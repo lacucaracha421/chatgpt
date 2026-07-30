@@ -3,6 +3,7 @@ mod db;
 pub mod error;
 mod ingestion;
 pub mod models;
+mod query;
 
 use std::{
     fs,
@@ -12,7 +13,19 @@ use std::{
 
 use error::LibraryError;
 use models::LibrarySummary;
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
+
+#[derive(Debug, Clone, Copy)]
+pub enum MediaVariant {
+    Asset,
+    Thumbnail,
+}
+
+#[derive(Debug)]
+pub struct MediaResponse {
+    pub bytes: Vec<u8>,
+    pub mime: &'static str,
+}
 
 #[derive(Debug, Clone)]
 pub struct Library {
@@ -59,6 +72,66 @@ impl Library {
             root: self.root.to_string_lossy().into_owned(),
             asset_count: asset_count as u64,
         })
+    }
+
+    pub fn resolve_media(
+        &self,
+        asset_id: &str,
+        variant: MediaVariant,
+    ) -> Result<MediaResponse, LibraryError> {
+        let column = match variant {
+            MediaVariant::Asset => "relative_path",
+            MediaVariant::Thumbnail => "thumbnail_relative_path",
+        };
+        let relative_path: Option<String> = self
+            .connection()?
+            .query_row(
+                &format!("SELECT {column} FROM assets WHERE id = ?1 AND status = 'normal'"),
+                [asset_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let relative_path = relative_path.ok_or(LibraryError::AssetNotFound)?;
+        let canonical_root =
+            fs::canonicalize(&self.root).map_err(|source| LibraryError::ReadMedia {
+                path: self.root.clone(),
+                source,
+            })?;
+        let requested_path = canonical_root.join(relative_path);
+        let canonical_path = fs::canonicalize(&requested_path).map_err(|source| {
+            if source.kind() == std::io::ErrorKind::NotFound {
+                LibraryError::MediaNotFound
+            } else {
+                LibraryError::ReadMedia {
+                    path: requested_path.clone(),
+                    source,
+                }
+            }
+        })?;
+        if !canonical_path.starts_with(&canonical_root) {
+            return Err(LibraryError::UnsafeMediaPath);
+        }
+        let mime = mime_for_path(&canonical_path);
+        let bytes = fs::read(&canonical_path).map_err(|source| LibraryError::ReadMedia {
+            path: canonical_path,
+            source,
+        })?;
+        Ok(MediaResponse { bytes, mime })
+    }
+}
+
+fn mime_for_path(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("png") => "image/png",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        _ => "application/octet-stream",
     }
 }
 

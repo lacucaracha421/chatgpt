@@ -15,6 +15,7 @@ function gateway(): LibraryGateway {
     renameClassification: vi.fn(),
     moveClassification: vi.fn(),
     deleteClassification: vi.fn(),
+    listAssets: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
     setAssetClassifications: vi.fn(),
     getAssetClassifications: vi.fn(),
     ingestImage: vi.fn(),

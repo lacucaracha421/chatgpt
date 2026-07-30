@@ -8,6 +8,7 @@ import {
 import { useCallback, useEffect, useState } from "react";
 import { ClassificationSidebar } from "../classification/ClassificationSidebar";
 import type { ClassificationEntry, LibraryGateway } from "../library/types";
+import { AssetBrowser } from "../assets/AssetGallery";
 
 type AppProps = {
   gateway?: LibraryGateway;
@@ -49,12 +50,18 @@ function LibraryScreen({ selectFolder }: { selectFolder: FolderPicker }) {
     <main>
       <h1>Lakomics</h1>
       <p>{library.root}</p>
-      <ClassificationSidebar
-        entries={entries}
-        selectedId={selectedId}
-        onSelect={setSelectedId}
-        onChanged={() => void refreshClassifications()}
-      />
+      <div className="app-shell">
+        <ClassificationSidebar
+          entries={entries}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+          onChanged={() => void refreshClassifications()}
+        />
+        <AssetBrowser
+          classificationId={selectedId}
+          classifications={entries}
+        />
+      </div>
     </main>
   );
 }

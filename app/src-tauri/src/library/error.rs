@@ -28,6 +28,18 @@ pub enum LibraryError {
     ClassificationNotEmpty,
     #[error("요청한 자산을 찾을 수 없습니다")]
     AssetNotFound,
+    #[error("자산 페이지 크기는 1에서 200 사이여야 합니다")]
+    InvalidAssetPageLimit,
+    #[error("요청한 미디어 파일을 찾을 수 없습니다")]
+    MediaNotFound,
+    #[error("미디어 경로가 라이브러리 폴더 밖을 가리킵니다")]
+    UnsafeMediaPath,
+    #[error("미디어 파일을 읽을 수 없습니다: {path}")]
+    ReadMedia {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("원본 파일을 읽을 수 없습니다: {path}")]
     ReadSource {
         path: PathBuf,

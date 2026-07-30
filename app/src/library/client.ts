@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AssetPage,
+  AssetQuery,
   ClassificationEntry,
   CreateClassification,
   IngestImageInput,
@@ -20,6 +22,8 @@ export const libraryGateway: LibraryGateway = {
   moveClassification: (id, parentId) =>
     invoke("move_classification", { id, parentId }),
   deleteClassification: (id) => invoke("delete_classification", { id }),
+  listAssets: (query: AssetQuery) =>
+    invoke<AssetPage>("list_assets", { query }),
   setAssetClassifications: (assetId, classificationIds) =>
     invoke("set_asset_classifications", { assetId, classificationIds }),
   getAssetClassifications: (assetId) =>

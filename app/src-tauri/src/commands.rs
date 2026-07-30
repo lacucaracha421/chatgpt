@@ -6,8 +6,8 @@ use tauri::State;
 use crate::library::{
     error::LibraryError,
     models::{
-        ClassificationEntry, CreateClassification, IngestImageRequest, IngestOutcome,
-        LibrarySummary,
+        AssetPage, AssetQuery, ClassificationEntry, CreateClassification, IngestImageRequest,
+        IngestOutcome, LibrarySummary,
     },
     Library,
 };
@@ -37,6 +37,10 @@ impl From<LibraryError> for CommandError {
             LibraryError::ClassificationCycle => "classification_cycle",
             LibraryError::ClassificationNotEmpty => "classification_not_empty",
             LibraryError::AssetNotFound => "asset_not_found",
+            LibraryError::InvalidAssetPageLimit => "invalid_asset_page_limit",
+            LibraryError::MediaNotFound => "media_not_found",
+            LibraryError::UnsafeMediaPath => "unsafe_media_path",
+            LibraryError::ReadMedia { .. } => "read_media_failed",
             LibraryError::ReadSource { .. } => "read_source_failed",
             LibraryError::UnsupportedImage => "unsupported_image",
             LibraryError::WriteAsset { .. } => "write_asset_failed",
@@ -45,6 +49,15 @@ impl From<LibraryError> for CommandError {
             code,
             message: error.to_string(),
         }
+    }
+}
+
+impl AppState {
+    pub(crate) fn current_library(&self) -> Option<Library> {
+        self.library
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 }
 
@@ -139,6 +152,16 @@ pub fn get_asset_classifications(
 }
 
 #[tauri::command]
+pub fn list_assets(
+    query: AssetQuery,
+    state: State<'_, AppState>,
+) -> Result<AssetPage, CommandError> {
+    current_required(state)?
+        .list_assets(query)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub fn set_asset_classifications(
     asset_id: String,
     classification_ids: Vec<String>,
@@ -165,11 +188,7 @@ pub async fn ingest_image(
 }
 
 fn current(state: State<'_, AppState>) -> Option<Library> {
-    state
-        .library
-        .read()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .clone()
+    state.current_library()
 }
 
 fn current_required(state: State<'_, AppState>) -> Result<Library, CommandError> {

@@ -25,6 +25,23 @@ export type AssetSummary = {
   favorite: boolean;
 };
 
+export type AssetCursor = {
+  collectedAt: string;
+  id: string;
+};
+
+export type AssetQuery = {
+  classificationId: string | null;
+  directOnly: boolean;
+  after: AssetCursor | null;
+  limit: number;
+};
+
+export type AssetPage = {
+  items: AssetSummary[];
+  nextCursor: AssetCursor | null;
+};
+
 export type CreateClassification = {
   kind: ClassificationKind;
   name: string;
@@ -49,6 +66,7 @@ export interface LibraryGateway {
   renameClassification(id: string, name: string): Promise<void>;
   moveClassification(id: string, parentId: string | null): Promise<void>;
   deleteClassification(id: string): Promise<void>;
+  listAssets(query: AssetQuery): Promise<AssetPage>;
   setAssetClassifications(assetId: string, classificationIds: string[]): Promise<void>;
   getAssetClassifications(assetId: string): Promise<string[]>;
   ingestImage(input: IngestImageInput): Promise<IngestOutcome>;

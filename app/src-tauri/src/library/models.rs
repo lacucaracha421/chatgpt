@@ -24,6 +24,29 @@ pub struct AssetSummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetCursor {
+    pub collected_at: String,
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetQuery {
+    pub classification_id: Option<String>,
+    pub direct_only: bool,
+    pub after: Option<AssetCursor>,
+    pub limit: u32,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetPage {
+    pub items: Vec<AssetSummary>,
+    pub next_cursor: Option<AssetCursor>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(
     tag = "status",
     rename_all = "snake_case",
