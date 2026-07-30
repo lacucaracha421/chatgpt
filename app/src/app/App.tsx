@@ -1,11 +1,37 @@
-import { Button } from "../shared/ui/Button";
+import { libraryGateway } from "../library/client";
+import { LibraryProvider, useLibrary } from "../library/LibraryContext";
+import {
+  LibrarySetup,
+  selectLibraryFolder,
+  type FolderPicker,
+} from "../library/LibrarySetup";
+import type { LibraryGateway } from "../library/types";
 
-export function App() {
+type AppProps = {
+  gateway?: LibraryGateway;
+  selectFolder?: FolderPicker;
+};
+
+export function App({
+  gateway = libraryGateway,
+  selectFolder = selectLibraryFolder,
+}: AppProps) {
   return (
-    <main className="setup-screen">
+    <LibraryProvider gateway={gateway}>
+      <LibraryScreen selectFolder={selectFolder} />
+    </LibraryProvider>
+  );
+}
+
+function LibraryScreen({ selectFolder }: { selectFolder: FolderPicker }) {
+  const { library } = useLibrary();
+  if (!library) {
+    return <LibrarySetup selectFolder={selectFolder} />;
+  }
+  return (
+    <main>
       <h1>Lakomics</h1>
-      <p>개인 미디어 라이브러리를 선택해주세요.</p>
-      <Button type="button">라이브러리 선택</Button>
+      <p>{library.root}</p>
     </main>
   );
 }

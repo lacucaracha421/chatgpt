@@ -16,7 +16,7 @@ pub enum LibraryError {
     UnsupportedSchema(i64),
     #[error("분류 이름은 비어 있을 수 없습니다")]
     EmptyClassificationName,
-    #[error("요청한 분류 항목을 찾을 수 없습니다")]
+    #[error("요청한 분류 항목을 찾을 수 없습니다.")]
     ClassificationNotFound,
     #[error("같은 위치에 같은 이름의 분류 항목이 있습니다")]
     DuplicateClassificationName,
