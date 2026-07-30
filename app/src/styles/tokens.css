@@ -1,0 +1,17 @@
+:root {
+  --color-bg: #111216;
+  --color-surface: #1a1c22;
+  --color-surface-hover: #242731;
+  --color-text: #f4f4f5;
+  --color-muted: #a1a1aa;
+  --color-accent: #f59e0b;
+  --color-border: #30333d;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --font-ui: "Segoe UI", sans-serif;
+}
