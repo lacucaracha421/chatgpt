@@ -4,9 +4,16 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[cfg(windows)]
+use std::os::windows::io::AsRawHandle;
+
 use image::{ImageFormat, ImageReader};
 use rusqlite::{params, OptionalExtension};
 use sha2::{Digest, Sha256};
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::{
+    GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+};
 
 use super::{
     error::LibraryError,
@@ -57,7 +64,7 @@ impl Library {
         let thumbnail_path = self.root().join(&thumbnail_relative_path);
         create_parent_directory(&thumbnail_path)?;
         let thumbnail_file = create_new_asset_file(&thumbnail_path)?;
-        pending.track(thumbnail_path.clone());
+        pending.track_created(thumbnail_path.clone(), &thumbnail_file)?;
         write_thumbnail(&staging_path, thumbnail_file)?;
 
         let relative_path = format!(
@@ -174,7 +181,7 @@ fn copy_and_hash(
     let mut source =
         File::open(source_path).map_err(|source| read_source_error(source_path, source))?;
     let mut staging = create_new_asset_file(staging_path)?;
-    pending.track(staging_path.to_path_buf());
+    pending.track_created(staging_path.to_path_buf(), &staging)?;
     let mut hasher = Sha256::new();
     let mut byte_size = 0_u64;
     let mut buffer = [0_u8; 64 * 1024];
@@ -272,7 +279,7 @@ fn install_staged_asset(
         source,
     })?;
     let mut asset = create_new_asset_file(asset_path)?;
-    pending.track(asset_path.to_path_buf());
+    pending.track_created(asset_path.to_path_buf(), &asset)?;
     io::copy(&mut staging, &mut asset).map_err(|source| LibraryError::WriteAsset {
         path: asset_path.to_path_buf(),
         source,
@@ -322,20 +329,32 @@ fn read_source_error(path: &Path, source: io::Error) -> LibraryError {
 }
 
 struct PendingFiles {
-    paths: Vec<PathBuf>,
+    files: Vec<PendingFile>,
     committed: bool,
 }
 
 impl PendingFiles {
     fn new() -> Self {
         Self {
-            paths: Vec::new(),
+            files: Vec::new(),
             committed: false,
         }
     }
 
+    fn track_created(&mut self, path: PathBuf, file: &File) -> Result<(), LibraryError> {
+        let identity =
+            FileIdentity::from_file(file).map_err(|source| LibraryError::WriteAsset {
+                path: path.clone(),
+                source,
+            })?;
+        self.files.push(PendingFile { path, identity });
+        Ok(())
+    }
+
+    #[cfg(test)]
     fn track(&mut self, path: PathBuf) {
-        self.paths.push(path);
+        let file = File::open(&path).unwrap();
+        self.track_created(path, &file).unwrap();
     }
 
     fn commit(mut self) {
@@ -346,10 +365,87 @@ impl PendingFiles {
 impl Drop for PendingFiles {
     fn drop(&mut self) {
         if !self.committed {
-            for path in self.paths.iter().rev() {
-                let _ = fs::remove_file(path);
+            for pending_file in self.files.iter().rev() {
+                if pending_file.identity.matches_path(&pending_file.path) {
+                    let _ = fs::remove_file(&pending_file.path);
+                }
             }
         }
+    }
+}
+
+struct PendingFile {
+    path: PathBuf,
+    identity: FileIdentity,
+}
+
+#[cfg(unix)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct FileIdentity {
+    device: u64,
+    inode: u64,
+}
+
+#[cfg(unix)]
+impl FileIdentity {
+    fn from_file(file: &File) -> io::Result<Self> {
+        use std::os::unix::fs::MetadataExt;
+
+        let metadata = file.metadata()?;
+        Ok(Self {
+            device: metadata.dev(),
+            inode: metadata.ino(),
+        })
+    }
+
+    fn matches_path(&self, path: &Path) -> bool {
+        let metadata = match fs::symlink_metadata(path) {
+            Ok(metadata) if !metadata.file_type().is_symlink() => metadata,
+            _ => return false,
+        };
+        use std::os::unix::fs::MetadataExt;
+
+        self.device == metadata.dev() && self.inode == metadata.ino()
+    }
+}
+
+#[cfg(windows)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct FileIdentity {
+    volume_serial_number: u32,
+    file_index_high: u32,
+    file_index_low: u32,
+}
+
+#[cfg(windows)]
+impl FileIdentity {
+    fn from_file(file: &File) -> io::Result<Self> {
+        let mut information = std::mem::MaybeUninit::<BY_HANDLE_FILE_INFORMATION>::zeroed();
+        // SAFETY: the file handle is valid for this call, and the API initializes the buffer on success.
+        if unsafe { GetFileInformationByHandle(file.as_raw_handle(), information.as_mut_ptr()) }
+            == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: GetFileInformationByHandle reported success above.
+        let information = unsafe { information.assume_init() };
+        Ok(Self {
+            volume_serial_number: information.dwVolumeSerialNumber,
+            file_index_high: information.nFileIndexHigh,
+            file_index_low: information.nFileIndexLow,
+        })
+    }
+
+    fn matches_path(&self, path: &Path) -> bool {
+        match fs::symlink_metadata(path) {
+            Ok(metadata) if !metadata.file_type().is_symlink() => {}
+            _ => return false,
+        }
+        let file = match File::open(path) {
+            Ok(file) => file,
+            Err(_) => return false,
+        };
+        Self::from_file(&file).is_ok_and(|identity| identity == *self)
     }
 }
 
@@ -560,5 +656,20 @@ mod tests {
         assert!(matches!(result, Err(LibraryError::WriteAsset { .. })));
         assert_eq!(std::fs::read(&asset).unwrap(), b"foreign asset bytes");
         assert_eq!(std::fs::read(&staging).unwrap(), b"owned staging bytes");
+    }
+
+    #[test]
+    fn cleanup_keeps_a_file_replaced_after_it_was_tracked() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("owned.part");
+        std::fs::write(&path, b"owned bytes").unwrap();
+        let mut pending = PendingFiles::new();
+        pending.track(path.clone());
+
+        std::fs::remove_file(&path).unwrap();
+        std::fs::write(&path, b"foreign replacement").unwrap();
+        drop(pending);
+
+        assert_eq!(std::fs::read(&path).unwrap(), b"foreign replacement");
     }
 }
