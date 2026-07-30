@@ -1,11 +1,13 @@
 use std::{
     fs::{self, File, OpenOptions},
-    io::{self, Read, Write},
+    io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
 
 #[cfg(windows)]
 use std::os::windows::io::AsRawHandle;
+#[cfg(target_os = "linux")]
+use std::{ffi::CString, os::unix::ffi::OsStrExt};
 
 use image::{ImageFormat, ImageReader};
 use rusqlite::{params, OptionalExtension};
@@ -181,7 +183,7 @@ fn copy_and_hash(
     let mut source =
         File::open(source_path).map_err(|source| read_source_error(source_path, source))?;
     let mut staging = create_new_asset_file(staging_path)?;
-    pending.track_created(staging_path.to_path_buf(), &staging)?;
+    pending.track_staging(staging_path.to_path_buf(), &staging)?;
     let mut hasher = Sha256::new();
     let mut byte_size = 0_u64;
     let mut buffer = [0_u8; 64 * 1024];
@@ -260,6 +262,7 @@ fn create_parent_directory(path: &Path) -> Result<(), LibraryError> {
 
 fn create_new_asset_file(path: &Path) -> Result<File, LibraryError> {
     OpenOptions::new()
+        .read(true)
         .write(true)
         .create_new(true)
         .open(path)
@@ -274,10 +277,13 @@ fn install_staged_asset(
     asset_path: &Path,
     pending: &mut PendingFiles,
 ) -> Result<(), LibraryError> {
-    let mut staging = File::open(staging_path).map_err(|source| LibraryError::WriteAsset {
-        path: staging_path.to_path_buf(),
-        source,
-    })?;
+    let mut staging = pending.owned_file(staging_path)?;
+    staging
+        .seek(SeekFrom::Start(0))
+        .map_err(|source| LibraryError::WriteAsset {
+            path: staging_path.to_path_buf(),
+            source,
+        })?;
     let mut asset = create_new_asset_file(asset_path)?;
     pending.track_created(asset_path.to_path_buf(), &asset)?;
     io::copy(&mut staging, &mut asset).map_err(|source| LibraryError::WriteAsset {
@@ -290,10 +296,7 @@ fn install_staged_asset(
     })?;
     drop(asset);
     drop(staging);
-    fs::remove_file(staging_path).map_err(|source| LibraryError::WriteAsset {
-        path: staging_path.to_path_buf(),
-        source,
-    })
+    pending.remove_owned(staging_path)
 }
 
 fn extension_for(format: ImageFormat) -> Option<&'static str> {
@@ -347,14 +350,78 @@ impl PendingFiles {
                 path: path.clone(),
                 source,
             })?;
-        self.files.push(PendingFile { path, identity });
+        self.files.push(PendingFile {
+            path,
+            identity,
+            file: None,
+        });
+        Ok(())
+    }
+
+    fn track_staging(&mut self, path: PathBuf, file: &File) -> Result<(), LibraryError> {
+        let identity =
+            FileIdentity::from_file(file).map_err(|source| LibraryError::WriteAsset {
+                path: path.clone(),
+                source,
+            })?;
+        let file = file
+            .try_clone()
+            .map_err(|source| LibraryError::WriteAsset {
+                path: path.clone(),
+                source,
+            })?;
+        self.files.push(PendingFile {
+            path,
+            identity,
+            file: Some(file),
+        });
+        Ok(())
+    }
+
+    fn owned_file(&self, path: &Path) -> Result<File, LibraryError> {
+        let pending_file = self
+            .files
+            .iter()
+            .find(|pending_file| pending_file.path == path)
+            .ok_or_else(|| LibraryError::WriteAsset {
+                path: path.to_path_buf(),
+                source: io::Error::new(io::ErrorKind::NotFound, "owned pending file not found"),
+            })?;
+        pending_file
+            .file
+            .as_ref()
+            .ok_or_else(|| LibraryError::WriteAsset {
+                path: path.to_path_buf(),
+                source: io::Error::new(io::ErrorKind::NotFound, "owned pending file is closed"),
+            })?
+            .try_clone()
+            .map_err(|source| LibraryError::WriteAsset {
+                path: path.to_path_buf(),
+                source,
+            })
+    }
+
+    fn remove_owned(&mut self, path: &Path) -> Result<(), LibraryError> {
+        let index = self
+            .files
+            .iter()
+            .position(|pending_file| pending_file.path == path)
+            .ok_or_else(|| LibraryError::WriteAsset {
+                path: path.to_path_buf(),
+                source: io::Error::new(io::ErrorKind::NotFound, "owned pending file not found"),
+            })?;
+        remove_pending_file(&mut self.files[index]).map_err(|source| LibraryError::WriteAsset {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        self.files.remove(index);
         Ok(())
     }
 
     #[cfg(test)]
     fn track(&mut self, path: PathBuf) {
         let file = File::open(&path).unwrap();
-        self.track_created(path, &file).unwrap();
+        self.track_staging(path, &file).unwrap();
     }
 
     fn commit(mut self) {
@@ -365,10 +432,8 @@ impl PendingFiles {
 impl Drop for PendingFiles {
     fn drop(&mut self) {
         if !self.committed {
-            for pending_file in self.files.iter().rev() {
-                if pending_file.identity.matches_path(&pending_file.path) {
-                    let _ = fs::remove_file(&pending_file.path);
-                }
+            for pending_file in self.files.iter_mut().rev() {
+                let _ = remove_pending_file(pending_file);
             }
         }
     }
@@ -377,7 +442,109 @@ impl Drop for PendingFiles {
 struct PendingFile {
     path: PathBuf,
     identity: FileIdentity,
+    file: Option<File>,
 }
+
+fn remove_pending_file(pending_file: &mut PendingFile) -> io::Result<()> {
+    drop(pending_file.file.take());
+    let Some(quarantine_path) = claim_path(&pending_file.path)? else {
+        return Ok(());
+    };
+    if !pending_file.identity.matches_path(&quarantine_path) {
+        restore_unverified_file(&quarantine_path, &pending_file.path)?;
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "pending path was replaced before cleanup",
+        ));
+    }
+    run_cleanup_hook(&quarantine_path);
+    if !pending_file.identity.matches_path(&quarantine_path) {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "isolated pending file was replaced before cleanup",
+        ));
+    }
+    fs::remove_file(quarantine_path)
+}
+
+fn claim_path(path: &Path) -> io::Result<Option<PathBuf>> {
+    let parent = path.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "pending path has no parent directory",
+        )
+    })?;
+    let quarantine_path = parent.join(format!(".{}.cleanup", uuid::Uuid::new_v4()));
+    match rename_no_replace(path, &quarantine_path) {
+        Ok(()) => Ok(Some(quarantine_path)),
+        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(source) => Err(source),
+    }
+}
+
+fn restore_unverified_file(quarantine_path: &Path, original_path: &Path) -> io::Result<()> {
+    rename_no_replace(quarantine_path, original_path)
+}
+
+#[cfg(windows)]
+fn rename_no_replace(from: &Path, to: &Path) -> io::Result<()> {
+    fs::rename(from, to)
+}
+
+#[cfg(target_os = "linux")]
+fn rename_no_replace(from: &Path, to: &Path) -> io::Result<()> {
+    let from = CString::new(from.as_os_str().as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains a NUL byte"))?;
+    let to = CString::new(to.as_os_str().as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains a NUL byte"))?;
+    // SAFETY: both C strings are NUL-terminated and remain valid for the call.
+    if unsafe {
+        libc::renameat2(
+            libc::AT_FDCWD,
+            from.as_ptr(),
+            libc::AT_FDCWD,
+            to.as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    } != 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+fn rename_no_replace(_from: &Path, _to: &Path) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "safe pending-file cleanup is supported on Windows and Linux",
+    ))
+}
+
+#[cfg(test)]
+type CleanupHook = Box<dyn FnOnce(&Path)>;
+
+#[cfg(test)]
+thread_local! {
+    static CLEANUP_HOOK: std::cell::RefCell<Option<CleanupHook>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn set_cleanup_hook(hook: impl FnOnce(&Path) + 'static) {
+    CLEANUP_HOOK.with(|cleanup_hook| *cleanup_hook.borrow_mut() = Some(Box::new(hook)));
+}
+
+#[cfg(test)]
+fn run_cleanup_hook(path: &Path) {
+    CLEANUP_HOOK.with(|cleanup_hook| {
+        if let Some(hook) = cleanup_hook.borrow_mut().take() {
+            hook(path);
+        }
+    });
+}
+
+#[cfg(not(test))]
+fn run_cleanup_hook(_path: &Path) {}
 
 #[cfg(unix)]
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -455,7 +622,9 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use super::{copy_and_hash, install_staged_asset, LibraryError, PendingFiles};
+    use super::{
+        copy_and_hash, install_staged_asset, set_cleanup_hook, LibraryError, PendingFiles,
+    };
     use crate::library::{
         models::{ClassificationKind, CreateClassification, IngestImageRequest, IngestOutcome},
         Library,
@@ -671,5 +840,50 @@ mod tests {
         drop(pending);
 
         assert_eq!(std::fs::read(&path).unwrap(), b"foreign replacement");
+    }
+
+    #[test]
+    fn staging_replacement_before_install_is_never_copied_or_deleted() {
+        let temp = tempfile::tempdir().unwrap();
+        let staging = temp.path().join("owned.part");
+        let asset = temp.path().join("asset.png");
+        std::fs::write(&staging, b"owned staging bytes").unwrap();
+        let mut pending = PendingFiles::new();
+        pending.track(staging.clone());
+
+        std::fs::remove_file(&staging).unwrap();
+        std::fs::write(&staging, b"foreign replacement").unwrap();
+        let result = install_staged_asset(&staging, &asset, &mut pending);
+
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&staging).unwrap(), b"foreign replacement");
+        drop(pending);
+        assert_eq!(std::fs::read(&staging).unwrap(), b"foreign replacement");
+        assert!(!asset.exists());
+    }
+
+    #[test]
+    fn cleanup_rechecks_an_isolated_file_before_deletion() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("owned.part");
+        std::fs::write(&path, b"owned bytes").unwrap();
+        let mut pending = PendingFiles::new();
+        pending.track(path.clone());
+        let replacement = b"foreign quarantine replacement".to_vec();
+        let quarantined_path = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let quarantined_path_for_hook = std::sync::Arc::clone(&quarantined_path);
+        set_cleanup_hook(move |quarantine_path| {
+            *quarantined_path_for_hook.lock().unwrap() = Some(quarantine_path.to_path_buf());
+            std::fs::remove_file(quarantine_path).unwrap();
+            std::fs::write(quarantine_path, replacement).unwrap();
+        });
+
+        drop(pending);
+
+        let quarantine_path = quarantined_path.lock().unwrap().take().unwrap();
+        assert_eq!(
+            std::fs::read(quarantine_path).unwrap(),
+            b"foreign quarantine replacement"
+        );
     }
 }
