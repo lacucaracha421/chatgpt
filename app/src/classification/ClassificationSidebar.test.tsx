@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { useState, type ComponentProps } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -98,6 +98,11 @@ describe("ClassificationSidebar", () => {
         configurable: true,
         value(this: HTMLDialogElement) {
           this.setAttribute("open", "");
+          this.addEventListener("keydown", (event) => {
+            if (event.key === "Escape") {
+              this.dispatchEvent(new Event("cancel", { cancelable: true }));
+            }
+          });
         },
       },
       close: {
@@ -141,7 +146,7 @@ describe("ClassificationSidebar", () => {
     expect(screen.queryByLabelText("종류")).not.toBeInTheDocument();
   });
 
-  it("keeps keyboard creation and cancellation accessible", async () => {
+  it("keeps Tab, Enter, and Escape dialog interactions accessible", async () => {
     const user = userEvent.setup();
     const fixtureGateway = gateway();
     renderSidebar(fixtureGateway);
@@ -174,7 +179,7 @@ describe("ClassificationSidebar", () => {
       value: close,
     });
     await user.click(screen.getByRole("button", { name: "최상위 분류 추가" }));
-    fireEvent(screen.getByRole("dialog"), new Event("cancel", { cancelable: true }));
+    await user.keyboard("{Escape}");
     expect(close).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
@@ -193,6 +198,25 @@ describe("ClassificationSidebar", () => {
     expect(await screen.findByRole("status")).toHaveTextContent(
       "하위 항목이나 자산이 연결된 분류 항목은 삭제할 수 없습니다",
     );
+  });
+
+  it("clears a deletion error after a successful retry", async () => {
+    const user = userEvent.setup();
+    const fixtureGateway = gateway();
+    vi.mocked(fixtureGateway.deleteClassification)
+      .mockRejectedValueOnce(new Error("삭제할 수 없습니다"))
+      .mockResolvedValueOnce(undefined);
+    renderSidebar(fixtureGateway, { selectedId: "tag" });
+
+    await user.click(screen.getByRole("button", { name: "삭제" }));
+    await user.click(screen.getByRole("button", { name: "삭제 확인" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("삭제할 수 없습니다");
+
+    await user.click(screen.getByRole("button", { name: "삭제 확인" }));
+    await waitFor(() =>
+      expect(fixtureGateway.deleteClassification).toHaveBeenCalledTimes(2),
+    );
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("warns when the tree contains orphaned entries", () => {

@@ -41,6 +41,12 @@ export function ClassificationSidebar({
     setDialog(null);
   }
 
+  function completeMutation() {
+    setMessage(null);
+    closeDialog();
+    onChanged();
+  }
+
   function openCreate() {
     const kinds = createKinds(selected);
     setName("");
@@ -68,8 +74,7 @@ export function ClassificationSidebar({
         name,
         parentId: dialog.parentId,
       });
-      closeDialog();
-      onChanged();
+      completeMutation();
     } catch (error) {
       setMessage(errorMessage(error));
     }
@@ -79,8 +84,7 @@ export function ClassificationSidebar({
     if (!dialog || dialog.type !== "rename") return;
     try {
       await gateway.renameClassification(dialog.entry.id, name);
-      closeDialog();
-      onChanged();
+      completeMutation();
     } catch (error) {
       setMessage(errorMessage(error));
     }
@@ -90,8 +94,7 @@ export function ClassificationSidebar({
     if (!dialog || dialog.type !== "move") return;
     try {
       await gateway.moveClassification(dialog.entry.id, parentId || null);
-      closeDialog();
-      onChanged();
+      completeMutation();
     } catch (error) {
       setMessage(errorMessage(error));
     }
@@ -101,8 +104,7 @@ export function ClassificationSidebar({
     if (!dialog || dialog.type !== "delete") return;
     try {
       await gateway.deleteClassification(dialog.entry.id);
-      closeDialog();
-      onChanged();
+      completeMutation();
     } catch (error) {
       setMessage(errorMessage(error));
     }
