@@ -42,8 +42,9 @@ impl Library {
             source,
         })?;
         let staging_path = staging_directory.join(format!("{}.part", uuid::Uuid::new_v4()));
-        let mut pending = PendingFiles::new(staging_path.clone());
-        let (content_hash, byte_size) = copy_and_hash(&request.source_path, &staging_path)?;
+        let mut pending = PendingFiles::new();
+        let (content_hash, byte_size) =
+            copy_and_hash(&request.source_path, &staging_path, &mut pending)?;
 
         let (format, width, height) = inspect_image(&staging_path)?;
         let existing_asset_id = self.find_asset_by_hash(&content_hash)?;
@@ -65,8 +66,7 @@ impl Library {
         );
         let asset_path = self.root().join(&relative_path);
         create_parent_directory(&asset_path)?;
-        move_staged_asset(&staging_path, &asset_path)?;
-        pending.track(asset_path.clone());
+        install_staged_asset(&staging_path, &asset_path, &mut pending)?;
 
         let asset = AssetSummary {
             id: uuid::Uuid::new_v4().to_string(),
@@ -166,13 +166,15 @@ impl Library {
     }
 }
 
-fn copy_and_hash(source_path: &Path, staging_path: &Path) -> Result<(String, u64), LibraryError> {
+fn copy_and_hash(
+    source_path: &Path,
+    staging_path: &Path,
+    pending: &mut PendingFiles,
+) -> Result<(String, u64), LibraryError> {
     let mut source =
         File::open(source_path).map_err(|source| read_source_error(source_path, source))?;
-    let mut staging = File::create(staging_path).map_err(|source| LibraryError::WriteAsset {
-        path: staging_path.to_path_buf(),
-        source,
-    })?;
+    let mut staging = create_new_asset_file(staging_path)?;
+    pending.track(staging_path.to_path_buf());
     let mut hasher = Sha256::new();
     let mut byte_size = 0_u64;
     let mut buffer = [0_u8; 64 * 1024];
@@ -260,15 +262,29 @@ fn create_new_asset_file(path: &Path) -> Result<File, LibraryError> {
         })
 }
 
-fn move_staged_asset(staging_path: &Path, asset_path: &Path) -> Result<(), LibraryError> {
-    if asset_path.exists() {
-        return Err(LibraryError::WriteAsset {
-            path: asset_path.to_path_buf(),
-            source: io::Error::new(io::ErrorKind::AlreadyExists, "asset path already exists"),
-        });
-    }
-    fs::rename(staging_path, asset_path).map_err(|source| LibraryError::WriteAsset {
+fn install_staged_asset(
+    staging_path: &Path,
+    asset_path: &Path,
+    pending: &mut PendingFiles,
+) -> Result<(), LibraryError> {
+    let mut staging = File::open(staging_path).map_err(|source| LibraryError::WriteAsset {
+        path: staging_path.to_path_buf(),
+        source,
+    })?;
+    let mut asset = create_new_asset_file(asset_path)?;
+    pending.track(asset_path.to_path_buf());
+    io::copy(&mut staging, &mut asset).map_err(|source| LibraryError::WriteAsset {
         path: asset_path.to_path_buf(),
+        source,
+    })?;
+    asset.flush().map_err(|source| LibraryError::WriteAsset {
+        path: asset_path.to_path_buf(),
+        source,
+    })?;
+    drop(asset);
+    drop(staging);
+    fs::remove_file(staging_path).map_err(|source| LibraryError::WriteAsset {
+        path: staging_path.to_path_buf(),
         source,
     })
 }
@@ -311,9 +327,9 @@ struct PendingFiles {
 }
 
 impl PendingFiles {
-    fn new(path: PathBuf) -> Self {
+    fn new() -> Self {
         Self {
-            paths: vec![path],
+            paths: Vec::new(),
             committed: false,
         }
     }
@@ -343,6 +359,7 @@ mod tests {
 
     use tempfile::TempDir;
 
+    use super::{copy_and_hash, install_staged_asset, LibraryError, PendingFiles};
     use crate::library::{
         models::{ClassificationKind, CreateClassification, IngestImageRequest, IngestOutcome},
         Library,
@@ -511,5 +528,37 @@ mod tests {
             .next()
             .is_none());
         assert_eq!(library.summary().unwrap().asset_count, 0);
+    }
+
+    #[test]
+    fn existing_staging_file_is_never_truncated_or_removed() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source.bin");
+        let staging = temp.path().join("foreign.part");
+        std::fs::write(&source, b"new source bytes").unwrap();
+        std::fs::write(&staging, b"foreign staging bytes").unwrap();
+
+        let mut pending = PendingFiles::new();
+        let result = copy_and_hash(&source, &staging, &mut pending);
+
+        assert!(matches!(result, Err(LibraryError::WriteAsset { .. })));
+        assert_eq!(std::fs::read(&staging).unwrap(), b"foreign staging bytes");
+    }
+
+    #[test]
+    fn existing_asset_destination_is_never_overwritten_or_removed() {
+        let temp = tempfile::tempdir().unwrap();
+        let staging = temp.path().join("owned.part");
+        let asset = temp.path().join("foreign.png");
+        std::fs::write(&staging, b"owned staging bytes").unwrap();
+        std::fs::write(&asset, b"foreign asset bytes").unwrap();
+        let mut pending = PendingFiles::new();
+        pending.track(staging.clone());
+
+        let result = install_staged_asset(&staging, &asset, &mut pending);
+
+        assert!(matches!(result, Err(LibraryError::WriteAsset { .. })));
+        assert_eq!(std::fs::read(&asset).unwrap(), b"foreign asset bytes");
+        assert_eq!(std::fs::read(&staging).unwrap(), b"owned staging bytes");
     }
 }
