@@ -1,6 +1,6 @@
 use std::{
     fs::{self, File, OpenOptions},
-    io::{self, Read, Seek, SeekFrom, Write},
+    io::{self, BufReader, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
 
@@ -28,6 +28,10 @@ const MAX_IMAGE_PIXELS: u64 = 200_000_000;
 
 impl Library {
     pub fn ingest_image(&self, request: IngestImageRequest) -> Result<IngestOutcome, LibraryError> {
+        let _ingestion_guard = self
+            .ingestion_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let source_metadata = fs::metadata(&request.source_path)
             .map_err(|source| read_source_error(&request.source_path, source))?;
         if !source_metadata.is_file() {
@@ -54,12 +58,14 @@ impl Library {
         let mut pending = PendingFiles::new();
         let (content_hash, byte_size) =
             copy_and_hash(&request.source_path, &staging_path, &mut pending)?;
+        run_staging_hook(&staging_path);
 
-        let (format, width, height) = inspect_image(&staging_path)?;
+        let (format, width, height) = inspect_image(pending.owned_file(&staging_path)?)?;
         let existing_asset_id = self.find_asset_by_hash(&content_hash)?;
         if let Some(existing_asset_id) = existing_asset_id {
             return Ok(IngestOutcome::ExactDuplicate { existing_asset_id });
         }
+        run_after_duplicate_hook(self.root());
 
         let prefix = &content_hash[..2];
         let thumbnail_relative_path = format!("thumbnails/{prefix}/{content_hash}.webp");
@@ -67,7 +73,7 @@ impl Library {
         create_parent_directory(&thumbnail_path)?;
         let thumbnail_file = create_new_asset_file(&thumbnail_path)?;
         pending.track_created(thumbnail_path.clone(), &thumbnail_file)?;
-        write_thumbnail(&staging_path, thumbnail_file)?;
+        write_thumbnail(pending.owned_file(&staging_path)?, thumbnail_file)?;
 
         let relative_path = format!(
             "assets/{prefix}/{content_hash}.{}",
@@ -217,10 +223,8 @@ fn copy_and_hash(
     Ok((hex::encode(hasher.finalize()), byte_size))
 }
 
-fn inspect_image(staging_path: &Path) -> Result<(ImageFormat, u32, u32), LibraryError> {
-    let reader = ImageReader::open(staging_path)
-        .and_then(|reader| reader.with_guessed_format())
-        .map_err(|_| LibraryError::UnsupportedImage)?;
+fn inspect_image(staging: File) -> Result<(ImageFormat, u32, u32), LibraryError> {
+    let reader = staging_image_reader(staging)?;
     let format = reader
         .format()
         .filter(|format| extension_for(*format).is_some())
@@ -237,16 +241,23 @@ fn inspect_image(staging_path: &Path) -> Result<(ImageFormat, u32, u32), Library
     Ok((format, width, height))
 }
 
-fn write_thumbnail(staging_path: &Path, mut thumbnail_file: File) -> Result<(), LibraryError> {
-    let reader = ImageReader::open(staging_path)
-        .and_then(|reader| reader.with_guessed_format())
-        .map_err(|_| LibraryError::UnsupportedImage)?;
+fn write_thumbnail(staging: File, mut thumbnail_file: File) -> Result<(), LibraryError> {
+    let reader = staging_image_reader(staging)?;
     let image = reader
         .decode()
         .map_err(|_| LibraryError::UnsupportedImage)?;
     image
         .thumbnail(360, 360)
         .write_to(&mut thumbnail_file, ImageFormat::WebP)
+        .map_err(|_| LibraryError::UnsupportedImage)
+}
+
+fn staging_image_reader(mut staging: File) -> Result<ImageReader<BufReader<File>>, LibraryError> {
+    staging
+        .seek(SeekFrom::Start(0))
+        .map_err(|_| LibraryError::UnsupportedImage)?;
+    ImageReader::new(BufReader::new(staging))
+        .with_guessed_format()
         .map_err(|_| LibraryError::UnsupportedImage)
 }
 
@@ -457,13 +468,8 @@ fn remove_pending_file(pending_file: &mut PendingFile) -> io::Result<()> {
             "pending path was replaced before cleanup",
         ));
     }
-    run_cleanup_hook(&quarantine_path);
-    if !pending_file.identity.matches_path(&quarantine_path) {
-        return Err(io::Error::new(
-            io::ErrorKind::AlreadyExists,
-            "isolated pending file was replaced before cleanup",
-        ));
-    }
+    // Lakomics ingests for this Library are serialized. This identity check is
+    // defense in depth, not an atomic conditional unlink against external writers.
     fs::remove_file(quarantine_path)
 }
 
@@ -522,29 +528,68 @@ fn rename_no_replace(_from: &Path, _to: &Path) -> io::Result<()> {
 }
 
 #[cfg(test)]
-type CleanupHook = Box<dyn FnOnce(&Path)>;
+type StagingHook = Box<dyn FnOnce(&Path)>;
 
 #[cfg(test)]
 thread_local! {
-    static CLEANUP_HOOK: std::cell::RefCell<Option<CleanupHook>> = const { std::cell::RefCell::new(None) };
+    static STAGING_HOOK: std::cell::RefCell<Option<StagingHook>> = const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(test)]
-fn set_cleanup_hook(hook: impl FnOnce(&Path) + 'static) {
-    CLEANUP_HOOK.with(|cleanup_hook| *cleanup_hook.borrow_mut() = Some(Box::new(hook)));
+fn set_staging_hook(hook: impl FnOnce(&Path) + 'static) {
+    STAGING_HOOK.with(|staging_hook| *staging_hook.borrow_mut() = Some(Box::new(hook)));
 }
 
 #[cfg(test)]
-fn run_cleanup_hook(path: &Path) {
-    CLEANUP_HOOK.with(|cleanup_hook| {
-        if let Some(hook) = cleanup_hook.borrow_mut().take() {
+fn run_staging_hook(path: &Path) {
+    STAGING_HOOK.with(|staging_hook| {
+        if let Some(hook) = staging_hook.borrow_mut().take() {
             hook(path);
         }
     });
 }
 
 #[cfg(not(test))]
-fn run_cleanup_hook(_path: &Path) {}
+fn run_staging_hook(_path: &Path) {}
+
+#[cfg(test)]
+type AfterDuplicateHook = std::sync::Arc<dyn Fn() + Send + Sync>;
+
+#[cfg(test)]
+static AFTER_DUPLICATE_HOOK: std::sync::Mutex<Option<(PathBuf, AfterDuplicateHook)>> =
+    std::sync::Mutex::new(None);
+
+#[cfg(test)]
+fn set_after_duplicate_hook(root: PathBuf, hook: impl Fn() + Send + Sync + 'static) {
+    *AFTER_DUPLICATE_HOOK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) =
+        Some((root, std::sync::Arc::new(hook)));
+}
+
+#[cfg(test)]
+fn clear_after_duplicate_hook() {
+    AFTER_DUPLICATE_HOOK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take();
+}
+
+#[cfg(test)]
+fn run_after_duplicate_hook(root: &Path) {
+    let hook = AFTER_DUPLICATE_HOOK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+        .filter(|(hook_root, _)| hook_root == root)
+        .map(|(_, hook)| std::sync::Arc::clone(hook));
+    if let Some(hook) = hook {
+        hook();
+    }
+}
+
+#[cfg(not(test))]
+fn run_after_duplicate_hook(_root: &Path) {}
 
 #[cfg(unix)]
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -618,12 +663,20 @@ impl FileIdentity {
 
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
+    use std::{
+        path::{Path, PathBuf},
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            mpsc, Arc, Mutex,
+        },
+        time::Duration,
+    };
 
     use tempfile::TempDir;
 
     use super::{
-        copy_and_hash, install_staged_asset, set_cleanup_hook, LibraryError, PendingFiles,
+        clear_after_duplicate_hook, copy_and_hash, install_staged_asset, set_after_duplicate_hook,
+        set_staging_hook, LibraryError, PendingFiles,
     };
     use crate::library::{
         models::{ClassificationKind, CreateClassification, IngestImageRequest, IngestOutcome},
@@ -863,27 +916,97 @@ mod tests {
     }
 
     #[test]
-    fn cleanup_rechecks_an_isolated_file_before_deletion() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("owned.part");
-        std::fs::write(&path, b"owned bytes").unwrap();
-        let mut pending = PendingFiles::new();
-        pending.track(path.clone());
-        let replacement = b"foreign quarantine replacement".to_vec();
-        let quarantined_path = std::sync::Arc::new(std::sync::Mutex::new(None));
-        let quarantined_path_for_hook = std::sync::Arc::clone(&quarantined_path);
-        set_cleanup_hook(move |quarantine_path| {
-            *quarantined_path_for_hook.lock().unwrap() = Some(quarantine_path.to_path_buf());
-            std::fs::remove_file(quarantine_path).unwrap();
-            std::fs::write(quarantine_path, replacement).unwrap();
+    fn staging_replacement_is_never_inspected_or_thumbnail_copied() {
+        let fixture = IngestionFixture::new();
+        let replacement = b"foreign invalid image".to_vec();
+        let replaced_path = Arc::new(Mutex::new(None));
+        let replaced_path_for_hook = Arc::clone(&replaced_path);
+        set_staging_hook(move |staging_path| {
+            std::fs::remove_file(staging_path).unwrap();
+            std::fs::write(staging_path, &replacement).unwrap();
+            *replaced_path_for_hook.lock().unwrap() = Some(staging_path.to_path_buf());
         });
 
-        drop(pending);
+        let error = fixture
+            .library
+            .ingest_image(IngestImageRequest {
+                source_path: fixture.source.clone(),
+                classification_id: None,
+                source_url: None,
+            })
+            .unwrap_err();
 
-        let quarantine_path = quarantined_path.lock().unwrap().take().unwrap();
-        assert_eq!(
-            std::fs::read(quarantine_path).unwrap(),
-            b"foreign quarantine replacement"
+        assert!(
+            matches!(error, LibraryError::WriteAsset { .. }),
+            "the retained valid image should reach identity-bound cleanup: {error:?}"
         );
+        let replaced_path = replaced_path.lock().unwrap().take().unwrap();
+        assert_eq!(
+            std::fs::read(replaced_path).unwrap(),
+            b"foreign invalid image"
+        );
+        assert_eq!(fixture.library.summary().unwrap().asset_count, 0);
+    }
+
+    #[test]
+    fn library_clones_serialize_ingests_for_one_open_library() {
+        let fixture = IngestionFixture::new();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_for_hook = Arc::clone(&calls);
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let release_rx = Arc::new(Mutex::new(release_rx));
+        let release_rx_for_hook = Arc::clone(&release_rx);
+        set_after_duplicate_hook(fixture.library.root().to_path_buf(), move || {
+            let call = calls_for_hook.fetch_add(1, Ordering::SeqCst);
+            entered_tx.send(call).unwrap();
+            if call == 0 {
+                release_rx_for_hook.lock().unwrap().recv().unwrap();
+            }
+        });
+
+        let first_library = fixture.library.clone();
+        let first_source = fixture.source.clone();
+        let first = std::thread::spawn(move || {
+            first_library.ingest_image(IngestImageRequest {
+                source_path: first_source,
+                classification_id: None,
+                source_url: None,
+            })
+        });
+        let second_library = fixture.library.clone();
+        let second_source = fixture.source.clone();
+        let second = std::thread::spawn(move || {
+            second_library.ingest_image(IngestImageRequest {
+                source_path: second_source,
+                classification_id: None,
+                source_url: None,
+            })
+        });
+
+        let first_entered = entered_rx.recv_timeout(Duration::from_secs(2)).is_ok();
+        let overlapped = entered_rx.recv_timeout(Duration::from_millis(250)).is_ok();
+        release_tx.send(()).unwrap();
+        let first = first.join().unwrap();
+        let second = second.join().unwrap();
+        clear_after_duplicate_hook();
+
+        assert!(
+            first_entered,
+            "neither ingest reached the duplicate boundary"
+        );
+        assert!(
+            !overlapped,
+            "two Library clones entered one library ingest concurrently"
+        );
+        let mut added = 0;
+        let mut duplicate = 0;
+        for outcome in [first.unwrap(), second.unwrap()] {
+            match outcome {
+                IngestOutcome::Added { .. } => added += 1,
+                IngestOutcome::ExactDuplicate { .. } => duplicate += 1,
+            }
+        }
+        assert_eq!((added, duplicate), (1, 1));
     }
 }

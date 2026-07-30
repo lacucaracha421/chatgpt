@@ -7,6 +7,7 @@ pub mod models;
 use std::{
     fs,
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
 };
 
 use error::LibraryError;
@@ -16,6 +17,8 @@ use rusqlite::Connection;
 #[derive(Debug, Clone)]
 pub struct Library {
     root: PathBuf,
+    // ponytail: one lock per open Library; split by content hash only if ingest throughput demands it.
+    ingestion_lock: Arc<Mutex<()>>,
 }
 
 impl Library {
@@ -31,7 +34,10 @@ impl Library {
                 .map_err(|source| LibraryError::CreateDirectory { path, source })?;
         }
         db::open_database(&root.join("library.sqlite"))?;
-        Ok(Self { root })
+        Ok(Self {
+            root,
+            ingestion_lock: Arc::new(Mutex::new(())),
+        })
     }
 
     pub fn root(&self) -> &Path {
