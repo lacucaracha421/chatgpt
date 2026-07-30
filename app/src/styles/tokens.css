@@ -13,5 +13,7 @@
   --space-6: 24px;
   --radius-sm: 6px;
   --radius-md: 10px;
+  --border-width: 1px;
+  --focus-width: 2px;
   --font-ui: "Segoe UI", sans-serif;
 }

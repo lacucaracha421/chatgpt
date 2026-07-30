@@ -11,6 +11,7 @@ import type { LibraryGateway, LibrarySummary } from "./types";
 export const LIBRARY_PATH_STORAGE_KEY = "lakomics.libraryPath";
 
 type LibraryContextValue = {
+  gateway: LibraryGateway;
   library: LibrarySummary | null;
   error: string | null;
   openLibrary(path: string): Promise<void>;
@@ -47,7 +48,7 @@ export function LibraryProvider({
   }, [openLibrary]);
 
   return (
-    <LibraryContext.Provider value={{ library, error, openLibrary }}>
+    <LibraryContext.Provider value={{ gateway, library, error, openLibrary }}>
       {children}
     </LibraryContext.Provider>
   );

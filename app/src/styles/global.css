@@ -16,6 +16,74 @@ button {
 }
 
 button:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
+  outline: var(--focus-width) solid var(--color-accent);
+  outline-offset: var(--space-1);
+}
+
+.ui-dialog {
+  padding: var(--space-4);
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.ui-dialog::backdrop {
+  background: var(--color-bg);
+}
+
+.ui-dialog__actions,
+.classification-sidebar__actions,
+.classification-sidebar__heading,
+.classification-sidebar__form {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.ui-dialog__actions,
+.classification-sidebar__actions {
+  margin-top: var(--space-3);
+}
+
+.classification-sidebar__heading {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.classification-sidebar__form {
+  flex-direction: column;
+}
+
+.ui-text-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.ui-text-field input,
+.classification-sidebar select {
+  padding: var(--space-2);
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font: inherit;
+}
+
+.ui-toast,
+.classification-sidebar__warning {
+  padding: var(--space-2);
+  color: var(--color-text);
+  background: var(--color-surface-hover);
+  border-radius: var(--radius-sm);
+}
+
+.classification-sidebar__tree {
+  padding: 0;
+  list-style: none;
+}
+
+.classification-sidebar__tree ul {
+  padding-inline-start: var(--space-4);
+  list-style: none;
 }

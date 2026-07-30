@@ -10,7 +10,7 @@ function gateway(): LibraryGateway {
   return {
     openLibrary: vi.fn().mockResolvedValue(summary),
     currentLibrary: vi.fn(),
-    listClassifications: vi.fn(),
+    listClassifications: vi.fn().mockResolvedValue([]),
     createClassification: vi.fn(),
     renameClassification: vi.fn(),
     moveClassification: vi.fn(),

@@ -5,7 +5,9 @@ import {
   selectLibraryFolder,
   type FolderPicker,
 } from "../library/LibrarySetup";
-import type { LibraryGateway } from "../library/types";
+import { useCallback, useEffect, useState } from "react";
+import { ClassificationSidebar } from "../classification/ClassificationSidebar";
+import type { ClassificationEntry, LibraryGateway } from "../library/types";
 
 type AppProps = {
   gateway?: LibraryGateway;
@@ -24,7 +26,22 @@ export function App({
 }
 
 function LibraryScreen({ selectFolder }: { selectFolder: FolderPicker }) {
-  const { library } = useLibrary();
+  const { gateway, library } = useLibrary();
+  const [entries, setEntries] = useState<ClassificationEntry[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const refreshClassifications = useCallback(async () => {
+    setEntries(await gateway.listClassifications());
+  }, [gateway]);
+
+  useEffect(() => {
+    if (!library) {
+      setEntries([]);
+      setSelectedId(null);
+      return;
+    }
+    void refreshClassifications();
+  }, [library, refreshClassifications]);
+
   if (!library) {
     return <LibrarySetup selectFolder={selectFolder} />;
   }
@@ -32,6 +49,12 @@ function LibraryScreen({ selectFolder }: { selectFolder: FolderPicker }) {
     <main>
       <h1>Lakomics</h1>
       <p>{library.root}</p>
+      <ClassificationSidebar
+        entries={entries}
+        selectedId={selectedId}
+        onSelect={setSelectedId}
+        onChanged={() => void refreshClassifications()}
+      />
     </main>
   );
 }
