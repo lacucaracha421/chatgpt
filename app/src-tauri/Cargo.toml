@@ -26,7 +26,9 @@ rusqlite = { version = "0.40.1", features = ["bundled"] }
 thiserror = "2.0.19"
 uuid = { version = "1.24.0", features = ["v4", "serde"] }
 chrono = { version = "0.4.45", features = ["serde"] }
+sha2 = "0.11.0"
+hex = "0.4.3"
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"
-

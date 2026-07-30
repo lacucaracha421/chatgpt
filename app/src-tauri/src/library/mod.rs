@@ -1,6 +1,7 @@
 mod classification;
 mod db;
 pub mod error;
+mod ingestion;
 pub mod models;
 
 use std::{
