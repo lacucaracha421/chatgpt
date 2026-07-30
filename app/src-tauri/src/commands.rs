@@ -53,13 +53,23 @@ pub fn open_library(
     path: String,
     state: State<'_, AppState>,
 ) -> Result<LibrarySummary, CommandError> {
-    let library = Library::open(path).map_err(CommandError::from)?;
+    let library = open_library_at(path)?;
     let summary = library.summary().map_err(CommandError::from)?;
     *state
         .library
         .write()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(library);
     Ok(summary)
+}
+
+fn open_library_at(path: String) -> Result<Library, CommandError> {
+    if !std::path::Path::new(&path).is_dir() {
+        return Err(CommandError {
+            code: "library_root_unavailable",
+            message: "선택한 라이브러리 폴더를 찾을 수 없습니다.".into(),
+        });
+    }
+    Library::open(path).map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -173,7 +183,7 @@ fn current_required(state: State<'_, AppState>) -> Result<Library, CommandError>
 mod tests {
     use crate::library::error::LibraryError;
 
-    use super::CommandError;
+    use super::{open_library_at, CommandError};
 
     #[test]
     fn command_error_has_stable_json_fields() {
@@ -182,5 +192,17 @@ mod tests {
 
         assert_eq!(value["code"], "classification_not_found");
         assert_eq!(value["message"], "요청한 분류 항목을 찾을 수 없습니다.");
+    }
+
+    #[test]
+    fn opening_a_missing_library_root_returns_an_error_without_creating_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let missing = temp.path().join("missing-library");
+
+        let error = open_library_at(missing.to_string_lossy().into_owned()).unwrap_err();
+
+        assert_eq!(error.code, "library_root_unavailable");
+        assert_eq!(error.message, "선택한 라이브러리 폴더를 찾을 수 없습니다.");
+        assert!(!missing.exists());
     }
 }
