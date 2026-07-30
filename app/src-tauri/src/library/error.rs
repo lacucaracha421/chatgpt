@@ -14,4 +14,18 @@ pub enum LibraryError {
     Database(#[from] rusqlite::Error),
     #[error("지원하지 않는 라이브러리 스키마 버전입니다: {0}")]
     UnsupportedSchema(i64),
+    #[error("분류 이름은 비어 있을 수 없습니다")]
+    EmptyClassificationName,
+    #[error("요청한 분류 항목을 찾을 수 없습니다")]
+    ClassificationNotFound,
+    #[error("같은 위치에 같은 이름의 분류 항목이 있습니다")]
+    DuplicateClassificationName,
+    #[error("최상위 분류는 부모를 가질 수 없고 작품은 최상위 분류 아래에 있어야 합니다")]
+    InvalidClassificationParent,
+    #[error("분류 항목을 자신의 하위 항목으로 옮길 수 없습니다")]
+    ClassificationCycle,
+    #[error("하위 항목이나 자산이 연결된 분류 항목은 삭제할 수 없습니다")]
+    ClassificationNotEmpty,
+    #[error("요청한 자산을 찾을 수 없습니다")]
+    AssetNotFound,
 }
