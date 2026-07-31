@@ -37,9 +37,11 @@ type AssetGalleryProps = {
 export function AssetBrowser({
   classificationId,
   classifications,
+  refreshVersion = 0,
 }: {
   classificationId: string | null;
   classifications: ClassificationEntry[];
+  refreshVersion?: number;
 }) {
   const { gateway } = useLibrary();
   const [directOnly, setDirectOnly] = useState(false);
@@ -82,7 +84,7 @@ export function AssetBrowser({
         generationRef.current += 1;
       }
     };
-  }, [classificationId, directOnly, gateway]);
+  }, [classificationId, directOnly, gateway, refreshVersion]);
 
   const loadNextPage = useCallback(() => {
     if (!nextCursor || loadingRef.current) return;

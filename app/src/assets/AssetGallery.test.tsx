@@ -253,6 +253,50 @@ describe("AssetGallery", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("refreshes the first page once and ignores the stale page", async () => {
+    let resolveStalePage!: (page: AssetPage) => void;
+    const stalePage = new Promise<AssetPage>((resolve) => {
+      resolveStalePage = resolve;
+    });
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listAssets)
+      .mockReturnValueOnce(stalePage)
+      .mockResolvedValueOnce({ items: [asset(1)], nextCursor: null });
+
+    const { rerender } = render(
+      <LibraryProvider gateway={libraryGateway}>
+        <AssetBrowser
+          classificationId={null}
+          classifications={classifications}
+          refreshVersion={0}
+        />
+      </LibraryProvider>,
+    );
+    rerender(
+      <LibraryProvider gateway={libraryGateway}>
+        <AssetBrowser
+          classificationId={null}
+          classifications={classifications}
+          refreshVersion={1}
+        />
+      </LibraryProvider>,
+    );
+
+    expect(
+      await screen.findByRole("img", { name: "asset-1.png" }),
+    ).toBeInTheDocument();
+    expect(libraryGateway.listAssets).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      resolveStalePage({ items: [asset(0)], nextCursor: null });
+      await stalePage;
+    });
+
+    expect(
+      screen.queryByRole("img", { name: "asset-0.png" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("closes stale asset details when the visible items are replaced", async () => {
     const user = userEvent.setup();
     const libraryGateway = gateway();
