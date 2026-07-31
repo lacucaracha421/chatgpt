@@ -114,6 +114,48 @@ describe("buildJustifiedRows", () => {
     expect(buildJustifiedRows([item], 1_000, 100, 8)).toEqual([]);
   });
 
+  it.each([
+    {
+      name: "an aspect ratio that underflows to zero",
+      item: {
+        id: "ratio-underflow",
+        width: Number.MIN_VALUE,
+        height: Number.MAX_VALUE,
+      },
+      containerWidth: 100,
+      targetHeight: 1,
+    },
+    {
+      name: "an aspect ratio that overflows",
+      item: {
+        id: "ratio-overflow",
+        width: Number.MAX_VALUE,
+        height: Number.MIN_VALUE,
+      },
+      containerWidth: 100,
+      targetHeight: 1,
+    },
+    {
+      name: "a target width that underflows to zero",
+      item: { id: "width-underflow", width: Number.MIN_VALUE, height: 1 },
+      containerWidth: 100,
+      targetHeight: Number.MIN_VALUE,
+    },
+    {
+      name: "a completed row height that underflows to zero",
+      item: { id: "height-underflow", width: Number.MAX_VALUE, height: 1 },
+      containerWidth: Number.MIN_VALUE,
+      targetHeight: Number.MIN_VALUE,
+    },
+  ])("throws RangeError for $name", ({ item, containerWidth, targetHeight }) => {
+    expect(() =>
+      buildJustifiedRows([item], containerWidth, targetHeight, 0),
+    ).toThrowError(RangeError);
+    expect(() =>
+      buildJustifiedRows([item], containerWidth, targetHeight, 0),
+    ).toThrowError(/numeric range/i);
+  });
+
   it("keeps every row height finite and positive when gaps fill a narrow row", () => {
     const rows = buildJustifiedRows(
       Array.from({ length: 20 }, (_, index) => ({

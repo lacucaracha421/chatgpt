@@ -12,6 +12,8 @@ export type JustifiedRow<T extends JustifiedSource> = {
 // A nearly full widow is completed so small width rounding does not leave a
 // conspicuous trailing gap; clearly incomplete rows stay at target height.
 const FINAL_ROW_COMPLETION_RATIO = 0.9;
+const NUMERIC_RANGE_ERROR =
+  "Justified row dimensions exceed JavaScript's numeric range.";
 
 export function buildJustifiedRows<T extends JustifiedSource>(
   items: T[],
@@ -32,11 +34,14 @@ export function buildJustifiedRows<T extends JustifiedSource>(
         !Number.isFinite(item.width) ||
         item.width <= 0 ||
         !Number.isFinite(item.height) ||
-        item.height <= 0 ||
-        !Number.isFinite((item.width / item.height) * targetHeight),
+        item.height <= 0,
     )
   ) {
     return [];
+  }
+  for (const item of items) {
+    const ratio = representable(item.width / item.height);
+    representable(ratio * targetHeight);
   }
 
   const rows: JustifiedRow<T>[] = [];
@@ -105,10 +110,17 @@ function rowAtHeight<T extends JustifiedSource>(
   height: number,
 ): JustifiedRow<T> {
   return {
-    height,
+    height: representable(height),
     items: items.map((item) => ({
       ...item,
-      width: (item.width / item.height) * height,
+      width: representable((item.width / item.height) * height),
     })),
   };
+}
+
+function representable(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new RangeError(NUMERIC_RANGE_ERROR);
+  }
+  return value;
 }

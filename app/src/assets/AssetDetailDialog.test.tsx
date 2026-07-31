@@ -1,4 +1,5 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { StrictMode } from "react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
@@ -148,6 +149,51 @@ it("ignores load completion from the previously open asset", async () => {
 
   expect(screen.getByRole("checkbox", { name: "건전" })).toBeChecked();
   expect(screen.getByRole("checkbox", { name: "아로나" })).not.toBeChecked();
+});
+
+it("ignores the first StrictMode load after the second load is edited", async () => {
+  let resolveFirst!: (ids: string[]) => void;
+  let resolveSecond!: (ids: string[]) => void;
+  const firstLoad = new Promise<string[]>((resolve) => {
+    resolveFirst = resolve;
+  });
+  const secondLoad = new Promise<string[]>((resolve) => {
+    resolveSecond = resolve;
+  });
+  const libraryGateway = gateway();
+  vi.mocked(libraryGateway.getAssetClassifications)
+    .mockReturnValueOnce(firstLoad)
+    .mockReturnValueOnce(secondLoad);
+  const user = userEvent.setup();
+
+  render(
+    <StrictMode>
+      <LibraryProvider gateway={libraryGateway}>
+        <AssetDetailDialog
+          asset={asset}
+          classifications={classifications}
+          onClose={vi.fn()}
+        />
+      </LibraryProvider>
+    </StrictMode>,
+  );
+  await waitFor(() =>
+    expect(libraryGateway.getAssetClassifications).toHaveBeenCalledTimes(2),
+  );
+  await act(async () => {
+    resolveSecond(["tag-clean"]);
+    await secondLoad;
+  });
+  await user.click(screen.getByRole("checkbox", { name: "건전" }));
+  await user.click(screen.getByRole("checkbox", { name: "아로나" }));
+
+  await act(async () => {
+    resolveFirst(["tag-clean"]);
+    await firstLoad;
+  });
+
+  expect(screen.getByRole("checkbox", { name: "건전" })).not.toBeChecked();
+  expect(screen.getByRole("checkbox", { name: "아로나" })).toBeChecked();
 });
 
 it("does not let an earlier save close the newly open asset", async () => {

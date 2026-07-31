@@ -252,15 +252,28 @@ export function AssetDetailDialog({
   const [message, setMessage] = useState<string | null>(null);
   const identityRef = useRef({ assetId: null as string | null, generation: 0 });
   const assetId = asset?.id ?? null;
-  if (identityRef.current.assetId !== assetId) {
+
+  useLayoutEffect(() => {
     identityRef.current = {
       assetId,
       generation: identityRef.current.generation + 1,
     };
-  }
-  const generation = identityRef.current.generation;
+    return () => {
+      if (identityRef.current.assetId === assetId) {
+        identityRef.current = {
+          assetId: null,
+          generation: identityRef.current.generation + 1,
+        };
+      }
+    };
+  }, [assetId]);
 
   useEffect(() => {
+    const request = {
+      assetId,
+      generation: identityRef.current.generation + 1,
+    };
+    identityRef.current = request;
     setClassificationsState({
       assetId,
       status: assetId ? "loading" : "idle",
@@ -268,30 +281,38 @@ export function AssetDetailDialog({
     });
     setSaving(false);
     setMessage(null);
-    if (!assetId) return;
-    const request = { assetId, generation };
-    void gateway
-      .getAssetClassifications(assetId)
-      .then((ids) => {
-        if (isCurrentAsset(identityRef, request)) {
-          setClassificationsState({
-            assetId,
-            status: "loaded",
-            selectedIds: ids,
-          });
-        }
-      })
-      .catch((error: unknown) => {
-        if (isCurrentAsset(identityRef, request)) {
-          setClassificationsState({
-            assetId,
-            status: "error",
-            selectedIds: [],
-          });
-          setMessage(commandErrorMessage(error, "분류를 불러오지 못했습니다."));
-        }
-      });
-  }, [assetId, gateway, generation]);
+    if (assetId) {
+      void gateway
+        .getAssetClassifications(assetId)
+        .then((ids) => {
+          if (isCurrentAsset(identityRef, request)) {
+            setClassificationsState({
+              assetId,
+              status: "loaded",
+              selectedIds: ids,
+            });
+          }
+        })
+        .catch((error: unknown) => {
+          if (isCurrentAsset(identityRef, request)) {
+            setClassificationsState({
+              assetId,
+              status: "error",
+              selectedIds: [],
+            });
+            setMessage(commandErrorMessage(error, "분류를 불러오지 못했습니다."));
+          }
+        });
+    }
+    return () => {
+      if (isCurrentAsset(identityRef, request)) {
+        identityRef.current = {
+          assetId: null,
+          generation: identityRef.current.generation + 1,
+        };
+      }
+    };
+  }, [assetId, gateway]);
 
   if (!asset) return null;
   const alt = asset.title || asset.originalName;
@@ -386,7 +407,7 @@ function isCurrentAsset(
     assetId: string | null;
     generation: number;
   }>,
-  request: { assetId: string; generation: number },
+  request: { assetId: string | null; generation: number },
 ): boolean {
   return (
     identityRef.current?.assetId === request.assetId &&
