@@ -74,4 +74,83 @@ describe("buildJustifiedRows", () => {
     expect(rows[0].height).toBeCloseTo(111.11, 2);
     expect(rows[0].items[0].width).toBeCloseTo(1_000, 2);
   });
+
+  it.each([
+    [0, 100, 8],
+    [-1, 100, 8],
+    [Number.NaN, 100, 8],
+    [Number.POSITIVE_INFINITY, 100, 8],
+    [1_000, 0, 8],
+    [1_000, Number.NaN, 8],
+    [1_000, Number.POSITIVE_INFINITY, 8],
+    [1_000, 100, -1],
+    [1_000, 100, Number.NaN],
+    [1_000, 100, Number.POSITIVE_INFINITY],
+    [1_000, 100, 1_000],
+  ])(
+    "rejects invalid layout metrics (%s, %s, %s)",
+    (containerWidth, targetHeight, gap) => {
+      expect(
+        buildJustifiedRows(
+          [{ id: "a", width: 100, height: 100 }],
+          containerWidth,
+          targetHeight,
+          gap,
+        ),
+      ).toEqual([]);
+    },
+  );
+
+  it.each([
+    { id: "zero-width", width: 0, height: 100 },
+    { id: "negative-width", width: -1, height: 100 },
+    { id: "nan-width", width: Number.NaN, height: 100 },
+    { id: "infinite-width", width: Number.POSITIVE_INFINITY, height: 100 },
+    { id: "zero-height", width: 100, height: 0 },
+    { id: "negative-height", width: 100, height: -1 },
+    { id: "nan-height", width: 100, height: Number.NaN },
+    { id: "infinite-height", width: 100, height: Number.POSITIVE_INFINITY },
+  ])("rejects invalid item dimensions for $id", (item) => {
+    expect(buildJustifiedRows([item], 1_000, 100, 8)).toEqual([]);
+  });
+
+  it("keeps every row height finite and positive when gaps fill a narrow row", () => {
+    const rows = buildJustifiedRows(
+      Array.from({ length: 20 }, (_, index) => ({
+        id: String(index),
+        width: 1,
+        height: 10_000,
+      })),
+      100,
+      180,
+      8,
+    );
+
+    expect(rows.length).toBeGreaterThan(1);
+    for (const row of rows) {
+      expect(row.height).toBeGreaterThan(0);
+      expect(Number.isFinite(row.height)).toBe(true);
+      expect(row.items.every((item) => Number.isFinite(item.width))).toBe(true);
+    }
+  });
+
+  it("keeps completed rows finite when aspect-ratio sums would overflow", () => {
+    const rows = buildJustifiedRows(
+      [
+        { id: "a", width: 1e308, height: 1 },
+        { id: "b", width: 1e308, height: 1 },
+      ],
+      Number.MAX_VALUE,
+      1,
+      0,
+    );
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].height).toBeGreaterThan(0);
+    expect(Number.isFinite(rows[0].height)).toBe(true);
+    expect(
+      rows[0].items.reduce((sum, item) => sum + item.width, 0) /
+        Number.MAX_VALUE,
+    ).toBeCloseTo(1);
+  });
 });

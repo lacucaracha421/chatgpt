@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import { useLibrary } from "../library/LibraryContext";
+import { commandErrorMessage } from "../library/errorMessage";
 import type {
   AssetCursor,
   AssetSummary,
@@ -68,7 +69,7 @@ export function AssetBrowser({
       })
       .catch((error: unknown) => {
         if (generation === generationRef.current) {
-          setMessage(errorMessage(error));
+          setMessage(commandErrorMessage(error, "자산을 불러오지 못했습니다."));
         }
       })
       .finally(() => {
@@ -99,10 +100,11 @@ export function AssetBrowser({
         if (generation !== generationRef.current) return;
         setItems((current) => [...current, ...page.items]);
         setNextCursor(page.nextCursor);
+        setMessage(null);
       })
       .catch((error: unknown) => {
         if (generation === generationRef.current) {
-          setMessage(errorMessage(error));
+          setMessage(commandErrorMessage(error, "자산을 불러오지 못했습니다."));
         }
       })
       .finally(() => {
@@ -241,38 +243,81 @@ export function AssetDetailDialog({
   onClose: () => void;
 }) {
   const { gateway } = useLibrary();
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [classificationsState, setClassificationsState] = useState<{
+    assetId: string | null;
+    status: "idle" | "loading" | "loaded" | "error";
+    selectedIds: string[];
+  }>({ assetId: null, status: "idle", selectedIds: [] });
+  const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const identityRef = useRef({ assetId: null as string | null, generation: 0 });
+  const assetId = asset?.id ?? null;
+  if (identityRef.current.assetId !== assetId) {
+    identityRef.current = {
+      assetId,
+      generation: identityRef.current.generation + 1,
+    };
+  }
+  const generation = identityRef.current.generation;
 
   useEffect(() => {
-    let cancelled = false;
-    setSelectedIds([]);
+    setClassificationsState({
+      assetId,
+      status: assetId ? "loading" : "idle",
+      selectedIds: [],
+    });
+    setSaving(false);
     setMessage(null);
-    if (!asset) return;
-    setLoading(true);
+    if (!assetId) return;
+    const request = { assetId, generation };
     void gateway
-      .getAssetClassifications(asset.id)
+      .getAssetClassifications(assetId)
       .then((ids) => {
-        if (!cancelled) setSelectedIds(ids);
+        if (isCurrentAsset(identityRef, request)) {
+          setClassificationsState({
+            assetId,
+            status: "loaded",
+            selectedIds: ids,
+          });
+        }
       })
       .catch((error: unknown) => {
-        if (!cancelled) setMessage(errorMessage(error));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (isCurrentAsset(identityRef, request)) {
+          setClassificationsState({
+            assetId,
+            status: "error",
+            selectedIds: [],
+          });
+          setMessage(commandErrorMessage(error, "분류를 불러오지 못했습니다."));
+        }
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [asset, gateway]);
+  }, [assetId, gateway, generation]);
 
   if (!asset) return null;
   const alt = asset.title || asset.originalName;
+  const loaded =
+    classificationsState.assetId === asset.id &&
+    classificationsState.status === "loaded";
+  const selectedIds =
+    classificationsState.assetId === asset.id
+      ? classificationsState.selectedIds
+      : [];
+
+  function close() {
+    identityRef.current = {
+      assetId: null,
+      generation: identityRef.current.generation + 1,
+    };
+    onClose();
+  }
 
   async function saveClassifications() {
-    if (!asset || loading) return;
-    setLoading(true);
+    if (!asset || !loaded || saving) return;
+    const request = {
+      assetId: asset.id,
+      generation: identityRef.current.generation,
+    };
+    setSaving(true);
     setMessage(null);
     try {
       await gateway.setAssetClassifications(
@@ -281,19 +326,24 @@ export function AssetDetailDialog({
           .filter((entry) => selectedIds.includes(entry.id))
           .map((entry) => entry.id),
       );
-      onClose();
+      if (isCurrentAsset(identityRef, request)) close();
     } catch (error) {
-      setMessage(errorMessage(error));
+      if (isCurrentAsset(identityRef, request)) {
+        setMessage(commandErrorMessage(error, "분류를 저장하지 못했습니다."));
+      }
     } finally {
-      setLoading(false);
+      if (isCurrentAsset(identityRef, request)) setSaving(false);
     }
   }
 
   return (
-    <Dialog open title={alt} onClose={onClose}>
+    <Dialog open title={alt} onClose={close}>
       <div className="asset-detail">
         <img className="asset-detail__image" src={assetUrl(asset.id)} alt={alt} />
-        <fieldset disabled={loading} className="asset-detail__classifications">
+        <fieldset
+          disabled={!loaded || saving}
+          className="asset-detail__classifications"
+        >
           <legend>분류</legend>
           {classifications.map((entry) => (
             <label key={entry.id}>
@@ -301,11 +351,12 @@ export function AssetDetailDialog({
                 type="checkbox"
                 checked={selectedIds.includes(entry.id)}
                 onChange={(event) =>
-                  setSelectedIds((current) =>
-                    event.target.checked
-                      ? [...current, entry.id]
-                      : current.filter((id) => id !== entry.id),
-                  )
+                  setClassificationsState((current) => ({
+                    ...current,
+                    selectedIds: event.target.checked
+                      ? [...current.selectedIds, entry.id]
+                      : current.selectedIds.filter((id) => id !== entry.id),
+                  }))
                 }
               />
               {entry.name}
@@ -314,12 +365,12 @@ export function AssetDetailDialog({
         </fieldset>
         {message && <Toast>{message}</Toast>}
         <div className="ui-dialog__actions">
-          <Button type="button" onClick={onClose}>
+          <Button type="button" onClick={close}>
             닫기
           </Button>
           <Button
             type="button"
-            disabled={loading}
+            disabled={!loaded || saving}
             onClick={() => void saveClassifications()}
           >
             분류 저장
@@ -330,31 +381,42 @@ export function AssetDetailDialog({
   );
 }
 
+function isCurrentAsset(
+  identityRef: React.RefObject<{
+    assetId: string | null;
+    generation: number;
+  }>,
+  request: { assetId: string; generation: number },
+): boolean {
+  return (
+    identityRef.current?.assetId === request.assetId &&
+    identityRef.current.generation === request.generation
+  );
+}
+
 function useGalleryMetrics(ref: React.RefObject<HTMLElement | null>) {
   const [metrics, setMetrics] = useState({ width: 0, gap: 0 });
 
   useLayoutEffect(() => {
     const element = ref.current;
     if (!element) return;
-    const update = () => {
+    const update = (width: number) => {
       const gap = Number.parseFloat(
         getComputedStyle(element).getPropertyValue("--space-2"),
       );
       setMetrics({
-        width: element.offsetWidth,
+        width,
         gap: Number.isFinite(gap) ? gap : 0,
       });
     };
-    update();
+    update(element.clientWidth);
     if (!window.ResizeObserver) return;
-    const observer = new ResizeObserver(update);
+    const observer = new ResizeObserver(([entry]) => {
+      update(entry?.contentRect.width ?? element.clientWidth);
+    });
     observer.observe(element);
     return () => observer.disconnect();
   }, [ref]);
 
   return metrics;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "자산을 불러오지 못했습니다.";
 }

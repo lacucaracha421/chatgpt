@@ -1,5 +1,3 @@
-#![allow(linker_messages)]
-
 mod commands;
 pub mod library;
 mod media_protocol;

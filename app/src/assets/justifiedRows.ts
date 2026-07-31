@@ -19,12 +19,35 @@ export function buildJustifiedRows<T extends JustifiedSource>(
   targetHeight: number,
   gap: number,
 ): JustifiedRow<T>[] {
-  if (containerWidth <= 0 || targetHeight <= 0) return [];
+  if (
+    !Number.isFinite(containerWidth) ||
+    containerWidth <= 0 ||
+    !Number.isFinite(targetHeight) ||
+    targetHeight <= 0 ||
+    !Number.isFinite(gap) ||
+    gap < 0 ||
+    gap >= containerWidth ||
+    items.some(
+      (item) =>
+        !Number.isFinite(item.width) ||
+        item.width <= 0 ||
+        !Number.isFinite(item.height) ||
+        item.height <= 0 ||
+        !Number.isFinite((item.width / item.height) * targetHeight),
+    )
+  ) {
+    return [];
+  }
 
   const rows: JustifiedRow<T>[] = [];
   let pending: T[] = [];
   for (const item of items) {
     pending.push(item);
+    if (gap * (pending.length - 1) >= containerWidth) {
+      const overflow = pending.pop()!;
+      rows.push(completedRow(pending, containerWidth, gap));
+      pending = [overflow];
+    }
     if (widthAtTarget(pending, targetHeight, gap) >= containerWidth) {
       rows.push(completedRow(pending, containerWidth, gap));
       pending = [];
@@ -63,9 +86,17 @@ function completedRow<T extends JustifiedSource>(
   containerWidth: number,
   gap: number,
 ): JustifiedRow<T> {
+  const maxRatio = items.reduce(
+    (maximum, item) => Math.max(maximum, item.width / item.height),
+    0,
+  );
+  const normalizedRatioSum = items.reduce(
+    (sum, item) => sum + item.width / item.height / maxRatio,
+    0,
+  );
   const height =
-    (containerWidth - gap * (items.length - 1)) /
-    items.reduce((sum, item) => sum + item.width / item.height, 0);
+    ((containerWidth - gap * (items.length - 1)) / maxRatio) /
+    normalizedRatioSum;
   return rowAtHeight(items, height);
 }
 

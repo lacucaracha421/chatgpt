@@ -1,4 +1,11 @@
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
@@ -19,6 +26,7 @@ describe("AssetGallery", () => {
   beforeEach(() => {
     Object.defineProperties(HTMLElement.prototype, {
       offsetWidth: { configurable: true, get: () => 900 },
+      clientWidth: { configurable: true, get: () => 840 },
       offsetHeight: { configurable: true, get: () => 600 },
     });
     Object.defineProperties(HTMLDialogElement.prototype, {
@@ -38,10 +46,10 @@ describe("AssetGallery", () => {
   });
   afterEach(cleanup);
 
-  it("renders fewer than one hundred images for five hundred assets", async () => {
+  it("virtualizes five hundred assets and replaces rows after scrolling", async () => {
     const items = Array.from({ length: 500 }, (_, index) => asset(index));
 
-    render(
+    const { container } = render(
       <LibraryProvider gateway={gateway()}>
         <AssetGallery
           items={items}
@@ -54,6 +62,45 @@ describe("AssetGallery", () => {
 
     await waitFor(() => expect(screen.getAllByRole("img").length).toBeGreaterThan(0));
     expect(screen.getAllByRole("img").length).toBeLessThan(100);
+    expect(
+      screen.getByRole("img", { name: "asset-0.png" }),
+    ).toBeInTheDocument();
+
+    const scroll = container.querySelector(".asset-gallery__scroll")!;
+    Object.defineProperty(scroll, "scrollTop", {
+      configurable: true,
+      writable: true,
+      value: 8_000,
+    });
+    fireEvent.scroll(scroll);
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("img", { name: "asset-0.png" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.getAllByRole("img").length).toBeLessThan(100);
+  });
+
+  it("uses the scroll container content width for row layout", async () => {
+    const { container } = render(
+      <LibraryProvider gateway={gateway()}>
+        <AssetGallery
+          items={Array.from({ length: 5 }, (_, index) => asset(index))}
+          classifications={classifications}
+          directOnly={false}
+          onDirectOnlyChange={vi.fn()}
+        />
+      </LibraryProvider>,
+    );
+
+    await waitFor(() =>
+      expect(container.querySelectorAll(".asset-gallery__asset")).toHaveLength(5),
+    );
+    const rowWidth = Array.from(
+      container.querySelectorAll<HTMLElement>(".asset-gallery__asset"),
+    ).reduce((sum, element) => sum + Number.parseFloat(element.style.width), 0);
+    expect(rowWidth).toBeCloseTo(840);
   });
 
   it("restarts at the first page when direct-only or classification changes", async () => {
@@ -120,8 +167,56 @@ describe("AssetGallery", () => {
     );
 
     await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenCalledTimes(2));
+    expect(libraryGateway.listAssets).toHaveBeenLastCalledWith({
+      classificationId: null,
+      directOnly: false,
+      after: first.nextCursor,
+      limit: 100,
+    });
     await new Promise((resolve) => window.setTimeout(resolve, 50));
     expect(libraryGateway.listAssets).toHaveBeenCalledTimes(2);
+  });
+
+  it("clears a next-page error after retry succeeds and stops at the last page", async () => {
+    const first: AssetPage = {
+      items: Array.from({ length: 50 }, (_, index) => asset(index)),
+      nextCursor: {
+        collectedAt: "2026-07-30T00:00:00Z",
+        id: "asset-49",
+      },
+    };
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listAssets)
+      .mockResolvedValueOnce(first)
+      .mockRejectedValueOnce(new Error("next page failed"))
+      .mockResolvedValueOnce({ items: [asset(50)], nextCursor: null });
+
+    const { container } = render(
+      <LibraryProvider gateway={libraryGateway}>
+        <AssetBrowser classificationId={null} classifications={classifications} />
+      </LibraryProvider>,
+    );
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "next page failed",
+    );
+    const scroll = container.querySelector(".asset-gallery__scroll")!;
+    Object.defineProperty(scroll, "scrollTop", {
+      configurable: true,
+      writable: true,
+      value: 300,
+    });
+    fireEvent.scroll(scroll);
+
+    await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenCalledTimes(3));
+    await waitFor(() =>
+      expect(screen.queryByRole("status")).not.toBeInTheDocument(),
+    );
+
+    scroll.scrollTop = 600;
+    fireEvent.scroll(scroll);
+    await new Promise((resolve) => window.setTimeout(resolve, 50));
+    expect(libraryGateway.listAssets).toHaveBeenCalledTimes(3);
   });
 
   it("ignores a stale first page after the classification changes", async () => {

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useLibrary } from "../library/LibraryContext";
 import type { ClassificationEntry, ClassificationKind } from "../library/types";
+import { commandErrorMessage } from "../library/errorMessage";
 import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
 import { TextField } from "../shared/ui/TextField";
@@ -76,7 +77,7 @@ export function ClassificationSidebar({
       });
       completeMutation();
     } catch (error) {
-      setMessage(errorMessage(error));
+      setMessage(commandErrorMessage(error, "분류를 변경하지 못했습니다."));
     }
   }
 
@@ -86,7 +87,7 @@ export function ClassificationSidebar({
       await gateway.renameClassification(dialog.entry.id, name);
       completeMutation();
     } catch (error) {
-      setMessage(errorMessage(error));
+      setMessage(commandErrorMessage(error, "분류를 변경하지 못했습니다."));
     }
   }
 
@@ -96,7 +97,7 @@ export function ClassificationSidebar({
       await gateway.moveClassification(dialog.entry.id, parentId || null);
       completeMutation();
     } catch (error) {
-      setMessage(errorMessage(error));
+      setMessage(commandErrorMessage(error, "분류를 변경하지 못했습니다."));
     }
   }
 
@@ -106,7 +107,7 @@ export function ClassificationSidebar({
       await gateway.deleteClassification(dialog.entry.id);
       completeMutation();
     } catch (error) {
-      setMessage(errorMessage(error));
+      setMessage(commandErrorMessage(error, "분류를 변경하지 못했습니다."));
     }
   }
 
@@ -272,12 +273,4 @@ function moveParents(entry: ClassificationEntry, entries: ClassificationEntry[])
 
 function kindLabel(kind: ClassificationKind): string {
   return ({ root: "최상위 분류", work: "작품", tag: "태그" })[kind];
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (typeof error === "object" && error !== null && "message" in error && typeof error.message === "string") {
-    return error.message;
-  }
-  return "분류를 변경하지 못했습니다.";
 }

@@ -13,6 +13,16 @@ impl Library {
         }
 
         let connection = self.connection()?;
+        if let Some(classification_id) = query.classification_id.as_deref() {
+            let exists: bool = connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM classification_entries WHERE id = ?1)",
+                [classification_id],
+                |row| row.get(0),
+            )?;
+            if !exists {
+                return Err(LibraryError::ClassificationNotFound);
+            }
+        }
         let mut statement = connection.prepare(
             "WITH RECURSIVE descendants(id) AS (
                  SELECT ?1 WHERE ?1 IS NOT NULL
@@ -239,6 +249,25 @@ mod tests {
                 .unwrap_err();
 
             assert!(matches!(error, LibraryError::InvalidAssetPageLimit));
+        }
+    }
+
+    #[test]
+    fn querying_a_missing_classification_returns_the_established_error() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+
+        for direct_only in [false, true] {
+            let error = library
+                .list_assets(AssetQuery {
+                    classification_id: Some("missing-classification".into()),
+                    direct_only,
+                    after: None,
+                    limit: 20,
+                })
+                .unwrap_err();
+
+            assert!(matches!(error, LibraryError::ClassificationNotFound));
         }
     }
 

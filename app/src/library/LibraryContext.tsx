@@ -7,6 +7,7 @@ import {
   type PropsWithChildren,
 } from "react";
 import type { LibraryGateway, LibrarySummary } from "./types";
+import { commandErrorMessage } from "./errorMessage";
 
 export const LIBRARY_PATH_STORAGE_KEY = "lakomics.libraryPath";
 
@@ -34,7 +35,7 @@ export function LibraryProvider({
         localStorage.setItem(LIBRARY_PATH_STORAGE_KEY, path);
       } catch (error) {
         setLibrary(null);
-        setError(errorMessage(error));
+        setError(commandErrorMessage(error, "라이브러리를 열 수 없습니다."));
       }
     },
     [gateway],
@@ -60,19 +61,4 @@ export function useLibrary(): LibraryContextValue {
     throw new Error("useLibrary must be used within a LibraryProvider");
   }
   return context;
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    "message" in error &&
-    typeof error.message === "string"
-  ) {
-    return error.message;
-  }
-  return "라이브러리를 열 수 없습니다.";
 }
