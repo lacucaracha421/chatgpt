@@ -47,6 +47,8 @@ export function useFileDrop({
   useEffect(() => {
     let active = true;
     let unlisten: (() => void) | undefined;
+    let pendingBatches = 0;
+    let queue = Promise.resolve();
     void subscribe((paths) => {
       if (!active) return;
       const {
@@ -54,35 +56,40 @@ export function useFileDrop({
         ingestImage: ingestDroppedImage,
         onResult: reportResult,
       } = optionsRef.current;
-      void (async () => {
-        for (const [index, sourcePath] of paths.entries()) {
-          if (!active) return;
-          setProgress({ current: index + 1, total: paths.length });
-          try {
-            const result = await ingestDroppedImage({
-              sourcePath,
-              classificationId: dropClassificationId,
-              sourceUrl: null,
-            });
+      pendingBatches += 1;
+      queue = queue
+        .then(async () => {
+          for (const [index, sourcePath] of paths.entries()) {
             if (!active) return;
-            reportResult(
-              result.status === "added"
-                ? { ...result, message: "저장했습니다" }
-                : { ...result, message: "이미 보관된 파일입니다" },
-            );
-          } catch (error) {
-            if (!active) return;
-            reportResult({
-              status: "error",
-              message: commandErrorMessage(
-                error,
-                "파일을 저장하지 못했습니다.",
-              ),
-            });
+            setProgress({ current: index + 1, total: paths.length });
+            try {
+              const result = await ingestDroppedImage({
+                sourcePath,
+                classificationId: dropClassificationId,
+                sourceUrl: null,
+              });
+              if (!active) return;
+              reportResult(
+                result.status === "added"
+                  ? { ...result, message: "저장했습니다" }
+                  : { ...result, message: "이미 보관된 파일입니다" },
+              );
+            } catch (error) {
+              if (!active) return;
+              reportResult({
+                status: "error",
+                message: commandErrorMessage(
+                  error,
+                  "파일을 저장하지 못했습니다.",
+                ),
+              });
+            }
           }
-        }
-        if (active) setProgress(null);
-      })();
+        })
+        .finally(() => {
+          pendingBatches -= 1;
+          if (active && pendingBatches === 0) setProgress(null);
+        });
     })
       .then((stop) => {
         if (active) {

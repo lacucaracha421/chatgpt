@@ -105,13 +105,36 @@ fn image_can_be_ingested_classified_queried_and_deduplicated() {
     assert_eq!(page.items[0].id, added.id);
     assert!(fixture.source_path.is_file());
 
-    let duplicate = fixture.ingest_raw(&classification.tag_id);
+    let classifications_before = fixture
+        .library
+        .get_asset_classifications(&added.id)
+        .unwrap();
+    assert_eq!(classifications_before.len(), 1);
+    assert_eq!(classifications_before[0].id, classification.tag_id);
+    let duplicate_target = fixture
+        .library
+        .create_classification(CreateClassification {
+            kind: ClassificationKind::Root,
+            name: "중복 수집 대상".into(),
+            parent_id: None,
+        })
+        .unwrap();
+
+    let duplicate = fixture.ingest_raw(&duplicate_target.id);
     assert_eq!(
         duplicate,
         IngestOutcome::ExactDuplicate {
-            existing_asset_id: added.id,
+            existing_asset_id: added.id.clone(),
         },
     );
+    assert_eq!(
+        fixture
+            .library
+            .get_asset_classifications(&added.id)
+            .unwrap(),
+        classifications_before,
+    );
+    assert!(fixture.query(&duplicate_target.id).items.is_empty());
     assert_eq!(fixture.query(&classification.root_id), page);
     assert!(fixture.source_path.is_file());
 }

@@ -1,7 +1,12 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
-import type { AssetSummary } from "../library/types";
+import type {
+  AssetSummary,
+  IngestImageInput,
+  IngestOutcome,
+} from "../library/types";
 import {
+  type DropProgress,
   type DropSubscriber,
   subscribeToTauriDrops,
   useFileDrop,
@@ -211,6 +216,110 @@ it("reports the current file and total while a drop is processing", async () => 
   await waitFor(() => expect(result.current).toBeNull());
 });
 
+it("queues overlapping drops in arrival order without clearing progress", async () => {
+  let drop: ((paths: string[]) => void) | undefined;
+  const a1 = deferred<IngestOutcome>();
+  const a2 = deferred<IngestOutcome>();
+  const b1 = deferred<IngestOutcome>();
+  const pendingByPath = new Map<string, Promise<IngestOutcome>>([
+    ["C:\\images\\a1.png", a1.promise],
+    ["C:\\images\\a2.png", a2.promise],
+    ["C:\\images\\b1.png", b1.promise],
+  ]);
+  const ingestImage = vi.fn((input: IngestImageInput) => {
+    const pending = pendingByPath.get(input.sourcePath);
+    if (!pending) throw new Error(`unexpected path: ${input.sourcePath}`);
+    return pending;
+  });
+  const onResult = vi.fn();
+  const subscribe: DropSubscriber = async (handler) => {
+    drop = handler;
+    return () => undefined;
+  };
+  const progressHistory: Array<DropProgress | null> = [];
+  const assetA1 = {
+    ...fixtureAsset,
+    id: "asset-a1",
+    originalName: "a1.png",
+  };
+  const assetA2 = {
+    ...fixtureAsset,
+    id: "asset-a2",
+    originalName: "a2.png",
+  };
+  const assetB1 = {
+    ...fixtureAsset,
+    id: "asset-b1",
+    originalName: "b1.png",
+  };
+
+  const { result, rerender } = renderHook(
+    ({ classificationId }: { classificationId: string | null }) => {
+      const progress = useFileDrop({
+        subscribe,
+        classificationId,
+        ingestImage,
+        onResult,
+      });
+      progressHistory.push(progress);
+      return progress;
+    },
+    { initialProps: { classificationId: "tag-a" } },
+  );
+  await waitFor(() => expect(drop).toBeDefined());
+  act(() => drop?.(["C:\\images\\a1.png", "C:\\images\\a2.png"]));
+  await waitFor(() => expect(ingestImage).toHaveBeenCalledTimes(1));
+  expect(result.current).toEqual({ current: 1, total: 2 });
+
+  rerender({ classificationId: "tag-b" });
+  await act(async () => {
+    drop?.(["C:\\images\\b1.png"]);
+    await Promise.resolve();
+  });
+
+  expect(ingestImage).toHaveBeenCalledTimes(1);
+  act(() => a1.resolve({ status: "added", asset: assetA1 }));
+  await waitFor(() => expect(ingestImage).toHaveBeenCalledTimes(2));
+  expect(ingestImage).toHaveBeenNthCalledWith(2, {
+    sourcePath: "C:\\images\\a2.png",
+    classificationId: "tag-a",
+    sourceUrl: null,
+  });
+  expect(result.current).toEqual({ current: 2, total: 2 });
+
+  act(() => a2.resolve({ status: "added", asset: assetA2 }));
+  await waitFor(() => expect(ingestImage).toHaveBeenCalledTimes(3));
+  expect(ingestImage).toHaveBeenNthCalledWith(3, {
+    sourcePath: "C:\\images\\b1.png",
+    classificationId: "tag-b",
+    sourceUrl: null,
+  });
+  expect(result.current).toEqual({ current: 1, total: 1 });
+
+  act(() => b1.resolve({ status: "added", asset: assetB1 }));
+  await waitFor(() => expect(result.current).toBeNull());
+  expect(onResult).toHaveBeenNthCalledWith(1, {
+    status: "added",
+    asset: assetA1,
+    message: "저장했습니다",
+  });
+  expect(onResult).toHaveBeenNthCalledWith(2, {
+    status: "added",
+    asset: assetA2,
+    message: "저장했습니다",
+  });
+  expect(onResult).toHaveBeenNthCalledWith(3, {
+    status: "added",
+    asset: assetB1,
+    message: "저장했습니다",
+  });
+  const activeStart = progressHistory.findIndex(
+    (progress) => progress?.current === 1 && progress.total === 2,
+  );
+  expect(activeStart).toBeGreaterThanOrEqual(0);
+  expect(progressHistory.slice(activeStart, -1)).not.toContain(null);
+});
+
 it("uses the current classification for a new drop without resubscribing", async () => {
   let drop: ((paths: string[]) => void) | undefined;
   const subscribe = vi.fn<DropSubscriber>(async (handler) => {
@@ -284,6 +393,29 @@ it("keeps the classification captured when a drop starts", async () => {
   });
 });
 
+it("unlistens an immediately established subscription on unmount", async () => {
+  const unlisten = vi.fn();
+  const subscribe = vi.fn<DropSubscriber>(async () => unlisten);
+
+  const { unmount } = renderHook(() =>
+    useFileDrop({
+      subscribe,
+      classificationId: null,
+      ingestImage: vi.fn(),
+      onResult: vi.fn(),
+    }),
+  );
+  await waitFor(() => expect(subscribe).toHaveBeenCalledOnce());
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(unlisten).not.toHaveBeenCalled();
+
+  unmount();
+
+  expect(unlisten).toHaveBeenCalledOnce();
+});
+
 it("unlistens when subscription setup finishes after unmount", async () => {
   const subscription = deferred<() => void>();
   const unlisten = vi.fn();
@@ -328,6 +460,7 @@ it("stops progress and result callbacks after unmount", async () => {
   await waitFor(() => expect(drop).toBeDefined());
   act(() => drop?.(["C:\\images\\first.png", "C:\\images\\second.png"]));
   await waitFor(() => expect(ingestImage).toHaveBeenCalledTimes(1));
+  act(() => drop?.(["C:\\images\\queued.png"]));
 
   unmount();
   await act(async () => {

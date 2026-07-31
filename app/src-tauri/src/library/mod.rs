@@ -27,6 +27,13 @@ pub struct MediaResponse {
     pub mime: &'static str,
 }
 
+/// The library interface does not expose its SQLite connection.
+///
+/// ```compile_fail
+/// fn direct_database_access(library: &app_lib::library::Library) {
+///     let _ = library.connection();
+/// }
+/// ```
 #[derive(Debug, Clone)]
 pub struct Library {
     root: PathBuf,
@@ -57,7 +64,7 @@ impl Library {
         &self.root
     }
 
-    pub fn connection(&self) -> Result<Connection, LibraryError> {
+    pub(crate) fn connection(&self) -> Result<Connection, LibraryError> {
         db::open_database(&self.root.join("library.sqlite"))
     }
 
