@@ -268,6 +268,24 @@ describe("AssetBrowser", () => {
     expect(screen.getByRole("button", { name: "휴지통으로 이동" })).toBeVisible();
   });
 
+  it("disables trash while pending and preserves a newer selection", async () => {
+    let resolveTrash!: () => void;
+    const pendingTrash = new Promise<void>((resolve) => { resolveTrash = resolve; });
+    const user = userEvent.setup();
+    const gateway = createGateway({ items: [{ ...asset(0), title: "First" }, { ...asset(1), title: "Second" }], nextCursor: null });
+    vi.mocked(gateway.trashAsset).mockReturnValue(pendingTrash);
+    renderBrowser(gateway);
+
+    await user.click(await screen.findByRole("button", { name: "First" }));
+    await user.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
+    expect(screen.getByRole("button", { name: "휴지통으로 이동" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Second" }));
+    await act(async () => { resolveTrash(); await pendingTrash; });
+
+    expect(await screen.findByRole("button", { name: "Second" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "휴지통으로 이동" })).not.toBeDisabled();
+  });
+
   it("uses the constrained workspace styles without horizontal sidebar scrolling", () => {
     expect(styles).toMatch(/\.asset-browser\s*\{[^}]*display:\s*flex;[^}]*min-height:\s*0;/s);
     expect(styles).toMatch(/\.asset-gallery__scroll\s*\{[^}]*flex:\s*1;[^}]*min-height:\s*0;[^}]*overflow:\s*auto;/s);

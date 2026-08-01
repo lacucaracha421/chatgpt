@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
@@ -32,6 +32,76 @@ it("keeps retention controls disabled until the policy is loaded", () => {
   expect(screen.getByRole("checkbox", { name: "자동 삭제" })).toBeDisabled();
   expect(screen.getByRole("checkbox", { name: "자동 삭제" })).not.toBeChecked();
   expect(screen.queryByRole("spinbutton", { name: "보존 기간" })).not.toBeInTheDocument();
+});
+
+it("keeps a loaded trash page visible when the policy request fails and retries both", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getTrashPolicy)
+    .mockRejectedValueOnce(new Error("policy failed"))
+    .mockResolvedValueOnce({ retentionDays: 30 });
+
+  render(<LibraryProvider gateway={gateway}><TrashBrowser /></LibraryProvider>);
+
+  expect(await screen.findByText("asset-1.png")).toBeVisible();
+  expect(screen.getByRole("checkbox", { name: "자동 삭제" })).toBeDisabled();
+  expect(screen.getByText("policy failed")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "다시 시도" }));
+
+  await waitFor(() => expect(gateway.listTrash).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(gateway.getTrashPolicy).toHaveBeenCalledTimes(2));
+  expect(screen.getByRole("checkbox", { name: "자동 삭제" })).not.toBeDisabled();
+});
+
+it("shows a retry instead of an empty state when listing trash fails", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.listTrash)
+    .mockRejectedValueOnce(new Error("trash list failed"))
+    .mockResolvedValueOnce({ items: [{ asset: asset(), trashedAt: "2026-07-20T00:00:00Z", purgeAt: null }], nextCursor: null, totalCount: 1, totalBytes: 1_024 });
+
+  render(<LibraryProvider gateway={gateway}><TrashBrowser /></LibraryProvider>);
+
+  expect(await screen.findByText("trash list failed")).toBeVisible();
+  expect(screen.getByRole("heading", { name: "휴지통을 불러오지 못했습니다." })).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "다시 시도" }));
+
+  expect(await screen.findByText("asset-1.png")).toBeVisible();
+});
+
+it("ignores an older policy completion after a newer refresh", async () => {
+  let resolveInitialPolicy!: (value: { retentionDays: number | null }) => void;
+  const initialPolicy = new Promise<{ retentionDays: number | null }>((resolve) => { resolveInitialPolicy = resolve; });
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getTrashPolicy)
+    .mockReturnValueOnce(initialPolicy)
+    .mockResolvedValueOnce({ retentionDays: 45 });
+
+  render(<LibraryProvider gateway={gateway}><TrashBrowser /></LibraryProvider>);
+
+  await user.click(await screen.findByRole("button", { name: "복원" }));
+  await waitFor(() => expect(gateway.getTrashPolicy).toHaveBeenCalledTimes(2));
+  await act(async () => { resolveInitialPolicy({ retentionDays: 30 }); await initialPolicy; });
+
+  expect(await screen.findByRole("spinbutton", { name: "보존 기간" })).toHaveValue(45);
+});
+
+it("disables conflicting trash mutations while a restore is pending", async () => {
+  let resolveRestore!: () => void;
+  const pendingRestore = new Promise<void>((resolve) => { resolveRestore = resolve; });
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.restoreAsset).mockReturnValue(pendingRestore);
+
+  render(<LibraryProvider gateway={gateway}><TrashBrowser /></LibraryProvider>);
+
+  await user.click(await screen.findByRole("button", { name: "복원" }));
+  expect(screen.getByRole("button", { name: "복원" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "휴지통 비우기" })).toBeDisabled();
+  expect(screen.getByRole("checkbox", { name: "자동 삭제" })).toBeDisabled();
+
+  await act(async () => { resolveRestore(); await pendingRestore; });
 });
 
 it("disables automatic deletion and saves a valid retention period", async () => {

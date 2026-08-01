@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ASSET_PAGE_SIZE } from "../library/constants";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -19,67 +19,110 @@ export function TrashBrowser() {
   const [page, setPage] = useState<TrashPage | null>(null);
   const [policy, setPolicy] = useState<TrashPolicy | null>(null);
   const [retentionDays, setRetentionDays] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [pageLoading, setPageLoading] = useState(true);
+  const [policyLoading, setPolicyLoading] = useState(true);
+  const [pageError, setPageError] = useState<string | null>(null);
+  const [policyError, setPolicyError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [emptying, setEmptying] = useState(false);
+  const [pendingMutation, setPendingMutation] = useState<"restore" | "policy" | "empty" | null>(null);
   const [confirmEmpty, setConfirmEmpty] = useState(false);
+  const loadGenerationRef = useRef(0);
+  const pendingMutationRef = useRef<"restore" | "policy" | "empty" | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [nextPage, nextPolicy] = await Promise.all([
-        gateway.listTrash({ after: null, limit: ASSET_PAGE_SIZE }),
-        gateway.getTrashPolicy(),
-      ]);
-      setPage(nextPage);
-      setPolicy(nextPolicy);
-      setRetentionDays(nextPolicy.retentionDays?.toString() ?? "");
-    } catch (error) {
-      setMessage(commandErrorMessage(error, "휴지통을 불러오지 못했습니다."));
-    } finally {
-      setLoading(false);
-    }
+  const load = useCallback(() => {
+    const generation = ++loadGenerationRef.current;
+    setPageLoading(true);
+    setPolicyLoading(true);
+    setPageError(null);
+    setPolicyError(null);
+    setPolicy(null);
+    void gateway.listTrash({ after: null, limit: ASSET_PAGE_SIZE })
+      .then((nextPage) => {
+        if (generation === loadGenerationRef.current) setPage(nextPage);
+      })
+      .catch((error: unknown) => {
+        if (generation === loadGenerationRef.current) setPageError(commandErrorMessage(error, "휴지통을 불러오지 못했습니다."));
+      })
+      .finally(() => {
+        if (generation === loadGenerationRef.current) setPageLoading(false);
+      });
+    void gateway.getTrashPolicy()
+      .then((nextPolicy) => {
+        if (generation !== loadGenerationRef.current) return;
+        setPolicy(nextPolicy);
+        setRetentionDays(nextPolicy.retentionDays?.toString() ?? "");
+      })
+      .catch((error: unknown) => {
+        if (generation === loadGenerationRef.current) setPolicyError(commandErrorMessage(error, "보존 기간을 불러오지 못했습니다."));
+      })
+      .finally(() => {
+        if (generation === loadGenerationRef.current) setPolicyLoading(false);
+      });
   }, [gateway]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    load();
+    return () => { loadGenerationRef.current += 1; };
+  }, [load]);
+
+  function beginMutation(kind: "restore" | "policy" | "empty"): boolean {
+    if (pendingMutationRef.current) return false;
+    pendingMutationRef.current = kind;
+    setPendingMutation(kind);
+    return true;
+  }
+
+  function finishMutation() {
+    pendingMutationRef.current = null;
+    setPendingMutation(null);
+  }
 
   async function restore(assetId: string) {
+    if (!beginMutation("restore")) return;
     try {
       await gateway.restoreAsset(assetId);
       setMessage("자산을 복원했습니다.");
-      await load();
+      load();
     } catch (error) {
       setMessage(commandErrorMessage(error, "자산을 복원하지 못했습니다."));
+    } finally {
+      finishMutation();
     }
   }
 
   async function setAutomaticDeletion(enabled: boolean) {
+    if (!beginMutation("policy")) return;
     const nextPolicy = { retentionDays: enabled ? validRetentionDays(retentionDays) ?? 30 : null };
     try {
       await gateway.setTrashPolicy(nextPolicy);
       setPolicy(nextPolicy);
       setRetentionDays(nextPolicy.retentionDays?.toString() ?? "");
+      load();
     } catch (error) {
       setMessage(commandErrorMessage(error, "자동 삭제 설정을 변경하지 못했습니다."));
+    } finally {
+      finishMutation();
     }
   }
 
   async function saveRetention() {
     const days = validRetentionDays(retentionDays);
-    if (days === null) return;
+    if (days === null || !beginMutation("policy")) return;
     try {
       await gateway.setTrashPolicy({ retentionDays: days });
       setPolicy({ retentionDays: days });
       setRetentionDays(days.toString());
       setMessage("보존 기간을 저장했습니다.");
-      await load();
+      load();
     } catch (error) {
       setMessage(commandErrorMessage(error, "보존 기간을 저장하지 못했습니다."));
+    } finally {
+      finishMutation();
     }
   }
 
   async function emptyTrash() {
-    setEmptying(true);
+    if (!beginMutation("empty")) return;
     try {
       const result = await gateway.emptyTrash();
       const failedCount = result.failedAssetIds.length;
@@ -87,29 +130,32 @@ export function TrashBrowser() {
         ? `${result.deletedCount}개 삭제, ${failedCount}개 삭제 실패했습니다.`
         : `${result.deletedCount}개를 영구 삭제했습니다.`);
       setConfirmEmpty(false);
-      await load();
+      load();
     } catch (error) {
       setMessage(commandErrorMessage(error, "휴지통을 비우지 못했습니다."));
     } finally {
-      setEmptying(false);
+      finishMutation();
     }
   }
 
   const automaticDeletion = policy !== null && policy.retentionDays !== null;
   const retentionError = automaticDeletion ? retentionErrorMessage(retentionDays) : undefined;
+  const loadError = pageError ?? policyError;
+  const mutationPending = pendingMutation !== null;
 
   return <section className="trash-browser" aria-label="휴지통">
     <header className="trash-browser__toolbar">
       <div><h2>휴지통</h2><p>복원할 수 있는 자산을 보관합니다.</p></div>
-      <Button variant="danger" onClick={() => setConfirmEmpty(true)} disabled={!page || page.totalCount === 0}>휴지통 비우기</Button>
+      <Button variant="danger" onClick={() => setConfirmEmpty(true)} disabled={!page || page.totalCount === 0 || mutationPending}>휴지통 비우기</Button>
     </header>
     <section className="trash-browser__policy" aria-label="보존 기간 설정">
-      <Toggle checked={automaticDeletion} disabled={!policy} onChange={(event) => void setAutomaticDeletion(event.target.checked)}>자동 삭제</Toggle>
-      {automaticDeletion && <div className="trash-browser__retention"><TextField label="보존 기간" type="number" min={MIN_RETENTION_DAYS} max={MAX_RETENTION_DAYS} value={retentionDays} error={retentionError} onChange={(event) => setRetentionDays(event.target.value)} /><Button onClick={() => void saveRetention()} disabled={Boolean(retentionError)}>저장</Button></div>}
+      <Toggle checked={automaticDeletion} disabled={!policy || mutationPending} onChange={(event) => void setAutomaticDeletion(event.target.checked)}>자동 삭제</Toggle>
+      {automaticDeletion && <div className="trash-browser__retention"><TextField label="보존 기간" type="number" min={MIN_RETENTION_DAYS} max={MAX_RETENTION_DAYS} value={retentionDays} error={retentionError} disabled={mutationPending} onChange={(event) => setRetentionDays(event.target.value)} /><Button onClick={() => void saveRetention()} disabled={Boolean(retentionError) || mutationPending}>저장</Button></div>}
     </section>
     {message && <Toast>{message}</Toast>}
-    {loading ? <Skeleton className="trash-browser__skeleton" label="휴지통을 불러오는 중" /> : !page || page.items.length === 0 ? <EmptyState title="휴지통이 비어 있습니다">삭제한 자산은 이곳에서 복원할 수 있습니다.</EmptyState> : <ul className="trash-browser__list">{page.items.map(({ asset, trashedAt, purgeAt }) => <li key={asset.id} className="trash-browser__item"><div><strong>{asset.title || asset.originalName}</strong><span>삭제: {localDate(trashedAt)}</span><span>{purgeAt ? `영구 삭제까지 ${remainingDays(purgeAt)}일` : "자동 삭제 안 함"}</span></div><Button onClick={() => void restore(asset.id)}>복원</Button></li>)}</ul>}
-    {confirmEmpty && page && <Dialog open title="휴지통 비우기" onClose={() => setConfirmEmpty(false)}><p>휴지통의 자산 {page.totalCount}개 ({formatBytes(page.totalBytes)})를 영구 삭제합니다.</p><p>이 작업은 되돌릴 수 없습니다.</p><div className="ui-dialog__actions"><Button onClick={() => setConfirmEmpty(false)}>취소</Button><Button variant="danger" disabled={emptying} onClick={() => void emptyTrash()}>영구 삭제</Button></div></Dialog>}
+    {loadError && <div className="trash-browser__load-error"><Toast>{loadError}</Toast><Button disabled={pageLoading || policyLoading || mutationPending} onClick={load}>다시 시도</Button></div>}
+    {pageLoading && !page ? <Skeleton className="trash-browser__skeleton" label="휴지통을 불러오는 중" /> : pageError && !page ? <EmptyState title="휴지통을 불러오지 못했습니다." /> : !page || page.items.length === 0 ? <EmptyState title="휴지통이 비어 있습니다">삭제한 자산은 이곳에서 복원할 수 있습니다.</EmptyState> : <ul className="trash-browser__list">{page.items.map(({ asset, trashedAt, purgeAt }) => <li key={asset.id} className="trash-browser__item"><div><strong>{asset.title || asset.originalName}</strong><span>삭제: {localDate(trashedAt)}</span><span>{purgeAt ? `영구 삭제까지 ${remainingDays(purgeAt)}일` : "자동 삭제 안 함"}</span></div><Button disabled={mutationPending} onClick={() => void restore(asset.id)}>복원</Button></li>)}</ul>}
+    {confirmEmpty && page && <Dialog open title="휴지통 비우기" onClose={() => setConfirmEmpty(false)}><p>휴지통의 자산 {page.totalCount}개 ({formatBytes(page.totalBytes)})를 영구 삭제합니다.</p><p>이 작업은 되돌릴 수 없습니다.</p><div className="ui-dialog__actions"><Button disabled={mutationPending} onClick={() => setConfirmEmpty(false)}>취소</Button><Button variant="danger" disabled={mutationPending} onClick={() => void emptyTrash()}>영구 삭제</Button></div></Dialog>}
   </section>;
 }
 

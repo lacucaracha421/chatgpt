@@ -7,7 +7,7 @@ import { Dialog } from "../shared/ui/Dialog";
 import { Toast } from "../shared/ui/Toast";
 import { assetUrl } from "./mediaUrl";
 
-export function AssetDetailDialog({ asset, classifications, onClose, onTrashed }: { asset: AssetSummary | null; classifications: ClassificationEntry[]; onClose: () => void; onTrashed?: () => void }) {
+export function AssetDetailDialog({ asset, classifications, onClose, onTrashed }: { asset: AssetSummary | null; classifications: ClassificationEntry[]; onClose: () => void; onTrashed?: (assetId: string) => void }) {
   const { gateway } = useLibrary();
   const [state, setState] = useState({ assetId: null as string | null, status: "idle" as "idle" | "loading" | "loaded" | "error", selectedIds: [] as string[] });
   const [saving, setSaving] = useState(false);
@@ -37,7 +37,7 @@ export function AssetDetailDialog({ asset, classifications, onClose, onTrashed }
     setSaving(true); setMessage(null);
     try {
       await gateway.trashAsset(asset.id);
-      onTrashed?.();
+      onTrashed?.(asset.id);
       close();
     } catch (error) {
       setMessage(commandErrorMessage(error, "자산을 휴지통으로 이동하지 못했습니다."));

@@ -29,10 +29,12 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, ref
   const [randomVersion, setRandomVersion] = useState(0);
   const [selectedAsset, setSelectedAsset] = useState<AssetSummary | null>(null);
   const [detailAsset, setDetailAsset] = useState<AssetSummary | null>(null);
+  const [trashPendingAssetId, setTrashPendingAssetId] = useState<string | null>(null);
   const selectedViewKeyRef = useRef<string | null>(null);
   const detailViewKeyRef = useRef<string | null>(null);
   const generationRef = useRef(0);
   const nextLoadingRef = useRef(false);
+  const trashPendingRef = useRef<string | null>(null);
   const randomPivotRef = useRef<string | null>(null);
   const effectiveSort = view.kind === "recent" ? "newest" : sort;
   if (effectiveSort === "random" && !randomPivotRef.current) randomPivotRef.current = createRandomPivot();
@@ -73,26 +75,34 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, ref
     catch (error) { const rollback = (asset: AssetSummary) => asset.id === target.id ? target : asset; setPage((current) => current?.queryKey === queryKey ? { ...current, items: current.items.map(rollback) } : current); setSelectedAsset(target); if (detailAsset?.id === target.id) setDetailAsset(target); setFirstError({ queryKey, message: commandErrorMessage(error, "좋아요를 변경하지 못했습니다.") }); }
   }, [detailAsset, effectiveSort, gateway, queryKey, refresh, selectedAsset, view.kind]);
   const trashSelected = useCallback(async () => {
-    if (!selectedAsset) return;
+    if (!selectedAsset || trashPendingRef.current) return;
+    const assetId = selectedAsset.id;
+    trashPendingRef.current = assetId;
+    setTrashPendingAssetId(assetId);
     try {
-      await gateway.trashAsset(selectedAsset.id);
-      setSelectedAsset(null);
-      setDetailAsset(null);
+      await gateway.trashAsset(assetId);
+      setSelectedAsset((current) => current?.id === assetId ? null : current);
+      setDetailAsset((current) => current?.id === assetId ? null : current);
       setMessage("휴지통으로 이동했습니다.");
       refresh();
     } catch (error) {
       setMessage(commandErrorMessage(error, "자산을 휴지통으로 이동하지 못했습니다."));
+    } finally {
+      if (trashPendingRef.current === assetId) {
+        trashPendingRef.current = null;
+        setTrashPendingAssetId(null);
+      }
     }
   }, [gateway, refresh, selectedAsset]);
-  const trashDetail = useCallback(() => {
-    setSelectedAsset(null);
-    setDetailAsset(null);
+  const trashDetail = useCallback((assetId: string) => {
+    setSelectedAsset((current) => current?.id === assetId ? null : current);
+    setDetailAsset((current) => current?.id === assetId ? null : current);
     setMessage("휴지통으로 이동했습니다.");
     refresh();
   }, [refresh]);
   const reshuffle = () => { randomPivotRef.current = createRandomPivot(); setRandomVersion((value) => value + 1); };
   return <section className="asset-browser" aria-label="전체 자산">
-    <AssetToolbar view={view} classifications={classifications} sort={sort} directOnly={directOnly} metadataVisible={metadataVisible} selectedAsset={selectedAsset} onSortChange={onSortChange} onDirectOnlyChange={setDirectOnly} onMetadataVisibleChange={onMetadataVisibleChange} onFavorite={() => void toggleFavorite()} onTrash={() => void trashSelected()} onReshuffle={reshuffle} />
+    <AssetToolbar view={view} classifications={classifications} sort={sort} directOnly={directOnly} metadataVisible={metadataVisible} selectedAsset={selectedAsset} onSortChange={onSortChange} onDirectOnlyChange={setDirectOnly} onMetadataVisibleChange={onMetadataVisibleChange} onFavorite={() => void toggleFavorite()} onTrash={() => void trashSelected()} trashPending={trashPendingAssetId !== null} onReshuffle={reshuffle} />
     {message && <Toast>{message}</Toast>}
     {currentFirstError && <Toast>{currentFirstError}</Toast>}
     {firstLoading || !activePage && !currentFirstError ? <Skeleton className="asset-browser__skeleton" label="자산을 불러오는 중" /> : currentFirstError && items.length === 0 ? <EmptyState title="자산을 불러오지 못했습니다"><Button onClick={refresh}>다시 시도</Button></EmptyState> : items.length === 0 ? <EmptyState title="자산이 없습니다">여기에 이미지를 놓아 추가하세요.</EmptyState> : <AssetGallery items={items} selectedAssetId={selectedAsset?.id} metadataVisible={metadataVisible} hasNextPage={nextCursor !== null} onLoadNextPage={loadNextPage} onSelect={(asset) => { selectedViewKeyRef.current = asset ? viewKey : null; setSelectedAsset(asset); }} onOpen={(asset) => { detailViewKeyRef.current = viewKey; setDetailAsset(asset); }} />}
