@@ -146,6 +146,7 @@ describe("ClassificationSidebar", () => {
 
     await user.click(screen.getByRole("treeitem", { name: /Games/ }));
     await user.click(screen.getByRole("button", { name: "분류 추가" }));
+    expect(screen.getByRole("option", { name: "작품" })).toBeInTheDocument();
     await user.type(screen.getByLabelText("이름"), "New work");
     await user.click(screen.getByRole("button", { name: "추가" }));
     await waitFor(() => expect(fixtureGateway.createClassification).toHaveBeenLastCalledWith({ kind: "work", name: "New work", parentId: "root" }));

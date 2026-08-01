@@ -405,5 +405,5 @@ function moveParents(entry: ClassificationEntry, entries: ClassificationEntry[])
 }
 
 function kindLabel(kind: ClassificationKind): string {
-  return ({ root: "최상위 분류", work: "작업", tag: "태그" })[kind];
+  return ({ root: "최상위 분류", work: "작품", tag: "태그" })[kind];
 }
