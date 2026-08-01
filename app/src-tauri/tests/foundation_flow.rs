@@ -6,8 +6,8 @@ use std::{
 use app_lib::library::{
     error::LibraryError,
     models::{
-        AssetPage, AssetQuery, AssetSort, AssetSummary, ClassificationKind, CreateClassification,
-        IngestImageRequest, IngestOutcome, TrashPolicy,
+        AssetCursor, AssetPage, AssetQuery, AssetSort, AssetSummary, ClassificationKind,
+        CreateClassification, IngestImageRequest, IngestOutcome, TrashPolicy,
     },
     Library,
 };
@@ -456,6 +456,75 @@ fn empty_trash_preserves_records_when_a_managed_path_is_unsafe() {
             .collect::<Vec<_>>(),
         vec![classification.tag_id]
     );
+}
+
+#[test]
+fn empty_trash_keeps_a_partial_failure_until_a_missing_file_can_be_retried() {
+    let fixture = FoundationFixture::new();
+    let classification = fixture.create_game_work_tag();
+    let asset = fixture.ingest(&classification.tag_id);
+    let asset_path = fixture.library.root().join(&asset.relative_path);
+    let thumbnail_path = fixture.library.root().join(&asset.thumbnail_relative_path);
+    fixture.library.trash_asset(&asset.id).unwrap();
+    fs::remove_file(&thumbnail_path).unwrap();
+    fs::create_dir(&thumbnail_path).unwrap();
+
+    let failed = fixture.library.empty_trash().unwrap();
+
+    assert_eq!(failed.deleted_count, 0);
+    assert_eq!(failed.failed_asset_ids, vec![asset.id.clone()]);
+    assert!(!asset_path.exists());
+    assert!(thumbnail_path.is_dir());
+    assert_eq!(fixture.library.list_trash(None, 20).unwrap().items.len(), 1);
+    assert_eq!(
+        fixture
+            .library
+            .get_asset_classifications(&asset.id)
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.id)
+            .collect::<Vec<_>>(),
+        vec![classification.tag_id]
+    );
+
+    fs::remove_dir(&thumbnail_path).unwrap();
+    fs::write(&thumbnail_path, b"replacement thumbnail").unwrap();
+    let retried = fixture.library.empty_trash().unwrap();
+
+    assert_eq!(retried.deleted_count, 1);
+    assert!(retried.failed_asset_ids.is_empty());
+    assert!(fixture
+        .library
+        .list_trash(None, 20)
+        .unwrap()
+        .items
+        .is_empty());
+    assert!(fixture
+        .library
+        .get_asset_classifications(&asset.id)
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn list_trash_reuses_cursor_and_page_limit_validation() {
+    let fixture = FoundationFixture::new();
+
+    for limit in [0, 201] {
+        assert!(matches!(
+            fixture.library.list_trash(None, limit),
+            Err(LibraryError::InvalidAssetPageLimit)
+        ));
+    }
+    assert!(matches!(
+        fixture.library.list_trash(
+            Some(AssetCursor {
+                token: "not-a-trash-cursor".into(),
+            }),
+            20,
+        ),
+        Err(LibraryError::InvalidAssetCursor)
+    ));
 }
 
 #[test]

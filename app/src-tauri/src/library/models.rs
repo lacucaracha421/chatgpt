@@ -20,7 +20,9 @@ pub struct AssetSummary {
     pub id: String,
     pub title: Option<String>,
     pub original_name: String,
+    #[serde(skip_serializing)]
     pub relative_path: String,
+    #[serde(skip_serializing)]
     pub thumbnail_relative_path: String,
     pub byte_size: u64,
     pub width: u32,
@@ -129,4 +131,31 @@ pub struct CreateClassification {
 pub struct LibrarySummary {
     pub root: String,
     pub asset_count: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AssetSummary;
+
+    #[test]
+    fn asset_summary_serialization_omits_managed_paths() {
+        let asset = AssetSummary {
+            id: "asset-1".into(),
+            title: None,
+            original_name: "source.png".into(),
+            relative_path: "assets/aa/asset.png".into(),
+            thumbnail_relative_path: "thumbnails/aa/asset.webp".into(),
+            byte_size: 1,
+            width: 1,
+            height: 1,
+            collected_at: "2026-08-02T00:00:00Z".into(),
+            favorite: false,
+            source_url: None,
+        };
+
+        let value = serde_json::to_value(asset).unwrap();
+
+        assert!(value.get("relativePath").is_none());
+        assert!(value.get("thumbnailRelativePath").is_none());
+    }
 }
