@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DropSubscriber } from "../ingestion/useFileDrop";
@@ -7,6 +7,7 @@ import type {
   ClassificationEntry,
   LibraryGateway,
 } from "../library/types";
+import { UI_PREFERENCES_KEY } from "../preferences/uiPreferences";
 import { App } from "./App";
 
 const summary = { root: "C:\\Lakomics", assetCount: 0 };
@@ -63,7 +64,7 @@ describe("App", () => {
   beforeEach(() => localStorage.clear());
   afterEach(cleanup);
 
-  it("opens the selected library and shows its path", async () => {
+  it("opens the selected library and persists it", async () => {
     const user = userEvent.setup();
     const selectFolder = vi.fn().mockResolvedValue("C:\\Lakomics");
     const libraryGateway = gateway();
@@ -75,7 +76,7 @@ describe("App", () => {
     await waitFor(() =>
       expect(libraryGateway.openLibrary).toHaveBeenCalledWith("C:\\Lakomics"),
     );
-    expect(screen.getByText("C:\\Lakomics")).toBeInTheDocument();
+    expect(screen.getByRole("main", { name: "Library workspace" })).toBeInTheDocument();
     expect(localStorage.getItem("lakomics.libraryPath")).toBe("C:\\Lakomics");
   });
 
@@ -88,7 +89,139 @@ describe("App", () => {
     await waitFor(() =>
       expect(libraryGateway.openLibrary).toHaveBeenCalledWith("C:\\Lakomics"),
     );
-    expect(screen.getByText("C:\\Lakomics")).toBeInTheDocument();
+    expect(screen.getByRole("main", { name: "Library workspace" })).toBeInTheDocument();
+  });
+
+  it("renders the persistent four-region workspace when a library is restored", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    const libraryGateway = gateway();
+
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} />);
+
+    expect(await screen.findByRole("main", { name: "Library workspace" })).toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "Classification" })).toBeInTheDocument();
+    expect(screen.getByRole("contentinfo")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Lakomics" })).not.toBeInTheDocument();
+  });
+
+  it("ignores drops outside a concrete classification and explains how to enable them", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    let drop: ((paths: string[]) => void) | undefined;
+    const subscribeDrops: DropSubscriber = async (handler) => {
+      drop = handler;
+      return () => undefined;
+    };
+    const libraryGateway = gateway();
+    const user = userEvent.setup();
+
+    render(
+      <App
+        gateway={libraryGateway}
+        selectFolder={vi.fn()}
+        subscribeDrops={subscribeDrops}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Favorites" }));
+    await waitFor(() => expect(drop).toBeDefined());
+    act(() => drop?.(["C:\\images\\a.png"]));
+
+    expect(libraryGateway.ingestImage).not.toHaveBeenCalled();
+    expect(
+      screen.getByText("파일을 저장할 분류를 먼저 선택하세요."),
+    ).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Recent" }));
+    act(() => drop?.(["C:\\images\\recent.png"]));
+    await Promise.resolve();
+
+    await user.click(screen.getByRole("button", { name: "All assets" }));
+    act(() => drop?.(["C:\\images\\all-assets.png"]));
+    await Promise.resolve();
+
+    expect(libraryGateway.ingestImage).not.toHaveBeenCalled();
+  });
+
+  it("loads and saves the complete validated UI preference object", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({
+      metadataVisible: false,
+      sidebarWidth: 264,
+      expandedClassificationIds: ["root-games"],
+      assetSort: "oldest",
+    }));
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games, blueArchive]);
+    const user = userEvent.setup();
+
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} />);
+
+    const metadata = await screen.findByLabelText("Metadata");
+    expect(metadata).not.toBeChecked();
+    expect(screen.getByLabelText("Sort")).toHaveValue("oldest");
+    expect(screen.getByRole("complementary", { name: "Classification" })).toHaveStyle({ width: "264px" });
+
+    await user.selectOptions(screen.getByLabelText("Sort"), "random");
+    await user.click(metadata);
+    await user.click(screen.getByRole("button", { name: "Collapse 게임" }));
+    const resizeHandle = screen.getByRole("separator", { name: "Resize sidebar" });
+    Object.defineProperties(resizeHandle, {
+      setPointerCapture: { configurable: true, value: vi.fn() },
+      releasePointerCapture: { configurable: true, value: vi.fn() },
+    });
+    fireEvent.pointerDown(resizeHandle, { pointerId: 1, clientX: 100 });
+    fireEvent.pointerMove(resizeHandle, { pointerId: 1, clientX: 108 });
+    fireEvent.pointerUp(resizeHandle, { pointerId: 1 });
+
+    await waitFor(() =>
+      expect(JSON.parse(localStorage.getItem(UI_PREFERENCES_KEY) ?? "{}")).toEqual({
+        metadataVisible: true,
+        sidebarWidth: 272,
+        expandedClassificationIds: [],
+        assetSort: "random",
+      }),
+    );
+  });
+
+  it("clears transient drop-result feedback while keeping status in the status bar", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+      let drop: ((paths: string[]) => void) | undefined;
+      const subscribeDrops: DropSubscriber = async (handler) => {
+        drop = handler;
+        return () => undefined;
+      };
+      const libraryGateway = gateway();
+      vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games]);
+      let resolveIngest!: (value: { status: "added"; asset: AssetSummary }) => void;
+      const pendingIngest = new Promise<{ status: "added"; asset: AssetSummary }>((resolve) => {
+        resolveIngest = resolve;
+      });
+      vi.mocked(libraryGateway.ingestImage).mockReturnValue(pendingIngest);
+      const user = userEvent.setup();
+
+      render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={subscribeDrops} />);
+
+      await user.click(await screen.findByRole("treeitem", { name: "게임" }));
+      await waitFor(() => expect(drop).toBeDefined());
+      act(() => drop?.(["C:\\images\\a.png"]));
+      await waitFor(() => expect(libraryGateway.ingestImage).toHaveBeenCalledOnce());
+
+      vi.useFakeTimers();
+      try {
+        await act(async () => {
+          resolveIngest({ status: "added", asset });
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+        expect(screen.getByRole("status")).toBeVisible();
+
+        await act(async () => vi.advanceTimersByTimeAsync(5_000));
+
+        expect(screen.queryByRole("status")).not.toBeInTheDocument();
+        expect(screen.getByRole("contentinfo")).toHaveTextContent("이미지 파일을 창으로 끌어놓으세요.");
+      } finally {
+        vi.useRealTimers();
+      }
   });
 
   it("shows setup and an error when restoring the saved library fails", async () => {
@@ -200,11 +333,13 @@ describe("App", () => {
       return () => undefined;
     };
     const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games]);
     vi.mocked(libraryGateway.ingestImage).mockResolvedValue({
       status: "exact_duplicate",
       existingAssetId: "asset-existing",
     });
 
+    const user = userEvent.setup();
     render(
       <App
         gateway={libraryGateway}
@@ -213,10 +348,11 @@ describe("App", () => {
       />,
     );
 
+    await user.click(await screen.findByRole("treeitem", { name: "게임" }));
     await waitFor(() => expect(drop).toBeDefined());
     await waitFor(() =>
       expect(libraryGateway.listAssets).toHaveBeenCalledWith({
-        classificationId: null,
+        classificationId: "root-games",
         directOnly: false,
         favoriteOnly: false,
         sort: "newest",
@@ -235,7 +371,7 @@ describe("App", () => {
     );
     expect(libraryGateway.ingestImage).toHaveBeenCalledWith({
       sourcePath: "C:\\images\\duplicate.png",
-      classificationId: null,
+      classificationId: "root-games",
       sourceUrl: null,
     });
     expect(libraryGateway.listAssets).toHaveBeenCalledTimes(callsBeforeDrop);

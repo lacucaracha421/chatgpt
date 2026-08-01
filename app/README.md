@@ -1,21 +1,26 @@
 # Lakomics
 
-## 실행과 테스트
+Lakomics is a desktop media library for images.
 
-Node.js와 npm, Rust와 Cargo, Windows WebView2가 필요합니다.
+## Run and verify
+
+Node.js, npm, Rust, and Windows WebView2 are required.
 
 ```powershell
 npm install
 npm run tauri dev
 npm test
+npm run build
 Set-Location src-tauri
+cargo fmt --all --check
+cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 ```
 
-## 첫 사용
+## Current controls
 
-1. 라이브러리 폴더를 선택합니다.
-2. 상위 분류와 작품 또는 태그를 만듭니다.
-3. 사용할 분류 항목을 선택합니다.
-4. 이미지 파일을 창으로 끌어놓습니다.
-5. 같은 파일을 다시 놓아 완전 중복 알림을 확인합니다.
+- Navigate classifications from the sidebar; use each row menu to rename, move, or delete a classification.
+- Choose newest, oldest, favorites, or random sort. Use direct-only filtering for a classification view.
+- Toggle asset metadata from the toolbar.
+- Select an asset with one click and open its details with a double click.
+- Drop image files only while a concrete classification is selected.

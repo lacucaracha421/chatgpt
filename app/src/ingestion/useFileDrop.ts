@@ -27,6 +27,7 @@ export type DropProgress = { current: number; total: number };
 
 type UseFileDropOptions = {
   subscribe: DropSubscriber;
+  enabled: boolean;
   classificationId: string | null;
   ingestImage: LibraryGateway["ingestImage"];
   onResult: (result: FileDropResult) => void;
@@ -34,15 +35,16 @@ type UseFileDropOptions = {
 
 export function useFileDrop({
   subscribe,
+  enabled,
   classificationId,
   ingestImage,
   onResult,
 }: UseFileDropOptions): DropProgress | null {
   const [progress, setProgress] = useState<DropProgress | null>(null);
-  const optionsRef = useRef({ classificationId, ingestImage, onResult });
+  const optionsRef = useRef({ enabled, classificationId, ingestImage, onResult });
   useLayoutEffect(() => {
-    optionsRef.current = { classificationId, ingestImage, onResult };
-  }, [classificationId, ingestImage, onResult]);
+    optionsRef.current = { enabled, classificationId, ingestImage, onResult };
+  }, [classificationId, enabled, ingestImage, onResult]);
 
   useEffect(() => {
     let active = true;
@@ -52,10 +54,12 @@ export function useFileDrop({
     void subscribe((paths) => {
       if (!active) return;
       const {
+        enabled: dropEnabled,
         classificationId: dropClassificationId,
         ingestImage: ingestDroppedImage,
         onResult: reportResult,
       } = optionsRef.current;
+      if (!dropEnabled) return;
       pendingBatches += 1;
       queue = queue
         .then(async () => {

@@ -35,8 +35,65 @@ input:disabled {
 
 .app-shell {
   display: grid;
-  grid-template-columns: minmax(14rem, 1fr) minmax(0, 4fr);
-  gap: var(--space-4);
+  grid-template-rows: minmax(0, 1fr) var(--statusbar-height);
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+.app-shell__workspace {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  min-height: 0;
+}
+
+.app-shell__content {
+  min-width: 0;
+  overflow: auto;
+}
+
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: 0 var(--space-3);
+  color: var(--color-muted);
+  background: var(--color-toolbar);
+  border-top: var(--border-width) solid var(--color-border);
+  font-size: 0.75rem;
+}
+
+.status-bar span:last-child {
+  margin-left: auto;
+}
+
+.setup-screen {
+  display: grid;
+  min-height: 100vh;
+  padding: var(--space-4);
+  place-items: center;
+}
+
+.setup-screen__panel {
+  display: grid;
+  gap: var(--space-3);
+  width: min(100%, 28rem);
+  padding: var(--space-6);
+  background: var(--color-surface);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.setup-screen__panel h1,
+.setup-screen__panel p {
+  margin: 0;
+}
+
+.setup-screen__error {
+  padding: var(--space-2);
+  color: var(--color-danger);
+  background: var(--color-surface-hover);
+  border-radius: var(--radius-sm);
 }
 
 .ui-button,

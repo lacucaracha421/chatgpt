@@ -42,10 +42,10 @@ function deferred<T>() {
 
 it("ingests dropped paths with the selected classification", async () => {
   let drop: ((paths: string[]) => void) | undefined;
-  const subscribe: DropSubscriber = async (handler) => {
+  const subscribe = vi.fn<DropSubscriber>(async (handler) => {
     drop = handler;
     return () => undefined;
-  };
+  });
   const ingestImage = vi.fn().mockResolvedValue({
     status: "added",
     asset: fixtureAsset,
@@ -53,6 +53,7 @@ it("ingests dropped paths with the selected classification", async () => {
 
   renderHook(() =>
     useFileDrop({
+      enabled: true,
       subscribe,
       classificationId: "tag-arona",
       ingestImage,
@@ -69,6 +70,50 @@ it("ingests dropped paths with the selected classification", async () => {
       sourceUrl: null,
     }),
   );
+});
+
+it("ignores disabled drops and accepts the next drop after being enabled", async () => {
+  let drop: ((paths: string[]) => void) | undefined;
+  const subscribe = vi.fn<DropSubscriber>(async (handler) => {
+    drop = handler;
+    return () => undefined;
+  });
+  const ingestImage = vi.fn().mockResolvedValue({
+    status: "added",
+    asset: fixtureAsset,
+  });
+  const onResult = vi.fn();
+  const { rerender, result } = renderHook(
+    ({ enabled }: { enabled: boolean }) =>
+      useFileDrop({
+        subscribe,
+        enabled,
+        classificationId: "tag-arona",
+        ingestImage,
+        onResult,
+      }),
+    { initialProps: { enabled: false } },
+  );
+
+  await waitFor(() => expect(drop).toBeDefined());
+  act(() => drop?.(["C:\\images\\ignored.png"]));
+  await Promise.resolve();
+
+  expect(ingestImage).not.toHaveBeenCalled();
+  expect(onResult).not.toHaveBeenCalled();
+  expect(result.current).toBeNull();
+
+  rerender({ enabled: true });
+  act(() => drop?.(["C:\\images\\accepted.png"]));
+
+  await waitFor(() =>
+    expect(ingestImage).toHaveBeenCalledWith({
+      sourcePath: "C:\\images\\accepted.png",
+      classificationId: "tag-arona",
+      sourceUrl: null,
+    }),
+  );
+  expect(subscribe).toHaveBeenCalledOnce();
 });
 
 it("ingests files from one drop sequentially", async () => {
@@ -88,6 +133,7 @@ it("ingests files from one drop sequentially", async () => {
 
   renderHook(() =>
     useFileDrop({
+      enabled: true,
       subscribe,
       classificationId: null,
       ingestImage,
@@ -131,6 +177,7 @@ it("reports an ingest error and continues with the next file", async () => {
 
   renderHook(() =>
     useFileDrop({
+      enabled: true,
       subscribe,
       classificationId: null,
       ingestImage,
@@ -164,6 +211,7 @@ it("reports added and exact duplicate outcomes with their user messages", async 
 
   renderHook(() =>
     useFileDrop({
+      enabled: true,
       subscribe,
       classificationId: null,
       ingestImage,
@@ -201,6 +249,7 @@ it("reports the current file and total while a drop is processing", async () => 
 
   const { result } = renderHook(() =>
     useFileDrop({
+      enabled: true,
       subscribe,
       classificationId: null,
       ingestImage,
@@ -257,6 +306,7 @@ it("queues overlapping drops in arrival order without clearing progress", async 
   const { result, rerender } = renderHook(
     ({ classificationId }: { classificationId: string | null }) => {
       const progress = useFileDrop({
+        enabled: true,
         subscribe,
         classificationId,
         ingestImage,
@@ -335,6 +385,7 @@ it("uses the current classification for a new drop without resubscribing", async
   const { rerender } = renderHook(
     ({ classificationId }: { classificationId: string | null }) =>
       useFileDrop({
+        enabled: true,
         subscribe,
         classificationId,
         ingestImage,
@@ -372,6 +423,7 @@ it("keeps the classification captured when a drop starts", async () => {
   const { rerender } = renderHook(
     ({ classificationId }: { classificationId: string | null }) =>
       useFileDrop({
+        enabled: true,
         subscribe,
         classificationId,
         ingestImage,
@@ -400,6 +452,7 @@ it("unlistens an immediately established subscription on unmount", async () => {
 
   const { unmount } = renderHook(() =>
     useFileDrop({
+      enabled: true,
       subscribe,
       classificationId: null,
       ingestImage: vi.fn(),
@@ -424,6 +477,7 @@ it("unlistens when subscription setup finishes after unmount", async () => {
 
   const { unmount } = renderHook(() =>
     useFileDrop({
+      enabled: true,
       subscribe,
       classificationId: null,
       ingestImage: vi.fn(),
@@ -452,6 +506,7 @@ it("stops progress and result callbacks after unmount", async () => {
 
   const { unmount } = renderHook(() =>
     useFileDrop({
+      enabled: true,
       subscribe,
       classificationId: null,
       ingestImage,
@@ -478,6 +533,7 @@ it("reports a drop subscription error while mounted", async () => {
 
   renderHook(() =>
     useFileDrop({
+      enabled: true,
       subscribe: vi.fn().mockRejectedValue({
         code: "drop_subscription_failed",
         message: "끌어놓기를 시작할 수 없습니다.",

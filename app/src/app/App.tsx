@@ -1,3 +1,14 @@
+import { useCallback, useEffect, useState } from "react";
+import { AssetBrowser, type AssetBrowserStatus } from "../assets/AssetBrowser";
+import { ClassificationSidebar } from "../classification/ClassificationSidebar";
+import {
+  type DropSubscriber,
+  type FileDropResult,
+  subscribeToTauriDrops,
+  useFileDrop,
+} from "../ingestion/useFileDrop";
+import { AppShell } from "../layout/AppShell";
+import { StatusBar } from "../layout/StatusBar";
 import { libraryGateway } from "../library/client";
 import { LibraryProvider, useLibrary } from "../library/LibraryContext";
 import {
@@ -5,16 +16,12 @@ import {
   selectLibraryFolder,
   type FolderPicker,
 } from "../library/LibrarySetup";
-import { useCallback, useEffect, useState } from "react";
-import { ClassificationSidebar } from "../classification/ClassificationSidebar";
 import type { AssetSort, AssetView, ClassificationEntry, LibraryGateway } from "../library/types";
-import { AssetBrowser } from "../assets/AssetBrowser";
 import {
-  type DropSubscriber,
-  type FileDropResult,
-  subscribeToTauriDrops,
-  useFileDrop,
-} from "../ingestion/useFileDrop";
+  loadUiPreferences,
+  saveUiPreferences,
+  type UiPreferences,
+} from "../preferences/uiPreferences";
 import { Toast } from "../shared/ui/Toast";
 
 type AppProps = {
@@ -30,10 +37,7 @@ export function App({
 }: AppProps) {
   return (
     <LibraryProvider gateway={gateway}>
-      <LibraryScreen
-        selectFolder={selectFolder}
-        subscribeDrops={subscribeDrops}
-      />
+      <LibraryScreen selectFolder={selectFolder} subscribeDrops={subscribeDrops} />
     </LibraryProvider>
   );
 }
@@ -47,40 +51,37 @@ function LibraryScreen({
 }) {
   const { library } = useLibrary();
 
-  if (!library) {
-    return <LibrarySetup selectFolder={selectFolder} />;
-  }
-  return <LibraryWorkspace subscribeDrops={subscribeDrops} />;
+  return library
+    ? <LibraryWorkspace subscribeDrops={subscribeDrops} />
+    : <LibrarySetup selectFolder={selectFolder} />;
 }
 
-function LibraryWorkspace({
-  subscribeDrops,
-}: {
-  subscribeDrops: DropSubscriber;
-}) {
-  const { gateway, library } = useLibrary();
+function LibraryWorkspace({ subscribeDrops }: { subscribeDrops: DropSubscriber }) {
+  const { gateway } = useLibrary();
   const [entries, setEntries] = useState<ClassificationEntry[]>([]);
   const [view, setView] = useState<AssetView>({
     kind: "classification",
     classificationId: null,
   });
-  const [expandedIds, setExpandedIds] = useState<string[]>([]);
-  const [sidebarWidth, setSidebarWidth] = useState(232);
+  const [preferences, setPreferences] = useState<UiPreferences>(loadUiPreferences);
   const [message, setMessage] = useState<string | null>(null);
   const [assetRefresh, setAssetRefresh] = useState(0);
-  const [assetSort, setAssetSort] = useState<AssetSort>("newest");
-  const [metadataVisible, setMetadataVisible] = useState(false);
+  const [browserStatus, setBrowserStatus] = useState<AssetBrowserStatus>({
+    loadedCount: 0,
+    selectedAsset: null,
+    loading: true,
+  });
   const refreshClassifications = useCallback(async () => {
     setEntries(await gateway.listClassifications());
   }, [gateway]);
   const handleDropResult = useCallback((result: FileDropResult) => {
     setMessage(result.message);
-    if (result.status === "added") {
-      setAssetRefresh((current) => current + 1);
-    }
+    if (result.status === "added") setAssetRefresh((current) => current + 1);
   }, []);
+  const dropEnabled = view.kind === "classification" && view.classificationId !== null;
   const progress = useFileDrop({
     subscribe: subscribeDrops,
+    enabled: dropEnabled,
     classificationId: view.kind === "classification" ? view.classificationId : null,
     ingestImage: gateway.ingestImage,
     onResult: handleDropResult,
@@ -89,41 +90,49 @@ function LibraryWorkspace({
   useEffect(() => {
     void refreshClassifications();
   }, [refreshClassifications]);
+  useEffect(() => {
+    saveUiPreferences(preferences);
+  }, [preferences]);
+  useEffect(() => {
+    if (!message) return;
+    const timer = window.setTimeout(() => setMessage(null), 5_000);
+    return () => window.clearTimeout(timer);
+  }, [message]);
+
+  function updatePreferences(update: Partial<UiPreferences>) {
+    setPreferences((current) => ({ ...current, ...update }));
+  }
 
   return (
-    <main>
-      <h1>Lakomics</h1>
-      <p>{library?.root}</p>
-      <section aria-label="파일 끌어놓기">
-        <p>
-          {progress
-            ? `${progress.total}개 중 ${progress.current}번째 파일을 처리하고 있습니다.`
-            : "이미지 파일을 창으로 끌어놓으세요."}
-        </p>
-        {message && <Toast>{message}</Toast>}
-      </section>
-      <div className="app-shell">
+    <AppShell
+      sidebar={
         <ClassificationSidebar
           entries={entries}
           view={view}
-          expandedIds={expandedIds}
-          sidebarWidth={sidebarWidth}
+          expandedIds={preferences.expandedClassificationIds}
+          sidebarWidth={preferences.sidebarWidth}
           onViewChange={setView}
-          onExpandedIdsChange={setExpandedIds}
-          onSidebarWidthChange={setSidebarWidth}
+          onExpandedIdsChange={(expandedClassificationIds) =>
+            updatePreferences({ expandedClassificationIds })
+          }
+          onSidebarWidthChange={(sidebarWidth) => updatePreferences({ sidebarWidth })}
           onChanged={() => void refreshClassifications()}
         />
+      }
+      content={<>
         <AssetBrowser
           view={view}
           classifications={entries}
-          sort={assetSort}
-          metadataVisible={metadataVisible}
+          sort={preferences.assetSort}
+          metadataVisible={preferences.metadataVisible}
           refreshVersion={assetRefresh}
-          onSortChange={setAssetSort}
-          onMetadataVisibleChange={setMetadataVisible}
-          onStatusChange={() => undefined}
+          onSortChange={(assetSort: AssetSort) => updatePreferences({ assetSort })}
+          onMetadataVisibleChange={(metadataVisible) => updatePreferences({ metadataVisible })}
+          onStatusChange={setBrowserStatus}
         />
-      </div>
-    </main>
+        {message && <Toast>{message}</Toast>}
+      </>}
+      status={<StatusBar status={browserStatus} progress={progress} dropEnabled={dropEnabled} />}
+    />
   );
 }

@@ -12,19 +12,15 @@ export function LibrarySetup({ selectFolder = selectLibraryFolder }: { selectFol
 
   async function select() {
     const path = await selectFolder();
-    if (typeof path === "string") {
-      await openLibrary(path);
-    }
+    if (typeof path === "string") await openLibrary(path);
   }
 
-  return (
-    <main className="setup-screen">
-      <h1>Lakomics</h1>
-      <p>개인 미디어 라이브러리를 선택해주세요.</p>
-      {error && <p role="alert">{error}</p>}
-      <Button type="button" onClick={() => void select()}>
-        라이브러리 선택
-      </Button>
-    </main>
-  );
+  return <main className="setup-screen">
+    <section className="setup-screen__panel" aria-labelledby="setup-title">
+      <h1 id="setup-title">Lakomics</h1>
+      <p>개인 미디어 라이브러리를 선택해 주세요.</p>
+      {error && <p className="setup-screen__error" role="alert">{error}</p>}
+      <Button type="button" onClick={() => void select()}>라이브러리 선택</Button>
+    </section>
+  </main>;
 }
