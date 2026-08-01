@@ -7,8 +7,8 @@ import {
 } from "../library/LibrarySetup";
 import { useCallback, useEffect, useState } from "react";
 import { ClassificationSidebar } from "../classification/ClassificationSidebar";
-import type { AssetView, ClassificationEntry, LibraryGateway } from "../library/types";
-import { AssetBrowser } from "../assets/AssetGallery";
+import type { AssetSort, AssetView, ClassificationEntry, LibraryGateway } from "../library/types";
+import { AssetBrowser } from "../assets/AssetBrowser";
 import {
   type DropSubscriber,
   type FileDropResult,
@@ -68,6 +68,8 @@ function LibraryWorkspace({
   const [sidebarWidth, setSidebarWidth] = useState(232);
   const [message, setMessage] = useState<string | null>(null);
   const [assetRefresh, setAssetRefresh] = useState(0);
+  const [assetSort, setAssetSort] = useState<AssetSort>("newest");
+  const [metadataVisible, setMetadataVisible] = useState(false);
   const refreshClassifications = useCallback(async () => {
     setEntries(await gateway.listClassifications());
   }, [gateway]);
@@ -112,9 +114,14 @@ function LibraryWorkspace({
           onChanged={() => void refreshClassifications()}
         />
         <AssetBrowser
-          classificationId={view.kind === "classification" ? view.classificationId : null}
+          view={view}
           classifications={entries}
+          sort={assetSort}
+          metadataVisible={metadataVisible}
           refreshVersion={assetRefresh}
+          onSortChange={setAssetSort}
+          onMetadataVisibleChange={setMetadataVisible}
+          onStatusChange={() => undefined}
         />
       </div>
     </main>
