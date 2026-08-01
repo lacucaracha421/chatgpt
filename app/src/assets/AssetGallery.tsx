@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import { useLibrary } from "../library/LibraryContext";
+import { ASSET_PAGE_SIZE } from "../library/constants";
 import { commandErrorMessage } from "../library/errorMessage";
 import type {
   AssetCursor,
@@ -20,7 +21,6 @@ import { Toast } from "../shared/ui/Toast";
 import { buildJustifiedRows } from "./justifiedRows";
 import { assetUrl, thumbnailUrl } from "./mediaUrl";
 
-const PAGE_SIZE = 100;
 const TARGET_ROW_HEIGHT = 180;
 const VIRTUAL_OVERSCAN_ROWS = 3;
 const NEXT_PAGE_THRESHOLD_ROWS = 5;
@@ -61,8 +61,11 @@ export function AssetBrowser({
       .listAssets({
         classificationId,
         directOnly,
+        favoriteOnly: false,
+        sort: "newest",
+        randomPivot: null,
         after: null,
-        limit: PAGE_SIZE,
+        limit: ASSET_PAGE_SIZE,
       })
       .then((page) => {
         if (generation !== generationRef.current) return;
@@ -95,8 +98,11 @@ export function AssetBrowser({
       .listAssets({
         classificationId,
         directOnly,
+        favoriteOnly: false,
+        sort: "newest",
+        randomPivot: null,
         after: cursor,
-        limit: PAGE_SIZE,
+        limit: ASSET_PAGE_SIZE,
       })
       .then((page) => {
         if (generation !== generationRef.current) return;

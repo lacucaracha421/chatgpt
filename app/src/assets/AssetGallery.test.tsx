@@ -116,6 +116,9 @@ describe("AssetGallery", () => {
       expect(libraryGateway.listAssets).toHaveBeenCalledWith({
         classificationId: "root",
         directOnly: false,
+        favoriteOnly: false,
+        sort: "newest",
+        randomPivot: null,
         after: null,
         limit: 100,
       }),
@@ -126,6 +129,9 @@ describe("AssetGallery", () => {
       expect(libraryGateway.listAssets).toHaveBeenCalledWith({
         classificationId: "root",
         directOnly: true,
+        favoriteOnly: false,
+        sort: "newest",
+        randomPivot: null,
         after: null,
         limit: 100,
       }),
@@ -140,6 +146,9 @@ describe("AssetGallery", () => {
       expect(libraryGateway.listAssets).toHaveBeenCalledWith({
         classificationId: "other",
         directOnly: true,
+        favoriteOnly: false,
+        sort: "newest",
+        randomPivot: null,
         after: null,
         limit: 100,
       }),
@@ -150,8 +159,7 @@ describe("AssetGallery", () => {
     const first: AssetPage = {
       items: Array.from({ length: 50 }, (_, index) => asset(index)),
       nextCursor: {
-        collectedAt: "2026-07-30T00:00:00Z",
-        id: "asset-49",
+        token: "asset-49",
       },
     };
     const pending = new Promise<AssetPage>(() => {});
@@ -170,6 +178,9 @@ describe("AssetGallery", () => {
     expect(libraryGateway.listAssets).toHaveBeenLastCalledWith({
       classificationId: null,
       directOnly: false,
+      favoriteOnly: false,
+      sort: "newest",
+      randomPivot: null,
       after: first.nextCursor,
       limit: 100,
     });
@@ -181,8 +192,7 @@ describe("AssetGallery", () => {
     const first: AssetPage = {
       items: Array.from({ length: 50 }, (_, index) => asset(index)),
       nextCursor: {
-        collectedAt: "2026-07-30T00:00:00Z",
-        id: "asset-49",
+        token: "asset-49",
       },
     };
     const libraryGateway = gateway();
@@ -346,6 +356,7 @@ function asset(index: number): AssetSummary {
     height: 200,
     collectedAt: "2026-07-30T00:00:00Z",
     favorite: false,
+    sourceUrl: null,
   };
 }
 
@@ -359,6 +370,7 @@ function gateway(): LibraryGateway {
     moveClassification: vi.fn(),
     deleteClassification: vi.fn(),
     listAssets: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
+    setAssetFavorite: vi.fn(),
     setAssetClassifications: vi.fn(),
     getAssetClassifications: vi.fn().mockResolvedValue([]),
     ingestImage: vi.fn(),

@@ -21,6 +21,7 @@ const asset: AssetSummary = {
   height: 300,
   collectedAt: "2026-07-30T00:00:00Z",
   favorite: false,
+  sourceUrl: null,
 };
 const otherAsset: AssetSummary = {
   ...asset,
@@ -281,6 +282,7 @@ function gateway(): LibraryGateway {
     moveClassification: vi.fn(),
     deleteClassification: vi.fn(),
     listAssets: vi.fn(),
+    setAssetFavorite: vi.fn(),
     setAssetClassifications: vi.fn().mockResolvedValue(undefined),
     getAssetClassifications: vi.fn().mockResolvedValue([]),
     ingestImage: vi.fn(),

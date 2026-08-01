@@ -39,6 +39,7 @@ const asset: AssetSummary = {
   height: 6,
   collectedAt: "2026-07-31T00:00:00Z",
   favorite: false,
+  sourceUrl: null,
 };
 
 function gateway(): LibraryGateway {
@@ -51,6 +52,7 @@ function gateway(): LibraryGateway {
     moveClassification: vi.fn(),
     deleteClassification: vi.fn(),
     listAssets: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
+    setAssetFavorite: vi.fn(),
     setAssetClassifications: vi.fn(),
     getAssetClassifications: vi.fn(),
     ingestImage: vi.fn(),
@@ -147,6 +149,9 @@ describe("App", () => {
       expect(libraryGateway.listAssets).toHaveBeenLastCalledWith({
         classificationId: "tag-arona",
         directOnly: false,
+        favoriteOnly: false,
+        sort: "newest",
+        randomPivot: null,
         after: null,
         limit: 100,
       }),
@@ -179,6 +184,9 @@ describe("App", () => {
     expect(libraryGateway.listAssets).toHaveBeenLastCalledWith({
       classificationId: "tag-arona",
       directOnly: false,
+      favoriteOnly: false,
+      sort: "newest",
+      randomPivot: null,
       after: null,
       limit: 100,
     });
@@ -210,6 +218,9 @@ describe("App", () => {
       expect(libraryGateway.listAssets).toHaveBeenCalledWith({
         classificationId: null,
         directOnly: false,
+        favoriteOnly: false,
+        sort: "newest",
+        randomPivot: null,
         after: null,
         limit: 100,
       }),

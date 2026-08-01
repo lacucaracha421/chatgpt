@@ -24,6 +24,8 @@ export const libraryGateway: LibraryGateway = {
   deleteClassification: (id) => invoke("delete_classification", { id }),
   listAssets: (query: AssetQuery) =>
     invoke<AssetPage>("list_assets", { query }),
+  setAssetFavorite: (assetId, favorite) =>
+    invoke("set_asset_favorite", { assetId, favorite }),
   setAssetClassifications: (assetId, classificationIds) =>
     invoke("set_asset_classifications", { assetId, classificationIds }),
   getAssetClassifications: (assetId) =>

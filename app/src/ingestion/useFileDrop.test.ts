@@ -29,6 +29,7 @@ const fixtureAsset: AssetSummary = {
   height: 6,
   collectedAt: "2026-07-31T00:00:00Z",
   favorite: false,
+  sourceUrl: null,
 };
 
 function deferred<T>() {
