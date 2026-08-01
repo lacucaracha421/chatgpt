@@ -20,13 +20,27 @@ pub(crate) fn create_verified_snapshot(
             path: destination.to_path_buf(),
             source,
         })?;
-    source
-        .backup(MAIN_DB, destination, None)
-        .map_err(|source| LibraryError::Backup {
+    let result = (|| {
+        run_after_reservation_hook(destination)?;
+        source
+            .backup(MAIN_DB, destination, None)
+            .map_err(|source| LibraryError::Backup {
+                path: destination.to_path_buf(),
+                source: std::io::Error::other(source),
+            })?;
+        verify_snapshot(destination)
+    })();
+    if result.is_err() {
+        fs::remove_file(destination).map_err(|source| LibraryError::Backup {
             path: destination.to_path_buf(),
-            source: std::io::Error::other(source),
+            source,
         })?;
+    }
 
+    result
+}
+
+fn verify_snapshot(destination: &Path) -> Result<(), LibraryError> {
     let snapshot = Connection::open(destination).map_err(|source| LibraryError::Backup {
         path: destination.to_path_buf(),
         source: std::io::Error::other(source),
@@ -44,22 +58,44 @@ pub(crate) fn create_verified_snapshot(
             source: std::io::Error::other(source),
         })?;
     if quick_check != "ok" || !(1..=db::SCHEMA_VERSION).contains(&version) {
-        drop(snapshot);
-        fs::remove_file(destination).map_err(|source| LibraryError::Backup {
-            path: destination.to_path_buf(),
-            source,
-        })?;
         return Err(LibraryError::InvalidBackup);
     }
+    Ok(())
+}
 
+#[cfg(test)]
+type AfterReservationHook = Box<dyn FnOnce(&Path) -> Result<(), LibraryError>>;
+
+#[cfg(test)]
+thread_local! {
+    static AFTER_RESERVATION_HOOK: std::cell::RefCell<Option<AfterReservationHook>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn set_after_reservation_hook(hook: impl FnOnce(&Path) -> Result<(), LibraryError> + 'static) {
+    AFTER_RESERVATION_HOOK.with(|stored_hook| *stored_hook.borrow_mut() = Some(Box::new(hook)));
+}
+
+#[cfg(test)]
+fn run_after_reservation_hook(destination: &Path) -> Result<(), LibraryError> {
+    AFTER_RESERVATION_HOOK.with(|stored_hook| {
+        stored_hook
+            .borrow_mut()
+            .take()
+            .map_or(Ok(()), |hook| hook(destination))
+    })
+}
+
+#[cfg(not(test))]
+fn run_after_reservation_hook(_destination: &Path) -> Result<(), LibraryError> {
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{fs, io};
 
-    use super::create_verified_snapshot;
+    use super::{create_verified_snapshot, set_after_reservation_hook};
     use crate::library::{db, error::LibraryError};
 
     #[test]
@@ -101,6 +137,25 @@ mod tests {
 
         assert!(matches!(error, LibraryError::Backup { .. }));
         assert_eq!(fs::read_to_string(destination).unwrap(), "keep this backup");
+    }
+
+    #[test]
+    fn verified_snapshot_removes_the_destination_after_a_post_reservation_failure() {
+        let temp = tempfile::tempdir().unwrap();
+        let destination = temp.path().join("snapshot.sqlite");
+        let destination_for_hook = destination.clone();
+        set_after_reservation_hook(move |_| {
+            Err(LibraryError::Backup {
+                path: destination_for_hook,
+                source: io::Error::other("simulated backup failure"),
+            })
+        });
+
+        let source = rusqlite::Connection::open_in_memory().unwrap();
+        let error = create_verified_snapshot(&source, &destination).unwrap_err();
+
+        assert!(matches!(error, LibraryError::Backup { .. }));
+        assert!(!destination.exists());
     }
 
     #[test]

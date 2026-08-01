@@ -54,12 +54,12 @@ impl Library {
             path: root.clone(),
             source,
         })?;
+        let lease = Arc::new(LibraryLease::acquire(&root)?);
         for name in ["assets", "thumbnails", "trash", "backups"] {
             let path = root.join(name);
             fs::create_dir_all(&path)
                 .map_err(|source| LibraryError::CreateDirectory { path, source })?;
         }
-        let lease = Arc::new(LibraryLease::acquire(&root)?);
         db::open_database(&root.join("library.sqlite"))?;
         Ok(Self {
             root,
@@ -152,15 +152,23 @@ fn mime_for_path(path: &Path) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::{error::LibraryError, Library};
 
     #[test]
     fn second_library_open_is_rejected_until_the_first_is_dropped() {
         let temp = tempfile::tempdir().unwrap();
         let first = Library::open(temp.path()).unwrap();
+        let removed_directory = temp.path().join("assets");
+        fs::remove_dir(&removed_directory).unwrap();
 
         let error = Library::open(temp.path()).unwrap_err();
         assert!(matches!(error, LibraryError::LibraryInUse));
+        assert!(
+            !removed_directory.exists(),
+            "a rejected opener recreated a layout directory"
+        );
 
         drop(first);
         Library::open(temp.path()).unwrap();

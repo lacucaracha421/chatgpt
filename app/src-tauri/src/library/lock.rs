@@ -18,19 +18,36 @@ impl LibraryLease {
         #[cfg(windows)]
         std::os::windows::fs::OpenOptionsExt::share_mode(&mut options, 0);
 
-        options
+        let file = options
             .open(&path)
-            .map(|file| Self { _file: file })
-            .map_err(|source| {
-                if matches!(
-                    source.kind(),
-                    std::io::ErrorKind::AlreadyExists | std::io::ErrorKind::PermissionDenied
-                ) || source.raw_os_error() == Some(32)
-                {
-                    LibraryError::LibraryInUse
-                } else {
-                    LibraryError::LibraryLock { path, source }
-                }
-            })
+            .map_err(|source| map_lock_error(&path, source))?;
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::fd::AsRawFd;
+
+            // SAFETY: `file` remains open for the full lifetime of the lease.
+            if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+                return Err(map_lock_error(&path, std::io::Error::last_os_error()));
+            }
+        }
+
+        Ok(Self { _file: file })
+    }
+}
+
+fn map_lock_error(path: &Path, source: std::io::Error) -> LibraryError {
+    if matches!(
+        source.kind(),
+        std::io::ErrorKind::AlreadyExists
+            | std::io::ErrorKind::PermissionDenied
+            | std::io::ErrorKind::WouldBlock
+    ) || source.raw_os_error() == Some(32)
+    {
+        LibraryError::LibraryInUse
+    } else {
+        LibraryError::LibraryLock {
+            path: path.to_path_buf(),
+            source,
+        }
     }
 }
