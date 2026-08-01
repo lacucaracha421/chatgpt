@@ -23,19 +23,19 @@ export function AssetToolbar({
   onDirectOnlyChange, onMetadataVisibleChange, onFavorite, onReshuffle,
 }: AssetToolbarProps) {
   const recent = view.kind === "recent";
-  const location = view.kind === "favorites" ? "Favorites" : recent ? "Recent" : classifications.find((entry) => entry.id === view.classificationId)?.name ?? "Assets";
+  const location = view.kind === "favorites" ? "즐겨찾기" : recent ? "최근" : classifications.find((entry) => entry.id === view.classificationId)?.name ?? "전체 자산";
   return (
     <header className="asset-toolbar">
       <h2>{location}</h2>
       <div className="asset-toolbar__controls">
-        <Select label="Sort" value={recent ? "newest" : sort} disabled={recent} onChange={(event) => onSortChange(event.target.value as AssetSort)}>
-          <option value="newest">Newest</option><option value="oldest">Oldest</option>
-          <option value="favorites">Favorites</option><option value="random">Random</option>
+        <Select label="정렬" value={recent ? "newest" : sort} disabled={recent} onChange={(event) => onSortChange(event.target.value as AssetSort)}>
+          <option value="newest">최신순</option><option value="oldest">오래된순</option>
+          <option value="favorites">좋아요순</option><option value="random">랜덤</option>
         </Select>
-        {view.kind === "classification" && <Toggle checked={directOnly} onChange={(event) => onDirectOnlyChange(event.target.checked)}>Direct only</Toggle>}
-        <Toggle checked={metadataVisible} onChange={(event) => onMetadataVisibleChange(event.target.checked)}>Metadata</Toggle>
-        {selectedAsset && <Button size="icon" aria-label={selectedAsset.favorite ? "Remove favorite" : "Add favorite"} onClick={onFavorite}><Star aria-hidden="true" fill={selectedAsset.favorite ? "currentColor" : "none"} /></Button>}
-        {sort === "random" && !recent && <Button size="icon" aria-label="Reshuffle" onClick={onReshuffle}><Shuffle aria-hidden="true" /></Button>}
+        {view.kind === "classification" && <Toggle checked={directOnly} onChange={(event) => onDirectOnlyChange(event.target.checked)}>이 분류만</Toggle>}
+        <Toggle checked={metadataVisible} onChange={(event) => onMetadataVisibleChange(event.target.checked)}>정보 표시</Toggle>
+        {selectedAsset && <Button size="icon" aria-label={selectedAsset.favorite ? "좋아요 끄기" : "좋아요 켜기"} onClick={onFavorite}><Star aria-hidden="true" fill={selectedAsset.favorite ? "currentColor" : "none"} /></Button>}
+        {sort === "random" && !recent && <Button size="icon" aria-label="다시 섞기" onClick={onReshuffle}><Shuffle aria-hidden="true" /></Button>}
       </div>
     </header>
   );

@@ -1,9 +1,12 @@
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+// @ts-ignore Vitest runs in Node, but this frontend project intentionally omits Node typings.
+import { readFileSync } from "node:fs";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { AssetPage, AssetSort, AssetView, ClassificationEntry, LibraryGateway } from "../library/types";
 import { AssetBrowser, type AssetBrowserStatus } from "./AssetBrowser";
+const styles = readFileSync("src/styles/global.css", "utf8");
 
 const classifications: ClassificationEntry[] = [];
 
@@ -15,7 +18,7 @@ beforeEach(() => Object.defineProperties(HTMLElement.prototype, {
   clientHeight: { configurable: true, get: () => 600 },
 }));
 beforeEach(() => Object.defineProperties(HTMLDialogElement.prototype, {
-  showModal: { configurable: true, value(this: HTMLDialogElement) { this.setAttribute("open", ""); } },
+  showModal: { configurable: true, value(this: HTMLDialogElement) { this.setAttribute("open", ""); this.querySelector<HTMLButtonElement>(".ui-dialog__actions button")?.focus(); } },
   close: { configurable: true, value(this: HTMLDialogElement) { this.removeAttribute("open"); } },
 }));
 
@@ -101,14 +104,14 @@ describe("AssetBrowser", () => {
     );
 
     expect(await screen.findByRole("img", { name: "asset-0.png" })).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "다시 시도" })).toBeInTheDocument();
   });
 
   it("maps direct-only and every selectable sort", async () => {
     const user = userEvent.setup();
     const gateway = createGateway();
     const { rerender } = renderBrowser(gateway);
-    await user.click(await screen.findByRole("checkbox", { name: "Direct only" }));
+    await user.click(await screen.findByRole("checkbox", { name: "이 분류만" }));
     await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(expect.objectContaining({ directOnly: true, sort: "newest" })));
     for (const sort of ["oldest", "favorites", "random"] as const) {
       rerender(browserElement(gateway, { sort }));
@@ -121,7 +124,7 @@ describe("AssetBrowser", () => {
     renderBrowser(gateway, { sort: "random" });
     await waitFor(() => expect(gateway.listAssets).toHaveBeenCalled());
     const first = vi.mocked(gateway.listAssets).mock.calls[0]![0].randomPivot;
-    await user.click(screen.getByRole("button", { name: "Reshuffle" }));
+    await user.click(screen.getByRole("button", { name: "다시 섞기" }));
     await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledTimes(2));
     expect(vi.mocked(gateway.listAssets).mock.calls[1]![0].randomPivot).not.toBe(first);
   });
@@ -179,7 +182,7 @@ describe("AssetBrowser", () => {
     const user = userEvent.setup(); const gateway = createGateway();
     vi.mocked(gateway.listAssets).mockRejectedValueOnce(new Error("first page failed")).mockResolvedValueOnce({ items: [{ ...asset(0), title: "Recovered" }], nextCursor: null });
     renderBrowser(gateway);
-    await user.click(await screen.findByRole("button", { name: "Retry" }));
+    await user.click(await screen.findByRole("button", { name: "다시 시도" }));
     expect(await screen.findByRole("button", { name: "Recovered" })).toBeInTheDocument();
   });
 
@@ -211,7 +214,7 @@ describe("AssetBrowser", () => {
 
     rerender(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "classification", classificationId: null }} classifications={classifications} sort="newest" metadataVisible={false} refreshVersion={1} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
 
-    expect(await screen.findByRole("button", { name: "After" })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByRole("button", { name: "After" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("dialog")).toHaveAccessibleName("After");
   });
 
@@ -220,7 +223,7 @@ describe("AssetBrowser", () => {
     vi.mocked(gateway.listAssets).mockResolvedValueOnce({ items: [{ ...asset(0), title: "Selected" }], nextCursor: null }).mockResolvedValueOnce({ items: [], nextCursor: null });
     const { rerender } = renderBrowser(gateway); await user.click(await screen.findByRole("button", { name: "Selected" }));
     rerender(browserElement(gateway, { refreshVersion: 1 }));
-    expect(await screen.findByRole("heading", { name: "No assets" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "자산이 없습니다" })).toBeInTheDocument();
   });
 
   it("clears selection when the view changes", async () => {
@@ -228,7 +231,23 @@ describe("AssetBrowser", () => {
     vi.mocked(gateway.listAssets).mockResolvedValue({ items: [{ ...asset(0), title: "Selected" }], nextCursor: null });
     const { rerender } = renderBrowser(gateway); await user.click(await screen.findByRole("button", { name: "Selected" }));
     rerender(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "favorites" }} classifications={classifications} sort="newest" metadataVisible={false} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
-    expect(await screen.findByRole("button", { name: "Selected" })).toHaveAttribute("aria-selected", "false");
+    expect(await screen.findByRole("button", { name: "Selected" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("keeps the detail dialog open after a real Enter press", async () => {
+    const user = userEvent.setup(); const gateway = createGateway({ items: [{ ...asset(0), title: "열기" }], nextCursor: null });
+    renderBrowser(gateway);
+    const tile = await screen.findByRole("button", { name: "열기" });
+    tile.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("dialog", { name: "열기" })).toBeInTheDocument();
+  });
+
+  it("uses the constrained workspace styles without horizontal sidebar scrolling", () => {
+    expect(styles).toMatch(/\.asset-browser\s*\{[^}]*display:\s*flex;[^}]*min-height:\s*0;/s);
+    expect(styles).toMatch(/\.asset-gallery__scroll\s*\{[^}]*flex:\s*1;[^}]*min-height:\s*0;[^}]*overflow:\s*auto;/s);
+    expect(styles).not.toMatch(/\.asset-gallery__scroll\s*\{[^}]*height:\s*70vh;/s);
+    expect(styles).toMatch(/\.classification-sidebar\s*\{[^}]*overflow-x:\s*hidden;[^}]*overflow-y:\s*auto;/s);
   });
 });
 

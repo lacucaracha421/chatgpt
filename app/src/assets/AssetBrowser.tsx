@@ -54,14 +54,14 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, ref
       setPage({ queryKey, items: result.items, nextCursor: result.nextCursor });
       setSelectedAsset((selected) => reconcileAsset(selected, selectedViewKeyRef.current, viewKey, result.items));
       setDetailAsset((detail) => reconcileAsset(detail, detailViewKeyRef.current, viewKey, result.items));
-    }).catch((error: unknown) => { if (generation === generationRef.current) setFirstError({ queryKey, message: commandErrorMessage(error, "Could not load assets.") }); }).finally(() => { if (generation === generationRef.current) setFirstLoading(false); });
+    }).catch((error: unknown) => { if (generation === generationRef.current) setFirstError({ queryKey, message: commandErrorMessage(error, "자산을 불러오지 못했습니다.") }); }).finally(() => { if (generation === generationRef.current) setFirstLoading(false); });
     return () => { if (generation === generationRef.current) generationRef.current += 1; };
   }, [gateway, queryBase, queryKey, refreshVersion, retryVersion, viewKey]);
   useEffect(() => onStatusChange({ loadedCount: items.length, selectedAsset, loading: firstLoading || nextLoading }), [firstLoading, items.length, nextLoading, onStatusChange, selectedAsset]);
   const loadNextPage = useCallback((retry = false) => {
     if (!activePage || !nextCursor || nextLoadingRef.current || (currentNextError && !retry)) return;
     const generation = generationRef.current; const cursor = nextCursor; nextLoadingRef.current = true; setNextLoading(true); setNextError(null);
-    void gateway.listAssets({ ...queryBase, after: cursor }).then((result) => { if (generation !== generationRef.current) return; setPage((current) => current?.queryKey === queryKey ? { queryKey, items: [...current.items, ...result.items], nextCursor: result.nextCursor } : current); }).catch((error: unknown) => { if (generation === generationRef.current) setNextError({ queryKey, message: commandErrorMessage(error, "Could not load the next page.") }); }).finally(() => { if (generation === generationRef.current) { nextLoadingRef.current = false; setNextLoading(false); } });
+    void gateway.listAssets({ ...queryBase, after: cursor }).then((result) => { if (generation !== generationRef.current) return; setPage((current) => current?.queryKey === queryKey ? { queryKey, items: [...current.items, ...result.items], nextCursor: result.nextCursor } : current); }).catch((error: unknown) => { if (generation === generationRef.current) setNextError({ queryKey, message: commandErrorMessage(error, "다음 자산을 불러오지 못했습니다.") }); }).finally(() => { if (generation === generationRef.current) { nextLoadingRef.current = false; setNextLoading(false); } });
   }, [activePage, currentNextError, gateway, nextCursor, queryBase, queryKey]);
   const toggleFavorite = useCallback(async () => {
     if (!selectedAsset) return;
@@ -69,14 +69,14 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, ref
     const update = (asset: AssetSummary) => asset.id === target.id ? { ...asset, favorite } : asset;
     setPage((current) => current?.queryKey === queryKey ? { ...current, items: current.items.map(update) } : current); setSelectedAsset(update(target)); if (detailAsset?.id === target.id) setDetailAsset(update(target));
     try { await gateway.setAssetFavorite(target.id, favorite); if (view.kind === "favorites" || effectiveSort === "favorites") refresh(); }
-    catch (error) { const rollback = (asset: AssetSummary) => asset.id === target.id ? target : asset; setPage((current) => current?.queryKey === queryKey ? { ...current, items: current.items.map(rollback) } : current); setSelectedAsset(target); if (detailAsset?.id === target.id) setDetailAsset(target); setFirstError({ queryKey, message: commandErrorMessage(error, "Could not update favorite.") }); }
+    catch (error) { const rollback = (asset: AssetSummary) => asset.id === target.id ? target : asset; setPage((current) => current?.queryKey === queryKey ? { ...current, items: current.items.map(rollback) } : current); setSelectedAsset(target); if (detailAsset?.id === target.id) setDetailAsset(target); setFirstError({ queryKey, message: commandErrorMessage(error, "좋아요를 변경하지 못했습니다.") }); }
   }, [detailAsset, effectiveSort, gateway, queryKey, refresh, selectedAsset, view.kind]);
   const reshuffle = () => { randomPivotRef.current = createRandomPivot(); setRandomVersion((value) => value + 1); };
-  return <section className="asset-browser" aria-label="Assets">
+  return <section className="asset-browser" aria-label="전체 자산">
     <AssetToolbar view={view} classifications={classifications} sort={sort} directOnly={directOnly} metadataVisible={metadataVisible} selectedAsset={selectedAsset} onSortChange={onSortChange} onDirectOnlyChange={setDirectOnly} onMetadataVisibleChange={onMetadataVisibleChange} onFavorite={() => void toggleFavorite()} onReshuffle={reshuffle} />
     {currentFirstError && <Toast>{currentFirstError}</Toast>}
-    {firstLoading || !activePage && !currentFirstError ? <Skeleton className="asset-browser__skeleton" label="Loading assets" /> : currentFirstError && items.length === 0 ? <EmptyState title="Could not load assets"><Button onClick={refresh}>Retry</Button></EmptyState> : items.length === 0 ? <EmptyState title="No assets">Drop images here to add them.</EmptyState> : <AssetGallery items={items} selectedAssetId={selectedAsset?.id} metadataVisible={metadataVisible} hasNextPage={nextCursor !== null} onLoadNextPage={loadNextPage} onSelect={(asset) => { selectedViewKeyRef.current = asset ? viewKey : null; setSelectedAsset(asset); }} onOpen={(asset) => { detailViewKeyRef.current = viewKey; setDetailAsset(asset); }} />}
-    {nextLoading && <Skeleton label="Loading more assets" />}{currentNextError && <div className="asset-browser__next-error"><Toast>{currentNextError}</Toast><Button onClick={() => loadNextPage(true)}>Retry</Button></div>}
+    {firstLoading || !activePage && !currentFirstError ? <Skeleton className="asset-browser__skeleton" label="자산을 불러오는 중" /> : currentFirstError && items.length === 0 ? <EmptyState title="자산을 불러오지 못했습니다"><Button onClick={refresh}>다시 시도</Button></EmptyState> : items.length === 0 ? <EmptyState title="자산이 없습니다">여기에 이미지를 놓아 추가하세요.</EmptyState> : <AssetGallery items={items} selectedAssetId={selectedAsset?.id} metadataVisible={metadataVisible} hasNextPage={nextCursor !== null} onLoadNextPage={loadNextPage} onSelect={(asset) => { selectedViewKeyRef.current = asset ? viewKey : null; setSelectedAsset(asset); }} onOpen={(asset) => { detailViewKeyRef.current = viewKey; setDetailAsset(asset); }} />}
+    {nextLoading && <Skeleton label="자산을 더 불러오는 중" />}{currentNextError && <div className="asset-browser__next-error"><Toast>{currentNextError}</Toast><Button onClick={() => loadNextPage(true)}>다시 시도</Button></div>}
     <AssetDetailDialog asset={detailAsset} classifications={classifications} onClose={() => setDetailAsset(null)} />
   </section>;
 }

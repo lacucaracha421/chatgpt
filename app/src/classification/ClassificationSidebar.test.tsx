@@ -102,9 +102,9 @@ describe("ClassificationSidebar", () => {
     const user = userEvent.setup();
     const { onViewChange } = renderSidebar();
 
-    await user.click(screen.getByRole("button", { name: "Favorites" }));
-    await user.click(screen.getByRole("button", { name: "Recent" }));
-    await user.click(screen.getByRole("button", { name: "All assets" }));
+    await user.click(screen.getByRole("button", { name: "즐겨찾기" }));
+    await user.click(screen.getByRole("button", { name: "최근" }));
+    await user.click(screen.getByRole("button", { name: "전체 자산" }));
 
     expect(onViewChange).toHaveBeenNthCalledWith(1, { kind: "favorites" });
     expect(onViewChange).toHaveBeenNthCalledWith(2, { kind: "recent" });
@@ -115,12 +115,12 @@ describe("ClassificationSidebar", () => {
     const user = userEvent.setup();
     const { onExpandedIdsChange, onViewChange } = renderSidebar();
 
-    await user.click(screen.getByRole("button", { name: "Collapse Games" }));
+    await user.click(screen.getByRole("button", { name: "Games 접기" }));
     expect(onExpandedIdsChange).toHaveBeenCalledWith(["work"]);
     expect(onViewChange).not.toHaveBeenCalled();
     expect(screen.queryByRole("treeitem", { name: /Blue Archive/ })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Expand Games" }));
+    await user.click(screen.getByRole("button", { name: "Games 펼치기" }));
     expect(onExpandedIdsChange).toHaveBeenLastCalledWith(["work", "root"]);
   });
 
@@ -139,15 +139,15 @@ describe("ClassificationSidebar", () => {
     const fixtureGateway = gateway();
     renderSidebar(fixtureGateway);
 
-    await user.click(screen.getByRole("button", { name: "Add classification" }));
-    await user.type(screen.getByLabelText("Name"), "Comics");
-    await user.click(screen.getByRole("button", { name: "Add" }));
+    await user.click(screen.getByRole("button", { name: "분류 추가" }));
+    await user.type(screen.getByLabelText("이름"), "Comics");
+    await user.click(screen.getByRole("button", { name: "추가" }));
     await waitFor(() => expect(fixtureGateway.createClassification).toHaveBeenCalledWith({ kind: "root", name: "Comics", parentId: null }));
 
     await user.click(screen.getByRole("treeitem", { name: /Games/ }));
-    await user.click(screen.getByRole("button", { name: "Add classification" }));
-    await user.type(screen.getByLabelText("Name"), "New work");
-    await user.click(screen.getByRole("button", { name: "Add" }));
+    await user.click(screen.getByRole("button", { name: "분류 추가" }));
+    await user.type(screen.getByLabelText("이름"), "New work");
+    await user.click(screen.getByRole("button", { name: "추가" }));
     await waitFor(() => expect(fixtureGateway.createClassification).toHaveBeenLastCalledWith({ kind: "work", name: "New work", parentId: "root" }));
   });
 
@@ -157,20 +157,20 @@ describe("ClassificationSidebar", () => {
     renderSidebar(fixtureGateway);
     const row = screen.getByRole("treeitem", { name: /Blue Archive/ });
 
-    await user.click(screen.getByRole("button", { name: "More actions for Blue Archive" }));
-    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Rename", "Move", "Delete"]);
-    await user.click(screen.getByRole("menuitem", { name: "Rename" }));
-    expect(screen.getByRole("dialog", { name: "Rename classification" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByRole("button", { name: "Blue Archive 추가 작업" }));
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["이름 변경", "이동", "삭제"]);
+    await user.click(screen.getByRole("menuitem", { name: "이름 변경" }));
+    expect(screen.getByRole("dialog", { name: "분류 이름 변경" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "취소" }));
 
     fireEvent.contextMenu(row, { clientX: 20, clientY: 20 });
-    await user.click(screen.getByRole("menuitem", { name: "Move" }));
-    expect(screen.getByRole("dialog", { name: "Move classification" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByRole("menuitem", { name: "이동" }));
+    expect(screen.getByRole("dialog", { name: "분류 이동" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "취소" }));
 
     fireEvent.contextMenu(row, { clientX: 20, clientY: 20 });
-    await user.click(screen.getByRole("menuitem", { name: "Delete" }));
-    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await user.click(screen.getByRole("menuitem", { name: "삭제" }));
+    await user.click(screen.getByRole("button", { name: "삭제" }));
     await waitFor(() => expect(fixtureGateway.deleteClassification).toHaveBeenCalledWith("work"));
   });
 
@@ -178,7 +178,7 @@ describe("ClassificationSidebar", () => {
     renderSidebar(gateway(), { expandedIds: [] });
 
     expect(screen.queryByRole("treeitem", { name: /Blue Archive/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Expand Games" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Games 펼치기" })).toBeInTheDocument();
   });
 
   it("uses one roving tab stop for visible rows and moves it vertically", () => {
@@ -250,7 +250,7 @@ describe("ClassificationSidebar", () => {
   it("keeps expand-button keyboard events out of tree-row navigation", async () => {
     const user = userEvent.setup();
     const { onExpandedIdsChange, onViewChange } = renderSidebar();
-    const expand = screen.getByRole("button", { name: "Collapse Games" });
+    const expand = screen.getByRole("button", { name: "Games 접기" });
 
     expand.focus();
     fireEvent.keyDown(expand, { key: "ArrowDown" });
@@ -268,7 +268,7 @@ describe("ClassificationSidebar", () => {
   it("keeps menu-trigger keyboard events out of tree-row navigation", async () => {
     const user = userEvent.setup();
     const { onExpandedIdsChange, onViewChange } = renderSidebar();
-    const trigger = screen.getByRole("button", { name: "More actions for Games" });
+    const trigger = screen.getByRole("button", { name: "Games 추가 작업" });
 
     trigger.focus();
     fireEvent.keyDown(trigger, { key: "ArrowDown" });
@@ -286,7 +286,7 @@ describe("ClassificationSidebar", () => {
 
   it("emits integer sidebar widths clamped to 184 and 360", () => {
     const { onSidebarWidthChange } = renderSidebar(gateway(), { sidebarWidth: 232 });
-    const handle = screen.getByRole("separator", { name: "Resize sidebar" });
+    const handle = screen.getByRole("separator", { name: "사이드바 크기 조절" });
     Object.defineProperties(handle, {
       setPointerCapture: { configurable: true, value: vi.fn() },
       releasePointerCapture: { configurable: true, value: vi.fn() },

@@ -18,7 +18,7 @@ export function AssetDetailDialog({ asset, classifications, onClose }: { asset: 
   useEffect(() => {
     const request = { assetId, generation: identityRef.current.generation + 1 };
     identityRef.current = request; setState({ assetId, status: assetId ? "loading" : "idle", selectedIds: [] }); setSaving(false); setMessage(null);
-    if (assetId) void gateway.getAssetClassifications(assetId).then((selectedIds) => { if (current(identityRef, request)) setState({ assetId, status: "loaded", selectedIds }); }).catch((error: unknown) => { if (current(identityRef, request)) { setState({ assetId, status: "error", selectedIds: [] }); setMessage(commandErrorMessage(error, "Could not load classifications.")); } });
+    if (assetId) void gateway.getAssetClassifications(assetId).then((selectedIds) => { if (current(identityRef, request)) setState({ assetId, status: "loaded", selectedIds }); }).catch((error: unknown) => { if (current(identityRef, request)) { setState({ assetId, status: "error", selectedIds: [] }); setMessage(commandErrorMessage(error, "분류를 불러오지 못했습니다.")); } });
     return () => { if (current(identityRef, request)) identityRef.current = { assetId: null, generation: identityRef.current.generation + 1 }; };
   }, [assetId, gateway]);
   if (!asset) return null;
@@ -29,15 +29,15 @@ export function AssetDetailDialog({ asset, classifications, onClose }: { asset: 
     if (!loaded || saving) return;
     const request = { assetId: asset.id, generation: identityRef.current.generation }; setSaving(true); setMessage(null);
     try { await gateway.setAssetClassifications(asset.id, classifications.filter((entry) => selectedIds.includes(entry.id)).map((entry) => entry.id)); if (current(identityRef, request)) close(); }
-    catch (error) { if (current(identityRef, request)) setMessage(commandErrorMessage(error, "Could not save classifications.")); }
+    catch (error) { if (current(identityRef, request)) setMessage(commandErrorMessage(error, "분류를 저장하지 못했습니다.")); }
     finally { if (current(identityRef, request)) setSaving(false); }
   };
   const date = localDate(asset.collectedAt);
   return <Dialog open title={asset.title || asset.originalName} onClose={close}><div className="asset-detail">
     <img className="asset-detail__image" src={assetUrl(asset.id)} alt={asset.title || asset.originalName} />
-    <dl className="asset-detail__metadata"><div><dt>Source</dt><dd>{asset.sourceUrl ?? "—"}</dd></div><div><dt>Collected</dt><dd>{date ?? "—"}</dd></div><div><dt>Favorite</dt><dd>{asset.favorite ? "Yes" : "No"}</dd></div></dl>
-    <fieldset disabled={!loaded || saving} className="asset-detail__classifications"><legend>Classifications</legend>{classifications.map((entry) => <label key={entry.id}><input type="checkbox" checked={selectedIds.includes(entry.id)} onChange={(event) => setState((value) => ({ ...value, selectedIds: event.target.checked ? [...value.selectedIds, entry.id] : value.selectedIds.filter((id) => id !== entry.id) }))} />{entry.name}</label>)}</fieldset>
-    {message && <Toast>{message}</Toast>}<div className="ui-dialog__actions"><Button type="button" onClick={close}>Close</Button><Button type="button" disabled={!loaded || saving} onClick={() => void save()}>Save classifications</Button></div>
+    <dl className="asset-detail__metadata"><div><dt>출처</dt><dd>{asset.sourceUrl ?? "—"}</dd></div><div><dt>가져온 날짜</dt><dd>{date ?? "—"}</dd></div><div><dt>좋아요</dt><dd>{asset.favorite ? "예" : "아니요"}</dd></div></dl>
+    <fieldset disabled={!loaded || saving} className="asset-detail__classifications"><legend>분류</legend>{classifications.map((entry) => <label key={entry.id}><input type="checkbox" checked={selectedIds.includes(entry.id)} onChange={(event) => setState((value) => ({ ...value, selectedIds: event.target.checked ? [...value.selectedIds, entry.id] : value.selectedIds.filter((id) => id !== entry.id) }))} />{entry.name}</label>)}</fieldset>
+    {message && <Toast>{message}</Toast>}<div className="ui-dialog__actions"><Button type="button" onClick={close}>닫기</Button><Button type="button" disabled={!loaded || saving} onClick={() => void save()}>분류 저장</Button></div>
   </div></Dialog>;
 }
 

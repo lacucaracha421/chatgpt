@@ -15,7 +15,7 @@ it("shows asset metadata and saves direct classifications", async () => {
   render(<LibraryProvider gateway={gateway}><AssetDetailDialog asset={asset} classifications={classifications} onClose={vi.fn()} /></LibraryProvider>);
   expect(await screen.findByText("https://example.com/source")).toBeInTheDocument();
   await user.click(screen.getByRole("checkbox", { name: "Tag" }));
-  await user.click(screen.getByRole("button", { name: "Save classifications" }));
+  await user.click(screen.getByRole("button", { name: "분류 저장" }));
   await waitFor(() => expect(gateway.setAssetClassifications).toHaveBeenCalledWith("asset", ["tag"]));
 });
 

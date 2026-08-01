@@ -46,7 +46,7 @@ export function AssetGallery({ items, selectedAssetId = null, metadataVisible = 
 
 function AssetTile({ asset, height, selected, metadataVisible, onSelect, onOpen }: { asset: AssetSummary; height: number; selected: boolean; metadataVisible: boolean; onSelect?: (asset: AssetSummary) => void; onOpen?: (asset: AssetSummary) => void }) {
   const alt = asset.title || asset.originalName;
-  return <button type="button" className="asset-gallery__asset" style={{ width: asset.width, height }} aria-label={alt} aria-selected={selected} onClick={() => onSelect?.(asset)} onDoubleClick={() => onOpen?.(asset)} onKeyDown={(event) => { if (event.key === "Enter") onOpen?.(asset); }}>
+  return <button type="button" className="asset-gallery__asset" style={{ width: asset.width, height }} aria-label={alt} aria-pressed={selected} onClick={() => onSelect?.(asset)} onDoubleClick={() => onOpen?.(asset)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); onOpen?.(asset); } }}>
     <img src={thumbnailUrl(asset.id)} alt={alt} />
     {metadataVisible && <span className="asset-gallery__metadata"><span>{sourceHost(asset.sourceUrl)}</span><span>{localDate(asset.collectedAt)}</span></span>}
   </button>;

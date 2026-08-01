@@ -99,7 +99,7 @@ describe("App", () => {
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} />);
 
     expect(await screen.findByRole("main", { name: "라이브러리 작업 공간" })).toBeInTheDocument();
-    expect(screen.getByRole("complementary", { name: "Classification" })).toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "분류" })).toBeInTheDocument();
     expect(screen.getByRole("contentinfo")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Lakomics" })).not.toBeInTheDocument();
   });
@@ -122,7 +122,7 @@ describe("App", () => {
       />,
     );
 
-    await user.click(await screen.findByRole("button", { name: "Favorites" }));
+    await user.click(await screen.findByRole("button", { name: "즐겨찾기" }));
     await waitFor(() => expect(drop).toBeDefined());
     act(() => drop?.(["C:\\images\\a.png"]));
 
@@ -131,11 +131,11 @@ describe("App", () => {
       screen.getByText("파일을 저장할 분류를 먼저 선택하세요."),
     ).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: "Recent" }));
+    await user.click(screen.getByRole("button", { name: "최근" }));
     act(() => drop?.(["C:\\images\\recent.png"]));
     await Promise.resolve();
 
-    await user.click(screen.getByRole("button", { name: "All assets" }));
+    await user.click(screen.getByRole("button", { name: "전체 자산" }));
     act(() => drop?.(["C:\\images\\all-assets.png"]));
     await Promise.resolve();
 
@@ -156,15 +156,15 @@ describe("App", () => {
 
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} />);
 
-    const metadata = await screen.findByLabelText("Metadata");
+    const metadata = await screen.findByLabelText("정보 표시");
     expect(metadata).not.toBeChecked();
-    expect(screen.getByLabelText("Sort")).toHaveValue("oldest");
-    expect(screen.getByRole("complementary", { name: "Classification" })).toHaveStyle({ width: "264px" });
+    expect(screen.getByLabelText("정렬")).toHaveValue("oldest");
+    expect(screen.getByRole("complementary", { name: "분류" })).toHaveStyle({ width: "264px" });
 
-    await user.selectOptions(screen.getByLabelText("Sort"), "random");
+    await user.selectOptions(screen.getByLabelText("정렬"), "random");
     await user.click(metadata);
-    await user.click(screen.getByRole("button", { name: "Collapse 게임" }));
-    const resizeHandle = screen.getByRole("separator", { name: "Resize sidebar" });
+    await user.click(screen.getByRole("button", { name: "게임 접기" }));
+    const resizeHandle = screen.getByRole("separator", { name: "사이드바 크기 조절" });
     Object.defineProperties(resizeHandle, {
       setPointerCapture: { configurable: true, value: vi.fn() },
       releasePointerCapture: { configurable: true, value: vi.fn() },
@@ -275,8 +275,8 @@ describe("App", () => {
       />,
     );
 
-    await user.click(await screen.findByRole("button", { name: "Expand 게임" }));
-    await user.click(await screen.findByRole("button", { name: "Expand 블루 아카이브" }));
+    await user.click(await screen.findByRole("button", { name: "게임 펼치기" }));
+    await user.click(await screen.findByRole("button", { name: "블루 아카이브 펼치기" }));
     await user.click(await screen.findByRole("treeitem", { name: "아로나" }));
     await waitFor(() =>
       expect(libraryGateway.listAssets).toHaveBeenLastCalledWith({
