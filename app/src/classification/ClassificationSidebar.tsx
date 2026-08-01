@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronRight, Clock3, Ellipsis, FolderTree, Plus, Star } from "lucide-react";
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
 import { useLibrary } from "../library/LibraryContext";
 import type { AssetView, ClassificationEntry, ClassificationKind } from "../library/types";
@@ -53,9 +53,14 @@ export function ClassificationSidebar({
   const [message, setMessage] = useState<string | null>(null);
   const resize = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
-  const activeRowId = visibleNodes.some((node) => node.entry.id === focusedId)
-    ? focusedId
-    : visibleNodes[0]?.entry.id ?? null;
+  const activeRowId = nearestVisibleTreeRowId(focusedId, entries, visibleNodes);
+
+  useLayoutEffect(() => {
+    if (focusedId && activeRowId && focusedId !== activeRowId) {
+      setFocusedId(activeRowId);
+      rowRefs.current.get(activeRowId)?.focus();
+    }
+  }, [activeRowId, focusedId]);
 
   function closeDialog() {
     setDialog(null);
@@ -339,12 +344,12 @@ function TreeItem({ activeRowId, expandedIds, node, onDelete, onMove, onRename, 
         onKeyDown={(event) => onRowKeyDown(event, node)}
       >
         {hasChildren ? (
-          <Button type="button" size="icon" variant="ghost" aria-label={`${expanded ? "Collapse" : "Expand"} ${node.entry.name}`} onClick={(event) => { event.stopPropagation(); onToggleExpanded(node.entry.id); }}>
+          <Button type="button" size="icon" variant="ghost" aria-label={`${expanded ? "Collapse" : "Expand"} ${node.entry.name}`} onClick={(event) => { event.stopPropagation(); onToggleExpanded(node.entry.id); }} onKeyDown={(event) => event.stopPropagation()}>
             {expanded ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
           </Button>
         ) : <span className="classification-sidebar__tree-spacer" aria-hidden="true" />}
         <span className="classification-sidebar__tree-label">{node.entry.name}</span>
-        <span onClick={(event) => event.stopPropagation()}>
+        <span onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
           <Menu label={`More actions for ${node.entry.name}`} items={actions} trigger={<Ellipsis aria-hidden="true" />} contextTarget={rowRef} />
         </span>
       </div>
@@ -366,6 +371,21 @@ function visibleTreeNodes(
   };
   nodes.forEach(append);
   return visible;
+}
+
+function nearestVisibleTreeRowId(
+  focusedId: string | null,
+  entries: ClassificationEntry[],
+  visibleNodes: ClassificationTreeNode[],
+): string | null {
+  const visibleIds = new Set(visibleNodes.map((node) => node.entry.id));
+  if (focusedId && visibleIds.has(focusedId)) return focusedId;
+  let entry = entries.find((candidate) => candidate.id === focusedId);
+  while (entry?.parentId) {
+    if (visibleIds.has(entry.parentId)) return entry.parentId;
+    entry = entries.find((candidate) => candidate.id === entry?.parentId);
+  }
+  return visibleNodes[0]?.entry.id ?? null;
 }
 
 function DialogActions({ onClose, submitLabel }: { onClose: () => void; submitLabel: string }) {

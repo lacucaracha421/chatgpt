@@ -215,6 +215,75 @@ describe("ClassificationSidebar", () => {
     expect(onViewChange).not.toHaveBeenCalled();
   });
 
+  it("recovers focus to the nearest visible ancestor after a controlled collapse", () => {
+    const fixtureGateway = gateway();
+    const onViewChange = vi.fn();
+    const onExpandedIdsChange = vi.fn();
+    const onSidebarWidthChange = vi.fn();
+    const onChanged = vi.fn();
+    const sidebar = (expandedIds: string[]) => (
+      <LibraryProvider gateway={fixtureGateway}>
+        <ClassificationSidebar
+          entries={entries}
+          view={{ kind: "classification", classificationId: null }}
+          expandedIds={expandedIds}
+          sidebarWidth={232}
+          onViewChange={onViewChange}
+          onExpandedIdsChange={onExpandedIdsChange}
+          onSidebarWidthChange={onSidebarWidthChange}
+          onChanged={onChanged}
+        />
+      </LibraryProvider>
+    );
+    const { rerender } = render(sidebar(["root", "work"]));
+    const arona = screen.getByRole("treeitem", { name: "Arona" });
+
+    arona.focus();
+    rerender(sidebar([]));
+
+    const games = screen.getByRole("treeitem", { name: "Games" });
+    expect(games).toHaveFocus();
+    expect(games.tabIndex).toBe(0);
+    expect(onViewChange).not.toHaveBeenCalled();
+  });
+
+  it("keeps expand-button keyboard events out of tree-row navigation", async () => {
+    const user = userEvent.setup();
+    const { onExpandedIdsChange, onViewChange } = renderSidebar();
+    const expand = screen.getByRole("button", { name: "Collapse Games" });
+
+    expand.focus();
+    fireEvent.keyDown(expand, { key: "ArrowDown" });
+    expect(expand).toHaveFocus();
+    expect(onViewChange).not.toHaveBeenCalled();
+    expect(onExpandedIdsChange).not.toHaveBeenCalled();
+
+    await user.keyboard("{Enter}");
+    expect(onExpandedIdsChange).toHaveBeenLastCalledWith(["work"]);
+    await user.keyboard(" ");
+    expect(onExpandedIdsChange).toHaveBeenLastCalledWith(["work", "root"]);
+    expect(onViewChange).not.toHaveBeenCalled();
+  });
+
+  it("keeps menu-trigger keyboard events out of tree-row navigation", async () => {
+    const user = userEvent.setup();
+    const { onExpandedIdsChange, onViewChange } = renderSidebar();
+    const trigger = screen.getByRole("button", { name: "More actions for Games" });
+
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+    expect(trigger).toHaveFocus();
+    expect(onViewChange).not.toHaveBeenCalled();
+    expect(onExpandedIdsChange).not.toHaveBeenCalled();
+
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await user.keyboard(" ");
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(onViewChange).not.toHaveBeenCalled();
+  });
+
   it("emits integer sidebar widths clamped to 184 and 360", () => {
     const { onSidebarWidthChange } = renderSidebar(gateway(), { sidebarWidth: 232 });
     const handle = screen.getByRole("separator", { name: "Resize sidebar" });
