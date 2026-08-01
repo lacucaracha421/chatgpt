@@ -1,11 +1,16 @@
 :root {
-  --color-bg: #111216;
-  --color-surface: #1a1c22;
-  --color-surface-hover: #242731;
+  --color-bg: #0d0f12;
+  --color-sidebar: #14171c;
+  --color-toolbar: #14171b;
+  --color-surface: #191d22;
+  --color-surface-hover: #22272f;
+  --color-selected: rgba(232, 138, 45, 0.14);
   --color-text: #f4f4f5;
   --color-muted: #a1a1aa;
-  --color-accent: #f59e0b;
+  --color-accent: #e88a2d;
   --color-border: #30333d;
+  --color-danger: #ec6666;
+  --color-focus: #9ab9ff;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -15,5 +20,12 @@
   --radius-md: 10px;
   --border-width: 1px;
   --focus-width: 2px;
+  --control-height-sm: 28px;
+  --control-height-md: 32px;
+  --control-height-icon: 32px;
+  --sidebar-width-default: 232px;
+  --toolbar-height: 48px;
+  --statusbar-height: 28px;
+  --gallery-target-row-height: 180px;
   --font-ui: "Segoe UI", sans-serif;
 }

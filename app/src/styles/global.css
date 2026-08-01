@@ -5,25 +5,82 @@ body {
   font-family: var(--font-ui);
 }
 
+button,
+select,
+input {
+  font: inherit;
+}
+
+button {
+  color: var(--color-text);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+button:focus-visible,
+select:focus-visible,
+input:focus-visible {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: var(--space-1);
+}
+
+button:disabled,
+select:disabled,
+input:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .app-shell {
   display: grid;
   grid-template-columns: minmax(14rem, 1fr) minmax(0, 4fr);
   gap: var(--space-4);
 }
 
-button {
-  padding: var(--space-2) var(--space-3);
-  color: var(--color-bg);
-  background: var(--color-accent);
-  border: 0;
+.ui-button,
+.ui-menu__trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--control-height-md);
+  padding: 0 var(--space-3);
+  color: var(--color-text);
+  background: var(--color-surface-hover);
+  border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  font: inherit;
 }
 
-button:focus-visible {
-  outline: var(--focus-width) solid var(--color-accent);
-  outline-offset: var(--space-1);
+.ui-button--primary {
+  color: var(--color-bg);
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.ui-button--secondary {
+  background: var(--color-surface-hover);
+}
+
+.ui-button--ghost,
+.ui-menu__trigger {
+  background: transparent;
+}
+
+.ui-button--danger,
+.ui-menu__item--destructive {
+  color: var(--color-danger);
+}
+
+.ui-button--sm {
+  min-height: var(--control-height-sm);
+}
+
+.ui-button--icon {
+  width: var(--control-height-icon);
+  min-height: var(--control-height-icon);
+  padding: 0;
 }
 
 .ui-dialog {
@@ -32,6 +89,10 @@ button:focus-visible {
   background: var(--color-surface);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-md);
+}
+
+.ui-dialog__title {
+  margin: 0 0 var(--space-3);
 }
 
 .ui-dialog::backdrop {
@@ -67,13 +128,76 @@ button:focus-visible {
 }
 
 .ui-text-field input,
+.ui-select select,
 .classification-sidebar select {
-  padding: var(--space-2);
+  min-height: var(--control-height-md);
+  padding: 0 var(--space-2);
   color: var(--color-text);
   background: var(--color-bg);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-sm);
   font: inherit;
+}
+
+.ui-select {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.ui-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ui-menu {
+  position: fixed;
+  z-index: 1;
+  display: grid;
+  min-width: 10rem;
+  padding: var(--space-1);
+  background: var(--color-surface);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.ui-menu__item {
+  min-height: var(--control-height-md);
+  padding: 0 var(--space-2);
+  color: var(--color-text);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+}
+
+.ui-menu__item:hover:not(:disabled),
+.ui-menu__item:focus-visible {
+  background: var(--color-surface-hover);
+}
+
+.ui-empty-state {
+  display: grid;
+  place-items: center;
+  min-height: var(--gallery-target-row-height);
+  padding: var(--space-4);
+  color: var(--color-muted);
+  text-align: center;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.ui-empty-state h2 {
+  margin: 0;
+  color: var(--color-text);
+}
+
+.ui-skeleton {
+  display: block;
+  min-height: var(--control-height-md);
+  background: var(--color-surface-hover);
+  border-radius: var(--radius-sm);
 }
 
 .ui-toast,
@@ -151,4 +275,14 @@ button:focus-visible {
   gap: var(--space-2);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
 }
