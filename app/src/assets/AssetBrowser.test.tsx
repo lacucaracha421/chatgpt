@@ -1,8 +1,9 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { AssetPage, AssetSort, AssetView, ClassificationEntry, LibraryGateway } from "../library/types";
-import { AssetBrowser } from "./AssetBrowser";
+import { AssetBrowser, type AssetBrowserStatus } from "./AssetBrowser";
 
 const classifications: ClassificationEntry[] = [];
 
@@ -12,6 +13,10 @@ beforeEach(() => Object.defineProperties(HTMLElement.prototype, {
   clientWidth: { configurable: true, get: () => 840 },
   offsetHeight: { configurable: true, get: () => 600 },
   clientHeight: { configurable: true, get: () => 600 },
+}));
+beforeEach(() => Object.defineProperties(HTMLDialogElement.prototype, {
+  showModal: { configurable: true, value(this: HTMLDialogElement) { this.setAttribute("open", ""); } },
+  close: { configurable: true, value(this: HTMLDialogElement) { this.removeAttribute("open"); } },
 }));
 
 describe("AssetBrowser", () => {
@@ -98,7 +103,143 @@ describe("AssetBrowser", () => {
     expect(await screen.findByRole("img", { name: "asset-0.png" })).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
+
+  it("maps direct-only and every selectable sort", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway();
+    const { rerender } = renderBrowser(gateway);
+    await user.click(await screen.findByRole("checkbox", { name: "Direct only" }));
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(expect.objectContaining({ directOnly: true, sort: "newest" })));
+    for (const sort of ["oldest", "favorites", "random"] as const) {
+      rerender(browserElement(gateway, { sort }));
+      await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(expect.objectContaining({ sort, randomPivot: sort === "random" ? expect.stringMatching(/^[\da-f]{32}$/) : null })));
+    }
+  });
+
+  it("replaces the random pivot only when reshuffled", async () => {
+    const user = userEvent.setup(); const gateway = createGateway();
+    renderBrowser(gateway, { sort: "random" });
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenCalled());
+    const first = vi.mocked(gateway.listAssets).mock.calls[0]![0].randomPivot;
+    await user.click(screen.getByRole("button", { name: "Reshuffle" }));
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(gateway.listAssets).mock.calls[1]![0].randomPivot).not.toBe(first);
+  });
+
+  it("creates a new pivot after leaving and re-entering random", async () => {
+    const gateway = createGateway(); const { rerender } = renderBrowser(gateway, { sort: "random" });
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledTimes(1));
+    const first = vi.mocked(gateway.listAssets).mock.calls[0]![0].randomPivot;
+    rerender(browserElement(gateway, { sort: "oldest" }));
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledTimes(2));
+    rerender(browserElement(gateway, { sort: "random" }));
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledTimes(3));
+    expect(vi.mocked(gateway.listAssets).mock.calls[2]![0].randomPivot).not.toBe(first);
+  });
+
+  it("keeps the random pivot through an ordinary refresh", async () => {
+    const gateway = createGateway(); const { rerender } = renderBrowser(gateway, { sort: "random" });
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledTimes(1));
+    const first = vi.mocked(gateway.listAssets).mock.calls[0]![0].randomPivot;
+    rerender(browserElement(gateway, { sort: "random", refreshVersion: 1 }));
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(gateway.listAssets).mock.calls[1]![0].randomPivot).toBe(first);
+  });
+
+  it("ignores stale first-page success", async () => {
+    let resolveOld!: (page: AssetPage) => void;
+    const old = new Promise<AssetPage>((resolve) => { resolveOld = resolve; });
+    const gateway = createGateway();
+    vi.mocked(gateway.listAssets).mockReturnValueOnce(old).mockResolvedValueOnce({ items: [{ ...asset(1), title: "New" }], nextCursor: null });
+    const status = vi.fn();
+    const { rerender } = render(browserElement(gateway, { status }));
+    rerender(browserElement(gateway, { sort: "oldest", status }));
+    expect(await screen.findByRole("button", { name: "New" })).toBeInTheDocument();
+    await act(async () => { resolveOld({ items: [{ ...asset(0), title: "Old" }], nextCursor: null }); await old; });
+    expect(screen.queryByRole("button", { name: "Old" })).not.toBeInTheDocument();
+    expect(status).toHaveBeenLastCalledWith(expect.objectContaining({ loading: false }));
+  });
+
+  it("ignores stale first-page failure and finalization", async () => {
+    let rejectOld!: (error: Error) => void; let resolveNew!: (page: AssetPage) => void;
+    const old = new Promise<AssetPage>((_resolve, reject) => { rejectOld = reject; });
+    const next = new Promise<AssetPage>((resolve) => { resolveNew = resolve; });
+    const gateway = createGateway(); const status = vi.fn();
+    vi.mocked(gateway.listAssets).mockReturnValueOnce(old).mockReturnValueOnce(next);
+    const { rerender } = render(browserElement(gateway, { status }));
+    rerender(browserElement(gateway, { sort: "oldest", status }));
+    await act(async () => { rejectOld(new Error("late failure")); await old.catch(() => undefined); });
+    expect(screen.queryByText("late failure")).not.toBeInTheDocument();
+    expect(status).toHaveBeenLastCalledWith(expect.objectContaining({ loading: true }));
+    await act(async () => { resolveNew({ items: [{ ...asset(1), title: "New" }], nextCursor: null }); await next; });
+    expect(await screen.findByRole("button", { name: "New" })).toBeInTheDocument();
+  });
+
+  it("retries a failed first page", async () => {
+    const user = userEvent.setup(); const gateway = createGateway();
+    vi.mocked(gateway.listAssets).mockRejectedValueOnce(new Error("first page failed")).mockResolvedValueOnce({ items: [{ ...asset(0), title: "Recovered" }], nextCursor: null });
+    renderBrowser(gateway);
+    await user.click(await screen.findByRole("button", { name: "Retry" }));
+    expect(await screen.findByRole("button", { name: "Recovered" })).toBeInTheDocument();
+  });
+
+  it("never loads an old cursor with a newly selected sort", async () => {
+    const gateway = createGateway();
+    vi.mocked(gateway.listAssets)
+      .mockResolvedValueOnce({ items: Array.from({ length: 50 }, (_, index) => asset(index)), nextCursor: { token: "old-cursor" } })
+      .mockResolvedValue({ items: [], nextCursor: null });
+    const { rerender } = renderBrowser(gateway, { sort: "newest" });
+    await screen.findByRole("img", { name: "asset-0.png" });
+
+    rerender(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "classification", classificationId: null }} classifications={classifications} sort="oldest" metadataVisible={false} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
+
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledWith(expect.objectContaining({ sort: "oldest", after: null })));
+    expect(vi.mocked(gateway.listAssets).mock.calls).not.toContainEqual([expect.objectContaining({ sort: "oldest", after: { token: "old-cursor" } })]);
+  });
+
+  it("preserves selection and detail through refresh when the asset remains", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway();
+    vi.mocked(gateway.listAssets)
+      .mockResolvedValueOnce({ items: [{ ...asset(0), title: "Before" }], nextCursor: null })
+      .mockResolvedValueOnce({ items: [{ ...asset(0), title: "After" }], nextCursor: null });
+    const { rerender } = renderBrowser(gateway);
+    const tile = await screen.findByRole("button", { name: "Before" });
+    await user.click(tile);
+    await user.dblClick(tile);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    rerender(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "classification", classificationId: null }} classifications={classifications} sort="newest" metadataVisible={false} refreshVersion={1} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
+
+    expect(await screen.findByRole("button", { name: "After" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("dialog")).toHaveAccessibleName("After");
+  });
+
+  it("clears selection when the refreshed page no longer contains the asset", async () => {
+    const user = userEvent.setup(); const gateway = createGateway();
+    vi.mocked(gateway.listAssets).mockResolvedValueOnce({ items: [{ ...asset(0), title: "Selected" }], nextCursor: null }).mockResolvedValueOnce({ items: [], nextCursor: null });
+    const { rerender } = renderBrowser(gateway); await user.click(await screen.findByRole("button", { name: "Selected" }));
+    rerender(browserElement(gateway, { refreshVersion: 1 }));
+    expect(await screen.findByRole("heading", { name: "No assets" })).toBeInTheDocument();
+  });
+
+  it("clears selection when the view changes", async () => {
+    const user = userEvent.setup(); const gateway = createGateway();
+    vi.mocked(gateway.listAssets).mockResolvedValue({ items: [{ ...asset(0), title: "Selected" }], nextCursor: null });
+    const { rerender } = renderBrowser(gateway); await user.click(await screen.findByRole("button", { name: "Selected" }));
+    rerender(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "favorites" }} classifications={classifications} sort="newest" metadataVisible={false} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
+    expect(await screen.findByRole("button", { name: "Selected" })).toHaveAttribute("aria-selected", "false");
+  });
 });
+
+function renderBrowser(gateway: LibraryGateway, options: BrowserOptions = {}) {
+  return render(browserElement(gateway, options));
+}
+
+type BrowserOptions = { sort?: AssetSort; refreshVersion?: number; status?: (status: AssetBrowserStatus) => void };
+function browserElement(gateway: LibraryGateway, { sort = "newest", refreshVersion = 0, status = vi.fn() }: BrowserOptions = {}) {
+  return <LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "classification", classificationId: null }} classifications={classifications} sort={sort} metadataVisible={false} refreshVersion={refreshVersion} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={status} /></LibraryProvider>;
+}
 
 function asset(index: number) {
   return {
@@ -122,6 +263,6 @@ function createGateway(page: AssetPage = { items: [], nextCursor: null }): Libra
     createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(),
     deleteClassification: vi.fn(), listAssets: vi.fn().mockResolvedValue(page),
     setAssetFavorite: vi.fn(), setAssetClassifications: vi.fn(),
-    getAssetClassifications: vi.fn(), ingestImage: vi.fn(),
+    getAssetClassifications: vi.fn().mockResolvedValue([]), ingestImage: vi.fn(),
   };
 }
