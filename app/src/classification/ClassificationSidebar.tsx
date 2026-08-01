@@ -41,15 +41,21 @@ export function ClassificationSidebar({
 }: ClassificationSidebarProps) {
   const { gateway } = useLibrary();
   const tree = buildClassificationTree(entries);
+  const visibleNodes = visibleTreeNodes(tree, expandedIds);
   const selected = view.kind === "classification" && view.classificationId
     ? entries.find((entry) => entry.id === view.classificationId) ?? null
     : null;
+  const [focusedId, setFocusedId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [name, setName] = useState("");
   const [kind, setKind] = useState<ClassificationKind>("root");
   const [parentId, setParentId] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const resize = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
+  const rowRefs = useRef(new Map<string, HTMLDivElement>());
+  const activeRowId = visibleNodes.some((node) => node.entry.id === focusedId)
+    ? focusedId
+    : visibleNodes[0]?.entry.id ?? null;
 
   function closeDialog() {
     setDialog(null);
@@ -116,6 +122,68 @@ export function ClassificationSidebar({
     );
   }
 
+  function registerTreeRow(id: string, element: HTMLDivElement | null) {
+    if (element) {
+      rowRefs.current.set(id, element);
+      return;
+    }
+    rowRefs.current.delete(id);
+  }
+
+  function focusTreeRow(id: string) {
+    setFocusedId(id);
+    rowRefs.current.get(id)?.focus();
+  }
+
+  function handleTreeKeyDown(
+    event: React.KeyboardEvent<HTMLDivElement>,
+    node: ClassificationTreeNode,
+  ) {
+    const index = visibleNodes.indexOf(node);
+    const parentId = node.entry.parentId;
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        focusTreeRow(visibleNodes[Math.min(index + 1, visibleNodes.length - 1)]?.entry.id ?? node.entry.id);
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        focusTreeRow(visibleNodes[Math.max(index - 1, 0)]?.entry.id ?? node.entry.id);
+        break;
+      case "Home":
+        event.preventDefault();
+        focusTreeRow(visibleNodes[0]?.entry.id ?? node.entry.id);
+        break;
+      case "End":
+        event.preventDefault();
+        focusTreeRow(visibleNodes[visibleNodes.length - 1]?.entry.id ?? node.entry.id);
+        break;
+      case "ArrowRight":
+        if (node.children.length === 0) return;
+        event.preventDefault();
+        if (expandedIds.includes(node.entry.id)) {
+          focusTreeRow(node.children[0].entry.id);
+        } else {
+          toggleExpanded(node.entry.id);
+        }
+        break;
+      case "ArrowLeft":
+        if (node.children.length > 0 && expandedIds.includes(node.entry.id)) {
+          event.preventDefault();
+          toggleExpanded(node.entry.id);
+        } else if (parentId) {
+          event.preventDefault();
+          focusTreeRow(parentId);
+        }
+        break;
+      case "Enter":
+      case " ":
+        event.preventDefault();
+        onViewChange({ kind: "classification", classificationId: node.entry.id });
+        break;
+    }
+  }
+
   function startResize(event: React.PointerEvent<HTMLDivElement>) {
     resize.current = { pointerId: event.pointerId, startX: event.clientX, startWidth: sidebarWidth };
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -156,8 +224,12 @@ export function ClassificationSidebar({
             node={node}
             view={view}
             expandedIds={expandedIds}
+            activeRowId={activeRowId}
             onViewChange={onViewChange}
             onToggleExpanded={toggleExpanded}
+            onRowFocus={setFocusedId}
+            onRowKeyDown={handleTreeKeyDown}
+            registerTreeRow={registerTreeRow}
             onRename={(entry) => { setName(entry.name); setDialog({ type: "rename", entry }); }}
             onMove={(entry) => { setParentId(entry.parentId ?? ""); setDialog({ type: "move", entry }); }}
             onDelete={(entry) => setDialog({ type: "delete", entry })}
@@ -225,14 +297,18 @@ function QuickViewButton({ icon, label, onClick, selected }: { icon: React.React
   return <button type="button" className="classification-sidebar__quick-view" aria-current={selected ? "page" : undefined} onClick={onClick}>{icon}<span>{label}</span></button>;
 }
 
-function TreeItem({ expandedIds, node, onDelete, onMove, onRename, onToggleExpanded, onViewChange, view }: {
+function TreeItem({ activeRowId, expandedIds, node, onDelete, onMove, onRename, onRowFocus, onRowKeyDown, onToggleExpanded, onViewChange, registerTreeRow, view }: {
+  activeRowId: string | null;
   expandedIds: string[];
   node: ClassificationTreeNode;
   onDelete: (entry: ClassificationEntry) => void;
   onMove: (entry: ClassificationEntry) => void;
   onRename: (entry: ClassificationEntry) => void;
+  onRowFocus: (id: string) => void;
+  onRowKeyDown: (event: React.KeyboardEvent<HTMLDivElement>, node: ClassificationTreeNode) => void;
   onToggleExpanded: (id: string) => void;
   onViewChange: (view: AssetView) => void;
+  registerTreeRow: (id: string, element: HTMLDivElement | null) => void;
   view: AssetView;
 }) {
   const rowRef = useRef<HTMLDivElement>(null);
@@ -248,20 +324,19 @@ function TreeItem({ expandedIds, node, onDelete, onMove, onRename, onToggleExpan
   return (
     <li className="classification-sidebar__tree-item">
       <div
-        ref={rowRef}
+        ref={(element) => {
+          rowRef.current = element;
+          registerTreeRow(node.entry.id, element);
+        }}
         className="classification-sidebar__tree-row"
         role="treeitem"
         aria-label={node.entry.name}
         aria-selected={selected}
         aria-expanded={hasChildren ? expanded : undefined}
-        tabIndex={0}
+        tabIndex={node.entry.id === activeRowId ? 0 : -1}
         onClick={() => onViewChange({ kind: "classification", classificationId: node.entry.id })}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            onViewChange({ kind: "classification", classificationId: node.entry.id });
-          }
-        }}
+        onFocus={() => onRowFocus(node.entry.id)}
+        onKeyDown={(event) => onRowKeyDown(event, node)}
       >
         {hasChildren ? (
           <Button type="button" size="icon" variant="ghost" aria-label={`${expanded ? "Collapse" : "Expand"} ${node.entry.name}`} onClick={(event) => { event.stopPropagation(); onToggleExpanded(node.entry.id); }}>
@@ -273,9 +348,24 @@ function TreeItem({ expandedIds, node, onDelete, onMove, onRename, onToggleExpan
           <Menu label={`More actions for ${node.entry.name}`} items={actions} trigger={<Ellipsis aria-hidden="true" />} contextTarget={rowRef} />
         </span>
       </div>
-      {hasChildren && expanded && <ul role="group">{node.children.map((child) => <TreeItem key={child.entry.id} node={child} view={view} expandedIds={expandedIds} onViewChange={onViewChange} onToggleExpanded={onToggleExpanded} onRename={onRename} onMove={onMove} onDelete={onDelete} />)}</ul>}
+      {hasChildren && expanded && <ul role="group">{node.children.map((child) => <TreeItem key={child.entry.id} node={child} view={view} expandedIds={expandedIds} activeRowId={activeRowId} onViewChange={onViewChange} onToggleExpanded={onToggleExpanded} onRowFocus={onRowFocus} onRowKeyDown={onRowKeyDown} registerTreeRow={registerTreeRow} onRename={onRename} onMove={onMove} onDelete={onDelete} />)}</ul>}
     </li>
   );
+}
+
+function visibleTreeNodes(
+  nodes: ClassificationTreeNode[],
+  expandedIds: string[],
+): ClassificationTreeNode[] {
+  const visible: ClassificationTreeNode[] = [];
+  const append = (node: ClassificationTreeNode) => {
+    visible.push(node);
+    if (expandedIds.includes(node.entry.id)) {
+      node.children.forEach(append);
+    }
+  };
+  nodes.forEach(append);
+  return visible;
 }
 
 function DialogActions({ onClose, submitLabel }: { onClose: () => void; submitLabel: string }) {

@@ -63,7 +63,6 @@ function renderSidebar(
             onSidebarWidthChange(width);
           }}
           onChanged={onChanged}
-          {...props}
         />
       </LibraryProvider>
     );
@@ -180,6 +179,40 @@ describe("ClassificationSidebar", () => {
 
     expect(screen.queryByRole("treeitem", { name: /Blue Archive/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Expand Games" })).toBeInTheDocument();
+  });
+
+  it("uses one roving tab stop for visible rows and moves it vertically", () => {
+    renderSidebar();
+    const games = screen.getByRole("treeitem", { name: "Games" });
+    const blueArchive = screen.getByRole("treeitem", { name: "Blue Archive" });
+    const arona = screen.getByRole("treeitem", { name: "Arona" });
+
+    expect([games, blueArchive, arona].map((row) => row.tabIndex)).toEqual([0, -1, -1]);
+    games.focus();
+    fireEvent.keyDown(games, { key: "ArrowDown" });
+    expect(blueArchive).toHaveFocus();
+    fireEvent.keyDown(blueArchive, { key: "End" });
+    expect(arona).toHaveFocus();
+    fireEvent.keyDown(arona, { key: "Home" });
+    expect(games).toHaveFocus();
+    fireEvent.keyDown(games, { key: "ArrowUp" });
+    expect(games).toHaveFocus();
+  });
+
+  it("uses Left and Right for visible hierarchy without selecting rows", () => {
+    const { onExpandedIdsChange, onViewChange } = renderSidebar(gateway(), { expandedIds: [] });
+    const games = screen.getByRole("treeitem", { name: "Games" });
+
+    games.focus();
+    fireEvent.keyDown(games, { key: "ArrowRight" });
+    expect(onExpandedIdsChange).toHaveBeenLastCalledWith(["root"]);
+    fireEvent.keyDown(games, { key: "ArrowRight" });
+    expect(screen.getByRole("treeitem", { name: "Blue Archive" })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("treeitem", { name: "Blue Archive" }), { key: "ArrowLeft" });
+    expect(games).toHaveFocus();
+    fireEvent.keyDown(games, { key: "ArrowLeft" });
+    expect(onExpandedIdsChange).toHaveBeenLastCalledWith([]);
+    expect(onViewChange).not.toHaveBeenCalled();
   });
 
   it("emits integer sidebar widths clamped to 184 and 360", () => {
