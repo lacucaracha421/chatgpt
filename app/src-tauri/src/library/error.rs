@@ -50,6 +50,8 @@ pub enum LibraryError {
     InvalidAssetPageLimit,
     #[error("invalid asset cursor")]
     InvalidAssetCursor,
+    #[error("invalid trash timestamp")]
+    InvalidTrashTimestamp,
     #[error("요청한 미디어 파일을 찾을 수 없습니다")]
     MediaNotFound,
     #[error("미디어 경로가 라이브러리 폴더 밖을 가리킵니다")]

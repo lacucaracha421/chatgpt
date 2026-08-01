@@ -7,6 +7,7 @@ mod ingestion;
 mod lock;
 pub mod models;
 mod query;
+mod trash;
 
 use std::{
     fs,
@@ -45,6 +46,8 @@ pub struct Library {
     lease: Arc<LibraryLease>,
     // ponytail: one lock per open Library; split by content hash only if ingest throughput demands it.
     ingestion_lock: Arc<Mutex<()>>,
+    // ponytail: one lock per open Library; split by asset only if trash throughput demands it.
+    trash_lock: Arc<Mutex<()>>,
 }
 
 impl Library {
@@ -65,6 +68,7 @@ impl Library {
             root,
             lease,
             ingestion_lock: Arc::new(Mutex::new(())),
+            trash_lock: Arc::new(Mutex::new(())),
         })
     }
 

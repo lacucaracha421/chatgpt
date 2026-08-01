@@ -64,6 +64,30 @@ pub struct AssetPage {
     pub next_cursor: Option<AssetCursor>,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TrashAssetSummary {
+    pub asset: AssetSummary,
+    pub trashed_at: String,
+    pub purge_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TrashPage {
+    pub items: Vec<TrashAssetSummary>,
+    pub next_cursor: Option<AssetCursor>,
+    pub total_count: u64,
+    pub total_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PurgeSummary {
+    pub deleted_count: u64,
+    pub failed_asset_ids: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(
     tag = "status",

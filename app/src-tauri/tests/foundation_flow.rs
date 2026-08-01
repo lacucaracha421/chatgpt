@@ -11,6 +11,7 @@ use app_lib::library::{
     },
     Library,
 };
+use chrono::{TimeZone, Utc};
 use image::{ImageFormat, Rgb, RgbImage};
 use rusqlite::Connection;
 use tempfile::TempDir;
@@ -313,6 +314,188 @@ fn trash_policy_defaults_updates_and_rejects_out_of_range_retention() {
             .unwrap_err();
         assert!(matches!(error, LibraryError::InvalidTrashRetention));
     }
+}
+
+#[test]
+fn trash_keeps_files_in_place_and_restore_keeps_metadata() {
+    let fixture = FoundationFixture::new();
+    let classification = fixture.create_game_work_tag();
+    let asset = fixture.ingest(&classification.tag_id);
+    let asset_path = fixture.library.root().join(&asset.relative_path);
+    let thumbnail_path = fixture.library.root().join(&asset.thumbnail_relative_path);
+
+    fixture.library.trash_asset(&asset.id).unwrap();
+
+    assert_eq!(fixture.library.summary().unwrap().asset_count, 0);
+    assert!(asset_path.is_file());
+    assert!(thumbnail_path.is_file());
+    assert_eq!(fixture.library.list_trash(None, 20).unwrap().items.len(), 1);
+
+    fixture.library.restore_asset(&asset.id).unwrap();
+
+    assert_eq!(fixture.library.summary().unwrap().asset_count, 1);
+    assert!(fixture
+        .library
+        .list_trash(None, 20)
+        .unwrap()
+        .items
+        .is_empty());
+    assert_eq!(
+        fixture
+            .library
+            .get_asset_classifications(&asset.id)
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.id)
+            .collect::<Vec<_>>(),
+        vec![classification.tag_id]
+    );
+}
+
+#[test]
+fn trash_pages_by_trashed_at_and_id_and_derives_purge_at() {
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path().join("library")).unwrap();
+    let first_path = temp.path().join("first.png");
+    let second_path = temp.path().join("second.png");
+    let third_path = temp.path().join("third.png");
+    write_colored_image(&first_path, [40, 80, 120]);
+    write_colored_image(&second_path, [80, 120, 40]);
+    write_colored_image(&third_path, [120, 40, 80]);
+    let first = ingest(&library, &first_path, None);
+    let second = ingest(&library, &second_path, None);
+    let third = ingest(&library, &third_path, None);
+    library
+        .set_trash_policy(TrashPolicy {
+            retention_days: Some(7),
+        })
+        .unwrap();
+    for asset in [&first, &second, &third] {
+        library.trash_asset(&asset.id).unwrap();
+    }
+    let connection = Connection::open(library.root().join("library.sqlite")).unwrap();
+    for (asset_id, trashed_at) in [
+        (&first.id, "2026-08-01T00:00:00Z"),
+        (&second.id, "2026-08-03T00:00:00Z"),
+        (&third.id, "2026-08-02T00:00:00Z"),
+    ] {
+        connection
+            .execute(
+                "UPDATE assets SET trashed_at = ?2 WHERE id = ?1",
+                [asset_id, trashed_at],
+            )
+            .unwrap();
+    }
+
+    let first_page = library.list_trash(None, 2).unwrap();
+    let second_page = library
+        .list_trash(first_page.next_cursor.clone(), 2)
+        .unwrap();
+
+    assert_eq!(first_page.total_count, 3);
+    assert_eq!(
+        first_page.total_bytes,
+        first.byte_size + second.byte_size + third.byte_size
+    );
+    assert_eq!(
+        first_page
+            .items
+            .iter()
+            .map(|item| item.asset.id.as_str())
+            .collect::<Vec<_>>(),
+        [second.id.as_str(), third.id.as_str()]
+    );
+    assert_eq!(
+        first_page.items[0].purge_at.as_deref(),
+        Some("2026-08-10T00:00:00+00:00")
+    );
+    assert_eq!(
+        second_page
+            .items
+            .iter()
+            .map(|item| item.asset.id.as_str())
+            .collect::<Vec<_>>(),
+        [first.id.as_str()]
+    );
+}
+
+#[test]
+fn empty_trash_preserves_records_when_a_managed_path_is_unsafe() {
+    let fixture = FoundationFixture::new();
+    let classification = fixture.create_game_work_tag();
+    let asset = fixture.ingest(&classification.tag_id);
+    fixture.library.trash_asset(&asset.id).unwrap();
+    let external_copy = fixture
+        .library
+        .root()
+        .parent()
+        .unwrap()
+        .join("external-user-copy.png");
+    fs::write(&external_copy, b"user-owned").unwrap();
+    Connection::open(fixture.library.root().join("library.sqlite"))
+        .unwrap()
+        .execute(
+            "UPDATE assets SET relative_path = '../external-user-copy.png' WHERE id = ?1",
+            [&asset.id],
+        )
+        .unwrap();
+
+    let result = fixture.library.empty_trash().unwrap();
+
+    assert_eq!(result.deleted_count, 0);
+    assert_eq!(result.failed_asset_ids, vec![asset.id.clone()]);
+    assert_eq!(fs::read(&external_copy).unwrap(), b"user-owned");
+    assert_eq!(fixture.library.list_trash(None, 20).unwrap().items.len(), 1);
+    assert_eq!(
+        fixture
+            .library
+            .get_asset_classifications(&asset.id)
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.id)
+            .collect::<Vec<_>>(),
+        vec![classification.tag_id]
+    );
+}
+
+#[test]
+fn purge_expired_trash_removes_managed_files_and_metadata() {
+    let fixture = FoundationFixture::new();
+    let classification = fixture.create_game_work_tag();
+    let asset = fixture.ingest(&classification.tag_id);
+    let asset_path = fixture.library.root().join(&asset.relative_path);
+    let thumbnail_path = fixture.library.root().join(&asset.thumbnail_relative_path);
+    fixture
+        .library
+        .set_trash_policy(TrashPolicy {
+            retention_days: Some(7),
+        })
+        .unwrap();
+    fixture.library.trash_asset(&asset.id).unwrap();
+    Connection::open(fixture.library.root().join("library.sqlite"))
+        .unwrap()
+        .execute(
+            "UPDATE assets SET trashed_at = '2026-07-01T00:00:00Z' WHERE id = ?1",
+            [&asset.id],
+        )
+        .unwrap();
+
+    let result = fixture
+        .library
+        .purge_expired_trash(Utc.with_ymd_and_hms(2026, 7, 8, 0, 0, 0).unwrap())
+        .unwrap();
+
+    assert_eq!(result.deleted_count, 1);
+    assert!(result.failed_asset_ids.is_empty());
+    assert!(!asset_path.exists());
+    assert!(!thumbnail_path.exists());
+    assert!(fixture
+        .library
+        .list_trash(None, 20)
+        .unwrap()
+        .items
+        .is_empty());
+    assert_eq!(fixture.library.summary().unwrap().asset_count, 0);
 }
 
 fn ingest(library: &Library, source_path: &Path, source_url: Option<&str>) -> AssetSummary {

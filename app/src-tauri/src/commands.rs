@@ -7,7 +7,7 @@ use crate::library::{
     error::LibraryError,
     models::{
         AssetPage, AssetQuery, ClassificationEntry, CreateClassification, IngestImageRequest,
-        IngestOutcome, LibrarySummary,
+        IngestOutcome, LibrarySummary, PurgeSummary, TrashPage, TrashPolicy,
     },
     Library,
 };
@@ -44,6 +44,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::AssetNotFound => "asset_not_found",
             LibraryError::InvalidAssetPageLimit => "invalid_asset_page_limit",
             LibraryError::InvalidAssetCursor => "invalid_asset_cursor",
+            LibraryError::InvalidTrashTimestamp => "invalid_trash_timestamp",
             LibraryError::MediaNotFound => "media_not_found",
             LibraryError::UnsafeMediaPath => "unsafe_media_path",
             LibraryError::ReadMedia { .. } => "read_media_failed",
@@ -164,6 +165,55 @@ pub fn list_assets(
 ) -> Result<AssetPage, CommandError> {
     current_required(state)?
         .list_assets(query)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn trash_asset(asset_id: String, state: State<'_, AppState>) -> Result<(), CommandError> {
+    current_required(state)?
+        .trash_asset(&asset_id)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn restore_asset(asset_id: String, state: State<'_, AppState>) -> Result<(), CommandError> {
+    current_required(state)?
+        .restore_asset(&asset_id)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn list_trash(
+    after: Option<crate::library::models::AssetCursor>,
+    limit: u32,
+    state: State<'_, AppState>,
+) -> Result<TrashPage, CommandError> {
+    current_required(state)?
+        .list_trash(after, limit)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn empty_trash(state: State<'_, AppState>) -> Result<PurgeSummary, CommandError> {
+    current_required(state)?
+        .empty_trash()
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn get_trash_policy(state: State<'_, AppState>) -> Result<TrashPolicy, CommandError> {
+    current_required(state)?
+        .trash_policy()
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn set_trash_policy(
+    policy: TrashPolicy,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    current_required(state)?
+        .set_trash_policy(policy)
         .map_err(CommandError::from)
 }
 
