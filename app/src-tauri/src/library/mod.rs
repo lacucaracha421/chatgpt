@@ -16,7 +16,7 @@ use std::{
 
 use error::LibraryError;
 use lock::LibraryLease;
-use models::LibrarySummary;
+use models::{LibrarySummary, TrashPolicy};
 use rusqlite::{Connection, OptionalExtension};
 
 #[derive(Debug, Clone, Copy)]
@@ -55,7 +55,7 @@ impl Library {
             source,
         })?;
         let lease = Arc::new(LibraryLease::acquire(&root)?);
-        for name in ["assets", "thumbnails", "trash", "backups"] {
+        for name in ["assets", "thumbnails", "backups"] {
             let path = root.join(name);
             fs::create_dir_all(&path)
                 .map_err(|source| LibraryError::CreateDirectory { path, source })?;
@@ -87,6 +87,29 @@ impl Library {
             root: self.root.to_string_lossy().into_owned(),
             asset_count: asset_count as u64,
         })
+    }
+
+    pub fn trash_policy(&self) -> Result<TrashPolicy, LibraryError> {
+        let retention_days = self.connection()?.query_row(
+            "SELECT trash_retention_days FROM library_settings WHERE singleton = 1",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(TrashPolicy { retention_days })
+    }
+
+    pub fn set_trash_policy(&self, policy: TrashPolicy) -> Result<(), LibraryError> {
+        if policy
+            .retention_days
+            .is_some_and(|days| !(1..=3650).contains(&days))
+        {
+            return Err(LibraryError::InvalidTrashRetention);
+        }
+        self.connection()?.execute(
+            "UPDATE library_settings SET trash_retention_days = ?1 WHERE singleton = 1",
+            [policy.retention_days],
+        )?;
+        Ok(())
     }
 
     pub fn resolve_media(
@@ -154,6 +177,8 @@ fn mime_for_path(path: &Path) -> &'static str {
 mod tests {
     use std::fs;
 
+    use rusqlite::Connection;
+
     use super::{error::LibraryError, Library};
 
     #[test]
@@ -175,7 +200,7 @@ mod tests {
     }
 
     #[test]
-    fn open_creates_the_self_contained_library_layout() {
+    fn open_creates_the_self_contained_library_layout_without_a_trash_directory() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("Lakomics Library");
 
@@ -183,9 +208,15 @@ mod tests {
 
         assert_eq!(library.root(), root.as_path());
         assert!(root.join("library.sqlite").is_file());
-        for directory in ["assets", "thumbnails", "trash", "backups"] {
+        for directory in ["assets", "thumbnails", "backups"] {
             assert!(root.join(directory).is_dir(), "{directory} was not created");
         }
+        assert!(!root.join("trash").exists());
+        let version: i64 = Connection::open(root.join("library.sqlite"))
+            .unwrap()
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 2);
         assert_eq!(library.summary().unwrap().asset_count, 0);
     }
 }

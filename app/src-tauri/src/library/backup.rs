@@ -1,13 +1,13 @@
 use std::{
     fs::{self, OpenOptions},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
+use chrono::Utc;
 use rusqlite::{Connection, MAIN_DB};
 
 use super::{db, error::LibraryError};
 
-#[allow(dead_code)] // Used by the backup rotation command introduced in the next safety slice.
 pub(crate) fn create_verified_snapshot(
     source: &Connection,
     destination: &Path,
@@ -38,6 +38,13 @@ pub(crate) fn create_verified_snapshot(
     }
 
     result
+}
+
+pub(crate) fn pre_migration_snapshot_path(root: &Path, source_version: i64) -> PathBuf {
+    root.join("backups").join(format!(
+        "pre-migration-{}-v{source_version}.sqlite",
+        Utc::now().format("%Y%m%d-%H%M%S")
+    ))
 }
 
 fn verify_snapshot(destination: &Path) -> Result<(), LibraryError> {
@@ -163,7 +170,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let destination = temp.path().join("snapshot.sqlite");
         let source = rusqlite::Connection::open_in_memory().unwrap();
-        source.execute_batch("PRAGMA user_version = 2;").unwrap();
+        source.execute_batch("PRAGMA user_version = 3;").unwrap();
 
         let error = create_verified_snapshot(&source, &destination).unwrap_err();
 

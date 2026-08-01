@@ -30,6 +30,8 @@ pub enum LibraryError {
     Database(#[from] rusqlite::Error),
     #[error("지원하지 않는 라이브러리 스키마 버전입니다: {0}")]
     UnsupportedSchema(i64),
+    #[error("trash retention must be between 1 and 3650 days, or disabled")]
+    InvalidTrashRetention,
     #[error("분류 이름은 비어 있을 수 없습니다")]
     EmptyClassificationName,
     #[error("요청한 분류 항목을 찾을 수 없습니다.")]

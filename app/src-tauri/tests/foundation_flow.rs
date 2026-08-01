@@ -1,13 +1,18 @@
-use std::path::{Path, PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use app_lib::library::{
+    error::LibraryError,
     models::{
         AssetPage, AssetQuery, AssetSort, AssetSummary, ClassificationKind, CreateClassification,
-        IngestImageRequest, IngestOutcome,
+        IngestImageRequest, IngestOutcome, TrashPolicy,
     },
     Library,
 };
 use image::{ImageFormat, Rgb, RgbImage};
+use rusqlite::Connection;
 use tempfile::TempDir;
 
 struct ClassificationPath {
@@ -214,6 +219,64 @@ fn public_asset_flow_supports_favorites_sorts_random_paging_and_source_urls() {
     assert_ne!(first.id, second.id);
 }
 
+#[test]
+fn migrates_v1_after_creating_a_verified_snapshot() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("library");
+    fs::create_dir(&root).unwrap();
+    let database_path = root.join("library.sqlite");
+    let database = Connection::open(&database_path).unwrap();
+    database
+        .execute_batch(include_str!("../migrations/0001_initial.sql"))
+        .unwrap();
+    database
+        .execute(
+            "INSERT INTO assets (
+                id, content_hash, media_kind, original_name, relative_path,
+                thumbnail_relative_path, byte_size, width, height, collected_at
+             ) VALUES (
+                'asset-1', 'hash-1', 'image', 'asset.png', 'assets/asset.png',
+                'thumbnails/asset.png', 1, 1, 1, '2026-08-01T00:00:00Z'
+             )",
+            [],
+        )
+        .unwrap();
+    drop(database);
+
+    let library = Library::open(&root).unwrap();
+
+    assert_eq!(user_version(&library), 2);
+    assert_eq!(library.trash_policy().unwrap().retention_days, Some(30));
+    assert!(!library.root().join("trash").exists());
+    assert_eq!(library.summary().unwrap().asset_count, 1);
+    assert_eq!(pre_migration_backups(library.root()).len(), 1);
+}
+
+#[test]
+fn trash_policy_defaults_updates_and_rejects_out_of_range_retention() {
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path().join("library")).unwrap();
+
+    assert_eq!(
+        library.trash_policy().unwrap(),
+        TrashPolicy {
+            retention_days: Some(30),
+        }
+    );
+    library
+        .set_trash_policy(TrashPolicy {
+            retention_days: None,
+        })
+        .unwrap();
+    assert_eq!(library.trash_policy().unwrap().retention_days, None);
+    for retention_days in [Some(0), Some(3651)] {
+        let error = library
+            .set_trash_policy(TrashPolicy { retention_days })
+            .unwrap_err();
+        assert!(matches!(error, LibraryError::InvalidTrashRetention));
+    }
+}
+
 fn ingest(library: &Library, source_path: &Path, source_url: Option<&str>) -> AssetSummary {
     let outcome = library
         .ingest_image(IngestImageRequest {
@@ -255,4 +318,23 @@ fn write_image(path: &Path, format: ImageFormat) {
     RgbImage::from_pixel(8, 6, Rgb([40, 80, 120]))
         .save_with_format(path, format)
         .unwrap();
+}
+
+fn user_version(library: &Library) -> i64 {
+    Connection::open(library.root().join("library.sqlite"))
+        .unwrap()
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap()
+}
+
+fn pre_migration_backups(root: &Path) -> Vec<PathBuf> {
+    fs::read_dir(root.join("backups"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("pre-migration-"))
+        })
+        .collect()
 }

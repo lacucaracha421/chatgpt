@@ -2,10 +2,11 @@ use std::{path::Path, time::Duration};
 
 use rusqlite::Connection;
 
-use super::error::LibraryError;
+use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 1;
+pub(crate) const SCHEMA_VERSION: i64 = 2;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
+const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 
 pub fn open_database(path: &Path) -> Result<Connection, LibraryError> {
     let mut connection = Connection::open(path)?;
@@ -18,6 +19,17 @@ pub fn open_database(path: &Path) -> Result<Connection, LibraryError> {
         0 => {
             let transaction = connection.transaction()?;
             transaction.execute_batch(INITIAL_SCHEMA)?;
+            transaction.execute_batch(VAULT_SAFETY_SCHEMA)?;
+            transaction.commit()?;
+        }
+        1 => {
+            let root = path
+                .parent()
+                .expect("database paths have a parent directory");
+            let snapshot = backup::pre_migration_snapshot_path(root, version);
+            backup::create_verified_snapshot(&connection, &snapshot)?;
+            let transaction = connection.transaction()?;
+            transaction.execute_batch(VAULT_SAFETY_SCHEMA)?;
             transaction.commit()?;
         }
         SCHEMA_VERSION => {}

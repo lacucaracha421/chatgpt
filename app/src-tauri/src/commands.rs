@@ -34,6 +34,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::CreateDirectory { .. } => "create_directory_failed",
             LibraryError::Database(_) => "database_failed",
             LibraryError::UnsupportedSchema(_) => "unsupported_schema",
+            LibraryError::InvalidTrashRetention => "invalid_trash_retention",
             LibraryError::EmptyClassificationName => "empty_classification_name",
             LibraryError::ClassificationNotFound => "classification_not_found",
             LibraryError::DuplicateClassificationName => "duplicate_classification_name",
