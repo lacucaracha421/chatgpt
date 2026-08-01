@@ -1,42 +1,55 @@
-import { useState } from "react";
-import { useLibrary } from "../library/LibraryContext";
-import type { ClassificationEntry, ClassificationKind } from "../library/types";
+import { ChevronDown, ChevronRight, Clock3, Ellipsis, FolderTree, Plus, Star } from "lucide-react";
+import { useRef, useState } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
+import { useLibrary } from "../library/LibraryContext";
+import type { AssetView, ClassificationEntry, ClassificationKind } from "../library/types";
 import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
+import { Menu, type MenuItem } from "../shared/ui/Menu";
+import { Select } from "../shared/ui/Select";
 import { TextField } from "../shared/ui/TextField";
 import { Toast } from "../shared/ui/Toast";
 import { buildClassificationTree, type ClassificationTreeNode } from "./buildTree";
 
 type ClassificationSidebarProps = {
   entries: ClassificationEntry[];
-  selectedId: string | null;
-  onSelect: (id: string) => void;
+  view: AssetView;
+  expandedIds: string[];
+  sidebarWidth: number;
+  onViewChange: (view: AssetView) => void;
+  onExpandedIdsChange: (ids: string[]) => void;
+  onSidebarWidthChange: (width: number) => void;
   onChanged: () => void;
 };
 
 type DialogState =
-  | {
-      type: "create";
-      parentId: string | null;
-      kinds: ClassificationKind[];
-    }
+  | { type: "create"; parentId: string | null; kinds: ClassificationKind[] }
   | { type: "rename" | "move" | "delete"; entry: ClassificationEntry };
+
+const MIN_SIDEBAR_WIDTH = 184;
+const MAX_SIDEBAR_WIDTH = 360;
 
 export function ClassificationSidebar({
   entries,
-  selectedId,
+  expandedIds,
   onChanged,
-  onSelect,
+  onExpandedIdsChange,
+  onSidebarWidthChange,
+  onViewChange,
+  sidebarWidth,
+  view,
 }: ClassificationSidebarProps) {
   const { gateway } = useLibrary();
   const tree = buildClassificationTree(entries);
-  const selected = entries.find((entry) => entry.id === selectedId) ?? null;
+  const selected = view.kind === "classification" && view.classificationId
+    ? entries.find((entry) => entry.id === view.classificationId) ?? null
+    : null;
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [name, setName] = useState("");
   const [kind, setKind] = useState<ClassificationKind>("root");
   const [parentId, setParentId] = useState("");
   const [message, setMessage] = useState<string | null>(null);
+  const resize = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
 
   function closeDialog() {
     setDialog(null);
@@ -55,26 +68,10 @@ export function ClassificationSidebar({
     setDialog({ type: "create", parentId: selected?.id ?? null, kinds });
   }
 
-  function openRename() {
-    if (!selected) return;
-    setName(selected.name);
-    setDialog({ type: "rename", entry: selected });
-  }
-
-  function openMove() {
-    if (!selected) return;
-    setParentId(selected.parentId ?? "");
-    setDialog({ type: "move", entry: selected });
-  }
-
   async function create() {
     if (!dialog || dialog.type !== "create") return;
     try {
-      await gateway.createClassification({
-        kind,
-        name,
-        parentId: dialog.parentId,
-      });
+      await gateway.createClassification({ kind, name, parentId: dialog.parentId });
       completeMutation();
     } catch (error) {
       setMessage(commandErrorMessage(error, "분류를 변경하지 못했습니다."));
@@ -111,110 +108,111 @@ export function ClassificationSidebar({
     }
   }
 
+  function toggleExpanded(id: string) {
+    onExpandedIdsChange(
+      expandedIds.includes(id)
+        ? expandedIds.filter((expandedId) => expandedId !== id)
+        : [...expandedIds, id],
+    );
+  }
+
+  function startResize(event: React.PointerEvent<HTMLDivElement>) {
+    resize.current = { pointerId: event.pointerId, startX: event.clientX, startWidth: sidebarWidth };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function resizeSidebar(event: React.PointerEvent<HTMLDivElement>) {
+    const activeResize = resize.current;
+    if (!activeResize || activeResize.pointerId !== event.pointerId) return;
+    onSidebarWidthChange(
+      Math.round(Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, activeResize.startWidth + event.clientX - activeResize.startX))),
+    );
+  }
+
+  function stopResize(event: React.PointerEvent<HTMLDivElement>) {
+    if (resize.current?.pointerId !== event.pointerId) return;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    resize.current = null;
+  }
+
   return (
-    <aside className="classification-sidebar" aria-label="분류">
+    <aside className="classification-sidebar" aria-label="Classification" style={{ width: sidebarWidth }}>
       <div className="classification-sidebar__heading">
-        <h2>분류</h2>
-        <Button type="button" onClick={openCreate}>
-          {selected ? "하위 항목 추가" : "최상위 분류 추가"}
+        <h2>Classification</h2>
+        <Button type="button" size="icon" variant="ghost" aria-label="Add classification" onClick={openCreate}>
+          <Plus aria-hidden="true" />
         </Button>
       </div>
-      {tree.orphans.length > 0 && (
-        <p className="classification-sidebar__warning" role="alert">
-          고아 분류 항목이 있어 표시하지 않았습니다.
-        </p>
-      )}
+      <nav className="classification-sidebar__quick-views" aria-label="Quick views">
+        <QuickViewButton icon={<FolderTree aria-hidden="true" />} label="All assets" selected={view.kind === "classification" && view.classificationId === null} onClick={() => onViewChange({ kind: "classification", classificationId: null })} />
+        <QuickViewButton icon={<Star aria-hidden="true" />} label="Favorites" selected={view.kind === "favorites"} onClick={() => onViewChange({ kind: "favorites" })} />
+        <QuickViewButton icon={<Clock3 aria-hidden="true" />} label="Recent" selected={view.kind === "recent"} onClick={() => onViewChange({ kind: "recent" })} />
+      </nav>
+      {tree.orphans.length > 0 && <p className="classification-sidebar__warning" role="alert">Orphaned classifications are hidden.</p>}
       <ul className="classification-sidebar__tree" role="tree">
         {tree.map((node) => (
           <TreeItem
             key={node.entry.id}
             node={node}
-            selectedId={selectedId}
-            onSelect={onSelect}
+            view={view}
+            expandedIds={expandedIds}
+            onViewChange={onViewChange}
+            onToggleExpanded={toggleExpanded}
+            onRename={(entry) => { setName(entry.name); setDialog({ type: "rename", entry }); }}
+            onMove={(entry) => { setParentId(entry.parentId ?? ""); setDialog({ type: "move", entry }); }}
+            onDelete={(entry) => setDialog({ type: "delete", entry })}
           />
         ))}
       </ul>
-      {selected && (
-        <div className="classification-sidebar__actions">
-          <Button type="button" onClick={openRename}>
-            이름 변경
-          </Button>
-          <Button type="button" onClick={openMove}>
-            이동
-          </Button>
-          <Button type="button" onClick={() => setDialog({ type: "delete", entry: selected })}>
-            삭제
-          </Button>
-        </div>
-      )}
+      <div
+        aria-label="Resize sidebar"
+        className="classification-sidebar__resize-handle"
+        role="separator"
+        aria-orientation="vertical"
+        onPointerDown={startResize}
+        onPointerMove={resizeSidebar}
+        onPointerUp={stopResize}
+        onPointerCancel={stopResize}
+      />
       {message && <Toast>{message}</Toast>}
       {dialog?.type === "create" && (
-        <Dialog open title="분류 추가" onClose={closeDialog}>
-          <form className="classification-sidebar__form" onSubmit={(event) => {
-            event.preventDefault();
-            void create();
-          }}>
-            {dialog.kinds.length === 1 ? (
-              <p>{kindLabel(dialog.kinds[0])}</p>
-            ) : (
-              <label>
-                종류
-                <select value={kind} onChange={(event) => setKind(event.target.value as ClassificationKind)}>
-                  {dialog.kinds.map((option) => (
-                    <option key={option} value={option}>
-                      {kindLabel(option)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+        <Dialog open title="Add classification" onClose={closeDialog}>
+          <form className="classification-sidebar__form" onSubmit={(event) => { event.preventDefault(); void create(); }}>
+            {dialog.kinds.length === 1 ? <p>{kindLabel(dialog.kinds[0])}</p> : (
+              <Select label="Type" value={kind} onChange={(event) => setKind(event.target.value as ClassificationKind)}>
+                {dialog.kinds.map((option) => <option key={option} value={option}>{kindLabel(option)}</option>)}
+              </Select>
             )}
-            <TextField autoFocus label="이름" required value={name} onChange={(event) => setName(event.target.value)} />
-            <DialogActions onClose={closeDialog} submitLabel="추가" />
+            <TextField autoFocus label="Name" required value={name} onChange={(event) => setName(event.target.value)} />
+            <DialogActions onClose={closeDialog} submitLabel="Add" />
           </form>
         </Dialog>
       )}
       {dialog?.type === "rename" && (
-        <Dialog open title="이름 변경" onClose={closeDialog}>
-          <form className="classification-sidebar__form" onSubmit={(event) => {
-            event.preventDefault();
-            void rename();
-          }}>
-            <TextField autoFocus label="이름" required value={name} onChange={(event) => setName(event.target.value)} />
-            <DialogActions onClose={closeDialog} submitLabel="저장" />
+        <Dialog open title="Rename classification" onClose={closeDialog}>
+          <form className="classification-sidebar__form" onSubmit={(event) => { event.preventDefault(); void rename(); }}>
+            <TextField autoFocus label="Name" required value={name} onChange={(event) => setName(event.target.value)} />
+            <DialogActions onClose={closeDialog} submitLabel="Save" />
           </form>
         </Dialog>
       )}
       {dialog?.type === "move" && (
-        <Dialog open title="분류 이동" onClose={closeDialog}>
-          <form className="classification-sidebar__form" onSubmit={(event) => {
-            event.preventDefault();
-            void move();
-          }}>
-            <label>
-              부모
-              <select value={parentId} onChange={(event) => setParentId(event.target.value)}>
-                {moveParents(dialog.entry, entries).map((parent) => (
-                  <option key={parent?.id ?? "root"} value={parent?.id ?? ""}>
-                    {parent?.name ?? "최상위"}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <DialogActions onClose={closeDialog} submitLabel="이동" />
+        <Dialog open title="Move classification" onClose={closeDialog}>
+          <form className="classification-sidebar__form" onSubmit={(event) => { event.preventDefault(); void move(); }}>
+            <Select label="Parent" value={parentId} onChange={(event) => setParentId(event.target.value)}>
+              {moveParents(dialog.entry, entries).map((parent) => <option key={parent?.id ?? "root"} value={parent?.id ?? ""}>{parent?.name ?? "Top level"}</option>)}
+            </Select>
+            <DialogActions onClose={closeDialog} submitLabel="Move" />
           </form>
         </Dialog>
       )}
       {dialog?.type === "delete" && (
-        <Dialog open title="분류 삭제" onClose={closeDialog}>
+        <Dialog open title="Delete classification" onClose={closeDialog}>
           <div className="classification-sidebar__form">
-            <p>{dialog.entry.name} 항목을 삭제할까요?</p>
+            <p>Delete {dialog.entry.name}?</p>
             <div className="ui-dialog__actions">
-              <Button type="button" onClick={closeDialog}>
-                취소
-              </Button>
-              <Button type="button" onClick={() => void remove()}>
-                삭제 확인
-              </Button>
+              <Button type="button" onClick={closeDialog}>Cancel</Button>
+              <Button type="button" variant="danger" onClick={() => void remove()}>Delete</Button>
             </div>
           </div>
         </Dialog>
@@ -223,40 +221,65 @@ export function ClassificationSidebar({
   );
 }
 
-function TreeItem({
-  node,
-  onSelect,
-  selectedId,
-}: {
+function QuickViewButton({ icon, label, onClick, selected }: { icon: React.ReactNode; label: string; onClick: () => void; selected: boolean }) {
+  return <button type="button" className="classification-sidebar__quick-view" aria-current={selected ? "page" : undefined} onClick={onClick}>{icon}<span>{label}</span></button>;
+}
+
+function TreeItem({ expandedIds, node, onDelete, onMove, onRename, onToggleExpanded, onViewChange, view }: {
+  expandedIds: string[];
   node: ClassificationTreeNode;
-  selectedId: string | null;
-  onSelect: (id: string) => void;
+  onDelete: (entry: ClassificationEntry) => void;
+  onMove: (entry: ClassificationEntry) => void;
+  onRename: (entry: ClassificationEntry) => void;
+  onToggleExpanded: (id: string) => void;
+  onViewChange: (view: AssetView) => void;
+  view: AssetView;
 }) {
+  const rowRef = useRef<HTMLDivElement>(null);
+  const hasChildren = node.children.length > 0;
+  const expanded = expandedIds.includes(node.entry.id);
+  const selected = view.kind === "classification" && view.classificationId === node.entry.id;
+  const actions: MenuItem[] = [
+    { id: "rename", label: "Rename", onSelect: () => onRename(node.entry) },
+    { id: "move", label: "Move", onSelect: () => onMove(node.entry) },
+    { id: "delete", label: "Delete", destructive: true, onSelect: () => onDelete(node.entry) },
+  ];
+
   return (
-    <li role="treeitem" aria-selected={node.entry.id === selectedId}>
-      <button type="button" onClick={() => onSelect(node.entry.id)}>
-        {node.entry.name} 선택
-      </button>
-      {node.children.length > 0 && (
-        <ul role="group">
-          {node.children.map((child) => (
-            <TreeItem key={child.entry.id} node={child} selectedId={selectedId} onSelect={onSelect} />
-          ))}
-        </ul>
-      )}
+    <li className="classification-sidebar__tree-item">
+      <div
+        ref={rowRef}
+        className="classification-sidebar__tree-row"
+        role="treeitem"
+        aria-label={node.entry.name}
+        aria-selected={selected}
+        aria-expanded={hasChildren ? expanded : undefined}
+        tabIndex={0}
+        onClick={() => onViewChange({ kind: "classification", classificationId: node.entry.id })}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onViewChange({ kind: "classification", classificationId: node.entry.id });
+          }
+        }}
+      >
+        {hasChildren ? (
+          <Button type="button" size="icon" variant="ghost" aria-label={`${expanded ? "Collapse" : "Expand"} ${node.entry.name}`} onClick={(event) => { event.stopPropagation(); onToggleExpanded(node.entry.id); }}>
+            {expanded ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
+          </Button>
+        ) : <span className="classification-sidebar__tree-spacer" aria-hidden="true" />}
+        <span className="classification-sidebar__tree-label">{node.entry.name}</span>
+        <span onClick={(event) => event.stopPropagation()}>
+          <Menu label={`More actions for ${node.entry.name}`} items={actions} trigger={<Ellipsis aria-hidden="true" />} contextTarget={rowRef} />
+        </span>
+      </div>
+      {hasChildren && expanded && <ul role="group">{node.children.map((child) => <TreeItem key={child.entry.id} node={child} view={view} expandedIds={expandedIds} onViewChange={onViewChange} onToggleExpanded={onToggleExpanded} onRename={onRename} onMove={onMove} onDelete={onDelete} />)}</ul>}
     </li>
   );
 }
 
 function DialogActions({ onClose, submitLabel }: { onClose: () => void; submitLabel: string }) {
-  return (
-    <div className="ui-dialog__actions">
-      <Button type="button" onClick={onClose}>
-        취소
-      </Button>
-      <Button type="submit">{submitLabel}</Button>
-    </div>
-  );
+  return <div className="ui-dialog__actions"><Button type="button" onClick={onClose}>Cancel</Button><Button type="submit">{submitLabel}</Button></div>;
 }
 
 function createKinds(selected: ClassificationEntry | null): ClassificationKind[] {
@@ -272,5 +295,5 @@ function moveParents(entry: ClassificationEntry, entries: ClassificationEntry[])
 }
 
 function kindLabel(kind: ClassificationKind): string {
-  return ({ root: "최상위 분류", work: "작품", tag: "태그" })[kind];
+  return ({ root: "Top-level classification", work: "Work", tag: "Tag" })[kind];
 }

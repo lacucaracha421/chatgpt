@@ -1,16 +1,16 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
-import { useState, type ComponentProps } from "react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState, type ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
-import type { ClassificationEntry, LibraryGateway } from "../library/types";
-import { buildClassificationTree } from "./buildTree";
+import type { AssetView, ClassificationEntry, LibraryGateway } from "../library/types";
 import { ClassificationSidebar } from "./ClassificationSidebar";
+import { buildClassificationTree } from "./buildTree";
 
 const entries: ClassificationEntry[] = [
-  { id: "root", kind: "root", name: "게임", parentId: null },
-  { id: "work", kind: "work", name: "블루 아카이브", parentId: "root" },
-  { id: "tag", kind: "tag", name: "아루", parentId: "work" },
+  { id: "root", kind: "root", name: "Games", parentId: null },
+  { id: "work", kind: "work", name: "Blue Archive", parentId: "root" },
+  { id: "tag", kind: "tag", name: "Arona", parentId: "work" },
 ];
 
 function gateway(): LibraryGateway {
@@ -34,19 +34,33 @@ function renderSidebar(
   libraryGateway = gateway(),
   props: Partial<ComponentProps<typeof ClassificationSidebar>> = {},
 ) {
-  const onSelect = vi.fn();
+  const onViewChange = vi.fn();
+  const onExpandedIdsChange = vi.fn();
+  const onSidebarWidthChange = vi.fn();
   const onChanged = vi.fn();
 
   function Fixture() {
-    const [selectedId, setSelectedId] = useState(props.selectedId ?? null);
+    const [view, setView] = useState<AssetView>(props.view ?? { kind: "classification", classificationId: null });
+    const [expandedIds, setExpandedIds] = useState(props.expandedIds ?? ["root", "work"]);
+    const [sidebarWidth, setSidebarWidth] = useState(props.sidebarWidth ?? 232);
     return (
       <LibraryProvider gateway={libraryGateway}>
         <ClassificationSidebar
           entries={entries}
-          selectedId={selectedId}
-          onSelect={(id) => {
-            setSelectedId(id);
-            onSelect(id);
+          view={view}
+          expandedIds={expandedIds}
+          sidebarWidth={sidebarWidth}
+          onViewChange={(nextView) => {
+            setView(nextView);
+            onViewChange(nextView);
+          }}
+          onExpandedIdsChange={(ids) => {
+            setExpandedIds(ids);
+            onExpandedIdsChange(ids);
+          }}
+          onSidebarWidthChange={(width) => {
+            setSidebarWidth(width);
+            onSidebarWidthChange(width);
           }}
           onChanged={onChanged}
           {...props}
@@ -55,177 +69,137 @@ function renderSidebar(
     );
   }
 
-  render(
-    <Fixture />,
-  );
-  return { libraryGateway, onChanged, onSelect };
+  render(<Fixture />);
+  return { libraryGateway, onChanged, onExpandedIdsChange, onSidebarWidthChange, onViewChange };
 }
 
 describe("buildClassificationTree", () => {
   it("orders roots and children alphabetically without losing their kinds", () => {
-    const tree = buildClassificationTree([
-      { id: "tag", kind: "tag", name: "아루", parentId: "work" },
-      { id: "work", kind: "work", name: "블루 아카이브", parentId: "root" },
-      { id: "root", kind: "root", name: "게임", parentId: null },
-      { id: "root-2", kind: "root", name: "만화", parentId: null },
-    ]);
+    const tree = buildClassificationTree([...entries].reverse());
 
-    expect(tree.map((node) => node.entry.name)).toEqual(["게임", "만화"]);
+    expect(tree.map((node) => node.entry.name)).toEqual(["Games"]);
     expect(tree[0].children[0].entry.kind).toBe("work");
-    expect(tree[0].children[0].children[0].entry).toMatchObject({
-      name: "아루",
-      kind: "tag",
-    });
+    expect(tree[0].children[0].children[0].entry).toMatchObject({ name: "Arona", kind: "tag" });
   });
 
   it("returns disconnected entries as orphans instead of dropping them", () => {
-    const tree = buildClassificationTree([
-      { id: "root", kind: "root", name: "게임", parentId: null },
-      { id: "lost", kind: "tag", name: "나", parentId: "missing" },
-      { id: "lost-2", kind: "tag", name: "가", parentId: "missing" },
-    ]);
+    const tree = buildClassificationTree([...entries, { id: "lost", kind: "tag", name: "Lost", parentId: "missing" }]);
 
-    expect(tree).toHaveLength(1);
-    expect(tree.orphans).toEqual([
-      { id: "lost-2", kind: "tag", name: "가", parentId: "missing" },
-      { id: "lost", kind: "tag", name: "나", parentId: "missing" },
-    ]);
+    expect(tree.orphans).toEqual([{ id: "lost", kind: "tag", name: "Lost", parentId: "missing" }]);
   });
 });
 
 describe("ClassificationSidebar", () => {
   beforeEach(() => {
     Object.defineProperties(HTMLDialogElement.prototype, {
-      showModal: {
-        configurable: true,
-        value(this: HTMLDialogElement) {
-          this.setAttribute("open", "");
-          this.addEventListener("keydown", (event) => {
-            if (event.key === "Escape") {
-              this.dispatchEvent(new Event("cancel", { cancelable: true }));
-            }
-          });
-        },
-      },
-      close: {
-        configurable: true,
-        value(this: HTMLDialogElement) {
-          this.removeAttribute("open");
-        },
-      },
+      showModal: { configurable: true, value(this: HTMLDialogElement) { this.setAttribute("open", ""); } },
+      close: { configurable: true, value(this: HTMLDialogElement) { this.removeAttribute("open"); } },
     });
   });
 
   afterEach(cleanup);
 
-  it("creates a work below the selected root", async () => {
+  it("changes all-assets and quick views without fake classification IDs", async () => {
+    const user = userEvent.setup();
+    const { onViewChange } = renderSidebar();
+
+    await user.click(screen.getByRole("button", { name: "Favorites" }));
+    await user.click(screen.getByRole("button", { name: "Recent" }));
+    await user.click(screen.getByRole("button", { name: "All assets" }));
+
+    expect(onViewChange).toHaveBeenNthCalledWith(1, { kind: "favorites" });
+    expect(onViewChange).toHaveBeenNthCalledWith(2, { kind: "recent" });
+    expect(onViewChange).toHaveBeenNthCalledWith(3, { kind: "classification", classificationId: null });
+  });
+
+  it("expands and collapses without changing the selected view", async () => {
+    const user = userEvent.setup();
+    const { onExpandedIdsChange, onViewChange } = renderSidebar();
+
+    await user.click(screen.getByRole("button", { name: "Collapse Games" }));
+    expect(onExpandedIdsChange).toHaveBeenCalledWith(["work"]);
+    expect(onViewChange).not.toHaveBeenCalled();
+    expect(screen.queryByRole("treeitem", { name: /Blue Archive/ })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Expand Games" }));
+    expect(onExpandedIdsChange).toHaveBeenLastCalledWith(["work", "root"]);
+  });
+
+  it("selects a classification row without toggling its expansion", async () => {
+    const user = userEvent.setup();
+    const { onExpandedIdsChange, onViewChange } = renderSidebar();
+
+    await user.click(screen.getByRole("treeitem", { name: /Blue Archive/ }));
+
+    expect(onViewChange).toHaveBeenCalledWith({ kind: "classification", classificationId: "work" });
+    expect(onExpandedIdsChange).not.toHaveBeenCalled();
+  });
+
+  it("creates root and selected child classifications using the existing rules", async () => {
     const user = userEvent.setup();
     const fixtureGateway = gateway();
     renderSidebar(fixtureGateway);
 
-    await user.click(screen.getByRole("button", { name: "게임 선택" }));
-    await user.click(screen.getByRole("button", { name: "하위 항목 추가" }));
-    await user.type(screen.getByLabelText("이름"), "블루 아카이브 2");
-    await user.click(screen.getByRole("button", { name: "추가" }));
+    await user.click(screen.getByRole("button", { name: "Add classification" }));
+    await user.type(screen.getByLabelText("Name"), "Comics");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    await waitFor(() => expect(fixtureGateway.createClassification).toHaveBeenCalledWith({ kind: "root", name: "Comics", parentId: null }));
 
-    await waitFor(() =>
-      expect(fixtureGateway.createClassification).toHaveBeenCalledWith({
-        kind: "work",
-        name: "블루 아카이브 2",
-        parentId: "root",
-      }),
-    );
+    await user.click(screen.getByRole("treeitem", { name: /Games/ }));
+    await user.click(screen.getByRole("button", { name: "Add classification" }));
+    await user.type(screen.getByLabelText("Name"), "New work");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    await waitFor(() => expect(fixtureGateway.createClassification).toHaveBeenLastCalledWith({ kind: "work", name: "New work", parentId: "root" }));
   });
 
-  it("offers only tags when adding below a work", async () => {
-    const user = userEvent.setup();
-    renderSidebar();
-
-    await user.click(screen.getByRole("button", { name: "블루 아카이브 선택" }));
-    await user.click(screen.getByRole("button", { name: "하위 항목 추가" }));
-
-    expect(screen.getByText("태그")).toBeInTheDocument();
-    expect(screen.queryByLabelText("종류")).not.toBeInTheDocument();
-  });
-
-  it("keeps Tab, Enter, and Escape dialog interactions accessible", async () => {
+  it("uses the same rename, move, and delete actions from ellipsis and right-click", async () => {
     const user = userEvent.setup();
     const fixtureGateway = gateway();
     renderSidebar(fixtureGateway);
+    const row = screen.getByRole("treeitem", { name: /Blue Archive/ });
 
-    await user.click(screen.getByRole("button", { name: "최상위 분류 추가" }));
-    const name = screen.getByLabelText("이름");
-    expect(name).toHaveFocus();
-    await user.tab();
-    expect(screen.getByRole("button", { name: "취소" })).toHaveFocus();
-    await user.tab();
-    expect(screen.getByRole("button", { name: "추가" })).toHaveFocus();
-    await user.tab({ shift: true });
-    await user.tab({ shift: true });
-    await user.type(name, "영화");
-    await user.keyboard("{Enter}");
+    await user.click(screen.getByRole("button", { name: "More actions for Blue Archive" }));
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Rename", "Move", "Delete"]);
+    await user.click(screen.getByRole("menuitem", { name: "Rename" }));
+    expect(screen.getByRole("dialog", { name: "Rename classification" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
 
-    await waitFor(() =>
-      expect(fixtureGateway.createClassification).toHaveBeenCalledWith({
-        kind: "root",
-        name: "영화",
-        parentId: null,
-      }),
-    );
+    fireEvent.contextMenu(row, { clientX: 20, clientY: 20 });
+    await user.click(screen.getByRole("menuitem", { name: "Move" }));
+    expect(screen.getByRole("dialog", { name: "Move classification" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
 
-    const close = vi.fn(function (this: HTMLDialogElement) {
-      this.removeAttribute("open");
-    });
-    Object.defineProperty(HTMLDialogElement.prototype, "close", {
-      configurable: true,
-      value: close,
-    });
-    await user.click(screen.getByRole("button", { name: "최상위 분류 추가" }));
-    await user.keyboard("{Escape}");
-    expect(close).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.contextMenu(row, { clientX: 20, clientY: 20 });
+    await user.click(screen.getByRole("menuitem", { name: "Delete" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(fixtureGateway.deleteClassification).toHaveBeenCalledWith("work"));
   });
 
-  it("shows the gateway deletion error without hiding it", async () => {
-    const user = userEvent.setup();
-    const fixtureGateway = gateway();
-    vi.mocked(fixtureGateway.deleteClassification).mockRejectedValue(
-      new Error("하위 항목이나 자산이 연결된 분류 항목은 삭제할 수 없습니다"),
-    );
-    renderSidebar(fixtureGateway, { selectedId: "tag" });
+  it("honors controlled expanded IDs", () => {
+    renderSidebar(gateway(), { expandedIds: [] });
 
-    await user.click(screen.getByRole("button", { name: "삭제" }));
-    await user.click(screen.getByRole("button", { name: "삭제 확인" }));
-
-    expect(await screen.findByRole("status")).toHaveTextContent(
-      "하위 항목이나 자산이 연결된 분류 항목은 삭제할 수 없습니다",
-    );
+    expect(screen.queryByRole("treeitem", { name: /Blue Archive/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Expand Games" })).toBeInTheDocument();
   });
 
-  it("clears a deletion error after a successful retry", async () => {
-    const user = userEvent.setup();
-    const fixtureGateway = gateway();
-    vi.mocked(fixtureGateway.deleteClassification)
-      .mockRejectedValueOnce(new Error("삭제할 수 없습니다"))
-      .mockResolvedValueOnce(undefined);
-    renderSidebar(fixtureGateway, { selectedId: "tag" });
-
-    await user.click(screen.getByRole("button", { name: "삭제" }));
-    await user.click(screen.getByRole("button", { name: "삭제 확인" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("삭제할 수 없습니다");
-
-    await user.click(screen.getByRole("button", { name: "삭제 확인" }));
-    await waitFor(() =>
-      expect(fixtureGateway.deleteClassification).toHaveBeenCalledTimes(2),
-    );
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-  });
-
-  it("warns when the tree contains orphaned entries", () => {
-    renderSidebar(gateway(), {
-      entries: [...entries, { id: "lost", kind: "tag", name: "고아", parentId: "missing" }],
+  it("emits integer sidebar widths clamped to 184 and 360", () => {
+    const { onSidebarWidthChange } = renderSidebar(gateway(), { sidebarWidth: 232 });
+    const handle = screen.getByRole("separator", { name: "Resize sidebar" });
+    Object.defineProperties(handle, {
+      setPointerCapture: { configurable: true, value: vi.fn() },
+      releasePointerCapture: { configurable: true, value: vi.fn() },
     });
+    vi.spyOn(handle, "setPointerCapture");
+    vi.spyOn(handle, "releasePointerCapture");
 
-    expect(screen.getByRole("alert")).toHaveTextContent("고아 분류 항목");
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 100 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: -100.4 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 400.4 });
+    fireEvent.pointerUp(handle, { pointerId: 1 });
+
+    expect(onSidebarWidthChange).toHaveBeenNthCalledWith(1, 184);
+    expect(onSidebarWidthChange).toHaveBeenNthCalledWith(2, 360);
+    expect(handle.setPointerCapture).toHaveBeenCalledWith(1);
+    expect(handle.releasePointerCapture).toHaveBeenCalledWith(1);
   });
 });

@@ -7,7 +7,7 @@ import {
 } from "../library/LibrarySetup";
 import { useCallback, useEffect, useState } from "react";
 import { ClassificationSidebar } from "../classification/ClassificationSidebar";
-import type { ClassificationEntry, LibraryGateway } from "../library/types";
+import type { AssetView, ClassificationEntry, LibraryGateway } from "../library/types";
 import { AssetBrowser } from "../assets/AssetGallery";
 import {
   type DropSubscriber,
@@ -60,7 +60,12 @@ function LibraryWorkspace({
 }) {
   const { gateway, library } = useLibrary();
   const [entries, setEntries] = useState<ClassificationEntry[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [view, setView] = useState<AssetView>({
+    kind: "classification",
+    classificationId: null,
+  });
+  const [expandedIds, setExpandedIds] = useState<string[]>([]);
+  const [sidebarWidth, setSidebarWidth] = useState(232);
   const [message, setMessage] = useState<string | null>(null);
   const [assetRefresh, setAssetRefresh] = useState(0);
   const refreshClassifications = useCallback(async () => {
@@ -74,7 +79,7 @@ function LibraryWorkspace({
   }, []);
   const progress = useFileDrop({
     subscribe: subscribeDrops,
-    classificationId: selectedId,
+    classificationId: view.kind === "classification" ? view.classificationId : null,
     ingestImage: gateway.ingestImage,
     onResult: handleDropResult,
   });
@@ -98,12 +103,16 @@ function LibraryWorkspace({
       <div className="app-shell">
         <ClassificationSidebar
           entries={entries}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
+          view={view}
+          expandedIds={expandedIds}
+          sidebarWidth={sidebarWidth}
+          onViewChange={setView}
+          onExpandedIdsChange={setExpandedIds}
+          onSidebarWidthChange={setSidebarWidth}
           onChanged={() => void refreshClassifications()}
         />
         <AssetBrowser
-          classificationId={selectedId}
+          classificationId={view.kind === "classification" ? view.classificationId : null}
           classifications={entries}
           refreshVersion={assetRefresh}
         />

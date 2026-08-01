@@ -142,9 +142,9 @@ describe("App", () => {
       />,
     );
 
-    await user.click(
-      await screen.findByRole("button", { name: "아로나 선택" }),
-    );
+    await user.click(await screen.findByRole("button", { name: "Expand 게임" }));
+    await user.click(await screen.findByRole("button", { name: "Expand 블루 아카이브" }));
+    await user.click(await screen.findByRole("treeitem", { name: "아로나" }));
     await waitFor(() =>
       expect(libraryGateway.listAssets).toHaveBeenLastCalledWith({
         classificationId: "tag-arona",
