@@ -38,6 +38,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::ClassificationNotEmpty => "classification_not_empty",
             LibraryError::AssetNotFound => "asset_not_found",
             LibraryError::InvalidAssetPageLimit => "invalid_asset_page_limit",
+            LibraryError::InvalidAssetCursor => "invalid_asset_cursor",
             LibraryError::MediaNotFound => "media_not_found",
             LibraryError::UnsafeMediaPath => "unsafe_media_path",
             LibraryError::ReadMedia { .. } => "read_media_failed",
@@ -158,6 +159,17 @@ pub fn list_assets(
 ) -> Result<AssetPage, CommandError> {
     current_required(state)?
         .list_assets(query)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn set_asset_favorite(
+    asset_id: String,
+    favorite: bool,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    current_required(state)?
+        .set_asset_favorite(&asset_id, favorite)
         .map_err(CommandError::from)
 }
 

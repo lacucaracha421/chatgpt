@@ -21,13 +21,22 @@ pub struct AssetSummary {
     pub height: u32,
     pub collected_at: String,
     pub favorite: bool,
+    pub source_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AssetSort {
+    Newest,
+    Oldest,
+    Favorites,
+    Random,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AssetCursor {
-    pub collected_at: String,
-    pub id: String,
+    pub token: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -35,6 +44,9 @@ pub struct AssetCursor {
 pub struct AssetQuery {
     pub classification_id: Option<String>,
     pub direct_only: bool,
+    pub favorite_only: bool,
+    pub sort: AssetSort,
+    pub random_pivot: Option<String>,
     pub after: Option<AssetCursor>,
     pub limit: u32,
 }

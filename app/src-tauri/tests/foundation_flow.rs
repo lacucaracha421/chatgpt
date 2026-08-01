@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use app_lib::library::{
     models::{
-        AssetPage, AssetQuery, AssetSummary, ClassificationKind, CreateClassification,
+        AssetPage, AssetQuery, AssetSort, AssetSummary, ClassificationKind, CreateClassification,
         IngestImageRequest, IngestOutcome,
     },
     Library,
@@ -87,6 +87,9 @@ impl FoundationFixture {
             .list_assets(AssetQuery {
                 classification_id: Some(classification_id.into()),
                 direct_only: false,
+                favorite_only: false,
+                sort: AssetSort::Newest,
+                random_pivot: None,
                 after: None,
                 limit: 100,
             })
@@ -165,6 +168,87 @@ fn png_jpeg_and_gif_images_can_be_ingested() {
         assert_eq!((asset.width, asset.height), (8, 6));
         assert!(source_path.is_file());
     }
+}
+
+#[test]
+fn public_asset_flow_supports_favorites_sorts_random_paging_and_source_urls() {
+    let temp = tempfile::tempdir().unwrap();
+    let first_path = temp.path().join("first.png");
+    let second_path = temp.path().join("second.png");
+    write_colored_image(&first_path, [40, 80, 120]);
+    write_colored_image(&second_path, [120, 80, 40]);
+    let library = Library::open(temp.path().join("library")).unwrap();
+
+    let first = ingest(&library, &first_path, Some("https://example.test/first"));
+    let second = ingest(&library, &second_path, None);
+    library.set_asset_favorite(&first.id, true).unwrap();
+
+    let favorites = library
+        .list_assets(asset_query(AssetSort::Favorites, true, None, 20))
+        .unwrap();
+    assert_eq!(favorites.items.len(), 1);
+    assert_eq!(favorites.items[0].id, first.id);
+    assert!(favorites.items[0].favorite);
+    assert_eq!(
+        favorites.items[0].source_url.as_deref(),
+        Some("https://example.test/first")
+    );
+
+    let newest = library
+        .list_assets(asset_query(AssetSort::Newest, false, None, 1))
+        .unwrap();
+    let oldest = library
+        .list_assets(asset_query(AssetSort::Oldest, false, None, 1))
+        .unwrap();
+    assert_eq!(newest.items.len(), 1);
+    assert_eq!(oldest.items.len(), 1);
+    assert_ne!(newest.next_cursor, None);
+    assert_ne!(oldest.next_cursor, None);
+
+    let random = asset_query(AssetSort::Random, false, Some("8"), 20);
+    assert_eq!(
+        library.list_assets(random.clone()).unwrap(),
+        library.list_assets(random).unwrap()
+    );
+    assert_eq!(library.summary().unwrap().asset_count, 2);
+    assert_ne!(first.id, second.id);
+}
+
+fn ingest(library: &Library, source_path: &Path, source_url: Option<&str>) -> AssetSummary {
+    let outcome = library
+        .ingest_image(IngestImageRequest {
+            source_path: source_path.to_path_buf(),
+            classification_id: None,
+            source_url: source_url.map(str::to_owned),
+        })
+        .unwrap();
+    let IngestOutcome::Added { asset } = outcome else {
+        panic!("each distinct test image must be added");
+    };
+    asset
+}
+
+fn asset_query(
+    sort: AssetSort,
+    favorite_only: bool,
+    random_pivot: Option<&str>,
+    limit: u32,
+) -> AssetQuery {
+    AssetQuery {
+        classification_id: None,
+        direct_only: false,
+        favorite_only,
+        sort,
+        random_pivot: random_pivot.map(str::to_owned),
+        after: None,
+        limit,
+    }
+}
+
+fn write_colored_image(path: &Path, rgb: [u8; 3]) {
+    RgbImage::from_pixel(8, 6, Rgb(rgb))
+        .save_with_format(path, ImageFormat::Png)
+        .unwrap();
 }
 
 fn write_image(path: &Path, format: ImageFormat) {

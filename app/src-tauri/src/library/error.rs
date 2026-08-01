@@ -30,6 +30,8 @@ pub enum LibraryError {
     AssetNotFound,
     #[error("자산 페이지 크기는 1에서 200 사이여야 합니다")]
     InvalidAssetPageLimit,
+    #[error("invalid asset cursor")]
+    InvalidAssetCursor,
     #[error("요청한 미디어 파일을 찾을 수 없습니다")]
     MediaNotFound,
     #[error("미디어 경로가 라이브러리 폴더 밖을 가리킵니다")]

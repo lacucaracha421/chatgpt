@@ -25,6 +25,7 @@ pub fn run() {
             commands::delete_classification,
             commands::get_asset_classifications,
             commands::list_assets,
+            commands::set_asset_favorite,
             commands::set_asset_classifications,
             commands::ingest_image,
         ])

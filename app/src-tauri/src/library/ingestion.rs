@@ -94,6 +94,7 @@ impl Library {
             height,
             collected_at: chrono::Utc::now().to_rfc3339(),
             favorite: false,
+            source_url: request.source_url.clone(),
         };
         self.register_asset(
             &asset,

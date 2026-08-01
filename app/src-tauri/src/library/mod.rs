@@ -1,6 +1,7 @@
 mod classification;
 mod db;
 pub mod error;
+mod favorite;
 mod ingestion;
 pub mod models;
 mod query;
