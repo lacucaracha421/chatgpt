@@ -32,6 +32,8 @@ pub enum LibraryError {
     UnsupportedSchema(i64),
     #[error("trash retention must be between 1 and 3650 days, or disabled")]
     InvalidTrashRetention,
+    #[error("managed file deletion is supported only on Windows")]
+    UnsupportedManagedFileDeletion,
     #[error("분류 이름은 비어 있을 수 없습니다")]
     EmptyClassificationName,
     #[error("요청한 분류 항목을 찾을 수 없습니다.")]

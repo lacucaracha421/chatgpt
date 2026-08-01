@@ -21,16 +21,6 @@ impl LibraryLease {
         let file = options
             .open(&path)
             .map_err(|source| map_lock_error(&path, source))?;
-        #[cfg(target_os = "linux")]
-        {
-            use std::os::fd::AsRawFd;
-
-            // SAFETY: `file` remains open for the full lifetime of the lease.
-            if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-                return Err(map_lock_error(&path, std::io::Error::last_os_error()));
-            }
-        }
-
         Ok(Self { _file: file })
     }
 }

@@ -6,8 +6,6 @@ use std::{
 
 #[cfg(windows)]
 use std::os::windows::io::AsRawHandle;
-#[cfg(target_os = "linux")]
-use std::{ffi::CString, os::unix::ffi::OsStrExt};
 
 use image::{ImageFormat, ImageReader};
 use rusqlite::{params, OptionalExtension};
@@ -498,36 +496,6 @@ fn rename_no_replace(from: &Path, to: &Path) -> io::Result<()> {
     fs::rename(from, to)
 }
 
-#[cfg(target_os = "linux")]
-fn rename_no_replace(from: &Path, to: &Path) -> io::Result<()> {
-    let from = CString::new(from.as_os_str().as_bytes())
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains a NUL byte"))?;
-    let to = CString::new(to.as_os_str().as_bytes())
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains a NUL byte"))?;
-    // SAFETY: both C strings are NUL-terminated and remain valid for the call.
-    if unsafe {
-        libc::renameat2(
-            libc::AT_FDCWD,
-            from.as_ptr(),
-            libc::AT_FDCWD,
-            to.as_ptr(),
-            libc::RENAME_NOREPLACE,
-        )
-    } != 0
-    {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(())
-}
-
-#[cfg(not(any(windows, target_os = "linux")))]
-fn rename_no_replace(_from: &Path, _to: &Path) -> io::Result<()> {
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "safe pending-file cleanup is supported on Windows and Linux",
-    ))
-}
-
 #[cfg(test)]
 type StagingHook = Box<dyn FnOnce(&Path)>;
 
@@ -591,36 +559,6 @@ fn run_after_duplicate_hook(root: &Path) {
 
 #[cfg(not(test))]
 fn run_after_duplicate_hook(_root: &Path) {}
-
-#[cfg(unix)]
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct FileIdentity {
-    device: u64,
-    inode: u64,
-}
-
-#[cfg(unix)]
-impl FileIdentity {
-    fn from_file(file: &File) -> io::Result<Self> {
-        use std::os::unix::fs::MetadataExt;
-
-        let metadata = file.metadata()?;
-        Ok(Self {
-            device: metadata.dev(),
-            inode: metadata.ino(),
-        })
-    }
-
-    fn matches_path(&self, path: &Path) -> bool {
-        let metadata = match fs::symlink_metadata(path) {
-            Ok(metadata) if !metadata.file_type().is_symlink() => metadata,
-            _ => return false,
-        };
-        use std::os::unix::fs::MetadataExt;
-
-        self.device == metadata.dev() && self.inode == metadata.ino()
-    }
-}
 
 #[cfg(windows)]
 #[derive(Clone, Copy, PartialEq, Eq)]

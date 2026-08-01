@@ -1,22 +1,13 @@
-use std::{
-    fs::{self, File},
-    io,
-    path::{Path, PathBuf},
-};
-
-#[cfg(target_os = "linux")]
-use std::{
-    ffi::CString,
-    os::{
-        fd::{AsRawFd, FromRawFd, OwnedFd},
-        unix::ffi::OsStrExt,
-    },
-};
 #[cfg(windows)]
 use std::{
     ffi::OsString,
     fs::OpenOptions,
     os::windows::{ffi::OsStringExt, fs::OpenOptionsExt, io::AsRawHandle},
+};
+use std::{
+    fs::{self, File},
+    io,
+    path::{Path, PathBuf},
 };
 
 use chrono::{DateTime, Duration, FixedOffset, Utc};
@@ -222,6 +213,7 @@ impl Library {
         Ok(())
     }
 
+    #[cfg(windows)]
     fn purge_candidates(&self, asset_ids: Vec<String>) -> Result<PurgeSummary, LibraryError> {
         let connection = self.connection()?;
         let mut deleted_count = 0;
@@ -255,6 +247,12 @@ impl Library {
         })
     }
 
+    #[cfg(not(windows))]
+    fn purge_candidates(&self, _asset_ids: Vec<String>) -> Result<PurgeSummary, LibraryError> {
+        Err(LibraryError::UnsupportedManagedFileDeletion)
+    }
+
+    #[cfg(windows)]
     fn remove_managed_files(
         &self,
         relative_path: &str,
@@ -407,85 +405,6 @@ fn run_after_trash_count_hook() {
 
 #[cfg(not(test))]
 fn run_after_trash_count_hook() {}
-
-#[cfg(target_os = "linux")]
-fn delete_managed_file(canonical_root: &Path, relative_path: &str) -> Result<(), ()> {
-    let components = checked_relative_path(relative_path)?
-        .components()
-        .filter_map(|component| match component {
-            std::path::Component::Normal(name) => Some(name),
-            std::path::Component::CurDir => None,
-            _ => unreachable!("checked relative paths contain only normal components"),
-        })
-        .collect::<Vec<_>>();
-    let Some((file_name, parents)) = components.split_last() else {
-        return Err(());
-    };
-    let root = File::open(canonical_root).map_err(|_| ())?;
-    let mut directories = Vec::<OwnedFd>::new();
-    let mut parent_fd = root.as_raw_fd();
-    for parent in parents {
-        let parent = CString::new(parent.as_bytes()).map_err(|_| ())?;
-        // SAFETY: `parent_fd` is open and `parent` is a NUL-terminated path component.
-        let fd = unsafe {
-            libc::openat(
-                parent_fd,
-                parent.as_ptr(),
-                libc::O_RDONLY | libc::O_CLOEXEC | libc::O_DIRECTORY | libc::O_NOFOLLOW,
-            )
-        };
-        if fd < 0 {
-            return if io::Error::last_os_error().kind() == io::ErrorKind::NotFound {
-                Ok(())
-            } else {
-                Err(())
-            };
-        }
-        // SAFETY: `openat` returned a new owned descriptor above.
-        let directory = unsafe { OwnedFd::from_raw_fd(fd) };
-        parent_fd = directory.as_raw_fd();
-        directories.push(directory);
-    }
-    let file_name = CString::new(file_name.as_bytes()).map_err(|_| ())?;
-    // SAFETY: `parent_fd` is open and `file_name` is a NUL-terminated path component.
-    let file_fd = unsafe {
-        libc::openat(
-            parent_fd,
-            file_name.as_ptr(),
-            libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
-        )
-    };
-    if file_fd < 0 {
-        return if io::Error::last_os_error().kind() == io::ErrorKind::NotFound {
-            Ok(())
-        } else {
-            Err(())
-        };
-    }
-    // SAFETY: `openat` returned a new owned descriptor above.
-    let file = unsafe { OwnedFd::from_raw_fd(file_fd) };
-    let mut metadata = std::mem::MaybeUninit::<libc::stat>::zeroed();
-    // SAFETY: the descriptor is valid and the kernel initializes the stat buffer on success.
-    if unsafe { libc::fstat(file.as_raw_fd(), metadata.as_mut_ptr()) } != 0
-        || unsafe { metadata.assume_init() }.st_mode & libc::S_IFMT != libc::S_IFREG
-    {
-        return Err(());
-    }
-    // SAFETY: `parent_fd` is open and `file_name` is a NUL-terminated final component.
-    if unsafe { libc::unlinkat(parent_fd, file_name.as_ptr(), 0) } != 0 {
-        return if io::Error::last_os_error().kind() == io::ErrorKind::NotFound {
-            Ok(())
-        } else {
-            Err(())
-        };
-    }
-    Ok(())
-}
-
-#[cfg(not(any(windows, target_os = "linux")))]
-fn delete_managed_file(_canonical_root: &Path, _relative_path: &str) -> Result<(), ()> {
-    Err(())
-}
 
 fn decode_cursor(after: Option<AssetCursor>) -> Result<Option<TrashCursor>, LibraryError> {
     after

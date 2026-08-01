@@ -35,6 +35,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::Database(_) => "database_failed",
             LibraryError::UnsupportedSchema(_) => "unsupported_schema",
             LibraryError::InvalidTrashRetention => "invalid_trash_retention",
+            LibraryError::UnsupportedManagedFileDeletion => "unsupported_managed_file_deletion",
             LibraryError::EmptyClassificationName => "empty_classification_name",
             LibraryError::ClassificationNotFound => "classification_not_found",
             LibraryError::DuplicateClassificationName => "duplicate_classification_name",

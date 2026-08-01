@@ -2,6 +2,9 @@ mod commands;
 pub mod library;
 mod media_protocol;
 
+#[cfg(not(windows))]
+compile_error!("Lakomics is supported only on Windows");
+
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
