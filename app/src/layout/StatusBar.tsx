@@ -15,8 +15,8 @@ export function StatusBar({ status, progress, dropEnabled }: StatusBarProps) {
       : "파일을 저장할 분류를 먼저 선택하세요.";
 
   return (
-    <footer className="status-bar" aria-label="Library status">
-      <span>{status.loading ? "Loading assets" : `${status.loadedCount} assets`}</span>
+    <footer className="status-bar" aria-label="라이브러리 상태">
+      <span>{status.loading ? "자산을 불러오는 중입니다." : `${status.loadedCount}개 자산`}</span>
       {status.selectedAsset && <span>{status.selectedAsset.originalName}</span>}
       <span>{progressText}</span>
     </footer>

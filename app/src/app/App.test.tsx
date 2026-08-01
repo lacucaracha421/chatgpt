@@ -76,7 +76,7 @@ describe("App", () => {
     await waitFor(() =>
       expect(libraryGateway.openLibrary).toHaveBeenCalledWith("C:\\Lakomics"),
     );
-    expect(screen.getByRole("main", { name: "Library workspace" })).toBeInTheDocument();
+    expect(screen.getByRole("main", { name: "라이브러리 작업 공간" })).toBeInTheDocument();
     expect(localStorage.getItem("lakomics.libraryPath")).toBe("C:\\Lakomics");
   });
 
@@ -89,7 +89,7 @@ describe("App", () => {
     await waitFor(() =>
       expect(libraryGateway.openLibrary).toHaveBeenCalledWith("C:\\Lakomics"),
     );
-    expect(screen.getByRole("main", { name: "Library workspace" })).toBeInTheDocument();
+    expect(screen.getByRole("main", { name: "라이브러리 작업 공간" })).toBeInTheDocument();
   });
 
   it("renders the persistent four-region workspace when a library is restored", async () => {
@@ -98,7 +98,7 @@ describe("App", () => {
 
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} />);
 
-    expect(await screen.findByRole("main", { name: "Library workspace" })).toBeInTheDocument();
+    expect(await screen.findByRole("main", { name: "라이브러리 작업 공간" })).toBeInTheDocument();
     expect(screen.getByRole("complementary", { name: "Classification" })).toBeInTheDocument();
     expect(screen.getByRole("contentinfo")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Lakomics" })).not.toBeInTheDocument();

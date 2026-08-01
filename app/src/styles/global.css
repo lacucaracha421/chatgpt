@@ -36,7 +36,7 @@ input:disabled {
 .app-shell {
   display: grid;
   grid-template-rows: minmax(0, 1fr) var(--statusbar-height);
-  min-height: 100vh;
+  height: 100vh;
   overflow: hidden;
 }
 
@@ -47,6 +47,7 @@ input:disabled {
 }
 
 .app-shell__content {
+  min-height: 0;
   min-width: 0;
   overflow: auto;
 }
@@ -279,8 +280,10 @@ input:disabled {
 .classification-sidebar {
   position: relative;
   flex: none;
+  min-height: 0;
   min-width: 184px;
   max-width: 360px;
+  overflow-y: auto;
   padding: var(--space-3);
   background: var(--color-sidebar);
 }
