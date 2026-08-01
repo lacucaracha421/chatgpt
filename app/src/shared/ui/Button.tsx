@@ -16,7 +16,7 @@ export function Button({
   children,
   className,
   size = "md",
-  variant = "primary",
+  variant = "secondary",
   ...props
 }: PropsWithChildren<ButtonProps>) {
   return (

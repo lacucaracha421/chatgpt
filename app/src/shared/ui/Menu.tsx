@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -27,6 +28,7 @@ type MenuPosition = { left: number; top: number };
 export function Menu({ contextTarget, items, label, trigger }: MenuProps): ReactNode {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const contextPointerTargetRef = useRef<EventTarget | null>(null);
   const wasOpenRef = useRef(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const [open, setOpen] = useState(false);
@@ -51,6 +53,7 @@ export function Menu({ contextTarget, items, label, trigger }: MenuProps): React
 
     const openFromContextTarget = (event: MouseEvent) => {
       event.preventDefault();
+      contextPointerTargetRef.current = event.currentTarget;
       openMenu({ left: event.clientX, top: event.clientY });
     };
     target.addEventListener("contextmenu", openFromContextTarget);
@@ -60,6 +63,11 @@ export function Menu({ contextTarget, items, label, trigger }: MenuProps): React
   useEffect(() => {
     if (!open) return;
     const dismissOutsideMenu = (event: PointerEvent) => {
+      if (event.target === contextPointerTargetRef.current) {
+        contextPointerTargetRef.current = null;
+        return;
+      }
+      contextPointerTargetRef.current = null;
       const target = event.target;
       if (
         target instanceof Node
@@ -73,9 +81,23 @@ export function Menu({ contextTarget, items, label, trigger }: MenuProps): React
     return () => document.removeEventListener("pointerup", dismissOutsideMenu);
   }, [open]);
 
+  useLayoutEffect(() => {
+    if (!open || !menuRef.current) return;
+    const { height, width } = menuRef.current.getBoundingClientRect();
+    setPosition((current) => {
+      const left = Math.max(0, Math.min(current.left, window.innerWidth - width));
+      const top = Math.max(0, Math.min(current.top, window.innerHeight - height));
+      return left === current.left && top === current.top ? current : { left, top };
+    });
+  }, [open]);
+
   useEffect(() => {
     if (open) {
       wasOpenRef.current = true;
+      if (enabledIndexes.length === 0) {
+        menuRef.current?.focus();
+        return;
+      }
       menuRef.current?.querySelector<HTMLButtonElement>(`[data-menu-index="${activeIndex}"]`)?.focus();
       return;
     }
@@ -152,7 +174,7 @@ export function Menu({ contextTarget, items, label, trigger }: MenuProps): React
         {trigger}
       </button>
       {open && (
-        <div ref={menuRef} className="ui-menu" role="menu" style={menuStyle} onKeyDown={handleMenuKeyDown}>
+        <div ref={menuRef} className="ui-menu" role="menu" tabIndex={-1} style={menuStyle} onKeyDown={handleMenuKeyDown}>
           {items.map((item, index) => (
             <button
               key={item.id}
