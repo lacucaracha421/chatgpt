@@ -10,7 +10,8 @@ export type AssetSort = "newest" | "oldest" | "favorites" | "random";
 export type AssetView =
   | { kind: "classification"; classificationId: string | null }
   | { kind: "favorites" }
-  | { kind: "recent" };
+  | { kind: "recent" }
+  | { kind: "trash" };
 
 export type ClassificationEntry = {
   id: string;
@@ -23,8 +24,6 @@ export type AssetSummary = {
   id: string;
   title: string | null;
   originalName: string;
-  relativePath: string;
-  thumbnailRelativePath: string;
   byteSize: number;
   width: number;
   height: number;
@@ -52,6 +51,26 @@ export type AssetPage = {
   nextCursor: AssetCursor | null;
 };
 
+export type TrashPolicy = { retentionDays: number | null };
+
+export type TrashAssetSummary = {
+  asset: AssetSummary;
+  trashedAt: string;
+  purgeAt: string | null;
+};
+
+export type TrashPage = {
+  items: TrashAssetSummary[];
+  nextCursor: AssetCursor | null;
+  totalCount: number;
+  totalBytes: number;
+};
+
+export type PurgeSummary = {
+  deletedCount: number;
+  failedAssetIds: string[];
+};
+
 export type CreateClassification = {
   kind: ClassificationKind;
   name: string;
@@ -77,6 +96,12 @@ export interface LibraryGateway {
   moveClassification(id: string, parentId: string | null): Promise<void>;
   deleteClassification(id: string): Promise<void>;
   listAssets(query: AssetQuery): Promise<AssetPage>;
+  trashAsset(assetId: string): Promise<void>;
+  restoreAsset(assetId: string): Promise<void>;
+  listTrash(query: { after: AssetCursor | null; limit: number }): Promise<TrashPage>;
+  emptyTrash(): Promise<PurgeSummary>;
+  getTrashPolicy(): Promise<TrashPolicy>;
+  setTrashPolicy(policy: TrashPolicy): Promise<void>;
   setAssetFavorite(assetId: string, favorite: boolean): Promise<void>;
   setAssetClassifications(assetId: string, classificationIds: string[]): Promise<void>;
   getAssetClassifications(assetId: string): Promise<string[]>;

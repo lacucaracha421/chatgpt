@@ -243,6 +243,31 @@ describe("AssetBrowser", () => {
     expect(screen.getByRole("dialog", { name: "열기" })).toBeInTheDocument();
   });
 
+  it("moves the selected asset to trash and refreshes the gallery", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway({ items: [{ ...asset(0), title: "Delete me" }], nextCursor: null });
+    renderBrowser(gateway);
+
+    await user.click(await screen.findByRole("button", { name: "Delete me" }));
+    await user.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
+
+    expect(gateway.trashAsset).toHaveBeenCalledWith("asset-0");
+    expect(screen.getByText("휴지통으로 이동했습니다.")).toBeVisible();
+  });
+
+  it("keeps the selected asset when moving it to trash fails", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway({ items: [{ ...asset(0), title: "Keep me" }], nextCursor: null });
+    vi.mocked(gateway.trashAsset).mockRejectedValue(new Error("trash failed"));
+    renderBrowser(gateway);
+
+    await user.click(await screen.findByRole("button", { name: "Keep me" }));
+    await user.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
+
+    expect(await screen.findByText("trash failed")).toBeVisible();
+    expect(screen.getByRole("button", { name: "휴지통으로 이동" })).toBeVisible();
+  });
+
   it("uses the constrained workspace styles without horizontal sidebar scrolling", () => {
     expect(styles).toMatch(/\.asset-browser\s*\{[^}]*display:\s*flex;[^}]*min-height:\s*0;/s);
     expect(styles).toMatch(/\.asset-gallery__scroll\s*\{[^}]*flex:\s*1;[^}]*min-height:\s*0;[^}]*overflow:\s*auto;/s);
@@ -265,8 +290,6 @@ function asset(index: number) {
     id: `asset-${index}`,
     title: null,
     originalName: `asset-${index}.png`,
-    relativePath: `assets/asset-${index}.png`,
-    thumbnailRelativePath: `thumbnails/asset-${index}.webp`,
     byteSize: 1,
     width: 200,
     height: 200,
@@ -281,6 +304,8 @@ function createGateway(page: AssetPage = { items: [], nextCursor: null }): Libra
     openLibrary: vi.fn(), currentLibrary: vi.fn(), listClassifications: vi.fn(),
     createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(),
     deleteClassification: vi.fn(), listAssets: vi.fn().mockResolvedValue(page),
+    trashAsset: vi.fn(), restoreAsset: vi.fn(), listTrash: vi.fn(), emptyTrash: vi.fn(),
+    getTrashPolicy: vi.fn(), setTrashPolicy: vi.fn(),
     setAssetFavorite: vi.fn(), setAssetClassifications: vi.fn(),
     getAssetClassifications: vi.fn().mockResolvedValue([]), ingestImage: vi.fn(),
   };

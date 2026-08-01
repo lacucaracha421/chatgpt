@@ -7,7 +7,7 @@ import { Dialog } from "../shared/ui/Dialog";
 import { Toast } from "../shared/ui/Toast";
 import { assetUrl } from "./mediaUrl";
 
-export function AssetDetailDialog({ asset, classifications, onClose }: { asset: AssetSummary | null; classifications: ClassificationEntry[]; onClose: () => void }) {
+export function AssetDetailDialog({ asset, classifications, onClose, onTrashed }: { asset: AssetSummary | null; classifications: ClassificationEntry[]; onClose: () => void; onTrashed?: () => void }) {
   const { gateway } = useLibrary();
   const [state, setState] = useState({ assetId: null as string | null, status: "idle" as "idle" | "loading" | "loaded" | "error", selectedIds: [] as string[] });
   const [saving, setSaving] = useState(false);
@@ -32,12 +32,25 @@ export function AssetDetailDialog({ asset, classifications, onClose }: { asset: 
     catch (error) { if (current(identityRef, request)) setMessage(commandErrorMessage(error, "분류를 저장하지 못했습니다.")); }
     finally { if (current(identityRef, request)) setSaving(false); }
   };
+  const trash = async () => {
+    if (saving) return;
+    setSaving(true); setMessage(null);
+    try {
+      await gateway.trashAsset(asset.id);
+      onTrashed?.();
+      close();
+    } catch (error) {
+      setMessage(commandErrorMessage(error, "자산을 휴지통으로 이동하지 못했습니다."));
+    } finally {
+      setSaving(false);
+    }
+  };
   const date = localDate(asset.collectedAt);
   return <Dialog open title={asset.title || asset.originalName} onClose={close}><div className="asset-detail">
     <img className="asset-detail__image" src={assetUrl(asset.id)} alt={asset.title || asset.originalName} />
     <dl className="asset-detail__metadata"><div><dt>출처</dt><dd>{asset.sourceUrl ?? "—"}</dd></div><div><dt>가져온 날짜</dt><dd>{date ?? "—"}</dd></div><div><dt>좋아요</dt><dd>{asset.favorite ? "예" : "아니요"}</dd></div></dl>
     <fieldset disabled={!loaded || saving} className="asset-detail__classifications"><legend>분류</legend>{classifications.map((entry) => <label key={entry.id}><input type="checkbox" checked={selectedIds.includes(entry.id)} onChange={(event) => setState((value) => ({ ...value, selectedIds: event.target.checked ? [...value.selectedIds, entry.id] : value.selectedIds.filter((id) => id !== entry.id) }))} />{entry.name}</label>)}</fieldset>
-    {message && <Toast>{message}</Toast>}<div className="ui-dialog__actions"><Button type="button" onClick={close}>닫기</Button><Button type="button" disabled={!loaded || saving} onClick={() => void save()}>분류 저장</Button></div>
+    {message && <Toast>{message}</Toast>}<div className="ui-dialog__actions"><Button type="button" onClick={close}>닫기</Button><Button type="button" variant="danger" disabled={saving} onClick={() => void trash()}>휴지통으로 이동</Button><Button type="button" disabled={!loaded || saving} onClick={() => void save()}>분류 저장</Button></div>
   </div></Dialog>;
 }
 

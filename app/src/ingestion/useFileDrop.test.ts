@@ -22,8 +22,6 @@ const fixtureAsset: AssetSummary = {
   id: "asset-arona",
   title: null,
   originalName: "arona.png",
-  relativePath: "assets/aa/arona.png",
-  thumbnailRelativePath: "thumbnails/aa/arona.webp",
   byteSize: 123,
   width: 8,
   height: 6,

@@ -33,8 +33,6 @@ const asset: AssetSummary = {
   id: "asset-arona",
   title: null,
   originalName: "arona.png",
-  relativePath: "assets/aa/arona.png",
-  thumbnailRelativePath: "thumbnails/aa/arona.webp",
   byteSize: 123,
   width: 8,
   height: 6,
@@ -53,6 +51,12 @@ function gateway(): LibraryGateway {
     moveClassification: vi.fn(),
     deleteClassification: vi.fn(),
     listAssets: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
+    trashAsset: vi.fn(),
+    restoreAsset: vi.fn(),
+    listTrash: vi.fn().mockResolvedValue({ items: [], nextCursor: null, totalCount: 0, totalBytes: 0 }),
+    emptyTrash: vi.fn(),
+    getTrashPolicy: vi.fn().mockResolvedValue({ retentionDays: 30 }),
+    setTrashPolicy: vi.fn(),
     setAssetFavorite: vi.fn(),
     setAssetClassifications: vi.fn(),
     getAssetClassifications: vi.fn(),
@@ -78,6 +82,36 @@ describe("App", () => {
     );
     expect(screen.getByRole("main", { name: "라이브러리 작업 공간" })).toBeInTheDocument();
     expect(localStorage.getItem("lakomics.libraryPath")).toBe("C:\\Lakomics");
+  });
+
+  it("renders the trash workspace without loading an asset page", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    const libraryGateway = gateway();
+    const user = userEvent.setup();
+
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} />);
+    await user.click(await screen.findByRole("button", { name: "휴지통 보기" }));
+
+    await waitFor(() => expect(libraryGateway.listTrash).toHaveBeenCalledWith({ after: null, limit: 100 }));
+  });
+
+  it("does not ingest drops while trash is active", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    let drop: ((paths: string[]) => void) | undefined;
+    const subscribeDrops: DropSubscriber = async (handler) => {
+      drop = handler;
+      return () => undefined;
+    };
+    const libraryGateway = gateway();
+    const user = userEvent.setup();
+
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={subscribeDrops} />);
+    await user.click(await screen.findByRole("button", { name: "휴지통 보기" }));
+    await waitFor(() => expect(drop).toBeDefined());
+    act(() => drop?.(["C:\\images\\ignored.png"]));
+
+    await Promise.resolve();
+    expect(libraryGateway.ingestImage).not.toHaveBeenCalled();
   });
 
   it("restores the saved library path when the app starts", async () => {

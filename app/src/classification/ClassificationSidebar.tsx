@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, Clock3, Ellipsis, FolderTree, Plus, Star } from "lucide-react";
+import { ChevronDown, ChevronRight, Clock3, Ellipsis, FolderTree, Plus, Star, Trash2 } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
 import { useLibrary } from "../library/LibraryContext";
@@ -220,6 +220,7 @@ export function ClassificationSidebar({
         <QuickViewButton icon={<FolderTree aria-hidden="true" />} label="전체 자산" selected={view.kind === "classification" && view.classificationId === null} onClick={() => onViewChange({ kind: "classification", classificationId: null })} />
         <QuickViewButton icon={<Star aria-hidden="true" />} label="즐겨찾기" selected={view.kind === "favorites"} onClick={() => onViewChange({ kind: "favorites" })} />
         <QuickViewButton icon={<Clock3 aria-hidden="true" />} label="최근" selected={view.kind === "recent"} onClick={() => onViewChange({ kind: "recent" })} />
+        <QuickViewButton icon={<Trash2 aria-hidden="true" />} label="휴지통 보기" selected={view.kind === "trash"} onClick={() => onViewChange({ kind: "trash" })} />
       </nav>
       {tree.orphans.length > 0 && <p className="classification-sidebar__warning" role="alert">연결되지 않은 분류는 숨겨집니다.</p>}
       <ul className="classification-sidebar__tree" role="tree">

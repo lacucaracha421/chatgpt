@@ -23,6 +23,12 @@ function gateway(): LibraryGateway {
     moveClassification: vi.fn().mockResolvedValue(undefined),
     deleteClassification: vi.fn().mockResolvedValue(undefined),
     listAssets: vi.fn(),
+    trashAsset: vi.fn(),
+    restoreAsset: vi.fn(),
+    listTrash: vi.fn(),
+    emptyTrash: vi.fn(),
+    getTrashPolicy: vi.fn(),
+    setTrashPolicy: vi.fn(),
     setAssetFavorite: vi.fn(),
     setAssetClassifications: vi.fn(),
     getAssetClassifications: vi.fn(),
@@ -109,6 +115,15 @@ describe("ClassificationSidebar", () => {
     expect(onViewChange).toHaveBeenNthCalledWith(1, { kind: "favorites" });
     expect(onViewChange).toHaveBeenNthCalledWith(2, { kind: "recent" });
     expect(onViewChange).toHaveBeenNthCalledWith(3, { kind: "classification", classificationId: null });
+  });
+
+  it("opens trash from the shared quick-view navigation", async () => {
+    const user = userEvent.setup();
+    const { onViewChange } = renderSidebar();
+
+    await user.click(screen.getByRole("button", { name: "휴지통 보기" }));
+
+    expect(onViewChange).toHaveBeenCalledWith({ kind: "trash" });
   });
 
   it("expands and collapses without changing the selected view", async () => {

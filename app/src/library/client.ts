@@ -8,6 +8,9 @@ import type {
   IngestOutcome,
   LibraryGateway,
   LibrarySummary,
+  PurgeSummary,
+  TrashPage,
+  TrashPolicy,
 } from "./types";
 
 export const libraryGateway: LibraryGateway = {
@@ -24,6 +27,12 @@ export const libraryGateway: LibraryGateway = {
   deleteClassification: (id) => invoke("delete_classification", { id }),
   listAssets: (query: AssetQuery) =>
     invoke<AssetPage>("list_assets", { query }),
+  trashAsset: (assetId) => invoke("trash_asset", { assetId }),
+  restoreAsset: (assetId) => invoke("restore_asset", { assetId }),
+  listTrash: ({ after, limit }) => invoke<TrashPage>("list_trash", { after, limit }),
+  emptyTrash: () => invoke<PurgeSummary>("empty_trash"),
+  getTrashPolicy: () => invoke<TrashPolicy>("get_trash_policy"),
+  setTrashPolicy: (policy) => invoke("set_trash_policy", { policy }),
   setAssetFavorite: (assetId, favorite) =>
     invoke("set_asset_favorite", { assetId, favorite }),
   setAssetClassifications: (assetId, classificationIds) =>

@@ -23,6 +23,7 @@ import {
   type UiPreferences,
 } from "../preferences/uiPreferences";
 import { Toast } from "../shared/ui/Toast";
+import { TrashBrowser } from "../safety/TrashBrowser";
 
 type AppProps = {
   gateway?: LibraryGateway;
@@ -120,7 +121,7 @@ function LibraryWorkspace({ subscribeDrops }: { subscribeDrops: DropSubscriber }
         />
       }
       content={<>
-        <AssetBrowser
+        {view.kind === "trash" ? <TrashBrowser /> : <AssetBrowser
           view={view}
           classifications={entries}
           sort={preferences.assetSort}
@@ -129,7 +130,7 @@ function LibraryWorkspace({ subscribeDrops }: { subscribeDrops: DropSubscriber }
           onSortChange={(assetSort: AssetSort) => updatePreferences({ assetSort })}
           onMetadataVisibleChange={(metadataVisible) => updatePreferences({ metadataVisible })}
           onStatusChange={setBrowserStatus}
-        />
+        />}
         {message && <Toast>{message}</Toast>}
       </>}
       status={<StatusBar status={browserStatus} progress={progress} dropEnabled={dropEnabled} />}
