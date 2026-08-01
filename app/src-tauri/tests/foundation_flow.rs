@@ -249,7 +249,45 @@ fn migrates_v1_after_creating_a_verified_snapshot() {
     assert_eq!(library.trash_policy().unwrap().retention_days, Some(30));
     assert!(!library.root().join("trash").exists());
     assert_eq!(library.summary().unwrap().asset_count, 1);
-    assert_eq!(pre_migration_backups(library.root()).len(), 1);
+    let backups = pre_migration_backups(library.root());
+    assert_eq!(backups.len(), 1);
+    let snapshot = Connection::open(&backups[0]).unwrap();
+    assert_eq!(
+        snapshot
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        snapshot
+            .query_row("SELECT COUNT(*) FROM assets", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    let snapshot_asset: (String, String, String, String) = snapshot
+        .query_row(
+            "SELECT id, content_hash, original_name, status FROM assets",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        snapshot_asset,
+        (
+            "asset-1".into(),
+            "hash-1".into(),
+            "asset.png".into(),
+            "normal".into(),
+        )
+    );
 }
 
 #[test]
