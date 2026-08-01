@@ -1,8 +1,10 @@
+mod backup;
 mod classification;
 mod db;
 pub mod error;
 mod favorite;
 mod ingestion;
+mod lock;
 pub mod models;
 mod query;
 
@@ -13,6 +15,7 @@ use std::{
 };
 
 use error::LibraryError;
+use lock::LibraryLease;
 use models::LibrarySummary;
 use rusqlite::{Connection, OptionalExtension};
 
@@ -38,6 +41,8 @@ pub struct MediaResponse {
 #[derive(Debug, Clone)]
 pub struct Library {
     root: PathBuf,
+    #[allow(dead_code)] // Keeps the operating-system lease alive for all Library clones.
+    lease: Arc<LibraryLease>,
     // ponytail: one lock per open Library; split by content hash only if ingest throughput demands it.
     ingestion_lock: Arc<Mutex<()>>,
 }
@@ -54,9 +59,11 @@ impl Library {
             fs::create_dir_all(&path)
                 .map_err(|source| LibraryError::CreateDirectory { path, source })?;
         }
+        let lease = Arc::new(LibraryLease::acquire(&root)?);
         db::open_database(&root.join("library.sqlite"))?;
         Ok(Self {
             root,
+            lease,
             ingestion_lock: Arc::new(Mutex::new(())),
         })
     }
@@ -145,7 +152,19 @@ fn mime_for_path(path: &Path) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::Library;
+    use super::{error::LibraryError, Library};
+
+    #[test]
+    fn second_library_open_is_rejected_until_the_first_is_dropped() {
+        let temp = tempfile::tempdir().unwrap();
+        let first = Library::open(temp.path()).unwrap();
+
+        let error = Library::open(temp.path()).unwrap_err();
+        assert!(matches!(error, LibraryError::LibraryInUse));
+
+        drop(first);
+        Library::open(temp.path()).unwrap();
+    }
 
     #[test]
     fn open_creates_the_self_contained_library_layout() {

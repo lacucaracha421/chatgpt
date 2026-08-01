@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::error::LibraryError;
 
-const SCHEMA_VERSION: i64 = 1;
+pub(crate) const SCHEMA_VERSION: i64 = 1;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 
 pub fn open_database(path: &Path) -> Result<Connection, LibraryError> {

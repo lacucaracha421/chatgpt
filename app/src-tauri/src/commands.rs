@@ -27,6 +27,10 @@ pub struct CommandError {
 impl From<LibraryError> for CommandError {
     fn from(error: LibraryError) -> Self {
         let code = match error {
+            LibraryError::LibraryInUse => "library_in_use",
+            LibraryError::LibraryLock { .. } => "library_lock_failed",
+            LibraryError::Backup { .. } => "backup_failed",
+            LibraryError::InvalidBackup => "invalid_backup",
             LibraryError::CreateDirectory { .. } => "create_directory_failed",
             LibraryError::Database(_) => "database_failed",
             LibraryError::UnsupportedSchema(_) => "unsupported_schema",
@@ -212,6 +216,8 @@ fn current_required(state: State<'_, AppState>) -> Result<Library, CommandError>
 
 #[cfg(test)]
 mod tests {
+    use std::{io, path::PathBuf};
+
     use crate::library::error::LibraryError;
 
     use super::{open_library_at, CommandError};
@@ -223,6 +229,33 @@ mod tests {
 
         assert_eq!(value["code"], "classification_not_found");
         assert_eq!(value["message"], "요청한 분류 항목을 찾을 수 없습니다.");
+    }
+
+    #[test]
+    fn library_safety_errors_have_stable_codes() {
+        let cases = [
+            (LibraryError::LibraryInUse, "library_in_use"),
+            (
+                LibraryError::LibraryLock {
+                    path: PathBuf::from(".lakomics.lock"),
+                    source: io::Error::other("lock failed"),
+                },
+                "library_lock_failed",
+            ),
+            (
+                LibraryError::Backup {
+                    path: PathBuf::from("snapshot.sqlite"),
+                    source: io::Error::other("backup failed"),
+                },
+                "backup_failed",
+            ),
+            (LibraryError::InvalidBackup, "invalid_backup"),
+        ];
+
+        for (error, code) in cases {
+            let value = serde_json::to_value(CommandError::from(error)).unwrap();
+            assert_eq!(value["code"], code);
+        }
     }
 
     #[test]

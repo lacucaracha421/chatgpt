@@ -4,6 +4,22 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum LibraryError {
+    #[error("라이브러리가 다른 창에서 열려 있습니다")]
+    LibraryInUse,
+    #[error("라이브러리 잠금 파일을 열 수 없습니다: {path}")]
+    LibraryLock {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("SQLite 백업을 만들 수 없습니다: {path}")]
+    Backup {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("SQLite 백업을 검증할 수 없습니다")]
+    InvalidBackup,
     #[error("라이브러리 폴더를 만들 수 없습니다: {path}")]
     CreateDirectory {
         path: PathBuf,
