@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState, type ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -73,6 +73,7 @@ function renderSidebar(
             onSidebarWidthChange(width);
           }}
           onChanged={onChanged}
+          onOpenSafety={props.onOpenSafety}
         />
       </LibraryProvider>
     );
@@ -112,20 +113,39 @@ describe("ClassificationSidebar", () => {
     const user = userEvent.setup();
     const { onViewChange } = renderSidebar();
 
+    const quickViews = screen.getByRole("navigation", { name: "빠른 보기" });
+    expect(within(quickViews).getAllByRole("button").map((button) => button.textContent)).toEqual([
+      "전체 자산",
+      "미분류함",
+      "최근",
+      "즐겨찾기",
+    ]);
+
+    await user.click(screen.getByRole("button", { name: "미분류함" }));
     await user.click(screen.getByRole("button", { name: "즐겨찾기" }));
     await user.click(screen.getByRole("button", { name: "최근" }));
     await user.click(screen.getByRole("button", { name: "전체 자산" }));
 
-    expect(onViewChange).toHaveBeenNthCalledWith(1, { kind: "favorites" });
-    expect(onViewChange).toHaveBeenNthCalledWith(2, { kind: "recent" });
-    expect(onViewChange).toHaveBeenNthCalledWith(3, { kind: "classification", classificationId: null });
+    expect(onViewChange).toHaveBeenNthCalledWith(1, { kind: "unsorted" });
+    expect(onViewChange).toHaveBeenNthCalledWith(2, { kind: "favorites" });
+    expect(onViewChange).toHaveBeenNthCalledWith(3, { kind: "recent" });
+    expect(onViewChange).toHaveBeenNthCalledWith(4, { kind: "classification", classificationId: null });
+  });
+
+  it("keeps trash and settings in the sidebar footer", () => {
+    renderSidebar(gateway(), { onOpenSafety: vi.fn() });
+
+    const trash = screen.getByRole("button", { name: "휴지통" });
+    const settings = screen.getByRole("button", { name: "라이브러리 안전 설정" });
+    expect(trash.closest(".classification-sidebar__footer")).not.toBeNull();
+    expect(settings.closest(".classification-sidebar__footer")).not.toBeNull();
   });
 
   it("opens trash from the shared quick-view navigation", async () => {
     const user = userEvent.setup();
     const { onViewChange } = renderSidebar();
 
-    await user.click(screen.getByRole("button", { name: "휴지통 보기" }));
+    await user.click(screen.getByRole("button", { name: "휴지통" }));
 
     expect(onViewChange).toHaveBeenCalledWith({ kind: "trash" });
   });

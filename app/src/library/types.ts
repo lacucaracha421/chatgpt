@@ -9,6 +9,7 @@ export type AssetSort = "newest" | "oldest" | "favorites" | "random";
 
 export type AssetView =
   | { kind: "classification"; classificationId: string | null }
+  | { kind: "unsorted" }
   | { kind: "favorites" }
   | { kind: "recent" }
   | { kind: "trash" };
@@ -40,6 +41,7 @@ export type AssetQuery = {
   classificationId: string | null;
   directOnly: boolean;
   favoriteOnly: boolean;
+  unclassifiedOnly: boolean;
   sort: AssetSort;
   randomPivot: string | null;
   after: AssetCursor | null;

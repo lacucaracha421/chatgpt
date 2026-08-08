@@ -24,9 +24,10 @@ beforeEach(() => Object.defineProperties(HTMLDialogElement.prototype, {
 
 describe("AssetBrowser", () => {
   it.each<[string, AssetView, AssetSort, Partial<Record<string, unknown>>]>([
-    ["classification", { kind: "classification", classificationId: "tag" }, "oldest", { classificationId: "tag", directOnly: false, favoriteOnly: false, sort: "oldest" }],
-    ["favorites", { kind: "favorites" }, "favorites", { classificationId: null, directOnly: false, favoriteOnly: true, sort: "favorites" }],
-    ["recent", { kind: "recent" }, "oldest", { classificationId: null, directOnly: false, favoriteOnly: false, sort: "newest" }],
+    ["classification", { kind: "classification", classificationId: "tag" }, "oldest", { classificationId: "tag", directOnly: false, favoriteOnly: false, unclassifiedOnly: false, sort: "oldest" }],
+    ["unsorted", { kind: "unsorted" }, "newest", { classificationId: null, directOnly: false, favoriteOnly: false, unclassifiedOnly: true, sort: "newest" }],
+    ["favorites", { kind: "favorites" }, "favorites", { classificationId: null, directOnly: false, favoriteOnly: true, unclassifiedOnly: false, sort: "favorites" }],
+    ["recent", { kind: "recent" }, "oldest", { classificationId: null, directOnly: false, favoriteOnly: false, unclassifiedOnly: false, sort: "newest" }],
   ])("maps the %s view to its first-page query", async (_name, view, sort, expected) => {
     const gateway = createGateway();
 

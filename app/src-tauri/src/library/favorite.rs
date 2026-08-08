@@ -58,6 +58,7 @@ fn query(sort: AssetSort, favorite_only: bool, limit: u32) -> AssetQuery {
         classification_id: None,
         direct_only: false,
         favorite_only,
+        unclassified_only: false,
         sort,
         random_pivot: None,
         after: None,

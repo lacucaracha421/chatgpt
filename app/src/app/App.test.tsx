@@ -102,7 +102,7 @@ describe("App", () => {
     const user = userEvent.setup();
 
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
-    await user.click(await screen.findByRole("button", { name: "휴지통 보기" }));
+    await user.click(await screen.findByRole("button", { name: "휴지통" }));
 
     await waitFor(() => expect(libraryGateway.listTrash).toHaveBeenCalledWith({ after: null, limit: 100 }));
   });
@@ -118,7 +118,7 @@ describe("App", () => {
     const user = userEvent.setup();
 
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={subscribeDrops} />);
-    await user.click(await screen.findByRole("button", { name: "휴지통 보기" }));
+    await user.click(await screen.findByRole("button", { name: "휴지통" }));
     await waitFor(() => expect(drop).toBeDefined());
     act(() => drop?.(["C:\\images\\ignored.png"]));
 
@@ -250,6 +250,34 @@ describe("App", () => {
     expect(within(content).queryByRole("button", { name: "라이브러리 안전 설정" })).not.toBeInTheDocument();
     expect(within(sidebar).getByRole("button", { name: "라이브러리 안전 설정" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Lakomics" })).not.toBeInTheDocument();
+  });
+
+  it("always opens all assets and maps the unsorted inbox to its query flag", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({
+      metadataVisible: false,
+      sidebarWidth: 264,
+      expandedClassificationIds: ["root-games"],
+      assetSort: "oldest",
+    }));
+    const libraryGateway = gateway();
+    const user = userEvent.setup();
+
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+
+    await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenCalledWith(expect.objectContaining({
+      classificationId: null,
+      favoriteOnly: false,
+      unclassifiedOnly: false,
+    })));
+    expect(screen.getByRole("button", { name: "전체 자산" })).toHaveAttribute("aria-current", "page");
+
+    await user.click(screen.getByRole("button", { name: "미분류함" }));
+    await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenLastCalledWith(expect.objectContaining({
+      classificationId: null,
+      favoriteOnly: false,
+      unclassifiedOnly: true,
+    })));
   });
 
   it("ignores drops outside a concrete classification and explains how to enable them", async () => {
@@ -431,6 +459,7 @@ describe("App", () => {
         classificationId: "tag-arona",
         directOnly: false,
         favoriteOnly: false,
+        unclassifiedOnly: false,
         sort: "newest",
         randomPivot: null,
         after: null,
@@ -466,6 +495,7 @@ describe("App", () => {
       classificationId: "tag-arona",
       directOnly: false,
       favoriteOnly: false,
+      unclassifiedOnly: false,
       sort: "newest",
       randomPivot: null,
       after: null,
@@ -503,6 +533,7 @@ describe("App", () => {
         classificationId: "root-games",
         directOnly: false,
         favoriteOnly: false,
+        unclassifiedOnly: false,
         sort: "newest",
         randomPivot: null,
         after: null,

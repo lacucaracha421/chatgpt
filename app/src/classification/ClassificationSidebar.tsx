@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, Clock3, Ellipsis, FolderTree, Plus, Settings, Star, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Clock3, Ellipsis, FolderTree, Inbox, Plus, Settings, Star, Trash2 } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
 import { useLibrary } from "../library/LibraryContext";
@@ -220,9 +220,9 @@ export function ClassificationSidebar({
       </div>
       <nav className="classification-sidebar__quick-views" aria-label="빠른 보기">
         <QuickViewButton icon={<FolderTree aria-hidden="true" />} label="전체 자산" selected={view.kind === "classification" && view.classificationId === null} onClick={() => onViewChange({ kind: "classification", classificationId: null })} />
-        <QuickViewButton icon={<Star aria-hidden="true" />} label="즐겨찾기" selected={view.kind === "favorites"} onClick={() => onViewChange({ kind: "favorites" })} />
+        <QuickViewButton icon={<Inbox aria-hidden="true" />} label="미분류함" selected={view.kind === "unsorted"} onClick={() => onViewChange({ kind: "unsorted" })} />
         <QuickViewButton icon={<Clock3 aria-hidden="true" />} label="최근" selected={view.kind === "recent"} onClick={() => onViewChange({ kind: "recent" })} />
-        <QuickViewButton icon={<Trash2 aria-hidden="true" />} label="휴지통 보기" selected={view.kind === "trash"} onClick={() => onViewChange({ kind: "trash" })} />
+        <QuickViewButton icon={<Star aria-hidden="true" />} label="즐겨찾기" selected={view.kind === "favorites"} onClick={() => onViewChange({ kind: "favorites" })} />
       </nav>
       {tree.orphans.length > 0 && <p className="classification-sidebar__warning" role="alert">연결되지 않은 분류는 숨겨집니다.</p>}
       <ul className="classification-sidebar__tree" role="tree">
@@ -244,14 +244,15 @@ export function ClassificationSidebar({
           />
         ))}
       </ul>
-      {onOpenSafety && (
-        <div className="classification-sidebar__footer">
+      <div className="classification-sidebar__footer">
+        <QuickViewButton icon={<Trash2 aria-hidden="true" />} label="휴지통" selected={view.kind === "trash"} onClick={() => onViewChange({ kind: "trash" })} />
+        {onOpenSafety && (
           <Button type="button" onClick={onOpenSafety}>
             <Settings aria-hidden="true" />
             라이브러리 안전 설정
           </Button>
-        </div>
-      )}
+        )}
+      </div>
       <div
         aria-label="사이드바 크기 조절"
         className="classification-sidebar__resize-handle"

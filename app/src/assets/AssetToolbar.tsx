@@ -25,7 +25,7 @@ export function AssetToolbar({
   onDirectOnlyChange, onMetadataVisibleChange, onFavorite, onTrash, trashPending, onReshuffle,
 }: AssetToolbarProps) {
   const recent = view.kind === "recent";
-  const location = view.kind === "favorites" ? "즐겨찾기" : recent ? "최근" : view.kind === "trash" ? "휴지통" : classifications.find((entry) => entry.id === view.classificationId)?.name ?? "전체 자산";
+  const location = view.kind === "favorites" ? "즐겨찾기" : view.kind === "unsorted" ? "미분류함" : recent ? "최근" : view.kind === "trash" ? "휴지통" : classifications.find((entry) => entry.id === view.classificationId)?.name ?? "전체 자산";
   return (
     <header className="asset-toolbar" role="toolbar" aria-label="자산 도구">
       <h2>{location}</h2>

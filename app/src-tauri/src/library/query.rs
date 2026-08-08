@@ -69,6 +69,7 @@ impl Library {
                     query.classification_id.as_deref(),
                     query.direct_only,
                     query.favorite_only,
+                    query.unclassified_only,
                     collected_at,
                     id,
                     i64::from(query.limit) + 1,
@@ -80,6 +81,7 @@ impl Library {
                     query.classification_id.as_deref(),
                     query.direct_only,
                     query.favorite_only,
+                    query.unclassified_only,
                     collected_at,
                     id,
                     i64::from(query.limit) + 1,
@@ -91,6 +93,7 @@ impl Library {
                     query.classification_id.as_deref(),
                     query.direct_only,
                     query.favorite_only,
+                    query.unclassified_only,
                     favorite,
                     collected_at,
                     id,
@@ -103,6 +106,7 @@ impl Library {
                     query.classification_id.as_deref(),
                     query.direct_only,
                     query.favorite_only,
+                    query.unclassified_only,
                     random_pivot,
                     bucket,
                     content_hash,
@@ -245,8 +249,9 @@ const NEWEST_SQL: &str = "WITH RECURSIVE descendants(id) AS (
 ) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url
 FROM assets AS asset WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
-AND (?4 IS NULL OR asset.collected_at < ?4 OR (asset.collected_at = ?4 AND asset.id < ?5))
-ORDER BY asset.collected_at DESC, asset.id DESC LIMIT ?6";
+AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
+AND (?5 IS NULL OR asset.collected_at < ?5 OR (asset.collected_at = ?5 AND asset.id < ?6))
+ORDER BY asset.collected_at DESC, asset.id DESC LIMIT ?7";
 
 const OLDEST_SQL: &str = "WITH RECURSIVE descendants(id) AS (
     SELECT ?1 WHERE ?1 IS NOT NULL
@@ -254,8 +259,9 @@ const OLDEST_SQL: &str = "WITH RECURSIVE descendants(id) AS (
 ) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url
 FROM assets AS asset WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
-AND (?4 IS NULL OR asset.collected_at > ?4 OR (asset.collected_at = ?4 AND asset.id > ?5))
-ORDER BY asset.collected_at ASC, asset.id ASC LIMIT ?6";
+AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
+AND (?5 IS NULL OR asset.collected_at > ?5 OR (asset.collected_at = ?5 AND asset.id > ?6))
+ORDER BY asset.collected_at ASC, asset.id ASC LIMIT ?7";
 
 const FAVORITES_SQL: &str = "WITH RECURSIVE descendants(id) AS (
     SELECT ?1 WHERE ?1 IS NOT NULL
@@ -263,17 +269,19 @@ const FAVORITES_SQL: &str = "WITH RECURSIVE descendants(id) AS (
 ) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url
 FROM assets AS asset WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
-AND (?4 IS NULL OR asset.favorite < ?4 OR (asset.favorite = ?4 AND (asset.collected_at < ?5 OR (asset.collected_at = ?5 AND asset.id < ?6))))
-ORDER BY asset.favorite DESC, asset.collected_at DESC, asset.id DESC LIMIT ?7";
+AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
+AND (?5 IS NULL OR asset.favorite < ?5 OR (asset.favorite = ?5 AND (asset.collected_at < ?6 OR (asset.collected_at = ?6 AND asset.id < ?7))))
+ORDER BY asset.favorite DESC, asset.collected_at DESC, asset.id DESC LIMIT ?8";
 
 const RANDOM_SQL: &str = "WITH RECURSIVE descendants(id) AS (
     SELECT ?1 WHERE ?1 IS NOT NULL
     UNION ALL SELECT entry.id FROM classification_entries AS entry JOIN descendants ON entry.parent_id = descendants.id
-) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url, asset.content_hash, CASE WHEN asset.content_hash >= ?4 THEN 0 ELSE 1 END
+) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url, asset.content_hash, CASE WHEN asset.content_hash >= ?5 THEN 0 ELSE 1 END
 FROM assets AS asset WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
-AND (?5 IS NULL OR CASE WHEN asset.content_hash >= ?4 THEN 0 ELSE 1 END > ?5 OR (CASE WHEN asset.content_hash >= ?4 THEN 0 ELSE 1 END = ?5 AND (asset.content_hash > ?6 OR (asset.content_hash = ?6 AND asset.id > ?7))))
-ORDER BY CASE WHEN asset.content_hash >= ?4 THEN 0 ELSE 1 END ASC, asset.content_hash ASC, asset.id ASC LIMIT ?8";
+AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
+AND (?6 IS NULL OR CASE WHEN asset.content_hash >= ?5 THEN 0 ELSE 1 END > ?6 OR (CASE WHEN asset.content_hash >= ?5 THEN 0 ELSE 1 END = ?6 AND (asset.content_hash > ?7 OR (asset.content_hash = ?7 AND asset.id > ?8))))
+ORDER BY CASE WHEN asset.content_hash >= ?5 THEN 0 ELSE 1 END ASC, asset.content_hash ASC, asset.id ASC LIMIT ?9";
 
 #[cfg(test)]
 mod tests {
@@ -307,6 +315,7 @@ mod tests {
                 classification_id: Some(root.id.clone()),
                 direct_only: false,
                 favorite_only: false,
+                unclassified_only: false,
                 sort: AssetSort::Newest,
                 random_pivot: None,
                 after: None,
@@ -318,6 +327,7 @@ mod tests {
                 classification_id: Some(root.id),
                 direct_only: true,
                 favorite_only: false,
+                unclassified_only: false,
                 sort: AssetSort::Newest,
                 random_pivot: None,
                 after: None,
@@ -363,6 +373,7 @@ mod tests {
                 classification_id: Some(root.id),
                 direct_only: false,
                 favorite_only: false,
+                unclassified_only: false,
                 sort: AssetSort::Newest,
                 random_pivot: None,
                 after: None,
@@ -372,6 +383,48 @@ mod tests {
 
         assert_eq!(page.items.len(), 1);
         assert_eq!(page.items[0].id, "asset-1");
+    }
+
+    #[test]
+    fn unclassified_query_returns_only_assets_without_classification_links() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let root = classification(&library, ClassificationKind::Root, "게임", None);
+        insert_asset(&library, "unclassified", "2026-07-31T00:00:00Z");
+        insert_asset(&library, "unclassified-older", "2026-07-29T00:00:00Z");
+        insert_asset(&library, "classified", "2026-07-30T00:00:00Z");
+        library
+            .set_asset_classifications("classified", &[root.id])
+            .unwrap();
+
+        let first = library
+            .list_assets(AssetQuery {
+                classification_id: None,
+                direct_only: false,
+                favorite_only: false,
+                unclassified_only: true,
+                sort: AssetSort::Newest,
+                random_pivot: None,
+                after: None,
+                limit: 1,
+            })
+            .unwrap();
+        let second = library
+            .list_assets(AssetQuery {
+                classification_id: None,
+                direct_only: false,
+                favorite_only: false,
+                unclassified_only: true,
+                sort: AssetSort::Newest,
+                random_pivot: None,
+                after: first.next_cursor.clone(),
+                limit: 1,
+            })
+            .unwrap();
+
+        assert_eq!(first.items.iter().map(|asset| asset.id.as_str()).collect::<Vec<_>>(), ["unclassified"]);
+        assert_eq!(second.items.iter().map(|asset| asset.id.as_str()).collect::<Vec<_>>(), ["unclassified-older"]);
+        assert!(second.next_cursor.is_none());
     }
 
     #[test]
@@ -387,6 +440,7 @@ mod tests {
                 classification_id: None,
                 direct_only: false,
                 favorite_only: false,
+                unclassified_only: false,
                 sort: AssetSort::Newest,
                 random_pivot: None,
                 after: None,
@@ -398,6 +452,7 @@ mod tests {
                 classification_id: None,
                 direct_only: false,
                 favorite_only: false,
+                unclassified_only: false,
                 sort: AssetSort::Newest,
                 random_pivot: None,
                 after: first.next_cursor.clone(),
@@ -435,6 +490,7 @@ mod tests {
                     classification_id: None,
                     direct_only: false,
                     favorite_only: false,
+                    unclassified_only: false,
                     sort: AssetSort::Newest,
                     random_pivot: None,
                     after: None,
@@ -457,6 +513,7 @@ mod tests {
                     classification_id: Some("missing-classification".into()),
                     direct_only,
                     favorite_only: false,
+                    unclassified_only: false,
                     sort: AssetSort::Newest,
                     random_pivot: None,
                     after: None,
@@ -551,6 +608,7 @@ mod tests {
             classification_id: None,
             direct_only: false,
             favorite_only: false,
+            unclassified_only: false,
             sort,
             random_pivot: random_pivot.map(str::to_owned),
             after: None,

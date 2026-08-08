@@ -57,7 +57,7 @@
 - Keeps: existing `AppShell({ sidebar, content, status })`
 - Produces: a stable four-region layout while `AssetBrowser` continues to own its stateful toolbar
 
-- [ ] **Step 1: Write failing shell and identity tests**
+- [x] **Step 1: Write failing shell and identity tests**
 
 Add assertions that the workspace has `navigation`, `toolbar`, `main content`, and `contentinfo`, that no floating `라이브러리 안전 설정` button exists in content, and that `tauri.conf.json`/`index.html` use `Lakomics`.
 
@@ -68,13 +68,13 @@ expect(within(screen.getByRole("region", { name: "자산 내용" }))
   .queryByRole("button", { name: "라이브러리 안전 설정" })).not.toBeInTheDocument();
 ```
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 Run: `Set-Location app; npm.cmd test -- src/layout/AppShell.test.tsx src/app/App.test.tsx`
 
 Expected: FAIL because the asset toolbar has no toolbar landmark and the safety button still floats above the browser.
 
-- [ ] **Step 3: Replace visual primitives without changing behavior**
+- [x] **Step 3: Replace visual primitives without changing behavior**
 
 Set package/product/window title to `Lakomics`. Replace orange accent tokens with a calm blue palette, add semantic tokens for elevated surfaces, selection, overlay, inspector width and drag insertion, and keep the 4px spacing scale. Mark the existing `AssetToolbar` as the toolbar landmark instead of lifting its state through `AppShell`. Keep the existing concrete-classification `이 분류만` range toggle beside the location control. Move the safety entry callback into the sidebar contract; do not move backup logic into `layout`.
 
@@ -88,13 +88,13 @@ Set package/product/window title to `Lakomics`. Replace orange accent tokens wit
 </main>
 ```
 
-- [ ] **Step 4: Verify shell tests and builds**
+- [x] **Step 4: Verify shell tests and builds**
 
 Run: `Set-Location app; npm.cmd test -- src/layout src/app; npm.cmd run build`
 
 Expected: PASS; the generated document and Tauri config both say `Lakomics`.
 
-- [ ] **Step 5: Commit the shell slice**
+- [x] **Step 5: Commit the shell slice**
 
 ```powershell
 git add app/index.html app/package.json app/src-tauri/Cargo.toml app/src-tauri/tauri.conf.json app/src/styles app/src/layout app/src/app
@@ -122,7 +122,7 @@ git commit -m "feat: establish Lakomics daily-use shell"
 - Adds `unclassifiedOnly: boolean` to `AssetQuery` in Rust and TypeScript
 - Keeps `classificationId`, `directOnly`, `favoriteOnly` unchanged for existing callers
 
-- [ ] **Step 1: Write RED Rust query tests**
+- [x] **Step 1: Write RED Rust query tests**
 
 Create one normal asset with no `asset_classifications` row and one classified asset. Query with `unclassified_only: true` and assert only the first is returned. Add a cursor test proving multiple unsorted pages have no duplicates.
 
@@ -140,13 +140,13 @@ let page = library.list_assets(AssetQuery {
 assert_eq!(ids(page), vec!["unclassified"]);
 ```
 
-- [ ] **Step 2: Run the Rust test and verify RED**
+- [x] **Step 2: Run the Rust test and verify RED**
 
 Run: `Set-Location app/src-tauri; cargo test unclassified`
 
 Expected: FAIL because `AssetQuery` lacks `unclassified_only`.
 
-- [ ] **Step 3: Implement the unclassified filter in one SQL seam**
+- [x] **Step 3: Implement the unclassified filter in one SQL seam**
 
 Add the boolean parameter to every sort query immediately after `favorite_only` and add:
 
@@ -159,7 +159,7 @@ AND (?4 = 0 OR NOT EXISTS (
 
 Shift cursor/limit parameters consistently in all four SQL statements and their `statement.query` calls. Do not add a second set of unsorted SQL constants.
 
-- [ ] **Step 4: Write RED React navigation tests**
+- [x] **Step 4: Write RED React navigation tests**
 
 Assert sidebar order `전체 자산`, `미분류함`, `최근`, `즐겨찾기`; selecting inbox requests `unclassifiedOnly: true`; initial render always requests all assets even if UI preferences contain unrelated values; settings and trash are in the footer.
 
@@ -172,11 +172,11 @@ expect(gateway.listAssets).toHaveBeenLastCalledWith(expect.objectContaining({
 }));
 ```
 
-- [ ] **Step 5: Implement the sidebar order and settings routing**
+- [x] **Step 5: Implement the sidebar order and settings routing**
 
 Add `unsorted` to `AssetView`, map it to the query flag, keep `LibraryWorkspace` initial view `{ kind: "classification", classificationId: null }`, and move `onOpenSafety` into `ClassificationSidebar`. Do not render a disabled review queue placeholder.
 
-- [ ] **Step 6: Verify Task 2**
+- [x] **Step 6: Verify Task 2**
 
 Run:
 
@@ -190,7 +190,7 @@ cargo test unclassified
 
 Expected: all commands exit 0.
 
-- [ ] **Step 7: Commit the navigation slice**
+- [x] **Step 7: Commit the navigation slice**
 
 ```powershell
 git add app/src app/src-tauri/src/library app/src-tauri/tests

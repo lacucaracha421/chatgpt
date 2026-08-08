@@ -70,6 +70,7 @@ pub struct AssetQuery {
     pub classification_id: Option<String>,
     pub direct_only: bool,
     pub favorite_only: bool,
+    pub unclassified_only: bool,
     pub sort: AssetSort,
     pub random_pivot: Option<String>,
     pub after: Option<AssetCursor>,
