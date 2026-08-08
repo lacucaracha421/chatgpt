@@ -2,7 +2,7 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
-import type { LibraryGateway } from "../library/types";
+import type { LibraryGateway, TrashPage } from "../library/types";
 import { TrashBrowser } from "./TrashBrowser";
 
 afterEach(cleanup);
@@ -67,6 +67,50 @@ it("shows a retry instead of an empty state when listing trash fails", async () 
   await user.click(screen.getByRole("button", { name: "다시 시도" }));
 
   expect(await screen.findByText("asset-1.png")).toBeVisible();
+});
+
+it("retries after listing trash fails while policy loading is still pending", async () => {
+  const neverPolicy = new Promise<{ retentionDays: number | null }>(() => undefined);
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.listTrash)
+    .mockRejectedValueOnce(new Error("trash list failed"))
+    .mockResolvedValueOnce({ items: [{ asset: asset(), trashedAt: "2026-07-20T00:00:00Z", purgeAt: null }], nextCursor: null, totalCount: 1, totalBytes: 1_024 });
+  vi.mocked(gateway.getTrashPolicy)
+    .mockReturnValueOnce(neverPolicy)
+    .mockResolvedValueOnce({ retentionDays: 30 });
+
+  render(<LibraryProvider gateway={gateway}><TrashBrowser /></LibraryProvider>);
+
+  expect(await screen.findByText("trash list failed")).toBeVisible();
+  const retry = screen.getByRole("button", { name: "다시 시도" });
+  expect(retry).not.toBeDisabled();
+  await user.click(retry);
+
+  expect(await screen.findByText("asset-1.png")).toBeVisible();
+  expect(gateway.getTrashPolicy).toHaveBeenCalledTimes(2);
+});
+
+it("retries after policy loading fails while listing trash is still pending", async () => {
+  const neverPage = new Promise<TrashPage>(() => undefined);
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.listTrash)
+    .mockReturnValueOnce(neverPage)
+    .mockResolvedValueOnce({ items: [{ asset: asset(), trashedAt: "2026-07-20T00:00:00Z", purgeAt: null }], nextCursor: null, totalCount: 1, totalBytes: 1_024 });
+  vi.mocked(gateway.getTrashPolicy)
+    .mockRejectedValueOnce(new Error("policy failed"))
+    .mockResolvedValueOnce({ retentionDays: 30 });
+
+  render(<LibraryProvider gateway={gateway}><TrashBrowser /></LibraryProvider>);
+
+  expect(await screen.findByText("policy failed")).toBeVisible();
+  const retry = screen.getByRole("button", { name: "다시 시도" });
+  expect(retry).not.toBeDisabled();
+  await user.click(retry);
+
+  expect(await screen.findByText("asset-1.png")).toBeVisible();
+  expect(gateway.listTrash).toHaveBeenCalledTimes(2);
 });
 
 it("ignores an older policy completion after a newer refresh", async () => {
