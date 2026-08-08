@@ -1,0 +1,40 @@
+import { cleanup, render, screen } from "@testing-library/react";
+// @ts-expect-error The app compiler intentionally omits Node ambient types.
+import { readFileSync } from "node:fs";
+import { afterEach, expect, it } from "vitest";
+import { AppShell } from "./AppShell";
+import { StatusBar } from "./StatusBar";
+
+afterEach(cleanup);
+const styles = readFileSync(`${(new Function("return process")() as { cwd(): string }).cwd()}/src/styles/global.css`, "utf8");
+
+it("uses Korean workspace and status labels", () => {
+  render(
+    <AppShell
+      sidebar={<aside>분류</aside>}
+      content={<section>자산</section>}
+      status={<StatusBar status={{ loadedCount: 3, selectedAsset: null, loading: true }} progress={null} dropEnabled />}
+    />,
+  );
+
+  expect(screen.getByRole("main", { name: "라이브러리 작업 공간" })).toBeInTheDocument();
+  expect(screen.getByRole("contentinfo", { name: "라이브러리 상태" })).toHaveTextContent("자산을 불러오는 중입니다.");
+  expect(screen.getByRole("contentinfo")).toHaveTextContent("이미지 파일을 창으로 끌어놓으세요.");
+});
+
+it("constrains the workspace row so the status bar remains in the desktop viewport", () => {
+  expect(styles).toContain(".app-shell");
+  expect(declarations(".app-shell")).toContain("height: 100vh;");
+  expect(declarations(".app-shell")).toContain("grid-template-rows: minmax(0, 1fr) var(--statusbar-height);");
+  expect(declarations(".app-shell__workspace")).toContain("min-height: 0;");
+  expect(declarations(".app-shell__content")).toContain("min-height: 0;");
+  expect(declarations(".classification-sidebar")).toContain("min-height: 0;");
+  expect(declarations(".classification-sidebar")).toContain("overflow-y: auto;");
+});
+
+function declarations(selector: string): string {
+  const start = styles.indexOf(`\n${selector} {`);
+  const open = styles.indexOf("{", start);
+  const close = styles.indexOf("}", open);
+  return start < 0 || open < 0 || close < 0 ? "" : styles.slice(open + 1, close);
+}
