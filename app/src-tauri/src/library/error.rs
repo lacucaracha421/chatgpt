@@ -52,6 +52,13 @@ pub enum LibraryError {
     AssetNotFound,
     #[error("하나 이상의 자산을 선택해야 합니다")]
     EmptyAssetSelection,
+    #[error("내보낼 자산 선택이 올바르지 않습니다")]
+    InvalidAssetSelection,
+    #[error("자산 드래그를 준비하지 못했습니다")]
+    AssetDragFailed {
+        #[source]
+        source: std::io::Error,
+    },
     #[error("자산 페이지 크기는 1에서 200 사이여야 합니다")]
     InvalidAssetPageLimit,
     #[error("invalid asset cursor")]

@@ -622,4 +622,46 @@ describe("App", () => {
     fireEvent.pointerUp(rootRow, { pointerId: 5, clientX: 20, clientY: 10 });
     expect(libraryGateway.moveClassification).toHaveBeenCalledTimes(1);
   });
+
+  it("promotes an asset pointer drag to native copy once at the viewport boundary", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    Object.defineProperties(HTMLElement.prototype, {
+      offsetWidth: { configurable: true, get: () => 900 }, clientWidth: { configurable: true, get: () => 840 },
+      offsetHeight: { configurable: true, get: () => 600 }, clientHeight: { configurable: true, get: () => 600 },
+    });
+    Object.defineProperties(window, { innerWidth: { configurable: true, value: 1000 }, innerHeight: { configurable: true, value: 700 } });
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listAssets).mockResolvedValue({ items: [asset], nextCursor: null });
+    const startAssetDrag = vi.fn().mockResolvedValue(undefined);
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} startAssetDrag={startAssetDrag} />);
+    const tile = await screen.findByRole("option", { name: "arona.png" });
+    Object.defineProperties(tile, { setPointerCapture: { configurable: true, value: vi.fn() }, releasePointerCapture: { configurable: true, value: vi.fn() } });
+
+    fireEvent.pointerDown(tile, { button: 0, pointerId: 9, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(tile, { pointerId: 9, clientX: 1001, clientY: 100 });
+    fireEvent.pointerMove(tile, { pointerId: 9, clientX: 1002, clientY: 100 });
+    await waitFor(() => expect(startAssetDrag).toHaveBeenCalledOnce());
+    expect(startAssetDrag).toHaveBeenCalledWith([asset.id]);
+  });
+
+  it("does not start native drag after Escape and reports native failures in the work tray", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listAssets).mockResolvedValue({ items: [asset], nextCursor: null });
+    const startAssetDrag = vi.fn().mockRejectedValue(new Error("탐색기 복사 실패"));
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} startAssetDrag={startAssetDrag} />);
+    const tile = await screen.findByRole("option", { name: "arona.png" });
+    Object.defineProperties(tile, { setPointerCapture: { configurable: true, value: vi.fn() }, releasePointerCapture: { configurable: true, value: vi.fn() } });
+
+    fireEvent.pointerDown(tile, { button: 0, pointerId: 10, clientX: 100, clientY: 100 });
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.pointerMove(tile, { pointerId: 10, clientX: 1001, clientY: 100 });
+    expect(startAssetDrag).not.toHaveBeenCalled();
+
+    fireEvent.pointerDown(tile, { button: 0, pointerId: 11, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(tile, { pointerId: 11, clientX: 1001, clientY: 100 });
+    await waitFor(() => expect(screen.getByRole("button", { name: "실패 1개" })).toBeVisible());
+    fireEvent.click(screen.getByRole("button", { name: "실패 1개" }));
+    expect(screen.getByRole("complementary", { name: "가져오기 작업" })).toHaveTextContent("탐색기 복사 실패");
+  });
 });

@@ -89,6 +89,13 @@ describe("AssetGallery", () => {
       expect.objectContaining({ pointerId: 8 }),
     );
   });
+
+  it("prevents the webview from starting its default image drag", async () => {
+    render(<AssetGallery items={[asset(0)]} onPointerDragStart={vi.fn()} />);
+    const image = await screen.findByRole("img", { name: "asset-0.png" });
+
+    expect(image).toHaveProperty("draggable", false);
+  });
 });
 
 function asset(index: number): AssetSummary { return { id: `asset-${index}`, title: null, originalName: `asset-${index}.png`, byteSize: 1, width: 200, height: 200, collectedAt: "2026-07-30T00:00:00Z", favorite: false, sourceUrl: null }; }

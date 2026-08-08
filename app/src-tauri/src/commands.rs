@@ -1,4 +1,5 @@
 use std::sync::RwLock;
+use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use tauri::State;
@@ -50,6 +51,8 @@ impl From<LibraryError> for CommandError {
             LibraryError::ClassificationNotEmpty => "classification_not_empty",
             LibraryError::AssetNotFound => "asset_not_found",
             LibraryError::EmptyAssetSelection => "empty_asset_selection",
+            LibraryError::InvalidAssetSelection => "invalid_asset_selection",
+            LibraryError::AssetDragFailed { .. } => "asset_drag_failed",
             LibraryError::InvalidAssetPageLimit => "invalid_asset_page_limit",
             LibraryError::InvalidAssetCursor => "invalid_asset_cursor",
             LibraryError::InvalidTrashTimestamp => "invalid_trash_timestamp",
@@ -78,12 +81,24 @@ pub fn open_library(
     path: String,
     state: State<'_, AppState>,
 ) -> Result<LibrarySummary, CommandError> {
-    let library = open_library_at(path)?;
-    let summary = library.summary().map_err(CommandError::from)?;
-    *state
+    open_library_in_state(path, &state)
+}
+
+fn open_library_in_state(path: String, state: &AppState) -> Result<LibrarySummary, CommandError> {
+    let mut current = state
         .library
         .write()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(library);
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(library) = current
+        .as_ref()
+        .filter(|library| library.root() == std::path::Path::new(&path))
+    {
+        return library.summary().map_err(CommandError::from);
+    }
+
+    let library = open_library_at(path)?;
+    let summary = library.summary().map_err(CommandError::from)?;
+    *current = Some(library);
     Ok(summary)
 }
 
@@ -335,6 +350,51 @@ pub async fn ingest_image(
         .map_err(CommandError::from)
 }
 
+#[tauri::command]
+pub fn start_asset_drag(
+    asset_ids: Vec<String>,
+    window: tauri::Window,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let prepared = current_required(state)?
+        .prepare_asset_drag(&asset_ids)
+        .map_err(CommandError::from)?;
+    let files = prepared.files.clone();
+    let preview = prepared.preview.clone();
+    let cleanup = Arc::new(Mutex::new(Some(prepared)));
+    let callback_cleanup = Arc::clone(&cleanup);
+    let result = drag::start_drag(
+        &window,
+        drag::DragItem::Files(files),
+        drag::Image::File(preview),
+        move |_result, _cursor| {
+            drop(
+                callback_cleanup
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .take(),
+            );
+        },
+        drag::Options {
+            mode: drag::DragMode::Copy,
+            ..Default::default()
+        },
+    );
+    if result.is_err() {
+        drop(
+            cleanup
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take(),
+        );
+        return Err(CommandError {
+            code: "asset_drag_failed",
+            message: "자산 드래그를 시작하지 못했습니다.".into(),
+        });
+    }
+    Ok(())
+}
+
 fn current(state: State<'_, AppState>) -> Option<Library> {
     state.current_library()
 }
@@ -352,7 +412,7 @@ mod tests {
 
     use crate::library::error::LibraryError;
 
-    use super::{open_library_at, CommandError};
+    use super::{open_library_at, open_library_in_state, AppState, CommandError};
 
     #[test]
     fn command_error_has_stable_json_fields() {
@@ -414,6 +474,19 @@ mod tests {
     }
 
     #[test]
+    fn drag_command_errors_have_stable_codes_without_internal_paths() {
+        let invalid = CommandError::from(LibraryError::InvalidAssetSelection);
+        assert_eq!(invalid.code, "invalid_asset_selection");
+
+        let failed = CommandError::from(LibraryError::AssetDragFailed {
+            source: io::Error::other(r"C:\library\.drag-out\secret.png"),
+        });
+        assert_eq!(failed.code, "asset_drag_failed");
+        assert!(!failed.message.contains("secret.png"));
+        assert!(!failed.message.contains("C:\\library"));
+    }
+
+    #[test]
     fn opening_a_missing_library_root_returns_an_error_without_creating_it() {
         let temp = tempfile::tempdir().unwrap();
         let missing = temp.path().join("missing-library");
@@ -423,5 +496,19 @@ mod tests {
         assert_eq!(error.code, "library_root_unavailable");
         assert_eq!(error.message, "선택한 라이브러리 폴더를 찾을 수 없습니다.");
         assert!(!missing.exists());
+    }
+
+    #[test]
+    fn reopening_the_current_library_reuses_its_existing_lease() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("library");
+        std::fs::create_dir(&root).unwrap();
+        let state = AppState::default();
+
+        let first = open_library_in_state(root.to_string_lossy().into_owned(), &state).unwrap();
+        let second = open_library_in_state(root.to_string_lossy().into_owned(), &state).unwrap();
+
+        assert_eq!(second, first);
+        assert_eq!(second.root, root.to_string_lossy());
     }
 }

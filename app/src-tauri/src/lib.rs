@@ -45,6 +45,7 @@ pub fn run() {
             commands::set_asset_classifications,
             commands::patch_asset_classifications,
             commands::ingest_image,
+            commands::start_asset_drag,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

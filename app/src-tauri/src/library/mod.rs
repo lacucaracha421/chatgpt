@@ -1,6 +1,7 @@
 mod backup;
 mod classification;
 mod db;
+mod drag_out;
 pub mod error;
 mod favorite;
 mod ingestion;
@@ -89,14 +90,16 @@ impl Library {
                 .map_err(|source| LibraryError::CreateDirectory { path, source })?;
         }
         db::open_database(&root.join("library.sqlite"))?;
-        Ok(Self {
+        let library = Self {
             root,
             lease,
             ingestion_lock: Arc::new(Mutex::new(())),
             trash_lock: Arc::new(Mutex::new(())),
             backup_lock: Arc::new(Mutex::new(())),
             database_lock: Arc::new(Mutex::new(())),
-        })
+        };
+        library.cleanup_stale_asset_drags()?;
+        Ok(library)
     }
 
     pub fn root(&self) -> &Path {

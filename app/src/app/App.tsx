@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AssetBrowser, type AssetBrowserStatus } from "../assets/AssetBrowser";
+import { startAssetDrag as nativeStartAssetDrag, type StartAssetDrag } from "../drag-out/startAssetDrag";
 import { ClassificationSidebar } from "../classification/ClassificationSidebar";
 import {
   type DropSubscriber,
   type FileDropResult,
+  type IngestionWork,
   subscribeToTauriDrops,
   useFileDrop,
 } from "../ingestion/useFileDrop";
@@ -35,16 +37,18 @@ type AppProps = {
   gateway?: LibraryGateway;
   selectFolder?: FolderPicker;
   subscribeDrops?: DropSubscriber;
+  startAssetDrag?: StartAssetDrag;
 };
 
 export function App({
   gateway = libraryGateway,
   selectFolder = selectLibraryFolder,
   subscribeDrops = subscribeToTauriDrops,
+  startAssetDrag = nativeStartAssetDrag,
 }: AppProps) {
   return (
     <LibraryProvider gateway={gateway}>
-      <LibraryScreen selectFolder={selectFolder} subscribeDrops={subscribeDrops} />
+      <LibraryScreen selectFolder={selectFolder} subscribeDrops={subscribeDrops} startAssetDrag={startAssetDrag} />
     </LibraryProvider>
   );
 }
@@ -52,18 +56,20 @@ export function App({
 function LibraryScreen({
   selectFolder,
   subscribeDrops,
+  startAssetDrag,
 }: {
   selectFolder: FolderPicker;
   subscribeDrops: DropSubscriber;
+  startAssetDrag: StartAssetDrag;
 }) {
   const { library } = useLibrary();
 
   return library
-    ? <LibraryWorkspace subscribeDrops={subscribeDrops} />
+    ? <LibraryWorkspace subscribeDrops={subscribeDrops} startAssetDrag={startAssetDrag} />
     : <LibrarySetup selectFolder={selectFolder} />;
 }
 
-function LibraryWorkspace({ subscribeDrops }: { subscribeDrops: DropSubscriber }) {
+function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: DropSubscriber; startAssetDrag: StartAssetDrag }) {
   const { gateway } = useLibrary();
   const [entries, setEntries] = useState<ClassificationEntry[]>([]);
   const [view, setView] = useState<AssetView>({
@@ -83,6 +89,9 @@ function LibraryWorkspace({ subscribeDrops }: { subscribeDrops: DropSubscriber }
   const [dragState, setDragState] = useState<PointerDragState>({ phase: "idle" });
   const dragStateRef = useRef<PointerDragState>({ phase: "idle" });
   const [dragTarget, setDragTarget] = useState<ClassificationDropTarget | null>(null);
+  const nativeDragStartedRef = useRef(false);
+  const nativeDragAssetsRef = useRef(new Map<string, string[]>());
+  const [nativeDragWorks, setNativeDragWorks] = useState<IngestionWork[]>([]);
   const appendMessage = useCallback((next: string) => {
     setMessage((current) => current ? `${current} ${next}` : next);
   }, []);
@@ -159,6 +168,7 @@ function LibraryWorkspace({ subscribeDrops }: { subscribeDrops: DropSubscriber }
   }
 
   function startPointerDrag(payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) {
+    nativeDragStartedRef.current = false;
     transitionDrag({ type: "arm", payload, x: event.clientX, y: event.clientY });
     setDragTarget(null);
     event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -168,7 +178,38 @@ function LibraryWorkspace({ subscribeDrops }: { subscribeDrops: DropSubscriber }
     const next = transitionDrag({ type: "move", x: event.clientX, y: event.clientY });
     if (next.phase !== "dragging") return;
     event.preventDefault();
+    if (next.payload.kind === "assets" && outsideViewport(event.clientX, event.clientY) && !nativeDragStartedRef.current) {
+      nativeDragStartedRef.current = true;
+      transitionDrag({ type: "cancel" });
+      setDragTarget(null);
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+      void beginNativeDrag(next.payload.assetIds);
+      return;
+    }
     setDragTarget(classificationTargetAt(event.clientX, event.clientY, next.payload, entries));
+  }
+
+  async function beginNativeDrag(assetIds: string[], workId: string = crypto.randomUUID()) {
+    nativeDragAssetsRef.current.set(workId, assetIds);
+    setNativeDragWorks((current) => {
+      const running: IngestionWork = { id: workId, total: 1, completed: 0, failures: [], status: "running" };
+      return current.some((work) => work.id === workId)
+        ? current.map((work) => work.id === workId ? running : work)
+        : [...current, running];
+    });
+    try {
+      await startAssetDrag(assetIds);
+      setNativeDragWorks((current) => current.map((work) => work.id === workId ? { ...work, completed: 1, status: "completed" } : work));
+    } catch (error) {
+      const message = commandErrorMessage(error, "탐색기로 자산을 복사하지 못했습니다.");
+      setNativeDragWorks((current) => current.map((work) => work.id === workId ? { ...work, completed: 1, failures: [{ sourcePath: "선택한 자산", message }], status: "failed" } : work));
+    }
+  }
+
+  function retryWork(workId: string) {
+    const assetIds = nativeDragAssetsRef.current.get(workId);
+    if (assetIds) void beginNativeDrag(assetIds, workId);
+    else dropState.retryFailed(workId);
   }
 
   function cancelPointerDrag(event: React.PointerEvent<HTMLElement>) {
@@ -271,7 +312,7 @@ function LibraryWorkspace({ subscribeDrops }: { subscribeDrops: DropSubscriber }
           }
           status={<StatusBar status={browserStatus} progress={dropState.progress} dropEnabled={dropEnabled} />}
         />
-        <WorkTray works={dropState.works} retryFailed={dropState.retryFailed} />
+        <WorkTray works={[...dropState.works, ...nativeDragWorks]} retryFailed={retryWork} />
       </div>
       <DropOverlay over={dropState.over} destinationName={entries.find((entry) => entry.id === dropClassificationId)?.name ?? "미분류함"} />
       <DragLayer state={dragState} />
@@ -317,4 +358,8 @@ function isDescendant(candidateId: string | null, ancestorId: string, entries: C
     current = entries.find((entry) => entry.id === current?.parentId);
   }
   return false;
+}
+
+function outsideViewport(x: number, y: number) {
+  return x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight;
 }

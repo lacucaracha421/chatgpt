@@ -524,11 +524,11 @@ export type StartAssetDrag = (assetIds: string[]) => Promise<void>;
 
 The Tauri command is `start_asset_drag(asset_ids, window, state)`. It resolves paths in Rust and permits `drag::DragMode::Copy` only.
 
-- [ ] **Step 1: Add `drag = "2.1.1"` only to Windows target dependencies**
+- [x] **Step 1: Add `drag = "2.1.1"` only to Windows target dependencies**
 
 Do not add the Tauri drag plugin or an npm package. The custom command is smaller and prevents arbitrary filesystem paths from crossing the frontend Interface.
 
-- [ ] **Step 2: Write RED preparation tests**
+- [x] **Step 2: Write RED preparation tests**
 
 Test normal asset validation, trash/missing rejection, one and multiple assets, original filename preservation, case-insensitive duplicate filenames receiving ` (2)`, hard-link creation with copy fallback, cleanup on drop, and cleanup of stale drag directories at library open.
 
@@ -540,15 +540,15 @@ drop(prepared);
 assert!(!drag_staging_root.exists());
 ```
 
-- [ ] **Step 3: Implement safe staging in `library/drag_out.rs`**
+- [x] **Step 3: Implement safe staging in `library/drag_out.rs`**
 
 Create a UUID directory under a library-owned `.drag-out` root. Resolve only `status = 'normal'` asset and thumbnail relative paths, canonicalize them under the library root, create original-name hard links, and fall back to `std::fs::copy` only when hard links fail. `Drop` removes only its exact UUID directory. Library open removes stale children under `.drag-out` after validating the resolved parent.
 
-- [ ] **Step 4: Write RED command tests around path secrecy and copy mode**
+- [x] **Step 4: Write RED command tests around path secrecy and copy mode**
 
 Keep `PreparedAssetDrag` fields non-serializable. Add stable `asset_drag_failed` and `invalid_asset_selection` errors without internal paths in `CommandError.message`.
 
-- [ ] **Step 5: Implement `start_asset_drag` on the Tauri main thread**
+- [x] **Step 5: Implement `start_asset_drag` on the Tauri main thread**
 
 Resolve the prepared files first, then call:
 
@@ -564,15 +564,15 @@ drag::start_drag(
 
 Return command setup failures; completion/cancel cleanup happens in the callback. Never accept a path from TypeScript.
 
-- [ ] **Step 6: Write frontend RED tests**
+- [x] **Step 6: Write frontend RED tests**
 
 Mock only `StartAssetDrag`. Assert leaving the viewport during an armed asset pointer drag passes selected IDs, an unselected tile passes only its own ID, Escape does not start native drag, and failures appear in the work tray.
 
-- [ ] **Step 7: Connect pointer exit to the native command**
+- [x] **Step 7: Connect pointer exit to the native command**
 
 Create a small `startAssetDrag` adapter that invokes `start_asset_drag`. The internal pointer drag remains active inside the viewport for sidebar classification; crossing the viewport boundary promotes the same payload to native drag-out exactly once.
 
-- [ ] **Step 8: Run automated verification**
+- [x] **Step 8: Run automated verification**
 
 ```powershell
 Set-Location app
@@ -584,7 +584,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test drag_out
 ```
 
-- [ ] **Step 9: Run mandatory Windows Explorer acceptance**
+- [x] **Step 9: Run mandatory Windows Explorer acceptance**
 
 Use an isolated test library and verify:
 
@@ -597,7 +597,7 @@ Use an isolated test library and verify:
 
 Record exact paths and results in `app/README.md`. If any boundary fails, keep Task 7 incomplete and debug the native seam; do not substitute a folder picker.
 
-- [ ] **Step 10: Commit the native drag slice**
+- [x] **Step 10: Commit the native drag slice**
 
 ```powershell
 git add app/src-tauri app/src/drag-out app/src/assets app/src/app app/src/styles/global.css app/README.md
