@@ -2,6 +2,7 @@ import { Shuffle, Star, Trash2 } from "lucide-react";
 import type { AssetSort, AssetSummary, AssetView, ClassificationEntry } from "../library/types";
 import { Button } from "../shared/ui/Button";
 import { Select } from "../shared/ui/Select";
+import { Slider } from "../shared/ui/Slider";
 import { Toggle } from "../shared/ui/Toggle";
 
 type AssetToolbarProps = {
@@ -10,10 +11,12 @@ type AssetToolbarProps = {
   sort: AssetSort;
   directOnly: boolean;
   metadataVisible: boolean;
+  thumbnailRowHeight: number;
   selectedAsset: AssetSummary | null;
   onSortChange: (sort: AssetSort) => void;
   onDirectOnlyChange: (value: boolean) => void;
   onMetadataVisibleChange: (value: boolean) => void;
+  onThumbnailRowHeightChange: (value: number) => void;
   onFavorite: () => void;
   onTrash: () => void;
   trashPending: boolean;
@@ -21,8 +24,8 @@ type AssetToolbarProps = {
 };
 
 export function AssetToolbar({
-  view, classifications, sort, directOnly, metadataVisible, selectedAsset, onSortChange,
-  onDirectOnlyChange, onMetadataVisibleChange, onFavorite, onTrash, trashPending, onReshuffle,
+  view, classifications, sort, directOnly, metadataVisible, thumbnailRowHeight, selectedAsset, onSortChange,
+  onDirectOnlyChange, onMetadataVisibleChange, onThumbnailRowHeightChange, onFavorite, onTrash, trashPending, onReshuffle,
 }: AssetToolbarProps) {
   const recent = view.kind === "recent";
   const location = view.kind === "favorites" ? "즐겨찾기" : view.kind === "unsorted" ? "미분류함" : recent ? "최근" : view.kind === "trash" ? "휴지통" : classifications.find((entry) => entry.id === view.classificationId)?.name ?? "전체 자산";
@@ -35,6 +38,7 @@ export function AssetToolbar({
           <option value="favorites">좋아요순</option><option value="random">랜덤</option>
         </Select>
         {view.kind === "classification" && <Toggle checked={directOnly} onChange={(event) => onDirectOnlyChange(event.target.checked)}>이 분류만</Toggle>}
+        <Slider label="미리보기 크기" min={96} max={320} step={8} value={thumbnailRowHeight} onChange={(event) => onThumbnailRowHeightChange(Number(event.target.value))} />
         <Toggle checked={metadataVisible} onChange={(event) => onMetadataVisibleChange(event.target.checked)}>정보 표시</Toggle>
         {selectedAsset && <Button size="icon" aria-label={selectedAsset.favorite ? "좋아요 끄기" : "좋아요 켜기"} onClick={onFavorite}><Star aria-hidden="true" fill={selectedAsset.favorite ? "currentColor" : "none"} /></Button>}
         {selectedAsset && <Button aria-label="휴지통으로 이동" variant="danger" disabled={trashPending} onClick={onTrash}><Trash2 aria-hidden="true" />휴지통으로 이동</Button>}

@@ -311,6 +311,19 @@ input:disabled {
   gap: var(--space-1);
 }
 
+.ui-slider {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-muted);
+  font-size: 0.75rem;
+}
+
+.ui-slider input {
+  width: 112px;
+  accent-color: var(--color-accent);
+}
+
 .classification-sidebar__footer {
   display: grid;
   gap: var(--space-1);
@@ -487,7 +500,7 @@ input:disabled {
   border-radius: var(--radius-sm);
 }
 
-.asset-gallery__asset[aria-pressed="true"] {
+.asset-gallery__asset[aria-selected="true"] {
   outline: var(--focus-width) solid var(--color-accent);
   outline-offset: calc(var(--focus-width) * -1);
 }

@@ -355,6 +355,7 @@ describe("App", () => {
         sidebarWidth: 272,
         expandedClassificationIds: [],
         assetSort: "random",
+        thumbnailRowHeight: 180,
       }),
     );
   });

@@ -172,9 +172,11 @@ function LibraryWorkspace({ subscribeDrops }: { subscribeDrops: DropSubscriber }
                     classifications={entries}
                     sort={preferences.assetSort}
                     metadataVisible={preferences.metadataVisible}
+                    thumbnailRowHeight={preferences.thumbnailRowHeight}
                     refreshVersion={assetRefresh}
                     onSortChange={(assetSort: AssetSort) => updatePreferences({ assetSort })}
                     onMetadataVisibleChange={(metadataVisible) => updatePreferences({ metadataVisible })}
+                    onThumbnailRowHeightChange={(thumbnailRowHeight) => updatePreferences({ thumbnailRowHeight })}
                     onStatusChange={setBrowserStatus}
                   />
                 )}

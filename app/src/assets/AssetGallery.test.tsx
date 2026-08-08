@@ -18,11 +18,50 @@ describe("AssetGallery", () => {
 
   it("selects once and opens on double click or Enter", async () => {
     const user = userEvent.setup(); const select = vi.fn(); const open = vi.fn();
-    render(<AssetGallery items={[asset(0)]} selectedAssetId={null} onSelect={select} onOpen={open} />);
-    const tile = await screen.findByRole("button", { name: "asset-0.png" });
-    await user.click(tile); expect(select).toHaveBeenCalledWith(expect.objectContaining({ id: "asset-0" })); expect(open).not.toHaveBeenCalled();
+    render(<AssetGallery items={[asset(0)]} selectedAssetIds={new Set()} focusAssetId="asset-0" targetRowHeight={180} onSelectionGesture={select} onOpen={open} />);
+    const tile = await screen.findByRole("option", { name: "asset-0.png" });
+    await user.click(tile); expect(select).toHaveBeenCalledWith(expect.objectContaining({ id: "asset-0" }), { toggle: false, range: false }); expect(open).not.toHaveBeenCalled();
     await user.dblClick(tile); expect(open).toHaveBeenCalledWith(expect.objectContaining({ id: "asset-0" }));
     fireEvent.keyDown(tile, { key: "Enter" }); expect(open).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports multi-selection gestures and loaded-item keyboard commands", async () => {
+    const user = userEvent.setup();
+    const onSelectionGesture = vi.fn();
+    const onSelectAll = vi.fn();
+    const onDeleteSelection = vi.fn();
+    const onClearSelection = vi.fn();
+    const onMoveFocus = vi.fn();
+    render(<AssetGallery
+      items={[asset(0), asset(1), asset(2)]}
+      selectedAssetIds={new Set(["asset-0"])}
+      focusAssetId="asset-0"
+      targetRowHeight={180}
+      onSelectionGesture={onSelectionGesture}
+      onSelectAll={onSelectAll}
+      onDeleteSelection={onDeleteSelection}
+      onClearSelection={onClearSelection}
+      onMoveFocus={onMoveFocus}
+    />);
+    const first = await screen.findByRole("option", { name: "asset-0.png" });
+    const second = screen.getByRole("option", { name: "asset-1.png" });
+    expect(first).toHaveAttribute("aria-selected", "true");
+    expect(first).not.toHaveAttribute("aria-pressed");
+
+    await user.keyboard("{Control>}");
+    await user.click(second);
+    await user.keyboard("{/Control}");
+    expect(onSelectionGesture).toHaveBeenLastCalledWith(expect.objectContaining({ id: "asset-1" }), { toggle: true, range: false });
+    fireEvent.click(second, { shiftKey: true });
+    expect(onSelectionGesture).toHaveBeenLastCalledWith(expect.objectContaining({ id: "asset-1" }), { toggle: false, range: true });
+
+    first.focus();
+    await user.keyboard("{Control>}a{/Control}");
+    await user.keyboard("{Delete}{Escape}{ArrowRight}");
+    expect(onSelectAll).toHaveBeenCalledOnce();
+    expect(onDeleteSelection).toHaveBeenCalledOnce();
+    expect(onClearSelection).toHaveBeenCalledOnce();
+    expect(onMoveFocus).toHaveBeenCalledWith(1, false);
   });
 
   it("renders safe metadata overlays", async () => {

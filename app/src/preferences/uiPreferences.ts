@@ -7,6 +7,7 @@ export type UiPreferences = {
   sidebarWidth: number;
   expandedClassificationIds: string[];
   assetSort: AssetSort;
+  thumbnailRowHeight: number;
 };
 
 export const DEFAULT_UI_PREFERENCES: UiPreferences = {
@@ -14,6 +15,7 @@ export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   sidebarWidth: 232,
   expandedClassificationIds: [],
   assetSort: "newest",
+  thumbnailRowHeight: 180,
 };
 
 export function loadUiPreferences(storage: Storage = localStorage): UiPreferences {
@@ -43,6 +45,10 @@ export function loadUiPreferences(storage: Storage = localStorage): UiPreference
     assetSort: isAssetSort(value.assetSort)
       ? value.assetSort
       : DEFAULT_UI_PREFERENCES.assetSort,
+    thumbnailRowHeight:
+      typeof value.thumbnailRowHeight === "number" && Number.isFinite(value.thumbnailRowHeight)
+        ? Math.max(96, Math.min(320, value.thumbnailRowHeight))
+        : DEFAULT_UI_PREFERENCES.thumbnailRowHeight,
   };
 }
 

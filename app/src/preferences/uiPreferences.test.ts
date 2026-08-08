@@ -32,6 +32,7 @@ describe("UI preferences", () => {
       sidebarWidth: 240,
       expandedClassificationIds: ["a"],
       assetSort: "oldest" as const,
+      thumbnailRowHeight: 220,
     };
 
     saveUiPreferences(value, localStorage);
@@ -63,6 +64,7 @@ describe("UI preferences", () => {
       sidebarWidth: 240,
       expandedClassificationIds: ["a"],
       assetSort: "newest",
+      thumbnailRowHeight: 180,
     });
   });
 
@@ -83,6 +85,16 @@ describe("UI preferences", () => {
       sidebarWidth: 360,
       expandedClassificationIds: ["a"],
       assetSort: "random",
+      thumbnailRowHeight: 180,
     });
+  });
+
+  it("migrates a missing thumbnail height and clamps stored values", () => {
+    const localStorage = storage();
+    localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({ thumbnailRowHeight: 999 }));
+    expect(loadUiPreferences(localStorage).thumbnailRowHeight).toBe(320);
+
+    localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({ thumbnailRowHeight: 40 }));
+    expect(loadUiPreferences(localStorage).thumbnailRowHeight).toBe(96);
   });
 });

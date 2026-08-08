@@ -10,13 +10,15 @@ import { Toast } from "../shared/ui/Toast";
 import { AssetDetailDialog } from "./AssetDetailDialog";
 import { AssetGallery } from "./AssetGallery";
 import { AssetToolbar } from "./AssetToolbar";
+import { applySelectionGesture, emptySelection, moveSelectionFocus, reconcileSelection, selectAllLoaded, type SelectionGesture, type SelectionState } from "./selection";
 
 export type AssetBrowserStatus = { loadedCount: number; selectedAsset: AssetSummary | null; loading: boolean };
-type Props = { view: AssetView; classifications: ClassificationEntry[]; sort: AssetSort; metadataVisible: boolean; refreshVersion: number; onSortChange: (sort: AssetSort) => void; onMetadataVisibleChange: (visible: boolean) => void; onStatusChange: (status: AssetBrowserStatus) => void };
+type Props = { view: AssetView; classifications: ClassificationEntry[]; sort: AssetSort; metadataVisible: boolean; thumbnailRowHeight?: number; refreshVersion: number; onSortChange: (sort: AssetSort) => void; onMetadataVisibleChange: (visible: boolean) => void; onThumbnailRowHeightChange?: (height: number) => void; onStatusChange: (status: AssetBrowserStatus) => void };
 type PageState = { queryKey: string; items: AssetSummary[]; nextCursor: AssetCursor | null };
 type QueryError = { queryKey: string; message: string };
+const EMPTY_ASSETS: AssetSummary[] = [];
 
-export function AssetBrowser({ view, classifications, sort, metadataVisible, refreshVersion, onSortChange, onMetadataVisibleChange, onStatusChange }: Props) {
+export function AssetBrowser({ view, classifications, sort, metadataVisible, thumbnailRowHeight = 180, refreshVersion, onSortChange, onMetadataVisibleChange, onThumbnailRowHeightChange = () => undefined, onStatusChange }: Props) {
   const { gateway } = useLibrary();
   const [directOnly, setDirectOnly] = useState(false);
   const [page, setPage] = useState<PageState | null>(null);
@@ -28,6 +30,7 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, ref
   const [retryVersion, setRetryVersion] = useState(0);
   const [randomVersion, setRandomVersion] = useState(0);
   const [selectedAsset, setSelectedAsset] = useState<AssetSummary | null>(null);
+  const [selection, setSelection] = useState<SelectionState>(emptySelection);
   const [detailAsset, setDetailAsset] = useState<AssetSummary | null>(null);
   const [trashPendingAssetId, setTrashPendingAssetId] = useState<string | null>(null);
   const selectedViewKeyRef = useRef<string | null>(null);
@@ -44,7 +47,8 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, ref
   const queryKey = JSON.stringify(queryBase);
   const viewKey = view.kind === "classification" ? `classification:${view.classificationId}` : view.kind;
   const activePage = page?.queryKey === queryKey ? page : null;
-  const items = activePage?.items ?? [];
+  const items = activePage?.items ?? EMPTY_ASSETS;
+  const itemIds = useMemo(() => items.map((asset) => asset.id), [items]);
   const nextCursor = activePage?.nextCursor ?? null;
   const currentFirstError = firstError?.queryKey === queryKey ? firstError.message : null;
   const currentNextError = nextError?.queryKey === queryKey ? nextError.message : null;
@@ -61,6 +65,13 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, ref
     return () => { if (generation === generationRef.current) generationRef.current += 1; };
   }, [gateway, queryBase, queryKey, refreshVersion, retryVersion, viewKey]);
   useEffect(() => onStatusChange({ loadedCount: items.length, selectedAsset, loading: firstLoading || nextLoading }), [firstLoading, items.length, nextLoading, onStatusChange, selectedAsset]);
+  useEffect(() => {
+    setSelection((current) => reconcileSelection(current, itemIds));
+  }, [itemIds]);
+  useEffect(() => {
+    setSelection(emptySelection());
+    setSelectedAsset(null);
+  }, [viewKey]);
   const loadNextPage = useCallback((retry = false) => {
     if (!activePage || !nextCursor || nextLoadingRef.current || (currentNextError && !retry)) return;
     const generation = generationRef.current; const cursor = nextCursor; nextLoadingRef.current = true; setNextLoading(true); setNextError(null);
@@ -101,11 +112,34 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, ref
     refresh();
   }, [refresh]);
   const reshuffle = () => { randomPivotRef.current = createRandomPivot(); setRandomVersion((value) => value + 1); };
+  const selectWithGesture = (asset: AssetSummary, gesture: SelectionGesture) => {
+    const next = applySelectionGesture(selection, itemIds, asset.id, gesture);
+    setSelection(next);
+    selectedViewKeyRef.current = next.ids.size > 0 ? viewKey : null;
+    setSelectedAsset(next.ids.has(asset.id) ? asset : items.find((item) => next.ids.has(item.id)) ?? null);
+  };
+  const clearSelection = () => {
+    setSelection(emptySelection());
+    selectedViewKeyRef.current = null;
+    setSelectedAsset(null);
+  };
+  const selectAll = () => {
+    const next = selectAllLoaded(selection, itemIds);
+    setSelection(next);
+    selectedViewKeyRef.current = next.ids.size > 0 ? viewKey : null;
+    setSelectedAsset((current) => current && next.ids.has(current.id) ? current : items[0] ?? null);
+  };
+  const moveFocus = (delta: number, extend: boolean) => {
+    const next = moveSelectionFocus(selection, itemIds, delta, extend);
+    setSelection(next);
+    selectedViewKeyRef.current = next.ids.size > 0 ? viewKey : null;
+    setSelectedAsset(items.find((item) => item.id === next.focusId) ?? null);
+  };
   return <section className="asset-browser" aria-label="전체 자산">
-    <AssetToolbar view={view} classifications={classifications} sort={sort} directOnly={directOnly} metadataVisible={metadataVisible} selectedAsset={selectedAsset} onSortChange={onSortChange} onDirectOnlyChange={setDirectOnly} onMetadataVisibleChange={onMetadataVisibleChange} onFavorite={() => void toggleFavorite()} onTrash={() => void trashSelected()} trashPending={trashPendingAssetId !== null} onReshuffle={reshuffle} />
+    <AssetToolbar view={view} classifications={classifications} sort={sort} directOnly={directOnly} metadataVisible={metadataVisible} thumbnailRowHeight={thumbnailRowHeight} selectedAsset={selectedAsset} onSortChange={onSortChange} onDirectOnlyChange={setDirectOnly} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onFavorite={() => void toggleFavorite()} onTrash={() => void trashSelected()} trashPending={trashPendingAssetId !== null} onReshuffle={reshuffle} />
     {message && <Toast>{message}</Toast>}
     {currentFirstError && <Toast>{currentFirstError}</Toast>}
-    {firstLoading || !activePage && !currentFirstError ? <Skeleton className="asset-browser__skeleton" label="자산을 불러오는 중" /> : currentFirstError && items.length === 0 ? <EmptyState title="자산을 불러오지 못했습니다"><Button onClick={refresh}>다시 시도</Button></EmptyState> : items.length === 0 ? <EmptyState title="자산이 없습니다">여기에 이미지를 놓아 추가하세요.</EmptyState> : <AssetGallery items={items} selectedAssetId={selectedAsset?.id} metadataVisible={metadataVisible} hasNextPage={nextCursor !== null} onLoadNextPage={loadNextPage} onSelect={(asset) => { selectedViewKeyRef.current = asset ? viewKey : null; setSelectedAsset(asset); }} onOpen={(asset) => { detailViewKeyRef.current = viewKey; setDetailAsset(asset); }} />}
+    {firstLoading || !activePage && !currentFirstError ? <Skeleton className="asset-browser__skeleton" label="자산을 불러오는 중" /> : currentFirstError && items.length === 0 ? <EmptyState title="자산을 불러오지 못했습니다"><Button onClick={refresh}>다시 시도</Button></EmptyState> : items.length === 0 ? <EmptyState title="자산이 없습니다">여기에 이미지를 놓아 추가하세요.</EmptyState> : <AssetGallery items={items} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} targetRowHeight={thumbnailRowHeight} metadataVisible={metadataVisible} hasNextPage={nextCursor !== null} onLoadNextPage={loadNextPage} onSelectionGesture={selectWithGesture} onSelectAll={selectAll} onDeleteSelection={() => void trashSelected()} onClearSelection={clearSelection} onMoveFocus={moveFocus} onOpen={(asset) => { detailViewKeyRef.current = viewKey; setDetailAsset(asset); }} />}
     {nextLoading && <Skeleton label="자산을 더 불러오는 중" />}{currentNextError && <div className="asset-browser__next-error"><Toast>{currentNextError}</Toast><Button onClick={() => loadNextPage(true)}>다시 시도</Button></div>}
     <AssetDetailDialog asset={detailAsset} classifications={classifications} onClose={() => setDetailAsset(null)} onTrashed={trashDetail} />
   </section>;

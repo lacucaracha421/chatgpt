@@ -220,7 +220,7 @@ git commit -m "feat: add unsorted inbox navigation"
 - Adds `thumbnailRowHeight: number` to `UiPreferences`, clamped to `96..320`, default `180`
 - `AssetGallery` receives `selectedAssetIds`, `focusAssetId`, `targetRowHeight` and reports pointer/keyboard selection gestures
 
-- [ ] **Step 1: Write exhaustive selection RED tests**
+- [x] **Step 1: Write exhaustive selection RED tests**
 
 Cover plain click, Ctrl toggle, Shift range, Ctrl+Shift additive range, Ctrl+A over loaded IDs only, selection reconciliation after page refresh, and arrow movement staying inside loaded IDs.
 
@@ -231,31 +231,31 @@ expect(applySelectionGesture(from("b"), ids, "d", { toggle: false, range: true }
   .toEqual(new Set(["b", "c", "d"]));
 ```
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run: `Set-Location app; npm.cmd test -- src/assets/selection.test.ts src/preferences/uiPreferences.test.ts`
 
 Expected: FAIL because the Module and preference do not exist.
 
-- [ ] **Step 3: Implement the pure selection Module and preference migration**
+- [x] **Step 3: Implement the pure selection Module and preference migration**
 
 Keep selection calculations free of React and DOM. Read older `lakomics.uiPreferences.v1` values by filling the new height default; do not rename the storage key just for an additive field.
 
-- [ ] **Step 4: Write gallery interaction RED tests**
+- [x] **Step 4: Write gallery interaction RED tests**
 
 Use `userEvent.keyboard("{Control>}a{/Control}")`, Ctrl/Shift clicks, Delete and Escape. Assert `aria-selected`, not `aria-pressed`, and assert that changing the slider changes row sizing without a new `listAssets` call.
 
-- [ ] **Step 5: Wire selection and density into existing virtualization**
+- [x] **Step 5: Wire selection and density into existing virtualization**
 
 Pass `thumbnailRowHeight` directly to `buildJustifiedRows`; keep `@tanstack/react-virtual`, overscan 3 and next-page threshold 5. Use a roving `tabIndex` for asset tiles, explicit image dimensions, `loading="lazy"`, and do not animate GIF thumbnails.
 
-- [ ] **Step 6: Verify Task 3**
+- [x] **Step 6: Verify Task 3**
 
 Run: `Set-Location app; npm.cmd test -- src/assets src/preferences; npm.cmd run build`
 
 Expected: all tests pass and list pagination tests remain unchanged.
 
-- [ ] **Step 7: Commit the gallery slice**
+- [x] **Step 7: Commit the gallery slice**
 
 ```powershell
 git add app/src/assets app/src/preferences app/src/shared/ui/Slider.tsx app/src/styles/global.css

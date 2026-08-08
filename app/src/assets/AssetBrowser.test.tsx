@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 // @ts-ignore Vitest runs in Node, but this frontend project intentionally omits Node typings.
 import { readFileSync } from "node:fs";
 import userEvent from "@testing-library/user-event";
@@ -83,6 +83,61 @@ describe("AssetBrowser", () => {
     expect(next![0].randomPivot).toBe(first![0].randomPivot);
   });
 
+  it("changes thumbnail density without reloading assets", async () => {
+    const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
+    const onThumbnailRowHeightChange = vi.fn();
+    render(
+      <LibraryProvider gateway={gateway}>
+        <AssetBrowser
+          view={{ kind: "classification", classificationId: null }}
+          classifications={classifications}
+          sort="newest"
+          metadataVisible={false}
+          thumbnailRowHeight={180}
+          refreshVersion={0}
+          onSortChange={vi.fn()}
+          onMetadataVisibleChange={vi.fn()}
+          onThumbnailRowHeightChange={onThumbnailRowHeightChange}
+          onStatusChange={vi.fn()}
+        />
+      </LibraryProvider>,
+    );
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledOnce());
+
+    fireEvent.change(screen.getByRole("slider", { name: "미리보기 크기" }), { target: { value: "240" } });
+
+    expect(onThumbnailRowHeightChange).toHaveBeenCalledWith(240);
+    expect(gateway.listAssets).toHaveBeenCalledOnce();
+  });
+
+  it("supports Ctrl, Shift, Ctrl+A, Escape, and roving arrow focus over loaded assets", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway({ items: [asset(0), asset(1), asset(2)], nextCursor: null });
+    renderBrowser(gateway);
+    const first = await screen.findByRole("option", { name: "asset-0.png" });
+    const second = screen.getByRole("option", { name: "asset-1.png" });
+    const third = screen.getByRole("option", { name: "asset-2.png" });
+
+    await user.click(first);
+    await user.keyboard("{Control>}");
+    await user.click(third);
+    await user.keyboard("{/Control}");
+    expect(first).toHaveAttribute("aria-selected", "true");
+    expect(third).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.click(second, { shiftKey: true });
+    expect([first, second, third].map((tile) => tile.getAttribute("aria-selected"))).toEqual(["false", "true", "true"]);
+    second.focus();
+    await user.keyboard("{Control>}a{/Control}");
+    expect([first, second, third].map((tile) => tile.getAttribute("aria-selected"))).toEqual(["true", "true", "true"]);
+    await user.keyboard("{Escape}");
+    expect([first, second, third].map((tile) => tile.getAttribute("aria-selected"))).toEqual(["false", "false", "false"]);
+
+    first.focus();
+    await user.keyboard("{ArrowRight}");
+    expect(second).toHaveFocus();
+  });
+
   it("retains assets and offers a retry when the next page fails", async () => {
     const gateway = createGateway();
     vi.mocked(gateway.listAssets)
@@ -158,9 +213,9 @@ describe("AssetBrowser", () => {
     const status = vi.fn();
     const { rerender } = render(browserElement(gateway, { status }));
     rerender(browserElement(gateway, { sort: "oldest", status }));
-    expect(await screen.findByRole("button", { name: "New" })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "New" })).toBeInTheDocument();
     await act(async () => { resolveOld({ items: [{ ...asset(0), title: "Old" }], nextCursor: null }); await old; });
-    expect(screen.queryByRole("button", { name: "Old" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Old" })).not.toBeInTheDocument();
     expect(status).toHaveBeenLastCalledWith(expect.objectContaining({ loading: false }));
   });
 
@@ -176,7 +231,7 @@ describe("AssetBrowser", () => {
     expect(screen.queryByText("late failure")).not.toBeInTheDocument();
     expect(status).toHaveBeenLastCalledWith(expect.objectContaining({ loading: true }));
     await act(async () => { resolveNew({ items: [{ ...asset(1), title: "New" }], nextCursor: null }); await next; });
-    expect(await screen.findByRole("button", { name: "New" })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "New" })).toBeInTheDocument();
   });
 
   it("retries a failed first page", async () => {
@@ -184,7 +239,7 @@ describe("AssetBrowser", () => {
     vi.mocked(gateway.listAssets).mockRejectedValueOnce(new Error("first page failed")).mockResolvedValueOnce({ items: [{ ...asset(0), title: "Recovered" }], nextCursor: null });
     renderBrowser(gateway);
     await user.click(await screen.findByRole("button", { name: "다시 시도" }));
-    expect(await screen.findByRole("button", { name: "Recovered" })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "Recovered" })).toBeInTheDocument();
   });
 
   it("never loads an old cursor with a newly selected sort", async () => {
@@ -208,21 +263,21 @@ describe("AssetBrowser", () => {
       .mockResolvedValueOnce({ items: [{ ...asset(0), title: "Before" }], nextCursor: null })
       .mockResolvedValueOnce({ items: [{ ...asset(0), title: "After" }], nextCursor: null });
     const { rerender } = renderBrowser(gateway);
-    const tile = await screen.findByRole("button", { name: "Before" });
+    const tile = await screen.findByRole("option", { name: "Before" });
     await user.click(tile);
     await user.dblClick(tile);
     expect(screen.getByRole("dialog")).toBeInTheDocument();
 
     rerender(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "classification", classificationId: null }} classifications={classifications} sort="newest" metadataVisible={false} refreshVersion={1} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
 
-    expect(await screen.findByRole("button", { name: "After" })).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByRole("option", { name: "After" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("dialog")).toHaveAccessibleName("After");
   });
 
   it("clears selection when the refreshed page no longer contains the asset", async () => {
     const user = userEvent.setup(); const gateway = createGateway();
     vi.mocked(gateway.listAssets).mockResolvedValueOnce({ items: [{ ...asset(0), title: "Selected" }], nextCursor: null }).mockResolvedValueOnce({ items: [], nextCursor: null });
-    const { rerender } = renderBrowser(gateway); await user.click(await screen.findByRole("button", { name: "Selected" }));
+    const { rerender } = renderBrowser(gateway); await user.click(await screen.findByRole("option", { name: "Selected" }));
     rerender(browserElement(gateway, { refreshVersion: 1 }));
     expect(await screen.findByRole("heading", { name: "자산이 없습니다" })).toBeInTheDocument();
   });
@@ -230,15 +285,15 @@ describe("AssetBrowser", () => {
   it("clears selection when the view changes", async () => {
     const user = userEvent.setup(); const gateway = createGateway();
     vi.mocked(gateway.listAssets).mockResolvedValue({ items: [{ ...asset(0), title: "Selected" }], nextCursor: null });
-    const { rerender } = renderBrowser(gateway); await user.click(await screen.findByRole("button", { name: "Selected" }));
+    const { rerender } = renderBrowser(gateway); await user.click(await screen.findByRole("option", { name: "Selected" }));
     rerender(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "favorites" }} classifications={classifications} sort="newest" metadataVisible={false} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
-    expect(await screen.findByRole("button", { name: "Selected" })).toHaveAttribute("aria-pressed", "false");
+    expect(await screen.findByRole("option", { name: "Selected" })).toHaveAttribute("aria-selected", "false");
   });
 
   it("keeps the detail dialog open after a real Enter press", async () => {
     const user = userEvent.setup(); const gateway = createGateway({ items: [{ ...asset(0), title: "열기" }], nextCursor: null });
     renderBrowser(gateway);
-    const tile = await screen.findByRole("button", { name: "열기" });
+    const tile = await screen.findByRole("option", { name: "열기" });
     tile.focus();
     await user.keyboard("{Enter}");
     expect(screen.getByRole("dialog", { name: "열기" })).toBeInTheDocument();
@@ -249,7 +304,7 @@ describe("AssetBrowser", () => {
     const gateway = createGateway({ items: [{ ...asset(0), title: "Delete me" }], nextCursor: null });
     renderBrowser(gateway);
 
-    await user.click(await screen.findByRole("button", { name: "Delete me" }));
+    await user.click(await screen.findByRole("option", { name: "Delete me" }));
     await user.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
 
     expect(gateway.trashAsset).toHaveBeenCalledWith("asset-0");
@@ -262,7 +317,7 @@ describe("AssetBrowser", () => {
     vi.mocked(gateway.trashAsset).mockRejectedValue(new Error("trash failed"));
     renderBrowser(gateway);
 
-    await user.click(await screen.findByRole("button", { name: "Keep me" }));
+    await user.click(await screen.findByRole("option", { name: "Keep me" }));
     await user.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
 
     expect(await screen.findByText("trash failed")).toBeVisible();
@@ -277,13 +332,13 @@ describe("AssetBrowser", () => {
     vi.mocked(gateway.trashAsset).mockReturnValue(pendingTrash);
     renderBrowser(gateway);
 
-    await user.click(await screen.findByRole("button", { name: "First" }));
+    await user.click(await screen.findByRole("option", { name: "First" }));
     await user.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
     expect(screen.getByRole("button", { name: "휴지통으로 이동" })).toBeDisabled();
-    await user.click(screen.getByRole("button", { name: "Second" }));
+    await user.click(screen.getByRole("option", { name: "Second" }));
     await act(async () => { resolveTrash(); await pendingTrash; });
 
-    expect(await screen.findByRole("button", { name: "Second" })).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByRole("option", { name: "Second" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("button", { name: "휴지통으로 이동" })).not.toBeDisabled();
   });
 
