@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, Clock3, Ellipsis, FolderTree, Plus, Star, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Clock3, Ellipsis, FolderTree, Plus, Settings, Star, Trash2 } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
 import { useLibrary } from "../library/LibraryContext";
@@ -20,6 +20,7 @@ type ClassificationSidebarProps = {
   onExpandedIdsChange: (ids: string[]) => void;
   onSidebarWidthChange: (width: number) => void;
   onChanged: () => void;
+  onOpenSafety?: () => void;
 };
 
 type DialogState =
@@ -36,6 +37,7 @@ export function ClassificationSidebar({
   onExpandedIdsChange,
   onSidebarWidthChange,
   onViewChange,
+  onOpenSafety,
   sidebarWidth,
   view,
 }: ClassificationSidebarProps) {
@@ -242,6 +244,14 @@ export function ClassificationSidebar({
           />
         ))}
       </ul>
+      {onOpenSafety && (
+        <div className="classification-sidebar__footer">
+          <Button type="button" onClick={onOpenSafety}>
+            <Settings aria-hidden="true" />
+            라이브러리 안전 설정
+          </Button>
+        </div>
+      )}
       <div
         aria-label="사이드바 크기 조절"
         className="classification-sidebar__resize-handle"

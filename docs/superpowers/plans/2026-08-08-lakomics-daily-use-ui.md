@@ -48,12 +48,14 @@
 - Modify: `app/src/styles/global.css`
 - Modify: `app/src/layout/AppShell.tsx`
 - Modify: `app/src/layout/AppShell.test.tsx`
+- Modify: `app/src/assets/AssetToolbar.tsx`
 - Modify: `app/src/app/App.tsx`
 - Modify: `app/src/app/App.test.tsx`
+- Modify: `app/src/classification/ClassificationSidebar.tsx`
 
 **Interfaces:**
-- Consumes: existing `AppShell({ sidebar, content, status })`
-- Produces: `AppShell({ sidebar, toolbar, content, status })` with one toolbar slot and a stable four-region layout
+- Keeps: existing `AppShell({ sidebar, content, status })`
+- Produces: a stable four-region layout while `AssetBrowser` continues to own its stateful toolbar
 
 - [ ] **Step 1: Write failing shell and identity tests**
 
@@ -70,17 +72,16 @@ expect(within(screen.getByRole("region", { name: "자산 내용" }))
 
 Run: `Set-Location app; npm.cmd test -- src/layout/AppShell.test.tsx src/app/App.test.tsx`
 
-Expected: FAIL because `AppShell` has no toolbar slot and the safety button still floats above the browser.
+Expected: FAIL because the asset toolbar has no toolbar landmark and the safety button still floats above the browser.
 
 - [ ] **Step 3: Replace visual primitives without changing behavior**
 
-Set package/product/window title to `Lakomics`. Replace orange accent tokens with a calm blue palette, add semantic tokens for elevated surfaces, selection, overlay, inspector width and drag insertion, and keep the 4px spacing scale. Rebuild the shell as sidebar + toolbar + gallery + statusbar. Keep the existing concrete-classification `이 분류만` range toggle beside the location control. Move the safety entry callback into the sidebar contract; do not move backup logic into `layout`.
+Set package/product/window title to `Lakomics`. Replace orange accent tokens with a calm blue palette, add semantic tokens for elevated surfaces, selection, overlay, inspector width and drag insertion, and keep the 4px spacing scale. Mark the existing `AssetToolbar` as the toolbar landmark instead of lifting its state through `AppShell`. Keep the existing concrete-classification `이 분류만` range toggle beside the location control. Move the safety entry callback into the sidebar contract; do not move backup logic into `layout`.
 
 ```tsx
 <main className="app-shell" aria-label="라이브러리 작업 공간">
-  <aside className="app-shell__sidebar">{sidebar}</aside>
   <div className="app-shell__workspace">
-    {toolbar}
+    {sidebar}
     <section className="app-shell__content">{content}</section>
   </div>
   {status}

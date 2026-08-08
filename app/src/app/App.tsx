@@ -23,7 +23,6 @@ import {
   saveUiPreferences,
   type UiPreferences,
 } from "../preferences/uiPreferences";
-import { Button } from "../shared/ui/Button";
 import { Toast } from "../shared/ui/Toast";
 import { SafetyDialog } from "../safety/SafetyDialog";
 import { TrashBrowser } from "../safety/TrashBrowser";
@@ -161,14 +160,12 @@ function LibraryWorkspace({ subscribeDrops }: { subscribeDrops: DropSubscriber }
               }
               onSidebarWidthChange={(sidebarWidth) => updatePreferences({ sidebarWidth })}
               onChanged={() => void refreshClassifications()}
+              onOpenSafety={() => setSafetyOpen(true)}
             />
           }
           content={
             <div className="library-content">
-              <div className="library-content__safety-entry">
-                <Button onClick={() => setSafetyOpen(true)}>라이브러리 안전 설정</Button>
-              </div>
-              <div className="library-content__browser">
+              <section className="library-content__browser" aria-label="자산 내용">
                 {view.kind === "trash" ? <TrashBrowser /> : (
                   <AssetBrowser
                     view={view}
@@ -182,7 +179,7 @@ function LibraryWorkspace({ subscribeDrops }: { subscribeDrops: DropSubscriber }
                   />
                 )}
                 {message && <Toast>{message}</Toast>}
-              </div>
+              </section>
             </div>
           }
           status={<StatusBar status={browserStatus} progress={progress} dropEnabled={dropEnabled} />}

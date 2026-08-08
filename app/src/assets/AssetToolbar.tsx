@@ -27,7 +27,7 @@ export function AssetToolbar({
   const recent = view.kind === "recent";
   const location = view.kind === "favorites" ? "즐겨찾기" : recent ? "최근" : view.kind === "trash" ? "휴지통" : classifications.find((entry) => entry.id === view.classificationId)?.name ?? "전체 자산";
   return (
-    <header className="asset-toolbar">
+    <header className="asset-toolbar" role="toolbar" aria-label="자산 도구">
       <h2>{location}</h2>
       <div className="asset-toolbar__controls">
         <Select label="정렬" value={recent ? "newest" : sort} disabled={recent} onChange={(event) => onSortChange(event.target.value as AssetSort)}>

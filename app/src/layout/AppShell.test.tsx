@@ -7,6 +7,21 @@ import { StatusBar } from "./StatusBar";
 
 afterEach(cleanup);
 const styles = readFileSync(`${(new Function("return process")() as { cwd(): string }).cwd()}/src/styles/global.css`, "utf8");
+const appRoot = (new Function("return process")() as { cwd(): string }).cwd();
+
+it("uses the Lakomics product identity", () => {
+  const html = readFileSync(`${appRoot}/index.html`, "utf8");
+  const packageJson = JSON.parse(readFileSync(`${appRoot}/package.json`, "utf8")) as { name: string };
+  const tauriConfig = JSON.parse(readFileSync(`${appRoot}/src-tauri/tauri.conf.json`, "utf8")) as {
+    productName: string;
+    app: { windows: Array<{ title: string }> };
+  };
+
+  expect(html).toContain("<title>Lakomics</title>");
+  expect(packageJson.name).toBe("lakomics");
+  expect(tauriConfig.productName).toBe("Lakomics");
+  expect(tauriConfig.app.windows[0]?.title).toBe("Lakomics");
+});
 
 it("uses Korean workspace and status labels", () => {
   render(
