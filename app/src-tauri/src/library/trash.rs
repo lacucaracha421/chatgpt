@@ -145,6 +145,7 @@ impl Library {
             .prepare("SELECT id FROM assets WHERE status = 'trash'")?
             .query_map([], |row| row.get(0))?
             .collect::<Result<Vec<String>, _>>()?;
+        drop(connection);
         self.purge_candidates(asset_ids)
     }
 
@@ -181,6 +182,7 @@ impl Library {
             })
             .filter_map(|(id, trashed_at)| (trashed_at <= cutoff).then_some(id))
             .collect();
+        drop(connection);
         self.purge_candidates(asset_ids)
     }
 

@@ -11,8 +11,9 @@ mod trash;
 
 use std::{
     fs,
+    ops::{Deref, DerefMut},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard},
 };
 
 use error::LibraryError;
@@ -50,6 +51,27 @@ pub struct Library {
     trash_lock: Arc<Mutex<()>>,
     // ponytail: one lock per open Library; split only if backup operations become a bottleneck.
     backup_lock: Arc<Mutex<()>>,
+    // ponytail: one database handle at a time; use a read/write lock if reads become a bottleneck.
+    database_lock: Arc<Mutex<()>>,
+}
+
+pub(crate) struct LockedConnection<'a> {
+    connection: Connection,
+    _guard: MutexGuard<'a, ()>,
+}
+
+impl Deref for LockedConnection<'_> {
+    type Target = Connection;
+
+    fn deref(&self) -> &Self::Target {
+        &self.connection
+    }
+}
+
+impl DerefMut for LockedConnection<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.connection
+    }
 }
 
 impl Library {
@@ -72,6 +94,7 @@ impl Library {
             ingestion_lock: Arc::new(Mutex::new(())),
             trash_lock: Arc::new(Mutex::new(())),
             backup_lock: Arc::new(Mutex::new(())),
+            database_lock: Arc::new(Mutex::new(())),
         })
     }
 
@@ -79,7 +102,18 @@ impl Library {
         &self.root
     }
 
-    pub(crate) fn connection(&self) -> Result<Connection, LibraryError> {
+    pub(crate) fn connection(&self) -> Result<LockedConnection<'_>, LibraryError> {
+        let guard = self
+            .database_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        Ok(LockedConnection {
+            connection: self.unlocked_connection()?,
+            _guard: guard,
+        })
+    }
+
+    fn unlocked_connection(&self) -> Result<Connection, LibraryError> {
         db::open_database(&self.root.join("library.sqlite"))
     }
 

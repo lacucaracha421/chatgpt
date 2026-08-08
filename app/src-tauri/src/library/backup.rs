@@ -40,7 +40,8 @@ impl Library {
         }
 
         let path = backup_path(&self.root, BackupKind::Daily, now, None);
-        create_verified_snapshot(&self.connection()?, &path)?;
+        let connection = self.connection()?;
+        create_verified_snapshot(&connection, &path)?;
         rotate_daily_backups(&self.root)?;
         Ok(backup_entry(&path).map(|entry| entry.metadata))
     }
@@ -61,6 +62,10 @@ impl Library {
             .backup_lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _database_guard = self
+            .database_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let selected = backup_entries(&self.root)?
             .into_iter()
             .find(|entry| entry.metadata.id == backup_id)
@@ -71,8 +76,9 @@ impl Library {
             "library.sqlite.restore-old-{}.sqlite",
             Uuid::new_v4()
         ));
+        cleanup_temporary_restore(&temporary)?;
 
-        let current_connection = self.connection()?;
+        let current_connection = self.unlocked_connection()?;
         current_connection.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
         let pre_restore = backup_path(&self.root, BackupKind::PreRestore, Utc::now(), None);
         create_verified_snapshot(&current_connection, &pre_restore)?;
@@ -84,17 +90,22 @@ impl Library {
         create_verified_snapshot(&selected_connection, &temporary)?;
         drop(selected_connection);
 
-        fs::rename(&current, &recovery).map_err(|source| backup_error(&current, source))?;
-        if let Err(error) = fs::rename(&temporary, &current) {
-            if rollback_restore(&current, &recovery).is_err() {
+        if let Err(source) = rename_database(&current, &recovery) {
+            cleanup_temporary_restore(&temporary)?;
+            return Err(backup_error(&current, source));
+        }
+        if let Err(error) = rename_database(&temporary, &current) {
+            if rollback_restore(&self.root, &current, &recovery).is_err() {
                 return Err(LibraryError::RestoreFailed {
                     recovery_path: recovery,
                 });
             }
+            cleanup_temporary_restore(&temporary)?;
             return Err(backup_error(&temporary, error));
         }
 
         let post_swap = (|| {
+            run_after_swap_hook()?;
             remove_database_sidecars(&current)?;
             drop(db::open_database(&current)?);
             remove_database_sidecars(&recovery)?;
@@ -103,7 +114,7 @@ impl Library {
         match post_swap {
             Ok(()) => Ok(()),
             Err(error) => {
-                if rollback_restore(&current, &recovery).is_err() {
+                if rollback_restore(&self.root, &current, &recovery).is_err() {
                     return Err(LibraryError::RestoreFailed {
                         recovery_path: recovery,
                     });
@@ -208,10 +219,44 @@ fn rotate_daily_backups(root: &Path) -> Result<(), LibraryError> {
     Ok(())
 }
 
-fn rollback_restore(current: &Path, recovery: &Path) -> Result<(), LibraryError> {
-    remove_file_if_exists(current)?;
-    remove_database_sidecars(current)?;
-    fs::rename(recovery, current).map_err(|source| backup_error(recovery, source))
+fn rollback_restore(root: &Path, current: &Path, recovery: &Path) -> Result<(), LibraryError> {
+    let failed_new = root.join(format!(
+        "library.sqlite.restore-new-{}.sqlite",
+        Uuid::new_v4()
+    ));
+    let preserved_new = current.exists();
+    if preserved_new {
+        move_database_set(current, &failed_new)?;
+    }
+    rename_database(recovery, current).map_err(|source| backup_error(recovery, source))?;
+    if preserved_new {
+        remove_database_sidecars(&failed_new)?;
+        remove_file_if_exists(&failed_new)?;
+    }
+    Ok(())
+}
+
+fn move_database_set(from: &Path, to: &Path) -> Result<(), LibraryError> {
+    rename_database(from, to).map_err(|source| backup_error(from, source))?;
+    for suffix in ["-wal", "-shm"] {
+        let from_sidecar = PathBuf::from(format!("{}{suffix}", from.display()));
+        if from_sidecar.exists() {
+            let to_sidecar = PathBuf::from(format!("{}{suffix}", to.display()));
+            rename_database(&from_sidecar, &to_sidecar)
+                .map_err(|source| backup_error(&from_sidecar, source))?;
+        }
+    }
+    Ok(())
+}
+
+fn cleanup_temporary_restore(temporary: &Path) -> Result<(), LibraryError> {
+    remove_database_sidecars(temporary)?;
+    remove_file_if_exists(temporary)
+}
+
+fn rename_database(from: &Path, to: &Path) -> std::io::Result<()> {
+    run_before_rename_hook(from, to)?;
+    fs::rename(from, to)
 }
 
 fn remove_database_sidecars(path: &Path) -> Result<(), LibraryError> {
@@ -329,16 +374,76 @@ fn run_after_reservation_hook(_destination: &Path) -> Result<(), LibraryError> {
 }
 
 #[cfg(test)]
+type BeforeRenameHook = Box<dyn Fn(&Path, &Path) -> std::io::Result<()>>;
+
+#[cfg(test)]
+type AfterSwapHook = Box<dyn FnOnce() -> Result<(), LibraryError>>;
+
+#[cfg(test)]
+thread_local! {
+    static BEFORE_RENAME_HOOK: std::cell::RefCell<Option<BeforeRenameHook>> = const { std::cell::RefCell::new(None) };
+    static AFTER_SWAP_HOOK: std::cell::RefCell<Option<AfterSwapHook>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn set_before_rename_hook(hook: impl Fn(&Path, &Path) -> std::io::Result<()> + 'static) {
+    BEFORE_RENAME_HOOK.with(|stored_hook| *stored_hook.borrow_mut() = Some(Box::new(hook)));
+}
+
+#[cfg(test)]
+fn run_before_rename_hook(from: &Path, to: &Path) -> std::io::Result<()> {
+    BEFORE_RENAME_HOOK.with(|stored_hook| {
+        stored_hook
+            .borrow()
+            .as_ref()
+            .map_or(Ok(()), |hook| hook(from, to))
+    })
+}
+
+#[cfg(not(test))]
+fn run_before_rename_hook(_from: &Path, _to: &Path) -> std::io::Result<()> {
+    Ok(())
+}
+
+#[cfg(test)]
+fn set_after_swap_hook(hook: impl FnOnce() -> Result<(), LibraryError> + 'static) {
+    AFTER_SWAP_HOOK.with(|stored_hook| *stored_hook.borrow_mut() = Some(Box::new(hook)));
+}
+
+#[cfg(test)]
+fn run_after_swap_hook() -> Result<(), LibraryError> {
+    AFTER_SWAP_HOOK.with(|stored_hook| {
+        stored_hook
+            .borrow_mut()
+            .take()
+            .map_or(Ok(()), |hook| hook())
+    })
+}
+
+#[cfg(not(test))]
+fn run_after_swap_hook() -> Result<(), LibraryError> {
+    Ok(())
+}
+
+#[cfg(test)]
 mod tests {
-    use std::{fs, io};
+    use std::{
+        fs, io,
+        path::PathBuf,
+        sync::{mpsc, Arc, Barrier},
+        time::Duration,
+    };
 
     use chrono::{TimeZone, Utc};
 
-    use super::{create_verified_snapshot, parse_backup_filename, set_after_reservation_hook};
+    use super::{
+        create_verified_snapshot, parse_backup_filename, set_after_reservation_hook,
+        set_after_swap_hook, set_before_rename_hook,
+    };
     use crate::library::{
         db,
         error::LibraryError,
-        models::{BackupKind, ClassificationKind, CreateClassification},
+        models::{BackupKind, ClassificationKind, CreateClassification, TrashPolicy},
         Library,
     };
 
@@ -454,6 +559,159 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn restore_replaces_a_stale_temporary_database() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let backup = library
+            .ensure_daily_backup(Utc.with_ymd_and_hms(2026, 8, 1, 12, 0, 0).unwrap())
+            .unwrap()
+            .unwrap();
+        let temporary = library.root().join("library.sqlite.restore.part");
+        fs::write(&temporary, b"stale restore").unwrap();
+
+        library.restore_backup(&backup.id).unwrap();
+
+        assert!(!temporary.exists());
+    }
+
+    #[test]
+    fn database_mutation_waits_until_restore_finishes() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let backup = library
+            .ensure_daily_backup(Utc.with_ymd_and_hms(2026, 8, 1, 12, 0, 0).unwrap())
+            .unwrap()
+            .unwrap();
+        let current = library.root().join("library.sqlite");
+        let restore_library = library.clone();
+        let barrier = Arc::new(Barrier::new(2));
+        let release = Arc::new(Barrier::new(2));
+        let hook_barrier = Arc::clone(&barrier);
+        let hook_release = Arc::clone(&release);
+        let restore = std::thread::spawn(move || {
+            set_before_rename_hook(move |from, _| {
+                if from == current {
+                    hook_barrier.wait();
+                    hook_release.wait();
+                }
+                Ok(())
+            });
+            restore_library.restore_backup(&backup.id).unwrap();
+        });
+        barrier.wait();
+
+        let mutation_library = library.clone();
+        let (done_tx, done_rx) = mpsc::channel();
+        let mutation = std::thread::spawn(move || {
+            mutation_library
+                .set_trash_policy(TrashPolicy {
+                    retention_days: Some(7),
+                })
+                .unwrap();
+            done_tx.send(()).unwrap();
+        });
+
+        assert!(done_rx.recv_timeout(Duration::from_millis(100)).is_err());
+        release.wait();
+        restore.join().unwrap();
+        mutation.join().unwrap();
+        assert_eq!(library.trash_policy().unwrap().retention_days, Some(7));
+    }
+
+    #[test]
+    fn failed_temporary_swap_cleans_up_the_temporary_database() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let backup = library
+            .ensure_daily_backup(Utc.with_ymd_and_hms(2026, 8, 1, 12, 0, 0).unwrap())
+            .unwrap()
+            .unwrap();
+        let temporary = library.root().join("library.sqlite.restore.part");
+        let current = library.root().join("library.sqlite");
+        let temporary_for_hook = temporary.clone();
+        let current_for_hook = current.clone();
+        set_before_rename_hook(move |from, to| {
+            if from == temporary_for_hook && to == current_for_hook {
+                return Err(io::Error::other("temporary swap failed"));
+            }
+            Ok(())
+        });
+
+        let error = library.restore_backup(&backup.id).unwrap_err();
+
+        assert!(matches!(error, LibraryError::Backup { .. }));
+        assert!(!temporary.exists());
+        assert!(current.exists());
+    }
+
+    #[test]
+    fn failed_current_database_move_cleans_up_the_temporary_database() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let backup = library
+            .ensure_daily_backup(Utc.with_ymd_and_hms(2026, 8, 1, 12, 0, 0).unwrap())
+            .unwrap()
+            .unwrap();
+        let temporary = library.root().join("library.sqlite.restore.part");
+        let current = library.root().join("library.sqlite");
+        let current_for_hook = current.clone();
+        set_before_rename_hook(move |from, to| {
+            let is_old_recovery = to
+                .file_name()
+                .and_then(std::ffi::OsStr::to_str)
+                .is_some_and(|name| name.starts_with("library.sqlite.restore-old-"));
+            if from == current_for_hook && is_old_recovery {
+                return Err(io::Error::other("current move failed"));
+            }
+            Ok(())
+        });
+
+        let error = library.restore_backup(&backup.id).unwrap_err();
+
+        assert!(matches!(error, LibraryError::Backup { .. }));
+        assert!(!temporary.exists());
+        assert!(current.exists());
+    }
+
+    #[test]
+    fn failed_rollback_preserves_the_swapped_database_as_a_distinct_recovery_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let backup = library
+            .ensure_daily_backup(Utc.with_ymd_and_hms(2026, 8, 1, 12, 0, 0).unwrap())
+            .unwrap()
+            .unwrap();
+        let current = library.root().join("library.sqlite");
+        set_after_swap_hook(|| {
+            Err(LibraryError::Backup {
+                path: PathBuf::from("post-swap"),
+                source: io::Error::other("post-swap failure"),
+            })
+        });
+        let current_for_hook = current.clone();
+        set_before_rename_hook(move |from, to| {
+            let is_old_recovery = from
+                .file_name()
+                .and_then(std::ffi::OsStr::to_str)
+                .is_some_and(|name| name.starts_with("library.sqlite.restore-old-"));
+            if to == current_for_hook && is_old_recovery {
+                return Err(io::Error::other("rollback rename failed"));
+            }
+            Ok(())
+        });
+
+        let error = library.restore_backup(&backup.id).unwrap_err();
+        let recovery_count = fs::read_dir(library.root())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with("library.sqlite.restore-new-"))
+            .count();
+
+        assert!(matches!(error, LibraryError::RestoreFailed { .. }));
+        assert_eq!(recovery_count, 1);
     }
 
     #[test]
