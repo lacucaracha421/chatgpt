@@ -7,7 +7,7 @@ use crate::library::{
     error::LibraryError,
     models::{
         AssetPage, AssetQuery, ClassificationEntry, CreateClassification, IngestImageRequest,
-        IngestOutcome, LibrarySummary, PurgeSummary, TrashPage, TrashPolicy,
+        IngestOutcome, LibrarySummary, MetadataBackup, PurgeSummary, TrashPage, TrashPolicy,
     },
     Library,
 };
@@ -26,11 +26,16 @@ pub struct CommandError {
 
 impl From<LibraryError> for CommandError {
     fn from(error: LibraryError) -> Self {
+        let message = match &error {
+            LibraryError::Backup { .. } => "SQLite 백업 작업에 실패했습니다.".into(),
+            _ => error.to_string(),
+        };
         let code = match error {
             LibraryError::LibraryInUse => "library_in_use",
             LibraryError::LibraryLock { .. } => "library_lock_failed",
             LibraryError::Backup { .. } => "backup_failed",
             LibraryError::InvalidBackup => "invalid_backup",
+            LibraryError::RestoreFailed { .. } => "restore_failed",
             LibraryError::CreateDirectory { .. } => "create_directory_failed",
             LibraryError::Database(_) => "database_failed",
             LibraryError::UnsupportedSchema(_) => "unsupported_schema",
@@ -53,10 +58,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::UnsupportedImage => "unsupported_image",
             LibraryError::WriteAsset { .. } => "write_asset_failed",
         };
-        Self {
-            code,
-            message: error.to_string(),
-        }
+        Self { code, message }
     }
 }
 
@@ -98,6 +100,34 @@ pub fn current_library(state: State<'_, AppState>) -> Result<Option<LibrarySumma
     current(state)
         .map(|library| library.summary().map_err(CommandError::from))
         .transpose()
+}
+
+#[tauri::command]
+pub fn ensure_daily_backup(
+    state: State<'_, AppState>,
+) -> Result<Option<MetadataBackup>, CommandError> {
+    current_required(state)?
+        .ensure_daily_backup(chrono::Utc::now())
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn list_metadata_backups(
+    state: State<'_, AppState>,
+) -> Result<Vec<MetadataBackup>, CommandError> {
+    current_required(state)?
+        .list_backups()
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn restore_metadata_backup(
+    backup_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    current_required(state)?
+        .restore_backup(&backup_id)
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -302,12 +332,29 @@ mod tests {
                 "backup_failed",
             ),
             (LibraryError::InvalidBackup, "invalid_backup"),
+            (
+                LibraryError::RestoreFailed {
+                    recovery_path: PathBuf::from("library.sqlite.restore-old.sqlite"),
+                },
+                "restore_failed",
+            ),
         ];
 
         for (error, code) in cases {
             let value = serde_json::to_value(CommandError::from(error)).unwrap();
             assert_eq!(value["code"], code);
         }
+    }
+
+    #[test]
+    fn backup_command_errors_do_not_expose_internal_backup_paths() {
+        let error = CommandError::from(LibraryError::Backup {
+            path: PathBuf::from(r"C:\\library\\backups\\daily-secret.sqlite"),
+            source: io::Error::other("backup failed"),
+        });
+
+        assert!(!error.message.contains("daily-secret.sqlite"));
+        assert!(!error.message.contains("C:\\library"));
     }
 
     #[test]

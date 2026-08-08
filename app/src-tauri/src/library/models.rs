@@ -1,5 +1,22 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BackupKind {
+    Daily,
+    PreMigration,
+    PreRestore,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MetadataBackup {
+    pub id: String,
+    pub kind: BackupKind,
+    pub created_at: String,
+    pub byte_size: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TrashPolicy {
@@ -135,7 +152,7 @@ pub struct LibrarySummary {
 
 #[cfg(test)]
 mod tests {
-    use super::AssetSummary;
+    use super::{AssetSummary, BackupKind, MetadataBackup};
 
     #[test]
     fn asset_summary_serialization_omits_managed_paths() {
@@ -157,5 +174,21 @@ mod tests {
 
         assert!(value.get("relativePath").is_none());
         assert!(value.get("thumbnailRelativePath").is_none());
+    }
+
+    #[test]
+    fn metadata_backup_serialization_exposes_an_opaque_id_without_a_filename() {
+        let backup = MetadataBackup {
+            id: "550e8400-e29b-41d4-a716-446655440000".into(),
+            kind: BackupKind::Daily,
+            created_at: "2026-08-01T12:00:00+00:00".into(),
+            byte_size: 42,
+        };
+
+        let value = serde_json::to_value(backup).unwrap();
+
+        assert_eq!(value["id"], "550e8400-e29b-41d4-a716-446655440000");
+        assert!(value.get("path").is_none());
+        assert!(value.get("filename").is_none());
     }
 }

@@ -48,6 +48,8 @@ pub struct Library {
     ingestion_lock: Arc<Mutex<()>>,
     // ponytail: one lock per open Library; split by asset only if trash throughput demands it.
     trash_lock: Arc<Mutex<()>>,
+    // ponytail: one lock per open Library; split only if backup operations become a bottleneck.
+    backup_lock: Arc<Mutex<()>>,
 }
 
 impl Library {
@@ -69,6 +71,7 @@ impl Library {
             lease,
             ingestion_lock: Arc::new(Mutex::new(())),
             trash_lock: Arc::new(Mutex::new(())),
+            backup_lock: Arc::new(Mutex::new(())),
         })
     }
 

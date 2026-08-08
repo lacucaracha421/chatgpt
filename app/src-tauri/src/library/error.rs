@@ -20,6 +20,8 @@ pub enum LibraryError {
     },
     #[error("SQLite 백업을 검증할 수 없습니다")]
     InvalidBackup,
+    #[error("메타데이터 백업 복원에 실패했습니다. 복구 데이터베이스가 보존되었습니다")]
+    RestoreFailed { recovery_path: PathBuf },
     #[error("라이브러리 폴더를 만들 수 없습니다: {path}")]
     CreateDirectory {
         path: PathBuf,

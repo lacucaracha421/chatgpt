@@ -21,6 +21,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::open_library,
             commands::current_library,
+            commands::ensure_daily_backup,
+            commands::list_metadata_backups,
+            commands::restore_metadata_backup,
             commands::list_classifications,
             commands::create_classification,
             commands::rename_classification,
