@@ -379,6 +379,49 @@ input:disabled {
 .classification-sidebar__tree-row {
   padding-right: var(--space-1);
   border-radius: var(--radius-sm);
+  position: relative;
+}
+
+.classification-sidebar__tree-row[data-drop-state="valid"][data-drop-position="inside"] {
+  background: var(--color-selected);
+  outline: var(--focus-width) solid var(--color-accent);
+}
+
+.classification-sidebar__tree-row[data-drop-state="invalid"] {
+  outline: var(--focus-width) solid var(--color-danger);
+}
+
+.classification-sidebar__tree-row[data-drop-state="valid"][data-drop-position="before"]::before,
+.classification-sidebar__tree-row[data-drop-state="valid"][data-drop-position="after"]::after {
+  position: absolute;
+  right: 0;
+  left: 0;
+  height: var(--drag-insertion-width);
+  background: var(--color-accent);
+  content: "";
+}
+
+.classification-sidebar__tree-row[data-drop-position="before"]::before { top: 0; }
+.classification-sidebar__tree-row[data-drop-position="after"]::after { bottom: 0; }
+
+.is-pointer-dragging,
+.is-pointer-dragging * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
+.ui-drag-layer {
+  position: fixed;
+  z-index: 1000;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-text);
+  background: var(--color-surface-elevated);
+  border: var(--border-width) solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px var(--color-overlay);
 }
 
 .classification-sidebar__tree-label {

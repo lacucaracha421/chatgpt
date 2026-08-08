@@ -385,31 +385,31 @@ type PointerDragState =
 
 The pure reducer starts dragging only after a 6px threshold. React owns pointer capture and renders one shared `DragLayer`.
 
-- [ ] **Step 1: Write pointer state RED tests**
+- [x] **Step 1: Write pointer state RED tests**
 
 Cover threshold, Escape/pointercancel, selected-vs-unselected asset payload, target enter/leave, and no text selection while dragging.
 
-- [ ] **Step 2: Implement the small pointer reducer and DragLayer**
+- [x] **Step 2: Implement the small pointer reducer and DragLayer**
 
 Do not use `draggable`, `dragstart`, `dataTransfer`, or a dependency. Use `pointerdown`, `pointermove`, `pointerup`, `pointercancel`, and `document.elementFromPoint`.
 
-- [ ] **Step 3: Write asset-to-classification RED tests**
+- [x] **Step 3: Write asset-to-classification RED tests**
 
 Drag a selected tile set over a classification row, assert visual target state, release, and expect one `patchAssetClassifications` call with only `addClassificationIds`.
 
-- [ ] **Step 4: Implement asset classification drops**
+- [x] **Step 4: Implement asset classification drops**
 
 Keyboard users keep the Task 4 classification menu. Drop failure preserves selection and reports a Toast.
 
-- [ ] **Step 5: Write classification move RED tests**
+- [x] **Step 5: Write classification move RED tests**
 
 Drag a tree row onto another row and assert `moveClassification(entryId, parentId)`. Assert self/descendant targets are visually invalid and never call the gateway.
 
-- [ ] **Step 6: Implement classification move targets**
+- [x] **Step 6: Implement classification move targets**
 
 Reuse `buildTree` ancestry data and the existing Rust cycle validation. Render a line for between-row insertion and a row highlight for child placement; map both to the existing single-parent model.
 
-- [ ] **Step 7: Verify and commit Task 5**
+- [x] **Step 7: Verify and commit Task 5**
 
 Run: `Set-Location app; npm.cmd test -- src/shared/interaction src/classification src/assets src/app; npm.cmd run build`
 

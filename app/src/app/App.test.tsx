@@ -560,4 +560,76 @@ describe("App", () => {
     });
     expect(libraryGateway.listAssets).toHaveBeenCalledTimes(callsBeforeDrop);
   });
+
+  it("drops an asset selection on a classification in one batch", async () => {
+    Object.defineProperties(HTMLElement.prototype, {
+      offsetWidth: { configurable: true, get: () => 900 },
+      clientWidth: { configurable: true, get: () => 840 },
+      offsetHeight: { configurable: true, get: () => 600 },
+      clientHeight: { configurable: true, get: () => 600 },
+    });
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games]);
+    vi.mocked(libraryGateway.listAssets).mockResolvedValue({ items: [asset], nextCursor: null });
+    vi.mocked(libraryGateway.patchAssetClassifications).mockResolvedValue(undefined);
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+
+    const tile = await screen.findByRole("option", { name: "arona.png" });
+    const target = await screen.findByRole("treeitem", { name: games.name });
+    Object.defineProperties(tile, {
+      setPointerCapture: { configurable: true, value: vi.fn() },
+      releasePointerCapture: { configurable: true, value: vi.fn() },
+    });
+    const elementFromPoint = vi.fn().mockReturnValue(target);
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: elementFromPoint });
+
+    fireEvent.pointerDown(tile, { button: 0, pointerId: 3, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(tile, { pointerId: 3, clientX: 20, clientY: 10 });
+    expect(target).toHaveAttribute("data-drop-state", "valid");
+    fireEvent.pointerUp(tile, { pointerId: 3, clientX: 20, clientY: 10 });
+
+    await waitFor(() => expect(libraryGateway.patchAssetClassifications).toHaveBeenCalledWith({
+      assetIds: ["asset-arona"],
+      addClassificationIds: ["root-games"],
+      removeClassificationIds: [],
+    }));
+  });
+
+  it("moves a classification but rejects its descendant as a target", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({
+      metadataVisible: true,
+      sidebarWidth: 232,
+      expandedClassificationIds: [games.id, blueArchive.id],
+      assetSort: "newest",
+      thumbnailRowHeight: 180,
+    }));
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games, blueArchive, arona]);
+    vi.mocked(libraryGateway.moveClassification).mockResolvedValue(undefined);
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+
+    const rootRow = await screen.findByRole("treeitem", { name: games.name });
+    const tagRow = await screen.findByRole("treeitem", { name: arona.name });
+    for (const row of [rootRow, tagRow]) Object.defineProperties(row, {
+      setPointerCapture: { configurable: true, value: vi.fn() },
+      releasePointerCapture: { configurable: true, value: vi.fn() },
+    });
+    const elementFromPoint = vi.fn().mockReturnValue(rootRow);
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: elementFromPoint });
+
+    fireEvent.pointerDown(tagRow, { button: 0, pointerId: 4, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(tagRow, { pointerId: 4, clientX: 20, clientY: 10 });
+    expect(rootRow).toHaveAttribute("data-drop-state", "valid");
+    fireEvent.pointerUp(tagRow, { pointerId: 4, clientX: 20, clientY: 10 });
+    await waitFor(() => expect(libraryGateway.moveClassification).toHaveBeenCalledWith(arona.id, games.id));
+
+    elementFromPoint.mockReturnValue(tagRow);
+    fireEvent.pointerDown(rootRow, { button: 0, pointerId: 5, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(rootRow, { pointerId: 5, clientX: 20, clientY: 10 });
+    expect(tagRow).toHaveAttribute("data-drop-state", "invalid");
+    fireEvent.pointerUp(rootRow, { pointerId: 5, clientX: 20, clientY: 10 });
+    expect(libraryGateway.moveClassification).toHaveBeenCalledTimes(1);
+  });
 });

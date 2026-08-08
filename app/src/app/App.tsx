@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AssetBrowser, type AssetBrowserStatus } from "../assets/AssetBrowser";
 import { ClassificationSidebar } from "../classification/ClassificationSidebar";
 import {
@@ -24,6 +24,8 @@ import {
   type UiPreferences,
 } from "../preferences/uiPreferences";
 import { Toast } from "../shared/ui/Toast";
+import { DragLayer } from "../shared/ui/DragLayer";
+import { pointerDragReducer, type ClassificationDropPosition, type ClassificationDropTarget, type InternalDragPayload, type PointerDragState } from "../shared/interaction/pointerDrag";
 import { SafetyDialog } from "../safety/SafetyDialog";
 import { TrashBrowser } from "../safety/TrashBrowser";
 
@@ -76,6 +78,9 @@ function LibraryWorkspace({ subscribeDrops }: { subscribeDrops: DropSubscriber }
     selectedAsset: null,
     loading: true,
   });
+  const [dragState, setDragState] = useState<PointerDragState>({ phase: "idle" });
+  const dragStateRef = useRef<PointerDragState>({ phase: "idle" });
+  const [dragTarget, setDragTarget] = useState<ClassificationDropTarget | null>(null);
   const appendMessage = useCallback((next: string) => {
     setMessage((current) => current ? `${current} ${next}` : next);
   }, []);
@@ -125,9 +130,77 @@ function LibraryWorkspace({ subscribeDrops }: { subscribeDrops: DropSubscriber }
     const timer = window.setTimeout(() => setMessage(null), 5_000);
     return () => window.clearTimeout(timer);
   }, [message]);
+  useEffect(() => {
+    document.body.classList.toggle("is-pointer-dragging", dragState.phase === "dragging");
+    return () => document.body.classList.remove("is-pointer-dragging");
+  }, [dragState.phase]);
+  useEffect(() => {
+    const cancel = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || dragStateRef.current.phase === "idle") return;
+      transitionDrag({ type: "cancel" });
+      setDragTarget(null);
+    };
+    window.addEventListener("keydown", cancel);
+    return () => window.removeEventListener("keydown", cancel);
+  }, []);
 
   function updatePreferences(update: Partial<UiPreferences>) {
     setPreferences((current) => ({ ...current, ...update }));
+  }
+
+  function transitionDrag(action: Parameters<typeof pointerDragReducer>[1]) {
+    const next = pointerDragReducer(dragStateRef.current, action);
+    dragStateRef.current = next;
+    setDragState(next);
+    return next;
+  }
+
+  function startPointerDrag(payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) {
+    transitionDrag({ type: "arm", payload, x: event.clientX, y: event.clientY });
+    setDragTarget(null);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }
+
+  function movePointerDrag(event: React.PointerEvent<HTMLElement>) {
+    const next = transitionDrag({ type: "move", x: event.clientX, y: event.clientY });
+    if (next.phase !== "dragging") return;
+    event.preventDefault();
+    setDragTarget(classificationTargetAt(event.clientX, event.clientY, next.payload, entries));
+  }
+
+  function cancelPointerDrag(event: React.PointerEvent<HTMLElement>) {
+    transitionDrag({ type: "cancel" });
+    setDragTarget(null);
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  }
+
+  function finishPointerDrag(event: React.PointerEvent<HTMLElement>) {
+    const current = dragStateRef.current;
+    const target = current.phase === "dragging"
+      ? classificationTargetAt(event.clientX, event.clientY, current.payload, entries)
+      : null;
+    transitionDrag({ type: "finish" });
+    setDragTarget(null);
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    if (!target?.valid || current.phase !== "dragging") return;
+    void performInternalDrop(current.payload, target);
+  }
+
+  async function performInternalDrop(payload: InternalDragPayload, target: ClassificationDropTarget) {
+    try {
+      if (payload.kind === "assets") {
+        await gateway.patchAssetClassifications({ assetIds: payload.assetIds, addClassificationIds: [target.entryId], removeClassificationIds: [] });
+        setAssetRefresh((current) => current + 1);
+        setMessage(`${payload.assetIds.length}개 자산을 분류했습니다.`);
+        return;
+      }
+      const parentId = classificationDropParent(entries, target);
+      await gateway.moveClassification(payload.entryId, parentId);
+      await refreshClassifications();
+      setMessage("분류를 이동했습니다.");
+    } catch (error) {
+      setMessage(commandErrorMessage(error, "드롭 작업을 완료하지 못했습니다."));
+    }
   }
 
   async function restoreBackup(backupId: string) {
@@ -161,6 +234,11 @@ function LibraryWorkspace({ subscribeDrops }: { subscribeDrops: DropSubscriber }
               onSidebarWidthChange={(sidebarWidth) => updatePreferences({ sidebarWidth })}
               onChanged={() => void refreshClassifications()}
               onOpenSafety={() => setSafetyOpen(true)}
+              dragTarget={dragTarget}
+              onPointerDragStart={startPointerDrag}
+              onPointerDragMove={movePointerDrag}
+              onPointerDragEnd={finishPointerDrag}
+              onPointerDragCancel={cancelPointerDrag}
             />
           }
           content={
@@ -178,6 +256,10 @@ function LibraryWorkspace({ subscribeDrops }: { subscribeDrops: DropSubscriber }
                     onMetadataVisibleChange={(metadataVisible) => updatePreferences({ metadataVisible })}
                     onThumbnailRowHeightChange={(thumbnailRowHeight) => updatePreferences({ thumbnailRowHeight })}
                     onStatusChange={setBrowserStatus}
+                    onPointerDragStart={startPointerDrag}
+                    onPointerDragMove={movePointerDrag}
+                    onPointerDragEnd={finishPointerDrag}
+                    onPointerDragCancel={cancelPointerDrag}
                   />
                 )}
                 {message && <Toast>{message}</Toast>}
@@ -187,6 +269,7 @@ function LibraryWorkspace({ subscribeDrops }: { subscribeDrops: DropSubscriber }
           status={<StatusBar status={browserStatus} progress={progress} dropEnabled={dropEnabled} />}
         />
       </div>
+      <DragLayer state={dragState} />
       <SafetyDialog
         open={safetyOpen}
         restoring={maintenance === "restore"}
@@ -195,4 +278,38 @@ function LibraryWorkspace({ subscribeDrops }: { subscribeDrops: DropSubscriber }
       />
     </>
   );
+}
+
+function classificationTargetAt(x: number, y: number, payload: InternalDragPayload, entries: ClassificationEntry[]): ClassificationDropTarget | null {
+  const element = document.elementFromPoint?.(x, y)?.closest<HTMLElement>("[data-classification-id]");
+  const entryId = element?.dataset.classificationId;
+  if (!element || !entryId) return null;
+  const rect = element.getBoundingClientRect();
+  const relativeY = rect.height > 0 ? (y - rect.top) / rect.height : 0.5;
+  const position: ClassificationDropPosition = relativeY < 0.25 ? "before" : relativeY > 0.75 ? "after" : "inside";
+  return { entryId, position, valid: payload.kind === "assets" || validClassificationDrop(payload.entryId, { entryId, position, valid: true }, entries) };
+}
+
+function classificationDropParent(entries: ClassificationEntry[], target: Pick<ClassificationDropTarget, "entryId" | "position">): string | null {
+  const entry = entries.find((candidate) => candidate.id === target.entryId);
+  return target.position === "inside" ? target.entryId : entry?.parentId ?? null;
+}
+
+function validClassificationDrop(entryId: string, target: ClassificationDropTarget, entries: ClassificationEntry[]) {
+  const entry = entries.find((candidate) => candidate.id === entryId);
+  const parentId = classificationDropParent(entries, target);
+  if (!entry || target.entryId === entryId || parentId === entryId || isDescendant(parentId, entryId, entries)) return false;
+  if (entry.kind === "root") return parentId === null;
+  const parent = entries.find((candidate) => candidate.id === parentId);
+  if (entry.kind === "work") return parent?.kind === "root";
+  return parentId === null || parent !== undefined;
+}
+
+function isDescendant(candidateId: string | null, ancestorId: string, entries: ClassificationEntry[]) {
+  let current = entries.find((entry) => entry.id === candidateId);
+  while (current) {
+    if (current.id === ancestorId) return true;
+    current = entries.find((entry) => entry.id === current?.parentId);
+  }
+  return false;
 }

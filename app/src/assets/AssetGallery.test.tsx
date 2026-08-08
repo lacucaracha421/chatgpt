@@ -68,6 +68,27 @@ describe("AssetGallery", () => {
     render(<AssetGallery items={[{ ...asset(0), sourceUrl: "not a URL", collectedAt: "bad date" }]} metadataVisible />);
     expect(await screen.findByRole("img", { name: "asset-0.png" })).toBeInTheDocument();
   });
+
+  it("arms a pointer drag with the selected set or only the unselected tile", async () => {
+    const onPointerDragStart = vi.fn();
+    render(<AssetGallery
+      items={[asset(0), asset(1), asset(2)]}
+      selectedAssetIds={new Set(["asset-0", "asset-1"])}
+      onPointerDragStart={onPointerDragStart}
+    />);
+
+    fireEvent.pointerDown(await screen.findByRole("option", { name: "asset-0.png" }), { button: 0, pointerId: 7, clientX: 10, clientY: 10 });
+    expect(onPointerDragStart).toHaveBeenLastCalledWith(
+      { kind: "assets", assetIds: ["asset-0", "asset-1"] },
+      expect.objectContaining({ pointerId: 7 }),
+    );
+
+    fireEvent.pointerDown(screen.getByRole("option", { name: "asset-2.png" }), { button: 0, pointerId: 8, clientX: 20, clientY: 20 });
+    expect(onPointerDragStart).toHaveBeenLastCalledWith(
+      { kind: "assets", assetIds: ["asset-2"] },
+      expect.objectContaining({ pointerId: 8 }),
+    );
+  });
 });
 
 function asset(index: number): AssetSummary { return { id: `asset-${index}`, title: null, originalName: `asset-${index}.png`, byteSize: 1, width: 200, height: 200, collectedAt: "2026-07-30T00:00:00Z", favorite: false, sourceUrl: null }; }

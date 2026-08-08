@@ -9,6 +9,7 @@ import { Menu, type MenuItem } from "../shared/ui/Menu";
 import { Select } from "../shared/ui/Select";
 import { TextField } from "../shared/ui/TextField";
 import { Toast } from "../shared/ui/Toast";
+import type { ClassificationDropTarget, InternalDragPayload } from "../shared/interaction/pointerDrag";
 import { buildClassificationTree, type ClassificationTreeNode } from "./buildTree";
 
 type ClassificationSidebarProps = {
@@ -21,6 +22,11 @@ type ClassificationSidebarProps = {
   onSidebarWidthChange: (width: number) => void;
   onChanged: () => void;
   onOpenSafety?: () => void;
+  dragTarget?: ClassificationDropTarget | null;
+  onPointerDragStart?: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => void;
+  onPointerDragMove?: (event: React.PointerEvent<HTMLElement>) => void;
+  onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void;
+  onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void;
 };
 
 type DialogState =
@@ -38,6 +44,11 @@ export function ClassificationSidebar({
   onSidebarWidthChange,
   onViewChange,
   onOpenSafety,
+  dragTarget,
+  onPointerDragStart,
+  onPointerDragMove,
+  onPointerDragEnd,
+  onPointerDragCancel,
   sidebarWidth,
   view,
 }: ClassificationSidebarProps) {
@@ -241,6 +252,11 @@ export function ClassificationSidebar({
             onRename={(entry) => { setName(entry.name); setDialog({ type: "rename", entry }); }}
             onMove={(entry) => { setParentId(entry.parentId ?? ""); setDialog({ type: "move", entry }); }}
             onDelete={(entry) => setDialog({ type: "delete", entry })}
+            dragTarget={dragTarget}
+            onPointerDragStart={onPointerDragStart}
+            onPointerDragMove={onPointerDragMove}
+            onPointerDragEnd={onPointerDragEnd}
+            onPointerDragCancel={onPointerDragCancel}
           />
         ))}
       </ul>
@@ -314,7 +330,7 @@ function QuickViewButton({ icon, label, onClick, selected }: { icon: React.React
   return <button type="button" className="classification-sidebar__quick-view" aria-current={selected ? "page" : undefined} onClick={onClick}>{icon}<span>{label}</span></button>;
 }
 
-function TreeItem({ activeRowId, expandedIds, node, onDelete, onMove, onRename, onRowFocus, onRowKeyDown, onToggleExpanded, onViewChange, registerTreeRow, view }: {
+function TreeItem({ activeRowId, expandedIds, node, onDelete, onMove, onRename, onRowFocus, onRowKeyDown, onToggleExpanded, onViewChange, registerTreeRow, view, dragTarget, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: {
   activeRowId: string | null;
   expandedIds: string[];
   node: ClassificationTreeNode;
@@ -327,6 +343,11 @@ function TreeItem({ activeRowId, expandedIds, node, onDelete, onMove, onRename, 
   onViewChange: (view: AssetView) => void;
   registerTreeRow: (id: string, element: HTMLDivElement | null) => void;
   view: AssetView;
+  dragTarget?: ClassificationDropTarget | null;
+  onPointerDragStart?: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => void;
+  onPointerDragMove?: (event: React.PointerEvent<HTMLElement>) => void;
+  onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void;
+  onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void;
 }) {
   const rowRef = useRef<HTMLDivElement>(null);
   const hasChildren = node.children.length > 0;
@@ -346,6 +367,9 @@ function TreeItem({ activeRowId, expandedIds, node, onDelete, onMove, onRename, 
           registerTreeRow(node.entry.id, element);
         }}
         className="classification-sidebar__tree-row"
+        data-classification-id={node.entry.id}
+        data-drop-state={dragTarget?.entryId === node.entry.id ? (dragTarget.valid ? "valid" : "invalid") : undefined}
+        data-drop-position={dragTarget?.entryId === node.entry.id ? dragTarget.position : undefined}
         role="treeitem"
         aria-label={node.entry.name}
         aria-selected={selected}
@@ -354,6 +378,10 @@ function TreeItem({ activeRowId, expandedIds, node, onDelete, onMove, onRename, 
         onClick={() => onViewChange({ kind: "classification", classificationId: node.entry.id })}
         onFocus={() => onRowFocus(node.entry.id)}
         onKeyDown={(event) => onRowKeyDown(event, node)}
+        onPointerDown={(event) => { if (event.button === 0 && !(event.target as HTMLElement).closest("button")) onPointerDragStart?.({ kind: "classification", entryId: node.entry.id }, event); }}
+        onPointerMove={onPointerDragMove}
+        onPointerUp={onPointerDragEnd}
+        onPointerCancel={onPointerDragCancel}
       >
         {hasChildren ? (
           <Button type="button" size="icon" variant="ghost" aria-label={`${node.entry.name} ${expanded ? "접기" : "펼치기"}`} onClick={(event) => { event.stopPropagation(); onToggleExpanded(node.entry.id); }} onKeyDown={(event) => event.stopPropagation()}>
@@ -365,7 +393,7 @@ function TreeItem({ activeRowId, expandedIds, node, onDelete, onMove, onRename, 
           <Menu label={`${node.entry.name} 추가 작업`} items={actions} trigger={<Ellipsis aria-hidden="true" />} contextTarget={rowRef} />
         </span>
       </div>
-      {hasChildren && expanded && <ul role="group">{node.children.map((child) => <TreeItem key={child.entry.id} node={child} view={view} expandedIds={expandedIds} activeRowId={activeRowId} onViewChange={onViewChange} onToggleExpanded={onToggleExpanded} onRowFocus={onRowFocus} onRowKeyDown={onRowKeyDown} registerTreeRow={registerTreeRow} onRename={onRename} onMove={onMove} onDelete={onDelete} />)}</ul>}
+      {hasChildren && expanded && <ul role="group">{node.children.map((child) => <TreeItem key={child.entry.id} node={child} view={view} expandedIds={expandedIds} activeRowId={activeRowId} onViewChange={onViewChange} onToggleExpanded={onToggleExpanded} onRowFocus={onRowFocus} onRowKeyDown={onRowKeyDown} registerTreeRow={registerTreeRow} onRename={onRename} onMove={onMove} onDelete={onDelete} dragTarget={dragTarget} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />)}</ul>}
     </li>
   );
 }
