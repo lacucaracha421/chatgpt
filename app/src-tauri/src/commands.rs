@@ -322,6 +322,12 @@ mod tests {
 
     #[test]
     fn library_safety_errors_have_stable_codes() {
+        let in_use = serde_json::to_value(CommandError::from(LibraryError::LibraryInUse)).unwrap();
+        assert_eq!(
+            in_use["message"],
+            "다른 Lakomics에서 사용 중인 라이브러리입니다."
+        );
+
         let cases = [
             (LibraryError::LibraryInUse, "library_in_use"),
             (

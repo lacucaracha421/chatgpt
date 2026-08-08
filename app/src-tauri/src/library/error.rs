@@ -4,7 +4,7 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum LibraryError {
-    #[error("라이브러리가 다른 창에서 열려 있습니다")]
+    #[error("다른 Lakomics에서 사용 중인 라이브러리입니다.")]
     LibraryInUse,
     #[error("라이브러리 잠금 파일을 열 수 없습니다: {path}")]
     LibraryLock {
