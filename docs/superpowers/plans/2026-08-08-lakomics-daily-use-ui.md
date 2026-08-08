@@ -625,23 +625,23 @@ git commit -m "feat: copy selected assets by native drag"
 - `AssetInspector({ assets, classifications, open, onOpenChange, onPatchClassifications })`
 - Viewer navigation is limited to the currently loaded ordered `items`
 
-- [ ] **Step 1: Write viewer RED tests**
+- [x] **Step 1: Write viewer RED tests**
 
 Assert double-click/Enter opens, left/right changes active ID, Escape closes, boundary keys do not wrap, GIF uses the original asset URL, ordinary images use the original asset URL only after open, and focus returns to the source tile.
 
-- [ ] **Step 2: Implement viewer by replacing the old detail dialog**
+- [x] **Step 2: Implement viewer by replacing the old detail dialog**
 
 Use the existing native `Dialog` Interface with a fullscreen variant; do not create a second focus-trap implementation. Show a contained image, compact controls and no always-visible metadata card.
 
-- [ ] **Step 3: Write inspector RED tests**
+- [x] **Step 3: Write inspector RED tests**
 
 Assert default closed, one-asset metadata, multi-selection summary, source link opening through the existing opener path, and classification add/remove using Task 4's batch Interface.
 
-- [ ] **Step 4: Implement the collapsible inspector**
+- [x] **Step 4: Implement the collapsible inspector**
 
 Keep inspector state in `AssetBrowser`; use CSS grid to reserve width only while open. At narrow widths, render it as an overlay panel instead of shrinking the gallery below its minimum width.
 
-- [ ] **Step 5: Verify and commit Task 8**
+- [x] **Step 5: Verify and commit Task 8**
 
 Run: `Set-Location app; npm.cmd test -- src/assets src/shared; npm.cmd run build`
 

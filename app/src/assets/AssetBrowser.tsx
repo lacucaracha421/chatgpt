@@ -8,9 +8,10 @@ import { EmptyState } from "../shared/ui/EmptyState";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { Toast } from "../shared/ui/Toast";
 import type { InternalDragPayload } from "../shared/interaction/pointerDrag";
-import { AssetDetailDialog } from "./AssetDetailDialog";
 import { AssetGallery } from "./AssetGallery";
+import { AssetInspector } from "./AssetInspector";
 import { AssetToolbar } from "./AssetToolbar";
+import { AssetViewer } from "./AssetViewer";
 import { applySelectionGesture, emptySelection, moveSelectionFocus, reconcileSelection, selectAllLoaded, type SelectionGesture, type SelectionState } from "./selection";
 
 export type AssetBrowserStatus = { loadedCount: number; selectedAsset: AssetSummary | null; loading: boolean };
@@ -32,11 +33,12 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, thu
   const [randomVersion, setRandomVersion] = useState(0);
   const [selectedAsset, setSelectedAsset] = useState<AssetSummary | null>(null);
   const [selection, setSelection] = useState<SelectionState>(emptySelection);
-  const [detailAsset, setDetailAsset] = useState<AssetSummary | null>(null);
+  const [viewerAssetId, setViewerAssetId] = useState<string | null>(null);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
   const [batchPending, setBatchPending] = useState(false);
   const [undoAssetIds, setUndoAssetIds] = useState<string[] | null>(null);
   const selectedViewKeyRef = useRef<string | null>(null);
-  const detailViewKeyRef = useRef<string | null>(null);
+  const viewerViewKeyRef = useRef<string | null>(null);
   const generationRef = useRef(0);
   const nextLoadingRef = useRef(false);
   const randomPivotRef = useRef<string | null>(null);
@@ -61,7 +63,7 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, thu
       if (generation !== generationRef.current) return;
       setPage({ queryKey, items: result.items, nextCursor: result.nextCursor });
       setSelectedAsset((selected) => reconcileAsset(selected, selectedViewKeyRef.current, viewKey, result.items));
-      setDetailAsset((detail) => reconcileAsset(detail, detailViewKeyRef.current, viewKey, result.items));
+      setViewerAssetId((assetId) => reconcileAssetId(assetId, viewerViewKeyRef.current, viewKey, result.items));
     }).catch((error: unknown) => { if (generation === generationRef.current) setFirstError({ queryKey, message: commandErrorMessage(error, "자산을 불러오지 못했습니다.") }); }).finally(() => { if (generation === generationRef.current) setFirstLoading(false); });
     return () => { if (generation === generationRef.current) generationRef.current += 1; };
   }, [gateway, queryBase, queryKey, refreshVersion, retryVersion, viewKey]);
@@ -78,12 +80,6 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, thu
     const generation = generationRef.current; const cursor = nextCursor; nextLoadingRef.current = true; setNextLoading(true); setNextError(null);
     void gateway.listAssets({ ...queryBase, after: cursor }).then((result) => { if (generation !== generationRef.current) return; setPage((current) => current?.queryKey === queryKey ? { queryKey, items: [...current.items, ...result.items], nextCursor: result.nextCursor } : current); }).catch((error: unknown) => { if (generation === generationRef.current) setNextError({ queryKey, message: commandErrorMessage(error, "다음 자산을 불러오지 못했습니다.") }); }).finally(() => { if (generation === generationRef.current) { nextLoadingRef.current = false; setNextLoading(false); } });
   }, [activePage, currentNextError, gateway, nextCursor, queryBase, queryKey]);
-  const trashDetail = useCallback((assetId: string) => {
-    setSelectedAsset((current) => current?.id === assetId ? null : current);
-    setDetailAsset((current) => current?.id === assetId ? null : current);
-    setMessage("휴지통으로 이동했습니다.");
-    refresh();
-  }, [refresh]);
   const reshuffle = () => { randomPivotRef.current = createRandomPivot(); setRandomVersion((value) => value + 1); };
   const selectWithGesture = (asset: AssetSummary, gesture: SelectionGesture) => {
     const next = applySelectionGesture(selection, itemIds, asset.id, gesture);
@@ -109,6 +105,7 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, thu
     setSelectedAsset(items.find((item) => item.id === next.focusId) ?? null);
   };
   const selectedIds = itemIds.filter((id) => selection.ids.has(id));
+  const selectedAssets = items.filter((asset) => selection.ids.has(asset.id));
   const runBatch = async (operation: () => Promise<void>, failureMessage: string) => {
     if (batchPending || selectedIds.length === 0) return false;
     setBatchPending(true);
@@ -163,15 +160,25 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, thu
     <AssetToolbar view={view} classifications={classifications} sort={sort} directOnly={directOnly} metadataVisible={metadataVisible} thumbnailRowHeight={thumbnailRowHeight} selectedCount={selectedIds.length} onSortChange={onSortChange} onDirectOnlyChange={setDirectOnly} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onFavorite={setBatchFavorite} onClassification={patchBatchClassification} onTrash={trashSelection} batchPending={batchPending} onReshuffle={reshuffle} />
     {message && <Toast actionLabel={undoAssetIds ? "실행 취소" : undefined} onAction={undoAssetIds ? undoTrash : undefined} actionDisabled={batchPending}>{message}</Toast>}
     {currentFirstError && <Toast>{currentFirstError}</Toast>}
-    {firstLoading || !activePage && !currentFirstError ? <Skeleton className="asset-browser__skeleton" label="자산을 불러오는 중" /> : currentFirstError && items.length === 0 ? <EmptyState title="자산을 불러오지 못했습니다"><Button onClick={refresh}>다시 시도</Button></EmptyState> : items.length === 0 ? <EmptyState title="자산이 없습니다">여기에 이미지를 놓아 추가하세요.</EmptyState> : <AssetGallery items={items} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} targetRowHeight={thumbnailRowHeight} metadataVisible={metadataVisible} hasNextPage={nextCursor !== null} onLoadNextPage={loadNextPage} onSelectionGesture={selectWithGesture} onSelectAll={selectAll} onDeleteSelection={trashSelection} onClearSelection={clearSelection} onMoveFocus={moveFocus} onOpen={(asset) => { detailViewKeyRef.current = viewKey; setDetailAsset(asset); }} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />}
-    {nextLoading && <Skeleton label="자산을 더 불러오는 중" />}{currentNextError && <div className="asset-browser__next-error"><Toast>{currentNextError}</Toast><Button onClick={() => loadNextPage(true)}>다시 시도</Button></div>}
-    <AssetDetailDialog asset={detailAsset} classifications={classifications} onClose={() => setDetailAsset(null)} onTrashed={trashDetail} />
+    <div className={`asset-browser__workspace${inspectorOpen ? " asset-browser__workspace--inspector" : ""}`}>
+      <div className="asset-browser__gallery">
+        {firstLoading || !activePage && !currentFirstError ? <Skeleton className="asset-browser__skeleton" label="자산을 불러오는 중" /> : currentFirstError && items.length === 0 ? <EmptyState title="자산을 불러오지 못했습니다"><Button onClick={refresh}>다시 시도</Button></EmptyState> : items.length === 0 ? <EmptyState title="자산이 없습니다">여기에 이미지를 놓아 추가하세요.</EmptyState> : <AssetGallery items={items} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} targetRowHeight={thumbnailRowHeight} metadataVisible={metadataVisible} hasNextPage={nextCursor !== null} onLoadNextPage={loadNextPage} onSelectionGesture={selectWithGesture} onSelectAll={selectAll} onDeleteSelection={trashSelection} onClearSelection={clearSelection} onMoveFocus={moveFocus} onOpen={(asset) => { viewerViewKeyRef.current = viewKey; setViewerAssetId(asset.id); }} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />}
+        {nextLoading && <Skeleton label="자산을 더 불러오는 중" />}{currentNextError && <div className="asset-browser__next-error"><Toast>{currentNextError}</Toast><Button onClick={() => loadNextPage(true)}>다시 시도</Button></div>}
+      </div>
+      <AssetInspector assets={selectedAssets} classifications={classifications} open={inspectorOpen} onOpenChange={setInspectorOpen} onPatchClassifications={patchBatchClassification} />
+    </div>
+    <AssetViewer items={items} activeId={viewerAssetId} onActiveIdChange={setViewerAssetId} onClose={() => setViewerAssetId(null)} />
   </section>;
 }
 
 function reconcileAsset(current: AssetSummary | null, currentViewKey: string | null, viewKey: string, items: AssetSummary[]) {
   if (!current || currentViewKey !== viewKey) return null;
   return items.find((asset) => asset.id === current.id) ?? null;
+}
+
+function reconcileAssetId(current: string | null, currentViewKey: string | null, viewKey: string, items: AssetSummary[]) {
+  if (!current || currentViewKey !== viewKey) return null;
+  return items.some((asset) => asset.id === current) ? current : null;
 }
 
 function createRandomPivot() {

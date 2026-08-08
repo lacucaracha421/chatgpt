@@ -1,13 +1,15 @@
-import { useEffect, useId, useRef, type PropsWithChildren } from "react";
+import { useEffect, useId, useRef, type KeyboardEventHandler, type PropsWithChildren } from "react";
 
 type DialogProps = PropsWithChildren<{
   open: boolean;
   title: string;
   closeDisabled?: boolean;
+  variant?: "default" | "fullscreen";
+  onKeyDown?: KeyboardEventHandler<HTMLDialogElement>;
   onClose: () => void;
 }>;
 
-export function Dialog({ children, closeDisabled = false, open, title, onClose }: DialogProps) {
+export function Dialog({ children, closeDisabled = false, open, title, variant = "default", onKeyDown, onClose }: DialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const openerRef = useRef<HTMLElement | null>(null);
   const titleId = useId();
@@ -23,6 +25,10 @@ export function Dialog({ children, closeDisabled = false, open, title, onClose }
       dialog.close();
       openerRef.current?.focus();
     }
+    return () => {
+      if (dialog.open) dialog.close();
+      openerRef.current?.focus();
+    };
   }, [open]);
 
   function closeAndRestoreFocus() {
@@ -34,8 +40,9 @@ export function Dialog({ children, closeDisabled = false, open, title, onClose }
   return (
     <dialog
       ref={dialogRef}
-      className="ui-dialog"
+      className={`ui-dialog${variant === "fullscreen" ? " ui-dialog--fullscreen" : ""}`}
       aria-labelledby={titleId}
+      onKeyDown={onKeyDown}
       onCancel={(event) => {
         event.preventDefault();
         if (closeDisabled) return;

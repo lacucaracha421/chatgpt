@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 // @ts-ignore Vitest runs in Node, but this frontend project intentionally omits Node typings.
 import { readFileSync } from "node:fs";
 import userEvent from "@testing-library/user-event";
@@ -290,13 +290,38 @@ describe("AssetBrowser", () => {
     expect(await screen.findByRole("option", { name: "Selected" })).toHaveAttribute("aria-selected", "false");
   });
 
-  it("keeps the detail dialog open after a real Enter press", async () => {
-    const user = userEvent.setup(); const gateway = createGateway({ items: [{ ...asset(0), title: "열기" }], nextCursor: null });
+  it("opens the viewer from Enter, navigates loaded assets, and restores tile focus", async () => {
+    const user = userEvent.setup(); const gateway = createGateway({ items: [{ ...asset(0), title: "첫 자산" }, { ...asset(1), title: "둘째 자산" }], nextCursor: null });
     renderBrowser(gateway);
-    const tile = await screen.findByRole("option", { name: "열기" });
+    const tile = await screen.findByRole("option", { name: "첫 자산" });
+    expect(screen.getByRole("img", { name: "첫 자산" })).toHaveAttribute("src", "http://lakomics.localhost/thumbnail/asset-0");
     tile.focus();
     await user.keyboard("{Enter}");
-    expect(screen.getByRole("dialog", { name: "열기" })).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog", { name: "첫 자산" });
+    expect(within(dialog).getByRole("img", { name: "첫 자산" })).toHaveAttribute("src", "http://lakomics.localhost/asset/asset-0");
+    fireEvent.keyDown(dialog, { key: "ArrowRight" });
+    expect(screen.getByRole("dialog", { name: "둘째 자산" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "감상 화면 닫기" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(tile).toHaveFocus();
+  });
+
+  it("keeps the inspector collapsed and applies its classification actions to the selection", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
+    const tag: ClassificationEntry = { id: "tag", kind: "tag", name: "태그", parentId: null };
+    render(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "classification", classificationId: null }} classifications={[tag]} sort="newest" metadataVisible={false} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
+    const first = await screen.findByRole("option", { name: "asset-0.png" });
+
+    expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument();
+    first.focus();
+    await user.keyboard("{Control>}a{/Control}");
+    await user.click(screen.getByRole("button", { name: "정보 열기" }));
+    expect(screen.getByText("2개 자산 선택")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "태그 추가" }));
+    await user.click(screen.getByRole("button", { name: "태그 제거" }));
+    expect(gateway.patchAssetClassifications).toHaveBeenNthCalledWith(1, { assetIds: ["asset-0", "asset-1"], addClassificationIds: ["tag"], removeClassificationIds: [] });
+    expect(gateway.patchAssetClassifications).toHaveBeenNthCalledWith(2, { assetIds: ["asset-0", "asset-1"], addClassificationIds: [], removeClassificationIds: ["tag"] });
   });
 
   it("moves the selected asset to trash and refreshes the gallery", async () => {
@@ -390,6 +415,9 @@ describe("AssetBrowser", () => {
 
   it("uses the constrained workspace styles without horizontal sidebar scrolling", () => {
     expect(styles).toMatch(/\.asset-browser\s*\{[^}]*display:\s*flex;[^}]*min-height:\s*0;/s);
+    expect(styles).toMatch(/\.asset-browser__workspace\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);[^}]*min-height:\s*0;/s);
+    expect(styles).toMatch(/\.asset-browser__workspace--inspector\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+var\(--inspector-width\);/s);
+    expect(styles).toMatch(/@media\s*\(max-width:\s*840px\)[\s\S]*?\.asset-browser__workspace--inspector\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);[\s\S]*?\.asset-inspector\s*\{[^}]*position:\s*absolute;/s);
     expect(styles).toMatch(/\.asset-gallery__scroll\s*\{[^}]*flex:\s*1;[^}]*min-height:\s*0;[^}]*overflow:\s*auto;/s);
     expect(styles).not.toMatch(/\.asset-gallery__scroll\s*\{[^}]*height:\s*70vh;/s);
     expect(styles).toMatch(/\.classification-sidebar\s*\{[^}]*overflow-x:\s*hidden;[^}]*overflow-y:\s*auto;/s);
