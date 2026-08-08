@@ -50,6 +50,8 @@ pub enum LibraryError {
     ClassificationNotEmpty,
     #[error("요청한 자산을 찾을 수 없습니다")]
     AssetNotFound,
+    #[error("하나 이상의 자산을 선택해야 합니다")]
+    EmptyAssetSelection,
     #[error("자산 페이지 크기는 1에서 200 사이여야 합니다")]
     InvalidAssetPageLimit,
     #[error("invalid asset cursor")]

@@ -4,8 +4,10 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use super::{
     error::LibraryError,
-    models::{ClassificationEntry, ClassificationKind, CreateClassification},
-    Library,
+    models::{
+        AssetClassificationPatch, ClassificationEntry, ClassificationKind, CreateClassification,
+    },
+    validated_asset_ids, Library,
 };
 
 impl Library {
@@ -133,36 +135,19 @@ impl Library {
         asset_id: &str,
         classification_ids: &[String],
     ) -> Result<(), LibraryError> {
-        let mut connection = self.connection()?;
-        let transaction = connection.transaction()?;
-        let asset_exists: bool = transaction.query_row(
-            "SELECT EXISTS(SELECT 1 FROM assets WHERE id = ?1)",
-            [asset_id],
-            |row| row.get(0),
-        )?;
-        if !asset_exists {
-            return Err(LibraryError::AssetNotFound);
-        }
+        self.change_asset_classifications(&[asset_id.to_owned()], classification_ids, &[], true)
+    }
 
-        let classification_ids: BTreeSet<_> = classification_ids.iter().collect();
-        for classification_id in &classification_ids {
-            if find_classification(&transaction, classification_id)?.is_none() {
-                return Err(LibraryError::ClassificationNotFound);
-            }
-        }
-
-        transaction.execute(
-            "DELETE FROM asset_classifications WHERE asset_id = ?1",
-            [asset_id],
-        )?;
-        for classification_id in classification_ids {
-            transaction.execute(
-                "INSERT INTO asset_classifications (asset_id, classification_id) VALUES (?1, ?2)",
-                params![asset_id, classification_id],
-            )?;
-        }
-        transaction.commit()?;
-        Ok(())
+    pub fn patch_asset_classifications(
+        &self,
+        patch: AssetClassificationPatch,
+    ) -> Result<(), LibraryError> {
+        self.change_asset_classifications(
+            &patch.asset_ids,
+            &patch.add_classification_ids,
+            &patch.remove_classification_ids,
+            false,
+        )
     }
 
     pub fn get_asset_classifications(
@@ -178,6 +163,48 @@ impl Library {
              ORDER BY entry.name COLLATE NOCASE, entry.id",
         )?;
         read_entries(&mut statement, [asset_id])
+    }
+
+    fn change_asset_classifications(
+        &self,
+        asset_ids: &[String],
+        add_ids: &[String],
+        remove_ids: &[String],
+        replace: bool,
+    ) -> Result<(), LibraryError> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let asset_ids = validated_asset_ids(&transaction, asset_ids)?;
+        let add_ids: BTreeSet<_> = add_ids.iter().map(String::as_str).collect();
+        let remove_ids: BTreeSet<_> = remove_ids.iter().map(String::as_str).collect();
+        for classification_id in add_ids.iter().chain(remove_ids.iter()) {
+            if find_classification(&transaction, classification_id)?.is_none() {
+                return Err(LibraryError::ClassificationNotFound);
+            }
+        }
+        for asset_id in asset_ids {
+            if replace {
+                transaction.execute(
+                    "DELETE FROM asset_classifications WHERE asset_id = ?1",
+                    [asset_id],
+                )?;
+            } else {
+                for classification_id in &remove_ids {
+                    transaction.execute(
+                        "DELETE FROM asset_classifications WHERE asset_id = ?1 AND classification_id = ?2",
+                        params![asset_id, classification_id],
+                    )?;
+                }
+            }
+            for classification_id in &add_ids {
+                transaction.execute(
+                    "INSERT OR IGNORE INTO asset_classifications (asset_id, classification_id) VALUES (?1, ?2)",
+                    params![asset_id, classification_id],
+                )?;
+            }
+        }
+        transaction.commit()?;
+        Ok(())
     }
 }
 
@@ -298,7 +325,7 @@ mod tests {
 
     use crate::library::{
         error::LibraryError,
-        models::{ClassificationKind, CreateClassification},
+        models::{AssetClassificationPatch, ClassificationKind, CreateClassification},
         Library,
     };
 
@@ -606,6 +633,74 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(error, LibraryError::AssetNotFound));
+    }
+
+    #[test]
+    fn batch_classification_patch_is_additive_selective_and_atomic() {
+        let fixture = ClassificationFixture::new();
+        insert_asset(&fixture.library, "asset-a");
+        insert_asset(&fixture.library, "asset-b");
+        fixture
+            .library
+            .set_asset_classifications("asset-a", std::slice::from_ref(&fixture.child_tag.id))
+            .unwrap();
+
+        fixture
+            .library
+            .patch_asset_classifications(AssetClassificationPatch {
+                asset_ids: vec!["asset-a".into(), "asset-b".into()],
+                add_classification_ids: vec![fixture.parent_tag.id.clone()],
+                remove_classification_ids: vec![],
+            })
+            .unwrap();
+        assert_eq!(
+            fixture
+                .library
+                .get_asset_classifications("asset-a")
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(
+            fixture
+                .library
+                .get_asset_classifications("asset-b")
+                .unwrap(),
+            vec![fixture.parent_tag.clone()]
+        );
+
+        fixture
+            .library
+            .patch_asset_classifications(AssetClassificationPatch {
+                asset_ids: vec!["asset-a".into()],
+                add_classification_ids: vec![],
+                remove_classification_ids: vec![fixture.child_tag.id.clone()],
+            })
+            .unwrap();
+        assert_eq!(
+            fixture
+                .library
+                .get_asset_classifications("asset-a")
+                .unwrap(),
+            vec![fixture.parent_tag.clone()]
+        );
+
+        let error = fixture
+            .library
+            .patch_asset_classifications(AssetClassificationPatch {
+                asset_ids: vec!["asset-a".into(), "missing".into()],
+                add_classification_ids: vec![fixture.root.id.clone()],
+                remove_classification_ids: vec![],
+            })
+            .unwrap_err();
+        assert!(matches!(error, LibraryError::AssetNotFound));
+        assert_eq!(
+            fixture
+                .library
+                .get_asset_classifications("asset-a")
+                .unwrap(),
+            vec![fixture.parent_tag.clone()]
+        );
     }
 
     fn insert_asset(library: &Library, id: &str) {

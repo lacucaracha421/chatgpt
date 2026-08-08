@@ -1,9 +1,17 @@
 import type { PropsWithChildren } from "react";
+import { Button } from "./Button";
 
-export function Toast({ children }: PropsWithChildren) {
+type ToastProps = PropsWithChildren<{
+  actionLabel?: string;
+  onAction?: () => void;
+  actionDisabled?: boolean;
+}>;
+
+export function Toast({ children, actionLabel, onAction, actionDisabled = false }: ToastProps) {
   return (
-    <p className="ui-toast" role="status">
-      {children}
-    </p>
+    <div className="ui-toast" role="status">
+      <span>{children}</span>
+      {actionLabel && onAction && <Button disabled={actionDisabled} onClick={onAction}>{actionLabel}</Button>}
+    </div>
   );
 }

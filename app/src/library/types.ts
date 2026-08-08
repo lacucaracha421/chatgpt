@@ -53,6 +53,12 @@ export type AssetPage = {
   nextCursor: AssetCursor | null;
 };
 
+export type AssetClassificationPatch = {
+  assetIds: string[];
+  addClassificationIds: string[];
+  removeClassificationIds: string[];
+};
+
 export type TrashPolicy = { retentionDays: number | null };
 
 export type TrashAssetSummary = {
@@ -106,7 +112,9 @@ export interface LibraryGateway {
   deleteClassification(id: string): Promise<void>;
   listAssets(query: AssetQuery): Promise<AssetPage>;
   trashAsset(assetId: string): Promise<void>;
+  trashAssets(assetIds: string[]): Promise<void>;
   restoreAsset(assetId: string): Promise<void>;
+  restoreAssets(assetIds: string[]): Promise<void>;
   listTrash(query: { after: AssetCursor | null; limit: number }): Promise<TrashPage>;
   emptyTrash(): Promise<PurgeSummary>;
   getTrashPolicy(): Promise<TrashPolicy>;
@@ -116,7 +124,9 @@ export interface LibraryGateway {
   restoreMetadataBackup(backupId: string): Promise<void>;
   purgeExpiredTrash(): Promise<PurgeSummary>;
   setAssetFavorite(assetId: string, favorite: boolean): Promise<void>;
+  setAssetsFavorite(assetIds: string[], favorite: boolean): Promise<void>;
   setAssetClassifications(assetId: string, classificationIds: string[]): Promise<void>;
+  patchAssetClassifications(patch: AssetClassificationPatch): Promise<void>;
   getAssetClassifications(assetId: string): Promise<string[]>;
   ingestImage(input: IngestImageInput): Promise<IngestOutcome>;
 }

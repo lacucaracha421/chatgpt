@@ -2,17 +2,31 @@ use rusqlite::params;
 
 #[cfg(test)]
 use crate::library::models::{AssetQuery, AssetSort};
-use crate::library::{error::LibraryError, Library};
+use crate::library::{error::LibraryError, validated_asset_ids, Library};
 
 impl Library {
     pub fn set_asset_favorite(&self, asset_id: &str, favorite: bool) -> Result<(), LibraryError> {
-        let changed = self.connection()?.execute(
-            "UPDATE assets SET favorite = ?2 WHERE id = ?1 AND status = 'normal'",
-            params![asset_id, favorite],
-        )?;
-        if changed == 0 {
-            return Err(LibraryError::AssetNotFound);
+        self.set_assets_favorite(&[asset_id.to_owned()], favorite)
+    }
+
+    pub fn set_assets_favorite(
+        &self,
+        asset_ids: &[String],
+        favorite: bool,
+    ) -> Result<(), LibraryError> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let asset_ids = validated_asset_ids(&transaction, asset_ids)?;
+        for asset_id in asset_ids {
+            let changed = transaction.execute(
+                "UPDATE assets SET favorite = ?2 WHERE id = ?1 AND status = 'normal'",
+                params![asset_id, favorite],
+            )?;
+            if changed == 0 {
+                return Err(LibraryError::AssetNotFound);
+            }
         }
+        transaction.commit()?;
         Ok(())
     }
 }
@@ -50,6 +64,36 @@ fn setting_a_missing_asset_favorite_returns_asset_not_found() {
     let error = library.set_asset_favorite("missing", true).unwrap_err();
 
     assert!(matches!(error, LibraryError::AssetNotFound));
+}
+
+#[cfg(test)]
+#[test]
+fn batch_favorite_update_is_atomic() {
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    insert_asset(&library, "asset-a", "hash-a", "2026-07-30T00:00:00Z");
+    insert_asset(&library, "asset-b", "hash-b", "2026-07-31T00:00:00Z");
+
+    library
+        .set_assets_favorite(&["asset-a".into(), "asset-b".into()], true)
+        .unwrap();
+    assert_eq!(
+        ids(&library
+            .list_assets(query(AssetSort::Newest, true, 20))
+            .unwrap()),
+        ["asset-b", "asset-a"]
+    );
+
+    let error = library
+        .set_assets_favorite(&["asset-a".into(), "missing".into()], false)
+        .unwrap_err();
+    assert!(matches!(error, LibraryError::AssetNotFound));
+    assert_eq!(
+        ids(&library
+            .list_assets(query(AssetSort::Newest, true, 20))
+            .unwrap()),
+        ["asset-b", "asset-a"]
+    );
 }
 
 #[cfg(test)]

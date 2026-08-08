@@ -23,7 +23,7 @@ use windows_sys::Win32::Storage::FileSystem::{
 use super::{
     error::LibraryError,
     models::{AssetCursor, AssetSummary, PurgeSummary, TrashAssetSummary, TrashPage},
-    Library,
+    validated_asset_ids, Library,
 };
 
 #[derive(Serialize, Deserialize)]
@@ -40,12 +40,16 @@ struct TrashRow {
 
 impl Library {
     pub fn trash_asset(&self, asset_id: &str) -> Result<(), LibraryError> {
+        self.trash_assets(&[asset_id.to_owned()])
+    }
+
+    pub fn trash_assets(&self, asset_ids: &[String]) -> Result<(), LibraryError> {
         let _trash_guard = self
             .trash_lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         self.update_trash_status(
-            asset_id,
+            asset_ids,
             "normal",
             "trash",
             Some(chrono::Utc::now().to_rfc3339()),
@@ -53,11 +57,15 @@ impl Library {
     }
 
     pub fn restore_asset(&self, asset_id: &str) -> Result<(), LibraryError> {
+        self.restore_assets(&[asset_id.to_owned()])
+    }
+
+    pub fn restore_assets(&self, asset_ids: &[String]) -> Result<(), LibraryError> {
         let _trash_guard = self
             .trash_lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        self.update_trash_status(asset_id, "trash", "normal", None)
+        self.update_trash_status(asset_ids, "trash", "normal", None)
     }
 
     pub fn list_trash(
@@ -188,28 +196,19 @@ impl Library {
 
     fn update_trash_status(
         &self,
-        asset_id: &str,
+        asset_ids: &[String],
         from_status: &str,
         to_status: &str,
         trashed_at: Option<String>,
     ) -> Result<(), LibraryError> {
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
-        let changed = transaction.execute(
-            "UPDATE assets SET status = ?3, trashed_at = ?4 WHERE id = ?1 AND status = ?2",
-            params![asset_id, from_status, to_status, trashed_at],
-        )?;
-        if changed == 0
-            && transaction
-                .query_row(
-                    "SELECT status FROM assets WHERE id = ?1",
-                    [asset_id],
-                    |row| row.get::<_, String>(0),
-                )
-                .optional()?
-                .is_none()
-        {
-            return Err(LibraryError::AssetNotFound);
+        let asset_ids = validated_asset_ids(&transaction, asset_ids)?;
+        for asset_id in asset_ids {
+            transaction.execute(
+                "UPDATE assets SET status = ?3, trashed_at = ?4 WHERE id = ?1 AND status = ?2",
+                params![asset_id, from_status, to_status, trashed_at],
+            )?;
         }
         transaction.commit()?;
         Ok(())
@@ -510,6 +509,53 @@ mod tests {
 
         assert_eq!(page.total_count, 1);
         assert_eq!(page.items.len(), 1);
+    }
+
+    #[test]
+    fn batch_trash_and_restore_are_atomic() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        insert_normal_asset(&library, "first");
+        insert_normal_asset(&library, "second");
+
+        library
+            .trash_assets(&["first".into(), "second".into()])
+            .unwrap();
+        assert_eq!(library.list_trash(None, 20).unwrap().total_count, 2);
+
+        let error = library
+            .restore_assets(&["first".into(), "missing".into()])
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            crate::library::error::LibraryError::AssetNotFound
+        ));
+        assert_eq!(library.list_trash(None, 20).unwrap().total_count, 2);
+
+        library
+            .restore_assets(&["first".into(), "second".into()])
+            .unwrap();
+        assert_eq!(library.list_trash(None, 20).unwrap().total_count, 0);
+    }
+
+    fn insert_normal_asset(library: &Library, id: &str) {
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO assets (
+                id, content_hash, media_kind, original_name, relative_path,
+                thumbnail_relative_path, byte_size, width, height, collected_at
+             ) VALUES (?1, ?2, 'image', ?3, ?4, ?5, 1, 1, 1, '2026-08-02T00:00:00Z')",
+                rusqlite::params![
+                    id,
+                    format!("hash-{id}"),
+                    format!("{id}.png"),
+                    format!("assets/{id}.png"),
+                    format!("thumbnails/{id}.webp")
+                ],
+            )
+            .unwrap();
     }
 
     fn insert_trashed_asset(library: &Library, id: &str, trashed_at: &str) {

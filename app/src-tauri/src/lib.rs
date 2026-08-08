@@ -33,13 +33,17 @@ pub fn run() {
             commands::get_asset_classifications,
             commands::list_assets,
             commands::trash_asset,
+            commands::trash_assets,
             commands::restore_asset,
+            commands::restore_assets,
             commands::list_trash,
             commands::empty_trash,
             commands::get_trash_policy,
             commands::set_trash_policy,
             commands::set_asset_favorite,
+            commands::set_assets_favorite,
             commands::set_asset_classifications,
+            commands::patch_asset_classifications,
             commands::ingest_image,
         ])
         .run(tauri::generate_context!())

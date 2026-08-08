@@ -422,8 +422,22 @@ mod tests {
             })
             .unwrap();
 
-        assert_eq!(first.items.iter().map(|asset| asset.id.as_str()).collect::<Vec<_>>(), ["unclassified"]);
-        assert_eq!(second.items.iter().map(|asset| asset.id.as_str()).collect::<Vec<_>>(), ["unclassified-older"]);
+        assert_eq!(
+            first
+                .items
+                .iter()
+                .map(|asset| asset.id.as_str())
+                .collect::<Vec<_>>(),
+            ["unclassified"]
+        );
+        assert_eq!(
+            second
+                .items
+                .iter()
+                .map(|asset| asset.id.as_str())
+                .collect::<Vec<_>>(),
+            ["unclassified-older"]
+        );
         assert!(second.next_cursor.is_none());
     }
 

@@ -6,8 +6,9 @@ use tauri::State;
 use crate::library::{
     error::LibraryError,
     models::{
-        AssetPage, AssetQuery, ClassificationEntry, CreateClassification, IngestImageRequest,
-        IngestOutcome, LibrarySummary, MetadataBackup, PurgeSummary, TrashPage, TrashPolicy,
+        AssetClassificationPatch, AssetPage, AssetQuery, ClassificationEntry, CreateClassification,
+        IngestImageRequest, IngestOutcome, LibrarySummary, MetadataBackup, PurgeSummary, TrashPage,
+        TrashPolicy,
     },
     Library,
 };
@@ -48,6 +49,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::ClassificationCycle => "classification_cycle",
             LibraryError::ClassificationNotEmpty => "classification_not_empty",
             LibraryError::AssetNotFound => "asset_not_found",
+            LibraryError::EmptyAssetSelection => "empty_asset_selection",
             LibraryError::InvalidAssetPageLimit => "invalid_asset_page_limit",
             LibraryError::InvalidAssetCursor => "invalid_asset_cursor",
             LibraryError::InvalidTrashTimestamp => "invalid_trash_timestamp",
@@ -207,9 +209,29 @@ pub fn trash_asset(asset_id: String, state: State<'_, AppState>) -> Result<(), C
 }
 
 #[tauri::command]
+pub fn trash_assets(
+    asset_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    current_required(state)?
+        .trash_assets(&asset_ids)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub fn restore_asset(asset_id: String, state: State<'_, AppState>) -> Result<(), CommandError> {
     current_required(state)?
         .restore_asset(&asset_id)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn restore_assets(
+    asset_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    current_required(state)?
+        .restore_assets(&asset_ids)
         .map_err(CommandError::from)
 }
 
@@ -267,6 +289,17 @@ pub fn set_asset_favorite(
 }
 
 #[tauri::command]
+pub fn set_assets_favorite(
+    asset_ids: Vec<String>,
+    favorite: bool,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    current_required(state)?
+        .set_assets_favorite(&asset_ids, favorite)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub fn set_asset_classifications(
     asset_id: String,
     classification_ids: Vec<String>,
@@ -274,6 +307,16 @@ pub fn set_asset_classifications(
 ) -> Result<(), CommandError> {
     current_required(state)?
         .set_asset_classifications(&asset_id, &classification_ids)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn patch_asset_classifications(
+    patch: AssetClassificationPatch,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    current_required(state)?
+        .patch_asset_classifications(patch)
         .map_err(CommandError::from)
 }
 

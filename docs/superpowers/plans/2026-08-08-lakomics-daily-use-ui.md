@@ -299,7 +299,7 @@ restoreAssets(assetIds: string[]): Promise<void>;
 
 Rust exposes the same four operations on `Library`; existing single-asset methods delegate to the batch implementation to retain one rule seam.
 
-- [ ] **Step 1: Write transaction RED tests**
+- [x] **Step 1: Write transaction RED tests**
 
 Test adding one classification to two assets while retaining old classifications, removing only named classifications, rejecting unknown IDs without partial writes, bulk favorite, bulk trash, and bulk restore preserving metadata.
 
@@ -312,29 +312,29 @@ library.patch_asset_classifications(AssetClassificationPatch {
 assert_eq!(classification_ids(&library, "a"), set!["old-tag", "new-tag"]);
 ```
 
-- [ ] **Step 2: Run Rust tests and verify RED**
+- [x] **Step 2: Run Rust tests and verify RED**
 
 Run: `Set-Location app/src-tauri; cargo test batch_`
 
 Expected: FAIL because batch methods and request types are missing.
 
-- [ ] **Step 3: Implement batch operations behind `Library`**
+- [x] **Step 3: Implement batch operations behind `Library`**
 
 Validate non-empty, deduplicated ID lists and every referenced asset/classification before mutation. Use one SQLite transaction per call. Reuse the existing trash state transition and timestamp policy; do not loop over public single-asset methods with separate connections.
 
-- [ ] **Step 4: Add commands and gateway methods**
+- [x] **Step 4: Add commands and gateway methods**
 
 Expose `patch_asset_classifications`, `set_assets_favorite`, `trash_assets`, and `restore_assets`. Keep internal paths and SQL out of serialized request/response types.
 
-- [ ] **Step 5: Write RED toolbar and undo tests**
+- [x] **Step 5: Write RED toolbar and undo tests**
 
 Assert selected count, explicit `즐겨찾기 추가/제거`, classification add/remove, one bulk trash call, and an actionable Toast whose `실행 취소` calls `restoreAssets` with the exact IDs. A failed mutation must leave all selected tiles visible.
 
-- [ ] **Step 6: Implement batch toolbar and actionable Toast**
+- [x] **Step 6: Implement batch toolbar and actionable Toast**
 
 Extend `Toast` with optional `actionLabel`, `onAction`, and `actionDisabled`. Keep the Toast live region non-modal. Refresh the first page after a successful batch and reconcile selection against returned items.
 
-- [ ] **Step 7: Verify Task 4**
+- [x] **Step 7: Verify Task 4**
 
 Run:
 
@@ -347,7 +347,7 @@ cargo fmt --all --check
 cargo test batch_
 ```
 
-- [ ] **Step 8: Commit the batch slice**
+- [x] **Step 8: Commit the batch slice**
 
 ```powershell
 git add app/src app/src-tauri/src

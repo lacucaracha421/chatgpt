@@ -32,12 +32,12 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, thu
   const [selectedAsset, setSelectedAsset] = useState<AssetSummary | null>(null);
   const [selection, setSelection] = useState<SelectionState>(emptySelection);
   const [detailAsset, setDetailAsset] = useState<AssetSummary | null>(null);
-  const [trashPendingAssetId, setTrashPendingAssetId] = useState<string | null>(null);
+  const [batchPending, setBatchPending] = useState(false);
+  const [undoAssetIds, setUndoAssetIds] = useState<string[] | null>(null);
   const selectedViewKeyRef = useRef<string | null>(null);
   const detailViewKeyRef = useRef<string | null>(null);
   const generationRef = useRef(0);
   const nextLoadingRef = useRef(false);
-  const trashPendingRef = useRef<string | null>(null);
   const randomPivotRef = useRef<string | null>(null);
   const effectiveSort = view.kind === "recent" ? "newest" : sort;
   if (effectiveSort === "random" && !randomPivotRef.current) randomPivotRef.current = createRandomPivot();
@@ -77,34 +77,6 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, thu
     const generation = generationRef.current; const cursor = nextCursor; nextLoadingRef.current = true; setNextLoading(true); setNextError(null);
     void gateway.listAssets({ ...queryBase, after: cursor }).then((result) => { if (generation !== generationRef.current) return; setPage((current) => current?.queryKey === queryKey ? { queryKey, items: [...current.items, ...result.items], nextCursor: result.nextCursor } : current); }).catch((error: unknown) => { if (generation === generationRef.current) setNextError({ queryKey, message: commandErrorMessage(error, "다음 자산을 불러오지 못했습니다.") }); }).finally(() => { if (generation === generationRef.current) { nextLoadingRef.current = false; setNextLoading(false); } });
   }, [activePage, currentNextError, gateway, nextCursor, queryBase, queryKey]);
-  const toggleFavorite = useCallback(async () => {
-    if (!selectedAsset) return;
-    const target = selectedAsset; const favorite = !target.favorite;
-    const update = (asset: AssetSummary) => asset.id === target.id ? { ...asset, favorite } : asset;
-    setPage((current) => current?.queryKey === queryKey ? { ...current, items: current.items.map(update) } : current); setSelectedAsset(update(target)); if (detailAsset?.id === target.id) setDetailAsset(update(target));
-    try { await gateway.setAssetFavorite(target.id, favorite); if (view.kind === "favorites" || effectiveSort === "favorites") refresh(); }
-    catch (error) { const rollback = (asset: AssetSummary) => asset.id === target.id ? target : asset; setPage((current) => current?.queryKey === queryKey ? { ...current, items: current.items.map(rollback) } : current); setSelectedAsset(target); if (detailAsset?.id === target.id) setDetailAsset(target); setFirstError({ queryKey, message: commandErrorMessage(error, "좋아요를 변경하지 못했습니다.") }); }
-  }, [detailAsset, effectiveSort, gateway, queryKey, refresh, selectedAsset, view.kind]);
-  const trashSelected = useCallback(async () => {
-    if (!selectedAsset || trashPendingRef.current) return;
-    const assetId = selectedAsset.id;
-    trashPendingRef.current = assetId;
-    setTrashPendingAssetId(assetId);
-    try {
-      await gateway.trashAsset(assetId);
-      setSelectedAsset((current) => current?.id === assetId ? null : current);
-      setDetailAsset((current) => current?.id === assetId ? null : current);
-      setMessage("휴지통으로 이동했습니다.");
-      refresh();
-    } catch (error) {
-      setMessage(commandErrorMessage(error, "자산을 휴지통으로 이동하지 못했습니다."));
-    } finally {
-      if (trashPendingRef.current === assetId) {
-        trashPendingRef.current = null;
-        setTrashPendingAssetId(null);
-      }
-    }
-  }, [gateway, refresh, selectedAsset]);
   const trashDetail = useCallback((assetId: string) => {
     setSelectedAsset((current) => current?.id === assetId ? null : current);
     setDetailAsset((current) => current?.id === assetId ? null : current);
@@ -135,11 +107,62 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, thu
     selectedViewKeyRef.current = next.ids.size > 0 ? viewKey : null;
     setSelectedAsset(items.find((item) => item.id === next.focusId) ?? null);
   };
+  const selectedIds = itemIds.filter((id) => selection.ids.has(id));
+  const runBatch = async (operation: () => Promise<void>, failureMessage: string) => {
+    if (batchPending || selectedIds.length === 0) return false;
+    setBatchPending(true);
+    setUndoAssetIds(null);
+    try {
+      await operation();
+      refresh();
+      return true;
+    } catch (error) {
+      setMessage(commandErrorMessage(error, failureMessage));
+      return false;
+    } finally {
+      setBatchPending(false);
+    }
+  };
+  const setBatchFavorite = (favorite: boolean) => void runBatch(
+    () => gateway.setAssetsFavorite(selectedIds, favorite),
+    "즐겨찾기를 변경하지 못했습니다.",
+  );
+  const patchBatchClassification = (classificationId: string, operation: "add" | "remove") => void runBatch(
+    () => gateway.patchAssetClassifications({
+      assetIds: selectedIds,
+      addClassificationIds: operation === "add" ? [classificationId] : [],
+      removeClassificationIds: operation === "remove" ? [classificationId] : [],
+    }),
+    "분류를 변경하지 못했습니다.",
+  );
+  const trashSelection = () => void (async () => {
+    const assetIds = [...selectedIds];
+    const succeeded = await runBatch(() => gateway.trashAssets(assetIds), "자산을 휴지통으로 이동하지 못했습니다.");
+    if (succeeded) {
+      setUndoAssetIds(assetIds);
+      setMessage(`${assetIds.length}개 자산을 휴지통으로 이동했습니다.`);
+    }
+  })();
+  const undoTrash = () => void (async () => {
+    const assetIds = undoAssetIds;
+    if (!assetIds || batchPending) return;
+    setBatchPending(true);
+    try {
+      await gateway.restoreAssets(assetIds);
+      setUndoAssetIds(null);
+      setMessage("휴지통 이동을 취소했습니다.");
+      refresh();
+    } catch (error) {
+      setMessage(commandErrorMessage(error, "휴지통 이동을 취소하지 못했습니다."));
+    } finally {
+      setBatchPending(false);
+    }
+  })();
   return <section className="asset-browser" aria-label="전체 자산">
-    <AssetToolbar view={view} classifications={classifications} sort={sort} directOnly={directOnly} metadataVisible={metadataVisible} thumbnailRowHeight={thumbnailRowHeight} selectedAsset={selectedAsset} onSortChange={onSortChange} onDirectOnlyChange={setDirectOnly} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onFavorite={() => void toggleFavorite()} onTrash={() => void trashSelected()} trashPending={trashPendingAssetId !== null} onReshuffle={reshuffle} />
-    {message && <Toast>{message}</Toast>}
+    <AssetToolbar view={view} classifications={classifications} sort={sort} directOnly={directOnly} metadataVisible={metadataVisible} thumbnailRowHeight={thumbnailRowHeight} selectedCount={selectedIds.length} onSortChange={onSortChange} onDirectOnlyChange={setDirectOnly} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onFavorite={setBatchFavorite} onClassification={patchBatchClassification} onTrash={trashSelection} batchPending={batchPending} onReshuffle={reshuffle} />
+    {message && <Toast actionLabel={undoAssetIds ? "실행 취소" : undefined} onAction={undoAssetIds ? undoTrash : undefined} actionDisabled={batchPending}>{message}</Toast>}
     {currentFirstError && <Toast>{currentFirstError}</Toast>}
-    {firstLoading || !activePage && !currentFirstError ? <Skeleton className="asset-browser__skeleton" label="자산을 불러오는 중" /> : currentFirstError && items.length === 0 ? <EmptyState title="자산을 불러오지 못했습니다"><Button onClick={refresh}>다시 시도</Button></EmptyState> : items.length === 0 ? <EmptyState title="자산이 없습니다">여기에 이미지를 놓아 추가하세요.</EmptyState> : <AssetGallery items={items} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} targetRowHeight={thumbnailRowHeight} metadataVisible={metadataVisible} hasNextPage={nextCursor !== null} onLoadNextPage={loadNextPage} onSelectionGesture={selectWithGesture} onSelectAll={selectAll} onDeleteSelection={() => void trashSelected()} onClearSelection={clearSelection} onMoveFocus={moveFocus} onOpen={(asset) => { detailViewKeyRef.current = viewKey; setDetailAsset(asset); }} />}
+    {firstLoading || !activePage && !currentFirstError ? <Skeleton className="asset-browser__skeleton" label="자산을 불러오는 중" /> : currentFirstError && items.length === 0 ? <EmptyState title="자산을 불러오지 못했습니다"><Button onClick={refresh}>다시 시도</Button></EmptyState> : items.length === 0 ? <EmptyState title="자산이 없습니다">여기에 이미지를 놓아 추가하세요.</EmptyState> : <AssetGallery items={items} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} targetRowHeight={thumbnailRowHeight} metadataVisible={metadataVisible} hasNextPage={nextCursor !== null} onLoadNextPage={loadNextPage} onSelectionGesture={selectWithGesture} onSelectAll={selectAll} onDeleteSelection={trashSelection} onClearSelection={clearSelection} onMoveFocus={moveFocus} onOpen={(asset) => { detailViewKeyRef.current = viewKey; setDetailAsset(asset); }} />}
     {nextLoading && <Skeleton label="자산을 더 불러오는 중" />}{currentNextError && <div className="asset-browser__next-error"><Toast>{currentNextError}</Toast><Button onClick={() => loadNextPage(true)}>다시 시도</Button></div>}
     <AssetDetailDialog asset={detailAsset} classifications={classifications} onClose={() => setDetailAsset(null)} onTrashed={trashDetail} />
   </section>;

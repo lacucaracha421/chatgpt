@@ -77,6 +77,14 @@ pub struct AssetQuery {
     pub limit: u32,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetClassificationPatch {
+    pub asset_ids: Vec<String>,
+    pub add_classification_ids: Vec<String>,
+    pub remove_classification_ids: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AssetPage {

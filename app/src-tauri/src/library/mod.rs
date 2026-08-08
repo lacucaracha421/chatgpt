@@ -10,6 +10,7 @@ mod query;
 mod trash;
 
 use std::{
+    collections::BTreeSet,
     fs,
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
@@ -197,6 +198,27 @@ impl Library {
         })?;
         Ok(MediaResponse { bytes, mime })
     }
+}
+
+pub(crate) fn validated_asset_ids<'a>(
+    connection: &Connection,
+    asset_ids: &'a [String],
+) -> Result<BTreeSet<&'a str>, LibraryError> {
+    let ids: BTreeSet<_> = asset_ids.iter().map(String::as_str).collect();
+    if ids.is_empty() {
+        return Err(LibraryError::EmptyAssetSelection);
+    }
+    for id in &ids {
+        let exists: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM assets WHERE id = ?1)",
+            [id],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            return Err(LibraryError::AssetNotFound);
+        }
+    }
+    Ok(ids)
 }
 
 fn mime_for_path(path: &Path) -> &'static str {

@@ -305,23 +305,69 @@ describe("AssetBrowser", () => {
     renderBrowser(gateway);
 
     await user.click(await screen.findByRole("option", { name: "Delete me" }));
-    await user.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
+    await user.click(screen.getByRole("button", { name: "선택 항목 휴지통으로 이동" }));
 
-    expect(gateway.trashAsset).toHaveBeenCalledWith("asset-0");
-    expect(screen.getByText("휴지통으로 이동했습니다.")).toBeVisible();
+    expect(gateway.trashAssets).toHaveBeenCalledWith(["asset-0"]);
+    expect(screen.getByText("1개 자산을 휴지통으로 이동했습니다.")).toBeVisible();
+  });
+
+  it("runs explicit batch favorite, classification, trash, and undo actions", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
+    const tag: ClassificationEntry = { id: "tag", kind: "tag", name: "아로나", parentId: null };
+    render(
+      <LibraryProvider gateway={gateway}>
+        <AssetBrowser view={{ kind: "classification", classificationId: null }} classifications={[tag]} sort="newest" metadataVisible={false} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} />
+      </LibraryProvider>,
+    );
+    const first = await screen.findByRole("option", { name: "asset-0.png" });
+    first.focus();
+    await user.keyboard("{Control>}a{/Control}");
+    expect(screen.getByText("2개 선택")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "즐겨찾기 추가" }));
+    expect(gateway.setAssetsFavorite).toHaveBeenCalledWith(["asset-0", "asset-1"], true);
+    await user.selectOptions(screen.getByLabelText("일괄 분류"), "tag");
+    await user.click(screen.getByRole("button", { name: "분류 추가" }));
+    expect(gateway.patchAssetClassifications).toHaveBeenCalledWith({
+      assetIds: ["asset-0", "asset-1"],
+      addClassificationIds: ["tag"],
+      removeClassificationIds: [],
+    });
+
+    await user.click(screen.getByRole("button", { name: "선택 항목 휴지통으로 이동" }));
+    expect(gateway.trashAssets).toHaveBeenCalledWith(["asset-0", "asset-1"]);
+    await user.click(await screen.findByRole("button", { name: "실행 취소" }));
+    expect(gateway.restoreAssets).toHaveBeenCalledWith(["asset-0", "asset-1"]);
+  });
+
+  it("keeps selected tiles visible when a batch mutation fails", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
+    vi.mocked(gateway.trashAssets).mockRejectedValue(new Error("batch failed"));
+    renderBrowser(gateway);
+    const first = await screen.findByRole("option", { name: "asset-0.png" });
+    first.focus();
+    await user.keyboard("{Control>}a{/Control}");
+
+    await user.click(screen.getByRole("button", { name: "선택 항목 휴지통으로 이동" }));
+
+    expect(await screen.findByText("batch failed")).toBeVisible();
+    expect(screen.getByRole("option", { name: "asset-0.png" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("option", { name: "asset-1.png" })).toHaveAttribute("aria-selected", "true");
   });
 
   it("keeps the selected asset when moving it to trash fails", async () => {
     const user = userEvent.setup();
     const gateway = createGateway({ items: [{ ...asset(0), title: "Keep me" }], nextCursor: null });
-    vi.mocked(gateway.trashAsset).mockRejectedValue(new Error("trash failed"));
+    vi.mocked(gateway.trashAssets).mockRejectedValue(new Error("trash failed"));
     renderBrowser(gateway);
 
     await user.click(await screen.findByRole("option", { name: "Keep me" }));
-    await user.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
+    await user.click(screen.getByRole("button", { name: "선택 항목 휴지통으로 이동" }));
 
     expect(await screen.findByText("trash failed")).toBeVisible();
-    expect(screen.getByRole("button", { name: "휴지통으로 이동" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "선택 항목 휴지통으로 이동" })).toBeVisible();
   });
 
   it("disables trash while pending and preserves a newer selection", async () => {
@@ -329,17 +375,17 @@ describe("AssetBrowser", () => {
     const pendingTrash = new Promise<void>((resolve) => { resolveTrash = resolve; });
     const user = userEvent.setup();
     const gateway = createGateway({ items: [{ ...asset(0), title: "First" }, { ...asset(1), title: "Second" }], nextCursor: null });
-    vi.mocked(gateway.trashAsset).mockReturnValue(pendingTrash);
+    vi.mocked(gateway.trashAssets).mockReturnValue(pendingTrash);
     renderBrowser(gateway);
 
     await user.click(await screen.findByRole("option", { name: "First" }));
-    await user.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
-    expect(screen.getByRole("button", { name: "휴지통으로 이동" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "선택 항목 휴지통으로 이동" }));
+    expect(screen.getByRole("button", { name: "선택 항목 휴지통으로 이동" })).toBeDisabled();
     await user.click(screen.getByRole("option", { name: "Second" }));
     await act(async () => { resolveTrash(); await pendingTrash; });
 
     expect(await screen.findByRole("option", { name: "Second" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("button", { name: "휴지통으로 이동" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "선택 항목 휴지통으로 이동" })).not.toBeDisabled();
   });
 
   it("uses the constrained workspace styles without horizontal sidebar scrolling", () => {
@@ -378,11 +424,11 @@ function createGateway(page: AssetPage = { items: [], nextCursor: null }): Libra
     openLibrary: vi.fn(), currentLibrary: vi.fn(), listClassifications: vi.fn(),
     createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(),
     deleteClassification: vi.fn(), listAssets: vi.fn().mockResolvedValue(page),
-    trashAsset: vi.fn(), restoreAsset: vi.fn(), listTrash: vi.fn(), emptyTrash: vi.fn(),
+    trashAsset: vi.fn(), trashAssets: vi.fn().mockResolvedValue(undefined), restoreAsset: vi.fn(), restoreAssets: vi.fn().mockResolvedValue(undefined), listTrash: vi.fn(), emptyTrash: vi.fn(),
     getTrashPolicy: vi.fn(), setTrashPolicy: vi.fn(),
     ensureDailyBackup: vi.fn(), listMetadataBackups: vi.fn(),
     restoreMetadataBackup: vi.fn(), purgeExpiredTrash: vi.fn(),
-    setAssetFavorite: vi.fn(), setAssetClassifications: vi.fn(),
+    setAssetFavorite: vi.fn(), setAssetsFavorite: vi.fn().mockResolvedValue(undefined), setAssetClassifications: vi.fn(), patchAssetClassifications: vi.fn().mockResolvedValue(undefined),
     getAssetClassifications: vi.fn().mockResolvedValue([]), ingestImage: vi.fn(),
   };
 }
