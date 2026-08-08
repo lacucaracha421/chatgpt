@@ -805,7 +805,7 @@ input:disabled {
   min-height: var(--gallery-target-row-height);
 }
 
-@media (max-width: 840px) {
+@media (max-width: 1100px) {
   .asset-browser__workspace--inspector {
     grid-template-columns: minmax(0, 1fr);
   }

@@ -417,7 +417,7 @@ describe("AssetBrowser", () => {
     expect(styles).toMatch(/\.asset-browser\s*\{[^}]*display:\s*flex;[^}]*min-height:\s*0;/s);
     expect(styles).toMatch(/\.asset-browser__workspace\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);[^}]*min-height:\s*0;/s);
     expect(styles).toMatch(/\.asset-browser__workspace--inspector\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+var\(--inspector-width\);/s);
-    expect(styles).toMatch(/@media\s*\(max-width:\s*840px\)[\s\S]*?\.asset-browser__workspace--inspector\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);[\s\S]*?\.asset-inspector\s*\{[^}]*position:\s*absolute;/s);
+    expect(styles).toMatch(/@media\s*\(max-width:\s*1100px\)[\s\S]*?\.asset-browser__workspace--inspector\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);[\s\S]*?\.asset-inspector\s*\{[^}]*position:\s*absolute;/s);
     expect(styles).toMatch(/\.asset-gallery__scroll\s*\{[^}]*flex:\s*1;[^}]*min-height:\s*0;[^}]*overflow:\s*auto;/s);
     expect(styles).not.toMatch(/\.asset-gallery__scroll\s*\{[^}]*height:\s*70vh;/s);
     expect(styles).toMatch(/\.classification-sidebar\s*\{[^}]*overflow-x:\s*hidden;[^}]*overflow-y:\s*auto;/s);

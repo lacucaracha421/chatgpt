@@ -10,8 +10,8 @@ beforeEach(() => Object.defineProperties(HTMLElement.prototype, {
 afterEach(cleanup);
 
 describe("AssetGallery", () => {
-  it("keeps only virtual rows in the DOM", async () => {
-    render(<AssetGallery items={Array.from({ length: 500 }, (_, index) => asset(index))} />);
+  it("keeps the DOM bounded with 50,000 asset metadata rows", async () => {
+    render(<AssetGallery items={Array.from({ length: 50_000 }, (_, index) => asset(index))} />);
     await waitFor(() => expect(screen.getAllByRole("img").length).toBeLessThan(100));
     expect(screen.getByRole("img", { name: "asset-0.png" })).toBeInTheDocument();
   });
