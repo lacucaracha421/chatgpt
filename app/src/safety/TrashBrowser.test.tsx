@@ -193,7 +193,9 @@ function createGateway(): LibraryGateway {
     emptyTrash: vi.fn().mockResolvedValue({ deletedCount: 2, failedAssetIds: [] }),
     getTrashPolicy: vi.fn().mockResolvedValue({ retentionDays: 30 }),
     setTrashPolicy: vi.fn().mockResolvedValue(undefined),
-  } as unknown as LibraryGateway;
+    ensureDailyBackup: vi.fn(), listMetadataBackups: vi.fn(),
+    restoreMetadataBackup: vi.fn(), purgeExpiredTrash: vi.fn(),
+  };
 }
 
 function asset() {

@@ -8,6 +8,7 @@ import type {
   IngestOutcome,
   LibraryGateway,
   LibrarySummary,
+  MetadataBackup,
   PurgeSummary,
   TrashPage,
   TrashPolicy,
@@ -33,6 +34,10 @@ export const libraryGateway: LibraryGateway = {
   emptyTrash: () => invoke<PurgeSummary>("empty_trash"),
   getTrashPolicy: () => invoke<TrashPolicy>("get_trash_policy"),
   setTrashPolicy: (policy) => invoke("set_trash_policy", { policy }),
+  ensureDailyBackup: () => invoke<MetadataBackup | null>("ensure_daily_backup"),
+  listMetadataBackups: () => invoke<MetadataBackup[]>("list_metadata_backups"),
+  restoreMetadataBackup: (backupId) => invoke("restore_metadata_backup", { backupId }),
+  purgeExpiredTrash: () => invoke<PurgeSummary>("purge_expired_trash"),
   setAssetFavorite: (assetId, favorite) =>
     invoke("set_asset_favorite", { assetId, favorite }),
   setAssetClassifications: (assetId, classificationIds) =>

@@ -6,6 +6,7 @@ import type {
   AssetSummary,
   ClassificationEntry,
   LibraryGateway,
+  MetadataBackup,
 } from "../library/types";
 import { UI_PREFERENCES_KEY } from "../preferences/uiPreferences";
 import { App } from "./App";
@@ -40,6 +41,13 @@ const asset: AssetSummary = {
   favorite: false,
   sourceUrl: null,
 };
+const noDrops: DropSubscriber = async () => () => undefined;
+const metadataBackup: MetadataBackup = {
+  id: "backup-1",
+  kind: "daily",
+  createdAt: "2026-08-01T12:00:00Z",
+  byteSize: 2048,
+};
 
 function gateway(): LibraryGateway {
   return {
@@ -57,6 +65,10 @@ function gateway(): LibraryGateway {
     emptyTrash: vi.fn(),
     getTrashPolicy: vi.fn().mockResolvedValue({ retentionDays: 30 }),
     setTrashPolicy: vi.fn(),
+    ensureDailyBackup: vi.fn().mockResolvedValue(null),
+    listMetadataBackups: vi.fn().mockResolvedValue([]),
+    restoreMetadataBackup: vi.fn(),
+    purgeExpiredTrash: vi.fn().mockResolvedValue({ deletedCount: 0, failedAssetIds: [] }),
     setAssetFavorite: vi.fn(),
     setAssetClassifications: vi.fn(),
     getAssetClassifications: vi.fn(),
@@ -89,7 +101,7 @@ describe("App", () => {
     const libraryGateway = gateway();
     const user = userEvent.setup();
 
-    render(<App gateway={libraryGateway} selectFolder={vi.fn()} />);
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
     await user.click(await screen.findByRole("button", { name: "휴지통 보기" }));
 
     await waitFor(() => expect(libraryGateway.listTrash).toHaveBeenCalledWith({ after: null, limit: 100 }));
@@ -118,12 +130,108 @@ describe("App", () => {
     localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
     const libraryGateway = gateway();
 
-    render(<App gateway={libraryGateway} selectFolder={vi.fn()} />);
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
 
     await waitFor(() =>
       expect(libraryGateway.openLibrary).toHaveBeenCalledWith("C:\\Lakomics"),
     );
     expect(screen.getByRole("main", { name: "라이브러리 작업 공간" })).toBeInTheDocument();
+  });
+
+  it("runs daily backup once and then purges expired trash after opening a library", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    const libraryGateway = gateway();
+
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+
+    await waitFor(() => expect(libraryGateway.ensureDailyBackup).toHaveBeenCalledOnce());
+    await waitFor(() => expect(libraryGateway.purgeExpiredTrash).toHaveBeenCalledOnce());
+    expect(vi.mocked(libraryGateway.ensureDailyBackup).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(libraryGateway.purgeExpiredTrash).mock.invocationCallOrder[0]);
+  });
+
+  it("keeps the workspace and runs trash maintenance when daily backup fails", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.ensureDailyBackup).mockRejectedValue(new Error("자동 백업에 실패했습니다."));
+
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+
+    expect(await screen.findByText("자동 백업에 실패했습니다.")).toBeVisible();
+    expect(screen.getByRole("main", { name: "라이브러리 작업 공간" })).toBeInTheDocument();
+    await waitFor(() => expect(libraryGateway.purgeExpiredTrash).toHaveBeenCalledOnce());
+  });
+
+  it("reports only the count of assets that automatic trash purge could not delete", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.purgeExpiredTrash).mockResolvedValue({
+      deletedCount: 3,
+      failedAssetIds: ["private-asset-1", "private-asset-2"],
+    });
+
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+
+    expect(await screen.findByText("자동 삭제하지 못한 자산이 2개 있습니다.")).toBeVisible();
+    expect(screen.queryByText(/private-asset/)).not.toBeInTheDocument();
+  });
+
+  it("keeps both startup warnings when backup and automatic purge have problems", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.ensureDailyBackup).mockRejectedValue(new Error("자동 백업 오류"));
+    vi.mocked(libraryGateway.purgeExpiredTrash).mockResolvedValue({
+      deletedCount: 0,
+      failedAssetIds: ["private-asset"],
+    });
+
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+
+    expect(await screen.findByText(/자동 백업 오류.*자동 삭제하지 못한 자산이 1개 있습니다/)).toBeVisible();
+    expect(screen.queryByText(/private-asset/)).not.toBeInTheDocument();
+  });
+
+  it("restores a backup and refreshes classifications and the current asset page", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listMetadataBackups).mockResolvedValue([metadataBackup]);
+    const user = userEvent.setup();
+
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    await screen.findByRole("main", { name: "라이브러리 작업 공간" });
+    await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenCalled());
+    const classificationCalls = vi.mocked(libraryGateway.listClassifications).mock.calls.length;
+    const assetCalls = vi.mocked(libraryGateway.listAssets).mock.calls.length;
+
+    await user.click(screen.getByRole("button", { name: "라이브러리 안전 설정" }));
+    await user.click(await screen.findByRole("button", { name: "이 시점으로 복구" }));
+    await user.click(screen.getByRole("button", { name: "복구 시작" }));
+
+    await waitFor(() => expect(libraryGateway.restoreMetadataBackup).toHaveBeenCalledWith("backup-1"));
+    await waitFor(() => expect(libraryGateway.listClassifications).toHaveBeenCalledTimes(classificationCalls + 1));
+    await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenCalledTimes(assetCalls + 1));
+    expect(await screen.findByText("복구가 완료되었습니다. 다음 단계에서 파일 검사를 실행할 수 있습니다.")).toBeVisible();
+  });
+
+  it("makes the workspace inert while backup restore is pending", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listMetadataBackups).mockResolvedValue([metadataBackup]);
+    let finishRestore!: () => void;
+    vi.mocked(libraryGateway.restoreMetadataBackup).mockReturnValue(new Promise<void>((resolve) => { finishRestore = resolve; }));
+    const user = userEvent.setup();
+
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    await user.click(await screen.findByRole("button", { name: "라이브러리 안전 설정" }));
+    await user.click(await screen.findByRole("button", { name: "이 시점으로 복구" }));
+    await user.click(screen.getByRole("button", { name: "복구 시작" }));
+
+    await waitFor(() => expect(document.querySelector(".library-workspace")).toHaveAttribute("inert"));
+    const dialog = screen.getByRole("dialog");
+    fireEvent(dialog, new Event("cancel", { cancelable: true }));
+    expect(dialog).toHaveAttribute("open");
+    finishRestore();
+    await waitFor(() => expect(document.querySelector(".library-workspace")).not.toHaveAttribute("inert"));
   });
 
   it("renders the persistent four-region workspace when a library is restored", async () => {

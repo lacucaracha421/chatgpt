@@ -24,6 +24,7 @@ pub fn run() {
             commands::ensure_daily_backup,
             commands::list_metadata_backups,
             commands::restore_metadata_backup,
+            commands::purge_expired_trash,
             commands::list_classifications,
             commands::create_classification,
             commands::rename_classification,

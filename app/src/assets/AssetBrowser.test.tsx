@@ -324,6 +324,8 @@ function createGateway(page: AssetPage = { items: [], nextCursor: null }): Libra
     deleteClassification: vi.fn(), listAssets: vi.fn().mockResolvedValue(page),
     trashAsset: vi.fn(), restoreAsset: vi.fn(), listTrash: vi.fn(), emptyTrash: vi.fn(),
     getTrashPolicy: vi.fn(), setTrashPolicy: vi.fn(),
+    ensureDailyBackup: vi.fn(), listMetadataBackups: vi.fn(),
+    restoreMetadataBackup: vi.fn(), purgeExpiredTrash: vi.fn(),
     setAssetFavorite: vi.fn(), setAssetClassifications: vi.fn(),
     getAssetClassifications: vi.fn().mockResolvedValue([]), ingestImage: vi.fn(),
   };

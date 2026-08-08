@@ -249,6 +249,13 @@ pub fn set_trash_policy(
 }
 
 #[tauri::command]
+pub fn purge_expired_trash(state: State<'_, AppState>) -> Result<PurgeSummary, CommandError> {
+    current_required(state)?
+        .purge_expired_trash(chrono::Utc::now())
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub fn set_asset_favorite(
     asset_id: String,
     favorite: bool,

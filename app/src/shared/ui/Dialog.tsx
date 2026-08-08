@@ -3,10 +3,11 @@ import { useEffect, useId, useRef, type PropsWithChildren } from "react";
 type DialogProps = PropsWithChildren<{
   open: boolean;
   title: string;
+  closeDisabled?: boolean;
   onClose: () => void;
 }>;
 
-export function Dialog({ children, open, title, onClose }: DialogProps) {
+export function Dialog({ children, closeDisabled = false, open, title, onClose }: DialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const openerRef = useRef<HTMLElement | null>(null);
   const titleId = useId();
@@ -37,6 +38,7 @@ export function Dialog({ children, open, title, onClose }: DialogProps) {
       aria-labelledby={titleId}
       onCancel={(event) => {
         event.preventDefault();
+        if (closeDisabled) return;
         closeAndRestoreFocus();
       }}
     >

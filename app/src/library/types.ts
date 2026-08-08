@@ -71,6 +71,13 @@ export type PurgeSummary = {
   failedAssetIds: string[];
 };
 
+export type MetadataBackup = {
+  id: string;
+  kind: "daily" | "pre_migration" | "pre_restore";
+  createdAt: string;
+  byteSize: number;
+};
+
 export type CreateClassification = {
   kind: ClassificationKind;
   name: string;
@@ -102,6 +109,10 @@ export interface LibraryGateway {
   emptyTrash(): Promise<PurgeSummary>;
   getTrashPolicy(): Promise<TrashPolicy>;
   setTrashPolicy(policy: TrashPolicy): Promise<void>;
+  ensureDailyBackup(): Promise<MetadataBackup | null>;
+  listMetadataBackups(): Promise<MetadataBackup[]>;
+  restoreMetadataBackup(backupId: string): Promise<void>;
+  purgeExpiredTrash(): Promise<PurgeSummary>;
   setAssetFavorite(assetId: string, favorite: boolean): Promise<void>;
   setAssetClassifications(assetId: string, classificationIds: string[]): Promise<void>;
   getAssetClassifications(assetId: string): Promise<string[]>;
