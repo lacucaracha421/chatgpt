@@ -454,27 +454,27 @@ type IngestionWork = {
 
 `DropSubscriber` now passes the full union. `useFileDrop` returns `{ progress, over, works, retryFailed }`.
 
-- [ ] **Step 1: Write native event RED tests**
+- [x] **Step 1: Write native event RED tests**
 
 Assert `subscribeToTauriDrops` translates Tauri `over`, `drop`, and `cancel`; no event is lost during React rerenders; inactive maintenance/trash/settings states ignore drops.
 
-- [ ] **Step 2: Write destination behavior RED tests**
+- [x] **Step 2: Write destination behavior RED tests**
 
 Drop in all-assets/recent/favorites/unsorted and expect `classificationId: null`. Drop in a concrete classification and expect that ID. Ensure FIFO batches and exact-duplicate behavior remain unchanged.
 
-- [ ] **Step 3: Implement the full event subscription and destination rule**
+- [x] **Step 3: Implement the full event subscription and destination rule**
 
 Enable drops for every normal `AssetBrowser` view. Disable only trash, settings, and maintenance. The overlay says either `<분류 이름>에 저장` or `미분류함에 저장` and always lists the four accepted formats. Exact file validation happens after drop because Tauri `over` has no paths.
 
-- [ ] **Step 4: Write overlay/work tray RED tests**
+- [x] **Step 4: Write overlay/work tray RED tests**
 
 Assert full-window overlay on over, removal on cancel/drop, `aria-live` progress, one expandable work row, filename-only failure display, and retry of only failed source paths.
 
-- [ ] **Step 5: Implement overlay and in-memory work tray**
+- [x] **Step 5: Implement overlay and in-memory work tray**
 
 Keep the FIFO promise chain in `useFileDrop`. Store only the current session's batches; do not add SQLite jobs in this phase. Collapse completed successful work after the Toast; retain failures until dismissed or retried.
 
-- [ ] **Step 6: Verify and commit Task 6**
+- [x] **Step 6: Verify and commit Task 6**
 
 Run: `Set-Location app; npm.cmd test -- src/ingestion src/app src/layout; npm.cmd run build`
 

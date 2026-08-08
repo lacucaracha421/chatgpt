@@ -284,7 +284,7 @@ describe("App", () => {
     })));
   });
 
-  it("ignores drops outside a concrete classification and explains how to enable them", async () => {
+  it("stores drops from broad views in the unclassified destination", async () => {
     localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
     let drop: ((paths: string[]) => void) | undefined;
     const subscribeDrops: DropSubscriber = async (handler) => {
@@ -292,34 +292,24 @@ describe("App", () => {
       return () => undefined;
     };
     const libraryGateway = gateway();
+    vi.mocked(libraryGateway.ingestImage).mockResolvedValue({ status: "added", asset });
     const user = userEvent.setup();
 
-    render(
-      <App
-        gateway={libraryGateway}
-        selectFolder={vi.fn()}
-        subscribeDrops={subscribeDrops}
-      />,
-    );
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={subscribeDrops} />);
 
     await user.click(await screen.findByRole("button", { name: "즐겨찾기" }));
     await waitFor(() => expect(drop).toBeDefined());
     act(() => drop?.(["C:\\images\\a.png"]));
-
-    expect(libraryGateway.ingestImage).not.toHaveBeenCalled();
-    expect(
-      screen.getByText("파일을 저장할 분류를 먼저 선택하세요."),
-    ).toBeVisible();
+    await waitFor(() => expect(libraryGateway.ingestImage).toHaveBeenCalledWith({ sourcePath: "C:\\images\\a.png", classificationId: null, sourceUrl: null }));
 
     await user.click(screen.getByRole("button", { name: "최근" }));
     act(() => drop?.(["C:\\images\\recent.png"]));
-    await Promise.resolve();
-
     await user.click(screen.getByRole("button", { name: "전체 자산" }));
     act(() => drop?.(["C:\\images\\all-assets.png"]));
-    await Promise.resolve();
 
-    expect(libraryGateway.ingestImage).not.toHaveBeenCalled();
+    await waitFor(() => expect(libraryGateway.ingestImage).toHaveBeenCalledTimes(3));
+    expect(libraryGateway.ingestImage).toHaveBeenNthCalledWith(2, { sourcePath: "C:\\images\\recent.png", classificationId: null, sourceUrl: null });
+    expect(libraryGateway.ingestImage).toHaveBeenNthCalledWith(3, { sourcePath: "C:\\images\\all-assets.png", classificationId: null, sourceUrl: null });
   });
 
   it("loads and saves the complete validated UI preference object", async () => {

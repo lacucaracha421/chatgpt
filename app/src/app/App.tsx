@@ -7,6 +7,8 @@ import {
   subscribeToTauriDrops,
   useFileDrop,
 } from "../ingestion/useFileDrop";
+import { DropOverlay } from "../ingestion/DropOverlay";
+import { WorkTray } from "../ingestion/WorkTray";
 import { AppShell } from "../layout/AppShell";
 import { StatusBar } from "../layout/StatusBar";
 import { libraryGateway } from "../library/client";
@@ -91,11 +93,12 @@ function LibraryWorkspace({ subscribeDrops }: { subscribeDrops: DropSubscriber }
     setMessage(result.message);
     if (result.status === "added") setAssetRefresh((current) => current + 1);
   }, []);
-  const dropEnabled = maintenance === null && view.kind === "classification" && view.classificationId !== null;
-  const progress = useFileDrop({
+  const dropEnabled = maintenance === null && !safetyOpen && view.kind !== "trash";
+  const dropClassificationId = view.kind === "classification" ? view.classificationId : null;
+  const dropState = useFileDrop({
     subscribe: subscribeDrops,
     enabled: dropEnabled,
-    classificationId: view.kind === "classification" ? view.classificationId : null,
+    classificationId: dropClassificationId,
     ingestImage: gateway.ingestImage,
     onResult: handleDropResult,
   });
@@ -266,9 +269,11 @@ function LibraryWorkspace({ subscribeDrops }: { subscribeDrops: DropSubscriber }
               </section>
             </div>
           }
-          status={<StatusBar status={browserStatus} progress={progress} dropEnabled={dropEnabled} />}
+          status={<StatusBar status={browserStatus} progress={dropState.progress} dropEnabled={dropEnabled} />}
         />
+        <WorkTray works={dropState.works} retryFailed={dropState.retryFailed} />
       </div>
+      <DropOverlay over={dropState.over} destinationName={entries.find((entry) => entry.id === dropClassificationId)?.name ?? "미분류함"} />
       <DragLayer state={dragState} />
       <SafetyDialog
         open={safetyOpen}
