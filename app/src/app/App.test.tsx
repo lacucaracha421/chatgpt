@@ -40,6 +40,7 @@ const asset: AssetSummary = {
   collectedAt: "2026-07-31T00:00:00Z",
   favorite: false,
   sourceUrl: null,
+  media: { kind: "image" },
 };
 const noDrops: DropSubscriber = async () => () => undefined;
 const metadataBackup: MetadataBackup = {
@@ -80,7 +81,9 @@ function gateway(): LibraryGateway {
     setAssetClassifications: vi.fn(),
     patchAssetClassifications: vi.fn(),
     getAssetClassifications: vi.fn(),
-    ingestImage: vi.fn(),
+    ingestMedia: vi.fn(),
+    preparePendingVideos: vi.fn(),
+    retryVideoPreparation: vi.fn(),
   };
 }
 
@@ -131,7 +134,7 @@ describe("App", () => {
     act(() => drop?.(["C:\\images\\ignored.png"]));
 
     await Promise.resolve();
-    expect(libraryGateway.ingestImage).not.toHaveBeenCalled();
+    expect(libraryGateway.ingestMedia).not.toHaveBeenCalled();
   });
 
   it("restores the saved library path when the app starts", async () => {
@@ -295,7 +298,7 @@ describe("App", () => {
       return () => undefined;
     };
     const libraryGateway = gateway();
-    vi.mocked(libraryGateway.ingestImage).mockResolvedValue({ status: "added", asset });
+    vi.mocked(libraryGateway.ingestMedia).mockResolvedValue({ status: "added", asset });
     const user = userEvent.setup();
 
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={subscribeDrops} />);
@@ -303,16 +306,16 @@ describe("App", () => {
     await user.click(await screen.findByRole("button", { name: "즐겨찾기" }));
     await waitFor(() => expect(drop).toBeDefined());
     act(() => drop?.(["C:\\images\\a.png"]));
-    await waitFor(() => expect(libraryGateway.ingestImage).toHaveBeenCalledWith({ sourcePath: "C:\\images\\a.png", classificationId: null, sourceUrl: null }));
+    await waitFor(() => expect(libraryGateway.ingestMedia).toHaveBeenCalledWith({ sourcePath: "C:\\images\\a.png", classificationId: null, sourceUrl: null }));
 
     await user.click(screen.getByRole("button", { name: "최근" }));
     act(() => drop?.(["C:\\images\\recent.png"]));
     await user.click(screen.getByRole("button", { name: "전체 자산" }));
     act(() => drop?.(["C:\\images\\all-assets.png"]));
 
-    await waitFor(() => expect(libraryGateway.ingestImage).toHaveBeenCalledTimes(3));
-    expect(libraryGateway.ingestImage).toHaveBeenNthCalledWith(2, { sourcePath: "C:\\images\\recent.png", classificationId: null, sourceUrl: null });
-    expect(libraryGateway.ingestImage).toHaveBeenNthCalledWith(3, { sourcePath: "C:\\images\\all-assets.png", classificationId: null, sourceUrl: null });
+    await waitFor(() => expect(libraryGateway.ingestMedia).toHaveBeenCalledTimes(3));
+    expect(libraryGateway.ingestMedia).toHaveBeenNthCalledWith(2, { sourcePath: "C:\\images\\recent.png", classificationId: null, sourceUrl: null });
+    expect(libraryGateway.ingestMedia).toHaveBeenNthCalledWith(3, { sourcePath: "C:\\images\\all-assets.png", classificationId: null, sourceUrl: null });
   });
 
   it("loads and saves the complete validated UI preference object", async () => {
@@ -370,7 +373,7 @@ describe("App", () => {
       const pendingIngest = new Promise<{ status: "added"; asset: AssetSummary }>((resolve) => {
         resolveIngest = resolve;
       });
-      vi.mocked(libraryGateway.ingestImage).mockReturnValue(pendingIngest);
+      vi.mocked(libraryGateway.ingestMedia).mockReturnValue(pendingIngest);
       const user = userEvent.setup();
 
       render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={subscribeDrops} />);
@@ -378,7 +381,7 @@ describe("App", () => {
       await user.click(await screen.findByRole("treeitem", { name: "게임" }));
       await waitFor(() => expect(drop).toBeDefined());
       act(() => drop?.(["C:\\images\\a.png"]));
-      await waitFor(() => expect(libraryGateway.ingestImage).toHaveBeenCalledOnce());
+      await waitFor(() => expect(libraryGateway.ingestMedia).toHaveBeenCalledOnce());
 
       await act(async () => {
         resolveIngest({ status: "added", asset });
@@ -428,7 +431,7 @@ describe("App", () => {
       blueArchive,
       arona,
     ]);
-    vi.mocked(libraryGateway.ingestImage).mockReturnValue(pendingIngest);
+    vi.mocked(libraryGateway.ingestMedia).mockReturnValue(pendingIngest);
     const user = userEvent.setup();
 
     render(
@@ -463,7 +466,7 @@ describe("App", () => {
     expect(
       await screen.findByText("1개 중 1번째 파일을 처리하고 있습니다."),
     ).toBeInTheDocument();
-    expect(libraryGateway.ingestImage).toHaveBeenCalledWith({
+    expect(libraryGateway.ingestMedia).toHaveBeenCalledWith({
       sourcePath: "C:\\images\\arona.png",
       classificationId: "tag-arona",
       sourceUrl: null,
@@ -498,7 +501,7 @@ describe("App", () => {
     };
     const libraryGateway = gateway();
     vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games]);
-    vi.mocked(libraryGateway.ingestImage).mockResolvedValue({
+    vi.mocked(libraryGateway.ingestMedia).mockResolvedValue({
       status: "exact_duplicate",
       existingAssetId: "asset-existing",
     });
@@ -537,7 +540,7 @@ describe("App", () => {
     act(() => drop?.(["C:\\images\\duplicate.png"]));
 
     expect(await screen.findByText(/추가 0 · 중복 1/)).toBeInTheDocument();
-    expect(libraryGateway.ingestImage).toHaveBeenCalledWith({
+    expect(libraryGateway.ingestMedia).toHaveBeenCalledWith({
       sourcePath: "C:\\images\\duplicate.png",
       classificationId: "root-games",
       sourceUrl: null,

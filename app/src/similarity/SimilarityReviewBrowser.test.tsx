@@ -80,6 +80,7 @@ function reviewAsset(id: string, originalName: string) {
     asset: {
       id, title: null, originalName, byteSize: 2_048, width: 1920, height: 1080,
       collectedAt: "2026-08-09T00:00:00Z", favorite: false, sourceUrl: "https://x.com/user/status/1",
+      media: { kind: "image" as const },
     },
     format: "PNG",
     classifications: [{ id: "tag", kind: "tag" as const, name: "아로나", parentId: "work" }],
@@ -101,6 +102,7 @@ function reviewGateway(): LibraryGateway {
     listTrash: vi.fn(), emptyTrash: vi.fn(), getTrashPolicy: vi.fn(), setTrashPolicy: vi.fn(),
     ensureDailyBackup: vi.fn(), listMetadataBackups: vi.fn(), restoreMetadataBackup: vi.fn(), purgeExpiredTrash: vi.fn(),
     setAssetFavorite: vi.fn(), setAssetsFavorite: vi.fn(), setAssetClassifications: vi.fn(), patchAssetClassifications: vi.fn(),
-    getAssetClassifications: vi.fn(), ingestImage: vi.fn(),
+    getAssetClassifications: vi.fn(), ingestMedia: vi.fn(),
+    preparePendingVideos: vi.fn(), retryVideoPreparation: vi.fn(),
   };
 }

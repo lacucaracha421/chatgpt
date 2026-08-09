@@ -39,6 +39,12 @@ struct TrashRow {
     trashed_at: String,
 }
 
+struct ManagedAssetPaths {
+    original: String,
+    thumbnail: Option<String>,
+    video_directory: Option<String>,
+}
+
 impl Library {
     pub fn trash_asset(&self, asset_id: &str) -> Result<(), LibraryError> {
         self.trash_assets(&[asset_id.to_owned()])
@@ -230,18 +236,24 @@ impl Library {
         for asset_id in asset_ids {
             let paths = connection
                 .query_row(
-                    "SELECT relative_path, thumbnail_relative_path FROM assets WHERE id = ?1 AND status = 'trash'",
+                    "SELECT relative_path, thumbnail_relative_path, media_kind
+                     FROM assets WHERE id = ?1 AND status = 'trash'",
                     [&asset_id],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                    |row| {
+                        let media_kind = row.get::<_, String>(2)?;
+                        Ok(ManagedAssetPaths {
+                            original: row.get(0)?,
+                            thumbnail: row.get(1)?,
+                            video_directory: (media_kind == "video")
+                                .then(|| format!("video-media/{asset_id}")),
+                        })
+                    },
                 )
                 .optional()?;
-            let Some((relative_path, thumbnail_relative_path)) = paths else {
+            let Some(paths) = paths else {
                 continue;
             };
-            if self
-                .remove_managed_files(&relative_path, &thumbnail_relative_path)
-                .is_err()
-            {
+            if self.remove_managed_paths(&paths).is_err() {
                 failed_asset_ids.push(asset_id);
                 continue;
             }
@@ -262,14 +274,30 @@ impl Library {
     }
 
     #[cfg(windows)]
+    fn remove_managed_paths(&self, paths: &ManagedAssetPaths) -> Result<(), ()> {
+        let canonical_root = fs::canonicalize(&self.root).map_err(|_| ())?;
+        delete_managed_file(&canonical_root, &paths.original)?;
+        if paths.video_directory.is_none() {
+            if let Some(thumbnail) = &paths.thumbnail {
+                delete_managed_file(&canonical_root, thumbnail)?;
+            }
+        }
+        if let Some(video_directory) = &paths.video_directory {
+            delete_managed_directory(&canonical_root, video_directory)?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn remove_managed_files(
         &self,
         relative_path: &str,
         thumbnail_relative_path: &str,
     ) -> Result<(), ()> {
-        let canonical_root = fs::canonicalize(&self.root).map_err(|_| ())?;
-        delete_managed_file(&canonical_root, relative_path)?;
-        delete_managed_file(&canonical_root, thumbnail_relative_path)
+        self.remove_managed_paths(&ManagedAssetPaths {
+            original: relative_path.to_owned(),
+            thumbnail: Some(thumbnail_relative_path.to_owned()),
+            video_directory: None,
+        })
     }
 }
 
@@ -326,6 +354,24 @@ fn delete_managed_file(canonical_root: &Path, relative_path: &str) -> Result<(),
     }
     drop(file);
     Ok(())
+}
+
+#[cfg(windows)]
+fn delete_managed_directory(canonical_root: &Path, relative_path: &str) -> Result<(), ()> {
+    let requested_path = canonical_root.join(checked_relative_path(relative_path)?);
+    let metadata = match fs::symlink_metadata(&requested_path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(_) => return Err(()),
+    };
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err(());
+    }
+    let canonical_directory = fs::canonicalize(&requested_path).map_err(|_| ())?;
+    if canonical_directory == canonical_root || !canonical_directory.starts_with(canonical_root) {
+        return Err(());
+    }
+    fs::remove_dir_all(canonical_directory).map_err(|_| ())
 }
 
 #[cfg(windows)]

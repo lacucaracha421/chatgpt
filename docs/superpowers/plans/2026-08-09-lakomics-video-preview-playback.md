@@ -506,7 +506,7 @@ git commit -m "feat: ingest image and video assets"
 - Consumes: existing trash/restore/purge/drag-out ownership rules and `VideoMedia` public methods.
 - Produces: `ingest_media`, `prepare_pending_videos`, `retry_video_preparation` Tauri calls; video derivatives follow asset lifecycle.
 
-- [ ] **Step 1: Write RED lifecycle and client contract tests**
+- [x] **Step 1: Write RED lifecycle and client contract tests**
 
 Rust integration tests prove trash retains derivatives, restore reuses them, permanent purge removes the entire exact `video-media/{asset_id}` directory and row, and drag-out copies only the original. A missing derivative causes library open/check to requeue preparation without replacing the original.
 
@@ -518,7 +518,7 @@ expect(invoke).toHaveBeenCalledWith("prepare_pending_videos", { limit: 1 });
 expect(invoke).toHaveBeenCalledWith("retry_video_preparation", { assetId: "video-1" });
 ```
 
-- [ ] **Step 2: Run RED tests**
+- [x] **Step 2: Run RED tests**
 
 ```powershell
 cd C:\chatgpt\app\src-tauri
@@ -528,7 +528,7 @@ cd C:\chatgpt\app
 npm.cmd test -- src/library/client.test.ts
 ```
 
-- [ ] **Step 3: Implement lifecycle and public gateway**
+- [x] **Step 3: Implement lifecycle and public gateway**
 
 `Library::managed_paths_for_asset` returns original, optional thumbnail, poster, scrub directory, and optional proxy; purge validates every resolved target stays under the canonical library root before deletion. Restore changes status only. Drag-out continues resolving the original `relative_path` only.
 
@@ -559,7 +559,7 @@ Replace `LibraryGateway.ingestImage` with `ingestMedia`; add preparation and ret
 
 Add `media: { kind: "image" }` to every existing frontend asset fixture found by `rg -l "originalName:" app/src --glob '*.test.ts' --glob '*.test.tsx'`; use video media only in new video-specific cases. This is an explicit type migration, not an optional compatibility field.
 
-- [ ] **Step 4: Run GREEN lifecycle and gateway tests**
+- [x] **Step 4: Run GREEN lifecycle and gateway tests**
 
 ```powershell
 cd C:\chatgpt\app\src-tauri
@@ -572,7 +572,7 @@ npm.cmd run build
 git diff --check
 ```
 
-- [ ] **Step 5: Commit Task 5**
+- [x] **Step 5: Commit Task 5**
 
 ```powershell
 git add app/src-tauri/src/library/trash.rs app/src-tauri/src/library/drag_out.rs app/src-tauri/src/library/mod.rs app/src-tauri/src/commands.rs app/src-tauri/src/lib.rs app/src-tauri/tests/foundation_flow.rs app/src/library/types.ts app/src/library/client.ts app/src/library/client.test.ts app/src/app/App.test.tsx app/src/assets/AssetBrowser.test.tsx app/src/assets/AssetGallery.test.tsx app/src/assets/AssetInspector.test.tsx app/src/assets/AssetViewer.test.tsx app/src/ingestion/useFileDrop.test.ts app/src/safety/TrashBrowser.test.tsx app/src/similarity/SimilarityReviewBrowser.test.tsx

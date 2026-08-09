@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import type {
   AssetSummary,
-  IngestImageInput,
+  IngestMediaInput,
   IngestOutcome,
 } from "../library/types";
 import {
@@ -29,6 +29,7 @@ const fixtureAsset: AssetSummary = {
   collectedAt: "2026-07-31T00:00:00Z",
   favorite: false,
   sourceUrl: null,
+  media: { kind: "image" },
 };
 
 it("keeps a completed batch with added, duplicate, review, and failure counts", async () => {
@@ -312,7 +313,7 @@ it("queues overlapping drops in arrival order without clearing progress", async 
     ["C:\\images\\a2.png", a2.promise],
     ["C:\\images\\b1.png", b1.promise],
   ]);
-  const ingestImage = vi.fn((input: IngestImageInput) => {
+  const ingestImage = vi.fn((input: IngestMediaInput) => {
     const pending = pendingByPath.get(input.sourcePath);
     if (!pending) throw new Error(`unexpected path: ${input.sourcePath}`);
     return pending;

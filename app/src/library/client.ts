@@ -6,7 +6,7 @@ import type {
   AssetSummary,
   ClassificationEntry,
   CreateClassification,
-  IngestImageInput,
+  IngestMediaInput,
   IngestOutcome,
   LibraryGateway,
   LibrarySummary,
@@ -17,6 +17,8 @@ import type {
   SimilarityReviewPage,
   TrashPage,
   TrashPolicy,
+  VideoPreparationProgress,
+  VideoPreparationState,
 } from "./types";
 
 export const libraryGateway: LibraryGateway = {
@@ -62,6 +64,10 @@ export const libraryGateway: LibraryGateway = {
     invoke("patch_asset_classifications", { patch }),
   getAssetClassifications: (assetId) =>
     invoke<string[]>("get_asset_classifications", { assetId }),
-  ingestImage: (request: IngestImageInput) =>
-    invoke<IngestOutcome>("ingest_image", { request }),
+  ingestMedia: (request: IngestMediaInput) =>
+    invoke<IngestOutcome>("ingest_media", { request }),
+  preparePendingVideos: (limit) =>
+    invoke<VideoPreparationProgress>("prepare_pending_videos", { limit }),
+  retryVideoPreparation: (assetId) =>
+    invoke<VideoPreparationState>("retry_video_preparation", { assetId }),
 };

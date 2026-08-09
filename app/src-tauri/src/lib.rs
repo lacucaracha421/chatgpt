@@ -48,7 +48,9 @@ pub fn run() {
             commands::set_assets_favorite,
             commands::set_asset_classifications,
             commands::patch_asset_classifications,
-            commands::ingest_image,
+            commands::ingest_media,
+            commands::prepare_pending_videos,
+            commands::retry_video_preparation,
             commands::start_asset_drag,
         ])
         .run(tauri::generate_context!())

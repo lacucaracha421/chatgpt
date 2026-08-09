@@ -11,7 +11,7 @@ use crate::library::{
         ClassificationEntry, CreateClassification, IngestMediaRequest, IngestOutcome,
         LibrarySummary, MetadataBackup, PurgeSummary, SimilarityDecisionOutcome,
         SimilarityDecisionRequest, SimilarityIndexProgress, SimilarityReviewPage, TrashPage,
-        TrashPolicy,
+        TrashPolicy, VideoPreparationProgress, VideoPreparationState,
     },
     Library,
 };
@@ -391,7 +391,7 @@ pub fn patch_asset_classifications(
 }
 
 #[tauri::command]
-pub async fn ingest_image(
+pub async fn ingest_media(
     request: IngestMediaRequest,
     state: State<'_, AppState>,
 ) -> Result<IngestOutcome, CommandError> {
@@ -402,6 +402,28 @@ pub async fn ingest_image(
             code: "ingest_failed",
             message: error.to_string(),
         })?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn prepare_pending_videos(
+    limit: u32,
+    state: State<'_, AppState>,
+) -> Result<VideoPreparationProgress, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.prepare_pending_videos(limit))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn retry_video_preparation(
+    asset_id: String,
+    state: State<'_, AppState>,
+) -> Result<VideoPreparationState, CommandError> {
+    current_required(state)?
+        .retry_video_preparation(&asset_id)
         .map_err(CommandError::from)
 }
 

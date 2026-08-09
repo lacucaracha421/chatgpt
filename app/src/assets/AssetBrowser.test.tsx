@@ -489,6 +489,7 @@ function asset(index: number) {
     collectedAt: "2026-07-30T00:00:00Z",
     favorite: false,
     sourceUrl: null,
+    media: { kind: "image" as const },
   };
 }
 
@@ -503,6 +504,7 @@ function createGateway(page: AssetPage = { items: [], nextCursor: null }): Libra
     ensureDailyBackup: vi.fn(), listMetadataBackups: vi.fn(),
     restoreMetadataBackup: vi.fn(), purgeExpiredTrash: vi.fn(),
     setAssetFavorite: vi.fn(), setAssetsFavorite: vi.fn().mockResolvedValue(undefined), setAssetClassifications: vi.fn(), patchAssetClassifications: vi.fn().mockResolvedValue(undefined),
-    getAssetClassifications: vi.fn().mockResolvedValue([]), ingestImage: vi.fn(),
+    getAssetClassifications: vi.fn().mockResolvedValue([]), ingestMedia: vi.fn(),
+    preparePendingVideos: vi.fn(), retryVideoPreparation: vi.fn(),
   };
 }

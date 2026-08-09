@@ -246,13 +246,108 @@ impl Library {
     }
 
     pub(crate) fn requeue_interrupted_video_preparation(&self) -> Result<(), LibraryError> {
-        self.connection()?.execute(
-            "UPDATE video_assets
-             SET preparation_state = 'pending', preparation_error = NULL
-             WHERE preparation_state = 'processing'",
-            [],
-        )?;
+        let connection = self.connection()?;
+        let candidates = connection
+            .prepare(
+                "SELECT asset_id, preparation_state, playback_kind, scrub_frame_count
+                 FROM video_assets
+                 WHERE preparation_state IN ('processing', 'ready')",
+            )?
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(connection);
+
+        for (asset_id, state, playback_kind, scrub_frame_count) in candidates {
+            let interrupted = state == "processing";
+            let incomplete = state == "ready"
+                && !self.video_derivatives_complete(
+                    &asset_id,
+                    playback_kind.as_deref(),
+                    scrub_frame_count,
+                );
+            if !interrupted && !incomplete {
+                continue;
+            }
+            self.remove_video_derivatives(&asset_id)?;
+            let mut connection = self.connection()?;
+            let transaction = connection.transaction()?;
+            transaction.execute(
+                "UPDATE assets SET thumbnail_relative_path = NULL WHERE id = ?1",
+                [&asset_id],
+            )?;
+            transaction.execute(
+                "UPDATE video_assets
+                 SET preparation_state = 'pending', preparation_error = NULL,
+                     playback_kind = NULL, poster_relative_path = NULL,
+                     scrub_relative_dir = NULL, scrub_frame_count = 0,
+                     proxy_relative_path = NULL
+                 WHERE asset_id = ?1",
+                [&asset_id],
+            )?;
+            transaction.commit()?;
+        }
         Ok(())
+    }
+
+    fn video_derivatives_complete(
+        &self,
+        asset_id: &str,
+        playback_kind: Option<&str>,
+        scrub_frame_count: i64,
+    ) -> bool {
+        let Ok(scrub_frame_count) = u64::try_from(scrub_frame_count) else {
+            return false;
+        };
+        if !safe_asset_id(asset_id) || !(1..=MAX_SCRUB_FRAMES).contains(&scrub_frame_count) {
+            return false;
+        }
+        let directory = self.root().join("video-media").join(asset_id);
+        if require_non_empty_file(&directory.join("poster.webp")).is_err() {
+            return false;
+        }
+        if (0..scrub_frame_count).any(|index| {
+            require_non_empty_file(&directory.join("scrub").join(format!("{index:03}.webp")))
+                .is_err()
+        }) {
+            return false;
+        }
+        match playback_kind {
+            Some("original") => true,
+            Some("proxy") => require_non_empty_file(&directory.join("playback.mp4")).is_ok(),
+            _ => false,
+        }
+    }
+
+    fn remove_video_derivatives(&self, asset_id: &str) -> Result<(), LibraryError> {
+        if !safe_asset_id(asset_id) {
+            return Err(LibraryError::UnsafeMediaPath);
+        }
+        let directory = self.root().join("video-media").join(asset_id);
+        let metadata = match fs::symlink_metadata(&directory) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(_) => return Err(LibraryError::UnsafeMediaPath),
+        };
+        if !metadata.is_dir() || metadata.file_type().is_symlink() {
+            return Err(LibraryError::UnsafeMediaPath);
+        }
+        let canonical_root =
+            fs::canonicalize(self.root()).map_err(|_| LibraryError::UnsafeMediaPath)?;
+        let canonical_directory =
+            fs::canonicalize(&directory).map_err(|_| LibraryError::UnsafeMediaPath)?;
+        if canonical_directory == canonical_root
+            || !canonical_directory.starts_with(&canonical_root)
+        {
+            return Err(LibraryError::UnsafeMediaPath);
+        }
+        fs::remove_dir_all(canonical_directory).map_err(|_| LibraryError::VideoPreparationFailed)
     }
 
     fn reserve_pending_video(&self) -> Result<Option<PendingVideo>, LibraryError> {
@@ -291,11 +386,7 @@ impl Library {
         tool: &T,
         video: PendingVideo,
     ) -> Result<(), LibraryError> {
-        if !video
-            .asset_id
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || character == '-')
-        {
+        if !safe_asset_id(&video.asset_id) {
             return Err(LibraryError::VideoPreparationFailed);
         }
         let source = self.root().join(&video.relative_path);
@@ -383,6 +474,13 @@ impl Library {
         )?;
         Ok(())
     }
+}
+
+fn safe_asset_id(asset_id: &str) -> bool {
+    !asset_id.is_empty()
+        && asset_id
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '-')
 }
 
 fn run_tool<const N: usize>(name: &str, arguments: [OsString; N]) -> Result<Vec<u8>, LibraryError> {

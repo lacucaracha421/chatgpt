@@ -116,7 +116,7 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
     subscribe: subscribeDrops,
     enabled: dropEnabled,
     classificationId: dropClassificationId,
-    ingestImage: gateway.ingestImage,
+    ingestImage: gateway.ingestMedia,
     onIngested: handleIngested,
     onFatalError: setMessage,
   });

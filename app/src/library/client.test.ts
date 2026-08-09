@@ -31,3 +31,27 @@ describe("libraryGateway similarity contract", () => {
     });
   });
 });
+
+describe("libraryGateway video contract", () => {
+  beforeEach(() => invoke.mockClear());
+
+  it("uses the media ingest and video preparation commands", async () => {
+    const request = {
+      sourcePath: "C:\\input\\clip.webm",
+      classificationId: "work-1",
+      sourceUrl: "https://example.test/post",
+    };
+
+    await libraryGateway.ingestMedia(request);
+    await libraryGateway.preparePendingVideos(1);
+    await libraryGateway.retryVideoPreparation("video-1");
+
+    expect(invoke).toHaveBeenNthCalledWith(1, "ingest_media", { request });
+    expect(invoke).toHaveBeenNthCalledWith(2, "prepare_pending_videos", {
+      limit: 1,
+    });
+    expect(invoke).toHaveBeenNthCalledWith(3, "retry_video_preparation", {
+      assetId: "video-1",
+    });
+  });
+});

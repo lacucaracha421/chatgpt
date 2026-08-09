@@ -37,7 +37,7 @@ type UseFileDropOptions = {
   subscribe: DropSubscriber;
   enabled: boolean;
   classificationId: string | null;
-  ingestImage: LibraryGateway["ingestImage"];
+  ingestImage: LibraryGateway["ingestMedia"];
   onIngested?: (result: IngestOutcome) => void;
   onFatalError?: (message: string) => void;
   // Kept temporarily so existing callers can migrate without changing drop semantics.

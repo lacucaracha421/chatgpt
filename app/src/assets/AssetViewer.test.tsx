@@ -39,5 +39,5 @@ it("supports buttons and Escape without wrapping at the final asset", async () =
 });
 
 function asset(id: string, originalName: string): AssetSummary {
-  return { id, title: null, originalName, byteSize: 1, width: 200, height: 100, collectedAt: "2026-08-09T00:00:00Z", favorite: false, sourceUrl: null };
+  return { id, title: null, originalName, byteSize: 1, width: 200, height: 100, collectedAt: "2026-08-09T00:00:00Z", favorite: false, sourceUrl: null, media: { kind: "image" } };
 }

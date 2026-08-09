@@ -22,6 +22,22 @@ export type ClassificationEntry = {
   parentId: string | null;
 };
 
+export type VideoPreparationState =
+  | "pending"
+  | "processing"
+  | "ready"
+  | "failed";
+
+export type MediaSummary =
+  | { kind: "image" }
+  | { kind: "gif" }
+  | {
+      kind: "video";
+      durationMs: number;
+      preparationState: VideoPreparationState;
+      scrubFrameCount: number;
+    };
+
 export type AssetSummary = {
   id: string;
   title: string | null;
@@ -32,6 +48,7 @@ export type AssetSummary = {
   collectedAt: string;
   favorite: boolean;
   sourceUrl: string | null;
+  media: MediaSummary;
 };
 
 export type AssetCursor = {
@@ -128,10 +145,17 @@ export type CreateClassification = {
   parentId: string | null;
 };
 
-export type IngestImageInput = {
+export type IngestMediaInput = {
   sourcePath: string;
   classificationId: string | null;
   sourceUrl: string | null;
+};
+
+export type VideoPreparationProgress = {
+  processed: number;
+  remaining: number;
+  failed: number;
+  changedAssetIds: string[];
 };
 
 export type IngestOutcome =
@@ -175,5 +199,7 @@ export interface LibraryGateway {
   setAssetClassifications(assetId: string, classificationIds: string[]): Promise<void>;
   patchAssetClassifications(patch: AssetClassificationPatch): Promise<void>;
   getAssetClassifications(assetId: string): Promise<string[]>;
-  ingestImage(input: IngestImageInput): Promise<IngestOutcome>;
+  ingestMedia(input: IngestMediaInput): Promise<IngestOutcome>;
+  preparePendingVideos(limit: number): Promise<VideoPreparationProgress>;
+  retryVideoPreparation(assetId: string): Promise<VideoPreparationState>;
 }

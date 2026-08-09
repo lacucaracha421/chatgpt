@@ -59,5 +59,5 @@ it("summarizes multi-selection and delegates classification add and remove", asy
 });
 
 function asset(id: string): AssetSummary {
-  return { id, title: null, originalName: `${id}.png`, byteSize: 1024, width: 200, height: 100, collectedAt: "2026-08-09T00:00:00Z", favorite: false, sourceUrl: `https://example.com/source/${id}` };
+  return { id, title: null, originalName: `${id}.png`, byteSize: 1024, width: 200, height: 100, collectedAt: "2026-08-09T00:00:00Z", favorite: false, sourceUrl: `https://example.com/source/${id}`, media: { kind: "image" } };
 }

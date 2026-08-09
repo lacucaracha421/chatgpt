@@ -411,6 +411,102 @@ fn video_media_summary_is_preserved_in_get_asset_and_trash_list() {
 }
 
 #[test]
+fn video_trash_retains_derivatives_and_restore_reuses_them() {
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path().join("library")).unwrap();
+    let (original, derivatives) = insert_ready_video(&library, "video-trash", "normal");
+
+    library.trash_asset("video-trash").unwrap();
+
+    assert!(original.is_file());
+    assert!(derivatives.join("poster.webp").is_file());
+    assert!(derivatives.join("scrub/000.webp").is_file());
+    library.restore_asset("video-trash").unwrap();
+    assert!(matches!(
+        library.get_asset("video-trash").unwrap().media,
+        MediaSummary::Video {
+            preparation_state: app_lib::library::models::VideoPreparationState::Ready,
+            ..
+        }
+    ));
+    assert!(derivatives.join("poster.webp").is_file());
+}
+
+#[test]
+fn video_trash_purge_removes_original_derivative_directory_and_rows() {
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path().join("library")).unwrap();
+    let (original, derivatives) = insert_ready_video(&library, "video-purge", "trash");
+
+    let result = library.empty_trash().unwrap();
+
+    assert_eq!(result.deleted_count, 1);
+    assert!(result.failed_asset_ids.is_empty());
+    assert!(!original.exists());
+    assert!(!derivatives.exists());
+    let counts: (i64, i64) = Connection::open(library.root().join("library.sqlite"))
+        .unwrap()
+        .query_row(
+            "SELECT (SELECT COUNT(*) FROM assets WHERE id = 'video-purge'),
+                    (SELECT COUNT(*) FROM video_assets WHERE asset_id = 'video-purge')",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(counts, (0, 0));
+}
+
+#[test]
+fn video_drag_out_copies_only_the_original() {
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path().join("library")).unwrap();
+    let (original, derivatives) = insert_ready_video(&library, "video-drag", "normal");
+
+    let prepared = library.prepare_asset_drag(&["video-drag".into()]).unwrap();
+
+    assert_eq!(prepared.files.len(), 1);
+    assert_eq!(
+        std::fs::read(&prepared.files[0]).unwrap(),
+        b"original-video"
+    );
+    assert_eq!(
+        prepared.files[0].file_name().unwrap().to_string_lossy(),
+        "video-drag.webm"
+    );
+    assert!(prepared.preview.is_file());
+    assert_eq!(std::fs::read(&original).unwrap(), b"original-video");
+    assert!(derivatives.join("poster.webp").is_file());
+}
+
+#[test]
+fn missing_video_derivative_is_requeued_on_open_without_replacing_original() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("library");
+    let library = Library::open(&root).unwrap();
+    let (original, derivatives) = insert_ready_video(&library, "video-requeue", "normal");
+    std::fs::remove_file(derivatives.join("poster.webp")).unwrap();
+    drop(library);
+
+    let library = Library::open(&root).unwrap();
+
+    assert_eq!(std::fs::read(&original).unwrap(), b"original-video");
+    assert!(!derivatives.exists());
+    let state: (String, Option<String>, Option<String>) =
+        Connection::open(library.root().join("library.sqlite"))
+            .unwrap()
+            .query_row(
+                "SELECT video.preparation_state, video.poster_relative_path,
+                    asset.thumbnail_relative_path
+             FROM video_assets AS video JOIN assets AS asset ON asset.id = video.asset_id
+             WHERE video.asset_id = 'video-requeue'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+    assert_eq!(state, ("pending".into(), None, None));
+}
+
+#[test]
 fn trash_policy_defaults_updates_and_rejects_out_of_range_retention() {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path().join("library")).unwrap();
@@ -779,6 +875,50 @@ fn version_two_library() -> MigrationFixture {
     }
     drop(database);
     MigrationFixture { _temp: temp, root }
+}
+
+fn insert_ready_video(library: &Library, asset_id: &str, status: &str) -> (PathBuf, PathBuf) {
+    let original_relative = format!("assets/vi/{asset_id}.webm");
+    let derivative_relative = format!("video-media/{asset_id}");
+    let poster_relative = format!("{derivative_relative}/poster.webp");
+    let scrub_relative = format!("{derivative_relative}/scrub");
+    let original = library.root().join(&original_relative);
+    let derivatives = library.root().join(&derivative_relative);
+    std::fs::create_dir_all(original.parent().unwrap()).unwrap();
+    std::fs::create_dir_all(derivatives.join("scrub")).unwrap();
+    std::fs::write(&original, b"original-video").unwrap();
+    std::fs::write(derivatives.join("poster.webp"), b"poster").unwrap();
+    std::fs::write(derivatives.join("scrub/000.webp"), b"frame").unwrap();
+    let connection = Connection::open(library.root().join("library.sqlite")).unwrap();
+    connection
+        .execute(
+            "INSERT INTO assets (
+                id, content_hash, media_kind, original_name, relative_path,
+                thumbnail_relative_path, byte_size, width, height, collected_at, status,
+                trashed_at
+             ) VALUES (?1, ?2, 'video', ?3, ?4, ?5, 14, 1280, 720,
+                '2026-08-09T00:00:00Z', ?6, CASE WHEN ?6 = 'trash' THEN '2026-08-09T00:00:00Z' END)",
+            params![
+                asset_id,
+                format!("hash-{asset_id}"),
+                format!("{asset_id}.webm"),
+                original_relative,
+                poster_relative,
+                status,
+            ],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO video_assets (
+                asset_id, duration_ms, container, video_codec, audio_codec,
+                preparation_state, playback_kind, poster_relative_path,
+                scrub_relative_dir, scrub_frame_count
+             ) VALUES (?1, 5000, 'webm', 'vp9', 'opus', 'ready', 'original', ?2, ?3, 1)",
+            params![asset_id, poster_relative, scrub_relative],
+        )
+        .unwrap();
+    (original, derivatives)
 }
 
 fn version_three_library() -> MigrationFixture {

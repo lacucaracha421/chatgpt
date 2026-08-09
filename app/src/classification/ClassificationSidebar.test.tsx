@@ -44,7 +44,9 @@ function gateway(): LibraryGateway {
     setAssetClassifications: vi.fn(),
     patchAssetClassifications: vi.fn(),
     getAssetClassifications: vi.fn(),
-    ingestImage: vi.fn(),
+    ingestMedia: vi.fn(),
+    preparePendingVideos: vi.fn(),
+    retryVideoPreparation: vi.fn(),
   };
 }
 
