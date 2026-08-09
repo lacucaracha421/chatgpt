@@ -1,6 +1,6 @@
 # Lakomics
 
-Lakomics is a desktop media library for images.
+Lakomics is a local-first Windows media library for JPEG, PNG, GIF, and WebP images.
 
 ## Run and verify
 
@@ -20,13 +20,36 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 ```
 
-## Current controls
+## Current daily-use behavior
 
-- Navigate classifications from the sidebar; use each row menu to rename, move, or delete a classification.
-- Choose newest, oldest, favorites, or random sort. Use direct-only filtering for a classification view.
-- Toggle asset metadata from the toolbar.
-- Select an asset with one click and open its details with a double click.
-- Drop image files only while a concrete classification is selected.
+- Lakomics always starts in **All assets**. The sidebar also provides Unsorted, Recent, Favorites, classifications, Trash, and Library safety.
+- Choose newest, oldest, favorites, or random sort. Change the justified-row height with the preview-size slider and toggle thumbnail metadata independently.
+- Click to select one asset, Ctrl-click to toggle, Shift-click for a loaded range, and Ctrl+A to select only currently loaded assets. Escape clears selection; arrow keys move focus; Delete moves the selection to Trash.
+- Double-click or press Enter to open the full-screen viewer. Left and Right move through the currently loaded order, and Escape closes the viewer.
+- The information panel opens on the first non-empty selection. Closing it manually keeps it closed while the selection changes; clearing the selection resets that choice. It shows one-asset metadata or a multi-selection summary and delegates classification changes to the same batch operation as the toolbar.
+- Drop files anywhere in an ordinary asset view. A concrete classification view adds that classification; All assets, Unsorted, Recent, and Favorites ingest into Unsorted. Incoming files are copied, and user source files are never moved or deleted.
+- Drag assets onto a classification to add it, or drag classifications to reorganize the tree. Dragging selected assets out of Lakomics starts a Windows copy operation with their original names; duplicate names receive a Windows-style numeric suffix.
+- The work tray reports ingestion and drag-out progress for the current app session only. It is not a persistent background-job history.
+
+Collections, similar-image review, browser-extension integration, video playback, comic reading, folder-recursive ingestion, and AVIF/HEIC are deferred.
+
+## Eagle compact UI acceptance
+
+Verified on 2026-08-09 with the temporary library at
+`C:\Users\namwoojun\Desktop\test`:
+
+```powershell
+cd C:\chatgpt\.worktrees\daily-use-ui\app
+npm.cmd run tauri dev
+npm.cmd run check
+```
+
+- All 176 frontend tests passed and the TypeScript/Vite production build completed successfully.
+- `.acceptance\eagle-compact-normal.png` records the normal desktop layout.
+- `.acceptance\eagle-compact-narrow.png` records the 960×650 layout with the inspector open.
+- `.acceptance\eagle-compact-drop.png` records the native Explorer drop indicator.
+- Single and multi-file incoming drops were exercised over the gallery, sidebar, and inspector. Exact duplicates did not create a new asset.
+- Dragging an asset to `.acceptance\output\run-eagle-compact-20260809-123822` produced a byte-identical copy while the managed original remained in the library.
 
 ## Windows drag-out acceptance
 

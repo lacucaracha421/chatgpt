@@ -606,13 +606,13 @@ git commit -m "style: clarify external file drop feedback"
 - Consumes: Tasks 1~7의 완성된 UI와 기존 Tauri acceptance 설정
 - Produces: 자동 검증 로그, 1536px/960px/드롭 화면 증거, 사용자 시각 승인 기록
 
-- [ ] **Step 1: 전체 자동 검증**
+- [x] **Step 1: 전체 자동 검증**
 
 Run: `cd app && npm.cmd run check`
 
 Expected: 모든 Vitest 파일 PASS, TypeScript와 Vite build exit 0
 
-- [ ] **Step 2: 일반 창 실제 검증**
+- [x] **Step 2: 일반 창 실제 검증**
 
 디버그 앱을 `C:\Users\namwoojun\Desktop\test` 라이브러리로 실행한다. 1536px 너비에서 다음을 확인하고 `.acceptance/eagle-compact-normal.png`를 저장한다.
 
@@ -623,19 +623,19 @@ Expected: 모든 Vitest 파일 PASS, TypeScript와 Vite build exit 0
 - 수동 닫기 후 강제 재열림 없음
 - 가로 스크롤 없음
 
-- [ ] **Step 3: 좁은 창 실제 검증**
+- [x] **Step 3: 좁은 창 실제 검증**
 
 960×650에서 정보 패널을 연 뒤 `.acceptance/eagle-compact-narrow.png`를 저장한다. 패널은 갤러리 위에 겹치고, 툴바는 한 줄을 유지하며, 사이드바와 컨트롤이 잘리지 않아야 한다.
 
-- [ ] **Step 4: Windows 탐색기 드롭 검증**
+- [x] **Step 4: Windows 탐색기 드롭 검증**
 
 한 이미지와 여러 이미지를 탐색기에서 앱의 사이드바, 갤러리, 정보 패널 위치에 각각 놓는다. `.acceptance/eagle-compact-drop.png`에는 파란 가장자리와 중앙의 작은 안내가 보여야 한다. 정확한 중복은 새 자산을 만들지 않고 알림만 표시해야 하며 실패 항목은 파일명만 표시해야 한다.
 
-- [ ] **Step 5: 기존 탐색기 복사 회귀 검증**
+- [x] **Step 5: 기존 탐색기 복사 회귀 검증**
 
 앱에서 이미지 하나와 여러 이미지를 Windows 탐색기 폴더로 끌어 복사한다. 라이브러리 원본이 남고 대상 폴더에 복사본이 생기는지 확인한다.
 
-- [ ] **Step 6: README와 계획 증거 갱신**
+- [x] **Step 6: README와 계획 증거 갱신**
 
 `app/README.md`에 다음 수동 확인 명령과 테스트 라이브러리 규칙을 기록한다.
 
@@ -646,11 +646,15 @@ npm.cmd run tauri dev
 
 이 Task의 체크박스 아래에 실행 날짜, 전체 테스트 개수, build 결과, 캡처 파일명을 기록한다. 실패를 성공으로 기록하지 않는다.
 
-- [ ] **Step 7: 사용자 시각 승인**
+검증 기록 (2026-08-09): `C:\Users\namwoojun\Desktop\test` 라이브러리로 실제 Tauri 앱을 실행했다. `npm.cmd run check`에서 25개 파일의 176개 테스트와 TypeScript/Vite production build가 통과했다. 일반 창은 `.acceptance/eagle-compact-normal.png`, 960×650 창은 `.acceptance/eagle-compact-narrow.png`, 탐색기 드롭 상태는 `.acceptance/eagle-compact-drop.png`에 저장했다. 단일·다중 파일을 갤러리·사이드바·정보 패널 위치에 드롭했고, 정확한 중복은 자산을 늘리지 않았다. 앱에서 탐색기로 끌어낸 파일은 `.acceptance/output/run-eagle-compact-20260809-123822/HPMhSEIbkAAc_sg.jpg`에 복사됐으며 원본과 SHA-256이 일치했다. 정보 패널은 수동 닫기 후 선택 변경에서 닫힘을 유지하고, 선택을 비운 뒤 새로 선택하면 다시 열렸다.
+
+- [x] **Step 7: 사용자 시각 승인**
 
 일반 창, 좁은 창, 드롭 상태 캡처를 사용자에게 보여준다. 간격, 대비, 툴바 밀도, 정보 패널을 승인받기 전에는 UI 완료로 표시하지 않는다. 수정 요청이 있으면 해당 Task의 테스트부터 다시 실행한다.
 
-- [ ] **Step 8: 문서 커밋**
+시각 승인 기록 (2026-08-09): 일반 창, 960×650 창, 탐색기 드롭 상태 캡처를 사용자에게 제시했고 사용자가 진행을 승인했다.
+
+- [x] **Step 8: 문서 커밋**
 
 `.acceptance`가 gitignore 대상이면 캡처는 커밋하지 않고 로컬 검증 증거로만 둔다.
 
