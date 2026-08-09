@@ -132,7 +132,7 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
     subscribe: subscribeDrops,
     enabled: dropEnabled,
     classificationId: dropClassificationId,
-    ingestImage: gateway.ingestMedia,
+    ingestMedia: gateway.ingestMedia,
     onIngested: handleIngested,
     onFatalError: setMessage,
   });

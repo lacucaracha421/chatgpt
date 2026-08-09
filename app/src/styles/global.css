@@ -872,6 +872,7 @@ input:disabled {
 
 .video-player__controls {
   position: absolute;
+  z-index: 1;
   right: var(--space-4);
   bottom: var(--space-4);
   left: var(--space-4);

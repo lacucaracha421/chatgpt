@@ -37,7 +37,7 @@ type UseFileDropOptions = {
   subscribe: DropSubscriber;
   enabled: boolean;
   classificationId: string | null;
-  ingestImage: LibraryGateway["ingestMedia"];
+  ingestMedia: LibraryGateway["ingestMedia"];
   onIngested?: (result: IngestOutcome) => void;
   onFatalError?: (message: string) => void;
   // Kept temporarily so existing callers can migrate without changing drop semantics.
@@ -100,7 +100,7 @@ export function useFileDrop(options: UseFileDropOptions): FileDropState {
           if (!active) return;
           setProgress({ current: index + 1, total: paths.length });
           try {
-            const result = await optionsRef.current.ingestImage({
+            const result = await optionsRef.current.ingestMedia({
               sourcePath,
               classificationId: destination,
               sourceUrl: null,
