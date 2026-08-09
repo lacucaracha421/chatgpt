@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, Clock3, Ellipsis, FolderTree, Images, Inbox, Plus, Settings, Star, Trash2 } from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon, ClockIcon, EllipsisHorizontalIcon, FolderIcon, PhotoIcon, InboxIcon, PlusIcon, Cog6ToothIcon, StarIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { useLayoutEffect, useRef, useState } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
 import { useLibrary } from "../library/LibraryContext";
@@ -227,15 +227,15 @@ export function ClassificationSidebar({
       <div className="classification-sidebar__heading">
         <h2>분류</h2>
         <Button type="button" size="icon" variant="ghost" aria-label="분류 추가" onClick={openCreate}>
-          <Plus aria-hidden="true" />
+          <PlusIcon aria-hidden="true" />
         </Button>
       </div>
       <nav className="classification-sidebar__quick-views" aria-label="빠른 보기">
-        <QuickViewButton icon={<FolderTree aria-hidden="true" />} label="전체 자산" selected={view.kind === "classification" && view.classificationId === null} onClick={() => onViewChange({ kind: "classification", classificationId: null })} />
-        <QuickViewButton icon={<Inbox aria-hidden="true" />} label="미분류함" selected={view.kind === "unsorted"} onClick={() => onViewChange({ kind: "unsorted" })} />
-        <QuickViewButton icon={<Clock3 aria-hidden="true" />} label="최근" selected={view.kind === "recent"} onClick={() => onViewChange({ kind: "recent" })} />
-        <QuickViewButton icon={<Star aria-hidden="true" />} label="즐겨찾기" selected={view.kind === "favorites"} onClick={() => onViewChange({ kind: "favorites" })} />
-        <QuickViewButton icon={<Images aria-hidden="true" />} label="유사 이미지 검토" count={reviewCount} selected={view.kind === "similarity_review"} onClick={() => onViewChange({ kind: "similarity_review" })} />
+        <QuickViewButton icon={<FolderIcon aria-hidden="true" />} label="전체 자산" selected={view.kind === "classification" && view.classificationId === null} onClick={() => onViewChange({ kind: "classification", classificationId: null })} />
+        <QuickViewButton icon={<InboxIcon aria-hidden="true" />} label="미분류함" selected={view.kind === "unsorted"} onClick={() => onViewChange({ kind: "unsorted" })} />
+        <QuickViewButton icon={<ClockIcon aria-hidden="true" />} label="최근" selected={view.kind === "recent"} onClick={() => onViewChange({ kind: "recent" })} />
+        <QuickViewButton icon={<StarIcon aria-hidden="true" />} label="즐겨찾기" selected={view.kind === "favorites"} onClick={() => onViewChange({ kind: "favorites" })} />
+        <QuickViewButton icon={<PhotoIcon aria-hidden="true" />} label="유사 이미지 검토" count={reviewCount} selected={view.kind === "similarity_review"} onClick={() => onViewChange({ kind: "similarity_review" })} />
       </nav>
       {tree.orphans.length > 0 && <p className="classification-sidebar__warning" role="alert">연결되지 않은 분류는 숨겨집니다.</p>}
       <ul className="classification-sidebar__tree" role="tree">
@@ -263,10 +263,10 @@ export function ClassificationSidebar({
         ))}
       </ul>
       <div className="classification-sidebar__footer">
-        <QuickViewButton icon={<Trash2 aria-hidden="true" />} label="휴지통" selected={view.kind === "trash"} onClick={() => onViewChange({ kind: "trash" })} />
+        <QuickViewButton icon={<TrashIcon aria-hidden="true" />} label="휴지통" selected={view.kind === "trash"} onClick={() => onViewChange({ kind: "trash" })} />
         {onOpenSafety && (
           <Button type="button" onClick={onOpenSafety}>
-            <Settings aria-hidden="true" />
+            <Cog6ToothIcon aria-hidden="true" />
             라이브러리 안전 설정
           </Button>
         )}
@@ -388,12 +388,12 @@ function TreeItem({ activeRowId, expandedIds, node, onDelete, onMove, onRename, 
         >
           {hasChildren ? (
             <Button type="button" size="icon" variant="ghost" aria-label={`${node.entry.name} ${expanded ? "접기" : "펼치기"}`} onClick={(event) => { event.stopPropagation(); onToggleExpanded(node.entry.id); }} onKeyDown={(event) => event.stopPropagation()}>
-              {expanded ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
+              {expanded ? <ChevronDownIcon aria-hidden="true" /> : <ChevronRightIcon aria-hidden="true" />}
             </Button>
           ) : <span className="classification-sidebar__tree-spacer" aria-hidden="true" />}
           <span className="classification-sidebar__tree-label">{node.entry.name}</span>
           <span onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-            <Menu label={`${node.entry.name} 추가 작업`} items={actions} trigger={<Ellipsis aria-hidden="true" />} />
+            <Menu label={`${node.entry.name} 추가 작업`} items={actions} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} />
           </span>
         </div>
       </ContextMenu>

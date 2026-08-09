@@ -1,4 +1,4 @@
-import { Ellipsis, Info, ListFilter, Shuffle, Star, Trash2, X } from "lucide-react";
+import { EllipsisHorizontalIcon, InformationCircleIcon, AdjustmentsHorizontalIcon, ArrowPathIcon, StarIcon, TrashIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { useState } from "react";
 import type { AssetSort, AssetView, ClassificationEntry } from "../library/types";
 import { Button } from "../shared/ui/Button";
@@ -54,19 +54,19 @@ export function AssetToolbar({
             {classifications.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
           </Select>
           <Button disabled={batchPending || !batchClassificationId} onClick={() => onClassification(batchClassificationId, "add")}>분류 추가</Button>
-          <Button aria-label="좋아요 켜기" disabled={batchPending} onClick={() => onFavorite(true)}><Star data-icon="inline-start" aria-hidden="true" />좋아요</Button>
-          <Button aria-label="휴지통으로 이동" variant="danger" disabled={batchPending} onClick={onTrash}><Trash2 data-icon="inline-start" aria-hidden="true" />휴지통</Button>
-          <Menu label="추가 작업" items={overflowItems} trigger={<Ellipsis aria-hidden="true" />} />
-          <Button aria-label="선택 해제" size="icon" variant="ghost" onClick={onClearSelection}><X aria-hidden="true" /></Button>
+          <Button aria-label="좋아요 켜기" disabled={batchPending} onClick={() => onFavorite(true)}><StarIcon data-icon="inline-start" aria-hidden="true" />좋아요</Button>
+          <Button aria-label="휴지통으로 이동" variant="danger" disabled={batchPending} onClick={onTrash}><TrashIcon data-icon="inline-start" aria-hidden="true" />휴지통</Button>
+          <Menu label="추가 작업" items={overflowItems} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} />
+          <Button aria-label="선택 해제" size="icon" variant="ghost" onClick={onClearSelection}><XMarkIcon aria-hidden="true" /></Button>
         </> : <>
           <Select label="정렬" value={recent ? "newest" : sort} disabled={recent} onChange={(event) => onSortChange(event.target.value as AssetSort)}>
             <option value="newest">최신순</option><option value="oldest">오래된순</option>
             <option value="favorites">좋아요순</option><option value="random">랜덤</option>
           </Select>
-          {view.kind === "classification" && <Toggle aria-label="이 분류만" checked={directOnly} onChange={(event) => onDirectOnlyChange(event.target.checked)}><ListFilter aria-hidden="true" /><span className="asset-toolbar__toggle-text">이 분류만</span></Toggle>}
+          {view.kind === "classification" && <Toggle aria-label="이 분류만" checked={directOnly} onChange={(event) => onDirectOnlyChange(event.target.checked)}><AdjustmentsHorizontalIcon aria-hidden="true" /><span className="asset-toolbar__toggle-text">이 분류만</span></Toggle>}
           <Slider label="미리보기 크기" min={96} max={320} step={8} value={thumbnailRowHeight} onChange={(event) => onThumbnailRowHeightChange(Number(event.target.value))} />
-          <Toggle aria-label="정보 표시" checked={metadataVisible} onChange={(event) => onMetadataVisibleChange(event.target.checked)}><Info aria-hidden="true" /><span className="asset-toolbar__toggle-text">정보 표시</span></Toggle>
-          {sort === "random" && !recent && <Tooltip content="다시 섞기"><Button size="icon" aria-label="다시 섞기" onClick={onReshuffle}><Shuffle aria-hidden="true" /></Button></Tooltip>}
+          <Toggle aria-label="정보 표시" checked={metadataVisible} onChange={(event) => onMetadataVisibleChange(event.target.checked)}><InformationCircleIcon aria-hidden="true" /><span className="asset-toolbar__toggle-text">정보 표시</span></Toggle>
+          {sort === "random" && !recent && <Tooltip content="다시 섞기"><Button size="icon" aria-label="다시 섞기" onClick={onReshuffle}><ArrowPathIcon aria-hidden="true" /></Button></Tooltip>}
         </>}
       </div>
     </header>

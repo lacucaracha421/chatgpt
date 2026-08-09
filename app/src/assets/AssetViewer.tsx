@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { ChevronLeftIcon, ChevronRightIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import type { AssetSummary } from "../library/types";
 import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
@@ -25,9 +25,9 @@ export function AssetViewer({ items, activeId, onActiveIdChange, onClose }: { it
   >
     <div className="asset-viewer">
       <div className="asset-viewer__controls">
-        <Button size="icon" variant="ghost" aria-label="이전 자산" disabled={!previous} onClick={() => move(previous)}><ChevronLeft aria-hidden="true" /></Button>
-        <Button size="icon" variant="ghost" aria-label="다음 자산" disabled={!next} onClick={() => move(next)}><ChevronRight aria-hidden="true" /></Button>
-        <Button size="icon" variant="ghost" aria-label="감상 화면 닫기" onClick={onClose}><X aria-hidden="true" /></Button>
+        <Button size="icon" variant="ghost" aria-label="이전 자산" disabled={!previous} onClick={() => move(previous)}><ChevronLeftIcon aria-hidden="true" /></Button>
+        <Button size="icon" variant="ghost" aria-label="다음 자산" disabled={!next} onClick={() => move(next)}><ChevronRightIcon aria-hidden="true" /></Button>
+        <Button size="icon" variant="ghost" aria-label="감상 화면 닫기" onClick={onClose}><XMarkIcon aria-hidden="true" /></Button>
       </div>
       {asset.media.kind === "video"
         ? <VideoPlayer key={asset.id} asset={asset as AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> }} />

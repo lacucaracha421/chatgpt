@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { XMarkIcon } from "@heroicons/react/24/outline";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatBytes, localDate, sourceLabel } from "../assets/assetMetadata";
 import { assetUrl } from "../assets/mediaUrl";
@@ -75,7 +75,7 @@ export function SimilarityReviewBrowser({ gateway, onCountChange, onClose }: Pro
   return <section className="similarity-review" aria-label="유사 이미지 검토" onKeyDown={(event) => event.stopPropagation()}>
     <header className="similarity-review__toolbar">
       <div><h2>유사 이미지 검토</h2>{review && initialTotal > 0 && <span>{current} / {initialTotal}</span>}</div>
-      <Button size="icon" variant="ghost" aria-label="유사 이미지 검토 닫기" onClick={onClose}><X aria-hidden="true" /></Button>
+      <Button size="icon" variant="ghost" aria-label="유사 이미지 검토 닫기" onClick={onClose}><XMarkIcon aria-hidden="true" /></Button>
     </header>
     {message && <Toast>{message}</Toast>}
     {loading ? <Skeleton className="similarity-review__skeleton" label="유사 이미지를 불러오는 중" /> : !review ? (

@@ -1,4 +1,4 @@
-import { Maximize2, Minimize2, Pause, Play, Volume2, VolumeX } from "lucide-react";
+import { ArrowsPointingOutIcon, ArrowsPointingInIcon, PauseIcon, PlayIcon, SpeakerWaveIcon, SpeakerXMarkIcon } from "@heroicons/react/24/outline";
 import { useEffect, useRef, useState } from "react";
 import type { AssetSummary } from "../library/types";
 import { playbackUrl, scrubFrameUrl } from "../assets/mediaUrl";
@@ -100,11 +100,11 @@ export function VideoPlayer({ asset }: { asset: VideoAsset }) {
         />
       </div>
       <div className="video-player__control-row">
-        <Button size="icon" variant="ghost" aria-label={playing ? "일시 정지" : "재생"} onClick={togglePlayback}>{playing ? <Pause aria-hidden="true" /> : <Play aria-hidden="true" />}</Button>
+        <Button size="icon" variant="ghost" aria-label={playing ? "일시 정지" : "재생"} onClick={togglePlayback}>{playing ? <PauseIcon aria-hidden="true" /> : <PlayIcon aria-hidden="true" />}</Button>
         <span className="video-player__time">{formatTime(currentTime)} / {formatTime(safeDuration)}</span>
-        <Button size="icon" variant="ghost" aria-label={muted ? "음소거 해제" : "음소거"} onClick={() => { if (videoRef.current) { videoRef.current.muted = !videoRef.current.muted; setMuted(videoRef.current.muted); } }}>{muted ? <VolumeX aria-hidden="true" /> : <Volume2 aria-hidden="true" />}</Button>
+        <Button size="icon" variant="ghost" aria-label={muted ? "음소거 해제" : "음소거"} onClick={() => { if (videoRef.current) { videoRef.current.muted = !videoRef.current.muted; setMuted(videoRef.current.muted); } }}>{muted ? <SpeakerXMarkIcon aria-hidden="true" /> : <SpeakerWaveIcon aria-hidden="true" />}</Button>
         <input type="range" className="video-player__volume" aria-label="음량" min={0} max={1} step={0.05} value={volume} onChange={(event) => { const next = Number(event.currentTarget.value); if (videoRef.current) { videoRef.current.volume = next; videoRef.current.muted = false; } setVolume(next); setMuted(false); }} />
-        <Button size="icon" variant="ghost" aria-label={fullscreen ? "전체 화면 종료" : "전체 화면"} onClick={() => { if (fullscreen) void document.exitFullscreen?.(); else void rootRef.current?.requestFullscreen?.(); }}>{fullscreen ? <Minimize2 aria-hidden="true" /> : <Maximize2 aria-hidden="true" />}</Button>
+        <Button size="icon" variant="ghost" aria-label={fullscreen ? "전체 화면 종료" : "전체 화면"} onClick={() => { if (fullscreen) void document.exitFullscreen?.(); else void rootRef.current?.requestFullscreen?.(); }}>{fullscreen ? <ArrowsPointingInIcon aria-hidden="true" /> : <ArrowsPointingOutIcon aria-hidden="true" />}</Button>
       </div>
     </div>
   </div>;
