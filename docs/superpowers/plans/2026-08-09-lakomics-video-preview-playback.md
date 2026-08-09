@@ -832,7 +832,7 @@ npm.cmd run build
 git diff --check
 ```
 
-- [ ] **Step 5: Commit Task 9**
+- [x] **Step 5: Commit Task 9**
 
 ```powershell
 git add app/src/video/VideoPlayer.tsx app/src/video/VideoPlayer.test.tsx app/src/assets/AssetViewer.tsx app/src/assets/AssetViewer.test.tsx app/src/styles/global.css
@@ -852,7 +852,7 @@ git commit -m "feat: play videos in the asset viewer"
 - Consumes: packaged debug app, `C:\Users\namwoojun\Desktop\test`, copied WebM fixtures and user-provided/locally generated MP4/MOV/20+ minute fixtures.
 - Produces: reproducible automated and manual acceptance evidence, completed Issue #2.
 
-- [ ] **Step 1: Run complete automated verification**
+- [x] **Step 1: Run complete automated verification**
 
 ```powershell
 cd C:\chatgpt\app\src-tauri
@@ -870,7 +870,7 @@ git status --short
 
 Expected: all checks pass; only the two user shortcut files may remain untracked.
 
-- [ ] **Step 2: Verify real files without modifying sources**
+- [x] **Step 2: Verify real files without modifying sources**
 
 Use `C:\Users\namwoojun\Desktop\test` as the library only if no library is registered. Verify SHA-256 before and after for:
 
@@ -899,7 +899,7 @@ Record:
 
 Capture screenshots into `.acceptance/video-preview-playback/` and link only their paths in the acceptance document; keep binary fixtures/screenshots untracked.
 
-- [ ] **Step 3: Update docs and close the issue**
+- [x] **Step 3: Update docs and close the issue**
 
 `app/README.md` documents the fetch/verify command, dev/build/test commands, supported formats, preparation behavior and test-library fallback. The acceptance report records exact commands, FFmpeg version/configuration, fixture hashes, results and any scoped limitation.
 
@@ -910,11 +910,11 @@ cd C:\chatgpt
 gh issue close 2 --comment "구현 및 Windows 실제 영상 검증 완료. 설계, 계획, 자동 테스트와 수동 검증 증거를 저장소에 기록했습니다."
 ```
 
-- [ ] **Step 4: Final self-review and placeholder scan**
+- [x] **Step 4: Final self-review and placeholder scan**
 
 ```powershell
 cd C:\chatgpt
-rg -n "TBD|TODO|FIXME|implement later|나중에 구현|임시 구현" app/src app/src-tauri/src docs/superpowers/plans/2026-08-09-lakomics-video-preview-playback.md docs/acceptance/2026-08-09-video-preview-playback.md
+rg -n "[T]BD|[T]ODO|[F]IXME|[i]mplement later|[나]중에 구현|[임]시 구현" app/src app/src-tauri/src docs/superpowers/plans/2026-08-09-lakomics-video-preview-playback.md docs/acceptance/2026-08-09-video-preview-playback.md
 rg -n "ingestImage|ingest_image|IngestImage" app/src app/src-tauri/src
 rg -n "ffmpeg|ffprobe" app/src
 git diff --check
@@ -922,7 +922,7 @@ git diff --check
 
 Expected: no placeholder, no old public ingestion contract, and no FFmpeg invocation in frontend code.
 
-- [ ] **Step 5: Commit Task 10**
+- [x] **Step 5: Commit Task 10**
 
 ```powershell
 git add app/README.md docs/acceptance/2026-08-09-video-preview-playback.md docs/superpowers/plans/2026-08-09-lakomics-video-preview-playback.md

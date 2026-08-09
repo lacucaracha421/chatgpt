@@ -1,10 +1,17 @@
 # Lakomics
 
-Lakomics is a local-first Windows media library for JPEG, PNG, GIF, and WebP images.
+Lakomics is a local-first Windows media library for JPEG, PNG, GIF, WebP, MP4, WebM, and MOV media.
 
 ## Run and verify
 
 Node.js, npm, Rust, and Windows WebView2 are required.
+
+Fetch and verify the pinned Windows LGPL FFmpeg sidecars from the repository root:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/fetch-ffmpeg-windows.ps1
+powershell -ExecutionPolicy Bypass -File scripts/fetch-ffmpeg-windows.ps1 -VerifyOnly
+```
 
 When a test app has no library registered, use
 `C:\Users\namwoojun\Desktop\test` as the temporary library.
@@ -14,6 +21,7 @@ npm install
 npm run tauri dev
 npm test
 npm run build
+npm run tauri build -- --debug
 Set-Location src-tauri
 cargo fmt --all --check
 cargo clippy --all-targets --all-features -- -D warnings
@@ -28,13 +36,16 @@ cargo test
 - Double-click or press Enter to open the full-screen viewer. Left and Right move through the currently loaded order, and Escape closes the viewer.
 - The information panel opens on the first non-empty selection. Closing it manually keeps it closed while the selection changes; clearing the selection resets that choice. It shows one-asset metadata or a multi-selection summary and delegates classification changes to the same batch operation as the toolbar.
 - Drop files anywhere in an ordinary asset view. A concrete classification view adds that classification; All assets, Unsorted, Recent, and Favorites ingest into Unsorted. Incoming files are copied, and user source files are never moved or deleted.
-- A completed image drop reports added, exact duplicate, similar-image review, and failure counts. Exact duplicates can open the existing asset; similar images stay outside ordinary asset views until reviewed.
+- A completed media drop reports added, exact duplicate, similar-image review, and failure counts. Exact duplicates can open the existing asset; similar images stay outside ordinary asset views until reviewed. Videos use exact-byte duplicate detection and never enter image-similarity review.
+- MP4, WebM, and MOV videos are registered immediately, then prepared one at a time in the background. Lakomics creates a poster and up to 240 WebP scrub frames. Web-compatible H.264/AAC MP4/MOV and VP8/VP9/AV1 WebM files play from the managed original; incompatible media receives an H.264/AAC proxy capped at 1080p/30fps without upscaling.
+- A ready video tile starts muted playback after a 200ms hover delay. Only one tile previews at a time; moving away releases its source. The tile progress strip shows discrete scrub frames and seeks after a short stable-pointer delay.
+- Double-click or press Enter on a video to use the full viewer with play/pause, current and total time, seeking and timeline preview, mute/volume, fullscreen, and previous/next navigation. Space toggles playback unless a control owns keyboard focus.
 - The Similar image review entry compares the existing and incoming images with public metadata. Choose Keep existing, Replace with new image, or Keep both. Existing-image replacement transfers its favorite and classifications while preserving the incoming image's source and collected date.
 - Existing images are prepared for similarity checks in non-blocking batches. The status bar reports remaining work and any images whose perceptual hash could not be prepared.
 - Drag assets onto a classification to add it, or drag classifications to reorganize the tree. Dragging selected assets out of Lakomics starts a Windows copy operation with their original names; duplicate names receive a Windows-style numeric suffix.
 - The work tray reports ingestion and drag-out progress for the current app session only. It is not a persistent background-job history.
 
-Collections, browser-extension integration, video playback, comic reading, folder-recursive ingestion, and AVIF/HEIC are deferred.
+Collections, browser-extension integration, comic reading, folder-recursive ingestion, and AVIF/HEIC are deferred.
 
 ## Similar image review acceptance
 
