@@ -7,6 +7,7 @@ import { StatusBar } from "./StatusBar";
 
 afterEach(cleanup);
 const styles = readFileSync(`${(new Function("return process")() as { cwd(): string }).cwd()}/src/styles/global.css`, "utf8");
+const appRoot = (new Function("return process")() as { cwd(): string }).cwd();
 
 it("uses Korean workspace and status labels", () => {
   render(
@@ -20,6 +21,17 @@ it("uses Korean workspace and status labels", () => {
   expect(screen.getByRole("main", { name: "라이브러리 작업 공간" })).toBeInTheDocument();
   expect(screen.getByRole("contentinfo", { name: "라이브러리 상태" })).toHaveTextContent("자산을 불러오는 중입니다.");
   expect(screen.getByRole("contentinfo")).toHaveTextContent("이미지 파일을 창으로 끌어놓으세요.");
+});
+
+it("uses the Lakomics product identity", () => {
+  const index = readFileSync(`${appRoot}/index.html`, "utf8");
+  const packageJson = JSON.parse(readFileSync(`${appRoot}/package.json`, "utf8"));
+  const tauri = JSON.parse(readFileSync(`${appRoot}/src-tauri/tauri.conf.json`, "utf8"));
+
+  expect(index).toContain("<title>Lakomics</title>");
+  expect(packageJson.name).toBe("lakomics");
+  expect(tauri.productName).toBe("Lakomics");
+  expect(tauri.app.windows[0].title).toBe("Lakomics");
 });
 
 it("constrains the workspace row so the status bar remains in the desktop viewport", () => {

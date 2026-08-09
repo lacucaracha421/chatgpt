@@ -50,17 +50,19 @@
 - Modify: `app/src/layout/AppShell.test.tsx`
 - Modify: `app/src/app/App.tsx`
 - Modify: `app/src/app/App.test.tsx`
+- Modify: `app/src/assets/AssetToolbar.tsx`
+- Modify: `app/src/classification/ClassificationSidebar.tsx`
 
 **Interfaces:**
 - Consumes: existing `AppShell({ sidebar, content, status })`
-- Produces: `AppShell({ sidebar, toolbar, content, status })` with one toolbar slot and a stable four-region layout
+- Produces: a stable sidebar + toolbar + content + status layout while `AssetBrowser` keeps ownership of its stateful `AssetToolbar`
 
 - [ ] **Step 1: Write failing shell and identity tests**
 
-Add assertions that the workspace has `navigation`, `toolbar`, `main content`, and `contentinfo`, that no floating `라이브러리 안전 설정` button exists in content, and that `tauri.conf.json`/`index.html` use `Lakomics`.
+Add assertions that the workspace has sidebar navigation, `toolbar`, main asset content, and `contentinfo`, that no floating `라이브러리 안전 설정` button exists in content, and that `tauri.conf.json`/`index.html` use `Lakomics`.
 
 ```tsx
-expect(screen.getByRole("navigation", { name: "라이브러리 탐색" })).toBeVisible();
+expect(screen.getByRole("complementary", { name: "분류" })).toBeVisible();
 expect(screen.getByRole("toolbar", { name: "자산 도구" })).toBeVisible();
 expect(within(screen.getByRole("region", { name: "자산 내용" }))
   .queryByRole("button", { name: "라이브러리 안전 설정" })).not.toBeInTheDocument();
