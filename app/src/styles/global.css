@@ -131,8 +131,8 @@ input:disabled {
 
 .ui-button svg,
 .ui-menu__trigger svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
 }
 
 .ui-button--primary {
@@ -430,6 +430,18 @@ input:disabled {
   text-align: left;
 }
 
+.classification-sidebar__quick-view svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+
+.classification-sidebar__tree-row svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
 .classification-sidebar__quick-view[aria-current="page"],
 .classification-sidebar__tree-row[aria-selected="true"] {
   background: var(--color-selected);
@@ -652,8 +664,8 @@ input:disabled {
 }
 
 .asset-toolbar .ui-toggle svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
 }
 
 .asset-browser {
