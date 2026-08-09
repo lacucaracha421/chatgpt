@@ -32,6 +32,7 @@ import { pointerDragReducer, type ClassificationDropPosition, type Classificatio
 import { SafetyDialog } from "../safety/SafetyDialog";
 import { TrashBrowser } from "../safety/TrashBrowser";
 import { SimilarityReviewBrowser } from "../similarity/SimilarityReviewBrowser";
+import { useSimilarityIndex } from "../similarity/useSimilarityIndex";
 
 type AppProps = {
   gateway?: LibraryGateway;
@@ -94,6 +95,7 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
   const [nativeDragWorks, setNativeDragWorks] = useState<IngestionWork[]>([]);
   const [requestedAsset, setRequestedAsset] = useState<AssetSummary | null>(null);
   const [reviewCount, setReviewCount] = useState(0);
+  const similarityIndex = useSimilarityIndex(gateway.indexMissingSimilarityHashes);
   const appendMessage = useCallback((next: string) => {
     setMessage((current) => current ? `${current} ${next}` : next);
   }, []);
@@ -345,7 +347,7 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
               </section>
             </div>
           }
-          status={<StatusBar status={browserStatus} progress={dropState.progress} dropEnabled={dropEnabled} />}
+          status={<StatusBar status={browserStatus} progress={dropState.progress} dropEnabled={dropEnabled} similarityIndex={similarityIndex} />}
         />
         <WorkTray
           works={[...dropState.works, ...nativeDragWorks]}

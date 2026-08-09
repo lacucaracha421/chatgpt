@@ -28,10 +28,40 @@ cargo test
 - Double-click or press Enter to open the full-screen viewer. Left and Right move through the currently loaded order, and Escape closes the viewer.
 - The information panel opens on the first non-empty selection. Closing it manually keeps it closed while the selection changes; clearing the selection resets that choice. It shows one-asset metadata or a multi-selection summary and delegates classification changes to the same batch operation as the toolbar.
 - Drop files anywhere in an ordinary asset view. A concrete classification view adds that classification; All assets, Unsorted, Recent, and Favorites ingest into Unsorted. Incoming files are copied, and user source files are never moved or deleted.
+- A completed image drop reports added, exact duplicate, similar-image review, and failure counts. Exact duplicates can open the existing asset; similar images stay outside ordinary asset views until reviewed.
+- The Similar image review entry compares the existing and incoming images with public metadata. Choose Keep existing, Replace with new image, or Keep both. Existing-image replacement transfers its favorite and classifications while preserving the incoming image's source and collected date.
+- Existing images are prepared for similarity checks in non-blocking batches. The status bar reports remaining work and any images whose perceptual hash could not be prepared.
 - Drag assets onto a classification to add it, or drag classifications to reorganize the tree. Dragging selected assets out of Lakomics starts a Windows copy operation with their original names; duplicate names receive a Windows-style numeric suffix.
 - The work tray reports ingestion and drag-out progress for the current app session only. It is not a persistent background-job history.
 
-Collections, similar-image review, browser-extension integration, video playback, comic reading, folder-recursive ingestion, and AVIF/HEIC are deferred.
+Collections, browser-extension integration, video playback, comic reading, folder-recursive ingestion, and AVIF/HEIC are deferred.
+
+## Similar image review acceptance
+
+Verified on 2026-08-09 with the temporary library at
+`C:\Users\namwoojun\Desktop\test`:
+
+```powershell
+cd C:\chatgpt\.worktrees\daily-use-ui\app
+npm.cmd run check
+cd src-tauri
+cargo fmt --all --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test
+cargo test candidate_search_scans_fifty_thousand_hashes --release -- --ignored --nocapture
+cd ..
+npm.cmd run tauri build -- --debug --no-bundle
+```
+
+- The four-file ingestion fixture produced two added images, one exact duplicate, one review-pending image, and no failures. The drop orchestration and result actions are covered by frontend integration tests; the same files were exercised through the real Windows library and review UI.
+- All 189 frontend tests passed, the TypeScript/Vite production build completed, and the Rust suite passed 88 unit tests, 12 integration tests, and one compile-fail doctest (with the dedicated performance test ignored in the ordinary run).
+- The sidebar queue count, 960×650 single-column layout, maximized two-column layout, all three decisions, and unresolved-review restart persistence were exercised in the Windows app.
+- Keep existing removed only the managed candidate. Replace moved the existing asset to Trash and transferred its favorite and classification while retaining the candidate source and collected date. Keep both left both assets normal.
+- Every external acceptance source remained present after ingestion and all three decisions.
+- The 50,000-row candidate scan completed in 40.9844 ms in the release measurement.
+- `.acceptance\similarity-result.png` records the four result counters and actions.
+- `.acceptance\similarity-review-normal.png` records the maximized side-by-side comparison.
+- `.acceptance\similarity-review-narrow.png` records the 960×650 stacked comparison without horizontal clipping.
 
 ## Eagle compact UI acceptance
 

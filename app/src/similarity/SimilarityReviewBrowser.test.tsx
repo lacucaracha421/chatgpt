@@ -41,6 +41,20 @@ it("keeps the current pair and disables decisions while a decision is pending", 
   expect(screen.getByText("candidate-review-1.png")).toBeInTheDocument();
 });
 
+it("hides the position counter after the last review is resolved", async () => {
+  const gateway = reviewGateway();
+  vi.mocked(gateway.listSimilarityReviews)
+    .mockResolvedValueOnce(reviewPage([review("review-1")], 1))
+    .mockResolvedValueOnce(reviewPage([], 0));
+  render(<SimilarityReviewBrowser gateway={gateway} onCountChange={vi.fn()} onClose={vi.fn()} />);
+  await screen.findByText("candidate-review-1.png");
+
+  await userEvent.click(screen.getByRole("button", { name: "기존 이미지 유지" }));
+
+  expect(await screen.findByRole("heading", { name: "검토할 유사 이미지가 없습니다" })).toBeInTheDocument();
+  expect(screen.queryByText(/\d+ \/ \d+/)).not.toBeInTheDocument();
+});
+
 it("closes with Escape without deciding and shows an empty queue", async () => {
   const gateway = reviewGateway();
   vi.mocked(gateway.listSimilarityReviews).mockResolvedValue(reviewPage([], 0));

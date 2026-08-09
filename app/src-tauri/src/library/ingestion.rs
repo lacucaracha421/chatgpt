@@ -108,7 +108,6 @@ impl Library {
             perceptual_hash,
             format,
             request.classification_id.as_deref(),
-            request.source_url,
             &registration,
         )?;
 
@@ -155,7 +154,6 @@ impl Library {
         perceptual_hash: u64,
         format: ImageFormat,
         classification_id: Option<&str>,
-        source_url: Option<String>,
         registration: &Registration,
     ) -> Result<(), LibraryError> {
         let mut connection = self.connection()?;
@@ -183,7 +181,7 @@ impl Library {
                 asset.byte_size as i64,
                 asset.width as i64,
                 asset.height as i64,
-                source_url,
+                asset.source_url.as_deref(),
                 asset.collected_at,
                 i64::from(asset.favorite),
                 status,

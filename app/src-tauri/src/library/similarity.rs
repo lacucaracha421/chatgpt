@@ -566,8 +566,11 @@ fn resolve_review(
 }
 
 #[cfg(test)]
+type AfterReviewResolvingHook = Box<dyn FnOnce() -> Result<(), LibraryError>>;
+
+#[cfg(test)]
 thread_local! {
-    static AFTER_REVIEW_RESOLVING_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce() -> Result<(), LibraryError>>>> =
+    static AFTER_REVIEW_RESOLVING_HOOK: std::cell::RefCell<Option<AfterReviewResolvingHook>> =
         const { std::cell::RefCell::new(None) };
 }
 

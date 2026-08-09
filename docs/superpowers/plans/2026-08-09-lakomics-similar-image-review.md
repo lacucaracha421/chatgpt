@@ -64,7 +64,7 @@
 - Consumes: schema v2 `assets`, `asset_classifications`, backup snapshot helpers
 - Produces: `SCHEMA_VERSION = 3`, `perceptual_hash`, `perceptual_hash_error`, `similarity_reviews`, Rust review request/response types
 
-- [ ] **Step 1: Write RED migration tests**
+- [x] **Step 1: Write RED migration tests**
 
 Add integration tests that open a real v2 database, assert a pre-migration backup is created, and inspect the migrated schema through SQL behavior rather than source text.
 
@@ -94,7 +94,7 @@ Add a private `MigrationFixture { _temp: TempDir, root: PathBuf }` plus `version
 
 Add model serialization tests proving review payloads expose public asset information but no path or hash.
 
-- [ ] **Step 2: Run RED tests**
+- [x] **Step 2: Run RED tests**
 
 Run:
 
@@ -106,7 +106,7 @@ cargo test similarity_review_serialization_omits_internal_hashes_and_paths
 
 Expected: FAIL because schema version 3, columns, table and models do not exist.
 
-- [ ] **Step 3: Add migration and exact Rust types**
+- [x] **Step 3: Add migration and exact Rust types**
 
 Create `0003_similarity_review.sql` with the following schema behavior:
 
@@ -209,7 +209,7 @@ SimilarityReviewNotFound,
 SimilarityReviewConflict,
 ```
 
-- [ ] **Step 4: Run GREEN migration tests**
+- [x] **Step 4: Run GREEN migration tests**
 
 Run:
 
@@ -221,7 +221,7 @@ cargo test open_creates_the_self_contained_library_layout_without_a_trash_direct
 
 Expected: PASS; fresh databases and v1/v2 databases end at version 3 with one verified pre-migration backup for upgrades.
 
-- [ ] **Step 5: Commit Task 1**
+- [x] **Step 5: Commit Task 1**
 
 ```powershell
 git add app/src-tauri/migrations/0003_similarity_review.sql app/src-tauri/src/library/db.rs app/src-tauri/src/library/error.rs app/src-tauri/src/library/models.rs app/src-tauri/tests/foundation_flow.rs
@@ -240,7 +240,7 @@ git commit -m "feat: add persistent similarity review schema"
 - Consumes: `assets.perceptual_hash`, managed asset path resolver, existing `image` crate
 - Produces: `Library::index_missing_similarity_hashes()`, internal `perceptual_hash`, `find_similar_asset`
 
-- [ ] **Step 1: Write RED hash behavior tests**
+- [x] **Step 1: Write RED hash behavior tests**
 
 Use real generated images. Derive expected relationships by fixture construction, not by calling the hash helper in assertions.
 
@@ -296,7 +296,7 @@ fn jpeg_variant(source: &DynamicImage, width: u32, height: u32, quality: u8) -> 
 
 `library_with_hashes` is a private test helper that creates a real temporary `Library` and inserts the literal `(id, hash, collected_at)` rows supplied by the test. It must not call `find_similar_asset` or compute expected distances.
 
-- [ ] **Step 2: Run RED hash tests**
+- [x] **Step 2: Run RED hash tests**
 
 ```powershell
 cd app/src-tauri
@@ -305,7 +305,7 @@ cargo test similarity::tests --lib
 
 Expected: FAIL because `similarity` module and methods are missing.
 
-- [ ] **Step 3: Implement the minimum hash Module**
+- [x] **Step 3: Implement the minimum hash Module**
 
 Use no dependency beyond `image`:
 
@@ -356,7 +356,7 @@ Store hashes with `u64::to_be_bytes()` and reject BLOBs whose length is not 8. `
 
 `index_missing_similarity_hashes()` selects at most 50 `normal` assets with both hash and error null, resolves and decodes managed originals inside Rust, and writes either the 8-byte hash or one of `media_not_found`, `unsafe_media_path`, `read_media_failed`, or `unsupported_image`. A database failure returns immediately instead of being stored as a per-asset media error. `processed` is the number attempted in this call, `remaining` is the current count with both columns null, and `failed` is the cumulative count with `perceptual_hash_error IS NOT NULL`; the 51-row test therefore observes `{ processed: 50, remaining: 1, failed: 1 }` then `{ processed: 1, remaining: 0, failed: 1 }`.
 
-- [ ] **Step 4: Verify GREEN and 50k search boundary**
+- [x] **Step 4: Verify GREEN and 50k search boundary**
 
 ```powershell
 cargo test similarity::tests --lib
@@ -365,7 +365,7 @@ cargo test candidate_search_scans_fifty_thousand_hashes --release -- --ignored -
 
 Expected: behavior tests PASS; the `#[test] #[ignore]` release measurement prints and asserts a duration below one second for one synthetic 50,000-row search.
 
-- [ ] **Step 5: Commit Task 2**
+- [x] **Step 5: Commit Task 2**
 
 ```powershell
 git add app/src-tauri/src/library/similarity.rs app/src-tauri/src/library/mod.rs
@@ -385,7 +385,7 @@ git commit -m "feat: index perceptual hashes for similar images"
 - Consumes: `perceptual_hash`, `find_similar_asset`, existing exact duplicate and pending-file safety flow
 - Produces: `IngestOutcome::ReviewPending`, atomic `review` asset + `similarity_reviews` row
 
-- [ ] **Step 1: Write RED ingestion tests**
+- [x] **Step 1: Write RED ingestion tests**
 
 ```rust
 #[test]
@@ -440,7 +440,7 @@ fn vertical_stripes(width: u32, height: u32) -> DynamicImage {
 }
 ```
 
-- [ ] **Step 2: Run RED ingestion tests**
+- [x] **Step 2: Run RED ingestion tests**
 
 ```powershell
 cargo test similar_image_becomes_review_pending_without_entering_normal_queries
@@ -449,7 +449,7 @@ cargo test exact_duplicate_wins_before_similarity_and_does_not_create_review
 
 Expected: FAIL because ingestion does not calculate or persist perceptual hashes and the review listing method is absent.
 
-- [ ] **Step 3: Integrate similarity after exact duplicate detection**
+- [x] **Step 3: Integrate similarity after exact duplicate detection**
 
 Preserve this order in `ingest_image`:
 
@@ -465,7 +465,7 @@ let similar = self.find_similar_asset(perceptual_hash)?;
 
 Install the managed original and thumbnail with the existing `PendingFiles` guard. Replace the normal-only registration helper with one internal function that accepts a private `Registration::Normal` or `Registration::Review { existing_asset_id, distance, review_id }`; it inserts the asset, requested classification, perceptual hash, and optional review row in one transaction. Only call `pending.commit()` after that transaction succeeds.
 
-- [ ] **Step 4: Run GREEN ingestion suite**
+- [x] **Step 4: Run GREEN ingestion suite**
 
 ```powershell
 cargo test ingestion::tests --lib
@@ -474,7 +474,7 @@ cargo test --test foundation_flow
 
 Expected: PASS including exact duplicate rollback, source preservation, classification validation and new review behavior.
 
-- [ ] **Step 5: Commit Task 3**
+- [x] **Step 5: Commit Task 3**
 
 ```powershell
 git add app/src-tauri/src/library/ingestion.rs app/src-tauri/src/library/similarity.rs
@@ -494,7 +494,7 @@ git commit -m "feat: queue similar ingestions for review"
 - Consumes: open `similarity_reviews`, asset classifications, favorite, trash retention policy, safe managed-file deletion
 - Produces: `get_asset`, `list_similarity_reviews`, `decide_similarity_review`, startup cleanup for `resolving`
 
-- [ ] **Step 1: Write RED review listing and decision tests**
+- [x] **Step 1: Write RED review listing and decision tests**
 
 Use real Library state and files. Each test names one broken transition.
 
@@ -546,7 +546,7 @@ Add separate tests for `keep_existing` leaving the old asset unchanged, `keep_bo
 
 `review_fixture()` creates two real image files, ingests the first as a normal asset, ingests a resized/re-encoded copy as the review candidate, creates the old and requested classifications through public Library methods, and obtains the open review ID from `IngestOutcome::ReviewPending`. Its test-only SQL query helpers are limited to `status(id)`, `asset(id)`, `classification_ids(id)`, and `source_url(id)`. `review_fixture_with_cleanup_hook()` uses the existing ingestion/trash hook pattern under `#[cfg(test)]` to stop only after the review reaches `resolving`; no cleanup-only method is added to production `Library`.
 
-- [ ] **Step 2: Run RED decision tests**
+- [x] **Step 2: Run RED decision tests**
 
 ```powershell
 cargo test similarity::tests::review --lib
@@ -554,13 +554,13 @@ cargo test similarity::tests::review --lib
 
 Expected: FAIL because list and decision methods do not exist.
 
-- [ ] **Step 3: Implement listing with public-only review assets**
+- [x] **Step 3: Implement listing with public-only review assets**
 
 Validate page limits with the existing `1..=200` rule. Select open reviews by `(created_at, id)`, load each asset and its classifications inside Rust, derive format from `media_kind` and managed extension, and return no path/hash columns. Encode the cursor as `{ created_at, id }` JSON in `AssetCursor.token`.
 
 Add `Library::get_asset(asset_id)` in the same Module. It returns the public summary for `normal` only and never serializes managed paths. Exact-duplicate UI uses it for normal assets; the review screen receives review candidates only through the review page Interface.
 
-- [ ] **Step 4: Implement the three decisions**
+- [x] **Step 4: Implement the three decisions**
 
 Acquire the existing `trash_lock` before loading a review and hold it through the decision's database and file work; this serializes decisions with purge/restore without adding another lock. Then use one decision path:
 
@@ -585,7 +585,7 @@ For keep both, set candidate normal and mark the review resolved in one transact
 
 Before branching, handle prior state exactly: a resolved row with the same decision returns `SimilarityDecisionOutcome` without another mutation; a resolving `keep_existing` row resumes cleanup; a row carrying another decision returns `LibraryError::SimilarityReviewConflict`; a missing review ID returns `LibraryError::SimilarityReviewNotFound`.
 
-- [ ] **Step 5: Run GREEN decision and trash regression tests**
+- [x] **Step 5: Run GREEN decision and trash regression tests**
 
 ```powershell
 cargo test similarity::tests --lib
@@ -594,7 +594,7 @@ cargo test trash::tests --lib
 
 Expected: PASS; existing trash purge/restore behavior remains unchanged.
 
-- [ ] **Step 6: Commit Task 4**
+- [x] **Step 6: Commit Task 4**
 
 ```powershell
 git add app/src-tauri/src/library/similarity.rs app/src-tauri/src/library/trash.rs app/src-tauri/src/library/mod.rs
@@ -618,7 +618,7 @@ git commit -m "feat: resolve similar image reviews safely"
 - Consumes: Task 4 Library methods and models
 - Produces: four Tauri commands and matching `LibraryGateway` methods; review asset media URLs
 
-- [ ] **Step 1: Write RED gateway contract tests**
+- [x] **Step 1: Write RED gateway contract tests**
 
 Create `client.test.ts`, mock only `@tauri-apps/api/core`'s `invoke` export with `vi.fn()`, import `libraryGateway` after that mock, clear the mock before each test, and assert these exact command names and camelCase payloads:
 
@@ -638,7 +638,7 @@ expect(invoke).toHaveBeenNthCalledWith(4, "get_asset", { assetId: "asset-1" });
 
 Add a Rust media protocol test proving a review candidate thumbnail/asset is readable while a trash asset remains unavailable.
 
-- [ ] **Step 2: Run RED Interface tests**
+- [x] **Step 2: Run RED Interface tests**
 
 ```powershell
 cd app
@@ -649,7 +649,7 @@ cargo test review_media_is_available_without_exposing_trash
 
 Expected: FAIL because the commands, gateway methods and review media access do not exist.
 
-- [ ] **Step 3: Add commands and exact TypeScript types**
+- [x] **Step 3: Add commands and exact TypeScript types**
 
 Register blocking Rust work with `spawn_blocking` for indexing and decisions. Listing and `get_asset` use synchronous commands under the existing database lock. Add these exact command shapes:
 
@@ -720,11 +720,11 @@ export type SimilarityDecisionOutcome = { status: "resolved"; nextReviewId: stri
 
 Extend `IngestOutcome` with `{ status: "review_pending"; reviewId: string }` and `LibraryGateway` with the four methods used in the RED test.
 
-- [ ] **Step 4: Allow media for normal or review only**
+- [x] **Step 4: Allow media for normal or review only**
 
 Change the internal media lookup predicate to `status IN ('normal', 'review')`. Keep public asset/trash listing rules unchanged. Test both asset and thumbnail variants.
 
-- [ ] **Step 5: Run GREEN Interface tests and build**
+- [x] **Step 5: Run GREEN Interface tests and build**
 
 ```powershell
 cd app
@@ -736,7 +736,7 @@ cargo test review_media_is_available_without_exposing_trash
 
 Expected: all listed tests and TypeScript/Vite build PASS.
 
-- [ ] **Step 6: Commit Task 5**
+- [x] **Step 6: Commit Task 5**
 
 ```powershell
 git add app/src-tauri/src/commands.rs app/src-tauri/src/lib.rs app/src-tauri/src/media_protocol.rs app/src/library/types.ts app/src/library/client.ts app/src/library/client.test.ts app/src/app/App.test.tsx
@@ -761,7 +761,7 @@ git commit -m "feat: expose similar review commands to the UI"
 - Consumes: three `IngestOutcome` statuses plus error, `getAsset`
 - Produces: per-batch counters, completed result card, dismiss/retry/open-review/open-existing callbacks
 
-- [ ] **Step 1: Write RED aggregation tests**
+- [x] **Step 1: Write RED aggregation tests**
 
 ```ts
 it("keeps a completed batch with added, duplicate, review, and failure counts", async () => {
@@ -786,7 +786,7 @@ it("keeps a completed batch with added, duplicate, review, and failure counts", 
 
 Add WorkTray behavior tests for a completed successful card remaining visible, dismiss removing it, review button callback, duplicate existing button callback, and failures retrying only failed paths. Assert visible filenames, not source paths.
 
-- [ ] **Step 2: Run RED result tests**
+- [x] **Step 2: Run RED result tests**
 
 ```powershell
 npm.cmd test -- src/ingestion/useFileDrop.test.ts src/ingestion/WorkTray.test.tsx
@@ -794,7 +794,7 @@ npm.cmd test -- src/ingestion/useFileDrop.test.ts src/ingestion/WorkTray.test.ts
 
 Expected: FAIL because completed work is hidden and result counters/actions do not exist.
 
-- [ ] **Step 3: Extend the work state minimally**
+- [x] **Step 3: Extend the work state minimally**
 
 Use this shape; keep failed source paths only in the hook's private retry context:
 
@@ -829,7 +829,7 @@ type UseFileDropOptions = {
 
 Call `onIngested` after each successful backend result so `App` can refresh normal assets or the review count without showing a Toast. A per-file rejection updates only `failures`; only subscription setup/listener failures call `onFatalError` and reach the shared Toast.
 
-- [ ] **Step 4: Render shared result cards and existing asset opening**
+- [x] **Step 4: Render shared result cards and existing asset opening**
 
 `WorkTray` accepts:
 
@@ -845,7 +845,7 @@ type WorkTrayProps = {
 
 Completed ingestion cards remain until dismissed; completed drag-out rows remain hidden. `openExisting` calls `gateway.getAsset`, switches to All Assets, and passes the returned `AssetSummary` to `AssetBrowser` as `requestedAsset`. `AssetBrowser` opens that asset in the existing viewer and clears the request on close without requiring it to be in the loaded page.
 
-- [ ] **Step 5: Run GREEN result and viewer tests**
+- [x] **Step 5: Run GREEN result and viewer tests**
 
 ```powershell
 npm.cmd test -- src/ingestion/useFileDrop.test.ts src/ingestion/WorkTray.test.tsx src/assets/AssetBrowser.test.tsx src/app/App.test.tsx
@@ -854,7 +854,7 @@ npm.cmd run build
 
 Expected: PASS; completed ingestion result remains, exact duplicate opens the real viewer, and drag-out behavior stays unchanged.
 
-- [ ] **Step 6: Commit Task 6**
+- [x] **Step 6: Commit Task 6**
 
 ```powershell
 git add app/src/ingestion app/src/assets/AssetBrowser.tsx app/src/assets/AssetBrowser.test.tsx app/src/app/App.tsx app/src/app/App.test.tsx
@@ -882,7 +882,7 @@ git commit -m "feat: summarize completed image ingestions"
 - Consumes: `listSimilarityReviews`, `decideSimilarityReview`, `assetUrl`, existing `Button`, `EmptyState`, `Toast`
 - Produces: `AssetView { kind: "similarity_review" }`, sidebar count, accessible comparison workflow
 
-- [ ] **Step 1: Write RED comparison behavior tests**
+- [x] **Step 1: Write RED comparison behavior tests**
 
 ```tsx
 it("shows both public assets and advances after a successful decision", async () => {
@@ -908,7 +908,7 @@ it("shows both public assets and advances after a successful decision", async ()
 
 Add tests for failure retaining the current pair, buttons disabled while pending, Escape calling `onClose` without a decision, last item empty state, and 960px layout class. Sidebar tests assert a stable `검토 대기` button and a badge with accessible name `검토 대기 12개`.
 
-- [ ] **Step 2: Run RED review UI tests**
+- [x] **Step 2: Run RED review UI tests**
 
 ```powershell
 npm.cmd test -- src/similarity/SimilarityReviewBrowser.test.tsx src/classification/ClassificationSidebar.test.tsx src/app/App.test.tsx
@@ -916,7 +916,7 @@ npm.cmd test -- src/similarity/SimilarityReviewBrowser.test.tsx src/classificati
 
 Expected: FAIL because the view, component and sidebar entry do not exist.
 
-- [ ] **Step 3: Build the comparison screen from existing UI primitives**
+- [x] **Step 3: Build the comparison screen from existing UI primitives**
 
 `SimilarityReviewBrowser` loads one open item with `limit: 1`, remembers the initial total for `현재 / 전체`, and reloads after decisions. Render the two sides with one small internal function, not two components with duplicated markup:
 
@@ -963,11 +963,11 @@ export function localDate(value: string): string {
 }
 ```
 
-- [ ] **Step 4: Wire navigation, count, and drop rules**
+- [x] **Step 4: Wire navigation, count, and drop rules**
 
 Add `{ kind: "similarity_review" }` to `AssetView`. `ClassificationSidebar` receives `reviewCount`. `App` fetches count with `listSimilarityReviews({ after: null, limit: 1 })` on library open and after review-pending ingestion/decisions. In the content switch, render Trash, SimilarityReviewBrowser, or AssetBrowser. Disable external drop while the review view is active.
 
-- [ ] **Step 5: Add token-based responsive styles**
+- [x] **Step 5: Add token-based responsive styles**
 
 Use a two-column grid above 1100px and one column below it:
 
@@ -985,7 +985,7 @@ Use a two-column grid above 1100px and one column below it:
 
 Reuse `--toolbar-height`, `--color-surface-elevated`, `--color-border`, `--radius-sm`, `--shadow-floating` and existing button variants. Do not add a second dialog/menu implementation.
 
-- [ ] **Step 6: Run GREEN UI tests and build**
+- [x] **Step 6: Run GREEN UI tests and build**
 
 ```powershell
 npm.cmd test -- src/similarity/SimilarityReviewBrowser.test.tsx src/classification/ClassificationSidebar.test.tsx src/app/App.test.tsx
@@ -994,7 +994,7 @@ npm.cmd run build
 
 Expected: PASS with keyboard names, focus behavior and responsive class contract.
 
-- [ ] **Step 7: Commit Task 7**
+- [x] **Step 7: Commit Task 7**
 
 ```powershell
 git add app/src/similarity/SimilarityReviewBrowser.tsx app/src/similarity/SimilarityReviewBrowser.test.tsx app/src/assets/assetMetadata.ts app/src/assets/AssetInspector.tsx app/src/classification app/src/library/types.ts app/src/app/App.tsx app/src/app/App.test.tsx app/src/styles
@@ -1020,7 +1020,7 @@ git commit -m "feat: review similar images side by side"
 - Consumes: `indexMissingSimilarityHashes`, Task 7 screen, temporary test library
 - Produces: non-blocking index loop, visible progress/failure status, automated and native evidence
 
-- [ ] **Step 1: Write RED indexing hook tests**
+- [x] **Step 1: Write RED indexing hook tests**
 
 ```ts
 it("runs one library-owned batch at a time until no hashes remain", async () => {
@@ -1039,7 +1039,7 @@ it("runs one library-owned batch at a time until no hashes remain", async () => 
 
 Add unmount cancellation, one-call-at-a-time, and failure-stops-with-public-message tests. Add StatusBar rendering tests for `유사 이미지 준비 중: 51개 남음` and `해시 생성 실패 2개`.
 
-- [ ] **Step 2: Run RED indexing tests**
+- [x] **Step 2: Run RED indexing tests**
 
 ```powershell
 npm.cmd test -- src/similarity/useSimilarityIndex.test.ts src/layout/AppShell.test.tsx src/app/App.test.tsx
@@ -1047,13 +1047,13 @@ npm.cmd test -- src/similarity/useSimilarityIndex.test.ts src/layout/AppShell.te
 
 Expected: FAIL because the hook and status props do not exist.
 
-- [ ] **Step 3: Implement a minimal cancellable loop**
+- [x] **Step 3: Implement a minimal cancellable loop**
 
 The hook calls the zero-argument library method, schedules the next batch with `window.setTimeout(run, 0)` only when `remaining > 0`, and clears the timer/unmount flag on cleanup. Do not use Web Workers, a job library or persisted frontend state; the database null/error columns already provide restart state.
 
 Pass `{ running, remaining, failed }` to `StatusBar`. Ingestion remains enabled while indexing and the status text explains that only prepared existing assets participate in similarity checks.
 
-- [ ] **Step 4: Run complete automated verification**
+- [x] **Step 4: Run complete automated verification**
 
 ```powershell
 cd C:\chatgpt\.worktrees\daily-use-ui\app
@@ -1087,15 +1087,17 @@ The interrupted `resolving` cleanup path is covered by Task 4's automated reopen
 
 Save the three named screenshots without overwriting previous acceptance files.
 
-- [ ] **Step 6: Update README and verification evidence**
+Evidence note (2026-08-09): the real Windows app verified queue count, both responsive layouts, all three decisions, source preservation, and unresolved-review restart persistence. The four outcomes, continuous multi-file processing, and exact-duplicate open action passed frontend integration tests and were reproduced with the same files through the real `Library` layer. Step 5 remains unchecked because the available Windows controller cannot drag across two separate application windows.
+
+- [x] **Step 6: Update README and verification evidence**
 
 Document the four result counters, review entry, three decisions, temporary library rule, automated counts, performance result, screenshot names and external-source preservation. Mark this plan's checkboxes only with observed evidence.
 
-- [ ] **Step 7: Present actual screenshots for visual approval**
+- [x] **Step 7: Present actual screenshots for visual approval**
 
 Show the result summary, normal comparison and narrow comparison. UI completion requires explicit user approval; requested visual changes rerun affected frontend tests and the real screenshot check.
 
-- [ ] **Step 8: Commit Task 8 after approval**
+- [x] **Step 8: Commit Task 8 after approval**
 
 ```powershell
 git add app/src/similarity/useSimilarityIndex.ts app/src/similarity/useSimilarityIndex.test.ts app/src/layout/StatusBar.tsx app/src/layout/AppShell.test.tsx app/src/app/App.tsx app/src/app/App.test.tsx app/README.md docs/superpowers/plans/2026-08-09-lakomics-similar-image-review.md

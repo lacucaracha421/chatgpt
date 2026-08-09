@@ -47,6 +47,24 @@ it("constrains the workspace row so the status bar remains in the desktop viewpo
   expect(declarations(".classification-sidebar")).toContain("overflow-y: auto;");
 });
 
+it("shows similarity indexing progress and failures", () => {
+  const { rerender } = render(<StatusBar
+    status={{ loadedCount: 3, selectedAsset: null, loading: false }}
+    progress={null}
+    dropEnabled
+    similarityIndex={{ running: true, remaining: 51, failed: 0 }}
+  />);
+  expect(screen.getByRole("contentinfo")).toHaveTextContent("유사 이미지 준비 중 · 51개 남음");
+
+  rerender(<StatusBar
+    status={{ loadedCount: 3, selectedAsset: null, loading: false }}
+    progress={null}
+    dropEnabled
+    similarityIndex={{ running: false, remaining: 0, failed: 2 }}
+  />);
+  expect(screen.getByRole("contentinfo")).toHaveTextContent("해시 생성 실패 2개");
+});
+
 function declarations(selector: string): string {
   const start = styles.indexOf(`\n${selector} {`);
   const open = styles.indexOf("{", start);
