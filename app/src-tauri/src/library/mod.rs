@@ -171,7 +171,9 @@ impl Library {
         let relative_path: Option<String> = self
             .connection()?
             .query_row(
-                &format!("SELECT {column} FROM assets WHERE id = ?1 AND status = 'normal'"),
+                &format!(
+                    "SELECT {column} FROM assets WHERE id = ?1 AND status IN ('normal', 'review')"
+                ),
                 [asset_id],
                 |row| row.get(0),
             )

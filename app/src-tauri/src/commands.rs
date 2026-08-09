@@ -7,8 +7,10 @@ use tauri::State;
 use crate::library::{
     error::LibraryError,
     models::{
-        AssetClassificationPatch, AssetPage, AssetQuery, ClassificationEntry, CreateClassification,
-        IngestImageRequest, IngestOutcome, LibrarySummary, MetadataBackup, PurgeSummary, TrashPage,
+        AssetClassificationPatch, AssetCursor, AssetPage, AssetQuery, AssetSummary,
+        ClassificationEntry, CreateClassification, IngestImageRequest, IngestOutcome,
+        LibrarySummary, MetadataBackup, PurgeSummary, SimilarityDecisionOutcome,
+        SimilarityDecisionRequest, SimilarityIndexProgress, SimilarityReviewPage, TrashPage,
         TrashPolicy,
     },
     Library,
@@ -30,6 +32,9 @@ impl From<LibraryError> for CommandError {
     fn from(error: LibraryError) -> Self {
         let message = match &error {
             LibraryError::Backup { .. } => "SQLite 백업 작업에 실패했습니다.".into(),
+            LibraryError::WriteAsset { .. } => {
+                "이미지 파일을 정리하지 못했습니다. 다시 시도해 주세요.".into()
+            }
             _ => error.to_string(),
         };
         let code = match error {
@@ -220,6 +225,50 @@ pub fn list_assets(
 }
 
 #[tauri::command]
+pub async fn index_missing_similarity_hashes(
+    state: State<'_, AppState>,
+) -> Result<SimilarityIndexProgress, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.index_missing_similarity_hashes())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn list_similarity_reviews(
+    after: Option<AssetCursor>,
+    limit: u32,
+    state: State<'_, AppState>,
+) -> Result<SimilarityReviewPage, CommandError> {
+    current_required(state)?
+        .list_similarity_reviews(after, limit)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn decide_similarity_review(
+    request: SimilarityDecisionRequest,
+    state: State<'_, AppState>,
+) -> Result<SimilarityDecisionOutcome, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.decide_similarity_review(request))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn get_asset(
+    asset_id: String,
+    state: State<'_, AppState>,
+) -> Result<AssetSummary, CommandError> {
+    current_required(state)?
+        .get_asset(&asset_id)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub fn trash_asset(asset_id: String, state: State<'_, AppState>) -> Result<(), CommandError> {
     current_required(state)?
         .trash_asset(&asset_id)
@@ -396,6 +445,13 @@ pub fn start_asset_drag(
         });
     }
     Ok(())
+}
+
+fn background_task_error() -> CommandError {
+    CommandError {
+        code: "background_task_failed",
+        message: "백그라운드 작업을 완료하지 못했습니다. 다시 시도해 주세요.".into(),
+    }
 }
 
 fn current(state: State<'_, AppState>) -> Option<Library> {

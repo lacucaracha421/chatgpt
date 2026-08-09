@@ -37,6 +37,41 @@ export type AssetCursor = {
   token: string;
 };
 
+export type SimilarityDecision =
+  | "keep_existing"
+  | "replace_existing"
+  | "keep_both";
+
+export type SimilarityReviewAsset = {
+  asset: AssetSummary;
+  format: string;
+  classifications: ClassificationEntry[];
+};
+
+export type SimilarityReviewSummary = {
+  id: string;
+  distance: number;
+  existing: SimilarityReviewAsset;
+  candidate: SimilarityReviewAsset;
+};
+
+export type SimilarityReviewPage = {
+  items: SimilarityReviewSummary[];
+  nextCursor: AssetCursor | null;
+  totalCount: number;
+};
+
+export type SimilarityIndexProgress = {
+  processed: number;
+  remaining: number;
+  failed: number;
+};
+
+export type SimilarityDecisionOutcome = {
+  status: "resolved";
+  nextReviewId: string | null;
+};
+
 export type AssetQuery = {
   classificationId: string | null;
   directOnly: boolean;
@@ -100,7 +135,8 @@ export type IngestImageInput = {
 
 export type IngestOutcome =
   | { status: "added"; asset: AssetSummary }
-  | { status: "exact_duplicate"; existingAssetId: string };
+  | { status: "exact_duplicate"; existingAssetId: string }
+  | { status: "review_pending"; reviewId: string };
 
 export interface LibraryGateway {
   openLibrary(path: string): Promise<LibrarySummary>;
@@ -111,6 +147,16 @@ export interface LibraryGateway {
   moveClassification(id: string, parentId: string | null): Promise<void>;
   deleteClassification(id: string): Promise<void>;
   listAssets(query: AssetQuery): Promise<AssetPage>;
+  indexMissingSimilarityHashes(): Promise<SimilarityIndexProgress>;
+  listSimilarityReviews(query: {
+    after: AssetCursor | null;
+    limit: number;
+  }): Promise<SimilarityReviewPage>;
+  decideSimilarityReview(request: {
+    reviewId: string;
+    decision: SimilarityDecision;
+  }): Promise<SimilarityDecisionOutcome>;
+  getAsset(assetId: string): Promise<AssetSummary>;
   trashAsset(assetId: string): Promise<void>;
   trashAssets(assetIds: string[]): Promise<void>;
   restoreAsset(assetId: string): Promise<void>;

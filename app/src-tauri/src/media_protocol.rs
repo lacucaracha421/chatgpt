@@ -64,6 +64,8 @@ mod tests {
 
     const ASSET_ID: &str = "00000000-0000-4000-8000-000000000001";
     const MISSING_ID: &str = "00000000-0000-4000-8000-000000000002";
+    const REVIEW_ID: &str = "00000000-0000-4000-8000-000000000003";
+    const TRASH_ID: &str = "00000000-0000-4000-8000-000000000004";
 
     #[test]
     fn protocol_serves_only_id_resolved_asset_and_thumbnail_bytes_with_mime() {
@@ -147,6 +149,40 @@ mod tests {
     }
 
     #[test]
+    fn review_media_is_available_without_exposing_trash() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        for (id, status) in [(REVIEW_ID, "review"), (TRASH_ID, "trash")] {
+            let asset_path = format!("assets/{id}.png");
+            let thumbnail_path = format!("thumbnails/{id}.webp");
+            insert_asset_with_status(&library, id, &asset_path, &thumbnail_path, status);
+            std::fs::write(library.root().join(asset_path), b"asset bytes").unwrap();
+            std::fs::write(library.root().join(thumbnail_path), b"thumbnail bytes").unwrap();
+        }
+
+        for variant in ["asset", "thumbnail"] {
+            assert_eq!(
+                media_response(
+                    Some(&library),
+                    &Method::GET,
+                    &format!("/{variant}/{REVIEW_ID}"),
+                )
+                .status(),
+                StatusCode::OK
+            );
+            assert_eq!(
+                media_response(
+                    Some(&library),
+                    &Method::GET,
+                    &format!("/{variant}/{TRASH_ID}"),
+                )
+                .status(),
+                StatusCode::NOT_FOUND
+            );
+        }
+    }
+
+    #[test]
     fn resolve_media_rejects_a_canonical_path_outside_the_library_root() {
         let temp = tempfile::tempdir().unwrap();
         let library = Library::open(temp.path().join("library")).unwrap();
@@ -171,20 +207,37 @@ mod tests {
         relative_path: &str,
         thumbnail_relative_path: &str,
     ) {
+        insert_asset_with_status(
+            library,
+            id,
+            relative_path,
+            thumbnail_relative_path,
+            "normal",
+        );
+    }
+
+    fn insert_asset_with_status(
+        library: &Library,
+        id: &str,
+        relative_path: &str,
+        thumbnail_relative_path: &str,
+        status: &str,
+    ) {
         library
             .connection()
             .unwrap()
             .execute(
                 "INSERT INTO assets (
                     id, content_hash, media_kind, original_name, relative_path,
-                    thumbnail_relative_path, byte_size, width, height, collected_at
-                 ) VALUES (?1, ?2, 'image', 'image.png', ?3, ?4, 11, 4, 3, ?5)",
+                    thumbnail_relative_path, byte_size, width, height, collected_at, status
+                 ) VALUES (?1, ?2, 'image', 'image.png', ?3, ?4, 11, 4, 3, ?5, ?6)",
                 params![
                     id,
                     format!("hash-{id}"),
                     relative_path,
                     thumbnail_relative_path,
                     "2026-07-30T00:00:00Z",
+                    status,
                 ],
             )
             .unwrap();

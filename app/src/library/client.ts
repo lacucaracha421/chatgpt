@@ -3,6 +3,7 @@ import type {
   AssetPage,
   AssetClassificationPatch,
   AssetQuery,
+  AssetSummary,
   ClassificationEntry,
   CreateClassification,
   IngestImageInput,
@@ -11,6 +12,9 @@ import type {
   LibrarySummary,
   MetadataBackup,
   PurgeSummary,
+  SimilarityDecisionOutcome,
+  SimilarityIndexProgress,
+  SimilarityReviewPage,
   TrashPage,
   TrashPolicy,
 } from "./types";
@@ -29,6 +33,13 @@ export const libraryGateway: LibraryGateway = {
   deleteClassification: (id) => invoke("delete_classification", { id }),
   listAssets: (query: AssetQuery) =>
     invoke<AssetPage>("list_assets", { query }),
+  indexMissingSimilarityHashes: () =>
+    invoke<SimilarityIndexProgress>("index_missing_similarity_hashes"),
+  listSimilarityReviews: ({ after, limit }) =>
+    invoke<SimilarityReviewPage>("list_similarity_reviews", { after, limit }),
+  decideSimilarityReview: (request) =>
+    invoke<SimilarityDecisionOutcome>("decide_similarity_review", { request }),
+  getAsset: (assetId) => invoke<AssetSummary>("get_asset", { assetId }),
   trashAsset: (assetId) => invoke("trash_asset", { assetId }),
   trashAssets: (assetIds) => invoke("trash_assets", { assetIds }),
   restoreAsset: (assetId) => invoke("restore_asset", { assetId }),

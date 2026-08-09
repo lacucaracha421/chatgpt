@@ -472,6 +472,7 @@ function createGateway(page: AssetPage = { items: [], nextCursor: null }): Libra
     openLibrary: vi.fn(), currentLibrary: vi.fn(), listClassifications: vi.fn(),
     createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(),
     deleteClassification: vi.fn(), listAssets: vi.fn().mockResolvedValue(page),
+    indexMissingSimilarityHashes: vi.fn(), listSimilarityReviews: vi.fn(), decideSimilarityReview: vi.fn(), getAsset: vi.fn(),
     trashAsset: vi.fn(), trashAssets: vi.fn().mockResolvedValue(undefined), restoreAsset: vi.fn(), restoreAssets: vi.fn().mockResolvedValue(undefined), listTrash: vi.fn(), emptyTrash: vi.fn(),
     getTrashPolicy: vi.fn(), setTrashPolicy: vi.fn(),
     ensureDailyBackup: vi.fn(), listMetadataBackups: vi.fn(),

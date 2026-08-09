@@ -17,6 +17,7 @@ export const subscribeToTauriDrops: DropSubscriber = async (handler) =>
 export type FileDropResult =
   | { status: "added"; asset: AssetSummary; message: "저장했습니다" }
   | { status: "exact_duplicate"; existingAssetId: string; message: "이미 보관된 파일입니다" }
+  | { status: "review_pending"; reviewId: string; message: string }
   | { status: "error"; message: string };
 
 export type DropProgress = { current: number; total: number };
