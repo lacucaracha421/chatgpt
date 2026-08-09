@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 // @ts-ignore Vitest runs in Node, but this frontend project intentionally omits Node typings.
 import { readFileSync } from "node:fs";
 import userEvent from "@testing-library/user-event";
@@ -24,9 +24,10 @@ beforeEach(() => Object.defineProperties(HTMLDialogElement.prototype, {
 
 describe("AssetBrowser", () => {
   it.each<[string, AssetView, AssetSort, Partial<Record<string, unknown>>]>([
-    ["classification", { kind: "classification", classificationId: "tag" }, "oldest", { classificationId: "tag", directOnly: false, favoriteOnly: false, sort: "oldest" }],
-    ["favorites", { kind: "favorites" }, "favorites", { classificationId: null, directOnly: false, favoriteOnly: true, sort: "favorites" }],
-    ["recent", { kind: "recent" }, "oldest", { classificationId: null, directOnly: false, favoriteOnly: false, sort: "newest" }],
+    ["classification", { kind: "classification", classificationId: "tag" }, "oldest", { classificationId: "tag", directOnly: false, favoriteOnly: false, unclassifiedOnly: false, sort: "oldest" }],
+    ["unsorted", { kind: "unsorted" }, "newest", { classificationId: null, directOnly: false, favoriteOnly: false, unclassifiedOnly: true, sort: "newest" }],
+    ["favorites", { kind: "favorites" }, "favorites", { classificationId: null, directOnly: false, favoriteOnly: true, unclassifiedOnly: false, sort: "favorites" }],
+    ["recent", { kind: "recent" }, "oldest", { classificationId: null, directOnly: false, favoriteOnly: false, unclassifiedOnly: false, sort: "newest" }],
   ])("maps the %s view to its first-page query", async (_name, view, sort, expected) => {
     const gateway = createGateway();
 
@@ -80,6 +81,61 @@ describe("AssetBrowser", () => {
     const [first, next] = vi.mocked(gateway.listAssets).mock.calls;
     expect(first![0].randomPivot).toMatch(/^[\da-f]{32}$/);
     expect(next![0].randomPivot).toBe(first![0].randomPivot);
+  });
+
+  it("changes thumbnail density without reloading assets", async () => {
+    const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
+    const onThumbnailRowHeightChange = vi.fn();
+    render(
+      <LibraryProvider gateway={gateway}>
+        <AssetBrowser
+          view={{ kind: "classification", classificationId: null }}
+          classifications={classifications}
+          sort="newest"
+          metadataVisible={false}
+          thumbnailRowHeight={180}
+          refreshVersion={0}
+          onSortChange={vi.fn()}
+          onMetadataVisibleChange={vi.fn()}
+          onThumbnailRowHeightChange={onThumbnailRowHeightChange}
+          onStatusChange={vi.fn()}
+        />
+      </LibraryProvider>,
+    );
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledOnce());
+
+    fireEvent.change(screen.getByRole("slider", { name: "미리보기 크기" }), { target: { value: "240" } });
+
+    expect(onThumbnailRowHeightChange).toHaveBeenCalledWith(240);
+    expect(gateway.listAssets).toHaveBeenCalledOnce();
+  });
+
+  it("supports Ctrl, Shift, Ctrl+A, Escape, and roving arrow focus over loaded assets", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway({ items: [asset(0), asset(1), asset(2)], nextCursor: null });
+    renderBrowser(gateway);
+    const first = await screen.findByRole("option", { name: "asset-0.png" });
+    const second = screen.getByRole("option", { name: "asset-1.png" });
+    const third = screen.getByRole("option", { name: "asset-2.png" });
+
+    await user.click(first);
+    await user.keyboard("{Control>}");
+    await user.click(third);
+    await user.keyboard("{/Control}");
+    expect(first).toHaveAttribute("aria-selected", "true");
+    expect(third).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.click(second, { shiftKey: true });
+    expect([first, second, third].map((tile) => tile.getAttribute("aria-selected"))).toEqual(["false", "true", "true"]);
+    second.focus();
+    await user.keyboard("{Control>}a{/Control}");
+    expect([first, second, third].map((tile) => tile.getAttribute("aria-selected"))).toEqual(["true", "true", "true"]);
+    await user.keyboard("{Escape}");
+    expect([first, second, third].map((tile) => tile.getAttribute("aria-selected"))).toEqual(["false", "false", "false"]);
+
+    first.focus();
+    await user.keyboard("{ArrowRight}");
+    expect(second).toHaveFocus();
   });
 
   it("retains assets and offers a retry when the next page fails", async () => {
@@ -157,9 +213,9 @@ describe("AssetBrowser", () => {
     const status = vi.fn();
     const { rerender } = render(browserElement(gateway, { status }));
     rerender(browserElement(gateway, { sort: "oldest", status }));
-    expect(await screen.findByRole("button", { name: "New" })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "New" })).toBeInTheDocument();
     await act(async () => { resolveOld({ items: [{ ...asset(0), title: "Old" }], nextCursor: null }); await old; });
-    expect(screen.queryByRole("button", { name: "Old" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Old" })).not.toBeInTheDocument();
     expect(status).toHaveBeenLastCalledWith(expect.objectContaining({ loading: false }));
   });
 
@@ -175,7 +231,7 @@ describe("AssetBrowser", () => {
     expect(screen.queryByText("late failure")).not.toBeInTheDocument();
     expect(status).toHaveBeenLastCalledWith(expect.objectContaining({ loading: true }));
     await act(async () => { resolveNew({ items: [{ ...asset(1), title: "New" }], nextCursor: null }); await next; });
-    expect(await screen.findByRole("button", { name: "New" })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "New" })).toBeInTheDocument();
   });
 
   it("retries a failed first page", async () => {
@@ -183,7 +239,7 @@ describe("AssetBrowser", () => {
     vi.mocked(gateway.listAssets).mockRejectedValueOnce(new Error("first page failed")).mockResolvedValueOnce({ items: [{ ...asset(0), title: "Recovered" }], nextCursor: null });
     renderBrowser(gateway);
     await user.click(await screen.findByRole("button", { name: "다시 시도" }));
-    expect(await screen.findByRole("button", { name: "Recovered" })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "Recovered" })).toBeInTheDocument();
   });
 
   it("never loads an old cursor with a newly selected sort", async () => {
@@ -206,22 +262,23 @@ describe("AssetBrowser", () => {
     vi.mocked(gateway.listAssets)
       .mockResolvedValueOnce({ items: [{ ...asset(0), title: "Before" }], nextCursor: null })
       .mockResolvedValueOnce({ items: [{ ...asset(0), title: "After" }], nextCursor: null });
-    const { rerender } = renderBrowser(gateway);
-    const tile = await screen.findByRole("button", { name: "Before" });
+    const { container, rerender } = renderBrowser(gateway);
+    const tile = await screen.findByRole("option", { name: "Before" });
     await user.click(tile);
     await user.dblClick(tile);
     expect(screen.getByRole("dialog")).toBeInTheDocument();
 
     rerender(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "classification", classificationId: null }} classifications={classifications} sort="newest" metadataVisible={false} refreshVersion={1} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
 
-    expect(await screen.findByRole("button", { name: "After" })).toHaveAttribute("aria-pressed", "true");
+    await waitFor(() => expect(container.querySelector('[data-asset-id="asset-0"]')).toHaveAttribute("aria-selected", "true"));
+    expect(container.querySelector('[data-asset-id="asset-0"]')).toHaveAccessibleName("After");
     expect(screen.getByRole("dialog")).toHaveAccessibleName("After");
   });
 
   it("clears selection when the refreshed page no longer contains the asset", async () => {
     const user = userEvent.setup(); const gateway = createGateway();
     vi.mocked(gateway.listAssets).mockResolvedValueOnce({ items: [{ ...asset(0), title: "Selected" }], nextCursor: null }).mockResolvedValueOnce({ items: [], nextCursor: null });
-    const { rerender } = renderBrowser(gateway); await user.click(await screen.findByRole("button", { name: "Selected" }));
+    const { rerender } = renderBrowser(gateway); await user.click(await screen.findByRole("option", { name: "Selected" }));
     rerender(browserElement(gateway, { refreshVersion: 1 }));
     expect(await screen.findByRole("heading", { name: "자산이 없습니다" })).toBeInTheDocument();
   });
@@ -229,18 +286,62 @@ describe("AssetBrowser", () => {
   it("clears selection when the view changes", async () => {
     const user = userEvent.setup(); const gateway = createGateway();
     vi.mocked(gateway.listAssets).mockResolvedValue({ items: [{ ...asset(0), title: "Selected" }], nextCursor: null });
-    const { rerender } = renderBrowser(gateway); await user.click(await screen.findByRole("button", { name: "Selected" }));
+    const { rerender } = renderBrowser(gateway); await user.click(await screen.findByRole("option", { name: "Selected" }));
     rerender(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "favorites" }} classifications={classifications} sort="newest" metadataVisible={false} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
-    expect(await screen.findByRole("button", { name: "Selected" })).toHaveAttribute("aria-pressed", "false");
+    expect(await screen.findByRole("option", { name: "Selected" })).toHaveAttribute("aria-selected", "false");
   });
 
-  it("keeps the detail dialog open after a real Enter press", async () => {
-    const user = userEvent.setup(); const gateway = createGateway({ items: [{ ...asset(0), title: "열기" }], nextCursor: null });
+  it("opens the viewer from Enter, navigates loaded assets, and restores tile focus", async () => {
+    const user = userEvent.setup(); const gateway = createGateway({ items: [{ ...asset(0), title: "첫 자산" }, { ...asset(1), title: "둘째 자산" }], nextCursor: null });
     renderBrowser(gateway);
-    const tile = await screen.findByRole("button", { name: "열기" });
+    const tile = await screen.findByRole("option", { name: "첫 자산" });
+    expect(screen.getByRole("img", { name: "첫 자산" })).toHaveAttribute("src", "http://lakomics.localhost/thumbnail/asset-0");
     tile.focus();
     await user.keyboard("{Enter}");
-    expect(screen.getByRole("dialog", { name: "열기" })).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog", { name: "첫 자산" });
+    expect(within(dialog).getByRole("img", { name: "첫 자산" })).toHaveAttribute("src", "http://lakomics.localhost/asset/asset-0");
+    fireEvent.keyDown(dialog, { key: "ArrowRight" });
+    expect(screen.getByRole("dialog", { name: "둘째 자산" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "감상 화면 닫기" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(tile).toHaveFocus();
+  });
+
+  it("opens the inspector on the first selection and respects a manual close until selection clears", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
+    renderBrowser(gateway);
+
+    const first = await screen.findByRole("option", { name: "asset-0.png" });
+    const second = screen.getByRole("option", { name: "asset-1.png" });
+    await user.click(first);
+    expect(screen.getByRole("complementary", { name: "자산 정보" })).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "정보 닫기" }));
+    await user.click(second);
+    expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument();
+
+    second.focus();
+    await user.keyboard("{Escape}");
+    await user.click(second);
+    expect(screen.getByRole("complementary", { name: "자산 정보" })).toBeVisible();
+  });
+
+  it("applies inspector classification actions to the selection", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
+    const tag: ClassificationEntry = { id: "tag", kind: "tag", name: "태그", parentId: null };
+    render(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "classification", classificationId: null }} classifications={[tag]} sort="newest" metadataVisible={false} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
+    const first = await screen.findByRole("option", { name: "asset-0.png" });
+
+    expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument();
+    first.focus();
+    await user.keyboard("{Control>}a{/Control}");
+    expect(screen.getByText("2개 자산 선택")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "태그 추가" }));
+    await user.click(screen.getByRole("button", { name: "태그 제거" }));
+    expect(gateway.patchAssetClassifications).toHaveBeenNthCalledWith(1, { assetIds: ["asset-0", "asset-1"], addClassificationIds: ["tag"], removeClassificationIds: [] });
+    expect(gateway.patchAssetClassifications).toHaveBeenNthCalledWith(2, { assetIds: ["asset-0", "asset-1"], addClassificationIds: [], removeClassificationIds: ["tag"] });
   });
 
   it("moves the selected asset to trash and refreshes the gallery", async () => {
@@ -248,20 +349,66 @@ describe("AssetBrowser", () => {
     const gateway = createGateway({ items: [{ ...asset(0), title: "Delete me" }], nextCursor: null });
     renderBrowser(gateway);
 
-    await user.click(await screen.findByRole("button", { name: "Delete me" }));
+    await user.click(await screen.findByRole("option", { name: "Delete me" }));
     await user.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
 
-    expect(gateway.trashAsset).toHaveBeenCalledWith("asset-0");
-    expect(screen.getByText("휴지통으로 이동했습니다.")).toBeVisible();
+    expect(gateway.trashAssets).toHaveBeenCalledWith(["asset-0"]);
+    expect(screen.getByText("1개 자산을 휴지통으로 이동했습니다.")).toBeVisible();
+  });
+
+  it("runs explicit batch favorite, classification, trash, and undo actions", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
+    const tag: ClassificationEntry = { id: "tag", kind: "tag", name: "아로나", parentId: null };
+    render(
+      <LibraryProvider gateway={gateway}>
+        <AssetBrowser view={{ kind: "classification", classificationId: null }} classifications={[tag]} sort="newest" metadataVisible={false} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} />
+      </LibraryProvider>,
+    );
+    const first = await screen.findByRole("option", { name: "asset-0.png" });
+    first.focus();
+    await user.keyboard("{Control>}a{/Control}");
+    expect(screen.getByText("2개 선택")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "좋아요 켜기" }));
+    expect(gateway.setAssetsFavorite).toHaveBeenCalledWith(["asset-0", "asset-1"], true);
+    await user.selectOptions(screen.getByLabelText("일괄 분류"), "tag");
+    await user.click(screen.getByRole("button", { name: "분류 추가" }));
+    expect(gateway.patchAssetClassifications).toHaveBeenCalledWith({
+      assetIds: ["asset-0", "asset-1"],
+      addClassificationIds: ["tag"],
+      removeClassificationIds: [],
+    });
+
+    await user.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
+    expect(gateway.trashAssets).toHaveBeenCalledWith(["asset-0", "asset-1"]);
+    await user.click(await screen.findByRole("button", { name: "실행 취소" }));
+    expect(gateway.restoreAssets).toHaveBeenCalledWith(["asset-0", "asset-1"]);
+  });
+
+  it("keeps selected tiles visible when a batch mutation fails", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
+    vi.mocked(gateway.trashAssets).mockRejectedValue(new Error("batch failed"));
+    renderBrowser(gateway);
+    const first = await screen.findByRole("option", { name: "asset-0.png" });
+    first.focus();
+    await user.keyboard("{Control>}a{/Control}");
+
+    await user.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
+
+    expect(await screen.findByText("batch failed")).toBeVisible();
+    expect(screen.getByRole("option", { name: "asset-0.png" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("option", { name: "asset-1.png" })).toHaveAttribute("aria-selected", "true");
   });
 
   it("keeps the selected asset when moving it to trash fails", async () => {
     const user = userEvent.setup();
     const gateway = createGateway({ items: [{ ...asset(0), title: "Keep me" }], nextCursor: null });
-    vi.mocked(gateway.trashAsset).mockRejectedValue(new Error("trash failed"));
+    vi.mocked(gateway.trashAssets).mockRejectedValue(new Error("trash failed"));
     renderBrowser(gateway);
 
-    await user.click(await screen.findByRole("button", { name: "Keep me" }));
+    await user.click(await screen.findByRole("option", { name: "Keep me" }));
     await user.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
 
     expect(await screen.findByText("trash failed")).toBeVisible();
@@ -273,25 +420,53 @@ describe("AssetBrowser", () => {
     const pendingTrash = new Promise<void>((resolve) => { resolveTrash = resolve; });
     const user = userEvent.setup();
     const gateway = createGateway({ items: [{ ...asset(0), title: "First" }, { ...asset(1), title: "Second" }], nextCursor: null });
-    vi.mocked(gateway.trashAsset).mockReturnValue(pendingTrash);
+    vi.mocked(gateway.trashAssets).mockReturnValue(pendingTrash);
     renderBrowser(gateway);
 
-    await user.click(await screen.findByRole("button", { name: "First" }));
+    await user.click(await screen.findByRole("option", { name: "First" }));
     await user.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
     expect(screen.getByRole("button", { name: "휴지통으로 이동" })).toBeDisabled();
-    await user.click(screen.getByRole("button", { name: "Second" }));
+    await user.click(screen.getByRole("option", { name: "Second" }));
     await act(async () => { resolveTrash(); await pendingTrash; });
 
-    expect(await screen.findByRole("button", { name: "Second" })).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByRole("option", { name: "Second" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("button", { name: "휴지통으로 이동" })).not.toBeDisabled();
   });
 
   it("uses the constrained workspace styles without horizontal sidebar scrolling", () => {
     expect(styles).toMatch(/\.asset-browser\s*\{[^}]*display:\s*flex;[^}]*min-height:\s*0;/s);
+    expect(styles).toMatch(/\.asset-browser__workspace\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);[^}]*min-height:\s*0;/s);
+    expect(styles).toMatch(/\.asset-browser__workspace--inspector\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+var\(--inspector-width\);/s);
+    expect(styles).toMatch(/@media\s*\(max-width:\s*1100px\)[\s\S]*?\.asset-browser__workspace--inspector\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);[\s\S]*?\.asset-inspector\s*\{[^}]*position:\s*absolute;/s);
     expect(styles).toMatch(/\.asset-gallery__scroll\s*\{[^}]*flex:\s*1;[^}]*min-height:\s*0;[^}]*overflow:\s*auto;/s);
     expect(styles).not.toMatch(/\.asset-gallery__scroll\s*\{[^}]*height:\s*70vh;/s);
     expect(styles).toMatch(/\.classification-sidebar\s*\{[^}]*overflow-x:\s*hidden;[^}]*overflow-y:\s*auto;/s);
   });
+});
+
+it("opens a requested asset that is not in the loaded page and clears it on close", async () => {
+  const requested = asset(99);
+  const onRequestedAssetHandled = vi.fn();
+  render(
+    <LibraryProvider gateway={createGateway()}>
+      <AssetBrowser
+        view={{ kind: "classification", classificationId: null }}
+        classifications={[]}
+        sort="newest"
+        metadataVisible={false}
+        refreshVersion={0}
+        requestedAsset={requested}
+        onRequestedAssetHandled={onRequestedAssetHandled}
+        onSortChange={vi.fn()}
+        onMetadataVisibleChange={vi.fn()}
+        onStatusChange={vi.fn()}
+      />
+    </LibraryProvider>,
+  );
+
+  expect(await screen.findByRole("img", { name: requested.originalName })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "감상 화면 닫기" }));
+  expect(onRequestedAssetHandled).toHaveBeenCalledOnce();
 });
 
 function renderBrowser(gateway: LibraryGateway, options: BrowserOptions = {}) {
@@ -322,11 +497,12 @@ function createGateway(page: AssetPage = { items: [], nextCursor: null }): Libra
     openLibrary: vi.fn(), currentLibrary: vi.fn(), listClassifications: vi.fn(),
     createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(),
     deleteClassification: vi.fn(), listAssets: vi.fn().mockResolvedValue(page),
-    trashAsset: vi.fn(), restoreAsset: vi.fn(), listTrash: vi.fn(), emptyTrash: vi.fn(),
+    indexMissingSimilarityHashes: vi.fn(), listSimilarityReviews: vi.fn(), decideSimilarityReview: vi.fn(), getAsset: vi.fn(),
+    trashAsset: vi.fn(), trashAssets: vi.fn().mockResolvedValue(undefined), restoreAsset: vi.fn(), restoreAssets: vi.fn().mockResolvedValue(undefined), listTrash: vi.fn(), emptyTrash: vi.fn(),
     getTrashPolicy: vi.fn(), setTrashPolicy: vi.fn(),
     ensureDailyBackup: vi.fn(), listMetadataBackups: vi.fn(),
     restoreMetadataBackup: vi.fn(), purgeExpiredTrash: vi.fn(),
-    setAssetFavorite: vi.fn(), setAssetClassifications: vi.fn(),
+    setAssetFavorite: vi.fn(), setAssetsFavorite: vi.fn().mockResolvedValue(undefined), setAssetClassifications: vi.fn(), patchAssetClassifications: vi.fn().mockResolvedValue(undefined),
     getAssetClassifications: vi.fn().mockResolvedValue([]), ingestImage: vi.fn(),
   };
 }

@@ -1,15 +1,18 @@
 mod backup;
 mod classification;
 mod db;
+mod drag_out;
 pub mod error;
 mod favorite;
 mod ingestion;
 mod lock;
 pub mod models;
 mod query;
+mod similarity;
 mod trash;
 
 use std::{
+    collections::BTreeSet,
     fs,
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
@@ -88,14 +91,17 @@ impl Library {
                 .map_err(|source| LibraryError::CreateDirectory { path, source })?;
         }
         db::open_database(&root.join("library.sqlite"))?;
-        Ok(Self {
+        let library = Self {
             root,
             lease,
             ingestion_lock: Arc::new(Mutex::new(())),
             trash_lock: Arc::new(Mutex::new(())),
             backup_lock: Arc::new(Mutex::new(())),
             database_lock: Arc::new(Mutex::new(())),
-        })
+        };
+        library.cleanup_stale_asset_drags()?;
+        library.cleanup_resolving_similarity_reviews()?;
+        Ok(library)
     }
 
     pub fn root(&self) -> &Path {
@@ -165,7 +171,9 @@ impl Library {
         let relative_path: Option<String> = self
             .connection()?
             .query_row(
-                &format!("SELECT {column} FROM assets WHERE id = ?1 AND status = 'normal'"),
+                &format!(
+                    "SELECT {column} FROM assets WHERE id = ?1 AND status IN ('normal', 'review')"
+                ),
                 [asset_id],
                 |row| row.get(0),
             )
@@ -197,6 +205,27 @@ impl Library {
         })?;
         Ok(MediaResponse { bytes, mime })
     }
+}
+
+pub(crate) fn validated_asset_ids<'a>(
+    connection: &Connection,
+    asset_ids: &'a [String],
+) -> Result<BTreeSet<&'a str>, LibraryError> {
+    let ids: BTreeSet<_> = asset_ids.iter().map(String::as_str).collect();
+    if ids.is_empty() {
+        return Err(LibraryError::EmptyAssetSelection);
+    }
+    for id in &ids {
+        let exists: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM assets WHERE id = ?1)",
+            [id],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            return Err(LibraryError::AssetNotFound);
+        }
+    }
+    Ok(ids)
 }
 
 fn mime_for_path(path: &Path) -> &'static str {
@@ -257,7 +286,7 @@ mod tests {
             .unwrap()
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
         assert_eq!(library.summary().unwrap().asset_count, 0);
     }
 }

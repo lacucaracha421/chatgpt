@@ -18,6 +18,7 @@ use windows_sys::Win32::Storage::FileSystem::{
 use super::{
     error::LibraryError,
     models::{AssetSummary, IngestImageRequest, IngestOutcome},
+    similarity::perceptual_hash_from_file,
     Library,
 };
 
@@ -64,6 +65,8 @@ impl Library {
             return Ok(IngestOutcome::ExactDuplicate { existing_asset_id });
         }
         run_after_duplicate_hook(self.root());
+        let perceptual_hash = perceptual_hash_from_file(pending.owned_file(&staging_path)?)?;
+        let similar = self.find_similar_asset(perceptual_hash)?;
 
         let prefix = &content_hash[..2];
         let thumbnail_relative_path = format!("thumbnails/{prefix}/{content_hash}.webp");
@@ -94,16 +97,25 @@ impl Library {
             favorite: false,
             source_url: request.source_url.clone(),
         };
+        let registration = similar.map_or(Registration::Normal, |candidate| Registration::Review {
+            existing_asset_id: candidate.asset_id,
+            distance: candidate.distance,
+            review_id: uuid::Uuid::new_v4().to_string(),
+        });
         self.register_asset(
             &asset,
             &content_hash,
+            perceptual_hash,
             format,
             request.classification_id.as_deref(),
-            request.source_url,
+            &registration,
         )?;
 
         pending.commit();
-        Ok(IngestOutcome::Added { asset })
+        Ok(match registration {
+            Registration::Normal => IngestOutcome::Added { asset },
+            Registration::Review { review_id, .. } => IngestOutcome::ReviewPending { review_id },
+        })
     }
 
     fn validate_classification(&self, classification_id: Option<&str>) -> Result<(), LibraryError> {
@@ -139,19 +151,24 @@ impl Library {
         &self,
         asset: &AssetSummary,
         content_hash: &str,
+        perceptual_hash: u64,
         format: ImageFormat,
         classification_id: Option<&str>,
-        source_url: Option<String>,
+        registration: &Registration,
     ) -> Result<(), LibraryError> {
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
+        let status = match registration {
+            Registration::Normal => "normal",
+            Registration::Review { .. } => "review",
+        };
         transaction.execute(
             "INSERT INTO assets (
                 id, content_hash, media_kind, title, original_name, relative_path,
                 thumbnail_relative_path, byte_size, width, height, source_url,
-                collected_at, favorite, status
+                collected_at, favorite, status, perceptual_hash
             ) VALUES (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 'normal'
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15
             )",
             params![
                 asset.id,
@@ -164,9 +181,11 @@ impl Library {
                 asset.byte_size as i64,
                 asset.width as i64,
                 asset.height as i64,
-                source_url,
+                asset.source_url.as_deref(),
                 asset.collected_at,
                 i64::from(asset.favorite),
+                status,
+                perceptual_hash.to_be_bytes(),
             ],
         )?;
         if let Some(classification_id) = classification_id {
@@ -175,9 +194,37 @@ impl Library {
                 params![asset.id, classification_id],
             )?;
         }
+        if let Registration::Review {
+            existing_asset_id,
+            distance,
+            review_id,
+        } = registration
+        {
+            transaction.execute(
+                "INSERT INTO similarity_reviews (
+                    id, existing_asset_id, candidate_asset_id, distance, status, created_at
+                 ) VALUES (?1, ?2, ?3, ?4, 'open', ?5)",
+                params![
+                    review_id,
+                    existing_asset_id,
+                    asset.id,
+                    distance,
+                    asset.collected_at
+                ],
+            )?;
+        }
         transaction.commit()?;
         Ok(())
     }
+}
+
+enum Registration {
+    Normal,
+    Review {
+        existing_asset_id: String,
+        distance: u32,
+        review_id: String,
+    },
 }
 
 fn copy_and_hash(
@@ -603,6 +650,7 @@ impl FileIdentity {
 #[cfg(test)]
 mod tests {
     use std::{
+        fs::File,
         path::{Path, PathBuf},
         sync::{
             atomic::{AtomicUsize, Ordering},
@@ -611,6 +659,7 @@ mod tests {
         time::Duration,
     };
 
+    use image::{codecs::jpeg::JpegEncoder, imageops::FilterType, DynamicImage, ImageBuffer, Rgb};
     use tempfile::TempDir;
 
     use super::{
@@ -618,7 +667,10 @@ mod tests {
         set_staging_hook, LibraryError, PendingFiles,
     };
     use crate::library::{
-        models::{ClassificationKind, CreateClassification, IngestImageRequest, IngestOutcome},
+        models::{
+            AssetQuery, AssetSort, AssetSummary, ClassificationKind, CreateClassification,
+            IngestImageRequest, IngestOutcome,
+        },
         Library,
     };
 
@@ -626,6 +678,13 @@ mod tests {
         _temp: TempDir,
         library: Library,
         source: PathBuf,
+    }
+
+    struct SimilarityIngestionFixture {
+        _temp: TempDir,
+        library: Library,
+        input: PathBuf,
+        tag_id: String,
     }
 
     impl IngestionFixture {
@@ -653,11 +712,117 @@ mod tests {
         }
     }
 
+    impl SimilarityIngestionFixture {
+        fn new() -> Self {
+            let temp = tempfile::tempdir().unwrap();
+            let input = temp.path().join("input");
+            std::fs::create_dir(&input).unwrap();
+            let library = Library::open(temp.path().join("library")).unwrap();
+            let tag_id = library
+                .create_classification(CreateClassification {
+                    kind: ClassificationKind::Root,
+                    name: "게임".into(),
+                    parent_id: None,
+                })
+                .unwrap()
+                .id;
+            Self {
+                _temp: temp,
+                library,
+                input,
+                tag_id,
+            }
+        }
+
+        fn write_png(&self, name: &str, image: &DynamicImage) -> PathBuf {
+            let path = self.input.join(name);
+            image
+                .save_with_format(&path, image::ImageFormat::Png)
+                .unwrap();
+            path
+        }
+
+        fn write_jpeg(&self, name: &str, image: &DynamicImage, quality: u8) -> PathBuf {
+            let path = self.input.join(name);
+            JpegEncoder::new_with_quality(File::create(&path).unwrap(), quality)
+                .encode_image(image)
+                .unwrap();
+            path
+        }
+
+        fn ingest(
+            &self,
+            path: &Path,
+            classification_id: Option<String>,
+            source_url: Option<String>,
+        ) -> IngestOutcome {
+            self.library
+                .ingest_image(IngestImageRequest {
+                    source_path: path.to_path_buf(),
+                    classification_id,
+                    source_url,
+                })
+                .unwrap()
+        }
+
+        fn all_assets(&self) -> Vec<AssetSummary> {
+            self.library
+                .list_assets(AssetQuery {
+                    classification_id: None,
+                    direct_only: false,
+                    favorite_only: false,
+                    unclassified_only: false,
+                    sort: AssetSort::Newest,
+                    random_pivot: None,
+                    after: None,
+                    limit: 100,
+                })
+                .unwrap()
+                .items
+        }
+
+        fn review_candidate_id(&self) -> String {
+            self.library
+                .connection()
+                .unwrap()
+                .query_row(
+                    "SELECT candidate_asset_id FROM similarity_reviews WHERE status = 'open'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        }
+
+        fn review_count(&self) -> i64 {
+            self.library
+                .connection()
+                .unwrap()
+                .query_row("SELECT COUNT(*) FROM similarity_reviews", [], |row| {
+                    row.get(0)
+                })
+                .unwrap()
+        }
+    }
+
     fn write_test_png(path: &Path, rgb: [u8; 3]) {
         let image = image::RgbImage::from_pixel(8, 6, image::Rgb(rgb));
         image
             .save_with_format(path, image::ImageFormat::Png)
             .unwrap();
+    }
+
+    fn vertical_stripes(width: u32, height: u32) -> DynamicImage {
+        DynamicImage::ImageRgb8(ImageBuffer::from_fn(width, height, |x, _| {
+            let light = (x / 32) % 2 == 0;
+            Rgb(if light { [240, 180, 30] } else { [20, 60, 180] })
+        }))
+    }
+
+    fn horizontal_stripes(width: u32, height: u32) -> DynamicImage {
+        DynamicImage::ImageRgb8(ImageBuffer::from_fn(width, height, |_, y| {
+            let light = (y / 32) % 2 == 0;
+            Rgb(if light { [240, 180, 30] } else { [20, 60, 180] })
+        }))
     }
 
     #[test]
@@ -694,6 +859,111 @@ mod tests {
             },
         );
         assert_eq!(fixture.library.summary().unwrap().asset_count, 1);
+    }
+
+    #[test]
+    fn similar_image_becomes_review_pending_without_entering_normal_queries() {
+        let fixture = SimilarityIngestionFixture::new();
+        let base = vertical_stripes(900, 600);
+        let existing_path = fixture.write_png("existing.png", &base);
+        let existing = match fixture.ingest(&existing_path, None, None) {
+            IngestOutcome::Added { asset } => asset,
+            other => panic!("expected added asset, got {other:?}"),
+        };
+        let variant_path = fixture.write_jpeg(
+            "variant.jpg",
+            &base.resize_exact(450, 300, FilterType::Triangle),
+            70,
+        );
+
+        let outcome = fixture.ingest(
+            &variant_path,
+            Some(fixture.tag_id.clone()),
+            Some("https://example.com/new".into()),
+        );
+
+        let review_id = match outcome {
+            IngestOutcome::ReviewPending { review_id } => review_id,
+            other => panic!("expected review pending, got {other:?}"),
+        };
+        assert_eq!(
+            fixture
+                .all_assets()
+                .iter()
+                .map(|asset| asset.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![existing.id]
+        );
+        let candidate_id = fixture.review_candidate_id();
+        let connection = fixture.library.connection().unwrap();
+        let stored: (String, String, Option<String>, i64) = connection
+            .query_row(
+                "SELECT reviews.id, assets.status, assets.source_url,
+                        length(assets.perceptual_hash)
+                 FROM similarity_reviews AS reviews
+                 JOIN assets ON assets.id = reviews.candidate_asset_id
+                 WHERE reviews.id = ?1",
+                [&review_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        drop(connection);
+        assert_eq!(
+            stored,
+            (
+                review_id,
+                "review".into(),
+                Some("https://example.com/new".into()),
+                8
+            )
+        );
+        assert_eq!(
+            fixture
+                .library
+                .get_asset_classifications(&candidate_id)
+                .unwrap()[0]
+                .id,
+            fixture.tag_id
+        );
+        assert!(existing_path.is_file());
+        assert!(variant_path.is_file());
+    }
+
+    #[test]
+    fn exact_duplicate_wins_before_similarity_and_does_not_create_review() {
+        let fixture = SimilarityIngestionFixture::new();
+        let path = fixture.write_png("same.png", &vertical_stripes(900, 600));
+        let existing = match fixture.ingest(&path, None, None) {
+            IngestOutcome::Added { asset } => asset,
+            other => panic!("expected added asset, got {other:?}"),
+        };
+
+        let outcome = fixture.ingest(&path, None, None);
+
+        assert_eq!(
+            outcome,
+            IngestOutcome::ExactDuplicate {
+                existing_asset_id: existing.id
+            }
+        );
+        assert_eq!(fixture.review_count(), 0);
+    }
+
+    #[test]
+    fn unrelated_image_is_added_normally() {
+        let fixture = SimilarityIngestionFixture::new();
+        let vertical = fixture.write_png("vertical.png", &vertical_stripes(900, 600));
+        let horizontal = fixture.write_png("horizontal.png", &horizontal_stripes(900, 600));
+        assert!(matches!(
+            fixture.ingest(&vertical, None, None),
+            IngestOutcome::Added { .. }
+        ));
+
+        let outcome = fixture.ingest(&horizontal, None, None);
+
+        assert!(matches!(outcome, IngestOutcome::Added { .. }));
+        assert_eq!(fixture.all_assets().len(), 2);
+        assert_eq!(fixture.review_count(), 0);
     }
 
     #[test]
@@ -944,6 +1214,9 @@ mod tests {
             match outcome {
                 IngestOutcome::Added { .. } => added += 1,
                 IngestOutcome::ExactDuplicate { .. } => duplicate += 1,
+                IngestOutcome::ReviewPending { .. } => {
+                    panic!("identical concurrent ingests cannot create a similarity review")
+                }
             }
         }
         assert_eq!((added, duplicate), (1, 1));

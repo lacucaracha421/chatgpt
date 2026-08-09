@@ -4,9 +4,10 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 2;
+pub(crate) const SCHEMA_VERSION: i64 = 3;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
+const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
 
 pub fn open_database(path: &Path) -> Result<Connection, LibraryError> {
     let mut connection = Connection::open(path)?;
@@ -20,16 +21,20 @@ pub fn open_database(path: &Path) -> Result<Connection, LibraryError> {
             let transaction = connection.transaction()?;
             transaction.execute_batch(INITIAL_SCHEMA)?;
             transaction.execute_batch(VAULT_SAFETY_SCHEMA)?;
+            transaction.execute_batch(SIMILARITY_REVIEW_SCHEMA)?;
             transaction.commit()?;
         }
-        1 => {
+        version @ 1..=2 => {
             let root = path
                 .parent()
                 .expect("database paths have a parent directory");
             let snapshot = backup::pre_migration_snapshot_path(root, version);
             backup::create_verified_snapshot(&connection, &snapshot)?;
             let transaction = connection.transaction()?;
-            transaction.execute_batch(VAULT_SAFETY_SCHEMA)?;
+            if version == 1 {
+                transaction.execute_batch(VAULT_SAFETY_SCHEMA)?;
+            }
+            transaction.execute_batch(SIMILARITY_REVIEW_SCHEMA)?;
             transaction.commit()?;
         }
         SCHEMA_VERSION => {}

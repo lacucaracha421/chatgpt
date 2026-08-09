@@ -1,10 +1,13 @@
 # Lakomics
 
-Lakomics is a desktop media library for images.
+Lakomics is a local-first Windows media library for JPEG, PNG, GIF, and WebP images.
 
 ## Run and verify
 
 Node.js, npm, Rust, and Windows WebView2 are required.
+
+When a test app has no library registered, use
+`C:\Users\namwoojun\Desktop\test` as the temporary library.
 
 ```powershell
 npm install
@@ -17,13 +20,78 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 ```
 
-## Current controls
+## Current daily-use behavior
 
-- Navigate classifications from the sidebar; use each row menu to rename, move, or delete a classification.
-- Choose newest, oldest, favorites, or random sort. Use direct-only filtering for a classification view.
-- Toggle asset metadata from the toolbar.
-- Select an asset with one click and open its details with a double click.
-- Drop image files only while a concrete classification is selected.
+- Lakomics always starts in **All assets**. The sidebar also provides Unsorted, Recent, Favorites, classifications, Trash, and Library safety.
+- Choose newest, oldest, favorites, or random sort. Change the justified-row height with the preview-size slider and toggle thumbnail metadata independently.
+- Click to select one asset, Ctrl-click to toggle, Shift-click for a loaded range, and Ctrl+A to select only currently loaded assets. Escape clears selection; arrow keys move focus; Delete moves the selection to Trash.
+- Double-click or press Enter to open the full-screen viewer. Left and Right move through the currently loaded order, and Escape closes the viewer.
+- The information panel opens on the first non-empty selection. Closing it manually keeps it closed while the selection changes; clearing the selection resets that choice. It shows one-asset metadata or a multi-selection summary and delegates classification changes to the same batch operation as the toolbar.
+- Drop files anywhere in an ordinary asset view. A concrete classification view adds that classification; All assets, Unsorted, Recent, and Favorites ingest into Unsorted. Incoming files are copied, and user source files are never moved or deleted.
+- A completed image drop reports added, exact duplicate, similar-image review, and failure counts. Exact duplicates can open the existing asset; similar images stay outside ordinary asset views until reviewed.
+- The Similar image review entry compares the existing and incoming images with public metadata. Choose Keep existing, Replace with new image, or Keep both. Existing-image replacement transfers its favorite and classifications while preserving the incoming image's source and collected date.
+- Existing images are prepared for similarity checks in non-blocking batches. The status bar reports remaining work and any images whose perceptual hash could not be prepared.
+- Drag assets onto a classification to add it, or drag classifications to reorganize the tree. Dragging selected assets out of Lakomics starts a Windows copy operation with their original names; duplicate names receive a Windows-style numeric suffix.
+- The work tray reports ingestion and drag-out progress for the current app session only. It is not a persistent background-job history.
+
+Collections, browser-extension integration, video playback, comic reading, folder-recursive ingestion, and AVIF/HEIC are deferred.
+
+## Similar image review acceptance
+
+Verified on 2026-08-09 with the temporary library at
+`C:\Users\namwoojun\Desktop\test`:
+
+```powershell
+cd C:\chatgpt\.worktrees\daily-use-ui\app
+npm.cmd run check
+cd src-tauri
+cargo fmt --all --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test
+cargo test candidate_search_scans_fifty_thousand_hashes --release -- --ignored --nocapture
+cd ..
+npm.cmd run tauri build -- --debug --no-bundle
+```
+
+- The four-file ingestion fixture produced two added images, one exact duplicate, one review-pending image, and no failures. The drop orchestration and result actions are covered by frontend integration tests; the same files were exercised through the real Windows library and review UI.
+- All 189 frontend tests passed, the TypeScript/Vite production build completed, and the Rust suite passed 88 unit tests, 12 integration tests, and one compile-fail doctest (with the dedicated performance test ignored in the ordinary run).
+- The sidebar queue count, 960×650 single-column layout, maximized two-column layout, all three decisions, and unresolved-review restart persistence were exercised in the Windows app.
+- Keep existing removed only the managed candidate. Replace moved the existing asset to Trash and transferred its favorite and classification while retaining the candidate source and collected date. Keep both left both assets normal.
+- Every external acceptance source remained present after ingestion and all three decisions.
+- The 50,000-row candidate scan completed in 40.9844 ms in the release measurement.
+- `.acceptance\similarity-result.png` records the four result counters and actions.
+- `.acceptance\similarity-review-normal.png` records the maximized side-by-side comparison.
+- `.acceptance\similarity-review-narrow.png` records the 960×650 stacked comparison without horizontal clipping.
+
+## Eagle compact UI acceptance
+
+Verified on 2026-08-09 with the temporary library at
+`C:\Users\namwoojun\Desktop\test`:
+
+```powershell
+cd C:\chatgpt\.worktrees\daily-use-ui\app
+npm.cmd run tauri dev
+npm.cmd run check
+```
+
+- All 176 frontend tests passed and the TypeScript/Vite production build completed successfully.
+- `.acceptance\eagle-compact-normal.png` records the normal desktop layout.
+- `.acceptance\eagle-compact-narrow.png` records the 960×650 layout with the inspector open.
+- `.acceptance\eagle-compact-drop.png` records the native Explorer drop indicator.
+- Single and multi-file incoming drops were exercised over the gallery, sidebar, and inspector. Exact duplicates did not create a new asset.
+- Dragging an asset to `.acceptance\output\run-eagle-compact-20260809-123822` produced a byte-identical copy while the managed original remained in the library.
+
+## Windows drag-out acceptance
+
+Verified on 2026-08-09 with the library at
+`C:\Users\namwoojun\Desktop\test` and Windows File Explorer:
+
+- Single output: `.acceptance\output\run-fix-20260809-0046\HPMhSEIbkAAc_sg.jpg`.
+- Multi-output: `.acceptance\output\run-multi-20260809-0047` contains two selected files with their original names.
+- Duplicate names: `.acceptance\output\run-duplicate-all-20260809-0054` contains both `HPMhSEIbkAAc_sg.jpg` and `HPMhSEIbkAAc_sg (2).jpg`.
+- Cancel output: `.acceptance\output\run-cancel-20260809-0055` remained empty and `.drag-out` had no staged child.
+- All four managed asset files remained present and matched their recorded SHA-256 hashes after successful drops.
+- Restart removed the deliberately created `.drag-out\stale-acceptance` directory.
 
 ## Library safety and backups
 

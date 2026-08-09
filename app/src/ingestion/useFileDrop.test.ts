@@ -6,6 +6,7 @@ import type {
   IngestOutcome,
 } from "../library/types";
 import {
+  type NativeFileDropEvent,
   type DropProgress,
   type DropSubscriber,
   subscribeToTauriDrops,
@@ -29,6 +30,43 @@ const fixtureAsset: AssetSummary = {
   favorite: false,
   sourceUrl: null,
 };
+
+it("keeps a completed batch with added, duplicate, review, and failure counts", async () => {
+  let drop: ((paths: string[]) => void) | undefined;
+  const subscribe = vi.fn<DropSubscriber>(async (handler) => {
+    drop = handler;
+    return () => undefined;
+  });
+  const ingestImage = vi.fn()
+    .mockResolvedValueOnce({ status: "added", asset: fixtureAsset })
+    .mockResolvedValueOnce({ status: "exact_duplicate", existingAssetId: "existing" })
+    .mockResolvedValueOnce({ status: "review_pending", reviewId: "review" })
+    .mockRejectedValueOnce(new Error("unsupported"));
+  const { result } = renderHook(() => useFileDrop({
+    enabled: true,
+    subscribe,
+    classificationId: null,
+    ingestImage,
+    onIngested: vi.fn(),
+    onFatalError: vi.fn(),
+  }));
+  await waitFor(() => expect(drop).toBeDefined());
+
+  act(() => drop?.([
+    "C:\\in\\added.png",
+    "C:\\in\\same.png",
+    "C:\\in\\variant.jpg",
+    "C:\\in\\bad.txt",
+  ]));
+
+  await waitFor(() => expect(result.current.works[0]?.status).toBe("failed"));
+  expect(result.current.works[0]).toMatchObject({
+    added: 1,
+    exactDuplicates: [{ fileName: "same.png", existingAssetId: "existing" }],
+    reviewPending: [{ fileName: "variant.jpg", reviewId: "review" }],
+    failures: [{ fileName: "bad.txt", message: expect.any(String) }],
+  });
+});
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -99,7 +137,7 @@ it("ignores disabled drops and accepts the next drop after being enabled", async
 
   expect(ingestImage).not.toHaveBeenCalled();
   expect(onResult).not.toHaveBeenCalled();
-  expect(result.current).toBeNull();
+  expect(result.current.progress).toBeNull();
 
   rerender({ enabled: true });
   act(() => drop?.(["C:\\images\\accepted.png"]));
@@ -257,11 +295,11 @@ it("reports the current file and total while a drop is processing", async () => 
   await waitFor(() => expect(drop).toBeDefined());
   act(() => drop?.(["C:\\images\\first.png", "C:\\images\\second.png"]));
 
-  await waitFor(() => expect(result.current).toEqual({ current: 1, total: 2 }));
+  await waitFor(() => expect(result.current.progress).toEqual({ current: 1, total: 2 }));
   act(() => first.resolve({ status: "added", asset: fixtureAsset }));
-  await waitFor(() => expect(result.current).toEqual({ current: 2, total: 2 }));
+  await waitFor(() => expect(result.current.progress).toEqual({ current: 2, total: 2 }));
   act(() => second.resolve({ status: "added", asset: fixtureAsset }));
-  await waitFor(() => expect(result.current).toBeNull());
+  await waitFor(() => expect(result.current.progress).toBeNull());
 });
 
 it("queues overlapping drops in arrival order without clearing progress", async () => {
@@ -303,15 +341,15 @@ it("queues overlapping drops in arrival order without clearing progress", async 
 
   const { result, rerender } = renderHook(
     ({ classificationId }: { classificationId: string | null }) => {
-      const progress = useFileDrop({
+      const state = useFileDrop({
         enabled: true,
         subscribe,
         classificationId,
         ingestImage,
         onResult,
       });
-      progressHistory.push(progress);
-      return progress;
+      progressHistory.push(state.progress);
+      return state.progress;
     },
     { initialProps: { classificationId: "tag-a" } },
   );
@@ -550,11 +588,9 @@ it("reports a drop subscription error while mounted", async () => {
   );
 });
 
-it("adapts Tauri drop events to path subscriptions", async () => {
+it("adapts every Tauri drag event without losing position or paths", async () => {
   const unlisten = vi.fn();
-  let tauriHandler:
-    | ((event: { payload: { type: "drop"; paths: string[] } }) => void)
-    | undefined;
+  let tauriHandler: ((event: { payload: NativeFileDropEvent }) => void) | undefined;
   onDragDropEvent.mockImplementationOnce(
     async (handler: typeof tauriHandler) => {
       tauriHandler = handler;
@@ -564,11 +600,54 @@ it("adapts Tauri drop events to path subscriptions", async () => {
   const handler = vi.fn();
 
   const stop = await subscribeToTauriDrops(handler);
-  tauriHandler?.({
-    payload: { type: "drop", paths: ["C:\\images\\arona.png"] },
-  });
+  tauriHandler?.({ payload: { type: "over", position: { x: 10, y: 20 } } });
+  tauriHandler?.({ payload: { type: "drop", paths: ["C:\\images\\arona.png"], position: { x: 30, y: 40 } } });
+  tauriHandler?.({ payload: { type: "cancel" } });
 
-  expect(handler).toHaveBeenCalledWith(["C:\\images\\arona.png"]);
+  expect(handler.mock.calls.map(([event]) => event)).toEqual([
+    { type: "over", position: { x: 10, y: 20 } },
+    { type: "drop", paths: ["C:\\images\\arona.png"], position: { x: 30, y: 40 } },
+    { type: "cancel" },
+  ]);
   stop();
   expect(unlisten).toHaveBeenCalledOnce();
+});
+
+it("shows native over state and clears it on cancel or drop", async () => {
+  let send: ((event: NativeFileDropEvent) => void) | undefined;
+  const subscribe: DropSubscriber = async (handler) => {
+    send = handler;
+    return () => undefined;
+  };
+  const ingestImage = vi.fn().mockResolvedValue({ status: "added", asset: fixtureAsset });
+  const { result } = renderHook(() => useFileDrop({ enabled: true, subscribe, classificationId: null, ingestImage, onResult: vi.fn() }));
+  await waitFor(() => expect(send).toBeDefined());
+
+  act(() => send?.({ type: "over", position: { x: 7, y: 9 } }));
+  expect(result.current.over).toEqual({ x: 7, y: 9 });
+  act(() => send?.({ type: "cancel" }));
+  expect(result.current.over).toBeNull();
+  act(() => send?.({ type: "over", position: { x: 1, y: 2 } }));
+  act(() => send?.({ type: "drop", paths: ["C:\\images\\arona.png"], position: { x: 1, y: 2 } }));
+  expect(result.current.over).toBeNull();
+  await waitFor(() => expect(ingestImage).toHaveBeenCalledOnce());
+});
+
+it("retries only the paths that failed in a work batch", async () => {
+  let drop: ((paths: string[]) => void) | undefined;
+  const subscribe: DropSubscriber = async (handler) => {
+    drop = handler;
+    return () => undefined;
+  };
+  const ingestImage = vi.fn()
+    .mockRejectedValueOnce(new Error("broken"))
+    .mockResolvedValue({ status: "added", asset: fixtureAsset });
+  const { result } = renderHook(() => useFileDrop({ enabled: true, subscribe, classificationId: "tag-a", ingestImage, onResult: vi.fn() }));
+  await waitFor(() => expect(drop).toBeDefined());
+  act(() => drop?.(["C:\\images\\broken.png", "C:\\images\\good.png"]));
+  await waitFor(() => expect(result.current.works[0]?.status).toBe("failed"));
+
+  act(() => result.current.retryFailed(result.current.works[0].id));
+  await waitFor(() => expect(ingestImage).toHaveBeenCalledTimes(3));
+  expect(ingestImage).toHaveBeenNthCalledWith(3, { sourcePath: "C:\\images\\broken.png", classificationId: "tag-a", sourceUrl: null });
 });

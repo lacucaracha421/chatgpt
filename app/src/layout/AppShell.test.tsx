@@ -8,7 +8,6 @@ import { StatusBar } from "./StatusBar";
 afterEach(cleanup);
 const styles = readFileSync(`${(new Function("return process")() as { cwd(): string }).cwd()}/src/styles/global.css`, "utf8");
 const appRoot = (new Function("return process")() as { cwd(): string }).cwd();
-
 it("uses Korean workspace and status labels", () => {
   render(
     <AppShell
@@ -42,6 +41,24 @@ it("constrains the workspace row so the status bar remains in the desktop viewpo
   expect(declarations(".app-shell__content")).toContain("min-height: 0;");
   expect(declarations(".classification-sidebar")).toContain("min-height: 0;");
   expect(declarations(".classification-sidebar")).toContain("overflow-y: auto;");
+});
+
+it("shows similarity indexing progress and failures", () => {
+  const { rerender } = render(<StatusBar
+    status={{ loadedCount: 3, selectedAsset: null, loading: false }}
+    progress={null}
+    dropEnabled
+    similarityIndex={{ running: true, remaining: 51, failed: 0 }}
+  />);
+  expect(screen.getByRole("contentinfo")).toHaveTextContent("유사 이미지 준비 중 · 51개 남음");
+
+  rerender(<StatusBar
+    status={{ loadedCount: 3, selectedAsset: null, loading: false }}
+    progress={null}
+    dropEnabled
+    similarityIndex={{ running: false, remaining: 0, failed: 2 }}
+  />);
+  expect(screen.getByRole("contentinfo")).toHaveTextContent("해시 생성 실패 2개");
 });
 
 function declarations(selector: string): string {

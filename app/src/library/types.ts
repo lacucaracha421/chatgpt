@@ -9,8 +9,10 @@ export type AssetSort = "newest" | "oldest" | "favorites" | "random";
 
 export type AssetView =
   | { kind: "classification"; classificationId: string | null }
+  | { kind: "unsorted" }
   | { kind: "favorites" }
   | { kind: "recent" }
+  | { kind: "similarity_review" }
   | { kind: "trash" };
 
 export type ClassificationEntry = {
@@ -36,10 +38,46 @@ export type AssetCursor = {
   token: string;
 };
 
+export type SimilarityDecision =
+  | "keep_existing"
+  | "replace_existing"
+  | "keep_both";
+
+export type SimilarityReviewAsset = {
+  asset: AssetSummary;
+  format: string;
+  classifications: ClassificationEntry[];
+};
+
+export type SimilarityReviewSummary = {
+  id: string;
+  distance: number;
+  existing: SimilarityReviewAsset;
+  candidate: SimilarityReviewAsset;
+};
+
+export type SimilarityReviewPage = {
+  items: SimilarityReviewSummary[];
+  nextCursor: AssetCursor | null;
+  totalCount: number;
+};
+
+export type SimilarityIndexProgress = {
+  processed: number;
+  remaining: number;
+  failed: number;
+};
+
+export type SimilarityDecisionOutcome = {
+  status: "resolved";
+  nextReviewId: string | null;
+};
+
 export type AssetQuery = {
   classificationId: string | null;
   directOnly: boolean;
   favoriteOnly: boolean;
+  unclassifiedOnly: boolean;
   sort: AssetSort;
   randomPivot: string | null;
   after: AssetCursor | null;
@@ -49,6 +87,12 @@ export type AssetQuery = {
 export type AssetPage = {
   items: AssetSummary[];
   nextCursor: AssetCursor | null;
+};
+
+export type AssetClassificationPatch = {
+  assetIds: string[];
+  addClassificationIds: string[];
+  removeClassificationIds: string[];
 };
 
 export type TrashPolicy = { retentionDays: number | null };
@@ -92,7 +136,8 @@ export type IngestImageInput = {
 
 export type IngestOutcome =
   | { status: "added"; asset: AssetSummary }
-  | { status: "exact_duplicate"; existingAssetId: string };
+  | { status: "exact_duplicate"; existingAssetId: string }
+  | { status: "review_pending"; reviewId: string };
 
 export interface LibraryGateway {
   openLibrary(path: string): Promise<LibrarySummary>;
@@ -103,8 +148,20 @@ export interface LibraryGateway {
   moveClassification(id: string, parentId: string | null): Promise<void>;
   deleteClassification(id: string): Promise<void>;
   listAssets(query: AssetQuery): Promise<AssetPage>;
+  indexMissingSimilarityHashes(): Promise<SimilarityIndexProgress>;
+  listSimilarityReviews(query: {
+    after: AssetCursor | null;
+    limit: number;
+  }): Promise<SimilarityReviewPage>;
+  decideSimilarityReview(request: {
+    reviewId: string;
+    decision: SimilarityDecision;
+  }): Promise<SimilarityDecisionOutcome>;
+  getAsset(assetId: string): Promise<AssetSummary>;
   trashAsset(assetId: string): Promise<void>;
+  trashAssets(assetIds: string[]): Promise<void>;
   restoreAsset(assetId: string): Promise<void>;
+  restoreAssets(assetIds: string[]): Promise<void>;
   listTrash(query: { after: AssetCursor | null; limit: number }): Promise<TrashPage>;
   emptyTrash(): Promise<PurgeSummary>;
   getTrashPolicy(): Promise<TrashPolicy>;
@@ -114,7 +171,9 @@ export interface LibraryGateway {
   restoreMetadataBackup(backupId: string): Promise<void>;
   purgeExpiredTrash(): Promise<PurgeSummary>;
   setAssetFavorite(assetId: string, favorite: boolean): Promise<void>;
+  setAssetsFavorite(assetIds: string[], favorite: boolean): Promise<void>;
   setAssetClassifications(assetId: string, classificationIds: string[]): Promise<void>;
+  patchAssetClassifications(patch: AssetClassificationPatch): Promise<void>;
   getAssetClassifications(assetId: string): Promise<string[]>;
   ingestImage(input: IngestImageInput): Promise<IngestOutcome>;
 }

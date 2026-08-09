@@ -23,6 +23,7 @@ function storage(): Storage {
 describe("UI preferences", () => {
   it("loads defaults when no preferences are stored", () => {
     expect(loadUiPreferences(storage())).toEqual(DEFAULT_UI_PREFERENCES);
+    expect(DEFAULT_UI_PREFERENCES.sidebarWidth).toBe(208);
   });
 
   it("saves preferences for a later load", () => {
@@ -32,6 +33,7 @@ describe("UI preferences", () => {
       sidebarWidth: 240,
       expandedClassificationIds: ["a"],
       assetSort: "oldest" as const,
+      thumbnailRowHeight: 220,
     };
 
     saveUiPreferences(value, localStorage);
@@ -63,6 +65,7 @@ describe("UI preferences", () => {
       sidebarWidth: 240,
       expandedClassificationIds: ["a"],
       assetSort: "newest",
+      thumbnailRowHeight: 180,
     });
   });
 
@@ -80,9 +83,28 @@ describe("UI preferences", () => {
 
     expect(loadUiPreferences(localStorage)).toEqual({
       metadataVisible: false,
-      sidebarWidth: 360,
+      sidebarWidth: 320,
       expandedClassificationIds: ["a"],
       assetSort: "random",
+      thumbnailRowHeight: 180,
     });
+  });
+
+  it("clamps sidebar width to the compact resize range", () => {
+    const localStorage = storage();
+    localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({ sidebarWidth: 100 }));
+    expect(loadUiPreferences(localStorage).sidebarWidth).toBe(176);
+
+    localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({ sidebarWidth: 400 }));
+    expect(loadUiPreferences(localStorage).sidebarWidth).toBe(320);
+  });
+
+  it("migrates a missing thumbnail height and clamps stored values", () => {
+    const localStorage = storage();
+    localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({ thumbnailRowHeight: 999 }));
+    expect(loadUiPreferences(localStorage).thumbnailRowHeight).toBe(320);
+
+    localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({ thumbnailRowHeight: 40 }));
+    expect(loadUiPreferences(localStorage).thumbnailRowHeight).toBe(96);
   });
 });

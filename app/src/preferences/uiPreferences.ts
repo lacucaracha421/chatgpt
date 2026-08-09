@@ -1,4 +1,5 @@
 import type { AssetSort } from "../library/types";
+import { clampSidebarWidth } from "../layout/sidebarWidth";
 
 export const UI_PREFERENCES_KEY = "lakomics.uiPreferences.v1";
 
@@ -7,13 +8,15 @@ export type UiPreferences = {
   sidebarWidth: number;
   expandedClassificationIds: string[];
   assetSort: AssetSort;
+  thumbnailRowHeight: number;
 };
 
 export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   metadataVisible: true,
-  sidebarWidth: 232,
+  sidebarWidth: 208,
   expandedClassificationIds: [],
   assetSort: "newest",
+  thumbnailRowHeight: 180,
 };
 
 export function loadUiPreferences(storage: Storage = localStorage): UiPreferences {
@@ -35,7 +38,7 @@ export function loadUiPreferences(storage: Storage = localStorage): UiPreference
         : DEFAULT_UI_PREFERENCES.metadataVisible,
     sidebarWidth:
       typeof value.sidebarWidth === "number" && Number.isFinite(value.sidebarWidth)
-        ? Math.max(184, Math.min(360, value.sidebarWidth))
+        ? clampSidebarWidth(value.sidebarWidth)
         : DEFAULT_UI_PREFERENCES.sidebarWidth,
     expandedClassificationIds: Array.isArray(value.expandedClassificationIds)
       ? [...new Set(value.expandedClassificationIds.filter(isString))]
@@ -43,6 +46,10 @@ export function loadUiPreferences(storage: Storage = localStorage): UiPreference
     assetSort: isAssetSort(value.assetSort)
       ? value.assetSort
       : DEFAULT_UI_PREFERENCES.assetSort,
+    thumbnailRowHeight:
+      typeof value.thumbnailRowHeight === "number" && Number.isFinite(value.thumbnailRowHeight)
+        ? Math.max(96, Math.min(320, value.thumbnailRowHeight))
+        : DEFAULT_UI_PREFERENCES.thumbnailRowHeight,
   };
 }
 

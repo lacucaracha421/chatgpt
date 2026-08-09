@@ -1,7 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AssetPage,
+  AssetClassificationPatch,
   AssetQuery,
+  AssetSummary,
   ClassificationEntry,
   CreateClassification,
   IngestImageInput,
@@ -10,6 +12,9 @@ import type {
   LibrarySummary,
   MetadataBackup,
   PurgeSummary,
+  SimilarityDecisionOutcome,
+  SimilarityIndexProgress,
+  SimilarityReviewPage,
   TrashPage,
   TrashPolicy,
 } from "./types";
@@ -28,8 +33,17 @@ export const libraryGateway: LibraryGateway = {
   deleteClassification: (id) => invoke("delete_classification", { id }),
   listAssets: (query: AssetQuery) =>
     invoke<AssetPage>("list_assets", { query }),
+  indexMissingSimilarityHashes: () =>
+    invoke<SimilarityIndexProgress>("index_missing_similarity_hashes"),
+  listSimilarityReviews: ({ after, limit }) =>
+    invoke<SimilarityReviewPage>("list_similarity_reviews", { after, limit }),
+  decideSimilarityReview: (request) =>
+    invoke<SimilarityDecisionOutcome>("decide_similarity_review", { request }),
+  getAsset: (assetId) => invoke<AssetSummary>("get_asset", { assetId }),
   trashAsset: (assetId) => invoke("trash_asset", { assetId }),
+  trashAssets: (assetIds) => invoke("trash_assets", { assetIds }),
   restoreAsset: (assetId) => invoke("restore_asset", { assetId }),
+  restoreAssets: (assetIds) => invoke("restore_assets", { assetIds }),
   listTrash: ({ after, limit }) => invoke<TrashPage>("list_trash", { after, limit }),
   emptyTrash: () => invoke<PurgeSummary>("empty_trash"),
   getTrashPolicy: () => invoke<TrashPolicy>("get_trash_policy"),
@@ -40,8 +54,12 @@ export const libraryGateway: LibraryGateway = {
   purgeExpiredTrash: () => invoke<PurgeSummary>("purge_expired_trash"),
   setAssetFavorite: (assetId, favorite) =>
     invoke("set_asset_favorite", { assetId, favorite }),
+  setAssetsFavorite: (assetIds, favorite) =>
+    invoke("set_assets_favorite", { assetIds, favorite }),
   setAssetClassifications: (assetId, classificationIds) =>
     invoke("set_asset_classifications", { assetId, classificationIds }),
+  patchAssetClassifications: (patch: AssetClassificationPatch) =>
+    invoke("patch_asset_classifications", { patch }),
   getAssetClassifications: (assetId) =>
     invoke<string[]>("get_asset_classifications", { assetId }),
   ingestImage: (request: IngestImageInput) =>

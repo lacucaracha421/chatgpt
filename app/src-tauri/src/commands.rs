@@ -1,4 +1,5 @@
 use std::sync::RwLock;
+use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use tauri::State;
@@ -6,8 +7,11 @@ use tauri::State;
 use crate::library::{
     error::LibraryError,
     models::{
-        AssetPage, AssetQuery, ClassificationEntry, CreateClassification, IngestImageRequest,
-        IngestOutcome, LibrarySummary, MetadataBackup, PurgeSummary, TrashPage, TrashPolicy,
+        AssetClassificationPatch, AssetCursor, AssetPage, AssetQuery, AssetSummary,
+        ClassificationEntry, CreateClassification, IngestImageRequest, IngestOutcome,
+        LibrarySummary, MetadataBackup, PurgeSummary, SimilarityDecisionOutcome,
+        SimilarityDecisionRequest, SimilarityIndexProgress, SimilarityReviewPage, TrashPage,
+        TrashPolicy,
     },
     Library,
 };
@@ -28,6 +32,9 @@ impl From<LibraryError> for CommandError {
     fn from(error: LibraryError) -> Self {
         let message = match &error {
             LibraryError::Backup { .. } => "SQLite 백업 작업에 실패했습니다.".into(),
+            LibraryError::WriteAsset { .. } => {
+                "이미지 파일을 정리하지 못했습니다. 다시 시도해 주세요.".into()
+            }
             _ => error.to_string(),
         };
         let code = match error {
@@ -48,8 +55,14 @@ impl From<LibraryError> for CommandError {
             LibraryError::ClassificationCycle => "classification_cycle",
             LibraryError::ClassificationNotEmpty => "classification_not_empty",
             LibraryError::AssetNotFound => "asset_not_found",
+            LibraryError::EmptyAssetSelection => "empty_asset_selection",
+            LibraryError::InvalidAssetSelection => "invalid_asset_selection",
+            LibraryError::AssetDragFailed { .. } => "asset_drag_failed",
             LibraryError::InvalidAssetPageLimit => "invalid_asset_page_limit",
             LibraryError::InvalidAssetCursor => "invalid_asset_cursor",
+            LibraryError::InvalidPerceptualHash => "invalid_perceptual_hash",
+            LibraryError::SimilarityReviewNotFound => "similarity_review_not_found",
+            LibraryError::SimilarityReviewConflict => "similarity_review_conflict",
             LibraryError::InvalidTrashTimestamp => "invalid_trash_timestamp",
             LibraryError::MediaNotFound => "media_not_found",
             LibraryError::UnsafeMediaPath => "unsafe_media_path",
@@ -76,12 +89,24 @@ pub fn open_library(
     path: String,
     state: State<'_, AppState>,
 ) -> Result<LibrarySummary, CommandError> {
-    let library = open_library_at(path)?;
-    let summary = library.summary().map_err(CommandError::from)?;
-    *state
+    open_library_in_state(path, &state)
+}
+
+fn open_library_in_state(path: String, state: &AppState) -> Result<LibrarySummary, CommandError> {
+    let mut current = state
         .library
         .write()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(library);
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(library) = current
+        .as_ref()
+        .filter(|library| library.root() == std::path::Path::new(&path))
+    {
+        return library.summary().map_err(CommandError::from);
+    }
+
+    let library = open_library_at(path)?;
+    let summary = library.summary().map_err(CommandError::from)?;
+    *current = Some(library);
     Ok(summary)
 }
 
@@ -200,6 +225,50 @@ pub fn list_assets(
 }
 
 #[tauri::command]
+pub async fn index_missing_similarity_hashes(
+    state: State<'_, AppState>,
+) -> Result<SimilarityIndexProgress, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.index_missing_similarity_hashes())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn list_similarity_reviews(
+    after: Option<AssetCursor>,
+    limit: u32,
+    state: State<'_, AppState>,
+) -> Result<SimilarityReviewPage, CommandError> {
+    current_required(state)?
+        .list_similarity_reviews(after, limit)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn decide_similarity_review(
+    request: SimilarityDecisionRequest,
+    state: State<'_, AppState>,
+) -> Result<SimilarityDecisionOutcome, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.decide_similarity_review(request))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn get_asset(
+    asset_id: String,
+    state: State<'_, AppState>,
+) -> Result<AssetSummary, CommandError> {
+    current_required(state)?
+        .get_asset(&asset_id)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub fn trash_asset(asset_id: String, state: State<'_, AppState>) -> Result<(), CommandError> {
     current_required(state)?
         .trash_asset(&asset_id)
@@ -207,9 +276,29 @@ pub fn trash_asset(asset_id: String, state: State<'_, AppState>) -> Result<(), C
 }
 
 #[tauri::command]
+pub fn trash_assets(
+    asset_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    current_required(state)?
+        .trash_assets(&asset_ids)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub fn restore_asset(asset_id: String, state: State<'_, AppState>) -> Result<(), CommandError> {
     current_required(state)?
         .restore_asset(&asset_id)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn restore_assets(
+    asset_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    current_required(state)?
+        .restore_assets(&asset_ids)
         .map_err(CommandError::from)
 }
 
@@ -267,6 +356,17 @@ pub fn set_asset_favorite(
 }
 
 #[tauri::command]
+pub fn set_assets_favorite(
+    asset_ids: Vec<String>,
+    favorite: bool,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    current_required(state)?
+        .set_assets_favorite(&asset_ids, favorite)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub fn set_asset_classifications(
     asset_id: String,
     classification_ids: Vec<String>,
@@ -274,6 +374,16 @@ pub fn set_asset_classifications(
 ) -> Result<(), CommandError> {
     current_required(state)?
         .set_asset_classifications(&asset_id, &classification_ids)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn patch_asset_classifications(
+    patch: AssetClassificationPatch,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    current_required(state)?
+        .patch_asset_classifications(patch)
         .map_err(CommandError::from)
 }
 
@@ -290,6 +400,58 @@ pub async fn ingest_image(
             message: error.to_string(),
         })?
         .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn start_asset_drag(
+    asset_ids: Vec<String>,
+    window: tauri::Window,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let prepared = current_required(state)?
+        .prepare_asset_drag(&asset_ids)
+        .map_err(CommandError::from)?;
+    let files = prepared.files.clone();
+    let preview = prepared.preview.clone();
+    let cleanup = Arc::new(Mutex::new(Some(prepared)));
+    let callback_cleanup = Arc::clone(&cleanup);
+    let result = drag::start_drag(
+        &window,
+        drag::DragItem::Files(files),
+        drag::Image::File(preview),
+        move |_result, _cursor| {
+            drop(
+                callback_cleanup
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .take(),
+            );
+        },
+        drag::Options {
+            mode: drag::DragMode::Copy,
+            ..Default::default()
+        },
+    );
+    if result.is_err() {
+        drop(
+            cleanup
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take(),
+        );
+        return Err(CommandError {
+            code: "asset_drag_failed",
+            message: "자산 드래그를 시작하지 못했습니다.".into(),
+        });
+    }
+    Ok(())
+}
+
+fn background_task_error() -> CommandError {
+    CommandError {
+        code: "background_task_failed",
+        message: "백그라운드 작업을 완료하지 못했습니다. 다시 시도해 주세요.".into(),
+    }
 }
 
 fn current(state: State<'_, AppState>) -> Option<Library> {
@@ -309,7 +471,7 @@ mod tests {
 
     use crate::library::error::LibraryError;
 
-    use super::{open_library_at, CommandError};
+    use super::{open_library_at, open_library_in_state, AppState, CommandError};
 
     #[test]
     fn command_error_has_stable_json_fields() {
@@ -360,6 +522,29 @@ mod tests {
     }
 
     #[test]
+    fn similarity_errors_have_stable_codes_without_internal_details() {
+        for (error, code) in [
+            (
+                LibraryError::InvalidPerceptualHash,
+                "invalid_perceptual_hash",
+            ),
+            (
+                LibraryError::SimilarityReviewNotFound,
+                "similarity_review_not_found",
+            ),
+            (
+                LibraryError::SimilarityReviewConflict,
+                "similarity_review_conflict",
+            ),
+        ] {
+            let error = CommandError::from(error);
+            assert_eq!(error.code, code);
+            assert!(!error.message.contains("review-1"));
+            assert!(!error.message.contains("C:\\library"));
+        }
+    }
+
+    #[test]
     fn backup_command_errors_do_not_expose_internal_backup_paths() {
         let error = CommandError::from(LibraryError::Backup {
             path: PathBuf::from(r"C:\\library\\backups\\daily-secret.sqlite"),
@@ -368,6 +553,19 @@ mod tests {
 
         assert!(!error.message.contains("daily-secret.sqlite"));
         assert!(!error.message.contains("C:\\library"));
+    }
+
+    #[test]
+    fn drag_command_errors_have_stable_codes_without_internal_paths() {
+        let invalid = CommandError::from(LibraryError::InvalidAssetSelection);
+        assert_eq!(invalid.code, "invalid_asset_selection");
+
+        let failed = CommandError::from(LibraryError::AssetDragFailed {
+            source: io::Error::other(r"C:\library\.drag-out\secret.png"),
+        });
+        assert_eq!(failed.code, "asset_drag_failed");
+        assert!(!failed.message.contains("secret.png"));
+        assert!(!failed.message.contains("C:\\library"));
     }
 
     #[test]
@@ -380,5 +578,19 @@ mod tests {
         assert_eq!(error.code, "library_root_unavailable");
         assert_eq!(error.message, "선택한 라이브러리 폴더를 찾을 수 없습니다.");
         assert!(!missing.exists());
+    }
+
+    #[test]
+    fn reopening_the_current_library_reuses_its_existing_lease() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("library");
+        std::fs::create_dir(&root).unwrap();
+        let state = AppState::default();
+
+        let first = open_library_in_state(root.to_string_lossy().into_owned(), &state).unwrap();
+        let second = open_library_in_state(root.to_string_lossy().into_owned(), &state).unwrap();
+
+        assert_eq!(second, first);
+        assert_eq!(second.root, root.to_string_lossy());
     }
 }

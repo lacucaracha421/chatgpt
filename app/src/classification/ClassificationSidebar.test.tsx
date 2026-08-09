@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState, type ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -23,8 +23,14 @@ function gateway(): LibraryGateway {
     moveClassification: vi.fn().mockResolvedValue(undefined),
     deleteClassification: vi.fn().mockResolvedValue(undefined),
     listAssets: vi.fn(),
+    indexMissingSimilarityHashes: vi.fn(),
+    listSimilarityReviews: vi.fn(),
+    decideSimilarityReview: vi.fn(),
+    getAsset: vi.fn(),
     trashAsset: vi.fn(),
+    trashAssets: vi.fn(),
     restoreAsset: vi.fn(),
+    restoreAssets: vi.fn(),
     listTrash: vi.fn(),
     emptyTrash: vi.fn(),
     getTrashPolicy: vi.fn(),
@@ -34,7 +40,9 @@ function gateway(): LibraryGateway {
     restoreMetadataBackup: vi.fn(),
     purgeExpiredTrash: vi.fn(),
     setAssetFavorite: vi.fn(),
+    setAssetsFavorite: vi.fn(),
     setAssetClassifications: vi.fn(),
+    patchAssetClassifications: vi.fn(),
     getAssetClassifications: vi.fn(),
     ingestImage: vi.fn(),
   };
@@ -60,6 +68,7 @@ function renderSidebar(
           view={view}
           expandedIds={expandedIds}
           sidebarWidth={sidebarWidth}
+          reviewCount={props.reviewCount ?? 0}
           onViewChange={(nextView) => {
             setView(nextView);
             onViewChange(nextView);
@@ -73,6 +82,7 @@ function renderSidebar(
             onSidebarWidthChange(width);
           }}
           onChanged={onChanged}
+          onOpenSafety={props.onOpenSafety}
         />
       </LibraryProvider>
     );
@@ -112,20 +122,40 @@ describe("ClassificationSidebar", () => {
     const user = userEvent.setup();
     const { onViewChange } = renderSidebar();
 
+    const quickViews = screen.getByRole("navigation", { name: "빠른 보기" });
+    expect(within(quickViews).getAllByRole("button").map((button) => button.textContent)).toEqual([
+      "전체 자산",
+      "미분류함",
+      "최근",
+      "즐겨찾기",
+      "유사 이미지 검토0",
+    ]);
+
+    await user.click(screen.getByRole("button", { name: "미분류함" }));
     await user.click(screen.getByRole("button", { name: "즐겨찾기" }));
     await user.click(screen.getByRole("button", { name: "최근" }));
     await user.click(screen.getByRole("button", { name: "전체 자산" }));
 
-    expect(onViewChange).toHaveBeenNthCalledWith(1, { kind: "favorites" });
-    expect(onViewChange).toHaveBeenNthCalledWith(2, { kind: "recent" });
-    expect(onViewChange).toHaveBeenNthCalledWith(3, { kind: "classification", classificationId: null });
+    expect(onViewChange).toHaveBeenNthCalledWith(1, { kind: "unsorted" });
+    expect(onViewChange).toHaveBeenNthCalledWith(2, { kind: "favorites" });
+    expect(onViewChange).toHaveBeenNthCalledWith(3, { kind: "recent" });
+    expect(onViewChange).toHaveBeenNthCalledWith(4, { kind: "classification", classificationId: null });
+  });
+
+  it("keeps trash and settings in the sidebar footer", () => {
+    renderSidebar(gateway(), { onOpenSafety: vi.fn() });
+
+    const trash = screen.getByRole("button", { name: "휴지통" });
+    const settings = screen.getByRole("button", { name: "라이브러리 안전 설정" });
+    expect(trash.closest(".classification-sidebar__footer")).not.toBeNull();
+    expect(settings.closest(".classification-sidebar__footer")).not.toBeNull();
   });
 
   it("opens trash from the shared quick-view navigation", async () => {
     const user = userEvent.setup();
     const { onViewChange } = renderSidebar();
 
-    await user.click(screen.getByRole("button", { name: "휴지통 보기" }));
+    await user.click(screen.getByRole("button", { name: "휴지통" }));
 
     expect(onViewChange).toHaveBeenCalledWith({ kind: "trash" });
   });
@@ -248,6 +278,7 @@ describe("ClassificationSidebar", () => {
           view={{ kind: "classification", classificationId: null }}
           expandedIds={expandedIds}
           sidebarWidth={232}
+          reviewCount={0}
           onViewChange={onViewChange}
           onExpandedIdsChange={onExpandedIdsChange}
           onSidebarWidthChange={onSidebarWidthChange}
@@ -292,21 +323,20 @@ describe("ClassificationSidebar", () => {
 
     trigger.focus();
     fireEvent.keyDown(trigger, { key: "ArrowDown" });
-    expect(trigger).toHaveFocus();
+    expect(screen.getByRole("menu")).toBeInTheDocument();
     expect(onViewChange).not.toHaveBeenCalled();
     expect(onExpandedIdsChange).not.toHaveBeenCalled();
 
-    await user.keyboard("{Enter}");
-    expect(screen.getByRole("menu")).toBeInTheDocument();
     await user.keyboard("{Escape}");
+    expect(trigger).toHaveFocus();
     await user.keyboard(" ");
     expect(screen.getByRole("menu")).toBeInTheDocument();
     expect(onViewChange).not.toHaveBeenCalled();
   });
 
-  it("emits integer sidebar widths clamped to 184 and 360", () => {
+  it("emits integer sidebar widths clamped to 176 and 320", () => {
     const { onSidebarWidthChange } = renderSidebar(gateway(), { sidebarWidth: 232 });
-    const handle = screen.getByRole("separator", { name: "사이드바 크기 조절" });
+    const handle = screen.getByRole("separator", { name: "사이드바 너비 조절" });
     Object.defineProperties(handle, {
       setPointerCapture: { configurable: true, value: vi.fn() },
       releasePointerCapture: { configurable: true, value: vi.fn() },
@@ -319,9 +349,18 @@ describe("ClassificationSidebar", () => {
     fireEvent.pointerMove(handle, { pointerId: 1, clientX: 400.4 });
     fireEvent.pointerUp(handle, { pointerId: 1 });
 
-    expect(onSidebarWidthChange).toHaveBeenNthCalledWith(1, 184);
-    expect(onSidebarWidthChange).toHaveBeenNthCalledWith(2, 360);
+    expect(onSidebarWidthChange).toHaveBeenNthCalledWith(1, 176);
+    expect(onSidebarWidthChange).toHaveBeenNthCalledWith(2, 320);
     expect(handle.setPointerCapture).toHaveBeenCalledWith(1);
     expect(handle.releasePointerCapture).toHaveBeenCalledWith(1);
+  });
+
+  it("opens the stable review queue entry and exposes its count", async () => {
+    const user = userEvent.setup();
+    const { onViewChange } = renderSidebar(gateway(), { reviewCount: 12 });
+
+    const button = screen.getByRole("button", { name: "유사 이미지 검토 12개" });
+    await user.click(button);
+    expect(onViewChange).toHaveBeenCalledWith({ kind: "similarity_review" });
   });
 });

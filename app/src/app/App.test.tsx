@@ -59,8 +59,14 @@ function gateway(): LibraryGateway {
     moveClassification: vi.fn(),
     deleteClassification: vi.fn(),
     listAssets: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
+    indexMissingSimilarityHashes: vi.fn(),
+    listSimilarityReviews: vi.fn().mockResolvedValue({ items: [], nextCursor: null, totalCount: 0 }),
+    decideSimilarityReview: vi.fn(),
+    getAsset: vi.fn(),
     trashAsset: vi.fn(),
+    trashAssets: vi.fn(),
     restoreAsset: vi.fn(),
+    restoreAssets: vi.fn(),
     listTrash: vi.fn().mockResolvedValue({ items: [], nextCursor: null, totalCount: 0, totalBytes: 0 }),
     emptyTrash: vi.fn(),
     getTrashPolicy: vi.fn().mockResolvedValue({ retentionDays: 30 }),
@@ -70,7 +76,9 @@ function gateway(): LibraryGateway {
     restoreMetadataBackup: vi.fn(),
     purgeExpiredTrash: vi.fn().mockResolvedValue({ deletedCount: 0, failedAssetIds: [] }),
     setAssetFavorite: vi.fn(),
+    setAssetsFavorite: vi.fn(),
     setAssetClassifications: vi.fn(),
+    patchAssetClassifications: vi.fn(),
     getAssetClassifications: vi.fn(),
     ingestImage: vi.fn(),
   };
@@ -102,7 +110,7 @@ describe("App", () => {
     const user = userEvent.setup();
 
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
-    await user.click(await screen.findByRole("button", { name: "휴지통 보기" }));
+    await user.click(await screen.findByRole("button", { name: "휴지통" }));
 
     await waitFor(() => expect(libraryGateway.listTrash).toHaveBeenCalledWith({ after: null, limit: 100 }));
   });
@@ -118,7 +126,7 @@ describe("App", () => {
     const user = userEvent.setup();
 
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={subscribeDrops} />);
-    await user.click(await screen.findByRole("button", { name: "휴지통 보기" }));
+    await user.click(await screen.findByRole("button", { name: "휴지통" }));
     await waitFor(() => expect(drop).toBeDefined());
     act(() => drop?.(["C:\\images\\ignored.png"]));
 
@@ -227,9 +235,8 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "복구 시작" }));
 
     await waitFor(() => expect(document.querySelector(".library-workspace")).toHaveAttribute("inert"));
-    const dialog = screen.getByRole("dialog");
-    fireEvent(dialog, new Event("cancel", { cancelable: true }));
-    expect(dialog).toHaveAttribute("open");
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("dialog")).toBeVisible();
     finishRestore();
     await waitFor(() => expect(document.querySelector(".library-workspace")).not.toHaveAttribute("inert"));
   });
@@ -241,18 +248,46 @@ describe("App", () => {
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} />);
 
     expect(await screen.findByRole("main", { name: "라이브러리 작업 공간" })).toBeInTheDocument();
-    expect(screen.getByRole("complementary", { name: "분류" })).toBeInTheDocument();
-    expect(screen.getByRole("toolbar", { name: "자산 도구" })).toBeInTheDocument();
+    const sidebar = screen.getByRole("complementary", { name: "분류" });
     const content = screen.getByRole("region", { name: "자산 내용" });
+    expect(sidebar).toBeInTheDocument();
+    expect(screen.getByRole("toolbar", { name: "자산 도구" })).toBeInTheDocument();
     expect(content).toBeInTheDocument();
-    expect(within(content).queryByRole("button", { name: "라이브러리 안전 설정" })).not.toBeInTheDocument();
-    expect(within(screen.getByRole("complementary", { name: "분류" }))
-      .getByRole("button", { name: "라이브러리 안전 설정" })).toBeInTheDocument();
     expect(screen.getByRole("contentinfo")).toBeInTheDocument();
+    expect(within(content).queryByRole("button", { name: "라이브러리 안전 설정" })).not.toBeInTheDocument();
+    expect(within(sidebar).getByRole("button", { name: "라이브러리 안전 설정" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Lakomics" })).not.toBeInTheDocument();
   });
 
-  it("ignores drops outside a concrete classification and explains how to enable them", async () => {
+  it("always opens all assets and maps the unsorted inbox to its query flag", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({
+      metadataVisible: false,
+      sidebarWidth: 264,
+      expandedClassificationIds: ["root-games"],
+      assetSort: "oldest",
+    }));
+    const libraryGateway = gateway();
+    const user = userEvent.setup();
+
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+
+    await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenCalledWith(expect.objectContaining({
+      classificationId: null,
+      favoriteOnly: false,
+      unclassifiedOnly: false,
+    })));
+    expect(screen.getByRole("button", { name: "전체 자산" })).toHaveAttribute("aria-current", "page");
+
+    await user.click(screen.getByRole("button", { name: "미분류함" }));
+    await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenLastCalledWith(expect.objectContaining({
+      classificationId: null,
+      favoriteOnly: false,
+      unclassifiedOnly: true,
+    })));
+  });
+
+  it("stores drops from broad views in the unclassified destination", async () => {
     localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
     let drop: ((paths: string[]) => void) | undefined;
     const subscribeDrops: DropSubscriber = async (handler) => {
@@ -260,34 +295,24 @@ describe("App", () => {
       return () => undefined;
     };
     const libraryGateway = gateway();
+    vi.mocked(libraryGateway.ingestImage).mockResolvedValue({ status: "added", asset });
     const user = userEvent.setup();
 
-    render(
-      <App
-        gateway={libraryGateway}
-        selectFolder={vi.fn()}
-        subscribeDrops={subscribeDrops}
-      />,
-    );
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={subscribeDrops} />);
 
     await user.click(await screen.findByRole("button", { name: "즐겨찾기" }));
     await waitFor(() => expect(drop).toBeDefined());
     act(() => drop?.(["C:\\images\\a.png"]));
-
-    expect(libraryGateway.ingestImage).not.toHaveBeenCalled();
-    expect(
-      screen.getByText("파일을 저장할 분류를 먼저 선택하세요."),
-    ).toBeVisible();
+    await waitFor(() => expect(libraryGateway.ingestImage).toHaveBeenCalledWith({ sourcePath: "C:\\images\\a.png", classificationId: null, sourceUrl: null }));
 
     await user.click(screen.getByRole("button", { name: "최근" }));
     act(() => drop?.(["C:\\images\\recent.png"]));
-    await Promise.resolve();
-
     await user.click(screen.getByRole("button", { name: "전체 자산" }));
     act(() => drop?.(["C:\\images\\all-assets.png"]));
-    await Promise.resolve();
 
-    expect(libraryGateway.ingestImage).not.toHaveBeenCalled();
+    await waitFor(() => expect(libraryGateway.ingestImage).toHaveBeenCalledTimes(3));
+    expect(libraryGateway.ingestImage).toHaveBeenNthCalledWith(2, { sourcePath: "C:\\images\\recent.png", classificationId: null, sourceUrl: null });
+    expect(libraryGateway.ingestImage).toHaveBeenNthCalledWith(3, { sourcePath: "C:\\images\\all-assets.png", classificationId: null, sourceUrl: null });
   });
 
   it("loads and saves the complete validated UI preference object", async () => {
@@ -312,7 +337,7 @@ describe("App", () => {
     await user.selectOptions(screen.getByLabelText("정렬"), "random");
     await user.click(metadata);
     await user.click(screen.getByRole("button", { name: "게임 접기" }));
-    const resizeHandle = screen.getByRole("separator", { name: "사이드바 크기 조절" });
+    const resizeHandle = screen.getByRole("separator", { name: "사이드바 너비 조절" });
     Object.defineProperties(resizeHandle, {
       setPointerCapture: { configurable: true, value: vi.fn() },
       releasePointerCapture: { configurable: true, value: vi.fn() },
@@ -327,11 +352,12 @@ describe("App", () => {
         sidebarWidth: 272,
         expandedClassificationIds: [],
         assetSort: "random",
+        thumbnailRowHeight: 180,
       }),
     );
   });
 
-  it("clears transient drop-result feedback while keeping status in the status bar", async () => {
+  it("keeps completed ingestion feedback in the work tray", async () => {
     localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
       let drop: ((paths: string[]) => void) | undefined;
       const subscribeDrops: DropSubscriber = async (handler) => {
@@ -354,22 +380,12 @@ describe("App", () => {
       act(() => drop?.(["C:\\images\\a.png"]));
       await waitFor(() => expect(libraryGateway.ingestImage).toHaveBeenCalledOnce());
 
-      vi.useFakeTimers();
-      try {
-        await act(async () => {
-          resolveIngest({ status: "added", asset });
-          await Promise.resolve();
-          await Promise.resolve();
-        });
-        expect(screen.getByRole("status")).toBeVisible();
-
-        await act(async () => vi.advanceTimersByTimeAsync(5_000));
-
-        expect(screen.queryByRole("status")).not.toBeInTheDocument();
-        expect(screen.getByRole("contentinfo")).toHaveTextContent("이미지 파일을 창으로 끌어놓으세요.");
-      } finally {
-        vi.useRealTimers();
-      }
+      await act(async () => {
+        resolveIngest({ status: "added", asset });
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(screen.getByRole("complementary", { name: "가져오기 작업" })).toHaveTextContent("추가 1");
   });
 
   it("shows setup and an error when restoring the saved library fails", async () => {
@@ -431,6 +447,7 @@ describe("App", () => {
         classificationId: "tag-arona",
         directOnly: false,
         favoriteOnly: false,
+        unclassifiedOnly: false,
         sort: "newest",
         randomPivot: null,
         after: null,
@@ -454,9 +471,7 @@ describe("App", () => {
 
     act(() => resolveIngest({ status: "added", asset }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent(
-      "저장했습니다",
-    );
+    expect(await screen.findByText(/추가 1 · 중복 0/)).toBeInTheDocument();
     await waitFor(() =>
       expect(libraryGateway.listAssets).toHaveBeenCalledTimes(
         callsBeforeDrop + 1,
@@ -466,6 +481,7 @@ describe("App", () => {
       classificationId: "tag-arona",
       directOnly: false,
       favoriteOnly: false,
+      unclassifiedOnly: false,
       sort: "newest",
       randomPivot: null,
       after: null,
@@ -486,6 +502,11 @@ describe("App", () => {
       status: "exact_duplicate",
       existingAssetId: "asset-existing",
     });
+    vi.mocked(libraryGateway.getAsset).mockResolvedValue({
+      ...asset,
+      id: "asset-existing",
+      originalName: "existing.png",
+    });
 
     const user = userEvent.setup();
     render(
@@ -503,6 +524,7 @@ describe("App", () => {
         classificationId: "root-games",
         directOnly: false,
         favoriteOnly: false,
+        unclassifiedOnly: false,
         sort: "newest",
         randomPivot: null,
         after: null,
@@ -514,14 +536,128 @@ describe("App", () => {
 
     act(() => drop?.(["C:\\images\\duplicate.png"]));
 
-    expect(await screen.findByRole("status")).toHaveTextContent(
-      "이미 보관된 파일입니다",
-    );
+    expect(await screen.findByText(/추가 0 · 중복 1/)).toBeInTheDocument();
     expect(libraryGateway.ingestImage).toHaveBeenCalledWith({
       sourcePath: "C:\\images\\duplicate.png",
       classificationId: "root-games",
       sourceUrl: null,
     });
     expect(libraryGateway.listAssets).toHaveBeenCalledTimes(callsBeforeDrop);
+    await user.click(screen.getByRole("button", { name: /duplicate.png 기존 이미지 열기/ }));
+    expect(libraryGateway.getAsset).toHaveBeenCalledWith("asset-existing");
+    expect(await screen.findByRole("img", { name: "existing.png" })).toBeInTheDocument();
+  });
+
+  it("drops an asset selection on a classification in one batch", async () => {
+    Object.defineProperties(HTMLElement.prototype, {
+      offsetWidth: { configurable: true, get: () => 900 },
+      clientWidth: { configurable: true, get: () => 840 },
+      offsetHeight: { configurable: true, get: () => 600 },
+      clientHeight: { configurable: true, get: () => 600 },
+    });
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games]);
+    vi.mocked(libraryGateway.listAssets).mockResolvedValue({ items: [asset], nextCursor: null });
+    vi.mocked(libraryGateway.patchAssetClassifications).mockResolvedValue(undefined);
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+
+    const tile = await screen.findByRole("option", { name: "arona.png" });
+    const target = await screen.findByRole("treeitem", { name: games.name });
+    Object.defineProperties(tile, {
+      setPointerCapture: { configurable: true, value: vi.fn() },
+      releasePointerCapture: { configurable: true, value: vi.fn() },
+    });
+    const elementFromPoint = vi.fn().mockReturnValue(target);
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: elementFromPoint });
+
+    fireEvent.pointerDown(tile, { button: 0, pointerId: 3, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(tile, { pointerId: 3, clientX: 20, clientY: 10 });
+    expect(target).toHaveAttribute("data-drop-state", "valid");
+    fireEvent.pointerUp(tile, { pointerId: 3, clientX: 20, clientY: 10 });
+
+    await waitFor(() => expect(libraryGateway.patchAssetClassifications).toHaveBeenCalledWith({
+      assetIds: ["asset-arona"],
+      addClassificationIds: ["root-games"],
+      removeClassificationIds: [],
+    }));
+  });
+
+  it("moves a classification but rejects its descendant as a target", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({
+      metadataVisible: true,
+      sidebarWidth: 232,
+      expandedClassificationIds: [games.id, blueArchive.id],
+      assetSort: "newest",
+      thumbnailRowHeight: 180,
+    }));
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games, blueArchive, arona]);
+    vi.mocked(libraryGateway.moveClassification).mockResolvedValue(undefined);
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+
+    const rootRow = await screen.findByRole("treeitem", { name: games.name });
+    const tagRow = await screen.findByRole("treeitem", { name: arona.name });
+    for (const row of [rootRow, tagRow]) Object.defineProperties(row, {
+      setPointerCapture: { configurable: true, value: vi.fn() },
+      releasePointerCapture: { configurable: true, value: vi.fn() },
+    });
+    const elementFromPoint = vi.fn().mockReturnValue(rootRow);
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: elementFromPoint });
+
+    fireEvent.pointerDown(tagRow, { button: 0, pointerId: 4, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(tagRow, { pointerId: 4, clientX: 20, clientY: 10 });
+    expect(rootRow).toHaveAttribute("data-drop-state", "valid");
+    fireEvent.pointerUp(tagRow, { pointerId: 4, clientX: 20, clientY: 10 });
+    await waitFor(() => expect(libraryGateway.moveClassification).toHaveBeenCalledWith(arona.id, games.id));
+
+    elementFromPoint.mockReturnValue(tagRow);
+    fireEvent.pointerDown(rootRow, { button: 0, pointerId: 5, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(rootRow, { pointerId: 5, clientX: 20, clientY: 10 });
+    expect(tagRow).toHaveAttribute("data-drop-state", "invalid");
+    fireEvent.pointerUp(rootRow, { pointerId: 5, clientX: 20, clientY: 10 });
+    expect(libraryGateway.moveClassification).toHaveBeenCalledTimes(1);
+  });
+
+  it("promotes an asset pointer drag to native copy once at the viewport boundary", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    Object.defineProperties(HTMLElement.prototype, {
+      offsetWidth: { configurable: true, get: () => 900 }, clientWidth: { configurable: true, get: () => 840 },
+      offsetHeight: { configurable: true, get: () => 600 }, clientHeight: { configurable: true, get: () => 600 },
+    });
+    Object.defineProperties(window, { innerWidth: { configurable: true, value: 1000 }, innerHeight: { configurable: true, value: 700 } });
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listAssets).mockResolvedValue({ items: [asset], nextCursor: null });
+    const startAssetDrag = vi.fn().mockResolvedValue(undefined);
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} startAssetDrag={startAssetDrag} />);
+    const tile = await screen.findByRole("option", { name: "arona.png" });
+    Object.defineProperties(tile, { setPointerCapture: { configurable: true, value: vi.fn() }, releasePointerCapture: { configurable: true, value: vi.fn() } });
+
+    fireEvent.pointerDown(tile, { button: 0, pointerId: 9, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(tile, { pointerId: 9, clientX: 1001, clientY: 100 });
+    fireEvent.pointerMove(tile, { pointerId: 9, clientX: 1002, clientY: 100 });
+    await waitFor(() => expect(startAssetDrag).toHaveBeenCalledOnce());
+    expect(startAssetDrag).toHaveBeenCalledWith([asset.id]);
+  });
+
+  it("does not start native drag after Escape and reports native failures in the work tray", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listAssets).mockResolvedValue({ items: [asset], nextCursor: null });
+    const startAssetDrag = vi.fn().mockRejectedValue(new Error("탐색기 복사 실패"));
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} startAssetDrag={startAssetDrag} />);
+    const tile = await screen.findByRole("option", { name: "arona.png" });
+    Object.defineProperties(tile, { setPointerCapture: { configurable: true, value: vi.fn() }, releasePointerCapture: { configurable: true, value: vi.fn() } });
+
+    fireEvent.pointerDown(tile, { button: 0, pointerId: 10, clientX: 100, clientY: 100 });
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.pointerMove(tile, { pointerId: 10, clientX: 1001, clientY: 100 });
+    expect(startAssetDrag).not.toHaveBeenCalled();
+
+    fireEvent.pointerDown(tile, { button: 0, pointerId: 11, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(tile, { pointerId: 11, clientX: 1001, clientY: 100 });
+    await waitFor(() => expect(screen.getByRole("button", { name: "실패 파일 다시 시도" })).toBeVisible());
+    expect(screen.getByRole("complementary", { name: "가져오기 작업" })).toHaveTextContent("탐색기 복사 실패");
   });
 });

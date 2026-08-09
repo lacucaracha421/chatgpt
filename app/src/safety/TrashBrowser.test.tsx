@@ -181,9 +181,10 @@ function createGateway(): LibraryGateway {
   return {
     openLibrary: vi.fn(), currentLibrary: vi.fn(), listClassifications: vi.fn(),
     createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(),
-    deleteClassification: vi.fn(), listAssets: vi.fn(), setAssetFavorite: vi.fn(),
-    setAssetClassifications: vi.fn(), getAssetClassifications: vi.fn(), ingestImage: vi.fn(),
-    trashAsset: vi.fn(), restoreAsset: vi.fn(),
+    deleteClassification: vi.fn(), listAssets: vi.fn(), indexMissingSimilarityHashes: vi.fn(),
+    listSimilarityReviews: vi.fn(), decideSimilarityReview: vi.fn(), getAsset: vi.fn(), setAssetFavorite: vi.fn(), setAssetsFavorite: vi.fn(),
+    setAssetClassifications: vi.fn(), patchAssetClassifications: vi.fn(), getAssetClassifications: vi.fn(), ingestImage: vi.fn(),
+    trashAsset: vi.fn(), trashAssets: vi.fn(), restoreAsset: vi.fn(), restoreAssets: vi.fn(),
     listTrash: vi.fn().mockResolvedValue({
       items: [{ asset: asset(), trashedAt: "2026-07-20T00:00:00Z", purgeAt: new Date(Date.now() + 12 * 86_400_000).toISOString() }],
       nextCursor: null,

@@ -48,16 +48,16 @@
 - Modify: `app/src/styles/global.css`
 - Modify: `app/src/layout/AppShell.tsx`
 - Modify: `app/src/layout/AppShell.test.tsx`
+- Modify: `app/src/assets/AssetToolbar.tsx`
 - Modify: `app/src/app/App.tsx`
 - Modify: `app/src/app/App.test.tsx`
-- Modify: `app/src/assets/AssetToolbar.tsx`
 - Modify: `app/src/classification/ClassificationSidebar.tsx`
 
 **Interfaces:**
-- Consumes: existing `AppShell({ sidebar, content, status })`
-- Produces: a stable sidebar + toolbar + content + status layout while `AssetBrowser` keeps ownership of its stateful `AssetToolbar`
+- Keeps: existing `AppShell({ sidebar, content, status })`
+- Produces: a stable four-region layout while `AssetBrowser` continues to own its stateful toolbar
 
-- [ ] **Step 1: Write failing shell and identity tests**
+- [x] **Step 1: Write failing shell and identity tests**
 
 Add assertions that the workspace has sidebar navigation, `toolbar`, main asset content, and `contentinfo`, that no floating `라이브러리 안전 설정` button exists in content, and that `tauri.conf.json`/`index.html` use `Lakomics`.
 
@@ -68,34 +68,33 @@ expect(within(screen.getByRole("region", { name: "자산 내용" }))
   .queryByRole("button", { name: "라이브러리 안전 설정" })).not.toBeInTheDocument();
 ```
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 Run: `Set-Location app; npm.cmd test -- src/layout/AppShell.test.tsx src/app/App.test.tsx`
 
-Expected: FAIL because `AppShell` has no toolbar slot and the safety button still floats above the browser.
+Expected: FAIL because the asset toolbar has no toolbar landmark and the safety button still floats above the browser.
 
-- [ ] **Step 3: Replace visual primitives without changing behavior**
+- [x] **Step 3: Replace visual primitives without changing behavior**
 
-Set package/product/window title to `Lakomics`. Replace orange accent tokens with a calm blue palette, add semantic tokens for elevated surfaces, selection, overlay, inspector width and drag insertion, and keep the 4px spacing scale. Rebuild the shell as sidebar + toolbar + gallery + statusbar. Keep the existing concrete-classification `이 분류만` range toggle beside the location control. Move the safety entry callback into the sidebar contract; do not move backup logic into `layout`.
+Set package/product/window title to `Lakomics`. Replace orange accent tokens with a calm blue palette, add semantic tokens for elevated surfaces, selection, overlay, inspector width and drag insertion, and keep the 4px spacing scale. Mark the existing `AssetToolbar` as the toolbar landmark instead of lifting its state through `AppShell`. Keep the existing concrete-classification `이 분류만` range toggle beside the location control. Move the safety entry callback into the sidebar contract; do not move backup logic into `layout`.
 
 ```tsx
 <main className="app-shell" aria-label="라이브러리 작업 공간">
-  <aside className="app-shell__sidebar">{sidebar}</aside>
   <div className="app-shell__workspace">
-    {toolbar}
+    {sidebar}
     <section className="app-shell__content">{content}</section>
   </div>
   {status}
 </main>
 ```
 
-- [ ] **Step 4: Verify shell tests and builds**
+- [x] **Step 4: Verify shell tests and builds**
 
 Run: `Set-Location app; npm.cmd test -- src/layout src/app; npm.cmd run build`
 
 Expected: PASS; the generated document and Tauri config both say `Lakomics`.
 
-- [ ] **Step 5: Commit the shell slice**
+- [x] **Step 5: Commit the shell slice**
 
 ```powershell
 git add app/index.html app/package.json app/src-tauri/Cargo.toml app/src-tauri/tauri.conf.json app/src/styles app/src/layout app/src/app
@@ -123,7 +122,7 @@ git commit -m "feat: establish Lakomics daily-use shell"
 - Adds `unclassifiedOnly: boolean` to `AssetQuery` in Rust and TypeScript
 - Keeps `classificationId`, `directOnly`, `favoriteOnly` unchanged for existing callers
 
-- [ ] **Step 1: Write RED Rust query tests**
+- [x] **Step 1: Write RED Rust query tests**
 
 Create one normal asset with no `asset_classifications` row and one classified asset. Query with `unclassified_only: true` and assert only the first is returned. Add a cursor test proving multiple unsorted pages have no duplicates.
 
@@ -141,13 +140,13 @@ let page = library.list_assets(AssetQuery {
 assert_eq!(ids(page), vec!["unclassified"]);
 ```
 
-- [ ] **Step 2: Run the Rust test and verify RED**
+- [x] **Step 2: Run the Rust test and verify RED**
 
 Run: `Set-Location app/src-tauri; cargo test unclassified`
 
 Expected: FAIL because `AssetQuery` lacks `unclassified_only`.
 
-- [ ] **Step 3: Implement the unclassified filter in one SQL seam**
+- [x] **Step 3: Implement the unclassified filter in one SQL seam**
 
 Add the boolean parameter to every sort query immediately after `favorite_only` and add:
 
@@ -160,7 +159,7 @@ AND (?4 = 0 OR NOT EXISTS (
 
 Shift cursor/limit parameters consistently in all four SQL statements and their `statement.query` calls. Do not add a second set of unsorted SQL constants.
 
-- [ ] **Step 4: Write RED React navigation tests**
+- [x] **Step 4: Write RED React navigation tests**
 
 Assert sidebar order `전체 자산`, `미분류함`, `최근`, `즐겨찾기`; selecting inbox requests `unclassifiedOnly: true`; initial render always requests all assets even if UI preferences contain unrelated values; settings and trash are in the footer.
 
@@ -173,11 +172,11 @@ expect(gateway.listAssets).toHaveBeenLastCalledWith(expect.objectContaining({
 }));
 ```
 
-- [ ] **Step 5: Implement the sidebar order and settings routing**
+- [x] **Step 5: Implement the sidebar order and settings routing**
 
 Add `unsorted` to `AssetView`, map it to the query flag, keep `LibraryWorkspace` initial view `{ kind: "classification", classificationId: null }`, and move `onOpenSafety` into `ClassificationSidebar`. Do not render a disabled review queue placeholder.
 
-- [ ] **Step 6: Verify Task 2**
+- [x] **Step 6: Verify Task 2**
 
 Run:
 
@@ -191,7 +190,7 @@ cargo test unclassified
 
 Expected: all commands exit 0.
 
-- [ ] **Step 7: Commit the navigation slice**
+- [x] **Step 7: Commit the navigation slice**
 
 ```powershell
 git add app/src app/src-tauri/src/library app/src-tauri/tests
@@ -221,7 +220,7 @@ git commit -m "feat: add unsorted inbox navigation"
 - Adds `thumbnailRowHeight: number` to `UiPreferences`, clamped to `96..320`, default `180`
 - `AssetGallery` receives `selectedAssetIds`, `focusAssetId`, `targetRowHeight` and reports pointer/keyboard selection gestures
 
-- [ ] **Step 1: Write exhaustive selection RED tests**
+- [x] **Step 1: Write exhaustive selection RED tests**
 
 Cover plain click, Ctrl toggle, Shift range, Ctrl+Shift additive range, Ctrl+A over loaded IDs only, selection reconciliation after page refresh, and arrow movement staying inside loaded IDs.
 
@@ -232,31 +231,31 @@ expect(applySelectionGesture(from("b"), ids, "d", { toggle: false, range: true }
   .toEqual(new Set(["b", "c", "d"]));
 ```
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run: `Set-Location app; npm.cmd test -- src/assets/selection.test.ts src/preferences/uiPreferences.test.ts`
 
 Expected: FAIL because the Module and preference do not exist.
 
-- [ ] **Step 3: Implement the pure selection Module and preference migration**
+- [x] **Step 3: Implement the pure selection Module and preference migration**
 
 Keep selection calculations free of React and DOM. Read older `lakomics.uiPreferences.v1` values by filling the new height default; do not rename the storage key just for an additive field.
 
-- [ ] **Step 4: Write gallery interaction RED tests**
+- [x] **Step 4: Write gallery interaction RED tests**
 
 Use `userEvent.keyboard("{Control>}a{/Control}")`, Ctrl/Shift clicks, Delete and Escape. Assert `aria-selected`, not `aria-pressed`, and assert that changing the slider changes row sizing without a new `listAssets` call.
 
-- [ ] **Step 5: Wire selection and density into existing virtualization**
+- [x] **Step 5: Wire selection and density into existing virtualization**
 
 Pass `thumbnailRowHeight` directly to `buildJustifiedRows`; keep `@tanstack/react-virtual`, overscan 3 and next-page threshold 5. Use a roving `tabIndex` for asset tiles, explicit image dimensions, `loading="lazy"`, and do not animate GIF thumbnails.
 
-- [ ] **Step 6: Verify Task 3**
+- [x] **Step 6: Verify Task 3**
 
 Run: `Set-Location app; npm.cmd test -- src/assets src/preferences; npm.cmd run build`
 
 Expected: all tests pass and list pagination tests remain unchanged.
 
-- [ ] **Step 7: Commit the gallery slice**
+- [x] **Step 7: Commit the gallery slice**
 
 ```powershell
 git add app/src/assets app/src/preferences app/src/shared/ui/Slider.tsx app/src/styles/global.css
@@ -300,7 +299,7 @@ restoreAssets(assetIds: string[]): Promise<void>;
 
 Rust exposes the same four operations on `Library`; existing single-asset methods delegate to the batch implementation to retain one rule seam.
 
-- [ ] **Step 1: Write transaction RED tests**
+- [x] **Step 1: Write transaction RED tests**
 
 Test adding one classification to two assets while retaining old classifications, removing only named classifications, rejecting unknown IDs without partial writes, bulk favorite, bulk trash, and bulk restore preserving metadata.
 
@@ -313,29 +312,29 @@ library.patch_asset_classifications(AssetClassificationPatch {
 assert_eq!(classification_ids(&library, "a"), set!["old-tag", "new-tag"]);
 ```
 
-- [ ] **Step 2: Run Rust tests and verify RED**
+- [x] **Step 2: Run Rust tests and verify RED**
 
 Run: `Set-Location app/src-tauri; cargo test batch_`
 
 Expected: FAIL because batch methods and request types are missing.
 
-- [ ] **Step 3: Implement batch operations behind `Library`**
+- [x] **Step 3: Implement batch operations behind `Library`**
 
 Validate non-empty, deduplicated ID lists and every referenced asset/classification before mutation. Use one SQLite transaction per call. Reuse the existing trash state transition and timestamp policy; do not loop over public single-asset methods with separate connections.
 
-- [ ] **Step 4: Add commands and gateway methods**
+- [x] **Step 4: Add commands and gateway methods**
 
 Expose `patch_asset_classifications`, `set_assets_favorite`, `trash_assets`, and `restore_assets`. Keep internal paths and SQL out of serialized request/response types.
 
-- [ ] **Step 5: Write RED toolbar and undo tests**
+- [x] **Step 5: Write RED toolbar and undo tests**
 
 Assert selected count, explicit `즐겨찾기 추가/제거`, classification add/remove, one bulk trash call, and an actionable Toast whose `실행 취소` calls `restoreAssets` with the exact IDs. A failed mutation must leave all selected tiles visible.
 
-- [ ] **Step 6: Implement batch toolbar and actionable Toast**
+- [x] **Step 6: Implement batch toolbar and actionable Toast**
 
 Extend `Toast` with optional `actionLabel`, `onAction`, and `actionDisabled`. Keep the Toast live region non-modal. Refresh the first page after a successful batch and reconcile selection against returned items.
 
-- [ ] **Step 7: Verify Task 4**
+- [x] **Step 7: Verify Task 4**
 
 Run:
 
@@ -348,7 +347,7 @@ cargo fmt --all --check
 cargo test batch_
 ```
 
-- [ ] **Step 8: Commit the batch slice**
+- [x] **Step 8: Commit the batch slice**
 
 ```powershell
 git add app/src app/src-tauri/src
@@ -386,31 +385,31 @@ type PointerDragState =
 
 The pure reducer starts dragging only after a 6px threshold. React owns pointer capture and renders one shared `DragLayer`.
 
-- [ ] **Step 1: Write pointer state RED tests**
+- [x] **Step 1: Write pointer state RED tests**
 
 Cover threshold, Escape/pointercancel, selected-vs-unselected asset payload, target enter/leave, and no text selection while dragging.
 
-- [ ] **Step 2: Implement the small pointer reducer and DragLayer**
+- [x] **Step 2: Implement the small pointer reducer and DragLayer**
 
 Do not use `draggable`, `dragstart`, `dataTransfer`, or a dependency. Use `pointerdown`, `pointermove`, `pointerup`, `pointercancel`, and `document.elementFromPoint`.
 
-- [ ] **Step 3: Write asset-to-classification RED tests**
+- [x] **Step 3: Write asset-to-classification RED tests**
 
 Drag a selected tile set over a classification row, assert visual target state, release, and expect one `patchAssetClassifications` call with only `addClassificationIds`.
 
-- [ ] **Step 4: Implement asset classification drops**
+- [x] **Step 4: Implement asset classification drops**
 
 Keyboard users keep the Task 4 classification menu. Drop failure preserves selection and reports a Toast.
 
-- [ ] **Step 5: Write classification move RED tests**
+- [x] **Step 5: Write classification move RED tests**
 
 Drag a tree row onto another row and assert `moveClassification(entryId, parentId)`. Assert self/descendant targets are visually invalid and never call the gateway.
 
-- [ ] **Step 6: Implement classification move targets**
+- [x] **Step 6: Implement classification move targets**
 
 Reuse `buildTree` ancestry data and the existing Rust cycle validation. Render a line for between-row insertion and a row highlight for child placement; map both to the existing single-parent model.
 
-- [ ] **Step 7: Verify and commit Task 5**
+- [x] **Step 7: Verify and commit Task 5**
 
 Run: `Set-Location app; npm.cmd test -- src/shared/interaction src/classification src/assets src/app; npm.cmd run build`
 
@@ -455,27 +454,27 @@ type IngestionWork = {
 
 `DropSubscriber` now passes the full union. `useFileDrop` returns `{ progress, over, works, retryFailed }`.
 
-- [ ] **Step 1: Write native event RED tests**
+- [x] **Step 1: Write native event RED tests**
 
 Assert `subscribeToTauriDrops` translates Tauri `over`, `drop`, and `cancel`; no event is lost during React rerenders; inactive maintenance/trash/settings states ignore drops.
 
-- [ ] **Step 2: Write destination behavior RED tests**
+- [x] **Step 2: Write destination behavior RED tests**
 
 Drop in all-assets/recent/favorites/unsorted and expect `classificationId: null`. Drop in a concrete classification and expect that ID. Ensure FIFO batches and exact-duplicate behavior remain unchanged.
 
-- [ ] **Step 3: Implement the full event subscription and destination rule**
+- [x] **Step 3: Implement the full event subscription and destination rule**
 
 Enable drops for every normal `AssetBrowser` view. Disable only trash, settings, and maintenance. The overlay says either `<분류 이름>에 저장` or `미분류함에 저장` and always lists the four accepted formats. Exact file validation happens after drop because Tauri `over` has no paths.
 
-- [ ] **Step 4: Write overlay/work tray RED tests**
+- [x] **Step 4: Write overlay/work tray RED tests**
 
 Assert full-window overlay on over, removal on cancel/drop, `aria-live` progress, one expandable work row, filename-only failure display, and retry of only failed source paths.
 
-- [ ] **Step 5: Implement overlay and in-memory work tray**
+- [x] **Step 5: Implement overlay and in-memory work tray**
 
 Keep the FIFO promise chain in `useFileDrop`. Store only the current session's batches; do not add SQLite jobs in this phase. Collapse completed successful work after the Toast; retain failures until dismissed or retried.
 
-- [ ] **Step 6: Verify and commit Task 6**
+- [x] **Step 6: Verify and commit Task 6**
 
 Run: `Set-Location app; npm.cmd test -- src/ingestion src/app src/layout; npm.cmd run build`
 
@@ -525,11 +524,11 @@ export type StartAssetDrag = (assetIds: string[]) => Promise<void>;
 
 The Tauri command is `start_asset_drag(asset_ids, window, state)`. It resolves paths in Rust and permits `drag::DragMode::Copy` only.
 
-- [ ] **Step 1: Add `drag = "2.1.1"` only to Windows target dependencies**
+- [x] **Step 1: Add `drag = "2.1.1"` only to Windows target dependencies**
 
 Do not add the Tauri drag plugin or an npm package. The custom command is smaller and prevents arbitrary filesystem paths from crossing the frontend Interface.
 
-- [ ] **Step 2: Write RED preparation tests**
+- [x] **Step 2: Write RED preparation tests**
 
 Test normal asset validation, trash/missing rejection, one and multiple assets, original filename preservation, case-insensitive duplicate filenames receiving ` (2)`, hard-link creation with copy fallback, cleanup on drop, and cleanup of stale drag directories at library open.
 
@@ -541,15 +540,15 @@ drop(prepared);
 assert!(!drag_staging_root.exists());
 ```
 
-- [ ] **Step 3: Implement safe staging in `library/drag_out.rs`**
+- [x] **Step 3: Implement safe staging in `library/drag_out.rs`**
 
 Create a UUID directory under a library-owned `.drag-out` root. Resolve only `status = 'normal'` asset and thumbnail relative paths, canonicalize them under the library root, create original-name hard links, and fall back to `std::fs::copy` only when hard links fail. `Drop` removes only its exact UUID directory. Library open removes stale children under `.drag-out` after validating the resolved parent.
 
-- [ ] **Step 4: Write RED command tests around path secrecy and copy mode**
+- [x] **Step 4: Write RED command tests around path secrecy and copy mode**
 
 Keep `PreparedAssetDrag` fields non-serializable. Add stable `asset_drag_failed` and `invalid_asset_selection` errors without internal paths in `CommandError.message`.
 
-- [ ] **Step 5: Implement `start_asset_drag` on the Tauri main thread**
+- [x] **Step 5: Implement `start_asset_drag` on the Tauri main thread**
 
 Resolve the prepared files first, then call:
 
@@ -565,15 +564,15 @@ drag::start_drag(
 
 Return command setup failures; completion/cancel cleanup happens in the callback. Never accept a path from TypeScript.
 
-- [ ] **Step 6: Write frontend RED tests**
+- [x] **Step 6: Write frontend RED tests**
 
 Mock only `StartAssetDrag`. Assert leaving the viewport during an armed asset pointer drag passes selected IDs, an unselected tile passes only its own ID, Escape does not start native drag, and failures appear in the work tray.
 
-- [ ] **Step 7: Connect pointer exit to the native command**
+- [x] **Step 7: Connect pointer exit to the native command**
 
 Create a small `startAssetDrag` adapter that invokes `start_asset_drag`. The internal pointer drag remains active inside the viewport for sidebar classification; crossing the viewport boundary promotes the same payload to native drag-out exactly once.
 
-- [ ] **Step 8: Run automated verification**
+- [x] **Step 8: Run automated verification**
 
 ```powershell
 Set-Location app
@@ -585,7 +584,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test drag_out
 ```
 
-- [ ] **Step 9: Run mandatory Windows Explorer acceptance**
+- [x] **Step 9: Run mandatory Windows Explorer acceptance**
 
 Use an isolated test library and verify:
 
@@ -598,7 +597,7 @@ Use an isolated test library and verify:
 
 Record exact paths and results in `app/README.md`. If any boundary fails, keep Task 7 incomplete and debug the native seam; do not substitute a folder picker.
 
-- [ ] **Step 10: Commit the native drag slice**
+- [x] **Step 10: Commit the native drag slice**
 
 ```powershell
 git add app/src-tauri app/src/drag-out app/src/assets app/src/app app/src/styles/global.css app/README.md
@@ -626,23 +625,23 @@ git commit -m "feat: copy selected assets by native drag"
 - `AssetInspector({ assets, classifications, open, onOpenChange, onPatchClassifications })`
 - Viewer navigation is limited to the currently loaded ordered `items`
 
-- [ ] **Step 1: Write viewer RED tests**
+- [x] **Step 1: Write viewer RED tests**
 
 Assert double-click/Enter opens, left/right changes active ID, Escape closes, boundary keys do not wrap, GIF uses the original asset URL, ordinary images use the original asset URL only after open, and focus returns to the source tile.
 
-- [ ] **Step 2: Implement viewer by replacing the old detail dialog**
+- [x] **Step 2: Implement viewer by replacing the old detail dialog**
 
 Use the existing native `Dialog` Interface with a fullscreen variant; do not create a second focus-trap implementation. Show a contained image, compact controls and no always-visible metadata card.
 
-- [ ] **Step 3: Write inspector RED tests**
+- [x] **Step 3: Write inspector RED tests**
 
 Assert default closed, one-asset metadata, multi-selection summary, source link opening through the existing opener path, and classification add/remove using Task 4's batch Interface.
 
-- [ ] **Step 4: Implement the collapsible inspector**
+- [x] **Step 4: Implement the collapsible inspector**
 
 Keep inspector state in `AssetBrowser`; use CSS grid to reserve width only while open. At narrow widths, render it as an overlay panel instead of shrinking the gallery below its minimum width.
 
-- [ ] **Step 5: Verify and commit Task 8**
+- [x] **Step 5: Verify and commit Task 8**
 
 Run: `Set-Location app; npm.cmd test -- src/assets src/shared; npm.cmd run build`
 

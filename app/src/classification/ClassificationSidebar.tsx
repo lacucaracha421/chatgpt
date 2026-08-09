@@ -1,14 +1,17 @@
-import { ChevronDown, ChevronRight, Clock3, Ellipsis, FolderTree, Plus, Star, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Clock3, Ellipsis, FolderTree, Images, Inbox, Plus, Settings, Star, Trash2 } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
 import { useLibrary } from "../library/LibraryContext";
 import type { AssetView, ClassificationEntry, ClassificationKind } from "../library/types";
+import { clampSidebarWidth } from "../layout/sidebarWidth";
 import { Button } from "../shared/ui/Button";
+import { ContextMenu } from "../shared/ui/ContextMenu";
 import { Dialog } from "../shared/ui/Dialog";
 import { Menu, type MenuItem } from "../shared/ui/Menu";
 import { Select } from "../shared/ui/Select";
 import { TextField } from "../shared/ui/TextField";
 import { Toast } from "../shared/ui/Toast";
+import type { ClassificationDropTarget, InternalDragPayload } from "../shared/interaction/pointerDrag";
 import { buildClassificationTree, type ClassificationTreeNode } from "./buildTree";
 
 type ClassificationSidebarProps = {
@@ -16,18 +19,22 @@ type ClassificationSidebarProps = {
   view: AssetView;
   expandedIds: string[];
   sidebarWidth: number;
+  reviewCount: number;
   onViewChange: (view: AssetView) => void;
   onExpandedIdsChange: (ids: string[]) => void;
   onSidebarWidthChange: (width: number) => void;
   onChanged: () => void;
+  onOpenSafety?: () => void;
+  dragTarget?: ClassificationDropTarget | null;
+  onPointerDragStart?: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => void;
+  onPointerDragMove?: (event: React.PointerEvent<HTMLElement>) => void;
+  onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void;
+  onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void;
 };
 
 type DialogState =
   | { type: "create"; parentId: string | null; kinds: ClassificationKind[] }
   | { type: "rename" | "move" | "delete"; entry: ClassificationEntry };
-
-const MIN_SIDEBAR_WIDTH = 184;
-const MAX_SIDEBAR_WIDTH = 360;
 
 export function ClassificationSidebar({
   entries,
@@ -36,7 +43,14 @@ export function ClassificationSidebar({
   onExpandedIdsChange,
   onSidebarWidthChange,
   onViewChange,
+  onOpenSafety,
+  dragTarget,
+  onPointerDragStart,
+  onPointerDragMove,
+  onPointerDragEnd,
+  onPointerDragCancel,
   sidebarWidth,
+  reviewCount,
   view,
 }: ClassificationSidebarProps) {
   const { gateway } = useLibrary();
@@ -198,7 +212,7 @@ export function ClassificationSidebar({
     const activeResize = resize.current;
     if (!activeResize || activeResize.pointerId !== event.pointerId) return;
     onSidebarWidthChange(
-      Math.round(Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, activeResize.startWidth + event.clientX - activeResize.startX))),
+      clampSidebarWidth(Math.round(activeResize.startWidth + event.clientX - activeResize.startX)),
     );
   }
 
@@ -218,9 +232,10 @@ export function ClassificationSidebar({
       </div>
       <nav className="classification-sidebar__quick-views" aria-label="빠른 보기">
         <QuickViewButton icon={<FolderTree aria-hidden="true" />} label="전체 자산" selected={view.kind === "classification" && view.classificationId === null} onClick={() => onViewChange({ kind: "classification", classificationId: null })} />
-        <QuickViewButton icon={<Star aria-hidden="true" />} label="즐겨찾기" selected={view.kind === "favorites"} onClick={() => onViewChange({ kind: "favorites" })} />
+        <QuickViewButton icon={<Inbox aria-hidden="true" />} label="미분류함" selected={view.kind === "unsorted"} onClick={() => onViewChange({ kind: "unsorted" })} />
         <QuickViewButton icon={<Clock3 aria-hidden="true" />} label="최근" selected={view.kind === "recent"} onClick={() => onViewChange({ kind: "recent" })} />
-        <QuickViewButton icon={<Trash2 aria-hidden="true" />} label="휴지통 보기" selected={view.kind === "trash"} onClick={() => onViewChange({ kind: "trash" })} />
+        <QuickViewButton icon={<Star aria-hidden="true" />} label="즐겨찾기" selected={view.kind === "favorites"} onClick={() => onViewChange({ kind: "favorites" })} />
+        <QuickViewButton icon={<Images aria-hidden="true" />} label="유사 이미지 검토" count={reviewCount} selected={view.kind === "similarity_review"} onClick={() => onViewChange({ kind: "similarity_review" })} />
       </nav>
       {tree.orphans.length > 0 && <p className="classification-sidebar__warning" role="alert">연결되지 않은 분류는 숨겨집니다.</p>}
       <ul className="classification-sidebar__tree" role="tree">
@@ -239,11 +254,25 @@ export function ClassificationSidebar({
             onRename={(entry) => { setName(entry.name); setDialog({ type: "rename", entry }); }}
             onMove={(entry) => { setParentId(entry.parentId ?? ""); setDialog({ type: "move", entry }); }}
             onDelete={(entry) => setDialog({ type: "delete", entry })}
+            dragTarget={dragTarget}
+            onPointerDragStart={onPointerDragStart}
+            onPointerDragMove={onPointerDragMove}
+            onPointerDragEnd={onPointerDragEnd}
+            onPointerDragCancel={onPointerDragCancel}
           />
         ))}
       </ul>
+      <div className="classification-sidebar__footer">
+        <QuickViewButton icon={<Trash2 aria-hidden="true" />} label="휴지통" selected={view.kind === "trash"} onClick={() => onViewChange({ kind: "trash" })} />
+        {onOpenSafety && (
+          <Button type="button" onClick={onOpenSafety}>
+            <Settings aria-hidden="true" />
+            라이브러리 안전 설정
+          </Button>
+        )}
+      </div>
       <div
-        aria-label="사이드바 크기 조절"
+        aria-label="사이드바 너비 조절"
         className="classification-sidebar__resize-handle"
         role="separator"
         aria-orientation="vertical"
@@ -299,11 +328,11 @@ export function ClassificationSidebar({
   );
 }
 
-function QuickViewButton({ icon, label, onClick, selected }: { icon: React.ReactNode; label: string; onClick: () => void; selected: boolean }) {
-  return <button type="button" className="classification-sidebar__quick-view" aria-current={selected ? "page" : undefined} onClick={onClick}>{icon}<span>{label}</span></button>;
+function QuickViewButton({ icon, label, count, onClick, selected }: { icon: React.ReactNode; label: string; count?: number; onClick: () => void; selected: boolean }) {
+  return <button type="button" className="classification-sidebar__quick-view" aria-label={count === undefined ? undefined : `${label} ${count}개`} aria-current={selected ? "page" : undefined} onClick={onClick}>{icon}<span>{label}</span>{count !== undefined && <span className="classification-sidebar__badge" aria-hidden="true">{count}</span>}</button>;
 }
 
-function TreeItem({ activeRowId, expandedIds, node, onDelete, onMove, onRename, onRowFocus, onRowKeyDown, onToggleExpanded, onViewChange, registerTreeRow, view }: {
+function TreeItem({ activeRowId, expandedIds, node, onDelete, onMove, onRename, onRowFocus, onRowKeyDown, onToggleExpanded, onViewChange, registerTreeRow, view, dragTarget, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: {
   activeRowId: string | null;
   expandedIds: string[];
   node: ClassificationTreeNode;
@@ -316,6 +345,11 @@ function TreeItem({ activeRowId, expandedIds, node, onDelete, onMove, onRename, 
   onViewChange: (view: AssetView) => void;
   registerTreeRow: (id: string, element: HTMLDivElement | null) => void;
   view: AssetView;
+  dragTarget?: ClassificationDropTarget | null;
+  onPointerDragStart?: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => void;
+  onPointerDragMove?: (event: React.PointerEvent<HTMLElement>) => void;
+  onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void;
+  onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void;
 }) {
   const rowRef = useRef<HTMLDivElement>(null);
   const hasChildren = node.children.length > 0;
@@ -329,32 +363,41 @@ function TreeItem({ activeRowId, expandedIds, node, onDelete, onMove, onRename, 
 
   return (
     <li className="classification-sidebar__tree-item">
-      <div
-        ref={(element) => {
-          rowRef.current = element;
-          registerTreeRow(node.entry.id, element);
-        }}
-        className="classification-sidebar__tree-row"
-        role="treeitem"
-        aria-label={node.entry.name}
-        aria-selected={selected}
-        aria-expanded={hasChildren ? expanded : undefined}
-        tabIndex={node.entry.id === activeRowId ? 0 : -1}
-        onClick={() => onViewChange({ kind: "classification", classificationId: node.entry.id })}
-        onFocus={() => onRowFocus(node.entry.id)}
-        onKeyDown={(event) => onRowKeyDown(event, node)}
-      >
-        {hasChildren ? (
-          <Button type="button" size="icon" variant="ghost" aria-label={`${node.entry.name} ${expanded ? "접기" : "펼치기"}`} onClick={(event) => { event.stopPropagation(); onToggleExpanded(node.entry.id); }} onKeyDown={(event) => event.stopPropagation()}>
-            {expanded ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
-          </Button>
-        ) : <span className="classification-sidebar__tree-spacer" aria-hidden="true" />}
-        <span className="classification-sidebar__tree-label">{node.entry.name}</span>
-        <span onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-          <Menu label={`${node.entry.name} 추가 작업`} items={actions} trigger={<Ellipsis aria-hidden="true" />} contextTarget={rowRef} />
-        </span>
-      </div>
-      {hasChildren && expanded && <ul role="group">{node.children.map((child) => <TreeItem key={child.entry.id} node={child} view={view} expandedIds={expandedIds} activeRowId={activeRowId} onViewChange={onViewChange} onToggleExpanded={onToggleExpanded} onRowFocus={onRowFocus} onRowKeyDown={onRowKeyDown} registerTreeRow={registerTreeRow} onRename={onRename} onMove={onMove} onDelete={onDelete} />)}</ul>}
+      <ContextMenu items={actions}>
+        <div
+          ref={(element) => {
+            rowRef.current = element;
+            registerTreeRow(node.entry.id, element);
+          }}
+          className="classification-sidebar__tree-row"
+          data-classification-id={node.entry.id}
+          data-drop-state={dragTarget?.entryId === node.entry.id ? (dragTarget.valid ? "valid" : "invalid") : undefined}
+          data-drop-position={dragTarget?.entryId === node.entry.id ? dragTarget.position : undefined}
+          role="treeitem"
+          aria-label={node.entry.name}
+          aria-selected={selected}
+          aria-expanded={hasChildren ? expanded : undefined}
+          tabIndex={node.entry.id === activeRowId ? 0 : -1}
+          onClick={() => onViewChange({ kind: "classification", classificationId: node.entry.id })}
+          onFocus={() => onRowFocus(node.entry.id)}
+          onKeyDown={(event) => onRowKeyDown(event, node)}
+          onPointerDown={(event) => { if (event.button === 0 && !(event.target as HTMLElement).closest("button")) onPointerDragStart?.({ kind: "classification", entryId: node.entry.id }, event); }}
+          onPointerMove={onPointerDragMove}
+          onPointerUp={onPointerDragEnd}
+          onPointerCancel={onPointerDragCancel}
+        >
+          {hasChildren ? (
+            <Button type="button" size="icon" variant="ghost" aria-label={`${node.entry.name} ${expanded ? "접기" : "펼치기"}`} onClick={(event) => { event.stopPropagation(); onToggleExpanded(node.entry.id); }} onKeyDown={(event) => event.stopPropagation()}>
+              {expanded ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
+            </Button>
+          ) : <span className="classification-sidebar__tree-spacer" aria-hidden="true" />}
+          <span className="classification-sidebar__tree-label">{node.entry.name}</span>
+          <span onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+            <Menu label={`${node.entry.name} 추가 작업`} items={actions} trigger={<Ellipsis aria-hidden="true" />} />
+          </span>
+        </div>
+      </ContextMenu>
+      {hasChildren && expanded && <ul role="group">{node.children.map((child) => <TreeItem key={child.entry.id} node={child} view={view} expandedIds={expandedIds} activeRowId={activeRowId} onViewChange={onViewChange} onToggleExpanded={onToggleExpanded} onRowFocus={onRowFocus} onRowKeyDown={onRowKeyDown} registerTreeRow={registerTreeRow} onRename={onRename} onMove={onMove} onDelete={onDelete} dragTarget={dragTarget} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />)}</ul>}
     </li>
   );
 }
