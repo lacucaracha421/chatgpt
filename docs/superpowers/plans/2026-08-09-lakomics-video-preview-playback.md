@@ -737,7 +737,7 @@ git commit -m "feat: prepare dropped videos in background"
 - Consumes: video `MediaSummary`, `thumbnailUrl`, `playbackUrl`, `scrubFrameUrl`.
 - Produces: poster/pending/failed states, 200ms muted hover playback, progress-bar frame preview and seek, globally one active tile.
 
-- [ ] **Step 1: Write RED interaction tests**
+- [x] **Step 1: Write RED interaction tests**
 
 Use fake timers and mocked `HTMLMediaElement.play/pause/load`. Tests prove:
 
@@ -748,14 +748,14 @@ Use fake timers and mocked `HTMLMediaElement.play/pause/load`. Tests prove:
 - progress pointer events stop propagation so selection and asset drag callbacks are not called.
 - pending shows compact progress state; failed shows retry button; ready shows poster, video icon, duration.
 
-- [ ] **Step 2: Run RED tile tests**
+- [x] **Step 2: Run RED tile tests**
 
 ```powershell
 cd C:\chatgpt\app
 npm.cmd test -- src/video/VideoTileMedia.test.tsx src/assets/AssetGallery.test.tsx src/assets/AssetBrowser.test.tsx
 ```
 
-- [ ] **Step 3: Implement one-active-tile ownership**
+- [x] **Step 3: Implement one-active-tile ownership**
 
 Keep `activePreviewId` in `AssetGallery`, the nearest common owner; do not add context. `VideoTileMedia` receives `active`, `onRequestActive`, `onReleaseActive`, and `onRetry`. It renders `<img>` normally and creates `<video muted playsInline preload="metadata">` only when active.
 
@@ -763,7 +763,7 @@ Progress interaction uses pointer capture. While moving, show the discrete scrub
 
 Use design tokens for progress height, overlay background, duration chip, and status badge. Add only semantic video tokens used by both gallery and player.
 
-- [ ] **Step 4: Run GREEN gallery tests and accessibility checks**
+- [x] **Step 4: Run GREEN gallery tests and accessibility checks**
 
 ```powershell
 cd C:\chatgpt\app

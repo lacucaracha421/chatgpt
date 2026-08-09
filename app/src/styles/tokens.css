@@ -37,6 +37,8 @@
   --gallery-gap: 6px;
   --drag-insertion-width: 2px;
   --selection-indicator-width: 2px;
+  --video-progress-height: 6px;
+  --video-overlay-bg: rgba(7, 10, 15, 0.72);
   --shadow-floating: 0 8px 24px var(--color-overlay);
   --font-ui: "Segoe UI", sans-serif;
 }

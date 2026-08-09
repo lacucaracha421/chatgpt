@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssetSummary } from "../library/types";
@@ -9,6 +9,7 @@ beforeEach(() => Object.defineProperties(HTMLElement.prototype, {
 }));
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -119,6 +120,24 @@ describe("AssetGallery", () => {
 
     expect(image).toHaveProperty("draggable", false);
   });
+
+  it("keeps only one video hover preview active", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined);
+    render(<AssetGallery items={[videoAsset(0), videoAsset(1)]} />);
+    const first = screen.getByRole("option", { name: "video-0.webm" }).querySelector(".video-tile")!;
+    const second = screen.getByRole("option", { name: "video-1.webm" }).querySelector(".video-tile")!;
+    fireEvent.pointerEnter(first);
+    act(() => vi.advanceTimersByTime(200));
+    expect(screen.getByLabelText("video-0.webm 미리보기")).toBeInTheDocument();
+    fireEvent.pointerEnter(second);
+    act(() => vi.advanceTimersByTime(200));
+    expect(screen.queryByLabelText("video-0.webm 미리보기")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("video-1.webm 미리보기")).toBeInTheDocument();
+  });
 });
 
 function asset(index: number): AssetSummary { return { id: `asset-${index}`, title: null, originalName: `asset-${index}.png`, byteSize: 1, width: 200, height: 200, collectedAt: "2026-07-30T00:00:00Z", favorite: false, sourceUrl: null, media: { kind: "image" } }; }
+function videoAsset(index: number): AssetSummary { return { ...asset(index), id: `video-${index}`, originalName: `video-${index}.webm`, media: { kind: "video", durationMs: 10_000, preparationState: "ready", scrubFrameCount: 10 } }; }
