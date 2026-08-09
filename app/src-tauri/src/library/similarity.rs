@@ -639,7 +639,7 @@ mod tests {
     use super::super::{
         error::LibraryError,
         models::{
-            AssetCursor, ClassificationKind, CreateClassification, IngestImageRequest,
+            AssetCursor, ClassificationKind, CreateClassification, IngestMediaRequest,
             IngestOutcome, SimilarityDecision, SimilarityDecisionRequest,
         },
         Library,
@@ -1005,7 +1005,7 @@ mod tests {
             base.save(&existing_path).unwrap();
             assert!(matches!(
                 self.library
-                    .ingest_image(IngestImageRequest {
+                    .ingest_media(IngestMediaRequest {
                         source_path: existing_path,
                         classification_id: None,
                         source_url: None,
@@ -1019,7 +1019,7 @@ mod tests {
                 .unwrap();
             assert!(matches!(
                 self.library
-                    .ingest_image(IngestImageRequest {
+                    .ingest_media(IngestMediaRequest {
                         source_path: variant_path,
                         classification_id: None,
                         source_url: None,
@@ -1124,7 +1124,7 @@ mod tests {
         let existing_source = input.join("existing.png");
         base.save(&existing_source).unwrap();
         let existing_id = match library
-            .ingest_image(IngestImageRequest {
+            .ingest_media(IngestMediaRequest {
                 source_path: existing_source,
                 classification_id: Some(old_tag.clone()),
                 source_url: Some("https://example.com/old".into()),
@@ -1139,7 +1139,7 @@ mod tests {
             .save(&candidate_source)
             .unwrap();
         let review_id = match library
-            .ingest_image(IngestImageRequest {
+            .ingest_media(IngestMediaRequest {
                 source_path: candidate_source,
                 classification_id: Some(requested_tag.clone()),
                 source_url: Some("https://example.com/new".into()),

@@ -7,7 +7,7 @@ use app_lib::library::{
     error::LibraryError,
     models::{
         AssetCursor, AssetPage, AssetQuery, AssetSort, AssetSummary, ClassificationKind,
-        CreateClassification, IngestImageRequest, IngestOutcome, MediaSummary, TrashPolicy,
+        CreateClassification, IngestMediaRequest, IngestOutcome, MediaSummary, TrashPolicy,
     },
     Library,
 };
@@ -94,7 +94,7 @@ impl FoundationFixture {
 
     fn ingest_raw(&self, classification_id: &str) -> IngestOutcome {
         self.library
-            .ingest_image(IngestImageRequest {
+            .ingest_media(IngestMediaRequest {
                 source_path: self.source_path.clone(),
                 classification_id: Some(classification_id.into()),
                 source_url: None,
@@ -176,7 +176,7 @@ fn png_jpeg_and_gif_images_can_be_ingested() {
         let library = Library::open(temp.path().join("library")).unwrap();
 
         let outcome = library
-            .ingest_image(IngestImageRequest {
+            .ingest_media(IngestMediaRequest {
                 source_path: source_path.clone(),
                 classification_id: None,
                 source_url: None,
@@ -697,7 +697,7 @@ fn purge_expired_trash_removes_managed_files_and_metadata() {
 
 fn ingest(library: &Library, source_path: &Path, source_url: Option<&str>) -> AssetSummary {
     let outcome = library
-        .ingest_image(IngestImageRequest {
+        .ingest_media(IngestMediaRequest {
             source_path: source_path.to_path_buf(),
             classification_id: None,
             source_url: source_url.map(str::to_owned),

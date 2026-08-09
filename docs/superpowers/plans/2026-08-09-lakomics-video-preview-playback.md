@@ -409,7 +409,7 @@ git commit -m "feat: prepare derived video media"
 - Consumes: existing atomic image ingest, `VideoMedia::probe`, exact content hash lock.
 - Produces: `ingest_media(IngestMediaRequest) -> IngestOutcome`; images retain similarity review, videos return added/exact duplicate only.
 
-- [ ] **Step 1: Write RED integration tests**
+- [x] **Step 1: Write RED integration tests**
 
 Use tiny generated fixture files and a `#[cfg(test)]` probe hook in `ingestion.rs` rather than checking large real videos into git:
 
@@ -436,7 +436,7 @@ fn video_ingest_registers_original_and_pending_job_atomically() {
 #[test] fn existing_image_ingest_and_similarity_behavior_is_unchanged() { /* regression */ }
 ```
 
-- [ ] **Step 2: Run RED ingestion tests**
+- [x] **Step 2: Run RED ingestion tests**
 
 ```powershell
 cd C:\chatgpt\app\src-tauri
@@ -445,7 +445,7 @@ cargo test exact_duplicate_video
 cargo test existing_image_ingest_and_similarity_behavior_is_unchanged
 ```
 
-- [ ] **Step 3: Implement a single media entry point**
+- [x] **Step 3: Implement a single media entry point**
 
 Rename the request without changing JSON field names:
 
@@ -461,7 +461,7 @@ pub struct IngestMediaRequest {
 
 Keep `ingest_image` only as a private helper for the image branch; remove the public duplicate command instead of supporting two frontend contracts.
 
-- [ ] **Step 4: Run GREEN ingestion and full Rust tests**
+- [x] **Step 4: Run GREEN ingestion and full Rust tests**
 
 ```powershell
 cd C:\chatgpt\app\src-tauri
@@ -472,7 +472,7 @@ cargo test
 git diff --check
 ```
 
-- [ ] **Step 5: Commit Task 4**
+- [x] **Step 5: Commit Task 4**
 
 ```powershell
 git add app/src-tauri/src/library/models.rs app/src-tauri/src/library/ingestion.rs app/src-tauri/src/library/similarity.rs app/src-tauri/tests/foundation_flow.rs

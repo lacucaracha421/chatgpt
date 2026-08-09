@@ -17,8 +17,11 @@ use windows_sys::Win32::Storage::FileSystem::{
 
 use super::{
     error::LibraryError,
-    models::{AssetSummary, IngestImageRequest, IngestOutcome, MediaSummary},
+    models::{
+        AssetSummary, IngestMediaRequest, IngestOutcome, MediaSummary, VideoPreparationState,
+    },
     similarity::perceptual_hash_from_file,
+    video_media::{probe_video, VideoProbe},
     Library,
 };
 
@@ -26,11 +29,12 @@ const MAX_IMAGE_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_IMAGE_PIXELS: u64 = 200_000_000;
 
 impl Library {
-    pub fn ingest_image(&self, request: IngestImageRequest) -> Result<IngestOutcome, LibraryError> {
+    pub fn ingest_media(&self, request: IngestMediaRequest) -> Result<IngestOutcome, LibraryError> {
         let _ingestion_guard = self
             .ingestion_lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let kind = ingest_kind(&request.source_path)?;
         let source_metadata = fs::metadata(&request.source_path)
             .map_err(|source| read_source_error(&request.source_path, source))?;
         if !source_metadata.is_file() {
@@ -42,7 +46,7 @@ impl Library {
                 ),
             ));
         }
-        if source_metadata.len() > MAX_IMAGE_BYTES {
+        if matches!(kind, IngestKind::Image) && source_metadata.len() > MAX_IMAGE_BYTES {
             return Err(LibraryError::UnsupportedImage);
         }
 
@@ -55,10 +59,38 @@ impl Library {
         })?;
         let staging_path = staging_directory.join(format!("{}.part", uuid::Uuid::new_v4()));
         let mut pending = PendingFiles::new();
-        let (content_hash, byte_size) =
-            copy_and_hash(&request.source_path, &staging_path, &mut pending)?;
+        let maximum_bytes = matches!(kind, IngestKind::Image).then_some(MAX_IMAGE_BYTES);
+        let (content_hash, byte_size) = copy_and_hash(
+            &request.source_path,
+            &staging_path,
+            &mut pending,
+            maximum_bytes,
+        )?;
         run_staging_hook(&staging_path);
 
+        match kind {
+            IngestKind::Image => {
+                self.ingest_image(request, staging_path, content_hash, byte_size, pending)
+            }
+            IngestKind::Video(extension) => self.ingest_video(
+                request,
+                staging_path,
+                content_hash,
+                byte_size,
+                pending,
+                extension,
+            ),
+        }
+    }
+
+    fn ingest_image(
+        &self,
+        request: IngestMediaRequest,
+        staging_path: PathBuf,
+        content_hash: String,
+        byte_size: u64,
+        mut pending: PendingFiles,
+    ) -> Result<IngestOutcome, LibraryError> {
         let (format, width, height) = inspect_image(pending.owned_file(&staging_path)?)?;
         let existing_asset_id = self.find_asset_by_hash(&content_hash)?;
         if let Some(existing_asset_id) = existing_asset_id {
@@ -121,6 +153,55 @@ impl Library {
             Registration::Normal => IngestOutcome::Added { asset },
             Registration::Review { review_id, .. } => IngestOutcome::ReviewPending { review_id },
         })
+    }
+
+    fn ingest_video(
+        &self,
+        request: IngestMediaRequest,
+        staging_path: PathBuf,
+        content_hash: String,
+        byte_size: u64,
+        mut pending: PendingFiles,
+        extension: &'static str,
+    ) -> Result<IngestOutcome, LibraryError> {
+        if let Some(existing_asset_id) = self.find_asset_by_hash(&content_hash)? {
+            return Ok(IngestOutcome::ExactDuplicate { existing_asset_id });
+        }
+        run_after_duplicate_hook(self.root());
+        let probe = run_video_probe(&staging_path, extension)?;
+        let prefix = &content_hash[..2];
+        let relative_path = format!("assets/{prefix}/{content_hash}.{extension}");
+        let asset_path = self.root().join(&relative_path);
+        create_parent_directory(&asset_path)?;
+        install_staged_asset(&staging_path, &asset_path, &mut pending)?;
+
+        let asset = AssetSummary {
+            id: uuid::Uuid::new_v4().to_string(),
+            title: None,
+            original_name: original_name(&request.source_path),
+            relative_path,
+            thumbnail_relative_path: None,
+            byte_size,
+            width: probe.width,
+            height: probe.height,
+            collected_at: chrono::Utc::now().to_rfc3339(),
+            favorite: false,
+            source_url: request.source_url,
+            media: MediaSummary::Video {
+                duration_ms: probe.duration_ms,
+                preparation_state: VideoPreparationState::Pending,
+                scrub_frame_count: 0,
+            },
+        };
+        self.register_video_asset(
+            &asset,
+            &content_hash,
+            &probe,
+            request.classification_id.as_deref(),
+        )?;
+
+        pending.commit();
+        Ok(IngestOutcome::Added { asset })
     }
 
     fn validate_classification(&self, classification_id: Option<&str>) -> Result<(), LibraryError> {
@@ -221,6 +302,83 @@ impl Library {
         transaction.commit()?;
         Ok(())
     }
+
+    fn register_video_asset(
+        &self,
+        asset: &AssetSummary,
+        content_hash: &str,
+        probe: &VideoProbe,
+        classification_id: Option<&str>,
+    ) -> Result<(), LibraryError> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        transaction.execute(
+            "INSERT INTO assets (
+                id, content_hash, media_kind, title, original_name, relative_path,
+                thumbnail_relative_path, byte_size, width, height, source_url,
+                collected_at, favorite, status, perceptual_hash
+            ) VALUES (
+                ?1, ?2, 'video', ?3, ?4, ?5, NULL, ?6, ?7, ?8, ?9, ?10, ?11, 'normal', NULL
+            )",
+            params![
+                asset.id,
+                content_hash,
+                asset.title,
+                asset.original_name,
+                asset.relative_path,
+                asset.byte_size as i64,
+                asset.width as i64,
+                asset.height as i64,
+                asset.source_url.as_deref(),
+                asset.collected_at,
+                i64::from(asset.favorite),
+            ],
+        )?;
+        transaction.execute(
+            "INSERT INTO video_assets (
+                asset_id, duration_ms, container, video_codec, audio_codec, preparation_state
+            ) VALUES (?1, ?2, ?3, ?4, ?5, 'pending')",
+            params![
+                asset.id,
+                probe.duration_ms as i64,
+                probe.container,
+                probe.video_codec,
+                probe.audio_codec.as_deref(),
+            ],
+        )?;
+        if let Some(classification_id) = classification_id {
+            transaction.execute(
+                "INSERT INTO asset_classifications (asset_id, classification_id) VALUES (?1, ?2)",
+                params![asset.id, classification_id],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy)]
+enum IngestKind {
+    Image,
+    Video(&'static str),
+}
+
+fn ingest_kind(path: &Path) -> Result<IngestKind, LibraryError> {
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    match extension.as_str() {
+        "jpg" | "jpeg" | "png" | "gif" | "webp" => Ok(IngestKind::Image),
+        "mp4" => Ok(IngestKind::Video("mp4")),
+        "webm" => Ok(IngestKind::Video("webm")),
+        "mov" => Ok(IngestKind::Video("mov")),
+        "mkv" | "avi" | "m4v" | "wmv" | "flv" | "mpeg" | "mpg" => {
+            Err(LibraryError::UnsupportedVideo)
+        }
+        _ => Err(LibraryError::UnsupportedImage),
+    }
 }
 
 enum Registration {
@@ -236,6 +394,7 @@ fn copy_and_hash(
     source_path: &Path,
     staging_path: &Path,
     pending: &mut PendingFiles,
+    maximum_bytes: Option<u64>,
 ) -> Result<(String, u64), LibraryError> {
     let mut source =
         File::open(source_path).map_err(|source| read_source_error(source_path, source))?;
@@ -255,7 +414,7 @@ fn copy_and_hash(
         byte_size = byte_size
             .checked_add(read as u64)
             .ok_or(LibraryError::UnsupportedImage)?;
-        if byte_size > MAX_IMAGE_BYTES {
+        if maximum_bytes.is_some_and(|maximum| byte_size > maximum) {
             return Err(LibraryError::UnsupportedImage);
         }
         staging
@@ -612,6 +771,36 @@ fn run_after_duplicate_hook(root: &Path) {
 #[cfg(not(test))]
 fn run_after_duplicate_hook(_root: &Path) {}
 
+#[cfg(test)]
+type VideoProbeHook = Box<dyn Fn(&Path, &str) -> Result<VideoProbe, LibraryError>>;
+
+#[cfg(test)]
+thread_local! {
+    static VIDEO_PROBE_HOOK: std::cell::RefCell<Option<VideoProbeHook>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn set_video_probe_hook(hook: impl Fn(&Path, &str) -> Result<VideoProbe, LibraryError> + 'static) {
+    VIDEO_PROBE_HOOK.with(|video_probe_hook| {
+        *video_probe_hook.borrow_mut() = Some(Box::new(hook));
+    });
+}
+
+#[cfg(test)]
+fn run_video_probe(path: &Path, extension: &str) -> Result<VideoProbe, LibraryError> {
+    VIDEO_PROBE_HOOK.with(|video_probe_hook| {
+        video_probe_hook.borrow().as_ref().map_or_else(
+            || probe_video(path, extension),
+            |hook| hook(path, extension),
+        )
+    })
+}
+
+#[cfg(not(test))]
+fn run_video_probe(path: &Path, extension: &str) -> Result<VideoProbe, LibraryError> {
+    probe_video(path, extension)
+}
+
 #[cfg(windows)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct FileIdentity {
@@ -669,13 +858,14 @@ mod tests {
 
     use super::{
         clear_after_duplicate_hook, copy_and_hash, install_staged_asset, set_after_duplicate_hook,
-        set_staging_hook, LibraryError, PendingFiles,
+        set_staging_hook, set_video_probe_hook, LibraryError, PendingFiles, MAX_IMAGE_BYTES,
     };
     use crate::library::{
         models::{
             AssetQuery, AssetSort, AssetSummary, ClassificationKind, CreateClassification,
-            IngestImageRequest, IngestOutcome,
+            IngestMediaRequest, IngestOutcome, MediaSummary, VideoPreparationState,
         },
+        video_media::VideoProbe,
         Library,
     };
 
@@ -708,7 +898,7 @@ mod tests {
 
         fn ingest(&self) -> IngestOutcome {
             self.library
-                .ingest_image(IngestImageRequest {
+                .ingest_media(IngestMediaRequest {
                     source_path: self.source.clone(),
                     classification_id: None,
                     source_url: None,
@@ -762,7 +952,7 @@ mod tests {
             source_url: Option<String>,
         ) -> IngestOutcome {
             self.library
-                .ingest_image(IngestImageRequest {
+                .ingest_media(IngestMediaRequest {
                     source_path: path.to_path_buf(),
                     classification_id,
                     source_url,
@@ -816,6 +1006,20 @@ mod tests {
             .unwrap();
     }
 
+    fn stub_video_probe() {
+        set_video_probe_hook(|_, extension| {
+            Ok(VideoProbe {
+                container: extension.to_owned(),
+                video_codec: "vp9".into(),
+                audio_codec: Some("opus".into()),
+                duration_ms: 12_345,
+                width: 1280,
+                height: 720,
+                frame_rate: 30.0,
+            })
+        });
+    }
+
     fn vertical_stripes(width: u32, height: u32) -> DynamicImage {
         DynamicImage::ImageRgb8(ImageBuffer::from_fn(width, height, |x, _| {
             let light = (x / 32) % 2 == 0;
@@ -846,6 +1050,185 @@ mod tests {
             .root()
             .join(asset.thumbnail_relative_path.as_deref().unwrap())
             .is_file());
+    }
+
+    #[test]
+    fn video_ingest_registers_original_and_pending_job_atomically() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("clip.webm");
+        std::fs::write(&source, b"valid-video-fixture").unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        let classification = library
+            .create_classification(CreateClassification {
+                kind: ClassificationKind::Root,
+                name: "video".into(),
+                parent_id: None,
+            })
+            .unwrap();
+        stub_video_probe();
+
+        let outcome = library
+            .ingest_media(IngestMediaRequest {
+                source_path: source.clone(),
+                classification_id: Some(classification.id.clone()),
+                source_url: Some("https://example.test/post".into()),
+            })
+            .unwrap();
+
+        let IngestOutcome::Added { asset } = outcome else {
+            panic!("video ingest must add an asset");
+        };
+        assert_eq!(
+            asset.media,
+            MediaSummary::Video {
+                duration_ms: 12_345,
+                preparation_state: VideoPreparationState::Pending,
+                scrub_frame_count: 0,
+            }
+        );
+        assert_eq!(asset.width, 1280);
+        assert_eq!(asset.height, 720);
+        assert!(source.is_file());
+        assert!(library.root().join(&asset.relative_path).is_file());
+        assert_eq!(
+            library.get_asset_classifications(&asset.id).unwrap(),
+            vec![classification]
+        );
+        let pending_jobs: i64 = library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM video_assets WHERE asset_id = ?1 AND preparation_state = 'pending'",
+                [&asset.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(pending_jobs, 1);
+    }
+
+    #[test]
+    fn exact_duplicate_video_creates_no_second_asset_or_job() {
+        let temp = tempfile::tempdir().unwrap();
+        let first_source = temp.path().join("first.webm");
+        let second_source = temp.path().join("second.webm");
+        std::fs::write(&first_source, b"same-video-bytes").unwrap();
+        std::fs::write(&second_source, b"same-video-bytes").unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        stub_video_probe();
+        let first = library
+            .ingest_media(IngestMediaRequest {
+                source_path: first_source,
+                classification_id: None,
+                source_url: None,
+            })
+            .unwrap();
+        let IngestOutcome::Added { asset } = first else {
+            panic!("first video ingest must add an asset");
+        };
+
+        let second = library
+            .ingest_media(IngestMediaRequest {
+                source_path: second_source,
+                classification_id: None,
+                source_url: None,
+            })
+            .unwrap();
+
+        assert_eq!(
+            second,
+            IngestOutcome::ExactDuplicate {
+                existing_asset_id: asset.id,
+            }
+        );
+        let counts: (i64, i64) = library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM assets), (SELECT COUNT(*) FROM video_assets)",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(counts, (1, 1));
+    }
+
+    #[test]
+    fn video_ingest_never_creates_a_similarity_review() {
+        let temp = tempfile::tempdir().unwrap();
+        let first_source = temp.path().join("first.webm");
+        let second_source = temp.path().join("second.webm");
+        std::fs::write(&first_source, b"video-a").unwrap();
+        std::fs::write(&second_source, b"video-b").unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        stub_video_probe();
+
+        for source_path in [first_source, second_source] {
+            assert!(matches!(
+                library
+                    .ingest_media(IngestMediaRequest {
+                        source_path,
+                        classification_id: None,
+                        source_url: None,
+                    })
+                    .unwrap(),
+                IngestOutcome::Added { .. }
+            ));
+        }
+
+        let review_count: i64 = library
+            .connection()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM similarity_reviews", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(review_count, 0);
+    }
+
+    #[test]
+    fn unsupported_media_extension_leaves_no_managed_file_or_database_row() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("clip.mkv");
+        std::fs::write(&source, b"unsupported-video-fixture").unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+
+        let result = library.ingest_media(IngestMediaRequest {
+            source_path: source.clone(),
+            classification_id: None,
+            source_url: None,
+        });
+
+        assert!(matches!(result, Err(LibraryError::UnsupportedVideo)));
+        assert!(source.is_file());
+        assert_eq!(library.summary().unwrap().asset_count, 0);
+        assert!(library
+            .root()
+            .join("assets/.staging")
+            .read_dir()
+            .map(|mut entries| entries.next().is_none())
+            .unwrap_or(true));
+    }
+
+    #[test]
+    fn existing_image_ingest_and_similarity_behavior_is_unchanged() {
+        let fixture = SimilarityIngestionFixture::new();
+        let base = vertical_stripes(900, 600);
+        let original = fixture.write_png("original.png", &base);
+        let similar = fixture.write_jpeg(
+            "similar.jpg",
+            &base.resize_exact(450, 300, FilterType::Triangle),
+            70,
+        );
+
+        assert!(matches!(
+            fixture.ingest(&original, None, None),
+            IngestOutcome::Added { .. }
+        ));
+        assert!(matches!(
+            fixture.ingest(&similar, None, None),
+            IngestOutcome::ReviewPending { .. }
+        ));
+        assert_eq!(fixture.review_count(), 1);
     }
 
     #[test]
@@ -1000,7 +1383,7 @@ mod tests {
 
         let outcome = fixture
             .library
-            .ingest_image(IngestImageRequest {
+            .ingest_media(IngestMediaRequest {
                 source_path: fixture.source.clone(),
                 classification_id: Some(duplicate_classification.id),
                 source_url: Some("https://example.test/duplicate".into()),
@@ -1026,7 +1409,7 @@ mod tests {
     fn failed_ingest_keeps_source_and_does_not_leave_a_registered_file() {
         let fixture = IngestionFixture::new();
 
-        let result = fixture.library.ingest_image(IngestImageRequest {
+        let result = fixture.library.ingest_media(IngestMediaRequest {
             source_path: fixture.source.clone(),
             classification_id: Some("missing-classification".into()),
             source_url: None,
@@ -1044,7 +1427,7 @@ mod tests {
         std::fs::write(&source, b"not an image").unwrap();
         let library = Library::open(temp.path().join("library")).unwrap();
 
-        let result = library.ingest_image(IngestImageRequest {
+        let result = library.ingest_media(IngestMediaRequest {
             source_path: source.clone(),
             classification_id: None,
             source_url: None,
@@ -1056,9 +1439,8 @@ mod tests {
             .root()
             .join("assets/.staging")
             .read_dir()
-            .unwrap()
-            .next()
-            .is_none());
+            .map(|mut entries| entries.next().is_none())
+            .unwrap_or(true));
         assert_eq!(library.summary().unwrap().asset_count, 0);
     }
 
@@ -1071,7 +1453,7 @@ mod tests {
         std::fs::write(&staging, b"foreign staging bytes").unwrap();
 
         let mut pending = PendingFiles::new();
-        let result = copy_and_hash(&source, &staging, &mut pending);
+        let result = copy_and_hash(&source, &staging, &mut pending, Some(MAX_IMAGE_BYTES));
 
         assert!(matches!(result, Err(LibraryError::WriteAsset { .. })));
         assert_eq!(std::fs::read(&staging).unwrap(), b"foreign staging bytes");
@@ -1143,7 +1525,7 @@ mod tests {
 
         let error = fixture
             .library
-            .ingest_image(IngestImageRequest {
+            .ingest_media(IngestMediaRequest {
                 source_path: fixture.source.clone(),
                 classification_id: None,
                 source_url: None,
@@ -1182,7 +1564,7 @@ mod tests {
         let first_library = fixture.library.clone();
         let first_source = fixture.source.clone();
         let first = std::thread::spawn(move || {
-            first_library.ingest_image(IngestImageRequest {
+            first_library.ingest_media(IngestMediaRequest {
                 source_path: first_source,
                 classification_id: None,
                 source_url: None,
@@ -1191,7 +1573,7 @@ mod tests {
         let second_library = fixture.library.clone();
         let second_source = fixture.source.clone();
         let second = std::thread::spawn(move || {
-            second_library.ingest_image(IngestImageRequest {
+            second_library.ingest_media(IngestMediaRequest {
                 source_path: second_source,
                 classification_id: None,
                 source_url: None,

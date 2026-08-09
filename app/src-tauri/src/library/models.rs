@@ -25,7 +25,7 @@ pub struct TrashPolicy {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct IngestImageRequest {
+pub struct IngestMediaRequest {
     pub source_path: std::path::PathBuf,
     pub classification_id: Option<String>,
     pub source_url: Option<String>,

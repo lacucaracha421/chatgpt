@@ -17,7 +17,6 @@ use super::{
 const MAX_SCRUB_FRAMES: u64 = 240;
 
 #[derive(Debug, Clone, PartialEq)]
-#[allow(dead_code)] // The next ingestion task consumes probe metadata through this private boundary.
 pub(crate) struct VideoProbe {
     pub(crate) container: String,
     pub(crate) video_codec: String,
@@ -29,14 +28,12 @@ pub(crate) struct VideoProbe {
 }
 
 #[derive(Deserialize)]
-#[allow(dead_code)] // Deserialized by parse_probe when video ingestion is connected.
 struct ProbeOutput {
     streams: Vec<ProbeStream>,
     format: ProbeFormat,
 }
 
 #[derive(Deserialize)]
-#[allow(dead_code)] // Deserialized by parse_probe when video ingestion is connected.
 struct ProbeStream {
     codec_type: String,
     codec_name: Option<String>,
@@ -46,13 +43,11 @@ struct ProbeStream {
 }
 
 #[derive(Deserialize)]
-#[allow(dead_code)] // Deserialized by parse_probe when video ingestion is connected.
 struct ProbeFormat {
     format_name: String,
     duration: String,
 }
 
-#[allow(dead_code)] // probe is consumed by the next ingestion task; preparation methods are live now.
 pub(crate) trait VideoTool {
     fn probe(&self, source: &Path, extension: &str) -> Result<VideoProbe, LibraryError>;
     fn create_poster(&self, source: &Path, destination: &Path) -> Result<(), LibraryError>;
@@ -75,6 +70,10 @@ struct PendingVideo {
 }
 
 struct ProcessVideoTool;
+
+pub(crate) fn probe_video(source: &Path, extension: &str) -> Result<VideoProbe, LibraryError> {
+    ProcessVideoTool.probe(source, extension)
+}
 
 impl VideoTool for ProcessVideoTool {
     fn probe(&self, source: &Path, extension: &str) -> Result<VideoProbe, LibraryError> {
@@ -448,7 +447,6 @@ fn scrub_timestamps_ms(duration_ms: u64) -> Vec<u64> {
         .collect()
 }
 
-#[allow(dead_code)] // Called by ProcessVideoTool::probe once ingest_media is connected.
 pub(crate) fn parse_probe(json: &str, extension: &str) -> Result<VideoProbe, LibraryError> {
     let output: ProbeOutput =
         serde_json::from_str(json).map_err(|_| LibraryError::UnsupportedVideo)?;
@@ -516,7 +514,6 @@ pub(crate) fn parse_probe(json: &str, extension: &str) -> Result<VideoProbe, Lib
     })
 }
 
-#[allow(dead_code)] // Called by parse_probe once ingest_media is connected.
 fn parse_fraction(value: &str) -> Option<f64> {
     let (numerator, denominator) = value.split_once('/')?;
     let numerator = numerator.parse::<f64>().ok()?;

@@ -8,7 +8,7 @@ use crate::library::{
     error::LibraryError,
     models::{
         AssetClassificationPatch, AssetCursor, AssetPage, AssetQuery, AssetSummary,
-        ClassificationEntry, CreateClassification, IngestImageRequest, IngestOutcome,
+        ClassificationEntry, CreateClassification, IngestMediaRequest, IngestOutcome,
         LibrarySummary, MetadataBackup, PurgeSummary, SimilarityDecisionOutcome,
         SimilarityDecisionRequest, SimilarityIndexProgress, SimilarityReviewPage, TrashPage,
         TrashPolicy,
@@ -392,11 +392,11 @@ pub fn patch_asset_classifications(
 
 #[tauri::command]
 pub async fn ingest_image(
-    request: IngestImageRequest,
+    request: IngestMediaRequest,
     state: State<'_, AppState>,
 ) -> Result<IngestOutcome, CommandError> {
     let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.ingest_image(request))
+    tauri::async_runtime::spawn_blocking(move || library.ingest_media(request))
         .await
         .map_err(|error| CommandError {
             code: "ingest_failed",
