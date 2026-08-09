@@ -601,14 +601,16 @@ it("adapts every Tauri drag event without losing position or paths", async () =>
   const handler = vi.fn();
 
   const stop = await subscribeToTauriDrops(handler);
+  tauriHandler?.({ payload: { type: "enter", paths: ["C:\\images\\arona.png"], position: { x: 5, y: 6 } } });
   tauriHandler?.({ payload: { type: "over", position: { x: 10, y: 20 } } });
   tauriHandler?.({ payload: { type: "drop", paths: ["C:\\images\\arona.png"], position: { x: 30, y: 40 } } });
-  tauriHandler?.({ payload: { type: "cancel" } });
+  tauriHandler?.({ payload: { type: "leave" } });
 
   expect(handler.mock.calls.map(([event]) => event)).toEqual([
+    { type: "enter", paths: ["C:\\images\\arona.png"], position: { x: 5, y: 6 } },
     { type: "over", position: { x: 10, y: 20 } },
     { type: "drop", paths: ["C:\\images\\arona.png"], position: { x: 30, y: 40 } },
-    { type: "cancel" },
+    { type: "leave" },
   ]);
   stop();
   expect(unlisten).toHaveBeenCalledOnce();
@@ -631,6 +633,29 @@ it("shows native over state and clears it on cancel or drop", async () => {
   act(() => send?.({ type: "over", position: { x: 1, y: 2 } }));
   act(() => send?.({ type: "drop", paths: ["C:\\images\\arona.png"], position: { x: 1, y: 2 } }));
   expect(result.current.over).toBeNull();
+  await waitFor(() => expect(ingestMedia).toHaveBeenCalledOnce());
+});
+
+it("does not ingest until the drop event after dragging over", async () => {
+  let send: ((event: NativeFileDropEvent) => void) | undefined;
+  const subscribe: DropSubscriber = async (handler) => {
+    send = handler;
+    return () => undefined;
+  };
+  const ingestMedia = vi.fn().mockResolvedValue({ status: "added", asset: fixtureAsset });
+  const { result } = renderHook(() => useFileDrop({ enabled: true, subscribe, classificationId: null, ingestMedia, onResult: vi.fn() }));
+  await waitFor(() => expect(send).toBeDefined());
+
+  act(() => send?.({ type: "enter", paths: ["C:\\images\\arona.png"], position: { x: 5, y: 6 } }));
+  act(() => send?.({ type: "over", position: { x: 6, y: 7 } }));
+  act(() => send?.({ type: "leave" }));
+
+  expect(result.current.over).toBeNull();
+  expect(ingestMedia).not.toHaveBeenCalled();
+
+  act(() => send?.({ type: "enter", paths: ["C:\\images\\arona.png"], position: { x: 5, y: 6 } }));
+  act(() => send?.({ type: "drop", paths: ["C:\\images\\arona.png"], position: { x: 5, y: 6 } }));
+
   await waitFor(() => expect(ingestMedia).toHaveBeenCalledOnce());
 });
 

@@ -4,8 +4,10 @@ import { commandErrorMessage } from "../library/errorMessage";
 import type { AssetSummary, IngestOutcome, LibraryGateway } from "../library/types";
 
 export type NativeFileDropEvent =
+  | { type: "enter"; paths: string[]; position: { x: number; y: number } }
   | { type: "over"; position: { x: number; y: number } }
   | { type: "drop"; paths: string[]; position: { x: number; y: number } }
+  | { type: "leave" }
   | { type: "cancel" };
 
 type CompatibleDropEvent = NativeFileDropEvent | string[];
@@ -150,7 +152,7 @@ export function useFileDrop(options: UseFileDropOptions): FileDropState {
       const event: NativeFileDropEvent = Array.isArray(incoming)
         ? { type: "drop", paths: incoming, position: { x: 0, y: 0 } }
         : incoming;
-      if (event.type === "cancel") {
+      if (event.type === "cancel" || event.type === "leave") {
         setOver(null);
         return;
       }
@@ -158,7 +160,7 @@ export function useFileDrop(options: UseFileDropOptions): FileDropState {
         setOver(null);
         return;
       }
-      if (event.type === "over") {
+      if (event.type === "enter" || event.type === "over") {
         setOver(event.position);
         return;
       }
