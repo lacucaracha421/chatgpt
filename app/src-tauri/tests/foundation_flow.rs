@@ -13,7 +13,7 @@ use app_lib::library::{
 };
 use chrono::{TimeZone, Utc};
 use image::{ImageFormat, Rgb, RgbImage};
-use rusqlite::Connection;
+use rusqlite::{params, Connection};
 use tempfile::TempDir;
 
 struct ClassificationPath {
@@ -25,6 +25,17 @@ struct FoundationFixture {
     _temp: TempDir,
     library: Library,
     source_path: PathBuf,
+}
+
+struct MigrationFixture {
+    _temp: TempDir,
+    root: PathBuf,
+}
+
+impl MigrationFixture {
+    fn root(&self) -> &Path {
+        &self.root
+    }
 }
 
 impl FoundationFixture {
@@ -75,6 +86,9 @@ impl FoundationFixture {
         match self.ingest_raw(classification_id) {
             IngestOutcome::Added { asset } => asset,
             IngestOutcome::ExactDuplicate { .. } => panic!("first ingest must add an asset"),
+            IngestOutcome::ReviewPending { .. } => {
+                panic!("first ingest cannot need similarity review")
+            }
         }
     }
 
@@ -247,7 +261,7 @@ fn migrates_v1_after_creating_a_verified_snapshot() {
 
     let library = Library::open(&root).unwrap();
 
-    assert_eq!(user_version(&library), 2);
+    assert_eq!(user_version(&library), 3);
     assert_eq!(library.trash_policy().unwrap().retention_days, Some(30));
     assert!(!library.root().join("trash").exists());
     assert_eq!(library.summary().unwrap().asset_count, 1);
@@ -290,6 +304,30 @@ fn migrates_v1_after_creating_a_verified_snapshot() {
             "normal".into(),
         )
     );
+}
+
+#[test]
+fn version_two_library_migrates_similarity_state_after_a_verified_backup() {
+    let fixture = version_two_library();
+    let library = Library::open(fixture.root()).unwrap();
+    let connection = Connection::open(library.root().join("library.sqlite")).unwrap();
+
+    assert_eq!(user_version(&library), 3);
+    connection
+        .execute(
+            "UPDATE assets SET perceptual_hash = ?2 WHERE id = ?1",
+            params!["asset-1", vec![0_u8; 8]],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO similarity_reviews (
+                id, existing_asset_id, candidate_asset_id, distance, status, created_at
+             ) VALUES ('review-1', 'asset-1', 'asset-2', 2, 'open', '2026-08-09T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+    assert_eq!(pre_migration_backups(library.root()).len(), 1);
 }
 
 #[test]
@@ -610,6 +648,41 @@ fn write_image(path: &Path, format: ImageFormat) {
     RgbImage::from_pixel(8, 6, Rgb([40, 80, 120]))
         .save_with_format(path, format)
         .unwrap();
+}
+
+fn version_two_library() -> MigrationFixture {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("library");
+    fs::create_dir(&root).unwrap();
+    let database = Connection::open(root.join("library.sqlite")).unwrap();
+    database
+        .execute_batch(include_str!("../migrations/0001_initial.sql"))
+        .unwrap();
+    database
+        .execute_batch(include_str!("../migrations/0002_vault_safety.sql"))
+        .unwrap();
+    for (id, hash, name) in [
+        ("asset-1", "hash-1", "first.png"),
+        ("asset-2", "hash-2", "second.png"),
+    ] {
+        database
+            .execute(
+                "INSERT INTO assets (
+                    id, content_hash, media_kind, original_name, relative_path,
+                    thumbnail_relative_path, byte_size, width, height, collected_at
+                 ) VALUES (?1, ?2, 'image', ?3, ?4, ?5, 1, 1, 1, '2026-08-01T00:00:00Z')",
+                params![
+                    id,
+                    hash,
+                    name,
+                    format!("assets/{name}"),
+                    format!("thumbnails/{name}")
+                ],
+            )
+            .unwrap();
+    }
+    drop(database);
+    MigrationFixture { _temp: temp, root }
 }
 
 fn user_version(library: &Library) -> i64 {

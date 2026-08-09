@@ -944,6 +944,9 @@ mod tests {
             match outcome {
                 IngestOutcome::Added { .. } => added += 1,
                 IngestOutcome::ExactDuplicate { .. } => duplicate += 1,
+                IngestOutcome::ReviewPending { .. } => {
+                    panic!("identical concurrent ingests cannot create a similarity review")
+                }
             }
         }
         assert_eq!((added, duplicate), (1, 1));

@@ -63,6 +63,12 @@ pub enum LibraryError {
     InvalidAssetPageLimit,
     #[error("invalid asset cursor")]
     InvalidAssetCursor,
+    #[error("저장된 유사 이미지 해시가 올바르지 않습니다")]
+    InvalidPerceptualHash,
+    #[error("요청한 유사 이미지 검토를 찾을 수 없습니다")]
+    SimilarityReviewNotFound,
+    #[error("이미 다른 결정으로 처리 중이거나 완료된 검토입니다")]
+    SimilarityReviewConflict,
     #[error("invalid trash timestamp")]
     InvalidTrashTimestamp,
     #[error("요청한 미디어 파일을 찾을 수 없습니다")]

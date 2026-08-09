@@ -64,6 +64,67 @@ pub struct AssetCursor {
     pub token: String,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SimilarityDecision {
+    KeepExisting,
+    ReplaceExisting,
+    KeepBoth,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SimilarityDecisionRequest {
+    pub review_id: String,
+    pub decision: SimilarityDecision,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SimilarityReviewAsset {
+    pub asset: AssetSummary,
+    pub format: String,
+    pub classifications: Vec<ClassificationEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SimilarityReviewSummary {
+    pub id: String,
+    pub distance: u32,
+    pub existing: SimilarityReviewAsset,
+    pub candidate: SimilarityReviewAsset,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SimilarityReviewPage {
+    pub items: Vec<SimilarityReviewSummary>,
+    pub next_cursor: Option<AssetCursor>,
+    pub total_count: u64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SimilarityIndexProgress {
+    pub processed: u64,
+    pub remaining: u64,
+    pub failed: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SimilarityDecisionStatus {
+    Resolved,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SimilarityDecisionOutcome {
+    pub status: SimilarityDecisionStatus,
+    pub next_review_id: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AssetQuery {
@@ -125,6 +186,7 @@ pub struct PurgeSummary {
 pub enum IngestOutcome {
     Added { asset: AssetSummary },
     ExactDuplicate { existing_asset_id: String },
+    ReviewPending { review_id: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -161,7 +223,10 @@ pub struct LibrarySummary {
 
 #[cfg(test)]
 mod tests {
-    use super::{AssetSummary, BackupKind, MetadataBackup};
+    use super::{
+        AssetSummary, BackupKind, ClassificationEntry, ClassificationKind, MetadataBackup,
+        SimilarityReviewAsset, SimilarityReviewSummary,
+    };
 
     #[test]
     fn asset_summary_serialization_omits_managed_paths() {
@@ -199,5 +264,51 @@ mod tests {
         assert_eq!(value["id"], "550e8400-e29b-41d4-a716-446655440000");
         assert!(value.get("path").is_none());
         assert!(value.get("filename").is_none());
+    }
+
+    #[test]
+    fn similarity_review_serialization_omits_internal_hashes_and_paths() {
+        let asset = AssetSummary {
+            id: "asset-1".into(),
+            title: None,
+            original_name: "source.png".into(),
+            relative_path: "assets/aa/asset.png".into(),
+            thumbnail_relative_path: "thumbnails/aa/asset.webp".into(),
+            byte_size: 42,
+            width: 8,
+            height: 6,
+            collected_at: "2026-08-09T00:00:00Z".into(),
+            favorite: false,
+            source_url: Some("https://example.test/source".into()),
+        };
+        let review_asset = SimilarityReviewAsset {
+            asset,
+            format: "PNG".into(),
+            classifications: vec![ClassificationEntry {
+                id: "tag-1".into(),
+                kind: ClassificationKind::Tag,
+                name: "아로나".into(),
+                parent_id: Some("work-1".into()),
+            }],
+        };
+        let value = serde_json::to_value(SimilarityReviewSummary {
+            id: "review-1".into(),
+            distance: 2,
+            existing: review_asset.clone(),
+            candidate: review_asset,
+        })
+        .unwrap();
+
+        let serialized = value.to_string();
+        assert_eq!(value["existing"]["asset"]["id"], "asset-1");
+        for forbidden in [
+            "relativePath",
+            "thumbnailRelativePath",
+            "contentHash",
+            "perceptualHash",
+            "assets/aa/asset.png",
+        ] {
+            assert!(!serialized.contains(forbidden));
+        }
     }
 }

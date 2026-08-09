@@ -55,6 +55,9 @@ impl From<LibraryError> for CommandError {
             LibraryError::AssetDragFailed { .. } => "asset_drag_failed",
             LibraryError::InvalidAssetPageLimit => "invalid_asset_page_limit",
             LibraryError::InvalidAssetCursor => "invalid_asset_cursor",
+            LibraryError::InvalidPerceptualHash => "invalid_perceptual_hash",
+            LibraryError::SimilarityReviewNotFound => "similarity_review_not_found",
+            LibraryError::SimilarityReviewConflict => "similarity_review_conflict",
             LibraryError::InvalidTrashTimestamp => "invalid_trash_timestamp",
             LibraryError::MediaNotFound => "media_not_found",
             LibraryError::UnsafeMediaPath => "unsafe_media_path",
@@ -459,6 +462,29 @@ mod tests {
         for (error, code) in cases {
             let value = serde_json::to_value(CommandError::from(error)).unwrap();
             assert_eq!(value["code"], code);
+        }
+    }
+
+    #[test]
+    fn similarity_errors_have_stable_codes_without_internal_details() {
+        for (error, code) in [
+            (
+                LibraryError::InvalidPerceptualHash,
+                "invalid_perceptual_hash",
+            ),
+            (
+                LibraryError::SimilarityReviewNotFound,
+                "similarity_review_not_found",
+            ),
+            (
+                LibraryError::SimilarityReviewConflict,
+                "similarity_review_conflict",
+            ),
+        ] {
+            let error = CommandError::from(error);
+            assert_eq!(error.code, code);
+            assert!(!error.message.contains("review-1"));
+            assert!(!error.message.contains("C:\\library"));
         }
     }
 
