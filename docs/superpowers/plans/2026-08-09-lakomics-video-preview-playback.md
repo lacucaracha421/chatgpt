@@ -277,14 +277,14 @@ git commit -m "build: pin Windows LGPL video sidecars"
 - Create: `app/src-tauri/src/library/video_media.rs`
 - Modify: `app/src-tauri/src/library/mod.rs`
 - Modify: `app/src-tauri/src/library/error.rs`
-- Modify: `app/src-tauri/Cargo.toml`
-- Modify: `app/src-tauri/src/lib.rs`
+- Modify: `app/src-tauri/src/library/models.rs`
+- Modify: `app/src-tauri/src/commands.rs`
 
 **Interfaces:**
 - Consumes: managed original path, `video_assets` row, pinned FFmpeg/FFprobe binaries.
 - Produces: `probe_video`, `prepare_pending_videos(limit)`, `retry_video_preparation(asset_id)`, poster/scrub/proxy files and stable public progress.
 
-- [ ] **Step 1: Write RED policy and state-machine tests**
+- [x] **Step 1: Write RED policy and state-machine tests**
 
 Add focused unit tests using an internal test-only `VideoTool` fake. The private trait exists because production sidecars and deterministic tests are two real implementations; it is not exported from `library`:
 
@@ -319,7 +319,7 @@ fn direct_playback(container: &str, video_codec: &str, audio_codec: Option<&str>
 }
 ```
 
-- [ ] **Step 2: Run RED module tests**
+- [x] **Step 2: Run RED module tests**
 
 ```powershell
 cd C:\chatgpt\app\src-tauri
@@ -328,9 +328,9 @@ cargo test video_media::tests
 
 Expected: FAIL because the module does not exist.
 
-- [ ] **Step 3: Implement the minimum module**
+- [x] **Step 3: Implement the minimum module**
 
-Add `tauri-plugin-shell = "2"`, initialize it in `lib.rs`, and use Rust-side `tauri_plugin_shell::ShellExt::sidecar`; do not grant or invoke shell commands from JavaScript. `TauriVideoTool` holds a cloned `AppHandle`, runs sidecars from the existing blocking command thread with `tauri::async_runtime::block_on`, and converts only exit status/stdout into private probe/preparation results. Command construction remains private to `video_media.rs`.
+Use `std::process::Command` only inside private `ProcessVideoTool`; Tauri `externalBin` still owns sidecar packaging and no shell permission or JavaScript command surface is added. Resolve `ffmpeg.exe`/`ffprobe.exe` beside the packaged executable, beside the cargo-test target, or at the pinned source-binary directory, and convert only exit status/stdout into private probe/preparation results. Command construction remains private to `video_media.rs`.
 
 FFprobe emits JSON with `-show_streams -show_format -of json`. Deserialize only required fields with `serde_json`; normalize container to `mp4`, `webm`, or `mov`; choose the first video stream and optional first audio stream; reject missing/zero duration and invalid dimensions.
 
@@ -379,7 +379,7 @@ pub struct VideoPreparationProgress {
 }
 ```
 
-- [ ] **Step 4: Run GREEN module tests and clippy**
+- [x] **Step 4: Run GREEN module tests and clippy**
 
 ```powershell
 cd C:\chatgpt\app\src-tauri
@@ -388,10 +388,10 @@ cargo clippy --all-targets -- -D warnings
 git diff --check
 ```
 
-- [ ] **Step 5: Commit Task 3**
+- [x] **Step 5: Commit Task 3**
 
 ```powershell
-git add app/src-tauri/src/library/video_media.rs app/src-tauri/src/library/mod.rs app/src-tauri/src/library/error.rs app/src-tauri/src/lib.rs app/src-tauri/Cargo.toml app/src-tauri/Cargo.lock
+git add app/src-tauri/src/library/video_media.rs app/src-tauri/src/library/mod.rs app/src-tauri/src/library/error.rs app/src-tauri/src/library/models.rs app/src-tauri/src/commands.rs
 git commit -m "feat: prepare derived video media"
 ```
 

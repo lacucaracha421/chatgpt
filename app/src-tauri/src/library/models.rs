@@ -40,6 +40,15 @@ pub enum VideoPreparationState {
     Failed,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoPreparationProgress {
+    pub processed: u32,
+    pub remaining: u32,
+    pub failed: u32,
+    pub changed_asset_ids: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(
     tag = "kind",

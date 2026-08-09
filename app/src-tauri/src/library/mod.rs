@@ -10,6 +10,7 @@ pub mod models;
 mod query;
 mod similarity;
 mod trash;
+mod video_media;
 
 use std::{
     collections::BTreeSet,
@@ -52,6 +53,8 @@ pub struct Library {
     ingestion_lock: Arc<Mutex<()>>,
     // ponytail: one lock per open Library; split by asset only if trash throughput demands it.
     trash_lock: Arc<Mutex<()>>,
+    // ponytail: one video preparation at a time; add a bounded worker pool only if profiling needs it.
+    video_lock: Arc<Mutex<()>>,
     // ponytail: one lock per open Library; split only if backup operations become a bottleneck.
     backup_lock: Arc<Mutex<()>>,
     // ponytail: one database handle at a time; use a read/write lock if reads become a bottleneck.
@@ -85,7 +88,7 @@ impl Library {
             source,
         })?;
         let lease = Arc::new(LibraryLease::acquire(&root)?);
-        for name in ["assets", "thumbnails", "backups"] {
+        for name in ["assets", "thumbnails", "backups", "video-media"] {
             let path = root.join(name);
             fs::create_dir_all(&path)
                 .map_err(|source| LibraryError::CreateDirectory { path, source })?;
@@ -96,11 +99,13 @@ impl Library {
             lease,
             ingestion_lock: Arc::new(Mutex::new(())),
             trash_lock: Arc::new(Mutex::new(())),
+            video_lock: Arc::new(Mutex::new(())),
             backup_lock: Arc::new(Mutex::new(())),
             database_lock: Arc::new(Mutex::new(())),
         };
         library.cleanup_stale_asset_drags()?;
         library.cleanup_resolving_similarity_reviews()?;
+        library.requeue_interrupted_video_preparation()?;
         Ok(library)
     }
 

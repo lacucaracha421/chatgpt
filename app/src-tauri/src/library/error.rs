@@ -89,6 +89,12 @@ pub enum LibraryError {
     },
     #[error("이미지 형식을 지원하지 않거나 파일이 손상됐습니다")]
     UnsupportedImage,
+    #[error("영상 형식을 지원하지 않거나 파일이 손상됐습니다")]
+    UnsupportedVideo,
+    #[error("영상 미리보기를 준비하지 못했습니다")]
+    VideoPreparationFailed,
+    #[error("영상 처리 도구를 실행할 수 없습니다")]
+    VideoToolUnavailable,
     #[error("라이브러리 파일을 쓸 수 없습니다: {path}")]
     WriteAsset {
         path: PathBuf,

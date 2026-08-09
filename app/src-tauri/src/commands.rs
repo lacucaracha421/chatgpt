@@ -69,6 +69,9 @@ impl From<LibraryError> for CommandError {
             LibraryError::ReadMedia { .. } => "read_media_failed",
             LibraryError::ReadSource { .. } => "read_source_failed",
             LibraryError::UnsupportedImage => "unsupported_image",
+            LibraryError::UnsupportedVideo => "unsupported_video",
+            LibraryError::VideoPreparationFailed => "video_preparation_failed",
+            LibraryError::VideoToolUnavailable => "video_tool_unavailable",
             LibraryError::WriteAsset { .. } => "write_asset_failed",
         };
         Self { code, message }
@@ -519,6 +522,17 @@ mod tests {
             let value = serde_json::to_value(CommandError::from(error)).unwrap();
             assert_eq!(value["code"], code);
         }
+    }
+
+    #[test]
+    fn unsupported_video_has_a_stable_public_error() {
+        let error = CommandError::from(LibraryError::UnsupportedVideo);
+
+        assert_eq!(error.code, "unsupported_video");
+        assert_eq!(
+            error.message,
+            "영상 형식을 지원하지 않거나 파일이 손상됐습니다"
+        );
     }
 
     #[test]
