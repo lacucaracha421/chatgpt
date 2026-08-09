@@ -31,6 +31,7 @@ import { DragLayer } from "../shared/ui/DragLayer";
 import { pointerDragReducer, type ClassificationDropPosition, type ClassificationDropTarget, type InternalDragPayload, type PointerDragState } from "../shared/interaction/pointerDrag";
 import { SafetyDialog } from "../safety/SafetyDialog";
 import { TrashBrowser } from "../safety/TrashBrowser";
+import { SimilarityReviewBrowser } from "../similarity/SimilarityReviewBrowser";
 
 type AppProps = {
   gateway?: LibraryGateway;
@@ -92,15 +93,21 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
   const nativeDragAssetsRef = useRef(new Map<string, string[]>());
   const [nativeDragWorks, setNativeDragWorks] = useState<IngestionWork[]>([]);
   const [requestedAsset, setRequestedAsset] = useState<AssetSummary | null>(null);
+  const [reviewCount, setReviewCount] = useState(0);
   const appendMessage = useCallback((next: string) => {
     setMessage((current) => current ? `${current} ${next}` : next);
   }, []);
   const refreshClassifications = useCallback(async () => {
     setEntries(await gateway.listClassifications());
   }, [gateway]);
+  const refreshReviewCount = useCallback(async () => {
+    const page = await gateway.listSimilarityReviews({ after: null, limit: 1 });
+    setReviewCount(page.totalCount);
+  }, [gateway]);
   const handleIngested = useCallback((result: IngestOutcome) => {
     if (result.status === "added") setAssetRefresh((current) => current + 1);
-  }, []);
+    if (result.status === "review_pending") void refreshReviewCount();
+  }, [refreshReviewCount]);
   const dropEnabled = maintenance === null && !safetyOpen && view.kind !== "trash" && view.kind !== "similarity_review";
   const dropClassificationId = view.kind === "classification" ? view.classificationId : null;
   const dropState = useFileDrop({
@@ -115,6 +122,9 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
   useEffect(() => {
     void refreshClassifications();
   }, [refreshClassifications]);
+  useEffect(() => {
+    void refreshReviewCount().catch((error) => setMessage(commandErrorMessage(error, "유사 이미지 검토 개수를 불러오지 못했습니다.")));
+  }, [refreshReviewCount]);
   useEffect(() => {
     let active = true;
     void (async () => {
@@ -294,6 +304,7 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
               onSidebarWidthChange={(sidebarWidth) => updatePreferences({ sidebarWidth })}
               onChanged={() => void refreshClassifications()}
               onOpenSafety={() => setSafetyOpen(true)}
+              reviewCount={reviewCount}
               dragTarget={dragTarget}
               onPointerDragStart={startPointerDrag}
               onPointerDragMove={movePointerDrag}
@@ -304,7 +315,13 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
           content={
             <div className="library-content">
               <section className="library-content__browser" aria-label="자산 내용">
-                {view.kind === "trash" ? <TrashBrowser /> : (
+                {view.kind === "trash" ? <TrashBrowser /> : view.kind === "similarity_review" ? (
+                  <SimilarityReviewBrowser
+                    gateway={gateway}
+                    onCountChange={setReviewCount}
+                    onClose={() => setView({ kind: "classification", classificationId: null })}
+                  />
+                ) : (
                   <AssetBrowser
                     view={view}
                     classifications={entries}

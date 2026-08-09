@@ -2,6 +2,7 @@ import { ExternalLink, Info, Minus, Plus, X } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { AssetSummary, ClassificationEntry } from "../library/types";
 import { Button } from "../shared/ui/Button";
+import { formatBytes, localDate, sourceLabel } from "./assetMetadata";
 
 export function AssetInspector({ assets, classifications, open, onOpenChange, onPatchClassifications }: { assets: AssetSummary[]; classifications: ClassificationEntry[]; open: boolean; onOpenChange: (open: boolean) => void; onPatchClassifications: (classificationId: string, operation: "add" | "remove") => void }) {
   if (!open) return assets.length > 0 ? <Button className="asset-inspector__toggle" size="icon" variant="ghost" aria-label="정보 열기" onClick={() => onOpenChange(true)}><Info aria-hidden="true" /></Button> : null;
@@ -30,10 +31,3 @@ export function AssetInspector({ assets, classifications, open, onOpenChange, on
     </section>}
   </aside>;
 }
-
-function sourceLabel(sourceUrl: string | null) {
-  if (!sourceUrl) return "—";
-  try { const url = new URL(sourceUrl); return `${url.hostname}${url.pathname}`; } catch { return sourceUrl; }
-}
-function localDate(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString(); }
-function formatBytes(value: number) { return value < 1024 ? `${value} B` : `${(value / 1024).toFixed(value % 1024 === 0 ? 0 : 1)} KB`; }

@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, Clock3, Ellipsis, FolderTree, Inbox, Plus, Settings, Star, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Clock3, Ellipsis, FolderTree, Images, Inbox, Plus, Settings, Star, Trash2 } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
 import { useLibrary } from "../library/LibraryContext";
@@ -19,6 +19,7 @@ type ClassificationSidebarProps = {
   view: AssetView;
   expandedIds: string[];
   sidebarWidth: number;
+  reviewCount: number;
   onViewChange: (view: AssetView) => void;
   onExpandedIdsChange: (ids: string[]) => void;
   onSidebarWidthChange: (width: number) => void;
@@ -49,6 +50,7 @@ export function ClassificationSidebar({
   onPointerDragEnd,
   onPointerDragCancel,
   sidebarWidth,
+  reviewCount,
   view,
 }: ClassificationSidebarProps) {
   const { gateway } = useLibrary();
@@ -233,6 +235,7 @@ export function ClassificationSidebar({
         <QuickViewButton icon={<Inbox aria-hidden="true" />} label="미분류함" selected={view.kind === "unsorted"} onClick={() => onViewChange({ kind: "unsorted" })} />
         <QuickViewButton icon={<Clock3 aria-hidden="true" />} label="최근" selected={view.kind === "recent"} onClick={() => onViewChange({ kind: "recent" })} />
         <QuickViewButton icon={<Star aria-hidden="true" />} label="즐겨찾기" selected={view.kind === "favorites"} onClick={() => onViewChange({ kind: "favorites" })} />
+        <QuickViewButton icon={<Images aria-hidden="true" />} label="유사 이미지 검토" count={reviewCount} selected={view.kind === "similarity_review"} onClick={() => onViewChange({ kind: "similarity_review" })} />
       </nav>
       {tree.orphans.length > 0 && <p className="classification-sidebar__warning" role="alert">연결되지 않은 분류는 숨겨집니다.</p>}
       <ul className="classification-sidebar__tree" role="tree">
@@ -325,8 +328,8 @@ export function ClassificationSidebar({
   );
 }
 
-function QuickViewButton({ icon, label, onClick, selected }: { icon: React.ReactNode; label: string; onClick: () => void; selected: boolean }) {
-  return <button type="button" className="classification-sidebar__quick-view" aria-current={selected ? "page" : undefined} onClick={onClick}>{icon}<span>{label}</span></button>;
+function QuickViewButton({ icon, label, count, onClick, selected }: { icon: React.ReactNode; label: string; count?: number; onClick: () => void; selected: boolean }) {
+  return <button type="button" className="classification-sidebar__quick-view" aria-label={count === undefined ? undefined : `${label} ${count}개`} aria-current={selected ? "page" : undefined} onClick={onClick}>{icon}<span>{label}</span>{count !== undefined && <span className="classification-sidebar__badge" aria-hidden="true">{count}</span>}</button>;
 }
 
 function TreeItem({ activeRowId, expandedIds, node, onDelete, onMove, onRename, onRowFocus, onRowKeyDown, onToggleExpanded, onViewChange, registerTreeRow, view, dragTarget, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: {

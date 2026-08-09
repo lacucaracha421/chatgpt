@@ -547,6 +547,28 @@ input:disabled {
 
 .work-tray__failures span { color: var(--color-muted); }
 
+.work-tray__result,
+.work-tray__result-head {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.work-tray__result-head {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.work-tray__result p { margin: 0; color: var(--color-muted); }
+
+.classification-sidebar__badge {
+  min-width: 20px;
+  margin-left: auto;
+  padding: 0 var(--space-1);
+  color: var(--color-muted);
+  text-align: center;
+  font-size: 0.6875rem;
+}
+
 .classification-sidebar__tree-label {
   flex: 1;
   min-width: 0;
@@ -910,7 +932,91 @@ input:disabled {
   min-height: var(--gallery-target-row-height);
 }
 
+.similarity-review {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  background: var(--color-bg);
+}
+
+.similarity-review__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: var(--toolbar-height);
+  padding: 0 var(--space-3);
+  background: var(--color-toolbar);
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+
+.similarity-review__toolbar > div {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.similarity-review__toolbar h2,
+.similarity-review__asset h3 { margin: 0; font-size: 0.875rem; }
+.similarity-review__toolbar span { color: var(--color-muted); font-size: 0.75rem; }
+
+.similarity-review__comparison {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  min-height: 0;
+  padding: var(--space-3);
+  overflow: auto;
+}
+
+.similarity-review__asset {
+  display: grid;
+  align-content: start;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-3);
+  background: var(--color-surface-elevated);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.similarity-review__preview {
+  display: grid;
+  place-items: center;
+  min-height: 240px;
+  background: var(--color-sidebar);
+  overflow: hidden;
+}
+
+.similarity-review__preview img {
+  display: block;
+  max-width: 100%;
+  max-height: 52vh;
+  object-fit: contain;
+}
+
+.similarity-review__asset dl { display: grid; gap: var(--space-1); margin: 0; }
+.similarity-review__asset dl div { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: var(--space-2); }
+.similarity-review__asset dt { color: var(--color-muted); }
+.similarity-review__asset dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+
+.similarity-review__actions {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-toolbar);
+  border-top: var(--border-width) solid var(--color-border);
+  box-shadow: var(--shadow-floating);
+}
+
+.similarity-review__skeleton { min-height: var(--gallery-target-row-height); }
+
 @media (max-width: 1100px) {
+  .similarity-review__comparison {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .asset-toolbar__toggle-text {
     position: absolute;
     width: 1px;

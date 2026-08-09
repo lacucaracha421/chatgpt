@@ -68,6 +68,7 @@ function renderSidebar(
           view={view}
           expandedIds={expandedIds}
           sidebarWidth={sidebarWidth}
+          reviewCount={props.reviewCount ?? 0}
           onViewChange={(nextView) => {
             setView(nextView);
             onViewChange(nextView);
@@ -127,6 +128,7 @@ describe("ClassificationSidebar", () => {
       "미분류함",
       "최근",
       "즐겨찾기",
+      "유사 이미지 검토0",
     ]);
 
     await user.click(screen.getByRole("button", { name: "미분류함" }));
@@ -276,6 +278,7 @@ describe("ClassificationSidebar", () => {
           view={{ kind: "classification", classificationId: null }}
           expandedIds={expandedIds}
           sidebarWidth={232}
+          reviewCount={0}
           onViewChange={onViewChange}
           onExpandedIdsChange={onExpandedIdsChange}
           onSidebarWidthChange={onSidebarWidthChange}
@@ -350,5 +353,14 @@ describe("ClassificationSidebar", () => {
     expect(onSidebarWidthChange).toHaveBeenNthCalledWith(2, 320);
     expect(handle.setPointerCapture).toHaveBeenCalledWith(1);
     expect(handle.releasePointerCapture).toHaveBeenCalledWith(1);
+  });
+
+  it("opens the stable review queue entry and exposes its count", async () => {
+    const user = userEvent.setup();
+    const { onViewChange } = renderSidebar(gateway(), { reviewCount: 12 });
+
+    const button = screen.getByRole("button", { name: "유사 이미지 검토 12개" });
+    await user.click(button);
+    expect(onViewChange).toHaveBeenCalledWith({ kind: "similarity_review" });
   });
 });
