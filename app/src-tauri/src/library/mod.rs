@@ -100,6 +100,7 @@ impl Library {
             database_lock: Arc::new(Mutex::new(())),
         };
         library.cleanup_stale_asset_drags()?;
+        library.cleanup_resolving_similarity_reviews()?;
         Ok(library)
     }
 

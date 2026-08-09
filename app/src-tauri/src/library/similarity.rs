@@ -1,12 +1,23 @@
 use std::{
     fs::File,
     io::{BufReader, Seek, SeekFrom},
+    path::Path,
 };
 
 use image::{DynamicImage, ImageReader};
-use rusqlite::params;
+use rusqlite::{params, Connection, OptionalExtension};
+use serde::{Deserialize, Serialize};
 
-use super::{error::LibraryError, models::SimilarityIndexProgress, Library, MediaVariant};
+use super::{
+    classification::classifications_for_asset,
+    error::LibraryError,
+    models::{
+        AssetCursor, AssetSummary, SimilarityDecision, SimilarityDecisionOutcome,
+        SimilarityDecisionRequest, SimilarityDecisionStatus, SimilarityIndexProgress,
+        SimilarityReviewAsset, SimilarityReviewPage, SimilarityReviewSummary,
+    },
+    Library, MediaVariant,
+};
 
 const SIMILARITY_DISTANCE_MAX: u32 = 6;
 const INDEX_BATCH_SIZE: u32 = 50;
@@ -17,7 +28,333 @@ pub(crate) struct SimilarAssetCandidate {
     pub(crate) distance: u32,
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReviewCursor {
+    created_at: String,
+    id: String,
+}
+
+struct OpenReviewRow {
+    id: String,
+    existing_asset_id: String,
+    candidate_asset_id: String,
+    distance: u32,
+    created_at: String,
+}
+
+struct StoredReview {
+    existing_asset_id: Option<String>,
+    candidate_asset_id: Option<String>,
+    status: String,
+    decision: Option<String>,
+}
+
 impl Library {
+    pub fn list_similarity_reviews(
+        &self,
+        after: Option<AssetCursor>,
+        limit: u32,
+    ) -> Result<SimilarityReviewPage, LibraryError> {
+        if !(1..=200).contains(&limit) {
+            return Err(LibraryError::InvalidAssetPageLimit);
+        }
+        let cursor = decode_review_cursor(after)?;
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let total_count: i64 = transaction.query_row(
+            "SELECT COUNT(*) FROM similarity_reviews WHERE status = 'open'",
+            [],
+            |row| row.get(0),
+        )?;
+        let (created_at, id) = cursor
+            .as_ref()
+            .map(|cursor| (Some(cursor.created_at.as_str()), Some(cursor.id.as_str())))
+            .unwrap_or((None, None));
+        let mut statement = transaction.prepare(
+            "SELECT id, existing_asset_id, candidate_asset_id, distance, created_at
+             FROM similarity_reviews
+             WHERE status = 'open'
+               AND (?1 IS NULL OR created_at > ?1 OR (created_at = ?1 AND id > ?2))
+             ORDER BY created_at, id
+             LIMIT ?3",
+        )?;
+        let rows = statement
+            .query_map(params![created_at, id, i64::from(limit) + 1], |row| {
+                Ok(OpenReviewRow {
+                    id: row.get(0)?,
+                    existing_asset_id: row.get(1)?,
+                    candidate_asset_id: row.get(2)?,
+                    distance: row.get(3)?,
+                    created_at: row.get(4)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(statement);
+
+        let has_more = rows.len() > limit as usize;
+        let rows = rows.into_iter().take(limit as usize).collect::<Vec<_>>();
+        let next_cursor = has_more.then(|| {
+            let row = rows.last().expect("a page with more rows contains one row");
+            AssetCursor {
+                token: serde_json::to_string(&ReviewCursor {
+                    created_at: row.created_at.clone(),
+                    id: row.id.clone(),
+                })
+                .expect("review cursor serializes"),
+            }
+        });
+        let items = rows
+            .into_iter()
+            .map(|row| {
+                Ok(SimilarityReviewSummary {
+                    id: row.id,
+                    distance: row.distance,
+                    existing: load_review_asset(&transaction, &row.existing_asset_id, "normal")?,
+                    candidate: load_review_asset(&transaction, &row.candidate_asset_id, "review")?,
+                })
+            })
+            .collect::<Result<Vec<_>, LibraryError>>()?;
+        transaction.commit()?;
+        Ok(SimilarityReviewPage {
+            items,
+            next_cursor,
+            total_count: u64::try_from(total_count).unwrap_or(0),
+        })
+    }
+
+    pub fn get_asset(&self, asset_id: &str) -> Result<AssetSummary, LibraryError> {
+        let connection = self.connection()?;
+        load_asset_summary(&connection, asset_id, "normal")
+    }
+
+    pub fn decide_similarity_review(
+        &self,
+        request: SimilarityDecisionRequest,
+    ) -> Result<SimilarityDecisionOutcome, LibraryError> {
+        let _trash_guard = self
+            .trash_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let review = self.load_stored_review(&request.review_id)?;
+        let requested = decision_name(request.decision);
+        match review.status.as_str() {
+            "resolved" if review.decision.as_deref() == Some(requested) => {
+                return self.similarity_decision_outcome();
+            }
+            "resolved" => return Err(LibraryError::SimilarityReviewConflict),
+            "resolving"
+                if review.decision.as_deref() == Some("keep_existing")
+                    && request.decision == SimilarityDecision::KeepExisting =>
+            {
+                self.finish_keep_existing(&request.review_id, &review)?;
+            }
+            "resolving" => return Err(LibraryError::SimilarityReviewConflict),
+            "open" => match request.decision {
+                SimilarityDecision::KeepExisting => {
+                    self.begin_keep_existing(&request.review_id, &review)?;
+                    run_after_review_resolving_hook()?;
+                    self.finish_keep_existing(&request.review_id, &review)?;
+                }
+                SimilarityDecision::ReplaceExisting => {
+                    self.resolve_replace_existing(&request.review_id, &review)?;
+                }
+                SimilarityDecision::KeepBoth => {
+                    self.resolve_keep_both(&request.review_id, &review)?;
+                }
+            },
+            _ => return Err(LibraryError::SimilarityReviewConflict),
+        }
+        self.similarity_decision_outcome()
+    }
+
+    pub(crate) fn cleanup_resolving_similarity_reviews(&self) -> Result<(), LibraryError> {
+        let _trash_guard = self
+            .trash_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let review_ids = {
+            let connection = self.connection()?;
+            let review_ids = connection
+                .prepare(
+                    "SELECT id FROM similarity_reviews
+                     WHERE status = 'resolving' AND decision = 'keep_existing'
+                     ORDER BY created_at, id",
+                )?
+                .query_map([], |row| row.get(0))?
+                .collect::<Result<Vec<String>, _>>()?;
+            review_ids
+        };
+        for review_id in review_ids {
+            let review = self.load_stored_review(&review_id)?;
+            self.finish_keep_existing(&review_id, &review)?;
+        }
+        Ok(())
+    }
+
+    fn load_stored_review(&self, review_id: &str) -> Result<StoredReview, LibraryError> {
+        self.connection()?
+            .query_row(
+                "SELECT existing_asset_id, candidate_asset_id, status, decision
+                 FROM similarity_reviews WHERE id = ?1",
+                [review_id],
+                |row| {
+                    Ok(StoredReview {
+                        existing_asset_id: row.get(0)?,
+                        candidate_asset_id: row.get(1)?,
+                        status: row.get(2)?,
+                        decision: row.get(3)?,
+                    })
+                },
+            )
+            .optional()?
+            .ok_or(LibraryError::SimilarityReviewNotFound)
+    }
+
+    fn resolve_replace_existing(
+        &self,
+        review_id: &str,
+        review: &StoredReview,
+    ) -> Result<(), LibraryError> {
+        let (existing_id, candidate_id) = open_review_asset_ids(review)?;
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        verify_asset_status(&transaction, existing_id, "normal")?;
+        verify_asset_status(&transaction, candidate_id, "review")?;
+        transaction.execute(
+            "INSERT OR IGNORE INTO asset_classifications (asset_id, classification_id)
+             SELECT ?2, classification_id FROM asset_classifications WHERE asset_id = ?1",
+            params![existing_id, candidate_id],
+        )?;
+        transaction.execute(
+            "UPDATE assets SET favorite = (SELECT favorite FROM assets WHERE id = ?1)
+             WHERE id = ?2 AND status = 'review'",
+            params![existing_id, candidate_id],
+        )?;
+        transaction.execute(
+            "UPDATE assets SET status = 'trash', trashed_at = ?2 WHERE id = ?1 AND status = 'normal'",
+            params![existing_id, chrono::Utc::now().to_rfc3339()],
+        )?;
+        transaction.execute(
+            "UPDATE assets SET status = 'normal', trashed_at = NULL WHERE id = ?1 AND status = 'review'",
+            [candidate_id],
+        )?;
+        resolve_review(&transaction, review_id, "replace_existing")?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn resolve_keep_both(
+        &self,
+        review_id: &str,
+        review: &StoredReview,
+    ) -> Result<(), LibraryError> {
+        let (existing_id, candidate_id) = open_review_asset_ids(review)?;
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        verify_asset_status(&transaction, existing_id, "normal")?;
+        verify_asset_status(&transaction, candidate_id, "review")?;
+        transaction.execute(
+            "UPDATE assets SET status = 'normal', trashed_at = NULL WHERE id = ?1 AND status = 'review'",
+            [candidate_id],
+        )?;
+        resolve_review(&transaction, review_id, "keep_both")?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn begin_keep_existing(
+        &self,
+        review_id: &str,
+        review: &StoredReview,
+    ) -> Result<(), LibraryError> {
+        let (existing_id, candidate_id) = open_review_asset_ids(review)?;
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        verify_asset_status(&transaction, existing_id, "normal")?;
+        verify_asset_status(&transaction, candidate_id, "review")?;
+        let changed = transaction.execute(
+            "UPDATE similarity_reviews
+             SET status = 'resolving', decision = 'keep_existing'
+             WHERE id = ?1 AND status = 'open'",
+            [review_id],
+        )?;
+        if changed != 1 {
+            return Err(LibraryError::SimilarityReviewConflict);
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn finish_keep_existing(
+        &self,
+        review_id: &str,
+        review: &StoredReview,
+    ) -> Result<(), LibraryError> {
+        let candidate_id = review
+            .candidate_asset_id
+            .as_deref()
+            .ok_or(LibraryError::SimilarityReviewConflict)?;
+        let (relative_path, thumbnail_relative_path): (String, String) = self
+            .connection()?
+            .query_row(
+                "SELECT relative_path, thumbnail_relative_path
+                 FROM assets WHERE id = ?1 AND status = 'review'",
+                [candidate_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .ok_or(LibraryError::SimilarityReviewConflict)?;
+        self.remove_review_candidate_files(&relative_path, &thumbnail_relative_path)?;
+
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        resolve_review(&transaction, review_id, "keep_existing")?;
+        transaction.execute(
+            "DELETE FROM assets WHERE id = ?1 AND status = 'review'",
+            [candidate_id],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    fn remove_review_candidate_files(
+        &self,
+        relative_path: &str,
+        thumbnail_relative_path: &str,
+    ) -> Result<(), LibraryError> {
+        self.remove_managed_files(relative_path, thumbnail_relative_path)
+            .map_err(|()| LibraryError::WriteAsset {
+                path: self.root().to_path_buf(),
+                source: std::io::Error::other("managed review file cleanup failed"),
+            })
+    }
+
+    #[cfg(not(windows))]
+    fn remove_review_candidate_files(
+        &self,
+        _relative_path: &str,
+        _thumbnail_relative_path: &str,
+    ) -> Result<(), LibraryError> {
+        Err(LibraryError::UnsupportedManagedFileDeletion)
+    }
+
+    fn similarity_decision_outcome(&self) -> Result<SimilarityDecisionOutcome, LibraryError> {
+        let next_review_id = self
+            .connection()?
+            .query_row(
+                "SELECT id FROM similarity_reviews WHERE status = 'open' ORDER BY created_at, id LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(SimilarityDecisionOutcome {
+            status: SimilarityDecisionStatus::Resolved,
+            next_review_id,
+        })
+    }
+
     pub fn index_missing_similarity_hashes(&self) -> Result<SimilarityIndexProgress, LibraryError> {
         let asset_ids = {
             let connection = self.connection()?;
@@ -112,6 +449,146 @@ impl Library {
     }
 }
 
+fn decode_review_cursor(after: Option<AssetCursor>) -> Result<Option<ReviewCursor>, LibraryError> {
+    after
+        .map(|cursor| {
+            serde_json::from_str(&cursor.token).map_err(|_| LibraryError::InvalidAssetCursor)
+        })
+        .transpose()
+}
+
+fn load_review_asset(
+    connection: &Connection,
+    asset_id: &str,
+    expected_status: &str,
+) -> Result<SimilarityReviewAsset, LibraryError> {
+    let asset = load_asset_summary(connection, asset_id, expected_status)?;
+    let format = Path::new(&asset.relative_path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| match extension.to_ascii_uppercase().as_str() {
+            "JPG" => "JPEG".to_owned(),
+            other => other.to_owned(),
+        })
+        .unwrap_or_else(|| "IMAGE".to_owned());
+    let classifications = classifications_for_asset(connection, asset_id)?;
+    Ok(SimilarityReviewAsset {
+        asset,
+        format,
+        classifications,
+    })
+}
+
+fn load_asset_summary(
+    connection: &Connection,
+    asset_id: &str,
+    expected_status: &str,
+) -> Result<AssetSummary, LibraryError> {
+    connection
+        .query_row(
+            "SELECT id, title, original_name, relative_path, thumbnail_relative_path,
+                    byte_size, width, height, collected_at, favorite, source_url
+             FROM assets WHERE id = ?1 AND status = ?2",
+            params![asset_id, expected_status],
+            |row| {
+                let byte_size = u64::try_from(row.get::<_, i64>(5)?)
+                    .map_err(|_| rusqlite::Error::InvalidQuery)?;
+                Ok(AssetSummary {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    original_name: row.get(2)?,
+                    relative_path: row.get(3)?,
+                    thumbnail_relative_path: row.get(4)?,
+                    byte_size,
+                    width: row.get(6)?,
+                    height: row.get(7)?,
+                    collected_at: row.get(8)?,
+                    favorite: row.get(9)?,
+                    source_url: row.get(10)?,
+                })
+            },
+        )
+        .optional()?
+        .ok_or(LibraryError::AssetNotFound)
+}
+
+fn decision_name(decision: SimilarityDecision) -> &'static str {
+    match decision {
+        SimilarityDecision::KeepExisting => "keep_existing",
+        SimilarityDecision::ReplaceExisting => "replace_existing",
+        SimilarityDecision::KeepBoth => "keep_both",
+    }
+}
+
+fn open_review_asset_ids(review: &StoredReview) -> Result<(&str, &str), LibraryError> {
+    match (
+        review.existing_asset_id.as_deref(),
+        review.candidate_asset_id.as_deref(),
+    ) {
+        (Some(existing_id), Some(candidate_id)) => Ok((existing_id, candidate_id)),
+        _ => Err(LibraryError::SimilarityReviewConflict),
+    }
+}
+
+fn verify_asset_status(
+    connection: &Connection,
+    asset_id: &str,
+    expected_status: &str,
+) -> Result<(), LibraryError> {
+    let matches: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM assets WHERE id = ?1 AND status = ?2)",
+        params![asset_id, expected_status],
+        |row| row.get(0),
+    )?;
+    if matches {
+        Ok(())
+    } else {
+        Err(LibraryError::SimilarityReviewConflict)
+    }
+}
+
+fn resolve_review(
+    connection: &Connection,
+    review_id: &str,
+    decision: &str,
+) -> Result<(), LibraryError> {
+    let changed = connection.execute(
+        "UPDATE similarity_reviews
+         SET status = 'resolved', decision = ?2, resolved_at = ?3
+         WHERE id = ?1 AND status IN ('open', 'resolving')",
+        params![review_id, decision, chrono::Utc::now().to_rfc3339()],
+    )?;
+    if changed == 1 {
+        Ok(())
+    } else {
+        Err(LibraryError::SimilarityReviewConflict)
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static AFTER_REVIEW_RESOLVING_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce() -> Result<(), LibraryError>>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn set_after_review_resolving_hook(hook: impl FnOnce() -> Result<(), LibraryError> + 'static) {
+    AFTER_REVIEW_RESOLVING_HOOK.with(|stored| *stored.borrow_mut() = Some(Box::new(hook)));
+}
+
+#[cfg(test)]
+fn run_after_review_resolving_hook() -> Result<(), LibraryError> {
+    AFTER_REVIEW_RESOLVING_HOOK.with(|stored| {
+        let hook = stored.borrow_mut().take();
+        hook.map_or(Ok(()), |hook| hook())
+    })
+}
+
+#[cfg(not(test))]
+fn run_after_review_resolving_hook() -> Result<(), LibraryError> {
+    Ok(())
+}
+
 pub(crate) fn perceptual_hash_from_file(mut file: File) -> Result<u64, LibraryError> {
     file.seek(SeekFrom::Start(0))
         .map_err(|_| LibraryError::UnsupportedImage)?;
@@ -159,7 +636,7 @@ fn similarity_index_error_code(error: &LibraryError) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, time::Instant};
+    use std::{fs, path::PathBuf, time::Instant};
 
     use image::{
         codecs::jpeg::JpegEncoder, imageops::FilterType, DynamicImage, ImageBuffer, Rgb, RgbImage,
@@ -167,8 +644,15 @@ mod tests {
     use rusqlite::params;
     use tempfile::TempDir;
 
-    use super::super::{error::LibraryError, Library};
-    use super::{hamming_distance, perceptual_hash};
+    use super::super::{
+        error::LibraryError,
+        models::{
+            AssetCursor, ClassificationKind, CreateClassification, IngestImageRequest,
+            IngestOutcome, SimilarityDecision, SimilarityDecisionRequest,
+        },
+        Library,
+    };
+    use super::{hamming_distance, perceptual_hash, set_after_review_resolving_hook};
 
     #[derive(Clone, Copy)]
     enum StripeDirection {
@@ -179,6 +663,19 @@ mod tests {
     struct TestLibrary {
         _temp: TempDir,
         library: Library,
+    }
+
+    struct ReviewFixture {
+        _temp: TempDir,
+        library: Library,
+        input: PathBuf,
+        existing_id: String,
+        candidate_id: String,
+        review_id: String,
+        old_tag: String,
+        requested_tag: String,
+        candidate_asset_path: PathBuf,
+        candidate_thumbnail_path: PathBuf,
     }
 
     #[test]
@@ -267,6 +764,189 @@ mod tests {
     }
 
     #[test]
+    fn review_listing_returns_public_assets_and_stable_cursor_pages() {
+        let fixture = review_fixture();
+        fixture.add_horizontal_review();
+
+        let first = fixture.library.list_similarity_reviews(None, 1).unwrap();
+        let second = fixture
+            .library
+            .list_similarity_reviews(first.next_cursor.clone(), 1)
+            .unwrap();
+
+        assert_eq!(first.total_count, 2);
+        assert_eq!(first.items.len(), 1);
+        assert_eq!(second.items.len(), 1);
+        assert_ne!(first.items[0].id, second.items[0].id);
+        assert!(first.next_cursor.is_some());
+        assert!(second.next_cursor.is_none());
+        for review in first.items.iter().chain(&second.items) {
+            assert!(!review.existing.format.is_empty());
+            assert!(!review.candidate.format.is_empty());
+            assert!(!review.existing.asset.original_name.is_empty());
+            assert!(!review.candidate.asset.original_name.is_empty());
+        }
+        assert!(matches!(
+            fixture.library.list_similarity_reviews(None, 0),
+            Err(LibraryError::InvalidAssetPageLimit)
+        ));
+        assert!(matches!(
+            fixture.library.list_similarity_reviews(
+                Some(AssetCursor {
+                    token: "not-a-review-cursor".into()
+                }),
+                20
+            ),
+            Err(LibraryError::InvalidAssetCursor)
+        ));
+    }
+
+    #[test]
+    fn get_asset_returns_normal_assets_but_not_review_candidates() {
+        let fixture = review_fixture();
+
+        assert_eq!(
+            fixture.library.get_asset(&fixture.existing_id).unwrap().id,
+            fixture.existing_id
+        );
+        assert!(matches!(
+            fixture.library.get_asset(&fixture.candidate_id),
+            Err(LibraryError::AssetNotFound)
+        ));
+    }
+
+    #[test]
+    fn replace_moves_existing_to_trash_and_transfers_classifications_and_favorite() {
+        let fixture = review_fixture();
+        fixture
+            .library
+            .set_asset_favorite(&fixture.existing_id, true)
+            .unwrap();
+
+        fixture
+            .library
+            .decide_similarity_review(SimilarityDecisionRequest {
+                review_id: fixture.review_id.clone(),
+                decision: SimilarityDecision::ReplaceExisting,
+            })
+            .unwrap();
+
+        assert_eq!(fixture.status(&fixture.existing_id), "trash");
+        assert_eq!(fixture.status(&fixture.candidate_id), "normal");
+        assert!(fixture.favorite(&fixture.candidate_id));
+        let mut actual = fixture.classification_ids(&fixture.candidate_id);
+        actual.sort();
+        let mut expected = vec![fixture.old_tag.clone(), fixture.requested_tag.clone()];
+        expected.sort();
+        assert_eq!(actual, expected);
+        assert_eq!(
+            fixture.source_url(&fixture.candidate_id),
+            Some("https://example.com/new".into())
+        );
+    }
+
+    #[test]
+    fn keep_both_normalizes_only_the_candidate_and_is_idempotent() {
+        let fixture = review_fixture();
+
+        let first = fixture
+            .library
+            .decide_similarity_review(SimilarityDecisionRequest {
+                review_id: fixture.review_id.clone(),
+                decision: SimilarityDecision::KeepBoth,
+            })
+            .unwrap();
+        let repeated = fixture
+            .library
+            .decide_similarity_review(SimilarityDecisionRequest {
+                review_id: fixture.review_id.clone(),
+                decision: SimilarityDecision::KeepBoth,
+            })
+            .unwrap();
+
+        assert_eq!(first, repeated);
+        assert_eq!(fixture.status(&fixture.existing_id), "normal");
+        assert_eq!(fixture.status(&fixture.candidate_id), "normal");
+        assert_eq!(fixture.normal_ids().len(), 2);
+        let conflict = fixture
+            .library
+            .decide_similarity_review(SimilarityDecisionRequest {
+                review_id: fixture.review_id.clone(),
+                decision: SimilarityDecision::ReplaceExisting,
+            })
+            .unwrap_err();
+        assert!(matches!(conflict, LibraryError::SimilarityReviewConflict));
+        assert!(matches!(
+            fixture
+                .library
+                .decide_similarity_review(SimilarityDecisionRequest {
+                    review_id: "missing-review".into(),
+                    decision: SimilarityDecision::KeepBoth,
+                }),
+            Err(LibraryError::SimilarityReviewNotFound)
+        ));
+    }
+
+    #[test]
+    fn keep_existing_removes_only_the_managed_candidate() {
+        let fixture = review_fixture();
+
+        fixture
+            .library
+            .decide_similarity_review(SimilarityDecisionRequest {
+                review_id: fixture.review_id.clone(),
+                decision: SimilarityDecision::KeepExisting,
+            })
+            .unwrap();
+
+        assert_eq!(fixture.status(&fixture.existing_id), "normal");
+        assert!(!fixture.asset_exists(&fixture.candidate_id));
+        assert!(!fixture.candidate_asset_path.exists());
+        assert!(!fixture.candidate_thumbnail_path.exists());
+        assert_eq!(
+            fixture
+                .library
+                .list_similarity_reviews(None, 20)
+                .unwrap()
+                .total_count,
+            0
+        );
+    }
+
+    #[test]
+    fn keep_existing_resumes_file_cleanup_after_reopen() {
+        let fixture = review_fixture();
+        set_after_review_resolving_hook(|| {
+            Err(LibraryError::WriteAsset {
+                path: PathBuf::from("simulated"),
+                source: std::io::Error::other("simulated interruption"),
+            })
+        });
+        let error = fixture
+            .library
+            .decide_similarity_review(SimilarityDecisionRequest {
+                review_id: fixture.review_id.clone(),
+                decision: SimilarityDecision::KeepExisting,
+            })
+            .unwrap_err();
+        assert!(matches!(error, LibraryError::WriteAsset { .. }));
+
+        let root = fixture.library.root().to_path_buf();
+        drop(fixture.library);
+        let reopened = Library::open(&root).unwrap();
+
+        assert!(!fixture.candidate_asset_path.exists());
+        assert!(!fixture.candidate_thumbnail_path.exists());
+        assert_eq!(
+            reopened
+                .list_similarity_reviews(None, 20)
+                .unwrap()
+                .total_count,
+            0
+        );
+    }
+
+    #[test]
     #[ignore]
     fn candidate_search_scans_fifty_thousand_hashes() {
         let temp = tempfile::tempdir().unwrap();
@@ -324,6 +1004,186 @@ mod tests {
             .encode_image(&resized)
             .unwrap();
         image::load_from_memory(&bytes).unwrap()
+    }
+
+    impl ReviewFixture {
+        fn add_horizontal_review(&self) {
+            let base = striped_fixture(900, 600, StripeDirection::Horizontal);
+            let existing_path = self.input.join("horizontal-existing.png");
+            base.save(&existing_path).unwrap();
+            assert!(matches!(
+                self.library
+                    .ingest_image(IngestImageRequest {
+                        source_path: existing_path,
+                        classification_id: None,
+                        source_url: None,
+                    })
+                    .unwrap(),
+                IngestOutcome::Added { .. }
+            ));
+            let variant_path = self.input.join("horizontal-variant.jpg");
+            jpeg_variant(&base, 450, 300, 70)
+                .save(&variant_path)
+                .unwrap();
+            assert!(matches!(
+                self.library
+                    .ingest_image(IngestImageRequest {
+                        source_path: variant_path,
+                        classification_id: None,
+                        source_url: None,
+                    })
+                    .unwrap(),
+                IngestOutcome::ReviewPending { .. }
+            ));
+        }
+
+        fn status(&self, asset_id: &str) -> String {
+            self.library
+                .connection()
+                .unwrap()
+                .query_row(
+                    "SELECT status FROM assets WHERE id = ?1",
+                    [asset_id],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        }
+
+        fn favorite(&self, asset_id: &str) -> bool {
+            self.library
+                .connection()
+                .unwrap()
+                .query_row(
+                    "SELECT favorite FROM assets WHERE id = ?1",
+                    [asset_id],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        }
+
+        fn classification_ids(&self, asset_id: &str) -> Vec<String> {
+            self.library
+                .get_asset_classifications(asset_id)
+                .unwrap()
+                .into_iter()
+                .map(|entry| entry.id)
+                .collect()
+        }
+
+        fn source_url(&self, asset_id: &str) -> Option<String> {
+            self.library
+                .connection()
+                .unwrap()
+                .query_row(
+                    "SELECT source_url FROM assets WHERE id = ?1",
+                    [asset_id],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        }
+
+        fn normal_ids(&self) -> Vec<String> {
+            let connection = self.library.connection().unwrap();
+            let mut statement = connection
+                .prepare("SELECT id FROM assets WHERE status = 'normal' ORDER BY id")
+                .unwrap();
+            statement
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        }
+
+        fn asset_exists(&self, asset_id: &str) -> bool {
+            self.library
+                .connection()
+                .unwrap()
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM assets WHERE id = ?1)",
+                    [asset_id],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        }
+    }
+
+    fn review_fixture() -> ReviewFixture {
+        let temp = tempfile::tempdir().unwrap();
+        let input = temp.path().join("input");
+        fs::create_dir(&input).unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        let old_tag = library
+            .create_classification(CreateClassification {
+                kind: ClassificationKind::Root,
+                name: "기존 분류".into(),
+                parent_id: None,
+            })
+            .unwrap()
+            .id;
+        let requested_tag = library
+            .create_classification(CreateClassification {
+                kind: ClassificationKind::Root,
+                name: "새 분류".into(),
+                parent_id: None,
+            })
+            .unwrap()
+            .id;
+        let base = striped_fixture(900, 600, StripeDirection::Vertical);
+        let existing_source = input.join("existing.png");
+        base.save(&existing_source).unwrap();
+        let existing_id = match library
+            .ingest_image(IngestImageRequest {
+                source_path: existing_source,
+                classification_id: Some(old_tag.clone()),
+                source_url: Some("https://example.com/old".into()),
+            })
+            .unwrap()
+        {
+            IngestOutcome::Added { asset } => asset.id,
+            other => panic!("expected normal existing asset, got {other:?}"),
+        };
+        let candidate_source = input.join("candidate.jpg");
+        jpeg_variant(&base, 450, 300, 70)
+            .save(&candidate_source)
+            .unwrap();
+        let review_id = match library
+            .ingest_image(IngestImageRequest {
+                source_path: candidate_source,
+                classification_id: Some(requested_tag.clone()),
+                source_url: Some("https://example.com/new".into()),
+            })
+            .unwrap()
+        {
+            IngestOutcome::ReviewPending { review_id } => review_id,
+            other => panic!("expected review candidate, got {other:?}"),
+        };
+        let (candidate_id, relative_path, thumbnail_relative_path): (String, String, String) =
+            library
+                .connection()
+                .unwrap()
+                .query_row(
+                    "SELECT assets.id, assets.relative_path, assets.thumbnail_relative_path
+                     FROM similarity_reviews
+                     JOIN assets ON assets.id = similarity_reviews.candidate_asset_id
+                     WHERE similarity_reviews.id = ?1",
+                    [&review_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .unwrap();
+        let candidate_asset_path = library.root().join(relative_path);
+        let candidate_thumbnail_path = library.root().join(thumbnail_relative_path);
+        ReviewFixture {
+            _temp: temp,
+            library,
+            input,
+            existing_id,
+            candidate_id,
+            review_id,
+            old_tag,
+            requested_tag,
+            candidate_asset_path,
+            candidate_thumbnail_path,
+        }
     }
 
     fn library_with_hashes(rows: &[(&str, u64, &str)]) -> TestLibrary {

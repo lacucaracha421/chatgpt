@@ -254,7 +254,7 @@ impl Library {
     }
 
     #[cfg(windows)]
-    fn remove_managed_files(
+    pub(crate) fn remove_managed_files(
         &self,
         relative_path: &str,
         thumbnail_relative_path: &str,

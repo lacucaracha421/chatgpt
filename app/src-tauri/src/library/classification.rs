@@ -155,14 +155,7 @@ impl Library {
         asset_id: &str,
     ) -> Result<Vec<ClassificationEntry>, LibraryError> {
         let connection = self.connection()?;
-        let mut statement = connection.prepare(
-            "SELECT entry.id, entry.kind, entry.name, entry.parent_id
-             FROM classification_entries AS entry
-             JOIN asset_classifications AS link ON link.classification_id = entry.id
-             WHERE link.asset_id = ?1
-             ORDER BY entry.name COLLATE NOCASE, entry.id",
-        )?;
-        read_entries(&mut statement, [asset_id])
+        classifications_for_asset(&connection, asset_id)
     }
 
     fn change_asset_classifications(
@@ -206,6 +199,20 @@ impl Library {
         transaction.commit()?;
         Ok(())
     }
+}
+
+pub(crate) fn classifications_for_asset(
+    connection: &Connection,
+    asset_id: &str,
+) -> Result<Vec<ClassificationEntry>, LibraryError> {
+    let mut statement = connection.prepare(
+        "SELECT entry.id, entry.kind, entry.name, entry.parent_id
+         FROM classification_entries AS entry
+         JOIN asset_classifications AS link ON link.classification_id = entry.id
+         WHERE link.asset_id = ?1
+         ORDER BY entry.name COLLATE NOCASE, entry.id",
+    )?;
+    read_entries(&mut statement, [asset_id])
 }
 
 fn normalized_name(name: String) -> Result<String, LibraryError> {
