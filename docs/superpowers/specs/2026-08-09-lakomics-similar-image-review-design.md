@@ -43,7 +43,7 @@
 
 ## 4. 저장 구조
 
-기존 `assets` 테이블에 nullable `perceptual_hash`와 nullable `perceptual_hash_error`를 추가하고 상태값에 `review`와 내부 정리용 `discarding`을 사용한다. 새 `similarity_reviews` 테이블은 다음 정보를 가진다.
+기존 `assets` 테이블에 nullable `perceptual_hash`와 nullable `perceptual_hash_error`를 추가하고 기존 `review` 상태를 사용한다. 새 `similarity_reviews` 테이블은 다음 정보를 가진다.
 
 - 안정적인 review ID
 - 기존 정상 자산 ID
@@ -79,7 +79,7 @@
 - `replace_existing`
 - `keep_both`
 
-`keep_existing`은 기존 자산을 변경하지 않는다. 첫 트랜잭션에서 review 행을 `resolving`으로 바꾸고 새 후보를 내부 `discarding` 상태로 전환한 뒤, 소유권을 확인한 관리 파일을 삭제한다. 마지막 트랜잭션은 후보 행을 제거하고 review 행의 후보 ID를 비운 뒤 `resolved`로 바꾼다. 앱이 중간에 종료되면 다음 실행에서 `resolving` review와 `discarding` 자산의 정리를 이어간다.
+`keep_existing`은 기존 자산을 변경하지 않는다. 첫 트랜잭션에서 review 행을 `resolving`으로 바꾸고 새 후보는 일반 목록에서 제외되는 기존 `review` 상태로 유지한 뒤, 소유권을 확인한 관리 파일을 삭제한다. 마지막 트랜잭션은 후보 행을 제거하고 review 행의 후보 ID를 비운 뒤 `resolved`로 바꾼다. 앱이 중간에 종료되면 다음 실행에서 `resolving` review의 정리를 이어간다.
 
 `replace_existing`은 기존 자산을 라이브러리 휴지통으로 보내고 새 후보를 정상 자산으로 만든다. 기존 자산의 분류와 즐겨찾기를 새 자산이 이어받는다. 새 이미지의 파일 고유 정보, 원래 파일명, 출처와 수집일은 새 후보 값을 유지한다. 작품·컬렉션 기능이 추가될 때 해당 연결도 같은 결정 트랜잭션의 승계 대상에 포함해야 한다.
 
@@ -124,7 +124,7 @@ get_asset(assetId) -> AssetSummary
 - 디코딩, 지각 해시, 썸네일 또는 파일 설치가 실패하면 열린 검토 기록이나 반쪽 자산을 남기지 않는다.
 - 검토 대기 등록은 자산 상태와 review 행을 한 트랜잭션에 기록한다.
 - 검토 결정 실패 시 열린 review 행을 유지해 다시 시도할 수 있게 한다.
-- `keep_existing`의 관리 파일 정리는 기존 파일 소유권 확인 규칙을 재사용하고, `discarding` 상태를 통해 재시작 후 이어간다.
+- `keep_existing`의 관리 파일 정리는 기존 파일 소유권 확인 규칙을 재사용하고, review 행의 `resolving` 상태를 통해 재시작 후 이어간다.
 - 앱 재시작 후 SQLite의 열린 review 행으로 목록을 복원한다.
 - 기존 해시 생성 실패는 해당 자산 ID에 공개 오류 코드를 기록하고 나머지 자산 처리를 계속한다. 사용자가 라이브러리 검사를 실행하기 전에는 같은 실패를 자동 반복하지 않는다.
 - 50,000개 지각 해시 검색은 Rust에서 수행하며 프론트엔드로 해시 목록을 보내지 않는다.
@@ -142,7 +142,7 @@ Rust 테스트는 다음을 증명한다.
 - 세 가지 결정이 상태, 휴지통, 분류와 즐겨찾기를 정확히 처리한다.
 - 반복 결정은 중복 변경을 만들지 않는다.
 - 재시작 후 열린 검토와 기존 해시 생성 진행 상태가 유지된다.
-- `keep_existing` 도중 종료된 `discarding` 후보가 다음 실행에서 안전하게 정리된다.
+- `keep_existing` 도중 종료된 `resolving` 검토가 다음 실행에서 안전하게 정리된다.
 - 50,000개 합성 해시에서 단일 후보 검색이 릴리스 빌드 기준 1초 안에 끝난다.
 
 React 테스트는 다음을 증명한다.
