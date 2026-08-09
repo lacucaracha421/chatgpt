@@ -1,4 +1,5 @@
 import type { AssetSort } from "../library/types";
+import { clampSidebarWidth } from "../layout/sidebarWidth";
 
 export const UI_PREFERENCES_KEY = "lakomics.uiPreferences.v1";
 
@@ -37,7 +38,7 @@ export function loadUiPreferences(storage: Storage = localStorage): UiPreference
         : DEFAULT_UI_PREFERENCES.metadataVisible,
     sidebarWidth:
       typeof value.sidebarWidth === "number" && Number.isFinite(value.sidebarWidth)
-        ? Math.max(176, Math.min(320, value.sidebarWidth))
+        ? clampSidebarWidth(value.sidebarWidth)
         : DEFAULT_UI_PREFERENCES.sidebarWidth,
     expandedClassificationIds: Array.isArray(value.expandedClassificationIds)
       ? [...new Set(value.expandedClassificationIds.filter(isString))]

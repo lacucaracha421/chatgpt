@@ -28,11 +28,14 @@
   --control-height-md: 28px;
   --control-height-icon: 28px;
   --sidebar-width-default: 208px;
+  --sidebar-width-min: 176px;
+  --sidebar-width-max: 320px;
   --toolbar-height: 40px;
   --statusbar-height: 24px;
   --gallery-target-row-height: 180px;
   --inspector-width: 272px;
   --gallery-gap: 6px;
   --drag-insertion-width: 2px;
+  --selection-indicator-width: 2px;
   --font-ui: "Segoe UI", sans-serif;
 }

@@ -231,9 +231,8 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "복구 시작" }));
 
     await waitFor(() => expect(document.querySelector(".library-workspace")).toHaveAttribute("inert"));
-    const dialog = screen.getByRole("dialog");
-    fireEvent(dialog, new Event("cancel", { cancelable: true }));
-    expect(dialog).toHaveAttribute("open");
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("dialog")).toBeVisible();
     finishRestore();
     await waitFor(() => expect(document.querySelector(".library-workspace")).not.toHaveAttribute("inert"));
   });
@@ -334,7 +333,7 @@ describe("App", () => {
     await user.selectOptions(screen.getByLabelText("정렬"), "random");
     await user.click(metadata);
     await user.click(screen.getByRole("button", { name: "게임 접기" }));
-    const resizeHandle = screen.getByRole("separator", { name: "사이드바 크기 조절" });
+    const resizeHandle = screen.getByRole("separator", { name: "사이드바 너비 조절" });
     Object.defineProperties(resizeHandle, {
       setPointerCapture: { configurable: true, value: vi.fn() },
       releasePointerCapture: { configurable: true, value: vi.fn() },

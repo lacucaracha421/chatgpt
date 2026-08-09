@@ -3,6 +3,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
 import { useLibrary } from "../library/LibraryContext";
 import type { AssetView, ClassificationEntry, ClassificationKind } from "../library/types";
+import { clampSidebarWidth } from "../layout/sidebarWidth";
 import { Button } from "../shared/ui/Button";
 import { ContextMenu } from "../shared/ui/ContextMenu";
 import { Dialog } from "../shared/ui/Dialog";
@@ -33,9 +34,6 @@ type ClassificationSidebarProps = {
 type DialogState =
   | { type: "create"; parentId: string | null; kinds: ClassificationKind[] }
   | { type: "rename" | "move" | "delete"; entry: ClassificationEntry };
-
-const MIN_SIDEBAR_WIDTH = 184;
-const MAX_SIDEBAR_WIDTH = 360;
 
 export function ClassificationSidebar({
   entries,
@@ -212,7 +210,7 @@ export function ClassificationSidebar({
     const activeResize = resize.current;
     if (!activeResize || activeResize.pointerId !== event.pointerId) return;
     onSidebarWidthChange(
-      Math.round(Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, activeResize.startWidth + event.clientX - activeResize.startX))),
+      clampSidebarWidth(Math.round(activeResize.startWidth + event.clientX - activeResize.startX)),
     );
   }
 
@@ -271,7 +269,7 @@ export function ClassificationSidebar({
         )}
       </div>
       <div
-        aria-label="사이드바 크기 조절"
+        aria-label="사이드바 너비 조절"
         className="classification-sidebar__resize-handle"
         role="separator"
         aria-orientation="vertical"

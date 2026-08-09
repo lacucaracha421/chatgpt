@@ -338,7 +338,7 @@ git commit -m "style: compact the asset toolbar and controls"
 - Consumes: Task 1의 176~320px 토큰과 현재 분류 트리/드래그 Interface
 - Produces: 28px 행, 최소 장식, 같은 키보드/드래그 동작을 갖는 사이드바
 
-- [ ] **Step 1: 사이드바 RED 테스트 작성**
+- [x] **Step 1: 사이드바 RED 테스트 작성**
 
 ```tsx
 it("clamps pointer resizing to the approved compact range", async () => {
@@ -353,25 +353,25 @@ it("clamps pointer resizing to the approved compact range", async () => {
 
 빠른 보기와 treeitem의 기존 키보드, 메뉴, 내부 드롭 테스트는 삭제하지 않는다.
 
-- [ ] **Step 2: RED 확인**
+- [x] **Step 2: RED 확인**
 
 Run: `cd app && npm.cmd test -- src/classification/ClassificationSidebar.test.tsx`
 
 Expected: 현재 184~360px 상수 때문에 FAIL
 
-- [ ] **Step 3: 사이드바 구현**
+- [x] **Step 3: 사이드바 구현**
 
 `MIN_SIDEBAR_WIDTH`와 `MAX_SIDEBAR_WIDTH`를 각각 176, 320으로 변경한다. resize handle에 `role="separator"`, `aria-orientation="vertical"`, `aria-label="사이드바 너비 조절"`을 부여한다. 빠른 보기와 트리 행은 28px 토큰을 공유하고, 선택 상태는 배경과 왼쪽 2px 강조선만 사용한다.
 
 분류 추가, 설정, 휴지통, 백업 동작의 위치와 로직은 바꾸지 않는다.
 
-- [ ] **Step 4: GREEN 확인**
+- [x] **Step 4: GREEN 확인**
 
 Run: `cd app && npm.cmd test -- src/classification/ClassificationSidebar.test.tsx src/app/App.test.tsx`
 
 Expected: PASS
 
-- [ ] **Step 5: 빌드와 커밋**
+- [x] **Step 5: 빌드와 커밋**
 
 Run: `cd app && npm.cmd run build`
 
@@ -381,6 +381,8 @@ Expected: exit 0
 git add app/src/classification/ClassificationSidebar.tsx app/src/classification/ClassificationSidebar.test.tsx app/src/styles/global.css
 git commit -m "style: tighten the classification sidebar"
 ```
+
+검증 기록 (2026-08-09): RED는 기존 손잡이 이름과 184~360px 범위 때문에 실패했다. 저장 설정과 포인터 조절이 같은 `clampSidebarWidth` 규칙을 사용하도록 중복을 제거하고 선택 강조선·간격을 정돈한 뒤 관련 3개 파일의 45개 테스트가 통과했고 `npm.cmd run build`가 exit 0이었다. Radix 전환 후 남아 있던 App 통합 테스트의 네이티브 dialog 가정도 실제 Escape 동작 검증으로 교체했다.
 
 ### Task 5: 정보 패널 자동 열기와 좁은 창 동작
 

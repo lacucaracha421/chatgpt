@@ -327,9 +327,9 @@ describe("ClassificationSidebar", () => {
     expect(onViewChange).not.toHaveBeenCalled();
   });
 
-  it("emits integer sidebar widths clamped to 184 and 360", () => {
+  it("emits integer sidebar widths clamped to 176 and 320", () => {
     const { onSidebarWidthChange } = renderSidebar(gateway(), { sidebarWidth: 232 });
-    const handle = screen.getByRole("separator", { name: "사이드바 크기 조절" });
+    const handle = screen.getByRole("separator", { name: "사이드바 너비 조절" });
     Object.defineProperties(handle, {
       setPointerCapture: { configurable: true, value: vi.fn() },
       releasePointerCapture: { configurable: true, value: vi.fn() },
@@ -342,8 +342,8 @@ describe("ClassificationSidebar", () => {
     fireEvent.pointerMove(handle, { pointerId: 1, clientX: 400.4 });
     fireEvent.pointerUp(handle, { pointerId: 1 });
 
-    expect(onSidebarWidthChange).toHaveBeenNthCalledWith(1, 184);
-    expect(onSidebarWidthChange).toHaveBeenNthCalledWith(2, 360);
+    expect(onSidebarWidthChange).toHaveBeenNthCalledWith(1, 176);
+    expect(onSidebarWidthChange).toHaveBeenNthCalledWith(2, 320);
     expect(handle.setPointerCapture).toHaveBeenCalledWith(1);
     expect(handle.releasePointerCapture).toHaveBeenCalledWith(1);
   });
