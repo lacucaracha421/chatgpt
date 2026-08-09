@@ -12,7 +12,7 @@ export type UiPreferences = {
 
 export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   metadataVisible: true,
-  sidebarWidth: 232,
+  sidebarWidth: 208,
   expandedClassificationIds: [],
   assetSort: "newest",
   thumbnailRowHeight: 180,
@@ -37,7 +37,7 @@ export function loadUiPreferences(storage: Storage = localStorage): UiPreference
         : DEFAULT_UI_PREFERENCES.metadataVisible,
     sidebarWidth:
       typeof value.sidebarWidth === "number" && Number.isFinite(value.sidebarWidth)
-        ? Math.max(184, Math.min(360, value.sidebarWidth))
+        ? Math.max(176, Math.min(320, value.sidebarWidth))
         : DEFAULT_UI_PREFERENCES.sidebarWidth,
     expandedClassificationIds: Array.isArray(value.expandedClassificationIds)
       ? [...new Set(value.expandedClassificationIds.filter(isString))]

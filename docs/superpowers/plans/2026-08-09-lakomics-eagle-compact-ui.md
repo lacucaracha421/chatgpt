@@ -54,7 +54,7 @@
 - Consumes: 기존 CSS class 이름과 `UiPreferences`
 - Produces: `--toolbar-height`, `--statusbar-height`, `--sidebar-width-default`, `--inspector-width`, `--gallery-gap` 토큰과 새 기본 사이드바 너비
 
-- [ ] **Step 1: 환경설정 RED 테스트 작성**
+- [x] **Step 1: 환경설정 RED 테스트 작성**
 
 `uiPreferences.test.ts`에는 저장값이 범위를 벗어날 때 176~320px로 제한되고 기본값이 208px인지 검증한다.
 
@@ -64,13 +64,13 @@ expect(loadUiPreferences(storageWith({ sidebarWidth: 100 })).sidebarWidth).toBe(
 expect(loadUiPreferences(storageWith({ sidebarWidth: 400 })).sidebarWidth).toBe(320);
 ```
 
-- [ ] **Step 2: RED 확인**
+- [x] **Step 2: RED 확인**
 
 Run: `cd app && npm.cmd test -- src/layout/AppShell.test.tsx src/preferences/uiPreferences.test.ts`
 
 Expected: 기존 232px 기본값과 184~360px 제한 때문에 FAIL
 
-- [ ] **Step 3: 중앙 토큰과 기본값 변경**
+- [x] **Step 3: 중앙 토큰과 기본값 변경**
 
 `tokens.css`의 기준값을 다음처럼 바꾸고 `global.css`에서는 값 대신 변수만 사용한다.
 
@@ -110,13 +110,13 @@ Expected: 기존 232px 기본값과 184~360px 제한 때문에 FAIL
 
 CSS 토큰은 실행 로직이 아닌 시각 설정이므로 소스 문자열을 검사하는 가짜 테스트를 추가하지 않는다. Task 8에서 실제 1536px/960px 렌더링으로 도구 모음, 상태 표시줄, 사이드바, 정보 패널, 갤러리 간격을 검증한다. `AppShell.test.tsx`의 기존 viewport 제약 테스트만 유지한다.
 
-- [ ] **Step 4: GREEN 확인**
+- [x] **Step 4: GREEN 확인**
 
 Run: `cd app && npm.cmd test -- src/layout/AppShell.test.tsx src/preferences/uiPreferences.test.ts`
 
 Expected: PASS
 
-- [ ] **Step 5: 빌드와 커밋**
+- [x] **Step 5: 빌드와 커밋**
 
 Run: `cd app && npm.cmd run build`
 
@@ -126,6 +126,8 @@ Expected: exit 0
 git add app/src/styles/tokens.css app/src/styles/global.css app/src/preferences/uiPreferences.ts app/src/preferences/uiPreferences.test.ts app/src/layout/AppShell.test.tsx
 git commit -m "style: establish Eagle compact design tokens"
 ```
+
+검증 기록 (2026-08-09): RED는 기존 기본값 232px, 상한 360px, 하한 184px을 각각 확인하며 3건 실패했다. GREEN은 `AppShell.test.tsx`와 `uiPreferences.test.ts`의 10개 테스트가 통과했고 `npm.cmd run build`가 exit 0이었다.
 
 ### Task 2: shadcn/Radix 공통 오버레이 부품
 
