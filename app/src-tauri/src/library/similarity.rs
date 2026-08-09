@@ -377,7 +377,7 @@ impl Library {
         for asset_id in &asset_ids {
             let result = self
                 .resolve_media(asset_id, MediaVariant::Asset)
-                .and_then(|media| perceptual_hash_from_bytes(&media.bytes));
+                .and_then(|media| perceptual_hash_from_file(media.file));
             let connection = self.connection()?;
             match result {
                 Ok(hash) => {
@@ -590,12 +590,6 @@ pub(crate) fn perceptual_hash_from_file(mut file: File) -> Result<u64, LibraryEr
         .decode()
         .map_err(|_| LibraryError::UnsupportedImage)?;
     Ok(perceptual_hash(&image))
-}
-
-fn perceptual_hash_from_bytes(bytes: &[u8]) -> Result<u64, LibraryError> {
-    image::load_from_memory(bytes)
-        .map(|image| perceptual_hash(&image))
-        .map_err(|_| LibraryError::UnsupportedImage)
 }
 
 fn perceptual_hash(image: &DynamicImage) -> u64 {

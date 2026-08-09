@@ -16,7 +16,16 @@ pub fn run() {
         .register_uri_scheme_protocol("lakomics", |context, request| {
             let state = context.app_handle().state::<commands::AppState>();
             let library = state.current_library();
-            media_protocol::media_response(library.as_ref(), request.method(), request.uri().path())
+            let range = request
+                .headers()
+                .get(tauri::http::header::RANGE)
+                .and_then(|value| value.to_str().ok());
+            media_protocol::media_response_with_range(
+                library.as_ref(),
+                request.method(),
+                request.uri().path(),
+                range,
+            )
         })
         .invoke_handler(tauri::generate_handler![
             commands::open_library,

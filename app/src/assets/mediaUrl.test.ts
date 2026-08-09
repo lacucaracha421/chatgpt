@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assetUrl, thumbnailUrl } from "./mediaUrl";
+import { assetUrl, playbackUrl, scrubFrameUrl, thumbnailUrl } from "./mediaUrl";
 
 describe("media URLs", () => {
   it("uses the Windows custom-protocol origin and ID-only paths", () => {
@@ -16,6 +16,12 @@ describe("media URLs", () => {
   it("encodes the ID as one URL segment", () => {
     expect(thumbnailUrl("asset/with/slashes")).toBe(
       "http://lakomics.localhost/thumbnail/asset%2Fwith%2Fslashes",
+    );
+    expect(playbackUrl("a/b")).toBe(
+      "http://lakomics.localhost/playback/a%2Fb",
+    );
+    expect(scrubFrameUrl("a/b", 12)).toBe(
+      "http://lakomics.localhost/scrub-frame/a%2Fb/12",
     );
   });
 });

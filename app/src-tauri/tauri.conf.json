@@ -20,7 +20,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' http://lakomics.localhost"
+      "csp": "default-src 'self'; img-src 'self' http://lakomics.localhost; media-src 'self' http://lakomics.localhost"
     }
   },
   "bundle": {

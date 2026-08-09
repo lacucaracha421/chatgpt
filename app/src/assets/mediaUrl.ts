@@ -7,3 +7,11 @@ export function thumbnailUrl(assetId: string): string {
 export function assetUrl(assetId: string): string {
   return `${MEDIA_ORIGIN}/asset/${encodeURIComponent(assetId)}`;
 }
+
+export function playbackUrl(assetId: string): string {
+  return `${MEDIA_ORIGIN}/playback/${encodeURIComponent(assetId)}`;
+}
+
+export function scrubFrameUrl(assetId: string, frameIndex: number): string {
+  return `${MEDIA_ORIGIN}/scrub-frame/${encodeURIComponent(assetId)}/${frameIndex}`;
+}

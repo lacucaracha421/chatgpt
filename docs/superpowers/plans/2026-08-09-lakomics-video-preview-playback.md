@@ -594,7 +594,7 @@ git commit -m "feat: expose video preparation lifecycle"
 - Consumes: prepared video metadata and canonical managed path validation.
 - Produces: `thumbnail(assetId)`, `playback(assetId)`, `scrubFrame(assetId, frameIndex)` without exposing a path.
 
-- [ ] **Step 1: Write RED protocol tests**
+- [x] **Step 1: Write RED protocol tests**
 
 Add Rust tests for bounded, open-ended, suffix, un-ranged playback, unsatisfiable, multi-range, missing derivative, and trash asset requests. Required behavior:
 
@@ -613,7 +613,7 @@ expect(playbackUrl("a/b")).toBe("http://lakomics.localhost/playback/a%2Fb");
 expect(scrubFrameUrl("a/b", 12)).toBe("http://lakomics.localhost/scrub-frame/a%2Fb/12");
 ```
 
-- [ ] **Step 2: Run RED protocol tests**
+- [x] **Step 2: Run RED protocol tests**
 
 ```powershell
 cd C:\chatgpt\app\src-tauri
@@ -622,7 +622,7 @@ cd C:\chatgpt\app
 npm.cmd test -- src/assets/mediaUrl.test.ts
 ```
 
-- [ ] **Step 3: Implement seekable file responses**
+- [x] **Step 3: Implement seekable file responses**
 
 Change `MediaResponse` from `Vec<u8>` to metadata plus an opened `File`. `resolve_media` selects:
 
@@ -639,7 +639,7 @@ pub enum MediaVariant {
 
 Extend CSP `media-src` to `http://lakomics.localhost` while leaving `connect-src` unchanged.
 
-- [ ] **Step 4: Run GREEN protocol tests**
+- [x] **Step 4: Run GREEN protocol tests**
 
 ```powershell
 cd C:\chatgpt\app\src-tauri
@@ -650,7 +650,7 @@ npm.cmd run build
 git diff --check
 ```
 
-- [ ] **Step 5: Commit Task 6**
+- [x] **Step 5: Commit Task 6**
 
 ```powershell
 git add app/src-tauri/src/library/mod.rs app/src-tauri/src/media_protocol.rs app/src-tauri/src/lib.rs app/src-tauri/tauri.conf.json app/src/assets/mediaUrl.ts app/src/assets/mediaUrl.test.ts

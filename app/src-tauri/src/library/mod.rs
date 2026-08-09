@@ -14,7 +14,7 @@ mod video_media;
 
 use std::{
     collections::BTreeSet,
-    fs,
+    fs::{self, File},
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
     sync::{Arc, Mutex, MutexGuard},
@@ -29,11 +29,14 @@ use rusqlite::{Connection, OptionalExtension};
 pub enum MediaVariant {
     Asset,
     Thumbnail,
+    Playback,
+    ScrubFrame(u32),
 }
 
 #[derive(Debug)]
 pub struct MediaResponse {
-    pub bytes: Vec<u8>,
+    pub file: File,
+    pub length: u64,
     pub mime: &'static str,
 }
 
@@ -169,20 +172,62 @@ impl Library {
         asset_id: &str,
         variant: MediaVariant,
     ) -> Result<MediaResponse, LibraryError> {
-        let column = match variant {
-            MediaVariant::Asset => "relative_path",
-            MediaVariant::Thumbnail => "thumbnail_relative_path",
+        let relative_path = match variant {
+            MediaVariant::Asset => self
+                .connection()?
+                .query_row(
+                    "SELECT CASE WHEN media_kind != 'video' THEN relative_path END
+                     FROM assets WHERE id = ?1 AND status IN ('normal', 'review')",
+                    [asset_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()?
+                .flatten(),
+            MediaVariant::Thumbnail => self
+                .connection()?
+                .query_row(
+                    "SELECT thumbnail_relative_path FROM assets
+                     WHERE id = ?1 AND status IN ('normal', 'review')",
+                    [asset_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()?
+                .flatten(),
+            MediaVariant::Playback => self
+                .connection()?
+                .query_row(
+                    "SELECT CASE video.playback_kind
+                        WHEN 'original' THEN asset.relative_path
+                        WHEN 'proxy' THEN video.proxy_relative_path
+                     END
+                     FROM assets AS asset
+                     JOIN video_assets AS video ON video.asset_id = asset.id
+                     WHERE asset.id = ?1 AND asset.status = 'normal'
+                       AND video.preparation_state = 'ready'",
+                    [asset_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()?
+                .flatten(),
+            MediaVariant::ScrubFrame(frame_index) => self
+                .connection()?
+                .query_row(
+                    "SELECT video.scrub_relative_dir, video.scrub_frame_count
+                     FROM assets AS asset
+                     JOIN video_assets AS video ON video.asset_id = asset.id
+                     WHERE asset.id = ?1 AND asset.status = 'normal'
+                       AND video.preparation_state = 'ready'",
+                    [asset_id],
+                    |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?)),
+                )
+                .optional()?
+                .and_then(|(directory, count)| {
+                    let count = u32::try_from(count).ok()?;
+                    (frame_index < count)
+                        .then(|| directory.map(|path| format!("{path}/{frame_index:03}.webp")))
+                        .flatten()
+                }),
         };
-        let relative_path: Option<String> = self
-            .connection()?
-            .query_row(
-                &format!(
-                    "SELECT {column} FROM assets WHERE id = ?1 AND status IN ('normal', 'review')"
-                ),
-                [asset_id],
-                |row| row.get(0),
-            )
-            .optional()?;
         let relative_path = relative_path.ok_or(LibraryError::AssetNotFound)?;
         let canonical_root =
             fs::canonicalize(&self.root).map_err(|source| LibraryError::ReadMedia {
@@ -204,11 +249,22 @@ impl Library {
             return Err(LibraryError::UnsafeMediaPath);
         }
         let mime = mime_for_path(&canonical_path);
-        let bytes = fs::read(&canonical_path).map_err(|source| LibraryError::ReadMedia {
+        let file = File::open(&canonical_path).map_err(|source| LibraryError::ReadMedia {
+            path: canonical_path.clone(),
+            source,
+        })?;
+        let metadata = file.metadata().map_err(|source| LibraryError::ReadMedia {
             path: canonical_path,
             source,
         })?;
-        Ok(MediaResponse { bytes, mime })
+        if !metadata.is_file() {
+            return Err(LibraryError::MediaNotFound);
+        }
+        Ok(MediaResponse {
+            file,
+            length: metadata.len(),
+            mime,
+        })
     }
 }
 
@@ -244,6 +300,9 @@ fn mime_for_path(path: &Path) -> &'static str {
         Some("png") => "image/png",
         Some("gif") => "image/gif",
         Some("webp") => "image/webp",
+        Some("mp4" | "m4v") => "video/mp4",
+        Some("webm") => "video/webm",
+        Some("mov") => "video/quicktime",
         _ => "application/octet-stream",
     }
 }
