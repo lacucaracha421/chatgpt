@@ -196,8 +196,8 @@ fn public_asset_flow_supports_favorites_sorts_random_paging_and_source_urls() {
     let temp = tempfile::tempdir().unwrap();
     let first_path = temp.path().join("first.png");
     let second_path = temp.path().join("second.png");
-    write_colored_image(&first_path, [40, 80, 120]);
-    write_colored_image(&second_path, [120, 80, 40]);
+    write_distinct_image(&first_path, 0);
+    write_distinct_image(&second_path, 1);
     let library = Library::open(temp.path().join("library")).unwrap();
 
     let first = ingest(&library, &first_path, Some("https://example.test/first"));
@@ -398,9 +398,9 @@ fn trash_pages_by_trashed_at_and_id_and_derives_purge_at() {
     let first_path = temp.path().join("first.png");
     let second_path = temp.path().join("second.png");
     let third_path = temp.path().join("third.png");
-    write_colored_image(&first_path, [40, 80, 120]);
-    write_colored_image(&second_path, [80, 120, 40]);
-    write_colored_image(&third_path, [120, 40, 80]);
+    write_distinct_image(&first_path, 0);
+    write_distinct_image(&second_path, 1);
+    write_distinct_image(&third_path, 2);
     let first = ingest(&library, &first_path, None);
     let second = ingest(&library, &second_path, None);
     let third = ingest(&library, &third_path, None);
@@ -638,10 +638,17 @@ fn asset_query(
     }
 }
 
-fn write_colored_image(path: &Path, rgb: [u8; 3]) {
-    RgbImage::from_pixel(8, 6, Rgb(rgb))
-        .save_with_format(path, ImageFormat::Png)
-        .unwrap();
+fn write_distinct_image(path: &Path, pattern: u8) {
+    RgbImage::from_fn(96, 64, |x, y| {
+        let light = match pattern {
+            0 => (x / 8) % 2 == 0,
+            1 => (y / 8) % 2 == 0,
+            _ => ((x + y) / 8) % 2 == 0,
+        };
+        Rgb(if light { [240, 180, 30] } else { [20, 60, 180] })
+    })
+    .save_with_format(path, ImageFormat::Png)
+    .unwrap();
 }
 
 fn write_image(path: &Path, format: ImageFormat) {

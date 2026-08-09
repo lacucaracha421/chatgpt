@@ -1,14 +1,17 @@
-use image::DynamicImage;
+use std::{
+    fs::File,
+    io::{BufReader, Seek, SeekFrom},
+};
+
+use image::{DynamicImage, ImageReader};
 use rusqlite::params;
 
 use super::{error::LibraryError, models::SimilarityIndexProgress, Library, MediaVariant};
 
-#[allow(dead_code)] // Used by ingestion when Task 3 connects candidate search.
 const SIMILARITY_DISTANCE_MAX: u32 = 6;
 const INDEX_BATCH_SIZE: u32 = 50;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // Used by ingestion when Task 3 connects candidate search.
 pub(crate) struct SimilarAssetCandidate {
     pub(crate) asset_id: String,
     pub(crate) distance: u32,
@@ -76,7 +79,6 @@ impl Library {
         })
     }
 
-    #[allow(dead_code)] // Used by ingestion when Task 3 connects candidate search.
     pub(crate) fn find_similar_asset(
         &self,
         target_hash: u64,
@@ -110,6 +112,17 @@ impl Library {
     }
 }
 
+pub(crate) fn perceptual_hash_from_file(mut file: File) -> Result<u64, LibraryError> {
+    file.seek(SeekFrom::Start(0))
+        .map_err(|_| LibraryError::UnsupportedImage)?;
+    let image = ImageReader::new(BufReader::new(file))
+        .with_guessed_format()
+        .map_err(|_| LibraryError::UnsupportedImage)?
+        .decode()
+        .map_err(|_| LibraryError::UnsupportedImage)?;
+    Ok(perceptual_hash(&image))
+}
+
 fn perceptual_hash_from_bytes(bytes: &[u8]) -> Result<u64, LibraryError> {
     image::load_from_memory(bytes)
         .map(|image| perceptual_hash(&image))
@@ -130,7 +143,6 @@ fn perceptual_hash(image: &DynamicImage) -> u64 {
     hash
 }
 
-#[allow(dead_code)] // Used by ingestion when Task 3 connects candidate search.
 fn hamming_distance(left: u64, right: u64) -> u32 {
     (left ^ right).count_ones()
 }
