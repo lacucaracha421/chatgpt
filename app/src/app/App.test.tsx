@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DropSubscriber } from "../ingestion/useFileDrop";
@@ -242,6 +242,12 @@ describe("App", () => {
 
     expect(await screen.findByRole("main", { name: "라이브러리 작업 공간" })).toBeInTheDocument();
     expect(screen.getByRole("complementary", { name: "분류" })).toBeInTheDocument();
+    expect(screen.getByRole("toolbar", { name: "자산 도구" })).toBeInTheDocument();
+    const content = screen.getByRole("region", { name: "자산 내용" });
+    expect(content).toBeInTheDocument();
+    expect(within(content).queryByRole("button", { name: "라이브러리 안전 설정" })).not.toBeInTheDocument();
+    expect(within(screen.getByRole("complementary", { name: "분류" }))
+      .getByRole("button", { name: "라이브러리 안전 설정" })).toBeInTheDocument();
     expect(screen.getByRole("contentinfo")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Lakomics" })).not.toBeInTheDocument();
   });
