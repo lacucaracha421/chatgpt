@@ -258,7 +258,7 @@ git commit -m "refactor: adopt compact Radix overlay primitives"
 - Consumes: 현재 `AssetToolbarProps`, `Button`, `Select`, `Slider`, `Toggle`, `Toast`, Task 2의 `Menu`와 `Tooltip`
 - Produces: 일반 상태와 선택 상태가 한 줄에서 전환되는 40px `AssetToolbar`
 
-- [ ] **Step 1: 도구 모음 RED 테스트 작성**
+- [x] **Step 1: 도구 모음 RED 테스트 작성**
 
 ```tsx
 it("shows only everyday controls when nothing is selected", () => {
@@ -281,13 +281,13 @@ it("replaces browsing controls with compact selection actions", () => {
 
 좁은 폭 대응은 CSS 검증으로 `flex-wrap: nowrap`, `min-width: 0`, overflow 메뉴 class 존재를 확인한다.
 
-- [ ] **Step 2: RED 확인**
+- [x] **Step 2: RED 확인**
 
 Run: `cd app && npm.cmd test -- src/assets/AssetToolbar.test.tsx`
 
 Expected: 현재 버튼 이름과 표시 구성이 승인안과 달라 FAIL
 
-- [ ] **Step 3: 공통 컨트롤 외형 통일**
+- [x] **Step 3: 공통 컨트롤 외형 통일**
 
 - `Button`의 기존 variant와 icon 접근성 제약은 유지한다.
 - `Select`, `Slider`, `Toggle`의 기존 이벤트 Interface는 유지해 업무 호출부를 불필요하게 바꾸지 않는다.
@@ -295,7 +295,7 @@ Expected: 현재 버튼 이름과 표시 구성이 승인안과 달라 FAIL
 - 높이, 패딩, 모서리, 색상은 토큰만 사용한다.
 - 아이콘 전용 버튼은 Task 2의 `Tooltip`으로 감싼다.
 
-- [ ] **Step 4: 도구 모음 구현**
+- [x] **Step 4: 도구 모음 구현**
 
 일반 상태는 위치, 정렬, 썸네일 크기, 정보 토글, 조건부 범위/랜덤 동작만 렌더링한다. 선택 상태는 선택 개수, 분류 선택, 좋아요 켜기, 휴지통, `추가 작업` 메뉴를 렌더링한다. 좋아요 끄기와 분류 제거는 `MenuItem[]`에 둔다.
 
@@ -308,13 +308,13 @@ const overflowItems: MenuItem[] = [
 
 위험 작업은 빨간 글자만 사용하고 도구 모음 전체를 빨간 버튼으로 채우지 않는다.
 
-- [ ] **Step 5: GREEN 확인**
+- [x] **Step 5: GREEN 확인**
 
 Run: `cd app && npm.cmd test -- src/assets/AssetToolbar.test.tsx src/assets/AssetBrowser.test.tsx src/shared/ui/Menu.test.tsx`
 
 Expected: PASS
 
-- [ ] **Step 6: 빌드와 커밋**
+- [x] **Step 6: 빌드와 커밋**
 
 Run: `cd app && npm.cmd run build`
 
@@ -324,6 +324,8 @@ Expected: exit 0
 git add app/src/shared/ui/Button.tsx app/src/shared/ui/Select.tsx app/src/shared/ui/Slider.tsx app/src/shared/ui/Toggle.tsx app/src/shared/ui/Toast.tsx app/src/assets/AssetToolbar.tsx app/src/assets/AssetToolbar.test.tsx app/src/styles/global.css
 git commit -m "style: compact the asset toolbar and controls"
 ```
+
+검증 기록 (2026-08-09): RED는 기존 선택 도구 모음의 버튼 이름과 상시 노출 작업이 승인된 구성과 달라 2건 실패했다. 선택 해제와 자주 쓰는 작업은 바로 노출하고 분류 제거·좋아요 끄기는 `추가 작업` 메뉴로 옮긴 뒤 관련 3개 파일의 34개 테스트가 통과했고 `npm.cmd run build`가 exit 0이었다.
 
 ### Task 4: 사이드바 밀도와 너비 규칙
 

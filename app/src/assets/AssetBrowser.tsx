@@ -157,7 +157,7 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, thu
     }
   })();
   return <section className="asset-browser" aria-label="전체 자산">
-    <AssetToolbar view={view} classifications={classifications} sort={sort} directOnly={directOnly} metadataVisible={metadataVisible} thumbnailRowHeight={thumbnailRowHeight} selectedCount={selectedIds.length} onSortChange={onSortChange} onDirectOnlyChange={setDirectOnly} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onFavorite={setBatchFavorite} onClassification={patchBatchClassification} onTrash={trashSelection} batchPending={batchPending} onReshuffle={reshuffle} />
+    <AssetToolbar view={view} classifications={classifications} sort={sort} directOnly={directOnly} metadataVisible={metadataVisible} thumbnailRowHeight={thumbnailRowHeight} selectedCount={selectedIds.length} onSortChange={onSortChange} onDirectOnlyChange={setDirectOnly} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onFavorite={setBatchFavorite} onClassification={patchBatchClassification} onTrash={trashSelection} onClearSelection={clearSelection} batchPending={batchPending} onReshuffle={reshuffle} />
     {message && <Toast actionLabel={undoAssetIds ? "실행 취소" : undefined} onAction={undoAssetIds ? undoTrash : undefined} actionDisabled={batchPending}>{message}</Toast>}
     {currentFirstError && <Toast>{currentFirstError}</Toast>}
     <div className={`asset-browser__workspace${inspectorOpen ? " asset-browser__workspace--inspector" : ""}`}>

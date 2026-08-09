@@ -262,7 +262,7 @@ describe("AssetBrowser", () => {
     vi.mocked(gateway.listAssets)
       .mockResolvedValueOnce({ items: [{ ...asset(0), title: "Before" }], nextCursor: null })
       .mockResolvedValueOnce({ items: [{ ...asset(0), title: "After" }], nextCursor: null });
-    const { rerender } = renderBrowser(gateway);
+    const { container, rerender } = renderBrowser(gateway);
     const tile = await screen.findByRole("option", { name: "Before" });
     await user.click(tile);
     await user.dblClick(tile);
@@ -270,7 +270,8 @@ describe("AssetBrowser", () => {
 
     rerender(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "classification", classificationId: null }} classifications={classifications} sort="newest" metadataVisible={false} refreshVersion={1} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
 
-    expect(await screen.findByRole("option", { name: "After" })).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(container.querySelector('[data-asset-id="asset-0"]')).toHaveAttribute("aria-selected", "true"));
+    expect(container.querySelector('[data-asset-id="asset-0"]')).toHaveAccessibleName("After");
     expect(screen.getByRole("dialog")).toHaveAccessibleName("After");
   });
 
@@ -330,7 +331,7 @@ describe("AssetBrowser", () => {
     renderBrowser(gateway);
 
     await user.click(await screen.findByRole("option", { name: "Delete me" }));
-    await user.click(screen.getByRole("button", { name: "선택 항목 휴지통으로 이동" }));
+    await user.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
 
     expect(gateway.trashAssets).toHaveBeenCalledWith(["asset-0"]);
     expect(screen.getByText("1개 자산을 휴지통으로 이동했습니다.")).toBeVisible();
@@ -350,7 +351,7 @@ describe("AssetBrowser", () => {
     await user.keyboard("{Control>}a{/Control}");
     expect(screen.getByText("2개 선택")).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: "즐겨찾기 추가" }));
+    await user.click(screen.getByRole("button", { name: "좋아요 켜기" }));
     expect(gateway.setAssetsFavorite).toHaveBeenCalledWith(["asset-0", "asset-1"], true);
     await user.selectOptions(screen.getByLabelText("일괄 분류"), "tag");
     await user.click(screen.getByRole("button", { name: "분류 추가" }));
@@ -360,7 +361,7 @@ describe("AssetBrowser", () => {
       removeClassificationIds: [],
     });
 
-    await user.click(screen.getByRole("button", { name: "선택 항목 휴지통으로 이동" }));
+    await user.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
     expect(gateway.trashAssets).toHaveBeenCalledWith(["asset-0", "asset-1"]);
     await user.click(await screen.findByRole("button", { name: "실행 취소" }));
     expect(gateway.restoreAssets).toHaveBeenCalledWith(["asset-0", "asset-1"]);
@@ -375,7 +376,7 @@ describe("AssetBrowser", () => {
     first.focus();
     await user.keyboard("{Control>}a{/Control}");
 
-    await user.click(screen.getByRole("button", { name: "선택 항목 휴지통으로 이동" }));
+    await user.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
 
     expect(await screen.findByText("batch failed")).toBeVisible();
     expect(screen.getByRole("option", { name: "asset-0.png" })).toHaveAttribute("aria-selected", "true");
@@ -389,10 +390,10 @@ describe("AssetBrowser", () => {
     renderBrowser(gateway);
 
     await user.click(await screen.findByRole("option", { name: "Keep me" }));
-    await user.click(screen.getByRole("button", { name: "선택 항목 휴지통으로 이동" }));
+    await user.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
 
     expect(await screen.findByText("trash failed")).toBeVisible();
-    expect(screen.getByRole("button", { name: "선택 항목 휴지통으로 이동" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "휴지통으로 이동" })).toBeVisible();
   });
 
   it("disables trash while pending and preserves a newer selection", async () => {
@@ -404,13 +405,13 @@ describe("AssetBrowser", () => {
     renderBrowser(gateway);
 
     await user.click(await screen.findByRole("option", { name: "First" }));
-    await user.click(screen.getByRole("button", { name: "선택 항목 휴지통으로 이동" }));
-    expect(screen.getByRole("button", { name: "선택 항목 휴지통으로 이동" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
+    expect(screen.getByRole("button", { name: "휴지통으로 이동" })).toBeDisabled();
     await user.click(screen.getByRole("option", { name: "Second" }));
     await act(async () => { resolveTrash(); await pendingTrash; });
 
     expect(await screen.findByRole("option", { name: "Second" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("button", { name: "선택 항목 휴지통으로 이동" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "휴지통으로 이동" })).not.toBeDisabled();
   });
 
   it("uses the constrained workspace styles without horizontal sidebar scrolling", () => {

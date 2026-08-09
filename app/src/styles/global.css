@@ -123,6 +123,14 @@ input:disabled {
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-sm);
   cursor: pointer;
+  font-size: 0.75rem;
+  gap: var(--space-compact);
+}
+
+.ui-button svg,
+.ui-menu__trigger svg {
+  width: 14px;
+  height: 14px;
 }
 
 .ui-button--primary {
@@ -245,8 +253,8 @@ input:disabled {
 
 .ui-select {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
+  align-items: center;
+  gap: var(--space-compact);
 }
 
 .ui-toggle {
@@ -366,6 +374,12 @@ input:disabled {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
+  color: var(--color-muted);
+  font-size: 0.75rem;
+}
+
+.ui-toggle input {
+  accent-color: var(--color-accent);
 }
 
 .ui-slider {
@@ -556,14 +570,44 @@ input:disabled {
 
 .asset-toolbar h2 {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .asset-toolbar__controls,
 .asset-browser__next-error {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-compact);
+  min-width: 0;
+}
+
+.asset-toolbar__controls {
+  flex: 1;
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+
+.asset-toolbar__controls > strong {
+  color: var(--color-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.asset-toolbar .ui-select > span,
+.asset-toolbar .ui-slider > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.asset-toolbar .ui-menu__trigger {
+  width: var(--control-height-icon);
+  padding: 0;
 }
 
 .asset-browser {
