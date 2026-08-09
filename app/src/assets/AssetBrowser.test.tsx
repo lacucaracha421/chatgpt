@@ -317,7 +317,7 @@ describe("AssetBrowser", () => {
     await user.click(first);
     expect(screen.getByRole("complementary", { name: "자산 정보" })).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: "정보 닫기" }));
+    await user.click(within(screen.getByRole("complementary", { name: "자산 정보" })).getByRole("button", { name: "정보 닫기" }));
     await user.click(second);
     expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument();
 

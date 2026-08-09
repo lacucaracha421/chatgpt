@@ -16,6 +16,8 @@ type AssetToolbarProps = {
   metadataVisible: boolean;
   thumbnailRowHeight: number;
   selectedCount: number;
+  inspectorOpen: boolean;
+  onInspectorToggle: () => void;
   onSortChange: (sort: AssetSort) => void;
   onDirectOnlyChange: (value: boolean) => void;
   onMetadataVisibleChange: (value: boolean) => void;
@@ -29,7 +31,7 @@ type AssetToolbarProps = {
 };
 
 export function AssetToolbar({
-  view: rawView, classifications, sort, directOnly, metadataVisible, thumbnailRowHeight, selectedCount, onSortChange,
+  view: rawView, classifications, sort, directOnly, metadataVisible, thumbnailRowHeight, selectedCount, inspectorOpen, onInspectorToggle, onSortChange,
   onDirectOnlyChange, onMetadataVisibleChange, onThumbnailRowHeightChange, onFavorite, onClassification, onTrash, onClearSelection, batchPending, onReshuffle,
 }: AssetToolbarProps) {
   const view = rawView.kind === "similarity_review"
@@ -57,6 +59,7 @@ export function AssetToolbar({
           <Button aria-label="좋아요 켜기" disabled={batchPending} onClick={() => onFavorite(true)}><StarIcon data-icon="inline-start" aria-hidden="true" />좋아요</Button>
           <Button aria-label="휴지통으로 이동" variant="danger" disabled={batchPending} onClick={onTrash}><TrashIcon data-icon="inline-start" aria-hidden="true" />휴지통</Button>
           <Menu label="추가 작업" items={overflowItems} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} />
+          <Button aria-label={inspectorOpen ? "정보 닫기" : "정보 열기"} size="icon" variant={inspectorOpen ? "secondary" : "ghost"} onClick={onInspectorToggle}><InformationCircleIcon aria-hidden="true" /></Button>
           <Button aria-label="선택 해제" size="icon" variant="ghost" onClick={onClearSelection}><XMarkIcon aria-hidden="true" /></Button>
         </> : <>
           <Select label="정렬" value={recent ? "newest" : sort} disabled={recent} onChange={(event) => onSortChange(event.target.value as AssetSort)}>

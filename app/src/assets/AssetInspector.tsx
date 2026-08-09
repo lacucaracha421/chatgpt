@@ -1,11 +1,11 @@
-import { ArrowTopRightOnSquareIcon, InformationCircleIcon, MinusIcon, PlusIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { ArrowTopRightOnSquareIcon, MinusIcon, PlusIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { AssetSummary, ClassificationEntry } from "../library/types";
 import { Button } from "../shared/ui/Button";
 import { formatBytes, localDate, sourceLabel } from "./assetMetadata";
 
 export function AssetInspector({ assets, classifications, open, onOpenChange, onPatchClassifications }: { assets: AssetSummary[]; classifications: ClassificationEntry[]; open: boolean; onOpenChange: (open: boolean) => void; onPatchClassifications: (classificationId: string, operation: "add" | "remove") => void }) {
-  if (!open) return assets.length > 0 ? <Button className="asset-inspector__toggle" size="icon" variant="ghost" aria-label="정보 열기" onClick={() => onOpenChange(true)}><InformationCircleIcon aria-hidden="true" /></Button> : null;
+  if (!open) return null;
   const asset = assets.length === 1 ? assets[0] : null;
 
   return <aside className="asset-inspector" aria-label="자산 정보" onKeyDown={(event) => { if (event.key === "Escape") onOpenChange(false); }}>

@@ -12,6 +12,8 @@ const baseProps = {
   metadataVisible: true,
   thumbnailRowHeight: 180,
   selectedCount: 0,
+  inspectorOpen: false,
+  onInspectorToggle: vi.fn(),
   onSortChange: vi.fn(),
   onDirectOnlyChange: vi.fn(),
   onMetadataVisibleChange: vi.fn(),
@@ -59,4 +61,17 @@ it("keeps uncommon selection actions in the overflow menu", async () => {
 
   expect(screen.getByRole("menuitem", { name: "선택한 분류 제거" })).toBeVisible();
   expect(screen.getByRole("menuitem", { name: "좋아요 끄기" })).toBeVisible();
+});
+
+it("toggles the inspector from the selection actions", async () => {
+  const user = userEvent.setup();
+  const onInspectorToggle = vi.fn();
+  render(<AssetToolbar {...baseProps} selectedCount={1} inspectorOpen={false} onInspectorToggle={onInspectorToggle} />);
+
+  const open = screen.getByRole("button", { name: "정보 열기" });
+  await user.click(open);
+  expect(onInspectorToggle).toHaveBeenCalledOnce();
+
+  render(<AssetToolbar {...baseProps} selectedCount={1} inspectorOpen={true} onInspectorToggle={onInspectorToggle} />);
+  expect(screen.getByRole("button", { name: "정보 닫기" })).toBeVisible();
 });
