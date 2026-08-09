@@ -46,14 +46,14 @@
 기존 `assets` 테이블에 nullable `perceptual_hash`와 nullable `perceptual_hash_error`를 추가하고 기존 `review` 상태를 사용한다. 새 `similarity_reviews` 테이블은 다음 정보를 가진다.
 
 - 안정적인 review ID
-- 기존 정상 자산 ID
+- nullable 기존 정상 자산 ID
 - nullable 새 검토 대기 자산 ID
 - Hamming distance
 - 생성 시각
 - `open`, `resolving`, `resolved` 상태
 - nullable 결정값과 해결 시각
 
-새 후보 자산 하나에는 열린 검토 기록이 최대 하나만 존재한다. 해결된 행은 반복 명령을 판별하는 작은 결정 기록으로 유지하고 검토 목록에는 `open` 행만 반환한다. 일반 자산 조회는 현재처럼 `normal` 상태만 반환하므로, 사용자가 결정하기 전 후보는 전체 자산·미분류함·최근·즐겨찾기·분류 결과에 나타나지 않는다.
+새 후보 자산 하나에는 열린 검토 기록이 최대 하나만 존재한다. 열린 검토에서는 기존·후보 ID가 모두 필요하다. 해결된 행은 반복 명령을 판별하는 작은 결정 기록으로 유지하되, 이후 휴지통에서 자산이 영구 삭제되면 외래키 `ON DELETE SET NULL`로 해당 ID를 비워 삭제를 막지 않는다. 검토 목록에는 `open` 행만 반환한다. 일반 자산 조회는 현재처럼 `normal` 상태만 반환하므로, 사용자가 결정하기 전 후보는 전체 자산·미분류함·최근·즐겨찾기·분류 결과에 나타나지 않는다.
 
 기존 라이브러리의 자산은 마이그레이션 직후 해시가 비어 있다. 앱은 라이브러리를 연 뒤 작은 묶음으로 해시 생성을 계속하며, 처리한 자산마다 즉시 저장한다. 앱이 종료되면 다음 실행에서 `perceptual_hash IS NULL AND perceptual_hash_error IS NULL`인 자산부터 이어가므로 별도 작업 큐를 만들지 않는다. 디코딩할 수 없는 기존 자산은 공개 오류 코드를 `perceptual_hash_error`에 기록해 무한 재시도를 막는다. 준비가 끝나기 전에도 완전 중복 검사는 정상 동작하고, 유사 검색은 해시가 준비된 기존 자산만 대상으로 한다. 상태 표시줄은 준비 중임과 실패 개수를 명확히 알린다.
 
@@ -79,7 +79,7 @@
 - `replace_existing`
 - `keep_both`
 
-`keep_existing`은 기존 자산을 변경하지 않는다. 첫 트랜잭션에서 review 행을 `resolving`으로 바꾸고 새 후보는 일반 목록에서 제외되는 기존 `review` 상태로 유지한 뒤, 소유권을 확인한 관리 파일을 삭제한다. 마지막 트랜잭션은 후보 행을 제거하고 review 행의 후보 ID를 비운 뒤 `resolved`로 바꾼다. 앱이 중간에 종료되면 다음 실행에서 `resolving` review의 정리를 이어간다.
+`keep_existing`은 기존 자산을 변경하지 않는다. 첫 트랜잭션에서 review 행을 `resolving`으로 바꾸고 새 후보는 일반 목록에서 제외되는 기존 `review` 상태로 유지한 뒤, 소유권을 확인한 관리 파일을 삭제한다. 마지막 트랜잭션은 review 행을 먼저 `resolved`로 바꾼 뒤 후보 자산 행을 제거하며, 외래키 `ON DELETE SET NULL`이 후보 ID를 비운다. 이 순서로 각 SQL 문이 상태 제약을 지키면서 전체 트랜잭션은 원자적으로 끝난다. 앱이 중간에 종료되면 다음 실행에서 `resolving` review의 정리를 이어간다.
 
 `replace_existing`은 기존 자산을 라이브러리 휴지통으로 보내고 새 후보를 정상 자산으로 만든다. 기존 자산의 분류와 즐겨찾기를 새 자산이 이어받는다. 새 이미지의 파일 고유 정보, 원래 파일명, 출처와 수집일은 새 후보 값을 유지한다. 작품·컬렉션 기능이 추가될 때 해당 연결도 같은 결정 트랜잭션의 승계 대상에 포함해야 한다.
 
@@ -92,7 +92,7 @@
 React는 SQLite, 지각 해시, 관리 파일 경로를 알지 않는다. 라이브러리 Module은 다음의 작은 Interface를 제공한다.
 
 ```text
-index_missing_similarity_hashes(limit) -> { processed, remaining }
+index_missing_similarity_hashes() -> { processed, remaining, failed }
 list_similarity_reviews(after, limit) -> { items, nextCursor, totalCount }
 decide_similarity_review(reviewId, decision) -> { status, nextReviewId? }
 get_asset(assetId) -> AssetSummary
