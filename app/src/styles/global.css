@@ -46,12 +46,14 @@ input:disabled {
 
 .library-content {
   height: 100%;
+  min-width: 0;
 }
 
 .library-content__browser {
   height: 100%;
   min-height: 0;
-  overflow: auto;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .app-shell__workspace {
@@ -567,6 +569,7 @@ input:disabled {
 }
 
 .asset-toolbar {
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -594,7 +597,7 @@ input:disabled {
 
 .asset-toolbar__controls {
   flex: 1;
-  justify-content: flex-end;
+  justify-content: flex-start;
   white-space: nowrap;
 }
 
@@ -602,6 +605,10 @@ input:disabled {
   color: var(--color-muted);
   font-size: 0.75rem;
   font-weight: 600;
+}
+
+.asset-toolbar__controls > * {
+  flex-shrink: 0;
 }
 
 .asset-toolbar .ui-select > span,
@@ -619,11 +626,19 @@ input:disabled {
   padding: 0;
 }
 
+.asset-toolbar .ui-toggle svg {
+  width: 14px;
+  height: 14px;
+}
+
 .asset-browser {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
 }
 
 .asset-browser__workspace {
@@ -632,6 +647,8 @@ input:disabled {
   grid-template-columns: minmax(0, 1fr);
   flex: 1;
   min-height: 0;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .asset-browser__workspace--inspector {
@@ -800,6 +817,8 @@ input:disabled {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
+  width: 100%;
+  min-width: 0;
 }
 
 .asset-inspector__header h2,
@@ -837,6 +856,9 @@ input:disabled {
   align-content: start;
   gap: var(--space-3);
   min-height: 100%;
+  box-sizing: border-box;
+  height: 100%;
+  overflow: auto;
   padding: var(--space-3);
 }
 
@@ -889,6 +911,25 @@ input:disabled {
 }
 
 @media (max-width: 1100px) {
+  .asset-toolbar__toggle-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .asset-toolbar .ui-slider {
+    flex: 0 1 72px;
+    min-width: 48px;
+  }
+
+  .asset-toolbar .ui-slider input {
+    width: 100%;
+    min-width: 48px;
+  }
+
   .asset-browser__workspace--inspector {
     grid-template-columns: minmax(0, 1fr);
   }

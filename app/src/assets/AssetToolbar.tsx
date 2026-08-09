@@ -1,4 +1,4 @@
-import { Ellipsis, Shuffle, Star, Trash2, X } from "lucide-react";
+import { Ellipsis, Info, ListFilter, Shuffle, Star, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import type { AssetSort, AssetView, ClassificationEntry } from "../library/types";
 import { Button } from "../shared/ui/Button";
@@ -60,9 +60,9 @@ export function AssetToolbar({
             <option value="newest">최신순</option><option value="oldest">오래된순</option>
             <option value="favorites">좋아요순</option><option value="random">랜덤</option>
           </Select>
-          {view.kind === "classification" && <Toggle checked={directOnly} onChange={(event) => onDirectOnlyChange(event.target.checked)}>이 분류만</Toggle>}
+          {view.kind === "classification" && <Toggle aria-label="이 분류만" checked={directOnly} onChange={(event) => onDirectOnlyChange(event.target.checked)}><ListFilter aria-hidden="true" /><span className="asset-toolbar__toggle-text">이 분류만</span></Toggle>}
           <Slider label="미리보기 크기" min={96} max={320} step={8} value={thumbnailRowHeight} onChange={(event) => onThumbnailRowHeightChange(Number(event.target.value))} />
-          <Toggle checked={metadataVisible} onChange={(event) => onMetadataVisibleChange(event.target.checked)}>정보 표시</Toggle>
+          <Toggle aria-label="정보 표시" checked={metadataVisible} onChange={(event) => onMetadataVisibleChange(event.target.checked)}><Info aria-hidden="true" /><span className="asset-toolbar__toggle-text">정보 표시</span></Toggle>
           {sort === "random" && !recent && <Tooltip content="다시 섞기"><Button size="icon" aria-label="다시 섞기" onClick={onReshuffle}><Shuffle aria-hidden="true" /></Button></Tooltip>}
         </>}
       </div>
