@@ -8,6 +8,7 @@ mod ingestion;
 mod lock;
 pub mod models;
 mod query;
+mod similarity;
 mod trash;
 
 use std::{
