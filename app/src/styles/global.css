@@ -687,9 +687,11 @@ input:disabled {
 }
 
 .asset-gallery__scroll {
+  box-sizing: border-box;
   flex: 1;
   min-height: 0;
   overflow: auto;
+  padding: var(--gallery-gap);
 }
 
 .asset-gallery__virtual-space {
@@ -758,7 +760,7 @@ input:disabled {
   padding: var(--space-1);
   background: var(--color-surface-elevated);
   border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-tile);
 }
 
 .asset-viewer__media {

@@ -102,9 +102,19 @@ function useGalleryMetrics(ref: React.RefObject<HTMLElement | null>) {
   const [metrics, setMetrics] = useState({ width: 0, gap: 0 });
   useLayoutEffect(() => {
     const element = ref.current; if (!element) return;
-    const update = (width: number) => { const style = getComputedStyle(element); const gap = Number.parseFloat(style.getPropertyValue("--space-2")); setMetrics({ width, gap: Number.isFinite(gap) ? gap : 0 }); };
-    update(element.clientWidth); if (!window.ResizeObserver) return;
-    const observer = new ResizeObserver(([entry]) => update(entry?.contentRect.width ?? element.clientWidth)); observer.observe(element); return () => observer.disconnect();
+    const update = (measuredWidth: number, includesPadding: boolean) => {
+      const style = getComputedStyle(element);
+      const gap = cssLength(style.getPropertyValue("--gallery-gap"));
+      const horizontalPadding = cssLength(style.paddingLeft) + cssLength(style.paddingRight);
+      setMetrics({ width: Math.max(0, measuredWidth - (includesPadding ? horizontalPadding : 0)), gap });
+    };
+    update(element.clientWidth, true); if (!window.ResizeObserver) return;
+    const observer = new ResizeObserver(([entry]) => entry ? update(entry.contentRect.width, false) : update(element.clientWidth, true)); observer.observe(element); return () => observer.disconnect();
   }, [ref]);
   return metrics;
+}
+
+function cssLength(value: string) {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }

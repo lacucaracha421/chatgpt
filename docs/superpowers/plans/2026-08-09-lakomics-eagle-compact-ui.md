@@ -470,7 +470,7 @@ git commit -m "feat: open asset details on first selection"
 - Consumes: 기존 `buildJustifiedRows`, TanStack virtualizer, `--gallery-gap`
 - Produces: 6px 기준 간격, 2px 이하 타일 모서리, 레이아웃을 바꾸지 않는 선택 테두리
 
-- [ ] **Step 1: 갤러리 RED 테스트 작성**
+- [x] **Step 1: 갤러리 RED 테스트 작성**
 
 `getComputedStyle`과 `ResizeObserver` 경계만 제어하고 실제 `AssetGallery`가 6px gap을 렌더링하는지 검증한다. 메타데이터가 꺼졌을 때 overlay가 렌더링되지 않는 기존 동작을 유지한다.
 
@@ -485,25 +485,25 @@ it("renders rows with the gallery gap supplied by computed styles", async () => 
 });
 ```
 
-- [ ] **Step 2: RED 확인**
+- [x] **Step 2: RED 확인**
 
 Run: `cd app && npm.cmd test -- src/assets/AssetGallery.test.tsx src/assets/justifiedRows.test.ts`
 
 Expected: 현재 `--space-2`를 읽기 때문에 FAIL
 
-- [ ] **Step 3: 최소 구현**
+- [x] **Step 3: 최소 구현**
 
 `useGalleryMetrics`는 `--gallery-gap`을 읽는다. `.asset-gallery__scroll`에 6px 바깥 padding을 주고 virtualizer 폭 계산에는 좌우 padding이 중복 반영되지 않도록 실제 content width를 사용한다. 타일 모서리는 `--radius-tile`, 선택선은 안쪽 outline을 사용한다. hover에서 이미지 크기나 위치를 움직이는 transform은 추가하지 않는다.
 
 가상화의 `VIRTUAL_OVERSCAN_ROWS = 3`, 다음 페이지 기준, 정렬 및 DB 조회는 변경하지 않는다.
 
-- [ ] **Step 4: GREEN과 성능 회귀 확인**
+- [x] **Step 4: GREEN과 성능 회귀 확인**
 
 Run: `cd app && npm.cmd test -- src/assets/AssetGallery.test.tsx src/assets/justifiedRows.test.ts src/assets/AssetBrowser.test.tsx`
 
 Expected: PASS
 
-- [ ] **Step 5: 빌드와 커밋**
+- [x] **Step 5: 빌드와 커밋**
 
 Run: `cd app && npm.cmd run build`
 
@@ -513,6 +513,8 @@ Expected: exit 0
 git add app/src/assets/AssetGallery.tsx app/src/assets/AssetGallery.test.tsx app/src/assets/justifiedRows.test.ts app/src/styles/global.css
 git commit -m "style: make the asset gallery content-first"
 ```
+
+검증 기록 (2026-08-09): RED는 실제 렌더 행이 6px 갤러리 토큰 대신 0px 간격을 사용해 실패했다. 초기 `clientWidth`에서는 padding을 한 번만 빼고 ResizeObserver의 content box 폭은 그대로 쓰도록 구분했으며, 타일 모서리를 2px 토큰으로 줄였다. 5만 개 자산 가상화 회귀를 포함한 관련 3개 파일의 65개 테스트가 통과했고 `npm.cmd run build`가 exit 0이었다.
 
 ### Task 7: 외부 드롭과 작업 상태의 Eagle Compact 표현
 

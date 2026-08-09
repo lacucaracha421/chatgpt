@@ -7,9 +7,32 @@ import { AssetGallery } from "./AssetGallery";
 beforeEach(() => Object.defineProperties(HTMLElement.prototype, {
   offsetWidth: { configurable: true, get: () => 900 }, clientWidth: { configurable: true, get: () => 840 }, offsetHeight: { configurable: true, get: () => 600 }, clientHeight: { configurable: true, get: () => 600 },
 }));
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("AssetGallery", () => {
+  it("renders rows with the gallery gap supplied by computed styles", async () => {
+    const computedStyle = vi.spyOn(window, "getComputedStyle").mockReturnValue({
+      getPropertyValue: (name: string) => name === "--gallery-gap" ? "6px" : "",
+      paddingLeft: "6px",
+      paddingRight: "6px",
+    } as CSSStyleDeclaration);
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe() { this.callback([{ contentRect: { width: 600 } } as ResizeObserverEntry], this as unknown as ResizeObserver); }
+      unobserve() {}
+      disconnect() {}
+    });
+
+    const { container } = render(<AssetGallery items={[asset(0), asset(1)]} />);
+    computedStyle.mockRestore();
+
+    await waitFor(() => expect(container.querySelector(".asset-gallery__row")).toHaveStyle({ gap: "6px" }));
+  });
+
   it("keeps the DOM bounded with 50,000 asset metadata rows", async () => {
     render(<AssetGallery items={Array.from({ length: 50_000 }, (_, index) => asset(index))} />);
     await waitFor(() => expect(screen.getAllByRole("img").length).toBeLessThan(100));
