@@ -57,6 +57,33 @@ it("keeps completed results and exposes duplicate, review, retry, and dismiss ac
   expect(dismissWork).toHaveBeenCalledWith("work-result");
 });
 
+it("shows video preparation progress, completion, and retry", async () => {
+  const retryFailed = vi.fn();
+  const user = userEvent.setup();
+  const { rerender } = render(
+    <WorkTray
+      works={[work({ kind: "preparation", id: "video", total: 2, completed: 1, status: "running" })]}
+      retryFailed={retryFailed}
+      dismissWork={vi.fn()}
+      openReview={vi.fn()}
+      openExisting={vi.fn()}
+    />,
+  );
+  expect(screen.getByText(/미리보기/)).toHaveTextContent("1 / 2");
+
+  rerender(
+    <WorkTray
+      works={[work({ kind: "preparation", id: "video", failures: [{ fileName: "v1", message: "failed" }], status: "failed" })]}
+      retryFailed={retryFailed}
+      dismissWork={vi.fn()}
+      openReview={vi.fn()}
+      openExisting={vi.fn()}
+    />,
+  );
+  await user.click(screen.getByRole("button", { name: /미리보기.*다시/ }));
+  expect(retryFailed).toHaveBeenCalledWith("video");
+});
+
 function work(overrides: Partial<import("./useFileDrop").IngestionWork> = {}): import("./useFileDrop").IngestionWork {
   return {
     kind: "ingestion",

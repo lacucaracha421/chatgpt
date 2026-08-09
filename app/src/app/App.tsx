@@ -33,6 +33,7 @@ import { SafetyDialog } from "../safety/SafetyDialog";
 import { TrashBrowser } from "../safety/TrashBrowser";
 import { SimilarityReviewBrowser } from "../similarity/SimilarityReviewBrowser";
 import { useSimilarityIndex } from "../similarity/useSimilarityIndex";
+import { useVideoPreparation } from "../video/useVideoPreparation";
 
 type AppProps = {
   gateway?: LibraryGateway;
@@ -95,6 +96,7 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
   const [nativeDragWorks, setNativeDragWorks] = useState<IngestionWork[]>([]);
   const [requestedAsset, setRequestedAsset] = useState<AssetSummary | null>(null);
   const [reviewCount, setReviewCount] = useState(0);
+  const [videoPreparationTrigger, setVideoPreparationTrigger] = useState(0);
   const similarityIndex = useSimilarityIndex(gateway.indexMissingSimilarityHashes);
   const appendMessage = useCallback((next: string) => {
     setMessage((current) => current ? `${current} ${next}` : next);
@@ -108,8 +110,22 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
   }, [gateway]);
   const handleIngested = useCallback((result: IngestOutcome) => {
     if (result.status === "added") setAssetRefresh((current) => current + 1);
+    if (
+      result.status === "added"
+      && result.asset.media.kind === "video"
+      && result.asset.media.preparationState !== "ready"
+    ) {
+      setVideoPreparationTrigger((current) => current + 1);
+    }
     if (result.status === "review_pending") void refreshReviewCount();
   }, [refreshReviewCount]);
+  const videoPreparation = useVideoPreparation({
+    enabled: maintenance === null,
+    trigger: videoPreparationTrigger,
+    prepare: gateway.preparePendingVideos,
+    retry: gateway.retryVideoPreparation,
+    onChanged: () => setAssetRefresh((current) => current + 1),
+  });
   const dropEnabled = maintenance === null && !safetyOpen && view.kind !== "trash" && view.kind !== "similarity_review";
   const dropClassificationId = view.kind === "classification" ? view.classificationId : null;
   const dropState = useFileDrop({
@@ -219,12 +235,17 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
   }
 
   function retryWork(workId: string) {
+    if (videoPreparation.work?.id === workId) {
+      void videoPreparation.retryFailed();
+      return;
+    }
     const assetIds = nativeDragAssetsRef.current.get(workId);
     if (assetIds) void beginNativeDrag(assetIds, workId);
     else dropState.retryFailed(workId);
   }
 
   function dismissWork(workId: string) {
+    if (videoPreparation.work?.id === workId) videoPreparation.dismissWork();
     nativeDragAssetsRef.current.delete(workId);
     setNativeDragWorks((current) => current.filter((work) => work.id !== workId));
     dropState.dismissWork(workId);
@@ -350,7 +371,7 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
           status={<StatusBar status={browserStatus} progress={dropState.progress} dropEnabled={dropEnabled} similarityIndex={similarityIndex} />}
         />
         <WorkTray
-          works={[...dropState.works, ...nativeDragWorks]}
+          works={[...dropState.works, ...nativeDragWorks, ...(videoPreparation.work ? [videoPreparation.work] : [])]}
           retryFailed={retryWork}
           dismissWork={dismissWork}
           openReview={() => setView({ kind: "similarity_review" })}

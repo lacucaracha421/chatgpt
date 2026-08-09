@@ -675,7 +675,7 @@ git commit -m "feat: stream prepared video media"
 - Consumes: `LibraryGateway.ingestMedia`, `preparePendingVideos(1)`, `retryVideoPreparation`.
 - Produces: images and videos use the same drag/drop queue; added pending videos start one-at-a-time preparation and refresh changed assets.
 
-- [ ] **Step 1: Write RED hook and UI tests**
+- [x] **Step 1: Write RED hook and UI tests**
 
 Update drop tests to prove `.webm`, `.mp4`, `.mov` paths call `ingestMedia`, errors remain per-file, and images still work. Add fake-timer preparation tests:
 
@@ -690,20 +690,20 @@ it("prepares one pending video at a time until remaining is zero", async () => {
 
 Tests also prove unmount stops scheduling and a rejected call shows one recoverable work item instead of spinning.
 
-- [ ] **Step 2: Run RED frontend tests**
+- [x] **Step 2: Run RED frontend tests**
 
 ```powershell
 cd C:\chatgpt\app
 npm.cmd test -- src/ingestion/useFileDrop.test.ts src/ingestion/WorkTray.test.tsx src/video/useVideoPreparation.test.ts src/app/App.test.tsx
 ```
 
-- [ ] **Step 3: Implement the small preparation loop**
+- [x] **Step 3: Implement the small preparation loop**
 
 Rename option `ingestImage` to `ingestMedia`; do not filter by extension in React because Rust owns validation. Add `preparation` as an `IngestionWork.kind` only when a pending/processing video exists. `useVideoPreparation` runs one request, refreshes only `changedAssetIds`, then queues the next microtask if `remaining > 0`; no polling interval and no global store.
 
 `WorkTray` displays `미리보기 준비 중`, `미리보기 준비 완료`, or `미리보기 준비 실패` with the existing Button/Toast patterns. Failed asset retry calls the gateway then restarts the loop.
 
-- [ ] **Step 4: Run GREEN frontend tests**
+- [x] **Step 4: Run GREEN frontend tests**
 
 ```powershell
 cd C:\chatgpt\app
@@ -712,7 +712,7 @@ npm.cmd run build
 git diff --check
 ```
 
-- [ ] **Step 5: Commit Task 7**
+- [x] **Step 5: Commit Task 7**
 
 ```powershell
 git add app/src/ingestion/useFileDrop.ts app/src/ingestion/useFileDrop.test.ts app/src/ingestion/WorkTray.tsx app/src/ingestion/WorkTray.test.tsx app/src/video/useVideoPreparation.ts app/src/video/useVideoPreparation.test.ts app/src/app/App.tsx app/src/app/App.test.tsx

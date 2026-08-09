@@ -22,7 +22,7 @@ export type FileDropResult =
 
 export type DropProgress = { current: number; total: number };
 export type IngestionWork = {
-  kind: "ingestion" | "drag_out";
+  kind: "ingestion" | "drag_out" | "preparation";
   id: string;
   total: number;
   completed: number;

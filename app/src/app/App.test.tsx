@@ -82,8 +82,8 @@ function gateway(): LibraryGateway {
     patchAssetClassifications: vi.fn(),
     getAssetClassifications: vi.fn(),
     ingestMedia: vi.fn(),
-    preparePendingVideos: vi.fn(),
-    retryVideoPreparation: vi.fn(),
+    preparePendingVideos: vi.fn().mockResolvedValue({ processed: 0, remaining: 0, failed: 0, changedAssetIds: [] }),
+    retryVideoPreparation: vi.fn().mockResolvedValue("pending"),
   };
 }
 

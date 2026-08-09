@@ -10,14 +10,23 @@ type WorkTrayProps = {
 };
 
 export function WorkTray({ works, retryFailed, dismissWork, openReview, openExisting }: WorkTrayProps) {
-  const visible = works.filter((work) => work.kind === "ingestion" || work.status !== "completed");
+  const visible = works.filter((work) => work.kind !== "drag_out" || work.status !== "completed");
   if (visible.length === 0) return null;
   return <aside className="work-tray" aria-label="가져오기 작업">
     {visible.map((work) => <div className="work-tray__row" key={work.id}>
       {work.status === "running" ? (
         <span aria-live="polite">
-          {work.kind === "drag_out" ? "탐색기로 복사하는 중" : "가져오는 중"} {work.completed} / {work.total}
+          {work.kind === "drag_out" ? "탐색기로 복사하는 중" : work.kind === "preparation" ? "미리보기 준비 중" : "가져오는 중"} {work.completed} / {work.total}
         </span>
+      ) : work.kind === "preparation" ? (
+        <div className="work-tray__result">
+          <div className="work-tray__result-head">
+            <strong>{work.status === "completed" ? "미리보기 준비 완료" : "미리보기 준비 실패"}</strong>
+            <Button variant="ghost" size="sm" onClick={() => dismissWork(work.id)}>닫기</Button>
+          </div>
+          {work.failures.map((failure) => <span key={failure.fileName}>{failure.message}</span>)}
+          {work.status === "failed" && <Button size="sm" onClick={() => retryFailed(work.id)}>미리보기 다시 시도</Button>}
+        </div>
       ) : (
         <div className="work-tray__result">
           <div className="work-tray__result-head">

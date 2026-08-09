@@ -652,3 +652,35 @@ it("retries only the paths that failed in a work batch", async () => {
   await waitFor(() => expect(ingestImage).toHaveBeenCalledTimes(3));
   expect(ingestImage).toHaveBeenNthCalledWith(3, { sourcePath: "C:\\images\\broken.png", classificationId: "tag-a", sourceUrl: null });
 });
+
+it("passes image and supported video paths through the same media gateway", async () => {
+  let drop: ((paths: string[]) => void) | undefined;
+  const subscribe: DropSubscriber = async (handler) => {
+    drop = handler;
+    return () => undefined;
+  };
+  const ingestImage = vi.fn().mockResolvedValue({ status: "added", asset: fixtureAsset });
+  renderHook(() => useFileDrop({
+    enabled: true,
+    subscribe,
+    classificationId: "work-a",
+    ingestImage,
+    onResult: vi.fn(),
+  }));
+  await waitFor(() => expect(drop).toBeDefined());
+
+  act(() => drop?.([
+    "C:\\media\\image.png",
+    "C:\\media\\clip.webm",
+    "C:\\media\\clip.mp4",
+    "C:\\media\\clip.mov",
+  ]));
+
+  await waitFor(() => expect(ingestImage).toHaveBeenCalledTimes(4));
+  expect(ingestImage.mock.calls.map(([input]) => input.sourcePath)).toEqual([
+    "C:\\media\\image.png",
+    "C:\\media\\clip.webm",
+    "C:\\media\\clip.mp4",
+    "C:\\media\\clip.mov",
+  ]);
+});
