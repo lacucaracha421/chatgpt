@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { StrictMode } from "react";
 import type { AssetSummary } from "../library/types";
 import { VideoTileMedia } from "./VideoTileMedia";
 
@@ -43,6 +44,11 @@ it("maps pointer position to a scrub frame and delays video seeking", () => {
   expect(media.currentTime).toBe(0);
   vi.advanceTimersByTime(120);
   expect(media.currentTime).toBe(5);
+});
+
+it("keeps active playback attached across StrictMode effect checks", () => {
+  render(<StrictMode><VideoTileMedia asset={video()} active onRequestActive={vi.fn()} onReleaseActive={vi.fn()} onRetry={vi.fn()} /></StrictMode>);
+  expect(screen.getByLabelText("clip.webm 미리보기")).toHaveAttribute("src", "http://lakomics.localhost/playback/video-1");
 });
 
 it("renders pending and failed states with a retry action", () => {

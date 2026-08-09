@@ -772,7 +772,7 @@ npm.cmd run build
 git diff --check
 ```
 
-- [ ] **Step 5: Commit Task 8**
+- [x] **Step 5: Commit Task 8**
 
 ```powershell
 git add app/src/video/VideoTileMedia.tsx app/src/video/VideoTileMedia.test.tsx app/src/assets/AssetGallery.tsx app/src/assets/AssetGallery.test.tsx app/src/assets/AssetBrowser.tsx app/src/assets/AssetBrowser.test.tsx app/src/styles/tokens.css app/src/styles/global.css
@@ -794,7 +794,7 @@ git commit -m "feat: preview and scrub gallery videos"
 - Consumes: active `AssetSummary`, previous/next assets, `playbackUrl`, `scrubFrameUrl`, existing fullscreen `Dialog` and `Button`.
 - Produces: play/pause, time, seek, timeline hover preview, mute/volume, fullscreen, keyboard and sibling navigation.
 
-- [ ] **Step 1: Write RED player tests**
+- [x] **Step 1: Write RED player tests**
 
 Mock media properties/events and Fullscreen API. Tests prove:
 
@@ -807,14 +807,14 @@ Mock media properties/events and Fullscreen API. Tests prove:
 - fullscreen calls `requestFullscreen`/`exitFullscreen` and reflects `fullscreenchange`.
 - previous/next asset navigation pauses, clears, and reloads the prior video source.
 
-- [ ] **Step 2: Run RED viewer/player tests**
+- [x] **Step 2: Run RED viewer/player tests**
 
 ```powershell
 cd C:\chatgpt\app
 npm.cmd test -- src/video/VideoPlayer.test.tsx src/assets/AssetViewer.test.tsx
 ```
 
-- [ ] **Step 3: Implement native-video-based controls**
+- [x] **Step 3: Implement native-video-based controls**
 
 Use the browser `<video>` element for buffering/Range behavior. React owns only visible control state derived from `timeupdate`, `durationchange`, `volumechange`, `play`, `pause`, `ended`, and `error`. Do not build a playback engine.
 
@@ -822,7 +822,7 @@ Timeline is one accessible `input type="range"` for keyboard seeking plus an ove
 
 `AssetViewer` switches on `asset.media.kind`; it preserves the current fullscreen Dialog, title, previous/next controls and image behavior.
 
-- [ ] **Step 4: Run GREEN player and full frontend tests**
+- [x] **Step 4: Run GREEN player and full frontend tests**
 
 ```powershell
 cd C:\chatgpt\app

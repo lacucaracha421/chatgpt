@@ -21,10 +21,11 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
     if (!active) return;
     const video = videoRef.current;
     if (!video) return;
+    video.src = playbackUrl(asset.id);
     video.muted = true;
     void video.play().catch(() => undefined);
     return () => { video.pause(); video.removeAttribute("src"); video.load(); };
-  }, [active]);
+  }, [active, asset.id]);
   useEffect(() => () => clearTimers(), []);
   const leave = () => { clearTimers(); setPreviewFrame(null); onReleaseActive(); };
   const scrub = (event: React.PointerEvent<HTMLDivElement>) => {
