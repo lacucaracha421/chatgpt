@@ -4,10 +4,10 @@ import type { AssetSummary, ClassificationEntry } from "../library/types";
 import { Button } from "../shared/ui/Button";
 
 export function AssetInspector({ assets, classifications, open, onOpenChange, onPatchClassifications }: { assets: AssetSummary[]; classifications: ClassificationEntry[]; open: boolean; onOpenChange: (open: boolean) => void; onPatchClassifications: (classificationId: string, operation: "add" | "remove") => void }) {
-  if (!open) return <Button className="asset-inspector__toggle" size="icon" variant="ghost" aria-label="정보 열기" onClick={() => onOpenChange(true)}><Info aria-hidden="true" /></Button>;
+  if (!open) return assets.length > 0 ? <Button className="asset-inspector__toggle" size="icon" variant="ghost" aria-label="정보 열기" onClick={() => onOpenChange(true)}><Info aria-hidden="true" /></Button> : null;
   const asset = assets.length === 1 ? assets[0] : null;
 
-  return <aside className="asset-inspector" aria-label="자산 정보">
+  return <aside className="asset-inspector" aria-label="자산 정보" onKeyDown={(event) => { if (event.key === "Escape") onOpenChange(false); }}>
     <header className="asset-inspector__header">
       <h2>정보</h2>
       <Button size="icon" variant="ghost" aria-label="정보 닫기" onClick={() => onOpenChange(false)}><X aria-hidden="true" /></Button>

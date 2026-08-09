@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { AssetSummary } from "../library/types";
 import { AssetViewer } from "./AssetViewer";
@@ -22,7 +23,8 @@ it("uses original media and navigates only inside the loaded order", () => {
   expect(onActiveIdChange).toHaveBeenCalledWith("b");
 });
 
-it("supports buttons and Escape without wrapping at the final asset", () => {
+it("supports buttons and Escape without wrapping at the final asset", async () => {
+  const user = userEvent.setup();
   const onActiveIdChange = vi.fn();
   const onClose = vi.fn();
   render(<AssetViewer items={[asset("a", "a.gif"), asset("b", "b.png")]} activeId="b" onActiveIdChange={onActiveIdChange} onClose={onClose} />);
@@ -32,7 +34,7 @@ it("supports buttons and Escape without wrapping at the final asset", () => {
   expect(onActiveIdChange).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "이전 자산" }));
   expect(onActiveIdChange).toHaveBeenCalledWith("a");
-  fireEvent(screen.getByRole("dialog"), new Event("cancel", { bubbles: false, cancelable: true }));
+  await user.keyboard("{Escape}");
   expect(onClose).toHaveBeenCalledOnce();
 });
 

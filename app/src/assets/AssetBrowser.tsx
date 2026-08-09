@@ -37,6 +37,7 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, thu
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [batchPending, setBatchPending] = useState(false);
   const [undoAssetIds, setUndoAssetIds] = useState<string[] | null>(null);
+  const previousSelectionCountRef = useRef(0);
   const selectedViewKeyRef = useRef<string | null>(null);
   const viewerViewKeyRef = useRef<string | null>(null);
   const generationRef = useRef(0);
@@ -75,6 +76,12 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, thu
     setSelection(emptySelection());
     setSelectedAsset(null);
   }, [viewKey]);
+  useEffect(() => {
+    const count = selection.ids.size;
+    if (previousSelectionCountRef.current === 0 && count > 0) setInspectorOpen(true);
+    if (count === 0) setInspectorOpen(false);
+    previousSelectionCountRef.current = count;
+  }, [selection.ids.size]);
   const loadNextPage = useCallback((retry = false) => {
     if (!activePage || !nextCursor || nextLoadingRef.current || (currentNextError && !retry)) return;
     const generation = generationRef.current; const cursor = nextCursor; nextLoadingRef.current = true; setNextLoading(true); setNextError(null);

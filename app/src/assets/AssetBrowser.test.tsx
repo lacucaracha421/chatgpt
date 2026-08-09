@@ -307,7 +307,27 @@ describe("AssetBrowser", () => {
     expect(tile).toHaveFocus();
   });
 
-  it("keeps the inspector collapsed and applies its classification actions to the selection", async () => {
+  it("opens the inspector on the first selection and respects a manual close until selection clears", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
+    renderBrowser(gateway);
+
+    const first = await screen.findByRole("option", { name: "asset-0.png" });
+    const second = screen.getByRole("option", { name: "asset-1.png" });
+    await user.click(first);
+    expect(screen.getByRole("complementary", { name: "자산 정보" })).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "정보 닫기" }));
+    await user.click(second);
+    expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument();
+
+    second.focus();
+    await user.keyboard("{Escape}");
+    await user.click(second);
+    expect(screen.getByRole("complementary", { name: "자산 정보" })).toBeVisible();
+  });
+
+  it("applies inspector classification actions to the selection", async () => {
     const user = userEvent.setup();
     const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
     const tag: ClassificationEntry = { id: "tag", kind: "tag", name: "태그", parentId: null };
@@ -317,7 +337,6 @@ describe("AssetBrowser", () => {
     expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument();
     first.focus();
     await user.keyboard("{Control>}a{/Control}");
-    await user.click(screen.getByRole("button", { name: "정보 열기" }));
     expect(screen.getByText("2개 자산 선택")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "태그 추가" }));
     await user.click(screen.getByRole("button", { name: "태그 제거" }));

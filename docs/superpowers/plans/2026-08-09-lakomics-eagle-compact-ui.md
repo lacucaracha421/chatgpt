@@ -397,7 +397,7 @@ git commit -m "style: tighten the classification sidebar"
 - Consumes: `SelectionState`, `AssetInspector({ assets, open, onOpenChange })`
 - Produces: 빈 선택에서 첫 선택으로 바뀔 때 자동 열리고 수동으로 닫을 수 있는 272px 패널
 
-- [ ] **Step 1: 자동 열기 RED 테스트 작성**
+- [x] **Step 1: 자동 열기 RED 테스트 작성**
 
 ```tsx
 it("opens the inspector on the first selection and closes it when selection clears", async () => {
@@ -417,13 +417,13 @@ it("opens the inspector on the first selection and closes it when selection clea
 
 `AssetInspector.test.tsx`에는 자산이 없을 때 열기 버튼도 보이지 않고, 자산이 있는 상태에서 수동으로 닫은 뒤 열기 버튼으로 복귀하는 검증을 추가한다.
 
-- [ ] **Step 2: RED 확인**
+- [x] **Step 2: RED 확인**
 
 Run: `cd app && npm.cmd test -- src/assets/AssetBrowser.test.tsx src/assets/AssetInspector.test.tsx`
 
 Expected: 현재 선택 시 자동으로 열리지 않아 FAIL
 
-- [ ] **Step 3: 전이 기반 자동 열기 구현**
+- [x] **Step 3: 전이 기반 자동 열기 구현**
 
 선택 개수의 이전 값을 ref로 보관하고 0에서 양수로 바뀔 때만 연다. 이 방식은 사용자가 패널을 닫아도 현재 선택이 유지되는 동안 다시 강제로 열지 않는다.
 
@@ -439,13 +439,13 @@ useEffect(() => {
 
 Escape는 전체화면 뷰어가 열려 있으면 기존 뷰어 처리가 우선하고, 그렇지 않으면 좁은 창의 정보 패널을 닫는다. 닫힌 패널의 열기 버튼은 선택 자산이 있을 때만 렌더링한다.
 
-- [ ] **Step 4: GREEN 확인**
+- [x] **Step 4: GREEN 확인**
 
 Run: `cd app && npm.cmd test -- src/assets/AssetBrowser.test.tsx src/assets/AssetInspector.test.tsx src/assets/AssetViewer.test.tsx`
 
 Expected: PASS
 
-- [ ] **Step 5: 빌드와 커밋**
+- [x] **Step 5: 빌드와 커밋**
 
 Run: `cd app && npm.cmd run build`
 
@@ -455,6 +455,8 @@ Expected: exit 0
 git add app/src/assets/AssetBrowser.tsx app/src/assets/AssetBrowser.test.tsx app/src/assets/AssetInspector.tsx app/src/assets/AssetInspector.test.tsx app/src/styles/global.css
 git commit -m "feat: open asset details on first selection"
 ```
+
+검증 기록 (2026-08-09): RED는 선택 후 정보 패널이 자동으로 열리지 않고 빈 선택에도 열기 버튼이 노출되어 3건 실패했다. 선택 개수의 0→양수 전이에서만 열고 0이면 닫도록 구현했으며, 패널 내부 Escape와 Radix 감상 화면 Escape를 실제 키보드 입력으로 검증했다. 관련 3개 파일의 35개 테스트가 통과했고 `npm.cmd run build`가 exit 0이었다.
 
 ### Task 6: 갤러리 표면과 간격 개선
 

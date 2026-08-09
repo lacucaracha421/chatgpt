@@ -8,6 +8,12 @@ const openUrl = vi.fn().mockResolvedValue(undefined);
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: (url: string) => openUrl(url) }));
 afterEach(() => { cleanup(); openUrl.mockClear(); });
 
+it("hides the open control when there is no selection", () => {
+  render(<AssetInspector assets={[]} classifications={[]} open={false} onOpenChange={vi.fn()} onPatchClassifications={vi.fn()} />);
+
+  expect(screen.queryByRole("button", { name: "정보 열기" })).not.toBeInTheDocument();
+});
+
 it("stays collapsed by default and opens on request", async () => {
   const user = userEvent.setup();
   const onOpenChange = vi.fn();
@@ -16,6 +22,17 @@ it("stays collapsed by default and opens on request", async () => {
   expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "정보 열기" }));
   expect(onOpenChange).toHaveBeenCalledWith(true);
+});
+
+it("closes from Escape while focus is inside the inspector", async () => {
+  const user = userEvent.setup();
+  const onOpenChange = vi.fn();
+  render(<AssetInspector assets={[asset("a")]} classifications={[]} open onOpenChange={onOpenChange} onPatchClassifications={vi.fn()} />);
+
+  screen.getByRole("button", { name: "정보 닫기" }).focus();
+  await user.keyboard("{Escape}");
+
+  expect(onOpenChange).toHaveBeenCalledWith(false);
 });
 
 it("shows one-asset metadata and opens its source URL", async () => {
