@@ -54,22 +54,7 @@
 - Consumes: 기존 CSS class 이름과 `UiPreferences`
 - Produces: `--toolbar-height`, `--statusbar-height`, `--sidebar-width-default`, `--inspector-width`, `--gallery-gap` 토큰과 새 기본 사이드바 너비
 
-- [ ] **Step 1: 토큰과 환경설정 RED 테스트 작성**
-
-`AppShell.test.tsx`에 토큰 파일을 읽는 검증을 추가한다.
-
-```tsx
-const tokens = readFileSync(`${appRoot}/src/styles/tokens.css`, "utf8");
-
-it("uses the approved Eagle Compact density tokens", () => {
-  expect(tokens).toContain("--toolbar-height: 40px;");
-  expect(tokens).toContain("--statusbar-height: 24px;");
-  expect(tokens).toContain("--sidebar-width-default: 208px;");
-  expect(tokens).toContain("--inspector-width: 272px;");
-  expect(tokens).toContain("--gallery-gap: 6px;");
-  expect(tokens).toContain("--radius-sm: 4px;");
-});
-```
+- [ ] **Step 1: 환경설정 RED 테스트 작성**
 
 `uiPreferences.test.ts`에는 저장값이 범위를 벗어날 때 176~320px로 제한되고 기본값이 208px인지 검증한다.
 
@@ -83,7 +68,7 @@ expect(loadUiPreferences(storageWith({ sidebarWidth: 400 })).sidebarWidth).toBe(
 
 Run: `cd app && npm.cmd test -- src/layout/AppShell.test.tsx src/preferences/uiPreferences.test.ts`
 
-Expected: 기존 48px/28px/232px/288px 토큰과 184~360px 제한 때문에 FAIL
+Expected: 기존 232px 기본값과 184~360px 제한 때문에 FAIL
 
 - [ ] **Step 3: 중앙 토큰과 기본값 변경**
 
@@ -122,6 +107,8 @@ Expected: 기존 48px/28px/232px/288px 토큰과 184~360px 제한 때문에 FAIL
 ```
 
 `uiPreferences.ts`의 기본값과 clamp를 208, 176, 320으로 맞춘다.
+
+CSS 토큰은 실행 로직이 아닌 시각 설정이므로 소스 문자열을 검사하는 가짜 테스트를 추가하지 않는다. Task 8에서 실제 1536px/960px 렌더링으로 도구 모음, 상태 표시줄, 사이드바, 정보 패널, 갤러리 간격을 검증한다. `AppShell.test.tsx`의 기존 viewport 제약 테스트만 유지한다.
 
 - [ ] **Step 4: GREEN 확인**
 
@@ -466,15 +453,16 @@ git commit -m "feat: open asset details on first selection"
 
 - [ ] **Step 1: 갤러리 RED 테스트 작성**
 
-`useGalleryMetrics`가 `--gallery-gap`을 읽는지 소스 계약을 검증하고, 메타데이터가 꺼졌을 때 overlay가 렌더링되지 않는 기존 동작을 유지한다.
+`getComputedStyle`과 `ResizeObserver` 경계만 제어하고 실제 `AssetGallery`가 6px gap을 렌더링하는지 검증한다. 메타데이터가 꺼졌을 때 overlay가 렌더링되지 않는 기존 동작을 유지한다.
 
 ```tsx
-it("reads the dedicated gallery gap token", () => {
-  expect(gallerySource).toContain('getPropertyValue("--gallery-gap")');
-});
-
-it("keeps selection inside the tile without changing dimensions", () => {
-  expect(declarations('.asset-gallery__asset[aria-selected="true"]')).toContain("outline-offset: calc(var(--focus-width) * -1);");
+it("renders rows with the gallery gap supplied by computed styles", async () => {
+  vi.spyOn(window, "getComputedStyle").mockReturnValue({
+    getPropertyValue: (name: string) => name === "--gallery-gap" ? "6" : "",
+  } as CSSStyleDeclaration);
+  installResizeObserver({ width: 600 });
+  const { container } = render(<AssetGallery items={[asset("a"), asset("b")]} />);
+  await waitFor(() => expect(container.querySelector(".asset-gallery__row")).toHaveStyle({ gap: "6px" }));
 });
 ```
 
