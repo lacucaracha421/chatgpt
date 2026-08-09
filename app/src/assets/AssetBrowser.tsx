@@ -15,12 +15,12 @@ import { AssetViewer } from "./AssetViewer";
 import { applySelectionGesture, emptySelection, moveSelectionFocus, reconcileSelection, selectAllLoaded, type SelectionGesture, type SelectionState } from "./selection";
 
 export type AssetBrowserStatus = { loadedCount: number; selectedAsset: AssetSummary | null; loading: boolean };
-type Props = { view: AssetView; classifications: ClassificationEntry[]; sort: AssetSort; metadataVisible: boolean; thumbnailRowHeight?: number; refreshVersion: number; onSortChange: (sort: AssetSort) => void; onMetadataVisibleChange: (visible: boolean) => void; onThumbnailRowHeightChange?: (height: number) => void; onStatusChange: (status: AssetBrowserStatus) => void; onPointerDragStart?: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => void; onPointerDragMove?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void };
+type Props = { view: AssetView; classifications: ClassificationEntry[]; sort: AssetSort; metadataVisible: boolean; thumbnailRowHeight?: number; refreshVersion: number; requestedAsset?: AssetSummary | null; onRequestedAssetHandled?: () => void; onSortChange: (sort: AssetSort) => void; onMetadataVisibleChange: (visible: boolean) => void; onThumbnailRowHeightChange?: (height: number) => void; onStatusChange: (status: AssetBrowserStatus) => void; onPointerDragStart?: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => void; onPointerDragMove?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void };
 type PageState = { queryKey: string; items: AssetSummary[]; nextCursor: AssetCursor | null };
 type QueryError = { queryKey: string; message: string };
 const EMPTY_ASSETS: AssetSummary[] = [];
 
-export function AssetBrowser({ view, classifications, sort, metadataVisible, thumbnailRowHeight = 180, refreshVersion, onSortChange, onMetadataVisibleChange, onThumbnailRowHeightChange = () => undefined, onStatusChange, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: Props) {
+export function AssetBrowser({ view, classifications, sort, metadataVisible, thumbnailRowHeight = 180, refreshVersion, requestedAsset = null, onRequestedAssetHandled = () => undefined, onSortChange, onMetadataVisibleChange, onThumbnailRowHeightChange = () => undefined, onStatusChange, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: Props) {
   const { gateway } = useLibrary();
   const [directOnly, setDirectOnly] = useState(false);
   const [page, setPage] = useState<PageState | null>(null);
@@ -40,6 +40,8 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, thu
   const previousSelectionCountRef = useRef(0);
   const selectedViewKeyRef = useRef<string | null>(null);
   const viewerViewKeyRef = useRef<string | null>(null);
+  const requestedAssetRef = useRef<AssetSummary | null>(requestedAsset);
+  requestedAssetRef.current = requestedAsset;
   const generationRef = useRef(0);
   const nextLoadingRef = useRef(false);
   const randomPivotRef = useRef<string | null>(null);
@@ -64,7 +66,7 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, thu
       if (generation !== generationRef.current) return;
       setPage({ queryKey, items: result.items, nextCursor: result.nextCursor });
       setSelectedAsset((selected) => reconcileAsset(selected, selectedViewKeyRef.current, viewKey, result.items));
-      setViewerAssetId((assetId) => reconcileAssetId(assetId, viewerViewKeyRef.current, viewKey, result.items));
+      setViewerAssetId((assetId) => requestedAssetRef.current?.id === assetId ? assetId : reconcileAssetId(assetId, viewerViewKeyRef.current, viewKey, result.items));
     }).catch((error: unknown) => { if (generation === generationRef.current) setFirstError({ queryKey, message: commandErrorMessage(error, "자산을 불러오지 못했습니다.") }); }).finally(() => { if (generation === generationRef.current) setFirstLoading(false); });
     return () => { if (generation === generationRef.current) generationRef.current += 1; };
   }, [gateway, queryBase, queryKey, refreshVersion, retryVersion, viewKey]);
@@ -76,6 +78,11 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, thu
     setSelection(emptySelection());
     setSelectedAsset(null);
   }, [viewKey]);
+  useEffect(() => {
+    if (!requestedAsset) return;
+    viewerViewKeyRef.current = null;
+    setViewerAssetId(requestedAsset.id);
+  }, [requestedAsset]);
   useEffect(() => {
     const count = selection.ids.size;
     if (previousSelectionCountRef.current === 0 && count > 0) setInspectorOpen(true);
@@ -174,7 +181,7 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, thu
       </div>
       <AssetInspector assets={selectedAssets} classifications={classifications} open={inspectorOpen} onOpenChange={setInspectorOpen} onPatchClassifications={patchBatchClassification} />
     </div>
-    <AssetViewer items={items} activeId={viewerAssetId} onActiveIdChange={setViewerAssetId} onClose={() => setViewerAssetId(null)} />
+    <AssetViewer items={requestedAsset && !items.some((item) => item.id === requestedAsset.id) ? [requestedAsset] : items} activeId={viewerAssetId} onActiveIdChange={setViewerAssetId} onClose={() => { setViewerAssetId(null); onRequestedAssetHandled(); }} />
   </section>;
 }
 

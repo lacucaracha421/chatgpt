@@ -4,7 +4,6 @@ import { startAssetDrag as nativeStartAssetDrag, type StartAssetDrag } from "../
 import { ClassificationSidebar } from "../classification/ClassificationSidebar";
 import {
   type DropSubscriber,
-  type FileDropResult,
   type IngestionWork,
   subscribeToTauriDrops,
   useFileDrop,
@@ -21,7 +20,7 @@ import {
   selectLibraryFolder,
   type FolderPicker,
 } from "../library/LibrarySetup";
-import type { AssetSort, AssetView, ClassificationEntry, LibraryGateway } from "../library/types";
+import type { AssetSort, AssetSummary, AssetView, ClassificationEntry, IngestOutcome, LibraryGateway } from "../library/types";
 import {
   loadUiPreferences,
   saveUiPreferences,
@@ -92,24 +91,25 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
   const nativeDragStartedRef = useRef(false);
   const nativeDragAssetsRef = useRef(new Map<string, string[]>());
   const [nativeDragWorks, setNativeDragWorks] = useState<IngestionWork[]>([]);
+  const [requestedAsset, setRequestedAsset] = useState<AssetSummary | null>(null);
   const appendMessage = useCallback((next: string) => {
     setMessage((current) => current ? `${current} ${next}` : next);
   }, []);
   const refreshClassifications = useCallback(async () => {
     setEntries(await gateway.listClassifications());
   }, [gateway]);
-  const handleDropResult = useCallback((result: FileDropResult) => {
-    setMessage(result.message);
+  const handleIngested = useCallback((result: IngestOutcome) => {
     if (result.status === "added") setAssetRefresh((current) => current + 1);
   }, []);
-  const dropEnabled = maintenance === null && !safetyOpen && view.kind !== "trash";
+  const dropEnabled = maintenance === null && !safetyOpen && view.kind !== "trash" && view.kind !== "similarity_review";
   const dropClassificationId = view.kind === "classification" ? view.classificationId : null;
   const dropState = useFileDrop({
     subscribe: subscribeDrops,
     enabled: dropEnabled,
     classificationId: dropClassificationId,
     ingestImage: gateway.ingestImage,
-    onResult: handleDropResult,
+    onIngested: handleIngested,
+    onFatalError: setMessage,
   });
 
   useEffect(() => {
@@ -192,7 +192,7 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
   async function beginNativeDrag(assetIds: string[], workId: string = crypto.randomUUID()) {
     nativeDragAssetsRef.current.set(workId, assetIds);
     setNativeDragWorks((current) => {
-      const running: IngestionWork = { id: workId, total: 1, completed: 0, failures: [], status: "running" };
+      const running: IngestionWork = { kind: "drag_out", id: workId, total: 1, completed: 0, added: 0, exactDuplicates: [], reviewPending: [], failures: [], status: "running" };
       return current.some((work) => work.id === workId)
         ? current.map((work) => work.id === workId ? running : work)
         : [...current, running];
@@ -202,7 +202,7 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
       setNativeDragWorks((current) => current.map((work) => work.id === workId ? { ...work, completed: 1, status: "completed" } : work));
     } catch (error) {
       const message = commandErrorMessage(error, "탐색기로 자산을 복사하지 못했습니다.");
-      setNativeDragWorks((current) => current.map((work) => work.id === workId ? { ...work, completed: 1, failures: [{ sourcePath: "선택한 자산", message }], status: "failed" } : work));
+      setNativeDragWorks((current) => current.map((work) => work.id === workId ? { ...work, completed: 1, failures: [{ fileName: "선택한 자산", message }], status: "failed" } : work));
     }
   }
 
@@ -210,6 +210,22 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
     const assetIds = nativeDragAssetsRef.current.get(workId);
     if (assetIds) void beginNativeDrag(assetIds, workId);
     else dropState.retryFailed(workId);
+  }
+
+  function dismissWork(workId: string) {
+    nativeDragAssetsRef.current.delete(workId);
+    setNativeDragWorks((current) => current.filter((work) => work.id !== workId));
+    dropState.dismissWork(workId);
+  }
+
+  async function openExisting(assetId: string) {
+    try {
+      const asset = await gateway.getAsset(assetId);
+      setView({ kind: "classification", classificationId: null });
+      setRequestedAsset(asset);
+    } catch (error) {
+      setMessage(commandErrorMessage(error, "기존 이미지를 열지 못했습니다."));
+    }
   }
 
   function cancelPointerDrag(event: React.PointerEvent<HTMLElement>) {
@@ -296,6 +312,8 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
                     metadataVisible={preferences.metadataVisible}
                     thumbnailRowHeight={preferences.thumbnailRowHeight}
                     refreshVersion={assetRefresh}
+                    requestedAsset={requestedAsset}
+                    onRequestedAssetHandled={() => setRequestedAsset(null)}
                     onSortChange={(assetSort: AssetSort) => updatePreferences({ assetSort })}
                     onMetadataVisibleChange={(metadataVisible) => updatePreferences({ metadataVisible })}
                     onThumbnailRowHeightChange={(thumbnailRowHeight) => updatePreferences({ thumbnailRowHeight })}
@@ -312,7 +330,13 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
           }
           status={<StatusBar status={browserStatus} progress={dropState.progress} dropEnabled={dropEnabled} />}
         />
-        <WorkTray works={[...dropState.works, ...nativeDragWorks]} retryFailed={retryWork} />
+        <WorkTray
+          works={[...dropState.works, ...nativeDragWorks]}
+          retryFailed={retryWork}
+          dismissWork={dismissWork}
+          openReview={() => setView({ kind: "similarity_review" })}
+          openExisting={(assetId) => void openExisting(assetId)}
+        />
       </div>
       <DropOverlay over={dropState.over} destinationName={entries.find((entry) => entry.id === dropClassificationId)?.name ?? "미분류함"} />
       <DragLayer state={dragState} />

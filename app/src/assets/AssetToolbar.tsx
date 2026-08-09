@@ -29,9 +29,12 @@ type AssetToolbarProps = {
 };
 
 export function AssetToolbar({
-  view, classifications, sort, directOnly, metadataVisible, thumbnailRowHeight, selectedCount, onSortChange,
+  view: rawView, classifications, sort, directOnly, metadataVisible, thumbnailRowHeight, selectedCount, onSortChange,
   onDirectOnlyChange, onMetadataVisibleChange, onThumbnailRowHeightChange, onFavorite, onClassification, onTrash, onClearSelection, batchPending, onReshuffle,
 }: AssetToolbarProps) {
+  const view = rawView.kind === "similarity_review"
+    ? ({ kind: "classification", classificationId: null } as const)
+    : rawView;
   const [batchClassificationId, setBatchClassificationId] = useState("");
   const recent = view.kind === "recent";
   const location = view.kind === "favorites" ? "즐겨찾기" : view.kind === "unsorted" ? "미분류함" : recent ? "최근" : view.kind === "trash" ? "휴지통" : classifications.find((entry) => entry.id === view.classificationId)?.name ?? "전체 자산";

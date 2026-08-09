@@ -444,6 +444,31 @@ describe("AssetBrowser", () => {
   });
 });
 
+it("opens a requested asset that is not in the loaded page and clears it on close", async () => {
+  const requested = asset(99);
+  const onRequestedAssetHandled = vi.fn();
+  render(
+    <LibraryProvider gateway={createGateway()}>
+      <AssetBrowser
+        view={{ kind: "classification", classificationId: null }}
+        classifications={[]}
+        sort="newest"
+        metadataVisible={false}
+        refreshVersion={0}
+        requestedAsset={requested}
+        onRequestedAssetHandled={onRequestedAssetHandled}
+        onSortChange={vi.fn()}
+        onMetadataVisibleChange={vi.fn()}
+        onStatusChange={vi.fn()}
+      />
+    </LibraryProvider>,
+  );
+
+  expect(await screen.findByRole("img", { name: requested.originalName })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "감상 화면 닫기" }));
+  expect(onRequestedAssetHandled).toHaveBeenCalledOnce();
+});
+
 function renderBrowser(gateway: LibraryGateway, options: BrowserOptions = {}) {
   return render(browserElement(gateway, options));
 }

@@ -12,6 +12,7 @@ export type AssetView =
   | { kind: "unsorted" }
   | { kind: "favorites" }
   | { kind: "recent" }
+  | { kind: "similarity_review" }
   | { kind: "trash" };
 
 export type ClassificationEntry = {

@@ -31,6 +31,43 @@ const fixtureAsset: AssetSummary = {
   sourceUrl: null,
 };
 
+it("keeps a completed batch with added, duplicate, review, and failure counts", async () => {
+  let drop: ((paths: string[]) => void) | undefined;
+  const subscribe = vi.fn<DropSubscriber>(async (handler) => {
+    drop = handler;
+    return () => undefined;
+  });
+  const ingestImage = vi.fn()
+    .mockResolvedValueOnce({ status: "added", asset: fixtureAsset })
+    .mockResolvedValueOnce({ status: "exact_duplicate", existingAssetId: "existing" })
+    .mockResolvedValueOnce({ status: "review_pending", reviewId: "review" })
+    .mockRejectedValueOnce(new Error("unsupported"));
+  const { result } = renderHook(() => useFileDrop({
+    enabled: true,
+    subscribe,
+    classificationId: null,
+    ingestImage,
+    onIngested: vi.fn(),
+    onFatalError: vi.fn(),
+  }));
+  await waitFor(() => expect(drop).toBeDefined());
+
+  act(() => drop?.([
+    "C:\\in\\added.png",
+    "C:\\in\\same.png",
+    "C:\\in\\variant.jpg",
+    "C:\\in\\bad.txt",
+  ]));
+
+  await waitFor(() => expect(result.current.works[0]?.status).toBe("failed"));
+  expect(result.current.works[0]).toMatchObject({
+    added: 1,
+    exactDuplicates: [{ fileName: "same.png", existingAssetId: "existing" }],
+    reviewPending: [{ fileName: "variant.jpg", reviewId: "review" }],
+    failures: [{ fileName: "bad.txt", message: expect.any(String) }],
+  });
+});
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((complete) => {

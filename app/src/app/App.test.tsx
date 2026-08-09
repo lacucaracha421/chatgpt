@@ -357,7 +357,7 @@ describe("App", () => {
     );
   });
 
-  it("clears transient drop-result feedback while keeping status in the status bar", async () => {
+  it("keeps completed ingestion feedback in the work tray", async () => {
     localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
       let drop: ((paths: string[]) => void) | undefined;
       const subscribeDrops: DropSubscriber = async (handler) => {
@@ -380,22 +380,12 @@ describe("App", () => {
       act(() => drop?.(["C:\\images\\a.png"]));
       await waitFor(() => expect(libraryGateway.ingestImage).toHaveBeenCalledOnce());
 
-      vi.useFakeTimers();
-      try {
-        await act(async () => {
-          resolveIngest({ status: "added", asset });
-          await Promise.resolve();
-          await Promise.resolve();
-        });
-        expect(screen.getByRole("status")).toBeVisible();
-
-        await act(async () => vi.advanceTimersByTimeAsync(5_000));
-
-        expect(screen.queryByRole("status")).not.toBeInTheDocument();
-        expect(screen.getByRole("contentinfo")).toHaveTextContent("이미지 파일을 창으로 끌어놓으세요.");
-      } finally {
-        vi.useRealTimers();
-      }
+      await act(async () => {
+        resolveIngest({ status: "added", asset });
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(screen.getByRole("complementary", { name: "가져오기 작업" })).toHaveTextContent("추가 1");
   });
 
   it("shows setup and an error when restoring the saved library fails", async () => {
@@ -481,9 +471,7 @@ describe("App", () => {
 
     act(() => resolveIngest({ status: "added", asset }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent(
-      "저장했습니다",
-    );
+    expect(await screen.findByText(/추가 1 · 중복 0/)).toBeInTheDocument();
     await waitFor(() =>
       expect(libraryGateway.listAssets).toHaveBeenCalledTimes(
         callsBeforeDrop + 1,
@@ -514,6 +502,11 @@ describe("App", () => {
       status: "exact_duplicate",
       existingAssetId: "asset-existing",
     });
+    vi.mocked(libraryGateway.getAsset).mockResolvedValue({
+      ...asset,
+      id: "asset-existing",
+      originalName: "existing.png",
+    });
 
     const user = userEvent.setup();
     render(
@@ -543,15 +536,16 @@ describe("App", () => {
 
     act(() => drop?.(["C:\\images\\duplicate.png"]));
 
-    expect(await screen.findByRole("status")).toHaveTextContent(
-      "이미 보관된 파일입니다",
-    );
+    expect(await screen.findByText(/추가 0 · 중복 1/)).toBeInTheDocument();
     expect(libraryGateway.ingestImage).toHaveBeenCalledWith({
       sourcePath: "C:\\images\\duplicate.png",
       classificationId: "root-games",
       sourceUrl: null,
     });
     expect(libraryGateway.listAssets).toHaveBeenCalledTimes(callsBeforeDrop);
+    await user.click(screen.getByRole("button", { name: /duplicate.png 기존 이미지 열기/ }));
+    expect(libraryGateway.getAsset).toHaveBeenCalledWith("asset-existing");
+    expect(await screen.findByRole("img", { name: "existing.png" })).toBeInTheDocument();
   });
 
   it("drops an asset selection on a classification in one batch", async () => {
@@ -663,8 +657,7 @@ describe("App", () => {
 
     fireEvent.pointerDown(tile, { button: 0, pointerId: 11, clientX: 100, clientY: 100 });
     fireEvent.pointerMove(tile, { pointerId: 11, clientX: 1001, clientY: 100 });
-    await waitFor(() => expect(screen.getByRole("button", { name: "실패 1개" })).toBeVisible());
-    fireEvent.click(screen.getByRole("button", { name: "실패 1개" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "실패 파일 다시 시도" })).toBeVisible());
     expect(screen.getByRole("complementary", { name: "가져오기 작업" })).toHaveTextContent("탐색기 복사 실패");
   });
 });
