@@ -210,7 +210,7 @@ git commit -m "feat: add persistent video media state"
 - Consumes: BtbN FFmpeg-Builds immutable release `autobuild-2026-08-08-13-06`, asset `ffmpeg-n7.1.5-12-g1fdbca85aa-win64-lgpl-shared-7.1.zip`.
 - Produces: local Tauri sidecars `ffmpeg-x86_64-pc-windows-msvc.exe`, `ffprobe-x86_64-pc-windows-msvc.exe` and adjacent shared DLL resources, reproducible hash verification.
 
-- [ ] **Step 1: Add a failing packaging contract check**
+- [x] **Step 1: Add a failing packaging contract check**
 
 Create `scripts/fetch-ffmpeg-windows.ps1` first with constants and a preflight assertion that intentionally fails until extraction/copying is implemented. The immutable download is:
 
@@ -221,7 +221,7 @@ SHA-256 4450e09c6740b39777a195569b61cf415a3e7ccaf0eb17f8ac9e16c84787dab3
 
 The check must fail if the archive hash differs, `ffmpeg -version` or `ffprobe -version` fails, or `ffmpeg -version` contains `--enable-gpl`/`--enable-nonfree`.
 
-- [ ] **Step 2: Run RED packaging check**
+- [x] **Step 2: Run RED packaging check**
 
 ```powershell
 cd C:\chatgpt
@@ -230,7 +230,7 @@ powershell -ExecutionPolicy Bypass -File scripts/fetch-ffmpeg-windows.ps1 -Verif
 
 Expected: FAIL because the sidecars are not present.
 
-- [ ] **Step 3: Implement the idempotent downloader and bundle config**
+- [x] **Step 3: Implement the idempotent downloader and bundle config**
 
 The script downloads to a unique temp directory, validates SHA-256 before extraction, copies only `ffmpeg.exe`, `ffprobe.exe`, required `av*.dll`, `sw*.dll`, `postproc*.dll`, and upstream license files, then verifies both executables. It never deletes outside its temp directory or `app/src-tauri/binaries` exact targets.
 
@@ -249,7 +249,7 @@ Use Tauri's required target-triple names:
 
 Ignore fetched executables and DLLs, but commit README, notices, and source/license metadata. `THIRD-PARTY-NOTICES.md` records the pinned release, archive name, SHA-256, BtbN MIT build-script license, FFmpeg LGPL notice, and FFmpeg source/build links.
 
-- [ ] **Step 4: Run GREEN packaging checks**
+- [x] **Step 4: Run GREEN packaging checks**
 
 ```powershell
 cd C:\chatgpt
@@ -262,7 +262,7 @@ git diff --check
 
 Expected: both encoders exist and the version configuration has no GPL/nonfree flags.
 
-- [ ] **Step 5: Commit Task 2**
+- [x] **Step 5: Commit Task 2**
 
 ```powershell
 git add scripts/fetch-ffmpeg-windows.ps1 app/src-tauri/binaries/README.md app/src-tauri/binaries/THIRD-PARTY-NOTICES.md app/src-tauri/.gitignore app/src-tauri/tauri.conf.json
