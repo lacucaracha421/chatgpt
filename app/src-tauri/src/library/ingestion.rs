@@ -17,7 +17,7 @@ use windows_sys::Win32::Storage::FileSystem::{
 
 use super::{
     error::LibraryError,
-    models::{AssetSummary, IngestImageRequest, IngestOutcome},
+    models::{AssetSummary, IngestImageRequest, IngestOutcome, MediaSummary},
     similarity::perceptual_hash_from_file,
     Library,
 };
@@ -89,13 +89,18 @@ impl Library {
             title: None,
             original_name: original_name(&request.source_path),
             relative_path,
-            thumbnail_relative_path,
+            thumbnail_relative_path: Some(thumbnail_relative_path),
             byte_size,
             width,
             height,
             collected_at: chrono::Utc::now().to_rfc3339(),
             favorite: false,
             source_url: request.source_url.clone(),
+            media: if format == ImageFormat::Gif {
+                MediaSummary::Gif
+            } else {
+                MediaSummary::Image
+            },
         };
         let registration = similar.map_or(Registration::Normal, |candidate| Registration::Review {
             existing_asset_id: candidate.asset_id,
@@ -839,7 +844,7 @@ mod tests {
         assert!(fixture
             .library
             .root()
-            .join(&asset.thumbnail_relative_path)
+            .join(asset.thumbnail_relative_path.as_deref().unwrap())
             .is_file());
     }
 

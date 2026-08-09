@@ -7,7 +7,7 @@ use app_lib::library::{
     error::LibraryError,
     models::{
         AssetCursor, AssetPage, AssetQuery, AssetSort, AssetSummary, ClassificationKind,
-        CreateClassification, IngestImageRequest, IngestOutcome, TrashPolicy,
+        CreateClassification, IngestImageRequest, IngestOutcome, MediaSummary, TrashPolicy,
     },
     Library,
 };
@@ -187,6 +187,14 @@ fn png_jpeg_and_gif_images_can_be_ingested() {
             panic!("{extension} must add an asset");
         };
         assert_eq!((asset.width, asset.height), (8, 6));
+        assert_eq!(
+            asset.media,
+            if extension == "gif" {
+                MediaSummary::Gif
+            } else {
+                MediaSummary::Image
+            }
+        );
         assert!(source_path.is_file());
     }
 }
@@ -261,7 +269,7 @@ fn migrates_v1_after_creating_a_verified_snapshot() {
 
     let library = Library::open(&root).unwrap();
 
-    assert_eq!(user_version(&library), 3);
+    assert_eq!(user_version(&library), 4);
     assert_eq!(library.trash_policy().unwrap().retention_days, Some(30));
     assert!(!library.root().join("trash").exists());
     assert_eq!(library.summary().unwrap().asset_count, 1);
@@ -312,7 +320,7 @@ fn version_two_library_migrates_similarity_state_after_a_verified_backup() {
     let library = Library::open(fixture.root()).unwrap();
     let connection = Connection::open(library.root().join("library.sqlite")).unwrap();
 
-    assert_eq!(user_version(&library), 3);
+    assert_eq!(user_version(&library), 4);
     connection
         .execute(
             "UPDATE assets SET perceptual_hash = ?2 WHERE id = ?1",
@@ -328,6 +336,78 @@ fn version_two_library_migrates_similarity_state_after_a_verified_backup() {
         )
         .unwrap();
     assert_eq!(pre_migration_backups(library.root()).len(), 1);
+}
+
+#[test]
+fn version_three_library_migrates_video_state_without_changing_images() {
+    let fixture = version_three_library();
+    let library = Library::open(fixture.root()).unwrap();
+    let connection = Connection::open(library.root().join("library.sqlite")).unwrap();
+
+    assert_eq!(user_version(&library), 4);
+    let preserved: (String, Option<String>) = connection
+        .query_row(
+            "SELECT media_kind, thumbnail_relative_path FROM assets WHERE id = 'asset-1'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        preserved,
+        ("image".into(), Some("thumbnails/aa/image.webp".into()))
+    );
+    connection
+        .execute(
+            "INSERT INTO assets (
+                id, content_hash, media_kind, original_name, relative_path,
+                thumbnail_relative_path, byte_size, width, height, collected_at
+             ) VALUES (
+                'video-1', 'video-hash', 'video', 'clip.webm', 'assets/vi/clip.webm',
+                NULL, 10, 1920, 1080, '2026-08-09T00:00:00Z'
+             )",
+            [],
+        )
+        .unwrap();
+    assert_eq!(pre_migration_backups(library.root()).len(), 1);
+}
+
+#[test]
+fn video_media_summary_is_preserved_in_get_asset_and_trash_list() {
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path().join("library")).unwrap();
+    let connection = Connection::open(library.root().join("library.sqlite")).unwrap();
+    connection
+        .execute(
+            "INSERT INTO assets (
+                id, content_hash, media_kind, original_name, relative_path,
+                thumbnail_relative_path, byte_size, width, height, collected_at
+             ) VALUES (
+                'video-1', 'video-hash', 'video', 'clip.webm', 'assets/vi/clip.webm',
+                NULL, 10, 1920, 1080, '2026-08-09T00:00:00Z'
+             )",
+            [],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO video_assets (
+                asset_id, duration_ms, container, video_codec, audio_codec,
+                preparation_state, scrub_frame_count
+             ) VALUES ('video-1', 12345, 'webm', 'vp9', 'opus', 'pending', 0)",
+            [],
+        )
+        .unwrap();
+    drop(connection);
+    let expected = MediaSummary::Video {
+        duration_ms: 12_345,
+        preparation_state: app_lib::library::models::VideoPreparationState::Pending,
+        scrub_frame_count: 0,
+    };
+
+    assert_eq!(library.get_asset("video-1").unwrap().media, expected);
+    library.trash_asset("video-1").unwrap();
+    let trash = library.list_trash(None, 20).unwrap();
+    assert_eq!(trash.items[0].asset.media, expected);
 }
 
 #[test]
@@ -361,7 +441,10 @@ fn trash_keeps_files_in_place_and_restore_keeps_metadata() {
     let classification = fixture.create_game_work_tag();
     let asset = fixture.ingest(&classification.tag_id);
     let asset_path = fixture.library.root().join(&asset.relative_path);
-    let thumbnail_path = fixture.library.root().join(&asset.thumbnail_relative_path);
+    let thumbnail_path = fixture
+        .library
+        .root()
+        .join(asset.thumbnail_relative_path.as_deref().unwrap());
 
     fixture.library.trash_asset(&asset.id).unwrap();
 
@@ -503,7 +586,10 @@ fn empty_trash_keeps_a_partial_failure_until_a_missing_file_can_be_retried() {
     let classification = fixture.create_game_work_tag();
     let asset = fixture.ingest(&classification.tag_id);
     let asset_path = fixture.library.root().join(&asset.relative_path);
-    let thumbnail_path = fixture.library.root().join(&asset.thumbnail_relative_path);
+    let thumbnail_path = fixture
+        .library
+        .root()
+        .join(asset.thumbnail_relative_path.as_deref().unwrap());
     fixture.library.trash_asset(&asset.id).unwrap();
     fs::remove_file(&thumbnail_path).unwrap();
     fs::create_dir(&thumbnail_path).unwrap();
@@ -572,7 +658,10 @@ fn purge_expired_trash_removes_managed_files_and_metadata() {
     let classification = fixture.create_game_work_tag();
     let asset = fixture.ingest(&classification.tag_id);
     let asset_path = fixture.library.root().join(&asset.relative_path);
-    let thumbnail_path = fixture.library.root().join(&asset.thumbnail_relative_path);
+    let thumbnail_path = fixture
+        .library
+        .root()
+        .join(asset.thumbnail_relative_path.as_deref().unwrap());
     fixture
         .library
         .set_trash_policy(TrashPolicy {
@@ -690,6 +779,25 @@ fn version_two_library() -> MigrationFixture {
     }
     drop(database);
     MigrationFixture { _temp: temp, root }
+}
+
+fn version_three_library() -> MigrationFixture {
+    let fixture = version_two_library();
+    let database = Connection::open(fixture.root.join("library.sqlite")).unwrap();
+    database
+        .execute_batch(include_str!("../migrations/0003_similarity_review.sql"))
+        .unwrap();
+    database
+        .execute(
+            "UPDATE assets
+             SET relative_path = 'assets/aa/image.png',
+                 thumbnail_relative_path = 'thumbnails/aa/image.webp'
+             WHERE id = 'asset-1'",
+            [],
+        )
+        .unwrap();
+    drop(database);
+    fixture
 }
 
 fn user_version(library: &Library) -> i64 {

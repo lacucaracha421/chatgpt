@@ -70,7 +70,7 @@
 - Consumes: schema v3 `assets`, verified pre-migration snapshot helper, current image/gif rows.
 - Produces: schema v4, `MediaSummary`, `VideoPreparationState`, nullable internal thumbnail path, public image/gif/video discrimination.
 
-- [ ] **Step 1: Write RED migration and serialization tests**
+- [x] **Step 1: Write RED migration and serialization tests**
 
 Add a real v3 fixture in `foundation_flow.rs` and prove migration preserves the existing image while permitting a pending video with no poster:
 
@@ -121,7 +121,7 @@ pub enum VideoPreparationState { Pending, Processing, Ready, Failed }
 
 `AssetSummary.thumbnail_relative_path` becomes `Option<String>` internally and gets a new public `media: MediaSummary` field.
 
-- [ ] **Step 2: Run RED tests**
+- [x] **Step 2: Run RED tests**
 
 ```powershell
 cd C:\chatgpt\app\src-tauri
@@ -131,7 +131,7 @@ cargo test video_asset_summary_serialization_hides_internal_media_details
 
 Expected: FAIL because schema v4 and tagged media fields do not exist.
 
-- [ ] **Step 3: Implement schema and row mapping**
+- [x] **Step 3: Implement schema and row mapping**
 
 `0004_video_media.sql` rebuilds only `assets` so its existing CHECK and NOT NULL rules can change safely. `db.rs` disables `foreign_keys` before opening the v4 transaction, copies every existing column into `assets_v4`, drops `assets`, renames `assets_v4`, recreates all three asset indexes, commits, re-enables `foreign_keys`, and then requires `PRAGMA foreign_key_check` to return no rows. An error path re-enables `foreign_keys` before returning. The new table keeps existing constraints except:
 
@@ -176,7 +176,7 @@ PRAGMA user_version = 4;
 
 Update every asset SELECT to LEFT JOIN `video_assets` and use a single `pub(crate)` `asset_summary_from_row` mapping function in `query.rs`. `similarity.rs` calls that helper rather than maintaining a second field list. Existing image/gif results must serialize `media: { kind: "image" | "gif" }`. Add the correct image/gif media value to existing constructors in `ingestion.rs`, `trash.rs`, model tests, and integration fixtures so Task 1 compiles without making ingestion behavior changes yet.
 
-- [ ] **Step 4: Run GREEN and regression tests**
+- [x] **Step 4: Run GREEN and regression tests**
 
 ```powershell
 cd C:\chatgpt\app\src-tauri
@@ -187,7 +187,7 @@ cargo test query
 git diff --check
 ```
 
-- [ ] **Step 5: Commit Task 1**
+- [x] **Step 5: Commit Task 1**
 
 ```powershell
 cd C:\chatgpt

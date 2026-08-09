@@ -3,7 +3,10 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     error::LibraryError,
-    models::{AssetCursor, AssetPage, AssetQuery, AssetSort, AssetSummary},
+    models::{
+        AssetCursor, AssetPage, AssetQuery, AssetSort, AssetSummary, MediaSummary,
+        VideoPreparationState,
+    },
     Library,
 };
 
@@ -192,25 +195,53 @@ fn random_keys(cursor: &Option<CursorPayload>) -> (Option<i64>, Option<&str>, Op
 }
 
 fn asset_row(row: &rusqlite::Row<'_>, random: bool) -> rusqlite::Result<AssetRow> {
+    Ok(AssetRow {
+        summary: asset_summary_from_row(row)?,
+        content_hash: random.then(|| row.get(15)).transpose()?,
+        random_bucket: random.then(|| row.get(16)).transpose()?,
+    })
+}
+
+pub(crate) fn asset_summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AssetSummary> {
     let byte_size =
         u64::try_from(row.get::<_, i64>(5)?).map_err(|_| rusqlite::Error::InvalidQuery)?;
-    Ok(AssetRow {
-        summary: AssetSummary {
-            id: row.get(0)?,
-            title: row.get(1)?,
-            original_name: row.get(2)?,
-            relative_path: row.get(3)?,
-            thumbnail_relative_path: row.get(4)?,
-            byte_size,
-            width: row.get(6)?,
-            height: row.get(7)?,
-            collected_at: row.get(8)?,
-            favorite: row.get(9)?,
-            source_url: row.get(10)?,
+    let media_kind: String = row.get(11)?;
+    let media = match media_kind.as_str() {
+        "image" => MediaSummary::Image,
+        "gif" => MediaSummary::Gif,
+        "video" => MediaSummary::Video {
+            duration_ms: u64::try_from(row.get::<_, i64>(12)?)
+                .map_err(|_| rusqlite::Error::InvalidQuery)?,
+            preparation_state: preparation_state(&row.get::<_, String>(13)?)?,
+            scrub_frame_count: u32::try_from(row.get::<_, i64>(14)?)
+                .map_err(|_| rusqlite::Error::InvalidQuery)?,
         },
-        content_hash: random.then(|| row.get(11)).transpose()?,
-        random_bucket: random.then(|| row.get(12)).transpose()?,
+        _ => return Err(rusqlite::Error::InvalidQuery),
+    };
+    Ok(AssetSummary {
+        id: row.get(0)?,
+        title: row.get(1)?,
+        original_name: row.get(2)?,
+        relative_path: row.get(3)?,
+        thumbnail_relative_path: row.get(4)?,
+        byte_size,
+        width: row.get(6)?,
+        height: row.get(7)?,
+        collected_at: row.get(8)?,
+        favorite: row.get(9)?,
+        source_url: row.get(10)?,
+        media,
     })
+}
+
+fn preparation_state(value: &str) -> rusqlite::Result<VideoPreparationState> {
+    match value {
+        "pending" => Ok(VideoPreparationState::Pending),
+        "processing" => Ok(VideoPreparationState::Processing),
+        "ready" => Ok(VideoPreparationState::Ready),
+        "failed" => Ok(VideoPreparationState::Failed),
+        _ => Err(rusqlite::Error::InvalidQuery),
+    }
 }
 
 fn encode_cursor(sort: AssetSort, asset: &AssetRow, random_pivot: &str) -> AssetCursor {
@@ -246,8 +277,10 @@ fn encode_cursor(sort: AssetSort, asset: &AssetRow, random_pivot: &str) -> Asset
 const NEWEST_SQL: &str = "WITH RECURSIVE descendants(id) AS (
     SELECT ?1 WHERE ?1 IS NOT NULL
     UNION ALL SELECT entry.id FROM classification_entries AS entry JOIN descendants ON entry.parent_id = descendants.id
-) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url
-FROM assets AS asset WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
+) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url,
+asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count
+FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
+WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
 AND (?5 IS NULL OR asset.collected_at < ?5 OR (asset.collected_at = ?5 AND asset.id < ?6))
@@ -256,8 +289,10 @@ ORDER BY asset.collected_at DESC, asset.id DESC LIMIT ?7";
 const OLDEST_SQL: &str = "WITH RECURSIVE descendants(id) AS (
     SELECT ?1 WHERE ?1 IS NOT NULL
     UNION ALL SELECT entry.id FROM classification_entries AS entry JOIN descendants ON entry.parent_id = descendants.id
-) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url
-FROM assets AS asset WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
+) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url,
+asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count
+FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
+WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
 AND (?5 IS NULL OR asset.collected_at > ?5 OR (asset.collected_at = ?5 AND asset.id > ?6))
@@ -266,8 +301,10 @@ ORDER BY asset.collected_at ASC, asset.id ASC LIMIT ?7";
 const FAVORITES_SQL: &str = "WITH RECURSIVE descendants(id) AS (
     SELECT ?1 WHERE ?1 IS NOT NULL
     UNION ALL SELECT entry.id FROM classification_entries AS entry JOIN descendants ON entry.parent_id = descendants.id
-) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url
-FROM assets AS asset WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
+) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url,
+asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count
+FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
+WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
 AND (?5 IS NULL OR asset.favorite < ?5 OR (asset.favorite = ?5 AND (asset.collected_at < ?6 OR (asset.collected_at = ?6 AND asset.id < ?7))))
@@ -276,8 +313,11 @@ ORDER BY asset.favorite DESC, asset.collected_at DESC, asset.id DESC LIMIT ?8";
 const RANDOM_SQL: &str = "WITH RECURSIVE descendants(id) AS (
     SELECT ?1 WHERE ?1 IS NOT NULL
     UNION ALL SELECT entry.id FROM classification_entries AS entry JOIN descendants ON entry.parent_id = descendants.id
-) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url, asset.content_hash, CASE WHEN asset.content_hash >= ?5 THEN 0 ELSE 1 END
-FROM assets AS asset WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
+) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url,
+asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count,
+asset.content_hash, CASE WHEN asset.content_hash >= ?5 THEN 0 ELSE 1 END
+FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
+WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
 AND (?6 IS NULL OR CASE WHEN asset.content_hash >= ?5 THEN 0 ELSE 1 END > ?6 OR (CASE WHEN asset.content_hash >= ?5 THEN 0 ELSE 1 END = ?6 AND (asset.content_hash > ?7 OR (asset.content_hash = ?7 AND asset.id > ?8))))
@@ -289,9 +329,93 @@ mod tests {
 
     use crate::library::{
         error::LibraryError,
-        models::{AssetCursor, AssetQuery, AssetSort, ClassificationKind, CreateClassification},
+        models::{
+            AssetCursor, AssetQuery, AssetSort, ClassificationKind, CreateClassification,
+            MediaSummary, VideoPreparationState,
+        },
         Library,
     };
+
+    #[test]
+    fn list_assets_returns_tagged_image_gif_and_video_summaries() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let connection = library.connection().unwrap();
+        for (id, hash, media_kind, thumbnail, collected_at) in [
+            (
+                "image-1",
+                "hash-image",
+                "image",
+                Some("thumbnails/image.webp"),
+                "2026-08-09T00:00:00Z",
+            ),
+            (
+                "gif-1",
+                "hash-gif",
+                "gif",
+                Some("thumbnails/gif.webp"),
+                "2026-08-09T00:00:01Z",
+            ),
+            (
+                "video-1",
+                "hash-video",
+                "video",
+                None,
+                "2026-08-09T00:00:02Z",
+            ),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO assets (
+                        id, content_hash, media_kind, original_name, relative_path,
+                        thumbnail_relative_path, byte_size, width, height, collected_at
+                     ) VALUES (?1, ?2, ?3, ?1, ?4, ?5, 1, 1920, 1080, ?6)",
+                    params![
+                        id,
+                        hash,
+                        media_kind,
+                        format!("assets/{id}"),
+                        thumbnail,
+                        collected_at
+                    ],
+                )
+                .unwrap();
+        }
+        connection
+            .execute(
+                "INSERT INTO video_assets (
+                    asset_id, duration_ms, container, video_codec, audio_codec,
+                    preparation_state, scrub_frame_count
+                 ) VALUES ('video-1', 12345, 'webm', 'vp9', 'opus', 'pending', 0)",
+                [],
+            )
+            .unwrap();
+        drop(connection);
+
+        let page = library
+            .list_assets(AssetQuery {
+                classification_id: None,
+                direct_only: false,
+                favorite_only: false,
+                unclassified_only: false,
+                sort: AssetSort::Newest,
+                random_pivot: None,
+                after: None,
+                limit: 20,
+            })
+            .unwrap();
+
+        assert_eq!(
+            page.items[0].media,
+            MediaSummary::Video {
+                duration_ms: 12_345,
+                preparation_state: VideoPreparationState::Pending,
+                scrub_frame_count: 0,
+            }
+        );
+        assert_eq!(page.items[1].media, MediaSummary::Gif);
+        assert_eq!(page.items[2].media, MediaSummary::Image);
+    }
 
     #[test]
     fn descendant_assets_are_included_unless_direct_only_is_requested() {

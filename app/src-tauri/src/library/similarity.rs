@@ -16,6 +16,7 @@ use super::{
         SimilarityDecisionRequest, SimilarityDecisionStatus, SimilarityIndexProgress,
         SimilarityReviewAsset, SimilarityReviewPage, SimilarityReviewSummary,
     },
+    query::asset_summary_from_row,
     Library, MediaVariant,
 };
 
@@ -486,27 +487,15 @@ fn load_asset_summary(
 ) -> Result<AssetSummary, LibraryError> {
     connection
         .query_row(
-            "SELECT id, title, original_name, relative_path, thumbnail_relative_path,
-                    byte_size, width, height, collected_at, favorite, source_url
-             FROM assets WHERE id = ?1 AND status = ?2",
+            "SELECT asset.id, asset.title, asset.original_name, asset.relative_path,
+                    asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height,
+                    asset.collected_at, asset.favorite, asset.source_url, asset.media_kind,
+                    video.duration_ms, video.preparation_state, video.scrub_frame_count
+             FROM assets AS asset
+             LEFT JOIN video_assets AS video ON video.asset_id = asset.id
+             WHERE asset.id = ?1 AND asset.status = ?2",
             params![asset_id, expected_status],
-            |row| {
-                let byte_size = u64::try_from(row.get::<_, i64>(5)?)
-                    .map_err(|_| rusqlite::Error::InvalidQuery)?;
-                Ok(AssetSummary {
-                    id: row.get(0)?,
-                    title: row.get(1)?,
-                    original_name: row.get(2)?,
-                    relative_path: row.get(3)?,
-                    thumbnail_relative_path: row.get(4)?,
-                    byte_size,
-                    width: row.get(6)?,
-                    height: row.get(7)?,
-                    collected_at: row.get(8)?,
-                    favorite: row.get(9)?,
-                    source_url: row.get(10)?,
-                })
-            },
+            asset_summary_from_row,
         )
         .optional()?
         .ok_or(LibraryError::AssetNotFound)

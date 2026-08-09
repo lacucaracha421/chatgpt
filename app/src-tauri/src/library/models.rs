@@ -31,6 +31,31 @@ pub struct IngestImageRequest {
     pub source_url: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum VideoPreparationState {
+    Pending,
+    Processing,
+    Ready,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum MediaSummary {
+    Image,
+    Gif,
+    Video {
+        duration_ms: u64,
+        preparation_state: VideoPreparationState,
+        scrub_frame_count: u32,
+    },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AssetSummary {
@@ -40,13 +65,14 @@ pub struct AssetSummary {
     #[serde(skip_serializing)]
     pub relative_path: String,
     #[serde(skip_serializing)]
-    pub thumbnail_relative_path: String,
+    pub thumbnail_relative_path: Option<String>,
     pub byte_size: u64,
     pub width: u32,
     pub height: u32,
     pub collected_at: String,
     pub favorite: bool,
     pub source_url: Option<String>,
+    pub media: MediaSummary,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -224,8 +250,8 @@ pub struct LibrarySummary {
 #[cfg(test)]
 mod tests {
     use super::{
-        AssetSummary, BackupKind, ClassificationEntry, ClassificationKind, MetadataBackup,
-        SimilarityReviewAsset, SimilarityReviewSummary,
+        AssetSummary, BackupKind, ClassificationEntry, ClassificationKind, MediaSummary,
+        MetadataBackup, SimilarityReviewAsset, SimilarityReviewSummary, VideoPreparationState,
     };
 
     #[test]
@@ -235,13 +261,14 @@ mod tests {
             title: None,
             original_name: "source.png".into(),
             relative_path: "assets/aa/asset.png".into(),
-            thumbnail_relative_path: "thumbnails/aa/asset.webp".into(),
+            thumbnail_relative_path: Some("thumbnails/aa/asset.webp".into()),
             byte_size: 1,
             width: 1,
             height: 1,
             collected_at: "2026-08-02T00:00:00Z".into(),
             favorite: false,
             source_url: None,
+            media: MediaSummary::Image,
         };
 
         let value = serde_json::to_value(asset).unwrap();
@@ -267,19 +294,59 @@ mod tests {
     }
 
     #[test]
+    fn video_asset_summary_serialization_hides_internal_media_details() {
+        let asset = AssetSummary {
+            id: "video-1".into(),
+            title: None,
+            original_name: "clip.webm".into(),
+            relative_path: "assets/aa/clip.webm".into(),
+            thumbnail_relative_path: None,
+            byte_size: 42,
+            width: 1920,
+            height: 1080,
+            collected_at: "2026-08-09T00:00:00Z".into(),
+            favorite: false,
+            source_url: None,
+            media: MediaSummary::Video {
+                duration_ms: 12_345,
+                preparation_state: VideoPreparationState::Pending,
+                scrub_frame_count: 0,
+            },
+        };
+
+        let value = serde_json::to_value(asset).unwrap();
+
+        assert_eq!(value["media"]["kind"], "video");
+        assert_eq!(value["media"]["durationMs"], 12_345);
+        assert_eq!(value["media"]["preparationState"], "pending");
+        assert_eq!(value["media"]["scrubFrameCount"], 0);
+        let serialized = value.to_string();
+        for forbidden in [
+            "relativePath",
+            "thumbnailRelativePath",
+            "videoCodec",
+            "audioCodec",
+            "assets/aa/clip.webm",
+        ] {
+            assert!(!serialized.contains(forbidden));
+        }
+    }
+
+    #[test]
     fn similarity_review_serialization_omits_internal_hashes_and_paths() {
         let asset = AssetSummary {
             id: "asset-1".into(),
             title: None,
             original_name: "source.png".into(),
             relative_path: "assets/aa/asset.png".into(),
-            thumbnail_relative_path: "thumbnails/aa/asset.webp".into(),
+            thumbnail_relative_path: Some("thumbnails/aa/asset.webp".into()),
             byte_size: 42,
             width: 8,
             height: 6,
             collected_at: "2026-08-09T00:00:00Z".into(),
             favorite: false,
             source_url: Some("https://example.test/source".into()),
+            media: MediaSummary::Image,
         };
         let review_asset = SimilarityReviewAsset {
             asset,

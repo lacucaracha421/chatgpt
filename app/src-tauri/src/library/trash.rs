@@ -23,6 +23,7 @@ use windows_sys::Win32::Storage::FileSystem::{
 use super::{
     error::LibraryError,
     models::{AssetCursor, AssetSummary, PurgeSummary, TrashAssetSummary, TrashPage},
+    query::asset_summary_from_row,
     validated_asset_ids, Library,
 };
 
@@ -100,10 +101,17 @@ impl Library {
         )?;
         let cursor = decode_cursor(after)?;
         let mut statement = transaction.prepare(
-            "SELECT id, title, original_name, relative_path, thumbnail_relative_path, byte_size, width, height, collected_at, favorite, source_url, trashed_at
-             FROM assets WHERE status = 'trash'
-             AND (?1 IS NULL OR trashed_at < ?1 OR (trashed_at = ?1 AND id < ?2))
-             ORDER BY trashed_at DESC, id DESC LIMIT ?3",
+            "SELECT asset.id, asset.title, asset.original_name, asset.relative_path,
+                    asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height,
+                    asset.collected_at, asset.favorite, asset.source_url, asset.media_kind,
+                    video.duration_ms, video.preparation_state, video.scrub_frame_count,
+                    asset.trashed_at
+             FROM assets AS asset
+             LEFT JOIN video_assets AS video ON video.asset_id = asset.id
+             WHERE asset.status = 'trash'
+             AND (?1 IS NULL OR asset.trashed_at < ?1
+                  OR (asset.trashed_at = ?1 AND asset.id < ?2))
+             ORDER BY asset.trashed_at DESC, asset.id DESC LIMIT ?3",
         )?;
         let (trashed_at, id) = cursor
             .as_ref()
@@ -416,23 +424,9 @@ fn decode_cursor(after: Option<AssetCursor>) -> Result<Option<TrashCursor>, Libr
 }
 
 fn trash_asset_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TrashRow> {
-    let byte_size =
-        u64::try_from(row.get::<_, i64>(5)?).map_err(|_| rusqlite::Error::InvalidQuery)?;
     Ok(TrashRow {
-        asset: AssetSummary {
-            id: row.get(0)?,
-            title: row.get(1)?,
-            original_name: row.get(2)?,
-            relative_path: row.get(3)?,
-            thumbnail_relative_path: row.get(4)?,
-            byte_size,
-            width: row.get(6)?,
-            height: row.get(7)?,
-            collected_at: row.get(8)?,
-            favorite: row.get(9)?,
-            source_url: row.get(10)?,
-        },
-        trashed_at: row.get(11)?,
+        asset: asset_summary_from_row(row)?,
+        trashed_at: row.get(15)?,
     })
 }
 
