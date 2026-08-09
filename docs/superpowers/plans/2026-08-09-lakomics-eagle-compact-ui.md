@@ -136,19 +136,23 @@ git commit -m "style: establish Eagle compact design tokens"
 - Modify: `app/package-lock.json`
 - Modify: `app/src/shared/ui/Menu.tsx`
 - Modify: `app/src/shared/ui/Menu.test.tsx`
+- Create: `app/src/shared/ui/ContextMenu.tsx`
+- Create: `app/src/shared/ui/ContextMenu.test.tsx`
 - Modify: `app/src/shared/ui/Dialog.tsx`
 - Create: `app/src/shared/ui/Dialog.test.tsx`
 - Create: `app/src/shared/ui/Tooltip.tsx`
 - Create: `app/src/shared/ui/Tooltip.test.tsx`
+- Modify: `app/src/classification/ClassificationSidebar.tsx`
+- Modify: `app/src/classification/ClassificationSidebar.test.tsx`
 - Modify: `app/src/styles/global.css`
 
 **Interfaces:**
-- Consumes: 기존 `MenuItem`, `Menu`, `Dialog` 호출부
-- Produces: 기존 호출부와 호환되는 `Menu`, `Dialog`; `Tooltip({ content, children })`
+- Consumes: 기존 `MenuItem`, `Dialog` 호출부와 분류 행의 우클릭 동작
+- Produces: 버튼 전용 `Menu`, 행을 감싸는 `ContextMenu`, 기존 호출부와 호환되는 `Dialog`, `Tooltip({ content, children })`
 
-- [ ] **Step 1: 공통 부품 RED 테스트 작성**
+- [x] **Step 1: 공통 부품 RED 테스트 작성**
 
-기존 `Menu.test.tsx`의 키보드, 바깥 클릭, 우클릭, 포커스 복귀 검증을 유지한다. `Dialog.test.tsx`와 `Tooltip.test.tsx`를 추가한다.
+기존 `Menu.test.tsx`의 버튼 열기, 키보드, 바깥 클릭, 포커스 복귀 검증을 유지한다. 외부 ref 좌표를 직접 계산하던 우클릭 테스트는 `ContextMenu.test.tsx`의 실제 trigger composition 테스트로 교체한다. `Dialog.test.tsx`와 `Tooltip.test.tsx`를 추가한다.
 
 ```tsx
 it("returns focus to the opener after closing", async () => {
@@ -168,21 +172,21 @@ it("names an icon button without adding a permanent label", async () => {
 });
 ```
 
-- [ ] **Step 2: RED 확인**
+- [x] **Step 2: RED 확인**
 
-Run: `cd app && npm.cmd test -- src/shared/ui/Menu.test.tsx src/shared/ui/Dialog.test.tsx src/shared/ui/Tooltip.test.tsx`
+Run: `cd app && npm.cmd test -- src/shared/ui/Menu.test.tsx src/shared/ui/ContextMenu.test.tsx src/shared/ui/Dialog.test.tsx src/shared/ui/Tooltip.test.tsx`
 
 Expected: `Tooltip` 모듈이 없고 새 Dialog 포커스 테스트가 아직 충족되지 않아 FAIL
 
-- [ ] **Step 3: 필요한 Radix 패키지만 설치**
+- [x] **Step 3: 필요한 Radix 패키지만 설치**
 
 Run: `cd app && npm.cmd install @radix-ui/react-context-menu @radix-ui/react-dialog @radix-ui/react-dropdown-menu @radix-ui/react-tooltip`
 
 전체 shadcn CLI 초기화, Tailwind, class utility 의존성은 추가하지 않는다.
 
-- [ ] **Step 4: 기존 Interface를 보존한 wrapper 구현**
+- [x] **Step 4: 기존 Interface를 보존한 wrapper 구현**
 
-`Menu`의 공개 타입은 그대로 유지한다.
+`MenuItem`은 `Menu`와 `ContextMenu`가 공유한다. `Menu`에서 `contextTarget`을 제거하고 버튼 trigger만 맡긴다.
 
 ```ts
 export type MenuItem = {
@@ -197,9 +201,14 @@ type MenuProps = {
   label: string;
   items: MenuItem[];
   trigger: ReactNode;
-  contextTarget?: RefObject<HTMLElement | null>;
 };
+
+type ContextMenuProps = PropsWithChildren<{
+  items: MenuItem[];
+}>;
 ```
+
+`ClassificationSidebar`의 tree row는 `<ContextMenu items={actions}>...</ContextMenu>`로 감싸고 내부의 `⋯` 버튼은 기존 `<Menu>`를 사용한다. 우클릭 좌표 계산, viewport clamp, document pointer listener는 모두 삭제한다.
 
 `Dialog`도 `open`, `title`, `closeDisabled`, `variant`, `onKeyDown`, `onClose`를 유지한다. Radix Portal/Overlay/Content를 사용하고 닫힌 뒤 opener 포커스가 복귀하도록 한다.
 
@@ -214,22 +223,24 @@ type TooltipProps = PropsWithChildren<{
 
 Radix의 구조 class는 `ui-menu`, `ui-dialog`, `ui-tooltip`로 한정하고 색상과 간격은 전역 토큰을 사용한다.
 
-- [ ] **Step 5: GREEN 확인**
+- [x] **Step 5: GREEN 확인**
 
-Run: `cd app && npm.cmd test -- src/shared/ui/Menu.test.tsx src/shared/ui/Dialog.test.tsx src/shared/ui/Tooltip.test.tsx src/classification/ClassificationSidebar.test.tsx src/safety/SafetyDialog.test.tsx`
+Run: `cd app && npm.cmd test -- src/shared/ui/Menu.test.tsx src/shared/ui/ContextMenu.test.tsx src/shared/ui/Dialog.test.tsx src/shared/ui/Tooltip.test.tsx src/classification/ClassificationSidebar.test.tsx src/safety/SafetyDialog.test.tsx`
 
 Expected: PASS
 
-- [ ] **Step 6: 빌드와 커밋**
+- [x] **Step 6: 빌드와 커밋**
 
 Run: `cd app && npm.cmd run build`
 
 Expected: exit 0
 
 ```powershell
-git add app/package.json app/package-lock.json app/src/shared/ui/Menu.tsx app/src/shared/ui/Menu.test.tsx app/src/shared/ui/Dialog.tsx app/src/shared/ui/Dialog.test.tsx app/src/shared/ui/Tooltip.tsx app/src/shared/ui/Tooltip.test.tsx app/src/styles/global.css
+git add app/package.json app/package-lock.json app/src/shared/ui/Menu.tsx app/src/shared/ui/Menu.test.tsx app/src/shared/ui/ContextMenu.tsx app/src/shared/ui/ContextMenu.test.tsx app/src/shared/ui/Dialog.tsx app/src/shared/ui/Dialog.test.tsx app/src/shared/ui/Tooltip.tsx app/src/shared/ui/Tooltip.test.tsx app/src/classification/ClassificationSidebar.tsx app/src/classification/ClassificationSidebar.test.tsx app/src/styles/global.css
 git commit -m "refactor: adopt compact Radix overlay primitives"
 ```
+
+검증 기록 (2026-08-09): RED는 `ContextMenu`와 `Tooltip` 부재, 기존 dialog Escape 상태 동기화로 실패했다. Radix의 modal 기본값과 jsdom focus 차이를 실제 패키지 소스와 분리해 수정한 뒤 관련 6개 파일의 27개 테스트가 통과했고 `npm.cmd run build`가 exit 0이었다.
 
 ### Task 3: 공통 컨트롤과 상단 도구 모음 정돈
 

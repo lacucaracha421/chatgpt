@@ -1,56 +1,44 @@
-import { useEffect, useId, useRef, type KeyboardEventHandler, type PropsWithChildren } from "react";
+import * as RadixDialog from "@radix-ui/react-dialog";
+import { useEffect, useRef, type KeyboardEventHandler, type PropsWithChildren } from "react";
 
 type DialogProps = PropsWithChildren<{
   open: boolean;
   title: string;
   closeDisabled?: boolean;
   variant?: "default" | "fullscreen";
-  onKeyDown?: KeyboardEventHandler<HTMLDialogElement>;
+  onKeyDown?: KeyboardEventHandler<HTMLDivElement>;
   onClose: () => void;
 }>;
 
 export function Dialog({ children, closeDisabled = false, open, title, variant = "default", onKeyDown, onClose }: DialogProps) {
-  const dialogRef = useRef<HTMLDialogElement>(null);
   const openerRef = useRef<HTMLElement | null>(null);
-  const titleId = useId();
+  const wasOpenRef = useRef(false);
 
   useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    if (open && !dialog.open) {
+    if (open && !wasOpenRef.current) {
       openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      dialog.showModal();
     }
-    if (!open && dialog.open) {
-      dialog.close();
-      openerRef.current?.focus();
-    }
-    return () => {
-      if (dialog.open) dialog.close();
-      openerRef.current?.focus();
-    };
+    wasOpenRef.current = open;
   }, [open]);
 
-  function closeAndRestoreFocus() {
-    dialogRef.current?.close();
-    openerRef.current?.focus();
-    onClose();
-  }
-
   return (
-    <dialog
-      ref={dialogRef}
-      className={`ui-dialog${variant === "fullscreen" ? " ui-dialog--fullscreen" : ""}`}
-      aria-labelledby={titleId}
-      onKeyDown={onKeyDown}
-      onCancel={(event) => {
-        event.preventDefault();
-        if (closeDisabled) return;
-        closeAndRestoreFocus();
-      }}
-    >
-      <h2 className="ui-dialog__title" id={titleId}>{title}</h2>
-      {children}
-    </dialog>
+    <RadixDialog.Root open={open} onOpenChange={(nextOpen) => { if (!nextOpen && !closeDisabled) onClose(); }}>
+      <RadixDialog.Portal>
+        <RadixDialog.Overlay className="ui-dialog__overlay" />
+        <RadixDialog.Content
+          className={`ui-dialog${variant === "fullscreen" ? " ui-dialog--fullscreen" : ""}`}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            openerRef.current?.focus();
+          }}
+          onEscapeKeyDown={(event) => { if (closeDisabled) event.preventDefault(); }}
+          onPointerDownOutside={(event) => { if (closeDisabled) event.preventDefault(); }}
+          onKeyDown={onKeyDown}
+        >
+          <RadixDialog.Title className="ui-dialog__title">{title}</RadixDialog.Title>
+          {children}
+        </RadixDialog.Content>
+      </RadixDialog.Portal>
+    </RadixDialog.Root>
   );
 }

@@ -4,6 +4,7 @@ import { commandErrorMessage } from "../library/errorMessage";
 import { useLibrary } from "../library/LibraryContext";
 import type { AssetView, ClassificationEntry, ClassificationKind } from "../library/types";
 import { Button } from "../shared/ui/Button";
+import { ContextMenu } from "../shared/ui/ContextMenu";
 import { Dialog } from "../shared/ui/Dialog";
 import { Menu, type MenuItem } from "../shared/ui/Menu";
 import { Select } from "../shared/ui/Select";
@@ -361,38 +362,40 @@ function TreeItem({ activeRowId, expandedIds, node, onDelete, onMove, onRename, 
 
   return (
     <li className="classification-sidebar__tree-item">
-      <div
-        ref={(element) => {
-          rowRef.current = element;
-          registerTreeRow(node.entry.id, element);
-        }}
-        className="classification-sidebar__tree-row"
-        data-classification-id={node.entry.id}
-        data-drop-state={dragTarget?.entryId === node.entry.id ? (dragTarget.valid ? "valid" : "invalid") : undefined}
-        data-drop-position={dragTarget?.entryId === node.entry.id ? dragTarget.position : undefined}
-        role="treeitem"
-        aria-label={node.entry.name}
-        aria-selected={selected}
-        aria-expanded={hasChildren ? expanded : undefined}
-        tabIndex={node.entry.id === activeRowId ? 0 : -1}
-        onClick={() => onViewChange({ kind: "classification", classificationId: node.entry.id })}
-        onFocus={() => onRowFocus(node.entry.id)}
-        onKeyDown={(event) => onRowKeyDown(event, node)}
-        onPointerDown={(event) => { if (event.button === 0 && !(event.target as HTMLElement).closest("button")) onPointerDragStart?.({ kind: "classification", entryId: node.entry.id }, event); }}
-        onPointerMove={onPointerDragMove}
-        onPointerUp={onPointerDragEnd}
-        onPointerCancel={onPointerDragCancel}
-      >
-        {hasChildren ? (
-          <Button type="button" size="icon" variant="ghost" aria-label={`${node.entry.name} ${expanded ? "접기" : "펼치기"}`} onClick={(event) => { event.stopPropagation(); onToggleExpanded(node.entry.id); }} onKeyDown={(event) => event.stopPropagation()}>
-            {expanded ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
-          </Button>
-        ) : <span className="classification-sidebar__tree-spacer" aria-hidden="true" />}
-        <span className="classification-sidebar__tree-label">{node.entry.name}</span>
-        <span onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-          <Menu label={`${node.entry.name} 추가 작업`} items={actions} trigger={<Ellipsis aria-hidden="true" />} contextTarget={rowRef} />
-        </span>
-      </div>
+      <ContextMenu items={actions}>
+        <div
+          ref={(element) => {
+            rowRef.current = element;
+            registerTreeRow(node.entry.id, element);
+          }}
+          className="classification-sidebar__tree-row"
+          data-classification-id={node.entry.id}
+          data-drop-state={dragTarget?.entryId === node.entry.id ? (dragTarget.valid ? "valid" : "invalid") : undefined}
+          data-drop-position={dragTarget?.entryId === node.entry.id ? dragTarget.position : undefined}
+          role="treeitem"
+          aria-label={node.entry.name}
+          aria-selected={selected}
+          aria-expanded={hasChildren ? expanded : undefined}
+          tabIndex={node.entry.id === activeRowId ? 0 : -1}
+          onClick={() => onViewChange({ kind: "classification", classificationId: node.entry.id })}
+          onFocus={() => onRowFocus(node.entry.id)}
+          onKeyDown={(event) => onRowKeyDown(event, node)}
+          onPointerDown={(event) => { if (event.button === 0 && !(event.target as HTMLElement).closest("button")) onPointerDragStart?.({ kind: "classification", entryId: node.entry.id }, event); }}
+          onPointerMove={onPointerDragMove}
+          onPointerUp={onPointerDragEnd}
+          onPointerCancel={onPointerDragCancel}
+        >
+          {hasChildren ? (
+            <Button type="button" size="icon" variant="ghost" aria-label={`${node.entry.name} ${expanded ? "접기" : "펼치기"}`} onClick={(event) => { event.stopPropagation(); onToggleExpanded(node.entry.id); }} onKeyDown={(event) => event.stopPropagation()}>
+              {expanded ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
+            </Button>
+          ) : <span className="classification-sidebar__tree-spacer" aria-hidden="true" />}
+          <span className="classification-sidebar__tree-label">{node.entry.name}</span>
+          <span onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+            <Menu label={`${node.entry.name} 추가 작업`} items={actions} trigger={<Ellipsis aria-hidden="true" />} />
+          </span>
+        </div>
+      </ContextMenu>
       {hasChildren && expanded && <ul role="group">{node.children.map((child) => <TreeItem key={child.entry.id} node={child} view={view} expandedIds={expandedIds} activeRowId={activeRowId} onViewChange={onViewChange} onToggleExpanded={onToggleExpanded} onRowFocus={onRowFocus} onRowKeyDown={onRowKeyDown} registerTreeRow={registerTreeRow} onRename={onRename} onMove={onMove} onDelete={onDelete} dragTarget={dragTarget} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />)}</ul>}
     </li>
   );

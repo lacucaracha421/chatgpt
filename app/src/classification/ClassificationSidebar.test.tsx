@@ -316,13 +316,12 @@ describe("ClassificationSidebar", () => {
 
     trigger.focus();
     fireEvent.keyDown(trigger, { key: "ArrowDown" });
-    expect(trigger).toHaveFocus();
+    expect(screen.getByRole("menu")).toBeInTheDocument();
     expect(onViewChange).not.toHaveBeenCalled();
     expect(onExpandedIdsChange).not.toHaveBeenCalled();
 
-    await user.keyboard("{Enter}");
-    expect(screen.getByRole("menu")).toBeInTheDocument();
     await user.keyboard("{Escape}");
+    expect(trigger).toHaveFocus();
     await user.keyboard(" ");
     expect(screen.getByRole("menu")).toBeInTheDocument();
     expect(onViewChange).not.toHaveBeenCalled();
