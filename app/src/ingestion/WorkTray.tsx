@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Button } from "../shared/ui/Button";
 import type { IngestionWork } from "./useFileDrop";
 
 export function WorkTray({ works, retryFailed }: { works: IngestionWork[]; retryFailed: (workId: string) => void }) {
@@ -9,10 +10,10 @@ export function WorkTray({ works, retryFailed }: { works: IngestionWork[]; retry
     {visible.map((work) => <div className="work-tray__row" key={work.id}>
       {work.status === "running" ? <span aria-live="polite">가져오는 중 {work.completed} / {work.total}</span> : (
         <>
-          <button type="button" onClick={() => setExpandedId((current) => current === work.id ? null : work.id)}>실패 {work.failures.length}개</button>
+          <Button variant="ghost" aria-expanded={expandedId === work.id} onClick={() => setExpandedId((current) => current === work.id ? null : work.id)}>실패 {work.failures.length}개</Button>
           {expandedId === work.id && <div className="work-tray__failures">
             <ul>{work.failures.map((failure) => <li key={failure.sourcePath}><strong>{fileName(failure.sourcePath)}</strong><span>{failure.message}</span></li>)}</ul>
-            <button type="button" onClick={() => retryFailed(work.id)}>실패 파일 다시 시도</button>
+            <Button size="sm" onClick={() => retryFailed(work.id)}>실패 파일 다시 시도</Button>
           </div>}
         </>
       )}

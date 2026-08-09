@@ -532,7 +532,7 @@ git commit -m "style: make the asset gallery content-first"
 - Consumes: `FileDropState`, `IngestionWork`, 기존 `dropEnabled`
 - Produces: 드롭 진입 테두리, `여기에 놓아 추가` 안내, 정확한 중복/실패/재시도 상태
 
-- [ ] **Step 1: 드롭 상태 RED 테스트 작성**
+- [x] **Step 1: 드롭 상태 RED 테스트 작성**
 
 ```tsx
 it("uses a quiet edge highlight and generic drop instruction", () => {
@@ -551,13 +551,13 @@ it("keeps failed names private and retries only the failed batch", async () => {
 
 `useFileDrop.test.ts`에는 정확한 중복 결과가 새 자산 refresh를 요구하지 않고 `exact_duplicate` 메시지를 한 번만 보내는 기존 계약을 명시한다. `App.test.tsx`에는 trash/safety/maintenance에서 드롭이 비활성화되는 검증을 유지한다.
 
-- [ ] **Step 2: RED 확인**
+- [x] **Step 2: RED 확인**
 
 Run: `cd app && npm.cmd test -- src/ingestion/DropOverlay.test.tsx src/ingestion/WorkTray.test.tsx src/ingestion/useFileDrop.test.ts src/app/App.test.tsx`
 
 Expected: DropOverlay 문구와 새 상태 class가 없어 FAIL
 
-- [ ] **Step 3: 오버레이와 작업창 구현**
+- [x] **Step 3: 오버레이와 작업창 구현**
 
 `DropOverlay`는 현재 destination과 지원 형식을 표시하되 전체 화면을 불투명하게 가리지 않는다.
 
@@ -574,13 +574,13 @@ return <div className="drop-overlay" role="status" aria-live="polite">
 
 CSS는 `inset: var(--space-compact)`, 2px accent outline, 투명한 내부 배경을 사용한다. 중앙 메시지에만 작은 떠 있는 표면을 사용한다.
 
-- [ ] **Step 4: GREEN 확인**
+- [x] **Step 4: GREEN 확인**
 
 Run: `cd app && npm.cmd test -- src/ingestion/DropOverlay.test.tsx src/ingestion/WorkTray.test.tsx src/ingestion/useFileDrop.test.ts src/app/App.test.tsx`
 
 Expected: PASS
 
-- [ ] **Step 5: 빌드와 커밋**
+- [x] **Step 5: 빌드와 커밋**
 
 Run: `cd app && npm.cmd run build`
 
@@ -590,6 +590,8 @@ Expected: exit 0
 git add app/src/ingestion/DropOverlay.tsx app/src/ingestion/DropOverlay.test.tsx app/src/ingestion/WorkTray.tsx app/src/ingestion/WorkTray.test.tsx app/src/ingestion/useFileDrop.ts app/src/ingestion/useFileDrop.test.ts app/src/app/App.test.tsx app/src/styles/global.css
 git commit -m "style: clarify external file drop feedback"
 ```
+
+검증 기록 (2026-08-09): RED는 기존 `게임에 저장` 문구와 화면 전체 차폐 표현 때문에 실패했다. 얇은 가장자리 강조와 작은 중앙 메시지로 교체하고 작업창 버튼을 공통 UI로 통일했으며, 반복되는 떠 있는 표면 그림자를 토큰으로 올렸다. 정확한 중복 무갱신, 드롭 비활성화, 실패 경로 비공개와 실패 항목 재시도를 포함한 관련 4개 파일의 40개 테스트가 통과했고 `npm.cmd run build`가 exit 0이었다.
 
 ### Task 8: 전체 회귀 검증과 실제 화면 승인
 

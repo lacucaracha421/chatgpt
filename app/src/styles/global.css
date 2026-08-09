@@ -270,7 +270,7 @@ input:disabled {
   background: var(--color-surface);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-sm);
-  box-shadow: 0 8px 24px var(--color-overlay);
+  box-shadow: var(--shadow-floating);
   outline: none;
 }
 
@@ -486,26 +486,34 @@ input:disabled {
   background: var(--color-surface-elevated);
   border: var(--border-width) solid var(--color-accent);
   border-radius: var(--radius-sm);
-  box-shadow: 0 8px 24px var(--color-overlay);
+  box-shadow: var(--shadow-floating);
 }
 
 .drop-overlay {
   position: fixed;
   z-index: 1100;
-  inset: var(--space-3);
+  inset: var(--space-compact);
   display: grid;
   place-content: center;
-  gap: var(--space-2);
   color: var(--color-text);
   text-align: center;
   pointer-events: none;
-  background: var(--color-overlay);
-  border: var(--focus-width) dashed var(--color-accent);
-  border-radius: var(--radius-md);
+  outline: var(--focus-width) solid var(--color-accent);
+  outline-offset: calc(var(--focus-width) * -1);
 }
 
-.drop-overlay strong { font-size: 1.25rem; }
-.drop-overlay span { color: var(--color-muted); }
+.drop-overlay__message {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface-elevated);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-floating);
+}
+
+.drop-overlay strong { font-size: 0.875rem; }
+.drop-overlay span { color: var(--color-muted); font-size: 0.75rem; }
 
 .work-tray {
   position: fixed;
@@ -517,7 +525,7 @@ input:disabled {
   background: var(--color-surface-elevated);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-md);
-  box-shadow: 0 8px 24px var(--color-overlay);
+  box-shadow: var(--shadow-floating);
 }
 
 .work-tray__row,
@@ -891,7 +899,7 @@ input:disabled {
     inset: 0 0 0 auto;
     box-sizing: border-box;
     width: min(var(--inspector-width), calc(100% - var(--space-6)));
-    box-shadow: 0 8px 24px var(--color-overlay);
+    box-shadow: var(--shadow-floating);
   }
 }
 
