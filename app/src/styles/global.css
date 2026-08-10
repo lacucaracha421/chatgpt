@@ -1512,6 +1512,57 @@ input:disabled {
   min-height: 200px;
 }
 
+.manga-viewer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.manga-viewer__controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+}
+
+.manga-viewer__progress {
+  margin-right: auto;
+  color: var(--color-muted);
+  font-size: 0.75rem;
+}
+
+.manga-viewer__stage {
+  display: grid;
+  place-items: center;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.manga-viewer__page {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.manga-viewer__edges {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  pointer-events: none;
+}
+
+.manga-viewer__edge {
+  pointer-events: auto;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
 @media (max-width: 1100px) {
   .similarity-review__comparison {
     grid-template-columns: minmax(0, 1fr);
