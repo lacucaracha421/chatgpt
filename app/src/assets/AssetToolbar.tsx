@@ -7,6 +7,7 @@ import { Select } from "../shared/ui/Select";
 import { Slider } from "../shared/ui/Slider";
 import { Toggle } from "../shared/ui/Toggle";
 import { Tooltip } from "../shared/ui/Tooltip";
+import { WindowControls } from "../layout/WindowControls";
 
 type AssetToolbarProps = {
   view: AssetView;
@@ -46,7 +47,7 @@ export function AssetToolbar({
   ];
 
   return (
-    <header className="asset-toolbar" role="toolbar" aria-label="자산 도구">
+    <header className="asset-toolbar" role="toolbar" aria-label="자산 도구" data-tauri-drag-region>
       <h2>{location}</h2>
       <div className="asset-toolbar__controls">
         {selectedCount > 0 ? <>
@@ -72,6 +73,7 @@ export function AssetToolbar({
           {sort === "random" && !recent && <Tooltip content="다시 섞기"><Button size="icon" aria-label="다시 섞기" onClick={onReshuffle}><ArrowPathIcon aria-hidden="true" /></Button></Tooltip>}
         </>}
       </div>
+      <WindowControls />
     </header>
   );
 }

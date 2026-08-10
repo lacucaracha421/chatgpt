@@ -4,6 +4,10 @@ import { afterEach, expect, it, vi } from "vitest";
 import type { AssetSort, AssetView } from "../library/types";
 import { AssetToolbar } from "./AssetToolbar";
 
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => ({ minimize: vi.fn(), toggleMaximize: vi.fn(), close: vi.fn() }),
+}));
+
 const baseProps = {
   view: { kind: "classification", classificationId: null } as AssetView,
   classifications: [{ id: "game", kind: "root" as const, name: "게임", parentId: null }],
@@ -61,6 +65,14 @@ it("keeps uncommon selection actions in the overflow menu", async () => {
 
   expect(screen.getByRole("menuitem", { name: "선택한 분류 제거" })).toBeVisible();
   expect(screen.getByRole("menuitem", { name: "좋아요 끄기" })).toBeVisible();
+});
+
+it("acts as the window title bar with drag region and window controls", () => {
+  const { container } = render(<AssetToolbar {...baseProps} />);
+  const header = container.querySelector(".asset-toolbar")!;
+  expect(header).toHaveAttribute("data-tauri-drag-region");
+  expect(screen.getByRole("button", { name: "창 최소화" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "창 최대화" })).toBeInTheDocument();
 });
 
 it("toggles the inspector from the selection actions", async () => {
