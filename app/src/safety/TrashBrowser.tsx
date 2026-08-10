@@ -3,7 +3,7 @@ import { ASSET_PAGE_SIZE } from "../library/constants";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { TrashPage, TrashPolicy } from "../library/types";
-import { WindowControls } from "../layout/WindowControls";
+import { ViewToolbar } from "../layout/ViewToolbar";
 import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
 import { EmptyState } from "../shared/ui/EmptyState";
@@ -142,11 +142,11 @@ export function TrashBrowser() {
   const mutationPending = pendingMutation !== null;
 
   return <section className="trash-browser" aria-label="휴지통">
-    <header className="trash-browser__toolbar" data-tauri-drag-region>
-      <div data-tauri-drag-region><h2>휴지통</h2><p>복원할 수 있는 자산을 보관합니다.</p></div>
-      <Button variant="danger" onClick={() => setConfirmEmpty(true)} disabled={!page || page.totalCount === 0 || mutationPending}>휴지통 비우기</Button>
-      <WindowControls />
-    </header>
+    <ViewToolbar
+      title="휴지통"
+      children={<p>복원할 수 있는 자산을 보관합니다.</p>}
+      actions={<Button variant="danger" onClick={() => setConfirmEmpty(true)} disabled={!page || page.totalCount === 0 || mutationPending}>휴지통 비우기</Button>}
+    />
     <section className="trash-browser__policy" aria-label="보존 기간 설정">
       <Toggle checked={automaticDeletion} disabled={!policy || mutationPending} onChange={(event) => void setAutomaticDeletion(event.target.checked)}>자동 삭제</Toggle>
       {automaticDeletion && <div className="trash-browser__retention"><TextField label="보존 기간" type="number" min={MIN_RETENTION_DAYS} max={MAX_RETENTION_DAYS} value={retentionDays} error={retentionError} disabled={mutationPending} onChange={(event) => setRetentionDays(event.target.value)} /><Button onClick={() => void saveRetention()} disabled={Boolean(retentionError) || mutationPending}>저장</Button></div>}
