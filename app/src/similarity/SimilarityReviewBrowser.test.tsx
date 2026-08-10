@@ -66,6 +66,13 @@ it("closes with Escape without deciding and shows an empty queue", async () => {
   expect(gateway.decideSimilarityReview).not.toHaveBeenCalled();
 });
 
+it("acts as the window title bar", () => {
+  const gateway = reviewGateway();
+  const { container } = render(<SimilarityReviewBrowser gateway={gateway} onCountChange={vi.fn()} onClose={vi.fn()} />);
+  expect(container.querySelector(".similarity-review__toolbar")).toHaveAttribute("data-tauri-drag-region");
+  expect(screen.getByRole("button", { name: "창 닫기" })).toBeInTheDocument();
+});
+
 function review(id: string): SimilarityReviewSummary {
   return {
     id,

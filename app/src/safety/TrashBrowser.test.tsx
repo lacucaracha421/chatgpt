@@ -177,6 +177,13 @@ it("confirms emptying the whole trash using the server totals", async () => {
   expect(gateway.emptyTrash).toHaveBeenCalledOnce();
 });
 
+it("acts as the window title bar", () => {
+  const gateway = createGateway();
+  const { container } = render(<LibraryProvider gateway={gateway}><TrashBrowser /></LibraryProvider>);
+  expect(container.querySelector(".trash-browser__toolbar")).toHaveAttribute("data-tauri-drag-region");
+  expect(screen.getByRole("button", { name: "창 닫기" })).toBeInTheDocument();
+});
+
 function createGateway(): LibraryGateway {
   return {
     openLibrary: vi.fn(), currentLibrary: vi.fn(), listClassifications: vi.fn(),

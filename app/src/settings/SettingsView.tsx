@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { MetadataBackup } from "../library/types";
+import { WindowControls } from "../layout/WindowControls";
 import { Button } from "../shared/ui/Button";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { Toast } from "../shared/ui/Toast";
@@ -61,8 +62,9 @@ export function SettingsView({ restoring, onRestore, onExit }: SettingsViewProps
   }
 
   return <section className="settings-view" aria-label="설정" onKeyDown={(event) => { if (event.key === "Escape" && !pending) onExit(); }}>
-    <header className="settings-view__toolbar">
+    <header className="settings-view__toolbar" data-tauri-drag-region>
       <div><h2>설정</h2><p>라이브러리 폴더, 안전 설정과 단축키를 확인합니다.</p></div>
+      <WindowControls />
     </header>
     <nav className="settings-view__sections" aria-label="설정 구역">
       <Button variant={section === "general" ? "primary" : "ghost"} onClick={() => setSection("general")}>일반 설정</Button>
