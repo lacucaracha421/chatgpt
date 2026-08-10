@@ -6,6 +6,7 @@ import { Button } from "../shared/ui/Button";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { Toast } from "../shared/ui/Toast";
+import { ViewToolbar } from "../layout/ViewToolbar";
 
 type MangaBrowserProps = {
   onOpenSeries?: (series: MangaSeries) => void;
@@ -61,10 +62,7 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
 
   return <section className="manga-browser" aria-label="망가">
     {message && <Toast>{message}</Toast>}
-    <div className="manga-browser__toolbar">
-      <h2>망가</h2>
-      <Button size="sm" onClick={() => void scan()}>새로고침</Button>
-    </div>
+    <ViewToolbar title="망가" actions={<Button size="sm" onClick={() => void scan()}>새로고침</Button>} />
     {!series ? <Skeleton className="manga-browser__skeleton" label="망가를 불러오는 중" /> : series.length === 0 ? (
       <EmptyState title="망가가 없습니다">망가 폴더에 시리즈 폴더를 추가하세요.</EmptyState>
     ) : <MangaCoverGrid series={series} onOpenSeries={onOpenSeries} />}

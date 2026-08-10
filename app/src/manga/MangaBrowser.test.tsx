@@ -28,6 +28,14 @@ describe("MangaBrowser", () => {
     expect(await screen.findByText("망가 폴더가 설정되지 않았습니다")).toBeVisible();
   });
 
+  it("uses the shared view toolbar with window controls", async () => {
+    const gateway = createGateway({ root: "C:\\manga", series });
+    const { container } = render(<LibraryProvider gateway={gateway}><MangaBrowser /></LibraryProvider>);
+    expect(await screen.findByRole("toolbar")).toBeInTheDocument();
+    expect(container.querySelector(".view-toolbar")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "창 닫기" })).toBeInTheDocument();
+  });
+
   it("opens the viewer when a cover is clicked", async () => {
     const gateway = createGateway({ root: "C:\\manga", series });
     const onOpenSeries = vi.fn();
