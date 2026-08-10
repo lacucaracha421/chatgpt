@@ -684,6 +684,7 @@ describe("App", () => {
       pageCount: 12,
       thumbnailRelativePath: "cover.jpg",
       scannedAt: "2026-08-01T00:00:00Z",
+      modifiedAt: "2026-08-01T00:00:00Z",
     }]);
     const user = userEvent.setup();
 

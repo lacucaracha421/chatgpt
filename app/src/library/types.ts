@@ -143,6 +143,7 @@ export type MangaSeries = {
   pageCount: number;
   thumbnailRelativePath: string;
   scannedAt: string;
+  modifiedAt: string;
 };
 
 export type MetadataBackup = {

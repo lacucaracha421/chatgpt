@@ -267,6 +267,7 @@ pub struct MangaSeries {
     pub page_count: u64,
     pub thumbnail_relative_path: String,
     pub scanned_at: String,
+    pub modified_at: String,
 }
 
 #[cfg(test)]

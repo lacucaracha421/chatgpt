@@ -8,8 +8,8 @@ import { MangaBrowser } from "./MangaBrowser";
 afterEach(cleanup);
 
 const series: MangaSeries[] = [
-  { id: "s1", relativePath: "[a] T1 (1)", title: "T1", author: "a", galleryId: "1", pageCount: 60, thumbnailRelativePath: "s1.webp", scannedAt: "2026-08-01T00:00:00Z" },
-  { id: "s2", relativePath: "[b] T2 (2)", title: "T2", author: "b", galleryId: "2", pageCount: 40, thumbnailRelativePath: "s2.webp", scannedAt: "2026-08-02T00:00:00Z" },
+  { id: "s1", relativePath: "[a] T1 (1)", title: "T1", author: "a", galleryId: "1", pageCount: 60, thumbnailRelativePath: "s1.webp", scannedAt: "2026-08-01T00:00:00Z", modifiedAt: "2026-07-31T00:00:00Z" },
+  { id: "s2", relativePath: "[b] T2 (2)", title: "T2", author: "b", galleryId: "2", pageCount: 40, thumbnailRelativePath: "s2.webp", scannedAt: "2026-08-02T00:00:00Z", modifiedAt: "2026-08-02T00:00:00Z" },
 ];
 
 describe("MangaBrowser", () => {

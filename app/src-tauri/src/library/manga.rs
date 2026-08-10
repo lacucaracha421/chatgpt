@@ -106,16 +106,31 @@ fn scan_series_folder(
         return Ok(false); // 빈 폴더는 스킵
     }
     let first_page = &page_files[0];
+    let modified_at = fs::metadata(&folder)
+        .and_then(|metadata| metadata.modified())
+        .map_err(|source| LibraryError::ReadMedia {
+            path: folder.clone(),
+            source,
+        })?
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| {
+            chrono::DateTime::from_timestamp(duration.as_secs() as i64, duration.subsec_nanos())
+                .expect("folder mtime is representable as RFC3339")
+                .to_rfc3339()
+        })
+        .unwrap_or_else(|_| chrono::Utc::now().to_rfc3339());
 
-    let existing: Option<(i64, String)> = connection
+    let existing: Option<(i64, String, String)> = connection
         .query_row(
-            "SELECT page_count, thumbnail_relative_path FROM manga_series WHERE relative_path = ?1",
+            "SELECT page_count, thumbnail_relative_path, modified_at FROM manga_series WHERE relative_path = ?1",
             [relative_path],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .optional()?;
-    let unchanged = existing.as_ref().is_some_and(|(count, thumb)| {
-        *count as usize == page_count && fs::exists(thumb_dir.join(thumb)).unwrap_or(false)
+    let unchanged = existing.as_ref().is_some_and(|(count, thumb, stored)| {
+        *count as usize == page_count
+            && fs::exists(thumb_dir.join(thumb)).unwrap_or(false)
+            && *stored == modified_at
     });
     if unchanged {
         return Ok(false);
@@ -139,15 +154,16 @@ fn scan_series_folder(
     }
 
     connection.execute(
-        "INSERT INTO manga_series (id, relative_path, title, author, gallery_id, page_count, thumbnail_relative_path, scanned_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        "INSERT INTO manga_series (id, relative_path, title, author, gallery_id, page_count, thumbnail_relative_path, scanned_at, modified_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
          ON CONFLICT(relative_path) DO UPDATE SET
            title = excluded.title,
            author = excluded.author,
            gallery_id = excluded.gallery_id,
            page_count = excluded.page_count,
            thumbnail_relative_path = excluded.thumbnail_relative_path,
-           scanned_at = excluded.scanned_at",
+           scanned_at = excluded.scanned_at,
+           modified_at = excluded.modified_at",
         rusqlite::params![
             series_id,
             relative_path,
@@ -157,6 +173,7 @@ fn scan_series_folder(
             page_count as i64,
             thumb_name,
             chrono::Utc::now().to_rfc3339(),
+            modified_at,
         ],
     )?;
     Ok(true)
@@ -236,8 +253,8 @@ pub(crate) fn list_series(
     connection: &rusqlite::Connection,
 ) -> Result<Vec<MangaSeries>, LibraryError> {
     let mut statement = connection.prepare(
-        "SELECT id, relative_path, title, author, gallery_id, page_count, thumbnail_relative_path, scanned_at
-         FROM manga_series ORDER BY scanned_at DESC",
+        "SELECT id, relative_path, title, author, gallery_id, page_count, thumbnail_relative_path, scanned_at, modified_at
+         FROM manga_series ORDER BY modified_at DESC",
     )?;
     let rows = statement.query_map([], |row| {
         Ok(MangaSeries {
@@ -249,6 +266,7 @@ pub(crate) fn list_series(
             page_count: row.get::<_, i64>(5)? as u64,
             thumbnail_relative_path: row.get(6)?,
             scanned_at: row.get(7)?,
+            modified_at: row.get(8)?,
         })
     })?;
     let mut series = Vec::new();
