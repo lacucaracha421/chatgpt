@@ -4,7 +4,7 @@ import { formatBytes, localDate, sourceLabel } from "../assets/assetMetadata";
 import { assetUrl } from "../assets/mediaUrl";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { LibraryGateway, SimilarityDecision, SimilarityReviewAsset, SimilarityReviewSummary } from "../library/types";
-import { WindowControls } from "../layout/WindowControls";
+import { ViewToolbar } from "../layout/ViewToolbar";
 import { Button } from "../shared/ui/Button";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { Skeleton } from "../shared/ui/Skeleton";
@@ -74,11 +74,11 @@ export function SimilarityReviewBrowser({ gateway, onCountChange, onClose }: Pro
 
   const current = initialTotal > 0 ? initialTotal - totalCount + 1 : 0;
   return <section className="similarity-review" aria-label="유사 검토" onKeyDown={(event) => event.stopPropagation()}>
-    <header className="similarity-review__toolbar" data-tauri-drag-region>
-      <div data-tauri-drag-region><h2>유사 검토</h2>{review && initialTotal > 0 && <span>{current} / {initialTotal}</span>}</div>
-      <Button size="icon" variant="ghost" aria-label="유사 검토 닫기" onClick={onClose}><XMarkIcon aria-hidden="true" /></Button>
-      <WindowControls />
-    </header>
+    <ViewToolbar
+      title="유사 검토"
+      children={review && initialTotal > 0 ? <span>{current} / {initialTotal}</span> : undefined}
+      actions={<Button size="icon" variant="ghost" aria-label="유사 검토 닫기" onClick={onClose}><XMarkIcon aria-hidden="true" /></Button>}
+    />
     {message && <Toast>{message}</Toast>}
     {loading ? <Skeleton className="similarity-review__skeleton" label="유사 이미지를 불러오는 중" /> : !review ? (
       <EmptyState title="검토할 유사 이미지가 없습니다">새 이미지가 들어오면 여기에 표시됩니다.</EmptyState>

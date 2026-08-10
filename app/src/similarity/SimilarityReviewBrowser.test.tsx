@@ -66,11 +66,11 @@ it("closes with Escape without deciding and shows an empty queue", async () => {
   expect(gateway.decideSimilarityReview).not.toHaveBeenCalled();
 });
 
-it("acts as the window title bar", () => {
+it("uses the shared view toolbar with window controls", async () => {
   const gateway = reviewGateway();
   const { container } = render(<SimilarityReviewBrowser gateway={gateway} onCountChange={vi.fn()} onClose={vi.fn()} />);
-  expect(container.querySelector(".similarity-review__toolbar")).toHaveAttribute("data-tauri-drag-region");
-  expect(container.querySelector(".similarity-review__toolbar > div")).toHaveAttribute("data-tauri-drag-region");
+  expect(await screen.findByRole("toolbar")).toBeInTheDocument();
+  expect(container.querySelector(".view-toolbar")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "창 닫기" })).toBeInTheDocument();
 });
 
