@@ -49,9 +49,15 @@ it("styles the window controls as native title bar buttons", () => {
 });
 
 it("applies retro bevels to toolbars and buttons", () => {
-  expect(declarations(".asset-toolbar")).toContain("border-top: var(--border-width) solid var(--bevel-light);");
-  expect(declarations(".asset-toolbar h2")).toContain("font-family: var(--toolbar-title-font);");
+  expect(declarations(".view-toolbar")).toContain("border-top: var(--border-width) solid var(--bevel-light);");
+  expect(declarations(".view-toolbar h2")).toContain("font-family: var(--toolbar-title-font);");
   expect(declarations(".ui-button,\n.ui-menu__trigger")).toContain("box-shadow: inset 0 1px 0 var(--bevel-light), inset 0 -1px 0 var(--bevel-dark);");
+});
+
+it("styles the shared view toolbar", () => {
+  expect(declarations(".view-toolbar")).toContain("min-height: var(--toolbar-height);");
+  expect(declarations(".view-toolbar h2")).toContain("font-family: var(--toolbar-title-font);");
+  expect(declarations(".view-toolbar__content")).toContain("flex: 1;");
 });
 
 it("defines retro toolbar tokens", () => {

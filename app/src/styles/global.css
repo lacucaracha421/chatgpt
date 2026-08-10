@@ -606,7 +606,7 @@ input:disabled {
   cursor: col-resize;
 }
 
-.asset-toolbar {
+.view-toolbar {
   box-sizing: border-box;
   display: flex;
   align-items: center;
@@ -619,7 +619,7 @@ input:disabled {
   border-bottom: var(--border-width) solid var(--bevel-dark);
 }
 
-.asset-toolbar h2 {
+.view-toolbar h2 {
   margin: 0;
   font-family: var(--toolbar-title-font);
   font-size: 0.8125rem;
@@ -629,7 +629,27 @@ input:disabled {
   white-space: nowrap;
 }
 
-.asset-toolbar__controls,
+.view-toolbar__content {
+  display: flex;
+  align-items: center;
+  gap: var(--space-compact);
+  flex: 1;
+  justify-content: flex-start;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.view-toolbar__content > * {
+  flex-shrink: 0;
+}
+
+.view-toolbar__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-compact);
+  flex-shrink: 0;
+}
+
 .asset-browser__next-error {
   display: flex;
   align-items: center;
@@ -637,24 +657,8 @@ input:disabled {
   min-width: 0;
 }
 
-.asset-toolbar__controls {
-  flex: 1;
-  justify-content: flex-start;
-  white-space: nowrap;
-}
-
-.asset-toolbar__controls > strong {
-  color: var(--color-muted);
-  font-size: 0.75rem;
-  font-weight: 600;
-}
-
-.asset-toolbar__controls > * {
-  flex-shrink: 0;
-}
-
-.asset-toolbar .ui-select > span,
-.asset-toolbar .ui-slider > span {
+.view-toolbar .ui-select > span,
+.view-toolbar .ui-slider > span {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -663,7 +667,7 @@ input:disabled {
   white-space: nowrap;
 }
 
-.asset-toolbar .ui-select select {
+.view-toolbar .ui-select select {
   min-height: var(--control-height-md);
   padding: 0 var(--space-4) 0 var(--space-2);
   color: var(--color-text);
@@ -680,11 +684,11 @@ input:disabled {
   background-repeat: no-repeat;
 }
 
-.asset-toolbar .ui-select select:hover {
+.view-toolbar .ui-select select:hover {
   background-color: var(--color-surface);
 }
 
-.asset-toolbar .ui-toggle {
+.view-toolbar .ui-toggle {
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -699,13 +703,13 @@ input:disabled {
   font-size: 0.75rem;
 }
 
-.asset-toolbar .ui-toggle:has(input:checked) {
+.view-toolbar .ui-toggle:has(input:checked) {
   color: var(--color-text);
   background: var(--color-surface);
   box-shadow: inset 0 1px 0 var(--bevel-dark), inset 0 -1px 0 var(--bevel-light);
 }
 
-.asset-toolbar .ui-toggle input {
+.view-toolbar .ui-toggle input {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -714,12 +718,12 @@ input:disabled {
   white-space: nowrap;
 }
 
-.asset-toolbar .ui-toggle svg {
+.view-toolbar .ui-toggle svg {
   width: 16px;
   height: 16px;
 }
 
-.asset-toolbar .ui-slider {
+.view-toolbar .ui-slider {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
@@ -727,7 +731,7 @@ input:disabled {
   font-size: 0.75rem;
 }
 
-.asset-toolbar .ui-slider input {
+.view-toolbar .ui-slider input {
   width: 112px;
   height: var(--control-height-md);
   margin: 0;
@@ -735,7 +739,7 @@ input:disabled {
   background: transparent;
 }
 
-.asset-toolbar .ui-slider input::-webkit-slider-runnable-track {
+.view-toolbar .ui-slider input::-webkit-slider-runnable-track {
   height: 6px;
   background: var(--color-bg);
   border: var(--border-width) solid var(--color-border);
@@ -743,7 +747,7 @@ input:disabled {
   box-shadow: inset 0 1px 0 var(--bevel-dark), inset 0 -1px 0 var(--bevel-light);
 }
 
-.asset-toolbar .ui-slider input::-webkit-slider-thumb {
+.view-toolbar .ui-slider input::-webkit-slider-thumb {
   width: 12px;
   height: 16px;
   margin-top: -6px;
@@ -754,7 +758,7 @@ input:disabled {
   box-shadow: inset 0 1px 0 var(--bevel-light), inset 0 -1px 0 var(--bevel-dark);
 }
 
-.asset-toolbar .ui-slider input::-moz-range-track {
+.view-toolbar .ui-slider input::-moz-range-track {
   height: 6px;
   background: var(--color-bg);
   border: var(--border-width) solid var(--color-border);
@@ -762,7 +766,7 @@ input:disabled {
   box-shadow: inset 0 1px 0 var(--bevel-dark), inset 0 -1px 0 var(--bevel-light);
 }
 
-.asset-toolbar .ui-slider input::-moz-range-thumb {
+.view-toolbar .ui-slider input::-moz-range-thumb {
   width: 12px;
   height: 16px;
   appearance: none;
@@ -772,7 +776,7 @@ input:disabled {
   box-shadow: inset 0 1px 0 var(--bevel-light), inset 0 -1px 0 var(--bevel-dark);
 }
 
-.asset-toolbar .ui-menu__trigger {
+.view-toolbar .ui-menu__trigger {
   width: var(--control-height-icon);
   padding: 0;
 }
@@ -889,23 +893,6 @@ input:disabled {
   gap: var(--space-4);
   padding: var(--space-4);
   min-height: 100%;
-}
-
-.settings-view__toolbar {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-4);
-}
-
-.settings-view__toolbar h2 {
-  margin: 0;
-  font-size: var(--text-lg);
-}
-
-.settings-view__toolbar p {
-  margin: var(--space-1) 0 0;
-  color: var(--color-text-muted);
 }
 
 .settings-view__sections {
@@ -1319,7 +1306,6 @@ input:disabled {
   padding: var(--space-3);
 }
 
-.trash-browser__toolbar,
 .trash-browser__item,
 .trash-browser__retention {
   display: flex;
@@ -1328,12 +1314,6 @@ input:disabled {
   gap: var(--space-2);
 }
 
-.trash-browser__toolbar h2,
-.trash-browser__toolbar p {
-  margin: 0;
-}
-
-.trash-browser__toolbar p,
 .trash-browser__item span {
   color: var(--color-muted);
   font-size: 0.875rem;
@@ -1375,26 +1355,8 @@ input:disabled {
   background: var(--color-bg);
 }
 
-.similarity-review__toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: var(--toolbar-height);
-  padding: 0 var(--space-3);
-  background: var(--color-toolbar);
-  border-top: var(--border-width) solid var(--bevel-light);
-  border-bottom: var(--border-width) solid var(--bevel-dark);
-}
-
-.similarity-review__toolbar > div {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
-}
-
-.similarity-review__toolbar h2,
 .similarity-review__asset h3 { margin: 0; font-size: 0.875rem; }
-.similarity-review__toolbar span { color: var(--color-muted); font-size: 0.75rem; }
+.view-toolbar__content > span { color: var(--color-muted); font-size: 0.75rem; }
 
 .similarity-review__comparison {
   display: grid;
@@ -1456,18 +1418,6 @@ input:disabled {
   min-height: 0;
   padding: var(--space-3);
   overflow: auto;
-}
-
-.manga-browser__toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-}
-
-.manga-browser__toolbar h2 {
-  margin: 0;
-  font-size: 0.875rem;
 }
 
 .manga-browser__grid {
@@ -1606,12 +1556,12 @@ input:disabled {
     white-space: nowrap;
   }
 
-  .asset-toolbar .ui-slider {
+  .view-toolbar .ui-slider {
     flex: 0 1 72px;
     min-width: 48px;
   }
 
-  .asset-toolbar .ui-slider input {
+  .view-toolbar .ui-slider input {
     width: 100%;
     min-width: 48px;
   }
