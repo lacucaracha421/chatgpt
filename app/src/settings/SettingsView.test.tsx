@@ -10,15 +10,28 @@ import { open } from "@tauri-apps/plugin-dialog";
 
 afterEach(cleanup);
 
-it("acts as the window title bar", () => {
+it("acts as the window title bar", async () => {
   const gateway = createGateway();
   const { container } = render(
     <LibraryProvider gateway={gateway}>
       <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
     </LibraryProvider>,
   );
-  expect(container.querySelector(".settings-view__toolbar")).toHaveAttribute("data-tauri-drag-region");
-  expect(container.querySelector(".settings-view__toolbar > div")).toHaveAttribute("data-tauri-drag-region");
+  await screen.findByRole("toolbar");
+  expect(container.querySelector(".view-toolbar")).toHaveAttribute("data-tauri-drag-region");
+  expect(container.querySelector(".view-toolbar h2")).toHaveAttribute("data-tauri-drag-region");
+  expect(screen.getByRole("button", { name: "창 닫기" })).toBeInTheDocument();
+});
+
+it("uses the shared view toolbar with window controls", async () => {
+  const gateway = createGateway();
+  const { container } = render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+  expect(await screen.findByRole("toolbar")).toBeInTheDocument();
+  expect(container.querySelector(".view-toolbar")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "창 닫기" })).toBeInTheDocument();
 });
 
