@@ -73,6 +73,10 @@ impl From<LibraryError> for CommandError {
             LibraryError::VideoPreparationFailed => "video_preparation_failed",
             LibraryError::VideoToolUnavailable => "video_tool_unavailable",
             LibraryError::WriteAsset { .. } => "write_asset_failed",
+            LibraryError::MangaRootNotSet => "manga_root_not_set",
+            LibraryError::MangaSeriesNotFound => "manga_series_not_found",
+            LibraryError::InvalidMangaFolder { .. } => "invalid_manga_folder",
+            LibraryError::MangaThumbnail { .. } => "manga_thumbnail_failed",
         };
         Self { code, message }
     }

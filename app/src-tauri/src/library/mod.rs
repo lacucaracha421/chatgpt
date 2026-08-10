@@ -6,6 +6,7 @@ pub mod error;
 mod favorite;
 mod ingestion;
 mod lock;
+mod manga;
 pub mod models;
 mod query;
 mod similarity;
@@ -22,7 +23,7 @@ use std::{
 
 use error::LibraryError;
 use lock::LibraryLease;
-use models::{LibrarySummary, TrashPolicy};
+use models::{LibrarySummary, MangaSeries, TrashPolicy};
 use rusqlite::{Connection, OptionalExtension};
 
 #[derive(Debug, Clone, Copy)]
@@ -167,6 +168,106 @@ impl Library {
         Ok(())
     }
 
+    pub fn manga_root(&self) -> Result<Option<String>, LibraryError> {
+        let connection = self.connection()?;
+        manga::manga_root(&connection)
+    }
+
+    pub fn set_manga_root(&self, path: Option<&str>) -> Result<(), LibraryError> {
+        let connection = self.connection()?;
+        manga::set_manga_root(&connection, path)
+    }
+
+    pub fn scan_manga(&self) -> Result<u64, LibraryError> {
+        let connection = self.connection()?;
+        manga::scan(&connection, self)
+    }
+
+    pub fn list_manga_series(&self) -> Result<Vec<MangaSeries>, LibraryError> {
+        let connection = self.connection()?;
+        manga::list_series(&connection)
+    }
+
+    pub fn manga_cover(&self, series_id: &str) -> Result<MediaResponse, LibraryError> {
+        let connection = self.connection()?;
+        let root = manga::manga_root(&connection)?.ok_or(LibraryError::MangaRootNotSet)?;
+        let thumb_relative: Option<String> = connection
+            .query_row(
+                "SELECT thumbnail_relative_path FROM manga_series WHERE id = ?1",
+                [series_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+        let thumb_relative = thumb_relative.ok_or(LibraryError::MangaSeriesNotFound)?;
+        let manga_root = Path::new(&root);
+        self.open_manga_media(
+            manga_root,
+            manga_root.join(".lakomics-thumbs").join(thumb_relative),
+        )
+    }
+
+    pub fn manga_page(&self, series_id: &str, page_index: u32) -> Result<MediaResponse, LibraryError> {
+        let connection = self.connection()?;
+        let root = manga::manga_root(&connection)?.ok_or(LibraryError::MangaRootNotSet)?;
+        let (relative_path, page_count): (String, i64) = connection
+            .query_row(
+                "SELECT relative_path, page_count FROM manga_series WHERE id = ?1",
+                [series_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+        if page_index == 0 || page_index as i64 > page_count {
+            return Err(LibraryError::MangaSeriesNotFound);
+        }
+        let manga_root = Path::new(&root);
+        let folder = manga_root.join(relative_path);
+        let pages = manga::list_page_files(&folder)?;
+        let file_name = pages
+            .get(page_index as usize - 1)
+            .ok_or(LibraryError::MangaSeriesNotFound)?;
+        self.open_manga_media(manga_root, folder.join(file_name))
+    }
+
+    fn open_manga_media(
+        &self,
+        manga_root: &Path,
+        absolute_path: PathBuf,
+    ) -> Result<MediaResponse, LibraryError> {
+        let canonical_root = fs::canonicalize(manga_root).map_err(|source| {
+            LibraryError::ReadMedia {
+                path: manga_root.to_path_buf(),
+                source,
+            }
+        })?;
+        let requested = absolute_path;
+        let canonical = fs::canonicalize(&requested).map_err(|source| {
+            if source.kind() == std::io::ErrorKind::NotFound {
+                LibraryError::MediaNotFound
+            } else {
+                LibraryError::ReadMedia {
+                    path: requested.clone(),
+                    source,
+                }
+            }
+        })?;
+        if !canonical.starts_with(&canonical_root) {
+            return Err(LibraryError::UnsafeMediaPath);
+        }
+        let mime = mime_for_path(&canonical);
+        let file = fs::File::open(&canonical).map_err(|source| LibraryError::ReadMedia {
+            path: canonical.clone(),
+            source,
+        })?;
+        let length = file
+            .metadata()
+            .map_err(|source| LibraryError::ReadMedia {
+                path: canonical.clone(),
+                source,
+            })?
+            .len();
+        Ok(MediaResponse { file, length, mime })
+    }
+
     pub fn resolve_media(
         &self,
         asset_id: &str,
@@ -300,6 +401,7 @@ fn mime_for_path(path: &Path) -> &'static str {
         Some("png") => "image/png",
         Some("gif") => "image/gif",
         Some("webp") => "image/webp",
+        Some("avif") => "image/avif",
         Some("mp4" | "m4v") => "video/mp4",
         Some("webm") => "video/webm",
         Some("mov") => "video/quicktime",

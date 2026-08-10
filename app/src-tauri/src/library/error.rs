@@ -101,4 +101,16 @@ pub enum LibraryError {
         #[source]
         source: std::io::Error,
     },
+    #[error("망가 루트 폴더가 설정되지 않았습니다")]
+    MangaRootNotSet,
+    #[error("망가 시리즈를 찾을 수 없습니다")]
+    MangaSeriesNotFound,
+    #[error("망가 폴더 구조가 올바르지 않습니다: {path}")]
+    InvalidMangaFolder { path: PathBuf },
+    #[error("망가 표지 썸네일을 만들 수 없습니다: {path}")]
+    MangaThumbnail {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
 }

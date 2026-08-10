@@ -256,6 +256,19 @@ pub struct LibrarySummary {
     pub asset_count: u64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MangaSeries {
+    pub id: String,
+    pub relative_path: String,
+    pub title: String,
+    pub author: String,
+    pub gallery_id: Option<String>,
+    pub page_count: u64,
+    pub thumbnail_relative_path: String,
+    pub scanned_at: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
