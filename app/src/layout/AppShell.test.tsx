@@ -44,6 +44,10 @@ it("constrains the workspace row so the status bar remains in the desktop viewpo
   expect(declarations(".classification-sidebar")).toContain("overflow-y: auto;");
 });
 
+it("styles the window controls as native title bar buttons", () => {
+  expect(declarations(".window-controls__button--close:hover")).toContain("background: var(--color-danger);");
+});
+
 it("shows similarity indexing progress and failures", () => {
   const { rerender } = render(<StatusBar
     status={{ loadedCount: 3, selectedAsset: null, loading: false }}

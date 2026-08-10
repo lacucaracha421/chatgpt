@@ -668,6 +668,31 @@ input:disabled {
   height: 16px;
 }
 
+.window-controls {
+  display: flex;
+  align-items: stretch;
+  align-self: stretch;
+  margin-right: calc(var(--space-3) * -1);
+}
+
+.window-controls__button {
+  width: 40px;
+  border: none;
+  background: transparent;
+  color: var(--color-muted);
+  cursor: pointer;
+}
+
+.window-controls__button:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.window-controls__button--close:hover {
+  background: var(--color-danger);
+  color: var(--color-bg);
+}
+
 .asset-browser {
   display: flex;
   flex-direction: column;
