@@ -61,6 +61,10 @@ pub fn run() {
             commands::prepare_pending_videos,
             commands::retry_video_preparation,
             commands::start_asset_drag,
+            commands::get_manga_root,
+            commands::set_manga_root,
+            commands::scan_manga,
+            commands::list_manga_series,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

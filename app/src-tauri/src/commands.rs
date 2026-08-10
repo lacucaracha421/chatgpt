@@ -9,7 +9,7 @@ use crate::library::{
     models::{
         AssetClassificationPatch, AssetCursor, AssetPage, AssetQuery, AssetSummary,
         ClassificationEntry, CreateClassification, IngestMediaRequest, IngestOutcome,
-        LibrarySummary, MetadataBackup, PurgeSummary, SimilarityDecisionOutcome,
+        LibrarySummary, MangaSeries, MetadataBackup, PurgeSummary, SimilarityDecisionOutcome,
         SimilarityDecisionRequest, SimilarityIndexProgress, SimilarityReviewPage, TrashPage,
         TrashPolicy, VideoPreparationProgress, VideoPreparationState,
     },
@@ -474,6 +474,33 @@ pub fn start_asset_drag(
         });
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn get_manga_root(state: State<'_, AppState>) -> Result<Option<String>, CommandError> {
+    let library = current_required(state)?;
+    library.manga_root().map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn set_manga_root(path: Option<String>, state: State<'_, AppState>) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    library.set_manga_root(path.as_deref()).map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn scan_manga(state: State<'_, AppState>) -> Result<u64, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.scan_manga())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn list_manga_series(state: State<'_, AppState>) -> Result<Vec<MangaSeries>, CommandError> {
+    let library = current_required(state)?;
+    library.list_manga_series().map_err(CommandError::from)
 }
 
 fn background_task_error() -> CommandError {

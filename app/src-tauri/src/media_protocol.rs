@@ -51,7 +51,9 @@ pub(crate) fn media_response_with_range(
         Err(
             LibraryError::AssetNotFound
             | LibraryError::MediaNotFound
-            | LibraryError::UnsafeMediaPath,
+            | LibraryError::UnsafeMediaPath
+            | LibraryError::MangaRootNotSet
+            | LibraryError::MangaSeriesNotFound,
         ) => empty_response(StatusCode::NOT_FOUND),
         Err(_) => empty_response(StatusCode::INTERNAL_SERVER_ERROR),
     }
@@ -120,6 +122,14 @@ fn parse_path(path: &str) -> Option<(MediaVariant, String)> {
         "asset" if segments.next().is_none() => MediaVariant::Asset,
         "thumbnail" if segments.next().is_none() => MediaVariant::Thumbnail,
         "playback" if segments.next().is_none() => MediaVariant::Playback,
+        "manga-cover" if segments.next().is_none() => MediaVariant::MangaCover,
+        "manga-page" => {
+            let page_index = segments.next()?.parse::<u32>().ok()?;
+            if segments.next().is_some() {
+                return None;
+            }
+            MediaVariant::MangaPage(page_index)
+        }
         "scrub-frame" => {
             let frame_index = segments.next()?.parse::<u32>().ok()?;
             if segments.next().is_some() {
@@ -191,6 +201,7 @@ mod tests {
     const MISSING_ID: &str = "00000000-0000-4000-8000-000000000002";
     const REVIEW_ID: &str = "00000000-0000-4000-8000-000000000003";
     const TRASH_ID: &str = "00000000-0000-4000-8000-000000000004";
+    const SERIES_ID: &str = "00000000-0000-4000-8000-000000000005";
 
     #[test]
     fn protocol_serves_only_id_resolved_asset_and_thumbnail_bytes_with_mime() {
@@ -409,6 +420,110 @@ mod tests {
             .status(),
             StatusCode::NOT_FOUND
         );
+    }
+
+    #[test]
+    fn manga_page_route_rejects_out_of_range_page() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        let manga_root = temp.path().join("manga");
+        std::fs::create_dir_all(manga_root.join("series-a")).unwrap();
+        write_test_png(&manga_root.join("series-a/1.png"));
+        write_test_png(&manga_root.join("series-a/2.png"));
+        library
+            .set_manga_root(Some(manga_root.to_string_lossy().as_ref()))
+            .unwrap();
+        library.scan_manga().unwrap();
+        let series = library.list_manga_series().unwrap();
+        assert_eq!(series.len(), 1);
+        let series_id = &series[0].id;
+
+        let cover = media_response(
+            Some(&library),
+            &Method::GET,
+            &format!("/manga-cover/{series_id}"),
+        );
+        assert_eq!(cover.status(), StatusCode::OK);
+        assert_eq!(cover.headers()[CONTENT_TYPE], "image/webp");
+
+        for page in [1, 2] {
+            let response = media_response(
+                Some(&library),
+                &Method::GET,
+                &format!("/manga-page/{series_id}/{page}"),
+            );
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(response.headers()[CONTENT_TYPE], "image/png");
+        }
+
+        for page in [0, 3, 999] {
+            let response = media_response(
+                Some(&library),
+                &Method::GET,
+                &format!("/manga-page/{series_id}/{page}"),
+            );
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        }
+    }
+
+    #[test]
+    fn manga_routes_reject_unsafe_paths_and_malformed_requests() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        let manga_root = temp.path().join("manga");
+        std::fs::create_dir_all(manga_root.join("series-a")).unwrap();
+        write_test_png(&manga_root.join("series-a/1.png"));
+        library
+            .set_manga_root(Some(manga_root.to_string_lossy().as_ref()))
+            .unwrap();
+        library.scan_manga().unwrap();
+        let series_id = library.list_manga_series().unwrap()[0].id.clone();
+
+        let cases = [
+            (
+                format!("/manga-page/{series_id}/not-a-number"),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                format!("/manga-page/{series_id}/1/extra"),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                format!("/manga-cover/{series_id}/extra"),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                format!("/manga-cover/{MISSING_ID}"),
+                StatusCode::NOT_FOUND,
+            ),
+            (
+                format!("/manga-page/{MISSING_ID}/1"),
+                StatusCode::NOT_FOUND,
+            ),
+        ];
+        for (path, expected) in cases {
+            assert_eq!(
+                media_response(Some(&library), &Method::GET, &path).status(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn manga_routes_are_hidden_when_no_library_is_open() {
+        let response = media_response(
+            None,
+            &Method::GET,
+            &format!("/manga-cover/{SERIES_ID}"),
+        );
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    fn write_test_png(path: &std::path::Path) {
+        let image = image::RgbImage::from_pixel(8, 6, image::Rgb([10, 20, 30]));
+        image
+            .save_with_format(path, image::ImageFormat::Png)
+            .unwrap();
     }
 
     fn insert_asset(

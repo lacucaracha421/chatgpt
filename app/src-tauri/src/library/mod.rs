@@ -32,6 +32,8 @@ pub enum MediaVariant {
     Thumbnail,
     Playback,
     ScrubFrame(u32),
+    MangaCover,
+    MangaPage(u32),
 }
 
 #[derive(Debug)]
@@ -215,7 +217,9 @@ impl Library {
                 "SELECT relative_path, page_count FROM manga_series WHERE id = ?1",
                 [series_id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
-            )?;
+            )
+            .optional()?
+            .ok_or(LibraryError::MangaSeriesNotFound)?;
         if page_index == 0 || page_index as i64 > page_count {
             return Err(LibraryError::MangaSeriesNotFound);
         }
@@ -273,6 +277,11 @@ impl Library {
         asset_id: &str,
         variant: MediaVariant,
     ) -> Result<MediaResponse, LibraryError> {
+        match variant {
+            MediaVariant::MangaCover => return self.manga_cover(asset_id),
+            MediaVariant::MangaPage(page_index) => return self.manga_page(asset_id, page_index),
+            _ => {}
+        }
         let relative_path = match variant {
             MediaVariant::Asset => self
                 .connection()?
@@ -328,6 +337,7 @@ impl Library {
                         .then(|| directory.map(|path| format!("{path}/{frame_index:03}.webp")))
                         .flatten()
                 }),
+            MediaVariant::MangaCover | MediaVariant::MangaPage(_) => unreachable!(),
         };
         let relative_path = relative_path.ok_or(LibraryError::AssetNotFound)?;
         let canonical_root =
