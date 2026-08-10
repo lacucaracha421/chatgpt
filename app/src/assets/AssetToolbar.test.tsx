@@ -31,7 +31,7 @@ afterEach(cleanup);
 it("shows everyday browsing controls when nothing is selected", () => {
   render(<AssetToolbar {...baseProps} />);
 
-  expect(screen.getByRole("heading", { name: "전체 자산" })).toBeVisible();
+  expect(screen.getByRole("heading", { name: "저장소" })).toBeVisible();
   expect(screen.getByLabelText("정렬")).toBeVisible();
   expect(screen.getByLabelText("미리보기 크기")).toBeVisible();
   expect(screen.getByLabelText("정보 표시")).toBeVisible();

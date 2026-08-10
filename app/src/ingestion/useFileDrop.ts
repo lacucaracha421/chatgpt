@@ -206,5 +206,5 @@ function fileName(path: string) {
 function legacyResult(result: IngestOutcome): FileDropResult {
   if (result.status === "added") return { ...result, message: "저장했습니다" };
   if (result.status === "exact_duplicate") return { ...result, message: "이미 보관된 파일입니다" };
-  return { ...result, message: "유사 이미지 검토 대기" };
+  return { ...result, message: "유사 검토 대기" };
 }

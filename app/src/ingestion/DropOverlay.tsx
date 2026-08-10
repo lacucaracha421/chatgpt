@@ -3,7 +3,7 @@ export function DropOverlay({ over, destinationName }: { over: { x: number; y: n
   return <div className="drop-overlay" role="status" aria-live="polite">
     <div className="drop-overlay__message">
       <strong>여기에 놓아 추가</strong>
-      <span>{destinationName} · JPEG · PNG · GIF · WebP</span>
+      <span>{destinationName} · 이미지와 영상 파일</span>
     </div>
   </div>;
 }

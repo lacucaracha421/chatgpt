@@ -19,7 +19,7 @@ it("uses Korean workspace and status labels", () => {
 
   expect(screen.getByRole("main", { name: "라이브러리 작업 공간" })).toBeInTheDocument();
   expect(screen.getByRole("contentinfo", { name: "라이브러리 상태" })).toHaveTextContent("자산을 불러오는 중입니다.");
-  expect(screen.getByRole("contentinfo")).toHaveTextContent("이미지 파일을 창으로 끌어놓으세요.");
+  expect(screen.getByRole("contentinfo")).toHaveTextContent("이미지와 영상 파일을 창으로 끌어놓으세요.");
 });
 
 it("uses the Lakomics product identity", () => {

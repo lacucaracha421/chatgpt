@@ -37,7 +37,7 @@ export function SimilarityReviewBrowser({ gateway, onCountChange, onClose }: Pro
       onCountChange(page.totalCount);
     } catch (error) {
       if (generation === generationRef.current) {
-        setMessage(commandErrorMessage(error, "유사 이미지 검토 목록을 불러오지 못했습니다."));
+        setMessage(commandErrorMessage(error, "유사 검토 목록을 불러오지 못했습니다."));
       }
     } finally {
       if (generation === generationRef.current) setLoading(false);
@@ -72,10 +72,10 @@ export function SimilarityReviewBrowser({ gateway, onCountChange, onClose }: Pro
   }
 
   const current = initialTotal > 0 ? initialTotal - totalCount + 1 : 0;
-  return <section className="similarity-review" aria-label="유사 이미지 검토" onKeyDown={(event) => event.stopPropagation()}>
+  return <section className="similarity-review" aria-label="유사 검토" onKeyDown={(event) => event.stopPropagation()}>
     <header className="similarity-review__toolbar">
-      <div><h2>유사 이미지 검토</h2>{review && initialTotal > 0 && <span>{current} / {initialTotal}</span>}</div>
-      <Button size="icon" variant="ghost" aria-label="유사 이미지 검토 닫기" onClick={onClose}><XMarkIcon aria-hidden="true" /></Button>
+      <div><h2>유사 검토</h2>{review && initialTotal > 0 && <span>{current} / {initialTotal}</span>}</div>
+      <Button size="icon" variant="ghost" aria-label="유사 검토 닫기" onClick={onClose}><XMarkIcon aria-hidden="true" /></Button>
     </header>
     {message && <Toast>{message}</Toast>}
     {loading ? <Skeleton className="similarity-review__skeleton" label="유사 이미지를 불러오는 중" /> : !review ? (

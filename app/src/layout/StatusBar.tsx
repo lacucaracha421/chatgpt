@@ -13,7 +13,7 @@ export function StatusBar({ status, progress, dropEnabled, similarityIndex }: St
   const progressText = progress
     ? `${progress.total}개 중 ${progress.current}번째 파일을 처리하고 있습니다.`
     : dropEnabled
-      ? "이미지 파일을 창으로 끌어놓으세요."
+      ? "이미지와 영상 파일을 창으로 끌어놓으세요."
       : "현재 화면에서는 파일을 가져올 수 없습니다.";
 
   return <footer className="status-bar" aria-label="라이브러리 상태">

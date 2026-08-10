@@ -36,7 +36,7 @@ export function WorkTray({ works, retryFailed, dismissWork, openReview, openExis
           <p>추가 {work.added} · 중복 {work.exactDuplicates.length} · 검토 대기 {work.reviewPending.length} · 실패 {work.failures.length}</p>
           {work.exactDuplicates.map((item) => (
             <Button key={`${item.fileName}-${item.existingAssetId}`} variant="ghost" size="sm" onClick={() => openExisting(item.existingAssetId)}>
-              {item.fileName} 기존 이미지 열기
+              {item.fileName} 기존 자산 열기
             </Button>
           ))}
           {work.reviewPending.length > 0 && <Button variant="ghost" size="sm" onClick={openReview}>

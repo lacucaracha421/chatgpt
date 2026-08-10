@@ -84,7 +84,6 @@ function renderSidebar(
             onSidebarWidthChange(width);
           }}
           onChanged={onChanged}
-          onOpenSafety={props.onOpenSafety}
         />
       </LibraryProvider>
     );
@@ -126,17 +125,17 @@ describe("ClassificationSidebar", () => {
 
     const quickViews = screen.getByRole("navigation", { name: "빠른 보기" });
     expect(within(quickViews).getAllByRole("button").map((button) => button.textContent)).toEqual([
-      "전체 자산",
-      "미분류함",
+      "저장소",
+      "미분류",
       "최근",
       "즐겨찾기",
-      "유사 이미지 검토0",
+      "유사 검토0",
     ]);
 
-    await user.click(screen.getByRole("button", { name: "미분류함" }));
+    await user.click(screen.getByRole("button", { name: "미분류" }));
     await user.click(screen.getByRole("button", { name: "즐겨찾기" }));
     await user.click(screen.getByRole("button", { name: "최근" }));
-    await user.click(screen.getByRole("button", { name: "전체 자산" }));
+    await user.click(screen.getByRole("button", { name: "저장소" }));
 
     expect(onViewChange).toHaveBeenNthCalledWith(1, { kind: "unsorted" });
     expect(onViewChange).toHaveBeenNthCalledWith(2, { kind: "favorites" });
@@ -145,12 +144,37 @@ describe("ClassificationSidebar", () => {
   });
 
   it("keeps trash and settings in the sidebar footer", () => {
-    renderSidebar(gateway(), { onOpenSafety: vi.fn() });
+    renderSidebar(gateway());
 
     const trash = screen.getByRole("button", { name: "휴지통" });
-    const settings = screen.getByRole("button", { name: "라이브러리 안전 설정" });
+    const settings = screen.getByRole("button", { name: "설정" });
     expect(trash.closest(".classification-sidebar__footer")).not.toBeNull();
     expect(settings.closest(".classification-sidebar__footer")).not.toBeNull();
+  });
+
+  it("opens settings from the sidebar footer", async () => {
+    const user = userEvent.setup();
+    const { onViewChange } = renderSidebar();
+
+    await user.click(screen.getByRole("button", { name: "설정" }));
+
+    expect(onViewChange).toHaveBeenCalledWith({ kind: "settings" });
+  });
+
+  it("opens the create dialog when the global create request increments", async () => {
+    const fixtureGateway = gateway();
+    function Fixture() {
+      const [request, setRequest] = useState(0);
+      return <>
+        <button onClick={() => setRequest((current) => current + 1)}>request</button>
+        <LibraryProvider gateway={fixtureGateway}>
+          <ClassificationSidebar entries={entries} view={{ kind: "classification", classificationId: null }} expandedIds={["root", "work"]} sidebarWidth={232} reviewCount={0} createClassificationRequest={request} onViewChange={vi.fn()} onExpandedIdsChange={vi.fn()} onSidebarWidthChange={vi.fn()} onChanged={vi.fn()} />
+        </LibraryProvider>
+      </>;
+    }
+    render(<Fixture />);
+    await userEvent.click(screen.getByRole("button", { name: "request" }));
+    expect(screen.getByRole("dialog", { name: "분류 추가" })).toBeInTheDocument();
   });
 
   it("opens trash from the shared quick-view navigation", async () => {
@@ -361,7 +385,7 @@ describe("ClassificationSidebar", () => {
     const user = userEvent.setup();
     const { onViewChange } = renderSidebar(gateway(), { reviewCount: 12 });
 
-    const button = screen.getByRole("button", { name: "유사 이미지 검토 12개" });
+    const button = screen.getByRole("button", { name: "유사 검토 12개" });
     await user.click(button);
     expect(onViewChange).toHaveBeenCalledWith({ kind: "similarity_review" });
   });

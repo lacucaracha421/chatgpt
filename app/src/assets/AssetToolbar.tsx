@@ -34,12 +34,12 @@ export function AssetToolbar({
   view: rawView, classifications, sort, directOnly, metadataVisible, thumbnailRowHeight, selectedCount, inspectorOpen, onInspectorToggle, onSortChange,
   onDirectOnlyChange, onMetadataVisibleChange, onThumbnailRowHeightChange, onFavorite, onClassification, onTrash, onClearSelection, batchPending, onReshuffle,
 }: AssetToolbarProps) {
-  const view = rawView.kind === "similarity_review"
+  const view = rawView.kind === "similarity_review" || rawView.kind === "settings"
     ? ({ kind: "classification", classificationId: null } as const)
     : rawView;
   const [batchClassificationId, setBatchClassificationId] = useState("");
   const recent = view.kind === "recent";
-  const location = view.kind === "favorites" ? "즐겨찾기" : view.kind === "unsorted" ? "미분류함" : recent ? "최근" : view.kind === "trash" ? "휴지통" : classifications.find((entry) => entry.id === view.classificationId)?.name ?? "전체 자산";
+  const location = view.kind === "favorites" ? "즐겨찾기" : view.kind === "unsorted" ? "미분류" : recent ? "최근" : view.kind === "trash" ? "휴지통" : classifications.find((entry) => entry.id === view.classificationId)?.name ?? "저장소";
   const overflowItems: MenuItem[] = [
     { id: "remove-classification", label: "선택한 분류 제거", disabled: batchPending || !batchClassificationId, onSelect: () => onClassification(batchClassificationId, "remove") },
     { id: "favorite-off", label: "좋아요 끄기", disabled: batchPending, onSelect: () => onFavorite(false) },
