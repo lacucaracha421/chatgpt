@@ -121,6 +121,34 @@ describe("AssetGallery", () => {
     expect(image).toHaveProperty("draggable", false);
   });
 
+  it("shows a filled star only on favorited tiles and does not make it interactive", async () => {
+    render(<AssetGallery
+      items={[{ ...asset(0), favorite: true }, asset(1)]}
+      targetRowHeight={180}
+      onSelectionGesture={vi.fn()}
+      onPointerDragStart={vi.fn()}
+    />);
+    const favorited = await screen.findByRole("option", { name: "asset-0.png" });
+    const plain = screen.getByRole("option", { name: "asset-1.png" });
+    expect(favorited.querySelector(".asset-gallery__favorite")).not.toBeNull();
+    expect(plain.querySelector(".asset-gallery__favorite")).toBeNull();
+    expect(favorited.querySelector(".asset-gallery__favorite")).toHaveClass("asset-gallery__favorite");
+  });
+
+  it("moves focus by rows, preserving the column with the nearest tile as fallback", async () => {
+    const onMoveFocus = vi.fn();
+    render(<AssetGallery
+      items={[asset(0), asset(1), asset(2), asset(3), asset(4), asset(5), asset(6), asset(7)]}
+      focusAssetId="asset-1"
+      targetRowHeight={180}
+      onMoveFocus={onMoveFocus}
+    />);
+    const tile = await screen.findByRole("option", { name: "asset-1.png" });
+    tile.focus();
+    fireEvent.keyDown(tile, { key: "ArrowDown" });
+    expect(onMoveFocus).toHaveBeenLastCalledWith(5, false);
+  });
+
   it("keeps only one video hover preview active", async () => {
     vi.useFakeTimers();
     vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
@@ -136,6 +164,76 @@ describe("AssetGallery", () => {
     act(() => vi.advanceTimersByTime(200));
     expect(screen.queryByLabelText("video-0.webm 미리보기")).not.toBeInTheDocument();
     expect(screen.getByLabelText("video-1.webm 미리보기")).toBeInTheDocument();
+  });
+
+  it("renders one scrollbar line per collected date and drags to scroll", async () => {
+    const getComputedStyle = vi.spyOn(window, "getComputedStyle").mockReturnValue({
+      getPropertyValue: (name: string) => name === "--gallery-gap" ? "6px" : "",
+      paddingLeft: "6px",
+      paddingRight: "6px",
+    } as CSSStyleDeclaration);
+    const { container } = render(<AssetGallery items={[
+      { ...asset(0), collectedAt: "2026-07-30T00:00:00Z" },
+      { ...asset(1), collectedAt: "2026-07-30T00:00:00Z" },
+      { ...asset(2), collectedAt: "2026-08-01T00:00:00Z" },
+      { ...asset(3), collectedAt: "2026-08-02T00:00:00Z" },
+    ]} />);
+    await waitFor(() => expect(screen.queryAllByRole("option").length).toBe(4));
+    getComputedStyle.mockRestore();
+
+    const scrollbar = container.querySelector(".asset-gallery__scrollbar")!;
+    expect(scrollbar.querySelectorAll(".asset-gallery__scrollbar-line")).toHaveLength(3);
+    expect(scrollbar).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("spreads a few dates evenly within the middle of the scrollbar track", async () => {
+    vi.spyOn(window, "getComputedStyle").mockReturnValue({
+      getPropertyValue: (name: string) => name === "--gallery-gap" ? "6px" : "",
+      paddingLeft: "6px",
+      paddingRight: "6px",
+    } as CSSStyleDeclaration);
+    const { container } = render(<AssetGallery items={[
+      { ...asset(0), collectedAt: "2026-07-30T00:00:00Z" },
+      { ...asset(1), collectedAt: "2026-08-01T00:00:00Z" },
+      { ...asset(2), collectedAt: "2026-08-02T00:00:00Z" },
+    ]} />);
+    await waitFor(() => expect(screen.queryAllByRole("option").length).toBe(3));
+
+    const lines = [...container.querySelectorAll(".asset-gallery__scrollbar-line")];
+    expect(lines).toHaveLength(3);
+    const tops = lines.map((line) => Number.parseFloat((line as HTMLElement).style.top));
+    const heights = lines.map((line) => Number.parseFloat((line as HTMLElement).style.height));
+    expect(heights).toEqual([2, 2, 2]);
+    expect(tops[0]).toBeGreaterThan(100);
+    expect(tops[2]).toBeLessThan(500);
+    expect(tops[1] - tops[0]).toBeCloseTo(tops[2] - tops[1]);
+  });
+
+  it("highlights the scrollbar line whose date is within the visible scroll range", async () => {
+    vi.spyOn(window, "getComputedStyle").mockReturnValue({
+      getPropertyValue: (name: string) => name === "--gallery-gap" ? "6px" : "",
+      paddingLeft: "6px",
+      paddingRight: "6px",
+    } as CSSStyleDeclaration);
+    const tallAsset = (index: number) => ({ ...asset(index), width: 200, height: 600 });
+    const items = [
+      ...Array.from({ length: 30 }, (_, index) => ({ ...tallAsset(index), collectedAt: "2026-07-30T00:00:00Z" })),
+      ...Array.from({ length: 30 }, (_, index) => ({ ...tallAsset(30 + index), collectedAt: "2026-08-01T00:00:00Z" })),
+    ];
+    const { container } = render(<AssetGallery items={items} />);
+    await waitFor(() => expect(screen.queryAllByRole("option").length).toBe(60));
+
+    const scroll = container.querySelector(".asset-gallery__scroll") as HTMLElement;
+    const lines = [...container.querySelectorAll(".asset-gallery__scrollbar-line")];
+    expect(lines).toHaveLength(2);
+    const isActive = (index: number) => lines[index].classList.contains("asset-gallery__scrollbar-line--active");
+    expect(isActive(0)).toBe(true);
+    expect(isActive(1)).toBe(false);
+
+    Object.defineProperty(scroll, "scrollTop", { configurable: true, get: () => 300, set: () => {} });
+    fireEvent.scroll(scroll);
+    expect(isActive(0)).toBe(false);
+    expect(isActive(1)).toBe(true);
   });
 });
 
