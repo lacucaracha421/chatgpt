@@ -43,4 +43,7 @@
   --video-overlay-bg: rgba(7, 10, 15, 0.72);
   --shadow-floating: 0 8px 24px var(--color-overlay);
   --font-ui: "Segoe UI", sans-serif;
+  --bevel-light: #2b2f35;
+  --bevel-dark: #0c0e11;
+  --toolbar-title-font: "Cascadia Mono", "Consolas", monospace;
 }

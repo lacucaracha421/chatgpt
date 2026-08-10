@@ -48,6 +48,13 @@ it("styles the window controls as native title bar buttons", () => {
   expect(declarations(".window-controls__button--close:hover")).toContain("background: var(--color-danger);");
 });
 
+it("defines retro toolbar tokens", () => {
+  const tokens = readFileSync(`${appRoot}/src/styles/tokens.css`, "utf8");
+  expect(tokens).toContain("--bevel-light:");
+  expect(tokens).toContain("--bevel-dark:");
+  expect(tokens).toContain("--toolbar-title-font:");
+});
+
 it("shows similarity indexing progress and failures", () => {
   const { rerender } = render(<StatusBar
     status={{ loadedCount: 3, selectedAsset: null, loading: false }}
