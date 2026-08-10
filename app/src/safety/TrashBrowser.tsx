@@ -143,7 +143,7 @@ export function TrashBrowser() {
 
   return <section className="trash-browser" aria-label="휴지통">
     <header className="trash-browser__toolbar" data-tauri-drag-region>
-      <div><h2>휴지통</h2><p>복원할 수 있는 자산을 보관합니다.</p></div>
+      <div data-tauri-drag-region><h2>휴지통</h2><p>복원할 수 있는 자산을 보관합니다.</p></div>
       <Button variant="danger" onClick={() => setConfirmEmpty(true)} disabled={!page || page.totalCount === 0 || mutationPending}>휴지통 비우기</Button>
       <WindowControls />
     </header>

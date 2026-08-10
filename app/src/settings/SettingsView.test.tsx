@@ -14,6 +14,7 @@ it("acts as the window title bar", () => {
     </LibraryProvider>,
   );
   expect(container.querySelector(".settings-view__toolbar")).toHaveAttribute("data-tauri-drag-region");
+  expect(container.querySelector(".settings-view__toolbar > div")).toHaveAttribute("data-tauri-drag-region");
   expect(screen.getByRole("button", { name: "창 닫기" })).toBeInTheDocument();
 });
 

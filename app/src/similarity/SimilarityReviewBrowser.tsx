@@ -75,7 +75,7 @@ export function SimilarityReviewBrowser({ gateway, onCountChange, onClose }: Pro
   const current = initialTotal > 0 ? initialTotal - totalCount + 1 : 0;
   return <section className="similarity-review" aria-label="유사 검토" onKeyDown={(event) => event.stopPropagation()}>
     <header className="similarity-review__toolbar" data-tauri-drag-region>
-      <div><h2>유사 검토</h2>{review && initialTotal > 0 && <span>{current} / {initialTotal}</span>}</div>
+      <div data-tauri-drag-region><h2>유사 검토</h2>{review && initialTotal > 0 && <span>{current} / {initialTotal}</span>}</div>
       <Button size="icon" variant="ghost" aria-label="유사 검토 닫기" onClick={onClose}><XMarkIcon aria-hidden="true" /></Button>
       <WindowControls />
     </header>

@@ -48,8 +48,8 @@ export function AssetToolbar({
 
   return (
     <header className="asset-toolbar" role="toolbar" aria-label="자산 도구" data-tauri-drag-region>
-      <h2>{location}</h2>
-      <div className="asset-toolbar__controls">
+      <h2 data-tauri-drag-region>{location}</h2>
+      <div className="asset-toolbar__controls" data-tauri-drag-region>
         {selectedCount > 0 ? <>
           <strong>{selectedCount}개 선택</strong>
           <Select label="일괄 분류" value={batchClassificationId} disabled={batchPending} onChange={(event) => setBatchClassificationId(event.target.value)}>
