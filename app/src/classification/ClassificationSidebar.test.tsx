@@ -381,6 +381,12 @@ describe("ClassificationSidebar", () => {
     expect(handle.releasePointerCapture).toHaveBeenCalledWith(1);
   });
 
+  it("makes the sidebar heading a window drag region", () => {
+    renderSidebar();
+
+    expect(document.querySelector(".classification-sidebar__heading")).toHaveAttribute("data-tauri-drag-region");
+  });
+
   it("opens the stable review queue entry and exposes its count", async () => {
     const user = userEvent.setup();
     const { onViewChange } = renderSidebar(gateway(), { reviewCount: 12 });

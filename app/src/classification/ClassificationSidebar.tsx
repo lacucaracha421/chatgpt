@@ -228,7 +228,7 @@ export function ClassificationSidebar({
 
   return (
     <aside className="classification-sidebar" aria-label="분류" style={{ width: sidebarWidth }}>
-      <div className="classification-sidebar__heading">
+      <div className="classification-sidebar__heading" data-tauri-drag-region>
         <h2>분류</h2>
         <Button type="button" size="icon" variant="ghost" aria-label="분류 추가" onClick={openCreate}>
           <PlusIcon aria-hidden="true" />
