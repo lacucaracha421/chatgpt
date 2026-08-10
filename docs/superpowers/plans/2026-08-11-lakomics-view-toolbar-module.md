@@ -500,6 +500,18 @@ return (
 
 > **주의:** `asset-toolbar__toggle-text` 클래스는 유지 (CSS 셀렉터가 `.view-toolbar .ui-toggle`로 이관되지만 span 클래스명은 그대로). `role="toolbar" aria-label="자산 도구"`는 ViewToolbar의 `ariaLabel` prop으로 전달 (App.test.tsx:264가 `getByRole("toolbar", { name: "자산 도구" })`를 검증).
 
+- [ ] **Step 3b: 선택 개수 라벨 스타일 복원**
+
+Task 2에서 `.asset-toolbar__controls > strong` 룰이 드롭됐으므로, `global.css`에 `.view-toolbar__content > strong` 룰을 추가해 복원:
+
+```css
+.view-toolbar__content > strong {
+  color: var(--color-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+```
+
 - [ ] **Step 4: 테스트 실행해 통과 확인**
 
 Run: `npm test -- --run src/assets/AssetToolbar.test.tsx`
