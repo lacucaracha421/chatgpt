@@ -307,7 +307,7 @@ describe("AssetBrowser", () => {
     expect(tile).toHaveFocus();
   });
 
-  it("opens the inspector on the first selection and respects a manual close until selection clears", async () => {
+  it("keeps the inspector closed on selection and opens it only from the toolbar toggle", async () => {
     const user = userEvent.setup();
     const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
     renderBrowser(gateway);
@@ -315,32 +315,39 @@ describe("AssetBrowser", () => {
     const first = await screen.findByRole("option", { name: "asset-0.png" });
     const second = screen.getByRole("option", { name: "asset-1.png" });
     await user.click(first);
+    expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "정보 열기" }));
+    expect(screen.getByRole("complementary", { name: "자산 정보" })).toBeVisible();
+
+    await user.click(second);
     expect(screen.getByRole("complementary", { name: "자산 정보" })).toBeVisible();
 
     await user.click(within(screen.getByRole("complementary", { name: "자산 정보" })).getByRole("button", { name: "정보 닫기" }));
-    await user.click(second);
     expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument();
 
-    second.focus();
-    await user.keyboard("{Escape}");
     await user.click(second);
-    expect(screen.getByRole("complementary", { name: "자산 정보" })).toBeVisible();
+    expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument();
   });
 
   it("applies inspector classification actions to the selection", async () => {
     const user = userEvent.setup();
     const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
     const tag: ClassificationEntry = { id: "tag", kind: "tag", name: "태그", parentId: null };
+    vi.mocked(gateway.getAssetClassifications).mockResolvedValueOnce([]).mockResolvedValue(["tag"]);
     render(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "classification", classificationId: null }} classifications={[tag]} sort="newest" metadataVisible={false} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
     const first = await screen.findByRole("option", { name: "asset-0.png" });
 
     expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument();
     first.focus();
     await user.keyboard("{Control>}a{/Control}");
-    expect(screen.getByText("2개 자산 선택")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "태그 추가" }));
-    await user.click(screen.getByRole("button", { name: "태그 제거" }));
+    expect(screen.getByText("2개 선택")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "정보 열기" }));
+    await user.click(await screen.findByRole("checkbox", { name: "태그 분류" }));
     expect(gateway.patchAssetClassifications).toHaveBeenNthCalledWith(1, { assetIds: ["asset-0", "asset-1"], addClassificationIds: ["tag"], removeClassificationIds: [] });
+    const checkbox = await screen.findByRole("checkbox", { name: "태그 분류" });
+    await waitFor(() => expect(checkbox).toBeChecked());
+    await user.click(checkbox);
     expect(gateway.patchAssetClassifications).toHaveBeenNthCalledWith(2, { assetIds: ["asset-0", "asset-1"], addClassificationIds: [], removeClassificationIds: ["tag"] });
   });
 

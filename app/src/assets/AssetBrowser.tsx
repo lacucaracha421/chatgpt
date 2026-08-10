@@ -37,7 +37,6 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, thu
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [batchPending, setBatchPending] = useState(false);
   const [undoAssetIds, setUndoAssetIds] = useState<string[] | null>(null);
-  const previousSelectionCountRef = useRef(0);
   const selectedViewKeyRef = useRef<string | null>(null);
   const viewerViewKeyRef = useRef<string | null>(null);
   const requestedAssetRef = useRef<AssetSummary | null>(requestedAsset);
@@ -84,10 +83,7 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, thu
     setViewerAssetId(requestedAsset.id);
   }, [requestedAsset]);
   useEffect(() => {
-    const count = selection.ids.size;
-    if (previousSelectionCountRef.current === 0 && count > 0) setInspectorOpen(true);
-    if (count === 0) setInspectorOpen(false);
-    previousSelectionCountRef.current = count;
+    if (selection.ids.size === 0) setInspectorOpen(false);
   }, [selection.ids.size]);
   const loadNextPage = useCallback((retry = false) => {
     if (!activePage || !nextCursor || nextLoadingRef.current || (currentNextError && !retry)) return;
@@ -139,6 +135,14 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, thu
     () => gateway.setAssetsFavorite(selectedIds, favorite),
     "즐겨찾기를 변경하지 못했습니다.",
   );
+  const toggleFavorite = (asset: AssetSummary) => void (async () => {
+    try {
+      await gateway.setAssetFavorite(asset.id, !asset.favorite);
+      refresh();
+    } catch (error) {
+      setMessage(commandErrorMessage(error, "즐겨찾기를 변경하지 못했습니다."));
+    }
+  })();
   const patchBatchClassification = (classificationId: string, operation: "add" | "remove") => void runBatch(
     () => gateway.patchAssetClassifications({
       assetIds: selectedIds,
@@ -170,18 +174,31 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, thu
       setBatchPending(false);
     }
   })();
-  return <section className="asset-browser" aria-label="전체 자산">
+  const trashViewerAsset = (asset: AssetSummary) => void (async () => {
+    const index = items.findIndex((item) => item.id === asset.id);
+    const next = items[index + 1] ?? items[index - 1];
+    try {
+      await gateway.trashAssets([asset.id]);
+      setUndoAssetIds([asset.id]);
+      setMessage("휴지통으로 이동했습니다.");
+      setViewerAssetId(next?.id ?? null);
+      refresh();
+    } catch (error) {
+      setMessage(commandErrorMessage(error, "자산을 휴지통으로 이동하지 못했습니다."));
+    }
+  })();
+  return <section className="asset-browser" aria-label="저장소">
     <AssetToolbar view={view} classifications={classifications} sort={sort} directOnly={directOnly} metadataVisible={metadataVisible} thumbnailRowHeight={thumbnailRowHeight} selectedCount={selectedIds.length} inspectorOpen={inspectorOpen} onInspectorToggle={() => setInspectorOpen((open) => !open)} onSortChange={onSortChange} onDirectOnlyChange={setDirectOnly} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onFavorite={setBatchFavorite} onClassification={patchBatchClassification} onTrash={trashSelection} onClearSelection={clearSelection} batchPending={batchPending} onReshuffle={reshuffle} />
     {message && <Toast actionLabel={undoAssetIds ? "실행 취소" : undefined} onAction={undoAssetIds ? undoTrash : undefined} actionDisabled={batchPending}>{message}</Toast>}
     {currentFirstError && <Toast>{currentFirstError}</Toast>}
     <div className={`asset-browser__workspace${inspectorOpen ? " asset-browser__workspace--inspector" : ""}`}>
       <div className="asset-browser__gallery">
-        {firstLoading || !activePage && !currentFirstError ? <Skeleton className="asset-browser__skeleton" label="자산을 불러오는 중" /> : currentFirstError && items.length === 0 ? <EmptyState title="자산을 불러오지 못했습니다"><Button onClick={refresh}>다시 시도</Button></EmptyState> : items.length === 0 ? <EmptyState title="자산이 없습니다">여기에 이미지를 놓아 추가하세요.</EmptyState> : <AssetGallery items={items} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} targetRowHeight={thumbnailRowHeight} metadataVisible={metadataVisible} hasNextPage={nextCursor !== null} onLoadNextPage={loadNextPage} onSelectionGesture={selectWithGesture} onSelectAll={selectAll} onDeleteSelection={trashSelection} onClearSelection={clearSelection} onMoveFocus={moveFocus} onOpen={(asset) => { viewerViewKeyRef.current = viewKey; setViewerAssetId(asset.id); }} onRetryVideo={(asset) => void gateway.retryVideoPreparation(asset.id).then(() => gateway.preparePendingVideos(1)).then(refresh).catch((error) => setMessage(commandErrorMessage(error, "미리보기 준비를 다시 시작하지 못했습니다.")))} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />}
+        {firstLoading || !activePage && !currentFirstError ? <Skeleton className="asset-browser__skeleton" label="자산을 불러오는 중" /> : currentFirstError && items.length === 0 ? <EmptyState title="자산을 불러오지 못했습니다"><Button onClick={refresh}>다시 시도</Button></EmptyState> : items.length === 0 ? <EmptyState title="자산이 없습니다">여기에 이미지와 영상 파일을 놓아 추가하세요.</EmptyState> : <AssetGallery items={items} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} targetRowHeight={thumbnailRowHeight} metadataVisible={metadataVisible} hasNextPage={nextCursor !== null} onLoadNextPage={loadNextPage} onSelectionGesture={selectWithGesture} onSelectAll={selectAll} onDeleteSelection={trashSelection} onClearSelection={clearSelection} onMoveFocus={moveFocus} onOpen={(asset) => { viewerViewKeyRef.current = viewKey; setViewerAssetId(asset.id); }} onRetryVideo={(asset) => void gateway.retryVideoPreparation(asset.id).then(() => gateway.preparePendingVideos(1)).then(refresh).catch((error) => setMessage(commandErrorMessage(error, "미리보기 준비를 다시 시작하지 못했습니다.")))} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />}
         {nextLoading && <Skeleton label="자산을 더 불러오는 중" />}{currentNextError && <div className="asset-browser__next-error"><Toast>{currentNextError}</Toast><Button onClick={() => loadNextPage(true)}>다시 시도</Button></div>}
       </div>
       <AssetInspector assets={selectedAssets} classifications={classifications} open={inspectorOpen} onOpenChange={setInspectorOpen} onPatchClassifications={patchBatchClassification} />
     </div>
-    <AssetViewer items={requestedAsset && !items.some((item) => item.id === requestedAsset.id) ? [requestedAsset] : items} activeId={viewerAssetId} onActiveIdChange={setViewerAssetId} onClose={() => { setViewerAssetId(null); onRequestedAssetHandled(); }} />
+    <AssetViewer items={requestedAsset && !items.some((item) => item.id === requestedAsset.id) ? [requestedAsset] : items} activeId={viewerAssetId} onActiveIdChange={setViewerAssetId} onClose={() => { setViewerAssetId(null); onRequestedAssetHandled(); }} onToggleFavorite={toggleFavorite} onTrash={trashViewerAsset} />
   </section>;
 }
 

@@ -41,6 +41,22 @@ it("supports buttons and Escape without wrapping at the final asset", async () =
   expect(onClose).toHaveBeenCalledOnce();
 });
 
+it("toggles favorite and moves to trash from the keyboard and buttons", () => {
+  const onToggleFavorite = vi.fn();
+  const onTrash = vi.fn();
+  render(<AssetViewer items={[asset("a", "a.gif")]} activeId="a" onActiveIdChange={vi.fn()} onClose={vi.fn()} onToggleFavorite={onToggleFavorite} onTrash={onTrash} />);
+  const dialog = screen.getByRole("dialog", { name: "a.gif" });
+
+  fireEvent.keyDown(dialog, { key: "f" });
+  expect(onToggleFavorite).toHaveBeenCalledWith(expect.objectContaining({ id: "a" }));
+  fireEvent.keyDown(dialog, { key: "Delete" });
+  expect(onTrash).toHaveBeenCalledWith(expect.objectContaining({ id: "a" }));
+  fireEvent.click(screen.getByRole("button", { name: "즐겨찾기 켜기" }));
+  expect(onToggleFavorite).toHaveBeenCalledTimes(2);
+  fireEvent.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
+  expect(onTrash).toHaveBeenCalledTimes(2);
+});
+
 it("renders a video player and cleans up its source when navigating", () => {
   vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
   const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);

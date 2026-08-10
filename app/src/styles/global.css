@@ -957,6 +957,23 @@ input:disabled {
   font-size: 0.75rem;
 }
 
+.asset-gallery__favorite {
+  position: absolute;
+  z-index: 1;
+  top: var(--space-1);
+  right: var(--space-1);
+  display: grid;
+  place-items: center;
+  color: var(--color-heart);
+  pointer-events: none;
+}
+
+.asset-gallery__favorite svg {
+  width: 18px;
+  height: 18px;
+  fill: var(--color-heart);
+}
+
 .asset-viewer {
   position: relative;
   display: grid;
