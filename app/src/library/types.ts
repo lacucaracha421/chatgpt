@@ -13,7 +13,8 @@ export type AssetView =
   | { kind: "favorites" }
   | { kind: "recent" }
   | { kind: "similarity_review" }
-  | { kind: "trash" };
+  | { kind: "trash" }
+  | { kind: "settings" };
 
 export type ClassificationEntry = {
   id: string;

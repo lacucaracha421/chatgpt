@@ -214,14 +214,16 @@ describe("App", () => {
     const classificationCalls = vi.mocked(libraryGateway.listClassifications).mock.calls.length;
     const assetCalls = vi.mocked(libraryGateway.listAssets).mock.calls.length;
 
-    await user.click(screen.getByRole("button", { name: "라이브러리 안전 설정" }));
+    await user.click(screen.getByRole("button", { name: "설정" }));
+    await user.click(await screen.findByRole("button", { name: "안전" }));
     await user.click(await screen.findByRole("button", { name: "이 시점으로 복구" }));
     await user.click(screen.getByRole("button", { name: "복구 시작" }));
 
     await waitFor(() => expect(libraryGateway.restoreMetadataBackup).toHaveBeenCalledWith("backup-1"));
+    expect(await screen.findByText("복구가 완료되었습니다.")).toBeVisible();
+    await user.keyboard("{Escape}");
     await waitFor(() => expect(libraryGateway.listClassifications).toHaveBeenCalledTimes(classificationCalls + 1));
     await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenCalledTimes(assetCalls + 1));
-    expect(await screen.findByText("복구가 완료되었습니다. 다음 단계에서 파일 검사를 실행할 수 있습니다.")).toBeVisible();
   });
 
   it("makes the workspace inert while backup restore is pending", async () => {
@@ -233,13 +235,14 @@ describe("App", () => {
     const user = userEvent.setup();
 
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
-    await user.click(await screen.findByRole("button", { name: "라이브러리 안전 설정" }));
+    await user.click(await screen.findByRole("button", { name: "설정" }));
+    await user.click(await screen.findByRole("button", { name: "안전" }));
     await user.click(await screen.findByRole("button", { name: "이 시점으로 복구" }));
     await user.click(screen.getByRole("button", { name: "복구 시작" }));
 
     await waitFor(() => expect(document.querySelector(".library-workspace")).toHaveAttribute("inert"));
     await user.keyboard("{Escape}");
-    expect(screen.getByRole("dialog")).toBeVisible();
+    expect(screen.getByRole("region", { name: "설정" })).toBeVisible();
     finishRestore();
     await waitFor(() => expect(document.querySelector(".library-workspace")).not.toHaveAttribute("inert"));
   });
@@ -257,8 +260,8 @@ describe("App", () => {
     expect(screen.getByRole("toolbar", { name: "자산 도구" })).toBeInTheDocument();
     expect(content).toBeInTheDocument();
     expect(screen.getByRole("contentinfo")).toBeInTheDocument();
-    expect(within(content).queryByRole("button", { name: "라이브러리 안전 설정" })).not.toBeInTheDocument();
-    expect(within(sidebar).getByRole("button", { name: "라이브러리 안전 설정" })).toBeInTheDocument();
+    expect(within(content).queryByRole("button", { name: "설정" })).not.toBeInTheDocument();
+    expect(within(sidebar).getByRole("button", { name: "설정" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Lakomics" })).not.toBeInTheDocument();
   });
 
@@ -280,9 +283,9 @@ describe("App", () => {
       favoriteOnly: false,
       unclassifiedOnly: false,
     })));
-    expect(screen.getByRole("button", { name: "전체 자산" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "저장소" })).toHaveAttribute("aria-current", "page");
 
-    await user.click(screen.getByRole("button", { name: "미분류함" }));
+    await user.click(screen.getByRole("button", { name: "미분류" }));
     await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenLastCalledWith(expect.objectContaining({
       classificationId: null,
       favoriteOnly: false,
@@ -310,7 +313,7 @@ describe("App", () => {
 
     await user.click(screen.getByRole("button", { name: "최근" }));
     act(() => drop?.(["C:\\images\\recent.png"]));
-    await user.click(screen.getByRole("button", { name: "전체 자산" }));
+    await user.click(screen.getByRole("button", { name: "저장소" }));
     act(() => drop?.(["C:\\images\\all-assets.png"]));
 
     await waitFor(() => expect(libraryGateway.ingestMedia).toHaveBeenCalledTimes(3));
@@ -546,7 +549,7 @@ describe("App", () => {
       sourceUrl: null,
     });
     expect(libraryGateway.listAssets).toHaveBeenCalledTimes(callsBeforeDrop);
-    await user.click(screen.getByRole("button", { name: /duplicate.png 기존 이미지 열기/ }));
+    await user.click(screen.getByRole("button", { name: /duplicate.png 기존 자산 열기/ }));
     expect(libraryGateway.getAsset).toHaveBeenCalledWith("asset-existing");
     expect(await screen.findByRole("img", { name: "existing.png" })).toBeInTheDocument();
   });

@@ -1,5 +1,5 @@
 import { ChevronDownIcon, ChevronRightIcon, ClockIcon, EllipsisHorizontalIcon, FolderIcon, PhotoIcon, InboxIcon, PlusIcon, Cog6ToothIcon, StarIcon, TrashIcon } from "@heroicons/react/24/outline";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useEffect, useRef, useState } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
 import { useLibrary } from "../library/LibraryContext";
 import type { AssetView, ClassificationEntry, ClassificationKind } from "../library/types";
@@ -20,11 +20,11 @@ type ClassificationSidebarProps = {
   expandedIds: string[];
   sidebarWidth: number;
   reviewCount: number;
+  createClassificationRequest?: number;
   onViewChange: (view: AssetView) => void;
   onExpandedIdsChange: (ids: string[]) => void;
   onSidebarWidthChange: (width: number) => void;
   onChanged: () => void;
-  onOpenSafety?: () => void;
   dragTarget?: ClassificationDropTarget | null;
   onPointerDragStart?: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => void;
   onPointerDragMove?: (event: React.PointerEvent<HTMLElement>) => void;
@@ -43,7 +43,6 @@ export function ClassificationSidebar({
   onExpandedIdsChange,
   onSidebarWidthChange,
   onViewChange,
-  onOpenSafety,
   dragTarget,
   onPointerDragStart,
   onPointerDragMove,
@@ -52,6 +51,7 @@ export function ClassificationSidebar({
   sidebarWidth,
   reviewCount,
   view,
+  createClassificationRequest = 0,
 }: ClassificationSidebarProps) {
   const { gateway } = useLibrary();
   const tree = buildClassificationTree(entries);
@@ -92,6 +92,10 @@ export function ClassificationSidebar({
     setKind(kinds[0]);
     setDialog({ type: "create", parentId: selected?.id ?? null, kinds });
   }
+
+  useEffect(() => {
+    if (createClassificationRequest > 0) openCreate();
+  }, [createClassificationRequest]);
 
   async function create() {
     if (!dialog || dialog.type !== "create") return;
@@ -231,11 +235,11 @@ export function ClassificationSidebar({
         </Button>
       </div>
       <nav className="classification-sidebar__quick-views" aria-label="빠른 보기">
-        <QuickViewButton icon={<FolderIcon aria-hidden="true" />} label="전체 자산" selected={view.kind === "classification" && view.classificationId === null} onClick={() => onViewChange({ kind: "classification", classificationId: null })} />
-        <QuickViewButton icon={<InboxIcon aria-hidden="true" />} label="미분류함" selected={view.kind === "unsorted"} onClick={() => onViewChange({ kind: "unsorted" })} />
+        <QuickViewButton icon={<FolderIcon aria-hidden="true" />} label="저장소" selected={view.kind === "classification" && view.classificationId === null} onClick={() => onViewChange({ kind: "classification", classificationId: null })} />
+        <QuickViewButton icon={<InboxIcon aria-hidden="true" />} label="미분류" selected={view.kind === "unsorted"} onClick={() => onViewChange({ kind: "unsorted" })} />
         <QuickViewButton icon={<ClockIcon aria-hidden="true" />} label="최근" selected={view.kind === "recent"} onClick={() => onViewChange({ kind: "recent" })} />
         <QuickViewButton icon={<StarIcon aria-hidden="true" />} label="즐겨찾기" selected={view.kind === "favorites"} onClick={() => onViewChange({ kind: "favorites" })} />
-        <QuickViewButton icon={<PhotoIcon aria-hidden="true" />} label="유사 이미지 검토" count={reviewCount} selected={view.kind === "similarity_review"} onClick={() => onViewChange({ kind: "similarity_review" })} />
+        <QuickViewButton icon={<PhotoIcon aria-hidden="true" />} label="유사 검토" count={reviewCount} selected={view.kind === "similarity_review"} onClick={() => onViewChange({ kind: "similarity_review" })} />
       </nav>
       {tree.orphans.length > 0 && <p className="classification-sidebar__warning" role="alert">연결되지 않은 분류는 숨겨집니다.</p>}
       <ul className="classification-sidebar__tree" role="tree">
@@ -264,12 +268,7 @@ export function ClassificationSidebar({
       </ul>
       <div className="classification-sidebar__footer">
         <QuickViewButton icon={<TrashIcon aria-hidden="true" />} label="휴지통" selected={view.kind === "trash"} onClick={() => onViewChange({ kind: "trash" })} />
-        {onOpenSafety && (
-          <Button type="button" onClick={onOpenSafety}>
-            <Cog6ToothIcon aria-hidden="true" />
-            라이브러리 안전 설정
-          </Button>
-        )}
+        <QuickViewButton icon={<Cog6ToothIcon aria-hidden="true" />} label="설정" selected={view.kind === "settings"} onClick={() => onViewChange({ kind: "settings" })} />
       </div>
       <div
         aria-label="사이드바 너비 조절"

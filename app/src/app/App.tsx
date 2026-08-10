@@ -29,7 +29,7 @@ import {
 import { Toast } from "../shared/ui/Toast";
 import { DragLayer } from "../shared/ui/DragLayer";
 import { pointerDragReducer, type ClassificationDropPosition, type ClassificationDropTarget, type InternalDragPayload, type PointerDragState } from "../shared/interaction/pointerDrag";
-import { SafetyDialog } from "../safety/SafetyDialog";
+import { SettingsView } from "../settings/SettingsView";
 import { TrashBrowser } from "../safety/TrashBrowser";
 import { SimilarityReviewBrowser } from "../similarity/SimilarityReviewBrowser";
 import { useSimilarityIndex } from "../similarity/useSimilarityIndex";
@@ -81,8 +81,8 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
   const [preferences, setPreferences] = useState<UiPreferences>(loadUiPreferences);
   const [message, setMessage] = useState<string | null>(null);
   const [assetRefresh, setAssetRefresh] = useState(0);
-  const [safetyOpen, setSafetyOpen] = useState(false);
   const [maintenance, setMaintenance] = useState<"restore" | null>(null);
+  const [createClassificationRequest, setCreateClassificationRequest] = useState(0);
   const [browserStatus, setBrowserStatus] = useState<AssetBrowserStatus>({
     loadedCount: 0,
     selectedAsset: null,
@@ -97,6 +97,7 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
   const [requestedAsset, setRequestedAsset] = useState<AssetSummary | null>(null);
   const [reviewCount, setReviewCount] = useState(0);
   const [videoPreparationTrigger, setVideoPreparationTrigger] = useState(0);
+  const settingsReturnViewRef = useRef<AssetView>({ kind: "classification", classificationId: null });
   const similarityIndex = useSimilarityIndex(gateway.indexMissingSimilarityHashes);
   const appendMessage = useCallback((next: string) => {
     setMessage((current) => current ? `${current} ${next}` : next);
@@ -126,7 +127,7 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
     retry: gateway.retryVideoPreparation,
     onChanged: () => setAssetRefresh((current) => current + 1),
   });
-  const dropEnabled = maintenance === null && !safetyOpen && view.kind !== "trash" && view.kind !== "similarity_review";
+  const dropEnabled = maintenance === null && view.kind !== "trash" && view.kind !== "similarity_review" && view.kind !== "settings";
   const dropClassificationId = view.kind === "classification" ? view.classificationId : null;
   const dropState = useFileDrop({
     subscribe: subscribeDrops,
@@ -141,7 +142,7 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
     void refreshClassifications();
   }, [refreshClassifications]);
   useEffect(() => {
-    void refreshReviewCount().catch((error) => setMessage(commandErrorMessage(error, "유사 이미지 검토 개수를 불러오지 못했습니다.")));
+    void refreshReviewCount().catch((error) => setMessage(commandErrorMessage(error, "유사 검토 개수를 불러오지 못했습니다.")));
   }, [refreshReviewCount]);
   useEffect(() => {
     let active = true;
@@ -183,9 +184,39 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
     window.addEventListener("keydown", cancel);
     return () => window.removeEventListener("keydown", cancel);
   }, []);
+  useEffect(() => {
+    const shortcut = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const editing = target?.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
+      if (editing || !event.ctrlKey || event.metaKey) return;
+      const key = event.key.toLowerCase();
+      if (key === "n") {
+        event.preventDefault();
+        setCreateClassificationRequest((current) => current + 1);
+        return;
+      }
+      if (key === "1" || key === "2" || key === "3" || key === "4") {
+        event.preventDefault();
+        const quickViews: AssetView[] = [
+          { kind: "classification", classificationId: null },
+          { kind: "unsorted" },
+          { kind: "recent" },
+          { kind: "favorites" },
+        ];
+        setView(quickViews[Number(key) - 1]);
+      }
+    };
+    window.addEventListener("keydown", shortcut);
+    return () => window.removeEventListener("keydown", shortcut);
+  }, []);
 
   function updatePreferences(update: Partial<UiPreferences>) {
     setPreferences((current) => ({ ...current, ...update }));
+  }
+
+  function navigateView(next: AssetView) {
+    if (next.kind === "settings" && view.kind !== "settings") settingsReturnViewRef.current = view;
+    setView(next);
   }
 
   function transitionDrag(action: Parameters<typeof pointerDragReducer>[1]) {
@@ -257,7 +288,7 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
       setView({ kind: "classification", classificationId: null });
       setRequestedAsset(asset);
     } catch (error) {
-      setMessage(commandErrorMessage(error, "기존 이미지를 열지 못했습니다."));
+      setMessage(commandErrorMessage(error, "기존 자산을 열지 못했습니다."));
     }
   }
 
@@ -303,8 +334,7 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
       await gateway.restoreMetadataBackup(backupId);
       await refreshClassifications();
       setAssetRefresh((current) => current + 1);
-      setSafetyOpen(false);
-      setMessage("복구가 완료되었습니다. 다음 단계에서 파일 검사를 실행할 수 있습니다.");
+      setMessage("복구가 완료되었습니다.");
     } finally {
       setMaintenance(null);
     }
@@ -320,13 +350,13 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
               view={view}
               expandedIds={preferences.expandedClassificationIds}
               sidebarWidth={preferences.sidebarWidth}
-              onViewChange={setView}
+              createClassificationRequest={createClassificationRequest}
+              onViewChange={navigateView}
               onExpandedIdsChange={(expandedClassificationIds) =>
                 updatePreferences({ expandedClassificationIds })
               }
               onSidebarWidthChange={(sidebarWidth) => updatePreferences({ sidebarWidth })}
               onChanged={() => void refreshClassifications()}
-              onOpenSafety={() => setSafetyOpen(true)}
               reviewCount={reviewCount}
               dragTarget={dragTarget}
               onPointerDragStart={startPointerDrag}
@@ -338,7 +368,13 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
           content={
             <div className="library-content">
               <section className="library-content__browser" aria-label="자산 내용">
-                {view.kind === "trash" ? <TrashBrowser /> : view.kind === "similarity_review" ? (
+                {view.kind === "trash" ? <TrashBrowser /> : view.kind === "settings" ? (
+                  <SettingsView
+                    restoring={maintenance === "restore"}
+                    onRestore={restoreBackup}
+                    onExit={() => { setView(settingsReturnViewRef.current); }}
+                  />
+                ) : view.kind === "similarity_review" ? (
                   <SimilarityReviewBrowser
                     gateway={gateway}
                     onCountChange={setReviewCount}
@@ -378,14 +414,8 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
           openExisting={(assetId) => void openExisting(assetId)}
         />
       </div>
-      <DropOverlay over={dropState.over} destinationName={entries.find((entry) => entry.id === dropClassificationId)?.name ?? "미분류함"} />
+      <DropOverlay over={dropState.over} destinationName={entries.find((entry) => entry.id === dropClassificationId)?.name ?? "미분류"} />
       <DragLayer state={dragState} />
-      <SafetyDialog
-        open={safetyOpen}
-        restoring={maintenance === "restore"}
-        onClose={() => setSafetyOpen(false)}
-        onRestore={restoreBackup}
-      />
     </>
   );
 }
