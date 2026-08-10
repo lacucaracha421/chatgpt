@@ -31,6 +31,7 @@ it("uses the Lakomics product identity", () => {
   expect(packageJson.name).toBe("lakomics");
   expect(tauri.productName).toBe("Lakomics");
   expect(tauri.app.windows[0].title).toBe("Lakomics");
+  expect(tauri.app.windows[0].decorations).toBe(false);
 });
 
 it("constrains the workspace row so the status bar remains in the desktop viewport", () => {
