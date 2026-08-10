@@ -10,6 +10,7 @@ import type {
   IngestOutcome,
   LibraryGateway,
   LibrarySummary,
+  MangaSeries,
   MetadataBackup,
   PurgeSummary,
   SimilarityDecisionOutcome,
@@ -64,6 +65,10 @@ export const libraryGateway: LibraryGateway = {
     invoke("patch_asset_classifications", { patch }),
   getAssetClassifications: (assetId) =>
     invoke<string[]>("get_asset_classifications", { assetId }),
+  getMangaRoot: () => invoke<string | null>("get_manga_root"),
+  setMangaRoot: (path) => invoke("set_manga_root", { path }),
+  scanManga: () => invoke<number>("scan_manga"),
+  listMangaSeries: () => invoke<MangaSeries[]>("list_manga_series"),
   ingestMedia: (request: IngestMediaInput) =>
     invoke<IngestOutcome>("ingest_media", { request }),
   preparePendingVideos: (limit) =>

@@ -512,6 +512,7 @@ function createGateway(page: AssetPage = { items: [], nextCursor: null }): Libra
     restoreMetadataBackup: vi.fn(), purgeExpiredTrash: vi.fn(),
     setAssetFavorite: vi.fn(), setAssetsFavorite: vi.fn().mockResolvedValue(undefined), setAssetClassifications: vi.fn(), patchAssetClassifications: vi.fn().mockResolvedValue(undefined),
     getAssetClassifications: vi.fn().mockResolvedValue([]), ingestMedia: vi.fn(),
+    getMangaRoot: vi.fn().mockResolvedValue(null), setMangaRoot: vi.fn().mockResolvedValue(undefined), scanManga: vi.fn().mockResolvedValue(0), listMangaSeries: vi.fn().mockResolvedValue([]),
     preparePendingVideos: vi.fn(), retryVideoPreparation: vi.fn(),
   };
 }

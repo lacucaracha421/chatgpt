@@ -15,3 +15,11 @@ export function playbackUrl(assetId: string): string {
 export function scrubFrameUrl(assetId: string, frameIndex: number): string {
   return `${MEDIA_ORIGIN}/scrub-frame/${encodeURIComponent(assetId)}/${frameIndex}`;
 }
+
+export function mangaCoverUrl(seriesId: string): string {
+  return `${MEDIA_ORIGIN}/manga-cover/${encodeURIComponent(seriesId)}`;
+}
+
+export function mangaPageUrl(seriesId: string, pageIndex: number): string {
+  return `${MEDIA_ORIGIN}/manga-page/${encodeURIComponent(seriesId)}/${pageIndex}`;
+}

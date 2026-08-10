@@ -133,6 +133,17 @@ export type PurgeSummary = {
   failedAssetIds: string[];
 };
 
+export type MangaSeries = {
+  id: string;
+  relativePath: string;
+  title: string;
+  author: string;
+  galleryId: string | null;
+  pageCount: number;
+  thumbnailRelativePath: string;
+  scannedAt: string;
+};
+
 export type MetadataBackup = {
   id: string;
   kind: "daily" | "pre_migration" | "pre_restore";
@@ -200,6 +211,10 @@ export interface LibraryGateway {
   setAssetClassifications(assetId: string, classificationIds: string[]): Promise<void>;
   patchAssetClassifications(patch: AssetClassificationPatch): Promise<void>;
   getAssetClassifications(assetId: string): Promise<string[]>;
+  getMangaRoot(): Promise<string | null>;
+  setMangaRoot(path: string | null): Promise<void>;
+  scanManga(): Promise<number>;
+  listMangaSeries(): Promise<MangaSeries[]>;
   ingestMedia(input: IngestMediaInput): Promise<IngestOutcome>;
   preparePendingVideos(limit: number): Promise<VideoPreparationProgress>;
   retryVideoPreparation(assetId: string): Promise<VideoPreparationState>;
