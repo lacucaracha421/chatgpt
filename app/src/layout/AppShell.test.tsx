@@ -6,7 +6,7 @@ import { AppShell } from "./AppShell";
 import { StatusBar } from "./StatusBar";
 
 afterEach(cleanup);
-const styles = readFileSync(`${(new Function("return process")() as { cwd(): string }).cwd()}/src/styles/global.css`, "utf8");
+const styles = readFileSync(`${(new Function("return process")() as { cwd(): string }).cwd()}/src/styles/global.css`, "utf8").replace(/\r\n/g, "\n");
 const appRoot = (new Function("return process")() as { cwd(): string }).cwd();
 it("uses Korean workspace and status labels", () => {
   render(
@@ -46,6 +46,12 @@ it("constrains the workspace row so the status bar remains in the desktop viewpo
 
 it("styles the window controls as native title bar buttons", () => {
   expect(declarations(".window-controls__button--close:hover")).toContain("background: var(--color-danger);");
+});
+
+it("applies retro bevels to toolbars and buttons", () => {
+  expect(declarations(".asset-toolbar")).toContain("border-top: var(--border-width) solid var(--bevel-light);");
+  expect(declarations(".asset-toolbar h2")).toContain("font-family: var(--toolbar-title-font);");
+  expect(declarations(".ui-button,\n.ui-menu__trigger")).toContain("box-shadow: inset 0 1px 0 var(--bevel-light), inset 0 -1px 0 var(--bevel-dark);");
 });
 
 it("defines retro toolbar tokens", () => {
