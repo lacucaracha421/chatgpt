@@ -1,4 +1,5 @@
 import { getVersion } from "@tauri-apps/api/app";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -22,7 +23,15 @@ export function SettingsView({ restoring, onRestore, onExit }: SettingsViewProps
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [mangaRoot, setMangaRoot] = useState<string | null>(null);
+  const [mangaRootError, setMangaRootError] = useState<string | null>(null);
   const pending = restoring || submitting;
+
+  useEffect(() => {
+    let active = true;
+    void gateway.getMangaRoot().then((root) => { if (active) setMangaRoot(root); });
+    return () => { active = false; };
+  }, [gateway]);
 
   useEffect(() => {
     void getVersion().then(setAppVersion).catch(() => setAppVersion(null));
@@ -61,6 +70,17 @@ export function SettingsView({ restoring, onRestore, onExit }: SettingsViewProps
     }
   }
 
+  async function chooseMangaFolder() {
+    const selected = await open({ directory: true, multiple: false });
+    if (typeof selected !== "string") return;
+    try {
+      await gateway.setMangaRoot(selected);
+      setMangaRoot(selected);
+    } catch (error) {
+      setMangaRootError(commandErrorMessage(error, "망가 폴더를 설정하지 못했습니다."));
+    }
+  }
+
   return <section className="settings-view" aria-label="설정" onKeyDown={(event) => { if (event.key === "Escape" && !pending) onExit(); }}>
     <header className="settings-view__toolbar" data-tauri-drag-region>
       <div data-tauri-drag-region><h2>설정</h2><p>라이브러리 폴더, 안전 설정과 단축키를 확인합니다.</p></div>
@@ -80,6 +100,14 @@ export function SettingsView({ restoring, onRestore, onExit }: SettingsViewProps
         <dl className="settings-view__field">
           <dt>앱 버전</dt>
           <dd>{appVersion ?? "알 수 없음"}</dd>
+        </dl>
+        <dl className="settings-view__field">
+          <dt>망가 폴더</dt>
+          <dd>
+            <span>{mangaRoot ?? "설정되지 않음"}</span>
+            <Button size="sm" onClick={() => void chooseMangaFolder()}>변경</Button>
+            {mangaRootError && <span role="alert">{mangaRootError}</span>}
+          </dd>
         </dl>
       </div>
     )}

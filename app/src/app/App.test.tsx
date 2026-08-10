@@ -670,4 +670,47 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "실패 파일 다시 시도" })).toBeVisible());
     expect(screen.getByRole("complementary", { name: "가져오기 작업" })).toHaveTextContent("탐색기 복사 실패");
   });
+
+  it("opens the manga browser and scans the manga folder", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.getMangaRoot).mockResolvedValue("C:\\Manga");
+    vi.mocked(libraryGateway.listMangaSeries).mockResolvedValue([{
+      id: "series-1",
+      relativePath: "Blue Archive",
+      title: "Blue Archive",
+      author: "Nexon",
+      galleryId: null,
+      pageCount: 12,
+      thumbnailRelativePath: "cover.jpg",
+      scannedAt: "2026-08-01T00:00:00Z",
+    }]);
+    const user = userEvent.setup();
+
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    await user.click(await screen.findByRole("button", { name: "망가" }));
+
+    expect(await screen.findByRole("region", { name: "망가" })).toBeInTheDocument();
+    await waitFor(() => expect(libraryGateway.scanManga).toHaveBeenCalled());
+    expect(await screen.findByRole("button", { name: /Blue Archive/ })).toBeInTheDocument();
+  });
+
+  it("does not ingest drops while the manga view is active", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    let drop: ((paths: string[]) => void) | undefined;
+    const subscribeDrops: DropSubscriber = async (handler) => {
+      drop = handler;
+      return () => undefined;
+    };
+    const libraryGateway = gateway();
+    const user = userEvent.setup();
+
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={subscribeDrops} />);
+    await user.click(await screen.findByRole("button", { name: "망가" }));
+    await waitFor(() => expect(drop).toBeDefined());
+    act(() => drop?.(["C:\\images\\ignored.png"]));
+
+    await Promise.resolve();
+    expect(libraryGateway.ingestMedia).not.toHaveBeenCalled();
+  });
 });

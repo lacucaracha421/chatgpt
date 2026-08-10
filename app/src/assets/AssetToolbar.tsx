@@ -35,7 +35,7 @@ export function AssetToolbar({
   view: rawView, classifications, sort, directOnly, metadataVisible, thumbnailRowHeight, selectedCount, inspectorOpen, onInspectorToggle, onSortChange,
   onDirectOnlyChange, onMetadataVisibleChange, onThumbnailRowHeightChange, onFavorite, onClassification, onTrash, onClearSelection, batchPending, onReshuffle,
 }: AssetToolbarProps) {
-  const view = rawView.kind === "similarity_review" || rawView.kind === "settings"
+  const view = rawView.kind === "similarity_review" || rawView.kind === "settings" || rawView.kind === "manga"
     ? ({ kind: "classification", classificationId: null } as const)
     : rawView;
   const [batchClassificationId, setBatchClassificationId] = useState("");

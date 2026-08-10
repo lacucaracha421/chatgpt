@@ -134,6 +134,7 @@ describe("ClassificationSidebar", () => {
       "최근",
       "즐겨찾기",
       "유사 검토0",
+      "망가",
     ]);
 
     await user.click(screen.getByRole("button", { name: "미분류" }));
@@ -398,5 +399,14 @@ describe("ClassificationSidebar", () => {
     const button = screen.getByRole("button", { name: "유사 검토 12개" });
     await user.click(button);
     expect(onViewChange).toHaveBeenCalledWith({ kind: "similarity_review" });
+  });
+
+  it("opens the manga quick view", async () => {
+    const user = userEvent.setup();
+    const { onViewChange } = renderSidebar();
+
+    await user.click(screen.getByRole("button", { name: "망가" }));
+
+    expect(onViewChange).toHaveBeenCalledWith({ kind: "manga" });
   });
 });

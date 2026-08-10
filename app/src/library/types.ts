@@ -14,7 +14,8 @@ export type AssetView =
   | { kind: "recent" }
   | { kind: "similarity_review" }
   | { kind: "trash" }
-  | { kind: "settings" };
+  | { kind: "settings" }
+  | { kind: "manga" };
 
 export type ClassificationEntry = {
   id: string;

@@ -34,6 +34,8 @@ import { TrashBrowser } from "../safety/TrashBrowser";
 import { SimilarityReviewBrowser } from "../similarity/SimilarityReviewBrowser";
 import { useSimilarityIndex } from "../similarity/useSimilarityIndex";
 import { useVideoPreparation } from "../video/useVideoPreparation";
+import { MangaBrowser } from "../manga/MangaBrowser";
+import { MangaViewer } from "../manga/MangaViewer";
 
 type AppProps = {
   gateway?: LibraryGateway;
@@ -96,6 +98,7 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
   const [nativeDragWorks, setNativeDragWorks] = useState<IngestionWork[]>([]);
   const [requestedAsset, setRequestedAsset] = useState<AssetSummary | null>(null);
   const [reviewCount, setReviewCount] = useState(0);
+  const [mangaViewer, setMangaViewer] = useState<{ seriesId: string; title: string; pageCount: number } | null>(null);
   const [videoPreparationTrigger, setVideoPreparationTrigger] = useState(0);
   const settingsReturnViewRef = useRef<AssetView>({ kind: "classification", classificationId: null });
   const similarityIndex = useSimilarityIndex(gateway.indexMissingSimilarityHashes);
@@ -127,7 +130,7 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
     retry: gateway.retryVideoPreparation,
     onChanged: () => setAssetRefresh((current) => current + 1),
   });
-  const dropEnabled = maintenance === null && view.kind !== "trash" && view.kind !== "similarity_review" && view.kind !== "settings";
+  const dropEnabled = maintenance === null && view.kind !== "trash" && view.kind !== "similarity_review" && view.kind !== "settings" && view.kind !== "manga";
   const dropClassificationId = view.kind === "classification" ? view.classificationId : null;
   const dropState = useFileDrop({
     subscribe: subscribeDrops,
@@ -380,6 +383,10 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
                     onCountChange={setReviewCount}
                     onClose={() => setView({ kind: "classification", classificationId: null })}
                   />
+                ) : view.kind === "manga" ? (
+                  <MangaBrowser
+                    onOpenSeries={(series) => setMangaViewer({ seriesId: series.id, title: series.title, pageCount: series.pageCount })}
+                  />
                 ) : (
                   <AssetBrowser
                     view={view}
@@ -416,6 +423,7 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
       </div>
       <DropOverlay over={dropState.over} destinationName={entries.find((entry) => entry.id === dropClassificationId)?.name ?? "미분류"} />
       <DragLayer state={dragState} />
+      {mangaViewer && <MangaViewer seriesId={mangaViewer.seriesId} title={mangaViewer.title} pageCount={mangaViewer.pageCount} onClose={() => setMangaViewer(null)} />}
     </>
   );
 }
