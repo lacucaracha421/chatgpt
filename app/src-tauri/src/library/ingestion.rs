@@ -862,8 +862,9 @@ mod tests {
     };
     use crate::library::{
         models::{
-            AssetQuery, AssetSort, AssetSummary, ClassificationKind, CreateClassification,
-            IngestMediaRequest, IngestOutcome, MediaSummary, VideoPreparationState,
+            AssetClassificationPatch, AssetQuery, AssetSort, AssetSummary, ClassificationKind,
+            CreateClassification, IngestMediaRequest, IngestOutcome, MediaSummary,
+            VideoPreparationState,
         },
         video_media::VideoProbe,
         Library,
@@ -1378,7 +1379,11 @@ mod tests {
         };
         fixture
             .library
-            .set_asset_classifications(&asset.id, std::slice::from_ref(&original_classification.id))
+            .patch_asset_classifications(AssetClassificationPatch {
+                asset_ids: vec![asset.id.clone()],
+                add_classification_ids: vec![original_classification.id.clone()],
+                remove_classification_ids: vec![],
+            })
             .unwrap();
 
         let outcome = fixture

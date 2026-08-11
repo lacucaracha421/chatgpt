@@ -12,9 +12,9 @@ use super::{
     classification::classifications_for_asset,
     error::LibraryError,
     models::{
-        AssetCursor, AssetSummary, SimilarityDecision, SimilarityDecisionOutcome,
-        SimilarityDecisionRequest, SimilarityDecisionStatus, SimilarityIndexProgress,
-        SimilarityReviewAsset, SimilarityReviewPage, SimilarityReviewSummary,
+        AssetCursor, AssetSummary, SimilarityDecision, SimilarityDecisionRequest,
+        SimilarityIndexProgress, SimilarityReviewAsset, SimilarityReviewPage,
+        SimilarityReviewSummary,
     },
     query::asset_summary_from_row,
     Library, MediaVariant,
@@ -132,7 +132,7 @@ impl Library {
     pub fn decide_similarity_review(
         &self,
         request: SimilarityDecisionRequest,
-    ) -> Result<SimilarityDecisionOutcome, LibraryError> {
+    ) -> Result<(), LibraryError> {
         let _trash_guard = self
             .trash_lock
             .lock()
@@ -141,7 +141,7 @@ impl Library {
         let requested = decision_name(request.decision);
         match review.status.as_str() {
             "resolved" if review.decision.as_deref() == Some(requested) => {
-                return self.similarity_decision_outcome();
+                return Ok(());
             }
             "resolved" => return Err(LibraryError::SimilarityReviewConflict),
             "resolving"
@@ -166,7 +166,7 @@ impl Library {
             },
             _ => return Err(LibraryError::SimilarityReviewConflict),
         }
-        self.similarity_decision_outcome()
+        Ok(())
     }
 
     pub(crate) fn cleanup_resolving_similarity_reviews(&self) -> Result<(), LibraryError> {
@@ -341,21 +341,6 @@ impl Library {
         Err(LibraryError::UnsupportedManagedFileDeletion)
     }
 
-    fn similarity_decision_outcome(&self) -> Result<SimilarityDecisionOutcome, LibraryError> {
-        let next_review_id = self
-            .connection()?
-            .query_row(
-                "SELECT id FROM similarity_reviews WHERE status = 'open' ORDER BY created_at, id LIMIT 1",
-                [],
-                |row| row.get(0),
-            )
-            .optional()?;
-        Ok(SimilarityDecisionOutcome {
-            status: SimilarityDecisionStatus::Resolved,
-            next_review_id,
-        })
-    }
-
     pub fn index_missing_similarity_hashes(&self) -> Result<SimilarityIndexProgress, LibraryError> {
         let asset_ids = {
             let connection = self.connection()?;
@@ -411,7 +396,6 @@ impl Library {
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
         Ok(SimilarityIndexProgress {
-            processed: asset_ids.len() as u64,
             remaining: remaining as u64,
             failed: failed as u64,
         })
@@ -719,11 +703,8 @@ mod tests {
         let first = fixture.library.index_missing_similarity_hashes().unwrap();
         let second = fixture.library.index_missing_similarity_hashes().unwrap();
 
-        assert_eq!((first.processed, first.remaining, first.failed), (50, 1, 1));
-        assert_eq!(
-            (second.processed, second.remaining, second.failed),
-            (1, 0, 1)
-        );
+        assert_eq!((first.remaining, first.failed), (1, 1));
+        assert_eq!((second.remaining, second.failed), (0, 1));
         let error: String = fixture
             .library
             .connection()
@@ -743,10 +724,7 @@ mod tests {
 
         let progress = fixture.library.index_missing_similarity_hashes().unwrap();
 
-        assert_eq!(
-            (progress.processed, progress.remaining, progress.failed),
-            (0, 0, 0)
-        );
+        assert_eq!((progress.remaining, progress.failed), (0, 0));
     }
 
     #[test]

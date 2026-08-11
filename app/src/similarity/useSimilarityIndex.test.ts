@@ -7,8 +7,8 @@ afterEach(() => vi.useRealTimers());
 it("runs one library-owned batch at a time until no hashes remain", async () => {
   vi.useFakeTimers();
   const index = vi.fn()
-    .mockResolvedValueOnce({ processed: 50, remaining: 1, failed: 1 })
-    .mockResolvedValueOnce({ processed: 1, remaining: 0, failed: 1 });
+    .mockResolvedValueOnce({ remaining: 1, failed: 1 })
+    .mockResolvedValueOnce({ remaining: 0, failed: 1 });
   const { result } = renderHook(() => useSimilarityIndex(index));
 
   await act(async () => { await Promise.resolve(); });
@@ -20,7 +20,7 @@ it("runs one library-owned batch at a time until no hashes remain", async () => 
 
 it("cancels scheduled work after unmount", async () => {
   vi.useFakeTimers();
-  const index = vi.fn().mockResolvedValue({ processed: 50, remaining: 1, failed: 0 });
+  const index = vi.fn().mockResolvedValue({ remaining: 1, failed: 0 });
   const { unmount } = renderHook(() => useSimilarityIndex(index));
   await act(async () => { await Promise.resolve(); });
   unmount();

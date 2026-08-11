@@ -9,8 +9,8 @@ use crate::library::{
     models::{
         AssetClassificationPatch, AssetCursor, AssetPage, AssetQuery, AssetSummary,
         ClassificationEntry, CreateClassification, IngestMediaRequest, IngestOutcome,
-        LibrarySummary, MangaSeries, MetadataBackup, PurgeSummary, SimilarityDecisionOutcome,
-        SimilarityDecisionRequest, SimilarityIndexProgress, SimilarityReviewPage, TrashPage,
+        LibrarySummary, MangaSeries, MetadataBackup, PurgeSummary, SimilarityDecisionRequest,
+        SimilarityIndexProgress, SimilarityReviewPage, TrashPage,
         TrashPolicy, VideoPreparationProgress, VideoPreparationState,
     },
     Library,
@@ -125,13 +125,6 @@ fn open_library_at(path: String) -> Result<Library, CommandError> {
         });
     }
     Library::open(path).map_err(CommandError::from)
-}
-
-#[tauri::command]
-pub fn current_library(state: State<'_, AppState>) -> Result<Option<LibrarySummary>, CommandError> {
-    current(state)
-        .map(|library| library.summary().map_err(CommandError::from))
-        .transpose()
 }
 
 #[tauri::command]
@@ -257,7 +250,7 @@ pub fn list_similarity_reviews(
 pub async fn decide_similarity_review(
     request: SimilarityDecisionRequest,
     state: State<'_, AppState>,
-) -> Result<SimilarityDecisionOutcome, CommandError> {
+) -> Result<(), CommandError> {
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || library.decide_similarity_review(request))
         .await
@@ -272,13 +265,6 @@ pub fn get_asset(
 ) -> Result<AssetSummary, CommandError> {
     current_required(state)?
         .get_asset(&asset_id)
-        .map_err(CommandError::from)
-}
-
-#[tauri::command]
-pub fn trash_asset(asset_id: String, state: State<'_, AppState>) -> Result<(), CommandError> {
-    current_required(state)?
-        .trash_asset(&asset_id)
         .map_err(CommandError::from)
 }
 
@@ -370,17 +356,6 @@ pub fn set_assets_favorite(
 ) -> Result<(), CommandError> {
     current_required(state)?
         .set_assets_favorite(&asset_ids, favorite)
-        .map_err(CommandError::from)
-}
-
-#[tauri::command]
-pub fn set_asset_classifications(
-    asset_id: String,
-    classification_ids: Vec<String>,
-    state: State<'_, AppState>,
-) -> Result<(), CommandError> {
-    current_required(state)?
-        .set_asset_classifications(&asset_id, &classification_ids)
         .map_err(CommandError::from)
 }
 

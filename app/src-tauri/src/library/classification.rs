@@ -130,14 +130,6 @@ impl Library {
         Ok(())
     }
 
-    pub fn set_asset_classifications(
-        &self,
-        asset_id: &str,
-        classification_ids: &[String],
-    ) -> Result<(), LibraryError> {
-        self.change_asset_classifications(&[asset_id.to_owned()], classification_ids, &[], true)
-    }
-
     pub fn patch_asset_classifications(
         &self,
         patch: AssetClassificationPatch,
@@ -146,7 +138,6 @@ impl Library {
             &patch.asset_ids,
             &patch.add_classification_ids,
             &patch.remove_classification_ids,
-            false,
         )
     }
 
@@ -163,7 +154,6 @@ impl Library {
         asset_ids: &[String],
         add_ids: &[String],
         remove_ids: &[String],
-        replace: bool,
     ) -> Result<(), LibraryError> {
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
@@ -176,18 +166,11 @@ impl Library {
             }
         }
         for asset_id in asset_ids {
-            if replace {
+            for classification_id in &remove_ids {
                 transaction.execute(
-                    "DELETE FROM asset_classifications WHERE asset_id = ?1",
-                    [asset_id],
+                    "DELETE FROM asset_classifications WHERE asset_id = ?1 AND classification_id = ?2",
+                    params![asset_id, classification_id],
                 )?;
-            } else {
-                for classification_id in &remove_ids {
-                    transaction.execute(
-                        "DELETE FROM asset_classifications WHERE asset_id = ?1 AND classification_id = ?2",
-                        params![asset_id, classification_id],
-                    )?;
-                }
             }
             for classification_id in &add_ids {
                 transaction.execute(
@@ -529,7 +512,11 @@ mod tests {
         insert_asset(&fixture.library, "asset-1");
         fixture
             .library
-            .set_asset_classifications("asset-1", std::slice::from_ref(&fixture.child_tag.id))
+            .patch_asset_classifications(AssetClassificationPatch {
+                asset_ids: vec!["asset-1".into()],
+                add_classification_ids: vec![fixture.child_tag.id.clone()],
+                remove_classification_ids: vec![],
+            })
             .unwrap();
 
         let error = fixture
@@ -587,69 +574,17 @@ mod tests {
     }
 
     #[test]
-    fn setting_asset_classifications_replaces_direct_links_and_ignores_duplicate_ids() {
-        let fixture = ClassificationFixture::new();
-        insert_asset(&fixture.library, "asset-1");
-
-        fixture
-            .library
-            .set_asset_classifications(
-                "asset-1",
-                &[fixture.child_tag.id.clone(), fixture.child_tag.id.clone()],
-            )
-            .unwrap();
-
-        let entries = fixture
-            .library
-            .get_asset_classifications("asset-1")
-            .unwrap();
-        assert_eq!(entries, vec![fixture.child_tag.clone()]);
-    }
-
-    #[test]
-    fn setting_asset_classifications_rolls_back_when_a_classification_is_missing() {
-        let fixture = ClassificationFixture::new();
-        insert_asset(&fixture.library, "asset-1");
-        fixture
-            .library
-            .set_asset_classifications("asset-1", std::slice::from_ref(&fixture.child_tag.id))
-            .unwrap();
-
-        let error = fixture
-            .library
-            .set_asset_classifications("asset-1", &["missing-classification".into()])
-            .unwrap_err();
-
-        assert!(matches!(error, LibraryError::ClassificationNotFound));
-        assert_eq!(
-            fixture
-                .library
-                .get_asset_classifications("asset-1")
-                .unwrap(),
-            vec![fixture.child_tag.clone()]
-        );
-    }
-
-    #[test]
-    fn setting_asset_classifications_rejects_a_missing_asset() {
-        let fixture = ClassificationFixture::new();
-
-        let error = fixture
-            .library
-            .set_asset_classifications("missing-asset", std::slice::from_ref(&fixture.child_tag.id))
-            .unwrap_err();
-
-        assert!(matches!(error, LibraryError::AssetNotFound));
-    }
-
-    #[test]
     fn batch_classification_patch_is_additive_selective_and_atomic() {
         let fixture = ClassificationFixture::new();
         insert_asset(&fixture.library, "asset-a");
         insert_asset(&fixture.library, "asset-b");
         fixture
             .library
-            .set_asset_classifications("asset-a", std::slice::from_ref(&fixture.child_tag.id))
+            .patch_asset_classifications(AssetClassificationPatch {
+                asset_ids: vec!["asset-a".into()],
+                add_classification_ids: vec![fixture.child_tag.id.clone()],
+                remove_classification_ids: vec![],
+            })
             .unwrap();
 
         fixture

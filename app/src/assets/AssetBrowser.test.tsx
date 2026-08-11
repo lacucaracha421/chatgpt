@@ -510,15 +510,15 @@ function asset(index: number) {
 
 function createGateway(page: AssetPage = { items: [], nextCursor: null }): LibraryGateway {
   return {
-    openLibrary: vi.fn(), currentLibrary: vi.fn(), listClassifications: vi.fn(),
+    openLibrary: vi.fn(), listClassifications: vi.fn(),
     createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(),
     deleteClassification: vi.fn(), listAssets: vi.fn().mockResolvedValue(page),
     indexMissingSimilarityHashes: vi.fn(), listSimilarityReviews: vi.fn(), decideSimilarityReview: vi.fn(), getAsset: vi.fn(),
-    trashAsset: vi.fn(), trashAssets: vi.fn().mockResolvedValue(undefined), restoreAsset: vi.fn(), restoreAssets: vi.fn().mockResolvedValue(undefined), listTrash: vi.fn(), emptyTrash: vi.fn(),
+    trashAssets: vi.fn().mockResolvedValue(undefined), restoreAsset: vi.fn(), restoreAssets: vi.fn().mockResolvedValue(undefined), listTrash: vi.fn(), emptyTrash: vi.fn(),
     getTrashPolicy: vi.fn(), setTrashPolicy: vi.fn(),
     ensureDailyBackup: vi.fn(), listMetadataBackups: vi.fn(),
     restoreMetadataBackup: vi.fn(), purgeExpiredTrash: vi.fn(),
-    setAssetFavorite: vi.fn(), setAssetsFavorite: vi.fn().mockResolvedValue(undefined), setAssetClassifications: vi.fn(), patchAssetClassifications: vi.fn().mockResolvedValue(undefined),
+    setAssetFavorite: vi.fn(), setAssetsFavorite: vi.fn().mockResolvedValue(undefined), patchAssetClassifications: vi.fn().mockResolvedValue(undefined),
     getAssetClassifications: vi.fn().mockResolvedValue([]), ingestMedia: vi.fn(),
     getMangaRoot: vi.fn().mockResolvedValue(null), setMangaRoot: vi.fn().mockResolvedValue(undefined), scanManga: vi.fn().mockResolvedValue(0), listMangaSeries: vi.fn().mockResolvedValue([]),
     preparePendingVideos: vi.fn(), retryVideoPreparation: vi.fn(),

@@ -142,22 +142,8 @@ pub struct SimilarityReviewPage {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SimilarityIndexProgress {
-    pub processed: u64,
     pub remaining: u64,
     pub failed: u64,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum SimilarityDecisionStatus {
-    Resolved,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct SimilarityDecisionOutcome {
-    pub status: SimilarityDecisionStatus,
-    pub next_review_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

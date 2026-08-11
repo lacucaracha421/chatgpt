@@ -405,7 +405,7 @@ fn video_media_summary_is_preserved_in_get_asset_and_trash_list() {
     };
 
     assert_eq!(library.get_asset("video-1").unwrap().media, expected);
-    library.trash_asset("video-1").unwrap();
+    library.trash_assets(&["video-1".into()]).unwrap();
     let trash = library.list_trash(None, 20).unwrap();
     assert_eq!(trash.items[0].asset.media, expected);
 }
@@ -416,7 +416,7 @@ fn video_trash_retains_derivatives_and_restore_reuses_them() {
     let library = Library::open(temp.path().join("library")).unwrap();
     let (original, derivatives) = insert_ready_video(&library, "video-trash", "normal");
 
-    library.trash_asset("video-trash").unwrap();
+    library.trash_assets(&["video-trash".into()]).unwrap();
 
     assert!(original.is_file());
     assert!(derivatives.join("poster.webp").is_file());
@@ -542,7 +542,10 @@ fn trash_keeps_files_in_place_and_restore_keeps_metadata() {
         .root()
         .join(asset.thumbnail_relative_path.as_deref().unwrap());
 
-    fixture.library.trash_asset(&asset.id).unwrap();
+    fixture
+        .library
+        .trash_assets(std::slice::from_ref(&asset.id))
+        .unwrap();
 
     assert_eq!(fixture.library.summary().unwrap().asset_count, 0);
     assert!(asset_path.is_file());
@@ -589,7 +592,9 @@ fn trash_pages_by_trashed_at_and_id_and_derives_purge_at() {
         })
         .unwrap();
     for asset in [&first, &second, &third] {
-        library.trash_asset(&asset.id).unwrap();
+        library
+            .trash_assets(std::slice::from_ref(&asset.id))
+            .unwrap();
     }
     let connection = Connection::open(library.root().join("library.sqlite")).unwrap();
     for (asset_id, trashed_at) in [
@@ -642,7 +647,10 @@ fn empty_trash_preserves_records_when_a_managed_path_is_unsafe() {
     let fixture = FoundationFixture::new();
     let classification = fixture.create_game_work_tag();
     let asset = fixture.ingest(&classification.tag_id);
-    fixture.library.trash_asset(&asset.id).unwrap();
+    fixture
+        .library
+        .trash_assets(std::slice::from_ref(&asset.id))
+        .unwrap();
     let external_copy = fixture
         .library
         .root()
@@ -686,7 +694,10 @@ fn empty_trash_keeps_a_partial_failure_until_a_missing_file_can_be_retried() {
         .library
         .root()
         .join(asset.thumbnail_relative_path.as_deref().unwrap());
-    fixture.library.trash_asset(&asset.id).unwrap();
+    fixture
+        .library
+        .trash_assets(std::slice::from_ref(&asset.id))
+        .unwrap();
     fs::remove_file(&thumbnail_path).unwrap();
     fs::create_dir(&thumbnail_path).unwrap();
 
@@ -764,7 +775,10 @@ fn purge_expired_trash_removes_managed_files_and_metadata() {
             retention_days: Some(7),
         })
         .unwrap();
-    fixture.library.trash_asset(&asset.id).unwrap();
+    fixture
+        .library
+        .trash_assets(std::slice::from_ref(&asset.id))
+        .unwrap();
     Connection::open(fixture.library.root().join("library.sqlite"))
         .unwrap()
         .execute(

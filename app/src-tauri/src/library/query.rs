@@ -330,8 +330,8 @@ mod tests {
     use crate::library::{
         error::LibraryError,
         models::{
-            AssetCursor, AssetQuery, AssetSort, ClassificationKind, CreateClassification,
-            MediaSummary, VideoPreparationState,
+            AssetClassificationPatch, AssetCursor, AssetQuery, AssetSort, ClassificationKind,
+            CreateClassification, MediaSummary, VideoPreparationState,
         },
         Library,
     };
@@ -431,7 +431,11 @@ mod tests {
         let tag = classification(&library, ClassificationKind::Tag, "아로나", Some(work.id));
         insert_asset(&library, "asset-1", "2026-07-30T00:00:00Z");
         library
-            .set_asset_classifications("asset-1", &[tag.id])
+            .patch_asset_classifications(AssetClassificationPatch {
+                asset_ids: vec!["asset-1".into()],
+                add_classification_ids: vec![tag.id],
+                remove_classification_ids: vec![],
+            })
             .unwrap();
 
         let descendants = library
@@ -489,7 +493,11 @@ mod tests {
         );
         insert_asset(&library, "asset-1", "2026-07-30T00:00:00Z");
         library
-            .set_asset_classifications("asset-1", &[work.id, tag.id])
+            .patch_asset_classifications(AssetClassificationPatch {
+                asset_ids: vec!["asset-1".into()],
+                add_classification_ids: vec![work.id, tag.id],
+                remove_classification_ids: vec![],
+            })
             .unwrap();
 
         let page = library
@@ -518,7 +526,11 @@ mod tests {
         insert_asset(&library, "unclassified-older", "2026-07-29T00:00:00Z");
         insert_asset(&library, "classified", "2026-07-30T00:00:00Z");
         library
-            .set_asset_classifications("classified", &[root.id])
+            .patch_asset_classifications(AssetClassificationPatch {
+                asset_ids: vec!["classified".into()],
+                add_classification_ids: vec![root.id],
+                remove_classification_ids: vec![],
+            })
             .unwrap();
 
         let first = library

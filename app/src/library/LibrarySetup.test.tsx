@@ -8,7 +8,6 @@ import type { LibraryGateway } from "./types";
 function gateway(): LibraryGateway {
   return {
     openLibrary: vi.fn().mockResolvedValue({ root: "C:\\Lakomics", assetCount: 0 }),
-    currentLibrary: vi.fn(),
     listClassifications: vi.fn(),
     createClassification: vi.fn(),
     renameClassification: vi.fn(),
@@ -19,7 +18,6 @@ function gateway(): LibraryGateway {
     listSimilarityReviews: vi.fn(),
     decideSimilarityReview: vi.fn(),
     getAsset: vi.fn(),
-    trashAsset: vi.fn(),
     trashAssets: vi.fn(),
     restoreAsset: vi.fn(),
     restoreAssets: vi.fn(),
@@ -33,7 +31,6 @@ function gateway(): LibraryGateway {
     purgeExpiredTrash: vi.fn(),
     setAssetFavorite: vi.fn(),
     setAssetsFavorite: vi.fn(),
-    setAssetClassifications: vi.fn(),
     patchAssetClassifications: vi.fn(),
     getAssetClassifications: vi.fn(),
     getMangaRoot: vi.fn().mockResolvedValue(null),

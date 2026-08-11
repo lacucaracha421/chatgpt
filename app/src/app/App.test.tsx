@@ -53,7 +53,6 @@ const metadataBackup: MetadataBackup = {
 function gateway(): LibraryGateway {
   return {
     openLibrary: vi.fn().mockResolvedValue(summary),
-    currentLibrary: vi.fn(),
     listClassifications: vi.fn().mockResolvedValue([]),
     createClassification: vi.fn(),
     renameClassification: vi.fn(),
@@ -64,7 +63,6 @@ function gateway(): LibraryGateway {
     listSimilarityReviews: vi.fn().mockResolvedValue({ items: [], nextCursor: null, totalCount: 0 }),
     decideSimilarityReview: vi.fn(),
     getAsset: vi.fn(),
-    trashAsset: vi.fn(),
     trashAssets: vi.fn(),
     restoreAsset: vi.fn(),
     restoreAssets: vi.fn(),
@@ -78,7 +76,6 @@ function gateway(): LibraryGateway {
     purgeExpiredTrash: vi.fn().mockResolvedValue({ deletedCount: 0, failedAssetIds: [] }),
     setAssetFavorite: vi.fn(),
     setAssetsFavorite: vi.fn(),
-    setAssetClassifications: vi.fn(),
     patchAssetClassifications: vi.fn(),
     getAssetClassifications: vi.fn(),
     getMangaRoot: vi.fn().mockResolvedValue(null),

@@ -30,6 +30,12 @@ describe("libraryGateway similarity contract", () => {
       assetId: "asset-1",
     });
   });
+
+  it("does not expose superseded single-item commands", () => {
+    expect(libraryGateway).not.toHaveProperty("currentLibrary");
+    expect(libraryGateway).not.toHaveProperty("trashAsset");
+    expect(libraryGateway).not.toHaveProperty("setAssetClassifications");
+  });
 });
 
 describe("libraryGateway video contract", () => {

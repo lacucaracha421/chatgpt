@@ -82,14 +82,8 @@ export type SimilarityReviewPage = {
 };
 
 export type SimilarityIndexProgress = {
-  processed: number;
   remaining: number;
   failed: number;
-};
-
-export type SimilarityDecisionOutcome = {
-  status: "resolved";
-  nextReviewId: string | null;
 };
 
 export type AssetQuery = {
@@ -179,7 +173,6 @@ export type IngestOutcome =
 
 export interface LibraryGateway {
   openLibrary(path: string): Promise<LibrarySummary>;
-  currentLibrary(): Promise<LibrarySummary | null>;
   listClassifications(): Promise<ClassificationEntry[]>;
   createClassification(input: CreateClassification): Promise<ClassificationEntry>;
   renameClassification(id: string, name: string): Promise<void>;
@@ -194,9 +187,8 @@ export interface LibraryGateway {
   decideSimilarityReview(request: {
     reviewId: string;
     decision: SimilarityDecision;
-  }): Promise<SimilarityDecisionOutcome>;
+  }): Promise<void>;
   getAsset(assetId: string): Promise<AssetSummary>;
-  trashAsset(assetId: string): Promise<void>;
   trashAssets(assetIds: string[]): Promise<void>;
   restoreAsset(assetId: string): Promise<void>;
   restoreAssets(assetIds: string[]): Promise<void>;
@@ -210,7 +202,6 @@ export interface LibraryGateway {
   purgeExpiredTrash(): Promise<PurgeSummary>;
   setAssetFavorite(assetId: string, favorite: boolean): Promise<void>;
   setAssetsFavorite(assetIds: string[], favorite: boolean): Promise<void>;
-  setAssetClassifications(assetId: string, classificationIds: string[]): Promise<void>;
   patchAssetClassifications(patch: AssetClassificationPatch): Promise<void>;
   getAssetClassifications(assetId: string): Promise<string[]>;
   getMangaRoot(): Promise<string | null>;

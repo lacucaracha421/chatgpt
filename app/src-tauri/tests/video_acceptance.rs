@@ -84,9 +84,13 @@ fn real_windows_video_workflow_preserves_sources_and_derives_media() {
             }
         ));
     }
-    reopened.trash_asset(&assets[0].id).unwrap();
+    reopened
+        .trash_assets(std::slice::from_ref(&assets[0].id))
+        .unwrap();
     reopened.restore_asset(&assets[0].id).unwrap();
-    reopened.trash_asset(&assets[4].id).unwrap();
+    reopened
+        .trash_assets(std::slice::from_ref(&assets[4].id))
+        .unwrap();
     assert_eq!(reopened.empty_trash().unwrap().deleted_count, 1);
     drop(reopened);
 

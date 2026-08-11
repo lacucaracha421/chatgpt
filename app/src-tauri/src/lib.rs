@@ -29,7 +29,6 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::open_library,
-            commands::current_library,
             commands::ensure_daily_backup,
             commands::list_metadata_backups,
             commands::restore_metadata_backup,
@@ -45,7 +44,6 @@ pub fn run() {
             commands::list_similarity_reviews,
             commands::decide_similarity_review,
             commands::get_asset,
-            commands::trash_asset,
             commands::trash_assets,
             commands::restore_asset,
             commands::restore_assets,
@@ -55,7 +53,6 @@ pub fn run() {
             commands::set_trash_policy,
             commands::set_asset_favorite,
             commands::set_assets_favorite,
-            commands::set_asset_classifications,
             commands::patch_asset_classifications,
             commands::ingest_media,
             commands::prepare_pending_videos,

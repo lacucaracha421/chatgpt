@@ -47,13 +47,13 @@ describe("MangaBrowser", () => {
 
 function createGateway(overrides: { root: string | null; series: MangaSeries[] }): LibraryGateway {
   const base: LibraryGateway = {
-    openLibrary: vi.fn(), currentLibrary: vi.fn(), listClassifications: vi.fn(),
+    openLibrary: vi.fn(), listClassifications: vi.fn(),
     createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(),
     deleteClassification: vi.fn(), listAssets: vi.fn(), indexMissingSimilarityHashes: vi.fn(),
     listSimilarityReviews: vi.fn(), decideSimilarityReview: vi.fn(), getAsset: vi.fn(), setAssetFavorite: vi.fn(), setAssetsFavorite: vi.fn(),
-    setAssetClassifications: vi.fn(), patchAssetClassifications: vi.fn(), getAssetClassifications: vi.fn(), ingestMedia: vi.fn(),
+    patchAssetClassifications: vi.fn(), getAssetClassifications: vi.fn(), ingestMedia: vi.fn(),
     preparePendingVideos: vi.fn(), retryVideoPreparation: vi.fn(),
-    trashAsset: vi.fn(), trashAssets: vi.fn(), restoreAsset: vi.fn(), restoreAssets: vi.fn(),
+    trashAssets: vi.fn(), restoreAsset: vi.fn(), restoreAssets: vi.fn(),
     listTrash: vi.fn(), emptyTrash: vi.fn(), getTrashPolicy: vi.fn(), setTrashPolicy: vi.fn(),
     ensureDailyBackup: vi.fn(), listMetadataBackups: vi.fn(), restoreMetadataBackup: vi.fn(), purgeExpiredTrash: vi.fn(),
     getMangaRoot: vi.fn().mockResolvedValue(overrides.root),

@@ -46,10 +46,6 @@ struct ManagedAssetPaths {
 }
 
 impl Library {
-    pub fn trash_asset(&self, asset_id: &str) -> Result<(), LibraryError> {
-        self.trash_assets(&[asset_id.to_owned()])
-    }
-
     pub fn trash_assets(&self, asset_ids: &[String]) -> Result<(), LibraryError> {
         let _trash_guard = self
             .trash_lock

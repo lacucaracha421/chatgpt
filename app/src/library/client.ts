@@ -13,7 +13,6 @@ import type {
   MangaSeries,
   MetadataBackup,
   PurgeSummary,
-  SimilarityDecisionOutcome,
   SimilarityIndexProgress,
   SimilarityReviewPage,
   TrashPage,
@@ -24,7 +23,6 @@ import type {
 
 export const libraryGateway: LibraryGateway = {
   openLibrary: (path) => invoke<LibrarySummary>("open_library", { path }),
-  currentLibrary: () => invoke<LibrarySummary | null>("current_library"),
   listClassifications: () =>
     invoke<ClassificationEntry[]>("list_classifications"),
   createClassification: (request: CreateClassification) =>
@@ -41,9 +39,8 @@ export const libraryGateway: LibraryGateway = {
   listSimilarityReviews: ({ after, limit }) =>
     invoke<SimilarityReviewPage>("list_similarity_reviews", { after, limit }),
   decideSimilarityReview: (request) =>
-    invoke<SimilarityDecisionOutcome>("decide_similarity_review", { request }),
+    invoke("decide_similarity_review", { request }),
   getAsset: (assetId) => invoke<AssetSummary>("get_asset", { assetId }),
-  trashAsset: (assetId) => invoke("trash_asset", { assetId }),
   trashAssets: (assetIds) => invoke("trash_assets", { assetIds }),
   restoreAsset: (assetId) => invoke("restore_asset", { assetId }),
   restoreAssets: (assetIds) => invoke("restore_assets", { assetIds }),
@@ -59,8 +56,6 @@ export const libraryGateway: LibraryGateway = {
     invoke("set_asset_favorite", { assetId, favorite }),
   setAssetsFavorite: (assetIds, favorite) =>
     invoke("set_assets_favorite", { assetIds, favorite }),
-  setAssetClassifications: (assetId, classificationIds) =>
-    invoke("set_asset_classifications", { assetId, classificationIds }),
   patchAssetClassifications: (patch: AssetClassificationPatch) =>
     invoke("patch_asset_classifications", { patch }),
   getAssetClassifications: (assetId) =>
