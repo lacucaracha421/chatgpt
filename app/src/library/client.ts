@@ -33,6 +33,8 @@ export const libraryGateway: LibraryGateway = {
     invoke("rename_classification", { id, name }),
   moveClassification: (id, parentId) =>
     invoke("move_classification", { id, parentId }),
+  updateClassificationAppearance: (id, iconKey, colorKey) =>
+    invoke("update_classification_appearance", { id, iconKey, colorKey }),
   deleteClassification: (id) => invoke("delete_classification", { id }),
   listAssets: (query: AssetQuery) =>
     invoke<AssetPage>("list_assets", { query }),

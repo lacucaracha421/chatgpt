@@ -91,7 +91,7 @@ function reviewAsset(id: string, originalName: string) {
       media: { kind: "image" as const },
     },
     format: "PNG",
-    classifications: [{ id: "tag", kind: "tag" as const, name: "아로나", parentId: "work" }],
+    classifications: [{ id: "tag", kind: "tag" as const, name: "아로나", parentId: "work", iconKey: null, colorKey: null }],
   };
 }
 
@@ -102,7 +102,7 @@ function reviewPage(items: SimilarityReviewSummary[], totalCount: number) {
 function reviewGateway(): LibraryGateway {
   return {
     openLibrary: vi.fn(), getExtensionConnection: vi.fn(), listClassifications: vi.fn(),
-    createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(), deleteClassification: vi.fn(),
+    createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(), updateClassificationAppearance: vi.fn(), deleteClassification: vi.fn(),
     listAssets: vi.fn(), indexMissingSimilarityHashes: vi.fn(),
     listSimilarityReviews: vi.fn(),
     decideSimilarityReview: vi.fn().mockResolvedValue(undefined),

@@ -10,8 +10,8 @@ vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: (url: string) => openUrl(
 afterEach(() => { cleanup(); openUrl.mockClear(); });
 
 const classifications: ClassificationEntry[] = [
-  { id: "tag", kind: "tag", name: "태그", parentId: null },
-  { id: "work", kind: "work", name: "작품", parentId: null },
+  { id: "tag", kind: "tag", name: "태그", parentId: null, iconKey: null, colorKey: null },
+  { id: "work", kind: "work", name: "작품", parentId: null, iconKey: null, colorKey: null },
 ];
 
 it("hides the open control when there is no selection", () => {

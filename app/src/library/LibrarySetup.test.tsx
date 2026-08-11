@@ -13,6 +13,7 @@ function gateway(): LibraryGateway {
     createClassification: vi.fn(),
     renameClassification: vi.fn(),
     moveClassification: vi.fn(),
+    updateClassificationAppearance: vi.fn(),
     deleteClassification: vi.fn(),
     listAssets: vi.fn(),
     indexMissingSimilarityHashes: vi.fn(),

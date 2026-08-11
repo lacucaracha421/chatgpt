@@ -8,9 +8,9 @@ import { ClassificationSidebar } from "./ClassificationSidebar";
 import { buildClassificationTree } from "./buildTree";
 
 const entries: ClassificationEntry[] = [
-  { id: "root", kind: "root", name: "Games", parentId: null },
-  { id: "work", kind: "work", name: "Blue Archive", parentId: "root" },
-  { id: "tag", kind: "tag", name: "Arona", parentId: "work" },
+  { id: "root", kind: "root", name: "Games", parentId: null, iconKey: null, colorKey: null },
+  { id: "work", kind: "work", name: "Blue Archive", parentId: "root", iconKey: null, colorKey: null },
+  { id: "tag", kind: "tag", name: "Arona", parentId: "work", iconKey: null, colorKey: null },
 ];
 
 function gateway(): LibraryGateway {
@@ -21,6 +21,7 @@ function gateway(): LibraryGateway {
     createClassification: vi.fn().mockResolvedValue(entries[1]),
     renameClassification: vi.fn().mockResolvedValue(undefined),
     moveClassification: vi.fn().mockResolvedValue(undefined),
+    updateClassificationAppearance: vi.fn().mockResolvedValue(undefined),
     deleteClassification: vi.fn().mockResolvedValue(undefined),
     listAssets: vi.fn(),
     indexMissingSimilarityHashes: vi.fn(),
@@ -105,7 +106,7 @@ describe("buildClassificationTree", () => {
   });
 
   it("reports whether disconnected entries were omitted", () => {
-    const tree = buildClassificationTree([...entries, { id: "lost", kind: "tag", name: "Lost", parentId: "missing" }]);
+    const tree = buildClassificationTree([...entries, { id: "lost", kind: "tag", name: "Lost", parentId: "missing", iconKey: null, colorKey: null }]);
 
     expect(tree.hasOrphans).toBe(true);
   });
@@ -329,7 +330,7 @@ describe("ClassificationSidebar", () => {
 
   it("explains that deleting a root preserves assets and removes its folder link", async () => {
     const user = userEvent.setup();
-    const rootEntries = [...entries, { id: "empty", kind: "root", name: "Unused", parentId: null }] satisfies ClassificationEntry[];
+    const rootEntries = [...entries, { id: "empty", kind: "root", name: "Unused", parentId: null, iconKey: null, colorKey: null }] satisfies ClassificationEntry[];
     renderSidebar(gateway(), { entries: rootEntries });
 
     fireEvent.contextMenu(screen.getByRole("treeitem", { name: "Unused" }), { clientX: 20, clientY: 20 });
@@ -356,7 +357,7 @@ describe("ClassificationSidebar", () => {
   it("selects all assets after deleting an empty root", async () => {
     const user = userEvent.setup();
     const fixtureGateway = gateway();
-    const rootEntries = [...entries, { id: "empty", kind: "root", name: "Unused", parentId: null }] satisfies ClassificationEntry[];
+    const rootEntries = [...entries, { id: "empty", kind: "root", name: "Unused", parentId: null, iconKey: null, colorKey: null }] satisfies ClassificationEntry[];
     const { onViewChange } = renderSidebar(fixtureGateway, { entries: rootEntries, view: { kind: "classification", classificationId: "empty" } });
 
     fireEvent.contextMenu(screen.getByRole("treeitem", { name: "Unused" }), { clientX: 20, clientY: 20 });
@@ -371,7 +372,7 @@ describe("ClassificationSidebar", () => {
     const user = userEvent.setup();
     const nestedEntries = [
       ...entries,
-      { id: "child", kind: "tag", name: "School Uniform", parentId: "tag" },
+      { id: "child", kind: "tag", name: "School Uniform", parentId: "tag", iconKey: null, colorKey: null },
     ] satisfies ClassificationEntry[];
     renderSidebar(gateway(), { entries: nestedEntries, expandedIds: ["root", "work", "tag"] });
 
@@ -396,7 +397,7 @@ describe("ClassificationSidebar", () => {
 
   it("offers only root folders when moving a work folder", async () => {
     const user = userEvent.setup();
-    const rootEntries = [...entries, { id: "root-2", kind: "root", name: "Images", parentId: null }] satisfies ClassificationEntry[];
+    const rootEntries = [...entries, { id: "root-2", kind: "root", name: "Images", parentId: null, iconKey: null, colorKey: null }] satisfies ClassificationEntry[];
     renderSidebar(gateway(), { entries: rootEntries });
 
     await user.click(screen.getByRole("button", { name: "Blue Archive 추가 작업" }));
@@ -408,7 +409,7 @@ describe("ClassificationSidebar", () => {
   it("expands the destination after moving from the dialog", async () => {
     const user = userEvent.setup();
     const fixtureGateway = gateway();
-    const rootEntries = [...entries, { id: "root-2", kind: "root", name: "Images", parentId: null }] satisfies ClassificationEntry[];
+    const rootEntries = [...entries, { id: "root-2", kind: "root", name: "Images", parentId: null, iconKey: null, colorKey: null }] satisfies ClassificationEntry[];
     const { onExpandedIdsChange } = renderSidebar(fixtureGateway, { entries: rootEntries, expandedIds: ["root", "work"] });
 
     await user.click(screen.getByRole("button", { name: "Arona 추가 작업" }));

@@ -17,24 +17,32 @@ const games: ClassificationEntry = {
   kind: "root",
   name: "게임",
   parentId: null,
+  iconKey: null,
+  colorKey: null,
 };
 const blueArchive: ClassificationEntry = {
   id: "work-blue-archive",
   kind: "work",
   name: "블루 아카이브",
   parentId: "root-games",
+  iconKey: null,
+  colorKey: null,
 };
 const arona: ClassificationEntry = {
   id: "tag-arona",
   kind: "tag",
   name: "아로나",
   parentId: "work-blue-archive",
+  iconKey: null,
+  colorKey: null,
 };
 const images: ClassificationEntry = {
   id: "root-images",
   kind: "root",
   name: "이미지",
   parentId: null,
+  iconKey: null,
+  colorKey: null,
 };
 const asset: AssetSummary = {
   id: "asset-arona",
@@ -64,6 +72,7 @@ function gateway(): LibraryGateway {
     createClassification: vi.fn(),
     renameClassification: vi.fn(),
     moveClassification: vi.fn(),
+    updateClassificationAppearance: vi.fn(),
     deleteClassification: vi.fn(),
     listAssets: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
     indexMissingSimilarityHashes: vi.fn(),

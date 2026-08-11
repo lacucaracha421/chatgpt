@@ -27,6 +27,8 @@ export type ClassificationEntry = {
   kind: ClassificationKind;
   name: string;
   parentId: string | null;
+  iconKey: string | null;
+  colorKey: string | null;
 };
 
 export type VideoPreparationState =
@@ -178,6 +180,11 @@ export interface LibraryGateway {
   createClassification(input: CreateClassification): Promise<ClassificationEntry>;
   renameClassification(id: string, name: string): Promise<void>;
   moveClassification(id: string, parentId: string | null): Promise<void>;
+  updateClassificationAppearance(
+    id: string,
+    iconKey: string | null,
+    colorKey: string | null,
+  ): Promise<void>;
   deleteClassification(id: string): Promise<void>;
   listAssets(query: AssetQuery): Promise<AssetPage>;
   indexMissingSimilarityHashes(): Promise<SimilarityIndexProgress>;

@@ -137,7 +137,7 @@ it("shows the Edge connection and copies its hidden key on request", async () =>
 function createGateway(): LibraryGateway {
   return {
     openLibrary: vi.fn(), getExtensionConnection: vi.fn(), listClassifications: vi.fn(),
-    createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(),
+    createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(), updateClassificationAppearance: vi.fn(),
     deleteClassification: vi.fn(), listAssets: vi.fn(), indexMissingSimilarityHashes: vi.fn(),
     listSimilarityReviews: vi.fn(), decideSimilarityReview: vi.fn(), getAsset: vi.fn(), setAssetFavorite: vi.fn(), setAssetsFavorite: vi.fn(),
     patchAssetClassifications: vi.fn(), getAssetClassifications: vi.fn(), ingestMedia: vi.fn(),

@@ -38,6 +38,24 @@ describe("libraryGateway similarity contract", () => {
   });
 });
 
+describe("libraryGateway classification appearance contract", () => {
+  beforeEach(() => invoke.mockClear());
+
+  it("uses the appearance command with camelCase payloads", async () => {
+    await libraryGateway.updateClassificationAppearance(
+      "folder-1",
+      "photo",
+      "pink",
+    );
+
+    expect(invoke).toHaveBeenCalledWith("update_classification_appearance", {
+      id: "folder-1",
+      iconKey: "photo",
+      colorKey: "pink",
+    });
+  });
+});
+
 describe("libraryGateway video contract", () => {
   beforeEach(() => invoke.mockClear());
 

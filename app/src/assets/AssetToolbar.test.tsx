@@ -10,7 +10,7 @@ vi.mock("@tauri-apps/api/window", () => ({
 
 const baseProps = {
   view: { kind: "classification", classificationId: null } as AssetView,
-  classifications: [{ id: "game", kind: "root" as const, name: "게임", parentId: null }],
+  classifications: [{ id: "game", kind: "root" as const, name: "게임", parentId: null, iconKey: null, colorKey: null }],
   sort: "newest" as AssetSort,
   directOnly: false,
   metadataVisible: true,

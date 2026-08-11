@@ -326,7 +326,7 @@ describe("AssetBrowser", () => {
   it("applies inspector classification actions to the selection", async () => {
     const user = userEvent.setup();
     const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
-    const tag: ClassificationEntry = { id: "tag", kind: "tag", name: "태그", parentId: null };
+    const tag: ClassificationEntry = { id: "tag", kind: "tag", name: "태그", parentId: null, iconKey: null, colorKey: null };
     vi.mocked(gateway.getAssetClassifications).mockResolvedValueOnce([]).mockResolvedValue(["tag"]);
     render(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "classification", classificationId: null }} classifications={[tag]} sort="newest" metadataVisible={false} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
     const first = await screen.findByRole("option", { name: "asset-0.png" });
@@ -383,7 +383,7 @@ describe("AssetBrowser", () => {
   it("runs explicit batch favorite, classification, trash, and undo actions", async () => {
     const user = userEvent.setup();
     const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
-    const tag: ClassificationEntry = { id: "tag", kind: "tag", name: "아로나", parentId: null };
+    const tag: ClassificationEntry = { id: "tag", kind: "tag", name: "아로나", parentId: null, iconKey: null, colorKey: null };
     render(
       <LibraryProvider gateway={gateway}>
         <AssetBrowser view={{ kind: "classification", classificationId: null }} classifications={[tag]} sort="newest" metadataVisible={false} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} />
@@ -511,7 +511,7 @@ function asset(index: number) {
 function createGateway(page: AssetPage = { items: [], nextCursor: null }): LibraryGateway {
   return {
     openLibrary: vi.fn(), getExtensionConnection: vi.fn(), listClassifications: vi.fn(),
-    createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(),
+    createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(), updateClassificationAppearance: vi.fn(),
     deleteClassification: vi.fn(), listAssets: vi.fn().mockResolvedValue(page),
     indexMissingSimilarityHashes: vi.fn(), listSimilarityReviews: vi.fn(), decideSimilarityReview: vi.fn(), getAsset: vi.fn(),
     trashAssets: vi.fn().mockResolvedValue(undefined), restoreAsset: vi.fn(), restoreAssets: vi.fn().mockResolvedValue(undefined), listTrash: vi.fn(), emptyTrash: vi.fn(),
