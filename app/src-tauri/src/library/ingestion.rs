@@ -26,7 +26,7 @@ use super::{
     Library,
 };
 
-const MAX_IMAGE_BYTES: u64 = 512 * 1024 * 1024;
+pub(crate) const MAX_IMAGE_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_IMAGE_PIXELS: u64 = 200_000_000;
 
 impl Library {

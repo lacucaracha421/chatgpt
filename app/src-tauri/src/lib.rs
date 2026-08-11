@@ -1,4 +1,5 @@
 mod commands;
+mod extension_api;
 pub mod library;
 mod media_protocol;
 
@@ -9,10 +10,21 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let app_state = commands::AppState::default();
+    let extension_runtime = extension_api::ExtensionRuntime::default();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .manage(commands::AppState::default())
+        .manage(app_state.clone())
+        .manage(extension_runtime.clone())
+        .setup(move |app| {
+            extension_api::start(
+                app.handle().clone(),
+                app_state.clone(),
+                extension_runtime.clone(),
+            );
+            Ok(())
+        })
         .register_uri_scheme_protocol("lakomics", |context, request| {
             let state = context.app_handle().state::<commands::AppState>();
             let library = state.current_library();
@@ -29,6 +41,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::open_library,
+            commands::get_extension_connection,
             commands::ensure_daily_backup,
             commands::list_metadata_backups,
             commands::restore_metadata_backup,

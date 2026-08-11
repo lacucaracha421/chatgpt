@@ -1,0 +1,936 @@
+use std::{
+    fs::{self, OpenOptions},
+    io::{self, Read, Write},
+    path::{Path, PathBuf},
+    sync::{Arc, RwLock},
+    thread,
+};
+
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Manager};
+use thiserror::Error;
+use tiny_http::{Header, Request, Response, Server};
+use uuid::Uuid;
+
+use crate::{
+    commands::AppState,
+    library::{
+        models::{AssetClassificationPatch, IngestMediaRequest, IngestOutcome},
+        Library, MAX_IMAGE_BYTES,
+    },
+};
+
+pub const API_ADDRESS: &str = "127.0.0.1:32145";
+pub const API_BASE_URL: &str = "http://127.0.0.1:32145";
+pub const EXTENSION_ORIGIN: &str = "chrome-extension://nclkmjmmlcdaeomgadndeangccfidfbk";
+const MAX_JSON_BYTES: usize = 32 * 1024;
+const TOKEN_FILE_NAME: &str = "extension-token.txt";
+
+#[derive(Debug, Error, PartialEq, Eq)]
+enum ApiError {
+    #[error("request origin is not allowed")]
+    ForbiddenOrigin,
+    #[error("authorization failed")]
+    Unauthorized,
+    #[error("request body is too large")]
+    BodyTooLarge,
+    #[error("request body could not be read")]
+    BodyRead,
+    #[error("extension token could not be loaded")]
+    TokenLoad,
+    #[error("no library is open")]
+    LibraryNotOpen,
+    #[error("route not found")]
+    NotFound,
+    #[error("library operation failed")]
+    Internal,
+    #[error("ingestion request is invalid")]
+    InvalidRequest,
+    #[error("media URL is invalid")]
+    InvalidMediaUrl,
+    #[error("source URL is invalid")]
+    InvalidSourceUrl,
+    #[error("classification was not found")]
+    ClassificationNotFound,
+    #[error("download is too large")]
+    DownloadTooLarge,
+    #[error("download failed")]
+    DownloadFailed,
+    #[error("downloaded file is not a supported image")]
+    UnsupportedImage,
+}
+
+#[derive(Clone, Default)]
+pub struct ExtensionRuntime(Arc<RwLock<RuntimeStatus>>);
+
+#[derive(Clone, Default)]
+enum RuntimeStatus {
+    #[default]
+    Starting,
+    Ready {
+        token: String,
+    },
+    BindFailed,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtensionConnection {
+    pub base_url: &'static str,
+    pub token: String,
+    pub status: ConnectionStatus,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectionStatus {
+    Ready,
+    BindFailed,
+}
+
+impl ExtensionRuntime {
+    pub fn connection(&self) -> ExtensionConnection {
+        let status = self
+            .0
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        match status {
+            RuntimeStatus::Ready { token } => ExtensionConnection {
+                base_url: API_BASE_URL,
+                token,
+                status: ConnectionStatus::Ready,
+            },
+            RuntimeStatus::Starting | RuntimeStatus::BindFailed => ExtensionConnection {
+                base_url: API_BASE_URL,
+                token: String::new(),
+                status: ConnectionStatus::BindFailed,
+            },
+        }
+    }
+
+    fn mark_ready(&self, token: String) {
+        *self
+            .0
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = RuntimeStatus::Ready { token };
+    }
+
+    fn mark_bind_failed(&self) {
+        *self
+            .0
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = RuntimeStatus::BindFailed;
+    }
+}
+
+pub(crate) fn start(app: AppHandle, state: AppState, runtime: ExtensionRuntime) {
+    let config_dir = match app.path().app_config_dir() {
+        Ok(path) => path,
+        Err(_) => {
+            runtime.mark_bind_failed();
+            return;
+        }
+    };
+    let token = match load_or_create_token(&config_dir) {
+        Ok(token) => token,
+        Err(_) => {
+            runtime.mark_bind_failed();
+            return;
+        }
+    };
+    let server = match Server::http(API_ADDRESS) {
+        Ok(server) => server,
+        Err(_) => {
+            runtime.mark_bind_failed();
+            return;
+        }
+    };
+    runtime.mark_ready(token.clone());
+    let _ = thread::Builder::new()
+        .name("lakomics-extension-api".into())
+        .spawn(move || serve(server, state, token));
+}
+
+fn serve(server: Server, state: AppState, token: String) {
+    for request in server.incoming_requests() {
+        handle_request(request, &state, &token);
+    }
+}
+
+fn handle_request(mut request: Request, state: &AppState, token: &str) {
+    let method = request.method().as_str().to_owned();
+    let path = request
+        .url()
+        .split('?')
+        .next()
+        .unwrap_or(request.url())
+        .to_owned();
+    let origin = request_header(&request, "Origin");
+    let authorization = request_header(&request, "Authorization");
+    let body = if method == "POST" {
+        match read_json_limited(request.as_reader()) {
+            Ok(body) => body,
+            Err(error) => {
+                let _ = request.respond(api_error_response(error).into_tiny_http());
+                return;
+            }
+        }
+    } else {
+        Vec::new()
+    };
+    let api_request = ApiRequest {
+        method,
+        path,
+        origin,
+        authorization,
+        body,
+    };
+    let library = state.current_library();
+    let response = dispatch(api_request, library.as_ref(), token);
+    let _ = request.respond(response.into_tiny_http());
+}
+
+fn request_header(request: &Request, name: &'static str) -> Option<String> {
+    request
+        .headers()
+        .iter()
+        .find(|header| header.field.equiv(name))
+        .map(|header| header.value.as_str().to_owned())
+}
+
+#[derive(Debug)]
+struct ApiRequest {
+    method: String,
+    path: String,
+    origin: Option<String>,
+    authorization: Option<String>,
+    body: Vec<u8>,
+}
+
+#[cfg(test)]
+impl ApiRequest {
+    fn get(path: &str, origin: &str, authorization: Option<&str>) -> Self {
+        Self {
+            method: "GET".into(),
+            path: path.into(),
+            origin: Some(origin.into()),
+            authorization: authorization.map(str::to_owned),
+            body: Vec::new(),
+        }
+    }
+
+    fn options(path: &str, origin: &str) -> Self {
+        Self {
+            method: "OPTIONS".into(),
+            path: path.into(),
+            origin: Some(origin.into()),
+            authorization: None,
+            body: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ApiResponse {
+    status: u16,
+    headers: Vec<(&'static str, String)>,
+    body: Vec<u8>,
+}
+
+impl ApiResponse {
+    fn empty(status: u16) -> Self {
+        Self {
+            status,
+            headers: cors_headers(),
+            body: Vec::new(),
+        }
+    }
+
+    fn json<T: Serialize>(status: u16, value: &T) -> Self {
+        let mut headers = cors_headers();
+        headers.push(("Content-Type", "application/json; charset=utf-8".into()));
+        Self {
+            status,
+            headers,
+            body: serde_json::to_vec(value).expect("API response models serialize"),
+        }
+    }
+
+    #[cfg(test)]
+    fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(field, _)| field.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.as_str())
+    }
+
+    fn into_tiny_http(self) -> Response<std::io::Cursor<Vec<u8>>> {
+        let mut response = Response::from_data(self.body).with_status_code(self.status);
+        for (name, value) in self.headers {
+            let header = Header::from_bytes(name.as_bytes(), value.as_bytes())
+                .expect("static API headers are ASCII");
+            response = response.with_header(header);
+        }
+        response
+    }
+}
+
+#[derive(Serialize)]
+struct ClassificationsResponse {
+    entries: Vec<crate::library::models::ClassificationEntry>,
+}
+
+#[derive(Serialize)]
+struct ErrorResponse {
+    code: &'static str,
+    message: &'static str,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct XIngestionRequest {
+    source: String,
+    media_url: String,
+    source_url: String,
+    classification_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct XIngestionResponse {
+    status: IngestionStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    asset_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    review_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum IngestionStatus {
+    Added,
+    DuplicateTagged,
+    DuplicateUnchanged,
+    ReviewPending,
+}
+
+trait ImageDownloader: Send + Sync {
+    fn download(
+        &self,
+        media_url: &url::Url,
+        destination: &Path,
+        maximum_bytes: u64,
+    ) -> Result<(), ApiError>;
+}
+
+struct UreqImageDownloader {
+    agent: ureq::Agent,
+}
+
+impl UreqImageDownloader {
+    fn new() -> Self {
+        let config = ureq::Agent::config_builder()
+            .https_only(true)
+            .max_redirects(0)
+            .build();
+        Self {
+            agent: config.into(),
+        }
+    }
+}
+
+impl ImageDownloader for UreqImageDownloader {
+    fn download(
+        &self,
+        media_url: &url::Url,
+        destination: &Path,
+        maximum_bytes: u64,
+    ) -> Result<(), ApiError> {
+        let mut response = self
+            .agent
+            .get(media_url.as_str())
+            .call()
+            .map_err(|_| ApiError::DownloadFailed)?;
+        if !response.status().is_success() {
+            return Err(ApiError::DownloadFailed);
+        }
+        let mut output = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(destination)
+            .map_err(|_| ApiError::DownloadFailed)?;
+        let mut reader = response
+            .body_mut()
+            .with_config()
+            .limit(maximum_bytes + 1)
+            .reader();
+        let copied = io::copy(&mut reader, &mut output).map_err(|_| ApiError::DownloadFailed)?;
+        if copied > maximum_bytes {
+            return Err(ApiError::DownloadTooLarge);
+        }
+        output.flush().map_err(|_| ApiError::DownloadFailed)
+    }
+}
+
+fn dispatch(request: ApiRequest, library: Option<&Library>, token: &str) -> ApiResponse {
+    if request.method == "OPTIONS" {
+        if request.origin.as_deref() != Some(EXTENSION_ORIGIN) {
+            return api_error_response(ApiError::ForbiddenOrigin);
+        }
+        let mut response = ApiResponse::empty(204);
+        response
+            .headers
+            .push(("Access-Control-Allow-Methods", "GET, POST, OPTIONS".into()));
+        response.headers.push((
+            "Access-Control-Allow-Headers",
+            "Authorization, Content-Type".into(),
+        ));
+        return response;
+    }
+
+    if let Err(error) = authorize(
+        request.origin.as_deref(),
+        request.authorization.as_deref(),
+        token,
+    ) {
+        return api_error_response(error);
+    }
+
+    match (request.method.as_str(), request.path.as_str()) {
+        ("GET", "/v1/classifications") => {
+            let Some(library) = library else {
+                return api_error_response(ApiError::LibraryNotOpen);
+            };
+            match library.list_classifications() {
+                Ok(entries) => ApiResponse::json(200, &ClassificationsResponse { entries }),
+                Err(_) => api_error_response(ApiError::Internal),
+            }
+        }
+        ("POST", "/v1/ingestions") => {
+            let Some(library) = library else {
+                return api_error_response(ApiError::LibraryNotOpen);
+            };
+            let request = match serde_json::from_slice::<XIngestionRequest>(&request.body) {
+                Ok(request) => request,
+                Err(_) => return api_error_response(ApiError::InvalidRequest),
+            };
+            match ingest_x_image(library, request, &UreqImageDownloader::new()) {
+                Ok(response) => ApiResponse::json(200, &response),
+                Err(error) => api_error_response(error),
+            }
+        }
+        _ => api_error_response(ApiError::NotFound),
+    }
+}
+
+fn ingest_x_image(
+    library: &Library,
+    request: XIngestionRequest,
+    downloader: &dyn ImageDownloader,
+) -> Result<XIngestionResponse, ApiError> {
+    if request.source != "x" || request.classification_id.trim().is_empty() {
+        return Err(ApiError::InvalidRequest);
+    }
+    let classification_exists = library
+        .list_classifications()
+        .map_err(|_| ApiError::Internal)?
+        .iter()
+        .any(|entry| entry.id == request.classification_id);
+    if !classification_exists {
+        return Err(ApiError::ClassificationNotFound);
+    }
+
+    let media_url = validate_url(&request.media_url, &["pbs.twimg.com"])
+        .map_err(|_| ApiError::InvalidMediaUrl)?;
+    validate_url(&request.source_url, &["x.com", "twitter.com"])
+        .map_err(|_| ApiError::InvalidSourceUrl)?;
+
+    let staging_directory = library.root().join("assets").join(".staging");
+    fs::create_dir_all(&staging_directory).map_err(|_| ApiError::DownloadFailed)?;
+    let temporary_path = staging_directory.join(format!("remote-{}.png", Uuid::new_v4()));
+    let temporary = TemporaryDownload::new(temporary_path);
+    downloader.download(&media_url, temporary.path(), MAX_IMAGE_BYTES)?;
+
+    let outcome = library
+        .ingest_media(IngestMediaRequest {
+            source_path: temporary.path().to_path_buf(),
+            classification_id: Some(request.classification_id.clone()),
+            source_url: Some(request.source_url),
+        })
+        .map_err(map_ingestion_error)?;
+    finish_ingestion(library, &request.classification_id, outcome)
+}
+
+fn validate_url(value: &str, allowed_hosts: &[&str]) -> Result<url::Url, ()> {
+    let parsed = url::Url::parse(value).map_err(|_| ())?;
+    if parsed.scheme() != "https"
+        || !parsed
+            .host_str()
+            .is_some_and(|host| allowed_hosts.contains(&host))
+    {
+        return Err(());
+    }
+    Ok(parsed)
+}
+
+fn finish_ingestion(
+    library: &Library,
+    classification_id: &str,
+    outcome: IngestOutcome,
+) -> Result<XIngestionResponse, ApiError> {
+    match outcome {
+        IngestOutcome::Added { asset } => Ok(XIngestionResponse {
+            status: IngestionStatus::Added,
+            asset_id: Some(asset.id),
+            review_id: None,
+        }),
+        IngestOutcome::ReviewPending { review_id } => Ok(XIngestionResponse {
+            status: IngestionStatus::ReviewPending,
+            asset_id: None,
+            review_id: Some(review_id),
+        }),
+        IngestOutcome::ExactDuplicate { existing_asset_id } => {
+            let already_classified = library
+                .get_asset_classifications(&existing_asset_id)
+                .map_err(|_| ApiError::Internal)?
+                .iter()
+                .any(|entry| entry.id == classification_id);
+            let status = if already_classified {
+                IngestionStatus::DuplicateUnchanged
+            } else {
+                library
+                    .patch_asset_classifications(AssetClassificationPatch {
+                        asset_ids: vec![existing_asset_id.clone()],
+                        add_classification_ids: vec![classification_id.to_owned()],
+                        remove_classification_ids: Vec::new(),
+                    })
+                    .map_err(|_| ApiError::Internal)?;
+                IngestionStatus::DuplicateTagged
+            };
+            Ok(XIngestionResponse {
+                status,
+                asset_id: Some(existing_asset_id),
+                review_id: None,
+            })
+        }
+    }
+}
+
+fn map_ingestion_error(error: crate::library::error::LibraryError) -> ApiError {
+    match error {
+        crate::library::error::LibraryError::ClassificationNotFound => {
+            ApiError::ClassificationNotFound
+        }
+        crate::library::error::LibraryError::UnsupportedImage => ApiError::UnsupportedImage,
+        _ => ApiError::Internal,
+    }
+}
+
+struct TemporaryDownload {
+    path: PathBuf,
+}
+
+impl TemporaryDownload {
+    fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TemporaryDownload {
+    fn drop(&mut self) {
+        match fs::remove_file(&self.path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => {}
+        }
+    }
+}
+
+fn cors_headers() -> Vec<(&'static str, String)> {
+    vec![
+        ("Access-Control-Allow-Origin", EXTENSION_ORIGIN.into()),
+        ("Vary", "Origin".into()),
+    ]
+}
+
+fn api_error_response(error: ApiError) -> ApiResponse {
+    let (status, code, message) = match error {
+        ApiError::ForbiddenOrigin => (403, "forbidden_origin", "Request origin is not allowed."),
+        ApiError::Unauthorized => (401, "unauthorized", "Extension connection key is invalid."),
+        ApiError::BodyTooLarge => (413, "body_too_large", "Request body is too large."),
+        ApiError::BodyRead => (400, "invalid_body", "Request body could not be read."),
+        ApiError::TokenLoad => (500, "token_unavailable", "Extension key is unavailable."),
+        ApiError::LibraryNotOpen => (409, "library_not_open", "Open a Lakomics library first."),
+        ApiError::NotFound => (404, "not_found", "Route not found."),
+        ApiError::Internal => (
+            500,
+            "internal_error",
+            "Lakomics could not complete the request.",
+        ),
+        ApiError::InvalidRequest => (400, "invalid_request", "Ingestion request is invalid."),
+        ApiError::InvalidMediaUrl => (400, "invalid_media_url", "X media URL is invalid."),
+        ApiError::InvalidSourceUrl => (400, "invalid_source_url", "X source URL is invalid."),
+        ApiError::ClassificationNotFound => (
+            404,
+            "classification_not_found",
+            "Refresh classifications and select one again.",
+        ),
+        ApiError::DownloadTooLarge => (413, "download_too_large", "Image is too large."),
+        ApiError::DownloadFailed => (502, "download_failed", "Image download failed."),
+        ApiError::UnsupportedImage => (
+            422,
+            "unsupported_image",
+            "Downloaded file is not a supported image.",
+        ),
+    };
+    ApiResponse::json(status, &ErrorResponse { code, message })
+}
+
+fn load_or_create_token(config_dir: &Path) -> Result<String, ApiError> {
+    fs::create_dir_all(config_dir).map_err(|_| ApiError::TokenLoad)?;
+    let path = config_dir.join(TOKEN_FILE_NAME);
+    let token = match OpenOptions::new().create_new(true).write(true).open(&path) {
+        Ok(mut file) => {
+            let token = Uuid::new_v4().simple().to_string();
+            file.write_all(token.as_bytes())
+                .and_then(|_| file.flush())
+                .map_err(|_| ApiError::TokenLoad)?;
+            token
+        }
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            fs::read_to_string(&path).map_err(|_| ApiError::TokenLoad)?
+        }
+        Err(_) => return Err(ApiError::TokenLoad),
+    };
+    if token.len() != 32
+        || !token
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return Err(ApiError::TokenLoad);
+    }
+    Ok(token)
+}
+
+fn authorize(
+    origin: Option<&str>,
+    authorization: Option<&str>,
+    token: &str,
+) -> Result<(), ApiError> {
+    if origin != Some(EXTENSION_ORIGIN) {
+        return Err(ApiError::ForbiddenOrigin);
+    }
+    let supplied = authorization
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .ok_or(ApiError::Unauthorized)?;
+    if supplied != token {
+        return Err(ApiError::Unauthorized);
+    }
+    Ok(())
+}
+
+fn read_json_limited<R: Read>(reader: R) -> Result<Vec<u8>, ApiError> {
+    let mut limited = reader.take((MAX_JSON_BYTES + 1) as u64);
+    let mut bytes = Vec::new();
+    limited
+        .read_to_end(&mut bytes)
+        .map_err(|_| ApiError::BodyRead)?;
+    if bytes.len() > MAX_JSON_BYTES {
+        return Err(ApiError::BodyTooLarge);
+    }
+    Ok(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+    use crate::library::{
+        models::{ClassificationKind, CreateClassification, IngestOutcome},
+        Library,
+    };
+
+    #[test]
+    fn creates_and_reuses_one_install_token() {
+        let root = tempfile::tempdir().unwrap();
+        let first = load_or_create_token(root.path()).unwrap();
+        let second = load_or_create_token(root.path()).unwrap();
+        assert_eq!(first, second);
+        assert_eq!(first.len(), 32);
+        assert!(first
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()));
+    }
+
+    #[test]
+    fn requires_exact_origin_and_bearer_token() {
+        assert!(authorize(Some(EXTENSION_ORIGIN), Some("Bearer abc"), "abc").is_ok());
+        assert_eq!(
+            authorize(Some("https://x.com"), Some("Bearer abc"), "abc"),
+            Err(ApiError::ForbiddenOrigin)
+        );
+        assert_eq!(
+            authorize(Some(EXTENSION_ORIGIN), Some("Bearer wrong"), "abc"),
+            Err(ApiError::Unauthorized)
+        );
+    }
+
+    #[test]
+    fn rejects_oversized_json_body() {
+        let bytes = vec![b'x'; MAX_JSON_BYTES + 1];
+        assert_eq!(
+            read_json_limited(bytes.as_slice()).unwrap_err(),
+            ApiError::BodyTooLarge
+        );
+    }
+
+    #[test]
+    fn classification_route_requires_auth_and_returns_existing_contract() {
+        let root = tempfile::tempdir().unwrap();
+        let library = Library::open(root.path()).unwrap();
+        library
+            .create_classification(CreateClassification {
+                kind: ClassificationKind::Root,
+                name: "Character".into(),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let unauthorized = dispatch(
+            ApiRequest::get("/v1/classifications", EXTENSION_ORIGIN, None),
+            Some(&library),
+            "secret",
+        );
+        assert_eq!(unauthorized.status, 401);
+
+        let response = dispatch(
+            ApiRequest::get(
+                "/v1/classifications",
+                EXTENSION_ORIGIN,
+                Some("Bearer secret"),
+            ),
+            Some(&library),
+            "secret",
+        );
+        assert_eq!(response.status, 200);
+        assert_eq!(
+            response.header("Access-Control-Allow-Origin"),
+            Some(EXTENSION_ORIGIN)
+        );
+        let json: serde_json::Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(json["entries"][0]["name"], "Character");
+        assert!(json["entries"][0].get("parentId").is_some());
+    }
+
+    #[test]
+    fn preflight_uses_fixed_cors_contract() {
+        let response = dispatch(
+            ApiRequest::options("/v1/classifications", EXTENSION_ORIGIN),
+            None,
+            "secret",
+        );
+        assert_eq!(response.status, 204);
+        assert_eq!(
+            response.header("Access-Control-Allow-Origin"),
+            Some(EXTENSION_ORIGIN)
+        );
+        assert_eq!(
+            response.header("Access-Control-Allow-Methods"),
+            Some("GET, POST, OPTIONS")
+        );
+        assert_eq!(
+            response.header("Access-Control-Allow-Headers"),
+            Some("Authorization, Content-Type")
+        );
+    }
+
+    #[test]
+    fn route_errors_have_stable_status_and_json_codes() {
+        let no_library = dispatch(
+            ApiRequest::get(
+                "/v1/classifications",
+                EXTENSION_ORIGIN,
+                Some("Bearer secret"),
+            ),
+            None,
+            "secret",
+        );
+        assert_eq!(no_library.status, 409);
+        assert_eq!(json_code(&no_library), "library_not_open");
+
+        let forbidden = dispatch(
+            ApiRequest::get(
+                "/v1/classifications",
+                "https://x.com",
+                Some("Bearer secret"),
+            ),
+            None,
+            "secret",
+        );
+        assert_eq!(forbidden.status, 403);
+        assert_eq!(json_code(&forbidden), "forbidden_origin");
+
+        let missing = dispatch(
+            ApiRequest::get("/v1/missing", EXTENSION_ORIGIN, Some("Bearer secret")),
+            None,
+            "secret",
+        );
+        assert_eq!(missing.status, 404);
+        assert_eq!(json_code(&missing), "not_found");
+    }
+
+    #[test]
+    fn ingestion_validates_classification_and_urls_before_downloading() {
+        let root = tempfile::tempdir().unwrap();
+        let library = Library::open(root.path()).unwrap();
+        let downloader = RecordingDownloader::new(png_bytes());
+
+        let error = ingest_x_image(&library, x_request("missing"), &downloader).unwrap_err();
+        assert_eq!(error, ApiError::ClassificationNotFound);
+        assert_eq!(downloader.calls(), 0);
+
+        let classification = create_root(&library, "Character");
+        let mut invalid_host = x_request(&classification.id);
+        invalid_host.media_url = "https://pbs.twimg.com.evil/media/ABC?format=png&name=orig".into();
+        let error = ingest_x_image(&library, invalid_host, &downloader).unwrap_err();
+        assert_eq!(error, ApiError::InvalidMediaUrl);
+        assert_eq!(downloader.calls(), 0);
+    }
+
+    #[test]
+    fn ingestion_adds_then_classifies_exact_duplicates_without_copying_again() {
+        let root = tempfile::tempdir().unwrap();
+        let library = Library::open(root.path()).unwrap();
+        let first_classification = create_root(&library, "First");
+        let second_classification = create_root(&library, "Second");
+        let downloader = RecordingDownloader::new(png_bytes());
+
+        let added =
+            ingest_x_image(&library, x_request(&first_classification.id), &downloader).unwrap();
+        assert_eq!(added.status, IngestionStatus::Added);
+        let asset_id = added.asset_id.unwrap();
+        assert_eq!(
+            library.get_asset(&asset_id).unwrap().source_url.as_deref(),
+            Some("https://x.com/example/status/123/photo/1")
+        );
+
+        let tagged =
+            ingest_x_image(&library, x_request(&second_classification.id), &downloader).unwrap();
+        assert_eq!(tagged.status, IngestionStatus::DuplicateTagged);
+        assert_eq!(tagged.asset_id.as_deref(), Some(asset_id.as_str()));
+
+        let unchanged =
+            ingest_x_image(&library, x_request(&second_classification.id), &downloader).unwrap();
+        assert_eq!(unchanged.status, IngestionStatus::DuplicateUnchanged);
+        let mut ids: Vec<_> = library
+            .get_asset_classifications(&asset_id)
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.id)
+            .collect();
+        ids.sort();
+        let mut expected = vec![first_classification.id, second_classification.id];
+        expected.sort();
+        assert_eq!(ids, expected);
+    }
+
+    #[test]
+    fn failed_image_ingestion_removes_remote_staging_file() {
+        let root = tempfile::tempdir().unwrap();
+        let library = Library::open(root.path()).unwrap();
+        let classification = create_root(&library, "Broken");
+        let downloader = RecordingDownloader::new(b"not an image".to_vec());
+
+        let error =
+            ingest_x_image(&library, x_request(&classification.id), &downloader).unwrap_err();
+        assert_eq!(error, ApiError::UnsupportedImage);
+        let staging = library.root().join("assets").join(".staging");
+        assert_eq!(fs::read_dir(staging).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn review_pending_outcome_preserves_the_review_id() {
+        let root = tempfile::tempdir().unwrap();
+        let library = Library::open(root.path()).unwrap();
+        let classification = create_root(&library, "Review");
+        let response = finish_ingestion(
+            &library,
+            &classification.id,
+            IngestOutcome::ReviewPending {
+                review_id: "review-1".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(response.status, IngestionStatus::ReviewPending);
+        assert_eq!(response.review_id.as_deref(), Some("review-1"));
+    }
+
+    struct RecordingDownloader {
+        bytes: Vec<u8>,
+        calls: AtomicUsize,
+    }
+
+    impl RecordingDownloader {
+        fn new(bytes: Vec<u8>) -> Self {
+            Self {
+                bytes,
+                calls: AtomicUsize::new(0),
+            }
+        }
+
+        fn calls(&self) -> usize {
+            self.calls.load(Ordering::SeqCst)
+        }
+    }
+
+    impl ImageDownloader for RecordingDownloader {
+        fn download(
+            &self,
+            _media_url: &url::Url,
+            destination: &Path,
+            _maximum_bytes: u64,
+        ) -> Result<(), ApiError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            fs::write(destination, &self.bytes).map_err(|_| ApiError::DownloadFailed)
+        }
+    }
+
+    fn create_root(library: &Library, name: &str) -> crate::library::models::ClassificationEntry {
+        library
+            .create_classification(CreateClassification {
+                kind: ClassificationKind::Root,
+                name: name.into(),
+                parent_id: None,
+            })
+            .unwrap()
+    }
+
+    fn x_request(classification_id: &str) -> XIngestionRequest {
+        XIngestionRequest {
+            source: "x".into(),
+            media_url: "https://pbs.twimg.com/media/ABC?format=png&name=orig".into(),
+            source_url: "https://x.com/example/status/123/photo/1".into(),
+            classification_id: classification_id.into(),
+        }
+    }
+
+    fn png_bytes() -> Vec<u8> {
+        let image = image::RgbImage::from_pixel(4, 4, image::Rgb([32, 64, 96]));
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(image)
+            .write_to(&mut bytes, image::ImageFormat::Png)
+            .unwrap();
+        bytes.into_inner()
+    }
+
+    fn json_code(response: &ApiResponse) -> String {
+        let json: serde_json::Value = serde_json::from_slice(&response.body).unwrap();
+        json["code"].as_str().unwrap().to_owned()
+    }
+}

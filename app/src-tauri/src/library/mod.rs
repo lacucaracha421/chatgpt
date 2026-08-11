@@ -22,6 +22,7 @@ use std::{
 };
 
 use error::LibraryError;
+pub(crate) use ingestion::MAX_IMAGE_BYTES;
 use lock::LibraryLease;
 use models::{LibrarySummary, MangaSeries, TrashPolicy};
 use rusqlite::{Connection, OptionalExtension};

@@ -16,9 +16,9 @@ use crate::library::{
     Library,
 };
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct AppState {
-    library: RwLock<Option<Library>>,
+    library: Arc<RwLock<Option<Library>>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -87,6 +87,13 @@ impl AppState {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
     }
+}
+
+#[tauri::command]
+pub fn get_extension_connection(
+    runtime: State<'_, crate::extension_api::ExtensionRuntime>,
+) -> crate::extension_api::ExtensionConnection {
+    runtime.connection()
 }
 
 #[tauri::command]
