@@ -1,0 +1,70 @@
+:root {
+  color-scheme: dark;
+  font-family: "Segoe UI", sans-serif;
+  color: #f4f4f5;
+  background: #111113;
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  display: grid;
+  gap: 20px;
+  width: min(760px, calc(100% - 40px));
+  margin: 40px auto;
+}
+
+section {
+  display: grid;
+  gap: 12px;
+  padding: 20px;
+  background: #1b1b1f;
+  border: 1px solid #34343a;
+  border-radius: 12px;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+}
+
+input,
+button {
+  min-height: 38px;
+  padding: 0 12px;
+  color: inherit;
+  background: #26262c;
+  border: 1px solid #44444d;
+  border-radius: 8px;
+}
+
+input {
+  flex: 1;
+  min-width: 0;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:hover {
+  background: #32323a;
+}
+
+#connection-status {
+  min-height: 24px;
+  color: #b9d8ff;
+}
+
+#layout-editor {
+  min-height: 180px;
+  color: #b8b8c2;
+}

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Lakomics X Collector 설정</title>
+    <link rel="stylesheet" href="options.css">
+    <script src="options.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <h1>Lakomics X Collector</h1>
+      <section aria-labelledby="connection-title">
+        <h2 id="connection-title">Lakomics 연결</h2>
+        <label for="connection-token">연결 키</label>
+        <div class="row">
+          <input id="connection-token" type="password" autocomplete="off" spellcheck="false">
+          <button id="save-token" type="button">저장</button>
+          <button id="refresh-classifications" type="button">연결 확인·새로고침</button>
+        </div>
+        <p id="connection-status" role="status"></p>
+      </section>
+      <section aria-labelledby="layout-title">
+        <h2 id="layout-title">방사형 메뉴 배치</h2>
+        <div id="layout-editor" aria-live="polite">분류 목록을 새로고침하면 편집기를 준비합니다.</div>
+      </section>
+    </main>
+  </body>
+</html>
