@@ -23,7 +23,8 @@ export function SettingsView({ restoring, onRestore, onExit }: SettingsViewProps
   const [backups, setBackups] = useState<MetadataBackup[] | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useAutoDismiss(error, setError);
+  const [backupRetryVersion, setBackupRetryVersion] = useState(0);
+  useAutoDismiss(backups === null ? null : error, setError);
   const [submitting, setSubmitting] = useState(false);
   const [mangaRoot, setMangaRoot] = useState<string | null>(null);
   const [mangaRootError, setMangaRootError] = useState<string | null>(null);
@@ -43,13 +44,13 @@ export function SettingsView({ restoring, onRestore, onExit }: SettingsViewProps
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       void gateway.listMetadataBackups().then((nextBackups) => {
-        if (!controller.signal.aborted) setBackups(nextBackups);
+        if (!controller.signal.aborted) { setBackups(nextBackups); setError(null); }
       }).catch((loadError: unknown) => {
         if (!controller.signal.aborted) setError(commandErrorMessage(loadError, "백업 목록을 불러오지 못했습니다."));
       });
     }, section === "safety" ? 0 : 250);
     return () => { controller.abort(); window.clearTimeout(timer); };
-  }, [gateway, section]);
+  }, [backupRetryVersion, gateway, section]);
 
   useEffect(() => {
     const cancel = (event: KeyboardEvent) => {
@@ -127,7 +128,7 @@ export function SettingsView({ restoring, onRestore, onExit }: SettingsViewProps
         ) : (
           <>
             <p>라이브러리 관리 정보의 자동 백업을 선택해 복구할 수 있습니다.</p>
-            {error && <div className="settings-view__safety-error"><Toast>{error}</Toast><Button onClick={() => setBackups(null)}>다시 시도</Button></div>}
+            {error && <div className="settings-view__safety-error"><Toast>{error}</Toast><Button onClick={() => { setError(null); setBackups(null); setBackupRetryVersion((version) => version + 1); }}>다시 시도</Button></div>}
             {!backups && !error ? (
               <Skeleton className="settings-view__skeleton" label="백업 목록을 불러오는 중" />
             ) : backups?.length === 0 ? (

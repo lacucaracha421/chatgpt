@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState, type ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -121,7 +121,7 @@ describe("ClassificationSidebar", () => {
     });
   });
 
-  afterEach(cleanup);
+  afterEach(() => { vi.useRealTimers(); cleanup(); });
 
   it("changes all-assets and quick views without fake classification IDs", async () => {
     const user = userEvent.setup();
@@ -230,6 +230,24 @@ describe("ClassificationSidebar", () => {
     await user.type(screen.getByLabelText("이름"), "New work");
     await user.click(screen.getByRole("button", { name: "추가" }));
     await waitFor(() => expect(fixtureGateway.createClassification).toHaveBeenLastCalledWith({ kind: "work", name: "New work", parentId: "root" }));
+  });
+
+  it("auto-dismisses classification mutation errors", async () => {
+    vi.useFakeTimers();
+    let rejectCreate!: (error: Error) => void;
+    const failed = new Promise<ClassificationEntry>((_resolve, reject) => { rejectCreate = reject; });
+    const fixtureGateway = gateway();
+    vi.mocked(fixtureGateway.createClassification).mockReturnValue(failed);
+    renderSidebar(fixtureGateway);
+
+    fireEvent.click(screen.getByRole("button", { name: "분류 추가" }));
+    fireEvent.change(screen.getByLabelText("이름"), { target: { value: "Broken" } });
+    fireEvent.click(screen.getByRole("button", { name: "추가" }));
+    await act(async () => { rejectCreate(new Error("create failed")); await failed.catch(() => undefined); });
+    expect(screen.getByText("create failed")).toBeVisible();
+    act(() => vi.advanceTimersByTime(5_000));
+
+    expect(screen.queryByText("create failed")).not.toBeInTheDocument();
   });
 
   it("uses the same rename, move, and delete actions from ellipsis and right-click", async () => {

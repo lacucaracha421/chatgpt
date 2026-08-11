@@ -11,6 +11,7 @@ import { Menu, type MenuItem } from "../shared/ui/Menu";
 import { Select } from "../shared/ui/Select";
 import { TextField } from "../shared/ui/TextField";
 import { Toast } from "../shared/ui/Toast";
+import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import type { ClassificationDropTarget, InternalDragPayload } from "../shared/interaction/pointerDrag";
 import { buildClassificationTree, type ClassificationTreeNode } from "./buildTree";
 
@@ -65,6 +66,7 @@ export function ClassificationSidebar({
   const [kind, setKind] = useState<ClassificationKind>("root");
   const [parentId, setParentId] = useState("");
   const [message, setMessage] = useState<string | null>(null);
+  useAutoDismiss(message, setMessage);
   const resize = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
   const activeRowId = nearestVisibleTreeRowId(focusedId, entries, visibleNodes);

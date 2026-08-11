@@ -10,7 +10,7 @@ const styles = readFileSync("src/styles/global.css", "utf8");
 
 const classifications: ClassificationEntry[] = [];
 
-afterEach(cleanup);
+afterEach(() => { vi.useRealTimers(); cleanup(); });
 beforeEach(() => Object.defineProperties(HTMLElement.prototype, {
   offsetWidth: { configurable: true, get: () => 900 },
   clientWidth: { configurable: true, get: () => 840 },
@@ -361,6 +361,30 @@ describe("AssetBrowser", () => {
 
     expect(gateway.trashAssets).toHaveBeenCalledWith(["asset-0"]);
     expect(screen.getByText("1개 자산을 휴지통으로 이동했습니다.")).toBeVisible();
+  });
+
+  it("expires the trash undo action with its toast", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway({ items: [asset(0)], nextCursor: null });
+    vi.mocked(gateway.setAssetFavorite).mockRejectedValue(new Error("favorite failed"));
+    renderBrowser(gateway);
+    const tile = await screen.findByRole("option", { name: "asset-0.png" });
+    await user.click(tile);
+    vi.useFakeTimers();
+
+    fireEvent.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByRole("button", { name: "실행 취소" })).toBeVisible();
+    act(() => vi.advanceTimersByTime(5_000));
+    fireEvent.doubleClick(screen.getByRole("option", { name: "asset-0.png" }));
+    fireEvent.click(screen.getByRole("button", { name: "즐겨찾기 켜기" }));
+    await act(async () => { await Promise.resolve(); });
+
+    expect(gateway.setAssetFavorite).toHaveBeenCalledWith("asset-0", true);
+    expect(gateway.setAssetsFavorite).not.toHaveBeenCalled();
+    expect(screen.getByText("favorite failed")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "감상 화면 닫기" }));
+    expect(screen.queryByRole("button", { name: "실행 취소" })).not.toBeInTheDocument();
   });
 
   it("runs explicit batch favorite, classification, trash, and undo actions", async () => {

@@ -30,7 +30,6 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, thu
   const [firstError, setFirstError] = useState<QueryError | null>(null);
   const [nextError, setNextError] = useState<QueryError | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  useAutoDismiss(message, setMessage);
   const [retryVersion, setRetryVersion] = useState(0);
   const [randomVersion, setRandomVersion] = useState(0);
   const [selectedAsset, setSelectedAsset] = useState<AssetSummary | null>(null);
@@ -39,6 +38,8 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, thu
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [batchPending, setBatchPending] = useState(false);
   const [undoAssetIds, setUndoAssetIds] = useState<string[] | null>(null);
+  const dismissMessage = useCallback((value: null) => { setMessage(value); setUndoAssetIds(null); }, []);
+  useAutoDismiss(message, dismissMessage);
   const selectedViewKeyRef = useRef<string | null>(null);
   const viewerViewKeyRef = useRef<string | null>(null);
   const requestedAssetRef = useRef<AssetSummary | null>(requestedAsset);

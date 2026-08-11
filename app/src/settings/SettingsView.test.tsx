@@ -1,14 +1,14 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
-import type { LibraryGateway } from "../library/types";
+import type { LibraryGateway, MetadataBackup } from "../library/types";
 import { SettingsView } from "./SettingsView";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 import { open } from "@tauri-apps/plugin-dialog";
 
-afterEach(cleanup);
+afterEach(() => { vi.useRealTimers(); cleanup(); });
 
 it("acts as the window title bar", async () => {
   const gateway = createGateway();
@@ -69,6 +69,35 @@ it("keeps the current manga root when the folder picker is cancelled", async () 
   await waitFor(() => expect(open).toHaveBeenCalledWith({ directory: true, multiple: false }));
   expect(gateway.setMangaRoot).not.toHaveBeenCalled();
   expect(screen.getByText("C:\\Manga")).toBeInTheDocument();
+});
+
+it("keeps backup load errors visible for retry", async () => {
+  vi.useFakeTimers();
+  let rejectBackups!: (error: Error) => void;
+  let resolveRetry!: (backups: MetadataBackup[]) => void;
+  const failed = new Promise<MetadataBackup[]>((_resolve, reject) => { rejectBackups = reject; });
+  const retried = new Promise<MetadataBackup[]>((resolve) => { resolveRetry = resolve; });
+  const gateway = createGateway();
+  vi.mocked(gateway.listMetadataBackups).mockReturnValueOnce(failed).mockReturnValueOnce(retried);
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "안전" }));
+  act(() => vi.advanceTimersByTime(0));
+  await act(async () => { rejectBackups(new Error("backup failed")); await failed.catch(() => undefined); });
+  act(() => vi.advanceTimersByTime(5_000));
+
+  expect(screen.getByText("backup failed")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+  act(() => vi.advanceTimersByTime(0));
+  await act(async () => { resolveRetry([]); await retried; });
+
+  expect(gateway.listMetadataBackups).toHaveBeenCalledTimes(2);
+  expect(screen.getByText("사용할 수 있는 백업이 없습니다.")).toBeVisible();
+  expect(screen.queryByText("backup failed")).not.toBeInTheDocument();
 });
 
 function createGateway(): LibraryGateway {
