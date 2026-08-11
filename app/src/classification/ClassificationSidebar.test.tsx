@@ -68,7 +68,7 @@ function renderSidebar(
     return (
       <LibraryProvider gateway={libraryGateway}>
         <ClassificationSidebar
-          entries={entries}
+          entries={props.entries ?? entries}
           view={view}
           expandedIds={expandedIds}
           sidebarWidth={sidebarWidth}
@@ -279,6 +279,60 @@ describe("ClassificationSidebar", () => {
     await user.click(screen.getByRole("menuitem", { name: "삭제" }));
     await user.click(screen.getByRole("button", { name: "삭제" }));
     await waitFor(() => expect(fixtureGateway.deleteClassification).toHaveBeenCalledWith("work"));
+  });
+
+  it("routes folder shortcuts through the same create, rename, and delete flows", async () => {
+    const user = userEvent.setup();
+    renderSidebar();
+    const games = screen.getByRole("treeitem", { name: "Games" });
+
+    fireEvent.keyDown(games, { key: "N", ctrlKey: true, shiftKey: true });
+    expect(screen.getByRole("textbox", { name: "폴더 이름" })).toHaveFocus();
+    await user.keyboard("{Escape}");
+
+    await user.click(games);
+    fireEvent.keyDown(games, { key: "n", altKey: true });
+    expect(screen.getByRole("textbox", { name: "폴더 이름" })).toHaveFocus();
+    await user.keyboard("{Escape}");
+
+    fireEvent.keyDown(games, { key: "F2" });
+    expect(screen.getByRole("textbox", { name: "폴더 이름" })).toHaveValue("Games");
+    await user.keyboard("{Escape}");
+
+    fireEvent.keyDown(games, { key: "Delete" });
+    expect(screen.getByRole("dialog", { name: "폴더 삭제" })).toBeInTheDocument();
+  });
+
+  it("omits the moving folder and its descendants from move targets", async () => {
+    const user = userEvent.setup();
+    const nestedEntries = [
+      ...entries,
+      { id: "child", kind: "tag", name: "School Uniform", parentId: "tag" },
+    ] satisfies ClassificationEntry[];
+    renderSidebar(gateway(), { entries: nestedEntries, expandedIds: ["root", "work", "tag"] });
+
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: "Arona" }), { clientX: 20, clientY: 20 });
+    await user.click(screen.getByRole("menuitem", { name: "폴더 이동" }));
+
+    const options = screen.getAllByRole("option").map((option) => option.textContent);
+    expect(options).toContain("Games");
+    expect(options).toContain("Blue Archive");
+    expect(options).not.toContain("Arona");
+    expect(options).not.toContain("School Uniform");
+  });
+
+  it("keeps delete confirmation open and shows the reason when deletion fails", async () => {
+    const user = userEvent.setup();
+    const fixtureGateway = gateway();
+    vi.mocked(fixtureGateway.deleteClassification).mockRejectedValue(new Error("하위 폴더나 자산이 있어 삭제할 수 없습니다."));
+    renderSidebar(fixtureGateway);
+
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: "Arona" }), { clientX: 20, clientY: 20 });
+    await user.click(screen.getByRole("menuitem", { name: "삭제" }));
+    await user.click(screen.getByRole("button", { name: "삭제" }));
+
+    expect(await screen.findByText("하위 폴더나 자산이 있어 삭제할 수 없습니다.")).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "폴더 삭제" })).toBeInTheDocument();
   });
 
   it("honors controlled expanded IDs", () => {

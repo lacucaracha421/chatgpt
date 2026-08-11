@@ -59,6 +59,9 @@ export function ClassificationSidebar({
   const { gateway } = useLibrary();
   const tree = buildClassificationTree(entries);
   const visibleNodes = visibleTreeNodes(tree, expandedIds);
+  const selected = view.kind === "classification" && view.classificationId
+    ? entries.find((entry) => entry.id === view.classificationId) ?? null
+    : null;
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [inlineEdit, setInlineEdit] = useState<InlineEdit | null>(null);
@@ -182,6 +185,24 @@ export function ClassificationSidebar({
     rowRefs.current.get(id)?.focus();
   }
 
+  function handleSidebarKeyDown(event: React.KeyboardEvent<HTMLElement>) {
+    if (inlineEdit || dialog) return;
+    const key = event.key.toLowerCase();
+    if (key === "n" && event.ctrlKey && event.shiftKey && !event.altKey) {
+      event.preventDefault();
+      openTopLevelCreate();
+    } else if (key === "n" && event.altKey && !event.ctrlKey && selected) {
+      event.preventDefault();
+      openChildCreate(selected);
+    } else if (event.key === "F2" && selected) {
+      event.preventDefault();
+      openRename(selected);
+    } else if (event.key === "Delete" && selected) {
+      event.preventDefault();
+      setDialog({ type: "delete", entry: selected });
+    }
+  }
+
   function handleTreeKeyDown(
     event: React.KeyboardEvent<HTMLDivElement>,
     node: ClassificationTreeNode,
@@ -251,7 +272,7 @@ export function ClassificationSidebar({
   }
 
   return (
-    <aside className="classification-sidebar" aria-label="분류" style={{ width: sidebarWidth }}>
+    <aside className="classification-sidebar" aria-label="분류" style={{ width: sidebarWidth }} onKeyDown={handleSidebarKeyDown}>
       <div className="classification-sidebar__heading" data-tauri-drag-region>
         <h2>분류</h2>
         <Button type="button" size="icon" variant="ghost" aria-label="새 폴더" onClick={openTopLevelCreate}>
@@ -521,5 +542,18 @@ function DialogActions({ onClose, submitLabel }: { onClose: () => void; submitLa
 function moveParents(entry: ClassificationEntry, entries: ClassificationEntry[]): Array<ClassificationEntry | null> {
   if (entry.kind === "root") return [null];
   const allowedKinds = entry.kind === "work" ? ["root"] : ["root", "work", "tag"];
-  return entries.filter((candidate) => candidate.id !== entry.id && allowedKinds.includes(candidate.kind));
+  return entries.filter((candidate) =>
+    candidate.id !== entry.id
+    && allowedKinds.includes(candidate.kind)
+    && !isDescendant(candidate.id, entry.id, entries),
+  );
+}
+
+function isDescendant(candidateId: string, ancestorId: string, entries: ClassificationEntry[]): boolean {
+  let current = entries.find((entry) => entry.id === candidateId);
+  while (current?.parentId) {
+    if (current.parentId === ancestorId) return true;
+    current = entries.find((entry) => entry.id === current?.parentId);
+  }
+  return false;
 }
