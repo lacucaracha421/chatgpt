@@ -46,8 +46,10 @@ pub enum LibraryError {
     InvalidClassificationParent,
     #[error("분류 항목을 자신의 하위 항목으로 옮길 수 없습니다")]
     ClassificationCycle,
-    #[error("하위 항목이나 자산이 연결된 분류 항목은 삭제할 수 없습니다")]
-    ClassificationNotEmpty,
+    #[error("하위 폴더가 있는 폴더는 삭제할 수 없습니다")]
+    ClassificationHasChildren,
+    #[error("자산이 연결된 최상위 폴더는 삭제할 수 없습니다")]
+    RootClassificationHasAssets,
     #[error("요청한 자산을 찾을 수 없습니다")]
     AssetNotFound,
     #[error("하나 이상의 자산을 선택해야 합니다")]

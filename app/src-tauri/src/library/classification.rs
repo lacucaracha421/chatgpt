@@ -110,20 +110,36 @@ impl Library {
     pub fn delete_classification(&self, id: &str) -> Result<(), LibraryError> {
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
-        if find_classification(&transaction, id)?.is_none() {
-            return Err(LibraryError::ClassificationNotFound);
-        }
-        let has_children_or_assets: bool = transaction.query_row(
-            "SELECT EXISTS(
-                 SELECT 1 FROM classification_entries WHERE parent_id = ?1
-                 UNION ALL
-                 SELECT 1 FROM asset_classifications WHERE classification_id = ?1
-             )",
+        let entry =
+            find_classification(&transaction, id)?.ok_or(LibraryError::ClassificationNotFound)?;
+        let has_children: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM classification_entries WHERE parent_id = ?1)",
             [id],
             |row| row.get(0),
         )?;
-        if has_children_or_assets {
-            return Err(LibraryError::ClassificationNotEmpty);
+        if has_children {
+            return Err(LibraryError::ClassificationHasChildren);
+        }
+
+        if let Some(parent_id) = entry.parent_id {
+            transaction.execute(
+                "INSERT OR IGNORE INTO asset_classifications (asset_id, classification_id)
+                 SELECT asset_id, ?2 FROM asset_classifications WHERE classification_id = ?1",
+                params![id, parent_id],
+            )?;
+            transaction.execute(
+                "DELETE FROM asset_classifications WHERE classification_id = ?1",
+                [id],
+            )?;
+        } else {
+            let has_assets: bool = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM asset_classifications WHERE classification_id = ?1)",
+                [id],
+                |row| row.get(0),
+            )?;
+            if has_assets {
+                return Err(LibraryError::RootClassificationHasAssets);
+            }
         }
         transaction.execute("DELETE FROM classification_entries WHERE id = ?1", [id])?;
         transaction.commit()?;
@@ -431,7 +447,7 @@ mod tests {
     }
 
     #[test]
-    fn deleting_a_non_empty_classification_is_rejected() {
+    fn deleting_a_classification_with_children_is_rejected() {
         let fixture = ClassificationFixture::new();
 
         let error = fixture
@@ -439,7 +455,7 @@ mod tests {
             .delete_classification(&fixture.root.id)
             .unwrap_err();
 
-        assert!(matches!(error, LibraryError::ClassificationNotEmpty));
+        assert!(matches!(error, LibraryError::ClassificationHasChildren));
     }
 
     #[test]
@@ -507,24 +523,105 @@ mod tests {
     }
 
     #[test]
-    fn deleting_an_asset_linked_classification_is_rejected() {
+    fn deleting_a_leaf_moves_every_asset_state_to_its_parent_once() {
         let fixture = ClassificationFixture::new();
-        insert_asset(&fixture.library, "asset-1");
+        for (id, status) in [
+            ("asset-normal", "normal"),
+            ("asset-review", "review"),
+            ("asset-trash", "trash"),
+        ] {
+            insert_asset(&fixture.library, id);
+            fixture
+                .library
+                .connection()
+                .unwrap()
+                .execute("UPDATE assets SET status = ?1 WHERE id = ?2", [status, id])
+                .unwrap();
+        }
         fixture
             .library
             .patch_asset_classifications(AssetClassificationPatch {
-                asset_ids: vec!["asset-1".into()],
+                asset_ids: vec![
+                    "asset-normal".into(),
+                    "asset-review".into(),
+                    "asset-trash".into(),
+                ],
                 add_classification_ids: vec![fixture.child_tag.id.clone()],
                 remove_classification_ids: vec![],
             })
             .unwrap();
+        fixture
+            .library
+            .patch_asset_classifications(AssetClassificationPatch {
+                asset_ids: vec!["asset-normal".into()],
+                add_classification_ids: vec![fixture.parent_tag.id.clone()],
+                remove_classification_ids: vec![],
+            })
+            .unwrap();
 
-        let error = fixture
+        fixture
             .library
             .delete_classification(&fixture.child_tag.id)
-            .unwrap_err();
+            .unwrap();
 
-        assert!(matches!(error, LibraryError::ClassificationNotEmpty));
+        for id in ["asset-normal", "asset-review", "asset-trash"] {
+            assert_eq!(
+                fixture.library.get_asset_classifications(id).unwrap(),
+                vec![fixture.parent_tag.clone()],
+            );
+        }
+        assert!(!fixture
+            .library
+            .list_classifications()
+            .unwrap()
+            .iter()
+            .any(|entry| entry.id == fixture.child_tag.id));
+    }
+
+    #[test]
+    fn deleting_an_asset_linked_root_is_rejected() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let root = library
+            .create_classification(CreateClassification {
+                kind: ClassificationKind::Root,
+                name: "Games".into(),
+                parent_id: None,
+            })
+            .unwrap();
+        insert_asset(&library, "asset-1");
+        library
+            .patch_asset_classifications(AssetClassificationPatch {
+                asset_ids: vec!["asset-1".into()],
+                add_classification_ids: vec![root.id.clone()],
+                remove_classification_ids: vec![],
+            })
+            .unwrap();
+
+        let error = library.delete_classification(&root.id).unwrap_err();
+
+        assert!(matches!(error, LibraryError::RootClassificationHasAssets));
+        assert_eq!(
+            library.get_asset_classifications("asset-1").unwrap(),
+            vec![root]
+        );
+    }
+
+    #[test]
+    fn deleting_an_empty_root_removes_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let root = library
+            .create_classification(CreateClassification {
+                kind: ClassificationKind::Root,
+                name: "Unused".into(),
+                parent_id: None,
+            })
+            .unwrap();
+
+        library.delete_classification(&root.id).unwrap();
+
+        assert!(library.list_classifications().unwrap().is_empty());
     }
 
     #[test]
