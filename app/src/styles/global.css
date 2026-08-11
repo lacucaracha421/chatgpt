@@ -230,6 +230,102 @@ input:disabled {
   margin-top: var(--space-3);
 }
 
+.classification-appearance {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.classification-appearance__preview {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control-height-md);
+  padding: var(--space-2);
+  background: var(--color-bg);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.classification-appearance__preview svg {
+  width: 20px;
+  height: 20px;
+}
+
+.classification-appearance__fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.classification-appearance__fieldset legend {
+  margin-bottom: var(--space-2);
+  color: var(--color-muted);
+  font-size: 0.8rem;
+}
+
+.classification-appearance__grid {
+  display: grid;
+  grid-template-columns: repeat(6, 28px);
+  gap: var(--space-2);
+}
+
+.classification-appearance__choice {
+  position: relative;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  color: var(--color-muted);
+  background: var(--color-bg);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.classification-appearance__choice input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.classification-appearance__choice:has(input:checked) {
+  color: var(--color-text);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 var(--border-width) var(--color-accent);
+}
+
+.classification-appearance__choice:has(input:focus-visible) {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.classification-appearance__choice svg {
+  width: 18px;
+  height: 18px;
+}
+
+.classification-appearance__swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+}
+
+.classification-appearance__error {
+  margin: 0;
+  color: var(--color-danger);
+}
+
+.classification-appearance__actions {
+  align-items: center;
+}
+
+.classification-appearance__action-spacer {
+  flex: 1;
+}
+
 .classification-sidebar__heading {
   align-items: center;
   justify-content: space-between;
