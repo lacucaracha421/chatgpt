@@ -121,6 +121,8 @@
     return true;
   });
 
+  chrome.action.onClicked.addListener(() => chrome.runtime.openOptionsPage());
+
   if (globalThis.__LAKOMICS_TEST__) {
     globalThis.LakomicsBackground = { handleMessage };
   }

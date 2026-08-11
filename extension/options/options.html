@@ -6,6 +6,7 @@
     <title>Lakomics X Collector 설정</title>
     <link rel="stylesheet" href="options.css">
     <script src="../src/layout.js" defer></script>
+    <script src="../src/options-connection.js" defer></script>
     <script src="options.js" defer></script>
   </head>
   <body>
@@ -16,8 +17,7 @@
         <label for="connection-token">연결 키</label>
         <div class="row">
           <input id="connection-token" type="password" autocomplete="off" spellcheck="false">
-          <button id="save-token" type="button">저장</button>
-          <button id="refresh-classifications" type="button">연결 확인·새로고침</button>
+          <button id="refresh-classifications" type="button">저장하고 연결</button>
         </div>
         <p id="connection-status" role="status"></p>
       </section>

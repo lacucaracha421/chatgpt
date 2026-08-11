@@ -2,7 +2,6 @@
   "use strict";
 
   const tokenInput = document.querySelector("#connection-token");
-  const saveButton = document.querySelector("#save-token");
   const refreshButton = document.querySelector("#refresh-classifications");
   const status = document.querySelector("#connection-status");
   const editor = document.querySelector("#layout-editor");
@@ -21,22 +20,14 @@
     if (stored.ok) workingLayout = stored.layout;
   }
 
-  saveButton.addEventListener("click", async () => {
-    const response = await chrome.runtime.sendMessage({
-      type: "settings:set-token",
-      token: tokenInput.value,
-    });
-    if (!response.ok) {
-      status.textContent = "32자리 연결 키를 확인하세요.";
-      return;
-    }
-    tokenInput.value = "";
-    status.textContent = "연결 키를 저장했습니다.";
-  });
-
   refreshButton.addEventListener("click", async () => {
     status.textContent = "Lakomics에 연결하는 중…";
-    const response = await chrome.runtime.sendMessage({ type: "classifications:refresh" });
+    const hadTypedToken = tokenInput.value.trim().length > 0;
+    const response = await LakomicsOptionsConnection.saveAndRefresh(
+      (message) => chrome.runtime.sendMessage(message),
+      tokenInput.value,
+    );
+    if (hadTypedToken && response.code !== "invalid_connection_key") tokenInput.value = "";
     if (!response.ok) {
       status.textContent = errorMessage(response.code);
       return;
@@ -155,6 +146,7 @@
   }
 
   function errorMessage(code) {
+    if (code === "invalid_connection_key") return "32자리 연결 키를 확인하세요.";
     if (code === "connection_key_missing") return "연결 키를 먼저 저장하세요.";
     if (code === "unauthorized") return "연결 키가 일치하지 않습니다.";
     if (code === "app_offline") return "Lakomics를 실행하고 라이브러리를 여세요.";

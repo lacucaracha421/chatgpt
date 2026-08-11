@@ -86,13 +86,27 @@ test("reconciles and stores layout without exposing storage to page scripts", as
   assert.deepEqual(plain(harness.storage.radialLayout), plain(response.layout));
 });
 
+test("toolbar click opens the extension options page", async () => {
+  const harness = createHarness();
+
+  await harness.clickAction();
+
+  assert.equal(harness.optionsOpened, 1);
+});
+
 function createHarness(initialStorage = {}) {
   const storage = { ...initialStorage };
   const responses = [];
   const fetchCalls = [];
   const clock = { now: 0 };
+  let actionListener;
+  let optionsOpened = 0;
   const chrome = {
-    runtime: { onMessage: { addListener() {} } },
+    action: { onClicked: { addListener(listener) { actionListener = listener; } } },
+    runtime: {
+      onMessage: { addListener() {} },
+      async openOptionsPage() { optionsOpened += 1; },
+    },
     storage: {
       local: {
         async get(keys) {
@@ -131,6 +145,8 @@ function createHarness(initialStorage = {}) {
     clock,
     fetchCalls,
     storage,
+    async clickAction() { await actionListener(); },
+    get optionsOpened() { return optionsOpened; },
     queueJson(body, status = 200) { responses.push({ body, status }); },
     queueError(error) { responses.push(error); },
   };
