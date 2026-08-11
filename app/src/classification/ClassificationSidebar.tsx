@@ -1,5 +1,5 @@
-import { BookOpenIcon, ChevronDownIcon, ChevronRightIcon, ClockIcon, EllipsisHorizontalIcon, FolderIcon, PhotoIcon, InboxIcon, PlusIcon, Cog6ToothIcon, StarIcon, TrashIcon } from "@heroicons/react/24/outline";
-import { useLayoutEffect, useEffect, useRef, useState } from "react";
+import { BookOpenIcon, ChevronDownIcon, ChevronRightIcon, ClockIcon, FolderIcon, PhotoIcon, InboxIcon, PlusIcon, Cog6ToothIcon, StarIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { useLayoutEffect, useEffect, useRef, useState, type CSSProperties } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
 import { useLibrary } from "../library/LibraryContext";
 import type { AssetView, ClassificationEntry } from "../library/types";
@@ -7,12 +7,14 @@ import { clampSidebarWidth } from "../layout/sidebarWidth";
 import { Button } from "../shared/ui/Button";
 import { ContextMenu } from "../shared/ui/ContextMenu";
 import { Dialog } from "../shared/ui/Dialog";
-import { Menu, type MenuItem } from "../shared/ui/Menu";
+import type { MenuItem } from "../shared/ui/Menu";
 import { Select } from "../shared/ui/Select";
 import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import type { ClassificationDropTarget, InternalDragPayload } from "../shared/interaction/pointerDrag";
 import { buildClassificationTree, type ClassificationTreeNode } from "./buildTree";
+import { ClassificationAppearanceDialog } from "./ClassificationAppearanceDialog";
+import { ClassificationIcon, classificationColor } from "./classificationAppearance";
 
 type ClassificationSidebarProps = {
   entries: ClassificationEntry[];
@@ -64,6 +66,7 @@ export function ClassificationSidebar({
     : null;
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState | null>(null);
+  const [appearanceEntry, setAppearanceEntry] = useState<ClassificationEntry | null>(null);
   const [inlineEdit, setInlineEdit] = useState<InlineEdit | null>(null);
   const [name, setName] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
@@ -301,6 +304,7 @@ export function ClassificationSidebar({
         <QuickViewButton icon={<BookOpenIcon aria-hidden="true" />} label="망가" selected={view.kind === "manga"} onClick={() => onViewChange({ kind: "manga" })} />
       </nav>
       {tree.hasOrphans && <p className="classification-sidebar__warning" role="alert">연결되지 않은 분류는 숨겨집니다.</p>}
+      <p className="classification-sidebar__tree-heading">폴더 ({tree.length})</p>
       <ContextMenu items={[{ id: "create-root", label: "새 폴더", onSelect: openTopLevelCreate }]}>
         <ul className="classification-sidebar__tree" role="tree">
           {tree.map((node) => (
@@ -320,6 +324,7 @@ export function ClassificationSidebar({
               registerTreeRow={registerTreeRow}
               onCreateChild={openChildCreate}
               onRename={openRename}
+              onAppearance={setAppearanceEntry}
               onEditNameChange={(nextName) => { setName(nextName); setEditError(null); }}
               onEditSave={() => void saveInlineEdit()}
               onEditCancel={cancelInlineEdit}
@@ -352,6 +357,14 @@ export function ClassificationSidebar({
         onPointerCancel={stopResize}
       />
       {message && <Toast>{message}</Toast>}
+      <ClassificationAppearanceDialog
+        entry={appearanceEntry}
+        onClose={() => setAppearanceEntry(null)}
+        onSaved={() => {
+          setAppearanceEntry(null);
+          onChanged();
+        }}
+      />
       {dialog?.type === "move" && (
         <Dialog open title="폴더 이동" onClose={closeDialog}>
           <form className="classification-sidebar__form" onSubmit={(event) => { event.preventDefault(); void move(); }}>
@@ -384,13 +397,14 @@ function QuickViewButton({ icon, label, count, onClick, selected }: { icon: Reac
   return <button type="button" className="classification-sidebar__quick-view" aria-label={count === undefined ? undefined : `${label} ${count}개`} aria-current={selected ? "page" : undefined} onClick={onClick}>{icon}<span>{label}</span>{count !== undefined && <span className="classification-sidebar__badge" aria-hidden="true">{count}</span>}</button>;
 }
 
-function TreeItem({ activeRowId, editError, editName, expandedIds, inlineEdit, node, onCreateChild, onDelete, onEditCancel, onEditNameChange, onEditSave, onMove, onRename, onRowFocus, onRowKeyDown, onToggleExpanded, onViewChange, registerTreeRow, view, dragTarget, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: {
+function TreeItem({ activeRowId, editError, editName, expandedIds, inlineEdit, node, onAppearance, onCreateChild, onDelete, onEditCancel, onEditNameChange, onEditSave, onMove, onRename, onRowFocus, onRowKeyDown, onToggleExpanded, onViewChange, registerTreeRow, view, dragTarget, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: {
   activeRowId: string | null;
   editError: string | null;
   editName: string;
   expandedIds: string[];
   inlineEdit: InlineEdit | null;
   node: ClassificationTreeNode;
+  onAppearance: (entry: ClassificationEntry) => void;
   onCreateChild: (entry: ClassificationEntry) => void;
   onDelete: (entry: ClassificationEntry) => void;
   onEditCancel: () => void;
@@ -419,6 +433,7 @@ function TreeItem({ activeRowId, editError, editName, expandedIds, inlineEdit, n
   const actions: MenuItem[] = [
     { id: "create-child", label: "하위 폴더 만들기", onSelect: () => onCreateChild(node.entry) },
     { id: "rename", label: "이름 변경", onSelect: () => onRename(node.entry) },
+    { id: "appearance", label: "아이콘 및 색상", onSelect: () => onAppearance(node.entry) },
     {
       id: "move",
       label: node.entry.kind === "root" ? "이동 — 최상위 폴더" : "폴더 이동",
@@ -453,7 +468,20 @@ function TreeItem({ activeRowId, editError, editName, expandedIds, inlineEdit, n
           tabIndex={node.entry.id === activeRowId ? 0 : -1}
           onClick={() => onViewChange({ kind: "classification", classificationId: node.entry.id })}
           onFocus={() => onRowFocus(node.entry.id)}
-          onKeyDown={(event) => onRowKeyDown(event, node)}
+          onKeyDown={(event) => {
+            if ((event.key === "F10" && event.shiftKey) || event.key === "ContextMenu") {
+              event.preventDefault();
+              event.stopPropagation();
+              const rect = event.currentTarget.getBoundingClientRect();
+              event.currentTarget.dispatchEvent(new MouseEvent("contextmenu", {
+                bubbles: true,
+                clientX: rect.left + 8,
+                clientY: rect.top + 8,
+              }));
+              return;
+            }
+            onRowKeyDown(event, node);
+          }}
           onPointerDown={(event) => { if (event.button === 0 && !(event.target as HTMLElement).closest("button")) onPointerDragStart?.({ kind: "classification", entryId: node.entry.id }, event); }}
           onPointerMove={onPointerDragMove}
           onPointerUp={onPointerDragEnd}
@@ -464,20 +492,20 @@ function TreeItem({ activeRowId, editError, editName, expandedIds, inlineEdit, n
               {expanded ? <ChevronDownIcon aria-hidden="true" /> : <ChevronRightIcon aria-hidden="true" />}
             </Button>
           ) : <span className="classification-sidebar__tree-spacer" aria-hidden="true" />}
-          {node.entry.kind === "work"
-            ? <BookOpenIcon className="classification-sidebar__tree-work" aria-hidden="true" />
-            : <FolderIcon className="classification-sidebar__tree-folder" aria-hidden="true" />}
+          <ClassificationIcon
+            className="classification-sidebar__tree-folder"
+            kind={node.entry.kind}
+            iconKey={node.entry.iconKey}
+            style={{ color: classificationColor(node.entry.colorKey) }}
+          />
           {editingName ? (
             <InlineFolderInput name={editName} error={editError} onNameChange={onEditNameChange} onSave={onEditSave} onCancel={onEditCancel} />
           ) : <span className="classification-sidebar__tree-label">{node.entry.name}</span>}
-          <span onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-            <Menu label={`${node.entry.name} 추가 작업`} items={actions} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} />
-          </span>
         </div>
       </ContextMenu>
       {expanded && (hasChildren || creatingChild) && (
-        <ul role="group">
-          {node.children.map((child) => <TreeItem key={child.entry.id} node={child} view={view} expandedIds={expandedIds} activeRowId={activeRowId} inlineEdit={inlineEdit} editName={editName} editError={editError} onViewChange={onViewChange} onToggleExpanded={onToggleExpanded} onRowFocus={onRowFocus} onRowKeyDown={onRowKeyDown} registerTreeRow={registerTreeRow} onCreateChild={onCreateChild} onRename={onRename} onEditNameChange={onEditNameChange} onEditSave={onEditSave} onEditCancel={onEditCancel} onMove={onMove} onDelete={onDelete} dragTarget={dragTarget} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />)}
+        <ul role="group" style={{ "--classification-branch-color": classificationColor(node.entry.colorKey) } as CSSProperties}>
+          {node.children.map((child) => <TreeItem key={child.entry.id} node={child} view={view} expandedIds={expandedIds} activeRowId={activeRowId} inlineEdit={inlineEdit} editName={editName} editError={editError} onViewChange={onViewChange} onToggleExpanded={onToggleExpanded} onRowFocus={onRowFocus} onRowKeyDown={onRowKeyDown} registerTreeRow={registerTreeRow} onAppearance={onAppearance} onCreateChild={onCreateChild} onRename={onRename} onEditNameChange={onEditNameChange} onEditSave={onEditSave} onEditCancel={onEditCancel} onMove={onMove} onDelete={onDelete} dragTarget={dragTarget} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />)}
           {creatingChild && <InlineFolderEditor name={editName} error={editError} onNameChange={onEditNameChange} onSave={onEditSave} onCancel={onEditCancel} />}
         </ul>
       )}

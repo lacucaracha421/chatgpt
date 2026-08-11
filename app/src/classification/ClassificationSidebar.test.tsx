@@ -209,6 +209,53 @@ describe("ClassificationSidebar", () => {
     expect(onExpandedIdsChange).not.toHaveBeenCalled();
   });
 
+  it("counts top-level folders and renders custom icon and connector colors", () => {
+    const styledEntries = [
+      { ...entries[0], iconKey: "photo", colorKey: "pink" },
+      entries[1],
+      entries[2],
+      { id: "root-2", kind: "root", name: "Images", parentId: null, iconKey: null, colorKey: null },
+    ] satisfies ClassificationEntry[];
+    renderSidebar(gateway(), { entries: styledEntries });
+
+    expect(screen.getByText("폴더 (2)")).toBeVisible();
+    const games = screen.getByRole("treeitem", { name: "Games" });
+    expect(games.querySelector("[data-icon-key='photo']")).toHaveStyle({ color: "#df6fa7" });
+    expect(games.querySelector(".classification-sidebar__tree-label")).not.toHaveAttribute("style");
+    const group = games.closest("li")?.querySelector(":scope > [role='group']") as HTMLElement;
+    expect(group.style.getPropertyValue("--classification-branch-color")).toBe("#df6fa7");
+    expect(screen.getByRole("treeitem", { name: "Blue Archive" }).querySelector("[data-icon-key='book']")).toBeInTheDocument();
+  });
+
+  it("opens the row context menu from both keyboard menu shortcuts", async () => {
+    const user = userEvent.setup();
+    renderSidebar();
+    const row = screen.getByRole("treeitem", { name: "Games" });
+    row.focus();
+
+    fireEvent.keyDown(row, { key: "F10", shiftKey: true });
+    expect(screen.getByRole("menuitem", { name: "아이콘 및 색상" })).toBeVisible();
+    await user.keyboard("{Escape}");
+
+    fireEvent.keyDown(row, { key: "ContextMenu" });
+    expect(screen.getByRole("menuitem", { name: "아이콘 및 색상" })).toBeVisible();
+  });
+
+  it("updates appearance from the folder context menu", async () => {
+    const user = userEvent.setup();
+    const fixtureGateway = gateway();
+    const { onChanged } = renderSidebar(fixtureGateway);
+
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: "Arona" }), { clientX: 20, clientY: 20 });
+    await user.click(screen.getByRole("menuitem", { name: "아이콘 및 색상" }));
+    await user.click(screen.getByRole("radio", { name: "사진" }));
+    await user.click(screen.getByRole("radio", { name: "분홍" }));
+    await user.click(screen.getByRole("button", { name: "저장" }));
+
+    await waitFor(() => expect(fixtureGateway.updateClassificationAppearance).toHaveBeenCalledWith("tag", "photo", "pink"));
+    expect(onChanged).toHaveBeenCalledOnce();
+  });
+
   it("creates top-level and child folders inline from context menus", async () => {
     const user = userEvent.setup();
     const fixtureGateway = gateway();
@@ -257,14 +304,15 @@ describe("ClassificationSidebar", () => {
     expect(input).toBeInTheDocument();
   });
 
-  it("uses the same rename, move, and delete actions from ellipsis and right-click", async () => {
+  it("uses right-click-only folder actions in the approved order", async () => {
     const user = userEvent.setup();
     const fixtureGateway = gateway();
     renderSidebar(fixtureGateway);
     const row = screen.getByRole("treeitem", { name: /Blue Archive/ });
 
-    await user.click(screen.getByRole("button", { name: "Blue Archive 추가 작업" }));
-    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["하위 폴더 만들기", "이름 변경", "폴더 이동", "삭제 — 하위 폴더 있음"]);
+    expect(screen.queryByRole("button", { name: /추가 작업/ })).not.toBeInTheDocument();
+    fireEvent.contextMenu(row, { clientX: 20, clientY: 20 });
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["하위 폴더 만들기", "이름 변경", "아이콘 및 색상", "폴더 이동", "삭제 — 하위 폴더 있음"]);
     await user.click(screen.getByRole("menuitem", { name: "이름 변경" }));
     const rename = screen.getByRole("textbox", { name: "폴더 이름" });
     await user.clear(rename);
@@ -310,7 +358,7 @@ describe("ClassificationSidebar", () => {
     const fixtureGateway = gateway();
     renderSidebar(fixtureGateway);
 
-    await user.click(screen.getByRole("button", { name: "Games 추가 작업" }));
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: "Games" }), { clientX: 20, clientY: 20 });
 
     const deleteItem = screen.getByRole("menuitem", { name: "삭제 — 하위 폴더 있음" });
     expect(deleteItem).toHaveAttribute("data-disabled");
@@ -386,13 +434,12 @@ describe("ClassificationSidebar", () => {
     expect(options).not.toContain("School Uniform");
   });
 
-  it("keeps root folders fixed and uses a distinct work-folder icon", async () => {
-    const user = userEvent.setup();
+  it("keeps root folders fixed and uses a distinct work-folder icon", () => {
     renderSidebar();
 
-    await user.click(screen.getByRole("button", { name: "Games 추가 작업" }));
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: "Games" }), { clientX: 20, clientY: 20 });
     expect(screen.getByRole("menuitem", { name: "이동 — 최상위 폴더" })).toHaveAttribute("data-disabled");
-    expect(screen.getByRole("treeitem", { name: "Blue Archive" }).querySelector(".classification-sidebar__tree-work")).toBeInTheDocument();
+    expect(screen.getByRole("treeitem", { name: "Blue Archive" }).querySelector("[data-icon-key='book']")).toBeInTheDocument();
   });
 
   it("offers only root folders when moving a work folder", async () => {
@@ -400,7 +447,7 @@ describe("ClassificationSidebar", () => {
     const rootEntries = [...entries, { id: "root-2", kind: "root", name: "Images", parentId: null, iconKey: null, colorKey: null }] satisfies ClassificationEntry[];
     renderSidebar(gateway(), { entries: rootEntries });
 
-    await user.click(screen.getByRole("button", { name: "Blue Archive 추가 작업" }));
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: "Blue Archive" }), { clientX: 20, clientY: 20 });
     await user.click(screen.getByRole("menuitem", { name: "폴더 이동" }));
 
     expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(["Games", "Images"]);
@@ -412,7 +459,7 @@ describe("ClassificationSidebar", () => {
     const rootEntries = [...entries, { id: "root-2", kind: "root", name: "Images", parentId: null, iconKey: null, colorKey: null }] satisfies ClassificationEntry[];
     const { onExpandedIdsChange } = renderSidebar(fixtureGateway, { entries: rootEntries, expandedIds: ["root", "work"] });
 
-    await user.click(screen.getByRole("button", { name: "Arona 추가 작업" }));
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: "Arona" }), { clientX: 20, clientY: 20 });
     await user.click(screen.getByRole("menuitem", { name: "폴더 이동" }));
     await user.selectOptions(screen.getByRole("combobox", { name: "상위 폴더" }), "root-2");
     await user.click(screen.getByRole("button", { name: "이동" }));
@@ -524,24 +571,6 @@ describe("ClassificationSidebar", () => {
     expect(onExpandedIdsChange).toHaveBeenLastCalledWith(["work"]);
     await user.keyboard(" ");
     expect(onExpandedIdsChange).toHaveBeenLastCalledWith(["work", "root"]);
-    expect(onViewChange).not.toHaveBeenCalled();
-  });
-
-  it("keeps menu-trigger keyboard events out of tree-row navigation", async () => {
-    const user = userEvent.setup();
-    const { onExpandedIdsChange, onViewChange } = renderSidebar();
-    const trigger = screen.getByRole("button", { name: "Games 추가 작업" });
-
-    trigger.focus();
-    fireEvent.keyDown(trigger, { key: "ArrowDown" });
-    expect(screen.getByRole("menu")).toBeInTheDocument();
-    expect(onViewChange).not.toHaveBeenCalled();
-    expect(onExpandedIdsChange).not.toHaveBeenCalled();
-
-    await user.keyboard("{Escape}");
-    expect(trigger).toHaveFocus();
-    await user.keyboard(" ");
-    expect(screen.getByRole("menu")).toBeInTheDocument();
     expect(onViewChange).not.toHaveBeenCalled();
   });
 
