@@ -25,6 +25,8 @@ impl Library {
             kind: request.kind,
             name,
             parent_id: request.parent_id,
+            icon_key: None,
+            color_key: None,
         };
         connection
             .execute(
@@ -100,7 +102,7 @@ impl Library {
     pub fn list_classifications(&self) -> Result<Vec<ClassificationEntry>, LibraryError> {
         let connection = self.connection()?;
         let mut statement = connection.prepare(
-            "SELECT id, kind, name, parent_id
+            "SELECT id, kind, name, parent_id, icon_key, color_key
              FROM classification_entries
              ORDER BY parent_id, name COLLATE NOCASE, id",
         )?;
@@ -196,7 +198,7 @@ pub(crate) fn classifications_for_asset(
     asset_id: &str,
 ) -> Result<Vec<ClassificationEntry>, LibraryError> {
     let mut statement = connection.prepare(
-        "SELECT entry.id, entry.kind, entry.name, entry.parent_id
+        "SELECT entry.id, entry.kind, entry.name, entry.parent_id, entry.icon_key, entry.color_key
          FROM classification_entries AS entry
          JOIN asset_classifications AS link ON link.classification_id = entry.id
          WHERE link.asset_id = ?1
@@ -230,9 +232,19 @@ fn find_classification(
 ) -> Result<Option<ClassificationEntry>, LibraryError> {
     let values = connection
         .query_row(
-            "SELECT id, kind, name, parent_id FROM classification_entries WHERE id = ?1",
+            "SELECT id, kind, name, parent_id, icon_key, color_key
+             FROM classification_entries WHERE id = ?1",
             [id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ))
+            },
         )
         .optional()?;
     values.map(entry_from_values).transpose()
@@ -253,13 +265,22 @@ where
             row.get(1)?,
             row.get(2)?,
             row.get(3)?,
+            row.get(4)?,
+            row.get(5)?,
         ))?);
     }
     Ok(entries)
 }
 
 fn entry_from_values(
-    (id, kind, name, parent_id): (String, String, String, Option<String>),
+    (id, kind, name, parent_id, icon_key, color_key): (
+        String,
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ),
 ) -> Result<ClassificationEntry, LibraryError> {
     let kind = match kind.as_str() {
         "root" => ClassificationKind::Root,
@@ -272,6 +293,8 @@ fn entry_from_values(
         kind,
         name,
         parent_id,
+        icon_key,
+        color_key,
     })
 }
 

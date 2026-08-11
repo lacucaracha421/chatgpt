@@ -225,6 +225,8 @@ pub struct ClassificationEntry {
     pub kind: ClassificationKind,
     pub name: String,
     pub parent_id: Option<String>,
+    pub icon_key: Option<String>,
+    pub color_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -359,6 +361,8 @@ mod tests {
                 kind: ClassificationKind::Tag,
                 name: "아로나".into(),
                 parent_id: Some("work-1".into()),
+                icon_key: None,
+                color_key: None,
             }],
         };
         let value = serde_json::to_value(SimilarityReviewSummary {

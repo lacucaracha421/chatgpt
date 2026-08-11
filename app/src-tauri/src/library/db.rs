@@ -4,13 +4,15 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 6;
+pub(crate) const SCHEMA_VERSION: i64 = 7;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
 const VIDEO_MEDIA_SCHEMA: &str = include_str!("../../migrations/0004_video_media.sql");
 const MANGA_SCHEMA: &str = include_str!("../../migrations/0005_manga.sql");
 const MANGA_MODIFIED_SCHEMA: &str = include_str!("../../migrations/0006_manga_modified.sql");
+const CLASSIFICATION_APPEARANCE_SCHEMA: &str =
+    include_str!("../../migrations/0007_classification_appearance.sql");
 
 pub fn open_database(path: &Path) -> Result<Connection, LibraryError> {
     let mut connection = Connection::open(path)?;
@@ -21,7 +23,7 @@ pub fn open_database(path: &Path) -> Result<Connection, LibraryError> {
     let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
     match version {
         SCHEMA_VERSION => {}
-        version @ 0..=5 => {
+        version @ 0..=6 => {
             if version > 0 {
                 let root = path
                     .parent()
@@ -58,6 +60,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         if version <= 5 {
             transaction.execute_batch(MANGA_MODIFIED_SCHEMA)?;
         }
+        if version <= 6 {
+            transaction.execute_batch(CLASSIFICATION_APPEARANCE_SCHEMA)?;
+        }
         transaction.commit()?;
         Ok::<(), LibraryError>(())
     })();
@@ -69,4 +74,53 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         return Err(LibraryError::Database(rusqlite::Error::InvalidQuery));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn migrates_existing_classifications_to_nullable_appearance() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        for schema in [
+            INITIAL_SCHEMA,
+            VAULT_SAFETY_SCHEMA,
+            SIMILARITY_REVIEW_SCHEMA,
+            VIDEO_MEDIA_SCHEMA,
+            MANGA_SCHEMA,
+            MANGA_MODIFIED_SCHEMA,
+        ] {
+            connection.execute_batch(schema).unwrap();
+        }
+        connection
+            .execute(
+                "INSERT INTO classification_entries (id, kind, name, parent_id, created_at)
+                 VALUES ('folder-1', 'root', 'Games', NULL, '2026-08-11T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+
+        migrate_to_latest(&mut connection, 6).unwrap();
+
+        let appearance = connection
+            .query_row(
+                "SELECT icon_key, color_key FROM classification_entries WHERE id = 'folder-1'",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(appearance, (None, None));
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            7
+        );
+    }
 }
