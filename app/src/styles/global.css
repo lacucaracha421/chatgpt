@@ -629,6 +629,11 @@ input:disabled {
   white-space: nowrap;
 }
 
+.view-toolbar p {
+  margin: 0;
+  color: var(--color-muted);
+}
+
 .view-toolbar__content {
   display: flex;
   align-items: center;
