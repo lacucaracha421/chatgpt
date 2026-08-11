@@ -6,7 +6,7 @@ export type ClassificationTreeNode = {
 };
 
 export type ClassificationTree = ClassificationTreeNode[] & {
-  orphans: ClassificationEntry[];
+  hasOrphans: boolean;
 };
 
 export function buildClassificationTree(
@@ -38,9 +38,6 @@ export function buildClassificationTree(
   sort(roots);
 
   return Object.assign(roots, {
-    orphans: [...nodes.values()]
-      .filter((node) => !visible.has(node.entry.id))
-      .map((node) => node.entry)
-      .sort((left, right) => left.name.localeCompare(right.name, "ko")),
+    hasOrphans: visible.size !== entries.length,
   });
 }

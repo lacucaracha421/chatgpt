@@ -35,7 +35,7 @@ const fixtureAsset: AssetSummary = {
 it("keeps a completed batch with added, duplicate, review, and failure counts", async () => {
   let drop: ((paths: string[]) => void) | undefined;
   const subscribe = vi.fn<DropSubscriber>(async (handler) => {
-    drop = handler;
+    drop = (paths) => handler({ type: "drop", paths, position: { x: 0, y: 0 } });
     return () => undefined;
   });
   const ingestMedia = vi.fn()
@@ -80,7 +80,7 @@ function deferred<T>() {
 it("ingests dropped paths with the selected classification", async () => {
   let drop: ((paths: string[]) => void) | undefined;
   const subscribe = vi.fn<DropSubscriber>(async (handler) => {
-    drop = handler;
+    drop = (paths) => handler({ type: "drop", paths, position: { x: 0, y: 0 } });
     return () => undefined;
   });
   const ingestMedia = vi.fn().mockResolvedValue({
@@ -94,7 +94,6 @@ it("ingests dropped paths with the selected classification", async () => {
       subscribe,
       classificationId: "tag-arona",
       ingestMedia,
-      onResult: vi.fn(),
     }),
   );
   await waitFor(() => expect(drop).toBeDefined());
@@ -112,14 +111,13 @@ it("ingests dropped paths with the selected classification", async () => {
 it("ignores disabled drops and accepts the next drop after being enabled", async () => {
   let drop: ((paths: string[]) => void) | undefined;
   const subscribe = vi.fn<DropSubscriber>(async (handler) => {
-    drop = handler;
+    drop = (paths) => handler({ type: "drop", paths, position: { x: 0, y: 0 } });
     return () => undefined;
   });
   const ingestMedia = vi.fn().mockResolvedValue({
     status: "added",
     asset: fixtureAsset,
   });
-  const onResult = vi.fn();
   const { rerender, result } = renderHook(
     ({ enabled }: { enabled: boolean }) =>
       useFileDrop({
@@ -127,7 +125,6 @@ it("ignores disabled drops and accepts the next drop after being enabled", async
         enabled,
         classificationId: "tag-arona",
         ingestMedia,
-        onResult,
       }),
     { initialProps: { enabled: false } },
   );
@@ -137,7 +134,6 @@ it("ignores disabled drops and accepts the next drop after being enabled", async
   await Promise.resolve();
 
   expect(ingestMedia).not.toHaveBeenCalled();
-  expect(onResult).not.toHaveBeenCalled();
   expect(result.current.progress).toBeNull();
 
   rerender({ enabled: true });
@@ -164,7 +160,7 @@ it("ingests files from one drop sequentially", async () => {
     .mockImplementationOnce(() => first.promise)
     .mockResolvedValueOnce({ status: "added", asset: fixtureAsset });
   const subscribe: DropSubscriber = async (handler) => {
-    drop = handler;
+    drop = (paths) => handler({ type: "drop", paths, position: { x: 0, y: 0 } });
     return () => undefined;
   };
 
@@ -174,7 +170,6 @@ it("ingests files from one drop sequentially", async () => {
       subscribe,
       classificationId: null,
       ingestMedia,
-      onResult: vi.fn(),
     }),
   );
   await waitFor(() => expect(drop).toBeDefined());
@@ -197,9 +192,8 @@ it("ingests files from one drop sequentially", async () => {
   });
 });
 
-it("reports an ingest error and continues with the next file", async () => {
+it("records an ingest error and continues with the next file", async () => {
   let drop: ((paths: string[]) => void) | undefined;
-  const onResult = vi.fn();
   const ingestMedia = vi
     .fn()
     .mockRejectedValueOnce({
@@ -208,67 +202,26 @@ it("reports an ingest error and continues with the next file", async () => {
     })
     .mockResolvedValueOnce({ status: "added", asset: fixtureAsset });
   const subscribe: DropSubscriber = async (handler) => {
-    drop = handler;
+    drop = (paths) => handler({ type: "drop", paths, position: { x: 0, y: 0 } });
     return () => undefined;
   };
 
-  renderHook(() =>
+  const { result } = renderHook(() =>
     useFileDrop({
       enabled: true,
       subscribe,
       classificationId: null,
       ingestMedia,
-      onResult,
     }),
   );
   await waitFor(() => expect(drop).toBeDefined());
   act(() => drop?.(["C:\\images\\broken.png", "C:\\images\\arona.png"]));
 
   await waitFor(() => expect(ingestMedia).toHaveBeenCalledTimes(2));
-  expect(onResult).toHaveBeenCalledWith({
-    status: "error",
+  expect(result.current.works[0].failures).toEqual([{
+    fileName: "broken.png",
     message: "지원하지 않는 이미지입니다.",
-  });
-});
-
-it("reports added and exact duplicate outcomes with their user messages", async () => {
-  let drop: ((paths: string[]) => void) | undefined;
-  const onResult = vi.fn();
-  const ingestMedia = vi
-    .fn()
-    .mockResolvedValueOnce({ status: "added", asset: fixtureAsset })
-    .mockResolvedValueOnce({
-      status: "exact_duplicate",
-      existingAssetId: "asset-existing",
-    });
-  const subscribe: DropSubscriber = async (handler) => {
-    drop = handler;
-    return () => undefined;
-  };
-
-  renderHook(() =>
-    useFileDrop({
-      enabled: true,
-      subscribe,
-      classificationId: null,
-      ingestMedia,
-      onResult,
-    }),
-  );
-  await waitFor(() => expect(drop).toBeDefined());
-  act(() => drop?.(["C:\\images\\new.png", "C:\\images\\duplicate.png"]));
-
-  await waitFor(() => expect(onResult).toHaveBeenCalledTimes(2));
-  expect(onResult).toHaveBeenNthCalledWith(1, {
-    status: "added",
-    asset: fixtureAsset,
-    message: "저장했습니다",
-  });
-  expect(onResult).toHaveBeenNthCalledWith(2, {
-    status: "exact_duplicate",
-    existingAssetId: "asset-existing",
-    message: "이미 보관된 파일입니다",
-  });
+  }]);
 });
 
 it("reports the current file and total while a drop is processing", async () => {
@@ -280,7 +233,7 @@ it("reports the current file and total while a drop is processing", async () => 
     .mockImplementationOnce(() => first.promise)
     .mockImplementationOnce(() => second.promise);
   const subscribe: DropSubscriber = async (handler) => {
-    drop = handler;
+    drop = (paths) => handler({ type: "drop", paths, position: { x: 0, y: 0 } });
     return () => undefined;
   };
 
@@ -290,7 +243,6 @@ it("reports the current file and total while a drop is processing", async () => 
       subscribe,
       classificationId: null,
       ingestMedia,
-      onResult: vi.fn(),
     }),
   );
   await waitFor(() => expect(drop).toBeDefined());
@@ -318,9 +270,8 @@ it("queues overlapping drops in arrival order without clearing progress", async 
     if (!pending) throw new Error(`unexpected path: ${input.sourcePath}`);
     return pending;
   });
-  const onResult = vi.fn();
   const subscribe: DropSubscriber = async (handler) => {
-    drop = handler;
+    drop = (paths) => handler({ type: "drop", paths, position: { x: 0, y: 0 } });
     return () => undefined;
   };
   const progressHistory: Array<DropProgress | null> = [];
@@ -347,7 +298,6 @@ it("queues overlapping drops in arrival order without clearing progress", async 
         subscribe,
         classificationId,
         ingestMedia,
-        onResult,
       });
       progressHistory.push(state.progress);
       return state.progress;
@@ -386,21 +336,6 @@ it("queues overlapping drops in arrival order without clearing progress", async 
 
   act(() => b1.resolve({ status: "added", asset: assetB1 }));
   await waitFor(() => expect(result.current).toBeNull());
-  expect(onResult).toHaveBeenNthCalledWith(1, {
-    status: "added",
-    asset: assetA1,
-    message: "저장했습니다",
-  });
-  expect(onResult).toHaveBeenNthCalledWith(2, {
-    status: "added",
-    asset: assetA2,
-    message: "저장했습니다",
-  });
-  expect(onResult).toHaveBeenNthCalledWith(3, {
-    status: "added",
-    asset: assetB1,
-    message: "저장했습니다",
-  });
   const activeStart = progressHistory.findIndex(
     (progress) => progress?.current === 1 && progress.total === 2,
   );
@@ -411,13 +346,12 @@ it("queues overlapping drops in arrival order without clearing progress", async 
 it("uses the current classification for a new drop without resubscribing", async () => {
   let drop: ((paths: string[]) => void) | undefined;
   const subscribe = vi.fn<DropSubscriber>(async (handler) => {
-    drop = handler;
+    drop = (paths) => handler({ type: "drop", paths, position: { x: 0, y: 0 } });
     return () => undefined;
   });
   const ingestMedia = vi
     .fn()
     .mockResolvedValue({ status: "added", asset: fixtureAsset });
-  const onResult = vi.fn();
 
   const { rerender } = renderHook(
     ({ classificationId }: { classificationId: string | null }) =>
@@ -426,7 +360,6 @@ it("uses the current classification for a new drop without resubscribing", async
         subscribe,
         classificationId,
         ingestMedia,
-        onResult,
       }),
     { initialProps: { classificationId: "tag-before" } },
   );
@@ -453,7 +386,7 @@ it("keeps the classification captured when a drop starts", async () => {
     .mockImplementationOnce(() => first.promise)
     .mockResolvedValueOnce({ status: "added", asset: fixtureAsset });
   const subscribe: DropSubscriber = async (handler) => {
-    drop = handler;
+    drop = (paths) => handler({ type: "drop", paths, position: { x: 0, y: 0 } });
     return () => undefined;
   };
 
@@ -464,7 +397,6 @@ it("keeps the classification captured when a drop starts", async () => {
         subscribe,
         classificationId,
         ingestMedia,
-        onResult: vi.fn(),
       }),
     { initialProps: { classificationId: "tag-at-drop" } },
   );
@@ -493,7 +425,6 @@ it("unlistens an immediately established subscription on unmount", async () => {
       subscribe,
       classificationId: null,
       ingestMedia: vi.fn(),
-      onResult: vi.fn(),
     }),
   );
   await waitFor(() => expect(subscribe).toHaveBeenCalledOnce());
@@ -518,7 +449,6 @@ it("unlistens when subscription setup finishes after unmount", async () => {
       subscribe,
       classificationId: null,
       ingestMedia: vi.fn(),
-      onResult: vi.fn(),
     }),
   );
 
@@ -528,16 +458,15 @@ it("unlistens when subscription setup finishes after unmount", async () => {
   await waitFor(() => expect(unlisten).toHaveBeenCalledOnce());
 });
 
-it("stops progress and result callbacks after unmount", async () => {
+it("stops progress and queued ingestion after unmount", async () => {
   let drop: ((paths: string[]) => void) | undefined;
   const first = deferred<{ status: "added"; asset: AssetSummary }>();
   const ingestMedia = vi
     .fn()
     .mockImplementationOnce(() => first.promise)
     .mockResolvedValueOnce({ status: "added", asset: fixtureAsset });
-  const onResult = vi.fn();
   const subscribe: DropSubscriber = async (handler) => {
-    drop = handler;
+    drop = (paths) => handler({ type: "drop", paths, position: { x: 0, y: 0 } });
     return () => undefined;
   };
 
@@ -547,7 +476,6 @@ it("stops progress and result callbacks after unmount", async () => {
       subscribe,
       classificationId: null,
       ingestMedia,
-      onResult,
     }),
   );
   await waitFor(() => expect(drop).toBeDefined());
@@ -561,12 +489,11 @@ it("stops progress and result callbacks after unmount", async () => {
     await Promise.resolve();
   });
 
-  expect(onResult).not.toHaveBeenCalled();
   expect(ingestMedia).toHaveBeenCalledTimes(1);
 });
 
 it("reports a drop subscription error while mounted", async () => {
-  const onResult = vi.fn();
+  const onFatalError = vi.fn();
 
   renderHook(() =>
     useFileDrop({
@@ -577,15 +504,12 @@ it("reports a drop subscription error while mounted", async () => {
       }),
       classificationId: null,
       ingestMedia: vi.fn(),
-      onResult,
+      onFatalError,
     }),
   );
 
   await waitFor(() =>
-    expect(onResult).toHaveBeenCalledWith({
-      status: "error",
-      message: "끌어놓기를 시작할 수 없습니다.",
-    }),
+    expect(onFatalError).toHaveBeenCalledWith("끌어놓기를 시작할 수 없습니다."),
   );
 });
 
@@ -623,16 +547,16 @@ it("shows native over state and clears it on cancel or drop", async () => {
     return () => undefined;
   };
   const ingestMedia = vi.fn().mockResolvedValue({ status: "added", asset: fixtureAsset });
-  const { result } = renderHook(() => useFileDrop({ enabled: true, subscribe, classificationId: null, ingestMedia, onResult: vi.fn() }));
+  const { result } = renderHook(() => useFileDrop({ enabled: true, subscribe, classificationId: null, ingestMedia }));
   await waitFor(() => expect(send).toBeDefined());
 
   act(() => send?.({ type: "over", position: { x: 7, y: 9 } }));
-  expect(result.current.over).toEqual({ x: 7, y: 9 });
+  expect(result.current.over).toBe(true);
   act(() => send?.({ type: "cancel" }));
-  expect(result.current.over).toBeNull();
+  expect(result.current.over).toBe(false);
   act(() => send?.({ type: "over", position: { x: 1, y: 2 } }));
   act(() => send?.({ type: "drop", paths: ["C:\\images\\arona.png"], position: { x: 1, y: 2 } }));
-  expect(result.current.over).toBeNull();
+  expect(result.current.over).toBe(false);
   await waitFor(() => expect(ingestMedia).toHaveBeenCalledOnce());
 });
 
@@ -643,14 +567,14 @@ it("does not ingest until the drop event after dragging over", async () => {
     return () => undefined;
   };
   const ingestMedia = vi.fn().mockResolvedValue({ status: "added", asset: fixtureAsset });
-  const { result } = renderHook(() => useFileDrop({ enabled: true, subscribe, classificationId: null, ingestMedia, onResult: vi.fn() }));
+  const { result } = renderHook(() => useFileDrop({ enabled: true, subscribe, classificationId: null, ingestMedia }));
   await waitFor(() => expect(send).toBeDefined());
 
   act(() => send?.({ type: "enter", paths: ["C:\\images\\arona.png"], position: { x: 5, y: 6 } }));
   act(() => send?.({ type: "over", position: { x: 6, y: 7 } }));
   act(() => send?.({ type: "leave" }));
 
-  expect(result.current.over).toBeNull();
+  expect(result.current.over).toBe(false);
   expect(ingestMedia).not.toHaveBeenCalled();
 
   act(() => send?.({ type: "enter", paths: ["C:\\images\\arona.png"], position: { x: 5, y: 6 } }));
@@ -662,13 +586,13 @@ it("does not ingest until the drop event after dragging over", async () => {
 it("retries only the paths that failed in a work batch", async () => {
   let drop: ((paths: string[]) => void) | undefined;
   const subscribe: DropSubscriber = async (handler) => {
-    drop = handler;
+    drop = (paths) => handler({ type: "drop", paths, position: { x: 0, y: 0 } });
     return () => undefined;
   };
   const ingestMedia = vi.fn()
     .mockRejectedValueOnce(new Error("broken"))
     .mockResolvedValue({ status: "added", asset: fixtureAsset });
-  const { result } = renderHook(() => useFileDrop({ enabled: true, subscribe, classificationId: "tag-a", ingestMedia, onResult: vi.fn() }));
+  const { result } = renderHook(() => useFileDrop({ enabled: true, subscribe, classificationId: "tag-a", ingestMedia }));
   await waitFor(() => expect(drop).toBeDefined());
   act(() => drop?.(["C:\\images\\broken.png", "C:\\images\\good.png"]));
   await waitFor(() => expect(result.current.works[0]?.status).toBe("failed"));
@@ -681,7 +605,7 @@ it("retries only the paths that failed in a work batch", async () => {
 it("passes image and supported video paths through the same media gateway", async () => {
   let drop: ((paths: string[]) => void) | undefined;
   const subscribe: DropSubscriber = async (handler) => {
-    drop = handler;
+    drop = (paths) => handler({ type: "drop", paths, position: { x: 0, y: 0 } });
     return () => undefined;
   };
   const ingestMedia = vi.fn().mockResolvedValue({ status: "added", asset: fixtureAsset });
@@ -690,7 +614,6 @@ it("passes image and supported video paths through the same media gateway", asyn
     subscribe,
     classificationId: "work-a",
     ingestMedia,
-    onResult: vi.fn(),
   }));
   await waitFor(() => expect(drop).toBeDefined());
 

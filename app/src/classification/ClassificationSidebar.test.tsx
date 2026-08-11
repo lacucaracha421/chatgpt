@@ -106,10 +106,10 @@ describe("buildClassificationTree", () => {
     expect(tree[0].children[0].children[0].entry).toMatchObject({ name: "Arona", kind: "tag" });
   });
 
-  it("returns disconnected entries as orphans instead of dropping them", () => {
+  it("reports whether disconnected entries were omitted", () => {
     const tree = buildClassificationTree([...entries, { id: "lost", kind: "tag", name: "Lost", parentId: "missing" }]);
 
-    expect(tree.orphans).toEqual([{ id: "lost", kind: "tag", name: "Lost", parentId: "missing" }]);
+    expect(tree.hasOrphans).toBe(true);
   });
 });
 

@@ -126,7 +126,7 @@ describe("App", () => {
     localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
     let drop: ((paths: string[]) => void) | undefined;
     const subscribeDrops: DropSubscriber = async (handler) => {
-      drop = handler;
+      drop = (paths) => handler({ type: "drop", paths, position: { x: 0, y: 0 } });
       return () => undefined;
     };
     const libraryGateway = gateway();
@@ -301,7 +301,7 @@ describe("App", () => {
     localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
     let drop: ((paths: string[]) => void) | undefined;
     const subscribeDrops: DropSubscriber = async (handler) => {
-      drop = handler;
+      drop = (paths) => handler({ type: "drop", paths, position: { x: 0, y: 0 } });
       return () => undefined;
     };
     const libraryGateway = gateway();
@@ -371,7 +371,7 @@ describe("App", () => {
     localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
       let drop: ((paths: string[]) => void) | undefined;
       const subscribeDrops: DropSubscriber = async (handler) => {
-        drop = handler;
+        drop = (paths) => handler({ type: "drop", paths, position: { x: 0, y: 0 } });
         return () => undefined;
       };
       const libraryGateway = gateway();
@@ -419,7 +419,7 @@ describe("App", () => {
     localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
     let drop: ((paths: string[]) => void) | undefined;
     const subscribeDrops: DropSubscriber = async (handler) => {
-      drop = handler;
+      drop = (paths) => handler({ type: "drop", paths, position: { x: 0, y: 0 } });
       return () => undefined;
     };
     let resolveIngest!: (value: {
@@ -503,7 +503,7 @@ describe("App", () => {
     localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
     let drop: ((paths: string[]) => void) | undefined;
     const subscribeDrops: DropSubscriber = async (handler) => {
-      drop = handler;
+      drop = (paths) => handler({ type: "drop", paths, position: { x: 0, y: 0 } });
       return () => undefined;
     };
     const libraryGateway = gateway();
@@ -700,7 +700,7 @@ describe("App", () => {
     localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
     let drop: ((paths: string[]) => void) | undefined;
     const subscribeDrops: DropSubscriber = async (handler) => {
-      drop = handler;
+      drop = (paths) => handler({ type: "drop", paths, position: { x: 0, y: 0 } });
       return () => undefined;
     };
     const libraryGateway = gateway();

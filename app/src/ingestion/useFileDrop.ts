@@ -1,7 +1,7 @@
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
-import type { AssetSummary, IngestOutcome, LibraryGateway } from "../library/types";
+import type { IngestOutcome, LibraryGateway } from "../library/types";
 
 export type NativeFileDropEvent =
   | { type: "enter"; paths: string[]; position: { x: number; y: number } }
@@ -10,17 +10,10 @@ export type NativeFileDropEvent =
   | { type: "leave" }
   | { type: "cancel" };
 
-type CompatibleDropEvent = NativeFileDropEvent | string[];
-export type DropSubscriber = (handler: (event: CompatibleDropEvent) => void) => Promise<() => void>;
+export type DropSubscriber = (handler: (event: NativeFileDropEvent) => void) => Promise<() => void>;
 
 export const subscribeToTauriDrops: DropSubscriber = async (handler) =>
   getCurrentWebview().onDragDropEvent((event) => handler(event.payload as NativeFileDropEvent));
-
-export type FileDropResult =
-  | { status: "added"; asset: AssetSummary; message: string }
-  | { status: "exact_duplicate"; existingAssetId: string; message: string }
-  | { status: "review_pending"; reviewId: string; message: string }
-  | { status: "error"; message: string };
 
 export type DropProgress = { current: number; total: number };
 export type IngestionWork = {
@@ -42,13 +35,11 @@ type UseFileDropOptions = {
   ingestMedia: LibraryGateway["ingestMedia"];
   onIngested?: (result: IngestOutcome) => void;
   onFatalError?: (message: string) => void;
-  // Kept temporarily so existing callers can migrate without changing drop semantics.
-  onResult?: (result: FileDropResult) => void;
 };
 
 export type FileDropState = {
   progress: DropProgress | null;
-  over: { x: number; y: number } | null;
+  over: boolean;
   works: IngestionWork[];
   retryFailed: (workId: string) => void;
   dismissWork: (workId: string) => void;
@@ -57,7 +48,7 @@ export type FileDropState = {
 export function useFileDrop(options: UseFileDropOptions): FileDropState {
   const { subscribe } = options;
   const [progress, setProgress] = useState<DropProgress | null>(null);
-  const [over, setOver] = useState<{ x: number; y: number } | null>(null);
+  const [over, setOver] = useState(false);
   const [works, setWorks] = useState<IngestionWork[]>([]);
   const optionsRef = useRef(options);
   const enqueueRef = useRef<(paths: string[], destination: string | null, workId?: string) => void>(() => undefined);
@@ -116,13 +107,11 @@ export function useFileDrop(options: UseFileDropOptions): FileDropState {
               reviewPending.push({ fileName: fileName(sourcePath), reviewId: result.reviewId });
             }
             optionsRef.current.onIngested?.(result);
-            optionsRef.current.onResult?.(legacyResult(result));
           } catch (error) {
             if (!active) return;
             const message = commandErrorMessage(error, "파일을 저장하지 못했습니다.");
             failures.push({ fileName: fileName(sourcePath), message });
             failedPaths.push(sourcePath);
-            optionsRef.current.onResult?.({ status: "error", message });
           }
           setWorks((current) => current.map((work) => work.id === workId
             ? {
@@ -149,22 +138,20 @@ export function useFileDrop(options: UseFileDropOptions): FileDropState {
 
     void subscribe((incoming) => {
       if (!active) return;
-      const event: NativeFileDropEvent = Array.isArray(incoming)
-        ? { type: "drop", paths: incoming, position: { x: 0, y: 0 } }
-        : incoming;
+      const event = incoming;
       if (event.type === "cancel" || event.type === "leave") {
-        setOver(null);
+        setOver(false);
         return;
       }
       if (!optionsRef.current.enabled) {
-        setOver(null);
+        setOver(false);
         return;
       }
       if (event.type === "enter" || event.type === "over") {
-        setOver(event.position);
+        setOver(true);
         return;
       }
-      setOver(null);
+      setOver(false);
       enqueue(event.paths, optionsRef.current.classificationId);
     }).then((stop) => {
       if (active) unlisten = stop;
@@ -173,7 +160,6 @@ export function useFileDrop(options: UseFileDropOptions): FileDropState {
       if (!active) return;
       const message = commandErrorMessage(error, "파일 놓기를 시작하지 못했습니다.");
       optionsRef.current.onFatalError?.(message);
-      optionsRef.current.onResult?.({ status: "error", message });
     });
     return () => {
       active = false;
@@ -201,10 +187,4 @@ function emptyWork(id: string, total: number): IngestionWork {
 
 function fileName(path: string) {
   return path.split(/[\\/]/).pop() ?? path;
-}
-
-function legacyResult(result: IngestOutcome): FileDropResult {
-  if (result.status === "added") return { ...result, message: "저장했습니다" };
-  if (result.status === "exact_duplicate") return { ...result, message: "이미 보관된 파일입니다" };
-  return { ...result, message: "유사 검토 대기" };
 }

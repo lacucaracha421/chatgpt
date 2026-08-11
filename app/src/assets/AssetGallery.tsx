@@ -1,7 +1,7 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { HeartIcon } from "@heroicons/react/24/solid";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { AssetSummary, ClassificationEntry } from "../library/types";
+import type { AssetSummary } from "../library/types";
 import { assetDragIds, type InternalDragPayload } from "../shared/interaction/pointerDrag";
 import type { SelectionGesture } from "./selection";
 import { buildJustifiedRows, type JustifiedRow } from "./justifiedRows";
@@ -16,7 +16,6 @@ const SPARSE_DATE_LINE_COUNT = 4;
 
 type AssetGalleryProps = {
   items: AssetSummary[];
-  classifications?: ClassificationEntry[];
   selectedAssetIds?: ReadonlySet<string>;
   focusAssetId?: string | null;
   targetRowHeight?: number;
@@ -34,9 +33,6 @@ type AssetGalleryProps = {
   onPointerDragMove?: (event: React.PointerEvent<HTMLElement>) => void;
   onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void;
   onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void;
-  // Transitional compatibility for existing gallery consumers; toolbar ownership is AssetToolbar.
-  directOnly?: boolean;
-  onDirectOnlyChange?: (directOnly: boolean) => void;
 };
 
 export function AssetGallery({ items, selectedAssetIds = new Set(), focusAssetId = null, targetRowHeight = 180, metadataVisible = false, hasNextPage = false, onLoadNextPage, onSelectionGesture, onSelectAll, onDeleteSelection, onClearSelection, onMoveFocus, onOpen, onRetryVideo, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {

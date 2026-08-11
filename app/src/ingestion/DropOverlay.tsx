@@ -1,4 +1,4 @@
-export function DropOverlay({ over, destinationName }: { over: { x: number; y: number } | null; destinationName: string }) {
+export function DropOverlay({ over, destinationName }: { over: boolean; destinationName: string }) {
   if (!over) return null;
   return <div className="drop-overlay" role="status" aria-live="polite">
     <div className="drop-overlay__message">
