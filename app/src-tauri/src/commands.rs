@@ -53,6 +53,9 @@ impl From<LibraryError> for CommandError {
             LibraryError::DuplicateClassificationName => "duplicate_classification_name",
             LibraryError::InvalidClassificationParent => "invalid_classification_parent",
             LibraryError::ClassificationCycle => "classification_cycle",
+            LibraryError::InvalidClassificationAppearance => {
+                "invalid_classification_appearance"
+            }
             LibraryError::ClassificationHasChildren => "classification_has_children",
             LibraryError::AssetNotFound => "asset_not_found",
             LibraryError::EmptyAssetSelection => "empty_asset_selection",
@@ -187,6 +190,18 @@ pub fn rename_classification(
 ) -> Result<(), CommandError> {
     current_required(state)?
         .rename_classification(&id, &name)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn update_classification_appearance(
+    id: String,
+    icon_key: Option<String>,
+    color_key: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    current_required(state)?
+        .update_classification_appearance(&id, icon_key.as_deref(), color_key.as_deref())
         .map_err(CommandError::from)
 }
 
@@ -516,6 +531,17 @@ mod tests {
 
         assert_eq!(value["code"], "classification_not_found");
         assert_eq!(value["message"], "요청한 분류 항목을 찾을 수 없습니다.");
+    }
+
+    #[test]
+    fn invalid_classification_appearance_has_a_stable_public_error() {
+        let error = CommandError::from(LibraryError::InvalidClassificationAppearance);
+
+        assert_eq!(error.code, "invalid_classification_appearance");
+        assert_eq!(
+            error.message,
+            "지원하지 않는 폴더 아이콘 또는 색상입니다."
+        );
     }
 
     #[test]

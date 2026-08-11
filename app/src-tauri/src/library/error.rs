@@ -46,6 +46,8 @@ pub enum LibraryError {
     InvalidClassificationParent,
     #[error("분류 항목을 자신의 하위 항목으로 옮길 수 없습니다")]
     ClassificationCycle,
+    #[error("지원하지 않는 폴더 아이콘 또는 색상입니다.")]
+    InvalidClassificationAppearance,
     #[error("하위 폴더가 있는 폴더는 삭제할 수 없습니다")]
     ClassificationHasChildren,
     #[error("요청한 자산을 찾을 수 없습니다")]

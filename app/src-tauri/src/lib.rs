@@ -49,6 +49,7 @@ pub fn run() {
             commands::list_classifications,
             commands::create_classification,
             commands::rename_classification,
+            commands::update_classification_appearance,
             commands::move_classification,
             commands::delete_classification,
             commands::get_asset_classifications,

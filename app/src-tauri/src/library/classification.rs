@@ -10,6 +10,37 @@ use super::{
     validated_asset_ids, Library,
 };
 
+const CLASSIFICATION_ICON_KEYS: [&str; 24] = [
+    "folder",
+    "photo",
+    "film",
+    "music",
+    "book",
+    "star",
+    "heart",
+    "user",
+    "users",
+    "academic-cap",
+    "briefcase",
+    "home",
+    "globe",
+    "map",
+    "calendar",
+    "clock",
+    "bookmark",
+    "tag",
+    "sparkles",
+    "bolt",
+    "fire",
+    "trophy",
+    "puzzle",
+    "cube",
+];
+const CLASSIFICATION_COLOR_KEYS: [&str; 12] = [
+    "red", "orange", "amber", "yellow", "lime", "green", "teal", "cyan", "blue", "indigo",
+    "purple", "pink",
+];
+
 impl Library {
     pub fn create_classification(
         &self,
@@ -93,6 +124,30 @@ impl Library {
                 params![name, id],
             )
             .map_err(map_duplicate_name)?;
+        if changed == 0 {
+            return Err(LibraryError::ClassificationNotFound);
+        }
+        Ok(())
+    }
+
+    pub fn update_classification_appearance(
+        &self,
+        id: &str,
+        icon_key: Option<&str>,
+        color_key: Option<&str>,
+    ) -> Result<(), LibraryError> {
+        if icon_key.is_some_and(|key| !CLASSIFICATION_ICON_KEYS.contains(&key))
+            || color_key.is_some_and(|key| !CLASSIFICATION_COLOR_KEYS.contains(&key))
+        {
+            return Err(LibraryError::InvalidClassificationAppearance);
+        }
+        let connection = self.connection()?;
+        let changed = connection.execute(
+            "UPDATE classification_entries
+             SET icon_key = ?1, color_key = ?2
+             WHERE id = ?3",
+            params![icon_key, color_key, id],
+        )?;
         if changed == 0 {
             return Err(LibraryError::ClassificationNotFound);
         }
@@ -667,6 +722,72 @@ mod tests {
             .rename_classification(&fixture.child_tag.id, " Student ")
             .unwrap_err();
         assert!(matches!(error, LibraryError::DuplicateClassificationName));
+    }
+
+    #[test]
+    fn classification_appearance_updates_and_resets() {
+        let fixture = ClassificationFixture::new();
+
+        fixture
+            .library
+            .update_classification_appearance(
+                &fixture.child_tag.id,
+                Some("photo"),
+                Some("pink"),
+            )
+            .unwrap();
+        let changed = fixture
+            .library
+            .list_classifications()
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.id == fixture.child_tag.id)
+            .unwrap();
+        assert_eq!(changed.icon_key.as_deref(), Some("photo"));
+        assert_eq!(changed.color_key.as_deref(), Some("pink"));
+
+        fixture
+            .library
+            .update_classification_appearance(&fixture.child_tag.id, None, None)
+            .unwrap();
+        let reset = fixture
+            .library
+            .list_classifications()
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.id == fixture.child_tag.id)
+            .unwrap();
+        assert_eq!((reset.icon_key, reset.color_key), (None, None));
+    }
+
+    #[test]
+    fn classification_appearance_rejects_unknown_keys_without_changing_it() {
+        let fixture = ClassificationFixture::new();
+
+        assert!(matches!(
+            fixture.library.update_classification_appearance(
+                &fixture.child_tag.id,
+                Some("uploaded-svg"),
+                Some("#ffffff"),
+            ),
+            Err(LibraryError::InvalidClassificationAppearance)
+        ));
+        let entry = fixture
+            .library
+            .list_classifications()
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.id == fixture.child_tag.id)
+            .unwrap();
+        assert_eq!((entry.icon_key, entry.color_key), (None, None));
+        assert!(matches!(
+            fixture.library.update_classification_appearance(
+                "missing-folder",
+                Some("folder"),
+                Some("blue"),
+            ),
+            Err(LibraryError::ClassificationNotFound)
+        ));
     }
 
     #[test]
