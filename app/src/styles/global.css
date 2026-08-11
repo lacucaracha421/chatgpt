@@ -1356,6 +1356,7 @@ input:disabled {
 }
 
 .similarity-review__asset h3 { margin: 0; font-size: 0.875rem; }
+.view-toolbar__content > strong { color: var(--color-muted); font-size: 0.75rem; font-weight: 600; }
 .view-toolbar__content > span { color: var(--color-muted); font-size: 0.75rem; }
 
 .similarity-review__comparison {

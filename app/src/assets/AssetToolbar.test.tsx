@@ -69,13 +69,18 @@ it("keeps uncommon selection actions in the overflow menu", async () => {
 
 it("acts as the window title bar with drag region and window controls", () => {
   const { container } = render(<AssetToolbar {...baseProps} />);
-  const header = container.querySelector(".asset-toolbar")!;
+  const header = container.querySelector(".view-toolbar")!;
   expect(header).toHaveAttribute("data-tauri-drag-region");
-  expect(container.querySelector(".asset-toolbar h2")).toHaveAttribute("data-tauri-drag-region");
-  expect(container.querySelector(".asset-toolbar__controls")).toHaveAttribute("data-tauri-drag-region");
+  expect(container.querySelector(".view-toolbar h2")).toHaveAttribute("data-tauri-drag-region");
   expect(screen.getByRole("button", { name: "창 최소화" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "창 최대화" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "창 최소화" }).querySelector("svg")).toBeInTheDocument();
+});
+
+it("uses the shared view toolbar with window controls", () => {
+  const { container } = render(<AssetToolbar {...baseProps} />);
+  expect(container.querySelector(".view-toolbar")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "창 닫기" })).toBeInTheDocument();
 });
 
 it("toggles the inspector from the selection actions", async () => {
