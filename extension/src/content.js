@@ -98,8 +98,22 @@
     return { message, retry };
   }
 
+  function createClickSuppressor() {
+    let armed = false;
+    return {
+      arm() { armed = true; },
+      consume(event) {
+        if (!armed) return false;
+        armed = false;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return true;
+      },
+    };
+  }
+
   if (globalThis.__LAKOMICS_TEST__) {
-    globalThis.LakomicsContent = { createCollectorController, feedbackFor };
+    globalThis.LakomicsContent = { createClickSuppressor, createCollectorController, feedbackFor };
     return;
   }
 
@@ -112,6 +126,7 @@
     let resultToast = null;
     let resultTimer = null;
     let resultAnchor = null;
+    const clickSuppressor = createClickSuppressor();
     const controller = createCollectorController({
       send: (payload) => chrome.runtime.sendMessage({ type: "ingestion:create", payload }),
       status: showStatus,
@@ -123,6 +138,7 @@
     document.addEventListener("pointermove", onPointerMove, true);
     document.addEventListener("pointerup", onPointerUp, true);
     document.addEventListener("pointercancel", cancelPointer, true);
+    document.addEventListener("click", (event) => clickSuppressor.consume(event), true);
     document.addEventListener("dragstart", onDragStart, true);
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") cancelPointer();
@@ -181,6 +197,7 @@
         pointer = null;
         return;
       }
+      clickSuppressor.arm();
       event.preventDefault();
       event.stopPropagation();
       if (!pointer.started) {
@@ -199,6 +216,7 @@
 
     function cancelPointer() {
       if (!pointer) return;
+      if (pointer.thresholdCrossed) clickSuppressor.arm();
       pointer = null;
       clearDwellTimer();
       controller.cancel();

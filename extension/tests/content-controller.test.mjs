@@ -78,6 +78,26 @@ test("worker transport failures remain retryable", async () => {
   assert.deepEqual(plain(sent[1]), plain(sent[0]));
 });
 
+test("click suppression consumes only the first click after a radial drag", () => {
+  const api = loadContent(async () => ({ ok: true }));
+  const suppressor = api.createClickSuppressor();
+  const ordinary = clickEvent();
+  assert.equal(suppressor.consume(ordinary), false);
+  assert.equal(ordinary.defaultPrevented, false);
+  assert.equal(ordinary.immediatePropagationStopped, false);
+
+  suppressor.arm();
+  const first = clickEvent();
+  assert.equal(suppressor.consume(first), true);
+  assert.equal(first.defaultPrevented, true);
+  assert.equal(first.immediatePropagationStopped, true);
+
+  const second = clickEvent();
+  assert.equal(suppressor.consume(second), false);
+  assert.equal(second.defaultPrevented, false);
+  assert.equal(second.immediatePropagationStopped, false);
+});
+
 function loadContent(send) {
   const context = {
     globalThis: null,
@@ -97,4 +117,13 @@ function loadContent(send) {
 
 function plain(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function clickEvent() {
+  return {
+    defaultPrevented: false,
+    immediatePropagationStopped: false,
+    preventDefault() { this.defaultPrevented = true; },
+    stopImmediatePropagation() { this.immediatePropagationStopped = true; },
+  };
 }
