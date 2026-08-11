@@ -7,6 +7,7 @@ import { Button } from "../shared/ui/Button";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { Toast } from "../shared/ui/Toast";
+import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import type { InternalDragPayload } from "../shared/interaction/pointerDrag";
 import { AssetGallery } from "./AssetGallery";
 import { AssetInspector } from "./AssetInspector";
@@ -29,6 +30,7 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, thu
   const [firstError, setFirstError] = useState<QueryError | null>(null);
   const [nextError, setNextError] = useState<QueryError | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  useAutoDismiss(message, setMessage);
   const [retryVersion, setRetryVersion] = useState(0);
   const [randomVersion, setRandomVersion] = useState(0);
   const [selectedAsset, setSelectedAsset] = useState<AssetSummary | null>(null);

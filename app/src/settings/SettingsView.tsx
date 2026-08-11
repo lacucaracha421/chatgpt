@@ -8,6 +8,7 @@ import { ViewToolbar } from "../layout/ViewToolbar";
 import { Button } from "../shared/ui/Button";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { Toast } from "../shared/ui/Toast";
+import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 
 type SettingsViewProps = {
   restoring: boolean;
@@ -22,9 +23,11 @@ export function SettingsView({ restoring, onRestore, onExit }: SettingsViewProps
   const [backups, setBackups] = useState<MetadataBackup[] | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  useAutoDismiss(error, setError);
   const [submitting, setSubmitting] = useState(false);
   const [mangaRoot, setMangaRoot] = useState<string | null>(null);
   const [mangaRootError, setMangaRootError] = useState<string | null>(null);
+  useAutoDismiss(mangaRootError, setMangaRootError);
   const pending = restoring || submitting;
 
   useEffect(() => {

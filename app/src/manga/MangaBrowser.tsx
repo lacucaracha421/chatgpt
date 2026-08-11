@@ -6,6 +6,7 @@ import { Button } from "../shared/ui/Button";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { Toast } from "../shared/ui/Toast";
+import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { ViewToolbar } from "../layout/ViewToolbar";
 
 type MangaBrowserProps = {
@@ -16,6 +17,7 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
   const [root, setRoot] = useState<string | null | undefined>(undefined);
   const [series, setSeries] = useState<MangaSeries[] | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  useAutoDismiss(message, setMessage);
 
   async function scan() {
     try {
@@ -27,12 +29,6 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
       setMessage("망가 목록을 불러오지 못했습니다");
     }
   }
-
-  useEffect(() => {
-    if (!message) return;
-    const timer = window.setTimeout(() => setMessage(null), 5000);
-    return () => window.clearTimeout(timer);
-  }, [message]);
 
   useEffect(() => {
     let active = true;

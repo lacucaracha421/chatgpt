@@ -9,6 +9,7 @@ import { Button } from "../shared/ui/Button";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { Toast } from "../shared/ui/Toast";
+import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 
 type Props = {
   gateway: LibraryGateway;
@@ -23,6 +24,7 @@ export function SimilarityReviewBrowser({ gateway, onCountChange, onClose }: Pro
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  useAutoDismiss(message, setMessage);
   const generationRef = useRef(0);
 
   const load = useCallback(async () => {

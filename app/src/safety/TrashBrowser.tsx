@@ -11,6 +11,7 @@ import { Skeleton } from "../shared/ui/Skeleton";
 import { TextField } from "../shared/ui/TextField";
 import { Toast } from "../shared/ui/Toast";
 import { Toggle } from "../shared/ui/Toggle";
+import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 
 const MIN_RETENTION_DAYS = 1;
 const MAX_RETENTION_DAYS = 3650;
@@ -24,6 +25,7 @@ export function TrashBrowser() {
   const [pageError, setPageError] = useState<string | null>(null);
   const [policyError, setPolicyError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  useAutoDismiss(message, setMessage);
   const [pendingMutation, setPendingMutation] = useState<"restore" | "policy" | "empty" | null>(null);
   const [confirmEmpty, setConfirmEmpty] = useState(false);
   const loadGenerationRef = useRef(0);
