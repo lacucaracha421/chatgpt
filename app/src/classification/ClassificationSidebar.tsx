@@ -110,6 +110,14 @@ export function ClassificationSidebar({
     beginInlineEdit({ type: "rename", entry }, entry.name);
   }
 
+  function openDelete(entry: ClassificationEntry) {
+    if (entries.some((candidate) => candidate.parentId === entry.id)) {
+      setMessage("하위 폴더가 있어 삭제할 수 없습니다.");
+      return;
+    }
+    setDialog({ type: "delete", entry });
+  }
+
   function cancelInlineEdit() {
     setInlineEdit(null);
     setEditError(null);
@@ -158,7 +166,11 @@ export function ClassificationSidebar({
     if (!dialog || dialog.type !== "delete") return;
     try {
       await gateway.deleteClassification(dialog.entry.id);
-      completeMutation();
+      setMessage(null);
+      closeDialog();
+      onExpandedIdsChange(expandedIds.filter((id) => id !== dialog.entry.id));
+      onViewChange({ kind: "classification", classificationId: dialog.entry.parentId });
+      onChanged();
     } catch (error) {
       setMessage(commandErrorMessage(error, "분류를 변경하지 못했습니다."));
     }
@@ -199,7 +211,7 @@ export function ClassificationSidebar({
       openRename(selected);
     } else if (event.key === "Delete" && selected) {
       event.preventDefault();
-      setDialog({ type: "delete", entry: selected });
+      openDelete(selected);
     }
   }
 
@@ -311,7 +323,7 @@ export function ClassificationSidebar({
               onEditSave={() => void saveInlineEdit()}
               onEditCancel={cancelInlineEdit}
               onMove={(entry) => { setParentId(entry.parentId ?? ""); setDialog({ type: "move", entry }); }}
-              onDelete={(entry) => setDialog({ type: "delete", entry })}
+              onDelete={openDelete}
               dragTarget={dragTarget}
               onPointerDragStart={onPointerDragStart}
               onPointerDragMove={onPointerDragMove}
@@ -353,6 +365,9 @@ export function ClassificationSidebar({
         <Dialog open title="폴더 삭제" onClose={closeDialog}>
           <div className="classification-sidebar__form">
             <p>{dialog.entry.name} 폴더를 삭제할까요?</p>
+            <p>{dialog.entry.parentId
+              ? `이 폴더의 자산은 ${entries.find((entry) => entry.id === dialog.entry.parentId)?.name ?? "상위"} 폴더로 이동합니다.`
+              : "비어 있는 최상위 폴더만 삭제할 수 있습니다."}</p>
             <div className="ui-dialog__actions">
               <Button type="button" onClick={closeDialog}>취소</Button>
               <Button type="button" variant="danger" onClick={() => void remove()}>삭제</Button>
@@ -404,7 +419,13 @@ function TreeItem({ activeRowId, editError, editName, expandedIds, inlineEdit, n
     { id: "create-child", label: "하위 폴더 만들기", onSelect: () => onCreateChild(node.entry) },
     { id: "rename", label: "이름 변경", onSelect: () => onRename(node.entry) },
     { id: "move", label: "폴더 이동", onSelect: () => onMove(node.entry) },
-    { id: "delete", label: "삭제", destructive: true, onSelect: () => onDelete(node.entry) },
+    {
+      id: "delete",
+      label: hasChildren ? "삭제 — 하위 폴더 있음" : "삭제",
+      destructive: true,
+      disabled: hasChildren,
+      onSelect: () => onDelete(node.entry),
+    },
   ];
 
   return (

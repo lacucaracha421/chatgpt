@@ -263,7 +263,7 @@ describe("ClassificationSidebar", () => {
     const row = screen.getByRole("treeitem", { name: /Blue Archive/ });
 
     await user.click(screen.getByRole("button", { name: "Blue Archive 추가 작업" }));
-    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["하위 폴더 만들기", "이름 변경", "폴더 이동", "삭제"]);
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["하위 폴더 만들기", "이름 변경", "폴더 이동", "삭제 — 하위 폴더 있음"]);
     await user.click(screen.getByRole("menuitem", { name: "이름 변경" }));
     const rename = screen.getByRole("textbox", { name: "폴더 이름" });
     await user.clear(rename);
@@ -275,10 +275,10 @@ describe("ClassificationSidebar", () => {
     expect(screen.getByRole("dialog", { name: "폴더 이동" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "취소" }));
 
-    fireEvent.contextMenu(row, { clientX: 20, clientY: 20 });
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: "Arona" }), { clientX: 20, clientY: 20 });
     await user.click(screen.getByRole("menuitem", { name: "삭제" }));
     await user.click(screen.getByRole("button", { name: "삭제" }));
-    await waitFor(() => expect(fixtureGateway.deleteClassification).toHaveBeenCalledWith("work"));
+    await waitFor(() => expect(fixtureGateway.deleteClassification).toHaveBeenCalledWith("tag"));
   });
 
   it("routes folder shortcuts through the same create, rename, and delete flows", async () => {
@@ -300,7 +300,71 @@ describe("ClassificationSidebar", () => {
     await user.keyboard("{Escape}");
 
     fireEvent.keyDown(games, { key: "Delete" });
-    expect(screen.getByRole("dialog", { name: "폴더 삭제" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("하위 폴더가 있어 삭제할 수 없습니다.");
+    expect(screen.queryByRole("dialog", { name: "폴더 삭제" })).not.toBeInTheDocument();
+  });
+
+  it("disables deletion for folders with children and explains why", async () => {
+    const user = userEvent.setup();
+    const fixtureGateway = gateway();
+    renderSidebar(fixtureGateway);
+
+    await user.click(screen.getByRole("button", { name: "Games 추가 작업" }));
+
+    const deleteItem = screen.getByRole("menuitem", { name: "삭제 — 하위 폴더 있음" });
+    expect(deleteItem).toHaveAttribute("data-disabled");
+    await user.click(deleteItem);
+    expect(fixtureGateway.deleteClassification).not.toHaveBeenCalled();
+  });
+
+  it("explains asset promotion before deleting a child folder", async () => {
+    const user = userEvent.setup();
+    renderSidebar();
+
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: "Arona" }), { clientX: 20, clientY: 20 });
+    await user.click(screen.getByRole("menuitem", { name: "삭제" }));
+
+    expect(screen.getByText("이 폴더의 자산은 Blue Archive 폴더로 이동합니다.")).toBeVisible();
+  });
+
+  it("explains that a root must be empty before deletion", async () => {
+    const user = userEvent.setup();
+    const rootEntries = [...entries, { id: "empty", kind: "root", name: "Unused", parentId: null }] satisfies ClassificationEntry[];
+    renderSidebar(gateway(), { entries: rootEntries });
+
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: "Unused" }), { clientX: 20, clientY: 20 });
+    await user.click(screen.getByRole("menuitem", { name: "삭제" }));
+
+    expect(screen.getByText("비어 있는 최상위 폴더만 삭제할 수 있습니다.")).toBeVisible();
+  });
+
+  it("selects the parent and removes the deleted child from expanded folders", async () => {
+    const user = userEvent.setup();
+    const fixtureGateway = gateway();
+    const { onChanged, onExpandedIdsChange, onViewChange } = renderSidebar(fixtureGateway, { expandedIds: ["root", "work", "tag"] });
+
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: "Arona" }), { clientX: 20, clientY: 20 });
+    await user.click(screen.getByRole("menuitem", { name: "삭제" }));
+    await user.click(screen.getByRole("button", { name: "삭제" }));
+
+    await waitFor(() => expect(fixtureGateway.deleteClassification).toHaveBeenCalledWith("tag"));
+    expect(onExpandedIdsChange).toHaveBeenCalledWith(["root", "work"]);
+    expect(onViewChange).toHaveBeenCalledWith({ kind: "classification", classificationId: "work" });
+    expect(onChanged).toHaveBeenCalledOnce();
+  });
+
+  it("selects all assets after deleting an empty root", async () => {
+    const user = userEvent.setup();
+    const fixtureGateway = gateway();
+    const rootEntries = [...entries, { id: "empty", kind: "root", name: "Unused", parentId: null }] satisfies ClassificationEntry[];
+    const { onViewChange } = renderSidebar(fixtureGateway, { entries: rootEntries, view: { kind: "classification", classificationId: "empty" } });
+
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: "Unused" }), { clientX: 20, clientY: 20 });
+    await user.click(screen.getByRole("menuitem", { name: "삭제" }));
+    await user.click(screen.getByRole("button", { name: "삭제" }));
+
+    await waitFor(() => expect(fixtureGateway.deleteClassification).toHaveBeenCalledWith("empty"));
+    expect(onViewChange).toHaveBeenCalledWith({ kind: "classification", classificationId: null });
   });
 
   it("omits the moving folder and its descendants from move targets", async () => {
