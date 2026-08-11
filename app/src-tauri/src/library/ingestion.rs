@@ -1,4 +1,5 @@
 use std::{
+    fmt::Write as _,
     fs::{self, File, OpenOptions},
     io::{self, BufReader, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
@@ -430,7 +431,11 @@ fn copy_and_hash(
         source,
     })?;
 
-    Ok((hex::encode(hasher.finalize()), byte_size))
+    let mut content_hash = String::with_capacity(64);
+    for byte in hasher.finalize() {
+        write!(&mut content_hash, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    Ok((content_hash, byte_size))
 }
 
 fn inspect_image(staging: File) -> Result<(ImageFormat, u32, u32), LibraryError> {
@@ -1442,6 +1447,23 @@ mod tests {
             .read_dir()
             .map(|mut entries| entries.next().is_none())
             .unwrap_or(true));
+    }
+
+    #[test]
+    fn content_hash_is_lowercase_sha256() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source.bin");
+        let staging = temp.path().join("staging.part");
+        std::fs::write(&source, b"hash me").unwrap();
+        let mut pending = PendingFiles::new();
+
+        let (content_hash, _) =
+            copy_and_hash(&source, &staging, &mut pending, None).unwrap();
+
+        assert_eq!(content_hash.len(), 64);
+        assert!(content_hash
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()));
     }
 
     #[test]
