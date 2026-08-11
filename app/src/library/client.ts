@@ -6,6 +6,7 @@ import type {
   AssetSummary,
   ClassificationEntry,
   CreateClassification,
+  ExtensionConnection,
   IngestMediaInput,
   IngestOutcome,
   LibraryGateway,
@@ -22,6 +23,8 @@ import type {
 
 export const libraryGateway: LibraryGateway = {
   openLibrary: (path) => invoke<LibrarySummary>("open_library", { path }),
+  getExtensionConnection: () =>
+    invoke<ExtensionConnection>("get_extension_connection"),
   listClassifications: () =>
     invoke<ClassificationEntry[]>("list_classifications"),
   createClassification: (request: CreateClassification) =>

@@ -897,6 +897,29 @@ input:disabled {
   gap: var(--space-3);
 }
 
+.settings-view__extension {
+  display: grid;
+  gap: var(--space-3);
+  max-width: 640px;
+}
+
+.settings-view__token-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.settings-view__token {
+  flex: 1;
+  min-width: 0;
+  height: var(--control-height-md);
+  padding: 0 var(--space-3);
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
 .settings-view__field {
   display: grid;
   gap: var(--space-1);

@@ -8,6 +8,7 @@ import type { LibraryGateway } from "./types";
 function gateway(): LibraryGateway {
   return {
     openLibrary: vi.fn().mockResolvedValue({ root: "C:\\Lakomics" }),
+    getExtensionConnection: vi.fn(),
     listClassifications: vi.fn(),
     createClassification: vi.fn(),
     renameClassification: vi.fn(),

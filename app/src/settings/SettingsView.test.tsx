@@ -100,9 +100,43 @@ it("keeps backup load errors visible for retry", async () => {
   expect(screen.queryByText("backup failed")).not.toBeInTheDocument();
 });
 
+it("shows the Edge connection and copies its hidden key on request", async () => {
+  const user = userEvent.setup();
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
+  const gateway = createGateway();
+  vi.mocked(gateway.getExtensionConnection).mockResolvedValue({
+    baseUrl: "http://127.0.0.1:32145",
+    token: "0123456789abcdef0123456789abcdef",
+    status: "ready",
+  });
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  await user.click(screen.getByRole("button", { name: "브라우저 확장" }));
+
+  expect(await screen.findByText("연결됨")).toBeVisible();
+  expect(screen.getByText("http://127.0.0.1:32145")).toBeVisible();
+  const token = screen.getByLabelText("확장 프로그램 연결 키");
+  expect(token).toHaveAttribute("type", "password");
+  expect(token).toHaveAttribute("readonly");
+  expect(writeText).not.toHaveBeenCalled();
+
+  await user.click(screen.getByRole("button", { name: "연결 키 복사" }));
+
+  expect(writeText).toHaveBeenCalledWith("0123456789abcdef0123456789abcdef");
+  expect(await screen.findByText("연결 키를 복사했습니다")).toBeVisible();
+});
+
 function createGateway(): LibraryGateway {
   return {
-    openLibrary: vi.fn(), listClassifications: vi.fn(),
+    openLibrary: vi.fn(), getExtensionConnection: vi.fn(), listClassifications: vi.fn(),
     createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(),
     deleteClassification: vi.fn(), listAssets: vi.fn(), indexMissingSimilarityHashes: vi.fn(),
     listSimilarityReviews: vi.fn(), decideSimilarityReview: vi.fn(), getAsset: vi.fn(), setAssetFavorite: vi.fn(), setAssetsFavorite: vi.fn(),

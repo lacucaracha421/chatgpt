@@ -16,6 +16,7 @@ const entries: ClassificationEntry[] = [
 function gateway(): LibraryGateway {
   return {
     openLibrary: vi.fn(),
+    getExtensionConnection: vi.fn(),
     listClassifications: vi.fn(),
     createClassification: vi.fn().mockResolvedValue(entries[1]),
     renameClassification: vi.fn().mockResolvedValue(undefined),

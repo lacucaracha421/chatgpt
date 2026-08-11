@@ -510,7 +510,7 @@ function asset(index: number) {
 
 function createGateway(page: AssetPage = { items: [], nextCursor: null }): LibraryGateway {
   return {
-    openLibrary: vi.fn(), listClassifications: vi.fn(),
+    openLibrary: vi.fn(), getExtensionConnection: vi.fn(), listClassifications: vi.fn(),
     createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(),
     deleteClassification: vi.fn(), listAssets: vi.fn().mockResolvedValue(page),
     indexMissingSimilarityHashes: vi.fn(), listSimilarityReviews: vi.fn(), decideSimilarityReview: vi.fn(), getAsset: vi.fn(),

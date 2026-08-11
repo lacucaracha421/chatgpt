@@ -53,6 +53,7 @@ const metadataBackup: MetadataBackup = {
 function gateway(): LibraryGateway {
   return {
     openLibrary: vi.fn().mockResolvedValue(summary),
+    getExtensionConnection: vi.fn(),
     listClassifications: vi.fn().mockResolvedValue([]),
     createClassification: vi.fn(),
     renameClassification: vi.fn(),

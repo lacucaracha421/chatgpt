@@ -47,7 +47,7 @@ describe("MangaBrowser", () => {
 
 function createGateway(overrides: { root: string | null; series: MangaSeries[] }): LibraryGateway {
   const base: LibraryGateway = {
-    openLibrary: vi.fn(), listClassifications: vi.fn(),
+    openLibrary: vi.fn(), getExtensionConnection: vi.fn(), listClassifications: vi.fn(),
     createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(),
     deleteClassification: vi.fn(), listAssets: vi.fn(), indexMissingSimilarityHashes: vi.fn(),
     listSimilarityReviews: vi.fn(), decideSimilarityReview: vi.fn(), getAsset: vi.fn(), setAssetFavorite: vi.fn(), setAssetsFavorite: vi.fn(),

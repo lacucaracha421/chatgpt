@@ -2,6 +2,12 @@ export type LibrarySummary = {
   root: string;
 };
 
+export type ExtensionConnection = {
+  baseUrl: string;
+  token: string;
+  status: "ready" | "bind_failed";
+};
+
 export type ClassificationKind = "root" | "work" | "tag";
 
 export type AssetSort = "newest" | "oldest" | "favorites" | "random";
@@ -167,6 +173,7 @@ export type IngestOutcome =
 
 export interface LibraryGateway {
   openLibrary(path: string): Promise<LibrarySummary>;
+  getExtensionConnection(): Promise<ExtensionConnection>;
   listClassifications(): Promise<ClassificationEntry[]>;
   createClassification(input: CreateClassification): Promise<ClassificationEntry>;
   renameClassification(id: string, name: string): Promise<void>;

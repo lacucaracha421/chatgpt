@@ -3,7 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
-import type { MetadataBackup } from "../library/types";
+import type { ExtensionConnection, MetadataBackup } from "../library/types";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { Button } from "../shared/ui/Button";
 import { Skeleton } from "../shared/ui/Skeleton";
@@ -18,7 +18,7 @@ type SettingsViewProps = {
 
 export function SettingsView({ restoring, onRestore, onExit }: SettingsViewProps) {
   const { gateway, library } = useLibrary();
-  const [section, setSection] = useState<"general" | "safety" | "shortcuts">("general");
+  const [section, setSection] = useState<"general" | "browser_extension" | "safety" | "shortcuts">("general");
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [backups, setBackups] = useState<MetadataBackup[] | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
@@ -29,6 +29,11 @@ export function SettingsView({ restoring, onRestore, onExit }: SettingsViewProps
   const [mangaRoot, setMangaRoot] = useState<string | null>(null);
   const [mangaRootError, setMangaRootError] = useState<string | null>(null);
   useAutoDismiss(mangaRootError, setMangaRootError);
+  const [extensionConnection, setExtensionConnection] = useState<ExtensionConnection | null>(null);
+  const [extensionError, setExtensionError] = useState<string | null>(null);
+  const [copyMessage, setCopyMessage] = useState<string | null>(null);
+  useAutoDismiss(extensionError, setExtensionError);
+  useAutoDismiss(copyMessage, setCopyMessage);
   const pending = restoring || submitting;
 
   useEffect(() => {
@@ -36,6 +41,19 @@ export function SettingsView({ restoring, onRestore, onExit }: SettingsViewProps
     void gateway.getMangaRoot().then((root) => { if (active) setMangaRoot(root); });
     return () => { active = false; };
   }, [gateway]);
+
+  useEffect(() => {
+    if (section !== "browser_extension") return;
+    let active = true;
+    setExtensionConnection(null);
+    setExtensionError(null);
+    void gateway.getExtensionConnection().then((connection) => {
+      if (active) setExtensionConnection(connection);
+    }).catch((loadError: unknown) => {
+      if (active) setExtensionError(commandErrorMessage(loadError, "확장 프로그램 연결 정보를 불러오지 못했습니다."));
+    });
+    return () => { active = false; };
+  }, [gateway, section]);
 
   useEffect(() => {
     void getVersion().then(setAppVersion).catch(() => setAppVersion(null));
@@ -85,10 +103,23 @@ export function SettingsView({ restoring, onRestore, onExit }: SettingsViewProps
     }
   }
 
+  async function copyExtensionToken() {
+    if (!extensionConnection?.token) return;
+    try {
+      await navigator.clipboard.writeText(extensionConnection.token);
+      setExtensionError(null);
+      setCopyMessage("연결 키를 복사했습니다");
+    } catch (copyError) {
+      setCopyMessage(null);
+      setExtensionError(commandErrorMessage(copyError, "연결 키를 복사하지 못했습니다."));
+    }
+  }
+
   return <section className="settings-view" aria-label="설정" onKeyDown={(event) => { if (event.key === "Escape" && !pending) onExit(); }}>
     <ViewToolbar title="설정" children={<p>라이브러리 폴더, 안전 설정과 단축키를 확인합니다.</p>} />
     <nav className="settings-view__sections" aria-label="설정 구역">
       <Button variant={section === "general" ? "primary" : "ghost"} onClick={() => setSection("general")}>일반 설정</Button>
+      <Button variant={section === "browser_extension" ? "primary" : "ghost"} onClick={() => setSection("browser_extension")}>브라우저 확장</Button>
       <Button variant={section === "safety" ? "primary" : "ghost"} onClick={() => setSection("safety")}>안전</Button>
       <Button variant={section === "shortcuts" ? "primary" : "ghost"} onClick={() => setSection("shortcuts")}>단축키·버튼 설명</Button>
     </nav>
@@ -110,6 +141,44 @@ export function SettingsView({ restoring, onRestore, onExit }: SettingsViewProps
             {mangaRootError && <span role="alert">{mangaRootError}</span>}
           </dd>
         </dl>
+      </div>
+    )}
+    {section === "browser_extension" && (
+      <div className="settings-view__extension">
+        <p>X 이미지를 방사형 메뉴로 수집하는 Edge 확장 프로그램의 연결 정보입니다.</p>
+        {extensionError && <Toast>{extensionError}</Toast>}
+        {!extensionConnection && !extensionError ? (
+          <Skeleton className="settings-view__skeleton" label="확장 프로그램 연결 정보를 불러오는 중" />
+        ) : extensionConnection ? (
+          <>
+            <dl className="settings-view__field">
+              <dt>연결 상태</dt>
+              <dd>{extensionConnection.status === "ready" ? "연결됨" : "사용 불가"}</dd>
+            </dl>
+            <dl className="settings-view__field">
+              <dt>로컬 주소</dt>
+              <dd>{extensionConnection.baseUrl}</dd>
+            </dl>
+            <label className="settings-view__field">
+              <span>확장 프로그램 연결 키</span>
+              <span className="settings-view__token-row">
+                <input
+                  className="settings-view__token"
+                  aria-label="확장 프로그램 연결 키"
+                  type="password"
+                  readOnly
+                  value={extensionConnection.token}
+                />
+                <Button
+                  size="sm"
+                  disabled={!extensionConnection.token}
+                  onClick={() => void copyExtensionToken()}
+                >연결 키 복사</Button>
+              </span>
+            </label>
+            {copyMessage && <Toast>{copyMessage}</Toast>}
+          </>
+        ) : null}
       </div>
     )}
     {section === "safety" && (
