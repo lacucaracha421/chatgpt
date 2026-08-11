@@ -45,7 +45,11 @@ cargo test
 - Drag assets onto a classification to add it, or drag classifications to reorganize the tree. Dragging selected assets out of Lakomics starts a Windows copy operation with their original names; duplicate names receive a Windows-style numeric suffix.
 - The work tray reports ingestion and drag-out progress for the current app session only. It is not a persistent background-job history.
 
-Collections, browser-extension integration, comic reading, folder-recursive ingestion, and AVIF/HEIC are deferred.
+Collections, folder-recursive ingestion, and AVIF/HEIC are deferred.
+
+## Edge X image collection
+
+The unpacked Microsoft Edge extension in `..\extension` collects an X post image directly into the open Lakomics library through an authenticated loopback connection. See [the Korean installation and operation guide](../docs/edge-extension.md).
 
 ## Similar image review acceptance
 
