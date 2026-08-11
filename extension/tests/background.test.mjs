@@ -19,6 +19,10 @@ test("keeps the connection token inside the service worker", async () => {
     harness.fetchCalls[0].options.headers.Authorization,
     "Bearer 0123456789abcdef0123456789abcdef",
   );
+  assert.equal(
+    harness.fetchCalls[0].options.headers["X-Lakomics-Extension-Id"],
+    "nclkmjmmlcdaeomgadndeangccfidfbk",
+  );
   assert.equal(JSON.stringify(settings).includes("0123456789abcdef"), false);
 });
 
@@ -104,6 +108,7 @@ function createHarness(initialStorage = {}) {
   const chrome = {
     action: { onClicked: { addListener(listener) { actionListener = listener; } } },
     runtime: {
+      id: "nclkmjmmlcdaeomgadndeangccfidfbk",
       onMessage: { addListener() {} },
       async openOptionsPage() { optionsOpened += 1; },
     },

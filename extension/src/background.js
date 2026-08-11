@@ -88,7 +88,10 @@
     if (!TOKEN_PATTERN.test(connectionToken ?? "")) {
       return { ok: false, code: "connection_key_missing" };
     }
-    const headers = { Authorization: `Bearer ${connectionToken}` };
+    const headers = {
+      Authorization: `Bearer ${connectionToken}`,
+      "X-Lakomics-Extension-Id": chrome.runtime.id,
+    };
     if (init.body !== undefined) headers["Content-Type"] = "application/json";
     let response;
     try {

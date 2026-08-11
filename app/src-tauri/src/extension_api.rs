@@ -22,6 +22,7 @@ use crate::{
 
 pub const API_ADDRESS: &str = "127.0.0.1:32145";
 pub const API_BASE_URL: &str = "http://127.0.0.1:32145";
+pub const EXTENSION_ID: &str = "nclkmjmmlcdaeomgadndeangccfidfbk";
 pub const EXTENSION_ORIGIN: &str = "chrome-extension://nclkmjmmlcdaeomgadndeangccfidfbk";
 const MAX_JSON_BYTES: usize = 32 * 1024;
 const TOKEN_FILE_NAME: &str = "extension-token.txt";
@@ -168,6 +169,7 @@ fn handle_request(mut request: Request, state: &AppState, token: &str) {
         .to_owned();
     let origin = request_header(&request, "Origin");
     let authorization = request_header(&request, "Authorization");
+    let extension_id = request_header(&request, "X-Lakomics-Extension-Id");
     let body = if method == "POST" {
         match read_json_limited(request.as_reader()) {
             Ok(body) => body,
@@ -184,6 +186,7 @@ fn handle_request(mut request: Request, state: &AppState, token: &str) {
         path,
         origin,
         authorization,
+        extension_id,
         body,
     };
     let library = state.current_library();
@@ -205,6 +208,7 @@ struct ApiRequest {
     path: String,
     origin: Option<String>,
     authorization: Option<String>,
+    extension_id: Option<String>,
     body: Vec<u8>,
 }
 
@@ -216,6 +220,7 @@ impl ApiRequest {
             path: path.into(),
             origin: Some(origin.into()),
             authorization: authorization.map(str::to_owned),
+            extension_id: Some(EXTENSION_ID.into()),
             body: Vec::new(),
         }
     }
@@ -226,6 +231,7 @@ impl ApiRequest {
             path: path.into(),
             origin: Some(origin.into()),
             authorization: None,
+            extension_id: None,
             body: Vec::new(),
         }
     }
@@ -384,7 +390,7 @@ fn dispatch(request: ApiRequest, library: Option<&Library>, token: &str) -> ApiR
             .push(("Access-Control-Allow-Methods", "GET, POST, OPTIONS".into()));
         response.headers.push((
             "Access-Control-Allow-Headers",
-            "Authorization, Content-Type".into(),
+            "Authorization, Content-Type, X-Lakomics-Extension-Id".into(),
         ));
         return response;
     }
@@ -392,6 +398,7 @@ fn dispatch(request: ApiRequest, library: Option<&Library>, token: &str) -> ApiR
     if let Err(error) = authorize(
         request.origin.as_deref(),
         request.authorization.as_deref(),
+        request.extension_id.as_deref(),
         token,
     ) {
         return api_error_response(error);
@@ -620,9 +627,10 @@ fn load_or_create_token(config_dir: &Path) -> Result<String, ApiError> {
 fn authorize(
     origin: Option<&str>,
     authorization: Option<&str>,
+    extension_id: Option<&str>,
     token: &str,
 ) -> Result<(), ApiError> {
-    if origin != Some(EXTENSION_ORIGIN) {
+    if extension_id != Some(EXTENSION_ID) || origin.is_some_and(|value| value != EXTENSION_ORIGIN) {
         return Err(ApiError::ForbiddenOrigin);
     }
     let supplied = authorization
@@ -670,13 +678,34 @@ mod tests {
 
     #[test]
     fn requires_exact_origin_and_bearer_token() {
-        assert!(authorize(Some(EXTENSION_ORIGIN), Some("Bearer abc"), "abc").is_ok());
+        assert!(authorize(
+            Some(EXTENSION_ORIGIN),
+            Some("Bearer abc"),
+            Some(EXTENSION_ID),
+            "abc"
+        )
+        .is_ok());
+        assert!(authorize(None, Some("Bearer abc"), Some(EXTENSION_ID), "abc").is_ok());
         assert_eq!(
-            authorize(Some("https://x.com"), Some("Bearer abc"), "abc"),
+            authorize(
+                Some("https://x.com"),
+                Some("Bearer abc"),
+                Some(EXTENSION_ID),
+                "abc"
+            ),
             Err(ApiError::ForbiddenOrigin)
         );
         assert_eq!(
-            authorize(Some(EXTENSION_ORIGIN), Some("Bearer wrong"), "abc"),
+            authorize(None, Some("Bearer abc"), None, "abc"),
+            Err(ApiError::ForbiddenOrigin)
+        );
+        assert_eq!(
+            authorize(
+                Some(EXTENSION_ORIGIN),
+                Some("Bearer wrong"),
+                Some(EXTENSION_ID),
+                "abc"
+            ),
             Err(ApiError::Unauthorized)
         );
     }
@@ -746,7 +775,7 @@ mod tests {
         );
         assert_eq!(
             response.header("Access-Control-Allow-Headers"),
-            Some("Authorization, Content-Type")
+            Some("Authorization, Content-Type, X-Lakomics-Extension-Id")
         );
     }
 
