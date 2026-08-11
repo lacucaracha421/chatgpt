@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState, type ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -160,7 +160,7 @@ describe("ClassificationSidebar", () => {
     expect(onViewChange).toHaveBeenCalledWith({ kind: "settings" });
   });
 
-  it("opens the create dialog when the global create request increments", async () => {
+  it("opens a top-level inline folder editor when the global create request increments", async () => {
     const fixtureGateway = gateway();
     function Fixture() {
       const [request, setRequest] = useState(0);
@@ -173,7 +173,7 @@ describe("ClassificationSidebar", () => {
     }
     render(<Fixture />);
     await userEvent.click(screen.getByRole("button", { name: "request" }));
-    expect(screen.getByRole("dialog", { name: "분류 추가" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "폴더 이름" })).toHaveFocus();
   });
 
   it("opens trash from the shared quick-view navigation", async () => {
@@ -208,40 +208,52 @@ describe("ClassificationSidebar", () => {
     expect(onExpandedIdsChange).not.toHaveBeenCalled();
   });
 
-  it("creates root and selected child classifications using the existing rules", async () => {
+  it("creates top-level and child folders inline from context menus", async () => {
     const user = userEvent.setup();
     const fixtureGateway = gateway();
     renderSidebar(fixtureGateway);
 
-    await user.click(screen.getByRole("button", { name: "분류 추가" }));
-    await user.type(screen.getByLabelText("이름"), "Comics");
-    await user.click(screen.getByRole("button", { name: "추가" }));
+    fireEvent.contextMenu(screen.getByRole("tree"), { clientX: 20, clientY: 20 });
+    await user.click(screen.getByRole("menuitem", { name: "새 폴더" }));
+    await user.type(screen.getByRole("textbox", { name: "폴더 이름" }), "Comics{Enter}");
     await waitFor(() => expect(fixtureGateway.createClassification).toHaveBeenCalledWith({ kind: "root", name: "Comics", parentId: null }));
 
-    await user.click(screen.getByRole("treeitem", { name: /Games/ }));
-    await user.click(screen.getByRole("button", { name: "분류 추가" }));
-    expect(screen.getByRole("option", { name: "작품" })).toBeInTheDocument();
-    await user.type(screen.getByLabelText("이름"), "New work");
-    await user.click(screen.getByRole("button", { name: "추가" }));
-    await waitFor(() => expect(fixtureGateway.createClassification).toHaveBeenLastCalledWith({ kind: "work", name: "New work", parentId: "root" }));
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: "Games" }), { clientX: 20, clientY: 20 });
+    await user.click(screen.getByRole("menuitem", { name: "하위 폴더 만들기" }));
+    await user.type(screen.getByRole("textbox", { name: "폴더 이름" }), "Characters{Enter}");
+    await waitFor(() => expect(fixtureGateway.createClassification).toHaveBeenLastCalledWith({ kind: "tag", name: "Characters", parentId: "root" }));
   });
 
-  it("auto-dismisses classification mutation errors", async () => {
-    vi.useFakeTimers();
-    let rejectCreate!: (error: Error) => void;
-    const failed = new Promise<ClassificationEntry>((_resolve, reject) => { rejectCreate = reject; });
+  it("saves an inline folder rename with Enter", async () => {
+    const user = userEvent.setup();
     const fixtureGateway = gateway();
-    vi.mocked(fixtureGateway.createClassification).mockReturnValue(failed);
     renderSidebar(fixtureGateway);
 
-    fireEvent.click(screen.getByRole("button", { name: "분류 추가" }));
-    fireEvent.change(screen.getByLabelText("이름"), { target: { value: "Broken" } });
-    fireEvent.click(screen.getByRole("button", { name: "추가" }));
-    await act(async () => { rejectCreate(new Error("create failed")); await failed.catch(() => undefined); });
-    expect(screen.getByText("create failed")).toBeVisible();
-    act(() => vi.advanceTimersByTime(5_000));
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: "Blue Archive" }), { clientX: 20, clientY: 20 });
+    await user.click(screen.getByRole("menuitem", { name: "이름 변경" }));
+    const input = screen.getByRole("textbox", { name: "폴더 이름" });
+    await user.clear(input);
+    await user.type(input, "Archive{Enter}");
 
-    expect(screen.queryByText("create failed")).not.toBeInTheDocument();
+    await waitFor(() => expect(fixtureGateway.renameClassification).toHaveBeenCalledWith("work", "Archive"));
+  });
+
+  it("keeps the inline editor open when a folder name is blank or creation fails", async () => {
+    const user = userEvent.setup();
+    const fixtureGateway = gateway();
+    vi.mocked(fixtureGateway.createClassification).mockRejectedValue(new Error("같은 위치에 같은 이름의 폴더가 있습니다."));
+    renderSidebar(fixtureGateway);
+
+    await user.click(screen.getByRole("button", { name: "새 폴더" }));
+    const input = screen.getByRole("textbox", { name: "폴더 이름" });
+    await user.type(input, "   {Enter}");
+    expect(screen.getByText("폴더 이름을 입력해 주세요.")).toBeVisible();
+    expect(fixtureGateway.createClassification).not.toHaveBeenCalled();
+
+    await user.clear(input);
+    await user.type(input, "Games{Enter}");
+    expect(await screen.findByText("같은 위치에 같은 이름의 폴더가 있습니다.")).toBeVisible();
+    expect(input).toBeInTheDocument();
   });
 
   it("uses the same rename, move, and delete actions from ellipsis and right-click", async () => {
@@ -251,14 +263,16 @@ describe("ClassificationSidebar", () => {
     const row = screen.getByRole("treeitem", { name: /Blue Archive/ });
 
     await user.click(screen.getByRole("button", { name: "Blue Archive 추가 작업" }));
-    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["이름 변경", "이동", "삭제"]);
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["하위 폴더 만들기", "이름 변경", "폴더 이동", "삭제"]);
     await user.click(screen.getByRole("menuitem", { name: "이름 변경" }));
-    expect(screen.getByRole("dialog", { name: "분류 이름 변경" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "취소" }));
+    const rename = screen.getByRole("textbox", { name: "폴더 이름" });
+    await user.clear(rename);
+    await user.type(rename, "Archive{Escape}");
+    expect(fixtureGateway.renameClassification).not.toHaveBeenCalled();
 
     fireEvent.contextMenu(row, { clientX: 20, clientY: 20 });
-    await user.click(screen.getByRole("menuitem", { name: "이동" }));
-    expect(screen.getByRole("dialog", { name: "분류 이동" })).toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: "폴더 이동" }));
+    expect(screen.getByRole("dialog", { name: "폴더 이동" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "취소" }));
 
     fireEvent.contextMenu(row, { clientX: 20, clientY: 20 });

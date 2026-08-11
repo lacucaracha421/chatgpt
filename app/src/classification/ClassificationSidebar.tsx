@@ -2,14 +2,13 @@ import { BookOpenIcon, ChevronDownIcon, ChevronRightIcon, ClockIcon, EllipsisHor
 import { useLayoutEffect, useEffect, useRef, useState } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
 import { useLibrary } from "../library/LibraryContext";
-import type { AssetView, ClassificationEntry, ClassificationKind } from "../library/types";
+import type { AssetView, ClassificationEntry } from "../library/types";
 import { clampSidebarWidth } from "../layout/sidebarWidth";
 import { Button } from "../shared/ui/Button";
 import { ContextMenu } from "../shared/ui/ContextMenu";
 import { Dialog } from "../shared/ui/Dialog";
 import { Menu, type MenuItem } from "../shared/ui/Menu";
 import { Select } from "../shared/ui/Select";
-import { TextField } from "../shared/ui/TextField";
 import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import type { ClassificationDropTarget, InternalDragPayload } from "../shared/interaction/pointerDrag";
@@ -34,8 +33,11 @@ type ClassificationSidebarProps = {
 };
 
 type DialogState =
-  | { type: "create"; parentId: string | null; kinds: ClassificationKind[] }
-  | { type: "rename" | "move" | "delete"; entry: ClassificationEntry };
+  { type: "move" | "delete"; entry: ClassificationEntry };
+
+type InlineEdit =
+  | { type: "create"; parentId: string | null; kind: "root" | "tag" }
+  | { type: "rename"; entry: ClassificationEntry };
 
 export function ClassificationSidebar({
   entries,
@@ -57,13 +59,11 @@ export function ClassificationSidebar({
   const { gateway } = useLibrary();
   const tree = buildClassificationTree(entries);
   const visibleNodes = visibleTreeNodes(tree, expandedIds);
-  const selected = view.kind === "classification" && view.classificationId
-    ? entries.find((entry) => entry.id === view.classificationId) ?? null
-    : null;
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState | null>(null);
+  const [inlineEdit, setInlineEdit] = useState<InlineEdit | null>(null);
   const [name, setName] = useState("");
-  const [kind, setKind] = useState<ClassificationKind>("root");
+  const [editError, setEditError] = useState<string | null>(null);
   const [parentId, setParentId] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   useAutoDismiss(message, setMessage);
@@ -88,34 +88,56 @@ export function ClassificationSidebar({
     onChanged();
   }
 
-  function openCreate() {
-    const kinds = createKinds(selected);
+  function beginInlineEdit(edit: InlineEdit, initialName = "") {
+    setInlineEdit(edit);
+    setEditError(null);
+    setName(initialName);
+  }
+
+  function openTopLevelCreate() {
+    beginInlineEdit({ type: "create", parentId: null, kind: "root" });
+  }
+
+  function openChildCreate(entry: ClassificationEntry) {
+    if (!expandedIds.includes(entry.id)) onExpandedIdsChange([...expandedIds, entry.id]);
+    beginInlineEdit({ type: "create", parentId: entry.id, kind: "tag" });
+  }
+
+  function openRename(entry: ClassificationEntry) {
+    beginInlineEdit({ type: "rename", entry }, entry.name);
+  }
+
+  function cancelInlineEdit() {
+    setInlineEdit(null);
+    setEditError(null);
     setName("");
-    setKind(kinds[0]);
-    setDialog({ type: "create", parentId: selected?.id ?? null, kinds });
   }
 
   useEffect(() => {
-    if (createClassificationRequest > 0) openCreate();
+    if (createClassificationRequest > 0) openTopLevelCreate();
   }, [createClassificationRequest]);
 
-  async function create() {
-    if (!dialog || dialog.type !== "create") return;
-    try {
-      await gateway.createClassification({ kind, name, parentId: dialog.parentId });
-      completeMutation();
-    } catch (error) {
-      setMessage(commandErrorMessage(error, "분류를 변경하지 못했습니다."));
+  async function saveInlineEdit() {
+    if (!inlineEdit) return;
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setEditError("폴더 이름을 입력해 주세요.");
+      return;
     }
-  }
-
-  async function rename() {
-    if (!dialog || dialog.type !== "rename") return;
     try {
-      await gateway.renameClassification(dialog.entry.id, name);
-      completeMutation();
+      if (inlineEdit.type === "create") {
+        await gateway.createClassification({
+          kind: inlineEdit.kind,
+          name: trimmedName,
+          parentId: inlineEdit.parentId,
+        });
+      } else {
+        await gateway.renameClassification(inlineEdit.entry.id, trimmedName);
+      }
+      cancelInlineEdit();
+      onChanged();
     } catch (error) {
-      setMessage(commandErrorMessage(error, "분류를 변경하지 못했습니다."));
+      setEditError(commandErrorMessage(error, "폴더를 변경하지 못했습니다."));
     }
   }
 
@@ -232,7 +254,7 @@ export function ClassificationSidebar({
     <aside className="classification-sidebar" aria-label="분류" style={{ width: sidebarWidth }}>
       <div className="classification-sidebar__heading" data-tauri-drag-region>
         <h2>분류</h2>
-        <Button type="button" size="icon" variant="ghost" aria-label="분류 추가" onClick={openCreate}>
+        <Button type="button" size="icon" variant="ghost" aria-label="새 폴더" onClick={openTopLevelCreate}>
           <PlusIcon aria-hidden="true" />
         </Button>
       </div>
@@ -245,30 +267,42 @@ export function ClassificationSidebar({
         <QuickViewButton icon={<BookOpenIcon aria-hidden="true" />} label="망가" selected={view.kind === "manga"} onClick={() => onViewChange({ kind: "manga" })} />
       </nav>
       {tree.hasOrphans && <p className="classification-sidebar__warning" role="alert">연결되지 않은 분류는 숨겨집니다.</p>}
-      <ul className="classification-sidebar__tree" role="tree">
-        {tree.map((node) => (
-          <TreeItem
-            key={node.entry.id}
-            node={node}
-            view={view}
-            expandedIds={expandedIds}
-            activeRowId={activeRowId}
-            onViewChange={onViewChange}
-            onToggleExpanded={toggleExpanded}
-            onRowFocus={setFocusedId}
-            onRowKeyDown={handleTreeKeyDown}
-            registerTreeRow={registerTreeRow}
-            onRename={(entry) => { setName(entry.name); setDialog({ type: "rename", entry }); }}
-            onMove={(entry) => { setParentId(entry.parentId ?? ""); setDialog({ type: "move", entry }); }}
-            onDelete={(entry) => setDialog({ type: "delete", entry })}
-            dragTarget={dragTarget}
-            onPointerDragStart={onPointerDragStart}
-            onPointerDragMove={onPointerDragMove}
-            onPointerDragEnd={onPointerDragEnd}
-            onPointerDragCancel={onPointerDragCancel}
-          />
-        ))}
-      </ul>
+      <ContextMenu items={[{ id: "create-root", label: "새 폴더", onSelect: openTopLevelCreate }]}>
+        <ul className="classification-sidebar__tree" role="tree">
+          {tree.map((node) => (
+            <TreeItem
+              key={node.entry.id}
+              node={node}
+              view={view}
+              expandedIds={expandedIds}
+              activeRowId={activeRowId}
+              inlineEdit={inlineEdit}
+              editName={name}
+              editError={editError}
+              onViewChange={onViewChange}
+              onToggleExpanded={toggleExpanded}
+              onRowFocus={setFocusedId}
+              onRowKeyDown={handleTreeKeyDown}
+              registerTreeRow={registerTreeRow}
+              onCreateChild={openChildCreate}
+              onRename={openRename}
+              onEditNameChange={(nextName) => { setName(nextName); setEditError(null); }}
+              onEditSave={() => void saveInlineEdit()}
+              onEditCancel={cancelInlineEdit}
+              onMove={(entry) => { setParentId(entry.parentId ?? ""); setDialog({ type: "move", entry }); }}
+              onDelete={(entry) => setDialog({ type: "delete", entry })}
+              dragTarget={dragTarget}
+              onPointerDragStart={onPointerDragStart}
+              onPointerDragMove={onPointerDragMove}
+              onPointerDragEnd={onPointerDragEnd}
+              onPointerDragCancel={onPointerDragCancel}
+            />
+          ))}
+          {inlineEdit?.type === "create" && inlineEdit.parentId === null && (
+            <InlineFolderEditor name={name} error={editError} onNameChange={(nextName) => { setName(nextName); setEditError(null); }} onSave={() => void saveInlineEdit()} onCancel={cancelInlineEdit} />
+          )}
+        </ul>
+      </ContextMenu>
       <div className="classification-sidebar__footer">
         <QuickViewButton icon={<TrashIcon aria-hidden="true" />} label="휴지통" selected={view.kind === "trash"} onClick={() => onViewChange({ kind: "trash" })} />
         <QuickViewButton icon={<Cog6ToothIcon aria-hidden="true" />} label="설정" selected={view.kind === "settings"} onClick={() => onViewChange({ kind: "settings" })} />
@@ -284,31 +318,10 @@ export function ClassificationSidebar({
         onPointerCancel={stopResize}
       />
       {message && <Toast>{message}</Toast>}
-      {dialog?.type === "create" && (
-        <Dialog open title="분류 추가" onClose={closeDialog}>
-          <form className="classification-sidebar__form" onSubmit={(event) => { event.preventDefault(); void create(); }}>
-            {dialog.kinds.length === 1 ? <p>{kindLabel(dialog.kinds[0])}</p> : (
-              <Select label="유형" value={kind} onChange={(event) => setKind(event.target.value as ClassificationKind)}>
-                {dialog.kinds.map((option) => <option key={option} value={option}>{kindLabel(option)}</option>)}
-              </Select>
-            )}
-            <TextField autoFocus label="이름" required value={name} onChange={(event) => setName(event.target.value)} />
-            <DialogActions onClose={closeDialog} submitLabel="추가" />
-          </form>
-        </Dialog>
-      )}
-      {dialog?.type === "rename" && (
-        <Dialog open title="분류 이름 변경" onClose={closeDialog}>
-          <form className="classification-sidebar__form" onSubmit={(event) => { event.preventDefault(); void rename(); }}>
-            <TextField autoFocus label="이름" required value={name} onChange={(event) => setName(event.target.value)} />
-            <DialogActions onClose={closeDialog} submitLabel="저장" />
-          </form>
-        </Dialog>
-      )}
       {dialog?.type === "move" && (
-        <Dialog open title="분류 이동" onClose={closeDialog}>
+        <Dialog open title="폴더 이동" onClose={closeDialog}>
           <form className="classification-sidebar__form" onSubmit={(event) => { event.preventDefault(); void move(); }}>
-            <Select label="상위 분류" value={parentId} onChange={(event) => setParentId(event.target.value)}>
+            <Select label="상위 폴더" value={parentId} onChange={(event) => setParentId(event.target.value)}>
               {moveParents(dialog.entry, entries).map((parent) => <option key={parent?.id ?? "root"} value={parent?.id ?? ""}>{parent?.name ?? "최상위"}</option>)}
             </Select>
             <DialogActions onClose={closeDialog} submitLabel="이동" />
@@ -316,9 +329,9 @@ export function ClassificationSidebar({
         </Dialog>
       )}
       {dialog?.type === "delete" && (
-        <Dialog open title="분류 삭제" onClose={closeDialog}>
+        <Dialog open title="폴더 삭제" onClose={closeDialog}>
           <div className="classification-sidebar__form">
-            <p>{dialog.entry.name} 분류를 삭제할까요?</p>
+            <p>{dialog.entry.name} 폴더를 삭제할까요?</p>
             <div className="ui-dialog__actions">
               <Button type="button" onClick={closeDialog}>취소</Button>
               <Button type="button" variant="danger" onClick={() => void remove()}>삭제</Button>
@@ -334,11 +347,18 @@ function QuickViewButton({ icon, label, count, onClick, selected }: { icon: Reac
   return <button type="button" className="classification-sidebar__quick-view" aria-label={count === undefined ? undefined : `${label} ${count}개`} aria-current={selected ? "page" : undefined} onClick={onClick}>{icon}<span>{label}</span>{count !== undefined && <span className="classification-sidebar__badge" aria-hidden="true">{count}</span>}</button>;
 }
 
-function TreeItem({ activeRowId, expandedIds, node, onDelete, onMove, onRename, onRowFocus, onRowKeyDown, onToggleExpanded, onViewChange, registerTreeRow, view, dragTarget, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: {
+function TreeItem({ activeRowId, editError, editName, expandedIds, inlineEdit, node, onCreateChild, onDelete, onEditCancel, onEditNameChange, onEditSave, onMove, onRename, onRowFocus, onRowKeyDown, onToggleExpanded, onViewChange, registerTreeRow, view, dragTarget, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: {
   activeRowId: string | null;
+  editError: string | null;
+  editName: string;
   expandedIds: string[];
+  inlineEdit: InlineEdit | null;
   node: ClassificationTreeNode;
+  onCreateChild: (entry: ClassificationEntry) => void;
   onDelete: (entry: ClassificationEntry) => void;
+  onEditCancel: () => void;
+  onEditNameChange: (name: string) => void;
+  onEditSave: () => void;
   onMove: (entry: ClassificationEntry) => void;
   onRename: (entry: ClassificationEntry) => void;
   onRowFocus: (id: string) => void;
@@ -357,9 +377,12 @@ function TreeItem({ activeRowId, expandedIds, node, onDelete, onMove, onRename, 
   const hasChildren = node.children.length > 0;
   const expanded = expandedIds.includes(node.entry.id);
   const selected = view.kind === "classification" && view.classificationId === node.entry.id;
+  const editingName = inlineEdit?.type === "rename" && inlineEdit.entry.id === node.entry.id;
+  const creatingChild = inlineEdit?.type === "create" && inlineEdit.parentId === node.entry.id;
   const actions: MenuItem[] = [
+    { id: "create-child", label: "하위 폴더 만들기", onSelect: () => onCreateChild(node.entry) },
     { id: "rename", label: "이름 변경", onSelect: () => onRename(node.entry) },
-    { id: "move", label: "이동", onSelect: () => onMove(node.entry) },
+    { id: "move", label: "폴더 이동", onSelect: () => onMove(node.entry) },
     { id: "delete", label: "삭제", destructive: true, onSelect: () => onDelete(node.entry) },
   ];
 
@@ -393,14 +416,71 @@ function TreeItem({ activeRowId, expandedIds, node, onDelete, onMove, onRename, 
               {expanded ? <ChevronDownIcon aria-hidden="true" /> : <ChevronRightIcon aria-hidden="true" />}
             </Button>
           ) : <span className="classification-sidebar__tree-spacer" aria-hidden="true" />}
-          <span className="classification-sidebar__tree-label">{node.entry.name}</span>
+          <FolderIcon className="classification-sidebar__tree-folder" aria-hidden="true" />
+          {editingName ? (
+            <InlineFolderInput name={editName} error={editError} onNameChange={onEditNameChange} onSave={onEditSave} onCancel={onEditCancel} />
+          ) : <span className="classification-sidebar__tree-label">{node.entry.name}</span>}
           <span onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
             <Menu label={`${node.entry.name} 추가 작업`} items={actions} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} />
           </span>
         </div>
       </ContextMenu>
-      {hasChildren && expanded && <ul role="group">{node.children.map((child) => <TreeItem key={child.entry.id} node={child} view={view} expandedIds={expandedIds} activeRowId={activeRowId} onViewChange={onViewChange} onToggleExpanded={onToggleExpanded} onRowFocus={onRowFocus} onRowKeyDown={onRowKeyDown} registerTreeRow={registerTreeRow} onRename={onRename} onMove={onMove} onDelete={onDelete} dragTarget={dragTarget} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />)}</ul>}
+      {expanded && (hasChildren || creatingChild) && (
+        <ul role="group">
+          {node.children.map((child) => <TreeItem key={child.entry.id} node={child} view={view} expandedIds={expandedIds} activeRowId={activeRowId} inlineEdit={inlineEdit} editName={editName} editError={editError} onViewChange={onViewChange} onToggleExpanded={onToggleExpanded} onRowFocus={onRowFocus} onRowKeyDown={onRowKeyDown} registerTreeRow={registerTreeRow} onCreateChild={onCreateChild} onRename={onRename} onEditNameChange={onEditNameChange} onEditSave={onEditSave} onEditCancel={onEditCancel} onMove={onMove} onDelete={onDelete} dragTarget={dragTarget} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />)}
+          {creatingChild && <InlineFolderEditor name={editName} error={editError} onNameChange={onEditNameChange} onSave={onEditSave} onCancel={onEditCancel} />}
+        </ul>
+      )}
     </li>
+  );
+}
+
+function InlineFolderEditor({ error, name, onCancel, onNameChange, onSave }: {
+  error: string | null;
+  name: string;
+  onCancel: () => void;
+  onNameChange: (name: string) => void;
+  onSave: () => void;
+}) {
+  return (
+    <li className="classification-sidebar__tree-item">
+      <div className="classification-sidebar__tree-row classification-sidebar__tree-row--editing">
+        <span className="classification-sidebar__tree-spacer" aria-hidden="true" />
+        <FolderIcon className="classification-sidebar__tree-folder" aria-hidden="true" />
+        <InlineFolderInput name={name} error={error} onNameChange={onNameChange} onSave={onSave} onCancel={onCancel} />
+      </div>
+    </li>
+  );
+}
+
+function InlineFolderInput({ error, name, onCancel, onNameChange, onSave }: {
+  error: string | null;
+  name: string;
+  onCancel: () => void;
+  onNameChange: (name: string) => void;
+  onSave: () => void;
+}) {
+  return (
+    <span className="classification-sidebar__inline-edit" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+      <input
+        autoFocus
+        aria-label="폴더 이름"
+        aria-invalid={Boolean(error)}
+        value={name}
+        onChange={(event) => onNameChange(event.target.value)}
+        onKeyDown={(event) => {
+          event.stopPropagation();
+          if (event.key === "Enter") {
+            event.preventDefault();
+            onSave();
+          } else if (event.key === "Escape") {
+            event.preventDefault();
+            onCancel();
+          }
+        }}
+      />
+      {error && <span className="classification-sidebar__inline-error" role="alert">{error}</span>}
+    </span>
   );
 }
 
@@ -438,18 +518,8 @@ function DialogActions({ onClose, submitLabel }: { onClose: () => void; submitLa
   return <div className="ui-dialog__actions"><Button type="button" onClick={onClose}>취소</Button><Button type="submit">{submitLabel}</Button></div>;
 }
 
-function createKinds(selected: ClassificationEntry | null): ClassificationKind[] {
-  if (!selected) return ["root"];
-  if (selected.kind === "root") return ["work", "tag"];
-  return ["tag"];
-}
-
 function moveParents(entry: ClassificationEntry, entries: ClassificationEntry[]): Array<ClassificationEntry | null> {
   if (entry.kind === "root") return [null];
-  const allowedKinds: ClassificationKind[] = entry.kind === "work" ? ["root"] : ["root", "work", "tag"];
+  const allowedKinds = entry.kind === "work" ? ["root"] : ["root", "work", "tag"];
   return entries.filter((candidate) => candidate.id !== entry.id && allowedKinds.includes(candidate.kind));
-}
-
-function kindLabel(kind: ClassificationKind): string {
-  return ({ root: "최상위 분류", work: "작품", tag: "태그" })[kind];
 }

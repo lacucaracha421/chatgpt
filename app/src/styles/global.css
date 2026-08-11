@@ -579,6 +579,37 @@ input:disabled {
   white-space: nowrap;
 }
 
+.classification-sidebar__tree-folder {
+  flex: none;
+  color: var(--color-muted);
+}
+
+.classification-sidebar__inline-edit {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: var(--space-1);
+}
+
+.classification-sidebar__inline-edit input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: var(--control-height-sm);
+  padding: 0 var(--space-1);
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: var(--border-width) solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  outline: none;
+}
+
+.classification-sidebar__inline-error {
+  color: var(--color-danger);
+  font-size: 0.6875rem;
+  line-height: 1.2;
+}
+
 .classification-sidebar__tree-spacer {
   width: var(--control-height-icon);
 }
