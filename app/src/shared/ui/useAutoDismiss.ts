@@ -1,9 +1,9 @@
 import { useEffect } from "react";
 
-export function useAutoDismiss<T>(value: T | null, dismiss: (value: null) => void, ms = 5000) {
+export function useAutoDismiss(value: string | null, dismiss: (value: null) => void) {
   useEffect(() => {
     if (value === null) return;
-    const timer = window.setTimeout(() => dismiss(null), ms);
+    const timer = window.setTimeout(() => dismiss(null), 5_000);
     return () => window.clearTimeout(timer);
-  }, [dismiss, ms, value]);
+  }, [dismiss, value]);
 }

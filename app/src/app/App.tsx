@@ -27,6 +27,7 @@ import {
   type UiPreferences,
 } from "../preferences/uiPreferences";
 import { Toast } from "../shared/ui/Toast";
+import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { DragLayer } from "../shared/ui/DragLayer";
 import { pointerDragReducer, type ClassificationDropPosition, type ClassificationDropTarget, type InternalDragPayload, type PointerDragState } from "../shared/interaction/pointerDrag";
 import { SettingsView } from "../settings/SettingsView";
@@ -140,6 +141,7 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
     onIngested: handleIngested,
     onFatalError: setMessage,
   });
+  useAutoDismiss(message, setMessage);
 
   useEffect(() => {
     void refreshClassifications();
@@ -169,11 +171,6 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
   useEffect(() => {
     saveUiPreferences(preferences);
   }, [preferences]);
-  useEffect(() => {
-    if (!message) return;
-    const timer = window.setTimeout(() => setMessage(null), 5_000);
-    return () => window.clearTimeout(timer);
-  }, [message]);
   useEffect(() => {
     document.body.classList.toggle("is-pointer-dragging", dragState.phase === "dragging");
     return () => document.body.classList.remove("is-pointer-dragging");

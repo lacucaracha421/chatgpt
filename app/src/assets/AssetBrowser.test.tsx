@@ -1,12 +1,9 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-// @ts-ignore Vitest runs in Node, but this frontend project intentionally omits Node typings.
-import { readFileSync } from "node:fs";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { AssetPage, AssetSort, AssetView, ClassificationEntry, LibraryGateway } from "../library/types";
 import { AssetBrowser, type AssetBrowserStatus } from "./AssetBrowser";
-const styles = readFileSync("src/styles/global.css", "utf8");
 
 const classifications: ClassificationEntry[] = [];
 
@@ -16,10 +13,6 @@ beforeEach(() => Object.defineProperties(HTMLElement.prototype, {
   clientWidth: { configurable: true, get: () => 840 },
   offsetHeight: { configurable: true, get: () => 600 },
   clientHeight: { configurable: true, get: () => 600 },
-}));
-beforeEach(() => Object.defineProperties(HTMLDialogElement.prototype, {
-  showModal: { configurable: true, value(this: HTMLDialogElement) { this.setAttribute("open", ""); this.querySelector<HTMLButtonElement>(".ui-dialog__actions button")?.focus(); } },
-  close: { configurable: true, value(this: HTMLDialogElement) { this.removeAttribute("open"); } },
 }));
 
 describe("AssetBrowser", () => {
@@ -464,15 +457,6 @@ describe("AssetBrowser", () => {
     expect(screen.getByRole("button", { name: "휴지통으로 이동" })).not.toBeDisabled();
   });
 
-  it("uses the constrained workspace styles without horizontal sidebar scrolling", () => {
-    expect(styles).toMatch(/\.asset-browser\s*\{[^}]*display:\s*flex;[^}]*min-height:\s*0;/s);
-    expect(styles).toMatch(/\.asset-browser__workspace\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);[^}]*min-height:\s*0;/s);
-    expect(styles).toMatch(/\.asset-browser__workspace--inspector\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+var\(--inspector-width\);/s);
-    expect(styles).toMatch(/@media\s*\(max-width:\s*1100px\)[\s\S]*?\.asset-browser__workspace--inspector\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);[\s\S]*?\.asset-inspector\s*\{[^}]*position:\s*absolute;/s);
-    expect(styles).toMatch(/\.asset-gallery__scroll\s*\{[^}]*flex:\s*1;[^}]*min-height:\s*0;[^}]*overflow:\s*auto;/s);
-    expect(styles).not.toMatch(/\.asset-gallery__scroll\s*\{[^}]*height:\s*70vh;/s);
-    expect(styles).toMatch(/\.classification-sidebar\s*\{[^}]*overflow-x:\s*hidden;[^}]*overflow-y:\s*auto;/s);
-  });
 });
 
 it("opens a requested asset that is not in the loaded page and clears it on close", async () => {

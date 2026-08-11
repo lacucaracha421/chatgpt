@@ -115,10 +115,6 @@ describe("buildClassificationTree", () => {
 
 describe("ClassificationSidebar", () => {
   beforeEach(() => {
-    Object.defineProperties(HTMLDialogElement.prototype, {
-      showModal: { configurable: true, value(this: HTMLDialogElement) { this.setAttribute("open", ""); } },
-      close: { configurable: true, value(this: HTMLDialogElement) { this.removeAttribute("open"); } },
-    });
   });
 
   afterEach(() => { vi.useRealTimers(); cleanup(); });

@@ -1,13 +1,9 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import type { AssetSummary } from "../library/types";
 import { AssetViewer } from "./AssetViewer";
 
-beforeEach(() => Object.defineProperties(HTMLDialogElement.prototype, {
-  showModal: { configurable: true, value(this: HTMLDialogElement) { this.setAttribute("open", ""); } },
-  close: { configurable: true, value(this: HTMLDialogElement) { this.removeAttribute("open"); } },
-}));
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();

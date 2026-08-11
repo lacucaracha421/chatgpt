@@ -1,15 +1,11 @@
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { LibraryGateway, TrashPage } from "../library/types";
 import { TrashBrowser } from "./TrashBrowser";
 
 afterEach(cleanup);
-beforeEach(() => Object.defineProperties(HTMLDialogElement.prototype, {
-  showModal: { configurable: true, value(this: HTMLDialogElement) { this.setAttribute("open", ""); } },
-  close: { configurable: true, value(this: HTMLDialogElement) { this.removeAttribute("open"); } },
-}));
 
 it("loads trash, shows its purge date, and restores an asset", async () => {
   const user = userEvent.setup();
