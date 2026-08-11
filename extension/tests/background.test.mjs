@@ -4,6 +4,7 @@ import test from "node:test";
 import vm from "node:vm";
 
 const source = fs.readFileSync(new URL("../src/background.js", import.meta.url), "utf8");
+const layoutSource = fs.readFileSync(new URL("../src/layout.js", import.meta.url), "utf8");
 
 test("keeps the connection token inside the service worker", async () => {
   const harness = createHarness({ connectionToken: "0123456789abcdef0123456789abcdef" });
@@ -68,6 +69,23 @@ test("refresh bypasses cache and ingestion preserves server error codes", async 
   assert.equal(harness.fetchCalls[2].options.method, "POST");
 });
 
+test("reconciles and stores layout without exposing storage to page scripts", async () => {
+  const harness = createHarness({
+    connectionToken: "0123456789abcdef0123456789abcdef",
+    radialLayout: { version: 1, parents: { __root__: [["deleted", null, null, null, null, null]] } },
+  });
+  harness.queueJson({
+    entries: [{ id: "fresh", kind: "root", name: "Fresh", parentId: null }],
+  });
+
+  const response = await harness.api.handleMessage({ type: "classifications:refresh" });
+  const stored = await harness.api.handleMessage({ type: "layout:get" });
+
+  assert.equal(response.layout.parents.__root__[0][0], "fresh");
+  assert.deepEqual(plain(stored.layout), plain(response.layout));
+  assert.deepEqual(plain(harness.storage.radialLayout), plain(response.layout));
+});
+
 function createHarness(initialStorage = {}) {
   const storage = { ...initialStorage };
   const responses = [];
@@ -106,11 +124,13 @@ function createHarness(initialStorage = {}) {
     __LAKOMICS_TEST__: true,
   };
   context.globalThis = context;
+  vm.runInNewContext(layoutSource, context, { filename: "layout.js" });
   vm.runInNewContext(source, context, { filename: "background.js" });
   return {
     api: context.LakomicsBackground,
     clock,
     fetchCalls,
+    storage,
     queueJson(body, status = 200) { responses.push({ body, status }); },
     queueError(error) { responses.push(error); },
   };

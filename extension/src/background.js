@@ -1,6 +1,10 @@
 (() => {
   "use strict";
 
+  if (!globalThis.LakomicsRadial && typeof importScripts === "function") {
+    importScripts("layout.js");
+  }
+
   const API_BASE_URL = "http://127.0.0.1:32145";
   const CACHE_MS = 30_000;
   const TOKEN_PATTERN = /^[0-9a-f]{32}$/;
@@ -23,6 +27,21 @@
         classificationCachedAt = 0;
         return { ok: true };
       }
+      case "layout:get": {
+        const { radialLayout } = await chrome.storage.local.get(["radialLayout"]);
+        return {
+          ok: true,
+          layout: validLayout(radialLayout) ? radialLayout : { version: 1, parents: {} },
+        };
+      }
+      case "layout:set": {
+        if (!validLayout(message.layout)) {
+          return { ok: false, code: "invalid_layout" };
+        }
+        await chrome.storage.local.set({ radialLayout: message.layout });
+        if (classificationCache) classificationCache.layout = message.layout;
+        return { ok: true };
+      }
       case "classifications:get":
         return classifications(false);
       case "classifications:refresh":
@@ -40,13 +59,28 @@
   async function classifications(force) {
     const now = Date.now();
     if (!force && classificationCache && now - classificationCachedAt <= CACHE_MS) {
-      return { ok: true, entries: classificationCache };
+      return { ok: true, ...classificationCache };
     }
     const response = await apiRequest("/v1/classifications");
     if (!response.ok) return response;
-    classificationCache = Array.isArray(response.entries) ? response.entries : [];
+    const entries = Array.isArray(response.entries) ? response.entries : [];
+    const { radialLayout } = await chrome.storage.local.get(["radialLayout"]);
+    const layout = globalThis.LakomicsRadial.reconcileLayout(entries, radialLayout);
+    if (JSON.stringify(layout) !== JSON.stringify(radialLayout)) {
+      await chrome.storage.local.set({ radialLayout: layout });
+    }
+    classificationCache = { entries, layout };
     classificationCachedAt = now;
-    return { ok: true, entries: classificationCache };
+    return { ok: true, ...classificationCache };
+  }
+
+  function validLayout(layout) {
+    if (!layout || layout.version !== 1 || !layout.parents || typeof layout.parents !== "object") {
+      return false;
+    }
+    return Object.values(layout.parents).every((pages) =>
+      Array.isArray(pages) && pages.every((page) =>
+        Array.isArray(page) && page.every((id) => id === null || typeof id === "string")));
   }
 
   async function apiRequest(path, init = {}) {
