@@ -6,7 +6,6 @@ import { Menu, type MenuItem } from "../shared/ui/Menu";
 import { Select } from "../shared/ui/Select";
 import { Slider } from "../shared/ui/Slider";
 import { Toggle } from "../shared/ui/Toggle";
-import { Tooltip } from "../shared/ui/Tooltip";
 import { ViewToolbar } from "../layout/ViewToolbar";
 
 type AssetToolbarProps = {
@@ -68,7 +67,7 @@ export function AssetToolbar({
         {view.kind === "classification" && <Toggle aria-label="이 분류만" checked={directOnly} onChange={(event) => onDirectOnlyChange(event.target.checked)}><AdjustmentsHorizontalIcon aria-hidden="true" /><span className="asset-toolbar__toggle-text">이 분류만</span></Toggle>}
         <Slider label="미리보기 크기" min={96} max={320} step={8} value={thumbnailRowHeight} onChange={(event) => onThumbnailRowHeightChange(Number(event.target.value))} />
         <Toggle aria-label="정보 표시" checked={metadataVisible} onChange={(event) => onMetadataVisibleChange(event.target.checked)}><InformationCircleIcon aria-hidden="true" /><span className="asset-toolbar__toggle-text">정보 표시</span></Toggle>
-        {sort === "random" && !recent && <Tooltip content="다시 섞기"><Button size="icon" aria-label="다시 섞기" onClick={onReshuffle}><ArrowPathIcon aria-hidden="true" /></Button></Tooltip>}
+        {sort === "random" && !recent && <Button size="icon" aria-label="다시 섞기" onClick={onReshuffle}><ArrowPathIcon aria-hidden="true" /></Button>}
       </>}
     </ViewToolbar>
   );

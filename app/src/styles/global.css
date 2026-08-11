@@ -297,20 +297,6 @@ input:disabled {
   outline: none;
 }
 
-.ui-tooltip {
-  padding: var(--space-1) var(--space-2);
-  color: var(--color-text);
-  background: var(--color-surface-elevated);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-sm);
-  box-shadow: 0 4px 12px var(--color-overlay);
-  font-size: 0.75rem;
-}
-
-.ui-tooltip__arrow {
-  fill: var(--color-surface-elevated);
-}
-
 .ui-empty-state {
   display: grid;
   place-items: center;
