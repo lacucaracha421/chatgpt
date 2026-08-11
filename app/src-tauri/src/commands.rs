@@ -54,7 +54,6 @@ impl From<LibraryError> for CommandError {
             LibraryError::InvalidClassificationParent => "invalid_classification_parent",
             LibraryError::ClassificationCycle => "classification_cycle",
             LibraryError::ClassificationHasChildren => "classification_has_children",
-            LibraryError::RootClassificationHasAssets => "root_classification_has_assets",
             LibraryError::AssetNotFound => "asset_not_found",
             LibraryError::EmptyAssetSelection => "empty_asset_selection",
             LibraryError::InvalidAssetSelection => "invalid_asset_selection",

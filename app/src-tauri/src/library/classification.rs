@@ -127,20 +127,11 @@ impl Library {
                  SELECT asset_id, ?2 FROM asset_classifications WHERE classification_id = ?1",
                 params![id, parent_id],
             )?;
-            transaction.execute(
-                "DELETE FROM asset_classifications WHERE classification_id = ?1",
-                [id],
-            )?;
-        } else {
-            let has_assets: bool = transaction.query_row(
-                "SELECT EXISTS(SELECT 1 FROM asset_classifications WHERE classification_id = ?1)",
-                [id],
-                |row| row.get(0),
-            )?;
-            if has_assets {
-                return Err(LibraryError::RootClassificationHasAssets);
-            }
         }
+        transaction.execute(
+            "DELETE FROM asset_classifications WHERE classification_id = ?1",
+            [id],
+        )?;
         transaction.execute("DELETE FROM classification_entries WHERE id = ?1", [id])?;
         transaction.commit()?;
         Ok(())
@@ -579,7 +570,7 @@ mod tests {
     }
 
     #[test]
-    fn deleting_an_asset_linked_root_is_rejected() {
+    fn deleting_an_asset_linked_root_preserves_the_asset_without_that_folder() {
         let temp = tempfile::tempdir().unwrap();
         let library = Library::open(temp.path()).unwrap();
         let root = library
@@ -598,13 +589,11 @@ mod tests {
             })
             .unwrap();
 
-        let error = library.delete_classification(&root.id).unwrap_err();
+        library.delete_classification(&root.id).unwrap();
 
-        assert!(matches!(error, LibraryError::RootClassificationHasAssets));
-        assert_eq!(
-            library.get_asset_classifications("asset-1").unwrap(),
-            vec![root]
-        );
+        assert_eq!(library.get_asset("asset-1").unwrap().id, "asset-1");
+        assert!(library.get_asset_classifications("asset-1").unwrap().is_empty());
+        assert!(library.list_classifications().unwrap().is_empty());
     }
 
     #[test]

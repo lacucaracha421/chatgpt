@@ -13,7 +13,7 @@
 - A classification folder is navigation, not a file-storage location; one asset may belong to several folders.
 - A folder with children cannot be deleted.
 - Deleting a leaf folder moves every directly linked asset, regardless of asset state, to its parent and preserves all other classification links.
-- A root folder can be deleted only when it has neither children nor directly linked assets.
+- A root folder without children can be deleted; its direct asset links are removed while the assets remain.
 - Delete and asset reassignment must be one database transaction.
 - Folder drops target only the inside of another folder; the tree remains name-sorted.
 - Root folders cannot move below another folder; work folders can move only below roots.
@@ -30,7 +30,7 @@
 
 **Interfaces:**
 - Consumes: `Library::delete_classification(&self, id: &str) -> Result<(), LibraryError>` and existing `asset_classifications` uniqueness.
-- Produces: the same public method with `ClassificationHasChildren` and `RootClassificationHasAssets` failure reasons and stable Tauri command error codes.
+- Produces: the same public method with a `ClassificationHasChildren` failure reason and root-link cleanup in the same transaction.
 
 - [ ] **Step 1: Write failing Rust tests for deletion outcomes**
 
@@ -45,7 +45,7 @@
   );
   ```
 
-  Add tests proving a child-bearing folder returns `ClassificationHasChildren`, an asset-bearing root returns `RootClassificationHasAssets`, an empty root is deleted, and an asset already linked to the parent remains linked exactly once. Mark directly linked fixtures as normal, review, and trash to prove deletion transfers every asset state without filtering.
+  Add tests proving a child-bearing folder returns `ClassificationHasChildren`, an asset-bearing root is deleted without deleting its assets, an empty root is deleted, and an asset already linked to the parent remains linked exactly once. Mark directly linked fixtures as normal, review, and trash to prove deletion transfers every asset state without filtering.
 
 - [ ] **Step 2: Run the focused Rust tests and verify RED**
 

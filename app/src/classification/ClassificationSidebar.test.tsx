@@ -327,7 +327,7 @@ describe("ClassificationSidebar", () => {
     expect(screen.getByText("이 폴더의 자산은 Blue Archive 폴더로 이동합니다.")).toBeVisible();
   });
 
-  it("explains that a root must be empty before deletion", async () => {
+  it("explains that deleting a root preserves assets and removes its folder link", async () => {
     const user = userEvent.setup();
     const rootEntries = [...entries, { id: "empty", kind: "root", name: "Unused", parentId: null }] satisfies ClassificationEntry[];
     renderSidebar(gateway(), { entries: rootEntries });
@@ -335,7 +335,7 @@ describe("ClassificationSidebar", () => {
     fireEvent.contextMenu(screen.getByRole("treeitem", { name: "Unused" }), { clientX: 20, clientY: 20 });
     await user.click(screen.getByRole("menuitem", { name: "삭제" }));
 
-    expect(screen.getByText("비어 있는 최상위 폴더만 삭제할 수 있습니다.")).toBeVisible();
+    expect(screen.getByText("자산은 보존되고 이 폴더 연결만 제거됩니다.")).toBeVisible();
   });
 
   it("selects the parent and removes the deleted child from expanded folders", async () => {

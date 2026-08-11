@@ -48,8 +48,6 @@ pub enum LibraryError {
     ClassificationCycle,
     #[error("하위 폴더가 있는 폴더는 삭제할 수 없습니다")]
     ClassificationHasChildren,
-    #[error("자산이 연결된 최상위 폴더는 삭제할 수 없습니다")]
-    RootClassificationHasAssets,
     #[error("요청한 자산을 찾을 수 없습니다")]
     AssetNotFound,
     #[error("하나 이상의 자산을 선택해야 합니다")]

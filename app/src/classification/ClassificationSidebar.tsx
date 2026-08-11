@@ -368,7 +368,7 @@ export function ClassificationSidebar({
             <p>{dialog.entry.name} 폴더를 삭제할까요?</p>
             <p>{dialog.entry.parentId
               ? `이 폴더의 자산은 ${entries.find((entry) => entry.id === dialog.entry.parentId)?.name ?? "상위"} 폴더로 이동합니다.`
-              : "비어 있는 최상위 폴더만 삭제할 수 있습니다."}</p>
+              : "자산은 보존되고 이 폴더 연결만 제거됩니다."}</p>
             <div className="ui-dialog__actions">
               <Button type="button" onClick={closeDialog}>취소</Button>
               <Button type="button" variant="danger" onClick={() => void remove()}>삭제</Button>
