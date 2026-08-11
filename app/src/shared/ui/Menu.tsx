@@ -28,11 +28,17 @@ export function Menu({ items, label, trigger }: MenuProps): ReactNode {
           {items.map((item) => (
             <DropdownMenu.Item
               key={item.id}
-              className={`ui-menu__item${item.destructive ? " ui-menu__item--destructive" : ""}`}
+              asChild
               disabled={item.disabled}
               onSelect={item.onSelect}
             >
-              {item.label}
+              <button
+                type="button"
+                className={`ui-menu__item${item.destructive ? " ui-menu__item--destructive" : ""}`}
+                disabled={item.disabled}
+              >
+                {item.label}
+              </button>
             </DropdownMenu.Item>
           ))}
         </DropdownMenu.Content>

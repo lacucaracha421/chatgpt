@@ -16,11 +16,17 @@ export function ContextMenu({ children, items }: ContextMenuProps) {
           {items.map((item) => (
             <RadixContextMenu.Item
               key={item.id}
-              className={`ui-menu__item${item.destructive ? " ui-menu__item--destructive" : ""}`}
+              asChild
               disabled={item.disabled}
               onSelect={item.onSelect}
             >
-              {item.label}
+              <button
+                type="button"
+                className={`ui-menu__item${item.destructive ? " ui-menu__item--destructive" : ""}`}
+                disabled={item.disabled}
+              >
+                {item.label}
+              </button>
             </RadixContextMenu.Item>
           ))}
         </RadixContextMenu.Content>

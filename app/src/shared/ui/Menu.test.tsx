@@ -45,7 +45,9 @@ describe("Menu", () => {
     trigger.focus();
     await user.keyboard("{ArrowDown}");
     expect(screen.getByRole("menu")).toBeVisible();
-    expect(screen.getByRole("menuitem", { name: "이동" })).toHaveFocus();
+    const moveItem = screen.getByRole("menuitem", { name: "이동" });
+    expect(moveItem.tagName).toBe("BUTTON");
+    expect(moveItem).toHaveFocus();
     await user.keyboard("{Enter}");
 
     expect(move).toHaveBeenCalledOnce();

@@ -13,7 +13,9 @@ it("opens from its wrapped target and runs the selected action", async () => {
   );
 
   fireEvent.contextMenu(screen.getByRole("button", { name: "블루 아카이브" }));
-  await user.click(screen.getByRole("menuitem", { name: "이름 변경" }));
+  const renameItem = screen.getByRole("menuitem", { name: "이름 변경" });
+  expect(renameItem.tagName).toBe("BUTTON");
+  await user.click(renameItem);
 
   expect(rename).toHaveBeenCalledOnce();
   expect(screen.queryByRole("menu")).not.toBeInTheDocument();
