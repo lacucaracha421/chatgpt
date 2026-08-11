@@ -12,7 +12,7 @@ export function ViewToolbar({ title, ariaLabel, children, actions }: ViewToolbar
   return (
     <header className="view-toolbar" role="toolbar" aria-label={ariaLabel} data-tauri-drag-region>
       <h2 data-tauri-drag-region>{title}</h2>
-      {children && <div className="view-toolbar__content">{children}</div>}
+      {children && <div className="view-toolbar__content" data-tauri-drag-region>{children}</div>}
       <div className="view-toolbar__actions">
         {actions}
         <WindowControls />

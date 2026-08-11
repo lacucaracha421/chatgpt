@@ -14,9 +14,10 @@ describe("ViewToolbar", () => {
   });
 
   it("places children on the left and actions on the right", () => {
-    render(<ViewToolbar title="T" actions={<button type="button">새로고침</button>}>좌측 내용</ViewToolbar>);
+    const { container } = render(<ViewToolbar title="T" actions={<button type="button">새로고침</button>}>좌측 내용</ViewToolbar>);
     expect(screen.getByText("좌측 내용")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "새로고침" })).toBeInTheDocument();
+    expect(container.querySelector(".view-toolbar__content")).toHaveAttribute("data-tauri-drag-region");
   });
 
   it("always includes the window controls", () => {
