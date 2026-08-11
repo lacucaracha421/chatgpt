@@ -10,7 +10,7 @@ use serde::Deserialize;
 
 use super::{
     error::LibraryError,
-    models::{VideoPreparationProgress, VideoPreparationState},
+    models::VideoPreparationProgress,
     Library,
 };
 
@@ -24,7 +24,6 @@ pub(crate) struct VideoProbe {
     pub(crate) duration_ms: u64,
     pub(crate) width: u32,
     pub(crate) height: u32,
-    pub(crate) frame_rate: f64,
 }
 
 #[derive(Deserialize)]
@@ -39,7 +38,6 @@ struct ProbeStream {
     codec_name: Option<String>,
     width: Option<u32>,
     height: Option<u32>,
-    avg_frame_rate: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -230,7 +228,7 @@ impl Library {
     pub fn retry_video_preparation(
         &self,
         asset_id: &str,
-    ) -> Result<VideoPreparationState, LibraryError> {
+    ) -> Result<(), LibraryError> {
         let changed = self.connection()?.execute(
             "UPDATE video_assets
              SET preparation_state = 'pending', preparation_error = NULL
@@ -244,7 +242,7 @@ impl Library {
         if changed == 0 {
             return Err(LibraryError::AssetNotFound);
         }
-        Ok(VideoPreparationState::Pending)
+        Ok(())
     }
 
     pub(crate) fn requeue_interrupted_video_preparation(&self) -> Result<(), LibraryError> {
@@ -592,12 +590,6 @@ pub(crate) fn parse_probe(json: &str, extension: &str) -> Result<VideoProbe, Lib
     if !duration_seconds.is_finite() || duration_seconds <= 0.0 {
         return Err(LibraryError::UnsupportedVideo);
     }
-    let frame_rate = video
-        .avg_frame_rate
-        .as_deref()
-        .and_then(parse_fraction)
-        .filter(|value| value.is_finite() && *value > 0.0)
-        .ok_or(LibraryError::UnsupportedVideo)?;
     let audio_codec = output
         .streams
         .iter()
@@ -610,15 +602,7 @@ pub(crate) fn parse_probe(json: &str, extension: &str) -> Result<VideoProbe, Lib
         duration_ms: (duration_seconds * 1_000.0).round() as u64,
         width,
         height,
-        frame_rate,
     })
-}
-
-fn parse_fraction(value: &str) -> Option<f64> {
-    let (numerator, denominator) = value.split_once('/')?;
-    let numerator = numerator.parse::<f64>().ok()?;
-    let denominator = denominator.parse::<f64>().ok()?;
-    (denominator != 0.0).then_some(numerator / denominator)
 }
 
 #[cfg(test)]
@@ -727,7 +711,7 @@ mod tests {
     fn ffprobe_json_is_normalized_to_video_metadata() {
         let json = r#"{
             "streams": [
-                {"codec_type":"video","codec_name":"vp9","width":1920,"height":1080,"avg_frame_rate":"30000/1001"},
+                {"codec_type":"video","codec_name":"vp9","width":1920,"height":1080},
                 {"codec_type":"audio","codec_name":"opus"}
             ],
             "format": {"format_name":"matroska,webm","duration":"65.432"}
@@ -740,7 +724,6 @@ mod tests {
         assert_eq!(probe.audio_codec.as_deref(), Some("opus"));
         assert_eq!(probe.duration_ms, 65_432);
         assert_eq!((probe.width, probe.height), (1920, 1080));
-        assert!((probe.frame_rate - 29.970).abs() < 0.001);
     }
 
     #[test]
@@ -750,7 +733,7 @@ mod tests {
             "format": {"format_name":"mov,mp4","duration":"10.0"}
         }"#;
         let zero_duration = r#"{
-            "streams": [{"codec_type":"video","codec_name":"h264","width":10,"height":10,"avg_frame_rate":"30/1"}],
+            "streams": [{"codec_type":"video","codec_name":"h264","width":10,"height":10}],
             "format": {"format_name":"mov,mp4","duration":"0"}
         }"#;
 

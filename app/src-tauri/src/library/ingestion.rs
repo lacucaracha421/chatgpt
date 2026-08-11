@@ -1016,7 +1016,6 @@ mod tests {
                 duration_ms: 12_345,
                 width: 1280,
                 height: 720,
-                frame_rate: 30.0,
             })
         });
     }
@@ -1201,7 +1200,6 @@ mod tests {
 
         assert!(matches!(result, Err(LibraryError::UnsupportedVideo)));
         assert!(source.is_file());
-        assert_eq!(library.summary().unwrap().asset_count, 0);
         assert!(library
             .root()
             .join("assets/.staging")
@@ -1247,7 +1245,6 @@ mod tests {
                 existing_asset_id: asset.id,
             },
         );
-        assert_eq!(fixture.library.summary().unwrap().asset_count, 1);
     }
 
     #[test]
@@ -1422,7 +1419,6 @@ mod tests {
 
         assert!(result.is_err());
         assert!(fixture.source.is_file());
-        assert_eq!(fixture.library.summary().unwrap().asset_count, 0);
     }
 
     #[test]
@@ -1446,7 +1442,6 @@ mod tests {
             .read_dir()
             .map(|mut entries| entries.next().is_none())
             .unwrap_or(true));
-        assert_eq!(library.summary().unwrap().asset_count, 0);
     }
 
     #[test]
@@ -1546,7 +1541,6 @@ mod tests {
             std::fs::read(replaced_path).unwrap(),
             b"foreign invalid image"
         );
-        assert_eq!(fixture.library.summary().unwrap().asset_count, 0);
     }
 
     #[test]

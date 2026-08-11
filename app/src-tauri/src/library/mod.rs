@@ -135,15 +135,8 @@ impl Library {
     }
 
     pub fn summary(&self) -> Result<LibrarySummary, LibraryError> {
-        let connection = self.connection()?;
-        let asset_count: i64 = connection.query_row(
-            "SELECT COUNT(*) FROM assets WHERE status = 'normal'",
-            [],
-            |row| row.get(0),
-        )?;
         Ok(LibrarySummary {
             root: self.root.to_string_lossy().into_owned(),
-            asset_count: asset_count as u64,
         })
     }
 
@@ -182,7 +175,7 @@ impl Library {
 
     pub fn scan_manga(&self) -> Result<u64, LibraryError> {
         let connection = self.connection()?;
-        manga::scan(&connection, self)
+        manga::scan(&connection)
     }
 
     pub fn list_manga_series(&self) -> Result<Vec<MangaSeries>, LibraryError> {
@@ -463,6 +456,5 @@ mod tests {
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
         assert_eq!(version, 6);
-        assert_eq!(library.summary().unwrap().asset_count, 0);
     }
 }

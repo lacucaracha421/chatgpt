@@ -7,7 +7,6 @@ use rusqlite::OptionalExtension;
 
 use super::error::LibraryError;
 use super::models::MangaSeries;
-use super::Library;
 
 const THUMB_DIR: &str = ".lakomics-thumbs";
 
@@ -41,10 +40,7 @@ pub(crate) fn set_manga_root(
     Ok(())
 }
 
-pub(crate) fn scan(
-    connection: &rusqlite::Connection,
-    library: &Library,
-) -> Result<u64, LibraryError> {
+pub(crate) fn scan(connection: &rusqlite::Connection) -> Result<u64, LibraryError> {
     let root = manga_root(connection)?.ok_or(LibraryError::MangaRootNotSet)?;
     let root_path = PathBuf::from(&root);
     if !root_path.is_dir() {
@@ -71,7 +67,7 @@ pub(crate) fn scan(
             continue;
         }
         seen_paths.push(folder_name.clone());
-        if scan_series_folder(connection, library, &root_path, &folder_name, &thumb_dir)? {
+        if scan_series_folder(connection, &root_path, &folder_name, &thumb_dir)? {
             changed += 1;
         }
     }
@@ -93,7 +89,6 @@ pub(crate) fn scan(
 
 fn scan_series_folder(
     connection: &rusqlite::Connection,
-    library: &Library,
     root: &Path,
     relative_path: &str,
     thumb_dir: &Path,
@@ -120,14 +115,14 @@ fn scan_series_folder(
         })
         .unwrap_or_else(|_| chrono::Utc::now().to_rfc3339());
 
-    let existing: Option<(i64, String, String)> = connection
+    let existing: Option<(String, i64, String, String)> = connection
         .query_row(
-            "SELECT page_count, thumbnail_relative_path, modified_at FROM manga_series WHERE relative_path = ?1",
+            "SELECT id, page_count, thumbnail_relative_path, modified_at FROM manga_series WHERE relative_path = ?1",
             [relative_path],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .optional()?;
-    let unchanged = existing.as_ref().is_some_and(|(count, thumb, stored)| {
+    let unchanged = existing.as_ref().is_some_and(|(_, count, thumb, stored)| {
         *count as usize == page_count
             && fs::exists(thumb_dir.join(thumb)).unwrap_or(false)
             && *stored == modified_at
@@ -137,13 +132,7 @@ fn scan_series_folder(
     }
 
     let series_id = match existing {
-        Some(_) => {
-            connection.query_row(
-                "SELECT id FROM manga_series WHERE relative_path = ?1",
-                [relative_path],
-                |row| row.get(0),
-            )?
-        }
+        Some((id, _, _, _)) => id,
         None => uuid::Uuid::new_v4().to_string(),
     };
 
@@ -253,20 +242,15 @@ pub(crate) fn list_series(
     connection: &rusqlite::Connection,
 ) -> Result<Vec<MangaSeries>, LibraryError> {
     let mut statement = connection.prepare(
-        "SELECT id, relative_path, title, author, gallery_id, page_count, thumbnail_relative_path, scanned_at, modified_at
+        "SELECT id, title, author, page_count
          FROM manga_series ORDER BY modified_at DESC",
     )?;
     let rows = statement.query_map([], |row| {
         Ok(MangaSeries {
             id: row.get(0)?,
-            relative_path: row.get(1)?,
-            title: row.get(2)?,
-            author: row.get(3)?,
-            gallery_id: row.get(4)?,
-            page_count: row.get::<_, i64>(5)? as u64,
-            thumbnail_relative_path: row.get(6)?,
-            scanned_at: row.get(7)?,
-            modified_at: row.get(8)?,
+            title: row.get(1)?,
+            author: row.get(2)?,
+            page_count: row.get::<_, i64>(3)? as u64,
         })
     })?;
     let mut series = Vec::new();

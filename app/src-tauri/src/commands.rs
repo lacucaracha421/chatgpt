@@ -11,7 +11,7 @@ use crate::library::{
         ClassificationEntry, CreateClassification, IngestMediaRequest, IngestOutcome,
         LibrarySummary, MangaSeries, MetadataBackup, PurgeSummary, SimilarityDecisionRequest,
         SimilarityIndexProgress, SimilarityReviewPage, TrashPage,
-        TrashPolicy, VideoPreparationProgress, VideoPreparationState,
+        TrashPolicy, VideoPreparationProgress,
     },
     Library,
 };
@@ -75,8 +75,6 @@ impl From<LibraryError> for CommandError {
             LibraryError::WriteAsset { .. } => "write_asset_failed",
             LibraryError::MangaRootNotSet => "manga_root_not_set",
             LibraryError::MangaSeriesNotFound => "manga_series_not_found",
-            LibraryError::InvalidMangaFolder { .. } => "invalid_manga_folder",
-            LibraryError::MangaThumbnail { .. } => "manga_thumbnail_failed",
         };
         Self { code, message }
     }
@@ -400,7 +398,7 @@ pub async fn prepare_pending_videos(
 pub fn retry_video_preparation(
     asset_id: String,
     state: State<'_, AppState>,
-) -> Result<VideoPreparationState, CommandError> {
+) -> Result<(), CommandError> {
     current_required(state)?
         .retry_video_preparation(&asset_id)
         .map_err(CommandError::from)

@@ -1,6 +1,5 @@
 export type LibrarySummary = {
   root: string;
-  assetCount: number;
 };
 
 export type ClassificationKind = "root" | "work" | "tag";
@@ -130,14 +129,9 @@ export type PurgeSummary = {
 
 export type MangaSeries = {
   id: string;
-  relativePath: string;
   title: string;
   author: string;
-  galleryId: string | null;
   pageCount: number;
-  thumbnailRelativePath: string;
-  scannedAt: string;
-  modifiedAt: string;
 };
 
 export type MetadataBackup = {
@@ -210,5 +204,5 @@ export interface LibraryGateway {
   listMangaSeries(): Promise<MangaSeries[]>;
   ingestMedia(input: IngestMediaInput): Promise<IngestOutcome>;
   preparePendingVideos(limit: number): Promise<VideoPreparationProgress>;
-  retryVideoPreparation(assetId: string): Promise<VideoPreparationState>;
+  retryVideoPreparation(assetId: string): Promise<void>;
 }

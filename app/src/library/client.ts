@@ -18,7 +18,6 @@ import type {
   TrashPage,
   TrashPolicy,
   VideoPreparationProgress,
-  VideoPreparationState,
 } from "./types";
 
 export const libraryGateway: LibraryGateway = {
@@ -69,5 +68,5 @@ export const libraryGateway: LibraryGateway = {
   preparePendingVideos: (limit) =>
     invoke<VideoPreparationProgress>("prepare_pending_videos", { limit }),
   retryVideoPreparation: (assetId) =>
-    invoke<VideoPreparationState>("retry_video_preparation", { assetId }),
+    invoke("retry_video_preparation", { assetId }),
 };

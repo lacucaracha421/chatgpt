@@ -239,7 +239,6 @@ fn public_asset_flow_supports_favorites_sorts_random_paging_and_source_urls() {
         library.list_assets(random.clone()).unwrap(),
         library.list_assets(random).unwrap()
     );
-    assert_eq!(library.summary().unwrap().asset_count, 2);
     assert_ne!(first.id, second.id);
 }
 
@@ -272,7 +271,7 @@ fn migrates_v1_after_creating_a_verified_snapshot() {
     assert_eq!(user_version(&library), 6);
     assert_eq!(library.trash_policy().unwrap().retention_days, Some(30));
     assert!(!library.root().join("trash").exists());
-    assert_eq!(library.summary().unwrap().asset_count, 1);
+    assert_eq!(library.get_asset("asset-1").unwrap().id, "asset-1");
     let backups = pre_migration_backups(library.root());
     assert_eq!(backups.len(), 1);
     let snapshot = Connection::open(&backups[0]).unwrap();
@@ -547,14 +546,14 @@ fn trash_keeps_files_in_place_and_restore_keeps_metadata() {
         .trash_assets(std::slice::from_ref(&asset.id))
         .unwrap();
 
-    assert_eq!(fixture.library.summary().unwrap().asset_count, 0);
+    assert!(fixture.library.get_asset(&asset.id).is_err());
     assert!(asset_path.is_file());
     assert!(thumbnail_path.is_file());
     assert_eq!(fixture.library.list_trash(None, 20).unwrap().items.len(), 1);
 
     fixture.library.restore_asset(&asset.id).unwrap();
 
-    assert_eq!(fixture.library.summary().unwrap().asset_count, 1);
+    assert_eq!(fixture.library.get_asset(&asset.id).unwrap().id, asset.id);
     assert!(fixture
         .library
         .list_trash(None, 20)
@@ -802,7 +801,7 @@ fn purge_expired_trash_removes_managed_files_and_metadata() {
         .unwrap()
         .items
         .is_empty());
-    assert_eq!(fixture.library.summary().unwrap().asset_count, 0);
+    assert!(fixture.library.get_asset(&asset.id).is_err());
 }
 
 fn ingest(library: &Library, source_path: &Path, source_url: Option<&str>) -> AssetSummary {

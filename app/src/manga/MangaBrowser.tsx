@@ -19,14 +19,15 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
   const [message, setMessage] = useState<string | null>(null);
   useAutoDismiss(message, setMessage);
 
-  async function scan() {
+  async function refreshSeries(active = () => true) {
     try {
       const scanned = await gateway.scanManga();
+      if (!active()) return;
       setMessage(scanned > 0 ? `망가 ${scanned}개를 새로고침했습니다` : "새로 변경된 망가가 없습니다");
       const next = await gateway.listMangaSeries();
-      setSeries(next);
+      if (active()) setSeries(next);
     } catch {
-      setMessage("망가 목록을 불러오지 못했습니다");
+      if (active()) setMessage("망가 목록을 불러오지 못했습니다");
     }
   }
 
@@ -37,13 +38,7 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
         const currentRoot = await gateway.getMangaRoot();
         if (!active) return;
         setRoot(currentRoot);
-        if (currentRoot) {
-          const scanned = await gateway.scanManga();
-          if (!active) return;
-          setMessage(scanned > 0 ? `망가 ${scanned}개를 새로고침했습니다` : "새로 변경된 망가가 없습니다");
-          const next = await gateway.listMangaSeries();
-          if (active) setSeries(next);
-        }
+        if (currentRoot) await refreshSeries(() => active);
       } catch {
         if (active) setMessage("망가 목록을 불러오지 못했습니다");
       }
@@ -63,7 +58,7 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
   }
 
   return <section className="manga-browser" aria-label="망가">
-    <ViewToolbar title="망가" actions={<Button size="sm" onClick={() => void scan()}>새로고침</Button>} />
+    <ViewToolbar title="망가" actions={<Button size="sm" onClick={() => void refreshSeries()}>새로고침</Button>} />
     {message && <Toast>{message}</Toast>}
     {!series ? <Skeleton className="manga-browser__skeleton" label="망가를 불러오는 중" /> : series.length === 0 ? (
       <EmptyState title="망가가 없습니다">망가 폴더에 시리즈 폴더를 추가하세요.</EmptyState>

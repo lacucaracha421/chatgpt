@@ -11,7 +11,7 @@ import type {
 import { UI_PREFERENCES_KEY } from "../preferences/uiPreferences";
 import { App } from "./App";
 
-const summary = { root: "C:\\Lakomics", assetCount: 0 };
+const summary = { root: "C:\\Lakomics" };
 const games: ClassificationEntry = {
   id: "root-games",
   kind: "root",
@@ -84,7 +84,7 @@ function gateway(): LibraryGateway {
     listMangaSeries: vi.fn().mockResolvedValue([]),
     ingestMedia: vi.fn(),
     preparePendingVideos: vi.fn().mockResolvedValue({ processed: 0, remaining: 0, failed: 0, changedAssetIds: [] }),
-    retryVideoPreparation: vi.fn().mockResolvedValue("pending"),
+    retryVideoPreparation: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -674,14 +674,9 @@ describe("App", () => {
     vi.mocked(libraryGateway.getMangaRoot).mockResolvedValue("C:\\Manga");
     vi.mocked(libraryGateway.listMangaSeries).mockResolvedValue([{
       id: "series-1",
-      relativePath: "Blue Archive",
       title: "Blue Archive",
       author: "Nexon",
-      galleryId: null,
       pageCount: 12,
-      thumbnailRelativePath: "cover.jpg",
-      scannedAt: "2026-08-01T00:00:00Z",
-      modifiedAt: "2026-08-01T00:00:00Z",
     }]);
     const user = userEvent.setup();
 

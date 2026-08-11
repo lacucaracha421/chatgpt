@@ -7,7 +7,7 @@ import type { LibraryGateway } from "./types";
 
 function gateway(): LibraryGateway {
   return {
-    openLibrary: vi.fn().mockResolvedValue({ root: "C:\\Lakomics", assetCount: 0 }),
+    openLibrary: vi.fn().mockResolvedValue({ root: "C:\\Lakomics" }),
     listClassifications: vi.fn(),
     createClassification: vi.fn(),
     renameClassification: vi.fn(),
