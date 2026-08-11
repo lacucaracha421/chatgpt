@@ -29,7 +29,7 @@ import {
 import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { DragLayer } from "../shared/ui/DragLayer";
-import { pointerDragReducer, type ClassificationDropPosition, type ClassificationDropTarget, type InternalDragPayload, type PointerDragState } from "../shared/interaction/pointerDrag";
+import { pointerDragReducer, type ClassificationDropTarget, type InternalDragPayload, type PointerDragState } from "../shared/interaction/pointerDrag";
 import { SettingsView } from "../settings/SettingsView";
 import { TrashBrowser } from "../safety/TrashBrowser";
 import { SimilarityReviewBrowser } from "../similarity/SimilarityReviewBrowser";
@@ -315,13 +315,19 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
       if (payload.kind === "assets") {
         await gateway.patchAssetClassifications({ assetIds: payload.assetIds, addClassificationIds: [target.entryId], removeClassificationIds: [] });
         setAssetRefresh((current) => current + 1);
-        setMessage(`${payload.assetIds.length}개 자산을 분류했습니다.`);
+        setMessage(`${payload.assetIds.length}개 자산을 폴더에 추가했습니다.`);
         return;
       }
       const parentId = classificationDropParent(entries, target);
       await gateway.moveClassification(payload.entryId, parentId);
+      setPreferences((current) => ({
+        ...current,
+        expandedClassificationIds: current.expandedClassificationIds.includes(target.entryId)
+          ? current.expandedClassificationIds
+          : [...current.expandedClassificationIds, target.entryId],
+      }));
       await refreshClassifications();
-      setMessage("분류를 이동했습니다.");
+      setMessage("폴더를 이동했습니다.");
     } catch (error) {
       setMessage(commandErrorMessage(error, "드롭 작업을 완료하지 못했습니다."));
     }
@@ -429,25 +435,21 @@ function classificationTargetAt(x: number, y: number, payload: InternalDragPaylo
   const element = document.elementFromPoint?.(x, y)?.closest<HTMLElement>("[data-classification-id]");
   const entryId = element?.dataset.classificationId;
   if (!element || !entryId) return null;
-  const rect = element.getBoundingClientRect();
-  const relativeY = rect.height > 0 ? (y - rect.top) / rect.height : 0.5;
-  const position: ClassificationDropPosition = relativeY < 0.25 ? "before" : relativeY > 0.75 ? "after" : "inside";
+  const position = "inside" as const;
   return { entryId, position, valid: payload.kind === "assets" || validClassificationDrop(payload.entryId, { entryId, position, valid: true }, entries) };
 }
 
-function classificationDropParent(entries: ClassificationEntry[], target: Pick<ClassificationDropTarget, "entryId" | "position">): string | null {
-  const entry = entries.find((candidate) => candidate.id === target.entryId);
-  return target.position === "inside" ? target.entryId : entry?.parentId ?? null;
+function classificationDropParent(_entries: ClassificationEntry[], target: Pick<ClassificationDropTarget, "entryId" | "position">): string {
+  return target.entryId;
 }
 
 function validClassificationDrop(entryId: string, target: ClassificationDropTarget, entries: ClassificationEntry[]) {
   const entry = entries.find((candidate) => candidate.id === entryId);
-  const parentId = classificationDropParent(entries, target);
-  if (!entry || target.entryId === entryId || parentId === entryId || isDescendant(parentId, entryId, entries)) return false;
-  if (entry.kind === "root") return parentId === null;
-  const parent = entries.find((candidate) => candidate.id === parentId);
-  if (entry.kind === "work") return parent?.kind === "root";
-  return parentId === null || parent !== undefined;
+  const parent = entries.find((candidate) => candidate.id === target.entryId);
+  if (!entry || !parent || entry.parentId === parent.id || parent.id === entry.id || isDescendant(parent.id, entry.id, entries)) return false;
+  if (entries.some((candidate) => candidate.id !== entry.id && candidate.parentId === parent.id && candidate.name.toLocaleLowerCase() === entry.name.toLocaleLowerCase())) return false;
+  if (entry.kind === "root") return false;
+  return entry.kind !== "work" || parent.kind === "root";
 }
 
 function isDescendant(candidateId: string | null, ancestorId: string, entries: ClassificationEntry[]) {

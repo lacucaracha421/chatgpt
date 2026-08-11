@@ -30,6 +30,12 @@ const arona: ClassificationEntry = {
   name: "아로나",
   parentId: "work-blue-archive",
 };
+const images: ClassificationEntry = {
+  id: "root-images",
+  kind: "root",
+  name: "이미지",
+  parentId: null,
+};
 const asset: AssetSummary = {
   id: "asset-arona",
   title: null,
@@ -572,6 +578,9 @@ describe("App", () => {
 
     const tile = await screen.findByRole("option", { name: "arona.png" });
     const target = await screen.findByRole("treeitem", { name: games.name });
+    vi.spyOn(target, "getBoundingClientRect").mockReturnValue({
+      bottom: 100, height: 100, left: 0, right: 200, top: 0, width: 200, x: 0, y: 0, toJSON: () => ({}),
+    });
     Object.defineProperties(tile, {
       setPointerCapture: { configurable: true, value: vi.fn() },
       releasePointerCapture: { configurable: true, value: vi.fn() },
@@ -580,18 +589,21 @@ describe("App", () => {
     Object.defineProperty(document, "elementFromPoint", { configurable: true, value: elementFromPoint });
 
     fireEvent.pointerDown(tile, { button: 0, pointerId: 3, clientX: 10, clientY: 10 });
-    fireEvent.pointerMove(tile, { pointerId: 3, clientX: 20, clientY: 10 });
+    fireEvent.pointerMove(tile, { pointerId: 3, clientX: 20, clientY: 1 });
     expect(target).toHaveAttribute("data-drop-state", "valid");
-    fireEvent.pointerUp(tile, { pointerId: 3, clientX: 20, clientY: 10 });
+    expect(target).toHaveAttribute("data-drop-position", "inside");
+    expect(screen.getByText("1개 자산 · 폴더에 추가")).toBeInTheDocument();
+    fireEvent.pointerUp(tile, { pointerId: 3, clientX: 20, clientY: 1 });
 
     await waitFor(() => expect(libraryGateway.patchAssetClassifications).toHaveBeenCalledWith({
       assetIds: ["asset-arona"],
       addClassificationIds: ["root-games"],
       removeClassificationIds: [],
     }));
+    expect(await screen.findByText("1개 자산을 폴더에 추가했습니다.")).toBeVisible();
   });
 
-  it("moves a classification but rejects its descendant as a target", async () => {
+  it("moves a classification inside a folder, expands it, and rejects invalid targets", async () => {
     localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
     localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({
       metadataVisible: true,
@@ -601,31 +613,71 @@ describe("App", () => {
       thumbnailRowHeight: 180,
     }));
     const libraryGateway = gateway();
-    vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games, blueArchive, arona]);
+    vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games, blueArchive, arona, images]);
     vi.mocked(libraryGateway.moveClassification).mockResolvedValue(undefined);
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
 
     const rootRow = await screen.findByRole("treeitem", { name: games.name });
+    const workRow = await screen.findByRole("treeitem", { name: blueArchive.name });
     const tagRow = await screen.findByRole("treeitem", { name: arona.name });
-    for (const row of [rootRow, tagRow]) Object.defineProperties(row, {
+    const imagesRow = await screen.findByRole("treeitem", { name: images.name });
+    for (const row of [rootRow, workRow, tagRow, imagesRow]) Object.defineProperties(row, {
       setPointerCapture: { configurable: true, value: vi.fn() },
       releasePointerCapture: { configurable: true, value: vi.fn() },
     });
-    const elementFromPoint = vi.fn().mockReturnValue(rootRow);
+    const elementFromPoint = vi.fn().mockReturnValue(workRow);
     Object.defineProperty(document, "elementFromPoint", { configurable: true, value: elementFromPoint });
 
     fireEvent.pointerDown(tagRow, { button: 0, pointerId: 4, clientX: 10, clientY: 10 });
     fireEvent.pointerMove(tagRow, { pointerId: 4, clientX: 20, clientY: 10 });
-    expect(rootRow).toHaveAttribute("data-drop-state", "valid");
-    fireEvent.pointerUp(tagRow, { pointerId: 4, clientX: 20, clientY: 10 });
-    await waitFor(() => expect(libraryGateway.moveClassification).toHaveBeenCalledWith(arona.id, games.id));
+    expect(workRow).toHaveAttribute("data-drop-state", "invalid");
+    fireEvent.pointerCancel(tagRow, { pointerId: 4 });
+
+    elementFromPoint.mockReturnValue(imagesRow);
+    fireEvent.pointerDown(tagRow, { button: 0, pointerId: 5, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(tagRow, { pointerId: 5, clientX: 20, clientY: 10 });
+    expect(imagesRow).toHaveAttribute("data-drop-state", "valid");
+    expect(imagesRow).toHaveAttribute("data-drop-position", "inside");
+    fireEvent.pointerUp(tagRow, { pointerId: 5, clientX: 20, clientY: 10 });
+    await waitFor(() => expect(libraryGateway.moveClassification).toHaveBeenCalledWith(arona.id, images.id));
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(UI_PREFERENCES_KEY) ?? "{}").expandedClassificationIds).toEqual([games.id, blueArchive.id, images.id]));
 
     elementFromPoint.mockReturnValue(tagRow);
-    fireEvent.pointerDown(rootRow, { button: 0, pointerId: 5, clientX: 10, clientY: 10 });
-    fireEvent.pointerMove(rootRow, { pointerId: 5, clientX: 20, clientY: 10 });
+    fireEvent.pointerDown(rootRow, { button: 0, pointerId: 6, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(rootRow, { pointerId: 6, clientX: 20, clientY: 10 });
     expect(tagRow).toHaveAttribute("data-drop-state", "invalid");
-    fireEvent.pointerUp(rootRow, { pointerId: 5, clientX: 20, clientY: 10 });
+    fireEvent.pointerUp(rootRow, { pointerId: 6, clientX: 20, clientY: 10 });
     expect(libraryGateway.moveClassification).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects moving a folder into a destination with the same child name", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({
+      metadataVisible: true,
+      sidebarWidth: 232,
+      expandedClassificationIds: [games.id, blueArchive.id],
+      assetSort: "newest",
+      thumbnailRowHeight: 180,
+    }));
+    const duplicate = { ...arona, id: "tag-arona-copy", parentId: images.id } satisfies ClassificationEntry;
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games, blueArchive, arona, images, duplicate]);
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+
+    const tagRow = await screen.findByRole("treeitem", { name: arona.name });
+    const imagesRow = await screen.findByRole("treeitem", { name: images.name });
+    Object.defineProperties(tagRow, {
+      setPointerCapture: { configurable: true, value: vi.fn() },
+      releasePointerCapture: { configurable: true, value: vi.fn() },
+    });
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: vi.fn().mockReturnValue(imagesRow) });
+
+    fireEvent.pointerDown(tagRow, { button: 0, pointerId: 7, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(tagRow, { pointerId: 7, clientX: 20, clientY: 10 });
+
+    expect(imagesRow).toHaveAttribute("data-drop-state", "invalid");
+    fireEvent.pointerUp(tagRow, { pointerId: 7, clientX: 20, clientY: 10 });
+    expect(libraryGateway.moveClassification).not.toHaveBeenCalled();
   });
 
   it("promotes an asset pointer drag to native copy once at the viewport boundary", async () => {

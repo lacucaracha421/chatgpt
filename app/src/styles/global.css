@@ -460,19 +460,6 @@ input:disabled {
   outline: var(--focus-width) solid var(--color-danger);
 }
 
-.classification-sidebar__tree-row[data-drop-state="valid"][data-drop-position="before"]::before,
-.classification-sidebar__tree-row[data-drop-state="valid"][data-drop-position="after"]::after {
-  position: absolute;
-  right: 0;
-  left: 0;
-  height: var(--drag-insertion-width);
-  background: var(--color-accent);
-  content: "";
-}
-
-.classification-sidebar__tree-row[data-drop-position="before"]::before { top: 0; }
-.classification-sidebar__tree-row[data-drop-position="after"]::after { bottom: 0; }
-
 .is-pointer-dragging,
 .is-pointer-dragging * {
   cursor: grabbing !important;
@@ -579,7 +566,8 @@ input:disabled {
   white-space: nowrap;
 }
 
-.classification-sidebar__tree-folder {
+.classification-sidebar__tree-folder,
+.classification-sidebar__tree-work {
   flex: none;
   color: var(--color-muted);
 }

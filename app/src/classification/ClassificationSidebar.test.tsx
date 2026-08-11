@@ -385,6 +385,41 @@ describe("ClassificationSidebar", () => {
     expect(options).not.toContain("School Uniform");
   });
 
+  it("keeps root folders fixed and uses a distinct work-folder icon", async () => {
+    const user = userEvent.setup();
+    renderSidebar();
+
+    await user.click(screen.getByRole("button", { name: "Games 추가 작업" }));
+    expect(screen.getByRole("menuitem", { name: "이동 — 최상위 폴더" })).toHaveAttribute("data-disabled");
+    expect(screen.getByRole("treeitem", { name: "Blue Archive" }).querySelector(".classification-sidebar__tree-work")).toBeInTheDocument();
+  });
+
+  it("offers only root folders when moving a work folder", async () => {
+    const user = userEvent.setup();
+    const rootEntries = [...entries, { id: "root-2", kind: "root", name: "Images", parentId: null }] satisfies ClassificationEntry[];
+    renderSidebar(gateway(), { entries: rootEntries });
+
+    await user.click(screen.getByRole("button", { name: "Blue Archive 추가 작업" }));
+    await user.click(screen.getByRole("menuitem", { name: "폴더 이동" }));
+
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(["Games", "Images"]);
+  });
+
+  it("expands the destination after moving from the dialog", async () => {
+    const user = userEvent.setup();
+    const fixtureGateway = gateway();
+    const rootEntries = [...entries, { id: "root-2", kind: "root", name: "Images", parentId: null }] satisfies ClassificationEntry[];
+    const { onExpandedIdsChange } = renderSidebar(fixtureGateway, { entries: rootEntries, expandedIds: ["root", "work"] });
+
+    await user.click(screen.getByRole("button", { name: "Arona 추가 작업" }));
+    await user.click(screen.getByRole("menuitem", { name: "폴더 이동" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "상위 폴더" }), "root-2");
+    await user.click(screen.getByRole("button", { name: "이동" }));
+
+    await waitFor(() => expect(fixtureGateway.moveClassification).toHaveBeenCalledWith("tag", "root-2"));
+    expect(onExpandedIdsChange).toHaveBeenCalledWith(["root", "work", "root-2"]);
+  });
+
   it("keeps delete confirmation open and shows the reason when deletion fails", async () => {
     const user = userEvent.setup();
     const fixtureGateway = gateway();

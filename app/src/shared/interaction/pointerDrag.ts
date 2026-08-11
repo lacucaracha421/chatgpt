@@ -7,7 +7,7 @@ export type PointerDragState =
   | { phase: "armed"; payload: InternalDragPayload; startX: number; startY: number }
   | { phase: "dragging"; payload: InternalDragPayload; x: number; y: number };
 
-export type ClassificationDropPosition = "before" | "inside" | "after";
+export type ClassificationDropPosition = "inside";
 export type ClassificationDropTarget = {
   entryId: string;
   position: ClassificationDropPosition;

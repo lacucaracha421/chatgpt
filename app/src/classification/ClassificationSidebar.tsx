@@ -156,6 +156,7 @@ export function ClassificationSidebar({
     if (!dialog || dialog.type !== "move") return;
     try {
       await gateway.moveClassification(dialog.entry.id, parentId || null);
+      if (parentId && !expandedIds.includes(parentId)) onExpandedIdsChange([...expandedIds, parentId]);
       completeMutation();
     } catch (error) {
       setMessage(commandErrorMessage(error, "분류를 변경하지 못했습니다."));
@@ -418,7 +419,12 @@ function TreeItem({ activeRowId, editError, editName, expandedIds, inlineEdit, n
   const actions: MenuItem[] = [
     { id: "create-child", label: "하위 폴더 만들기", onSelect: () => onCreateChild(node.entry) },
     { id: "rename", label: "이름 변경", onSelect: () => onRename(node.entry) },
-    { id: "move", label: "폴더 이동", onSelect: () => onMove(node.entry) },
+    {
+      id: "move",
+      label: node.entry.kind === "root" ? "이동 — 최상위 폴더" : "폴더 이동",
+      disabled: node.entry.kind === "root",
+      onSelect: () => onMove(node.entry),
+    },
     {
       id: "delete",
       label: hasChildren ? "삭제 — 하위 폴더 있음" : "삭제",
@@ -458,7 +464,9 @@ function TreeItem({ activeRowId, editError, editName, expandedIds, inlineEdit, n
               {expanded ? <ChevronDownIcon aria-hidden="true" /> : <ChevronRightIcon aria-hidden="true" />}
             </Button>
           ) : <span className="classification-sidebar__tree-spacer" aria-hidden="true" />}
-          <FolderIcon className="classification-sidebar__tree-folder" aria-hidden="true" />
+          {node.entry.kind === "work"
+            ? <BookOpenIcon className="classification-sidebar__tree-work" aria-hidden="true" />
+            : <FolderIcon className="classification-sidebar__tree-folder" aria-hidden="true" />}
           {editingName ? (
             <InlineFolderInput name={editName} error={editError} onNameChange={onEditNameChange} onSave={onEditSave} onCancel={onEditCancel} />
           ) : <span className="classification-sidebar__tree-label">{node.entry.name}</span>}
