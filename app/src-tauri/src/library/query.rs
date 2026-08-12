@@ -45,6 +45,9 @@ impl Library {
         if !(1..=200).contains(&query.limit) {
             return Err(LibraryError::InvalidAssetPageLimit);
         }
+        if query.classification_id.is_some() && query.album_id.is_some() {
+            return Err(LibraryError::InvalidAssetScope);
+        }
 
         let connection = self.connection()?;
         if let Some(classification_id) = query.classification_id.as_deref() {
@@ -55,6 +58,16 @@ impl Library {
             )?;
             if !exists {
                 return Err(LibraryError::ClassificationNotFound);
+            }
+        }
+        if let Some(album_id) = query.album_id.as_deref() {
+            let exists: bool = connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM albums WHERE id = ?1)",
+                [album_id],
+                |row| row.get(0),
+            )?;
+            if !exists {
+                return Err(LibraryError::AlbumNotFound);
             }
         }
         let cursor = decode_cursor(&query)?;
@@ -73,6 +86,7 @@ impl Library {
                     query.direct_only,
                     query.favorite_only,
                     query.unclassified_only,
+                    query.album_id.as_deref(),
                     collected_at,
                     id,
                     i64::from(query.limit) + 1,
@@ -85,6 +99,7 @@ impl Library {
                     query.direct_only,
                     query.favorite_only,
                     query.unclassified_only,
+                    query.album_id.as_deref(),
                     collected_at,
                     id,
                     i64::from(query.limit) + 1,
@@ -97,6 +112,7 @@ impl Library {
                     query.direct_only,
                     query.favorite_only,
                     query.unclassified_only,
+                    query.album_id.as_deref(),
                     favorite,
                     collected_at,
                     id,
@@ -110,6 +126,7 @@ impl Library {
                     query.direct_only,
                     query.favorite_only,
                     query.unclassified_only,
+                    query.album_id.as_deref(),
                     random_pivot,
                     bucket,
                     content_hash,
@@ -277,51 +294,67 @@ fn encode_cursor(sort: AssetSort, asset: &AssetRow, random_pivot: &str) -> Asset
 const NEWEST_SQL: &str = "WITH RECURSIVE descendants(id) AS (
     SELECT ?1 WHERE ?1 IS NOT NULL
     UNION ALL SELECT entry.id FROM classification_entries AS entry JOIN descendants ON entry.parent_id = descendants.id
+) , album_descendants(id) AS (
+    SELECT ?5 WHERE ?5 IS NOT NULL
+    UNION ALL SELECT child.id FROM albums AS child JOIN album_descendants ON child.parent_id = album_descendants.id
 ) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url,
 asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count
 FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
 WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
-AND (?5 IS NULL OR asset.collected_at < ?5 OR (asset.collected_at = ?5 AND asset.id < ?6))
-ORDER BY asset.collected_at DESC, asset.id DESC LIMIT ?7";
+AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
+AND (?6 IS NULL OR asset.collected_at < ?6 OR (asset.collected_at = ?6 AND asset.id < ?7))
+ORDER BY asset.collected_at DESC, asset.id DESC LIMIT ?8";
 
 const OLDEST_SQL: &str = "WITH RECURSIVE descendants(id) AS (
     SELECT ?1 WHERE ?1 IS NOT NULL
     UNION ALL SELECT entry.id FROM classification_entries AS entry JOIN descendants ON entry.parent_id = descendants.id
+) , album_descendants(id) AS (
+    SELECT ?5 WHERE ?5 IS NOT NULL
+    UNION ALL SELECT child.id FROM albums AS child JOIN album_descendants ON child.parent_id = album_descendants.id
 ) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url,
 asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count
 FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
 WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
-AND (?5 IS NULL OR asset.collected_at > ?5 OR (asset.collected_at = ?5 AND asset.id > ?6))
-ORDER BY asset.collected_at ASC, asset.id ASC LIMIT ?7";
+AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
+AND (?6 IS NULL OR asset.collected_at > ?6 OR (asset.collected_at = ?6 AND asset.id > ?7))
+ORDER BY asset.collected_at ASC, asset.id ASC LIMIT ?8";
 
 const FAVORITES_SQL: &str = "WITH RECURSIVE descendants(id) AS (
     SELECT ?1 WHERE ?1 IS NOT NULL
     UNION ALL SELECT entry.id FROM classification_entries AS entry JOIN descendants ON entry.parent_id = descendants.id
+) , album_descendants(id) AS (
+    SELECT ?5 WHERE ?5 IS NOT NULL
+    UNION ALL SELECT child.id FROM albums AS child JOIN album_descendants ON child.parent_id = album_descendants.id
 ) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url,
 asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count
 FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
 WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
-AND (?5 IS NULL OR asset.favorite < ?5 OR (asset.favorite = ?5 AND (asset.collected_at < ?6 OR (asset.collected_at = ?6 AND asset.id < ?7))))
-ORDER BY asset.favorite DESC, asset.collected_at DESC, asset.id DESC LIMIT ?8";
+AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
+AND (?6 IS NULL OR asset.favorite < ?6 OR (asset.favorite = ?6 AND (asset.collected_at < ?7 OR (asset.collected_at = ?7 AND asset.id < ?8))))
+ORDER BY asset.favorite DESC, asset.collected_at DESC, asset.id DESC LIMIT ?9";
 
 const RANDOM_SQL: &str = "WITH RECURSIVE descendants(id) AS (
     SELECT ?1 WHERE ?1 IS NOT NULL
     UNION ALL SELECT entry.id FROM classification_entries AS entry JOIN descendants ON entry.parent_id = descendants.id
+) , album_descendants(id) AS (
+    SELECT ?5 WHERE ?5 IS NOT NULL
+    UNION ALL SELECT child.id FROM albums AS child JOIN album_descendants ON child.parent_id = album_descendants.id
 ) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url,
 asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count,
-asset.content_hash, CASE WHEN asset.content_hash >= ?5 THEN 0 ELSE 1 END
+asset.content_hash, CASE WHEN asset.content_hash >= ?6 THEN 0 ELSE 1 END
 FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
 WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
-AND (?6 IS NULL OR CASE WHEN asset.content_hash >= ?5 THEN 0 ELSE 1 END > ?6 OR (CASE WHEN asset.content_hash >= ?5 THEN 0 ELSE 1 END = ?6 AND (asset.content_hash > ?7 OR (asset.content_hash = ?7 AND asset.id > ?8))))
-ORDER BY CASE WHEN asset.content_hash >= ?5 THEN 0 ELSE 1 END ASC, asset.content_hash ASC, asset.id ASC LIMIT ?9";
+AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
+AND (?7 IS NULL OR CASE WHEN asset.content_hash >= ?6 THEN 0 ELSE 1 END > ?7 OR (CASE WHEN asset.content_hash >= ?6 THEN 0 ELSE 1 END = ?7 AND (asset.content_hash > ?8 OR (asset.content_hash = ?8 AND asset.id > ?9))))
+ORDER BY CASE WHEN asset.content_hash >= ?6 THEN 0 ELSE 1 END ASC, asset.content_hash ASC, asset.id ASC LIMIT ?10";
 
 #[cfg(test)]
 mod tests {
@@ -330,8 +363,9 @@ mod tests {
     use crate::library::{
         error::LibraryError,
         models::{
-            AssetClassificationPatch, AssetCursor, AssetQuery, AssetSort, ClassificationKind,
-            CreateClassification, MediaSummary, VideoPreparationState,
+            AssetAlbumPatch, AssetClassificationPatch, AssetCursor, AssetQuery, AssetSort,
+            ClassificationKind, CreateAlbum, CreateClassification, MediaSummary,
+            VideoPreparationState,
         },
         Library,
     };
@@ -395,6 +429,7 @@ mod tests {
         let page = library
             .list_assets(AssetQuery {
                 classification_id: None,
+                album_id: None,
                 direct_only: false,
                 favorite_only: false,
                 unclassified_only: false,
@@ -441,6 +476,7 @@ mod tests {
         let descendants = library
             .list_assets(AssetQuery {
                 classification_id: Some(root.id.clone()),
+                album_id: None,
                 direct_only: false,
                 favorite_only: false,
                 unclassified_only: false,
@@ -453,6 +489,7 @@ mod tests {
         let direct = library
             .list_assets(AssetQuery {
                 classification_id: Some(root.id),
+                album_id: None,
                 direct_only: true,
                 favorite_only: false,
                 unclassified_only: false,
@@ -503,6 +540,7 @@ mod tests {
         let page = library
             .list_assets(AssetQuery {
                 classification_id: Some(root.id),
+                album_id: None,
                 direct_only: false,
                 favorite_only: false,
                 unclassified_only: false,
@@ -515,6 +553,84 @@ mod tests {
 
         assert_eq!(page.items.len(), 1);
         assert_eq!(page.items[0].id, "asset-1");
+    }
+
+    #[test]
+    fn parent_album_query_includes_descendants_once_and_hides_trash() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let root = library
+            .create_album(CreateAlbum {
+                name: "표지".into(),
+                parent_id: None,
+            })
+            .unwrap();
+        let first_child = library
+            .create_album(CreateAlbum {
+                name: "게임".into(),
+                parent_id: Some(root.id.clone()),
+            })
+            .unwrap();
+        let second_child = library
+            .create_album(CreateAlbum {
+                name: "만화".into(),
+                parent_id: Some(root.id.clone()),
+            })
+            .unwrap();
+        insert_asset(&library, "asset-1", "2026-08-12T00:00:00Z");
+        library
+            .patch_asset_albums(AssetAlbumPatch {
+                asset_ids: vec!["asset-1".into()],
+                add_album_ids: vec![first_child.id, second_child.id],
+                remove_album_ids: Vec::new(),
+            })
+            .unwrap();
+        let query = AssetQuery {
+            classification_id: None,
+            album_id: Some(root.id),
+            direct_only: false,
+            favorite_only: false,
+            unclassified_only: false,
+            sort: AssetSort::Newest,
+            random_pivot: None,
+            after: None,
+            limit: 20,
+        };
+
+        assert_eq!(library.list_assets(query.clone()).unwrap().items.len(), 1);
+        library.trash_assets(&["asset-1".into()]).unwrap();
+        assert!(library.list_assets(query.clone()).unwrap().items.is_empty());
+        library.restore_asset("asset-1").unwrap();
+        assert_eq!(library.list_assets(query).unwrap().items.len(), 1);
+    }
+
+    #[test]
+    fn rejects_simultaneous_folder_and_album_scopes() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let folder = classification(&library, ClassificationKind::Root, "게임", None);
+        let album = library
+            .create_album(CreateAlbum {
+                name: "표지".into(),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let error = library
+            .list_assets(AssetQuery {
+                classification_id: Some(folder.id),
+                album_id: Some(album.id),
+                direct_only: false,
+                favorite_only: false,
+                unclassified_only: false,
+                sort: AssetSort::Newest,
+                random_pivot: None,
+                after: None,
+                limit: 20,
+            })
+            .unwrap_err();
+
+        assert!(matches!(error, LibraryError::InvalidAssetScope));
     }
 
     #[test]
@@ -536,6 +652,7 @@ mod tests {
         let first = library
             .list_assets(AssetQuery {
                 classification_id: None,
+                album_id: None,
                 direct_only: false,
                 favorite_only: false,
                 unclassified_only: true,
@@ -548,6 +665,7 @@ mod tests {
         let second = library
             .list_assets(AssetQuery {
                 classification_id: None,
+                album_id: None,
                 direct_only: false,
                 favorite_only: false,
                 unclassified_only: true,
@@ -588,6 +706,7 @@ mod tests {
         let first = library
             .list_assets(AssetQuery {
                 classification_id: None,
+                album_id: None,
                 direct_only: false,
                 favorite_only: false,
                 unclassified_only: false,
@@ -600,6 +719,7 @@ mod tests {
         let second = library
             .list_assets(AssetQuery {
                 classification_id: None,
+                album_id: None,
                 direct_only: false,
                 favorite_only: false,
                 unclassified_only: false,
@@ -638,6 +758,7 @@ mod tests {
             let error = library
                 .list_assets(AssetQuery {
                     classification_id: None,
+                    album_id: None,
                     direct_only: false,
                     favorite_only: false,
                     unclassified_only: false,
@@ -661,6 +782,7 @@ mod tests {
             let error = library
                 .list_assets(AssetQuery {
                     classification_id: Some("missing-classification".into()),
+                    album_id: None,
                     direct_only,
                     favorite_only: false,
                     unclassified_only: false,
@@ -756,6 +878,7 @@ mod tests {
     fn query(sort: AssetSort, random_pivot: Option<&str>) -> AssetQuery {
         AssetQuery {
             classification_id: None,
+            album_id: None,
             direct_only: false,
             favorite_only: false,
             unclassified_only: false,

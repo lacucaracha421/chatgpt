@@ -970,6 +970,7 @@ mod tests {
             self.library
                 .list_assets(AssetQuery {
                     classification_id: None,
+                    album_id: None,
                     direct_only: false,
                     favorite_only: false,
                     unclassified_only: false,

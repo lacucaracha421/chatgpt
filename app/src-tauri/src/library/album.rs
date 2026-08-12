@@ -1,10 +1,12 @@
+use std::collections::BTreeSet;
+
 use rusqlite::{params, Connection};
 
 use super::{
     error::LibraryError,
     folder_appearance,
-    models::{AlbumEntry, CreateAlbum},
-    Library,
+    models::{AlbumEntry, AssetAlbumPatch, CreateAlbum},
+    validated_asset_ids, Library,
 };
 
 impl Library {
@@ -128,6 +130,53 @@ impl Library {
         }
         Ok(())
     }
+
+    pub fn patch_asset_albums(&self, patch: AssetAlbumPatch) -> Result<(), LibraryError> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let asset_ids = validated_asset_ids(&transaction, &patch.asset_ids)?;
+        let add_ids: BTreeSet<_> = patch.add_album_ids.iter().map(String::as_str).collect();
+        let remove_ids: BTreeSet<_> = patch
+            .remove_album_ids
+            .iter()
+            .map(String::as_str)
+            .collect();
+        for album_id in add_ids.iter().chain(remove_ids.iter()) {
+            require_album(&transaction, album_id)?;
+        }
+        for asset_id in asset_ids {
+            for album_id in &remove_ids {
+                transaction.execute(
+                    "DELETE FROM asset_albums WHERE asset_id = ?1 AND album_id = ?2",
+                    params![asset_id, album_id],
+                )?;
+            }
+            for album_id in &add_ids {
+                transaction.execute(
+                    "INSERT OR IGNORE INTO asset_albums (asset_id, album_id) VALUES (?1, ?2)",
+                    params![asset_id, album_id],
+                )?;
+            }
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn get_asset_albums(&self, asset_id: &str) -> Result<Vec<AlbumEntry>, LibraryError> {
+        let connection = self.connection()?;
+        validated_asset_ids(&connection, &[asset_id.to_owned()])?;
+        let mut statement = connection.prepare(
+            "SELECT album.id, album.name, album.parent_id, album.icon_key, album.color_key
+             FROM albums AS album
+             JOIN asset_albums AS link ON link.album_id = album.id
+             WHERE link.asset_id = ?1
+             ORDER BY album.name COLLATE NOCASE, album.id",
+        )?;
+        let entries = statement
+            .query_map([asset_id], album_from_row)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(entries)
+    }
 }
 
 fn normalized_name(name: String) -> Result<String, LibraryError> {
@@ -176,7 +225,7 @@ fn map_duplicate_name(error: rusqlite::Error) -> LibraryError {
 mod tests {
     use crate::library::{
         error::LibraryError,
-        models::{AlbumEntry, CreateAlbum},
+        models::{AlbumEntry, AssetAlbumPatch, CreateAlbum},
         Library,
     };
 
@@ -347,5 +396,68 @@ mod tests {
             Err(LibraryError::DuplicateAlbumName)
         ));
         assert_eq!(library.list_albums().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn one_asset_can_join_multiple_albums_without_new_asset_rows() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        insert_asset(&library, "asset-1");
+        let first = library
+            .create_album(CreateAlbum {
+                name: "표지".into(),
+                parent_id: None,
+            })
+            .unwrap();
+        let second = library
+            .create_album(CreateAlbum {
+                name: "참고".into(),
+                parent_id: None,
+            })
+            .unwrap();
+
+        library
+            .patch_asset_albums(AssetAlbumPatch {
+                asset_ids: vec!["asset-1".into()],
+                add_album_ids: vec![first.id.clone(), second.id.clone()],
+                remove_album_ids: Vec::new(),
+            })
+            .unwrap();
+
+        let album_ids = library
+            .get_asset_albums("asset-1")
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.id)
+            .collect::<Vec<_>>();
+        assert_eq!(album_ids, vec![second.id, first.id]);
+        assert_eq!(
+            library
+                .connection()
+                .unwrap()
+                .query_row("SELECT COUNT(*) FROM assets", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+    }
+
+    fn insert_asset(library: &Library, id: &str) {
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO assets (
+                    id, content_hash, media_kind, original_name, relative_path,
+                    thumbnail_relative_path, byte_size, width, height, collected_at
+                 ) VALUES (?1, ?2, 'image', 'asset.png', ?3, ?4, 1, 1, 1,
+                    '2026-08-12T00:00:00Z')",
+                rusqlite::params![
+                    id,
+                    format!("hash-{id}"),
+                    format!("assets/{id}.png"),
+                    format!("thumbnails/{id}.webp"),
+                ],
+            )
+            .unwrap();
     }
 }

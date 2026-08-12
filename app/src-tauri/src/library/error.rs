@@ -75,6 +75,8 @@ pub enum LibraryError {
     },
     #[error("자산 페이지 크기는 1에서 200 사이여야 합니다")]
     InvalidAssetPageLimit,
+    #[error("일반 폴더와 앨범 범위를 동시에 조회할 수 없습니다")]
+    InvalidAssetScope,
     #[error("invalid asset cursor")]
     InvalidAssetCursor,
     #[error("저장된 유사 이미지 해시가 올바르지 않습니다")]

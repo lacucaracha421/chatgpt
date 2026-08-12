@@ -150,6 +150,7 @@ pub struct SimilarityIndexProgress {
 #[serde(rename_all = "camelCase")]
 pub struct AssetQuery {
     pub classification_id: Option<String>,
+    pub album_id: Option<String>,
     pub direct_only: bool,
     pub favorite_only: bool,
     pub unclassified_only: bool,
@@ -252,6 +253,14 @@ pub struct AlbumEntry {
 pub struct CreateAlbum {
     pub name: String,
     pub parent_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetAlbumPatch {
+    pub asset_ids: Vec<String>,
+    pub add_album_ids: Vec<String>,
+    pub remove_album_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

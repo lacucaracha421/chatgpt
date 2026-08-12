@@ -106,6 +106,7 @@ impl FoundationFixture {
         self.library
             .list_assets(AssetQuery {
                 classification_id: Some(classification_id.into()),
+                album_id: None,
                 direct_only: false,
                 favorite_only: false,
                 unclassified_only: false,
@@ -268,7 +269,7 @@ fn migrates_v1_after_creating_a_verified_snapshot() {
 
     let library = Library::open(&root).unwrap();
 
-    assert_eq!(user_version(&library), 7);
+    assert_eq!(user_version(&library), 8);
     assert_eq!(library.trash_policy().unwrap().retention_days, Some(30));
     assert!(!library.root().join("trash").exists());
     assert_eq!(library.get_asset("asset-1").unwrap().id, "asset-1");
@@ -319,7 +320,7 @@ fn version_two_library_migrates_similarity_state_after_a_verified_backup() {
     let library = Library::open(fixture.root()).unwrap();
     let connection = Connection::open(library.root().join("library.sqlite")).unwrap();
 
-    assert_eq!(user_version(&library), 7);
+    assert_eq!(user_version(&library), 8);
     connection
         .execute(
             "UPDATE assets SET perceptual_hash = ?2 WHERE id = ?1",
@@ -343,7 +344,7 @@ fn version_three_library_migrates_video_state_without_changing_images() {
     let library = Library::open(fixture.root()).unwrap();
     let connection = Connection::open(library.root().join("library.sqlite")).unwrap();
 
-    assert_eq!(user_version(&library), 7);
+    assert_eq!(user_version(&library), 8);
     let preserved: (String, Option<String>) = connection
         .query_row(
             "SELECT media_kind, thumbnail_relative_path FROM assets WHERE id = 'asset-1'",
@@ -826,6 +827,7 @@ fn asset_query(
 ) -> AssetQuery {
     AssetQuery {
         classification_id: None,
+        album_id: None,
         direct_only: false,
         favorite_only,
         unclassified_only: false,

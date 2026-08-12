@@ -68,6 +68,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::InvalidAssetSelection => "invalid_asset_selection",
             LibraryError::AssetDragFailed { .. } => "asset_drag_failed",
             LibraryError::InvalidAssetPageLimit => "invalid_asset_page_limit",
+            LibraryError::InvalidAssetScope => "invalid_asset_scope",
             LibraryError::InvalidAssetCursor => "invalid_asset_cursor",
             LibraryError::InvalidPerceptualHash => "invalid_perceptual_hash",
             LibraryError::SimilarityReviewNotFound => "similarity_review_not_found",
