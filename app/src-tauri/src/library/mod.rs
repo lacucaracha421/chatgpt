@@ -1,9 +1,11 @@
 mod backup;
+mod album;
 mod classification;
 mod db;
 mod drag_out;
 pub mod error;
 mod favorite;
+mod folder_appearance;
 mod ingestion;
 mod lock;
 mod manga;

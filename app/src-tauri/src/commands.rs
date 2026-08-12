@@ -57,6 +57,12 @@ impl From<LibraryError> for CommandError {
                 "invalid_classification_appearance"
             }
             LibraryError::ClassificationHasChildren => "classification_has_children",
+            LibraryError::EmptyAlbumName => "empty_album_name",
+            LibraryError::AlbumNotFound => "album_not_found",
+            LibraryError::DuplicateAlbumName => "duplicate_album_name",
+            LibraryError::AlbumCycle => "album_cycle",
+            LibraryError::AlbumHasChildren => "album_has_children",
+            LibraryError::InvalidAlbumAppearance => "invalid_album_appearance",
             LibraryError::AssetNotFound => "asset_not_found",
             LibraryError::EmptyAssetSelection => "empty_asset_selection",
             LibraryError::InvalidAssetSelection => "invalid_asset_selection",

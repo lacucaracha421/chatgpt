@@ -4,42 +4,12 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use super::{
     error::LibraryError,
+    folder_appearance,
     models::{
         AssetClassificationPatch, ClassificationEntry, ClassificationKind, CreateClassification,
     },
     validated_asset_ids, Library,
 };
-
-const CLASSIFICATION_ICON_KEYS: [&str; 24] = [
-    "folder",
-    "photo",
-    "film",
-    "music",
-    "book",
-    "star",
-    "heart",
-    "user",
-    "users",
-    "academic-cap",
-    "briefcase",
-    "home",
-    "globe",
-    "map",
-    "calendar",
-    "clock",
-    "bookmark",
-    "tag",
-    "sparkles",
-    "bolt",
-    "fire",
-    "trophy",
-    "puzzle",
-    "cube",
-];
-const CLASSIFICATION_COLOR_KEYS: [&str; 12] = [
-    "red", "orange", "amber", "yellow", "lime", "green", "teal", "cyan", "blue", "indigo",
-    "purple", "pink",
-];
 
 impl Library {
     pub fn create_classification(
@@ -136,9 +106,7 @@ impl Library {
         icon_key: Option<&str>,
         color_key: Option<&str>,
     ) -> Result<(), LibraryError> {
-        if icon_key.is_some_and(|key| !CLASSIFICATION_ICON_KEYS.contains(&key))
-            || color_key.is_some_and(|key| !CLASSIFICATION_COLOR_KEYS.contains(&key))
-        {
+        if !folder_appearance::validate(icon_key, color_key) {
             return Err(LibraryError::InvalidClassificationAppearance);
         }
         let connection = self.connection()?;

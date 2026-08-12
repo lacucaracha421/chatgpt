@@ -50,6 +50,18 @@ pub enum LibraryError {
     InvalidClassificationAppearance,
     #[error("하위 폴더가 있는 폴더는 삭제할 수 없습니다")]
     ClassificationHasChildren,
+    #[error("앨범 이름은 비어 있을 수 없습니다")]
+    EmptyAlbumName,
+    #[error("요청한 앨범을 찾을 수 없습니다")]
+    AlbumNotFound,
+    #[error("같은 위치에 같은 이름의 앨범이 있습니다")]
+    DuplicateAlbumName,
+    #[error("앨범을 자기 자신이나 자신의 하위 앨범 아래로 옮길 수 없습니다")]
+    AlbumCycle,
+    #[error("하위 앨범이 있는 앨범은 삭제할 수 없습니다")]
+    AlbumHasChildren,
+    #[error("지원하지 않는 앨범 아이콘 또는 색상입니다")]
+    InvalidAlbumAppearance,
     #[error("요청한 자산을 찾을 수 없습니다")]
     AssetNotFound,
     #[error("하나 이상의 자산을 선택해야 합니다")]
