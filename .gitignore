@@ -1,3 +1,4 @@
 .superpowers/
 .worktrees/
 .acceptance/
+__pycache__/
