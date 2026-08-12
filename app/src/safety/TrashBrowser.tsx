@@ -146,7 +146,6 @@ export function TrashBrowser() {
   return <section className="trash-browser" aria-label="휴지통">
     <ViewToolbar
       title="휴지통"
-      children={<p>복원할 수 있는 자산을 보관합니다.</p>}
       actions={<Button variant="danger" onClick={() => setConfirmEmpty(true)} disabled={!page || page.totalCount === 0 || mutationPending}>휴지통 비우기</Button>}
     />
     <section className="trash-browser__policy" aria-label="보존 기간 설정">

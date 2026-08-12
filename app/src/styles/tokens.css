@@ -3,12 +3,14 @@
   --color-sidebar: #181b1f;
   --color-toolbar: #1b1e22;
   --color-surface: #202328;
-  --color-surface-elevated: #202328;
+  --color-surface-elevated: #24282d;
+  --color-surface-raised: var(--color-surface-elevated);
   --color-surface-hover: #282c31;
   --color-selected: rgba(78, 146, 255, 0.18);
   --color-overlay: rgba(7, 10, 15, 0.82);
   --color-text: #e7e9ec;
   --color-muted: #8e959f;
+  --color-text-muted: var(--color-muted);
   --color-accent: #4e8df7;
   --color-heart: #e5484d;
   --color-border: #2b2f35;
@@ -20,6 +22,10 @@
   --space-3: 12px;
   --space-4: 16px;
   --space-6: 24px;
+  --text-xs: 0.6875rem;
+  --text-sm: 0.75rem;
+  --text-md: 0.8125rem;
+  --text-lg: 0.875rem;
   --radius-tile: 2px;
   --radius-sm: 4px;
   --radius-md: 8px;
@@ -47,5 +53,4 @@
   --font-ui: "Segoe UI", sans-serif;
   --bevel-light: #2b2f35;
   --bevel-dark: #0c0e11;
-  --toolbar-title-font: "Cascadia Mono", "Consolas", monospace;
 }

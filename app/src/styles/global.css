@@ -121,10 +121,9 @@ input:disabled {
   min-height: var(--control-height-md);
   padding: 0 var(--space-3);
   color: var(--color-text);
-  background: var(--color-surface-hover);
-  border: var(--border-width) solid var(--color-border);
+  background: transparent;
+  border: var(--border-width) solid transparent;
   border-radius: var(--radius-sm);
-  box-shadow: inset 0 1px 0 var(--bevel-light), inset 0 -1px 0 var(--bevel-dark);
   cursor: pointer;
   font-size: 0.75rem;
   gap: var(--space-compact);
@@ -144,11 +143,27 @@ input:disabled {
 
 .ui-button--secondary {
   background: var(--color-surface-hover);
+  border-color: var(--color-border);
 }
 
 .ui-button--ghost,
 .ui-menu__trigger {
+  color: var(--color-muted);
   background: transparent;
+}
+
+.ui-button--secondary:hover:not(:disabled) {
+  background: var(--color-surface);
+}
+
+.ui-button--ghost:hover:not(:disabled),
+.ui-menu__trigger:hover:not(:disabled) {
+  color: var(--color-text);
+  background: var(--color-surface-hover);
+}
+
+.ui-button--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
 }
 
 .ui-button--danger,
@@ -398,16 +413,17 @@ input:disabled {
   display: grid;
   place-items: center;
   min-height: var(--gallery-target-row-height);
+  gap: var(--space-1);
   padding: var(--space-4);
   color: var(--color-muted);
   text-align: center;
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-md);
 }
 
 .ui-empty-state h2 {
   margin: 0;
   color: var(--color-text);
+  font-size: var(--text-lg);
+  font-weight: 600;
 }
 
 .ui-skeleton {
@@ -779,11 +795,9 @@ input:disabled {
 
 .view-toolbar h2 {
   margin: 0;
-  font-family: var(--toolbar-title-font);
-  font-size: 0.8125rem;
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
   white-space: nowrap;
 }
 
@@ -834,10 +848,9 @@ input:disabled {
   min-height: var(--control-height-md);
   padding: 0 var(--space-4) 0 var(--space-2);
   color: var(--color-text);
-  background: var(--color-surface-hover);
-  border: var(--border-width) solid var(--color-border);
+  background: transparent;
+  border: var(--border-width) solid transparent;
   border-radius: var(--radius-sm);
-  box-shadow: inset 0 1px 0 var(--bevel-light), inset 0 -1px 0 var(--bevel-dark);
   font: inherit;
   font-size: 0.75rem;
   appearance: none;
@@ -848,7 +861,8 @@ input:disabled {
 }
 
 .view-toolbar .ui-select select:hover {
-  background-color: var(--color-surface);
+  background-color: var(--color-surface-hover);
+  border-color: var(--color-border);
 }
 
 .view-toolbar .ui-toggle {
@@ -859,17 +873,21 @@ input:disabled {
   min-height: var(--control-height-md);
   padding: 0 var(--space-2);
   color: var(--color-muted);
-  border: var(--border-width) solid var(--color-border);
+  border: var(--border-width) solid transparent;
   border-radius: var(--radius-sm);
-  box-shadow: inset 0 1px 0 var(--bevel-light), inset 0 -1px 0 var(--bevel-dark);
   cursor: pointer;
   font-size: 0.75rem;
 }
 
+.view-toolbar .ui-toggle:hover {
+  color: var(--color-text);
+  background: var(--color-surface-hover);
+}
+
 .view-toolbar .ui-toggle:has(input:checked) {
   color: var(--color-text);
-  background: var(--color-surface);
-  box-shadow: inset 0 1px 0 var(--bevel-dark), inset 0 -1px 0 var(--bevel-light);
+  background: var(--color-surface-hover);
+  border-color: var(--color-border);
 }
 
 .view-toolbar .ui-toggle input {
@@ -1061,7 +1079,30 @@ input:disabled {
 .settings-view__sections {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2);
+  gap: var(--space-1);
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+
+.settings-view__section-button {
+  min-height: var(--control-height-md);
+  margin-bottom: calc(var(--border-width) * -1);
+  padding: 0 var(--space-3);
+  color: var(--color-muted);
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+}
+
+.settings-view__section-button:hover:not(:disabled) {
+  color: var(--color-text);
+  background: var(--color-surface-hover);
+}
+
+.settings-view__section-button[aria-current="page"] {
+  color: var(--color-text);
+  background: transparent;
+  border-bottom-color: var(--color-accent);
 }
 
 .settings-view__general {

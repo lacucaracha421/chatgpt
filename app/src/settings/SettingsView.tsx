@@ -116,12 +116,12 @@ export function SettingsView({ restoring, onRestore, onExit }: SettingsViewProps
   }
 
   return <section className="settings-view" aria-label="설정" onKeyDown={(event) => { if (event.key === "Escape" && !pending) onExit(); }}>
-    <ViewToolbar title="설정" children={<p>라이브러리 폴더, 안전 설정과 단축키를 확인합니다.</p>} />
+    <ViewToolbar title="설정" />
     <nav className="settings-view__sections" aria-label="설정 구역">
-      <Button variant={section === "general" ? "primary" : "ghost"} onClick={() => setSection("general")}>일반 설정</Button>
-      <Button variant={section === "browser_extension" ? "primary" : "ghost"} onClick={() => setSection("browser_extension")}>브라우저 확장</Button>
-      <Button variant={section === "safety" ? "primary" : "ghost"} onClick={() => setSection("safety")}>안전</Button>
-      <Button variant={section === "shortcuts" ? "primary" : "ghost"} onClick={() => setSection("shortcuts")}>단축키·버튼 설명</Button>
+      <Button className="settings-view__section-button" variant="ghost" aria-current={section === "general" ? "page" : undefined} onClick={() => setSection("general")}>일반 설정</Button>
+      <Button className="settings-view__section-button" variant="ghost" aria-current={section === "browser_extension" ? "page" : undefined} onClick={() => setSection("browser_extension")}>브라우저 확장</Button>
+      <Button className="settings-view__section-button" variant="ghost" aria-current={section === "safety" ? "page" : undefined} onClick={() => setSection("safety")}>안전</Button>
+      <Button className="settings-view__section-button" variant="ghost" aria-current={section === "shortcuts" ? "page" : undefined} onClick={() => setSection("shortcuts")}>단축키·버튼 설명</Button>
     </nav>
     {section === "general" && (
       <div className="settings-view__general">
