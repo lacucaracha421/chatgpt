@@ -1,3 +1,11 @@
+npm.cmd run tauri dev
+
+gh auth login
+gh repo clone lacucaracha421/chatgpt
+
+syncthing
+<<유용
+
 Codex 수동 스킬 명령어
 =======================
 
