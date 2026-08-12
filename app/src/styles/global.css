@@ -433,9 +433,22 @@ input:disabled {
 }
 
 .classification-sidebar__tree-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: calc(100% - (2 * var(--space-1)));
+  padding: 0;
   margin: var(--space-3) var(--space-1) var(--space-1);
   color: var(--color-muted);
   font-size: 0.75rem;
+  text-align: left;
+  background: transparent;
+  border: 0;
+}
+
+.classification-sidebar__tree-heading svg {
+  width: 0.75rem;
+  height: 0.75rem;
 }
 
 .classification-sidebar__tree ul[role="group"] {

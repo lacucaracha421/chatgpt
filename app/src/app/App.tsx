@@ -20,7 +20,7 @@ import {
   selectLibraryFolder,
   type FolderPicker,
 } from "../library/LibrarySetup";
-import type { AssetSort, AssetSummary, AssetView, ClassificationEntry, IngestOutcome, LibraryGateway } from "../library/types";
+import type { AlbumEntry, AssetSort, AssetSummary, AssetView, ClassificationEntry, IngestOutcome, LibraryGateway } from "../library/types";
 import {
   loadUiPreferences,
   saveUiPreferences,
@@ -77,6 +77,7 @@ function LibraryScreen({
 function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: DropSubscriber; startAssetDrag: StartAssetDrag }) {
   const { gateway } = useLibrary();
   const [entries, setEntries] = useState<ClassificationEntry[]>([]);
+  const [albums, setAlbums] = useState<AlbumEntry[]>([]);
   const [view, setView] = useState<AssetView>({
     kind: "classification",
     classificationId: null,
@@ -108,6 +109,17 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
   }, []);
   const refreshClassifications = useCallback(async () => {
     setEntries(await gateway.listClassifications());
+  }, [gateway]);
+  const refreshAlbums = useCallback(async () => {
+    setAlbums(await gateway.listAlbums());
+  }, [gateway]);
+  const refreshSidebar = useCallback(async () => {
+    const [nextEntries, nextAlbums] = await Promise.all([
+      gateway.listClassifications(),
+      gateway.listAlbums(),
+    ]);
+    setEntries(nextEntries);
+    setAlbums(nextAlbums);
   }, [gateway]);
   const refreshReviewCount = useCallback(async () => {
     const page = await gateway.listSimilarityReviews({ after: null, limit: 1 });
@@ -144,8 +156,8 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
   useAutoDismiss(message, setMessage);
 
   useEffect(() => {
-    void refreshClassifications();
-  }, [refreshClassifications]);
+    void refreshSidebar();
+  }, [refreshSidebar]);
   useEffect(() => {
     void refreshReviewCount().catch((error) => setMessage(commandErrorMessage(error, "유사 검토 개수를 불러오지 못했습니다.")));
   }, [refreshReviewCount]);
@@ -338,7 +350,7 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
     setMaintenance("restore");
     try {
       await gateway.restoreMetadataBackup(backupId);
-      await refreshClassifications();
+      await refreshSidebar();
       setAssetRefresh((current) => current + 1);
       setMessage("복구가 완료되었습니다.");
     } finally {
@@ -353,16 +365,22 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
           sidebar={
             <ClassificationSidebar
               entries={entries}
+              albums={albums}
               view={view}
               expandedIds={preferences.expandedClassificationIds}
+              expandedAlbumIds={preferences.expandedAlbumIds}
               sidebarWidth={preferences.sidebarWidth}
               createClassificationRequest={createClassificationRequest}
               onViewChange={navigateView}
               onExpandedIdsChange={(expandedClassificationIds) =>
                 updatePreferences({ expandedClassificationIds })
               }
+              onExpandedAlbumIdsChange={(expandedAlbumIds) =>
+                updatePreferences({ expandedAlbumIds })
+              }
               onSidebarWidthChange={(sidebarWidth) => updatePreferences({ sidebarWidth })}
               onChanged={() => void refreshClassifications()}
+              onAlbumsChanged={() => void refreshAlbums()}
               reviewCount={reviewCount}
               dragTarget={dragTarget}
               onPointerDragStart={startPointerDrag}

@@ -22,13 +22,27 @@ function setup(update = vi.fn().mockResolvedValue(undefined)) {
   const onSaved = vi.fn();
   render(
     <LibraryProvider gateway={gateway}>
-      <ClassificationAppearanceDialog entry={entry} onClose={onClose} onSaved={onSaved} />
+      <ClassificationAppearanceDialog entry={{ ...entry, scope: "classification" }} onClose={onClose} onSaved={onSaved} />
     </LibraryProvider>,
   );
   return { update, onClose, onSaved };
 }
 
 describe("ClassificationAppearanceDialog", () => {
+  it("saves album appearance through the album command", async () => {
+    const user = userEvent.setup();
+    const updateAlbumAppearance = vi.fn().mockResolvedValue(undefined);
+    const gateway = { updateAlbumAppearance } as unknown as LibraryGateway;
+    render(
+      <LibraryProvider gateway={gateway}>
+        <ClassificationAppearanceDialog entry={{ ...entry, scope: "album" }} onClose={vi.fn()} onSaved={vi.fn()} />
+      </LibraryProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "저장" }));
+    expect(updateAlbumAppearance).toHaveBeenCalledWith("folder-1", "star", "blue");
+  });
+
   it("shows the current selection and preview", () => {
     setup();
 

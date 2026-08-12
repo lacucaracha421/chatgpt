@@ -1,5 +1,20 @@
 import type { ClassificationEntry } from "../library/types";
 
+export type TreeEntry = {
+  id: string;
+  name: string;
+  parentId: string | null;
+};
+
+export type TreeNode<T extends TreeEntry> = {
+  entry: T;
+  children: TreeNode<T>[];
+};
+
+export type Tree<T extends TreeEntry> = TreeNode<T>[] & {
+  hasOrphans: boolean;
+};
+
 export type ClassificationTreeNode = {
   entry: ClassificationEntry;
   children: ClassificationTreeNode[];
@@ -9,13 +24,11 @@ export type ClassificationTree = ClassificationTreeNode[] & {
   hasOrphans: boolean;
 };
 
-export function buildClassificationTree(
-  entries: ClassificationEntry[],
-): ClassificationTree {
-  const nodes = new Map<string, ClassificationTreeNode>(
+export function buildTree<T extends TreeEntry>(entries: T[]): Tree<T> {
+  const nodes = new Map<string, TreeNode<T>>(
     entries.map((entry) => [entry.id, { entry, children: [] }]),
   );
-  const roots: ClassificationTreeNode[] = [];
+  const roots: TreeNode<T>[] = [];
 
   for (const node of nodes.values()) {
     if (node.entry.parentId === null) {
@@ -26,7 +39,7 @@ export function buildClassificationTree(
   }
 
   const visible = new Set<string>();
-  const sort = (items: ClassificationTreeNode[]) => {
+  const sort = (items: TreeNode<T>[]) => {
     items.sort((left, right) =>
       left.entry.name.localeCompare(right.entry.name, "ko"),
     );
@@ -40,4 +53,8 @@ export function buildClassificationTree(
   return Object.assign(roots, {
     hasOrphans: visible.size !== entries.length,
   });
+}
+
+export function buildClassificationTree(entries: ClassificationEntry[]): ClassificationTree {
+  return buildTree(entries);
 }

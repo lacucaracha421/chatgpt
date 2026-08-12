@@ -2,7 +2,7 @@ import { BookOpenIcon, ChevronDownIcon, ChevronRightIcon, ClockIcon, FolderIcon,
 import { useLayoutEffect, useEffect, useRef, useState, type CSSProperties } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
 import { useLibrary } from "../library/LibraryContext";
-import type { AssetView, ClassificationEntry } from "../library/types";
+import type { AlbumEntry, AssetView, ClassificationEntry } from "../library/types";
 import { clampSidebarWidth } from "../layout/sidebarWidth";
 import { Button } from "../shared/ui/Button";
 import { ContextMenu } from "../shared/ui/ContextMenu";
@@ -12,21 +12,25 @@ import { Select } from "../shared/ui/Select";
 import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import type { ClassificationDropTarget, InternalDragPayload } from "../shared/interaction/pointerDrag";
-import { buildClassificationTree, type ClassificationTreeNode } from "./buildTree";
+import { buildTree, type TreeNode } from "./buildTree";
 import { ClassificationAppearanceDialog } from "./ClassificationAppearanceDialog";
 import { ClassificationIcon, classificationColor } from "./classificationAppearance";
 
 type ClassificationSidebarProps = {
   entries: ClassificationEntry[];
+  albums?: AlbumEntry[];
   view: AssetView;
   expandedIds: string[];
+  expandedAlbumIds?: string[];
   sidebarWidth: number;
   reviewCount: number;
   createClassificationRequest?: number;
   onViewChange: (view: AssetView) => void;
   onExpandedIdsChange: (ids: string[]) => void;
+  onExpandedAlbumIdsChange?: (ids: string[]) => void;
   onSidebarWidthChange: (width: number) => void;
   onChanged: () => void;
+  onAlbumsChanged?: () => void;
   dragTarget?: ClassificationDropTarget | null;
   onPointerDragStart?: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => void;
   onPointerDragMove?: (event: React.PointerEvent<HTMLElement>) => void;
@@ -34,18 +38,34 @@ type ClassificationSidebarProps = {
   onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void;
 };
 
+type SidebarTreeEntry = {
+  treeKind: "classification" | "album";
+  id: string;
+  name: string;
+  parentId: string | null;
+  iconKey: string | null;
+  colorKey: string | null;
+  kind: ClassificationEntry["kind"];
+};
+
+type SidebarTreeNode = TreeNode<SidebarTreeEntry>;
+
 type DialogState =
-  { type: "move" | "delete"; entry: ClassificationEntry };
+  { type: "move" | "delete"; entry: SidebarTreeEntry };
 
 type InlineEdit =
-  | { type: "create"; parentId: string | null; kind: "root" | "tag" }
-  | { type: "rename"; entry: ClassificationEntry };
+  | { type: "create"; treeKind: "classification" | "album"; parentId: string | null; kind: "root" | "tag" }
+  | { type: "rename"; entry: SidebarTreeEntry };
 
 export function ClassificationSidebar({
   entries,
+  albums = [],
   expandedIds,
+  expandedAlbumIds = [],
   onChanged,
+  onAlbumsChanged = onChanged,
   onExpandedIdsChange,
+  onExpandedAlbumIdsChange = () => undefined,
   onSidebarWidthChange,
   onViewChange,
   dragTarget,
@@ -59,23 +79,33 @@ export function ClassificationSidebar({
   createClassificationRequest = 0,
 }: ClassificationSidebarProps) {
   const { gateway } = useLibrary();
-  const tree = buildClassificationTree(entries);
+  const classificationEntries: SidebarTreeEntry[] = entries.map((entry) => ({ ...entry, treeKind: "classification" }));
+  const albumEntries: SidebarTreeEntry[] = albums.map((entry) => ({ ...entry, treeKind: "album", kind: "tag" }));
+  const tree = buildTree(classificationEntries);
+  const albumTree = buildTree(albumEntries);
   const visibleNodes = visibleTreeNodes(tree, expandedIds);
+  const visibleAlbumNodes = visibleTreeNodes(albumTree, expandedAlbumIds);
   const selected = view.kind === "classification" && view.classificationId
-    ? entries.find((entry) => entry.id === view.classificationId) ?? null
-    : null;
+    ? classificationEntries.find((entry) => entry.id === view.classificationId) ?? null
+    : view.kind === "album"
+      ? albumEntries.find((entry) => entry.id === view.albumId) ?? null
+      : null;
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState | null>(null);
-  const [appearanceEntry, setAppearanceEntry] = useState<ClassificationEntry | null>(null);
+  const [appearanceEntry, setAppearanceEntry] = useState<SidebarTreeEntry | null>(null);
   const [inlineEdit, setInlineEdit] = useState<InlineEdit | null>(null);
   const [name, setName] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
   const [parentId, setParentId] = useState("");
   const [message, setMessage] = useState<string | null>(null);
+  const [foldersOpen, setFoldersOpen] = useState(true);
+  const [albumsOpen, setAlbumsOpen] = useState(true);
   useAutoDismiss(message, setMessage);
   const resize = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
-  const activeRowId = nearestVisibleTreeRowId(focusedId, entries, visibleNodes);
+  const allEntries = [...classificationEntries, ...albumEntries];
+  const allVisibleNodes = [...visibleNodes, ...visibleAlbumNodes];
+  const activeRowId = nearestVisibleTreeRowId(focusedId, allEntries, allVisibleNodes);
 
   useLayoutEffect(() => {
     if (focusedId && activeRowId && focusedId !== activeRowId) {
@@ -88,10 +118,10 @@ export function ClassificationSidebar({
     setDialog(null);
   }
 
-  function completeMutation() {
+  function completeMutation(treeKind: SidebarTreeEntry["treeKind"]) {
     setMessage(null);
     closeDialog();
-    onChanged();
+    treeKind === "album" ? onAlbumsChanged() : onChanged();
   }
 
   function beginInlineEdit(edit: InlineEdit, initialName = "") {
@@ -100,21 +130,24 @@ export function ClassificationSidebar({
     setName(initialName);
   }
 
-  function openTopLevelCreate() {
-    beginInlineEdit({ type: "create", parentId: null, kind: "root" });
+  function openTopLevelCreate(treeKind: SidebarTreeEntry["treeKind"] = "classification") {
+    beginInlineEdit({ type: "create", treeKind, parentId: null, kind: treeKind === "album" ? "tag" : "root" });
   }
 
-  function openChildCreate(entry: ClassificationEntry) {
-    if (!expandedIds.includes(entry.id)) onExpandedIdsChange([...expandedIds, entry.id]);
-    beginInlineEdit({ type: "create", parentId: entry.id, kind: "tag" });
+  function openChildCreate(entry: SidebarTreeEntry) {
+    const expanded = entry.treeKind === "album" ? expandedAlbumIds : expandedIds;
+    const setExpanded = entry.treeKind === "album" ? onExpandedAlbumIdsChange : onExpandedIdsChange;
+    if (!expanded.includes(entry.id)) setExpanded([...expanded, entry.id]);
+    beginInlineEdit({ type: "create", treeKind: entry.treeKind, parentId: entry.id, kind: "tag" });
   }
 
-  function openRename(entry: ClassificationEntry) {
+  function openRename(entry: SidebarTreeEntry) {
     beginInlineEdit({ type: "rename", entry }, entry.name);
   }
 
-  function openDelete(entry: ClassificationEntry) {
-    if (entries.some((candidate) => candidate.parentId === entry.id)) {
+  function openDelete(entry: SidebarTreeEntry) {
+    const siblings = entry.treeKind === "album" ? albumEntries : classificationEntries;
+    if (siblings.some((candidate) => candidate.parentId === entry.id)) {
       setMessage("하위 폴더가 있어 삭제할 수 없습니다.");
       return;
     }
@@ -128,7 +161,7 @@ export function ClassificationSidebar({
   }
 
   useEffect(() => {
-    if (createClassificationRequest > 0) openTopLevelCreate();
+    if (createClassificationRequest > 0) openTopLevelCreate("classification");
   }, [createClassificationRequest]);
 
   async function saveInlineEdit() {
@@ -140,16 +173,18 @@ export function ClassificationSidebar({
     }
     try {
       if (inlineEdit.type === "create") {
-        await gateway.createClassification({
-          kind: inlineEdit.kind,
-          name: trimmedName,
-          parentId: inlineEdit.parentId,
-        });
+        if (inlineEdit.treeKind === "album") {
+          await gateway.createAlbum({ name: trimmedName, parentId: inlineEdit.parentId });
+        } else {
+          await gateway.createClassification({ kind: inlineEdit.kind, name: trimmedName, parentId: inlineEdit.parentId });
+        }
       } else {
-        await gateway.renameClassification(inlineEdit.entry.id, trimmedName);
+        if (inlineEdit.entry.treeKind === "album") await gateway.renameAlbum(inlineEdit.entry.id, trimmedName);
+        else await gateway.renameClassification(inlineEdit.entry.id, trimmedName);
       }
+      const changedKind = inlineEdit.type === "create" ? inlineEdit.treeKind : inlineEdit.entry.treeKind;
       cancelInlineEdit();
-      onChanged();
+      changedKind === "album" ? onAlbumsChanged() : onChanged();
     } catch (error) {
       setEditError(commandErrorMessage(error, "폴더를 변경하지 못했습니다."));
     }
@@ -158,9 +193,13 @@ export function ClassificationSidebar({
   async function move() {
     if (!dialog || dialog.type !== "move") return;
     try {
-      await gateway.moveClassification(dialog.entry.id, parentId || null);
-      if (parentId && !expandedIds.includes(parentId)) onExpandedIdsChange([...expandedIds, parentId]);
-      completeMutation();
+      const isAlbum = dialog.entry.treeKind === "album";
+      if (isAlbum) await gateway.moveAlbum(dialog.entry.id, parentId || null);
+      else await gateway.moveClassification(dialog.entry.id, parentId || null);
+      const expanded = isAlbum ? expandedAlbumIds : expandedIds;
+      const setExpanded = isAlbum ? onExpandedAlbumIdsChange : onExpandedIdsChange;
+      if (parentId && !expanded.includes(parentId)) setExpanded([...expanded, parentId]);
+      completeMutation(dialog.entry.treeKind);
     } catch (error) {
       setMessage(commandErrorMessage(error, "분류를 변경하지 못했습니다."));
     }
@@ -169,23 +208,29 @@ export function ClassificationSidebar({
   async function remove() {
     if (!dialog || dialog.type !== "delete") return;
     try {
-      await gateway.deleteClassification(dialog.entry.id);
+      const isAlbum = dialog.entry.treeKind === "album";
+      if (isAlbum) await gateway.deleteAlbum(dialog.entry.id);
+      else await gateway.deleteClassification(dialog.entry.id);
       setMessage(null);
       closeDialog();
-      onExpandedIdsChange(expandedIds.filter((id) => id !== dialog.entry.id));
-      onViewChange({ kind: "classification", classificationId: dialog.entry.parentId });
-      onChanged();
+      if (isAlbum) {
+        onExpandedAlbumIdsChange(expandedAlbumIds.filter((id) => id !== dialog.entry.id));
+        onViewChange(dialog.entry.parentId ? { kind: "album", albumId: dialog.entry.parentId } : { kind: "classification", classificationId: null });
+        onAlbumsChanged();
+      } else {
+        onExpandedIdsChange(expandedIds.filter((id) => id !== dialog.entry.id));
+        onViewChange({ kind: "classification", classificationId: dialog.entry.parentId });
+        onChanged();
+      }
     } catch (error) {
       setMessage(commandErrorMessage(error, "분류를 변경하지 못했습니다."));
     }
   }
 
-  function toggleExpanded(id: string) {
-    onExpandedIdsChange(
-      expandedIds.includes(id)
-        ? expandedIds.filter((expandedId) => expandedId !== id)
-        : [...expandedIds, id],
-    );
+  function toggleExpanded(entry: SidebarTreeEntry) {
+    const expanded = entry.treeKind === "album" ? expandedAlbumIds : expandedIds;
+    const setExpanded = entry.treeKind === "album" ? onExpandedAlbumIdsChange : onExpandedIdsChange;
+    setExpanded(expanded.includes(entry.id) ? expanded.filter((id) => id !== entry.id) : [...expanded, entry.id]);
   }
 
   function registerTreeRow(id: string, element: HTMLDivElement | null) {
@@ -206,7 +251,7 @@ export function ClassificationSidebar({
     const key = event.key.toLowerCase();
     if (key === "n" && event.ctrlKey && event.shiftKey && !event.altKey) {
       event.preventDefault();
-      openTopLevelCreate();
+      openTopLevelCreate("classification");
     } else if (key === "n" && event.altKey && !event.ctrlKey && selected) {
       event.preventDefault();
       openChildCreate(selected);
@@ -221,40 +266,42 @@ export function ClassificationSidebar({
 
   function handleTreeKeyDown(
     event: React.KeyboardEvent<HTMLDivElement>,
-    node: ClassificationTreeNode,
+    node: SidebarTreeNode,
   ) {
-    const index = visibleNodes.indexOf(node);
+    const scopedVisibleNodes = node.entry.treeKind === "album" ? visibleAlbumNodes : visibleNodes;
+    const scopedExpandedIds = node.entry.treeKind === "album" ? expandedAlbumIds : expandedIds;
+    const index = scopedVisibleNodes.indexOf(node);
     const parentId = node.entry.parentId;
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();
-        focusTreeRow(visibleNodes[Math.min(index + 1, visibleNodes.length - 1)]?.entry.id ?? node.entry.id);
+        focusTreeRow(scopedVisibleNodes[Math.min(index + 1, scopedVisibleNodes.length - 1)]?.entry.id ?? node.entry.id);
         break;
       case "ArrowUp":
         event.preventDefault();
-        focusTreeRow(visibleNodes[Math.max(index - 1, 0)]?.entry.id ?? node.entry.id);
+        focusTreeRow(scopedVisibleNodes[Math.max(index - 1, 0)]?.entry.id ?? node.entry.id);
         break;
       case "Home":
         event.preventDefault();
-        focusTreeRow(visibleNodes[0]?.entry.id ?? node.entry.id);
+        focusTreeRow(scopedVisibleNodes[0]?.entry.id ?? node.entry.id);
         break;
       case "End":
         event.preventDefault();
-        focusTreeRow(visibleNodes[visibleNodes.length - 1]?.entry.id ?? node.entry.id);
+        focusTreeRow(scopedVisibleNodes[scopedVisibleNodes.length - 1]?.entry.id ?? node.entry.id);
         break;
       case "ArrowRight":
         if (node.children.length === 0) return;
         event.preventDefault();
-        if (expandedIds.includes(node.entry.id)) {
+        if (scopedExpandedIds.includes(node.entry.id)) {
           focusTreeRow(node.children[0].entry.id);
         } else {
-          toggleExpanded(node.entry.id);
+          toggleExpanded(node.entry);
         }
         break;
       case "ArrowLeft":
-        if (node.children.length > 0 && expandedIds.includes(node.entry.id)) {
+        if (node.children.length > 0 && scopedExpandedIds.includes(node.entry.id)) {
           event.preventDefault();
-          toggleExpanded(node.entry.id);
+          toggleExpanded(node.entry);
         } else if (parentId) {
           event.preventDefault();
           focusTreeRow(parentId);
@@ -263,7 +310,7 @@ export function ClassificationSidebar({
       case "Enter":
       case " ":
         event.preventDefault();
-        onViewChange({ kind: "classification", classificationId: node.entry.id });
+        onViewChange(node.entry.treeKind === "album" ? { kind: "album", albumId: node.entry.id } : { kind: "classification", classificationId: node.entry.id });
         break;
     }
   }
@@ -291,7 +338,7 @@ export function ClassificationSidebar({
     <aside className="classification-sidebar" aria-label="분류" style={{ width: sidebarWidth }} onKeyDown={handleSidebarKeyDown}>
       <div className="classification-sidebar__heading" data-tauri-drag-region>
         <h2>분류</h2>
-        <Button type="button" size="icon" variant="ghost" aria-label="새 폴더" onClick={openTopLevelCreate}>
+        <Button type="button" size="icon" variant="ghost" aria-label="새 폴더" onClick={() => openTopLevelCreate("classification")}>
           <PlusIcon aria-hidden="true" />
         </Button>
       </div>
@@ -304,9 +351,12 @@ export function ClassificationSidebar({
         <QuickViewButton icon={<BookOpenIcon aria-hidden="true" />} label="망가" selected={view.kind === "manga"} onClick={() => onViewChange({ kind: "manga" })} />
       </nav>
       {tree.hasOrphans && <p className="classification-sidebar__warning" role="alert">연결되지 않은 분류는 숨겨집니다.</p>}
-      <p className="classification-sidebar__tree-heading">폴더 ({tree.length})</p>
-      <ContextMenu items={[{ id: "create-root", label: "새 폴더", onSelect: openTopLevelCreate }]}>
-        <ul className="classification-sidebar__tree" role="tree">
+      <button type="button" className="classification-sidebar__tree-heading" aria-expanded={foldersOpen} aria-label={`폴더 ${foldersOpen ? "접기" : "펼치기"}`} onClick={() => setFoldersOpen((open) => !open)}>
+        {foldersOpen ? <ChevronDownIcon aria-hidden="true" /> : <ChevronRightIcon aria-hidden="true" />}
+        <span>폴더 ({tree.length})</span>
+      </button>
+      <ContextMenu items={[{ id: "create-root", label: "새 폴더", onSelect: () => openTopLevelCreate("classification") }]}>
+        <ul className="classification-sidebar__tree" role="tree" aria-label="폴더" hidden={!foldersOpen}>
           {tree.map((node) => (
             <TreeItem
               key={node.entry.id}
@@ -337,7 +387,44 @@ export function ClassificationSidebar({
               onPointerDragCancel={onPointerDragCancel}
             />
           ))}
-          {inlineEdit?.type === "create" && inlineEdit.parentId === null && (
+          {inlineEdit?.type === "create" && inlineEdit.treeKind === "classification" && inlineEdit.parentId === null && (
+            <InlineFolderEditor name={name} error={editError} onNameChange={(nextName) => { setName(nextName); setEditError(null); }} onSave={() => void saveInlineEdit()} onCancel={cancelInlineEdit} />
+          )}
+        </ul>
+      </ContextMenu>
+      {albumTree.hasOrphans && <p className="classification-sidebar__warning" role="alert">연결되지 않은 앨범을 숨겼습니다.</p>}
+      <button type="button" className="classification-sidebar__tree-heading" aria-expanded={albumsOpen} aria-label={`앨범 ${albumsOpen ? "접기" : "펼치기"}`} onClick={() => setAlbumsOpen((open) => !open)}>
+        {albumsOpen ? <ChevronDownIcon aria-hidden="true" /> : <ChevronRightIcon aria-hidden="true" />}
+        <span>앨범 ({albumTree.length})</span>
+      </button>
+      <ContextMenu items={[{ id: "create-album", label: "새 앨범", onSelect: () => openTopLevelCreate("album") }]}>
+        <ul className="classification-sidebar__tree" role="tree" aria-label="앨범" hidden={!albumsOpen}>
+          {albumTree.map((node) => (
+            <TreeItem
+              key={node.entry.id}
+              node={node}
+              view={view}
+              expandedIds={expandedAlbumIds}
+              activeRowId={activeRowId}
+              inlineEdit={inlineEdit}
+              editName={name}
+              editError={editError}
+              onViewChange={onViewChange}
+              onToggleExpanded={toggleExpanded}
+              onRowFocus={setFocusedId}
+              onRowKeyDown={handleTreeKeyDown}
+              registerTreeRow={registerTreeRow}
+              onCreateChild={openChildCreate}
+              onRename={openRename}
+              onAppearance={setAppearanceEntry}
+              onEditNameChange={(nextName) => { setName(nextName); setEditError(null); }}
+              onEditSave={() => void saveInlineEdit()}
+              onEditCancel={cancelInlineEdit}
+              onMove={(entry) => { setParentId(entry.parentId ?? ""); setDialog({ type: "move", entry }); }}
+              onDelete={openDelete}
+            />
+          ))}
+          {inlineEdit?.type === "create" && inlineEdit.treeKind === "album" && inlineEdit.parentId === null && (
             <InlineFolderEditor name={name} error={editError} onNameChange={(nextName) => { setName(nextName); setEditError(null); }} onSave={() => void saveInlineEdit()} onCancel={cancelInlineEdit} />
           )}
         </ul>
@@ -358,30 +445,32 @@ export function ClassificationSidebar({
       />
       {message && <Toast>{message}</Toast>}
       <ClassificationAppearanceDialog
-        entry={appearanceEntry}
+        entry={appearanceEntry ? { ...appearanceEntry, scope: appearanceEntry.treeKind } : null}
         onClose={() => setAppearanceEntry(null)}
         onSaved={() => {
           setAppearanceEntry(null);
-          onChanged();
+          appearanceEntry?.treeKind === "album" ? onAlbumsChanged() : onChanged();
         }}
       />
       {dialog?.type === "move" && (
-        <Dialog open title="폴더 이동" onClose={closeDialog}>
+        <Dialog open title={dialog.entry.treeKind === "album" ? "앨범 이동" : "폴더 이동"} onClose={closeDialog}>
           <form className="classification-sidebar__form" onSubmit={(event) => { event.preventDefault(); void move(); }}>
-            <Select label="상위 폴더" value={parentId} onChange={(event) => setParentId(event.target.value)}>
-              {moveParents(dialog.entry, entries).map((parent) => <option key={parent?.id ?? "root"} value={parent?.id ?? ""}>{parent?.name ?? "최상위"}</option>)}
+            <Select label={dialog.entry.treeKind === "album" ? "상위 앨범" : "상위 폴더"} value={parentId} onChange={(event) => setParentId(event.target.value)}>
+              {moveParents(dialog.entry, dialog.entry.treeKind === "album" ? albumEntries : classificationEntries).map((parent) => <option key={parent?.id ?? "root"} value={parent?.id ?? ""}>{parent?.name ?? "최상위"}</option>)}
             </Select>
             <DialogActions onClose={closeDialog} submitLabel="이동" />
           </form>
         </Dialog>
       )}
       {dialog?.type === "delete" && (
-        <Dialog open title="폴더 삭제" onClose={closeDialog}>
+        <Dialog open title={dialog.entry.treeKind === "album" ? "앨범 삭제" : "폴더 삭제"} onClose={closeDialog}>
           <div className="classification-sidebar__form">
-            <p>{dialog.entry.name} 폴더를 삭제할까요?</p>
-            <p>{dialog.entry.parentId
-              ? `이 폴더의 자산은 ${entries.find((entry) => entry.id === dialog.entry.parentId)?.name ?? "상위"} 폴더로 이동합니다.`
-              : "자산은 보존되고 이 폴더 연결만 제거됩니다."}</p>
+            <p>{dialog.entry.name} {dialog.entry.treeKind === "album" ? "앨범" : "폴더"}을 삭제할까요?</p>
+            <p>{dialog.entry.treeKind === "album"
+              ? "앨범 연결만 제거되며 원본 파일과 일반 폴더는 유지됩니다."
+              : dialog.entry.parentId
+                ? `이 폴더의 자산은 ${entries.find((entry) => entry.id === dialog.entry.parentId)?.name ?? "상위"} 폴더로 이동합니다.`
+                : "자산은 보존되고 이 폴더 연결만 제거됩니다."}</p>
             <div className="ui-dialog__actions">
               <Button type="button" onClick={closeDialog}>취소</Button>
               <Button type="button" variant="danger" onClick={() => void remove()}>삭제</Button>
@@ -403,18 +492,18 @@ function TreeItem({ activeRowId, editError, editName, expandedIds, inlineEdit, n
   editName: string;
   expandedIds: string[];
   inlineEdit: InlineEdit | null;
-  node: ClassificationTreeNode;
-  onAppearance: (entry: ClassificationEntry) => void;
-  onCreateChild: (entry: ClassificationEntry) => void;
-  onDelete: (entry: ClassificationEntry) => void;
+  node: SidebarTreeNode;
+  onAppearance: (entry: SidebarTreeEntry) => void;
+  onCreateChild: (entry: SidebarTreeEntry) => void;
+  onDelete: (entry: SidebarTreeEntry) => void;
   onEditCancel: () => void;
   onEditNameChange: (name: string) => void;
   onEditSave: () => void;
-  onMove: (entry: ClassificationEntry) => void;
-  onRename: (entry: ClassificationEntry) => void;
+  onMove: (entry: SidebarTreeEntry) => void;
+  onRename: (entry: SidebarTreeEntry) => void;
   onRowFocus: (id: string) => void;
-  onRowKeyDown: (event: React.KeyboardEvent<HTMLDivElement>, node: ClassificationTreeNode) => void;
-  onToggleExpanded: (id: string) => void;
+  onRowKeyDown: (event: React.KeyboardEvent<HTMLDivElement>, node: SidebarTreeNode) => void;
+  onToggleExpanded: (entry: SidebarTreeEntry) => void;
   onViewChange: (view: AssetView) => void;
   registerTreeRow: (id: string, element: HTMLDivElement | null) => void;
   view: AssetView;
@@ -427,17 +516,19 @@ function TreeItem({ activeRowId, editError, editName, expandedIds, inlineEdit, n
   const rowRef = useRef<HTMLDivElement>(null);
   const hasChildren = node.children.length > 0;
   const expanded = expandedIds.includes(node.entry.id);
-  const selected = view.kind === "classification" && view.classificationId === node.entry.id;
+  const selected = node.entry.treeKind === "album"
+    ? view.kind === "album" && view.albumId === node.entry.id
+    : view.kind === "classification" && view.classificationId === node.entry.id;
   const editingName = inlineEdit?.type === "rename" && inlineEdit.entry.id === node.entry.id;
-  const creatingChild = inlineEdit?.type === "create" && inlineEdit.parentId === node.entry.id;
+  const creatingChild = inlineEdit?.type === "create" && inlineEdit.treeKind === node.entry.treeKind && inlineEdit.parentId === node.entry.id;
   const actions: MenuItem[] = [
-    { id: "create-child", label: "하위 폴더 만들기", onSelect: () => onCreateChild(node.entry) },
+    { id: "create-child", label: node.entry.treeKind === "album" ? "하위 앨범 만들기" : "하위 폴더 만들기", onSelect: () => onCreateChild(node.entry) },
     { id: "rename", label: "이름 변경", onSelect: () => onRename(node.entry) },
     { id: "appearance", label: "아이콘 및 색상", onSelect: () => onAppearance(node.entry) },
     {
       id: "move",
-      label: node.entry.kind === "root" ? "이동 — 최상위 폴더" : "폴더 이동",
-      disabled: node.entry.kind === "root",
+      label: node.entry.treeKind === "album" ? "앨범 이동" : node.entry.kind === "root" ? "이동 — 최상위 폴더" : "폴더 이동",
+      disabled: node.entry.treeKind === "classification" && node.entry.kind === "root",
       onSelect: () => onMove(node.entry),
     },
     {
@@ -458,7 +549,8 @@ function TreeItem({ activeRowId, editError, editName, expandedIds, inlineEdit, n
             registerTreeRow(node.entry.id, element);
           }}
           className="classification-sidebar__tree-row"
-          data-classification-id={node.entry.id}
+          data-classification-id={node.entry.treeKind === "classification" ? node.entry.id : undefined}
+          data-album-id={node.entry.treeKind === "album" ? node.entry.id : undefined}
           data-drop-state={dragTarget?.entryId === node.entry.id ? (dragTarget.valid ? "valid" : "invalid") : undefined}
           data-drop-position={dragTarget?.entryId === node.entry.id ? dragTarget.position : undefined}
           role="treeitem"
@@ -466,7 +558,7 @@ function TreeItem({ activeRowId, editError, editName, expandedIds, inlineEdit, n
           aria-selected={selected}
           aria-expanded={hasChildren ? expanded : undefined}
           tabIndex={node.entry.id === activeRowId ? 0 : -1}
-          onClick={() => onViewChange({ kind: "classification", classificationId: node.entry.id })}
+          onClick={() => onViewChange(node.entry.treeKind === "album" ? { kind: "album", albumId: node.entry.id } : { kind: "classification", classificationId: node.entry.id })}
           onFocus={() => onRowFocus(node.entry.id)}
           onKeyDown={(event) => {
             if ((event.key === "F10" && event.shiftKey) || event.key === "ContextMenu") {
@@ -482,13 +574,13 @@ function TreeItem({ activeRowId, editError, editName, expandedIds, inlineEdit, n
             }
             onRowKeyDown(event, node);
           }}
-          onPointerDown={(event) => { if (event.button === 0 && !(event.target as HTMLElement).closest("button")) onPointerDragStart?.({ kind: "classification", entryId: node.entry.id }, event); }}
+          onPointerDown={(event) => { if (node.entry.treeKind === "classification" && event.button === 0 && !(event.target as HTMLElement).closest("button")) onPointerDragStart?.({ kind: "classification", entryId: node.entry.id }, event); }}
           onPointerMove={onPointerDragMove}
           onPointerUp={onPointerDragEnd}
           onPointerCancel={onPointerDragCancel}
         >
           {hasChildren ? (
-            <Button type="button" size="icon" variant="ghost" aria-label={`${node.entry.name} ${expanded ? "접기" : "펼치기"}`} onClick={(event) => { event.stopPropagation(); onToggleExpanded(node.entry.id); }} onKeyDown={(event) => event.stopPropagation()}>
+            <Button type="button" size="icon" variant="ghost" aria-label={`${node.entry.name} ${expanded ? "접기" : "펼치기"}`} onClick={(event) => { event.stopPropagation(); onToggleExpanded(node.entry); }} onKeyDown={(event) => event.stopPropagation()}>
               {expanded ? <ChevronDownIcon aria-hidden="true" /> : <ChevronRightIcon aria-hidden="true" />}
             </Button>
           ) : <span className="classification-sidebar__tree-spacer" aria-hidden="true" />}
@@ -563,11 +655,11 @@ function InlineFolderInput({ error, name, onCancel, onNameChange, onSave }: {
 }
 
 function visibleTreeNodes(
-  nodes: ClassificationTreeNode[],
+  nodes: SidebarTreeNode[],
   expandedIds: string[],
-): ClassificationTreeNode[] {
-  const visible: ClassificationTreeNode[] = [];
-  const append = (node: ClassificationTreeNode) => {
+): SidebarTreeNode[] {
+  const visible: SidebarTreeNode[] = [];
+  const append = (node: SidebarTreeNode) => {
     visible.push(node);
     if (expandedIds.includes(node.entry.id)) {
       node.children.forEach(append);
@@ -579,8 +671,8 @@ function visibleTreeNodes(
 
 function nearestVisibleTreeRowId(
   focusedId: string | null,
-  entries: ClassificationEntry[],
-  visibleNodes: ClassificationTreeNode[],
+  entries: SidebarTreeEntry[],
+  visibleNodes: SidebarTreeNode[],
 ): string | null {
   const visibleIds = new Set(visibleNodes.map((node) => node.entry.id));
   if (focusedId && visibleIds.has(focusedId)) return focusedId;
@@ -596,7 +688,10 @@ function DialogActions({ onClose, submitLabel }: { onClose: () => void; submitLa
   return <div className="ui-dialog__actions"><Button type="button" onClick={onClose}>취소</Button><Button type="submit">{submitLabel}</Button></div>;
 }
 
-function moveParents(entry: ClassificationEntry, entries: ClassificationEntry[]): Array<ClassificationEntry | null> {
+function moveParents(entry: SidebarTreeEntry, entries: SidebarTreeEntry[]): Array<SidebarTreeEntry | null> {
+  if (entry.treeKind === "album") {
+    return [null, ...entries.filter((candidate) => candidate.id !== entry.id && !isDescendant(candidate.id, entry.id, entries))];
+  }
   if (entry.kind === "root") return [null];
   const allowedKinds = entry.kind === "work" ? ["root"] : ["root", "work", "tag"];
   return entries.filter((candidate) =>
@@ -606,7 +701,7 @@ function moveParents(entry: ClassificationEntry, entries: ClassificationEntry[])
   );
 }
 
-function isDescendant(candidateId: string, ancestorId: string, entries: ClassificationEntry[]): boolean {
+function isDescendant(candidateId: string, ancestorId: string, entries: SidebarTreeEntry[]): boolean {
   let current = entries.find((entry) => entry.id === candidateId);
   while (current?.parentId) {
     if (current.parentId === ancestorId) return true;

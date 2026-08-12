@@ -12,7 +12,7 @@ import {
 } from "./classificationAppearance";
 
 type ClassificationAppearanceDialogProps = {
-  entry: ClassificationEntry | null;
+  entry: (Pick<ClassificationEntry, "id" | "name" | "kind" | "iconKey" | "colorKey"> & { scope: "classification" | "album" }) | null;
   onClose: () => void;
   onSaved: () => void;
 };
@@ -41,7 +41,8 @@ export function ClassificationAppearanceDialog({
     setSaving(true);
     setError(null);
     try {
-      await gateway.updateClassificationAppearance(entry!.id, iconKey, colorKey);
+      if (entry!.scope === "album") await gateway.updateAlbumAppearance(entry!.id, iconKey, colorKey);
+      else await gateway.updateClassificationAppearance(entry!.id, iconKey, colorKey);
       onSaved();
     } catch (saveError) {
       setError(commandErrorMessage(saveError, "폴더 모양을 저장하지 못했습니다."));

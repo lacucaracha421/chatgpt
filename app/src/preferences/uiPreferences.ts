@@ -7,6 +7,7 @@ export type UiPreferences = {
   metadataVisible: boolean;
   sidebarWidth: number;
   expandedClassificationIds: string[];
+  expandedAlbumIds: string[];
   assetSort: AssetSort;
   thumbnailRowHeight: number;
 };
@@ -15,6 +16,7 @@ export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   metadataVisible: true,
   sidebarWidth: 208,
   expandedClassificationIds: [],
+  expandedAlbumIds: [],
   assetSort: "newest",
   thumbnailRowHeight: 180,
 };
@@ -43,6 +45,9 @@ export function loadUiPreferences(storage: Storage = localStorage): UiPreference
     expandedClassificationIds: Array.isArray(value.expandedClassificationIds)
       ? [...new Set(value.expandedClassificationIds.filter(isString))]
       : DEFAULT_UI_PREFERENCES.expandedClassificationIds,
+    expandedAlbumIds: Array.isArray(value.expandedAlbumIds)
+      ? [...new Set(value.expandedAlbumIds.filter(isString))]
+      : DEFAULT_UI_PREFERENCES.expandedAlbumIds,
     assetSort: isAssetSort(value.assetSort)
       ? value.assetSort
       : DEFAULT_UI_PREFERENCES.assetSort,

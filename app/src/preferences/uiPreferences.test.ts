@@ -32,6 +32,7 @@ describe("UI preferences", () => {
       metadataVisible: false,
       sidebarWidth: 240,
       expandedClassificationIds: ["a"],
+      expandedAlbumIds: ["album-a"],
       assetSort: "oldest" as const,
       thumbnailRowHeight: 220,
     };
@@ -64,6 +65,7 @@ describe("UI preferences", () => {
       metadataVisible: false,
       sidebarWidth: 240,
       expandedClassificationIds: ["a"],
+      expandedAlbumIds: [],
       assetSort: "newest",
       thumbnailRowHeight: 180,
     });
@@ -85,6 +87,7 @@ describe("UI preferences", () => {
       metadataVisible: false,
       sidebarWidth: 320,
       expandedClassificationIds: ["a"],
+      expandedAlbumIds: [],
       assetSort: "random",
       thumbnailRowHeight: 180,
     });

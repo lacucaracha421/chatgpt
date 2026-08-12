@@ -121,6 +121,45 @@ describe("buildClassificationTree", () => {
 });
 
 describe("ClassificationSidebar", () => {
+  it("shows a nested album section and selects an album", async () => {
+    const user = userEvent.setup();
+    const onViewChange = vi.fn();
+    const fixtureGateway = gateway();
+    render(
+      <LibraryProvider gateway={fixtureGateway}>
+        <ClassificationSidebar
+          entries={entries}
+          albums={[
+            { id: "album-root", name: "표지", parentId: null, iconKey: null, colorKey: null },
+            { id: "album-child", name: "게임 표지", parentId: "album-root", iconKey: null, colorKey: null },
+          ]}
+          view={{ kind: "classification", classificationId: null }}
+          expandedIds={[]}
+          expandedAlbumIds={["album-root"]}
+          sidebarWidth={232}
+          reviewCount={0}
+          onViewChange={onViewChange}
+          onExpandedIdsChange={vi.fn()}
+          onExpandedAlbumIdsChange={vi.fn()}
+          onSidebarWidthChange={vi.fn()}
+          onChanged={vi.fn()}
+          onAlbumsChanged={vi.fn()}
+        />
+      </LibraryProvider>,
+    );
+
+    expect(screen.getByText("앨범 (1)")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "앨범 접기" }));
+    expect(screen.queryByRole("treeitem", { name: "표지" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "앨범 펼치기" }));
+    await user.click(screen.getByRole("treeitem", { name: "게임 표지" }));
+    expect(onViewChange).toHaveBeenCalledWith({ kind: "album", albumId: "album-child" });
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: "표지" }));
+    await user.click(screen.getByRole("menuitem", { name: "하위 앨범 만들기" }));
+    await user.type(screen.getByRole("textbox", { name: "폴더 이름" }), "캐릭터");
+    await user.keyboard("{Enter}");
+    expect(fixtureGateway.createAlbum).toHaveBeenCalledWith({ name: "캐릭터", parentId: "album-root" });
+  });
   beforeEach(() => {
   });
 
@@ -269,7 +308,7 @@ describe("ClassificationSidebar", () => {
     const fixtureGateway = gateway();
     renderSidebar(fixtureGateway);
 
-    fireEvent.contextMenu(screen.getByRole("tree"), { clientX: 20, clientY: 20 });
+    fireEvent.contextMenu(screen.getByRole("tree", { name: "폴더" }), { clientX: 20, clientY: 20 });
     await user.click(screen.getByRole("menuitem", { name: "새 폴더" }));
     await user.type(screen.getByRole("textbox", { name: "폴더 이름" }), "Comics{Enter}");
     await waitFor(() => expect(fixtureGateway.createClassification).toHaveBeenCalledWith({ kind: "root", name: "Comics", parentId: null }));

@@ -174,6 +174,20 @@ describe("App", () => {
     expect(screen.getByRole("main", { name: "라이브러리 작업 공간" })).toBeInTheDocument();
   });
 
+  it("loads albums with folders when the workspace opens", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listAlbums).mockResolvedValue([
+      { id: "album-cover", name: "표지", parentId: null, iconKey: null, colorKey: null },
+    ]);
+
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+
+    expect(await screen.findByRole("treeitem", { name: "표지" })).toBeVisible();
+    expect(libraryGateway.listClassifications).toHaveBeenCalledOnce();
+    expect(libraryGateway.listAlbums).toHaveBeenCalledOnce();
+  });
+
   it("runs daily backup once and then purges expired trash after opening a library", async () => {
     localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
     const libraryGateway = gateway();
@@ -382,6 +396,7 @@ describe("App", () => {
         metadataVisible: true,
         sidebarWidth: 272,
         expandedClassificationIds: [],
+        expandedAlbumIds: [],
         assetSort: "random",
         thumbnailRowHeight: 180,
       }),
