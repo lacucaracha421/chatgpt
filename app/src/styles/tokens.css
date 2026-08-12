@@ -40,6 +40,7 @@
   --selection-indicator-width: 2px;
   --classification-branch-indent: 16px;
   --classification-connector-mix: 55%;
+  --z-floating-menu: 1200;
   --video-progress-height: 6px;
   --video-overlay-bg: rgba(7, 10, 15, 0.72);
   --shadow-floating: 0 8px 24px var(--color-overlay);
