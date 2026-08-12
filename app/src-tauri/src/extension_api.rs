@@ -15,7 +15,7 @@ use uuid::Uuid;
 use crate::{
     commands::AppState,
     library::{
-        models::{AssetClassificationPatch, IngestMediaRequest, IngestOutcome},
+        models::{IngestMediaRequest, IngestOutcome},
         Library, MAX_IMAGE_BYTES,
     },
 };
@@ -482,8 +482,8 @@ fn validate_url(value: &str, allowed_hosts: &[&str]) -> Result<url::Url, ()> {
 }
 
 fn finish_ingestion(
-    library: &Library,
-    classification_id: &str,
+    _library: &Library,
+    _classification_id: &str,
     outcome: IngestOutcome,
 ) -> Result<XIngestionResponse, ApiError> {
     match outcome {
@@ -497,23 +497,14 @@ fn finish_ingestion(
             asset_id: None,
             review_id: Some(review_id),
         }),
-        IngestOutcome::ExactDuplicate { existing_asset_id } => {
-            let already_classified = library
-                .get_asset_classifications(&existing_asset_id)
-                .map_err(|_| ApiError::Internal)?
-                .iter()
-                .any(|entry| entry.id == classification_id);
-            let status = if already_classified {
-                IngestionStatus::DuplicateUnchanged
-            } else {
-                library
-                    .patch_asset_classifications(AssetClassificationPatch {
-                        asset_ids: vec![existing_asset_id.clone()],
-                        add_classification_ids: vec![classification_id.to_owned()],
-                        remove_classification_ids: Vec::new(),
-                    })
-                    .map_err(|_| ApiError::Internal)?;
+        IngestOutcome::ExactDuplicate {
+            existing_asset_id,
+            classification_changed,
+        } => {
+            let status = if classification_changed {
                 IngestionStatus::DuplicateTagged
+            } else {
+                IngestionStatus::DuplicateUnchanged
             };
             Ok(XIngestionResponse {
                 status,
@@ -833,7 +824,7 @@ mod tests {
     }
 
     #[test]
-    fn ingestion_adds_then_classifies_exact_duplicates_without_copying_again() {
+    fn ingestion_moves_exact_duplicates_without_copying_again() {
         let root = tempfile::tempdir().unwrap();
         let library = Library::open(root.path()).unwrap();
         let first_classification = create_root(&library, "First");
@@ -857,16 +848,13 @@ mod tests {
         let unchanged =
             ingest_x_image(&library, x_request(&second_classification.id), &downloader).unwrap();
         assert_eq!(unchanged.status, IngestionStatus::DuplicateUnchanged);
-        let mut ids: Vec<_> = library
+        let ids: Vec<_> = library
             .get_asset_classifications(&asset_id)
             .unwrap()
             .into_iter()
             .map(|entry| entry.id)
             .collect();
-        ids.sort();
-        let mut expected = vec![first_classification.id, second_classification.id];
-        expected.sort();
-        assert_eq!(ids, expected);
+        assert_eq!(ids, vec![second_classification.id]);
     }
 
     #[test]

@@ -207,7 +207,10 @@ pub struct PurgeSummary {
 )]
 pub enum IngestOutcome {
     Added { asset: AssetSummary },
-    ExactDuplicate { existing_asset_id: String },
+    ExactDuplicate {
+        existing_asset_id: String,
+        classification_changed: bool,
+    },
     ReviewPending { review_id: String },
 }
 
@@ -228,6 +231,13 @@ pub struct ClassificationEntry {
     pub parent_id: Option<String>,
     pub icon_key: Option<String>,
     pub color_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetAssetClassification {
+    pub asset_ids: Vec<String>,
+    pub classification_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -19,7 +19,8 @@ use windows_sys::Win32::Storage::FileSystem::{
 use super::{
     error::LibraryError,
     models::{
-        AssetSummary, IngestMediaRequest, IngestOutcome, MediaSummary, VideoPreparationState,
+        AssetSummary, IngestMediaRequest, IngestOutcome, MediaSummary, SetAssetClassification,
+        VideoPreparationState,
     },
     similarity::perceptual_hash_from_file,
     video_media::{probe_video, VideoProbe},
@@ -95,7 +96,7 @@ impl Library {
         let (format, width, height) = inspect_image(pending.owned_file(&staging_path)?)?;
         let existing_asset_id = self.find_asset_by_hash(&content_hash)?;
         if let Some(existing_asset_id) = existing_asset_id {
-            return Ok(IngestOutcome::ExactDuplicate { existing_asset_id });
+            return self.finish_exact_duplicate(existing_asset_id, request.classification_id);
         }
         run_after_duplicate_hook(self.root());
         let perceptual_hash = perceptual_hash_from_file(pending.owned_file(&staging_path)?)?;
@@ -166,7 +167,7 @@ impl Library {
         extension: &'static str,
     ) -> Result<IngestOutcome, LibraryError> {
         if let Some(existing_asset_id) = self.find_asset_by_hash(&content_hash)? {
-            return Ok(IngestOutcome::ExactDuplicate { existing_asset_id });
+            return self.finish_exact_duplicate(existing_asset_id, request.classification_id);
         }
         run_after_duplicate_hook(self.root());
         let probe = run_video_probe(&staging_path, extension)?;
@@ -203,6 +204,32 @@ impl Library {
 
         pending.commit();
         Ok(IngestOutcome::Added { asset })
+    }
+
+    fn finish_exact_duplicate(
+        &self,
+        existing_asset_id: String,
+        classification_id: Option<String>,
+    ) -> Result<IngestOutcome, LibraryError> {
+        let current_ids = self
+            .get_asset_classifications(&existing_asset_id)?
+            .into_iter()
+            .map(|entry| entry.id)
+            .collect::<Vec<_>>();
+        let classification_changed = match classification_id.as_deref() {
+            Some(requested_id) => current_ids.as_slice() != [requested_id],
+            None => !current_ids.is_empty(),
+        };
+        if classification_changed {
+            self.set_asset_classification(SetAssetClassification {
+                asset_ids: vec![existing_asset_id.clone()],
+                classification_id,
+            })?;
+        }
+        Ok(IngestOutcome::ExactDuplicate {
+            existing_asset_id,
+            classification_changed,
+        })
     }
 
     fn validate_classification(&self, classification_id: Option<&str>) -> Result<(), LibraryError> {
@@ -1144,6 +1171,7 @@ mod tests {
             second,
             IngestOutcome::ExactDuplicate {
                 existing_asset_id: asset.id,
+                classification_changed: false,
             }
         );
         let counts: (i64, i64) = library
@@ -1249,6 +1277,7 @@ mod tests {
             second,
             IngestOutcome::ExactDuplicate {
                 existing_asset_id: asset.id,
+                classification_changed: false,
             },
         );
     }
@@ -1335,7 +1364,8 @@ mod tests {
         assert_eq!(
             outcome,
             IngestOutcome::ExactDuplicate {
-                existing_asset_id: existing.id
+                existing_asset_id: existing.id,
+                classification_changed: false,
             }
         );
         assert_eq!(fixture.review_count(), 0);
@@ -1359,7 +1389,7 @@ mod tests {
     }
 
     #[test]
-    fn exact_duplicate_keeps_the_existing_asset_classifications() {
+    fn exact_duplicate_moves_the_existing_asset_to_the_requested_folder() {
         let fixture = IngestionFixture::new();
         let original_classification = fixture
             .library
@@ -1393,7 +1423,7 @@ mod tests {
             .library
             .ingest_media(IngestMediaRequest {
                 source_path: fixture.source.clone(),
-                classification_id: Some(duplicate_classification.id),
+                classification_id: Some(duplicate_classification.id.clone()),
                 source_url: Some("https://example.test/duplicate".into()),
             })
             .unwrap();
@@ -1402,6 +1432,7 @@ mod tests {
             outcome,
             IngestOutcome::ExactDuplicate {
                 existing_asset_id: asset.id.clone(),
+                classification_changed: true,
             },
         );
         assert_eq!(
@@ -1409,7 +1440,16 @@ mod tests {
                 .library
                 .get_asset_classifications(&asset.id)
                 .unwrap(),
-            vec![original_classification],
+            vec![duplicate_classification],
+        );
+        assert_eq!(
+            fixture
+                .library
+                .connection()
+                .unwrap()
+                .query_row("SELECT COUNT(*) FROM assets", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            1
         );
     }
 

@@ -150,6 +150,7 @@ fn image_can_be_ingested_classified_queried_and_deduplicated() {
         duplicate,
         IngestOutcome::ExactDuplicate {
             existing_asset_id: added.id.clone(),
+            classification_changed: true,
         },
     );
     assert_eq!(
@@ -157,10 +158,10 @@ fn image_can_be_ingested_classified_queried_and_deduplicated() {
             .library
             .get_asset_classifications(&added.id)
             .unwrap(),
-        classifications_before,
+        vec![duplicate_target.clone()],
     );
-    assert!(fixture.query(&duplicate_target.id).items.is_empty());
-    assert_eq!(fixture.query(&classification.root_id), page);
+    assert_eq!(fixture.query(&duplicate_target.id).items, vec![added.clone()]);
+    assert!(fixture.query(&classification.root_id).items.is_empty());
     assert!(fixture.source_path.is_file());
 }
 

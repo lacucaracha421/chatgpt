@@ -10,7 +10,7 @@ use crate::library::{
         AssetClassificationPatch, AssetCursor, AssetPage, AssetQuery, AssetSummary,
         ClassificationEntry, CreateClassification, IngestMediaRequest, IngestOutcome,
         LibrarySummary, MangaSeries, MetadataBackup, PurgeSummary, SimilarityDecisionRequest,
-        SimilarityIndexProgress, SimilarityReviewPage, TrashPage,
+        SetAssetClassification, SimilarityIndexProgress, SimilarityReviewPage, TrashPage,
         TrashPolicy, VideoPreparationProgress,
     },
     Library,
@@ -393,6 +393,16 @@ pub fn patch_asset_classifications(
 ) -> Result<(), CommandError> {
     current_required(state)?
         .patch_asset_classifications(patch)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn set_asset_classification(
+    request: SetAssetClassification,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    current_required(state)?
+        .set_asset_classification(request)
         .map_err(CommandError::from)
 }
 

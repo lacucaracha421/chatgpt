@@ -7,6 +7,7 @@ use super::{
     folder_appearance,
     models::{
         AssetClassificationPatch, ClassificationEntry, ClassificationKind, CreateClassification,
+        SetAssetClassification,
     },
     validated_asset_ids, Library,
 };
@@ -171,6 +172,35 @@ impl Library {
             &patch.add_classification_ids,
             &patch.remove_classification_ids,
         )
+    }
+
+    pub fn set_asset_classification(
+        &self,
+        request: SetAssetClassification,
+    ) -> Result<(), LibraryError> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let asset_ids = validated_asset_ids(&transaction, &request.asset_ids)?;
+        if let Some(classification_id) = request.classification_id.as_deref() {
+            if find_classification(&transaction, classification_id)?.is_none() {
+                return Err(LibraryError::ClassificationNotFound);
+            }
+        }
+        for asset_id in asset_ids {
+            transaction.execute(
+                "DELETE FROM asset_classifications WHERE asset_id = ?1",
+                [asset_id],
+            )?;
+            if let Some(classification_id) = request.classification_id.as_deref() {
+                transaction.execute(
+                    "INSERT INTO asset_classifications (asset_id, classification_id)
+                     VALUES (?1, ?2)",
+                    params![asset_id, classification_id],
+                )?;
+            }
+        }
+        transaction.commit()?;
+        Ok(())
     }
 
     pub fn get_asset_classifications(
@@ -368,7 +398,10 @@ mod tests {
 
     use crate::library::{
         error::LibraryError,
-        models::{AssetClassificationPatch, ClassificationKind, CreateClassification},
+        models::{
+            AssetClassificationPatch, ClassificationKind, CreateClassification,
+            SetAssetClassification,
+        },
         Library,
     };
 
@@ -841,6 +874,81 @@ mod tests {
                 .unwrap(),
             vec![fixture.parent_tag.clone()]
         );
+    }
+
+    #[test]
+    fn setting_a_folder_replaces_all_direct_links_atomically() {
+        let fixture = ClassificationFixture::new();
+        insert_asset(&fixture.library, "asset-a");
+        fixture
+            .library
+            .patch_asset_classifications(AssetClassificationPatch {
+                asset_ids: vec!["asset-a".into()],
+                add_classification_ids: vec![
+                    fixture.root.id.clone(),
+                    fixture.child_tag.id.clone(),
+                ],
+                remove_classification_ids: Vec::new(),
+            })
+            .unwrap();
+
+        fixture
+            .library
+            .set_asset_classification(SetAssetClassification {
+                asset_ids: vec!["asset-a".into()],
+                classification_id: Some(fixture.parent_tag.id.clone()),
+            })
+            .unwrap();
+
+        assert_eq!(
+            fixture
+                .library
+                .get_asset_classifications("asset-a")
+                .unwrap(),
+            vec![fixture.parent_tag]
+        );
+    }
+
+    #[test]
+    fn setting_a_folder_can_unsort_and_rejects_partial_batches() {
+        let fixture = ClassificationFixture::new();
+        insert_asset(&fixture.library, "asset-a");
+        fixture
+            .library
+            .set_asset_classification(SetAssetClassification {
+                asset_ids: vec!["asset-a".into()],
+                classification_id: Some(fixture.root.id.clone()),
+            })
+            .unwrap();
+
+        let error = fixture
+            .library
+            .set_asset_classification(SetAssetClassification {
+                asset_ids: vec!["asset-a".into(), "missing".into()],
+                classification_id: Some(fixture.child_tag.id),
+            })
+            .unwrap_err();
+        assert!(matches!(error, LibraryError::AssetNotFound));
+        assert_eq!(
+            fixture
+                .library
+                .get_asset_classifications("asset-a")
+                .unwrap(),
+            vec![fixture.root]
+        );
+
+        fixture
+            .library
+            .set_asset_classification(SetAssetClassification {
+                asset_ids: vec!["asset-a".into()],
+                classification_id: None,
+            })
+            .unwrap();
+        assert!(fixture
+            .library
+            .get_asset_classifications("asset-a")
+            .unwrap()
+            .is_empty());
     }
 
     fn insert_asset(library: &Library, id: &str) {

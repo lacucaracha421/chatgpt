@@ -68,6 +68,7 @@ pub fn run() {
             commands::set_asset_favorite,
             commands::set_assets_favorite,
             commands::patch_asset_classifications,
+            commands::set_asset_classification,
             commands::ingest_media,
             commands::prepare_pending_videos,
             commands::retry_video_preparation,
