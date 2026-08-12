@@ -1,10 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AlbumEntry,
+  AssetAlbumPatch,
   AssetPage,
-  AssetClassificationPatch,
   AssetQuery,
   AssetSummary,
   ClassificationEntry,
+  CreateAlbum,
   CreateClassification,
   ExtensionConnection,
   IngestMediaInput,
@@ -36,6 +38,13 @@ export const libraryGateway: LibraryGateway = {
   updateClassificationAppearance: (id, iconKey, colorKey) =>
     invoke("update_classification_appearance", { id, iconKey, colorKey }),
   deleteClassification: (id) => invoke("delete_classification", { id }),
+  listAlbums: () => invoke<AlbumEntry[]>("list_albums"),
+  createAlbum: (request: CreateAlbum) => invoke<AlbumEntry>("create_album", { request }),
+  renameAlbum: (id, name) => invoke("rename_album", { id, name }),
+  moveAlbum: (id, parentId) => invoke("move_album", { id, parentId }),
+  updateAlbumAppearance: (id, iconKey, colorKey) =>
+    invoke("update_album_appearance", { id, iconKey, colorKey }),
+  deleteAlbum: (id) => invoke("delete_album", { id }),
   listAssets: (query: AssetQuery) =>
     invoke<AssetPage>("list_assets", { query }),
   indexMissingSimilarityHashes: () =>
@@ -60,10 +69,12 @@ export const libraryGateway: LibraryGateway = {
     invoke("set_asset_favorite", { assetId, favorite }),
   setAssetsFavorite: (assetIds, favorite) =>
     invoke("set_assets_favorite", { assetIds, favorite }),
-  patchAssetClassifications: (patch: AssetClassificationPatch) =>
-    invoke("patch_asset_classifications", { patch }),
   getAssetClassifications: (assetId) =>
     invoke<string[]>("get_asset_classifications", { assetId }),
+  setAssetClassification: (request) =>
+    invoke("set_asset_classification", { request }),
+  patchAssetAlbums: (patch: AssetAlbumPatch) => invoke("patch_asset_albums", { patch }),
+  getAssetAlbums: (assetId) => invoke<string[]>("get_asset_albums", { assetId }),
   getMangaRoot: () => invoke<string | null>("get_manga_root"),
   setMangaRoot: (path) => invoke("set_manga_root", { path }),
   scanManga: () => invoke<number>("scan_manga"),

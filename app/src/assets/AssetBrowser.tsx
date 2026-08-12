@@ -51,9 +51,9 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, thu
   if (effectiveSort === "random" && !randomPivotRef.current) randomPivotRef.current = createRandomPivot();
   useEffect(() => { if (effectiveSort !== "random") randomPivotRef.current = null; }, [effectiveSort]);
   useEffect(() => { if (view.kind !== "classification") setDirectOnly(false); }, [view.kind]);
-  const queryBase = useMemo<Omit<AssetQuery, "after">>(() => ({ classificationId: view.kind === "classification" ? view.classificationId : null, directOnly: view.kind === "classification" ? directOnly : false, favoriteOnly: view.kind === "favorites", unclassifiedOnly: view.kind === "unsorted", sort: effectiveSort, randomPivot: effectiveSort === "random" ? randomPivotRef.current : null, limit: ASSET_PAGE_SIZE }), [directOnly, effectiveSort, randomVersion, view]);
+  const queryBase = useMemo<Omit<AssetQuery, "after">>(() => ({ classificationId: view.kind === "classification" ? view.classificationId : null, albumId: view.kind === "album" ? view.albumId : null, directOnly: view.kind === "classification" ? directOnly : false, favoriteOnly: view.kind === "favorites", unclassifiedOnly: view.kind === "unsorted", sort: effectiveSort, randomPivot: effectiveSort === "random" ? randomPivotRef.current : null, limit: ASSET_PAGE_SIZE }), [directOnly, effectiveSort, randomVersion, view]);
   const queryKey = JSON.stringify(queryBase);
-  const viewKey = view.kind === "classification" ? `classification:${view.classificationId}` : view.kind;
+  const viewKey = view.kind === "classification" ? `classification:${view.classificationId}` : view.kind === "album" ? `album:${view.albumId}` : view.kind;
   const activePage = page?.queryKey === queryKey ? page : null;
   const items = activePage?.items ?? EMPTY_ASSETS;
   const itemIds = useMemo(() => items.map((asset) => asset.id), [items]);
@@ -147,10 +147,9 @@ export function AssetBrowser({ view, classifications, sort, metadataVisible, thu
     }
   })();
   const patchBatchClassification = (classificationId: string, operation: "add" | "remove") => void runBatch(
-    () => gateway.patchAssetClassifications({
+    () => gateway.setAssetClassification({
       assetIds: selectedIds,
-      addClassificationIds: operation === "add" ? [classificationId] : [],
-      removeClassificationIds: operation === "remove" ? [classificationId] : [],
+      classificationId: operation === "add" ? classificationId : null,
     }),
     "분류를 변경하지 못했습니다.",
   );

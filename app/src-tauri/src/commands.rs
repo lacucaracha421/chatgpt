@@ -7,10 +7,11 @@ use tauri::State;
 use crate::library::{
     error::LibraryError,
     models::{
-        AssetClassificationPatch, AssetCursor, AssetPage, AssetQuery, AssetSummary,
-        ClassificationEntry, CreateClassification, IngestMediaRequest, IngestOutcome,
-        LibrarySummary, MangaSeries, MetadataBackup, PurgeSummary, SimilarityDecisionRequest,
-        SetAssetClassification, SimilarityIndexProgress, SimilarityReviewPage, TrashPage,
+        AlbumEntry, AssetAlbumPatch, AssetCursor, AssetPage, AssetQuery,
+        AssetSummary, ClassificationEntry, CreateAlbum, CreateClassification, IngestMediaRequest,
+        IngestOutcome, LibrarySummary, MangaSeries, MetadataBackup, PurgeSummary,
+        SimilarityDecisionRequest, SetAssetClassification, SimilarityIndexProgress,
+        SimilarityReviewPage, TrashPage,
         TrashPolicy, VideoPreparationProgress,
     },
     Library,
@@ -387,13 +388,66 @@ pub fn set_assets_favorite(
 }
 
 #[tauri::command]
-pub fn patch_asset_classifications(
-    patch: AssetClassificationPatch,
+pub fn list_albums(state: State<'_, AppState>) -> Result<Vec<AlbumEntry>, CommandError> {
+    current_required(state)?.list_albums().map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn create_album(
+    request: CreateAlbum,
+    state: State<'_, AppState>,
+) -> Result<AlbumEntry, CommandError> {
+    current_required(state)?.create_album(request).map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn rename_album(id: String, name: String, state: State<'_, AppState>) -> Result<(), CommandError> {
+    current_required(state)?.rename_album(&id, &name).map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn move_album(
+    id: String,
+    parent_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    current_required(state)?.move_album(&id, parent_id.as_deref()).map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn update_album_appearance(
+    id: String,
+    icon_key: Option<String>,
+    color_key: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
     current_required(state)?
-        .patch_asset_classifications(patch)
+        .update_album_appearance(&id, icon_key.as_deref(), color_key.as_deref())
         .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn delete_album(id: String, state: State<'_, AppState>) -> Result<(), CommandError> {
+    current_required(state)?.delete_album(&id).map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn get_asset_albums(
+    asset_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, CommandError> {
+    current_required(state)?
+        .get_asset_albums(&asset_id)
+        .map(|entries| entries.into_iter().map(|entry| entry.id).collect())
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn patch_asset_albums(
+    patch: AssetAlbumPatch,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    current_required(state)?.patch_asset_albums(patch).map_err(CommandError::from)
 }
 
 #[tauri::command]

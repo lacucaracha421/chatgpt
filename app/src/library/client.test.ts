@@ -56,6 +56,37 @@ describe("libraryGateway classification appearance contract", () => {
   });
 });
 
+describe("libraryGateway album contract", () => {
+  beforeEach(() => invoke.mockClear());
+
+  it("uses album and single-folder commands with camelCase payloads", async () => {
+    await libraryGateway.createAlbum({ name: "표지", parentId: null });
+    await libraryGateway.patchAssetAlbums({
+      assetIds: ["asset-1"],
+      addAlbumIds: ["album-1"],
+      removeAlbumIds: [],
+    });
+    await libraryGateway.setAssetClassification({
+      assetIds: ["asset-1"],
+      classificationId: "folder-1",
+    });
+
+    expect(invoke).toHaveBeenNthCalledWith(1, "create_album", {
+      request: { name: "표지", parentId: null },
+    });
+    expect(invoke).toHaveBeenNthCalledWith(2, "patch_asset_albums", {
+      patch: {
+        assetIds: ["asset-1"],
+        addAlbumIds: ["album-1"],
+        removeAlbumIds: [],
+      },
+    });
+    expect(invoke).toHaveBeenNthCalledWith(3, "set_asset_classification", {
+      request: { assetIds: ["asset-1"], classificationId: "folder-1" },
+    });
+  });
+});
+
 describe("libraryGateway video contract", () => {
   beforeEach(() => invoke.mockClear());
 

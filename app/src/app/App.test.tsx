@@ -69,6 +69,12 @@ function gateway(): LibraryGateway {
     openLibrary: vi.fn().mockResolvedValue(summary),
     getExtensionConnection: vi.fn(),
     listClassifications: vi.fn().mockResolvedValue([]),
+    listAlbums: vi.fn().mockResolvedValue([]),
+    createAlbum: vi.fn(),
+    renameAlbum: vi.fn(),
+    moveAlbum: vi.fn(),
+    updateAlbumAppearance: vi.fn(),
+    deleteAlbum: vi.fn(),
     createClassification: vi.fn(),
     renameClassification: vi.fn(),
     moveClassification: vi.fn(),
@@ -92,8 +98,10 @@ function gateway(): LibraryGateway {
     purgeExpiredTrash: vi.fn().mockResolvedValue({ deletedCount: 0, failedAssetIds: [] }),
     setAssetFavorite: vi.fn(),
     setAssetsFavorite: vi.fn(),
-    patchAssetClassifications: vi.fn(),
     getAssetClassifications: vi.fn(),
+    setAssetClassification: vi.fn(),
+    patchAssetAlbums: vi.fn(),
+    getAssetAlbums: vi.fn().mockResolvedValue([]),
     getMangaRoot: vi.fn().mockResolvedValue(null),
     setMangaRoot: vi.fn().mockResolvedValue(undefined),
     scanManga: vi.fn().mockResolvedValue(0),
@@ -468,6 +476,7 @@ describe("App", () => {
     await waitFor(() =>
       expect(libraryGateway.listAssets).toHaveBeenLastCalledWith({
         classificationId: "tag-arona",
+        albumId: null,
         directOnly: false,
         favoriteOnly: false,
         unclassifiedOnly: false,
@@ -502,6 +511,7 @@ describe("App", () => {
     );
     expect(libraryGateway.listAssets).toHaveBeenLastCalledWith({
       classificationId: "tag-arona",
+      albumId: null,
       directOnly: false,
       favoriteOnly: false,
       unclassifiedOnly: false,
@@ -524,6 +534,7 @@ describe("App", () => {
     vi.mocked(libraryGateway.ingestMedia).mockResolvedValue({
       status: "exact_duplicate",
       existingAssetId: "asset-existing",
+      classificationChanged: false,
     });
     vi.mocked(libraryGateway.getAsset).mockResolvedValue({
       ...asset,
@@ -545,6 +556,7 @@ describe("App", () => {
     await waitFor(() =>
       expect(libraryGateway.listAssets).toHaveBeenCalledWith({
         classificationId: "root-games",
+        albumId: null,
         directOnly: false,
         favoriteOnly: false,
         unclassifiedOnly: false,
@@ -582,7 +594,7 @@ describe("App", () => {
     const libraryGateway = gateway();
     vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games]);
     vi.mocked(libraryGateway.listAssets).mockResolvedValue({ items: [asset], nextCursor: null });
-    vi.mocked(libraryGateway.patchAssetClassifications).mockResolvedValue(undefined);
+    vi.mocked(libraryGateway.setAssetClassification).mockResolvedValue(undefined);
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
 
     const tile = await screen.findByRole("option", { name: "arona.png" });
@@ -604,10 +616,9 @@ describe("App", () => {
     expect(screen.getByText("1개 자산 · 폴더에 추가")).toBeInTheDocument();
     fireEvent.pointerUp(tile, { pointerId: 3, clientX: 20, clientY: 1 });
 
-    await waitFor(() => expect(libraryGateway.patchAssetClassifications).toHaveBeenCalledWith({
+    await waitFor(() => expect(libraryGateway.setAssetClassification).toHaveBeenCalledWith({
       assetIds: ["asset-arona"],
-      addClassificationIds: ["root-games"],
-      removeClassificationIds: [],
+      classificationId: "root-games",
     }));
     expect(await screen.findByText("1개 자산을 폴더에 추가했습니다.")).toBeVisible();
   });

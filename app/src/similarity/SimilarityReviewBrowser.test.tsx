@@ -102,6 +102,7 @@ function reviewPage(items: SimilarityReviewSummary[], totalCount: number) {
 function reviewGateway(): LibraryGateway {
   return {
     openLibrary: vi.fn(), getExtensionConnection: vi.fn(), listClassifications: vi.fn(),
+    listAlbums: vi.fn().mockResolvedValue([]), createAlbum: vi.fn(), renameAlbum: vi.fn(), moveAlbum: vi.fn(), updateAlbumAppearance: vi.fn(), deleteAlbum: vi.fn(),
     createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(), updateClassificationAppearance: vi.fn(), deleteClassification: vi.fn(),
     listAssets: vi.fn(), indexMissingSimilarityHashes: vi.fn(),
     listSimilarityReviews: vi.fn(),
@@ -109,8 +110,8 @@ function reviewGateway(): LibraryGateway {
     getAsset: vi.fn(), trashAssets: vi.fn(), restoreAsset: vi.fn(), restoreAssets: vi.fn(),
     listTrash: vi.fn(), emptyTrash: vi.fn(), getTrashPolicy: vi.fn(), setTrashPolicy: vi.fn(),
     ensureDailyBackup: vi.fn(), listMetadataBackups: vi.fn(), restoreMetadataBackup: vi.fn(), purgeExpiredTrash: vi.fn(),
-    setAssetFavorite: vi.fn(), setAssetsFavorite: vi.fn(), patchAssetClassifications: vi.fn(),
-    getAssetClassifications: vi.fn(), ingestMedia: vi.fn(),
+    setAssetFavorite: vi.fn(), setAssetsFavorite: vi.fn(),
+    getAssetClassifications: vi.fn(), setAssetClassification: vi.fn(), patchAssetAlbums: vi.fn(), getAssetAlbums: vi.fn().mockResolvedValue([]), ingestMedia: vi.fn(),
     preparePendingVideos: vi.fn(), retryVideoPreparation: vi.fn(),
     getMangaRoot: vi.fn().mockResolvedValue(null), setMangaRoot: vi.fn().mockResolvedValue(undefined), scanManga: vi.fn().mockResolvedValue(0), listMangaSeries: vi.fn().mockResolvedValue([]),
   };

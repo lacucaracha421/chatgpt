@@ -39,7 +39,7 @@ export function AssetToolbar({
     : rawView;
   const [batchClassificationId, setBatchClassificationId] = useState("");
   const recent = view.kind === "recent";
-  const location = view.kind === "favorites" ? "즐겨찾기" : view.kind === "unsorted" ? "미분류" : recent ? "최근" : view.kind === "trash" ? "휴지통" : classifications.find((entry) => entry.id === view.classificationId)?.name ?? "저장소";
+  const location = view.kind === "favorites" ? "즐겨찾기" : view.kind === "unsorted" ? "미분류" : recent ? "최근" : view.kind === "trash" ? "휴지통" : view.kind === "album" ? "앨범" : classifications.find((entry) => entry.id === view.classificationId)?.name ?? "저장소";
   const overflowItems: MenuItem[] = [
     { id: "remove-classification", label: "선택한 분류 제거", disabled: batchPending || !batchClassificationId, onSelect: () => onClassification(batchClassificationId, "remove") },
     { id: "favorite-off", label: "좋아요 끄기", disabled: batchPending, onSelect: () => onFavorite(false) },

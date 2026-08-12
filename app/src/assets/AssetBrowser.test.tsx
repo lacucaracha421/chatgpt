@@ -42,6 +42,7 @@ describe("AssetBrowser", () => {
     await waitFor(() =>
       expect(gateway.listAssets).toHaveBeenCalledWith({
         ...expected,
+        albumId: null,
         randomPivot: null,
         after: null,
         limit: 100,
@@ -337,11 +338,11 @@ describe("AssetBrowser", () => {
     expect(screen.getByText("2개 선택")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "정보 열기" }));
     await user.click(await screen.findByRole("checkbox", { name: "태그 분류" }));
-    expect(gateway.patchAssetClassifications).toHaveBeenNthCalledWith(1, { assetIds: ["asset-0", "asset-1"], addClassificationIds: ["tag"], removeClassificationIds: [] });
+    expect(gateway.setAssetClassification).toHaveBeenNthCalledWith(1, { assetIds: ["asset-0", "asset-1"], classificationId: "tag" });
     const checkbox = await screen.findByRole("checkbox", { name: "태그 분류" });
     await waitFor(() => expect(checkbox).toBeChecked());
     await user.click(checkbox);
-    expect(gateway.patchAssetClassifications).toHaveBeenNthCalledWith(2, { assetIds: ["asset-0", "asset-1"], addClassificationIds: [], removeClassificationIds: ["tag"] });
+    expect(gateway.setAssetClassification).toHaveBeenNthCalledWith(2, { assetIds: ["asset-0", "asset-1"], classificationId: null });
   });
 
   it("moves the selected asset to trash and refreshes the gallery", async () => {
@@ -398,10 +399,9 @@ describe("AssetBrowser", () => {
     expect(gateway.setAssetsFavorite).toHaveBeenCalledWith(["asset-0", "asset-1"], true);
     await user.selectOptions(screen.getByLabelText("일괄 분류"), "tag");
     await user.click(screen.getByRole("button", { name: "분류 추가" }));
-    expect(gateway.patchAssetClassifications).toHaveBeenCalledWith({
+    expect(gateway.setAssetClassification).toHaveBeenCalledWith({
       assetIds: ["asset-0", "asset-1"],
-      addClassificationIds: ["tag"],
-      removeClassificationIds: [],
+      classificationId: "tag",
     });
 
     await user.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
@@ -511,6 +511,7 @@ function asset(index: number) {
 function createGateway(page: AssetPage = { items: [], nextCursor: null }): LibraryGateway {
   return {
     openLibrary: vi.fn(), getExtensionConnection: vi.fn(), listClassifications: vi.fn(),
+    listAlbums: vi.fn().mockResolvedValue([]), createAlbum: vi.fn(), renameAlbum: vi.fn(), moveAlbum: vi.fn(), updateAlbumAppearance: vi.fn(), deleteAlbum: vi.fn(),
     createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(), updateClassificationAppearance: vi.fn(),
     deleteClassification: vi.fn(), listAssets: vi.fn().mockResolvedValue(page),
     indexMissingSimilarityHashes: vi.fn(), listSimilarityReviews: vi.fn(), decideSimilarityReview: vi.fn(), getAsset: vi.fn(),
@@ -518,8 +519,8 @@ function createGateway(page: AssetPage = { items: [], nextCursor: null }): Libra
     getTrashPolicy: vi.fn(), setTrashPolicy: vi.fn(),
     ensureDailyBackup: vi.fn(), listMetadataBackups: vi.fn(),
     restoreMetadataBackup: vi.fn(), purgeExpiredTrash: vi.fn(),
-    setAssetFavorite: vi.fn(), setAssetsFavorite: vi.fn().mockResolvedValue(undefined), patchAssetClassifications: vi.fn().mockResolvedValue(undefined),
-    getAssetClassifications: vi.fn().mockResolvedValue([]), ingestMedia: vi.fn(),
+    setAssetFavorite: vi.fn(), setAssetsFavorite: vi.fn().mockResolvedValue(undefined),
+    getAssetClassifications: vi.fn().mockResolvedValue([]), setAssetClassification: vi.fn(), patchAssetAlbums: vi.fn(), getAssetAlbums: vi.fn().mockResolvedValue([]), ingestMedia: vi.fn(),
     getMangaRoot: vi.fn().mockResolvedValue(null), setMangaRoot: vi.fn().mockResolvedValue(undefined), scanManga: vi.fn().mockResolvedValue(0), listMangaSeries: vi.fn().mockResolvedValue([]),
     preparePendingVideos: vi.fn(), retryVideoPreparation: vi.fn(),
   };

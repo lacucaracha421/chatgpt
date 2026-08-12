@@ -313,7 +313,7 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
   async function performInternalDrop(payload: InternalDragPayload, target: ClassificationDropTarget) {
     try {
       if (payload.kind === "assets") {
-        await gateway.patchAssetClassifications({ assetIds: payload.assetIds, addClassificationIds: [target.entryId], removeClassificationIds: [] });
+        await gateway.setAssetClassification({ assetIds: payload.assetIds, classificationId: target.entryId });
         setAssetRefresh((current) => current + 1);
         setMessage(`${payload.assetIds.length}개 자산을 폴더에 추가했습니다.`);
         return;

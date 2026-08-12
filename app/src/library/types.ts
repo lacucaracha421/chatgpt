@@ -14,6 +14,7 @@ export type AssetSort = "newest" | "oldest" | "favorites" | "random";
 
 export type AssetView =
   | { kind: "classification"; classificationId: string | null }
+  | { kind: "album"; albumId: string }
   | { kind: "unsorted" }
   | { kind: "favorites" }
   | { kind: "recent" }
@@ -25,6 +26,14 @@ export type AssetView =
 export type ClassificationEntry = {
   id: string;
   kind: ClassificationKind;
+  name: string;
+  parentId: string | null;
+  iconKey: string | null;
+  colorKey: string | null;
+};
+
+export type AlbumEntry = {
+  id: string;
   name: string;
   parentId: string | null;
   iconKey: string | null;
@@ -95,6 +104,7 @@ export type SimilarityIndexProgress = {
 
 export type AssetQuery = {
   classificationId: string | null;
+  albumId: string | null;
   directOnly: boolean;
   favoriteOnly: boolean;
   unclassifiedOnly: boolean;
@@ -109,10 +119,15 @@ export type AssetPage = {
   nextCursor: AssetCursor | null;
 };
 
-export type AssetClassificationPatch = {
+export type AssetAlbumPatch = {
   assetIds: string[];
-  addClassificationIds: string[];
-  removeClassificationIds: string[];
+  addAlbumIds: string[];
+  removeAlbumIds: string[];
+};
+
+export type SetAssetClassification = {
+  assetIds: string[];
+  classificationId: string | null;
 };
 
 export type TrashPolicy = { retentionDays: number | null };
@@ -155,6 +170,11 @@ export type CreateClassification = {
   parentId: string | null;
 };
 
+export type CreateAlbum = {
+  name: string;
+  parentId: string | null;
+};
+
 export type IngestMediaInput = {
   sourcePath: string;
   classificationId: string | null;
@@ -170,7 +190,7 @@ export type VideoPreparationProgress = {
 
 export type IngestOutcome =
   | { status: "added"; asset: AssetSummary }
-  | { status: "exact_duplicate"; existingAssetId: string }
+  | { status: "exact_duplicate"; existingAssetId: string; classificationChanged: boolean }
   | { status: "review_pending"; reviewId: string };
 
 export interface LibraryGateway {
@@ -186,6 +206,12 @@ export interface LibraryGateway {
     colorKey: string | null,
   ): Promise<void>;
   deleteClassification(id: string): Promise<void>;
+  listAlbums(): Promise<AlbumEntry[]>;
+  createAlbum(input: CreateAlbum): Promise<AlbumEntry>;
+  renameAlbum(id: string, name: string): Promise<void>;
+  moveAlbum(id: string, parentId: string | null): Promise<void>;
+  updateAlbumAppearance(id: string, iconKey: string | null, colorKey: string | null): Promise<void>;
+  deleteAlbum(id: string): Promise<void>;
   listAssets(query: AssetQuery): Promise<AssetPage>;
   indexMissingSimilarityHashes(): Promise<SimilarityIndexProgress>;
   listSimilarityReviews(query: {
@@ -210,8 +236,10 @@ export interface LibraryGateway {
   purgeExpiredTrash(): Promise<PurgeSummary>;
   setAssetFavorite(assetId: string, favorite: boolean): Promise<void>;
   setAssetsFavorite(assetIds: string[], favorite: boolean): Promise<void>;
-  patchAssetClassifications(patch: AssetClassificationPatch): Promise<void>;
   getAssetClassifications(assetId: string): Promise<string[]>;
+  setAssetClassification(request: SetAssetClassification): Promise<void>;
+  patchAssetAlbums(patch: AssetAlbumPatch): Promise<void>;
+  getAssetAlbums(assetId: string): Promise<string[]>;
   getMangaRoot(): Promise<string | null>;
   setMangaRoot(path: string | null): Promise<void>;
   scanManga(): Promise<number>;
