@@ -126,7 +126,9 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
     setReviewCount(page.totalCount);
   }, [gateway]);
   const handleIngested = useCallback((result: IngestOutcome) => {
-    if (result.status === "added") setAssetRefresh((current) => current + 1);
+    if (result.status === "added" || (result.status === "exact_duplicate" && result.classificationChanged)) {
+      setAssetRefresh((current) => current + 1);
+    }
     if (
       result.status === "added"
       && result.asset.media.kind === "video"
@@ -257,7 +259,7 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
       void beginNativeDrag(next.payload.assetIds);
       return;
     }
-    setDragTarget(classificationTargetAt(event.clientX, event.clientY, next.payload, entries));
+    setDragTarget(sidebarTargetAt(event.clientX, event.clientY, next.payload, entries, albums));
   }
 
   async function beginNativeDrag(assetIds: string[], workId: string = crypto.randomUUID()) {
@@ -313,7 +315,7 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
   function finishPointerDrag(event: React.PointerEvent<HTMLElement>) {
     const current = dragStateRef.current;
     const target = current.phase === "dragging"
-      ? classificationTargetAt(event.clientX, event.clientY, current.payload, entries)
+      ? sidebarTargetAt(event.clientX, event.clientY, current.payload, entries, albums)
       : null;
     transitionDrag({ type: "finish" });
     setDragTarget(null);
@@ -325,21 +327,26 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
   async function performInternalDrop(payload: InternalDragPayload, target: ClassificationDropTarget) {
     try {
       if (payload.kind === "assets") {
-        await gateway.setAssetClassification({ assetIds: payload.assetIds, classificationId: target.entryId });
+        if (target.kind === "album") {
+          await gateway.patchAssetAlbums({ assetIds: payload.assetIds, addAlbumIds: [target.entryId], removeAlbumIds: [] });
+        } else {
+          await gateway.setAssetClassification({ assetIds: payload.assetIds, classificationId: target.entryId });
+        }
         setAssetRefresh((current) => current + 1);
-        setMessage(`${payload.assetIds.length}개 자산을 폴더에 추가했습니다.`);
+        setMessage(`${payload.assetIds.length}개 자산을 ${target.kind === "album" ? "앨범에 추가" : "폴더로 이동"}했습니다.`);
         return;
       }
-      const parentId = classificationDropParent(entries, target);
-      await gateway.moveClassification(payload.entryId, parentId);
+      if (payload.kind === "album") await gateway.moveAlbum(payload.entryId, target.entryId);
+      else await gateway.moveClassification(payload.entryId, target.entryId);
       setPreferences((current) => ({
         ...current,
-        expandedClassificationIds: current.expandedClassificationIds.includes(target.entryId)
-          ? current.expandedClassificationIds
-          : [...current.expandedClassificationIds, target.entryId],
+        ...(payload.kind === "album"
+          ? { expandedAlbumIds: current.expandedAlbumIds.includes(target.entryId) ? current.expandedAlbumIds : [...current.expandedAlbumIds, target.entryId] }
+          : { expandedClassificationIds: current.expandedClassificationIds.includes(target.entryId) ? current.expandedClassificationIds : [...current.expandedClassificationIds, target.entryId] }),
       }));
-      await refreshClassifications();
-      setMessage("폴더를 이동했습니다.");
+      if (payload.kind === "album") await refreshAlbums();
+      else await refreshClassifications();
+      setMessage(`${payload.kind === "album" ? "앨범" : "폴더"}을 이동했습니다.`);
     } catch (error) {
       setMessage(commandErrorMessage(error, "드롭 작업을 완료하지 못했습니다."));
     }
@@ -412,6 +419,7 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
                   <AssetBrowser
                     view={view}
                     classifications={entries}
+                    albums={albums}
                     sort={preferences.assetSort}
                     metadataVisible={preferences.metadataVisible}
                     thumbnailRowHeight={preferences.thumbnailRowHeight}
@@ -449,16 +457,18 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
   );
 }
 
-function classificationTargetAt(x: number, y: number, payload: InternalDragPayload, entries: ClassificationEntry[]): ClassificationDropTarget | null {
-  const element = document.elementFromPoint?.(x, y)?.closest<HTMLElement>("[data-classification-id]");
-  const entryId = element?.dataset.classificationId;
+function sidebarTargetAt(x: number, y: number, payload: InternalDragPayload, entries: ClassificationEntry[], albums: AlbumEntry[]): ClassificationDropTarget | null {
+  const element = document.elementFromPoint?.(x, y)?.closest<HTMLElement>("[data-classification-id], [data-album-id]");
+  const kind = element?.dataset.albumId ? "album" : "classification";
+  const entryId = kind === "album" ? element?.dataset.albumId : element?.dataset.classificationId;
   if (!element || !entryId) return null;
   const position = "inside" as const;
-  return { entryId, position, valid: payload.kind === "assets" || validClassificationDrop(payload.entryId, { entryId, position, valid: true }, entries) };
-}
-
-function classificationDropParent(_entries: ClassificationEntry[], target: Pick<ClassificationDropTarget, "entryId" | "position">): string {
-  return target.entryId;
+  const target = { kind, entryId, position, valid: true } as const;
+  const valid = payload.kind === "assets"
+    || payload.kind === kind && (kind === "album"
+      ? validTreeDrop(payload.entryId, entryId, albums)
+      : validClassificationDrop(payload.entryId, target, entries));
+  return { ...target, valid };
 }
 
 function validClassificationDrop(entryId: string, target: ClassificationDropTarget, entries: ClassificationEntry[]) {
@@ -470,7 +480,17 @@ function validClassificationDrop(entryId: string, target: ClassificationDropTarg
   return entry.kind !== "work" || parent.kind === "root";
 }
 
-function isDescendant(candidateId: string | null, ancestorId: string, entries: ClassificationEntry[]) {
+function validTreeDrop(entryId: string, parentId: string, entries: Array<{ id: string; name: string; parentId: string | null }>) {
+  const entry = entries.find((candidate) => candidate.id === entryId);
+  const parent = entries.find((candidate) => candidate.id === parentId);
+  return Boolean(entry && parent
+    && entry.parentId !== parent.id
+    && parent.id !== entry.id
+    && !isDescendant(parent.id, entry.id, entries)
+    && !entries.some((candidate) => candidate.id !== entry.id && candidate.parentId === parent.id && candidate.name.toLocaleLowerCase() === entry.name.toLocaleLowerCase()));
+}
+
+function isDescendant(candidateId: string | null, ancestorId: string, entries: Array<{ id: string; parentId: string | null }>) {
   let current = entries.find((entry) => entry.id === candidateId);
   while (current) {
     if (current.id === ancestorId) return true;

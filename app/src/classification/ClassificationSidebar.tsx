@@ -422,6 +422,11 @@ export function ClassificationSidebar({
               onEditCancel={cancelInlineEdit}
               onMove={(entry) => { setParentId(entry.parentId ?? ""); setDialog({ type: "move", entry }); }}
               onDelete={openDelete}
+              dragTarget={dragTarget}
+              onPointerDragStart={onPointerDragStart}
+              onPointerDragMove={onPointerDragMove}
+              onPointerDragEnd={onPointerDragEnd}
+              onPointerDragCancel={onPointerDragCancel}
             />
           ))}
           {inlineEdit?.type === "create" && inlineEdit.treeKind === "album" && inlineEdit.parentId === null && (
@@ -551,8 +556,8 @@ function TreeItem({ activeRowId, editError, editName, expandedIds, inlineEdit, n
           className="classification-sidebar__tree-row"
           data-classification-id={node.entry.treeKind === "classification" ? node.entry.id : undefined}
           data-album-id={node.entry.treeKind === "album" ? node.entry.id : undefined}
-          data-drop-state={dragTarget?.entryId === node.entry.id ? (dragTarget.valid ? "valid" : "invalid") : undefined}
-          data-drop-position={dragTarget?.entryId === node.entry.id ? dragTarget.position : undefined}
+          data-drop-state={dragTarget?.kind === node.entry.treeKind && dragTarget.entryId === node.entry.id ? (dragTarget.valid ? "valid" : "invalid") : undefined}
+          data-drop-position={dragTarget?.kind === node.entry.treeKind && dragTarget.entryId === node.entry.id ? dragTarget.position : undefined}
           role="treeitem"
           aria-label={node.entry.name}
           aria-selected={selected}
@@ -574,7 +579,7 @@ function TreeItem({ activeRowId, editError, editName, expandedIds, inlineEdit, n
             }
             onRowKeyDown(event, node);
           }}
-          onPointerDown={(event) => { if (node.entry.treeKind === "classification" && event.button === 0 && !(event.target as HTMLElement).closest("button")) onPointerDragStart?.({ kind: "classification", entryId: node.entry.id }, event); }}
+          onPointerDown={(event) => { if (event.button === 0 && !(event.target as HTMLElement).closest("button")) onPointerDragStart?.({ kind: node.entry.treeKind, entryId: node.entry.id }, event); }}
           onPointerMove={onPointerDragMove}
           onPointerUp={onPointerDragEnd}
           onPointerCancel={onPointerDragCancel}

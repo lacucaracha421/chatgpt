@@ -21,6 +21,7 @@ describe("AssetBrowser", () => {
     ["unsorted", { kind: "unsorted" }, "newest", { classificationId: null, directOnly: false, favoriteOnly: false, unclassifiedOnly: true, sort: "newest" }],
     ["favorites", { kind: "favorites" }, "favorites", { classificationId: null, directOnly: false, favoriteOnly: true, unclassifiedOnly: false, sort: "favorites" }],
     ["recent", { kind: "recent" }, "oldest", { classificationId: null, directOnly: false, favoriteOnly: false, unclassifiedOnly: false, sort: "newest" }],
+    ["album", { kind: "album", albumId: "album-1" }, "newest", { classificationId: null, albumId: "album-1", directOnly: false, favoriteOnly: false, unclassifiedOnly: false, sort: "newest" }],
   ])("maps the %s view to its first-page query", async (_name, view, sort, expected) => {
     const gateway = createGateway();
 
@@ -41,8 +42,8 @@ describe("AssetBrowser", () => {
 
     await waitFor(() =>
       expect(gateway.listAssets).toHaveBeenCalledWith({
-        ...expected,
         albumId: null,
+        ...expected,
         randomPivot: null,
         after: null,
         limit: 100,
@@ -324,12 +325,14 @@ describe("AssetBrowser", () => {
     expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument();
   });
 
-  it("applies inspector classification actions to the selection", async () => {
+  it("applies inspector folder and album actions to the selection", async () => {
     const user = userEvent.setup();
     const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
     const tag: ClassificationEntry = { id: "tag", kind: "tag", name: "태그", parentId: null, iconKey: null, colorKey: null };
-    vi.mocked(gateway.getAssetClassifications).mockResolvedValueOnce([]).mockResolvedValue(["tag"]);
-    render(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "classification", classificationId: null }} classifications={[tag]} sort="newest" metadataVisible={false} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
+    const album = { id: "album", name: "표지", parentId: null, iconKey: null, colorKey: null };
+    vi.mocked(gateway.getAssetClassifications).mockResolvedValue(["tag"]);
+    vi.mocked(gateway.getAssetAlbums).mockResolvedValueOnce([]).mockResolvedValue(["album"]);
+    render(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "classification", classificationId: null }} classifications={[tag]} albums={[album]} sort="newest" metadataVisible={false} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
     const first = await screen.findByRole("option", { name: "asset-0.png" });
 
     expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument();
@@ -337,12 +340,12 @@ describe("AssetBrowser", () => {
     await user.keyboard("{Control>}a{/Control}");
     expect(screen.getByText("2개 선택")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "정보 열기" }));
-    await user.click(await screen.findByRole("checkbox", { name: "태그 분류" }));
-    expect(gateway.setAssetClassification).toHaveBeenNthCalledWith(1, { assetIds: ["asset-0", "asset-1"], classificationId: "tag" });
-    const checkbox = await screen.findByRole("checkbox", { name: "태그 분류" });
-    await waitFor(() => expect(checkbox).toBeChecked());
+    const inspector = await screen.findByRole("complementary", { name: "자산 정보" });
+    await user.selectOptions(within(inspector).getByLabelText("폴더"), "tag");
+    expect(gateway.setAssetClassification).toHaveBeenCalledWith({ assetIds: ["asset-0", "asset-1"], classificationId: "tag" });
+    const checkbox = await screen.findByRole("checkbox", { name: "표지 앨범" });
     await user.click(checkbox);
-    expect(gateway.setAssetClassification).toHaveBeenNthCalledWith(2, { assetIds: ["asset-0", "asset-1"], classificationId: null });
+    expect(gateway.patchAssetAlbums).toHaveBeenCalledWith({ assetIds: ["asset-0", "asset-1"], addAlbumIds: [], removeAlbumIds: ["album"] });
   });
 
   it("moves the selected asset to trash and refreshes the gallery", async () => {
@@ -385,9 +388,10 @@ describe("AssetBrowser", () => {
     const user = userEvent.setup();
     const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
     const tag: ClassificationEntry = { id: "tag", kind: "tag", name: "아로나", parentId: null, iconKey: null, colorKey: null };
+    const album = { id: "album", name: "표지", parentId: null, iconKey: null, colorKey: null };
     render(
       <LibraryProvider gateway={gateway}>
-        <AssetBrowser view={{ kind: "classification", classificationId: null }} classifications={[tag]} sort="newest" metadataVisible={false} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} />
+        <AssetBrowser view={{ kind: "classification", classificationId: null }} classifications={[tag]} albums={[album]} sort="newest" metadataVisible={false} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} />
       </LibraryProvider>,
     );
     const first = await screen.findByRole("option", { name: "asset-0.png" });
@@ -397,12 +401,15 @@ describe("AssetBrowser", () => {
 
     await user.click(screen.getByRole("button", { name: "좋아요 켜기" }));
     expect(gateway.setAssetsFavorite).toHaveBeenCalledWith(["asset-0", "asset-1"], true);
-    await user.selectOptions(screen.getByLabelText("일괄 분류"), "tag");
-    await user.click(screen.getByRole("button", { name: "분류 추가" }));
+    await user.selectOptions(screen.getByLabelText("폴더"), "tag");
+    await user.click(screen.getByRole("button", { name: "폴더로 이동" }));
     expect(gateway.setAssetClassification).toHaveBeenCalledWith({
       assetIds: ["asset-0", "asset-1"],
       classificationId: "tag",
     });
+    await user.selectOptions(screen.getByLabelText("앨범"), "album");
+    await user.click(screen.getByRole("button", { name: "앨범에 추가" }));
+    expect(gateway.patchAssetAlbums).toHaveBeenCalledWith({ assetIds: ["asset-0", "asset-1"], addAlbumIds: ["album"], removeAlbumIds: [] });
 
     await user.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
     expect(gateway.trashAssets).toHaveBeenCalledWith(["asset-0", "asset-1"]);

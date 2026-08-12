@@ -598,6 +598,29 @@ describe("App", () => {
     expect(await screen.findByRole("img", { name: "existing.png" })).toBeInTheDocument();
   });
 
+  it("refreshes assets when exact-duplicate ingestion moved its folder", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    let drop: ((paths: string[]) => void) | undefined;
+    const subscribeDrops: DropSubscriber = async (handler) => {
+      drop = (paths) => handler({ type: "drop", paths, position: { x: 0, y: 0 } });
+      return () => undefined;
+    };
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.ingestMedia).mockResolvedValue({
+      status: "exact_duplicate",
+      existingAssetId: "asset-existing",
+      classificationChanged: true,
+    });
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={subscribeDrops} />);
+
+    await waitFor(() => expect(drop).toBeDefined());
+    await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenCalled());
+    const callsBeforeDrop = vi.mocked(libraryGateway.listAssets).mock.calls.length;
+    act(() => drop?.(["C:\\images\\duplicate-moved.png"]));
+
+    await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenCalledTimes(callsBeforeDrop + 1));
+  });
+
   it("drops an asset selection on a classification in one batch", async () => {
     Object.defineProperties(HTMLElement.prototype, {
       offsetWidth: { configurable: true, get: () => 900 },
@@ -635,7 +658,44 @@ describe("App", () => {
       assetIds: ["asset-arona"],
       classificationId: "root-games",
     }));
-    expect(await screen.findByText("1개 자산을 폴더에 추가했습니다.")).toBeVisible();
+    expect(await screen.findByText("1개 자산을 폴더로 이동했습니다.")).toBeVisible();
+  });
+
+  it("drops an asset selection on an album without moving its folder", async () => {
+    Object.defineProperties(HTMLElement.prototype, {
+      offsetWidth: { configurable: true, get: () => 900 },
+      clientWidth: { configurable: true, get: () => 840 },
+      offsetHeight: { configurable: true, get: () => 600 },
+      clientHeight: { configurable: true, get: () => 600 },
+    });
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listAlbums).mockResolvedValue([
+      { id: "album-covers", name: "표지", parentId: null, iconKey: null, colorKey: null },
+    ]);
+    vi.mocked(libraryGateway.listAssets).mockResolvedValue({ items: [asset], nextCursor: null });
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+
+    const tile = await screen.findByRole("option", { name: "arona.png" });
+    const target = await screen.findByRole("treeitem", { name: "표지" });
+    Object.defineProperties(tile, {
+      setPointerCapture: { configurable: true, value: vi.fn() },
+      releasePointerCapture: { configurable: true, value: vi.fn() },
+    });
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: vi.fn().mockReturnValue(target) });
+
+    fireEvent.pointerDown(tile, { button: 0, pointerId: 4, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(tile, { pointerId: 4, clientX: 20, clientY: 1 });
+    await waitFor(() => expect(target).toHaveAttribute("data-drop-state", "valid"));
+    fireEvent.pointerUp(tile, { pointerId: 4, clientX: 20, clientY: 1 });
+
+    await waitFor(() => expect(libraryGateway.patchAssetAlbums).toHaveBeenCalledWith({
+      assetIds: ["asset-arona"],
+      addAlbumIds: ["album-covers"],
+      removeAlbumIds: [],
+    }));
+    expect(libraryGateway.setAssetClassification).not.toHaveBeenCalled();
+    expect(await screen.findByText("1개 자산을 앨범에 추가했습니다.")).toBeVisible();
   });
 
   it("moves a classification inside a folder, expands it, and rejects invalid targets", async () => {

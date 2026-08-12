@@ -1,6 +1,6 @@
 import { EllipsisHorizontalIcon, InformationCircleIcon, AdjustmentsHorizontalIcon, ArrowPathIcon, StarIcon, TrashIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { useState } from "react";
-import type { AssetSort, AssetView, ClassificationEntry } from "../library/types";
+import type { AlbumEntry, AssetSort, AssetView, ClassificationEntry } from "../library/types";
 import { Button } from "../shared/ui/Button";
 import { Menu, type MenuItem } from "../shared/ui/Menu";
 import { Select } from "../shared/ui/Select";
@@ -11,6 +11,7 @@ import { ViewToolbar } from "../layout/ViewToolbar";
 type AssetToolbarProps = {
   view: AssetView;
   classifications: ClassificationEntry[];
+  albums: AlbumEntry[];
   sort: AssetSort;
   directOnly: boolean;
   metadataVisible: boolean;
@@ -23,7 +24,8 @@ type AssetToolbarProps = {
   onMetadataVisibleChange: (value: boolean) => void;
   onThumbnailRowHeightChange: (value: number) => void;
   onFavorite: (favorite: boolean) => void;
-  onClassification: (classificationId: string, operation: "add" | "remove") => void;
+  onMoveToFolder: (classificationId: string | null) => void;
+  onAlbum: (albumId: string, operation: "add" | "remove") => void;
   onTrash: () => void;
   onClearSelection: () => void;
   batchPending: boolean;
@@ -31,17 +33,18 @@ type AssetToolbarProps = {
 };
 
 export function AssetToolbar({
-  view: rawView, classifications, sort, directOnly, metadataVisible, thumbnailRowHeight, selectedCount, inspectorOpen, onInspectorToggle, onSortChange,
-  onDirectOnlyChange, onMetadataVisibleChange, onThumbnailRowHeightChange, onFavorite, onClassification, onTrash, onClearSelection, batchPending, onReshuffle,
+  view: rawView, classifications, albums, sort, directOnly, metadataVisible, thumbnailRowHeight, selectedCount, inspectorOpen, onInspectorToggle, onSortChange,
+  onDirectOnlyChange, onMetadataVisibleChange, onThumbnailRowHeightChange, onFavorite, onMoveToFolder, onAlbum, onTrash, onClearSelection, batchPending, onReshuffle,
 }: AssetToolbarProps) {
   const view = rawView.kind === "similarity_review" || rawView.kind === "settings" || rawView.kind === "manga"
     ? ({ kind: "classification", classificationId: null } as const)
     : rawView;
   const [batchClassificationId, setBatchClassificationId] = useState("");
+  const [batchAlbumId, setBatchAlbumId] = useState("");
   const recent = view.kind === "recent";
-  const location = view.kind === "favorites" ? "즐겨찾기" : view.kind === "unsorted" ? "미분류" : recent ? "최근" : view.kind === "trash" ? "휴지통" : view.kind === "album" ? "앨범" : classifications.find((entry) => entry.id === view.classificationId)?.name ?? "저장소";
+  const location = view.kind === "favorites" ? "즐겨찾기" : view.kind === "unsorted" ? "미분류" : recent ? "최근" : view.kind === "trash" ? "휴지통" : view.kind === "album" ? albums.find((entry) => entry.id === view.albumId)?.name ?? "앨범" : classifications.find((entry) => entry.id === view.classificationId)?.name ?? "저장소";
   const overflowItems: MenuItem[] = [
-    { id: "remove-classification", label: "선택한 분류 제거", disabled: batchPending || !batchClassificationId, onSelect: () => onClassification(batchClassificationId, "remove") },
+    { id: "remove-album", label: "앨범에서 제거", disabled: batchPending || !batchAlbumId, onSelect: () => onAlbum(batchAlbumId, "remove") },
     { id: "favorite-off", label: "좋아요 끄기", disabled: batchPending, onSelect: () => onFavorite(false) },
   ];
 
@@ -49,11 +52,16 @@ export function AssetToolbar({
     <ViewToolbar title={location} ariaLabel="자산 도구">
       {selectedCount > 0 ? <>
         <strong>{selectedCount}개 선택</strong>
-        <Select label="일괄 분류" value={batchClassificationId} disabled={batchPending} onChange={(event) => setBatchClassificationId(event.target.value)}>
-          <option value="">분류 선택</option>
+        <Select label="폴더" value={batchClassificationId} disabled={batchPending} onChange={(event) => setBatchClassificationId(event.target.value)}>
+          <option value="">미분류</option>
           {classifications.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
         </Select>
-        <Button disabled={batchPending || !batchClassificationId} onClick={() => onClassification(batchClassificationId, "add")}>분류 추가</Button>
+        <Button disabled={batchPending} onClick={() => onMoveToFolder(batchClassificationId || null)}>폴더로 이동</Button>
+        <Select label="앨범" value={batchAlbumId} disabled={batchPending} onChange={(event) => setBatchAlbumId(event.target.value)}>
+          <option value="">앨범 선택</option>
+          {albums.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
+        </Select>
+        <Button disabled={batchPending || !batchAlbumId} onClick={() => onAlbum(batchAlbumId, "add")}>앨범에 추가</Button>
         <Button aria-label="좋아요 켜기" disabled={batchPending} onClick={() => onFavorite(true)}><StarIcon data-icon="inline-start" aria-hidden="true" />좋아요</Button>
         <Button aria-label="휴지통으로 이동" variant="danger" disabled={batchPending} onClick={onTrash}><TrashIcon data-icon="inline-start" aria-hidden="true" />휴지통</Button>
         <Menu label="추가 작업" items={overflowItems} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} />

@@ -1,6 +1,7 @@
 export type InternalDragPayload =
   | { kind: "assets"; assetIds: string[] }
-  | { kind: "classification"; entryId: string };
+  | { kind: "classification"; entryId: string }
+  | { kind: "album"; entryId: string };
 
 export type PointerDragState =
   | { phase: "idle" }
@@ -9,6 +10,7 @@ export type PointerDragState =
 
 export type ClassificationDropPosition = "inside";
 export type ClassificationDropTarget = {
+  kind: "classification" | "album";
   entryId: string;
   position: ClassificationDropPosition;
   valid: boolean;

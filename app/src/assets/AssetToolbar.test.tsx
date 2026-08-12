@@ -11,6 +11,7 @@ vi.mock("@tauri-apps/api/window", () => ({
 const baseProps = {
   view: { kind: "classification", classificationId: null } as AssetView,
   classifications: [{ id: "game", kind: "root" as const, name: "게임", parentId: null, iconKey: null, colorKey: null }],
+  albums: [{ id: "covers", name: "표지", parentId: null, iconKey: null, colorKey: null }],
   sort: "newest" as AssetSort,
   directOnly: false,
   metadataVisible: true,
@@ -23,7 +24,8 @@ const baseProps = {
   onMetadataVisibleChange: vi.fn(),
   onThumbnailRowHeightChange: vi.fn(),
   onFavorite: vi.fn(),
-  onClassification: vi.fn(),
+  onMoveToFolder: vi.fn(),
+  onAlbum: vi.fn(),
   onTrash: vi.fn(),
   onClearSelection: vi.fn(),
   batchPending: false,
@@ -63,8 +65,23 @@ it("keeps uncommon selection actions in the overflow menu", async () => {
 
   await user.click(screen.getByRole("button", { name: "추가 작업" }));
 
-  expect(screen.getByRole("menuitem", { name: "선택한 분류 제거" })).toBeVisible();
+  expect(screen.getByRole("menuitem", { name: "앨범에서 제거" })).toBeVisible();
   expect(screen.getByRole("menuitem", { name: "좋아요 끄기" })).toBeVisible();
+});
+
+it("moves a selection to one folder and adds it to an album", async () => {
+  const user = userEvent.setup();
+  const onMoveToFolder = vi.fn();
+  const onAlbum = vi.fn();
+  render(<AssetToolbar {...baseProps} selectedCount={2} onMoveToFolder={onMoveToFolder} onAlbum={onAlbum} />);
+
+  await user.selectOptions(screen.getByLabelText("폴더"), "game");
+  await user.click(screen.getByRole("button", { name: "폴더로 이동" }));
+  expect(onMoveToFolder).toHaveBeenCalledWith("game");
+
+  await user.selectOptions(screen.getByLabelText("앨범"), "covers");
+  await user.click(screen.getByRole("button", { name: "앨범에 추가" }));
+  expect(onAlbum).toHaveBeenCalledWith("covers", "add");
 });
 
 it("acts as the window title bar with drag region and window controls", () => {

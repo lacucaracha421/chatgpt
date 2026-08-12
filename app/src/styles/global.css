@@ -1481,6 +1481,25 @@ input:disabled {
   list-style: none;
 }
 
+.asset-inspector__folder-select {
+  display: grid;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+
+.asset-inspector__folder-select select {
+  min-width: 0;
+  height: var(--control-height-md);
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.asset-inspector__classifications h4 {
+  margin: var(--space-3) 0 0;
+}
+
 .trash-browser {
   display: grid;
   align-content: start;

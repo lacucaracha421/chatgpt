@@ -2,7 +2,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
-import type { AssetSummary, ClassificationEntry, LibraryGateway } from "../library/types";
+import type { AlbumEntry, AssetSummary, ClassificationEntry, LibraryGateway } from "../library/types";
 import { AssetInspector } from "./AssetInspector";
 
 const openUrl = vi.fn().mockResolvedValue(undefined);
@@ -13,11 +13,15 @@ const classifications: ClassificationEntry[] = [
   { id: "tag", kind: "tag", name: "태그", parentId: null, iconKey: null, colorKey: null },
   { id: "work", kind: "work", name: "작품", parentId: null, iconKey: null, colorKey: null },
 ];
+const albums: AlbumEntry[] = [
+  { id: "cover", name: "표지", parentId: null, iconKey: null, colorKey: null },
+  { id: "reference", name: "자료", parentId: null, iconKey: null, colorKey: null },
+];
 
 it("hides the open control when there is no selection", () => {
   render(
     <LibraryProvider gateway={createGateway([])}>
-      <AssetInspector assets={[]} classifications={[]} open={false} onOpenChange={vi.fn()} onPatchClassifications={vi.fn()} />
+      <AssetInspector assets={[]} classifications={[]} albums={[]} open={false} onOpenChange={vi.fn()} onMoveToFolder={vi.fn()} onPatchAlbum={vi.fn()} />
     </LibraryProvider>,
   );
 
@@ -27,7 +31,7 @@ it("hides the open control when there is no selection", () => {
 it("stays collapsed by default and renders nothing while closed", () => {
   render(
     <LibraryProvider gateway={createGateway([])}>
-      <AssetInspector assets={[asset("a")]} classifications={[]} open={false} onOpenChange={vi.fn()} onPatchClassifications={vi.fn()} />
+      <AssetInspector assets={[asset("a")]} classifications={[]} albums={[]} open={false} onOpenChange={vi.fn()} onMoveToFolder={vi.fn()} onPatchAlbum={vi.fn()} />
     </LibraryProvider>,
   );
 
@@ -39,7 +43,7 @@ it("closes from Escape while focus is inside the inspector", async () => {
   const onOpenChange = vi.fn();
   render(
     <LibraryProvider gateway={createGateway([])}>
-      <AssetInspector assets={[asset("a")]} classifications={[]} open onOpenChange={onOpenChange} onPatchClassifications={vi.fn()} />
+      <AssetInspector assets={[asset("a")]} classifications={[]} albums={[]} open onOpenChange={onOpenChange} onMoveToFolder={vi.fn()} onPatchAlbum={vi.fn()} />
     </LibraryProvider>,
   );
 
@@ -53,7 +57,7 @@ it("shows one-asset metadata and opens its source URL", async () => {
   const user = userEvent.setup();
   render(
     <LibraryProvider gateway={createGateway([])}>
-      <AssetInspector assets={[asset("a")]} classifications={[]} open onOpenChange={vi.fn()} onPatchClassifications={vi.fn()} />
+      <AssetInspector assets={[asset("a")]} classifications={[]} albums={[]} open onOpenChange={vi.fn()} onMoveToFolder={vi.fn()} onPatchAlbum={vi.fn()} />
     </LibraryProvider>,
   );
 
@@ -63,47 +67,62 @@ it("shows one-asset metadata and opens its source URL", async () => {
   expect(openUrl).toHaveBeenCalledWith("https://example.com/source/a");
 });
 
-it("checks a classification that every selected asset has and toggles it off", async () => {
-  const gateway = createGateway(["tag"]);
-  const onPatchClassifications = vi.fn();
+it("checks an album that every selected asset has and toggles it off", async () => {
+  const gateway = createGateway(["tag"], ["cover"]);
+  const onPatchAlbum = vi.fn();
   render(
     <LibraryProvider gateway={gateway}>
-      <AssetInspector assets={[asset("a")]} classifications={classifications} open onOpenChange={vi.fn()} onPatchClassifications={onPatchClassifications} />
+      <AssetInspector assets={[asset("a")]} classifications={classifications} albums={albums} open onOpenChange={vi.fn()} onMoveToFolder={vi.fn()} onPatchAlbum={onPatchAlbum} />
     </LibraryProvider>,
   );
-  const checkbox = await screen.findByRole("checkbox", { name: "태그 분류" });
+  const checkbox = await screen.findByRole("checkbox", { name: "표지 앨범" });
   expect(checkbox).toBeChecked();
-  expect(screen.getByRole("checkbox", { name: "작품 분류" })).not.toBeChecked();
+  expect(screen.getByRole("checkbox", { name: "자료 앨범" })).not.toBeChecked();
 
   await userEvent.click(checkbox);
-  expect(onPatchClassifications).toHaveBeenCalledWith("tag", "remove");
+  expect(onPatchAlbum).toHaveBeenCalledWith("cover", "remove");
 });
 
-it("shows indeterminate state when only some of the selection has a classification", async () => {
-  const getAssetClassifications = vi.fn().mockImplementation((assetId: string) => Promise.resolve(assetId === "a" ? ["tag"] : []));
-  const gateway = { getAssetClassifications } as unknown as LibraryGateway;
+it("shows indeterminate state when only some of the selection is in an album", async () => {
+  const getAssetClassifications = vi.fn().mockResolvedValue(["tag"]);
+  const getAssetAlbums = vi.fn().mockImplementation((assetId: string) => Promise.resolve(assetId === "a" ? ["cover"] : []));
+  const gateway = { getAssetClassifications, getAssetAlbums } as unknown as LibraryGateway;
   render(
     <LibraryProvider gateway={gateway}>
-      <AssetInspector assets={[asset("a"), asset("b")]} classifications={classifications} open onOpenChange={vi.fn()} onPatchClassifications={vi.fn()} />
+      <AssetInspector assets={[asset("a"), asset("b")]} classifications={classifications} albums={albums} open onOpenChange={vi.fn()} onMoveToFolder={vi.fn()} onPatchAlbum={vi.fn()} />
     </LibraryProvider>,
   );
-  const checkbox = await screen.findByRole("checkbox", { name: "태그 분류" });
+  const checkbox = await screen.findByRole("checkbox", { name: "표지 앨범" });
   await waitFor(() => expect(checkbox).toHaveProperty("indeterminate", true));
 });
 
-it("reports when classification membership cannot be loaded", async () => {
-  const gateway = createGateway([], true);
+it("moves the selection to one folder", async () => {
+  const user = userEvent.setup();
+  const onMoveToFolder = vi.fn();
   render(
-    <LibraryProvider gateway={gateway}>
-      <AssetInspector assets={[asset("a")]} classifications={classifications} open onOpenChange={vi.fn()} onPatchClassifications={vi.fn()} />
+    <LibraryProvider gateway={createGateway(["tag"])}>
+      <AssetInspector assets={[asset("a")]} classifications={classifications} albums={albums} open onOpenChange={vi.fn()} onMoveToFolder={onMoveToFolder} onPatchAlbum={vi.fn()} />
     </LibraryProvider>,
   );
-  expect(await screen.findByText("분류 상태를 불러오지 못했습니다.")).toBeVisible();
+
+  await user.selectOptions(await screen.findByLabelText("폴더"), "work");
+  expect(onMoveToFolder).toHaveBeenCalledWith("work");
 });
 
-function createGateway(classificationIds: string[], reject = false): LibraryGateway {
+it("reports when classification membership cannot be loaded", async () => {
+  const gateway = createGateway([], [], true);
+  render(
+    <LibraryProvider gateway={gateway}>
+      <AssetInspector assets={[asset("a")]} classifications={classifications} albums={albums} open onOpenChange={vi.fn()} onMoveToFolder={vi.fn()} onPatchAlbum={vi.fn()} />
+    </LibraryProvider>,
+  );
+  expect(await screen.findByText("폴더와 앨범 상태를 불러오지 못했습니다.")).toBeVisible();
+});
+
+function createGateway(classificationIds: string[], albumIds: string[] = [], reject = false): LibraryGateway {
   return {
     getAssetClassifications: vi.fn().mockImplementation(() => reject ? Promise.reject(new Error("membership failed")) : Promise.resolve(classificationIds)),
+    getAssetAlbums: vi.fn().mockImplementation(() => reject ? Promise.reject(new Error("membership failed")) : Promise.resolve(albumIds)),
   } as unknown as LibraryGateway;
 }
 
