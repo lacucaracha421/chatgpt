@@ -239,6 +239,23 @@ pub struct CreateClassification {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct AlbumEntry {
+    pub id: String,
+    pub name: String,
+    pub parent_id: Option<String>,
+    pub icon_key: Option<String>,
+    pub color_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateAlbum {
+    pub name: String,
+    pub parent_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct LibrarySummary {
     pub root: String,
 }

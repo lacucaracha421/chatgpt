@@ -779,7 +779,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let destination = temp.path().join("snapshot.sqlite");
         let source = rusqlite::Connection::open_in_memory().unwrap();
-        source.execute_batch("PRAGMA user_version = 8;").unwrap();
+        source.execute_batch("PRAGMA user_version = 9;").unwrap();
 
         let error = create_verified_snapshot(&source, &destination).unwrap_err();
 
