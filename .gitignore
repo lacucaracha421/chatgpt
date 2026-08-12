@@ -2,3 +2,4 @@
 .worktrees/
 .acceptance/
 __pycache__/
+*.lnk
