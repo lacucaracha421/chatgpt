@@ -393,46 +393,48 @@ export function ClassificationSidebar({
         </ul>
       </ContextMenu>
       {albumTree.hasOrphans && <p className="classification-sidebar__warning" role="alert">연결되지 않은 앨범을 숨겼습니다.</p>}
-      <button type="button" className="classification-sidebar__tree-heading" aria-expanded={albumsOpen} aria-label={`앨범 ${albumsOpen ? "접기" : "펼치기"}`} onClick={() => setAlbumsOpen((open) => !open)}>
-        {albumsOpen ? <ChevronDownIcon aria-hidden="true" /> : <ChevronRightIcon aria-hidden="true" />}
-        <span>앨범 ({albumTree.length})</span>
-      </button>
       <ContextMenu items={[{ id: "create-album", label: "새 앨범", onSelect: () => openTopLevelCreate("album") }]}>
-        <ul className="classification-sidebar__tree" role="tree" aria-label="앨범" hidden={!albumsOpen}>
-          {albumTree.map((node) => (
-            <TreeItem
-              key={node.entry.id}
-              node={node}
-              view={view}
-              expandedIds={expandedAlbumIds}
-              activeRowId={activeRowId}
-              inlineEdit={inlineEdit}
-              editName={name}
-              editError={editError}
-              onViewChange={onViewChange}
-              onToggleExpanded={toggleExpanded}
-              onRowFocus={setFocusedId}
-              onRowKeyDown={handleTreeKeyDown}
-              registerTreeRow={registerTreeRow}
-              onCreateChild={openChildCreate}
-              onRename={openRename}
-              onAppearance={setAppearanceEntry}
-              onEditNameChange={(nextName) => { setName(nextName); setEditError(null); }}
-              onEditSave={() => void saveInlineEdit()}
-              onEditCancel={cancelInlineEdit}
-              onMove={(entry) => { setParentId(entry.parentId ?? ""); setDialog({ type: "move", entry }); }}
-              onDelete={openDelete}
-              dragTarget={dragTarget}
-              onPointerDragStart={onPointerDragStart}
-              onPointerDragMove={onPointerDragMove}
-              onPointerDragEnd={onPointerDragEnd}
-              onPointerDragCancel={onPointerDragCancel}
-            />
-          ))}
-          {inlineEdit?.type === "create" && inlineEdit.treeKind === "album" && inlineEdit.parentId === null && (
-            <InlineFolderEditor name={name} error={editError} onNameChange={(nextName) => { setName(nextName); setEditError(null); }} onSave={() => void saveInlineEdit()} onCancel={cancelInlineEdit} />
-          )}
-        </ul>
+        <div>
+          <button type="button" className="classification-sidebar__tree-heading" aria-expanded={albumsOpen} aria-label={`앨범 ${albumsOpen ? "접기" : "펼치기"}`} onClick={() => setAlbumsOpen((open) => !open)}>
+            {albumsOpen ? <ChevronDownIcon aria-hidden="true" /> : <ChevronRightIcon aria-hidden="true" />}
+            <span>앨범 ({albumTree.length})</span>
+          </button>
+          <ul className="classification-sidebar__tree" role="tree" aria-label="앨범" hidden={!albumsOpen}>
+            {albumTree.map((node) => (
+              <TreeItem
+                key={node.entry.id}
+                node={node}
+                view={view}
+                expandedIds={expandedAlbumIds}
+                activeRowId={activeRowId}
+                inlineEdit={inlineEdit}
+                editName={name}
+                editError={editError}
+                onViewChange={onViewChange}
+                onToggleExpanded={toggleExpanded}
+                onRowFocus={setFocusedId}
+                onRowKeyDown={handleTreeKeyDown}
+                registerTreeRow={registerTreeRow}
+                onCreateChild={openChildCreate}
+                onRename={openRename}
+                onAppearance={setAppearanceEntry}
+                onEditNameChange={(nextName) => { setName(nextName); setEditError(null); }}
+                onEditSave={() => void saveInlineEdit()}
+                onEditCancel={cancelInlineEdit}
+                onMove={(entry) => { setParentId(entry.parentId ?? ""); setDialog({ type: "move", entry }); }}
+                onDelete={openDelete}
+                dragTarget={dragTarget}
+                onPointerDragStart={onPointerDragStart}
+                onPointerDragMove={onPointerDragMove}
+                onPointerDragEnd={onPointerDragEnd}
+                onPointerDragCancel={onPointerDragCancel}
+              />
+            ))}
+            {inlineEdit?.type === "create" && inlineEdit.treeKind === "album" && inlineEdit.parentId === null && (
+              <InlineFolderEditor name={name} error={editError} onNameChange={(nextName) => { setName(nextName); setEditError(null); }} onSave={() => void saveInlineEdit()} onCancel={cancelInlineEdit} />
+            )}
+          </ul>
+        </div>
       </ContextMenu>
       <div className="classification-sidebar__footer">
         <QuickViewButton icon={<TrashIcon aria-hidden="true" />} label="휴지통" selected={view.kind === "trash"} onClick={() => onViewChange({ kind: "trash" })} />

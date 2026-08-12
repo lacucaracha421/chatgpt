@@ -121,6 +121,19 @@ describe("buildClassificationTree", () => {
 });
 
 describe("ClassificationSidebar", () => {
+  it("creates the first album from the album heading context menu", async () => {
+    const user = userEvent.setup();
+    const fixtureGateway = gateway();
+    renderSidebar(fixtureGateway, { albums: [] });
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "앨범 접기" }));
+    await user.click(screen.getByRole("menuitem", { name: "새 앨범" }));
+    await user.type(screen.getByRole("textbox", { name: "폴더 이름" }), "표지");
+    await user.keyboard("{Enter}");
+
+    expect(fixtureGateway.createAlbum).toHaveBeenCalledWith({ name: "표지", parentId: null });
+  });
+
   it("shows a nested album section and selects an album", async () => {
     const user = userEvent.setup();
     const onViewChange = vi.fn();
