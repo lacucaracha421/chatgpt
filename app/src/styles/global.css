@@ -346,6 +346,12 @@ input:disabled {
   justify-content: space-between;
 }
 
+.classification-sidebar__heading h2 {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
 .classification-sidebar__form {
   flex-direction: column;
 }
@@ -442,7 +448,17 @@ input:disabled {
 }
 
 .classification-sidebar__tree {
-  --classification-row-height: var(--control-height-sm);
+  --classification-row-height: var(--sidebar-tree-row-height);
+  --classification-selection-height: var(--sidebar-selection-height);
+  --classification-depth-step: var(--sidebar-depth-step);
+  --classification-row-start: var(--space-1);
+  --classification-toggle-size: 16px;
+  --classification-triangle-height: var(--sidebar-triangle-height);
+  --classification-triangle-width: 6px;
+  --classification-triangle-clearance: var(--sidebar-triangle-clearance);
+  --classification-toggle-center-x: calc(var(--classification-row-start) + var(--classification-toggle-size) / 2);
+  --classification-icon-center-x: calc(var(--classification-toggle-center-x) + var(--classification-depth-step));
+  --classification-branch-x: var(--classification-icon-center-x);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -456,7 +472,7 @@ input:disabled {
   padding: 0;
   margin: var(--space-3) var(--space-1) var(--space-1);
   color: var(--color-muted);
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   text-align: left;
   background: transparent;
   border: 0;
@@ -470,39 +486,108 @@ input:disabled {
 .classification-sidebar__tree ul[role="group"] {
   position: relative;
   margin: 0;
-  padding-inline-start: var(--classification-branch-indent);
+  padding-inline-start: var(--classification-depth-step);
   list-style: none;
 }
 
 .classification-sidebar__tree ul[role="group"]::before {
   position: absolute;
-  top: 0;
-  bottom: calc(var(--classification-row-height) / 2);
-  left: 7px;
+  top: calc(var(--classification-row-height) / -2);
+  left: var(--classification-branch-x);
+  height: calc(var(--classification-row-height) / 2);
   width: var(--border-width);
   content: "";
   background: color-mix(in srgb, var(--classification-branch-color) var(--classification-connector-mix), transparent);
 }
 
+.classification-sidebar__tree ul[role="group"]:has(
+  > .classification-sidebar__tree-item:first-child
+  > .classification-sidebar__tree-row[aria-expanded]
+)::before {
+  display: none;
+}
+
 .classification-sidebar__tree ul[role="group"] > .classification-sidebar__tree-item::before {
   position: absolute;
-  top: calc(var(--classification-row-height) / 2);
-  left: calc((var(--classification-branch-indent) - 7px) * -1);
-  width: calc(var(--classification-branch-indent) - 7px);
-  height: var(--border-width);
+  top: 0;
+  bottom: 0;
+  left: var(--classification-toggle-center-x);
+  width: var(--border-width);
   content: "";
   background: color-mix(in srgb, var(--classification-branch-color) var(--classification-connector-mix), transparent);
 }
 
-.classification-sidebar__tree ul[role="group"] > .classification-sidebar__tree-item:last-child::after {
+.classification-sidebar__tree ul[role="group"] > .classification-sidebar__tree-item:first-child:has(
+  > .classification-sidebar__tree-row[aria-expanded]
+)::before {
+  top: calc(
+    var(--classification-row-height) / 2
+    + var(--classification-triangle-height) / 2
+    + var(--classification-triangle-clearance)
+  );
+}
+
+.classification-sidebar__tree ul[role="group"] > .classification-sidebar__tree-item:last-child::before {
+  bottom: auto;
+  height: calc(var(--classification-row-height) / 2 - var(--classification-connector-radius));
+}
+
+.classification-sidebar__tree ul[role="group"] > .classification-sidebar__tree-item:last-child:has(
+  > .classification-sidebar__tree-row[aria-expanded]
+)::before {
+  height: calc(
+    var(--classification-row-height) / 2
+    - var(--classification-triangle-height) / 2
+    - var(--classification-triangle-clearance)
+  );
+}
+
+.classification-sidebar__tree ul[role="group"] > .classification-sidebar__tree-item:first-child:last-child:has(
+  > .classification-sidebar__tree-row[aria-expanded]
+)::before {
+  display: none;
+}
+
+.classification-sidebar__tree ul[role="group"] > .classification-sidebar__tree-item:last-child:not(
+  :has(> .classification-sidebar__tree-row[aria-expanded])
+)::after {
   position: absolute;
-  z-index: 0;
-  top: calc(var(--classification-row-height) / 2 + var(--border-width));
-  bottom: 0;
-  left: calc((var(--classification-branch-indent) - 8px) * -1);
-  width: 3px;
+  top: calc(var(--classification-row-height) / 2 - var(--classification-connector-radius));
+  left: var(--classification-toggle-center-x);
+  width: var(--classification-depth-step);
+  height: var(--classification-connector-radius);
   content: "";
-  background: var(--color-sidebar);
+  border-left: var(--border-width) solid color-mix(in srgb, var(--classification-branch-color) var(--classification-connector-mix), transparent);
+  border-bottom: var(--border-width) solid color-mix(in srgb, var(--classification-branch-color) var(--classification-connector-mix), transparent);
+  border-bottom-left-radius: var(--classification-connector-radius);
+}
+
+.classification-sidebar__tree-item[data-has-next-sibling="true"]
+> ul[role="group"]
+> .classification-sidebar__tree-item:last-child::before {
+  display: block;
+  top: 0;
+  bottom: 0;
+  height: auto;
+}
+
+.classification-sidebar__tree-item[data-has-next-sibling="true"]
+> ul[role="group"]
+> .classification-sidebar__tree-item:last-child::after {
+  display: none;
+}
+
+.classification-sidebar__tree-item[data-has-next-sibling="true"]
+> ul[role="group"]
+> .classification-sidebar__tree-item:first-child:last-child:has(
+  > .classification-sidebar__tree-row[aria-expanded]
+)::before {
+  top: calc(
+    var(--classification-row-height) / 2
+    + var(--classification-triangle-height) / 2
+    + var(--classification-triangle-clearance)
+  );
+  bottom: 0;
 }
 
 .classification-sidebar {
@@ -522,7 +607,7 @@ input:disabled {
 
 .classification-sidebar__quick-views {
   display: grid;
-  gap: var(--space-1);
+  gap: 2px;
 }
 
 .ui-toast {
@@ -553,7 +638,7 @@ input:disabled {
 
 .classification-sidebar__footer {
   display: grid;
-  gap: var(--space-1);
+  gap: 2px;
   margin-top: auto;
   padding-top: var(--space-3);
   border-top: var(--border-width) solid var(--color-border);
@@ -571,35 +656,59 @@ input:disabled {
   align-items: center;
   min-width: 0;
   max-width: 100%;
-  min-height: var(--classification-row-height);
-  gap: var(--space-2);
 }
 
 .classification-sidebar__quick-view {
   width: 100%;
-  padding: 0 var(--space-2);
+  min-height: var(--sidebar-quick-row-height);
+  padding: 0;
+  color: var(--color-text);
   text-align: left;
+  background: transparent;
+  border: 0;
 }
 
-.classification-sidebar__quick-view svg {
+.classification-sidebar__quick-view-surface {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-width: 0;
+  height: var(--sidebar-selection-height);
+  gap: var(--space-2);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-selection);
+}
+
+.classification-sidebar__quick-view-surface svg {
   flex: none;
   width: 18px;
   height: 18px;
+  color: var(--color-muted);
 }
 
-.classification-sidebar__tree-row svg {
-  flex: none;
-  width: 16px;
-  height: 16px;
+.classification-sidebar__quick-view-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.classification-sidebar__quick-view[aria-current="page"],
-.classification-sidebar__tree-row[aria-selected="true"] {
-  background: var(--color-selected);
+.classification-sidebar__quick-view[aria-current="page"] > .classification-sidebar__quick-view-surface {
+  color: var(--color-text);
+  background: var(--color-sidebar-selection);
 }
 
-.classification-sidebar__quick-view[aria-current="page"] {
-  box-shadow: inset var(--selection-indicator-width) 0 var(--color-accent);
+.classification-sidebar__quick-view[aria-current="page"] > .classification-sidebar__quick-view-surface svg {
+  color: currentColor;
+}
+
+.classification-sidebar__quick-view:hover > .classification-sidebar__quick-view-surface {
+  background: var(--color-sidebar-hover);
+}
+
+.classification-sidebar__quick-view[aria-current="page"]:hover > .classification-sidebar__quick-view-surface {
+  background: var(--color-sidebar-selection);
 }
 
 .classification-sidebar__tree-item {
@@ -614,12 +723,92 @@ input:disabled {
 }
 
 .classification-sidebar__tree-row {
+  position: relative;
   z-index: 1;
-  gap: var(--space-compact);
+  width: 100%;
+  min-height: var(--classification-row-height);
+  gap: var(--space-2);
   padding-left: var(--space-1);
   padding-right: var(--space-1);
-  border-radius: var(--radius-sm);
+  background: transparent;
+}
+
+.classification-sidebar__tree-toggle,
+.classification-sidebar__tree-spacer {
   position: relative;
+  z-index: 2;
+  flex: none;
+  width: var(--classification-toggle-size);
+  min-width: var(--classification-toggle-size);
+  height: var(--classification-toggle-size);
+  min-height: var(--classification-toggle-size);
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+
+.classification-sidebar__tree-toggle.ui-button--ghost:hover:not(:disabled),
+.classification-sidebar__tree-toggle.ui-button--ghost:focus-visible {
+  background: transparent;
+}
+
+.classification-sidebar__tree-toggle::before {
+  position: absolute;
+  z-index: -1;
+  top: 50%;
+  left: 50%;
+  width: calc(var(--border-width) * 3);
+  height: calc(
+    var(--classification-triangle-clearance) * 2
+    + var(--classification-triangle-height)
+  );
+  content: "";
+  background: var(--color-sidebar);
+  transform: translate(-50%, -50%);
+}
+
+.classification-sidebar__tree-toggle-mark {
+  display: block;
+  width: 0;
+  height: 0;
+  border-top: calc(var(--classification-triangle-height) / 2) solid transparent;
+  border-bottom: calc(var(--classification-triangle-height) / 2) solid transparent;
+  border-left: var(--classification-triangle-width) solid var(--color-muted);
+  transform-origin: calc(var(--classification-triangle-width) / 2) 50%;
+}
+
+.classification-sidebar__tree-toggle-mark[data-state="expanded"] {
+  transform: rotate(90deg);
+}
+
+.classification-sidebar__tree-row[aria-selected="true"] .classification-sidebar__tree-toggle-mark {
+  border-left-color: var(--color-text);
+}
+
+.classification-sidebar__tree-surface {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: calc(100% - var(--classification-toggle-size) - var(--space-2));
+  height: var(--classification-selection-height);
+  gap: var(--space-compact);
+  margin-left: calc(var(--space-1) * -1);
+  padding: 0 var(--space-compact) 0 var(--space-1);
+  color: var(--color-text);
+  border-radius: var(--radius-selection);
+}
+
+.classification-sidebar__tree-row[aria-selected="true"] > .classification-sidebar__tree-surface {
+  background: var(--color-sidebar-selection);
+}
+
+.classification-sidebar__tree-row:hover > .classification-sidebar__tree-surface {
+  background: var(--color-sidebar-hover);
+}
+
+.classification-sidebar__tree-row[aria-selected="true"]:hover > .classification-sidebar__tree-surface {
+  background: var(--color-sidebar-selection);
 }
 
 .classification-sidebar__tree-row[data-drop-state="valid"][data-drop-position="inside"] {
@@ -722,11 +911,11 @@ input:disabled {
 
 .classification-sidebar__badge {
   min-width: 20px;
-  margin-left: auto;
+  margin-left: var(--space-1);
   padding: 0 var(--space-1);
   color: var(--color-muted);
   text-align: center;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
 }
 
 .classification-sidebar__tree-label {
@@ -739,6 +928,8 @@ input:disabled {
 
 .classification-sidebar__tree-folder {
   flex: none;
+  width: var(--classification-icon-size);
+  height: var(--classification-icon-size);
 }
 
 .classification-sidebar__inline-edit {
@@ -768,7 +959,7 @@ input:disabled {
 }
 
 .classification-sidebar__tree-spacer {
-  width: var(--control-height-icon);
+  width: var(--classification-toggle-size);
 }
 
 .classification-sidebar__resize-handle {

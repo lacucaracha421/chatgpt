@@ -616,7 +616,14 @@ function TreeItem({ activeRowId, editError, editName, expandedIds, hasNextSiblin
         </div>
       </ContextMenu>
       {expanded && (hasChildren || creatingChild) && (
-        <ul role="group" style={{ "--classification-branch-color": classificationColor(node.entry.colorKey) } as CSSProperties}>
+        <ul
+          role="group"
+          style={{
+            "--classification-branch-color": node.entry.colorKey
+              ? classificationColor(node.entry.colorKey)
+              : "var(--color-sidebar-connector)",
+          } as CSSProperties}
+        >
           {node.children.map((child, index) => <TreeItem key={child.entry.id} node={child} hasNextSibling={index < node.children.length - 1} view={view} expandedIds={expandedIds} activeRowId={activeRowId} inlineEdit={inlineEdit} editName={editName} editError={editError} onViewChange={onViewChange} onToggleExpanded={onToggleExpanded} onRowFocus={onRowFocus} onRowKeyDown={onRowKeyDown} registerTreeRow={registerTreeRow} onAppearance={onAppearance} onCreateChild={onCreateChild} onRename={onRename} onEditNameChange={onEditNameChange} onEditSave={onEditSave} onEditCancel={onEditCancel} onMove={onMove} onDelete={onDelete} dragTarget={dragTarget} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />)}
           {creatingChild && <InlineFolderEditor name={editName} error={editError} onNameChange={onEditNameChange} onSave={onEditSave} onCancel={onEditCancel} />}
         </ul>

@@ -312,6 +312,8 @@ describe("ClassificationSidebar", () => {
     const group = games.closest("li")?.querySelector(":scope > [role='group']") as HTMLElement;
     expect(group.style.getPropertyValue("--classification-branch-color")).toBe("#df6fa7");
     expect(screen.getByRole("treeitem", { name: "Blue Archive" }).querySelector("[data-icon-key='book']")).toBeInTheDocument();
+    const defaultGroup = screen.getByRole("treeitem", { name: "Blue Archive" }).closest("li")?.querySelector(":scope > [role='group']") as HTMLElement;
+    expect(defaultGroup.style.getPropertyValue("--classification-branch-color")).toBe("var(--color-sidebar-connector)");
   });
 
   it("opens the row context menu from both keyboard menu shortcuts", async () => {
