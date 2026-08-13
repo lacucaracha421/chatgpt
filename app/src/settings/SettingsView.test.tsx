@@ -52,6 +52,25 @@ it("uses the shared view toolbar with window controls", async () => {
   expect(screen.getByRole("button", { name: "창 닫기" })).toBeInTheDocument();
 });
 
+it("uses desktop settings navigation and compact property rows", async () => {
+  const gateway = createGateway();
+  const { container } = render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  const navigation = screen.getByRole("navigation", { name: "설정 구역" });
+  expect(navigation).toHaveClass("settings-view__navigation");
+  expect(screen.getByRole("button", { name: "일반" })).toHaveAttribute("aria-current", "page");
+  expect(screen.getByRole("heading", { name: "일반" })).toBeInTheDocument();
+  expect(container.querySelectorAll(".settings-view__property")).toHaveLength(3);
+
+  await userEvent.click(screen.getByRole("button", { name: "메타데이터 가져오기" }));
+  expect(screen.getByRole("heading", { name: "메타데이터 가져오기" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "메타데이터 가져오기" })).toHaveAttribute("aria-current", "page");
+});
+
 it("loads the manga root and changes it through the folder picker", async () => {
   const user = userEvent.setup();
   const gateway = createGateway();

@@ -131,51 +131,52 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
 
   return <section className="settings-view" aria-label="설정" onKeyDown={(event) => { if (event.key === "Escape" && !pending) onExit(); }}>
     <ViewToolbar title="설정" />
-    <nav className="settings-view__sections" aria-label="설정 구역">
-      <Button className="settings-view__section-button" variant="ghost" aria-current={section === "general" ? "page" : undefined} onClick={() => setSection("general")}>일반 설정</Button>
+    <div className="settings-view__body">
+    <nav className="settings-view__navigation" aria-label="설정 구역">
+      <Button className="settings-view__section-button" variant="ghost" aria-current={section === "general" ? "page" : undefined} onClick={() => setSection("general")}>일반</Button>
       <Button className="settings-view__section-button" variant="ghost" aria-current={section === "browser_extension" ? "page" : undefined} onClick={() => setSection("browser_extension")}>브라우저 확장</Button>
       <Button className="settings-view__section-button" variant="ghost" aria-current={section === "metadata_import" ? "page" : undefined} onClick={() => setSection("metadata_import")}>메타데이터 가져오기</Button>
       <Button className="settings-view__section-button" variant="ghost" aria-current={section === "safety" ? "page" : undefined} onClick={() => setSection("safety")}>안전</Button>
-      <Button className="settings-view__section-button" variant="ghost" aria-current={section === "shortcuts" ? "page" : undefined} onClick={() => setSection("shortcuts")}>단축키·버튼 설명</Button>
+      <Button className="settings-view__section-button" variant="ghost" aria-current={section === "shortcuts" ? "page" : undefined} onClick={() => setSection("shortcuts")}>단축키</Button>
     </nav>
+    <div className="settings-view__content">
     {section === "general" && (
-      <div className="settings-view__general">
-        <dl className="settings-view__field">
+      <div className="settings-view__section">
+        <header className="settings-view__header"><h2>일반</h2><p>라이브러리와 외부 콘텐츠 폴더를 관리합니다.</p></header>
+        <dl className="settings-view__property">
           <dt>라이브러리 폴더</dt>
-          <dd>{library?.root ?? "알 수 없음"}</dd>
+          <dd className="settings-view__path">{library?.root ?? "알 수 없음"}</dd>
         </dl>
-        <dl className="settings-view__field">
+        <dl className="settings-view__property">
           <dt>앱 버전</dt>
           <dd>{appVersion ?? "알 수 없음"}</dd>
         </dl>
-        <dl className="settings-view__field">
+        <dl className="settings-view__property">
           <dt>망가 폴더</dt>
-          <dd>
-            <span>{mangaRoot ?? "설정되지 않음"}</span>
-            <Button size="sm" onClick={() => void chooseMangaFolder()}>변경</Button>
-            {mangaRootError && <span role="alert">{mangaRootError}</span>}
-          </dd>
+          <dd className="settings-view__path">{mangaRoot ?? "설정되지 않음"}</dd>
+          <Button size="sm" onClick={() => void chooseMangaFolder()}>변경</Button>
+          {mangaRootError && <dd className="settings-view__row-message" role="alert">{mangaRootError}</dd>}
         </dl>
       </div>
     )}
     {section === "browser_extension" && (
-      <div className="settings-view__extension">
-        <p>X 이미지를 방사형 메뉴로 수집하는 Edge 확장 프로그램의 연결 정보입니다.</p>
+      <div className="settings-view__section">
+        <header className="settings-view__header"><h2>브라우저 확장</h2><p>Edge 확장 프로그램의 로컬 연결을 확인합니다.</p></header>
         {extensionError && <Toast>{extensionError}</Toast>}
         {!extensionConnection && !extensionError ? (
           <Skeleton className="settings-view__skeleton" label="확장 프로그램 연결 정보를 불러오는 중" />
         ) : extensionConnection ? (
           <>
-            <dl className="settings-view__field">
+            <dl className="settings-view__property">
               <dt>연결 상태</dt>
               <dd>{extensionConnection.status === "ready" ? "연결됨" : "사용 불가"}</dd>
             </dl>
-            <dl className="settings-view__field">
+            <dl className="settings-view__property">
               <dt>로컬 주소</dt>
-              <dd>{extensionConnection.baseUrl}</dd>
+              <dd className="settings-view__path">{extensionConnection.baseUrl}</dd>
             </dl>
-            <label className="settings-view__field">
-              <span>확장 프로그램 연결 키</span>
+            <label className="settings-view__property">
+              <span className="settings-view__property-label">연결 키</span>
               <span className="settings-view__token-row">
                 <input
                   className="settings-view__token"
@@ -197,20 +198,21 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
       </div>
     )}
     {section === "metadata_import" && (
-      <div className="settings-view__extension">
-        <p>확장 프로그램이 내보낸 메타데이터 JSON을 우선해 분류 폴더를 만들고 이미지 사본을 라이브러리에 저장합니다. 원본 폴더는 변경하지 않습니다.</p>
-        <dl className="settings-view__field">
+      <div className="settings-view__section">
+        <header className="settings-view__header"><h2>메타데이터 가져오기</h2><p>내보낸 JSON을 기준으로 분류와 이미지 사본을 가져옵니다. 원본은 변경하지 않습니다.</p></header>
+        <dl className="settings-view__property">
           <dt>최근 가져오기 폴더</dt>
-          <dd>{lastImportFolder ?? "아직 없음"}</dd>
+          <dd className="settings-view__path">{lastImportFolder ?? "아직 없음"}</dd>
         </dl>
-        <div className="ui-dialog__actions">
+        <div className="settings-view__actions">
           {lastImportFolder && <Button disabled={pending || metadataImportRunning || !onImportFolder} onClick={() => void onImportFolder?.(lastImportFolder)}>최근 폴더 다시 가져오기</Button>}
           <Button variant="primary" disabled={pending || metadataImportRunning || !onImportFolder} onClick={() => void chooseImportFolder()}>{lastImportFolder ? "다른 폴더 선택" : "폴더 선택"}</Button>
         </div>
       </div>
     )}
     {section === "safety" && (
-      <div className="settings-view__safety">
+      <div className="settings-view__section settings-view__safety">
+        <header className="settings-view__header"><h2>안전</h2><p>자동 백업에서 라이브러리 관리 정보를 복구합니다.</p></header>
         {confirmingId ? (
           <div className="settings-view__safety-confirm">
             <p>현재 상태를 별도로 보존한 뒤 선택한 시점으로 관리 정보를 복구합니다.</p>
@@ -224,7 +226,6 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           </div>
         ) : (
           <>
-            <p>라이브러리 관리 정보의 자동 백업을 선택해 복구할 수 있습니다.</p>
             {error && <div className="settings-view__safety-error"><Toast>{error}</Toast><Button onClick={() => { setError(null); setBackups(null); setBackupRetryVersion((version) => version + 1); }}>다시 시도</Button></div>}
             {!backups && !error ? (
               <Skeleton className="settings-view__skeleton" label="백업 목록을 불러오는 중" />
@@ -249,7 +250,8 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
       </div>
     )}
     {section === "shortcuts" && (
-      <div className="settings-view__shortcuts">
+      <div className="settings-view__section settings-view__shortcuts">
+        <header className="settings-view__header"><h2>단축키</h2><p>키보드 조작과 주요 화면 버튼을 확인합니다.</p></header>
         <h3>단축키</h3>
         <table className="settings-view__table">
           <thead><tr><th scope="col">단축키</th><th scope="col">동작</th></tr></thead>
@@ -266,6 +268,8 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
         </table>
       </div>
     )}
+    </div>
+    </div>
   </section>;
 }
 
