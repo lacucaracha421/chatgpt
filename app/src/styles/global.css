@@ -889,6 +889,17 @@ input:disabled {
   box-shadow: var(--shadow-floating);
 }
 
+.work-tray,
+.work-tray__row,
+.work-tray__result,
+.work-tray__result > *,
+.work-tray__failures,
+.work-tray__failures li,
+.work-tray__failures li > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .work-tray__row,
 .work-tray__failures,
 .work-tray__failures li {
@@ -917,7 +928,24 @@ input:disabled {
   align-items: center;
 }
 
+.work-tray__result-head strong,
+.work-tray__result p,
+.work-tray__result > span,
+.work-tray__failures li > * {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .work-tray__result p { margin: 0; color: var(--color-muted); }
+
+.work-tray__overflow { color: var(--color-muted); }
+
+.work-tray__result > .ui-button {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .classification-sidebar__badge {
   min-width: 20px;
