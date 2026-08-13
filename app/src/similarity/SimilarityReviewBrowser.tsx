@@ -81,7 +81,7 @@ export function SimilarityReviewBrowser({ gateway, onCountChange, onClose }: Pro
       children={review && initialTotal > 0 ? <span>{current} / {initialTotal}</span> : undefined}
       actions={<Button size="icon" variant="ghost" aria-label="유사 검토 닫기" onClick={onClose}><XMarkIcon aria-hidden="true" /></Button>}
     />
-    {message && <Toast>{message}</Toast>}
+    {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
     {loading ? <Skeleton className="similarity-review__skeleton" label="유사 이미지를 불러오는 중" /> : !review ? (
       <EmptyState title="검토할 유사 이미지가 없습니다">새 이미지가 들어오면 여기에 표시됩니다.</EmptyState>
     ) : <>

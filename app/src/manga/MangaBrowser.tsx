@@ -59,7 +59,7 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
 
   return <section className="manga-browser" aria-label="망가">
     <ViewToolbar title="망가" actions={<Button size="sm" onClick={() => void refreshSeries()}>새로고침</Button>} />
-    {message && <Toast>{message}</Toast>}
+    {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
     {!series ? <Skeleton className="manga-browser__skeleton" label="망가를 불러오는 중" /> : series.length === 0 ? (
       <EmptyState title="망가가 없습니다">망가 폴더에 시리즈 폴더를 추가하세요.</EmptyState>
     ) : <MangaCoverGrid series={series} onOpenSeries={onOpenSeries} />}

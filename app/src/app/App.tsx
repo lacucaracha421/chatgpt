@@ -469,7 +469,7 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
                     onPointerDragCancel={cancelPointerDrag}
                   />
                 )}
-                {message && <Toast>{message}</Toast>}
+                {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
               </section>
             </div>
           }

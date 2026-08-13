@@ -452,7 +452,7 @@ export function ClassificationSidebar({
         onPointerUp={stopResize}
         onPointerCancel={stopResize}
       />
-      {message && <Toast>{message}</Toast>}
+      {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
       <ClassificationAppearanceDialog
         entry={appearanceEntry ? { ...appearanceEntry, scope: appearanceEntry.treeKind } : null}
         onClose={() => setAppearanceEntry(null)}

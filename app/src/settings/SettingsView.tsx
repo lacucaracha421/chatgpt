@@ -162,7 +162,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     {section === "browser_extension" && (
       <div className="settings-view__section">
         <header className="settings-view__header"><h2>브라우저 확장</h2><p>Edge 확장 프로그램의 로컬 연결을 확인합니다.</p></header>
-        {extensionError && <Toast>{extensionError}</Toast>}
+        {extensionError && <Toast onDismiss={() => setExtensionError(null)}>{extensionError}</Toast>}
         {!extensionConnection && !extensionError ? (
           <Skeleton className="settings-view__skeleton" label="확장 프로그램 연결 정보를 불러오는 중" />
         ) : extensionConnection ? (
@@ -192,7 +192,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
                 >연결 키 복사</Button>
               </span>
             </label>
-            {copyMessage && <Toast>{copyMessage}</Toast>}
+            {copyMessage && <Toast onDismiss={() => setCopyMessage(null)}>{copyMessage}</Toast>}
           </>
         ) : null}
       </div>
@@ -216,7 +216,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
         {confirmingId ? (
           <div className="settings-view__safety-confirm">
             <p>현재 상태를 별도로 보존한 뒤 선택한 시점으로 관리 정보를 복구합니다.</p>
-            {error && <Toast>{error}</Toast>}
+            {error && <Toast onDismiss={() => setError(null)}>{error}</Toast>}
             <div className="ui-dialog__actions">
               <Button disabled={pending} onClick={() => setConfirmingId(null)}>취소</Button>
               <Button variant="primary" disabled={pending} onClick={() => void restore()}>

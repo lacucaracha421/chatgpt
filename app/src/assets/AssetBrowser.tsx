@@ -199,7 +199,7 @@ export function AssetBrowser({ view, classifications, albums = [], sort, metadat
   })();
   return <section className="asset-browser" aria-label="저장소">
     <AssetToolbar view={view} classifications={classifications} albums={albums} sort={sort} directOnly={directOnly} metadataVisible={metadataVisible} thumbnailRowHeight={thumbnailRowHeight} selectedCount={selectedIds.length} inspectorOpen={inspectorOpen} onInspectorToggle={() => setInspectorOpen((open) => !open)} onSortChange={onSortChange} onDirectOnlyChange={setDirectOnly} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onFavorite={setBatchFavorite} onMoveToFolder={moveBatchToFolder} onAlbum={patchBatchAlbum} onTrash={trashSelection} onClearSelection={clearSelection} batchPending={batchPending} onReshuffle={reshuffle} />
-    {message && <Toast actionLabel={undoAssetIds ? "실행 취소" : undefined} onAction={undoAssetIds ? undoTrash : undefined} actionDisabled={batchPending}>{message}</Toast>}
+    {message && <Toast actionLabel={undoAssetIds ? "실행 취소" : undefined} onAction={undoAssetIds ? undoTrash : undefined} actionDisabled={batchPending} onDismiss={() => dismissMessage(null)}>{message}</Toast>}
     {currentFirstError && <Toast>{currentFirstError}</Toast>}
     <div className={`asset-browser__workspace${inspectorOpen ? " asset-browser__workspace--inspector" : ""}`}>
       <div className="asset-browser__gallery">
