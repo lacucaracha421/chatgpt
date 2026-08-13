@@ -6,6 +6,7 @@ use tauri::State;
 
 use crate::library::{
     error::LibraryError,
+    metadata_import::{self, MetadataImportPlan},
     models::{
         AlbumEntry, AssetAlbumPatch, AssetCursor, AssetPage, AssetQuery,
         AssetSummary, ClassificationEntry, CreateAlbum, CreateClassification, IngestMediaRequest,
@@ -16,6 +17,14 @@ use crate::library::{
     },
     Library,
 };
+
+#[tauri::command]
+pub async fn inspect_metadata_import(folder: String) -> Result<MetadataImportPlan, CommandError> {
+    tauri::async_runtime::spawn_blocking(move || metadata_import::inspect(folder.as_ref()))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
 
 #[derive(Clone, Default)]
 pub struct AppState {
@@ -47,6 +56,12 @@ impl From<LibraryError> for CommandError {
             LibraryError::CreateDirectory { .. } => "create_directory_failed",
             LibraryError::Database(_) => "database_failed",
             LibraryError::UnsupportedSchema(_) => "unsupported_schema",
+            LibraryError::MetadataImportManifestCount => "metadata_import_manifest_count",
+            LibraryError::UnsupportedMetadataImport => "unsupported_metadata_import",
+            LibraryError::InvalidMetadataImport => "invalid_metadata_import",
+            LibraryError::MetadataImportTooLarge => "metadata_import_too_large",
+            LibraryError::UnsafeMetadataImportPath => "unsafe_metadata_import_path",
+            LibraryError::ReadMetadataImport { .. } => "read_metadata_import_failed",
             LibraryError::InvalidTrashRetention => "invalid_trash_retention",
             LibraryError::UnsupportedManagedFileDeletion => "unsupported_managed_file_deletion",
             LibraryError::EmptyClassificationName => "empty_classification_name",
@@ -75,6 +90,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::SimilarityReviewNotFound => "similarity_review_not_found",
             LibraryError::SimilarityReviewConflict => "similarity_review_conflict",
             LibraryError::InvalidTrashTimestamp => "invalid_trash_timestamp",
+            LibraryError::InvalidCollectedAt => "invalid_collected_at",
             LibraryError::MediaNotFound => "media_not_found",
             LibraryError::UnsafeMediaPath => "unsafe_media_path",
             LibraryError::ReadMedia { .. } => "read_media_failed",

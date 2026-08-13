@@ -98,6 +98,8 @@ impl FoundationFixture {
                 source_path: self.source_path.clone(),
                 classification_id: Some(classification_id.into()),
                 source_url: None,
+                collected_at: None,
+                replace_duplicate_metadata: false,
             })
             .unwrap()
     }
@@ -151,6 +153,7 @@ fn image_can_be_ingested_classified_queried_and_deduplicated() {
         IngestOutcome::ExactDuplicate {
             existing_asset_id: added.id.clone(),
             classification_changed: true,
+            metadata_changed: false,
         },
     );
     assert_eq!(
@@ -160,7 +163,10 @@ fn image_can_be_ingested_classified_queried_and_deduplicated() {
             .unwrap(),
         vec![duplicate_target.clone()],
     );
-    assert_eq!(fixture.query(&duplicate_target.id).items, vec![added.clone()]);
+    assert_eq!(
+        fixture.query(&duplicate_target.id).items,
+        vec![added.clone()]
+    );
     assert!(fixture.query(&classification.root_id).items.is_empty());
     assert!(fixture.source_path.is_file());
 }
@@ -182,6 +188,8 @@ fn png_jpeg_and_gif_images_can_be_ingested() {
                 source_path: source_path.clone(),
                 classification_id: None,
                 source_url: None,
+                collected_at: None,
+                replace_duplicate_metadata: false,
             })
             .unwrap();
 
@@ -812,6 +820,8 @@ fn ingest(library: &Library, source_path: &Path, source_url: Option<&str>) -> As
             source_path: source_path.to_path_buf(),
             classification_id: None,
             source_url: source_url.map(str::to_owned),
+            collected_at: None,
+            replace_duplicate_metadata: false,
         })
         .unwrap();
     let IngestOutcome::Added { asset } = outcome else {

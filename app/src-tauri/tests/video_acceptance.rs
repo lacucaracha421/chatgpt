@@ -146,6 +146,8 @@ fn request(path: &Path) -> IngestMediaRequest {
         source_path: path.to_owned(),
         classification_id: None,
         source_url: None,
+        collected_at: None,
+        replace_duplicate_metadata: false,
     }
 }
 

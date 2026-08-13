@@ -15,6 +15,7 @@ import type {
   LibrarySummary,
   MangaSeries,
   MetadataBackup,
+  MetadataImportPlan,
   PurgeSummary,
   SimilarityIndexProgress,
   SimilarityReviewPage,
@@ -79,6 +80,8 @@ export const libraryGateway: LibraryGateway = {
   setMangaRoot: (path) => invoke("set_manga_root", { path }),
   scanManga: () => invoke<number>("scan_manga"),
   listMangaSeries: () => invoke<MangaSeries[]>("list_manga_series"),
+  inspectMetadataImport: (folder) =>
+    invoke<MetadataImportPlan>("inspect_metadata_import", { folder }),
   ingestMedia: (request: IngestMediaInput) =>
     invoke<IngestOutcome>("ingest_media", { request }),
   preparePendingVideos: (limit) =>

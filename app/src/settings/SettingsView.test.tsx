@@ -10,6 +10,23 @@ import { open } from "@tauri-apps/plugin-dialog";
 
 afterEach(() => { vi.useRealTimers(); cleanup(); });
 
+it("starts a repeatable metadata folder import and remembers the selected folder", async () => {
+  localStorage.clear();
+  vi.mocked(open).mockResolvedValue("C:\\exports\\lakomics" as never);
+  const onImportFolder = vi.fn().mockResolvedValue(true);
+  const gateway = createGateway();
+  vi.mocked(gateway.getExtensionConnection).mockResolvedValue({ baseUrl: "http://127.0.0.1:32145", token: "token", status: "ready" });
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} onImportFolder={onImportFolder} />
+    </LibraryProvider>,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "메타데이터 가져오기" }));
+  await userEvent.click(screen.getByRole("button", { name: "폴더 선택" }));
+  await waitFor(() => expect(onImportFolder).toHaveBeenCalledWith("C:\\exports\\lakomics"));
+  expect(localStorage.getItem("lakomics.metadataImportFolder")).toBe("C:\\exports\\lakomics");
+});
+
 it("acts as the window title bar", async () => {
   const gateway = createGateway();
   const { container } = render(

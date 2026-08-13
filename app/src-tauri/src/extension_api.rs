@@ -464,6 +464,8 @@ fn ingest_x_image(
             source_path: temporary.path().to_path_buf(),
             classification_id: Some(request.classification_id.clone()),
             source_url: Some(request.source_url),
+            collected_at: None,
+            replace_duplicate_metadata: false,
         })
         .map_err(map_ingestion_error)?;
     finish_ingestion(library, &request.classification_id, outcome)
@@ -500,6 +502,7 @@ fn finish_ingestion(
         IngestOutcome::ExactDuplicate {
             existing_asset_id,
             classification_changed,
+            ..
         } => {
             let status = if classification_changed {
                 IngestionStatus::DuplicateTagged

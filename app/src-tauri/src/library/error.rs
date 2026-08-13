@@ -32,6 +32,21 @@ pub enum LibraryError {
     Database(#[from] rusqlite::Error),
     #[error("지원하지 않는 라이브러리 스키마 버전입니다: {0}")]
     UnsupportedSchema(i64),
+    #[error("가져오기 폴더에는 지원되는 메타데이터 JSON이 정확히 하나 있어야 합니다")]
+    MetadataImportManifestCount,
+    #[error("지원하지 않는 메타데이터 형식 또는 버전입니다")]
+    UnsupportedMetadataImport,
+    #[error("메타데이터 JSON이 올바르지 않습니다")]
+    InvalidMetadataImport,
+    #[error("메타데이터 JSON이 너무 큽니다")]
+    MetadataImportTooLarge,
+    #[error("메타데이터에 안전하지 않은 파일 경로가 있습니다")]
+    UnsafeMetadataImportPath,
+    #[error("메타데이터 가져오기 폴더를 읽을 수 없습니다")]
+    ReadMetadataImport {
+        #[source]
+        source: std::io::Error,
+    },
     #[error("trash retention must be between 1 and 3650 days, or disabled")]
     InvalidTrashRetention,
     #[error("managed file deletion is supported only on Windows")]
@@ -87,6 +102,8 @@ pub enum LibraryError {
     SimilarityReviewConflict,
     #[error("invalid trash timestamp")]
     InvalidTrashTimestamp,
+    #[error("수집 시각이 RFC 3339 형식이 아닙니다")]
+    InvalidCollectedAt,
     #[error("요청한 미디어 파일을 찾을 수 없습니다")]
     MediaNotFound,
     #[error("미디어 경로가 라이브러리 폴더 밖을 가리킵니다")]

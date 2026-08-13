@@ -979,6 +979,8 @@ mod tests {
                         source_path: existing_path,
                         classification_id: None,
                         source_url: None,
+                        collected_at: None,
+                        replace_duplicate_metadata: false,
                     })
                     .unwrap(),
                 IngestOutcome::Added { .. }
@@ -993,6 +995,8 @@ mod tests {
                         source_path: variant_path,
                         classification_id: None,
                         source_url: None,
+                        collected_at: None,
+                        replace_duplicate_metadata: false,
                     })
                     .unwrap(),
                 IngestOutcome::ReviewPending { .. }
@@ -1098,6 +1102,8 @@ mod tests {
                 source_path: existing_source,
                 classification_id: Some(old_tag.clone()),
                 source_url: Some("https://example.com/old".into()),
+                collected_at: None,
+                replace_duplicate_metadata: false,
             })
             .unwrap()
         {
@@ -1113,6 +1119,8 @@ mod tests {
                 source_path: candidate_source,
                 classification_id: Some(requested_tag.clone()),
                 source_url: Some("https://example.com/new".into()),
+                collected_at: None,
+                replace_duplicate_metadata: false,
             })
             .unwrap()
         {

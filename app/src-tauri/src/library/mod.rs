@@ -9,6 +9,7 @@ mod folder_appearance;
 mod ingestion;
 mod lock;
 mod manga;
+pub mod metadata_import;
 pub mod models;
 mod query;
 mod similarity;

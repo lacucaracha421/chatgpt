@@ -51,6 +51,13 @@ impl Library {
         if matches!(kind, IngestKind::Image) && source_metadata.len() > MAX_IMAGE_BYTES {
             return Err(LibraryError::UnsupportedImage);
         }
+        if request
+            .collected_at
+            .as_deref()
+            .is_some_and(|value| chrono::DateTime::parse_from_rfc3339(value).is_err())
+        {
+            return Err(LibraryError::InvalidCollectedAt);
+        }
 
         self.validate_classification(request.classification_id.as_deref())?;
 
@@ -96,7 +103,7 @@ impl Library {
         let (format, width, height) = inspect_image(pending.owned_file(&staging_path)?)?;
         let existing_asset_id = self.find_asset_by_hash(&content_hash)?;
         if let Some(existing_asset_id) = existing_asset_id {
-            return self.finish_exact_duplicate(existing_asset_id, request.classification_id);
+            return self.finish_exact_duplicate(existing_asset_id, &request);
         }
         run_after_duplicate_hook(self.root());
         let perceptual_hash = perceptual_hash_from_file(pending.owned_file(&staging_path)?)?;
@@ -127,7 +134,10 @@ impl Library {
             byte_size,
             width,
             height,
-            collected_at: chrono::Utc::now().to_rfc3339(),
+            collected_at: request
+                .collected_at
+                .clone()
+                .unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
             favorite: false,
             source_url: request.source_url.clone(),
             media: if format == ImageFormat::Gif {
@@ -167,7 +177,7 @@ impl Library {
         extension: &'static str,
     ) -> Result<IngestOutcome, LibraryError> {
         if let Some(existing_asset_id) = self.find_asset_by_hash(&content_hash)? {
-            return self.finish_exact_duplicate(existing_asset_id, request.classification_id);
+            return self.finish_exact_duplicate(existing_asset_id, &request);
         }
         run_after_duplicate_hook(self.root());
         let probe = run_video_probe(&staging_path, extension)?;
@@ -186,7 +196,10 @@ impl Library {
             byte_size,
             width: probe.width,
             height: probe.height,
-            collected_at: chrono::Utc::now().to_rfc3339(),
+            collected_at: request
+                .collected_at
+                .clone()
+                .unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
             favorite: false,
             source_url: request.source_url,
             media: MediaSummary::Video {
@@ -209,26 +222,44 @@ impl Library {
     fn finish_exact_duplicate(
         &self,
         existing_asset_id: String,
-        classification_id: Option<String>,
+        request: &IngestMediaRequest,
     ) -> Result<IngestOutcome, LibraryError> {
         let current_ids = self
             .get_asset_classifications(&existing_asset_id)?
             .into_iter()
             .map(|entry| entry.id)
             .collect::<Vec<_>>();
-        let classification_changed = match classification_id.as_deref() {
+        let classification_changed = match request.classification_id.as_deref() {
             Some(requested_id) => current_ids.as_slice() != [requested_id],
             None => !current_ids.is_empty(),
         };
         if classification_changed {
             self.set_asset_classification(SetAssetClassification {
                 asset_ids: vec![existing_asset_id.clone()],
-                classification_id,
+                classification_id: request.classification_id.clone(),
             })?;
         }
+        let metadata_changed = if request.replace_duplicate_metadata {
+            self.connection()?.execute(
+                "UPDATE assets
+                 SET source_url = COALESCE(?2, source_url),
+                     collected_at = COALESCE(?3, collected_at)
+                 WHERE id = ?1
+                   AND ((?2 IS NOT NULL AND source_url IS NOT ?2)
+                     OR (?3 IS NOT NULL AND collected_at IS NOT ?3))",
+                params![
+                    existing_asset_id,
+                    request.source_url.as_deref(),
+                    request.collected_at.as_deref(),
+                ],
+            )? > 0
+        } else {
+            false
+        };
         Ok(IngestOutcome::ExactDuplicate {
             existing_asset_id,
             classification_changed,
+            metadata_changed,
         })
     }
 
@@ -935,6 +966,8 @@ mod tests {
                     source_path: self.source.clone(),
                     classification_id: None,
                     source_url: None,
+                    collected_at: None,
+                    replace_duplicate_metadata: false,
                 })
                 .unwrap()
         }
@@ -989,6 +1022,8 @@ mod tests {
                     source_path: path.to_path_buf(),
                     classification_id,
                     source_url,
+                    collected_at: None,
+                    replace_duplicate_metadata: false,
                 })
                 .unwrap()
         }
@@ -1105,6 +1140,8 @@ mod tests {
                 source_path: source.clone(),
                 classification_id: Some(classification.id.clone()),
                 source_url: Some("https://example.test/post".into()),
+                collected_at: None,
+                replace_duplicate_metadata: false,
             })
             .unwrap();
 
@@ -1153,6 +1190,8 @@ mod tests {
                 source_path: first_source,
                 classification_id: None,
                 source_url: None,
+                collected_at: None,
+                replace_duplicate_metadata: false,
             })
             .unwrap();
         let IngestOutcome::Added { asset } = first else {
@@ -1164,6 +1203,8 @@ mod tests {
                 source_path: second_source,
                 classification_id: None,
                 source_url: None,
+                collected_at: None,
+                replace_duplicate_metadata: false,
             })
             .unwrap();
 
@@ -1172,6 +1213,7 @@ mod tests {
             IngestOutcome::ExactDuplicate {
                 existing_asset_id: asset.id,
                 classification_changed: false,
+                metadata_changed: false,
             }
         );
         let counts: (i64, i64) = library
@@ -1203,6 +1245,8 @@ mod tests {
                         source_path,
                         classification_id: None,
                         source_url: None,
+                        collected_at: None,
+                        replace_duplicate_metadata: false,
                     })
                     .unwrap(),
                 IngestOutcome::Added { .. }
@@ -1230,6 +1274,8 @@ mod tests {
             source_path: source.clone(),
             classification_id: None,
             source_url: None,
+            collected_at: None,
+            replace_duplicate_metadata: false,
         });
 
         assert!(matches!(result, Err(LibraryError::UnsupportedVideo)));
@@ -1278,6 +1324,7 @@ mod tests {
             IngestOutcome::ExactDuplicate {
                 existing_asset_id: asset.id,
                 classification_changed: false,
+                metadata_changed: false,
             },
         );
     }
@@ -1366,6 +1413,7 @@ mod tests {
             IngestOutcome::ExactDuplicate {
                 existing_asset_id: existing.id,
                 classification_changed: false,
+                metadata_changed: false,
             }
         );
         assert_eq!(fixture.review_count(), 0);
@@ -1418,6 +1466,15 @@ mod tests {
                 remove_classification_ids: vec![],
             })
             .unwrap();
+        fixture
+            .library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE assets SET title = 'keep me', favorite = 1 WHERE id = ?1",
+                [&asset.id],
+            )
+            .unwrap();
 
         let outcome = fixture
             .library
@@ -1425,6 +1482,8 @@ mod tests {
                 source_path: fixture.source.clone(),
                 classification_id: Some(duplicate_classification.id.clone()),
                 source_url: Some("https://example.test/duplicate".into()),
+                collected_at: Some("2026-08-13T13:44:55Z".into()),
+                replace_duplicate_metadata: true,
             })
             .unwrap();
 
@@ -1433,6 +1492,7 @@ mod tests {
             IngestOutcome::ExactDuplicate {
                 existing_asset_id: asset.id.clone(),
                 classification_changed: true,
+                metadata_changed: true,
             },
         );
         assert_eq!(
@@ -1451,6 +1511,53 @@ mod tests {
                 .unwrap(),
             1
         );
+        let stored: (Option<String>, String, i64, Option<String>) = fixture
+            .library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT source_url, collected_at, favorite, title FROM assets WHERE id = ?1",
+                [&asset.id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            stored,
+            (
+                Some("https://example.test/duplicate".into()),
+                "2026-08-13T13:44:55Z".into(),
+                1,
+                Some("keep me".into()),
+            )
+        );
+    }
+
+    #[test]
+    fn added_asset_preserves_requested_collection_time_and_rejects_invalid_time() {
+        let fixture = IngestionFixture::new();
+        let outcome = fixture
+            .library
+            .ingest_media(IngestMediaRequest {
+                source_path: fixture.source.clone(),
+                classification_id: None,
+                source_url: None,
+                collected_at: Some("2026-08-13T13:44:55+09:00".into()),
+                replace_duplicate_metadata: false,
+            })
+            .unwrap();
+        let IngestOutcome::Added { asset } = outcome else {
+            panic!("first ingest must add an asset");
+        };
+        assert_eq!(asset.collected_at, "2026-08-13T13:44:55+09:00");
+
+        let invalid = fixture.library.ingest_media(IngestMediaRequest {
+            source_path: fixture.source.clone(),
+            classification_id: None,
+            source_url: None,
+            collected_at: Some("yesterday".into()),
+            replace_duplicate_metadata: false,
+        });
+        assert!(matches!(invalid, Err(LibraryError::InvalidCollectedAt)));
     }
 
     #[test]
@@ -1461,6 +1568,8 @@ mod tests {
             source_path: fixture.source.clone(),
             classification_id: Some("missing-classification".into()),
             source_url: None,
+            collected_at: None,
+            replace_duplicate_metadata: false,
         });
 
         assert!(result.is_err());
@@ -1478,6 +1587,8 @@ mod tests {
             source_path: source.clone(),
             classification_id: None,
             source_url: None,
+            collected_at: None,
+            replace_duplicate_metadata: false,
         });
 
         assert!(result.is_err());
@@ -1592,6 +1703,8 @@ mod tests {
                 source_path: fixture.source.clone(),
                 classification_id: None,
                 source_url: None,
+                collected_at: None,
+                replace_duplicate_metadata: false,
             })
             .unwrap_err();
 
@@ -1630,6 +1743,8 @@ mod tests {
                 source_path: first_source,
                 classification_id: None,
                 source_url: None,
+                collected_at: None,
+                replace_duplicate_metadata: false,
             })
         });
         let second_library = fixture.library.clone();
@@ -1639,6 +1754,8 @@ mod tests {
                 source_path: second_source,
                 classification_id: None,
                 source_url: None,
+                collected_at: None,
+                replace_duplicate_metadata: false,
             })
         });
 

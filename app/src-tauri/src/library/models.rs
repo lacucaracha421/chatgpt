@@ -29,6 +29,9 @@ pub struct IngestMediaRequest {
     pub source_path: std::path::PathBuf,
     pub classification_id: Option<String>,
     pub source_url: Option<String>,
+    pub collected_at: Option<String>,
+    #[serde(default)]
+    pub replace_duplicate_metadata: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -210,6 +213,7 @@ pub enum IngestOutcome {
     ExactDuplicate {
         existing_asset_id: String,
         classification_changed: bool,
+        metadata_changed: bool,
     },
     ReviewPending { review_id: String },
 }

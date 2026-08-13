@@ -14,11 +14,16 @@ type SettingsViewProps = {
   restoring: boolean;
   onRestore: (backupId: string) => Promise<void>;
   onExit: () => void;
+  onImportFolder?: (folder: string) => Promise<boolean>;
+  metadataImportRunning?: boolean;
 };
 
-export function SettingsView({ restoring, onRestore, onExit }: SettingsViewProps) {
+const METADATA_IMPORT_FOLDER_KEY = "lakomics.metadataImportFolder";
+
+export function SettingsView({ restoring, onRestore, onExit, onImportFolder, metadataImportRunning = false }: SettingsViewProps) {
   const { gateway, library } = useLibrary();
-  const [section, setSection] = useState<"general" | "browser_extension" | "safety" | "shortcuts">("general");
+  const [section, setSection] = useState<"general" | "browser_extension" | "metadata_import" | "safety" | "shortcuts">("general");
+  const [lastImportFolder, setLastImportFolder] = useState(() => localStorage.getItem(METADATA_IMPORT_FOLDER_KEY));
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [backups, setBackups] = useState<MetadataBackup[] | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
@@ -115,11 +120,21 @@ export function SettingsView({ restoring, onRestore, onExit }: SettingsViewProps
     }
   }
 
+  async function chooseImportFolder() {
+    const selected = await open({ directory: true, multiple: false, defaultPath: localStorage.getItem(METADATA_IMPORT_FOLDER_KEY) ?? undefined });
+    if (typeof selected !== "string") return;
+    if (await onImportFolder?.(selected)) {
+      localStorage.setItem(METADATA_IMPORT_FOLDER_KEY, selected);
+      setLastImportFolder(selected);
+    }
+  }
+
   return <section className="settings-view" aria-label="설정" onKeyDown={(event) => { if (event.key === "Escape" && !pending) onExit(); }}>
     <ViewToolbar title="설정" />
     <nav className="settings-view__sections" aria-label="설정 구역">
       <Button className="settings-view__section-button" variant="ghost" aria-current={section === "general" ? "page" : undefined} onClick={() => setSection("general")}>일반 설정</Button>
       <Button className="settings-view__section-button" variant="ghost" aria-current={section === "browser_extension" ? "page" : undefined} onClick={() => setSection("browser_extension")}>브라우저 확장</Button>
+      <Button className="settings-view__section-button" variant="ghost" aria-current={section === "metadata_import" ? "page" : undefined} onClick={() => setSection("metadata_import")}>메타데이터 가져오기</Button>
       <Button className="settings-view__section-button" variant="ghost" aria-current={section === "safety" ? "page" : undefined} onClick={() => setSection("safety")}>안전</Button>
       <Button className="settings-view__section-button" variant="ghost" aria-current={section === "shortcuts" ? "page" : undefined} onClick={() => setSection("shortcuts")}>단축키·버튼 설명</Button>
     </nav>
@@ -179,6 +194,19 @@ export function SettingsView({ restoring, onRestore, onExit }: SettingsViewProps
             {copyMessage && <Toast>{copyMessage}</Toast>}
           </>
         ) : null}
+      </div>
+    )}
+    {section === "metadata_import" && (
+      <div className="settings-view__extension">
+        <p>확장 프로그램이 내보낸 메타데이터 JSON을 우선해 분류 폴더를 만들고 이미지 사본을 라이브러리에 저장합니다. 원본 폴더는 변경하지 않습니다.</p>
+        <dl className="settings-view__field">
+          <dt>최근 가져오기 폴더</dt>
+          <dd>{lastImportFolder ?? "아직 없음"}</dd>
+        </dl>
+        <div className="ui-dialog__actions">
+          {lastImportFolder && <Button disabled={pending || metadataImportRunning || !onImportFolder} onClick={() => void onImportFolder?.(lastImportFolder)}>최근 폴더 다시 가져오기</Button>}
+          <Button variant="primary" disabled={pending || metadataImportRunning || !onImportFolder} onClick={() => void chooseImportFolder()}>{lastImportFolder ? "다른 폴더 선택" : "폴더 선택"}</Button>
+        </div>
       </div>
     )}
     {section === "safety" && (

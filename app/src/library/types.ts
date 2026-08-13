@@ -179,6 +179,24 @@ export type IngestMediaInput = {
   sourcePath: string;
   classificationId: string | null;
   sourceUrl: string | null;
+  collectedAt?: string | null;
+  replaceDuplicateMetadata?: boolean;
+};
+
+export type MetadataImportPlan = {
+  metadataFile: string;
+  classificationPaths: string[][];
+  items: Array<{
+    fileName: string;
+    sourcePath: string;
+    classificationPath: string[];
+    sourceUrl: string;
+    collectedAt: string;
+  }>;
+  skipped: Array<{
+    fileName: string;
+    reason: "missing_file" | "invalid_source_url" | "invalid_collected_at";
+  }>;
 };
 
 export type VideoPreparationProgress = {
@@ -190,7 +208,7 @@ export type VideoPreparationProgress = {
 
 export type IngestOutcome =
   | { status: "added"; asset: AssetSummary }
-  | { status: "exact_duplicate"; existingAssetId: string; classificationChanged: boolean }
+  | { status: "exact_duplicate"; existingAssetId: string; classificationChanged: boolean; metadataChanged?: boolean }
   | { status: "review_pending"; reviewId: string };
 
 export interface LibraryGateway {
@@ -244,6 +262,7 @@ export interface LibraryGateway {
   setMangaRoot(path: string | null): Promise<void>;
   scanManga(): Promise<number>;
   listMangaSeries(): Promise<MangaSeries[]>;
+  inspectMetadataImport?(folder: string): Promise<MetadataImportPlan>;
   ingestMedia(input: IngestMediaInput): Promise<IngestOutcome>;
   preparePendingVideos(limit: number): Promise<VideoPreparationProgress>;
   retryVideoPreparation(assetId: string): Promise<void>;

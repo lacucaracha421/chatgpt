@@ -1,7 +1,21 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { WorkTray } from "./WorkTray";
+
+it("shows metadata folder import skips and retries the whole folder", () => {
+  const retry = vi.fn();
+  render(<WorkTray
+    works={[{ kind: "metadata_import", id: "metadata-1", folder: "C:\\export", total: 1, completed: 1, added: 1, foldersCreated: 2, pathsReused: 1, exactDuplicates: [], reviewPending: [], skipped: [{ fileName: "missing.jpg", message: "원본 파일이 없습니다." }], failures: [], status: "completed" }]}
+    retryFailed={retry}
+    dismissWork={vi.fn()}
+    openReview={vi.fn()}
+    openExisting={vi.fn()}
+  />);
+  expect(screen.getByText(/건너뜀 1/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "폴더 다시 가져오기" }));
+  expect(retry).toHaveBeenCalledWith("metadata-1");
+});
 
 afterEach(cleanup);
 

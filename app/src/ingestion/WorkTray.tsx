@@ -1,8 +1,9 @@
 import { Button } from "../shared/ui/Button";
 import type { IngestionWork } from "./useFileDrop";
+import type { MetadataImportWork } from "./metadataImport";
 
 type WorkTrayProps = {
-  works: IngestionWork[];
+  works: Array<IngestionWork | MetadataImportWork>;
   retryFailed(workId: string): void;
   dismissWork(workId: string): void;
   openReview(): void;
@@ -16,8 +17,18 @@ export function WorkTray({ works, retryFailed, dismissWork, openReview, openExis
     {visible.map((work) => <div className="work-tray__row" key={work.id}>
       {work.status === "running" ? (
         <span aria-live="polite">
-          {work.kind === "drag_out" ? "탐색기로 복사하는 중" : work.kind === "preparation" ? "미리보기 준비 중" : "가져오는 중"} {work.completed} / {work.total}
+          {work.kind === "drag_out" ? "탐색기로 복사하는 중" : work.kind === "preparation" ? "미리보기 준비 중" : work.kind === "metadata_import" ? "메타데이터 폴더 가져오는 중" : "가져오는 중"} {work.completed} / {work.total}
         </span>
+      ) : work.kind === "metadata_import" ? (
+        <div className="work-tray__result">
+          <div className="work-tray__result-head">
+            <strong>메타데이터 폴더 가져오기 결과</strong>
+            <Button variant="ghost" size="sm" onClick={() => dismissWork(work.id)}>닫기</Button>
+          </div>
+          <p>폴더 생성 {work.foldersCreated} · 경로 재사용 {work.pathsReused} · 추가 {work.added} · 중복 {work.exactDuplicates.length} · 검토 대기 {work.reviewPending.length} · 건너뜀 {work.skipped.length} · 실패 {work.failures.length}</p>
+          {[...work.skipped, ...work.failures].map((failure) => <span key={`${failure.fileName}-${failure.message}`}>{failure.fileName}: {failure.message}</span>)}
+          <Button size="sm" onClick={() => retryFailed(work.id)}>폴더 다시 가져오기</Button>
+        </div>
       ) : work.kind === "preparation" ? (
         <div className="work-tray__result">
           <div className="work-tray__result-head">

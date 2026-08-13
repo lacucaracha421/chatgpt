@@ -10,6 +10,7 @@ import {
 } from "../ingestion/useFileDrop";
 import { DropOverlay } from "../ingestion/DropOverlay";
 import { WorkTray } from "../ingestion/WorkTray";
+import { executeMetadataImport, type MetadataImportWork } from "../ingestion/metadataImport";
 import { AppShell } from "../layout/AppShell";
 import { StatusBar } from "../layout/StatusBar";
 import { libraryGateway } from "../library/client";
@@ -98,6 +99,8 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
   const nativeDragStartedRef = useRef(false);
   const nativeDragAssetsRef = useRef(new Map<string, string[]>());
   const [nativeDragWorks, setNativeDragWorks] = useState<IngestionWork[]>([]);
+  const [metadataImportWorks, setMetadataImportWorks] = useState<MetadataImportWork[]>([]);
+  const metadataImportRunningRef = useRef(false);
   const [requestedAsset, setRequestedAsset] = useState<AssetSummary | null>(null);
   const [reviewCount, setReviewCount] = useState(0);
   const [mangaViewer, setMangaViewer] = useState<{ seriesId: string; title: string; pageCount: number } | null>(null);
@@ -155,6 +158,28 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
     onIngested: handleIngested,
     onFatalError: setMessage,
   });
+
+  const beginMetadataImport = useCallback(async (folder: string, existingWorkId?: string) => {
+    if (metadataImportRunningRef.current) return false;
+    metadataImportRunningRef.current = true;
+    const workId = existingWorkId ?? crypto.randomUUID();
+    const update = (work: MetadataImportWork) => setMetadataImportWorks((current) =>
+      current.some((item) => item.id === work.id)
+        ? current.map((item) => item.id === work.id ? work : item)
+        : [...current, work]);
+    try {
+      await executeMetadataImport(gateway, folder, update, workId);
+      await refreshClassifications();
+      setAssetRefresh((current) => current + 1);
+      await refreshReviewCount();
+      return true;
+    } catch (error) {
+      update({ kind: "metadata_import", id: workId, folder, total: 0, completed: 0, added: 0, foldersCreated: 0, pathsReused: 0, exactDuplicates: [], reviewPending: [], skipped: [], failures: [{ fileName: "폴더 검사", message: commandErrorMessage(error, "가져오기 폴더를 검사하지 못했습니다.") }], status: "failed" });
+      return false;
+    } finally {
+      metadataImportRunningRef.current = false;
+    }
+  }, [gateway, refreshClassifications, refreshReviewCount]);
   useAutoDismiss(message, setMessage);
 
   useEffect(() => {
@@ -280,6 +305,11 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
   }
 
   function retryWork(workId: string) {
+    const metadataWork = metadataImportWorks.find((work) => work.id === workId);
+    if (metadataWork) {
+      void beginMetadataImport(metadataWork.folder, workId);
+      return;
+    }
     if (videoPreparation.work?.id === workId) {
       void videoPreparation.retryFailed();
       return;
@@ -293,6 +323,7 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
     if (videoPreparation.work?.id === workId) videoPreparation.dismissWork();
     nativeDragAssetsRef.current.delete(workId);
     setNativeDragWorks((current) => current.filter((work) => work.id !== workId));
+    setMetadataImportWorks((current) => current.filter((work) => work.id !== workId));
     dropState.dismissWork(workId);
   }
 
@@ -404,6 +435,8 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
                     restoring={maintenance === "restore"}
                     onRestore={restoreBackup}
                     onExit={() => { setView(settingsReturnViewRef.current); }}
+                    onImportFolder={beginMetadataImport}
+                    metadataImportRunning={metadataImportWorks.some((work) => work.status === "running")}
                   />
                 ) : view.kind === "similarity_review" ? (
                   <SimilarityReviewBrowser
@@ -443,7 +476,7 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
           status={<StatusBar status={browserStatus} progress={dropState.progress} dropEnabled={dropEnabled} similarityIndex={similarityIndex} />}
         />
         <WorkTray
-          works={[...dropState.works, ...nativeDragWorks, ...(videoPreparation.work ? [videoPreparation.work] : [])]}
+          works={[...dropState.works, ...nativeDragWorks, ...metadataImportWorks, ...(videoPreparation.work ? [videoPreparation.work] : [])]}
           retryFailed={retryWork}
           dismissWork={dismissWork}
           openReview={() => setView({ kind: "similarity_review" })}
