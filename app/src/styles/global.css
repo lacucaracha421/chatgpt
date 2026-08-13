@@ -183,6 +183,7 @@ input:disabled {
 
 .ui-dialog {
   position: fixed;
+  z-index: var(--z-dialog-content);
   top: 50%;
   left: 50%;
   width: min(28rem, calc(100vw - var(--space-6)));
@@ -203,6 +204,7 @@ input:disabled {
 
 .ui-dialog__overlay {
   position: fixed;
+  z-index: var(--z-dialog-overlay);
   inset: 0;
   background: var(--color-overlay);
 }
