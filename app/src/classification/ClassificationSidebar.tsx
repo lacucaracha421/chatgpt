@@ -357,10 +357,11 @@ export function ClassificationSidebar({
       </button>
       <ContextMenu items={[{ id: "create-root", label: "새 폴더", onSelect: () => openTopLevelCreate("classification") }]}>
         <ul className="classification-sidebar__tree" role="tree" aria-label="폴더" hidden={!foldersOpen}>
-          {tree.map((node) => (
+          {tree.map((node, index) => (
             <TreeItem
               key={node.entry.id}
               node={node}
+              hasNextSibling={index < tree.length - 1}
               view={view}
               expandedIds={expandedIds}
               activeRowId={activeRowId}
@@ -400,10 +401,11 @@ export function ClassificationSidebar({
             <span>앨범 ({albumTree.length})</span>
           </button>
           <ul className="classification-sidebar__tree" role="tree" aria-label="앨범" hidden={!albumsOpen}>
-            {albumTree.map((node) => (
+            {albumTree.map((node, index) => (
               <TreeItem
                 key={node.entry.id}
                 node={node}
+                hasNextSibling={index < albumTree.length - 1}
                 view={view}
                 expandedIds={expandedAlbumIds}
                 activeRowId={activeRowId}
@@ -490,14 +492,23 @@ export function ClassificationSidebar({
 }
 
 function QuickViewButton({ icon, label, count, onClick, selected }: { icon: React.ReactNode; label: string; count?: number; onClick: () => void; selected: boolean }) {
-  return <button type="button" className="classification-sidebar__quick-view" aria-label={count === undefined ? undefined : `${label} ${count}개`} aria-current={selected ? "page" : undefined} onClick={onClick}>{icon}<span>{label}</span>{count !== undefined && <span className="classification-sidebar__badge" aria-hidden="true">{count}</span>}</button>;
+  return (
+    <button type="button" className="classification-sidebar__quick-view" aria-label={count === undefined ? undefined : `${label} ${count}개`} aria-current={selected ? "page" : undefined} onClick={onClick}>
+      <span className="classification-sidebar__quick-view-surface">
+        {icon}
+        <span className="classification-sidebar__quick-view-label">{label}</span>
+        {count !== undefined && <span className="classification-sidebar__badge" aria-hidden="true">{count}</span>}
+      </span>
+    </button>
+  );
 }
 
-function TreeItem({ activeRowId, editError, editName, expandedIds, inlineEdit, node, onAppearance, onCreateChild, onDelete, onEditCancel, onEditNameChange, onEditSave, onMove, onRename, onRowFocus, onRowKeyDown, onToggleExpanded, onViewChange, registerTreeRow, view, dragTarget, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: {
+function TreeItem({ activeRowId, editError, editName, expandedIds, hasNextSibling, inlineEdit, node, onAppearance, onCreateChild, onDelete, onEditCancel, onEditNameChange, onEditSave, onMove, onRename, onRowFocus, onRowKeyDown, onToggleExpanded, onViewChange, registerTreeRow, view, dragTarget, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: {
   activeRowId: string | null;
   editError: string | null;
   editName: string;
   expandedIds: string[];
+  hasNextSibling: boolean;
   inlineEdit: InlineEdit | null;
   node: SidebarTreeNode;
   onAppearance: (entry: SidebarTreeEntry) => void;
@@ -548,7 +559,7 @@ function TreeItem({ activeRowId, editError, editName, expandedIds, inlineEdit, n
   ];
 
   return (
-    <li className="classification-sidebar__tree-item">
+    <li className="classification-sidebar__tree-item" data-has-next-sibling={hasNextSibling ? "true" : undefined}>
       <ContextMenu items={actions}>
         <div
           ref={(element) => {
@@ -587,24 +598,26 @@ function TreeItem({ activeRowId, editError, editName, expandedIds, inlineEdit, n
           onPointerCancel={onPointerDragCancel}
         >
           {hasChildren ? (
-            <Button type="button" size="icon" variant="ghost" aria-label={`${node.entry.name} ${expanded ? "접기" : "펼치기"}`} onClick={(event) => { event.stopPropagation(); onToggleExpanded(node.entry); }} onKeyDown={(event) => event.stopPropagation()}>
-              {expanded ? <ChevronDownIcon aria-hidden="true" /> : <ChevronRightIcon aria-hidden="true" />}
+            <Button type="button" size="icon" variant="ghost" className="classification-sidebar__tree-toggle" aria-label={`${node.entry.name} ${expanded ? "접기" : "펼치기"}`} onClick={(event) => { event.stopPropagation(); onToggleExpanded(node.entry); }} onKeyDown={(event) => event.stopPropagation()}>
+              <span className="classification-sidebar__tree-toggle-mark" data-state={expanded ? "expanded" : "collapsed"} aria-hidden="true" />
             </Button>
           ) : <span className="classification-sidebar__tree-spacer" aria-hidden="true" />}
-          <ClassificationIcon
-            className="classification-sidebar__tree-folder"
-            kind={node.entry.kind}
-            iconKey={node.entry.iconKey}
-            style={{ color: classificationColor(node.entry.colorKey) }}
-          />
-          {editingName ? (
-            <InlineFolderInput name={editName} error={editError} onNameChange={onEditNameChange} onSave={onEditSave} onCancel={onEditCancel} />
-          ) : <span className="classification-sidebar__tree-label">{node.entry.name}</span>}
+          <span className="classification-sidebar__tree-surface">
+            <ClassificationIcon
+              className="classification-sidebar__tree-folder"
+              kind={node.entry.kind}
+              iconKey={node.entry.iconKey}
+              style={{ color: classificationColor(node.entry.colorKey) }}
+            />
+            {editingName ? (
+              <InlineFolderInput name={editName} error={editError} onNameChange={onEditNameChange} onSave={onEditSave} onCancel={onEditCancel} />
+            ) : <span className="classification-sidebar__tree-label">{node.entry.name}</span>}
+          </span>
         </div>
       </ContextMenu>
       {expanded && (hasChildren || creatingChild) && (
         <ul role="group" style={{ "--classification-branch-color": classificationColor(node.entry.colorKey) } as CSSProperties}>
-          {node.children.map((child) => <TreeItem key={child.entry.id} node={child} view={view} expandedIds={expandedIds} activeRowId={activeRowId} inlineEdit={inlineEdit} editName={editName} editError={editError} onViewChange={onViewChange} onToggleExpanded={onToggleExpanded} onRowFocus={onRowFocus} onRowKeyDown={onRowKeyDown} registerTreeRow={registerTreeRow} onAppearance={onAppearance} onCreateChild={onCreateChild} onRename={onRename} onEditNameChange={onEditNameChange} onEditSave={onEditSave} onEditCancel={onEditCancel} onMove={onMove} onDelete={onDelete} dragTarget={dragTarget} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />)}
+          {node.children.map((child, index) => <TreeItem key={child.entry.id} node={child} hasNextSibling={index < node.children.length - 1} view={view} expandedIds={expandedIds} activeRowId={activeRowId} inlineEdit={inlineEdit} editName={editName} editError={editError} onViewChange={onViewChange} onToggleExpanded={onToggleExpanded} onRowFocus={onRowFocus} onRowKeyDown={onRowKeyDown} registerTreeRow={registerTreeRow} onAppearance={onAppearance} onCreateChild={onCreateChild} onRename={onRename} onEditNameChange={onEditNameChange} onEditSave={onEditSave} onEditCancel={onEditCancel} onMove={onMove} onDelete={onDelete} dragTarget={dragTarget} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />)}
           {creatingChild && <InlineFolderEditor name={editName} error={editError} onNameChange={onEditNameChange} onSave={onEditSave} onCancel={onEditCancel} />}
         </ul>
       )}
@@ -623,8 +636,10 @@ function InlineFolderEditor({ error, name, onCancel, onNameChange, onSave }: {
     <li className="classification-sidebar__tree-item">
       <div className="classification-sidebar__tree-row classification-sidebar__tree-row--editing">
         <span className="classification-sidebar__tree-spacer" aria-hidden="true" />
-        <FolderIcon className="classification-sidebar__tree-folder" aria-hidden="true" />
-        <InlineFolderInput name={name} error={error} onNameChange={onNameChange} onSave={onSave} onCancel={onCancel} />
+        <span className="classification-sidebar__tree-surface">
+          <FolderIcon className="classification-sidebar__tree-folder" aria-hidden="true" />
+          <InlineFolderInput name={name} error={error} onNameChange={onNameChange} onSave={onSave} onCancel={onCancel} />
+        </span>
       </div>
     </li>
   );

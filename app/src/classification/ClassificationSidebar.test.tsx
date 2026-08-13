@@ -212,6 +212,33 @@ describe("ClassificationSidebar", () => {
     expect(settings.closest(".classification-sidebar__footer")).not.toBeNull();
   });
 
+  it("keeps compact selection surfaces inside full interaction rows", () => {
+    renderSidebar();
+
+    const storage = screen.getByRole("button", { name: "저장소" });
+    expect(storage).toHaveAttribute("aria-current", "page");
+    expect(storage.querySelector(":scope > .classification-sidebar__quick-view-surface")).not.toBeNull();
+
+    const games = screen.getByRole("treeitem", { name: "Games" });
+    expect(games).toHaveAttribute("aria-expanded", "true");
+    expect(games.querySelector(":scope > .classification-sidebar__tree-toggle")).not.toBeNull();
+    expect(games.querySelector(":scope > .classification-sidebar__tree-surface")).not.toBeNull();
+    expect(games.querySelector(".classification-sidebar__tree-toggle-mark")).toHaveAttribute("data-state", "expanded");
+  });
+
+  it("marks only tree items that have a following sibling", () => {
+    const siblingEntries = [
+      ...entries,
+      { id: "root-2", kind: "root", name: "Images", parentId: null, iconKey: null, colorKey: null },
+    ] satisfies ClassificationEntry[];
+    renderSidebar(gateway(), { entries: siblingEntries });
+
+    const gamesItem = screen.getByRole("treeitem", { name: "Games" }).closest("li");
+    const imagesItem = screen.getByRole("treeitem", { name: "Images" }).closest("li");
+    expect(gamesItem).toHaveAttribute("data-has-next-sibling", "true");
+    expect(imagesItem).not.toHaveAttribute("data-has-next-sibling");
+  });
+
   it("opens settings from the sidebar footer", async () => {
     const user = userEvent.setup();
     const { onViewChange } = renderSidebar();
