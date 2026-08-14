@@ -8,7 +8,69 @@ import { SettingsView } from "./SettingsView";
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 import { open } from "@tauri-apps/plugin-dialog";
 
-afterEach(() => { vi.useRealTimers(); cleanup(); });
+afterEach(() => { vi.useRealTimers(); localStorage.clear(); cleanup(); });
+
+it("keeps the current library when switching is cancelled", async () => {
+  localStorage.setItem("lakomics.libraryPath", "C:\\Current");
+  const gateway = createGateway();
+  vi.mocked(gateway.openLibrary).mockResolvedValue({ root: "C:\\Current" });
+  vi.mocked(open).mockResolvedValue(null);
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  await screen.findByText("C:\\Current");
+  await userEvent.click(screen.getByRole("button", { name: "다른 저장소 열기" }));
+
+  expect(open).toHaveBeenCalledWith({ directory: true, multiple: false, defaultPath: "C:\\Current" });
+  expect(gateway.openLibrary).toHaveBeenCalledTimes(1);
+});
+
+it("opens a selected library and disables duplicate switching while pending", async () => {
+  localStorage.setItem("lakomics.libraryPath", "C:\\Current");
+  const gateway = createGateway();
+  let resolveSwitch!: (summary: { root: string }) => void;
+  vi.mocked(gateway.openLibrary)
+    .mockResolvedValueOnce({ root: "C:\\Current" })
+    .mockReturnValueOnce(new Promise((resolve) => { resolveSwitch = resolve; }));
+  vi.mocked(open).mockResolvedValue("D:\\Next");
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  const button = await screen.findByRole("button", { name: "다른 저장소 열기" });
+  await userEvent.click(button);
+  expect(button).toBeDisabled();
+
+  resolveSwitch({ root: "D:\\Next" });
+  expect(await screen.findByText("D:\\Next")).toBeVisible();
+  expect(localStorage.getItem("lakomics.libraryPath")).toBe("D:\\Next");
+});
+
+it("shows a switch error without replacing the current library", async () => {
+  localStorage.setItem("lakomics.libraryPath", "C:\\Current");
+  const gateway = createGateway();
+  vi.mocked(gateway.openLibrary)
+    .mockResolvedValueOnce({ root: "C:\\Current" })
+    .mockRejectedValueOnce(new Error("switch failed"));
+  vi.mocked(open).mockResolvedValue("D:\\Broken");
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  await screen.findByText("C:\\Current");
+  await userEvent.click(screen.getByRole("button", { name: "다른 저장소 열기" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("switch failed");
+  expect(screen.getByText("C:\\Current")).toBeVisible();
+  expect(localStorage.getItem("lakomics.libraryPath")).toBe("C:\\Current");
+});
 
 it("starts a repeatable metadata folder import and remembers the selected folder", async () => {
   localStorage.clear();

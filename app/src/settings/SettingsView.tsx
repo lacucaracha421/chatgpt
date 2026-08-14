@@ -21,7 +21,7 @@ type SettingsViewProps = {
 const METADATA_IMPORT_FOLDER_KEY = "lakomics.metadataImportFolder";
 
 export function SettingsView({ restoring, onRestore, onExit, onImportFolder, metadataImportRunning = false }: SettingsViewProps) {
-  const { gateway, library } = useLibrary();
+  const { error: libraryError, gateway, library, openLibrary } = useLibrary();
   const [section, setSection] = useState<"general" | "browser_extension" | "metadata_import" | "safety" | "shortcuts">("general");
   const [lastImportFolder, setLastImportFolder] = useState(() => localStorage.getItem(METADATA_IMPORT_FOLDER_KEY));
   const [appVersion, setAppVersion] = useState<string | null>(null);
@@ -37,6 +37,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [extensionConnection, setExtensionConnection] = useState<ExtensionConnection | null>(null);
   const [extensionError, setExtensionError] = useState<string | null>(null);
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
+  const [switchingLibrary, setSwitchingLibrary] = useState(false);
   useAutoDismiss(extensionError, setExtensionError);
   useAutoDismiss(copyMessage, setCopyMessage);
   const pending = restoring || submitting;
@@ -97,6 +98,17 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     }
   }
 
+  async function chooseLibraryFolder() {
+    if (switchingLibrary || pending || metadataImportRunning) return;
+    setSwitchingLibrary(true);
+    try {
+      const selected = await open({ directory: true, multiple: false, defaultPath: library?.root });
+      if (typeof selected === "string") await openLibrary(selected);
+    } finally {
+      setSwitchingLibrary(false);
+    }
+  }
+
   async function chooseMangaFolder() {
     const selected = await open({ directory: true, multiple: false });
     if (typeof selected !== "string") return;
@@ -146,6 +158,10 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
         <dl className="settings-view__property">
           <dt>라이브러리 폴더</dt>
           <dd className="settings-view__path">{library?.root ?? "알 수 없음"}</dd>
+          <Button size="sm" disabled={switchingLibrary || pending || metadataImportRunning} onClick={() => void chooseLibraryFolder()}>
+            {switchingLibrary ? "여는 중…" : "다른 저장소 열기"}
+          </Button>
+          {libraryError && <dd className="settings-view__row-message" role="alert">{libraryError}</dd>}
         </dl>
         <dl className="settings-view__property">
           <dt>앱 버전</dt>
