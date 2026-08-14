@@ -34,7 +34,6 @@ export function LibraryProvider({
         setLibrary(summary);
         localStorage.setItem(LIBRARY_PATH_STORAGE_KEY, path);
       } catch (error) {
-        setLibrary(null);
         setError(commandErrorMessage(error, "라이브러리를 열 수 없습니다."));
       }
     },
