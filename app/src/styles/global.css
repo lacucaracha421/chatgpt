@@ -605,6 +605,30 @@ input:disabled {
   overflow-y: auto;
   padding: var(--space-3);
   background: var(--color-sidebar);
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-muted) 32%, transparent) transparent;
+}
+
+.classification-sidebar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.classification-sidebar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.classification-sidebar::-webkit-scrollbar-thumb {
+  min-height: 32px;
+  background: color-mix(in srgb, var(--color-muted) 32%, transparent);
+  border: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  background-clip: padding-box;
+}
+
+.classification-sidebar::-webkit-scrollbar-thumb:hover,
+.classification-sidebar::-webkit-scrollbar-thumb:active {
+  background: color-mix(in srgb, var(--color-muted) 68%, transparent);
+  background-clip: padding-box;
 }
 
 .classification-sidebar__quick-views {
