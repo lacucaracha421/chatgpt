@@ -15,6 +15,8 @@ const NEXT_PAGE_THRESHOLD_ROWS = 5;
 const DATE_LINE_HEIGHT = 2;
 const SPARSE_DATE_LINE_COUNT = 4;
 const QUICK_PREVIEW_DELAY_MS = 150;
+const QUICK_PREVIEW_GAP = 8;
+const QUICK_PREVIEW_MARGIN = 12;
 
 type QuickPreviewState = { asset: AssetSummary; anchor: DOMRect };
 
@@ -61,9 +63,10 @@ export function AssetGallery({ items, selectedAssetIds = new Set(), focusAssetId
     setQuickPreview(null);
   };
   const requestQuickPreview = (asset: AssetSummary, trigger: HTMLElement) => {
+    const sourceAsset = items.find((item) => item.id === asset.id) ?? asset;
     if (quickPreviewTimerRef.current !== null) window.clearTimeout(quickPreviewTimerRef.current);
     quickPreviewTimerRef.current = window.setTimeout(() => {
-      setQuickPreview({ asset, anchor: trigger.getBoundingClientRect() });
+      setQuickPreview({ asset: sourceAsset, anchor: trigger.getBoundingClientRect() });
       quickPreviewTimerRef.current = null;
     }, QUICK_PREVIEW_DELAY_MS);
   };
@@ -132,7 +135,7 @@ export function AssetGallery({ items, selectedAssetIds = new Set(), focusAssetId
     {dateLines.length > 0 && <div className="asset-gallery__scrollbar" aria-hidden="true" onPointerDown={(event) => { if (event.button === 0) { event.currentTarget.setPointerCapture(event.pointerId); scrollToPointer(event.clientY); } }} onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) scrollToPointer(event.clientY); }}>
       {dateLines.map((line) => <span key={line.key} className={activeLineKeys.has(line.key) ? "asset-gallery__scrollbar-line asset-gallery__scrollbar-line--active" : "asset-gallery__scrollbar-line"} style={{ top: `${line.top}px`, height: `${line.height}px` }} />)}
     </div>}
-    {quickPreview && <div className="asset-gallery__quick-preview"><img src={assetUrl(quickPreview.asset.id)} alt={`${quickPreview.asset.title || quickPreview.asset.originalName} 빠른 미리보기`} draggable={false} onError={cancelQuickPreview} /></div>}
+    {quickPreview && <div className="asset-gallery__quick-preview" style={quickPreviewLayout(quickPreview)}><img src={assetUrl(quickPreview.asset.id)} alt={`${quickPreview.asset.title || quickPreview.asset.originalName} 빠른 미리보기`} draggable={false} onError={cancelQuickPreview} /></div>}
   </div>;
 }
 
@@ -142,7 +145,7 @@ function AssetTile({ asset, height, selected, selectedAssetIds, focused, metadat
     {asset.media.kind === "video" ? <VideoTileMedia asset={asset as AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> }} active={activePreview} onRequestActive={onRequestPreview} onReleaseActive={onReleasePreview} onRetry={() => onRetryVideo?.(asset)} /> : <img src={thumbnailUrl(asset.id)} alt={alt} width={asset.width} height={asset.height} loading="lazy" draggable={false} />}
     {asset.favorite && <span className="asset-gallery__favorite" aria-hidden="true"><HeartIcon /></span>}
     {metadataVisible && <span className="asset-gallery__metadata"><span>{sourceHost(asset.sourceUrl)}</span><span>{localDate(asset.collectedAt)}</span></span>}
-    {asset.media.kind === "image" && <button type="button" className="asset-gallery__quick-preview-trigger" aria-label={`${alt} 빠른 확대 미리보기`} onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onPointerEnter={(event) => onRequestQuickPreview(asset, event.currentTarget)} onPointerLeave={onCancelQuickPreview} onFocus={(event) => onRequestQuickPreview(asset, event.currentTarget)} onBlur={onCancelQuickPreview} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onCancelQuickPreview(); } }}><PlusIcon aria-hidden="true" /></button>}
+    {asset.media.kind === "image" && <button type="button" className="asset-gallery__quick-preview-trigger" aria-label={`${alt} 빠른 확대 미리보기`} onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onPointerEnter={(event) => onRequestQuickPreview(asset, event.currentTarget)} onPointerLeave={onCancelQuickPreview} onFocus={(event) => onRequestQuickPreview(asset, event.currentTarget)} onBlur={onCancelQuickPreview} onKeyDown={(event) => { event.stopPropagation(); if (event.key === "Escape") { event.preventDefault(); onCancelQuickPreview(); } }}><PlusIcon aria-hidden="true" /></button>}
   </div>;
 }
 
@@ -220,6 +223,25 @@ function useGalleryMetrics(ref: React.RefObject<HTMLElement | null>) {
 function cssLength(value: string) {
   const parsed = Number.parseFloat(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function quickPreviewLayout({ asset, anchor }: QuickPreviewState): React.CSSProperties {
+  const maxWidth = window.innerWidth * 0.55;
+  const maxHeight = window.innerHeight * 0.7;
+  const sourceWidth = Math.max(1, asset.width);
+  const sourceHeight = Math.max(1, asset.height);
+  const scale = Math.min(maxWidth / sourceWidth, maxHeight / sourceHeight);
+  const width = sourceWidth * scale;
+  const height = sourceHeight * scale;
+  const preferredRight = anchor.right + QUICK_PREVIEW_GAP;
+  const left = preferredRight + width + QUICK_PREVIEW_MARGIN <= window.innerWidth
+    ? preferredRight
+    : Math.max(QUICK_PREVIEW_MARGIN, anchor.left - QUICK_PREVIEW_GAP - width);
+  const top = Math.min(
+    window.innerHeight - QUICK_PREVIEW_MARGIN - height,
+    Math.max(QUICK_PREVIEW_MARGIN, anchor.top + anchor.height / 2 - height / 2),
+  );
+  return { left, top, width, height };
 }
 
 function rowMoveDelta(rows: ReturnType<typeof buildJustifiedRows<AssetSummary>>, gap: number, items: AssetSummary[], currentId: string, direction: 1 | -1): number {

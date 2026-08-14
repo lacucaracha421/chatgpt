@@ -1706,6 +1706,56 @@ input:disabled {
   fill: var(--color-heart);
 }
 
+.asset-gallery__quick-preview-trigger {
+  position: absolute;
+  z-index: 2;
+  right: var(--space-1);
+  bottom: var(--space-1);
+  display: grid;
+  width: var(--control-height-sm);
+  height: var(--control-height-sm);
+  padding: var(--space-1);
+  place-items: center;
+  background: var(--video-overlay-bg);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease, background 120ms ease;
+}
+
+.asset-gallery__quick-preview-trigger:hover {
+  background: var(--color-surface-hover);
+}
+
+.asset-gallery__quick-preview-trigger svg {
+  width: 100%;
+  height: 100%;
+}
+
+.asset-gallery__asset:hover .asset-gallery__quick-preview-trigger,
+.asset-gallery__asset:focus-within .asset-gallery__quick-preview-trigger {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.asset-gallery__quick-preview {
+  position: fixed;
+  z-index: var(--z-floating-menu);
+  box-sizing: border-box;
+  overflow: hidden;
+  background: var(--color-surface-elevated);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-floating);
+  pointer-events: none;
+}
+
+.asset-gallery__quick-preview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
 .asset-viewer {
   position: relative;
   display: grid;

@@ -99,6 +99,7 @@ describe("AssetGallery", () => {
     fireEvent.click(trigger);
     fireEvent.doubleClick(trigger);
     fireEvent.pointerDown(trigger, { button: 0 });
+    fireEvent.keyDown(trigger, { key: "Enter" });
     expect(select).not.toHaveBeenCalled();
     expect(open).not.toHaveBeenCalled();
 
@@ -113,6 +114,38 @@ describe("AssetGallery", () => {
     act(() => vi.advanceTimersByTime(150));
     fireEvent.scroll(container.querySelector(".asset-gallery__scroll")!);
     expect(screen.queryByRole("img", { name: "asset-0.png 빠른 미리보기" })).not.toBeInTheDocument();
+  });
+
+  it("places the quick preview beside its trigger and clamps it inside the viewport", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("innerWidth", 1000);
+    vi.stubGlobal("innerHeight", 800);
+    render(<AssetGallery items={[{ ...asset(0), width: 400, height: 800 }]} />);
+    const trigger = screen.getByRole("button", { name: "asset-0.png 빠른 확대 미리보기" });
+    vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue({
+      left: 900,
+      right: 924,
+      top: 760,
+      bottom: 784,
+      width: 24,
+      height: 24,
+      x: 900,
+      y: 760,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerEnter(trigger);
+    act(() => vi.advanceTimersByTime(150));
+    const preview = screen.getByRole("img", { name: "asset-0.png 빠른 미리보기" }).parentElement!;
+    const left = Number.parseFloat(preview.style.left);
+    const top = Number.parseFloat(preview.style.top);
+    const width = Number.parseFloat(preview.style.width);
+    const height = Number.parseFloat(preview.style.height);
+
+    expect(left).toBeLessThan(900);
+    expect(top).toBeGreaterThanOrEqual(12);
+    expect(top + height).toBeLessThanOrEqual(788);
+    expect(width / height).toBeCloseTo(0.5);
   });
 
   it("reports multi-selection gestures and loaded-item keyboard commands", async () => {
