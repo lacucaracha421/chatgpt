@@ -523,12 +523,26 @@ describe("ClassificationSidebar", () => {
     expect(options).not.toContain("School Uniform");
   });
 
-  it("keeps root folders fixed and uses a distinct work-folder icon", () => {
-    renderSidebar();
+  it("offers other folders when moving a root folder", async () => {
+    const user = userEvent.setup();
+    const rootEntries = [...entries, { id: "root-2", kind: "root", name: "Images", parentId: null, iconKey: null, colorKey: null }] satisfies ClassificationEntry[];
+    renderSidebar(gateway(), { entries: rootEntries });
+    expect(screen.getByRole("treeitem", { name: "Blue Archive" }).querySelector("[data-icon-key='book']")).toBeInTheDocument();
 
     fireEvent.contextMenu(screen.getByRole("treeitem", { name: "Games" }), { clientX: 20, clientY: 20 });
-    expect(screen.getByRole("menuitem", { name: "이동 — 최상위 폴더" })).toHaveAttribute("data-disabled");
-    expect(screen.getByRole("treeitem", { name: "Blue Archive" }).querySelector("[data-icon-key='book']")).toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: "폴더 이동" }));
+
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toContain("Images");
+  });
+
+  it("offers the top level when moving a tag folder", async () => {
+    const user = userEvent.setup();
+    renderSidebar();
+
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: "Arona" }), { clientX: 20, clientY: 20 });
+    await user.click(screen.getByRole("menuitem", { name: "폴더 이동" }));
+
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toContain("최상위");
   });
 
   it("offers only root folders when moving a work folder", async () => {

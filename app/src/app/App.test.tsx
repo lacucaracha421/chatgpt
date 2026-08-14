@@ -745,6 +745,29 @@ describe("App", () => {
     expect(libraryGateway.moveClassification).toHaveBeenCalledTimes(1);
   });
 
+  it("moves a root classification inside another root", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games, images]);
+    vi.mocked(libraryGateway.moveClassification).mockResolvedValue(undefined);
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+
+    const gamesRow = await screen.findByRole("treeitem", { name: games.name });
+    const imagesRow = await screen.findByRole("treeitem", { name: images.name });
+    Object.defineProperties(imagesRow, {
+      setPointerCapture: { configurable: true, value: vi.fn() },
+      releasePointerCapture: { configurable: true, value: vi.fn() },
+    });
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: vi.fn().mockReturnValue(gamesRow) });
+
+    fireEvent.pointerDown(imagesRow, { button: 0, pointerId: 8, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(imagesRow, { pointerId: 8, clientX: 20, clientY: 10 });
+    expect(gamesRow).toHaveAttribute("data-drop-state", "valid");
+    fireEvent.pointerUp(imagesRow, { pointerId: 8, clientX: 20, clientY: 10 });
+
+    await waitFor(() => expect(libraryGateway.moveClassification).toHaveBeenCalledWith(images.id, games.id));
+  });
+
   it("rejects moving a folder into a destination with the same child name", async () => {
     localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
     localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({

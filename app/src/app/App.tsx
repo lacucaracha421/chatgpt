@@ -509,7 +509,6 @@ function validClassificationDrop(entryId: string, target: ClassificationDropTarg
   const parent = entries.find((candidate) => candidate.id === target.entryId);
   if (!entry || !parent || entry.parentId === parent.id || parent.id === entry.id || isDescendant(parent.id, entry.id, entries)) return false;
   if (entries.some((candidate) => candidate.id !== entry.id && candidate.parentId === parent.id && candidate.name.toLocaleLowerCase() === entry.name.toLocaleLowerCase())) return false;
-  if (entry.kind === "root") return false;
   return entry.kind !== "work" || parent.kind === "root";
 }
 

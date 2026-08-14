@@ -545,8 +545,7 @@ function TreeItem({ activeRowId, editError, editName, expandedIds, hasNextSiblin
     { id: "appearance", label: "아이콘 및 색상", onSelect: () => onAppearance(node.entry) },
     {
       id: "move",
-      label: node.entry.treeKind === "album" ? "앨범 이동" : node.entry.kind === "root" ? "이동 — 최상위 폴더" : "폴더 이동",
-      disabled: node.entry.treeKind === "classification" && node.entry.kind === "root",
+      label: node.entry.treeKind === "album" ? "앨범 이동" : "폴더 이동",
       onSelect: () => onMove(node.entry),
     },
     {
@@ -721,13 +720,14 @@ function moveParents(entry: SidebarTreeEntry, entries: SidebarTreeEntry[]): Arra
   if (entry.treeKind === "album") {
     return [null, ...entries.filter((candidate) => candidate.id !== entry.id && !isDescendant(candidate.id, entry.id, entries))];
   }
-  if (entry.kind === "root") return [null];
-  const allowedKinds = entry.kind === "work" ? ["root"] : ["root", "work", "tag"];
-  return entries.filter((candidate) =>
+  if (entry.kind === "work") {
+    return entries.filter((candidate) => candidate.kind === "root" && candidate.id !== entry.id);
+  }
+  const parents = entries.filter((candidate) =>
     candidate.id !== entry.id
-    && allowedKinds.includes(candidate.kind)
     && !isDescendant(candidate.id, entry.id, entries),
   );
+  return entry.kind === "tag" ? [null, ...parents] : parents;
 }
 
 function isDescendant(candidateId: string, ancestorId: string, entries: SidebarTreeEntry[]): boolean {
