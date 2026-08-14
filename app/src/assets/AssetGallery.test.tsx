@@ -49,6 +49,72 @@ describe("AssetGallery", () => {
     fireEvent.keyDown(tile, { key: "Enter" }); expect(open).toHaveBeenCalledTimes(2);
   });
 
+  it("offers quick preview only for image assets", async () => {
+    render(<AssetGallery items={[asset(0), videoAsset(1)]} />);
+
+    expect(await screen.findByRole("button", { name: "asset-0.png 빠른 확대 미리보기" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "video-1.webm 빠른 확대 미리보기" })).not.toBeInTheDocument();
+  });
+
+  it("opens one original image preview after the hover delay and closes it on leave", () => {
+    vi.useFakeTimers();
+    render(<AssetGallery items={[asset(0), asset(1)]} />);
+    const first = screen.getByRole("button", { name: "asset-0.png 빠른 확대 미리보기" });
+
+    fireEvent.pointerEnter(first);
+    act(() => vi.advanceTimersByTime(149));
+    expect(screen.queryByRole("img", { name: "asset-0.png 빠른 미리보기" })).not.toBeInTheDocument();
+
+    act(() => vi.advanceTimersByTime(1));
+    expect(screen.getByRole("img", { name: "asset-0.png 빠른 미리보기" })).toHaveAttribute("src", "http://lakomics.localhost/asset/asset-0");
+
+    const second = screen.getByRole("button", { name: "asset-1.png 빠른 확대 미리보기" });
+    fireEvent.pointerEnter(second);
+    act(() => vi.advanceTimersByTime(150));
+    expect(screen.queryByRole("img", { name: "asset-0.png 빠른 미리보기" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("img", { name: /빠른 미리보기/ })).toHaveLength(1);
+
+    fireEvent.pointerLeave(second);
+    expect(screen.queryByRole("img", { name: "asset-1.png 빠른 미리보기" })).not.toBeInTheDocument();
+  });
+
+  it("supports keyboard quick preview and dismisses it without selecting or opening the tile", () => {
+    vi.useFakeTimers();
+    const select = vi.fn();
+    const open = vi.fn();
+    const { container } = render(<AssetGallery items={[asset(0)]} onSelectionGesture={select} onOpen={open} />);
+    const trigger = screen.getByRole("button", { name: "asset-0.png 빠른 확대 미리보기" });
+
+    fireEvent.focus(trigger);
+    act(() => vi.advanceTimersByTime(150));
+    expect(screen.getByRole("img", { name: "asset-0.png 빠른 미리보기" })).toBeInTheDocument();
+    fireEvent.blur(trigger);
+    expect(screen.queryByRole("img", { name: "asset-0.png 빠른 미리보기" })).not.toBeInTheDocument();
+
+    fireEvent.focus(trigger);
+    act(() => vi.advanceTimersByTime(150));
+    fireEvent.keyDown(trigger, { key: "Escape" });
+    expect(screen.queryByRole("img", { name: "asset-0.png 빠른 미리보기" })).not.toBeInTheDocument();
+
+    fireEvent.click(trigger);
+    fireEvent.doubleClick(trigger);
+    fireEvent.pointerDown(trigger, { button: 0 });
+    expect(select).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
+
+    fireEvent.blur(trigger);
+    fireEvent.focus(trigger);
+    act(() => vi.advanceTimersByTime(150));
+    fireEvent.error(screen.getByRole("img", { name: "asset-0.png 빠른 미리보기" }));
+    expect(screen.queryByRole("img", { name: "asset-0.png 빠른 미리보기" })).not.toBeInTheDocument();
+
+    fireEvent.blur(trigger);
+    fireEvent.focus(trigger);
+    act(() => vi.advanceTimersByTime(150));
+    fireEvent.scroll(container.querySelector(".asset-gallery__scroll")!);
+    expect(screen.queryByRole("img", { name: "asset-0.png 빠른 미리보기" })).not.toBeInTheDocument();
+  });
+
   it("reports multi-selection gestures and loaded-item keyboard commands", async () => {
     const user = userEvent.setup();
     const onSelectionGesture = vi.fn();

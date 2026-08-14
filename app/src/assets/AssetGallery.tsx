@@ -1,11 +1,12 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { PlusIcon } from "@heroicons/react/24/outline";
 import { HeartIcon } from "@heroicons/react/24/solid";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { AssetSummary } from "../library/types";
 import { assetDragIds, type InternalDragPayload } from "../shared/interaction/pointerDrag";
 import type { SelectionGesture } from "./selection";
 import { buildJustifiedRows, type JustifiedRow } from "./justifiedRows";
-import { thumbnailUrl } from "./mediaUrl";
+import { assetUrl, thumbnailUrl } from "./mediaUrl";
 import { VideoTileMedia } from "../video/VideoTileMedia";
 import "../styles/tokens.css";
 
@@ -13,6 +14,9 @@ const VIRTUAL_OVERSCAN_ROWS = 3;
 const NEXT_PAGE_THRESHOLD_ROWS = 5;
 const DATE_LINE_HEIGHT = 2;
 const SPARSE_DATE_LINE_COUNT = 4;
+const QUICK_PREVIEW_DELAY_MS = 150;
+
+type QuickPreviewState = { asset: AssetSummary; anchor: DOMRect };
 
 type AssetGalleryProps = {
   items: AssetSummary[];
@@ -38,7 +42,9 @@ type AssetGalleryProps = {
 export function AssetGallery({ items, selectedAssetIds = new Set(), focusAssetId = null, targetRowHeight = 180, metadataVisible = false, hasNextPage = false, onLoadNextPage, onSelectionGesture, onSelectAll, onDeleteSelection, onClearSelection, onMoveFocus, onOpen, onRetryVideo, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const focusRequestedRef = useRef(false);
+  const quickPreviewTimerRef = useRef<number | null>(null);
   const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
+  const [quickPreview, setQuickPreview] = useState<QuickPreviewState | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const { width, gap, height } = useGalleryMetrics(scrollRef);
   const rows = useMemo(() => buildJustifiedRows(items, width, targetRowHeight, gap), [gap, items, targetRowHeight, width]);
@@ -49,6 +55,18 @@ export function AssetGallery({ items, selectedAssetIds = new Set(), focusAssetId
   const visibleStart = scrollTop;
   const visibleEnd = scrollTop + height;
   const activeLineKeys = new Set(dateLines.filter((line) => line.contentCenter >= visibleStart && line.contentCenter <= visibleEnd).map((line) => line.key));
+  const cancelQuickPreview = () => {
+    if (quickPreviewTimerRef.current !== null) window.clearTimeout(quickPreviewTimerRef.current);
+    quickPreviewTimerRef.current = null;
+    setQuickPreview(null);
+  };
+  const requestQuickPreview = (asset: AssetSummary, trigger: HTMLElement) => {
+    if (quickPreviewTimerRef.current !== null) window.clearTimeout(quickPreviewTimerRef.current);
+    quickPreviewTimerRef.current = window.setTimeout(() => {
+      setQuickPreview({ asset, anchor: trigger.getBoundingClientRect() });
+      quickPreviewTimerRef.current = null;
+    }, QUICK_PREVIEW_DELAY_MS);
+  };
   const scrollToPointer = (clientY: number) => {
     const element = scrollRef.current; if (!element) return;
     const rect = element.getBoundingClientRect();
@@ -59,6 +77,9 @@ export function AssetGallery({ items, selectedAssetIds = new Set(), focusAssetId
     const last = virtualRows[virtualRows.length - 1];
     if (hasNextPage && onLoadNextPage && last && last.index >= rows.length - NEXT_PAGE_THRESHOLD_ROWS) onLoadNextPage();
   }, [hasNextPage, onLoadNextPage, rows.length, virtualRows]);
+  useEffect(() => () => {
+    if (quickPreviewTimerRef.current !== null) window.clearTimeout(quickPreviewTimerRef.current);
+  }, []);
   useLayoutEffect(() => {
     if (!focusRequestedRef.current || !focusAssetId) return;
     [...(scrollRef.current?.querySelectorAll<HTMLElement>("[role=option]") ?? [])]
@@ -73,7 +94,7 @@ export function AssetGallery({ items, selectedAssetIds = new Set(), focusAssetId
       role="listbox"
       aria-label="자산"
       aria-multiselectable="true"
-      onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+      onScroll={(event) => { cancelQuickPreview(); setScrollTop(event.currentTarget.scrollTop); }}
       onClick={(event) => { if (!(event.target as HTMLElement).closest(".asset-gallery__asset")) onClearSelection?.(); }}
       onKeyDown={(event) => {
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
@@ -103,7 +124,7 @@ export function AssetGallery({ items, selectedAssetIds = new Set(), focusAssetId
         {virtualRows.map((virtualRow) => {
           const row = rows[virtualRow.index]; if (!row) return null;
           return <div key={virtualRow.key} className="asset-gallery__row" style={{ gap, height: row.height, transform: `translateY(${virtualRow.start}px)` }}>
-            {row.items.map((asset, index) => <AssetTile key={asset.id} asset={asset} height={row.height} selected={selectedAssetIds.has(asset.id)} selectedAssetIds={selectedAssetIds} focused={focusAssetId ? focusAssetId === asset.id : virtualRow.index === 0 && index === 0} metadataVisible={metadataVisible} activePreview={activePreviewId === asset.id} onRequestPreview={() => setActivePreviewId(asset.id)} onReleasePreview={() => setActivePreviewId((current) => current === asset.id ? null : current)} onRetryVideo={onRetryVideo} onSelectionGesture={onSelectionGesture} onOpen={onOpen} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />)}
+            {row.items.map((asset, index) => <AssetTile key={asset.id} asset={asset} height={row.height} selected={selectedAssetIds.has(asset.id)} selectedAssetIds={selectedAssetIds} focused={focusAssetId ? focusAssetId === asset.id : virtualRow.index === 0 && index === 0} metadataVisible={metadataVisible} activePreview={activePreviewId === asset.id} onRequestPreview={() => setActivePreviewId(asset.id)} onReleasePreview={() => setActivePreviewId((current) => current === asset.id ? null : current)} onRequestQuickPreview={requestQuickPreview} onCancelQuickPreview={cancelQuickPreview} onRetryVideo={onRetryVideo} onSelectionGesture={onSelectionGesture} onOpen={onOpen} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />)}
           </div>;
         })}
       </div>
@@ -111,15 +132,17 @@ export function AssetGallery({ items, selectedAssetIds = new Set(), focusAssetId
     {dateLines.length > 0 && <div className="asset-gallery__scrollbar" aria-hidden="true" onPointerDown={(event) => { if (event.button === 0) { event.currentTarget.setPointerCapture(event.pointerId); scrollToPointer(event.clientY); } }} onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) scrollToPointer(event.clientY); }}>
       {dateLines.map((line) => <span key={line.key} className={activeLineKeys.has(line.key) ? "asset-gallery__scrollbar-line asset-gallery__scrollbar-line--active" : "asset-gallery__scrollbar-line"} style={{ top: `${line.top}px`, height: `${line.height}px` }} />)}
     </div>}
+    {quickPreview && <div className="asset-gallery__quick-preview"><img src={assetUrl(quickPreview.asset.id)} alt={`${quickPreview.asset.title || quickPreview.asset.originalName} 빠른 미리보기`} draggable={false} onError={cancelQuickPreview} /></div>}
   </div>;
 }
 
-function AssetTile({ asset, height, selected, selectedAssetIds, focused, metadataVisible, activePreview, onRequestPreview, onReleasePreview, onRetryVideo, onSelectionGesture, onOpen, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: { asset: AssetSummary; height: number; selected: boolean; selectedAssetIds: ReadonlySet<string>; focused: boolean; metadataVisible: boolean; activePreview: boolean; onRequestPreview(): void; onReleasePreview(): void; onRetryVideo?: AssetGalleryProps["onRetryVideo"]; onSelectionGesture?: (asset: AssetSummary, gesture: SelectionGesture) => void; onOpen?: (asset: AssetSummary) => void; onPointerDragStart?: AssetGalleryProps["onPointerDragStart"]; onPointerDragMove?: AssetGalleryProps["onPointerDragMove"]; onPointerDragEnd?: AssetGalleryProps["onPointerDragEnd"]; onPointerDragCancel?: AssetGalleryProps["onPointerDragCancel"] }) {
+function AssetTile({ asset, height, selected, selectedAssetIds, focused, metadataVisible, activePreview, onRequestPreview, onReleasePreview, onRequestQuickPreview, onCancelQuickPreview, onRetryVideo, onSelectionGesture, onOpen, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: { asset: AssetSummary; height: number; selected: boolean; selectedAssetIds: ReadonlySet<string>; focused: boolean; metadataVisible: boolean; activePreview: boolean; onRequestPreview(): void; onReleasePreview(): void; onRequestQuickPreview(asset: AssetSummary, trigger: HTMLElement): void; onCancelQuickPreview(): void; onRetryVideo?: AssetGalleryProps["onRetryVideo"]; onSelectionGesture?: (asset: AssetSummary, gesture: SelectionGesture) => void; onOpen?: (asset: AssetSummary) => void; onPointerDragStart?: AssetGalleryProps["onPointerDragStart"]; onPointerDragMove?: AssetGalleryProps["onPointerDragMove"]; onPointerDragEnd?: AssetGalleryProps["onPointerDragEnd"]; onPointerDragCancel?: AssetGalleryProps["onPointerDragCancel"] }) {
   const alt = asset.title || asset.originalName;
   return <div role="option" data-asset-id={asset.id} className="asset-gallery__asset" style={{ width: asset.width, height }} aria-label={alt} aria-selected={selected} tabIndex={focused ? 0 : -1} onClick={(event) => onSelectionGesture?.(asset, { toggle: event.ctrlKey || event.metaKey, range: event.shiftKey })} onDoubleClick={() => onOpen?.(asset)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); onOpen?.(asset); } }} onPointerDown={(event) => { if (event.button === 0) onPointerDragStart?.({ kind: "assets", assetIds: assetDragIds(asset.id, selectedAssetIds) }, event); }} onPointerMove={onPointerDragMove} onPointerUp={onPointerDragEnd} onPointerCancel={onPointerDragCancel}>
     {asset.media.kind === "video" ? <VideoTileMedia asset={asset as AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> }} active={activePreview} onRequestActive={onRequestPreview} onReleaseActive={onReleasePreview} onRetry={() => onRetryVideo?.(asset)} /> : <img src={thumbnailUrl(asset.id)} alt={alt} width={asset.width} height={asset.height} loading="lazy" draggable={false} />}
     {asset.favorite && <span className="asset-gallery__favorite" aria-hidden="true"><HeartIcon /></span>}
     {metadataVisible && <span className="asset-gallery__metadata"><span>{sourceHost(asset.sourceUrl)}</span><span>{localDate(asset.collectedAt)}</span></span>}
+    {asset.media.kind === "image" && <button type="button" className="asset-gallery__quick-preview-trigger" aria-label={`${alt} 빠른 확대 미리보기`} onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onPointerEnter={(event) => onRequestQuickPreview(asset, event.currentTarget)} onPointerLeave={onCancelQuickPreview} onFocus={(event) => onRequestQuickPreview(asset, event.currentTarget)} onBlur={onCancelQuickPreview} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onCancelQuickPreview(); } }}><PlusIcon aria-hidden="true" /></button>}
   </div>;
 }
 
