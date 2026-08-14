@@ -11,6 +11,9 @@ import type {
 import { UI_PREFERENCES_KEY } from "../preferences/uiPreferences";
 import { App } from "./App";
 
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
+import { open } from "@tauri-apps/plugin-dialog";
+
 const summary = { root: "C:\\Lakomics" };
 const games: ClassificationEntry = {
   id: "root-games",
@@ -113,7 +116,10 @@ function gateway(): LibraryGateway {
 }
 
 describe("App", () => {
-  beforeEach(() => localStorage.clear());
+  beforeEach(() => {
+    localStorage.clear();
+    vi.mocked(open).mockReset();
+  });
   afterEach(cleanup);
 
   it("opens the selected library and persists it", async () => {
@@ -130,6 +136,24 @@ describe("App", () => {
     );
     expect(screen.getByRole("main", { name: "라이브러리 작업 공간" })).toBeInTheDocument();
     expect(localStorage.getItem("lakomics.libraryPath")).toBe("C:\\Lakomics");
+  });
+
+  it("remounts and reloads the workspace after switching library roots", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Current");
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.openLibrary).mockImplementation(async (path) => ({ root: path }));
+    vi.mocked(libraryGateway.listClassifications)
+      .mockResolvedValueOnce([{ ...games, id: "old-root", name: "Old library" }])
+      .mockResolvedValue([{ ...games, id: "new-root", name: "New library" }]);
+    vi.mocked(open).mockResolvedValue("D:\\Next");
+    render(<App gateway={libraryGateway} subscribeDrops={noDrops} />);
+
+    expect(await screen.findByRole("treeitem", { name: "Old library" })).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "설정" }));
+    await userEvent.click(screen.getByRole("button", { name: "다른 저장소 열기" }));
+
+    expect(await screen.findByRole("treeitem", { name: "New library" })).toBeVisible();
+    expect(screen.queryByRole("treeitem", { name: "Old library" })).not.toBeInTheDocument();
   });
 
   it("renders the trash workspace without loading an asset page", async () => {

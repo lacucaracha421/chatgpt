@@ -71,7 +71,7 @@ function LibraryScreen({
   const { library } = useLibrary();
 
   return library
-    ? <LibraryWorkspace subscribeDrops={subscribeDrops} startAssetDrag={startAssetDrag} />
+    ? <LibraryWorkspace key={library.root} subscribeDrops={subscribeDrops} startAssetDrag={startAssetDrag} />
     : <LibrarySetup selectFolder={selectFolder} />;
 }
 
