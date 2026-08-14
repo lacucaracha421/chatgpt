@@ -56,7 +56,12 @@ impl Library {
         let entry =
             find_classification(&transaction, id)?.ok_or(LibraryError::ClassificationNotFound)?;
         let parent = find_parent(&transaction, parent_id)?;
-        validate_parent(&entry.kind, parent.as_ref())?;
+        let next_kind = match (&entry.kind, parent.as_ref()) {
+            (ClassificationKind::Root, Some(_)) => ClassificationKind::Tag,
+            (ClassificationKind::Tag, None) => ClassificationKind::Root,
+            _ => entry.kind.clone(),
+        };
+        validate_parent(&next_kind, parent.as_ref())?;
 
         if let Some(parent_id) = parent_id {
             let is_descendant: bool = transaction.query_row(
@@ -78,8 +83,8 @@ impl Library {
 
         transaction
             .execute(
-                "UPDATE classification_entries SET parent_id = ?1 WHERE id = ?2",
-                params![parent_id, id],
+                "UPDATE classification_entries SET kind = ?1, parent_id = ?2 WHERE id = ?3",
+                params![kind_name(&next_kind), parent_id, id],
             )
             .map_err(map_duplicate_name)?;
         transaction.commit()?;
@@ -514,6 +519,105 @@ mod tests {
             .find(|entry| entry.id == fixture.child_tag.id)
             .unwrap();
         assert_eq!(moved.parent_id, Some(fixture.root.id));
+    }
+
+    #[test]
+    fn moving_a_root_below_another_root_demotes_it_without_moving_contents() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let destination = library
+            .create_classification(CreateClassification {
+                kind: ClassificationKind::Root,
+                name: "Games".into(),
+                parent_id: None,
+            })
+            .unwrap();
+        let moving = library
+            .create_classification(CreateClassification {
+                kind: ClassificationKind::Root,
+                name: "Reverse".into(),
+                parent_id: None,
+            })
+            .unwrap();
+        let child = library
+            .create_classification(CreateClassification {
+                kind: ClassificationKind::Tag,
+                name: "Character".into(),
+                parent_id: Some(moving.id.clone()),
+            })
+            .unwrap();
+        insert_asset(&library, "asset-a");
+        library
+            .set_asset_classification(SetAssetClassification {
+                asset_ids: vec!["asset-a".into()],
+                classification_id: Some(moving.id.clone()),
+            })
+            .unwrap();
+
+        library
+            .move_classification(&moving.id, Some(&destination.id))
+            .unwrap();
+
+        let entries = library.list_classifications().unwrap();
+        let moved = entries.iter().find(|entry| entry.id == moving.id).unwrap();
+        let preserved_child = entries.iter().find(|entry| entry.id == child.id).unwrap();
+        assert_eq!(moved.kind, ClassificationKind::Tag);
+        assert_eq!(moved.parent_id, Some(destination.id));
+        assert_eq!(preserved_child.parent_id, Some(moved.id.clone()));
+        assert_eq!(
+            library.get_asset_classifications("asset-a").unwrap(),
+            vec![moved.clone()]
+        );
+    }
+
+    #[test]
+    fn moving_a_tag_to_the_top_level_promotes_it_without_moving_contents() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let destination = library
+            .create_classification(CreateClassification {
+                kind: ClassificationKind::Root,
+                name: "Games".into(),
+                parent_id: None,
+            })
+            .unwrap();
+        let moving = library
+            .create_classification(CreateClassification {
+                kind: ClassificationKind::Root,
+                name: "Reverse".into(),
+                parent_id: None,
+            })
+            .unwrap();
+        let child = library
+            .create_classification(CreateClassification {
+                kind: ClassificationKind::Tag,
+                name: "Character".into(),
+                parent_id: Some(moving.id.clone()),
+            })
+            .unwrap();
+        insert_asset(&library, "asset-a");
+        library
+            .set_asset_classification(SetAssetClassification {
+                asset_ids: vec!["asset-a".into()],
+                classification_id: Some(moving.id.clone()),
+            })
+            .unwrap();
+        library
+            .move_classification(&moving.id, Some(&destination.id))
+            .unwrap();
+
+        library.move_classification(&moving.id, None).unwrap();
+
+        let entries = library.list_classifications().unwrap();
+        let moved = entries.iter().find(|entry| entry.id == moving.id).unwrap();
+        let preserved_child = entries.iter().find(|entry| entry.id == child.id).unwrap();
+        assert_eq!(moved.kind, ClassificationKind::Root);
+        assert_eq!(moved.parent_id, None);
+        assert_eq!(preserved_child.parent_id, Some(moved.id.clone()));
+        assert_eq!(
+            library.get_asset_classifications("asset-a").unwrap(),
+            vec![moved.clone()]
+        );
     }
 
     #[test]
