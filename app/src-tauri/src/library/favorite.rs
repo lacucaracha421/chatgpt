@@ -101,6 +101,7 @@ fn query(sort: AssetSort, favorite_only: bool, limit: u32) -> AssetQuery {
     AssetQuery {
         classification_id: None,
         album_id: None,
+        collection_id: None,
         direct_only: false,
         favorite_only,
         unclassified_only: false,

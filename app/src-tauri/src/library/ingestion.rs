@@ -1127,6 +1127,7 @@ mod tests {
                 .list_assets(AssetQuery {
                     classification_id: None,
                     album_id: None,
+                    collection_id: None,
                     direct_only: false,
                     favorite_only: false,
                     unclassified_only: false,

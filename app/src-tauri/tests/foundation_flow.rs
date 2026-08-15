@@ -116,6 +116,7 @@ impl FoundationFixture {
             .list_assets(AssetQuery {
                 classification_id: Some(classification_id.into()),
                 album_id: None,
+                collection_id: None,
                 direct_only: false,
                 favorite_only: false,
                 unclassified_only: false,
@@ -858,6 +859,7 @@ fn asset_query(
     AssetQuery {
         classification_id: None,
         album_id: None,
+        collection_id: None,
         direct_only: false,
         favorite_only,
         unclassified_only: false,

@@ -228,6 +228,18 @@ impl Library {
             params![existing_id, candidate_id],
         )?;
         transaction.execute(
+            "INSERT OR IGNORE INTO collection_assets (collection_id, asset_id, added_at)
+             SELECT collection_id, ?2, added_at
+             FROM collection_assets WHERE asset_id = ?1",
+            params![existing_id, candidate_id],
+        )?;
+        transaction.execute(
+            "UPDATE collections
+             SET cover_asset_id = ?2, updated_at = ?3
+             WHERE cover_asset_id = ?1",
+            params![existing_id, candidate_id, chrono::Utc::now().to_rfc3339()],
+        )?;
+        transaction.execute(
             "UPDATE assets SET favorite = (SELECT favorite FROM assets WHERE id = ?1)
              WHERE id = ?2 AND status = 'review'",
             params![existing_id, candidate_id],
@@ -620,8 +632,9 @@ mod tests {
     use super::super::{
         error::LibraryError,
         models::{
-            AssetCursor, ClassificationKind, CreateClassification, ImportSource, IngestMediaRequest,
-            IngestOutcome, SimilarityDecision, SimilarityDecisionRequest,
+            AssetCollectionPatch, AssetCursor, ClassificationKind, CreateClassification,
+            CreateCollection, ImportSource, IngestMediaRequest, IngestOutcome, SimilarityDecision,
+            SimilarityDecisionRequest,
         },
         Library,
     };
@@ -783,8 +796,23 @@ mod tests {
     }
 
     #[test]
-    fn replace_moves_existing_to_trash_and_transfers_classifications_and_favorite() {
+    fn replace_moves_existing_to_trash_and_transfers_classifications_collection_and_favorite() {
         let fixture = review_fixture();
+        let collection = fixture
+            .library
+            .create_collection(CreateCollection {
+                name: "Reference".into(),
+                description: None,
+            })
+            .unwrap();
+        fixture
+            .library
+            .patch_asset_collections(AssetCollectionPatch {
+                asset_ids: vec![fixture.existing_id.clone()],
+                add_collection_ids: vec![collection.id.clone()],
+                remove_collection_ids: vec![],
+            })
+            .unwrap();
         fixture
             .library
             .set_asset_favorite(&fixture.existing_id, true)
@@ -806,6 +834,13 @@ mod tests {
         let mut expected = vec![fixture.old_tag.clone(), fixture.requested_tag.clone()];
         expected.sort();
         assert_eq!(actual, expected);
+        assert_eq!(
+            fixture
+                .library
+                .get_asset_collections(&fixture.candidate_id)
+                .unwrap(),
+            vec![collection.id]
+        );
         assert_eq!(
             fixture.source_url(&fixture.candidate_id),
             Some("https://example.com/new".into())

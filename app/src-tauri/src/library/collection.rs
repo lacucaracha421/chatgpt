@@ -472,6 +472,44 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn permanent_asset_delete_cascades_membership_and_clears_cover() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        insert_asset(&library, "asset-1", "normal");
+        let collection = create(&library, "Reference");
+        library
+            .patch_asset_collections(AssetCollectionPatch {
+                asset_ids: vec!["asset-1".into()],
+                add_collection_ids: vec![collection.id.clone()],
+                remove_collection_ids: vec![],
+            })
+            .unwrap();
+        library
+            .set_collection_cover(&collection.id, Some("asset-1"))
+            .unwrap();
+
+        library
+            .connection()
+            .unwrap()
+            .execute("DELETE FROM assets WHERE id = 'asset-1'", [])
+            .unwrap();
+
+        let after = library.get_collection(&collection.id).unwrap();
+        assert_eq!(after.asset_count, 0);
+        assert_eq!(after.cover_asset_id, None);
+        assert_eq!(
+            library
+                .connection()
+                .unwrap()
+                .query_row("SELECT COUNT(*) FROM collection_assets", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+    }
+
     fn create(library: &Library, name: &str) -> crate::library::models::CollectionSummary {
         library
             .create_collection(CreateCollection {

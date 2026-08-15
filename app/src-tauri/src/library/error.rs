@@ -102,7 +102,7 @@ pub enum LibraryError {
     },
     #[error("자산 페이지 크기는 1에서 200 사이여야 합니다")]
     InvalidAssetPageLimit,
-    #[error("일반 폴더와 앨범 범위를 동시에 조회할 수 없습니다")]
+    #[error("분류, 앨범, 컬렉션 범위는 한 번에 하나만 조회할 수 있습니다")]
     InvalidAssetScope,
     #[error("invalid asset cursor")]
     InvalidAssetCursor,

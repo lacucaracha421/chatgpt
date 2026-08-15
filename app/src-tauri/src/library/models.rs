@@ -207,6 +207,7 @@ pub struct SimilarityIndexProgress {
 pub struct AssetQuery {
     pub classification_id: Option<String>,
     pub album_id: Option<String>,
+    pub collection_id: Option<String>,
     pub direct_only: bool,
     pub favorite_only: bool,
     pub unclassified_only: bool,

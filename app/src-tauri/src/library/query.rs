@@ -45,7 +45,16 @@ impl Library {
         if !(1..=200).contains(&query.limit) {
             return Err(LibraryError::InvalidAssetPageLimit);
         }
-        if query.classification_id.is_some() && query.album_id.is_some() {
+        if [
+            query.classification_id.is_some(),
+            query.album_id.is_some(),
+            query.collection_id.is_some(),
+        ]
+        .into_iter()
+        .filter(|present| *present)
+        .count()
+            > 1
+        {
             return Err(LibraryError::InvalidAssetScope);
         }
 
@@ -70,6 +79,16 @@ impl Library {
                 return Err(LibraryError::AlbumNotFound);
             }
         }
+        if let Some(collection_id) = query.collection_id.as_deref() {
+            let exists: bool = connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM collections WHERE id = ?1)",
+                [collection_id],
+                |row| row.get(0),
+            )?;
+            if !exists {
+                return Err(LibraryError::CollectionNotFound);
+            }
+        }
         let cursor = decode_cursor(&query)?;
         let random_pivot = query.random_pivot.as_deref().unwrap_or("");
         let mut statement = connection.prepare(match query.sort {
@@ -90,6 +109,7 @@ impl Library {
                     collected_at,
                     id,
                     i64::from(query.limit) + 1,
+                    query.collection_id.as_deref(),
                 ])?
             }
             AssetSort::Oldest => {
@@ -103,6 +123,7 @@ impl Library {
                     collected_at,
                     id,
                     i64::from(query.limit) + 1,
+                    query.collection_id.as_deref(),
                 ])?
             }
             AssetSort::Favorites => {
@@ -117,6 +138,7 @@ impl Library {
                     collected_at,
                     id,
                     i64::from(query.limit) + 1,
+                    query.collection_id.as_deref(),
                 ])?
             }
             AssetSort::Random => {
@@ -132,6 +154,7 @@ impl Library {
                     content_hash,
                     id,
                     i64::from(query.limit) + 1,
+                    query.collection_id.as_deref(),
                 ])?
             }
         };
@@ -316,6 +339,7 @@ WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
 AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
+AND (?9 IS NULL OR EXISTS (SELECT 1 FROM collection_assets AS collection_link WHERE collection_link.asset_id = asset.id AND collection_link.collection_id = ?9))
 AND (?6 IS NULL OR asset.collected_at < ?6 OR (asset.collected_at = ?6 AND asset.id < ?7))
 ORDER BY asset.collected_at DESC, asset.id DESC LIMIT ?8";
 
@@ -334,6 +358,7 @@ WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
 AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
+AND (?9 IS NULL OR EXISTS (SELECT 1 FROM collection_assets AS collection_link WHERE collection_link.asset_id = asset.id AND collection_link.collection_id = ?9))
 AND (?6 IS NULL OR asset.collected_at > ?6 OR (asset.collected_at = ?6 AND asset.id > ?7))
 ORDER BY asset.collected_at ASC, asset.id ASC LIMIT ?8";
 
@@ -352,6 +377,7 @@ WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
 AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
+AND (?10 IS NULL OR EXISTS (SELECT 1 FROM collection_assets AS collection_link WHERE collection_link.asset_id = asset.id AND collection_link.collection_id = ?10))
 AND (?6 IS NULL OR asset.favorite < ?6 OR (asset.favorite = ?6 AND (asset.collected_at < ?7 OR (asset.collected_at = ?7 AND asset.id < ?8))))
 ORDER BY asset.favorite DESC, asset.collected_at DESC, asset.id DESC LIMIT ?9";
 
@@ -371,6 +397,7 @@ WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
 AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
+AND (?11 IS NULL OR EXISTS (SELECT 1 FROM collection_assets AS collection_link WHERE collection_link.asset_id = asset.id AND collection_link.collection_id = ?11))
 AND (?7 IS NULL OR CASE WHEN asset.content_hash >= ?6 THEN 0 ELSE 1 END > ?7 OR (CASE WHEN asset.content_hash >= ?6 THEN 0 ELSE 1 END = ?7 AND (asset.content_hash > ?8 OR (asset.content_hash = ?8 AND asset.id > ?9))))
 ORDER BY CASE WHEN asset.content_hash >= ?6 THEN 0 ELSE 1 END ASC, asset.content_hash ASC, asset.id ASC LIMIT ?10";
 
@@ -381,9 +408,9 @@ mod tests {
     use crate::library::{
         error::LibraryError,
         models::{
-            AssetAlbumPatch, AssetClassificationPatch, AssetCursor, AssetQuery, AssetSort,
-            ClassificationKind, CreateAlbum, CreateClassification, ImportSource, MediaSummary,
-            VideoPreparationState,
+            AssetAlbumPatch, AssetClassificationPatch, AssetCollectionPatch, AssetCursor,
+            AssetQuery, AssetSort, ClassificationKind, CreateAlbum, CreateClassification,
+            CreateCollection, ImportSource, MediaSummary, VideoPreparationState,
         },
         Library,
     };
@@ -448,6 +475,7 @@ mod tests {
             .list_assets(AssetQuery {
                 classification_id: None,
                 album_id: None,
+                collection_id: None,
                 direct_only: false,
                 favorite_only: false,
                 unclassified_only: false,
@@ -538,6 +566,7 @@ mod tests {
             .list_assets(AssetQuery {
                 classification_id: Some(root.id.clone()),
                 album_id: None,
+                collection_id: None,
                 direct_only: false,
                 favorite_only: false,
                 unclassified_only: false,
@@ -551,6 +580,7 @@ mod tests {
             .list_assets(AssetQuery {
                 classification_id: Some(root.id),
                 album_id: None,
+                collection_id: None,
                 direct_only: true,
                 favorite_only: false,
                 unclassified_only: false,
@@ -602,6 +632,7 @@ mod tests {
             .list_assets(AssetQuery {
                 classification_id: Some(root.id),
                 album_id: None,
+                collection_id: None,
                 direct_only: false,
                 favorite_only: false,
                 unclassified_only: false,
@@ -649,6 +680,7 @@ mod tests {
         let query = AssetQuery {
             classification_id: None,
             album_id: Some(root.id),
+            collection_id: None,
             direct_only: false,
             favorite_only: false,
             unclassified_only: false,
@@ -663,6 +695,90 @@ mod tests {
         assert!(library.list_assets(query.clone()).unwrap().items.is_empty());
         library.restore_asset("asset-1").unwrap();
         assert_eq!(library.list_assets(query).unwrap().items.len(), 1);
+    }
+
+    #[test]
+    fn collection_query_returns_only_normal_members_and_restores_membership() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let collection = library
+            .create_collection(CreateCollection {
+                name: "Reference".into(),
+                description: None,
+            })
+            .unwrap();
+        insert_asset(&library, "member", "2026-08-12T00:00:00Z");
+        insert_asset(&library, "other", "2026-08-11T00:00:00Z");
+        library
+            .patch_asset_collections(AssetCollectionPatch {
+                asset_ids: vec!["member".into()],
+                add_collection_ids: vec![collection.id.clone()],
+                remove_collection_ids: Vec::new(),
+            })
+            .unwrap();
+        let query = AssetQuery {
+            classification_id: None,
+            album_id: None,
+            collection_id: Some(collection.id),
+            direct_only: false,
+            favorite_only: false,
+            unclassified_only: false,
+            sort: AssetSort::Newest,
+            random_pivot: None,
+            after: None,
+            limit: 20,
+        };
+
+        assert_eq!(
+            library
+                .list_assets(query.clone())
+                .unwrap()
+                .items
+                .into_iter()
+                .map(|asset| asset.id)
+                .collect::<Vec<_>>(),
+            vec!["member"]
+        );
+        library.trash_assets(&["member".into()]).unwrap();
+        assert!(library.list_assets(query.clone()).unwrap().items.is_empty());
+        assert_eq!(library.get_collection(query.collection_id.as_deref().unwrap()).unwrap().asset_count, 0);
+        library.restore_asset("member").unwrap();
+        assert_eq!(library.list_assets(query).unwrap().items.len(), 1);
+    }
+
+    #[test]
+    fn rejects_collection_combined_with_another_location_scope() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let collection = library
+            .create_collection(CreateCollection {
+                name: "Reference".into(),
+                description: None,
+            })
+            .unwrap();
+        let album = library
+            .create_album(CreateAlbum {
+                name: "Covers".into(),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let error = library
+            .list_assets(AssetQuery {
+                classification_id: None,
+                album_id: Some(album.id),
+                collection_id: Some(collection.id),
+                direct_only: false,
+                favorite_only: false,
+                unclassified_only: false,
+                sort: AssetSort::Newest,
+                random_pivot: None,
+                after: None,
+                limit: 20,
+            })
+            .unwrap_err();
+
+        assert!(matches!(error, LibraryError::InvalidAssetScope));
     }
 
     #[test]
@@ -681,6 +797,7 @@ mod tests {
             .list_assets(AssetQuery {
                 classification_id: Some(folder.id),
                 album_id: Some(album.id),
+                collection_id: None,
                 direct_only: false,
                 favorite_only: false,
                 unclassified_only: false,
@@ -714,6 +831,7 @@ mod tests {
             .list_assets(AssetQuery {
                 classification_id: None,
                 album_id: None,
+                collection_id: None,
                 direct_only: false,
                 favorite_only: false,
                 unclassified_only: true,
@@ -727,6 +845,7 @@ mod tests {
             .list_assets(AssetQuery {
                 classification_id: None,
                 album_id: None,
+                collection_id: None,
                 direct_only: false,
                 favorite_only: false,
                 unclassified_only: true,
@@ -768,6 +887,7 @@ mod tests {
             .list_assets(AssetQuery {
                 classification_id: None,
                 album_id: None,
+                collection_id: None,
                 direct_only: false,
                 favorite_only: false,
                 unclassified_only: false,
@@ -781,6 +901,7 @@ mod tests {
             .list_assets(AssetQuery {
                 classification_id: None,
                 album_id: None,
+                collection_id: None,
                 direct_only: false,
                 favorite_only: false,
                 unclassified_only: false,
@@ -820,6 +941,7 @@ mod tests {
                 .list_assets(AssetQuery {
                     classification_id: None,
                     album_id: None,
+                    collection_id: None,
                     direct_only: false,
                     favorite_only: false,
                     unclassified_only: false,
@@ -844,6 +966,7 @@ mod tests {
                 .list_assets(AssetQuery {
                     classification_id: Some("missing-classification".into()),
                     album_id: None,
+                    collection_id: None,
                     direct_only,
                     favorite_only: false,
                     unclassified_only: false,
@@ -940,6 +1063,7 @@ mod tests {
         AssetQuery {
             classification_id: None,
             album_id: None,
+            collection_id: None,
             direct_only: false,
             favorite_only: false,
             unclassified_only: false,
