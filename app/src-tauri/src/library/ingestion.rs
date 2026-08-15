@@ -510,7 +510,7 @@ fn ingest_kind(path: &Path) -> Result<IngestKind, LibraryError> {
         .map(str::to_ascii_lowercase)
         .unwrap_or_default();
     match extension.as_str() {
-        "jpg" | "jpeg" | "png" | "gif" | "webp" => Ok(IngestKind::Image),
+        "jpg" | "jpeg" | "jfif" | "png" | "gif" | "webp" => Ok(IngestKind::Image),
         "mp4" => Ok(IngestKind::Video("mp4")),
         "webm" => Ok(IngestKind::Video("webm")),
         "mov" => Ok(IngestKind::Video("mov")),
@@ -1699,6 +1699,20 @@ mod tests {
             import_batch_id: "00000000-0000-4000-8000-000000000001".into(),
         });
         assert!(matches!(invalid, Err(LibraryError::InvalidCollectedAt)));
+    }
+
+    #[test]
+    fn jfif_ingestion_keeps_the_original_name_and_stores_jpeg_bytes_as_jpg() {
+        let fixture = SimilarityIngestionFixture::new();
+        let image = DynamicImage::new_rgb8(4, 4);
+        let source = fixture.write_jpeg("portrait.jfif", &image, 90);
+
+        let IngestOutcome::Added { asset } = fixture.ingest(&source, None, None) else {
+            panic!("first JFIF ingest must add an asset");
+        };
+
+        assert_eq!(asset.original_name, "portrait.jfif");
+        assert!(asset.relative_path.ends_with(".jpg"));
     }
 
     #[test]

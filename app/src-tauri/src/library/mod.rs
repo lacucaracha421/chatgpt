@@ -8,6 +8,7 @@ pub mod error;
 mod favorite;
 mod folder_appearance;
 mod ingestion;
+pub mod legacy_migration;
 mod lock;
 mod manga;
 pub mod metadata_import;

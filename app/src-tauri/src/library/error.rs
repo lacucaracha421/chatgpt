@@ -110,6 +110,24 @@ pub enum LibraryError {
     InvalidCreatorUrl,
     #[error("가져오기 배치 ID가 올바른 UUID가 아닙니다")]
     InvalidImportBatchId,
+    #[error("구버전 Lakomics 스냅샷을 읽을 수 없습니다: {path}")]
+    ReadLegacySnapshot {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("구버전 Lakomics 스냅샷이 올바른 JSON이 아닙니다: {path}")]
+    InvalidLegacySnapshot { path: PathBuf },
+    #[error("구버전 Lakomics 스냅샷에 중복 파일명이 있습니다: {0}")]
+    DuplicateLegacyMetadata(String),
+    #[error("구버전 Lakomics 이미지 폴더를 읽을 수 없습니다: {path}")]
+    ReadLegacyRoot {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("이전 계획의 대상 라이브러리와 열린 라이브러리가 다릅니다")]
+    LegacyLibraryMismatch,
     #[error("요청한 미디어 파일을 찾을 수 없습니다")]
     MediaNotFound,
     #[error("미디어 경로가 라이브러리 폴더 밖을 가리킵니다")]
