@@ -29,6 +29,13 @@ const fixtureAsset: AssetSummary = {
   collectedAt: "2026-07-31T00:00:00Z",
   favorite: false,
   sourceUrl: null,
+  sourcePublishedAt: null,
+  creatorName: null,
+  creatorHandle: null,
+  creatorUrl: null,
+  importSource: null,
+  importBatchId: null,
+  originalModifiedAt: null,
   media: { kind: "image" },
 };
 

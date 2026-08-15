@@ -91,7 +91,7 @@ describe("VideoPlayer", () => {
 });
 
 function videoAsset(): AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> } {
-  return { id: "video-1", title: null, originalName: "sample.webm", byteSize: 1, width: 1920, height: 1080, collectedAt: "2026-08-09T00:00:00Z", favorite: false, sourceUrl: null, media: { kind: "video", durationMs: 100_000, preparationState: "ready", scrubFrameCount: 11 } };
+  return { id: "video-1", title: null, originalName: "sample.webm", byteSize: 1, width: 1920, height: 1080, collectedAt: "2026-08-09T00:00:00Z", favorite: false, sourceUrl: null, sourcePublishedAt: null, creatorName: null, creatorHandle: null, creatorUrl: null, importSource: null, importBatchId: null, originalModifiedAt: null, media: { kind: "video", durationMs: 100_000, preparationState: "ready", scrubFrameCount: 11 } };
 }
 
 function setMediaNumber(element: HTMLElement, property: "duration" | "currentTime", value: number) {

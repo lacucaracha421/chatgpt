@@ -511,6 +511,13 @@ function asset(index: number) {
     collectedAt: "2026-07-30T00:00:00Z",
     favorite: false,
     sourceUrl: null,
+    sourcePublishedAt: null,
+    creatorName: null,
+    creatorHandle: null,
+    creatorUrl: null,
+    importSource: null,
+    importBatchId: null,
+    originalModifiedAt: null,
     media: { kind: "image" as const },
   };
 }
@@ -521,7 +528,7 @@ function createGateway(page: AssetPage = { items: [], nextCursor: null }): Libra
     listAlbums: vi.fn().mockResolvedValue([]), createAlbum: vi.fn(), renameAlbum: vi.fn(), moveAlbum: vi.fn(), updateAlbumAppearance: vi.fn(), deleteAlbum: vi.fn(),
     createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(), updateClassificationAppearance: vi.fn(),
     deleteClassification: vi.fn(), listAssets: vi.fn().mockResolvedValue(page),
-    indexMissingSimilarityHashes: vi.fn(), listSimilarityReviews: vi.fn(), decideSimilarityReview: vi.fn(), getAsset: vi.fn(),
+    indexMissingSimilarityHashes: vi.fn(), listSimilarityReviews: vi.fn(), decideSimilarityReview: vi.fn(), getAsset: vi.fn(), updateAssetMetadata: vi.fn(),
     trashAssets: vi.fn().mockResolvedValue(undefined), restoreAsset: vi.fn(), restoreAssets: vi.fn().mockResolvedValue(undefined), listTrash: vi.fn(), emptyTrash: vi.fn(),
     getTrashPolicy: vi.fn(), setTrashPolicy: vi.fn(),
     ensureDailyBackup: vi.fn(), listMetadataBackups: vi.fn(),

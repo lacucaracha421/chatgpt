@@ -18,3 +18,35 @@ export function localDate(value: string): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString();
 }
+
+export function creatorLabel(
+  name: string | null,
+  handle: string | null,
+): string {
+  const account = handle ? `@${handle.replace(/^@+/, "")}` : null;
+  if (name && account) return `${name} (${account})`;
+  return name || account || "—";
+}
+
+const IMPORT_SOURCE_LABELS: Record<ImportSource, string> = {
+  direct: "직접 추가",
+  browser_extension: "브라우저 확장",
+  metadata_import: "메타데이터 가져오기",
+  legacy_lakomics: "구버전 Lakomics 이전",
+};
+
+export function importSourceLabel(value: ImportSource | null): string {
+  return value ? IMPORT_SOURCE_LABELS[value] ?? "—" : "—";
+}
+
+export function localDateTime(value: string | null): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString();
+}
+
+export function batchLabel(value: string | null): string {
+  if (!value) return "—";
+  return value.length > 12 ? value.slice(0, 8) : value;
+}
+import type { ImportSource } from "../library/types";

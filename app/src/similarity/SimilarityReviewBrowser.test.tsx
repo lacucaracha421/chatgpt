@@ -88,6 +88,8 @@ function reviewAsset(id: string, originalName: string) {
     asset: {
       id, title: null, originalName, byteSize: 2_048, width: 1920, height: 1080,
       collectedAt: "2026-08-09T00:00:00Z", favorite: false, sourceUrl: "https://x.com/user/status/1",
+      sourcePublishedAt: null, creatorName: null, creatorHandle: null, creatorUrl: null,
+      importSource: null, importBatchId: null, originalModifiedAt: null,
       media: { kind: "image" as const },
     },
     format: "PNG",
@@ -107,7 +109,7 @@ function reviewGateway(): LibraryGateway {
     listAssets: vi.fn(), indexMissingSimilarityHashes: vi.fn(),
     listSimilarityReviews: vi.fn(),
     decideSimilarityReview: vi.fn().mockResolvedValue(undefined),
-    getAsset: vi.fn(), trashAssets: vi.fn(), restoreAsset: vi.fn(), restoreAssets: vi.fn(),
+    getAsset: vi.fn(), updateAssetMetadata: vi.fn(), trashAssets: vi.fn(), restoreAsset: vi.fn(), restoreAssets: vi.fn(),
     listTrash: vi.fn(), emptyTrash: vi.fn(), getTrashPolicy: vi.fn(), setTrashPolicy: vi.fn(),
     ensureDailyBackup: vi.fn(), listMetadataBackups: vi.fn(), restoreMetadataBackup: vi.fn(), purgeExpiredTrash: vi.fn(),
     setAssetFavorite: vi.fn(), setAssetsFavorite: vi.fn(),

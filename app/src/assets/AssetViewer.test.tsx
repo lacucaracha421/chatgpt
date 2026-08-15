@@ -71,7 +71,7 @@ it("renders a video player and cleans up its source when navigating", () => {
 });
 
 function asset(id: string, originalName: string): AssetSummary {
-  return { id, title: null, originalName, byteSize: 1, width: 200, height: 100, collectedAt: "2026-08-09T00:00:00Z", favorite: false, sourceUrl: null, media: { kind: "image" } };
+  return { id, title: null, originalName, byteSize: 1, width: 200, height: 100, collectedAt: "2026-08-09T00:00:00Z", favorite: false, sourceUrl: null, sourcePublishedAt: null, creatorName: null, creatorHandle: null, creatorUrl: null, importSource: null, importBatchId: null, originalModifiedAt: null, media: { kind: "image" } };
 }
 
 function videoAsset(id: string, originalName: string): AssetSummary {

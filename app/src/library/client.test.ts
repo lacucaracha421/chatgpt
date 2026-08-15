@@ -31,6 +31,20 @@ describe("libraryGateway similarity contract", () => {
     });
   });
 
+  it("updates editable source metadata through one request payload", async () => {
+    const request = {
+      assetId: "asset-1",
+      sourcePublishedAt: "2026-08-01T10:20:30Z",
+      creatorName: "Example Artist",
+      creatorHandle: "example",
+      creatorUrl: "https://x.com/example",
+    };
+
+    await libraryGateway.updateAssetMetadata(request);
+
+    expect(invoke).toHaveBeenCalledWith("update_asset_metadata", { request });
+  });
+
   it("does not expose superseded single-item commands", () => {
     expect(libraryGateway).not.toHaveProperty("currentLibrary");
     expect(libraryGateway).not.toHaveProperty("trashAsset");

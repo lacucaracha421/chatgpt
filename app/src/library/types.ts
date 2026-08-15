@@ -56,6 +56,12 @@ export type MediaSummary =
       scrubFrameCount: number;
     };
 
+export type ImportSource =
+  | "direct"
+  | "browser_extension"
+  | "metadata_import"
+  | "legacy_lakomics";
+
 export type AssetSummary = {
   id: string;
   title: string | null;
@@ -66,7 +72,22 @@ export type AssetSummary = {
   collectedAt: string;
   favorite: boolean;
   sourceUrl: string | null;
+  sourcePublishedAt: string | null;
+  creatorName: string | null;
+  creatorHandle: string | null;
+  creatorUrl: string | null;
+  importSource: ImportSource | null;
+  importBatchId: string | null;
+  originalModifiedAt: string | null;
   media: MediaSummary;
+};
+
+export type AssetMetadataPatch = {
+  assetId: string;
+  sourcePublishedAt: string | null;
+  creatorName: string | null;
+  creatorHandle: string | null;
+  creatorUrl: string | null;
 };
 
 export type AssetCursor = {
@@ -247,6 +268,7 @@ export interface LibraryGateway {
     decision: SimilarityDecision;
   }): Promise<void>;
   getAsset(assetId: string): Promise<AssetSummary>;
+  updateAssetMetadata(request: AssetMetadataPatch): Promise<AssetSummary>;
   trashAssets(assetIds: string[]): Promise<void>;
   restoreAsset(assetId: string): Promise<void>;
   restoreAssets(assetIds: string[]): Promise<void>;

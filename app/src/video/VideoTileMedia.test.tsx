@@ -64,6 +64,8 @@ function video(state: "pending" | "processing" | "ready" | "failed" = "ready"): 
   return {
     id: "video-1", title: null, originalName: "clip.webm", byteSize: 10,
     width: 1280, height: 720, collectedAt: "2026-08-09T00:00:00Z", favorite: false, sourceUrl: null,
+    sourcePublishedAt: null, creatorName: null, creatorHandle: null, creatorUrl: null,
+    importSource: null, importBatchId: null, originalModifiedAt: null,
     media: { kind: "video" as const, durationMs: 10_000, preparationState: state, scrubFrameCount: 10 },
   };
 }

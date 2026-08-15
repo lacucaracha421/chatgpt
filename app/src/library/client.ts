@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AlbumEntry,
   AssetAlbumPatch,
+  AssetMetadataPatch,
   AssetPage,
   AssetQuery,
   AssetSummary,
@@ -55,6 +56,8 @@ export const libraryGateway: LibraryGateway = {
   decideSimilarityReview: (request) =>
     invoke("decide_similarity_review", { request }),
   getAsset: (assetId) => invoke<AssetSummary>("get_asset", { assetId }),
+  updateAssetMetadata: (request: AssetMetadataPatch) =>
+    invoke<AssetSummary>("update_asset_metadata", { request }),
   trashAssets: (assetIds) => invoke("trash_assets", { assetIds }),
   restoreAsset: (assetId) => invoke("restore_asset", { assetId }),
   restoreAssets: (assetIds) => invoke("restore_assets", { assetIds }),

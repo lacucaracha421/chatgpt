@@ -26,6 +26,7 @@ function gateway(): LibraryGateway {
     listSimilarityReviews: vi.fn(),
     decideSimilarityReview: vi.fn(),
     getAsset: vi.fn(),
+    updateAssetMetadata: vi.fn(),
     trashAssets: vi.fn(),
     restoreAsset: vi.fn(),
     restoreAssets: vi.fn(),
