@@ -250,6 +250,8 @@ impl Library {
             warnings: plan.warnings.clone(),
         };
         for (index, image) in plan.images.iter().enumerate() {
+            let (creator_handle, creator_url) =
+                creator_from_source_url(image.source_url.as_deref());
             let classification_id = if image.classification_path.is_empty() {
                 None
             } else {
@@ -263,8 +265,8 @@ impl Library {
                 replace_duplicate_metadata: true,
                 source_published_at: None,
                 creator_name: None,
-                creator_handle: None,
-                creator_url: None,
+                creator_handle,
+                creator_url,
                 import_source: ImportSource::LegacyLakomics,
                 import_batch_id: image.import_batch_id.clone(),
             });
@@ -482,6 +484,28 @@ fn normalize_legacy_timestamp(value: Option<&str>) -> Option<String> {
         .map(|timestamp| timestamp.to_rfc3339())
 }
 
+fn creator_from_source_url(source_url: Option<&str>) -> (Option<String>, Option<String>) {
+    let Some(url) = source_url.and_then(|value| url::Url::parse(value).ok()) else {
+        return (None, None);
+    };
+    if !matches!(
+        url.host_str(),
+        Some("x.com" | "www.x.com" | "twitter.com" | "www.twitter.com")
+    ) {
+        return (None, None);
+    }
+    let segments = url.path_segments().map(Iterator::collect::<Vec<_>>);
+    let Some([handle, "status", ..]) = segments.as_deref() else {
+        return (None, None);
+    };
+    if handle.eq_ignore_ascii_case("i") {
+        return (None, None);
+    }
+    let handle = (*handle).to_owned();
+    let profile_url = format!("https://x.com/{handle}");
+    (Some(handle), Some(profile_url))
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -489,7 +513,7 @@ mod tests {
     use image::{DynamicImage, ImageFormat};
     use serde_json::json;
 
-    use super::{inspect_legacy_migration, LegacyMigrationPaths};
+    use super::{creator_from_source_url, inspect_legacy_migration, LegacyMigrationPaths};
     use crate::library::{
         models::{AssetQuery, AssetSort},
         Library,
@@ -620,5 +644,73 @@ mod tests {
             .unwrap();
         assert_eq!(assets.items.len(), 1);
         assert_eq!(assets.items[0].title.as_deref(), Some("Alpha title"));
+    }
+
+    #[test]
+    fn execution_derives_creator_from_an_unambiguous_x_post_url() {
+        let temp = tempfile::tempdir().unwrap();
+        let legacy_root = temp.path().join("legacy");
+        fs::create_dir(&legacy_root).unwrap();
+        DynamicImage::new_rgb8(8, 8)
+            .save_with_format(legacy_root.join("alpha.png"), ImageFormat::Png)
+            .unwrap();
+        let primary = temp.path().join("metadata_latest.json");
+        fs::write(
+            &primary,
+            serde_json::to_vec(&json!({
+                "items": [{
+                    "relativePath": "alpha.png",
+                    "tags": [],
+                    "sourceId": "https://x.com/Example_Artist/status/123456789",
+                    "customTitle": null,
+                    "modifiedAt": "2026-01-01T00:00:00Z"
+                }]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let fallback = temp.path().join("storage_metadata_latest.json");
+        fs::write(&fallback, br#"{"items":[]}"#).unwrap();
+        let library_root = temp.path().join("library");
+        let plan = inspect_legacy_migration(LegacyMigrationPaths {
+            library_root: library_root.clone(),
+            legacy_root,
+            primary_snapshot: primary,
+            fallback_snapshot: fallback,
+        })
+        .unwrap();
+        let library = Library::open(&library_root).unwrap();
+
+        library.execute_legacy_migration(&plan, |_| {}).unwrap();
+
+        let assets = library
+            .list_assets(AssetQuery {
+                classification_id: None,
+                album_id: None,
+                direct_only: false,
+                favorite_only: false,
+                unclassified_only: false,
+                sort: AssetSort::Newest,
+                random_pivot: None,
+                after: None,
+                limit: 10,
+            })
+            .unwrap();
+        assert_eq!(
+            assets.items[0].creator_handle.as_deref(),
+            Some("Example_Artist")
+        );
+        assert_eq!(
+            assets.items[0].creator_url.as_deref(),
+            Some("https://x.com/Example_Artist")
+        );
+    }
+
+    #[test]
+    fn generic_x_status_url_does_not_invent_a_creator() {
+        assert_eq!(
+            creator_from_source_url(Some("https://x.com/i/status/123456789")),
+            (None, None)
+        );
     }
 }
