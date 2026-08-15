@@ -104,6 +104,10 @@ pub enum LibraryError {
     InvalidTrashTimestamp,
     #[error("수집 시각이 RFC 3339 형식이 아닙니다")]
     InvalidCollectedAt,
+    #[error("출처 게시 시각은 RFC 3339 형식이어야 합니다")]
+    InvalidSourcePublishedAt,
+    #[error("작성자 URL은 http 또는 https 주소여야 합니다")]
+    InvalidCreatorUrl,
     #[error("요청한 미디어 파일을 찾을 수 없습니다")]
     MediaNotFound,
     #[error("미디어 경로가 라이브러리 폴더 밖을 가리킵니다")]

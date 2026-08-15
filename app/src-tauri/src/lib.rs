@@ -67,6 +67,7 @@ pub fn run() {
             commands::list_similarity_reviews,
             commands::decide_similarity_review,
             commands::get_asset,
+            commands::update_asset_metadata,
             commands::trash_assets,
             commands::restore_asset,
             commands::restore_assets,

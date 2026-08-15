@@ -8,7 +8,7 @@ use crate::library::{
     error::LibraryError,
     metadata_import::{self, MetadataImportPlan},
     models::{
-        AlbumEntry, AssetAlbumPatch, AssetCursor, AssetPage, AssetQuery,
+        AlbumEntry, AssetAlbumPatch, AssetCursor, AssetMetadataPatch, AssetPage, AssetQuery,
         AssetSummary, ClassificationEntry, CreateAlbum, CreateClassification, IngestMediaRequest,
         IngestOutcome, LibrarySummary, MangaSeries, MetadataBackup, PurgeSummary,
         SimilarityDecisionRequest, SetAssetClassification, SimilarityIndexProgress,
@@ -91,6 +91,8 @@ impl From<LibraryError> for CommandError {
             LibraryError::SimilarityReviewConflict => "similarity_review_conflict",
             LibraryError::InvalidTrashTimestamp => "invalid_trash_timestamp",
             LibraryError::InvalidCollectedAt => "invalid_collected_at",
+            LibraryError::InvalidSourcePublishedAt => "invalid_source_published_at",
+            LibraryError::InvalidCreatorUrl => "invalid_creator_url",
             LibraryError::MediaNotFound => "media_not_found",
             LibraryError::UnsafeMediaPath => "unsafe_media_path",
             LibraryError::ReadMedia { .. } => "read_media_failed",
@@ -309,6 +311,16 @@ pub fn get_asset(
 ) -> Result<AssetSummary, CommandError> {
     current_required(state)?
         .get_asset(&asset_id)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn update_asset_metadata(
+    request: AssetMetadataPatch,
+    state: State<'_, AppState>,
+) -> Result<AssetSummary, CommandError> {
+    current_required(state)?
+        .update_asset_metadata(request)
         .map_err(CommandError::from)
 }
 
@@ -628,6 +640,18 @@ mod tests {
         assert_eq!(
             error.message,
             "지원하지 않는 폴더 아이콘 또는 색상입니다."
+        );
+    }
+
+    #[test]
+    fn asset_source_metadata_errors_have_stable_codes() {
+        assert_eq!(
+            CommandError::from(LibraryError::InvalidSourcePublishedAt).code,
+            "invalid_source_published_at"
+        );
+        assert_eq!(
+            CommandError::from(LibraryError::InvalidCreatorUrl).code,
+            "invalid_creator_url"
         );
     }
 

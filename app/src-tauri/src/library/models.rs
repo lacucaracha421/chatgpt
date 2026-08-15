@@ -124,6 +124,16 @@ pub struct AssetSummary {
     pub media: MediaSummary,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetMetadataPatch {
+    pub asset_id: String,
+    pub source_published_at: Option<String>,
+    pub creator_name: Option<String>,
+    pub creator_handle: Option<String>,
+    pub creator_url: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AssetSort {

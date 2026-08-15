@@ -1,5 +1,6 @@
 mod backup;
 mod album;
+mod asset_metadata;
 mod classification;
 mod db;
 mod drag_out;
