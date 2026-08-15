@@ -23,6 +23,35 @@ struct BackupEntry {
 }
 
 impl Library {
+    pub fn create_pre_migration_backup(
+        &self,
+        label: &str,
+    ) -> Result<MetadataBackup, LibraryError> {
+        if label != "legacy-lakomics" {
+            return Err(LibraryError::InvalidBackup);
+        }
+        let _backup_guard = self
+            .backup_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let connection = self.connection()?;
+        let source_version: i64 = connection.pragma_query_value(
+            None,
+            "user_version",
+            |row| row.get(0),
+        )?;
+        let path = backup_path(
+            &self.root,
+            BackupKind::PreMigration,
+            Utc::now(),
+            Some(source_version),
+        );
+        create_verified_snapshot(&connection, &path)?;
+        backup_entry(&path)
+            .map(|entry| entry.metadata)
+            .ok_or(LibraryError::InvalidBackup)
+    }
+
     pub fn ensure_daily_backup(
         &self,
         now: DateTime<Utc>,
@@ -494,6 +523,17 @@ mod tests {
             "daily-20260801-120000-550e8400-e29b-41d4-a716-446655440000.sqlite"
         )
         .is_some());
+    }
+
+    #[test]
+    fn creates_a_verified_pre_migration_backup() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+
+        let backup = library.create_pre_migration_backup("legacy-lakomics").unwrap();
+
+        assert_eq!(backup.kind, BackupKind::PreMigration);
+        assert!(library.list_backups().unwrap().iter().any(|entry| entry.id == backup.id));
     }
 
     #[test]
