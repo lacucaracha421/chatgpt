@@ -68,6 +68,36 @@ pub enum MediaSummary {
     },
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportSource {
+    Direct,
+    BrowserExtension,
+    MetadataImport,
+    LegacyLakomics,
+}
+
+impl ImportSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Direct => "direct",
+            Self::BrowserExtension => "browser_extension",
+            Self::MetadataImport => "metadata_import",
+            Self::LegacyLakomics => "legacy_lakomics",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "direct" => Some(Self::Direct),
+            "browser_extension" => Some(Self::BrowserExtension),
+            "metadata_import" => Some(Self::MetadataImport),
+            "legacy_lakomics" => Some(Self::LegacyLakomics),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AssetSummary {
@@ -84,6 +114,13 @@ pub struct AssetSummary {
     pub collected_at: String,
     pub favorite: bool,
     pub source_url: Option<String>,
+    pub source_published_at: Option<String>,
+    pub creator_name: Option<String>,
+    pub creator_handle: Option<String>,
+    pub creator_url: Option<String>,
+    pub import_source: Option<ImportSource>,
+    pub import_batch_id: Option<String>,
+    pub original_modified_at: Option<String>,
     pub media: MediaSummary,
 }
 
@@ -313,6 +350,13 @@ mod tests {
             collected_at: "2026-08-02T00:00:00Z".into(),
             favorite: false,
             source_url: None,
+            source_published_at: None,
+            creator_name: None,
+            creator_handle: None,
+            creator_url: None,
+            import_source: None,
+            import_batch_id: None,
+            original_modified_at: None,
             media: MediaSummary::Image,
         };
 
@@ -352,6 +396,13 @@ mod tests {
             collected_at: "2026-08-09T00:00:00Z".into(),
             favorite: false,
             source_url: None,
+            source_published_at: None,
+            creator_name: None,
+            creator_handle: None,
+            creator_url: None,
+            import_source: None,
+            import_batch_id: None,
+            original_modified_at: None,
             media: MediaSummary::Video {
                 duration_ms: 12_345,
                 preparation_state: VideoPreparationState::Pending,
@@ -391,6 +442,13 @@ mod tests {
             collected_at: "2026-08-09T00:00:00Z".into(),
             favorite: false,
             source_url: Some("https://example.test/source".into()),
+            source_published_at: None,
+            creator_name: None,
+            creator_handle: None,
+            creator_url: None,
+            import_source: None,
+            import_batch_id: None,
+            original_modified_at: None,
             media: MediaSummary::Image,
         };
         let review_asset = SimilarityReviewAsset {

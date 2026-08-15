@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use super::{
     error::LibraryError,
     models::{
-        AssetCursor, AssetPage, AssetQuery, AssetSort, AssetSummary, MediaSummary,
+        AssetCursor, AssetPage, AssetQuery, AssetSort, AssetSummary, ImportSource, MediaSummary,
         VideoPreparationState,
     },
     Library,
@@ -214,8 +214,8 @@ fn random_keys(cursor: &Option<CursorPayload>) -> (Option<i64>, Option<&str>, Op
 fn asset_row(row: &rusqlite::Row<'_>, random: bool) -> rusqlite::Result<AssetRow> {
     Ok(AssetRow {
         summary: asset_summary_from_row(row)?,
-        content_hash: random.then(|| row.get(15)).transpose()?,
-        random_bucket: random.then(|| row.get(16)).transpose()?,
+        content_hash: random.then(|| row.get(22)).transpose()?,
+        random_bucket: random.then(|| row.get(23)).transpose()?,
     })
 }
 
@@ -247,6 +247,16 @@ pub(crate) fn asset_summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Resul
         collected_at: row.get(8)?,
         favorite: row.get(9)?,
         source_url: row.get(10)?,
+        source_published_at: row.get(15)?,
+        creator_name: row.get(16)?,
+        creator_handle: row.get(17)?,
+        creator_url: row.get(18)?,
+        import_source: row
+            .get::<_, Option<String>>(19)?
+            .as_deref()
+            .and_then(ImportSource::parse),
+        import_batch_id: row.get(20)?,
+        original_modified_at: row.get(21)?,
         media,
     })
 }
@@ -298,7 +308,9 @@ const NEWEST_SQL: &str = "WITH RECURSIVE descendants(id) AS (
     SELECT ?5 WHERE ?5 IS NOT NULL
     UNION ALL SELECT child.id FROM albums AS child JOIN album_descendants ON child.parent_id = album_descendants.id
 ) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url,
-asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count
+asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count,
+asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url,
+asset.import_source, asset.import_batch_id, asset.original_modified_at
 FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
 WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
@@ -314,7 +326,9 @@ const OLDEST_SQL: &str = "WITH RECURSIVE descendants(id) AS (
     SELECT ?5 WHERE ?5 IS NOT NULL
     UNION ALL SELECT child.id FROM albums AS child JOIN album_descendants ON child.parent_id = album_descendants.id
 ) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url,
-asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count
+asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count,
+asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url,
+asset.import_source, asset.import_batch_id, asset.original_modified_at
 FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
 WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
@@ -330,7 +344,9 @@ const FAVORITES_SQL: &str = "WITH RECURSIVE descendants(id) AS (
     SELECT ?5 WHERE ?5 IS NOT NULL
     UNION ALL SELECT child.id FROM albums AS child JOIN album_descendants ON child.parent_id = album_descendants.id
 ) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url,
-asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count
+asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count,
+asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url,
+asset.import_source, asset.import_batch_id, asset.original_modified_at
 FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
 WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
@@ -347,6 +363,8 @@ const RANDOM_SQL: &str = "WITH RECURSIVE descendants(id) AS (
     UNION ALL SELECT child.id FROM albums AS child JOIN album_descendants ON child.parent_id = album_descendants.id
 ) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url,
 asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count,
+asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url,
+asset.import_source, asset.import_batch_id, asset.original_modified_at,
 asset.content_hash, CASE WHEN asset.content_hash >= ?6 THEN 0 ELSE 1 END
 FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
 WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
@@ -364,7 +382,7 @@ mod tests {
         error::LibraryError,
         models::{
             AssetAlbumPatch, AssetClassificationPatch, AssetCursor, AssetQuery, AssetSort,
-            ClassificationKind, CreateAlbum, CreateClassification, MediaSummary,
+            ClassificationKind, CreateAlbum, CreateClassification, ImportSource, MediaSummary,
             VideoPreparationState,
         },
         Library,
@@ -450,6 +468,49 @@ mod tests {
         );
         assert_eq!(page.items[1].media, MediaSummary::Gif);
         assert_eq!(page.items[2].media, MediaSummary::Image);
+    }
+
+    #[test]
+    fn asset_source_provenance_round_trips_through_queries() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let connection = library.connection().unwrap();
+        connection
+            .execute(
+                "INSERT INTO assets (
+                    id, content_hash, media_kind, original_name, relative_path,
+                    thumbnail_relative_path, byte_size, width, height, collected_at,
+                    source_published_at, creator_name, creator_handle, creator_url,
+                    import_source, import_batch_id, original_modified_at
+                 ) VALUES (
+                    'asset-1', 'hash-1', 'image', 'one.png', 'assets/one.png',
+                    'thumbnails/one.webp', 1, 1, 1, '2026-08-12T00:00:00Z',
+                    '2026-08-01T10:20:30Z', 'Example Artist', 'example',
+                    'https://x.com/example', 'metadata_import',
+                    '31d1f90c-214b-41e2-9d84-f9d964bb5bc3', '2026-07-31T09:00:00Z'
+                 )",
+                [],
+            )
+            .unwrap();
+        drop(connection);
+
+        let asset = library.get_asset("asset-1").unwrap();
+        assert_eq!(
+            asset.source_published_at.as_deref(),
+            Some("2026-08-01T10:20:30Z")
+        );
+        assert_eq!(asset.creator_name.as_deref(), Some("Example Artist"));
+        assert_eq!(asset.creator_handle.as_deref(), Some("example"));
+        assert_eq!(asset.creator_url.as_deref(), Some("https://x.com/example"));
+        assert_eq!(asset.import_source, Some(ImportSource::MetadataImport));
+        assert_eq!(
+            asset.import_batch_id.as_deref(),
+            Some("31d1f90c-214b-41e2-9d84-f9d964bb5bc3")
+        );
+        assert_eq!(
+            asset.original_modified_at.as_deref(),
+            Some("2026-07-31T09:00:00Z")
+        );
     }
 
     #[test]

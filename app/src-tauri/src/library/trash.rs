@@ -107,6 +107,9 @@ impl Library {
                     asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height,
                     asset.collected_at, asset.favorite, asset.source_url, asset.media_kind,
                     video.duration_ms, video.preparation_state, video.scrub_frame_count,
+                    asset.source_published_at, asset.creator_name, asset.creator_handle,
+                    asset.creator_url, asset.import_source, asset.import_batch_id,
+                    asset.original_modified_at,
                     asset.trashed_at
              FROM assets AS asset
              LEFT JOIN video_assets AS video ON video.asset_id = asset.id
@@ -468,7 +471,7 @@ fn decode_cursor(after: Option<AssetCursor>) -> Result<Option<TrashCursor>, Libr
 fn trash_asset_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TrashRow> {
     Ok(TrashRow {
         asset: asset_summary_from_row(row)?,
-        trashed_at: row.get(15)?,
+        trashed_at: row.get(22)?,
     })
 }
 

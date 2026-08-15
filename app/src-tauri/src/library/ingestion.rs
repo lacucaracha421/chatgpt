@@ -140,6 +140,13 @@ impl Library {
                 .unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
             favorite: false,
             source_url: request.source_url.clone(),
+            source_published_at: None,
+            creator_name: None,
+            creator_handle: None,
+            creator_url: None,
+            import_source: None,
+            import_batch_id: None,
+            original_modified_at: None,
             media: if format == ImageFormat::Gif {
                 MediaSummary::Gif
             } else {
@@ -202,6 +209,13 @@ impl Library {
                 .unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
             favorite: false,
             source_url: request.source_url,
+            source_published_at: None,
+            creator_name: None,
+            creator_handle: None,
+            creator_url: None,
+            import_source: None,
+            import_batch_id: None,
+            original_modified_at: None,
             media: MediaSummary::Video {
                 duration_ms: probe.duration_ms,
                 preparation_state: VideoPreparationState::Pending,
