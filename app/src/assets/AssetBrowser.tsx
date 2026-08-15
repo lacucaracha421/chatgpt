@@ -120,6 +120,13 @@ export function AssetBrowser({ view, classifications, albums = [], sort, metadat
   };
   const selectedIds = itemIds.filter((id) => selection.ids.has(id));
   const selectedAssets = items.filter((asset) => selection.ids.has(asset.id));
+  const updateAssetSummary = (updated: AssetSummary) => {
+    setPage((current) => current ? {
+      ...current,
+      items: current.items.map((item) => item.id === updated.id ? updated : item),
+    } : current);
+    setSelectedAsset((current) => current?.id === updated.id ? updated : current);
+  };
   const runBatch = async (operation: () => Promise<void>, failureMessage: string) => {
     if (batchPending || selectedIds.length === 0) return false;
     setBatchPending(true);
@@ -206,7 +213,7 @@ export function AssetBrowser({ view, classifications, albums = [], sort, metadat
         {firstLoading || !activePage && !currentFirstError ? <Skeleton className="asset-browser__skeleton" label="자산을 불러오는 중" /> : currentFirstError && items.length === 0 ? <EmptyState title="자산을 불러오지 못했습니다"><Button onClick={refresh}>다시 시도</Button></EmptyState> : items.length === 0 ? <EmptyState title={view.kind === "album" ? "이 앨범에 자산이 없습니다." : "자산이 없습니다"}>{view.kind === "album" ? "원하는 자산을 이 앨범에 추가하세요." : "여기에 이미지와 영상 파일을 놓아 추가하세요."}</EmptyState> : <AssetGallery items={items} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} targetRowHeight={thumbnailRowHeight} metadataVisible={metadataVisible} hasNextPage={nextCursor !== null} onLoadNextPage={loadNextPage} onSelectionGesture={selectWithGesture} onSelectAll={selectAll} onDeleteSelection={trashSelection} onClearSelection={clearSelection} onMoveFocus={moveFocus} onOpen={(asset) => { viewerViewKeyRef.current = viewKey; setViewerAssetId(asset.id); }} onRetryVideo={(asset) => void gateway.retryVideoPreparation(asset.id).then(() => gateway.preparePendingVideos(1)).then(refresh).catch((error) => setMessage(commandErrorMessage(error, "미리보기 준비를 다시 시작하지 못했습니다.")))} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />}
         {nextLoading && <Skeleton label="자산을 더 불러오는 중" />}{currentNextError && <div className="asset-browser__next-error"><Toast>{currentNextError}</Toast><Button onClick={() => loadNextPage(true)}>다시 시도</Button></div>}
       </div>
-      <AssetInspector assets={selectedAssets} classifications={classifications} albums={albums} open={inspectorOpen} membershipVersion={membershipVersion} onOpenChange={setInspectorOpen} onMoveToFolder={moveBatchToFolder} onPatchAlbum={patchBatchAlbum} />
+      <AssetInspector assets={selectedAssets} classifications={classifications} albums={albums} open={inspectorOpen} membershipVersion={membershipVersion} onOpenChange={setInspectorOpen} onMoveToFolder={moveBatchToFolder} onPatchAlbum={patchBatchAlbum} onAssetUpdated={updateAssetSummary} />
     </div>
     <AssetViewer items={requestedAsset && !items.some((item) => item.id === requestedAsset.id) ? [requestedAsset] : items} activeId={viewerAssetId} onActiveIdChange={setViewerAssetId} onClose={() => { setViewerAssetId(null); onRequestedAssetHandled(); }} onToggleFavorite={toggleFavorite} onTrash={trashViewerAsset} />
   </section>;

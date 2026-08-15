@@ -341,11 +341,29 @@ describe("AssetBrowser", () => {
     expect(screen.getByText("2개 선택")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "정보 열기" }));
     const inspector = await screen.findByRole("complementary", { name: "자산 정보" });
+    expect(within(inspector).queryByRole("button", { name: "출처 정보 편집" })).not.toBeInTheDocument();
     await user.selectOptions(within(inspector).getByLabelText("폴더"), "tag");
     expect(gateway.setAssetClassification).toHaveBeenCalledWith({ assetIds: ["asset-0", "asset-1"], classificationId: "tag" });
     const checkbox = await screen.findByRole("checkbox", { name: "표지 앨범" });
     await user.click(checkbox);
     expect(gateway.patchAssetAlbums).toHaveBeenCalledWith({ assetIds: ["asset-0", "asset-1"], addAlbumIds: [], removeAlbumIds: ["album"] });
+  });
+
+  it("keeps the selected page summary in sync after metadata editing", async () => {
+    const user = userEvent.setup();
+    const original = asset(0);
+    const updated = { ...original, creatorName: "Updated Artist" };
+    const gateway = createGateway({ items: [original], nextCursor: null });
+    vi.mocked(gateway.updateAssetMetadata).mockResolvedValue(updated);
+    renderBrowser(gateway);
+
+    await user.click(await screen.findByRole("option", { name: original.originalName }));
+    await user.click(screen.getByRole("button", { name: "정보 열기" }));
+    await user.click(screen.getByRole("button", { name: "출처 정보 편집" }));
+    await user.type(screen.getByLabelText("제작자 이름"), "Updated Artist");
+    await user.click(screen.getByRole("button", { name: "저장" }));
+
+    expect(await screen.findByText("Updated Artist")).toBeVisible();
   });
 
   it("moves the selected asset to trash and refreshes the gallery", async () => {

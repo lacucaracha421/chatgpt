@@ -67,6 +67,84 @@ it("shows one-asset metadata and opens its source URL", async () => {
   expect(openUrl).toHaveBeenCalledWith("https://example.com/source/a");
 });
 
+it("shows source and provenance details with quiet external links", async () => {
+  const user = userEvent.setup();
+  render(
+    <LibraryProvider gateway={createGateway([])}>
+      <AssetInspector assets={[completeAsset()]} classifications={[]} albums={[]} open onOpenChange={vi.fn()} onMoveToFolder={vi.fn()} onPatchAlbum={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  expect(screen.getByText("Example Artist (@example)")).toBeVisible();
+  expect(screen.getByText("브라우저 확장")).toBeVisible();
+  expect(screen.getByText("31d1f90c-214b-41e2-9d84-f9d964bb5bc3")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "제작자 페이지 열기" }));
+  expect(openUrl).toHaveBeenCalledWith("https://x.com/example");
+});
+
+it("edits source metadata, normalizes blank values, and returns the updated asset", async () => {
+  const user = userEvent.setup();
+  const updated = { ...completeAsset(), creatorName: "Updated Artist", creatorHandle: null };
+  const updateAssetMetadata = vi.fn().mockResolvedValue(updated);
+  const onAssetUpdated = vi.fn();
+  render(
+    <LibraryProvider gateway={createGateway([], [], false, updateAssetMetadata)}>
+      <AssetInspector assets={[completeAsset()]} classifications={[]} albums={[]} open onOpenChange={vi.fn()} onMoveToFolder={vi.fn()} onPatchAlbum={vi.fn()} onAssetUpdated={onAssetUpdated} />
+    </LibraryProvider>,
+  );
+
+  await user.click(screen.getByRole("button", { name: "출처 정보 편집" }));
+  await user.clear(screen.getByLabelText("제작자 이름"));
+  await user.type(screen.getByLabelText("제작자 이름"), "  Updated Artist  ");
+  await user.clear(screen.getByLabelText("계정명"));
+  await user.click(screen.getByRole("button", { name: "저장" }));
+
+  expect(updateAssetMetadata).toHaveBeenCalledWith({
+    assetId: "complete",
+    sourcePublishedAt: "2026-08-01T10:20:30Z",
+    creatorName: "Updated Artist",
+    creatorHandle: null,
+    creatorUrl: "https://x.com/example",
+  });
+  expect(onAssetUpdated).toHaveBeenCalledWith(updated);
+});
+
+it("cancels editing on the first Escape without closing the inspector", async () => {
+  const user = userEvent.setup();
+  const onOpenChange = vi.fn();
+  render(
+    <LibraryProvider gateway={createGateway([])}>
+      <AssetInspector assets={[completeAsset()]} classifications={[]} albums={[]} open onOpenChange={onOpenChange} onMoveToFolder={vi.fn()} onPatchAlbum={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  await user.click(screen.getByRole("button", { name: "출처 정보 편집" }));
+  await user.keyboard("{Escape}");
+  expect(screen.queryByLabelText("제작자 이름")).not.toBeInTheDocument();
+  expect(onOpenChange).not.toHaveBeenCalled();
+
+  await user.keyboard("{Escape}");
+  expect(onOpenChange).toHaveBeenCalledWith(false);
+});
+
+it("keeps the draft open when saving fails", async () => {
+  const user = userEvent.setup();
+  const updateAssetMetadata = vi.fn().mockRejectedValue(new Error("저장 실패"));
+  render(
+    <LibraryProvider gateway={createGateway([], [], false, updateAssetMetadata)}>
+      <AssetInspector assets={[completeAsset()]} classifications={[]} albums={[]} open onOpenChange={vi.fn()} onMoveToFolder={vi.fn()} onPatchAlbum={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  await user.click(screen.getByRole("button", { name: "출처 정보 편집" }));
+  await user.clear(screen.getByLabelText("제작자 이름"));
+  await user.type(screen.getByLabelText("제작자 이름"), "Draft Artist");
+  await user.click(screen.getByRole("button", { name: "저장" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("저장 실패");
+  expect(screen.getByLabelText("제작자 이름")).toHaveValue("Draft Artist");
+});
+
 it("checks an album that every selected asset has and toggles it off", async () => {
   const gateway = createGateway(["tag"], ["cover"]);
   const onPatchAlbum = vi.fn();
@@ -119,11 +197,25 @@ it("reports when classification membership cannot be loaded", async () => {
   expect(await screen.findByText("폴더와 앨범 상태를 불러오지 못했습니다.")).toBeVisible();
 });
 
-function createGateway(classificationIds: string[], albumIds: string[] = [], reject = false): LibraryGateway {
+function createGateway(classificationIds: string[], albumIds: string[] = [], reject = false, updateAssetMetadata = vi.fn()): LibraryGateway {
   return {
     getAssetClassifications: vi.fn().mockImplementation(() => reject ? Promise.reject(new Error("membership failed")) : Promise.resolve(classificationIds)),
     getAssetAlbums: vi.fn().mockImplementation(() => reject ? Promise.reject(new Error("membership failed")) : Promise.resolve(albumIds)),
+    updateAssetMetadata,
   } as unknown as LibraryGateway;
+}
+
+function completeAsset(): AssetSummary {
+  return {
+    ...asset("complete"),
+    sourcePublishedAt: "2026-08-01T10:20:30Z",
+    creatorName: "Example Artist",
+    creatorHandle: "example",
+    creatorUrl: "https://x.com/example",
+    importSource: "browser_extension",
+    importBatchId: "31d1f90c-214b-41e2-9d84-f9d964bb5bc3",
+    originalModifiedAt: "2026-08-01T09:00:00Z",
+  };
 }
 
 function asset(id: string): AssetSummary {
