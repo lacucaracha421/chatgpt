@@ -7,7 +7,8 @@ use app_lib::library::{
     error::LibraryError,
     models::{
         AssetCursor, AssetPage, AssetQuery, AssetSort, AssetSummary, ClassificationKind,
-        CreateClassification, IngestMediaRequest, IngestOutcome, MediaSummary, TrashPolicy,
+        CreateClassification, ImportSource, IngestMediaRequest, IngestOutcome, MediaSummary,
+        TrashPolicy,
     },
     Library,
 };
@@ -100,6 +101,12 @@ impl FoundationFixture {
                 source_url: None,
                 collected_at: None,
                 replace_duplicate_metadata: false,
+                source_published_at: None,
+                creator_name: None,
+                creator_handle: None,
+                creator_url: None,
+                import_source: ImportSource::Direct,
+                import_batch_id: "00000000-0000-4000-8000-000000000003".into(),
             })
             .unwrap()
     }
@@ -190,6 +197,12 @@ fn png_jpeg_and_gif_images_can_be_ingested() {
                 source_url: None,
                 collected_at: None,
                 replace_duplicate_metadata: false,
+                source_published_at: None,
+                creator_name: None,
+                creator_handle: None,
+                creator_url: None,
+                import_source: ImportSource::Direct,
+                import_batch_id: "00000000-0000-4000-8000-000000000003".into(),
             })
             .unwrap();
 
@@ -822,6 +835,12 @@ fn ingest(library: &Library, source_path: &Path, source_url: Option<&str>) -> As
             source_url: source_url.map(str::to_owned),
             collected_at: None,
             replace_duplicate_metadata: false,
+            source_published_at: None,
+            creator_name: None,
+            creator_handle: None,
+            creator_url: None,
+            import_source: ImportSource::Direct,
+            import_batch_id: "00000000-0000-4000-8000-000000000003".into(),
         })
         .unwrap();
     let IngestOutcome::Added { asset } = outcome else {

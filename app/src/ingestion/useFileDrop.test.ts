@@ -104,6 +104,8 @@ it("ingests dropped paths with the selected classification", async () => {
       sourcePath: "C:\\images\\arona.png",
       classificationId: "tag-arona",
       sourceUrl: null,
+      importSource: "direct",
+      importBatchId: expect.any(String),
     }),
   );
 });
@@ -144,6 +146,8 @@ it("ignores disabled drops and accepts the next drop after being enabled", async
       sourcePath: "C:\\images\\accepted.png",
       classificationId: "tag-arona",
       sourceUrl: null,
+      importSource: "direct",
+      importBatchId: expect.any(String),
     }),
   );
   expect(subscribe).toHaveBeenCalledOnce();
@@ -180,6 +184,8 @@ it("ingests files from one drop sequentially", async () => {
     sourcePath: "C:\\images\\first.png",
     classificationId: null,
     sourceUrl: null,
+    importSource: "direct",
+    importBatchId: expect.any(String),
   });
 
   act(() => first.resolve({ status: "added", asset: fixtureAsset }));
@@ -189,6 +195,8 @@ it("ingests files from one drop sequentially", async () => {
     sourcePath: "C:\\images\\second.png",
     classificationId: null,
     sourceUrl: null,
+    importSource: "direct",
+    importBatchId: ingestMedia.mock.calls[0][0].importBatchId,
   });
 });
 
@@ -322,6 +330,8 @@ it("queues overlapping drops in arrival order without clearing progress", async 
     sourcePath: "C:\\images\\a2.png",
     classificationId: "tag-a",
     sourceUrl: null,
+    importSource: "direct",
+    importBatchId: ingestMedia.mock.calls[0][0].importBatchId,
   });
   expect(result.current).toEqual({ current: 2, total: 2 });
 
@@ -331,6 +341,8 @@ it("queues overlapping drops in arrival order without clearing progress", async 
     sourcePath: "C:\\images\\b1.png",
     classificationId: "tag-b",
     sourceUrl: null,
+    importSource: "direct",
+    importBatchId: expect.any(String),
   });
   expect(result.current).toEqual({ current: 1, total: 1 });
 
@@ -373,6 +385,8 @@ it("uses the current classification for a new drop without resubscribing", async
       sourcePath: "C:\\images\\arona.png",
       classificationId: "tag-current",
       sourceUrl: null,
+      importSource: "direct",
+      importBatchId: expect.any(String),
     }),
   );
   expect(subscribe).toHaveBeenCalledTimes(1);
@@ -412,6 +426,8 @@ it("keeps the classification captured when a drop starts", async () => {
     sourcePath: "C:\\images\\second.png",
     classificationId: "tag-at-drop",
     sourceUrl: null,
+    importSource: "direct",
+    importBatchId: ingestMedia.mock.calls[0][0].importBatchId,
   });
 });
 
@@ -599,7 +615,13 @@ it("retries only the paths that failed in a work batch", async () => {
 
   act(() => result.current.retryFailed(result.current.works[0].id));
   await waitFor(() => expect(ingestMedia).toHaveBeenCalledTimes(3));
-  expect(ingestMedia).toHaveBeenNthCalledWith(3, { sourcePath: "C:\\images\\broken.png", classificationId: "tag-a", sourceUrl: null });
+  expect(ingestMedia).toHaveBeenNthCalledWith(3, {
+    sourcePath: "C:\\images\\broken.png",
+    classificationId: "tag-a",
+    sourceUrl: null,
+    importSource: "direct",
+    importBatchId: ingestMedia.mock.calls[0][0].importBatchId,
+  });
 });
 
 it("passes image and supported video paths through the same media gateway", async () => {

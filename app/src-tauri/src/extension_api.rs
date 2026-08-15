@@ -15,7 +15,7 @@ use uuid::Uuid;
 use crate::{
     commands::AppState,
     library::{
-        models::{IngestMediaRequest, IngestOutcome},
+        models::{ImportSource, IngestMediaRequest, IngestOutcome},
         Library, MAX_IMAGE_BYTES,
     },
 };
@@ -450,8 +450,16 @@ fn ingest_x_image(
 
     let media_url = validate_url(&request.media_url, &["pbs.twimg.com"])
         .map_err(|_| ApiError::InvalidMediaUrl)?;
-    validate_url(&request.source_url, &["x.com", "twitter.com"])
+    let source_url = validate_url(&request.source_url, &["x.com", "twitter.com"])
         .map_err(|_| ApiError::InvalidSourceUrl)?;
+    let (creator_handle, creator_url) = x_creator(&source_url)
+        .map(|handle| {
+            (
+                Some(handle.to_owned()),
+                Some(format!("https://x.com/{handle}")),
+            )
+        })
+        .unwrap_or((None, None));
 
     let staging_directory = library.root().join("assets").join(".staging");
     fs::create_dir_all(&staging_directory).map_err(|_| ApiError::DownloadFailed)?;
@@ -466,9 +474,28 @@ fn ingest_x_image(
             source_url: Some(request.source_url),
             collected_at: None,
             replace_duplicate_metadata: false,
+            source_published_at: None,
+            creator_name: None,
+            creator_handle,
+            creator_url,
+            import_source: ImportSource::BrowserExtension,
+            import_batch_id: Uuid::new_v4().to_string(),
         })
         .map_err(map_ingestion_error)?;
     finish_ingestion(library, &request.classification_id, outcome)
+}
+
+fn x_creator(url: &url::Url) -> Option<&str> {
+    if !matches!(url.host_str(), Some("x.com" | "twitter.com")) {
+        return None;
+    }
+    let mut segments = url.path_segments()?;
+    let handle = segments.next()?;
+    let status = segments.next()?;
+    if handle.is_empty() || handle.eq_ignore_ascii_case("i") || status != "status" {
+        return None;
+    }
+    Some(handle)
 }
 
 fn validate_url(value: &str, allowed_hosts: &[&str]) -> Result<url::Url, ()> {
@@ -653,6 +680,19 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
+
+    #[test]
+    fn creator_handle_is_derived_only_from_account_status_urls() {
+        let account = url::Url::parse("https://x.com/example/status/123").unwrap();
+        let system = url::Url::parse("https://x.com/i/status/123").unwrap();
+        let profile = url::Url::parse("https://x.com/example").unwrap();
+        let unknown = url::Url::parse("https://example.com/example/status/123").unwrap();
+
+        assert_eq!(x_creator(&account), Some("example"));
+        assert_eq!(x_creator(&system), None);
+        assert_eq!(x_creator(&profile), None);
+        assert_eq!(x_creator(&unknown), None);
+    }
     use crate::library::{
         models::{ClassificationKind, CreateClassification, IngestOutcome},
         Library,

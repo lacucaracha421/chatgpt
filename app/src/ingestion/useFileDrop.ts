@@ -97,6 +97,8 @@ export function useFileDrop(options: UseFileDropOptions): FileDropState {
               sourcePath,
               classificationId: destination,
               sourceUrl: null,
+              importSource: "direct",
+              importBatchId: workId,
             });
             if (!active) return;
             if (result.status === "added") added += 1;

@@ -1,7 +1,7 @@
 use std::{env, fs, path::Path};
 
 use app_lib::library::{
-    models::{IngestMediaRequest, IngestOutcome, MediaSummary, VideoPreparationState},
+    models::{ImportSource, IngestMediaRequest, IngestOutcome, MediaSummary, VideoPreparationState},
     Library,
 };
 use rusqlite::Connection;
@@ -148,6 +148,12 @@ fn request(path: &Path) -> IngestMediaRequest {
         source_url: None,
         collected_at: None,
         replace_duplicate_metadata: false,
+        source_published_at: None,
+        creator_name: None,
+        creator_handle: None,
+        creator_url: None,
+        import_source: ImportSource::Direct,
+        import_batch_id: "00000000-0000-4000-8000-000000000004".into(),
     }
 }
 

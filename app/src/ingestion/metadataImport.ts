@@ -55,6 +55,8 @@ export async function executeMetadataImport(
         sourceUrl: item.sourceUrl,
         collectedAt: item.collectedAt,
         replaceDuplicateMetadata: true,
+        importSource: "metadata_import",
+        importBatchId: workId,
       });
       work = applyOutcome(work, item.fileName, outcome);
     } catch (error) {

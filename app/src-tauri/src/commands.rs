@@ -93,6 +93,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::InvalidCollectedAt => "invalid_collected_at",
             LibraryError::InvalidSourcePublishedAt => "invalid_source_published_at",
             LibraryError::InvalidCreatorUrl => "invalid_creator_url",
+            LibraryError::InvalidImportBatchId => "invalid_import_batch_id",
             LibraryError::MediaNotFound => "media_not_found",
             LibraryError::UnsafeMediaPath => "unsafe_media_path",
             LibraryError::ReadMedia { .. } => "read_media_failed",

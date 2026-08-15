@@ -23,12 +23,12 @@ describe("executeMetadataImport", () => {
       ingestMedia: vi.fn().mockResolvedValue({ status: "added", asset: { id: "asset" } }),
     } as unknown as LibraryGateway;
 
-    const result = await executeMetadataImport(gateway, "C:\\export");
+    const result = await executeMetadataImport(gateway, "C:\\export", undefined, "work-1");
 
     expect(gateway.createClassification).toHaveBeenCalledTimes(2);
     expect(gateway.createClassification).toHaveBeenNthCalledWith(1, { kind: "tag", name: "Reverse", parentId: "games" });
     expect(gateway.createClassification).toHaveBeenNthCalledWith(2, { kind: "root", name: "Unused", parentId: null });
-    expect(gateway.ingestMedia).toHaveBeenCalledWith({ sourcePath: "C:\\export\\one.jpg", classificationId: "Reverse", sourceUrl: "https://x.com/a/status/1", collectedAt: "2026-08-13T13:44:55Z", replaceDuplicateMetadata: true });
+    expect(gateway.ingestMedia).toHaveBeenCalledWith({ sourcePath: "C:\\export\\one.jpg", classificationId: "Reverse", sourceUrl: "https://x.com/a/status/1", collectedAt: "2026-08-13T13:44:55Z", replaceDuplicateMetadata: true, importSource: "metadata_import", importBatchId: "work-1" });
     expect(result).toMatchObject({ added: 1, foldersCreated: 2, pathsReused: 2, completed: 1, total: 1, skipped: [{ fileName: "missing.jpg" }] });
   });
 });

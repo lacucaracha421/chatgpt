@@ -108,6 +108,8 @@ pub enum LibraryError {
     InvalidSourcePublishedAt,
     #[error("작성자 URL은 http 또는 https 주소여야 합니다")]
     InvalidCreatorUrl,
+    #[error("가져오기 배치 ID가 올바른 UUID가 아닙니다")]
+    InvalidImportBatchId,
     #[error("요청한 미디어 파일을 찾을 수 없습니다")]
     MediaNotFound,
     #[error("미디어 경로가 라이브러리 폴더 밖을 가리킵니다")]

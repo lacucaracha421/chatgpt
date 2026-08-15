@@ -95,6 +95,8 @@ describe("libraryGateway video contract", () => {
       sourcePath: "C:\\input\\clip.webm",
       classificationId: "work-1",
       sourceUrl: "https://example.test/post",
+      importSource: "direct" as const,
+      importBatchId: "00000000-0000-4000-8000-000000000006",
     };
 
     await libraryGateway.ingestMedia(request);

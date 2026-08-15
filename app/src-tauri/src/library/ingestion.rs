@@ -17,10 +17,11 @@ use windows_sys::Win32::Storage::FileSystem::{
 };
 
 use super::{
+    asset_metadata::normalize_source_metadata,
     error::LibraryError,
     models::{
-        AssetSummary, IngestMediaRequest, IngestOutcome, MediaSummary, SetAssetClassification,
-        VideoPreparationState,
+        AssetSummary, ImportSource, IngestMediaRequest, IngestOutcome, MediaSummary,
+        SetAssetClassification, VideoPreparationState,
     },
     similarity::perceptual_hash_from_file,
     video_media::{probe_video, VideoProbe},
@@ -31,7 +32,22 @@ pub(crate) const MAX_IMAGE_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_IMAGE_PIXELS: u64 = 200_000_000;
 
 impl Library {
-    pub fn ingest_media(&self, request: IngestMediaRequest) -> Result<IngestOutcome, LibraryError> {
+    pub fn ingest_media(
+        &self,
+        mut request: IngestMediaRequest,
+    ) -> Result<IngestOutcome, LibraryError> {
+        uuid::Uuid::parse_str(&request.import_batch_id)
+            .map_err(|_| LibraryError::InvalidImportBatchId)?;
+        let normalized = normalize_source_metadata(
+            request.source_published_at,
+            request.creator_name,
+            request.creator_handle,
+            request.creator_url,
+        )?;
+        request.source_published_at = normalized.published_at;
+        request.creator_name = normalized.creator_name;
+        request.creator_handle = normalized.creator_handle;
+        request.creator_url = normalized.creator_url;
         let _ingestion_guard = self
             .ingestion_lock
             .lock()
@@ -58,6 +74,15 @@ impl Library {
         {
             return Err(LibraryError::InvalidCollectedAt);
         }
+        let original_modified_at = if request.import_source == ImportSource::BrowserExtension {
+            None
+        } else {
+            source_metadata
+                .modified()
+                .ok()
+                .map(chrono::DateTime::<chrono::Utc>::from)
+                .map(|value| value.to_rfc3339())
+        };
 
         self.validate_classification(request.classification_id.as_deref())?;
 
@@ -79,7 +104,14 @@ impl Library {
 
         match kind {
             IngestKind::Image => {
-                self.ingest_image(request, staging_path, content_hash, byte_size, pending)
+                self.ingest_image(
+                    request,
+                    staging_path,
+                    content_hash,
+                    byte_size,
+                    pending,
+                    original_modified_at,
+                )
             }
             IngestKind::Video(extension) => self.ingest_video(
                 request,
@@ -88,6 +120,7 @@ impl Library {
                 byte_size,
                 pending,
                 extension,
+                original_modified_at,
             ),
         }
     }
@@ -99,6 +132,7 @@ impl Library {
         content_hash: String,
         byte_size: u64,
         mut pending: PendingFiles,
+        original_modified_at: Option<String>,
     ) -> Result<IngestOutcome, LibraryError> {
         let (format, width, height) = inspect_image(pending.owned_file(&staging_path)?)?;
         let existing_asset_id = self.find_asset_by_hash(&content_hash)?;
@@ -140,13 +174,13 @@ impl Library {
                 .unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
             favorite: false,
             source_url: request.source_url.clone(),
-            source_published_at: None,
-            creator_name: None,
-            creator_handle: None,
-            creator_url: None,
-            import_source: None,
-            import_batch_id: None,
-            original_modified_at: None,
+            source_published_at: request.source_published_at.clone(),
+            creator_name: request.creator_name.clone(),
+            creator_handle: request.creator_handle.clone(),
+            creator_url: request.creator_url.clone(),
+            import_source: Some(request.import_source),
+            import_batch_id: Some(request.import_batch_id.clone()),
+            original_modified_at,
             media: if format == ImageFormat::Gif {
                 MediaSummary::Gif
             } else {
@@ -182,6 +216,7 @@ impl Library {
         byte_size: u64,
         mut pending: PendingFiles,
         extension: &'static str,
+        original_modified_at: Option<String>,
     ) -> Result<IngestOutcome, LibraryError> {
         if let Some(existing_asset_id) = self.find_asset_by_hash(&content_hash)? {
             return self.finish_exact_duplicate(existing_asset_id, &request);
@@ -208,14 +243,14 @@ impl Library {
                 .clone()
                 .unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
             favorite: false,
-            source_url: request.source_url,
-            source_published_at: None,
-            creator_name: None,
-            creator_handle: None,
-            creator_url: None,
-            import_source: None,
-            import_batch_id: None,
-            original_modified_at: None,
+            source_url: request.source_url.clone(),
+            source_published_at: request.source_published_at.clone(),
+            creator_name: request.creator_name.clone(),
+            creator_handle: request.creator_handle.clone(),
+            creator_url: request.creator_url.clone(),
+            import_source: Some(request.import_source),
+            import_batch_id: Some(request.import_batch_id.clone()),
+            original_modified_at,
             media: MediaSummary::Video {
                 duration_ms: probe.duration_ms,
                 preparation_state: VideoPreparationState::Pending,
@@ -257,14 +292,26 @@ impl Library {
             self.connection()?.execute(
                 "UPDATE assets
                  SET source_url = COALESCE(?2, source_url),
-                     collected_at = COALESCE(?3, collected_at)
+                     collected_at = COALESCE(?3, collected_at),
+                     source_published_at = COALESCE(?4, source_published_at),
+                     creator_name = COALESCE(?5, creator_name),
+                     creator_handle = COALESCE(?6, creator_handle),
+                     creator_url = COALESCE(?7, creator_url)
                  WHERE id = ?1
                    AND ((?2 IS NOT NULL AND source_url IS NOT ?2)
-                     OR (?3 IS NOT NULL AND collected_at IS NOT ?3))",
+                     OR (?3 IS NOT NULL AND collected_at IS NOT ?3)
+                     OR (?4 IS NOT NULL AND source_published_at IS NOT ?4)
+                     OR (?5 IS NOT NULL AND creator_name IS NOT ?5)
+                     OR (?6 IS NOT NULL AND creator_handle IS NOT ?6)
+                     OR (?7 IS NOT NULL AND creator_url IS NOT ?7))",
                 params![
                     existing_asset_id,
                     request.source_url.as_deref(),
                     request.collected_at.as_deref(),
+                    request.source_published_at.as_deref(),
+                    request.creator_name.as_deref(),
+                    request.creator_handle.as_deref(),
+                    request.creator_url.as_deref(),
                 ],
             )? > 0
         } else {
@@ -325,9 +372,12 @@ impl Library {
             "INSERT INTO assets (
                 id, content_hash, media_kind, title, original_name, relative_path,
                 thumbnail_relative_path, byte_size, width, height, source_url,
-                collected_at, favorite, status, perceptual_hash
+                collected_at, favorite, status, perceptual_hash, source_published_at,
+                creator_name, creator_handle, creator_url, import_source, import_batch_id,
+                original_modified_at
             ) VALUES (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
+                ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22
             )",
             params![
                 asset.id,
@@ -345,6 +395,13 @@ impl Library {
                 i64::from(asset.favorite),
                 status,
                 perceptual_hash.to_be_bytes(),
+                asset.source_published_at.as_deref(),
+                asset.creator_name.as_deref(),
+                asset.creator_handle.as_deref(),
+                asset.creator_url.as_deref(),
+                asset.import_source.map(ImportSource::as_str),
+                asset.import_batch_id.as_deref(),
+                asset.original_modified_at.as_deref(),
             ],
         )?;
         if let Some(classification_id) = classification_id {
@@ -389,9 +446,12 @@ impl Library {
             "INSERT INTO assets (
                 id, content_hash, media_kind, title, original_name, relative_path,
                 thumbnail_relative_path, byte_size, width, height, source_url,
-                collected_at, favorite, status, perceptual_hash
+                collected_at, favorite, status, perceptual_hash, source_published_at,
+                creator_name, creator_handle, creator_url, import_source, import_batch_id,
+                original_modified_at
             ) VALUES (
-                ?1, ?2, 'video', ?3, ?4, ?5, NULL, ?6, ?7, ?8, ?9, ?10, ?11, 'normal', NULL
+                ?1, ?2, 'video', ?3, ?4, ?5, NULL, ?6, ?7, ?8, ?9, ?10, ?11,
+                'normal', NULL, ?12, ?13, ?14, ?15, ?16, ?17, ?18
             )",
             params![
                 asset.id,
@@ -405,6 +465,13 @@ impl Library {
                 asset.source_url.as_deref(),
                 asset.collected_at,
                 i64::from(asset.favorite),
+                asset.source_published_at.as_deref(),
+                asset.creator_name.as_deref(),
+                asset.creator_handle.as_deref(),
+                asset.creator_url.as_deref(),
+                asset.import_source.map(ImportSource::as_str),
+                asset.import_batch_id.as_deref(),
+                asset.original_modified_at.as_deref(),
             ],
         )?;
         transaction.execute(
@@ -940,7 +1007,7 @@ mod tests {
     use crate::library::{
         models::{
             AssetClassificationPatch, AssetQuery, AssetSort, AssetSummary, ClassificationKind,
-            CreateClassification, IngestMediaRequest, IngestOutcome, MediaSummary,
+            CreateClassification, ImportSource, IngestMediaRequest, IngestOutcome, MediaSummary,
             VideoPreparationState,
         },
         video_media::VideoProbe,
@@ -982,6 +1049,12 @@ mod tests {
                     source_url: None,
                     collected_at: None,
                     replace_duplicate_metadata: false,
+                    source_published_at: None,
+                    creator_name: None,
+                    creator_handle: None,
+                    creator_url: None,
+                    import_source: ImportSource::Direct,
+                    import_batch_id: "00000000-0000-4000-8000-000000000001".into(),
                 })
                 .unwrap()
         }
@@ -1038,6 +1111,12 @@ mod tests {
                     source_url,
                     collected_at: None,
                     replace_duplicate_metadata: false,
+                    source_published_at: None,
+                    creator_name: None,
+                    creator_handle: None,
+                    creator_url: None,
+                    import_source: ImportSource::Direct,
+                    import_batch_id: "00000000-0000-4000-8000-000000000001".into(),
                 })
                 .unwrap()
         }
@@ -1156,6 +1235,12 @@ mod tests {
                 source_url: Some("https://example.test/post".into()),
                 collected_at: None,
                 replace_duplicate_metadata: false,
+                source_published_at: None,
+                creator_name: None,
+                creator_handle: None,
+                creator_url: None,
+                import_source: ImportSource::Direct,
+                import_batch_id: "00000000-0000-4000-8000-000000000001".into(),
             })
             .unwrap();
 
@@ -1206,6 +1291,12 @@ mod tests {
                 source_url: None,
                 collected_at: None,
                 replace_duplicate_metadata: false,
+                source_published_at: None,
+                creator_name: None,
+                creator_handle: None,
+                creator_url: None,
+                import_source: ImportSource::Direct,
+                import_batch_id: "00000000-0000-4000-8000-000000000001".into(),
             })
             .unwrap();
         let IngestOutcome::Added { asset } = first else {
@@ -1219,6 +1310,12 @@ mod tests {
                 source_url: None,
                 collected_at: None,
                 replace_duplicate_metadata: false,
+                source_published_at: None,
+                creator_name: None,
+                creator_handle: None,
+                creator_url: None,
+                import_source: ImportSource::Direct,
+                import_batch_id: "00000000-0000-4000-8000-000000000001".into(),
             })
             .unwrap();
 
@@ -1261,6 +1358,12 @@ mod tests {
                         source_url: None,
                         collected_at: None,
                         replace_duplicate_metadata: false,
+                        source_published_at: None,
+                        creator_name: None,
+                        creator_handle: None,
+                        creator_url: None,
+                        import_source: ImportSource::Direct,
+                        import_batch_id: "00000000-0000-4000-8000-000000000001".into(),
                     })
                     .unwrap(),
                 IngestOutcome::Added { .. }
@@ -1290,6 +1393,12 @@ mod tests {
             source_url: None,
             collected_at: None,
             replace_duplicate_metadata: false,
+            source_published_at: None,
+            creator_name: None,
+            creator_handle: None,
+            creator_url: None,
+            import_source: ImportSource::Direct,
+            import_batch_id: "00000000-0000-4000-8000-000000000001".into(),
         });
 
         assert!(matches!(result, Err(LibraryError::UnsupportedVideo)));
@@ -1498,6 +1607,12 @@ mod tests {
                 source_url: Some("https://example.test/duplicate".into()),
                 collected_at: Some("2026-08-13T13:44:55Z".into()),
                 replace_duplicate_metadata: true,
+                source_published_at: None,
+                creator_name: None,
+                creator_handle: None,
+                creator_url: None,
+                import_source: ImportSource::Direct,
+                import_batch_id: "00000000-0000-4000-8000-000000000001".into(),
             })
             .unwrap();
 
@@ -1557,6 +1672,12 @@ mod tests {
                 source_url: None,
                 collected_at: Some("2026-08-13T13:44:55+09:00".into()),
                 replace_duplicate_metadata: false,
+                source_published_at: None,
+                creator_name: None,
+                creator_handle: None,
+                creator_url: None,
+                import_source: ImportSource::Direct,
+                import_batch_id: "00000000-0000-4000-8000-000000000001".into(),
             })
             .unwrap();
         let IngestOutcome::Added { asset } = outcome else {
@@ -1570,8 +1691,146 @@ mod tests {
             source_url: None,
             collected_at: Some("yesterday".into()),
             replace_duplicate_metadata: false,
+            source_published_at: None,
+            creator_name: None,
+            creator_handle: None,
+            creator_url: None,
+            import_source: ImportSource::Direct,
+            import_batch_id: "00000000-0000-4000-8000-000000000001".into(),
         });
         assert!(matches!(invalid, Err(LibraryError::InvalidCollectedAt)));
+    }
+
+    #[test]
+    fn ingestion_records_source_metadata_and_preserves_first_provenance_on_duplicates() {
+        let fixture = IngestionFixture::new();
+        let first_batch = "31d1f90c-214b-41e2-9d84-f9d964bb5bc3";
+        let outcome = fixture
+            .library
+            .ingest_media(IngestMediaRequest {
+                source_path: fixture.source.clone(),
+                classification_id: None,
+                source_url: Some("https://x.com/example/status/1".into()),
+                collected_at: None,
+                replace_duplicate_metadata: false,
+                source_published_at: Some("2026-08-01T10:20:30Z".into()),
+                creator_name: Some("Example Artist".into()),
+                creator_handle: Some("example".into()),
+                creator_url: Some("https://x.com/example".into()),
+                import_source: ImportSource::Direct,
+                import_batch_id: first_batch.into(),
+            })
+            .unwrap();
+        let IngestOutcome::Added { asset } = outcome else {
+            panic!("first ingest must add an asset");
+        };
+        assert_eq!(asset.import_source, Some(ImportSource::Direct));
+        assert_eq!(asset.import_batch_id.as_deref(), Some(first_batch));
+        assert!(asset.original_modified_at.is_some());
+        let original_modified_at = asset.original_modified_at.clone();
+
+        let duplicate = fixture
+            .library
+            .ingest_media(IngestMediaRequest {
+                source_path: fixture.source.clone(),
+                classification_id: None,
+                source_url: Some("https://x.com/changed/status/2".into()),
+                collected_at: None,
+                replace_duplicate_metadata: true,
+                source_published_at: Some("2026-08-02T10:20:30Z".into()),
+                creator_name: Some("Changed Artist".into()),
+                creator_handle: Some("changed".into()),
+                creator_url: Some("https://x.com/changed".into()),
+                import_source: ImportSource::MetadataImport,
+                import_batch_id: "fe6dbf94-f018-45c8-814b-79d1962ed377".into(),
+            })
+            .unwrap();
+        assert!(matches!(
+            duplicate,
+            IngestOutcome::ExactDuplicate {
+                metadata_changed: true,
+                ..
+            }
+        ));
+        let stored = fixture.library.get_asset(&asset.id).unwrap();
+        assert_eq!(stored.creator_name.as_deref(), Some("Changed Artist"));
+        assert_eq!(stored.import_source, Some(ImportSource::Direct));
+        assert_eq!(stored.import_batch_id.as_deref(), Some(first_batch));
+        assert_eq!(stored.original_modified_at, original_modified_at);
+    }
+
+    #[test]
+    fn ingestion_rejects_invalid_batch_ids_and_omits_extension_file_times() {
+        let invalid_fixture = IngestionFixture::new();
+        let invalid = invalid_fixture.library.ingest_media(IngestMediaRequest {
+            source_path: invalid_fixture.source.clone(),
+            classification_id: None,
+            source_url: None,
+            collected_at: None,
+            replace_duplicate_metadata: false,
+            source_published_at: None,
+            creator_name: None,
+            creator_handle: None,
+            creator_url: None,
+            import_source: ImportSource::Direct,
+            import_batch_id: "not-a-uuid".into(),
+        });
+        assert!(matches!(invalid, Err(LibraryError::InvalidImportBatchId)));
+
+        let invalid_url = invalid_fixture.library.ingest_media(IngestMediaRequest {
+            source_path: invalid_fixture.source.clone(),
+            classification_id: None,
+            source_url: None,
+            collected_at: None,
+            replace_duplicate_metadata: false,
+            source_published_at: None,
+            creator_name: None,
+            creator_handle: None,
+            creator_url: Some("javascript:alert(1)".into()),
+            import_source: ImportSource::Direct,
+            import_batch_id: "00000000-0000-4000-8000-000000000005".into(),
+        });
+        assert!(matches!(invalid_url, Err(LibraryError::InvalidCreatorUrl)));
+
+        let invalid_time = invalid_fixture.library.ingest_media(IngestMediaRequest {
+            source_path: invalid_fixture.source.clone(),
+            classification_id: None,
+            source_url: None,
+            collected_at: None,
+            replace_duplicate_metadata: false,
+            source_published_at: Some("not-a-time".into()),
+            creator_name: None,
+            creator_handle: None,
+            creator_url: None,
+            import_source: ImportSource::Direct,
+            import_batch_id: "00000000-0000-4000-8000-000000000005".into(),
+        });
+        assert!(matches!(
+            invalid_time,
+            Err(LibraryError::InvalidSourcePublishedAt)
+        ));
+
+        let extension_fixture = IngestionFixture::new();
+        let outcome = extension_fixture
+            .library
+            .ingest_media(IngestMediaRequest {
+                source_path: extension_fixture.source.clone(),
+                classification_id: None,
+                source_url: Some("https://x.com/example/status/1".into()),
+                collected_at: None,
+                replace_duplicate_metadata: false,
+                source_published_at: None,
+                creator_name: None,
+                creator_handle: Some("example".into()),
+                creator_url: Some("https://x.com/example".into()),
+                import_source: ImportSource::BrowserExtension,
+                import_batch_id: "1be16707-c772-46c7-85b5-ae9be71211a4".into(),
+            })
+            .unwrap();
+        let IngestOutcome::Added { asset } = outcome else {
+            panic!("extension ingest must add an asset");
+        };
+        assert_eq!(asset.original_modified_at, None);
     }
 
     #[test]
@@ -1584,6 +1843,12 @@ mod tests {
             source_url: None,
             collected_at: None,
             replace_duplicate_metadata: false,
+            source_published_at: None,
+            creator_name: None,
+            creator_handle: None,
+            creator_url: None,
+            import_source: ImportSource::Direct,
+            import_batch_id: "00000000-0000-4000-8000-000000000001".into(),
         });
 
         assert!(result.is_err());
@@ -1603,6 +1868,12 @@ mod tests {
             source_url: None,
             collected_at: None,
             replace_duplicate_metadata: false,
+            source_published_at: None,
+            creator_name: None,
+            creator_handle: None,
+            creator_url: None,
+            import_source: ImportSource::Direct,
+            import_batch_id: "00000000-0000-4000-8000-000000000001".into(),
         });
 
         assert!(result.is_err());
@@ -1719,6 +1990,12 @@ mod tests {
                 source_url: None,
                 collected_at: None,
                 replace_duplicate_metadata: false,
+                source_published_at: None,
+                creator_name: None,
+                creator_handle: None,
+                creator_url: None,
+                import_source: ImportSource::Direct,
+                import_batch_id: "00000000-0000-4000-8000-000000000001".into(),
             })
             .unwrap_err();
 
@@ -1759,6 +2036,12 @@ mod tests {
                 source_url: None,
                 collected_at: None,
                 replace_duplicate_metadata: false,
+                source_published_at: None,
+                creator_name: None,
+                creator_handle: None,
+                creator_url: None,
+                import_source: ImportSource::Direct,
+                import_batch_id: "00000000-0000-4000-8000-000000000001".into(),
             })
         });
         let second_library = fixture.library.clone();
@@ -1770,6 +2053,12 @@ mod tests {
                 source_url: None,
                 collected_at: None,
                 replace_duplicate_metadata: false,
+                source_published_at: None,
+                creator_name: None,
+                creator_handle: None,
+                creator_url: None,
+                import_source: ImportSource::Direct,
+                import_batch_id: "00000000-0000-4000-8000-000000000001".into(),
             })
         });
 

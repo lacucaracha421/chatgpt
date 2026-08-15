@@ -181,6 +181,12 @@ export type IngestMediaInput = {
   sourceUrl: string | null;
   collectedAt?: string | null;
   replaceDuplicateMetadata?: boolean;
+  sourcePublishedAt?: string | null;
+  creatorName?: string | null;
+  creatorHandle?: string | null;
+  creatorUrl?: string | null;
+  importSource: "direct" | "browser_extension" | "metadata_import" | "legacy_lakomics";
+  importBatchId: string;
 };
 
 export type MetadataImportPlan = {

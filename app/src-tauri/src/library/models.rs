@@ -32,6 +32,12 @@ pub struct IngestMediaRequest {
     pub collected_at: Option<String>,
     #[serde(default)]
     pub replace_duplicate_metadata: bool,
+    pub source_published_at: Option<String>,
+    pub creator_name: Option<String>,
+    pub creator_handle: Option<String>,
+    pub creator_url: Option<String>,
+    pub import_source: ImportSource,
+    pub import_batch_id: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

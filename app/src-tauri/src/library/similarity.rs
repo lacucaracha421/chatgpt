@@ -620,7 +620,7 @@ mod tests {
     use super::super::{
         error::LibraryError,
         models::{
-            AssetCursor, ClassificationKind, CreateClassification, IngestMediaRequest,
+            AssetCursor, ClassificationKind, CreateClassification, ImportSource, IngestMediaRequest,
             IngestOutcome, SimilarityDecision, SimilarityDecisionRequest,
         },
         Library,
@@ -984,6 +984,12 @@ mod tests {
                         source_url: None,
                         collected_at: None,
                         replace_duplicate_metadata: false,
+                        source_published_at: None,
+                        creator_name: None,
+                        creator_handle: None,
+                        creator_url: None,
+                        import_source: ImportSource::Direct,
+                        import_batch_id: "00000000-0000-4000-8000-000000000002".into(),
                     })
                     .unwrap(),
                 IngestOutcome::Added { .. }
@@ -1000,6 +1006,12 @@ mod tests {
                         source_url: None,
                         collected_at: None,
                         replace_duplicate_metadata: false,
+                        source_published_at: None,
+                        creator_name: None,
+                        creator_handle: None,
+                        creator_url: None,
+                        import_source: ImportSource::Direct,
+                        import_batch_id: "00000000-0000-4000-8000-000000000002".into(),
                     })
                     .unwrap(),
                 IngestOutcome::ReviewPending { .. }
@@ -1107,6 +1119,12 @@ mod tests {
                 source_url: Some("https://example.com/old".into()),
                 collected_at: None,
                 replace_duplicate_metadata: false,
+                source_published_at: None,
+                creator_name: None,
+                creator_handle: None,
+                creator_url: None,
+                import_source: ImportSource::Direct,
+                import_batch_id: "00000000-0000-4000-8000-000000000002".into(),
             })
             .unwrap()
         {
@@ -1124,6 +1142,12 @@ mod tests {
                 source_url: Some("https://example.com/new".into()),
                 collected_at: None,
                 replace_duplicate_metadata: false,
+                source_published_at: None,
+                creator_name: None,
+                creator_handle: None,
+                creator_url: None,
+                import_source: ImportSource::Direct,
+                import_batch_id: "00000000-0000-4000-8000-000000000002".into(),
             })
             .unwrap()
         {

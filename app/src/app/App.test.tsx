@@ -372,7 +372,13 @@ describe("App", () => {
     await user.click(await screen.findByRole("button", { name: "즐겨찾기" }));
     await waitFor(() => expect(drop).toBeDefined());
     act(() => drop?.(["C:\\images\\a.png"]));
-    await waitFor(() => expect(libraryGateway.ingestMedia).toHaveBeenCalledWith({ sourcePath: "C:\\images\\a.png", classificationId: null, sourceUrl: null }));
+    await waitFor(() => expect(libraryGateway.ingestMedia).toHaveBeenCalledWith({
+      sourcePath: "C:\\images\\a.png",
+      classificationId: null,
+      sourceUrl: null,
+      importSource: "direct",
+      importBatchId: expect.any(String),
+    }));
 
     await user.click(screen.getByRole("button", { name: "최근" }));
     act(() => drop?.(["C:\\images\\recent.png"]));
@@ -380,8 +386,8 @@ describe("App", () => {
     act(() => drop?.(["C:\\images\\all-assets.png"]));
 
     await waitFor(() => expect(libraryGateway.ingestMedia).toHaveBeenCalledTimes(3));
-    expect(libraryGateway.ingestMedia).toHaveBeenNthCalledWith(2, { sourcePath: "C:\\images\\recent.png", classificationId: null, sourceUrl: null });
-    expect(libraryGateway.ingestMedia).toHaveBeenNthCalledWith(3, { sourcePath: "C:\\images\\all-assets.png", classificationId: null, sourceUrl: null });
+    expect(libraryGateway.ingestMedia).toHaveBeenNthCalledWith(2, { sourcePath: "C:\\images\\recent.png", classificationId: null, sourceUrl: null, importSource: "direct", importBatchId: expect.any(String) });
+    expect(libraryGateway.ingestMedia).toHaveBeenNthCalledWith(3, { sourcePath: "C:\\images\\all-assets.png", classificationId: null, sourceUrl: null, importSource: "direct", importBatchId: expect.any(String) });
   });
 
   it("loads and saves the complete validated UI preference object", async () => {
@@ -538,6 +544,8 @@ describe("App", () => {
       sourcePath: "C:\\images\\arona.png",
       classificationId: "tag-arona",
       sourceUrl: null,
+      importSource: "direct",
+      importBatchId: expect.any(String),
     });
 
     act(() => resolveIngest({ status: "added", asset }));
@@ -615,6 +623,8 @@ describe("App", () => {
       sourcePath: "C:\\images\\duplicate.png",
       classificationId: "root-games",
       sourceUrl: null,
+      importSource: "direct",
+      importBatchId: expect.any(String),
     });
     expect(libraryGateway.listAssets).toHaveBeenCalledTimes(callsBeforeDrop);
     await user.click(screen.getByRole("button", { name: /duplicate.png 기존 자산 열기/ }));
