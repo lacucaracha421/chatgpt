@@ -208,6 +208,7 @@ impl Library {
         })
     }
 
+    #[allow(clippy::too_many_arguments)] // Mirrors the image path; a context type would only move these one-shot values.
     fn ingest_video(
         &self,
         request: IngestMediaRequest,

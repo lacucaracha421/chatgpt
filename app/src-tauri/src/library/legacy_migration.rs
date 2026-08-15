@@ -45,6 +45,8 @@ pub struct LegacyMigrationPlan {
     pub classification_paths: Vec<Vec<String>>,
     pub metadata_matched: usize,
     pub unclassified: usize,
+    pub total_bytes: u64,
+    pub tree_nodes: usize,
     pub warnings: Vec<String>,
 }
 
@@ -126,6 +128,15 @@ pub fn inspect_legacy_migration(
     let mut used_paths = BTreeSet::new();
     let mut images = direct_images(&paths.legacy_root)?;
     images.sort_by_key(|path| file_key(path));
+    let total_bytes = images.iter().try_fold(0_u64, |total, path| {
+        fs::metadata(path)
+            .map(|metadata| total.saturating_add(metadata.len()))
+            .map_err(|source| LibraryError::ReadLegacyRoot {
+                path: paths.legacy_root.clone(),
+                source,
+            })
+    })?;
+    let tree_nodes = tag_paths.tree_paths.len();
 
     let images = images
         .into_iter()
@@ -156,7 +167,8 @@ pub fn inspect_legacy_migration(
                 classification_path,
                 source_url: metadata.and_then(|item| normalized(item.source_id.clone())),
                 custom_title: metadata.and_then(|item| normalized(item.custom_title.clone())),
-                collected_at: metadata.and_then(|item| normalize_legacy_timestamp(item.modified_at.as_deref())),
+                collected_at: metadata
+                    .and_then(|item| normalize_legacy_timestamp(item.modified_at.as_deref())),
                 import_batch_id: batch_id.clone(),
                 metadata_source,
             }
@@ -175,6 +187,8 @@ pub fn inspect_legacy_migration(
         classification_paths,
         metadata_matched,
         unclassified,
+        total_bytes,
+        tree_nodes,
         warnings,
     })
 }
@@ -259,17 +273,18 @@ impl Library {
                     report.added += 1;
                     self.apply_legacy_title(&asset.id, image.custom_title.as_deref())?;
                 }
-                Ok(IngestOutcome::ExactDuplicate { existing_asset_id, .. }) => {
+                Ok(IngestOutcome::ExactDuplicate {
+                    existing_asset_id, ..
+                }) => {
                     report.exact_duplicates += 1;
                     self.apply_legacy_title(&existing_asset_id, image.custom_title.as_deref())?;
                 }
                 Ok(IngestOutcome::ReviewPending { .. }) => report.review_pending += 1,
                 Err(error) => {
                     report.failed += 1;
-                    report.warnings.push(format!(
-                        "{}: {error}",
-                        image.source_path.display()
-                    ));
+                    report
+                        .warnings
+                        .push(format!("{}: {error}", image.source_path.display()));
                 }
             }
             progress(LegacyMigrationProgress {
@@ -287,7 +302,9 @@ impl Library {
     }
 
     fn apply_legacy_title(&self, asset_id: &str, title: Option<&str>) -> Result<(), LibraryError> {
-        let Some(title) = title else { return Ok(()); };
+        let Some(title) = title else {
+            return Ok(());
+        };
         self.connection()?.execute(
             "UPDATE assets SET title = ?2 WHERE id = ?1 AND title IS NOT ?2",
             rusqlite::params![asset_id, title],
@@ -301,8 +318,9 @@ fn read_snapshot(path: &Path) -> Result<LegacySnapshot, LibraryError> {
         path: path.to_path_buf(),
         source,
     })?;
-    serde_json::from_slice(&bytes)
-        .map_err(|_| LibraryError::InvalidLegacySnapshot { path: path.to_path_buf() })
+    serde_json::from_slice(&bytes).map_err(|_| LibraryError::InvalidLegacySnapshot {
+        path: path.to_path_buf(),
+    })
 }
 
 fn index_items(
@@ -330,11 +348,21 @@ fn build_tag_paths(
     snapshot_path: &Path,
 ) -> Result<TagPathIndex, LibraryError> {
     let Some(tree_json) = preferences.and_then(|value| value.storage_tag_tree) else {
-        return Ok(TagPathIndex { by_tag: BTreeMap::new(), tree_paths: Vec::new(), order: BTreeMap::new() });
+        return Ok(TagPathIndex {
+            by_tag: BTreeMap::new(),
+            tree_paths: Vec::new(),
+            order: BTreeMap::new(),
+        });
     };
-    let roots: Vec<LegacyTreeNode> = serde_json::from_str(&tree_json)
-        .map_err(|_| LibraryError::InvalidLegacySnapshot { path: snapshot_path.to_path_buf() })?;
-    let mut index = TagPathIndex { by_tag: BTreeMap::new(), tree_paths: Vec::new(), order: BTreeMap::new() };
+    let roots: Vec<LegacyTreeNode> =
+        serde_json::from_str(&tree_json).map_err(|_| LibraryError::InvalidLegacySnapshot {
+            path: snapshot_path.to_path_buf(),
+        })?;
+    let mut index = TagPathIndex {
+        by_tag: BTreeMap::new(),
+        tree_paths: Vec::new(),
+        order: BTreeMap::new(),
+    };
     for root in roots {
         visit_tree(root, &[], &mut index);
     }
@@ -367,7 +395,13 @@ fn deepest_path(
         .collect();
     let maximum = candidates.iter().map(|path| path.len()).max().unwrap_or(0);
     candidates.retain(|path| path.len() == maximum);
-    candidates.sort_by_key(|path| index.order.get(&path_key(path)).copied().unwrap_or(usize::MAX));
+    candidates.sort_by_key(|path| {
+        index
+            .order
+            .get(&path_key(path))
+            .copied()
+            .unwrap_or(usize::MAX)
+    });
     candidates.dedup_by(|left, right| path_key(left) == path_key(right));
     if candidates.len() > 1 {
         warnings.push(format!(
@@ -375,7 +409,10 @@ fn deepest_path(
             source_path.display()
         ));
     }
-    candidates.first().map(|path| (*path).clone()).unwrap_or_default()
+    candidates
+        .first()
+        .map(|path| (*path).clone())
+        .unwrap_or_default()
 }
 
 fn direct_images(root: &Path) -> Result<Vec<PathBuf>, LibraryError> {
@@ -390,10 +427,15 @@ fn direct_images(root: &Path) -> Result<Vec<PathBuf>, LibraryError> {
             source,
         })?;
         let path = entry.path();
-        if entry.file_type().map_err(|source| LibraryError::ReadLegacyRoot {
-            path: root.to_path_buf(),
-            source,
-        })?.is_file() && is_supported_image(&path) {
+        if entry
+            .file_type()
+            .map_err(|source| LibraryError::ReadLegacyRoot {
+                path: root.to_path_buf(),
+                source,
+            })?
+            .is_file()
+            && is_supported_image(&path)
+        {
             images.push(path);
         }
     }
@@ -414,7 +456,10 @@ fn file_key(path: &Path) -> String {
 }
 
 fn path_key(path: &[String]) -> String {
-    path.iter().map(|part| part.to_lowercase()).collect::<Vec<_>>().join("\0")
+    path.iter()
+        .map(|part| part.to_lowercase())
+        .collect::<Vec<_>>()
+        .join("\0")
 }
 
 fn normalized(value: Option<String>) -> Option<String> {
@@ -445,7 +490,10 @@ mod tests {
     use serde_json::json;
 
     use super::{inspect_legacy_migration, LegacyMigrationPaths};
-    use crate::library::{models::{AssetQuery, AssetSort}, Library};
+    use crate::library::{
+        models::{AssetQuery, AssetSort},
+        Library,
+    };
 
     #[test]
     fn combines_snapshots_and_reconstructs_the_deepest_classification_paths() {
@@ -485,18 +533,32 @@ mod tests {
             legacy_root,
             primary_snapshot: primary,
             fallback_snapshot: fallback,
-        }).unwrap();
+        })
+        .unwrap();
 
         assert_eq!(plan.images.len(), 4);
         assert_eq!(plan.metadata_matched, 3);
         assert_eq!(plan.unclassified, 1);
-        assert_eq!(plan.classification_paths, vec![
-            vec![String::from("게임")],
-            vec![String::from("게임"), String::from("리버스")],
-            vec![String::from("게임"), String::from("리버스"), String::from("라플라스")],
-        ]);
-        assert_eq!(plan.images[0].import_batch_id, plan.images[1].import_batch_id);
-        assert!(plan.images.iter().any(|image| image.source_path.ends_with("portrait.jfif")));
+        assert_eq!(
+            plan.classification_paths,
+            vec![
+                vec![String::from("게임")],
+                vec![String::from("게임"), String::from("리버스")],
+                vec![
+                    String::from("게임"),
+                    String::from("리버스"),
+                    String::from("라플라스")
+                ],
+            ]
+        );
+        assert_eq!(
+            plan.images[0].import_batch_id,
+            plan.images[1].import_batch_id
+        );
+        assert!(plan
+            .images
+            .iter()
+            .any(|image| image.source_path.ends_with("portrait.jfif")));
     }
 
     #[test]
@@ -523,26 +585,39 @@ mod tests {
             legacy_root,
             primary_snapshot: primary,
             fallback_snapshot: fallback,
-        }).unwrap();
+        })
+        .unwrap();
         let library = Library::open(&library_root).unwrap();
 
         let first = library.execute_legacy_migration(&plan, |_| {}).unwrap();
         let second = library.execute_legacy_migration(&plan, |_| {}).unwrap();
 
-        assert_eq!((first.added, first.exact_duplicates, first.folders_created), (1, 0, 1));
-        assert_eq!((second.added, second.exact_duplicates, second.folders_created), (0, 1, 0));
+        assert_eq!(
+            (first.added, first.exact_duplicates, first.folders_created),
+            (1, 0, 1)
+        );
+        assert_eq!(
+            (
+                second.added,
+                second.exact_duplicates,
+                second.folders_created
+            ),
+            (0, 1, 0)
+        );
         assert_eq!(library.list_classifications().unwrap().len(), 1);
-        let assets = library.list_assets(AssetQuery {
-            classification_id: None,
-            album_id: None,
-            direct_only: false,
-            favorite_only: false,
-            unclassified_only: false,
-            sort: AssetSort::Newest,
-            random_pivot: None,
-            after: None,
-            limit: 10,
-        }).unwrap();
+        let assets = library
+            .list_assets(AssetQuery {
+                classification_id: None,
+                album_id: None,
+                direct_only: false,
+                favorite_only: false,
+                unclassified_only: false,
+                sort: AssetSort::Newest,
+                random_pivot: None,
+                after: None,
+                limit: 10,
+            })
+            .unwrap();
         assert_eq!(assets.items.len(), 1);
         assert_eq!(assets.items[0].title.as_deref(), Some("Alpha title"));
     }

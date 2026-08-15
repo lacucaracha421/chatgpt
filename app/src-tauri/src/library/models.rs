@@ -261,6 +261,7 @@ pub struct PurgeSummary {
     rename_all = "snake_case",
     rename_all_fields = "camelCase"
 )]
+#[allow(clippy::large_enum_variant)] // Command results are returned once, never stored in a collection.
 pub enum IngestOutcome {
     Added { asset: AssetSummary },
     ExactDuplicate {
