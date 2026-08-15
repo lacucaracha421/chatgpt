@@ -77,6 +77,18 @@ pub enum LibraryError {
     AlbumHasChildren,
     #[error("지원하지 않는 앨범 아이콘 또는 색상입니다")]
     InvalidAlbumAppearance,
+    #[error("컬렉션 이름은 비어 있을 수 없습니다")]
+    EmptyCollectionName,
+    #[error("컬렉션 이름은 120자 이하여야 합니다")]
+    CollectionNameTooLong,
+    #[error("컬렉션 설명은 2,000자 이하여야 합니다")]
+    CollectionDescriptionTooLong,
+    #[error("요청한 컬렉션을 찾을 수 없습니다")]
+    CollectionNotFound,
+    #[error("같은 이름의 컬렉션이 있습니다")]
+    DuplicateCollectionName,
+    #[error("대표 이미지는 컬렉션에 속한 정상 자산이어야 합니다")]
+    CollectionCoverNotMember,
     #[error("요청한 자산을 찾을 수 없습니다")]
     AssetNotFound,
     #[error("하나 이상의 자산을 선택해야 합니다")]

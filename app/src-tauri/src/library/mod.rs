@@ -1,7 +1,8 @@
-mod backup;
 mod album;
 mod asset_metadata;
+mod backup;
 mod classification;
+mod collection;
 mod db;
 mod drag_out;
 pub mod error;
@@ -208,7 +209,11 @@ impl Library {
         )
     }
 
-    pub fn manga_page(&self, series_id: &str, page_index: u32) -> Result<MediaResponse, LibraryError> {
+    pub fn manga_page(
+        &self,
+        series_id: &str,
+        page_index: u32,
+    ) -> Result<MediaResponse, LibraryError> {
         let connection = self.connection()?;
         let root = manga::manga_root(&connection)?.ok_or(LibraryError::MangaRootNotSet)?;
         let (relative_path, page_count): (String, i64) = connection
@@ -236,12 +241,11 @@ impl Library {
         manga_root: &Path,
         absolute_path: PathBuf,
     ) -> Result<MediaResponse, LibraryError> {
-        let canonical_root = fs::canonicalize(manga_root).map_err(|source| {
-            LibraryError::ReadMedia {
+        let canonical_root =
+            fs::canonicalize(manga_root).map_err(|source| LibraryError::ReadMedia {
                 path: manga_root.to_path_buf(),
                 source,
-            }
-        })?;
+            })?;
         let requested = absolute_path;
         let canonical = fs::canonicalize(&requested).map_err(|source| {
             if source.kind() == std::io::ErrorKind::NotFound {
@@ -461,6 +465,6 @@ mod tests {
             .unwrap()
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 9);
+        assert_eq!(version, 10);
     }
 }

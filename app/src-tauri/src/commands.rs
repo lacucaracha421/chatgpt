@@ -11,9 +11,8 @@ use crate::library::{
         AlbumEntry, AssetAlbumPatch, AssetCursor, AssetMetadataPatch, AssetPage, AssetQuery,
         AssetSummary, ClassificationEntry, CreateAlbum, CreateClassification, IngestMediaRequest,
         IngestOutcome, LibrarySummary, MangaSeries, MetadataBackup, PurgeSummary,
-        SimilarityDecisionRequest, SetAssetClassification, SimilarityIndexProgress,
-        SimilarityReviewPage, TrashPage,
-        TrashPolicy, VideoPreparationProgress,
+        SetAssetClassification, SimilarityDecisionRequest, SimilarityIndexProgress,
+        SimilarityReviewPage, TrashPage, TrashPolicy, VideoPreparationProgress,
     },
     Library,
 };
@@ -69,9 +68,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::DuplicateClassificationName => "duplicate_classification_name",
             LibraryError::InvalidClassificationParent => "invalid_classification_parent",
             LibraryError::ClassificationCycle => "classification_cycle",
-            LibraryError::InvalidClassificationAppearance => {
-                "invalid_classification_appearance"
-            }
+            LibraryError::InvalidClassificationAppearance => "invalid_classification_appearance",
             LibraryError::ClassificationHasChildren => "classification_has_children",
             LibraryError::EmptyAlbumName => "empty_album_name",
             LibraryError::AlbumNotFound => "album_not_found",
@@ -79,6 +76,12 @@ impl From<LibraryError> for CommandError {
             LibraryError::AlbumCycle => "album_cycle",
             LibraryError::AlbumHasChildren => "album_has_children",
             LibraryError::InvalidAlbumAppearance => "invalid_album_appearance",
+            LibraryError::EmptyCollectionName => "empty_collection_name",
+            LibraryError::CollectionNameTooLong => "collection_name_too_long",
+            LibraryError::CollectionDescriptionTooLong => "collection_description_too_long",
+            LibraryError::CollectionNotFound => "collection_not_found",
+            LibraryError::DuplicateCollectionName => "duplicate_collection_name",
+            LibraryError::CollectionCoverNotMember => "collection_cover_not_member",
             LibraryError::AssetNotFound => "asset_not_found",
             LibraryError::EmptyAssetSelection => "empty_asset_selection",
             LibraryError::InvalidAssetSelection => "invalid_asset_selection",
@@ -423,7 +426,9 @@ pub fn set_assets_favorite(
 
 #[tauri::command]
 pub fn list_albums(state: State<'_, AppState>) -> Result<Vec<AlbumEntry>, CommandError> {
-    current_required(state)?.list_albums().map_err(CommandError::from)
+    current_required(state)?
+        .list_albums()
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -431,12 +436,20 @@ pub fn create_album(
     request: CreateAlbum,
     state: State<'_, AppState>,
 ) -> Result<AlbumEntry, CommandError> {
-    current_required(state)?.create_album(request).map_err(CommandError::from)
+    current_required(state)?
+        .create_album(request)
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]
-pub fn rename_album(id: String, name: String, state: State<'_, AppState>) -> Result<(), CommandError> {
-    current_required(state)?.rename_album(&id, &name).map_err(CommandError::from)
+pub fn rename_album(
+    id: String,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    current_required(state)?
+        .rename_album(&id, &name)
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -445,7 +458,9 @@ pub fn move_album(
     parent_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    current_required(state)?.move_album(&id, parent_id.as_deref()).map_err(CommandError::from)
+    current_required(state)?
+        .move_album(&id, parent_id.as_deref())
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -462,7 +477,9 @@ pub fn update_album_appearance(
 
 #[tauri::command]
 pub fn delete_album(id: String, state: State<'_, AppState>) -> Result<(), CommandError> {
-    current_required(state)?.delete_album(&id).map_err(CommandError::from)
+    current_required(state)?
+        .delete_album(&id)
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -481,7 +498,9 @@ pub fn patch_asset_albums(
     patch: AssetAlbumPatch,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    current_required(state)?.patch_asset_albums(patch).map_err(CommandError::from)
+    current_required(state)?
+        .patch_asset_albums(patch)
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -583,9 +602,14 @@ pub fn get_manga_root(state: State<'_, AppState>) -> Result<Option<String>, Comm
 }
 
 #[tauri::command]
-pub fn set_manga_root(path: Option<String>, state: State<'_, AppState>) -> Result<(), CommandError> {
+pub fn set_manga_root(
+    path: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
     let library = current_required(state)?;
-    library.set_manga_root(path.as_deref()).map_err(CommandError::from)
+    library
+        .set_manga_root(path.as_deref())
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -643,10 +667,7 @@ mod tests {
         let error = CommandError::from(LibraryError::InvalidClassificationAppearance);
 
         assert_eq!(error.code, "invalid_classification_appearance");
-        assert_eq!(
-            error.message,
-            "지원하지 않는 폴더 아이콘 또는 색상입니다."
-        );
+        assert_eq!(error.message, "지원하지 않는 폴더 아이콘 또는 색상입니다.");
     }
 
     #[test]

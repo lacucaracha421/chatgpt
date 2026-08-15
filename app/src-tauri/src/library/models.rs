@@ -263,13 +263,17 @@ pub struct PurgeSummary {
 )]
 #[allow(clippy::large_enum_variant)] // Command results are returned once, never stored in a collection.
 pub enum IngestOutcome {
-    Added { asset: AssetSummary },
+    Added {
+        asset: AssetSummary,
+    },
     ExactDuplicate {
         existing_asset_id: String,
         classification_changed: bool,
         metadata_changed: bool,
     },
-    ReviewPending { review_id: String },
+    ReviewPending {
+        review_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -329,6 +333,40 @@ pub struct AssetAlbumPatch {
     pub asset_ids: Vec<String>,
     pub add_album_ids: Vec<String>,
     pub remove_album_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CollectionSummary {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub cover_asset_id: Option<String>,
+    pub asset_count: u64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateCollection {
+    pub name: String,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCollection {
+    pub name: String,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetCollectionPatch {
+    pub asset_ids: Vec<String>,
+    pub add_collection_ids: Vec<String>,
+    pub remove_collection_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
