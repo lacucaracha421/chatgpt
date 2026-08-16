@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AssetBrowser, type AssetBrowserStatus } from "../assets/AssetBrowser";
 import { startAssetDrag as nativeStartAssetDrag, type StartAssetDrag } from "../drag-out/startAssetDrag";
 import { ClassificationSidebar } from "../classification/ClassificationSidebar";
+import { CollectionBrowser } from "../collections/CollectionBrowser";
 import {
   type DropSubscriber,
   type IngestionWork,
@@ -21,7 +22,7 @@ import {
   selectLibraryFolder,
   type FolderPicker,
 } from "../library/LibrarySetup";
-import type { AlbumEntry, AssetSort, AssetSummary, AssetView, ClassificationEntry, IngestOutcome, LibraryGateway } from "../library/types";
+import type { AlbumEntry, AssetSort, AssetSummary, AssetView, ClassificationEntry, CollectionSummary, IngestOutcome, LibraryGateway } from "../library/types";
 import {
   loadUiPreferences,
   saveUiPreferences,
@@ -79,6 +80,7 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
   const { gateway } = useLibrary();
   const [entries, setEntries] = useState<ClassificationEntry[]>([]);
   const [albums, setAlbums] = useState<AlbumEntry[]>([]);
+  const [collections, setCollections] = useState<CollectionSummary[]>([]);
   const [view, setView] = useState<AssetView>({
     kind: "classification",
     classificationId: null,
@@ -116,13 +118,18 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
   const refreshAlbums = useCallback(async () => {
     setAlbums(await gateway.listAlbums());
   }, [gateway]);
+  const refreshCollections = useCallback(async () => {
+    setCollections(await gateway.listCollections());
+  }, [gateway]);
   const refreshSidebar = useCallback(async () => {
-    const [nextEntries, nextAlbums] = await Promise.all([
+    const [nextEntries, nextAlbums, nextCollections] = await Promise.all([
       gateway.listClassifications(),
       gateway.listAlbums(),
+      gateway.listCollections(),
     ]);
     setEntries(nextEntries);
     setAlbums(nextAlbums);
+    setCollections(nextCollections);
   }, [gateway]);
   const refreshReviewCount = useCallback(async () => {
     const page = await gateway.listSimilarityReviews({ after: null, limit: 1 });
@@ -447,6 +454,14 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
                 ) : view.kind === "manga" ? (
                   <MangaBrowser
                     onOpenSeries={(series) => setMangaViewer({ seriesId: series.id, title: series.title, pageCount: series.pageCount })}
+                  />
+                ) : view.kind === "collections" ? (
+                  <CollectionBrowser
+                    collections={collections}
+                    typeFilter={view.typeFilter}
+                    showcase={view.showcase}
+                    onViewChange={navigateView}
+                    onChanged={refreshCollections}
                   />
                 ) : (
                   <AssetBrowser

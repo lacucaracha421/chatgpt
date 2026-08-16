@@ -930,4 +930,39 @@ describe("App", () => {
     await Promise.resolve();
     expect(libraryGateway.ingestMedia).not.toHaveBeenCalled();
   });
+
+  it("opens the collections browser and loads collections with the sidebar", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listCollections).mockResolvedValue([{
+      id: "collection-1",
+      name: "Astral Chain",
+      description: null,
+      type: "game",
+      coverAssetId: null,
+      assetCount: 3,
+      year: 2019,
+      author: "PlatinumGames",
+      director: null,
+      externalScore: 87,
+      myScore: 9,
+      genres: null,
+      overview: null,
+      externalId: null,
+      externalSource: null,
+      externalSyncedAt: null,
+      showcase: false,
+      createdAt: "2026-08-01T00:00:00Z",
+      updatedAt: "2026-08-01T00:00:00Z",
+    }]);
+    const user = userEvent.setup();
+
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    await user.click(await screen.findByRole("button", { name: "컬렉션" }));
+    expect(await screen.findByRole("region", { name: "컬렉션" })).toBeInTheDocument();
+    expect(await screen.findByText("Astral Chain")).toBeInTheDocument();
+
+    await user.click(await screen.findByRole("button", { name: "저장소" }));
+    expect(await screen.findByRole("region", { name: "자산 내용" })).toBeInTheDocument();
+  });
 });
