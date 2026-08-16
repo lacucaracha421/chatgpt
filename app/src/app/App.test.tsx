@@ -113,6 +113,14 @@ function gateway(): LibraryGateway {
     setAssetClassification: vi.fn(),
     patchAssetAlbums: vi.fn(),
     getAssetAlbums: vi.fn().mockResolvedValue([]),
+    listCollections: vi.fn().mockResolvedValue([]),
+    createCollection: vi.fn(),
+    updateCollection: vi.fn(),
+    deleteCollection: vi.fn(),
+    setCollectionCover: vi.fn(),
+    setCollectionShowcase: vi.fn(),
+    getAssetCollections: vi.fn().mockResolvedValue([]),
+    patchAssetCollections: vi.fn(),
     getMangaRoot: vi.fn().mockResolvedValue(null),
     setMangaRoot: vi.fn().mockResolvedValue(undefined),
     scanManga: vi.fn().mockResolvedValue(0),
@@ -530,6 +538,7 @@ describe("App", () => {
       expect(libraryGateway.listAssets).toHaveBeenLastCalledWith({
         classificationId: "tag-arona",
         albumId: null,
+        collectionId: null,
         directOnly: false,
         favoriteOnly: false,
         unclassifiedOnly: false,
@@ -567,6 +576,7 @@ describe("App", () => {
     expect(libraryGateway.listAssets).toHaveBeenLastCalledWith({
       classificationId: "tag-arona",
       albumId: null,
+      collectionId: null,
       directOnly: false,
       favoriteOnly: false,
       unclassifiedOnly: false,
@@ -612,6 +622,7 @@ describe("App", () => {
       expect(libraryGateway.listAssets).toHaveBeenCalledWith({
         classificationId: "root-games",
         albumId: null,
+        collectionId: null,
         directOnly: false,
         favoriteOnly: false,
         unclassifiedOnly: false,

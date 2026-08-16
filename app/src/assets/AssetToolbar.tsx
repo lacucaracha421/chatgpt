@@ -42,7 +42,7 @@ export function AssetToolbar({
   const [batchClassificationId, setBatchClassificationId] = useState("");
   const [batchAlbumId, setBatchAlbumId] = useState("");
   const recent = view.kind === "recent";
-  const location = view.kind === "favorites" ? "즐겨찾기" : view.kind === "unsorted" ? "미분류" : recent ? "최근" : view.kind === "trash" ? "휴지통" : view.kind === "album" ? albums.find((entry) => entry.id === view.albumId)?.name ?? "앨범" : classifications.find((entry) => entry.id === view.classificationId)?.name ?? "저장소";
+  const location = view.kind === "favorites" ? "즐겨찾기" : view.kind === "unsorted" ? "미분류" : recent ? "최근" : view.kind === "trash" ? "휴지통" : view.kind === "album" ? albums.find((entry) => entry.id === view.albumId)?.name ?? "앨범" : view.kind === "collections" ? "컬렉션" : view.kind === "collection" ? "컬렉션" : classifications.find((entry) => entry.id === view.classificationId)?.name ?? "저장소";
   const overflowItems: MenuItem[] = [
     { id: "remove-album", label: "앨범에서 제거", disabled: batchPending || !batchAlbumId, onSelect: () => onAlbum(batchAlbumId, "remove") },
     { id: "favorite-off", label: "좋아요 끄기", disabled: batchPending, onSelect: () => onFavorite(false) },

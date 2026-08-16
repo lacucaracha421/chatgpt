@@ -22,6 +22,7 @@ describe("AssetBrowser", () => {
     ["favorites", { kind: "favorites" }, "favorites", { classificationId: null, directOnly: false, favoriteOnly: true, unclassifiedOnly: false, sort: "favorites" }],
     ["recent", { kind: "recent" }, "oldest", { classificationId: null, directOnly: false, favoriteOnly: false, unclassifiedOnly: false, sort: "newest" }],
     ["album", { kind: "album", albumId: "album-1" }, "newest", { classificationId: null, albumId: "album-1", directOnly: false, favoriteOnly: false, unclassifiedOnly: false, sort: "newest" }],
+    ["collection", { kind: "collection", collectionId: "collection-1" }, "newest", { classificationId: null, albumId: null, collectionId: "collection-1", directOnly: false, favoriteOnly: false, unclassifiedOnly: false, sort: "newest" }],
   ])("maps the %s view to its first-page query", async (_name, view, sort, expected) => {
     const gateway = createGateway();
 
@@ -43,6 +44,7 @@ describe("AssetBrowser", () => {
     await waitFor(() =>
       expect(gateway.listAssets).toHaveBeenCalledWith({
         albumId: null,
+        collectionId: null,
         ...expected,
         randomPivot: null,
         after: null,
@@ -553,6 +555,7 @@ function createGateway(page: AssetPage = { items: [], nextCursor: null }): Libra
     restoreMetadataBackup: vi.fn(), purgeExpiredTrash: vi.fn(),
     setAssetFavorite: vi.fn(), setAssetsFavorite: vi.fn().mockResolvedValue(undefined),
     getAssetClassifications: vi.fn().mockResolvedValue([]), setAssetClassification: vi.fn(), patchAssetAlbums: vi.fn(), getAssetAlbums: vi.fn().mockResolvedValue([]), ingestMedia: vi.fn(),
+    listCollections: vi.fn().mockResolvedValue([]), createCollection: vi.fn(), updateCollection: vi.fn(), deleteCollection: vi.fn(), setCollectionCover: vi.fn(), setCollectionShowcase: vi.fn(), getAssetCollections: vi.fn().mockResolvedValue([]), patchAssetCollections: vi.fn(),
     getMangaRoot: vi.fn().mockResolvedValue(null), setMangaRoot: vi.fn().mockResolvedValue(undefined), scanManga: vi.fn().mockResolvedValue(0), listMangaSeries: vi.fn().mockResolvedValue([]),
     preparePendingVideos: vi.fn(), retryVideoPreparation: vi.fn(),
   };
