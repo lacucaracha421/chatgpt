@@ -410,7 +410,7 @@ mod tests {
         models::{
             AssetAlbumPatch, AssetClassificationPatch, AssetCollectionPatch, AssetCursor,
             AssetQuery, AssetSort, ClassificationKind, CreateAlbum, CreateClassification,
-            CreateCollection, ImportSource, MediaSummary, VideoPreparationState,
+            CollectionType, CreateCollection, ImportSource, MediaSummary, VideoPreparationState,
         },
         Library,
     };
@@ -705,6 +705,7 @@ mod tests {
             .create_collection(CreateCollection {
                 name: "Reference".into(),
                 description: None,
+                collection_type: CollectionType::Manga,
             })
             .unwrap();
         insert_asset(&library, "member", "2026-08-12T00:00:00Z");
@@ -754,6 +755,7 @@ mod tests {
             .create_collection(CreateCollection {
                 name: "Reference".into(),
                 description: None,
+                collection_type: CollectionType::Manga,
             })
             .unwrap();
         let album = library

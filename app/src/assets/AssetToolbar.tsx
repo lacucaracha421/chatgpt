@@ -1,6 +1,6 @@
 import { EllipsisHorizontalIcon, InformationCircleIcon, AdjustmentsHorizontalIcon, ArrowPathIcon, StarIcon, TrashIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { useState } from "react";
-import type { AlbumEntry, AssetSort, AssetView, ClassificationEntry } from "../library/types";
+import type { AlbumEntry, AssetSort, AssetView, ClassificationEntry, CollectionSummary } from "../library/types";
 import { Button } from "../shared/ui/Button";
 import { Menu, type MenuItem } from "../shared/ui/Menu";
 import { Select } from "../shared/ui/Select";
@@ -26,6 +26,9 @@ type AssetToolbarProps = {
   onFavorite: (favorite: boolean) => void;
   onMoveToFolder: (classificationId: string | null) => void;
   onAlbum: (albumId: string, operation: "add" | "remove") => void;
+  collections?: CollectionSummary[];
+  onRemoveFromCollection?: () => void;
+  onSetCover?: () => void;
   onTrash: () => void;
   onClearSelection: () => void;
   batchPending: boolean;
@@ -33,7 +36,7 @@ type AssetToolbarProps = {
 };
 
 export function AssetToolbar({
-  view: rawView, classifications, albums, sort, directOnly, metadataVisible, thumbnailRowHeight, selectedCount, inspectorOpen, onInspectorToggle, onSortChange,
+  view: rawView, classifications, albums, collections = [], onRemoveFromCollection, onSetCover, sort, directOnly, metadataVisible, thumbnailRowHeight, selectedCount, inspectorOpen, onInspectorToggle, onSortChange,
   onDirectOnlyChange, onMetadataVisibleChange, onThumbnailRowHeightChange, onFavorite, onMoveToFolder, onAlbum, onTrash, onClearSelection, batchPending, onReshuffle,
 }: AssetToolbarProps) {
   const view = rawView.kind === "similarity_review" || rawView.kind === "settings" || rawView.kind === "manga"
@@ -42,7 +45,7 @@ export function AssetToolbar({
   const [batchClassificationId, setBatchClassificationId] = useState("");
   const [batchAlbumId, setBatchAlbumId] = useState("");
   const recent = view.kind === "recent";
-  const location = view.kind === "favorites" ? "즐겨찾기" : view.kind === "unsorted" ? "미분류" : recent ? "최근" : view.kind === "trash" ? "휴지통" : view.kind === "album" ? albums.find((entry) => entry.id === view.albumId)?.name ?? "앨범" : classifications.find((entry) => entry.id === view.classificationId)?.name ?? "저장소";
+  const location = view.kind === "collection" ? collections.find((entry) => entry.id === view.collectionId)?.name ?? "컬렉션" : view.kind === "favorites" ? "즐겨찾기" : view.kind === "unsorted" ? "미분류" : recent ? "최근" : view.kind === "trash" ? "휴지통" : view.kind === "album" ? albums.find((entry) => entry.id === view.albumId)?.name ?? "앨범" : view.kind === "collections" ? "컬렉션" : classifications.find((entry) => entry.id === view.classificationId)?.name ?? "저장소";
   const overflowItems: MenuItem[] = [
     { id: "remove-album", label: "앨범에서 제거", disabled: batchPending || !batchAlbumId, onSelect: () => onAlbum(batchAlbumId, "remove") },
     { id: "favorite-off", label: "좋아요 끄기", disabled: batchPending, onSelect: () => onFavorite(false) },
@@ -63,6 +66,8 @@ export function AssetToolbar({
         </Select>
         <Button disabled={batchPending || !batchAlbumId} onClick={() => onAlbum(batchAlbumId, "add")}>앨범에 추가</Button>
         <Button aria-label="좋아요 켜기" disabled={batchPending} onClick={() => onFavorite(true)}><StarIcon data-icon="inline-start" aria-hidden="true" />좋아요</Button>
+        {view.kind === "collection" && selectedCount > 0 && <Button disabled={batchPending} onClick={onRemoveFromCollection}>이 컬렉션에서 제거</Button>}
+        {view.kind === "collection" && selectedCount === 1 && <Button disabled={batchPending} onClick={onSetCover}>대표 이미지로 지정</Button>}
         <Button aria-label="휴지통으로 이동" variant="danger" disabled={batchPending} onClick={onTrash}><TrashIcon data-icon="inline-start" aria-hidden="true" />휴지통</Button>
         <Menu label="추가 작업" items={overflowItems} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} />
         <Button aria-label={inspectorOpen ? "정보 닫기" : "정보 열기"} size="icon" variant={inspectorOpen ? "secondary" : "ghost"} onClick={onInspectorToggle}><InformationCircleIcon aria-hidden="true" /></Button>

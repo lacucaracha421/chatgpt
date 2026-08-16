@@ -52,6 +52,14 @@ function gateway(): LibraryGateway {
     setAssetClassification: vi.fn(),
     patchAssetAlbums: vi.fn(),
     getAssetAlbums: vi.fn().mockResolvedValue([]),
+    listCollections: vi.fn().mockResolvedValue([]),
+    createCollection: vi.fn(),
+    updateCollection: vi.fn(),
+    deleteCollection: vi.fn(),
+    setCollectionCover: vi.fn(),
+    setCollectionShowcase: vi.fn(),
+    getAssetCollections: vi.fn().mockResolvedValue([]),
+    patchAssetCollections: vi.fn(),
     getMangaRoot: vi.fn().mockResolvedValue(null),
     setMangaRoot: vi.fn().mockResolvedValue(undefined),
     scanManga: vi.fn().mockResolvedValue(0),
@@ -191,6 +199,7 @@ describe("ClassificationSidebar", () => {
       "즐겨찾기",
       "유사 검토0",
       "망가",
+      "컬렉션",
     ]);
 
     await user.click(screen.getByRole("button", { name: "미분류" }));
@@ -721,5 +730,14 @@ describe("ClassificationSidebar", () => {
     await user.click(screen.getByRole("button", { name: "망가" }));
 
     expect(onViewChange).toHaveBeenCalledWith({ kind: "manga" });
+  });
+
+  it("opens the collections quick view", async () => {
+    const user = userEvent.setup();
+    const { onViewChange } = renderSidebar();
+
+    await user.click(screen.getByRole("button", { name: "컬렉션" }));
+
+    expect(onViewChange).toHaveBeenCalledWith({ kind: "collections", typeFilter: null, showcase: false });
   });
 });

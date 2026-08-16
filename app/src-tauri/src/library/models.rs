@@ -336,14 +336,35 @@ pub struct AssetAlbumPatch {
     pub remove_album_ids: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CollectionType {
+    Game,
+    Manga,
+    Movie,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct CollectionSummary {
     pub id: String,
     pub name: String,
     pub description: Option<String>,
+    #[serde(rename = "type")]
+    pub collection_type: CollectionType,
     pub cover_asset_id: Option<String>,
     pub asset_count: u64,
+    pub year: Option<i64>,
+    pub author: Option<String>,
+    pub director: Option<String>,
+    pub external_score: Option<i64>,
+    pub my_score: Option<i64>,
+    pub genres: Option<String>,
+    pub overview: Option<String>,
+    pub external_id: Option<String>,
+    pub external_source: Option<String>,
+    pub external_synced_at: Option<String>,
+    pub showcase: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -353,6 +374,8 @@ pub struct CollectionSummary {
 pub struct CreateCollection {
     pub name: String,
     pub description: Option<String>,
+    #[serde(rename = "type")]
+    pub collection_type: CollectionType,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -360,6 +383,15 @@ pub struct CreateCollection {
 pub struct UpdateCollection {
     pub name: String,
     pub description: Option<String>,
+    #[serde(rename = "type")]
+    pub collection_type: CollectionType,
+    pub year: Option<i64>,
+    pub author: Option<String>,
+    pub director: Option<String>,
+    pub external_score: Option<i64>,
+    pub my_score: Option<i64>,
+    pub genres: Option<String>,
+    pub overview: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

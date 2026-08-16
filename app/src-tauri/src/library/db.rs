@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 10;
+pub(crate) const SCHEMA_VERSION: i64 = 11;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -17,6 +17,8 @@ const ASSET_ALBUMS_SCHEMA: &str = include_str!("../../migrations/0008_asset_albu
 const ASSET_SOURCE_PROVENANCE_SCHEMA: &str =
     include_str!("../../migrations/0009_asset_source_provenance.sql");
 const COLLECTIONS_SCHEMA: &str = include_str!("../../migrations/0010_collections.sql");
+const COLLECTIONS_TYPED_SCHEMA: &str =
+    include_str!("../../migrations/0011_collections_typed_metadata.sql");
 
 pub fn open_database(path: &Path) -> Result<Connection, LibraryError> {
     let mut connection = Connection::open(path)?;
@@ -27,7 +29,7 @@ pub fn open_database(path: &Path) -> Result<Connection, LibraryError> {
     let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
     match version {
         SCHEMA_VERSION => {}
-        version @ 0..=9 => {
+        version @ 0..=10 => {
             if version > 0 {
                 let root = path
                     .parent()
@@ -75,6 +77,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         }
         if version <= 9 {
             transaction.execute_batch(COLLECTIONS_SCHEMA)?;
+        }
+        if version <= 10 {
+            transaction.execute_batch(COLLECTIONS_TYPED_SCHEMA)?;
         }
         transaction.commit()?;
         Ok::<(), LibraryError>(())
@@ -147,7 +152,7 @@ mod tests {
             connection
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
-            10
+            11
         );
     }
 
@@ -199,7 +204,7 @@ mod tests {
             connection
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
-            10
+            11
         );
     }
 
@@ -243,7 +248,7 @@ mod tests {
             connection
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
-            10
+            11
         );
     }
 
@@ -282,7 +287,7 @@ mod tests {
             connection
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
-            10
+            11
         );
         connection
             .execute(

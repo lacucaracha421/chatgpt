@@ -2,13 +2,16 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AlbumEntry,
   AssetAlbumPatch,
+  AssetCollectionPatch,
   AssetMetadataPatch,
   AssetPage,
   AssetQuery,
   AssetSummary,
   ClassificationEntry,
+  CollectionSummary,
   CreateAlbum,
   CreateClassification,
+  CreateCollection,
   ExtensionConnection,
   IngestMediaInput,
   IngestOutcome,
@@ -22,6 +25,7 @@ import type {
   SimilarityReviewPage,
   TrashPage,
   TrashPolicy,
+  UpdateCollection,
   VideoPreparationProgress,
 } from "./types";
 
@@ -79,6 +83,20 @@ export const libraryGateway: LibraryGateway = {
     invoke("set_asset_classification", { request }),
   patchAssetAlbums: (patch: AssetAlbumPatch) => invoke("patch_asset_albums", { patch }),
   getAssetAlbums: (assetId) => invoke<string[]>("get_asset_albums", { assetId }),
+  listCollections: () => invoke<CollectionSummary[]>("list_collections"),
+  createCollection: (input: CreateCollection) =>
+    invoke<CollectionSummary>("create_collection", { request: input }),
+  updateCollection: (id: string, input: UpdateCollection) =>
+    invoke<CollectionSummary>("update_collection", { id, request: input }),
+  deleteCollection: (id) => invoke<void>("delete_collection", { id }),
+  setCollectionCover: (collectionId, assetId) =>
+    invoke<CollectionSummary>("set_collection_cover", { collectionId, assetId }),
+  setCollectionShowcase: (collectionId, showcase) =>
+    invoke<CollectionSummary>("set_collection_showcase", { collectionId, showcase }),
+  getAssetCollections: (assetId) =>
+    invoke<string[]>("get_asset_collections", { assetId }),
+  patchAssetCollections: (patch: AssetCollectionPatch) =>
+    invoke<void>("patch_asset_collections", { patch }),
   getMangaRoot: () => invoke<string | null>("get_manga_root"),
   setMangaRoot: (path) => invoke("set_manga_root", { path }),
   scanManga: () => invoke<number>("scan_manga"),

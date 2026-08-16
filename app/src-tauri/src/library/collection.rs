@@ -4,7 +4,10 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use super::{
     error::LibraryError,
-    models::{AssetCollectionPatch, CollectionSummary, CreateCollection, UpdateCollection},
+    models::{
+        AssetCollectionPatch, CollectionSummary, CollectionType, CreateCollection,
+        UpdateCollection,
+    },
     validated_asset_ids, Library,
 };
 
@@ -12,6 +15,7 @@ const COLLECTION_SUMMARY_SQL: &str = "SELECT
     collection.id,
     collection.name,
     collection.description,
+    collection.type,
     COALESCE(
         CASE WHEN EXISTS (
             SELECT 1 FROM collection_assets AS explicit_link
@@ -37,6 +41,17 @@ const COLLECTION_SUMMARY_SQL: &str = "SELECT
         WHERE count_link.collection_id = collection.id
           AND count_asset.status = 'normal'
     ),
+    collection.year,
+    collection.author,
+    collection.director,
+    collection.external_score,
+    collection.my_score,
+    collection.genres,
+    collection.overview,
+    collection.external_id,
+    collection.external_source,
+    collection.external_synced_at,
+    collection.showcase,
     collection.created_at,
     collection.updated_at
 FROM collections AS collection";
@@ -65,15 +80,22 @@ impl Library {
     ) -> Result<CollectionSummary, LibraryError> {
         let name = normalized_name(request.name)?;
         let description = normalized_description(request.description)?;
+        let type_str = collection_type_str(request.collection_type);
         let id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().to_rfc3339();
         let connection = self.connection()?;
         connection
             .execute(
                 "INSERT INTO collections (
-                    id, name, description, cover_asset_id, created_at, updated_at
-                 ) VALUES (?1, ?2, ?3, NULL, ?4, ?4)",
-                params![id, name, description, now],
+                    id, name, description, type, cover_asset_id,
+                    year, author, director, external_score, my_score,
+                    genres, overview, external_id, external_source, external_synced_at,
+                    showcase, external_metadata_json, created_at, updated_at
+                 ) VALUES (?1, ?2, ?3, ?4, NULL,
+                    NULL, NULL, NULL, NULL, NULL,
+                    NULL, NULL, NULL, NULL, NULL,
+                    0, NULL, ?5, ?5)",
+                params![id, name, description, type_str, now],
             )
             .map_err(map_duplicate_name)?;
         collection_by_id(&connection, &id)
@@ -86,13 +108,24 @@ impl Library {
     ) -> Result<CollectionSummary, LibraryError> {
         let name = normalized_name(request.name)?;
         let description = normalized_description(request.description)?;
+        let type_str = collection_type_str(request.collection_type);
         let connection = self.connection()?;
         let changed = connection
             .execute(
                 "UPDATE collections
-                 SET name = ?1, description = ?2, updated_at = ?3
-                 WHERE id = ?4",
-                params![name, description, chrono::Utc::now().to_rfc3339(), id],
+                 SET name = ?1, description = ?2, type = ?3,
+                     year = ?4, author = ?5, director = ?6,
+                     external_score = ?7, my_score = ?8,
+                     genres = ?9, overview = ?10,
+                     updated_at = ?11
+                 WHERE id = ?12",
+                params![
+                    name, description, type_str,
+                    request.year, request.author, request.director,
+                    request.external_score, request.my_score,
+                    request.genres, request.overview,
+                    chrono::Utc::now().to_rfc3339(), id
+                ],
             )
             .map_err(map_duplicate_name)?;
         if changed == 0 {
@@ -137,6 +170,27 @@ impl Library {
             "UPDATE collections SET cover_asset_id = ?1, updated_at = ?2 WHERE id = ?3",
             params![asset_id, chrono::Utc::now().to_rfc3339(), collection_id],
         )?;
+        collection_by_id(&connection, collection_id)
+    }
+
+    pub fn set_collection_showcase(
+        &self,
+        collection_id: &str,
+        showcase: bool,
+    ) -> Result<CollectionSummary, LibraryError> {
+        let connection = self.connection()?;
+        require_collection(&connection, collection_id)?;
+        let changed = connection.execute(
+            "UPDATE collections SET showcase = ?1, updated_at = ?2 WHERE id = ?3",
+            params![
+                if showcase { 1 } else { 0 },
+                chrono::Utc::now().to_rfc3339(),
+                collection_id
+            ],
+        )?;
+        if changed == 0 {
+            return Err(LibraryError::CollectionNotFound);
+        }
         collection_by_id(&connection, collection_id)
     }
 
@@ -253,15 +307,42 @@ fn collection_by_id(connection: &Connection, id: &str) -> Result<CollectionSumma
 }
 
 fn collection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollectionSummary> {
+    let type_str: String = row.get(3)?;
+    let collection_type = match type_str.as_str() {
+        "game" => CollectionType::Game,
+        "movie" => CollectionType::Movie,
+        _ => CollectionType::Manga,
+    };
+    let showcase_int: i64 = row.get(16)?;
     Ok(CollectionSummary {
         id: row.get(0)?,
         name: row.get(1)?,
         description: row.get(2)?,
-        cover_asset_id: row.get(3)?,
-        asset_count: u64::try_from(row.get::<_, i64>(4)?).unwrap_or(0),
-        created_at: row.get(5)?,
-        updated_at: row.get(6)?,
+        collection_type,
+        cover_asset_id: row.get(4)?,
+        asset_count: u64::try_from(row.get::<_, i64>(5)?).unwrap_or(0),
+        year: row.get(6)?,
+        author: row.get(7)?,
+        director: row.get(8)?,
+        external_score: row.get(9)?,
+        my_score: row.get(10)?,
+        genres: row.get(11)?,
+        overview: row.get(12)?,
+        external_id: row.get(13)?,
+        external_source: row.get(14)?,
+        external_synced_at: row.get(15)?,
+        showcase: showcase_int != 0,
+        created_at: row.get(17)?,
+        updated_at: row.get(18)?,
     })
+}
+
+fn collection_type_str(collection_type: CollectionType) -> &'static str {
+    match collection_type {
+        CollectionType::Game => "game",
+        CollectionType::Manga => "manga",
+        CollectionType::Movie => "movie",
+    }
 }
 
 fn map_duplicate_name(error: rusqlite::Error) -> LibraryError {
@@ -279,7 +360,10 @@ fn map_duplicate_name(error: rusqlite::Error) -> LibraryError {
 mod tests {
     use crate::library::{
         error::LibraryError,
-        models::{AssetCollectionPatch, CreateCollection, UpdateCollection},
+        models::{
+            AssetCollectionPatch, CollectionSummary, CollectionType, CreateCollection,
+            UpdateCollection,
+        },
         Library,
     };
 
@@ -293,6 +377,7 @@ mod tests {
             .create_collection(CreateCollection {
                 name: "  Reference  ".into(),
                 description: Some("  Covers and poses  ".into()),
+                collection_type: CollectionType::Manga,
             })
             .unwrap();
         assert_eq!(created.name, "Reference");
@@ -306,6 +391,14 @@ mod tests {
                 UpdateCollection {
                     name: "Inspiration".into(),
                     description: Some("   ".into()),
+                    collection_type: CollectionType::Manga,
+                    year: None,
+                    author: None,
+                    director: None,
+                    external_score: None,
+                    my_score: None,
+                    genres: None,
+                    overview: None,
                 },
             )
             .unwrap();
@@ -334,6 +427,7 @@ mod tests {
             .create_collection(CreateCollection {
                 name: "Reference".into(),
                 description: None,
+                collection_type: CollectionType::Manga,
             })
             .unwrap();
 
@@ -342,6 +436,7 @@ mod tests {
                 library.create_collection(CreateCollection {
                     name: name.into(),
                     description: None,
+                    collection_type: CollectionType::Manga,
                 }),
                 Err(LibraryError::EmptyCollectionName)
             ));
@@ -350,6 +445,7 @@ mod tests {
             library.create_collection(CreateCollection {
                 name: "R".repeat(121),
                 description: None,
+                collection_type: CollectionType::Manga,
             }),
             Err(LibraryError::CollectionNameTooLong)
         ));
@@ -357,6 +453,7 @@ mod tests {
             library.create_collection(CreateCollection {
                 name: "reference".into(),
                 description: None,
+                collection_type: CollectionType::Manga,
             }),
             Err(LibraryError::DuplicateCollectionName)
         ));
@@ -364,6 +461,7 @@ mod tests {
             library.create_collection(CreateCollection {
                 name: "Other".into(),
                 description: Some("x".repeat(2001)),
+                collection_type: CollectionType::Manga,
             }),
             Err(LibraryError::CollectionDescriptionTooLong)
         ));
@@ -510,11 +608,54 @@ mod tests {
         );
     }
 
-    fn create(library: &Library, name: &str) -> crate::library::models::CollectionSummary {
+    #[test]
+    fn update_collection_persists_typed_metadata_and_showcase() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let created = library
+            .create_collection(CreateCollection {
+                name: "Astral Chain".into(),
+                description: None,
+                collection_type: CollectionType::Game,
+            })
+            .unwrap();
+        assert_eq!(created.collection_type, CollectionType::Game);
+        assert!(!created.showcase);
+
+        let updated = library
+            .update_collection(
+                &created.id,
+                UpdateCollection {
+                    name: "Astral Chain".into(),
+                    description: Some("액션 게임".into()),
+                    collection_type: CollectionType::Game,
+                    year: Some(2019),
+                    author: Some("PlatinumGames".into()),
+                    director: None,
+                    external_score: Some(87),
+                    my_score: Some(9),
+                    genres: None,
+                    overview: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(updated.year, Some(2019));
+        assert_eq!(updated.author.as_deref(), Some("PlatinumGames"));
+        assert_eq!(updated.external_score, Some(87));
+
+        let showcased = library
+            .set_collection_showcase(&created.id, true)
+            .unwrap();
+        assert!(showcased.showcase);
+        assert_eq!(library.list_collections().unwrap()[0].showcase, true);
+    }
+
+    fn create(library: &Library, name: &str) -> CollectionSummary {
         library
             .create_collection(CreateCollection {
                 name: name.into(),
                 description: None,
+                collection_type: CollectionType::Manga,
             })
             .unwrap()
     }

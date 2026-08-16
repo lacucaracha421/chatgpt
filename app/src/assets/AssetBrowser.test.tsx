@@ -22,6 +22,7 @@ describe("AssetBrowser", () => {
     ["favorites", { kind: "favorites" }, "favorites", { classificationId: null, directOnly: false, favoriteOnly: true, unclassifiedOnly: false, sort: "favorites" }],
     ["recent", { kind: "recent" }, "oldest", { classificationId: null, directOnly: false, favoriteOnly: false, unclassifiedOnly: false, sort: "newest" }],
     ["album", { kind: "album", albumId: "album-1" }, "newest", { classificationId: null, albumId: "album-1", directOnly: false, favoriteOnly: false, unclassifiedOnly: false, sort: "newest" }],
+    ["collection", { kind: "collection", collectionId: "collection-1" }, "newest", { classificationId: null, albumId: null, collectionId: "collection-1", directOnly: false, favoriteOnly: false, unclassifiedOnly: false, sort: "newest" }],
   ])("maps the %s view to its first-page query", async (_name, view, sort, expected) => {
     const gateway = createGateway();
 
@@ -43,6 +44,7 @@ describe("AssetBrowser", () => {
     await waitFor(() =>
       expect(gateway.listAssets).toHaveBeenCalledWith({
         albumId: null,
+        collectionId: null,
         ...expected,
         randomPivot: null,
         after: null,
@@ -482,6 +484,50 @@ describe("AssetBrowser", () => {
     expect(screen.getByRole("button", { name: "휴지통으로 이동" })).not.toBeDisabled();
   });
 
+  it("removes the selection from the active collection and refreshes the gallery", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
+    const onCollectionsChanged = vi.fn();
+    render(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "collection", collectionId: "collection-1" }} classifications={classifications} collections={[{ id: "collection-1", name: "엘든 링", description: null, type: "game", coverAssetId: null, assetCount: 2, year: null, author: null, director: null, externalScore: null, myScore: null, genres: null, overview: null, externalId: null, externalSource: null, externalSyncedAt: null, showcase: false, createdAt: "2026-08-10T00:00:00Z", updatedAt: "2026-08-10T00:00:00Z" }]} onCollectionsChanged={onCollectionsChanged} sort="newest" metadataVisible={false} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
+    const first = await screen.findByRole("option", { name: "asset-0.png" });
+    first.focus();
+    await user.keyboard("{Control>}a{/Control}");
+
+    await user.click(screen.getByRole("button", { name: "이 컬렉션에서 제거" }));
+
+    expect(gateway.patchAssetCollections).toHaveBeenCalledWith({ assetIds: ["asset-0", "asset-1"], addCollectionIds: [], removeCollectionIds: ["collection-1"] });
+    expect(onCollectionsChanged).not.toHaveBeenCalled();
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledTimes(2));
+  });
+
+  it("sets the selected asset as the collection cover", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway({ items: [asset(0)], nextCursor: null });
+    const onCollectionsChanged = vi.fn();
+    render(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "collection", collectionId: "collection-1" }} classifications={classifications} onCollectionsChanged={onCollectionsChanged} sort="newest" metadataVisible={false} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
+
+    await user.click(await screen.findByRole("option", { name: "asset-0.png" }));
+    await user.click(screen.getByRole("button", { name: "대표 이미지로 지정" }));
+
+    expect(gateway.setCollectionCover).toHaveBeenCalledWith("collection-1", "asset-0");
+    expect(onCollectionsChanged).toHaveBeenCalledOnce();
+  });
+
+  it("applies inspector collection actions to the selection", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
+    vi.mocked(gateway.getAssetCollections).mockResolvedValue(["collection-1"]);
+    render(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "classification", classificationId: null }} classifications={classifications} collections={[{ id: "collection-1", name: "엘든 링", description: null, type: "game", coverAssetId: null, assetCount: 2, year: null, author: null, director: null, externalScore: null, myScore: null, genres: null, overview: null, externalId: null, externalSource: null, externalSyncedAt: null, showcase: false, createdAt: "2026-08-10T00:00:00Z", updatedAt: "2026-08-10T00:00:00Z" }]} sort="newest" metadataVisible={false} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
+    const first = await screen.findByRole("option", { name: "asset-0.png" });
+    first.focus();
+    await user.keyboard("{Control>}a{/Control}");
+    await user.click(screen.getByRole("button", { name: "정보 열기" }));
+
+    const checkbox = await screen.findByRole("checkbox", { name: "엘든 링 컬렉션" });
+    await user.click(checkbox);
+    expect(gateway.patchAssetCollections).toHaveBeenCalledWith({ assetIds: ["asset-0", "asset-1"], addCollectionIds: [], removeCollectionIds: ["collection-1"] });
+  });
+
 });
 
 it("opens a requested asset that is not in the loaded page and clears it on close", async () => {
@@ -553,6 +599,7 @@ function createGateway(page: AssetPage = { items: [], nextCursor: null }): Libra
     restoreMetadataBackup: vi.fn(), purgeExpiredTrash: vi.fn(),
     setAssetFavorite: vi.fn(), setAssetsFavorite: vi.fn().mockResolvedValue(undefined),
     getAssetClassifications: vi.fn().mockResolvedValue([]), setAssetClassification: vi.fn(), patchAssetAlbums: vi.fn(), getAssetAlbums: vi.fn().mockResolvedValue([]), ingestMedia: vi.fn(),
+    listCollections: vi.fn().mockResolvedValue([]), createCollection: vi.fn(), updateCollection: vi.fn(), deleteCollection: vi.fn(), setCollectionCover: vi.fn(), setCollectionShowcase: vi.fn(), getAssetCollections: vi.fn().mockResolvedValue([]), patchAssetCollections: vi.fn(),
     getMangaRoot: vi.fn().mockResolvedValue(null), setMangaRoot: vi.fn().mockResolvedValue(undefined), scanManga: vi.fn().mockResolvedValue(0), listMangaSeries: vi.fn().mockResolvedValue([]),
     preparePendingVideos: vi.fn(), retryVideoPreparation: vi.fn(),
   };

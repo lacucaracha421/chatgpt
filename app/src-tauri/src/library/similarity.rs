@@ -632,9 +632,9 @@ mod tests {
     use super::super::{
         error::LibraryError,
         models::{
-            AssetCollectionPatch, AssetCursor, ClassificationKind, CreateClassification,
-            CreateCollection, ImportSource, IngestMediaRequest, IngestOutcome, SimilarityDecision,
-            SimilarityDecisionRequest,
+            AssetCollectionPatch, AssetCursor, ClassificationKind, CollectionType,
+            CreateClassification, CreateCollection, ImportSource, IngestMediaRequest,
+            IngestOutcome, SimilarityDecision, SimilarityDecisionRequest,
         },
         Library,
     };
@@ -803,6 +803,7 @@ mod tests {
             .create_collection(CreateCollection {
                 name: "Reference".into(),
                 description: None,
+                collection_type: CollectionType::Manga,
             })
             .unwrap();
         fixture

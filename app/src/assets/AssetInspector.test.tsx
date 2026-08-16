@@ -1,8 +1,8 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
-import type { AlbumEntry, AssetSummary, ClassificationEntry, LibraryGateway } from "../library/types";
+import type { AlbumEntry, AssetSummary, ClassificationEntry, CollectionSummary, LibraryGateway } from "../library/types";
 import { AssetInspector } from "./AssetInspector";
 
 const openUrl = vi.fn().mockResolvedValue(undefined);
@@ -16,6 +16,10 @@ const classifications: ClassificationEntry[] = [
 const albums: AlbumEntry[] = [
   { id: "cover", name: "표지", parentId: null, iconKey: null, colorKey: null },
   { id: "reference", name: "자료", parentId: null, iconKey: null, colorKey: null },
+];
+const collections: CollectionSummary[] = [
+  { id: "elden", name: "엘든 링", description: null, type: "game", coverAssetId: null, assetCount: 1, year: null, author: "프롬소프트", director: null, externalScore: 96, myScore: 95, genres: null, overview: null, externalId: null, externalSource: null, externalSyncedAt: null, showcase: false, createdAt: "2026-08-10T00:00:00Z", updatedAt: "2026-08-10T00:00:00Z" },
+  { id: "frieren", name: "프리렌", description: null, type: "manga", coverAssetId: null, assetCount: 1, year: 2020, author: "야마다 카네히토", director: null, externalScore: null, myScore: null, genres: null, overview: null, externalId: null, externalSource: null, externalSyncedAt: null, showcase: false, createdAt: "2026-08-10T00:00:00Z", updatedAt: "2026-08-10T00:00:00Z" },
 ];
 
 it("hides the open control when there is no selection", () => {
@@ -164,7 +168,8 @@ it("checks an album that every selected asset has and toggles it off", async () 
 it("shows indeterminate state when only some of the selection is in an album", async () => {
   const getAssetClassifications = vi.fn().mockResolvedValue(["tag"]);
   const getAssetAlbums = vi.fn().mockImplementation((assetId: string) => Promise.resolve(assetId === "a" ? ["cover"] : []));
-  const gateway = { getAssetClassifications, getAssetAlbums } as unknown as LibraryGateway;
+  const getAssetCollections = vi.fn().mockResolvedValue([]);
+  const gateway = { getAssetClassifications, getAssetAlbums, getAssetCollections } as unknown as LibraryGateway;
   render(
     <LibraryProvider gateway={gateway}>
       <AssetInspector assets={[asset("a"), asset("b")]} classifications={classifications} albums={albums} open onOpenChange={vi.fn()} onMoveToFolder={vi.fn()} onPatchAlbum={vi.fn()} />
@@ -194,13 +199,78 @@ it("reports when classification membership cannot be loaded", async () => {
       <AssetInspector assets={[asset("a")]} classifications={classifications} albums={albums} open onOpenChange={vi.fn()} onMoveToFolder={vi.fn()} onPatchAlbum={vi.fn()} />
     </LibraryProvider>,
   );
-  expect(await screen.findByText("폴더와 앨범 상태를 불러오지 못했습니다.")).toBeVisible();
+  expect(await screen.findByText("폴더, 앨범과 컬렉션 상태를 불러오지 못했습니다.")).toBeVisible();
 });
 
-function createGateway(classificationIds: string[], albumIds: string[] = [], reject = false, updateAssetMetadata = vi.fn()): LibraryGateway {
+it("checks a collection that every selected asset has and toggles it off", async () => {
+  const gateway = createGateway([], [], false, vi.fn(), ["elden"]);
+  const onPatchCollection = vi.fn();
+  render(
+    <LibraryProvider gateway={gateway}>
+      <AssetInspector assets={[asset("a")]} classifications={[]} albums={[]} collections={collections} open onOpenChange={vi.fn()} onMoveToFolder={vi.fn()} onPatchAlbum={vi.fn()} onPatchCollection={onPatchCollection} />
+    </LibraryProvider>,
+  );
+  const checkbox = await screen.findByRole("checkbox", { name: "엘든 링 컬렉션" });
+  expect(checkbox).toBeChecked();
+  expect(screen.getByRole("checkbox", { name: "프리렌 컬렉션" })).not.toBeChecked();
+
+  await userEvent.click(checkbox);
+  expect(onPatchCollection).toHaveBeenCalledWith("elden", "remove");
+});
+
+it("shows indeterminate collection state when only some of the selection is in a collection", async () => {
+  const getAssetCollections = vi.fn().mockImplementation((assetId: string) => Promise.resolve(assetId === "a" ? ["elden"] : []));
+  const gateway = { getAssetClassifications: vi.fn().mockResolvedValue([]), getAssetAlbums: vi.fn().mockResolvedValue([]), getAssetCollections } as unknown as LibraryGateway;
+  render(
+    <LibraryProvider gateway={gateway}>
+      <AssetInspector assets={[asset("a"), asset("b")]} classifications={[]} albums={[]} collections={collections} open onOpenChange={vi.fn()} onMoveToFolder={vi.fn()} onPatchAlbum={vi.fn()} onPatchCollection={vi.fn()} />
+    </LibraryProvider>,
+  );
+  const checkbox = await screen.findByRole("checkbox", { name: "엘든 링 컬렉션" });
+  await waitFor(() => expect(checkbox).toHaveProperty("indeterminate", true));
+});
+
+it("shows the active collection metadata for a game collection", async () => {
+  const gateway = createGateway([], [], false, vi.fn(), ["elden"]);
+  render(
+    <LibraryProvider gateway={gateway}>
+      <AssetInspector assets={[asset("a")]} classifications={[]} albums={[]} collections={collections} currentCollection={collections[0]} open onOpenChange={vi.fn()} onMoveToFolder={vi.fn()} onPatchAlbum={vi.fn()} />
+    </LibraryProvider>,
+  );
+  const section = await screen.findByRole("region", { name: "컬렉션 정보" });
+  expect(within(section).getByText("엘든 링")).toBeVisible();
+  expect(within(section).getByText("프롬소프트")).toBeVisible();
+  expect(within(section).getByText("96")).toBeVisible();
+  expect(within(section).getByText("95")).toBeVisible();
+});
+
+it("shows the active collection metadata for a manga collection", async () => {
+  render(
+    <LibraryProvider gateway={createGateway([], [], false, vi.fn(), ["frieren"])}>
+      <AssetInspector assets={[asset("a")]} classifications={[]} albums={[]} collections={collections} currentCollection={collections[1]} open onOpenChange={vi.fn()} onMoveToFolder={vi.fn()} onPatchAlbum={vi.fn()} />
+    </LibraryProvider>,
+  );
+  const section = await screen.findByRole("region", { name: "컬렉션 정보" });
+  expect(within(section).getByText("프리렌")).toBeVisible();
+  expect(within(section).getByText("야마다 카네히토")).toBeVisible();
+  expect(within(section).getByText("2020")).toBeVisible();
+});
+
+it("hides collection metadata when more than one asset is selected", async () => {
+  render(
+    <LibraryProvider gateway={createGateway([], [], false, vi.fn(), ["elden"])}>
+      <AssetInspector assets={[asset("a"), asset("b")]} classifications={[]} albums={[]} collections={collections} currentCollection={collections[0]} open onOpenChange={vi.fn()} onMoveToFolder={vi.fn()} onPatchAlbum={vi.fn()} />
+    </LibraryProvider>,
+  );
+  await screen.findByText("2개 자산 선택");
+  expect(screen.queryByRole("region", { name: "컬렉션 정보" })).not.toBeInTheDocument();
+});
+
+function createGateway(classificationIds: string[], albumIds: string[] = [], reject = false, updateAssetMetadata = vi.fn(), collectionIds: string[] = []): LibraryGateway {
   return {
     getAssetClassifications: vi.fn().mockImplementation(() => reject ? Promise.reject(new Error("membership failed")) : Promise.resolve(classificationIds)),
     getAssetAlbums: vi.fn().mockImplementation(() => reject ? Promise.reject(new Error("membership failed")) : Promise.resolve(albumIds)),
+    getAssetCollections: vi.fn().mockImplementation(() => reject ? Promise.reject(new Error("membership failed")) : Promise.resolve(collectionIds)),
     updateAssetMetadata,
   } as unknown as LibraryGateway;
 }
