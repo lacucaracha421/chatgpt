@@ -565,7 +565,7 @@ input:disabled {
   position: absolute;
   top: calc(var(--classification-row-height) / 2 - var(--classification-connector-radius));
   left: var(--classification-toggle-center-x);
-  width: calc(var(--classification-depth-step) / 2);
+  width: var(--classification-depth-step);
   height: var(--classification-connector-radius);
   content: "";
   border-left: var(--border-width) solid color-mix(in srgb, var(--classification-branch-color) var(--classification-connector-mix), transparent);
@@ -805,18 +805,6 @@ input:disabled {
     var(--classification-triangle-clearance) * 2
     + var(--classification-triangle-height)
   );
-  content: "";
-  background: var(--color-sidebar);
-  transform: translate(-50%, -50%);
-}
-
-.classification-sidebar__tree-spacer::before {
-  position: absolute;
-  z-index: -1;
-  top: 50%;
-  left: 50%;
-  width: calc(var(--border-width) * 3);
-  height: 100%;
   content: "";
   background: var(--color-sidebar);
   transform: translate(-50%, -50%);
