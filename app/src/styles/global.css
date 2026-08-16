@@ -503,9 +503,9 @@ input:disabled {
 
 .classification-sidebar__tree ul[role="group"]::before {
   position: absolute;
-  top: calc(var(--classification-row-height) / -2);
+  top: calc(var(--classification-row-height) / -2 + var(--classification-icon-size) / 2);
   left: var(--classification-branch-x);
-  height: calc(var(--classification-row-height) / 2);
+  height: calc(var(--classification-row-height) / 2 - var(--classification-icon-size) / 2);
   width: var(--border-width);
   content: "";
   background: color-mix(in srgb, var(--classification-branch-color) var(--classification-connector-mix), transparent);
