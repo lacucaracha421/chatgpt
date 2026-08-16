@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ASSET_PAGE_SIZE } from "../library/constants";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
-import type { AlbumEntry, AssetCursor, AssetQuery, AssetSort, AssetSummary, AssetView, ClassificationEntry } from "../library/types";
+import type { AlbumEntry, AssetCursor, AssetQuery, AssetSort, AssetSummary, AssetView, ClassificationEntry, CollectionSummary } from "../library/types";
 import { Button } from "../shared/ui/Button";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { Skeleton } from "../shared/ui/Skeleton";
@@ -16,12 +16,12 @@ import { AssetViewer } from "./AssetViewer";
 import { applySelectionGesture, emptySelection, moveSelectionFocus, reconcileSelection, selectAllLoaded, type SelectionGesture, type SelectionState } from "./selection";
 
 export type AssetBrowserStatus = { loadedCount: number; selectedAsset: AssetSummary | null; loading: boolean };
-type Props = { view: AssetView; classifications: ClassificationEntry[]; albums?: AlbumEntry[]; sort: AssetSort; metadataVisible: boolean; thumbnailRowHeight?: number; refreshVersion: number; requestedAsset?: AssetSummary | null; onRequestedAssetHandled?: () => void; onSortChange: (sort: AssetSort) => void; onMetadataVisibleChange: (visible: boolean) => void; onThumbnailRowHeightChange?: (height: number) => void; onStatusChange: (status: AssetBrowserStatus) => void; onPointerDragStart?: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => void; onPointerDragMove?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void };
+type Props = { view: AssetView; classifications: ClassificationEntry[]; albums?: AlbumEntry[]; collections?: CollectionSummary[]; onCollectionsChanged?: () => void; sort: AssetSort; metadataVisible: boolean; thumbnailRowHeight?: number; refreshVersion: number; requestedAsset?: AssetSummary | null; onRequestedAssetHandled?: () => void; onSortChange: (sort: AssetSort) => void; onMetadataVisibleChange: (visible: boolean) => void; onThumbnailRowHeightChange?: (height: number) => void; onStatusChange: (status: AssetBrowserStatus) => void; onPointerDragStart?: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => void; onPointerDragMove?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void };
 type PageState = { queryKey: string; items: AssetSummary[]; nextCursor: AssetCursor | null };
 type QueryError = { queryKey: string; message: string };
 const EMPTY_ASSETS: AssetSummary[] = [];
 
-export function AssetBrowser({ view, classifications, albums = [], sort, metadataVisible, thumbnailRowHeight = 180, refreshVersion, requestedAsset = null, onRequestedAssetHandled = () => undefined, onSortChange, onMetadataVisibleChange, onThumbnailRowHeightChange = () => undefined, onStatusChange, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: Props) {
+export function AssetBrowser({ view, classifications, albums = [], collections = [], onCollectionsChanged = () => undefined, sort, metadataVisible, thumbnailRowHeight = 180, refreshVersion, requestedAsset = null, onRequestedAssetHandled = () => undefined, onSortChange, onMetadataVisibleChange, onThumbnailRowHeightChange = () => undefined, onStatusChange, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: Props) {
   const { gateway } = useLibrary();
   const [directOnly, setDirectOnly] = useState(false);
   const [page, setPage] = useState<PageState | null>(null);
@@ -168,6 +168,33 @@ export function AssetBrowser({ view, classifications, albums = [], sort, metadat
       setMembershipVersion((version) => version + 1);
     }
   })();
+  const patchBatchCollection = (collectionId: string, operation: "add" | "remove") => void (async () => {
+    if (await runBatch(() => gateway.patchAssetCollections({
+      assetIds: selectedIds,
+      addCollectionIds: operation === "add" ? [collectionId] : [],
+      removeCollectionIds: operation === "remove" ? [collectionId] : [],
+    }), "컬렉션을 변경하지 못했습니다.")) {
+      setMembershipVersion((version) => version + 1);
+      onCollectionsChanged();
+    }
+  })();
+  const removeFromCollection = () => void (async () => {
+    if (view.kind !== "collection") return;
+    await runBatch(() => gateway.patchAssetCollections({
+      assetIds: selectedIds,
+      addCollectionIds: [],
+      removeCollectionIds: [view.collectionId],
+    }), "컬렉션에서 제거하지 못했습니다.");
+  })();
+  const setCover = (assetId: string) => void (async () => {
+    if (view.kind !== "collection") return;
+    try {
+      await gateway.setCollectionCover(view.collectionId, assetId);
+      onCollectionsChanged();
+    } catch (error) {
+      setMessage(commandErrorMessage(error, "대표 이미지를 지정하지 못했습니다."));
+    }
+  })();
   const trashSelection = () => void (async () => {
     const assetIds = [...selectedIds];
     const succeeded = await runBatch(() => gateway.trashAssets(assetIds), "자산을 휴지통으로 이동하지 못했습니다.");
@@ -205,7 +232,7 @@ export function AssetBrowser({ view, classifications, albums = [], sort, metadat
     }
   })();
   return <section className="asset-browser" aria-label="저장소">
-    <AssetToolbar view={view} classifications={classifications} albums={albums} sort={sort} directOnly={directOnly} metadataVisible={metadataVisible} thumbnailRowHeight={thumbnailRowHeight} selectedCount={selectedIds.length} inspectorOpen={inspectorOpen} onInspectorToggle={() => setInspectorOpen((open) => !open)} onSortChange={onSortChange} onDirectOnlyChange={setDirectOnly} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onFavorite={setBatchFavorite} onMoveToFolder={moveBatchToFolder} onAlbum={patchBatchAlbum} onTrash={trashSelection} onClearSelection={clearSelection} batchPending={batchPending} onReshuffle={reshuffle} />
+    <AssetToolbar view={view} classifications={classifications} albums={albums} collections={collections} sort={sort} directOnly={directOnly} metadataVisible={metadataVisible} thumbnailRowHeight={thumbnailRowHeight} selectedCount={selectedIds.length} inspectorOpen={inspectorOpen} onInspectorToggle={() => setInspectorOpen((open) => !open)} onSortChange={onSortChange} onDirectOnlyChange={setDirectOnly} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onFavorite={setBatchFavorite} onMoveToFolder={moveBatchToFolder} onAlbum={patchBatchAlbum} onRemoveFromCollection={removeFromCollection} onSetCover={selectedIds.length === 1 ? () => setCover(selectedIds[0]!) : undefined} onTrash={trashSelection} onClearSelection={clearSelection} batchPending={batchPending} onReshuffle={reshuffle} />
     {message && <Toast actionLabel={undoAssetIds ? "실행 취소" : undefined} onAction={undoAssetIds ? undoTrash : undefined} actionDisabled={batchPending} onDismiss={() => dismissMessage(null)}>{message}</Toast>}
     {currentFirstError && <Toast>{currentFirstError}</Toast>}
     <div className={`asset-browser__workspace${inspectorOpen ? " asset-browser__workspace--inspector" : ""}`}>
@@ -213,7 +240,7 @@ export function AssetBrowser({ view, classifications, albums = [], sort, metadat
         {firstLoading || !activePage && !currentFirstError ? <Skeleton className="asset-browser__skeleton" label="자산을 불러오는 중" /> : currentFirstError && items.length === 0 ? <EmptyState title="자산을 불러오지 못했습니다"><Button onClick={refresh}>다시 시도</Button></EmptyState> : items.length === 0 ? <EmptyState title={view.kind === "album" ? "이 앨범에 자산이 없습니다." : view.kind === "collection" ? "이 컬렉션에 자산이 없습니다." : "자산이 없습니다"}>{view.kind === "album" ? "원하는 자산을 이 앨범에 추가하세요." : view.kind === "collection" ? "원하는 자산을 이 컬렉션에 추가하세요." : "여기에 이미지와 영상 파일을 놓아 추가하세요."}</EmptyState> : <AssetGallery items={items} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} targetRowHeight={thumbnailRowHeight} metadataVisible={metadataVisible} hasNextPage={nextCursor !== null} onLoadNextPage={loadNextPage} onSelectionGesture={selectWithGesture} onSelectAll={selectAll} onDeleteSelection={trashSelection} onClearSelection={clearSelection} onMoveFocus={moveFocus} onOpen={(asset) => { viewerViewKeyRef.current = viewKey; setViewerAssetId(asset.id); }} onRetryVideo={(asset) => void gateway.retryVideoPreparation(asset.id).then(() => gateway.preparePendingVideos(1)).then(refresh).catch((error) => setMessage(commandErrorMessage(error, "미리보기 준비를 다시 시작하지 못했습니다.")))} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />}
         {nextLoading && <Skeleton label="자산을 더 불러오는 중" />}{currentNextError && <div className="asset-browser__next-error"><Toast>{currentNextError}</Toast><Button onClick={() => loadNextPage(true)}>다시 시도</Button></div>}
       </div>
-      <AssetInspector assets={selectedAssets} classifications={classifications} albums={albums} open={inspectorOpen} membershipVersion={membershipVersion} onOpenChange={setInspectorOpen} onMoveToFolder={moveBatchToFolder} onPatchAlbum={patchBatchAlbum} onAssetUpdated={updateAssetSummary} />
+      <AssetInspector assets={selectedAssets} classifications={classifications} albums={albums} collections={collections} currentCollection={view.kind === "collection" ? collections.find((entry) => entry.id === view.collectionId) ?? null : null} open={inspectorOpen} membershipVersion={membershipVersion} onOpenChange={setInspectorOpen} onMoveToFolder={moveBatchToFolder} onPatchAlbum={patchBatchAlbum} onPatchCollection={patchBatchCollection} onAssetUpdated={updateAssetSummary} />
     </div>
     <AssetViewer items={requestedAsset && !items.some((item) => item.id === requestedAsset.id) ? [requestedAsset] : items} activeId={viewerAssetId} onActiveIdChange={setViewerAssetId} onClose={() => { setViewerAssetId(null); onRequestedAssetHandled(); }} onToggleFavorite={toggleFavorite} onTrash={trashViewerAsset} />
   </section>;

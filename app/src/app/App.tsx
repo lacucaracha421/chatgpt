@@ -468,6 +468,8 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
                     view={view}
                     classifications={entries}
                     albums={albums}
+                    collections={collections}
+                    onCollectionsChanged={() => void refreshCollections()}
                     sort={preferences.assetSort}
                     metadataVisible={preferences.metadataVisible}
                     thumbnailRowHeight={preferences.thumbnailRowHeight}

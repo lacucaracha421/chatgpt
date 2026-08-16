@@ -1949,6 +1949,33 @@ input:disabled {
   margin: var(--space-3) 0 0;
 }
 
+.asset-inspector__collection-info {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: var(--border-width) solid var(--color-border);
+}
+
+.asset-inspector__collection-info h3 {
+  margin: 0 0 var(--space-2);
+}
+
+.asset-inspector__collection-info dl {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+}
+
+.asset-inspector__collection-info div {
+  display: grid;
+  grid-template-columns: 6rem minmax(0, 1fr);
+  gap: var(--space-2);
+}
+
+.asset-inspector__collection-info dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .trash-browser {
   display: grid;
   align-content: start;

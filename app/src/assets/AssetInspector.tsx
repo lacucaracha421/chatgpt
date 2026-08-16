@@ -12,6 +12,7 @@ import type {
   AlbumEntry,
   AssetSummary,
   ClassificationEntry,
+  CollectionSummary,
 } from "../library/types";
 import { Button } from "../shared/ui/Button";
 import { TextField } from "../shared/ui/TextField";
@@ -28,11 +29,14 @@ type Props = {
   assets: AssetSummary[];
   classifications: ClassificationEntry[];
   albums: AlbumEntry[];
+  collections?: CollectionSummary[];
+  currentCollection?: CollectionSummary | null;
   open: boolean;
   membershipVersion?: number;
   onOpenChange: (open: boolean) => void;
   onMoveToFolder: (classificationId: string | null) => void;
   onPatchAlbum: (albumId: string, operation: "add" | "remove") => void;
+  onPatchCollection?: (collectionId: string, operation: "add" | "remove") => void;
   onAssetUpdated?: (asset: AssetSummary) => void;
 };
 
@@ -47,16 +51,20 @@ export function AssetInspector({
   assets,
   classifications,
   albums,
+  collections = [],
+  currentCollection = null,
   open,
   membershipVersion = 0,
   onOpenChange,
   onMoveToFolder,
   onPatchAlbum,
+  onPatchCollection = () => undefined,
   onAssetUpdated = () => undefined,
 }: Props) {
   const { gateway } = useLibrary();
   const [folderIds, setFolderIds] = useState<Array<string | null>>([]);
   const [albumIds, setAlbumIds] = useState<string[]>([]);
+  const [collectionIds, setCollectionIds] = useState<string[]>([]);
   const [membershipError, setMembershipError] = useState(false);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -86,17 +94,19 @@ export function AssetInspector({
     setMembershipError(false);
     void Promise.all(
       assets.map(async (asset) => {
-        const [folders, memberships] = await Promise.all([
+        const [folders, memberships, collectionMemberships] = await Promise.all([
           gateway.getAssetClassifications(asset.id),
           gateway.getAssetAlbums(asset.id),
+          gateway.getAssetCollections(asset.id),
         ]);
-        return { folderId: folders[0] ?? null, albumIds: memberships };
+        return { folderId: folders[0] ?? null, albumIds: memberships, collectionIds: collectionMemberships };
       }),
     )
       .then((results) => {
         if (reload === reloadRef.current) {
           setFolderIds(results.map((result) => result.folderId));
           setAlbumIds(results.flatMap((result) => result.albumIds));
+          setCollectionIds(results.flatMap((result) => result.collectionIds));
         }
       })
       .catch(() => {
@@ -227,11 +237,37 @@ export function AssetInspector({
       ) : (
         <p>{assets.length > 0 ? `${assets.length}개 자산 선택` : "선택한 자산이 없습니다."}</p>
       )}
+      {currentCollection && assets.length === 1 && (
+        <section className="asset-inspector__collection-info" aria-label="컬렉션 정보">
+          <h3>{currentCollection.name}</h3>
+          <dl>
+            {currentCollection.type === "game" && (
+              <>
+                {currentCollection.author && <div><dt>제작사</dt><dd>{currentCollection.author}</dd></div>}
+                {currentCollection.externalScore != null && <div><dt>외부 점수</dt><dd>{currentCollection.externalScore}</dd></div>}
+                {currentCollection.myScore != null && <div><dt>내 점수</dt><dd>{currentCollection.myScore}</dd></div>}
+              </>
+            )}
+            {currentCollection.type === "manga" && (
+              <>
+                {currentCollection.author && <div><dt>작가</dt><dd>{currentCollection.author}</dd></div>}
+                {currentCollection.year != null && <div><dt>출간 연도</dt><dd>{currentCollection.year}</dd></div>}
+              </>
+            )}
+            {currentCollection.type === "movie" && (
+              <>
+                {currentCollection.director && <div><dt>감독</dt><dd>{currentCollection.director}</dd></div>}
+                {currentCollection.year != null && <div><dt>개봉 연도</dt><dd>{currentCollection.year}</dd></div>}
+              </>
+            )}
+          </dl>
+        </section>
+      )}
       {assets.length > 0 && (
         <section className="asset-inspector__classifications" aria-labelledby="asset-inspector-classifications">
           <h3 id="asset-inspector-classifications">정리</h3>
           {membershipError ? (
-            <p className="asset-inspector__membership-error">폴더와 앨범 상태를 불러오지 못했습니다.</p>
+            <p className="asset-inspector__membership-error">폴더, 앨범과 컬렉션 상태를 불러오지 못했습니다.</p>
           ) : (
             <>
               <label className="asset-inspector__folder-select">
@@ -251,6 +287,21 @@ export function AssetInspector({
                   <li key={entry.id}>
                     <label className="asset-inspector__classification">
                       <input type="checkbox" checked={checked} aria-label={`${entry.name} 앨범`} ref={(element) => { if (element) element.indeterminate = indeterminate; }} onChange={() => onPatchAlbum(entry.id, checked ? "remove" : "add")} />
+                      {indeterminate ? <MinusIcon aria-hidden="true" className="asset-inspector__checkbox-icon" /> : <CheckIcon aria-hidden="true" className="asset-inspector__checkbox-icon" />}
+                      <span>{entry.name}</span>
+                    </label>
+                  </li>
+                );
+              })}</ul>
+              <h4>컬렉션</h4>
+              <ul>{collections.map((entry) => {
+                const count = collectionIds.filter((id) => id === entry.id).length;
+                const checked = count === assets.length;
+                const indeterminate = count > 0 && !checked;
+                return (
+                  <li key={entry.id}>
+                    <label className="asset-inspector__classification">
+                      <input type="checkbox" checked={checked} aria-label={`${entry.name} 컬렉션`} ref={(element) => { if (element) element.indeterminate = indeterminate; }} onChange={() => onPatchCollection(entry.id, checked ? "remove" : "add")} />
                       {indeterminate ? <MinusIcon aria-hidden="true" className="asset-inspector__checkbox-icon" /> : <CheckIcon aria-hidden="true" className="asset-inspector__checkbox-icon" />}
                       <span>{entry.name}</span>
                     </label>

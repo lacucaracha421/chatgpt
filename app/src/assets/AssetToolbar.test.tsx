@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
-import type { AssetSort, AssetView } from "../library/types";
+import type { AssetSort, AssetView, CollectionSummary } from "../library/types";
 import { AssetToolbar } from "./AssetToolbar";
 
 vi.mock("@tauri-apps/api/window", () => ({
@@ -12,6 +12,7 @@ const baseProps = {
   view: { kind: "classification", classificationId: null } as AssetView,
   classifications: [{ id: "game", kind: "root" as const, name: "게임", parentId: null, iconKey: null, colorKey: null }],
   albums: [{ id: "covers", name: "표지", parentId: null, iconKey: null, colorKey: null }],
+  collections: [],
   sort: "newest" as AssetSort,
   directOnly: false,
   metadataVisible: true,
@@ -111,4 +112,41 @@ it("toggles the inspector from the selection actions", async () => {
 
   render(<AssetToolbar {...baseProps} selectedCount={1} inspectorOpen={true} onInspectorToggle={onInspectorToggle} />);
   expect(screen.getByRole("button", { name: "정보 닫기" })).toBeVisible();
+});
+
+it("shows the collection name as the location in a collection detail view", () => {
+  const collections: CollectionSummary[] = [{ id: "collection-1", name: "엘든 링", description: null, type: "game", coverAssetId: null, assetCount: 3, year: null, author: null, director: null, externalScore: null, myScore: null, genres: null, overview: null, externalId: null, externalSource: null, externalSyncedAt: null, showcase: false, createdAt: "2026-08-10T00:00:00Z", updatedAt: "2026-08-10T00:00:00Z" }];
+  render(<AssetToolbar {...baseProps} view={{ kind: "collection", collectionId: "collection-1" }} collections={collections} />);
+
+  expect(screen.getByRole("heading", { name: "엘든 링" })).toBeVisible();
+});
+
+it("removes the selection from the active collection", async () => {
+  const user = userEvent.setup();
+  const onRemoveFromCollection = vi.fn();
+  render(<AssetToolbar {...baseProps} view={{ kind: "collection", collectionId: "collection-1" }} selectedCount={2} onRemoveFromCollection={onRemoveFromCollection} />);
+
+  await user.click(screen.getByRole("button", { name: "이 컬렉션에서 제거" }));
+  expect(onRemoveFromCollection).toHaveBeenCalledOnce();
+});
+
+it("sets the selected asset as the collection cover when exactly one is selected", async () => {
+  const user = userEvent.setup();
+  const onSetCover = vi.fn();
+  render(<AssetToolbar {...baseProps} view={{ kind: "collection", collectionId: "collection-1" }} selectedCount={1} onSetCover={onSetCover} />);
+
+  await user.click(screen.getByRole("button", { name: "대표 이미지로 지정" }));
+  expect(onSetCover).toHaveBeenCalledOnce();
+});
+
+it("hides the cover action outside a single-selection collection detail", () => {
+  render(<AssetToolbar {...baseProps} view={{ kind: "collection", collectionId: "collection-1" }} selectedCount={2} />);
+  expect(screen.queryByRole("button", { name: "대표 이미지로 지정" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "이 컬렉션에서 제거" })).toBeVisible();
+});
+
+it("does not show collection actions outside a collection detail view", () => {
+  render(<AssetToolbar {...baseProps} selectedCount={1} />);
+  expect(screen.queryByRole("button", { name: "이 컬렉션에서 제거" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "대표 이미지로 지정" })).not.toBeInTheDocument();
 });
