@@ -9,7 +9,7 @@ const context = { globalThis: null };
 context.globalThis = context;
 vm.runInNewContext(layoutSource, context, { filename: "layout.js" });
 vm.runInNewContext(gestureSource, context, { filename: "gesture.js" });
-const { createSession } = context.LakomicsGesture;
+const { createSession, secondaryAngles, primaryAngle } = context.LakomicsGesture;
 
 const tree = [
   { id: "parent", kind: "root", name: "Parent", parentId: null },
@@ -48,7 +48,7 @@ test("secondary ring hit-test selects a child on release", () => {
   session.move(pointForPrimarySlot(0), 0);
   session.tick(300);
   assert.notEqual(session.snapshot().secondaryLevel, null);
-  session.move(pointForSecondarySlot(0, 2), 301);
+  session.move(pointForSecondarySlot(0, 0, 6, 6), 301);
   const result = session.release();
   assert.deepEqual(plain(result), { type: "select", classificationId: "child-a" });
 });
@@ -111,8 +111,9 @@ function pointForPrimarySlot(index, count = 2) {
   return { x: 100 + Math.cos(angle) * r, y: 100 + Math.sin(angle) * r };
 }
 
-function pointForSecondarySlot(index, count) {
-  const angle = -Math.PI / 2 + (Math.PI * 2 * index) / count;
+function pointForSecondarySlot(index, primaryIndex, primaryCount, secondaryCount) {
+  const angles = secondaryAngles(primaryIndex, primaryCount, secondaryCount);
+  const angle = angles[index].center;
   const r = (130 + 185) / 2;
   return { x: 100 + Math.cos(angle) * r, y: 100 + Math.sin(angle) * r };
 }

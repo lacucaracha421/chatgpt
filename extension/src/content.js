@@ -302,19 +302,20 @@
     }
 
     function renderSecondarySectors(svg, snapshot) {
+      const angles = snapshot.secondaryAngles;
+      if (!angles) return;
       const count = snapshot.secondaryLevel.slotCount;
       snapshot.secondaryLevel.slots.forEach((entry, index) => {
-        const start = -Math.PI / 2 + (Math.PI * 2 * (index - 0.5)) / count;
-        const end = -Math.PI / 2 + (Math.PI * 2 * (index + 0.5)) / count;
+        const angle = angles[index];
+        if (!angle) return;
         const path = svgElement("path", {
-          d: sectorPath(130, 185, start, end),
+          d: sectorPath(130, 185, angle.start, angle.end),
           class: `lakomics-sector-secondary${snapshot.hover?.type === "secondary-slot" && snapshot.hover.index === index ? " is-active" : ""}${entry ? "" : " is-empty"}`,
         });
         svg.append(path);
-        const angle = -Math.PI / 2 + (Math.PI * 2 * index) / count;
         const text = svgElement("text", {
-          x: Math.cos(angle) * 157,
-          y: Math.sin(angle) * 157,
+          x: Math.cos(angle.center) * 157,
+          y: Math.sin(angle.center) * 157,
           class: "lakomics-sector-label-secondary",
         });
         text.textContent = entry?.name ?? "";

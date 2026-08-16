@@ -10,6 +10,41 @@
   const SECONDARY_OUTER_RADIUS = 185;
   const CONTROL_RADIUS = 210;
   const CONTROL_HIT_HALF_HEIGHT = 72;
+  const SECONDARY_CLUSTER_ARC_MAX = (Math.PI / 180) * 120;
+  const SECONDARY_SECTOR_GAP = (Math.PI / 180) * 2;
+
+  function primaryAngle(index, count) {
+    return -Math.PI / 2 + (Math.PI * 2 * index) / count;
+  }
+
+  function secondaryAngles(primaryIndex, primaryCount, secondaryCount) {
+    const safeCount = Math.max(1, secondaryCount || 1);
+    const anchor = primaryAngle(primaryIndex, primaryCount);
+    const arc = Math.min(SECONDARY_CLUSTER_ARC_MAX, (Math.PI * 2 * safeCount) / Math.max(primaryCount, 1));
+    const gap = SECONDARY_SECTOR_GAP;
+    const sectorSpan = (arc - gap * (safeCount - 1)) / safeCount;
+    const startAngle = anchor - arc / 2;
+    const angles = [];
+    for (let i = 0; i < safeCount; i++) {
+      const start = startAngle + i * (sectorSpan + gap);
+      const end = start + sectorSpan;
+      angles.push({ start, end, center: (start + end) / 2 });
+    }
+    return angles;
+  }
+
+  function normalizeAngle(angle) {
+    const twoPi = Math.PI * 2;
+    return (angle % twoPi + twoPi) % twoPi;
+  }
+
+  function isAngleWithin(angle, start, end) {
+    const a = normalizeAngle(angle);
+    const s = normalizeAngle(start);
+    const e = normalizeAngle(end);
+    if (s <= e) return a >= s && a <= e;
+    return a >= s || a <= e;
+  }
 
   function createSession(origin, entries, layout) {
     let opened = false;
@@ -76,11 +111,16 @@
       if (radius <= CENTER_RADIUS) return { type: "center" };
 
       if (expandedParentId !== null && radius >= SECONDARY_INNER_RADIUS && radius <= SECONDARY_OUTER_RADIUS) {
-        const level = currentSecondaryLevel();
-        const sector = (Math.PI * 2) / level.slotCount;
-        const angle = (Math.atan2(dy, dx) + Math.PI / 2 + Math.PI * 2) % (Math.PI * 2);
-        const index = Math.floor(((angle + sector / 2) % (Math.PI * 2)) / sector);
-        return { type: "secondary-slot", index, entry: level.slots[index] ?? null };
+        const primaryLevel = currentPrimaryLevel();
+        const secondaryLevel = currentSecondaryLevel();
+        const primaryIndex = primaryLevel.slots.findIndex((s) => s?.id === expandedParentId);
+        const angles = secondaryAngles(primaryIndex, primaryLevel.slotCount, secondaryLevel.slotCount);
+        const pointAngle = Math.atan2(dy, dx);
+        for (let i = 0; i < angles.length; i++) {
+          if (isAngleWithin(pointAngle, angles[i].start, angles[i].end)) {
+            return { type: "secondary-slot", index: i, entry: secondaryLevel.slots[i] ?? null };
+          }
+        }
       }
 
       if (radius >= PRIMARY_INNER_RADIUS && radius <= PRIMARY_OUTER_RADIUS) {
@@ -151,6 +191,11 @@
       primaryPage = primaryLevel.page;
       const secondaryLevel = expandedParentId !== null ? currentSecondaryLevel() : null;
       if (secondaryLevel) secondaryPage = secondaryLevel.page;
+      let secondaryAnglesResult = null;
+      if (secondaryLevel) {
+        const primaryIndex = primaryLevel.slots.findIndex((s) => s?.id === expandedParentId);
+        secondaryAnglesResult = secondaryAngles(primaryIndex, primaryLevel.slotCount, secondaryLevel.slotCount);
+      }
       return {
         opened,
         expandedParentId,
@@ -161,6 +206,7 @@
         dwellDeadline,
         primaryLevel,
         secondaryLevel,
+        secondaryAngles: secondaryAnglesResult,
       };
     }
 
@@ -186,7 +232,12 @@
     SECONDARY_INNER_RADIUS,
     SECONDARY_OUTER_RADIUS,
     CONTROL_RADIUS,
+    SECONDARY_CLUSTER_ARC_MAX,
     createSession,
     distance,
+    secondaryAngles,
+    primaryAngle,
+    normalizeAngle,
+    isAngleWithin,
   };
 })();
