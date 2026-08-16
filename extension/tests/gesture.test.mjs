@@ -14,7 +14,8 @@ const { createSession } = context.LakomicsGesture;
 const tree = [
   { id: "parent", kind: "root", name: "Parent", parentId: null },
   { id: "other", kind: "root", name: "Other", parentId: null },
-  { id: "child", kind: "tag", name: "Child", parentId: "parent" },
+  { id: "child-a", kind: "tag", name: "Child A", parentId: "parent" },
+  { id: "child-b", kind: "tag", name: "Child B", parentId: "parent" },
 ];
 const layout = context.LakomicsRadial.resetLayout(tree);
 
@@ -27,46 +28,93 @@ test("preserves a click below twelve pixels and opens at the threshold", () => {
   assert.equal(opening.move({ x: 112, y: 100 }, 0).opened, true);
 });
 
-test("release before dwell selects a parent and dwell enters its children", () => {
+test("release before dwell selects a primary and dwell expands secondary ring", () => {
   const immediate = createSession({ x: 100, y: 100 }, tree, layout);
-  immediate.move(pointForSlot(0), 0);
+  immediate.move(pointForPrimarySlot(0), 0);
   assert.deepEqual(plain(immediate.release()), { type: "select", classificationId: "parent" });
 
   const descended = createSession({ x: 100, y: 100 }, tree, layout);
-  descended.move(pointForSlot(0), 0);
+  descended.move(pointForPrimarySlot(0), 0);
+  assert.equal(descended.snapshot().secondaryLevel, null);
   const afterDwell = descended.tick(300);
-  assert.equal(afterDwell.parentId, "parent");
-  assert.equal(afterDwell.level.slots[0].id, "child");
-  descended.move({ x: 100, y: 100 }, 301);
-  assert.deepEqual(plain(descended.release()), { type: "select", classificationId: "parent" });
+  assert.equal(afterDwell.expandedParentId, "parent");
+  assert.equal(afterDwell.secondaryLevel.slots.length, 6);
+  assert.equal(afterDwell.secondaryLevel.slots[0].id, "child-a");
+  assert.equal(afterDwell.secondaryLevel.slots[1].id, "child-b");
 });
 
-test("leaving a sector cancels its dwell timer", () => {
+test("secondary ring hit-test selects a child on release", () => {
   const session = createSession({ x: 100, y: 100 }, tree, layout);
-  session.move(pointForSlot(0), 0);
-  session.move({ x: 300, y: 300 }, 200);
-  session.move(pointForSlot(0), 400);
-  assert.equal(session.tick(699).parentId, null);
-  assert.equal(session.tick(700).parentId, "parent");
+  session.move(pointForPrimarySlot(0), 0);
+  session.tick(300);
+  assert.notEqual(session.snapshot().secondaryLevel, null);
+  session.move(pointForSecondarySlot(0, 2), 301);
+  const result = session.release();
+  assert.deepEqual(plain(result), { type: "select", classificationId: "child-a" });
 });
 
-test("dwell pages and returns through the exterior controls", () => {
+test("center entry closes the secondary ring and selects the parent on release", () => {
+  const session = createSession({ x: 100, y: 100 }, tree, layout);
+  session.move(pointForPrimarySlot(0), 0);
+  session.tick(300);
+  assert.notEqual(session.snapshot().secondaryLevel, null);
+  session.move({ x: 100, y: 100 }, 301);
+  assert.equal(session.snapshot().secondaryLevel, null);
+  assert.equal(session.snapshot().expandedParentId, null);
+  const result = session.release();
+  assert.deepEqual(plain(result), { type: "select", classificationId: "parent" });
+});
+
+test("ring switch requires 300ms dwell on the new primary", () => {
+  const switchTree = [
+    { id: "parent", kind: "root", name: "Parent", parentId: null },
+    { id: "other", kind: "root", name: "Other", parentId: null },
+    { id: "child-a", kind: "tag", name: "Child A", parentId: "parent" },
+    { id: "child-b", kind: "tag", name: "Child B", parentId: "parent" },
+    { id: "child-c", kind: "tag", name: "Child C", parentId: "other" },
+  ];
+  const switchLayout = context.LakomicsRadial.resetLayout(switchTree);
+  const session = createSession({ x: 100, y: 100 }, switchTree, switchLayout);
+  session.move(pointForPrimarySlot(0), 0);
+  session.tick(300);
+  assert.equal(session.snapshot().expandedParentId, "parent");
+  session.move(pointForPrimarySlot(1, 6), 301);
+  assert.equal(session.snapshot().expandedParentId, "parent");
+  session.tick(601);
+  assert.equal(session.snapshot().expandedParentId, "other");
+});
+
+test("childless primary does not expand on dwell", () => {
+  const single = [{ id: "lonely", kind: "root", name: "Lonely", parentId: null }];
+  const singleLayout = context.LakomicsRadial.resetLayout(single);
+  const session = createSession({ x: 100, y: 100 }, single, singleLayout);
+  session.move(pointForPrimarySlot(0, 1), 0);
+  session.tick(300);
+  assert.equal(session.snapshot().secondaryLevel, null);
+  assert.deepEqual(plain(session.release()), { type: "select", classificationId: "lonely" });
+});
+
+test("dwell pages through exterior controls for the active ring", () => {
   const many = Array.from({ length: 13 }, (_, index) => ({
-    id: `root-${index}`,
-    kind: "root",
-    name: `Root ${index}`,
-    parentId: null,
+    id: `root-${index}`, kind: "root", name: `Root ${index}`, parentId: null,
   }));
   const session = createSession({ x: 100, y: 100 }, many, context.LakomicsRadial.resetLayout(many));
-  session.move({ x: 260, y: 100 }, 0);
-  assert.equal(session.tick(300).page, 1);
-  session.move({ x: -60, y: 100 }, 301);
-  assert.equal(session.tick(601).page, 0);
+  session.move({ x: 300, y: 100 }, 0);
+  assert.equal(session.tick(300).primaryPage, 1);
+  session.move({ x: -100, y: 100 }, 301);
+  assert.equal(session.tick(601).primaryPage, 0);
 });
 
-function pointForSlot(index, count = 6) {
+function pointForPrimarySlot(index, count = 2) {
   const angle = -Math.PI / 2 + (Math.PI * 2 * index) / count;
-  return { x: 100 + Math.cos(angle) * 84, y: 100 + Math.sin(angle) * 84 };
+  const r = (48 + 110) / 2;
+  return { x: 100 + Math.cos(angle) * r, y: 100 + Math.sin(angle) * r };
+}
+
+function pointForSecondarySlot(index, count) {
+  const angle = -Math.PI / 2 + (Math.PI * 2 * index) / count;
+  const r = (130 + 185) / 2;
+  return { x: 100 + Math.cos(angle) * r, y: 100 + Math.sin(angle) * r };
 }
 
 function plain(value) {
