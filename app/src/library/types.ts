@@ -21,7 +21,9 @@ export type AssetView =
   | { kind: "similarity_review" }
   | { kind: "trash" }
   | { kind: "settings" }
-  | { kind: "manga" };
+  | { kind: "manga" }
+  | { kind: "collections"; typeFilter: CollectionType | null; showcase: boolean }
+  | { kind: "collection"; collectionId: string };
 
 export type ClassificationEntry = {
   id: string;
@@ -38,6 +40,55 @@ export type AlbumEntry = {
   parentId: string | null;
   iconKey: string | null;
   colorKey: string | null;
+};
+
+export type CollectionType = "game" | "manga" | "movie";
+
+export type CollectionSummary = {
+  id: string;
+  name: string;
+  description: string | null;
+  type: CollectionType;
+  coverAssetId: string | null;
+  assetCount: number;
+  year: number | null;
+  author: string | null;
+  director: string | null;
+  externalScore: number | null;
+  myScore: number | null;
+  genres: string | null;
+  overview: string | null;
+  externalId: string | null;
+  externalSource: string | null;
+  externalSyncedAt: string | null;
+  showcase: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateCollection = {
+  name: string;
+  description: string | null;
+  type: CollectionType;
+};
+
+export type UpdateCollection = {
+  name: string;
+  description: string | null;
+  type: CollectionType;
+  year: number | null;
+  author: string | null;
+  director: string | null;
+  externalScore: number | null;
+  myScore: number | null;
+  genres: string | null;
+  overview: string | null;
+};
+
+export type AssetCollectionPatch = {
+  assetIds: string[];
+  addCollectionIds: string[];
+  removeCollectionIds: string[];
 };
 
 export type VideoPreparationState =
@@ -126,6 +177,7 @@ export type SimilarityIndexProgress = {
 export type AssetQuery = {
   classificationId: string | null;
   albumId: string | null;
+  collectionId: string | null;
   directOnly: boolean;
   favoriteOnly: boolean;
   unclassifiedOnly: boolean;
@@ -286,6 +338,14 @@ export interface LibraryGateway {
   setAssetClassification(request: SetAssetClassification): Promise<void>;
   patchAssetAlbums(patch: AssetAlbumPatch): Promise<void>;
   getAssetAlbums(assetId: string): Promise<string[]>;
+  listCollections(): Promise<CollectionSummary[]>;
+  createCollection(input: CreateCollection): Promise<CollectionSummary>;
+  updateCollection(id: string, input: UpdateCollection): Promise<CollectionSummary>;
+  deleteCollection(id: string): Promise<void>;
+  setCollectionCover(collectionId: string, assetId: string | null): Promise<CollectionSummary>;
+  setCollectionShowcase(collectionId: string, showcase: boolean): Promise<CollectionSummary>;
+  getAssetCollections(assetId: string): Promise<string[]>;
+  patchAssetCollections(patch: AssetCollectionPatch): Promise<void>;
   getMangaRoot(): Promise<string | null>;
   setMangaRoot(path: string | null): Promise<void>;
   scanManga(): Promise<number>;
