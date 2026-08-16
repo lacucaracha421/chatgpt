@@ -8,11 +8,12 @@ use crate::library::{
     error::LibraryError,
     metadata_import::{self, MetadataImportPlan},
     models::{
-        AlbumEntry, AssetAlbumPatch, AssetCursor, AssetMetadataPatch, AssetPage, AssetQuery,
-        AssetSummary, ClassificationEntry, CreateAlbum, CreateClassification, IngestMediaRequest,
-        IngestOutcome, LibrarySummary, MangaSeries, MetadataBackup, PurgeSummary,
-        SetAssetClassification, SimilarityDecisionRequest, SimilarityIndexProgress,
-        SimilarityReviewPage, TrashPage, TrashPolicy, VideoPreparationProgress,
+        AlbumEntry, AssetAlbumPatch, AssetCollectionPatch, AssetCursor, AssetMetadataPatch,
+        AssetPage, AssetQuery, AssetSummary, ClassificationEntry, CollectionSummary,
+        CreateAlbum, CreateClassification, CreateCollection, IngestMediaRequest, IngestOutcome,
+        LibrarySummary, MangaSeries, MetadataBackup, PurgeSummary, SetAssetClassification,
+        SimilarityDecisionRequest, SimilarityIndexProgress, SimilarityReviewPage, TrashPage,
+        TrashPolicy, UpdateCollection, VideoPreparationProgress,
     },
     Library,
 };
@@ -82,6 +83,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::CollectionNotFound => "collection_not_found",
             LibraryError::DuplicateCollectionName => "duplicate_collection_name",
             LibraryError::CollectionCoverNotMember => "collection_cover_not_member",
+            LibraryError::InvalidCollectionType => "invalid_collection_type",
             LibraryError::AssetNotFound => "asset_not_found",
             LibraryError::EmptyAssetSelection => "empty_asset_selection",
             LibraryError::InvalidAssetSelection => "invalid_asset_selection",
@@ -500,6 +502,72 @@ pub fn patch_asset_albums(
 ) -> Result<(), CommandError> {
     current_required(state)?
         .patch_asset_albums(patch)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn list_collections(state: State<'_, AppState>) -> Result<Vec<CollectionSummary>, CommandError> {
+    current_required(state)?
+        .list_collections()
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn create_collection(
+    request: CreateCollection,
+    state: State<'_, AppState>,
+) -> Result<CollectionSummary, CommandError> {
+    current_required(state)?
+        .create_collection(request)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn update_collection(
+    id: String,
+    request: UpdateCollection,
+    state: State<'_, AppState>,
+) -> Result<CollectionSummary, CommandError> {
+    current_required(state)?
+        .update_collection(&id, request)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn delete_collection(id: String, state: State<'_, AppState>) -> Result<(), CommandError> {
+    current_required(state)?
+        .delete_collection(&id)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn set_collection_cover(
+    collection_id: String,
+    asset_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<CollectionSummary, CommandError> {
+    current_required(state)?
+        .set_collection_cover(&collection_id, asset_id.as_deref())
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn get_asset_collections(
+    asset_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, CommandError> {
+    current_required(state)?
+        .get_asset_collections(&asset_id)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn patch_asset_collections(
+    patch: AssetCollectionPatch,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    current_required(state)?
+        .patch_asset_collections(patch)
         .map_err(CommandError::from)
 }
 

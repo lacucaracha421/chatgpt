@@ -89,6 +89,8 @@ pub enum LibraryError {
     DuplicateCollectionName,
     #[error("대표 이미지는 컬렉션에 속한 정상 자산이어야 합니다")]
     CollectionCoverNotMember,
+    #[error("지원하지 않는 컬렉션 유형입니다")]
+    InvalidCollectionType,
     #[error("요청한 자산을 찾을 수 없습니다")]
     AssetNotFound,
     #[error("하나 이상의 자산을 선택해야 합니다")]
