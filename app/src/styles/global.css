@@ -3,6 +3,15 @@ body {
   background: var(--color-bg);
   color: var(--color-text);
   font-family: var(--font-ui);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+input,
+textarea,
+[contenteditable="true"] {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 button,
@@ -857,7 +866,6 @@ input:disabled {
 .is-pointer-dragging,
 .is-pointer-dragging * {
   cursor: grabbing !important;
-  user-select: none !important;
 }
 
 .ui-drag-layer {

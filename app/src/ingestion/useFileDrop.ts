@@ -32,6 +32,7 @@ type UseFileDropOptions = {
   subscribe: DropSubscriber;
   enabled: boolean;
   classificationId: string | null;
+  libraryRoot?: string | null;
   ingestMedia: LibraryGateway["ingestMedia"];
   onIngested?: (result: IngestOutcome) => void;
   onFatalError?: (message: string) => void;
@@ -154,7 +155,12 @@ export function useFileDrop(options: UseFileDropOptions): FileDropState {
         return;
       }
       setOver(false);
-      enqueue(event.paths, optionsRef.current.classificationId);
+      const root = optionsRef.current.libraryRoot;
+      const externalPaths = root
+        ? event.paths.filter((p) => !isInsideLibrary(p, root))
+        : event.paths;
+      if (externalPaths.length === 0) return;
+      enqueue(externalPaths, optionsRef.current.classificationId);
     }).then((stop) => {
       if (active) unlisten = stop;
       else stop();
@@ -189,4 +195,11 @@ function emptyWork(id: string, total: number): IngestionWork {
 
 function fileName(path: string) {
   return path.split(/[\\/]/).pop() ?? path;
+}
+
+function isInsideLibrary(path: string, root: string): boolean {
+  const normalize = (p: string) => p.replace(/\\/g, "/").toLowerCase().replace(/\/+$/, "");
+  const normalizedPath = normalize(path);
+  const normalizedRoot = normalize(root);
+  return normalizedPath === normalizedRoot || normalizedPath.startsWith(normalizedRoot + "/");
 }

@@ -72,11 +72,11 @@ function LibraryScreen({
   const { library } = useLibrary();
 
   return library
-    ? <LibraryWorkspace key={library.root} subscribeDrops={subscribeDrops} startAssetDrag={startAssetDrag} />
+    ? <LibraryWorkspace key={library.root} libraryRoot={library.root} subscribeDrops={subscribeDrops} startAssetDrag={startAssetDrag} />
     : <LibrarySetup selectFolder={selectFolder} />;
 }
 
-function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: DropSubscriber; startAssetDrag: StartAssetDrag }) {
+function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag }: { libraryRoot: string; subscribeDrops: DropSubscriber; startAssetDrag: StartAssetDrag }) {
   const { gateway } = useLibrary();
   const [entries, setEntries] = useState<ClassificationEntry[]>([]);
   const [albums, setAlbums] = useState<AlbumEntry[]>([]);
@@ -161,6 +161,7 @@ function LibraryWorkspace({ subscribeDrops, startAssetDrag }: { subscribeDrops: 
     subscribe: subscribeDrops,
     enabled: dropEnabled,
     classificationId: dropClassificationId,
+    libraryRoot,
     ingestMedia: gateway.ingestMedia,
     onIngested: handleIngested,
     onFatalError: setMessage,
