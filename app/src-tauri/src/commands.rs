@@ -572,6 +572,17 @@ pub fn patch_asset_collections(
 }
 
 #[tauri::command]
+pub fn set_collection_showcase(
+    collection_id: String,
+    showcase: bool,
+    state: State<'_, AppState>,
+) -> Result<CollectionSummary, CommandError> {
+    current_required(state)?
+        .set_collection_showcase(&collection_id, showcase)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub fn set_asset_classification(
     request: SetAssetClassification,
     state: State<'_, AppState>,
