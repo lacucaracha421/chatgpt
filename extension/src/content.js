@@ -268,32 +268,54 @@
       overlay = document.createElement("div");
       overlay.className = "lakomics-radial-overlay";
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      svg.setAttribute("viewBox", "-200 -200 400 400");
+      svg.setAttribute("viewBox", "-220 -220 440 440");
       svg.style.left = `${pointer.origin.x}px`;
       svg.style.top = `${pointer.origin.y}px`;
       svg.classList.add("lakomics-radial-menu");
-      renderSectors(svg, snapshot);
+      renderPrimarySectors(svg, snapshot);
+      if (snapshot.secondaryLevel) renderSecondarySectors(svg, snapshot);
       renderCenter(svg, snapshot);
       renderControls(svg, snapshot);
       overlay.append(svg);
       document.documentElement.append(overlay);
     }
 
-    function renderSectors(svg, snapshot) {
-      const count = snapshot.level.slotCount;
-      snapshot.level.slots.forEach((entry, index) => {
+    function renderPrimarySectors(svg, snapshot) {
+      const count = snapshot.primaryLevel.slotCount;
+      snapshot.primaryLevel.slots.forEach((entry, index) => {
         const start = -Math.PI / 2 + (Math.PI * 2 * (index - 0.5)) / count;
         const end = -Math.PI / 2 + (Math.PI * 2 * (index + 0.5)) / count;
         const path = svgElement("path", {
-          d: sectorPath(48, 132, start, end),
-          class: `lakomics-sector${snapshot.hover?.type === "slot" && snapshot.hover.index === index ? " is-active" : ""}${entry ? "" : " is-empty"}`,
+          d: sectorPath(48, 110, start, end),
+          class: `lakomics-sector${snapshot.hover?.type === "primary-slot" && snapshot.hover.index === index ? " is-active" : ""}${entry ? "" : " is-empty"}${snapshot.expandedParentId === entry?.id ? " is-expanded" : ""}`,
         });
         svg.append(path);
         const angle = -Math.PI / 2 + (Math.PI * 2 * index) / count;
         const text = svgElement("text", {
-          x: Math.cos(angle) * 91,
-          y: Math.sin(angle) * 91,
+          x: Math.cos(angle) * 79,
+          y: Math.sin(angle) * 79,
           class: "lakomics-sector-label",
+        });
+        text.textContent = entry?.name ?? "";
+        svg.append(text);
+      });
+    }
+
+    function renderSecondarySectors(svg, snapshot) {
+      const count = snapshot.secondaryLevel.slotCount;
+      snapshot.secondaryLevel.slots.forEach((entry, index) => {
+        const start = -Math.PI / 2 + (Math.PI * 2 * (index - 0.5)) / count;
+        const end = -Math.PI / 2 + (Math.PI * 2 * (index + 0.5)) / count;
+        const path = svgElement("path", {
+          d: sectorPath(130, 185, start, end),
+          class: `lakomics-sector-secondary${snapshot.hover?.type === "secondary-slot" && snapshot.hover.index === index ? " is-active" : ""}${entry ? "" : " is-empty"}`,
+        });
+        svg.append(path);
+        const angle = -Math.PI / 2 + (Math.PI * 2 * index) / count;
+        const text = svgElement("text", {
+          x: Math.cos(angle) * 157,
+          y: Math.sin(angle) * 157,
+          class: "lakomics-sector-label-secondary",
         });
         text.textContent = entry?.name ?? "";
         svg.append(text);
@@ -308,14 +330,16 @@
         class: `lakomics-radial-center${snapshot.hover?.type === "center" ? " is-active" : ""}`,
       });
       const label = svgElement("text", { x: 0, y: 4, class: "lakomics-center-label" });
-      label.textContent = snapshot.path.at(-1)?.name ?? "취소";
+      const parentEntry = snapshot.primaryLevel.slots.find((s) => s?.id === snapshot.expandedParentId);
+      label.textContent = parentEntry?.name ?? "취소";
       svg.append(circle, label);
     }
 
     function renderControls(svg, snapshot) {
-      if (snapshot.level.page > 0) renderControl(svg, -166, 0, "‹", snapshot.hover?.type === "previous");
-      if (snapshot.level.page + 1 < snapshot.level.pageCount) renderControl(svg, 166, 0, "›", snapshot.hover?.type === "next");
-      if (snapshot.path.length) renderControl(svg, 0, 166, "위로", snapshot.hover?.type === "back");
+      const activePage = snapshot.secondaryLevel ? snapshot.secondaryPage : snapshot.primaryPage;
+      const activePageCount = snapshot.secondaryLevel ? snapshot.secondaryLevel.pageCount : snapshot.primaryLevel.pageCount;
+      if (activePage > 0) renderControl(svg, -195, 0, "‹", snapshot.hover?.type === "previous");
+      if (activePage + 1 < activePageCount) renderControl(svg, 195, 0, "›", snapshot.hover?.type === "next");
     }
 
     function renderControl(svg, x, y, label, active) {

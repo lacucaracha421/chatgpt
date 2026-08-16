@@ -8,8 +8,8 @@
 
 .lakomics-radial-menu {
   position: fixed;
-  width: 400px;
-  height: 400px;
+  width: 440px;
+  height: 440px;
   transform: translate(-50%, -50%);
   overflow: visible;
   filter: drop-shadow(0 10px 28px rgb(0 0 0 / 55%));
@@ -31,6 +31,36 @@
 .lakomics-sector.is-empty {
   fill: rgb(24 25 29 / 82%);
   stroke-dasharray: 4 4;
+}
+
+.lakomics-sector.is-expanded {
+  fill: #2a3f5f;
+  stroke: #5a8ab5;
+}
+
+.lakomics-sector-secondary {
+  fill: rgb(24 25 29 / 92%);
+  stroke: #3a3d47;
+  stroke-width: 1.5;
+}
+
+.lakomics-sector-secondary.is-active {
+  fill: #2f6db5;
+  stroke: #8ec4ff;
+}
+
+.lakomics-sector-secondary.is-empty {
+  fill: rgb(20 21 25 / 78%);
+  stroke-dasharray: 4 4;
+}
+
+.lakomics-sector-label-secondary {
+  fill: #d8dbe0;
+  font-size: 12px;
+  font-weight: 600;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  pointer-events: none;
 }
 
 .lakomics-sector-label,

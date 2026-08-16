@@ -10,7 +10,7 @@ const contentSource = fs.readFileSync(new URL("../src/content.js", import.meta.u
 test("sends one final selection and cancellation sends nothing", async () => {
   const sent = [];
   const api = loadContent(async (payload) => { sent.push(payload); return { ok: true, status: "added" }; });
-  const controller = api.createCollectorController({ send: api.send, status() {} });
+  const controller = api.createCollectorController({ send: api.send, status() {}, snapshot: api.snapshot });
   const candidate = {
     mediaUrl: "https://pbs.twimg.com/media/A?format=jpg&name=orig",
     sourceUrl: "https://x.com/user/status/1/photo/1",
@@ -43,7 +43,7 @@ test("retry resends the identical failed payload", async () => {
     sent.push(payload);
     return sent.length === 1 ? { ok: false, code: "download_failed" } : { ok: true, status: "added" };
   });
-  const controller = api.createCollectorController({ send: api.send, status() {} });
+  const controller = api.createCollectorController({ send: api.send, status() {}, snapshot: api.snapshot });
   const entries = [{ id: "tag", kind: "tag", name: "Tag", parentId: null }];
   const candidate = { mediaUrl: "https://pbs.twimg.com/media/A?format=jpg&name=orig", sourceUrl: "https://x.com/u/status/1" };
   controller.begin(candidate, { x: 0, y: 0 }, entries, api.radial.resetLayout(entries));
@@ -66,6 +66,7 @@ test("worker transport failures remain retryable", async () => {
   const controller = api.createCollectorController({
     send: api.send,
     status(message, retry) { statuses.push({ message, retry }); },
+    snapshot: api.snapshot,
   });
   const entries = [{ id: "tag", kind: "tag", name: "Tag", parentId: null }];
   const candidate = { mediaUrl: "https://pbs.twimg.com/media/A?format=jpg&name=orig", sourceUrl: "https://x.com/u/status/1" };
@@ -98,6 +99,22 @@ test("click suppression consumes only the first click after a radial drag", () =
   assert.equal(second.immediatePropagationStopped, false);
 });
 
+test("secondary ring expands on dwell and renders child slots", async () => {
+  const api = loadContent(async () => ({ ok: true, status: "added" }));
+  const controller = api.createCollectorController({ send: api.send, status() {}, snapshot: api.snapshot });
+  const entries = [
+    { id: "parent", kind: "root", name: "Parent", parentId: null },
+    { id: "child", kind: "tag", name: "Child", parentId: "parent" },
+  ];
+  const layout = api.radial.resetLayout(entries);
+  controller.begin({ mediaUrl: "https://x.com/img.jpg", sourceUrl: "https://x.com/u/1" }, { x: 100, y: 100 }, entries, layout);
+  controller.move({ x: 100, y: 16 }, 0);
+  controller.tick(300);
+  const lastSnapshot = api.lastSnapshot;
+  assert.notEqual(lastSnapshot.secondaryLevel, null);
+  assert.equal(lastSnapshot.secondaryLevel.slots[0].id, "child");
+});
+
 function loadContent(send) {
   const context = {
     globalThis: null,
@@ -108,10 +125,13 @@ function loadContent(send) {
   vm.runInNewContext(layoutSource, context, { filename: "layout.js" });
   vm.runInNewContext(gestureSource, context, { filename: "gesture.js" });
   vm.runInNewContext(contentSource, context, { filename: "content.js" });
+  let lastSnapshot = null;
   return {
     ...context.LakomicsContent,
     radial: context.LakomicsRadial,
     send,
+    snapshot(next) { lastSnapshot = next; },
+    get lastSnapshot() { return lastSnapshot; },
   };
 }
 
