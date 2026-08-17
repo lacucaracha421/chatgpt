@@ -53,7 +53,7 @@ test("secondary ring hit-test selects a child on release", () => {
   assert.deepEqual(plain(result), { type: "select", classificationId: "child-a" });
 });
 
-test("center entry closes the secondary ring and selects the parent on release", () => {
+test("center entry closes the secondary ring and cancels on release", () => {
   const session = createSession({ x: 100, y: 100 }, tree, layout);
   session.move(pointForPrimarySlot(0), 0);
   session.tick(300);
@@ -62,7 +62,7 @@ test("center entry closes the secondary ring and selects the parent on release",
   assert.equal(session.snapshot().secondaryLevel, null);
   assert.equal(session.snapshot().expandedParentId, null);
   const result = session.release();
-  assert.deepEqual(plain(result), { type: "select", classificationId: "parent" });
+  assert.deepEqual(plain(result), { type: "cancel" });
 });
 
 test("ring switch requires 300ms dwell on the new primary", () => {
@@ -92,6 +92,23 @@ test("childless primary does not expand on dwell", () => {
   session.tick(300);
   assert.equal(session.snapshot().secondaryLevel, null);
   assert.deepEqual(plain(session.release()), { type: "select", classificationId: "lonely" });
+});
+
+test("pinned first-level ring expands the pinned entry's actual children on dwell", () => {
+  const pinnedTree = [
+    { id: "game", kind: "root", name: "게임", parentId: null },
+    { id: "reverse", kind: "tag", name: "리버스", parentId: "game" },
+    { id: "reverse-child", kind: "tag", name: "리버스 하위", parentId: "reverse" },
+  ];
+  const pinnedLayout = context.LakomicsRadial.resetLayout(pinnedTree);
+  const session = createSession({ x: 100, y: 100 }, pinnedTree, pinnedLayout, ["reverse"]);
+  const primary = session.snapshot().primaryLevel;
+  const reverseIndex = primary.slots.findIndex((s) => s?.id === "reverse");
+  assert.notEqual(reverseIndex, -1);
+  session.move(pointForPrimarySlot(reverseIndex, primary.slotCount), 0);
+  session.tick(300);
+  assert.equal(session.snapshot().expandedParentId, "reverse");
+  assert.equal(session.snapshot().secondaryLevel.slots[0].id, "reverse-child");
 });
 
 test("dwell pages through exterior controls for the active ring", () => {

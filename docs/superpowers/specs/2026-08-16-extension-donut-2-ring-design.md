@@ -30,9 +30,9 @@ Redesign the radial classification donut so that:
 ### Second-level ring (secondary)
 
 - **Slot count**: Dynamic, equal to the number of children of the selected first-level item. If the count exceeds 12, the same page controls paginate.
-- **Radius**: Inner 130px, outer 185px. A 20px gap separates the first and second rings.
+- **Radius**: Inner 118px, outer 180px. An 8px gap separates the first and second rings for a tighter, connected look.
 - **Expansion trigger**: 300ms dwell on a first-level item that has children. Items without children do not trigger expansion — the pointer can be released immediately to select that item.
-- **Angular layout**: The selected first-level item's center angle is the anchor. Second-level sectors are distributed around the full circumference of the outer ring, centered on the anchor angle. This matches the legacy `buildOuterAngles` approach: the anchor is the first-level sector's center, and the outer sectors are evenly spaced across the full circle starting from that anchor.
+- **Angular layout**: The selected first-level item's center angle is the anchor. Second-level sectors are clustered in a partial fan arc centered on the anchor, with a small gap between sectors. The fan arc grows with the number of children: it is at least wide enough for each child to have 28° of angular room, and at most 220°. Denser classifications therefore get a visibly larger secondary donut area, while sparse classifications keep a compact fan.
 
 ### Center
 

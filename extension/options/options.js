@@ -10,6 +10,7 @@
   let path = [];
   let page = 0;
   let selectedIndex = null;
+  let pinnedIds = [];
 
   void initialize();
 
@@ -18,6 +19,8 @@
     status.textContent = settings.tokenConfigured ? "연결 키가 저장되어 있습니다." : "Lakomics에서 연결 키를 복사해 입력하세요.";
     const stored = await chrome.runtime.sendMessage({ type: "layout:get" });
     if (stored.ok) workingLayout = stored.layout;
+    const pinned = await chrome.runtime.sendMessage({ type: "pinned:get" });
+    if (pinned.ok) pinnedIds = pinned.pinnedIds;
   }
 
   refreshButton.addEventListener("click", async () => {
@@ -34,6 +37,7 @@
     }
     entries = response.entries;
     workingLayout = response.layout;
+    pinnedIds = response.pinnedIds;
     path = [];
     page = 0;
     selectedIndex = null;
@@ -43,8 +47,13 @@
 
   function renderEditor() {
     editor.replaceChildren();
+    if (path.length === 0 && !workingLayout.parents?.[LakomicsRadial.PINNED]) {
+      workingLayout = LakomicsRadial.reorderPinned(workingLayout, entries, pinnedIds);
+    }
     const parentId = path.at(-1)?.id ?? null;
-    const level = LakomicsRadial.getLevel(entries, workingLayout, parentId, page);
+    const level = path.length === 0
+      ? LakomicsRadial.getPinnedLevel(entries, workingLayout, pinnedIds, page)
+      : LakomicsRadial.getLevel(entries, workingLayout, parentId, page);
     page = level.page;
 
     const heading = document.createElement("div");
@@ -59,13 +68,15 @@
     radial.className = "radial-editor";
     level.slots.forEach((entry, slotIndex) => {
       const angle = -Math.PI / 2 + (Math.PI * 2 * slotIndex) / level.slotCount;
+      const x = `${Math.cos(angle) * 132}px`;
+      const y = `${Math.sin(angle) * 132}px`;
+      const globalIndex = level.page * level.slotCount + slotIndex;
       const button = document.createElement("button");
       button.type = "button";
       button.className = "radial-slot";
-      button.style.setProperty("--slot-x", `${Math.cos(angle) * 132}px`);
-      button.style.setProperty("--slot-y", `${Math.sin(angle) * 132}px`);
+      button.style.setProperty("--slot-x", x);
+      button.style.setProperty("--slot-y", y);
       button.textContent = entry?.name ?? "빈 슬롯";
-      const globalIndex = level.page * level.slotCount + slotIndex;
       button.classList.toggle("is-empty", !entry);
       button.classList.toggle("is-selected", selectedIndex === globalIndex);
       button.addEventListener("click", () => selectSlot(globalIndex, entry));
@@ -94,7 +105,75 @@
     const help = document.createElement("p");
     help.className = "editor-help";
     help.textContent = "분류 슬롯을 선택한 뒤 다른 슬롯을 누르면 두 위치를 바꿉니다. 빈 슬롯으로도 이동할 수 있습니다.";
-    editor.append(heading, radial, controls, help);
+    editor.append(heading, renderPinnedPanel(), radial, controls, help);
+  }
+
+  function renderPinnedPanel() {
+    const panel = document.createElement("div");
+    panel.className = "pinned-panel";
+
+    const title = document.createElement("strong");
+    title.textContent = "1차 도넛에 고정된 분류";
+    panel.append(title);
+
+    const pinnedEntries = pinnedIds
+      .map((id) => entries.find((entry) => entry.id === id))
+      .filter(Boolean);
+
+    if (pinnedEntries.length > 0) {
+      const list = document.createElement("div");
+      list.className = "pinned-list";
+      pinnedEntries.forEach((entry) => {
+        const item = document.createElement("div");
+        item.className = "pinned-item";
+        const name = document.createElement("span");
+        name.textContent = entry.name;
+        const removeButton = document.createElement("button");
+        removeButton.type = "button";
+        removeButton.textContent = "해제";
+        removeButton.addEventListener("click", () => {
+          pinnedIds = pinnedIds.filter((id) => id !== entry.id);
+          workingLayout = LakomicsRadial.reorderPinned(workingLayout, entries, pinnedIds);
+          renderEditor();
+        });
+        item.append(name, removeButton);
+        list.append(item);
+      });
+      panel.append(list);
+    } else {
+      const empty = document.createElement("p");
+      empty.className = "pinned-empty";
+      empty.textContent = "아직 고정된 분류가 없습니다.";
+      panel.append(empty);
+    }
+
+    const candidates = entries.filter((entry) => entry.parentId !== null && !pinnedIds.includes(entry.id));
+    if (candidates.length > 0) {
+      const addRow = document.createElement("div");
+      addRow.className = "pinned-add";
+      const select = document.createElement("select");
+      select.append(document.createElement("option"));
+      candidates.forEach((entry) => {
+        const option = document.createElement("option");
+        option.value = entry.id;
+        option.textContent = entry.name;
+        select.append(option);
+      });
+      const addButton = document.createElement("button");
+      addButton.type = "button";
+      addButton.textContent = "고정";
+      addButton.addEventListener("click", () => {
+        const id = select.value;
+        if (!id) return;
+        pinnedIds = [...pinnedIds, id];
+        workingLayout = LakomicsRadial.reorderPinned(workingLayout, entries, pinnedIds);
+        renderEditor();
+      });
+      addRow.append(select, addButton);
+      panel.append(addRow);
+    }
+
+    return panel;
   }
 
   function selectSlot(globalIndex, entry) {
@@ -104,7 +183,7 @@
     } else if (selectedIndex === globalIndex) {
       selectedIndex = null;
     } else {
-      const parentId = path.at(-1)?.id ?? null;
+      const parentId = path.length === 0 ? LakomicsRadial.PINNED : path.at(-1)?.id ?? null;
       workingLayout = LakomicsRadial.moveSlot(workingLayout, parentId, selectedIndex, globalIndex);
       selectedIndex = null;
     }
@@ -133,7 +212,14 @@
 
   async function saveLayout() {
     const response = await chrome.runtime.sendMessage({ type: "layout:set", layout: workingLayout });
-    status.textContent = response.ok ? "방사형 메뉴 배치를 저장했습니다." : "배치를 저장하지 못했습니다.";
+    if (!response.ok) {
+      status.textContent = "배치를 저장하지 못했습니다.";
+      return;
+    }
+    const pinned = await chrome.runtime.sendMessage({ type: "pinned:set", pinnedIds });
+    status.textContent = pinned.ok
+      ? "방사형 메뉴 배치와 고정 분류를 저장했습니다."
+      : "배치를 저장했지만 고정 분류를 저장하지 못했습니다.";
   }
 
   function controlButton(label, enabled, action) {

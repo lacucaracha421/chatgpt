@@ -6,12 +6,14 @@
   const CENTER_RADIUS = 42;
   const PRIMARY_INNER_RADIUS = 48;
   const PRIMARY_OUTER_RADIUS = 110;
-  const SECONDARY_INNER_RADIUS = 130;
-  const SECONDARY_OUTER_RADIUS = 185;
+  const SECONDARY_INNER_RADIUS = 118;
+  const SECONDARY_OUTER_RADIUS = 180;
   const CONTROL_RADIUS = 210;
   const CONTROL_HIT_HALF_HEIGHT = 72;
-  const SECONDARY_CLUSTER_ARC_MAX = (Math.PI / 180) * 120;
+  const SECONDARY_CLUSTER_ARC_MAX = (Math.PI / 180) * 140;
+  const SECONDARY_SECTOR_MIN_SPAN = (Math.PI / 180) * 28;
   const SECONDARY_SECTOR_GAP = (Math.PI / 180) * 2;
+  const SECONDARY_FULL_CIRCLE_THRESHOLD = 6;
 
   function primaryAngle(index, count) {
     return -Math.PI / 2 + (Math.PI * 2 * index) / count;
@@ -20,10 +22,14 @@
   function secondaryAngles(primaryIndex, primaryCount, secondaryCount) {
     const safeCount = Math.max(1, secondaryCount || 1);
     const anchor = primaryAngle(primaryIndex, primaryCount);
-    const arc = Math.min(SECONDARY_CLUSTER_ARC_MAX, (Math.PI * 2 * safeCount) / Math.max(primaryCount, 1));
     const gap = SECONDARY_SECTOR_GAP;
+    const useFullCircle = safeCount > SECONDARY_FULL_CIRCLE_THRESHOLD;
+    const maxArc = useFullCircle ? Math.PI * 2 : SECONDARY_CLUSTER_ARC_MAX;
+    const naturalArc = (Math.PI * 2 * safeCount) / Math.max(primaryCount, 1);
+    const minArc = safeCount * SECONDARY_SECTOR_MIN_SPAN + gap * (safeCount - 1);
+    const arc = Math.min(maxArc, Math.max(naturalArc, minArc));
     const sectorSpan = (arc - gap * (safeCount - 1)) / safeCount;
-    const startAngle = anchor - arc / 2;
+    const startAngle = useFullCircle ? -Math.PI / 2 : anchor - arc / 2;
     const angles = [];
     for (let i = 0; i < safeCount; i++) {
       const start = startAngle + i * (sectorSpan + gap);
@@ -46,7 +52,7 @@
     return a >= s || a <= e;
   }
 
-  function createSession(origin, entries, layout) {
+  function createSession(origin, entries, layout, pinnedIds = []) {
     let opened = false;
     let expandedParentId = null;
     let lastExpandedParentId = null;
@@ -93,9 +99,6 @@
       }
       if (hover?.type === "primary-slot" && hover.entry) {
         return { type: "select", classificationId: hover.entry.id };
-      }
-      if (hover?.type === "center" && lastExpandedParentId) {
-        return { type: "select", classificationId: lastExpandedParentId };
       }
       if (hover?.type === "center") {
         return { type: "cancel" };
@@ -179,7 +182,7 @@
     }
 
     function currentPrimaryLevel() {
-      return globalThis.LakomicsRadial.getLevel(entries, layout, null, primaryPage);
+      return globalThis.LakomicsRadial.getPinnedLevel(entries, layout, pinnedIds, primaryPage);
     }
 
     function currentSecondaryLevel() {

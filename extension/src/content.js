@@ -5,10 +5,10 @@
     let active = null;
     let failedPayload = null;
 
-    function begin(candidate, origin, entries, layout) {
+    function begin(candidate, origin, entries, layout, pinnedIds = []) {
       active = {
         candidate,
-        session: globalThis.LakomicsGesture.createSession(origin, entries, layout),
+        session: globalThis.LakomicsGesture.createSession(origin, entries, layout, pinnedIds),
       };
       return active.session.snapshot();
     }
@@ -230,6 +230,7 @@
         pointer.origin,
         pointer.classifications.entries,
         pointer.classifications.layout,
+        pointer.classifications.pinnedIds,
       );
       scheduleDwell(controller.move(pointer.latest, pointer.latestTime));
     }

@@ -2,6 +2,7 @@
   "use strict";
 
   const ROOT = "__root__";
+  const PINNED = "__pinned__";
 
   function slotCount(childCount) {
     return childCount <= 6 ? 6 : 12;
@@ -66,6 +67,51 @@
     return next;
   }
 
+  function isFirstLevelVisible(entry, pinnedIds) {
+    return entry?.parentId === null || pinnedIds?.has(entry.id);
+  }
+
+  function getPinnedLevel(entries, layout, pinnedIds, requestedPage) {
+    const pinnedSet = new Set(Array.isArray(pinnedIds) ? pinnedIds : []);
+    const children = entries.filter((entry) => isFirstLevelVisible(entry, pinnedSet));
+    const count = slotCount(children.length);
+    const pages = reconcileParent(children, layout?.parents?.[PINNED]);
+    const pageCount = Math.max(1, pages.length);
+    const page = Math.min(Math.max(0, Number(requestedPage) || 0), pageCount - 1);
+    const byId = new Map(children.map((entry) => [entry.id, entry]));
+    const ids = [...(pages[page] ?? [])];
+    while (ids.length < count) ids.push(null);
+    return {
+      parentId: PINNED,
+      page,
+      pageCount,
+      slotCount: count,
+      slots: ids.slice(0, count).map((id) => id ? byId.get(id) ?? null : null),
+    };
+  }
+
+  function reorderPinned(layout, entries, pinnedIds) {
+    const pinnedSet = new Set(Array.isArray(pinnedIds) ? pinnedIds : []);
+    const children = entries.filter((entry) => isFirstLevelVisible(entry, pinnedSet));
+    const count = slotCount(children.length);
+    const pages = layout?.parents?.[PINNED] ?? [Array(count).fill(null)];
+    const oldFlat = pages.flat();
+    const byId = new Map(children.map((entry) => [entry.id, entry]));
+    const ordered = [];
+    for (const id of oldFlat) {
+      if (id && byId.has(id)) { ordered.push(id); byId.delete(id); }
+    }
+    for (const entry of children) {
+      if (byId.has(entry.id)) { ordered.push(entry.id); byId.delete(entry.id); }
+    }
+    const pageCount = Math.max(1, Math.ceil(ordered.length / count));
+    const capacity = pageCount * count;
+    while (ordered.length < capacity) ordered.push(null);
+    const next = JSON.parse(JSON.stringify(layout));
+    next.parents[PINNED] = chunk(ordered, count);
+    return next;
+  }
+
   function reconcileParent(children, storedPages) {
     const count = slotCount(children.length);
     const pageCount = Math.max(1, Math.ceil(children.length / count));
@@ -120,10 +166,13 @@
 
   globalThis.LakomicsRadial = {
     ROOT,
+    PINNED,
     slotCount,
     reconcileLayout,
     resetLayout,
     getLevel,
+    getPinnedLevel,
+    reorderPinned,
     moveSlot,
   };
 })();

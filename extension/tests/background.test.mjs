@@ -90,6 +90,57 @@ test("reconciles and stores layout without exposing storage to page scripts", as
   assert.deepEqual(plain(harness.storage.radialLayout), plain(response.layout));
 });
 
+test("pinned:get and pinned:set round-trip classification ids in storage", async () => {
+  const harness = createHarness({ connectionToken: "0123456789abcdef0123456789abcdef" });
+
+  const before = await harness.api.handleMessage({ type: "pinned:get" });
+  assert.deepEqual(plain(before), { ok: true, pinnedIds: [] });
+
+  const set = await harness.api.handleMessage({ type: "pinned:set", pinnedIds: ["reverse"] });
+  assert.deepEqual(plain(set), { ok: true });
+
+  const after = await harness.api.handleMessage({ type: "pinned:get" });
+  assert.deepEqual(plain(after), { ok: true, pinnedIds: ["reverse"] });
+  assert.deepEqual(harness.storage.pinnedClassificationIds, ["reverse"]);
+});
+
+test("pinned:set rejects non-array pinnedIds", async () => {
+  const harness = createHarness();
+
+  const response = await harness.api.handleMessage({ type: "pinned:set", pinnedIds: "reverse" });
+
+  assert.deepEqual(plain(response), { ok: false, code: "invalid_pinned" });
+});
+
+test("classifications:refresh includes persisted pinned ids", async () => {
+  const harness = createHarness({
+    connectionToken: "0123456789abcdef0123456789abcdef",
+    pinnedClassificationIds: ["reverse"],
+  });
+  harness.queueJson({ entries: [] });
+
+  const response = await harness.api.handleMessage({ type: "classifications:refresh" });
+
+  assert.equal(response.ok, true);
+  assert.deepEqual(response.pinnedIds, ["reverse"]);
+});
+
+test("classifications:get serves fresh pinned ids after pinned:set without cache staleness", async () => {
+  const harness = createHarness({ connectionToken: "0123456789abcdef0123456789abcdef" });
+  harness.queueJson({ entries: [] });
+
+  const before = await harness.api.handleMessage({ type: "classifications:get" });
+  assert.deepEqual(plain(before.pinnedIds), []);
+
+  const set = await harness.api.handleMessage({ type: "pinned:set", pinnedIds: ["reverse"] });
+  assert.deepEqual(plain(set), { ok: true });
+
+  const after = await harness.api.handleMessage({ type: "classifications:get" });
+  assert.equal(after.ok, true);
+  assert.deepEqual(plain(after.pinnedIds), ["reverse"]);
+  assert.equal(harness.fetchCalls.length, 1);
+});
+
 test("toolbar click opens the extension options page", async () => {
   const harness = createHarness();
 

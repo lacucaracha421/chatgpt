@@ -74,6 +74,64 @@ test("swaps occupied and empty slots without changing the tree", () => {
   assert.equal(layout.parents.__root__[0][0], "id-0");
 });
 
+test("combines roots and pinned children into the pinned first-level ring", () => {
+  const pinnedEntries = [
+    { id: "game", name: "게임", parentId: null },
+    { id: "reverse", name: "리버스", parentId: "game" },
+    { id: "manga", name: "만화", parentId: null },
+    { id: "zenless", name: "젠레스", parentId: "game" },
+  ];
+  const pinnedLayout = layoutApi.resetLayout(pinnedEntries);
+
+  assert.equal(layoutApi.PINNED, "__pinned__");
+
+  const level = layoutApi.getPinnedLevel(pinnedEntries, pinnedLayout, ["reverse", "zenless"], 0);
+  assert.equal(level.slotCount, 6);
+  assert.deepEqual(
+    [...level.slots.map((s) => s?.id ?? null)].sort(),
+    [...["game", "manga", "reverse", "zenless", null, null]].sort(),
+  );
+});
+
+test("reorderPinned preserves stored order, drops stale ids, and appends newly visible ids", () => {
+  const pinnedEntries = [
+    { id: "game", name: "게임", parentId: null },
+    { id: "reverse", name: "리버스", parentId: "game" },
+    { id: "manga", name: "만화", parentId: null },
+    { id: "zenless", name: "젠레스", parentId: "game" },
+  ];
+  const pinnedLayout = {
+    version: 1,
+    parents: {
+      __pinned__: [["game", "stale", "reverse", "zenless", null, null]],
+    },
+  };
+
+  const reordered = layoutApi.reorderPinned(pinnedLayout, pinnedEntries, ["reverse", "zenless"]);
+
+  assert.deepEqual(plain(reordered.parents.__pinned__), [["game", "reverse", "zenless", "manga", null, null]]);
+});
+
+test("reorderPinned rebuilds pinned pages without mutating the input layout", () => {
+  const pinnedEntries = [
+    { id: "game", name: "게임", parentId: null },
+    { id: "reverse", name: "리버스", parentId: "game" },
+    { id: "manga", name: "만화", parentId: null },
+    { id: "zenless", name: "젠레스", parentId: "game" },
+  ];
+  const pinnedLayout = layoutApi.resetLayout(pinnedEntries);
+
+  const reordered = layoutApi.reorderPinned(pinnedLayout, pinnedEntries, ["reverse", "zenless"]);
+  const ids = reordered.parents.__pinned__.flat();
+  assert.equal(ids.length, 6);
+  assert.equal(ids.filter(Boolean).length, 4);
+  assert.ok(ids.includes("game"));
+  assert.ok(ids.includes("manga"));
+  assert.ok(ids.includes("reverse"));
+  assert.ok(ids.includes("zenless"));
+  assert.equal(pinnedLayout.parents.__pinned__, undefined);
+});
+
 function entries(count) {
   return Array.from({ length: count }, (_, index) => ({
     id: `id-${index}`,

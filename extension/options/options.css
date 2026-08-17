@@ -113,6 +113,80 @@ button:hover {
   border-color: #70a9f0;
 }
 
+.pinned-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  background: #1f1f24;
+  border: 1px solid #34343a;
+  border-radius: 10px;
+}
+
+.pinned-panel strong {
+  font-size: 14px;
+  color: #f4f4f5;
+}
+
+.pinned-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pinned-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  background: #26262c;
+  border: 1px solid #44444d;
+  border-radius: 8px;
+}
+
+.pinned-item span {
+  font-size: 13px;
+}
+
+.pinned-item button {
+  min-height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
+  color: #f4f4f5;
+  background: transparent;
+  border: 1px solid #525560;
+  border-radius: 6px;
+}
+
+.pinned-item button:hover {
+  background: #32323a;
+}
+
+.pinned-empty {
+  margin: 0;
+  color: #777782;
+  font-size: 13px;
+}
+
+.pinned-add {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.pinned-add select {
+  flex: 1;
+  min-height: 34px;
+  padding: 0 8px;
+  color: #f4f4f5;
+  background: #26262c;
+  border: 1px solid #44444d;
+  border-radius: 8px;
+}
+
+.pinned-add button {
+  min-height: 34px;
+}
+
 .radial-center {
   position: absolute;
   top: 50%;

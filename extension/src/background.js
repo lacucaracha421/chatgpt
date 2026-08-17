@@ -46,6 +46,14 @@
         return classifications(false);
       case "classifications:refresh":
         return classifications(true);
+      case "pinned:get":
+        return { ok: true, pinnedIds: await loadPinned() };
+      case "pinned:set": {
+        if (!Array.isArray(message.pinnedIds)) return { ok: false, code: "invalid_pinned" };
+        await chrome.storage.local.set({ pinnedClassificationIds: message.pinnedIds });
+        if (classificationCache) classificationCache.pinnedIds = message.pinnedIds;
+        return { ok: true };
+      }
       case "ingestion:create":
         return apiRequest("/v1/ingestions", {
           method: "POST",
@@ -69,9 +77,14 @@
     if (JSON.stringify(layout) !== JSON.stringify(radialLayout)) {
       await chrome.storage.local.set({ radialLayout: layout });
     }
-    classificationCache = { entries, layout };
+    classificationCache = { entries, layout, pinnedIds: await loadPinned() };
     classificationCachedAt = now;
     return { ok: true, ...classificationCache };
+  }
+
+  async function loadPinned() {
+    const { pinnedClassificationIds } = await chrome.storage.local.get(["pinnedClassificationIds"]);
+    return Array.isArray(pinnedClassificationIds) ? pinnedClassificationIds : [];
   }
 
   function validLayout(layout) {
