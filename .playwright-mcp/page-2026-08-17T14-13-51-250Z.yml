@@ -1,0 +1,31 @@
+- main [ref=f3e2]:
+  - heading "Lakomics X Collector" [level=1] [ref=f3e3]
+  - region [ref=f3e4]:
+    - heading "Lakomics 연결" [level=2] [ref=f3e5]
+    - generic [ref=f3e6]: 연결 키
+    - generic [ref=f3e7]:
+      - textbox "연결 키" [ref=f3e8]
+      - button "저장하고 연결" [active] [ref=f3e9] [cursor=pointer]
+    - status [ref=f3e10]: 연결됨 · 분류 4개
+  - region [ref=f3e11]:
+    - heading "방사형 메뉴 배치" [level=2] [ref=f3e12]
+    - generic [ref=f3e13]:
+      - generic [ref=f3e14]:
+        - strong [ref=f3e15]: 최상위 분류
+        - generic [ref=f3e16]: 1 / 1 페이지
+      - generic [ref=f3e17]:
+        - button "게임" [ref=f3e18] [cursor=pointer]
+        - button "만화" [ref=f3e19] [cursor=pointer]
+        - button "빈 슬롯" [ref=f3e20] [cursor=pointer]
+        - button "빈 슬롯" [ref=f3e21] [cursor=pointer]
+        - button "빈 슬롯" [ref=f3e22] [cursor=pointer]
+        - button "빈 슬롯" [ref=f3e23] [cursor=pointer]
+        - generic [ref=f3e24]: ROOT
+      - generic [ref=f3e25]:
+        - button "이전 페이지" [disabled] [ref=f3e26]
+        - button "다음 페이지" [disabled] [ref=f3e27]
+        - button "한 단계 위" [disabled] [ref=f3e28]
+        - button "선택한 분류 열기" [disabled] [ref=f3e29]
+        - button "자동 배치로 초기화" [ref=f3e30] [cursor=pointer]
+        - button "배치 저장" [ref=f3e31] [cursor=pointer]
+      - paragraph [ref=f3e32]: 분류 슬롯을 선택한 뒤 다른 슬롯을 누르면 두 위치를 바꿉니다. 빈 슬롯으로도 이동할 수 있습니다.

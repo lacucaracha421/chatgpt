@@ -53,7 +53,8 @@ const COLLECTION_SUMMARY_SQL: &str = "SELECT
     collection.external_synced_at,
     collection.showcase,
     collection.created_at,
-    collection.updated_at
+    collection.updated_at,
+    collection.source_path
 FROM collections AS collection";
 
 impl Library {
@@ -117,13 +118,17 @@ impl Library {
                      year = ?4, author = ?5, director = ?6,
                      external_score = ?7, my_score = ?8,
                      genres = ?9, overview = ?10,
-                     updated_at = ?11
-                 WHERE id = ?12",
+                     external_id = ?11, external_source = ?12,
+                     external_synced_at = CASE WHEN ?11 IS NOT NULL THEN ?13 ELSE external_synced_at END,
+                     updated_at = ?14
+                 WHERE id = ?15",
                 params![
                     name, description, type_str,
                     request.year, request.author, request.director,
                     request.external_score, request.my_score,
                     request.genres, request.overview,
+                    request.external_id, request.external_source,
+                    chrono::Utc::now().to_rfc3339(),
                     chrono::Utc::now().to_rfc3339(), id
                 ],
             )
@@ -261,7 +266,7 @@ impl Library {
     }
 }
 
-fn normalized_name(name: String) -> Result<String, LibraryError> {
+pub(crate) fn normalized_name(name: String) -> Result<String, LibraryError> {
     let name = name.trim().to_owned();
     if name.is_empty() {
         return Err(LibraryError::EmptyCollectionName);
@@ -298,7 +303,7 @@ fn require_collection(connection: &Connection, id: &str) -> Result<(), LibraryEr
     }
 }
 
-fn collection_by_id(connection: &Connection, id: &str) -> Result<CollectionSummary, LibraryError> {
+pub(crate) fn collection_by_id(connection: &Connection, id: &str) -> Result<CollectionSummary, LibraryError> {
     let sql = format!("{COLLECTION_SUMMARY_SQL} WHERE collection.id = ?1");
     connection
         .query_row(&sql, [id], collection_from_row)
@@ -334,10 +339,11 @@ fn collection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollectionSu
         showcase: showcase_int != 0,
         created_at: row.get(17)?,
         updated_at: row.get(18)?,
+        source_path: row.get(19)?,
     })
 }
 
-fn collection_type_str(collection_type: CollectionType) -> &'static str {
+pub(crate) fn collection_type_str(collection_type: CollectionType) -> &'static str {
     match collection_type {
         CollectionType::Game => "game",
         CollectionType::Manga => "manga",
@@ -399,6 +405,8 @@ mod tests {
                     my_score: None,
                     genres: None,
                     overview: None,
+                    external_id: None,
+                    external_source: None,
                 },
             )
             .unwrap();
@@ -636,6 +644,8 @@ mod tests {
                     my_score: Some(9),
                     genres: None,
                     overview: None,
+                    external_id: None,
+                    external_source: None,
                 },
             )
             .unwrap();

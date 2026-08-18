@@ -53,7 +53,9 @@ pub(crate) fn media_response_with_range(
             | LibraryError::MediaNotFound
             | LibraryError::UnsafeMediaPath
             | LibraryError::MangaRootNotSet
-            | LibraryError::MangaSeriesNotFound,
+            | LibraryError::MangaSeriesNotFound
+            | LibraryError::CollectionSourceRootNotSet
+            | LibraryError::CollectionSourcePathNotSet,
         ) => empty_response(StatusCode::NOT_FOUND),
         Err(_) => empty_response(StatusCode::INTERNAL_SERVER_ERROR),
     }

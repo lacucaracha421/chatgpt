@@ -1,0 +1,7 @@
+[     267ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:8765/options-harness.html:0
+[     283ms] [ERROR] Failed to load resource: the server responded with a status of 404 (File not found) @ http://127.0.0.1:8765/favicon.ico:0
+[    5635ms] TypeError: Cannot read properties of null (reading 'id')
+    at http://127.0.0.1:8765/extension/options/options.js:82:49
+    at Array.forEach (<anonymous>)
+    at renderEditor (http://127.0.0.1:8765/extension/options/options.js:66:17)
+    at HTMLButtonElement.<anonymous> (http://127.0.0.1:8765/extension/options/options.js:45:5)

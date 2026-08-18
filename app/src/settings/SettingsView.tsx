@@ -16,11 +16,12 @@ type SettingsViewProps = {
   onExit: () => void;
   onImportFolder?: (folder: string) => Promise<boolean>;
   metadataImportRunning?: boolean;
+  onCollectionsChanged?: () => void;
 };
 
 const METADATA_IMPORT_FOLDER_KEY = "lakomics.metadataImportFolder";
 
-export function SettingsView({ restoring, onRestore, onExit, onImportFolder, metadataImportRunning = false }: SettingsViewProps) {
+export function SettingsView({ restoring, onRestore, onExit, onImportFolder, metadataImportRunning = false, onCollectionsChanged }: SettingsViewProps) {
   const { error: libraryError, gateway, library, openLibrary } = useLibrary();
   const [section, setSection] = useState<"general" | "browser_extension" | "metadata_import" | "safety" | "shortcuts">("general");
   const [lastImportFolder, setLastImportFolder] = useState(() => localStorage.getItem(METADATA_IMPORT_FOLDER_KEY));
@@ -40,6 +41,9 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [switchingLibrary, setSwitchingLibrary] = useState(false);
   useAutoDismiss(extensionError, setExtensionError);
   useAutoDismiss(copyMessage, setCopyMessage);
+  const [bookImportRunning, setBookImportRunning] = useState(false);
+  const [bookImportMessage, setBookImportMessage] = useState<string | null>(null);
+  useAutoDismiss(bookImportMessage, setBookImportMessage);
   const pending = restoring || submitting;
 
   useEffect(() => {
@@ -120,6 +124,25 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     }
   }
 
+  async function chooseBookImportFolder() {
+    if (bookImportRunning) return;
+    const selected = await open({ directory: true, multiple: false });
+    if (typeof selected !== "string") return;
+    setBookImportRunning(true);
+    setBookImportMessage(null);
+    try {
+      const report = await gateway.importBookCollections(selected);
+      setBookImportMessage(
+        `컬렉션 가져오기 완료: 스캔 ${report.scanned}개, 생성 ${report.created}개, 건너뜀 ${report.skipped}개${report.errors.length ? `, 오류 ${report.errors.length}개` : ""}`,
+      );
+      if (report.created > 0) onCollectionsChanged?.();
+    } catch (error) {
+      setBookImportMessage(commandErrorMessage(error, "컬렉션을 가져오지 못했습니다."));
+    } finally {
+      setBookImportRunning(false);
+    }
+  }
+
   async function copyExtensionToken() {
     if (!extensionConnection?.token) return;
     try {
@@ -172,6 +195,14 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           <dd className="settings-view__path">{mangaRoot ?? "설정되지 않음"}</dd>
           <Button size="sm" onClick={() => void chooseMangaFolder()}>변경</Button>
           {mangaRootError && <dd className="settings-view__row-message" role="alert">{mangaRootError}</dd>}
+        </dl>
+        <dl className="settings-view__property">
+          <dt>컬렉션 가져오기</dt>
+          <dd className="settings-view__path">book 폴더의 info.txt에서 게임/만화/영화 컬렉션을 가져옵니다.</dd>
+          <Button size="sm" disabled={bookImportRunning} onClick={() => void chooseBookImportFolder()}>
+            {bookImportRunning ? "가져오는 중…" : "폴더 선택"}
+          </Button>
+          {bookImportMessage && <dd className="settings-view__row-message" role="alert">{bookImportMessage}</dd>}
         </dl>
       </div>
     )}

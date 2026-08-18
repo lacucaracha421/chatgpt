@@ -367,6 +367,8 @@ pub struct CollectionSummary {
     pub showcase: bool,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -392,6 +394,10 @@ pub struct UpdateCollection {
     pub my_score: Option<i64>,
     pub genres: Option<String>,
     pub overview: Option<String>,
+    #[serde(default)]
+    pub external_id: Option<String>,
+    #[serde(default)]
+    pub external_source: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

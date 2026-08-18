@@ -445,6 +445,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag }: { lib
                     onExit={() => { setView(settingsReturnViewRef.current); }}
                     onImportFolder={beginMetadataImport}
                     metadataImportRunning={metadataImportWorks.some((work) => work.status === "running")}
+                    onCollectionsChanged={refreshCollections}
                   />
                 ) : view.kind === "similarity_review" ? (
                   <SimilarityReviewBrowser

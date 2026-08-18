@@ -58,7 +58,7 @@ function gateway(): LibraryGateway {
     listMangaSeries: vi.fn().mockResolvedValue([]),
     ingestMedia: vi.fn(),
     preparePendingVideos: vi.fn(),
-    retryVideoPreparation: vi.fn(),
+    retryVideoPreparation: vi.fn(), inspectBookImport: vi.fn(), importBookCollections: vi.fn(),
   };
 }
 

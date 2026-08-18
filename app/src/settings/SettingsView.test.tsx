@@ -126,7 +126,7 @@ it("uses desktop settings navigation and compact property rows", async () => {
   expect(navigation).toHaveClass("settings-view__navigation");
   expect(screen.getByRole("button", { name: "일반" })).toHaveAttribute("aria-current", "page");
   expect(screen.getByRole("heading", { name: "일반" })).toBeInTheDocument();
-  expect(container.querySelectorAll(".settings-view__property")).toHaveLength(3);
+  expect(container.querySelectorAll(".settings-view__property")).toHaveLength(4);
 
   await userEvent.click(screen.getByRole("button", { name: "메타데이터 가져오기" }));
   expect(screen.getByRole("heading", { name: "메타데이터 가져오기" })).toBeInTheDocument();
@@ -241,7 +241,7 @@ function createGateway(): LibraryGateway {
     listSimilarityReviews: vi.fn(), decideSimilarityReview: vi.fn(), getAsset: vi.fn(), updateAssetMetadata: vi.fn(), setAssetFavorite: vi.fn(), setAssetsFavorite: vi.fn(),
     getAssetClassifications: vi.fn(), setAssetClassification: vi.fn(), patchAssetAlbums: vi.fn(), getAssetAlbums: vi.fn().mockResolvedValue([]), ingestMedia: vi.fn(),
     listCollections: vi.fn().mockResolvedValue([]), createCollection: vi.fn(), updateCollection: vi.fn(), deleteCollection: vi.fn(), setCollectionCover: vi.fn(), setCollectionShowcase: vi.fn(), getAssetCollections: vi.fn().mockResolvedValue([]), patchAssetCollections: vi.fn(),
-    preparePendingVideos: vi.fn(), retryVideoPreparation: vi.fn(),
+    preparePendingVideos: vi.fn(), retryVideoPreparation: vi.fn(), inspectBookImport: vi.fn(), importBookCollections: vi.fn(),
     getMangaRoot: vi.fn().mockResolvedValue(null), setMangaRoot: vi.fn().mockResolvedValue(undefined), scanManga: vi.fn().mockResolvedValue(0), listMangaSeries: vi.fn().mockResolvedValue([]),
     trashAssets: vi.fn(), restoreAsset: vi.fn(), restoreAssets: vi.fn(),
     listTrash: vi.fn(), emptyTrash: vi.fn(), getTrashPolicy: vi.fn(), setTrashPolicy: vi.fn(),

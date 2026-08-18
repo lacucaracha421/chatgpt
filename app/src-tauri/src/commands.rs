@@ -5,6 +5,7 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::library::{
+    book_migration::{BookImportPlan, BookMigrationReport},
     error::LibraryError,
     metadata_import::{self, MetadataImportPlan},
     models::{
@@ -114,6 +115,8 @@ impl From<LibraryError> for CommandError {
             LibraryError::VideoToolUnavailable => "video_tool_unavailable",
             LibraryError::WriteAsset { .. } => "write_asset_failed",
             LibraryError::MangaRootNotSet => "manga_root_not_set",
+            LibraryError::CollectionSourceRootNotSet => "collection_source_root_not_set",
+            LibraryError::CollectionSourcePathNotSet => "collection_source_path_not_set",
             LibraryError::MangaSeriesNotFound => "manga_series_not_found",
         };
         Self { code, message }
@@ -704,6 +707,28 @@ pub async fn scan_manga(state: State<'_, AppState>) -> Result<u64, CommandError>
 pub fn list_manga_series(state: State<'_, AppState>) -> Result<Vec<MangaSeries>, CommandError> {
     let library = current_required(state)?;
     library.list_manga_series().map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn inspect_book_import(
+    root: String,
+    state: State<'_, AppState>,
+) -> Result<BookImportPlan, CommandError> {
+    let library = current_required(state)?;
+    library
+        .inspect_book_import(&root)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn import_book_collections(
+    root: String,
+    state: State<'_, AppState>,
+) -> Result<BookMigrationReport, CommandError> {
+    let library = current_required(state)?;
+    library
+        .import_book_collections(&root)
+        .map_err(CommandError::from)
 }
 
 fn background_task_error() -> CommandError {

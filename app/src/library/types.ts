@@ -354,4 +354,39 @@ export interface LibraryGateway {
   ingestMedia(input: IngestMediaInput): Promise<IngestOutcome>;
   preparePendingVideos(limit: number): Promise<VideoPreparationProgress>;
   retryVideoPreparation(assetId: string): Promise<void>;
+  inspectBookImport(root: string): Promise<BookImportPlan>;
+  importBookCollections(root: string): Promise<BookMigrationReport>;
 }
+
+export type BookImportEntry = {
+  folder: string;
+  collectionType: CollectionType;
+  name: string;
+  year: number | null;
+  author: string | null;
+  director: string | null;
+  myScore: number | null;
+  genres: string | null;
+  overview: string | null;
+  externalId: string | null;
+  externalSource: string | null;
+};
+
+export type BookMigrationError = {
+  folder: string;
+  message: string;
+};
+
+export type BookImportPlan = {
+  root: string;
+  entries: BookImportEntry[];
+  skipped: BookMigrationError[];
+};
+
+export type BookMigrationReport = {
+  scanned: number;
+  created: number;
+  updated: number;
+  skipped: number;
+  errors: BookMigrationError[];
+};

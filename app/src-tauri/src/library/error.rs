@@ -174,6 +174,10 @@ pub enum LibraryError {
     },
     #[error("망가 루트 폴더가 설정되지 않았습니다")]
     MangaRootNotSet,
+    #[error("컬렉션 소스 루트가 설정되지 않았습니다")]
+    CollectionSourceRootNotSet,
+    #[error("컬렉션에 소스 경로가 설정되지 않았습니다")]
+    CollectionSourcePathNotSet,
     #[error("망가 시리즈를 찾을 수 없습니다")]
     MangaSeriesNotFound,
 }
