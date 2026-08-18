@@ -1,5 +1,0 @@
-- main [ref=e3]:
-  - region [ref=e4]:
-    - heading "Lakomics" [level=1] [ref=e5]
-    - paragraph [ref=e6]: 개인 미디어 라이브러리를 선택해 주세요.
-    - button "라이브러리 선택" [ref=e7] [cursor=pointer]
