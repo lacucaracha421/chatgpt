@@ -408,6 +408,14 @@ pub struct AssetCollectionPatch {
     pub remove_collection_ids: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CollectionCover {
+    pub file_name: String,
+    pub shelf: u8,
+    pub volume_label: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct LibrarySummary {

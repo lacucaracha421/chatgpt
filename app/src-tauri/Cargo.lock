@@ -2040,6 +2040,7 @@ dependencies = [
  "chrono",
  "drag",
  "image",
+ "regex",
  "rusqlite",
  "serde",
  "serde_json",

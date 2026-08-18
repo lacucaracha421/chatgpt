@@ -4,6 +4,7 @@ pub mod book_migration;
 mod backup;
 mod classification;
 mod collection;
+mod collection_source;
 mod db;
 mod drag_out;
 pub mod error;
@@ -42,6 +43,7 @@ pub enum MediaVariant {
     ScrubFrame(u32),
     MangaCover,
     MangaPage(u32),
+    CollectionCover,
 }
 
 #[derive(Debug)]
@@ -237,7 +239,7 @@ impl Library {
         self.open_manga_media(manga_root, folder.join(file_name))
     }
 
-    fn open_manga_media(
+    pub(crate) fn open_manga_media(
         &self,
         manga_root: &Path,
         absolute_path: PathBuf,
@@ -341,7 +343,9 @@ impl Library {
                         .then(|| directory.map(|path| format!("{path}/{frame_index:03}.webp")))
                         .flatten()
                 }),
-            MediaVariant::MangaCover | MediaVariant::MangaPage(_) => unreachable!(),
+            MediaVariant::MangaCover | MediaVariant::MangaPage(_) | MediaVariant::CollectionCover => {
+                unreachable!()
+            }
         };
         let relative_path = relative_path.ok_or(LibraryError::AssetNotFound)?;
         let canonical_root =

@@ -5,6 +5,7 @@ use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
 use super::collection::{collection_by_id, collection_type_str, normalized_name};
+use super::collection_source::set_collection_source_root;
 use super::error::LibraryError;
 use super::models::CollectionType;
 use super::Library;
@@ -38,6 +39,7 @@ pub struct BookImportPlan {
 #[serde(rename_all = "camelCase")]
 pub struct BookImportEntry {
     pub folder: String,
+    pub relative_path: String,
     pub collection_type: CollectionType,
     pub name: String,
     pub year: Option<i64>,
@@ -94,7 +96,8 @@ impl Library {
                         continue;
                     }
                     entries.push(BookImportEntry {
-                        folder: folder_name,
+                        folder: folder_name.clone(),
+                        relative_path: relative_path_for(&root_path, &entry.path()),
                         collection_type: parsed.collection_type,
                         name: parsed.name,
                         year: parsed.year,
@@ -131,6 +134,7 @@ impl Library {
     pub fn import_book_collections(&self, root: &str) -> Result<BookMigrationReport, LibraryError> {
         let plan = self.inspect_book_import(root)?;
         let connection = self.connection()?;
+        set_collection_source_root(&connection, Some(root))?;
         let mut report = BookMigrationReport {
             scanned: plan.entries.len() as u64 + plan.skipped.len() as u64,
             created: 0,
@@ -183,11 +187,11 @@ fn upsert_collection(
                 id, name, description, type, cover_asset_id,
                 year, author, director, external_score, my_score,
                 genres, overview, external_id, external_source, external_synced_at,
-                showcase, external_metadata_json, created_at, updated_at
+                showcase, external_metadata_json, created_at, updated_at, source_path
              ) VALUES (?1, ?2, NULL, ?3, NULL,
                 ?4, ?5, ?6, NULL, ?7,
                 ?8, ?9, ?10, ?11, ?12,
-                0, NULL, ?13, ?13)",
+                0, NULL, ?13, ?13, ?14)",
             params![
                 id,
                 name,
@@ -201,7 +205,8 @@ fn upsert_collection(
                 entry.external_id,
                 entry.external_source,
                 external_synced_at,
-                now
+                now,
+                entry.relative_path
             ],
         )
         .map_err(|e| map_duplicate_name_err(e, &entry.name))?;
@@ -313,6 +318,13 @@ fn trim_field(value: &str) -> String {
 
 fn folder_name(path: &Path) -> Option<String> {
     path.file_name().map(|n| n.to_string_lossy().into_owned())
+}
+
+fn relative_path_for(root: &Path, folder: &Path) -> String {
+    folder
+        .strip_prefix(root)
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_else(|_| folder.to_string_lossy().into_owned())
 }
 
 fn parse_key_value(raw: &str) -> Vec<(String, String)> {

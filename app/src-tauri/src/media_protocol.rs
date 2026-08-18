@@ -25,12 +25,41 @@ pub(crate) fn media_response_with_range(
     if method != Method::GET {
         return empty_response(StatusCode::METHOD_NOT_ALLOWED);
     }
-    let Some((variant, asset_id)) = parse_path(path) else {
+    let Some((variant, asset_id, file_name)) = parse_path(path) else {
         return empty_response(StatusCode::BAD_REQUEST);
     };
     let Some(library) = library else {
         return empty_response(StatusCode::NOT_FOUND);
     };
+
+    if matches!(variant, MediaVariant::CollectionCover) {
+        let file_name = file_name.unwrap_or_default();
+        return match library.collection_cover_media(&asset_id, &file_name) {
+            Ok(mut media) => {
+                let mut bytes = Vec::new();
+                if media.file.read_to_end(&mut bytes).is_err() {
+                    return empty_response(StatusCode::INTERNAL_SERVER_ERROR);
+                }
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .header(CONTENT_TYPE, media.mime)
+                    .header(CONTENT_LENGTH, media.length.to_string())
+                    .body(bytes)
+                    .expect("static media response is valid")
+            }
+            Err(
+                LibraryError::AssetNotFound
+                | LibraryError::MediaNotFound
+                | LibraryError::UnsafeMediaPath
+                | LibraryError::MangaRootNotSet
+                | LibraryError::MangaSeriesNotFound
+                | LibraryError::CollectionSourceRootNotSet
+                | LibraryError::CollectionSourcePathNotSet
+                | LibraryError::CollectionNotFound,
+            ) => empty_response(StatusCode::NOT_FOUND),
+            Err(_) => empty_response(StatusCode::INTERNAL_SERVER_ERROR),
+        };
+    }
 
     match library.resolve_media(&asset_id, variant) {
         Ok(media) if matches!(variant, MediaVariant::Playback) => {
@@ -113,35 +142,42 @@ fn parse_range(value: &str, total: u64) -> Option<(u64, u64)> {
     }
 }
 
-fn parse_path(path: &str) -> Option<(MediaVariant, String)> {
+fn parse_path(path: &str) -> Option<(MediaVariant, String, Option<String>)> {
     let mut segments = path.strip_prefix('/')?.split('/');
     let route = segments.next()?;
     let asset_id = percent_decode(segments.next()?)?;
     if uuid::Uuid::parse_str(&asset_id).is_err() {
         return None;
     }
-    let variant = match route {
-        "asset" if segments.next().is_none() => MediaVariant::Asset,
-        "thumbnail" if segments.next().is_none() => MediaVariant::Thumbnail,
-        "playback" if segments.next().is_none() => MediaVariant::Playback,
-        "manga-cover" if segments.next().is_none() => MediaVariant::MangaCover,
+    let (variant, file_name) = match route {
+        "asset" if segments.next().is_none() => (MediaVariant::Asset, None),
+        "thumbnail" if segments.next().is_none() => (MediaVariant::Thumbnail, None),
+        "playback" if segments.next().is_none() => (MediaVariant::Playback, None),
+        "manga-cover" if segments.next().is_none() => (MediaVariant::MangaCover, None),
         "manga-page" => {
             let page_index = segments.next()?.parse::<u32>().ok()?;
             if segments.next().is_some() {
                 return None;
             }
-            MediaVariant::MangaPage(page_index)
+            (MediaVariant::MangaPage(page_index), None)
+        }
+        "collection-cover" => {
+            let file_name = percent_decode(segments.next()?)?;
+            if segments.next().is_some() {
+                return None;
+            }
+            (MediaVariant::CollectionCover, Some(file_name))
         }
         "scrub-frame" => {
             let frame_index = segments.next()?.parse::<u32>().ok()?;
             if segments.next().is_some() {
                 return None;
             }
-            MediaVariant::ScrubFrame(frame_index)
+            (MediaVariant::ScrubFrame(frame_index), None)
         }
         _ => return None,
     };
-    Some((variant, asset_id))
+    Some((variant, asset_id, file_name))
 }
 
 fn percent_decode(value: &str) -> Option<String> {
