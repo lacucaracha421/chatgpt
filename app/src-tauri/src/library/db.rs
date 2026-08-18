@@ -31,7 +31,7 @@ pub fn open_database(path: &Path) -> Result<Connection, LibraryError> {
     let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
     match version {
         SCHEMA_VERSION => {}
-        version @ 0..=10 => {
+        version @ 0..=11 => {
             if version > 0 {
                 let root = path
                     .parent()
