@@ -10,11 +10,11 @@ use crate::library::{
     metadata_import::{self, MetadataImportPlan},
     models::{
         AlbumEntry, AssetAlbumPatch, AssetCollectionPatch, AssetCursor, AssetMetadataPatch,
-        AssetPage, AssetQuery, AssetSummary, ClassificationEntry, CollectionSummary,
-        CreateAlbum, CreateClassification, CreateCollection, IngestMediaRequest, IngestOutcome,
-        LibrarySummary, MangaSeries, MetadataBackup, PurgeSummary, SetAssetClassification,
-        SimilarityDecisionRequest, SimilarityIndexProgress, SimilarityReviewPage, TrashPage,
-        TrashPolicy, UpdateCollection, VideoPreparationProgress,
+        AssetPage, AssetQuery, AssetSummary, CollectionCover, ClassificationEntry,
+        CollectionSummary, CreateAlbum, CreateClassification, CreateCollection,
+        IngestMediaRequest, IngestOutcome, LibrarySummary, MangaSeries, MetadataBackup,
+        PurgeSummary, SetAssetClassification, SimilarityDecisionRequest, SimilarityIndexProgress,
+        SimilarityReviewPage, TrashPage, TrashPolicy, UpdateCollection, VideoPreparationProgress,
     },
     Library,
 };
@@ -728,6 +728,38 @@ pub fn import_book_collections(
     let library = current_required(state)?;
     library
         .import_book_collections(&root)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn get_collection_source_root(
+    state: State<'_, AppState>,
+) -> Result<Option<String>, CommandError> {
+    let library = current_required(state)?;
+    library
+        .collection_source_root()
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn set_collection_source_root(
+    path: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    library
+        .set_collection_source_root(path.as_deref())
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn list_collection_covers(
+    collection_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<CollectionCover>, CommandError> {
+    let library = current_required(state)?;
+    library
+        .list_collection_covers(&collection_id)
         .map_err(CommandError::from)
 }
 

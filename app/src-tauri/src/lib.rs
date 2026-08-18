@@ -96,6 +96,9 @@ pub fn run() {
             commands::list_manga_series,
             commands::inspect_book_import,
             commands::import_book_collections,
+            commands::get_collection_source_root,
+            commands::set_collection_source_root,
+            commands::list_collection_covers,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
