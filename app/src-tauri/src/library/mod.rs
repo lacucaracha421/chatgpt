@@ -1,5 +1,6 @@
 mod album;
 mod asset_metadata;
+pub mod book_migration;
 mod backup;
 mod classification;
 mod collection;
@@ -465,6 +466,6 @@ mod tests {
             .unwrap()
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 11);
+        assert_eq!(version, 12);
     }
 }

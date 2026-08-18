@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 11;
+pub(crate) const SCHEMA_VERSION: i64 = 12;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -19,6 +19,8 @@ const ASSET_SOURCE_PROVENANCE_SCHEMA: &str =
 const COLLECTIONS_SCHEMA: &str = include_str!("../../migrations/0010_collections.sql");
 const COLLECTIONS_TYPED_SCHEMA: &str =
     include_str!("../../migrations/0011_collections_typed_metadata.sql");
+const COLLECTION_SOURCE_SCHEMA: &str =
+    include_str!("../../migrations/0012_collection_source.sql");
 
 pub fn open_database(path: &Path) -> Result<Connection, LibraryError> {
     let mut connection = Connection::open(path)?;
@@ -80,6 +82,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         }
         if version <= 10 {
             transaction.execute_batch(COLLECTIONS_TYPED_SCHEMA)?;
+        }
+        if version <= 11 {
+            transaction.execute_batch(COLLECTION_SOURCE_SCHEMA)?;
         }
         transaction.commit()?;
         Ok::<(), LibraryError>(())
@@ -152,7 +157,7 @@ mod tests {
             connection
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
-            11
+            12
         );
     }
 
@@ -204,7 +209,7 @@ mod tests {
             connection
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
-            11
+            12
         );
     }
 
@@ -248,7 +253,7 @@ mod tests {
             connection
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
-            11
+            12
         );
     }
 
@@ -287,7 +292,7 @@ mod tests {
             connection
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
-            11
+            12
         );
         connection
             .execute(
