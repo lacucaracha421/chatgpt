@@ -64,6 +64,7 @@ export type CollectionSummary = {
   showcase: boolean;
   createdAt: string;
   updatedAt: string;
+  sourcePath?: string | null;
 };
 
 export type CreateCollection = {
@@ -356,6 +357,9 @@ export interface LibraryGateway {
   retryVideoPreparation(assetId: string): Promise<void>;
   inspectBookImport(root: string): Promise<BookImportPlan>;
   importBookCollections(root: string): Promise<BookMigrationReport>;
+  getCollectionSourceRoot(): Promise<string | null>;
+  setCollectionSourceRoot(path: string | null): Promise<void>;
+  listCollectionCovers(collectionId: string): Promise<CollectionCover[]>;
 }
 
 export type BookImportEntry = {
@@ -389,4 +393,10 @@ export type BookMigrationReport = {
   updated: number;
   skipped: number;
   errors: BookMigrationError[];
+};
+
+export type CollectionCover = {
+  fileName: string;
+  shelf: number;
+  volumeLabel: string;
 };

@@ -29,6 +29,7 @@ import type {
   VideoPreparationProgress,
   BookImportPlan,
   BookMigrationReport,
+  CollectionCover,
 } from "./types";
 
 export const libraryGateway: LibraryGateway = {
@@ -105,6 +106,9 @@ export const libraryGateway: LibraryGateway = {
   listMangaSeries: () => invoke<MangaSeries[]>("list_manga_series"),
   inspectBookImport: (root) => invoke<BookImportPlan>("inspect_book_import", { root }),
   importBookCollections: (root) => invoke<BookMigrationReport>("import_book_collections", { root }),
+  getCollectionSourceRoot: () => invoke<string | null>("get_collection_source_root"),
+  setCollectionSourceRoot: (path) => invoke("set_collection_source_root", { path }),
+  listCollectionCovers: (collectionId) => invoke<CollectionCover[]>("list_collection_covers", { collectionId }),
   inspectMetadataImport: (folder) =>
     invoke<MetadataImportPlan>("inspect_metadata_import", { folder }),
   ingestMedia: (request: IngestMediaInput) =>

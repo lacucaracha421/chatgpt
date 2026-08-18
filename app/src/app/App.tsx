@@ -3,6 +3,7 @@ import { AssetBrowser, type AssetBrowserStatus } from "../assets/AssetBrowser";
 import { startAssetDrag as nativeStartAssetDrag, type StartAssetDrag } from "../drag-out/startAssetDrag";
 import { ClassificationSidebar } from "../classification/ClassificationSidebar";
 import { CollectionBrowser } from "../collections/CollectionBrowser";
+import { CollectionOverlay } from "../collections/CollectionOverlay";
 import {
   type DropSubscriber,
   type IngestionWork,
@@ -456,6 +457,13 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag }: { lib
                 ) : view.kind === "manga" ? (
                   <MangaBrowser
                     onOpenSeries={(series) => setMangaViewer({ seriesId: series.id, title: series.title, pageCount: series.pageCount })}
+                  />
+                ) : view.kind === "collection" ? (
+                  <CollectionOverlay
+                    collectionId={view.collectionId}
+                    collections={collections}
+                    onExit={() => setView({ kind: "collections", typeFilter: null, showcase: false })}
+                    onChanged={refreshCollections}
                   />
                 ) : view.kind === "collections" ? (
                   <CollectionBrowser
