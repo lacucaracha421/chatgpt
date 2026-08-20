@@ -27,7 +27,9 @@ ALTER TABLE collections ADD COLUMN source_path TEXT;
 - `collection_source_root` — 구성 가능한 루트 경로. 설정 UI에서 선택. 망가 폴더(`manga_root`)와 동일한 패턴.
 - `source_path` — 루트 기준 **상대 경로만** 저장. 예: `comics/나루토`, `games/GAME_Elden Ring`.
 - 절대 경로 하드코딩 금지. 폴더 이동 시 루트 설정만 변경하면 복구.
-- 백엔드가 `collection_source_root + source_path + /covers/` 조합으로 파일 접근.
+- 백엔드가 `collection_source_root + source_path` 아래의 대표 미리보기와 `covers/`를 읽는다.
+- 외부 폴더 이미지는 레거시 컬렉션을 보여주기 위한 읽기 전용 소스 미리보기다. 미디어 금고의 대표 자산을 대체하거나 `cover_asset_id`에 기록하지 않는다.
+- 모든 외부 파일 접근은 정규화한 컬렉션 폴더 안에 머물러야 하며 절대 경로와 상위 경로 이탈을 거부한다.
 
 ### 마이그레이션 수정
 
@@ -61,10 +63,22 @@ ALTER TABLE collections ADD COLUMN source_path TEXT;
 
 ## 표지 그리드 (책장)
 
-### 컬렉션 브라우저 그리드 — 기존 유지
+### 컬렉션 브라우저 그리드 — 소스 미리보기 폴백
 
-- `CollectionCard` (표지 2:3 + 타입 + 이름 + asset 수) 변경 없음
+- `CollectionCard`의 2:3 레이아웃과 메타데이터 표시는 유지한다.
+- 대표 자산이 있으면 기존 `thumbnail/{asset_id}`를 사용한다.
+- 대표 자산이 없고 `source_path`가 있으면 `collection-source-preview/{collection_id}`를 사용한다.
+- 소스 미리보기 선택 순서는 구판과 동일하게 `info.txt`의 유효한 상대 `Cover:` → 루트의 `thumbnail.webp` → 루트의 다른 `thumbnail.*` → 루트 첫 이미지 → 자연 정렬한 `covers/` 첫 이미지다.
+- 후보가 없거나 소스 루트·경로가 유효하지 않으면 404를 반환하고 카드는 기존 빈 표지를 보여준다.
+- 프론트엔드는 파일명이나 선택 규칙을 알지 않는다. 선택과 안전한 파일 열기는 컬렉션 소스 Module 안에 둔다.
 - 컬렉션 클릭 → `onViewChange({ kind: "collection", collectionId })` → 새 오버레이 뷰로 라우팅
+
+### 소스 미리보기 검증
+
+- 대표 자산 URL이 소스 미리보기 URL보다 우선하는지 프론트엔드 테스트로 확인한다.
+- `Cover:` 우선순위와 각 폴백 단계를 컬렉션 소스 Module 테스트로 확인한다.
+- 절대 `Cover:` 경로, `..` 경로, 컬렉션 폴더 밖 심볼릭 링크는 제공하지 않는다.
+- 미디어 프로토콜은 정상 이미지를 200으로, 후보 없음과 잘못된 경로를 404로 반환한다.
 
 ### 오버레이 내부 썸네일 리스트 (하단 영역)
 
