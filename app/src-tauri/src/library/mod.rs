@@ -44,6 +44,7 @@ pub enum MediaVariant {
     MangaCover,
     MangaPage(u32),
     CollectionCover,
+    CollectionSourcePreview,
 }
 
 #[derive(Debug)]
@@ -343,7 +344,10 @@ impl Library {
                         .then(|| directory.map(|path| format!("{path}/{frame_index:03}.webp")))
                         .flatten()
                 }),
-            MediaVariant::MangaCover | MediaVariant::MangaPage(_) | MediaVariant::CollectionCover => {
+            MediaVariant::MangaCover
+            | MediaVariant::MangaPage(_)
+            | MediaVariant::CollectionCover
+            | MediaVariant::CollectionSourcePreview => {
                 unreachable!()
             }
         };

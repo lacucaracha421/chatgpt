@@ -32,9 +32,17 @@ pub(crate) fn media_response_with_range(
         return empty_response(StatusCode::NOT_FOUND);
     };
 
-    if matches!(variant, MediaVariant::CollectionCover) {
-        let file_name = file_name.unwrap_or_default();
-        return match library.collection_cover_media(&asset_id, &file_name) {
+    let collection_media = match variant {
+        MediaVariant::CollectionCover => Some(
+            library.collection_cover_media(&asset_id, &file_name.unwrap_or_default()),
+        ),
+        MediaVariant::CollectionSourcePreview => {
+            Some(library.collection_source_preview_media(&asset_id))
+        }
+        _ => None,
+    };
+    if let Some(collection_media) = collection_media {
+        return match collection_media {
             Ok(mut media) => {
                 let mut bytes = Vec::new();
                 if media.file.read_to_end(&mut bytes).is_err() {
@@ -168,6 +176,9 @@ fn parse_path(path: &str) -> Option<(MediaVariant, String, Option<String>)> {
             }
             (MediaVariant::CollectionCover, Some(file_name))
         }
+        "collection-source-preview" if segments.next().is_none() => {
+            (MediaVariant::CollectionSourcePreview, None)
+        }
         "scrub-frame" => {
             let frame_index = segments.next()?.parse::<u32>().ok()?;
             if segments.next().is_some() {
@@ -240,6 +251,59 @@ mod tests {
     const REVIEW_ID: &str = "00000000-0000-4000-8000-000000000003";
     const TRASH_ID: &str = "00000000-0000-4000-8000-000000000004";
     const SERIES_ID: &str = "00000000-0000-4000-8000-000000000005";
+    const COLLECTION_ID: &str = "00000000-0000-4000-8000-000000000006";
+
+    fn collection_source_library(with_preview: bool) -> (tempfile::TempDir, Library) {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        let source_root = temp.path().join("source");
+        let collection_dir = source_root.join("series");
+        std::fs::create_dir_all(&collection_dir).unwrap();
+        if with_preview {
+            std::fs::write(collection_dir.join("thumbnail.webp"), b"source preview").unwrap();
+        }
+        library
+            .set_collection_source_root(Some(source_root.to_string_lossy().as_ref()))
+            .unwrap();
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO collections (id, name, created_at, updated_at, source_path)
+                 VALUES (?1, 'Series', '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z', 'series')",
+                [COLLECTION_ID],
+            )
+            .unwrap();
+        (temp, library)
+    }
+
+    #[test]
+    fn collection_source_preview_route_serves_the_resolved_image() {
+        let (_temp, library) = collection_source_library(true);
+
+        let response = media_response(
+            Some(&library),
+            &Method::GET,
+            &format!("/collection-source-preview/{COLLECTION_ID}"),
+        );
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[CONTENT_TYPE], "image/webp");
+        assert_eq!(response.body(), b"source preview");
+    }
+
+    #[test]
+    fn collection_source_preview_route_returns_not_found_without_a_candidate() {
+        let (_temp, library) = collection_source_library(false);
+
+        let response = media_response(
+            Some(&library),
+            &Method::GET,
+            &format!("/collection-source-preview/{COLLECTION_ID}"),
+        );
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
 
     #[test]
     fn protocol_serves_only_id_resolved_asset_and_thumbnail_bytes_with_mime() {
