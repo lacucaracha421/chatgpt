@@ -82,8 +82,6 @@ export type UpdateCollection = {
   director: string | null;
   externalScore: number | null;
   myScore: number | null;
-  genres: string | null;
-  overview: string | null;
 };
 
 export type AssetCollectionPatch = {

@@ -60,8 +60,6 @@ export function CollectionEditDialog({
       director: director.trim() || null,
       externalScore,
       myScore,
-      genres: null,
-      overview: null,
     };
     setSaving(true);
     setError(null);
