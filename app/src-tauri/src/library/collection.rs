@@ -117,19 +117,19 @@ impl Library {
                  SET name = ?1, description = ?2, type = ?3,
                      year = ?4, author = ?5, director = ?6,
                      external_score = ?7, my_score = ?8,
-                     genres = ?9, overview = ?10,
-                     external_id = ?11, external_source = ?12,
-                     external_synced_at = CASE WHEN ?11 IS NOT NULL THEN ?13 ELSE external_synced_at END,
-                     updated_at = ?14
-                 WHERE id = ?15",
+                     updated_at = ?9
+                 WHERE id = ?10",
                 params![
-                    name, description, type_str,
-                    request.year, request.author, request.director,
-                    request.external_score, request.my_score,
-                    request.genres, request.overview,
-                    request.external_id, request.external_source,
+                    name,
+                    description,
+                    type_str,
+                    request.year,
+                    request.author,
+                    request.director,
+                    request.external_score,
+                    request.my_score,
                     chrono::Utc::now().to_rfc3339(),
-                    chrono::Utc::now().to_rfc3339(), id
+                    id,
                 ],
             )
             .map_err(map_duplicate_name)?;
@@ -403,10 +403,6 @@ mod tests {
                     director: None,
                     external_score: None,
                     my_score: None,
-                    genres: None,
-                    overview: None,
-                    external_id: None,
-                    external_source: None,
                 },
             )
             .unwrap();
@@ -642,10 +638,6 @@ mod tests {
                     director: None,
                     external_score: Some(87),
                     my_score: Some(9),
-                    genres: None,
-                    overview: None,
-                    external_id: None,
-                    external_source: None,
                 },
             )
             .unwrap();
@@ -658,6 +650,68 @@ mod tests {
             .unwrap();
         assert!(showcased.showcase);
         assert_eq!(library.list_collections().unwrap()[0].showcase, true);
+    }
+
+    #[test]
+    fn ordinary_edit_preserves_imported_metadata_and_provider_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let created = create(&library, "Imported Work");
+
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE collections
+                 SET year = 2024, author = 'Imported Author', genres = 'Fantasy',
+                     overview = 'Imported overview', external_id = 'provider-42',
+                     external_source = 'mangadex', external_synced_at = '2026-08-20T01:02:03Z',
+                     external_metadata_json = '{\"title\":\"Provider title\"}'
+                 WHERE id = ?1",
+                [&created.id],
+            )
+            .unwrap();
+
+        let updated = library
+            .update_collection(
+                &created.id,
+                UpdateCollection {
+                    name: "Renamed Work".into(),
+                    description: None,
+                    collection_type: CollectionType::Manga,
+                    year: Some(2024),
+                    author: Some("Imported Author".into()),
+                    director: None,
+                    external_score: None,
+                    my_score: Some(9),
+                },
+            )
+            .unwrap();
+
+        assert_eq!(updated.name, "Renamed Work");
+        assert_eq!(updated.my_score, Some(9));
+        assert_eq!(updated.year, Some(2024));
+        assert_eq!(updated.author.as_deref(), Some("Imported Author"));
+        assert_eq!(updated.genres.as_deref(), Some("Fantasy"));
+        assert_eq!(updated.overview.as_deref(), Some("Imported overview"));
+        assert_eq!(updated.external_id.as_deref(), Some("provider-42"));
+        assert_eq!(updated.external_source.as_deref(), Some("mangadex"));
+        assert_eq!(
+            updated.external_synced_at.as_deref(),
+            Some("2026-08-20T01:02:03Z")
+        );
+        assert_eq!(
+            library
+                .connection()
+                .unwrap()
+                .query_row(
+                    "SELECT external_metadata_json FROM collections WHERE id = ?1",
+                    [&created.id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "{\"title\":\"Provider title\"}",
+        );
     }
 
     fn create(library: &Library, name: &str) -> CollectionSummary {

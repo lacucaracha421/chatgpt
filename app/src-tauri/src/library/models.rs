@@ -392,12 +392,6 @@ pub struct UpdateCollection {
     pub director: Option<String>,
     pub external_score: Option<i64>,
     pub my_score: Option<i64>,
-    pub genres: Option<String>,
-    pub overview: Option<String>,
-    #[serde(default)]
-    pub external_id: Option<String>,
-    #[serde(default)]
-    pub external_source: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
