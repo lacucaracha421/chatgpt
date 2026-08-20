@@ -21,6 +21,7 @@ mod query;
 mod similarity;
 mod trash;
 mod video_media;
+mod work_artwork;
 
 use std::{
     collections::BTreeSet,
@@ -46,6 +47,7 @@ pub enum MediaVariant {
     MangaPage(u32),
     CollectionCover,
     CollectionSourcePreview,
+    WorkArtwork,
 }
 
 #[derive(Debug)]
@@ -106,7 +108,13 @@ impl Library {
             source,
         })?;
         let lease = Arc::new(LibraryLease::acquire(&root)?);
-        for name in ["assets", "thumbnails", "backups", "video-media"] {
+        for name in [
+            "assets",
+            "thumbnails",
+            "backups",
+            "video-media",
+            "work-artwork",
+        ] {
             let path = root.join(name);
             fs::create_dir_all(&path)
                 .map_err(|source| LibraryError::CreateDirectory { path, source })?;
@@ -124,6 +132,7 @@ impl Library {
         library.cleanup_stale_asset_drags()?;
         library.cleanup_resolving_similarity_reviews()?;
         library.requeue_interrupted_video_preparation()?;
+        library.cleanup_unreferenced_work_artwork()?;
         Ok(library)
     }
 
@@ -288,6 +297,7 @@ impl Library {
         match variant {
             MediaVariant::MangaCover => return self.manga_cover(asset_id),
             MediaVariant::MangaPage(page_index) => return self.manga_page(asset_id, page_index),
+            MediaVariant::WorkArtwork => return self.resolve_work_artwork(asset_id),
             _ => {}
         }
         let relative_path = match variant {
@@ -348,11 +358,19 @@ impl Library {
             MediaVariant::MangaCover
             | MediaVariant::MangaPage(_)
             | MediaVariant::CollectionCover
-            | MediaVariant::CollectionSourcePreview => {
+            | MediaVariant::CollectionSourcePreview
+            | MediaVariant::WorkArtwork => {
                 unreachable!()
             }
         };
         let relative_path = relative_path.ok_or(LibraryError::AssetNotFound)?;
+        self.open_library_media(&relative_path)
+    }
+
+    pub(crate) fn open_library_media(
+        &self,
+        relative_path: &str,
+    ) -> Result<MediaResponse, LibraryError> {
         let canonical_root =
             fs::canonicalize(&self.root).map_err(|source| LibraryError::ReadMedia {
                 path: self.root.clone(),

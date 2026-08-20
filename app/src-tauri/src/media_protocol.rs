@@ -179,6 +179,7 @@ fn parse_path(path: &str) -> Option<(MediaVariant, String, Option<String>)> {
         "collection-source-preview" if segments.next().is_none() => {
             (MediaVariant::CollectionSourcePreview, None)
         }
+        "work-artwork" if segments.next().is_none() => (MediaVariant::WorkArtwork, None),
         "scrub-frame" => {
             let frame_index = segments.next()?.parse::<u32>().ok()?;
             if segments.next().is_some() {
@@ -252,6 +253,7 @@ mod tests {
     const TRASH_ID: &str = "00000000-0000-4000-8000-000000000004";
     const SERIES_ID: &str = "00000000-0000-4000-8000-000000000005";
     const COLLECTION_ID: &str = "00000000-0000-4000-8000-000000000006";
+    const ARTWORK_ID: &str = "00000000-0000-4000-8000-000000000007";
 
     fn collection_source_library(with_preview: bool) -> (tempfile::TempDir, Library) {
         let temp = tempfile::tempdir().unwrap();
@@ -303,6 +305,38 @@ mod tests {
         );
 
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn work_artwork_route_serves_only_the_id_resolved_file() {
+        let (_temp, library) = collection_source_library(false);
+        let relative_path = format!("work-artwork/{COLLECTION_ID}/{ARTWORK_ID}.png");
+        let absolute_path = library.root().join(&relative_path);
+        std::fs::create_dir_all(absolute_path.parent().unwrap()).unwrap();
+        std::fs::write(&absolute_path, b"artwork bytes").unwrap();
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO collection_work_artworks (
+                    id, collection_id, provider, provider_image_id, kind, relative_path,
+                    mime_type, width, height, selected, created_at, updated_at
+                 ) VALUES (?1, ?2, 'mangadex', 'cover-1', 'cover', ?3,
+                    'image/png', 10, 15, 1,
+                    '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z')",
+                params![ARTWORK_ID, COLLECTION_ID, relative_path],
+            )
+            .unwrap();
+
+        let response = media_response(
+            Some(&library),
+            &Method::GET,
+            &format!("/work-artwork/{ARTWORK_ID}"),
+        );
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[CONTENT_TYPE], "image/png");
+        assert_eq!(response.body(), b"artwork bytes");
     }
 
     #[test]

@@ -162,6 +162,14 @@ pub enum LibraryError {
     },
     #[error("이미지 형식을 지원하지 않거나 파일이 손상됐습니다")]
     UnsupportedImage,
+    #[error("Work 표지 이미지가 올바르지 않습니다")]
+    InvalidWorkArtwork,
+    #[error("Work 표지 파일을 쓸 수 없습니다: {path}")]
+    WriteWorkArtwork {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("영상 형식을 지원하지 않거나 파일이 손상됐습니다")]
     UnsupportedVideo,
     #[error("영상 미리보기를 준비하지 못했습니다")]

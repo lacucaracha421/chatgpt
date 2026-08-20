@@ -46,6 +46,9 @@ impl From<LibraryError> for CommandError {
             LibraryError::WriteAsset { .. } => {
                 "이미지 파일을 정리하지 못했습니다. 다시 시도해 주세요.".into()
             }
+            LibraryError::WriteWorkArtwork { .. } => {
+                "Work 표지 파일을 저장하지 못했습니다. 다시 시도해 주세요.".into()
+            }
             _ => error.to_string(),
         };
         let code = match error {
@@ -111,6 +114,8 @@ impl From<LibraryError> for CommandError {
             LibraryError::ReadMedia { .. } => "read_media_failed",
             LibraryError::ReadSource { .. } => "read_source_failed",
             LibraryError::UnsupportedImage => "unsupported_image",
+            LibraryError::InvalidWorkArtwork => "invalid_work_artwork",
+            LibraryError::WriteWorkArtwork { .. } => "write_work_artwork_failed",
             LibraryError::UnsupportedVideo => "unsupported_video",
             LibraryError::VideoPreparationFailed => "video_preparation_failed",
             LibraryError::VideoToolUnavailable => "video_tool_unavailable",
