@@ -449,7 +449,6 @@ pub enum MangaDexApplyTarget {
 pub struct MangaDexApplyRequest {
     pub target: MangaDexApplyTarget,
     pub manga_id: String,
-    pub cover_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -519,7 +518,6 @@ mod tests {
                 collection_id: "work-1".into(),
             },
             manga_id: "manga-1".into(),
-            cover_id: "cover-1".into(),
         })
         .unwrap();
 
@@ -527,8 +525,7 @@ mod tests {
             value,
             serde_json::json!({
                 "target": { "kind": "existing", "collectionId": "work-1" },
-                "mangaId": "manga-1",
-                "coverId": "cover-1"
+                "mangaId": "manga-1"
             })
         );
     }

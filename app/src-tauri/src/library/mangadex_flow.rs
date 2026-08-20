@@ -7,7 +7,7 @@ use super::{
     mangadex::{self, MangaDexFetchedWork},
     models::{
         CollectionSummary, ExternalBindingInput, MangaDexApplyRequest, MangaDexApplyTarget,
-        MangaDexConnection, MangaDexSearchResult, MangaDexWorkPreview,
+        MangaDexConnection, MangaDexCoverCandidate, MangaDexSearchResult, MangaDexWorkPreview,
     },
     Library,
 };
@@ -51,33 +51,22 @@ impl Library {
         request: MangaDexApplyRequest,
     ) -> Result<CollectionSummary, LibraryError> {
         let fetched = mangadex::fetch_work(&request.manga_id)?;
-        let cover = fetched
-            .preview
-            .covers
-            .iter()
-            .find(|cover| cover.cover_id == request.cover_id)
-            .ok_or(LibraryError::InvalidMangaDexIdentity)?;
-        let bytes = mangadex::download_cover(&request.manga_id, &cover.file_name)?;
-        self.apply_fetched_mangadex(request, fetched, &bytes)
+        let bytes = representative_japanese_cover(&fetched.preview.covers)
+            .map(|cover| mangadex::download_cover(&request.manga_id, &cover.file_name))
+            .transpose()?;
+        self.apply_fetched_mangadex(request, fetched, bytes.as_deref())
     }
 
     pub(crate) fn apply_fetched_mangadex(
         &self,
         request: MangaDexApplyRequest,
         fetched: MangaDexFetchedWork,
-        cover_bytes: &[u8],
+        cover_bytes: Option<&[u8]>,
     ) -> Result<CollectionSummary, LibraryError> {
         if request.manga_id != fetched.preview.manga_id {
             return Err(LibraryError::InvalidMangaDexIdentity);
         }
-        let cover = fetched
-            .preview
-            .covers
-            .iter()
-            .find(|cover| cover.cover_id == request.cover_id)
-            .ok_or(LibraryError::InvalidMangaDexIdentity)?;
-        let cover_file_name = cover.file_name.clone();
-        let cover_language = cover.language.clone();
+        let cover = representative_japanese_cover(&fetched.preview.covers);
         let (collection_id, new_name) = match &request.target {
             MangaDexApplyTarget::New { name } => (
                 uuid::Uuid::new_v4().to_string(),
@@ -100,8 +89,14 @@ impl Library {
                 (collection_id.clone(), None)
             }
         };
-        mangadex::validate_cover_identity(&request.manga_id, &cover_file_name)?;
-        let prepared = self.prepare_work_artwork(&collection_id, cover_bytes)?;
+        let prepared = match (cover, cover_bytes) {
+            (Some(cover), Some(bytes)) => {
+                mangadex::validate_cover_identity(&request.manga_id, &cover.file_name)?;
+                Some(self.prepare_work_artwork(&collection_id, bytes)?)
+            }
+            (None, None) => None,
+            _ => return Err(LibraryError::InvalidMangaDexIdentity),
+        };
         {
             let mut connection = self.connection()?;
             let transaction = connection.transaction()?;
@@ -152,17 +147,21 @@ impl Library {
                 },
                 &now,
             )?;
-            Library::select_work_artwork_in_transaction(
-                &transaction,
-                &collection_id,
-                PROVIDER,
-                &request.cover_id,
-                cover_language.as_deref(),
-                &prepared,
-            )?;
+            if let (Some(cover), Some(prepared)) = (cover, prepared.as_ref()) {
+                Library::select_work_artwork_in_transaction(
+                    &transaction,
+                    &collection_id,
+                    PROVIDER,
+                    &cover.cover_id,
+                    cover.language.as_deref(),
+                    prepared,
+                )?;
+            }
             transaction.commit()?;
         }
-        prepared.commit();
+        if let Some(prepared) = prepared {
+            prepared.commit();
+        }
         let connection = self.connection()?;
         collection_by_id(&connection, &collection_id)
     }
@@ -209,6 +208,21 @@ impl Library {
     }
 }
 
+fn representative_japanese_cover(
+    covers: &[MangaDexCoverCandidate],
+) -> Option<&MangaDexCoverCandidate> {
+    covers
+        .iter()
+        .find(|cover| {
+            cover.language.as_deref() == Some("ja") && cover.volume.as_deref() == Some("1")
+        })
+        .or_else(|| {
+            covers
+                .iter()
+                .find(|cover| cover.language.as_deref() == Some("ja"))
+        })
+}
+
 fn fill_blank_provider_fields(
     connection: &rusqlite::Connection,
     collection_id: &str,
@@ -241,6 +255,8 @@ mod tests {
 
     use image::{DynamicImage, ImageFormat};
 
+    use super::representative_japanese_cover;
+
     use crate::library::{
         error::LibraryError,
         mangadex::{parse_work_preview, MangaDexFetchedWork},
@@ -270,6 +286,49 @@ mod tests {
         bytes.into_inner()
     }
 
+    fn request(name: &str) -> MangaDexApplyRequest {
+        MangaDexApplyRequest {
+            target: MangaDexApplyTarget::New { name: name.into() },
+            manga_id: MANGA_ID.into(),
+        }
+    }
+
+    #[test]
+    fn representative_cover_prefers_japanese_volume_one() {
+        let mut covers = fetched("snapshot").preview.covers;
+        let mut japanese_volume_two = covers[0].clone();
+        japanese_volume_two.cover_id = "33333333-3333-4333-8333-333333333333".into();
+        japanese_volume_two.volume = Some("2".into());
+        covers.insert(0, japanese_volume_two);
+
+        let selected = representative_japanese_cover(&covers).unwrap();
+
+        assert_eq!(selected.cover_id, COVER_ID);
+        assert_eq!(selected.language.as_deref(), Some("ja"));
+        assert_eq!(selected.volume.as_deref(), Some("1"));
+    }
+
+    #[test]
+    fn new_apply_without_a_japanese_cover_commits_without_artwork() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let mut work = fetched("snapshot-v1");
+        work.preview
+            .covers
+            .retain(|cover| cover.language.as_deref() != Some("ja"));
+
+        let created = library
+            .apply_fetched_mangadex(request("던전밥"), work, None)
+            .unwrap();
+
+        assert_eq!(created.name, "던전밥");
+        assert!(created.selected_work_artwork_id.is_none());
+        assert!(library
+            .get_mangadex_connection(&created.id)
+            .unwrap()
+            .is_some());
+    }
+
     #[test]
     fn new_apply_commits_collection_binding_and_selected_artwork_together() {
         let temp = tempfile::tempdir().unwrap();
@@ -282,10 +341,9 @@ mod tests {
                         name: "  던전밥 소장판  ".into(),
                     },
                     manga_id: MANGA_ID.into(),
-                    cover_id: COVER_ID.into(),
                 },
                 fetched("snapshot-v1"),
-                &cover_bytes(),
+                Some(&cover_bytes()),
             )
             .unwrap();
 
@@ -349,10 +407,9 @@ mod tests {
                         collection_id: existing.id.clone(),
                     },
                     manga_id: MANGA_ID.into(),
-                    cover_id: COVER_ID.into(),
                 },
                 fetched("snapshot-v1"),
-                &cover_bytes(),
+                Some(&cover_bytes()),
             )
             .unwrap();
 
@@ -371,20 +428,19 @@ mod tests {
     fn duplicate_provider_identity_rolls_back_and_removes_the_prepared_file() {
         let temp = tempfile::tempdir().unwrap();
         let library = Library::open(temp.path()).unwrap();
-        let request = |name: &str| MangaDexApplyRequest {
-            target: MangaDexApplyTarget::New { name: name.into() },
-            manga_id: MANGA_ID.into(),
-            cover_id: COVER_ID.into(),
-        };
         library
-            .apply_fetched_mangadex(request("첫 Work"), fetched("snapshot-v1"), &cover_bytes())
+            .apply_fetched_mangadex(
+                request("첫 Work"),
+                fetched("snapshot-v1"),
+                Some(&cover_bytes()),
+            )
             .unwrap();
         let files_before = artwork_file_count(&library);
 
         let duplicate = library.apply_fetched_mangadex(
             request("중복 Work"),
             fetched("snapshot-v2"),
-            &cover_bytes(),
+            Some(&cover_bytes()),
         );
 
         assert!(matches!(
@@ -406,10 +462,9 @@ mod tests {
                         name: "로컬 제목".into(),
                     },
                     manga_id: MANGA_ID.into(),
-                    cover_id: COVER_ID.into(),
                 },
                 fetched("snapshot-v1"),
-                &cover_bytes(),
+                Some(&cover_bytes()),
             )
             .unwrap();
         let selected_artwork = created.selected_work_artwork_id.clone();
