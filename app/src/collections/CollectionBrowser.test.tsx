@@ -120,6 +120,19 @@ describe("CollectionBrowser", () => {
     expect(await screen.findByRole("heading", { name: "새 컬렉션" })).toBeInTheDocument();
     expect(gateway.createCollection).not.toHaveBeenCalled();
   });
+
+  it("prefers stored WorkArtwork over other card covers", () => {
+    renderBrowser({
+      collections: [{ ...sample, selectedWorkArtworkId: "artwork-1", coverAssetId: "asset-1", sourcePath: "games/astral-chain" }],
+      typeFilter: null,
+      showcase: false,
+    });
+
+    expect(screen.getByRole("img", { name: "Astral Chain" })).toHaveAttribute(
+      "src",
+      "http://lakomics.localhost/work-artwork/artwork-1",
+    );
+  });
 });
 
 function createGateway(): LibraryGateway {

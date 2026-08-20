@@ -1,6 +1,6 @@
 import { PlusIcon } from "@heroicons/react/24/outline";
 import { useState } from "react";
-import { collectionSourcePreviewUrl, thumbnailUrl } from "../assets/mediaUrl";
+import { collectionSourcePreviewUrl, thumbnailUrl, workArtworkUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { AssetView, CollectionSummary, CollectionType, CreateCollection, UpdateCollection } from "../library/types";
@@ -130,7 +130,9 @@ export function CollectionBrowser({
             <CollectionCard
               collection={collection}
               coverUrl={
-                collection.coverAssetId
+                collection.selectedWorkArtworkId
+                  ? workArtworkUrl(collection.selectedWorkArtworkId)
+                  : collection.coverAssetId
                   ? thumbnailUrl(collection.coverAssetId)
                   : collection.sourcePath
                     ? collectionSourcePreviewUrl(collection.id)
