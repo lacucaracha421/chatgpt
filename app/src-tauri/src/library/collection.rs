@@ -48,9 +48,6 @@ const COLLECTION_SUMMARY_SQL: &str = "SELECT
     collection.my_score,
     collection.genres,
     collection.overview,
-    collection.external_id,
-    collection.external_source,
-    collection.external_synced_at,
     collection.showcase,
     collection.created_at,
     collection.updated_at,
@@ -90,12 +87,10 @@ impl Library {
                 "INSERT INTO collections (
                     id, name, description, type, cover_asset_id,
                     year, author, director, external_score, my_score,
-                    genres, overview, external_id, external_source, external_synced_at,
-                    showcase, external_metadata_json, created_at, updated_at
+                    genres, overview, showcase, created_at, updated_at
                  ) VALUES (?1, ?2, ?3, ?4, NULL,
                     NULL, NULL, NULL, NULL, NULL,
-                    NULL, NULL, NULL, NULL, NULL,
-                    0, NULL, ?5, ?5)",
+                    NULL, NULL, 0, ?5, ?5)",
                 params![id, name, description, type_str, now],
             )
             .map_err(map_duplicate_name)?;
@@ -290,10 +285,7 @@ fn normalized_description(description: Option<String>) -> Result<Option<String>,
     Ok(description)
 }
 
-pub(crate) fn require_collection(
-    connection: &Connection,
-    id: &str,
-) -> Result<(), LibraryError> {
+pub(crate) fn require_collection(connection: &Connection, id: &str) -> Result<(), LibraryError> {
     let exists: bool = connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM collections WHERE id = ?1)",
         [id],
@@ -321,7 +313,7 @@ fn collection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollectionSu
         "movie" => CollectionType::Movie,
         _ => CollectionType::Manga,
     };
-    let showcase_int: i64 = row.get(16)?;
+    let showcase_int: i64 = row.get(13)?;
     Ok(CollectionSummary {
         id: row.get(0)?,
         name: row.get(1)?,
@@ -336,13 +328,10 @@ fn collection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollectionSu
         my_score: row.get(10)?,
         genres: row.get(11)?,
         overview: row.get(12)?,
-        external_id: row.get(13)?,
-        external_source: row.get(14)?,
-        external_synced_at: row.get(15)?,
         showcase: showcase_int != 0,
-        created_at: row.get(17)?,
-        updated_at: row.get(18)?,
-        source_path: row.get(19)?,
+        created_at: row.get(14)?,
+        updated_at: row.get(15)?,
+        source_path: row.get(16)?,
     })
 }
 
@@ -371,7 +360,7 @@ mod tests {
         error::LibraryError,
         models::{
             AssetCollectionPatch, CollectionSummary, CollectionType, CreateCollection,
-            UpdateCollection,
+            ExternalBindingInput, UpdateCollection,
         },
         Library,
     };
@@ -667,12 +656,24 @@ mod tests {
             .execute(
                 "UPDATE collections
                  SET year = 2024, author = 'Imported Author', genres = 'Fantasy',
-                     overview = 'Imported overview', external_id = 'provider-42',
-                     external_source = 'mangadex', external_synced_at = '2026-08-20T01:02:03Z',
-                     external_metadata_json = '{\"title\":\"Provider title\"}'
+                     overview = 'Imported overview'
                  WHERE id = ?1",
                 [&created.id],
             )
+            .unwrap();
+        library
+            .upsert_collection_external_binding(
+                &created.id,
+                ExternalBindingInput {
+                    provider: "mangadex".into(),
+                    external_id: "provider-42".into(),
+                    provider_data_json: Some("{\"title\":\"Provider title\"}".into()),
+                    last_synced_at: Some("2026-08-20T01:02:03Z".into()),
+                },
+            )
+            .unwrap();
+        let before = library
+            .list_collection_external_bindings(&created.id)
             .unwrap();
 
         let updated = library
@@ -697,23 +698,11 @@ mod tests {
         assert_eq!(updated.author.as_deref(), Some("Imported Author"));
         assert_eq!(updated.genres.as_deref(), Some("Fantasy"));
         assert_eq!(updated.overview.as_deref(), Some("Imported overview"));
-        assert_eq!(updated.external_id.as_deref(), Some("provider-42"));
-        assert_eq!(updated.external_source.as_deref(), Some("mangadex"));
-        assert_eq!(
-            updated.external_synced_at.as_deref(),
-            Some("2026-08-20T01:02:03Z")
-        );
         assert_eq!(
             library
-                .connection()
-                .unwrap()
-                .query_row(
-                    "SELECT external_metadata_json FROM collections WHERE id = ?1",
-                    [&created.id],
-                    |row| row.get::<_, String>(0),
-                )
+                .list_collection_external_bindings(&created.id)
                 .unwrap(),
-            "{\"title\":\"Provider title\"}",
+            before
         );
     }
 

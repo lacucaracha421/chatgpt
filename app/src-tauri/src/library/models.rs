@@ -361,9 +361,6 @@ pub struct CollectionSummary {
     pub my_score: Option<i64>,
     pub genres: Option<String>,
     pub overview: Option<String>,
-    pub external_id: Option<String>,
-    pub external_source: Option<String>,
-    pub external_synced_at: Option<String>,
     pub showcase: bool,
     pub created_at: String,
     pub updated_at: String,
@@ -448,9 +445,38 @@ pub struct MangaSeries {
 #[cfg(test)]
 mod tests {
     use super::{
-        AssetSummary, BackupKind, ClassificationEntry, ClassificationKind, MediaSummary,
-        MetadataBackup, SimilarityReviewAsset, SimilarityReviewSummary, VideoPreparationState,
+        AssetSummary, BackupKind, ClassificationEntry, ClassificationKind, CollectionSummary,
+        CollectionType, MediaSummary, MetadataBackup, SimilarityReviewAsset,
+        SimilarityReviewSummary, VideoPreparationState,
     };
+
+    #[test]
+    fn collection_summary_omits_legacy_provider_identity() {
+        let value = serde_json::to_value(CollectionSummary {
+            id: "work-1".into(),
+            name: "Dungeon Meshi".into(),
+            description: None,
+            collection_type: CollectionType::Manga,
+            cover_asset_id: None,
+            asset_count: 0,
+            year: Some(2014),
+            author: Some("Ryoko Kui".into()),
+            director: None,
+            external_score: None,
+            my_score: None,
+            genres: Some("Fantasy".into()),
+            overview: None,
+            showcase: false,
+            created_at: "2026-08-20T00:00:00Z".into(),
+            updated_at: "2026-08-20T00:00:00Z".into(),
+            source_path: None,
+        })
+        .unwrap();
+
+        for field in ["externalId", "externalSource", "externalSyncedAt"] {
+            assert!(value.get(field).is_none());
+        }
+    }
 
     #[test]
     fn asset_summary_serialization_omits_managed_paths() {
