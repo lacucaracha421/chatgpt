@@ -1,6 +1,6 @@
 import { PlusIcon } from "@heroicons/react/24/outline";
 import { useState } from "react";
-import { thumbnailUrl } from "../assets/mediaUrl";
+import { collectionSourcePreviewUrl, thumbnailUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { AssetView, CollectionSummary, CollectionType, CreateCollection, UpdateCollection } from "../library/types";
@@ -121,7 +121,13 @@ export function CollectionBrowser({
           >
             <CollectionCard
               collection={collection}
-              coverUrl={collection.coverAssetId ? thumbnailUrl(collection.coverAssetId) : null}
+              coverUrl={
+                collection.coverAssetId
+                  ? thumbnailUrl(collection.coverAssetId)
+                  : collection.sourcePath
+                    ? collectionSourcePreviewUrl(collection.id)
+                    : null
+              }
               selected={false}
               onClick={() => onViewChange({ kind: "collection", collectionId: collection.id })}
             />

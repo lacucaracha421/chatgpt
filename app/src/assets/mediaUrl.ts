@@ -27,3 +27,7 @@ export function mangaPageUrl(seriesId: string, pageIndex: number): string {
 export function collectionCoverUrl(collectionId: string, fileName: string): string {
   return `${MEDIA_ORIGIN}/collection-cover/${encodeURIComponent(collectionId)}/${encodeURIComponent(fileName)}`;
 }
+
+export function collectionSourcePreviewUrl(collectionId: string): string {
+  return `${MEDIA_ORIGIN}/collection-source-preview/${encodeURIComponent(collectionId)}`;
+}

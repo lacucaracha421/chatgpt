@@ -58,6 +58,32 @@ describe("CollectionBrowser", () => {
     expect(screen.getByText("3개")).toBeInTheDocument();
   });
 
+  it("uses the source preview when a collection has no cover asset", () => {
+    renderBrowser({
+      collections: [{ ...sample, sourcePath: "games/astral-chain" }],
+      typeFilter: null,
+      showcase: false,
+    });
+
+    expect(screen.getByRole("img", { name: "Astral Chain" })).toHaveAttribute(
+      "src",
+      "http://lakomics.localhost/collection-source-preview/c1",
+    );
+  });
+
+  it("prefers the media-vault cover asset over the source preview", () => {
+    renderBrowser({
+      collections: [{ ...sample, coverAssetId: "asset-1", sourcePath: "games/astral-chain" }],
+      typeFilter: null,
+      showcase: false,
+    });
+
+    expect(screen.getByRole("img", { name: "Astral Chain" })).toHaveAttribute(
+      "src",
+      "http://lakomics.localhost/thumbnail/asset-1",
+    );
+  });
+
   it("shows empty state when no collections", () => {
     renderBrowser({ collections: [], typeFilter: null, showcase: false });
     expect(screen.getByText("컬렉션이 없습니다.")).toBeInTheDocument();
