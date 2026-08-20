@@ -58,9 +58,6 @@ export type CollectionSummary = {
   myScore: number | null;
   genres: string | null;
   overview: string | null;
-  externalId: string | null;
-  externalSource: string | null;
-  externalSyncedAt: string | null;
   showcase: boolean;
   createdAt: string;
   updatedAt: string;
@@ -360,6 +357,11 @@ export interface LibraryGateway {
   listCollectionCovers(collectionId: string): Promise<CollectionCover[]>;
 }
 
+export type BookExternalBinding = {
+  provider: string;
+  externalId: string;
+};
+
 export type BookImportEntry = {
   folder: string;
   collectionType: CollectionType;
@@ -370,8 +372,7 @@ export type BookImportEntry = {
   myScore: number | null;
   genres: string | null;
   overview: string | null;
-  externalId: string | null;
-  externalSource: string | null;
+  externalBindings: BookExternalBinding[];
 };
 
 export type BookMigrationError = {
