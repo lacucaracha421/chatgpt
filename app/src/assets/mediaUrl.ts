@@ -31,3 +31,11 @@ export function collectionCoverUrl(collectionId: string, fileName: string): stri
 export function collectionSourcePreviewUrl(collectionId: string): string {
   return `${MEDIA_ORIGIN}/collection-source-preview/${encodeURIComponent(collectionId)}`;
 }
+
+export function workArtworkUrl(artworkId: string): string {
+  return `${MEDIA_ORIGIN}/work-artwork/${encodeURIComponent(artworkId)}`;
+}
+
+export function mangadexCoverPreviewUrl(mangaId: string, fileName: string): string {
+  return `${MEDIA_ORIGIN}/mangadex-cover-preview/${encodeURIComponent(mangaId)}/${encodeURIComponent(fileName)}`;
+}

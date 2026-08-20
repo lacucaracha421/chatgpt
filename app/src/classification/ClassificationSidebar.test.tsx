@@ -53,6 +53,7 @@ function gateway(): LibraryGateway {
     patchAssetAlbums: vi.fn(),
     getAssetAlbums: vi.fn().mockResolvedValue([]),
     listCollections: vi.fn().mockResolvedValue([]),
+    searchMangaDex: vi.fn(), previewMangaDex: vi.fn(), applyMangaDex: vi.fn(), refreshMangaDex: vi.fn(), getMangaDexConnection: vi.fn().mockResolvedValue(null),
     createCollection: vi.fn(),
     updateCollection: vi.fn(),
     deleteCollection: vi.fn(),

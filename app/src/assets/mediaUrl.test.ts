@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { assetUrl, playbackUrl, scrubFrameUrl, thumbnailUrl } from "./mediaUrl";
+import {
+  assetUrl,
+  mangadexCoverPreviewUrl,
+  playbackUrl,
+  scrubFrameUrl,
+  thumbnailUrl,
+  workArtworkUrl,
+} from "./mediaUrl";
 
 describe("media URLs", () => {
   it("uses the Windows custom-protocol origin and ID-only paths", () => {
@@ -22,6 +29,12 @@ describe("media URLs", () => {
     );
     expect(scrubFrameUrl("a/b", 12)).toBe(
       "http://lakomics.localhost/scrub-frame/a%2Fb/12",
+    );
+    expect(workArtworkUrl("art/one")).toBe(
+      "http://lakomics.localhost/work-artwork/art%2Fone",
+    );
+    expect(mangadexCoverPreviewUrl("manga/one", "cover one.jpg")).toBe(
+      "http://lakomics.localhost/mangadex-cover-preview/manga%2Fone/cover%20one.jpg",
     );
   });
 });

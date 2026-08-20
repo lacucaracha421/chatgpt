@@ -18,8 +18,8 @@ const albums: AlbumEntry[] = [
   { id: "reference", name: "자료", parentId: null, iconKey: null, colorKey: null },
 ];
 const collections: CollectionSummary[] = [
-  { id: "elden", name: "엘든 링", description: null, type: "game", coverAssetId: null, assetCount: 1, year: null, author: "프롬소프트", director: null, externalScore: 96, myScore: 95, genres: null, overview: null, showcase: false, createdAt: "2026-08-10T00:00:00Z", updatedAt: "2026-08-10T00:00:00Z" },
-  { id: "frieren", name: "프리렌", description: null, type: "manga", coverAssetId: null, assetCount: 1, year: 2020, author: "야마다 카네히토", director: null, externalScore: null, myScore: null, genres: null, overview: null, showcase: false, createdAt: "2026-08-10T00:00:00Z", updatedAt: "2026-08-10T00:00:00Z" },
+  { id: "elden", name: "엘든 링", description: null, type: "game", coverAssetId: null, selectedWorkArtworkId: null, assetCount: 1, year: null, author: "프롬소프트", director: null, externalScore: 96, myScore: 95, genres: null, overview: null, showcase: false, createdAt: "2026-08-10T00:00:00Z", updatedAt: "2026-08-10T00:00:00Z" },
+  { id: "frieren", name: "프리렌", description: null, type: "manga", coverAssetId: null, selectedWorkArtworkId: null, assetCount: 1, year: 2020, author: "야마다 카네히토", director: null, externalScore: null, myScore: null, genres: null, overview: null, showcase: false, createdAt: "2026-08-10T00:00:00Z", updatedAt: "2026-08-10T00:00:00Z" },
 ];
 
 it("hides the open control when there is no selection", () => {

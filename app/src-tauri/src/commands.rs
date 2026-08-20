@@ -12,9 +12,11 @@ use crate::library::{
         AlbumEntry, AssetAlbumPatch, AssetCollectionPatch, AssetCursor, AssetMetadataPatch,
         AssetPage, AssetQuery, AssetSummary, CollectionCover, ClassificationEntry,
         CollectionSummary, CreateAlbum, CreateClassification, CreateCollection,
-        IngestMediaRequest, IngestOutcome, LibrarySummary, MangaSeries, MetadataBackup,
-        PurgeSummary, SetAssetClassification, SimilarityDecisionRequest, SimilarityIndexProgress,
-        SimilarityReviewPage, TrashPage, TrashPolicy, UpdateCollection, VideoPreparationProgress,
+        IngestMediaRequest, IngestOutcome, LibrarySummary, MangaDexApplyRequest,
+        MangaDexConnection, MangaDexSearchResult, MangaDexWorkPreview, MangaSeries,
+        MetadataBackup, PurgeSummary, SetAssetClassification, SimilarityDecisionRequest,
+        SimilarityIndexProgress, SimilarityReviewPage, TrashPage, TrashPolicy, UpdateCollection,
+        VideoPreparationProgress,
     },
     Library,
 };
@@ -530,6 +532,64 @@ pub fn list_collections(state: State<'_, AppState>) -> Result<Vec<CollectionSumm
 }
 
 #[tauri::command]
+pub async fn search_mangadex(
+    query: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<MangaDexSearchResult>, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.search_mangadex(&query))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn preview_mangadex(
+    manga_id: String,
+    state: State<'_, AppState>,
+) -> Result<MangaDexWorkPreview, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.preview_mangadex(&manga_id))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn apply_mangadex(
+    request: MangaDexApplyRequest,
+    state: State<'_, AppState>,
+) -> Result<CollectionSummary, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.apply_mangadex(request))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn refresh_mangadex(
+    collection_id: String,
+    state: State<'_, AppState>,
+) -> Result<CollectionSummary, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.refresh_mangadex(&collection_id))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn get_mangadex_connection(
+    collection_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<MangaDexConnection>, CommandError> {
+    current_required(state)?
+        .get_mangadex_connection(&collection_id)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub fn create_collection(
     request: CreateCollection,
     state: State<'_, AppState>,
@@ -829,6 +889,22 @@ mod tests {
         assert_eq!(
             CommandError::from(LibraryError::InvalidCreatorUrl).code,
             "invalid_creator_url"
+        );
+    }
+
+    #[test]
+    fn mangadex_errors_have_stable_codes() {
+        assert_eq!(
+            CommandError::from(LibraryError::MangaDexRateLimited).code,
+            "mangadex_rate_limited"
+        );
+        assert_eq!(
+            CommandError::from(LibraryError::InvalidWorkArtwork).code,
+            "invalid_work_artwork"
+        );
+        assert_eq!(
+            CommandError::from(LibraryError::DuplicateProviderBinding).code,
+            "duplicate_provider_binding"
         );
     }
 

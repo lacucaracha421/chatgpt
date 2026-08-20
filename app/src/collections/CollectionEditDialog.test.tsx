@@ -15,6 +15,7 @@ it("submits only fields owned by ordinary collection editing", async () => {
     description: "description",
     type: "manga",
     coverAssetId: null,
+    selectedWorkArtworkId: null,
     assetCount: 0,
     year: 2024,
     author: "Imported Author",

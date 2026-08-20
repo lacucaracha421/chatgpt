@@ -50,6 +50,7 @@ export type CollectionSummary = {
   description: string | null;
   type: CollectionType;
   coverAssetId: string | null;
+  selectedWorkArtworkId: string | null;
   assetCount: number;
   year: number | null;
   author: string | null;
@@ -68,6 +69,50 @@ export type CreateCollection = {
   name: string;
   description: string | null;
   type: CollectionType;
+};
+
+export type MangaDexSearchResult = {
+  mangaId: string;
+  title: string;
+  alternateTitles: string[];
+  author: string | null;
+  year: number | null;
+  status: string | null;
+  primaryCoverFileName: string | null;
+};
+
+export type MangaDexCoverCandidate = {
+  coverId: string;
+  fileName: string;
+  volume: string | null;
+  language: string | null;
+};
+
+export type MangaDexWorkPreview = {
+  mangaId: string;
+  proposedTitle: string;
+  alternateTitles: string[];
+  author: string | null;
+  year: number | null;
+  status: string | null;
+  genres: string | null;
+  overview: string | null;
+  covers: MangaDexCoverCandidate[];
+};
+
+export type MangaDexApplyTarget =
+  | { kind: "new"; name: string }
+  | { kind: "existing"; collectionId: string };
+
+export type MangaDexApplyRequest = {
+  target: MangaDexApplyTarget;
+  mangaId: string;
+  coverId: string;
+};
+
+export type MangaDexConnection = {
+  mangaId: string;
+  lastSyncedAt: string | null;
 };
 
 export type UpdateCollection = {
@@ -335,6 +380,11 @@ export interface LibraryGateway {
   patchAssetAlbums(patch: AssetAlbumPatch): Promise<void>;
   getAssetAlbums(assetId: string): Promise<string[]>;
   listCollections(): Promise<CollectionSummary[]>;
+  searchMangaDex(query: string): Promise<MangaDexSearchResult[]>;
+  previewMangaDex(mangaId: string): Promise<MangaDexWorkPreview>;
+  applyMangaDex(request: MangaDexApplyRequest): Promise<CollectionSummary>;
+  refreshMangaDex(collectionId: string): Promise<CollectionSummary>;
+  getMangaDexConnection(collectionId: string): Promise<MangaDexConnection | null>;
   createCollection(input: CreateCollection): Promise<CollectionSummary>;
   updateCollection(id: string, input: UpdateCollection): Promise<CollectionSummary>;
   deleteCollection(id: string): Promise<void>;

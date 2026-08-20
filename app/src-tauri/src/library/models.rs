@@ -508,9 +508,30 @@ pub struct MangaSeries {
 mod tests {
     use super::{
         AssetSummary, BackupKind, ClassificationEntry, ClassificationKind, CollectionSummary,
-        CollectionType, MediaSummary, MetadataBackup, SimilarityReviewAsset,
-        SimilarityReviewSummary, VideoPreparationState,
+        CollectionType, MangaDexApplyRequest, MangaDexApplyTarget, MediaSummary, MetadataBackup,
+        SimilarityReviewAsset, SimilarityReviewSummary, VideoPreparationState,
     };
+
+    #[test]
+    fn serializes_mangadex_apply_targets_for_the_typescript_gateway() {
+        let value = serde_json::to_value(MangaDexApplyRequest {
+            target: MangaDexApplyTarget::Existing {
+                collection_id: "work-1".into(),
+            },
+            manga_id: "manga-1".into(),
+            cover_id: "cover-1".into(),
+        })
+        .unwrap();
+
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "target": { "kind": "existing", "collectionId": "work-1" },
+                "mangaId": "manga-1",
+                "coverId": "cover-1"
+            })
+        );
+    }
 
     #[test]
     fn collection_summary_omits_legacy_provider_identity() {

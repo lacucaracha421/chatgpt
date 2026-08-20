@@ -17,6 +17,10 @@ import type {
   IngestOutcome,
   LibraryGateway,
   LibrarySummary,
+  MangaDexApplyRequest,
+  MangaDexConnection,
+  MangaDexSearchResult,
+  MangaDexWorkPreview,
   MangaSeries,
   MetadataBackup,
   MetadataImportPlan,
@@ -87,6 +91,16 @@ export const libraryGateway: LibraryGateway = {
   patchAssetAlbums: (patch: AssetAlbumPatch) => invoke("patch_asset_albums", { patch }),
   getAssetAlbums: (assetId) => invoke<string[]>("get_asset_albums", { assetId }),
   listCollections: () => invoke<CollectionSummary[]>("list_collections"),
+  searchMangaDex: (query) =>
+    invoke<MangaDexSearchResult[]>("search_mangadex", { query }),
+  previewMangaDex: (mangaId) =>
+    invoke<MangaDexWorkPreview>("preview_mangadex", { mangaId }),
+  applyMangaDex: (request: MangaDexApplyRequest) =>
+    invoke<CollectionSummary>("apply_mangadex", { request }),
+  refreshMangaDex: (collectionId) =>
+    invoke<CollectionSummary>("refresh_mangadex", { collectionId }),
+  getMangaDexConnection: (collectionId) =>
+    invoke<MangaDexConnection | null>("get_mangadex_connection", { collectionId }),
   createCollection: (input: CreateCollection) =>
     invoke<CollectionSummary>("create_collection", { request: input }),
   updateCollection: (id: string, input: UpdateCollection) =>
