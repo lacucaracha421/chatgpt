@@ -3,9 +3,7 @@ use std::{collections::BTreeSet, fs, path::PathBuf};
 use image::ImageFormat;
 use rusqlite::{params, OptionalExtension, Transaction};
 
-use super::{
-    collection::require_collection, error::LibraryError, Library, MediaResponse,
-};
+use super::{collection::require_collection, error::LibraryError, Library, MediaResponse};
 
 const MAX_WORK_ARTWORK_BYTES: usize = 32 * 1024 * 1024;
 
@@ -39,9 +37,6 @@ impl Library {
         collection_id: &str,
         bytes: &[u8],
     ) -> Result<PreparedWorkArtwork, LibraryError> {
-        let connection = self.connection()?;
-        require_collection(&connection, collection_id)?;
-        drop(connection);
         if bytes.is_empty() || bytes.len() > MAX_WORK_ARTWORK_BYTES {
             return Err(LibraryError::InvalidWorkArtwork);
         }

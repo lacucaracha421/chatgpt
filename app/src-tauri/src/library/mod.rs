@@ -16,6 +16,7 @@ pub mod legacy_migration;
 mod lock;
 mod manga;
 pub(crate) mod mangadex;
+mod mangadex_flow;
 pub mod metadata_import;
 pub mod models;
 mod query;

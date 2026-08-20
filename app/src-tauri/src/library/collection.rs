@@ -352,7 +352,7 @@ pub(crate) fn collection_type_str(collection_type: CollectionType) -> &'static s
     }
 }
 
-fn map_duplicate_name(error: rusqlite::Error) -> LibraryError {
+pub(crate) fn map_duplicate_name(error: rusqlite::Error) -> LibraryError {
     match error {
         rusqlite::Error::SqliteFailure(error, _)
             if error.code == rusqlite::ErrorCode::ConstraintViolation =>

@@ -123,6 +123,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::MangaDexRateLimited => "mangadex_rate_limited",
             LibraryError::MangaDexNotFound => "mangadex_not_found",
             LibraryError::InvalidMangaDexResponse => "invalid_mangadex_response",
+            LibraryError::DuplicateProviderBinding => "duplicate_provider_binding",
             LibraryError::UnsupportedVideo => "unsupported_video",
             LibraryError::VideoPreparationFailed => "video_preparation_failed",
             LibraryError::VideoToolUnavailable => "video_tool_unavailable",

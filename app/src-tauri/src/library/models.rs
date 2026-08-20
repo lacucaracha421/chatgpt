@@ -433,6 +433,32 @@ pub struct MangaDexWorkPreview {
     pub covers: Vec<MangaDexCoverCandidate>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum MangaDexApplyTarget {
+    New { name: String },
+    Existing { collection_id: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MangaDexApplyRequest {
+    pub target: MangaDexApplyTarget,
+    pub manga_id: String,
+    pub cover_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MangaDexConnection {
+    pub manga_id: String,
+    pub last_synced_at: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateCollection {

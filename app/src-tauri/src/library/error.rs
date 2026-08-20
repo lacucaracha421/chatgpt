@@ -184,6 +184,8 @@ pub enum LibraryError {
     MangaDexNotFound,
     #[error("MangaDex 응답을 처리할 수 없습니다")]
     InvalidMangaDexResponse,
+    #[error("이 MangaDex 작품은 이미 다른 Work에 연결되어 있습니다")]
+    DuplicateProviderBinding,
     #[error("영상 형식을 지원하지 않거나 파일이 손상됐습니다")]
     UnsupportedVideo,
     #[error("영상 미리보기를 준비하지 못했습니다")]
