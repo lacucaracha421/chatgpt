@@ -1,4 +1,5 @@
 import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { CollectionSummary, LibraryGateway } from "../library/types";
@@ -109,9 +110,13 @@ describe("CollectionBrowser", () => {
     expect(onViewChange).toHaveBeenCalledWith({ kind: "collection", collectionId: "c1" });
   });
 
-  it("creates a collection from the toolbar button", async () => {
+  it("orders MangaDex before manual input in the new collection menu", async () => {
+    const user = userEvent.setup();
     const gateway = renderBrowser({ collections: [], typeFilter: null, showcase: false });
-    screen.getByRole("button", { name: "새 컬렉션" }).click();
+    await user.click(screen.getByRole("button", { name: "새 컬렉션" }));
+    const items = await screen.findAllByRole("menuitem");
+    expect(items.map((item) => item.textContent)).toEqual(["MangaDex에서 만화 추가", "직접 입력"]);
+    await user.click(screen.getByRole("menuitem", { name: "직접 입력" }));
     expect(await screen.findByRole("heading", { name: "새 컬렉션" })).toBeInTheDocument();
     expect(gateway.createCollection).not.toHaveBeenCalled();
   });

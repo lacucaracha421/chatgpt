@@ -4,7 +4,7 @@ import { useEffect, useRef, type KeyboardEventHandler, type PropsWithChildren } 
 type DialogProps = PropsWithChildren<{
   open: boolean;
   title: string;
-  variant?: "default" | "fullscreen";
+  variant?: "default" | "wide" | "fullscreen";
   onKeyDown?: KeyboardEventHandler<HTMLDivElement>;
   onClose: () => void;
 }>;
@@ -25,7 +25,7 @@ export function Dialog({ children, open, title, variant = "default", onKeyDown, 
       <RadixDialog.Portal>
         <RadixDialog.Overlay className="ui-dialog__overlay" />
         <RadixDialog.Content
-          className={`ui-dialog${variant === "fullscreen" ? " ui-dialog--fullscreen" : ""}`}
+          className={`ui-dialog${variant === "default" ? "" : ` ui-dialog--${variant}`}`}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
             openerRef.current?.focus();

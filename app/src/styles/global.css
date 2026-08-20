@@ -235,6 +235,10 @@ input:disabled {
   transform: none;
 }
 
+.ui-dialog--wide {
+  width: min(56rem, calc(100vw - var(--space-6)));
+}
+
 .ui-dialog--fullscreen > .ui-dialog__title {
   position: absolute;
   width: 1px;
@@ -2413,6 +2417,112 @@ input:disabled {
 .collection-edit-dialog__error {
   margin: 0;
   color: var(--color-danger);
+}
+
+.mangadex-import {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.mangadex-import__search {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: var(--space-2);
+}
+
+.mangadex-import__workspace {
+  display: grid;
+  grid-template-columns: minmax(12rem, 0.7fr) minmax(0, 1.3fr);
+  gap: var(--space-3);
+  min-height: 22rem;
+}
+
+.mangadex-import__results {
+  overflow: auto;
+  border-right: var(--border-width) solid var(--color-border);
+}
+
+.mangadex-import__result {
+  display: grid;
+  width: 100%;
+  padding: var(--space-2);
+  color: var(--color-text);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: var(--border-width) solid var(--color-border);
+  cursor: pointer;
+}
+
+.mangadex-import__result:hover {
+  background: var(--color-surface-hover);
+}
+
+.mangadex-import__result small,
+.mangadex-import__metadata dt {
+  color: var(--color-muted);
+}
+
+.mangadex-import__detail {
+  min-width: 0;
+}
+
+.mangadex-import__metadata {
+  display: flex;
+  gap: var(--space-4);
+  margin: var(--space-3) 0;
+}
+
+.mangadex-import__metadata div {
+  display: grid;
+  gap: 2px;
+}
+
+.mangadex-import__metadata dd {
+  margin: 0;
+}
+
+.mangadex-import__overview,
+.mangadex-import__error {
+  margin: 0;
+}
+
+.mangadex-import__error {
+  color: var(--color-danger);
+}
+
+.mangadex-import__covers {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(6rem, 1fr));
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.mangadex-import__cover {
+  display: grid;
+  gap: var(--space-compact);
+  padding: var(--space-compact);
+  color: var(--color-muted);
+  background: transparent;
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.mangadex-import__cover[aria-pressed="true"] {
+  color: var(--color-text);
+  border-color: var(--color-accent);
+}
+
+.mangadex-import__cover img {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+}
+
+.mangadex-import__actions {
+  justify-content: flex-end;
 }
 
 /* Collection Overlay */
