@@ -4,10 +4,10 @@ use std::path::{Path, PathBuf};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
-use super::collection::{collection_by_id, collection_type_str, normalized_name};
+use super::collection::{collection_type_str, normalized_name};
 use super::collection_source::set_collection_source_root;
 use super::error::LibraryError;
-use super::models::CollectionType;
+use super::models::{CollectionType, ExternalBindingInput};
 use super::Library;
 
 #[derive(Debug, Clone, Serialize)]
@@ -48,8 +48,14 @@ pub struct BookImportEntry {
     pub my_score: Option<i64>,
     pub genres: Option<String>,
     pub overview: Option<String>,
-    pub external_id: Option<String>,
-    pub external_source: Option<String>,
+    pub external_bindings: Vec<BookExternalBinding>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BookExternalBinding {
+    pub provider: String,
+    pub external_id: String,
 }
 
 impl Library {
@@ -106,8 +112,7 @@ impl Library {
                         my_score: parsed.my_score,
                         genres: parsed.genres,
                         overview: parsed.overview,
-                        external_id: parsed.external_id,
-                        external_source: parsed.external_source,
+                        external_bindings: parsed.external_bindings,
                     });
                 }
                 Ok(None) => {
@@ -176,22 +181,18 @@ fn upsert_collection(
     let id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
     let type_str = collection_type_str(entry.collection_type);
-    let external_synced_at: Option<String> = if entry.external_id.is_some() {
-        Some(now.clone())
-    } else {
-        None
-    };
-    connection
+    let transaction = connection
+        .unchecked_transaction()
+        .map_err(|error| error.to_string())?;
+    transaction
         .execute(
             "INSERT INTO collections (
                 id, name, description, type, cover_asset_id,
                 year, author, director, external_score, my_score,
-                genres, overview, external_id, external_source, external_synced_at,
-                showcase, external_metadata_json, created_at, updated_at, source_path
+                genres, overview, showcase, created_at, updated_at, source_path
              ) VALUES (?1, ?2, NULL, ?3, NULL,
                 ?4, ?5, ?6, NULL, ?7,
-                ?8, ?9, ?10, ?11, ?12,
-                0, NULL, ?13, ?13, ?14)",
+                ?8, ?9, 0, ?10, ?10, ?11)",
             params![
                 id,
                 name,
@@ -202,15 +203,26 @@ fn upsert_collection(
                 entry.my_score,
                 entry.genres,
                 entry.overview,
-                entry.external_id,
-                entry.external_source,
-                external_synced_at,
                 now,
                 entry.relative_path
             ],
         )
         .map_err(|e| map_duplicate_name_err(e, &entry.name))?;
-    let _ = collection_by_id(connection, &id).map_err(|e| e.to_string())?;
+    for binding in &entry.external_bindings {
+        super::external_binding::upsert_external_binding(
+            &transaction,
+            &id,
+            ExternalBindingInput {
+                provider: binding.provider.clone(),
+                external_id: binding.external_id.clone(),
+                provider_data_json: None,
+                last_synced_at: Some(now.clone()),
+            },
+            &now,
+        )
+        .map_err(|error| error.to_string())?;
+    }
+    transaction.commit().map_err(|error| error.to_string())?;
     Ok(true)
 }
 
@@ -232,8 +244,7 @@ struct ParsedInfo {
     my_score: Option<i64>,
     genres: Option<String>,
     overview: Option<String>,
-    external_id: Option<String>,
-    external_source: Option<String>,
+    external_bindings: Vec<BookExternalBinding>,
 }
 
 fn parse_info_txt(folder: &Path) -> Result<Option<ParsedInfo>, String> {
@@ -274,7 +285,7 @@ fn parse_info_txt(folder: &Path) -> Result<Option<ParsedInfo>, String> {
     });
     let genres = first_value(&fields, "Genres").map(|v| trim_field(&v));
     let overview = first_value(&fields, "Overview").map(|v| trim_field(&v));
-    let (external_id, external_source) = pick_external_id(&fields);
+    let external_bindings = external_bindings(&fields);
     Ok(Some(ParsedInfo {
         name,
         collection_type,
@@ -284,25 +295,26 @@ fn parse_info_txt(folder: &Path) -> Result<Option<ParsedInfo>, String> {
         my_score,
         genres,
         overview,
-        external_id,
-        external_source,
+        external_bindings,
     }))
 }
 
-fn pick_external_id(fields: &[(String, String)]) -> (Option<String>, Option<String>) {
-    if let Some(id) = first_value(fields, "TMDB ID") {
-        return (Some(id.trim().to_string()), Some("tmdb".into()));
-    }
-    if let Some(id) = first_value(fields, "Steam App ID") {
-        return (Some(id.trim().to_string()), Some("steam".into()));
-    }
-    if let Some(id) = first_value(fields, "IGDB ID") {
-        return (Some(id.trim().to_string()), Some("igdb".into()));
-    }
-    if let Some(id) = first_value(fields, "MangaDex ID") {
-        return (Some(id.trim().to_string()), Some("mangadex".into()));
-    }
-    (None, None)
+fn external_bindings(fields: &[(String, String)]) -> Vec<BookExternalBinding> {
+    [
+        ("TMDB ID", "tmdb"),
+        ("Steam App ID", "steam"),
+        ("IGDB ID", "igdb"),
+        ("MangaDex ID", "mangadex"),
+    ]
+    .into_iter()
+    .filter_map(|(key, provider)| {
+        let external_id = first_value(fields, key)?.trim();
+        (!external_id.is_empty()).then(|| BookExternalBinding {
+            provider: provider.into(),
+            external_id: external_id.into(),
+        })
+    })
+    .collect()
 }
 
 fn first_value<'a>(fields: &'a [(String, String)], key: &str) -> Option<&'a str> {
@@ -358,14 +370,21 @@ mod tests {
                    MangaDex ID: 6b1eb93e-473a-4ab3-9922-1a66d2a29a4a\n";
         let fields = parse_key_value(raw);
         assert_eq!(first_value(&fields, "Title"), Some("나루토"));
-        assert_eq!(first_value(&fields, "MangaDex ID"), Some("6b1eb93e-473a-4ab3-9922-1a66d2a29a4a"));
-        let (id, src) = pick_external_id(&fields);
-        assert_eq!(id.as_deref(), Some("6b1eb93e-473a-4ab3-9922-1a66d2a29a4a"));
-        assert_eq!(src.as_deref(), Some("mangadex"));
+        assert_eq!(
+            first_value(&fields, "MangaDex ID"),
+            Some("6b1eb93e-473a-4ab3-9922-1a66d2a29a4a")
+        );
+        assert_eq!(
+            external_bindings(&fields),
+            vec![BookExternalBinding {
+                provider: "mangadex".into(),
+                external_id: "6b1eb93e-473a-4ab3-9922-1a66d2a29a4a".into(),
+            }]
+        );
     }
 
     #[test]
-    fn parses_game_info_txt_with_steam_and_igdb() {
+    fn parses_every_game_provider_identity() {
         let raw = "Steam App ID: 1245620\n\
                    IGDB ID: 119133\n\
                    Title: 엘든 링\n\
@@ -375,9 +394,58 @@ mod tests {
                    Type: game\n";
         let fields = parse_key_value(raw);
         assert_eq!(first_value(&fields, "Type"), Some("game"));
-        let (id, src) = pick_external_id(&fields);
-        assert_eq!(id.as_deref(), Some("1245620"));
-        assert_eq!(src.as_deref(), Some("steam"));
+        assert_eq!(
+            external_bindings(&fields),
+            vec![
+                BookExternalBinding {
+                    provider: "steam".into(),
+                    external_id: "1245620".into(),
+                },
+                BookExternalBinding {
+                    provider: "igdb".into(),
+                    external_id: "119133".into(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn binding_failure_rolls_back_collection_import() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let connection = library.connection().unwrap();
+        let entry = BookImportEntry {
+            folder: "Elden Ring".into(),
+            relative_path: "Elden Ring".into(),
+            collection_type: CollectionType::Game,
+            name: "Elden Ring".into(),
+            year: Some(2022),
+            author: Some("FromSoftware".into()),
+            director: None,
+            my_score: None,
+            genres: None,
+            overview: None,
+            external_bindings: vec![
+                BookExternalBinding {
+                    provider: "steam".into(),
+                    external_id: "1245620".into(),
+                },
+                BookExternalBinding {
+                    provider: "igdb".into(),
+                    external_id: "   ".into(),
+                },
+            ],
+        };
+
+        assert!(upsert_collection(&connection, &entry).is_err());
+        for table in ["collections", "collection_external_bindings"] {
+            let count: i64 = connection
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 0, "{table} should be rolled back");
+        }
     }
 
     #[test]
@@ -390,9 +458,13 @@ mod tests {
                    Director: 후지모토 타츠키\n";
         let fields = parse_key_value(raw);
         assert_eq!(first_value(&fields, "Type"), Some("movie"));
-        let (id, src) = pick_external_id(&fields);
-        assert_eq!(id.as_deref(), Some("1218925"));
-        assert_eq!(src.as_deref(), Some("tmdb"));
+        assert_eq!(
+            external_bindings(&fields),
+            vec![BookExternalBinding {
+                provider: "tmdb".into(),
+                external_id: "1218925".into(),
+            }]
+        );
     }
 
     #[test]
