@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 13;
+pub(crate) const SCHEMA_VERSION: i64 = 14;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -23,6 +23,8 @@ const COLLECTION_SOURCE_SCHEMA: &str =
     include_str!("../../migrations/0012_collection_source.sql");
 const COLLECTION_EXTERNAL_BINDINGS_SCHEMA: &str =
     include_str!("../../migrations/0013_collection_external_bindings.sql");
+const COLLECTION_WORK_ARTWORKS_SCHEMA: &str =
+    include_str!("../../migrations/0014_collection_work_artworks.sql");
 
 pub fn open_database(path: &Path) -> Result<Connection, LibraryError> {
     let mut connection = Connection::open(path)?;
@@ -33,7 +35,7 @@ pub fn open_database(path: &Path) -> Result<Connection, LibraryError> {
     let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
     match version {
         SCHEMA_VERSION => {}
-        version @ 0..=12 => {
+        version @ 0..=13 => {
             if version > 0 {
                 let root = path
                     .parent()
@@ -90,6 +92,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         }
         if version <= 12 {
             transaction.execute_batch(COLLECTION_EXTERNAL_BINDINGS_SCHEMA)?;
+        }
+        if version <= 13 {
+            transaction.execute_batch(COLLECTION_WORK_ARTWORKS_SCHEMA)?;
         }
         transaction.commit()?;
         Ok::<(), LibraryError>(())
@@ -409,7 +414,103 @@ mod tests {
             connection
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
-            13
+            SCHEMA_VERSION
+        );
+    }
+
+    #[test]
+    fn migrates_v13_to_v14_work_artwork_constraints() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        for schema in [
+            INITIAL_SCHEMA,
+            VAULT_SAFETY_SCHEMA,
+            SIMILARITY_REVIEW_SCHEMA,
+            VIDEO_MEDIA_SCHEMA,
+            MANGA_SCHEMA,
+            MANGA_MODIFIED_SCHEMA,
+            CLASSIFICATION_APPEARANCE_SCHEMA,
+            ASSET_ALBUMS_SCHEMA,
+            ASSET_SOURCE_PROVENANCE_SCHEMA,
+            COLLECTIONS_SCHEMA,
+            COLLECTIONS_TYPED_SCHEMA,
+            COLLECTION_SOURCE_SCHEMA,
+            COLLECTION_EXTERNAL_BINDINGS_SCHEMA,
+        ] {
+            connection.execute_batch(schema).unwrap();
+        }
+        connection
+            .execute(
+                "INSERT INTO collections (
+                    id, name, description, type, cover_asset_id, year, author, director,
+                    external_score, my_score, genres, overview, showcase,
+                    created_at, updated_at, source_path
+                 ) VALUES (
+                    'work-1', 'Work One', NULL, 'manga', NULL, NULL, NULL, NULL,
+                    NULL, NULL, NULL, NULL, 0,
+                    '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z', NULL
+                 )",
+                [],
+            )
+            .unwrap();
+
+        migrate_to_latest(&mut connection, 13).unwrap();
+
+        connection
+            .execute(
+                "INSERT INTO collection_work_artworks (
+                    id, collection_id, provider, provider_image_id, kind, relative_path,
+                    mime_type, width, height, language, selected, created_at, updated_at
+                 ) VALUES (
+                    'art-1', 'work-1', 'mangadex', 'cover-1', 'cover',
+                    'work-artwork/work-1/art-1.jpg', 'image/jpeg', 100, 150,
+                    'ja', 1, '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z'
+                 )",
+                [],
+            )
+            .unwrap();
+        assert!(connection
+            .execute(
+                "INSERT INTO collection_work_artworks (
+                    id, collection_id, provider, provider_image_id, kind, relative_path,
+                    mime_type, width, height, language, selected, created_at, updated_at
+                 ) VALUES (
+                    'art-2', 'work-1', 'mangadex', 'cover-2', 'cover',
+                    'work-artwork/work-1/art-2.jpg', 'image/jpeg', 100, 150,
+                    NULL, 1, '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z'
+                 )",
+                [],
+            )
+            .is_err());
+        assert!(connection
+            .execute(
+                "INSERT INTO collection_work_artworks (
+                    id, collection_id, provider, provider_image_id, kind, relative_path,
+                    mime_type, width, height, language, selected, created_at, updated_at
+                 ) VALUES (
+                    'art-3', 'work-1', 'mangadex', 'cover-1', 'alternate',
+                    'work-artwork/work-1/art-3.jpg', 'image/jpeg', 100, 150,
+                    NULL, 0, '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z'
+                 )",
+                [],
+            )
+            .is_err());
+
+        connection
+            .execute("DELETE FROM collections WHERE id = 'work-1'", [])
+            .unwrap();
+        assert_eq!(
+            connection
+                .query_row("SELECT COUNT(*) FROM collection_work_artworks", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            14
         );
     }
 }

@@ -353,6 +353,7 @@ pub struct CollectionSummary {
     #[serde(rename = "type")]
     pub collection_type: CollectionType,
     pub cover_asset_id: Option<String>,
+    pub selected_work_artwork_id: Option<String>,
     pub asset_count: u64,
     pub year: Option<i64>,
     pub author: Option<String>,
@@ -458,6 +459,7 @@ mod tests {
             description: None,
             collection_type: CollectionType::Manga,
             cover_asset_id: None,
+            selected_work_artwork_id: None,
             asset_count: 0,
             year: Some(2014),
             author: Some("Ryoko Kui".into()),

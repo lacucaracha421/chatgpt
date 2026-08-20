@@ -35,6 +35,14 @@ const COLLECTION_SUMMARY_SQL: &str = "SELECT
         )
     ),
     (
+        SELECT artwork.id
+        FROM collection_work_artworks AS artwork
+        WHERE artwork.collection_id = collection.id
+          AND artwork.kind = 'cover'
+          AND artwork.selected = 1
+        LIMIT 1
+    ),
+    (
         SELECT COUNT(*)
         FROM collection_assets AS count_link
         JOIN assets AS count_asset ON count_asset.id = count_link.asset_id
@@ -313,25 +321,26 @@ fn collection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollectionSu
         "movie" => CollectionType::Movie,
         _ => CollectionType::Manga,
     };
-    let showcase_int: i64 = row.get(13)?;
+    let showcase_int: i64 = row.get(14)?;
     Ok(CollectionSummary {
         id: row.get(0)?,
         name: row.get(1)?,
         description: row.get(2)?,
         collection_type,
         cover_asset_id: row.get(4)?,
-        asset_count: u64::try_from(row.get::<_, i64>(5)?).unwrap_or(0),
-        year: row.get(6)?,
-        author: row.get(7)?,
-        director: row.get(8)?,
-        external_score: row.get(9)?,
-        my_score: row.get(10)?,
-        genres: row.get(11)?,
-        overview: row.get(12)?,
+        selected_work_artwork_id: row.get(5)?,
+        asset_count: u64::try_from(row.get::<_, i64>(6)?).unwrap_or(0),
+        year: row.get(7)?,
+        author: row.get(8)?,
+        director: row.get(9)?,
+        external_score: row.get(10)?,
+        my_score: row.get(11)?,
+        genres: row.get(12)?,
+        overview: row.get(13)?,
         showcase: showcase_int != 0,
-        created_at: row.get(14)?,
-        updated_at: row.get(15)?,
-        source_path: row.get(16)?,
+        created_at: row.get(15)?,
+        updated_at: row.get(16)?,
+        source_path: row.get(17)?,
     })
 }
 
@@ -703,6 +712,52 @@ mod tests {
                 .list_collection_external_bindings(&created.id)
                 .unwrap(),
             before
+        );
+    }
+
+    #[test]
+    fn summary_projects_selected_work_artwork() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let collection = create(&library, "Dungeon Meshi");
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO collection_work_artworks (
+                    id, collection_id, provider, provider_image_id, kind, relative_path,
+                    mime_type, width, height, language, selected, created_at, updated_at
+                 ) VALUES (
+                    'art-1', ?1, 'mangadex', 'cover-1', 'cover',
+                    'work-artwork/art-1.jpg', 'image/jpeg', 100, 150, 'ja', 0,
+                    '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z'
+                 )",
+                [&collection.id],
+            )
+            .unwrap();
+
+        assert_eq!(
+            library
+                .get_collection(&collection.id)
+                .unwrap()
+                .selected_work_artwork_id,
+            None
+        );
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE collection_work_artworks SET selected = 1 WHERE id = 'art-1'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(
+            library
+                .get_collection(&collection.id)
+                .unwrap()
+                .selected_work_artwork_id
+                .as_deref(),
+            Some("art-1")
         );
     }
 
