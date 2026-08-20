@@ -170,6 +170,20 @@ pub enum LibraryError {
         #[source]
         source: std::io::Error,
     },
+    #[error("MangaDex 검색어는 두 글자 이상이어야 합니다")]
+    InvalidMangaDexQuery,
+    #[error("MangaDex 식별자가 올바르지 않습니다")]
+    InvalidMangaDexIdentity,
+    #[error("MangaDex에 연결할 수 없습니다")]
+    MangaDexUnavailable,
+    #[error("MangaDex 요청 시간이 초과됐습니다")]
+    MangaDexTimedOut,
+    #[error("MangaDex 요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요")]
+    MangaDexRateLimited,
+    #[error("MangaDex 작품을 찾을 수 없습니다")]
+    MangaDexNotFound,
+    #[error("MangaDex 응답을 처리할 수 없습니다")]
+    InvalidMangaDexResponse,
     #[error("영상 형식을 지원하지 않거나 파일이 손상됐습니다")]
     UnsupportedVideo,
     #[error("영상 미리보기를 준비하지 못했습니다")]

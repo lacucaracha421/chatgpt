@@ -1,0 +1,34 @@
+{
+  "result": "ok",
+  "response": "collection",
+  "data": [
+    {
+      "id": "d1a9fdeb-f713-407f-960c-8326b586e6fd",
+      "type": "manga",
+      "attributes": {
+        "title": { "en": "Delicious in Dungeon" },
+        "altTitles": [
+          { "ko": "던전밥" },
+          { "ja-ro": "Dungeon Meshi" },
+          { "ja": "ダンジョン飯" },
+          { "en": "Delicious in Dungeon" }
+        ],
+        "description": { "ko": "던전을 탐험하며 마물을 요리하는 이야기.", "en": "A dungeon cooking adventure." },
+        "year": 2014,
+        "status": "completed",
+        "tags": [
+          { "id": "tag-1", "type": "tag", "attributes": { "name": { "en": "Fantasy" } } },
+          { "id": "tag-2", "type": "tag", "attributes": { "name": { "ko": "모험", "en": "Adventure" } } }
+        ]
+      },
+      "relationships": [
+        { "id": "author-1", "type": "author", "attributes": { "name": "Ryoko Kui" } },
+        { "id": "author-1", "type": "artist", "attributes": { "name": "Ryoko Kui" } },
+        { "id": "11111111-1111-4111-8111-111111111111", "type": "cover_art", "attributes": { "fileName": "a1b2c3d4-e5f6-47a8-9000-111122223333.jpg" } }
+      ]
+    }
+  ],
+  "limit": 20,
+  "offset": 0,
+  "total": 1
+}

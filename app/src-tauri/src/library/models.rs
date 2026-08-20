@@ -398,6 +398,41 @@ pub struct ExternalBinding {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MangaDexSearchResult {
+    pub manga_id: String,
+    pub title: String,
+    pub alternate_titles: Vec<String>,
+    pub author: Option<String>,
+    pub year: Option<i64>,
+    pub status: Option<String>,
+    pub primary_cover_file_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MangaDexCoverCandidate {
+    pub cover_id: String,
+    pub file_name: String,
+    pub volume: Option<String>,
+    pub language: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MangaDexWorkPreview {
+    pub manga_id: String,
+    pub proposed_title: String,
+    pub alternate_titles: Vec<String>,
+    pub author: Option<String>,
+    pub year: Option<i64>,
+    pub status: Option<String>,
+    pub genres: Option<String>,
+    pub overview: Option<String>,
+    pub covers: Vec<MangaDexCoverCandidate>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateCollection {

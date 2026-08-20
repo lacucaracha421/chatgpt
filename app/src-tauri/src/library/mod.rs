@@ -15,6 +15,7 @@ mod ingestion;
 pub mod legacy_migration;
 mod lock;
 mod manga;
+pub(crate) mod mangadex;
 pub mod metadata_import;
 pub mod models;
 mod query;
@@ -48,6 +49,7 @@ pub enum MediaVariant {
     CollectionCover,
     CollectionSourcePreview,
     WorkArtwork,
+    MangaDexCoverPreview,
 }
 
 #[derive(Debug)]
@@ -359,7 +361,8 @@ impl Library {
             | MediaVariant::MangaPage(_)
             | MediaVariant::CollectionCover
             | MediaVariant::CollectionSourcePreview
-            | MediaVariant::WorkArtwork => {
+            | MediaVariant::WorkArtwork
+            | MediaVariant::MangaDexCoverPreview => {
                 unreachable!()
             }
         };

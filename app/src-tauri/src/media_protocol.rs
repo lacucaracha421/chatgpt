@@ -5,7 +5,7 @@ use tauri::http::{
     Method, Response, StatusCode,
 };
 
-use crate::library::{error::LibraryError, Library, MediaVariant};
+use crate::library::{error::LibraryError, mangadex, Library, MediaVariant};
 
 #[cfg(test)]
 pub(crate) fn media_response(
@@ -31,6 +31,25 @@ pub(crate) fn media_response_with_range(
     let Some(library) = library else {
         return empty_response(StatusCode::NOT_FOUND);
     };
+
+    if matches!(variant, MediaVariant::MangaDexCoverPreview) {
+        return match mangadex::cover_preview(&asset_id, &file_name.unwrap_or_default()) {
+            Ok(image) => Response::builder()
+                .status(StatusCode::OK)
+                .header(CONTENT_TYPE, image.mime)
+                .header(CONTENT_LENGTH, image.bytes.len().to_string())
+                .body(image.bytes)
+                .expect("remote image response is valid"),
+            Err(LibraryError::MangaDexNotFound) => empty_response(StatusCode::NOT_FOUND),
+            Err(LibraryError::MangaDexRateLimited) => {
+                empty_response(StatusCode::TOO_MANY_REQUESTS)
+            }
+            Err(LibraryError::InvalidMangaDexIdentity) => {
+                empty_response(StatusCode::BAD_REQUEST)
+            }
+            Err(_) => empty_response(StatusCode::BAD_GATEWAY),
+        };
+    }
 
     let collection_media = match variant {
         MediaVariant::CollectionCover => Some(
@@ -180,6 +199,15 @@ fn parse_path(path: &str) -> Option<(MediaVariant, String, Option<String>)> {
             (MediaVariant::CollectionSourcePreview, None)
         }
         "work-artwork" if segments.next().is_none() => (MediaVariant::WorkArtwork, None),
+        "mangadex-cover-preview" => {
+            let file_name = percent_decode(segments.next()?)?;
+            if segments.next().is_some()
+                || mangadex::validate_cover_identity(&asset_id, &file_name).is_err()
+            {
+                return None;
+            }
+            (MediaVariant::MangaDexCoverPreview, Some(file_name))
+        }
         "scrub-frame" => {
             let frame_index = segments.next()?.parse::<u32>().ok()?;
             if segments.next().is_some() {
@@ -245,7 +273,7 @@ mod tests {
 
     use crate::library::{error::LibraryError, Library, MediaVariant};
 
-    use super::{media_response, media_response_with_range};
+    use super::{media_response, media_response_with_range, parse_path};
 
     const ASSET_ID: &str = "00000000-0000-4000-8000-000000000001";
     const MISSING_ID: &str = "00000000-0000-4000-8000-000000000002";
@@ -337,6 +365,19 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.headers()[CONTENT_TYPE], "image/png");
         assert_eq!(response.body(), b"artwork bytes");
+    }
+
+    #[test]
+    fn parses_mangadex_cover_preview_route() {
+        let file_name = "a1b2c3d4-e5f6-47a8-9000-111122223333.jpg";
+        let (variant, manga_id, parsed_file_name) = parse_path(&format!(
+            "/mangadex-cover-preview/{COLLECTION_ID}/{file_name}"
+        ))
+        .unwrap();
+
+        assert!(matches!(variant, MediaVariant::MangaDexCoverPreview));
+        assert_eq!(manga_id, COLLECTION_ID);
+        assert_eq!(parsed_file_name.as_deref(), Some(file_name));
     }
 
     #[test]
