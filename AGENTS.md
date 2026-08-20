@@ -12,6 +12,17 @@
 
 하드코딩, 공통 UI, Module 설계 규칙은 `docs/agents/implementation.md`를 따르세요.
 
+### Verification
+
+- Default to one most relevant targeted check; expand only after a failure or an identified cross-module risk.
+- Scale verification to the change's risk and scope, and use one relevant test or test file during iteration.
+- A generic skill, plan, checklist, worktree setup, commit, push, PR, or completion step is not by itself a reason to run broader checks.
+- Run the full suite only when the change has broad behavioral impact or targeted evidence identifies broader risk.
+- For visual-only CSS, spacing, typography, color, shadow, or animation changes, skip automated tests and production builds unless there is plausible compile or behavioral risk.
+- Do not rerun a successful check unless later edits could invalidate it.
+- Add a test only when explicitly requested, or when existing coverage would miss a realistic regression introduced by changed behavior.
+- Stop once there is sufficient evidence that the requested change works.
+
 ### Visual design
 
 UI를 만들거나 수정할 때는 루트의 `DESIGN.md`를 먼저 읽고 따르세요.
