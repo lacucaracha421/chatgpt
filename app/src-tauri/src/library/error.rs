@@ -85,6 +85,8 @@ pub enum LibraryError {
     CollectionDescriptionTooLong,
     #[error("요청한 컬렉션을 찾을 수 없습니다")]
     CollectionNotFound,
+    #[error("외부 제공자와 ID는 비어 있을 수 없습니다")]
+    InvalidExternalBinding,
     #[error("같은 이름의 컬렉션이 있습니다")]
     DuplicateCollectionName,
     #[error("대표 이미지는 컬렉션에 속한 정상 자산이어야 합니다")]

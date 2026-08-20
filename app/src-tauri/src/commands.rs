@@ -82,6 +82,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::CollectionNameTooLong => "collection_name_too_long",
             LibraryError::CollectionDescriptionTooLong => "collection_description_too_long",
             LibraryError::CollectionNotFound => "collection_not_found",
+            LibraryError::InvalidExternalBinding => "invalid_external_binding",
             LibraryError::DuplicateCollectionName => "duplicate_collection_name",
             LibraryError::CollectionCoverNotMember => "collection_cover_not_member",
             LibraryError::InvalidCollectionType => "invalid_collection_type",

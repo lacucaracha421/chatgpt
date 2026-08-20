@@ -7,6 +7,7 @@ mod collection;
 mod collection_source;
 mod db;
 mod drag_out;
+mod external_binding;
 pub mod error;
 mod favorite;
 mod folder_appearance;

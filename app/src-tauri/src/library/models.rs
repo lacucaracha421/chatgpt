@@ -382,6 +382,26 @@ pub struct CreateCollection {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ExternalBindingInput {
+    pub provider: String,
+    pub external_id: String,
+    pub provider_data_json: Option<String>,
+    pub last_synced_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalBinding {
+    pub provider: String,
+    pub external_id: String,
+    pub provider_data_json: Option<String>,
+    pub last_synced_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateCollection {
     pub name: String,
     pub description: Option<String>,

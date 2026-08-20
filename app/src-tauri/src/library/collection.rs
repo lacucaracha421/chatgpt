@@ -290,7 +290,10 @@ fn normalized_description(description: Option<String>) -> Result<Option<String>,
     Ok(description)
 }
 
-fn require_collection(connection: &Connection, id: &str) -> Result<(), LibraryError> {
+pub(crate) fn require_collection(
+    connection: &Connection,
+    id: &str,
+) -> Result<(), LibraryError> {
     let exists: bool = connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM collections WHERE id = ?1)",
         [id],
