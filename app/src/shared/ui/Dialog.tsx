@@ -4,7 +4,7 @@ import { useEffect, useRef, type KeyboardEventHandler, type PropsWithChildren } 
 type DialogProps = PropsWithChildren<{
   open: boolean;
   title: string;
-  variant?: "default" | "wide" | "fullscreen";
+  variant?: "default" | "medium" | "wide" | "fullscreen";
   onKeyDown?: KeyboardEventHandler<HTMLDivElement>;
   onClose: () => void;
 }>;

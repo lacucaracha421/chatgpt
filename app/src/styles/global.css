@@ -235,6 +235,10 @@ input:disabled {
   transform: none;
 }
 
+.ui-dialog--medium {
+  width: min(45rem, calc(100vw - var(--space-6)));
+}
+
 .ui-dialog--wide {
   width: min(56rem, calc(100vw - var(--space-6)));
 }
@@ -2420,6 +2424,7 @@ input:disabled {
 }
 
 .mangadex-import {
+  --mangadex-label-width: 4rem;
   display: grid;
   gap: var(--space-3);
 }
@@ -2431,20 +2436,28 @@ input:disabled {
   gap: var(--space-2);
 }
 
-.mangadex-import__workspace {
+.mangadex-import__search .ui-text-field {
   display: grid;
-  grid-template-columns: minmax(12rem, 0.7fr) minmax(0, 1.3fr);
+  grid-template-columns: var(--mangadex-label-width) minmax(0, 1fr);
+  align-items: center;
   gap: var(--space-3);
-  min-height: 22rem;
 }
 
 .mangadex-import__results {
+  min-height: 16rem;
+  max-height: 22rem;
+  margin-left: calc(var(--mangadex-label-width) + var(--space-3));
   overflow: auto;
-  border-right: var(--border-width) solid var(--color-border);
+  border-top: var(--border-width) solid var(--color-border);
 }
 
 .mangadex-import__result {
   display: grid;
+  grid-template-areas:
+    "title provider"
+    "meta provider";
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--space-3);
   width: 100%;
   padding: var(--space-2);
   color: var(--color-text);
@@ -2459,66 +2472,51 @@ input:disabled {
   background: var(--color-surface-hover);
 }
 
-.mangadex-import__result small,
-.mangadex-import__metadata dt {
+.mangadex-import__result[aria-pressed="true"] {
+  background: var(--color-selected);
+  box-shadow: inset var(--focus-width) 0 var(--color-accent);
+}
+
+.mangadex-import__result-title {
+  grid-area: title;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mangadex-import__result small {
+  grid-area: meta;
   color: var(--color-muted);
+  font-size: var(--text-xs);
 }
 
-.mangadex-import__detail {
-  min-width: 0;
+.mangadex-import__result-provider {
+  grid-area: provider;
+  align-self: center;
+  color: var(--color-muted);
+  font-size: var(--text-xs);
 }
 
-.mangadex-import__metadata {
-  display: flex;
-  gap: var(--space-4);
-  margin: var(--space-3) 0;
-}
-
-.mangadex-import__metadata div {
-  display: grid;
-  gap: 2px;
-}
-
-.mangadex-import__metadata dd {
-  margin: 0;
-}
-
-.mangadex-import__overview,
+.mangadex-import__provider-note,
 .mangadex-import__error {
   margin: 0;
+}
+
+.mangadex-import__provider-note {
+  margin-left: calc(var(--mangadex-label-width) + var(--space-3));
+  color: var(--color-muted);
+  font-size: var(--text-xs);
 }
 
 .mangadex-import__error {
   color: var(--color-danger);
 }
 
-.mangadex-import__covers {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(6rem, 1fr));
-  gap: var(--space-2);
-  margin-top: var(--space-3);
-}
-
-.mangadex-import__cover {
-  display: grid;
-  gap: var(--space-compact);
-  padding: var(--space-compact);
+.mangadex-import__hint {
+  margin-right: auto;
   color: var(--color-muted);
-  background: transparent;
-  border: var(--border-width) solid transparent;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-}
-
-.mangadex-import__cover[aria-pressed="true"] {
-  color: var(--color-text);
-  border-color: var(--color-accent);
-}
-
-.mangadex-import__cover img {
-  width: 100%;
-  aspect-ratio: 2 / 3;
-  object-fit: cover;
+  font-size: var(--text-xs);
 }
 
 .mangadex-import__actions {

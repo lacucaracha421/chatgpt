@@ -1,8 +1,7 @@
 import { useState } from "react";
-import { mangadexCoverPreviewUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
-import type { CollectionSummary, MangaDexSearchResult, MangaDexWorkPreview } from "../library/types";
+import type { CollectionSummary, MangaDexSearchResult } from "../library/types";
 import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
 import { Skeleton } from "../shared/ui/Skeleton";
@@ -23,10 +22,8 @@ export function MangaDexImportDialog({ open, target, onClose, onApplied }: Props
   const { gateway } = useLibrary();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<MangaDexSearchResult[]>([]);
-  const [preview, setPreview] = useState<MangaDexWorkPreview | null>(null);
-  const [name, setName] = useState("");
-  const [coverId, setCoverId] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"search" | "preview" | "apply" | null>(null);
+  const [selected, setSelected] = useState<MangaDexSearchResult | null>(null);
+  const [busy, setBusy] = useState<"search" | "apply" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function search() {
@@ -38,7 +35,9 @@ export function MangaDexImportDialog({ open, target, onClose, onApplied }: Props
     setBusy("search");
     setError(null);
     try {
-      setResults(await gateway.searchMangaDex(trimmed));
+      const nextResults = await gateway.searchMangaDex(trimmed);
+      setResults(nextResults);
+      setSelected(null);
     } catch (searchError) {
       setError(commandErrorMessage(searchError, "MangaDex에서 검색하지 못했습니다."));
     } finally {
@@ -46,37 +45,21 @@ export function MangaDexImportDialog({ open, target, onClose, onApplied }: Props
     }
   }
 
-  async function selectResult(result: MangaDexSearchResult) {
-    setBusy("preview");
+  function selectResult(result: MangaDexSearchResult) {
+    setSelected(result);
     setError(null);
-    try {
-      const next = await gateway.previewMangaDex(result.mangaId);
-      setPreview(next);
-      setName(next.proposedTitle);
-      setCoverId(null);
-    } catch (previewError) {
-      setError(commandErrorMessage(previewError, "만화 정보를 불러오지 못했습니다."));
-    } finally {
-      setBusy(null);
-    }
   }
 
   async function apply() {
-    if (!preview || !coverId) return;
-    const trimmedName = name.trim();
-    if (target.kind === "new" && !trimmedName) {
-      setError("컬렉션 이름을 입력해 주세요.");
-      return;
-    }
+    if (!selected) return;
     setBusy("apply");
     setError(null);
     try {
       const collection = await gateway.applyMangaDex({
         target: target.kind === "new"
-          ? { kind: "new", name: trimmedName }
+          ? { kind: "new", name: selected.title }
           : { kind: "existing", collectionId: target.collection.id },
-        mangaId: preview.mangaId,
-        coverId,
+        mangaId: selected.mangaId,
       });
       await onApplied(collection);
       onClose();
@@ -87,7 +70,7 @@ export function MangaDexImportDialog({ open, target, onClose, onApplied }: Props
   }
 
   return (
-    <Dialog open={open} title={target.kind === "new" ? "MangaDex에서 만화 추가" : "MangaDex 연결"} variant="wide" onClose={onClose}>
+    <Dialog open={open} title={target.kind === "new" ? "새 작품 추가" : "MangaDex 연결"} variant="medium" onClose={onClose}>
       <div className="mangadex-import">
         <div className="mangadex-import__search">
           <TextField
@@ -101,55 +84,32 @@ export function MangaDexImportDialog({ open, target, onClose, onApplied }: Props
         </div>
 
         {error && <p className="mangadex-import__error" role="alert">{error}</p>}
+        <p className="mangadex-import__provider-note">
+          MangaDex에서 작품 정보를 검색합니다. 한국 정발 정보는 작품 생성 후 Aladin에 연결할 수 있습니다.
+        </p>
         {busy === "search" && <Skeleton className="mangadex-import__loading" label="검색 중" />}
 
-        <div className="mangadex-import__workspace">
-          <div className="mangadex-import__results" aria-label="검색 결과">
-            {results.map((result) => (
-              <button key={result.mangaId} type="button" className="mangadex-import__result" onClick={() => void selectResult(result)}>
-                <span>{result.title}</span>
-                <small>{[result.author, result.year].filter(Boolean).join(" · ")}</small>
-              </button>
-            ))}
-          </div>
-
-          <div className="mangadex-import__detail">
-            {busy === "preview" && <Skeleton className="mangadex-import__loading" label="상세 정보 불러오는 중" />}
-            {preview && (
-              <>
-                {target.kind === "new" && (
-                  <TextField label="컬렉션 이름" value={name} onChange={(event) => { setName(event.target.value); setError(null); }} />
-                )}
-                <dl className="mangadex-import__metadata">
-                  <div><dt>작가</dt><dd>{preview.author ?? "-"}</dd></div>
-                  <div><dt>연도</dt><dd>{preview.year ?? "-"}</dd></div>
-                  <div><dt>장르</dt><dd>{preview.genres ?? "-"}</dd></div>
-                </dl>
-                {preview.overview && <p className="mangadex-import__overview">{preview.overview}</p>}
-                <div className="mangadex-import__covers" aria-label="표지 선택">
-                  {preview.covers.map((cover) => (
-                    <button
-                      key={cover.coverId}
-                      type="button"
-                      className="mangadex-import__cover"
-                      aria-label={`${cover.volume ?? "권 번호 없음"}권 표지`}
-                      aria-pressed={coverId === cover.coverId}
-                      onClick={() => { setCoverId(cover.coverId); setError(null); }}
-                    >
-                      <img src={mangadexCoverPreviewUrl(preview.mangaId, cover.fileName)} alt="" />
-                      <span>{cover.volume ? `${cover.volume}권` : "권 번호 없음"}</span>
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
+        <div className="mangadex-import__results" aria-label="검색 결과">
+          {results.map((result) => (
+            <button
+              key={result.mangaId}
+              type="button"
+              className="mangadex-import__result"
+              aria-pressed={selected?.mangaId === result.mangaId}
+              onClick={() => selectResult(result)}
+            >
+              <span className="mangadex-import__result-title">{result.title}</span>
+              <small>{[result.author, result.year].filter(Boolean).join(" · ")}</small>
+              <span className="mangadex-import__result-provider">MangaDex</span>
+            </button>
+          ))}
         </div>
 
         <div className="ui-dialog__actions mangadex-import__actions">
+          <span className="mangadex-import__hint">외부 정보는 로컬에 저장되며 사용자 수정값을 덮어쓰지 않습니다.</span>
           <Button type="button" disabled={busy !== null} onClick={onClose}>취소</Button>
-          <Button type="button" variant="primary" disabled={!preview || !coverId || busy !== null} onClick={() => void apply()}>
-            {target.kind === "new" ? "추가" : "적용"}
+          <Button type="button" variant="primary" disabled={!selected || busy !== null} onClick={() => void apply()}>
+            {target.kind === "new" ? "작품 만들기" : "연결"}
           </Button>
         </div>
       </div>

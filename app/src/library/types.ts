@@ -107,7 +107,6 @@ export type MangaDexApplyTarget =
 export type MangaDexApplyRequest = {
   target: MangaDexApplyTarget;
   mangaId: string;
-  coverId: string;
 };
 
 export type MangaDexConnection = {

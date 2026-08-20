@@ -53,7 +53,7 @@ function renderDialog(target: { kind: "new" } | { kind: "existing"; collection: 
 }
 
 describe("MangaDexImportDialog", () => {
-  it("searches, previews, selects a cover, and creates with the edited title", async () => {
+  it("selects a text result and creates without requesting or choosing a cover", async () => {
     const user = userEvent.setup();
     const { gateway, onApplied } = renderDialog();
 
@@ -61,22 +61,20 @@ describe("MangaDexImportDialog", () => {
     await user.click(screen.getByRole("button", { name: "검색" }));
     expect(gateway.searchMangaDex).toHaveBeenCalledWith("던전밥");
 
-    await user.click(await screen.findByRole("button", { name: /던전밥/ }));
-    expect(gateway.previewMangaDex).toHaveBeenCalledWith("manga-1");
+    const result = await screen.findByRole("button", { name: /던전밥/ });
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    await user.click(result);
 
-    const apply = await screen.findByRole("button", { name: "추가" });
-    expect(apply).toBeDisabled();
-    const title = screen.getByRole("textbox", { name: "컬렉션 이름" });
-    await user.clear(title);
-    await user.type(title, "던전밥 완전판");
-    await user.click(screen.getByRole("button", { name: "1권 표지" }));
+    expect(gateway.previewMangaDex).not.toHaveBeenCalled();
+    expect(result).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    const apply = screen.getByRole("button", { name: "작품 만들기" });
     expect(apply).toBeEnabled();
     await user.click(apply);
 
     await waitFor(() => expect(gateway.applyMangaDex).toHaveBeenCalledWith({
-      target: { kind: "new", name: "던전밥 완전판" },
+      target: { kind: "new", name: "던전밥" },
       mangaId: "manga-1",
-      coverId: "cover-1",
     }));
     expect(onApplied).toHaveBeenCalledWith(collection);
   });
@@ -89,16 +87,16 @@ describe("MangaDexImportDialog", () => {
 
     await user.type(screen.getByRole("searchbox", { name: "만화 검색" }), "던전밥");
     await user.click(screen.getByRole("button", { name: "검색" }));
-    await user.click(await screen.findByRole("button", { name: /던전밥/ }));
-    await user.click(await screen.findByRole("button", { name: "2권 표지" }));
-    await user.click(screen.getByRole("button", { name: "적용" }));
+    const result = await screen.findByRole("button", { name: /던전밥/ });
+    await user.click(result);
+    await user.click(screen.getByRole("button", { name: "연결" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("연결하지 못했습니다.");
-    expect(screen.getByRole("button", { name: "2권 표지" })).toHaveAttribute("aria-pressed", "true");
+    expect(result).toHaveAttribute("aria-pressed", "true");
+    expect(gateway.previewMangaDex).not.toHaveBeenCalled();
     expect(gateway.applyMangaDex).toHaveBeenCalledWith({
       target: { kind: "existing", collectionId: "collection-9" },
       mangaId: "manga-1",
-      coverId: "cover-2",
     });
   });
 });
