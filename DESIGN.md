@@ -154,6 +154,22 @@ Settings는 desktop preference window처럼 구성한다.
 일반 UI에서는 opacity/background/border 같은 상태 전환을 우선한다.
 translateY, scale, spring, 장식용 entrance animation은 피한다.
 
+### Works collectible interaction exception
+
+Works의 만화 표지 감상 뷰어와 게임 패키지 전시는 일반 UI motion 규칙의 제한적 예외다.
+실제 수집품을 집어 들거나 살펴보는 의미를 전달할 때만 작은 translate/scale/3D transform과
+접지·부유 shadow를 사용할 수 있다.
+
+- 일반 버튼, toolbar, settings row, 일반 card, Asset tile에는 이 예외를 적용하지 않는다.
+- 기본 browsing 상태에서는 효과를 없애거나 매우 약하게 유지한다.
+- 큰 bounce/spring, 큰 각도 회전, 강한 holo/glare, 상시 animation은 금지한다.
+- 권장 motion 시간은 기존 80~160ms 범위를 우선한다.
+- game package는 정면 cover밖에 없는 경우가 많으므로 옆/뒤 빈 면이 드러날 정도로 회전하지 않는다.
+- Manga volume cover click의 기본 목적은 metadata dialog가 아니라 cover appreciation이다.
+
+이 예외의 현재 시각 기준은
+`docs/prototypes/lakomics-works-v6-reference.html`이며 production 구현은 기존 token/component를 사용한다.
+
 ## AI 출력 거부 체크
 
 UI 변경을 받기 전에 다음이 새로 생겼는지 확인한다.

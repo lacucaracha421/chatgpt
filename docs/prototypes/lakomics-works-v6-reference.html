@@ -1,0 +1,2414 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lakomics Works Prototype</title>
+  <style>
+:root {
+  --color-bg: #111316;
+  --color-sidebar: #181b1f;
+  --color-toolbar: #1b1e22;
+  --color-surface: #202328;
+  --color-surface-elevated: #24282d;
+  --color-surface-hover: #282c31;
+  --color-selected: rgba(78, 146, 255, 0.18);
+  --color-sidebar-selection: #30343a;
+  --color-sidebar-hover: #23272c;
+  --color-text: #e7e9ec;
+  --color-muted: #8e959f;
+  --color-accent: #4e8df7;
+  --color-border: #2b2f35;
+  --color-focus: #7db1ff;
+  --color-green: #72ad7a;
+  --color-warn: #d7a95b;
+
+  --space-1: 4px;
+  --space-compact: 6px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+
+  --radius-tile: 2px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+
+  --sidebar-width: 208px;
+  --toolbar-height: 40px;
+  --statusbar-height: 24px;
+  --font-ui: "Segoe UI", "Noto Sans KR", sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body { width: 100%; height: 100%; margin: 0; }
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  overflow: hidden;
+}
+button, input { font: inherit; }
+button { color: inherit; }
+
+.app-shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) 1fr;
+  width: 100vw;
+  height: 100vh;
+  min-width: 920px;
+  min-height: 620px;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--color-sidebar);
+  border-right: 1px solid var(--color-border);
+}
+
+.brand-row {
+  height: var(--toolbar-height);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--color-border);
+}
+.brand-mark {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  background: #2d333a;
+  border: 1px solid #3b424b;
+  border-radius: 3px;
+  font-weight: 600;
+  font-size: 11px;
+}
+.brand-name { font-weight: 600; letter-spacing: .1px; }
+
+.nav {
+  padding: 8px 6px;
+  flex: 1;
+  overflow-y: auto;
+}
+.nav-section { display: grid; gap: 1px; }
+.nav-heading {
+  margin: 14px 7px 5px;
+  color: #747b84;
+  font-size: 11px;
+}
+.nav-row {
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+  cursor: pointer;
+}
+.nav-row:hover { background: var(--color-sidebar-hover); }
+.nav-row.selected {
+  background: var(--color-sidebar-selection);
+  box-shadow: inset 2px 0 var(--color-accent);
+}
+.nav-icon { color: #8c929a; text-align: center; font-size: 12px; }
+.nav-count { color: #737a83; font-size: 11px; }
+.sidebar-footer {
+  padding: 5px 6px 7px;
+  border-top: 1px solid var(--color-border);
+}
+.tree { display: grid; gap: 1px; }
+.tree-row {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  border-radius: 3px;
+  color: #c8ccd1;
+}
+.tree-row:hover { background: var(--color-sidebar-hover); }
+.tree-row.depth-1 { padding-left: 27px; color: #aeb4bb; }
+.tree-toggle { width: 13px; color: #707780; }
+
+.main {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: var(--toolbar-height) 1fr var(--statusbar-height);
+  background: var(--color-bg);
+}
+.toolbar {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto minmax(180px, 1fr);
+  align-items: center;
+  height: var(--toolbar-height);
+  padding: 0 7px 0 10px;
+  background: var(--color-toolbar);
+  border-bottom: 1px solid var(--color-border);
+}
+.toolbar-left, .toolbar-actions, .toolbar-center {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.toolbar-actions { justify-content: flex-end; }
+.toolbar-title { font-weight: 600; }
+.toolbar-meta { color: var(--color-muted); font-size: 11px; }
+
+.quiet-button, .primary-icon {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+}
+.quiet-button:hover { background: var(--color-surface-hover); }
+.primary-icon {
+  background: var(--color-accent);
+  color: #fff;
+}
+.primary-icon:hover { filter: brightness(1.08); }
+
+.segment {
+  display: flex;
+  align-items: stretch;
+  height: 28px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.segment-button {
+  min-width: 48px;
+  padding: 0 10px;
+  border: 0;
+  border-right: 1px solid var(--color-border);
+  background: #191c20;
+  color: #aeb4bb;
+  cursor: pointer;
+}
+.segment-button:last-child { border-right: 0; }
+.segment-button:hover { background: #24282d; color: var(--color-text); }
+.segment-button.active {
+  background: #30343a;
+  color: #f1f3f5;
+}
+.text-toggle {
+  height: 28px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #aeb4bb;
+  cursor: pointer;
+}
+.text-toggle:hover { background: var(--color-surface-hover); }
+.text-toggle.active { background: var(--color-selected); color: #dce9ff; }
+
+.view {
+  min-height: 0;
+  overflow: auto;
+  display: none;
+}
+.active-view { display: block; }
+
+.works-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 12px 6px;
+  align-items: start;
+  padding: 8px;
+}
+.work-card {
+  min-width: 0;
+  cursor: pointer;
+  outline: none;
+}
+.work-card:hover .work-cover { outline-color: #4d555f; }
+.work-card:focus-visible .work-cover {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+}
+.work-cover {
+  position: relative;
+  aspect-ratio: 2 / 3;
+  background: #1e2125;
+  border-radius: var(--radius-tile);
+  overflow: hidden;
+  outline: 1px solid #262a2f;
+  outline-offset: -1px;
+}
+.work-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.work-card.type-game .work-cover { aspect-ratio: 3 / 4; }
+.work-card.type-movie .work-cover { aspect-ratio: 2 / 3; }
+
+.work-labels { padding: 5px 2px 0; }
+.work-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  color: #e1e4e8;
+}
+.work-subtitle {
+  margin-top: 2px;
+  color: #7f8791;
+  font-size: 11px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: rgba(13,15,18,.82);
+  border: 1px solid rgba(255,255,255,.12);
+  color: #d7dce2;
+  font-size: 10px;
+}
+.cover-badge {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+}
+.badge.new { color: #f0c77a; border-color: rgba(215,169,91,.45); }
+.badge.sync { color: #9bcba1; border-color: rgba(114,173,122,.38); }
+
+.statusbar {
+  height: var(--statusbar-height);
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px;
+  color: #737a83;
+  background: #15181b;
+  font-size: 11px;
+}
+
+.detail-view { overflow: auto; }
+.detail-page { min-height: 100%; }
+.detail-hero {
+  position: relative;
+  min-height: 230px;
+  border-bottom: 1px solid var(--color-border);
+  background: #16191d;
+  overflow: hidden;
+}
+.detail-hero-art {
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 72%;
+  height: 100%;
+  object-fit: cover;
+  opacity: .55;
+}
+.detail-hero-scrim {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, #14171a 0%, rgba(20,23,26,.96) 30%, rgba(20,23,26,.52) 60%, rgba(20,23,26,.18) 100%),
+    linear-gradient(0deg, #14171a 0%, transparent 35%);
+}
+.detail-hero-content {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 118px minmax(0, 620px);
+  gap: 14px;
+  align-items: end;
+  min-height: 230px;
+  padding: 18px 20px 18px;
+}
+.detail-poster {
+  width: 118px;
+  aspect-ratio: 2/3;
+  object-fit: cover;
+  border: 1px solid #343a42;
+  border-radius: 2px;
+  background: #22262b;
+}
+.detail-title {
+  margin: 0 0 5px;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.detail-native-title {
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: #8d949d;
+}
+.detail-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+  color: #b4bac1;
+  font-size: 12px;
+}
+.detail-overview {
+  margin: 10px 0 0;
+  max-width: 680px;
+  color: #9ea5ad;
+  line-height: 1.5;
+  font-size: 12px;
+}
+
+.detail-tabs {
+  height: 38px;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--color-border);
+  background: #171a1e;
+}
+.detail-tab {
+  position: relative;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: #9299a2;
+  cursor: pointer;
+}
+.detail-tab:hover { color: #d5d9de; }
+.detail-tab.active { color: #e8eaed; }
+.detail-tab.active::after {
+  content: "";
+  position: absolute;
+  left: 9px;
+  right: 9px;
+  bottom: -1px;
+  height: 2px;
+  background: var(--color-accent);
+}
+
+.detail-body { padding: 12px; }
+.section-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 30px;
+  margin-bottom: 6px;
+}
+.section-title { font-weight: 600; font-size: 14px; }
+.section-meta { color: #7f8791; font-size: 11px; }
+
+.asset-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 6px;
+}
+.asset-thumb {
+  aspect-ratio: 16/10;
+  object-fit: cover;
+  width: 100%;
+  border-radius: 2px;
+  outline: 1px solid #25292e;
+  outline-offset: -1px;
+}
+
+.manga-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  min-height: calc(100vh - 102px);
+}
+.manga-main { padding: 12px; min-width: 0; }
+.info-sheet {
+  border-left: 1px solid var(--color-border);
+  padding: 12px;
+  background: #16191d;
+}
+.info-sheet h3 {
+  margin: 0 0 10px;
+  font-size: 13px;
+}
+.property-list { display: grid; }
+.property-row {
+  display: grid;
+  grid-template-columns: 84px minmax(0,1fr);
+  gap: 8px;
+  min-height: 28px;
+  align-items: start;
+  padding: 5px 0;
+  border-bottom: 1px solid #24282d;
+}
+.property-key { color: #777f88; font-size: 11px; }
+.property-value { color: #c8cdd3; font-size: 12px; line-height: 1.4; }
+.sync-line {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border);
+  color: #7e8690;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.sync-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--color-green);
+  vertical-align: 1px;
+}
+
+.volume-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 12px 6px;
+}
+.volume-card { min-width: 0; cursor: pointer; }
+.volume-cover {
+  position: relative;
+  aspect-ratio: 2/3;
+  overflow: hidden;
+  border-radius: 2px;
+  background: #1d2024;
+  outline: 1px solid #282d32;
+  outline-offset: -1px;
+}
+.volume-cover img { width:100%; height:100%; display:block; object-fit:cover; }
+.volume-number { margin-top: 4px; font-size: 11px; color: #d0d4d9; }
+.volume-date { margin-top: 1px; font-size: 10px; color: #777f88; }
+.upcoming .volume-cover { outline-color: rgba(215,169,91,.45); }
+
+.movie-layout {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 690px) minmax(220px, 1fr);
+  gap: 16px;
+  padding: 18px;
+}
+.movie-poster {
+  width: 168px;
+  border-radius: 2px;
+  border: 1px solid #343a42;
+}
+.movie-copy h1 { margin: 0 0 4px; font-size: 21px; }
+.movie-copy .original { color: #858d96; font-size: 12px; margin-bottom: 14px; }
+.movie-facts { color: #b0b6bd; font-size: 12px; margin-bottom: 14px; }
+.movie-copy p { color: #a0a7af; line-height: 1.58; max-width: 670px; }
+.movie-backdrop {
+  width: 100%;
+  aspect-ratio: 16/9;
+  object-fit: cover;
+  border-radius: 2px;
+  border: 1px solid #2b3036;
+}
+.movie-side-label { color:#777f88; font-size:11px; margin:6px 0 10px; }
+
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(7,10,15,.78);
+  display: grid;
+  place-items: center;
+}
+.dialog-overlay.hidden, .hidden { display: none !important; }
+.dialog {
+  width: min(720px, calc(100vw - 48px));
+  max-height: min(720px, calc(100vh - 48px));
+  display: grid;
+  grid-template-rows: 42px minmax(0,1fr) 48px;
+  background: #202328;
+  border: 1px solid #3a4047;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(7,10,15,.82);
+  overflow: hidden;
+}
+.dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+.dialog-head h2 { margin:0; font-size:14px; font-weight:600; }
+.dialog-body { padding: 12px; overflow:auto; }
+.dialog-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  padding: 0 10px;
+  border-top: 1px solid var(--color-border);
+}
+.dialog-hint { margin-right:auto; color:#777f88; font-size:11px; }
+
+.form-row {
+  display: grid;
+  grid-template-columns: 68px minmax(0,1fr);
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 9px;
+}
+.form-row > label { color:#969da5; font-size:12px; }
+.search-line { display:flex; gap:6px; }
+input {
+  height: 28px;
+  flex:1;
+  min-width:0;
+  padding: 0 8px;
+  color: var(--color-text);
+  background:#15181b;
+  border:1px solid #363c43;
+  border-radius:4px;
+  outline:none;
+}
+input:focus { border-color: var(--color-focus); }
+.standard-button, .emphasized-button {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 4px;
+  border: 1px solid #3b4148;
+  background: #292d32;
+  color: #d7dbe0;
+  cursor: pointer;
+}
+.standard-button:hover { background:#32373d; }
+.emphasized-button {
+  border-color: #4e8df7;
+  background: var(--color-accent);
+  color: white;
+}
+.emphasized-button:disabled { opacity:.45; cursor:default; }
+.provider-note {
+  margin: 3px 0 10px 76px;
+  color:#7d858e;
+  font-size:11px;
+}
+.search-results {
+  margin-left:76px;
+  border-top: 1px solid var(--color-border);
+}
+.result-row {
+  display:grid;
+  grid-template-columns: 54px minmax(0,1fr) auto;
+  gap:10px;
+  align-items:center;
+  min-height:78px;
+  padding:7px 6px;
+  border-bottom:1px solid var(--color-border);
+  cursor:pointer;
+}
+.result-row:hover { background:#25292e; }
+.result-row.selected { background: var(--color-selected); box-shadow: inset 2px 0 var(--color-accent); }
+.result-cover {
+  width:54px;
+  height:64px;
+  object-fit:cover;
+  border-radius:2px;
+  outline:1px solid #343a41;
+}
+.result-title { font-size:13px; font-weight:600; }
+.result-meta { margin-top:3px; color:#858d96; font-size:11px; }
+.result-provider { color:#6f7780; font-size:10px; }
+
+
+.game-hero {
+  min-height: 360px;
+  background: #121519;
+}
+.game-hero .detail-hero-art {
+  inset: 0;
+  width: 100%;
+  opacity: .78;
+  object-position: center center;
+}
+.game-hero .detail-hero-scrim {
+  background:
+    linear-gradient(180deg, rgba(9,11,14,.18) 0%, rgba(9,11,14,.38) 38%, rgba(9,11,14,.82) 100%),
+    linear-gradient(90deg, rgba(9,11,14,.82) 0%, rgba(9,11,14,.46) 42%, rgba(9,11,14,.18) 70%, rgba(9,11,14,.08) 100%);
+}
+.game-hero .detail-hero-content {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: end;
+  min-height: 360px;
+  padding: 22px 22px 18px;
+}
+.game-hero .game-hero-panel {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 14px;
+  align-items: end;
+  max-width: 720px;
+}
+.game-hero .detail-poster {
+  width: 88px;
+  box-shadow: 0 10px 22px rgba(0,0,0,.28);
+}
+.game-kicker {
+  color: #9aa2ab;
+  font-size: 11px;
+  margin-bottom: 5px;
+}
+.game-summary-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 8px;
+  margin-top: 12px;
+}
+.game-chip {
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 3px;
+  background: rgba(12,14,18,.42);
+  color: #d2d7dc;
+  font-size: 11px;
+}
+.game-sections {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 290px;
+  gap: 14px;
+  padding: 12px;
+}
+.game-side-sheet {
+  border-left: 1px solid var(--color-border);
+  padding-left: 14px;
+}
+.game-side-sheet .property-row:first-child {
+  border-top: 1px solid #24282d;
+}
+
+@media (max-width: 1050px) {
+  :root { --sidebar-width: 184px; }
+  .toolbar { grid-template-columns: minmax(160px,1fr) auto auto; }
+  .works-grid { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); }
+  .manga-layout { grid-template-columns: minmax(0, 1fr) 240px; }
+  .movie-layout { grid-template-columns: 145px minmax(0, 1fr); }
+  .movie-poster { width:145px; }
+  .movie-artwork-side { grid-column: 1 / -1; }
+  .game-sections { grid-template-columns: 1fr; }
+  .game-side-sheet { border-left: 0; padding-left: 0; }
+  .game-hero { min-height: 300px; }
+  .game-hero .detail-hero-content { min-height: 300px; }
+}
+
+
+/* v4: typed Work grids, date rail, Showcase, manga volume shared transition */
+
+.works-layout {
+  position: relative;
+  min-height: 100%;
+  padding-right: 20px;
+}
+.works-grid {
+  padding-right: 2px;
+}
+.work-card.type-game .work-cover { aspect-ratio: 3 / 4; }
+.work-card.type-manga .work-cover,
+.work-card.type-movie .work-cover { aspect-ratio: 2 / 3; }
+
+.work-date-rail {
+  position: fixed;
+  right: 2px;
+  top: calc(var(--toolbar-height) + 5px);
+  bottom: calc(var(--statusbar-height) + 5px);
+  width: 16px;
+  z-index: 8;
+  cursor: ns-resize;
+  user-select: none;
+  touch-action: none;
+}
+.work-date-rail::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 6px;
+  width: 1px;
+  background: #252a2f;
+}
+.work-date-line {
+  position: absolute;
+  right: 4px;
+  width: 5px;
+  height: 2px;
+  background: #4b525a;
+  border-radius: 1px;
+  transition: width 100ms ease, background 100ms ease;
+}
+.work-date-line.active {
+  width: 9px;
+  background: #9aa2ab;
+}
+.work-date-label {
+  position: fixed;
+  right: 22px;
+  top: 52px;
+  z-index: 9;
+  padding: 3px 6px;
+  border: 1px solid #343a41;
+  border-radius: 4px;
+  background: rgba(18,21,25,.94);
+  color: #b8bec5;
+  font-size: 10px;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 100ms ease, transform 100ms ease;
+}
+.work-date-label.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Showcase */
+.showcase-view {
+  min-height: 100%;
+  background: #111316;
+}
+.showcase-toolbar-note {
+  color: #747c85;
+  font-size: 11px;
+}
+.showcase-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 38px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--color-border);
+  background: #15181b;
+}
+.showcase-tab {
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #9198a0;
+  cursor: pointer;
+}
+.showcase-tab:hover { background: #20242a; color: #d7dbe0; }
+.showcase-tab.active {
+  background: #2b3036;
+  color: #eef0f2;
+}
+
+.showcase-stage {
+  padding: 12px 16px 18px;
+}
+.showcase-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.showcase-heading h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.showcase-heading span {
+  color: #767e87;
+  font-size: 11px;
+}
+.showcase-wall {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+.showcase-item {
+  position: relative;
+  min-width: 0;
+  cursor: pointer;
+}
+.showcase-frame {
+  position: relative;
+  overflow: hidden;
+  border-radius: 2px;
+  background: #1b1f23;
+  outline: 1px solid #272c31;
+  outline-offset: -1px;
+}
+.showcase-item.game .showcase-frame { aspect-ratio: 16 / 10; }
+.showcase-item.manga .showcase-frame,
+.showcase-item.movie .showcase-frame { aspect-ratio: 2 / 3; }
+.showcase-frame img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+.showcase-item:hover .showcase-frame {
+  outline-color: #555d66;
+}
+.showcase-caption {
+  padding: 5px 1px 2px;
+}
+.showcase-title {
+  font-size: 12px;
+  color: #e3e6e9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.showcase-meta {
+  margin-top: 2px;
+  color: #757d86;
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.showcase-edit-button {
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid #373d44;
+  border-radius: 4px;
+  background: #262b30;
+  color: #cdd2d7;
+  cursor: pointer;
+}
+.showcase-edit-button:hover { background: #30353b; }
+
+/* Manga volume detail transition */
+.volume-card {
+  position: relative;
+}
+.volume-cover {
+  transform-origin: center center;
+}
+.volume-card:hover .volume-cover {
+  outline-color: #59616a;
+}
+.volume-detail-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(7, 10, 15, .78);
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+.volume-detail-overlay.open {
+  opacity: 1;
+}
+.volume-detail-panel {
+  width: min(760px, calc(100vw - 44px));
+  max-height: calc(100vh - 48px);
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 18px;
+  padding: 18px;
+  background: #1b1f23;
+  border: 1px solid #363c43;
+  border-radius: 8px;
+  box-shadow: 0 12px 30px rgba(0,0,0,.42);
+  opacity: 0;
+  transform: translateY(3px);
+  transition: opacity 120ms ease 90ms, transform 120ms ease 90ms;
+}
+.volume-detail-overlay.open .volume-detail-panel {
+  opacity: 1;
+  transform: translateY(0);
+}
+.volume-detail-cover-slot {
+  aspect-ratio: 2 / 3;
+  background: #22262b;
+  border-radius: 2px;
+}
+.volume-detail-copy {
+  min-width: 0;
+}
+.volume-detail-copy h2 {
+  margin: 2px 0 3px;
+  font-size: 18px;
+}
+.volume-detail-copy .volume-original {
+  color: #7f8790;
+  font-size: 11px;
+  margin-bottom: 12px;
+}
+.volume-detail-copy p {
+  color: #a4abb3;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.volume-detail-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 14px;
+}
+.volume-detail-actions button {
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid #3b4249;
+  border-radius: 4px;
+  background: #292e33;
+  color: #d4d8dc;
+  cursor: pointer;
+}
+.volume-detail-actions button:hover { background: #33383e; }
+.volume-detail-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+}
+.volume-transition-clone {
+  position: fixed;
+  z-index: 90;
+  pointer-events: none;
+  border-radius: 2px;
+  overflow: hidden;
+  box-shadow: 0 14px 34px rgba(0,0,0,.42);
+  outline: 1px solid #454c54;
+  outline-offset: -1px;
+  will-change: left, top, width, height;
+}
+.volume-transition-clone img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+@media (max-width: 1080px) {
+  .showcase-wall { grid-template-columns: repeat(4, minmax(0,1fr)); }
+}
+@media (max-width: 820px) {
+  .showcase-wall { grid-template-columns: repeat(3, minmax(0,1fr)); }
+  .volume-detail-panel { grid-template-columns: 170px minmax(0,1fr); }
+}
+
+
+/* v5 — collectible presentation */
+
+/* Generic dark premium game case.
+   The ordinary grid keeps this quiet; detail/showcase can enable motion. */
+.work-card.type-game .work-cover {
+  overflow: visible;
+  outline: 0;
+  background: transparent;
+  display: grid;
+  place-items: center;
+}
+.work-card.type-game:hover .work-cover { outline: 0; }
+
+.game-case-wrap {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  perspective: 900px;
+}
+.game-case {
+  --case-spine: 8px;
+  --case-tilt-x: 0deg;
+  --case-tilt-y: -2.5deg;
+  --case-glare-x: 50%;
+  --case-glare-y: 25%;
+  position: relative;
+  width: calc(100% - 10px);
+  height: calc(100% - 4px);
+  min-width: 0;
+  transform-style: preserve-3d;
+  transform: rotateX(var(--case-tilt-x)) rotateY(var(--case-tilt-y));
+  transform-origin: center center;
+  transition: transform 110ms ease-out, filter 110ms ease-out;
+  filter: drop-shadow(0 5px 6px rgba(0,0,0,.28));
+}
+.game-case__shell {
+  position: absolute;
+  inset: 0;
+  border: 1px solid #3a4047;
+  border-radius: 4px;
+  background: rgba(20,23,27,.94);
+  box-shadow:
+    inset 1px 0 rgba(255,255,255,.045),
+    inset -1px 0 rgba(0,0,0,.46);
+  transform: translateZ(0);
+}
+.game-case__spine {
+  position: absolute;
+  left: 2px;
+  top: 3px;
+  bottom: 3px;
+  width: var(--case-spine);
+  border-right: 1px solid #424950;
+  background: rgba(8,10,12,.74);
+  transform: translateZ(3px);
+}
+.game-case__front {
+  position: absolute;
+  left: calc(var(--case-spine) + 4px);
+  top: 3px;
+  right: 3px;
+  bottom: 3px;
+  overflow: hidden;
+  border-radius: 1px 2px 2px 1px;
+  background: #15181b;
+  transform: translateZ(4px);
+}
+.game-case__front img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+.game-case__edge {
+  position: absolute;
+  right: -3px;
+  top: 5px;
+  bottom: 5px;
+  width: 4px;
+  border-radius: 0 2px 2px 0;
+  background: #0d0f12;
+  border-right: 1px solid #333941;
+  transform: rotateY(90deg);
+  transform-origin: left center;
+  opacity: .88;
+}
+.game-case__gloss,
+.collectible-glare {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: .22;
+  background:
+    radial-gradient(circle at var(--case-glare-x) var(--case-glare-y),
+      rgba(255,255,255,.33) 0,
+      rgba(255,255,255,.11) 17%,
+      rgba(255,255,255,0) 42%);
+  mix-blend-mode: screen;
+}
+.game-case__rim {
+  position: absolute;
+  inset: 1px;
+  pointer-events: none;
+  border: 1px solid rgba(255,255,255,.035);
+  border-radius: 3px;
+}
+.game-case--interactive {
+  --case-tilt-y: 0deg;
+  cursor: default;
+}
+.game-case--interactive.tilt-active {
+  transition: transform 55ms linear, filter 80ms linear;
+  filter: drop-shadow(var(--tilt-shadow-x, 0px) var(--tilt-shadow-y, 9px) 12px rgba(0,0,0,.36));
+}
+
+/* Detail cover should read as a physical package, not a second artwork panel. */
+.game-hero .detail-game-case {
+  width: 98px;
+  height: 132px;
+  align-self: end;
+}
+.game-hero .detail-game-case .game-case {
+  width: 100%;
+  height: 100%;
+}
+.game-hero .game-hero-panel {
+  grid-template-columns: 104px minmax(0, 1fr);
+}
+
+/* In the normal game library the packaging hint is subtle. */
+.work-card.type-game .game-case {
+  --case-spine: 7px;
+}
+.work-card.type-game .game-case__gloss { opacity: .10; }
+.work-card.type-game .game-case__edge { width: 3px; right: -2px; }
+.work-card.type-game .work-cover:hover .game-case {
+  --case-tilt-y: -3.5deg;
+  filter: drop-shadow(0 6px 8px rgba(0,0,0,.32));
+}
+
+/* Showcase: the game case itself is the exhibit. */
+.showcase-item.game .showcase-frame {
+  aspect-ratio: 5 / 4;
+  display: grid;
+  place-items: center;
+  padding: 10px 13px 8px;
+  overflow: visible;
+  background: #14171a;
+  outline: 1px solid #252a2f;
+  perspective: 1000px;
+}
+.showcase-item.game .showcase-frame:hover {
+  outline-color: #363d44;
+}
+.showcase-item.game .game-case-wrap {
+  height: 100%;
+  width: auto;
+  aspect-ratio: 3 / 4;
+}
+.showcase-item.game .game-case {
+  width: 100%;
+  height: 100%;
+}
+.showcase-item.game .game-case__gloss { opacity: .26; }
+
+/* Manga: expanded cover is a collectible viewer, not an information dialog. */
+.volume-detail-overlay {
+  background: rgba(7,10,15,.86);
+  overflow: hidden;
+}
+.volume-detail-panel,
+.volume-detail-copy,
+.volume-detail-cover-slot,
+.volume-detail-actions {
+  display: none !important;
+}
+.manga-collectible-slot {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  width: min(42vw, 390px);
+  aspect-ratio: 2 / 3;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.manga-collectible {
+  --case-tilt-x: 0deg;
+  --case-tilt-y: 0deg;
+  --case-glare-x: 50%;
+  --case-glare-y: 25%;
+  position: fixed;
+  z-index: 91;
+  overflow: hidden;
+  border-radius: 2px;
+  outline: 1px solid rgba(255,255,255,.15);
+  outline-offset: -1px;
+  box-shadow: 0 18px 42px rgba(0,0,0,.45);
+  transform-style: preserve-3d;
+  transform: perspective(1000px) rotateX(var(--case-tilt-x)) rotateY(var(--case-tilt-y)) scale(1.015);
+  transition:
+    left 155ms cubic-bezier(.22,.8,.24,1),
+    top 155ms cubic-bezier(.22,.8,.24,1),
+    width 155ms cubic-bezier(.22,.8,.24,1),
+    height 155ms cubic-bezier(.22,.8,.24,1),
+    transform 100ms ease-out,
+    box-shadow 100ms ease-out;
+  will-change: left, top, width, height, transform;
+  cursor: default;
+}
+.manga-collectible.tilt-active {
+  transition: transform 48ms linear, box-shadow 70ms linear;
+  box-shadow:
+    var(--tilt-shadow-x, 0px) var(--tilt-shadow-y, 18px) 34px rgba(0,0,0,.45),
+    0 5px 18px rgba(0,0,0,.34);
+}
+.manga-collectible img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+.manga-collectible .collectible-glare {
+  opacity: .20;
+}
+.manga-viewer-nav {
+  position: fixed;
+  top: 50%;
+  z-index: 92;
+  width: 34px;
+  height: 52px;
+  margin-top: -26px;
+  border: 0;
+  border-radius: 4px;
+  background: rgba(22,25,29,.62);
+  color: #b6bdc5;
+  font-size: 26px;
+  cursor: pointer;
+  opacity: .72;
+}
+.manga-viewer-nav:hover {
+  background: rgba(34,38,43,.88);
+  color: #eef0f2;
+  opacity: 1;
+}
+.manga-viewer-prev { left: 18px; }
+.manga-viewer-next { right: 18px; }
+.manga-viewer-close {
+  position: fixed;
+  right: 12px;
+  top: 10px;
+  z-index: 92;
+}
+.manga-viewer-index {
+  position: fixed;
+  left: 50%;
+  bottom: 14px;
+  z-index: 92;
+  transform: translateX(-50%);
+  color: rgba(230,233,236,.56);
+  font-size: 11px;
+  pointer-events: none;
+}
+
+/* Keep the viewer usable on the tablet-sized window. */
+@media (max-width: 900px) {
+  .manga-collectible-slot {
+    width: min(53vw, 360px);
+  }
+  .showcase-item.game .showcase-frame {
+    padding: 8px 9px 7px;
+  }
+}
+
+
+/* v6 — floor display / physical collectible lift */
+
+/* A quiet "floor" surface: not a shelf, not a card wrapper. */
+.collectible-floor {
+  position: relative;
+  min-height: 100%;
+  isolation: isolate;
+}
+.collectible-floor::before {
+  content: "";
+  position: absolute;
+  z-index: -2;
+  inset: 28% 0 0;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.010), rgba(255,255,255,.022) 42%, rgba(0,0,0,.06)),
+    #121518;
+  border-top: 1px solid rgba(255,255,255,.025);
+}
+.collectible-floor::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  left: 8%;
+  right: 8%;
+  bottom: 4%;
+  height: 18%;
+  background: radial-gradient(ellipse at center, rgba(0,0,0,.25), rgba(0,0,0,0) 70%);
+  filter: blur(18px);
+  pointer-events: none;
+}
+
+/* Physical item base. */
+.floor-object {
+  --lift-y: 0px;
+  --lift-rotate-y: 0deg;
+  --lift-rotate-x: 1.5deg;
+  position: relative;
+  transform-style: preserve-3d;
+  transform:
+    perspective(950px)
+    translateY(var(--lift-y))
+    rotateX(var(--lift-rotate-x))
+    rotateY(var(--lift-rotate-y));
+  transform-origin: center 88%;
+  transition:
+    transform 155ms cubic-bezier(.2,.72,.22,1),
+    filter 155ms ease-out;
+  will-change: transform;
+}
+
+/* Contact shadow directly underneath the collectible. */
+.floor-object::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  left: 12%;
+  right: 12%;
+  bottom: -10px;
+  height: 15px;
+  border-radius: 50%;
+  background: rgba(0,0,0,.32);
+  filter: blur(7px);
+  transform: scaleX(.96);
+  opacity: .72;
+  transition:
+    bottom 155ms cubic-bezier(.2,.72,.22,1),
+    height 155ms ease,
+    filter 155ms ease,
+    opacity 155ms ease,
+    transform 155ms ease;
+  pointer-events: none;
+}
+
+/* A lifted object feels detached from the floor. */
+.floor-object.lifted {
+  --lift-y: -15px;
+  --lift-rotate-y: -5deg;
+  --lift-rotate-x: 0deg;
+  filter: drop-shadow(0 13px 15px rgba(0,0,0,.24));
+}
+.floor-object.lifted::after {
+  bottom: -23px;
+  height: 21px;
+  filter: blur(10px);
+  opacity: .52;
+  transform: scaleX(1.12);
+}
+
+/* Hover is only a hint. Click/press is the real lift. */
+@media (hover:hover) and (pointer:fine) {
+  .floor-object:not(.lifted):hover {
+    --lift-y: -3px;
+    --lift-rotate-y: -1.5deg;
+  }
+  .floor-object:not(.lifted):hover::after {
+    bottom: -13px;
+    opacity: .64;
+  }
+}
+
+/* Works grid: game package gets a physical floor hint without sacrificing density. */
+.work-card.type-game .work-cover {
+  padding: 3px 4px 7px;
+}
+.work-card.type-game .floor-object {
+  width: 100%;
+  height: 100%;
+}
+.work-card.type-game .floor-object::after {
+  bottom: -5px;
+  left: 17%;
+  right: 17%;
+  height: 9px;
+  filter: blur(5px);
+  opacity: .5;
+}
+
+/* Showcase gets a real exhibition surface. */
+.showcase-stage {
+  position: relative;
+  overflow: hidden;
+}
+.showcase-stage.collectible-floor {
+  padding-top: 18px;
+  padding-bottom: 30px;
+}
+.showcase-stage.collectible-floor::before {
+  inset: 18% -16px -18px;
+}
+.showcase-wall {
+  position: relative;
+  z-index: 1;
+  align-items: end;
+}
+
+/* Showcase items are no longer "cards"; the item stands over its own shadow. */
+.showcase-item.game .showcase-frame,
+.showcase-item.manga .showcase-frame {
+  overflow: visible;
+  background: transparent;
+  outline: 0;
+  padding-bottom: 13px;
+}
+.showcase-item.game:hover .showcase-frame,
+.showcase-item.manga:hover .showcase-frame {
+  outline: 0;
+}
+.showcase-item.game .floor-object,
+.showcase-item.manga .floor-object {
+  width: 100%;
+}
+.showcase-item.game .game-case-wrap {
+  width: 73%;
+  max-width: 150px;
+  margin: 0 auto;
+}
+.showcase-item.manga .floor-object {
+  width: 78%;
+  max-width: 148px;
+  margin: 0 auto;
+}
+.showcase-item.manga .floor-object > img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  border-radius: 2px;
+  outline: 1px solid #2d3238;
+  outline-offset: -1px;
+}
+
+/* Movie remains poster-oriented; don't force every medium into the same object language. */
+
+/* Game detail: the package is sitting in front of the hero artwork. */
+.game-hero .detail-game-case {
+  position: relative;
+  padding-bottom: 10px;
+}
+.game-hero .detail-game-case.floor-object::after {
+  left: 9%;
+  right: 9%;
+  bottom: -3px;
+  height: 12px;
+  opacity: .62;
+}
+
+/* Manga volume grid: covers sit quietly above the page/floor. */
+.volume-grid {
+  padding: 2px 2px 10px;
+}
+.volume-card {
+  padding: 1px 1px 7px;
+}
+.volume-card .volume-floor-object {
+  width: 100%;
+}
+.volume-card .volume-floor-object::after {
+  left: 13%;
+  right: 13%;
+  bottom: -5px;
+  height: 8px;
+  filter: blur(5px);
+  opacity: .44;
+}
+.volume-card .volume-floor-object .volume-cover {
+  width: 100%;
+}
+
+/* The expanded manga cover gets a deeper free-floating shadow. */
+.manga-collectible {
+  box-shadow:
+    0 22px 46px rgba(0,0,0,.42),
+    0 6px 18px rgba(0,0,0,.28);
+}
+.manga-collectible::after {
+  content: "";
+  position: fixed;
+  z-index: -1;
+  left: 13%;
+  right: 13%;
+  bottom: -31px;
+  height: 25px;
+  border-radius: 50%;
+  background: rgba(0,0,0,.35);
+  filter: blur(12px);
+  pointer-events: none;
+}
+
+/* Click lift animation hook used before navigation/opening. */
+.floor-object.click-lift {
+  --lift-y: -18px;
+  --lift-rotate-y: -6deg;
+  --lift-rotate-x: 0deg;
+  filter: drop-shadow(0 14px 16px rgba(0,0,0,.27));
+}
+.floor-object.click-lift::after {
+  bottom: -25px;
+  height: 22px;
+  filter: blur(11px);
+  opacity: .5;
+  transform: scaleX(1.15);
+}
+
+@media (max-width: 900px) {
+  .showcase-item.game .game-case-wrap,
+  .showcase-item.manga .floor-object {
+    width: 84%;
+  }
+}
+
+</style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand-row">
+        <div class="brand-mark">L</div>
+        <div class="brand-name">Lakomics</div>
+      </div>
+
+      <nav class="nav" aria-label="주 탐색">
+        <div class="nav-section">
+          <button class="nav-row"><span class="nav-icon">▦</span><span>저장소</span><span class="nav-count">10,482</span></button>
+          <button class="nav-row"><span class="nav-icon">○</span><span>미분류</span><span class="nav-count">127</span></button>
+          <button class="nav-row"><span class="nav-icon">★</span><span>즐겨찾기</span><span class="nav-count">364</span></button>
+          <button class="nav-row"><span class="nav-icon">≋</span><span>최근</span></button>
+        </div>
+
+        <div class="nav-heading">작품</div>
+        <div class="nav-section">
+          <button class="nav-row selected" data-filter="game"><span class="nav-icon">◇</span><span>게임</span><span class="nav-count">61</span></button>
+          <button class="nav-row" data-filter="manga"><span class="nav-icon">▤</span><span>만화</span><span class="nav-count">43</span></button>
+          <button class="nav-row" data-filter="movie"><span class="nav-icon">▰</span><span>영화</span><span class="nav-count">24</span></button>
+          <button class="nav-row" data-nav="showcase"><span class="nav-icon">✦</span><span>쇼케이스</span><span class="nav-count">30</span></button>
+        </div>
+
+        <div class="nav-heading">분류</div>
+        <div class="tree">
+          <div class="tree-row"><span class="tree-toggle">▾</span><span>게임</span></div>
+          <div class="tree-row depth-1"><span class="tree-toggle">›</span><span>명조</span></div>
+          <div class="tree-row depth-1"><span class="tree-toggle">›</span><span>젠레스 존 제로</span></div>
+          <div class="tree-row"><span class="tree-toggle">▾</span><span>애니 / 만화</span></div>
+          <div class="tree-row depth-1"><span class="tree-toggle">›</span><span>던전밥</span></div>
+        </div>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button class="nav-row"><span class="nav-icon">♲</span><span>휴지통</span></button>
+        <button class="nav-row"><span class="nav-icon">⚙</span><span>설정</span></button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="toolbar">
+        <div class="toolbar-left">
+          <button id="backButton" class="quiet-button hidden" aria-label="뒤로">←</button>
+          <div id="toolbarTitle" class="toolbar-title">작품</div>
+          <div id="toolbarMeta" class="toolbar-meta">128</div>
+        </div>
+
+        <div class="toolbar-center" id="worksFilters">
+          <div class="segment">
+            <button class="segment-button active" data-type="game">게임</button>
+            <button class="segment-button" data-type="manga">만화</button>
+            <button class="segment-button" data-type="movie">영화</button>
+          </div>
+        </div>
+
+        <div class="toolbar-actions">
+          <button class="quiet-button" title="검색">⌕</button>
+          <button class="quiet-button" title="정렬">⇅</button>
+          <button class="quiet-button" title="보기">▦</button>
+          <button class="primary-icon" id="openAddDialog" title="새 작품">＋</button>
+        </div>
+      </header>
+
+      <section id="worksView" class="view active-view">
+        <div class="works-layout">
+          <div class="works-grid" id="worksGrid"></div>
+          <div class="work-date-rail" id="workDateRail" aria-hidden="true"></div>
+          <div class="work-date-label" id="workDateLabel"></div>
+        </div>
+      </section>
+
+      <section id="detailView" class="view detail-view"></section>
+      <section id="showcaseView" class="view showcase-view"></section>
+
+      <footer class="statusbar">
+        <span id="statusText">작품 128개</span>
+        <span class="status-right">로컬 라이브러리 · 마지막 동기화 18:42</span>
+      </footer>
+    </main>
+  </div>
+
+  <div class="dialog-overlay hidden" id="addDialog" role="presentation">
+    <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialogTitle">
+      <div class="dialog-head">
+        <h2 id="dialogTitle">새 작품 추가</h2>
+        <button class="quiet-button" id="closeDialog" aria-label="닫기">×</button>
+      </div>
+
+      <div class="dialog-body">
+        <div class="form-row">
+          <label>종류</label>
+          <div class="segment provider-type">
+            <button class="segment-button active" data-provider-type="manga">만화</button>
+            <button class="segment-button" data-provider-type="game">게임</button>
+            <button class="segment-button" data-provider-type="movie">영화</button>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <label for="workSearch">제목</label>
+          <div class="search-line">
+            <input id="workSearch" value="던전밥" autocomplete="off">
+            <button class="standard-button" id="searchButton">검색</button>
+          </div>
+        </div>
+
+        <div class="provider-note" id="providerNote">
+          MangaDex에서 작품 정보를 검색합니다. 한국 정발 정보는 작품 생성 후 Aladin에 연결할 수 있습니다.
+        </div>
+
+        <div class="search-results" id="searchResults"></div>
+      </div>
+
+      <div class="dialog-foot">
+        <span class="dialog-hint">외부 정보는 로컬에 저장되며 사용자 수정값을 덮어쓰지 않습니다.</span>
+        <button class="standard-button" id="cancelDialog">취소</button>
+        <button class="emphasized-button" id="createWork" disabled>작품 만들기</button>
+      </div>
+    </section>
+  </div>
+
+  <script>
+const volumeAssets = ["data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiB2aWV3Qm94PSIwIDAgNjAwIDkwMCI+CjxyZWN0IHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiBmaWxsPSIjMjgyODIzIi8+CjxyZWN0IHg9IjQ4IiB5PSIxNjIiIHdpZHRoPSI1MDQiIGhlaWdodD0iMTQ0IiBmaWxsPSIjYjVhNjY0IiBvcGFjaXR5PSIuNTUiLz48cmVjdCB4PSI0OCIgeT0iMzUxIiB3aWR0aD0iMzg0IiBoZWlnaHQ9IjcyIiBmaWxsPSIjYjVhNjY0IiBvcGFjaXR5PSIuMjgiLz48cmVjdCB4PSIyMTYiIHk9IjQ4NiIgd2lkdGg9IjMzNiIgaGVpZ2h0PSIyMTYiIGZpbGw9IiNiNWE2NjQiIG9wYWNpdHk9Ii4zOCIvPgo8cmVjdCB4PSI0MiIgeT0iNzIiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMDgiIGZpbGw9IiNiNWE2NjQiIG9wYWNpdHk9Ii45Ii8+Cjx0ZXh0IHg9IjQyIiB5PSI3MzgiIGZpbGw9IiNmMGYyZjQiIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSIzMyIgZm9udC13ZWlnaHQ9IjYwMCI+Vk9MLiAxPC90ZXh0Pgo8dGV4dCB4PSI0MiIgeT0iNzg3IiBmaWxsPSIjYWFiMGI3IiBmb250LWZhbWlseT0iU2Vnb2UgVUksQXJpYWwiIGZvbnQtc2l6ZT0iMTYiPkRVTkdFT04gTUVTSEk8L3RleHQ+Cjwvc3ZnPg==", "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiB2aWV3Qm94PSIwIDAgNjAwIDkwMCI+CjxyZWN0IHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiBmaWxsPSIjMjIyOTJjIi8+CjxwYXRoIGQ9Ik0gMCA2NDggTCAxNjggMzc4IEwgMjk0IDU5NCBMIDQ0NCAyNTIgTCA2MDAgNTIyIEwgNjAwIDkwMCBMIDAgOTAwIFoiIGZpbGw9IiM3MTk4YTciIG9wYWNpdHk9Ii40OCIvPgo8cmVjdCB4PSI0MiIgeT0iNzIiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMDgiIGZpbGw9IiM3MTk4YTciIG9wYWNpdHk9Ii45Ii8+Cjx0ZXh0IHg9IjQyIiB5PSI3MzgiIGZpbGw9IiNmMGYyZjQiIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSIzMyIgZm9udC13ZWlnaHQ9IjYwMCI+Vk9MLiAyPC90ZXh0Pgo8dGV4dCB4PSI0MiIgeT0iNzg3IiBmaWxsPSIjYWFiMGI3IiBmb250LWZhbWlseT0iU2Vnb2UgVUksQXJpYWwiIGZvbnQtc2l6ZT0iMTYiPkRVTkdFT04gTUVTSEk8L3RleHQ+Cjwvc3ZnPg==", "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiB2aWV3Qm94PSIwIDAgNjAwIDkwMCI+CjxyZWN0IHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiBmaWxsPSIjMmIyMjIzIi8+CjxjaXJjbGUgY3g9IjQzMiIgY3k9IjI4OCIgcj0iMTA4IiBmaWxsPSIjYTA2YTZlIiBvcGFjaXR5PSIuNTUiLz48cmVjdCB4PSI2MCIgeT0iNTIyIiB3aWR0aD0iMzcyIiBoZWlnaHQ9IjIyIiBmaWxsPSIjYTA2YTZlIiBvcGFjaXR5PSIuNzUiLz4KPHJlY3QgeD0iNDIiIHk9IjcyIiB3aWR0aD0iMTAiIGhlaWdodD0iMTA4IiBmaWxsPSIjYTA2YTZlIiBvcGFjaXR5PSIuOSIvPgo8dGV4dCB4PSI0MiIgeT0iNzM4IiBmaWxsPSIjZjBmMmY0IiBmb250LWZhbWlseT0iU2Vnb2UgVUksQXJpYWwiIGZvbnQtc2l6ZT0iMzMiIGZvbnQtd2VpZ2h0PSI2MDAiPlZPTC4gMzwvdGV4dD4KPHRleHQgeD0iNDIiIHk9Ijc4NyIgZmlsbD0iI2FhYjBiNyIgZm9udC1mYW1pbHk9IlNlZ29lIFVJLEFyaWFsIiBmb250LXNpemU9IjE2Ij5EVU5HRU9OIE1FU0hJPC90ZXh0Pgo8L3N2Zz4=", "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiB2aWV3Qm94PSIwIDAgNjAwIDkwMCI+CjxyZWN0IHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiBmaWxsPSIjMjQyNzJiIi8+CjxyZWN0IHg9IjQ4IiB5PSIxNjIiIHdpZHRoPSI1MDQiIGhlaWdodD0iMTQ0IiBmaWxsPSIjOGI4ZWFiIiBvcGFjaXR5PSIuNTUiLz48cmVjdCB4PSI0OCIgeT0iMzUxIiB3aWR0aD0iMzg0IiBoZWlnaHQ9IjcyIiBmaWxsPSIjOGI4ZWFiIiBvcGFjaXR5PSIuMjgiLz48cmVjdCB4PSIyMTYiIHk9IjQ4NiIgd2lkdGg9IjMzNiIgaGVpZ2h0PSIyMTYiIGZpbGw9IiM4YjhlYWIiIG9wYWNpdHk9Ii4zOCIvPgo8cmVjdCB4PSI0MiIgeT0iNzIiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMDgiIGZpbGw9IiM4YjhlYWIiIG9wYWNpdHk9Ii45Ii8+Cjx0ZXh0IHg9IjQyIiB5PSI3MzgiIGZpbGw9IiNmMGYyZjQiIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSIzMyIgZm9udC13ZWlnaHQ9IjYwMCI+Vk9MLiA0PC90ZXh0Pgo8dGV4dCB4PSI0MiIgeT0iNzg3IiBmaWxsPSIjYWFiMGI3IiBmb250LWZhbWlseT0iU2Vnb2UgVUksQXJpYWwiIGZvbnQtc2l6ZT0iMTYiPkRVTkdFT04gTUVTSEk8L3RleHQ+Cjwvc3ZnPg==", "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiB2aWV3Qm94PSIwIDAgNjAwIDkwMCI+CjxyZWN0IHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiBmaWxsPSIjMjYyNTFmIi8+CjxwYXRoIGQ9Ik0gMCA2NDggTCAxNjggMzc4IEwgMjk0IDU5NCBMIDQ0NCAyNTIgTCA2MDAgNTIyIEwgNjAwIDkwMCBMIDAgOTAwIFoiIGZpbGw9IiNhZjhjNWYiIG9wYWNpdHk9Ii40OCIvPgo8cmVjdCB4PSI0MiIgeT0iNzIiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMDgiIGZpbGw9IiNhZjhjNWYiIG9wYWNpdHk9Ii45Ii8+Cjx0ZXh0IHg9IjQyIiB5PSI3MzgiIGZpbGw9IiNmMGYyZjQiIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSIzMyIgZm9udC13ZWlnaHQ9IjYwMCI+Vk9MLiA1PC90ZXh0Pgo8dGV4dCB4PSI0MiIgeT0iNzg3IiBmaWxsPSIjYWFiMGI3IiBmb250LWZhbWlseT0iU2Vnb2UgVUksQXJpYWwiIGZvbnQtc2l6ZT0iMTYiPkRVTkdFT04gTUVTSEk8L3RleHQ+Cjwvc3ZnPg==", "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiB2aWV3Qm94PSIwIDAgNjAwIDkwMCI+CjxyZWN0IHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiBmaWxsPSIjMjAyOTI1Ii8+CjxjaXJjbGUgY3g9IjQzMiIgY3k9IjI4OCIgcj0iMTA4IiBmaWxsPSIjNmQ5Zjg1IiBvcGFjaXR5PSIuNTUiLz48cmVjdCB4PSI2MCIgeT0iNTIyIiB3aWR0aD0iMzcyIiBoZWlnaHQ9IjIyIiBmaWxsPSIjNmQ5Zjg1IiBvcGFjaXR5PSIuNzUiLz4KPHJlY3QgeD0iNDIiIHk9IjcyIiB3aWR0aD0iMTAiIGhlaWdodD0iMTA4IiBmaWxsPSIjNmQ5Zjg1IiBvcGFjaXR5PSIuOSIvPgo8dGV4dCB4PSI0MiIgeT0iNzM4IiBmaWxsPSIjZjBmMmY0IiBmb250LWZhbWlseT0iU2Vnb2UgVUksQXJpYWwiIGZvbnQtc2l6ZT0iMzMiIGZvbnQtd2VpZ2h0PSI2MDAiPlZPTC4gNjwvdGV4dD4KPHRleHQgeD0iNDIiIHk9Ijc4NyIgZmlsbD0iI2FhYjBiNyIgZm9udC1mYW1pbHk9IlNlZ29lIFVJLEFyaWFsIiBmb250LXNpemU9IjE2Ij5EVU5HRU9OIE1FU0hJPC90ZXh0Pgo8L3N2Zz4="];
+const userAssets = ["data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAwIiBoZWlnaHQ9IjY3NSIgdmlld0JveD0iMCAwIDEyMDAgNjc1Ij4KPHJlY3Qgd2lkdGg9IjEyMDAiIGhlaWdodD0iNjc1IiBmaWxsPSIjMWMyMzI4Ii8+CjxyZWN0IHg9Ijk2IiB5PSIxMjEiIHdpZHRoPSIxMDA4IiBoZWlnaHQ9IjEwOCIgZmlsbD0iIzU2N2Q5NyIgb3BhY2l0eT0iLjU1Ii8+PHJlY3QgeD0iOTYiIHk9IjI2MyIgd2lkdGg9Ijc2OCIgaGVpZ2h0PSI1NCIgZmlsbD0iIzU2N2Q5NyIgb3BhY2l0eT0iLjI4Ii8+PHJlY3QgeD0iNDMyIiB5PSIzNjQiIHdpZHRoPSI2NzIiIGhlaWdodD0iMTYyIiBmaWxsPSIjNTY3ZDk3IiBvcGFjaXR5PSIuMzgiLz4KPHJlY3QgeD0iODQiIHk9IjU0IiB3aWR0aD0iMjEiIGhlaWdodD0iODEiIGZpbGw9IiM1NjdkOTciIG9wYWNpdHk9Ii45Ii8+Cjx0ZXh0IHg9Ijg0IiB5PSI1NTMiIGZpbGw9IiNmMGYyZjQiIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSI2NiIgZm9udC13ZWlnaHQ9IjYwMCI+QVNTRVQgMTwvdGV4dD4KPHRleHQgeD0iODQiIHk9IjU5MCIgZmlsbD0iI2FhYjBiNyIgZm9udC1mYW1pbHk9IlNlZ29lIFVJLEFyaWFsIiBmb250LXNpemU9IjMyIj5VU0VSIENPTExFQ1RFRCBNRURJQTwvdGV4dD4KPC9zdmc+", "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAwIiBoZWlnaHQ9IjY3NSIgdmlld0JveD0iMCAwIDEyMDAgNjc1Ij4KPHJlY3Qgd2lkdGg9IjEyMDAiIGhlaWdodD0iNjc1IiBmaWxsPSIjMjUyMTFmIi8+CjxjaXJjbGUgY3g9Ijg2NCIgY3k9IjIxNiIgcj0iMTIxIiBmaWxsPSIjOWI3ODViIiBvcGFjaXR5PSIuNTUiLz48cmVjdCB4PSIxMjAiIHk9IjM5MSIgd2lkdGg9Ijc0NCIgaGVpZ2h0PSIxNiIgZmlsbD0iIzliNzg1YiIgb3BhY2l0eT0iLjc1Ii8+CjxyZWN0IHg9Ijg0IiB5PSI1NCIgd2lkdGg9IjIxIiBoZWlnaHQ9IjgxIiBmaWxsPSIjOWI3ODViIiBvcGFjaXR5PSIuOSIvPgo8dGV4dCB4PSI4NCIgeT0iNTUzIiBmaWxsPSIjZjBmMmY0IiBmb250LWZhbWlseT0iU2Vnb2UgVUksQXJpYWwiIGZvbnQtc2l6ZT0iNjYiIGZvbnQtd2VpZ2h0PSI2MDAiPkFTU0VUIDI8L3RleHQ+Cjx0ZXh0IHg9Ijg0IiB5PSI1OTAiIGZpbGw9IiNhYWIwYjciIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSIzMiI+VVNFUiBDT0xMRUNURUQgTUVESUE8L3RleHQ+Cjwvc3ZnPg==", "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAwIiBoZWlnaHQ9IjY3NSIgdmlld0JveD0iMCAwIDEyMDAgNjc1Ij4KPHJlY3Qgd2lkdGg9IjEyMDAiIGhlaWdodD0iNjc1IiBmaWxsPSIjMWUyODIzIi8+CjxwYXRoIGQ9Ik0gMCA0ODYgTCAzMzYgMjgzIEwgNTg4IDQ0NSBMIDg4OCAxODkgTCAxMjAwIDM5MSBMIDEyMDAgNjc1IEwgMCA2NzUgWiIgZmlsbD0iIzVmOTI3OCIgb3BhY2l0eT0iLjQ4Ii8+CjxyZWN0IHg9Ijg0IiB5PSI1NCIgd2lkdGg9IjIxIiBoZWlnaHQ9IjgxIiBmaWxsPSIjNWY5Mjc4IiBvcGFjaXR5PSIuOSIvPgo8dGV4dCB4PSI4NCIgeT0iNTUzIiBmaWxsPSIjZjBmMmY0IiBmb250LWZhbWlseT0iU2Vnb2UgVUksQXJpYWwiIGZvbnQtc2l6ZT0iNjYiIGZvbnQtd2VpZ2h0PSI2MDAiPkFTU0VUIDM8L3RleHQ+Cjx0ZXh0IHg9Ijg0IiB5PSI1OTAiIGZpbGw9IiNhYWIwYjciIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSIzMiI+VVNFUiBDT0xMRUNURUQgTUVESUE8L3RleHQ+Cjwvc3ZnPg==", "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAwIiBoZWlnaHQ9IjY3NSIgdmlld0JveD0iMCAwIDEyMDAgNjc1Ij4KPHJlY3Qgd2lkdGg9IjEyMDAiIGhlaWdodD0iNjc1IiBmaWxsPSIjMjkyMjI2Ii8+CjxyZWN0IHg9Ijk2IiB5PSIxMjEiIHdpZHRoPSIxMDA4IiBoZWlnaHQ9IjEwOCIgZmlsbD0iIzlhNjk3ZSIgb3BhY2l0eT0iLjU1Ii8+PHJlY3QgeD0iOTYiIHk9IjI2MyIgd2lkdGg9Ijc2OCIgaGVpZ2h0PSI1NCIgZmlsbD0iIzlhNjk3ZSIgb3BhY2l0eT0iLjI4Ii8+PHJlY3QgeD0iNDMyIiB5PSIzNjQiIHdpZHRoPSI2NzIiIGhlaWdodD0iMTYyIiBmaWxsPSIjOWE2OTdlIiBvcGFjaXR5PSIuMzgiLz4KPHJlY3QgeD0iODQiIHk9IjU0IiB3aWR0aD0iMjEiIGhlaWdodD0iODEiIGZpbGw9IiM5YTY5N2UiIG9wYWNpdHk9Ii45Ii8+Cjx0ZXh0IHg9Ijg0IiB5PSI1NTMiIGZpbGw9IiNmMGYyZjQiIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSI2NiIgZm9udC13ZWlnaHQ9IjYwMCI+QVNTRVQgNDwvdGV4dD4KPHRleHQgeD0iODQiIHk9IjU5MCIgZmlsbD0iI2FhYjBiNyIgZm9udC1mYW1pbHk9IlNlZ29lIFVJLEFyaWFsIiBmb250LXNpemU9IjMyIj5VU0VSIENPTExFQ1RFRCBNRURJQTwvdGV4dD4KPC9zdmc+", "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAwIiBoZWlnaHQ9IjY3NSIgdmlld0JveD0iMCAwIDEyMDAgNjc1Ij4KPHJlY3Qgd2lkdGg9IjEyMDAiIGhlaWdodD0iNjc1IiBmaWxsPSIjMjQyNTJhIi8+CjxjaXJjbGUgY3g9Ijg2NCIgY3k9IjIxNiIgcj0iMTIxIiBmaWxsPSIjNzc3Y2EzIiBvcGFjaXR5PSIuNTUiLz48cmVjdCB4PSIxMjAiIHk9IjM5MSIgd2lkdGg9Ijc0NCIgaGVpZ2h0PSIxNiIgZmlsbD0iIzc3N2NhMyIgb3BhY2l0eT0iLjc1Ii8+CjxyZWN0IHg9Ijg0IiB5PSI1NCIgd2lkdGg9IjIxIiBoZWlnaHQ9IjgxIiBmaWxsPSIjNzc3Y2EzIiBvcGFjaXR5PSIuOSIvPgo8dGV4dCB4PSI4NCIgeT0iNTUzIiBmaWxsPSIjZjBmMmY0IiBmb250LWZhbWlseT0iU2Vnb2UgVUksQXJpYWwiIGZvbnQtc2l6ZT0iNjYiIGZvbnQtd2VpZ2h0PSI2MDAiPkFTU0VUIDU8L3RleHQ+Cjx0ZXh0IHg9Ijg0IiB5PSI1OTAiIGZpbGw9IiNhYWIwYjciIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSIzMiI+VVNFUiBDT0xMRUNURUQgTUVESUE8L3RleHQ+Cjwvc3ZnPg==", "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAwIiBoZWlnaHQ9IjY3NSIgdmlld0JveD0iMCAwIDEyMDAgNjc1Ij4KPHJlY3Qgd2lkdGg9IjEyMDAiIGhlaWdodD0iNjc1IiBmaWxsPSIjMjkyNjFmIi8+CjxwYXRoIGQ9Ik0gMCA0ODYgTCAzMzYgMjgzIEwgNTg4IDQ0NSBMIDg4OCAxODkgTCAxMjAwIDM5MSBMIDEyMDAgNjc1IEwgMCA2NzUgWiIgZmlsbD0iI2EyOGM1OSIgb3BhY2l0eT0iLjQ4Ii8+CjxyZWN0IHg9Ijg0IiB5PSI1NCIgd2lkdGg9IjIxIiBoZWlnaHQ9IjgxIiBmaWxsPSIjYTI4YzU5IiBvcGFjaXR5PSIuOSIvPgo8dGV4dCB4PSI4NCIgeT0iNTUzIiBmaWxsPSIjZjBmMmY0IiBmb250LWZhbWlseT0iU2Vnb2UgVUksQXJpYWwiIGZvbnQtc2l6ZT0iNjYiIGZvbnQtd2VpZ2h0PSI2MDAiPkFTU0VUIDY8L3RleHQ+Cjx0ZXh0IHg9Ijg0IiB5PSI1OTAiIGZpbGw9IiNhYWIwYjciIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSIzMiI+VVNFUiBDT0xMRUNURUQgTUVESUE8L3RleHQ+Cjwvc3ZnPg==", "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAwIiBoZWlnaHQ9IjY3NSIgdmlld0JveD0iMCAwIDEyMDAgNjc1Ij4KPHJlY3Qgd2lkdGg9IjEyMDAiIGhlaWdodD0iNjc1IiBmaWxsPSIjMWYyNTI4Ii8+CjxyZWN0IHg9Ijk2IiB5PSIxMjEiIHdpZHRoPSIxMDA4IiBoZWlnaHQ9IjEwOCIgZmlsbD0iIzY2ODc5NiIgb3BhY2l0eT0iLjU1Ii8+PHJlY3QgeD0iOTYiIHk9IjI2MyIgd2lkdGg9Ijc2OCIgaGVpZ2h0PSI1NCIgZmlsbD0iIzY2ODc5NiIgb3BhY2l0eT0iLjI4Ii8+PHJlY3QgeD0iNDMyIiB5PSIzNjQiIHdpZHRoPSI2NzIiIGhlaWdodD0iMTYyIiBmaWxsPSIjNjY4Nzk2IiBvcGFjaXR5PSIuMzgiLz4KPHJlY3QgeD0iODQiIHk9IjU0IiB3aWR0aD0iMjEiIGhlaWdodD0iODEiIGZpbGw9IiM2Njg3OTYiIG9wYWNpdHk9Ii45Ii8+Cjx0ZXh0IHg9Ijg0IiB5PSI1NTMiIGZpbGw9IiNmMGYyZjQiIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSI2NiIgZm9udC13ZWlnaHQ9IjYwMCI+QVNTRVQgNzwvdGV4dD4KPHRleHQgeD0iODQiIHk9IjU5MCIgZmlsbD0iI2FhYjBiNyIgZm9udC1mYW1pbHk9IlNlZ29lIFVJLEFyaWFsIiBmb250LXNpemU9IjMyIj5VU0VSIENPTExFQ1RFRCBNRURJQTwvdGV4dD4KPC9zdmc+", "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAwIiBoZWlnaHQ9IjY3NSIgdmlld0JveD0iMCAwIDEyMDAgNjc1Ij4KPHJlY3Qgd2lkdGg9IjEyMDAiIGhlaWdodD0iNjc1IiBmaWxsPSIjMjcyMTIxIi8+CjxjaXJjbGUgY3g9Ijg2NCIgY3k9IjIxNiIgcj0iMTIxIiBmaWxsPSIjOWI2ZjY1IiBvcGFjaXR5PSIuNTUiLz48cmVjdCB4PSIxMjAiIHk9IjM5MSIgd2lkdGg9Ijc0NCIgaGVpZ2h0PSIxNiIgZmlsbD0iIzliNmY2NSIgb3BhY2l0eT0iLjc1Ii8+CjxyZWN0IHg9Ijg0IiB5PSI1NCIgd2lkdGg9IjIxIiBoZWlnaHQ9IjgxIiBmaWxsPSIjOWI2ZjY1IiBvcGFjaXR5PSIuOSIvPgo8dGV4dCB4PSI4NCIgeT0iNTUzIiBmaWxsPSIjZjBmMmY0IiBmb250LWZhbWlseT0iU2Vnb2UgVUksQXJpYWwiIGZvbnQtc2l6ZT0iNjYiIGZvbnQtd2VpZ2h0PSI2MDAiPkFTU0VUIDg8L3RleHQ+Cjx0ZXh0IHg9Ijg0IiB5PSI1OTAiIGZpbGw9IiNhYWIwYjciIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSIzMiI+VVNFUiBDT0xMRUNURUQgTUVESUE8L3RleHQ+Cjwvc3ZnPg=="];
+const works = [
+  { id:"dungeon", type:"manga", title:"던전밥", sub:"완결 · 14권", createdAt:"2026-08-18", cover:"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiB2aWV3Qm94PSIwIDAgNjAwIDkwMCI+CjxyZWN0IHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiBmaWxsPSIjMjUyOTI0Ii8+CjxyZWN0IHg9IjQ4IiB5PSIxNjIiIHdpZHRoPSI1MDQiIGhlaWdodD0iMTQ0IiBmaWxsPSIjZDViNTZkIiBvcGFjaXR5PSIuNTUiLz48cmVjdCB4PSI0OCIgeT0iMzUxIiB3aWR0aD0iMzg0IiBoZWlnaHQ9IjcyIiBmaWxsPSIjZDViNTZkIiBvcGFjaXR5PSIuMjgiLz48cmVjdCB4PSIyMTYiIHk9IjQ4NiIgd2lkdGg9IjMzNiIgaGVpZ2h0PSIyMTYiIGZpbGw9IiNkNWI1NmQiIG9wYWNpdHk9Ii4zOCIvPgo8cmVjdCB4PSI0MiIgeT0iNzIiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMDgiIGZpbGw9IiNkNWI1NmQiIG9wYWNpdHk9Ii45Ii8+Cjx0ZXh0IHg9IjQyIiB5PSI3MzgiIGZpbGw9IiNmMGYyZjQiIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSIzMyIgZm9udC13ZWlnaHQ9IjYwMCI+642Y7KCE67ClPC90ZXh0Pgo8dGV4dCB4PSI0MiIgeT0iNzg3IiBmaWxsPSIjYWFiMGI3IiBmb250LWZhbWlseT0iU2Vnb2UgVUksQXJpYWwiIGZvbnQtc2l6ZT0iMTYiPk1BTkdBPC90ZXh0Pgo8L3N2Zz4=", showcase:true, badge:"신간 확인" },
+  { id:"nier", type:"game", title:"NieR:Automata", sub:"2017 · PlatinumGames", createdAt:"2026-08-17", cover:"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiB2aWV3Qm94PSIwIDAgNjAwIDkwMCI+CjxyZWN0IHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiBmaWxsPSIjMTcxYTFiIi8+CjxwYXRoIGQ9Ik0gMCA2NDggTCAxNjggMzc4IEwgMjk0IDU5NCBMIDQ0NCAyNTIgTCA2MDAgNTIyIEwgNjAwIDkwMCBMIDAgOTAwIFoiIGZpbGw9IiNjNGM2YmQiIG9wYWNpdHk9Ii40OCIvPgo8cmVjdCB4PSI0MiIgeT0iNzIiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMDgiIGZpbGw9IiNjNGM2YmQiIG9wYWNpdHk9Ii45Ii8+Cjx0ZXh0IHg9IjQyIiB5PSI3MzgiIGZpbGw9IiNmMGYyZjQiIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSIzMyIgZm9udC13ZWlnaHQ9IjYwMCI+TmllUjpBdXRvbWF0YTwvdGV4dD4KPHRleHQgeD0iNDIiIHk9Ijc4NyIgZmlsbD0iI2FhYjBiNyIgZm9udC1mYW1pbHk9IlNlZ29lIFVJLEFyaWFsIiBmb250LXNpemU9IjE2Ij5HQU1FPC90ZXh0Pgo8L3N2Zz4=", showcase:true },
+  { id:"blade", type:"movie", title:"Blade Runner", sub:"1982 · Ridley Scott", createdAt:"2026-08-15", cover:"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiB2aWV3Qm94PSIwIDAgNjAwIDkwMCI+CjxyZWN0IHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiBmaWxsPSIjMTcxYTIxIi8+CjxyZWN0IHg9IjQ4IiB5PSIxNjIiIHdpZHRoPSI1MDQiIGhlaWdodD0iMTQ0IiBmaWxsPSIjYTE2MzYyIiBvcGFjaXR5PSIuNTUiLz48cmVjdCB4PSI0OCIgeT0iMzUxIiB3aWR0aD0iMzg0IiBoZWlnaHQ9IjcyIiBmaWxsPSIjYTE2MzYyIiBvcGFjaXR5PSIuMjgiLz48cmVjdCB4PSIyMTYiIHk9IjQ4NiIgd2lkdGg9IjMzNiIgaGVpZ2h0PSIyMTYiIGZpbGw9IiNhMTYzNjIiIG9wYWNpdHk9Ii4zOCIvPgo8cmVjdCB4PSI0MiIgeT0iNzIiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMDgiIGZpbGw9IiNhMTYzNjIiIG9wYWNpdHk9Ii45Ii8+Cjx0ZXh0IHg9IjQyIiB5PSI3MzgiIGZpbGw9IiNmMGYyZjQiIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSIzMyIgZm9udC13ZWlnaHQ9IjYwMCI+QkxBREUgUlVOTkVSPC90ZXh0Pgo8dGV4dCB4PSI0MiIgeT0iNzg3IiBmaWxsPSIjYWFiMGI3IiBmb250LWZhbWlseT0iU2Vnb2UgVUksQXJpYWwiIGZvbnQtc2l6ZT0iMTYiPk1PVklFPC90ZXh0Pgo8L3N2Zz4=", showcase:true },
+  { id:"yotsuba", type:"manga", title:"요츠바랑!", sub:"연재중 · 15권", createdAt:"2026-08-12", cover:"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiB2aWV3Qm94PSIwIDAgNjAwIDkwMCI+CjxyZWN0IHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiBmaWxsPSIjMjQzMDI5Ii8+CjxjaXJjbGUgY3g9IjQzMiIgY3k9IjI4OCIgcj0iMTA4IiBmaWxsPSIjODBiNzgzIiBvcGFjaXR5PSIuNTUiLz48cmVjdCB4PSI2MCIgeT0iNTIyIiB3aWR0aD0iMzcyIiBoZWlnaHQ9IjIyIiBmaWxsPSIjODBiNzgzIiBvcGFjaXR5PSIuNzUiLz4KPHJlY3QgeD0iNDIiIHk9IjcyIiB3aWR0aD0iMTAiIGhlaWdodD0iMTA4IiBmaWxsPSIjODBiNzgzIiBvcGFjaXR5PSIuOSIvPgo8dGV4dCB4PSI0MiIgeT0iNzM4IiBmaWxsPSIjZjBmMmY0IiBmb250LWZhbWlseT0iU2Vnb2UgVUksQXJpYWwiIGZvbnQtc2l6ZT0iMzMiIGZvbnQtd2VpZ2h0PSI2MDAiPuyalOy4oOuwlOuekSE8L3RleHQ+Cjx0ZXh0IHg9IjQyIiB5PSI3ODciIGZpbGw9IiNhYWIwYjciIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSIxNiI+TUFOR0E8L3RleHQ+Cjwvc3ZnPg==", showcase:false, badge:"NEW" },
+  { id:"persona", type:"game", title:"Persona 3 Reload", sub:"2024 · ATLUS", createdAt:"2026-08-10", cover:"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiB2aWV3Qm94PSIwIDAgNjAwIDkwMCI+CjxyZWN0IHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiBmaWxsPSIjMTUyNTMyIi8+CjxyZWN0IHg9IjQ4IiB5PSIxNjIiIHdpZHRoPSI1MDQiIGhlaWdodD0iMTQ0IiBmaWxsPSIjNWI5OWM4IiBvcGFjaXR5PSIuNTUiLz48cmVjdCB4PSI0OCIgeT0iMzUxIiB3aWR0aD0iMzg0IiBoZWlnaHQ9IjcyIiBmaWxsPSIjNWI5OWM4IiBvcGFjaXR5PSIuMjgiLz48cmVjdCB4PSIyMTYiIHk9IjQ4NiIgd2lkdGg9IjMzNiIgaGVpZ2h0PSIyMTYiIGZpbGw9IiM1Yjk5YzgiIG9wYWNpdHk9Ii4zOCIvPgo8cmVjdCB4PSI0MiIgeT0iNzIiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMDgiIGZpbGw9IiM1Yjk5YzgiIG9wYWNpdHk9Ii45Ii8+Cjx0ZXh0IHg9IjQyIiB5PSI3MzgiIGZpbGw9IiNmMGYyZjQiIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSIzMyIgZm9udC13ZWlnaHQ9IjYwMCI+UEVSU09OQSAzPC90ZXh0Pgo8dGV4dCB4PSI0MiIgeT0iNzg3IiBmaWxsPSIjYWFiMGI3IiBmb250LWZhbWlseT0iU2Vnb2UgVUksQXJpYWwiIGZvbnQtc2l6ZT0iMTYiPkdBTUU8L3RleHQ+Cjwvc3ZnPg==", showcase:false },
+  { id:"arrival", type:"movie", title:"컨택트", sub:"2016 · Denis Villeneuve", createdAt:"2026-08-08", cover:"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiB2aWV3Qm94PSIwIDAgNjAwIDkwMCI+CjxyZWN0IHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiBmaWxsPSIjMjUyODI3Ii8+CjxjaXJjbGUgY3g9IjQzMiIgY3k9IjI4OCIgcj0iMTA4IiBmaWxsPSIjOWE5Nzg3IiBvcGFjaXR5PSIuNTUiLz48cmVjdCB4PSI2MCIgeT0iNTIyIiB3aWR0aD0iMzcyIiBoZWlnaHQ9IjIyIiBmaWxsPSIjOWE5Nzg3IiBvcGFjaXR5PSIuNzUiLz4KPHJlY3QgeD0iNDIiIHk9IjcyIiB3aWR0aD0iMTAiIGhlaWdodD0iMTA4IiBmaWxsPSIjOWE5Nzg3IiBvcGFjaXR5PSIuOSIvPgo8dGV4dCB4PSI0MiIgeT0iNzM4IiBmaWxsPSIjZjBmMmY0IiBmb250LWZhbWlseT0iU2Vnb2UgVUksQXJpYWwiIGZvbnQtc2l6ZT0iMzMiIGZvbnQtd2VpZ2h0PSI2MDAiPkFSUklWQUw8L3RleHQ+Cjx0ZXh0IHg9IjQyIiB5PSI3ODciIGZpbGw9IiNhYWIwYjciIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSIxNiI+TU9WSUU8L3RleHQ+Cjwvc3ZnPg==", showcase:false },
+  { id:"frieren", type:"manga", title:"장송의 프리렌", sub:"연재중 · 14권", createdAt:"2026-08-06", cover:"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiB2aWV3Qm94PSIwIDAgNjAwIDkwMCI+CjxyZWN0IHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiBmaWxsPSIjMjAyYTJhIi8+CjxwYXRoIGQ9Ik0gMCA2NDggTCAxNjggMzc4IEwgMjk0IDU5NCBMIDQ0NCAyNTIgTCA2MDAgNTIyIEwgNjAwIDkwMCBMIDAgOTAwIFoiIGZpbGw9IiM2ZjliOTUiIG9wYWNpdHk9Ii40OCIvPgo8cmVjdCB4PSI0MiIgeT0iNzIiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMDgiIGZpbGw9IiM2ZjliOTUiIG9wYWNpdHk9Ii45Ii8+Cjx0ZXh0IHg9IjQyIiB5PSI3MzgiIGZpbGw9IiNmMGYyZjQiIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSIzMyIgZm9udC13ZWlnaHQ9IjYwMCI+7ZSE66as66CMPC90ZXh0Pgo8dGV4dCB4PSI0MiIgeT0iNzg3IiBmaWxsPSIjYWFiMGI3IiBmb250LWZhbWlseT0iU2Vnb2UgVUksQXJpYWwiIGZvbnQtc2l6ZT0iMTYiPk1BTkdBPC90ZXh0Pgo8L3N2Zz4=", showcase:true },
+  { id:"armored", type:"game", title:"ARMORED CORE VI", sub:"2023 · FromSoftware", createdAt:"2026-08-03", cover:"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiB2aWV3Qm94PSIwIDAgNjAwIDkwMCI+CjxyZWN0IHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiBmaWxsPSIjMmIyNDIwIi8+CjxyZWN0IHg9IjQ4IiB5PSIxNjIiIHdpZHRoPSI1MDQiIGhlaWdodD0iMTQ0IiBmaWxsPSIjYjU3ZDU4IiBvcGFjaXR5PSIuNTUiLz48cmVjdCB4PSI0OCIgeT0iMzUxIiB3aWR0aD0iMzg0IiBoZWlnaHQ9IjcyIiBmaWxsPSIjYjU3ZDU4IiBvcGFjaXR5PSIuMjgiLz48cmVjdCB4PSIyMTYiIHk9IjQ4NiIgd2lkdGg9IjMzNiIgaGVpZ2h0PSIyMTYiIGZpbGw9IiNiNTdkNTgiIG9wYWNpdHk9Ii4zOCIvPgo8cmVjdCB4PSI0MiIgeT0iNzIiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMDgiIGZpbGw9IiNiNTdkNTgiIG9wYWNpdHk9Ii45Ii8+Cjx0ZXh0IHg9IjQyIiB5PSI3MzgiIGZpbGw9IiNmMGYyZjQiIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSIzMyIgZm9udC13ZWlnaHQ9IjYwMCI+QVJNT1JFRCBDT1JFIFZJPC90ZXh0Pgo8dGV4dCB4PSI0MiIgeT0iNzg3IiBmaWxsPSIjYWFiMGI3IiBmb250LWZhbWlseT0iU2Vnb2UgVUksQXJpYWwiIGZvbnQtc2l6ZT0iMTYiPkdBTUU8L3RleHQ+Cjwvc3ZnPg==", showcase:false },
+  { id:"ghost", type:"movie", title:"공각기동대", sub:"1995 · Oshii Mamoru", createdAt:"2026-07-29", cover:"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiB2aWV3Qm94PSIwIDAgNjAwIDkwMCI+CjxyZWN0IHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiBmaWxsPSIjMWQyNzJiIi8+CjxjaXJjbGUgY3g9IjQzMiIgY3k9IjI4OCIgcj0iMTA4IiBmaWxsPSIjNWU5ZWFhIiBvcGFjaXR5PSIuNTUiLz48cmVjdCB4PSI2MCIgeT0iNTIyIiB3aWR0aD0iMzcyIiBoZWlnaHQ9IjIyIiBmaWxsPSIjNWU5ZWFhIiBvcGFjaXR5PSIuNzUiLz4KPHJlY3QgeD0iNDIiIHk9IjcyIiB3aWR0aD0iMTAiIGhlaWdodD0iMTA4IiBmaWxsPSIjNWU5ZWFhIiBvcGFjaXR5PSIuOSIvPgo8dGV4dCB4PSI0MiIgeT0iNzM4IiBmaWxsPSIjZjBmMmY0IiBmb250LWZhbWlseT0iU2Vnb2UgVUksQXJpYWwiIGZvbnQtc2l6ZT0iMzMiIGZvbnQtd2VpZ2h0PSI2MDAiPkdIT1NUIElOIFRIRSBTSEVMTDwvdGV4dD4KPHRleHQgeD0iNDIiIHk9Ijc4NyIgZmlsbD0iI2FhYjBiNyIgZm9udC1mYW1pbHk9IlNlZ29lIFVJLEFyaWFsIiBmb250LXNpemU9IjE2Ij5NT1ZJRTwvdGV4dD4KPC9zdmc+", showcase:true },
+  { id:"chrono", type:"game", title:"Chrono Trigger", sub:"1995 · Square", createdAt:"2026-07-26", cover:"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiB2aWV3Qm94PSIwIDAgNjAwIDkwMCI+CjxyZWN0IHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiBmaWxsPSIjMmEyMzIwIi8+CjxwYXRoIGQ9Ik0gMCA2NDggTCAxNjggMzc4IEwgMjk0IDU5NCBMIDQ0NCAyNTIgTCA2MDAgNTIyIEwgNjAwIDkwMCBMIDAgOTAwIFoiIGZpbGw9IiNjMjdkNTEiIG9wYWNpdHk9Ii40OCIvPgo8cmVjdCB4PSI0MiIgeT0iNzIiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMDgiIGZpbGw9IiNjMjdkNTEiIG9wYWNpdHk9Ii45Ii8+Cjx0ZXh0IHg9IjQyIiB5PSI3MzgiIGZpbGw9IiNmMGYyZjQiIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSIzMyIgZm9udC13ZWlnaHQ9IjYwMCI+Q0hST05PIFRSSUdHRVI8L3RleHQ+Cjx0ZXh0IHg9IjQyIiB5PSI3ODciIGZpbGw9IiNhYWIwYjciIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSIxNiI+R0FNRTwvdGV4dD4KPC9zdmc+", showcase:true },
+  { id:"pluto", type:"manga", title:"PLUTO", sub:"완결 · 8권", createdAt:"2026-07-21", cover:"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiB2aWV3Qm94PSIwIDAgNjAwIDkwMCI+CjxyZWN0IHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiBmaWxsPSIjMjgyNzJhIi8+CjxjaXJjbGUgY3g9IjQzMiIgY3k9IjI4OCIgcj0iMTA4IiBmaWxsPSIjYTA4Yzc1IiBvcGFjaXR5PSIuNTUiLz48cmVjdCB4PSI2MCIgeT0iNTIyIiB3aWR0aD0iMzcyIiBoZWlnaHQ9IjIyIiBmaWxsPSIjYTA4Yzc1IiBvcGFjaXR5PSIuNzUiLz4KPHJlY3QgeD0iNDIiIHk9IjcyIiB3aWR0aD0iMTAiIGhlaWdodD0iMTA4IiBmaWxsPSIjYTA4Yzc1IiBvcGFjaXR5PSIuOSIvPgo8dGV4dCB4PSI0MiIgeT0iNzM4IiBmaWxsPSIjZjBmMmY0IiBmb250LWZhbWlseT0iU2Vnb2UgVUksQXJpYWwiIGZvbnQtc2l6ZT0iMzMiIGZvbnQtd2VpZ2h0PSI2MDAiPlBMVVRPPC90ZXh0Pgo8dGV4dCB4PSI0MiIgeT0iNzg3IiBmaWxsPSIjYWFiMGI3IiBmb250LWZhbWlseT0iU2Vnb2UgVUksQXJpYWwiIGZvbnQtc2l6ZT0iMTYiPk1BTkdBPC90ZXh0Pgo8L3N2Zz4=", showcase:false },
+  { id:"memories", type:"movie", title:"MEMORIES", sub:"1995 · Otomo Katsuhiro", createdAt:"2026-07-18", cover:"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiB2aWV3Qm94PSIwIDAgNjAwIDkwMCI+CjxyZWN0IHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiBmaWxsPSIjMjUyMjI1Ii8+CjxyZWN0IHg9IjQ4IiB5PSIxNjIiIHdpZHRoPSI1MDQiIGhlaWdodD0iMTQ0IiBmaWxsPSIjYTQ2ZjdkIiBvcGFjaXR5PSIuNTUiLz48cmVjdCB4PSI0OCIgeT0iMzUxIiB3aWR0aD0iMzg0IiBoZWlnaHQ9IjcyIiBmaWxsPSIjYTQ2ZjdkIiBvcGFjaXR5PSIuMjgiLz48cmVjdCB4PSIyMTYiIHk9IjQ4NiIgd2lkdGg9IjMzNiIgaGVpZ2h0PSIyMTYiIGZpbGw9IiNhNDZmN2QiIG9wYWNpdHk9Ii4zOCIvPgo8cmVjdCB4PSI0MiIgeT0iNzIiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMDgiIGZpbGw9IiNhNDZmN2QiIG9wYWNpdHk9Ii45Ii8+Cjx0ZXh0IHg9IjQyIiB5PSI3MzgiIGZpbGw9IiNmMGYyZjQiIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSIzMyIgZm9udC13ZWlnaHQ9IjYwMCI+TUVNT1JJRVM8L3RleHQ+Cjx0ZXh0IHg9IjQyIiB5PSI3ODciIGZpbGw9IiNhYWIwYjciIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSIxNiI+TU9WSUU8L3RleHQ+Cjwvc3ZnPg==", showcase:false }
+];
+
+let currentFilter = "game";
+let selectedResult = null;
+let providerType = "manga";
+
+const worksGrid = document.getElementById("worksGrid");
+const worksView = document.getElementById("worksView");
+const detailView = document.getElementById("detailView");
+const showcaseView = document.getElementById("showcaseView");
+const workDateRail = document.getElementById("workDateRail");
+const workDateLabel = document.getElementById("workDateLabel");
+const toolbarTitle = document.getElementById("toolbarTitle");
+const toolbarMeta = document.getElementById("toolbarMeta");
+const worksFilters = document.getElementById("worksFilters");
+const backButton = document.getElementById("backButton");
+const statusText = document.getElementById("statusText");
+
+
+
+function floorObjectMarkup(innerHtml, extraClass = "") {
+  return `<div class="floor-object ${extraClass}">${innerHtml}</div>`;
+}
+
+function playObjectLift(element, callback, delay = 150) {
+  if (!element) {
+    callback?.();
+    return;
+  }
+  if (element.dataset.liftLock === "true") return;
+  element.dataset.liftLock = "true";
+  element.classList.add("click-lift");
+  window.setTimeout(() => {
+    callback?.();
+    window.setTimeout(() => {
+      element.classList.remove("click-lift");
+      delete element.dataset.liftLock;
+    }, 110);
+  }, delay);
+}
+
+function gameCaseMarkup(work, extraClass = "", interactive = false) {
+  return `
+    <div class="game-case-wrap ${extraClass}">
+      <div class="game-case ${interactive ? "game-case--interactive" : ""}">
+        <div class="game-case__shell"></div>
+        <div class="game-case__spine"></div>
+        <div class="game-case__front">
+          <img src="${work.cover}" alt="">
+          <span class="game-case__gloss"></span>
+        </div>
+        <div class="game-case__edge"></div>
+        <span class="game-case__rim"></span>
+      </div>
+    </div>`;
+}
+
+function bindTiltSurface(element, maxX = 7, maxY = 9) {
+  if (!element || element.dataset.tiltBound === "true") return;
+  element.dataset.tiltBound = "true";
+  let active = false;
+
+  const target = element.classList.contains("game-case") || element.classList.contains("manga-collectible")
+    ? element
+    : element.querySelector(".game-case") || element;
+
+  const update = (clientX, clientY) => {
+    const rect = target.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const nx = Math.max(-1, Math.min(1, ((clientX - rect.left) / rect.width) * 2 - 1));
+    const ny = Math.max(-1, Math.min(1, ((clientY - rect.top) / rect.height) * 2 - 1));
+
+    target.style.setProperty("--case-tilt-x", `${(-ny * maxX).toFixed(2)}deg`);
+    target.style.setProperty("--case-tilt-y", `${(nx * maxY).toFixed(2)}deg`);
+    target.style.setProperty("--case-glare-x", `${((nx + 1) * 50).toFixed(1)}%`);
+    target.style.setProperty("--case-glare-y", `${((ny + 1) * 50).toFixed(1)}%`);
+    target.style.setProperty("--tilt-shadow-x", `${(-nx * 10).toFixed(1)}px`);
+    target.style.setProperty("--tilt-shadow-y", `${(10 + ny * 6).toFixed(1)}px`);
+    target.classList.add("tilt-active");
+  };
+
+  const reset = () => {
+    active = false;
+    target.style.setProperty("--case-tilt-x", "0deg");
+    target.style.setProperty("--case-tilt-y", "0deg");
+    target.style.setProperty("--case-glare-x", "50%");
+    target.style.setProperty("--case-glare-y", "25%");
+    target.classList.remove("tilt-active");
+  };
+
+  element.addEventListener("pointerenter", e => {
+    if (e.pointerType === "mouse" || e.pointerType === "pen") update(e.clientX, e.clientY);
+  });
+  element.addEventListener("pointermove", e => {
+    if (e.pointerType === "mouse" || e.pointerType === "pen" || active) update(e.clientX, e.clientY);
+  });
+  element.addEventListener("pointerleave", reset);
+  element.addEventListener("pointerdown", e => {
+    active = true;
+    if (element.setPointerCapture) {
+      try { element.setPointerCapture(e.pointerId); } catch {}
+    }
+    update(e.clientX, e.clientY);
+  });
+  element.addEventListener("pointerup", reset);
+  element.addEventListener("pointercancel", reset);
+}
+
+function renderWorks() {
+  const filtered = works
+    .filter(w => w.type === currentFilter)
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  worksGrid.innerHTML = filtered.map(w => `
+    <article class="work-card type-${w.type}" tabindex="0" data-id="${w.id}" data-created-at="${w.createdAt}">
+      <div class="work-cover">
+        ${w.type === "game"
+          ? floorObjectMarkup(gameCaseMarkup(w), "library-game-object")
+          : `<img src="${w.cover}" alt="">`}
+        ${w.badge ? `<span class="badge cover-badge ${w.badge === "NEW" ? "new" : "sync"}">${w.badge}</span>` : ""}
+      </div>
+      <div class="work-labels">
+        <div class="work-title">${w.title}</div>
+        <div class="work-subtitle">${w.sub}</div>
+      </div>
+    </article>
+  `).join("");
+
+  worksGrid.querySelectorAll(".work-card").forEach(card => {
+    const open = () => {
+      const object = card.querySelector(".floor-object");
+      if (object) {
+        playObjectLift(object, () => openDetail(card.dataset.id), 135);
+      } else {
+        openDetail(card.dataset.id);
+      }
+    };
+    card.addEventListener("click", open);
+    card.addEventListener("keydown", e => { if (e.key === "Enter") open(); });
+  });
+
+  toolbarMeta.textContent = filtered.length;
+  statusText.textContent = `${typeLabel(currentFilter)} ${filtered.length}개`;
+  requestAnimationFrame(() => renderDateRail(filtered));
+}
+
+function typeLabel(type) {
+  return type === "game" ? "게임" : type === "manga" ? "만화" : "영화";
+}
+
+function renderDateRail(filtered) {
+  if (!workDateRail) return;
+  workDateRail.innerHTML = "";
+  if (filtered.length === 0) return;
+
+  const uniqueDates = [...new Set(filtered.map(w => w.createdAt))];
+  uniqueDates.forEach((date, index) => {
+    const line = document.createElement("span");
+    line.className = "work-date-line";
+    line.dataset.date = date;
+    const top = uniqueDates.length === 1 ? 50 : (index / (uniqueDates.length - 1)) * 94 + 3;
+    line.style.top = `${top}%`;
+    workDateRail.appendChild(line);
+  });
+  updateDateRailActive();
+}
+
+function updateDateRailActive() {
+  const cards = [...worksGrid.querySelectorAll(".work-card")];
+  if (!cards.length) return;
+  const viewRect = worksView.getBoundingClientRect();
+  let closest = cards[0];
+  let best = Infinity;
+  for (const card of cards) {
+    const rect = card.getBoundingClientRect();
+    const d = Math.abs(rect.top - viewRect.top - 12);
+    if (d < best) { best = d; closest = card; }
+  }
+  const date = closest.dataset.createdAt;
+  workDateRail.querySelectorAll(".work-date-line").forEach(line => {
+    line.classList.toggle("active", line.dataset.date === date);
+  });
+  if (workDateLabel) {
+    workDateLabel.textContent = formatShortDate(date);
+    workDateLabel.classList.add("visible");
+    clearTimeout(updateDateRailActive._timer);
+    updateDateRailActive._timer = setTimeout(() => workDateLabel.classList.remove("visible"), 650);
+  }
+}
+
+function formatShortDate(date) {
+  const d = new Date(date);
+  if (Number.isNaN(d.getTime())) return date;
+  return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,"0")}.${String(d.getDate()).padStart(2,"0")}`;
+}
+
+function scrollWorksFromRail(clientY) {
+  const rect = workDateRail.getBoundingClientRect();
+  const ratio = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+  worksView.scrollTop = ratio * Math.max(0, worksView.scrollHeight - worksView.clientHeight);
+}
+
+if (workDateRail) {
+  workDateRail.addEventListener("pointerdown", e => {
+    if (e.button !== 0) return;
+    workDateRail.setPointerCapture(e.pointerId);
+    scrollWorksFromRail(e.clientY);
+  });
+  workDateRail.addEventListener("pointermove", e => {
+    if (workDateRail.hasPointerCapture(e.pointerId)) scrollWorksFromRail(e.clientY);
+  });
+}
+worksView.addEventListener("scroll", updateDateRailActive, { passive: true });
+
+function showWorks() {
+  detailView.classList.remove("active-view");
+  showcaseView.classList.remove("active-view");
+  worksView.classList.add("active-view");
+  backButton.classList.add("hidden");
+  worksFilters.classList.remove("hidden");
+  toolbarTitle.textContent = "작품";
+  document.querySelectorAll("[data-type]").forEach(x => x.classList.toggle("active", x.dataset.type === currentFilter));
+  renderWorks();
+}
+
+function openDetail(id) {
+  const work = works.find(w => w.id === id);
+  if (!work) return;
+
+  worksView.classList.remove("active-view");
+  showcaseView.classList.remove("active-view");
+  detailView.classList.add("active-view");
+  backButton.classList.remove("hidden");
+  worksFilters.classList.add("hidden");
+  toolbarTitle.textContent = work.title;
+  toolbarMeta.textContent = work.type === "manga" ? "만화" : work.type === "game" ? "게임" : "영화";
+  statusText.textContent = work.title;
+
+  if (work.type === "manga") renderMangaDetail(work);
+  else if (work.type === "game") renderGameDetail(work);
+  else renderMovieDetail(work);
+}
+
+function renderMangaDetail(work) {
+  const volumes = Array.from({ length: 15 }, (_, i) => {
+    const n = i + 1;
+    const upcoming = n === 15;
+    return `
+      <div class="volume-card ${upcoming ? "upcoming" : ""}" data-volume="${n}" data-upcoming="${upcoming ? "true" : "false"}">
+        <div class="floor-object volume-floor-object">
+          <div class="volume-cover">
+            <img src="${volumeAssets[(n - 1) % 6]}" alt="">
+            ${upcoming ? '<span class="badge cover-badge new">발매 예정</span>' : ""}
+          </div>
+        </div>
+        <div class="volume-number">${n}권</div>
+        <div class="volume-date">${upcoming ? "2026-09-18 예정" : "한국 정발"}</div>
+      </div>`;
+  }).join("");
+
+  detailView.innerHTML = `
+    <div class="detail-page">
+      <div class="manga-layout">
+        <div class="manga-main">
+          <div class="section-line">
+            <div>
+              <div class="section-title">${work.title}</div>
+              <div class="section-meta">九井諒子 · 완결 · 14권 정발</div>
+            </div>
+            <div class="section-meta">표지 15개</div>
+          </div>
+          <div class="volume-grid">${volumes}</div>
+        </div>
+        <aside class="info-sheet">
+          <h3>작품 정보</h3>
+          <div class="property-list">
+            <div class="property-row"><span class="property-key">원제</span><span class="property-value">ダンジョン飯</span></div>
+            <div class="property-row"><span class="property-key">작가</span><span class="property-value">九井諒子</span></div>
+            <div class="property-row"><span class="property-key">상태</span><span class="property-value">완결</span></div>
+            <div class="property-row"><span class="property-key">장르</span><span class="property-value">판타지 · 모험 · 코미디</span></div>
+            <div class="property-row"><span class="property-key">내 점수</span><span class="property-value">9.4</span></div>
+          </div>
+          <div class="sync-line">
+            <div><span class="sync-dot"></span>MangaDex · 2일 전 동기화</div>
+            <div><span class="sync-dot"></span>Aladin · 오늘 18:42 확인</div>
+            <div style="margin-top:6px;color:#bfa16e">15권 · 2026-09-18 발매 예정</div>
+          </div>
+        </aside>
+      </div>
+    </div>`;
+  detailView.querySelectorAll(".volume-card").forEach(card => {
+    card.addEventListener("click", () => {
+      const object = card.querySelector(".volume-floor-object");
+      playObjectLift(object, () => openVolumeDetail(card, work), 120);
+    });
+  });
+}
+
+function renderGameDetail(work) {
+  detailView.innerHTML = `
+    <div class="detail-page">
+      <div class="detail-hero game-hero">
+        <img class="detail-hero-art" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAwIiBoZWlnaHQ9IjY3NSIgdmlld0JveD0iMCAwIDEyMDAgNjc1Ij4KPHJlY3Qgd2lkdGg9IjEyMDAiIGhlaWdodD0iNjc1IiBmaWxsPSIjMTcxYTFiIi8+CjxwYXRoIGQ9Ik0gMCA0ODYgTCAzMzYgMjgzIEwgNTg4IDQ0NSBMIDg4OCAxODkgTCAxMjAwIDM5MSBMIDEyMDAgNjc1IEwgMCA2NzUgWiIgZmlsbD0iIzhiOGY4NyIgb3BhY2l0eT0iLjQ4Ii8+CjxyZWN0IHg9Ijg0IiB5PSI1NCIgd2lkdGg9IjIxIiBoZWlnaHQ9IjgxIiBmaWxsPSIjOGI4Zjg3IiBvcGFjaXR5PSIuOSIvPgo8dGV4dCB4PSI4NCIgeT0iNTUzIiBmaWxsPSIjZjBmMmY0IiBmb250LWZhbWlseT0iU2Vnb2UgVUksQXJpYWwiIGZvbnQtc2l6ZT0iNjYiIGZvbnQtd2VpZ2h0PSI2MDAiPk5pZVI6QXV0b21hdGE8L3RleHQ+Cjx0ZXh0IHg9Ijg0IiB5PSI1OTAiIGZpbGw9IiNhYWIwYjciIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSIzMiI+T0ZGSUNJQUwgQVJUV09SSzwvdGV4dD4KPC9zdmc+" alt="">
+        <div class="detail-hero-scrim"></div>
+        <div class="detail-hero-content">
+          <div class="game-hero-panel">
+            ${floorObjectMarkup(gameCaseMarkup(work, "", true), "detail-game-case lifted")}
+            <div>
+              <div class="game-kicker">MAIN ARTWORK</div>
+              <h1 class="detail-title">${work.title}</h1>
+              <div class="detail-native-title">ニーア オートマタ</div>
+              <div class="detail-facts">
+                <span>2017</span><span>PlatinumGames</span><span>Square Enix</span>
+                <span>Action RPG</span><span>Windows · PlayStation · Switch</span>
+              </div>
+              <div class="game-summary-strip">
+                <span class="game-chip">대표 아트워크</span>
+                <span class="game-chip">공식 아트워크 12</span>
+                <span class="game-chip">스크린샷 8</span>
+                <span class="game-chip">내 미디어 428</span>
+              </div>
+              <p class="detail-overview">게임 상세에서는 선택한 작품의 메인 아트워크가 가장 크게 먼저 보여야 한다는 피드백을 반영한 버전입니다. 표지는 보조로 두고, 작품의 인상은 hero artwork가 담당합니다.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-tabs">
+        <button class="detail-tab active">내 미디어 <span style="color:#737a83">428</span></button>
+        <button class="detail-tab">공식 아트워크 <span style="color:#737a83">12</span></button>
+        <button class="detail-tab">스크린샷 <span style="color:#737a83">8</span></button>
+        <button class="detail-tab">정보</button>
+      </div>
+      <div class="game-sections">
+        <div>
+          <div class="section-line">
+            <span class="section-title">관련 자산</span>
+            <span class="section-meta">수집한 미디어만 표시</span>
+          </div>
+          <div class="asset-strip">
+            ${userAssets.map(x=>`<img class="asset-thumb" src="${x}" alt="">`).join("")}
+          </div>
+        </div>
+        <aside class="game-side-sheet">
+          <div class="section-line">
+            <span class="section-title">작품 정보</span>
+            <span class="section-meta">provider 캐시됨</span>
+          </div>
+          <div class="property-list">
+            <div class="property-row"><span class="property-key">개발</span><span class="property-value">PlatinumGames</span></div>
+            <div class="property-row"><span class="property-key">배급</span><span class="property-value">Square Enix</span></div>
+            <div class="property-row"><span class="property-key">출시</span><span class="property-value">2017-02-23</span></div>
+            <div class="property-row"><span class="property-key">플랫폼</span><span class="property-value">Windows · PlayStation · Switch</span></div>
+            <div class="property-row"><span class="property-key">장르</span><span class="property-value">Action RPG</span></div>
+          </div>
+          <div class="sync-line">
+            <div><span class="sync-dot"></span>Game provider · 오늘 18:42 동기화</div>
+            <div><span class="sync-dot"></span>Artwork cache · 로컬 저장됨</div>
+          </div>
+        </aside>
+      </div>
+    </div>`;
+  const detailCase = detailView.querySelector(".detail-game-case");
+  if (detailCase) bindTiltSurface(detailCase, 5, 7);
+}
+
+
+function renderMovieDetail(work) {
+  detailView.innerHTML = `
+    <div class="detail-page">
+      <div class="movie-layout">
+        <img class="movie-poster" src="${work.cover}" alt="">
+        <section class="movie-copy">
+          <h1>${work.title}</h1>
+          <div class="original">BLADE RUNNER</div>
+          <div class="movie-facts">1982 · Ridley Scott · 117분 · SF / 느와르</div>
+          <p>작품 상세는 스트리밍 서비스의 거대한 프로모션 화면처럼 만들지 않고, 포스터와 backdrop이 정보보다 조금 더 앞에 나오되 메타데이터를 읽기 쉬운 밀도로 유지하는 방향입니다.</p>
+          <div class="property-list" style="max-width:560px;margin-top:16px">
+            <div class="property-row"><span class="property-key">감독</span><span class="property-value">Ridley Scott</span></div>
+            <div class="property-row"><span class="property-key">개봉</span><span class="property-value">1982</span></div>
+            <div class="property-row"><span class="property-key">러닝타임</span><span class="property-value">117분</span></div>
+            <div class="property-row"><span class="property-key">내 점수</span><span class="property-value">9.1</span></div>
+            <div class="property-row"><span class="property-key">출처</span><span class="property-value">TMDB · 로컬 캐시됨</span></div>
+          </div>
+        </section>
+        <aside class="movie-artwork-side">
+          <img class="movie-backdrop" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAwIiBoZWlnaHQ9IjY3NSIgdmlld0JveD0iMCAwIDEyMDAgNjc1Ij4KPHJlY3Qgd2lkdGg9IjEyMDAiIGhlaWdodD0iNjc1IiBmaWxsPSIjMTcxYTIxIi8+CjxwYXRoIGQ9Ik0gMCA0ODYgTCAzMzYgMjgzIEwgNTg4IDQ0NSBMIDg4OCAxODkgTCAxMjAwIDM5MSBMIDEyMDAgNjc1IEwgMCA2NzUgWiIgZmlsbD0iI2ExNjM2MiIgb3BhY2l0eT0iLjQ4Ii8+CjxyZWN0IHg9Ijg0IiB5PSI1NCIgd2lkdGg9IjIxIiBoZWlnaHQ9IjgxIiBmaWxsPSIjYTE2MzYyIiBvcGFjaXR5PSIuOSIvPgo8dGV4dCB4PSI4NCIgeT0iNTUzIiBmaWxsPSIjZjBmMmY0IiBmb250LWZhbWlseT0iU2Vnb2UgVUksQXJpYWwiIGZvbnQtc2l6ZT0iNjYiIGZvbnQtd2VpZ2h0PSI2MDAiPkJMQURFIFJVTk5FUjwvdGV4dD4KPHRleHQgeD0iODQiIHk9IjU5MCIgZmlsbD0iI2FhYjBiNyIgZm9udC1mYW1pbHk9IlNlZ29lIFVJLEFyaWFsIiBmb250LXNpemU9IjMyIj5CQUNLRFJPUDwvdGV4dD4KPC9zdmc+" alt="">
+          <div class="movie-side-label">Backdrop · 작품 아트워크</div>
+          <img class="movie-backdrop" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAwIiBoZWlnaHQ9IjY3NSIgdmlld0JveD0iMCAwIDEyMDAgNjc1Ij4KPHJlY3Qgd2lkdGg9IjEyMDAiIGhlaWdodD0iNjc1IiBmaWxsPSIjMWQyMDI0Ii8+CjxyZWN0IHg9Ijk2IiB5PSIxMjEiIHdpZHRoPSIxMDA4IiBoZWlnaHQ9IjEwOCIgZmlsbD0iIzVmNzc4MiIgb3BhY2l0eT0iLjU1Ii8+PHJlY3QgeD0iOTYiIHk9IjI2MyIgd2lkdGg9Ijc2OCIgaGVpZ2h0PSI1NCIgZmlsbD0iIzVmNzc4MiIgb3BhY2l0eT0iLjI4Ii8+PHJlY3QgeD0iNDMyIiB5PSIzNjQiIHdpZHRoPSI2NzIiIGhlaWdodD0iMTYyIiBmaWxsPSIjNWY3NzgyIiBvcGFjaXR5PSIuMzgiLz4KPHJlY3QgeD0iODQiIHk9IjU0IiB3aWR0aD0iMjEiIGhlaWdodD0iODEiIGZpbGw9IiM1Zjc3ODIiIG9wYWNpdHk9Ii45Ii8+Cjx0ZXh0IHg9Ijg0IiB5PSI1NTMiIGZpbGw9IiNmMGYyZjQiIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSI2NiIgZm9udC13ZWlnaHQ9IjYwMCI+TE9TIEFOR0VMRVMgMjAxOTwvdGV4dD4KPHRleHQgeD0iODQiIHk9IjU5MCIgZmlsbD0iI2FhYjBiNyIgZm9udC1mYW1pbHk9IlNlZ29lIFVJLEFyaWFsIiBmb250LXNpemU9IjMyIj5BTFRFUk5BVElWRSBBUlQ8L3RleHQ+Cjwvc3ZnPg==" alt="">
+          <div class="movie-side-label">Alternative artwork</div>
+        </aside>
+      </div>
+    </div>`;
+}
+
+document.querySelectorAll("[data-type]").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("[data-type]").forEach(x => x.classList.remove("active"));
+    btn.classList.add("active");
+    currentFilter = btn.dataset.type;
+    renderWorks();
+  });
+});
+
+document.querySelectorAll("[data-filter]").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".nav-row").forEach(x => x.classList.remove("selected"));
+    btn.classList.add("selected");
+    currentFilter = btn.dataset.filter;
+    showWorks();
+  });
+});
+
+const showcaseNav = document.querySelector("[data-nav='showcase']");
+if (showcaseNav) {
+  showcaseNav.addEventListener("click", () => {
+    document.querySelectorAll(".nav-row").forEach(x => x.classList.remove("selected"));
+    showcaseNav.classList.add("selected");
+    showShowcase();
+  });
+}
+
+backButton.addEventListener("click", showWorks);
+
+
+const showcaseData = {
+  game: [
+    ["nier","NieR:Automata","2017 · PlatinumGames"],
+    ["armored","ARMORED CORE VI","2023 · FromSoftware"],
+    ["chrono","Chrono Trigger","1995 · Square"],
+    ["persona","Persona 3 Reload","2024 · ATLUS"],
+    ["nier","NieR:Automata","대표 아트워크"],
+    ["armored","ARMORED CORE VI","Favorite"],
+    ["chrono","Chrono Trigger","Favorite"],
+    ["persona","Persona 3 Reload","Favorite"],
+    ["nier","NieR:Automata","Favorite"],
+    ["armored","ARMORED CORE VI","Favorite"]
+  ],
+  manga: [
+    ["dungeon","던전밥","九井諒子"],
+    ["frieren","장송의 프리렌","山田鐘人 · アベツカサ"],
+    ["yotsuba","요츠바랑!","あずまきよひこ"],
+    ["pluto","PLUTO","浦沢直樹"],
+    ["dungeon","던전밥","Favorite"],
+    ["frieren","장송의 프리렌","Favorite"],
+    ["yotsuba","요츠바랑!","Favorite"],
+    ["pluto","PLUTO","Favorite"],
+    ["dungeon","던전밥","Favorite"],
+    ["frieren","장송의 프리렌","Favorite"]
+  ],
+  movie: [
+    ["blade","Blade Runner","1982 · Ridley Scott"],
+    ["arrival","컨택트","2016 · Denis Villeneuve"],
+    ["ghost","공각기동대","1995 · Oshii Mamoru"],
+    ["memories","MEMORIES","1995 · Otomo Katsuhiro"],
+    ["blade","Blade Runner","Favorite"],
+    ["arrival","컨택트","Favorite"],
+    ["ghost","공각기동대","Favorite"],
+    ["memories","MEMORIES","Favorite"],
+    ["blade","Blade Runner","Favorite"],
+    ["arrival","컨택트","Favorite"]
+  ]
+};
+
+let showcaseType = "game";
+
+function showShowcase() {
+  worksView.classList.remove("active-view");
+  detailView.classList.remove("active-view");
+  showcaseView.classList.add("active-view");
+  backButton.classList.add("hidden");
+  worksFilters.classList.add("hidden");
+  toolbarTitle.textContent = "쇼케이스";
+  toolbarMeta.textContent = "30";
+  statusText.textContent = "쇼케이스 · 게임 10 · 만화 10 · 영화 10";
+  renderShowcase();
+}
+
+function renderShowcase() {
+  const rows = showcaseData[showcaseType];
+  showcaseView.innerHTML = `
+    <div class="showcase-tabs">
+      ${["game","manga","movie"].map(type => `
+        <button class="showcase-tab ${type === showcaseType ? "active" : ""}" data-showcase-type="${type}">
+          ${typeLabel(type)}
+        </button>`).join("")}
+      <span class="showcase-toolbar-note">가장 좋아한 작품 10개 · 순서는 직접 정하는 전시 순서</span>
+      <span style="margin-left:auto"></span>
+      <button class="showcase-edit-button" type="button">전시 편집</button>
+    </div>
+    <div class="showcase-stage collectible-floor">
+      <div class="showcase-heading">
+        <h2>${typeLabel(showcaseType)} 쇼케이스</h2>
+        <span>10 selections</span>
+      </div>
+      <div class="showcase-wall">
+        ${rows.map(([id,title,meta], index) => {
+          const work = works.find(w => w.id === id);
+          return `
+            <article class="showcase-item ${showcaseType}" data-id="${id}">
+              <div class="showcase-frame">
+                ${showcaseType === "game"
+                  ? floorObjectMarkup(gameCaseMarkup(work, "showcase-game-case", true), "showcase-floor-object")
+                  : showcaseType === "manga"
+                    ? floorObjectMarkup(`<img src="${work.cover}" alt="">`, "showcase-floor-object")
+                    : `<img src="${work.cover}" alt="">`}
+              </div>
+              <div class="showcase-caption">
+                <div class="showcase-title">${title}</div>
+                <div class="showcase-meta">${meta}</div>
+              </div>
+            </article>`;
+        }).join("")}
+      </div>
+    </div>
+  `;
+  showcaseView.querySelectorAll("[data-showcase-type]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      showcaseType = btn.dataset.showcaseType;
+      renderShowcase();
+    });
+  });
+  showcaseView.querySelectorAll(".showcase-item").forEach(item => {
+    item.addEventListener("click", () => {
+      const object = item.querySelector(".floor-object");
+      if (object) playObjectLift(object, () => openDetail(item.dataset.id), 145);
+      else openDetail(item.dataset.id);
+    });
+  });
+  if (showcaseType === "game") {
+    showcaseView.querySelectorAll(".showcase-game-case").forEach(el => bindTiltSurface(el, 7, 10));
+  }
+}
+
+function openVolumeDetail(card, work) {
+  if (document.querySelector(".volume-detail-overlay")) return;
+
+  const cards = [...detailView.querySelectorAll(".volume-card")];
+  let currentCard = card;
+  let currentIndex = Math.max(0, cards.indexOf(card));
+  let closing = false;
+
+  const coverFor = target => target?.querySelector(".volume-cover");
+  const imageFor = target => coverFor(target)?.querySelector("img");
+  const firstCover = coverFor(currentCard);
+  const firstImage = imageFor(currentCard);
+  if (!firstCover || !firstImage) return;
+
+  const overlay = document.createElement("div");
+  overlay.className = "volume-detail-overlay";
+  overlay.innerHTML = `
+    <button type="button" class="quiet-button manga-viewer-close" aria-label="닫기">×</button>
+    <button type="button" class="manga-viewer-nav manga-viewer-prev" aria-label="이전 권">‹</button>
+    <button type="button" class="manga-viewer-nav manga-viewer-next" aria-label="다음 권">›</button>
+    <div class="manga-collectible-slot"></div>
+    <div class="manga-viewer-index"></div>
+  `;
+  document.body.appendChild(overlay);
+
+  const slot = overlay.querySelector(".manga-collectible-slot");
+  const indexLabel = overlay.querySelector(".manga-viewer-index");
+
+  const collectible = document.createElement("div");
+  collectible.className = "manga-collectible";
+  collectible.innerHTML = `
+    <img src="${firstImage.src}" alt="">
+    <span class="collectible-glare"></span>
+  `;
+  document.body.appendChild(collectible);
+
+  function setCollectibleRect(rect, animate = true) {
+    if (!animate) collectible.style.transition = "none";
+    collectible.style.left = `${rect.left}px`;
+    collectible.style.top = `${rect.top}px`;
+    collectible.style.width = `${rect.width}px`;
+    collectible.style.height = `${rect.height}px`;
+    if (!animate) {
+      collectible.getBoundingClientRect();
+      collectible.style.transition = "";
+    }
+  }
+
+  function updateIndexLabel() {
+    indexLabel.textContent = `${currentIndex + 1} / ${cards.length}`;
+  }
+
+  const startRect = firstCover.getBoundingClientRect();
+  setCollectibleRect(startRect, false);
+
+  requestAnimationFrame(() => {
+    overlay.classList.add("open");
+    collectible.style.setProperty("--case-tilt-y", "-5deg");
+    collectible.style.setProperty("--case-tilt-x", "0deg");
+    const endRect = slot.getBoundingClientRect();
+    setCollectibleRect(endRect, true);
+    updateIndexLabel();
+    setTimeout(() => {
+      collectible.style.setProperty("--case-tilt-y", "0deg");
+      bindTiltSurface(collectible, 7, 9);
+    }, 165);
+  });
+
+  function switchVolume(nextIndex) {
+    if (closing || nextIndex < 0 || nextIndex >= cards.length) return;
+    currentIndex = nextIndex;
+    currentCard = cards[currentIndex];
+    const nextImage = imageFor(currentCard);
+    if (!nextImage) return;
+
+    collectible.style.setProperty("--case-tilt-x", "0deg");
+    collectible.style.setProperty("--case-tilt-y", "0deg");
+    collectible.classList.remove("tilt-active");
+    collectible.querySelector("img").src = nextImage.src;
+    updateIndexLabel();
+  }
+
+  function closeViewer() {
+    if (closing) return;
+    closing = true;
+    collectible.style.setProperty("--case-tilt-x", "0deg");
+    collectible.style.setProperty("--case-tilt-y", "0deg");
+    collectible.classList.remove("tilt-active");
+    overlay.classList.remove("open");
+
+    const target = coverFor(currentCard) || firstCover;
+    const targetRect = target.getBoundingClientRect();
+    collectible.style.transition =
+      "left 145ms cubic-bezier(.4,0,.6,1), top 145ms cubic-bezier(.4,0,.6,1), width 145ms cubic-bezier(.4,0,.6,1), height 145ms cubic-bezier(.4,0,.6,1), transform 80ms ease-out";
+    setCollectibleRect(targetRect, true);
+
+    setTimeout(() => {
+      collectible.remove();
+      overlay.remove();
+      document.removeEventListener("keydown", onKey);
+    }, 170);
+  }
+
+  function onKey(e) {
+    if (e.key === "Escape") closeViewer();
+    if (e.key === "ArrowLeft") switchVolume(currentIndex - 1);
+    if (e.key === "ArrowRight") switchVolume(currentIndex + 1);
+  }
+
+  overlay.querySelector(".manga-viewer-close").addEventListener("click", closeViewer);
+  overlay.querySelector(".manga-viewer-prev").addEventListener("click", e => {
+    e.stopPropagation();
+    switchVolume(currentIndex - 1);
+  });
+  overlay.querySelector(".manga-viewer-next").addEventListener("click", e => {
+    e.stopPropagation();
+    switchVolume(currentIndex + 1);
+  });
+  overlay.addEventListener("click", e => {
+    if (e.target === overlay) closeViewer();
+  });
+  document.addEventListener("keydown", onKey);
+}
+
+const dialog = document.getElementById("addDialog");
+const openAddDialog = document.getElementById("openAddDialog");
+const closeDialog = document.getElementById("closeDialog");
+const cancelDialog = document.getElementById("cancelDialog");
+const createWork = document.getElementById("createWork");
+const searchResults = document.getElementById("searchResults");
+const workSearch = document.getElementById("workSearch");
+const providerNote = document.getElementById("providerNote");
+
+const resultData = {
+  manga: [
+    {title:"던전밥", meta:"九井諒子 · 2014 · 완결", provider:"MangaDex", cover:"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiB2aWV3Qm94PSIwIDAgNjAwIDkwMCI+CjxyZWN0IHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiBmaWxsPSIjMjUyOTI0Ii8+CjxyZWN0IHg9IjQ4IiB5PSIxNjIiIHdpZHRoPSI1MDQiIGhlaWdodD0iMTQ0IiBmaWxsPSIjZDViNTZkIiBvcGFjaXR5PSIuNTUiLz48cmVjdCB4PSI0OCIgeT0iMzUxIiB3aWR0aD0iMzg0IiBoZWlnaHQ9IjcyIiBmaWxsPSIjZDViNTZkIiBvcGFjaXR5PSIuMjgiLz48cmVjdCB4PSIyMTYiIHk9IjQ4NiIgd2lkdGg9IjMzNiIgaGVpZ2h0PSIyMTYiIGZpbGw9IiNkNWI1NmQiIG9wYWNpdHk9Ii4zOCIvPgo8cmVjdCB4PSI0MiIgeT0iNzIiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMDgiIGZpbGw9IiNkNWI1NmQiIG9wYWNpdHk9Ii45Ii8+Cjx0ZXh0IHg9IjQyIiB5PSI3MzgiIGZpbGw9IiNmMGYyZjQiIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSIzMyIgZm9udC13ZWlnaHQ9IjYwMCI+642Y7KCE67ClPC90ZXh0Pgo8dGV4dCB4PSI0MiIgeT0iNzg3IiBmaWxsPSIjYWFiMGI3IiBmb250LWZhbWlseT0iU2Vnb2UgVUksQXJpYWwiIGZvbnQtc2l6ZT0iMTYiPk1BTkdBPC90ZXh0Pgo8L3N2Zz4="},
+    {title:"던전밥 월드 가이드 모험자 바이블", meta:"九井諒子 · Guidebook", provider:"MangaDex", cover:"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiB2aWV3Qm94PSIwIDAgNjAwIDkwMCI+CjxyZWN0IHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiBmaWxsPSIjMjQyNzJiIi8+CjxyZWN0IHg9IjQ4IiB5PSIxNjIiIHdpZHRoPSI1MDQiIGhlaWdodD0iMTQ0IiBmaWxsPSIjOGI4ZWFiIiBvcGFjaXR5PSIuNTUiLz48cmVjdCB4PSI0OCIgeT0iMzUxIiB3aWR0aD0iMzg0IiBoZWlnaHQ9IjcyIiBmaWxsPSIjOGI4ZWFiIiBvcGFjaXR5PSIuMjgiLz48cmVjdCB4PSIyMTYiIHk9IjQ4NiIgd2lkdGg9IjMzNiIgaGVpZ2h0PSIyMTYiIGZpbGw9IiM4YjhlYWIiIG9wYWNpdHk9Ii4zOCIvPgo8cmVjdCB4PSI0MiIgeT0iNzIiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMDgiIGZpbGw9IiM4YjhlYWIiIG9wYWNpdHk9Ii45Ii8+Cjx0ZXh0IHg9IjQyIiB5PSI3MzgiIGZpbGw9IiNmMGYyZjQiIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSIzMyIgZm9udC13ZWlnaHQ9IjYwMCI+Vk9MLiA0PC90ZXh0Pgo8dGV4dCB4PSI0MiIgeT0iNzg3IiBmaWxsPSIjYWFiMGI3IiBmb250LWZhbWlseT0iU2Vnb2UgVUksQXJpYWwiIGZvbnQtc2l6ZT0iMTYiPkRVTkdFT04gTUVTSEk8L3RleHQ+Cjwvc3ZnPg=="},
+    {title:"ダンジョン飯", meta:"Japanese title match", provider:"MangaDex", cover:"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiB2aWV3Qm94PSIwIDAgNjAwIDkwMCI+CjxyZWN0IHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiBmaWxsPSIjMjIyOTJjIi8+CjxwYXRoIGQ9Ik0gMCA2NDggTCAxNjggMzc4IEwgMjk0IDU5NCBMIDQ0NCAyNTIgTCA2MDAgNTIyIEwgNjAwIDkwMCBMIDAgOTAwIFoiIGZpbGw9IiM3MTk4YTciIG9wYWNpdHk9Ii40OCIvPgo8cmVjdCB4PSI0MiIgeT0iNzIiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMDgiIGZpbGw9IiM3MTk4YTciIG9wYWNpdHk9Ii45Ii8+Cjx0ZXh0IHg9IjQyIiB5PSI3MzgiIGZpbGw9IiNmMGYyZjQiIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSIzMyIgZm9udC13ZWlnaHQ9IjYwMCI+Vk9MLiAyPC90ZXh0Pgo8dGV4dCB4PSI0MiIgeT0iNzg3IiBmaWxsPSIjYWFiMGI3IiBmb250LWZhbWlseT0iU2Vnb2UgVUksQXJpYWwiIGZvbnQtc2l6ZT0iMTYiPkRVTkdFT04gTUVTSEk8L3RleHQ+Cjwvc3ZnPg=="}
+  ],
+  game: [
+    {title:"NieR:Automata", meta:"2017 · PlatinumGames · Square Enix", provider:"Game metadata provider", cover:"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiB2aWV3Qm94PSIwIDAgNjAwIDkwMCI+CjxyZWN0IHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiBmaWxsPSIjMTcxYTFiIi8+CjxwYXRoIGQ9Ik0gMCA2NDggTCAxNjggMzc4IEwgMjk0IDU5NCBMIDQ0NCAyNTIgTCA2MDAgNTIyIEwgNjAwIDkwMCBMIDAgOTAwIFoiIGZpbGw9IiNjNGM2YmQiIG9wYWNpdHk9Ii40OCIvPgo8cmVjdCB4PSI0MiIgeT0iNzIiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMDgiIGZpbGw9IiNjNGM2YmQiIG9wYWNpdHk9Ii45Ii8+Cjx0ZXh0IHg9IjQyIiB5PSI3MzgiIGZpbGw9IiNmMGYyZjQiIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSIzMyIgZm9udC13ZWlnaHQ9IjYwMCI+TmllUjpBdXRvbWF0YTwvdGV4dD4KPHRleHQgeD0iNDIiIHk9Ijc4NyIgZmlsbD0iI2FhYjBiNyIgZm9udC1mYW1pbHk9IlNlZ29lIFVJLEFyaWFsIiBmb250LXNpemU9IjE2Ij5HQU1FPC90ZXh0Pgo8L3N2Zz4="},
+    {title:"NieR Replicant ver.1.22474487139...", meta:"2021 · Toylogic · Square Enix", provider:"Game metadata provider", cover:"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiB2aWV3Qm94PSIwIDAgNjAwIDkwMCI+CjxyZWN0IHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiBmaWxsPSIjMTUyNTMyIi8+CjxyZWN0IHg9IjQ4IiB5PSIxNjIiIHdpZHRoPSI1MDQiIGhlaWdodD0iMTQ0IiBmaWxsPSIjNWI5OWM4IiBvcGFjaXR5PSIuNTUiLz48cmVjdCB4PSI0OCIgeT0iMzUxIiB3aWR0aD0iMzg0IiBoZWlnaHQ9IjcyIiBmaWxsPSIjNWI5OWM4IiBvcGFjaXR5PSIuMjgiLz48cmVjdCB4PSIyMTYiIHk9IjQ4NiIgd2lkdGg9IjMzNiIgaGVpZ2h0PSIyMTYiIGZpbGw9IiM1Yjk5YzgiIG9wYWNpdHk9Ii4zOCIvPgo8cmVjdCB4PSI0MiIgeT0iNzIiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMDgiIGZpbGw9IiM1Yjk5YzgiIG9wYWNpdHk9Ii45Ii8+Cjx0ZXh0IHg9IjQyIiB5PSI3MzgiIGZpbGw9IiNmMGYyZjQiIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSIzMyIgZm9udC13ZWlnaHQ9IjYwMCI+UEVSU09OQSAzPC90ZXh0Pgo8dGV4dCB4PSI0MiIgeT0iNzg3IiBmaWxsPSIjYWFiMGI3IiBmb250LWZhbWlseT0iU2Vnb2UgVUksQXJpYWwiIGZvbnQtc2l6ZT0iMTYiPkdBTUU8L3RleHQ+Cjwvc3ZnPg=="}
+  ],
+  movie: [
+    {title:"Blade Runner", meta:"1982 · Ridley Scott", provider:"TMDB", cover:"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiB2aWV3Qm94PSIwIDAgNjAwIDkwMCI+CjxyZWN0IHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiBmaWxsPSIjMTcxYTIxIi8+CjxyZWN0IHg9IjQ4IiB5PSIxNjIiIHdpZHRoPSI1MDQiIGhlaWdodD0iMTQ0IiBmaWxsPSIjYTE2MzYyIiBvcGFjaXR5PSIuNTUiLz48cmVjdCB4PSI0OCIgeT0iMzUxIiB3aWR0aD0iMzg0IiBoZWlnaHQ9IjcyIiBmaWxsPSIjYTE2MzYyIiBvcGFjaXR5PSIuMjgiLz48cmVjdCB4PSIyMTYiIHk9IjQ4NiIgd2lkdGg9IjMzNiIgaGVpZ2h0PSIyMTYiIGZpbGw9IiNhMTYzNjIiIG9wYWNpdHk9Ii4zOCIvPgo8cmVjdCB4PSI0MiIgeT0iNzIiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMDgiIGZpbGw9IiNhMTYzNjIiIG9wYWNpdHk9Ii45Ii8+Cjx0ZXh0IHg9IjQyIiB5PSI3MzgiIGZpbGw9IiNmMGYyZjQiIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSIzMyIgZm9udC13ZWlnaHQ9IjYwMCI+QkxBREUgUlVOTkVSPC90ZXh0Pgo8dGV4dCB4PSI0MiIgeT0iNzg3IiBmaWxsPSIjYWFiMGI3IiBmb250LWZhbWlseT0iU2Vnb2UgVUksQXJpYWwiIGZvbnQtc2l6ZT0iMTYiPk1PVklFPC90ZXh0Pgo8L3N2Zz4="},
+    {title:"Blade Runner 2049", meta:"2017 · Denis Villeneuve", provider:"TMDB", cover:"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiB2aWV3Qm94PSIwIDAgNjAwIDkwMCI+CjxyZWN0IHdpZHRoPSI2MDAiIGhlaWdodD0iOTAwIiBmaWxsPSIjMjUyODI3Ii8+CjxjaXJjbGUgY3g9IjQzMiIgY3k9IjI4OCIgcj0iMTA4IiBmaWxsPSIjOWE5Nzg3IiBvcGFjaXR5PSIuNTUiLz48cmVjdCB4PSI2MCIgeT0iNTIyIiB3aWR0aD0iMzcyIiBoZWlnaHQ9IjIyIiBmaWxsPSIjOWE5Nzg3IiBvcGFjaXR5PSIuNzUiLz4KPHJlY3QgeD0iNDIiIHk9IjcyIiB3aWR0aD0iMTAiIGhlaWdodD0iMTA4IiBmaWxsPSIjOWE5Nzg3IiBvcGFjaXR5PSIuOSIvPgo8dGV4dCB4PSI0MiIgeT0iNzM4IiBmaWxsPSIjZjBmMmY0IiBmb250LWZhbWlseT0iU2Vnb2UgVUksQXJpYWwiIGZvbnQtc2l6ZT0iMzMiIGZvbnQtd2VpZ2h0PSI2MDAiPkFSUklWQUw8L3RleHQ+Cjx0ZXh0IHg9IjQyIiB5PSI3ODciIGZpbGw9IiNhYWIwYjciIGZvbnQtZmFtaWx5PSJTZWdvZSBVSSxBcmlhbCIgZm9udC1zaXplPSIxNiI+TU9WSUU8L3RleHQ+Cjwvc3ZnPg=="}
+  ]
+};
+
+function providerDefaultQuery(type) {
+  return type === "manga" ? "던전밥" : type === "game" ? "NieR" : "Blade Runner";
+}
+function providerMessage(type) {
+  if (type === "manga") return "MangaDex에서 작품 정보를 검색합니다. 한국 정발 정보는 작품 생성 후 Aladin에 연결할 수 있습니다.";
+  if (type === "game") return "게임 메타데이터 provider에서 제목, 제작사, 발매일, cover와 artwork를 검색합니다.";
+  return "TMDB에서 영화 정보, poster와 backdrop을 검색합니다.";
+}
+function renderSearchResults() {
+  selectedResult = null;
+  createWork.disabled = true;
+  searchResults.innerHTML = resultData[providerType].map((r, i) => `
+    <div class="result-row" data-result="${i}">
+      <img class="result-cover" src="${r.cover}" alt="">
+      <div>
+        <div class="result-title">${r.title}</div>
+        <div class="result-meta">${r.meta}</div>
+      </div>
+      <div class="result-provider">${r.provider}</div>
+    </div>
+  `).join("");
+  searchResults.querySelectorAll(".result-row").forEach(row => {
+    row.addEventListener("click", () => {
+      searchResults.querySelectorAll(".result-row").forEach(x => x.classList.remove("selected"));
+      row.classList.add("selected");
+      selectedResult = Number(row.dataset.result);
+      createWork.disabled = false;
+    });
+  });
+}
+function openDialog() {
+  dialog.classList.remove("hidden");
+  selectedResult = null;
+  providerType = "manga";
+  document.querySelectorAll("[data-provider-type]").forEach(x => x.classList.toggle("active", x.dataset.providerType === "manga"));
+  workSearch.value = providerDefaultQuery(providerType);
+  providerNote.textContent = providerMessage(providerType);
+  renderSearchResults();
+  setTimeout(() => workSearch.focus(), 0);
+}
+function closeAddDialog() { dialog.classList.add("hidden"); }
+
+openAddDialog.addEventListener("click", openDialog);
+closeDialog.addEventListener("click", closeAddDialog);
+cancelDialog.addEventListener("click", closeAddDialog);
+dialog.addEventListener("mousedown", e => { if (e.target === dialog) closeAddDialog(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeAddDialog(); });
+
+document.querySelectorAll("[data-provider-type]").forEach(btn => {
+  btn.addEventListener("click", () => {
+    providerType = btn.dataset.providerType;
+    document.querySelectorAll("[data-provider-type]").forEach(x => x.classList.toggle("active", x === btn));
+    workSearch.value = providerDefaultQuery(providerType);
+    providerNote.textContent = providerMessage(providerType);
+    renderSearchResults();
+  });
+});
+document.getElementById("searchButton").addEventListener("click", renderSearchResults);
+
+createWork.addEventListener("click", () => {
+  if (selectedResult === null) return;
+  const r = resultData[providerType][selectedResult];
+  closeAddDialog();
+  statusText.textContent = `${r.title} · 가져오기 미리보기 완료 (목업)`;
+});
+
+document.querySelectorAll(".detail-tab").forEach(btn => btn.addEventListener("click", () => {}));
+
+renderWorks();
+
+</script>
+</body>
+</html>
