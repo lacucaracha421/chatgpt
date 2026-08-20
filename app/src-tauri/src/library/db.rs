@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 12;
+pub(crate) const SCHEMA_VERSION: i64 = 13;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -21,6 +21,8 @@ const COLLECTIONS_TYPED_SCHEMA: &str =
     include_str!("../../migrations/0011_collections_typed_metadata.sql");
 const COLLECTION_SOURCE_SCHEMA: &str =
     include_str!("../../migrations/0012_collection_source.sql");
+const COLLECTION_EXTERNAL_BINDINGS_SCHEMA: &str =
+    include_str!("../../migrations/0013_collection_external_bindings.sql");
 
 pub fn open_database(path: &Path) -> Result<Connection, LibraryError> {
     let mut connection = Connection::open(path)?;
@@ -31,7 +33,7 @@ pub fn open_database(path: &Path) -> Result<Connection, LibraryError> {
     let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
     match version {
         SCHEMA_VERSION => {}
-        version @ 0..=11 => {
+        version @ 0..=12 => {
             if version > 0 {
                 let root = path
                     .parent()
@@ -85,6 +87,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         }
         if version <= 11 {
             transaction.execute_batch(COLLECTION_SOURCE_SCHEMA)?;
+        }
+        if version <= 12 {
+            transaction.execute_batch(COLLECTION_EXTERNAL_BINDINGS_SCHEMA)?;
         }
         transaction.commit()?;
         Ok::<(), LibraryError>(())
@@ -157,7 +162,7 @@ mod tests {
             connection
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
-            12
+            SCHEMA_VERSION
         );
     }
 
@@ -209,7 +214,7 @@ mod tests {
             connection
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
-            12
+            SCHEMA_VERSION
         );
     }
 
@@ -253,7 +258,7 @@ mod tests {
             connection
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
-            12
+            SCHEMA_VERSION
         );
     }
 
@@ -292,7 +297,7 @@ mod tests {
             connection
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
-            12
+            SCHEMA_VERSION
         );
         connection
             .execute(
@@ -318,6 +323,93 @@ mod tests {
                     .get::<_, i64>(0))
                 .unwrap(),
             1
+        );
+    }
+
+    #[test]
+    fn migrates_v12_external_identity_to_normalized_binding() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        for schema in [
+            INITIAL_SCHEMA,
+            VAULT_SAFETY_SCHEMA,
+            SIMILARITY_REVIEW_SCHEMA,
+            VIDEO_MEDIA_SCHEMA,
+            MANGA_SCHEMA,
+            MANGA_MODIFIED_SCHEMA,
+            CLASSIFICATION_APPEARANCE_SCHEMA,
+            ASSET_ALBUMS_SCHEMA,
+            ASSET_SOURCE_PROVENANCE_SCHEMA,
+            COLLECTIONS_SCHEMA,
+            COLLECTIONS_TYPED_SCHEMA,
+            COLLECTION_SOURCE_SCHEMA,
+        ] {
+            connection.execute_batch(schema).unwrap();
+        }
+        connection
+            .execute(
+                "INSERT INTO collections (
+                    id, name, description, type, cover_asset_id, year, author, director,
+                    external_score, my_score, genres, overview, external_id,
+                    external_source, external_synced_at, showcase, external_metadata_json,
+                    created_at, updated_at, source_path
+                 ) VALUES (
+                    'work-1', 'Work One', NULL, 'manga', NULL, NULL, NULL, NULL,
+                    NULL, NULL, NULL, NULL, ' md-1 ', ' MangaDex ',
+                    '2026-08-20T01:02:03Z', 0, '{\"title\":\"Provider title\"}',
+                    '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z', NULL
+                 )",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO collections (
+                    id, name, description, type, cover_asset_id, year, author, director,
+                    external_score, my_score, genres, overview, external_id,
+                    external_source, external_synced_at, showcase, external_metadata_json,
+                    created_at, updated_at, source_path
+                 ) VALUES (
+                    'work-2', 'Work Two', NULL, 'manga', NULL, NULL, NULL, NULL,
+                    NULL, NULL, NULL, NULL, NULL, 'legacy-only', NULL, 0, 'raw-only',
+                    '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z', NULL
+                 )",
+                [],
+            )
+            .unwrap();
+
+        migrate_to_latest(&mut connection, 12).unwrap();
+
+        let migrated: (String, String, Option<String>, Option<String>) = connection
+            .query_row(
+                "SELECT provider, external_id, provider_data_json, last_synced_at
+                 FROM collection_external_bindings WHERE collection_id = 'work-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(migrated.0, "mangadex");
+        assert_eq!(migrated.1, "md-1");
+        assert_eq!(
+            migrated.2.as_deref(),
+            Some("{\"title\":\"Provider title\"}")
+        );
+        assert_eq!(migrated.3.as_deref(), Some("2026-08-20T01:02:03Z"));
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT external_source, external_metadata_json
+                     FROM collections WHERE id = 'work-2'",
+                    [],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                )
+                .unwrap(),
+            ("legacy-only".into(), "raw-only".into())
+        );
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            13
         );
     }
 }
