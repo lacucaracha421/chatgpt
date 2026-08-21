@@ -1,4 +1,4 @@
-import { workArtworkUrl } from "../assets/mediaUrl";
+import { workArtworkThumbnailUrl } from "../assets/mediaUrl";
 import type { CollectionVolume } from "../library/types";
 
 type CollectionVolumeGridProps = {
@@ -54,7 +54,7 @@ export function CollectionVolumeGrid({
                 onClick={() => onSelect(volume.id)}
               >
                 {volume.coverArtworkId ? (
-                  <img src={workArtworkUrl(volume.coverArtworkId)} alt={label} loading="lazy" draggable={false} />
+                  <img src={workArtworkThumbnailUrl(volume.coverArtworkId)} alt={label} loading="lazy" draggable={false} />
                 ) : (
                   <span className="collection-overlay__cover-placeholder" aria-hidden="true" />
                 )}

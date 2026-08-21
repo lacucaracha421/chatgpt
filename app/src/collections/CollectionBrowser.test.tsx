@@ -130,7 +130,7 @@ describe("CollectionBrowser", () => {
 
     expect(screen.getByRole("img", { name: "Astral Chain" })).toHaveAttribute(
       "src",
-      "http://lakomics.localhost/work-artwork/artwork-1",
+      "http://lakomics.localhost/work-artwork-thumbnail/artwork-1",
     );
   });
 });

@@ -5,6 +5,7 @@ import {
   playbackUrl,
   scrubFrameUrl,
   thumbnailUrl,
+  workArtworkThumbnailUrl,
   workArtworkUrl,
 } from "./mediaUrl";
 
@@ -32,6 +33,9 @@ describe("media URLs", () => {
     );
     expect(workArtworkUrl("art/one")).toBe(
       "http://lakomics.localhost/work-artwork/art%2Fone",
+    );
+    expect(workArtworkThumbnailUrl("art/one")).toBe(
+      "http://lakomics.localhost/work-artwork-thumbnail/art%2Fone",
     );
     expect(mangadexCoverPreviewUrl("manga/one", "cover one.jpg")).toBe(
       "http://lakomics.localhost/mangadex-cover-preview/manga%2Fone/cover%20one.jpg",

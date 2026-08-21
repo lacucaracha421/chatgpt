@@ -96,7 +96,7 @@ describe("CollectionOverlay MangaDex flow", () => {
     await user.click(screen.getByRole("button", { name: "서랍 1" }));
     expect(await screen.findByRole("img", { name: "10권 표지" })).toHaveAttribute(
       "src",
-      "http://lakomics.localhost/work-artwork/art-10",
+      "http://lakomics.localhost/work-artwork-thumbnail/art-10",
     );
   });
 
