@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { collectionCoverUrl, workArtworkUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
-import type { CollectionCover, CollectionSummary, CollectionVolume, MangaDexConnection } from "../library/types";
+import type { AladinConnection, CollectionCover, CollectionSummary, CollectionVolume, MangaDexConnection } from "../library/types";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { Button } from "../shared/ui/Button";
 import { Skeleton } from "../shared/ui/Skeleton";
@@ -13,6 +13,7 @@ import { CollectionInfoPanel } from "./CollectionInfoPanel";
 import { CollectionVolumeGrid } from "./CollectionVolumeGrid";
 import { CollectionVolumePanel } from "./CollectionVolumePanel";
 import { MangaCoverViewer } from "./MangaCoverViewer";
+import { AladinConnectDialog } from "./AladinConnectDialog";
 import { MangaDexImportDialog } from "./MangaDexImportDialog";
 
 type CollectionOverlayProps = {
@@ -31,9 +32,12 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
   const [viewerVolumeId, setViewerVolumeId] = useState<string | null>(null);
   const [shelfFilter, setShelfFilter] = useState<number | null>(null);
   const [editionIndex, setEditionIndex] = useState(0);
-  const [connection, setConnection] = useState<MangaDexConnection | null | undefined>(undefined);
+  const [mangaDexConnection, setMangaDexConnection] = useState<MangaDexConnection | null | undefined>(undefined);
+  const [aladinConnection, setAladinConnection] = useState<AladinConnection | null | undefined>(undefined);
   const [importOpen, setImportOpen] = useState(false);
+  const [aladinOpen, setAladinOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [aladinRefreshing, setAladinRefreshing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const viewerOpenerRef = useRef<HTMLElement | null>(null);
 
@@ -107,24 +111,38 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
   useEffect(() => {
     let active = true;
     if (!isManga) {
-      setConnection(null);
+      setMangaDexConnection(null);
       return () => { active = false; };
     }
-    setConnection(undefined);
+    setMangaDexConnection(undefined);
     void gateway.getMangaDexConnection(collectionId).then(
-      (next) => { if (active) setConnection(next); },
-      () => { if (active) setConnection(null); },
+      (next) => { if (active) setMangaDexConnection(next); },
+      () => { if (active) setMangaDexConnection(null); },
+    );
+    return () => { active = false; };
+  }, [gateway, collectionId, isManga]);
+
+  useEffect(() => {
+    let active = true;
+    if (!isManga) {
+      setAladinConnection(null);
+      return () => { active = false; };
+    }
+    setAladinConnection(undefined);
+    void gateway.getAladinConnection(collectionId).then(
+      (next) => { if (active) setAladinConnection(next); },
+      () => { if (active) setAladinConnection(null); },
     );
     return () => { active = false; };
   }, [gateway, collectionId, isManga]);
 
   useEffect(() => {
     const exit = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && viewerVolumeId === null) onExit();
+      if (event.key === "Escape" && viewerVolumeId === null && !importOpen && !aladinOpen) onExit();
     };
     window.addEventListener("keydown", exit);
     return () => window.removeEventListener("keydown", exit);
-  }, [onExit, viewerVolumeId]);
+  }, [aladinOpen, importOpen, onExit, viewerVolumeId]);
 
   const heroUrl = useMemo(
     () => isManga && selectedVolume?.coverArtworkId
@@ -161,6 +179,25 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
     }
   }
 
+  async function refreshAladin() {
+    setAladinRefreshing(true);
+    setMessage(null);
+    try {
+      const result = await gateway.refreshAladin(collectionId);
+      const refreshed = await gateway.listCollectionVolumes(collectionId);
+      setVolumes(refreshed);
+      setSelectedVolumeId((current) => current && refreshed.some((volume) => volume.id === current)
+        ? current
+        : firstVolumeId(refreshed, editionIndex));
+      setAladinConnection(await gateway.getAladinConnection(collectionId));
+      setMessage(aladinResultMessage(result));
+    } catch (error) {
+      setMessage(commandErrorMessage(error, "Aladin 정보를 새로고침하지 못했습니다."));
+    } finally {
+      setAladinRefreshing(false);
+    }
+  }
+
   function selectEdition(next: number) {
     setViewerVolumeId(null);
     setEditionIndex(next);
@@ -186,9 +223,14 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
         title={collection?.name ?? "컬렉션"}
         ariaLabel="컬렉션 표지 도구"
         actions={<>
-          {isManga && connection !== undefined && (
-            <Button size="sm" variant="ghost" disabled={refreshing} onClick={() => connection ? void refresh() : setImportOpen(true)}>
-              {connection ? "MangaDex 새로고침" : "MangaDex 연결"}
+          {isManga && mangaDexConnection !== undefined && (
+            <Button size="sm" variant="ghost" disabled={refreshing} onClick={() => mangaDexConnection ? void refresh() : setImportOpen(true)}>
+              {mangaDexConnection ? "MangaDex 새로고침" : "MangaDex 연결"}
+            </Button>
+          )}
+          {isManga && aladinConnection !== undefined && (
+            <Button size="sm" variant="ghost" disabled={aladinRefreshing} onClick={() => aladinConnection ? void refreshAladin() : setAladinOpen(true)}>
+              {aladinConnection ? "Aladin 새로고침" : "Aladin 연결"}
             </Button>
           )}
           <Button size="icon" variant="ghost" aria-label="컬렉션 표지 보기 닫기" onClick={onExit}>
@@ -214,7 +256,13 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
           )}
         </div>
         {isManga && (
-          <CollectionVolumePanel coverCount={volumes?.length ?? 0} volumeLabel={selectedVolume?.displayLabel ?? ""} />
+          <CollectionVolumePanel
+            coverCount={volumes?.length ?? 0}
+            volumeLabel={selectedVolume?.displayLabel ?? ""}
+            localReleaseDate={selectedVolume?.localReleaseDate ?? null}
+            isbn13={selectedVolume?.isbn13 ?? null}
+            releaseStatus={selectedVolume?.releaseStatus ?? null}
+          />
         )}
       </div>
       {isManga && volumes !== null ? (
@@ -254,12 +302,33 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
           onClose={() => setImportOpen(false)}
           onApplied={async () => {
             await onChanged();
-            setConnection(await gateway.getMangaDexConnection(collection.id));
+            setMangaDexConnection(await gateway.getMangaDexConnection(collection.id));
+          }}
+        />
+      )}
+      {aladinOpen && collection && (
+        <AladinConnectDialog
+          open
+          collectionId={collection.id}
+          initialQuery={collection.name}
+          onClose={() => setAladinOpen(false)}
+          onApplied={async (result) => {
+            const refreshed = await gateway.listCollectionVolumes(collection.id);
+            setVolumes(refreshed);
+            setSelectedVolumeId((current) => current && refreshed.some((volume) => volume.id === current)
+              ? current
+              : firstVolumeId(refreshed, editionIndex));
+            setAladinConnection(await gateway.getAladinConnection(collection.id));
+            setMessage(aladinResultMessage(result));
           }}
         />
       )}
     </section>
   );
+}
+
+function aladinResultMessage(result: { added: number; updated: number; unchanged: number; ignored: number }) {
+  return `국내 발매 정보: 추가 ${result.added}권, 갱신 ${result.updated}권, 유지 ${result.unchanged}권, 제외 ${result.ignored}개`;
 }
 
 function firstVolumeId(volumes: CollectionVolume[], editionIndex: number) {

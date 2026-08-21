@@ -147,6 +147,75 @@ describe("CollectionOverlay MangaDex flow", () => {
     expect(screen.getByRole("heading", { name: "MangaDex 연결" })).toBeInTheDocument();
   });
 
+  it("keeps MangaDex separate and opens the text-only Aladin connection dialog", async () => {
+    const user = userEvent.setup();
+    const { onExit } = renderOverlay({
+      getMangaDexConnection: vi.fn().mockResolvedValue({ mangaId: "manga-1", lastSyncedAt: "t" }),
+    });
+
+    expect(await screen.findByRole("button", { name: "MangaDex 새로고침" })).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "Aladin 연결" }));
+    const dialog = screen.getByRole("dialog", { name: "Aladin 연결" });
+    expect(dialog).toBeInTheDocument();
+    expect(dialog.querySelector("img")).toBeNull();
+    await user.keyboard("{Escape}");
+    expect(onExit).not.toHaveBeenCalled();
+  });
+
+  it("refreshes Aladin releases once and shows Korean publication fields without changing covers", async () => {
+    const user = userEvent.setup();
+    const initial = {
+      id: "v1", volumeNumber: 1, editionIndex: 0, displayLabel: "1", coverArtworkId: "art-1",
+      localReleaseDate: null, isbn13: null, releaseStatus: null,
+    };
+    const released = {
+      ...initial,
+      localReleaseDate: "2026-08-20", isbn13: "9781234567890", releaseStatus: "released" as const,
+    };
+    const listCollectionVolumes = vi.fn().mockResolvedValue([initial]);
+    const { gateway } = renderOverlay({
+      listCollectionVolumes,
+      getMangaDexConnection: vi.fn().mockResolvedValue({ mangaId: "manga-1", lastSyncedAt: "t" }),
+      getAladinConnection: vi.fn().mockResolvedValue({ anchorItemId: "item-1", query: "던전밥", lastSyncedAt: "t" }),
+      refreshAladin: vi.fn().mockResolvedValue({ added: 0, updated: 1, unchanged: 0, ignored: 0 }),
+    });
+    const hero = (await screen.findAllByRole("img", { name: "1권 표지" }))
+      .find((image) => image.getAttribute("src")?.includes("work-artwork/art-1"))!;
+    expect(hero).toHaveAttribute("src", "http://lakomics.localhost/work-artwork/art-1");
+    await waitFor(() => expect(gateway.syncMangaDexVolumeCovers).toHaveBeenCalledOnce());
+    listCollectionVolumes.mockClear();
+    listCollectionVolumes.mockResolvedValue([released]);
+
+    await user.click(await screen.findByRole("button", { name: "Aladin 새로고침" }));
+
+    await waitFor(() => expect(gateway.refreshAladin).toHaveBeenCalledWith("collection-1"));
+    expect(listCollectionVolumes).toHaveBeenCalledOnce();
+    expect(screen.getByText("2026. 08. 20.")).toBeInTheDocument();
+    expect(screen.getByText("9781234567890")).toBeInTheDocument();
+    expect(screen.getByText("출간됨")).toBeInTheDocument();
+    expect(hero).toHaveAttribute("src", "http://lakomics.localhost/work-artwork/art-1");
+    const thumbnail = screen.getAllByRole("img", { name: "1권 표지" })
+      .find((image) => image.getAttribute("src")?.includes("work-artwork-thumbnail/art-1"));
+    expect(thumbnail).toHaveAttribute("src", "http://lakomics.localhost/work-artwork-thumbnail/art-1");
+  });
+
+  it("keeps the shelf visible when Aladin refresh fails", async () => {
+    const user = userEvent.setup();
+    renderOverlay({
+      listCollectionVolumes: vi.fn().mockResolvedValue([{
+        id: "v1", volumeNumber: 1, editionIndex: 0, displayLabel: "1", coverArtworkId: "art-1",
+        localReleaseDate: null, isbn13: null, releaseStatus: null,
+      }]),
+      getAladinConnection: vi.fn().mockResolvedValue({ anchorItemId: "item-1", query: "던전밥", lastSyncedAt: "t" }),
+      refreshAladin: vi.fn().mockRejectedValue(new Error("알라딘 실패")),
+    });
+
+    expect(await screen.findByRole("button", { name: "1권 표지" })).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "Aladin 새로고침" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("알라딘 실패");
+    expect(screen.getByRole("button", { name: "1권 표지" })).toBeInTheDocument();
+  });
+
   it("refreshes a connected manga and reports the change", async () => {
     const user = userEvent.setup();
     const { gateway, onChanged } = renderOverlay({
