@@ -1,4 +1,5 @@
 mod album;
+pub(crate) mod aladin;
 mod asset_metadata;
 pub mod book_migration;
 mod backup;

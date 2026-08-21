@@ -186,6 +186,18 @@ pub enum LibraryError {
     InvalidMangaDexResponse,
     #[error("이 MangaDex 작품은 이미 다른 Work에 연결되어 있습니다")]
     DuplicateProviderBinding,
+    #[error("알라딘 검색어는 두 글자 이상이어야 합니다")]
+    InvalidAladinQuery,
+    #[error("알라딘 TTB 키가 올바르지 않습니다")]
+    InvalidAladinCredential,
+    #[error("알라딘에 연결할 수 없습니다")]
+    AladinUnavailable,
+    #[error("알라딘 요청 시간이 초과됐습니다")]
+    AladinTimedOut,
+    #[error("알라딘 요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요")]
+    AladinRateLimited,
+    #[error("알라딘 응답을 처리할 수 없습니다")]
+    InvalidAladinResponse,
     #[error("영상 형식을 지원하지 않거나 파일이 손상됐습니다")]
     UnsupportedVideo,
     #[error("영상 미리보기를 준비하지 못했습니다")]

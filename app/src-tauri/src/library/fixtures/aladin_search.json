@@ -1,0 +1,63 @@
+{
+  "version": "20131101",
+  "title": "Aladin OpenAPI Search Results",
+  "totalResults": 6,
+  "startIndex": 1,
+  "itemsPerPage": 6,
+  "item": [
+    {
+      "title": "던전밥 1권",
+      "author": "쿠이 료코",
+      "pubDate": "2024-01-10",
+      "isbn13": "9780000000001",
+      "itemId": 101,
+      "link": "https://www.aladin.co.kr/shop/wproduct.aspx?ItemId=101",
+      "publisher": "소미미디어"
+    },
+    {
+      "title": "던전밥 2권",
+      "author": "쿠이 료코",
+      "pubDate": "2024-02-10",
+      "isbn13": "9780000000002",
+      "itemId": 102,
+      "link": "https://www.aladin.co.kr/shop/wproduct.aspx?ItemId=102",
+      "publisher": "소미미디어"
+    },
+    {
+      "title": "던전밥 공식 가이드북",
+      "author": "쿠이 료코",
+      "pubDate": "2024-03-10",
+      "isbn13": "9780000000003",
+      "itemId": 103,
+      "link": "https://www.aladin.co.kr/shop/wproduct.aspx?ItemId=103",
+      "publisher": "소미미디어"
+    },
+    {
+      "title": "던전밥 1권",
+      "author": "쿠이 료코",
+      "pubDate": "2025-01-10",
+      "isbn13": "9780000000011",
+      "itemId": 201,
+      "link": "https://www.aladin.co.kr/shop/wproduct.aspx?ItemId=201",
+      "publisher": "다른출판사"
+    },
+    {
+      "title": "던전밥 10.5권",
+      "author": "쿠이 료코",
+      "pubDate": "2025-02-10",
+      "isbn13": "9780000000012",
+      "itemId": 202,
+      "link": "https://www.aladin.co.kr/shop/wproduct.aspx?ItemId=202",
+      "publisher": "소미미디어"
+    },
+    {
+      "title": "던전밥 3권",
+      "author": "쿠이 료코",
+      "pubDate": "",
+      "isbn13": "",
+      "itemId": 104,
+      "link": "https://www.aladin.co.kr/shop/wproduct.aspx?ItemId=104",
+      "publisher": "소미미디어"
+    }
+  ]
+}
