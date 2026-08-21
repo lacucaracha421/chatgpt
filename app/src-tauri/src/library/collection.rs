@@ -149,7 +149,7 @@ impl Library {
         if changed == 0 {
             return Err(LibraryError::CollectionNotFound);
         }
-        Ok(())
+        self.cleanup_unreferenced_work_artwork()
     }
 
     pub fn set_collection_cover(
@@ -365,6 +365,10 @@ pub(crate) fn map_duplicate_name(error: rusqlite::Error) -> LibraryError {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+
+    use image::{DynamicImage, ImageFormat};
+
     use crate::library::{
         error::LibraryError,
         models::{
@@ -422,6 +426,51 @@ mod tests {
                 .unwrap(),
             1
         );
+    }
+
+    #[test]
+    fn deleting_collection_removes_managed_work_artwork_and_thumbnail() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let collection = library
+            .create_collection(CreateCollection {
+                name: "Dungeon Meshi".into(),
+                description: None,
+                collection_type: CollectionType::Manga,
+            })
+            .unwrap();
+        let mut bytes = Cursor::new(Vec::new());
+        DynamicImage::new_rgb8(12, 18)
+            .write_to(&mut bytes, ImageFormat::Png)
+            .unwrap();
+        let prepared = library
+            .prepare_work_artwork(&collection.id, &bytes.into_inner())
+            .unwrap();
+        let original = library.root().join(&prepared.relative_path);
+        let thumbnail = library.root().join(format!(
+            "work-artwork-thumbnails/{}/{}.webp",
+            collection.id, prepared.id
+        ));
+        {
+            let mut connection = library.connection().unwrap();
+            let transaction = connection.transaction().unwrap();
+            Library::select_work_artwork_in_transaction(
+                &transaction,
+                &collection.id,
+                "mangadex",
+                "cover-1",
+                Some("ja"),
+                &prepared,
+            )
+            .unwrap();
+            transaction.commit().unwrap();
+        }
+        prepared.commit();
+
+        library.delete_collection(&collection.id).unwrap();
+
+        assert!(!original.exists());
+        assert!(!thumbnail.exists());
     }
 
     #[test]

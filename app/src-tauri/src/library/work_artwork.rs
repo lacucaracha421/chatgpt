@@ -1,4 +1,9 @@
-use std::{collections::BTreeSet, fs, path::PathBuf};
+use std::{
+    collections::BTreeSet,
+    fs,
+    io::{BufReader, BufWriter},
+    path::{Path, PathBuf},
+};
 
 use image::ImageFormat;
 use rusqlite::{params, OptionalExtension, Transaction};
@@ -6,6 +11,7 @@ use rusqlite::{params, OptionalExtension, Transaction};
 use super::{collection::require_collection, error::LibraryError, Library, MediaResponse};
 
 pub(crate) const MAX_WORK_ARTWORK_BYTES: usize = 32 * 1024 * 1024;
+const WORK_ARTWORK_THUMBNAIL_BOUND: u32 = 360;
 
 pub(crate) struct PreparedWorkArtwork {
     pub id: String,
@@ -14,6 +20,7 @@ pub(crate) struct PreparedWorkArtwork {
     pub width: u32,
     pub height: u32,
     absolute_path: PathBuf,
+    thumbnail_absolute_path: PathBuf,
     committed: bool,
 }
 
@@ -21,6 +28,7 @@ impl Drop for PreparedWorkArtwork {
     fn drop(&mut self) {
         if !self.committed {
             let _ = fs::remove_file(&self.absolute_path);
+            let _ = fs::remove_file(&self.thumbnail_absolute_path);
         }
     }
 }
@@ -53,6 +61,8 @@ impl Library {
         let id = uuid::Uuid::new_v4().to_string();
         let relative_path = format!("work-artwork/{collection_id}/{id}.{extension}");
         let absolute_path = self.root().join(&relative_path);
+        let thumbnail_relative_path = work_artwork_thumbnail_relative_path(collection_id, &id);
+        let thumbnail_absolute_path = self.root().join(&thumbnail_relative_path);
         let directory = absolute_path
             .parent()
             .expect("generated WorkArtwork paths have a parent");
@@ -67,6 +77,11 @@ impl Library {
                 source,
             });
         }
+        if let Err(error) = write_work_artwork_thumbnail(&image, &thumbnail_absolute_path) {
+            let _ = fs::remove_file(&absolute_path);
+            let _ = fs::remove_file(&thumbnail_absolute_path);
+            return Err(error);
+        }
         Ok(PreparedWorkArtwork {
             id,
             relative_path,
@@ -74,6 +89,7 @@ impl Library {
             width: image.width(),
             height: image.height(),
             absolute_path,
+            thumbnail_absolute_path,
             committed: false,
         })
     }
@@ -177,72 +193,189 @@ impl Library {
         self.open_library_media(&relative_path)
     }
 
-    pub(crate) fn cleanup_unreferenced_work_artwork(&self) -> Result<(), LibraryError> {
-        let referenced = {
-            let connection = self.connection()?;
-            let mut statement = connection.prepare(
-                "SELECT relative_path FROM collection_work_artworks ORDER BY relative_path",
-            )?;
-            let paths = statement
-                .query_map([], |row| row.get::<_, String>(0))?
-                .map(|path| path.map(|path| self.root().join(path)))
-                .collect::<Result<BTreeSet<_>, _>>()?;
-            paths
-        };
-        let artwork_root = self.root().join("work-artwork");
-        for collection_entry in fs::read_dir(&artwork_root).map_err(|source| {
-            LibraryError::WriteWorkArtwork {
-                path: artwork_root.clone(),
-                source,
+    pub fn resolve_work_artwork_thumbnail(
+        &self,
+        artwork_id: &str,
+    ) -> Result<MediaResponse, LibraryError> {
+        uuid::Uuid::parse_str(artwork_id).map_err(|_| LibraryError::MediaNotFound)?;
+        let (collection_id, relative_path) = self
+            .connection()?
+            .query_row(
+                "SELECT collection_id, relative_path
+                 FROM collection_work_artworks WHERE id = ?1",
+                [artwork_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?
+            .ok_or(LibraryError::MediaNotFound)?;
+        let thumbnail_relative_path =
+            work_artwork_thumbnail_relative_path(&collection_id, artwork_id);
+        let thumbnail_path = self.root().join(&thumbnail_relative_path);
+        if !thumbnail_path.exists() {
+            let media = self.open_library_media(&relative_path)?;
+            let image = image::ImageReader::new(BufReader::new(media.file))
+                .with_guessed_format()
+                .map_err(|_| LibraryError::InvalidWorkArtwork)?
+                .decode()
+                .map_err(|_| LibraryError::InvalidWorkArtwork)?;
+            let temporary_path = thumbnail_path.with_extension(format!(
+                "{}.tmp",
+                uuid::Uuid::new_v4()
+            ));
+            if let Err(error) = write_work_artwork_thumbnail(&image, &temporary_path) {
+                let _ = fs::remove_file(&temporary_path);
+                return Err(error);
             }
-        })? {
-            let collection_entry = collection_entry.map_err(|source| {
-                LibraryError::WriteWorkArtwork {
-                    path: artwork_root.clone(),
-                    source,
-                }
-            })?;
-            if !collection_entry
-                .file_type()
-                .map_err(|source| LibraryError::WriteWorkArtwork {
-                    path: collection_entry.path(),
-                    source,
-                })?
-                .is_dir()
-            {
-                continue;
-            }
-            for file_entry in fs::read_dir(collection_entry.path()).map_err(|source| {
-                LibraryError::WriteWorkArtwork {
-                    path: collection_entry.path(),
-                    source,
-                }
-            })? {
-                let file_entry = file_entry.map_err(|source| LibraryError::WriteWorkArtwork {
-                    path: collection_entry.path(),
-                    source,
-                })?;
-                let path = file_entry.path();
-                if file_entry
-                    .file_type()
-                    .map_err(|source| LibraryError::WriteWorkArtwork {
-                        path: path.clone(),
+            if let Err(source) = fs::rename(&temporary_path, &thumbnail_path) {
+                let _ = fs::remove_file(&temporary_path);
+                if !thumbnail_path.exists() {
+                    return Err(LibraryError::WriteWorkArtwork {
+                        path: thumbnail_path,
                         source,
-                    })?
-                    .is_file()
-                    && !referenced.contains(&path)
-                {
-                    fs::remove_file(&path).map_err(|source| {
-                        LibraryError::WriteWorkArtwork {
-                            path: path.clone(),
-                            source,
-                        }
-                    })?;
+                    });
                 }
             }
         }
+        self.open_library_media(&thumbnail_relative_path)
+    }
+
+    pub(crate) fn cleanup_unreferenced_work_artwork(&self) -> Result<(), LibraryError> {
+        let (referenced_artwork, referenced_thumbnails) = {
+            let connection = self.connection()?;
+            let mut statement = connection.prepare(
+                "SELECT id, collection_id, relative_path
+                 FROM collection_work_artworks ORDER BY relative_path",
+            )?;
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            let artwork = rows
+                .iter()
+                .map(|(_, _, path)| self.root().join(path))
+                .collect();
+            let thumbnails = rows
+                .iter()
+                .map(|(id, collection_id, _)| {
+                    self.root()
+                        .join(work_artwork_thumbnail_relative_path(collection_id, id))
+                })
+                .collect();
+            (artwork, thumbnails)
+        };
+        cleanup_unreferenced_files(&self.root().join("work-artwork"), &referenced_artwork)?;
+        cleanup_unreferenced_files(
+            &self.root().join("work-artwork-thumbnails"),
+            &referenced_thumbnails,
+        )?;
         Ok(())
     }
+}
+
+fn work_artwork_thumbnail_relative_path(collection_id: &str, artwork_id: &str) -> String {
+    format!("work-artwork-thumbnails/{collection_id}/{artwork_id}.webp")
+}
+
+fn write_work_artwork_thumbnail(
+    image: &image::DynamicImage,
+    path: &std::path::Path,
+) -> Result<(), LibraryError> {
+    let directory = path
+        .parent()
+        .expect("generated WorkArtwork thumbnail paths have a parent");
+    fs::create_dir_all(directory).map_err(|source| LibraryError::WriteWorkArtwork {
+        path: directory.to_path_buf(),
+        source,
+    })?;
+    let file = fs::File::create(path).map_err(|source| LibraryError::WriteWorkArtwork {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    image
+        .thumbnail(WORK_ARTWORK_THUMBNAIL_BOUND, WORK_ARTWORK_THUMBNAIL_BOUND)
+        .write_to(&mut BufWriter::new(file), ImageFormat::WebP)
+        .map_err(|source| LibraryError::WriteWorkArtwork {
+            path: path.to_path_buf(),
+            source: std::io::Error::other(source),
+        })
+}
+
+fn cleanup_unreferenced_files(
+    root: &Path,
+    referenced: &BTreeSet<PathBuf>,
+) -> Result<(), LibraryError> {
+    let entries = match fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(source) => {
+            return Err(LibraryError::WriteWorkArtwork {
+                path: root.to_path_buf(),
+                source,
+            })
+        }
+    };
+    for directory_entry in entries {
+        let directory_entry = directory_entry.map_err(|source| LibraryError::WriteWorkArtwork {
+            path: root.to_path_buf(),
+            source,
+        })?;
+        if !directory_entry
+            .file_type()
+            .map_err(|source| LibraryError::WriteWorkArtwork {
+                path: directory_entry.path(),
+                source,
+            })?
+            .is_dir()
+        {
+            continue;
+        }
+        let directory = directory_entry.path();
+        for file_entry in
+            fs::read_dir(&directory).map_err(|source| LibraryError::WriteWorkArtwork {
+                path: directory.clone(),
+                source,
+            })?
+        {
+            let file_entry = file_entry.map_err(|source| LibraryError::WriteWorkArtwork {
+                path: directory.clone(),
+                source,
+            })?;
+            let path = file_entry.path();
+            if file_entry
+                .file_type()
+                .map_err(|source| LibraryError::WriteWorkArtwork {
+                    path: path.clone(),
+                    source,
+                })?
+                .is_file()
+                && !referenced.contains(&path)
+            {
+                fs::remove_file(&path).map_err(|source| LibraryError::WriteWorkArtwork {
+                    path: path.clone(),
+                    source,
+                })?;
+            }
+        }
+        if fs::read_dir(&directory)
+            .map_err(|source| LibraryError::WriteWorkArtwork {
+                path: directory.clone(),
+                source,
+            })?
+            .next()
+            .is_none()
+        {
+            fs::remove_dir(&directory).map_err(|source| LibraryError::WriteWorkArtwork {
+                path: directory,
+                source,
+            })?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -260,11 +393,47 @@ mod tests {
     use super::MAX_WORK_ARTWORK_BYTES;
 
     fn png_bytes() -> Vec<u8> {
+        png_bytes_at(12, 18)
+    }
+
+    fn png_bytes_at(width: u32, height: u32) -> Vec<u8> {
         let mut bytes = Cursor::new(Vec::new());
-        DynamicImage::new_rgb8(12, 18)
+        DynamicImage::new_rgb8(width, height)
             .write_to(&mut bytes, ImageFormat::Png)
             .unwrap();
         bytes.into_inner()
+    }
+
+    #[test]
+    fn prepared_artwork_writes_a_bounded_thumbnail_and_drop_removes_both() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let collection = library
+            .create_collection(CreateCollection {
+                name: "Dungeon Meshi".into(),
+                description: None,
+                collection_type: CollectionType::Manga,
+            })
+            .unwrap();
+
+        let prepared = library
+            .prepare_work_artwork(&collection.id, &png_bytes_at(900, 1350))
+            .unwrap();
+        let original = library.root().join(&prepared.relative_path);
+        let thumbnail = library.root().join(format!(
+            "work-artwork-thumbnails/{}/{}.webp",
+            collection.id, prepared.id
+        ));
+        let decoded = image::open(&thumbnail).unwrap();
+
+        assert!(original.exists());
+        assert!(decoded.width() <= 360);
+        assert!(decoded.height() <= 360);
+        assert_eq!(decoded.width() * 3, decoded.height() * 2);
+
+        drop(prepared);
+        assert!(!original.exists());
+        assert!(!thumbnail.exists());
     }
 
     #[test]
@@ -400,9 +569,57 @@ mod tests {
     }
 
     #[test]
+    fn thumbnail_resolver_backfills_missing_cache_and_returns_webp() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let collection = library
+            .create_collection(CreateCollection {
+                name: "Dungeon Meshi".into(),
+                description: None,
+                collection_type: CollectionType::Manga,
+            })
+            .unwrap();
+        let prepared = library
+            .prepare_work_artwork(&collection.id, &png_bytes_at(900, 1350))
+            .unwrap();
+        let artwork_id = prepared.id.clone();
+        let thumbnail = library.root().join(format!(
+            "work-artwork-thumbnails/{}/{}.webp",
+            collection.id, artwork_id
+        ));
+        {
+            let mut connection = library.connection().unwrap();
+            let transaction = connection.transaction().unwrap();
+            Library::select_work_artwork_in_transaction(
+                &transaction,
+                &collection.id,
+                "mangadex",
+                "cover-1",
+                Some("ja"),
+                &prepared,
+            )
+            .unwrap();
+            transaction.commit().unwrap();
+        }
+        prepared.commit();
+        std::fs::remove_file(&thumbnail).unwrap();
+
+        let mut media = library
+            .resolve_work_artwork_thumbnail(&artwork_id)
+            .unwrap();
+        let mut bytes = Vec::new();
+        media.file.read_to_end(&mut bytes).unwrap();
+        let decoded = image::load_from_memory_with_format(&bytes, ImageFormat::WebP).unwrap();
+
+        assert_eq!(media.mime, "image/webp");
+        assert!(thumbnail.exists());
+        assert_eq!((decoded.width(), decoded.height()), (240, 360));
+    }
+
+    #[test]
     fn reopening_removes_only_unreferenced_artwork_files() {
         let temp = tempfile::tempdir().unwrap();
-        let (stored_path, orphan_path) = {
+        let (stored_path, orphan_path, stored_thumbnail, orphan_thumbnail) = {
             let library = Library::open(temp.path()).unwrap();
             let collection = library
                 .create_collection(CreateCollection {
@@ -415,6 +632,10 @@ mod tests {
                 .prepare_work_artwork(&collection.id, &png_bytes())
                 .unwrap();
             let stored_path = library.root().join(&prepared.relative_path);
+            let stored_thumbnail = library.root().join(format!(
+                "work-artwork-thumbnails/{}/{}.webp",
+                collection.id, prepared.id
+            ));
             {
                 let mut connection = library.connection().unwrap();
                 let transaction = connection.transaction().unwrap();
@@ -432,12 +653,16 @@ mod tests {
             prepared.commit();
             let orphan_path = stored_path.parent().unwrap().join("orphan.png");
             std::fs::write(&orphan_path, png_bytes()).unwrap();
-            (stored_path, orphan_path)
+            let orphan_thumbnail = stored_thumbnail.parent().unwrap().join("orphan.webp");
+            std::fs::write(&orphan_thumbnail, b"orphan thumbnail").unwrap();
+            (stored_path, orphan_path, stored_thumbnail, orphan_thumbnail)
         };
 
         let _reopened = Library::open(temp.path()).unwrap();
 
         assert!(stored_path.is_file());
         assert!(!orphan_path.exists());
+        assert!(stored_thumbnail.is_file());
+        assert!(!orphan_thumbnail.exists());
     }
 }
