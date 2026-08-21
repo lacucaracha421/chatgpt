@@ -23,7 +23,7 @@ const METADATA_IMPORT_FOLDER_KEY = "lakomics.metadataImportFolder";
 
 export function SettingsView({ restoring, onRestore, onExit, onImportFolder, metadataImportRunning = false, onCollectionsChanged }: SettingsViewProps) {
   const { error: libraryError, gateway, library, openLibrary } = useLibrary();
-  const [section, setSection] = useState<"general" | "browser_extension" | "metadata_import" | "safety" | "shortcuts">("general");
+  const [section, setSection] = useState<"general" | "browser_extension" | "external_services" | "metadata_import" | "safety" | "shortcuts">("general");
   const [lastImportFolder, setLastImportFolder] = useState(() => localStorage.getItem(METADATA_IMPORT_FOLDER_KEY));
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [backups, setBackups] = useState<MetadataBackup[] | null>(null);
@@ -44,7 +44,13 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [bookImportRunning, setBookImportRunning] = useState(false);
   const [bookImportMessage, setBookImportMessage] = useState<string | null>(null);
   useAutoDismiss(bookImportMessage, setBookImportMessage);
-  const pending = restoring || submitting;
+  const [aladinConfigured, setAladinConfigured] = useState<boolean | null>(null);
+  const [aladinKey, setAladinKey] = useState("");
+  const [aladinBusy, setAladinBusy] = useState(false);
+  const [aladinConfirmingDelete, setAladinConfirmingDelete] = useState(false);
+  const [aladinError, setAladinError] = useState<string | null>(null);
+  useAutoDismiss(aladinError, setAladinError);
+  const pending = restoring || submitting || aladinBusy;
 
   useEffect(() => {
     let active = true;
@@ -61,6 +67,19 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
       if (active) setExtensionConnection(connection);
     }).catch((loadError: unknown) => {
       if (active) setExtensionError(commandErrorMessage(loadError, "확장 프로그램 연결 정보를 불러오지 못했습니다."));
+    });
+    return () => { active = false; };
+  }, [gateway, section]);
+
+  useEffect(() => {
+    if (section !== "external_services") return;
+    let active = true;
+    setAladinConfigured(null);
+    setAladinError(null);
+    void gateway.getAladinCredentialStatus().then((status) => {
+      if (active) setAladinConfigured(status.configured);
+    }).catch((loadError: unknown) => {
+      if (active) setAladinError(commandErrorMessage(loadError, "알라딘 설정을 확인하지 못했습니다."));
     });
     return () => { active = false; };
   }, [gateway, section]);
@@ -155,6 +174,37 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     }
   }
 
+  async function saveAladinKey() {
+    if (!aladinKey.trim() || aladinBusy) return;
+    setAladinBusy(true);
+    setAladinError(null);
+    try {
+      const status = await gateway.setAladinTtbKey(aladinKey);
+      setAladinConfigured(status.configured);
+      setAladinKey("");
+    } catch (saveError) {
+      setAladinError(commandErrorMessage(saveError, "알라딘 TTB 키를 저장하지 못했습니다."));
+    } finally {
+      setAladinBusy(false);
+    }
+  }
+
+  async function deleteAladinKey() {
+    if (aladinBusy) return;
+    setAladinBusy(true);
+    setAladinError(null);
+    try {
+      const status = await gateway.deleteAladinTtbKey();
+      setAladinConfigured(status.configured);
+      setAladinConfirmingDelete(false);
+      setAladinKey("");
+    } catch (deleteError) {
+      setAladinError(commandErrorMessage(deleteError, "알라딘 TTB 키를 삭제하지 못했습니다."));
+    } finally {
+      setAladinBusy(false);
+    }
+  }
+
   async function chooseImportFolder() {
     const selected = await open({ directory: true, multiple: false, defaultPath: localStorage.getItem(METADATA_IMPORT_FOLDER_KEY) ?? undefined });
     if (typeof selected !== "string") return;
@@ -170,6 +220,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     <nav className="settings-view__navigation" aria-label="설정 구역">
       <Button className="settings-view__section-button" variant="ghost" aria-current={section === "general" ? "page" : undefined} onClick={() => setSection("general")}>일반</Button>
       <Button className="settings-view__section-button" variant="ghost" aria-current={section === "browser_extension" ? "page" : undefined} onClick={() => setSection("browser_extension")}>브라우저 확장</Button>
+      <Button className="settings-view__section-button" variant="ghost" aria-current={section === "external_services" ? "page" : undefined} onClick={() => setSection("external_services")}>외부 서비스</Button>
       <Button className="settings-view__section-button" variant="ghost" aria-current={section === "metadata_import" ? "page" : undefined} onClick={() => setSection("metadata_import")}>메타데이터 가져오기</Button>
       <Button className="settings-view__section-button" variant="ghost" aria-current={section === "safety" ? "page" : undefined} onClick={() => setSection("safety")}>안전</Button>
       <Button className="settings-view__section-button" variant="ghost" aria-current={section === "shortcuts" ? "page" : undefined} onClick={() => setSection("shortcuts")}>단축키</Button>
@@ -242,6 +293,40 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             {copyMessage && <Toast onDismiss={() => setCopyMessage(null)}>{copyMessage}</Toast>}
           </>
         ) : null}
+      </div>
+    )}
+    {section === "external_services" && (
+      <div className="settings-view__section">
+        <header className="settings-view__header"><h2>외부 서비스</h2><p>국내 단행본 발매 정보를 가져올 서비스를 관리합니다.</p></header>
+        {aladinError && <Toast onDismiss={() => setAladinError(null)}>{aladinError}</Toast>}
+        <dl className="settings-view__property">
+          <dt>알라딘 OpenAPI</dt>
+          <dd className="settings-view__credential-status">{aladinConfigured === null ? "확인 중…" : aladinConfigured ? "설정됨" : "설정되지 않음"}</dd>
+          {aladinConfigured && !aladinConfirmingDelete && <Button size="sm" variant="danger" disabled={aladinBusy} onClick={() => setAladinConfirmingDelete(true)}>키 삭제</Button>}
+        </dl>
+        <label className="settings-view__property">
+          <span className="settings-view__property-label">알라딘 TTB 키</span>
+          <span className="settings-view__token-row">
+            <input
+              className="settings-view__token"
+              aria-label="알라딘 TTB 키"
+              type="password"
+              autoComplete="off"
+              value={aladinKey}
+              onChange={(event) => setAladinKey(event.target.value)}
+            />
+            <Button size="sm" disabled={aladinBusy || !aladinKey.trim()} onClick={() => void saveAladinKey()}>{aladinBusy ? "처리 중…" : "저장"}</Button>
+          </span>
+        </label>
+        {aladinConfirmingDelete && (
+          <div className="settings-view__credential-confirm">
+            <p>저장된 알라딘 TTB 키를 삭제할까요?</p>
+            <div className="settings-view__credential-actions">
+              <Button size="sm" disabled={aladinBusy} onClick={() => setAladinConfirmingDelete(false)}>취소</Button>
+              <Button size="sm" variant="danger" disabled={aladinBusy} onClick={() => void deleteAladinKey()}>삭제 확인</Button>
+            </div>
+          </div>
+        )}
       </div>
     )}
     {section === "metadata_import" && (

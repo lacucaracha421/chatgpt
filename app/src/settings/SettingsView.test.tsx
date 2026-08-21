@@ -232,6 +232,36 @@ it("shows the Edge connection and copies its hidden key on request", async () =>
   expect(await screen.findByText("연결 키를 복사했습니다")).toBeVisible();
 });
 
+it("stores and removes an Aladin key without reading it back", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getAladinCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.setAladinTtbKey).mockResolvedValue({ configured: true });
+  vi.mocked(gateway.deleteAladinTtbKey).mockResolvedValue({ configured: false });
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  await user.click(screen.getByRole("button", { name: "외부 서비스" }));
+  expect(await screen.findByText("설정되지 않음")).toBeInTheDocument();
+  expect(await gateway.getAladinCredentialStatus()).toEqual({ configured: false });
+  await user.type(screen.getByLabelText("알라딘 TTB 키"), "new-secret");
+  await user.click(screen.getByRole("button", { name: "저장" }));
+
+  expect(gateway.setAladinTtbKey).toHaveBeenCalledWith("new-secret");
+  expect(screen.getByLabelText("알라딘 TTB 키")).toHaveValue("");
+  expect(screen.getByText("설정됨")).toBeInTheDocument();
+  expect(screen.queryByDisplayValue("new-secret")).not.toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "키 삭제" }));
+  expect(screen.getByText("저장된 알라딘 TTB 키를 삭제할까요?")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "삭제 확인" }));
+  expect(gateway.deleteAladinTtbKey).toHaveBeenCalledOnce();
+  expect(screen.getByText("설정되지 않음")).toBeInTheDocument();
+});
+
 function createGateway(): LibraryGateway {
   return {
     openLibrary: vi.fn(), getExtensionConnection: vi.fn(), listClassifications: vi.fn(),

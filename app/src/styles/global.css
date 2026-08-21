@@ -1479,6 +1479,29 @@ input:disabled {
   font-size: var(--text-sm);
 }
 
+.settings-view__credential-status {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.settings-view__credential-confirm,
+.settings-view__credential-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.settings-view__credential-confirm {
+  justify-content: space-between;
+  padding-top: var(--space-2);
+}
+
+.settings-view__credential-confirm p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
 .settings-view__actions {
   display: flex;
   justify-content: flex-end;
