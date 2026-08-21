@@ -2746,6 +2746,150 @@ input:disabled {
   grid-column: 1 / -1;
 }
 
+/* Manga cover appreciation viewer */
+.manga-cover-viewer__backdrop {
+  position: fixed;
+  z-index: var(--z-dialog-overlay);
+  inset: 0;
+  background: var(--color-overlay);
+  animation: manga-cover-viewer-fade 140ms ease-out;
+}
+
+.manga-cover-viewer {
+  position: fixed;
+  z-index: var(--z-dialog-content);
+  inset: 0;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 48px;
+  grid-template-rows: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  color: var(--color-text);
+  outline: none;
+  pointer-events: none;
+}
+
+.manga-cover-viewer__title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.manga-cover-viewer__cover-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  perspective: 1000px;
+  pointer-events: auto;
+}
+
+.manga-cover-viewer__collectible {
+  --viewer-tilt-x: 0deg;
+  --viewer-tilt-y: 0deg;
+  --viewer-shadow-x: 0px;
+  --viewer-shadow-y: 12px;
+  position: relative;
+  display: flex;
+  max-width: min(72vw, 620px);
+  max-height: calc(100vh - 88px);
+  transform: rotateX(var(--viewer-tilt-x)) rotateY(var(--viewer-tilt-y)) scale(1.015);
+  transform-style: preserve-3d;
+  filter: drop-shadow(var(--viewer-shadow-x) var(--viewer-shadow-y) 24px var(--color-overlay));
+  transition: transform 140ms ease-out, filter 140ms ease-out;
+  animation: manga-cover-viewer-open 140ms ease-out;
+}
+
+.manga-cover-viewer__collectible img {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100vh - 88px);
+  object-fit: contain;
+  border-radius: var(--radius-tile);
+}
+
+.manga-cover-viewer__glare {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-tile);
+  background: linear-gradient(120deg, transparent 25%, rgba(255, 255, 255, 0.12), transparent 75%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease-out;
+}
+
+.manga-cover-viewer__collectible--tilting .manga-cover-viewer__glare {
+  opacity: 0.28;
+}
+
+.manga-cover-viewer__control {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.manga-cover-viewer__control:hover:not(:disabled) {
+  background: var(--color-surface-hover);
+}
+
+.manga-cover-viewer__control:disabled {
+  color: var(--color-muted);
+  opacity: 0.45;
+  cursor: default;
+}
+
+.manga-cover-viewer__control svg {
+  width: 20px;
+  height: 20px;
+}
+
+.manga-cover-viewer__previous,
+.manga-cover-viewer__next {
+  justify-self: center;
+}
+
+.manga-cover-viewer__close {
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-4);
+}
+
+.manga-cover-viewer__position {
+  grid-column: 2;
+  display: flex;
+  justify-content: center;
+  gap: var(--space-3);
+  color: var(--color-muted);
+  font-size: var(--text-sm);
+  pointer-events: none;
+}
+
+@keyframes manga-cover-viewer-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes manga-cover-viewer-open {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to { opacity: 1; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -2753,5 +2897,14 @@ input:disabled {
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
+  }
+
+  .manga-cover-viewer__collectible {
+    transform: none;
+    filter: none;
+  }
+
+  .manga-cover-viewer__glare {
+    display: none;
   }
 }
