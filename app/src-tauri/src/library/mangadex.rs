@@ -221,6 +221,47 @@ pub(crate) fn parse_work_preview(
     })
 }
 
+pub(crate) fn parse_snapshot_covers(
+    snapshot_json: &str,
+    manga_id: &str,
+) -> Result<Vec<MangaDexCoverCandidate>, LibraryError> {
+    uuid::Uuid::parse_str(manga_id).map_err(|_| LibraryError::InvalidMangaDexIdentity)?;
+    let snapshot: serde_json::Value =
+        serde_json::from_str(snapshot_json).map_err(|_| LibraryError::InvalidMangaDexResponse)?;
+    let covers: CollectionEnvelope<CoverData> = serde_json::from_value(
+        snapshot
+            .get("covers")
+            .cloned()
+            .ok_or(LibraryError::InvalidMangaDexResponse)?,
+    )
+    .map_err(|_| LibraryError::InvalidMangaDexResponse)?;
+    if covers.result != "ok" {
+        return Err(LibraryError::InvalidMangaDexResponse);
+    }
+
+    Ok(covers
+        .data
+        .into_iter()
+        .filter_map(|cover| {
+            let belongs_to_manga = cover.relationships.iter().any(|relationship| {
+                relationship.relationship_type == "manga" && relationship.id == manga_id
+            });
+            if !belongs_to_manga
+                || validate_cover_identity(manga_id, &cover.attributes.file_name).is_err()
+                || uuid::Uuid::parse_str(&cover.id).is_err()
+            {
+                return None;
+            }
+            Some(MangaDexCoverCandidate {
+                cover_id: cover.id,
+                file_name: cover.attributes.file_name,
+                volume: cover.attributes.volume,
+                language: cover.attributes.locale,
+            })
+        })
+        .collect())
+}
+
 pub(crate) fn search(query: &str) -> Result<Vec<MangaDexSearchResult>, LibraryError> {
     let url = search_url(query)?;
     let json = get_text(&url, MAX_JSON_BYTES)?;
@@ -434,8 +475,8 @@ fn nonempty(value: Option<&String>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        cover_url, map_status_code, parse_search, parse_work_preview, search_url,
-        validate_cover_identity, validate_query,
+        cover_url, map_status_code, parse_search, parse_snapshot_covers, parse_work_preview,
+        search_url, validate_cover_identity, validate_query,
     };
     use crate::library::error::LibraryError;
 
@@ -482,6 +523,21 @@ mod tests {
             "11111111-1111-4111-8111-111111111111"
         );
         assert_eq!(preview.covers[1].language.as_deref(), Some("ko"));
+    }
+
+    #[test]
+    fn stored_snapshot_skips_a_malformed_cover_without_losing_valid_siblings() {
+        let snapshot = format!(
+            r#"{{"covers":{{"result":"ok","data":[
+                {{"id":"11111111-1111-4111-8111-111111111111","attributes":{{"volume":"1","fileName":"{COVER_FILE}","locale":"ja"}},"relationships":[{{"id":"{MANGA_ID}","type":"manga"}}]}},
+                {{"id":"not-a-uuid","attributes":{{"volume":"2","fileName":"bad.jpg","locale":"ja"}},"relationships":[{{"id":"{MANGA_ID}","type":"manga"}}]}}
+            ]}}}}"#
+        );
+
+        let covers = parse_snapshot_covers(&snapshot, MANGA_ID).unwrap();
+
+        assert_eq!(covers.len(), 1);
+        assert_eq!(covers[0].cover_id, "11111111-1111-4111-8111-111111111111");
     }
 
     #[test]

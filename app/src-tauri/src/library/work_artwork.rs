@@ -85,7 +85,7 @@ impl Library {
         provider_image_id: &str,
         language: Option<&str>,
         prepared: &PreparedWorkArtwork,
-    ) -> Result<(), LibraryError> {
+    ) -> Result<String, LibraryError> {
         require_collection(transaction, collection_id)?;
         let now = chrono::Utc::now().to_rfc3339();
         transaction.execute(
@@ -120,7 +120,14 @@ impl Library {
                 now,
             ],
         )?;
-        Ok(())
+        transaction
+            .query_row(
+                "SELECT id FROM collection_work_artworks
+                 WHERE collection_id = ?1 AND provider = ?2 AND provider_image_id = ?3",
+                params![collection_id, provider, provider_image_id],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
     }
 
     pub fn resolve_work_artwork(

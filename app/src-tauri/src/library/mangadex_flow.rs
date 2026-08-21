@@ -2,6 +2,7 @@ use rusqlite::{params, OptionalExtension};
 
 use super::{
     collection::{collection_by_id, map_duplicate_name, normalized_name, require_collection},
+    collection_volume::materialize_mangadex_volumes,
     error::LibraryError,
     external_binding::upsert_external_binding,
     mangadex::{self, MangaDexFetchedWork},
@@ -66,7 +67,11 @@ impl Library {
         if request.manga_id != fetched.preview.manga_id {
             return Err(LibraryError::InvalidMangaDexIdentity);
         }
-        let cover = representative_japanese_cover(&fetched.preview.covers);
+        let MangaDexFetchedWork {
+            preview,
+            snapshot_json,
+        } = fetched;
+        let cover = representative_japanese_cover(&preview.covers);
         let (collection_id, new_name) = match &request.target {
             MangaDexApplyTarget::New { name } => (
                 uuid::Uuid::new_v4().to_string(),
@@ -125,16 +130,16 @@ impl Library {
                         params![
                             collection_id,
                             name,
-                            fetched.preview.year,
-                            fetched.preview.author,
-                            fetched.preview.genres,
-                            fetched.preview.overview,
+                            preview.year,
+                            preview.author,
+                            preview.genres,
+                            preview.overview,
                             now,
                         ],
                     )
                     .map_err(map_duplicate_name)?;
             } else {
-                fill_blank_provider_fields(&transaction, &collection_id, &fetched.preview, &now)?;
+                fill_blank_provider_fields(&transaction, &collection_id, &preview, &now)?;
             }
             upsert_external_binding(
                 &transaction,
@@ -142,21 +147,35 @@ impl Library {
                 ExternalBindingInput {
                     provider: PROVIDER.into(),
                     external_id: request.manga_id.clone(),
-                    provider_data_json: Some(fetched.snapshot_json),
+                    provider_data_json: Some(snapshot_json),
                     last_synced_at: Some(now.clone()),
                 },
                 &now,
             )?;
-            if let (Some(cover), Some(prepared)) = (cover, prepared.as_ref()) {
-                Library::select_work_artwork_in_transaction(
-                    &transaction,
-                    &collection_id,
-                    PROVIDER,
-                    &cover.cover_id,
-                    cover.language.as_deref(),
-                    prepared,
-                )?;
-            }
+            let representative_artwork =
+                if let (Some(cover), Some(prepared)) = (cover, prepared.as_ref()) {
+                    Some((
+                        cover.cover_id.as_str(),
+                        Library::select_work_artwork_in_transaction(
+                            &transaction,
+                            &collection_id,
+                            PROVIDER,
+                            &cover.cover_id,
+                            cover.language.as_deref(),
+                            prepared,
+                        )?,
+                    ))
+                } else {
+                    None
+                };
+            materialize_mangadex_volumes(
+                &transaction,
+                &collection_id,
+                &preview.covers,
+                representative_artwork
+                    .as_ref()
+                    .map(|(cover_id, artwork_id)| (*cover_id, artwork_id.as_str())),
+            )?;
             transaction.commit()?;
         }
         if let Some(prepared) = prepared {
@@ -376,6 +395,34 @@ mod tests {
         assert!(library
             .resolve_work_artwork(created.selected_work_artwork_id.as_deref().unwrap())
             .is_ok());
+    }
+
+    #[test]
+    fn new_apply_links_the_selected_artwork_to_volume_one() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+
+        let created = library
+            .apply_fetched_mangadex(
+                request("던전밥"),
+                fetched("snapshot-v1"),
+                Some(&cover_bytes()),
+            )
+            .unwrap();
+
+        let stored: (i64, u8, Option<String>) = library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT volume_number, edition_index, cover_artwork_id
+                 FROM collection_volumes WHERE collection_id = ?1",
+                [&created.id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(stored.0, 1);
+        assert_eq!(stored.1, 0);
+        assert_eq!(stored.2, created.selected_work_artwork_id);
     }
 
     #[test]

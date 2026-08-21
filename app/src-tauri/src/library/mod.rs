@@ -4,6 +4,7 @@ pub mod book_migration;
 mod backup;
 mod classification;
 mod collection;
+mod collection_volume;
 mod collection_source;
 mod db;
 mod drag_out;
