@@ -5,7 +5,7 @@ use rusqlite::{params, OptionalExtension, Transaction};
 
 use super::{collection::require_collection, error::LibraryError, Library, MediaResponse};
 
-const MAX_WORK_ARTWORK_BYTES: usize = 32 * 1024 * 1024;
+pub(crate) const MAX_WORK_ARTWORK_BYTES: usize = 32 * 1024 * 1024;
 
 pub(crate) struct PreparedWorkArtwork {
     pub id: String,
@@ -128,6 +128,37 @@ impl Library {
                 |row| row.get(0),
             )
             .map_err(Into::into)
+    }
+
+    pub(crate) fn insert_volume_work_artwork_in_transaction(
+        transaction: &Transaction<'_>,
+        collection_id: &str,
+        provider: &str,
+        provider_image_id: &str,
+        language: Option<&str>,
+        prepared: &PreparedWorkArtwork,
+    ) -> Result<String, LibraryError> {
+        require_collection(transaction, collection_id)?;
+        let now = chrono::Utc::now().to_rfc3339();
+        transaction.execute(
+            "INSERT INTO collection_work_artworks (
+                id, collection_id, provider, provider_image_id, kind, relative_path,
+                mime_type, width, height, language, selected, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, 'volume_cover', ?5, ?6, ?7, ?8, ?9, 0, ?10, ?10)",
+            params![
+                prepared.id,
+                collection_id,
+                provider,
+                provider_image_id,
+                prepared.relative_path,
+                prepared.mime_type,
+                prepared.width,
+                prepared.height,
+                language,
+                now,
+            ],
+        )?;
+        Ok(prepared.id.clone())
     }
 
     pub fn resolve_work_artwork(
