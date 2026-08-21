@@ -353,6 +353,7 @@ pub struct CollectionSummary {
     #[serde(rename = "type")]
     pub collection_type: CollectionType,
     pub cover_asset_id: Option<String>,
+    pub selected_work_artwork_id: Option<String>,
     pub asset_count: u64,
     pub year: Option<i64>,
     pub author: Option<String>,
@@ -361,9 +362,6 @@ pub struct CollectionSummary {
     pub my_score: Option<i64>,
     pub genres: Option<String>,
     pub overview: Option<String>,
-    pub external_id: Option<String>,
-    pub external_source: Option<String>,
-    pub external_synced_at: Option<String>,
     pub showcase: bool,
     pub created_at: String,
     pub updated_at: String,
@@ -378,6 +376,104 @@ pub struct CreateCollection {
     pub description: Option<String>,
     #[serde(rename = "type")]
     pub collection_type: CollectionType,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalBindingInput {
+    pub provider: String,
+    pub external_id: String,
+    pub provider_data_json: Option<String>,
+    pub last_synced_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalBinding {
+    pub provider: String,
+    pub external_id: String,
+    pub provider_data_json: Option<String>,
+    pub last_synced_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MangaDexSearchResult {
+    pub manga_id: String,
+    pub title: String,
+    pub alternate_titles: Vec<String>,
+    pub author: Option<String>,
+    pub year: Option<i64>,
+    pub status: Option<String>,
+    pub primary_cover_file_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MangaDexCoverCandidate {
+    pub cover_id: String,
+    pub file_name: String,
+    pub volume: Option<String>,
+    pub language: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MangaDexWorkPreview {
+    pub manga_id: String,
+    pub proposed_title: String,
+    pub alternate_titles: Vec<String>,
+    pub author: Option<String>,
+    pub year: Option<i64>,
+    pub status: Option<String>,
+    pub genres: Option<String>,
+    pub overview: Option<String>,
+    pub covers: Vec<MangaDexCoverCandidate>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum MangaDexApplyTarget {
+    New { name: String },
+    Existing { collection_id: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MangaDexApplyRequest {
+    pub target: MangaDexApplyTarget,
+    pub manga_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MangaDexConnection {
+    pub manga_id: String,
+    pub last_synced_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CollectionVolume {
+    pub id: String,
+    pub volume_number: i64,
+    pub edition_index: u8,
+    pub display_label: String,
+    pub cover_artwork_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MangaDexVolumeSyncResult {
+    pub completed: u64,
+    pub skipped: u64,
+    pub failed: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -428,9 +524,58 @@ pub struct MangaSeries {
 #[cfg(test)]
 mod tests {
     use super::{
-        AssetSummary, BackupKind, ClassificationEntry, ClassificationKind, MediaSummary,
-        MetadataBackup, SimilarityReviewAsset, SimilarityReviewSummary, VideoPreparationState,
+        AssetSummary, BackupKind, ClassificationEntry, ClassificationKind, CollectionSummary,
+        CollectionType, MangaDexApplyRequest, MangaDexApplyTarget, MediaSummary, MetadataBackup,
+        SimilarityReviewAsset, SimilarityReviewSummary, VideoPreparationState,
     };
+
+    #[test]
+    fn serializes_mangadex_apply_targets_for_the_typescript_gateway() {
+        let value = serde_json::to_value(MangaDexApplyRequest {
+            target: MangaDexApplyTarget::Existing {
+                collection_id: "work-1".into(),
+            },
+            manga_id: "manga-1".into(),
+        })
+        .unwrap();
+
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "target": { "kind": "existing", "collectionId": "work-1" },
+                "mangaId": "manga-1"
+            })
+        );
+    }
+
+    #[test]
+    fn collection_summary_omits_legacy_provider_identity() {
+        let value = serde_json::to_value(CollectionSummary {
+            id: "work-1".into(),
+            name: "Dungeon Meshi".into(),
+            description: None,
+            collection_type: CollectionType::Manga,
+            cover_asset_id: None,
+            selected_work_artwork_id: None,
+            asset_count: 0,
+            year: Some(2014),
+            author: Some("Ryoko Kui".into()),
+            director: None,
+            external_score: None,
+            my_score: None,
+            genres: Some("Fantasy".into()),
+            overview: None,
+            showcase: false,
+            created_at: "2026-08-20T00:00:00Z".into(),
+            updated_at: "2026-08-20T00:00:00Z".into(),
+            source_path: None,
+        })
+        .unwrap();
+
+        for field in ["externalId", "externalSource", "externalSyncedAt"] {
+            assert!(value.get(field).is_none());
+        }
+    }
 
     #[test]
     fn asset_summary_serialization_omits_managed_paths() {

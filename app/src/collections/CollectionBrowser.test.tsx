@@ -1,4 +1,5 @@
 import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { CollectionSummary, LibraryGateway } from "../library/types";
@@ -12,6 +13,7 @@ const sample: CollectionSummary = {
   description: null,
   type: "game",
   coverAssetId: null,
+  selectedWorkArtworkId: null,
   assetCount: 3,
   year: 2019,
   author: "PlatinumGames",
@@ -20,9 +22,6 @@ const sample: CollectionSummary = {
   myScore: 9,
   genres: null,
   overview: null,
-  externalId: null,
-  externalSource: null,
-  externalSyncedAt: null,
   showcase: false,
   createdAt: "t",
   updatedAt: "t",
@@ -111,11 +110,28 @@ describe("CollectionBrowser", () => {
     expect(onViewChange).toHaveBeenCalledWith({ kind: "collection", collectionId: "c1" });
   });
 
-  it("creates a collection from the toolbar button", async () => {
+  it("orders MangaDex before manual input in the new collection menu", async () => {
+    const user = userEvent.setup();
     const gateway = renderBrowser({ collections: [], typeFilter: null, showcase: false });
-    screen.getByRole("button", { name: "새 컬렉션" }).click();
+    await user.click(screen.getByRole("button", { name: "새 컬렉션" }));
+    const items = await screen.findAllByRole("menuitem");
+    expect(items.map((item) => item.textContent)).toEqual(["MangaDex에서 만화 추가", "직접 입력"]);
+    await user.click(screen.getByRole("menuitem", { name: "직접 입력" }));
     expect(await screen.findByRole("heading", { name: "새 컬렉션" })).toBeInTheDocument();
     expect(gateway.createCollection).not.toHaveBeenCalled();
+  });
+
+  it("prefers stored WorkArtwork over other card covers", () => {
+    renderBrowser({
+      collections: [{ ...sample, selectedWorkArtworkId: "artwork-1", coverAssetId: "asset-1", sourcePath: "games/astral-chain" }],
+      typeFilter: null,
+      showcase: false,
+    });
+
+    expect(screen.getByRole("img", { name: "Astral Chain" })).toHaveAttribute(
+      "src",
+      "http://lakomics.localhost/work-artwork/artwork-1",
+    );
   });
 });
 
@@ -159,6 +175,7 @@ function createGateway(): LibraryGateway {
     patchAssetAlbums: vi.fn(),
     getAssetAlbums: vi.fn().mockResolvedValue([]),
     listCollections: vi.fn().mockResolvedValue([]),
+    searchMangaDex: vi.fn(), previewMangaDex: vi.fn(), applyMangaDex: vi.fn(), refreshMangaDex: vi.fn(), getMangaDexConnection: vi.fn().mockResolvedValue(null),
     createCollection: vi.fn(),
     updateCollection: vi.fn(),
     deleteCollection: vi.fn(),
@@ -172,6 +189,6 @@ function createGateway(): LibraryGateway {
     listMangaSeries: vi.fn().mockResolvedValue([]),
     ingestMedia: vi.fn(),
     preparePendingVideos: vi.fn(),
-    retryVideoPreparation: vi.fn(), inspectBookImport: vi.fn(), importBookCollections: vi.fn(), getCollectionSourceRoot: vi.fn(), setCollectionSourceRoot: vi.fn(), listCollectionCovers: vi.fn(),
+    retryVideoPreparation: vi.fn(), inspectBookImport: vi.fn(), importBookCollections: vi.fn(), getCollectionSourceRoot: vi.fn(), setCollectionSourceRoot: vi.fn(), listCollectionCovers: vi.fn(), listCollectionVolumes: vi.fn(), syncMangaDexVolumeCovers: vi.fn(),
   };
 }

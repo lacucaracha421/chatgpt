@@ -62,6 +62,11 @@ pub fn run() {
             commands::get_asset_albums,
             commands::patch_asset_albums,
             commands::list_collections,
+            commands::search_mangadex,
+            commands::preview_mangadex,
+            commands::apply_mangadex,
+            commands::refresh_mangadex,
+            commands::get_mangadex_connection,
             commands::create_collection,
             commands::update_collection,
             commands::delete_collection,
@@ -99,6 +104,8 @@ pub fn run() {
             commands::get_collection_source_root,
             commands::set_collection_source_root,
             commands::list_collection_covers,
+            commands::list_collection_volumes,
+            commands::sync_mangadex_volume_covers,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

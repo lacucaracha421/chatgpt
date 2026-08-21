@@ -85,6 +85,8 @@ pub enum LibraryError {
     CollectionDescriptionTooLong,
     #[error("요청한 컬렉션을 찾을 수 없습니다")]
     CollectionNotFound,
+    #[error("외부 제공자와 ID는 비어 있을 수 없습니다")]
+    InvalidExternalBinding,
     #[error("같은 이름의 컬렉션이 있습니다")]
     DuplicateCollectionName,
     #[error("대표 이미지는 컬렉션에 속한 정상 자산이어야 합니다")]
@@ -160,6 +162,30 @@ pub enum LibraryError {
     },
     #[error("이미지 형식을 지원하지 않거나 파일이 손상됐습니다")]
     UnsupportedImage,
+    #[error("Work 표지 이미지가 올바르지 않습니다")]
+    InvalidWorkArtwork,
+    #[error("Work 표지 파일을 쓸 수 없습니다: {path}")]
+    WriteWorkArtwork {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("MangaDex 검색어는 두 글자 이상이어야 합니다")]
+    InvalidMangaDexQuery,
+    #[error("MangaDex 식별자가 올바르지 않습니다")]
+    InvalidMangaDexIdentity,
+    #[error("MangaDex에 연결할 수 없습니다")]
+    MangaDexUnavailable,
+    #[error("MangaDex 요청 시간이 초과됐습니다")]
+    MangaDexTimedOut,
+    #[error("MangaDex 요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요")]
+    MangaDexRateLimited,
+    #[error("MangaDex 작품을 찾을 수 없습니다")]
+    MangaDexNotFound,
+    #[error("MangaDex 응답을 처리할 수 없습니다")]
+    InvalidMangaDexResponse,
+    #[error("이 MangaDex 작품은 이미 다른 Work에 연결되어 있습니다")]
+    DuplicateProviderBinding,
     #[error("영상 형식을 지원하지 않거나 파일이 손상됐습니다")]
     UnsupportedVideo,
     #[error("영상 미리보기를 준비하지 못했습니다")]

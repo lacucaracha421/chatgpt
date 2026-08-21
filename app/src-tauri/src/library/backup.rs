@@ -819,7 +819,10 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let destination = temp.path().join("snapshot.sqlite");
         let source = rusqlite::Connection::open_in_memory().unwrap();
-        source.execute_batch("PRAGMA user_version = 13;").unwrap();
+        let unsupported = db::SCHEMA_VERSION + 1;
+        source
+            .execute_batch(&format!("PRAGMA user_version = {unsupported};"))
+            .unwrap();
 
         let error = create_verified_snapshot(&source, &destination).unwrap_err();
 

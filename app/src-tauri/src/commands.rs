@@ -10,11 +10,13 @@ use crate::library::{
     metadata_import::{self, MetadataImportPlan},
     models::{
         AlbumEntry, AssetAlbumPatch, AssetCollectionPatch, AssetCursor, AssetMetadataPatch,
-        AssetPage, AssetQuery, AssetSummary, CollectionCover, ClassificationEntry,
-        CollectionSummary, CreateAlbum, CreateClassification, CreateCollection,
-        IngestMediaRequest, IngestOutcome, LibrarySummary, MangaSeries, MetadataBackup,
-        PurgeSummary, SetAssetClassification, SimilarityDecisionRequest, SimilarityIndexProgress,
-        SimilarityReviewPage, TrashPage, TrashPolicy, UpdateCollection, VideoPreparationProgress,
+        AssetPage, AssetQuery, AssetSummary, CollectionCover, CollectionVolume,
+        ClassificationEntry, CollectionSummary, CreateAlbum, CreateClassification, CreateCollection,
+        IngestMediaRequest, IngestOutcome, LibrarySummary, MangaDexApplyRequest,
+        MangaDexConnection, MangaDexSearchResult, MangaDexVolumeSyncResult, MangaDexWorkPreview, MangaSeries,
+        MetadataBackup, PurgeSummary, SetAssetClassification, SimilarityDecisionRequest,
+        SimilarityIndexProgress, SimilarityReviewPage, TrashPage, TrashPolicy, UpdateCollection,
+        VideoPreparationProgress,
     },
     Library,
 };
@@ -45,6 +47,9 @@ impl From<LibraryError> for CommandError {
             LibraryError::Backup { .. } => "SQLite 백업 작업에 실패했습니다.".into(),
             LibraryError::WriteAsset { .. } => {
                 "이미지 파일을 정리하지 못했습니다. 다시 시도해 주세요.".into()
+            }
+            LibraryError::WriteWorkArtwork { .. } => {
+                "Work 표지 파일을 저장하지 못했습니다. 다시 시도해 주세요.".into()
             }
             _ => error.to_string(),
         };
@@ -82,6 +87,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::CollectionNameTooLong => "collection_name_too_long",
             LibraryError::CollectionDescriptionTooLong => "collection_description_too_long",
             LibraryError::CollectionNotFound => "collection_not_found",
+            LibraryError::InvalidExternalBinding => "invalid_external_binding",
             LibraryError::DuplicateCollectionName => "duplicate_collection_name",
             LibraryError::CollectionCoverNotMember => "collection_cover_not_member",
             LibraryError::InvalidCollectionType => "invalid_collection_type",
@@ -110,6 +116,16 @@ impl From<LibraryError> for CommandError {
             LibraryError::ReadMedia { .. } => "read_media_failed",
             LibraryError::ReadSource { .. } => "read_source_failed",
             LibraryError::UnsupportedImage => "unsupported_image",
+            LibraryError::InvalidWorkArtwork => "invalid_work_artwork",
+            LibraryError::WriteWorkArtwork { .. } => "write_work_artwork_failed",
+            LibraryError::InvalidMangaDexQuery => "invalid_mangadex_query",
+            LibraryError::InvalidMangaDexIdentity => "invalid_mangadex_identity",
+            LibraryError::MangaDexUnavailable => "mangadex_unavailable",
+            LibraryError::MangaDexTimedOut => "mangadex_timed_out",
+            LibraryError::MangaDexRateLimited => "mangadex_rate_limited",
+            LibraryError::MangaDexNotFound => "mangadex_not_found",
+            LibraryError::InvalidMangaDexResponse => "invalid_mangadex_response",
+            LibraryError::DuplicateProviderBinding => "duplicate_provider_binding",
             LibraryError::UnsupportedVideo => "unsupported_video",
             LibraryError::VideoPreparationFailed => "video_preparation_failed",
             LibraryError::VideoToolUnavailable => "video_tool_unavailable",
@@ -516,6 +532,64 @@ pub fn list_collections(state: State<'_, AppState>) -> Result<Vec<CollectionSumm
 }
 
 #[tauri::command]
+pub async fn search_mangadex(
+    query: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<MangaDexSearchResult>, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.search_mangadex(&query))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn preview_mangadex(
+    manga_id: String,
+    state: State<'_, AppState>,
+) -> Result<MangaDexWorkPreview, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.preview_mangadex(&manga_id))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn apply_mangadex(
+    request: MangaDexApplyRequest,
+    state: State<'_, AppState>,
+) -> Result<CollectionSummary, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.apply_mangadex(request))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn refresh_mangadex(
+    collection_id: String,
+    state: State<'_, AppState>,
+) -> Result<CollectionSummary, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.refresh_mangadex(&collection_id))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn get_mangadex_connection(
+    collection_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<MangaDexConnection>, CommandError> {
+    current_required(state)?
+        .get_mangadex_connection(&collection_id)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub fn create_collection(
     request: CreateCollection,
     state: State<'_, AppState>,
@@ -763,6 +837,32 @@ pub fn list_collection_covers(
         .map_err(CommandError::from)
 }
 
+#[tauri::command]
+pub async fn list_collection_volumes(
+    collection_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<CollectionVolume>, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.list_collection_volumes(&collection_id))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn sync_mangadex_volume_covers(
+    collection_id: String,
+    state: State<'_, AppState>,
+) -> Result<MangaDexVolumeSyncResult, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.sync_mangadex_volume_covers(&collection_id)
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}
+
 fn background_task_error() -> CommandError {
     CommandError {
         code: "background_task_failed",
@@ -815,6 +915,22 @@ mod tests {
         assert_eq!(
             CommandError::from(LibraryError::InvalidCreatorUrl).code,
             "invalid_creator_url"
+        );
+    }
+
+    #[test]
+    fn mangadex_errors_have_stable_codes() {
+        assert_eq!(
+            CommandError::from(LibraryError::MangaDexRateLimited).code,
+            "mangadex_rate_limited"
+        );
+        assert_eq!(
+            CommandError::from(LibraryError::InvalidWorkArtwork).code,
+            "invalid_work_artwork"
+        );
+        assert_eq!(
+            CommandError::from(LibraryError::DuplicateProviderBinding).code,
+            "duplicate_provider_binding"
         );
     }
 

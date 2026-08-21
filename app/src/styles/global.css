@@ -235,6 +235,14 @@ input:disabled {
   transform: none;
 }
 
+.ui-dialog--medium {
+  width: min(45rem, calc(100vw - var(--space-6)));
+}
+
+.ui-dialog--wide {
+  width: min(56rem, calc(100vw - var(--space-6)));
+}
+
 .ui-dialog--fullscreen > .ui-dialog__title {
   position: absolute;
   width: 1px;
@@ -2415,6 +2423,106 @@ input:disabled {
   color: var(--color-danger);
 }
 
+.mangadex-import {
+  --mangadex-label-width: 4rem;
+  display: grid;
+  gap: var(--space-3);
+}
+
+.mangadex-import__search {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: var(--space-2);
+}
+
+.mangadex-import__search .ui-text-field {
+  display: grid;
+  grid-template-columns: var(--mangadex-label-width) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.mangadex-import__results {
+  min-height: 16rem;
+  max-height: 22rem;
+  margin-left: calc(var(--mangadex-label-width) + var(--space-3));
+  overflow: auto;
+  border-top: var(--border-width) solid var(--color-border);
+}
+
+.mangadex-import__result {
+  display: grid;
+  grid-template-areas:
+    "title provider"
+    "meta provider";
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-2);
+  color: var(--color-text);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: var(--border-width) solid var(--color-border);
+  cursor: pointer;
+}
+
+.mangadex-import__result:hover {
+  background: var(--color-surface-hover);
+}
+
+.mangadex-import__result[aria-pressed="true"] {
+  background: var(--color-selected);
+  box-shadow: inset var(--focus-width) 0 var(--color-accent);
+}
+
+.mangadex-import__result-title {
+  grid-area: title;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mangadex-import__result small {
+  grid-area: meta;
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+}
+
+.mangadex-import__result-provider {
+  grid-area: provider;
+  align-self: center;
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+}
+
+.mangadex-import__provider-note,
+.mangadex-import__error {
+  margin: 0;
+}
+
+.mangadex-import__provider-note {
+  margin-left: calc(var(--mangadex-label-width) + var(--space-3));
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+}
+
+.mangadex-import__error {
+  color: var(--color-danger);
+}
+
+.mangadex-import__hint {
+  margin-right: auto;
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+}
+
+.mangadex-import__actions {
+  justify-content: flex-end;
+}
+
 /* Collection Overlay */
 .collection-overlay {
   display: flex;
@@ -2537,22 +2645,6 @@ input:disabled {
   font-size: var(--text-md);
 }
 
-.collection-overlay__volume-input {
-  width: 80px;
-  height: var(--control-height-sm);
-  padding: 0 var(--space-2);
-  color: var(--color-text);
-  background: var(--color-surface);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-sm);
-  font-size: var(--text-sm);
-}
-
-.collection-overlay__volume-input:focus {
-  outline: var(--focus-width) solid var(--color-accent);
-  outline-offset: calc(var(--focus-width) * -1);
-}
-
 .collection-overlay__grid-area {
   display: flex;
   gap: var(--space-3);
@@ -2617,12 +2709,20 @@ input:disabled {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
-.collection-overlay__cover-tile img {
+.collection-overlay__cover-tile img,
+.collection-overlay__cover-placeholder {
   display: block;
   width: 100%;
   aspect-ratio: 0.7;
-  object-fit: cover;
   border-radius: var(--radius-tile);
+}
+
+.collection-overlay__cover-tile img {
+  object-fit: cover;
+}
+
+.collection-overlay__cover-placeholder {
+  background: var(--color-surface);
 }
 
 .collection-overlay__cover-label {
@@ -2634,7 +2734,8 @@ input:disabled {
   text-overflow: ellipsis;
 }
 
-.collection-overlay__cover-tile[aria-pressed="true"] img {
+.collection-overlay__cover-tile[aria-pressed="true"] img,
+.collection-overlay__cover-tile[aria-pressed="true"] .collection-overlay__cover-placeholder {
   outline: var(--focus-width) solid var(--color-accent);
   outline-offset: calc(var(--focus-width) * -1);
 }

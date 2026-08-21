@@ -114,6 +114,7 @@ function gateway(): LibraryGateway {
     patchAssetAlbums: vi.fn(),
     getAssetAlbums: vi.fn().mockResolvedValue([]),
     listCollections: vi.fn().mockResolvedValue([]),
+    searchMangaDex: vi.fn(), previewMangaDex: vi.fn(), applyMangaDex: vi.fn(), refreshMangaDex: vi.fn(), getMangaDexConnection: vi.fn().mockResolvedValue(null),
     createCollection: vi.fn(),
     updateCollection: vi.fn(),
     deleteCollection: vi.fn(),
@@ -127,7 +128,7 @@ function gateway(): LibraryGateway {
     listMangaSeries: vi.fn().mockResolvedValue([]),
     ingestMedia: vi.fn(),
     preparePendingVideos: vi.fn().mockResolvedValue({ processed: 0, remaining: 0, failed: 0, changedAssetIds: [] }),
-    retryVideoPreparation: vi.fn().mockResolvedValue(undefined), inspectBookImport: vi.fn(), importBookCollections: vi.fn(), getCollectionSourceRoot: vi.fn(), setCollectionSourceRoot: vi.fn(), listCollectionCovers: vi.fn(),
+    retryVideoPreparation: vi.fn().mockResolvedValue(undefined), inspectBookImport: vi.fn(), importBookCollections: vi.fn(), getCollectionSourceRoot: vi.fn(), setCollectionSourceRoot: vi.fn(), listCollectionCovers: vi.fn(), listCollectionVolumes: vi.fn(), syncMangaDexVolumeCovers: vi.fn(),
   };
 }
 
@@ -940,6 +941,7 @@ describe("App", () => {
       description: null,
       type: "game",
       coverAssetId: null,
+      selectedWorkArtworkId: null,
       assetCount: 3,
       year: 2019,
       author: "PlatinumGames",
@@ -948,9 +950,6 @@ describe("App", () => {
       myScore: 9,
       genres: null,
       overview: null,
-      externalId: null,
-      externalSource: null,
-      externalSyncedAt: null,
       showcase: false,
       createdAt: "2026-08-01T00:00:00Z",
       updatedAt: "2026-08-01T00:00:00Z",

@@ -1,6 +1,6 @@
 import { PlusIcon } from "@heroicons/react/24/outline";
 import { useState } from "react";
-import { collectionSourcePreviewUrl, thumbnailUrl } from "../assets/mediaUrl";
+import { collectionSourcePreviewUrl, thumbnailUrl, workArtworkUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { AssetView, CollectionSummary, CollectionType, CreateCollection, UpdateCollection } from "../library/types";
@@ -9,10 +9,12 @@ import { Button } from "../shared/ui/Button";
 import { ContextMenu } from "../shared/ui/ContextMenu";
 import { Dialog } from "../shared/ui/Dialog";
 import { EmptyState } from "../shared/ui/EmptyState";
+import { Menu } from "../shared/ui/Menu";
 import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { CollectionCard } from "./CollectionCard";
 import { CollectionEditDialog, type CollectionEditMode } from "./CollectionEditDialog";
+import { MangaDexImportDialog } from "./MangaDexImportDialog";
 
 type CollectionBrowserProps = {
   collections: CollectionSummary[];
@@ -31,6 +33,7 @@ export function CollectionBrowser({
 }: CollectionBrowserProps) {
   const { gateway } = useLibrary();
   const [editMode, setEditMode] = useState<CollectionEditMode | null>(null);
+  const [mangaDexOpen, setMangaDexOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<CollectionSummary | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   useAutoDismiss(message, setMessage);
@@ -84,9 +87,14 @@ export function CollectionBrowser({
         title="컬렉션"
         ariaLabel="컬렉션 도구"
         actions={
-          <Button size="icon" variant="ghost" aria-label="새 컬렉션" onClick={() => setEditMode({ kind: "create" })}>
-            <PlusIcon aria-hidden="true" />
-          </Button>
+          <Menu
+            label="새 컬렉션"
+            trigger={<PlusIcon aria-hidden="true" />}
+            items={[
+              { id: "mangadex", label: "MangaDex에서 만화 추가", onSelect: () => setMangaDexOpen(true) },
+              { id: "manual", label: "직접 입력", onSelect: () => setEditMode({ kind: "create" }) },
+            ]}
+          />
         }
       >
         <div className="collection-browser__filters">
@@ -122,7 +130,9 @@ export function CollectionBrowser({
             <CollectionCard
               collection={collection}
               coverUrl={
-                collection.coverAssetId
+                collection.selectedWorkArtworkId
+                  ? workArtworkUrl(collection.selectedWorkArtworkId)
+                  : collection.coverAssetId
                   ? thumbnailUrl(collection.coverAssetId)
                   : collection.sourcePath
                     ? collectionSourcePreviewUrl(collection.id)
@@ -147,6 +157,17 @@ export function CollectionBrowser({
           mode={editMode}
           onClose={() => setEditMode(null)}
           onSubmit={handleSubmit}
+        />
+      )}
+      {mangaDexOpen && (
+        <MangaDexImportDialog
+          open
+          target={{ kind: "new" }}
+          onClose={() => setMangaDexOpen(false)}
+          onApplied={async (collection) => {
+            await onChanged();
+            onViewChange({ kind: "collection", collectionId: collection.id });
+          }}
         />
       )}
       {deleteTarget && (

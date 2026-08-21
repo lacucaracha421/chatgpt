@@ -35,6 +35,14 @@ const COLLECTION_SUMMARY_SQL: &str = "SELECT
         )
     ),
     (
+        SELECT artwork.id
+        FROM collection_work_artworks AS artwork
+        WHERE artwork.collection_id = collection.id
+          AND artwork.kind = 'cover'
+          AND artwork.selected = 1
+        LIMIT 1
+    ),
+    (
         SELECT COUNT(*)
         FROM collection_assets AS count_link
         JOIN assets AS count_asset ON count_asset.id = count_link.asset_id
@@ -48,9 +56,6 @@ const COLLECTION_SUMMARY_SQL: &str = "SELECT
     collection.my_score,
     collection.genres,
     collection.overview,
-    collection.external_id,
-    collection.external_source,
-    collection.external_synced_at,
     collection.showcase,
     collection.created_at,
     collection.updated_at,
@@ -90,12 +95,10 @@ impl Library {
                 "INSERT INTO collections (
                     id, name, description, type, cover_asset_id,
                     year, author, director, external_score, my_score,
-                    genres, overview, external_id, external_source, external_synced_at,
-                    showcase, external_metadata_json, created_at, updated_at
+                    genres, overview, showcase, created_at, updated_at
                  ) VALUES (?1, ?2, ?3, ?4, NULL,
                     NULL, NULL, NULL, NULL, NULL,
-                    NULL, NULL, NULL, NULL, NULL,
-                    0, NULL, ?5, ?5)",
+                    NULL, NULL, 0, ?5, ?5)",
                 params![id, name, description, type_str, now],
             )
             .map_err(map_duplicate_name)?;
@@ -290,7 +293,7 @@ fn normalized_description(description: Option<String>) -> Result<Option<String>,
     Ok(description)
 }
 
-fn require_collection(connection: &Connection, id: &str) -> Result<(), LibraryError> {
+pub(crate) fn require_collection(connection: &Connection, id: &str) -> Result<(), LibraryError> {
     let exists: bool = connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM collections WHERE id = ?1)",
         [id],
@@ -318,28 +321,26 @@ fn collection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollectionSu
         "movie" => CollectionType::Movie,
         _ => CollectionType::Manga,
     };
-    let showcase_int: i64 = row.get(16)?;
+    let showcase_int: i64 = row.get(14)?;
     Ok(CollectionSummary {
         id: row.get(0)?,
         name: row.get(1)?,
         description: row.get(2)?,
         collection_type,
         cover_asset_id: row.get(4)?,
-        asset_count: u64::try_from(row.get::<_, i64>(5)?).unwrap_or(0),
-        year: row.get(6)?,
-        author: row.get(7)?,
-        director: row.get(8)?,
-        external_score: row.get(9)?,
-        my_score: row.get(10)?,
-        genres: row.get(11)?,
-        overview: row.get(12)?,
-        external_id: row.get(13)?,
-        external_source: row.get(14)?,
-        external_synced_at: row.get(15)?,
+        selected_work_artwork_id: row.get(5)?,
+        asset_count: u64::try_from(row.get::<_, i64>(6)?).unwrap_or(0),
+        year: row.get(7)?,
+        author: row.get(8)?,
+        director: row.get(9)?,
+        external_score: row.get(10)?,
+        my_score: row.get(11)?,
+        genres: row.get(12)?,
+        overview: row.get(13)?,
         showcase: showcase_int != 0,
-        created_at: row.get(17)?,
-        updated_at: row.get(18)?,
-        source_path: row.get(19)?,
+        created_at: row.get(15)?,
+        updated_at: row.get(16)?,
+        source_path: row.get(17)?,
     })
 }
 
@@ -351,7 +352,7 @@ pub(crate) fn collection_type_str(collection_type: CollectionType) -> &'static s
     }
 }
 
-fn map_duplicate_name(error: rusqlite::Error) -> LibraryError {
+pub(crate) fn map_duplicate_name(error: rusqlite::Error) -> LibraryError {
     match error {
         rusqlite::Error::SqliteFailure(error, _)
             if error.code == rusqlite::ErrorCode::ConstraintViolation =>
@@ -368,7 +369,7 @@ mod tests {
         error::LibraryError,
         models::{
             AssetCollectionPatch, CollectionSummary, CollectionType, CreateCollection,
-            UpdateCollection,
+            ExternalBindingInput, UpdateCollection,
         },
         Library,
     };
@@ -664,12 +665,24 @@ mod tests {
             .execute(
                 "UPDATE collections
                  SET year = 2024, author = 'Imported Author', genres = 'Fantasy',
-                     overview = 'Imported overview', external_id = 'provider-42',
-                     external_source = 'mangadex', external_synced_at = '2026-08-20T01:02:03Z',
-                     external_metadata_json = '{\"title\":\"Provider title\"}'
+                     overview = 'Imported overview'
                  WHERE id = ?1",
                 [&created.id],
             )
+            .unwrap();
+        library
+            .upsert_collection_external_binding(
+                &created.id,
+                ExternalBindingInput {
+                    provider: "mangadex".into(),
+                    external_id: "provider-42".into(),
+                    provider_data_json: Some("{\"title\":\"Provider title\"}".into()),
+                    last_synced_at: Some("2026-08-20T01:02:03Z".into()),
+                },
+            )
+            .unwrap();
+        let before = library
+            .list_collection_external_bindings(&created.id)
             .unwrap();
 
         let updated = library
@@ -694,23 +707,57 @@ mod tests {
         assert_eq!(updated.author.as_deref(), Some("Imported Author"));
         assert_eq!(updated.genres.as_deref(), Some("Fantasy"));
         assert_eq!(updated.overview.as_deref(), Some("Imported overview"));
-        assert_eq!(updated.external_id.as_deref(), Some("provider-42"));
-        assert_eq!(updated.external_source.as_deref(), Some("mangadex"));
-        assert_eq!(
-            updated.external_synced_at.as_deref(),
-            Some("2026-08-20T01:02:03Z")
-        );
         assert_eq!(
             library
-                .connection()
-                .unwrap()
-                .query_row(
-                    "SELECT external_metadata_json FROM collections WHERE id = ?1",
-                    [&created.id],
-                    |row| row.get::<_, String>(0),
-                )
+                .list_collection_external_bindings(&created.id)
                 .unwrap(),
-            "{\"title\":\"Provider title\"}",
+            before
+        );
+    }
+
+    #[test]
+    fn summary_projects_selected_work_artwork() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let collection = create(&library, "Dungeon Meshi");
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO collection_work_artworks (
+                    id, collection_id, provider, provider_image_id, kind, relative_path,
+                    mime_type, width, height, language, selected, created_at, updated_at
+                 ) VALUES (
+                    'art-1', ?1, 'mangadex', 'cover-1', 'cover',
+                    'work-artwork/art-1.jpg', 'image/jpeg', 100, 150, 'ja', 0,
+                    '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z'
+                 )",
+                [&collection.id],
+            )
+            .unwrap();
+
+        assert_eq!(
+            library
+                .get_collection(&collection.id)
+                .unwrap()
+                .selected_work_artwork_id,
+            None
+        );
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE collection_work_artworks SET selected = 1 WHERE id = 'art-1'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(
+            library
+                .get_collection(&collection.id)
+                .unwrap()
+                .selected_work_artwork_id
+                .as_deref(),
+            Some("art-1")
         );
     }
 

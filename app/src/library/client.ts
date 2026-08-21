@@ -17,6 +17,10 @@ import type {
   IngestOutcome,
   LibraryGateway,
   LibrarySummary,
+  MangaDexApplyRequest,
+  MangaDexConnection,
+  MangaDexSearchResult,
+  MangaDexWorkPreview,
   MangaSeries,
   MetadataBackup,
   MetadataImportPlan,
@@ -30,6 +34,8 @@ import type {
   BookImportPlan,
   BookMigrationReport,
   CollectionCover,
+  CollectionVolume,
+  MangaDexVolumeSyncResult,
 } from "./types";
 
 export const libraryGateway: LibraryGateway = {
@@ -87,6 +93,16 @@ export const libraryGateway: LibraryGateway = {
   patchAssetAlbums: (patch: AssetAlbumPatch) => invoke("patch_asset_albums", { patch }),
   getAssetAlbums: (assetId) => invoke<string[]>("get_asset_albums", { assetId }),
   listCollections: () => invoke<CollectionSummary[]>("list_collections"),
+  searchMangaDex: (query) =>
+    invoke<MangaDexSearchResult[]>("search_mangadex", { query }),
+  previewMangaDex: (mangaId) =>
+    invoke<MangaDexWorkPreview>("preview_mangadex", { mangaId }),
+  applyMangaDex: (request: MangaDexApplyRequest) =>
+    invoke<CollectionSummary>("apply_mangadex", { request }),
+  refreshMangaDex: (collectionId) =>
+    invoke<CollectionSummary>("refresh_mangadex", { collectionId }),
+  getMangaDexConnection: (collectionId) =>
+    invoke<MangaDexConnection | null>("get_mangadex_connection", { collectionId }),
   createCollection: (input: CreateCollection) =>
     invoke<CollectionSummary>("create_collection", { request: input }),
   updateCollection: (id: string, input: UpdateCollection) =>
@@ -109,6 +125,10 @@ export const libraryGateway: LibraryGateway = {
   getCollectionSourceRoot: () => invoke<string | null>("get_collection_source_root"),
   setCollectionSourceRoot: (path) => invoke("set_collection_source_root", { path }),
   listCollectionCovers: (collectionId) => invoke<CollectionCover[]>("list_collection_covers", { collectionId }),
+  listCollectionVolumes: (collectionId) =>
+    invoke<CollectionVolume[]>("list_collection_volumes", { collectionId }),
+  syncMangaDexVolumeCovers: (collectionId) =>
+    invoke<MangaDexVolumeSyncResult>("sync_mangadex_volume_covers", { collectionId }),
   inspectMetadataImport: (folder) =>
     invoke<MetadataImportPlan>("inspect_metadata_import", { folder }),
   ingestMedia: (request: IngestMediaInput) =>
