@@ -39,4 +39,4 @@ tempfile = "3.27.0"
 
 [target.'cfg(windows)'.dependencies]
 drag = "2.1.1"
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security_Credentials", "Win32_Storage_FileSystem"] }

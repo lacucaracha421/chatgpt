@@ -190,6 +190,14 @@ pub enum LibraryError {
     InvalidAladinQuery,
     #[error("알라딘 TTB 키가 올바르지 않습니다")]
     InvalidAladinCredential,
+    #[error("알라딘 TTB 키가 설정되지 않았습니다")]
+    AladinCredentialNotConfigured,
+    #[error("알라딘 TTB 키는 비어 있을 수 없습니다")]
+    InvalidAladinCredentialValue,
+    #[error("이 운영체제에서는 보안 자격 증명 저장소를 사용할 수 없습니다")]
+    CredentialStoreUnavailable,
+    #[error("보안 자격 증명 저장소 작업에 실패했습니다")]
+    CredentialStoreFailed,
     #[error("알라딘에 연결할 수 없습니다")]
     AladinUnavailable,
     #[error("알라딘 요청 시간이 초과됐습니다")]

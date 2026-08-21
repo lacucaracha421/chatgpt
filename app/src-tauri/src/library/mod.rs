@@ -7,6 +7,7 @@ mod classification;
 mod collection;
 mod collection_volume;
 mod collection_source;
+pub(crate) mod credential;
 mod db;
 mod drag_out;
 mod external_binding;
