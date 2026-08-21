@@ -458,6 +458,24 @@ pub struct MangaDexConnection {
     pub last_synced_at: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CollectionVolume {
+    pub id: String,
+    pub volume_number: i64,
+    pub edition_index: u8,
+    pub display_label: String,
+    pub cover_artwork_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MangaDexVolumeSyncResult {
+    pub completed: u64,
+    pub skipped: u64,
+    pub failed: u64,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateCollection {
