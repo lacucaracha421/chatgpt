@@ -38,6 +38,13 @@ function renderOverlay(
     syncMangaDexVolumeCovers: vi.fn().mockResolvedValue({ completed: 0, skipped: 0, failed: 0 }),
     getMangaDexConnection: vi.fn().mockResolvedValue(null),
     refreshMangaDex: vi.fn().mockResolvedValue(collection),
+    getAladinCredentialStatus: vi.fn().mockResolvedValue({ configured: false }),
+    setAladinTtbKey: vi.fn().mockResolvedValue({ configured: true }),
+    deleteAladinTtbKey: vi.fn().mockResolvedValue({ configured: false }),
+    searchAladin: vi.fn().mockResolvedValue([]),
+    applyAladin: vi.fn().mockResolvedValue({ added: 0, updated: 0, unchanged: 0, ignored: 0 }),
+    refreshAladin: vi.fn().mockResolvedValue({ added: 0, updated: 0, unchanged: 0, ignored: 0 }),
+    getAladinConnection: vi.fn().mockResolvedValue(null),
     ...overrides,
   } as unknown as LibraryGateway;
   render(

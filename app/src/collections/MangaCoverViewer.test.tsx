@@ -7,9 +7,9 @@ import { MangaCoverViewer, type ViewableCollectionVolume } from "./MangaCoverVie
 afterEach(cleanup);
 
 const volumes: ViewableCollectionVolume[] = [
-  { id: "v1", volumeNumber: 1, editionIndex: 0, displayLabel: "1", coverArtworkId: "art-1" },
-  { id: "v2", volumeNumber: 2, editionIndex: 0, displayLabel: "2", coverArtworkId: "art-2" },
-  { id: "v3", volumeNumber: 3, editionIndex: 0, displayLabel: "3", coverArtworkId: "art-3" },
+  { id: "v1", volumeNumber: 1, editionIndex: 0, displayLabel: "1", coverArtworkId: "art-1", localReleaseDate: null, isbn13: null, releaseStatus: null },
+  { id: "v2", volumeNumber: 2, editionIndex: 0, displayLabel: "2", coverArtworkId: "art-2", localReleaseDate: null, isbn13: null, releaseStatus: null },
+  { id: "v3", volumeNumber: 3, editionIndex: 0, displayLabel: "3", coverArtworkId: "art-3", localReleaseDate: null, isbn13: null, releaseStatus: null },
 ] satisfies CollectionVolume[];
 
 describe("MangaCoverViewer", () => {

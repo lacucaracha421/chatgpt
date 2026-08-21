@@ -1,5 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AladinApplyRequest,
+  AladinConnection,
+  AladinCredentialStatus,
+  AladinSeriesCandidate,
+  AladinSyncResult,
   AlbumEntry,
   AssetAlbumPatch,
   AssetCollectionPatch,
@@ -103,6 +108,20 @@ export const libraryGateway: LibraryGateway = {
     invoke<CollectionSummary>("refresh_mangadex", { collectionId }),
   getMangaDexConnection: (collectionId) =>
     invoke<MangaDexConnection | null>("get_mangadex_connection", { collectionId }),
+  getAladinCredentialStatus: () =>
+    invoke<AladinCredentialStatus>("get_aladin_credential_status"),
+  setAladinTtbKey: (ttbKey) =>
+    invoke<AladinCredentialStatus>("set_aladin_ttb_key", { ttbKey }),
+  deleteAladinTtbKey: () =>
+    invoke<AladinCredentialStatus>("delete_aladin_ttb_key"),
+  searchAladin: (query) =>
+    invoke<AladinSeriesCandidate[]>("search_aladin", { query }),
+  applyAladin: (request: AladinApplyRequest) =>
+    invoke<AladinSyncResult>("apply_aladin", { request }),
+  refreshAladin: (collectionId) =>
+    invoke<AladinSyncResult>("refresh_aladin", { collectionId }),
+  getAladinConnection: (collectionId) =>
+    invoke<AladinConnection | null>("get_aladin_connection", { collectionId }),
   createCollection: (input: CreateCollection) =>
     invoke<CollectionSummary>("create_collection", { request: input }),
   updateCollection: (id: string, input: UpdateCollection) =>

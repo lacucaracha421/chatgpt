@@ -6,11 +6,13 @@ use tauri::State;
 
 use crate::library::{
     book_migration::{BookImportPlan, BookMigrationReport},
+    credential,
     error::LibraryError,
     metadata_import::{self, MetadataImportPlan},
     models::{
-        AlbumEntry, AssetAlbumPatch, AssetCollectionPatch, AssetCursor, AssetMetadataPatch,
-        AssetPage, AssetQuery, AssetSummary, CollectionCover, CollectionVolume,
+        AladinApplyRequest, AladinConnection, AladinSeriesCandidate, AladinSyncResult, AlbumEntry,
+        AssetAlbumPatch, AssetCollectionPatch, AssetCursor, AssetMetadataPatch, AssetPage,
+        AssetQuery, AssetSummary, CollectionCover, CollectionVolume,
         ClassificationEntry, CollectionSummary, CreateAlbum, CreateClassification, CreateCollection,
         IngestMediaRequest, IngestOutcome, LibrarySummary, MangaDexApplyRequest,
         MangaDexConnection, MangaDexSearchResult, MangaDexVolumeSyncResult, MangaDexWorkPreview, MangaSeries,
@@ -39,6 +41,12 @@ pub struct AppState {
 pub struct CommandError {
     pub code: &'static str,
     pub message: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AladinCredentialStatus {
+    pub configured: bool,
 }
 
 impl From<LibraryError> for CommandError {
@@ -602,6 +610,80 @@ pub fn get_mangadex_connection(
 }
 
 #[tauri::command]
+pub fn get_aladin_credential_status() -> Result<AladinCredentialStatus, CommandError> {
+    credential::aladin_key_status()
+        .map(|configured| AladinCredentialStatus { configured })
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn set_aladin_ttb_key(ttb_key: String) -> Result<AladinCredentialStatus, CommandError> {
+    credential::set_aladin_key(&ttb_key).map_err(CommandError::from)?;
+    Ok(AladinCredentialStatus { configured: true })
+}
+
+#[tauri::command]
+pub fn delete_aladin_ttb_key() -> Result<AladinCredentialStatus, CommandError> {
+    credential::delete_aladin_key().map_err(CommandError::from)?;
+    Ok(AladinCredentialStatus { configured: false })
+}
+
+#[tauri::command]
+pub async fn search_aladin(
+    query: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<AladinSeriesCandidate>, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let key = credential::read_aladin_key()?;
+        library.search_aladin(&key, &query)
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn apply_aladin(
+    request: AladinApplyRequest,
+    state: State<'_, AppState>,
+) -> Result<AladinSyncResult, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let key = credential::read_aladin_key()?;
+        library.apply_aladin(&key, request)
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn refresh_aladin(
+    collection_id: String,
+    state: State<'_, AppState>,
+) -> Result<AladinSyncResult, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let key = credential::read_aladin_key()?;
+        library.refresh_aladin(&key, &collection_id)
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn get_aladin_connection(
+    collection_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<AladinConnection>, CommandError> {
+    current_required(state)?
+        .get_aladin_connection(&collection_id)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub fn create_collection(
     request: CreateCollection,
     state: State<'_, AppState>,
@@ -944,6 +1026,24 @@ mod tests {
             CommandError::from(LibraryError::DuplicateProviderBinding).code,
             "duplicate_provider_binding"
         );
+    }
+
+    #[test]
+    fn aladin_errors_have_stable_codes() {
+        let cases = [
+            (LibraryError::AladinCredentialNotConfigured, "aladin_credential_not_configured"),
+            (LibraryError::InvalidAladinCredential, "invalid_aladin_credential"),
+            (LibraryError::InvalidAladinQuery, "invalid_aladin_query"),
+            (LibraryError::AladinTimedOut, "aladin_timed_out"),
+            (LibraryError::AladinRateLimited, "aladin_rate_limited"),
+            (LibraryError::InvalidAladinResponse, "invalid_aladin_response"),
+            (LibraryError::AmbiguousAladinBinding, "ambiguous_aladin_binding"),
+            (LibraryError::DuplicateAladinProviderItem, "duplicate_aladin_provider_item"),
+            (LibraryError::CredentialStoreUnavailable, "credential_store_unavailable"),
+        ];
+        for (error, expected) in cases {
+            assert_eq!(CommandError::from(error).code, expected);
+        }
     }
 
     #[test]

@@ -114,12 +114,55 @@ export type MangaDexConnection = {
   lastSyncedAt: string | null;
 };
 
+export type AladinCredentialStatus = { configured: boolean };
+
+export type AladinConnection = {
+  anchorItemId: string;
+  query: string;
+  lastSyncedAt: string | null;
+};
+
+export type AladinSyncResult = {
+  added: number;
+  updated: number;
+  unchanged: number;
+  ignored: number;
+};
+
+export type AladinVolumeCandidate = {
+  volumeNumber: number;
+  providerItemId: string;
+  title: string;
+  publicationDate: string | null;
+  isbn13: string | null;
+};
+
+export type AladinSeriesCandidate = {
+  anchorItemId: string;
+  groupFingerprint: string;
+  title: string;
+  author: string | null;
+  publisher: string | null;
+  volumes: AladinVolumeCandidate[];
+  ignoredCount: number;
+};
+
+export type AladinApplyRequest = {
+  collectionId: string;
+  query: string;
+  anchorItemId: string;
+  groupFingerprint: string;
+};
+
 export type CollectionVolume = {
   id: string;
   volumeNumber: number;
   editionIndex: number;
   displayLabel: string;
   coverArtworkId: string | null;
+  localReleaseDate: string | null;
+  isbn13: string | null;
+  releaseStatus: "upcoming" | "released" | null;
 };
 
 export type MangaDexVolumeSyncResult = {
@@ -398,6 +441,13 @@ export interface LibraryGateway {
   applyMangaDex(request: MangaDexApplyRequest): Promise<CollectionSummary>;
   refreshMangaDex(collectionId: string): Promise<CollectionSummary>;
   getMangaDexConnection(collectionId: string): Promise<MangaDexConnection | null>;
+  getAladinCredentialStatus(): Promise<AladinCredentialStatus>;
+  setAladinTtbKey(ttbKey: string): Promise<AladinCredentialStatus>;
+  deleteAladinTtbKey(): Promise<AladinCredentialStatus>;
+  searchAladin(query: string): Promise<AladinSeriesCandidate[]>;
+  applyAladin(request: AladinApplyRequest): Promise<AladinSyncResult>;
+  refreshAladin(collectionId: string): Promise<AladinSyncResult>;
+  getAladinConnection(collectionId: string): Promise<AladinConnection | null>;
   createCollection(input: CreateCollection): Promise<CollectionSummary>;
   updateCollection(id: string, input: UpdateCollection): Promise<CollectionSummary>;
   deleteCollection(id: string): Promise<void>;
