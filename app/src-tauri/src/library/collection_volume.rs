@@ -5,7 +5,7 @@ use rusqlite::{params, OptionalExtension, Transaction};
 use super::{
     error::LibraryError,
     mangadex,
-    models::{CollectionVolume, MangaDexCoverCandidate},
+    models::{CollectionVolume, MangaDexCoverCandidate, MangaDexVolumeSyncResult},
     work_artwork::MAX_WORK_ARTWORK_BYTES,
     Library,
 };
@@ -230,6 +230,147 @@ impl Library {
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(volumes)
+    }
+
+    pub fn sync_mangadex_volume_covers(
+        &self,
+        collection_id: &str,
+    ) -> Result<MangaDexVolumeSyncResult, LibraryError> {
+        self.sync_mangadex_volume_covers_with(collection_id, |manga_id, file_name| {
+            mangadex::download_cover(manga_id, file_name)
+        })
+    }
+
+    fn sync_mangadex_volume_covers_with<F>(
+        &self,
+        collection_id: &str,
+        mut download: F,
+    ) -> Result<MangaDexVolumeSyncResult, LibraryError>
+    where
+        F: FnMut(&str, &str) -> Result<Vec<u8>, LibraryError>,
+    {
+        let (collection_type, manga_id) = self
+            .connection()?
+            .query_row(
+                "SELECT c.type, b.external_id
+                 FROM collections c
+                 LEFT JOIN collection_external_bindings b
+                   ON b.collection_id = c.id AND b.provider = 'mangadex'
+                 WHERE c.id = ?1",
+                [collection_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+            )
+            .optional()?
+            .ok_or(LibraryError::CollectionNotFound)?;
+        if collection_type != "manga" {
+            return Err(LibraryError::InvalidCollectionType);
+        }
+        let manga_id = manga_id.ok_or(LibraryError::InvalidMangaDexIdentity)?;
+        let rows = {
+            let connection = self.connection()?;
+            let mut statement = connection.prepare(
+                "SELECT id, source_provider, source_cover_id, source_file_name, cover_artwork_id
+                 FROM collection_volumes
+                 WHERE collection_id = ?1
+                 ORDER BY volume_number, edition_index",
+            )?;
+            let rows = statement
+                .query_map([collection_id], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                    ))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
+        };
+        let mut result = MangaDexVolumeSyncResult {
+            completed: 0,
+            skipped: 0,
+            failed: 0,
+        };
+
+        for (volume_id, source_provider, source_cover_id, source_file_name, artwork_id) in rows {
+            if source_provider.as_deref() != Some("mangadex") || artwork_id.is_some() {
+                result.skipped += 1;
+                continue;
+            }
+            let (Some(cover_id), Some(file_name)) = (source_cover_id, source_file_name) else {
+                result.failed += 1;
+                continue;
+            };
+            let existing_artwork = self
+                .connection()?
+                .query_row(
+                    "SELECT id FROM collection_work_artworks
+                     WHERE collection_id = ?1 AND provider = 'mangadex' AND provider_image_id = ?2",
+                    params![collection_id, cover_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?;
+            if let Some(existing_artwork) = existing_artwork {
+                if self.attach_volume_artwork(&volume_id, &existing_artwork)? {
+                    result.completed += 1;
+                } else {
+                    result.skipped += 1;
+                }
+                continue;
+            }
+
+            let item_result = (|| -> Result<bool, LibraryError> {
+                let bytes = download(&manga_id, &file_name)?;
+                let prepared = self.prepare_work_artwork(collection_id, &bytes)?;
+                let attached = {
+                    let mut connection = self.connection()?;
+                    let transaction = connection.transaction()?;
+                    let artwork_id = Library::insert_volume_work_artwork_in_transaction(
+                        &transaction,
+                        collection_id,
+                        "mangadex",
+                        &cover_id,
+                        Some("ja"),
+                        &prepared,
+                    )?;
+                    let attached = transaction.execute(
+                        "UPDATE collection_volumes SET cover_artwork_id = ?1, updated_at = ?2
+                         WHERE id = ?3 AND cover_artwork_id IS NULL
+                           AND source_provider = 'mangadex'",
+                        params![artwork_id, chrono::Utc::now().to_rfc3339(), volume_id],
+                    )? == 1;
+                    if attached {
+                        transaction.commit()?;
+                    } else {
+                        transaction.rollback()?;
+                    }
+                    attached
+                };
+                if attached {
+                    prepared.commit();
+                }
+                Ok(attached)
+            })();
+            match item_result {
+                Ok(true) => result.completed += 1,
+                Ok(false) => result.skipped += 1,
+                Err(_) => result.failed += 1,
+            }
+        }
+        Ok(result)
+    }
+
+    fn attach_volume_artwork(
+        &self,
+        volume_id: &str,
+        artwork_id: &str,
+    ) -> Result<bool, LibraryError> {
+        Ok(self.connection()?.execute(
+            "UPDATE collection_volumes SET cover_artwork_id = ?1, updated_at = ?2
+             WHERE id = ?3 AND cover_artwork_id IS NULL AND source_provider = 'mangadex'",
+            params![artwork_id, chrono::Utc::now().to_rfc3339(), volume_id],
+        )? == 1)
     }
 
     fn local_volume_artwork(
@@ -511,5 +652,106 @@ mod tests {
         ] {
             assert!(covers_dir.join(file_name).is_file());
         }
+    }
+
+    #[test]
+    fn sync_continues_after_failure_and_retries_only_missing_volumes() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let work = library
+            .create_collection(CreateCollection {
+                name: "Work".into(),
+                description: None,
+                collection_type: CollectionType::Manga,
+            })
+            .unwrap();
+        library
+            .upsert_collection_external_binding(
+                &work.id,
+                ExternalBindingInput {
+                    provider: "mangadex".into(),
+                    external_id: MANGA_ID.into(),
+                    provider_data_json: None,
+                    last_synced_at: None,
+                },
+            )
+            .unwrap();
+        let covers = vec![
+            candidate("11111111-1111-4111-8111-111111111111", "one.jpg", "1", "ja"),
+            candidate("22222222-2222-4222-8222-222222222222", "two.jpg", "2", "ja"),
+            candidate("33333333-3333-4333-8333-333333333333", "three.jpg", "3", "ja"),
+        ];
+        {
+            let mut connection = library.connection().unwrap();
+            let transaction = connection.transaction().unwrap();
+            materialize_mangadex_volumes(&transaction, &work.id, &covers, None).unwrap();
+            transaction
+                .execute(
+                    "INSERT INTO collection_work_artworks (
+                        id, collection_id, provider, provider_image_id, kind, relative_path,
+                        mime_type, width, height, language, selected, created_at, updated_at
+                     ) VALUES (
+                        'art-one', ?1, 'mangadex', ?2, 'volume_cover',
+                        'work-artwork/existing-one.jpg', 'image/jpeg', 100, 150,
+                        'ja', 0, 't', 't'
+                     )",
+                    rusqlite::params![work.id, covers[0].cover_id],
+                )
+                .unwrap();
+            transaction
+                .execute(
+                    "UPDATE collection_volumes SET cover_artwork_id = 'art-one'
+                     WHERE collection_id = ?1 AND volume_number = 1 AND edition_index = 0",
+                    [&work.id],
+                )
+                .unwrap();
+            transaction.commit().unwrap();
+        }
+        let mut first_calls = Vec::new();
+
+        let first = library
+            .sync_mangadex_volume_covers_with(&work.id, |manga_id, file_name| {
+                first_calls.push((manga_id.to_owned(), file_name.to_owned()));
+                if file_name == "two.jpg" {
+                    Err(crate::library::error::LibraryError::MangaDexUnavailable)
+                } else {
+                    Ok(cover_bytes())
+                }
+            })
+            .unwrap();
+
+        assert_eq!(
+            first,
+            crate::library::models::MangaDexVolumeSyncResult {
+                completed: 1,
+                skipped: 1,
+                failed: 1,
+            }
+        );
+        assert_eq!(
+            first_calls,
+            vec![
+                (MANGA_ID.into(), "two.jpg".into()),
+                (MANGA_ID.into(), "three.jpg".into()),
+            ]
+        );
+        let mut second_calls = Vec::new();
+
+        let second = library
+            .sync_mangadex_volume_covers_with(&work.id, |manga_id, file_name| {
+                second_calls.push((manga_id.to_owned(), file_name.to_owned()));
+                Ok(cover_bytes())
+            })
+            .unwrap();
+
+        assert_eq!(
+            second,
+            crate::library::models::MangaDexVolumeSyncResult {
+                completed: 1,
+                skipped: 2,
+                failed: 0,
+            }
+        );
+        assert_eq!(second_calls, vec![(MANGA_ID.into(), "two.jpg".into())]);
     }
 }

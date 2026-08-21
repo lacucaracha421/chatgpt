@@ -10,10 +10,10 @@ use crate::library::{
     metadata_import::{self, MetadataImportPlan},
     models::{
         AlbumEntry, AssetAlbumPatch, AssetCollectionPatch, AssetCursor, AssetMetadataPatch,
-        AssetPage, AssetQuery, AssetSummary, CollectionCover, ClassificationEntry,
-        CollectionSummary, CreateAlbum, CreateClassification, CreateCollection,
+        AssetPage, AssetQuery, AssetSummary, CollectionCover, CollectionVolume,
+        ClassificationEntry, CollectionSummary, CreateAlbum, CreateClassification, CreateCollection,
         IngestMediaRequest, IngestOutcome, LibrarySummary, MangaDexApplyRequest,
-        MangaDexConnection, MangaDexSearchResult, MangaDexWorkPreview, MangaSeries,
+        MangaDexConnection, MangaDexSearchResult, MangaDexVolumeSyncResult, MangaDexWorkPreview, MangaSeries,
         MetadataBackup, PurgeSummary, SetAssetClassification, SimilarityDecisionRequest,
         SimilarityIndexProgress, SimilarityReviewPage, TrashPage, TrashPolicy, UpdateCollection,
         VideoPreparationProgress,
@@ -835,6 +835,32 @@ pub fn list_collection_covers(
     library
         .list_collection_covers(&collection_id)
         .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn list_collection_volumes(
+    collection_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<CollectionVolume>, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.list_collection_volumes(&collection_id))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn sync_mangadex_volume_covers(
+    collection_id: String,
+    state: State<'_, AppState>,
+) -> Result<MangaDexVolumeSyncResult, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.sync_mangadex_volume_covers(&collection_id)
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
 }
 
 fn background_task_error() -> CommandError {

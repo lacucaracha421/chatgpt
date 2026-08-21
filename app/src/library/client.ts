@@ -34,6 +34,8 @@ import type {
   BookImportPlan,
   BookMigrationReport,
   CollectionCover,
+  CollectionVolume,
+  MangaDexVolumeSyncResult,
 } from "./types";
 
 export const libraryGateway: LibraryGateway = {
@@ -123,6 +125,10 @@ export const libraryGateway: LibraryGateway = {
   getCollectionSourceRoot: () => invoke<string | null>("get_collection_source_root"),
   setCollectionSourceRoot: (path) => invoke("set_collection_source_root", { path }),
   listCollectionCovers: (collectionId) => invoke<CollectionCover[]>("list_collection_covers", { collectionId }),
+  listCollectionVolumes: (collectionId) =>
+    invoke<CollectionVolume[]>("list_collection_volumes", { collectionId }),
+  syncMangaDexVolumeCovers: (collectionId) =>
+    invoke<MangaDexVolumeSyncResult>("sync_mangadex_volume_covers", { collectionId }),
   inspectMetadataImport: (folder) =>
     invoke<MetadataImportPlan>("inspect_metadata_import", { folder }),
   ingestMedia: (request: IngestMediaInput) =>

@@ -114,6 +114,20 @@ export type MangaDexConnection = {
   lastSyncedAt: string | null;
 };
 
+export type CollectionVolume = {
+  id: string;
+  volumeNumber: number;
+  editionIndex: number;
+  displayLabel: string;
+  coverArtworkId: string | null;
+};
+
+export type MangaDexVolumeSyncResult = {
+  completed: number;
+  skipped: number;
+  failed: number;
+};
+
 export type UpdateCollection = {
   name: string;
   description: string | null;
@@ -404,6 +418,8 @@ export interface LibraryGateway {
   getCollectionSourceRoot(): Promise<string | null>;
   setCollectionSourceRoot(path: string | null): Promise<void>;
   listCollectionCovers(collectionId: string): Promise<CollectionCover[]>;
+  listCollectionVolumes(collectionId: string): Promise<CollectionVolume[]>;
+  syncMangaDexVolumeCovers(collectionId: string): Promise<MangaDexVolumeSyncResult>;
 }
 
 export type BookExternalBinding = {
