@@ -27,7 +27,11 @@ const collection: CollectionSummary = {
   updatedAt: "t",
 };
 
-function renderOverlay(overrides: Partial<LibraryGateway> = {}, onChanged = vi.fn().mockResolvedValue(undefined)) {
+function renderOverlay(
+  overrides: Partial<LibraryGateway> = {},
+  onChanged = vi.fn().mockResolvedValue(undefined),
+  onExit = vi.fn(),
+) {
   const gateway = {
     listCollectionCovers: vi.fn().mockResolvedValue([]),
     listCollectionVolumes: vi.fn().mockResolvedValue([]),
@@ -38,10 +42,10 @@ function renderOverlay(overrides: Partial<LibraryGateway> = {}, onChanged = vi.f
   } as unknown as LibraryGateway;
   render(
     <LibraryProvider gateway={gateway}>
-      <CollectionOverlay collectionId={collection.id} collections={[collection]} onExit={() => undefined} onChanged={onChanged} />
+      <CollectionOverlay collectionId={collection.id} collections={[collection]} onExit={onExit} onChanged={onChanged} />
     </LibraryProvider>,
   );
-  return { gateway, onChanged };
+  return { gateway, onChanged, onExit };
 }
 
 describe("CollectionOverlay MangaDex flow", () => {
@@ -98,6 +102,34 @@ describe("CollectionOverlay MangaDex flow", () => {
       "src",
       "http://lakomics.localhost/work-artwork-thumbnail/art-10",
     );
+  });
+
+  it("opens artwork covers in the viewer and restores focus without opening placeholders", async () => {
+    const user = userEvent.setup();
+    const { onExit } = renderOverlay({
+      listCollectionVolumes: vi.fn().mockResolvedValue([
+        { id: "v1", volumeNumber: 1, editionIndex: 0, displayLabel: "1", coverArtworkId: "art-1" },
+        { id: "v2", volumeNumber: 2, editionIndex: 0, displayLabel: "2", coverArtworkId: "art-2" },
+        { id: "v3", volumeNumber: 3, editionIndex: 0, displayLabel: "3", coverArtworkId: null },
+      ]),
+    });
+
+    const opener = await screen.findByRole("button", { name: "2권 표지" });
+    await user.click(opener);
+
+    expect(screen.getByRole("dialog", { name: "던전밥 2권 표지 감상" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "2권 표지" })).toHaveAttribute(
+      "src",
+      "http://lakomics.localhost/work-artwork/art-2",
+    );
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(opener).toHaveFocus());
+    expect(onExit).not.toHaveBeenCalled();
+
+    const placeholder = screen.getByRole("button", { name: "3권 표지 불러오는 중" });
+    expect(placeholder.querySelector("img")).toBeNull();
+    await user.click(placeholder);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("opens the shared import dialog when the manga is not connected", async () => {

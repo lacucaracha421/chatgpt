@@ -1,5 +1,5 @@
 import { XMarkIcon } from "@heroicons/react/24/outline";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { collectionCoverUrl, workArtworkUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -12,6 +12,7 @@ import { CollectionCoverGrid } from "./CollectionCoverGrid";
 import { CollectionInfoPanel } from "./CollectionInfoPanel";
 import { CollectionVolumeGrid } from "./CollectionVolumeGrid";
 import { CollectionVolumePanel } from "./CollectionVolumePanel";
+import { MangaCoverViewer } from "./MangaCoverViewer";
 import { MangaDexImportDialog } from "./MangaDexImportDialog";
 
 type CollectionOverlayProps = {
@@ -27,17 +28,27 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
   const [volumes, setVolumes] = useState<CollectionVolume[] | null>(null);
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [selectedVolumeId, setSelectedVolumeId] = useState<string | null>(null);
+  const [viewerVolumeId, setViewerVolumeId] = useState<string | null>(null);
   const [shelfFilter, setShelfFilter] = useState<number | null>(null);
   const [editionIndex, setEditionIndex] = useState(0);
   const [connection, setConnection] = useState<MangaDexConnection | null | undefined>(undefined);
   const [importOpen, setImportOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const viewerOpenerRef = useRef<HTMLElement | null>(null);
 
   const collection = collections.find((candidate) => candidate.id === collectionId);
   const isManga = collection?.type === "manga";
   const selectedCover = covers?.find((cover) => cover.fileName === selectedFileName) ?? null;
   const selectedVolume = volumes?.find((volume) => volume.id === selectedVolumeId) ?? null;
+  const viewerVolumes = useMemo(
+    () => (volumes ?? [])
+      .filter((volume): volume is CollectionVolume & { coverArtworkId: string } => (
+        volume.editionIndex === editionIndex && volume.coverArtworkId !== null
+      ))
+      .sort((left, right) => left.volumeNumber - right.volumeNumber),
+    [editionIndex, volumes],
+  );
 
   useEffect(() => {
     if (isManga) {
@@ -109,11 +120,11 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
 
   useEffect(() => {
     const exit = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onExit();
+      if (event.key === "Escape" && viewerVolumeId === null) onExit();
     };
     window.addEventListener("keydown", exit);
     return () => window.removeEventListener("keydown", exit);
-  }, [onExit]);
+  }, [onExit, viewerVolumeId]);
 
   const heroUrl = useMemo(
     () => isManga && selectedVolume?.coverArtworkId
@@ -151,8 +162,22 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
   }
 
   function selectEdition(next: number) {
+    setViewerVolumeId(null);
     setEditionIndex(next);
     setSelectedVolumeId(firstVolumeId(volumes ?? [], next));
+  }
+
+  function openVolume(volumeId: string) {
+    const volume = volumes?.find((candidate) => candidate.id === volumeId);
+    if (!volume?.coverArtworkId) return;
+    viewerOpenerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setSelectedVolumeId(volumeId);
+    setViewerVolumeId(volumeId);
+  }
+
+  function closeViewer() {
+    setViewerVolumeId(null);
+    requestAnimationFrame(() => viewerOpenerRef.current?.focus());
   }
 
   return (
@@ -198,7 +223,7 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
           selectedVolumeId={selectedVolumeId}
           editionIndex={editionIndex}
           onEditionIndexChange={selectEdition}
-          onSelect={setSelectedVolumeId}
+          onSelect={openVolume}
         />
       ) : !isManga && covers !== null ? (
         <CollectionCoverGrid
@@ -210,6 +235,18 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
           onSelect={setSelectedFileName}
         />
       ) : null}
+      {viewerVolumeId && viewerVolumes.some((volume) => volume.id === viewerVolumeId) && (
+        <MangaCoverViewer
+          workTitle={collection?.name ?? "컬렉션"}
+          volumes={viewerVolumes}
+          activeVolumeId={viewerVolumeId}
+          onActiveVolumeChange={(volumeId) => {
+            setViewerVolumeId(volumeId);
+            setSelectedVolumeId(volumeId);
+          }}
+          onClose={closeViewer}
+        />
+      )}
       {importOpen && collection && (
         <MangaDexImportDialog
           open
