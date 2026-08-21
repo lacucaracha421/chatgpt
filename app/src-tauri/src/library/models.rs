@@ -475,6 +475,54 @@ pub struct CollectionVolume {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct AladinVolumeCandidate {
+    pub volume_number: i64,
+    pub provider_item_id: String,
+    pub title: String,
+    pub publication_date: Option<String>,
+    pub isbn13: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AladinSeriesCandidate {
+    pub anchor_item_id: String,
+    pub group_fingerprint: String,
+    pub title: String,
+    pub author: Option<String>,
+    pub publisher: Option<String>,
+    pub volumes: Vec<AladinVolumeCandidate>,
+    pub ignored_count: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AladinApplyRequest {
+    pub collection_id: String,
+    pub query: String,
+    pub anchor_item_id: String,
+    pub group_fingerprint: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AladinConnection {
+    pub anchor_item_id: String,
+    pub query: String,
+    pub last_synced_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AladinSyncResult {
+    pub added: u64,
+    pub updated: u64,
+    pub unchanged: u64,
+    pub ignored: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct MangaDexVolumeSyncResult {
     pub completed: u64,
     pub skipped: u64,

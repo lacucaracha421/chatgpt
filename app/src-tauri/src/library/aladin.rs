@@ -1,5 +1,3 @@
-#![allow(dead_code)] // Removed when aladin_flow consumes the network entry point.
-
 use std::{io::Read, time::Duration};
 
 use regex::Regex;

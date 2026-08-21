@@ -206,6 +206,10 @@ pub enum LibraryError {
     AladinRateLimited,
     #[error("알라딘 응답을 처리할 수 없습니다")]
     InvalidAladinResponse,
+    #[error("기존 알라딘 연결과 같은 시리즈를 확실하게 찾을 수 없습니다")]
+    AmbiguousAladinBinding,
+    #[error("이 알라딘 상품은 이미 다른 Work에 연결되어 있습니다")]
+    DuplicateAladinProviderItem,
     #[error("영상 형식을 지원하지 않거나 파일이 손상됐습니다")]
     UnsupportedVideo,
     #[error("영상 미리보기를 준비하지 못했습니다")]
