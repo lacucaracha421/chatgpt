@@ -215,6 +215,7 @@ fn upsert_collection(
             ExternalBindingInput {
                 provider: binding.provider.clone(),
                 external_id: binding.external_id.clone(),
+                provider_config_json: None,
                 provider_data_json: None,
                 last_synced_at: Some(now.clone()),
             },

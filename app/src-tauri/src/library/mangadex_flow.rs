@@ -147,6 +147,7 @@ impl Library {
                 ExternalBindingInput {
                     provider: PROVIDER.into(),
                     external_id: request.manga_id.clone(),
+                    provider_config_json: None,
                     provider_data_json: Some(snapshot_json),
                     last_synced_at: Some(now.clone()),
                 },
@@ -215,6 +216,7 @@ impl Library {
                 ExternalBindingInput {
                     provider: PROVIDER.into(),
                     external_id: fetched.preview.manga_id,
+                    provider_config_json: None,
                     provider_data_json: Some(fetched.snapshot_json),
                     last_synced_at: Some(now.clone()),
                 },

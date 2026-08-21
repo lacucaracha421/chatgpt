@@ -14,7 +14,7 @@ impl Library {
         let connection = self.connection()?;
         super::collection::require_collection(&connection, collection_id)?;
         let mut statement = connection.prepare(
-            "SELECT provider, external_id, provider_data_json, last_synced_at,
+            "SELECT provider, external_id, provider_config_json, provider_data_json, last_synced_at,
                     created_at, updated_at
              FROM collection_external_bindings
              WHERE collection_id = ?1
@@ -51,11 +51,12 @@ pub(crate) fn upsert_external_binding(
     }
     connection.execute(
         "INSERT INTO collection_external_bindings (
-            collection_id, provider, external_id, provider_data_json,
+            collection_id, provider, external_id, provider_config_json, provider_data_json,
             last_synced_at, created_at, updated_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
          ON CONFLICT(collection_id, provider) DO UPDATE SET
             external_id = excluded.external_id,
+            provider_config_json = excluded.provider_config_json,
             provider_data_json = excluded.provider_data_json,
             last_synced_at = excluded.last_synced_at,
             updated_at = excluded.updated_at",
@@ -63,6 +64,7 @@ pub(crate) fn upsert_external_binding(
             collection_id,
             provider,
             external_id,
+            input.provider_config_json,
             input.provider_data_json,
             input.last_synced_at,
             now
@@ -77,7 +79,7 @@ fn binding_by_provider(
     provider: &str,
 ) -> Result<ExternalBinding, LibraryError> {
     Ok(connection.query_row(
-        "SELECT provider, external_id, provider_data_json, last_synced_at,
+        "SELECT provider, external_id, provider_config_json, provider_data_json, last_synced_at,
                 created_at, updated_at
          FROM collection_external_bindings
          WHERE collection_id = ?1 AND provider = ?2",
@@ -90,10 +92,11 @@ fn binding_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ExternalBinding
     Ok(ExternalBinding {
         provider: row.get(0)?,
         external_id: row.get(1)?,
-        provider_data_json: row.get(2)?,
-        last_synced_at: row.get(3)?,
-        created_at: row.get(4)?,
-        updated_at: row.get(5)?,
+        provider_config_json: row.get(2)?,
+        provider_data_json: row.get(3)?,
+        last_synced_at: row.get(4)?,
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
     })
 }
 
@@ -120,6 +123,7 @@ mod tests {
         ExternalBindingInput {
             provider: provider.into(),
             external_id: external_id.into(),
+            provider_config_json: None,
             provider_data_json: None,
             last_synced_at: None,
         }
@@ -137,6 +141,7 @@ mod tests {
                 ExternalBindingInput {
                     provider: " MangaDex ".into(),
                     external_id: " md-1 ".into(),
+                    provider_config_json: None,
                     provider_data_json: Some("{\"title\":\"Dungeon Meshi\"}".into()),
                     last_synced_at: Some("2026-08-20T01:00:00Z".into()),
                 },
@@ -151,6 +156,7 @@ mod tests {
                 ExternalBindingInput {
                     provider: "MANGADEX".into(),
                     external_id: "md-2".into(),
+                    provider_config_json: None,
                     provider_data_json: Some("{\"title\":\"Delicious in Dungeon\"}".into()),
                     last_synced_at: Some("2026-08-20T02:00:00Z".into()),
                 },

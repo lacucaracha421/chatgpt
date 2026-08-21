@@ -383,6 +383,7 @@ pub struct CreateCollection {
 pub struct ExternalBindingInput {
     pub provider: String,
     pub external_id: String,
+    pub provider_config_json: Option<String>,
     pub provider_data_json: Option<String>,
     pub last_synced_at: Option<String>,
 }
@@ -392,6 +393,7 @@ pub struct ExternalBindingInput {
 pub struct ExternalBinding {
     pub provider: String,
     pub external_id: String,
+    pub provider_config_json: Option<String>,
     pub provider_data_json: Option<String>,
     pub last_synced_at: Option<String>,
     pub created_at: String,
@@ -466,6 +468,9 @@ pub struct CollectionVolume {
     pub edition_index: u8,
     pub display_label: String,
     pub cover_artwork_id: Option<String>,
+    pub local_release_date: Option<String>,
+    pub isbn13: Option<String>,
+    pub release_status: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

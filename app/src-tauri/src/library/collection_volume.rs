@@ -211,21 +211,41 @@ impl Library {
 
         let connection = self.connection()?;
         let mut statement = connection.prepare(
-            "SELECT id, volume_number, edition_index, cover_artwork_id
-             FROM collection_volumes
-             WHERE collection_id = ?1
-             ORDER BY edition_index, sort_order, volume_number",
+            "SELECT volume.id, volume.volume_number, volume.edition_index,
+                    volume.cover_artwork_id, source.publication_date, source.isbn13
+             FROM collection_volumes AS volume
+             LEFT JOIN collection_volume_sources AS source
+               ON source.collection_id = volume.collection_id
+              AND source.volume_number = volume.volume_number
+              AND source.provider = 'aladin'
+             WHERE volume.collection_id = ?1
+             ORDER BY volume.edition_index, volume.sort_order, volume.volume_number",
         )?;
         let volumes = statement
             .query_map([collection_id], |row| {
                 let volume_number = row.get(1)?;
                 let edition_index = row.get(2)?;
+                let local_release_date: Option<String> = row.get(4)?;
+                let release_status = local_release_date.as_deref().and_then(|value| {
+                    chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
+                        .ok()
+                        .map(|date| {
+                            if date > chrono::Utc::now().date_naive() {
+                                "upcoming".to_owned()
+                            } else {
+                                "released".to_owned()
+                            }
+                        })
+                });
                 Ok(CollectionVolume {
                     id: row.get(0)?,
                     volume_number,
                     edition_index,
                     display_label: display_label(volume_number, edition_index),
                     cover_artwork_id: row.get(3)?,
+                    local_release_date,
+                    isbn13: row.get(5)?,
+                    release_status,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -592,6 +612,7 @@ mod tests {
                 ExternalBindingInput {
                     provider: "mangadex".into(),
                     external_id: MANGA_ID.into(),
+                    provider_config_json: None,
                     provider_data_json: Some(snapshot),
                     last_synced_at: None,
                 },
@@ -655,6 +676,66 @@ mod tests {
     }
 
     #[test]
+    fn projects_aladin_release_without_changing_cover_editions() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let work = library
+            .create_collection(CreateCollection {
+                name: "Work".into(),
+                description: None,
+                collection_type: CollectionType::Manga,
+            })
+            .unwrap();
+        let future = (chrono::Utc::now().date_naive() + chrono::Days::new(1)).to_string();
+        library
+            .connection()
+            .unwrap()
+            .execute_batch(&format!(
+                "INSERT INTO collection_work_artworks (
+                    id, collection_id, provider, provider_image_id, kind, relative_path,
+                    mime_type, width, height, language, selected, created_at, updated_at
+                 ) VALUES
+                    ('art-base', '{id}', 'mangadex', 'cover-base', 'volume_cover',
+                     'work-artwork/{id}/base.jpg', 'image/jpeg', 100, 150, 'ja', 0, 't', 't'),
+                    ('art-alt', '{id}', 'mangadex', 'cover-alt', 'volume_cover',
+                     'work-artwork/{id}/alt.jpg', 'image/jpeg', 100, 150, 'ja', 0, 't', 't');
+                 INSERT INTO collection_volumes (
+                    id, collection_id, volume_number, edition_index, sort_order,
+                    cover_artwork_id, source_provider, source_cover_id, source_file_name,
+                    created_at, updated_at
+                 ) VALUES
+                    ('volume-base', '{id}', 2, 0, 2, 'art-base', 'mangadex', 'cover-base', 'base.jpg', 't', 't'),
+                    ('volume-alt', '{id}', 2, 1, 2, 'art-alt', 'mangadex', 'cover-alt', 'alt.jpg', 't', 't');
+                 INSERT INTO collection_volume_sources (
+                    collection_id, volume_number, provider, provider_item_id,
+                    title, author, publisher, isbn13, publication_date, item_url,
+                    provider_data_json, created_at, updated_at
+                 ) VALUES (
+                    '{id}', 2, 'aladin', 'item-2', 'Work 2', NULL, 'Publisher',
+                    '9780000000002', '{future}', NULL, '{{}}', 't', 't'
+                 );",
+                id = work.id,
+            ))
+            .unwrap();
+
+        let volumes = library.list_collection_volumes(&work.id).unwrap();
+        let base = volumes
+            .iter()
+            .find(|volume| volume.volume_number == 2 && volume.edition_index == 0)
+            .unwrap();
+        let alternate = volumes
+            .iter()
+            .find(|volume| volume.volume_number == 2 && volume.edition_index == 1)
+            .unwrap();
+
+        assert_eq!(base.local_release_date.as_deref(), Some(future.as_str()));
+        assert_eq!(base.isbn13.as_deref(), Some("9780000000002"));
+        assert_eq!(base.release_status.as_deref(), Some("upcoming"));
+        assert_eq!(base.cover_artwork_id.as_deref(), Some("art-base"));
+        assert_eq!(alternate.cover_artwork_id.as_deref(), Some("art-alt"));
+    }
+
+    #[test]
     fn sync_continues_after_failure_and_retries_only_missing_volumes() {
         let temp = tempfile::tempdir().unwrap();
         let library = Library::open(temp.path()).unwrap();
@@ -671,6 +752,7 @@ mod tests {
                 ExternalBindingInput {
                     provider: "mangadex".into(),
                     external_id: MANGA_ID.into(),
+                    provider_config_json: None,
                     provider_data_json: None,
                     last_synced_at: None,
                 },

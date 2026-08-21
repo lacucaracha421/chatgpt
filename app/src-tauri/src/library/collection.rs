@@ -725,6 +725,7 @@ mod tests {
                 ExternalBindingInput {
                     provider: "mangadex".into(),
                     external_id: "provider-42".into(),
+                    provider_config_json: None,
                     provider_data_json: Some("{\"title\":\"Provider title\"}".into()),
                     last_synced_at: Some("2026-08-20T01:02:03Z".into()),
                 },
