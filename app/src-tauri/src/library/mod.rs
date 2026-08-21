@@ -141,6 +141,7 @@ impl Library {
         library.cleanup_resolving_similarity_reviews()?;
         library.requeue_interrupted_video_preparation()?;
         library.cleanup_unreferenced_work_artwork()?;
+        library.start_work_artwork_thumbnail_backfill();
         Ok(library)
     }
 

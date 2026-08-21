@@ -245,6 +245,15 @@ impl Library {
         Ok(())
     }
 
+    pub(crate) fn start_work_artwork_thumbnail_backfill(&self) {
+        let library = self.clone();
+        let _ = std::thread::Builder::new()
+            .name("work-artwork-thumbnail-backfill".into())
+            .spawn(move || {
+                let _ = library.backfill_missing_work_artwork_thumbnails();
+            });
+    }
+
     fn ensure_work_artwork_thumbnail(
         &self,
         collection_id: &str,
