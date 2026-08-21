@@ -30,6 +30,8 @@ const collection: CollectionSummary = {
 function renderOverlay(overrides: Partial<LibraryGateway> = {}, onChanged = vi.fn().mockResolvedValue(undefined)) {
   const gateway = {
     listCollectionCovers: vi.fn().mockResolvedValue([]),
+    listCollectionVolumes: vi.fn().mockResolvedValue([]),
+    syncMangaDexVolumeCovers: vi.fn().mockResolvedValue({ completed: 0, skipped: 0, failed: 0 }),
     getMangaDexConnection: vi.fn().mockResolvedValue(null),
     refreshMangaDex: vi.fn().mockResolvedValue(collection),
     ...overrides,
@@ -43,13 +45,15 @@ function renderOverlay(overrides: Partial<LibraryGateway> = {}, onChanged = vi.f
 }
 
 describe("CollectionOverlay MangaDex flow", () => {
-  it("prefers a local collection cover and falls back to stored WorkArtwork", async () => {
+  it("prefers a Volume cover and falls back to stored WorkArtwork", async () => {
     renderOverlay({
-      listCollectionCovers: vi.fn().mockResolvedValue([{ fileName: "local.jpg", volumeLabel: "1", shelf: 1 }]),
+      listCollectionVolumes: vi.fn().mockResolvedValue([
+        { id: "volume-1", volumeNumber: 1, editionIndex: 0, displayLabel: "1", coverArtworkId: "local-art" },
+      ]),
     });
     await waitFor(() => expect(document.querySelector(".collection-overlay__hero img")).toHaveAttribute(
       "src",
-      "http://lakomics.localhost/collection-cover/collection-1/local.jpg",
+      "http://lakomics.localhost/work-artwork/local-art",
     ));
     cleanup();
 
@@ -57,6 +61,42 @@ describe("CollectionOverlay MangaDex flow", () => {
     expect(await screen.findByRole("img", { name: "던전밥" })).toHaveAttribute(
       "src",
       "http://lakomics.localhost/work-artwork/artwork-1",
+    );
+  });
+
+  it("shows ordered manga Volume drawers, fills placeholders, and has no fake editor", async () => {
+    let finishSync!: (result: { completed: number; skipped: number; failed: number }) => void;
+    const syncMangaDexVolumeCovers = vi.fn().mockReturnValue(
+      new Promise((resolve) => { finishSync = resolve; }),
+    );
+    const listCollectionVolumes = vi.fn()
+      .mockResolvedValueOnce([
+        { id: "v10", volumeNumber: 10, editionIndex: 0, displayLabel: "10", coverArtworkId: null },
+        { id: "v2", volumeNumber: 2, editionIndex: 0, displayLabel: "2", coverArtworkId: "art-2" },
+        { id: "v1-1", volumeNumber: 1, editionIndex: 1, displayLabel: "1.1", coverArtworkId: "art-1-1" },
+      ])
+      .mockResolvedValueOnce([
+        { id: "v2", volumeNumber: 2, editionIndex: 0, displayLabel: "2", coverArtworkId: "art-2" },
+        { id: "v10", volumeNumber: 10, editionIndex: 0, displayLabel: "10", coverArtworkId: "art-10" },
+        { id: "v1-1", volumeNumber: 1, editionIndex: 1, displayLabel: "1.1", coverArtworkId: "art-1-1" },
+      ]);
+    const user = userEvent.setup();
+    renderOverlay({ listCollectionVolumes, syncMangaDexVolumeCovers });
+
+    expect(await screen.findAllByRole("button", { name: /^(2|10)권 표지/ })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: /^(2|10)권 표지/ }).map((button) => button.getAttribute("aria-label"))).toEqual([
+      "2권 표지",
+      "10권 표지 불러오는 중",
+    ]);
+    expect(screen.queryByRole("textbox", { name: "권 번호" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "서랍 2" }));
+    expect(screen.getByRole("button", { name: "1.1권 표지" })).toBeInTheDocument();
+
+    finishSync({ completed: 1, skipped: 2, failed: 0 });
+    await user.click(screen.getByRole("button", { name: "서랍 1" }));
+    expect(await screen.findByRole("img", { name: "10권 표지" })).toHaveAttribute(
+      "src",
+      "http://lakomics.localhost/work-artwork/art-10",
     );
   });
 
