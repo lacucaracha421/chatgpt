@@ -199,6 +199,9 @@ fn parse_path(path: &str) -> Option<(MediaVariant, String, Option<String>)> {
             (MediaVariant::CollectionSourcePreview, None)
         }
         "work-artwork" if segments.next().is_none() => (MediaVariant::WorkArtwork, None),
+        "work-artwork-thumbnail" if segments.next().is_none() => {
+            (MediaVariant::WorkArtworkThumbnail, None)
+        }
         "mangadex-cover-preview" => {
             let file_name = percent_decode(segments.next()?)?;
             if segments.next().is_some()
@@ -265,6 +268,9 @@ fn empty_response(status: StatusCode) -> Response<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+
+    use image::{DynamicImage, ImageFormat};
     use rusqlite::params;
     use tauri::http::{
         header::{ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE},
@@ -341,7 +347,12 @@ mod tests {
         let relative_path = format!("work-artwork/{COLLECTION_ID}/{ARTWORK_ID}.png");
         let absolute_path = library.root().join(&relative_path);
         std::fs::create_dir_all(absolute_path.parent().unwrap()).unwrap();
-        std::fs::write(&absolute_path, b"artwork bytes").unwrap();
+        let mut artwork_bytes = Cursor::new(Vec::new());
+        DynamicImage::new_rgb8(900, 1350)
+            .write_to(&mut artwork_bytes, ImageFormat::Png)
+            .unwrap();
+        let artwork_bytes = artwork_bytes.into_inner();
+        std::fs::write(&absolute_path, &artwork_bytes).unwrap();
         library
             .connection()
             .unwrap()
@@ -364,7 +375,39 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.headers()[CONTENT_TYPE], "image/png");
-        assert_eq!(response.body(), b"artwork bytes");
+        assert_eq!(response.body(), &artwork_bytes);
+
+        let thumbnail = media_response(
+            Some(&library),
+            &Method::GET,
+            &format!("/work-artwork-thumbnail/{ARTWORK_ID}"),
+        );
+        assert_eq!(thumbnail.status(), StatusCode::OK);
+        assert_eq!(thumbnail.headers()[CONTENT_TYPE], "image/webp");
+        assert!(library
+            .root()
+            .join(format!(
+                "work-artwork-thumbnails/{COLLECTION_ID}/{ARTWORK_ID}.webp"
+            ))
+            .exists());
+        assert_eq!(
+            media_response(
+                Some(&library),
+                &Method::GET,
+                "/work-artwork-thumbnail/not-a-uuid",
+            )
+            .status(),
+            StatusCode::BAD_REQUEST,
+        );
+        assert_eq!(
+            media_response(
+                Some(&library),
+                &Method::GET,
+                &format!("/work-artwork-thumbnail/{ARTWORK_ID}/more"),
+            )
+            .status(),
+            StatusCode::BAD_REQUEST,
+        );
     }
 
     #[test]

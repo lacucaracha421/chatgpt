@@ -51,6 +51,7 @@ pub enum MediaVariant {
     CollectionCover,
     CollectionSourcePreview,
     WorkArtwork,
+    WorkArtworkThumbnail,
     MangaDexCoverPreview,
 }
 
@@ -302,6 +303,9 @@ impl Library {
             MediaVariant::MangaCover => return self.manga_cover(asset_id),
             MediaVariant::MangaPage(page_index) => return self.manga_page(asset_id, page_index),
             MediaVariant::WorkArtwork => return self.resolve_work_artwork(asset_id),
+            MediaVariant::WorkArtworkThumbnail => {
+                return self.resolve_work_artwork_thumbnail(asset_id)
+            }
             _ => {}
         }
         let relative_path = match variant {
@@ -364,6 +368,7 @@ impl Library {
             | MediaVariant::CollectionCover
             | MediaVariant::CollectionSourcePreview
             | MediaVariant::WorkArtwork
+            | MediaVariant::WorkArtworkThumbnail
             | MediaVariant::MangaDexCoverPreview => {
                 unreachable!()
             }
