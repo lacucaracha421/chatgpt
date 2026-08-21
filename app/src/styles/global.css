@@ -2546,6 +2546,114 @@ input:disabled {
   justify-content: flex-end;
 }
 
+.aladin-connect {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.aladin-connect__search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--space-2);
+}
+
+.aladin-connect__note,
+.aladin-connect__error,
+.aladin-connect__empty {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.aladin-connect__note,
+.aladin-connect__empty,
+.aladin-connect__actions span {
+  color: var(--color-muted);
+}
+
+.aladin-connect__error {
+  color: var(--color-danger);
+}
+
+.aladin-connect__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(16rem, 0.8fr);
+  min-height: 20rem;
+  border: var(--border-width) solid var(--color-border);
+}
+
+.aladin-connect__results,
+.aladin-connect__preview {
+  min-width: 0;
+  overflow: auto;
+}
+
+.aladin-connect__results {
+  border-right: var(--border-width) solid var(--color-border);
+}
+
+.aladin-connect__result {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-text);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+
+.aladin-connect__result:hover:not(:disabled) {
+  background: var(--color-surface-hover);
+}
+
+.aladin-connect__result[aria-pressed="true"] {
+  background: var(--color-selected);
+  box-shadow: inset var(--focus-width) 0 var(--color-accent);
+}
+
+.aladin-connect__result small,
+.aladin-connect__preview small {
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+}
+
+.aladin-connect__preview {
+  padding: var(--space-3);
+}
+
+.aladin-connect__preview-header {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+
+.aladin-connect__preview ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.aladin-connect__preview li {
+  display: grid;
+  gap: 2px;
+  padding: var(--space-2) 0;
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+
+.aladin-connect__actions span {
+  margin-right: auto;
+  font-size: var(--text-xs);
+}
+
+@media (max-width: 760px) {
+  .aladin-connect__body { grid-template-columns: 1fr; }
+  .aladin-connect__results { border-right: 0; border-bottom: var(--border-width) solid var(--color-border); }
+}
+
 /* Collection Overlay */
 .collection-overlay {
   display: flex;
