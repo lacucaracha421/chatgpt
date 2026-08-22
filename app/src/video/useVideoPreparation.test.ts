@@ -27,8 +27,8 @@ it("prepares one pending video at a time until remaining is zero", async () => {
   );
 
   await waitFor(() => expect(prepare).toHaveBeenCalledTimes(2));
-  expect(prepare).toHaveBeenNthCalledWith(1, 1);
-  expect(prepare).toHaveBeenNthCalledWith(2, 1);
+  expect(prepare).toHaveBeenNthCalledWith(1, 5);
+  expect(prepare).toHaveBeenNthCalledWith(2, 5);
   expect(maximumActiveCalls).toBe(1);
   expect(onChanged.mock.calls.map(([ids]) => ids)).toEqual([["v1"], ["v2"]]);
   expect(result.current.work?.status).toBe("completed");

@@ -5,6 +5,9 @@ use std::{
     process::Command,
 };
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
 use rusqlite::{params, OptionalExtension};
 use serde::Deserialize;
 
@@ -478,8 +481,14 @@ fn safe_asset_id(asset_id: &str) -> bool {
 
 fn run_tool<const N: usize>(name: &str, arguments: [OsString; N]) -> Result<Vec<u8>, LibraryError> {
     let executable = tool_path(name).ok_or(LibraryError::VideoToolUnavailable)?;
-    let output = Command::new(executable)
-        .args(arguments)
+    let mut command = Command::new(executable);
+    command.args(arguments);
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let output = command
         .output()
         .map_err(|_| LibraryError::VideoToolUnavailable)?;
     if output.status.success() {

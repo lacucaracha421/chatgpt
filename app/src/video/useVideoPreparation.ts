@@ -62,7 +62,7 @@ export function useVideoPreparation(options: Options) {
           ? "running"
           : "completed",
     });
-    return progress.failed === 0 && progress.remaining > 0;
+    return progress.remaining > 0;
   }, []);
 
   runRef.current = () => {
@@ -75,7 +75,7 @@ export function useVideoPreparation(options: Options) {
         while (activeRef.current && optionsRef.current.enabled) {
           let progress: VideoPreparationProgress;
           try {
-            progress = await optionsRef.current.prepare(1);
+            progress = await optionsRef.current.prepare(5);
           } catch (error) {
             if (activeRef.current) {
               setWork({
