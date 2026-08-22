@@ -12,6 +12,7 @@ use super::{
         AladinApplyRequest, AladinConnection, AladinSeriesCandidate, AladinSyncResult,
         AladinVolumeCandidate, ExternalBindingInput,
     },
+    release_watch::{event_kind_str, pending_release_changes},
     Library,
 };
 
@@ -30,6 +31,24 @@ struct ProviderConfig {
     query: String,
     group_fingerprint: String,
     known_item_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct StoredAladinSource {
+    pub(super) provider_item_id: String,
+    pub(super) title: String,
+    pub(super) author: Option<String>,
+    pub(super) publisher: Option<String>,
+    pub(super) isbn13: Option<String>,
+    pub(super) publication_date: Option<String>,
+    pub(super) item_url: Option<String>,
+    pub(super) provider_data_json: String,
+}
+
+#[derive(Debug)]
+pub(super) struct AladinReconcileOutcome {
+    pub(super) sync_result: AladinSyncResult,
+    pub(super) release_event_count: u64,
 }
 
 impl Library {
@@ -67,6 +86,42 @@ impl Library {
         config: ProviderConfig,
         items: Vec<AladinItem>,
     ) -> Result<AladinSyncResult, LibraryError> {
+        let checked_at = chrono::Utc::now().to_rfc3339();
+        Ok(self
+            .refresh_aladin_items_with_config_at(
+                collection_id,
+                anchor_item_id,
+                config,
+                items,
+                &checked_at,
+            )?
+            .sync_result)
+    }
+
+    pub(super) fn refresh_aladin_items_at(
+        &self,
+        collection_id: &str,
+        items: Vec<AladinItem>,
+        checked_at: &str,
+    ) -> Result<AladinReconcileOutcome, LibraryError> {
+        let (anchor_item_id, config) = self.aladin_binding_config(collection_id)?;
+        self.refresh_aladin_items_with_config_at(
+            collection_id,
+            anchor_item_id,
+            config,
+            items,
+            checked_at,
+        )
+    }
+
+    fn refresh_aladin_items_with_config_at(
+        &self,
+        collection_id: &str,
+        anchor_item_id: String,
+        config: ProviderConfig,
+        items: Vec<AladinItem>,
+        checked_at: &str,
+    ) -> Result<AladinReconcileOutcome, LibraryError> {
         let groups = grouped_items(items);
         let mut matches = groups.iter().filter(|group| {
             group
@@ -86,7 +141,7 @@ impl Library {
             return Err(LibraryError::AmbiguousAladinBinding);
         }
         let selected = selected.unwrap();
-        self.reconcile_aladin(
+        self.reconcile_aladin_at(
             AladinApplyRequest {
                 collection_id: collection_id.to_owned(),
                 query: config.query,
@@ -95,6 +150,7 @@ impl Library {
             },
             selected,
             config.known_item_ids,
+            checked_at,
         )
     }
 
@@ -183,8 +239,21 @@ impl Library {
         &self,
         request: AladinApplyRequest,
         selected: GroupedSeries,
-        mut known_item_ids: Vec<String>,
+        known_item_ids: Vec<String>,
     ) -> Result<AladinSyncResult, LibraryError> {
+        let checked_at = chrono::Utc::now().to_rfc3339();
+        Ok(self
+            .reconcile_aladin_at(request, selected, known_item_ids, &checked_at)?
+            .sync_result)
+    }
+
+    fn reconcile_aladin_at(
+        &self,
+        request: AladinApplyRequest,
+        selected: GroupedSeries,
+        mut known_item_ids: Vec<String>,
+        checked_at: &str,
+    ) -> Result<AladinReconcileOutcome, LibraryError> {
         for item in &selected.items {
             if !known_item_ids.contains(&item.item_id) {
                 known_item_ids.push(item.item_id.clone());
@@ -201,24 +270,58 @@ impl Library {
             serde_json::to_string(&config).map_err(|_| LibraryError::InvalidAladinResponse)?;
         let snapshot_json = serde_json::to_string(&selected.candidate)
             .map_err(|_| LibraryError::InvalidAladinResponse)?;
-        let now = chrono::Utc::now().to_rfc3339();
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
         require_collection(&transaction, &request.collection_id)?;
+        let subscription_last_checked_at = transaction
+            .query_row(
+                "SELECT last_checked_at
+                 FROM release_watch_subscriptions
+                 WHERE collection_id = ?1 AND provider = ?2",
+                params![request.collection_id, PROVIDER],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?;
         let mut result = AladinSyncResult {
             added: 0,
             updated: 0,
             unchanged: 0,
             ignored: selected.candidate.ignored_count,
         };
+        let mut release_event_count = 0;
         for item in &selected.items {
-            reconcile_source(
+            let existing = reconcile_source(
                 &transaction,
                 &request.collection_id,
                 item,
-                &now,
+                checked_at,
                 &mut result,
             )?;
+            if let Some(previous_checked_at) = &subscription_last_checked_at {
+                for change in pending_release_changes(
+                    existing.as_ref(),
+                    item,
+                    previous_checked_at.as_deref(),
+                    checked_at,
+                ) {
+                    transaction.execute(
+                        "INSERT INTO release_watch_events (
+                            id, collection_id, event_kind, volume_number,
+                            previous_value, current_value, detected_at, read_at
+                         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL)",
+                        params![
+                            uuid::Uuid::new_v4().to_string(),
+                            request.collection_id,
+                            event_kind_str(change.kind),
+                            change.volume_number,
+                            change.previous_value,
+                            change.current_value,
+                            checked_at,
+                        ],
+                    )?;
+                    release_event_count += 1;
+                }
+            }
         }
         super::external_binding::upsert_external_binding(
             &transaction,
@@ -228,12 +331,22 @@ impl Library {
                 external_id: request.anchor_item_id,
                 provider_config_json: Some(config_json),
                 provider_data_json: Some(snapshot_json),
-                last_synced_at: Some(now.clone()),
+                last_synced_at: Some(checked_at.to_owned()),
             },
-            &now,
+            checked_at,
         )?;
+        if subscription_last_checked_at.is_some() {
+            transaction.execute(
+                "UPDATE release_watch_subscriptions SET last_checked_at = ?1
+                 WHERE collection_id = ?2 AND provider = ?3",
+                params![checked_at, request.collection_id, PROVIDER],
+            )?;
+        }
         transaction.commit()?;
-        Ok(result)
+        Ok(AladinReconcileOutcome {
+            sync_result: result,
+            release_event_count,
+        })
     }
 }
 
@@ -243,18 +356,8 @@ fn reconcile_source(
     item: &AladinItem,
     now: &str,
     result: &mut AladinSyncResult,
-) -> Result<(), LibraryError> {
-    type StoredSource = (
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        String,
-    );
-    let existing: Option<StoredSource> = transaction
+) -> Result<Option<StoredAladinSource>, LibraryError> {
+    let existing: Option<StoredAladinSource> = transaction
         .query_row(
             "SELECT provider_item_id, title, author, publisher, isbn13,
                     publication_date, item_url, provider_data_json
@@ -262,32 +365,32 @@ fn reconcile_source(
              WHERE collection_id = ?1 AND volume_number = ?2 AND provider = ?3",
             params![collection_id, item.volume_number, PROVIDER],
             |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                    row.get(5)?,
-                    row.get(6)?,
-                    row.get(7)?,
-                ))
+                Ok(StoredAladinSource {
+                    provider_item_id: row.get(0)?,
+                    title: row.get(1)?,
+                    author: row.get(2)?,
+                    publisher: row.get(3)?,
+                    isbn13: row.get(4)?,
+                    publication_date: row.get(5)?,
+                    item_url: row.get(6)?,
+                    provider_data_json: row.get(7)?,
+                })
             },
         )
         .optional()?;
-    let current = (
-        item.item_id.clone(),
-        item.title.trim().to_owned(),
-        item.author.clone(),
-        item.publisher.clone(),
-        item.isbn13.clone(),
-        item.publication_date.clone(),
-        item.item_url.clone(),
-        item.snapshot_json.clone(),
-    );
-    match existing {
+    let current = StoredAladinSource {
+        provider_item_id: item.item_id.clone(),
+        title: item.title.trim().to_owned(),
+        author: item.author.clone(),
+        publisher: item.publisher.clone(),
+        isbn13: item.isbn13.clone(),
+        publication_date: item.publication_date.clone(),
+        item_url: item.item_url.clone(),
+        provider_data_json: item.snapshot_json.clone(),
+    };
+    match existing.as_ref() {
         None => result.added += 1,
-        Some(stored) if stored == current => result.unchanged += 1,
+        Some(stored) if stored == &current => result.unchanged += 1,
         Some(_) => result.updated += 1,
     }
 
@@ -312,14 +415,14 @@ fn reconcile_source(
                 collection_id,
                 item.volume_number,
                 PROVIDER,
-                current.0,
-                current.1,
-                current.2,
-                current.3,
-                current.4,
-                current.5,
-                current.6,
-                current.7,
+                current.provider_item_id,
+                current.title,
+                current.author,
+                current.publisher,
+                current.isbn13,
+                current.publication_date,
+                current.item_url,
+                current.provider_data_json,
                 now,
             ],
         )
@@ -338,7 +441,7 @@ fn reconcile_source(
             now
         ],
     )?;
-    Ok(())
+    Ok(existing)
 }
 
 fn map_source_write_error(error: rusqlite::Error) -> LibraryError {
@@ -461,7 +564,10 @@ mod tests {
     use crate::library::{
         aladin::AladinItem,
         error::LibraryError,
-        models::{AladinApplyRequest, CollectionType, CreateCollection, ExternalBindingInput},
+        models::{
+            AladinApplyRequest, CollectionType, CreateCollection, ExternalBindingInput,
+            ReleaseWatchEventKind,
+        },
         Library,
     };
 
@@ -775,5 +881,201 @@ mod tests {
             unrelated,
         );
         assert!(matches!(error, Err(LibraryError::AmbiguousAladinBinding)));
+    }
+
+    #[test]
+    fn watched_refresh_records_release_changes_once() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let work_id = create_work(&library, "던전밥");
+        let initial = vec![item(
+            "item-1",
+            "던전밥",
+            1,
+            "A출판",
+            Some("9781"),
+            Some("2026-08-21"),
+        )];
+        library
+            .apply_aladin_items(request(&work_id, &initial), initial, Vec::new())
+            .unwrap();
+        library.set_release_watch_enabled(&work_id, true).unwrap();
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE release_watch_subscriptions
+                 SET last_checked_at = '2026-08-20T00:00:00Z'
+                 WHERE collection_id = ?1",
+                [&work_id],
+            )
+            .unwrap();
+        let refreshed = vec![
+            item(
+                "item-1",
+                "던전밥",
+                1,
+                "A출판",
+                Some("9781"),
+                Some("2026-08-20"),
+            ),
+            item(
+                "item-2",
+                "던전밥",
+                2,
+                "A출판",
+                Some("9782"),
+                Some("2026-09-01"),
+            ),
+        ];
+
+        let first = library
+            .refresh_aladin_items_at(&work_id, refreshed.clone(), "2026-08-22T00:00:00Z")
+            .unwrap();
+        assert_eq!(first.release_event_count, 3);
+        assert_eq!(
+            library
+                .take_unread_release_changes(&work_id)
+                .unwrap()
+                .iter()
+                .map(|event| event.kind)
+                .collect::<Vec<_>>(),
+            vec![
+                ReleaseWatchEventKind::ReleaseDateChanged,
+                ReleaseWatchEventKind::ReleaseStatusChanged,
+                ReleaseWatchEventKind::NewVolume,
+            ]
+        );
+
+        let second = library
+            .refresh_aladin_items_at(&work_id, refreshed, "2026-08-22T00:00:00Z")
+            .unwrap();
+        assert_eq!(second.release_event_count, 0);
+        assert!(library
+            .take_unread_release_changes(&work_id)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            library
+                .get_release_watch_status(&work_id)
+                .unwrap()
+                .last_checked_at
+                .as_deref(),
+            Some("2026-08-22T00:00:00Z")
+        );
+    }
+
+    #[test]
+    fn unwatched_aladin_reconciliation_creates_no_release_events() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let work_id = create_work(&library, "던전밥");
+        let initial = vec![item("item-1", "던전밥", 1, "A출판", Some("9781"), None)];
+        library
+            .apply_aladin_items(request(&work_id, &initial), initial, Vec::new())
+            .unwrap();
+        library
+            .refresh_aladin_items_at(
+                &work_id,
+                vec![
+                    item("item-1", "던전밥", 1, "A출판", Some("9781"), None),
+                    item("item-2", "던전밥", 2, "A출판", Some("9782"), None),
+                ],
+                "2026-08-22T00:00:00Z",
+            )
+            .unwrap();
+
+        assert_eq!(
+            library
+                .connection()
+                .unwrap()
+                .query_row("SELECT COUNT(*) FROM release_watch_events", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn release_watch_state_rolls_back_with_source_reconciliation() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let owner_id = create_work(&library, "기존 Work");
+        let target_id = create_work(&library, "대상 Work");
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO collection_volume_sources (
+                    collection_id, volume_number, provider, provider_item_id, title,
+                    provider_data_json, created_at, updated_at
+                 ) VALUES (?1, 2, 'aladin', 'shared-item', '기존 2권', '{}', 't', 't')",
+                [&owner_id],
+            )
+            .unwrap();
+        let initial = vec![item(
+            "item-1",
+            "던전밥",
+            1,
+            "A출판",
+            Some("9781"),
+            Some("2026-08-21"),
+        )];
+        library
+            .apply_aladin_items(request(&target_id, &initial), initial, Vec::new())
+            .unwrap();
+        library.set_release_watch_enabled(&target_id, true).unwrap();
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE release_watch_subscriptions
+                 SET last_checked_at = '2026-08-20T00:00:00Z'
+                 WHERE collection_id = ?1",
+                [&target_id],
+            )
+            .unwrap();
+
+        let result = library.refresh_aladin_items_at(
+            &target_id,
+            vec![
+                item(
+                    "item-1",
+                    "던전밥",
+                    1,
+                    "A출판",
+                    Some("9781"),
+                    Some("2026-08-20"),
+                ),
+                item("shared-item", "던전밥", 2, "A출판", Some("9782"), None),
+            ],
+            "2026-08-22T00:00:00Z",
+        );
+        assert!(matches!(
+            result,
+            Err(LibraryError::DuplicateAladinProviderItem)
+        ));
+        let connection = library.connection().unwrap();
+        let state: (Option<String>, i64, Option<String>) = connection
+            .query_row(
+                "SELECT
+                    (SELECT publication_date FROM collection_volume_sources
+                     WHERE collection_id = ?1 AND volume_number = 1 AND provider = 'aladin'),
+                    (SELECT COUNT(*) FROM release_watch_events WHERE collection_id = ?1),
+                    (SELECT last_checked_at FROM release_watch_subscriptions
+                     WHERE collection_id = ?1 AND provider = 'aladin')",
+                [&target_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            state,
+            (
+                Some("2026-08-21".into()),
+                0,
+                Some("2026-08-20T00:00:00Z".into())
+            )
+        );
     }
 }
