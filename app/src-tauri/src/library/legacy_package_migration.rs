@@ -6,10 +6,14 @@ use std::{
 };
 
 use chrono::{DateTime, NaiveDateTime, SecondsFormat, Utc};
+use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::error::LibraryError;
+use super::{
+    book_migration::{scan_book_import, BookImportPlan},
+    error::LibraryError,
+};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -69,6 +73,41 @@ pub struct LegacyPackageSource {
     pub custom_title_count: usize,
     pub total_bytes: u64,
     pub fingerprint: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LegacyPackageTargetBaseline {
+    pub schema_version: i64,
+    pub normal_assets: u64,
+    pub collections: u64,
+    pub classifications: u64,
+    pub mappings: u64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LegacyPackagePreview {
+    pub new_assets: usize,
+    pub exact_target_duplicates: usize,
+    pub source_duplicates: usize,
+    pub already_mapped: usize,
+    pub mappings_to_create: usize,
+    pub folders_to_create: usize,
+    pub folders_reused: usize,
+    pub collections_to_create: usize,
+    pub collections_existing: usize,
+    pub collection_errors: usize,
+    pub estimated_copy_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LegacyPackageMigrationPlan {
+    pub source: LegacyPackageSource,
+    pub books: BookImportPlan,
+    pub target_before: LegacyPackageTargetBaseline,
+    pub preview: LegacyPackagePreview,
 }
 
 #[derive(Debug, Deserialize)]
@@ -311,6 +350,220 @@ pub fn inspect_legacy_package_source(
         total_bytes,
         fingerprint,
     })
+}
+
+pub fn inspect_legacy_package_migration(
+    paths: &LegacyPackagePaths,
+) -> Result<LegacyPackageMigrationPlan, LibraryError> {
+    let mut source = inspect_legacy_package_source(paths)?;
+    let books = scan_book_import(&source.paths.book_root)?;
+    let book_fingerprint = fingerprint_books(&source.paths.book_root, &books)?;
+    source.fingerprint = sha256_join(&[source.fingerprint.as_bytes(), book_fingerprint.as_bytes()]);
+
+    let database_path = source.paths.library_root.join("library.sqlite");
+    let connection = Connection::open_with_flags(
+        &database_path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    let schema_version: i64 =
+        connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if !(19..=super::db::SCHEMA_VERSION).contains(&schema_version) {
+        return Err(LibraryError::UnsupportedSchema(schema_version));
+    }
+    let table_count = |table: &str| -> Result<u64, LibraryError> {
+        Ok(
+            connection.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get::<_, i64>(0)
+            })? as u64,
+        )
+    };
+    let mappings_table = has_table(&connection, "legacy_package_asset_mappings")?;
+    let target_before = LegacyPackageTargetBaseline {
+        schema_version,
+        normal_assets: connection.query_row(
+            "SELECT COUNT(*) FROM assets WHERE status = 'normal'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )? as u64,
+        collections: table_count("collections")?,
+        classifications: table_count("classification_entries")?,
+        mappings: if mappings_table {
+            table_count("legacy_package_asset_mappings")?
+        } else {
+            0
+        },
+    };
+
+    let mut target_hashes = BTreeSet::new();
+    {
+        let mut statement = connection.prepare("SELECT content_hash FROM assets")?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+        for row in rows {
+            target_hashes.insert(row?);
+        }
+    }
+    let target_paths = target_classification_paths(&connection)?;
+    let folders_reused = source
+        .folders
+        .iter()
+        .filter(|folder| target_paths.contains(&path_key(&folder.path)))
+        .count();
+
+    let mut target_collection_names = BTreeSet::new();
+    {
+        let mut statement = connection.prepare("SELECT name FROM collections")?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+        for row in rows {
+            target_collection_names.insert(row?.to_lowercase());
+        }
+    }
+    let collections_existing = books
+        .entries
+        .iter()
+        .filter(|entry| target_collection_names.contains(&entry.name.to_lowercase()))
+        .count();
+    let already_mapped = if mappings_table {
+        connection.query_row(
+            "SELECT COUNT(*) FROM legacy_package_asset_mappings
+             WHERE source_library_id = ?1",
+            [&source.library_id],
+            |row| row.get::<_, i64>(0),
+        )? as usize
+    } else {
+        0
+    };
+
+    let mut unique_source_hashes = BTreeMap::<String, u64>::new();
+    for item in &source.items {
+        unique_source_hashes
+            .entry(item.source_sha256.clone())
+            .or_insert(item.byte_length);
+    }
+    let new_assets = unique_source_hashes
+        .keys()
+        .filter(|hash| !target_hashes.contains(*hash))
+        .count();
+    let exact_target_duplicates = source
+        .items
+        .iter()
+        .filter(|item| target_hashes.contains(&item.source_sha256))
+        .count();
+    let estimated_copy_bytes = unique_source_hashes
+        .iter()
+        .filter(|(hash, _)| !target_hashes.contains(*hash))
+        .fold(0_u64, |total, (_, length)| total.saturating_add(*length));
+    let preview = LegacyPackagePreview {
+        new_assets,
+        exact_target_duplicates,
+        source_duplicates: source
+            .items
+            .len()
+            .saturating_sub(unique_source_hashes.len()),
+        already_mapped,
+        mappings_to_create: source.items.len().saturating_sub(already_mapped),
+        folders_to_create: source.folders.len().saturating_sub(folders_reused),
+        folders_reused,
+        collections_to_create: books.entries.len().saturating_sub(collections_existing),
+        collections_existing,
+        collection_errors: books.skipped.len(),
+        estimated_copy_bytes,
+    };
+    Ok(LegacyPackageMigrationPlan {
+        source,
+        books,
+        target_before,
+        preview,
+    })
+}
+
+fn fingerprint_books(root: &Path, plan: &BookImportPlan) -> Result<String, LibraryError> {
+    let mut hasher = Sha256::new();
+    for entry in &plan.entries {
+        let folder = contained_relative_directory(root, &entry.relative_path)?;
+        let info = canonical_file(&folder.join("info.txt"))?;
+        ensure_contained(&info, root, "book info.txt escapes book root")?;
+        let bytes = read_bytes(&info)?;
+        fingerprint_field(&mut hasher, entry.relative_path.as_bytes());
+        fingerprint_field(&mut hasher, entry.name.as_bytes());
+        fingerprint_field(&mut hasher, sha256_bytes(&bytes).as_bytes());
+    }
+    for skipped in &plan.skipped {
+        fingerprint_field(&mut hasher, skipped.folder.as_bytes());
+        fingerprint_field(&mut hasher, skipped.message.as_bytes());
+    }
+    Ok(hex(hasher.finalize().as_slice()))
+}
+
+fn contained_relative_directory(root: &Path, relative: &str) -> Result<PathBuf, LibraryError> {
+    let path = Path::new(relative);
+    if path.is_absolute()
+        || path
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_) | Component::CurDir))
+    {
+        return Err(invalid("book folder path is unsafe"));
+    }
+    let canonical = canonical_directory(&root.join(path))?;
+    ensure_contained(&canonical, root, "book folder escapes book root")?;
+    Ok(canonical)
+}
+
+fn has_table(connection: &Connection, table: &str) -> Result<bool, LibraryError> {
+    Ok(connection.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1
+         )",
+        [table],
+        |row| row.get(0),
+    )?)
+}
+
+fn target_classification_paths(connection: &Connection) -> Result<BTreeSet<String>, LibraryError> {
+    let mut entries = BTreeMap::<String, (String, Option<String>)>::new();
+    let mut statement =
+        connection.prepare("SELECT id, name, parent_id FROM classification_entries")?;
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Option<String>>(2)?,
+        ))
+    })?;
+    for row in rows {
+        let (id, name, parent_id) = row?;
+        entries.insert(id, (name, parent_id));
+    }
+    let mut paths = BTreeSet::new();
+    for id in entries.keys() {
+        let mut current = Some(id.as_str());
+        let mut seen = BTreeSet::new();
+        let mut names = Vec::new();
+        while let Some(entry_id) = current {
+            if !seen.insert(entry_id.to_owned()) {
+                return Err(invalid("target classification hierarchy contains a cycle"));
+            }
+            let (name, parent_id) = entries
+                .get(entry_id)
+                .ok_or_else(|| invalid("target classification parent is missing"))?;
+            names.push(name.clone());
+            current = parent_id.as_deref();
+        }
+        names.reverse();
+        paths.insert(path_key(&names));
+    }
+    Ok(paths)
+}
+
+fn path_key(path: &[String]) -> String {
+    path.join("\0").to_lowercase()
+}
+
+fn sha256_join(fields: &[&[u8]]) -> String {
+    let mut hasher = Sha256::new();
+    for field in fields {
+        fingerprint_field(&mut hasher, field);
+    }
+    hex(hasher.finalize().as_slice())
 }
 
 fn folder_index(
@@ -856,5 +1109,80 @@ mod tests {
             .unwrap()
             .fingerprint;
         assert_ne!(before, after);
+    }
+
+    #[test]
+    fn dry_run_preview_is_read_only() {
+        let fixture = Fixture::new();
+        for (folder, title) in [("Blue Archive", "Blue Archive"), ("Naruto", "나루토")] {
+            let path = fixture.paths.book_root.join(folder);
+            fs::create_dir(&path).unwrap();
+            fs::write(
+                path.join("info.txt"),
+                format!("Title: {title}\nType: manga\n"),
+            )
+            .unwrap();
+        }
+        let source = inspect_legacy_package_source(&fixture.paths).unwrap();
+        let first_hash = source.items[0].source_sha256.clone();
+        let library = crate::library::Library::open(&fixture.paths.library_root).unwrap();
+        library
+            .create_classification(crate::library::models::CreateClassification {
+                kind: crate::library::models::ClassificationKind::Root,
+                name: "게임".into(),
+                parent_id: None,
+            })
+            .unwrap();
+        let connection = library.connection().unwrap();
+        connection
+            .execute(
+                "INSERT INTO assets (
+                    id, content_hash, media_kind, original_name, relative_path,
+                    thumbnail_relative_path, byte_size, width, height, collected_at,
+                    favorite, status
+                 ) VALUES (
+                    'existing-asset', ?1, 'image', 'existing.png',
+                    'assets/existing.png', 'thumbnails/existing.webp',
+                    1, 1, 1, '2026-08-22T00:00:00Z', 0, 'normal'
+                 )",
+                [first_hash],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO collections (
+                    id, name, description, type, cover_asset_id, showcase,
+                    created_at, updated_at
+                 ) VALUES (
+                    'existing-collection', 'blue archive', NULL, 'manga', NULL, 0,
+                    '2026-08-22T00:00:00Z', '2026-08-22T00:00:00Z'
+                 )",
+                [],
+            )
+            .unwrap();
+        drop(connection);
+        drop(library);
+        let database = fixture.paths.library_root.join("library.sqlite");
+        let before_database = fs::read(&database).unwrap();
+        let backup_count = fs::read_dir(fixture.paths.library_root.join("backups"))
+            .map(|entries| entries.count())
+            .unwrap_or(0);
+
+        let plan = inspect_legacy_package_migration(&fixture.paths).unwrap();
+
+        assert_eq!(plan.preview.new_assets, 1);
+        assert_eq!(plan.preview.exact_target_duplicates, 1);
+        assert_eq!(plan.preview.folders_reused, 1);
+        assert_eq!(plan.preview.folders_to_create, 1);
+        assert_eq!(plan.preview.collections_existing, 1);
+        assert_eq!(plan.preview.collections_to_create, 1);
+        assert_eq!(plan.target_before.normal_assets, 1);
+        assert_eq!(fs::read(&database).unwrap(), before_database);
+        assert_eq!(
+            fs::read_dir(fixture.paths.library_root.join("backups"))
+                .map(|entries| entries.count())
+                .unwrap_or(0),
+            backup_count
+        );
     }
 }
