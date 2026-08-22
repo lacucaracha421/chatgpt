@@ -12,10 +12,10 @@ use crate::library::{
     models::{
         AladinApplyRequest, AladinConnection, AladinSeriesCandidate, AladinSyncResult, AlbumEntry,
         AssetAlbumPatch, AssetCollectionPatch, AssetCursor, AssetMetadataPatch, AssetPage,
-        AssetQuery, AssetSummary, CollectionCover, CollectionVolume,
-        ClassificationEntry, CollectionSummary, CreateAlbum, CreateClassification, CreateCollection,
-        IngestMediaRequest, IngestOutcome, LibrarySummary, MangaDexApplyRequest,
-        MangaDexConnection, MangaDexSearchResult, MangaDexVolumeSyncResult, MangaDexWorkPreview, MangaSeries,
+        AssetQuery, AssetSummary, ClassificationEntry, CollectionCover, CollectionSummary,
+        CollectionVolume, CreateAlbum, CreateClassification, CreateCollection, IngestMediaRequest,
+        IngestOutcome, LibrarySummary, MangaDexApplyRequest, MangaDexConnection,
+        MangaDexSearchResult, MangaDexVolumeSyncResult, MangaDexWorkPreview, MangaSeries,
         MetadataBackup, PurgeSummary, SetAssetClassification, SimilarityDecisionRequest,
         SimilarityIndexProgress, SimilarityReviewPage, TrashPage, TrashPolicy, UpdateCollection,
         VideoPreparationProgress,
@@ -545,7 +545,9 @@ pub fn patch_asset_albums(
 }
 
 #[tauri::command]
-pub fn list_collections(state: State<'_, AppState>) -> Result<Vec<CollectionSummary>, CommandError> {
+pub fn list_collections(
+    state: State<'_, AppState>,
+) -> Result<Vec<CollectionSummary>, CommandError> {
     current_required(state)?
         .list_collections()
         .map_err(CommandError::from)
@@ -904,9 +906,7 @@ pub fn get_collection_source_root(
     state: State<'_, AppState>,
 ) -> Result<Option<String>, CommandError> {
     let library = current_required(state)?;
-    library
-        .collection_source_root()
-        .map_err(CommandError::from)
+    library.collection_source_root().map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -1031,15 +1031,33 @@ mod tests {
     #[test]
     fn aladin_errors_have_stable_codes() {
         let cases = [
-            (LibraryError::AladinCredentialNotConfigured, "aladin_credential_not_configured"),
-            (LibraryError::InvalidAladinCredential, "invalid_aladin_credential"),
+            (
+                LibraryError::AladinCredentialNotConfigured,
+                "aladin_credential_not_configured",
+            ),
+            (
+                LibraryError::InvalidAladinCredential,
+                "invalid_aladin_credential",
+            ),
             (LibraryError::InvalidAladinQuery, "invalid_aladin_query"),
             (LibraryError::AladinTimedOut, "aladin_timed_out"),
             (LibraryError::AladinRateLimited, "aladin_rate_limited"),
-            (LibraryError::InvalidAladinResponse, "invalid_aladin_response"),
-            (LibraryError::AmbiguousAladinBinding, "ambiguous_aladin_binding"),
-            (LibraryError::DuplicateAladinProviderItem, "duplicate_aladin_provider_item"),
-            (LibraryError::CredentialStoreUnavailable, "credential_store_unavailable"),
+            (
+                LibraryError::InvalidAladinResponse,
+                "invalid_aladin_response",
+            ),
+            (
+                LibraryError::AmbiguousAladinBinding,
+                "ambiguous_aladin_binding",
+            ),
+            (
+                LibraryError::DuplicateAladinProviderItem,
+                "duplicate_aladin_provider_item",
+            ),
+            (
+                LibraryError::CredentialStoreUnavailable,
+                "credential_store_unavailable",
+            ),
         ];
         for (error, expected) in cases {
             assert_eq!(CommandError::from(error).code, expected);

@@ -648,7 +648,8 @@ mod tests {
             .collect::<Result<_, _>>()
             .unwrap();
         assert_eq!(bindings, vec!["aladin", "mangadex"]);
-        let volumes: Vec<(i64, u8, Option<String>, Option<String>, Option<String>)> = connection
+        type VolumeRow = (i64, u8, Option<String>, Option<String>, Option<String>);
+        let volumes: Vec<VolumeRow> = connection
             .prepare(
                 "SELECT volume_number, edition_index, cover_artwork_id, source_provider, source_cover_id
                  FROM collection_volumes WHERE collection_id = ?1 ORDER BY volume_number, edition_index",

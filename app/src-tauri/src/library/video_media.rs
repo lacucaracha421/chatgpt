@@ -8,11 +8,7 @@ use std::{
 use rusqlite::{params, OptionalExtension};
 use serde::Deserialize;
 
-use super::{
-    error::LibraryError,
-    models::VideoPreparationProgress,
-    Library,
-};
+use super::{error::LibraryError, models::VideoPreparationProgress, Library};
 
 const MAX_SCRUB_FRAMES: u64 = 240;
 
@@ -225,10 +221,7 @@ impl Library {
         Ok(progress)
     }
 
-    pub fn retry_video_preparation(
-        &self,
-        asset_id: &str,
-    ) -> Result<(), LibraryError> {
+    pub fn retry_video_preparation(&self, asset_id: &str) -> Result<(), LibraryError> {
         let changed = self.connection()?.execute(
             "UPDATE video_assets
              SET preparation_state = 'pending', preparation_error = NULL

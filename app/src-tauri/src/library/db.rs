@@ -19,8 +19,7 @@ const ASSET_SOURCE_PROVENANCE_SCHEMA: &str =
 const COLLECTIONS_SCHEMA: &str = include_str!("../../migrations/0010_collections.sql");
 const COLLECTIONS_TYPED_SCHEMA: &str =
     include_str!("../../migrations/0011_collections_typed_metadata.sql");
-const COLLECTION_SOURCE_SCHEMA: &str =
-    include_str!("../../migrations/0012_collection_source.sql");
+const COLLECTION_SOURCE_SCHEMA: &str = include_str!("../../migrations/0012_collection_source.sql");
 const COLLECTION_EXTERNAL_BINDINGS_SCHEMA: &str =
     include_str!("../../migrations/0013_collection_external_bindings.sql");
 const COLLECTION_WORK_ARTWORKS_SCHEMA: &str =
@@ -520,7 +519,7 @@ mod tests {
             connection
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
-            14
+            SCHEMA_VERSION
         );
     }
 
@@ -611,7 +610,10 @@ mod tests {
         }
 
         connection
-            .execute("DELETE FROM collection_work_artworks WHERE id = 'art-1'", [])
+            .execute(
+                "DELETE FROM collection_work_artworks WHERE id = 'art-1'",
+                [],
+            )
             .unwrap();
         let cover_id: Option<String> = connection
             .query_row(
@@ -625,7 +627,7 @@ mod tests {
             connection
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
-            15
+            SCHEMA_VERSION
         );
     }
 

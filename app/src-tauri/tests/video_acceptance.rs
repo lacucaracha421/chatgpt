@@ -1,7 +1,9 @@
 use std::{env, fs, path::Path};
 
 use app_lib::library::{
-    models::{ImportSource, IngestMediaRequest, IngestOutcome, MediaSummary, VideoPreparationState},
+    models::{
+        ImportSource, IngestMediaRequest, IngestOutcome, MediaSummary, VideoPreparationState,
+    },
     Library,
 };
 use rusqlite::Connection;

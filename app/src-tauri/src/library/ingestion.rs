@@ -103,16 +103,14 @@ impl Library {
         run_staging_hook(&staging_path);
 
         match kind {
-            IngestKind::Image => {
-                self.ingest_image(
-                    request,
-                    staging_path,
-                    content_hash,
-                    byte_size,
-                    pending,
-                    original_modified_at,
-                )
-            }
+            IngestKind::Image => self.ingest_image(
+                request,
+                staging_path,
+                content_hash,
+                byte_size,
+                pending,
+                original_modified_at,
+            ),
             IngestKind::Video(extension) => self.ingest_video(
                 request,
                 staging_path,
@@ -1638,7 +1636,8 @@ mod tests {
                 .library
                 .connection()
                 .unwrap()
-                .query_row("SELECT COUNT(*) FROM assets", [], |row| row.get::<_, i64>(0))
+                .query_row("SELECT COUNT(*) FROM assets", [], |row| row
+                    .get::<_, i64>(0))
                 .unwrap(),
             1
         );
@@ -1910,8 +1909,7 @@ mod tests {
         std::fs::write(&source, b"hash me").unwrap();
         let mut pending = PendingFiles::new();
 
-        let (content_hash, _) =
-            copy_and_hash(&source, &staging, &mut pending, None).unwrap();
+        let (content_hash, _) = copy_and_hash(&source, &staging, &mut pending, None).unwrap();
 
         assert_eq!(content_hash.len(), 64);
         assert!(content_hash

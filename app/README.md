@@ -4,7 +4,9 @@ Lakomics is a local-first Windows media library for JPEG, PNG, GIF, WebP, MP4, W
 
 ## Run and verify
 
-Node.js, npm, Rust, and Windows WebView2 are required.
+Node.js 24.19.0 LTS, npm 12.0.2, Rust 1.98.0, and Windows WebView2 are required.
+The repository pins the Node.js baseline in `../.node-version`, the npm baseline in
+`package.json`, and the Rust toolchain in `rust-toolchain.toml`.
 
 Fetch and verify the pinned Windows LGPL FFmpeg sidecars from the repository root:
 
@@ -17,7 +19,7 @@ When a test app has no library registered, use
 `C:\Users\namwoojun\Desktop\test` as the temporary library.
 
 ```powershell
-npm install
+npm ci
 npm run tauri dev
 npm test
 npm run build

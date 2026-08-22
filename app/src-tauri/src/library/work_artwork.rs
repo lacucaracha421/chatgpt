@@ -177,10 +177,7 @@ impl Library {
         Ok(prepared.id.clone())
     }
 
-    pub fn resolve_work_artwork(
-        &self,
-        artwork_id: &str,
-    ) -> Result<MediaResponse, LibraryError> {
+    pub fn resolve_work_artwork(&self, artwork_id: &str) -> Result<MediaResponse, LibraryError> {
         let relative_path = self
             .connection()?
             .query_row(
@@ -208,11 +205,8 @@ impl Library {
             )
             .optional()?
             .ok_or(LibraryError::MediaNotFound)?;
-        let thumbnail_relative_path = self.ensure_work_artwork_thumbnail(
-            &collection_id,
-            artwork_id,
-            &relative_path,
-        )?;
+        let thumbnail_relative_path =
+            self.ensure_work_artwork_thumbnail(&collection_id, artwork_id, &relative_path)?;
         self.open_library_media(&thumbnail_relative_path)
     }
 
@@ -236,16 +230,25 @@ impl Library {
         };
 
         for (artwork_id, collection_id, relative_path) in artworks {
-            let _ = self.ensure_work_artwork_thumbnail(
-                &collection_id,
-                &artwork_id,
-                &relative_path,
-            );
+            let _ = self.ensure_work_artwork_thumbnail(&collection_id, &artwork_id, &relative_path);
         }
         Ok(())
     }
 
     pub(crate) fn start_work_artwork_thumbnail_backfill(&self) {
+        let has_artwork = self.connection().and_then(|connection| {
+            connection
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM collection_work_artworks LIMIT 1)",
+                    [],
+                    |row| row.get::<_, bool>(0),
+                )
+                .map_err(LibraryError::from)
+        });
+        if matches!(has_artwork, Ok(false)) {
+            return;
+        }
+
         let library = self.clone();
         let _ = std::thread::Builder::new()
             .name("work-artwork-thumbnail-backfill".into())
@@ -273,8 +276,7 @@ impl Library {
             .map_err(|_| LibraryError::InvalidWorkArtwork)?
             .decode()
             .map_err(|_| LibraryError::InvalidWorkArtwork)?;
-        let temporary_path =
-            thumbnail_path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
+        let temporary_path = thumbnail_path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
         if let Err(error) = write_work_artwork_thumbnail(&image, &temporary_path) {
             let _ = fs::remove_file(&temporary_path);
             return Err(error);
@@ -511,10 +513,7 @@ mod tests {
         assert_eq!(prepared.mime_type, "image/png");
         assert_eq!(
             prepared.relative_path,
-            format!(
-                "work-artwork/{}/{}.png",
-                collection.id, prepared.id
-            )
+            format!("work-artwork/{}/{}.png", collection.id, prepared.id)
         );
         let stored_path = library.root().join(&prepared.relative_path);
         assert!(stored_path.is_file());
@@ -656,9 +655,7 @@ mod tests {
         prepared.commit();
         std::fs::remove_file(&thumbnail).unwrap();
 
-        let mut media = library
-            .resolve_work_artwork_thumbnail(&artwork_id)
-            .unwrap();
+        let mut media = library.resolve_work_artwork_thumbnail(&artwork_id).unwrap();
         let mut bytes = Vec::new();
         media.file.read_to_end(&mut bytes).unwrap();
         let decoded = image::load_from_memory_with_format(&bytes, ImageFormat::WebP).unwrap();

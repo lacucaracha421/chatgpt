@@ -775,7 +775,10 @@ mod tests {
         library.delete_classification(&root.id).unwrap();
 
         assert_eq!(library.get_asset("asset-1").unwrap().id, "asset-1");
-        assert!(library.get_asset_classifications("asset-1").unwrap().is_empty());
+        assert!(library
+            .get_asset_classifications("asset-1")
+            .unwrap()
+            .is_empty());
         assert!(library.list_classifications().unwrap().is_empty());
     }
 
@@ -835,11 +838,7 @@ mod tests {
 
         fixture
             .library
-            .update_classification_appearance(
-                &fixture.child_tag.id,
-                Some("photo"),
-                Some("pink"),
-            )
+            .update_classification_appearance(&fixture.child_tag.id, Some("photo"), Some("pink"))
             .unwrap();
         let changed = fixture
             .library
@@ -988,10 +987,7 @@ mod tests {
             .library
             .patch_asset_classifications(AssetClassificationPatch {
                 asset_ids: vec!["asset-a".into()],
-                add_classification_ids: vec![
-                    fixture.root.id.clone(),
-                    fixture.child_tag.id.clone(),
-                ],
+                add_classification_ids: vec![fixture.root.id.clone(), fixture.child_tag.id.clone()],
                 remove_classification_ids: Vec::new(),
             })
             .unwrap();

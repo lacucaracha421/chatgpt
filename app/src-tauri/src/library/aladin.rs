@@ -54,8 +54,19 @@ struct AladinItemPayload {
 pub(crate) fn parse_volume_product(title: &str) -> Option<ParsedVolumeProduct> {
     let lower = title.to_ascii_lowercase();
     if [
-        "세트", "박스", "가이드", "화집", "소설", "캘린더", "달력", "아트북",
-        "guide", "novel", "calendar", "art book", "box set",
+        "세트",
+        "박스",
+        "가이드",
+        "화집",
+        "소설",
+        "캘린더",
+        "달력",
+        "아트북",
+        "guide",
+        "novel",
+        "calendar",
+        "art book",
+        "box set",
     ]
     .iter()
     .any(|term| lower.contains(term))
@@ -97,7 +108,10 @@ pub(crate) fn parse_search(json: &str) -> Result<Vec<AladinItem>, LibraryError> 
     let envelope: serde_json::Value =
         serde_json::from_str(json).map_err(|_| LibraryError::InvalidAladinResponse)?;
     if let Some(code) = envelope.get("errorCode") {
-        let code = code.as_str().map(str::to_owned).unwrap_or_else(|| code.to_string());
+        let code = code
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| code.to_string());
         if !code.trim_matches('"').is_empty() && code.trim_matches('"') != "0" {
             return Err(LibraryError::InvalidAladinCredential);
         }
@@ -110,8 +124,8 @@ pub(crate) fn parse_search(json: &str) -> Result<Vec<AladinItem>, LibraryError> 
         .ok_or(LibraryError::InvalidAladinResponse)?;
     let mut items = Vec::new();
     for raw in raw_items {
-        let payload: AladinItemPayload = serde_json::from_value(raw.clone())
-            .map_err(|_| LibraryError::InvalidAladinResponse)?;
+        let payload: AladinItemPayload =
+            serde_json::from_value(raw.clone()).map_err(|_| LibraryError::InvalidAladinResponse)?;
         let Some(parsed) = parse_volume_product(&payload.title) else {
             continue;
         };
@@ -140,7 +154,8 @@ pub(crate) fn parse_search(json: &str) -> Result<Vec<AladinItem>, LibraryError> 
 pub(crate) fn search(ttb_key: &str, query: &str) -> Result<Vec<AladinItem>, LibraryError> {
     search_with(ttb_key, query, |url, parameters| {
         let mut url = Url::parse(url).map_err(|_| AladinTransportError::Unavailable)?;
-        url.query_pairs_mut().extend_pairs(parameters.iter().copied());
+        url.query_pairs_mut()
+            .extend_pairs(parameters.iter().copied());
         let config = ureq::Agent::config_builder()
             .timeout_global(Some(REQUEST_TIMEOUT))
             .build();
@@ -177,11 +192,7 @@ pub(crate) fn search(ttb_key: &str, query: &str) -> Result<Vec<AladinItem>, Libr
     })
 }
 
-fn search_with<F>(
-    ttb_key: &str,
-    query: &str,
-    fetch: F,
-) -> Result<Vec<AladinItem>, LibraryError>
+fn search_with<F>(ttb_key: &str, query: &str, fetch: F) -> Result<Vec<AladinItem>, LibraryError>
 where
     F: FnOnce(&str, &[(&str, &str)]) -> Result<String, AladinTransportError>,
 {
@@ -227,10 +238,26 @@ mod tests {
 
     #[test]
     fn parses_integer_volume_suffixes() {
-        assert_eq!(parse_volume_product("던전밥 12권").unwrap().volume_number, 12);
-        assert_eq!(parse_volume_product("던전밥 Vol. 12").unwrap().volume_number, 12);
-        assert_eq!(parse_volume_product("던전밥 제12권").unwrap().volume_number, 12);
-        assert_eq!(parse_volume_product("던전밥 Volume 12").unwrap().volume_number, 12);
+        assert_eq!(
+            parse_volume_product("던전밥 12권").unwrap().volume_number,
+            12
+        );
+        assert_eq!(
+            parse_volume_product("던전밥 Vol. 12")
+                .unwrap()
+                .volume_number,
+            12
+        );
+        assert_eq!(
+            parse_volume_product("던전밥 제12권").unwrap().volume_number,
+            12
+        );
+        assert_eq!(
+            parse_volume_product("던전밥 Volume 12")
+                .unwrap()
+                .volume_number,
+            12
+        );
     }
 
     #[test]

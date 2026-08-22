@@ -41,20 +41,16 @@ pub(crate) fn media_response_with_range(
                 .body(image.bytes)
                 .expect("remote image response is valid"),
             Err(LibraryError::MangaDexNotFound) => empty_response(StatusCode::NOT_FOUND),
-            Err(LibraryError::MangaDexRateLimited) => {
-                empty_response(StatusCode::TOO_MANY_REQUESTS)
-            }
-            Err(LibraryError::InvalidMangaDexIdentity) => {
-                empty_response(StatusCode::BAD_REQUEST)
-            }
+            Err(LibraryError::MangaDexRateLimited) => empty_response(StatusCode::TOO_MANY_REQUESTS),
+            Err(LibraryError::InvalidMangaDexIdentity) => empty_response(StatusCode::BAD_REQUEST),
             Err(_) => empty_response(StatusCode::BAD_GATEWAY),
         };
     }
 
     let collection_media = match variant {
-        MediaVariant::CollectionCover => Some(
-            library.collection_cover_media(&asset_id, &file_name.unwrap_or_default()),
-        ),
+        MediaVariant::CollectionCover => {
+            Some(library.collection_cover_media(&asset_id, &file_name.unwrap_or_default()))
+        }
         MediaVariant::CollectionSourcePreview => {
             Some(library.collection_source_preview_media(&asset_id))
         }
@@ -712,14 +708,8 @@ mod tests {
                 format!("/manga-cover/{series_id}/extra"),
                 StatusCode::BAD_REQUEST,
             ),
-            (
-                format!("/manga-cover/{MISSING_ID}"),
-                StatusCode::NOT_FOUND,
-            ),
-            (
-                format!("/manga-page/{MISSING_ID}/1"),
-                StatusCode::NOT_FOUND,
-            ),
+            (format!("/manga-cover/{MISSING_ID}"), StatusCode::NOT_FOUND),
+            (format!("/manga-page/{MISSING_ID}/1"), StatusCode::NOT_FOUND),
         ];
         for (path, expected) in cases {
             assert_eq!(
@@ -731,11 +721,7 @@ mod tests {
 
     #[test]
     fn manga_routes_are_hidden_when_no_library_is_open() {
-        let response = media_response(
-            None,
-            &Method::GET,
-            &format!("/manga-cover/{SERIES_ID}"),
-        );
+        let response = media_response(None, &Method::GET, &format!("/manga-cover/{SERIES_ID}"));
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 

@@ -46,8 +46,8 @@ impl<'a, B: CredentialBackend> CredentialService<'a, B> {
             .read(ALADIN_TARGET)
             .map_err(map_backend_error)?
             .ok_or(LibraryError::AladinCredentialNotConfigured)?;
-        let value = String::from_utf8(value)
-            .map_err(|_| LibraryError::InvalidAladinCredentialValue)?;
+        let value =
+            String::from_utf8(value).map_err(|_| LibraryError::InvalidAladinCredentialValue)?;
         let value = value.trim();
         if value.is_empty() {
             return Err(LibraryError::InvalidAladinCredentialValue);
@@ -74,8 +74,8 @@ mod windows {
     use windows_sys::Win32::{
         Foundation::{GetLastError, ERROR_NOT_FOUND},
         Security::Credentials::{
-            CredDeleteW, CredFree, CredReadW, CredWriteW, CREDENTIALW,
-            CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC,
+            CredDeleteW, CredFree, CredReadW, CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE,
+            CRED_TYPE_GENERIC,
         },
     };
 

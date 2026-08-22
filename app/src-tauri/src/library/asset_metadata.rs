@@ -203,8 +203,12 @@ mod tests {
                     thumbnail_relative_path, byte_size, width, height, collected_at
                  ) VALUES (?1, ?2, 'image', ?3, ?4, ?5, 1, 1, 1, ?6)",
                 params![
-                    "asset-1", "hash-1", "one.png", "assets/one.png",
-                    "thumbnails/one.webp", "2026-08-15T00:00:00Z",
+                    "asset-1",
+                    "hash-1",
+                    "one.png",
+                    "assets/one.png",
+                    "thumbnails/one.webp",
+                    "2026-08-15T00:00:00Z",
                 ],
             )
             .unwrap();

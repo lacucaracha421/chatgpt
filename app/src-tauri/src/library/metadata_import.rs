@@ -403,12 +403,14 @@ mod tests {
 
         let too_many = tempdir().unwrap();
         let items = (0..=MAX_METADATA_ITEMS)
-            .map(|index| serde_json::json!({
-                "filename": format!("{index}.jpg"),
-                "tagPath": "A",
-                "tweetUrl": "x",
-                "savedAt": "x"
-            }))
+            .map(|index| {
+                serde_json::json!({
+                    "filename": format!("{index}.jpg"),
+                    "tagPath": "A",
+                    "tweetUrl": "x",
+                    "savedAt": "x"
+                })
+            })
             .collect::<Vec<_>>();
         write_manifest(
             too_many.path(),

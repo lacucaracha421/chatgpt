@@ -10,7 +10,9 @@ use super::models::MangaSeries;
 
 const THUMB_DIR: &str = ".lakomics-thumbs";
 
-pub(crate) fn manga_root(connection: &rusqlite::Connection) -> Result<Option<String>, LibraryError> {
+pub(crate) fn manga_root(
+    connection: &rusqlite::Connection,
+) -> Result<Option<String>, LibraryError> {
     let value = connection
         .query_row(
             "SELECT manga_root FROM library_settings WHERE singleton = 1",
@@ -174,7 +176,9 @@ fn parse_series_metadata(folder: &Path, folder_name: &str) -> (String, String, O
     let mut author = String::new();
     let mut gallery_id: Option<String> = None;
     for line in info.lines() {
-        let Some((key, value)) = line.split_once(':') else { continue };
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
         let value = value.trim().to_string();
         match key.trim() {
             "제목" => title = value,
@@ -208,10 +212,17 @@ pub(crate) fn list_page_files(folder: &Path) -> Result<Vec<String>, LibraryError
     };
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        let Some(stem) = name.split_once('.') else { continue };
-        let Ok(number) = stem.0.parse::<u32>() else { continue };
+        let Some(stem) = name.split_once('.') else {
+            continue;
+        };
+        let Ok(number) = stem.0.parse::<u32>() else {
+            continue;
+        };
         let ext = stem.1.to_ascii_lowercase();
-        if matches!(ext.as_str(), "webp" | "avif" | "jpg" | "jpeg" | "png" | "gif") {
+        if matches!(
+            ext.as_str(),
+            "webp" | "avif" | "jpg" | "jpeg" | "png" | "gif"
+        ) {
             pages.push((number, name));
         }
     }
@@ -227,7 +238,9 @@ fn create_thumbnail(source: &Path, target: &Path) -> Result<(), LibraryError> {
     let reader = image::ImageReader::new(std::io::BufReader::new(file))
         .with_guessed_format()
         .map_err(|_| LibraryError::UnsupportedImage)?;
-    let image = reader.decode().map_err(|_| LibraryError::UnsupportedImage)?;
+    let image = reader
+        .decode()
+        .map_err(|_| LibraryError::UnsupportedImage)?;
     let out = fs::File::create(target).map_err(|source_err| LibraryError::WriteAsset {
         path: target.to_path_buf(),
         source: source_err,
@@ -273,7 +286,10 @@ mod tests {
             fs::write(temp.path().join(name), b"x").unwrap();
         }
         let pages = list_page_files(temp.path()).unwrap();
-        assert_eq!(pages, vec!["001.webp", "1.webp", "02.webp", "3.webp", "10.avif"]);
+        assert_eq!(
+            pages,
+            vec!["001.webp", "1.webp", "02.webp", "3.webp", "10.avif"]
+        );
     }
 
     #[test]

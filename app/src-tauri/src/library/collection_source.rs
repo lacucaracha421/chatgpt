@@ -52,7 +52,7 @@ fn classify_shelf(file_name: &str, regex: &regex::Regex) -> (u8, String) {
     if let Some(caps) = regex.captures(&lower) {
         let ver = caps.get(1).map(|m| m.as_str()).unwrap_or("");
         let shelf = if ver.contains('.') {
-            let decimal = ver.split('.').last().unwrap_or("");
+            let decimal = ver.split('.').next_back().unwrap_or("");
             match decimal {
                 "1" => 2,
                 "2" => 3,
@@ -134,12 +134,11 @@ fn info_cover(collection_dir: &Path) -> Result<Option<PathBuf>, LibraryError> {
         return Ok(None);
     }
     let candidate = collection_dir.join(relative);
-    let canonical_collection = fs::canonicalize(collection_dir).map_err(|source| {
-        LibraryError::ReadMedia {
+    let canonical_collection =
+        fs::canonicalize(collection_dir).map_err(|source| LibraryError::ReadMedia {
             path: collection_dir.to_path_buf(),
             source,
-        }
-    })?;
+        })?;
     let canonical_candidate = match fs::canonicalize(&candidate) {
         Ok(path) => path,
         Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -232,8 +231,8 @@ impl Library {
         collection_id: &str,
     ) -> Result<Vec<CollectionCover>, LibraryError> {
         let connection = self.connection()?;
-        let root = collection_source_root(&connection)?
-            .ok_or(LibraryError::CollectionSourceRootNotSet)?;
+        let root =
+            collection_source_root(&connection)?.ok_or(LibraryError::CollectionSourceRootNotSet)?;
         let source_path: Option<String> = connection
             .query_row(
                 "SELECT source_path FROM collections WHERE id = ?1",
@@ -287,8 +286,8 @@ impl Library {
         file_name: &str,
     ) -> Result<MediaResponse, LibraryError> {
         let connection = self.connection()?;
-        let root = collection_source_root(&connection)?
-            .ok_or(LibraryError::CollectionSourceRootNotSet)?;
+        let root =
+            collection_source_root(&connection)?.ok_or(LibraryError::CollectionSourceRootNotSet)?;
         let source_path: Option<String> = connection
             .query_row(
                 "SELECT source_path FROM collections WHERE id = ?1",
@@ -311,8 +310,8 @@ impl Library {
         collection_id: &str,
     ) -> Result<MediaResponse, LibraryError> {
         let connection = self.connection()?;
-        let root = collection_source_root(&connection)?
-            .ok_or(LibraryError::CollectionSourceRootNotSet)?;
+        let root =
+            collection_source_root(&connection)?.ok_or(LibraryError::CollectionSourceRootNotSet)?;
         let source_path: Option<String> = connection
             .query_row(
                 "SELECT source_path FROM collections WHERE id = ?1",
@@ -369,8 +368,16 @@ mod tests {
         let (_temp, library, collection_dir) = source_library();
         fs::write(collection_dir.join("chosen.png"), b"chosen").unwrap();
         fs::write(collection_dir.join("thumbnail.webp"), b"thumbnail").unwrap();
-        fs::write(collection_dir.join(COVERS_DIR).join("vol_1_cover.png"), b"volume").unwrap();
-        fs::write(collection_dir.join("info.txt"), "Title: Series\nCover: chosen.png\n").unwrap();
+        fs::write(
+            collection_dir.join(COVERS_DIR).join("vol_1_cover.png"),
+            b"volume",
+        )
+        .unwrap();
+        fs::write(
+            collection_dir.join("info.txt"),
+            "Title: Series\nCover: chosen.png\n",
+        )
+        .unwrap();
 
         let media = library
             .collection_source_preview_media(COLLECTION_ID)
@@ -392,22 +399,38 @@ mod tests {
         fs::write(&volume, b"volume").unwrap();
 
         assert_eq!(
-            read_media(library.collection_source_preview_media(COLLECTION_ID).unwrap()),
+            read_media(
+                library
+                    .collection_source_preview_media(COLLECTION_ID)
+                    .unwrap()
+            ),
             b"webp-thumbnail"
         );
         fs::remove_file(webp_thumbnail).unwrap();
         assert_eq!(
-            read_media(library.collection_source_preview_media(COLLECTION_ID).unwrap()),
+            read_media(
+                library
+                    .collection_source_preview_media(COLLECTION_ID)
+                    .unwrap()
+            ),
             b"png-thumbnail"
         );
         fs::remove_file(png_thumbnail).unwrap();
         assert_eq!(
-            read_media(library.collection_source_preview_media(COLLECTION_ID).unwrap()),
+            read_media(
+                library
+                    .collection_source_preview_media(COLLECTION_ID)
+                    .unwrap()
+            ),
             b"root-image"
         );
         fs::remove_file(root_image).unwrap();
         assert_eq!(
-            read_media(library.collection_source_preview_media(COLLECTION_ID).unwrap()),
+            read_media(
+                library
+                    .collection_source_preview_media(COLLECTION_ID)
+                    .unwrap()
+            ),
             b"volume"
         );
     }
@@ -415,7 +438,11 @@ mod tests {
     #[test]
     fn source_preview_ignores_an_info_cover_outside_the_collection_folder() {
         let (_temp, library, collection_dir) = source_library();
-        fs::write(collection_dir.parent().unwrap().join("outside.png"), b"outside").unwrap();
+        fs::write(
+            collection_dir.parent().unwrap().join("outside.png"),
+            b"outside",
+        )
+        .unwrap();
         fs::write(collection_dir.join("thumbnail.webp"), b"safe-thumbnail").unwrap();
         fs::write(collection_dir.join("info.txt"), "Cover: ../outside.png\n").unwrap();
 

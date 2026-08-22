@@ -229,7 +229,9 @@ fn upsert_collection(
 
 fn map_duplicate_name_err(e: rusqlite::Error, name: &str) -> String {
     match e {
-        rusqlite::Error::SqliteFailure(ref fail, _) if fail.code == rusqlite::ErrorCode::ConstraintViolation => {
+        rusqlite::Error::SqliteFailure(ref fail, _)
+            if fail.code == rusqlite::ErrorCode::ConstraintViolation =>
+        {
             format!("a collection named '{name}' already exists")
         }
         other => other.to_string(),
@@ -253,8 +255,8 @@ fn parse_info_txt(folder: &Path) -> Result<Option<ParsedInfo>, String> {
     if !info_path.is_file() {
         return Ok(None);
     }
-    let raw = fs::read_to_string(&info_path)
-        .map_err(|e| format!("failed to read info.txt: {e}"))?;
+    let raw =
+        fs::read_to_string(&info_path).map_err(|e| format!("failed to read info.txt: {e}"))?;
     let fields = parse_key_value(&raw);
     let name = match first_value(&fields, "Title") {
         Some(name) => trim_field(name),
@@ -272,10 +274,9 @@ fn parse_info_txt(folder: &Path) -> Result<Option<ParsedInfo>, String> {
         Some(ref t) if t == "gacha" => CollectionType::Game,
         _ => CollectionType::Manga,
     };
-    let year = first_value(&fields, "Publication Year")
-        .and_then(|v| v.trim().parse::<i64>().ok());
-    let author = first_value(&fields, "Authors").map(|v| trim_field(&v));
-    let director = first_value(&fields, "Director").map(|v| trim_field(&v));
+    let year = first_value(&fields, "Publication Year").and_then(|v| v.trim().parse::<i64>().ok());
+    let author = first_value(&fields, "Authors").map(trim_field);
+    let director = first_value(&fields, "Director").map(trim_field);
     let my_score = first_value(&fields, "Rating").and_then(|v| {
         let v = v.trim();
         if v.eq_ignore_ascii_case("unknown") || v.is_empty() {
@@ -284,8 +285,8 @@ fn parse_info_txt(folder: &Path) -> Result<Option<ParsedInfo>, String> {
             v.parse::<i64>().ok()
         }
     });
-    let genres = first_value(&fields, "Genres").map(|v| trim_field(&v));
-    let overview = first_value(&fields, "Overview").map(|v| trim_field(&v));
+    let genres = first_value(&fields, "Genres").map(trim_field);
+    let overview = first_value(&fields, "Overview").map(trim_field);
     let external_bindings = external_bindings(&fields);
     Ok(Some(ParsedInfo {
         name,

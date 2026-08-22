@@ -5,8 +5,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use super::{
     error::LibraryError,
     models::{
-        AssetCollectionPatch, CollectionSummary, CollectionType, CreateCollection,
-        UpdateCollection,
+        AssetCollectionPatch, CollectionSummary, CollectionType, CreateCollection, UpdateCollection,
     },
     validated_asset_ids, Library,
 };
@@ -306,7 +305,10 @@ pub(crate) fn require_collection(connection: &Connection, id: &str) -> Result<()
     }
 }
 
-pub(crate) fn collection_by_id(connection: &Connection, id: &str) -> Result<CollectionSummary, LibraryError> {
+pub(crate) fn collection_by_id(
+    connection: &Connection,
+    id: &str,
+) -> Result<CollectionSummary, LibraryError> {
     let sql = format!("{COLLECTION_SUMMARY_SQL} WHERE collection.id = ?1");
     connection
         .query_row(&sql, [id], collection_from_row)
@@ -695,11 +697,9 @@ mod tests {
         assert_eq!(updated.author.as_deref(), Some("PlatinumGames"));
         assert_eq!(updated.external_score, Some(87));
 
-        let showcased = library
-            .set_collection_showcase(&created.id, true)
-            .unwrap();
+        let showcased = library.set_collection_showcase(&created.id, true).unwrap();
         assert!(showcased.showcase);
-        assert_eq!(library.list_collections().unwrap()[0].showcase, true);
+        assert!(library.list_collections().unwrap()[0].showcase);
     }
 
     #[test]

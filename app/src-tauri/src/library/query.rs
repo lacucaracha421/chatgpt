@@ -409,8 +409,9 @@ mod tests {
         error::LibraryError,
         models::{
             AssetAlbumPatch, AssetClassificationPatch, AssetCollectionPatch, AssetCursor,
-            AssetQuery, AssetSort, ClassificationKind, CreateAlbum, CreateClassification,
-            CollectionType, CreateCollection, ImportSource, MediaSummary, VideoPreparationState,
+            AssetQuery, AssetSort, ClassificationKind, CollectionType, CreateAlbum,
+            CreateClassification, CreateCollection, ImportSource, MediaSummary,
+            VideoPreparationState,
         },
         Library,
     };
@@ -742,7 +743,13 @@ mod tests {
         );
         library.trash_assets(&["member".into()]).unwrap();
         assert!(library.list_assets(query.clone()).unwrap().items.is_empty());
-        assert_eq!(library.get_collection(query.collection_id.as_deref().unwrap()).unwrap().asset_count, 0);
+        assert_eq!(
+            library
+                .get_collection(query.collection_id.as_deref().unwrap())
+                .unwrap()
+                .asset_count,
+            0
+        );
         library.restore_asset("member").unwrap();
         assert_eq!(library.list_assets(query).unwrap().items.len(), 1);
     }

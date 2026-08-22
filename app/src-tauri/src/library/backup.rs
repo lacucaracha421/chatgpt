@@ -23,10 +23,7 @@ struct BackupEntry {
 }
 
 impl Library {
-    pub fn create_pre_migration_backup(
-        &self,
-        label: &str,
-    ) -> Result<MetadataBackup, LibraryError> {
+    pub fn create_pre_migration_backup(&self, label: &str) -> Result<MetadataBackup, LibraryError> {
         if label != "legacy-lakomics" {
             return Err(LibraryError::InvalidBackup);
         }
@@ -35,11 +32,8 @@ impl Library {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let connection = self.connection()?;
-        let source_version: i64 = connection.pragma_query_value(
-            None,
-            "user_version",
-            |row| row.get(0),
-        )?;
+        let source_version: i64 =
+            connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
         let path = backup_path(
             &self.root,
             BackupKind::PreMigration,
@@ -530,10 +524,16 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let library = Library::open(temp.path()).unwrap();
 
-        let backup = library.create_pre_migration_backup("legacy-lakomics").unwrap();
+        let backup = library
+            .create_pre_migration_backup("legacy-lakomics")
+            .unwrap();
 
         assert_eq!(backup.kind, BackupKind::PreMigration);
-        assert!(library.list_backups().unwrap().iter().any(|entry| entry.id == backup.id));
+        assert!(library
+            .list_backups()
+            .unwrap()
+            .iter()
+            .any(|entry| entry.id == backup.id));
     }
 
     #[test]

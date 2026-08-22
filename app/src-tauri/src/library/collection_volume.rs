@@ -126,8 +126,7 @@ impl Library {
         let legacy_covers = match self.list_collection_covers(collection_id) {
             Ok(covers) => covers,
             Err(
-                LibraryError::CollectionSourceRootNotSet
-                | LibraryError::CollectionSourcePathNotSet,
+                LibraryError::CollectionSourceRootNotSet | LibraryError::CollectionSourcePathNotSet,
             ) => Vec::new(),
             Err(error) => return Err(error),
         };
@@ -142,7 +141,10 @@ impl Library {
             }
         }
         for ((volume_number, edition_index), file_name) in local_slots {
-            if self.local_volume_artwork(collection_id, volume_number, edition_index)?.is_some() {
+            if self
+                .local_volume_artwork(collection_id, volume_number, edition_index)?
+                .is_some()
+            {
                 continue;
             }
             let existing_artwork = self
@@ -162,12 +164,13 @@ impl Library {
                     return Err(LibraryError::InvalidWorkArtwork);
                 }
                 let mut bytes = Vec::with_capacity(media.length as usize);
-                media.file.read_to_end(&mut bytes).map_err(|source| {
-                    LibraryError::ReadMedia {
+                media
+                    .file
+                    .read_to_end(&mut bytes)
+                    .map_err(|source| LibraryError::ReadMedia {
                         path: std::path::PathBuf::from(&file_name),
                         source,
-                    }
-                })?;
+                    })?;
                 let prepared = self.prepare_work_artwork(collection_id, &bytes)?;
                 let artwork_id = {
                     let mut connection = self.connection()?;
@@ -194,7 +197,10 @@ impl Library {
                 prepared.commit();
                 artwork_id
             };
-            if self.local_volume_artwork(collection_id, volume_number, edition_index)?.is_none() {
+            if self
+                .local_volume_artwork(collection_id, volume_number, edition_index)?
+                .is_none()
+            {
                 let mut connection = self.connection()?;
                 let transaction = connection.transaction()?;
                 set_local_volume(
@@ -457,9 +463,7 @@ mod tests {
 
     use super::{materialize_mangadex_volumes, parse_volume_slot};
     use crate::library::{
-        models::{
-            CollectionType, CreateCollection, ExternalBindingInput, MangaDexCoverCandidate,
-        },
+        models::{CollectionType, CreateCollection, ExternalBindingInput, MangaDexCoverCandidate},
         Library,
     };
 
@@ -624,7 +628,10 @@ mod tests {
         assert_eq!(
             volumes
                 .iter()
-                .map(|volume| (volume.display_label.clone(), volume.cover_artwork_id.is_some()))
+                .map(|volume| (
+                    volume.display_label.clone(),
+                    volume.cover_artwork_id.is_some()
+                ))
                 .collect::<Vec<_>>(),
             vec![("1".into(), true), ("2.3".into(), true)]
         );
@@ -638,7 +645,10 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(source, (Some("local".into()), Some("vol_1_local.png".into())));
+        assert_eq!(
+            source,
+            (Some("local".into()), Some("vol_1_local.png".into()))
+        );
         let counts_before: (i64, i64) = library
             .connection()
             .unwrap()
@@ -761,7 +771,12 @@ mod tests {
         let covers = vec![
             candidate("11111111-1111-4111-8111-111111111111", "one.jpg", "1", "ja"),
             candidate("22222222-2222-4222-8222-222222222222", "two.jpg", "2", "ja"),
-            candidate("33333333-3333-4333-8333-333333333333", "three.jpg", "3", "ja"),
+            candidate(
+                "33333333-3333-4333-8333-333333333333",
+                "three.jpg",
+                "3",
+                "ja",
+            ),
         ];
         {
             let mut connection = library.connection().unwrap();

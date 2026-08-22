@@ -55,7 +55,10 @@ impl Library {
         let name = normalized_name(name.to_owned())?;
         let connection = self.connection()?;
         let changed = connection
-            .execute("UPDATE albums SET name = ?1 WHERE id = ?2", params![name, id])
+            .execute(
+                "UPDATE albums SET name = ?1 WHERE id = ?2",
+                params![name, id],
+            )
             .map_err(map_duplicate_name)?;
         if changed == 0 {
             return Err(LibraryError::AlbumNotFound);
@@ -136,11 +139,7 @@ impl Library {
         let transaction = connection.transaction()?;
         let asset_ids = validated_asset_ids(&transaction, &patch.asset_ids)?;
         let add_ids: BTreeSet<_> = patch.add_album_ids.iter().map(String::as_str).collect();
-        let remove_ids: BTreeSet<_> = patch
-            .remove_album_ids
-            .iter()
-            .map(String::as_str)
-            .collect();
+        let remove_ids: BTreeSet<_> = patch.remove_album_ids.iter().map(String::as_str).collect();
         for album_id in add_ids.iter().chain(remove_ids.iter()) {
             require_album(&transaction, album_id)?;
         }
@@ -286,9 +285,7 @@ mod tests {
             })
             .unwrap();
 
-        library
-            .move_album(&child.id, Some(&other_root.id))
-            .unwrap();
+        library.move_album(&child.id, Some(&other_root.id)).unwrap();
         assert_eq!(
             library
                 .list_albums()
@@ -365,11 +362,7 @@ mod tests {
         assert_eq!(changed.color_key.as_deref(), Some("pink"));
 
         assert!(matches!(
-            library.update_album_appearance(
-                &album.id,
-                Some("uploaded-svg"),
-                Some("#ffffff")
-            ),
+            library.update_album_appearance(&album.id, Some("uploaded-svg"), Some("#ffffff")),
             Err(LibraryError::InvalidAlbumAppearance)
         ));
         let unchanged = library.list_albums().unwrap().pop().unwrap();
@@ -435,7 +428,8 @@ mod tests {
             library
                 .connection()
                 .unwrap()
-                .query_row("SELECT COUNT(*) FROM assets", [], |row| row.get::<_, i64>(0))
+                .query_row("SELECT COUNT(*) FROM assets", [], |row| row
+                    .get::<_, i64>(0))
                 .unwrap(),
             1
         );
