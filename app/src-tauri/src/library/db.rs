@@ -1025,7 +1025,11 @@ mod tests {
                 [],
             )
             .is_err());
-        assert!(!connection.prepare("PRAGMA foreign_key_check").unwrap().exists([]).unwrap());
+        assert!(!connection
+            .prepare("PRAGMA foreign_key_check")
+            .unwrap()
+            .exists([])
+            .unwrap());
         assert_eq!(
             connection
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
