@@ -2,7 +2,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
-import type { CollectionSummary, LibraryGateway } from "../library/types";
+import type { CollectionSummary, LibraryGateway, ReleaseWatchEvent } from "../library/types";
 import { CollectionOverlay } from "./CollectionOverlay";
 
 afterEach(cleanup);
@@ -27,6 +27,12 @@ const collection: CollectionSummary = {
   createdAt: "t",
   updatedAt: "t",
 };
+
+const unread: ReleaseWatchEvent[] = [
+  { id: "e1", kind: "new_volume", volumeNumber: 13, previousValue: null, currentValue: "2026-09-01", detectedAt: "2026-08-22T00:00:00Z" },
+  { id: "e2", kind: "release_date_changed", volumeNumber: 12, previousValue: "2026-08-21", currentValue: "2026-08-23", detectedAt: "2026-08-22T00:00:00Z" },
+  { id: "e3", kind: "release_status_changed", volumeNumber: 11, previousValue: "upcoming", currentValue: "released", detectedAt: "2026-08-22T00:00:00Z" },
+];
 
 function renderOverlay(
   overrides: Partial<LibraryGateway> = {},
@@ -61,6 +67,73 @@ function renderOverlay(
 }
 
 describe("CollectionOverlay MangaDex flow", () => {
+  it("enables release watch for a connected Aladin manga", async () => {
+    const user = userEvent.setup();
+    const setReleaseWatchEnabled = vi.fn().mockResolvedValue({ enabled: true, lastCheckedAt: null });
+    const { gateway } = renderOverlay({
+      getAladinConnection: vi.fn().mockResolvedValue({ anchorItemId: "item-1", query: "던전밥", lastSyncedAt: "t" }),
+      getReleaseWatchStatus: vi.fn().mockResolvedValue({ enabled: false, lastCheckedAt: null }),
+      setReleaseWatchEnabled,
+    });
+
+    await user.click(await screen.findByRole("button", { name: "신간 알림 켜기" }));
+
+    expect(setReleaseWatchEnabled).toHaveBeenCalledWith("collection-1", true);
+    expect(await screen.findByRole("button", { name: "신간 알림 끄기" })).toBeInTheDocument();
+    expect(gateway.takeUnreadReleaseChanges).toHaveBeenCalledOnce();
+  });
+
+  it("disables an enabled release watch", async () => {
+    const user = userEvent.setup();
+    const setReleaseWatchEnabled = vi.fn().mockResolvedValue({ enabled: false, lastCheckedAt: "t" });
+    renderOverlay({
+      getAladinConnection: vi.fn().mockResolvedValue({ anchorItemId: "item-1", query: "던전밥", lastSyncedAt: "t" }),
+      getReleaseWatchStatus: vi.fn().mockResolvedValue({ enabled: true, lastCheckedAt: "t" }),
+      setReleaseWatchEnabled,
+    });
+
+    await user.click(await screen.findByRole("button", { name: "신간 알림 끄기" }));
+
+    expect(setReleaseWatchEnabled).toHaveBeenCalledWith("collection-1", false);
+    expect(await screen.findByRole("button", { name: "신간 알림 켜기" })).toBeInTheDocument();
+  });
+
+  it("does not expose release watch without an Aladin binding", async () => {
+    const { gateway } = renderOverlay();
+
+    await waitFor(() => expect(gateway.getAladinConnection).toHaveBeenCalledOnce());
+    expect(screen.queryByRole("button", { name: /신간 알림/ })).not.toBeInTheDocument();
+  });
+
+  it("takes unread changes once, keeps the selected cover, and refreshes the card projection", async () => {
+    const onChanged = vi.fn().mockResolvedValue(undefined);
+    renderOverlay({
+      listCollectionVolumes: vi.fn().mockResolvedValue([{
+        id: "v1", volumeNumber: 1, editionIndex: 0, displayLabel: "1", coverArtworkId: "art-1",
+      }]),
+      takeUnreadReleaseChanges: vi.fn().mockResolvedValue(unread),
+    }, onChanged);
+
+    const hero = (await screen.findAllByRole("img", { name: "1권 표지" }))
+      .find((image) => image.getAttribute("src")?.includes("work-artwork/art-1"))!;
+    const summary = await screen.findByRole("region", { name: "새 출간 정보" });
+
+    expect(summary).toHaveTextContent("새 권: 13권");
+    expect(summary).toHaveTextContent("출간일 변경: 12권 2026-08-21 → 2026-08-23");
+    expect(summary).toHaveTextContent("출간 상태 변경: 11권 출간 예정 → 출간됨");
+    expect(onChanged).toHaveBeenCalledOnce();
+    expect(hero).toHaveAttribute("src", "http://lakomics.localhost/work-artwork/art-1");
+  });
+
+  it("renders no release summary and does not refresh cards when there are no unread changes", async () => {
+    const onChanged = vi.fn().mockResolvedValue(undefined);
+    const { gateway } = renderOverlay({}, onChanged);
+
+    await waitFor(() => expect(gateway.takeUnreadReleaseChanges).toHaveBeenCalledOnce());
+    expect(screen.queryByRole("region", { name: "새 출간 정보" })).not.toBeInTheDocument();
+    expect(onChanged).not.toHaveBeenCalled();
+  });
+
   it("prefers a Volume cover and falls back to stored WorkArtwork", async () => {
     renderOverlay({
       listCollectionVolumes: vi.fn().mockResolvedValue([
@@ -178,10 +251,12 @@ describe("CollectionOverlay MangaDex flow", () => {
       localReleaseDate: "2026-08-20", isbn13: "9781234567890", releaseStatus: "released" as const,
     };
     const listCollectionVolumes = vi.fn().mockResolvedValue([initial]);
+    const getReleaseWatchStatus = vi.fn().mockResolvedValue({ enabled: true, lastCheckedAt: "t" });
     const { gateway } = renderOverlay({
       listCollectionVolumes,
       getMangaDexConnection: vi.fn().mockResolvedValue({ mangaId: "manga-1", lastSyncedAt: "t" }),
       getAladinConnection: vi.fn().mockResolvedValue({ anchorItemId: "item-1", query: "던전밥", lastSyncedAt: "t" }),
+      getReleaseWatchStatus,
       refreshAladin: vi.fn().mockResolvedValue({ added: 0, updated: 1, unchanged: 0, ignored: 0 }),
     });
     const hero = (await screen.findAllByRole("img", { name: "1권 표지" }))
@@ -194,6 +269,7 @@ describe("CollectionOverlay MangaDex flow", () => {
     await user.click(await screen.findByRole("button", { name: "Aladin 새로고침" }));
 
     await waitFor(() => expect(gateway.refreshAladin).toHaveBeenCalledWith("collection-1"));
+    expect(getReleaseWatchStatus).toHaveBeenCalledTimes(2);
     expect(listCollectionVolumes).toHaveBeenCalledOnce();
     expect(screen.getByText("2026. 08. 20.")).toBeInTheDocument();
     expect(screen.getByText("9781234567890")).toBeInTheDocument();

@@ -58,6 +58,20 @@ describe("CollectionBrowser", () => {
     expect(screen.getByText("3개")).toBeInTheDocument();
   });
 
+  it("shows unread release counts only when a collection has changes", () => {
+    renderBrowser({
+      collections: [
+        { ...sample, id: "changed", name: "던전밥", unreadReleaseCount: 3 },
+        { ...sample, id: "quiet", name: "요츠바랑!", unreadReleaseCount: 0 },
+      ],
+      typeFilter: null,
+      showcase: false,
+    });
+
+    expect(screen.getByText("신간 3")).toBeInTheDocument();
+    expect(screen.queryByText("신간 0")).not.toBeInTheDocument();
+  });
+
   it("uses the source preview when a collection has no cover asset", () => {
     renderBrowser({
       collections: [{ ...sample, sourcePath: "games/astral-chain" }],

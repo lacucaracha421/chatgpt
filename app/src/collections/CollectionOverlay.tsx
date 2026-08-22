@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { collectionCoverUrl, workArtworkUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
-import type { AladinConnection, CollectionCover, CollectionSummary, CollectionVolume, MangaDexConnection } from "../library/types";
+import type { AladinConnection, CollectionCover, CollectionSummary, CollectionVolume, MangaDexConnection, ReleaseWatchEvent, ReleaseWatchStatus } from "../library/types";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { Button } from "../shared/ui/Button";
 import { Skeleton } from "../shared/ui/Skeleton";
@@ -15,6 +15,7 @@ import { CollectionVolumePanel } from "./CollectionVolumePanel";
 import { MangaCoverViewer } from "./MangaCoverViewer";
 import { AladinConnectDialog } from "./AladinConnectDialog";
 import { MangaDexImportDialog } from "./MangaDexImportDialog";
+import { ReleaseWatchSummary } from "./ReleaseWatchSummary";
 
 type CollectionOverlayProps = {
   collectionId: string;
@@ -38,11 +39,20 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
   const [aladinOpen, setAladinOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [aladinRefreshing, setAladinRefreshing] = useState(false);
+  const [releaseWatchStatus, setReleaseWatchStatus] = useState<ReleaseWatchStatus | null>(null);
+  const [releaseChanges, setReleaseChanges] = useState<ReleaseWatchEvent[]>([]);
+  const [releaseWatchSaving, setReleaseWatchSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const viewerOpenerRef = useRef<HTMLElement | null>(null);
+  const onChangedRef = useRef(onChanged);
+
+  useEffect(() => {
+    onChangedRef.current = onChanged;
+  }, [onChanged]);
 
   const collection = collections.find((candidate) => candidate.id === collectionId);
   const isManga = collection?.type === "manga";
+  const hasAladinConnection = Boolean(aladinConnection);
   const selectedCover = covers?.find((cover) => cover.fileName === selectedFileName) ?? null;
   const selectedVolume = volumes?.find((volume) => volume.id === selectedVolumeId) ?? null;
   const viewerVolumes = useMemo(
@@ -68,6 +78,21 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
         setSelectedFileName(next[0]?.fileName ?? null);
       },
       () => { if (active) setCovers([]); },
+    );
+    return () => { active = false; };
+  }, [gateway, collectionId, isManga]);
+
+  useEffect(() => {
+    let active = true;
+    setReleaseChanges([]);
+    if (!isManga) return () => { active = false; };
+    void gateway.takeUnreadReleaseChanges(collectionId).then(
+      async (events) => {
+        if (!active) return;
+        setReleaseChanges(events);
+        if (events.length > 0) await onChangedRef.current();
+      },
+      () => undefined,
     );
     return () => { active = false; };
   }, [gateway, collectionId, isManga]);
@@ -107,6 +132,17 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
     })();
     return () => { active = false; };
   }, [gateway, collectionId, isManga]);
+
+  useEffect(() => {
+    let active = true;
+    setReleaseWatchStatus(null);
+    if (!hasAladinConnection) return () => { active = false; };
+    void gateway.getReleaseWatchStatus(collectionId).then(
+      (status) => { if (active) setReleaseWatchStatus(status); },
+      () => undefined,
+    );
+    return () => { active = false; };
+  }, [collectionId, gateway, hasAladinConnection]);
 
   useEffect(() => {
     let active = true;
@@ -190,11 +226,25 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
         ? current
         : firstVolumeId(refreshed, editionIndex));
       setAladinConnection(await gateway.getAladinConnection(collectionId));
+      setReleaseWatchStatus(await gateway.getReleaseWatchStatus(collectionId));
       setMessage(aladinResultMessage(result));
     } catch (error) {
       setMessage(commandErrorMessage(error, "Aladin 정보를 새로고침하지 못했습니다."));
     } finally {
       setAladinRefreshing(false);
+    }
+  }
+
+  async function toggleReleaseWatch() {
+    if (!releaseWatchStatus) return;
+    setReleaseWatchSaving(true);
+    setMessage(null);
+    try {
+      setReleaseWatchStatus(await gateway.setReleaseWatchEnabled(collectionId, !releaseWatchStatus.enabled));
+    } catch (error) {
+      setMessage(commandErrorMessage(error, "신간 알림 설정을 바꾸지 못했습니다."));
+    } finally {
+      setReleaseWatchSaving(false);
     }
   }
 
@@ -233,12 +283,18 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
               {aladinConnection ? "Aladin 새로고침" : "Aladin 연결"}
             </Button>
           )}
+          {isManga && aladinConnection && releaseWatchStatus && (
+            <Button size="sm" variant="ghost" disabled={releaseWatchSaving} onClick={() => void toggleReleaseWatch()}>
+              {releaseWatchStatus.enabled ? "신간 알림 끄기" : "신간 알림 켜기"}
+            </Button>
+          )}
           <Button size="icon" variant="ghost" aria-label="컬렉션 표지 보기 닫기" onClick={onExit}>
             <XMarkIcon aria-hidden="true" />
           </Button>
         </>}
       />
       {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
+      <ReleaseWatchSummary events={releaseChanges} />
       <div className="collection-overlay__body">
         {collection && <CollectionInfoPanel collection={collection} />}
         <div className="collection-overlay__hero">
