@@ -41,6 +41,9 @@ import type {
   CollectionCover,
   CollectionVolume,
   MangaDexVolumeSyncResult,
+  ReleaseWatchEvent,
+  ReleaseWatchRunResult,
+  ReleaseWatchStatus,
 } from "./types";
 
 export const libraryGateway: LibraryGateway = {
@@ -122,6 +125,14 @@ export const libraryGateway: LibraryGateway = {
     invoke<AladinSyncResult>("refresh_aladin", { collectionId }),
   getAladinConnection: (collectionId) =>
     invoke<AladinConnection | null>("get_aladin_connection", { collectionId }),
+  getReleaseWatchStatus: (collectionId) =>
+    invoke<ReleaseWatchStatus>("get_release_watch_status", { collectionId }),
+  setReleaseWatchEnabled: (collectionId, enabled) =>
+    invoke<ReleaseWatchStatus>("set_release_watch_enabled", { collectionId, enabled }),
+  takeUnreadReleaseChanges: (collectionId) =>
+    invoke<ReleaseWatchEvent[]>("take_unread_release_changes", { collectionId }),
+  runDueReleaseWatch: () =>
+    invoke<ReleaseWatchRunResult>("run_due_release_watch"),
   createCollection: (input: CreateCollection) =>
     invoke<CollectionSummary>("create_collection", { request: input }),
   updateCollection: (id: string, input: UpdateCollection) =>

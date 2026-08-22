@@ -217,6 +217,21 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag }: { lib
     return () => { active = false; };
   }, [appendMessage, gateway]);
   useEffect(() => {
+    let active = true;
+    void (async () => {
+      const result = await gateway.runDueReleaseWatch();
+      if (!active) return;
+      await refreshCollections();
+      if (!active || result.changedCollections === 0) return;
+      appendMessage(`새 출간 정보가 있는 작품 ${result.changedCollections}개`);
+    })().catch((error) => {
+      if (active) {
+        console.warn("Release Watch startup check failed", commandErrorMessage(error, "신간 확인을 완료하지 못했습니다."));
+      }
+    });
+    return () => { active = false; };
+  }, [appendMessage, gateway, libraryRoot, refreshCollections]);
+  useEffect(() => {
     saveUiPreferences(preferences);
   }, [preferences]);
   useEffect(() => {

@@ -30,6 +30,9 @@ export function CollectionCard({
         ) : (
           <span className="collection-card__placeholder" aria-hidden="true" />
         )}
+        {collection.unreadReleaseCount > 0 && (
+          <span className="collection-card__release-badge">신간 {collection.unreadReleaseCount}</span>
+        )}
       </span>
       <span className="collection-card__meta">
         <span className="collection-card__type">{TYPE_LABEL[collection.type]}</span>

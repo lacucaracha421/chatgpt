@@ -208,6 +208,8 @@ pub enum LibraryError {
     InvalidAladinResponse,
     #[error("기존 알라딘 연결과 같은 시리즈를 확실하게 찾을 수 없습니다")]
     AmbiguousAladinBinding,
+    #[error("만화 컬렉션을 알라딘에 연결한 뒤 신간 알림을 켤 수 있습니다")]
+    ReleaseWatchRequiresAladinBinding,
     #[error("이 알라딘 상품은 이미 다른 Work에 연결되어 있습니다")]
     DuplicateAladinProviderItem,
     #[error("영상 형식을 지원하지 않거나 파일이 손상됐습니다")]

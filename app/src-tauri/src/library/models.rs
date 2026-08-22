@@ -355,6 +355,7 @@ pub struct CollectionSummary {
     pub cover_asset_id: Option<String>,
     pub selected_work_artwork_id: Option<String>,
     pub asset_count: u64,
+    pub unread_release_count: u64,
     pub year: Option<i64>,
     pub author: Option<String>,
     pub director: Option<String>,
@@ -398,6 +399,52 @@ pub struct ExternalBinding {
     pub last_synced_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseWatchStatus {
+    pub enabled: bool,
+    pub last_checked_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReleaseWatchEventKind {
+    NewVolume,
+    ReleaseDateChanged,
+    ReleaseStatusChanged,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseWatchEvent {
+    pub id: String,
+    pub kind: ReleaseWatchEventKind,
+    pub volume_number: i64,
+    pub previous_value: Option<String>,
+    pub current_value: Option<String>,
+    pub detected_at: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReleaseWatchRunStopReason {
+    CredentialNotConfigured,
+    InvalidCredential,
+    RateLimited,
+    TimedOut,
+    Unavailable,
+    InvalidResponse,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseWatchRunResult {
+    pub checked: u64,
+    pub changed_collections: u64,
+    pub skipped: u64,
+    pub stop_reason: Option<ReleaseWatchRunStopReason>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -611,6 +658,7 @@ mod tests {
             cover_asset_id: None,
             selected_work_artwork_id: None,
             asset_count: 0,
+            unread_release_count: 0,
             year: Some(2014),
             author: Some("Ryoko Kui".into()),
             director: None,

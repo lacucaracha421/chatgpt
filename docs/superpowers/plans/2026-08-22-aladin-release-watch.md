@@ -53,7 +53,7 @@
 - Consumes: `collection_external_bindings(collection_id, provider)` and `collections(id)`.
 - Produces: schema version `17`, `release_watch_subscriptions`, `release_watch_events`, and `CollectionSummary.unread_release_count: u64` serialized as `unreadReleaseCount`.
 
-- [ ] **Step 1: Add a failing v16 migration test**
+- [x] **Step 1: Add a failing v16 migration test**
 
 In `db.rs`, add `migrates_v16_to_release_watch_without_enabling_bindings`. Build an in-memory v16 database with the existing migration constants, insert one manga Collection and one Aladin binding, call `migrate_to_latest(&mut connection, 16)`, then assert:
 
@@ -76,7 +76,7 @@ connection.execute(
 
 Also insert one valid `new_volume` event, reject an unknown event kind, delete the Collection, and assert both new tables cascade to zero rows.
 
-- [ ] **Step 2: Run the migration test to verify it fails**
+- [x] **Step 2: Run the migration test to verify it fails**
 
 Run:
 
@@ -86,7 +86,7 @@ cargo test --manifest-path app/src-tauri/Cargo.toml migrates_v16_to_release_watc
 
 Expected: FAIL because schema version 17 and the new tables do not exist.
 
-- [ ] **Step 3: Add migration 0017 and register it**
+- [x] **Step 3: Add migration 0017 and register it**
 
 Create `0017_aladin_release_watch.sql` with the complete schema:
 
@@ -125,7 +125,7 @@ PRAGMA user_version = 17;
 
 In `db.rs`, set `SCHEMA_VERSION` to `17`, include the new file as `ALADIN_RELEASE_WATCH_SCHEMA`, permit prior versions through `16`, and execute the schema when `version <= 16`.
 
-- [ ] **Step 4: Add unread count to the Rust Collection projection**
+- [x] **Step 4: Add unread count to the Rust Collection projection**
 
 Add this field to `CollectionSummary`:
 
@@ -146,7 +146,7 @@ Append this expression before `collection.source_path` in `COLLECTION_SUMMARY_SQ
 
 Update `collection_from_row` and the serialization fixture in `models.rs` with `unread_release_count: 0`. Add a focused Collection test that inserts two unread events and one read event, then asserts `get_collection(id).unread_release_count == 2`.
 
-- [ ] **Step 5: Run the focused migration and Collection tests**
+- [x] **Step 5: Run the focused migration and Collection tests**
 
 Run:
 
@@ -157,7 +157,7 @@ cargo test --manifest-path app/src-tauri/Cargo.toml collection_summary_counts_on
 
 Expected: both tests PASS.
 
-- [ ] **Step 6: Commit the persistence slice**
+- [x] **Step 6: Commit the persistence slice**
 
 ```powershell
 git add -- app/src-tauri/migrations/0017_aladin_release_watch.sql app/src-tauri/src/library/db.rs app/src-tauri/src/library/models.rs app/src-tauri/src/library/collection.rs
@@ -184,7 +184,7 @@ git commit -m "feat: persist Aladin release watch state"
   - `Library::set_release_watch_enabled(&self, collection_id: &str, enabled: bool) -> Result<ReleaseWatchStatus, LibraryError>`
   - `Library::take_unread_release_changes(&self, collection_id: &str) -> Result<Vec<ReleaseWatchEvent>, LibraryError>`
 
-- [ ] **Step 1: Write failing subscription and unread lifecycle tests**
+- [x] **Step 1: Write failing subscription and unread lifecycle tests**
 
 In `release_watch.rs`, create a test helper that opens a temporary Library, creates a manga Collection, and optionally inserts an Aladin binding. Add tests proving:
 
@@ -206,7 +206,7 @@ Seed the subscription from the binding's existing `last_synced_at`, make repeate
 
 For unread lifecycle, insert three events in detection order, call `take_unread_release_changes`, assert the returned typed values and order, assert their `read_at` values become non-null, and assert a second call returns an empty vector. Delete the subscription before taking events and prove the events survive.
 
-- [ ] **Step 2: Run the module tests to verify they fail**
+- [x] **Step 2: Run the module tests to verify they fail**
 
 Run:
 
@@ -216,7 +216,7 @@ cargo test --manifest-path app/src-tauri/Cargo.toml release_watch::tests
 
 Expected: FAIL because the module, models, and error variant do not exist.
 
-- [ ] **Step 3: Define serialized Release Watch models and error**
+- [x] **Step 3: Define serialized Release Watch models and error**
 
 Add to `models.rs`:
 
@@ -250,7 +250,7 @@ pub struct ReleaseWatchEvent {
 
 Add `LibraryError::ReleaseWatchRequiresAladinBinding` with Korean text explaining that Aladin must be connected before enabling notifications. Register `mod release_watch;` in `library/mod.rs`.
 
-- [ ] **Step 4: Implement the minimal subscription operations**
+- [x] **Step 4: Implement the minimal subscription operations**
 
 In `release_watch.rs`, use row presence as the boolean. Enabling uses one `INSERT ... SELECT` so binding validation and initial timestamp are atomic:
 
@@ -273,7 +273,7 @@ if inserted == 0 && !subscription_exists(&connection, collection_id)? {
 
 Disabling deletes only the subscription. `get_release_watch_status` first requires the Collection, then returns `{ enabled: false, last_checked_at: None }` when no row exists.
 
-- [ ] **Step 5: Implement atomic take-and-read**
+- [x] **Step 5: Implement atomic take-and-read**
 
 Use one transaction. Query only `read_at IS NULL` ordered by `detected_at, id`, map event kinds explicitly, update exactly the returned IDs to one `read_at = now`, then commit. Do not delete event rows and do not mark events that arrived after the query.
 
@@ -289,7 +289,7 @@ for event in &events {
 }
 ```
 
-- [ ] **Step 6: Run the module tests and commit**
+- [x] **Step 6: Run the module tests and commit**
 
 Run:
 
@@ -321,7 +321,7 @@ git commit -m "feat: manage release watch subscriptions"
   - `pub(super) fn refresh_aladin_items_at(&self, collection_id: &str, items: Vec<AladinItem>, checked_at: &str) -> Result<AladinReconcileOutcome, LibraryError>`
   - the existing `apply_aladin`, `refresh_aladin`, and `AladinSyncResult` public signatures remain unchanged.
 
-- [ ] **Step 1: Write failing pure change-detection tests**
+- [x] **Step 1: Write failing pure change-detection tests**
 
 In `release_watch.rs`, test the pure helper with fixed timestamps and exact expected vectors:
 
@@ -351,7 +351,7 @@ assert_eq!(
 
 Also prove unchanged data produces no event, an unchanged date crossing from future at `previous` to past at `checked_at` produces only `ReleaseStatusChanged`, and `previous_checked_at: None` produces no synthetic status change.
 
-- [ ] **Step 2: Run the change-detection tests to verify they fail**
+- [x] **Step 2: Run the change-detection tests to verify they fail**
 
 Run:
 
@@ -361,7 +361,7 @@ cargo test --manifest-path app/src-tauri/Cargo.toml pending_release_changes_
 
 Expected: FAIL because the helper and pending type do not exist.
 
-- [ ] **Step 3: Implement deterministic date/status comparison**
+- [x] **Step 3: Implement deterministic date/status comparison**
 
 Move the stored Aladin source tuple into a named `pub(super) StoredAladinSource` containing the fields already compared by `reconcile_source`. Add:
 
@@ -375,7 +375,7 @@ fn release_status_at(publication_date: Option<&str>, checked_at: &str) -> Option
 
 `pending_release_changes` emits in stable order: `NewVolume` alone for no stored source; otherwise `ReleaseDateChanged` first when dates differ, followed by `ReleaseStatusChanged` when both a previous check and different derived statuses exist. Previous/current values are the exact nullable dates or `upcoming`/`released` strings.
 
-- [ ] **Step 4: Write failing transactional integration tests**
+- [x] **Step 4: Write failing transactional integration tests**
 
 In `aladin_flow.rs`, add tests that enable Release Watch, run `refresh_aladin_items` with fixture items, then call `take_unread_release_changes`. Prove:
 
@@ -388,7 +388,7 @@ In `aladin_flow.rs`, add tests that enable Release Watch, run `refresh_aladin_it
 
 Pass explicit check timestamps through a private `reconcile_aladin_at(..., checked_at: &str)` helper so tests never depend on the wall clock.
 
-- [ ] **Step 5: Integrate event insertion with the existing transaction**
+- [x] **Step 5: Integrate event insertion with the existing transaction**
 
 Inside `reconcile_aladin_at`:
 
@@ -421,7 +421,7 @@ transaction.execute(
 )?;
 ```
 
-- [ ] **Step 6: Run focused Aladin and Release Watch tests**
+- [x] **Step 6: Run focused Aladin and Release Watch tests**
 
 Run:
 
@@ -432,7 +432,7 @@ cargo test --manifest-path app/src-tauri/Cargo.toml aladin_flow::tests
 
 Expected: change-detection and all existing/new Aladin flow tests PASS.
 
-- [ ] **Step 7: Commit transactional detection**
+- [x] **Step 7: Commit transactional detection**
 
 ```powershell
 git add -- app/src-tauri/src/library/aladin_flow.rs app/src-tauri/src/library/release_watch.rs
@@ -486,7 +486,7 @@ git commit -m "feat: record Aladin release changes"
   - `Library::run_due_release_watch(&self, ttb_key: &str) -> Result<ReleaseWatchRunResult, LibraryError>`
   - Tauri/gateway commands `getReleaseWatchStatus`, `setReleaseWatchEnabled`, `takeUnreadReleaseChanges`, and `runDueReleaseWatch`.
 
-- [ ] **Step 1: Write failing due-selection and runner tests**
+- [x] **Step 1: Write failing due-selection and runner tests**
 
 In `release_watch.rs`, use a private `run_due_release_watch_with(checked_at, fetch)` seam whose fetch closure accepts the stored query and returns fixture `Vec<AladinItem>`. Add tests proving:
 
@@ -505,7 +505,7 @@ Seed subscriptions at null, exactly 24 hours old, 23:59:59 old, and older timest
 
 Add one test where `AmbiguousAladinBinding` increments `skipped` and continues, and one per provider-wide family proving `InvalidAladinCredential`, `AladinRateLimited`, `AladinTimedOut`, `AladinUnavailable`, and `InvalidAladinResponse` set the matching stop reason and make no later fetch call.
 
-- [ ] **Step 2: Run runner tests to verify they fail**
+- [x] **Step 2: Run runner tests to verify they fail**
 
 Run:
 
@@ -515,7 +515,7 @@ cargo test --manifest-path app/src-tauri/Cargo.toml run_due_release_watch_
 
 Expected: FAIL because the run result and runner do not exist.
 
-- [ ] **Step 3: Add a single-run lock and implement the sequential runner**
+- [x] **Step 3: Add a single-run lock and implement the sequential runner**
 
 Add to `Library`:
 
@@ -545,7 +545,7 @@ fn stop_reason(error: &LibraryError) -> Option<ReleaseWatchRunStopReason> {
 
 All other binding-specific errors increment `skipped` and continue. Select the stable query with each due row, fetch by that query, then call Task 3's `refresh_aladin_items_at`. Count a Collection as changed when `release_event_count > 0`; return a distinct Collection count rather than an event count.
 
-- [ ] **Step 4: Add Rust command contracts and stable error mapping**
+- [x] **Step 4: Add Rust command contracts and stable error mapping**
 
 Add synchronous commands for status, toggle, and take; add an async `run_due_release_watch` command using `spawn_blocking`, matching existing Aladin commands.
 
@@ -553,7 +553,7 @@ For a missing credential, return a successful aggregate with `stop_reason: Crede
 
 Add a command serialization test proving run results and events contain no TTB key, provider URL, raw JSON, or managed path field.
 
-- [ ] **Step 5: Mirror exact contracts in TypeScript and the client**
+- [x] **Step 5: Mirror exact contracts in TypeScript and the client**
 
 Add required `unreadReleaseCount: number` to `CollectionSummary`, then define:
 
@@ -591,7 +591,7 @@ runDueReleaseWatch(): Promise<ReleaseWatchRunResult>;
 
 Update every listed gateway mock with deterministic defaults and every listed Collection fixture with `unreadReleaseCount: 0`. Do not make the new fields or methods optional to avoid hiding contract drift.
 
-- [ ] **Step 6: Run runner, command, and TypeScript contract checks**
+- [x] **Step 6: Run runner, command, and TypeScript contract checks**
 
 Run:
 
@@ -603,7 +603,7 @@ npm --prefix app run build
 
 Expected: Rust tests PASS and TypeScript/Vite production build exits 0.
 
-- [ ] **Step 7: Commit the runner and IPC slice**
+- [x] **Step 7: Commit the runner and IPC slice**
 
 ```powershell
 git add -- app/src-tauri/src/library/release_watch.rs app/src-tauri/src/library/mod.rs app/src-tauri/src/library/models.rs app/src-tauri/src/commands.rs app/src-tauri/src/lib.rs app/src/library/types.ts app/src/library/client.ts app/src/app/App.test.tsx app/src/assets/AssetBrowser.test.tsx app/src/assets/AssetInspector.test.tsx app/src/assets/AssetToolbar.test.tsx app/src/classification/ClassificationAppearanceDialog.test.tsx app/src/classification/ClassificationSidebar.test.tsx app/src/collections/AladinConnectDialog.test.tsx app/src/collections/CollectionBrowser.test.tsx app/src/collections/CollectionEditDialog.test.tsx app/src/collections/CollectionOverlay.test.tsx app/src/collections/MangaDexImportDialog.test.tsx app/src/ingestion/metadataImport.test.ts app/src/library/LibraryContext.test.tsx app/src/library/LibrarySetup.test.tsx app/src/manga/MangaBrowser.test.tsx app/src/safety/TrashBrowser.test.tsx app/src/settings/SettingsView.test.tsx app/src/similarity/SimilarityReviewBrowser.test.tsx
@@ -626,7 +626,7 @@ git commit -m "feat: expose due Aladin release checks"
 - Consumes: Task 4 gateway methods and typed models.
 - Produces: accessible `신간 N` card badge, `신간 알림 켜기/끄기` overlay action, and `ReleaseWatchSummary({ events })`.
 
-- [ ] **Step 1: Write the failing card-badge test**
+- [x] **Step 1: Write the failing card-badge test**
 
 In `CollectionBrowser.test.tsx`, render `{ ...sample, unreadReleaseCount: 3 }` and assert:
 
@@ -636,7 +636,7 @@ expect(screen.getByText("신간 3")).toBeInTheDocument();
 
 Render the zero-count sample and assert `queryByText(/신간/)` is null. Keep the card's Collection name, type, and asset count assertions unchanged.
 
-- [ ] **Step 2: Run the card test to verify it fails**
+- [x] **Step 2: Run the card test to verify it fails**
 
 Run:
 
@@ -646,7 +646,7 @@ npm --prefix app test -- src/collections/CollectionBrowser.test.tsx
 
 Expected: FAIL because `CollectionCard` does not render the badge.
 
-- [ ] **Step 3: Implement the badge with existing card markup**
+- [x] **Step 3: Implement the badge with existing card markup**
 
 Inside `.collection-card__cover`, add only when the count is positive:
 
@@ -660,7 +660,7 @@ Inside `.collection-card__cover`, add only when the count is positive:
 
 Make `.collection-card__cover` positioned and place the badge at the top-right using existing accent, surface, radius, and text-size tokens. Do not add an icon, animation, or dependency.
 
-- [ ] **Step 4: Write failing overlay lifecycle tests**
+- [x] **Step 4: Write failing overlay lifecycle tests**
 
 In `CollectionOverlay.test.tsx`, add focused cases:
 
@@ -681,7 +681,7 @@ const unread: ReleaseWatchEvent[] = [
 ];
 ```
 
-- [ ] **Step 5: Run overlay tests to verify they fail**
+- [x] **Step 5: Run overlay tests to verify they fail**
 
 Run:
 
@@ -691,7 +691,7 @@ npm --prefix app test -- src/collections/CollectionOverlay.test.tsx
 
 Expected: FAIL because status, toggle, take, and summary UI are absent.
 
-- [ ] **Step 6: Implement the compact summary component**
+- [x] **Step 6: Implement the compact summary component**
 
 Create `ReleaseWatchSummary.tsx`. Group events by kind in stable order and render one compact region:
 
@@ -717,7 +717,7 @@ export function ReleaseWatchSummary({ events }: { events: ReleaseWatchEvent[] })
 
 Use `알 수 없음` only for a nullable previous/current date value. Map only `upcoming` and `released`; render an unknown status string unchanged rather than inventing a label.
 
-- [ ] **Step 7: Integrate overlay status, take, and toggle**
+- [x] **Step 7: Integrate overlay status, take, and toggle**
 
 Add states:
 
@@ -733,7 +733,7 @@ Add one toolbar button next to `Aladin 새로고침`, disabled while saving. On 
 
 Render `ReleaseWatchSummary` between the Toast and `.collection-overlay__body`, so it remains visible until the overlay closes without disturbing the three-column body or selected Volume.
 
-- [ ] **Step 8: Add restrained styles and run both UI tests**
+- [x] **Step 8: Add restrained styles and run both UI tests**
 
 Add styles for `.collection-card__release-badge` and `.release-watch-summary` using existing spacing, accent, border, surface, radius, and text tokens. Use no gradient, scale transform, entrance animation, fixed overlay, or new card system.
 
@@ -745,7 +745,7 @@ npm --prefix app test -- src/collections/CollectionBrowser.test.tsx src/collecti
 
 Expected: both test files PASS and existing MangaDex/Aladin cover-flow assertions remain green.
 
-- [ ] **Step 9: Commit the Collection UI slice**
+- [x] **Step 9: Commit the Collection UI slice**
 
 ```powershell
 git add -- app/src/collections/ReleaseWatchSummary.tsx app/src/collections/CollectionCard.tsx app/src/collections/CollectionBrowser.test.tsx app/src/collections/CollectionOverlay.tsx app/src/collections/CollectionOverlay.test.tsx app/src/styles/global.css
@@ -767,7 +767,7 @@ git commit -m "feat: show unread Aladin releases"
 - Consumes: `LibraryGateway.runDueReleaseWatch`, `refreshCollections`, `appendMessage`, and `LibraryWorkspace`'s existing `key={library.root}` remount boundary.
 - Produces: one cancellable startup effect per open Library and final user documentation.
 
-- [ ] **Step 1: Write failing App startup tests**
+- [x] **Step 1: Write failing App startup tests**
 
 In `App.test.tsx`, add a test with an open Library and a deferred `runDueReleaseWatch` promise. Assert the workspace and navigation render before resolving the promise, and assert the method is invoked once for that `LibraryWorkspace`.
 
@@ -786,7 +786,7 @@ Then assert `listCollections` runs again and one status Toast contains `새 출�
 
 Add a stale-result test using the existing Settings flow from `remounts and reloads the workspace after switching library roots`: open library A, leave its watcher deferred, click `설정` then `다른 저장소 열기` to open B, resolve A, and assert A's result does not refresh B or show a Toast. Add a zero-change result test proving no Release Watch Toast appears.
 
-- [ ] **Step 2: Run the App tests to verify they fail**
+- [x] **Step 2: Run the App tests to verify they fail**
 
 Run:
 
@@ -796,7 +796,7 @@ npm --prefix app test -- src/app/App.test.tsx
 
 Expected: FAIL because the startup effect does not exist.
 
-- [ ] **Step 3: Implement the cancellable startup effect**
+- [x] **Step 3: Implement the cancellable startup effect**
 
 Add beside existing backup/purge startup effects:
 
@@ -820,7 +820,7 @@ useEffect(() => {
 
 Do not show a second failure Toast, retry, interval, or WorkTray item. The error path logs only the redacted public command message and never provider data or a request URL.
 
-- [ ] **Step 4: Run the App test and affected UI set**
+- [x] **Step 4: Run the App test and affected UI set**
 
 Run:
 
@@ -830,7 +830,7 @@ npm --prefix app test -- src/app/App.test.tsx src/collections/CollectionBrowser.
 
 Expected: all affected React tests PASS.
 
-- [ ] **Step 5: Document the user-visible behavior**
+- [x] **Step 5: Document the user-visible behavior**
 
 In `app/README.md`, add one concise paragraph in the Collection/Aladin area:
 
@@ -838,7 +838,7 @@ In `app/README.md`, add one concise paragraph in the Collection/Aladin area:
 Release Watch is opt-in per Aladin-connected manga. On startup Lakomics checks subscriptions whose last successful check is at least 24 hours old, shows an unread `신간 N` badge for new or changed Korean releases, and marks those changes read when the Collection is opened. Lakomics does not check while the app is closed.
 ```
 
-- [ ] **Step 6: Run focused Rust integration evidence**
+- [x] **Step 6: Run focused Rust integration evidence**
 
 Run:
 
@@ -850,7 +850,7 @@ cargo test --manifest-path app/src-tauri/Cargo.toml collection_summary_counts_on
 
 Expected: subscription, runner, transactional Aladin, and projection tests PASS.
 
-- [ ] **Step 7: Run final formatting, frontend build, and diff checks**
+- [x] **Step 7: Run final formatting, frontend build, and diff checks**
 
 Run:
 
@@ -868,7 +868,7 @@ Expected:
 - `git diff --check` exits 0.
 - only Release Watch implementation, tests, README, spec alignment, and this checked-off plan are modified.
 
-- [ ] **Step 8: Review scope against the design**
+- [x] **Step 8: Review scope against the design**
 
 Compare `git diff main...HEAD` with every acceptance criterion in `docs/superpowers/specs/2026-08-22-aladin-release-watch-design.md`. Confirm explicitly:
 
@@ -879,7 +879,7 @@ Compare `git diff main...HEAD` with every acceptance criterion in `docs/superpow
 - manual refresh and startup use one transactional reconciliation path;
 - unread events survive disabling and are marked read only when returned to the overlay.
 
-- [ ] **Step 9: Commit startup integration and documentation**
+- [x] **Step 9: Commit startup integration and documentation**
 
 ```powershell
 git add -- app/src/app/App.tsx app/src/app/App.test.tsx app/README.md docs/superpowers/plans/2026-08-22-aladin-release-watch.md
@@ -900,3 +900,14 @@ Expected commit sequence:
 4. `feat: expose due Aladin release checks`
 5. `feat: show unread Aladin releases`
 6. `feat: check Aladin releases after startup`
+
+### Executed verification — 2026-08-22
+
+- `npm --prefix app test -- src/app/App.test.tsx src/collections/CollectionBrowser.test.tsx src/collections/CollectionOverlay.test.tsx` — 3 files, 59 tests passed.
+- `cargo test --manifest-path app/src-tauri/Cargo.toml release_watch` — 12 focused tests passed.
+- `cargo test --manifest-path app/src-tauri/Cargo.toml aladin_flow::tests` — 7 focused tests passed.
+- `cargo test --manifest-path app/src-tauri/Cargo.toml collection_summary_counts_only_unread_release_events` — 1 focused test passed.
+- `cargo fmt --manifest-path app/src-tauri/Cargo.toml -- --check` — exited successfully.
+- `npm --prefix app run build` — TypeScript and Vite production build completed; 814 modules transformed. The pre-existing chunk-size warning remained informational.
+- `git diff --check` — exited successfully; only line-ending notices were emitted.
+- Scope review against the design confirmed no automatic subscription, timer, service, Windows notification, notification center, provider abstraction, or live-provider test was added. Public contracts and logs expose no credential, credential-bearing URL, raw provider response, or managed path. Library remount cancellation, shared transactional reconciliation, subscription-independent event retention, and atomic take-and-read are covered by the focused tests above.

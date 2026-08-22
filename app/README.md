@@ -47,7 +47,9 @@ cargo test
 - Drag assets onto a classification to add it, or drag classifications to reorganize the tree. Dragging selected assets out of Lakomics starts a Windows copy operation with their original names; duplicate names receive a Windows-style numeric suffix.
 - The work tray reports ingestion and drag-out progress for the current app session only. It is not a persistent background-job history.
 
-Collections, folder-recursive ingestion, and AVIF/HEIC are deferred.
+Release Watch is opt-in per Aladin-connected manga. On startup Lakomics checks subscriptions whose last successful check is at least 24 hours old, shows an unread `신간 N` badge for new or changed Korean releases, and marks those changes read when the Collection is opened. Lakomics does not check while the app is closed.
+
+Folder-recursive ingestion and AVIF/HEIC are deferred.
 
 ## Edge X image collection
 

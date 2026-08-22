@@ -7,6 +7,7 @@ import type {
   ClassificationEntry,
   LibraryGateway,
   MetadataBackup,
+  ReleaseWatchRunResult,
 } from "../library/types";
 import { UI_PREFERENCES_KEY } from "../preferences/uiPreferences";
 import { App } from "./App";
@@ -128,7 +129,7 @@ function gateway(): LibraryGateway {
     listMangaSeries: vi.fn().mockResolvedValue([]),
     ingestMedia: vi.fn(),
     preparePendingVideos: vi.fn().mockResolvedValue({ processed: 0, remaining: 0, failed: 0, changedAssetIds: [] }),
-    retryVideoPreparation: vi.fn().mockResolvedValue(undefined), inspectBookImport: vi.fn(), importBookCollections: vi.fn(), getCollectionSourceRoot: vi.fn(), setCollectionSourceRoot: vi.fn(), listCollectionCovers: vi.fn(), listCollectionVolumes: vi.fn(), syncMangaDexVolumeCovers: vi.fn(), getAladinCredentialStatus: vi.fn(), setAladinTtbKey: vi.fn(), deleteAladinTtbKey: vi.fn(), searchAladin: vi.fn(), applyAladin: vi.fn(), refreshAladin: vi.fn(), getAladinConnection: vi.fn(),
+    retryVideoPreparation: vi.fn().mockResolvedValue(undefined), inspectBookImport: vi.fn(), importBookCollections: vi.fn(), getCollectionSourceRoot: vi.fn(), setCollectionSourceRoot: vi.fn(), listCollectionCovers: vi.fn(), listCollectionVolumes: vi.fn(), syncMangaDexVolumeCovers: vi.fn(), getAladinCredentialStatus: vi.fn(), setAladinTtbKey: vi.fn(), deleteAladinTtbKey: vi.fn(), searchAladin: vi.fn(), applyAladin: vi.fn(), refreshAladin: vi.fn(), getAladinConnection: vi.fn(), getReleaseWatchStatus: vi.fn().mockResolvedValue({ enabled: false, lastCheckedAt: null }), setReleaseWatchEnabled: vi.fn().mockResolvedValue({ enabled: false, lastCheckedAt: null }), takeUnreadReleaseChanges: vi.fn().mockResolvedValue([]), runDueReleaseWatch: vi.fn().mockResolvedValue({ checked: 0, changedCollections: 0, skipped: 0, stopReason: null }),
   };
 }
 
@@ -171,6 +172,62 @@ describe("App", () => {
 
     expect(await screen.findByRole("treeitem", { name: "New library" })).toBeVisible();
     expect(screen.queryByRole("treeitem", { name: "Old library" })).not.toBeInTheDocument();
+  });
+
+  it("checks due releases once without blocking the workspace and refreshes changed collections", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    let finishWatch!: (result: ReleaseWatchRunResult) => void;
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.runDueReleaseWatch).mockReturnValue(new Promise((resolve) => { finishWatch = resolve; }));
+
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+
+    expect(await screen.findByRole("main", { name: "라이브러리 작업 공간" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "저장소" })).toBeVisible();
+    expect(libraryGateway.runDueReleaseWatch).toHaveBeenCalledOnce();
+    await waitFor(() => expect(libraryGateway.listCollections).toHaveBeenCalledOnce());
+
+    finishWatch({ checked: 3, changedCollections: 2, skipped: 0, stopReason: null });
+
+    await waitFor(() => expect(libraryGateway.listCollections).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole("status")).toHaveTextContent("새 출간 정보가 있는 작품 2개");
+  });
+
+  it("ignores a stale release-watch result after switching libraries", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Current");
+    let finishOldWatch!: (result: ReleaseWatchRunResult) => void;
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.openLibrary).mockImplementation(async (path) => ({ root: path }));
+    vi.mocked(libraryGateway.runDueReleaseWatch)
+      .mockReturnValueOnce(new Promise((resolve) => { finishOldWatch = resolve; }))
+      .mockResolvedValue({ checked: 0, changedCollections: 0, skipped: 0, stopReason: null });
+    vi.mocked(open).mockResolvedValue("D:\\Next");
+    render(<App gateway={libraryGateway} subscribeDrops={noDrops} />);
+
+    await waitFor(() => expect(libraryGateway.runDueReleaseWatch).toHaveBeenCalledOnce());
+    await userEvent.click(await screen.findByRole("button", { name: "설정" }));
+    await userEvent.click(screen.getByRole("button", { name: "다른 저장소 열기" }));
+    await waitFor(() => expect(libraryGateway.runDueReleaseWatch).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(libraryGateway.listCollections).toHaveBeenCalledTimes(3));
+
+    await act(async () => {
+      finishOldWatch({ checked: 1, changedCollections: 1, skipped: 0, stopReason: null });
+      await Promise.resolve();
+    });
+
+    expect(libraryGateway.listCollections).toHaveBeenCalledTimes(3);
+    expect(screen.queryByText("새 출간 정보가 있는 작품 1개")).not.toBeInTheDocument();
+  });
+
+  it("shows no release-watch message when startup finds no changes", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    const libraryGateway = gateway();
+
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+
+    await waitFor(() => expect(libraryGateway.runDueReleaseWatch).toHaveBeenCalledOnce());
+    await waitFor(() => expect(libraryGateway.listCollections).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(/새 출간 정보가 있는 작품/)).not.toBeInTheDocument();
   });
 
   it("renders the trash workspace without loading an asset page", async () => {
@@ -943,6 +1000,7 @@ describe("App", () => {
       coverAssetId: null,
       selectedWorkArtworkId: null,
       assetCount: 3,
+      unreadReleaseCount: 0,
       year: 2019,
       author: "PlatinumGames",
       director: null,

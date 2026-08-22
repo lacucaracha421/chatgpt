@@ -16,9 +16,10 @@ use crate::library::{
         CollectionVolume, CreateAlbum, CreateClassification, CreateCollection, IngestMediaRequest,
         IngestOutcome, LibrarySummary, MangaDexApplyRequest, MangaDexConnection,
         MangaDexSearchResult, MangaDexVolumeSyncResult, MangaDexWorkPreview, MangaSeries,
-        MetadataBackup, PurgeSummary, SetAssetClassification, SimilarityDecisionRequest,
-        SimilarityIndexProgress, SimilarityReviewPage, TrashPage, TrashPolicy, UpdateCollection,
-        VideoPreparationProgress,
+        MetadataBackup, PurgeSummary, ReleaseWatchEvent, ReleaseWatchRunResult,
+        ReleaseWatchRunStopReason, ReleaseWatchStatus, SetAssetClassification,
+        SimilarityDecisionRequest, SimilarityIndexProgress, SimilarityReviewPage, TrashPage,
+        TrashPolicy, UpdateCollection, VideoPreparationProgress,
     },
     Library,
 };
@@ -145,6 +146,9 @@ impl From<LibraryError> for CommandError {
             LibraryError::AladinRateLimited => "aladin_rate_limited",
             LibraryError::InvalidAladinResponse => "invalid_aladin_response",
             LibraryError::AmbiguousAladinBinding => "ambiguous_aladin_binding",
+            LibraryError::ReleaseWatchRequiresAladinBinding => {
+                "release_watch_requires_aladin_binding"
+            }
             LibraryError::DuplicateAladinProviderItem => "duplicate_aladin_provider_item",
             LibraryError::UnsupportedVideo => "unsupported_video",
             LibraryError::VideoPreparationFailed => "video_preparation_failed",
@@ -686,6 +690,66 @@ pub fn get_aladin_connection(
 }
 
 #[tauri::command]
+pub fn get_release_watch_status(
+    collection_id: String,
+    state: State<'_, AppState>,
+) -> Result<ReleaseWatchStatus, CommandError> {
+    current_required(state)?
+        .get_release_watch_status(&collection_id)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn set_release_watch_enabled(
+    collection_id: String,
+    enabled: bool,
+    state: State<'_, AppState>,
+) -> Result<ReleaseWatchStatus, CommandError> {
+    current_required(state)?
+        .set_release_watch_enabled(&collection_id, enabled)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn take_unread_release_changes(
+    collection_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<ReleaseWatchEvent>, CommandError> {
+    current_required(state)?
+        .take_unread_release_changes(&collection_id)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn run_due_release_watch(
+    state: State<'_, AppState>,
+) -> Result<ReleaseWatchRunResult, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        run_release_watch_with_key(&library, credential::read_aladin_key())
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}
+
+fn run_release_watch_with_key(
+    library: &Library,
+    key: Result<String, LibraryError>,
+) -> Result<ReleaseWatchRunResult, LibraryError> {
+    match key {
+        Ok(key) => library.run_due_release_watch(&key),
+        Err(LibraryError::AladinCredentialNotConfigured) => Ok(ReleaseWatchRunResult {
+            checked: 0,
+            changed_collections: 0,
+            skipped: 0,
+            stop_reason: Some(ReleaseWatchRunStopReason::CredentialNotConfigured),
+        }),
+        Err(error) => Err(error),
+    }
+}
+
+#[tauri::command]
 pub fn create_collection(
     request: CreateCollection,
     state: State<'_, AppState>,
@@ -979,9 +1043,17 @@ fn current_required(state: State<'_, AppState>) -> Result<Library, CommandError>
 mod tests {
     use std::{io, path::PathBuf};
 
-    use crate::library::error::LibraryError;
+    use crate::library::{
+        error::LibraryError,
+        models::{
+            ReleaseWatchEvent, ReleaseWatchEventKind, ReleaseWatchRunResult,
+            ReleaseWatchRunStopReason,
+        },
+    };
 
-    use super::{open_library_at, open_library_in_state, AppState, CommandError};
+    use super::{
+        open_library_at, open_library_in_state, run_release_watch_with_key, AppState, CommandError,
+    };
 
     #[test]
     fn command_error_has_stable_json_fields() {
@@ -990,6 +1062,57 @@ mod tests {
 
         assert_eq!(value["code"], "classification_not_found");
         assert_eq!(value["message"], "요청한 분류 항목을 찾을 수 없습니다.");
+    }
+
+    #[test]
+    fn release_watch_commands_serialize_public_fields_only() {
+        let value = serde_json::json!({
+            "run": ReleaseWatchRunResult {
+                checked: 2,
+                changed_collections: 1,
+                skipped: 0,
+                stop_reason: Some(ReleaseWatchRunStopReason::RateLimited),
+            },
+            "events": [ReleaseWatchEvent {
+                id: "event-1".into(),
+                kind: ReleaseWatchEventKind::ReleaseDateChanged,
+                volume_number: 12,
+                previous_value: Some("2026-08-21".into()),
+                current_value: Some("2026-08-23".into()),
+                detected_at: "2026-08-22T00:00:00Z".into(),
+            }],
+        });
+
+        assert_eq!(value["run"]["changedCollections"], 1);
+        assert_eq!(value["run"]["stopReason"], "rate_limited");
+        assert_eq!(value["events"][0]["kind"], "release_date_changed");
+        assert_eq!(value["events"][0]["volumeNumber"], 12);
+        let serialized = value.to_string();
+        for forbidden in ["ttbKey", "providerUrl", "providerDataJson", "relativePath"] {
+            assert!(!serialized.contains(forbidden));
+        }
+    }
+
+    #[test]
+    fn missing_aladin_credential_returns_a_public_release_watch_stop() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = crate::library::Library::open(temp.path()).unwrap();
+
+        let result =
+            run_release_watch_with_key(&library, Err(LibraryError::AladinCredentialNotConfigured))
+                .unwrap();
+
+        assert_eq!(result.checked, 0);
+        assert_eq!(result.changed_collections, 0);
+        assert_eq!(result.skipped, 0);
+        assert_eq!(
+            result.stop_reason,
+            Some(ReleaseWatchRunStopReason::CredentialNotConfigured)
+        );
+        assert!(matches!(
+            run_release_watch_with_key(&library, Err(LibraryError::CredentialStoreFailed)),
+            Err(LibraryError::CredentialStoreFailed)
+        ));
     }
 
     #[test]

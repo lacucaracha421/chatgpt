@@ -24,6 +24,7 @@ mod mangadex_flow;
 pub mod metadata_import;
 pub mod models;
 mod query;
+mod release_watch;
 mod similarity;
 mod trash;
 mod video_media;
@@ -85,6 +86,8 @@ pub struct Library {
     video_lock: Arc<Mutex<()>>,
     // ponytail: one lock per open Library; split only if backup operations become a bottleneck.
     backup_lock: Arc<Mutex<()>>,
+    // ponytail: one startup Release Watch run per Library; split only if provider latency demands it.
+    release_watch_lock: Arc<Mutex<()>>,
     // ponytail: one database handle at a time; use a read/write lock if reads become a bottleneck.
     database_lock: Arc<Mutex<()>>,
 }
@@ -135,6 +138,7 @@ impl Library {
             trash_lock: Arc::new(Mutex::new(())),
             video_lock: Arc::new(Mutex::new(())),
             backup_lock: Arc::new(Mutex::new(())),
+            release_watch_lock: Arc::new(Mutex::new(())),
             database_lock: Arc::new(Mutex::new(())),
         };
         library.cleanup_stale_asset_drags()?;
