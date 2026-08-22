@@ -34,7 +34,7 @@ type AssetGalleryProps = {
   onMoveFocus?: (delta: number, extend: boolean) => void;
   onOpen?: (asset: AssetSummary) => void;
   onRetryVideo?: (asset: AssetSummary) => void;
-  onSelectDate?: (date: string) => void;
+  onSelectDate?: (date: string | null) => void;
   onPointerDragStart?: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => void;
   onPointerDragMove?: (event: React.PointerEvent<HTMLElement>) => void;
   onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void;
@@ -111,7 +111,7 @@ export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new S
       role="listbox"
       aria-label="자산"
       aria-multiselectable="true"
-      onScroll={(event) => { cancelQuickPreview(); setScrollTop(event.currentTarget.scrollTop); }}
+      onScroll={(event) => { cancelQuickPreview(); setScrollTop(event.currentTarget.scrollTop); if (event.currentTarget.scrollTop <= 0 && onSelectDate) onSelectDate(""); }}
       onClick={(event) => { if (!(event.target as HTMLElement).closest(".asset-gallery__asset")) onClearSelection?.(); }}
       onKeyDown={(event) => {
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
