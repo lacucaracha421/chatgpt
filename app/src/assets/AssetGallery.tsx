@@ -76,7 +76,14 @@ export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new S
     const element = scrollRef.current; if (!element) return;
     const rect = element.getBoundingClientRect();
     if (rect.height <= 0) return;
-    element.scrollTop = ((clientY - rect.top) / rect.height) * (element.scrollHeight - element.clientHeight);
+    if (dateBuckets.length === 0) {
+      element.scrollTop = ((clientY - rect.top) / rect.height) * (element.scrollHeight - element.clientHeight);
+      return;
+    }
+    const ratio = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+    const bucketIndex = dateBuckets.length <= 1 ? 0 : Math.round(ratio * (dateBuckets.length - 1));
+    const date = dateBuckets[bucketIndex]?.date;
+    if (date) onSelectDate?.(date);
   };
   useEffect(() => {
     const last = virtualRows[virtualRows.length - 1];
