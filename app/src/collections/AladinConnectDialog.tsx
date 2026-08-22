@@ -90,7 +90,7 @@ export function AladinConnectDialog({
         </div>
 
         {error && <p className="aladin-connect__error" role="alert">{error}</p>}
-        <p className="aladin-connect__note">표지 없이 국내 단행본 시리즈와 발매 정보만 검색합니다.</p>
+        <p className="aladin-connect__note">표지 없이 국내 단행본·전자책 시리즈와 발매 정보만 검색합니다.</p>
         {busy === "search" && <Skeleton className="aladin-connect__loading" label="알라딘 검색 중" />}
 
         <div className="aladin-connect__body">

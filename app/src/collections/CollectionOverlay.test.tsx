@@ -67,6 +67,19 @@ function renderOverlay(
 }
 
 describe("CollectionOverlay MangaDex flow", () => {
+  it("presents work information and the volume shelf as named sections", async () => {
+    renderOverlay({
+      listCollectionVolumes: vi.fn().mockResolvedValue([{
+        id: "v1", volumeNumber: 1, editionIndex: 0, displayLabel: "1", coverArtworkId: "art-1",
+      }]),
+    });
+
+    expect(screen.getByRole("heading", { name: "작품 정보" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "선택한 권" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "권별 표지" })).toBeInTheDocument();
+    expect(screen.getByText("총 1권")).toBeInTheDocument();
+  });
+
   it("enables release watch for a connected Aladin manga", async () => {
     const user = userEvent.setup();
     const setReleaseWatchEnabled = vi.fn().mockResolvedValue({ enabled: true, lastCheckedAt: null });

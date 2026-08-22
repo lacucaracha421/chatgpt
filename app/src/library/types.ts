@@ -2,6 +2,93 @@ export type LibrarySummary = {
   root: string;
 };
 
+export type CatalogStatus = {
+  installed: boolean;
+  workCount: number;
+  updateEnabled: boolean;
+  updateIntervalSeconds: number;
+  lastAttemptAt: string | null;
+  lastSuccessAt: string | null;
+  lastAdded: number;
+  lastError: string | null;
+};
+
+export type CatalogUpdateResult = {
+  added: number;
+  pages: number;
+  reason: "completed" | "upToDate" | "pageLimit" | "rateLimited" | "alreadyRunning";
+  lastSuccessAt: string | null;
+};
+
+export type RemoteProvider = "kHentai";
+
+export type ResolvedGallery = {
+  provider: RemoteProvider;
+  workId: string;
+  pageCount: number;
+  pageUrls: string[];
+};
+
+export type RemoteReadingProgress = {
+  provider: RemoteProvider;
+  workId: string;
+  lastPage: number;
+  pageCount: number;
+  lastReadAt: string;
+};
+
+export type CatalogSort = "latest" | "views" | "hotDay" | "hotWeek" | "hotMonth";
+export type CatalogScope = "all" | "bookmarked";
+
+export type CatalogSearchQuery = {
+  text: string;
+  sort: CatalogSort;
+  scope: CatalogScope;
+  page: number;
+  pageSize: number;
+};
+
+export type CatalogSuggestion = { value: string; label: string; count: number };
+
+export type CatalogWork = {
+  id: number;
+  title: string;
+  titleJpn: string | null;
+  artists: string[];
+  series: string[];
+  thumbnailUrl: string | null;
+  bookmarked: boolean;
+  fileCount: number;
+  views: number;
+  posted: number;
+};
+
+export type CatalogTagGroup = { namespace: string; values: string[] };
+
+export type CatalogWorkDetail = {
+  id: number;
+  title: string;
+  titleJpn: string | null;
+  thumbnailUrl: string | null;
+  uploader: string | null;
+  category: number | null;
+  posted: number | null;
+  updated: number | null;
+  fileCount: number;
+  fileSize: number | null;
+  rating: number | null;
+  views: number;
+  bookmarked: boolean;
+  tagGroups: CatalogTagGroup[];
+};
+
+export type CatalogSearchPage = {
+  works: CatalogWork[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+};
+
 export type ExtensionConnection = {
   baseUrl: string;
   token: string;
@@ -418,6 +505,19 @@ export type IngestOutcome =
 
 export interface LibraryGateway {
   openLibrary(path: string): Promise<LibrarySummary>;
+  importVckCatalog(vckRoot: string): Promise<CatalogStatus>;
+  getOnlineCatalogStatus(): Promise<CatalogStatus>;
+  searchOnlineCatalog(query: CatalogSearchQuery): Promise<CatalogSearchPage>;
+  suggestOnlineCatalog(text: string, limit: number): Promise<CatalogSuggestion[]>;
+  getOnlineCatalogWorkDetail(workId: number): Promise<CatalogWorkDetail>;
+  setOnlineCatalogBookmark(workId: number, bookmarked: boolean): Promise<void>;
+  updateOnlineCatalog(): Promise<CatalogUpdateResult>;
+  setOnlineCatalogUpdateSettings(enabled: boolean, intervalSeconds: number): Promise<CatalogStatus>;
+  runDueOnlineCatalogUpdate(): Promise<CatalogUpdateResult | null>;
+  resolveOnlineCatalogWork(workId: number): Promise<ResolvedGallery>;
+  getRemoteReadingProgress(provider: RemoteProvider, workId: string): Promise<RemoteReadingProgress | null>;
+  saveRemoteReadingProgress(progress: RemoteReadingProgress): Promise<void>;
+  clearRemoteMangaCache(): Promise<void>;
   getExtensionConnection(): Promise<ExtensionConnection>;
   listClassifications(): Promise<ClassificationEntry[]>;
   createClassification(input: CreateClassification): Promise<ClassificationEntry>;

@@ -4,6 +4,7 @@ mod album;
 mod asset_metadata;
 mod backup;
 pub mod book_migration;
+pub(crate) mod catalog_update;
 mod classification;
 mod collection;
 mod collection_source;
@@ -23,8 +24,12 @@ pub(crate) mod mangadex;
 mod mangadex_flow;
 pub mod metadata_import;
 pub mod models;
+mod online_catalog;
 mod query;
 mod release_watch;
+pub(crate) mod remote_gallery;
+pub(crate) mod remote_media;
+pub(crate) mod remote_progress;
 mod similarity;
 mod trash;
 mod video_media;
@@ -88,8 +93,11 @@ pub struct Library {
     backup_lock: Arc<Mutex<()>>,
     // ponytail: one startup Release Watch run per Library; split only if provider latency demands it.
     release_watch_lock: Arc<Mutex<()>>,
+    // ponytail: one manga scan per Library; concurrent scans only duplicate disk and image work.
+    manga_scan_lock: Arc<Mutex<()>>,
     // ponytail: one database handle at a time; use a read/write lock if reads become a bottleneck.
     database_lock: Arc<Mutex<()>>,
+    catalog_lookup_cache: Arc<Mutex<Option<online_catalog::CatalogLookupCache>>>,
 }
 
 pub(crate) struct LockedConnection<'a> {
@@ -130,7 +138,7 @@ impl Library {
             fs::create_dir_all(&path)
                 .map_err(|source| LibraryError::CreateDirectory { path, source })?;
         }
-        db::open_database(&root.join("library.sqlite"))?;
+        db::initialize_database(&root.join("library.sqlite"))?;
         let library = Self {
             root,
             lease,
@@ -139,7 +147,9 @@ impl Library {
             video_lock: Arc::new(Mutex::new(())),
             backup_lock: Arc::new(Mutex::new(())),
             release_watch_lock: Arc::new(Mutex::new(())),
+            manga_scan_lock: Arc::new(Mutex::new(())),
             database_lock: Arc::new(Mutex::new(())),
+            catalog_lookup_cache: Arc::new(Mutex::new(None)),
         };
         library.cleanup_stale_asset_drags()?;
         library.cleanup_resolving_similarity_reviews()?;
@@ -208,8 +218,7 @@ impl Library {
     }
 
     pub fn scan_manga(&self) -> Result<u64, LibraryError> {
-        let connection = self.connection()?;
-        manga::scan(&connection)
+        manga::scan(self)
     }
 
     pub fn list_manga_series(&self) -> Result<Vec<MangaSeries>, LibraryError> {

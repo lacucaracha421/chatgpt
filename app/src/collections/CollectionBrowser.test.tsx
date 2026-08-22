@@ -116,6 +116,15 @@ describe("CollectionBrowser", () => {
   it("shows showcase collections when showcase on and a collection is showcased", () => {
     renderBrowser({ collections: [{ ...sample, showcase: true }], typeFilter: null, showcase: true });
     expect(screen.getByText("Astral Chain")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "전체 쇼케이스" })).toBeInTheDocument();
+    expect(screen.getByText("선정 작품 1개")).toBeInTheDocument();
+  });
+
+  it("labels the ordinary library with the visible work count", () => {
+    renderBrowser({ collections: [sample], typeFilter: "game", showcase: false });
+
+    expect(screen.getByRole("heading", { name: "게임 컬렉션" })).toBeInTheDocument();
+    expect(screen.getByText("작품 1개")).toBeInTheDocument();
   });
 
   it("opens the detail view when a card is clicked", () => {
@@ -153,6 +162,7 @@ describe("CollectionBrowser", () => {
 function createGateway(): LibraryGateway {
   return {
     openLibrary: vi.fn(),
+    importVckCatalog: vi.fn(), getOnlineCatalogStatus: vi.fn(), searchOnlineCatalog: vi.fn(), suggestOnlineCatalog: vi.fn(), updateOnlineCatalog: vi.fn(), setOnlineCatalogUpdateSettings: vi.fn(), runDueOnlineCatalogUpdate: vi.fn(), getOnlineCatalogWorkDetail: vi.fn(), setOnlineCatalogBookmark: vi.fn(), resolveOnlineCatalogWork: vi.fn(), getRemoteReadingProgress: vi.fn(), saveRemoteReadingProgress: vi.fn(), clearRemoteMangaCache: vi.fn(),
     getExtensionConnection: vi.fn(),
     listClassifications: vi.fn(),
     listAlbums: vi.fn().mockResolvedValue([]),

@@ -759,7 +759,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let source_path = temp.path().join("library.sqlite");
         let destination = temp.path().join("snapshot.sqlite");
-        let source = db::open_database(&source_path).unwrap();
+        let source = db::initialize_database(&source_path).unwrap();
         source
             .execute(
                 "INSERT INTO classification_entries

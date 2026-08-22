@@ -13,6 +13,7 @@ export function CollectionInfoPanel({ collection }: CollectionInfoPanelProps) {
 
   return (
     <aside className="collection-overlay__info" aria-label="컬렉션 정보">
+      <h3>작품 정보</h3>
       <dl className="collection-overlay__info-rows">
         {rows.map(([label, value]) => (
           <div className="collection-overlay__info-row" key={label}>

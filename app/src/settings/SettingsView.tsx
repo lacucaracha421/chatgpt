@@ -3,11 +3,13 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
-import type { ExtensionConnection, MetadataBackup } from "../library/types";
+import type { CatalogStatus, ExtensionConnection, MetadataBackup } from "../library/types";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { Button } from "../shared/ui/Button";
 import { Skeleton } from "../shared/ui/Skeleton";
+import { Select } from "../shared/ui/Select";
 import { Toast } from "../shared/ui/Toast";
+import { Toggle } from "../shared/ui/Toggle";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 
 type SettingsViewProps = {
@@ -49,7 +51,15 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [aladinBusy, setAladinBusy] = useState(false);
   const [aladinConfirmingDelete, setAladinConfirmingDelete] = useState(false);
   const [aladinError, setAladinError] = useState<string | null>(null);
+  const [catalogStatus, setCatalogStatus] = useState<CatalogStatus | null>(null);
+  const [catalogBusy, setCatalogBusy] = useState(false);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [catalogCacheConfirming, setCatalogCacheConfirming] = useState(false);
+  const [catalogCacheBusy, setCatalogCacheBusy] = useState(false);
+  const [catalogCacheMessage, setCatalogCacheMessage] = useState<string | null>(null);
   useAutoDismiss(aladinError, setAladinError);
+  useAutoDismiss(catalogError, setCatalogError);
+  useAutoDismiss(catalogCacheMessage, setCatalogCacheMessage);
   const pending = restoring || submitting || aladinBusy;
 
   useEffect(() => {
@@ -80,6 +90,11 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
       if (active) setAladinConfigured(status.configured);
     }).catch((loadError: unknown) => {
       if (active) setAladinError(commandErrorMessage(loadError, "알라딘 설정을 확인하지 못했습니다."));
+    });
+    void gateway.getOnlineCatalogStatus().then((status) => {
+      if (active) setCatalogStatus(status);
+    }).catch((loadError: unknown) => {
+      if (active) setCatalogError(commandErrorMessage(loadError, "온라인 카탈로그 설정을 확인하지 못했습니다."));
     });
     return () => { active = false; };
   }, [gateway, section]);
@@ -205,6 +220,35 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     }
   }
 
+  async function saveCatalogSettings(enabled: boolean, intervalSeconds: number) {
+    if (!catalogStatus || catalogBusy) return;
+    setCatalogBusy(true);
+    setCatalogError(null);
+    try {
+      setCatalogStatus(await gateway.setOnlineCatalogUpdateSettings(enabled, intervalSeconds));
+    } catch (saveError) {
+      setCatalogError(commandErrorMessage(saveError, "온라인 카탈로그 설정을 저장하지 못했습니다."));
+    } finally {
+      setCatalogBusy(false);
+    }
+  }
+
+  async function clearCatalogCache() {
+    if (catalogCacheBusy) return;
+    setCatalogCacheBusy(true);
+    setCatalogError(null);
+    setCatalogCacheMessage(null);
+    try {
+      await gateway.clearRemoteMangaCache();
+      setCatalogCacheConfirming(false);
+      setCatalogCacheMessage("온라인 이미지 캐시를 지웠습니다");
+    } catch (clearError) {
+      setCatalogError(commandErrorMessage(clearError, "온라인 이미지 캐시를 지우지 못했습니다."));
+    } finally {
+      setCatalogCacheBusy(false);
+    }
+  }
+
   async function chooseImportFolder() {
     const selected = await open({ directory: true, multiple: false, defaultPath: localStorage.getItem(METADATA_IMPORT_FOLDER_KEY) ?? undefined });
     if (typeof selected !== "string") return;
@@ -297,8 +341,33 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     )}
     {section === "external_services" && (
       <div className="settings-view__section">
-        <header className="settings-view__header"><h2>외부 서비스</h2><p>국내 단행본 발매 정보를 가져올 서비스를 관리합니다.</p></header>
+        <header className="settings-view__header"><h2>외부 서비스</h2><p>온라인 콘텐츠와 단행본 정보를 가져올 서비스를 관리합니다.</p></header>
         {aladinError && <Toast onDismiss={() => setAladinError(null)}>{aladinError}</Toast>}
+        {catalogError && <Toast onDismiss={() => setCatalogError(null)}>{catalogError}</Toast>}
+        {catalogStatus && <dl className="settings-view__property">
+          <dt>온라인 카탈로그</dt>
+          <dd><Toggle checked={catalogStatus.updateEnabled} disabled={catalogBusy || !catalogStatus.installed} onChange={(event) => void saveCatalogSettings(event.target.checked, catalogStatus.updateIntervalSeconds)}>자동 갱신</Toggle></dd>
+          <Select label="갱신 간격" value={String(catalogStatus.updateIntervalSeconds)} disabled={catalogBusy || !catalogStatus.installed} onChange={(event) => void saveCatalogSettings(catalogStatus.updateEnabled, Number(event.target.value))}>
+            <option value="3600">1시간</option>
+            <option value="21600">6시간</option>
+            <option value="86400">24시간</option>
+          </Select>
+        </dl>}
+        <dl className="settings-view__property">
+          <dt>온라인 이미지 캐시</dt>
+          <dd>열어 본 온라인 작품의 페이지 이미지만 삭제합니다.</dd>
+          {!catalogCacheConfirming ? (
+            <Button size="sm" disabled={catalogCacheBusy} onClick={() => setCatalogCacheConfirming(true)}>이미지 캐시 지우기</Button>
+          ) : (
+            <span className="settings-view__credential-actions">
+              <Button size="sm" disabled={catalogCacheBusy} onClick={() => setCatalogCacheConfirming(false)}>취소</Button>
+              <Button size="sm" variant="danger" disabled={catalogCacheBusy} onClick={() => void clearCatalogCache()}>
+                {catalogCacheBusy ? "삭제 중…" : "캐시 삭제 확인"}
+              </Button>
+            </span>
+          )}
+        </dl>
+        {catalogCacheMessage && <Toast onDismiss={() => setCatalogCacheMessage(null)}>{catalogCacheMessage}</Toast>}
         <dl className="settings-view__property">
           <dt>알라딘 OpenAPI</dt>
           <dd className="settings-view__credential-status">{aladinConfigured === null ? "확인 중…" : aladinConfigured ? "설정됨" : "설정되지 않음"}</dd>

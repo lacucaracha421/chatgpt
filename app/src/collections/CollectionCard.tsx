@@ -20,7 +20,7 @@ export function CollectionCard({
   return (
     <button
       type="button"
-      className="collection-card"
+      className={`collection-card collection-card--${collection.type}`}
       aria-selected={selected}
       onClick={onClick}
     >

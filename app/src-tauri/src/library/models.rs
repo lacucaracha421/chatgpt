@@ -608,6 +608,148 @@ pub struct CollectionCover {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct CatalogStatus {
+    pub installed: bool,
+    pub work_count: u64,
+    pub update_enabled: bool,
+    pub update_interval_seconds: u64,
+    pub last_attempt_at: Option<String>,
+    pub last_success_at: Option<String>,
+    pub last_added: u64,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum CatalogUpdateStopReason {
+    Completed,
+    UpToDate,
+    PageLimit,
+    RateLimited,
+    AlreadyRunning,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogUpdateResult {
+    pub added: u64,
+    pub pages: u32,
+    pub reason: CatalogUpdateStopReason,
+    pub last_success_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum RemoteProvider {
+    KHentai,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedGallery {
+    pub provider: RemoteProvider,
+    pub work_id: String,
+    pub page_count: u32,
+    pub page_urls: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteReadingProgress {
+    pub provider: String,
+    pub work_id: String,
+    pub last_page: u32,
+    pub page_count: u32,
+    pub last_read_at: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum CatalogSort {
+    Latest,
+    Views,
+    HotDay,
+    HotWeek,
+    HotMonth,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum CatalogScope {
+    All,
+    Bookmarked,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogSearchQuery {
+    pub text: String,
+    pub sort: CatalogSort,
+    pub scope: CatalogScope,
+    pub page: u32,
+    pub page_size: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogSuggestion {
+    pub value: String,
+    pub label: String,
+    pub count: u64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogWork {
+    pub id: u64,
+    pub title: String,
+    pub title_jpn: Option<String>,
+    pub artists: Vec<String>,
+    pub series: Vec<String>,
+    pub thumbnail_url: Option<String>,
+    pub bookmarked: bool,
+    pub file_count: u32,
+    pub views: u64,
+    pub posted: i64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogTagGroup {
+    pub namespace: String,
+    pub values: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogWorkDetail {
+    pub id: u64,
+    pub title: String,
+    pub title_jpn: Option<String>,
+    pub thumbnail_url: Option<String>,
+    pub uploader: Option<String>,
+    pub category: Option<i64>,
+    pub posted: Option<i64>,
+    pub updated: Option<i64>,
+    pub file_count: u32,
+    pub file_size: Option<u64>,
+    pub rating: Option<i64>,
+    pub views: u64,
+    pub bookmarked: bool,
+    pub tag_groups: Vec<CatalogTagGroup>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogSearchPage {
+    pub works: Vec<CatalogWork>,
+    pub total_count: u64,
+    pub page: u32,
+    pub page_size: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct LibrarySummary {
     pub root: String,
 }

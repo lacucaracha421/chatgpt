@@ -78,6 +78,7 @@ const metadataBackup: MetadataBackup = {
 function gateway(): LibraryGateway {
   return {
     openLibrary: vi.fn().mockResolvedValue(summary),
+    importVckCatalog: vi.fn(), getOnlineCatalogStatus: vi.fn(), searchOnlineCatalog: vi.fn(), suggestOnlineCatalog: vi.fn(), updateOnlineCatalog: vi.fn(), setOnlineCatalogUpdateSettings: vi.fn(), runDueOnlineCatalogUpdate: vi.fn(), getOnlineCatalogWorkDetail: vi.fn(), setOnlineCatalogBookmark: vi.fn(), resolveOnlineCatalogWork: vi.fn(), getRemoteReadingProgress: vi.fn(), saveRemoteReadingProgress: vi.fn(), clearRemoteMangaCache: vi.fn(),
     getExtensionConnection: vi.fn(),
     listClassifications: vi.fn().mockResolvedValue([]),
     listAlbums: vi.fn().mockResolvedValue([]),

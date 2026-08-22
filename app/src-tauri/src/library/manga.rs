@@ -7,6 +7,7 @@ use rusqlite::OptionalExtension;
 
 use super::error::LibraryError;
 use super::models::MangaSeries;
+use super::Library;
 
 const THUMB_DIR: &str = ".lakomics-thumbs";
 
@@ -42,8 +43,23 @@ pub(crate) fn set_manga_root(
     Ok(())
 }
 
-pub(crate) fn scan(connection: &rusqlite::Connection) -> Result<u64, LibraryError> {
-    let root = manga_root(connection)?.ok_or(LibraryError::MangaRootNotSet)?;
+pub(crate) fn scan(library: &Library) -> Result<u64, LibraryError> {
+    scan_with_thumbnail(library, create_thumbnail)
+}
+
+fn scan_with_thumbnail<F>(library: &Library, mut thumbnail: F) -> Result<u64, LibraryError>
+where
+    F: FnMut(&Path, &Path) -> Result<(), LibraryError>,
+{
+    let _scan_guard = library
+        .manga_scan_lock
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let root = {
+        let connection = library.connection()?;
+        manga_root(&connection)?
+    }
+    .ok_or(LibraryError::MangaRootNotSet)?;
     let root_path = PathBuf::from(&root);
     if !root_path.is_dir() {
         return Err(LibraryError::MangaRootNotSet);
@@ -69,11 +85,18 @@ pub(crate) fn scan(connection: &rusqlite::Connection) -> Result<u64, LibraryErro
             continue;
         }
         seen_paths.push(folder_name.clone());
-        if scan_series_folder(connection, &root_path, &folder_name, &thumb_dir)? {
+        if scan_series_folder(
+            library,
+            &root_path,
+            &folder_name,
+            &thumb_dir,
+            &mut thumbnail,
+        )? {
             changed += 1;
         }
     }
     // 삭제된 폴더 정리: DB에 있지만 이번 스캔에서 못 본 시리즈는 제거
+    let connection = library.connection()?;
     let mut statement = connection.prepare("SELECT relative_path FROM manga_series")?;
     let db_paths: Vec<String> = statement
         .query_map([], |row| row.get(0))?
@@ -89,12 +112,16 @@ pub(crate) fn scan(connection: &rusqlite::Connection) -> Result<u64, LibraryErro
     Ok(changed)
 }
 
-fn scan_series_folder(
-    connection: &rusqlite::Connection,
+fn scan_series_folder<F>(
+    library: &Library,
     root: &Path,
     relative_path: &str,
     thumb_dir: &Path,
-) -> Result<bool, LibraryError> {
+    thumbnail: &mut F,
+) -> Result<bool, LibraryError>
+where
+    F: FnMut(&Path, &Path) -> Result<(), LibraryError>,
+{
     let folder = root.join(relative_path);
     let (title, author, gallery_id) = parse_series_metadata(&folder, relative_path);
     let page_files = list_page_files(&folder)?;
@@ -117,13 +144,16 @@ fn scan_series_folder(
         })
         .unwrap_or_else(|_| chrono::Utc::now().to_rfc3339());
 
-    let existing: Option<(String, i64, String, String)> = connection
-        .query_row(
-            "SELECT id, page_count, thumbnail_relative_path, modified_at FROM manga_series WHERE relative_path = ?1",
-            [relative_path],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-        )
-        .optional()?;
+    let existing: Option<(String, i64, String, String)> = {
+        let connection = library.connection()?;
+        connection
+            .query_row(
+                "SELECT id, page_count, thumbnail_relative_path, modified_at FROM manga_series WHERE relative_path = ?1",
+                [relative_path],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .optional()?
+    };
     let unchanged = existing.as_ref().is_some_and(|(_, count, thumb, stored)| {
         *count as usize == page_count
             && fs::exists(thumb_dir.join(thumb)).unwrap_or(false)
@@ -141,9 +171,10 @@ fn scan_series_folder(
     let thumb_name = format!("{series_id}.webp");
     let thumb_path = thumb_dir.join(&thumb_name);
     if !thumb_path.exists() {
-        create_thumbnail(&folder.join(first_page), &thumb_path)?;
+        thumbnail(&folder.join(first_page), &thumb_path)?;
     }
 
+    let connection = library.connection()?;
     connection.execute(
         "INSERT INTO manga_series (id, relative_path, title, author, gallery_id, page_count, thumbnail_relative_path, scanned_at, modified_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
@@ -275,9 +306,10 @@ pub(crate) fn list_series(
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{fs, sync::mpsc, thread, time::Duration};
 
-    use super::{list_page_files, parse_series_metadata};
+    use super::{list_page_files, parse_series_metadata, scan_with_thumbnail};
+    use crate::library::Library;
 
     #[test]
     fn list_page_files_sorts_two_and_three_digit_names() {
@@ -314,5 +346,96 @@ mod tests {
         assert_eq!(title, "[unknown] Some Title");
         assert_eq!(author, "unknown");
         assert_eq!(gallery, None);
+    }
+
+    #[test]
+    fn slow_thumbnail_generation_does_not_block_database_reads() {
+        let temp = tempfile::tempdir().unwrap();
+        let manga_root = temp.path().join("manga");
+        let series = manga_root.join("series-a");
+        fs::create_dir_all(&series).unwrap();
+        fs::write(series.join("1.webp"), b"page").unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        library
+            .set_manga_root(Some(manga_root.to_string_lossy().as_ref()))
+            .unwrap();
+
+        let (thumbnail_started_tx, thumbnail_started_rx) = mpsc::channel();
+        let (release_thumbnail_tx, release_thumbnail_rx) = mpsc::channel();
+        let scan_library = library.clone();
+        let scan = thread::spawn(move || {
+            scan_with_thumbnail(&scan_library, |_, target| {
+                thumbnail_started_tx.send(()).unwrap();
+                release_thumbnail_rx.recv().unwrap();
+                fs::write(target, b"thumbnail").unwrap();
+                Ok(())
+            })
+        });
+        thumbnail_started_rx
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap();
+
+        let (read_finished_tx, read_finished_rx) = mpsc::channel();
+        let read_library = library.clone();
+        let read = thread::spawn(move || {
+            read_finished_tx.send(read_library.manga_root()).unwrap();
+        });
+        let read_finished = read_finished_rx
+            .recv_timeout(Duration::from_millis(250))
+            .is_ok();
+
+        release_thumbnail_tx.send(()).unwrap();
+        scan.join().unwrap().unwrap();
+        read.join().unwrap();
+        assert!(
+            read_finished,
+            "database reads waited for thumbnail generation"
+        );
+    }
+
+    #[test]
+    fn concurrent_scans_do_not_run_thumbnail_generation_together() {
+        let temp = tempfile::tempdir().unwrap();
+        let manga_root = temp.path().join("manga");
+        let series = manga_root.join("series-a");
+        fs::create_dir_all(&series).unwrap();
+        fs::write(series.join("1.webp"), b"page").unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        library
+            .set_manga_root(Some(manga_root.to_string_lossy().as_ref()))
+            .unwrap();
+
+        let (first_started_tx, first_started_rx) = mpsc::channel();
+        let (release_first_tx, release_first_rx) = mpsc::channel();
+        let first_library = library.clone();
+        let first = thread::spawn(move || {
+            scan_with_thumbnail(&first_library, |_, target| {
+                first_started_tx.send(()).unwrap();
+                release_first_rx.recv().unwrap();
+                fs::write(target, b"thumbnail").unwrap();
+                Ok(())
+            })
+        });
+        first_started_rx
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap();
+
+        let (second_finished_tx, second_finished_rx) = mpsc::channel();
+        let second_library = library.clone();
+        let second = thread::spawn(move || {
+            let result = scan_with_thumbnail(&second_library, |_, target| {
+                fs::write(target, b"thumbnail").unwrap();
+                Ok(())
+            });
+            second_finished_tx.send(result).unwrap();
+        });
+        let overlapped = second_finished_rx
+            .recv_timeout(Duration::from_millis(250))
+            .is_ok();
+
+        release_first_tx.send(()).unwrap();
+        first.join().unwrap().unwrap();
+        second.join().unwrap();
+        assert!(!overlapped, "concurrent manga scans overlapped");
     }
 }

@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 17;
+pub(crate) const SCHEMA_VERSION: i64 = 19;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -30,17 +30,25 @@ const ALADIN_VOLUME_SOURCES_SCHEMA: &str =
     include_str!("../../migrations/0016_aladin_volume_sources.sql");
 const ALADIN_RELEASE_WATCH_SCHEMA: &str =
     include_str!("../../migrations/0017_aladin_release_watch.sql");
+const ONLINE_CATALOG_SCHEMA: &str = include_str!("../../migrations/0018_online_catalog.sql");
+const ONLINE_CATALOG_BOOKMARKS_SCHEMA: &str =
+    include_str!("../../migrations/0019_online_catalog_bookmarks.sql");
 
 pub fn open_database(path: &Path) -> Result<Connection, LibraryError> {
-    let mut connection = Connection::open(path)?;
-    connection.pragma_update(None, "foreign_keys", "ON")?;
-    connection.pragma_update(None, "journal_mode", "WAL")?;
+    let connection = Connection::open(path)?;
     connection.busy_timeout(Duration::from_secs(5))?;
+    connection.pragma_update(None, "foreign_keys", "ON")?;
+    Ok(connection)
+}
+
+pub fn initialize_database(path: &Path) -> Result<Connection, LibraryError> {
+    let mut connection = open_database(path)?;
+    connection.pragma_update(None, "journal_mode", "WAL")?;
 
     let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
     match version {
         SCHEMA_VERSION => {}
-        version @ 0..=16 => {
+        version @ 0..=18 => {
             if version > 0 {
                 let root = path
                     .parent()
@@ -110,6 +118,12 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         if version <= 16 {
             transaction.execute_batch(ALADIN_RELEASE_WATCH_SCHEMA)?;
         }
+        if version <= 17 {
+            transaction.execute_batch(ONLINE_CATALOG_SCHEMA)?;
+        }
+        if version <= 18 {
+            transaction.execute_batch(ONLINE_CATALOG_BOOKMARKS_SCHEMA)?;
+        }
         transaction.commit()?;
         Ok::<(), LibraryError>(())
     })();
@@ -126,6 +140,22 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opens_a_routine_connection_while_another_connection_is_writing() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("library.sqlite");
+        let writer = Connection::open(&path).unwrap();
+        writer
+            .pragma_update(None, "user_version", SCHEMA_VERSION)
+            .unwrap();
+        writer.execute_batch("BEGIN EXCLUSIVE").unwrap();
+
+        let opened = open_database(&path);
+
+        writer.execute_batch("ROLLBACK").unwrap();
+        assert!(opened.is_ok(), "{opened:?}");
+    }
 
     #[test]
     fn migrates_v8_to_asset_source_provenance() {
@@ -693,7 +723,6 @@ mod tests {
 
         migrate_to_latest(&mut connection, 15).unwrap();
 
-        assert_eq!(SCHEMA_VERSION, 16);
         let config: Option<String> = connection
             .query_row(
                 "SELECT provider_config_json FROM collection_external_bindings
@@ -769,7 +798,6 @@ mod tests {
 
         migrate_to_latest(&mut connection, 16).unwrap();
 
-        assert_eq!(SCHEMA_VERSION, 17);
         assert_eq!(
             connection
                 .query_row(
@@ -832,5 +860,94 @@ mod tests {
                 .unwrap();
             assert_eq!(count, 0, "{table} should cascade with the Collection");
         }
+    }
+
+    #[test]
+    fn migrates_v17_to_online_catalog() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        for schema in [
+            INITIAL_SCHEMA,
+            VAULT_SAFETY_SCHEMA,
+            SIMILARITY_REVIEW_SCHEMA,
+            VIDEO_MEDIA_SCHEMA,
+            MANGA_SCHEMA,
+            MANGA_MODIFIED_SCHEMA,
+            CLASSIFICATION_APPEARANCE_SCHEMA,
+            ASSET_ALBUMS_SCHEMA,
+            ASSET_SOURCE_PROVENANCE_SCHEMA,
+            COLLECTIONS_SCHEMA,
+            COLLECTIONS_TYPED_SCHEMA,
+            COLLECTION_SOURCE_SCHEMA,
+            COLLECTION_EXTERNAL_BINDINGS_SCHEMA,
+            COLLECTION_WORK_ARTWORKS_SCHEMA,
+            COLLECTION_VOLUMES_SCHEMA,
+            ALADIN_VOLUME_SOURCES_SCHEMA,
+            ALADIN_RELEASE_WATCH_SCHEMA,
+        ] {
+            connection.execute_batch(schema).unwrap();
+        }
+
+        migrate_to_latest(&mut connection, 17).unwrap();
+
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT update_enabled FROM online_catalog_settings WHERE singleton = 1",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1,
+        );
+        assert!(connection
+            .prepare("SELECT provider, work_id, last_page FROM remote_reading_progress")
+            .is_ok());
+    }
+
+    #[test]
+    fn migrates_v18_to_online_catalog_bookmarks() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        for schema in [
+            INITIAL_SCHEMA,
+            VAULT_SAFETY_SCHEMA,
+            SIMILARITY_REVIEW_SCHEMA,
+            VIDEO_MEDIA_SCHEMA,
+            MANGA_SCHEMA,
+            MANGA_MODIFIED_SCHEMA,
+            CLASSIFICATION_APPEARANCE_SCHEMA,
+            ASSET_ALBUMS_SCHEMA,
+            ASSET_SOURCE_PROVENANCE_SCHEMA,
+            COLLECTIONS_SCHEMA,
+            COLLECTIONS_TYPED_SCHEMA,
+            COLLECTION_SOURCE_SCHEMA,
+            COLLECTION_EXTERNAL_BINDINGS_SCHEMA,
+            COLLECTION_WORK_ARTWORKS_SCHEMA,
+            COLLECTION_VOLUMES_SCHEMA,
+            ALADIN_VOLUME_SOURCES_SCHEMA,
+            ALADIN_RELEASE_WATCH_SCHEMA,
+            ONLINE_CATALOG_SCHEMA,
+        ] {
+            connection.execute_batch(schema).unwrap();
+        }
+
+        migrate_to_latest(&mut connection, 18).unwrap();
+        connection
+            .execute(
+                "INSERT INTO online_catalog_bookmarks (provider, work_id, created_at)
+                 VALUES ('kHentai', '42', '2026-08-22T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT provider || ':' || work_id FROM online_catalog_bookmarks",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "kHentai:42",
+        );
     }
 }

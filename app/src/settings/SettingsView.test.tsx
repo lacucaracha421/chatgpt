@@ -262,9 +262,67 @@ it("stores and removes an Aladin key without reading it back", async () => {
   expect(screen.getByText("설정되지 않음")).toBeInTheDocument();
 });
 
+it("changes online catalog automatic update settings", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getAladinCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.getOnlineCatalogStatus).mockResolvedValue({
+    installed: true,
+    workCount: 100,
+    updateEnabled: true,
+    updateIntervalSeconds: 3_600,
+    lastAttemptAt: null,
+    lastSuccessAt: null,
+    lastAdded: 0,
+    lastError: null,
+  });
+  vi.mocked(gateway.setOnlineCatalogUpdateSettings).mockImplementation(async (enabled, intervalSeconds) => ({
+    installed: true,
+    workCount: 100,
+    updateEnabled: enabled,
+    updateIntervalSeconds: intervalSeconds,
+    lastAttemptAt: null,
+    lastSuccessAt: null,
+    lastAdded: 0,
+    lastError: null,
+  }));
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  await user.click(screen.getByRole("button", { name: "외부 서비스" }));
+  const toggle = await screen.findByRole("checkbox", { name: "자동 갱신" });
+  expect(toggle).toBeChecked();
+  await user.selectOptions(screen.getByRole("combobox", { name: "갱신 간격" }), "21600");
+  expect(gateway.setOnlineCatalogUpdateSettings).toHaveBeenCalledWith(true, 21_600);
+  await user.click(toggle);
+  expect(gateway.setOnlineCatalogUpdateSettings).toHaveBeenCalledWith(false, 21_600);
+});
+
+it("confirms before clearing the remote manga cache", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getAladinCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.clearRemoteMangaCache).mockResolvedValue(undefined);
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  await user.click(screen.getByRole("button", { name: "외부 서비스" }));
+  await user.click(await screen.findByRole("button", { name: "이미지 캐시 지우기" }));
+  expect(gateway.clearRemoteMangaCache).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "캐시 삭제 확인" }));
+  expect(gateway.clearRemoteMangaCache).toHaveBeenCalledOnce();
+  expect(await screen.findByText("온라인 이미지 캐시를 지웠습니다")).toBeVisible();
+});
+
 function createGateway(): LibraryGateway {
   return {
-    openLibrary: vi.fn(), getExtensionConnection: vi.fn(), listClassifications: vi.fn(),
+    openLibrary: vi.fn(), importVckCatalog: vi.fn(), getOnlineCatalogStatus: vi.fn().mockResolvedValue({ installed: false, workCount: 0, updateEnabled: true, updateIntervalSeconds: 3600, lastAttemptAt: null, lastSuccessAt: null, lastAdded: 0, lastError: null }), searchOnlineCatalog: vi.fn(), suggestOnlineCatalog: vi.fn(), updateOnlineCatalog: vi.fn(), setOnlineCatalogUpdateSettings: vi.fn(), runDueOnlineCatalogUpdate: vi.fn(), getOnlineCatalogWorkDetail: vi.fn(), setOnlineCatalogBookmark: vi.fn(), resolveOnlineCatalogWork: vi.fn(), getRemoteReadingProgress: vi.fn(), saveRemoteReadingProgress: vi.fn(), clearRemoteMangaCache: vi.fn(), getExtensionConnection: vi.fn(), listClassifications: vi.fn(),
     listAlbums: vi.fn().mockResolvedValue([]), createAlbum: vi.fn(), renameAlbum: vi.fn(), moveAlbum: vi.fn(), updateAlbumAppearance: vi.fn(), deleteAlbum: vi.fn(),
     createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(), updateClassificationAppearance: vi.fn(),
     deleteClassification: vi.fn(), listAssets: vi.fn(), indexMissingSimilarityHashes: vi.fn(),

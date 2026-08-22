@@ -126,3 +126,58 @@ describe("libraryGateway video contract", () => {
     });
   });
 });
+
+describe("libraryGateway online catalog contract", () => {
+  beforeEach(() => invoke.mockClear());
+
+  it("maps catalog import, status, search, and suggestions", async () => {
+    const query = {
+      text: "던전",
+      sort: "latest" as const,
+      scope: "all" as const,
+      page: 0,
+      pageSize: 48,
+    };
+
+    await libraryGateway.importVckCatalog("C:\\VCK");
+    await libraryGateway.getOnlineCatalogStatus();
+    await libraryGateway.searchOnlineCatalog(query);
+    await libraryGateway.suggestOnlineCatalog("제독", 10);
+    await libraryGateway.updateOnlineCatalog();
+    await libraryGateway.setOnlineCatalogUpdateSettings(true, 21_600);
+    await libraryGateway.runDueOnlineCatalogUpdate();
+    await libraryGateway.getOnlineCatalogWorkDetail(3);
+    await libraryGateway.setOnlineCatalogBookmark(3, true);
+    await libraryGateway.resolveOnlineCatalogWork(3);
+    await libraryGateway.getRemoteReadingProgress("kHentai", "3");
+    await libraryGateway.saveRemoteReadingProgress({ provider: "kHentai", workId: "3", lastPage: 2, pageCount: 10, lastReadAt: "" });
+    await libraryGateway.clearRemoteMangaCache();
+
+    expect(invoke).toHaveBeenNthCalledWith(1, "import_vck_catalog", {
+      vckRoot: "C:\\VCK",
+    });
+    expect(invoke).toHaveBeenNthCalledWith(2, "get_online_catalog_status");
+    expect(invoke).toHaveBeenNthCalledWith(3, "search_online_catalog", { query });
+    expect(invoke).toHaveBeenNthCalledWith(4, "suggest_online_catalog", {
+      text: "제독",
+      limit: 10,
+    });
+    expect(invoke).toHaveBeenNthCalledWith(5, "update_online_catalog");
+    expect(invoke).toHaveBeenNthCalledWith(6, "set_online_catalog_update_settings", {
+      enabled: true,
+      intervalSeconds: 21_600,
+    });
+    expect(invoke).toHaveBeenNthCalledWith(7, "run_due_online_catalog_update");
+    expect(invoke).toHaveBeenNthCalledWith(8, "get_online_catalog_work_detail", { workId: 3 });
+    expect(invoke).toHaveBeenNthCalledWith(9, "set_online_catalog_bookmark", {
+      workId: 3,
+      bookmarked: true,
+    });
+    expect(invoke).toHaveBeenNthCalledWith(10, "resolve_online_catalog_work", { workId: 3 });
+    expect(invoke).toHaveBeenNthCalledWith(11, "get_remote_reading_progress", { provider: "kHentai", workId: "3" });
+    expect(invoke).toHaveBeenNthCalledWith(12, "save_remote_reading_progress", {
+      progress: { provider: "kHentai", workId: "3", lastPage: 2, pageCount: 10, lastReadAt: "" },
+    });
+    expect(invoke).toHaveBeenNthCalledWith(13, "clear_remote_manga_cache");
+  });
+});

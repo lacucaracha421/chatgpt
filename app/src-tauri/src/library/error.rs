@@ -30,6 +30,38 @@ pub enum LibraryError {
     },
     #[error("SQLite 작업이 실패했습니다")]
     Database(#[from] rusqlite::Error),
+    #[error("온라인 카탈로그가 설치되지 않았습니다")]
+    OnlineCatalogNotInstalled,
+    #[error("온라인 카탈로그 작품을 찾을 수 없습니다")]
+    OnlineCatalogWorkNotFound,
+    #[error("온라인 카탈로그 데이터가 올바르지 않습니다")]
+    InvalidOnlineCatalog,
+    #[error("온라인 카탈로그 요청 경로가 올바르지 않습니다")]
+    InvalidCatalogTransportPath,
+    #[error("온라인 카탈로그 서버가 요청을 거부했습니다: HTTP {0}")]
+    CatalogTransportRejected(u16),
+    #[error("온라인 카탈로그 응답을 처리할 수 없습니다")]
+    InvalidCatalogTransportResponse,
+    #[error("온라인 카탈로그 요청 시간이 초과됐습니다")]
+    CatalogTransportTimedOut,
+    #[error("온라인 카탈로그의 다른 요청이 처리 중입니다")]
+    CatalogTransportBusy,
+    #[error("온라인 카탈로그에 연결할 수 없습니다")]
+    CatalogTransportUnavailable,
+    #[error("온라인 카탈로그 갱신 간격은 60초 이상이어야 합니다")]
+    InvalidCatalogUpdateInterval,
+    #[error("온라인 작품의 이미지 목록이 올바르지 않습니다")]
+    InvalidRemoteGallery,
+    #[error("온라인 작품의 이미지 목록을 가져올 수 없습니다")]
+    RemoteGalleryUnavailable,
+    #[error("온라인 작품의 읽기 위치가 올바르지 않습니다")]
+    InvalidRemoteReadingProgress,
+    #[error("온라인 카탈로그 파일 작업에 실패했습니다: {path}")]
+    OnlineCatalogImport {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("지원하지 않는 라이브러리 스키마 버전입니다: {0}")]
     UnsupportedSchema(i64),
     #[error("가져오기 폴더에는 지원되는 메타데이터 JSON이 정확히 하나 있어야 합니다")]

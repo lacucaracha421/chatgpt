@@ -59,6 +59,7 @@
   --z-dialog-overlay: 1110;
   --z-dialog-content: 1120;
   --z-floating-menu: 1200;
+  --z-toast: 1300;
   --video-progress-height: 6px;
   --video-overlay-bg: rgba(7, 10, 15, 0.72);
   --shadow-floating: 0 8px 24px var(--color-overlay);

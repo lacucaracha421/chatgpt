@@ -15,6 +15,7 @@ export function CollectionVolumePanel({
 }: CollectionVolumePanelProps) {
   return (
     <aside className="collection-overlay__volume" aria-label="권 정보">
+      <h3>선택한 권</h3>
       <div className="collection-overlay__volume-row">
         <span className="collection-overlay__volume-label">표지 수</span>
         <span className="collection-overlay__volume-value">{coverCount}</span>

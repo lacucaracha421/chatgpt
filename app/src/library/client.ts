@@ -38,16 +38,49 @@ import type {
   VideoPreparationProgress,
   BookImportPlan,
   BookMigrationReport,
+  CatalogSearchPage,
+  CatalogSearchQuery,
+  CatalogStatus,
+  CatalogSuggestion,
+  CatalogUpdateResult,
+  CatalogWorkDetail,
   CollectionCover,
   CollectionVolume,
   MangaDexVolumeSyncResult,
   ReleaseWatchEvent,
   ReleaseWatchRunResult,
   ReleaseWatchStatus,
+  RemoteReadingProgress,
+  ResolvedGallery,
 } from "./types";
 
 export const libraryGateway: LibraryGateway = {
   openLibrary: (path) => invoke<LibrarySummary>("open_library", { path }),
+  importVckCatalog: (vckRoot) =>
+    invoke<CatalogStatus>("import_vck_catalog", { vckRoot }),
+  getOnlineCatalogStatus: () =>
+    invoke<CatalogStatus>("get_online_catalog_status"),
+  searchOnlineCatalog: (query: CatalogSearchQuery) =>
+    invoke<CatalogSearchPage>("search_online_catalog", { query }),
+  suggestOnlineCatalog: (text, limit) =>
+    invoke<CatalogSuggestion[]>("suggest_online_catalog", { text, limit }),
+  getOnlineCatalogWorkDetail: (workId) =>
+    invoke<CatalogWorkDetail>("get_online_catalog_work_detail", { workId }),
+  setOnlineCatalogBookmark: (workId, bookmarked) =>
+    invoke("set_online_catalog_bookmark", { workId, bookmarked }),
+  updateOnlineCatalog: () =>
+    invoke<CatalogUpdateResult>("update_online_catalog"),
+  setOnlineCatalogUpdateSettings: (enabled, intervalSeconds) =>
+    invoke<CatalogStatus>("set_online_catalog_update_settings", { enabled, intervalSeconds }),
+  runDueOnlineCatalogUpdate: () =>
+    invoke<CatalogUpdateResult | null>("run_due_online_catalog_update"),
+  resolveOnlineCatalogWork: (workId) =>
+    invoke<ResolvedGallery>("resolve_online_catalog_work", { workId }),
+  getRemoteReadingProgress: (provider, workId) =>
+    invoke<RemoteReadingProgress | null>("get_remote_reading_progress", { provider, workId }),
+  saveRemoteReadingProgress: (progress) =>
+    invoke("save_remote_reading_progress", { progress }),
+  clearRemoteMangaCache: () => invoke("clear_remote_manga_cache"),
   getExtensionConnection: () =>
     invoke<ExtensionConnection>("get_extension_connection"),
   listClassifications: () =>

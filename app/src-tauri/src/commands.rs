@@ -2,26 +2,33 @@ use std::sync::RwLock;
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, State};
 
-use crate::library::{
-    book_migration::{BookImportPlan, BookMigrationReport},
-    credential,
-    error::LibraryError,
-    metadata_import::{self, MetadataImportPlan},
-    models::{
-        AladinApplyRequest, AladinConnection, AladinSeriesCandidate, AladinSyncResult, AlbumEntry,
-        AssetAlbumPatch, AssetCollectionPatch, AssetCursor, AssetMetadataPatch, AssetPage,
-        AssetQuery, AssetSummary, ClassificationEntry, CollectionCover, CollectionSummary,
-        CollectionVolume, CreateAlbum, CreateClassification, CreateCollection, IngestMediaRequest,
-        IngestOutcome, LibrarySummary, MangaDexApplyRequest, MangaDexConnection,
-        MangaDexSearchResult, MangaDexVolumeSyncResult, MangaDexWorkPreview, MangaSeries,
-        MetadataBackup, PurgeSummary, ReleaseWatchEvent, ReleaseWatchRunResult,
-        ReleaseWatchRunStopReason, ReleaseWatchStatus, SetAssetClassification,
-        SimilarityDecisionRequest, SimilarityIndexProgress, SimilarityReviewPage, TrashPage,
-        TrashPolicy, UpdateCollection, VideoPreparationProgress,
+use crate::{
+    catalog_transport::CatalogTransport,
+    library::{
+        book_migration::{BookImportPlan, BookMigrationReport},
+        catalog_update::{self, CatalogUpdateState},
+        credential,
+        error::LibraryError,
+        metadata_import::{self, MetadataImportPlan},
+        models::{
+            AladinApplyRequest, AladinConnection, AladinSeriesCandidate, AladinSyncResult,
+            AlbumEntry, AssetAlbumPatch, AssetCollectionPatch, AssetCursor, AssetMetadataPatch,
+            AssetPage, AssetQuery, AssetSummary, CatalogSearchPage, CatalogSearchQuery,
+            CatalogStatus, CatalogSuggestion, CatalogUpdateResult, CatalogUpdateStopReason,
+            CatalogWorkDetail, ClassificationEntry, CollectionCover, CollectionSummary,
+            CollectionVolume, CreateAlbum, CreateClassification, CreateCollection,
+            IngestMediaRequest, IngestOutcome, LibrarySummary, MangaDexApplyRequest,
+            MangaDexConnection, MangaDexSearchResult, MangaDexVolumeSyncResult,
+            MangaDexWorkPreview, MangaSeries, MetadataBackup, PurgeSummary, ReleaseWatchEvent,
+            ReleaseWatchRunResult, ReleaseWatchRunStopReason, ReleaseWatchStatus, RemoteProvider,
+            RemoteReadingProgress, ResolvedGallery, SetAssetClassification,
+            SimilarityDecisionRequest, SimilarityIndexProgress, SimilarityReviewPage, TrashPage,
+            TrashPolicy, UpdateCollection, VideoPreparationProgress,
+        },
+        Library,
     },
-    Library,
 };
 
 #[tauri::command]
@@ -70,6 +77,20 @@ impl From<LibraryError> for CommandError {
             LibraryError::RestoreFailed { .. } => "restore_failed",
             LibraryError::CreateDirectory { .. } => "create_directory_failed",
             LibraryError::Database(_) => "database_failed",
+            LibraryError::OnlineCatalogNotInstalled => "online_catalog_not_installed",
+            LibraryError::OnlineCatalogWorkNotFound => "online_catalog_work_not_found",
+            LibraryError::InvalidOnlineCatalog => "invalid_online_catalog",
+            LibraryError::InvalidCatalogTransportPath => "invalid_catalog_transport_path",
+            LibraryError::CatalogTransportRejected(_) => "catalog_transport_rejected",
+            LibraryError::InvalidCatalogTransportResponse => "invalid_catalog_transport_response",
+            LibraryError::CatalogTransportTimedOut => "catalog_transport_timed_out",
+            LibraryError::CatalogTransportBusy => "catalog_transport_busy",
+            LibraryError::CatalogTransportUnavailable => "catalog_transport_unavailable",
+            LibraryError::InvalidCatalogUpdateInterval => "invalid_catalog_update_interval",
+            LibraryError::InvalidRemoteGallery => "invalid_remote_gallery",
+            LibraryError::RemoteGalleryUnavailable => "remote_gallery_unavailable",
+            LibraryError::InvalidRemoteReadingProgress => "invalid_remote_reading_progress",
+            LibraryError::OnlineCatalogImport { .. } => "online_catalog_import_failed",
             LibraryError::UnsupportedSchema(_) => "unsupported_schema",
             LibraryError::MetadataImportManifestCount => "metadata_import_manifest_count",
             LibraryError::UnsupportedMetadataImport => "unsupported_metadata_import",
@@ -941,6 +962,215 @@ pub async fn scan_manga(state: State<'_, AppState>) -> Result<u64, CommandError>
 pub fn list_manga_series(state: State<'_, AppState>) -> Result<Vec<MangaSeries>, CommandError> {
     let library = current_required(state)?;
     library.list_manga_series().map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn import_vck_catalog(
+    vck_root: String,
+    state: State<'_, AppState>,
+) -> Result<CatalogStatus, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.import_vck_catalog(vck_root.as_ref()))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn get_online_catalog_status(
+    state: State<'_, AppState>,
+) -> Result<CatalogStatus, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.catalog_status())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn search_online_catalog(
+    query: CatalogSearchQuery,
+    state: State<'_, AppState>,
+) -> Result<CatalogSearchPage, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.search_online_catalog(query))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn suggest_online_catalog(
+    text: String,
+    limit: u32,
+    state: State<'_, AppState>,
+) -> Result<Vec<CatalogSuggestion>, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.suggest_online_catalog(&text, limit))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn get_online_catalog_work_detail(
+    work_id: u64,
+    state: State<'_, AppState>,
+) -> Result<CatalogWorkDetail, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.online_catalog_work_detail(work_id))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn set_online_catalog_bookmark(
+    work_id: u64,
+    bookmarked: bool,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    current_required(state)?
+        .set_online_catalog_bookmark(work_id, bookmarked)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn update_online_catalog(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    transport: State<'_, CatalogTransport>,
+    update_state: State<'_, CatalogUpdateState>,
+) -> Result<CatalogUpdateResult, CommandError> {
+    run_online_catalog_update(app, state, transport, update_state).await
+}
+
+#[tauri::command]
+pub async fn run_due_online_catalog_update(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    transport: State<'_, CatalogTransport>,
+    update_state: State<'_, CatalogUpdateState>,
+) -> Result<Option<CatalogUpdateResult>, CommandError> {
+    let library = current_required(state.clone())?;
+    let status = library.catalog_status().map_err(CommandError::from)?;
+    if !status.installed
+        || !catalog_update::is_update_due(
+            status.update_enabled,
+            status.update_interval_seconds,
+            status.last_attempt_at.as_deref(),
+            chrono::Utc::now(),
+        )
+    {
+        return Ok(None);
+    }
+    run_online_catalog_update(app, state, transport, update_state)
+        .await
+        .map(Some)
+}
+
+async fn run_online_catalog_update(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    transport: State<'_, CatalogTransport>,
+    update_state: State<'_, CatalogUpdateState>,
+) -> Result<CatalogUpdateResult, CommandError> {
+    let library = current_required(state)?;
+    let Some(_guard) = update_state.begin() else {
+        return Ok(CatalogUpdateResult {
+            added: 0,
+            pages: 0,
+            reason: CatalogUpdateStopReason::AlreadyRunning,
+            last_success_at: library
+                .catalog_status()
+                .map_err(CommandError::from)?
+                .last_success_at,
+        });
+    };
+    catalog_update::execute_catalog_update(library, &transport, &app)
+        .await
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn set_online_catalog_update_settings(
+    enabled: bool,
+    interval_seconds: u64,
+    state: State<'_, AppState>,
+) -> Result<CatalogStatus, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.set_catalog_update_settings(enabled, interval_seconds)
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn resolve_online_catalog_work(
+    work_id: u64,
+    state: State<'_, AppState>,
+) -> Result<ResolvedGallery, CommandError> {
+    let library = current_required(state)?;
+    let root = library.root().to_path_buf();
+    tauri::async_runtime::spawn_blocking(move || -> Result<ResolvedGallery, LibraryError> {
+        if let Some(manifest) = crate::library::remote_gallery::load_valid_manifest(&root, work_id)?
+        {
+            return Ok(ResolvedGallery {
+                provider: RemoteProvider::KHentai,
+                work_id: work_id.to_string(),
+                page_count: manifest.pages.len() as u32,
+                page_urls: manifest.pages.into_iter().map(|page| page.url).collect(),
+            });
+        }
+        let pages = crate::library::remote_gallery::fetch_khentai_gallery(work_id)?;
+        let page_count = pages.len() as u32;
+        let page_urls = pages.iter().map(|page| page.url.clone()).collect();
+        crate::library::remote_gallery::write_manifest(
+            &root,
+            &crate::library::remote_gallery::RemoteGalleryManifest::khentai(work_id, pages),
+        )?;
+        Ok(ResolvedGallery {
+            provider: RemoteProvider::KHentai,
+            work_id: work_id.to_string(),
+            page_count,
+            page_urls,
+        })
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn get_remote_reading_progress(
+    provider: String,
+    work_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<RemoteReadingProgress>, CommandError> {
+    crate::library::remote_progress::get_progress(&current_required(state)?, &provider, &work_id)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn save_remote_reading_progress(
+    progress: RemoteReadingProgress,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    crate::library::remote_progress::save_progress(&current_required(state)?, &progress)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn clear_remote_manga_cache(state: State<'_, AppState>) -> Result<(), CommandError> {
+    let root = current_required(state)?.root().to_path_buf();
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::library::remote_media::clear_remote_cache(&root)
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
 }
 
 #[tauri::command]

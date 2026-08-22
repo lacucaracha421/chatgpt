@@ -25,6 +25,24 @@ pub(crate) fn media_response_with_range(
     if method != Method::GET {
         return empty_response(StatusCode::METHOD_NOT_ALLOWED);
     }
+    if path.starts_with("/remote-manga-") {
+        let Some((work_id, page)) = parse_remote_manga_path(path) else {
+            return empty_response(StatusCode::BAD_REQUEST);
+        };
+        let Some(library) = library else {
+            return empty_response(StatusCode::NOT_FOUND);
+        };
+        return match crate::library::remote_media::load_remote_page(library.root(), work_id, page) {
+            Ok(media) => Response::builder()
+                .status(StatusCode::OK)
+                .header(CONTENT_TYPE, media.mime)
+                .header(CONTENT_LENGTH, media.bytes.len().to_string())
+                .body(media.bytes)
+                .expect("remote media response is valid"),
+            Err(LibraryError::MediaNotFound) => empty_response(StatusCode::NOT_FOUND),
+            Err(_) => empty_response(StatusCode::BAD_GATEWAY),
+        };
+    }
     let Some((variant, asset_id, file_name)) = parse_path(path) else {
         return empty_response(StatusCode::BAD_REQUEST);
     };
@@ -111,6 +129,18 @@ pub(crate) fn media_response_with_range(
         ) => empty_response(StatusCode::NOT_FOUND),
         Err(_) => empty_response(StatusCode::INTERNAL_SERVER_ERROR),
     }
+}
+
+fn parse_remote_manga_path(path: &str) -> Option<(u64, u32)> {
+    let segments = path.strip_prefix('/')?.split('/').collect::<Vec<_>>();
+    let (work_id, page) = match segments.as_slice() {
+        ["remote-manga-thumbnail", work_id] => (*work_id, "1"),
+        ["remote-manga-page", "kHentai", work_id, page] => (*work_id, *page),
+        _ => return None,
+    };
+    let work_id = work_id.parse::<u64>().ok().filter(|id| *id > 0)?;
+    let page = page.parse::<u32>().ok().filter(|page| *page > 0)?;
+    Some((work_id, page))
 }
 
 fn playback_response(
@@ -275,7 +305,7 @@ mod tests {
 
     use crate::library::{error::LibraryError, Library, MediaVariant};
 
-    use super::{media_response, media_response_with_range, parse_path};
+    use super::{media_response, media_response_with_range, parse_path, parse_remote_manga_path};
 
     const ASSET_ID: &str = "00000000-0000-4000-8000-000000000001";
     const MISSING_ID: &str = "00000000-0000-4000-8000-000000000002";
@@ -284,6 +314,26 @@ mod tests {
     const SERIES_ID: &str = "00000000-0000-4000-8000-000000000005";
     const COLLECTION_ID: &str = "00000000-0000-4000-8000-000000000006";
     const ARTWORK_ID: &str = "00000000-0000-4000-8000-000000000007";
+
+    #[test]
+    fn remote_manga_routes_accept_only_closed_numeric_paths() {
+        assert_eq!(
+            parse_remote_manga_path("/remote-manga-page/kHentai/42/3"),
+            Some((42, 3))
+        );
+        assert_eq!(
+            parse_remote_manga_path("/remote-manga-thumbnail/42"),
+            Some((42, 1))
+        );
+        for path in [
+            "/remote-manga-page/hitomi/42/3",
+            "/remote-manga-page/kHentai/42/0",
+            "/remote-manga-page/kHentai/../3",
+            "/remote-manga-thumbnail/42/extra",
+        ] {
+            assert_eq!(parse_remote_manga_path(path), None, "{path}");
+        }
+    }
 
     fn collection_source_library(with_preview: bool) -> (tempfile::TempDir, Library) {
         let temp = tempfile::tempdir().unwrap();

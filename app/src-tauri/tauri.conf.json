@@ -21,7 +21,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' http://lakomics.localhost; media-src 'self' http://lakomics.localhost"
+      "csp": "default-src 'self'; img-src 'self' http://lakomics.localhost https://ehgt.org https://*.ehgt.org https://*.siam-cdn.net; media-src 'self' http://lakomics.localhost"
     }
   },
   "bundle": {

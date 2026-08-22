@@ -40,6 +40,8 @@ import { useSimilarityIndex } from "../similarity/useSimilarityIndex";
 import { useVideoPreparation } from "../video/useVideoPreparation";
 import { MangaBrowser } from "../manga/MangaBrowser";
 import { MangaViewer } from "../manga/MangaViewer";
+import { useDesktopInteractions } from "./useDesktopInteractions";
+import { useOnlineCatalogUpdate } from "./useOnlineCatalogUpdate";
 
 type AppProps = {
   gateway?: LibraryGateway;
@@ -54,6 +56,7 @@ export function App({
   subscribeDrops = subscribeToTauriDrops,
   startAssetDrag = nativeStartAssetDrag,
 }: AppProps) {
+  useDesktopInteractions();
   return (
     <LibraryProvider gateway={gateway}>
       <LibraryScreen selectFolder={selectFolder} subscribeDrops={subscribeDrops} startAssetDrag={startAssetDrag} />
@@ -79,6 +82,7 @@ function LibraryScreen({
 
 function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag }: { libraryRoot: string; subscribeDrops: DropSubscriber; startAssetDrag: StartAssetDrag }) {
   const { gateway } = useLibrary();
+  useOnlineCatalogUpdate(gateway, libraryRoot);
   const [entries, setEntries] = useState<ClassificationEntry[]>([]);
   const [albums, setAlbums] = useState<AlbumEntry[]>([]);
   const [collections, setCollections] = useState<CollectionSummary[]>([]);

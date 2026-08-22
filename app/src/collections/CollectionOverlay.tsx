@@ -295,8 +295,7 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
       />
       {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
       <ReleaseWatchSummary events={releaseChanges} />
-      <div className="collection-overlay__body">
-        {collection && <CollectionInfoPanel collection={collection} />}
+      <div className={`collection-overlay__body${isManga ? " collection-overlay__body--manga" : ""}`}>
         <div className="collection-overlay__hero">
           {!isManga && covers === null ? (
             <Skeleton className="collection-overlay__hero-skeleton" label="표지를 불러오는 중" />
@@ -311,15 +310,18 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
             <span className="collection-overlay__hero-empty">표지가 없습니다.</span>
           )}
         </div>
-        {isManga && (
-          <CollectionVolumePanel
-            coverCount={volumes?.length ?? 0}
-            volumeLabel={selectedVolume?.displayLabel ?? ""}
-            localReleaseDate={selectedVolume?.localReleaseDate ?? null}
-            isbn13={selectedVolume?.isbn13 ?? null}
-            releaseStatus={selectedVolume?.releaseStatus ?? null}
-          />
-        )}
+        <div className="collection-overlay__details">
+          {collection && <CollectionInfoPanel collection={collection} />}
+          {isManga && (
+            <CollectionVolumePanel
+              coverCount={volumes?.length ?? 0}
+              volumeLabel={selectedVolume?.displayLabel ?? ""}
+              localReleaseDate={selectedVolume?.localReleaseDate ?? null}
+              isbn13={selectedVolume?.isbn13 ?? null}
+              releaseStatus={selectedVolume?.releaseStatus ?? null}
+            />
+          )}
+        </div>
       </div>
       {isManga && volumes !== null ? (
         <CollectionVolumeGrid

@@ -1,3 +1,4 @@
+mod catalog_transport;
 mod commands;
 mod extension_api;
 pub mod library;
@@ -17,6 +18,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(app_state.clone())
         .manage(extension_runtime.clone())
+        .manage(catalog_transport::CatalogTransport::default())
+        .manage(library::catalog_update::CatalogUpdateState::default())
         .setup(move |app| {
             extension_api::start(
                 app.handle().clone(),
@@ -110,6 +113,19 @@ pub fn run() {
             commands::set_manga_root,
             commands::scan_manga,
             commands::list_manga_series,
+            commands::import_vck_catalog,
+            commands::get_online_catalog_status,
+            commands::search_online_catalog,
+            commands::suggest_online_catalog,
+            commands::get_online_catalog_work_detail,
+            commands::set_online_catalog_bookmark,
+            commands::update_online_catalog,
+            commands::run_due_online_catalog_update,
+            commands::set_online_catalog_update_settings,
+            commands::resolve_online_catalog_work,
+            commands::get_remote_reading_progress,
+            commands::save_remote_reading_progress,
+            commands::clear_remote_manga_cache,
             commands::inspect_book_import,
             commands::import_book_collections,
             commands::get_collection_source_root,

@@ -24,6 +24,10 @@ export function mangaPageUrl(seriesId: string, pageIndex: number): string {
   return `${MEDIA_ORIGIN}/manga-page/${encodeURIComponent(seriesId)}/${pageIndex}`;
 }
 
+export function remoteMangaPageUrl(provider: "kHentai", workId: string, pageIndex: number): string {
+  return `${MEDIA_ORIGIN}/remote-manga-page/${provider}/${encodeURIComponent(workId)}/${pageIndex}`;
+}
+
 export function collectionCoverUrl(collectionId: string, fileName: string): string {
   return `${MEDIA_ORIGIN}/collection-cover/${encodeURIComponent(collectionId)}/${encodeURIComponent(fileName)}`;
 }

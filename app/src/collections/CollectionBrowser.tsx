@@ -16,6 +16,12 @@ import { CollectionCard } from "./CollectionCard";
 import { CollectionEditDialog, type CollectionEditMode } from "./CollectionEditDialog";
 import { MangaDexImportDialog } from "./MangaDexImportDialog";
 
+const TYPE_LABEL: Record<CollectionType, string> = {
+  game: "게임",
+  manga: "만화",
+  movie: "영화",
+};
+
 type CollectionBrowserProps = {
   collections: CollectionSummary[];
   typeFilter: CollectionType | null;
@@ -43,6 +49,7 @@ export function CollectionBrowser({
     if (typeFilter && collection.type !== typeFilter) return false;
     return true;
   });
+  const sectionLabel = typeFilter ? TYPE_LABEL[typeFilter] : "전체";
 
   function setTypeFilter(next: CollectionType | null) {
     onViewChange({ kind: "collections", typeFilter: next, showcase });
@@ -110,46 +117,55 @@ export function CollectionBrowser({
         </div>
       </ViewToolbar>
       {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
-      <div
-        className="collection-browser__grid"
-        onContextMenu={(event) => {
-          if ((event.target as HTMLElement).closest(".collection-card")) return;
-          event.preventDefault();
-          setEditMode({ kind: "create" });
-        }}
-      >
-        {visible.map((collection) => (
-          <ContextMenu
-            key={collection.id}
-            items={[
-              { id: "edit", label: "편집", onSelect: () => setEditMode({ kind: "edit", collection }) },
-              { id: "showcase", label: collection.showcase ? "쇼케이스에서 제거" : "쇼케이스에 추가", onSelect: () => void toggleShowcase(collection) },
-              { id: "delete", label: "삭제", destructive: true, onSelect: () => setDeleteTarget(collection) },
-            ]}
-          >
-            <CollectionCard
-              collection={collection}
-              coverUrl={
-                collection.selectedWorkArtworkId
-                  ? workArtworkThumbnailUrl(collection.selectedWorkArtworkId)
-                  : collection.coverAssetId
-                  ? thumbnailUrl(collection.coverAssetId)
-                  : collection.sourcePath
-                    ? collectionSourcePreviewUrl(collection.id)
-                    : null
-              }
-              selected={false}
-              onClick={() => onViewChange({ kind: "collection", collectionId: collection.id })}
-            />
-          </ContextMenu>
-        ))}
-        {visible.length === 0 && (
-          <div className="collection-browser__empty">
-            <EmptyState title={showcase ? "쇼케이스에 컬렉션이 없습니다." : "컬렉션이 없습니다."}>
-              {showcase ? "쇼케이스로 표시한 컬렉션이 여기에 표시됩니다." : "새 컬렉션을 만들어 작품을 모아보세요."}
-            </EmptyState>
+      <div className={`collection-browser__stage${showcase ? " collection-browser__stage--showcase" : ""}`}>
+        <div className="collection-browser__heading">
+          <div>
+            <span className="collection-browser__eyebrow">{showcase ? "CURATED SELECTION" : "LIBRARY"}</span>
+            <h3>{sectionLabel} {showcase ? "쇼케이스" : "컬렉션"}</h3>
           </div>
-        )}
+          <span>{showcase ? "선정 작품" : "작품"} {visible.length}개</span>
+        </div>
+        <div
+          className="collection-browser__grid"
+          onContextMenu={(event) => {
+            if ((event.target as HTMLElement).closest(".collection-card")) return;
+            event.preventDefault();
+            setEditMode({ kind: "create" });
+          }}
+        >
+          {visible.map((collection) => (
+            <ContextMenu
+              key={collection.id}
+              items={[
+                { id: "edit", label: "편집", onSelect: () => setEditMode({ kind: "edit", collection }) },
+                { id: "showcase", label: collection.showcase ? "쇼케이스에서 제거" : "쇼케이스에 추가", onSelect: () => void toggleShowcase(collection) },
+                { id: "delete", label: "삭제", destructive: true, onSelect: () => setDeleteTarget(collection) },
+              ]}
+            >
+              <CollectionCard
+                collection={collection}
+                coverUrl={
+                  collection.selectedWorkArtworkId
+                    ? workArtworkThumbnailUrl(collection.selectedWorkArtworkId)
+                    : collection.coverAssetId
+                    ? thumbnailUrl(collection.coverAssetId)
+                    : collection.sourcePath
+                      ? collectionSourcePreviewUrl(collection.id)
+                      : null
+                }
+                selected={false}
+                onClick={() => onViewChange({ kind: "collection", collectionId: collection.id })}
+              />
+            </ContextMenu>
+          ))}
+          {visible.length === 0 && (
+            <div className="collection-browser__empty">
+              <EmptyState title={showcase ? "쇼케이스에 컬렉션이 없습니다." : "컬렉션이 없습니다."}>
+                {showcase ? "쇼케이스로 표시한 컬렉션이 여기에 표시됩니다." : "새 컬렉션을 만들어 작품을 모아보세요."}
+              </EmptyState>
+            </div>
+          )}
+        </div>
       </div>
       {editMode && (
         <CollectionEditDialog

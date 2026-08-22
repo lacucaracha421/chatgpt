@@ -24,19 +24,25 @@ export function CollectionVolumeGrid({
 
   return (
     <div className="collection-overlay__grid-area">
-      <div className="collection-overlay__shelves" role="group" aria-label="판본 서랍">
-        {DRAWERS.map((drawer) => (
-          <button
-            key={drawer}
-            type="button"
-            className="collection-overlay__shelf-button"
-            aria-label={`서랍 ${drawer + 1}`}
-            aria-pressed={editionIndex === drawer}
-            onClick={() => onEditionIndexChange(drawer)}
-          >
-            {drawer + 1}
-          </button>
-        ))}
+      <div className="collection-overlay__grid-heading">
+        <div>
+          <h3>권별 표지</h3>
+          <span>총 {visible.length}권</span>
+        </div>
+        <div className="collection-overlay__shelves" role="group" aria-label="판본 서랍">
+          {DRAWERS.map((drawer) => (
+            <button
+              key={drawer}
+              type="button"
+              className="collection-overlay__shelf-button"
+              aria-label={`서랍 ${drawer + 1}`}
+              aria-pressed={editionIndex === drawer}
+              onClick={() => onEditionIndexChange(drawer)}
+            >
+              {drawer + 1}
+            </button>
+          ))}
+        </div>
       </div>
       <div className="collection-overlay__cover-grid">
         {visible.length === 0 ? (
