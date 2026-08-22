@@ -38,6 +38,8 @@ import type {
   VideoPreparationProgress,
   BookImportPlan,
   BookMigrationReport,
+  LegacyPackageMigrationPlan,
+  LegacyPackageMigrationReport,
   CatalogSearchPage,
   CatalogSearchQuery,
   CatalogStatus,
@@ -185,6 +187,10 @@ export const libraryGateway: LibraryGateway = {
   listMangaSeries: () => invoke<MangaSeries[]>("list_manga_series"),
   inspectBookImport: (root) => invoke<BookImportPlan>("inspect_book_import", { root }),
   importBookCollections: (root) => invoke<BookMigrationReport>("import_book_collections", { root }),
+  inspectLegacyPackageMigration: (input) =>
+    invoke<LegacyPackageMigrationPlan>("inspect_legacy_package_migration", input),
+  executeLegacyPackageMigration: (input) =>
+    invoke<LegacyPackageMigrationReport>("execute_legacy_package_migration", input),
   getCollectionSourceRoot: () => invoke<string | null>("get_collection_source_root"),
   setCollectionSourceRoot: (path) => invoke("set_collection_source_root", { path }),
   listCollectionCovers: (collectionId) => invoke<CollectionCover[]>("list_collection_covers", { collectionId }),

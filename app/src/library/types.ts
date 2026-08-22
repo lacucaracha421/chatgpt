@@ -601,6 +601,8 @@ export interface LibraryGateway {
   retryVideoPreparation(assetId: string): Promise<void>;
   inspectBookImport(root: string): Promise<BookImportPlan>;
   importBookCollections(root: string): Promise<BookMigrationReport>;
+  inspectLegacyPackageMigration(input: LegacyPackageMigrationInput): Promise<LegacyPackageMigrationPlan>;
+  executeLegacyPackageMigration(input: LegacyPackageMigrationExecuteInput): Promise<LegacyPackageMigrationReport>;
   getCollectionSourceRoot(): Promise<string | null>;
   setCollectionSourceRoot(path: string | null): Promise<void>;
   listCollectionCovers(collectionId: string): Promise<CollectionCover[]>;
@@ -649,4 +651,114 @@ export type CollectionCover = {
   fileName: string;
   shelf: number;
   volumeLabel: string;
+};
+
+export type LegacyPackageMigrationInput = {
+  packageRoot: string;
+  metadataSnapshot: string;
+  bookRoot: string;
+};
+
+export type LegacyPackageMigrationExecuteInput = LegacyPackageMigrationInput & {
+  expectedFingerprint: string;
+};
+
+export type LegacyPackageMediaKind = "image" | "video";
+
+export type LegacyPackageFolder = {
+  sourceFolderId: string;
+  path: string[];
+  displayOrder: number;
+};
+
+export type LegacyPackageItem = {
+  sourceItemId: string;
+  sourcePath: string;
+  sourceSha256: string;
+  byteLength: number;
+  mediaKind: LegacyPackageMediaKind;
+  originalName: string;
+  classificationPaths: string[][];
+  customTitle: string | null;
+  sourceUrl: string | null;
+  collectedAt: string;
+  favorite: boolean;
+  rawMetadataJson: string;
+};
+
+export type LegacyPackageSource = {
+  paths: LegacyPackagePaths;
+  libraryId: string;
+  syntheticRootId: string;
+  folders: LegacyPackageFolder[];
+  items: LegacyPackageItem[];
+  imageCount: number;
+  videoCount: number;
+  favoriteCount: number;
+  sourceUrlCount: number;
+  customTitleCount: number;
+  totalBytes: number;
+  fingerprint: string;
+};
+
+export type LegacyPackagePaths = {
+  libraryRoot: string;
+  packageRoot: string;
+  metadataSnapshot: string;
+  bookRoot: string;
+};
+
+export type LegacyPackageTargetBaseline = {
+  schemaVersion: number;
+  normalAssets: number;
+  collections: number;
+  classifications: number;
+  mappings: number;
+};
+
+export type LegacyPackagePreview = {
+  newAssets: number;
+  exactTargetDuplicates: number;
+  sourceDuplicates: number;
+  alreadyMapped: number;
+  mappingsToCreate: number;
+  foldersToCreate: number;
+  foldersReused: number;
+  collectionsToCreate: number;
+  collectionsExisting: number;
+  collectionErrors: number;
+  estimatedCopyBytes: number;
+};
+
+export type LegacyPackageMigrationPlan = {
+  source: LegacyPackageSource;
+  books: BookImportPlan;
+  targetBefore: LegacyPackageTargetBaseline;
+  preview: LegacyPackagePreview;
+};
+
+export type LegacyPackageMigrationFailure = {
+  sourceItemId: string;
+  message: string;
+};
+
+export type LegacyPackageBookCollections = {
+  created: number;
+  skipped: number;
+};
+
+export type LegacyPackageMigrationReport = {
+  planned: number;
+  added: number;
+  exactTargetReused: number;
+  sourceDuplicatesReused: number;
+  alreadyMapped: number;
+  reviewKeptBoth: number;
+  mappingsCreated: number;
+  classificationLinksAdded: number;
+  foldersCreated: number;
+  foldersReused: number;
+  failed: number;
+  failures: LegacyPackageMigrationFailure[];
+  bookCollections: LegacyPackageBookCollections;
 };

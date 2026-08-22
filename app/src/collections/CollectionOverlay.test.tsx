@@ -42,7 +42,7 @@ function renderOverlay(
   const gateway = {
     listCollectionCovers: vi.fn().mockResolvedValue([]),
     listCollectionVolumes: vi.fn().mockResolvedValue([]),
-    syncMangaDexVolumeCovers: vi.fn().mockResolvedValue({ completed: 0, skipped: 0, failed: 0 }),
+    syncMangaDexVolumeCovers: vi.fn(), inspectLegacyPackageMigration: vi.fn(), executeLegacyPackageMigration: vi.fn().mockResolvedValue({ completed: 0, skipped: 0, failed: 0 }),
     getMangaDexConnection: vi.fn().mockResolvedValue(null),
     refreshMangaDex: vi.fn().mockResolvedValue(collection),
     getAladinCredentialStatus: vi.fn().mockResolvedValue({ configured: false }),

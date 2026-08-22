@@ -3,7 +3,8 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
-import type { CatalogStatus, ExtensionConnection, MetadataBackup } from "../library/types";
+import type { CatalogStatus, ExtensionConnection, LegacyPackageMigrationPlan, LegacyPackageMigrationReport, MetadataBackup } from "../library/types";
+import { formatBytes } from "../assets/assetMetadata";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { Button } from "../shared/ui/Button";
 import { Skeleton } from "../shared/ui/Skeleton";
@@ -25,7 +26,7 @@ const METADATA_IMPORT_FOLDER_KEY = "lakomics.metadataImportFolder";
 
 export function SettingsView({ restoring, onRestore, onExit, onImportFolder, metadataImportRunning = false, onCollectionsChanged }: SettingsViewProps) {
   const { error: libraryError, gateway, library, openLibrary } = useLibrary();
-  const [section, setSection] = useState<"general" | "browser_extension" | "external_services" | "metadata_import" | "safety" | "shortcuts">("general");
+  const [section, setSection] = useState<"general" | "browser_extension" | "external_services" | "metadata_import" | "legacy_package" | "safety" | "shortcuts">("general");
   const [lastImportFolder, setLastImportFolder] = useState(() => localStorage.getItem(METADATA_IMPORT_FOLDER_KEY));
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [backups, setBackups] = useState<MetadataBackup[] | null>(null);
@@ -46,6 +47,17 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [bookImportRunning, setBookImportRunning] = useState(false);
   const [bookImportMessage, setBookImportMessage] = useState<string | null>(null);
   useAutoDismiss(bookImportMessage, setBookImportMessage);
+  const [legacyPackage, setLegacyPackage] = useState<{
+    packageRoot: string;
+    metadataSnapshot: string;
+    bookRoot: string;
+  } | null>(null);
+  const [legacyPlan, setLegacyPlan] = useState<LegacyPackageMigrationPlan | null>(null);
+  const [legacyReport, setLegacyReport] = useState<LegacyPackageMigrationReport | null>(null);
+  const [legacyBusy, setLegacyBusy] = useState(false);
+  const [legacyError, setLegacyError] = useState<string | null>(null);
+  const [legacyConfirming, setLegacyConfirming] = useState(false);
+  useAutoDismiss(legacyError, setLegacyError);
   const [aladinConfigured, setAladinConfigured] = useState<boolean | null>(null);
   const [aladinKey, setAladinKey] = useState("");
   const [aladinBusy, setAladinBusy] = useState(false);
@@ -177,6 +189,66 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     }
   }
 
+  async function chooseLegacyPackageRoot() {
+    if (legacyBusy) return;
+    const selected = await open({ directory: true, multiple: false });
+    if (typeof selected !== "string") return;
+    setLegacyPackage((current) => ({ packageRoot: selected, metadataSnapshot: current?.metadataSnapshot ?? "", bookRoot: current?.bookRoot ?? "" }));
+  }
+
+  async function chooseLegacyMetadataSnapshot() {
+    if (legacyBusy) return;
+    const selected = await open({ multiple: false, filters: [{ name: "JSON", extensions: ["json"] }] });
+    if (typeof selected !== "string") return;
+    setLegacyPackage((current) => current ? { ...current, metadataSnapshot: selected } : { packageRoot: "", metadataSnapshot: selected, bookRoot: "" });
+  }
+
+  async function chooseLegacyBookRoot() {
+    if (legacyBusy) return;
+    const selected = await open({ directory: true, multiple: false });
+    if (typeof selected !== "string") return;
+    setLegacyPackage((current) => current ? { ...current, bookRoot: selected } : { packageRoot: "", metadataSnapshot: "", bookRoot: selected });
+  }
+
+  async function previewLegacyPackage() {
+    if (!legacyPackage || legacyBusy) return;
+    if (!legacyPackage.packageRoot || !legacyPackage.metadataSnapshot || !legacyPackage.bookRoot) {
+      setLegacyError("패키지 폴더, 메타데이터 스냅샷, book 폴더를 모두 선택하세요.");
+      return;
+    }
+    setLegacyBusy(true);
+    setLegacyError(null);
+    setLegacyPlan(null);
+    setLegacyReport(null);
+    try {
+      const plan = await gateway.inspectLegacyPackageMigration(legacyPackage);
+      setLegacyPlan(plan);
+    } catch (error) {
+      setLegacyError(commandErrorMessage(error, "레거시 패키지를 검사하지 못했습니다."));
+    } finally {
+      setLegacyBusy(false);
+    }
+  }
+
+  async function executeLegacyPackage() {
+    if (!legacyPackage || !legacyPlan || legacyBusy) return;
+    setLegacyBusy(true);
+    setLegacyError(null);
+    setLegacyConfirming(false);
+    try {
+      const report = await gateway.executeLegacyPackageMigration({
+        ...legacyPackage,
+        expectedFingerprint: legacyPlan.source.fingerprint,
+      });
+      setLegacyReport(report);
+      if (report.added > 0 || report.bookCollections.created > 0) onCollectionsChanged?.();
+    } catch (error) {
+      setLegacyError(commandErrorMessage(error, "레거시 패키지 자산을 가져오지 못했습니다."));
+    } finally {
+      setLegacyBusy(false);
+    }
+  }
+
   async function copyExtensionToken() {
     if (!extensionConnection?.token) return;
     try {
@@ -266,6 +338,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
       <Button className="settings-view__section-button" variant="ghost" aria-current={section === "browser_extension" ? "page" : undefined} onClick={() => setSection("browser_extension")}>브라우저 확장</Button>
       <Button className="settings-view__section-button" variant="ghost" aria-current={section === "external_services" ? "page" : undefined} onClick={() => setSection("external_services")}>외부 서비스</Button>
       <Button className="settings-view__section-button" variant="ghost" aria-current={section === "metadata_import" ? "page" : undefined} onClick={() => setSection("metadata_import")}>메타데이터 가져오기</Button>
+      <Button className="settings-view__section-button" variant="ghost" aria-current={section === "legacy_package" ? "page" : undefined} onClick={() => setSection("legacy_package")}>레거시 패키지 가져오기</Button>
       <Button className="settings-view__section-button" variant="ghost" aria-current={section === "safety" ? "page" : undefined} onClick={() => setSection("safety")}>안전</Button>
       <Button className="settings-view__section-button" variant="ghost" aria-current={section === "shortcuts" ? "page" : undefined} onClick={() => setSection("shortcuts")}>단축키</Button>
     </nav>
@@ -409,6 +482,96 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           {lastImportFolder && <Button disabled={pending || metadataImportRunning || !onImportFolder} onClick={() => void onImportFolder?.(lastImportFolder)}>최근 폴더 다시 가져오기</Button>}
           <Button variant="primary" disabled={pending || metadataImportRunning || !onImportFolder} onClick={() => void chooseImportFolder()}>{lastImportFolder ? "다른 폴더 선택" : "폴더 선택"}</Button>
         </div>
+      </div>
+    )}
+    {section === "legacy_package" && (
+      <div className="settings-view__section">
+        <header className="settings-view__header"><h2>레거시 패키지 가져오기</h2><p>구 라코믹스 패키지의 자산과 컬렉션을 현재 라이브러리로 가져옵니다. 원본 패키지는 변경하지 않습니다.</p></header>
+        {legacyError && <Toast onDismiss={() => setLegacyError(null)}>{legacyError}</Toast>}
+        <dl className="settings-view__property">
+          <dt>패키지 폴더</dt>
+          <dd className="settings-view__path">{legacyPackage?.packageRoot ?? "선택되지 않음"}</dd>
+          <Button size="sm" disabled={legacyBusy} onClick={() => void chooseLegacyPackageRoot()}>선택</Button>
+        </dl>
+        <dl className="settings-view__property">
+          <dt>메타데이터 스냅샷</dt>
+          <dd className="settings-view__path">{legacyPackage?.metadataSnapshot ?? "선택되지 않음"}</dd>
+          <Button size="sm" disabled={legacyBusy} onClick={() => void chooseLegacyMetadataSnapshot()}>선택</Button>
+        </dl>
+        <dl className="settings-view__property">
+          <dt>Book 폴더</dt>
+          <dd className="settings-view__path">{legacyPackage?.bookRoot ?? "선택되지 않음"}</dd>
+          <Button size="sm" disabled={legacyBusy} onClick={() => void chooseLegacyBookRoot()}>선택</Button>
+        </dl>
+        <div className="settings-view__actions">
+          <Button disabled={legacyBusy || !legacyPackage} onClick={() => void previewLegacyPackage()}>{legacyBusy ? "검사 중…" : "미리 보기"}</Button>
+        </div>
+        {legacyPlan && (
+          <div className="settings-view__legacy-plan">
+            <h3>검사 결과</h3>
+            <dl className="settings-view__property">
+              <dt>라이브러리 ID</dt>
+              <dd className="settings-view__path">{legacyPlan.source.libraryId}</dd>
+            </dl>
+            <dl className="settings-view__property">
+              <dt>패키지 자산</dt>
+              <dd>이미지 {legacyPlan.source.imageCount}개 · 영상 {legacyPlan.source.videoCount}개 · 즐겨찾기 {legacyPlan.source.favoriteCount}개</dd>
+            </dl>
+            <dl className="settings-view__property">
+              <dt>가져올 자산</dt>
+              <dd>새 자산 {legacyPlan.preview.newAssets}개 · 대상 중복 {legacyPlan.preview.exactTargetDuplicates}개 · 이미 매핑 {legacyPlan.preview.alreadyMapped}개</dd>
+            </dl>
+            <dl className="settings-view__property">
+              <dt>분류</dt>
+              <dd>생성 {legacyPlan.preview.foldersToCreate} · 재사용 {legacyPlan.preview.foldersReused}</dd>
+            </dl>
+            <dl className="settings-view__property">
+              <dt>컬렉션</dt>
+              <dd>생성 {legacyPlan.preview.collectionsToCreate} · 기존 {legacyPlan.preview.collectionsExisting} · 오류 {legacyPlan.preview.collectionErrors}</dd>
+            </dl>
+            <dl className="settings-view__property">
+              <dt>예상 복사량</dt>
+              <dd>{formatBytes(legacyPlan.preview.estimatedCopyBytes)}</dd>
+            </dl>
+            {!legacyConfirming ? (
+              <div className="settings-view__actions">
+                <Button variant="primary" disabled={legacyBusy} onClick={() => setLegacyConfirming(true)}>가져오기 실행</Button>
+              </div>
+            ) : (
+              <div className="settings-view__safety-confirm">
+                <p>레거시 패키지 자산을 현재 라이브러리로 가져올까요? 새 자산은 복사되고, 기존 자산은 메타데이터만 병합됩니다.</p>
+                <div className="ui-dialog__actions">
+                  <Button disabled={legacyBusy} onClick={() => setLegacyConfirming(false)}>취소</Button>
+                  <Button variant="primary" disabled={legacyBusy} onClick={() => void executeLegacyPackage()}>{legacyBusy ? "가져오는 중…" : "가져오기 확인"}</Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        {legacyReport && (
+          <div className="settings-view__legacy-report">
+            <h3>가져오기 결과</h3>
+            <dl className="settings-view__property">
+              <dt>자산</dt>
+              <dd>추가 {legacyReport.added} · 대상 재사용 {legacyReport.exactTargetReused} · 중복 재사용 {legacyReport.sourceDuplicatesReused} · 이미 매핑 {legacyReport.alreadyMapped} · 실패 {legacyReport.failed}</dd>
+            </dl>
+            <dl className="settings-view__property">
+              <dt>분류</dt>
+              <dd>생성 {legacyReport.foldersCreated} · 재사용 {legacyReport.foldersReused} · 연결 추가 {legacyReport.classificationLinksAdded}</dd>
+            </dl>
+            <dl className="settings-view__property">
+              <dt>컬렉션</dt>
+              <dd>생성 {legacyReport.bookCollections.created} · 건너뜀 {legacyReport.bookCollections.skipped}</dd>
+            </dl>
+            {legacyReport.failures.length > 0 && (
+              <ul className="settings-view__legacy-failures">
+                {legacyReport.failures.map((failure) => (
+                  <li key={failure.sourceItemId}><strong>{failure.sourceItemId}</strong> — {failure.message}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       </div>
     )}
     {section === "safety" && (
