@@ -50,7 +50,7 @@ export function AssetBrowser({ view, classifications, albums = [], collections =
   const generationRef = useRef(0);
   const nextLoadingRef = useRef(false);
   const randomPivotRef = useRef<string | null>(null);
-  const effectiveSort = view.kind === "recent" ? "newest" : sort;
+  const effectiveSort = collectedFrom != null ? "oldest" : view.kind === "recent" ? "newest" : sort;
   if (effectiveSort === "random" && !randomPivotRef.current) randomPivotRef.current = createRandomPivot();
   useEffect(() => { if (effectiveSort !== "random") randomPivotRef.current = null; }, [effectiveSort]);
   useEffect(() => { if (view.kind !== "classification") setDirectOnly(false); }, [view.kind]);
@@ -77,7 +77,7 @@ export function AssetBrowser({ view, classifications, albums = [], collections =
   }, [gateway, queryBase, queryKey, refreshVersion, retryVersion, viewKey]);
   useEffect(() => {
     let cancelled = false;
-    void gateway.listAssetDateBuckets({ ...queryBase, after: null }).then((result) => {
+    void gateway.listAssetDateBuckets({ ...queryBase, collectedFrom: null, after: null }).then((result) => {
       if (!cancelled) setDateBuckets(result);
     }).catch(() => { if (!cancelled) setDateBuckets([]); });
     return () => { cancelled = true; };
@@ -242,7 +242,7 @@ export function AssetBrowser({ view, classifications, albums = [], collections =
     }
   })();
   return <section className="asset-browser" aria-label="저장소">
-    <AssetToolbar view={view} classifications={classifications} albums={albums} collections={collections} sort={sort} directOnly={directOnly} metadataVisible={metadataVisible} thumbnailRowHeight={thumbnailRowHeight} selectedCount={selectedIds.length} inspectorOpen={inspectorOpen} onInspectorToggle={() => setInspectorOpen((open) => !open)} onSortChange={onSortChange} onDirectOnlyChange={setDirectOnly} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onFavorite={setBatchFavorite} onMoveToFolder={moveBatchToFolder} onAlbum={patchBatchAlbum} onRemoveFromCollection={removeFromCollection} onSetCover={selectedIds.length === 1 ? () => setCover(selectedIds[0]!) : undefined} onTrash={trashSelection} onClearSelection={clearSelection} batchPending={batchPending} onReshuffle={reshuffle} />
+    <AssetToolbar view={view} classifications={classifications} albums={albums} collections={collections} sort={sort} directOnly={directOnly} metadataVisible={metadataVisible} thumbnailRowHeight={thumbnailRowHeight} selectedCount={selectedIds.length} inspectorOpen={inspectorOpen} onInspectorToggle={() => setInspectorOpen((open) => !open)} onSortChange={(next) => { setCollectedFrom(null); onSortChange(next); }} onDirectOnlyChange={setDirectOnly} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onFavorite={setBatchFavorite} onMoveToFolder={moveBatchToFolder} onAlbum={patchBatchAlbum} onRemoveFromCollection={removeFromCollection} onSetCover={selectedIds.length === 1 ? () => setCover(selectedIds[0]!) : undefined} onTrash={trashSelection} onClearSelection={clearSelection} batchPending={batchPending} onReshuffle={reshuffle} />
     {message && <Toast actionLabel={undoAssetIds ? "실행 취소" : undefined} onAction={undoAssetIds ? undoTrash : undefined} actionDisabled={batchPending} onDismiss={() => dismissMessage(null)}>{message}</Toast>}
     {currentFirstError && <Toast>{currentFirstError}</Toast>}
     <div className={`asset-browser__workspace${inspectorOpen ? " asset-browser__workspace--inspector" : ""}`}>

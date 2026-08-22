@@ -125,6 +125,7 @@ impl Library {
                     id,
                     i64::from(query.limit) + 1,
                     query.collection_id.as_deref(),
+                    query.collected_from.as_deref(),
                 ])?
             }
             AssetSort::Favorites => {
@@ -394,6 +395,7 @@ AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE lin
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
 AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
 AND (?9 IS NULL OR EXISTS (SELECT 1 FROM collection_assets AS collection_link WHERE collection_link.asset_id = asset.id AND collection_link.collection_id = ?9))
+AND (?10 IS NULL OR asset.collected_at >= ?10)
 AND (?6 IS NULL OR asset.collected_at > ?6 OR (asset.collected_at = ?6 AND asset.id > ?7))
 ORDER BY asset.collected_at ASC, asset.id ASC LIMIT ?8";
 
