@@ -60,105 +60,131 @@ pub struct BookExternalBinding {
 
 impl Library {
     pub fn inspect_book_import(&self, root: &str) -> Result<BookImportPlan, LibraryError> {
-        let root_path = PathBuf::from(root);
-        if !root_path.is_dir() {
-            return Err(LibraryError::ReadMedia {
-                path: root_path,
-                source: std::io::Error::new(std::io::ErrorKind::NotFound, "book root not found"),
-            });
-        }
-        let mut entries = Vec::new();
-        let mut skipped = Vec::new();
+        let mut plan = scan_book_import(Path::new(root))?;
         let connection = self.connection()?;
-        let dir_entries = fs::read_dir(&root_path).map_err(|source| LibraryError::ReadMedia {
-            path: root_path.clone(),
-            source,
-        })?;
-        for entry in dir_entries {
-            let entry = entry.map_err(|source| LibraryError::ReadMedia {
-                path: root_path.clone(),
-                source,
-            })?;
-            let file_type = entry
-                .file_type()
-                .map_err(|source| LibraryError::ReadMedia {
-                    path: entry.path(),
-                    source,
-                })?;
-            if !file_type.is_dir() {
-                continue;
-            }
-            let folder_name = entry.file_name().to_string_lossy().into_owned();
-            if folder_name.starts_with('.') {
-                continue;
-            }
-            match parse_info_txt(&entry.path()) {
-                Ok(Some(parsed)) => {
-                    if collection_exists_by_name(&connection, &parsed.name)? {
-                        skipped.push(BookMigrationError {
-                            folder: folder_name,
-                            message: "collection with same name already exists".into(),
-                        });
-                        continue;
-                    }
-                    entries.push(BookImportEntry {
-                        folder: folder_name.clone(),
-                        relative_path: relative_path_for(&root_path, &entry.path()),
-                        collection_type: parsed.collection_type,
-                        name: parsed.name,
-                        year: parsed.year,
-                        author: parsed.author,
-                        director: parsed.director,
-                        my_score: parsed.my_score,
-                        genres: parsed.genres,
-                        overview: parsed.overview,
-                        external_bindings: parsed.external_bindings,
-                    });
-                }
-                Ok(None) => {
-                    skipped.push(BookMigrationError {
-                        folder: folder_name,
-                        message: "no info.txt found".into(),
-                    });
-                }
-                Err(message) => {
-                    skipped.push(BookMigrationError {
-                        folder: folder_name,
-                        message,
-                    });
-                }
+        let mut pending = Vec::new();
+        for entry in plan.entries {
+            if collection_exists_by_name(&connection, &entry.name)? {
+                plan.skipped.push(BookMigrationError {
+                    folder: entry.folder,
+                    message: "collection with same name already exists".into(),
+                });
+            } else {
+                pending.push(entry);
             }
         }
-        Ok(BookImportPlan {
-            root: root_path.to_string_lossy().into_owned(),
-            entries,
-            skipped,
-        })
+        plan.entries = pending;
+        Ok(plan)
     }
 
     pub fn import_book_collections(&self, root: &str) -> Result<BookMigrationReport, LibraryError> {
-        let plan = self.inspect_book_import(root)?;
+        let plan = scan_book_import(Path::new(root))?;
+        self.apply_book_import_plan(&plan)
+    }
+
+    pub(crate) fn apply_book_import_plan(
+        &self,
+        plan: &BookImportPlan,
+    ) -> Result<BookMigrationReport, LibraryError> {
         let connection = self.connection()?;
-        set_collection_source_root(&connection, Some(root))?;
+        set_collection_source_root(&connection, Some(&plan.root))?;
         let mut report = BookMigrationReport {
             scanned: plan.entries.len() as u64 + plan.skipped.len() as u64,
             created: 0,
             updated: 0,
             skipped: plan.skipped.len() as u64,
-            errors: plan.skipped,
+            errors: plan.skipped.clone(),
         };
-        for entry in plan.entries {
+        for entry in &plan.entries {
+            if collection_exists_by_name(&connection, &entry.name)? {
+                report.skipped += 1;
+                report.errors.push(BookMigrationError {
+                    folder: entry.folder.clone(),
+                    message: "collection with same name already exists".into(),
+                });
+                continue;
+            }
             match upsert_collection(&connection, &entry) {
                 Ok(true) => report.created += 1,
                 Ok(false) => report.updated += 1,
                 Err(message) => report.errors.push(BookMigrationError {
-                    folder: entry.folder,
+                    folder: entry.folder.clone(),
                     message,
                 }),
             }
         }
         Ok(report)
     }
+}
+
+pub(crate) fn scan_book_import(root: &Path) -> Result<BookImportPlan, LibraryError> {
+    let root_path = PathBuf::from(root);
+    if !root_path.is_dir() {
+        return Err(LibraryError::ReadMedia {
+            path: root_path,
+            source: std::io::Error::new(std::io::ErrorKind::NotFound, "book root not found"),
+        });
+    }
+    let mut entries = Vec::new();
+    let mut skipped = Vec::new();
+    let dir_entries = fs::read_dir(&root_path).map_err(|source| LibraryError::ReadMedia {
+        path: root_path.clone(),
+        source,
+    })?;
+    for entry in dir_entries {
+        let entry = entry.map_err(|source| LibraryError::ReadMedia {
+            path: root_path.clone(),
+            source,
+        })?;
+        let file_type = entry
+            .file_type()
+            .map_err(|source| LibraryError::ReadMedia {
+                path: entry.path(),
+                source,
+            })?;
+        if !file_type.is_dir() {
+            continue;
+        }
+        let folder_name = entry.file_name().to_string_lossy().into_owned();
+        if folder_name.starts_with('.') {
+            continue;
+        }
+        match parse_info_txt(&entry.path()) {
+            Ok(Some(parsed)) => entries.push(BookImportEntry {
+                folder: folder_name,
+                relative_path: relative_path_for(&root_path, &entry.path()),
+                collection_type: parsed.collection_type,
+                name: parsed.name,
+                year: parsed.year,
+                author: parsed.author,
+                director: parsed.director,
+                my_score: parsed.my_score,
+                genres: parsed.genres,
+                overview: parsed.overview,
+                external_bindings: parsed.external_bindings,
+            }),
+            Ok(None) => skipped.push(BookMigrationError {
+                folder: folder_name,
+                message: "no info.txt found".into(),
+            }),
+            Err(message) => skipped.push(BookMigrationError {
+                folder: folder_name,
+                message,
+            }),
+        }
+    }
+    entries.sort_by(|left, right| {
+        left.name
+            .to_lowercase()
+            .cmp(&right.name.to_lowercase())
+            .then_with(|| left.folder.cmp(&right.folder))
+    });
+    skipped.sort_by(|left, right| left.folder.cmp(&right.folder));
+    Ok(BookImportPlan {
+        root: root_path.to_string_lossy().into_owned(),
+        entries,
+        skipped,
+    })
 }
 
 fn collection_exists_by_name(
@@ -448,6 +474,58 @@ mod tests {
                 .unwrap();
             assert_eq!(count, 0, "{table} should be rolled back");
         }
+    }
+
+    #[test]
+    fn scans_without_a_library_and_applies_existing_names_idempotently() {
+        let source = tempfile::tempdir().unwrap();
+        let book = source.path().join("Blue Archive");
+        fs::create_dir(&book).unwrap();
+        fs::write(
+            book.join("info.txt"),
+            "Title: Blue Archive\nType: game\nPublication Year: 2021\n",
+        )
+        .unwrap();
+
+        let plan = scan_book_import(source.path()).unwrap();
+
+        assert_eq!(plan.entries.len(), 1);
+        assert!(plan.skipped.is_empty());
+        let target = tempfile::tempdir().unwrap();
+        let library = Library::open(target.path()).unwrap();
+        let first = library.apply_book_import_plan(&plan).unwrap();
+        let before: (String, String, Option<i64>) = library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT id, created_at, year FROM collections WHERE name = 'Blue Archive'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        let second = library.apply_book_import_plan(&plan).unwrap();
+        let after: (String, String, Option<i64>) = library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT id, created_at, year FROM collections WHERE name = 'Blue Archive'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+
+        assert_eq!((first.created, first.skipped), (1, 0));
+        assert_eq!((second.created, second.skipped), (0, 1));
+        assert_eq!(before, after);
+        assert_eq!(
+            library
+                .connection()
+                .unwrap()
+                .query_row("SELECT COUNT(*) FROM collections", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
     }
 
     #[test]
