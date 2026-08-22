@@ -1198,7 +1198,7 @@ fn hash_file(path: &Path) -> Result<(String, u64), LibraryError> {
     })?;
     let mut hasher = Sha256::new();
     let mut length = 0_u64;
-    let mut buffer = [0_u8; 1024 * 1024];
+    let mut buffer = vec![0_u8; 1024 * 1024];
     loop {
         let read = file
             .read(&mut buffer)
