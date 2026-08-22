@@ -6,13 +6,19 @@ use std::{
 };
 
 use chrono::{DateTime, NaiveDateTime, SecondsFormat, Utc};
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::{
     book_migration::{scan_book_import, BookImportPlan},
     error::LibraryError,
+    legacy_migration::creator_from_source_url,
+    models::{
+        ClassificationKind, CreateClassification, ImportSource, IngestMediaRequest, IngestOutcome,
+        SimilarityDecision, SimilarityDecisionRequest,
+    },
+    Library,
 };
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -108,6 +114,38 @@ pub struct LegacyPackageMigrationPlan {
     pub books: BookImportPlan,
     pub target_before: LegacyPackageTargetBaseline,
     pub preview: LegacyPackagePreview,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LegacyPackageMigrationProgress {
+    pub processed: usize,
+    pub total: usize,
+    pub current_item: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LegacyPackageMigrationFailure {
+    pub source_item_id: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LegacyPackageMigrationReport {
+    pub planned: usize,
+    pub added: usize,
+    pub exact_target_reused: usize,
+    pub source_duplicates_reused: usize,
+    pub already_mapped: usize,
+    pub review_kept_both: usize,
+    pub mappings_created: usize,
+    pub classification_links_added: usize,
+    pub folders_created: usize,
+    pub folders_reused: usize,
+    pub failed: usize,
+    pub failures: Vec<LegacyPackageMigrationFailure>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -476,6 +514,398 @@ pub fn inspect_legacy_package_migration(
     })
 }
 
+impl Library {
+    pub fn execute_legacy_package_migration(
+        &self,
+        plan: &LegacyPackageMigrationPlan,
+        mut progress: impl FnMut(LegacyPackageMigrationProgress),
+    ) -> Result<LegacyPackageMigrationReport, LibraryError> {
+        if canonical_directory(self.root())? != plan.source.paths.library_root {
+            return Err(LibraryError::LegacyLibraryMismatch);
+        }
+        let current_source = inspect_legacy_package_source(&plan.source.paths)?;
+        let current_books = scan_book_import(&current_source.paths.book_root)?;
+        let current_fingerprint = sha256_join(&[
+            current_source.fingerprint.as_bytes(),
+            fingerprint_books(&current_source.paths.book_root, &current_books)?.as_bytes(),
+        ]);
+        if current_fingerprint != plan.source.fingerprint {
+            return Err(invalid("source changed after the migration preview"));
+        }
+
+        let mut entries = self.list_classifications()?;
+        let mut path_ids = BTreeMap::new();
+        let mut folders_created = 0;
+        let mut folders_reused = 0;
+        for folder in &plan.source.folders {
+            let parent_id = if folder.path.len() > 1 {
+                Some(
+                    path_ids
+                        .get(&path_key(&folder.path[..folder.path.len() - 1]))
+                        .cloned()
+                        .ok_or_else(|| invalid("source folder parent was not planned"))?,
+                )
+            } else {
+                None
+            };
+            let name = folder
+                .path
+                .last()
+                .ok_or_else(|| invalid("source folder path is empty"))?;
+            let existing = entries.iter().find(|entry| {
+                entry.parent_id == parent_id && entry.name.eq_ignore_ascii_case(name)
+            });
+            let id = if let Some(existing) = existing {
+                folders_reused += 1;
+                existing.id.clone()
+            } else {
+                let created = self.create_classification(CreateClassification {
+                    kind: if parent_id.is_none() {
+                        ClassificationKind::Root
+                    } else {
+                        ClassificationKind::Tag
+                    },
+                    name: name.clone(),
+                    parent_id,
+                })?;
+                folders_created += 1;
+                let id = created.id.clone();
+                entries.push(created);
+                id
+            };
+            path_ids.insert(path_key(&folder.path), id);
+        }
+
+        let initial_hashes = self.legacy_package_target_hashes()?;
+        let import_batch_id = uuid::Uuid::new_v4().to_string();
+        let mut report = LegacyPackageMigrationReport {
+            planned: plan.source.items.len(),
+            added: 0,
+            exact_target_reused: 0,
+            source_duplicates_reused: 0,
+            already_mapped: 0,
+            review_kept_both: 0,
+            mappings_created: 0,
+            classification_links_added: 0,
+            folders_created,
+            folders_reused,
+            failed: 0,
+            failures: Vec::new(),
+        };
+        for (index, item) in plan.source.items.iter().enumerate() {
+            match self.migrate_legacy_package_item(
+                &plan.source.library_id,
+                item,
+                &path_ids,
+                &initial_hashes,
+                &import_batch_id,
+            ) {
+                Ok(outcome) => {
+                    match outcome.disposition {
+                        ItemDisposition::Added => report.added += 1,
+                        ItemDisposition::ExactTargetReused => report.exact_target_reused += 1,
+                        ItemDisposition::SourceDuplicateReused => {
+                            report.source_duplicates_reused += 1
+                        }
+                        ItemDisposition::AlreadyMapped => report.already_mapped += 1,
+                    }
+                    report.review_kept_both += outcome.review_kept_both;
+                    report.mappings_created += outcome.mapping_created;
+                    report.classification_links_added += outcome.classification_links_added;
+                }
+                Err(error) => {
+                    report.failed += 1;
+                    report.failures.push(LegacyPackageMigrationFailure {
+                        source_item_id: item.source_item_id.clone(),
+                        message: error.to_string(),
+                    });
+                }
+            }
+            progress(LegacyPackageMigrationProgress {
+                processed: index + 1,
+                total: plan.source.items.len(),
+                current_item: item.source_item_id.clone(),
+            });
+        }
+        Ok(report)
+    }
+
+    fn legacy_package_target_hashes(&self) -> Result<BTreeSet<String>, LibraryError> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare("SELECT content_hash FROM assets")?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+        Ok(rows.collect::<Result<BTreeSet<_>, _>>()?)
+    }
+
+    fn migrate_legacy_package_item(
+        &self,
+        source_library_id: &str,
+        item: &LegacyPackageItem,
+        path_ids: &BTreeMap<String, String>,
+        initial_hashes: &BTreeSet<String>,
+        import_batch_id: &str,
+    ) -> Result<ItemMigrationOutcome, LibraryError> {
+        let mapping = self
+            .connection()?
+            .query_row(
+                "SELECT asset_id, source_sha256
+                 FROM legacy_package_asset_mappings
+                 WHERE source_library_id = ?1 AND source_item_id = ?2",
+                params![source_library_id, item.source_item_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?;
+        if let Some((asset_id, mapped_hash)) = mapping {
+            if mapped_hash != item.source_sha256 {
+                return Err(invalid("an existing source mapping has a different hash"));
+            }
+            let (asset_hash, status) = self.asset_hash_and_status(&asset_id)?;
+            if asset_hash != item.source_sha256 {
+                return Err(invalid("a mapped target asset has a different hash"));
+            }
+            let review_kept_both = self.ensure_migration_asset_normal(&asset_id, &status)?;
+            let classification_links_added = self.merge_legacy_package_metadata(
+                source_library_id,
+                item,
+                &asset_id,
+                path_ids,
+                false,
+                true,
+            )?;
+            return Ok(ItemMigrationOutcome {
+                disposition: ItemDisposition::AlreadyMapped,
+                review_kept_both,
+                mapping_created: 0,
+                classification_links_added,
+            });
+        }
+
+        let existing = self
+            .connection()?
+            .query_row(
+                "SELECT id, status FROM assets WHERE content_hash = ?1",
+                [&item.source_sha256],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?;
+        let (asset_id, added, review_kept_both) = if let Some((asset_id, status)) = existing {
+            let review_kept_both = self.ensure_migration_asset_normal(&asset_id, &status)?;
+            (asset_id, false, review_kept_both)
+        } else {
+            let (creator_handle, creator_url) = creator_from_source_url(item.source_url.as_deref());
+            match self.ingest_media(IngestMediaRequest {
+                source_path: item.source_path.clone(),
+                classification_id: None,
+                source_url: item.source_url.clone(),
+                collected_at: Some(item.collected_at.clone()),
+                replace_duplicate_metadata: false,
+                source_published_at: None,
+                creator_name: None,
+                creator_handle,
+                creator_url,
+                import_source: ImportSource::LegacyLakomics,
+                import_batch_id: import_batch_id.to_owned(),
+            })? {
+                IngestOutcome::Added { asset } => (asset.id, true, 0),
+                IngestOutcome::ExactDuplicate {
+                    existing_asset_id, ..
+                } => (existing_asset_id, false, 0),
+                IngestOutcome::ReviewPending { review_id } => {
+                    let candidate_id = self.connection()?.query_row(
+                        "SELECT candidate_asset_id FROM similarity_reviews WHERE id = ?1",
+                        [&review_id],
+                        |row| row.get::<_, String>(0),
+                    )?;
+                    self.decide_similarity_review(SimilarityDecisionRequest {
+                        review_id,
+                        decision: SimilarityDecision::KeepBoth,
+                    })?;
+                    (candidate_id, true, 1)
+                }
+            }
+        };
+        let disposition = if added {
+            ItemDisposition::Added
+        } else if initial_hashes.contains(&item.source_sha256) {
+            ItemDisposition::ExactTargetReused
+        } else {
+            ItemDisposition::SourceDuplicateReused
+        };
+        let classification_links_added = self.merge_legacy_package_metadata(
+            source_library_id,
+            item,
+            &asset_id,
+            path_ids,
+            added,
+            false,
+        )?;
+        Ok(ItemMigrationOutcome {
+            disposition,
+            review_kept_both,
+            mapping_created: 1,
+            classification_links_added,
+        })
+    }
+
+    fn asset_hash_and_status(&self, asset_id: &str) -> Result<(String, String), LibraryError> {
+        self.connection()?
+            .query_row(
+                "SELECT content_hash, status FROM assets WHERE id = ?1",
+                [asset_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .ok_or_else(|| invalid("a mapped target asset is missing"))
+    }
+
+    fn ensure_migration_asset_normal(
+        &self,
+        asset_id: &str,
+        status: &str,
+    ) -> Result<usize, LibraryError> {
+        match status {
+            "normal" => Ok(0),
+            "trash" => {
+                self.restore_asset(asset_id)?;
+                Ok(0)
+            }
+            "review" => {
+                let review_id = self
+                    .connection()?
+                    .query_row(
+                        "SELECT id FROM similarity_reviews
+                         WHERE candidate_asset_id = ?1 AND status = 'open'",
+                        [asset_id],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()?
+                    .ok_or_else(|| invalid("a review asset has no open similarity review"))?;
+                self.decide_similarity_review(SimilarityDecisionRequest {
+                    review_id,
+                    decision: SimilarityDecision::KeepBoth,
+                })?;
+                Ok(1)
+            }
+            _ => Err(invalid("a target asset has an unknown status")),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn merge_legacy_package_metadata(
+        &self,
+        source_library_id: &str,
+        item: &LegacyPackageItem,
+        asset_id: &str,
+        path_ids: &BTreeMap<String, String>,
+        replace_original_name: bool,
+        mapping_exists: bool,
+    ) -> Result<usize, LibraryError> {
+        let mut classification_ids = BTreeSet::new();
+        for path in &item.classification_paths {
+            classification_ids.insert(
+                path_ids
+                    .get(&path_key(path))
+                    .cloned()
+                    .ok_or_else(|| invalid("an item classification was not planned"))?,
+            );
+        }
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        if item.favorite {
+            transaction.execute(
+                "UPDATE assets SET favorite = 1 WHERE id = ?1 AND favorite = 0",
+                [asset_id],
+            )?;
+        }
+        if let Some(title) = item.custom_title.as_deref() {
+            transaction.execute(
+                "UPDATE assets SET title = ?2
+                 WHERE id = ?1 AND (title IS NULL OR trim(title) = '')",
+                params![asset_id, title],
+            )?;
+        }
+        if let Some(source_url) = item.source_url.as_deref() {
+            let (creator_handle, creator_url) = creator_from_source_url(Some(source_url));
+            transaction.execute(
+                "UPDATE assets
+                 SET source_url = ?2,
+                     creator_handle = COALESCE(creator_handle, ?3),
+                     creator_url = COALESCE(creator_url, ?4)
+                 WHERE id = ?1 AND (source_url IS NULL OR trim(source_url) = '')",
+                params![asset_id, source_url, creator_handle, creator_url],
+            )?;
+        }
+        let current_collected_at: String = transaction.query_row(
+            "SELECT collected_at FROM assets WHERE id = ?1",
+            [asset_id],
+            |row| row.get(0),
+        )?;
+        if timestamp_is_earlier(&item.collected_at, &current_collected_at) {
+            transaction.execute(
+                "UPDATE assets SET collected_at = ?2 WHERE id = ?1",
+                params![asset_id, item.collected_at],
+            )?;
+        }
+        if replace_original_name {
+            transaction.execute(
+                "UPDATE assets SET original_name = ?2 WHERE id = ?1",
+                params![asset_id, item.original_name],
+            )?;
+        }
+        let mut classification_links_added = 0;
+        for classification_id in classification_ids {
+            classification_links_added += transaction.execute(
+                "INSERT OR IGNORE INTO asset_classifications (asset_id, classification_id)
+                 VALUES (?1, ?2)",
+                params![asset_id, classification_id],
+            )?;
+        }
+        if !mapping_exists {
+            transaction.execute(
+                "INSERT INTO legacy_package_asset_mappings (
+                    source_library_id, source_item_id, asset_id, source_sha256,
+                    raw_metadata_json, imported_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    source_library_id,
+                    item.source_item_id,
+                    asset_id,
+                    item.source_sha256,
+                    item.raw_metadata_json,
+                    Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+                ],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(classification_links_added)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ItemDisposition {
+    Added,
+    ExactTargetReused,
+    SourceDuplicateReused,
+    AlreadyMapped,
+}
+
+struct ItemMigrationOutcome {
+    disposition: ItemDisposition,
+    review_kept_both: usize,
+    mapping_created: usize,
+    classification_links_added: usize,
+}
+
+fn timestamp_is_earlier(candidate: &str, current: &str) -> bool {
+    match (
+        DateTime::parse_from_rfc3339(candidate),
+        DateTime::parse_from_rfc3339(current),
+    ) {
+        (Ok(candidate), Ok(current)) => candidate < current,
+        _ => false,
+    }
+}
+
 fn fingerprint_books(root: &Path, plan: &BookImportPlan) -> Result<String, LibraryError> {
     let mut hasher = Sha256::new();
     for entry in &plan.entries {
@@ -839,6 +1269,7 @@ fn invalid(message: impl Into<String>) -> LibraryError {
 mod tests {
     use std::{fs, path::PathBuf};
 
+    use image::{DynamicImage, ImageFormat};
     use serde_json::json;
     use sha2::{Digest, Sha256};
 
@@ -875,12 +1306,13 @@ mod tests {
             )
             .unwrap();
 
+            let first_bytes = tiny_png();
             let first = write_item(
                 &package_root,
                 "item-1",
                 "image",
                 "one.png",
-                b"first image",
+                &first_bytes,
                 &["blue"],
             );
             write_item(
@@ -971,6 +1403,14 @@ mod tests {
         )
         .unwrap();
         (manifest, payload)
+    }
+
+    fn tiny_png() -> Vec<u8> {
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        DynamicImage::new_rgb8(8, 8)
+            .write_to(&mut bytes, ImageFormat::Png)
+            .unwrap();
+        bytes.into_inner()
     }
 
     #[test]
@@ -1183,6 +1623,124 @@ mod tests {
                 .map(|entries| entries.count())
                 .unwrap_or(0),
             backup_count
+        );
+    }
+
+    #[test]
+    fn execution_is_additive_and_idempotent() {
+        let fixture = Fixture::new();
+        let source = inspect_legacy_package_source(&fixture.paths).unwrap();
+        let video_hash = source.items[1].source_sha256.clone();
+        let library = crate::library::Library::open(&fixture.paths.library_root).unwrap();
+        let existing_folder = library
+            .create_classification(crate::library::models::CreateClassification {
+                kind: crate::library::models::ClassificationKind::Root,
+                name: "기존 분류".into(),
+                parent_id: None,
+            })
+            .unwrap();
+        let connection = library.connection().unwrap();
+        connection
+            .execute(
+                "INSERT INTO assets (
+                    id, content_hash, media_kind, title, original_name, relative_path,
+                    thumbnail_relative_path, byte_size, width, height, source_url,
+                    collected_at, favorite, status
+                 ) VALUES (
+                    'existing-video', ?1, 'video', '기존 제목', 'existing.mp4',
+                    'assets/existing.mp4', NULL, 12, 1, 1, 'https://keep.example',
+                    '2026-08-22T00:00:00Z', 0, 'normal'
+                 )",
+                [video_hash],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO asset_classifications (asset_id, classification_id)
+                 VALUES ('existing-video', ?1)",
+                [&existing_folder.id],
+            )
+            .unwrap();
+        drop(connection);
+        let plan = inspect_legacy_package_migration(&fixture.paths).unwrap();
+        let mut progress = Vec::new();
+
+        let first = library
+            .execute_legacy_package_migration(&plan, |value| progress.push(value))
+            .unwrap();
+
+        assert_eq!(first.added, 1);
+        assert_eq!(first.exact_target_reused, 1);
+        assert_eq!(first.mappings_created, 2);
+        assert_eq!(first.failed, 0);
+        assert_eq!(progress.len(), 2);
+        let connection = library.connection().unwrap();
+        assert_eq!(
+            connection
+                .query_row("SELECT COUNT(*) FROM assets", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM legacy_package_asset_mappings",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            2
+        );
+        let imported: (String, String, i64) = connection
+            .query_row(
+                "SELECT title, source_url, favorite
+                 FROM assets WHERE content_hash = ?1",
+                [&source.items[0].source_sha256],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            imported,
+            ("제목".into(), "https://x.com/user/status/1".into(), 1)
+        );
+        let existing: (String, String, String) = connection
+            .query_row(
+                "SELECT title, source_url, collected_at FROM assets WHERE id = 'existing-video'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(existing.0, "기존 제목");
+        assert_eq!(existing.1, "https://keep.example");
+        assert!(existing.2.starts_with("2026-03-16T10:00:00"));
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*)
+                     FROM asset_classifications
+                     WHERE asset_id = 'existing-video'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            2
+        );
+        drop(connection);
+
+        let second = library
+            .execute_legacy_package_migration(&plan, |_| {})
+            .unwrap();
+        assert_eq!(second.added, 0);
+        assert_eq!(second.already_mapped, 2);
+        assert_eq!(second.mappings_created, 0);
+        assert_eq!(second.failed, 0);
+        assert_eq!(
+            inspect_legacy_package_migration(&fixture.paths)
+                .unwrap()
+                .source
+                .fingerprint,
+            plan.source.fingerprint
         );
     }
 }

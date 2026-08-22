@@ -484,7 +484,9 @@ fn normalize_legacy_timestamp(value: Option<&str>) -> Option<String> {
         .map(|timestamp| timestamp.to_rfc3339())
 }
 
-fn creator_from_source_url(source_url: Option<&str>) -> (Option<String>, Option<String>) {
+pub(super) fn creator_from_source_url(
+    source_url: Option<&str>,
+) -> (Option<String>, Option<String>) {
     let Some(url) = source_url.and_then(|value| url::Url::parse(value).ok()) else {
         return (None, None);
     };
