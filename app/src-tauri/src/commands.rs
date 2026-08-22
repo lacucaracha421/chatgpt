@@ -141,6 +141,8 @@ impl From<LibraryError> for CommandError {
             LibraryError::DuplicateLegacyMetadata(_) => "duplicate_legacy_metadata",
             LibraryError::ReadLegacyRoot { .. } => "read_legacy_root_failed",
             LibraryError::LegacyLibraryMismatch => "legacy_library_mismatch",
+            LibraryError::ReadLegacyPackage { .. } => "read_legacy_package_failed",
+            LibraryError::InvalidLegacyPackage(_) => "invalid_legacy_package",
             LibraryError::MediaNotFound => "media_not_found",
             LibraryError::UnsafeMediaPath => "unsafe_media_path",
             LibraryError::ReadMedia { .. } => "read_media_failed",
