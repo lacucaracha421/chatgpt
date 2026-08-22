@@ -24,6 +24,7 @@ mod mangadex_flow;
 pub mod metadata_import;
 pub mod models;
 mod query;
+mod release_watch;
 mod similarity;
 mod trash;
 mod video_media;

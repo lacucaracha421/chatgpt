@@ -403,6 +403,32 @@ pub struct ExternalBinding {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct ReleaseWatchStatus {
+    pub enabled: bool,
+    pub last_checked_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReleaseWatchEventKind {
+    NewVolume,
+    ReleaseDateChanged,
+    ReleaseStatusChanged,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseWatchEvent {
+    pub id: String,
+    pub kind: ReleaseWatchEventKind,
+    pub volume_number: i64,
+    pub previous_value: Option<String>,
+    pub current_value: Option<String>,
+    pub detected_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct MangaDexSearchResult {
     pub manga_id: String,
     pub title: String,

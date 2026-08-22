@@ -145,6 +145,9 @@ impl From<LibraryError> for CommandError {
             LibraryError::AladinRateLimited => "aladin_rate_limited",
             LibraryError::InvalidAladinResponse => "invalid_aladin_response",
             LibraryError::AmbiguousAladinBinding => "ambiguous_aladin_binding",
+            LibraryError::ReleaseWatchRequiresAladinBinding => {
+                "release_watch_requires_aladin_binding"
+            }
             LibraryError::DuplicateAladinProviderItem => "duplicate_aladin_provider_item",
             LibraryError::UnsupportedVideo => "unsupported_video",
             LibraryError::VideoPreparationFailed => "video_preparation_failed",
