@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use super::{
     error::LibraryError,
     models::{
-        AssetCursor, AssetPage, AssetQuery, AssetSort, AssetSummary, ImportSource, MediaSummary,
-        VideoPreparationState,
+        AssetCursor, AssetDateBucket, AssetPage, AssetQuery, AssetSort, AssetSummary, ImportSource,
+        MediaSummary, VideoPreparationState,
     },
     Library,
 };
@@ -175,6 +175,39 @@ impl Library {
             items: items.into_iter().map(|asset| asset.summary).collect(),
             next_cursor,
         })
+    }
+
+    pub fn list_asset_date_buckets(&self, query: AssetQuery) -> Result<Vec<AssetDateBucket>, LibraryError> {
+        if [
+            query.classification_id.is_some(),
+            query.album_id.is_some(),
+            query.collection_id.is_some(),
+        ]
+        .into_iter()
+        .filter(|present| *present)
+        .count()
+            > 1
+        {
+            return Err(LibraryError::InvalidAssetScope);
+        }
+
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(DATE_BUCKETS_SQL)?;
+        let mut rows = statement.query(params![
+            query.classification_id.as_deref(),
+            query.direct_only,
+            query.favorite_only,
+            query.unclassified_only,
+            query.album_id.as_deref(),
+            query.collection_id.as_deref(),
+        ])?;
+        let mut buckets = Vec::new();
+        while let Some(row) = rows.next()? {
+            let date: String = row.get(0)?;
+            let count: i64 = row.get(1)?;
+            buckets.push(AssetDateBucket { date, count: count as u64 });
+        }
+        Ok(buckets)
     }
 }
 
@@ -400,6 +433,21 @@ AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_
 AND (?11 IS NULL OR EXISTS (SELECT 1 FROM collection_assets AS collection_link WHERE collection_link.asset_id = asset.id AND collection_link.collection_id = ?11))
 AND (?7 IS NULL OR CASE WHEN asset.content_hash >= ?6 THEN 0 ELSE 1 END > ?7 OR (CASE WHEN asset.content_hash >= ?6 THEN 0 ELSE 1 END = ?7 AND (asset.content_hash > ?8 OR (asset.content_hash = ?8 AND asset.id > ?9))))
 ORDER BY CASE WHEN asset.content_hash >= ?6 THEN 0 ELSE 1 END ASC, asset.content_hash ASC, asset.id ASC LIMIT ?10";
+
+const DATE_BUCKETS_SQL: &str = "WITH RECURSIVE descendants(id) AS (
+    SELECT ?1 WHERE ?1 IS NOT NULL
+    UNION ALL SELECT entry.id FROM classification_entries AS entry JOIN descendants ON entry.parent_id = descendants.id
+) , album_descendants(id) AS (
+    SELECT ?5 WHERE ?5 IS NOT NULL
+    UNION ALL SELECT child.id FROM albums AS child JOIN album_descendants ON child.parent_id = album_descendants.id
+) SELECT substr(asset.collected_at, 1, 10) AS date, COUNT(*) AS count
+FROM assets AS asset
+WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
+AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
+AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
+AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
+AND (?6 IS NULL OR EXISTS (SELECT 1 FROM collection_assets AS collection_link WHERE collection_link.asset_id = asset.id AND collection_link.collection_id = ?6))
+GROUP BY date ORDER BY date DESC";
 
 #[cfg(test)]
 mod tests {

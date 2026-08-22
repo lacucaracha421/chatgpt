@@ -506,6 +506,9 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
         <div className="settings-view__actions">
           <Button disabled={legacyBusy || !legacyPackage} onClick={() => void previewLegacyPackage()}>{legacyBusy ? "검사 중…" : "미리 보기"}</Button>
         </div>
+        {legacyBusy && (
+          <p className="settings-view__row-message" role="status">패키지를 검사하는 중입니다. 파일이 많으면 시간이 걸려요…</p>
+        )}
         {legacyPlan && (
           <div className="settings-view__legacy-plan">
             <h3>검사 결과</h3>

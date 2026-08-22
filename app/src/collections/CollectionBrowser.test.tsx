@@ -177,6 +177,7 @@ function createGateway(): LibraryGateway {
     updateClassificationAppearance: vi.fn(),
     deleteClassification: vi.fn(),
     listAssets: vi.fn(),
+    listAssetDateBuckets: vi.fn().mockResolvedValue([]),
     indexMissingSimilarityHashes: vi.fn(),
     listSimilarityReviews: vi.fn(),
     decideSimilarityReview: vi.fn(),

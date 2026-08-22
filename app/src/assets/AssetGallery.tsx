@@ -2,7 +2,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { PlusIcon } from "@heroicons/react/24/outline";
 import { HeartIcon } from "@heroicons/react/24/solid";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { AssetSummary } from "../library/types";
+import type { AssetDateBucket, AssetSummary } from "../library/types";
 import { assetDragIds, type InternalDragPayload } from "../shared/interaction/pointerDrag";
 import type { SelectionGesture } from "./selection";
 import { buildJustifiedRows, type JustifiedRow } from "./justifiedRows";
@@ -12,8 +12,6 @@ import "../styles/tokens.css";
 
 const VIRTUAL_OVERSCAN_ROWS = 3;
 const NEXT_PAGE_THRESHOLD_ROWS = 5;
-const DATE_LINE_HEIGHT = 2;
-const SPARSE_DATE_LINE_COUNT = 4;
 const QUICK_PREVIEW_DELAY_MS = 150;
 const QUICK_PREVIEW_GAP = 8;
 const QUICK_PREVIEW_MARGIN = 12;
@@ -22,6 +20,7 @@ type QuickPreviewState = { asset: AssetSummary; anchor: DOMRect };
 
 type AssetGalleryProps = {
   items: AssetSummary[];
+  dateBuckets?: AssetDateBucket[];
   selectedAssetIds?: ReadonlySet<string>;
   focusAssetId?: string | null;
   targetRowHeight?: number;
@@ -41,22 +40,24 @@ type AssetGalleryProps = {
   onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void;
 };
 
-export function AssetGallery({ items, selectedAssetIds = new Set(), focusAssetId = null, targetRowHeight = 180, metadataVisible = false, hasNextPage = false, onLoadNextPage, onSelectionGesture, onSelectAll, onDeleteSelection, onClearSelection, onMoveFocus, onOpen, onRetryVideo, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
+export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new Set(), focusAssetId = null, targetRowHeight = 180, metadataVisible = false, hasNextPage = false, onLoadNextPage, onSelectionGesture, onSelectAll, onDeleteSelection, onClearSelection, onMoveFocus, onOpen, onRetryVideo, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const focusRequestedRef = useRef(false);
   const quickPreviewTimerRef = useRef<number | null>(null);
   const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
   const [quickPreview, setQuickPreview] = useState<QuickPreviewState | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
+  const [hoveredLine, setHoveredLine] = useState<{ key: string; index: number; top: number; label: string } | null>(null);
   const { width, gap, height } = useGalleryMetrics(scrollRef);
   const rows = useMemo(() => buildJustifiedRows(items, width, targetRowHeight, gap), [gap, items, targetRowHeight, width]);
   const rowVirtualizer = useVirtualizer({ count: rows.length, getScrollElement: () => scrollRef.current, estimateSize: (index) => rows[index]?.height ?? targetRowHeight, getItemKey: (index) => rows[index]?.items[0]?.id ?? index, gap, overscan: VIRTUAL_OVERSCAN_ROWS });
   const virtualRows = rowVirtualizer.getVirtualItems();
   const totalSize = rows.length > 0 ? rows.reduce((sum, row) => sum + row.height, 0) + gap * (rows.length - 1) : 0;
-  const dateLines = useMemo(() => buildDateLines(rows, gap, totalSize, height), [gap, height, rows, totalSize]);
-  const visibleStart = scrollTop;
-  const visibleEnd = scrollTop + height;
-  const activeLineKeys = new Set(dateLines.filter((line) => line.contentCenter >= visibleStart && line.contentCenter <= visibleEnd).map((line) => line.key));
+  const dateSummary = useMemo(() => dateBuckets.length > 0 ? buildDateSummaryFromBuckets(dateBuckets) : buildDateSummary(rows, gap, totalSize), [dateBuckets, gap, rows, totalSize]);
+  const geometry = useMemo(() => railGeometry(dateSummary.length, height), [dateSummary.length, height]);
+  const activeIndex = useMemo(() => dateBuckets.length > 0 ? findActiveIndexByScroll(scrollTop, height, dateBuckets.length) : findActiveIndex(scrollTop + height / 2, totalSize, dateSummary), [dateBuckets.length, dateSummary, height, scrollTop, totalSize]);
+  const tickIndexes = useMemo(() => selectTickIndexes(dateSummary, geometry.extent), [dateSummary, geometry.extent]);
+  const dateLines = useMemo(() => buildDateLines(geometry, tickIndexes, dateSummary, activeIndex), [activeIndex, dateSummary, geometry, tickIndexes]);
   const cancelQuickPreview = () => {
     if (quickPreviewTimerRef.current !== null) window.clearTimeout(quickPreviewTimerRef.current);
     quickPreviewTimerRef.current = null;
@@ -83,6 +84,11 @@ export function AssetGallery({ items, selectedAssetIds = new Set(), focusAssetId
   useEffect(() => () => {
     if (quickPreviewTimerRef.current !== null) window.clearTimeout(quickPreviewTimerRef.current);
   }, []);
+  useLayoutEffect(() => {
+    if (scrollRef.current && scrollRef.current.scrollTop !== scrollTop) {
+      setScrollTop(scrollRef.current.scrollTop);
+    }
+  }, [height, items]);
   useLayoutEffect(() => {
     if (!focusRequestedRef.current || !focusAssetId) return;
     [...(scrollRef.current?.querySelectorAll<HTMLElement>("[role=option]") ?? [])]
@@ -132,8 +138,17 @@ export function AssetGallery({ items, selectedAssetIds = new Set(), focusAssetId
         })}
       </div>
     </div>
-    {dateLines.length > 0 && <div className="asset-gallery__scrollbar" aria-hidden="true" onPointerDown={(event) => { if (event.button === 0) { event.currentTarget.setPointerCapture(event.pointerId); scrollToPointer(event.clientY); } }} onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) scrollToPointer(event.clientY); }}>
-      {dateLines.map((line) => <span key={line.key} className={activeLineKeys.has(line.key) ? "asset-gallery__scrollbar-line asset-gallery__scrollbar-line--active" : "asset-gallery__scrollbar-line"} style={{ top: `${line.top}px`, height: `${line.height}px` }} />)}
+    {dateLines.length > 0 && <div className="asset-gallery__scrollbar" aria-hidden="true" onPointerDown={(event) => { if (event.button === 0) { event.currentTarget.setPointerCapture(event.pointerId); scrollToPointer(event.clientY); } }} onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) scrollToPointer(event.clientY); }} onPointerLeave={() => setHoveredLine(null)}>
+      {dateLines.map((line, index) => (
+        <span
+          key={line.key}
+          className={lineClassName(hoveredLine, index, line)}
+          style={{ top: `${line.top}px` }}
+          onPointerEnter={() => setHoveredLine({ key: line.key, index, top: line.top, label: line.label })}
+          onPointerLeave={() => setHoveredLine((current) => current?.key === line.key ? null : current)}
+        />
+      ))}
+      {hoveredLine && <span className="asset-gallery__scrollbar-label" style={{ top: `${hoveredLine.top}px` }}>{hoveredLine.label}</span>}
     </div>}
     {quickPreview && <div className="asset-gallery__quick-preview" style={quickPreviewLayout(quickPreview)}><img src={assetUrl(quickPreview.asset.id)} alt={`${quickPreview.asset.title || quickPreview.asset.originalName} 빠른 미리보기`} draggable={false} onError={cancelQuickPreview} /></div>}
   </div>;
@@ -152,11 +167,25 @@ function AssetTile({ asset, height, selected, selectedAssetIds, focused, metadat
 function sourceHost(sourceUrl: string | null) { if (!sourceUrl) return null; try { return new URL(sourceUrl).hostname || null; } catch { return null; } }
 function localDate(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? null : date.toLocaleDateString(); }
 
-type DateLine = { key: string; top: number; height: number; contentCenter: number };
+type DateSpan = { key: string; label: string; count: number; min: number; max: number };
+type DateLine = { key: string; top: number; label: string; isMajor: boolean; isActive: boolean; density: number };
+type RailGeometry = { start: number; extent: number };
 
-function buildDateLines(rows: JustifiedRow<AssetSummary>[], gap: number, totalSize: number, trackHeight: number): DateLine[] {
-  if (trackHeight <= 0 || totalSize <= 0 || rows.length === 0) return [];
-  const byDate = new Map<string, { min: number; max: number }>();
+const RAIL_MIN_TICK_GAP = 8;
+
+function buildDateSummaryFromBuckets(buckets: AssetDateBucket[]): DateSpan[] {
+  if (buckets.length === 0) return [];
+  const count = buckets.length;
+  return buckets.map((bucket, index) => {
+    const ratio = count <= 1 ? 0 : index / (count - 1);
+    const key = bucket.date;
+    return { key, label: dateLabel(key), count: bucket.count, min: ratio, max: ratio };
+  });
+}
+
+function buildDateSummary(rows: JustifiedRow<AssetSummary>[], gap: number, totalSize: number): DateSpan[] {
+  if (totalSize <= 0 || rows.length === 0) return [];
+  const byDate = new Map<string, { label: string; count: number; min: number; max: number }>();
   let offset = 0;
   for (let index = 0; index < rows.length; index += 1) {
     const row = rows[index];
@@ -166,36 +195,136 @@ function buildDateLines(rows: JustifiedRow<AssetSummary>[], gap: number, totalSi
       if (!key) continue;
       const span = byDate.get(key);
       if (span) {
+        span.count += 1;
         if (center < span.min) span.min = center;
         if (center > span.max) span.max = center;
       } else {
-        byDate.set(key, { min: center, max: center });
+        byDate.set(key, { label: dateLabel(key), count: 1, min: center, max: center });
       }
     }
     offset += row.height + (index < rows.length - 1 ? gap : 0);
   }
-  const scale = trackHeight / totalSize;
-  const lines = [...byDate.entries()].map(([key, span]) => ({
-    key,
-    contentCenter: (span.min + span.max) / 2,
-  }));
-  if (lines.length <= SPARSE_DATE_LINE_COUNT) {
-    const bandTop = trackHeight * 0.3;
-    const bandBottom = trackHeight * 0.7;
-    const step = lines.length === 1 ? 0 : (bandBottom - bandTop) / (lines.length - 1);
-    return lines.map((line, index) => ({
-      key: line.key,
-      top: bandTop + step * index,
-      height: DATE_LINE_HEIGHT,
-      contentCenter: line.contentCenter,
-    }));
+  return [...byDate.entries()].map(([key, span]) => ({ key, label: span.label, count: span.count, min: span.min / totalSize, max: span.max / totalSize })).sort((left, right) => left.min - right.min);
+}
+
+function railGeometry(bucketCount: number, availableExtent: number): RailGeometry {
+  const safeExtent = Math.max(0, availableExtent);
+  if (bucketCount <= 1 || safeExtent === 0) return { start: 0, extent: 0 };
+  return { start: 0, extent: safeExtent };
+}
+
+function bucketPosition(index: number, count: number, extent: number): number {
+  if (count <= 1 || extent <= 0) return 0;
+  return (index / (count - 1)) * extent;
+}
+
+function nearestBucketIndex(contentCenter: number, totalSize: number, dateSummary: DateSpan[]): number {
+  if (dateSummary.length <= 1 || totalSize <= 0) return 0;
+  const ratio = Math.max(0, Math.min(1, contentCenter / totalSize));
+  let low = 0;
+  let high = dateSummary.length - 1;
+  while (low < high) {
+    const mid = Math.floor((low + high + 1) / 2);
+    if ((dateSummary[mid].min + dateSummary[mid].max) / 2 / totalSize <= ratio) {
+      low = mid;
+    } else {
+      high = mid - 1;
+    }
   }
-  return lines.map((line) => ({
-    key: line.key,
-    top: line.contentCenter * scale,
-    height: DATE_LINE_HEIGHT,
-    contentCenter: line.contentCenter,
-  }));
+  return low;
+}
+
+function findActiveIndex(contentCenter: number, totalSize: number, dateSummary: DateSpan[]): number | null {
+  if (dateSummary.length === 0) return null;
+  return nearestBucketIndex(contentCenter, totalSize, dateSummary);
+}
+
+function findActiveIndexByScroll(scrollTop: number, _viewportHeight: number, bucketCount: number): number | null {
+  if (bucketCount === 0) return null;
+  if (bucketCount === 1) return 0;
+  const scrollElement = document.querySelector(".asset-gallery__scroll") as HTMLElement | null;
+  if (!scrollElement) return 0;
+  const maxScroll = scrollElement.scrollHeight - scrollElement.clientHeight;
+  if (maxScroll <= 0) return 0;
+  const ratio = Math.max(0, Math.min(1, scrollTop / maxScroll));
+  return Math.round(ratio * (bucketCount - 1));
+}
+
+function selectTickIndexes(dateSummary: DateSpan[], extent: number): number[] {
+  const count = dateSummary.length;
+  if (count === 0) return [];
+  const capacity = Math.max(2, Math.floor(extent / RAIL_MIN_TICK_GAP) + 1);
+  if (count <= capacity) return Array.from({ length: count }, (_, index) => index);
+
+  const mandatory = new Set([0, count - 1]);
+  for (let index = 1; index < count; index += 1) {
+    const previous = dateSummary[index - 1].key.split("-").map(Number);
+    const current = dateSummary[index].key.split("-").map(Number);
+    if (previous[0] !== current[0] || previous[1] !== current[1]) mandatory.add(index);
+  }
+
+  const selected = new Set(mandatory.size <= capacity ? mandatory : evenlySample([...mandatory].sort((a, b) => a - b), capacity));
+  while (selected.size < capacity) {
+    const ordered = [...selected].sort((a, b) => a - b);
+    let largestGap = 0;
+    let midpoint = -1;
+    for (let index = 1; index < ordered.length; index += 1) {
+      const gap = ordered[index] - ordered[index - 1];
+      if (gap > largestGap) {
+        largestGap = gap;
+        midpoint = ordered[index - 1] + Math.floor(gap / 2);
+      }
+    }
+    if (largestGap <= 1 || midpoint < 0) break;
+    selected.add(midpoint);
+  }
+
+  return [...selected].sort((a, b) => a - b);
+}
+
+function evenlySample(indexes: number[], count: number): number[] {
+  if (indexes.length <= count) return indexes;
+  return Array.from({ length: count }, (_, slot) => indexes[Math.round((slot * (indexes.length - 1)) / (count - 1))]);
+}
+
+function buildDateLines(geometry: RailGeometry, tickIndexes: number[], dateSummary: DateSpan[], activeIndex: number | null): DateLine[] {
+  if (geometry.extent <= 0 || tickIndexes.length === 0) return [];
+  const maxCount = Math.max(1, ...dateSummary.map((span) => span.count));
+  return tickIndexes.map((index) => {
+    const span = dateSummary[index];
+    const previous = index === 0 ? null : dateSummary[index - 1];
+    const currentParts = span.key.split("-").map(Number);
+    const previousParts = previous?.key.split("-").map(Number);
+    const isMajor = index === 0 || !previousParts || previousParts[0] !== currentParts[0] || previousParts[1] !== currentParts[1];
+    const density = span.count / maxCount;
+    return {
+      key: span.key,
+      top: geometry.start + bucketPosition(index, dateSummary.length, geometry.extent),
+      label: dateLabelText(span.label, span.count),
+      isMajor,
+      isActive: activeIndex === index,
+      density,
+    };
+  });
+}
+
+function lineClassName(hoveredLine: { key: string; index: number } | null, lineIndex: number, line: DateLine): string {
+  const base = "asset-gallery__scrollbar-line";
+  const classes = [base];
+  if (line.density >= 0.75) classes.push(`${base}--dense`);
+  else if (line.density >= 0.35) classes.push(`${base}--medium`);
+  if (line.isMajor) classes.push(`${base}--major`);
+  if (hoveredLine?.key === line.key) {
+    classes.push(`${base}--hovered`);
+  } else if (hoveredLine != null) {
+    const distance = Math.abs(hoveredLine.index - lineIndex);
+    if (distance === 1) classes.push(`${base}--nearby-1`);
+    else if (distance === 2) classes.push(`${base}--nearby-2`);
+    else if (line.isActive) classes.push(`${base}--active`);
+  } else if (line.isActive) {
+    classes.push(`${base}--active`);
+  }
+  return classes.join(" ");
 }
 
 function dateKey(value: string): string | null {
@@ -204,18 +333,37 @@ function dateKey(value: string): string | null {
   return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
 }
 
+function dateLabel(key: string): string {
+  const [year, month, day] = key.split("-").map(Number);
+  if (!year || !month || !day) return key;
+  return `${year}. ${String(month).padStart(2, "0")}. ${String(day).padStart(2, "0")}`;
+}
+
+function dateLabelText(label: string, count: number): string {
+  return `${label} · ${count.toLocaleString("ko-KR")}개`;
+}
+
+const METRICS_QUANTIZE = 16;
+
 function useGalleryMetrics(ref: React.RefObject<HTMLElement | null>) {
   const [metrics, setMetrics] = useState({ width: 0, gap: 0, height: 0 });
   useLayoutEffect(() => {
     const element = ref.current; if (!element) return;
-    const update = (measuredWidth: number, includesPadding: boolean) => {
+    const update = (measuredWidth: number, measuredHeight: number, includesPadding: boolean) => {
       const style = getComputedStyle(element);
       const gap = cssLength(style.getPropertyValue("--gallery-gap"));
       const horizontalPadding = cssLength(style.paddingLeft) + cssLength(style.paddingRight);
-      setMetrics({ width: Math.max(0, measuredWidth - (includesPadding ? horizontalPadding : 0)), gap, height: element.clientHeight });
+      setMetrics((current) => {
+        const nextWidth = measuredWidth > 0 ? Math.max(0, measuredWidth - (includesPadding ? horizontalPadding : 0)) : current.width;
+        const nextHeight = measuredHeight > 0 ? measuredHeight : current.height;
+        const quantizedWidth = Math.round(nextWidth / METRICS_QUANTIZE) * METRICS_QUANTIZE;
+        const quantizedHeight = Math.round(nextHeight / METRICS_QUANTIZE) * METRICS_QUANTIZE;
+        if (quantizedWidth === current.width && quantizedHeight === current.height && gap === current.gap) return current;
+        return { width: quantizedWidth, gap, height: quantizedHeight };
+      });
     };
-    update(element.clientWidth, true); if (!window.ResizeObserver) return;
-    const observer = new ResizeObserver(([entry]) => entry ? update(entry.contentRect.width, false) : update(element.clientWidth, true)); observer.observe(element); return () => observer.disconnect();
+    update(element.clientWidth, element.clientHeight, true); if (!window.ResizeObserver) return;
+    const observer = new ResizeObserver(([entry]) => entry ? update(entry.contentRect.width, entry.contentRect.height, false) : update(element.clientWidth, element.clientHeight, true)); observer.observe(element); return () => observer.disconnect();
   }, [ref]);
   return metrics;
 }

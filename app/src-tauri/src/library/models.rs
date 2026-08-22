@@ -234,6 +234,13 @@ pub struct AssetPage {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct AssetDateBucket {
+    pub date: String,
+    pub count: u64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct TrashAssetSummary {
     pub asset: AssetSummary,
     pub trashed_at: String,

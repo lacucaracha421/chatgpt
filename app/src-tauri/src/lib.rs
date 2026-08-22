@@ -90,6 +90,7 @@ pub fn run() {
             commands::set_collection_showcase,
             commands::get_asset_classifications,
             commands::list_assets,
+            commands::list_asset_date_buckets,
             commands::index_missing_similarity_hashes,
             commands::list_similarity_reviews,
             commands::decide_similarity_review,

@@ -405,6 +405,11 @@ export type AssetPage = {
   nextCursor: AssetCursor | null;
 };
 
+export type AssetDateBucket = {
+  date: string;
+  count: number;
+};
+
 export type AssetAlbumPatch = {
   assetIds: string[];
   addAlbumIds: string[];
@@ -536,6 +541,7 @@ export interface LibraryGateway {
   updateAlbumAppearance(id: string, iconKey: string | null, colorKey: string | null): Promise<void>;
   deleteAlbum(id: string): Promise<void>;
   listAssets(query: AssetQuery): Promise<AssetPage>;
+  listAssetDateBuckets(query: AssetQuery): Promise<AssetDateBucket[]>;
   indexMissingSimilarityHashes(): Promise<SimilarityIndexProgress>;
   listSimilarityReviews(query: {
     after: AssetCursor | null;

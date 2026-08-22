@@ -138,8 +138,14 @@ impl Library {
             return self.finish_exact_duplicate(existing_asset_id, &request);
         }
         run_after_duplicate_hook(self.root());
-        let perceptual_hash = perceptual_hash_from_file(pending.owned_file(&staging_path)?)?;
-        let similar = self.find_similar_asset(perceptual_hash)?;
+        let skip_similarity = request.import_source == ImportSource::LegacyLakomics;
+        let (perceptual_hash, similar) = if skip_similarity {
+            (None, None)
+        } else {
+            let hash = perceptual_hash_from_file(pending.owned_file(&staging_path)?)?;
+            let similar = self.find_similar_asset(hash)?;
+            (Some(hash), similar)
+        };
 
         let prefix = &content_hash[..2];
         let thumbnail_relative_path = format!("thumbnails/{prefix}/{content_hash}.webp");
@@ -356,7 +362,7 @@ impl Library {
         &self,
         asset: &AssetSummary,
         content_hash: &str,
-        perceptual_hash: u64,
+        perceptual_hash: Option<u64>,
         format: ImageFormat,
         classification_id: Option<&str>,
         registration: &Registration,
@@ -393,7 +399,7 @@ impl Library {
                 asset.collected_at,
                 i64::from(asset.favorite),
                 status,
-                perceptual_hash.to_be_bytes(),
+                perceptual_hash.map(|h| h.to_be_bytes().to_vec()),
                 asset.source_published_at.as_deref(),
                 asset.creator_name.as_deref(),
                 asset.creator_handle.as_deref(),

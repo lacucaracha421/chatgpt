@@ -31,6 +31,7 @@ function gateway(): LibraryGateway {
     updateClassificationAppearance: vi.fn().mockResolvedValue(undefined),
     deleteClassification: vi.fn().mockResolvedValue(undefined),
     listAssets: vi.fn(),
+    listAssetDateBuckets: vi.fn().mockResolvedValue([]),
     indexMissingSimilarityHashes: vi.fn(),
     listSimilarityReviews: vi.fn(),
     decideSimilarityReview: vi.fn(),

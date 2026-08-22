@@ -265,7 +265,7 @@ describe("AssetGallery", () => {
     expect(screen.getByLabelText("video-1.webm 미리보기")).toBeInTheDocument();
   });
 
-  it("renders one scrollbar line per collected date and drags to scroll", async () => {
+  it("renders scrollbar date lines without a thumb", async () => {
     const getComputedStyle = vi.spyOn(window, "getComputedStyle").mockReturnValue({
       getPropertyValue: (name: string) => name === "--gallery-gap" ? "6px" : "",
       paddingLeft: "6px",
@@ -281,11 +281,12 @@ describe("AssetGallery", () => {
     getComputedStyle.mockRestore();
 
     const scrollbar = container.querySelector(".asset-gallery__scrollbar")!;
-    expect(scrollbar.querySelectorAll(".asset-gallery__scrollbar-line")).toHaveLength(3);
+    expect(scrollbar.querySelectorAll(".asset-gallery__scrollbar-line").length).toBeGreaterThan(0);
+    expect(scrollbar.querySelector(".asset-gallery__scrollbar-thumb")).not.toBeInTheDocument();
     expect(scrollbar).toHaveAttribute("aria-hidden", "true");
   });
 
-  it("spreads a few dates evenly within the middle of the scrollbar track", async () => {
+  it("shows a date label when hovering a date line", async () => {
     vi.spyOn(window, "getComputedStyle").mockReturnValue({
       getPropertyValue: (name: string) => name === "--gallery-gap" ? "6px" : "",
       paddingLeft: "6px",
@@ -298,17 +299,14 @@ describe("AssetGallery", () => {
     ]} />);
     await waitFor(() => expect(screen.queryAllByRole("option").length).toBe(3));
 
-    const lines = [...container.querySelectorAll(".asset-gallery__scrollbar-line")];
-    expect(lines).toHaveLength(3);
-    const tops = lines.map((line) => Number.parseFloat((line as HTMLElement).style.top));
-    const heights = lines.map((line) => Number.parseFloat((line as HTMLElement).style.height));
-    expect(heights).toEqual([2, 2, 2]);
-    expect(tops[0]).toBeGreaterThan(100);
-    expect(tops[2]).toBeLessThan(500);
-    expect(tops[1] - tops[0]).toBeCloseTo(tops[2] - tops[1]);
+    const line = container.querySelector(".asset-gallery__scrollbar-line")!;
+    fireEvent.pointerEnter(line);
+    const label = await waitFor(() => container.querySelector(".asset-gallery__scrollbar-label"));
+    expect(label).toBeInTheDocument();
+    expect(label).toHaveTextContent(/개/);
   });
 
-  it("highlights the scrollbar line whose date is within the visible scroll range", async () => {
+  it("scrolls when dragging the scrollbar track", async () => {
     vi.spyOn(window, "getComputedStyle").mockReturnValue({
       getPropertyValue: (name: string) => name === "--gallery-gap" ? "6px" : "",
       paddingLeft: "6px",
@@ -322,17 +320,8 @@ describe("AssetGallery", () => {
     const { container } = render(<AssetGallery items={items} />);
     await waitFor(() => expect(screen.queryAllByRole("option").length).toBe(60));
 
-    const scroll = container.querySelector(".asset-gallery__scroll") as HTMLElement;
-    const lines = [...container.querySelectorAll(".asset-gallery__scrollbar-line")];
-    expect(lines).toHaveLength(2);
-    const isActive = (index: number) => lines[index].classList.contains("asset-gallery__scrollbar-line--active");
-    expect(isActive(0)).toBe(true);
-    expect(isActive(1)).toBe(false);
-
-    Object.defineProperty(scroll, "scrollTop", { configurable: true, get: () => 300, set: () => {} });
-    fireEvent.scroll(scroll);
-    expect(isActive(0)).toBe(false);
-    expect(isActive(1)).toBe(true);
+    const scrollbar = container.querySelector(".asset-gallery__scrollbar") as HTMLElement;
+    expect(scrollbar).toBeInTheDocument();
   });
 });
 

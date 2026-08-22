@@ -17,8 +17,8 @@ use crate::{
         metadata_import::{self, MetadataImportPlan},
         models::{
             AladinApplyRequest, AladinConnection, AladinSeriesCandidate, AladinSyncResult,
-            AlbumEntry, AssetAlbumPatch, AssetCollectionPatch, AssetCursor, AssetMetadataPatch,
-            AssetPage, AssetQuery, AssetSummary, CatalogSearchPage, CatalogSearchQuery,
+            AlbumEntry, AssetAlbumPatch, AssetCollectionPatch, AssetCursor, AssetDateBucket,
+            AssetMetadataPatch, AssetPage, AssetQuery, AssetSummary, CatalogSearchPage, CatalogSearchQuery,
             CatalogStatus, CatalogSuggestion, CatalogUpdateResult, CatalogUpdateStopReason,
             CatalogWorkDetail, ClassificationEntry, CollectionCover, CollectionSummary,
             CollectionVolume, CreateAlbum, CreateClassification, CreateCollection,
@@ -347,6 +347,16 @@ pub fn list_assets(
 ) -> Result<AssetPage, CommandError> {
     current_required(state)?
         .list_assets(query)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn list_asset_date_buckets(
+    query: AssetQuery,
+    state: State<'_, AppState>,
+) -> Result<Vec<AssetDateBucket>, CommandError> {
+    current_required(state)?
+        .list_asset_date_buckets(query)
         .map_err(CommandError::from)
 }
 
@@ -1201,20 +1211,25 @@ pub fn import_book_collections(
 }
 
 #[tauri::command]
-pub fn inspect_legacy_package_migration(
+pub async fn inspect_legacy_package_migration(
     package_root: String,
     metadata_snapshot: String,
     book_root: String,
     state: State<'_, AppState>,
 ) -> Result<LegacyPackageMigrationPlan, CommandError> {
     let library = current_required(state)?;
-    let paths = LegacyPackagePaths {
-        library_root: library.root().to_path_buf(),
-        package_root: package_root.into(),
-        metadata_snapshot: metadata_snapshot.into(),
-        book_root: book_root.into(),
-    };
-    legacy_package_migration::inspect_legacy_package_migration(&paths).map_err(CommandError::from)
+    tauri::async_runtime::spawn_blocking(move || {
+        let paths = LegacyPackagePaths {
+            library_root: library.root().to_path_buf(),
+            package_root: package_root.into(),
+            metadata_snapshot: metadata_snapshot.into(),
+            book_root: book_root.into(),
+        };
+        legacy_package_migration::inspect_legacy_package_migration(&paths)
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
 }
 
 #[tauri::command]
