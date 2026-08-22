@@ -17,6 +17,7 @@ it("submits only fields owned by ordinary collection editing", async () => {
     coverAssetId: null,
     selectedWorkArtworkId: null,
     assetCount: 0,
+    unreadReleaseCount: 0,
     year: 2024,
     author: "Imported Author",
     director: null,

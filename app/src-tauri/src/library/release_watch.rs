@@ -1,11 +1,14 @@
 use rusqlite::{params, OptionalExtension};
 
 use super::{
-    aladin::AladinItem,
+    aladin::{self, AladinItem},
     aladin_flow::StoredAladinSource,
     collection::require_collection,
     error::LibraryError,
-    models::{ReleaseWatchEvent, ReleaseWatchEventKind, ReleaseWatchStatus},
+    models::{
+        ReleaseWatchEvent, ReleaseWatchEventKind, ReleaseWatchRunResult, ReleaseWatchRunStopReason,
+        ReleaseWatchStatus,
+    },
     Library,
 };
 
@@ -80,6 +83,103 @@ pub(super) fn event_kind_str(kind: ReleaseWatchEventKind) -> &'static str {
 }
 
 impl Library {
+    pub fn run_due_release_watch(
+        &self,
+        ttb_key: &str,
+    ) -> Result<ReleaseWatchRunResult, LibraryError> {
+        let checked_at = chrono::Utc::now().to_rfc3339();
+        self.run_due_release_watch_with(&checked_at, |query| aladin::search(ttb_key, query))
+    }
+
+    fn run_due_release_watch_with<F>(
+        &self,
+        checked_at: &str,
+        mut fetch: F,
+    ) -> Result<ReleaseWatchRunResult, LibraryError>
+    where
+        F: FnMut(&str) -> Result<Vec<AladinItem>, LibraryError>,
+    {
+        let _guard = self
+            .release_watch_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let checked = chrono::DateTime::parse_from_rfc3339(checked_at)
+            .map_err(|_| LibraryError::InvalidAladinResponse)?;
+        let cutoff = checked - chrono::Duration::hours(24);
+        let due = {
+            let connection = self.connection()?;
+            let mut statement = connection.prepare(
+                "SELECT collection_id, last_checked_at
+                 FROM release_watch_subscriptions
+                 ORDER BY COALESCE(last_checked_at, ''), collection_id",
+            )?;
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows.into_iter()
+                .filter(|(_, last_checked_at)| {
+                    last_checked_at.as_deref().is_none_or(|value| {
+                        chrono::DateTime::parse_from_rfc3339(value)
+                            .map(|timestamp| timestamp <= cutoff)
+                            .unwrap_or(true)
+                    })
+                })
+                .collect::<Vec<_>>()
+        };
+        let mut result = ReleaseWatchRunResult {
+            checked: 0,
+            changed_collections: 0,
+            skipped: 0,
+            stop_reason: None,
+        };
+        for (collection_id, _) in due {
+            let query = match self.get_aladin_connection(&collection_id) {
+                Ok(Some(connection)) => connection.query,
+                Ok(None) => {
+                    result.skipped += 1;
+                    continue;
+                }
+                Err(error) => {
+                    if let Some(reason) = stop_reason(&error) {
+                        result.stop_reason = Some(reason);
+                        break;
+                    }
+                    result.skipped += 1;
+                    continue;
+                }
+            };
+            let items = match fetch(&query) {
+                Ok(items) => items,
+                Err(error) => {
+                    if let Some(reason) = stop_reason(&error) {
+                        result.stop_reason = Some(reason);
+                        break;
+                    }
+                    result.skipped += 1;
+                    continue;
+                }
+            };
+            match self.refresh_aladin_items_at(&collection_id, items, checked_at) {
+                Ok(outcome) => {
+                    result.checked += 1;
+                    if outcome.release_event_count > 0 {
+                        result.changed_collections += 1;
+                    }
+                }
+                Err(error) => {
+                    if let Some(reason) = stop_reason(&error) {
+                        result.stop_reason = Some(reason);
+                        break;
+                    }
+                    result.skipped += 1;
+                }
+            }
+        }
+        Ok(result)
+    }
+
     pub fn get_release_watch_status(
         &self,
         collection_id: &str,
@@ -155,6 +255,17 @@ impl Library {
     }
 }
 
+fn stop_reason(error: &LibraryError) -> Option<ReleaseWatchRunStopReason> {
+    match error {
+        LibraryError::InvalidAladinCredential => Some(ReleaseWatchRunStopReason::InvalidCredential),
+        LibraryError::AladinRateLimited => Some(ReleaseWatchRunStopReason::RateLimited),
+        LibraryError::AladinTimedOut => Some(ReleaseWatchRunStopReason::TimedOut),
+        LibraryError::AladinUnavailable => Some(ReleaseWatchRunStopReason::Unavailable),
+        LibraryError::InvalidAladinResponse => Some(ReleaseWatchRunStopReason::InvalidResponse),
+        _ => None,
+    }
+}
+
 fn subscription_exists(
     connection: &rusqlite::Connection,
     collection_id: &str,
@@ -215,6 +326,7 @@ mod tests {
         models::{CollectionType, CreateCollection, ExternalBindingInput, ReleaseWatchEventKind},
         Library,
     };
+    use rusqlite::params;
 
     fn item(volume_number: i64, publication_date: Option<&str>) -> AladinItem {
         AladinItem {
@@ -310,18 +422,197 @@ mod tests {
     }
 
     fn connect_aladin(library: &Library, collection_id: &str) {
+        connect_aladin_with(library, collection_id, "item-1", "던전밥");
+    }
+
+    fn connect_aladin_with(library: &Library, collection_id: &str, item_id: &str, query: &str) {
         library
             .upsert_collection_external_binding(
                 collection_id,
                 ExternalBindingInput {
                     provider: "aladin".into(),
-                    external_id: "item-1".into(),
-                    provider_config_json: Some("{}".into()),
+                    external_id: item_id.into(),
+                    provider_config_json: Some(format!(
+                        r#"{{"version":1,"query":"{query}","groupFingerprint":"","knownItemIds":[]}}"#
+                    )),
                     provider_data_json: Some("{}".into()),
                     last_synced_at: Some("2026-08-21T00:00:00Z".into()),
                 },
             )
             .unwrap();
+    }
+
+    fn runner_item(item_id: &str, title: &str) -> AladinItem {
+        AladinItem {
+            item_id: item_id.into(),
+            title: format!("{title} 1권"),
+            author: Some("작가".into()),
+            publisher: Some("출판사".into()),
+            isbn13: Some(format!("isbn-{item_id}")),
+            publication_date: None,
+            item_url: None,
+            volume_number: 1,
+            base_title: title.into(),
+            snapshot_json: format!(r#"{{"itemId":"{item_id}"}}"#),
+        }
+    }
+
+    fn subscribe_at(library: &Library, collection_id: &str, checked_at: Option<&str>) {
+        library
+            .set_release_watch_enabled(collection_id, true)
+            .unwrap();
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE release_watch_subscriptions SET last_checked_at = ?1
+                 WHERE collection_id = ?2",
+                params![checked_at, collection_id],
+            )
+            .unwrap();
+    }
+
+    fn seed_source(library: &Library, collection_id: &str, item_id: &str, title: &str) {
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO collection_volume_sources (
+                    collection_id, volume_number, provider, provider_item_id, title,
+                    author, publisher, isbn13, publication_date, item_url,
+                    provider_data_json, created_at, updated_at
+                 ) VALUES (?1, 1, 'aladin', ?2, ?3, '작가', '출판사', ?4,
+                    NULL, NULL, ?5, 't', 't')",
+                params![
+                    collection_id,
+                    item_id,
+                    format!("{title} 1권"),
+                    format!("isbn-{item_id}"),
+                    format!(r#"{{"itemId":"{item_id}"}}"#),
+                ],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn run_due_release_watch_checks_only_due_subscriptions_oldest_first() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        for (query, checked_at, has_source) in [
+            ("never", None, true),
+            ("oldest", Some("2026-08-20T12:00:00Z"), false),
+            ("exact", Some("2026-08-21T12:00:00Z"), true),
+            ("fresh", Some("2026-08-21T12:00:01Z"), false),
+        ] {
+            let collection_id = create_collection(&library, query, CollectionType::Manga);
+            let item_id = format!("item-{query}");
+            connect_aladin_with(&library, &collection_id, &item_id, query);
+            subscribe_at(&library, &collection_id, checked_at);
+            if has_source {
+                seed_source(&library, &collection_id, &item_id, query);
+            }
+        }
+        let mut calls = Vec::new();
+
+        let result = library
+            .run_due_release_watch_with("2026-08-22T12:00:00Z", |query| {
+                calls.push(query.to_owned());
+                Ok(vec![runner_item(&format!("item-{query}"), query)])
+            })
+            .unwrap();
+
+        assert_eq!(calls, vec!["never", "oldest", "exact"]);
+        assert_eq!(result.checked, 3);
+        assert_eq!(result.changed_collections, 1);
+        assert_eq!(result.skipped, 0);
+        assert_eq!(result.stop_reason, None);
+    }
+
+    #[test]
+    fn run_due_release_watch_skips_binding_failure_and_continues() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        for query in ["broken", "later"] {
+            let collection_id = create_collection(&library, query, CollectionType::Manga);
+            connect_aladin_with(&library, &collection_id, &format!("item-{query}"), query);
+            subscribe_at(
+                &library,
+                &collection_id,
+                Some(if query == "broken" {
+                    "2026-08-20T12:00:00Z"
+                } else {
+                    "2026-08-21T12:00:00Z"
+                }),
+            );
+        }
+        let mut calls = Vec::new();
+
+        let result = library
+            .run_due_release_watch_with("2026-08-22T12:00:00Z", |query| {
+                calls.push(query.to_owned());
+                if query == "broken" {
+                    Err(LibraryError::AmbiguousAladinBinding)
+                } else {
+                    Ok(vec![runner_item("item-later", "later")])
+                }
+            })
+            .unwrap();
+
+        assert_eq!(calls, vec!["broken", "later"]);
+        assert_eq!(result.checked, 1);
+        assert_eq!(result.changed_collections, 1);
+        assert_eq!(result.skipped, 1);
+        assert_eq!(result.stop_reason, None);
+    }
+
+    #[test]
+    fn run_due_release_watch_stops_after_provider_wide_failure() {
+        use crate::library::models::ReleaseWatchRunStopReason;
+
+        let cases: [(fn() -> LibraryError, ReleaseWatchRunStopReason); 5] = [
+            (
+                || LibraryError::InvalidAladinCredential,
+                ReleaseWatchRunStopReason::InvalidCredential,
+            ),
+            (
+                || LibraryError::AladinRateLimited,
+                ReleaseWatchRunStopReason::RateLimited,
+            ),
+            (
+                || LibraryError::AladinTimedOut,
+                ReleaseWatchRunStopReason::TimedOut,
+            ),
+            (
+                || LibraryError::AladinUnavailable,
+                ReleaseWatchRunStopReason::Unavailable,
+            ),
+            (
+                || LibraryError::InvalidAladinResponse,
+                ReleaseWatchRunStopReason::InvalidResponse,
+            ),
+        ];
+        for (failure, expected_reason) in cases {
+            let temp = tempfile::tempdir().unwrap();
+            let library = Library::open(temp.path()).unwrap();
+            for query in ["first", "later"] {
+                let collection_id = create_collection(&library, query, CollectionType::Manga);
+                connect_aladin_with(&library, &collection_id, &format!("item-{query}"), query);
+                subscribe_at(&library, &collection_id, None);
+            }
+            let mut calls = 0;
+
+            let result = library
+                .run_due_release_watch_with("2026-08-22T12:00:00Z", |_query| {
+                    calls += 1;
+                    Err(failure())
+                })
+                .unwrap();
+
+            assert_eq!(calls, 1);
+            assert_eq!(result.checked, 0);
+            assert_eq!(result.skipped, 0);
+            assert_eq!(result.stop_reason, Some(expected_reason));
+        }
     }
 
     #[test]

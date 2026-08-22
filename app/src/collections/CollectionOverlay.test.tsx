@@ -15,6 +15,7 @@ const collection: CollectionSummary = {
   coverAssetId: null,
   selectedWorkArtworkId: "artwork-1",
   assetCount: 0,
+  unreadReleaseCount: 0,
   year: 2014,
   author: "쿠이 료코",
   director: null,
@@ -45,6 +46,10 @@ function renderOverlay(
     applyAladin: vi.fn().mockResolvedValue({ added: 0, updated: 0, unchanged: 0, ignored: 0 }),
     refreshAladin: vi.fn().mockResolvedValue({ added: 0, updated: 0, unchanged: 0, ignored: 0 }),
     getAladinConnection: vi.fn().mockResolvedValue(null),
+    getReleaseWatchStatus: vi.fn().mockResolvedValue({ enabled: false, lastCheckedAt: null }),
+    setReleaseWatchEnabled: vi.fn().mockResolvedValue({ enabled: false, lastCheckedAt: null }),
+    takeUnreadReleaseChanges: vi.fn().mockResolvedValue([]),
+    runDueReleaseWatch: vi.fn().mockResolvedValue({ checked: 0, changedCollections: 0, skipped: 0, stopReason: null }),
     ...overrides,
   } as unknown as LibraryGateway;
   render(

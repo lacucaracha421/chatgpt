@@ -427,6 +427,26 @@ pub struct ReleaseWatchEvent {
     pub detected_at: String,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReleaseWatchRunStopReason {
+    CredentialNotConfigured,
+    InvalidCredential,
+    RateLimited,
+    TimedOut,
+    Unavailable,
+    InvalidResponse,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseWatchRunResult {
+    pub checked: u64,
+    pub changed_collections: u64,
+    pub skipped: u64,
+    pub stop_reason: Option<ReleaseWatchRunStopReason>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct MangaDexSearchResult {

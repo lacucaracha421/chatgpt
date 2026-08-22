@@ -52,6 +52,7 @@ export type CollectionSummary = {
   coverAssetId: string | null;
   selectedWorkArtworkId: string | null;
   assetCount: number;
+  unreadReleaseCount: number;
   year: number | null;
   author: string | null;
   director: string | null;
@@ -69,6 +70,34 @@ export type CreateCollection = {
   name: string;
   description: string | null;
   type: CollectionType;
+};
+
+export type ReleaseWatchStatus = {
+  enabled: boolean;
+  lastCheckedAt: string | null;
+};
+
+export type ReleaseWatchEvent = {
+  id: string;
+  kind: "new_volume" | "release_date_changed" | "release_status_changed";
+  volumeNumber: number;
+  previousValue: string | null;
+  currentValue: string | null;
+  detectedAt: string;
+};
+
+export type ReleaseWatchRunResult = {
+  checked: number;
+  changedCollections: number;
+  skipped: number;
+  stopReason:
+    | "credential_not_configured"
+    | "invalid_credential"
+    | "rate_limited"
+    | "timed_out"
+    | "unavailable"
+    | "invalid_response"
+    | null;
 };
 
 export type MangaDexSearchResult = {
@@ -448,6 +477,13 @@ export interface LibraryGateway {
   applyAladin(request: AladinApplyRequest): Promise<AladinSyncResult>;
   refreshAladin(collectionId: string): Promise<AladinSyncResult>;
   getAladinConnection(collectionId: string): Promise<AladinConnection | null>;
+  getReleaseWatchStatus(collectionId: string): Promise<ReleaseWatchStatus>;
+  setReleaseWatchEnabled(
+    collectionId: string,
+    enabled: boolean,
+  ): Promise<ReleaseWatchStatus>;
+  takeUnreadReleaseChanges(collectionId: string): Promise<ReleaseWatchEvent[]>;
+  runDueReleaseWatch(): Promise<ReleaseWatchRunResult>;
   createCollection(input: CreateCollection): Promise<CollectionSummary>;
   updateCollection(id: string, input: UpdateCollection): Promise<CollectionSummary>;
   deleteCollection(id: string): Promise<void>;
