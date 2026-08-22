@@ -110,6 +110,7 @@ impl Library {
                     id,
                     i64::from(query.limit) + 1,
                     query.collection_id.as_deref(),
+                    query.collected_from.as_deref(),
                 ])?
             }
             AssetSort::Oldest => {
@@ -373,6 +374,7 @@ AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE lin
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
 AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
 AND (?9 IS NULL OR EXISTS (SELECT 1 FROM collection_assets AS collection_link WHERE collection_link.asset_id = asset.id AND collection_link.collection_id = ?9))
+AND (?10 IS NULL OR asset.collected_at >= ?10)
 AND (?6 IS NULL OR asset.collected_at < ?6 OR (asset.collected_at = ?6 AND asset.id < ?7))
 ORDER BY asset.collected_at DESC, asset.id DESC LIMIT ?8";
 
@@ -532,6 +534,7 @@ mod tests {
                 random_pivot: None,
                 after: None,
                 limit: 20,
+                ..Default::default()
             })
             .unwrap();
 
@@ -623,6 +626,7 @@ mod tests {
                 random_pivot: None,
                 after: None,
                 limit: 20,
+                ..Default::default()
             })
             .unwrap();
         let direct = library
@@ -637,6 +641,7 @@ mod tests {
                 random_pivot: None,
                 after: None,
                 limit: 20,
+                ..Default::default()
             })
             .unwrap();
 
@@ -689,6 +694,7 @@ mod tests {
                 random_pivot: None,
                 after: None,
                 limit: 20,
+                ..Default::default()
             })
             .unwrap();
 
@@ -737,6 +743,7 @@ mod tests {
             random_pivot: None,
             after: None,
             limit: 20,
+            ..Default::default()
         };
 
         assert_eq!(library.list_assets(query.clone()).unwrap().items.len(), 1);
@@ -777,6 +784,7 @@ mod tests {
             random_pivot: None,
             after: None,
             limit: 20,
+            ..Default::default()
         };
 
         assert_eq!(
@@ -832,6 +840,7 @@ mod tests {
                 random_pivot: None,
                 after: None,
                 limit: 20,
+                ..Default::default()
             })
             .unwrap_err();
 
@@ -862,6 +871,7 @@ mod tests {
                 random_pivot: None,
                 after: None,
                 limit: 20,
+                ..Default::default()
             })
             .unwrap_err();
 
@@ -896,6 +906,7 @@ mod tests {
                 random_pivot: None,
                 after: None,
                 limit: 1,
+                ..Default::default()
             })
             .unwrap();
         let second = library
@@ -910,6 +921,7 @@ mod tests {
                 random_pivot: None,
                 after: first.next_cursor.clone(),
                 limit: 1,
+                ..Default::default()
             })
             .unwrap();
 
@@ -952,6 +964,7 @@ mod tests {
                 random_pivot: None,
                 after: None,
                 limit: 2,
+                ..Default::default()
             })
             .unwrap();
         let second = library
@@ -966,6 +979,7 @@ mod tests {
                 random_pivot: None,
                 after: first.next_cursor.clone(),
                 limit: 2,
+                ..Default::default()
             })
             .unwrap();
 
@@ -1006,6 +1020,7 @@ mod tests {
                     random_pivot: None,
                     after: None,
                     limit,
+                    ..Default::default()
                 })
                 .unwrap_err();
 
@@ -1031,6 +1046,7 @@ mod tests {
                     random_pivot: None,
                     after: None,
                     limit: 20,
+                    ..Default::default()
                 })
                 .unwrap_err();
 
@@ -1128,6 +1144,7 @@ mod tests {
             random_pivot: random_pivot.map(str::to_owned),
             after: None,
             limit: 2,
+            ..Default::default()
         }
     }
 

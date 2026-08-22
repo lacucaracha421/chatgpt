@@ -1139,6 +1139,7 @@ mod tests {
                     random_pivot: None,
                     after: None,
                     limit: 100,
+                    ..Default::default()
                 })
                 .unwrap()
                 .items

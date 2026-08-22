@@ -398,6 +398,7 @@ export type AssetQuery = {
   randomPivot: string | null;
   after: AssetCursor | null;
   limit: number;
+  collectedFrom: string | null;
 };
 
 export type AssetPage = {

@@ -48,6 +48,7 @@ describe("AssetBrowser", () => {
         ...expected,
         randomPivot: null,
         after: null,
+        collectedFrom: null,
         limit: 100,
       }),
     );

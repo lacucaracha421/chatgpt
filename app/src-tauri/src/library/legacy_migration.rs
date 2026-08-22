@@ -643,6 +643,7 @@ mod tests {
                 random_pivot: None,
                 after: None,
                 limit: 10,
+                ..Default::default()
             })
             .unwrap();
         assert_eq!(assets.items.len(), 1);
@@ -698,6 +699,7 @@ mod tests {
                 random_pivot: None,
                 after: None,
                 limit: 10,
+                ..Default::default()
             })
             .unwrap();
         assert_eq!(

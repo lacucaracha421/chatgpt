@@ -140,9 +140,10 @@ pub struct AssetMetadataPatch {
     pub creator_url: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AssetSort {
+    #[default]
     Newest,
     Oldest,
     Favorites,
@@ -202,7 +203,7 @@ pub struct SimilarityIndexProgress {
     pub failed: u64,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct AssetQuery {
     pub classification_id: Option<String>,
@@ -215,6 +216,7 @@ pub struct AssetQuery {
     pub random_pivot: Option<String>,
     pub after: Option<AssetCursor>,
     pub limit: u32,
+    pub collected_from: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

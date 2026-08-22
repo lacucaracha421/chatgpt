@@ -34,13 +34,14 @@ type AssetGalleryProps = {
   onMoveFocus?: (delta: number, extend: boolean) => void;
   onOpen?: (asset: AssetSummary) => void;
   onRetryVideo?: (asset: AssetSummary) => void;
+  onSelectDate?: (date: string) => void;
   onPointerDragStart?: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => void;
   onPointerDragMove?: (event: React.PointerEvent<HTMLElement>) => void;
   onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void;
   onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void;
 };
 
-export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new Set(), focusAssetId = null, targetRowHeight = 180, metadataVisible = false, hasNextPage = false, onLoadNextPage, onSelectionGesture, onSelectAll, onDeleteSelection, onClearSelection, onMoveFocus, onOpen, onRetryVideo, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
+export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new Set(), focusAssetId = null, targetRowHeight = 180, metadataVisible = false, hasNextPage = false, onLoadNextPage, onSelectionGesture, onSelectAll, onDeleteSelection, onClearSelection, onMoveFocus, onOpen, onRetryVideo, onSelectDate, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const focusRequestedRef = useRef(false);
   const quickPreviewTimerRef = useRef<number | null>(null);
@@ -146,6 +147,7 @@ export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new S
           style={{ top: `${line.top}px` }}
           onPointerEnter={() => setHoveredLine({ key: line.key, index, top: line.top, label: line.label })}
           onPointerLeave={() => setHoveredLine((current) => current?.key === line.key ? null : current)}
+          onPointerDown={(event) => { if (event.button === 0) { event.stopPropagation(); onSelectDate?.(line.key); } }}
         />
       ))}
       {hoveredLine && <span className="asset-gallery__scrollbar-label" style={{ top: `${hoveredLine.top}px` }}>{hoveredLine.label}</span>}

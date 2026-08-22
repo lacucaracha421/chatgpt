@@ -109,6 +109,7 @@ fn query(sort: AssetSort, favorite_only: bool, limit: u32) -> AssetQuery {
         random_pivot: None,
         after: None,
         limit,
+        ..Default::default()
     }
 }
 
