@@ -56,10 +56,10 @@ This pass excludes:
 
 Add `release_watch_subscriptions` with one row for each enabled binding:
 
-- `external_binding_id` — primary key and foreign key to `external_bindings(id)` with cascade delete;
+- `collection_id` and `provider` — composite primary key and composite foreign key to `collection_external_bindings(collection_id, provider)` with cascade delete;
 - `last_checked_at` — nullable UTC timestamp of the last successful watch check.
 
-Row presence means enabled. Disabling Release Watch deletes the subscription row, avoiding a separate boolean state. Only an Aladin External Binding may receive a subscription; the Library Module enforces this before insertion.
+Row presence means enabled. Disabling Release Watch deletes the subscription row, avoiding a separate boolean state. A check constraint fixes `provider` to `aladin`; the composite foreign key guarantees that the Aladin External Binding exists before insertion.
 
 `last_checked_at` differs from `external_bindings.last_synced_at`. The latter records any successful provider synchronization, while the former controls whether the startup watcher considers a subscription due.
 
@@ -103,11 +103,18 @@ For each due subscription:
 
 1. Load the Aladin credential inside Rust.
 2. Use the existing stable binding query and anchor identity to fetch the authoritative group.
-3. Compare the new typed releases with the current Collection Volumes.
+3. Compare the new typed releases with the stored Aladin Volume sources, using the subscription's previous `last_checked_at` and the current check time for derived release status.
 4. In one transaction, insert Release Change events, reconcile current release fields, update the binding snapshot and `last_synced_at`, and update the subscription's `last_checked_at`.
 5. Commit before processing the next subscription.
 
 No difference produces no event, but still advances both successful timestamps. Because event insertion and state reconciliation share one transaction, interruption cannot persist the new current state without its event or create the same event again on restart.
+
+Event detection uses exact rules:
+
+- no stored Aladin source for a returned Volume produces `new_volume`;
+- a changed stored `publication_date` produces `release_date_changed`;
+- when a previous successful check exists, status is derived for the stored date at that previous check and for the returned date at the current check; a difference produces `release_status_changed`;
+- the first check after enabling has no synthetic previous status, so it does not label unchanged existing Volumes as newly released.
 
 When the aggregate command finishes, `App` reloads Collections. If one or more Collections received events, it shows one existing Toast: `새 출간 정보가 있는 작품 N개`.
 
@@ -130,7 +137,7 @@ A failure specific to one binding skips that Collection and permits later subscr
 
 The startup runner does not retry in the same application session. The subscription remains due for the next startup or an explicit manual refresh. Normal offline browsing and previously stored release information remain available.
 
-There is no persistent error-history table. The aggregate result contains checked, changed, skipped, and stopped counts plus a stable public stop reason when applicable. It contains no credential-bearing URL, TTB key, raw provider response, or managed path.
+There is no persistent error-history table. The aggregate result contains checked, changed, and skipped counts plus a stable public stop reason when applicable. Because a run stops at most once, a separate stopped counter would duplicate the stop reason. The result contains no credential-bearing URL, TTB key, raw provider response, or managed path.
 
 ## Frontend behavior
 
