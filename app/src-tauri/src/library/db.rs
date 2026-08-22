@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 16;
+pub(crate) const SCHEMA_VERSION: i64 = 17;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -28,6 +28,8 @@ const COLLECTION_VOLUMES_SCHEMA: &str =
     include_str!("../../migrations/0015_collection_volumes.sql");
 const ALADIN_VOLUME_SOURCES_SCHEMA: &str =
     include_str!("../../migrations/0016_aladin_volume_sources.sql");
+const ALADIN_RELEASE_WATCH_SCHEMA: &str =
+    include_str!("../../migrations/0017_aladin_release_watch.sql");
 
 pub fn open_database(path: &Path) -> Result<Connection, LibraryError> {
     let mut connection = Connection::open(path)?;
@@ -38,7 +40,7 @@ pub fn open_database(path: &Path) -> Result<Connection, LibraryError> {
     let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
     match version {
         SCHEMA_VERSION => {}
-        version @ 0..=15 => {
+        version @ 0..=16 => {
             if version > 0 {
                 let root = path
                     .parent()
@@ -104,6 +106,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         }
         if version <= 15 {
             transaction.execute_batch(ALADIN_VOLUME_SOURCES_SCHEMA)?;
+        }
+        if version <= 16 {
+            transaction.execute_batch(ALADIN_RELEASE_WATCH_SCHEMA)?;
         }
         transaction.commit()?;
         Ok::<(), LibraryError>(())
@@ -720,5 +725,112 @@ mod tests {
             )
             .unwrap();
         assert_eq!(cover.as_deref(), Some("art-1"));
+    }
+
+    #[test]
+    fn migrates_v16_to_release_watch_without_enabling_bindings() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        for schema in [
+            INITIAL_SCHEMA,
+            VAULT_SAFETY_SCHEMA,
+            SIMILARITY_REVIEW_SCHEMA,
+            VIDEO_MEDIA_SCHEMA,
+            MANGA_SCHEMA,
+            MANGA_MODIFIED_SCHEMA,
+            CLASSIFICATION_APPEARANCE_SCHEMA,
+            ASSET_ALBUMS_SCHEMA,
+            ASSET_SOURCE_PROVENANCE_SCHEMA,
+            COLLECTIONS_SCHEMA,
+            COLLECTIONS_TYPED_SCHEMA,
+            COLLECTION_SOURCE_SCHEMA,
+            COLLECTION_EXTERNAL_BINDINGS_SCHEMA,
+            COLLECTION_WORK_ARTWORKS_SCHEMA,
+            COLLECTION_VOLUMES_SCHEMA,
+            ALADIN_VOLUME_SOURCES_SCHEMA,
+        ] {
+            connection.execute_batch(schema).unwrap();
+        }
+        connection
+            .execute_batch(
+                "INSERT INTO collections (
+                    id, name, description, type, cover_asset_id, year, author, director,
+                    external_score, my_score, genres, overview, showcase,
+                    created_at, updated_at, source_path
+                 ) VALUES (
+                    'work-1', 'Work One', NULL, 'manga', NULL, NULL, NULL, NULL,
+                    NULL, NULL, NULL, NULL, 0, 't', 't', NULL
+                 );
+                 INSERT INTO collection_external_bindings (
+                    collection_id, provider, external_id, provider_data_json,
+                    last_synced_at, created_at, updated_at
+                 ) VALUES ('work-1', 'aladin', 'item-1', '{}', 't', 't', 't');",
+            )
+            .unwrap();
+
+        migrate_to_latest(&mut connection, 16).unwrap();
+
+        assert_eq!(SCHEMA_VERSION, 17);
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM release_watch_subscriptions",
+                    [],
+                    |row| { row.get::<_, i64>(0) }
+                )
+                .unwrap(),
+            0
+        );
+        assert!(connection
+            .execute(
+                "INSERT INTO release_watch_subscriptions (
+                    collection_id, provider, last_checked_at
+                 ) VALUES ('work-1', 'mangadex', NULL)",
+                [],
+            )
+            .is_err());
+        connection
+            .execute(
+                "INSERT INTO release_watch_subscriptions (
+                    collection_id, provider, last_checked_at
+                 ) VALUES ('work-1', 'aladin', NULL)",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO release_watch_events (
+                    id, collection_id, event_kind, volume_number,
+                    previous_value, current_value, detected_at, read_at
+                 ) VALUES (
+                    'event-1', 'work-1', 'new_volume', 1,
+                    NULL, '2026-09-01', '2026-08-22T00:00:00Z', NULL
+                 )",
+                [],
+            )
+            .unwrap();
+        assert!(connection
+            .execute(
+                "INSERT INTO release_watch_events (
+                    id, collection_id, event_kind, volume_number,
+                    detected_at, read_at
+                 ) VALUES (
+                    'event-2', 'work-1', 'renamed', 1,
+                    '2026-08-22T00:00:00Z', NULL
+                 )",
+                [],
+            )
+            .is_err());
+
+        connection
+            .execute("DELETE FROM collections WHERE id = 'work-1'", [])
+            .unwrap();
+        for table in ["release_watch_subscriptions", "release_watch_events"] {
+            let count = connection
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap();
+            assert_eq!(count, 0, "{table} should cascade with the Collection");
+        }
     }
 }

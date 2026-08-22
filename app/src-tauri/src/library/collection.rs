@@ -58,6 +58,12 @@ const COLLECTION_SUMMARY_SQL: &str = "SELECT
     collection.showcase,
     collection.created_at,
     collection.updated_at,
+    (
+        SELECT COUNT(*)
+        FROM release_watch_events AS release_event
+        WHERE release_event.collection_id = collection.id
+          AND release_event.read_at IS NULL
+    ),
     collection.source_path
 FROM collections AS collection";
 
@@ -332,6 +338,7 @@ fn collection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollectionSu
         cover_asset_id: row.get(4)?,
         selected_work_artwork_id: row.get(5)?,
         asset_count: u64::try_from(row.get::<_, i64>(6)?).unwrap_or(0),
+        unread_release_count: u64::try_from(row.get::<_, i64>(17)?).unwrap_or(0),
         year: row.get(7)?,
         author: row.get(8)?,
         director: row.get(9)?,
@@ -342,7 +349,7 @@ fn collection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollectionSu
         showcase: showcase_int != 0,
         created_at: row.get(15)?,
         updated_at: row.get(16)?,
-        source_path: row.get(17)?,
+        source_path: row.get(18)?,
     })
 }
 
@@ -808,6 +815,39 @@ mod tests {
                 .selected_work_artwork_id
                 .as_deref(),
             Some("art-1")
+        );
+    }
+
+    #[test]
+    fn collection_summary_counts_only_unread_release_events() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let collection = create(&library, "Dungeon Meshi");
+        let connection = library.connection().unwrap();
+        for (id, read_at) in [
+            ("event-1", None),
+            ("event-2", None),
+            ("event-3", Some("2026-08-22T01:00:00Z")),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO release_watch_events (
+                        id, collection_id, event_kind, volume_number,
+                        previous_value, current_value, detected_at, read_at
+                     ) VALUES (?1, ?2, 'new_volume', 1, NULL, '2026-09-01',
+                        '2026-08-22T00:00:00Z', ?3)",
+                    rusqlite::params![id, collection.id, read_at],
+                )
+                .unwrap();
+        }
+        drop(connection);
+
+        assert_eq!(
+            library
+                .get_collection(&collection.id)
+                .unwrap()
+                .unread_release_count,
+            2
         );
     }
 
