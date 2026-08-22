@@ -11,6 +11,9 @@ use crate::{
         catalog_update::{self, CatalogUpdateState},
         credential,
         error::LibraryError,
+        legacy_package_migration::{
+            self, LegacyPackageMigrationPlan, LegacyPackageMigrationReport, LegacyPackagePaths,
+        },
         metadata_import::{self, MetadataImportPlan},
         models::{
             AladinApplyRequest, AladinConnection, AladinSeriesCandidate, AladinSyncResult,
@@ -1195,6 +1198,52 @@ pub fn import_book_collections(
     library
         .import_book_collections(&root)
         .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn inspect_legacy_package_migration(
+    package_root: String,
+    metadata_snapshot: String,
+    book_root: String,
+    state: State<'_, AppState>,
+) -> Result<LegacyPackageMigrationPlan, CommandError> {
+    let library = current_required(state)?;
+    let paths = LegacyPackagePaths {
+        library_root: library.root().to_path_buf(),
+        package_root: package_root.into(),
+        metadata_snapshot: metadata_snapshot.into(),
+        book_root: book_root.into(),
+    };
+    legacy_package_migration::inspect_legacy_package_migration(&paths).map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn execute_legacy_package_migration(
+    package_root: String,
+    metadata_snapshot: String,
+    book_root: String,
+    expected_fingerprint: String,
+    state: State<'_, AppState>,
+) -> Result<LegacyPackageMigrationReport, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let paths = LegacyPackagePaths {
+            library_root: library.root().to_path_buf(),
+            package_root: package_root.into(),
+            metadata_snapshot: metadata_snapshot.into(),
+            book_root: book_root.into(),
+        };
+        let plan = legacy_package_migration::inspect_legacy_package_migration(&paths)?;
+        if plan.source.fingerprint != expected_fingerprint {
+            return Err(LibraryError::InvalidLegacyPackage(
+                "source changed after the migration preview".into(),
+            ));
+        }
+        library.execute_legacy_package_migration(&plan, |_| {})
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
 }
 
 #[tauri::command]

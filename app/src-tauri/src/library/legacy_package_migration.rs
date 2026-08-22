@@ -146,6 +146,14 @@ pub struct LegacyPackageMigrationReport {
     pub folders_reused: usize,
     pub failed: usize,
     pub failures: Vec<LegacyPackageMigrationFailure>,
+    pub book_collections: LegacyPackageBookCollections,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct LegacyPackageBookCollections {
+    pub created: usize,
+    pub skipped: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -577,6 +585,7 @@ impl Library {
         }
 
         let initial_hashes = self.legacy_package_target_hashes()?;
+        let book_report = self.apply_book_import_plan(&current_books)?;
         let import_batch_id = uuid::Uuid::new_v4().to_string();
         let mut report = LegacyPackageMigrationReport {
             planned: plan.source.items.len(),
@@ -591,6 +600,10 @@ impl Library {
             folders_reused,
             failed: 0,
             failures: Vec::new(),
+            book_collections: LegacyPackageBookCollections {
+                created: book_report.created as usize,
+                skipped: book_report.skipped as usize,
+            },
         };
         for (index, item) in plan.source.items.iter().enumerate() {
             match self.migrate_legacy_package_item(
@@ -1629,6 +1642,15 @@ mod tests {
     #[test]
     fn execution_is_additive_and_idempotent() {
         let fixture = Fixture::new();
+        for (folder, title) in [("Blue Archive", "Blue Archive"), ("Naruto", "나루토")] {
+            let path = fixture.paths.book_root.join(folder);
+            fs::create_dir(&path).unwrap();
+            fs::write(
+                path.join("info.txt"),
+                format!("Title: {title}\nType: manga\n"),
+            )
+            .unwrap();
+        }
         let source = inspect_legacy_package_source(&fixture.paths).unwrap();
         let video_hash = source.items[1].source_sha256.clone();
         let library = crate::library::Library::open(&fixture.paths.library_root).unwrap();
@@ -1661,6 +1683,18 @@ mod tests {
                 [&existing_folder.id],
             )
             .unwrap();
+        connection
+            .execute(
+                "INSERT INTO collections (
+                    id, name, description, type, cover_asset_id, showcase,
+                    created_at, updated_at
+                 ) VALUES (
+                    'existing-collection', 'blue archive', '보존', 'manga', NULL, 0,
+                    '2026-08-22T00:00:00Z', '2026-08-22T00:00:00Z'
+                 )",
+                [],
+            )
+            .unwrap();
         drop(connection);
         let plan = inspect_legacy_package_migration(&fixture.paths).unwrap();
         let mut progress = Vec::new();
@@ -1673,6 +1707,8 @@ mod tests {
         assert_eq!(first.exact_target_reused, 1);
         assert_eq!(first.mappings_created, 2);
         assert_eq!(first.failed, 0);
+        assert_eq!(first.book_collections.created, 1);
+        assert_eq!(first.book_collections.skipped, 1);
         assert_eq!(progress.len(), 2);
         let connection = library.connection().unwrap();
         assert_eq!(
@@ -1735,6 +1771,20 @@ mod tests {
         assert_eq!(second.already_mapped, 2);
         assert_eq!(second.mappings_created, 0);
         assert_eq!(second.failed, 0);
+        assert_eq!(second.book_collections.created, 0);
+        assert_eq!(second.book_collections.skipped, 2);
+        assert_eq!(
+            library
+                .connection()
+                .unwrap()
+                .query_row(
+                    "SELECT description FROM collections WHERE id = 'existing-collection'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "보존"
+        );
         assert_eq!(
             inspect_legacy_package_migration(&fixture.paths)
                 .unwrap()

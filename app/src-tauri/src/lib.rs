@@ -128,6 +128,8 @@ pub fn run() {
             commands::clear_remote_manga_cache,
             commands::inspect_book_import,
             commands::import_book_collections,
+            commands::inspect_legacy_package_migration,
+            commands::execute_legacy_package_migration,
             commands::get_collection_source_root,
             commands::set_collection_source_root,
             commands::list_collection_covers,
