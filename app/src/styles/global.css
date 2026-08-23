@@ -1766,6 +1766,20 @@ input:disabled {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 }
 
+.asset-gallery__scrollbar-indicator {
+  position: absolute;
+  right: 11px;
+  width: 12px;
+  height: 5px;
+  transform: translateY(-50%);
+  border-radius: 3px;
+  background: var(--color-text);
+  opacity: 0.92;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-text) 45%, transparent);
+  transition: top 90ms linear;
+  pointer-events: none;
+}
+
 .asset-gallery__virtual-space {
   position: relative;
   width: 100%;

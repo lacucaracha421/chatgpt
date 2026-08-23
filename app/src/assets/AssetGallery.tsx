@@ -66,10 +66,31 @@ export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new S
   const totalSize = rows.length > 0 ? rows.reduce((sum, row) => sum + row.height, 0) + gap * (rows.length - 1) : 0;
   const dateSummary = useMemo(() => dateBuckets.length > 0 ? buildDateSummaryFromBuckets(dateBuckets) : buildDateSummary(rows, gap, totalSize), [dateBuckets, gap, rows, totalSize]);
   const geometry = useMemo(() => railGeometry(dateSummary.length, railExtent), [dateSummary.length, railExtent]);
+  const hasRail = dateSummary.length > 0;
   const activeIndex = useMemo(() => {
     if (dateBuckets.length > 0) return findActiveBucketIndex(dateBuckets, rows, gap, scrollTop, height);
     return findActiveIndex(scrollTop + height / 2, totalSize, dateSummary);
   }, [dateBuckets, gap, dateSummary, height, rows, scrollTop, totalSize]);
+  const activeIndicatorTop = useMemo(() => {
+    if (!hasRail || geometry.extent <= 0 || dateBuckets.length < 2 || rows.length === 0) return null;
+    const row = rows[rowIndexAtContentOffset(rows, gap, scrollTop + Math.max(1, height) / 2)];
+    const centerItem = row?.items[Math.floor((row.items.length - 1) / 2)];
+    const key = centerItem ? isoDayKey(centerItem.collectedAt) : null;
+    if (!key) return null;
+    const newer = newestBucketAtOrAfter(dateBuckets, key);
+    let fraction: number;
+    if (newer < 0) fraction = 0;
+    else if (newer >= dateBuckets.length - 1) fraction = 1;
+    else {
+      const newerTime = Date.parse(`${dateBuckets[newer].date}T00:00:00Z`);
+      const olderTime = Date.parse(`${dateBuckets[newer + 1].date}T00:00:00Z`);
+      const keyTime = Date.parse(`${key}T00:00:00Z`);
+      const span = olderTime - newerTime;
+      const delta = span > 0 ? (keyTime - newerTime) / span : 0;
+      fraction = (newer + Math.min(1, Math.max(0, delta))) / (dateBuckets.length - 1);
+    }
+    return RAIL_EDGE_INSET + fraction * (geometry.extent - RAIL_EDGE_INSET * 2);
+  }, [dateBuckets, gap, geometry.extent, hasRail, height, rows, scrollTop]);
   const tickIndexes = useMemo(() => selectTickIndexes(dateSummary, geometry.extent), [dateSummary, geometry.extent]);
   const dateLines = useMemo(() => buildDateLines(geometry, tickIndexes, dateSummary, activeIndex), [activeIndex, dateSummary, geometry, tickIndexes]);
   const cancelQuickPreview = () => {
@@ -114,7 +135,6 @@ export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new S
       onLoadPrevPage();
     }
   }, [hasPreviousPage, onLoadPrevPage, virtualRows]);
-  const hasRail = dateSummary.length > 0;
   useEffect(() => {
     const element = railRef.current; if (!element) return;
     const update = () => setRailExtent(element.clientHeight);
@@ -228,6 +248,7 @@ export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new S
         />
       ))}
       {hoveredLine && <span className="asset-gallery__scrollbar-label" style={{ top: `${hoveredLine.top}px` }}>{hoveredLine.label}</span>}
+      {activeIndicatorTop != null && <span className="asset-gallery__scrollbar-indicator" style={{ top: `${activeIndicatorTop}px` }} />}
     </div>}
     {quickPreview && <div className="asset-gallery__quick-preview" style={quickPreviewLayout(quickPreview)}><img src={assetUrl(quickPreview.asset.id)} alt={`${quickPreview.asset.title || quickPreview.asset.originalName} 빠른 미리보기`} draggable={false} onError={cancelQuickPreview} /></div>}
   </div>;
@@ -324,12 +345,7 @@ function rowIndexAtContentOffset(rows: JustifiedRow<AssetSummary>[], gap: number
   return rows.length - 1;
 }
 
-function findActiveBucketIndex(buckets: AssetDateBucket[], rows: JustifiedRow<AssetSummary>[], gap: number, scrollTop: number, viewportHeight: number): number | null {
-  if (buckets.length === 0 || rows.length === 0) return null;
-  const row = rows[rowIndexAtContentOffset(rows, gap, scrollTop + Math.max(1, viewportHeight) / 2)];
-  if (!row || row.items.length === 0) return null;
-  const key = utcDayKey(row.items[Math.floor((row.items.length - 1) / 2)].collectedAt);
-  if (!key) return null;
+function newestBucketAtOrAfter(buckets: AssetDateBucket[], key: string): number {
   let low = 0;
   let high = buckets.length - 1;
   let newer = -1;
@@ -342,6 +358,16 @@ function findActiveBucketIndex(buckets: AssetDateBucket[], rows: JustifiedRow<As
       high = mid - 1;
     }
   }
+  return newer;
+}
+
+function findActiveBucketIndex(buckets: AssetDateBucket[], rows: JustifiedRow<AssetSummary>[], gap: number, scrollTop: number, viewportHeight: number): number | null {
+  if (buckets.length === 0 || rows.length === 0) return null;
+  const row = rows[rowIndexAtContentOffset(rows, gap, scrollTop + Math.max(1, viewportHeight) / 2)];
+  if (!row || row.items.length === 0) return null;
+  const key = isoDayKey(row.items[Math.floor((row.items.length - 1) / 2)].collectedAt);
+  if (!key) return null;
+  const newer = newestBucketAtOrAfter(buckets, key);
   return newer < 0 ? 0 : newer;
 }
 
@@ -430,15 +456,14 @@ function dateKey(value: string): string | null {
   return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
 }
 
-function utcDayKey(value: string): string | null {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+function isoDayKey(value: string): string | null {
+  const match = /^\d{4}-\d{2}-\d{2}/.exec(value);
+  return match ? match[0] : null;
 }
 
 function findRowIndexOfDate(rows: JustifiedRow<AssetSummary>[], date: string): number {
   for (let index = 0; index < rows.length; index += 1) {
-    if (rows[index].items.some((item) => utcDayKey(item.collectedAt) === date)) return index;
+    if (rows[index].items.some((item) => isoDayKey(item.collectedAt) === date)) return index;
   }
   return -1;
 }
