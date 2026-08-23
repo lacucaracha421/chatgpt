@@ -632,7 +632,7 @@ describe("App", () => {
         sort: "newest",
         randomPivot: null,
         after: null,
-        collectedFrom: null,
+        aroundDate: null,
         limit: 100,
       }),
     );
@@ -671,7 +671,7 @@ describe("App", () => {
       sort: "newest",
       randomPivot: null,
       after: null,
-      collectedFrom: null,
+      aroundDate: null,
       limit: 100,
     });
   });
@@ -718,7 +718,7 @@ describe("App", () => {
         sort: "newest",
         randomPivot: null,
         after: null,
-        collectedFrom: null,
+        aroundDate: null,
         limit: 100,
       }),
     );

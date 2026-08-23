@@ -18,6 +18,8 @@ const QUICK_PREVIEW_MARGIN = 12;
 
 type QuickPreviewState = { asset: AssetSummary; anchor: DOMRect };
 
+type GalleryJump = { date: string; ratio: number; token: number };
+
 type AssetGalleryProps = {
   items: AssetSummary[];
   dateBuckets?: AssetDateBucket[];
@@ -27,6 +29,10 @@ type AssetGalleryProps = {
   metadataVisible?: boolean;
   hasNextPage?: boolean;
   onLoadNextPage?: () => void;
+  hasPreviousPage?: boolean;
+  onLoadPrevPage?: () => void;
+  jumpTarget?: GalleryJump | null;
+  railInteractive?: boolean;
   onSelectionGesture?: (asset: AssetSummary, gesture: SelectionGesture) => void;
   onSelectAll?: () => void;
   onDeleteSelection?: () => void;
@@ -34,17 +40,19 @@ type AssetGalleryProps = {
   onMoveFocus?: (delta: number, extend: boolean) => void;
   onOpen?: (asset: AssetSummary) => void;
   onRetryVideo?: (asset: AssetSummary) => void;
-  onSelectDate?: (date: string | null) => void;
+  onSelectDate?: (date: string, ratio: number) => void;
   onPointerDragStart?: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => void;
   onPointerDragMove?: (event: React.PointerEvent<HTMLElement>) => void;
   onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void;
   onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void;
 };
 
-export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new Set(), focusAssetId = null, targetRowHeight = 180, metadataVisible = false, hasNextPage = false, onLoadNextPage, onSelectionGesture, onSelectAll, onDeleteSelection, onClearSelection, onMoveFocus, onOpen, onRetryVideo, onSelectDate, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
+export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new Set(), focusAssetId = null, targetRowHeight = 180, metadataVisible = false, hasNextPage = false, onLoadNextPage, hasPreviousPage = false, onLoadPrevPage, jumpTarget = null, railInteractive = true, onSelectionGesture, onSelectAll, onDeleteSelection, onClearSelection, onMoveFocus, onOpen, onRetryVideo, onSelectDate, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const focusRequestedRef = useRef(false);
   const quickPreviewTimerRef = useRef<number | null>(null);
+  const prependGuardRef = useRef({ pending: false, firstAssetId: null as string | null });
+  const jumpedTokenRef = useRef<number | null>(null);
   const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
   const [quickPreview, setQuickPreview] = useState<QuickPreviewState | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -73,7 +81,7 @@ export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new S
     }, QUICK_PREVIEW_DELAY_MS);
   };
   const scrollToPointer = (clientY: number) => {
-    const element = scrollRef.current; if (!element) return;
+    const element = scrollRef.current; if (!element || !railInteractive) return;
     const rect = element.getBoundingClientRect();
     if (rect.height <= 0) return;
     if (dateBuckets.length === 0) {
@@ -83,15 +91,57 @@ export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new S
     const ratio = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
     const bucketIndex = dateBuckets.length <= 1 ? 0 : Math.round(ratio * (dateBuckets.length - 1));
     const date = dateBuckets[bucketIndex]?.date;
-    if (date) onSelectDate?.(date);
+    if (date) onSelectDate?.(date, ratio);
   };
   useEffect(() => {
     const last = virtualRows[virtualRows.length - 1];
     if (hasNextPage && onLoadNextPage && last && last.index >= rows.length - NEXT_PAGE_THRESHOLD_ROWS) onLoadNextPage();
   }, [hasNextPage, onLoadNextPage, rows.length, virtualRows]);
+  useEffect(() => {
+    const first = virtualRows[0];
+    if (hasPreviousPage && onLoadPrevPage && first && first.index < NEXT_PAGE_THRESHOLD_ROWS) {
+      prependGuardRef.current.pending = true;
+      onLoadPrevPage();
+    }
+  }, [hasPreviousPage, onLoadPrevPage, virtualRows]);
   useEffect(() => () => {
     if (quickPreviewTimerRef.current !== null) window.clearTimeout(quickPreviewTimerRef.current);
   }, []);
+  useLayoutEffect(() => {
+    const element = scrollRef.current;
+    const guard = prependGuardRef.current;
+    if (element && guard.pending && guard.firstAssetId) {
+      const oldIndex = items.findIndex((item) => item.id === guard.firstAssetId);
+      if (oldIndex > 0) {
+        let rowIndex = 0;
+        let flat = 0;
+        while (rowIndex < rows.length && flat + rows[rowIndex].items.length <= oldIndex) {
+          flat += rows[rowIndex].items.length;
+          rowIndex += 1;
+        }
+        let insertedHeight = 0;
+        for (let index = 0; index < rowIndex; index += 1) insertedHeight += rows[index].height + gap;
+        element.scrollTop += insertedHeight;
+        setScrollTop(element.scrollTop);
+      }
+    }
+    guard.pending = false;
+    guard.firstAssetId = items[0]?.id ?? null;
+  }, [gap, items, rows]);
+  useLayoutEffect(() => {
+    if (!jumpTarget || jumpedTokenRef.current === jumpTarget.token) return;
+    const rowIndex = findRowIndexOfDate(rows, jumpTarget.date);
+    if (rowIndex < 0) return;
+    jumpedTokenRef.current = jumpTarget.token;
+    const element = scrollRef.current; if (!element) return;
+    let rowStart = 0;
+    for (let index = 0; index < rowIndex; index += 1) rowStart += rows[index].height + gap;
+    const viewport = element.clientHeight || height;
+    const ratio = Math.max(0, Math.min(1, jumpTarget.ratio));
+    const desired = rowStart + rows[rowIndex].height / 2 - ratio * viewport;
+    element.scrollTop = Math.max(0, Math.min(element.scrollHeight - viewport, desired));
+    setScrollTop(element.scrollTop);
+  }, [gap, height, jumpTarget, rows]);
   useLayoutEffect(() => {
     if (scrollRef.current && scrollRef.current.scrollTop !== scrollTop) {
       setScrollTop(scrollRef.current.scrollTop);
@@ -111,7 +161,7 @@ export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new S
       role="listbox"
       aria-label="자산"
       aria-multiselectable="true"
-      onScroll={(event) => { cancelQuickPreview(); setScrollTop(event.currentTarget.scrollTop); if (event.currentTarget.scrollTop <= 0 && onSelectDate) onSelectDate(""); }}
+      onScroll={(event) => { cancelQuickPreview(); setScrollTop(event.currentTarget.scrollTop); }}
       onClick={(event) => { if (!(event.target as HTMLElement).closest(".asset-gallery__asset")) onClearSelection?.(); }}
       onKeyDown={(event) => {
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
@@ -154,7 +204,7 @@ export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new S
           style={{ top: `${line.top}px` }}
           onPointerEnter={() => setHoveredLine({ key: line.key, index, top: line.top, label: line.label })}
           onPointerLeave={() => setHoveredLine((current) => current?.key === line.key ? null : current)}
-          onPointerDown={(event) => { if (event.button === 0) { event.stopPropagation(); onSelectDate?.(line.key); } }}
+          onPointerDown={(event) => { if (event.button === 0 && railInteractive) { event.stopPropagation(); onSelectDate?.(line.key, geometry.extent > 0 ? Math.max(0, Math.min(1, line.top / geometry.extent)) : 0.5); } }}
         />
       ))}
       {hoveredLine && <span className="asset-gallery__scrollbar-label" style={{ top: `${hoveredLine.top}px` }}>{hoveredLine.label}</span>}
@@ -340,6 +390,19 @@ function dateKey(value: string): string | null {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;
   return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
+}
+
+function utcDayKey(value: string): string | null {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+}
+
+function findRowIndexOfDate(rows: JustifiedRow<AssetSummary>[], date: string): number {
+  for (let index = 0; index < rows.length; index += 1) {
+    if (rows[index].items.some((item) => utcDayKey(item.collectedAt) === date)) return index;
+  }
+  return -1;
 }
 
 function dateLabel(key: string): string {

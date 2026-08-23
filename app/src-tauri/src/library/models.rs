@@ -204,7 +204,7 @@ pub struct SimilarityIndexProgress {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct AssetQuery {
     pub classification_id: Option<String>,
     pub album_id: Option<String>,
@@ -215,8 +215,9 @@ pub struct AssetQuery {
     pub sort: AssetSort,
     pub random_pivot: Option<String>,
     pub after: Option<AssetCursor>,
+    pub before: Option<AssetCursor>,
+    pub around_date: Option<String>,
     pub limit: u32,
-    pub collected_from: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -232,6 +233,8 @@ pub struct AssetClassificationPatch {
 pub struct AssetPage {
     pub items: Vec<AssetSummary>,
     pub next_cursor: Option<AssetCursor>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub previous_cursor: Option<AssetCursor>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

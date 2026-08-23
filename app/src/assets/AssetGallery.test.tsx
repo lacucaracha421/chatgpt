@@ -323,6 +323,60 @@ describe("AssetGallery", () => {
     const scrollbar = container.querySelector(".asset-gallery__scrollbar") as HTMLElement;
     expect(scrollbar).toBeInTheDocument();
   });
+
+  it("reports the clicked bucket date and viewport ratio from a scrollbar tick", async () => {
+    const onSelectDate = vi.fn();
+    const { container } = render(<AssetGallery
+      items={[
+        { ...asset(0), collectedAt: "2026-07-30T00:00:00Z" },
+        { ...asset(1), collectedAt: "2026-08-01T00:00:00Z" },
+      ]}
+      dateBuckets={[{ date: "2026-07-30", count: 1 }, { date: "2026-08-01", count: 1 }]}
+      onSelectDate={onSelectDate}
+    />);
+    await waitFor(() => expect(container.querySelector(".asset-gallery__scrollbar-line")).not.toBeNull());
+
+    const lines = container.querySelectorAll(".asset-gallery__scrollbar-line");
+    fireEvent.pointerDown(lines[1]!, { button: 0, pointerId: 1 });
+
+    expect(onSelectDate).toHaveBeenCalledTimes(1);
+    const [date, ratio] = onSelectDate.mock.calls[0]!;
+    expect(date).toBe("2026-08-01");
+    expect(ratio).toBeGreaterThan(0);
+    expect(ratio).toBeLessThanOrEqual(1);
+  });
+
+  it("ignores rail clicks when the rail is not interactive", async () => {
+    const onSelectDate = vi.fn();
+    const { container } = render(<AssetGallery
+      items={[
+        { ...asset(0), collectedAt: "2026-07-30T00:00:00Z" },
+        { ...asset(1), collectedAt: "2026-08-01T00:00:00Z" },
+      ]}
+      dateBuckets={[{ date: "2026-07-30", count: 1 }, { date: "2026-08-01", count: 1 }]}
+      railInteractive={false}
+      onSelectDate={onSelectDate}
+    />);
+    await waitFor(() => expect(container.querySelector(".asset-gallery__scrollbar-line")).not.toBeNull());
+
+    fireEvent.pointerDown(container.querySelector(".asset-gallery__scrollbar-line")!, { button: 0, pointerId: 1 });
+
+    expect(onSelectDate).not.toHaveBeenCalled();
+  });
+
+  it("requests older pages while an upward page remains available", async () => {
+    const onLoadPrevPage = vi.fn();
+    render(<AssetGallery items={[asset(0), asset(1)]} hasPreviousPage onLoadPrevPage={onLoadPrevPage} />);
+
+    await waitFor(() => expect(onLoadPrevPage).toHaveBeenCalled());
+  });
+
+  it("does not request older pages without a previous cursor", () => {
+    const onLoadPrevPage = vi.fn();
+    render(<AssetGallery items={[asset(0), asset(1)]} onLoadPrevPage={onLoadPrevPage} />);
+
+    expect(onLoadPrevPage).not.toHaveBeenCalled();
+  });
 });
 
 function asset(index: number): AssetSummary { return { id: `asset-${index}`, title: null, originalName: `asset-${index}.png`, byteSize: 1, width: 200, height: 200, collectedAt: "2026-07-30T00:00:00Z", favorite: false, sourceUrl: null, sourcePublishedAt: null, creatorName: null, creatorHandle: null, creatorUrl: null, importSource: null, importBatchId: null, originalModifiedAt: null, media: { kind: "image" } }; }

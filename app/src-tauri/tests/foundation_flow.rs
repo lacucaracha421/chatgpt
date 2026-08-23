@@ -124,6 +124,7 @@ impl FoundationFixture {
                 random_pivot: None,
                 after: None,
                 limit: 100,
+                ..Default::default()
             })
             .unwrap()
     }
@@ -867,6 +868,7 @@ fn asset_query(
         random_pivot: random_pivot.map(str::to_owned),
         after: None,
         limit,
+        ..Default::default()
     }
 }
 

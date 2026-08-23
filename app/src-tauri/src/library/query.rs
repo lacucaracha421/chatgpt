@@ -40,6 +40,51 @@ struct AssetRow {
     random_bucket: Option<i64>,
 }
 
+/// One ascending half-page shared by oldest-first paging, anchor heads/tails,
+/// and upward (before-cursor) pagination in a newest-first listing.
+/// `?1..?5` scope, `?6`/`?7` exclusive cursor tuple, `?8` inclusive date bound,
+/// `?9` collection scope, `?10` limit + 1.
+const CHRONO_ASC_HALF_SQL: &str = "WITH RECURSIVE descendants(id) AS (
+    SELECT ?1 WHERE ?1 IS NOT NULL
+    UNION ALL SELECT entry.id FROM classification_entries AS entry JOIN descendants ON entry.parent_id = descendants.id
+) , album_descendants(id) AS (
+    SELECT ?5 WHERE ?5 IS NOT NULL
+    UNION ALL SELECT child.id FROM albums AS child JOIN album_descendants ON child.parent_id = album_descendants.id
+) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url,
+asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count,
+asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url,
+asset.import_source, asset.import_batch_id, asset.original_modified_at
+FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
+WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
+AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
+AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
+AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
+AND (?9 IS NULL OR EXISTS (SELECT 1 FROM collection_assets AS collection_link WHERE collection_link.asset_id = asset.id AND collection_link.collection_id = ?9))
+AND (?6 IS NULL OR asset.collected_at > ?6 OR (asset.collected_at = ?6 AND asset.id > ?7))
+AND (?8 IS NULL OR asset.collected_at >= ?8)
+ORDER BY asset.collected_at ASC, asset.id ASC LIMIT ?10";
+
+/// The descending mirror of CHRONO_ASC_HALF_SQL: newest-first pages,
+/// anchor tails/heads, and upward pagination in an oldest-first listing.
+const CHRONO_DESC_HALF_SQL: &str = "WITH RECURSIVE descendants(id) AS (
+    SELECT ?1 WHERE ?1 IS NOT NULL
+    UNION ALL SELECT entry.id FROM classification_entries AS entry JOIN descendants ON entry.parent_id = descendants.id
+) , album_descendants(id) AS (
+    SELECT ?5 WHERE ?5 IS NOT NULL
+    UNION ALL SELECT child.id FROM albums AS child JOIN album_descendants ON child.parent_id = album_descendants.id
+) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url,
+asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count,
+asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url,
+asset.import_source, asset.import_batch_id, asset.original_modified_at
+FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
+WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
+AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
+AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
+AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
+AND (?9 IS NULL OR EXISTS (SELECT 1 FROM collection_assets AS collection_link WHERE collection_link.asset_id = asset.id AND collection_link.collection_id = ?9))
+AND (?6 IS NULL OR asset.collected_at < ?6 OR (asset.collected_at = ?6 AND asset.id < ?7))
+AND (?8 IS NULL OR asset.collected_at < ?8)
+ORDER BY asset.collected_at DESC, asset.id DESC LIMIT ?10";
 impl Library {
     pub fn list_assets(&self, query: AssetQuery) -> Result<AssetPage, LibraryError> {
         if !(1..=200).contains(&query.limit) {
@@ -89,11 +134,28 @@ impl Library {
                 return Err(LibraryError::CollectionNotFound);
             }
         }
+        if query.after.is_some() && (query.before.is_some() || query.around_date.is_some()) {
+            return Err(LibraryError::InvalidAssetCursor);
+        }
+        match query.sort {
+            AssetSort::Newest | AssetSort::Oldest => {}
+            AssetSort::Favorites | AssetSort::Random => {
+                if query.before.is_some() || query.around_date.is_some() {
+                    return Err(LibraryError::InvalidAssetCursor);
+                }
+            }
+        }
+        if let Some(date) = query.around_date.as_deref() {
+            return self.anchor_asset_page(&connection, &query, date);
+        }
+        if let Some(cursor) = query.before.as_ref() {
+            return self.asset_page_before(&connection, &query, cursor);
+        }
         let cursor = decode_cursor(&query)?;
         let random_pivot = query.random_pivot.as_deref().unwrap_or("");
         let mut statement = connection.prepare(match query.sort {
-            AssetSort::Newest => NEWEST_SQL,
-            AssetSort::Oldest => OLDEST_SQL,
+            AssetSort::Newest => CHRONO_DESC_HALF_SQL,
+            AssetSort::Oldest => CHRONO_ASC_HALF_SQL,
             AssetSort::Favorites => FAVORITES_SQL,
             AssetSort::Random => RANDOM_SQL,
         })?;
@@ -108,9 +170,9 @@ impl Library {
                     query.album_id.as_deref(),
                     collected_at,
                     id,
-                    i64::from(query.limit) + 1,
+                    None::<String>,
                     query.collection_id.as_deref(),
-                    query.collected_from.as_deref(),
+                    i64::from(query.limit) + 1,
                 ])?
             }
             AssetSort::Oldest => {
@@ -123,9 +185,9 @@ impl Library {
                     query.album_id.as_deref(),
                     collected_at,
                     id,
-                    i64::from(query.limit) + 1,
+                    None::<String>,
                     query.collection_id.as_deref(),
-                    query.collected_from.as_deref(),
+                    i64::from(query.limit) + 1,
                 ])?
             }
             AssetSort::Favorites => {
@@ -176,6 +238,99 @@ impl Library {
         Ok(AssetPage {
             items: items.into_iter().map(|asset| asset.summary).collect(),
             next_cursor,
+            previous_cursor: None,
+        })
+    }
+
+    /// Loads one window centered on a date: the half page adjacent above the
+    /// boundary plus the half page starting at it, in display order, with
+    /// cursors for continuing both upward and downward.
+    fn anchor_asset_page(
+        &self,
+        connection: &rusqlite::Connection,
+        query: &AssetQuery,
+        date: &str,
+    ) -> Result<AssetPage, LibraryError> {
+        let bound = anchor_bound(query.sort, date)?;
+        let half = (query.limit as usize).max(2) / 2;
+        let fetch = i64::try_from(half + 1).map_err(|_| LibraryError::InvalidAssetPageLimit)?;
+        // Head half: the page adjacent above the boundary (fetched toward the
+        // boundary, then reversed into display order). Tail half: the page
+        // starting at the boundary in display order.
+        let (head_sql, tail_sql) = match query.sort {
+            AssetSort::Oldest => (CHRONO_DESC_HALF_SQL, CHRONO_ASC_HALF_SQL),
+            _ => (CHRONO_ASC_HALF_SQL, CHRONO_DESC_HALF_SQL),
+        };
+        let mut head =
+            run_chronological_page(connection, head_sql, query, None, Some(&bound), fetch)?;
+        let has_more_up = head.len() > half;
+        head.truncate(half);
+        head.reverse();
+        let mut tail =
+            run_chronological_page(connection, tail_sql, query, None, Some(&bound), fetch)?;
+        let has_more_down = tail.len() > half;
+        tail.truncate(half);
+        let mut items: Vec<AssetSummary> = head.into_iter().map(|row| row.summary).collect();
+        items.extend(tail.iter().map(|row| row.summary.clone()));
+        let previous_cursor = has_more_up.then(|| {
+            encode_cursor(
+                query.sort,
+                &chrono_row(items.first().expect("more-up implies a first item")),
+                "",
+            )
+        });
+        let next_cursor = (has_more_down && !tail.is_empty())
+            .then(|| encode_cursor(query.sort, &tail.last().expect("tail keeps its last item"), ""));
+        Ok(AssetPage {
+            items,
+            next_cursor,
+            previous_cursor,
+        })
+    }
+
+    /// Loads the page immediately preceding `cursor` in display order.
+    fn asset_page_before(
+        &self,
+        connection: &rusqlite::Connection,
+        query: &AssetQuery,
+        cursor: &AssetCursor,
+    ) -> Result<AssetPage, LibraryError> {
+        let payload = decode_side_cursor(query, cursor)?;
+        let (collected_at, id) = match &payload {
+            CursorPayload::Newest { collected_at, id }
+            | CursorPayload::Oldest { collected_at, id } => {
+                (collected_at.as_str(), id.as_str())
+            }
+            _ => return Err(LibraryError::InvalidAssetCursor),
+        };
+        let limit_plus = i64::from(query.limit) + 1;
+        let sql = match query.sort {
+            AssetSort::Oldest => CHRONO_DESC_HALF_SQL,
+            _ => CHRONO_ASC_HALF_SQL,
+        };
+        let mut rows = run_chronological_page(
+            connection,
+            sql,
+            query,
+            Some((collected_at, id)),
+            None,
+            limit_plus,
+        )?;
+        let has_more_up = rows.len() > query.limit as usize;
+        rows.truncate(query.limit as usize);
+        rows.reverse();
+        let items: Vec<AssetSummary> = rows.into_iter().map(|row| row.summary).collect();
+        let previous_cursor = has_more_up.then(|| {
+            encode_cursor(
+                query.sort,
+                &chrono_row(items.first().expect("more-up implies a first item")),
+                "",
+            )
+        });
+        Ok(AssetPage {
+            items,
+            next_cursor: None,
+            previous_cursor,
         })
     }
 
@@ -233,6 +388,72 @@ fn decode_cursor(query: &AssetQuery) -> Result<Option<CursorPayload>, LibraryErr
     } else {
         Err(LibraryError::InvalidAssetCursor)
     }
+}
+
+fn decode_side_cursor(
+    query: &AssetQuery,
+    cursor: &AssetCursor,
+) -> Result<CursorPayload, LibraryError> {
+    let payload = serde_json::from_str::<CursorPayload>(&cursor.token)
+        .map_err(|_| LibraryError::InvalidAssetCursor)?;
+    let expected = matches!(
+        (&query.sort, &payload),
+        (AssetSort::Newest, CursorPayload::Newest { .. })
+            | (AssetSort::Oldest, CursorPayload::Oldest { .. })
+    );
+    if expected {
+        Ok(payload)
+    } else {
+        Err(LibraryError::InvalidAssetCursor)
+    }
+}
+
+/// The display-order boundary just before `date`: everything at or after the
+/// bound belongs to the tail half of an anchor window.
+fn anchor_bound(sort: AssetSort, date: &str) -> Result<String, LibraryError> {
+    let day =
+        chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").map_err(|_| LibraryError::InvalidAssetCursor)?;
+    Ok(match sort {
+        AssetSort::Oldest => day.format("%Y-%m-%d").to_string(),
+        _ => (day + chrono::Duration::days(1)).format("%Y-%m-%d").to_string(),
+    })
+}
+
+fn chrono_row(summary: &AssetSummary) -> AssetRow {
+    AssetRow {
+        summary: summary.clone(),
+        content_hash: None,
+        random_bucket: None,
+    }
+}
+
+fn run_chronological_page(
+    connection: &rusqlite::Connection,
+    sql: &str,
+    query: &AssetQuery,
+    cursor: Option<(&str, &str)>,
+    bound: Option<&str>,
+    limit_plus: i64,
+) -> Result<Vec<AssetRow>, LibraryError> {
+    let (collected_at, id) = cursor.map_or((None, None), |(at, asset_id)| (Some(at), Some(asset_id)));
+    let mut statement = connection.prepare(sql)?;
+    let mut rows = statement.query(params![
+        query.classification_id.as_deref(),
+        query.direct_only,
+        query.favorite_only,
+        query.unclassified_only,
+        query.album_id.as_deref(),
+        collected_at,
+        id,
+        bound,
+        query.collection_id.as_deref(),
+        limit_plus,
+    ])?;
+    let mut items = Vec::new();
+    while let Some(row) = rows.next()? {
+        items.push(asset_row(row, false)?);
+    }
+    Ok(items)
 }
 
 fn collected_at_and_id(cursor: &Option<CursorPayload>) -> (Option<&str>, Option<&str>) {
@@ -359,46 +580,6 @@ fn encode_cursor(sort: AssetSort, asset: &AssetRow, random_pivot: &str) -> Asset
     }
 }
 
-const NEWEST_SQL: &str = "WITH RECURSIVE descendants(id) AS (
-    SELECT ?1 WHERE ?1 IS NOT NULL
-    UNION ALL SELECT entry.id FROM classification_entries AS entry JOIN descendants ON entry.parent_id = descendants.id
-) , album_descendants(id) AS (
-    SELECT ?5 WHERE ?5 IS NOT NULL
-    UNION ALL SELECT child.id FROM albums AS child JOIN album_descendants ON child.parent_id = album_descendants.id
-) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url,
-asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count,
-asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url,
-asset.import_source, asset.import_batch_id, asset.original_modified_at
-FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
-WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
-AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
-AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
-AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
-AND (?9 IS NULL OR EXISTS (SELECT 1 FROM collection_assets AS collection_link WHERE collection_link.asset_id = asset.id AND collection_link.collection_id = ?9))
-AND (?10 IS NULL OR asset.collected_at >= ?10)
-AND (?6 IS NULL OR asset.collected_at < ?6 OR (asset.collected_at = ?6 AND asset.id < ?7))
-ORDER BY asset.collected_at DESC, asset.id DESC LIMIT ?8";
-
-const OLDEST_SQL: &str = "WITH RECURSIVE descendants(id) AS (
-    SELECT ?1 WHERE ?1 IS NOT NULL
-    UNION ALL SELECT entry.id FROM classification_entries AS entry JOIN descendants ON entry.parent_id = descendants.id
-) , album_descendants(id) AS (
-    SELECT ?5 WHERE ?5 IS NOT NULL
-    UNION ALL SELECT child.id FROM albums AS child JOIN album_descendants ON child.parent_id = album_descendants.id
-) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url,
-asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count,
-asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url,
-asset.import_source, asset.import_batch_id, asset.original_modified_at
-FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
-WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
-AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
-AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
-AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
-AND (?9 IS NULL OR EXISTS (SELECT 1 FROM collection_assets AS collection_link WHERE collection_link.asset_id = asset.id AND collection_link.collection_id = ?9))
-AND (?10 IS NULL OR asset.collected_at >= ?10)
-AND (?6 IS NULL OR asset.collected_at > ?6 OR (asset.collected_at = ?6 AND asset.id > ?7))
-ORDER BY asset.collected_at ASC, asset.id ASC LIMIT ?8";
-
 const FAVORITES_SQL: &str = "WITH RECURSIVE descendants(id) AS (
     SELECT ?1 WHERE ?1 IS NOT NULL
     UNION ALL SELECT entry.id FROM classification_entries AS entry JOIN descendants ON entry.parent_id = descendants.id
@@ -460,7 +641,7 @@ mod tests {
     use crate::library::{
         error::LibraryError,
         models::{
-            AssetAlbumPatch, AssetClassificationPatch, AssetCollectionPatch, AssetCursor,
+            AssetAlbumPatch, AssetClassificationPatch, AssetCollectionPatch, AssetCursor, AssetPage,
             AssetQuery, AssetSort, ClassificationKind, CollectionType, CreateAlbum,
             CreateClassification, CreateCollection, ImportSource, MediaSummary,
             VideoPreparationState,
@@ -1002,6 +1183,276 @@ mod tests {
             ["asset-a"]
         );
         assert!(second.next_cursor.is_none());
+    }
+
+    fn chrono_query(sort: AssetSort) -> AssetQuery {
+        AssetQuery {
+            classification_id: None,
+            album_id: None,
+            collection_id: None,
+            direct_only: false,
+            favorite_only: false,
+            unclassified_only: false,
+            sort,
+            random_pivot: None,
+            after: None,
+            limit: 100,
+            ..Default::default()
+        }
+    }
+
+    fn ids(page: &AssetPage) -> Vec<&str> {
+        page.items.iter().map(|asset| asset.id.as_str()).collect()
+    }
+
+    #[test]
+    fn anchor_query_loads_assets_on_both_sides_of_the_target_date() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        insert_asset(&library, "n1", "2026-08-01T09:00:00Z");
+        insert_asset(&library, "o1", "2026-07-31T13:00:00Z");
+        insert_asset(&library, "o2", "2026-07-31T12:00:00Z");
+        insert_asset(&library, "o3", "2026-07-31T11:00:00Z");
+        insert_asset(&library, "p1", "2026-07-30T15:00:00Z");
+        insert_asset(&library, "p2", "2026-07-30T10:00:00Z");
+        insert_asset(&library, "q1", "2026-07-29T08:00:00Z");
+
+        let mut query = chrono_query(AssetSort::Newest);
+        query.limit = 6;
+        query.around_date = Some("2026-07-31".into());
+        let window = library.list_assets(query.clone()).unwrap();
+
+        // Half window is 3: head keeps [n1] (fewer newer assets exist), tail
+        // starts at the boundary with the three newest 07-31 assets.
+        assert_eq!(ids(&window), ["n1", "o1", "o2", "o3"]);
+        assert!(window.previous_cursor.is_none());
+        assert!(window.next_cursor.is_some());
+    }
+
+    #[test]
+    fn anchor_window_paginates_in_both_directions_without_gaps_or_overlap() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        for day in 26..=31 {
+            for slot in 0..4i32 {
+                insert_asset(
+                    &library,
+                    &format!("a{day}-{slot}"),
+                    &format!("2026-07-{day:02}T{slot:02}:00:00Z"),
+                );
+            }
+        }
+        // 24 assets from 07-26 to 07-31. Display order (newest first) is the
+        // exact reverse of insertion order.
+
+        let mut query = chrono_query(AssetSort::Newest);
+        query.limit = 8;
+        query.around_date = Some("2026-07-29".into());
+        let anchor = library.list_assets(query.clone()).unwrap();
+        assert_eq!(anchor.items.len(), 8);
+        assert!(anchor.previous_cursor.is_some());
+        assert!(anchor.next_cursor.is_some());
+
+        // Walk upward to the very top.
+        let mut upward = Vec::new();
+        let mut cursor = anchor.previous_cursor.clone();
+        while let Some(token) = cursor {
+            query.after = None;
+            query.before = Some(token);
+            query.around_date = None;
+            let page = library.list_assets(query.clone()).unwrap();
+            let reached_top = page.previous_cursor.is_none();
+            upward.extend(page.items.iter().map(|asset| asset.id.clone()));
+            cursor = page.previous_cursor;
+            if reached_top {
+                break;
+            }
+        }
+
+        // Walk downward to the very bottom.
+        let mut downward = Vec::new();
+        let mut cursor = anchor.next_cursor.clone();
+        while let Some(token) = cursor {
+            query.before = None;
+            query.after = Some(token);
+            let page = library.list_assets(query.clone()).unwrap();
+            downward.extend(page.items.iter().map(|asset| asset.id.clone()));
+            cursor = page.next_cursor;
+        }
+
+        let expected: Vec<String> = library
+            .list_assets(chrono_query(AssetSort::Newest))
+            .unwrap()
+            .items
+            .into_iter()
+            .map(|asset| asset.id)
+            .collect();
+        let mut combined = upward;
+        combined.extend(anchor.items.iter().map(|asset| asset.id.clone()));
+        combined.extend(downward);
+        assert_eq!(combined, expected);
+    }
+
+    #[test]
+    fn anchor_window_works_for_oldest_sort_and_keeps_display_order() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        insert_asset(&library, "old", "2026-07-28T09:00:00Z");
+        insert_asset(&library, "d1", "2026-07-29T10:00:00Z");
+        insert_asset(&library, "d2", "2026-07-29T11:00:00Z");
+        insert_asset(&library, "d3", "2026-07-29T12:00:00Z");
+        insert_asset(&library, "new1", "2026-07-30T09:00:00Z");
+        insert_asset(&library, "new2", "2026-07-30T10:00:00Z");
+
+        let mut query = chrono_query(AssetSort::Oldest);
+        query.limit = 6;
+        query.around_date = Some("2026-07-30".into());
+        let window = library.list_assets(query.clone()).unwrap();
+
+        // Oldest display order is ascending; the boundary sits at day start,
+        // so the head keeps the three newest pre-day assets and the tail the
+        // two assets of 07-30.
+        assert_eq!(ids(&window), ["d1", "d2", "d3", "new1", "new2"]);
+        assert!(window.previous_cursor.is_some());
+        assert!(window.next_cursor.is_none());
+
+        query.before = window.previous_cursor.clone();
+        query.around_date = None;
+        let head = library.list_assets(query).unwrap();
+        assert_eq!(ids(&head), ["old"]);
+        assert!(head.previous_cursor.is_none());
+    }
+
+    #[test]
+    fn identical_timestamps_keep_stable_order_across_anchor_pages() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        insert_asset(&library, "u1", "2026-07-31T11:00:00Z");
+        insert_asset(&library, "u2", "2026-07-31T12:00:00Z");
+        insert_asset(&library, "u3", "2026-07-31T13:00:00Z");
+        insert_asset(&library, "top", "2026-07-31T09:00:00Z");
+        insert_asset(&library, "t1", "2026-07-30T00:00:00Z");
+        insert_asset(&library, "t2", "2026-07-30T00:00:00Z");
+        insert_asset(&library, "t3", "2026-07-30T00:00:00Z");
+        insert_asset(&library, "bottom", "2026-07-29T09:00:00Z");
+
+        let mut query = chrono_query(AssetSort::Newest);
+        query.limit = 4;
+        query.around_date = Some("2026-07-30".into());
+        let window = library.list_assets(query.clone()).unwrap();
+
+        // Newest-first display: u3,u2,u1,top | t3,t2,t1,bottom. The window
+        // keeps the two assets adjacent above the 07-31/07-30 boundary and
+        // the first two below it, with cursors for both directions.
+        assert_eq!(ids(&window), ["u1", "top", "t3", "t2"]);
+        assert!(window.previous_cursor.is_some());
+        assert!(window.next_cursor.is_some());
+
+        query.before = window.previous_cursor.clone();
+        query.around_date = None;
+        let head = library.list_assets(query.clone()).unwrap();
+        assert_eq!(ids(&head), ["u3", "u2"]);
+        assert!(head.previous_cursor.is_none());
+
+        query.after = window.next_cursor;
+        query.before = None;
+        let tail = library.list_assets(query).unwrap();
+        assert_eq!(ids(&tail), ["t1", "bottom"]);
+        assert!(tail.next_cursor.is_none());
+
+        // Oldest sort mirrors the behavior with the boundary at day start.
+        let mut query = chrono_query(AssetSort::Oldest);
+        query.limit = 4;
+        query.around_date = Some("2026-07-31".into());
+        let oldest_window = library.list_assets(query.clone()).unwrap();
+        // Head keeps the two assets adjacent below 07-31 (reversed), tail the
+        // two oldest 07-31 assets.
+        assert_eq!(ids(&oldest_window), ["t2", "t3", "top", "u1"]);
+        assert!(oldest_window.previous_cursor.is_some());
+        assert!(oldest_window.next_cursor.is_some());
+        query.before = oldest_window.previous_cursor;
+        query.around_date = None;
+        let oldest_head = library.list_assets(query).unwrap();
+        assert_eq!(ids(&oldest_head), ["bottom", "t1"]);
+    }
+
+    #[test]
+    fn scope_filters_apply_to_anchor_and_before_pagination() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let root = classification(&library, ClassificationKind::Root, "게임", None);
+        let work = classification(
+            &library,
+            ClassificationKind::Work,
+            "블루 아카이브",
+            Some(root.id.clone()),
+        );
+        let timestamps = [
+            ("in-top", "2026-08-01T11:00:00Z"),
+            ("in-newest", "2026-08-01T10:00:00Z"),
+            ("in-newer", "2026-08-01T09:00:00Z"),
+            ("in-day", "2026-07-30T00:00:00Z"),
+            ("in-older", "2026-07-29T00:00:00Z"),
+            ("out-day", "2026-07-30T12:00:00Z"),
+        ];
+        for (id, collected_at) in timestamps {
+            insert_asset(&library, id, collected_at);
+        }
+        library
+            .patch_asset_classifications(AssetClassificationPatch {
+                asset_ids: vec![
+                    "in-top".into(),
+                    "in-newest".into(),
+                    "in-newer".into(),
+                    "in-day".into(),
+                    "in-older".into(),
+                ],
+                add_classification_ids: vec![work.id.clone()],
+                remove_classification_ids: vec![],
+            })
+            .unwrap();
+
+        let mut query = chrono_query(AssetSort::Newest);
+        query.limit = 4;
+        query.classification_id = Some(work.id.clone());
+        query.around_date = Some("2026-07-30".into());
+        // Half window is 2 and the untagged asset stays out of both halves.
+        let window = library.list_assets(query.clone()).unwrap();
+        assert_eq!(ids(&window), ["in-newest", "in-newer", "in-day", "in-older"]);
+        assert!(window.previous_cursor.is_some());
+        assert!(window.next_cursor.is_none());
+
+        query.before = window.previous_cursor;
+        query.around_date = None;
+        let head = library.list_assets(query).unwrap();
+        assert_eq!(ids(&head), ["in-top"]);
+    }
+
+    #[test]
+    fn anchor_rejects_invalid_dates_and_non_chronological_sorts() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+
+        let mut query = chrono_query(AssetSort::Newest);
+        query.around_date = Some("not-a-date".into());
+        assert!(matches!(
+            library.list_assets(query.clone()),
+            Err(LibraryError::InvalidAssetCursor)
+        ));
+
+        query.sort = AssetSort::Favorites;
+        query.around_date = Some("2026-07-30".into());
+        assert!(matches!(
+            library.list_assets(query.clone()),
+            Err(LibraryError::InvalidAssetCursor)
+        ));
+
+        query.sort = AssetSort::Random;
+        query.random_pivot = Some(hash('a'));
+        assert!(matches!(
+            library.list_assets(query),
+            Err(LibraryError::InvalidAssetCursor)
+        ));
     }
 
     #[test]

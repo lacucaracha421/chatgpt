@@ -397,13 +397,15 @@ export type AssetQuery = {
   sort: AssetSort;
   randomPivot: string | null;
   after: AssetCursor | null;
+  before?: AssetCursor | null;
+  aroundDate?: string | null;
   limit: number;
-  collectedFrom: string | null;
 };
 
 export type AssetPage = {
   items: AssetSummary[];
   nextCursor: AssetCursor | null;
+  previousCursor?: AssetCursor | null;
 };
 
 export type AssetDateBucket = {

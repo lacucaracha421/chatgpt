@@ -17,8 +17,9 @@ import { applySelectionGesture, emptySelection, moveSelectionFocus, reconcileSel
 
 export type AssetBrowserStatus = { loadedCount: number; selectedAsset: AssetSummary | null; loading: boolean };
 type Props = { view: AssetView; classifications: ClassificationEntry[]; albums?: AlbumEntry[]; collections?: CollectionSummary[]; onCollectionsChanged?: () => void; sort: AssetSort; metadataVisible: boolean; thumbnailRowHeight?: number; refreshVersion: number; requestedAsset?: AssetSummary | null; onRequestedAssetHandled?: () => void; onSortChange: (sort: AssetSort) => void; onMetadataVisibleChange: (visible: boolean) => void; onThumbnailRowHeightChange?: (height: number) => void; onStatusChange: (status: AssetBrowserStatus) => void; onPointerDragStart?: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => void; onPointerDragMove?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void };
-type PageState = { queryKey: string; items: AssetSummary[]; nextCursor: AssetCursor | null };
+type PageState = { queryKey: string; items: AssetSummary[]; headCursor: AssetCursor | null; tailCursor: AssetCursor | null };
 type QueryError = { queryKey: string; message: string };
+export type GalleryJump = { date: string; ratio: number; token: number };
 const EMPTY_ASSETS: AssetSummary[] = [];
 
 export function AssetBrowser({ view, classifications, albums = [], collections = [], onCollectionsChanged = () => undefined, sort, metadataVisible, thumbnailRowHeight = 180, refreshVersion, requestedAsset = null, onRequestedAssetHandled = () => undefined, onSortChange, onMetadataVisibleChange, onThumbnailRowHeightChange = () => undefined, onStatusChange, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: Props) {
@@ -27,8 +28,10 @@ export function AssetBrowser({ view, classifications, albums = [], collections =
   const [page, setPage] = useState<PageState | null>(null);
   const [firstLoading, setFirstLoading] = useState(true);
   const [nextLoading, setNextLoading] = useState(false);
+  const [prevLoading, setPrevLoading] = useState(false);
   const [firstError, setFirstError] = useState<QueryError | null>(null);
   const [nextError, setNextError] = useState<QueryError | null>(null);
+  const [prevError, setPrevError] = useState<QueryError | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [retryVersion, setRetryVersion] = useState(0);
   const [randomVersion, setRandomVersion] = useState(0);
@@ -40,7 +43,8 @@ export function AssetBrowser({ view, classifications, albums = [], collections =
   const [membershipVersion, setMembershipVersion] = useState(0);
   const [undoAssetIds, setUndoAssetIds] = useState<string[] | null>(null);
   const [dateBuckets, setDateBuckets] = useState<AssetDateBucket[]>([]);
-  const [collectedFrom, setCollectedFrom] = useState<string | null>(null);
+  const [anchor, setAnchor] = useState<string | null>(null);
+  const [jumpTarget, setJumpTarget] = useState<GalleryJump | null>(null);
   const dismissMessage = useCallback((value: null) => { setMessage(value); setUndoAssetIds(null); }, []);
   useAutoDismiss(message, dismissMessage);
   const selectedViewKeyRef = useRef<string | null>(null);
@@ -49,27 +53,37 @@ export function AssetBrowser({ view, classifications, albums = [], collections =
   requestedAssetRef.current = requestedAsset;
   const generationRef = useRef(0);
   const nextLoadingRef = useRef(false);
+  const prevLoadingRef = useRef(false);
   const randomPivotRef = useRef<string | null>(null);
-  const effectiveSort = collectedFrom != null ? "oldest" : view.kind === "recent" ? "newest" : sort;
+  const [anchorViewKey, setAnchorViewKey] = useState<string | null>(null);
+  const effectiveSort = view.kind === "recent" ? "newest" : sort;
+  const chronological = effectiveSort === "newest" || effectiveSort === "oldest";
   if (effectiveSort === "random" && !randomPivotRef.current) randomPivotRef.current = createRandomPivot();
   useEffect(() => { if (effectiveSort !== "random") randomPivotRef.current = null; }, [effectiveSort]);
   useEffect(() => { if (view.kind !== "classification") setDirectOnly(false); }, [view.kind]);
-  const queryBase = useMemo<Omit<AssetQuery, "after">>(() => ({ classificationId: view.kind === "classification" ? view.classificationId : null, albumId: view.kind === "album" ? view.albumId : null, collectionId: view.kind === "collection" ? view.collectionId : null, directOnly: view.kind === "classification" ? directOnly : false, favoriteOnly: view.kind === "favorites", unclassifiedOnly: view.kind === "unsorted", sort: effectiveSort, randomPivot: effectiveSort === "random" ? randomPivotRef.current : null, limit: ASSET_PAGE_SIZE, collectedFrom }), [collectedFrom, directOnly, effectiveSort, randomVersion, view]);
+  const queryBase = useMemo<Omit<AssetQuery, "after">>(() => ({ classificationId: view.kind === "classification" ? view.classificationId : null, albumId: view.kind === "album" ? view.albumId : null, collectionId: view.kind === "collection" ? view.collectionId : null, directOnly: view.kind === "classification" ? directOnly : false, favoriteOnly: view.kind === "favorites", unclassifiedOnly: view.kind === "unsorted", sort: effectiveSort, randomPivot: effectiveSort === "random" ? randomPivotRef.current : null, limit: ASSET_PAGE_SIZE }), [directOnly, effectiveSort, randomVersion, view]);
   const queryKey = JSON.stringify(queryBase);
   const viewKey = view.kind === "classification" ? `classification:${view.classificationId}` : view.kind === "album" ? `album:${view.albumId}` : view.kind === "collection" ? `collection:${view.collectionId}` : view.kind;
+  const effectiveAnchor = anchor !== null && anchorViewKey === viewKey ? anchor : null;
+  const anchorRef = useRef<string | null>(effectiveAnchor);
+  anchorRef.current = effectiveAnchor;
   const activePage = page?.queryKey === queryKey ? page : null;
   const items = activePage?.items ?? EMPTY_ASSETS;
   const itemIds = useMemo(() => items.map((asset) => asset.id), [items]);
-  const nextCursor = activePage?.nextCursor ?? null;
+  const headCursor = activePage?.headCursor ?? null;
+  const tailCursor = activePage?.tailCursor ?? null;
   const currentFirstError = firstError?.queryKey === queryKey ? firstError.message : null;
   const currentNextError = nextError?.queryKey === queryKey ? nextError.message : null;
+  const currentPrevError = prevError?.queryKey === queryKey ? prevError.message : null;
   const refresh = useCallback(() => setRetryVersion((value) => value + 1), []);
   useEffect(() => {
     const generation = ++generationRef.current;
-    nextLoadingRef.current = false; setFirstLoading(true); setNextLoading(false); setFirstError(null); setNextError(null);
-    void gateway.listAssets({ ...queryBase, after: null }).then((result) => {
+    nextLoadingRef.current = false; prevLoadingRef.current = false; setFirstLoading(true); setNextLoading(false); setPrevLoading(false); setFirstError(null); setNextError(null); setPrevError(null);
+    const anchorDate = anchorRef.current;
+    const request = anchorDate ? { ...queryBase, after: null, aroundDate: anchorDate } : { ...queryBase, after: null, aroundDate: null };
+    void gateway.listAssets(request).then((result) => {
       if (generation !== generationRef.current) return;
-      setPage({ queryKey, items: result.items, nextCursor: result.nextCursor });
+      setPage({ queryKey, items: result.items, headCursor: result.previousCursor ?? null, tailCursor: result.nextCursor });
       setSelectedAsset((selected) => reconcileAsset(selected, selectedViewKeyRef.current, viewKey, result.items));
       setViewerAssetId((assetId) => requestedAssetRef.current?.id === assetId ? assetId : reconcileAssetId(assetId, viewerViewKeyRef.current, viewKey, result.items));
     }).catch((error: unknown) => { if (generation === generationRef.current) setFirstError({ queryKey, message: commandErrorMessage(error, "자산을 불러오지 못했습니다.") }); }).finally(() => { if (generation === generationRef.current) setFirstLoading(false); });
@@ -77,19 +91,21 @@ export function AssetBrowser({ view, classifications, albums = [], collections =
   }, [gateway, queryBase, queryKey, refreshVersion, retryVersion, viewKey]);
   useEffect(() => {
     let cancelled = false;
-    void gateway.listAssetDateBuckets({ ...queryBase, collectedFrom: null, after: null }).then((result) => {
+    void gateway.listAssetDateBuckets({ ...queryBase, after: null }).then((result) => {
       if (!cancelled) setDateBuckets(result);
     }).catch(() => { if (!cancelled) setDateBuckets([]); });
     return () => { cancelled = true; };
   }, [gateway, queryBase, queryKey, refreshVersion]);
-  useEffect(() => onStatusChange({ loadedCount: items.length, selectedAsset, loading: firstLoading || nextLoading }), [firstLoading, items.length, nextLoading, onStatusChange, selectedAsset]);
+  useEffect(() => onStatusChange({ loadedCount: items.length, selectedAsset, loading: firstLoading || nextLoading || prevLoading }), [firstLoading, items.length, nextLoading, onStatusChange, prevLoading, selectedAsset]);
   useEffect(() => {
     setSelection((current) => reconcileSelection(current, itemIds));
   }, [itemIds]);
   useEffect(() => {
     setSelection(emptySelection());
     setSelectedAsset(null);
-    setCollectedFrom(null);
+    setAnchor(null);
+    setAnchorViewKey(null);
+    setJumpTarget(null);
   }, [viewKey]);
   useEffect(() => {
     if (!requestedAsset) return;
@@ -100,10 +116,29 @@ export function AssetBrowser({ view, classifications, albums = [], collections =
     if (selection.ids.size === 0) setInspectorOpen(false);
   }, [selection.ids.size]);
   const loadNextPage = useCallback((retry = false) => {
-    if (!activePage || !nextCursor || nextLoadingRef.current || (currentNextError && !retry)) return;
-    const generation = generationRef.current; const cursor = nextCursor; nextLoadingRef.current = true; setNextLoading(true); setNextError(null);
-    void gateway.listAssets({ ...queryBase, after: cursor }).then((result) => { if (generation !== generationRef.current) return; setPage((current) => current?.queryKey === queryKey ? { queryKey, items: [...current.items, ...result.items], nextCursor: result.nextCursor } : current); }).catch((error: unknown) => { if (generation === generationRef.current) setNextError({ queryKey, message: commandErrorMessage(error, "다음 자산을 불러오지 못했습니다.") }); }).finally(() => { if (generation === generationRef.current) { nextLoadingRef.current = false; setNextLoading(false); } });
-  }, [activePage, currentNextError, gateway, nextCursor, queryBase, queryKey]);
+    if (!activePage || !tailCursor || nextLoadingRef.current || (currentNextError && !retry)) return;
+    const generation = generationRef.current; const cursor = tailCursor; nextLoadingRef.current = true; setNextLoading(true); setNextError(null);
+    void gateway.listAssets({ ...queryBase, after: cursor, aroundDate: null }).then((result) => { if (generation !== generationRef.current) return; setPage((current) => current?.queryKey === queryKey ? { queryKey, items: [...current.items, ...result.items], headCursor: current.headCursor, tailCursor: result.nextCursor } : current); }).catch((error: unknown) => { if (generation === generationRef.current) setNextError({ queryKey, message: commandErrorMessage(error, "다음 자산을 불러오지 못했습니다.") }); }).finally(() => { if (generation === generationRef.current) { nextLoadingRef.current = false; setNextLoading(false); } });
+  }, [activePage, currentNextError, gateway, queryBase, queryKey, tailCursor]);
+  const loadPrevPage = useCallback((retry = false) => {
+    if (!activePage || !headCursor || prevLoadingRef.current || (currentPrevError && !retry)) return;
+    const generation = generationRef.current; const cursor = headCursor; prevLoadingRef.current = true; setPrevLoading(true); setPrevError(null);
+    void gateway.listAssets({ ...queryBase, after: null, before: cursor, aroundDate: null }).then((result) => { if (generation !== generationRef.current) return; setPage((current) => current?.queryKey === queryKey ? { queryKey, items: [...result.items, ...current.items], headCursor: result.previousCursor ?? null, tailCursor: current.tailCursor } : current); }).catch((error: unknown) => { if (generation === generationRef.current) setPrevError({ queryKey, message: commandErrorMessage(error, "이전 자산을 불러오지 못했습니다.") }); }).finally(() => { if (generation === generationRef.current) { prevLoadingRef.current = false; setPrevLoading(false); } });
+  }, [activePage, currentPrevError, gateway, queryBase, queryKey, headCursor]);
+  const jumpToDate = useCallback((date: string, ratio: number) => {
+    if (!chronological || !date) return;
+    const generation = ++generationRef.current;
+    nextLoadingRef.current = false; prevLoadingRef.current = false; setNextLoading(false); setPrevLoading(false); setFirstError(null); setNextError(null); setPrevError(null);
+    setAnchor(date);
+    setAnchorViewKey(viewKey);
+    setJumpTarget({ date, ratio, token: generation });
+    void gateway.listAssets({ ...queryBase, after: null, aroundDate: date }).then((result) => {
+      if (generation !== generationRef.current) return;
+      setPage({ queryKey, items: result.items, headCursor: result.previousCursor ?? null, tailCursor: result.nextCursor });
+      setSelectedAsset((selected) => reconcileAsset(selected, selectedViewKeyRef.current, viewKey, result.items));
+      setViewerAssetId((assetId) => requestedAssetRef.current?.id === assetId ? assetId : reconcileAssetId(assetId, viewerViewKeyRef.current, viewKey, result.items));
+    }).catch((error: unknown) => { if (generation === generationRef.current) setFirstError({ queryKey, message: commandErrorMessage(error, "해당 날짜로 이동하지 못했습니다.") }); });
+  }, [chronological, gateway, queryBase, queryKey, viewKey]);
   const reshuffle = () => { randomPivotRef.current = createRandomPivot(); setRandomVersion((value) => value + 1); };
   const selectWithGesture = (asset: AssetSummary, gesture: SelectionGesture) => {
     const next = applySelectionGesture(selection, itemIds, asset.id, gesture);
@@ -242,13 +277,14 @@ export function AssetBrowser({ view, classifications, albums = [], collections =
     }
   })();
   return <section className="asset-browser" aria-label="저장소">
-    <AssetToolbar view={view} classifications={classifications} albums={albums} collections={collections} sort={sort} directOnly={directOnly} metadataVisible={metadataVisible} thumbnailRowHeight={thumbnailRowHeight} selectedCount={selectedIds.length} inspectorOpen={inspectorOpen} onInspectorToggle={() => setInspectorOpen((open) => !open)} onSortChange={(next) => { setCollectedFrom(null); onSortChange(next); }} onDirectOnlyChange={setDirectOnly} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onFavorite={setBatchFavorite} onMoveToFolder={moveBatchToFolder} onAlbum={patchBatchAlbum} onRemoveFromCollection={removeFromCollection} onSetCover={selectedIds.length === 1 ? () => setCover(selectedIds[0]!) : undefined} onTrash={trashSelection} onClearSelection={clearSelection} batchPending={batchPending} onReshuffle={reshuffle} />
+    <AssetToolbar view={view} classifications={classifications} albums={albums} collections={collections} sort={sort} directOnly={directOnly} metadataVisible={metadataVisible} thumbnailRowHeight={thumbnailRowHeight} selectedCount={selectedIds.length} inspectorOpen={inspectorOpen} onInspectorToggle={() => setInspectorOpen((open) => !open)} onSortChange={(next) => { setAnchor(null); setAnchorViewKey(null); setJumpTarget(null); onSortChange(next); }} onDirectOnlyChange={setDirectOnly} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onFavorite={setBatchFavorite} onMoveToFolder={moveBatchToFolder} onAlbum={patchBatchAlbum} onRemoveFromCollection={removeFromCollection} onSetCover={selectedIds.length === 1 ? () => setCover(selectedIds[0]!) : undefined} onTrash={trashSelection} onClearSelection={clearSelection} batchPending={batchPending} onReshuffle={reshuffle} />
     {message && <Toast actionLabel={undoAssetIds ? "실행 취소" : undefined} onAction={undoAssetIds ? undoTrash : undefined} actionDisabled={batchPending} onDismiss={() => dismissMessage(null)}>{message}</Toast>}
     {currentFirstError && <Toast>{currentFirstError}</Toast>}
     <div className={`asset-browser__workspace${inspectorOpen ? " asset-browser__workspace--inspector" : ""}`}>
       <div className="asset-browser__gallery">
-        {firstLoading || !activePage && !currentFirstError ? <Skeleton className="asset-browser__skeleton" label="자산을 불러오는 중" /> : currentFirstError && items.length === 0 ? <EmptyState title="자산을 불러오지 못했습니다"><Button onClick={refresh}>다시 시도</Button></EmptyState> : items.length === 0 ? <EmptyState title={view.kind === "album" ? "이 앨범에 자산이 없습니다." : view.kind === "collection" ? "이 컬렉션에 자산이 없습니다." : "자산이 없습니다"}>{view.kind === "album" ? "원하는 자산을 이 앨범에 추가하세요." : view.kind === "collection" ? "원하는 자산을 이 컬렉션에 추가하세요." : "여기에 이미지와 영상 파일을 놓아 추가하세요."}</EmptyState>         : <AssetGallery items={items} dateBuckets={dateBuckets} onSelectDate={(date) => setCollectedFrom(date || null)} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} targetRowHeight={thumbnailRowHeight} metadataVisible={metadataVisible} hasNextPage={nextCursor !== null} onLoadNextPage={loadNextPage} onSelectionGesture={selectWithGesture} onSelectAll={selectAll} onDeleteSelection={trashSelection} onClearSelection={clearSelection} onMoveFocus={moveFocus} onOpen={(asset) => { viewerViewKeyRef.current = viewKey; setViewerAssetId(asset.id); }} onRetryVideo={(asset) => void gateway.retryVideoPreparation(asset.id).then(() => gateway.preparePendingVideos(1)).then(refresh).catch((error) => setMessage(commandErrorMessage(error, "미리보기 준비를 다시 시작하지 못했습니다.")))} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />}
+        {firstLoading || !activePage && !currentFirstError ? <Skeleton className="asset-browser__skeleton" label="자산을 불러오는 중" /> : currentFirstError && items.length === 0 ? <EmptyState title="자산을 불러오지 못했습니다"><Button onClick={refresh}>다시 시도</Button></EmptyState> : items.length === 0 ? <EmptyState title={view.kind === "album" ? "이 앨범에 자산이 없습니다." : view.kind === "collection" ? "이 컬렉션에 자산이 없습니다." : "자산이 없습니다"}>{view.kind === "album" ? "원하는 자산을 이 앨범에 추가하세요." : view.kind === "collection" ? "원하는 자산을 이 컬렉션에 추가하세요." : "여기에 이미지와 영상 파일을 놓아 추가하세요."}</EmptyState>         : <AssetGallery items={items} dateBuckets={dateBuckets} onSelectDate={jumpToDate} railInteractive={chronological} jumpTarget={jumpTarget} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} targetRowHeight={thumbnailRowHeight} metadataVisible={metadataVisible} hasNextPage={tailCursor !== null} onLoadNextPage={loadNextPage} hasPreviousPage={headCursor !== null} onLoadPrevPage={loadPrevPage} onSelectionGesture={selectWithGesture} onSelectAll={selectAll} onDeleteSelection={trashSelection} onClearSelection={clearSelection} onMoveFocus={moveFocus} onOpen={(asset) => { viewerViewKeyRef.current = viewKey; setViewerAssetId(asset.id); }} onRetryVideo={(asset) => void gateway.retryVideoPreparation(asset.id).then(() => gateway.preparePendingVideos(1)).then(refresh).catch((error) => setMessage(commandErrorMessage(error, "미리보기 준비를 다시 시작하지 못했습니다.")))} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />}
         {nextLoading && <Skeleton label="자산을 더 불러오는 중" />}{currentNextError && <div className="asset-browser__next-error"><Toast>{currentNextError}</Toast><Button onClick={() => loadNextPage(true)}>다시 시도</Button></div>}
+        {prevLoading && <Skeleton label="이전 자산을 불러오는 중" />}{currentPrevError && <div className="asset-browser__next-error"><Toast>{currentPrevError}</Toast><Button onClick={() => loadPrevPage(true)}>다시 시도</Button></div>}
       </div>
       <AssetInspector assets={selectedAssets} classifications={classifications} albums={albums} collections={collections} currentCollection={view.kind === "collection" ? collections.find((entry) => entry.id === view.collectionId) ?? null : null} open={inspectorOpen} membershipVersion={membershipVersion} onOpenChange={setInspectorOpen} onMoveToFolder={moveBatchToFolder} onPatchAlbum={patchBatchAlbum} onPatchCollection={patchBatchCollection} onAssetUpdated={updateAssetSummary} />
     </div>
