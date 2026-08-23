@@ -7,7 +7,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use thiserror::Error;
 use tiny_http::{Header, Request, Response, Server};
 use uuid::Uuid;
@@ -25,6 +25,7 @@ pub const API_BASE_URL: &str = "http://127.0.0.1:32145";
 pub const EXTENSION_ID: &str = "nclkmjmmlcdaeomgadndeangccfidfbk";
 pub const EXTENSION_ORIGIN: &str = "chrome-extension://nclkmjmmlcdaeomgadndeangccfidfbk";
 const MAX_JSON_BYTES: usize = 32 * 1024;
+const MAX_REMOTE_VIDEO_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const TOKEN_FILE_NAME: &str = "extension-token.txt";
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -150,16 +151,16 @@ pub(crate) fn start(app: AppHandle, state: AppState, runtime: ExtensionRuntime) 
     runtime.mark_ready(token.clone());
     let _ = thread::Builder::new()
         .name("lakomics-extension-api".into())
-        .spawn(move || serve(server, state, token));
+        .spawn(move || serve(app, server, state, token));
 }
 
-fn serve(server: Server, state: AppState, token: String) {
+fn serve(app: AppHandle, server: Server, state: AppState, token: String) {
     for request in server.incoming_requests() {
-        handle_request(request, &state, &token);
+        handle_request(app.clone(), request, &state, &token);
     }
 }
 
-fn handle_request(mut request: Request, state: &AppState, token: &str) {
+fn handle_request(app: AppHandle, mut request: Request, state: &AppState, token: &str) {
     let method = request.method().as_str().to_owned();
     let path = request
         .url()
@@ -190,7 +191,10 @@ fn handle_request(mut request: Request, state: &AppState, token: &str) {
         body,
     };
     let library = state.current_library();
-    let response = dispatch(api_request, library.as_ref(), token);
+    let (response, outcome) = dispatch(api_request, library.as_ref(), token);
+    if let Some(outcome) = outcome {
+        let _ = app.emit("extension://ingestion", &outcome);
+    }
     let _ = request.respond(response.into_tiny_http());
 }
 
@@ -379,10 +383,11 @@ impl ImageDownloader for UreqImageDownloader {
     }
 }
 
-fn dispatch(request: ApiRequest, library: Option<&Library>, token: &str) -> ApiResponse {
+fn dispatch(request: ApiRequest, library: Option<&Library>, token: &str) -> (ApiResponse, Option<IngestOutcome>) {
+    let error_to_pair = |error: ApiError| (api_error_response(error), None);
     if request.method == "OPTIONS" {
         if request.origin.as_deref() != Some(EXTENSION_ORIGIN) {
-            return api_error_response(ApiError::ForbiddenOrigin);
+            return error_to_pair(ApiError::ForbiddenOrigin);
         }
         let mut response = ApiResponse::empty(204);
         response
@@ -392,7 +397,7 @@ fn dispatch(request: ApiRequest, library: Option<&Library>, token: &str) -> ApiR
             "Access-Control-Allow-Headers",
             "Authorization, Content-Type, X-Lakomics-Extension-Id".into(),
         ));
-        return response;
+        return (response, None);
     }
 
     if let Err(error) = authorize(
@@ -401,33 +406,33 @@ fn dispatch(request: ApiRequest, library: Option<&Library>, token: &str) -> ApiR
         request.extension_id.as_deref(),
         token,
     ) {
-        return api_error_response(error);
+        return error_to_pair(error);
     }
 
     match (request.method.as_str(), request.path.as_str()) {
         ("GET", "/v1/classifications") => {
             let Some(library) = library else {
-                return api_error_response(ApiError::LibraryNotOpen);
+                return error_to_pair(ApiError::LibraryNotOpen);
             };
             match library.list_classifications() {
-                Ok(entries) => ApiResponse::json(200, &ClassificationsResponse { entries }),
-                Err(_) => api_error_response(ApiError::Internal),
+                Ok(entries) => (ApiResponse::json(200, &ClassificationsResponse { entries }), None),
+                Err(_) => error_to_pair(ApiError::Internal),
             }
         }
         ("POST", "/v1/ingestions") => {
             let Some(library) = library else {
-                return api_error_response(ApiError::LibraryNotOpen);
+                return error_to_pair(ApiError::LibraryNotOpen);
             };
             let request = match serde_json::from_slice::<XIngestionRequest>(&request.body) {
                 Ok(request) => request,
-                Err(_) => return api_error_response(ApiError::InvalidRequest),
+                Err(_) => return error_to_pair(ApiError::InvalidRequest),
             };
             match ingest_x_image(library, request, &UreqImageDownloader::new()) {
-                Ok(response) => ApiResponse::json(200, &response),
-                Err(error) => api_error_response(error),
+                Ok((response, outcome)) => (ApiResponse::json(200, &response), Some(outcome)),
+                Err(error) => error_to_pair(error),
             }
         }
-        _ => api_error_response(ApiError::NotFound),
+        _ => error_to_pair(ApiError::NotFound),
     }
 }
 
@@ -435,7 +440,7 @@ fn ingest_x_image(
     library: &Library,
     request: XIngestionRequest,
     downloader: &dyn ImageDownloader,
-) -> Result<XIngestionResponse, ApiError> {
+) -> Result<(XIngestionResponse, IngestOutcome), ApiError> {
     if request.source != "x" || request.classification_id.trim().is_empty() {
         return Err(ApiError::InvalidRequest);
     }
@@ -448,7 +453,7 @@ fn ingest_x_image(
         return Err(ApiError::ClassificationNotFound);
     }
 
-    let media_url = validate_url(&request.media_url, &["pbs.twimg.com"])
+    let media_url = validate_url(&request.media_url, &["pbs.twimg.com", "video.twimg.com"])
         .map_err(|_| ApiError::InvalidMediaUrl)?;
     let source_url = validate_url(&request.source_url, &["x.com", "twitter.com"])
         .map_err(|_| ApiError::InvalidSourceUrl)?;
@@ -463,9 +468,20 @@ fn ingest_x_image(
 
     let staging_directory = library.root().join("assets").join(".staging");
     fs::create_dir_all(&staging_directory).map_err(|_| ApiError::DownloadFailed)?;
-    let temporary_path = staging_directory.join(format!("remote-{}.png", Uuid::new_v4()));
+    let (temporary_extension, maximum_bytes) = match media_url.host_str() {
+        Some("pbs.twimg.com") => ("png", MAX_IMAGE_BYTES),
+        Some("video.twimg.com") if media_url.path().to_ascii_lowercase().ends_with(".mp4") => {
+            ("mp4", MAX_REMOTE_VIDEO_BYTES)
+        }
+        _ => return Err(ApiError::InvalidMediaUrl),
+    };
+    let temporary_path = staging_directory.join(format!(
+        "remote-{}.{}",
+        Uuid::new_v4(),
+        temporary_extension
+    ));
     let temporary = TemporaryDownload::new(temporary_path);
-    downloader.download(&media_url, temporary.path(), MAX_IMAGE_BYTES)?;
+    downloader.download(&media_url, temporary.path(), maximum_bytes)?;
 
     let outcome = library
         .ingest_media(IngestMediaRequest {
@@ -482,7 +498,8 @@ fn ingest_x_image(
             import_batch_id: Uuid::new_v4().to_string(),
         })
         .map_err(map_ingestion_error)?;
-    finish_ingestion(library, &request.classification_id, outcome)
+    let response = finish_ingestion(library, &request.classification_id, &outcome)?;
+    Ok((response, outcome))
 }
 
 fn x_creator(url: &url::Url) -> Option<&str> {
@@ -513,32 +530,32 @@ fn validate_url(value: &str, allowed_hosts: &[&str]) -> Result<url::Url, ()> {
 fn finish_ingestion(
     _library: &Library,
     _classification_id: &str,
-    outcome: IngestOutcome,
+    outcome: &IngestOutcome,
 ) -> Result<XIngestionResponse, ApiError> {
     match outcome {
         IngestOutcome::Added { asset } => Ok(XIngestionResponse {
             status: IngestionStatus::Added,
-            asset_id: Some(asset.id),
+            asset_id: Some(asset.id.clone()),
             review_id: None,
         }),
         IngestOutcome::ReviewPending { review_id } => Ok(XIngestionResponse {
             status: IngestionStatus::ReviewPending,
             asset_id: None,
-            review_id: Some(review_id),
+            review_id: Some(review_id.clone()),
         }),
         IngestOutcome::ExactDuplicate {
             existing_asset_id,
             classification_changed,
             ..
         } => {
-            let status = if classification_changed {
+            let status = if *classification_changed {
                 IngestionStatus::DuplicateTagged
             } else {
                 IngestionStatus::DuplicateUnchanged
             };
             Ok(XIngestionResponse {
                 status,
-                asset_id: Some(existing_asset_id),
+                asset_id: Some(existing_asset_id.clone()),
                 review_id: None,
             })
         }
@@ -770,6 +787,7 @@ mod tests {
             Some(&library),
             "secret",
         );
+        let (unauthorized, _) = unauthorized;
         assert_eq!(unauthorized.status, 401);
 
         let response = dispatch(
@@ -781,6 +799,8 @@ mod tests {
             Some(&library),
             "secret",
         );
+        let (response, outcome) = response;
+        assert!(outcome.is_none());
         assert_eq!(response.status, 200);
         assert_eq!(
             response.header("Access-Control-Allow-Origin"),
@@ -798,6 +818,7 @@ mod tests {
             None,
             "secret",
         );
+        let (response, _) = response;
         assert_eq!(response.status, 204);
         assert_eq!(
             response.header("Access-Control-Allow-Origin"),
@@ -824,6 +845,7 @@ mod tests {
             None,
             "secret",
         );
+        let (no_library, _) = no_library;
         assert_eq!(no_library.status, 409);
         assert_eq!(json_code(&no_library), "library_not_open");
 
@@ -836,6 +858,7 @@ mod tests {
             None,
             "secret",
         );
+        let (forbidden, _) = forbidden;
         assert_eq!(forbidden.status, 403);
         assert_eq!(json_code(&forbidden), "forbidden_origin");
 
@@ -844,6 +867,7 @@ mod tests {
             None,
             "secret",
         );
+        let (missing, _) = missing;
         assert_eq!(missing.status, 404);
         assert_eq!(json_code(&missing), "not_found");
     }
@@ -876,6 +900,7 @@ mod tests {
 
         let added =
             ingest_x_image(&library, x_request(&first_classification.id), &downloader).unwrap();
+        let added = added.0;
         assert_eq!(added.status, IngestionStatus::Added);
         let asset_id = added.asset_id.unwrap();
         assert_eq!(
@@ -885,11 +910,13 @@ mod tests {
 
         let tagged =
             ingest_x_image(&library, x_request(&second_classification.id), &downloader).unwrap();
+        let tagged = tagged.0;
         assert_eq!(tagged.status, IngestionStatus::DuplicateTagged);
         assert_eq!(tagged.asset_id.as_deref(), Some(asset_id.as_str()));
 
         let unchanged =
             ingest_x_image(&library, x_request(&second_classification.id), &downloader).unwrap();
+        let unchanged = unchanged.0;
         assert_eq!(unchanged.status, IngestionStatus::DuplicateUnchanged);
         let ids: Vec<_> = library
             .get_asset_classifications(&asset_id)
@@ -922,7 +949,7 @@ mod tests {
         let response = finish_ingestion(
             &library,
             &classification.id,
-            IngestOutcome::ReviewPending {
+            &IngestOutcome::ReviewPending {
                 review_id: "review-1".into(),
             },
         )

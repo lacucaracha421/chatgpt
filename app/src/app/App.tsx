@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { AssetBrowser, type AssetBrowserStatus } from "../assets/AssetBrowser";
 import { startAssetDrag as nativeStartAssetDrag, type StartAssetDrag } from "../drag-out/startAssetDrag";
 import { ClassificationSidebar } from "../classification/ClassificationSidebar";
@@ -43,11 +44,17 @@ import { MangaViewer } from "../manga/MangaViewer";
 import { useDesktopInteractions } from "./useDesktopInteractions";
 import { useOnlineCatalogUpdate } from "./useOnlineCatalogUpdate";
 
+export type ExtensionIngestListener = (handler: (outcome: IngestOutcome) => void) => Promise<() => void>;
+
+export const subscribeToExtensionIngest: ExtensionIngestListener = async (handler) =>
+  listen<IngestOutcome>("extension://ingestion", (event) => handler(event.payload));
+
 type AppProps = {
   gateway?: LibraryGateway;
   selectFolder?: FolderPicker;
   subscribeDrops?: DropSubscriber;
   startAssetDrag?: StartAssetDrag;
+  subscribeExtensionIngest?: ExtensionIngestListener;
 };
 
 export function App({
@@ -55,11 +62,12 @@ export function App({
   selectFolder = selectLibraryFolder,
   subscribeDrops = subscribeToTauriDrops,
   startAssetDrag = nativeStartAssetDrag,
+  subscribeExtensionIngest = subscribeToExtensionIngest,
 }: AppProps) {
   useDesktopInteractions();
   return (
     <LibraryProvider gateway={gateway}>
-      <LibraryScreen selectFolder={selectFolder} subscribeDrops={subscribeDrops} startAssetDrag={startAssetDrag} />
+      <LibraryScreen selectFolder={selectFolder} subscribeDrops={subscribeDrops} startAssetDrag={startAssetDrag} subscribeExtensionIngest={subscribeExtensionIngest} />
     </LibraryProvider>
   );
 }
@@ -68,19 +76,21 @@ function LibraryScreen({
   selectFolder,
   subscribeDrops,
   startAssetDrag,
+  subscribeExtensionIngest,
 }: {
   selectFolder: FolderPicker;
   subscribeDrops: DropSubscriber;
   startAssetDrag: StartAssetDrag;
+  subscribeExtensionIngest: ExtensionIngestListener;
 }) {
   const { library } = useLibrary();
 
   return library
-    ? <LibraryWorkspace key={library.root} libraryRoot={library.root} subscribeDrops={subscribeDrops} startAssetDrag={startAssetDrag} />
+    ? <LibraryWorkspace key={library.root} libraryRoot={library.root} subscribeDrops={subscribeDrops} startAssetDrag={startAssetDrag} subscribeExtensionIngest={subscribeExtensionIngest} />
     : <LibrarySetup selectFolder={selectFolder} />;
 }
 
-function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag }: { libraryRoot: string; subscribeDrops: DropSubscriber; startAssetDrag: StartAssetDrag }) {
+function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscribeExtensionIngest }: { libraryRoot: string; subscribeDrops: DropSubscriber; startAssetDrag: StartAssetDrag; subscribeExtensionIngest: ExtensionIngestListener }) {
   const { gateway } = useLibrary();
   useOnlineCatalogUpdate(gateway, libraryRoot);
   const [entries, setEntries] = useState<ClassificationEntry[]>([]);
@@ -153,6 +163,17 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag }: { lib
     }
     if (result.status === "review_pending") void refreshReviewCount();
   }, [refreshReviewCount]);
+  const handleIngestedRef = useRef(handleIngested);
+  useLayoutEffect(() => { handleIngestedRef.current = handleIngested; }, [handleIngested]);
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let active = true;
+    void subscribeExtensionIngest((outcome) => {
+      if (!active) return;
+      handleIngestedRef.current(outcome);
+    }).then((stop) => { if (active) unlisten = stop; else stop(); }).catch(() => undefined);
+    return () => { active = false; unlisten?.(); };
+  }, [subscribeExtensionIngest]);
   const videoPreparation = useVideoPreparation({
     enabled: maintenance === null,
     trigger: videoPreparationTrigger,

@@ -10,7 +10,7 @@ import type {
   ReleaseWatchRunResult,
 } from "../library/types";
 import { UI_PREFERENCES_KEY } from "../preferences/uiPreferences";
-import { App } from "./App";
+import { App, type ExtensionIngestListener } from "./App";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 import { open } from "@tauri-apps/plugin-dialog";
@@ -464,6 +464,33 @@ describe("App", () => {
     await waitFor(() => expect(libraryGateway.ingestMedia).toHaveBeenCalledTimes(3));
     expect(libraryGateway.ingestMedia).toHaveBeenNthCalledWith(2, { sourcePath: "C:\\images\\recent.png", classificationId: null, sourceUrl: null, importSource: "direct", importBatchId: expect.any(String) });
     expect(libraryGateway.ingestMedia).toHaveBeenNthCalledWith(3, { sourcePath: "C:\\images\\all-assets.png", classificationId: null, sourceUrl: null, importSource: "direct", importBatchId: expect.any(String) });
+  });
+
+  it("refreshes assets and kicks off video preparation when the extension ingests a video", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    let emit: ((outcome: { status: "added"; asset: AssetSummary }) => void) | undefined;
+    const subscribeExtensionIngest: ExtensionIngestListener = async (handler) => {
+      emit = handler;
+      return () => undefined;
+    };
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games]);
+    vi.mocked(libraryGateway.listAssets).mockResolvedValue({ items: [], nextCursor: null });
+    const videoAsset: AssetSummary = {
+      ...asset,
+      id: "asset-x-video",
+      media: { kind: "video", durationMs: 1000, preparationState: "pending", scrubFrameCount: 0 },
+    };
+
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} subscribeExtensionIngest={subscribeExtensionIngest} />);
+    await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenCalled());
+    const assetCallsBefore = vi.mocked(libraryGateway.listAssets).mock.calls.length;
+    const prepareCallsBefore = vi.mocked(libraryGateway.preparePendingVideos).mock.calls.length;
+
+    await act(async () => { emit?.({ status: "added", asset: videoAsset }); });
+
+    await waitFor(() => expect(vi.mocked(libraryGateway.listAssets).mock.calls.length).toBeGreaterThan(assetCallsBefore));
+    await waitFor(() => expect(vi.mocked(libraryGateway.preparePendingVideos).mock.calls.length).toBeGreaterThan(prepareCallsBefore));
   });
 
   it("loads and saves the complete validated UI preference object", async () => {
