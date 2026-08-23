@@ -377,6 +377,44 @@ describe("AssetGallery", () => {
 
     expect(onLoadPrevPage).not.toHaveBeenCalled();
   });
+
+  it("matches naive timestamps against date buckets without timezone shifts", async () => {
+    const { container } = render(<AssetGallery
+      items={[{ ...asset(0), collectedAt: "2024-01-28T03:00:00" }]}
+      dateBuckets={[{ date: "2024-01-28", count: 1 }, { date: "2024-01-27", count: 1 }]}
+    />);
+    await waitFor(() => expect(container.querySelector(".asset-gallery__scrollbar-line")).not.toBeNull());
+
+    const lines = container.querySelectorAll(".asset-gallery__scrollbar-line");
+    expect(lines[0]).toHaveClass("asset-gallery__scrollbar-line--active");
+    expect(lines[1]).not.toHaveClass("asset-gallery__scrollbar-line--active");
+  });
+
+  it("emits at most one date jump per throttle interval while dragging", async () => {
+    const onSelectDate = vi.fn();
+    const { container } = render(<AssetGallery
+      items={[
+        { ...asset(0), collectedAt: "2026-07-30T00:00:00Z" },
+        { ...asset(1), collectedAt: "2026-08-01T00:00:00Z" },
+      ]}
+      dateBuckets={[{ date: "2026-07-30", count: 1 }, { date: "2026-08-01", count: 1 }]}
+      onSelectDate={onSelectDate}
+    />);
+    await waitFor(() => expect(container.querySelector(".asset-gallery__scrollbar-line")).not.toBeNull());
+    const scrollbar = container.querySelector(".asset-gallery__scrollbar") as HTMLElement;
+    vi.spyOn(scrollbar, "getBoundingClientRect").mockReturnValue({ top: 0, height: 600, bottom: 600, left: 0, right: 40, width: 40, x: 0, y: 0, toJSON: () => ({}) });
+    Object.defineProperty(scrollbar, "hasPointerCapture", { configurable: true, value: () => true });
+    vi.useFakeTimers();
+
+    fireEvent.pointerDown(scrollbar, { button: 0, pointerId: 1, clientY: 10 });
+    fireEvent.pointerMove(scrollbar, { pointerId: 1, clientY: 300 });
+    fireEvent.pointerMove(scrollbar, { pointerId: 1, clientY: 590 });
+    expect(onSelectDate).toHaveBeenCalledTimes(1);
+
+    act(() => vi.advanceTimersByTime(160));
+    expect(onSelectDate).toHaveBeenCalledTimes(2);
+    expect(onSelectDate.mock.calls[1]![1]).toBeGreaterThan(onSelectDate.mock.calls[0]![1]);
+  });
 });
 
 function asset(index: number): AssetSummary { return { id: `asset-${index}`, title: null, originalName: `asset-${index}.png`, byteSize: 1, width: 200, height: 200, collectedAt: "2026-07-30T00:00:00Z", favorite: false, sourceUrl: null, sourcePublishedAt: null, creatorName: null, creatorHandle: null, creatorUrl: null, importSource: null, importBatchId: null, originalModifiedAt: null, media: { kind: "image" } }; }

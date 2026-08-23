@@ -1768,16 +1768,23 @@ input:disabled {
 
 .asset-gallery__scrollbar-indicator {
   position: absolute;
+  top: -2.5px;
   right: 11px;
   width: 12px;
   height: 5px;
-  transform: translateY(-50%);
   border-radius: 3px;
   background: var(--color-text);
   opacity: 0.92;
   box-shadow: 0 0 8px color-mix(in srgb, var(--color-text) 45%, transparent);
-  transition: top 90ms linear;
+  transition: transform 90ms linear;
   pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .asset-gallery__scrollbar-indicator,
+  .asset-gallery__scrollbar-line::after {
+    transition: none;
+  }
 }
 
 .asset-gallery__virtual-space {
