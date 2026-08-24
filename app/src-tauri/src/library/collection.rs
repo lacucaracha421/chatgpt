@@ -374,20 +374,27 @@ impl Library {
             [],
         )?;
         connection.execute(
-            "UPDATE collections AS current
-         SET showcase_order = (
-             SELECT COUNT(*)
-             FROM collections AS earlier
-             WHERE earlier.showcase = 1
-               AND (earlier.legacy_kind IS NULL OR earlier.legacy_kind <> 'gacha')
-               AND earlier.type = current.type
-               AND (
-                   earlier.created_at < current.created_at
-                   OR (earlier.created_at = current.created_at AND earlier.id < current.id)
-               )
-         )
-         WHERE current.showcase = 1
-           AND (current.legacy_kind IS NULL OR current.legacy_kind <> 'gacha')",
+            "WITH ranked AS (
+                 SELECT id,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY type
+                            ORDER BY
+                                CASE WHEN showcase_order IS NULL THEN 1 ELSE 0 END,
+                                showcase_order,
+                                created_at,
+                                id
+                        ) - 1 AS normalized_order
+                 FROM collections
+                 WHERE showcase = 1
+                   AND (legacy_kind IS NULL OR legacy_kind <> 'gacha')
+             )
+             UPDATE collections
+             SET showcase_order = (
+                 SELECT normalized_order
+                 FROM ranked
+                 WHERE ranked.id = collections.id
+             )
+             WHERE id IN (SELECT id FROM ranked)",
             [],
         )?;
         Ok(())
@@ -984,6 +991,37 @@ mod tests {
         let visible = create(&library, "Visible Game");
         let showcased = library.set_collection_showcase(&visible.id, true).unwrap();
         assert_eq!(showcased.showcase_order, Some(0));
+    }
+
+    #[test]
+    fn reopening_preserves_manual_showcase_order_while_compacting_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let first = {
+            let library = Library::open(temp.path()).unwrap();
+            let a = create(&library, "A");
+            let b = create(&library, "B");
+            library.set_collection_showcase(&a.id, true).unwrap();
+            library.set_collection_showcase(&b.id, true).unwrap();
+            library
+                .connection()
+                .unwrap()
+                .execute(
+                    "UPDATE collections
+                     SET showcase_order = CASE id WHEN ?1 THEN 4 WHEN ?2 THEN 9 END
+                     WHERE id IN (?1, ?2)",
+                    rusqlite::params![b.id, a.id],
+                )
+                .unwrap();
+            (a.id, b.id)
+        };
+
+        let library = Library::open(temp.path()).unwrap();
+        let listed = library.list_collections().unwrap();
+        let order = |id: &str| {
+            listed.iter().find(|item| item.id == id).unwrap().showcase_order
+        };
+        assert_eq!(order(&first.1), Some(0));
+        assert_eq!(order(&first.0), Some(1));
     }
 
     #[test]
