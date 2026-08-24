@@ -86,7 +86,7 @@ impl Library {
             if !folder.starts_with(&canonical_root) {
                 continue;
             }
-            let Ok(Some(parsed)) = parse_info_txt(&folder) else {
+            let Ok(Some(parsed)) = parse_info_txt_within_root(&folder, &canonical_root) else {
                 continue;
             };
             let Some(kind) = parsed.legacy_kind else {
@@ -396,6 +396,20 @@ fn parse_info_txt(folder: &Path) -> Result<Option<ParsedInfo>, String> {
     }))
 }
 
+fn parse_info_txt_within_root(
+    folder: &Path,
+    canonical_root: &Path,
+) -> Result<Option<ParsedInfo>, String> {
+    let canonical_info = match fs::canonicalize(folder.join("info.txt")) {
+        Ok(path) => path,
+        Err(error) => return Err(format!("failed to resolve info.txt: {error}")),
+    };
+    if !canonical_info.starts_with(canonical_root) {
+        return Ok(None);
+    }
+    parse_info_txt(folder)
+}
+
 fn external_bindings(fields: &[(String, String)]) -> Vec<BookExternalBinding> {
     [
         ("TMDB ID", "tmdb"),
@@ -457,6 +471,61 @@ fn parse_key_value(raw: &str) -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn backfill_skips_info_txt_symlink_outside_source_root() {
+        use std::os::unix::fs::symlink;
+
+        let source = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(
+            outside.path().join("info.txt"),
+            "Title: External Gacha\nType: gacha\n",
+        )
+        .unwrap();
+        let folder = source.path().join("linked");
+        fs::create_dir(&folder).unwrap();
+        symlink(outside.path().join("info.txt"), folder.join("info.txt")).unwrap();
+
+        assert!(
+            parse_info_txt_within_root(&folder, &fs::canonicalize(source.path()).unwrap())
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn backfill_skips_info_txt_symlink_outside_source_root() {
+        use std::os::windows::fs::symlink_file;
+
+        let source = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(
+            outside.path().join("info.txt"),
+            "Title: External Gacha\nType: gacha\n",
+        )
+        .unwrap();
+        let folder = source.path().join("linked");
+        fs::create_dir(&folder).unwrap();
+        let link = folder.join("info.txt");
+        if symlink_file(outside.path().join("info.txt"), &link).is_ok() {
+            assert!(
+                parse_info_txt_within_root(&folder, &fs::canonicalize(source.path()).unwrap())
+                    .unwrap()
+                    .is_none()
+            );
+        } else {
+            eprintln!("skipping symlink portion: Windows symlink privilege unavailable");
+            assert!(parse_info_txt_within_root(
+                outside.path(),
+                &fs::canonicalize(source.path()).unwrap()
+            )
+            .unwrap()
+            .is_none());
+        }
+    }
 
     #[test]
     fn backfills_safe_legacy_kinds_without_overwriting_or_guessing() {
