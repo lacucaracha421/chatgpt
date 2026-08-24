@@ -101,6 +101,82 @@ describe("libraryGateway album contract", () => {
   });
 });
 
+describe("libraryGateway collection contract", () => {
+  beforeEach(() => invoke.mockClear());
+
+  it("uses collection CRUD, membership, and cover commands", async () => {
+    await libraryGateway.listCollections();
+    await libraryGateway.createCollection({
+      name: "Reference",
+      description: "Covers and poses",
+      type: "manga",
+    });
+    await libraryGateway.updateCollection("collection-1", {
+      name: "Inspiration",
+      description: null,
+      type: "manga",
+      year: 2024,
+      author: "Creator",
+      developer: null,
+      productionCompany: null,
+      releaseDate: null,
+      director: null,
+      externalScore: 91,
+      myScore: 4.5,
+    });
+    await libraryGateway.patchAssetCollections({
+      assetIds: ["asset-1"],
+      addCollectionIds: ["collection-1"],
+      removeCollectionIds: [],
+    });
+    await libraryGateway.getAssetCollections("asset-1");
+    await libraryGateway.setCollectionCover("collection-1", "asset-1");
+    await libraryGateway.deleteCollection("collection-1");
+
+    expect(invoke).toHaveBeenNthCalledWith(1, "list_collections");
+    expect(invoke).toHaveBeenNthCalledWith(2, "create_collection", {
+      request: {
+        name: "Reference",
+        description: "Covers and poses",
+        type: "manga",
+      },
+    });
+    expect(invoke).toHaveBeenNthCalledWith(3, "update_collection", {
+      id: "collection-1",
+      request: {
+        name: "Inspiration",
+        description: null,
+        type: "manga",
+        year: 2024,
+        author: "Creator",
+        developer: null,
+        productionCompany: null,
+        releaseDate: null,
+        director: null,
+        externalScore: 91,
+        myScore: 4.5,
+      },
+    });
+    expect(invoke).toHaveBeenNthCalledWith(4, "patch_asset_collections", {
+      patch: {
+        assetIds: ["asset-1"],
+        addCollectionIds: ["collection-1"],
+        removeCollectionIds: [],
+      },
+    });
+    expect(invoke).toHaveBeenNthCalledWith(5, "get_asset_collections", {
+      assetId: "asset-1",
+    });
+    expect(invoke).toHaveBeenNthCalledWith(6, "set_collection_cover", {
+      collectionId: "collection-1",
+      assetId: "asset-1",
+    });
+    expect(invoke).toHaveBeenNthCalledWith(7, "delete_collection", {
+      id: "collection-1",
+    });
+  });
+});
+
 describe("libraryGateway video contract", () => {
   beforeEach(() => invoke.mockClear());
 

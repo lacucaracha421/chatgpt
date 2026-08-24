@@ -143,12 +143,16 @@ export type CollectionSummary = {
   unreadReleaseCount: number;
   year: number | null;
   author: string | null;
+  developer: string | null;
+  productionCompany: string | null;
+  releaseDate: string | null;
   director: string | null;
   externalScore: number | null;
   myScore: number | null;
   genres: string | null;
   overview: string | null;
   showcase: boolean;
+  showcaseOrder: number | null;
   createdAt: string;
   updatedAt: string;
   sourcePath?: string | null;
@@ -294,6 +298,9 @@ export type UpdateCollection = {
   type: CollectionType;
   year: number | null;
   author: string | null;
+  developer: string | null;
+  productionCompany: string | null;
+  releaseDate: string | null;
   director: string | null;
   externalScore: number | null;
   myScore: number | null;

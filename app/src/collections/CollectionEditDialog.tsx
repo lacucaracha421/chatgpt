@@ -26,6 +26,9 @@ export function CollectionEditDialog({
   const [type, setType] = useState<CollectionType>(existing?.type ?? "manga");
   const [year, setYear] = useState<number | null>(existing?.year ?? null);
   const [author, setAuthor] = useState(existing?.author ?? "");
+  const [developer, setDeveloper] = useState(existing?.developer ?? "");
+  const [productionCompany, setProductionCompany] = useState(existing?.productionCompany ?? "");
+  const [releaseDate, setReleaseDate] = useState<string | null>(existing?.releaseDate ?? null);
   const [director, setDirector] = useState(existing?.director ?? "");
   const [externalScore, setExternalScore] = useState<number | null>(existing?.externalScore ?? null);
   const [myScore, setMyScore] = useState<number | null>(existing?.myScore ?? null);
@@ -38,6 +41,9 @@ export function CollectionEditDialog({
     setType(existing?.type ?? "manga");
     setYear(existing?.year ?? null);
     setAuthor(existing?.author ?? "");
+    setDeveloper(existing?.developer ?? "");
+    setProductionCompany(existing?.productionCompany ?? "");
+    setReleaseDate(existing?.releaseDate ?? null);
     setDirector(existing?.director ?? "");
     setExternalScore(existing?.externalScore ?? null);
     setMyScore(existing?.myScore ?? null);
@@ -57,6 +63,9 @@ export function CollectionEditDialog({
       type,
       year,
       author: author.trim() || null,
+      developer: developer.trim() || null,
+      productionCompany: productionCompany.trim() || null,
+      releaseDate,
       director: director.trim() || null,
       externalScore,
       myScore,
@@ -94,13 +103,17 @@ export function CollectionEditDialog({
         )}
         {type === "game" && (
           <>
-            <TextField label="제작사" value={author} onChange={(event) => setAuthor(event.target.value)} />
+            <TextField label="개발사" value={developer} onChange={(event) => setDeveloper(event.target.value)} />
             <TextField label="외부 점수" inputMode="numeric" value={externalScore?.toString() ?? ""} onChange={(event) => setExternalScore(event.target.value ? Number(event.target.value) : null)} />
-            <TextField label="내 점수" inputMode="numeric" value={myScore?.toString() ?? ""} onChange={(event) => setMyScore(event.target.value ? Number(event.target.value) : null)} />
+            <Select label="내 별점" value={myScore?.toString() ?? ""} onChange={(event) => setMyScore(event.target.value === "" ? null : Number(event.target.value))}>
+              <option value="">미평가</option>
+              {[5, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1, 0.5, 0].map((rating) => <option key={rating} value={rating}>{rating.toFixed(1)}</option>)}
+            </Select>
           </>
         )}
         {type === "movie" && (
           <>
+            <TextField label="제작사" value={productionCompany} onChange={(event) => setProductionCompany(event.target.value)} />
             <TextField label="감독" value={director} onChange={(event) => setDirector(event.target.value)} />
             <TextField label="개봉 연도" inputMode="numeric" value={year?.toString() ?? ""} onChange={(event) => setYear(event.target.value ? Number(event.target.value) : null)} />
           </>
