@@ -275,8 +275,8 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
           : result.reason === "rateLimited"
             ? "요청이 제한되었습니다. 잠시 후 다시 시도하세요"
             : `${result.added.toLocaleString()}개 작품을 갱신했습니다`);
-    } catch {
-      setMessage("온라인 카탈로그를 갱신하지 못했습니다");
+    } catch (error) {
+      setMessage(commandErrorMessage(error, "온라인 카탈로그를 갱신하지 못했습니다"));
     } finally {
       setUpdating(false);
     }

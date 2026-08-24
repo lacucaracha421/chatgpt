@@ -219,6 +219,19 @@ describe("OnlineCatalogBrowser", () => {
     expect(await screen.findByText("3개 작품을 갱신했습니다")).toBeInTheDocument();
   });
 
+  it("shows the public command error when a manual catalog update fails", async () => {
+    const gateway = createGateway(true);
+    vi.mocked(gateway.updateOnlineCatalog).mockRejectedValue({
+      code: "invalid_catalog_transport_response",
+      message: "온라인 카탈로그 응답을 처리할 수 없습니다",
+    });
+    renderBrowser(gateway);
+
+    await userEvent.click(await screen.findByRole("button", { name: "지금 갱신" }));
+
+    expect(await screen.findByText("온라인 카탈로그 응답을 처리할 수 없습니다")).toBeInTheDocument();
+  });
+
   it("shows resolved CDN images without routing them through the native media protocol", async () => {
     const gateway = createGateway(true);
     renderBrowser(gateway);
