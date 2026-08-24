@@ -66,7 +66,7 @@ describe("collection library derivation", () => {
       "game",
       { query: "", sort: "media_date", direction, rating: "all" },
     );
-    expect(result.at(-1)?.name).toBe("Missing");
+    expect(result[result.length - 1]?.name).toBe("Missing");
   });
 
   it("sorts names in both directions", () => {

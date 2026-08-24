@@ -1061,6 +1061,29 @@ describe("App", () => {
     expect(await screen.findByRole("region", { name: "자산 내용" })).toBeInTheDocument();
   });
 
+  it("preserves the game Library search after opening and leaving a Collection detail", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({ collectionType: "game" }));
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listCollections).mockResolvedValue([{
+      id: "collection-search", name: "NieR: Automata", description: null, type: "game",
+      coverAssetId: null, selectedWorkArtworkId: null, assetCount: 0, unreadReleaseCount: 0,
+      year: 2017, author: null, developer: null, productionCompany: null, releaseDate: null,
+      director: null, externalScore: null, myScore: null, genres: null, overview: null,
+      showcase: false, showcaseOrder: null, createdAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z",
+    }]);
+    vi.mocked(libraryGateway.listCollectionCovers).mockResolvedValue([]);
+    vi.mocked(libraryGateway.listCollectionVolumes).mockResolvedValue([]);
+    const user = userEvent.setup();
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    await user.click(await screen.findByRole("button", { name: "컬렉션" }));
+    const search = await screen.findByRole("textbox", { name: "제목 검색" });
+    await user.type(search, "nier");
+    await user.click(await screen.findByText("NieR: Automata"));
+    await user.click(await screen.findByRole("button", { name: "컬렉션 표지 보기 닫기" }));
+    expect(await screen.findByRole("textbox", { name: "제목 검색" })).toHaveValue("nier");
+  });
+
   it("returns from a manga Collection detail to the manga list", async () => {
     localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
     localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({ collectionType: "game" }));

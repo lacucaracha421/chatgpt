@@ -79,7 +79,7 @@ function compareMediaDate(
 
 function mediaDateKey(collection: CollectionSummary): number | null {
   if (collection.releaseDate) {
-    return Number(collection.releaseDate.replaceAll("-", ""));
+    return Number(collection.releaseDate.replace(/-/g, ""));
   }
   if (collection.year !== null) return collection.year * 10_000;
   return null;
