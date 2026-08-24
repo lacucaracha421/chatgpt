@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
-use super::collection::{collection_type_str, normalized_name};
+use super::collection::{collection_type_str, normalized_name, validated_personal_rating};
 use super::collection_source::{collection_source_root, set_collection_source_root};
 use super::error::LibraryError;
 use super::models::{CollectionType, ExternalBindingInput};
@@ -55,7 +55,7 @@ pub struct BookImportEntry {
     pub year: Option<i64>,
     pub author: Option<String>,
     pub director: Option<String>,
-    pub my_score: Option<i64>,
+    pub my_score: Option<f64>,
     pub genres: Option<String>,
     pub overview: Option<String>,
     pub external_bindings: Vec<BookExternalBinding>,
@@ -256,11 +256,13 @@ fn upsert_collection(
         .execute(
             "INSERT INTO collections (
                 id, name, description, type, cover_asset_id,
-                year, author, director, external_score, my_score,
-                genres, overview, showcase, created_at, updated_at, source_path, legacy_kind
+                year, author, director, developer, production_company, release_date,
+                external_score, my_score, genres, overview, showcase, showcase_order,
+                created_at, updated_at, source_path, legacy_kind
              ) VALUES (?1, ?2, NULL, ?3, NULL,
-                ?4, ?5, ?6, NULL, ?7,
-                ?8, ?9, 0, ?10, ?10, ?11, ?12)",
+                ?4, ?5, ?6, ?7, NULL, NULL,
+                NULL, ?8, ?9, ?10, 0, NULL,
+                ?11, ?11, ?12, ?13)",
             params![
                 id,
                 name,
@@ -268,6 +270,9 @@ fn upsert_collection(
                 entry.year,
                 entry.author,
                 entry.director,
+                (entry.collection_type == CollectionType::Game)
+                    .then(|| entry.author.clone())
+                    .flatten(),
                 entry.my_score,
                 entry.genres,
                 entry.overview,
@@ -314,7 +319,7 @@ struct ParsedInfo {
     year: Option<i64>,
     author: Option<String>,
     director: Option<String>,
-    my_score: Option<i64>,
+    my_score: Option<f64>,
     genres: Option<String>,
     overview: Option<String>,
     external_bindings: Vec<BookExternalBinding>,
@@ -376,9 +381,16 @@ fn parse_info_txt(folder: &Path) -> Result<Option<ParsedInfo>, String> {
         if v.eq_ignore_ascii_case("unknown") || v.is_empty() {
             None
         } else {
-            v.parse::<i64>().ok()
+            Some(v.parse::<f64>().map_err(|error| error.to_string()))
         }
     });
+    let my_score = my_score
+        .transpose()
+        .map_err(|error| format!("invalid personal rating: {error}"))?
+        .map(|score| validated_personal_rating(Some(score)))
+        .transpose()
+        .map_err(|error| error.to_string())?
+        .flatten();
     let genres = first_value(&fields, "Genres").map(trim_field);
     let overview = first_value(&fields, "Overview").map(trim_field);
     let external_bindings = external_bindings(&fields);
@@ -803,5 +815,45 @@ mod tests {
             }
         });
         assert!(rating.is_none());
+    }
+
+    #[test]
+    fn imports_game_typed_metadata_and_half_star_rating() {
+        let source = tempfile::tempdir().unwrap();
+        let game = source.path().join("Elden Ring");
+        fs::create_dir(&game).unwrap();
+        fs::write(
+            game.join("info.txt"),
+            "Title: Elden Ring\nType: game\nAuthors: FromSoftware\nPublication Year: 2022\nRating: 4.5\n",
+        )
+        .unwrap();
+
+        let target = tempfile::tempdir().unwrap();
+        let library = Library::open(target.path()).unwrap();
+        let plan = scan_book_import(source.path()).unwrap();
+        library.apply_book_import_plan(&plan).unwrap();
+
+        let imported = library.list_collections().unwrap().pop().unwrap();
+        assert_eq!(imported.collection_type, CollectionType::Game);
+        assert_eq!(imported.author.as_deref(), Some("FromSoftware"));
+        assert_eq!(imported.developer.as_deref(), Some("FromSoftware"));
+        assert_eq!(imported.year, Some(2022));
+        assert_eq!(imported.release_date, None);
+        assert_eq!(imported.my_score, Some(4.5));
+    }
+
+    #[test]
+    fn rejects_unsupported_legacy_rating_step() {
+        let source = tempfile::tempdir().unwrap();
+        fs::write(
+            source.path().join("info.txt"),
+            "Title: Invalid Rating\nType: game\nRating: 4.25\n",
+        )
+        .unwrap();
+
+        match parse_info_txt(source.path()) {
+            Err(message) => assert!(message.contains("개인 별점")),
+            Ok(_) => panic!("quarter-step rating must be rejected"),
+        }
     }
 }
