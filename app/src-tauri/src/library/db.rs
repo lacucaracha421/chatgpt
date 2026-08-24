@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 21;
+pub(crate) const SCHEMA_VERSION: i64 = 22;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -37,6 +37,8 @@ const LEGACY_PACKAGE_IMPORTS_SCHEMA: &str =
     include_str!("../../migrations/0020_legacy_package_imports.sql");
 const COLLECTION_LEGACY_KIND_SCHEMA: &str =
     include_str!("../../migrations/0021_collection_legacy_kind.sql");
+const COLLECTION_FOUNDATION_SCHEMA: &str =
+    include_str!("../../migrations/0022_collection_foundation.sql");
 
 pub fn open_database(path: &Path) -> Result<Connection, LibraryError> {
     let connection = Connection::open(path)?;
@@ -52,7 +54,7 @@ pub fn initialize_database(path: &Path) -> Result<Connection, LibraryError> {
     let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
     match version {
         SCHEMA_VERSION => {}
-        version @ 0..=20 => {
+        version @ 0..=21 => {
             if version > 0 {
                 let root = path
                     .parent()
@@ -133,6 +135,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         }
         if version <= 20 {
             transaction.execute_batch(COLLECTION_LEGACY_KIND_SCHEMA)?;
+        }
+        if version <= 21 {
+            transaction.execute_batch(COLLECTION_FOUNDATION_SCHEMA)?;
         }
         transaction.commit()?;
         Ok::<(), LibraryError>(())
@@ -219,6 +224,84 @@ mod tests {
                 )
                 .unwrap(),
             None
+        );
+    }
+
+    #[test]
+    fn migrates_v21_collection_foundation_without_rewriting_ratings() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        for schema in [
+            INITIAL_SCHEMA,
+            VAULT_SAFETY_SCHEMA,
+            SIMILARITY_REVIEW_SCHEMA,
+            VIDEO_MEDIA_SCHEMA,
+            MANGA_SCHEMA,
+            MANGA_MODIFIED_SCHEMA,
+            CLASSIFICATION_APPEARANCE_SCHEMA,
+            ASSET_ALBUMS_SCHEMA,
+            ASSET_SOURCE_PROVENANCE_SCHEMA,
+            COLLECTIONS_SCHEMA,
+            COLLECTIONS_TYPED_SCHEMA,
+            COLLECTION_SOURCE_SCHEMA,
+            COLLECTION_EXTERNAL_BINDINGS_SCHEMA,
+            COLLECTION_WORK_ARTWORKS_SCHEMA,
+            COLLECTION_VOLUMES_SCHEMA,
+            ALADIN_VOLUME_SOURCES_SCHEMA,
+            ALADIN_RELEASE_WATCH_SCHEMA,
+            ONLINE_CATALOG_SCHEMA,
+            ONLINE_CATALOG_BOOKMARKS_SCHEMA,
+            LEGACY_PACKAGE_IMPORTS_SCHEMA,
+            COLLECTION_LEGACY_KIND_SCHEMA,
+        ] {
+            connection.execute_batch(schema).unwrap();
+        }
+        connection.execute_batch(
+            "INSERT INTO collections
+                (id, name, type, author, my_score, showcase, created_at, updated_at)
+             VALUES
+                ('game-a', 'Game A', 'game', 'Studio A', 5, 1, '2026-01-01', '2026-01-01'),
+                ('game-b', 'Game B', 'game', 'Studio B', 4, 1, '2026-01-02', '2026-01-02'),
+                ('movie-a', 'Movie A', 'movie', NULL, 3, 1, '2026-01-01', '2026-01-01');",
+        )
+        .unwrap();
+
+        migrate_to_latest(&mut connection, 21).unwrap();
+
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            22
+        );
+        let game: (Option<String>, Option<String>, Option<String>, Option<f64>, Option<i64>) =
+            connection
+                .query_row(
+                    "SELECT developer, production_company, release_date, my_score, showcase_order
+                     FROM collections WHERE id = 'game-a'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+                )
+                .unwrap();
+        assert_eq!(game, (Some("Studio A".into()), None, None, Some(5.0), Some(0)));
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT showcase_order FROM collections WHERE id = 'game-b'",
+                    [],
+                    |row| row.get::<_, Option<i64>>(0),
+                )
+                .unwrap(),
+            Some(1)
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT showcase_order FROM collections WHERE id = 'movie-a'",
+                    [],
+                    |row| row.get::<_, Option<i64>>(0),
+                )
+                .unwrap(),
+            Some(0)
         );
     }
 
