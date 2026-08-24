@@ -130,7 +130,7 @@ The current `author` and `director` columns are insufficient and must not contin
 - personal rating;
 - Showcase order per media type.
 
-Personal rating uses a 5-star UI with 0.5 increments. The existing integer storage convention can represent this as `0..10`, where `9` means 4.5 stars. Unrated remains null. Validation must reject values outside the supported range.
+Personal rating uses a 5-star UI and stores the displayed value directly as `0.0..5.0` in 0.5 increments. Existing integer ratings from 0 through 5 already mean the same displayed values and remain unchanged. SQLite can retain half-step real values in the existing `my_score` column without rebuilding the table. Unrated remains null. Validation must reject out-of-range values and values that are not half-step increments.
 
 Provider-derived fields, explicit user values, selected presentation artwork, and provider snapshots must remain distinguishable enough that refresh cannot erase user intent. A Collection may own multiple external bindings. Do not introduce a speculative universal provider interface before the next real provider requires it.
 
