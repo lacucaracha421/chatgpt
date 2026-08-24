@@ -2908,14 +2908,13 @@ input:disabled {
   font-weight: 650;
 }
 
-.collection-browser__heading > span,
-.collection-browser__eyebrow {
+.collection-browser__heading > span {
   color: var(--color-muted);
   font-size: var(--text-xs);
 }
 
 .collection-browser__eyebrow {
-  letter-spacing: 0.08em;
+  display: none;
 }
 
 .collection-browser__grid {
@@ -2962,6 +2961,12 @@ input:disabled {
   cursor: pointer;
 }
 
+.collection-card__object {
+  display: block;
+  position: relative;
+  min-width: 0;
+}
+
 .collection-card__cover {
   display: block;
   position: relative;
@@ -2971,19 +2976,30 @@ input:disabled {
   outline: var(--border-width) solid var(--color-border);
   outline-offset: calc(var(--border-width) * -1);
   border-radius: var(--radius-tile);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
-  transition: transform 130ms ease, outline-color 130ms ease, box-shadow 130ms ease;
+  box-shadow: none;
+  transition: outline-color 130ms ease, box-shadow 130ms ease;
 }
 
-.collection-card--game .collection-card__cover {
-  aspect-ratio: 3 / 4;
+.collection-card__object--game {
+  padding: 6px 6px 8px;
+  background: var(--color-surface);
+  border-radius: var(--radius-tile);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+}
+
+.collection-card__object--game::before {
+  position: absolute;
+  inset: 8px auto 10px 2px;
+  width: 3px;
+  content: "";
+  background: var(--color-border);
+  border-radius: 2px;
 }
 
 .collection-card:hover .collection-card__cover,
 .collection-card:focus-visible .collection-card__cover {
   outline-color: var(--color-muted);
-  transform: translateY(-2px);
-  box-shadow: 0 9px 22px rgba(0, 0, 0, 0.28);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.16);
 }
 
 .collection-browser__stage--showcase .collection-card__cover {
@@ -3019,31 +3035,34 @@ input:disabled {
 .collection-card__meta {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 0;
   min-width: 0;
   padding: 6px 2px 0;
-}
-
-.collection-card__type {
-  color: var(--color-muted);
-  font-size: var(--text-xs);
 }
 
 .collection-card__name {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
   color: var(--color-text);
   font-size: var(--text-sm);
   font-weight: 600;
+  line-height: 1.35;
 }
 
-.collection-card__count {
+.collection-card__credit {
+  overflow: hidden;
+  min-height: 1.35em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--color-muted);
   font-size: var(--text-xs);
+  line-height: 1.35;
 }
 
-.collection-card[aria-selected="true"] .collection-card__cover {
+.collection-card[aria-selected="true"] .collection-card__object {
   outline: var(--focus-width) solid var(--color-accent);
   outline-offset: calc(var(--focus-width) * -1);
 }

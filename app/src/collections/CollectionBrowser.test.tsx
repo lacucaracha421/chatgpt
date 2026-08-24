@@ -91,8 +91,9 @@ describe("CollectionBrowser", () => {
   it("renders a grid of collection cards", () => {
     renderBrowser({ collections: [sample], typeFilter: "game", showcase: false });
     expect(screen.getByText("Astral Chain")).toBeInTheDocument();
-    expect(screen.getAllByText("게임").length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText("3개")).toBeInTheDocument();
+    expect(screen.getByText("PlatinumGames")).toHaveClass("collection-card__credit");
+    expect(document.querySelector(".collection-card__type")).not.toBeInTheDocument();
+    expect(document.querySelector(".collection-card__count")).not.toBeInTheDocument();
   });
 
   it("shows unread release counts only when a collection has changes", () => {
