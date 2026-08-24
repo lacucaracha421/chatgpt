@@ -10,6 +10,15 @@ use super::error::LibraryError;
 use super::models::{CollectionType, ExternalBindingInput};
 use super::Library;
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LegacyCollectionKind {
+    Game,
+    Manga,
+    Movie,
+    Gacha,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BookMigrationReport {
@@ -41,6 +50,7 @@ pub struct BookImportEntry {
     pub folder: String,
     pub relative_path: String,
     pub collection_type: CollectionType,
+    pub legacy_kind: Option<LegacyCollectionKind>,
     pub name: String,
     pub year: Option<i64>,
     pub author: Option<String>,
@@ -154,6 +164,7 @@ pub(crate) fn scan_book_import(root: &Path) -> Result<BookImportPlan, LibraryErr
                 folder: folder_name,
                 relative_path: relative_path_for(&root_path, &entry.path()),
                 collection_type: parsed.collection_type,
+                legacy_kind: parsed.legacy_kind,
                 name: parsed.name,
                 year: parsed.year,
                 author: parsed.author,
@@ -215,10 +226,10 @@ fn upsert_collection(
             "INSERT INTO collections (
                 id, name, description, type, cover_asset_id,
                 year, author, director, external_score, my_score,
-                genres, overview, showcase, created_at, updated_at, source_path
+                genres, overview, showcase, created_at, updated_at, source_path, legacy_kind
              ) VALUES (?1, ?2, NULL, ?3, NULL,
                 ?4, ?5, ?6, NULL, ?7,
-                ?8, ?9, 0, ?10, ?10, ?11)",
+                ?8, ?9, 0, ?10, ?10, ?11, ?12)",
             params![
                 id,
                 name,
@@ -230,7 +241,8 @@ fn upsert_collection(
                 entry.genres,
                 entry.overview,
                 now,
-                entry.relative_path
+                entry.relative_path,
+                entry.legacy_kind.map(legacy_kind_str)
             ],
         )
         .map_err(|e| map_duplicate_name_err(e, &entry.name))?;
@@ -267,6 +279,7 @@ fn map_duplicate_name_err(e: rusqlite::Error, name: &str) -> String {
 struct ParsedInfo {
     name: String,
     collection_type: CollectionType,
+    legacy_kind: Option<LegacyCollectionKind>,
     year: Option<i64>,
     author: Option<String>,
     director: Option<String>,
@@ -274,6 +287,15 @@ struct ParsedInfo {
     genres: Option<String>,
     overview: Option<String>,
     external_bindings: Vec<BookExternalBinding>,
+}
+
+fn legacy_kind_str(kind: LegacyCollectionKind) -> &'static str {
+    match kind {
+        LegacyCollectionKind::Game => "game",
+        LegacyCollectionKind::Manga => "manga",
+        LegacyCollectionKind::Movie => "movie",
+        LegacyCollectionKind::Gacha => "gacha",
+    }
 }
 
 fn parse_info_txt(folder: &Path) -> Result<Option<ParsedInfo>, String> {
@@ -294,12 +316,14 @@ fn parse_info_txt(folder: &Path) -> Result<Option<ParsedInfo>, String> {
     if name.is_empty() {
         return Err("empty name".into());
     }
-    let collection_type = match first_value(&fields, "Type").map(|v| v.trim().to_lowercase()) {
-        Some(ref t) if t == "game" => CollectionType::Game,
-        Some(ref t) if t == "movie" => CollectionType::Movie,
-        Some(ref t) if t == "gacha" => CollectionType::Game,
-        _ => CollectionType::Manga,
-    };
+    let (collection_type, legacy_kind) =
+        match first_value(&fields, "Type").map(|v| v.trim().to_lowercase()) {
+            Some(t) if t == "game" => (CollectionType::Game, Some(LegacyCollectionKind::Game)),
+            Some(t) if t == "manga" => (CollectionType::Manga, Some(LegacyCollectionKind::Manga)),
+            Some(t) if t == "movie" => (CollectionType::Movie, Some(LegacyCollectionKind::Movie)),
+            Some(t) if t == "gacha" => (CollectionType::Game, Some(LegacyCollectionKind::Gacha)),
+            _ => (CollectionType::Manga, None),
+        };
     let year = first_value(&fields, "Publication Year").and_then(|v| v.trim().parse::<i64>().ok());
     let author = first_value(&fields, "Authors").map(trim_field);
     let director = first_value(&fields, "Director").map(trim_field);
@@ -317,6 +341,7 @@ fn parse_info_txt(folder: &Path) -> Result<Option<ParsedInfo>, String> {
     Ok(Some(ParsedInfo {
         name,
         collection_type,
+        legacy_kind,
         year,
         author,
         director,
@@ -422,6 +447,11 @@ mod tests {
                    Type: game\n";
         let fields = parse_key_value(raw);
         assert_eq!(first_value(&fields, "Type"), Some("game"));
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("info.txt"), raw).unwrap();
+        let parsed = parse_info_txt(temp.path()).unwrap().unwrap();
+        assert_eq!(parsed.collection_type, CollectionType::Game);
+        assert_eq!(parsed.legacy_kind, Some(LegacyCollectionKind::Game));
         assert_eq!(
             external_bindings(&fields),
             vec![
@@ -446,6 +476,7 @@ mod tests {
             folder: "Elden Ring".into(),
             relative_path: "Elden Ring".into(),
             collection_type: CollectionType::Game,
+            legacy_kind: Some(LegacyCollectionKind::Game),
             name: "Elden Ring".into(),
             year: Some(2022),
             author: Some("FromSoftware".into()),
@@ -548,12 +579,51 @@ mod tests {
     }
 
     #[test]
+    fn persists_gacha_legacy_kind_during_import() {
+        let source = tempfile::tempdir().unwrap();
+        let book = source.path().join("Gacha Work");
+        fs::create_dir(&book).unwrap();
+        fs::write(book.join("info.txt"), "Title: Gacha Work\nType: gacha\n").unwrap();
+        let plan = scan_book_import(source.path()).unwrap();
+        let target = tempfile::tempdir().unwrap();
+        let library = Library::open(target.path()).unwrap();
+        library.apply_book_import_plan(&plan).unwrap();
+        let stored: Option<String> = library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT legacy_kind FROM collections WHERE name = 'Gacha Work'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored.as_deref(), Some("gacha"));
+    }
+
+    #[test]
+    fn parses_gacha_type_as_game_with_legacy_provenance() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("info.txt"),
+            "Title: Gacha Work\nType: gacha\n",
+        )
+        .unwrap();
+        let parsed = parse_info_txt(temp.path()).unwrap().unwrap();
+        assert_eq!(parsed.collection_type, CollectionType::Game);
+        assert_eq!(parsed.legacy_kind, Some(LegacyCollectionKind::Gacha));
+    }
+
+    #[test]
     fn treats_missing_type_as_manga() {
-        let raw = "Title: Chainsaw Man\nAuthors: Fujimoto Tatsuki\n";
-        let fields = parse_key_value(raw);
-        let parsed = parse_info_txt(Path::new("Chainsaw Man")).unwrap();
-        assert!(parsed.is_none());
-        let _ = fields;
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("info.txt"),
+            "Title: Chainsaw Man\nAuthors: Fujimoto Tatsuki\n",
+        )
+        .unwrap();
+        let parsed = parse_info_txt(temp.path()).unwrap().unwrap();
+        assert_eq!(parsed.collection_type, CollectionType::Manga);
+        assert_eq!(parsed.legacy_kind, None);
     }
 
     #[test]

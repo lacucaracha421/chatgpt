@@ -130,6 +130,7 @@ export type AlbumEntry = {
 };
 
 export type CollectionType = "game" | "manga" | "movie";
+export type LegacyCollectionKind = "game" | "manga" | "movie" | "gacha";
 
 export type CollectionSummary = {
   id: string;
@@ -627,6 +628,7 @@ export type BookExternalBinding = {
 export type BookImportEntry = {
   folder: string;
   collectionType: CollectionType;
+  legacyKind: LegacyCollectionKind | null;
   name: string;
   year: number | null;
   author: string | null;
