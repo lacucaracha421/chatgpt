@@ -1056,4 +1056,45 @@ describe("App", () => {
     await user.click(await screen.findByRole("button", { name: "저장소" }));
     expect(await screen.findByRole("region", { name: "자산 내용" })).toBeInTheDocument();
   });
+
+  it("returns from a manga Collection detail to the manga list", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({ collectionType: "game" }));
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listCollections).mockResolvedValue([{
+      id: "manga-1",
+      name: "던전밥",
+      description: null,
+      type: "manga",
+      coverAssetId: null,
+      selectedWorkArtworkId: null,
+      assetCount: 1,
+      unreadReleaseCount: 0,
+      year: 2014,
+      author: "쿠이 료코",
+      director: null,
+      externalScore: null,
+      myScore: null,
+      genres: null,
+      overview: null,
+      showcase: false,
+      createdAt: "2026-08-01T00:00:00Z",
+      updatedAt: "2026-08-01T00:00:00Z",
+    }]);
+    vi.mocked(libraryGateway.getMangaDexConnection).mockResolvedValue(null);
+    vi.mocked(libraryGateway.getAladinConnection).mockResolvedValue(null);
+    vi.mocked(libraryGateway.listCollectionCovers).mockResolvedValue([]);
+    vi.mocked(libraryGateway.listCollectionVolumes).mockResolvedValue([]);
+    const user = userEvent.setup();
+
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    await user.click(await screen.findByRole("button", { name: "컬렉션" }));
+    await user.click(await screen.findByRole("button", { name: "만화" }));
+    await user.click(await screen.findByText("던전밥"));
+    await user.click(await screen.findByRole("button", { name: "컬렉션 표지 보기 닫기" }));
+
+    expect(await screen.findByRole("heading", { name: "만화 컬렉션" })).toBeInTheDocument();
+    expect(screen.getByText("던전밥")).toBeInTheDocument();
+  });
+
 });

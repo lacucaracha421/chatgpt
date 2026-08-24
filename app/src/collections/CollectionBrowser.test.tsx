@@ -117,6 +117,16 @@ describe("CollectionBrowser", () => {
     expect(screen.getByText("쇼케이스에 컬렉션이 없습니다.")).toBeInTheDocument();
   });
 
+  it("preserves the concrete type when toggling showcase", async () => {
+    const user = userEvent.setup();
+    const onViewChange = vi.fn();
+    renderBrowser({ collections: [sample], typeFilter: "game", showcase: false, onViewChange });
+
+    await user.click(screen.getByRole("button", { name: "쇼케이스" }));
+
+    expect(onViewChange).toHaveBeenCalledWith({ kind: "collections", typeFilter: "game", showcase: true });
+  });
+
   it("shows showcase collections when showcase on and a collection is showcased", () => {
     renderBrowser({ collections: [{ ...sample, showcase: true }], typeFilter: "game", showcase: true });
     expect(screen.getByText("Astral Chain")).toBeInTheDocument();

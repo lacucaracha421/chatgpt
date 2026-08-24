@@ -740,10 +740,10 @@ describe("ClassificationSidebar", () => {
 
   it("opens the collections quick view", async () => {
     const user = userEvent.setup();
-    const { onViewChange } = renderSidebar();
+    const { onViewChange } = renderSidebar(undefined, { collectionType: "movie" });
 
     await user.click(screen.getByRole("button", { name: "컬렉션" }));
 
-    expect(onViewChange).toHaveBeenCalledWith({ kind: "collections", typeFilter: "manga", showcase: false });
+    expect(onViewChange).toHaveBeenCalledWith({ kind: "collections", typeFilter: "movie", showcase: false });
   });
 });
