@@ -40,18 +40,22 @@ impl CatalogTransport {
         app: &AppHandle,
         path: &str,
     ) -> Result<String, LibraryError> {
+        let deadline = Instant::now() + REQUEST_TIMEOUT;
         let script = request_script(path)?;
         let _guard = self.begin_request()?;
-        let window = ensure_window(app).await?;
+        let window = ensure_window(app, deadline).await?;
         window
             .eval(script)
             .map_err(|_| LibraryError::CatalogTransportUnavailable)?;
-        let callback = poll_response(&window).await?;
+        let callback = poll_response(&window, deadline).await?;
         decode_callback(&callback)
     }
 }
 
-async fn ensure_window(app: &AppHandle) -> Result<WebviewWindow, LibraryError> {
+async fn ensure_window(
+    app: &AppHandle,
+    deadline: Instant,
+) -> Result<WebviewWindow, LibraryError> {
     if let Some(window) = app.get_webview_window("catalog-transport") {
         return Ok(window);
     }
@@ -77,7 +81,11 @@ async fn ensure_window(app: &AppHandle) -> Result<WebviewWindow, LibraryError> {
     .build()
     .map_err(|_| LibraryError::CatalogTransportUnavailable)?;
 
-    tauri::async_runtime::spawn_blocking(move || receive_callback(ready_receiver, REQUEST_TIMEOUT))
+    let remaining = remaining_until(deadline, Instant::now());
+    if remaining.is_zero() {
+        return Err(LibraryError::CatalogTransportTimedOut);
+    }
+    tauri::async_runtime::spawn_blocking(move || receive_callback(ready_receiver, remaining))
         .await
         .map_err(|_| LibraryError::CatalogTransportUnavailable)??;
     Ok(window)
@@ -106,10 +114,9 @@ async fn evaluate(
         .map_err(|_| LibraryError::CatalogTransportUnavailable)?
 }
 
-async fn poll_response(window: &WebviewWindow) -> Result<String, LibraryError> {
-    let deadline = Instant::now() + REQUEST_TIMEOUT;
+async fn poll_response(window: &WebviewWindow, deadline: Instant) -> Result<String, LibraryError> {
     loop {
-        let remaining = deadline.saturating_duration_since(Instant::now());
+        let remaining = remaining_until(deadline, Instant::now());
         if remaining.is_zero() {
             return Err(LibraryError::CatalogTransportTimedOut);
         }
@@ -117,10 +124,22 @@ async fn poll_response(window: &WebviewWindow) -> Result<String, LibraryError> {
         if value != "null" {
             return Ok(value);
         }
-        tauri::async_runtime::spawn_blocking(|| std::thread::sleep(RESPONSE_POLL_INTERVAL))
+        let delay = poll_delay(remaining_until(deadline, Instant::now()));
+        if delay.is_zero() {
+            return Err(LibraryError::CatalogTransportTimedOut);
+        }
+        tauri::async_runtime::spawn_blocking(move || std::thread::sleep(delay))
             .await
             .map_err(|_| LibraryError::CatalogTransportUnavailable)?;
     }
+}
+
+fn remaining_until(deadline: Instant, now: Instant) -> Duration {
+    deadline.saturating_duration_since(now)
+}
+
+fn poll_delay(remaining: Duration) -> Duration {
+    RESPONSE_POLL_INTERVAL.min(remaining)
 }
 
 pub(crate) fn search_page_path(cursor: Option<u64>) -> String {
@@ -137,13 +156,19 @@ fn request_script(path: &str) -> Result<String, LibraryError> {
     let path =
         serde_json::to_string(path).map_err(|_| LibraryError::InvalidCatalogTransportPath)?;
     Ok(format!(
-        r#"window.__lakomicsCatalogResponse = null;
+        r#"window.__lakomicsCatalogGeneration = (window.__lakomicsCatalogGeneration || 0) + 1;
+        const generation = window.__lakomicsCatalogGeneration;
+        window.__lakomicsCatalogResponse = null;
         void (async () => {{
           try {{
             const response = await fetch({path}, {{ credentials: 'include', cache: 'no-store' }});
-            window.__lakomicsCatalogResponse = JSON.stringify({{ ok: response.ok, status: response.status, body: await response.text() }});
+            if (window.__lakomicsCatalogGeneration === generation) {{
+              window.__lakomicsCatalogResponse = JSON.stringify({{ ok: response.ok, status: response.status, body: await response.text() }});
+            }}
           }} catch (error) {{
-            window.__lakomicsCatalogResponse = JSON.stringify({{ ok: false, status: 0, body: String(error) }});
+            if (window.__lakomicsCatalogGeneration === generation) {{
+              window.__lakomicsCatalogResponse = JSON.stringify({{ ok: false, status: 0, body: String(error) }});
+            }}
           }}
         }})();"#
     ))
@@ -190,11 +215,11 @@ fn decode_callback(value: &str) -> Result<String, LibraryError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        decode_callback, receive_callback, request_script, response_script,
-        search_page_path, CatalogTransport,
+        decode_callback, poll_delay, receive_callback, remaining_until, request_script,
+        response_script, search_page_path, CatalogTransport, RESPONSE_POLL_INTERVAL,
     };
     use crate::library::error::LibraryError;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     fn callback_value(ok: bool, status: u16, body: &str) -> String {
         serde_json::to_string(
@@ -235,10 +260,15 @@ mod tests {
     fn starts_async_fetch_without_returning_its_promise_to_webview2() {
         let script = request_script("/ajax/search?search=language%3Akorean").unwrap();
         assert!(script.contains("window.__lakomicsCatalogResponse = null"));
+        assert!(script.contains(
+            "window.__lakomicsCatalogGeneration = (window.__lakomicsCatalogGeneration || 0) + 1"
+        ));
+        assert!(script.contains("const generation = window.__lakomicsCatalogGeneration"));
         assert!(script.contains("void (async () =>"));
         assert!(script.contains(
-            "window.__lakomicsCatalogResponse = JSON.stringify({ ok: response.ok"
+            "if (window.__lakomicsCatalogGeneration === generation)"
         ));
+        assert!(script.contains("credentials: 'include', cache: 'no-store'"));
         assert!(script.contains("fetch(\"/ajax/search?search=language%3Akorean\""));
         assert!(!script.trim_end().ends_with("})()"));
     }
@@ -249,8 +279,25 @@ mod tests {
 
         assert!(script.contains("window.__lakomicsCatalogResponse"));
         assert!(script.contains("value === null"));
+        assert!(script.contains("value === undefined"));
         assert!(script.contains("delete window.__lakomicsCatalogResponse"));
         assert!(!script.contains("fetch("));
+    }
+
+    #[test]
+    fn computes_remaining_shared_deadline_without_sleeping() {
+        let now = Instant::now();
+        let deadline = now + Duration::from_secs(1);
+
+        assert_eq!(remaining_until(deadline, now), Duration::from_secs(1));
+        assert_eq!(remaining_until(deadline, deadline), Duration::ZERO);
+        assert_eq!(remaining_until(deadline, deadline + Duration::from_secs(1)), Duration::ZERO);
+    }
+
+    #[test]
+    fn caps_poll_delay_at_remaining_deadline() {
+        assert_eq!(poll_delay(Duration::from_secs(1)), RESPONSE_POLL_INTERVAL);
+        assert_eq!(poll_delay(Duration::from_millis(10)), Duration::from_millis(10));
     }
 
     #[test]
