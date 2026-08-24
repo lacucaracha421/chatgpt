@@ -81,6 +81,26 @@ describe("AssetBrowser", () => {
     expect(next![0].randomPivot).toBe(first![0].randomPivot);
   });
 
+  it("keeps the gallery layout stable while the next page is loading", async () => {
+    const pendingNext = new Promise<AssetPage>(() => undefined);
+    const status = vi.fn();
+    const gateway = createGateway();
+    vi.mocked(gateway.listAssets)
+      .mockResolvedValueOnce({
+        items: Array.from({ length: 50 }, (_, index) => asset(index)),
+        nextCursor: { token: "next" },
+      })
+      .mockReturnValueOnce(pendingNext);
+
+    const { container } = renderBrowser(gateway, { status });
+
+    expect(await screen.findByRole("option", { name: "asset-0.png" })).toBeInTheDocument();
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledTimes(2));
+    expect(status).toHaveBeenLastCalledWith(expect.objectContaining({ loading: true }));
+    expect(container.querySelector(".asset-gallery")).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "자산을 더 불러오는 중" })).not.toBeInTheDocument();
+  });
+
   it("changes thumbnail density without reloading assets", async () => {
     const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
     const onThumbnailRowHeightChange = vi.fn();
