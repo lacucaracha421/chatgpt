@@ -103,6 +103,26 @@ it("submits a half-star personal rating for movie", async () => {
   expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ myScore: 3.5 }));
 });
 
+it("does not show rating or developer controls while creating a game", async () => {
+  const user = userEvent.setup();
+  render(<CollectionEditDialog open mode={{ kind: "create" }} onClose={vi.fn()} onSubmit={vi.fn()} />);
+
+  await user.selectOptions(screen.getByLabelText("유형"), "game");
+
+  expect(screen.queryByLabelText("내 별점")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("개발사")).not.toBeInTheDocument();
+});
+
+it("does not show rating or production company controls while creating a movie", async () => {
+  const user = userEvent.setup();
+  render(<CollectionEditDialog open mode={{ kind: "create" }} onClose={vi.fn()} onSubmit={vi.fn()} />);
+
+  await user.selectOptions(screen.getByLabelText("유형"), "movie");
+
+  expect(screen.queryByLabelText("내 별점")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("제작사")).not.toBeInTheDocument();
+});
+
 const collectionFixture: CollectionSummary = {
   id: "work-1",
   name: "Provider title",
