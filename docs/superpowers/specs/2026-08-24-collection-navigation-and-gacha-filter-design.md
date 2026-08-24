@@ -56,7 +56,7 @@ Collection 유형은 계속 `game | manga | movie` 세 가지뿐이다. `legacy_
 
 SQLite 스키마 버전을 올리고 `collections`에 nullable `legacy_kind` 컬럼을 추가한다. 새 레거시 가져오기는 `info.txt`를 파싱할 때 정규화한 원본 `Type`을 Collection 유형과 함께 기록한다.
 
-기존 행은 스키마 마이그레이션 이후 라이브러리를 열 때 멱등적으로 보강한다. 대상은 `source_path`가 있고 `legacy_kind`가 비어 있는 행뿐이다. 기존 레거시 가져오기 parser와 안전한 Collection source 경로 해석을 재사용해 `<library root>/<source_path>/info.txt`의 `Type`을 읽는다. 이미 값이 있는 행은 다시 읽지 않는다.
+기존 행은 스키마 마이그레이션 이후 라이브러리를 열 때 멱등적으로 보강한다. 대상은 `source_path`가 있고 `legacy_kind`가 비어 있는 행뿐이다. 기존 레거시 가져오기 parser와 안전한 Collection source 경로 해석을 재사용해 `<collection_source_root>/<source_path>/info.txt`의 `Type`을 읽는다. 이미 값이 있는 행은 다시 읽지 않는다.
 
 원본 폴더나 `info.txt`가 없거나, 경로가 라이브러리 루트 밖을 가리키거나, 파일을 읽을 수 없거나, `Type`이 인식되지 않으면 해당 행을 `NULL`로 남긴다. 앱 시작과 Collection 탐색은 계속 진행하며 판별할 수 없는 항목은 숨기지 않는다. 추측보다 자료 보존을 우선한다.
 
