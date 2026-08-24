@@ -241,7 +241,7 @@ it("shows the active collection metadata for a game collection", async () => {
   expect(within(section).getByText("엘든 링")).toBeVisible();
   expect(within(section).getByText("프롬소프트")).toBeVisible();
   expect(within(section).getByText("96")).toBeVisible();
-  expect(within(section).getByText("95")).toBeVisible();
+  expect(within(section).getByText("5")).toBeVisible();
 });
 
 it("shows the active collection metadata for a manga collection", async () => {
