@@ -163,8 +163,9 @@ fn request_script(path: &str) -> Result<String, LibraryError> {
           void (async () => {{
             try {{
               const response = await fetch({path}, {{ credentials: 'include', cache: 'no-store' }});
+              const body = await response.text();
               if (window.__lakomicsCatalogGeneration === generation) {{
-                window.__lakomicsCatalogResponse = JSON.stringify({{ ok: response.ok, status: response.status, body: await response.text() }});
+                window.__lakomicsCatalogResponse = JSON.stringify({{ ok: response.ok, status: response.status, body }});
               }}
             }} catch (error) {{
               if (window.__lakomicsCatalogGeneration === generation) {{
@@ -273,6 +274,11 @@ mod tests {
         assert!(script.contains(
             "if (window.__lakomicsCatalogGeneration === generation)"
         ));
+        let body_index = script.find("const body = await response.text();").unwrap();
+        let guard_index = script
+            .find("if (window.__lakomicsCatalogGeneration === generation)")
+            .unwrap();
+        assert!(body_index < guard_index);
         assert!(script.contains("credentials: 'include', cache: 'no-store'"));
         assert!(script.contains("fetch(\"/ajax/search?search=language%3Akorean\""));
         assert!(!script.trim_end().ends_with("})()"));
