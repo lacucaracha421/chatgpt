@@ -103,7 +103,7 @@ it("submits a half-star personal rating for movie", async () => {
   expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ myScore: 3.5 }));
 });
 
-it("does not show rating or developer controls while creating a game", async () => {
+it("shows only core fields while creating a game", async () => {
   const user = userEvent.setup();
   render(<CollectionEditDialog open mode={{ kind: "create" }} onClose={vi.fn()} onSubmit={vi.fn()} />);
 
@@ -111,9 +111,18 @@ it("does not show rating or developer controls while creating a game", async () 
 
   expect(screen.queryByLabelText("내 별점")).not.toBeInTheDocument();
   expect(screen.queryByLabelText("개발사")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("외부 점수")).not.toBeInTheDocument();
 });
 
-it("does not show rating or production company controls while creating a movie", async () => {
+it("shows only core fields while creating a manga", () => {
+  render(<CollectionEditDialog open mode={{ kind: "create" }} onClose={vi.fn()} onSubmit={vi.fn()} />);
+
+  expect(screen.queryByLabelText("작가")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("출간 연도")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("내 별점")).not.toBeInTheDocument();
+});
+
+it("shows only core fields while creating a movie", async () => {
   const user = userEvent.setup();
   render(<CollectionEditDialog open mode={{ kind: "create" }} onClose={vi.fn()} onSubmit={vi.fn()} />);
 
@@ -121,6 +130,8 @@ it("does not show rating or production company controls while creating a movie",
 
   expect(screen.queryByLabelText("내 별점")).not.toBeInTheDocument();
   expect(screen.queryByLabelText("제작사")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("감독")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("개봉 연도")).not.toBeInTheDocument();
 });
 
 const collectionFixture: CollectionSummary = {

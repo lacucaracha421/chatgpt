@@ -95,19 +95,19 @@ export function CollectionEditDialog({
           <option value="manga">만화</option>
           <option value="movie">영화</option>
         </Select>
-        {type === "manga" && (
+        {mode.kind === "edit" && type === "manga" && (
           <>
             <TextField label="작가" value={author} onChange={(event) => setAuthor(event.target.value)} />
             <TextField label="출간 연도" inputMode="numeric" value={year?.toString() ?? ""} onChange={(event) => setYear(event.target.value ? Number(event.target.value) : null)} />
           </>
         )}
-        {type === "game" && (
+        {mode.kind === "edit" && type === "game" && (
           <>
             {mode.kind === "edit" && <TextField label="개발사" value={developer} onChange={(event) => setDeveloper(event.target.value)} />}
             <TextField label="외부 점수" inputMode="numeric" value={externalScore?.toString() ?? ""} onChange={(event) => setExternalScore(event.target.value ? Number(event.target.value) : null)} />
           </>
         )}
-        {type === "movie" && (
+        {mode.kind === "edit" && type === "movie" && (
           <>
             {mode.kind === "edit" && <TextField label="제작사" value={productionCompany} onChange={(event) => setProductionCompany(event.target.value)} />}
             <TextField label="감독" value={director} onChange={(event) => setDirector(event.target.value)} />
