@@ -2810,6 +2810,26 @@ input:disabled {
   display: flex;
   align-items: center;
   gap: var(--space-compact);
+  flex-wrap: wrap;
+}
+
+.collection-browser__library-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-compact);
+}
+
+.collection-browser__library-controls .ui-text-field > span,
+.collection-browser__library-controls .ui-select > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .collection-browser__segment {

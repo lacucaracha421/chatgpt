@@ -1,5 +1,5 @@
 import { PlusIcon } from "@heroicons/react/24/outline";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { collectionSourcePreviewUrl, thumbnailUrl, workArtworkThumbnailUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -11,10 +11,13 @@ import { Dialog } from "../shared/ui/Dialog";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { Menu } from "../shared/ui/Menu";
 import { Toast } from "../shared/ui/Toast";
+import { Select } from "../shared/ui/Select";
+import { TextField } from "../shared/ui/TextField";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { CollectionCard } from "./CollectionCard";
 import { CollectionEditDialog, type CollectionEditMode } from "./CollectionEditDialog";
 import { MangaDexImportDialog } from "./MangaDexImportDialog";
+import { deriveCollectionLibrary, type CollectionLibrarySort, type CollectionLibraryState } from "./collectionLibrary";
 
 const TYPE_LABEL: Record<CollectionType, string> = {
   game: "게임",
@@ -28,6 +31,8 @@ type CollectionBrowserProps = {
   showcase: boolean;
   onViewChange: (next: AssetView) => void;
   onChanged: () => Promise<void>;
+  libraryState: CollectionLibraryState;
+  onLibraryStateChange: (next: CollectionLibraryState) => void;
 };
 
 export function CollectionBrowser({
@@ -36,19 +41,21 @@ export function CollectionBrowser({
   showcase,
   onViewChange,
   onChanged,
+  libraryState,
+  onLibraryStateChange,
 }: CollectionBrowserProps) {
   const { gateway } = useLibrary();
   const [editMode, setEditMode] = useState<CollectionEditMode | null>(null);
   const [mangaDexOpen, setMangaDexOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<CollectionSummary | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const libraryStateRef = useRef(libraryState);
+  libraryStateRef.current = libraryState;
   useAutoDismiss(message, setMessage);
 
-  const visible = collections.filter((collection) => {
-    if (showcase && !collection.showcase) return false;
-    if (collection.type !== typeFilter) return false;
-    return true;
-  });
+  const visible = showcase
+    ? collections.filter((collection) => collection.type === typeFilter && collection.showcase).sort((a, b) => (a.showcaseOrder ?? Number.MAX_SAFE_INTEGER) - (b.showcaseOrder ?? Number.MAX_SAFE_INTEGER) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
+    : deriveCollectionLibrary(collections, typeFilter, libraryState);
   const sectionLabel = TYPE_LABEL[typeFilter];
 
   function setTypeFilter(next: CollectionType) {
@@ -57,6 +64,12 @@ export function CollectionBrowser({
 
   function setShowcase(next: boolean) {
     onViewChange({ kind: "collections", typeFilter, showcase: next });
+  }
+
+  function patchLibraryState(update: Partial<CollectionLibraryState>) {
+    const next = { ...libraryStateRef.current, ...update };
+    libraryStateRef.current = next;
+    onLibraryStateChange(next);
   }
 
   async function handleSubmit(input: CreateCollection | UpdateCollection) {
@@ -98,22 +111,25 @@ export function CollectionBrowser({
             label="새 컬렉션"
             trigger={<PlusIcon aria-hidden="true" />}
             items={[
-              { id: "mangadex", label: "MangaDex에서 만화 추가", onSelect: () => setMangaDexOpen(true) },
+              ...(typeFilter === "manga" ? [{ id: "mangadex", label: "MangaDex에서 만화 추가", onSelect: () => setMangaDexOpen(true) }] : []),
               { id: "manual", label: "직접 입력", onSelect: () => setEditMode({ kind: "create" }) },
             ]}
           />
         }
       >
         <div className="collection-browser__filters">
+          <ModeSegment showcase={showcase} onChange={setShowcase} />
           <TypeSegment current={typeFilter} onChange={setTypeFilter} />
-          <button
-            type="button"
-            className="collection-browser__showcase"
-            aria-pressed={showcase}
-            onClick={() => setShowcase(!showcase)}
-          >
-            쇼케이스
-          </button>
+          {!showcase && <div className="collection-browser__library-controls">
+            <TextField label="제목 검색" placeholder="제목 검색" value={libraryState.query} onChange={(event) => patchLibraryState({ query: event.target.value })} />
+            <Select label="정렬" value={libraryState.sort} onChange={(event) => patchLibraryState({ sort: event.target.value as CollectionLibrarySort })}>
+              <option value="recent">최근 추가</option><option value="name">제목</option><option value="media_date">출시·출간·개봉일</option>
+            </Select>
+            <button type="button" aria-label={libraryState.direction === "desc" ? "내림차순" : "오름차순"} onClick={() => patchLibraryState({ direction: libraryState.direction === "desc" ? "asc" : "desc" })}>↕</button>
+            <Select label="내 별점" value={String(libraryState.rating)} onChange={(event) => patchLibraryState({ rating: event.target.value === "all" || event.target.value === "unrated" ? event.target.value : Number(event.target.value) })}>
+              <option value="all">전체</option>{[5, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1, 0.5, 0].map((rating) => <option key={rating} value={rating}>{rating.toFixed(1)}</option>)}<option value="unrated">미평가</option>
+            </Select>
+          </div>}
         </div>
       </ViewToolbar>
       {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
@@ -161,7 +177,7 @@ export function CollectionBrowser({
           {visible.length === 0 && (
             <div className="collection-browser__empty">
               <EmptyState title={showcase ? "쇼케이스에 컬렉션이 없습니다." : "컬렉션이 없습니다."}>
-                {showcase ? "쇼케이스로 표시한 컬렉션이 여기에 표시됩니다." : "새 컬렉션을 만들어 작품을 모아보세요."}
+                {showcase ? "쇼케이스로 표시한 컬렉션이 여기에 표시됩니다." : <><p>새 컬렉션을 만들어 작품을 모아보세요.</p><Button type="button" onClick={() => typeFilter === "manga" ? setMangaDexOpen(true) : setEditMode({ kind: "create" })}>{typeFilter === "manga" ? "MangaDex에서 만화 추가" : "직접 입력"}</Button></>}
               </EmptyState>
             </div>
           )}
@@ -228,4 +244,11 @@ function TypeSegment({
       ))}
     </div>
   );
+}
+
+function ModeSegment({ showcase, onChange }: { showcase: boolean; onChange: (next: boolean) => void }) {
+  return <div className="collection-browser__segment" role="group" aria-label="보기">
+    <button type="button" className="collection-browser__segment-button" aria-pressed={!showcase} onClick={() => onChange(false)}>라이브러리</button>
+    <button type="button" className="collection-browser__segment-button" aria-pressed={showcase} onClick={() => onChange(true)}>쇼케이스</button>
+  </div>;
 }

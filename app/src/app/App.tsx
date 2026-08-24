@@ -4,6 +4,7 @@ import { AssetBrowser, type AssetBrowserStatus } from "../assets/AssetBrowser";
 import { startAssetDrag as nativeStartAssetDrag, type StartAssetDrag } from "../drag-out/startAssetDrag";
 import { ClassificationSidebar } from "../classification/ClassificationSidebar";
 import { CollectionBrowser } from "../collections/CollectionBrowser";
+import { createDefaultCollectionLibraryState, type CollectionLibraryState, type CollectionLibraryStateByType } from "../collections/collectionLibrary";
 import { CollectionOverlay } from "../collections/CollectionOverlay";
 import {
   type DropSubscriber,
@@ -96,6 +97,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const [entries, setEntries] = useState<ClassificationEntry[]>([]);
   const [albums, setAlbums] = useState<AlbumEntry[]>([]);
   const [collections, setCollections] = useState<CollectionSummary[]>([]);
+  const [collectionLibraryState, setCollectionLibraryState] = useState<CollectionLibraryStateByType>(createDefaultCollectionLibraryState);
   const [view, setView] = useState<AssetView>({
     kind: "classification",
     classificationId: null,
@@ -306,6 +308,10 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     if (next.kind === "settings" && view.kind !== "settings") settingsReturnViewRef.current = view;
     if (next.kind === "collections") updatePreferences({ collectionType: next.typeFilter });
     setView(next);
+  }
+
+  function updateCollectionLibraryState(type: CollectionSummary["type"], next: CollectionLibraryState) {
+    setCollectionLibraryState((current) => ({ ...current, [type]: next }));
   }
 
   function transitionDrag(action: Parameters<typeof pointerDragReducer>[1]) {
@@ -519,6 +525,8 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     collections={collections}
                     typeFilter={view.typeFilter}
                     showcase={view.showcase}
+                    libraryState={collectionLibraryState[view.typeFilter]}
+                    onLibraryStateChange={(next) => updateCollectionLibraryState(view.typeFilter, next)}
                     onViewChange={navigateView}
                     onChanged={refreshCollections}
                   />

@@ -1,9 +1,11 @@
 import { cleanup, render, screen } from "@testing-library/react";
+import { useState } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { CollectionSummary, LibraryGateway } from "../library/types";
 import { CollectionBrowser } from "./CollectionBrowser";
+import { createDefaultCollectionLibraryState } from "./collectionLibrary";
 
 afterEach(cleanup);
 
@@ -38,23 +40,54 @@ function renderBrowser(props: {
   showcase: boolean;
   onViewChange?: () => void;
   onChanged?: () => Promise<void>;
+  libraryState?: ReturnType<typeof createDefaultCollectionLibraryState>["game"];
+  onLibraryStateChange?: (next: ReturnType<typeof createDefaultCollectionLibraryState>["game"]) => void;
 }) {
   const gateway = createGateway();
+  function Harness() {
+    const [state, setState] = useState(props.libraryState ?? createDefaultCollectionLibraryState().game);
+    return <LibraryProvider gateway={gateway}><CollectionBrowser
+      collections={props.collections} typeFilter={props.typeFilter} showcase={props.showcase}
+      onViewChange={props.onViewChange ?? (() => undefined)} onChanged={props.onChanged ?? (async () => undefined)}
+      libraryState={state} onLibraryStateChange={(next) => { props.onLibraryStateChange?.(next); setState(next); }}
+    /></LibraryProvider>;
+  }
   render(
-    <LibraryProvider gateway={gateway}>
-      <CollectionBrowser
-        collections={props.collections}
-        typeFilter={props.typeFilter}
-        showcase={props.showcase}
-        onViewChange={props.onViewChange ?? (() => undefined)}
-        onChanged={props.onChanged ?? (async () => undefined)}
-      />
-    </LibraryProvider>,
+    <Harness />,
   );
   return gateway;
 }
 
 describe("CollectionBrowser", () => {
+  it("renders stable mode, media, search, sort, direction, and rating controls", () => {
+    const defaults = createDefaultCollectionLibraryState();
+    renderBrowser({ collections: [sample], typeFilter: "game", showcase: false, libraryState: defaults.game });
+    expect(screen.getByRole("button", { name: "라이브러리" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "쇼케이스" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("textbox", { name: "제목 검색" })).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "정렬" })).toHaveValue("recent");
+    expect(screen.getByRole("combobox", { name: "내 별점" })).toHaveValue("all");
+  });
+
+  it("updates only the active media browse state", async () => {
+    const onLibraryStateChange = vi.fn();
+    renderBrowser({ collections: [sample], typeFilter: "game", showcase: false, onLibraryStateChange });
+    await userEvent.setup().type(screen.getByRole("textbox", { name: "제목 검색" }), "nier");
+    expect(onLibraryStateChange).toHaveBeenLastCalledWith({ ...createDefaultCollectionLibraryState().game, query: "nier" });
+  });
+
+  it("toggles direction and converts rating values", async () => {
+    const onLibraryStateChange = vi.fn();
+    renderBrowser({ collections: [sample], typeFilter: "game", showcase: false, onLibraryStateChange });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "내림차순" }));
+    expect(onLibraryStateChange).toHaveBeenLastCalledWith({ ...createDefaultCollectionLibraryState().game, direction: "asc" });
+    await user.selectOptions(screen.getByRole("combobox", { name: "내 별점" }), "4.5");
+    expect(onLibraryStateChange).toHaveBeenLastCalledWith({ ...createDefaultCollectionLibraryState().game, direction: "asc", rating: 4.5 });
+    expect(screen.getByRole("option", { name: "전체" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "미평가" })).toBeInTheDocument();
+  });
+
   it("renders a grid of collection cards", () => {
     renderBrowser({ collections: [sample], typeFilter: "game", showcase: false });
     expect(screen.getByText("Astral Chain")).toBeInTheDocument();
@@ -152,15 +185,22 @@ describe("CollectionBrowser", () => {
     expect(onViewChange).toHaveBeenCalledWith({ kind: "collection", collectionId: "c1" });
   });
 
-  it("orders MangaDex before manual input in the new collection menu", async () => {
+  it("offers MangaDex for manga in the new collection menu", async () => {
     const user = userEvent.setup();
-    const gateway = renderBrowser({ collections: [], typeFilter: "game", showcase: false });
+    const gateway = renderBrowser({ collections: [], typeFilter: "manga", showcase: false });
     await user.click(screen.getByRole("button", { name: "새 컬렉션" }));
     const items = await screen.findAllByRole("menuitem");
     expect(items.map((item) => item.textContent)).toEqual(["MangaDex에서 만화 추가", "직접 입력"]);
     await user.click(screen.getByRole("menuitem", { name: "직접 입력" }));
     expect(await screen.findByRole("heading", { name: "새 컬렉션" })).toBeInTheDocument();
     expect(gateway.createCollection).not.toHaveBeenCalled();
+  });
+
+  it("does not offer MangaDex for game", async () => {
+    const user = userEvent.setup();
+    renderBrowser({ collections: [], typeFilter: "game", showcase: false });
+    await user.click(screen.getByRole("button", { name: "새 컬렉션" }));
+    expect(screen.queryByRole("menuitem", { name: "MangaDex에서 만화 추가" })).not.toBeInTheDocument();
   });
 
   it("prefers stored WorkArtwork over other card covers", () => {
