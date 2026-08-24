@@ -14,13 +14,15 @@ SET showcase_order = (
     SELECT COUNT(*)
     FROM collections AS earlier
     WHERE earlier.showcase = 1
+      AND (earlier.legacy_kind IS NULL OR earlier.legacy_kind <> 'gacha')
       AND earlier.type = current.type
       AND (
           earlier.created_at < current.created_at
           OR (earlier.created_at = current.created_at AND earlier.id < current.id)
       )
 )
-WHERE current.showcase = 1;
+WHERE current.showcase = 1
+  AND (current.legacy_kind IS NULL OR current.legacy_kind <> 'gacha');
 
 CREATE INDEX collections_by_type_release_date
 ON collections(type, release_date);

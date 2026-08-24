@@ -143,7 +143,9 @@ impl Library {
                          WHEN showcase = 1 AND type <> ?3 THEN (
                              SELECT COALESCE(MAX(other.showcase_order) + 1, 0)
                              FROM collections AS other
-                             WHERE other.type = ?3 AND other.id <> ?13
+                            WHERE other.type = ?3
+                              AND other.id <> ?13
+                              AND (other.legacy_kind IS NULL OR other.legacy_kind <> 'gacha')
                          )
                          ELSE showcase_order
                      END,
@@ -227,7 +229,9 @@ impl Library {
                      ELSE (
                          SELECT COALESCE(MAX(other.showcase_order) + 1, 0)
                          FROM collections AS other
-                         WHERE other.type = collections.type AND other.id <> collections.id
+                         WHERE other.type = collections.type
+                           AND other.id <> collections.id
+                           AND (other.legacy_kind IS NULL OR other.legacy_kind <> 'gacha')
                      )
                  END,
                  updated_at = ?2
@@ -344,20 +348,55 @@ fn normalized_optional_text(value: Option<String>) -> Option<String> {
 fn normalized_release_date(value: Option<String>) -> Result<Option<String>, LibraryError> {
     let value = normalized_optional_text(value);
     if value.as_ref().is_some_and(|value| {
-        chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").is_err()
+        let bytes = value.as_bytes();
+        bytes.len() != 10
+            || bytes[4] != b'-'
+            || bytes[7] != b'-'
+            || bytes
+                .iter()
+                .enumerate()
+                .any(|(index, byte)| (index != 4 && index != 7) && !byte.is_ascii_digit())
+            || chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").is_err()
     }) {
         return Err(LibraryError::InvalidCollectionReleaseDate);
     }
     Ok(value)
 }
 
-pub(crate) fn validated_personal_rating(
-    value: Option<f64>,
-) -> Result<Option<f64>, LibraryError> {
+impl Library {
+    pub(crate) fn normalize_showcase_orders(&self) -> Result<(), LibraryError> {
+        let connection = self.connection()?;
+        connection.execute(
+            "UPDATE collections
+         SET showcase_order = NULL
+         WHERE showcase = 1
+           AND (legacy_kind IS NOT NULL AND legacy_kind = 'gacha')",
+            [],
+        )?;
+        connection.execute(
+            "UPDATE collections AS current
+         SET showcase_order = (
+             SELECT COUNT(*)
+             FROM collections AS earlier
+             WHERE earlier.showcase = 1
+               AND (earlier.legacy_kind IS NULL OR earlier.legacy_kind <> 'gacha')
+               AND earlier.type = current.type
+               AND (
+                   earlier.created_at < current.created_at
+                   OR (earlier.created_at = current.created_at AND earlier.id < current.id)
+               )
+         )
+         WHERE current.showcase = 1
+           AND (current.legacy_kind IS NULL OR current.legacy_kind <> 'gacha')",
+            [],
+        )?;
+        Ok(())
+    }
+}
+
+pub(crate) fn validated_personal_rating(value: Option<f64>) -> Result<Option<f64>, LibraryError> {
     if value.is_some_and(|value| {
-        !value.is_finite()
-            || !(0.0..=5.0).contains(&value)
-            || (value * 2.0).fract() != 0.0
+        !value.is_finite() || !(0.0..=5.0).contains(&value) || (value * 2.0).fract() != 0.0
     }) {
         return Err(LibraryError::InvalidPersonalRating);
     }
@@ -880,10 +919,12 @@ mod tests {
             my_score,
         };
 
-        assert!(matches!(
-            library.update_collection(&created.id, request(Some("2026-02-30"), None)),
-            Err(LibraryError::InvalidCollectionReleaseDate)
-        ));
+        for date in ["2026-02-30", "2026-8-5", "+002026-01-01"] {
+            assert!(matches!(
+                library.update_collection(&created.id, request(Some(date), None)),
+                Err(LibraryError::InvalidCollectionReleaseDate)
+            ));
+        }
         for score in [-0.5, 0.25, 5.5, f64::INFINITY] {
             assert!(matches!(
                 library.update_collection(&created.id, request(None, Some(score))),
@@ -900,20 +941,49 @@ mod tests {
         let second = create(&library, "Second");
 
         assert_eq!(
-            library.set_collection_showcase(&first.id, true).unwrap().showcase_order,
+            library
+                .set_collection_showcase(&first.id, true)
+                .unwrap()
+                .showcase_order,
             Some(0)
         );
         assert_eq!(
-            library.set_collection_showcase(&second.id, true).unwrap().showcase_order,
+            library
+                .set_collection_showcase(&second.id, true)
+                .unwrap()
+                .showcase_order,
             Some(1)
         );
         assert_eq!(
-            library.set_collection_showcase(&first.id, true).unwrap().showcase_order,
+            library
+                .set_collection_showcase(&first.id, true)
+                .unwrap()
+                .showcase_order,
             Some(0)
         );
         let removed = library.set_collection_showcase(&first.id, false).unwrap();
         assert!(!removed.showcase);
         assert_eq!(removed.showcase_order, None);
+    }
+
+    #[test]
+    fn showcase_order_ignores_hidden_gacha_rows() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let hidden = create(&library, "Hidden Gacha");
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE collections SET legacy_kind = 'gacha' WHERE id = ?1",
+                [&hidden.id],
+            )
+            .unwrap();
+        library.set_collection_showcase(&hidden.id, true).unwrap();
+
+        let visible = create(&library, "Visible Game");
+        let showcased = library.set_collection_showcase(&visible.id, true).unwrap();
+        assert_eq!(showcased.showcase_order, Some(0));
     }
 
     #[test]
