@@ -73,14 +73,14 @@ function compareMediaDate(
     if (leftDate === null && rightDate === null) return 0;
     return leftDate === null ? 1 : -1;
   }
-  const result = leftDate.kind - rightDate.kind || leftDate.value - rightDate.value;
+  const result = leftDate - rightDate;
   return direction === "desc" ? -result : result;
 }
 
-function mediaDateKey(collection: CollectionSummary): { value: number; kind: number } | null {
+function mediaDateKey(collection: CollectionSummary): number | null {
   if (collection.releaseDate) {
-    return { value: Number(collection.releaseDate.replaceAll("-", "")), kind: 0 };
+    return Number(collection.releaseDate.replaceAll("-", ""));
   }
-  if (collection.year !== null) return { value: collection.year * 10_000, kind: 1 };
+  if (collection.year !== null) return collection.year * 10_000;
   return null;
 }

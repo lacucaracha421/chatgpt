@@ -83,13 +83,28 @@ describe("collection library derivation", () => {
     expect(deriveCollectionLibrary(collections, "game", { query: "", sort: "recent", direction: "desc", rating: "all" }).map((item) => item.name)).toEqual(["New", "Old"]);
   });
 
-  it("prefers exact release dates over years and breaks ties by name then id", () => {
+  it("uses the shared media-date key and breaks ties by name then id", () => {
     const collections = [
       game("Zulu", null, { id: "2", releaseDate: null, year: 2020 }),
       game("Alpha", null, { id: "1", releaseDate: "2020-01-01", year: 1999 }),
       game("Alpha", null, { id: "0", releaseDate: "2020-01-01", year: 1999 }),
     ];
-    expect(deriveCollectionLibrary(collections, "game", { query: "", sort: "media_date", direction: "asc", rating: "all" }).map((item) => `${item.name}:${item.id}`)).toEqual(["Alpha:0", "Alpha:1", "Zulu:2"]);
+    expect(deriveCollectionLibrary(collections, "game", { query: "", sort: "media_date", direction: "asc", rating: "all" }).map((item) => `${item.name}:${item.id}`)).toEqual(["Zulu:2", "Alpha:0", "Alpha:1"]);
+  });
+
+  it.each(["asc", "desc"] as const)("uses one numeric key for exact dates and years (%s)", (direction) => {
+    const collections = [
+      game("Exact 2030", null, { releaseDate: "2030-01-01", year: null }),
+      game("Year 2020", null, { releaseDate: null, year: 2020 }),
+    ];
+    expect(
+      deriveCollectionLibrary(collections, "game", {
+        query: "",
+        sort: "media_date",
+        direction,
+        rating: "all",
+      }).map((item) => item.name),
+    ).toEqual(direction === "asc" ? ["Year 2020", "Exact 2030"] : ["Exact 2030", "Year 2020"]);
   });
 
   it("does not mutate input and creates independent default states", () => {
