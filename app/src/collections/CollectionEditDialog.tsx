@@ -105,10 +105,6 @@ export function CollectionEditDialog({
           <>
             <TextField label="개발사" value={developer} onChange={(event) => setDeveloper(event.target.value)} />
             <TextField label="외부 점수" inputMode="numeric" value={externalScore?.toString() ?? ""} onChange={(event) => setExternalScore(event.target.value ? Number(event.target.value) : null)} />
-            <Select label="내 별점" value={myScore?.toString() ?? ""} onChange={(event) => setMyScore(event.target.value === "" ? null : Number(event.target.value))}>
-              <option value="">미평가</option>
-              {[5, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1, 0.5, 0].map((rating) => <option key={rating} value={rating}>{rating.toFixed(1)}</option>)}
-            </Select>
           </>
         )}
         {type === "movie" && (
@@ -118,6 +114,10 @@ export function CollectionEditDialog({
             <TextField label="개봉 연도" inputMode="numeric" value={year?.toString() ?? ""} onChange={(event) => setYear(event.target.value ? Number(event.target.value) : null)} />
           </>
         )}
+        <Select label="내 별점" value={myScore?.toString() ?? ""} onChange={(event) => setMyScore(event.target.value === "" ? null : Number(event.target.value))}>
+          <option value="">미평가</option>
+          {[5, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1, 0.5, 0].map((rating) => <option key={rating} value={rating}>{rating.toFixed(1)}</option>)}
+        </Select>
         {error && <p className="collection-edit-dialog__error" role="alert">{error}</p>}
         <div className="ui-dialog__actions">
           <Button type="button" disabled={saving} onClick={onClose}>취소</Button>

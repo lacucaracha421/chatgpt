@@ -81,6 +81,28 @@ it("shows movie production company separately from director", () => {
   expect(screen.getByLabelText("감독")).toHaveValue("Director");
 });
 
+it("submits a half-star personal rating for manga", async () => {
+  const user = userEvent.setup();
+  const onSubmit = vi.fn().mockResolvedValue(undefined);
+  render(<CollectionEditDialog open mode={{ kind: "edit", collection: collectionFixture }} onClose={vi.fn()} onSubmit={onSubmit} />);
+
+  await user.selectOptions(screen.getByLabelText("내 별점"), "4.5");
+  await user.click(screen.getByRole("button", { name: "저장" }));
+
+  expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ myScore: 4.5 }));
+});
+
+it("submits a half-star personal rating for movie", async () => {
+  const user = userEvent.setup();
+  const onSubmit = vi.fn().mockResolvedValue(undefined);
+  render(<CollectionEditDialog open mode={{ kind: "edit", collection: { ...collectionFixture, type: "movie" } }} onClose={vi.fn()} onSubmit={onSubmit} />);
+
+  await user.selectOptions(screen.getByLabelText("내 별점"), "3.5");
+  await user.click(screen.getByRole("button", { name: "저장" }));
+
+  expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ myScore: 3.5 }));
+});
+
 const collectionFixture: CollectionSummary = {
   id: "work-1",
   name: "Provider title",
