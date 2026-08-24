@@ -84,26 +84,6 @@ export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new S
     }
     return findActiveIndex(scrollTop + height / 2, totalSize, dateSummary);
   }, [centerRowIndex, dateBuckets, dateSummary, height, rows, scrollTop, totalSize]);
-  const activeIndicatorTop = useMemo(() => {
-    if (!hasRail || geometry.extent <= 0 || dateBuckets.length < 2 || centerRowIndex < 0) return null;
-    const row = rows[centerRowIndex];
-    const centerItem = row.items[Math.floor((row.items.length - 1) / 2)];
-    const key = isoDayKey(centerItem.collectedAt);
-    if (!key) return null;
-    const newer = newestBucketAtOrAfter(dateBuckets, key);
-    let fraction: number;
-    if (newer < 0) fraction = 0;
-    else if (newer >= dateBuckets.length - 1) fraction = 1;
-    else {
-      const newerTime = Date.parse(`${dateBuckets[newer].date}T00:00:00Z`);
-      const olderTime = Date.parse(`${dateBuckets[newer + 1].date}T00:00:00Z`);
-      const keyTime = Date.parse(`${key}T00:00:00Z`);
-      const span = olderTime - newerTime;
-      const delta = span > 0 ? (keyTime - newerTime) / span : 0;
-      fraction = (newer + Math.min(1, Math.max(0, delta))) / (dateBuckets.length - 1);
-    }
-    return RAIL_EDGE_INSET + fraction * (geometry.extent - RAIL_EDGE_INSET * 2);
-  }, [centerRowIndex, dateBuckets, geometry.extent, hasRail, rows]);
   const tickIndexes = useMemo(() => selectTickIndexes(dateSummary, geometry.extent), [dateSummary, geometry.extent]);
   const dateLines = useMemo(() => buildDateLines(geometry, tickIndexes, dateSummary, activeIndex), [activeIndex, dateSummary, geometry, tickIndexes]);
   const cancelQuickPreview = () => {
@@ -265,7 +245,7 @@ export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new S
       <div className="asset-gallery__virtual-space" style={{ height: rowVirtualizer.getTotalSize() }}>
         {virtualRows.map((virtualRow) => {
           const row = rows[virtualRow.index]; if (!row) return null;
-          return <div key={virtualRow.key} className="asset-gallery__row" style={{ gap, height: row.height, transform: `translateY(${virtualRow.start}px)` }}>
+          return <div key={virtualRow.key} className="asset-gallery__row" style={{ gap, height: row.height + gap, backgroundColor: "var(--color-bg)", transform: `translateY(${virtualRow.start}px)` }}>
             {row.items.map((asset, index) => <AssetTile key={asset.id} asset={asset} height={row.height} selected={selectedAssetIds.has(asset.id)} selectedAssetIds={selectedAssetIds} focused={focusAssetId ? focusAssetId === asset.id : virtualRow.index === 0 && index === 0} metadataVisible={metadataVisible} activePreview={activePreviewId === asset.id} onRequestPreview={() => setActivePreviewId(asset.id)} onReleasePreview={() => setActivePreviewId((current) => current === asset.id ? null : current)} onRequestQuickPreview={requestQuickPreview} onCancelQuickPreview={cancelQuickPreview} onRetryVideo={onRetryVideo} onSelectionGesture={onSelectionGesture} onOpen={onOpen} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />)}
           </div>;
         })}
@@ -283,7 +263,6 @@ export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new S
         />
       ))}
       {hoveredLine && <span className="asset-gallery__scrollbar-label" style={{ top: `${hoveredLine.top}px` }}>{hoveredLine.label}</span>}
-      {activeIndicatorTop != null && <span className="asset-gallery__scrollbar-indicator" style={{ transform: `translateY(${activeIndicatorTop}px)` }} />}
     </div>}
     {quickPreview && <div className="asset-gallery__quick-preview" style={quickPreviewLayout(quickPreview)}><img src={assetUrl(quickPreview.asset.id)} alt={`${quickPreview.asset.title || quickPreview.asset.originalName} 빠른 미리보기`} draggable={false} onError={cancelQuickPreview} /></div>}
   </div>;

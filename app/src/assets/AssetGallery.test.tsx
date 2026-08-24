@@ -6,6 +6,7 @@ import { AssetGallery } from "./AssetGallery";
 
 beforeEach(() => Object.defineProperties(HTMLElement.prototype, {
   offsetWidth: { configurable: true, get: () => 900 }, clientWidth: { configurable: true, get: () => 840 }, offsetHeight: { configurable: true, get: () => 600 }, clientHeight: { configurable: true, get: () => 600 },
+  setPointerCapture: { configurable: true, value: vi.fn() },
 }));
 afterEach(() => {
   cleanup();
@@ -32,6 +33,27 @@ describe("AssetGallery", () => {
     computedStyle.mockRestore();
 
     await waitFor(() => expect(container.querySelector(".asset-gallery__row")).toHaveStyle({ gap: "6px" }));
+  });
+
+  it("paints virtual row gaps with the gallery background", async () => {
+    const { container } = render(<AssetGallery items={[asset(0), asset(1)]} />);
+
+    const row = await waitFor(() => container.querySelector(".asset-gallery__row") as HTMLElement);
+    expect(row).toHaveStyle({ backgroundColor: "var(--color-bg)" });
+  });
+
+  it("extends the virtual row background through the vertical gallery gap", async () => {
+    const computedStyle = vi.spyOn(window, "getComputedStyle").mockReturnValue({
+      getPropertyValue: (name: string) => name === "--gallery-gap" ? "6px" : "",
+      paddingLeft: "6px",
+      paddingRight: "6px",
+    } as CSSStyleDeclaration);
+    const { container } = render(<AssetGallery items={[asset(0), asset(1)]} />);
+    computedStyle.mockRestore();
+
+    const row = await waitFor(() => container.querySelector(".asset-gallery__row") as HTMLElement);
+    const tile = row.querySelector(".asset-gallery__asset") as HTMLElement;
+    expect(Number.parseFloat(row.style.height)).toBe(Number.parseFloat(tile.style.height) + 6);
   });
 
   it("keeps the DOM bounded with 50,000 asset metadata rows", async () => {
@@ -344,6 +366,19 @@ describe("AssetGallery", () => {
     expect(date).toBe("2026-08-01");
     expect(ratio).toBeGreaterThan(0);
     expect(ratio).toBeLessThanOrEqual(1);
+  });
+
+  it("renders date ticks without a separate scroll position indicator", async () => {
+    const { container } = render(<AssetGallery
+      items={[
+        { ...asset(0), collectedAt: "2026-07-30T00:00:00Z" },
+        { ...asset(1), collectedAt: "2026-08-01T00:00:00Z" },
+      ]}
+      dateBuckets={[{ date: "2026-07-30", count: 1 }, { date: "2026-08-01", count: 1 }]}
+    />);
+
+    await waitFor(() => expect(container.querySelector(".asset-gallery__scrollbar-line")).not.toBeNull());
+    expect(container.querySelector(".asset-gallery__scrollbar-indicator")).toBeNull();
   });
 
   it("ignores rail clicks when the rail is not interactive", async () => {

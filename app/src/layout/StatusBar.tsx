@@ -17,7 +17,7 @@ export function StatusBar({ status, progress, dropEnabled, similarityIndex }: St
       : "현재 화면에서는 파일을 가져올 수 없습니다.";
 
   return <footer className="status-bar" aria-label="라이브러리 상태">
-    <span>{status.loading ? "자산을 불러오는 중입니다." : `${status.loadedCount}개 자산`}</span>
+    <span>{status.loadedCount}개 자산</span>
     {status.selectedAsset && <span>{status.selectedAsset.originalName}</span>}
     {similarityIndex?.running && <span>유사 이미지 준비 중 · {similarityIndex.remaining}개 남음</span>}
     {!!similarityIndex?.failed && <span>해시 생성 실패 {similarityIndex.failed}개</span>}
