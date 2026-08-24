@@ -71,7 +71,9 @@ impl Library {
     pub fn list_collections(&self) -> Result<Vec<CollectionSummary>, LibraryError> {
         let connection = self.connection()?;
         let sql = format!(
-            "{COLLECTION_SUMMARY_SQL} ORDER BY collection.updated_at DESC, collection.id DESC"
+            "{COLLECTION_SUMMARY_SQL}
+             WHERE collection.legacy_kind IS NULL OR collection.legacy_kind <> 'gacha'
+             ORDER BY collection.updated_at DESC, collection.id DESC"
         );
         let mut statement = connection.prepare(&sql)?;
         let entries = statement
@@ -386,6 +388,45 @@ mod tests {
         },
         Library,
     };
+
+    #[test]
+    fn list_collections_hides_only_proven_legacy_gacha() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let game = library
+            .create_collection(CreateCollection {
+                name: "Visible Game".into(),
+                description: None,
+                collection_type: CollectionType::Game,
+            })
+            .unwrap();
+        let gacha = library
+            .create_collection(CreateCollection {
+                name: "Hidden Gacha".into(),
+                description: None,
+                collection_type: CollectionType::Game,
+            })
+            .unwrap();
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE collections SET legacy_kind = 'gacha' WHERE id = ?1",
+                [&gacha.id],
+            )
+            .unwrap();
+
+        assert_eq!(library.get_collection(&gacha.id).unwrap().id, gacha.id);
+        assert_eq!(
+            library
+                .list_collections()
+                .unwrap()
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![game.id.as_str()]
+        );
+    }
 
     #[test]
     fn creates_updates_lists_and_deletes_collection_without_deleting_assets() {

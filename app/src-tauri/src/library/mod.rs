@@ -152,6 +152,7 @@ impl Library {
             database_lock: Arc::new(Mutex::new(())),
             catalog_lookup_cache: Arc::new(Mutex::new(None)),
         };
+        library.backfill_legacy_collection_kinds()?;
         library.cleanup_stale_asset_drags()?;
         library.cleanup_resolving_similarity_reviews()?;
         library.requeue_interrupted_video_preparation()?;

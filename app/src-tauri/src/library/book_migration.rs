@@ -5,7 +5,7 @@ use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
 use super::collection::{collection_type_str, normalized_name};
-use super::collection_source::set_collection_source_root;
+use super::collection_source::{collection_source_root, set_collection_source_root};
 use super::error::LibraryError;
 use super::models::{CollectionType, ExternalBindingInput};
 use super::Library;
@@ -69,6 +69,37 @@ pub struct BookExternalBinding {
 }
 
 impl Library {
+    pub(crate) fn backfill_legacy_collection_kinds(&self) -> Result<u64, LibraryError> {
+        let connection = self.connection()?;
+        let Some(root) = collection_source_root(&connection)? else {
+            return Ok(0);
+        };
+        let Ok(canonical_root) = fs::canonicalize(&root) else {
+            return Ok(0);
+        };
+        let rows = pending_legacy_sources(&connection)?;
+        let mut updated = 0;
+        for (id, source_path) in rows {
+            let Ok(folder) = fs::canonicalize(canonical_root.join(source_path)) else {
+                continue;
+            };
+            if !folder.starts_with(&canonical_root) {
+                continue;
+            }
+            let Ok(Some(parsed)) = parse_info_txt(&folder) else {
+                continue;
+            };
+            let Some(kind) = parsed.legacy_kind else {
+                continue;
+            };
+            updated += connection.execute(
+                "UPDATE collections SET legacy_kind = ?1 WHERE id = ?2 AND legacy_kind IS NULL",
+                params![legacy_kind_str(kind), id],
+            )? as u64;
+        }
+        Ok(updated)
+    }
+
     pub fn inspect_book_import(&self, root: &str) -> Result<BookImportPlan, LibraryError> {
         let mut plan = scan_book_import(Path::new(root))?;
         let connection = self.connection()?;
@@ -289,6 +320,19 @@ struct ParsedInfo {
     external_bindings: Vec<BookExternalBinding>,
 }
 
+fn pending_legacy_sources(
+    connection: &rusqlite::Connection,
+) -> Result<Vec<(String, String)>, LibraryError> {
+    let mut statement = connection.prepare(
+        "SELECT id, source_path FROM collections
+         WHERE source_path IS NOT NULL AND legacy_kind IS NULL",
+    )?;
+    let rows = statement
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<Result<Vec<(String, String)>, _>>()?;
+    Ok(rows)
+}
+
 fn legacy_kind_str(kind: LegacyCollectionKind) -> &'static str {
     match kind {
         LegacyCollectionKind::Game => "game",
@@ -413,6 +457,57 @@ fn parse_key_value(raw: &str) -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backfills_safe_legacy_kinds_without_overwriting_or_guessing() {
+        let source = tempfile::tempdir().unwrap();
+        let gacha = source.path().join("gacha");
+        fs::create_dir(&gacha).unwrap();
+        fs::write(gacha.join("info.txt"), "Title: Gacha\nType: gacha\n").unwrap();
+        let outside = source.path().parent().unwrap().join("outside");
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("info.txt"), "Title: Outside\nType: gacha\n").unwrap();
+
+        let target = tempfile::tempdir().unwrap();
+        let library = Library::open(target.path()).unwrap();
+        library
+            .set_collection_source_root(Some(source.path().to_string_lossy().as_ref()))
+            .unwrap();
+        let connection = library.connection().unwrap();
+        for (id, source_path, legacy_kind) in [
+            ("gacha-1", Some("gacha"), None),
+            ("missing-1", Some("missing"), None),
+            ("existing-1", Some("gacha"), Some("game")),
+            ("unsafe-1", Some("../outside"), None),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO collections (id, name, type, created_at, updated_at, source_path, legacy_kind)
+                     VALUES (?1, ?2, 'game', '2026-01-01', '2026-01-01', ?3, ?4)",
+                    rusqlite::params![id, id, source_path, legacy_kind],
+                )
+                .unwrap();
+        }
+        drop(connection);
+
+        assert_eq!(library.backfill_legacy_collection_kinds().unwrap(), 1);
+        let stored = |id: &str| {
+            library
+                .connection()
+                .unwrap()
+                .query_row(
+                    "SELECT legacy_kind FROM collections WHERE id = ?1",
+                    [id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .unwrap()
+        };
+        assert_eq!(stored("gacha-1").as_deref(), Some("gacha"));
+        assert_eq!(library.backfill_legacy_collection_kinds().unwrap(), 0);
+        assert_eq!(stored("missing-1"), None);
+        assert_eq!(stored("existing-1").as_deref(), Some("game"));
+        assert_eq!(stored("unsafe-1"), None);
+    }
 
     #[test]
     fn parses_manga_info_txt() {
