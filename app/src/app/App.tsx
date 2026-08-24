@@ -102,6 +102,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     kind: "classification",
     classificationId: null,
   });
+  const collectionReturnViewRef = useRef<Extract<AssetView, { kind: "collections" }> | null>(null);
   const [preferences, setPreferences] = useState<UiPreferences>(loadUiPreferences);
   const [message, setMessage] = useState<string | null>(null);
   const [assetRefresh, setAssetRefresh] = useState(0);
@@ -305,6 +306,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   }
 
   function navigateView(next: AssetView) {
+    if (next.kind === "collection" && view.kind === "collections") collectionReturnViewRef.current = view;
     if (next.kind === "settings" && view.kind !== "settings") settingsReturnViewRef.current = view;
     if (next.kind === "collections") updatePreferences({ collectionType: next.typeFilter });
     setView(next);
@@ -512,7 +514,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     collections={collections}
                     onExit={() => {
                       const detailCollection = collections.find((item) => item.id === view.collectionId);
-                      setView({
+                      setView(collectionReturnViewRef.current ?? {
                         kind: "collections",
                         typeFilter: detailCollection?.type ?? preferences.collectionType,
                         showcase: false,

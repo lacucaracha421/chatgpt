@@ -2913,10 +2913,6 @@ input:disabled {
   font-size: var(--text-xs);
 }
 
-.collection-browser__eyebrow {
-  display: none;
-}
-
 .collection-browser__grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
@@ -2999,6 +2995,10 @@ input:disabled {
 .collection-card:hover .collection-card__cover,
 .collection-card:focus-visible .collection-card__cover {
   outline-color: var(--color-muted);
+}
+
+.collection-card:hover .collection-card__object--game .collection-card__cover,
+.collection-card:focus-visible .collection-card__object--game .collection-card__cover {
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.16);
 }
 

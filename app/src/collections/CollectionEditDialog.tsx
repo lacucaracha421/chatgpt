@@ -6,7 +6,7 @@ import { Select } from "../shared/ui/Select";
 import { TextField } from "../shared/ui/TextField";
 
 export type CollectionEditMode =
-  | { kind: "create" }
+  | { kind: "create"; type: CollectionType }
   | { kind: "edit"; collection: CollectionSummary };
 
 export function CollectionEditDialog({
@@ -23,7 +23,7 @@ export function CollectionEditDialog({
   const existing = mode.kind === "edit" ? mode.collection : null;
   const [name, setName] = useState(existing?.name ?? "");
   const [description, setDescription] = useState(existing?.description ?? "");
-  const [type, setType] = useState<CollectionType>(existing?.type ?? "manga");
+  const [type, setType] = useState<CollectionType>(mode.kind === "create" ? mode.type : existing?.type ?? "manga");
   const [year, setYear] = useState<number | null>(existing?.year ?? null);
   const [author, setAuthor] = useState(existing?.author ?? "");
   const [developer, setDeveloper] = useState(existing?.developer ?? "");
@@ -38,7 +38,7 @@ export function CollectionEditDialog({
   useEffect(() => {
     setName(existing?.name ?? "");
     setDescription(existing?.description ?? "");
-    setType(existing?.type ?? "manga");
+    setType(mode.kind === "create" ? mode.type : existing?.type ?? "manga");
     setYear(existing?.year ?? null);
     setAuthor(existing?.author ?? "");
     setDeveloper(existing?.developer ?? "");
@@ -49,7 +49,7 @@ export function CollectionEditDialog({
     setMyScore(existing?.myScore ?? null);
     setSaving(false);
     setError(null);
-  }, [existing]);
+  }, [existing, mode]);
 
   async function handleSubmit() {
     const trimmedName = name.trim();

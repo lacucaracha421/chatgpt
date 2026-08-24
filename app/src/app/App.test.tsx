@@ -1128,4 +1128,27 @@ describe("App", () => {
     expect(screen.getByText("던전밥")).toBeInTheDocument();
   });
 
+  it("returns from a Showcase detail to the originating Showcase mode", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({ collectionType: "game" }));
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listCollections).mockResolvedValue([{
+      id: "showcase-game", name: "Showcase Game", description: null, type: "game",
+      coverAssetId: null, selectedWorkArtworkId: null, assetCount: 0, unreadReleaseCount: 0,
+      year: 2020, author: null, developer: null, productionCompany: null, releaseDate: null,
+      director: null, externalScore: null, myScore: null, genres: null, overview: null,
+      showcase: true, showcaseOrder: 1, createdAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z",
+    }]);
+    vi.mocked(libraryGateway.listCollectionCovers).mockResolvedValue([]);
+    vi.mocked(libraryGateway.listCollectionVolumes).mockResolvedValue([]);
+    const user = userEvent.setup();
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    await user.click(await screen.findByRole("button", { name: "컬렉션" }));
+    await user.click(await screen.findByRole("button", { name: "쇼케이스" }));
+    await user.click(await screen.findByText("Showcase Game"));
+    await user.click(await screen.findByRole("button", { name: "컬렉션 표지 보기 닫기" }));
+    expect(await screen.findByRole("button", { name: "쇼케이스" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "게임" })).toHaveAttribute("aria-pressed", "true");
+  });
+
 });

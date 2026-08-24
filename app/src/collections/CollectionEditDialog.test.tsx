@@ -105,7 +105,7 @@ it("submits a half-star personal rating for movie", async () => {
 
 it("shows only core fields while creating a game", async () => {
   const user = userEvent.setup();
-  render(<CollectionEditDialog open mode={{ kind: "create" }} onClose={vi.fn()} onSubmit={vi.fn()} />);
+  render(<CollectionEditDialog open mode={{ kind: "create", type: "manga" }} onClose={vi.fn()} onSubmit={vi.fn()} />);
 
   await user.selectOptions(screen.getByLabelText("유형"), "game");
 
@@ -114,8 +114,18 @@ it("shows only core fields while creating a game", async () => {
   expect(screen.queryByLabelText("외부 점수")).not.toBeInTheDocument();
 });
 
+it("starts creation with the active type and submits it", async () => {
+  const user = userEvent.setup();
+  const onSubmit = vi.fn().mockResolvedValue(undefined);
+  render(<CollectionEditDialog open mode={{ kind: "create", type: "game" }} onClose={vi.fn()} onSubmit={onSubmit} />);
+  expect(screen.getByLabelText("유형")).toHaveValue("game");
+  await user.type(screen.getByRole("textbox", { name: "이름" }), "A game");
+  await user.click(screen.getByRole("button", { name: "저장" }));
+  expect(onSubmit).toHaveBeenCalledWith({ name: "A game", description: null, type: "game" });
+});
+
 it("shows only core fields while creating a manga", () => {
-  render(<CollectionEditDialog open mode={{ kind: "create" }} onClose={vi.fn()} onSubmit={vi.fn()} />);
+  render(<CollectionEditDialog open mode={{ kind: "create", type: "manga" }} onClose={vi.fn()} onSubmit={vi.fn()} />);
 
   expect(screen.queryByLabelText("작가")).not.toBeInTheDocument();
   expect(screen.queryByLabelText("출간 연도")).not.toBeInTheDocument();
@@ -124,7 +134,7 @@ it("shows only core fields while creating a manga", () => {
 
 it("shows only core fields while creating a movie", async () => {
   const user = userEvent.setup();
-  render(<CollectionEditDialog open mode={{ kind: "create" }} onClose={vi.fn()} onSubmit={vi.fn()} />);
+  render(<CollectionEditDialog open mode={{ kind: "create", type: "movie" }} onClose={vi.fn()} onSubmit={vi.fn()} />);
 
   await user.selectOptions(screen.getByLabelText("유형"), "movie");
 

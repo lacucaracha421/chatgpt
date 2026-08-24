@@ -112,7 +112,7 @@ export function CollectionBrowser({
             trigger={<PlusIcon aria-hidden="true" />}
             items={[
               ...(typeFilter === "manga" ? [{ id: "mangadex", label: "MangaDex에서 만화 추가", onSelect: () => setMangaDexOpen(true) }] : []),
-              { id: "manual", label: "직접 입력", onSelect: () => setEditMode({ kind: "create" }) },
+              { id: "manual", label: "직접 입력", onSelect: () => setEditMode({ kind: "create", type: typeFilter }) },
             ]}
           />
         }
@@ -136,7 +136,6 @@ export function CollectionBrowser({
       <div className={`collection-browser__stage${showcase ? " collection-browser__stage--showcase" : ""}`}>
         <div className="collection-browser__heading">
           <div>
-            <span className="collection-browser__eyebrow">{showcase ? "CURATED SELECTION" : "LIBRARY"}</span>
             <h3>{sectionLabel} {showcase ? "쇼케이스" : "컬렉션"}</h3>
           </div>
           <span>{showcase ? "선정 작품" : "작품"} {visible.length}개</span>
@@ -146,7 +145,7 @@ export function CollectionBrowser({
           onContextMenu={(event) => {
             if ((event.target as HTMLElement).closest(".collection-card")) return;
             event.preventDefault();
-            setEditMode({ kind: "create" });
+            setEditMode({ kind: "create", type: typeFilter });
           }}
         >
           {visible.map((collection) => (
@@ -177,7 +176,7 @@ export function CollectionBrowser({
           {visible.length === 0 && (
             <div className="collection-browser__empty">
               <EmptyState title={showcase ? "쇼케이스에 컬렉션이 없습니다." : "컬렉션이 없습니다."}>
-                {showcase ? "쇼케이스로 표시한 컬렉션이 여기에 표시됩니다." : <><p>새 컬렉션을 만들어 작품을 모아보세요.</p><Button type="button" onClick={() => typeFilter === "manga" ? setMangaDexOpen(true) : setEditMode({ kind: "create" })}>{typeFilter === "manga" ? "MangaDex에서 만화 추가" : "직접 입력"}</Button></>}
+                {showcase ? "라이브러리에서 쇼케이스에 추가한 컬렉션이 여기에 표시됩니다." : <><p>새 컬렉션을 만들어 작품을 모아보세요.</p><Button type="button" onClick={() => typeFilter === "manga" ? setMangaDexOpen(true) : setEditMode({ kind: "create", type: typeFilter })}>{typeFilter === "manga" ? "MangaDex에서 만화 추가" : "직접 입력"}</Button></>}
               </EmptyState>
             </div>
           )}
