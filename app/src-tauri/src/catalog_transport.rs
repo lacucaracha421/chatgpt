@@ -156,20 +156,22 @@ fn request_script(path: &str) -> Result<String, LibraryError> {
     let path =
         serde_json::to_string(path).map_err(|_| LibraryError::InvalidCatalogTransportPath)?;
     Ok(format!(
-        r#"window.__lakomicsCatalogGeneration = (window.__lakomicsCatalogGeneration || 0) + 1;
-        const generation = window.__lakomicsCatalogGeneration;
-        window.__lakomicsCatalogResponse = null;
-        void (async () => {{
-          try {{
-            const response = await fetch({path}, {{ credentials: 'include', cache: 'no-store' }});
-            if (window.__lakomicsCatalogGeneration === generation) {{
-              window.__lakomicsCatalogResponse = JSON.stringify({{ ok: response.ok, status: response.status, body: await response.text() }});
+        r#"(() => {{
+          window.__lakomicsCatalogGeneration = (window.__lakomicsCatalogGeneration || 0) + 1;
+          const generation = window.__lakomicsCatalogGeneration;
+          window.__lakomicsCatalogResponse = null;
+          void (async () => {{
+            try {{
+              const response = await fetch({path}, {{ credentials: 'include', cache: 'no-store' }});
+              if (window.__lakomicsCatalogGeneration === generation) {{
+                window.__lakomicsCatalogResponse = JSON.stringify({{ ok: response.ok, status: response.status, body: await response.text() }});
+              }}
+            }} catch (error) {{
+              if (window.__lakomicsCatalogGeneration === generation) {{
+                window.__lakomicsCatalogResponse = JSON.stringify({{ ok: false, status: 0, body: String(error) }});
+              }}
             }}
-          }} catch (error) {{
-            if (window.__lakomicsCatalogGeneration === generation) {{
-              window.__lakomicsCatalogResponse = JSON.stringify({{ ok: false, status: 0, body: String(error) }});
-            }}
-          }}
+          }})();
         }})();"#
     ))
 }
@@ -262,6 +264,9 @@ mod tests {
         assert!(script.contains("window.__lakomicsCatalogResponse = null"));
         assert!(script.contains(
             "window.__lakomicsCatalogGeneration = (window.__lakomicsCatalogGeneration || 0) + 1"
+        ));
+        assert!(script.contains(
+            "(() => {\n          window.__lakomicsCatalogGeneration ="
         ));
         assert!(script.contains("const generation = window.__lakomicsCatalogGeneration"));
         assert!(script.contains("void (async () =>"));
