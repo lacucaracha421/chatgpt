@@ -356,7 +356,7 @@ pub enum CollectionType {
     Movie,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CollectionSummary {
     pub id: String,
@@ -371,11 +371,15 @@ pub struct CollectionSummary {
     pub year: Option<i64>,
     pub author: Option<String>,
     pub director: Option<String>,
+    pub developer: Option<String>,
+    pub production_company: Option<String>,
+    pub release_date: Option<String>,
     pub external_score: Option<i64>,
-    pub my_score: Option<i64>,
+    pub my_score: Option<f64>,
     pub genres: Option<String>,
     pub overview: Option<String>,
     pub showcase: bool,
+    pub showcase_order: Option<i64>,
     pub created_at: String,
     pub updated_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -598,8 +602,11 @@ pub struct UpdateCollection {
     pub year: Option<i64>,
     pub author: Option<String>,
     pub director: Option<String>,
+    pub developer: Option<String>,
+    pub production_company: Option<String>,
+    pub release_date: Option<String>,
     pub external_score: Option<i64>,
-    pub my_score: Option<i64>,
+    pub my_score: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -816,11 +823,15 @@ mod tests {
             year: Some(2014),
             author: Some("Ryoko Kui".into()),
             director: None,
+            developer: None,
+            production_company: None,
+            release_date: None,
             external_score: None,
             my_score: None,
             genres: Some("Fantasy".into()),
             overview: None,
             showcase: false,
+            showcase_order: None,
             created_at: "2026-08-20T00:00:00Z".into(),
             updated_at: "2026-08-20T00:00:00Z".into(),
             source_path: None,

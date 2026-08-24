@@ -124,6 +124,8 @@ impl From<LibraryError> for CommandError {
             LibraryError::DuplicateCollectionName => "duplicate_collection_name",
             LibraryError::CollectionCoverNotMember => "collection_cover_not_member",
             LibraryError::InvalidCollectionType => "invalid_collection_type",
+            LibraryError::InvalidCollectionReleaseDate => "invalid_collection_release_date",
+            LibraryError::InvalidPersonalRating => "invalid_personal_rating",
             LibraryError::AssetNotFound => "asset_not_found",
             LibraryError::EmptyAssetSelection => "empty_asset_selection",
             LibraryError::InvalidAssetSelection => "invalid_asset_selection",

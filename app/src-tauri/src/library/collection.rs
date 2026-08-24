@@ -51,11 +51,15 @@ const COLLECTION_SUMMARY_SQL: &str = "SELECT
     collection.year,
     collection.author,
     collection.director,
+    collection.developer,
+    collection.production_company,
+    collection.release_date,
     collection.external_score,
     collection.my_score,
     collection.genres,
     collection.overview,
     collection.showcase,
+    collection.showcase_order,
     collection.created_at,
     collection.updated_at,
     (
@@ -101,11 +105,12 @@ impl Library {
             .execute(
                 "INSERT INTO collections (
                     id, name, description, type, cover_asset_id,
-                    year, author, director, external_score, my_score,
+                    year, author, director, developer, production_company, release_date,
+                    external_score, my_score, showcase_order,
                     genres, overview, showcase, created_at, updated_at
                  ) VALUES (?1, ?2, ?3, ?4, NULL,
-                    NULL, NULL, NULL, NULL, NULL,
-                    NULL, NULL, 0, ?5, ?5)",
+                    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                    NULL, NULL, NULL, 0, ?5, ?5)",
                 params![id, name, description, type_str, now],
             )
             .map_err(map_duplicate_name)?;
@@ -120,24 +125,42 @@ impl Library {
         let name = normalized_name(request.name)?;
         let description = normalized_description(request.description)?;
         let type_str = collection_type_str(request.collection_type);
+        let author = normalized_optional_text(request.author);
+        let director = normalized_optional_text(request.director);
+        let developer = normalized_optional_text(request.developer);
+        let production_company = normalized_optional_text(request.production_company);
+        let release_date = normalized_release_date(request.release_date)?;
+        let my_score = validated_personal_rating(request.my_score)?;
         let connection = self.connection()?;
         let changed = connection
             .execute(
                 "UPDATE collections
                  SET name = ?1, description = ?2, type = ?3,
                      year = ?4, author = ?5, director = ?6,
-                     external_score = ?7, my_score = ?8,
-                     updated_at = ?9
-                 WHERE id = ?10",
+                     developer = ?7, production_company = ?8, release_date = ?9,
+                     external_score = ?10, my_score = ?11,
+                     showcase_order = CASE
+                         WHEN showcase = 1 AND type <> ?3 THEN (
+                             SELECT COALESCE(MAX(other.showcase_order) + 1, 0)
+                             FROM collections AS other
+                             WHERE other.type = ?3 AND other.id <> ?13
+                         )
+                         ELSE showcase_order
+                     END,
+                     updated_at = ?12
+                 WHERE id = ?13",
                 params![
                     name,
                     description,
                     type_str,
                     request.year,
-                    request.author,
-                    request.director,
+                    author,
+                    director,
+                    developer,
+                    production_company,
+                    release_date,
                     request.external_score,
-                    request.my_score,
+                    my_score,
                     chrono::Utc::now().to_rfc3339(),
                     id,
                 ],
@@ -196,7 +219,19 @@ impl Library {
         let connection = self.connection()?;
         require_collection(&connection, collection_id)?;
         let changed = connection.execute(
-            "UPDATE collections SET showcase = ?1, updated_at = ?2 WHERE id = ?3",
+            "UPDATE collections
+             SET showcase = ?1,
+                 showcase_order = CASE
+                     WHEN ?1 = 0 THEN NULL
+                     WHEN showcase = 1 AND showcase_order IS NOT NULL THEN showcase_order
+                     ELSE (
+                         SELECT COALESCE(MAX(other.showcase_order) + 1, 0)
+                         FROM collections AS other
+                         WHERE other.type = collections.type AND other.id <> collections.id
+                     )
+                 END,
+                 updated_at = ?2
+             WHERE id = ?3",
             params![
                 if showcase { 1 } else { 0 },
                 chrono::Utc::now().to_rfc3339(),
@@ -300,6 +335,35 @@ fn normalized_description(description: Option<String>) -> Result<Option<String>,
     Ok(description)
 }
 
+fn normalized_optional_text(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+}
+
+fn normalized_release_date(value: Option<String>) -> Result<Option<String>, LibraryError> {
+    let value = normalized_optional_text(value);
+    if value.as_ref().is_some_and(|value| {
+        chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").is_err()
+    }) {
+        return Err(LibraryError::InvalidCollectionReleaseDate);
+    }
+    Ok(value)
+}
+
+pub(crate) fn validated_personal_rating(
+    value: Option<f64>,
+) -> Result<Option<f64>, LibraryError> {
+    if value.is_some_and(|value| {
+        !value.is_finite()
+            || !(0.0..=5.0).contains(&value)
+            || (value * 2.0).fract() != 0.0
+    }) {
+        return Err(LibraryError::InvalidPersonalRating);
+    }
+    Ok(value)
+}
+
 pub(crate) fn require_collection(connection: &Connection, id: &str) -> Result<(), LibraryError> {
     let exists: bool = connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM collections WHERE id = ?1)",
@@ -331,7 +395,7 @@ fn collection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollectionSu
         "movie" => CollectionType::Movie,
         _ => CollectionType::Manga,
     };
-    let showcase_int: i64 = row.get(14)?;
+    let showcase_int: i64 = row.get(17)?;
     Ok(CollectionSummary {
         id: row.get(0)?,
         name: row.get(1)?,
@@ -340,18 +404,22 @@ fn collection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollectionSu
         cover_asset_id: row.get(4)?,
         selected_work_artwork_id: row.get(5)?,
         asset_count: u64::try_from(row.get::<_, i64>(6)?).unwrap_or(0),
-        unread_release_count: u64::try_from(row.get::<_, i64>(17)?).unwrap_or(0),
+        unread_release_count: u64::try_from(row.get::<_, i64>(21)?).unwrap_or(0),
         year: row.get(7)?,
         author: row.get(8)?,
         director: row.get(9)?,
-        external_score: row.get(10)?,
-        my_score: row.get(11)?,
-        genres: row.get(12)?,
-        overview: row.get(13)?,
+        developer: row.get(10)?,
+        production_company: row.get(11)?,
+        release_date: row.get(12)?,
+        external_score: row.get(13)?,
+        my_score: row.get(14)?,
+        genres: row.get(15)?,
+        overview: row.get(16)?,
         showcase: showcase_int != 0,
-        created_at: row.get(15)?,
-        updated_at: row.get(16)?,
-        source_path: row.get(18)?,
+        showcase_order: row.get(18)?,
+        created_at: row.get(19)?,
+        updated_at: row.get(20)?,
+        source_path: row.get(22)?,
     })
 }
 
@@ -456,6 +524,9 @@ mod tests {
                     year: None,
                     author: None,
                     director: None,
+                    developer: None,
+                    production_company: None,
+                    release_date: None,
                     external_score: None,
                     my_score: None,
                 },
@@ -736,8 +807,11 @@ mod tests {
                     year: Some(2019),
                     author: Some("PlatinumGames".into()),
                     director: None,
+                    developer: None,
+                    production_company: None,
+                    release_date: None,
                     external_score: Some(87),
-                    my_score: Some(9),
+                    my_score: Some(4.5),
                 },
             )
             .unwrap();
@@ -748,6 +822,98 @@ mod tests {
         let showcased = library.set_collection_showcase(&created.id, true).unwrap();
         assert!(showcased.showcase);
         assert!(library.list_collections().unwrap()[0].showcase);
+    }
+
+    #[test]
+    fn update_collection_persists_typed_credits_date_and_half_star_rating() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let created = library
+            .create_collection(CreateCollection {
+                name: "Astral Chain".into(),
+                description: None,
+                collection_type: CollectionType::Game,
+            })
+            .unwrap();
+
+        let updated = library
+            .update_collection(
+                &created.id,
+                UpdateCollection {
+                    name: "Astral Chain".into(),
+                    description: None,
+                    collection_type: CollectionType::Game,
+                    year: Some(2019),
+                    author: None,
+                    director: None,
+                    developer: Some("  PlatinumGames  ".into()),
+                    production_company: None,
+                    release_date: Some("2019-08-30".into()),
+                    external_score: Some(87),
+                    my_score: Some(4.5),
+                },
+            )
+            .unwrap();
+
+        assert_eq!(updated.developer.as_deref(), Some("PlatinumGames"));
+        assert_eq!(updated.production_company, None);
+        assert_eq!(updated.release_date.as_deref(), Some("2019-08-30"));
+        assert_eq!(updated.my_score, Some(4.5));
+    }
+
+    #[test]
+    fn update_collection_rejects_invalid_date_and_personal_rating() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let created = create(&library, "Invalid metadata");
+        let request = |release_date: Option<&str>, my_score: Option<f64>| UpdateCollection {
+            name: "Invalid metadata".into(),
+            description: None,
+            collection_type: CollectionType::Manga,
+            year: None,
+            author: None,
+            director: None,
+            developer: None,
+            production_company: None,
+            release_date: release_date.map(str::to_owned),
+            external_score: None,
+            my_score,
+        };
+
+        assert!(matches!(
+            library.update_collection(&created.id, request(Some("2026-02-30"), None)),
+            Err(LibraryError::InvalidCollectionReleaseDate)
+        ));
+        for score in [-0.5, 0.25, 5.5, f64::INFINITY] {
+            assert!(matches!(
+                library.update_collection(&created.id, request(None, Some(score))),
+                Err(LibraryError::InvalidPersonalRating)
+            ));
+        }
+    }
+
+    #[test]
+    fn showcase_membership_assigns_stable_order_per_type() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let first = create(&library, "First");
+        let second = create(&library, "Second");
+
+        assert_eq!(
+            library.set_collection_showcase(&first.id, true).unwrap().showcase_order,
+            Some(0)
+        );
+        assert_eq!(
+            library.set_collection_showcase(&second.id, true).unwrap().showcase_order,
+            Some(1)
+        );
+        assert_eq!(
+            library.set_collection_showcase(&first.id, true).unwrap().showcase_order,
+            Some(0)
+        );
+        let removed = library.set_collection_showcase(&first.id, false).unwrap();
+        assert!(!removed.showcase);
+        assert_eq!(removed.showcase_order, None);
     }
 
     #[test]
@@ -793,14 +959,17 @@ mod tests {
                     year: Some(2024),
                     author: Some("Imported Author".into()),
                     director: None,
+                    developer: None,
+                    production_company: None,
+                    release_date: None,
                     external_score: None,
-                    my_score: Some(9),
+                    my_score: Some(4.5),
                 },
             )
             .unwrap();
 
         assert_eq!(updated.name, "Renamed Work");
-        assert_eq!(updated.my_score, Some(9));
+        assert_eq!(updated.my_score, Some(4.5));
         assert_eq!(updated.year, Some(2024));
         assert_eq!(updated.author.as_deref(), Some("Imported Author"));
         assert_eq!(updated.genres.as_deref(), Some("Fantasy"));
