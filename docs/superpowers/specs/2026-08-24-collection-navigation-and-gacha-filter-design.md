@@ -72,7 +72,7 @@ Collection 목록을 제공하는 Rust Module이 기본적으로 `legacy_kind = 
 
 `AssetView`의 Collection 목록 상태는 항상 구체적인 `CollectionType`을 가진다. `typeFilter: null`과 이를 의미하는 `전체` 버튼, 제목과 테스트 fixture를 제거한다.
 
-유형 선택 시 `lakomics.collection.lastType` 로컬 UI 설정에 값을 기록한다. Collection 빠른 보기를 열 때 저장된 값이 `game`, `manga`, `movie` 중 하나면 복원하고, 값이 없거나 손상됐으면 `manga`를 사용한다. 이 설정은 라이브러리 데이터가 아니며 앱 설치 단위로 공유한다.
+유형 선택 시 기존 `UiPreferences`의 `collectionType` 로컬 UI 설정에 값을 기록한다. Collection 빠른 보기를 열 때 저장된 값이 `game`, `manga`, `movie` 중 하나면 복원하고, 값이 없거나 손상됐으면 `manga`를 사용한다. 이 설정은 라이브러리 데이터가 아니며 앱 설치 단위로 공유한다.
 
 Collection 상세 화면을 닫을 때 조회한 Collection의 유형으로 돌아간다. Collection을 찾을 수 없어 유형을 알 수 없는 경우에는 유효한 마지막 유형을 사용하고, 그것도 없으면 `manga`를 사용한다. 일반 Collection과 쇼케이스는 같은 유형을 유지한 채 전환한다.
 
