@@ -304,6 +304,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
 
   function navigateView(next: AssetView) {
     if (next.kind === "settings" && view.kind !== "settings") settingsReturnViewRef.current = view;
+    if (next.kind === "collections") updatePreferences({ collectionType: next.typeFilter });
     setView(next);
   }
 
@@ -454,6 +455,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
               entries={entries}
               albums={albums}
               view={view}
+              collectionType={preferences.collectionType}
               expandedIds={preferences.expandedClassificationIds}
               expandedAlbumIds={preferences.expandedAlbumIds}
               sidebarWidth={preferences.sidebarWidth}
@@ -502,7 +504,14 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                   <CollectionOverlay
                     collectionId={view.collectionId}
                     collections={collections}
-                    onExit={() => setView({ kind: "collections", typeFilter: null, showcase: false })}
+                    onExit={() => {
+                      const detailCollection = collections.find((item) => item.id === view.collectionId);
+                      setView({
+                        kind: "collections",
+                        typeFilter: detailCollection?.type ?? preferences.collectionType,
+                        showcase: false,
+                      });
+                    }}
                     onChanged={refreshCollections}
                   />
                 ) : view.kind === "collections" ? (

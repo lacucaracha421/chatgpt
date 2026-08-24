@@ -532,6 +532,7 @@ describe("App", () => {
         expandedAlbumIds: [],
         assetSort: "random",
         thumbnailRowHeight: 180,
+        collectionType: "manga",
       }),
     );
   });
@@ -1023,6 +1024,7 @@ describe("App", () => {
 
   it("opens the collections browser and loads collections with the sidebar", async () => {
     localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({ collectionType: "game" }));
     const libraryGateway = gateway();
     vi.mocked(libraryGateway.listCollections).mockResolvedValue([{
       id: "collection-1",

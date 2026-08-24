@@ -24,7 +24,7 @@ const TYPE_LABEL: Record<CollectionType, string> = {
 
 type CollectionBrowserProps = {
   collections: CollectionSummary[];
-  typeFilter: CollectionType | null;
+  typeFilter: CollectionType;
   showcase: boolean;
   onViewChange: (next: AssetView) => void;
   onChanged: () => Promise<void>;
@@ -46,12 +46,12 @@ export function CollectionBrowser({
 
   const visible = collections.filter((collection) => {
     if (showcase && !collection.showcase) return false;
-    if (typeFilter && collection.type !== typeFilter) return false;
+    if (collection.type !== typeFilter) return false;
     return true;
   });
-  const sectionLabel = typeFilter ? TYPE_LABEL[typeFilter] : "전체";
+  const sectionLabel = TYPE_LABEL[typeFilter];
 
-  function setTypeFilter(next: CollectionType | null) {
+  function setTypeFilter(next: CollectionType) {
     onViewChange({ kind: "collections", typeFilter: next, showcase });
   }
 
@@ -205,11 +205,10 @@ function TypeSegment({
   current,
   onChange,
 }: {
-  current: CollectionType | null;
-  onChange: (next: CollectionType | null) => void;
+  current: CollectionType;
+  onChange: (next: CollectionType) => void;
 }) {
-  const options: Array<[CollectionType | null, string]> = [
-    [null, "전체"],
+  const options: Array<[CollectionType, string]> = [
     ["game", "게임"],
     ["manga", "만화"],
     ["movie", "영화"],

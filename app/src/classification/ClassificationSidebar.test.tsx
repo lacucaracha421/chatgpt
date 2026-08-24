@@ -90,6 +90,7 @@ function renderSidebar(
       <LibraryProvider gateway={libraryGateway}>
         <ClassificationSidebar
           entries={props.entries ?? entries}
+          collectionType={props.collectionType ?? "manga"}
           view={view}
           expandedIds={expandedIds}
           sidebarWidth={sidebarWidth}
@@ -154,6 +155,7 @@ describe("ClassificationSidebar", () => {
       <LibraryProvider gateway={fixtureGateway}>
         <ClassificationSidebar
           entries={entries}
+          collectionType="manga"
           albums={[
             { id: "album-root", name: "표지", parentId: null, iconKey: null, colorKey: null },
             { id: "album-child", name: "게임 표지", parentId: "album-root", iconKey: null, colorKey: null },
@@ -268,7 +270,7 @@ describe("ClassificationSidebar", () => {
       return <>
         <button onClick={() => setRequest((current) => current + 1)}>request</button>
         <LibraryProvider gateway={fixtureGateway}>
-          <ClassificationSidebar entries={entries} view={{ kind: "classification", classificationId: null }} expandedIds={["root", "work"]} sidebarWidth={232} reviewCount={0} createClassificationRequest={request} onViewChange={vi.fn()} onExpandedIdsChange={vi.fn()} onSidebarWidthChange={vi.fn()} onChanged={vi.fn()} />
+          <ClassificationSidebar entries={entries} collectionType="manga" view={{ kind: "classification", classificationId: null }} expandedIds={["root", "work"]} sidebarWidth={232} reviewCount={0} createClassificationRequest={request} onViewChange={vi.fn()} onExpandedIdsChange={vi.fn()} onSidebarWidthChange={vi.fn()} onChanged={vi.fn()} />
         </LibraryProvider>
       </>;
     }
@@ -649,6 +651,7 @@ describe("ClassificationSidebar", () => {
       <LibraryProvider gateway={fixtureGateway}>
         <ClassificationSidebar
           entries={entries}
+          collectionType="manga"
           view={{ kind: "classification", classificationId: null }}
           expandedIds={expandedIds}
           sidebarWidth={232}
@@ -741,6 +744,6 @@ describe("ClassificationSidebar", () => {
 
     await user.click(screen.getByRole("button", { name: "컬렉션" }));
 
-    expect(onViewChange).toHaveBeenCalledWith({ kind: "collections", typeFilter: null, showcase: false });
+    expect(onViewChange).toHaveBeenCalledWith({ kind: "collections", typeFilter: "manga", showcase: false });
   });
 });

@@ -109,7 +109,7 @@ export type AssetView =
   | { kind: "trash" }
   | { kind: "settings" }
   | { kind: "manga" }
-  | { kind: "collections"; typeFilter: CollectionType | null; showcase: boolean }
+  | { kind: "collections"; typeFilter: CollectionType; showcase: boolean }
   | { kind: "collection"; collectionId: string };
 
 export type ClassificationEntry = {

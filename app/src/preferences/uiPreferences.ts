@@ -1,4 +1,4 @@
-import type { AssetSort } from "../library/types";
+import type { AssetSort, CollectionType } from "../library/types";
 import { clampSidebarWidth } from "../layout/sidebarWidth";
 
 export const UI_PREFERENCES_KEY = "lakomics.uiPreferences.v1";
@@ -10,6 +10,7 @@ export type UiPreferences = {
   expandedAlbumIds: string[];
   assetSort: AssetSort;
   thumbnailRowHeight: number;
+  collectionType: CollectionType;
 };
 
 export const DEFAULT_UI_PREFERENCES: UiPreferences = {
@@ -19,6 +20,7 @@ export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   expandedAlbumIds: [],
   assetSort: "newest",
   thumbnailRowHeight: 180,
+  collectionType: "manga",
 };
 
 export function loadUiPreferences(storage: Storage = localStorage): UiPreferences {
@@ -55,6 +57,9 @@ export function loadUiPreferences(storage: Storage = localStorage): UiPreference
       typeof value.thumbnailRowHeight === "number" && Number.isFinite(value.thumbnailRowHeight)
         ? Math.max(96, Math.min(320, value.thumbnailRowHeight))
         : DEFAULT_UI_PREFERENCES.thumbnailRowHeight,
+    collectionType: isCollectionType(value.collectionType)
+      ? value.collectionType
+      : DEFAULT_UI_PREFERENCES.collectionType,
   };
 }
 
@@ -80,4 +85,8 @@ function isAssetSort(value: unknown): value is AssetSort {
     value === "favorites" ||
     value === "random"
   );
+}
+
+function isCollectionType(value: unknown): value is CollectionType {
+  return value === "game" || value === "manga" || value === "movie";
 }

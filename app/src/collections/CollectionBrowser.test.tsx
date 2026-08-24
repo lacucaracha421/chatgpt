@@ -30,7 +30,7 @@ const sample: CollectionSummary = {
 
 function renderBrowser(props: {
   collections: CollectionSummary[];
-  typeFilter: CollectionSummary["type"] | null;
+  typeFilter: CollectionSummary["type"];
   showcase: boolean;
   onViewChange?: () => void;
   onChanged?: () => Promise<void>;
@@ -52,7 +52,7 @@ function renderBrowser(props: {
 
 describe("CollectionBrowser", () => {
   it("renders a grid of collection cards", () => {
-    renderBrowser({ collections: [sample], typeFilter: null, showcase: false });
+    renderBrowser({ collections: [sample], typeFilter: "game", showcase: false });
     expect(screen.getByText("Astral Chain")).toBeInTheDocument();
     expect(screen.getAllByText("게임").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("3개")).toBeInTheDocument();
@@ -64,7 +64,7 @@ describe("CollectionBrowser", () => {
         { ...sample, id: "changed", name: "던전밥", unreadReleaseCount: 3 },
         { ...sample, id: "quiet", name: "요츠바랑!", unreadReleaseCount: 0 },
       ],
-      typeFilter: null,
+      typeFilter: "game",
       showcase: false,
     });
 
@@ -75,7 +75,7 @@ describe("CollectionBrowser", () => {
   it("uses the source preview when a collection has no cover asset", () => {
     renderBrowser({
       collections: [{ ...sample, sourcePath: "games/astral-chain" }],
-      typeFilter: null,
+      typeFilter: "game",
       showcase: false,
     });
 
@@ -88,7 +88,7 @@ describe("CollectionBrowser", () => {
   it("prefers the media-vault cover asset over the source preview", () => {
     renderBrowser({
       collections: [{ ...sample, coverAssetId: "asset-1", sourcePath: "games/astral-chain" }],
-      typeFilter: null,
+      typeFilter: "game",
       showcase: false,
     });
 
@@ -99,24 +99,28 @@ describe("CollectionBrowser", () => {
   });
 
   it("shows empty state when no collections", () => {
-    renderBrowser({ collections: [], typeFilter: null, showcase: false });
+    renderBrowser({ collections: [], typeFilter: "game", showcase: false });
     expect(screen.getByText("컬렉션이 없습니다.")).toBeInTheDocument();
   });
 
   it("filters by type when type filter set", () => {
-    renderBrowser({ collections: [sample], typeFilter: "manga", showcase: false });
-    expect(screen.queryByText("Astral Chain")).not.toBeInTheDocument();
+    const manga = { ...sample, id: "manga", name: "던전밥", type: "manga" as const };
+    renderBrowser({ collections: [sample, manga], typeFilter: "game", showcase: false });
+    expect(screen.queryByRole("button", { name: "전체" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "게임" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Astral Chain")).toBeInTheDocument();
+    expect(screen.queryByText("던전밥")).not.toBeInTheDocument();
   });
 
   it("shows only showcase collections when showcase on", () => {
-    renderBrowser({ collections: [sample], typeFilter: null, showcase: true });
+    renderBrowser({ collections: [sample], typeFilter: "game", showcase: true });
     expect(screen.getByText("쇼케이스에 컬렉션이 없습니다.")).toBeInTheDocument();
   });
 
   it("shows showcase collections when showcase on and a collection is showcased", () => {
-    renderBrowser({ collections: [{ ...sample, showcase: true }], typeFilter: null, showcase: true });
+    renderBrowser({ collections: [{ ...sample, showcase: true }], typeFilter: "game", showcase: true });
     expect(screen.getByText("Astral Chain")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "전체 쇼케이스" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "게임 쇼케이스" })).toBeInTheDocument();
     expect(screen.getByText("선정 작품 1개")).toBeInTheDocument();
   });
 
@@ -129,14 +133,14 @@ describe("CollectionBrowser", () => {
 
   it("opens the detail view when a card is clicked", () => {
     const onViewChange = vi.fn();
-    renderBrowser({ collections: [sample], typeFilter: null, showcase: false, onViewChange });
+    renderBrowser({ collections: [sample], typeFilter: "game", showcase: false, onViewChange });
     screen.getByText("Astral Chain").click();
     expect(onViewChange).toHaveBeenCalledWith({ kind: "collection", collectionId: "c1" });
   });
 
   it("orders MangaDex before manual input in the new collection menu", async () => {
     const user = userEvent.setup();
-    const gateway = renderBrowser({ collections: [], typeFilter: null, showcase: false });
+    const gateway = renderBrowser({ collections: [], typeFilter: "game", showcase: false });
     await user.click(screen.getByRole("button", { name: "새 컬렉션" }));
     const items = await screen.findAllByRole("menuitem");
     expect(items.map((item) => item.textContent)).toEqual(["MangaDex에서 만화 추가", "직접 입력"]);
@@ -148,7 +152,7 @@ describe("CollectionBrowser", () => {
   it("prefers stored WorkArtwork over other card covers", () => {
     renderBrowser({
       collections: [{ ...sample, selectedWorkArtworkId: "artwork-1", coverAssetId: "asset-1", sourcePath: "games/astral-chain" }],
-      typeFilter: null,
+      typeFilter: "game",
       showcase: false,
     });
 

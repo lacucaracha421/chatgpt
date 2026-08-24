@@ -35,6 +35,7 @@ describe("UI preferences", () => {
       expandedAlbumIds: ["album-a"],
       assetSort: "oldest" as const,
       thumbnailRowHeight: 220,
+      collectionType: "manga" as const,
     };
 
     saveUiPreferences(value, localStorage);
@@ -68,6 +69,7 @@ describe("UI preferences", () => {
       expandedAlbumIds: [],
       assetSort: "newest",
       thumbnailRowHeight: 180,
+      collectionType: "manga",
     });
   });
 
@@ -90,6 +92,7 @@ describe("UI preferences", () => {
       expandedAlbumIds: [],
       assetSort: "random",
       thumbnailRowHeight: 180,
+      collectionType: "manga",
     });
   });
 
@@ -109,5 +112,14 @@ describe("UI preferences", () => {
 
     localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({ thumbnailRowHeight: 40 }));
     expect(loadUiPreferences(localStorage).thumbnailRowHeight).toBe(96);
+  });
+
+  it("restores a valid collection type and replaces an invalid one with manga", () => {
+    const localStorage = storage();
+    localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({ collectionType: "movie" }));
+    expect(loadUiPreferences(localStorage).collectionType).toBe("movie");
+
+    localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({ collectionType: "gacha" }));
+    expect(loadUiPreferences(localStorage).collectionType).toBe("manga");
   });
 });
