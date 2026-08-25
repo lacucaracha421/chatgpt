@@ -14,11 +14,15 @@ context.globalThis = context;
 vm.runInNewContext(source, context, { filename: "x-gallery.js" });
 const {
   AUTO_TARGET_NEW_IMAGES,
+  GALLERY_INITIAL_RENDER_ITEMS,
+  GALLERY_RENDER_BATCH_ITEMS,
   createGalleryStore,
+  galleryItemKey,
   nextAutoHarvestState,
   parseStatusHref,
   pruneSavedEntries,
   selectedTabIsFirst,
+  takeUnrenderedGalleryItems,
 } = context.LakomicsXGallery;
 
 test("parses X status/photo URLs without depending on the UI language", () => {
@@ -114,4 +118,48 @@ test("saved-media history drops expired entries and caps recent markers", () => 
   assert.equal("expired" in pruned, false);
   assert.equal("url-0" in pruned, true);
   assert.equal("url-3009" in pruned, false);
+});
+
+
+test("incremental gallery batching keeps already-rendered media out of later batches", () => {
+  assert.equal(GALLERY_INITIAL_RENDER_ITEMS, 36);
+  assert.equal(GALLERY_RENDER_BATCH_ITEMS, 24);
+  const items = Array.from({ length: 70 }, (_, index) => ({
+    tweetId: String(index),
+    imageIndex: 1,
+    imageUrl: `https://pbs.twimg.com/media/${index}?format=jpg&name=orig`,
+  }));
+  const rendered = new Set();
+  const initial = takeUnrenderedGalleryItems(items, rendered, GALLERY_INITIAL_RENDER_ITEMS);
+  assert.equal(initial.length, 36);
+  for (const item of initial) rendered.add(galleryItemKey(item));
+  const next = takeUnrenderedGalleryItems(items, rendered, GALLERY_RENDER_BATCH_ITEMS);
+  assert.equal(next.length, 24);
+  assert.equal(next[0].tweetId, "36");
+  assert.equal(next.at(-1).tweetId, "59");
+});
+
+test("gallery store reports only newly-added media to incremental renderer", () => {
+  const changes = [];
+  const store = createGalleryStore((change) => changes.push(change));
+  store.upsert({
+    tweetId: "9",
+    username: "u",
+    author: "@u",
+    postUrl: "https://x.com/u/status/9",
+    collectedAt: 100,
+    images: [{ url: "A", index: 1 }],
+  });
+  store.upsert({
+    tweetId: "9",
+    username: "u",
+    author: "@u",
+    postUrl: "https://x.com/u/status/9",
+    collectedAt: 110,
+    images: [{ url: "A", index: 1 }, { url: "B", index: 2 }],
+  });
+  assert.equal(changes.length, 2);
+  assert.equal(changes[0].type, "upsert");
+  assert.deepEqual(Array.from(changes[0].items, (item) => item.imageUrl), ["A"]);
+  assert.deepEqual(Array.from(changes[1].items, (item) => item.imageUrl), ["B"]);
 });

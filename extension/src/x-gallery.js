@@ -15,6 +15,9 @@
   const SAVED_STORAGE_KEY = "lakomicsXGallerySavedMediaV1";
   const SAVED_MAX_ITEMS = 3000;
   const SAVED_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
+  const GALLERY_INITIAL_RENDER_ITEMS = 36;
+  const GALLERY_RENDER_BATCH_ITEMS = 24;
+  const GALLERY_LOAD_MORE_THRESHOLD_PX = 900;
 
   function parseStatusHref(value) {
     let url;
@@ -120,6 +123,39 @@
     };
   }
 
+  function flattenPostImages(post, images = post?.images ?? []) {
+    return images.map((image) => ({
+      tweetId: post.tweetId,
+      username: post.username,
+      author: post.author,
+      postUrl: post.postUrl,
+      collectedAt: post.collectedAt,
+      imageIndex: image.index,
+      imageUrl: image.url,
+    }));
+  }
+
+  function galleryItemKey(item) {
+    if (!item) return "";
+    const tweetId = String(item.tweetId ?? "");
+    const imageIndex = String(item.imageIndex ?? "");
+    const imageUrl = String(item.imageUrl ?? "");
+    return imageUrl ? `${tweetId}:${imageIndex}:${imageUrl}` : `${tweetId}:${imageIndex}`;
+  }
+
+  function takeUnrenderedGalleryItems(items, renderedKeys, limit) {
+    const result = [];
+    const maxItems = Math.max(0, Number(limit) || 0);
+    if (!maxItems) return result;
+    for (const item of items ?? []) {
+      const key = galleryItemKey(item);
+      if (!key || renderedKeys?.has?.(key)) continue;
+      result.push(item);
+      if (result.length >= maxItems) break;
+    }
+    return result;
+  }
+
   function createGalleryStore(onChange = () => {}) {
     const posts = new Map();
 
@@ -127,35 +163,29 @@
       if (!post?.tweetId || !Array.isArray(post.images) || !post.images.length) return false;
       const existing = posts.get(post.tweetId);
       if (!existing) {
-        posts.set(post.tweetId, {
+        const stored = {
           ...post,
           images: post.images.map((image) => ({ ...image })),
-        });
-        onChange();
+        };
+        posts.set(post.tweetId, stored);
+        onChange({ type: "upsert", items: flattenPostImages(stored) });
         return true;
       }
 
       const known = new Set(existing.images.map((image) => image.url));
       const additions = post.images.filter((image) => image?.url && !known.has(image.url));
       if (!additions.length) return false;
-      existing.images.push(...additions.map((image) => ({ ...image })));
+      const storedAdditions = additions.map((image) => ({ ...image }));
+      existing.images.push(...storedAdditions);
       existing.collectedAt = Math.min(existing.collectedAt ?? post.collectedAt, post.collectedAt);
-      onChange();
+      onChange({ type: "upsert", items: flattenPostImages(existing, storedAdditions) });
       return true;
     }
 
     function flatImages() {
       return Array.from(posts.values())
         .sort((a, b) => (b.collectedAt ?? 0) - (a.collectedAt ?? 0))
-        .flatMap((post) => post.images.map((image) => ({
-          tweetId: post.tweetId,
-          username: post.username,
-          author: post.author,
-          postUrl: post.postUrl,
-          collectedAt: post.collectedAt,
-          imageIndex: image.index,
-          imageUrl: image.url,
-        })));
+        .flatMap((post) => flattenPostImages(post));
     }
 
     function imageCount() {
@@ -171,7 +201,7 @@
     function clear() {
       if (!posts.size) return false;
       posts.clear();
-      onChange();
+      onChange({ type: "clear", items: [] });
       return true;
     }
 
@@ -199,7 +229,10 @@
   if (globalThis.__LAKOMICS_TEST__) {
     globalThis.LakomicsXGallery = {
       AUTO_TARGET_NEW_IMAGES,
+      GALLERY_INITIAL_RENDER_ITEMS,
+      GALLERY_RENDER_BATCH_ITEMS,
       createGalleryStore,
+      galleryItemKey,
       extractPost,
       findTweetIdentity,
       isHomeRoute,
@@ -208,6 +241,7 @@
       parseStatusHref,
       pruneSavedEntries,
       selectedTabIsFirst,
+      takeUnrenderedGalleryItems,
     };
     return;
   }
@@ -225,19 +259,31 @@
     let harvestLoopToken = 0;
     let storeVersion = 0;
     let timelineVersion = 0;
+    let galleryRenderQueued = false;
+    let galleryLoadMoreQueued = false;
     const observedArticles = new WeakSet();
     const visibleArticles = new WeakSet();
     const pendingArticles = new Set();
+    const pendingGalleryItems = new Map();
+    const renderedGalleryKeys = new Set();
     const savedMedia = new Map();
 
     const ui = createGalleryUi();
     globalThis.LakomicsXGalleryRuntime = { markSaved };
-    void loadSavedMedia();
-    const store = createGalleryStore(() => {
+    const store = createGalleryStore((change) => {
       storeVersion += 1;
+      if (change?.type === "clear") {
+        resetGalleryRender();
+      } else {
+        for (const item of change?.items ?? []) {
+          const key = galleryItemKey(item);
+          if (key) pendingGalleryItems.set(key, item);
+        }
+      }
       updateCounters();
-      if (overlayOpen) queueGalleryRender();
+      if (overlayOpen && !harvest?.running) queueGalleryRender();
     });
+    void loadSavedMedia();
 
     const intersectionObserver = new IntersectionObserver((entries) => {
       for (const entry of entries) {
@@ -292,7 +338,6 @@
     ui.clear.addEventListener("click", () => {
       if (harvest?.running) stopAutoHarvest("자동 수집을 중지했습니다", true);
       store.clear();
-      renderGallery();
     });
     ui.auto.addEventListener("click", () => {
       if (harvest?.running) stopAutoHarvest("자동 수집을 중지했습니다", true);
@@ -301,6 +346,7 @@
     ui.overlay.addEventListener("click", (event) => {
       if (event.target === ui.overlay) closeGallery();
     });
+    ui.scroll.addEventListener("scroll", queueGalleryLoadMore, { passive: true });
 
     function observeArticle(article) {
       if (!article || observedArticles.has(article)) return;
@@ -363,21 +409,39 @@
       overlayOpen = true;
       ui.overlay.hidden = false;
       ui.trigger.setAttribute("aria-expanded", "true");
-      renderGallery();
+      resetGalleryRender();
+      renderInitialGallery();
       ui.close.focus({ preventScroll: true });
     }
 
     function closeGallery() {
-      if (harvest?.running) stopAutoHarvest("자동 수집을 중지했습니다", true);
       overlayOpen = false;
+      if (harvest?.running) stopAutoHarvest("자동 수집을 중지했습니다", true);
       ui.overlay.hidden = true;
       ui.trigger.setAttribute("aria-expanded", "false");
       ui.trigger.focus({ preventScroll: true });
     }
 
     function queueGalleryRender() {
+      if (galleryRenderQueued || !overlayOpen || harvest?.running) return;
+      galleryRenderQueued = true;
       requestAnimationFrame(() => {
-        if (overlayOpen) renderGallery();
+        galleryRenderQueued = false;
+        if (!overlayOpen || harvest?.running) return;
+        const items = Array.from(pendingGalleryItems.values());
+        pendingGalleryItems.clear();
+        insertGalleryItemsSorted(items);
+      });
+    }
+
+    function queueGalleryLoadMore() {
+      if (galleryLoadMoreQueued || !overlayOpen) return;
+      const remaining = ui.scroll.scrollHeight - ui.scroll.scrollTop - ui.scroll.clientHeight;
+      if (remaining > GALLERY_LOAD_MORE_THRESHOLD_PX) return;
+      galleryLoadMoreQueued = true;
+      requestAnimationFrame(() => {
+        galleryLoadMoreQueued = false;
+        if (overlayOpen) renderNextGalleryBatch();
       });
     }
 
@@ -409,14 +473,81 @@
       }
     }
 
-    function renderGallery() {
-      const items = store.flatImages();
+    function resetGalleryRender() {
+      renderedGalleryKeys.clear();
+      pendingGalleryItems.clear();
       ui.grid.replaceChildren();
+      ui.empty.hidden = store.imageCount() > 0;
+      ui.scroll.scrollTop = 0;
+    }
+
+    function renderInitialGallery() {
+      const items = store.flatImages();
       ui.empty.hidden = items.length > 0;
       if (!items.length) return;
+      pendingGalleryItems.clear();
+      appendGalleryItems(takeUnrenderedGalleryItems(items, renderedGalleryKeys, GALLERY_INITIAL_RENDER_ITEMS));
+    }
+
+    function renderNextGalleryBatch() {
+      const items = store.flatImages();
+      const batch = takeUnrenderedGalleryItems(items, renderedGalleryKeys, GALLERY_RENDER_BATCH_ITEMS);
+      appendGalleryItems(batch);
+    }
+
+    function appendGalleryItems(items) {
+      const fresh = (items ?? []).filter((item) => {
+        const key = galleryItemKey(item);
+        return key && !renderedGalleryKeys.has(key);
+      });
+      if (!fresh.length) return;
       const fragment = document.createDocumentFragment();
-      for (const item of items) fragment.append(createCard(item));
+      for (const item of fresh) {
+        const key = galleryItemKey(item);
+        renderedGalleryKeys.add(key);
+        fragment.append(createCard(item));
+      }
       ui.grid.append(fragment);
+      ui.empty.hidden = true;
+      queueGalleryLoadMore();
+    }
+
+    function insertGalleryItemsSorted(items) {
+      const fresh = (items ?? []).filter((item) => {
+        const key = galleryItemKey(item);
+        return key && !renderedGalleryKeys.has(key);
+      });
+      if (!fresh.length) return;
+      fresh.sort((a, b) => {
+        const timeDelta = Number(b.collectedAt || 0) - Number(a.collectedAt || 0);
+        if (timeDelta) return timeDelta;
+        if (a.tweetId === b.tweetId) return Number(a.imageIndex || 0) - Number(b.imageIndex || 0);
+        return String(b.tweetId || "").localeCompare(String(a.tweetId || ""));
+      });
+      for (const item of fresh) {
+        const key = galleryItemKey(item);
+        const card = createCard(item);
+        const collectedAt = Number(item.collectedAt || 0);
+        const imageIndex = Number(item.imageIndex || 0);
+        let before = null;
+        for (const child of ui.grid.children) {
+          const childCollectedAt = Number(child.getAttribute("data-lakomics-collected-at") || 0);
+          if (collectedAt > childCollectedAt) {
+            before = child;
+            break;
+          }
+          if (collectedAt === childCollectedAt
+            && child.getAttribute("data-lakomics-tweet-id") === String(item.tweetId || "")
+            && imageIndex < Number(child.getAttribute("data-lakomics-media-index") || 0)) {
+            before = child;
+            break;
+          }
+        }
+        renderedGalleryKeys.add(key);
+        ui.grid.insertBefore(card, before);
+      }
+      ui.empty.hidden = true;
+      queueGalleryLoadMore();
     }
 
     function createCard(item) {
@@ -425,6 +556,9 @@
       const saved = savedMedia.has(item.imageUrl);
       card.classList.toggle("is-saved", saved);
       card.setAttribute("data-lakomics-media-url", item.imageUrl);
+      card.setAttribute("data-lakomics-collected-at", String(Number(item.collectedAt || 0)));
+      card.setAttribute("data-lakomics-tweet-id", String(item.tweetId || ""));
+      card.setAttribute("data-lakomics-media-index", String(item.imageIndex || 1));
 
       const imageLink = document.createElement("a");
       imageLink.className = "lakomics-x-gallery-image-link";
@@ -470,7 +604,7 @@
       const pruned = pruneSavedEntries(stored?.[SAVED_STORAGE_KEY]);
       savedMedia.clear();
       for (const [url, timestamp] of Object.entries(pruned)) savedMedia.set(url, Number(timestamp));
-      if (overlayOpen) renderGallery();
+      if (overlayOpen) refreshSavedMarkers();
       if (Object.keys(pruned).length !== Object.keys(stored?.[SAVED_STORAGE_KEY] ?? {}).length) {
         void storageSet({ [SAVED_STORAGE_KEY]: pruned });
       }
@@ -487,6 +621,13 @@
       void storageSet({ [SAVED_STORAGE_KEY]: snapshot });
       for (const card of ui.grid.querySelectorAll('.lakomics-x-gallery-card')) {
         if (card.getAttribute('data-lakomics-media-url') === normalized) card.classList.add('is-saved');
+      }
+    }
+
+    function refreshSavedMarkers() {
+      for (const card of ui.grid.querySelectorAll('.lakomics-x-gallery-card')) {
+        const mediaUrl = card.getAttribute('data-lakomics-media-url');
+        card.classList.toggle('is-saved', savedMedia.has(mediaUrl));
       }
     }
 
@@ -560,6 +701,10 @@
       harvestLoopToken += 1;
       harvest = null;
       updateHarvestUi(reason);
+      if (overlayOpen) {
+        resetGalleryRender();
+        renderInitialGallery();
+      }
       if (restorePosition && Number.isFinite(current.startScrollTop)) {
         window.setTimeout(() => {
           setScrollTop(current.startScrollTop);
@@ -719,6 +864,7 @@
       summary: root.querySelector(".lakomics-x-gallery-summary"),
       harvestStatus: root.querySelector(".lakomics-x-gallery-harvest-status"),
       empty: root.querySelector(".lakomics-x-gallery-empty"),
+      scroll: root.querySelector(".lakomics-x-gallery-scroll"),
       grid: root.querySelector(".lakomics-x-gallery-grid"),
     };
   }
