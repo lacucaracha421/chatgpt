@@ -19,6 +19,11 @@
   const GALLERY_RENDER_BATCH_ITEMS = 24;
   const GALLERY_LOAD_MORE_THRESHOLD_PX = 900;
   const LIKE_FILTER_THRESHOLDS = [0, 1000, 5000, 10000];
+  const GALLERY_FILTER_RECOMMENDED = "recommend";
+  const ARTIST_AFFINITY_STORAGE_KEY = "lakomicsXGalleryArtistAffinityV1";
+  const ARTIST_AFFINITY_MAX_ITEMS = 2000;
+  const ARTIST_AFFINITY_MAX_SCORE = 4;
+  const RECOMMENDED_FILTER_MIN_SCORE = 2;
 
   function parseStatusHref(value) {
     let url;
@@ -162,6 +167,88 @@
       if (count >= 1_000) return `${Math.round(count / 100) / 10}천`;
       return String(Math.round(count));
     }
+  }
+
+  function normalizeAuthorKey(value) {
+    const text = String(value ?? "").trim().replace(/^@+/, "").toLowerCase();
+    return text || "";
+  }
+
+  function pruneArtistAffinity(value) {
+    const merged = new Map();
+    for (const [rawAuthor, rawCount] of Object.entries(value && typeof value === "object" ? value : {})) {
+      const author = normalizeAuthorKey(rawAuthor);
+      const count = Number(rawCount);
+      if (!author || !Number.isFinite(count) || count <= 0) continue;
+      merged.set(author, Math.max(Number(merged.get(author) || 0), Math.round(count)));
+    }
+    const entries = Array.from(merged.entries())
+      .sort((a, b) => Number(b[1]) - Number(a[1]) || String(a[0]).localeCompare(String(b[0])))
+      .slice(0, ARTIST_AFFINITY_MAX_ITEMS);
+    return Object.fromEntries(entries);
+  }
+
+  function getArtistAffinityCount(item, affinitySource) {
+    const author = normalizeAuthorKey(item?.username || item?.author);
+    if (!author) return 0;
+    if (affinitySource && typeof affinitySource.get === "function") return Number(affinitySource.get(author) || 0);
+    if (affinitySource && typeof affinitySource === "object") return Number(affinitySource[author] || 0);
+    return 0;
+  }
+
+  function getArtistAffinityScore(item, affinitySource) {
+    const count = getArtistAffinityCount(item, affinitySource);
+    if (count >= 12) return 4;
+    if (count >= 6) return 3;
+    if (count >= 3) return 2;
+    if (count >= 1) return 1;
+    return 0;
+  }
+
+  function getLikeRecommendationScore(item) {
+    const likeCount = Number(item?.likeCount);
+    if (!Number.isFinite(likeCount) || likeCount <= 0) return 0;
+    if (likeCount >= 30_000) return 4;
+    if (likeCount >= 10_000) return 3;
+    if (likeCount >= 5_000) return 2;
+    if (likeCount >= 1_000) return 1;
+    return 0;
+  }
+
+  function getRecommendedScore(item, affinitySource) {
+    return Math.min(
+      ARTIST_AFFINITY_MAX_SCORE + 4,
+      getLikeRecommendationScore(item) + getArtistAffinityScore(item, affinitySource),
+    );
+  }
+
+  function normalizeGalleryFilterMode(value) {
+    if (value === GALLERY_FILTER_RECOMMENDED) return GALLERY_FILTER_RECOMMENDED;
+    const numeric = Number(value);
+    return LIKE_FILTER_THRESHOLDS.includes(numeric) ? String(numeric) : "0";
+  }
+
+  function matchesGalleryFilter(item, mode, affinitySource) {
+    if (mode === GALLERY_FILTER_RECOMMENDED) return getRecommendedScore(item, affinitySource) >= RECOMMENDED_FILTER_MIN_SCORE;
+    return matchesLikeFilter(item, Number(mode) || 0);
+  }
+
+  function sortGalleryItems(items, mode, affinitySource) {
+    const list = Array.from(items ?? []);
+    if (mode !== GALLERY_FILTER_RECOMMENDED) return list;
+    list.sort((a, b) => {
+      const scoreDelta = getRecommendedScore(b, affinitySource) - getRecommendedScore(a, affinitySource);
+      if (scoreDelta) return scoreDelta;
+      const affinityDelta = getArtistAffinityCount(b, affinitySource) - getArtistAffinityCount(a, affinitySource);
+      if (affinityDelta) return affinityDelta;
+      const likeDelta = Number(b?.likeCount || 0) - Number(a?.likeCount || 0);
+      if (likeDelta) return likeDelta;
+      const timeDelta = Number(b?.collectedAt || 0) - Number(a?.collectedAt || 0);
+      if (timeDelta) return timeDelta;
+      if (a?.tweetId === b?.tweetId) return Number(a?.imageIndex || 0) - Number(b?.imageIndex || 0);
+      return String(b?.tweetId || "").localeCompare(String(a?.tweetId || ""));
+    });
+    return list;
   }
 
   function extractPost(article, collectedAt = Date.now()) {
@@ -322,7 +409,9 @@
       AUTO_TARGET_NEW_IMAGES,
       GALLERY_INITIAL_RENDER_ITEMS,
       GALLERY_RENDER_BATCH_ITEMS,
+      GALLERY_FILTER_RECOMMENDED,
       LIKE_FILTER_THRESHOLDS,
+      RECOMMENDED_FILTER_MIN_SCORE,
       createGalleryStore,
       galleryItemKey,
       extractLikeCount,
@@ -331,11 +420,20 @@
       findTweetIdentity,
       isHomeRoute,
       mediaBelongsToTweet,
+      matchesGalleryFilter,
       matchesLikeFilter,
       nextAutoHarvestState,
+      normalizeAuthorKey,
+      normalizeGalleryFilterMode,
       parseCompactMetric,
       parseStatusHref,
+      pruneArtistAffinity,
       pruneSavedEntries,
+      getArtistAffinityCount,
+      getArtistAffinityScore,
+      getLikeRecommendationScore,
+      getRecommendedScore,
+      sortGalleryItems,
       selectedTabIsFirst,
       takeUnrenderedGalleryItems,
     };
@@ -357,13 +455,14 @@
     let timelineVersion = 0;
     let galleryRenderQueued = false;
     let galleryLoadMoreQueued = false;
-    let minLikeFilter = 0;
+    let galleryFilterMode = "0";
     const observedArticles = new WeakSet();
     const visibleArticles = new WeakSet();
     const pendingArticles = new Set();
     const pendingGalleryItems = new Map();
     const renderedGalleryKeys = new Set();
     const savedMedia = new Map();
+    const artistAffinity = new Map();
 
     const ui = createGalleryUi();
     globalThis.LakomicsXGalleryRuntime = { markSaved };
@@ -383,6 +482,7 @@
       if (overlayOpen && !harvest?.running) queueGalleryRender();
     });
     void loadSavedMedia();
+    void loadArtistAffinity();
 
     const intersectionObserver = new IntersectionObserver((entries) => {
       for (const entry of entries) {
@@ -447,8 +547,8 @@
     });
     ui.scroll.addEventListener("scroll", queueGalleryLoadMore, { passive: true });
     ui.likeFilter.addEventListener("change", () => {
-      const next = Number(ui.likeFilter.value);
-      minLikeFilter = LIKE_FILTER_THRESHOLDS.includes(next) ? next : 0;
+      galleryFilterMode = normalizeGalleryFilterMode(ui.likeFilter.value);
+      ui.likeFilter.value = galleryFilterMode;
       resetGalleryRender();
       renderInitialGallery();
       updateCounters();
@@ -534,7 +634,11 @@
       requestAnimationFrame(() => {
         galleryRenderQueued = false;
         if (!overlayOpen || harvest?.running) return;
-        const items = Array.from(pendingGalleryItems.values()).filter((item) => matchesLikeFilter(item, minLikeFilter));
+        const items = sortGalleryItems(
+          Array.from(pendingGalleryItems.values()).filter((item) => matchesGalleryFilter(item, galleryFilterMode, artistAffinity)),
+          galleryFilterMode,
+          artistAffinity,
+        );
         pendingGalleryItems.clear();
         insertGalleryItemsSorted(items);
       });
@@ -553,12 +657,18 @@
 
     function updateCounters() {
       const imageCount = store.imageCount();
-      const filteredImageCount = store.imageCount(minLikeFilter);
-      const filteredPostCount = store.postCount(minLikeFilter);
+      const filteredItems = store.flatImages().filter((item) => matchesGalleryFilter(item, galleryFilterMode, artistAffinity));
+      const filteredImageCount = filteredItems.length;
+      const filteredPostCount = new Set(filteredItems.map((item) => String(item.tweetId || ""))).size;
       ui.triggerCount.textContent = String(imageCount);
-      ui.summary.textContent = minLikeFilter
-        ? `${filteredImageCount}/${imageCount} images · ${filteredPostCount} posts · ♥ ${formatLikeCount(minLikeFilter)}+`
-        : `${imageCount} images · ${store.postCount()} posts`;
+      if (galleryFilterMode === GALLERY_FILTER_RECOMMENDED) {
+        ui.summary.textContent = `${filteredImageCount}/${imageCount} images · ${filteredPostCount} posts · 🎨 추천`;
+      } else {
+        const numericFilter = Number(galleryFilterMode) || 0;
+        ui.summary.textContent = numericFilter
+          ? `${filteredImageCount}/${imageCount} images · ${filteredPostCount} posts · ♥ ${formatLikeCount(numericFilter)}+`
+          : `${imageCount} images · ${store.postCount()} posts`;
+      }
       ui.trigger.classList.toggle("is-empty", imageCount === 0);
       ui.trigger.title = isForYouTimeline(document)
         ? `추천 이미지 ${imageCount}개 — 추천 피드를 보며 수집 중`
@@ -587,12 +697,16 @@
       renderedGalleryKeys.clear();
       pendingGalleryItems.clear();
       ui.grid.replaceChildren();
-      ui.empty.hidden = store.imageCount(minLikeFilter) > 0;
+      ui.empty.hidden = store.flatImages().some((item) => matchesGalleryFilter(item, galleryFilterMode, artistAffinity));
       ui.scroll.scrollTop = 0;
     }
 
     function renderInitialGallery() {
-      const items = store.flatImages().filter((item) => matchesLikeFilter(item, minLikeFilter));
+      const items = sortGalleryItems(
+        store.flatImages().filter((item) => matchesGalleryFilter(item, galleryFilterMode, artistAffinity)),
+        galleryFilterMode,
+        artistAffinity,
+      );
       ui.empty.hidden = items.length > 0;
       if (!items.length) return;
       pendingGalleryItems.clear();
@@ -600,7 +714,11 @@
     }
 
     function renderNextGalleryBatch() {
-      const items = store.flatImages().filter((item) => matchesLikeFilter(item, minLikeFilter));
+      const items = sortGalleryItems(
+        store.flatImages().filter((item) => matchesGalleryFilter(item, galleryFilterMode, artistAffinity)),
+        galleryFilterMode,
+        artistAffinity,
+      );
       const batch = takeUnrenderedGalleryItems(items, renderedGalleryKeys, GALLERY_RENDER_BATCH_ITEMS);
       appendGalleryItems(batch);
     }
@@ -625,7 +743,7 @@
     function insertGalleryItemsSorted(items) {
       const fresh = (items ?? []).filter((item) => {
         const key = galleryItemKey(item);
-        return key && !renderedGalleryKeys.has(key) && matchesLikeFilter(item, minLikeFilter);
+        return key && !renderedGalleryKeys.has(key) && matchesGalleryFilter(item, galleryFilterMode, artistAffinity);
       });
       if (!fresh.length) return;
       fresh.sort((a, b) => {
@@ -669,7 +787,9 @@
       card.setAttribute("data-lakomics-collected-at", String(Number(item.collectedAt || 0)));
       card.setAttribute("data-lakomics-tweet-id", String(item.tweetId || ""));
       card.setAttribute("data-lakomics-media-index", String(item.imageIndex || 1));
+      const recommendedScore = getRecommendedScore(item, artistAffinity);
       card.setAttribute("data-lakomics-like-count", Number.isFinite(Number(item.likeCount)) ? String(Number(item.likeCount)) : "");
+      card.setAttribute("data-lakomics-recommended-score", String(recommendedScore));
       card.setAttribute("data-lakomics-gallery-key", galleryItemKey(item));
 
       const imageLink = document.createElement("a");
@@ -698,6 +818,12 @@
       savedBadge.textContent = "✓ 저장됨";
       savedBadge.setAttribute("aria-label", "이미 저장됨");
 
+      const recommendedBadge = document.createElement("span");
+      recommendedBadge.className = "lakomics-x-gallery-recommended-badge";
+      recommendedBadge.textContent = "🎨 추천";
+      recommendedBadge.hidden = recommendedScore < RECOMMENDED_FILTER_MIN_SCORE;
+      recommendedBadge.title = `추천 점수 ${recommendedScore}`;
+
       const footer = document.createElement("div");
       footer.className = "lakomics-x-gallery-footer";
       const author = document.createElement("span");
@@ -711,7 +837,7 @@
       hint.className = "lakomics-x-gallery-hint";
       hint.textContent = "길게 눌러 저장 · 탭 원문";
       footer.append(author, likes, hint);
-      card.append(imageLink, savedBadge, footer);
+      card.append(imageLink, savedBadge, recommendedBadge, footer);
       return card;
     }
 
@@ -721,11 +847,18 @@
       for (const card of ui.grid.children) {
         if (card.getAttribute("data-lakomics-gallery-key") !== key) continue;
         const count = Number(item.likeCount);
+        const recommendedScore = getRecommendedScore(item, artistAffinity);
         card.setAttribute("data-lakomics-like-count", Number.isFinite(count) ? String(count) : "");
+        card.setAttribute("data-lakomics-recommended-score", String(recommendedScore));
         const likes = card.querySelector(".lakomics-x-gallery-likes");
         if (likes) {
           likes.textContent = `♥ ${formatLikeCount(item.likeCount)}`;
           likes.title = Number.isFinite(count) ? `좋아요 ${count.toLocaleString()}개` : "좋아요 수를 읽지 못함";
+        }
+        const recommendedBadge = card.querySelector(".lakomics-x-gallery-recommended-badge");
+        if (recommendedBadge) {
+          recommendedBadge.hidden = recommendedScore < RECOMMENDED_FILTER_MIN_SCORE;
+          recommendedBadge.title = `추천 점수 ${recommendedScore}`;
         }
         break;
       }
@@ -742,7 +875,34 @@
       }
     }
 
-    function markSaved(mediaUrl) {
+    async function loadArtistAffinity() {
+      const stored = await storageGet(ARTIST_AFFINITY_STORAGE_KEY);
+      const pruned = pruneArtistAffinity(stored?.[ARTIST_AFFINITY_STORAGE_KEY]);
+      artistAffinity.clear();
+      for (const [author, count] of Object.entries(pruned)) artistAffinity.set(author, Number(count));
+      if (overlayOpen) {
+        resetGalleryRender();
+        renderInitialGallery();
+      }
+      updateCounters();
+      if (Object.keys(pruned).length !== Object.keys(stored?.[ARTIST_AFFINITY_STORAGE_KEY] ?? {}).length) {
+        void storageSet({ [ARTIST_AFFINITY_STORAGE_KEY]: pruned });
+      }
+    }
+
+    function resolveSavedAuthorKey(mediaUrl, meta = {}) {
+      const direct = normalizeAuthorKey(meta?.author || meta?.username);
+      if (direct) return direct;
+      const normalizedUrl = String(mediaUrl || "");
+      for (const card of ui.grid.querySelectorAll('.lakomics-x-gallery-card')) {
+        if (card.getAttribute('data-lakomics-media-url') !== normalizedUrl) continue;
+        const cardAuthor = normalizeAuthorKey(card.querySelector('.lakomics-x-gallery-image')?.getAttribute('data-lakomics-author'));
+        if (cardAuthor) return cardAuthor;
+      }
+      return "";
+    }
+
+    function markSaved(mediaUrl, meta = {}) {
       const normalizer = globalThis.LakomicsXSource?.normalizeMediaUrl;
       const normalized = typeof normalizer === "function" ? normalizer(mediaUrl) : mediaUrl;
       if (!normalized) return;
@@ -751,9 +911,34 @@
       savedMedia.clear();
       for (const [url, timestamp] of Object.entries(snapshot)) savedMedia.set(url, Number(timestamp));
       void storageSet({ [SAVED_STORAGE_KEY]: snapshot });
+
+      const authorKey = resolveSavedAuthorKey(normalized, meta);
+      if (authorKey) {
+        artistAffinity.set(authorKey, Math.max(1, Number(artistAffinity.get(authorKey) || 0) + 1));
+        const affinitySnapshot = pruneArtistAffinity(Object.fromEntries(artistAffinity));
+        artistAffinity.clear();
+        for (const [author, count] of Object.entries(affinitySnapshot)) artistAffinity.set(author, Number(count));
+        void storageSet({ [ARTIST_AFFINITY_STORAGE_KEY]: affinitySnapshot });
+      }
+
       for (const card of ui.grid.querySelectorAll('.lakomics-x-gallery-card')) {
         if (card.getAttribute('data-lakomics-media-url') === normalized) card.classList.add('is-saved');
       }
+      if (overlayOpen) {
+        if (galleryFilterMode === GALLERY_FILTER_RECOMMENDED) {
+          resetGalleryRender();
+          renderInitialGallery();
+        } else {
+          for (const item of pendingGalleryItems.values()) updateRenderedCardMetadata(item);
+          for (const card of ui.grid.querySelectorAll('.lakomics-x-gallery-card')) {
+            const key = card.getAttribute('data-lakomics-gallery-key');
+            if (!key) continue;
+            const item = store.flatImages().find((entry) => galleryItemKey(entry) === key);
+            if (item) updateRenderedCardMetadata(item);
+          }
+        }
+      }
+      updateCounters();
     }
 
     function refreshSavedMarkers() {
@@ -939,6 +1124,8 @@
         #${GALLERY_ROOT_ID} .lakomics-x-gallery-card.is-saved { box-shadow: inset 0 0 0 2px rgba(74,222,128,.56); }
         #${GALLERY_ROOT_ID} .lakomics-x-gallery-saved-badge { position: absolute; top: 8px; right: 8px; z-index: 2; display: none; align-items: center; min-height: 26px; padding: 0 9px; border: 1px solid rgba(134,239,172,.42); border-radius: 999px; background: rgba(15,23,18,.86); color: #86efac; box-shadow: 0 3px 12px rgba(0,0,0,.34); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); font-size: 11px; font-weight: 750; pointer-events: none; }
         #${GALLERY_ROOT_ID} .lakomics-x-gallery-card.is-saved .lakomics-x-gallery-saved-badge { display: inline-flex; }
+        #${GALLERY_ROOT_ID} .lakomics-x-gallery-recommended-badge { position: absolute; top: 8px; left: 8px; z-index: 2; display: inline-flex; align-items: center; min-height: 24px; padding: 0 8px; border: 1px solid rgba(250,204,21,.42); border-radius: 999px; background: rgba(40,31,8,.86); color: #fde68a; box-shadow: 0 3px 12px rgba(0,0,0,.28); font-size: 11px; font-weight: 750; pointer-events: none; }
+        #${GALLERY_ROOT_ID} .lakomics-x-gallery-recommended-badge[hidden] { display: none !important; }
         #${GALLERY_ROOT_ID} .lakomics-x-gallery-image-link { display: block; text-decoration: none; background: #111; }
         #${GALLERY_ROOT_ID} .lakomics-x-gallery-image { display: block; width: 100%; height: auto; max-height: none; object-fit: contain; user-select: none; -webkit-user-drag: none; touch-action: manipulation; }
         #${GALLERY_ROOT_ID} .lakomics-x-gallery-footer { min-height: 34px; padding: 8px 10px; display: flex; align-items: center; gap: 10px; color: #d4d4d8; background: #151518; font-size: 12px; }
@@ -978,11 +1165,12 @@
             <div class="lakomics-x-gallery-summary">0 images · 0 posts</div>
             <div class="lakomics-x-gallery-harvest-status" hidden></div>
           </div>
-          <select class="lakomics-x-gallery-like-filter" aria-label="좋아요 필터" title="좋아요 수로 갤러리 필터">
+          <select class="lakomics-x-gallery-like-filter" aria-label="추천/좋아요 필터" title="좋아요 수 또는 추천 점수로 갤러리 필터">
             <option value="0">전체</option>
             <option value="1000">♥ 1천+</option>
             <option value="5000">♥ 5천+</option>
             <option value="10000">♥ 1만+</option>
+            <option value="recommend">🎨 추천</option>
           </select>
           <button class="lakomics-x-gallery-auto" type="button" title="추천 피드를 자동으로 내려 새 이미지 100장을 수집하고 시작 위치로 돌아갑니다">▶ 자동 수집</button>
           <button class="lakomics-x-gallery-clear" type="button" title="이번 세션 수집 목록 비우기">초기화</button>

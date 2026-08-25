@@ -14,19 +14,30 @@ context.globalThis = context;
 vm.runInNewContext(source, context, { filename: "x-gallery.js" });
 const {
   AUTO_TARGET_NEW_IMAGES,
+  GALLERY_FILTER_RECOMMENDED,
   GALLERY_INITIAL_RENDER_ITEMS,
   GALLERY_RENDER_BATCH_ITEMS,
   LIKE_FILTER_THRESHOLDS,
+  RECOMMENDED_FILTER_MIN_SCORE,
   createGalleryStore,
   galleryItemKey,
   extractLikeCount,
   formatLikeCount,
+  getArtistAffinityCount,
+  getArtistAffinityScore,
+  getLikeRecommendationScore,
+  getRecommendedScore,
+  matchesGalleryFilter,
   matchesLikeFilter,
   nextAutoHarvestState,
+  normalizeAuthorKey,
+  normalizeGalleryFilterMode,
   parseCompactMetric,
   parseStatusHref,
+  pruneArtistAffinity,
   pruneSavedEntries,
   selectedTabIsFirst,
+  sortGalleryItems,
   takeUnrenderedGalleryItems,
 } = context.LakomicsXGallery;
 
@@ -126,6 +137,18 @@ test("saved-media history drops expired entries and caps recent markers", () => 
 });
 
 
+test("artist affinity normalizes handles and keeps only the strongest authors", () => {
+  const pruned = pruneArtistAffinity({
+    "@Foo": 2,
+    " foo ": 5,
+    "BAR": 1,
+    "": 99,
+    baz: 0,
+  });
+  assert.equal(JSON.stringify(pruned), JSON.stringify({ foo: 5, bar: 1 }));
+  assert.equal(normalizeAuthorKey("@@Mixed_Case "), "mixed_case");
+});
+
 test("incremental gallery batching keeps already-rendered media out of later batches", () => {
   assert.equal(GALLERY_INITIAL_RENDER_ITEMS, 36);
   assert.equal(GALLERY_RENDER_BATCH_ITEMS, 24);
@@ -167,6 +190,35 @@ test("gallery store reports only newly-added media to incremental renderer", () 
   assert.equal(changes[0].type, "upsert");
   assert.deepEqual(Array.from(changes[0].items, (item) => item.imageUrl), ["A"]);
   assert.deepEqual(Array.from(changes[1].items, (item) => item.imageUrl), ["B"]);
+});
+
+
+test("recommended filter uses like score and saved-artist affinity together", () => {
+  const affinity = new Map([["favartist", 4], ["legend", 13]]);
+  assert.equal(getArtistAffinityCount({ author: "@FavArtist" }, affinity), 4);
+  assert.equal(getArtistAffinityScore({ author: "@FavArtist" }, affinity), 2);
+  assert.equal(getArtistAffinityScore({ author: "legend" }, affinity), 4);
+  assert.equal(getLikeRecommendationScore({ likeCount: 800 }), 0);
+  assert.equal(getLikeRecommendationScore({ likeCount: 1200 }), 1);
+  assert.equal(getLikeRecommendationScore({ likeCount: 12000 }), 3);
+  assert.equal(getRecommendedScore({ author: "@favartist", likeCount: 1200 }, affinity), 3);
+  assert.equal(getRecommendedScore({ author: "@new", likeCount: 12000 }, affinity), 3);
+  assert.equal(matchesGalleryFilter({ author: "@favartist", likeCount: 800 }, GALLERY_FILTER_RECOMMENDED, affinity), true);
+  assert.equal(matchesGalleryFilter({ author: "@stranger", likeCount: 800 }, GALLERY_FILTER_RECOMMENDED, affinity), false);
+  assert.equal(RECOMMENDED_FILTER_MIN_SCORE, 2);
+  assert.equal(normalizeGalleryFilterMode("recommend"), "recommend");
+  assert.equal(normalizeGalleryFilterMode("5000"), "5000");
+});
+
+
+test("recommended filter sorting prioritizes affinity and score over recency", () => {
+  const affinity = new Map([["fav", 6]]);
+  const sorted = sortGalleryItems([
+    { tweetId: "late", imageIndex: 1, imageUrl: "L", author: "@other", likeCount: 2000, collectedAt: 200 },
+    { tweetId: "fav", imageIndex: 1, imageUrl: "F", author: "@fav", likeCount: 400, collectedAt: 100 },
+    { tweetId: "viral", imageIndex: 1, imageUrl: "V", author: "@other2", likeCount: 15000, collectedAt: 50 },
+  ], GALLERY_FILTER_RECOMMENDED, affinity);
+  assert.equal(JSON.stringify(sorted.map((item) => item.tweetId)), JSON.stringify(["fav", "viral", "late"]));
 });
 
 

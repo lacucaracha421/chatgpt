@@ -258,7 +258,12 @@
       close: closeRadial,
       saved: (payload, response) => {
         if (payload?.mediaType !== "image" || !payload.mediaUrl) return;
-        globalThis.LakomicsXGalleryRuntime?.markSaved?.(payload.mediaUrl, { status: response?.status });
+        globalThis.LakomicsXGalleryRuntime?.markSaved?.(payload.mediaUrl, {
+          status: response?.status,
+          author: payload.author ?? null,
+          postId: payload.postId ?? null,
+          sourceUrl: payload.sourceUrl ?? null,
+        });
       },
     });
 
