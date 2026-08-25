@@ -16,6 +16,7 @@ pub mod error;
 mod external_binding;
 mod favorite;
 mod folder_appearance;
+pub(crate) mod igdb;
 mod ingestion;
 pub mod legacy_migration;
 pub mod legacy_package_migration;
@@ -99,6 +100,7 @@ pub struct Library {
     // ponytail: one database handle at a time; use a read/write lock if reads become a bottleneck.
     database_lock: Arc<Mutex<()>>,
     catalog_lookup_cache: Arc<Mutex<Option<online_catalog::CatalogLookupCache>>>,
+    igdb_token_cache: igdb::IgdbTokenCache,
 }
 
 pub(crate) struct LockedConnection<'a> {
@@ -151,6 +153,7 @@ impl Library {
             manga_scan_lock: Arc::new(Mutex::new(())),
             database_lock: Arc::new(Mutex::new(())),
             catalog_lookup_cache: Arc::new(Mutex::new(None)),
+            igdb_token_cache: igdb::IgdbTokenCache::default(),
         };
         library.backfill_legacy_collection_kinds()?;
         library.normalize_showcase_orders()?;
@@ -164,6 +167,10 @@ impl Library {
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    pub(crate) fn igdb_client(&self) -> igdb::IgdbClient {
+        igdb::IgdbClient::with_cache(self.igdb_token_cache.clone())
     }
 
     pub(crate) fn connection(&self) -> Result<LockedConnection<'_>, LibraryError> {

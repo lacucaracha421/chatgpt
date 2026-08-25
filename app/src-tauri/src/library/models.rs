@@ -1,4 +1,53 @@
 use serde::{Deserialize, Serialize};
+use std::fmt;
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct IgdbCredentials {
+    pub client_id: String,
+    pub client_secret: String,
+}
+
+impl fmt::Debug for IgdbCredentials {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("IgdbCredentials")
+            .field("client_id", &self.client_id)
+            .field("client_secret", &"[redacted]")
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct IgdbCredentialStatus {
+    pub configured: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct IgdbImageRef {
+    pub image_id: String,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct IgdbRemoteGame {
+    pub id: i64,
+    pub name: String,
+    pub summary: Option<String>,
+    pub release_date: Option<String>,
+    pub genres: Vec<String>,
+    pub platforms: Vec<String>,
+    pub developer: Option<String>,
+    pub publisher: Option<String>,
+    pub cover: Option<IgdbImageRef>,
+    pub artworks: Vec<IgdbImageRef>,
+    pub screenshots: Vec<IgdbImageRef>,
+    pub snapshot_json: String,
+}
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

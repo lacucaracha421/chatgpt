@@ -242,6 +242,26 @@ pub enum LibraryError {
     CredentialStoreUnavailable,
     #[error("보안 자격 증명 저장소 작업에 실패했습니다")]
     CredentialStoreFailed,
+    #[error("IGDB Client ID 또는 Client Secret이 올바르지 않습니다")]
+    InvalidIgdbCredential,
+    #[error("IGDB 자격 증명이 설정되지 않았습니다")]
+    IgdbCredentialNotConfigured,
+    #[error("IGDB 자격 증명 값은 비어 있을 수 없습니다")]
+    InvalidIgdbCredentialValue,
+    #[error("IGDB 요청이 올바르지 않습니다")]
+    IgdbInvalidRequest,
+    #[error("IGDB 인증이 거부됐습니다")]
+    IgdbUnauthorized,
+    #[error("IGDB 작품을 찾을 수 없습니다")]
+    IgdbNotFound,
+    #[error("IGDB 요청 한도를 초과했습니다")]
+    IgdbRateLimited,
+    #[error("IGDB에 연결할 수 없습니다")]
+    IgdbUnavailable,
+    #[error("IGDB 응답을 처리할 수 없습니다")]
+    IgdbInvalidResponse,
+    #[error("IGDB 이미지 식별자가 올바르지 않습니다")]
+    IgdbInvalidImageId,
     #[error("알라딘에 연결할 수 없습니다")]
     AladinUnavailable,
     #[error("알라딘 요청 시간이 초과됐습니다")]
