@@ -14,22 +14,29 @@ context.globalThis = context;
 vm.runInNewContext(source, context, { filename: "x-gallery.js" });
 const {
   AUTO_TARGET_NEW_IMAGES,
+  GALLERY_DOUBLE_TAP_MS,
+  GALLERY_FILTER_ARTISTS,
   GALLERY_FILTER_RECOMMENDED,
   GALLERY_INITIAL_RENDER_ITEMS,
   GALLERY_RENDER_BATCH_ITEMS,
   LIKE_FILTER_THRESHOLDS,
   RECOMMENDED_FILTER_MIN_SCORE,
+  compareGalleryItems,
   createGalleryStore,
   galleryItemKey,
   extractLikeCount,
   formatLikeCount,
   getArtistAffinityCount,
   getArtistAffinityScore,
+  getArtistDisinterestCount,
+  getArtistDisinterestScore,
   getLikeRecommendationScore,
   getRecommendedScore,
+  isDismissedMedia,
   matchesGalleryFilter,
   matchesLikeFilter,
   nextAutoHarvestState,
+  nextGalleryImageTap,
   normalizeAuthorKey,
   normalizeGalleryFilterMode,
   parseCompactMetric,
@@ -40,6 +47,23 @@ const {
   sortGalleryItems,
   takeUnrenderedGalleryItems,
 } = context.LakomicsXGallery;
+
+test("gallery image navigation requires a second tap inside the double-tap window", () => {
+  const first = nextGalleryImageTap(0, 1000);
+  assert.equal(first.open, false);
+  assert.equal(first.lastTapAt, 1000);
+  const second = nextGalleryImageTap(first.lastTapAt, 1400);
+  assert.equal(second.open, true);
+  assert.equal(second.lastTapAt, 0);
+  assert.equal(GALLERY_DOUBLE_TAP_MS, 500);
+});
+
+test("gallery image navigation does not treat a late second tap as a double tap", () => {
+  const first = nextGalleryImageTap(0, 1000);
+  const late = nextGalleryImageTap(first.lastTapAt, 1600);
+  assert.equal(late.open, false);
+  assert.equal(late.lastTapAt, 1600);
+});
 
 test("parses X status/photo URLs without depending on the UI language", () => {
   const parsed = parseStatusHref("https://twitter.com/user/status/123/photo/2?ref=home");
@@ -190,6 +214,46 @@ test("gallery store reports only newly-added media to incremental renderer", () 
   assert.equal(changes[0].type, "upsert");
   assert.deepEqual(Array.from(changes[0].items, (item) => item.imageUrl), ["A"]);
   assert.deepEqual(Array.from(changes[1].items, (item) => item.imageUrl), ["B"]);
+});
+
+
+test("artist filter keeps only saved artists and sorts by affinity first", () => {
+  const affinity = new Map([["fav", 5], ["fav2", 2]]);
+  const items = [
+    { tweetId: "1", imageIndex: 1, imageUrl: "A", author: "@other", likeCount: 50000, collectedAt: 500 },
+    { tweetId: "2", imageIndex: 1, imageUrl: "B", author: "@fav2", likeCount: 120, collectedAt: 300 },
+    { tweetId: "3", imageIndex: 1, imageUrl: "C", author: "@fav", likeCount: 10, collectedAt: 100 },
+    { tweetId: "4", imageIndex: 1, imageUrl: "D", author: "@fav", likeCount: 5, collectedAt: 400 },
+  ];
+  const filtered = items.filter((item) => matchesGalleryFilter(item, GALLERY_FILTER_ARTISTS, affinity));
+  const sorted = sortGalleryItems(filtered, GALLERY_FILTER_ARTISTS, affinity);
+  assert.equal(normalizeGalleryFilterMode("artist"), "artist");
+  assert.equal(JSON.stringify(sorted.map((item) => item.tweetId)), JSON.stringify(["4", "3", "2"]));
+  assert.ok(compareGalleryItems(sorted[0], sorted[1], affinity, GALLERY_FILTER_ARTISTS) < 0);
+});
+
+
+test("interest feedback can hide a media item and weakly penalize its artist", () => {
+  const dismissed = new Map([["https://pbs.twimg.com/media/A?format=jpg&name=orig", Date.now()]]);
+  const negative = new Map([["noisy", 1], ["repeated", 4], ["blockedish", 9]]);
+  assert.equal(isDismissedMedia({ imageUrl: "https://pbs.twimg.com/media/A?format=jpg&name=orig" }, dismissed), true);
+  assert.equal(isDismissedMedia({ imageUrl: "https://pbs.twimg.com/media/B?format=jpg&name=orig" }, dismissed), false);
+  assert.equal(getArtistDisinterestCount({ author: "@Noisy" }, negative), 1);
+  assert.equal(getArtistDisinterestScore({ author: "@Noisy" }, negative), 1);
+  assert.equal(getArtistDisinterestScore({ author: "@Repeated" }, negative), 2);
+  assert.equal(getArtistDisinterestScore({ author: "@Blockedish" }, negative), 3);
+  assert.equal(getRecommendedScore({ author: "@noisy", likeCount: 5000 }, new Map(), negative), 1);
+});
+
+
+test("saving an already-saved gallery image does not relearn the artist or rebuild the gallery", () => {
+  const markSavedStart = source.indexOf("function markSaved(mediaUrl, meta = {})");
+  const markSavedEnd = source.indexOf("function markNotInterested", markSavedStart);
+  const markSavedSource = source.slice(markSavedStart, markSavedEnd);
+  assert.match(markSavedSource, /const wasAlreadySaved = savedMedia\.has\(normalized\)/);
+  assert.match(markSavedSource, /authorKey && !wasAlreadySaved/);
+  assert.doesNotMatch(markSavedSource, /resetGalleryRender\(\)/);
+  assert.doesNotMatch(markSavedSource, /renderInitialGallery\(\)/);
 });
 
 
