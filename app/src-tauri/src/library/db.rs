@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 22;
+pub(crate) const SCHEMA_VERSION: i64 = 23;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -39,6 +39,8 @@ const COLLECTION_LEGACY_KIND_SCHEMA: &str =
     include_str!("../../migrations/0021_collection_legacy_kind.sql");
 const COLLECTION_FOUNDATION_SCHEMA: &str =
     include_str!("../../migrations/0022_collection_foundation.sql");
+const GAME_PROVIDER_DETAIL_SCHEMA: &str =
+    include_str!("../../migrations/0023_game_provider_detail.sql");
 
 pub fn open_database(path: &Path) -> Result<Connection, LibraryError> {
     let connection = Connection::open(path)?;
@@ -54,7 +56,7 @@ pub fn initialize_database(path: &Path) -> Result<Connection, LibraryError> {
     let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
     match version {
         SCHEMA_VERSION => {}
-        version @ 0..=21 => {
+        version @ 0..=22 => {
             if version > 0 {
                 let root = path
                     .parent()
@@ -138,6 +140,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         }
         if version <= 21 {
             transaction.execute_batch(COLLECTION_FOUNDATION_SCHEMA)?;
+        }
+        if version <= 22 {
+            transaction.execute_batch(GAME_PROVIDER_DETAIL_SCHEMA)?;
         }
         transaction.commit()?;
         Ok::<(), LibraryError>(())
@@ -271,7 +276,7 @@ mod tests {
             connection
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
-            22
+            SCHEMA_VERSION
         );
         let game: (Option<String>, Option<String>, Option<String>, Option<f64>, Option<i64>) =
             connection
@@ -303,6 +308,55 @@ mod tests {
                 .unwrap(),
             Some(0)
         );
+    }
+
+    #[test]
+    fn migrates_v22_to_v23_game_provider_detail() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        for schema in [
+            INITIAL_SCHEMA,
+            VAULT_SAFETY_SCHEMA,
+            SIMILARITY_REVIEW_SCHEMA,
+            VIDEO_MEDIA_SCHEMA,
+            MANGA_SCHEMA,
+            MANGA_MODIFIED_SCHEMA,
+            CLASSIFICATION_APPEARANCE_SCHEMA,
+            ASSET_ALBUMS_SCHEMA,
+            ASSET_SOURCE_PROVENANCE_SCHEMA,
+            COLLECTIONS_SCHEMA,
+            COLLECTIONS_TYPED_SCHEMA,
+            COLLECTION_SOURCE_SCHEMA,
+            COLLECTION_EXTERNAL_BINDINGS_SCHEMA,
+            COLLECTION_WORK_ARTWORKS_SCHEMA,
+            COLLECTION_VOLUMES_SCHEMA,
+            ALADIN_VOLUME_SOURCES_SCHEMA,
+            ALADIN_RELEASE_WATCH_SCHEMA,
+            ONLINE_CATALOG_SCHEMA,
+            ONLINE_CATALOG_BOOKMARKS_SCHEMA,
+            LEGACY_PACKAGE_IMPORTS_SCHEMA,
+            COLLECTION_LEGACY_KIND_SCHEMA,
+            COLLECTION_FOUNDATION_SCHEMA,
+        ] {
+            connection.execute_batch(schema).unwrap();
+        }
+        connection
+            .execute(
+                "INSERT INTO collections (id, name, type, created_at, updated_at)
+                 VALUES ('game-1', 'Sega Game', 'game', 't', 't')",
+                [],
+            )
+            .unwrap();
+
+        migrate_to_latest(&mut connection, 22).unwrap();
+
+        let provider_detail: (Option<String>, Option<String>) = connection
+            .query_row(
+                "SELECT publisher, platforms FROM collections WHERE id = 'game-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(provider_detail, (None, None));
     }
 
     #[test]

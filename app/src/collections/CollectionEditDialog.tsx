@@ -27,6 +27,8 @@ export function CollectionEditDialog({
   const [year, setYear] = useState<number | null>(existing?.year ?? null);
   const [author, setAuthor] = useState(existing?.author ?? "");
   const [developer, setDeveloper] = useState(existing?.developer ?? "");
+  const [publisher, setPublisher] = useState(existing?.publisher ?? "");
+  const [platforms, setPlatforms] = useState(existing?.platforms ?? "");
   const [productionCompany, setProductionCompany] = useState(existing?.productionCompany ?? "");
   const [releaseDate, setReleaseDate] = useState<string | null>(existing?.releaseDate ?? null);
   const [director, setDirector] = useState(existing?.director ?? "");
@@ -42,6 +44,8 @@ export function CollectionEditDialog({
     setYear(existing?.year ?? null);
     setAuthor(existing?.author ?? "");
     setDeveloper(existing?.developer ?? "");
+    setPublisher(existing?.publisher ?? "");
+    setPlatforms(existing?.platforms ?? "");
     setProductionCompany(existing?.productionCompany ?? "");
     setReleaseDate(existing?.releaseDate ?? null);
     setDirector(existing?.director ?? "");
@@ -64,6 +68,8 @@ export function CollectionEditDialog({
       year,
       author: author.trim() || null,
       developer: developer.trim() || null,
+      publisher: publisher.trim() || null,
+      platforms: platforms.trim() || null,
       productionCompany: productionCompany.trim() || null,
       releaseDate,
       director: director.trim() || null,
@@ -104,6 +110,9 @@ export function CollectionEditDialog({
         {mode.kind === "edit" && type === "game" && (
           <>
             {mode.kind === "edit" && <TextField label="개발사" value={developer} onChange={(event) => setDeveloper(event.target.value)} />}
+            <TextField label="퍼블리셔" value={publisher} onChange={(event) => setPublisher(event.target.value)} />
+            <TextField label="플랫폼" value={platforms} onChange={(event) => setPlatforms(event.target.value)} />
+            <TextField label="출시일" type="date" value={releaseDate ?? ""} onChange={(event) => setReleaseDate(event.target.value || null)} />
             <TextField label="외부 점수" inputMode="numeric" value={externalScore?.toString() ?? ""} onChange={(event) => setExternalScore(event.target.value ? Number(event.target.value) : null)} />
           </>
         )}

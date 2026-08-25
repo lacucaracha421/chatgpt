@@ -57,6 +57,8 @@ it("submits only fields owned by ordinary collection editing", async () => {
     director: null,
     externalScore: 91,
     myScore: null,
+    publisher: null,
+    platforms: null,
     developer: null,
     productionCompany: null,
     releaseDate: null,
@@ -72,6 +74,36 @@ it("submits game developer and a half-star personal rating", async () => {
   await user.click(screen.getByRole("button", { name: "저장" }));
 
   expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ developer: "PlatinumGames", productionCompany: null, releaseDate: null, myScore: 5 }));
+});
+
+it("submits provider-backed game presentation fields when editing", async () => {
+  const user = userEvent.setup();
+  const onSubmit = vi.fn().mockResolvedValue(undefined);
+  render(
+    <CollectionEditDialog
+      open
+      mode={{
+        kind: "edit",
+        collection: {
+          ...collectionFixture,
+          type: "game",
+          publisher: "Sega",
+          platforms: "Dreamcast · Windows",
+          releaseDate: "2000-05-25",
+        },
+      }}
+      onClose={vi.fn()}
+      onSubmit={onSubmit}
+    />,
+  );
+
+  await user.click(screen.getByRole("button", { name: "저장" }));
+
+  expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+    publisher: "Sega",
+    platforms: "Dreamcast · Windows",
+    releaseDate: "2000-05-25",
+  }));
 });
 
 it("shows movie production company separately from director", () => {

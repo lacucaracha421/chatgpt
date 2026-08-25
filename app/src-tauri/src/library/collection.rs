@@ -42,6 +42,14 @@ const COLLECTION_SUMMARY_SQL: &str = "SELECT
         LIMIT 1
     ),
     (
+        SELECT artwork.id
+        FROM collection_work_artworks AS artwork
+        WHERE artwork.collection_id = collection.id
+          AND artwork.kind = 'hero'
+          AND artwork.selected = 1
+        LIMIT 1
+    ),
+    (
         SELECT COUNT(*)
         FROM collection_assets AS count_link
         JOIN assets AS count_asset ON count_asset.id = count_link.asset_id
@@ -52,6 +60,8 @@ const COLLECTION_SUMMARY_SQL: &str = "SELECT
     collection.author,
     collection.director,
     collection.developer,
+    collection.publisher,
+    collection.platforms,
     collection.production_company,
     collection.release_date,
     collection.external_score,
@@ -137,20 +147,21 @@ impl Library {
                 "UPDATE collections
                  SET name = ?1, description = ?2, type = ?3,
                      year = ?4, author = ?5, director = ?6,
-                     developer = ?7, production_company = ?8, release_date = ?9,
-                     external_score = ?10, my_score = ?11,
+                     developer = ?7, publisher = ?8, platforms = ?9,
+                     production_company = ?10, release_date = ?11,
+                     external_score = ?12, my_score = ?13,
                      showcase_order = CASE
                          WHEN showcase = 1 AND type <> ?3 THEN (
                              SELECT COALESCE(MAX(other.showcase_order) + 1, 0)
                              FROM collections AS other
                             WHERE other.type = ?3
-                              AND other.id <> ?13
+                              AND other.id <> ?15
                               AND (other.legacy_kind IS NULL OR other.legacy_kind <> 'gacha')
                          )
                          ELSE showcase_order
                      END,
-                     updated_at = ?12
-                 WHERE id = ?13",
+                     updated_at = ?14
+                 WHERE id = ?15",
                 params![
                     name,
                     description,
@@ -159,6 +170,8 @@ impl Library {
                     author,
                     director,
                     developer,
+                    normalized_optional_text(request.publisher),
+                    normalized_optional_text(request.platforms),
                     production_company,
                     release_date,
                     request.external_score,
@@ -441,7 +454,7 @@ fn collection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollectionSu
         "movie" => CollectionType::Movie,
         _ => CollectionType::Manga,
     };
-    let showcase_int: i64 = row.get(17)?;
+    let showcase_int: i64 = row.get(20)?;
     Ok(CollectionSummary {
         id: row.get(0)?,
         name: row.get(1)?,
@@ -449,23 +462,26 @@ fn collection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollectionSu
         collection_type,
         cover_asset_id: row.get(4)?,
         selected_work_artwork_id: row.get(5)?,
-        asset_count: u64::try_from(row.get::<_, i64>(6)?).unwrap_or(0),
-        unread_release_count: u64::try_from(row.get::<_, i64>(21)?).unwrap_or(0),
-        year: row.get(7)?,
-        author: row.get(8)?,
-        director: row.get(9)?,
-        developer: row.get(10)?,
-        production_company: row.get(11)?,
-        release_date: row.get(12)?,
-        external_score: row.get(13)?,
-        my_score: row.get(14)?,
-        genres: row.get(15)?,
-        overview: row.get(16)?,
+        selected_hero_artwork_id: row.get(6)?,
+        asset_count: u64::try_from(row.get::<_, i64>(7)?).unwrap_or(0),
+        unread_release_count: u64::try_from(row.get::<_, i64>(24)?).unwrap_or(0),
+        year: row.get(8)?,
+        author: row.get(9)?,
+        director: row.get(10)?,
+        developer: row.get(11)?,
+        publisher: row.get(12)?,
+        platforms: row.get(13)?,
+        production_company: row.get(14)?,
+        release_date: row.get(15)?,
+        external_score: row.get(16)?,
+        my_score: row.get(17)?,
+        genres: row.get(18)?,
+        overview: row.get(19)?,
         showcase: showcase_int != 0,
-        showcase_order: row.get(18)?,
-        created_at: row.get(19)?,
-        updated_at: row.get(20)?,
-        source_path: row.get(22)?,
+        showcase_order: row.get(21)?,
+        created_at: row.get(22)?,
+        updated_at: row.get(23)?,
+        source_path: row.get(25)?,
     })
 }
 
@@ -571,6 +587,8 @@ mod tests {
                     author: None,
                     director: None,
                     developer: None,
+                    publisher: None,
+                    platforms: None,
                     production_company: None,
                     release_date: None,
                     external_score: None,
@@ -854,6 +872,8 @@ mod tests {
                     author: Some("PlatinumGames".into()),
                     director: None,
                     developer: None,
+                    publisher: None,
+                    platforms: None,
                     production_company: None,
                     release_date: None,
                     external_score: Some(87),
@@ -893,6 +913,8 @@ mod tests {
                     author: None,
                     director: None,
                     developer: Some("  PlatinumGames  ".into()),
+                    publisher: None,
+                    platforms: None,
                     production_company: None,
                     release_date: Some("2019-08-30".into()),
                     external_score: Some(87),
@@ -920,6 +942,8 @@ mod tests {
             author: None,
             director: None,
             developer: None,
+            publisher: None,
+            platforms: None,
             production_company: None,
             release_date: release_date.map(str::to_owned),
             external_score: None,
@@ -1068,6 +1092,8 @@ mod tests {
                     author: Some("Imported Author".into()),
                     director: None,
                     developer: None,
+                    publisher: None,
+                    platforms: None,
                     production_company: None,
                     release_date: None,
                     external_score: None,
@@ -1134,6 +1160,42 @@ mod tests {
                 .as_deref(),
             Some("art-1")
         );
+    }
+
+    #[test]
+    fn projects_selected_cover_and_hero_independently() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let collection = create(&library, "Sega Game");
+        let connection = library.connection().unwrap();
+        connection
+            .execute(
+                "UPDATE collections
+                 SET publisher = 'Sega', platforms = 'Dreamcast · Windows'
+                 WHERE id = ?1",
+                [&collection.id],
+            )
+            .unwrap();
+        for (id, kind) in [("cover-art", "cover"), ("hero-art", "hero")] {
+            connection
+                .execute(
+                    "INSERT INTO collection_work_artworks (
+                        id, collection_id, provider, provider_image_id, kind, relative_path,
+                        mime_type, width, height, language, selected, created_at, updated_at
+                     ) VALUES (?1, ?2, 'igdb', ?3, ?4,
+                        ?5, 'image/jpeg', 100, 150, NULL, 1,
+                        '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z')",
+                    rusqlite::params![id, collection.id, id, kind, format!("work-artwork/{id}.jpg")],
+                )
+                .unwrap();
+        }
+        drop(connection);
+
+        let game = library.get_collection(&collection.id).unwrap();
+        assert_eq!(game.selected_work_artwork_id.as_deref(), Some("cover-art"));
+        assert_eq!(game.selected_hero_artwork_id.as_deref(), Some("hero-art"));
+        assert_eq!(game.publisher.as_deref(), Some("Sega"));
+        assert_eq!(game.platforms.as_deref(), Some("Dreamcast · Windows"));
     }
 
     #[test]
