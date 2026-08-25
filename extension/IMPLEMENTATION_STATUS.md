@@ -25,3 +25,10 @@ alpha.15.1 integrates AI X Translate Lite v1.4.14 OpenRouter edition and simplif
 - Auto-harvest defers live card creation so X timeline scrolling gets priority, then refreshes one initial batch when harvesting ends.
 - Existing rendered image nodes are preserved during normal collection; saved-state refresh only toggles markers.
 - Existing image lazy-loading/async decoding stays intact while the DOM itself is now paged.
+
+## alpha.15.8 like-count filtering
+- Reads engagement counts from X's stable `data-testid="like"` / `data-testid="unlike"` controls while parsing localized/compact numeric labels.
+- Persists like count alongside each in-session gallery post and propagates it to every image card from the post.
+- Adds non-destructive gallery thresholds: all, 1K+, 5K+, and 10K+ likes.
+- Like metadata can upgrade while a visible tweet finishes rendering; newly eligible cards can enter the active filter without discarding the session store.
+- Gallery cards show the parsed like count next to the author.

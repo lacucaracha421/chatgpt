@@ -18,6 +18,7 @@
   const GALLERY_INITIAL_RENDER_ITEMS = 36;
   const GALLERY_RENDER_BATCH_ITEMS = 24;
   const GALLERY_LOAD_MORE_THRESHOLD_PX = 900;
+  const LIKE_FILTER_THRESHOLDS = [0, 1000, 5000, 10000];
 
   function parseStatusHref(value) {
     let url;
@@ -91,6 +92,78 @@
     return true;
   }
 
+  function parseCompactMetric(value) {
+    const text = String(value ?? "").replace(/\u00a0/g, " ").trim();
+    if (!text) return null;
+    const match = text.match(/(?:^|[^0-9])([0-9][0-9.,]*)(?:\s*)(K|M|B|T|천|만|억|万|億)?/i);
+    if (!match) return null;
+
+    const suffix = match[2] || "";
+    let numberText = match[1];
+    if (suffix) {
+      const commaCount = (numberText.match(/,/g) || []).length;
+      const dotCount = (numberText.match(/\./g) || []).length;
+      if (commaCount && dotCount) {
+        const lastComma = numberText.lastIndexOf(",");
+        const lastDot = numberText.lastIndexOf(".");
+        const decimal = lastComma > lastDot ? "," : ".";
+        const thousands = decimal === "," ? "." : ",";
+        numberText = numberText.split(thousands).join("").replace(decimal, ".");
+      } else if (commaCount === 1 && /,[0-9]{1,2}$/.test(numberText)) {
+        numberText = numberText.replace(",", ".");
+      } else {
+        numberText = numberText.replace(/,/g, "");
+      }
+    } else {
+      numberText = numberText.replace(/[.,]/g, "");
+    }
+
+    const number = Number.parseFloat(numberText);
+    if (!Number.isFinite(number)) return null;
+    const multipliers = {
+      K: 1_000, M: 1_000_000, B: 1_000_000_000, T: 1_000_000_000_000,
+      "천": 1_000, "만": 10_000, "억": 100_000_000,
+      "万": 10_000, "億": 100_000_000,
+    };
+    const multiplier = suffix ? (multipliers[suffix.toUpperCase?.() ?? suffix] ?? multipliers[suffix] ?? 1) : 1;
+    return Math.max(0, Math.round(number * multiplier));
+  }
+
+  function extractLikeCount(article) {
+    const likeButton = article?.querySelector?.('[data-testid="like"], [data-testid="unlike"]');
+    if (!likeButton) return null;
+    const candidates = [
+      likeButton.getAttribute?.("aria-label"),
+      likeButton.innerText,
+      likeButton.textContent,
+    ];
+    for (const candidate of candidates) {
+      const parsed = parseCompactMetric(candidate);
+      if (parsed !== null) return parsed;
+    }
+    return 0;
+  }
+
+  function matchesLikeFilter(item, minLikes = 0) {
+    const threshold = Math.max(0, Number(minLikes) || 0);
+    if (!threshold) return true;
+    const count = Number(item?.likeCount);
+    return Number.isFinite(count) && count >= threshold;
+  }
+
+  function formatLikeCount(value) {
+    if (value === null || value === undefined || value === "") return "—";
+    const count = Number(value);
+    if (!Number.isFinite(count) || count < 0) return "—";
+    try {
+      return new Intl.NumberFormat("ko-KR", { notation: "compact", maximumFractionDigits: 1 }).format(count);
+    } catch {
+      if (count >= 10_000) return `${Math.round(count / 1000) / 10}만`;
+      if (count >= 1_000) return `${Math.round(count / 100) / 10}천`;
+      return String(Math.round(count));
+    }
+  }
+
   function extractPost(article, collectedAt = Date.now()) {
     const identity = findTweetIdentity(article);
     if (!identity) return null;
@@ -119,6 +192,7 @@
       author: `@${identity.username}`,
       postUrl: identity.postUrl,
       images,
+      likeCount: extractLikeCount(article),
       collectedAt,
     };
   }
@@ -132,6 +206,7 @@
       collectedAt: post.collectedAt,
       imageIndex: image.index,
       imageUrl: image.url,
+      likeCount: post.likeCount,
     }));
   }
 
@@ -174,11 +249,21 @@
 
       const known = new Set(existing.images.map((image) => image.url));
       const additions = post.images.filter((image) => image?.url && !known.has(image.url));
-      if (!additions.length) return false;
+      const incomingLikes = Number(post.likeCount);
+      const existingLikes = Number(existing.likeCount);
+      const likeCountImproved = Number.isFinite(incomingLikes)
+        && (!Number.isFinite(existingLikes) || incomingLikes > existingLikes);
+      if (likeCountImproved) existing.likeCount = incomingLikes;
+      if (!additions.length && !likeCountImproved) return false;
       const storedAdditions = additions.map((image) => ({ ...image }));
-      existing.images.push(...storedAdditions);
-      existing.collectedAt = Math.min(existing.collectedAt ?? post.collectedAt, post.collectedAt);
-      onChange({ type: "upsert", items: flattenPostImages(existing, storedAdditions) });
+      if (storedAdditions.length) {
+        existing.images.push(...storedAdditions);
+        existing.collectedAt = Math.min(existing.collectedAt ?? post.collectedAt, post.collectedAt);
+      }
+      onChange({
+        type: likeCountImproved ? "metadata" : "upsert",
+        items: likeCountImproved ? flattenPostImages(existing) : flattenPostImages(existing, storedAdditions),
+      });
       return true;
     }
 
@@ -188,14 +273,20 @@
         .flatMap((post) => flattenPostImages(post));
     }
 
-    function imageCount() {
+    function imageCount(minLikes = 0) {
       let count = 0;
-      for (const post of posts.values()) count += post.images.length;
+      for (const post of posts.values()) {
+        if (matchesLikeFilter(post, minLikes)) count += post.images.length;
+      }
       return count;
     }
 
-    function postCount() {
-      return posts.size;
+    function postCount(minLikes = 0) {
+      let count = 0;
+      for (const post of posts.values()) {
+        if (matchesLikeFilter(post, minLikes)) count += 1;
+      }
+      return count;
     }
 
     function clear() {
@@ -231,13 +322,18 @@
       AUTO_TARGET_NEW_IMAGES,
       GALLERY_INITIAL_RENDER_ITEMS,
       GALLERY_RENDER_BATCH_ITEMS,
+      LIKE_FILTER_THRESHOLDS,
       createGalleryStore,
       galleryItemKey,
+      extractLikeCount,
       extractPost,
+      formatLikeCount,
       findTweetIdentity,
       isHomeRoute,
       mediaBelongsToTweet,
+      matchesLikeFilter,
       nextAutoHarvestState,
+      parseCompactMetric,
       parseStatusHref,
       pruneSavedEntries,
       selectedTabIsFirst,
@@ -261,6 +357,7 @@
     let timelineVersion = 0;
     let galleryRenderQueued = false;
     let galleryLoadMoreQueued = false;
+    let minLikeFilter = 0;
     const observedArticles = new WeakSet();
     const visibleArticles = new WeakSet();
     const pendingArticles = new Set();
@@ -277,7 +374,9 @@
       } else {
         for (const item of change?.items ?? []) {
           const key = galleryItemKey(item);
-          if (key) pendingGalleryItems.set(key, item);
+          if (!key) continue;
+          if (renderedGalleryKeys.has(key)) updateRenderedCardMetadata(item);
+          else pendingGalleryItems.set(key, item);
         }
       }
       updateCounters();
@@ -347,6 +446,13 @@
       if (event.target === ui.overlay) closeGallery();
     });
     ui.scroll.addEventListener("scroll", queueGalleryLoadMore, { passive: true });
+    ui.likeFilter.addEventListener("change", () => {
+      const next = Number(ui.likeFilter.value);
+      minLikeFilter = LIKE_FILTER_THRESHOLDS.includes(next) ? next : 0;
+      resetGalleryRender();
+      renderInitialGallery();
+      updateCounters();
+    });
 
     function observeArticle(article) {
       if (!article || observedArticles.has(article)) return;
@@ -428,7 +534,7 @@
       requestAnimationFrame(() => {
         galleryRenderQueued = false;
         if (!overlayOpen || harvest?.running) return;
-        const items = Array.from(pendingGalleryItems.values());
+        const items = Array.from(pendingGalleryItems.values()).filter((item) => matchesLikeFilter(item, minLikeFilter));
         pendingGalleryItems.clear();
         insertGalleryItemsSorted(items);
       });
@@ -447,8 +553,12 @@
 
     function updateCounters() {
       const imageCount = store.imageCount();
+      const filteredImageCount = store.imageCount(minLikeFilter);
+      const filteredPostCount = store.postCount(minLikeFilter);
       ui.triggerCount.textContent = String(imageCount);
-      ui.summary.textContent = `${imageCount} images · ${store.postCount()} posts`;
+      ui.summary.textContent = minLikeFilter
+        ? `${filteredImageCount}/${imageCount} images · ${filteredPostCount} posts · ♥ ${formatLikeCount(minLikeFilter)}+`
+        : `${imageCount} images · ${store.postCount()} posts`;
       ui.trigger.classList.toggle("is-empty", imageCount === 0);
       ui.trigger.title = isForYouTimeline(document)
         ? `추천 이미지 ${imageCount}개 — 추천 피드를 보며 수집 중`
@@ -477,12 +587,12 @@
       renderedGalleryKeys.clear();
       pendingGalleryItems.clear();
       ui.grid.replaceChildren();
-      ui.empty.hidden = store.imageCount() > 0;
+      ui.empty.hidden = store.imageCount(minLikeFilter) > 0;
       ui.scroll.scrollTop = 0;
     }
 
     function renderInitialGallery() {
-      const items = store.flatImages();
+      const items = store.flatImages().filter((item) => matchesLikeFilter(item, minLikeFilter));
       ui.empty.hidden = items.length > 0;
       if (!items.length) return;
       pendingGalleryItems.clear();
@@ -490,7 +600,7 @@
     }
 
     function renderNextGalleryBatch() {
-      const items = store.flatImages();
+      const items = store.flatImages().filter((item) => matchesLikeFilter(item, minLikeFilter));
       const batch = takeUnrenderedGalleryItems(items, renderedGalleryKeys, GALLERY_RENDER_BATCH_ITEMS);
       appendGalleryItems(batch);
     }
@@ -515,7 +625,7 @@
     function insertGalleryItemsSorted(items) {
       const fresh = (items ?? []).filter((item) => {
         const key = galleryItemKey(item);
-        return key && !renderedGalleryKeys.has(key);
+        return key && !renderedGalleryKeys.has(key) && matchesLikeFilter(item, minLikeFilter);
       });
       if (!fresh.length) return;
       fresh.sort((a, b) => {
@@ -559,6 +669,8 @@
       card.setAttribute("data-lakomics-collected-at", String(Number(item.collectedAt || 0)));
       card.setAttribute("data-lakomics-tweet-id", String(item.tweetId || ""));
       card.setAttribute("data-lakomics-media-index", String(item.imageIndex || 1));
+      card.setAttribute("data-lakomics-like-count", Number.isFinite(Number(item.likeCount)) ? String(Number(item.likeCount)) : "");
+      card.setAttribute("data-lakomics-gallery-key", galleryItemKey(item));
 
       const imageLink = document.createElement("a");
       imageLink.className = "lakomics-x-gallery-image-link";
@@ -591,12 +703,32 @@
       const author = document.createElement("span");
       author.className = "lakomics-x-gallery-author";
       author.textContent = item.author;
+      const likes = document.createElement("span");
+      likes.className = "lakomics-x-gallery-likes";
+      likes.textContent = `♥ ${formatLikeCount(item.likeCount)}`;
+      likes.title = Number.isFinite(Number(item.likeCount)) ? `좋아요 ${Number(item.likeCount).toLocaleString()}개` : "좋아요 수를 읽지 못함";
       const hint = document.createElement("span");
       hint.className = "lakomics-x-gallery-hint";
       hint.textContent = "길게 눌러 저장 · 탭 원문";
-      footer.append(author, hint);
+      footer.append(author, likes, hint);
       card.append(imageLink, savedBadge, footer);
       return card;
+    }
+
+    function updateRenderedCardMetadata(item) {
+      const key = galleryItemKey(item);
+      if (!key) return;
+      for (const card of ui.grid.children) {
+        if (card.getAttribute("data-lakomics-gallery-key") !== key) continue;
+        const count = Number(item.likeCount);
+        card.setAttribute("data-lakomics-like-count", Number.isFinite(count) ? String(count) : "");
+        const likes = card.querySelector(".lakomics-x-gallery-likes");
+        if (likes) {
+          likes.textContent = `♥ ${formatLikeCount(item.likeCount)}`;
+          likes.title = Number.isFinite(count) ? `좋아요 ${count.toLocaleString()}개` : "좋아요 수를 읽지 못함";
+        }
+        break;
+      }
     }
 
     async function loadSavedMedia() {
@@ -796,6 +928,7 @@
         #${GALLERY_ROOT_ID} .lakomics-x-gallery-harvest-status[hidden] { display: none !important; }
         #${GALLERY_ROOT_ID} .lakomics-x-gallery-header button { min-height: 36px; padding: 0 12px; border: 0; border-radius: 999px; background: transparent; color: #d4d4d8; cursor: pointer; font: inherit; white-space: nowrap; }
         #${GALLERY_ROOT_ID} .lakomics-x-gallery-header button:hover { background: rgba(255,255,255,.09); color: #fff; }
+        #${GALLERY_ROOT_ID} .lakomics-x-gallery-like-filter { height: 34px; padding: 0 28px 0 10px; border: 1px solid rgba(244,63,94,.28); border-radius: 999px; background: rgba(244,63,94,.10); color: #fda4af; font: inherit; font-size: 12px; font-weight: 700; outline: none; cursor: pointer; }
         #${GALLERY_ROOT_ID} .lakomics-x-gallery-auto { background: rgba(29,155,240,.14) !important; color: #8fd3ff !important; font-size: 12px; font-weight: 700; }
         #${GALLERY_ROOT_ID} .lakomics-x-gallery-auto.is-running { background: rgba(239,68,68,.16) !important; color: #fca5a5 !important; }
         #${GALLERY_ROOT_ID} .lakomics-x-gallery-clear { font-size: 12px; }
@@ -810,6 +943,7 @@
         #${GALLERY_ROOT_ID} .lakomics-x-gallery-image { display: block; width: 100%; height: auto; max-height: none; object-fit: contain; user-select: none; -webkit-user-drag: none; touch-action: manipulation; }
         #${GALLERY_ROOT_ID} .lakomics-x-gallery-footer { min-height: 34px; padding: 8px 10px; display: flex; align-items: center; gap: 10px; color: #d4d4d8; background: #151518; font-size: 12px; }
         #${GALLERY_ROOT_ID} .lakomics-x-gallery-author { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; }
+        #${GALLERY_ROOT_ID} .lakomics-x-gallery-likes { flex: 0 0 auto; color: #fb7185; font-size: 11px; font-weight: 750; white-space: nowrap; }
         #${GALLERY_ROOT_ID} .lakomics-x-gallery-hint { margin-left: auto; color: #71717a; white-space: nowrap; }
         #${GALLERY_ROOT_ID} .lakomics-x-gallery-empty { max-width: 440px; margin: 18vh auto 0; padding: 28px; text-align: center; color: #a1a1aa; line-height: 1.6; }
         @media (max-width: 720px) {
@@ -817,10 +951,12 @@
           #${GALLERY_ROOT_ID} .lakomics-x-gallery-header { min-height: 56px; padding: 7px 10px; gap: 5px; }
           #${GALLERY_ROOT_ID} .lakomics-x-gallery-title { font-size: 16px; }
           #${GALLERY_ROOT_ID} .lakomics-x-gallery-header button { min-height: 34px; padding: 0 9px; }
+          #${GALLERY_ROOT_ID} .lakomics-x-gallery-like-filter { width: 92px; padding-left: 8px; font-size: 11px; }
           #${GALLERY_ROOT_ID} .lakomics-x-gallery-scroll { padding: 8px; }
           #${GALLERY_ROOT_ID} .lakomics-x-gallery-grid { column-width: 160px; column-gap: 8px; }
           #${GALLERY_ROOT_ID} .lakomics-x-gallery-card { margin-bottom: 8px; border-radius: 9px; }
           #${GALLERY_ROOT_ID} .lakomics-x-gallery-hint { display: none; }
+          #${GALLERY_ROOT_ID} .lakomics-x-gallery-footer { gap: 7px; }
         }
         @media (max-width: 430px) {
           #${GALLERY_ROOT_ID} .lakomics-x-gallery-title { font-size: 15px; }
@@ -842,6 +978,12 @@
             <div class="lakomics-x-gallery-summary">0 images · 0 posts</div>
             <div class="lakomics-x-gallery-harvest-status" hidden></div>
           </div>
+          <select class="lakomics-x-gallery-like-filter" aria-label="좋아요 필터" title="좋아요 수로 갤러리 필터">
+            <option value="0">전체</option>
+            <option value="1000">♥ 1천+</option>
+            <option value="5000">♥ 5천+</option>
+            <option value="10000">♥ 1만+</option>
+          </select>
           <button class="lakomics-x-gallery-auto" type="button" title="추천 피드를 자동으로 내려 새 이미지 100장을 수집하고 시작 위치로 돌아갑니다">▶ 자동 수집</button>
           <button class="lakomics-x-gallery-clear" type="button" title="이번 세션 수집 목록 비우기">초기화</button>
           <button class="lakomics-x-gallery-close" type="button" aria-label="갤러리 닫기" title="닫기">✕</button>
@@ -861,6 +1003,7 @@
       close: root.querySelector(".lakomics-x-gallery-close"),
       clear: root.querySelector(".lakomics-x-gallery-clear"),
       auto: root.querySelector(".lakomics-x-gallery-auto"),
+      likeFilter: root.querySelector(".lakomics-x-gallery-like-filter"),
       summary: root.querySelector(".lakomics-x-gallery-summary"),
       harvestStatus: root.querySelector(".lakomics-x-gallery-harvest-status"),
       empty: root.querySelector(".lakomics-x-gallery-empty"),
