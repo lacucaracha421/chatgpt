@@ -179,6 +179,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::IgdbUnavailable => "igdb_unavailable",
             LibraryError::IgdbInvalidResponse => "igdb_invalid_response",
             LibraryError::IgdbInvalidImageId => "igdb_invalid_image_id",
+            LibraryError::InvalidIgdbIdentity => "invalid_igdb_identity",
             LibraryError::AladinUnavailable => "aladin_unavailable",
             LibraryError::AladinTimedOut => "aladin_timed_out",
             LibraryError::AladinRateLimited => "aladin_rate_limited",

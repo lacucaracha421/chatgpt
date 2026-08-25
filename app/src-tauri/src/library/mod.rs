@@ -17,6 +17,7 @@ mod external_binding;
 mod favorite;
 mod folder_appearance;
 pub(crate) mod igdb;
+mod igdb_flow;
 mod ingestion;
 pub mod legacy_migration;
 pub mod legacy_package_migration;

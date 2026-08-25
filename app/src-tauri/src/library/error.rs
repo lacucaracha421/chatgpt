@@ -262,6 +262,8 @@ pub enum LibraryError {
     IgdbInvalidResponse,
     #[error("IGDB 이미지 식별자가 올바르지 않습니다")]
     IgdbInvalidImageId,
+    #[error("IGDB 게임 식별자가 올바르지 않습니다")]
+    InvalidIgdbIdentity,
     #[error("알라딘에 연결할 수 없습니다")]
     AladinUnavailable,
     #[error("알라딘 요청 시간이 초과됐습니다")]

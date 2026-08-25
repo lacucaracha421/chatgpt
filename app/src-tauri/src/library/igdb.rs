@@ -12,6 +12,7 @@ use serde::Deserialize;
 use super::{
     error::LibraryError,
     models::{IgdbCredentials, IgdbImageRef, IgdbRemoteGame},
+    work_artwork::MAX_WORK_ARTWORK_BYTES,
 };
 
 const TOKEN_URL: &str = "https://id.twitch.tv/oauth2/token";
@@ -22,6 +23,7 @@ const MAX_JSON_BYTES: usize = 4 * 1024 * 1024;
 pub enum IgdbImageSize {
     CoverBig,
     Hd1080p,
+    Original,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -161,6 +163,11 @@ impl IgdbClient {
     }
     pub fn image_url(image_id: &str, size: IgdbImageSize) -> Result<String, LibraryError> {
         image_url(image_id, size)
+    }
+    pub(crate) fn download_original(&self, image_id: &str) -> Result<Vec<u8>, LibraryError> {
+        let url = Self::image_url(image_id, IgdbImageSize::Original)?;
+        let mut response = self.agent.get(&url).call().map_err(map_ureq_error)?;
+        read_bytes(&mut response, MAX_WORK_ARTWORK_BYTES)
     }
     fn request_games(
         &self,
@@ -436,6 +443,7 @@ fn image_url(image_id: &str, size: IgdbImageSize) -> Result<String, LibraryError
     let size = match size {
         IgdbImageSize::CoverBig => "t_cover_big",
         IgdbImageSize::Hd1080p => "t_1080p",
+        IgdbImageSize::Original => "original",
     };
     Ok(format!(
         "https://images.igdb.com/igdb/image/upload/{size}/{image_id}.jpg"
@@ -459,17 +467,24 @@ fn map_ureq_error(error: ureq::Error) -> LibraryError {
     }
 }
 fn read_body(response: &mut ureq::http::Response<ureq::Body>) -> Result<String, LibraryError> {
+    let bytes = read_bytes(response, MAX_JSON_BYTES)?;
+    String::from_utf8(bytes).map_err(|_| LibraryError::IgdbInvalidResponse)
+}
+fn read_bytes(
+    response: &mut ureq::http::Response<ureq::Body>,
+    maximum_bytes: usize,
+) -> Result<Vec<u8>, LibraryError> {
     let mut bytes = Vec::new();
     response
         .body_mut()
         .as_reader()
-        .take((MAX_JSON_BYTES + 1) as u64)
+        .take((maximum_bytes + 1) as u64)
         .read_to_end(&mut bytes)
         .map_err(|_| LibraryError::IgdbUnavailable)?;
-    if bytes.len() > MAX_JSON_BYTES {
+    if bytes.len() > maximum_bytes {
         return Err(LibraryError::IgdbInvalidResponse);
     }
-    String::from_utf8(bytes).map_err(|_| LibraryError::IgdbInvalidResponse)
+    Ok(bytes)
 }
 fn encode_form(value: &str) -> String {
     value
@@ -532,6 +547,10 @@ mod tests {
         assert_eq!(
             super::image_url("abc_-12", IgdbImageSize::CoverBig).unwrap(),
             "https://images.igdb.com/igdb/image/upload/t_cover_big/abc_-12.jpg"
+        );
+        assert_eq!(
+            super::image_url("abc_-12", IgdbImageSize::Original).unwrap(),
+            "https://images.igdb.com/igdb/image/upload/original/abc_-12.jpg"
         );
     }
 
