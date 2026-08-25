@@ -1,7 +1,9 @@
 use std::{
+    fmt,
     io::Read,
     sync::{Arc, Mutex},
-    time::Duration,
+    thread,
+    time::{Duration, Instant},
 };
 
 use chrono::TimeZone;
@@ -22,15 +24,34 @@ pub enum IgdbImageSize {
     Hd1080p,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct CachedIgdbToken {
     pub access_token: String,
     pub expires_at: i64,
 }
 
-#[derive(Debug, Clone, Default)]
+impl fmt::Debug for CachedIgdbToken {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CachedIgdbToken")
+            .field("access_token", &"[redacted]")
+            .field("expires_at", &self.expires_at)
+            .finish()
+    }
+}
+
+#[derive(Clone, Default)]
 pub struct IgdbTokenCache {
     inner: Arc<Mutex<Option<CachedIgdbToken>>>,
+}
+
+impl fmt::Debug for IgdbTokenCache {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("IgdbTokenCache")
+            .field("configured", &self.inner.lock().map(|value| value.is_some()).unwrap_or(false))
+            .finish()
+    }
 }
 
 impl IgdbTokenCache {
@@ -59,6 +80,7 @@ impl IgdbTokenCache {
 pub struct IgdbClient {
     agent: ureq::Agent,
     token_cache: IgdbTokenCache,
+    last_game_request: Arc<Mutex<Option<Instant>>>,
 }
 
 impl Default for IgdbClient {
@@ -80,6 +102,7 @@ impl IgdbClient {
                 .build()
                 .into(),
             token_cache,
+            last_game_request: Arc::new(Mutex::new(None)),
         }
     }
     pub fn search(
@@ -151,6 +174,7 @@ impl IgdbClient {
         credentials: &IgdbCredentials,
         body: &str,
     ) -> Result<String, LibraryError> {
+        self.wait_for_game_request();
         let mut response = self
             .agent
             .post(GAMES_URL)
@@ -160,6 +184,19 @@ impl IgdbClient {
             .send(body.to_owned())
             .map_err(map_ureq_error)?;
         read_body(&mut response)
+    }
+
+    fn wait_for_game_request(&self) {
+        let mut last = self
+            .last_game_request
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let now = Instant::now();
+        let wait = minimum_request_wait(*last, now);
+        if !wait.is_zero() {
+            thread::sleep(wait);
+        }
+        *last = Some(Instant::now());
     }
 }
 
@@ -416,6 +453,12 @@ fn encode_form(value: &str) -> String {
         .collect()
 }
 
+fn minimum_request_wait(last: Option<Instant>, now: Instant) -> Duration {
+    last.map_or(Duration::ZERO, |last| {
+        Duration::from_millis(250).saturating_sub(now.saturating_duration_since(last))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::{map_http_status, normalize_game, parse_token, IgdbImageSize, LibraryError};
@@ -459,6 +502,32 @@ mod tests {
         assert_eq!(
             super::image_url("abc_-12", IgdbImageSize::CoverBig).unwrap(),
             "https://images.igdb.com/igdb/image/upload/t_cover_big/abc_-12.jpg"
+        );
+    }
+
+    #[test]
+    fn redacts_cached_access_tokens_from_debug_output() {
+        let token = super::CachedIgdbToken {
+            access_token: "secret-access-token".into(),
+            expires_at: 123,
+        };
+        let cache = super::IgdbTokenCache::default();
+        cache.store(token.clone());
+        assert!(!format!("{token:?}").contains("secret-access-token"));
+        assert!(!format!("{cache:?}").contains("secret-access-token"));
+    }
+
+    #[test]
+    fn calculates_only_the_remaining_igdb_request_spacing() {
+        let last = std::time::Instant::now();
+        let now = last + std::time::Duration::from_millis(100);
+        assert_eq!(
+            super::minimum_request_wait(Some(last), now),
+            std::time::Duration::from_millis(150)
+        );
+        assert_eq!(
+            super::minimum_request_wait(Some(last), last + std::time::Duration::from_millis(300)),
+            std::time::Duration::ZERO
         );
     }
 }
