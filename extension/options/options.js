@@ -5,6 +5,7 @@
   const downloadFolder = document.querySelector("#download-folder");
   const touchLongPress = document.querySelector("#touch-long-press");
   const suppressDownloadUi = document.querySelector("#suppress-download-ui");
+  const autoLikeOnSave = document.querySelector("#auto-like-on-save");
   const savePreferences = document.querySelector("#save-preferences");
   const preferencesStatus = document.querySelector("#preferences-status");
   const xTranslateEnabled = document.querySelector("#x-translate-enabled");
@@ -52,6 +53,7 @@
     downloadFolder.value = preferences.downloadFolder ?? "Lakomics";
     touchLongPress.value = String(preferences.touchLongPressMs ?? 450);
     suppressDownloadUi.checked = preferences.suppressDownloadUi === true;
+    autoLikeOnSave.checked = preferences.autoLikeOnSave !== false;
     preferencesStatus.textContent = settings.downloadsApiAvailable
       ? (settings.downloadsUiApiAvailable ? "모바일 다운로드 UI 제어 사용 가능" : "다운로드 UI 숨김 API를 찾지 못했습니다.")
       : "확장 다운로드 API를 찾지 못했습니다.";
@@ -241,6 +243,7 @@
         touchPersistent: true,
         suppressContextMenu: true,
         suppressDownloadUi: suppressDownloadUi.checked,
+        autoLikeOnSave: autoLikeOnSave.checked,
       },
     });
     if (!response.ok) {

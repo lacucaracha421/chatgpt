@@ -18,6 +18,7 @@ test("keeps the connection token inside the service worker", async () => {
   assert.equal(settings.tokenConfigured, true);
   assert.equal(settings.preferences.saveMode, "auto");
   assert.equal(settings.preferences.touchLongPressMs, 450);
+  assert.equal(settings.preferences.autoLikeOnSave, true);
   assert.equal(settings.downloadsApiAvailable, true);
   assert.equal(classifications.ok, true);
   assert.equal(

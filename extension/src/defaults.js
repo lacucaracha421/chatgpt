@@ -8,6 +8,7 @@
     touchPersistent: true,
     suppressContextMenu: true,
     suppressDownloadUi: true,
+    autoLikeOnSave: true,
   });
 
   const DEFAULT_REMOTE_SETTINGS = Object.freeze({
@@ -56,6 +57,7 @@
       touchPersistent: value.touchPersistent !== false,
       suppressContextMenu: value.suppressContextMenu !== false,
       suppressDownloadUi: value.suppressDownloadUi !== false,
+      autoLikeOnSave: value.autoLikeOnSave !== false,
     };
   }
 

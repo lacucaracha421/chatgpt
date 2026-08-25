@@ -184,12 +184,178 @@
     };
   }
 
+
+  function normalizePostId(value) {
+    const text = String(value ?? "").trim();
+    return /^\d+$/.test(text) ? text : "";
+  }
+
+  function findTweetArticleForPost(root, postId) {
+    const targetId = normalizePostId(postId);
+    if (!targetId) return null;
+    const articles = root?.querySelectorAll?.('article[data-testid="tweet"]') ?? [];
+    for (const article of articles) {
+      const links = article?.querySelectorAll?.('a[href*="/status/"]') ?? [];
+      for (const link of links) {
+        const href = link?.getAttribute?.("href") || link?.href || "";
+        const match = String(href).match(/\/status\/(\d+)/);
+        if (match?.[1] === targetId) return article;
+      }
+    }
+    return null;
+  }
+
+  const X_FAVORITE_TWEET_QUERY_ID = "lI07N6Otwv1PhnEgXILM7A";
+  const X_WEB_BEARER = "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
+
+  function autoLikeVisiblePost(root, postId) {
+    const article = findTweetArticleForPost(root, postId);
+    if (!article) return { ok: false, status: "not_found" };
+    if (article.querySelector?.('[data-testid="unlike"]')) {
+      return { ok: true, status: "already_liked" };
+    }
+    const likeNode = article.querySelector?.('[data-testid="like"]');
+    const likeButton = likeNode?.closest?.('button, [role="button"]') ?? likeNode;
+    if (!likeButton || typeof likeButton.click !== "function") {
+      return { ok: false, status: "button_missing" };
+    }
+    try {
+      // Use the closest clickable control rather than assuming data-testid sits
+      // on the actual button. X moves the test id between wrapper/button nodes.
+      likeButton.click();
+      return { ok: true, status: "dom_click_sent" };
+    } catch {
+      return { ok: false, status: "click_failed" };
+    }
+  }
+
+  function readCookieValue(cookieString, name) {
+    const target = String(name ?? "").trim();
+    if (!target) return "";
+    for (const part of String(cookieString ?? "").split(";")) {
+      const separator = part.indexOf("=");
+      if (separator < 0) continue;
+      const key = part.slice(0, separator).trim();
+      if (key !== target) continue;
+      return part.slice(separator + 1).trim();
+    }
+    return "";
+  }
+
+  function safeXOrigin(value) {
+    try {
+      const url = new URL(String(value || "https://x.com"));
+      if (url.protocol === "https:" && ["x.com", "twitter.com"].includes(url.hostname)) return url.origin;
+    } catch {}
+    return "https://x.com";
+  }
+
+  async function favoriteTweetViaWebApi({
+    postId,
+    fetchFn = globalThis.fetch,
+    cookieString = globalThis.document?.cookie ?? "",
+    origin = globalThis.location?.origin ?? "https://x.com",
+    language = globalThis.navigator?.language ?? "en",
+  } = {}) {
+    const targetId = normalizePostId(postId);
+    if (!targetId) return { ok: false, status: "invalid_post_id" };
+    if (typeof fetchFn !== "function") return { ok: false, status: "fetch_unavailable" };
+    const csrf = readCookieValue(cookieString, "ct0");
+    if (!csrf) return { ok: false, status: "csrf_missing" };
+
+    const endpoint = `${safeXOrigin(origin)}/i/api/graphql/${X_FAVORITE_TWEET_QUERY_ID}/FavoriteTweet`;
+    let response;
+    try {
+      response = await fetchFn(endpoint, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          accept: "*/*",
+          authorization: X_WEB_BEARER,
+          "content-type": "application/json",
+          "x-csrf-token": csrf,
+          "x-twitter-active-user": "yes",
+          "x-twitter-auth-type": "OAuth2Session",
+          "x-twitter-client-language": String(language || "en").split("-")[0] || "en",
+        },
+        body: JSON.stringify({
+          variables: { tweet_id: targetId },
+          queryId: X_FAVORITE_TWEET_QUERY_ID,
+        }),
+      });
+    } catch {
+      return { ok: false, status: "api_network_failed" };
+    }
+
+    if (!response?.ok) {
+      return { ok: false, status: "api_http_failed", httpStatus: Number(response?.status || 0) };
+    }
+
+    let data = null;
+    try {
+      data = await response.json();
+    } catch {
+      try {
+        const raw = await response.text();
+        data = raw ? JSON.parse(raw) : null;
+      } catch {}
+    }
+    if (data?.data?.favorite_tweet === "Done" || data?.data?.favorite_tweet?.result === "Done") {
+      return { ok: true, status: "api_liked" };
+    }
+    return { ok: false, status: "api_unconfirmed" };
+  }
+
+  function delay(ms) {
+    return new Promise((resolve) => globalThis.setTimeout(resolve, ms));
+  }
+
+  async function autoLikePost({
+    root = globalThis.document,
+    postId,
+    fetchFn = globalThis.fetch,
+    cookieString = globalThis.document?.cookie ?? "",
+    origin = globalThis.location?.origin ?? "https://x.com",
+    language = globalThis.navigator?.language ?? "en",
+    waitMs = 420,
+  } = {}) {
+    const targetId = normalizePostId(postId);
+    if (!targetId) return { ok: false, status: "invalid_post_id" };
+
+    const dom = autoLikeVisiblePost(root, targetId);
+    if (dom.status === "already_liked") return { ok: true, status: "already_liked", method: "dom" };
+    if (dom.status === "dom_click_sent") {
+      await delay(Math.max(0, Number(waitMs) || 0));
+      const refreshedArticle = findTweetArticleForPost(root, targetId);
+      if (refreshedArticle?.querySelector?.('[data-testid="unlike"]')) {
+        return { ok: true, status: "dom_liked", method: "dom" };
+      }
+    }
+
+    const api = await favoriteTweetViaWebApi({ postId: targetId, fetchFn, cookieString, origin, language });
+    return { ...api, method: api.ok ? "api" : "api_fallback", domStatus: dom.status };
+  }
+
+  function autoLikeFeedback(result) {
+    if (result?.status === "already_liked") return "저장 완료 · 이미 좋아요";
+    if (result?.ok) return "저장 완료 · X 좋아요 완료";
+    if (result?.status === "csrf_missing") return "저장 완료 · 좋아요 실패(ct0 없음)";
+    if (result?.status === "api_http_failed") return `저장 완료 · 좋아요 실패(HTTP ${result.httpStatus || "?"})`;
+    if (result?.status === "api_unconfirmed") return "저장 완료 · 좋아요 응답 확인 실패";
+    if (result?.status === "api_network_failed") return "저장 완료 · 좋아요 요청 실패";
+    return `저장 완료 · 좋아요 실패(${result?.status || "unknown"})`;
+  }
+
   function createClickSuppressor() {
     let armed = false;
     return {
       arm() { armed = true; },
       consume(event) {
         if (!armed) return false;
+        // Programmatic extension actions (for example auto-like button.click())
+        // are untrusted DOM events. Do not consume them as the post-radial
+        // click-through guard is only meant for the user's real pointer click.
+        if (event?.isTrusted === false) return false;
         armed = false;
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -200,10 +366,19 @@
 
   if (globalThis.__LAKOMICS_TEST__) {
     globalThis.LakomicsContent = {
+      X_FAVORITE_TWEET_QUERY_ID,
+      autoLikeFeedback,
+      autoLikePost,
+      autoLikeVisiblePost,
+      favoriteTweetViaWebApi,
+      readCookieValue,
+      safeXOrigin,
       createClickSuppressor,
       createCollectorController,
       feedbackFor,
+      findTweetArticleForPost,
       isSavedResponse,
+      normalizePostId,
       clampRadialOrigin,
     };
     return;
@@ -257,6 +432,20 @@
       snapshot: renderSnapshot,
       close: closeRadial,
       saved: (payload, response) => {
+        if (preferences.autoLikeOnSave !== false && payload?.postId) {
+          void autoLikePost({
+            root: document,
+            postId: payload.postId,
+            fetchFn: globalThis.fetch?.bind?.(globalThis) ?? globalThis.fetch,
+            cookieString: document.cookie,
+            origin: location.origin,
+            language: navigator.language,
+          }).then((likeResult) => {
+            showStatus(autoLikeFeedback(likeResult), false, likeResult.ok ? "success" : "progress");
+          }).catch(() => {
+            showStatus("저장 완료 · 좋아요 요청 실패", false, "progress");
+          });
+        }
         if (payload?.mediaType !== "image" || !payload.mediaUrl) return;
         globalThis.LakomicsXGalleryRuntime?.markSaved?.(payload.mediaUrl, {
           status: response?.status,

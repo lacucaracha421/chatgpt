@@ -7,6 +7,106 @@ const layoutSource = fs.readFileSync(new URL("../src/layout.js", import.meta.url
 const gestureSource = fs.readFileSync(new URL("../src/gesture.js", import.meta.url), "utf8");
 const contentSource = fs.readFileSync(new URL("../src/content.js", import.meta.url), "utf8");
 
+test("auto-like clicks only the matching visible post and never unlikes an existing like", () => {
+  const api = loadContent(async () => ({ ok: true }));
+  let clicks = 0;
+  const matchingLink = { getAttribute: () => "/artist/status/123/photo/1" };
+  const otherLink = { getAttribute: () => "/other/status/999" };
+  const likeButton = { click() { clicks += 1; } };
+  const article = {
+    querySelectorAll() { return [matchingLink]; },
+    querySelector(selector) {
+      if (selector === '[data-testid="unlike"]') return null;
+      if (selector === '[data-testid="like"]') return likeButton;
+      return null;
+    },
+  };
+  const otherArticle = {
+    querySelectorAll() { return [otherLink]; },
+    querySelector() { return null; },
+  };
+  const root = { querySelectorAll() { return [otherArticle, article]; } };
+
+  assert.equal(api.findTweetArticleForPost(root, "123"), article);
+  assert.deepEqual(plain(api.autoLikeVisiblePost(root, "123")), { ok: true, status: "dom_click_sent" });
+  assert.equal(clicks, 1);
+
+  article.querySelector = (selector) => selector === '[data-testid="unlike"]' ? {} : likeButton;
+  assert.deepEqual(plain(api.autoLikeVisiblePost(root, "123")), { ok: true, status: "already_liked" });
+  assert.equal(clicks, 1);
+  assert.deepEqual(plain(api.autoLikeVisiblePost(root, "404")), { ok: false, status: "not_found" });
+});
+
+test("FavoriteTweet API fallback uses the logged-in X session and csrf cookie", async () => {
+  const api = loadContent(async () => ({ ok: true }));
+  let request = null;
+  const fetchFn = async (url, options) => {
+    request = { url, options };
+    return {
+      ok: true,
+      status: 200,
+      async json() { return { data: { favorite_tweet: "Done" } }; },
+    };
+  };
+  const result = await api.favoriteTweetViaWebApi({
+    postId: "123",
+    fetchFn,
+    cookieString: "foo=1; ct0=csrf-token-xyz; bar=2",
+    origin: "https://x.com",
+    language: "ko-KR",
+  });
+  assert.deepEqual(plain(result), { ok: true, status: "api_liked" });
+  assert.match(request.url, /\/FavoriteTweet$/);
+  assert.equal(request.options.credentials, "include");
+  assert.equal(request.options.headers["x-csrf-token"], "csrf-token-xyz");
+  assert.equal(request.options.headers["x-twitter-client-language"], "ko");
+  const payload = JSON.parse(request.options.body);
+  assert.equal(payload.variables.tweet_id, "123");
+  assert.equal(payload.queryId, api.X_FAVORITE_TWEET_QUERY_ID);
+});
+
+
+test("auto-like falls back to FavoriteTweet API when the tweet is no longer in the DOM", async () => {
+  const api = loadContent(async () => ({ ok: true }));
+  const root = { querySelectorAll() { return []; } };
+  let calls = 0;
+  const result = await api.autoLikePost({
+    root,
+    postId: "456",
+    cookieString: "ct0=token",
+    origin: "https://x.com",
+    waitMs: 0,
+    fetchFn: async () => {
+      calls += 1;
+      return { ok: true, status: 200, async json() { return { data: { favorite_tweet: "Done" } }; } };
+    },
+  });
+  assert.equal(calls, 1);
+  assert.deepEqual(plain(result), { ok: true, status: "api_liked", method: "api", domStatus: "not_found" });
+});
+
+
+test("auto-like diagnostics preserve X HTTP failures without failing Lakomics save", async () => {
+  const api = loadContent(async () => ({ ok: true }));
+  const result = await api.autoLikePost({
+    root: { querySelectorAll() { return []; } },
+    postId: "789",
+    cookieString: "ct0=token",
+    origin: "https://x.com",
+    waitMs: 0,
+    fetchFn: async () => ({ ok: false, status: 403 }),
+  });
+  assert.deepEqual(plain(result), {
+    ok: false,
+    status: "api_http_failed",
+    httpStatus: 403,
+    method: "api_fallback",
+    domStatus: "not_found",
+  });
+  assert.equal(api.autoLikeFeedback(result), "저장 완료 · 좋아요 실패(HTTP 403)");
+});
+
+
 test("sends one final selection and cancellation sends nothing", async () => {
   const sent = [];
   const api = loadContent(async (payload) => { sent.push(payload); return { ok: true, status: "added" }; });
@@ -215,6 +315,11 @@ test("click suppression consumes only the first click after a radial drag", () =
   assert.equal(ordinary.immediatePropagationStopped, false);
 
   suppressor.arm();
+  const synthetic = { ...clickEvent(), isTrusted: false };
+  assert.equal(suppressor.consume(synthetic), false);
+  assert.equal(synthetic.defaultPrevented, false);
+  assert.equal(synthetic.immediatePropagationStopped, false);
+
   const first = clickEvent();
   assert.equal(suppressor.consume(first), true);
   assert.equal(first.defaultPrevented, true);
@@ -256,6 +361,8 @@ test("mobile radial origin falls back to the viewport center when the viewport i
 
 function loadContent(send) {
   const context = {
+    URL,
+    setTimeout,
     globalThis: null,
     __LAKOMICS_TEST__: true,
     __send: send,
