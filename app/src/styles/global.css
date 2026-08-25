@@ -3337,6 +3337,46 @@ input:disabled {
   border-radius: var(--radius-md);
 }
 
+.collection-overlay__manga-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+  gap: var(--space-3);
+  flex: 1;
+  min-height: 0;
+  padding: var(--space-3) var(--space-4);
+  overflow: hidden;
+}
+
+.collection-overlay__manga-detail {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.collection-overlay__manga-main {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.collection-overlay__manga-main .collection-overlay__grid-area {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  border-top: 0;
+}
+
+.collection-overlay__manga-aside {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--color-surface);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
 .collection-overlay__info {
   display: flex;
   flex-direction: column;
@@ -3558,6 +3598,18 @@ input:disabled {
   transform: translateY(-2px);
 }
 
+.collection-overlay__manga-main .collection-overlay__cover-tile img,
+.collection-overlay__manga-main .collection-overlay__cover-placeholder {
+  box-shadow: none;
+}
+
+.collection-overlay__manga-main .collection-overlay__cover-tile:hover img,
+.collection-overlay__manga-main .collection-overlay__cover-tile:focus-visible img,
+.collection-overlay__manga-main .collection-overlay__cover-tile:hover .collection-overlay__cover-placeholder,
+.collection-overlay__manga-main .collection-overlay__cover-tile:focus-visible .collection-overlay__cover-placeholder {
+  transform: none;
+}
+
 .collection-overlay__cover-tile img {
   object-fit: cover;
 }
@@ -3590,6 +3642,15 @@ input:disabled {
 @media (max-width: 860px) {
   .collection-overlay__body {
     grid-template-columns: minmax(220px, 1fr) minmax(220px, 270px);
+  }
+
+  .collection-overlay__manga-layout {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+  }
+
+  .collection-overlay__manga-main {
+    min-height: 280px;
   }
 
   .collection-browser__grid {

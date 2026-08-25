@@ -12,7 +12,6 @@ import { Toast } from "../shared/ui/Toast";
 import { CollectionCoverGrid } from "./CollectionCoverGrid";
 import { CollectionInfoPanel } from "./CollectionInfoPanel";
 import { CollectionVolumeGrid } from "./CollectionVolumeGrid";
-import { CollectionVolumePanel } from "./CollectionVolumePanel";
 import { MangaCoverViewer } from "./MangaCoverViewer";
 import { AladinConnectDialog } from "./AladinConnectDialog";
 import { MangaDexImportDialog } from "./MangaDexImportDialog";
@@ -55,7 +54,6 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
   const isManga = collection?.type === "manga";
   const hasAladinConnection = Boolean(aladinConnection);
   const selectedCover = covers?.find((cover) => cover.fileName === selectedFileName) ?? null;
-  const selectedVolume = volumes?.find((volume) => volume.id === selectedVolumeId) ?? null;
   const viewerVolumes = useMemo(
     () => (volumes ?? [])
       .filter((volume): volume is CollectionVolume & { coverArtworkId: string } => (
@@ -182,15 +180,40 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
   }, [aladinOpen, importOpen, onExit, viewerVolumeId]);
 
   const heroUrl = useMemo(
-    () => isManga && selectedVolume?.coverArtworkId
-      ? workArtworkUrl(selectedVolume.coverArtworkId)
-      : selectedCover
-        ? collectionCoverUrl(collectionId, selectedCover.fileName)
-        : collection?.selectedWorkArtworkId
-          ? workArtworkUrl(collection.selectedWorkArtworkId)
-          : null,
-    [collection, collectionId, isManga, selectedCover, selectedVolume],
+    () => selectedCover
+      ? collectionCoverUrl(collectionId, selectedCover.fileName)
+      : collection?.selectedWorkArtworkId
+        ? workArtworkUrl(collection.selectedWorkArtworkId)
+        : null,
+    [collection, collectionId, selectedCover],
   );
+
+  const providerMenu = isManga ? (
+    <Menu
+      label="연결 및 갱신"
+      trigger={<span>연결 및 갱신</span>}
+      items={[
+        {
+          id: "mangadex",
+          label: mangaDexConnection ? "MangaDex 새로고침" : "MangaDex 연결",
+          disabled: mangaDexConnection === undefined || refreshing,
+          onSelect: () => mangaDexConnection ? void refresh() : setImportOpen(true),
+        },
+        {
+          id: "aladin",
+          label: aladinConnection ? "Aladin 새로고침" : "Aladin 연결",
+          disabled: aladinConnection === undefined || aladinRefreshing,
+          onSelect: () => aladinConnection ? void refreshAladin() : setAladinOpen(true),
+        },
+        ...(aladinConnection && releaseWatchStatus ? [{
+          id: "release-watch",
+          label: releaseWatchStatus.enabled ? "신간 알림 끄기" : "신간 알림 켜기",
+          disabled: releaseWatchSaving,
+          onSelect: () => void toggleReleaseWatch(),
+        }] : []),
+      ]}
+    />
+  ) : null;
 
   async function refresh() {
     setRefreshing(true);
@@ -281,78 +304,59 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
       />
       {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
       <ReleaseWatchSummary events={releaseChanges} />
-      <div className={`collection-overlay__body${isManga ? " collection-overlay__body--manga" : ""}`}>
-        <div className="collection-overlay__hero">
-          {!isManga && covers === null ? (
-            <Skeleton className="collection-overlay__hero-skeleton" label="표지를 불러오는 중" />
-          ) : heroUrl ? (
-            <img
-              key={heroUrl}
-              src={heroUrl}
-              alt={selectedVolume ? `${selectedVolume.displayLabel}권 표지` : selectedCover?.volumeLabel ?? collection?.name ?? ""}
-              draggable={false}
+      {isManga ? (
+        <section className="collection-overlay__manga-detail" role="region" aria-label="만화 상세">
+          <div className="collection-overlay__manga-layout">
+            <main className="collection-overlay__manga-main">
+              {volumes !== null && (
+                <CollectionVolumeGrid
+                  volumes={volumes}
+                  selectedVolumeId={selectedVolumeId}
+                  editionIndex={editionIndex}
+                  onEditionIndexChange={selectEdition}
+                  onSelect={openVolume}
+                />
+              )}
+            </main>
+            <aside className="collection-overlay__manga-aside">
+              {collection && <CollectionInfoPanel collection={collection} />}
+              {providerMenu}
+            </aside>
+          </div>
+        </section>
+      ) : (
+        <>
+          <div className="collection-overlay__body">
+            <div className="collection-overlay__hero">
+              {covers === null ? (
+                <Skeleton className="collection-overlay__hero-skeleton" label="표지를 불러오는 중" />
+              ) : heroUrl ? (
+                <img
+                  key={heroUrl}
+                  src={heroUrl}
+                  alt={selectedCover?.volumeLabel ?? collection?.name ?? ""}
+                  draggable={false}
+                />
+              ) : (
+                <span className="collection-overlay__hero-empty">표지가 없습니다.</span>
+              )}
+            </div>
+            <div className="collection-overlay__details">
+              {collection && <CollectionInfoPanel collection={collection} />}
+            </div>
+          </div>
+          {covers !== null && (
+            <CollectionCoverGrid
+              collectionId={collectionId}
+              covers={covers}
+              selectedFileName={selectedFileName}
+              shelfFilter={shelfFilter}
+              onShelfFilterChange={setShelfFilter}
+              onSelect={setSelectedFileName}
             />
-          ) : (
-            <span className="collection-overlay__hero-empty">표지가 없습니다.</span>
           )}
-        </div>
-        <div className="collection-overlay__details">
-          {isManga && (
-            <Menu
-              label="연결 및 갱신"
-              trigger={<span>연결 및 갱신</span>}
-              items={[
-                {
-                  id: "mangadex",
-                  label: mangaDexConnection ? "MangaDex 새로고침" : "MangaDex 연결",
-                  disabled: mangaDexConnection === undefined || refreshing,
-                  onSelect: () => mangaDexConnection ? void refresh() : setImportOpen(true),
-                },
-                {
-                  id: "aladin",
-                  label: aladinConnection ? "Aladin 새로고침" : "Aladin 연결",
-                  disabled: aladinConnection === undefined || aladinRefreshing,
-                  onSelect: () => aladinConnection ? void refreshAladin() : setAladinOpen(true),
-                },
-                ...(aladinConnection && releaseWatchStatus ? [{
-                  id: "release-watch",
-                  label: releaseWatchStatus.enabled ? "신간 알림 끄기" : "신간 알림 켜기",
-                  disabled: releaseWatchSaving,
-                  onSelect: () => void toggleReleaseWatch(),
-                }] : []),
-              ]}
-            />
-          )}
-          {collection && <CollectionInfoPanel collection={collection} />}
-          {isManga && (
-            <CollectionVolumePanel
-              coverCount={volumes?.length ?? 0}
-              volumeLabel={selectedVolume?.displayLabel ?? ""}
-              localReleaseDate={selectedVolume?.localReleaseDate ?? null}
-              isbn13={selectedVolume?.isbn13 ?? null}
-              releaseStatus={selectedVolume?.releaseStatus ?? null}
-            />
-          )}
-        </div>
-      </div>
-      {isManga && volumes !== null ? (
-        <CollectionVolumeGrid
-          volumes={volumes}
-          selectedVolumeId={selectedVolumeId}
-          editionIndex={editionIndex}
-          onEditionIndexChange={selectEdition}
-          onSelect={openVolume}
-        />
-      ) : !isManga && covers !== null ? (
-        <CollectionCoverGrid
-          collectionId={collectionId}
-          covers={covers}
-          selectedFileName={selectedFileName}
-          shelfFilter={shelfFilter}
-          onShelfFilterChange={setShelfFilter}
-          onSelect={setSelectedFileName}
-        />
-      ) : null}
+        </>
+      )}
       {viewerVolumeId && viewerVolumes.some((volume) => volume.id === viewerVolumeId) && (
         <MangaCoverViewer
           workTitle={collection?.name ?? "컬렉션"}

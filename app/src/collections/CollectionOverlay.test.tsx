@@ -75,20 +75,28 @@ async function openProviderMenu(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("CollectionOverlay MangaDex flow", () => {
-  it("presents work information and the volume shelf as named sections", async () => {
+  it("composes manga detail around a shelf-first layout", async () => {
+    const user = userEvent.setup();
     renderOverlay({
       listCollectionVolumes: vi.fn().mockResolvedValue([{
         id: "v1", volumeNumber: 1, editionIndex: 0, displayLabel: "1", coverArtworkId: "art-1",
+      }, {
+        id: "v2", volumeNumber: 2, editionIndex: 0, displayLabel: "2", coverArtworkId: "art-2",
       }]),
     });
 
+    const detail = screen.getByRole("region", { name: "만화 상세" });
+    expect(detail.querySelector(".collection-overlay__manga-layout")).not.toBeNull();
+    expect(detail.querySelector(".collection-overlay__hero")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "선택한 권" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "작품 정보" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "선택한 권" })).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "권별 표지" })).toBeInTheDocument();
-    expect(screen.getByText("총 1권")).toBeInTheDocument();
-    expect(document.querySelector(".collection-overlay__details")).toContainElement(
+    expect(screen.getByText("총 2권")).toBeInTheDocument();
+    expect(detail.querySelector(".collection-overlay__manga-aside")).toContainElement(
       screen.getByRole("button", { name: "연결 및 갱신" }),
     );
+    await user.click(screen.getByRole("button", { name: "2권 표지" }));
+    expect(screen.getByRole("dialog", { name: "던전밥 2권 표지 감상" })).toBeInTheDocument();
   });
 
   it("enables release watch for a connected Aladin manga", async () => {
@@ -137,7 +145,7 @@ describe("CollectionOverlay MangaDex flow", () => {
     expect(screen.queryByRole("menuitem", { name: /신간 알림/ })).not.toBeInTheDocument();
   });
 
-  it("takes unread changes once, keeps the selected cover, and refreshes the card projection", async () => {
+  it("takes unread changes once, keeps the selected shelf cover, and refreshes the card projection", async () => {
     const onChanged = vi.fn().mockResolvedValue(undefined);
     renderOverlay({
       listCollectionVolumes: vi.fn().mockResolvedValue([{
@@ -146,15 +154,14 @@ describe("CollectionOverlay MangaDex flow", () => {
       takeUnreadReleaseChanges: vi.fn().mockResolvedValue(unread),
     }, onChanged);
 
-    const hero = (await screen.findAllByRole("img", { name: "1권 표지" }))
-      .find((image) => image.getAttribute("src")?.includes("work-artwork/art-1"))!;
+    const shelfCover = await screen.findByRole("img", { name: "1권 표지" });
     const summary = await screen.findByRole("region", { name: "새 출간 정보" });
 
     expect(summary).toHaveTextContent("새 권: 13권");
     expect(summary).toHaveTextContent("출간일 변경: 12권 2026-08-21 → 2026-08-23");
     expect(summary).toHaveTextContent("출간 상태 변경: 11권 출간 예정 → 출간됨");
     expect(onChanged).toHaveBeenCalledOnce();
-    expect(hero).toHaveAttribute("src", "http://lakomics.localhost/work-artwork/art-1");
+    expect(shelfCover).toHaveAttribute("src", "http://lakomics.localhost/work-artwork-thumbnail/art-1");
   });
 
   it("renders no release summary and does not refresh cards when there are no unread changes", async () => {
@@ -166,23 +173,17 @@ describe("CollectionOverlay MangaDex flow", () => {
     expect(onChanged).not.toHaveBeenCalled();
   });
 
-  it("prefers a Volume cover and falls back to stored WorkArtwork", async () => {
+  it("renders volume covers on the shelf without a generic hero", async () => {
     renderOverlay({
       listCollectionVolumes: vi.fn().mockResolvedValue([
         { id: "volume-1", volumeNumber: 1, editionIndex: 0, displayLabel: "1", coverArtworkId: "local-art" },
       ]),
     });
-    await waitFor(() => expect(document.querySelector(".collection-overlay__hero img")).toHaveAttribute(
+    expect(await screen.findByRole("img", { name: "1권 표지" })).toHaveAttribute(
       "src",
-      "http://lakomics.localhost/work-artwork/local-art",
-    ));
-    cleanup();
-
-    renderOverlay();
-    expect(await screen.findByRole("img", { name: "던전밥" })).toHaveAttribute(
-      "src",
-      "http://lakomics.localhost/work-artwork/artwork-1",
+      "http://lakomics.localhost/work-artwork-thumbnail/local-art",
     );
+    expect(document.querySelector(".collection-overlay__hero")).toBeNull();
   });
 
   it("shows ordered manga Volume drawers, fills placeholders, and has no fake editor", async () => {
@@ -275,7 +276,7 @@ describe("CollectionOverlay MangaDex flow", () => {
     expect(onExit).not.toHaveBeenCalled();
   });
 
-  it("refreshes Aladin releases once and shows Korean publication fields without changing covers", async () => {
+  it("refreshes Aladin releases once without changing shelf covers", async () => {
     const user = userEvent.setup();
     const initial = {
       id: "v1", volumeNumber: 1, editionIndex: 0, displayLabel: "1", coverArtworkId: "art-1",
@@ -294,9 +295,8 @@ describe("CollectionOverlay MangaDex flow", () => {
       getReleaseWatchStatus,
       refreshAladin: vi.fn().mockResolvedValue({ added: 0, updated: 1, unchanged: 0, ignored: 0 }),
     });
-    const hero = (await screen.findAllByRole("img", { name: "1권 표지" }))
-      .find((image) => image.getAttribute("src")?.includes("work-artwork/art-1"))!;
-    expect(hero).toHaveAttribute("src", "http://lakomics.localhost/work-artwork/art-1");
+    const shelfCover = await screen.findByRole("img", { name: "1권 표지" });
+    expect(shelfCover).toHaveAttribute("src", "http://lakomics.localhost/work-artwork-thumbnail/art-1");
     await waitFor(() => expect(gateway.syncMangaDexVolumeCovers).toHaveBeenCalledOnce());
     listCollectionVolumes.mockClear();
     listCollectionVolumes.mockResolvedValue([released]);
@@ -307,13 +307,7 @@ describe("CollectionOverlay MangaDex flow", () => {
     await waitFor(() => expect(gateway.refreshAladin).toHaveBeenCalledWith("collection-1"));
     expect(getReleaseWatchStatus).toHaveBeenCalledTimes(2);
     expect(listCollectionVolumes).toHaveBeenCalledOnce();
-    expect(screen.getByText("2026. 08. 20.")).toBeInTheDocument();
-    expect(screen.getByText("9781234567890")).toBeInTheDocument();
-    expect(screen.getByText("출간됨")).toBeInTheDocument();
-    expect(hero).toHaveAttribute("src", "http://lakomics.localhost/work-artwork/art-1");
-    const thumbnail = screen.getAllByRole("img", { name: "1권 표지" })
-      .find((image) => image.getAttribute("src")?.includes("work-artwork-thumbnail/art-1"));
-    expect(thumbnail).toHaveAttribute("src", "http://lakomics.localhost/work-artwork-thumbnail/art-1");
+    expect(shelfCover).toHaveAttribute("src", "http://lakomics.localhost/work-artwork-thumbnail/art-1");
   });
 
   it("keeps the shelf visible when Aladin refresh fails", async () => {
@@ -346,17 +340,21 @@ describe("CollectionOverlay MangaDex flow", () => {
     expect(onChanged).toHaveBeenCalledOnce();
   });
 
-  it("retains the artwork and shows an error when refresh fails", async () => {
+  it("retains the shelf and shows an error when refresh fails", async () => {
     const user = userEvent.setup();
     renderOverlay({
+      listCollectionVolumes: vi.fn().mockResolvedValue([{
+        id: "v1", volumeNumber: 1, editionIndex: 0, displayLabel: "1", coverArtworkId: "art-1",
+      }]),
+      syncMangaDexVolumeCovers: vi.fn().mockResolvedValue({ completed: 0, skipped: 0, failed: 0 }),
       getMangaDexConnection: vi.fn().mockResolvedValue({ mangaId: "manga-1", lastSyncedAt: "t" }),
       refreshMangaDex: vi.fn().mockRejectedValue(new Error("새로고침하지 못했습니다.")),
     });
-    const artwork = await screen.findByRole("img", { name: "던전밥" });
+    const shelfCover = await screen.findByRole("img", { name: "1권 표지" });
 
     await openProviderMenu(user);
     await user.click(screen.getByRole("menuitem", { name: "MangaDex 새로고침" }));
     expect(await screen.findByRole("status")).toHaveTextContent("새로고침하지 못했습니다.");
-    expect(artwork).toBeInTheDocument();
+    expect(shelfCover).toBeInTheDocument();
   });
 });

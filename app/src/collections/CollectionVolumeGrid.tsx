@@ -23,10 +23,10 @@ export function CollectionVolumeGrid({
     .sort((left, right) => left.volumeNumber - right.volumeNumber);
 
   return (
-    <div className="collection-overlay__grid-area">
+    <section className="collection-overlay__grid-area" aria-labelledby="collection-volume-grid-heading">
       <div className="collection-overlay__grid-heading">
         <div>
-          <h3>권별 표지</h3>
+          <h3 id="collection-volume-grid-heading">권별 표지</h3>
           <span>총 {visible.length}권</span>
         </div>
         <div className="collection-overlay__shelves" role="group" aria-label="판본 서랍">
@@ -70,6 +70,6 @@ export function CollectionVolumeGrid({
           })
         )}
       </div>
-    </div>
+    </section>
   );
 }
