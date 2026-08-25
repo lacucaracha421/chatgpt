@@ -282,32 +282,6 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
       {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
       <ReleaseWatchSummary events={releaseChanges} />
       <div className={`collection-overlay__body${isManga ? " collection-overlay__body--manga" : ""}`}>
-        {isManga && (
-          <Menu
-            label="연결 및 갱신"
-            trigger={<span>연결 및 갱신</span>}
-            items={[
-              {
-                id: "mangadex",
-                label: mangaDexConnection ? "MangaDex 새로고침" : "MangaDex 연결",
-                disabled: mangaDexConnection === undefined || refreshing,
-                onSelect: () => mangaDexConnection ? void refresh() : setImportOpen(true),
-              },
-              {
-                id: "aladin",
-                label: aladinConnection ? "Aladin 새로고침" : "Aladin 연결",
-                disabled: aladinConnection === undefined || aladinRefreshing,
-                onSelect: () => aladinConnection ? void refreshAladin() : setAladinOpen(true),
-              },
-              ...(aladinConnection && releaseWatchStatus ? [{
-                id: "release-watch",
-                label: releaseWatchStatus.enabled ? "신간 알림 끄기" : "신간 알림 켜기",
-                disabled: releaseWatchSaving,
-                onSelect: () => void toggleReleaseWatch(),
-              }] : []),
-            ]}
-          />
-        )}
         <div className="collection-overlay__hero">
           {!isManga && covers === null ? (
             <Skeleton className="collection-overlay__hero-skeleton" label="표지를 불러오는 중" />
@@ -323,6 +297,32 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
           )}
         </div>
         <div className="collection-overlay__details">
+          {isManga && (
+            <Menu
+              label="연결 및 갱신"
+              trigger={<span>연결 및 갱신</span>}
+              items={[
+                {
+                  id: "mangadex",
+                  label: mangaDexConnection ? "MangaDex 새로고침" : "MangaDex 연결",
+                  disabled: mangaDexConnection === undefined || refreshing,
+                  onSelect: () => mangaDexConnection ? void refresh() : setImportOpen(true),
+                },
+                {
+                  id: "aladin",
+                  label: aladinConnection ? "Aladin 새로고침" : "Aladin 연결",
+                  disabled: aladinConnection === undefined || aladinRefreshing,
+                  onSelect: () => aladinConnection ? void refreshAladin() : setAladinOpen(true),
+                },
+                ...(aladinConnection && releaseWatchStatus ? [{
+                  id: "release-watch",
+                  label: releaseWatchStatus.enabled ? "신간 알림 끄기" : "신간 알림 켜기",
+                  disabled: releaseWatchSaving,
+                  onSelect: () => void toggleReleaseWatch(),
+                }] : []),
+              ]}
+            />
+          )}
           {collection && <CollectionInfoPanel collection={collection} />}
           {isManga && (
             <CollectionVolumePanel

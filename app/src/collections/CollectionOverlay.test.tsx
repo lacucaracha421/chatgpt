@@ -86,6 +86,9 @@ describe("CollectionOverlay MangaDex flow", () => {
     expect(screen.getByRole("heading", { name: "선택한 권" })).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "권별 표지" })).toBeInTheDocument();
     expect(screen.getByText("총 1권")).toBeInTheDocument();
+    expect(document.querySelector(".collection-overlay__details")).toContainElement(
+      screen.getByRole("button", { name: "연결 및 갱신" }),
+    );
   });
 
   it("enables release watch for a connected Aladin manga", async () => {
@@ -125,10 +128,13 @@ describe("CollectionOverlay MangaDex flow", () => {
   });
 
   it("does not expose release watch without an Aladin binding", async () => {
+    const user = userEvent.setup();
     const { gateway } = renderOverlay();
 
     await waitFor(() => expect(gateway.getAladinConnection).toHaveBeenCalledOnce());
     expect(screen.queryByRole("button", { name: /신간 알림/ })).not.toBeInTheDocument();
+    await openProviderMenu(user);
+    expect(screen.queryByRole("menuitem", { name: /신간 알림/ })).not.toBeInTheDocument();
   });
 
   it("takes unread changes once, keeps the selected cover, and refreshes the card projection", async () => {
