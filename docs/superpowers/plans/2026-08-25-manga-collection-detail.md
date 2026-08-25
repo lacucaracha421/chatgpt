@@ -47,7 +47,7 @@ For connected providers, open the same menu and activate `MangaDex 새로고침`
 
 - [ ] **Step 2: Run the focused test and verify it fails**
 
-Run: `npm test -- --run app/src/collections/CollectionOverlay.test.tsx`
+Run from the repository root: `cd app && npm test -- --run src/collections/CollectionOverlay.test.tsx`
 
 Expected: FAIL because provider actions are still individual toolbar buttons and there is no `연결 및 갱신` trigger.
 
@@ -86,7 +86,7 @@ Remove the three manga-specific `Button` blocks from `ViewToolbar.actions`; keep
 
 - [ ] **Step 4: Run the focused test and verify it passes**
 
-Run: `npm test -- --run app/src/collections/CollectionOverlay.test.tsx`
+Run from the repository root: `cd app && npm test -- --run src/collections/CollectionOverlay.test.tsx`
 
 Expected: PASS.
 
@@ -127,7 +127,7 @@ Keep the existing ordering, edition drawer, placeholder, focus restoration, rele
 
 - [ ] **Step 2: Run the focused test and verify it fails**
 
-Run: `npm test -- --run app/src/collections/CollectionOverlay.test.tsx`
+Run from the repository root: `cd app && npm test -- --run src/collections/CollectionOverlay.test.tsx`
 
 Expected: FAIL because manga currently renders the generic hero/detail block and `선택한 권` panel.
 
@@ -171,11 +171,11 @@ Add a dense two-column manga layout: `minmax(0, 1fr)` shelf plus a restrained fi
 
 - [ ] **Step 5: Run the focused tests and type/build check**
 
-Run: `npm test -- --run app/src/collections/CollectionOverlay.test.tsx app/src/collections/MangaCoverViewer.test.tsx`
+Run from the repository root: `cd app && npm test -- --run src/collections/CollectionOverlay.test.tsx src/collections/MangaCoverViewer.test.tsx`
 
 Expected: PASS.
 
-Run: `npm run build`
+Run from the repository root: `cd app && npm run build`
 
 Expected: PASS; the existing Vite chunk-size warning is acceptable.
 
@@ -203,19 +203,19 @@ git commit -m "feat: build shelf-first manga collection detail"
 
 - [ ] **Step 1: Run the focused manga detail suite**
 
-Run: `npm test -- --run app/src/collections/CollectionOverlay.test.tsx app/src/collections/MangaCoverViewer.test.tsx app/src/collections/AladinConnectDialog.test.tsx app/src/collections/MangaDexImportDialog.test.tsx`
+Run from the repository root: `cd app && npm test -- --run src/collections/CollectionOverlay.test.tsx src/collections/MangaCoverViewer.test.tsx src/collections/AladinConnectDialog.test.tsx src/collections/MangaDexImportDialog.test.tsx`
 
 Expected: PASS.
 
 - [ ] **Step 2: Run the Collection integration tests**
 
-Run: `npm test -- --run app/src/collections/CollectionBrowser.test.tsx app/src/collections/CollectionCard.test.tsx app/src/collections/collectionLibrary.test.ts`
+Run from the repository root: `cd app && npm test -- --run src/collections/CollectionBrowser.test.tsx src/collections/CollectionCard.test.tsx src/collections/collectionLibrary.test.ts`
 
 Expected: PASS, proving list state and card behavior still integrate with detail navigation.
 
 - [ ] **Step 3: Run the production build once**
 
-Run: `npm run build`
+Run from the repository root: `cd app && npm run build`
 
 Expected: PASS; the existing Vite chunk-size warning is acceptable.
 
