@@ -70,6 +70,10 @@ function renderOverlay(
   return { gateway, onChanged, onExit };
 }
 
+async function openProviderMenu(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByRole("button", { name: "연결 및 갱신" }));
+}
+
 describe("CollectionOverlay MangaDex flow", () => {
   it("presents work information and the volume shelf as named sections", async () => {
     renderOverlay({
@@ -93,10 +97,13 @@ describe("CollectionOverlay MangaDex flow", () => {
       setReleaseWatchEnabled,
     });
 
-    await user.click(await screen.findByRole("button", { name: "신간 알림 켜기" }));
+    expect(screen.queryByRole("button", { name: "신간 알림 켜기" })).not.toBeInTheDocument();
+    await openProviderMenu(user);
+    await user.click(screen.getByRole("menuitem", { name: "신간 알림 켜기" }));
 
     expect(setReleaseWatchEnabled).toHaveBeenCalledWith("collection-1", true);
-    expect(await screen.findByRole("button", { name: "신간 알림 끄기" })).toBeInTheDocument();
+    await openProviderMenu(user);
+    expect(await screen.findByRole("menuitem", { name: "신간 알림 끄기" })).toBeInTheDocument();
     expect(gateway.takeUnreadReleaseChanges).toHaveBeenCalledOnce();
   });
 
@@ -109,10 +116,12 @@ describe("CollectionOverlay MangaDex flow", () => {
       setReleaseWatchEnabled,
     });
 
-    await user.click(await screen.findByRole("button", { name: "신간 알림 끄기" }));
+    await openProviderMenu(user);
+    await user.click(screen.getByRole("menuitem", { name: "신간 알림 끄기" }));
 
     expect(setReleaseWatchEnabled).toHaveBeenCalledWith("collection-1", false);
-    expect(await screen.findByRole("button", { name: "신간 알림 켜기" })).toBeInTheDocument();
+    await openProviderMenu(user);
+    expect(await screen.findByRole("menuitem", { name: "신간 알림 켜기" })).toBeInTheDocument();
   });
 
   it("does not expose release watch without an Aladin binding", async () => {
@@ -238,7 +247,9 @@ describe("CollectionOverlay MangaDex flow", () => {
     const user = userEvent.setup();
     renderOverlay();
 
-    await user.click(await screen.findByRole("button", { name: "MangaDex 연결" }));
+    expect(screen.queryByRole("button", { name: "MangaDex 연결" })).not.toBeInTheDocument();
+    await openProviderMenu(user);
+    await user.click(screen.getByRole("menuitem", { name: "MangaDex 연결" }));
     expect(screen.getByRole("heading", { name: "MangaDex 연결" })).toBeInTheDocument();
   });
 
@@ -248,8 +259,9 @@ describe("CollectionOverlay MangaDex flow", () => {
       getMangaDexConnection: vi.fn().mockResolvedValue({ mangaId: "manga-1", lastSyncedAt: "t" }),
     });
 
-    expect(await screen.findByRole("button", { name: "MangaDex 새로고침" })).toBeInTheDocument();
-    await user.click(await screen.findByRole("button", { name: "Aladin 연결" }));
+    await openProviderMenu(user);
+    expect(screen.getByRole("menuitem", { name: "MangaDex 새로고침" })).toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: "Aladin 연결" }));
     const dialog = screen.getByRole("dialog", { name: "Aladin 연결" });
     expect(dialog).toBeInTheDocument();
     expect(dialog.querySelector("img")).toBeNull();
@@ -283,7 +295,8 @@ describe("CollectionOverlay MangaDex flow", () => {
     listCollectionVolumes.mockClear();
     listCollectionVolumes.mockResolvedValue([released]);
 
-    await user.click(await screen.findByRole("button", { name: "Aladin 새로고침" }));
+    await openProviderMenu(user);
+    await user.click(screen.getByRole("menuitem", { name: "Aladin 새로고침" }));
 
     await waitFor(() => expect(gateway.refreshAladin).toHaveBeenCalledWith("collection-1"));
     expect(getReleaseWatchStatus).toHaveBeenCalledTimes(2);
@@ -309,7 +322,8 @@ describe("CollectionOverlay MangaDex flow", () => {
     });
 
     expect(await screen.findByRole("button", { name: "1권 표지" })).toBeInTheDocument();
-    await user.click(await screen.findByRole("button", { name: "Aladin 새로고침" }));
+    await openProviderMenu(user);
+    await user.click(screen.getByRole("menuitem", { name: "Aladin 새로고침" }));
     expect(await screen.findByRole("status")).toHaveTextContent("알라딘 실패");
     expect(screen.getByRole("button", { name: "1권 표지" })).toBeInTheDocument();
   });
@@ -320,7 +334,8 @@ describe("CollectionOverlay MangaDex flow", () => {
       getMangaDexConnection: vi.fn().mockResolvedValue({ mangaId: "manga-1", lastSyncedAt: "t" }),
     });
 
-    await user.click(await screen.findByRole("button", { name: "MangaDex 새로고침" }));
+    await openProviderMenu(user);
+    await user.click(screen.getByRole("menuitem", { name: "MangaDex 새로고침" }));
     await waitFor(() => expect(gateway.refreshMangaDex).toHaveBeenCalledWith("collection-1"));
     expect(onChanged).toHaveBeenCalledOnce();
   });
@@ -333,7 +348,8 @@ describe("CollectionOverlay MangaDex flow", () => {
     });
     const artwork = await screen.findByRole("img", { name: "던전밥" });
 
-    await user.click(await screen.findByRole("button", { name: "MangaDex 새로고침" }));
+    await openProviderMenu(user);
+    await user.click(screen.getByRole("menuitem", { name: "MangaDex 새로고침" }));
     expect(await screen.findByRole("status")).toHaveTextContent("새로고침하지 못했습니다.");
     expect(artwork).toBeInTheDocument();
   });

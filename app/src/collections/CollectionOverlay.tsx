@@ -6,6 +6,7 @@ import { commandErrorMessage } from "../library/errorMessage";
 import type { AladinConnection, CollectionCover, CollectionSummary, CollectionVolume, MangaDexConnection, ReleaseWatchEvent, ReleaseWatchStatus } from "../library/types";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { Button } from "../shared/ui/Button";
+import { Menu } from "../shared/ui/Menu";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { Toast } from "../shared/ui/Toast";
 import { CollectionCoverGrid } from "./CollectionCoverGrid";
@@ -273,21 +274,6 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
         title={collection?.name ?? "컬렉션"}
         ariaLabel="컬렉션 표지 도구"
         actions={<>
-          {isManga && mangaDexConnection !== undefined && (
-            <Button size="sm" variant="ghost" disabled={refreshing} onClick={() => mangaDexConnection ? void refresh() : setImportOpen(true)}>
-              {mangaDexConnection ? "MangaDex 새로고침" : "MangaDex 연결"}
-            </Button>
-          )}
-          {isManga && aladinConnection !== undefined && (
-            <Button size="sm" variant="ghost" disabled={aladinRefreshing} onClick={() => aladinConnection ? void refreshAladin() : setAladinOpen(true)}>
-              {aladinConnection ? "Aladin 새로고침" : "Aladin 연결"}
-            </Button>
-          )}
-          {isManga && aladinConnection && releaseWatchStatus && (
-            <Button size="sm" variant="ghost" disabled={releaseWatchSaving} onClick={() => void toggleReleaseWatch()}>
-              {releaseWatchStatus.enabled ? "신간 알림 끄기" : "신간 알림 켜기"}
-            </Button>
-          )}
           <Button size="icon" variant="ghost" aria-label="컬렉션 표지 보기 닫기" onClick={onExit}>
             <XMarkIcon aria-hidden="true" />
           </Button>
@@ -296,6 +282,32 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
       {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
       <ReleaseWatchSummary events={releaseChanges} />
       <div className={`collection-overlay__body${isManga ? " collection-overlay__body--manga" : ""}`}>
+        {isManga && (
+          <Menu
+            label="연결 및 갱신"
+            trigger={<span>연결 및 갱신</span>}
+            items={[
+              {
+                id: "mangadex",
+                label: mangaDexConnection ? "MangaDex 새로고침" : "MangaDex 연결",
+                disabled: mangaDexConnection === undefined || refreshing,
+                onSelect: () => mangaDexConnection ? void refresh() : setImportOpen(true),
+              },
+              {
+                id: "aladin",
+                label: aladinConnection ? "Aladin 새로고침" : "Aladin 연결",
+                disabled: aladinConnection === undefined || aladinRefreshing,
+                onSelect: () => aladinConnection ? void refreshAladin() : setAladinOpen(true),
+              },
+              ...(aladinConnection && releaseWatchStatus ? [{
+                id: "release-watch",
+                label: releaseWatchStatus.enabled ? "신간 알림 끄기" : "신간 알림 켜기",
+                disabled: releaseWatchSaving,
+                onSelect: () => void toggleReleaseWatch(),
+              }] : []),
+            ]}
+          />
+        )}
         <div className="collection-overlay__hero">
           {!isManga && covers === null ? (
             <Skeleton className="collection-overlay__hero-skeleton" label="표지를 불러오는 중" />
