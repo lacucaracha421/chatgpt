@@ -49,6 +49,75 @@ pub struct IgdbRemoteGame {
     pub snapshot_json: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct IgdbImageCandidate {
+    pub image_id: String,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct IgdbSearchResult {
+    pub game_id: i64,
+    pub title: String,
+    pub developer: Option<String>,
+    pub release_date: Option<String>,
+    pub cover: Option<IgdbImageCandidate>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct IgdbGamePreview {
+    pub game_id: i64,
+    pub proposed_title: String,
+    pub developer: Option<String>,
+    pub publisher: Option<String>,
+    pub release_date: Option<String>,
+    pub platforms: Vec<String>,
+    pub genres: Vec<String>,
+    pub overview: Option<String>,
+    pub covers: Vec<IgdbImageCandidate>,
+    pub artworks: Vec<IgdbImageCandidate>,
+    pub screenshots: Vec<IgdbImageCandidate>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct IgdbConnection {
+    pub game_id: i64,
+    pub last_synced_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct IgdbApplyRequest {
+    pub game_id: i64,
+    pub cover_image_id: Option<String>,
+    pub hero_image_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum IgdbArtworkDecision {
+    Keep,
+    Clear,
+    Select { image_id: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct IgdbArtworkReplaceRequest {
+    pub collection_id: String,
+    pub cover: IgdbArtworkDecision,
+    pub hero: IgdbArtworkDecision,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum BackupKind {

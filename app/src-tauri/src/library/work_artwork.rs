@@ -13,6 +13,21 @@ use super::{collection::require_collection, error::LibraryError, Library, MediaR
 pub(crate) const MAX_WORK_ARTWORK_BYTES: usize = 32 * 1024 * 1024;
 const WORK_ARTWORK_THUMBNAIL_BOUND: u32 = 360;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WorkArtworkKind {
+    Cover,
+    Hero,
+}
+
+impl WorkArtworkKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Cover => "cover",
+            Self::Hero => "hero",
+        }
+    }
+}
+
 pub(crate) struct PreparedWorkArtwork {
     pub id: String,
     pub relative_path: String,
@@ -102,32 +117,47 @@ impl Library {
         language: Option<&str>,
         prepared: &PreparedWorkArtwork,
     ) -> Result<String, LibraryError> {
+        Self::insert_work_artwork_in_transaction(
+            transaction,
+            collection_id,
+            provider,
+            provider_image_id,
+            WorkArtworkKind::Cover,
+            language,
+            prepared,
+        )
+    }
+
+    pub(crate) fn insert_work_artwork_in_transaction(
+        transaction: &Transaction<'_>,
+        collection_id: &str,
+        provider: &str,
+        provider_image_id: &str,
+        kind: WorkArtworkKind,
+        language: Option<&str>,
+        prepared: &PreparedWorkArtwork,
+    ) -> Result<String, LibraryError> {
         require_collection(transaction, collection_id)?;
         let now = chrono::Utc::now().to_rfc3339();
-        transaction.execute(
-            "UPDATE collection_work_artworks
-             SET selected = 0, updated_at = ?1
-             WHERE collection_id = ?2 AND kind = 'cover' AND selected = 1",
-            params![now, collection_id],
-        )?;
         transaction.execute(
             "INSERT INTO collection_work_artworks (
                 id, collection_id, provider, provider_image_id, kind, relative_path,
                 mime_type, width, height, language, selected, created_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, 'cover', ?5, ?6, ?7, ?8, ?9, 1, ?10, ?10)
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 0, ?11, ?11)
              ON CONFLICT(collection_id, provider, provider_image_id) DO UPDATE SET
                 relative_path = excluded.relative_path,
                 mime_type = excluded.mime_type,
                 width = excluded.width,
                 height = excluded.height,
                 language = excluded.language,
-                selected = 1,
+                selected = 0,
                 updated_at = excluded.updated_at",
             params![
                 prepared.id,
                 collection_id,
                 provider,
                 provider_image_id,
+                kind.as_str(),
                 prepared.relative_path,
                 prepared.mime_type,
                 prepared.width,
@@ -136,14 +166,72 @@ impl Library {
                 now,
             ],
         )?;
-        transaction
-            .query_row(
-                "SELECT id FROM collection_work_artworks
-                 WHERE collection_id = ?1 AND provider = ?2 AND provider_image_id = ?3",
-                params![collection_id, provider, provider_image_id],
-                |row| row.get(0),
-            )
-            .map_err(Into::into)
+        let artwork_id: String = transaction.query_row(
+            "SELECT id FROM collection_work_artworks
+             WHERE collection_id = ?1 AND provider = ?2 AND provider_image_id = ?3",
+            params![collection_id, provider, provider_image_id],
+            |row| row.get(0),
+        )?;
+        Self::select_work_artwork_kind_in_transaction(
+            transaction,
+            collection_id,
+            &artwork_id,
+            kind,
+        )?;
+        Ok(artwork_id)
+    }
+
+    pub(crate) fn select_work_artwork_kind_in_transaction(
+        transaction: &Transaction<'_>,
+        collection_id: &str,
+        artwork_id: &str,
+        kind: WorkArtworkKind,
+    ) -> Result<(), LibraryError> {
+        require_collection(transaction, collection_id)?;
+        let belongs: bool = transaction.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM collection_work_artworks
+                WHERE id = ?1 AND collection_id = ?2 AND kind = ?3
+            )",
+            params![artwork_id, collection_id, kind.as_str()],
+            |row| row.get(0),
+        )?;
+        if !belongs {
+            return Err(LibraryError::InvalidWorkArtwork);
+        }
+        let now = chrono::Utc::now().to_rfc3339();
+        transaction.execute(
+            "UPDATE collection_work_artworks
+             SET selected = 0, updated_at = ?1
+             WHERE collection_id = ?2 AND kind = ?3 AND selected = 1",
+            params![now, collection_id, kind.as_str()],
+        )?;
+        transaction.execute(
+            "UPDATE collection_work_artworks
+             SET selected = 1, updated_at = ?1
+             WHERE id = ?2 AND collection_id = ?3 AND kind = ?4",
+            params![now, artwork_id, collection_id, kind.as_str()],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn clear_work_artwork_kind_in_transaction(
+        transaction: &Transaction<'_>,
+        collection_id: &str,
+        kind: WorkArtworkKind,
+    ) -> Result<(), LibraryError> {
+        require_collection(transaction, collection_id)?;
+        transaction.execute(
+            "UPDATE collection_work_artworks
+             SET selected = 0, updated_at = ?1
+             WHERE collection_id = ?2 AND kind = ?3 AND selected = 1",
+            params![
+                chrono::Utc::now().to_rfc3339(),
+                collection_id,
+                kind.as_str()
+            ],
+        )?;
+        Ok(())
     }
 
     pub(crate) fn insert_volume_work_artwork_in_transaction(
@@ -444,7 +532,7 @@ mod tests {
         Library,
     };
 
-    use super::MAX_WORK_ARTWORK_BYTES;
+    use super::{WorkArtworkKind, MAX_WORK_ARTWORK_BYTES};
 
     fn png_bytes() -> Vec<u8> {
         png_bytes_at(12, 18)
@@ -617,6 +705,299 @@ mod tests {
         media.file.read_to_end(&mut served).unwrap();
         assert_eq!(media.mime, "image/png");
         assert_eq!(served, second_bytes);
+    }
+
+    #[test]
+    fn selected_cover_and_hero_can_coexist_for_one_collection() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let collection = library
+            .create_collection(CreateCollection {
+                name: "Example Game".into(),
+                description: None,
+                collection_type: CollectionType::Game,
+            })
+            .unwrap();
+
+        let cover = library
+            .prepare_work_artwork(&collection.id, &png_bytes())
+            .unwrap();
+        let cover_id = cover.id.clone();
+        {
+            let mut connection = library.connection().unwrap();
+            let transaction = connection.transaction().unwrap();
+            Library::select_work_artwork_in_transaction(
+                &transaction,
+                &collection.id,
+                "igdb",
+                "cover-1",
+                None,
+                &cover,
+            )
+            .unwrap();
+            transaction.commit().unwrap();
+        }
+        cover.commit();
+
+        let hero = library
+            .prepare_work_artwork(&collection.id, &png_bytes_at(16, 9))
+            .unwrap();
+        let hero_id = hero.id.clone();
+        {
+            let mut connection = library.connection().unwrap();
+            let transaction = connection.transaction().unwrap();
+            Library::insert_work_artwork_in_transaction(
+                &transaction,
+                &collection.id,
+                "igdb",
+                "hero-1",
+                WorkArtworkKind::Hero,
+                None,
+                &hero,
+            )
+            .unwrap();
+            transaction.commit().unwrap();
+        }
+        hero.commit();
+
+        let selected: Vec<(String, String, i64)> = library
+            .connection()
+            .unwrap()
+            .prepare(
+                "SELECT id, kind, selected FROM collection_work_artworks
+                 WHERE collection_id = ?1 ORDER BY kind",
+            )
+            .unwrap()
+            .query_map([&collection.id], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+
+        assert_eq!(
+            selected,
+            vec![(cover_id, "cover".into(), 1), (hero_id, "hero".into(), 1)]
+        );
+    }
+
+    #[test]
+    fn selecting_a_second_hero_preserves_the_selected_cover() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let collection = library
+            .create_collection(CreateCollection {
+                name: "Example Game".into(),
+                description: None,
+                collection_type: CollectionType::Game,
+            })
+            .unwrap();
+
+        let cover = library
+            .prepare_work_artwork(&collection.id, &png_bytes())
+            .unwrap();
+        let cover_id = cover.id.clone();
+        {
+            let mut connection = library.connection().unwrap();
+            let transaction = connection.transaction().unwrap();
+            Library::select_work_artwork_in_transaction(
+                &transaction,
+                &collection.id,
+                "igdb",
+                "cover-1",
+                None,
+                &cover,
+            )
+            .unwrap();
+            transaction.commit().unwrap();
+        }
+        cover.commit();
+
+        let first_hero = library
+            .prepare_work_artwork(&collection.id, &png_bytes_at(16, 9))
+            .unwrap();
+        let first_hero_id = first_hero.id.clone();
+        {
+            let mut connection = library.connection().unwrap();
+            let transaction = connection.transaction().unwrap();
+            Library::insert_work_artwork_in_transaction(
+                &transaction,
+                &collection.id,
+                "igdb",
+                "hero-1",
+                WorkArtworkKind::Hero,
+                None,
+                &first_hero,
+            )
+            .unwrap();
+            transaction.commit().unwrap();
+        }
+        first_hero.commit();
+
+        let second_hero = library
+            .prepare_work_artwork(&collection.id, &png_bytes_at(20, 11))
+            .unwrap();
+        let second_hero_id = second_hero.id.clone();
+        {
+            let mut connection = library.connection().unwrap();
+            let transaction = connection.transaction().unwrap();
+            Library::insert_work_artwork_in_transaction(
+                &transaction,
+                &collection.id,
+                "igdb",
+                "hero-2",
+                WorkArtworkKind::Hero,
+                None,
+                &second_hero,
+            )
+            .unwrap();
+            transaction.commit().unwrap();
+        }
+        second_hero.commit();
+
+        let selected: Vec<(String, String, i64)> = library
+            .connection()
+            .unwrap()
+            .prepare(
+                "SELECT id, kind, selected FROM collection_work_artworks
+                 WHERE collection_id = ?1 ORDER BY provider_image_id",
+            )
+            .unwrap()
+            .query_map([&collection.id], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+
+        assert_eq!(
+            selected,
+            vec![
+                (cover_id, "cover".into(), 1),
+                (first_hero_id, "hero".into(), 0),
+                (second_hero_id, "hero".into(), 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn selecting_artwork_under_the_wrong_kind_is_rejected() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let collection = library
+            .create_collection(CreateCollection {
+                name: "Example Game".into(),
+                description: None,
+                collection_type: CollectionType::Game,
+            })
+            .unwrap();
+        let cover = library
+            .prepare_work_artwork(&collection.id, &png_bytes())
+            .unwrap();
+        let cover_id = cover.id.clone();
+        {
+            let mut connection = library.connection().unwrap();
+            let transaction = connection.transaction().unwrap();
+            Library::select_work_artwork_in_transaction(
+                &transaction,
+                &collection.id,
+                "igdb",
+                "cover-1",
+                None,
+                &cover,
+            )
+            .unwrap();
+            assert!(matches!(
+                Library::select_work_artwork_kind_in_transaction(
+                    &transaction,
+                    &collection.id,
+                    &cover_id,
+                    WorkArtworkKind::Hero,
+                ),
+                Err(LibraryError::InvalidWorkArtwork)
+            ));
+            transaction.commit().unwrap();
+        }
+        cover.commit();
+    }
+
+    #[test]
+    fn clearing_hero_preserves_the_selected_cover() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let collection = library
+            .create_collection(CreateCollection {
+                name: "Example Game".into(),
+                description: None,
+                collection_type: CollectionType::Game,
+            })
+            .unwrap();
+        let cover = library
+            .prepare_work_artwork(&collection.id, &png_bytes())
+            .unwrap();
+        let cover_id = cover.id.clone();
+        {
+            let mut connection = library.connection().unwrap();
+            let transaction = connection.transaction().unwrap();
+            Library::select_work_artwork_in_transaction(
+                &transaction,
+                &collection.id,
+                "igdb",
+                "cover-1",
+                None,
+                &cover,
+            )
+            .unwrap();
+            transaction.commit().unwrap();
+        }
+        cover.commit();
+
+        let hero = library
+            .prepare_work_artwork(&collection.id, &png_bytes_at(16, 9))
+            .unwrap();
+        let hero_id = hero.id.clone();
+        {
+            let mut connection = library.connection().unwrap();
+            let transaction = connection.transaction().unwrap();
+            Library::insert_work_artwork_in_transaction(
+                &transaction,
+                &collection.id,
+                "igdb",
+                "hero-1",
+                WorkArtworkKind::Hero,
+                None,
+                &hero,
+            )
+            .unwrap();
+            Library::clear_work_artwork_kind_in_transaction(
+                &transaction,
+                &collection.id,
+                WorkArtworkKind::Hero,
+            )
+            .unwrap();
+            transaction.commit().unwrap();
+        }
+        hero.commit();
+
+        let selected: Vec<(String, String, i64)> = library
+            .connection()
+            .unwrap()
+            .prepare(
+                "SELECT id, kind, selected FROM collection_work_artworks
+                 WHERE collection_id = ?1 ORDER BY kind",
+            )
+            .unwrap()
+            .query_map([&collection.id], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+
+        assert_eq!(
+            selected,
+            vec![(cover_id, "cover".into(), 1), (hero_id, "hero".into(), 0)]
+        );
     }
 
     #[test]
