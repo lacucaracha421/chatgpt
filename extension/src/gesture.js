@@ -2,6 +2,7 @@
   "use strict";
 
   const OPEN_DISTANCE_PX = 12;
+  const TOUCH_CANCEL_DISTANCE_PX = 20;
   const DWELL_MS = 300;
   const CENTER_RADIUS = 42;
   const PRIMARY_INNER_RADIUS = 48;
@@ -52,17 +53,22 @@
     return a >= s || a <= e;
   }
 
-  function createSession(origin, entries, layout, pinnedIds = []) {
-    let opened = false;
+  function createSession(origin, entries, layout, pinnedIds = [], options = {}) {
+    let opened = options.openImmediately === true;
+    const centerSelectsExpandedParent = options.centerSelectsExpandedParent === true;
+    const confirmSelectionWithCenter = options.confirmSelectionWithCenter === true;
     let expandedParentId = null;
+    let pendingClassificationId = null;
     let lastExpandedParentId = null;
     let primaryPage = 0;
     let secondaryPage = 0;
     let hover = null;
     let hoverSince = null;
     let dwellDeadline = null;
+    let lastPoint = null;
 
     function move(point, time) {
+      lastPoint = point;
       if (!opened) {
         if (distance(origin, point) < OPEN_DISTANCE_PX) return snapshot();
         opened = true;
@@ -70,7 +76,7 @@
       const target = hitTest(point);
       if (!sameTarget(target, hover)) {
         if (target.type === "center") {
-          if (expandedParentId !== null) {
+          if (expandedParentId !== null && !centerSelectsExpandedParent) {
             lastExpandedParentId = expandedParentId;
             expandedParentId = null;
             secondaryPage = 0;
@@ -94,15 +100,69 @@
 
     function release() {
       if (!opened) return { type: "click" };
-      if (hover?.type === "secondary-slot" && hover.entry) {
-        return { type: "select", classificationId: hover.entry.id };
+      return selectionAction(currentTarget());
+    }
+
+    function activate() {
+      if (!opened) return { type: "click" };
+      const target = currentTarget();
+
+      if (confirmSelectionWithCenter) {
+        if (target?.type === "center") {
+          const classificationId = pendingClassificationId ?? expandedParentId;
+          return classificationId
+            ? { type: "select", classificationId }
+            : { type: "cancel" };
+        }
+        if (target?.type === "primary-slot" && target.entry) {
+          pendingClassificationId = target.entry.id;
+          const hasChildren = entries.some((entry) => entry.parentId === target.entry.id);
+          if (hasChildren && expandedParentId !== target.entry.id) {
+            expandedParentId = target.entry.id;
+            secondaryPage = 0;
+            hover = null;
+            hoverSince = null;
+            dwellDeadline = null;
+            return { type: "expand", classificationId: target.entry.id };
+          }
+          return { type: "pending", classificationId: target.entry.id };
+        }
+        if (target?.type === "secondary-slot" && target.entry) {
+          pendingClassificationId = target.entry.id;
+          return { type: "pending", classificationId: target.entry.id };
+        }
+        return selectionAction(target);
       }
-      if (hover?.type === "primary-slot" && hover.entry) {
-        return { type: "select", classificationId: hover.entry.id };
+
+      if (target?.type === "center" && expandedParentId !== null) {
+        return { type: "select", classificationId: expandedParentId };
       }
-      if (hover?.type === "center") {
-        return { type: "cancel" };
+      if (target?.type === "primary-slot" && target.entry
+        && entries.some((entry) => entry.parentId === target.entry.id)
+        && expandedParentId !== target.entry.id) {
+        expandedParentId = target.entry.id;
+        secondaryPage = 0;
+        hover = null;
+        hoverSince = null;
+        dwellDeadline = null;
+        return { type: "expand", classificationId: target.entry.id };
       }
+      return selectionAction(target);
+    }
+
+    function currentTarget() {
+      if (hover) return hover;
+      return lastPoint ? hitTest(lastPoint) : null;
+    }
+
+    function selectionAction(target) {
+      if (target?.type === "secondary-slot" && target.entry) {
+        return { type: "select", classificationId: target.entry.id };
+      }
+      if (target?.type === "primary-slot" && target.entry) {
+        return { type: "select", classificationId: target.entry.id };
+      }
+      if (target?.type === "center") return { type: "cancel" };
       return { type: "cancel" };
     }
 
@@ -202,6 +262,7 @@
       return {
         opened,
         expandedParentId,
+        pendingClassificationId,
         primaryPage,
         secondaryPage,
         hover,
@@ -213,7 +274,7 @@
       };
     }
 
-    return { move, tick, release, snapshot };
+    return { move, tick, release, activate, snapshot };
   }
 
   function distance(a, b) {
@@ -228,6 +289,7 @@
 
   globalThis.LakomicsGesture = {
     OPEN_DISTANCE_PX,
+    TOUCH_CANCEL_DISTANCE_PX,
     DWELL_MS,
     CENTER_RADIUS,
     PRIMARY_INNER_RADIUS,

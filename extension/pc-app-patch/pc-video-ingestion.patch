@@ -1,0 +1,30 @@
+diff --git a/app/src-tauri/src/extension_api.rs b/app/src-tauri/src/extension_api.rs
+--- a/app/src-tauri/src/extension_api.rs
++++ b/app/src-tauri/src/extension_api.rs
+@@
+ const MAX_JSON_BYTES: usize = 32 * 1024;
++const MAX_REMOTE_VIDEO_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+ const TOKEN_FILE_NAME: &str = "extension-token.txt";
+@@
+-    let media_url = validate_url(&request.media_url, &["pbs.twimg.com"])
++    let media_url = validate_url(&request.media_url, &["pbs.twimg.com", "video.twimg.com"])
+         .map_err(|_| ApiError::InvalidMediaUrl)?;
+@@
+     let staging_directory = library.root().join("assets").join(".staging");
+     fs::create_dir_all(&staging_directory).map_err(|_| ApiError::DownloadFailed)?;
+-    let temporary_path = staging_directory.join(format!("remote-{}.png", Uuid::new_v4()));
++    let (temporary_extension, maximum_bytes) = match media_url.host_str() {
++        Some("pbs.twimg.com") => ("png", MAX_IMAGE_BYTES),
++        Some("video.twimg.com") if media_url.path().to_ascii_lowercase().ends_with(".mp4") => {
++            ("mp4", MAX_REMOTE_VIDEO_BYTES)
++        }
++        _ => return Err(ApiError::InvalidMediaUrl),
++    };
++    let temporary_path = staging_directory.join(format!(
++        "remote-{}.{}",
++        Uuid::new_v4(),
++        temporary_extension
++    ));
+     let temporary = TemporaryDownload::new(temporary_path);
+-    downloader.download(&media_url, temporary.path(), MAX_IMAGE_BYTES)?;
++    downloader.download(&media_url, temporary.path(), maximum_bytes)?;

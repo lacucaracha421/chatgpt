@@ -23,6 +23,26 @@ test("uses six, twelve, and paged twelve-slot levels", () => {
   assert.equal(paged.slots[1], null);
 });
 
+
+test("honors an explicit twelve-slot secondary layout even with only one child", () => {
+  const current = [
+    { id: "root", kind: "root", name: "Root", parentId: null },
+    { id: "child", kind: "tag", name: "Child", parentId: "root" },
+  ];
+  const layout = {
+    version: 1,
+    parents: {
+      root: [[null, null, "child", null, null, null, null, null, null, null, null, null]],
+    },
+  };
+
+  const level = layoutApi.getLevel(current, layout, "root", 0);
+
+  assert.equal(level.slotCount, 12);
+  assert.equal(level.slots.length, 12);
+  assert.equal(level.slots[2].id, "child");
+});
+
 test("preserves ID positions across rename and fills the first empty slot", () => {
   const original = entries(3);
   const stored = {
