@@ -139,14 +139,14 @@ export type CollectionSummary = {
   type: CollectionType;
   coverAssetId: string | null;
   selectedWorkArtworkId: string | null;
-  selectedHeroArtworkId?: string | null;
+  selectedHeroArtworkId: string | null;
   assetCount: number;
   unreadReleaseCount: number;
   year: number | null;
   author: string | null;
   developer: string | null;
-  publisher?: string | null;
-  platforms?: string | null;
+  publisher: string | null;
+  platforms: string | null;
   productionCompany: string | null;
   releaseDate: string | null;
   director: string | null;

@@ -1033,11 +1033,14 @@ describe("App", () => {
       type: "game",
       coverAssetId: null,
       selectedWorkArtworkId: null,
+      selectedHeroArtworkId: null,
       assetCount: 3,
       unreadReleaseCount: 0,
       year: 2019,
       author: "PlatinumGames",
       developer: "PlatinumGames",
+      publisher: null,
+      platforms: null,
       productionCompany: null,
       releaseDate: null,
       director: null,
@@ -1067,8 +1070,8 @@ describe("App", () => {
     const libraryGateway = gateway();
     vi.mocked(libraryGateway.listCollections).mockResolvedValue([{
       id: "collection-search", name: "NieR: Automata", description: null, type: "game",
-      coverAssetId: null, selectedWorkArtworkId: null, assetCount: 0, unreadReleaseCount: 0,
-      year: 2017, author: null, developer: null, productionCompany: null, releaseDate: null,
+      coverAssetId: null, selectedWorkArtworkId: null, selectedHeroArtworkId: null, assetCount: 0, unreadReleaseCount: 0,
+      year: 2017, author: null, developer: null, publisher: null, platforms: null, productionCompany: null, releaseDate: null,
       director: null, externalScore: null, myScore: null, genres: null, overview: null,
       showcase: false, showcaseOrder: null, createdAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z",
     }]);
@@ -1095,11 +1098,14 @@ describe("App", () => {
       type: "manga",
       coverAssetId: null,
       selectedWorkArtworkId: null,
+      selectedHeroArtworkId: null,
       assetCount: 1,
       unreadReleaseCount: 0,
       year: 2014,
       author: "쿠이 료코",
       developer: null,
+      publisher: null,
+      platforms: null,
       productionCompany: null,
       releaseDate: null,
       director: null,
@@ -1134,8 +1140,8 @@ describe("App", () => {
     const libraryGateway = gateway();
     vi.mocked(libraryGateway.listCollections).mockResolvedValue([{
       id: "showcase-game", name: "Showcase Game", description: null, type: "game",
-      coverAssetId: null, selectedWorkArtworkId: null, assetCount: 0, unreadReleaseCount: 0,
-      year: 2020, author: null, developer: null, productionCompany: null, releaseDate: null,
+      coverAssetId: null, selectedWorkArtworkId: null, selectedHeroArtworkId: null, assetCount: 0, unreadReleaseCount: 0,
+      year: 2020, author: null, developer: null, publisher: null, platforms: null, productionCompany: null, releaseDate: null,
       director: null, externalScore: null, myScore: null, genres: null, overview: null,
       showcase: true, showcaseOrder: 1, createdAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z",
     }]);
