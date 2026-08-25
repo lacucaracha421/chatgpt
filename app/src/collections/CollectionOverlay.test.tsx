@@ -58,6 +58,9 @@ function renderOverlay(
     getAladinConnection: vi.fn().mockResolvedValue(null),
     getReleaseWatchStatus: vi.fn().mockResolvedValue({ enabled: false, lastCheckedAt: null }),
     setReleaseWatchEnabled: vi.fn().mockResolvedValue({ enabled: false, lastCheckedAt: null }),
+    updateCollection: vi.fn().mockResolvedValue(undefined),
+    setCollectionShowcase: vi.fn().mockResolvedValue(undefined),
+    deleteCollection: vi.fn().mockResolvedValue(undefined),
     takeUnreadReleaseChanges: vi.fn().mockResolvedValue([]),
     runDueReleaseWatch: vi.fn().mockResolvedValue({ checked: 0, changedCollections: 0, skipped: 0, stopReason: null }),
     ...overrides,
@@ -86,7 +89,7 @@ describe("CollectionOverlay MangaDex flow", () => {
     });
 
     const detail = screen.getByRole("region", { name: "만화 상세" });
-    expect(detail.querySelector(".collection-overlay__manga-layout")).not.toBeNull();
+    expect(detail).toHaveClass("collection-overlay__manga-layout");
     expect(detail.querySelector(".collection-overlay__hero")).toBeNull();
     expect(screen.queryByRole("heading", { name: "선택한 권" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "작품 정보" })).toBeInTheDocument();
@@ -258,6 +261,58 @@ describe("CollectionOverlay MangaDex flow", () => {
     await openProviderMenu(user);
     await user.click(screen.getByRole("menuitem", { name: "MangaDex 연결" }));
     expect(screen.getByRole("heading", { name: "MangaDex 연결" })).toBeInTheDocument();
+  });
+
+  it("dismisses the provider menu with Escape without exiting detail", async () => {
+    const user = userEvent.setup();
+    const { onExit } = renderOverlay();
+    const trigger = await screen.findByRole("button", { name: "연결 및 갱신" });
+
+    await user.click(trigger);
+    expect(screen.getByRole("menuitem", { name: "MangaDex 연결" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+
+    expect(onExit).not.toHaveBeenCalled();
+    expect(screen.getByRole("region", { name: "만화 상세" })).toBeInTheDocument();
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it("exposes collection management actions and reuses their callbacks", async () => {
+    const user = userEvent.setup();
+    const onChanged = vi.fn().mockResolvedValue(undefined);
+    const { gateway } = renderOverlay({}, onChanged);
+
+    await openProviderMenu(user);
+    expect(screen.getByRole("menuitem", { name: "편집" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "쇼케이스에 추가" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "삭제" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("menuitem", { name: "편집" }));
+    expect(screen.getByRole("dialog", { name: "컬렉션 편집" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "저장" }));
+    await waitFor(() => expect(gateway.updateCollection).toHaveBeenCalledWith("collection-1", expect.objectContaining({ name: "던전밥", type: "manga" })));
+    expect(onChanged).toHaveBeenCalledOnce();
+
+    await openProviderMenu(user);
+    await user.click(screen.getByRole("menuitem", { name: "쇼케이스에 추가" }));
+    await waitFor(() => expect(gateway.setCollectionShowcase).toHaveBeenCalledWith("collection-1", true));
+    expect(onChanged).toHaveBeenCalledTimes(2);
+  });
+
+  it("confirms collection deletion before leaving detail", async () => {
+    const user = userEvent.setup();
+    const onChanged = vi.fn().mockResolvedValue(undefined);
+    const { gateway, onExit } = renderOverlay({}, onChanged);
+
+    await openProviderMenu(user);
+    await user.click(screen.getByRole("menuitem", { name: "삭제" }));
+    expect(screen.getByRole("dialog", { name: "컬렉션 삭제" })).toHaveTextContent("던전밥");
+    expect(gateway.deleteCollection).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "삭제" }));
+    await waitFor(() => expect(gateway.deleteCollection).toHaveBeenCalledWith("collection-1"));
+    expect(onChanged).toHaveBeenCalledOnce();
+    expect(onExit).toHaveBeenCalledOnce();
   });
 
   it("keeps MangaDex separate and opens the text-only Aladin connection dialog", async () => {

@@ -3,14 +3,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { collectionCoverUrl, workArtworkUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
-import type { AladinConnection, CollectionCover, CollectionSummary, CollectionVolume, MangaDexConnection, ReleaseWatchEvent, ReleaseWatchStatus } from "../library/types";
+import type { AladinConnection, CollectionCover, CollectionSummary, CollectionVolume, CreateCollection, MangaDexConnection, ReleaseWatchEvent, ReleaseWatchStatus, UpdateCollection } from "../library/types";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { Button } from "../shared/ui/Button";
+import { Dialog } from "../shared/ui/Dialog";
 import { Menu } from "../shared/ui/Menu";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { Toast } from "../shared/ui/Toast";
 import { CollectionCoverGrid } from "./CollectionCoverGrid";
 import { CollectionInfoPanel } from "./CollectionInfoPanel";
+import { CollectionEditDialog, type CollectionEditMode } from "./CollectionEditDialog";
 import { CollectionVolumeGrid } from "./CollectionVolumeGrid";
 import { MangaCoverViewer } from "./MangaCoverViewer";
 import { AladinConnectDialog } from "./AladinConnectDialog";
@@ -42,6 +44,8 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
   const [releaseWatchStatus, setReleaseWatchStatus] = useState<ReleaseWatchStatus | null>(null);
   const [releaseChanges, setReleaseChanges] = useState<ReleaseWatchEvent[]>([]);
   const [releaseWatchSaving, setReleaseWatchSaving] = useState(false);
+  const [editMode, setEditMode] = useState<CollectionEditMode | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const viewerOpenerRef = useRef<HTMLElement | null>(null);
   const onChangedRef = useRef(onChanged);
@@ -173,7 +177,7 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
 
   useEffect(() => {
     const exit = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && viewerVolumeId === null && !importOpen && !aladinOpen) onExit();
+      if (event.key === "Escape" && !event.defaultPrevented && viewerVolumeId === null && !importOpen && !aladinOpen) onExit();
     };
     window.addEventListener("keydown", exit);
     return () => window.removeEventListener("keydown", exit);
@@ -193,6 +197,22 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
       label="연결 및 갱신"
       trigger={<span>연결 및 갱신</span>}
       items={[
+        {
+          id: "edit",
+          label: "편집",
+          onSelect: () => collection && setEditMode({ kind: "edit", collection }),
+        },
+        {
+          id: "showcase",
+          label: collection?.showcase ? "쇼케이스에서 제거" : "쇼케이스에 추가",
+          onSelect: () => void toggleShowcase(),
+        },
+        {
+          id: "delete",
+          label: "삭제",
+          destructive: true,
+          onSelect: () => setDeleteOpen(true),
+        },
         {
           id: "mangadex",
           label: mangaDexConnection ? "MangaDex 새로고침" : "MangaDex 연결",
@@ -214,6 +234,34 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
       ]}
     />
   ) : null;
+
+  async function submitEdit(input: CreateCollection | UpdateCollection) {
+    if (editMode?.kind !== "edit") return;
+    await gateway.updateCollection(collectionId, input as UpdateCollection);
+    await onChanged();
+  }
+
+  async function toggleShowcase() {
+    if (!collection) return;
+    try {
+      await gateway.setCollectionShowcase(collection.id, !collection.showcase);
+      await onChanged();
+    } catch (error) {
+      setMessage(commandErrorMessage(error, "쇼케이스를 변경하지 못했습니다."));
+    }
+  }
+
+  async function removeCollection() {
+    if (!collection) return;
+    try {
+      await gateway.deleteCollection(collection.id);
+      setDeleteOpen(false);
+      await onChanged();
+      onExit();
+    } catch (error) {
+      setMessage(commandErrorMessage(error, "컬렉션을 삭제하지 못했습니다."));
+    }
+  }
 
   async function refresh() {
     setRefreshing(true);
@@ -305,9 +353,8 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
       {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
       <ReleaseWatchSummary events={releaseChanges} />
       {isManga ? (
-        <section className="collection-overlay__manga-detail" role="region" aria-label="만화 상세">
-          <div className="collection-overlay__manga-layout">
-            <main className="collection-overlay__manga-main">
+        <div className="collection-overlay__manga-layout" role="region" aria-label="만화 상세">
+            <div className="collection-overlay__manga-main">
               {volumes !== null && (
                 <CollectionVolumeGrid
                   volumes={volumes}
@@ -317,13 +364,12 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
                   onSelect={openVolume}
                 />
               )}
-            </main>
+            </div>
             <aside className="collection-overlay__manga-aside">
               {collection && <CollectionInfoPanel collection={collection} />}
               {providerMenu}
             </aside>
-          </div>
-        </section>
+        </div>
       ) : (
         <>
           <div className="collection-overlay__body">
@@ -396,6 +442,25 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
             setMessage(aladinResultMessage(result));
           }}
         />
+      )}
+      {editMode && (
+        <CollectionEditDialog
+          open
+          mode={editMode}
+          onClose={() => setEditMode(null)}
+          onSubmit={submitEdit}
+        />
+      )}
+      {deleteOpen && collection && (
+        <Dialog open title="컬렉션 삭제" onClose={() => setDeleteOpen(false)}>
+          <div className="collection-browser__delete">
+            <p>컬렉션 '{collection.name}'을 삭제합니다. 속한 자산은 라이브러리에 보존됩니다.</p>
+            <div className="ui-dialog__actions">
+              <Button type="button" onClick={() => setDeleteOpen(false)}>취소</Button>
+              <Button type="button" variant="danger" onClick={() => void removeCollection()}>삭제</Button>
+            </div>
+          </div>
+        </Dialog>
       )}
     </section>
   );
