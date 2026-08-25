@@ -85,15 +85,15 @@ Provider protocol logic must not move into `App.tsx`, `CollectionBrowser`, dialo
 
 ## 4. Collection data changes
 
-Game presentation needs three Collection fields not currently represented:
+Game presentation needs three Collection summary fields not currently represented:
 
 - `publisher`: nullable text;
 - `platforms`: nullable text containing the provider-normalized display list;
-- `selected_hero_artwork_id`: nullable foreign key to existing WorkArtwork.
+- `selectedHeroArtworkId`: nullable projection of the selected `hero` WorkArtwork.
 
-`selected_work_artwork_id` retains its current representative-cover role. Manga behavior and existing data remain compatible. Game cover/package uses `selected_work_artwork_id`; game hero uses `selected_hero_artwork_id`.
+`selectedWorkArtworkId` retains its current representative-cover projection from `WorkArtwork(kind='cover', selected=1)`. Manga behavior and existing data remain compatible. Game cover/package uses that projection; game hero uses the equivalent `WorkArtwork(kind='hero', selected=1)` projection.
 
-The migration adds the fields without rebuilding unrelated tables. Deleting a referenced hero artwork clears only `selected_hero_artwork_id`. It never deletes an Asset Library Asset.
+The migration adds only `publisher` and `platforms` to `collections` without rebuilding unrelated tables. The existing selected-per-kind WorkArtwork index already guarantees at most one selected cover and one selected hero per Collection, so adding a second selection FK would duplicate state. Deleting the selected hero artwork naturally makes `selectedHeroArtworkId` project as null. It never deletes an Asset Library Asset.
 
 The existing game fields keep these roles:
 
@@ -251,7 +251,7 @@ Backend coverage focuses on the real seams:
 - credential save/status/delete without value exposure;
 - atomic Collection, binding, cover, and hero apply with file cleanup on failure;
 - refresh preserving user values and artwork selections;
-- migration compatibility for the new fields and hero foreign key.
+- migration compatibility for `publisher` and `platforms`, plus selected-hero projection from WorkArtwork.
 
 Frontend coverage focuses on:
 
