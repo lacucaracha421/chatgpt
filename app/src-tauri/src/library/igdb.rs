@@ -49,7 +49,14 @@ impl fmt::Debug for IgdbTokenCache {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("IgdbTokenCache")
-            .field("configured", &self.inner.lock().map(|value| value.is_some()).unwrap_or(false))
+            .field(
+                "configured",
+                &self
+                    .inner
+                    .lock()
+                    .map(|value| value.is_some())
+                    .unwrap_or(false),
+            )
             .finish()
     }
 }
@@ -77,10 +84,27 @@ impl IgdbTokenCache {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub(crate) struct IgdbRequestLimiter {
+    last_request: Arc<Mutex<Option<Instant>>>,
+}
+
+impl IgdbRequestLimiter {
+    fn reserve_at(&self, now: Instant) -> Duration {
+        let mut last = self
+            .last_request
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let wait = minimum_request_wait(*last, now);
+        *last = Some(now + wait);
+        wait
+    }
+}
+
 pub struct IgdbClient {
     agent: ureq::Agent,
     token_cache: IgdbTokenCache,
-    last_game_request: Arc<Mutex<Option<Instant>>>,
+    request_limiter: IgdbRequestLimiter,
 }
 
 impl Default for IgdbClient {
@@ -94,6 +118,13 @@ impl IgdbClient {
         Self::default()
     }
     pub(crate) fn with_cache(token_cache: IgdbTokenCache) -> Self {
+        Self::with_cache_and_limiter(token_cache, IgdbRequestLimiter::default())
+    }
+
+    pub(crate) fn with_cache_and_limiter(
+        token_cache: IgdbTokenCache,
+        request_limiter: IgdbRequestLimiter,
+    ) -> Self {
         Self {
             agent: ureq::Agent::config_builder()
                 .https_only(true)
@@ -102,7 +133,7 @@ impl IgdbClient {
                 .build()
                 .into(),
             token_cache,
-            last_game_request: Arc::new(Mutex::new(None)),
+            request_limiter,
         }
     }
     pub fn search(
@@ -187,16 +218,15 @@ impl IgdbClient {
     }
 
     fn wait_for_game_request(&self) {
-        let mut last = self
-            .last_game_request
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let now = Instant::now();
-        let wait = minimum_request_wait(*last, now);
+        let wait = self.request_limiter.reserve_at(Instant::now());
         if !wait.is_zero() {
             thread::sleep(wait);
         }
-        *last = Some(Instant::now());
+    }
+
+    #[cfg(test)]
+    fn reserve_request_at(&self, now: Instant) -> Duration {
+        self.request_limiter.reserve_at(now)
     }
 }
 
@@ -528,6 +558,21 @@ mod tests {
         assert_eq!(
             super::minimum_request_wait(Some(last), last + std::time::Duration::from_millis(300)),
             std::time::Duration::ZERO
+        );
+    }
+
+    #[test]
+    fn separately_constructed_clients_share_the_request_limiter_state() {
+        let cache = super::IgdbTokenCache::default();
+        let limiter = super::IgdbRequestLimiter::default();
+        let first = super::IgdbClient::with_cache_and_limiter(cache.clone(), limiter.clone());
+        let second = super::IgdbClient::with_cache_and_limiter(cache, limiter.clone());
+        let now = std::time::Instant::now();
+
+        assert_eq!(first.reserve_request_at(now), std::time::Duration::ZERO);
+        assert_eq!(
+            second.reserve_request_at(now + std::time::Duration::from_millis(100)),
+            std::time::Duration::from_millis(150)
         );
     }
 }

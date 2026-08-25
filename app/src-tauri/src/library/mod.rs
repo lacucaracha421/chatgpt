@@ -101,6 +101,7 @@ pub struct Library {
     database_lock: Arc<Mutex<()>>,
     catalog_lookup_cache: Arc<Mutex<Option<online_catalog::CatalogLookupCache>>>,
     igdb_token_cache: igdb::IgdbTokenCache,
+    igdb_request_limiter: igdb::IgdbRequestLimiter,
 }
 
 pub(crate) struct LockedConnection<'a> {
@@ -154,6 +155,7 @@ impl Library {
             database_lock: Arc::new(Mutex::new(())),
             catalog_lookup_cache: Arc::new(Mutex::new(None)),
             igdb_token_cache: igdb::IgdbTokenCache::default(),
+            igdb_request_limiter: igdb::IgdbRequestLimiter::default(),
         };
         library.backfill_legacy_collection_kinds()?;
         library.normalize_showcase_orders()?;
@@ -170,7 +172,10 @@ impl Library {
     }
 
     pub(crate) fn igdb_client(&self) -> igdb::IgdbClient {
-        igdb::IgdbClient::with_cache(self.igdb_token_cache.clone())
+        igdb::IgdbClient::with_cache_and_limiter(
+            self.igdb_token_cache.clone(),
+            self.igdb_request_limiter.clone(),
+        )
     }
 
     pub(crate) fn connection(&self) -> Result<LockedConnection<'_>, LibraryError> {
