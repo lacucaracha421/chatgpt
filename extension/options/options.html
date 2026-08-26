@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Lakomics X Collector 설정</title>
+    <title>Lakomics Radial 설정</title>
     <link rel="stylesheet" href="options.css">
     <script src="../src/layout.js" defer></script>
     <script src="../src/options-connection.js" defer></script>
@@ -11,20 +11,112 @@
   </head>
   <body>
     <main>
-      <h1>Lakomics X Collector</h1>
+      <h1>Lakomics Radial</h1>
+
       <section aria-labelledby="connection-title">
         <h2 id="connection-title">Lakomics 연결</h2>
         <label for="connection-token">연결 키</label>
         <div class="row">
-          <input id="connection-token" type="password" autocomplete="off" spellcheck="false">
+          <input id="connection-token" type="password" autocomplete="off" spellcheck="false" placeholder="저장된 키가 있으면 비워 두세요">
           <button id="refresh-classifications" type="button">저장하고 연결</button>
         </div>
         <p id="connection-status" role="status"></p>
+
+        <label class="check-row" for="remote-enabled">
+          <input id="remote-enabled" type="checkbox">
+          <span>Remote Lakomics · Tailscale 사용</span>
+        </label>
+        <label for="remote-base-url">Remote 주소</label>
+        <input id="remote-base-url" type="url" autocomplete="off" spellcheck="false" placeholder="https://laku.tail0aa1a3.ts.net">
+        <div class="row">
+          <button id="save-test-remote" type="button">저장하고 원격 연결 테스트</button>
+        </div>
+        <p id="remote-status" role="status"></p>
       </section>
+
+      <section aria-labelledby="translate-title">
+        <h2 id="translate-title">X Translate</h2>
+        <label class="check-row" for="x-translate-enabled">
+          <input id="x-translate-enabled" type="checkbox">
+          <span>X에서 번역 버튼(訳) 사용</span>
+        </label>
+        <p class="setting-note">AI X Translate Lite v1.4.14 OpenRouter판을 내장합니다. API 제공자·키·모델은 X 화면의 訳 패널에서 설정합니다.</p>
+        <p id="x-translate-status" role="status"></p>
+      </section>
+
+      <section aria-labelledby="mobile-title">
+        <h2 id="mobile-title">모바일 도넛</h2>
+        <div class="settings-grid compact-grid">
+          <label for="touch-long-press">롱프레스 시간 (ms)</label>
+          <input id="touch-long-press" type="number" min="220" max="900" step="10">
+          <label class="check-row" for="suppress-download-ui">
+            <input id="suppress-download-ui" type="checkbox">
+            <span>다운로드 완료 UI 숨기기</span>
+          </label>
+          <label class="check-row" for="auto-like-on-save">
+            <input id="auto-like-on-save" type="checkbox">
+            <span>Lakomics 저장 시 X 좋아요</span>
+          </label>
+          <p class="setting-note">현재 화면에 원본 게시물이 남아 있을 때만 자동으로 좋아요를 누릅니다. 이미 좋아요한 게시물은 건드리지 않습니다.</p>
+        </div>
+        <div class="row">
+          <button id="save-preferences" type="button">모바일 설정 저장</button>
+        </div>
+        <p id="preferences-status" role="status"></p>
+      </section>
+
       <section aria-labelledby="layout-title">
-        <h2 id="layout-title">방사형 메뉴 배치</h2>
-        <div id="layout-editor" aria-live="polite">분류 목록을 새로고침하면 편집기를 준비합니다.</div>
+        <h2 id="layout-title">PC · 방사형 메뉴 배치</h2>
+        <div id="layout-editor" aria-live="polite">Lakomics에 연결하면 편집기를 준비합니다.</div>
       </section>
+
+      <details class="advanced-block">
+        <summary>고급 · 복구 설정</summary>
+        <div class="advanced-content">
+          <section aria-labelledby="fallback-title">
+            <h2 id="fallback-title">오프라인 저장</h2>
+            <p class="setting-note">Lakomics에 연결되지 않을 때 브라우저의 기본 Download 폴더 아래에 저장합니다. Android의 /storage/emulated/0 같은 절대 경로는 확장 API로 지정할 수 없습니다.</p>
+            <label for="download-folder">Download 아래 하위 폴더</label>
+            <input id="download-folder" type="text" autocomplete="off" spellcheck="false" placeholder="Lakomics images">
+            <p class="setting-note">예: <code>Lakomics images</code> → <code>내장 저장공간/Download/Lakomics images</code></p>
+          </section>
+
+          <section aria-labelledby="connection-backup-title">
+            <h2 id="connection-backup-title">연결 설정 백업</h2>
+            <p class="setting-note">완전 재설치로 저장소가 초기화될 때만 사용합니다. JSON에는 Lakomics 연결 키가 평문으로 포함됩니다.</p>
+            <textarea id="connection-backup-json" rows="7" spellcheck="false" placeholder="연결 설정 백업 JSON"></textarea>
+            <div class="row">
+              <button id="export-connection-backup" type="button">연결 설정 내보내기</button>
+              <button id="import-connection-backup" type="button">연결 설정 가져오기</button>
+            </div>
+            <p id="connection-backup-status" role="status"></p>
+          </section>
+
+          <section aria-labelledby="mobile-tree-title">
+            <h2 id="mobile-tree-title">오프라인 도넛 분류</h2>
+            <p class="setting-note">PC에 연결되지 않았을 때만 쓰는 로컬 분류입니다. 평소에는 PC Lakomics 분류가 우선됩니다.</p>
+            <div class="row">
+              <label for="local-primary-select">편집할 1차 분류</label>
+              <select id="local-primary-select"></select>
+              <label for="local-primary-name">1차 이름</label>
+              <input id="local-primary-name" type="text" maxlength="80" autocomplete="off">
+            </div>
+            <div id="local-secondary-grid" class="secondary-slot-grid" aria-live="polite"></div>
+            <div class="row">
+              <button id="save-local-tree" type="button">도넛 저장</button>
+              <button id="reset-local-tree" type="button">기본값</button>
+              <button id="copy-app-tree" type="button">PC 분류에서 복사</button>
+            </div>
+            <p id="local-tree-status" role="status"></p>
+            <label for="local-tree-json">오프라인 도넛 JSON</label>
+            <textarea id="local-tree-json" rows="10" spellcheck="false"></textarea>
+            <div class="row">
+              <button id="export-local-tree" type="button">JSON 내보내기</button>
+              <button id="import-local-tree" type="button">JSON 가져오기</button>
+            </div>
+          </section>
+        </div>
+      </details>
     </main>
   </body>
 </html>

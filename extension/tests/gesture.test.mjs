@@ -19,6 +19,14 @@ const tree = [
 ];
 const layout = context.LakomicsRadial.resetLayout(tree);
 
+
+test("touch sessions can open immediately after a long press without a drag", () => {
+  const session = createSession({ x: 100, y: 100 }, tree, layout, [], { openImmediately: true });
+  assert.equal(session.snapshot().opened, true);
+  session.move(pointForPrimarySlot(0), 0);
+  assert.deepEqual(plain(session.release()), { type: "select", classificationId: "parent" });
+});
+
 test("preserves a click below twelve pixels and opens at the threshold", () => {
   const session = createSession({ x: 100, y: 100 }, tree, layout);
   assert.equal(session.move({ x: 111, y: 100 }, 0).opened, false);
@@ -41,6 +49,24 @@ test("release before dwell selects a primary and dwell expands secondary ring", 
   assert.equal(afterDwell.secondaryLevel.slots.length, 6);
   assert.equal(afterDwell.secondaryLevel.slots[0].id, "child-a");
   assert.equal(afterDwell.secondaryLevel.slots[1].id, "child-b");
+});
+
+
+test("release on a primary still selects that primary after its dwell opened children", () => {
+  const session = createSession({ x: 100, y: 100 }, tree, layout);
+  session.move(pointForPrimarySlot(0), 0);
+  session.tick(300);
+  assert.equal(session.snapshot().expandedParentId, "parent");
+  assert.deepEqual(plain(session.release()), { type: "select", classificationId: "parent" });
+});
+
+test("touch activation opens a parent immediately, then selects a secondary child", () => {
+  const session = createSession({ x: 100, y: 100 }, tree, layout, [], { openImmediately: true });
+  session.move(pointForPrimarySlot(0), 0);
+  assert.deepEqual(plain(session.activate()), { type: "expand", classificationId: "parent" });
+  assert.equal(session.snapshot().expandedParentId, "parent");
+  session.move(pointForSecondarySlot(0, 0, 6, 6), 1);
+  assert.deepEqual(plain(session.activate()), { type: "select", classificationId: "child-a" });
 });
 
 test("secondary ring hit-test selects a child on release", () => {
@@ -138,3 +164,43 @@ function pointForSecondarySlot(index, primaryIndex, primaryCount, secondaryCount
 function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
+
+test("mobile confirm mode requires the center after selecting a primary leaf", () => {
+  const entries = [{ id: "leaf", kind: "tag", name: "Leaf", parentId: null }];
+  const leafLayout = context.LakomicsRadial.resetLayout(entries);
+  const session = createSession(
+    { x: 100, y: 100 }, entries, leafLayout, [],
+    { openImmediately: true, centerSelectsExpandedParent: true, confirmSelectionWithCenter: true },
+  );
+  session.move(pointForPrimarySlot(0, 6), 0);
+  assert.deepEqual(plain(session.activate()), { type: "pending", classificationId: "leaf" });
+  assert.equal(session.snapshot().pendingClassificationId, "leaf");
+  session.move({ x: 100, y: 100 }, 1);
+  assert.deepEqual(plain(session.activate()), { type: "select", classificationId: "leaf" });
+});
+
+test("mobile confirm mode expands a parent, lets a child become pending, and saves only from center", () => {
+  const session = createSession(
+    { x: 100, y: 100 }, tree, layout, [],
+    { openImmediately: true, centerSelectsExpandedParent: true, confirmSelectionWithCenter: true },
+  );
+  session.move(pointForPrimarySlot(0), 0);
+  assert.deepEqual(plain(session.activate()), { type: "expand", classificationId: "parent" });
+  assert.equal(session.snapshot().pendingClassificationId, "parent");
+  session.move(pointForSecondarySlot(0, 0, 6, 6), 1);
+  assert.deepEqual(plain(session.activate()), { type: "pending", classificationId: "child-a" });
+  assert.equal(session.snapshot().pendingClassificationId, "child-a");
+  session.move({ x: 100, y: 100 }, 2);
+  assert.deepEqual(plain(session.activate()), { type: "select", classificationId: "child-a" });
+});
+
+test("mobile confirm mode saves the expanded parent from center when no child replaces it", () => {
+  const session = createSession(
+    { x: 100, y: 100 }, tree, layout, [],
+    { openImmediately: true, centerSelectsExpandedParent: true, confirmSelectionWithCenter: true },
+  );
+  session.move(pointForPrimarySlot(0), 0);
+  assert.deepEqual(plain(session.activate()), { type: "expand", classificationId: "parent" });
+  session.move({ x: 100, y: 100 }, 1);
+  assert.deepEqual(plain(session.activate()), { type: "select", classificationId: "parent" });
+});

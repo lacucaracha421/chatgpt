@@ -1,14 +1,16 @@
 (() => {
   "use strict";
 
-  function createCollectorController({ send, status, snapshot = () => {}, close = () => {} }) {
+  function createCollectorController({ send, status, snapshot = () => {}, close = () => {}, saved = () => {} }) {
     let active = null;
     let failedPayload = null;
 
-    function begin(candidate, origin, entries, layout, pinnedIds = []) {
+    function begin(candidate, origin, entries, layout, pinnedIds = [], classificationSource = "app", options = {}) {
       active = {
         candidate,
-        session: globalThis.LakomicsGesture.createSession(origin, entries, layout, pinnedIds),
+        entries,
+        classificationSource,
+        session: globalThis.LakomicsGesture.createSession(origin, entries, layout, pinnedIds, options),
       };
       return active.session.snapshot();
     }
@@ -30,17 +32,55 @@
     async function release() {
       if (!active) return { type: "idle" };
       const current = active;
+      const action = current.session.release();
       active = null;
       close();
-      const action = current.session.release();
       if (action.type !== "select") return action;
-      const payload = {
+      return submit(payloadFor(current, action.classificationId));
+    }
+
+    function activate() {
+      if (!active) return { type: "idle" };
+      const current = active;
+      const action = current.session.activate();
+      if (action.type === "expand" || action.type === "pending") {
+        snapshot(current.session.snapshot());
+        return action;
+      }
+      active = null;
+      close();
+      if (action.type === "select") void submit(payloadFor(current, action.classificationId));
+      return action;
+    }
+
+    function payloadFor(current, classificationId) {
+      const classification = current.entries.find((entry) => entry.id === classificationId);
+      return {
         source: "x",
-        mediaUrl: current.candidate.mediaUrl,
+        mediaType: current.candidate.type ?? "image",
+        mediaUrl: current.candidate.mediaUrl ?? null,
         sourceUrl: current.candidate.sourceUrl,
-        classificationId: action.classificationId,
+        author: current.candidate.author ?? null,
+        postId: current.candidate.postId ?? null,
+        mediaIndex: current.candidate.mediaIndex ?? null,
+        classificationId,
+        classificationName: classification?.name ?? "기타",
+        classificationPath: classificationPath(current.entries, classificationId),
+        classificationSource: current.classificationSource,
       };
-      return submit(payload);
+    }
+
+    function classificationPath(entries, classificationId) {
+      const byId = new Map(entries.map((entry) => [entry.id, entry]));
+      const names = [];
+      const seen = new Set();
+      let current = byId.get(classificationId) ?? null;
+      while (current && !seen.has(current.id) && names.length < 8) {
+        seen.add(current.id);
+        if (current.name) names.unshift(current.name);
+        current = current.parentId ? byId.get(current.parentId) ?? null : null;
+      }
+      return names;
     }
 
     function cancel() {
@@ -54,7 +94,7 @@
     }
 
     async function submit(payload) {
-      status("Lakomics로 수집 중", false);
+      status("저장 중…", false, "progress");
       let response;
       try {
         response = await send(payload);
@@ -65,22 +105,33 @@
       if (response.ok) failedPayload = null;
       else if (feedback.retry) failedPayload = { ...payload };
       else failedPayload = null;
-      status(feedback.message, feedback.retry);
+      status(feedback.message, feedback.retry, feedback.kind);
+      if (isSavedResponse(response)) saved(payload, response);
       return response;
     }
 
-    return { begin, move, tick, release, cancel, retry };
+    return { begin, move, tick, release, activate, cancel, retry };
+  }
+
+  function isSavedResponse(response) {
+    return Boolean(response?.ok) && response?.status !== "review_pending";
   }
 
   function feedbackFor(response) {
     if (response?.ok) {
+      if (response.status === "downloaded" && response.fallbackCode) {
+        return { message: "Lakomics 연결 불가 · 기기에 저장됨", retry: false, kind: "success" };
+      }
       const messages = {
         added: "수집 완료",
         duplicate_tagged: "기존 자산에 분류 추가",
         duplicate_unchanged: "이미 저장됨",
         review_pending: "유사 이미지 검토 대기",
+        downloaded: "다운로드 완료",
+        duplicate_recent: "방금 저장한 미디어입니다",
+        metadata_repaired: "JSON 저장 완료",
       };
-      return { message: messages[response.status] ?? "수집 완료", retry: false };
+      return { message: messages[response.status] ?? "저장 완료", retry: false, kind: "success" };
     }
     const errors = {
       app_offline: ["Lakomics를 실행해 주세요", true],
@@ -88,14 +139,211 @@
       unauthorized: ["확장 프로그램 설정에서 연결 키를 확인해 주세요", false],
       library_not_open: ["Lakomics에서 라이브러리를 열어 주세요", true],
       classification_not_found: ["분류를 새로고침하고 다시 선택해 주세요", false],
-      download_failed: ["이미지를 다운로드하지 못했습니다", true],
-      download_too_large: ["이미지가 너무 큽니다", false],
+      download_failed: ["미디어를 다운로드하지 못했습니다", true],
+      metadata_download_failed: ["미디어는 저장됐지만 JSON 저장에 실패했습니다", true],
+      video_info_failed: ["X 영상 정보를 가져오지 못했습니다", true],
+      video_unavailable: ["이 게시물의 영상을 가져올 수 없습니다", false],
+      pc_video_api_unsupported: ["PC Lakomics 앱의 영상 수집 API 업데이트가 필요합니다", false],
+      downloads_api_unavailable: ["이 브라우저는 확장 다운로드 API를 지원하지 않습니다", false],
+      invalid_media_url: ["미디어 주소를 읽지 못했습니다", false],
+      download_too_large: ["미디어가 너무 큽니다", false],
       unsupported_image: ["지원하지 않는 이미지입니다", false],
       request_failed: ["수집 요청에 실패했습니다", true],
       worker_failed: ["확장 프로그램 요청에 실패했습니다", true],
     };
-    const [message, retry] = errors[response?.code] ?? ["수집 요청에 실패했습니다", true];
-    return { message, retry };
+    const [message, retry] = errors[response?.code] ?? ["저장 요청에 실패했습니다", true];
+    return { message, retry, kind: "error" };
+  }
+
+  const RADIAL_VIEWPORT_EXTENT_PX = 220;
+  const RADIAL_VIEWPORT_MARGIN_PX = 8;
+
+  function clampRadialOrigin(origin, viewportWidth, viewportHeight, extent = RADIAL_VIEWPORT_EXTENT_PX, margin = RADIAL_VIEWPORT_MARGIN_PX) {
+    const width = Number(viewportWidth);
+    const height = Number(viewportHeight);
+    if (!origin || !Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+      return origin ? { ...origin } : { x: 0, y: 0 };
+    }
+    const inset = Math.max(0, Number(extent) || 0) + Math.max(0, Number(margin) || 0);
+    return {
+      x: clampAxis(origin.x, width, inset),
+      y: clampAxis(origin.y, height, inset),
+    };
+  }
+
+  function clampAxis(value, size, inset) {
+    if (size <= inset * 2) return size / 2;
+    return Math.min(size - inset, Math.max(inset, value));
+  }
+
+  function currentViewportSize() {
+    const viewport = window.visualViewport;
+    return {
+      width: viewport?.width ?? window.innerWidth,
+      height: viewport?.height ?? window.innerHeight,
+    };
+  }
+
+
+  function normalizePostId(value) {
+    const text = String(value ?? "").trim();
+    return /^\d+$/.test(text) ? text : "";
+  }
+
+  function findTweetArticleForPost(root, postId) {
+    const targetId = normalizePostId(postId);
+    if (!targetId) return null;
+    const articles = root?.querySelectorAll?.('article[data-testid="tweet"]') ?? [];
+    for (const article of articles) {
+      const links = article?.querySelectorAll?.('a[href*="/status/"]') ?? [];
+      for (const link of links) {
+        const href = link?.getAttribute?.("href") || link?.href || "";
+        const match = String(href).match(/\/status\/(\d+)/);
+        if (match?.[1] === targetId) return article;
+      }
+    }
+    return null;
+  }
+
+  const X_FAVORITE_TWEET_QUERY_ID = "lI07N6Otwv1PhnEgXILM7A";
+  const X_WEB_BEARER = "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
+
+  function autoLikeVisiblePost(root, postId) {
+    const article = findTweetArticleForPost(root, postId);
+    if (!article) return { ok: false, status: "not_found" };
+    if (article.querySelector?.('[data-testid="unlike"]')) {
+      return { ok: true, status: "already_liked" };
+    }
+    const likeNode = article.querySelector?.('[data-testid="like"]');
+    const likeButton = likeNode?.closest?.('button, [role="button"]') ?? likeNode;
+    if (!likeButton || typeof likeButton.click !== "function") {
+      return { ok: false, status: "button_missing" };
+    }
+    try {
+      // Use the closest clickable control rather than assuming data-testid sits
+      // on the actual button. X moves the test id between wrapper/button nodes.
+      likeButton.click();
+      return { ok: true, status: "dom_click_sent" };
+    } catch {
+      return { ok: false, status: "click_failed" };
+    }
+  }
+
+  function readCookieValue(cookieString, name) {
+    const target = String(name ?? "").trim();
+    if (!target) return "";
+    for (const part of String(cookieString ?? "").split(";")) {
+      const separator = part.indexOf("=");
+      if (separator < 0) continue;
+      const key = part.slice(0, separator).trim();
+      if (key !== target) continue;
+      return part.slice(separator + 1).trim();
+    }
+    return "";
+  }
+
+  function safeXOrigin(value) {
+    try {
+      const url = new URL(String(value || "https://x.com"));
+      if (url.protocol === "https:" && ["x.com", "twitter.com"].includes(url.hostname)) return url.origin;
+    } catch {}
+    return "https://x.com";
+  }
+
+  async function favoriteTweetViaWebApi({
+    postId,
+    fetchFn = globalThis.fetch,
+    cookieString = globalThis.document?.cookie ?? "",
+    origin = globalThis.location?.origin ?? "https://x.com",
+    language = globalThis.navigator?.language ?? "en",
+  } = {}) {
+    const targetId = normalizePostId(postId);
+    if (!targetId) return { ok: false, status: "invalid_post_id" };
+    if (typeof fetchFn !== "function") return { ok: false, status: "fetch_unavailable" };
+    const csrf = readCookieValue(cookieString, "ct0");
+    if (!csrf) return { ok: false, status: "csrf_missing" };
+
+    const endpoint = `${safeXOrigin(origin)}/i/api/graphql/${X_FAVORITE_TWEET_QUERY_ID}/FavoriteTweet`;
+    let response;
+    try {
+      response = await fetchFn(endpoint, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          accept: "*/*",
+          authorization: X_WEB_BEARER,
+          "content-type": "application/json",
+          "x-csrf-token": csrf,
+          "x-twitter-active-user": "yes",
+          "x-twitter-auth-type": "OAuth2Session",
+          "x-twitter-client-language": String(language || "en").split("-")[0] || "en",
+        },
+        body: JSON.stringify({
+          variables: { tweet_id: targetId },
+          queryId: X_FAVORITE_TWEET_QUERY_ID,
+        }),
+      });
+    } catch {
+      return { ok: false, status: "api_network_failed" };
+    }
+
+    if (!response?.ok) {
+      return { ok: false, status: "api_http_failed", httpStatus: Number(response?.status || 0) };
+    }
+
+    let data = null;
+    try {
+      data = await response.json();
+    } catch {
+      try {
+        const raw = await response.text();
+        data = raw ? JSON.parse(raw) : null;
+      } catch {}
+    }
+    if (data?.data?.favorite_tweet === "Done" || data?.data?.favorite_tweet?.result === "Done") {
+      return { ok: true, status: "api_liked" };
+    }
+    return { ok: false, status: "api_unconfirmed" };
+  }
+
+  function delay(ms) {
+    return new Promise((resolve) => globalThis.setTimeout(resolve, ms));
+  }
+
+  async function autoLikePost({
+    root = globalThis.document,
+    postId,
+    fetchFn = globalThis.fetch,
+    cookieString = globalThis.document?.cookie ?? "",
+    origin = globalThis.location?.origin ?? "https://x.com",
+    language = globalThis.navigator?.language ?? "en",
+    waitMs = 420,
+  } = {}) {
+    const targetId = normalizePostId(postId);
+    if (!targetId) return { ok: false, status: "invalid_post_id" };
+
+    const dom = autoLikeVisiblePost(root, targetId);
+    if (dom.status === "already_liked") return { ok: true, status: "already_liked", method: "dom" };
+    if (dom.status === "dom_click_sent") {
+      await delay(Math.max(0, Number(waitMs) || 0));
+      const refreshedArticle = findTweetArticleForPost(root, targetId);
+      if (refreshedArticle?.querySelector?.('[data-testid="unlike"]')) {
+        return { ok: true, status: "dom_liked", method: "dom" };
+      }
+    }
+
+    const api = await favoriteTweetViaWebApi({ postId: targetId, fetchFn, cookieString, origin, language });
+    return { ...api, method: api.ok ? "api" : "api_fallback", domStatus: dom.status };
+  }
+
+  function autoLikeFeedback(result) {
+    if (result?.status === "already_liked") return "저장 완료 · 이미 좋아요";
+    if (result?.ok) return "저장 완료 · X 좋아요 완료";
+    if (result?.status === "csrf_missing") return "저장 완료 · 좋아요 실패(ct0 없음)";
+    if (result?.status === "api_http_failed") return `저장 완료 · 좋아요 실패(HTTP ${result.httpStatus || "?"})`;
+    if (result?.status === "api_unconfirmed") return "저장 완료 · 좋아요 응답 확인 실패";
+    if (result?.status === "api_network_failed") return "저장 완료 · 좋아요 요청 실패";
+    return `저장 완료 · 좋아요 실패(${result?.status || "unknown"})`;
   }
 
   function createClickSuppressor() {
@@ -104,6 +352,10 @@
       arm() { armed = true; },
       consume(event) {
         if (!armed) return false;
+        // Programmatic extension actions (for example auto-like button.click())
+        // are untrusted DOM events. Do not consume them as the post-radial
+        // click-through guard is only meant for the user's real pointer click.
+        if (event?.isTrusted === false) return false;
         armed = false;
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -113,136 +365,362 @@
   }
 
   if (globalThis.__LAKOMICS_TEST__) {
-    globalThis.LakomicsContent = { createClickSuppressor, createCollectorController, feedbackFor };
+    globalThis.LakomicsContent = {
+      X_FAVORITE_TWEET_QUERY_ID,
+      autoLikeFeedback,
+      autoLikePost,
+      autoLikeVisiblePost,
+      favoriteTweetViaWebApi,
+      readCookieValue,
+      safeXOrigin,
+      createClickSuppressor,
+      createCollectorController,
+      feedbackFor,
+      findTweetArticleForPost,
+      isSavedResponse,
+      normalizePostId,
+      clampRadialOrigin,
+    };
     return;
   }
 
   installContentScript();
 
+  function runtimeMessage(message) {
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (value) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+      try {
+        const maybePromise = chrome.runtime.sendMessage(message, (response) => {
+          const lastError = chrome.runtime?.lastError;
+          if (lastError) {
+            finish({ ok: false, code: "worker_failed", message: lastError.message });
+            return;
+          }
+          finish(response);
+        });
+        if (maybePromise && typeof maybePromise.then === "function") {
+          maybePromise.then(finish).catch((error) => {
+            finish({ ok: false, code: "worker_failed", message: String(error?.message ?? error ?? "") });
+          });
+        }
+      } catch (error) {
+        finish({ ok: false, code: "worker_failed", message: String(error?.message ?? error ?? "") });
+      }
+    });
+  }
+
   function installContentScript() {
     let pointer = null;
+    let menuContext = null;
     let overlay = null;
     let dwellTimer = null;
+    let longPressTimer = null;
     let resultToast = null;
     let resultTimer = null;
-    let resultAnchor = null;
+    let clickShield = null;
+    let clickShieldTimer = null;
+    let preferences = globalThis.LakomicsDefaults.normalizePreferences();
     const clickSuppressor = createClickSuppressor();
     const controller = createCollectorController({
-      send: (payload) => chrome.runtime.sendMessage({ type: "ingestion:create", payload }),
+      send: (payload) => runtimeMessage({ type: "ingestion:create", payload }),
       status: showStatus,
       snapshot: renderSnapshot,
       close: closeRadial,
+      saved: (payload, response) => {
+        if (preferences.autoLikeOnSave !== false && payload?.postId) {
+          void autoLikePost({
+            root: document,
+            postId: payload.postId,
+            fetchFn: globalThis.fetch?.bind?.(globalThis) ?? globalThis.fetch,
+            cookieString: document.cookie,
+            origin: location.origin,
+            language: navigator.language,
+          }).then((likeResult) => {
+            showStatus(autoLikeFeedback(likeResult), false, likeResult.ok ? "success" : "progress");
+          }).catch(() => {
+            showStatus("저장 완료 · 좋아요 요청 실패", false, "progress");
+          });
+        }
+        if (payload?.mediaType !== "image" || !payload.mediaUrl) return;
+        globalThis.LakomicsXGalleryRuntime?.markSaved?.(payload.mediaUrl, {
+          status: response?.status,
+          author: payload.author ?? null,
+          postId: payload.postId ?? null,
+          sourceUrl: payload.sourceUrl ?? null,
+        });
+      },
     });
+
+    void runtimeMessage({ type: "settings:get" })
+      .then((response) => {
+        if (response?.ok) preferences = globalThis.LakomicsDefaults.normalizePreferences(response.preferences);
+      })
+      .catch(() => {});
 
     document.addEventListener("pointerdown", onPointerDown, true);
     document.addEventListener("pointermove", onPointerMove, true);
     document.addEventListener("pointerup", onPointerUp, true);
-    document.addEventListener("pointercancel", cancelPointer, true);
+    document.addEventListener("pointercancel", onPointerCancel, true);
+    document.addEventListener("contextmenu", onContextMenu, true);
+    document.addEventListener("selectstart", onSelectStart, true);
     document.addEventListener("click", (event) => clickSuppressor.consume(event), true);
     document.addEventListener("dragstart", onDragStart, true);
     document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") cancelPointer();
+      if (event.key === "Escape") cancelAll();
     }, true);
-    window.addEventListener("blur", cancelPointer);
+    window.addEventListener("blur", () => {
+      if (menuContext?.input === "mouse") cancelAll();
+    });
 
     function onPointerDown(event) {
-      if (pointer || event.button !== 0 || event.pointerType !== "mouse") return;
+      if (pointer) return;
+
+      if (menuContext?.state === "touch-held") {
+        if (!pointerInput(event)) return;
+        setTouchGuard(true);
+        pointer = {
+          id: event.pointerId,
+          input: "touch-select",
+          latest: pointFromEvent(event),
+          latestTime: event.timeStamp,
+        };
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        scheduleDwell(controller.move(pointer.latest, pointer.latestTime));
+        return;
+      }
+
+      const input = pointerInput(event);
+      if (!input) return;
       const candidate = globalThis.LakomicsXSource.findCandidate(event.target);
       if (!candidate) return;
+
+      const origin = pointFromEvent(event);
       pointer = {
         id: event.pointerId,
+        input,
         candidate,
-        origin: { x: event.clientX, y: event.clientY },
-        latest: { x: event.clientX, y: event.clientY },
+        origin,
+        latest: origin,
         latestTime: event.timeStamp,
         thresholdCrossed: false,
+        longPressReady: false,
         started: false,
         classifications: null,
       };
-      resultAnchor = candidate.image;
-      void chrome.runtime.sendMessage({ type: "classifications:get" })
-        .catch(() => ({ ok: false, code: "worker_failed" }))
-        .then((response) => {
-          if (!pointer || pointer.candidate !== candidate) return;
-          if (!response.ok) {
-            if (pointer.thresholdCrossed) showStatus(feedbackFor(response).message, false);
-            cancelPointer();
-            return;
-          }
-          pointer.classifications = response;
-          startControllerIfReady();
-        });
+
+      void loadClassifications(candidate);
+
+      if (input === "touch") {
+        setTouchGuard(true);
+        longPressTimer = window.setTimeout(() => {
+          longPressTimer = null;
+          if (!pointer || pointer.candidate !== candidate || pointer.input !== "touch") return;
+          pointer.longPressReady = true;
+          pointer.thresholdCrossed = true;
+          candidate.element.setPointerCapture?.(pointer.id);
+          renderLoading(pointer.origin, "분류 불러오는 중…");
+          startControllerIfReady(true);
+        }, preferences.touchLongPressMs);
+      }
     }
 
     function onPointerMove(event) {
       if (!pointer || event.pointerId !== pointer.id) return;
-      pointer.latest = { x: event.clientX, y: event.clientY };
+      pointer.latest = pointFromEvent(event);
       pointer.latestTime = event.timeStamp;
-      if (!pointer.thresholdCrossed
+
+      if (pointer.input === "touch-select") {
+        event.preventDefault();
+        event.stopPropagation();
+        scheduleDwell(controller.move(pointer.latest, pointer.latestTime));
+        return;
+      }
+
+      if (pointer.input === "touch" && !pointer.longPressReady) {
+        if (globalThis.LakomicsGesture.distance(pointer.origin, pointer.latest) >= globalThis.LakomicsGesture.TOUCH_CANCEL_DISTANCE_PX) {
+          clearLongPressTimer();
+          pointer = null;
+          setTouchGuard(false);
+        }
+        return;
+      }
+
+      if (pointer.input === "mouse" && !pointer.thresholdCrossed
         && globalThis.LakomicsGesture.distance(pointer.origin, pointer.latest) >= globalThis.LakomicsGesture.OPEN_DISTANCE_PX) {
         pointer.thresholdCrossed = true;
-        pointer.candidate.image.setPointerCapture?.(pointer.id);
-        renderLoading(pointer.origin);
+        pointer.candidate.element.setPointerCapture?.(pointer.id);
+        renderLoading(pointer.origin, "분류 불러오는 중…");
       }
+
       if (!pointer.thresholdCrossed) return;
       event.preventDefault();
       event.stopPropagation();
-      startControllerIfReady();
-      if (pointer.started) scheduleDwell(controller.move(pointer.latest, pointer.latestTime));
+      startControllerIfReady(pointer.input === "touch");
+      if (pointer?.started) scheduleDwell(controller.move(pointer.latest, pointer.latestTime));
     }
 
     function onPointerUp(event) {
       if (!pointer || event.pointerId !== pointer.id) return;
-      if (!pointer.thresholdCrossed) {
+
+      if (pointer.input === "touch-select") {
+        clickSuppressor.arm();
+        event.preventDefault();
+        event.stopImmediatePropagation();
         pointer = null;
+        clearDwellTimer();
+        const action = controller.activate();
+        if (action.type === "expand" || action.type === "pending") {
+          if (menuContext) menuContext.state = "touch-held";
+          setTouchGuard(true);
+        } else {
+          menuContext = null;
+          setTouchGuard(false);
+          installTouchClickShield();
+        }
         return;
       }
+
+      if (pointer.input === "touch" && !pointer.longPressReady) {
+        clearLongPressTimer();
+        pointer = null;
+        setTouchGuard(false);
+        return;
+      }
+
+      if (!pointer.thresholdCrossed) {
+        const wasTouch = pointer.input === "touch";
+        pointer = null;
+        if (wasTouch) setTouchGuard(false);
+        return;
+      }
+
       clickSuppressor.arm();
       event.preventDefault();
-      event.stopPropagation();
+      event.stopImmediatePropagation();
+      clearLongPressTimer();
+      clearDwellTimer();
+
       if (!pointer.started) {
-        showStatus("분류를 불러오지 못했습니다", false);
-        cancelPointer();
+        showStatus("분류를 불러오지 못했습니다", false, "error");
+        cancelAll();
         return;
       }
+
+      if (pointer.input === "touch" && preferences.touchPersistent) {
+        pointer = null;
+        if (menuContext) menuContext.state = "touch-held";
+        return;
+      }
+
+      const wasTouch = pointer.input === "touch";
       pointer = null;
-      clearDwellTimer();
+      menuContext = null;
+      if (wasTouch) {
+        setTouchGuard(false);
+        installTouchClickShield();
+      }
       void controller.release();
+    }
+
+    function onPointerCancel(event) {
+      if (!pointer || event.pointerId !== pointer.id) return;
+      if (pointer.input === "touch" && pointer.longPressReady && preferences.touchPersistent && pointer.started) {
+        clickSuppressor.arm();
+        pointer = null;
+        clearLongPressTimer();
+        clearDwellTimer();
+        if (menuContext) menuContext.state = "touch-held";
+        return;
+      }
+      cancelAll();
+    }
+
+    function onContextMenu(event) {
+      if (!preferences.suppressContextMenu) return;
+      const touchActive = isTouchGestureActive();
+      const candidate = globalThis.LakomicsXSource.findCandidate(event.target);
+      if (!touchActive && !candidate) return;
+      if (touchActive || pointer?.candidate?.element === candidate?.element) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    }
+
+    function onSelectStart(event) {
+      if (!isTouchGestureActive()) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
     }
 
     function onDragStart(event) {
       if (globalThis.LakomicsXSource.findCandidate(event.target)) event.preventDefault();
     }
 
-    function cancelPointer() {
-      if (!pointer) return;
-      if (pointer.thresholdCrossed) clickSuppressor.arm();
-      pointer = null;
-      clearDwellTimer();
-      controller.cancel();
+    async function loadClassifications(candidate) {
+      const response = await runtimeMessage({ type: "classifications:get" });
+      if (!pointer || pointer.candidate !== candidate) return;
+      if (!response.ok) {
+        if (pointer.thresholdCrossed || pointer.longPressReady) showStatus(feedbackFor(response).message, false, "error");
+        cancelAll();
+        return;
+      }
+      pointer.classifications = response;
+      startControllerIfReady(pointer.input === "touch");
     }
 
-    function startControllerIfReady() {
+    function startControllerIfReady(openImmediately = false) {
       if (!pointer || pointer.started || !pointer.thresholdCrossed || !pointer.classifications) return;
       pointer.started = true;
-      controller.begin(
+      const radialOrigin = pointer.input === "touch"
+        ? clampRadialOrigin(pointer.origin, currentViewportSize().width, currentViewportSize().height)
+        : { ...pointer.origin };
+      menuContext = {
+        input: pointer.input === "touch" ? "touch" : "mouse",
+        state: pointer.input === "touch" ? "touch-active" : "mouse-active",
+        origin: radialOrigin,
+        candidate: pointer.candidate,
+      };
+      const first = controller.begin(
         pointer.candidate,
-        pointer.origin,
+        radialOrigin,
         pointer.classifications.entries,
         pointer.classifications.layout,
         pointer.classifications.pinnedIds,
+        pointer.classifications.classificationSource ?? "app",
+        {
+          openImmediately,
+          centerSelectsExpandedParent: pointer.input === "touch",
+          confirmSelectionWithCenter: pointer.input === "touch",
+        },
       );
-      scheduleDwell(controller.move(pointer.latest, pointer.latestTime));
+      if (openImmediately) {
+        renderSnapshot(first);
+        // A touch menu may be shifted away from the press point to stay fully
+        // inside the viewport. Start it at its visual center so opening near
+        // an edge does not accidentally hover/expand a sector.
+        scheduleDwell(controller.move(radialOrigin, pointer.latestTime));
+      } else {
+        scheduleDwell(controller.move(pointer.latest, pointer.latestTime));
+      }
     }
 
     function scheduleDwell(snapshot) {
       clearDwellTimer();
-      if (!snapshot?.opened || snapshot.dwellDeadline === null) return;
+      if (!snapshot?.opened || snapshot.dwellDeadline === null || !pointer) return;
+      const currentPointerId = pointer.id;
+      const latestTime = pointer.latestTime;
       dwellTimer = window.setTimeout(() => {
         dwellTimer = null;
+        if (!pointer || pointer.id !== currentPointerId) return;
         const next = controller.tick(snapshot.dwellDeadline);
         scheduleDwell(next);
-      }, Math.max(0, snapshot.dwellDeadline - pointer.latestTime));
+      }, Math.max(0, snapshot.dwellDeadline - latestTime));
     }
 
     function clearDwellTimer() {
@@ -250,7 +728,53 @@
       dwellTimer = null;
     }
 
-    function renderLoading(origin) {
+    function clearLongPressTimer() {
+      if (longPressTimer !== null) window.clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+
+    function cancelAll() {
+      if (pointer?.thresholdCrossed || menuContext) clickSuppressor.arm();
+      pointer = null;
+      menuContext = null;
+      setTouchGuard(false);
+      clearLongPressTimer();
+      clearDwellTimer();
+      controller.cancel();
+    }
+
+    function isTouchGestureActive() {
+      return pointer?.input === "touch"
+        || pointer?.input === "touch-select"
+        || menuContext?.input === "touch";
+    }
+
+    function setTouchGuard(active) {
+      document.documentElement.classList.toggle("lakomics-touch-gesture-active", Boolean(active));
+    }
+
+    function installTouchClickShield() {
+      if (clickShieldTimer !== null) window.clearTimeout(clickShieldTimer);
+      clickShield?.remove();
+      clickShield = document.createElement("div");
+      clickShield.className = "lakomics-touch-click-shield";
+      clickShield.setAttribute("aria-hidden", "true");
+      const block = (event) => {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      };
+      clickShield.addEventListener("pointerdown", block, true);
+      clickShield.addEventListener("pointerup", block, true);
+      clickShield.addEventListener("click", block, true);
+      document.documentElement.append(clickShield);
+      clickShieldTimer = window.setTimeout(() => {
+        clickShield?.remove();
+        clickShield = null;
+        clickShieldTimer = null;
+      }, 420);
+    }
+
+    function renderLoading(origin, label) {
       closeRadial();
       overlay = document.createElement("div");
       overlay.className = "lakomics-radial-overlay";
@@ -258,20 +782,20 @@
       loading.className = "lakomics-radial-loading";
       loading.style.left = `${origin.x}px`;
       loading.style.top = `${origin.y}px`;
-      loading.textContent = "분류 불러오는 중…";
+      loading.textContent = label;
       overlay.append(loading);
       document.documentElement.append(overlay);
     }
 
     function renderSnapshot(snapshot) {
-      if (!pointer || !snapshot?.opened) return;
+      if (!menuContext || !snapshot?.opened) return;
       closeRadial();
       overlay = document.createElement("div");
-      overlay.className = "lakomics-radial-overlay";
+      overlay.className = `lakomics-radial-overlay${menuContext.input === "touch" ? " is-touch" : ""}`;
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
       svg.setAttribute("viewBox", "-220 -220 440 440");
-      svg.style.left = `${pointer.origin.x}px`;
-      svg.style.top = `${pointer.origin.y}px`;
+      svg.style.left = `${menuContext.origin.x}px`;
+      svg.style.top = `${menuContext.origin.y}px`;
       svg.classList.add("lakomics-radial-menu");
       renderPrimarySectors(svg, snapshot);
       if (snapshot.secondaryLevel) renderSecondarySectors(svg, snapshot);
@@ -288,7 +812,7 @@
         const end = -Math.PI / 2 + (Math.PI * 2 * (index + 0.5)) / count;
         const path = svgElement("path", {
           d: sectorPath(48, 110, start, end),
-          class: `lakomics-sector${snapshot.hover?.type === "primary-slot" && snapshot.hover.index === index ? " is-active" : ""}${entry ? "" : " is-empty"}${snapshot.expandedParentId === entry?.id ? " is-expanded" : ""}`,
+          class: `lakomics-sector${snapshot.hover?.type === "primary-slot" && snapshot.hover.index === index ? " is-active" : ""}${entry ? "" : " is-empty"}${snapshot.expandedParentId === entry?.id ? " is-expanded" : ""}${snapshot.pendingClassificationId === entry?.id ? " is-selected" : ""}`,
         });
         svg.append(path);
         const angle = -Math.PI / 2 + (Math.PI * 2 * index) / count;
@@ -305,13 +829,12 @@
     function renderSecondarySectors(svg, snapshot) {
       const angles = snapshot.secondaryAngles;
       if (!angles) return;
-      const count = snapshot.secondaryLevel.slotCount;
       snapshot.secondaryLevel.slots.forEach((entry, index) => {
         const angle = angles[index];
         if (!angle) return;
         const path = svgElement("path", {
           d: sectorPath(130, 185, angle.start, angle.end),
-          class: `lakomics-sector-secondary${snapshot.hover?.type === "secondary-slot" && snapshot.hover.index === index ? " is-active" : ""}${entry ? "" : " is-empty"}`,
+          class: `lakomics-sector-secondary${snapshot.hover?.type === "secondary-slot" && snapshot.hover.index === index ? " is-active" : ""}${entry ? "" : " is-empty"}${snapshot.pendingClassificationId === entry?.id ? " is-selected" : ""}`,
         });
         svg.append(path);
         const text = svgElement("text", {
@@ -332,8 +855,12 @@
         class: `lakomics-radial-center${snapshot.hover?.type === "center" ? " is-active" : ""}`,
       });
       const label = svgElement("text", { x: 0, y: 4, class: "lakomics-center-label" });
-      const parentEntry = snapshot.primaryLevel.slots.find((s) => s?.id === snapshot.expandedParentId);
-      label.textContent = parentEntry?.name ?? "취소";
+      const parentEntry = snapshot.primaryLevel.slots.find((entry) => entry?.id === snapshot.expandedParentId);
+      if (menuContext?.input === "touch") {
+        label.textContent = snapshot.pendingClassificationId || snapshot.expandedParentId ? "저장" : "취소";
+      } else {
+        label.textContent = parentEntry?.name ?? "취소";
+      }
       svg.append(circle, label);
     }
 
@@ -354,15 +881,23 @@
       svg.append(group);
     }
 
-    function showStatus(message, retry) {
+    function showStatus(message, retry, kind = "progress") {
       if (resultToast) resultToast.remove();
       if (resultTimer !== null) window.clearTimeout(resultTimer);
+      resultTimer = null;
       resultToast = document.createElement("div");
-      resultToast.className = "lakomics-result-toast";
-      const rect = resultAnchor?.getBoundingClientRect?.();
-      resultToast.style.left = `${Math.max(12, rect?.left ?? 12)}px`;
-      resultToast.style.top = `${Math.max(12, (rect?.top ?? 12) + 12)}px`;
+      resultToast.className = `lakomics-result-toast is-${kind}`;
+      if (kind === "error") {
+        resultToast.setAttribute("role", "alert");
+        resultToast.setAttribute("aria-live", "assertive");
+        const icon = document.createElement("span");
+        icon.className = "lakomics-result-toast-icon";
+        icon.textContent = "!";
+        icon.setAttribute("aria-hidden", "true");
+        resultToast.append(icon);
+      }
       const text = document.createElement("span");
+      text.className = "lakomics-result-toast-text";
       text.textContent = message;
       resultToast.append(text);
       if (retry) {
@@ -371,13 +906,13 @@
         button.textContent = "다시 시도";
         button.addEventListener("click", () => void controller.retry());
         resultToast.append(button);
-      } else {
-        resultTimer = window.setTimeout(() => {
-          resultToast?.remove();
-          resultToast = null;
-          resultTimer = null;
-        }, 3_000);
       }
+      const timeoutMs = kind === "error" ? 8_000 : 3_000;
+      resultTimer = window.setTimeout(() => {
+        resultToast?.remove();
+        resultToast = null;
+        resultTimer = null;
+      }, timeoutMs);
       document.documentElement.append(resultToast);
     }
 
@@ -385,6 +920,16 @@
       overlay?.remove();
       overlay = null;
     }
+  }
+
+  function pointerInput(event) {
+    if (event.pointerType === "mouse") return event.button === 0 ? "mouse" : null;
+    if (event.pointerType === "touch" || event.pointerType === "pen") return "touch";
+    return null;
+  }
+
+  function pointFromEvent(event) {
+    return { x: event.clientX, y: event.clientY };
   }
 
   function sectorPath(innerRadius, outerRadius, start, end) {

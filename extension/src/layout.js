@@ -34,8 +34,10 @@
 
   function getLevel(entries, layout, parentId, requestedPage) {
     const children = entries.filter((entry) => entry.parentId === parentId);
-    const count = slotCount(children.length);
-    const pages = layout?.parents?.[parentKey(parentId)] ?? [Array(count).fill(null)];
+    const storedPages = layout?.parents?.[parentKey(parentId)];
+    const storedSlotCount = storedPages?.[0]?.length;
+    const count = storedSlotCount === 12 ? 12 : slotCount(children.length);
+    const pages = storedPages ?? [Array(count).fill(null)];
     const pageCount = Math.max(1, pages.length);
     const page = Math.min(Math.max(0, Number(requestedPage) || 0), pageCount - 1);
     const byId = new Map(children.map((entry) => [entry.id, entry]));

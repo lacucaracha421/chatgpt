@@ -213,3 +213,154 @@ button:hover {
   font-size: 13px;
   text-align: center;
 }
+
+select {
+  min-height: 38px;
+  padding: 0 10px;
+  color: inherit;
+  background: #26262c;
+  border: 1px solid #44444d;
+  border-radius: 8px;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(0, 1fr);
+  gap: 10px 14px;
+  align-items: center;
+}
+
+.settings-grid input[type="number"] {
+  width: 140px;
+  flex: none;
+}
+
+.check-row {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.check-row input[type="checkbox"] {
+  flex: none;
+  min-height: auto;
+  width: 18px;
+  height: 18px;
+}
+
+#preferences-status {
+  min-height: 24px;
+  color: #b9d8ff;
+}
+
+@media (max-width: 560px) {
+  main {
+    width: min(100% - 24px, 760px);
+    margin: 16px auto 28px;
+  }
+
+  section {
+    padding: 16px;
+  }
+
+  .row {
+    flex-direction: column;
+  }
+
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .radial-editor {
+    transform: scale(0.84);
+    margin-block: -28px;
+  }
+}
+
+.setting-note {
+  grid-column: 1 / -1;
+  color: #92929d;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+
+.secondary-slot-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.secondary-slot-field {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid rgba(127, 127, 127, 0.28);
+  border-radius: 10px;
+}
+
+.secondary-slot-field span {
+  font-size: 12px;
+  opacity: 0.72;
+}
+
+#local-tree-json {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 180px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+@media (max-width: 720px) {
+  .secondary-slot-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+#connection-backup-json {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 140px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+
+#x-translate-status,
+#remote-status,
+#connection-backup-status,
+#local-tree-status {
+  min-height: 20px;
+  color: #b9d8ff;
+}
+
+.compact-grid {
+  grid-template-columns: minmax(180px, 1fr) minmax(120px, 220px);
+}
+
+.advanced-block {
+  border: 1px solid #34343a;
+  border-radius: 12px;
+  background: #17171a;
+}
+
+.advanced-block > summary {
+  cursor: pointer;
+  padding: 16px 20px;
+  color: #b8b8c2;
+  font-weight: 650;
+  user-select: none;
+}
+
+.advanced-content {
+  display: grid;
+  gap: 14px;
+  padding: 0 12px 12px;
+}
+
+.advanced-content section {
+  background: #1a1a1e;
+}
