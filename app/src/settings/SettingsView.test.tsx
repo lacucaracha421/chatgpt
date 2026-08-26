@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
@@ -245,21 +245,95 @@ it("stores and removes an Aladin key without reading it back", async () => {
   );
 
   await user.click(screen.getByRole("button", { name: "외부 서비스" }));
-  expect(await screen.findByText("설정되지 않음")).toBeInTheDocument();
+  const aladinStatusRow = (await screen.findByText("알라딘 OpenAPI")).parentElement;
+  expect(within(aladinStatusRow!).getByText("설정되지 않음")).toBeInTheDocument();
   expect(await gateway.getAladinCredentialStatus()).toEqual({ configured: false });
   await user.type(screen.getByLabelText("알라딘 TTB 키"), "new-secret");
   await user.click(screen.getByRole("button", { name: "저장" }));
 
   expect(gateway.setAladinTtbKey).toHaveBeenCalledWith("new-secret");
   expect(screen.getByLabelText("알라딘 TTB 키")).toHaveValue("");
-  expect(screen.getByText("설정됨")).toBeInTheDocument();
+  expect(within(aladinStatusRow!).getByText("설정됨")).toBeInTheDocument();
   expect(screen.queryByDisplayValue("new-secret")).not.toBeInTheDocument();
 
   await user.click(screen.getByRole("button", { name: "키 삭제" }));
   expect(screen.getByText("저장된 알라딘 TTB 키를 삭제할까요?")).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "삭제 확인" }));
   expect(gateway.deleteAladinTtbKey).toHaveBeenCalledOnce();
-  expect(screen.getByText("설정되지 않음")).toBeInTheDocument();
+  expect(within(aladinStatusRow!).getByText("설정되지 않음")).toBeInTheDocument();
+});
+
+it("shows only IGDB credential status and keeps stored values out of the inputs", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getAladinCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.getIgdbCredentialStatus).mockResolvedValue({ configured: true });
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  await user.click(screen.getByRole("button", { name: "외부 서비스" }));
+  const statusRow = (await screen.findByText("IGDB")).parentElement;
+  expect(statusRow).not.toBeNull();
+  expect(within(statusRow!).getByText("설정됨")).toBeVisible();
+  expect(screen.getByLabelText("IGDB Client ID")).toHaveAttribute("type", "password");
+  expect(screen.getByLabelText("IGDB Client Secret")).toHaveAttribute("type", "password");
+  expect(screen.getByLabelText("IGDB Client ID")).toHaveValue("");
+  expect(screen.getByLabelText("IGDB Client Secret")).toHaveValue("");
+  expect(screen.queryByDisplayValue("stored-client-id")).not.toBeInTheDocument();
+  expect(screen.queryByDisplayValue("stored-client-secret")).not.toBeInTheDocument();
+});
+
+it("saves both IGDB credentials exactly and clears them after success", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getAladinCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.getIgdbCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.setIgdbCredentials).mockResolvedValue({ configured: true });
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  await user.click(screen.getByRole("button", { name: "외부 서비스" }));
+  const clientId = await screen.findByLabelText("IGDB Client ID");
+  const clientSecret = screen.getByLabelText("IGDB Client Secret");
+  expect(screen.getByRole("button", { name: "IGDB 저장" })).toBeDisabled();
+  await user.type(clientId, " client-id ");
+  await user.type(clientSecret, " client-secret ");
+  await user.click(screen.getByRole("button", { name: "IGDB 저장" }));
+
+  expect(gateway.setIgdbCredentials).toHaveBeenCalledWith({ clientId: " client-id ", clientSecret: " client-secret " });
+  expect(clientId).toHaveValue("");
+  expect(clientSecret).toHaveValue("");
+  const statusRow = screen.getByText("IGDB").parentElement;
+  expect(within(statusRow!).getByText("설정됨")).toBeVisible();
+});
+
+it("requires confirmation before deleting IGDB credentials", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getAladinCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.getIgdbCredentialStatus).mockResolvedValue({ configured: true });
+  vi.mocked(gateway.deleteIgdbCredentials).mockResolvedValue({ configured: false });
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  await user.click(screen.getByRole("button", { name: "외부 서비스" }));
+  const statusRow = (await screen.findByText("IGDB")).parentElement;
+  await user.click(within(statusRow!).getByRole("button", { name: "IGDB 키 삭제" }));
+  expect(gateway.deleteIgdbCredentials).not.toHaveBeenCalled();
+  expect(screen.getByText("저장된 IGDB 자격 증명을 삭제할까요?")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "IGDB 삭제 확인" }));
+
+  expect(gateway.deleteIgdbCredentials).toHaveBeenCalledOnce();
+  expect(within(statusRow!).getByText("설정되지 않음")).toBeVisible();
 });
 
 it("changes online catalog automatic update settings", async () => {
@@ -322,7 +396,7 @@ it("confirms before clearing the remote manga cache", async () => {
 
 function createGateway(): LibraryGateway {
   return {
-    getIgdbCredentialStatus: vi.fn(),
+    getIgdbCredentialStatus: vi.fn().mockResolvedValue({ configured: false }),
     setIgdbCredentials: vi.fn(),
     deleteIgdbCredentials: vi.fn(),
     searchIgdbGames: vi.fn(),

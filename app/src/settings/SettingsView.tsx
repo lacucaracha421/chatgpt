@@ -63,6 +63,12 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [aladinBusy, setAladinBusy] = useState(false);
   const [aladinConfirmingDelete, setAladinConfirmingDelete] = useState(false);
   const [aladinError, setAladinError] = useState<string | null>(null);
+  const [igdbConfigured, setIgdbConfigured] = useState<boolean | null>(null);
+  const [igdbClientId, setIgdbClientId] = useState("");
+  const [igdbClientSecret, setIgdbClientSecret] = useState("");
+  const [igdbBusy, setIgdbBusy] = useState(false);
+  const [igdbConfirmingDelete, setIgdbConfirmingDelete] = useState(false);
+  const [igdbError, setIgdbError] = useState<string | null>(null);
   const [catalogStatus, setCatalogStatus] = useState<CatalogStatus | null>(null);
   const [catalogBusy, setCatalogBusy] = useState(false);
   const [catalogError, setCatalogError] = useState<string | null>(null);
@@ -70,9 +76,10 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [catalogCacheBusy, setCatalogCacheBusy] = useState(false);
   const [catalogCacheMessage, setCatalogCacheMessage] = useState<string | null>(null);
   useAutoDismiss(aladinError, setAladinError);
+  useAutoDismiss(igdbError, setIgdbError);
   useAutoDismiss(catalogError, setCatalogError);
   useAutoDismiss(catalogCacheMessage, setCatalogCacheMessage);
-  const pending = restoring || submitting || aladinBusy;
+  const pending = restoring || submitting || aladinBusy || igdbBusy;
 
   useEffect(() => {
     let active = true;
@@ -98,10 +105,17 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     let active = true;
     setAladinConfigured(null);
     setAladinError(null);
+    setIgdbConfigured(null);
+    setIgdbError(null);
     void gateway.getAladinCredentialStatus().then((status) => {
       if (active) setAladinConfigured(status.configured);
     }).catch((loadError: unknown) => {
       if (active) setAladinError(commandErrorMessage(loadError, "알라딘 설정을 확인하지 못했습니다."));
+    });
+    void gateway.getIgdbCredentialStatus().then((status) => {
+      if (active) setIgdbConfigured(status.configured);
+    }).catch(() => {
+      if (active) setIgdbError("IGDB 설정을 확인하지 못했습니다.");
     });
     void gateway.getOnlineCatalogStatus().then((status) => {
       if (active) setCatalogStatus(status);
@@ -292,6 +306,39 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     }
   }
 
+  async function saveIgdbCredentials() {
+    if (!igdbClientId.trim() || !igdbClientSecret.trim() || igdbBusy) return;
+    setIgdbBusy(true);
+    setIgdbError(null);
+    try {
+      const status = await gateway.setIgdbCredentials({ clientId: igdbClientId, clientSecret: igdbClientSecret });
+      setIgdbConfigured(status.configured);
+      setIgdbClientId("");
+      setIgdbClientSecret("");
+    } catch {
+      setIgdbError("IGDB 자격 증명을 저장하지 못했습니다.");
+    } finally {
+      setIgdbBusy(false);
+    }
+  }
+
+  async function deleteIgdbCredentials() {
+    if (igdbBusy) return;
+    setIgdbBusy(true);
+    setIgdbError(null);
+    try {
+      const status = await gateway.deleteIgdbCredentials();
+      setIgdbConfigured(status.configured);
+      setIgdbConfirmingDelete(false);
+      setIgdbClientId("");
+      setIgdbClientSecret("");
+    } catch {
+      setIgdbError("IGDB 자격 증명을 삭제하지 못했습니다.");
+    } finally {
+      setIgdbBusy(false);
+    }
+  }
+
   async function saveCatalogSettings(enabled: boolean, intervalSeconds: number) {
     if (!catalogStatus || catalogBusy) return;
     setCatalogBusy(true);
@@ -416,6 +463,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
       <div className="settings-view__section">
         <header className="settings-view__header"><h2>외부 서비스</h2><p>온라인 콘텐츠와 단행본 정보를 가져올 서비스를 관리합니다.</p></header>
         {aladinError && <Toast onDismiss={() => setAladinError(null)}>{aladinError}</Toast>}
+        {igdbError && <Toast onDismiss={() => setIgdbError(null)}>{igdbError}</Toast>}
         {catalogError && <Toast onDismiss={() => setCatalogError(null)}>{catalogError}</Toast>}
         {catalogStatus && <dl className="settings-view__property">
           <dt>온라인 카탈로그</dt>
@@ -466,6 +514,47 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             <div className="settings-view__credential-actions">
               <Button size="sm" disabled={aladinBusy} onClick={() => setAladinConfirmingDelete(false)}>취소</Button>
               <Button size="sm" variant="danger" disabled={aladinBusy} onClick={() => void deleteAladinKey()}>삭제 확인</Button>
+            </div>
+          </div>
+        )}
+        <dl className="settings-view__property">
+          <dt>IGDB</dt>
+          <dd className="settings-view__credential-status">{igdbConfigured === null ? "확인 중…" : igdbConfigured ? "설정됨" : "설정되지 않음"}</dd>
+          {igdbConfigured && !igdbConfirmingDelete && <Button size="sm" variant="danger" disabled={igdbBusy} onClick={() => setIgdbConfirmingDelete(true)}>IGDB 키 삭제</Button>}
+        </dl>
+        <label className="settings-view__property">
+          <span className="settings-view__property-label">IGDB Client ID</span>
+          <span className="settings-view__token-row">
+            <input
+              className="settings-view__token"
+              aria-label="IGDB Client ID"
+              type="password"
+              autoComplete="off"
+              value={igdbClientId}
+              onChange={(event) => setIgdbClientId(event.target.value)}
+            />
+          </span>
+        </label>
+        <label className="settings-view__property">
+          <span className="settings-view__property-label">IGDB Client Secret</span>
+          <span className="settings-view__token-row">
+            <input
+              className="settings-view__token"
+              aria-label="IGDB Client Secret"
+              type="password"
+              autoComplete="off"
+              value={igdbClientSecret}
+              onChange={(event) => setIgdbClientSecret(event.target.value)}
+            />
+            <Button size="sm" disabled={igdbBusy || !igdbClientId.trim() || !igdbClientSecret.trim()} onClick={() => void saveIgdbCredentials()}>{igdbBusy ? "처리 중…" : "IGDB 저장"}</Button>
+          </span>
+        </label>
+        {igdbConfirmingDelete && (
+          <div className="settings-view__credential-confirm">
+            <p>저장된 IGDB 자격 증명을 삭제할까요?</p>
+            <div className="settings-view__credential-actions">
+              <Button size="sm" disabled={igdbBusy} onClick={() => setIgdbConfirmingDelete(false)}>취소</Button>
+              <Button size="sm" variant="danger" disabled={igdbBusy} onClick={() => void deleteIgdbCredentials()}>IGDB 삭제 확인</Button>
             </div>
           </div>
         )}
