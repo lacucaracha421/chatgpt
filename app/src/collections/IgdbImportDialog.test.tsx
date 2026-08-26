@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
@@ -104,6 +104,23 @@ describe("IgdbImportDialog", () => {
     expect(screen.getByRole("radio", { name: /ss-1/ })).toBeInTheDocument();
   });
 
+  it("restores the exact search snapshot when going back from cover", async () => {
+    const user = userEvent.setup();
+    const gateway = makeGateway();
+    renderDialog(gateway);
+    const search = screen.getByRole("searchbox", { name: "게임 검색" });
+    await user.type(search, " exact query ");
+    await user.click(screen.getByRole("button", { name: "검색" }));
+    const resultButton = await screen.findByRole("button", { name: /Astral Chain/ });
+    await user.click(resultButton);
+    await user.click(screen.getByRole("button", { name: "다음" }));
+    await screen.findByRole("heading", { name: "표지 선택" });
+    await user.click(screen.getByRole("button", { name: "뒤로" }));
+
+    expect(screen.getByRole("searchbox", { name: "게임 검색" })).toHaveValue(" exact query ");
+    expect(screen.getByRole("button", { name: /Astral Chain/ })).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("preserves search state and opens Settings for missing credentials", async () => {
     const user = userEvent.setup();
     const gateway = makeGateway({ searchIgdbGames: vi.fn().mockRejectedValue({ code: "igdb_credential_not_configured", message: "secret" }) });
@@ -116,6 +133,22 @@ describe("IgdbImportDialog", () => {
     expect(screen.getByRole("alert")).not.toHaveTextContent("secret");
     await user.click(screen.getByRole("button", { name: "IGDB 설정 열기" }));
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps an existing load failure out of title search and retries the same connection", async () => {
+    const user = userEvent.setup();
+    const gateway = makeGateway({
+      getIgdbConnection: vi.fn()
+        .mockRejectedValueOnce(new Error("연결을 불러오지 못했습니다."))
+        .mockResolvedValue({ gameId: 17, lastSyncedAt: null }),
+    });
+    renderDialog(gateway, { kind: "existing", collectionId: "collection-9" });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("연결을 불러오지 못했습니다.");
+    expect(screen.queryByRole("searchbox", { name: "게임 검색" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "다시 시도" }));
+    expect(await screen.findByRole("heading", { name: "표지 선택" })).toBeInTheDocument();
+    expect(gateway.getIgdbConnection).toHaveBeenCalledTimes(2);
   });
 
   it("replaces existing artwork with explicit select and clear decisions", async () => {
@@ -147,5 +180,28 @@ describe("IgdbImportDialog", () => {
       cover: { kind: "keep" },
       hero: { kind: "keep" },
     }));
+  });
+
+  it("blocks cancel while apply is busy and closes only after success", async () => {
+    const user = userEvent.setup();
+    let finishApply!: (value: CollectionSummary) => void;
+    const gateway = makeGateway({
+      applyIgdbGame: vi.fn().mockReturnValue(new Promise<CollectionSummary>((resolve) => { finishApply = resolve; })),
+    });
+    const { onClose } = renderDialog(gateway);
+    await user.type(screen.getByRole("searchbox", { name: "게임 검색" }), "astral");
+    await user.click(screen.getByRole("button", { name: "검색" }));
+    await user.click(await screen.findByRole("button", { name: /Astral Chain/ }));
+    await user.click(screen.getByRole("button", { name: "다음" }));
+    await user.click(screen.getByRole("radio", { name: /co-1/ }));
+    await user.click(screen.getByRole("button", { name: "다음" }));
+    await user.click(screen.getByRole("button", { name: "hero 없이 가져오기" }));
+    await user.click(screen.getByRole("button", { name: "가져오기" }));
+    expect(screen.getByRole("button", { name: "취소" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "취소" }));
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+    finishApply(collection);
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 });

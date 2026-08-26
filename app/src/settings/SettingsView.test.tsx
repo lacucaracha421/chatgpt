@@ -263,6 +263,21 @@ it("stores and removes an Aladin key without reading it back", async () => {
   expect(within(aladinStatusRow!).getByText("설정되지 않음")).toBeInTheDocument();
 });
 
+it("opens the requested settings section", async () => {
+  const gateway = createGateway();
+  vi.mocked(gateway.getAladinCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.getIgdbCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.getOnlineCatalogStatus).mockResolvedValue({ installed: false, workCount: 0, updateEnabled: false, updateIntervalSeconds: 0, lastAttemptAt: null, lastSuccessAt: null, lastAdded: 0, lastError: null });
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="external_services" />
+    </LibraryProvider>,
+  );
+
+  expect(await screen.findByRole("heading", { name: "외부 서비스" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "외부 서비스" })).toHaveAttribute("aria-current", "page");
+});
+
 it("shows only IGDB credential status and keeps stored values out of the inputs", async () => {
   const user = userEvent.setup();
   const gateway = createGateway();

@@ -12,10 +12,18 @@ export type IgdbImportTarget =
   | { kind: "new" }
   | { kind: "existing"; collectionId: string };
 
+type IgdbSearchSnapshot = {
+  query: string;
+  results: IgdbSearchResult[];
+  selectedGameId: number | null;
+};
+
 export type IgdbImportStep =
-  | { kind: "search"; query: string; results: IgdbSearchResult[]; selectedGameId: number | null }
-  | { kind: "cover"; preview: IgdbGamePreview; coverImageId: string | null; coverDecisionMade: boolean }
-  | { kind: "hero"; preview: IgdbGamePreview; coverImageId: string | null; heroImageId: string | null; heroDecisionMade: boolean };
+  | ({ kind: "search" } & IgdbSearchSnapshot)
+  | { kind: "cover"; preview: IgdbGamePreview; coverImageId: string | null; coverDecisionMade: boolean; searchSnapshot: IgdbSearchSnapshot | null }
+  | { kind: "hero"; preview: IgdbGamePreview; coverImageId: string | null; heroImageId: string | null; heroDecisionMade: boolean; searchSnapshot: IgdbSearchSnapshot | null }
+  | { kind: "existing-loading" }
+  | { kind: "existing-error"; message: string; credentialError: boolean };
 
 type Props = {
   open: boolean;
@@ -29,38 +37,51 @@ type Busy = "search" | "preview" | "apply" | null;
 
 export function IgdbImportDialog({ open, target, onClose, onApplied, onOpenSettings }: Props) {
   const { gateway } = useLibrary();
-  const [step, setStep] = useState<IgdbImportStep>({ kind: "search", query: "", results: [], selectedGameId: null });
+  const [step, setStep] = useState<IgdbImportStep>(() => target.kind === "existing" ? { kind: "existing-loading" } : newSearchStep());
   const [busy, setBusy] = useState<Busy>(null);
   const [error, setError] = useState<string | null>(null);
   const [credentialError, setCredentialError] = useState(false);
+  const targetCollectionId = target.kind === "existing" ? target.collectionId : undefined;
 
   useEffect(() => {
     if (!open) return;
-    setStep({ kind: "search", query: "", results: [], selectedGameId: null });
+    if (target.kind === "new") {
+      setStep(newSearchStep());
+      setBusy(null);
+      setError(null);
+      setCredentialError(false);
+      return;
+    }
+    return loadExisting();
+  }, [gateway, open, targetCollectionId, target.kind]);
+
+  function loadExisting() {
+    if (target.kind !== "existing") return;
+    const collectionId = target.collectionId;
+    let active = true;
+    setStep({ kind: "existing-loading" });
     setBusy(null);
     setError(null);
     setCredentialError(false);
-    if (target.kind !== "existing") return;
-
-    let active = true;
     setBusy("preview");
-    void gateway.getIgdbConnection(target.collectionId)
+    void gateway.getIgdbConnection(collectionId)
       .then((connection) => {
         if (!connection) throw new Error("IGDB 연결을 찾지 못했습니다.");
         return gateway.previewIgdbGame(connection.gameId);
       })
       .then((preview) => {
         if (!active) return;
-        setStep({ kind: "cover", preview, coverImageId: null, coverDecisionMade: false });
+        setStep({ kind: "cover", preview, coverImageId: null, coverDecisionMade: false, searchSnapshot: null });
         setError(null);
       })
       .catch((loadError: unknown) => {
         if (!active) return;
-        showError(loadError, "IGDB 게임 정보를 불러오지 못했습니다.", setError, setCredentialError);
+        const nextError = errorInfo(loadError, "IGDB 게임 정보를 불러오지 못했습니다.");
+        setStep({ kind: "existing-error", ...nextError });
       })
       .finally(() => { if (active) setBusy(null); });
     return () => { active = false; };
-  }, [gateway, open, target.collectionId, target.kind]);
+  }
 
   function updateSearch(update: Partial<Extract<IgdbImportStep, { kind: "search" }>>) {
     setStep((current) => current.kind === "search" ? { ...current, ...update } : current);
@@ -94,7 +115,7 @@ export function IgdbImportDialog({ open, target, onClose, onApplied, onOpenSetti
     setCredentialError(false);
     try {
       const preview = await gateway.previewIgdbGame(step.selectedGameId);
-      setStep({ kind: "cover", preview, coverImageId: null, coverDecisionMade: false });
+      setStep({ kind: "cover", preview, coverImageId: null, coverDecisionMade: false, searchSnapshot: step });
     } catch (previewError) {
       showError(previewError, "IGDB 게임 정보를 불러오지 못했습니다.", setError, setCredentialError);
     } finally {
@@ -111,15 +132,16 @@ export function IgdbImportDialog({ open, target, onClose, onApplied, onOpenSetti
       coverImageId: step.coverImageId,
       heroImageId: null,
       heroDecisionMade: false,
+      searchSnapshot: step.searchSnapshot,
     });
     setError(null);
   }
 
   function back() {
     if (step.kind === "hero") {
-      setStep({ kind: "cover", preview: step.preview, coverImageId: step.coverImageId, coverDecisionMade: step.coverImageId !== null });
+      setStep({ kind: "cover", preview: step.preview, coverImageId: step.coverImageId, coverDecisionMade: step.coverImageId !== null, searchSnapshot: step.searchSnapshot });
     } else if (step.kind === "cover" && target.kind === "new") {
-      setStep({ kind: "search", query: step.preview.proposedTitle, results: [], selectedGameId: step.preview.gameId });
+      setStep(step.searchSnapshot ? { kind: "search", ...step.searchSnapshot } : newSearchStep());
     }
     setError(null);
     setCredentialError(false);
@@ -153,20 +175,32 @@ export function IgdbImportDialog({ open, target, onClose, onApplied, onOpenSetti
   const title = target.kind === "new" ? "IGDB에서 게임 추가" : "IGDB 게임 아트워크 변경";
   const preview = step.kind === "cover" || step.kind === "hero" ? step.preview : null;
   const candidates = step.kind === "cover" ? step.preview.covers : step.kind === "hero" ? (step.preview.artworks.length > 0 ? step.preview.artworks : step.preview.screenshots) : [];
-  const loadingExisting = target.kind === "existing" && busy === "preview" && !preview;
+  const loadingExisting = step.kind === "existing-loading";
+  const existingError = step.kind === "existing-error" ? step : null;
+
+  function handleClose() {
+    if (busy === "apply") return;
+    onClose();
+  }
 
   return (
-    <Dialog open={open} title={title} variant="medium" onClose={onClose}>
+    <Dialog open={open} title={title} variant="medium" onClose={handleClose}>
       <div className="igdb-import">
         {loadingExisting && <Skeleton className="igdb-import__loading" label="IGDB 게임 정보 불러오는 중" />}
+        {existingError && <div className="igdb-import__error" role="alert"><p>{existingError.message}</p>{existingError.credentialError && <Button type="button" onClick={onOpenSettings}>IGDB 설정 열기</Button>}</div>}
         {error && <div className="igdb-import__error" role="alert"><p>{error}</p>{credentialError && <Button type="button" onClick={onOpenSettings}>IGDB 설정 열기</Button>}</div>}
-        {!loadingExisting && step.kind === "search" && <SearchStep step={step} busy={busy} onQuery={(query) => updateSearch({ query })} onSearch={() => void search()} onSelect={(selectedGameId) => { updateSearch({ selectedGameId }); setError(null); setCredentialError(false); }} />}
-        {!loadingExisting && preview && <PreviewSummary preview={preview} />}
-        {!loadingExisting && step.kind === "cover" && <ArtworkStep kind="cover" candidates={candidates} selectedId={step.coverImageId} onSelect={(imageId) => setStep({ ...step, coverImageId: imageId, coverDecisionMade: true })} />}
-        {!loadingExisting && step.kind === "hero" && <ArtworkStep kind="hero" candidates={candidates} selectedId={step.heroImageId} onSelect={(imageId) => setStep({ ...step, heroImageId: imageId, heroDecisionMade: true })} />}
-        {!loadingExisting && <div className="ui-dialog__actions igdb-import__actions">
-          <Button type="button" onClick={onClose}>취소</Button>
-          {step.kind !== "search" && <Button type="button" onClick={back} disabled={busy !== null}>뒤로</Button>}
+        {!loadingExisting && !existingError && step.kind === "search" && <SearchStep step={step} busy={busy} onQuery={(query) => updateSearch({ query })} onSearch={() => void search()} onSelect={(selectedGameId) => { updateSearch({ selectedGameId }); setError(null); setCredentialError(false); }} />}
+        {!loadingExisting && !existingError && preview && <PreviewSummary preview={preview} />}
+        {!loadingExisting && !existingError && step.kind === "cover" && <ArtworkStep kind="cover" candidates={candidates} selectedId={step.coverImageId} onSelect={(imageId) => setStep({ ...step, coverImageId: imageId, coverDecisionMade: true })} />}
+        {!loadingExisting && !existingError && step.kind === "hero" && <ArtworkStep kind="hero" candidates={candidates} selectedId={step.heroImageId} onSelect={(imageId) => setStep({ ...step, heroImageId: imageId, heroDecisionMade: true })} />}
+        {existingError && <div className="ui-dialog__actions igdb-import__actions">
+          <Button type="button" onClick={handleClose}>취소</Button>
+          <Button type="button" variant="primary" disabled={busy !== null} onClick={() => void loadExisting()}>다시 시도</Button>
+        </div>}
+        {!loadingExisting && !existingError && <div className="ui-dialog__actions igdb-import__actions">
+          <Button type="button" onClick={handleClose} disabled={busy === "apply"}>취소</Button>
+          {step.kind === "hero" && <Button type="button" onClick={back} disabled={busy !== null}>뒤로</Button>}
+          {step.kind === "cover" && target.kind === "new" && <Button type="button" onClick={back} disabled={busy !== null}>뒤로</Button>}
           {step.kind === "search" && <Button type="button" variant="primary" disabled={step.selectedGameId === null || busy !== null} onClick={() => void previewSelected()}>{busy === "preview" ? "불러오는 중" : "다음"}</Button>}
           {step.kind === "cover" && <Button type="button" variant="primary" disabled={busy !== null || (target.kind === "new" && step.preview.covers.length > 0 && !step.coverDecisionMade)} onClick={nextFromCover}>다음</Button>}
           {step.kind === "hero" && <>
@@ -212,13 +246,18 @@ function ArtworkStep({ kind, candidates, selectedId, onSelect }: { kind: "cover"
 }
 
 function showError(error: unknown, fallback: string, setError: (message: string) => void, setCredentialError: (value: boolean) => void) {
-  if (errorCode(error) === "igdb_credential_not_configured") {
-    setCredentialError(true);
-    setError("IGDB 설정이 필요합니다.");
-    return;
-  }
-  setCredentialError(false);
-  setError(commandErrorMessage(error, fallback));
+  const nextError = errorInfo(error, fallback);
+  setCredentialError(nextError.credentialError);
+  setError(nextError.message);
+}
+
+function errorInfo(error: unknown, fallback: string): { message: string; credentialError: boolean } {
+  if (errorCode(error) === "igdb_credential_not_configured") return { message: "IGDB 설정이 필요합니다.", credentialError: true };
+  return { message: commandErrorMessage(error, fallback), credentialError: false };
+}
+
+function newSearchStep(): Extract<IgdbImportStep, { kind: "search" }> {
+  return { kind: "search", query: "", results: [], selectedGameId: null };
 }
 
 function errorCode(error: unknown): string | null {

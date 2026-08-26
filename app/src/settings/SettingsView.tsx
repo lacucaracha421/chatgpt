@@ -20,13 +20,16 @@ type SettingsViewProps = {
   onImportFolder?: (folder: string) => Promise<boolean>;
   metadataImportRunning?: boolean;
   onCollectionsChanged?: () => void;
+  initialSection?: SettingsSection;
 };
+
+type SettingsSection = "general" | "browser_extension" | "external_services" | "metadata_import" | "legacy_package" | "safety" | "shortcuts";
 
 const METADATA_IMPORT_FOLDER_KEY = "lakomics.metadataImportFolder";
 
-export function SettingsView({ restoring, onRestore, onExit, onImportFolder, metadataImportRunning = false, onCollectionsChanged }: SettingsViewProps) {
+export function SettingsView({ restoring, onRestore, onExit, onImportFolder, metadataImportRunning = false, onCollectionsChanged, initialSection }: SettingsViewProps) {
   const { error: libraryError, gateway, library, openLibrary } = useLibrary();
-  const [section, setSection] = useState<"general" | "browser_extension" | "external_services" | "metadata_import" | "legacy_package" | "safety" | "shortcuts">("general");
+  const [section, setSection] = useState<SettingsSection>(() => initialSection ?? "general");
   const [lastImportFolder, setLastImportFolder] = useState(() => localStorage.getItem(METADATA_IMPORT_FOLDER_KEY));
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [backups, setBackups] = useState<MetadataBackup[] | null>(null);

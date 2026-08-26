@@ -107,7 +107,7 @@ export type AssetView =
   | { kind: "recent" }
   | { kind: "similarity_review" }
   | { kind: "trash" }
-  | { kind: "settings" }
+  | { kind: "settings"; section?: "external_services" }
   | { kind: "manga" }
   | { kind: "collections"; typeFilter: CollectionType; showcase: boolean }
   | { kind: "collection"; collectionId: string };

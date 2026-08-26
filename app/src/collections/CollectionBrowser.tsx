@@ -211,7 +211,7 @@ export function CollectionBrowser({
           onClose={() => setIgdbOpen(false)}
           onOpenSettings={() => {
             setIgdbOpen(false);
-            onViewChange({ kind: "settings" });
+            onViewChange({ kind: "settings", section: "external_services" });
           }}
           onApplied={async (collection) => {
             await onChanged();
