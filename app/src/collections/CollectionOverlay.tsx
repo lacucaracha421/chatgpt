@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { collectionCoverUrl, workArtworkUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
-import type { AladinConnection, CollectionCover, CollectionSummary, CollectionVolume, CreateCollection, MangaDexConnection, ReleaseWatchEvent, ReleaseWatchStatus, UpdateCollection } from "../library/types";
+import type { AladinConnection, CollectionCover, CollectionSummary, CollectionVolume, CreateCollection, IgdbConnection, MangaDexConnection, ReleaseWatchEvent, ReleaseWatchStatus, UpdateCollection } from "../library/types";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
@@ -18,15 +18,18 @@ import { MangaCoverViewer } from "./MangaCoverViewer";
 import { AladinConnectDialog } from "./AladinConnectDialog";
 import { MangaDexImportDialog } from "./MangaDexImportDialog";
 import { ReleaseWatchSummary } from "./ReleaseWatchSummary";
+import { GameCollectionDetail } from "./GameCollectionDetail";
+import { IgdbImportDialog } from "./IgdbImportDialog";
 
 type CollectionOverlayProps = {
   collectionId: string;
   collections: CollectionSummary[];
   onExit: () => void;
   onChanged: () => Promise<void>;
+  onOpenSettings: () => void;
 };
 
-export function CollectionOverlay({ collectionId, collections, onExit, onChanged }: CollectionOverlayProps) {
+export function CollectionOverlay({ collectionId, collections, onExit, onChanged, onOpenSettings }: CollectionOverlayProps) {
   const { gateway } = useLibrary();
   const [covers, setCovers] = useState<CollectionCover[] | null>(null);
   const [volumes, setVolumes] = useState<CollectionVolume[] | null>(null);
@@ -37,13 +40,17 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
   const [editionIndex, setEditionIndex] = useState(0);
   const [mangaDexConnection, setMangaDexConnection] = useState<MangaDexConnection | null | undefined>(undefined);
   const [aladinConnection, setAladinConnection] = useState<AladinConnection | null | undefined>(undefined);
+  const [igdbConnection, setIgdbConnection] = useState<IgdbConnection | null | undefined>(undefined);
   const [importOpen, setImportOpen] = useState(false);
   const [aladinOpen, setAladinOpen] = useState(false);
+  const [igdbOpen, setIgdbOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [aladinRefreshing, setAladinRefreshing] = useState(false);
+  const [igdbRefreshing, setIgdbRefreshing] = useState(false);
   const [releaseWatchStatus, setReleaseWatchStatus] = useState<ReleaseWatchStatus | null>(null);
   const [releaseChanges, setReleaseChanges] = useState<ReleaseWatchEvent[]>([]);
   const [releaseWatchSaving, setReleaseWatchSaving] = useState(false);
+  const [igdbError, setIgdbError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState<CollectionEditMode | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -56,6 +63,7 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
 
   const collection = collections.find((candidate) => candidate.id === collectionId);
   const isManga = collection?.type === "manga";
+  const isGame = collection?.type === "game";
   const hasAladinConnection = Boolean(aladinConnection);
   const selectedCover = covers?.find((cover) => cover.fileName === selectedFileName) ?? null;
   const viewerVolumes = useMemo(
@@ -68,7 +76,7 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
   );
 
   useEffect(() => {
-    if (isManga) {
+    if (isManga || isGame) {
       setCovers([]);
       setSelectedFileName(null);
       return;
@@ -83,7 +91,7 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
       () => { if (active) setCovers([]); },
     );
     return () => { active = false; };
-  }, [gateway, collectionId, isManga]);
+  }, [gateway, collectionId, isGame, isManga]);
 
   useEffect(() => {
     let active = true;
@@ -163,6 +171,26 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
 
   useEffect(() => {
     let active = true;
+    setIgdbError(null);
+    if (!isGame) {
+      setIgdbConnection(null);
+      return () => { active = false; };
+    }
+    setIgdbConnection(undefined);
+    void gateway.getIgdbConnection(collectionId).then(
+      (next) => { if (active) setIgdbConnection(next); },
+      (error) => {
+        if (active) {
+          setIgdbConnection(null);
+          setIgdbError(commandErrorMessage(error, "IGDB 연결 상태를 불러오지 못했습니다."));
+        }
+      },
+    );
+    return () => { active = false; };
+  }, [gateway, collectionId, isGame]);
+
+  useEffect(() => {
+    let active = true;
     if (!isManga) {
       setAladinConnection(null);
       return () => { active = false; };
@@ -177,11 +205,11 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
 
   useEffect(() => {
     const exit = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !event.defaultPrevented && viewerVolumeId === null && !importOpen && !aladinOpen) onExit();
+      if (event.key === "Escape" && !event.defaultPrevented && viewerVolumeId === null && !importOpen && !aladinOpen && !igdbOpen) onExit();
     };
     window.addEventListener("keydown", exit);
     return () => window.removeEventListener("keydown", exit);
-  }, [aladinOpen, importOpen, onExit, viewerVolumeId]);
+  }, [aladinOpen, igdbOpen, importOpen, onExit, viewerVolumeId]);
 
   const heroUrl = useMemo(
     () => selectedCover
@@ -191,6 +219,13 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
         : null,
     [collection, collectionId, selectedCover],
   );
+
+  const gameCoverUrl = collection?.selectedWorkArtworkId
+    ? workArtworkUrl(collection.selectedWorkArtworkId)
+    : null;
+  const gameHeroUrl = collection?.selectedHeroArtworkId
+    ? workArtworkUrl(collection.selectedHeroArtworkId)
+    : null;
 
   const providerMenu = isManga ? (
     <Menu
@@ -307,6 +342,24 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
     }
   }
 
+  async function refreshIgdb() {
+    setIgdbRefreshing(true);
+    setIgdbError(null);
+    try {
+      await gateway.refreshIgdbGame(collectionId);
+      await onChanged();
+    } catch (error) {
+      setIgdbError(commandErrorMessage(error, "IGDB 정보를 새로고침하지 못했습니다."));
+    } finally {
+      setIgdbRefreshing(false);
+    }
+  }
+
+  function openIgdbSettings() {
+    setIgdbOpen(false);
+    onOpenSettings();
+  }
+
   async function toggleReleaseWatch() {
     if (!releaseWatchStatus) return;
     setReleaseWatchSaving(true);
@@ -352,7 +405,21 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
       />
       {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
       <ReleaseWatchSummary events={releaseChanges} />
-      {isManga ? (
+      {isGame && collection ? (
+        <GameCollectionDetail
+          collection={collection}
+          coverUrl={gameCoverUrl}
+          heroUrl={gameHeroUrl}
+          providerConnected={Boolean(igdbConnection)}
+          providerBusy={igdbConnection === undefined || igdbRefreshing}
+          providerError={igdbError}
+          onEdit={() => setEditMode({ kind: "edit", collection })}
+          onToggleShowcase={() => void toggleShowcase()}
+          onDelete={() => setDeleteOpen(true)}
+          onRefreshProvider={() => void refreshIgdb()}
+          onChangeArtwork={() => setIgdbOpen(true)}
+        />
+      ) : isManga ? (
         <div className="collection-overlay__manga-layout" role="region" aria-label="만화 상세">
             <div className="collection-overlay__manga-main">
               {volumes !== null && (
@@ -423,6 +490,18 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
           onApplied={async () => {
             await onChanged();
             setMangaDexConnection(await gateway.getMangaDexConnection(collection.id));
+          }}
+        />
+      )}
+      {igdbOpen && collection && isGame && (
+        <IgdbImportDialog
+          open
+          target={{ kind: "existing", collectionId: collection.id }}
+          onClose={() => setIgdbOpen(false)}
+          onOpenSettings={openIgdbSettings}
+          onApplied={async () => {
+            await onChanged();
+            setIgdbConnection(await gateway.getIgdbConnection(collection.id));
           }}
         />
       )}

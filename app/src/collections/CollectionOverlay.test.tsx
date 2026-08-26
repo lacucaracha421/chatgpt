@@ -35,6 +35,23 @@ const collection: CollectionSummary = {
   updatedAt: "t",
 };
 
+const gameCollection: CollectionSummary = {
+  ...collection,
+  id: "game-1",
+  name: "Astral Chain",
+  type: "game",
+  selectedWorkArtworkId: "game-cover",
+  selectedHeroArtworkId: "game-hero",
+  author: null,
+  year: 2019,
+  developer: "PlatinumGames",
+  publisher: "Nintendo",
+  platforms: "Nintendo Switch",
+  releaseDate: "2019-08-30",
+  genres: "Action",
+  overview: "A special ops action game.",
+};
+
 const unread: ReleaseWatchEvent[] = [
   { id: "e1", kind: "new_volume", volumeNumber: 13, previousValue: null, currentValue: "2026-09-01", detectedAt: "2026-08-22T00:00:00Z" },
   { id: "e2", kind: "release_date_changed", volumeNumber: 12, previousValue: "2026-08-21", currentValue: "2026-08-23", detectedAt: "2026-08-22T00:00:00Z" },
@@ -45,6 +62,8 @@ function renderOverlay(
   overrides: Partial<LibraryGateway> = {},
   onChanged = vi.fn().mockResolvedValue(undefined),
   onExit = vi.fn(),
+  targetCollection = collection,
+  onOpenSettings = vi.fn(),
 ) {
   const gateway = {
     listCollectionCovers: vi.fn().mockResolvedValue([]),
@@ -59,6 +78,22 @@ function renderOverlay(
     applyAladin: vi.fn().mockResolvedValue({ added: 0, updated: 0, unchanged: 0, ignored: 0 }),
     refreshAladin: vi.fn().mockResolvedValue({ added: 0, updated: 0, unchanged: 0, ignored: 0 }),
     getAladinConnection: vi.fn().mockResolvedValue(null),
+    getIgdbConnection: vi.fn().mockResolvedValue(null),
+    previewIgdbGame: vi.fn().mockResolvedValue({
+      gameId: 17,
+      proposedTitle: gameCollection.name,
+      developer: gameCollection.developer,
+      publisher: gameCollection.publisher,
+      releaseDate: gameCollection.releaseDate,
+      platforms: ["Nintendo Switch"],
+      genres: ["Action"],
+      overview: gameCollection.overview,
+      covers: [],
+      artworks: [],
+      screenshots: [],
+    }),
+    replaceIgdbGameArtwork: vi.fn().mockResolvedValue(gameCollection),
+    refreshIgdbGame: vi.fn().mockResolvedValue(gameCollection),
     getReleaseWatchStatus: vi.fn().mockResolvedValue({ enabled: false, lastCheckedAt: null }),
     setReleaseWatchEnabled: vi.fn().mockResolvedValue({ enabled: false, lastCheckedAt: null }),
     updateCollection: vi.fn().mockResolvedValue(undefined),
@@ -70,10 +105,10 @@ function renderOverlay(
   } as unknown as LibraryGateway;
   render(
     <LibraryProvider gateway={gateway}>
-      <CollectionOverlay collectionId={collection.id} collections={[collection]} onExit={onExit} onChanged={onChanged} />
+      <CollectionOverlay collectionId={targetCollection.id} collections={[targetCollection]} onExit={onExit} onChanged={onChanged} onOpenSettings={onOpenSettings} />
     </LibraryProvider>,
   );
-  return { gateway, onChanged, onExit };
+  return { gateway, onChanged, onExit, onOpenSettings };
 }
 
 async function openProviderMenu(user: ReturnType<typeof userEvent.setup>) {
@@ -414,5 +449,118 @@ describe("CollectionOverlay MangaDex flow", () => {
     await user.click(screen.getByRole("menuitem", { name: "MangaDex 새로고침" }));
     expect(await screen.findByRole("status")).toHaveTextContent("새로고침하지 못했습니다.");
     expect(shelfCover).toBeInTheDocument();
+  });
+});
+
+describe("CollectionOverlay game detail flow", () => {
+  it("branches to game detail with selected cover and hero artwork URLs", () => {
+    renderOverlay({}, undefined, undefined, gameCollection);
+
+    expect(screen.getByRole("heading", { name: "Astral Chain", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Astral Chain 표지" })).toHaveAttribute(
+      "src",
+      "http://lakomics.localhost/work-artwork/game-cover",
+    );
+    expect(screen.getByRole("img", { name: "Astral Chain 대표 아트워크" })).toHaveAttribute(
+      "src",
+      "http://lakomics.localhost/work-artwork/game-hero",
+    );
+  });
+
+  it("renders local game detail before the connection request resolves", () => {
+    let resolveConnection!: (connection: null) => void;
+    const getIgdbConnection = vi.fn().mockReturnValue(new Promise((resolve) => { resolveConnection = resolve; }));
+    renderOverlay({ getIgdbConnection }, undefined, undefined, gameCollection);
+
+    expect(screen.getByRole("heading", { name: "Astral Chain", level: 1 })).toBeInTheDocument();
+    resolveConnection(null);
+  });
+
+  it("exposes game edit, Showcase, delete, refresh, and artwork actions", async () => {
+    const user = userEvent.setup();
+    renderOverlay({}, undefined, undefined, gameCollection);
+    await waitFor(() => expect(screen.getByRole("button", { name: "작품 관리" })).toBeEnabled());
+
+    await user.click(screen.getByRole("button", { name: "작품 관리" }));
+    expect(screen.getByRole("menuitem", { name: "편집" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "쇼케이스에 추가" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "삭제" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "IGDB 새로고침" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "표지·hero 변경" })).toBeInTheDocument();
+  });
+
+  it("refreshes IGDB and reports success without replacing local detail", async () => {
+    const user = userEvent.setup();
+    const onChanged = vi.fn().mockResolvedValue(undefined);
+    const refreshIgdbGame = vi.fn().mockResolvedValue(gameCollection);
+    const { gateway } = renderOverlay({ refreshIgdbGame }, onChanged, undefined, gameCollection);
+
+    await user.click(screen.getByRole("button", { name: "작품 관리" }));
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: "IGDB 새로고침" })).toBeEnabled());
+    await user.click(screen.getByRole("menuitem", { name: "IGDB 새로고침" }));
+
+    await waitFor(() => expect(gateway.refreshIgdbGame).toHaveBeenCalledWith("game-1"));
+    expect(onChanged).toHaveBeenCalledOnce();
+    expect(screen.getByRole("heading", { name: "Astral Chain", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Astral Chain 대표 아트워크" })).toHaveAttribute(
+      "src",
+      "http://lakomics.localhost/work-artwork/game-hero",
+    );
+  });
+
+  it("keeps local game detail and hero when IGDB refresh fails", async () => {
+    const user = userEvent.setup();
+    renderOverlay({ refreshIgdbGame: vi.fn().mockRejectedValue(new Error("IGDB 새로고침 실패")) }, undefined, undefined, gameCollection);
+
+    await user.click(screen.getByRole("button", { name: "작품 관리" }));
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: "IGDB 새로고침" })).toBeEnabled());
+    await user.click(screen.getByRole("menuitem", { name: "IGDB 새로고침" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("IGDB 새로고침 실패");
+    expect(screen.getByRole("heading", { name: "Astral Chain", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Astral Chain 대표 아트워크" })).toHaveAttribute(
+      "src",
+      "http://lakomics.localhost/work-artwork/game-hero",
+    );
+  });
+
+  it("opens existing-target artwork dialog and refreshes local data after save", async () => {
+    const user = userEvent.setup();
+    const onChanged = vi.fn().mockResolvedValue(undefined);
+    const { gateway } = renderOverlay({ getIgdbConnection: vi.fn().mockResolvedValue({ gameId: 17, lastSyncedAt: "t" }) }, onChanged, undefined, gameCollection);
+
+    await user.click(screen.getByRole("button", { name: "작품 관리" }));
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: "표지·hero 변경" })).toBeEnabled());
+    await user.click(screen.getByRole("menuitem", { name: "표지·hero 변경" }));
+    expect(screen.getByRole("dialog", { name: "IGDB 게임 아트워크 변경" })).toBeInTheDocument();
+    expect(gateway.getIgdbConnection).toHaveBeenCalledWith("game-1");
+
+    expect(await screen.findByRole("heading", { name: "표지 선택" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "다음" }));
+    expect(await screen.findByRole("heading", { name: "대표 이미지 선택" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "저장" }));
+
+    await waitFor(() => expect(gateway.replaceIgdbGameArtwork).toHaveBeenCalledWith({
+      collectionId: "game-1",
+      cover: { kind: "keep" },
+      hero: { kind: "keep" },
+    }));
+    expect(onChanged).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("dialog", { name: "IGDB 게임 아트워크 변경" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Astral Chain", level: 1 })).toBeInTheDocument();
+  });
+
+  it("routes missing-credential artwork errors to the external-services settings callback", async () => {
+    const user = userEvent.setup();
+    const onOpenSettings = vi.fn();
+    renderOverlay({ getIgdbConnection: vi.fn().mockRejectedValue({ code: "igdb_credential_not_configured" }) }, undefined, undefined, gameCollection, onOpenSettings);
+
+    await user.click(screen.getByRole("button", { name: "작품 관리" }));
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: "표지·hero 변경" })).toBeEnabled());
+    await user.click(screen.getByRole("menuitem", { name: "표지·hero 변경" }));
+    await user.click(await screen.findByRole("button", { name: "IGDB 설정 열기" }));
+
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("dialog", { name: "IGDB 게임 아트워크 변경" })).not.toBeInTheDocument();
   });
 });
