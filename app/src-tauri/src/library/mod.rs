@@ -35,6 +35,7 @@ pub(crate) mod remote_media;
 pub(crate) mod remote_progress;
 mod similarity;
 pub(crate) mod tmdb;
+mod tmdb_flow;
 mod trash;
 mod video_media;
 mod work_artwork;
