@@ -124,7 +124,6 @@ impl TmdbClient {
 
 #[derive(Debug, Deserialize)]
 struct RawSearchResponse {
-    #[serde(default)]
     results: Vec<RawSearchMovie>,
 }
 
@@ -372,7 +371,7 @@ fn normalize_raw_movie(raw: RawMovie) -> Result<TmdbRemoteMovie, LibraryError> {
 }
 
 fn merge_raw_movie(primary: &mut RawMovie, fallback: RawMovie) {
-    if text_is_blank(primary.title.as_deref()) {
+    if text_is_blank(primary.title.as_deref()) && text_is_blank(primary.original_title.as_deref()) {
         primary.title = fallback.title;
     }
     if text_is_blank(primary.overview.as_deref()) {
@@ -577,7 +576,10 @@ fn push_unique_limited(mut values: Vec<String>, value: String) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{map_http_status, normalize_movie, validate_image_path, TmdbImageSize};
+    use super::{
+        map_http_status, merge_raw_movie, normalize_movie, normalize_raw_movie, parse_raw_movie,
+        parse_search, validate_image_path, TmdbImageSize,
+    };
     use crate::library::{error::LibraryError, models::TmdbCredentials};
 
     #[test]
@@ -619,6 +621,31 @@ mod tests {
             vec!["매드하우스", "Rex Entertainment"]
         );
         assert!(!format!("{:?}", credentials).contains("secret-token"));
+    }
+
+    #[test]
+    fn prefers_original_language_title_before_english_fallback() {
+        let mut korean =
+            parse_raw_movie(r#"{"id":1,"title":"  ","original_title":"원어 제목","overview":""}"#)
+                .unwrap();
+        let english = parse_raw_movie(
+            r#"{"id":1,"title":"English title","original_title":"Original title","overview":"English overview"}"#,
+        )
+        .unwrap();
+
+        merge_raw_movie(&mut korean, english);
+        let movie = normalize_raw_movie(korean).unwrap();
+
+        assert_eq!(movie.title, "원어 제목");
+        assert_eq!(movie.overview.as_deref(), Some("English overview"));
+    }
+
+    #[test]
+    fn rejects_search_envelopes_without_results() {
+        assert!(matches!(
+            parse_search("{}"),
+            Err(LibraryError::TmdbInvalidResponse)
+        ));
     }
 
     #[test]
