@@ -3,6 +3,7 @@
 
   const ROOT = "__root__";
   const PINNED = "__pinned__";
+  const PIN_ONLY_FIRST_LEVEL_NAMES = new Set(["리버스", "명조", "젠레스"].map(normalizeName));
 
   function slotCount(childCount) {
     return childCount <= 6 ? 6 : 12;
@@ -33,11 +34,21 @@
   }
 
   function getLevel(entries, layout, parentId, requestedPage) {
-    const children = entries.filter((entry) => entry.parentId === parentId);
     const storedPages = layout?.parents?.[parentKey(parentId)];
-    const storedSlotCount = storedPages?.[0]?.length;
-    const count = storedSlotCount === 12 ? 12 : slotCount(children.length);
-    const pages = storedPages ?? [Array(count).fill(null)];
+    const directChildren = entries.filter((entry) => entry.parentId === parentId);
+    // Prefer the live parent/child tree. If a pinned first-level item was moved or
+    // recreated and the backend relationship briefly disagrees with the persisted
+    // radial layout, keep the user's existing submenu usable by recovering only IDs
+    // that still exist in the current entry set. This is deliberately a fallback:
+    // once real direct children are present they always win.
+    const children = directChildren.length
+      ? directChildren
+      : recoverStoredChildren(entries, storedPages);
+    // Always reconcile against the live/recovered tree. Cached/older layouts can be
+    // missing a page for a pinned child (for example 리버스/명조/젠레스), which
+    // used to make an existing submenu render as an empty ring until refresh.
+    const pages = reconcileParent(children, storedPages);
+    const count = pages[0]?.length ?? slotCount(children.length);
     const pageCount = Math.max(1, pages.length);
     const page = Math.min(Math.max(0, Number(requestedPage) || 0), pageCount - 1);
     const byId = new Map(children.map((entry) => [entry.id, entry]));
@@ -50,6 +61,34 @@
       slotCount: count,
       slots: ids.slice(0, count).map((id) => id ? byId.get(id) ?? null : null),
     };
+  }
+
+  function getCompactLevel(entries, layout, parentId, requestedPage) {
+    const level = getLevel(entries, layout, parentId, requestedPage);
+    const slots = level.slots.filter(Boolean);
+    return {
+      ...level,
+      slotCount: slots.length,
+      slots,
+    };
+  }
+
+
+  function recoverStoredChildren(entries, storedPages) {
+    if (!Array.isArray(storedPages)) return [];
+    const byId = new Map((Array.isArray(entries) ? entries : [])
+      .filter((entry) => entry && typeof entry.id === "string")
+      .map((entry) => [entry.id, entry]));
+    const recovered = [];
+    const seen = new Set();
+    for (const id of storedPages.flat()) {
+      if (typeof id !== "string" || seen.has(id)) continue;
+      const entry = byId.get(id);
+      if (!entry) continue;
+      seen.add(id);
+      recovered.push(entry);
+    }
+    return recovered;
   }
 
   function moveSlot(layout, parentId, fromIndex, toIndex) {
@@ -70,7 +109,17 @@
   }
 
   function isFirstLevelVisible(entry, pinnedIds) {
-    return entry?.parentId === null || pinnedIds?.has(entry.id);
+    if (!entry || typeof entry.id !== "string") return false;
+    if (pinnedIds?.has(entry.id)) return true;
+    if (entry.parentId !== null) return false;
+    // These promoted work shortcuts used to leak into the first ring through the
+    // local/offline fallback even when the user had not pinned their real app entry.
+    // Keep them hidden until an explicit pin exists; ordinary roots remain visible.
+    return !PIN_ONLY_FIRST_LEVEL_NAMES.has(normalizeName(entry.name));
+  }
+
+  function normalizeName(value) {
+    return String(value ?? "").normalize("NFKC").replace(/\s+/g, "").toLowerCase();
   }
 
   function getPinnedLevel(entries, layout, pinnedIds, requestedPage) {
@@ -115,7 +164,10 @@
   }
 
   function reconcileParent(children, storedPages) {
-    const count = slotCount(children.length);
+    // Keep an explicitly arranged twelve-slot submenu sparse instead of collapsing
+    // it to six slots, while still healing stale/missing child ids.
+    const storedSlotCount = Array.isArray(storedPages?.[0]) ? storedPages[0].length : 0;
+    const count = storedSlotCount === 12 ? 12 : slotCount(children.length);
     const pageCount = Math.max(1, Math.ceil(children.length / count));
     const capacity = pageCount * count;
     const slots = Array(capacity).fill(null);
@@ -173,6 +225,7 @@
     reconcileLayout,
     resetLayout,
     getLevel,
+    getCompactLevel,
     getPinnedLevel,
     reorderPinned,
     moveSlot,
