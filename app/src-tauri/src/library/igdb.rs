@@ -443,7 +443,7 @@ fn image_url(image_id: &str, size: IgdbImageSize) -> Result<String, LibraryError
     let size = match size {
         IgdbImageSize::CoverBig => "t_cover_big",
         IgdbImageSize::Hd1080p => "t_1080p",
-        IgdbImageSize::Original => "original",
+        IgdbImageSize::Original => "t_original",
     };
     Ok(format!(
         "https://images.igdb.com/igdb/image/upload/{size}/{image_id}.jpg"
@@ -550,7 +550,7 @@ mod tests {
         );
         assert_eq!(
             super::image_url("abc_-12", IgdbImageSize::Original).unwrap(),
-            "https://images.igdb.com/igdb/image/upload/original/abc_-12.jpg"
+            "https://images.igdb.com/igdb/image/upload/t_original/abc_-12.jpg"
         );
     }
 

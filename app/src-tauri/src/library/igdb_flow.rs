@@ -6,7 +6,7 @@ use super::{
     credential,
     error::LibraryError,
     external_binding::upsert_external_binding,
-    igdb::{self, IgdbImageSize},
+    igdb::{self, IgdbClient, IgdbImageSize},
     models::{
         CollectionSummary, ExternalBindingInput, IgdbApplyRequest, IgdbArtworkDecision,
         IgdbArtworkReplaceRequest, IgdbConnection, IgdbGamePreview, IgdbImageCandidate,
@@ -18,80 +18,118 @@ use super::{
 
 const PROVIDER: &str = "igdb";
 
-impl Library {
-    pub fn search_igdb_games(&self, query: &str) -> Result<Vec<IgdbSearchResult>, LibraryError> {
+struct GameImportFlow<'a> {
+    library: &'a Library,
+    client: IgdbClient,
+}
+
+impl<'a> GameImportFlow<'a> {
+    fn new(library: &'a Library) -> Self {
+        Self {
+            library,
+            client: library.igdb_client(),
+        }
+    }
+
+    fn search(&self, query: &str) -> Result<Vec<IgdbSearchResult>, LibraryError> {
         let credentials = credential::read_igdb_credentials_os()?;
-        self.igdb_client()
+        self.client
             .search(&credentials, query)
             .map(|games| games.into_iter().map(search_result).collect())
     }
 
-    pub fn preview_igdb_game(&self, game_id: i64) -> Result<IgdbGamePreview, LibraryError> {
+    fn preview(&self, game_id: i64) -> Result<IgdbGamePreview, LibraryError> {
         let credentials = credential::read_igdb_credentials_os()?;
-        let game = self.igdb_client().game(&credentials, game_id)?;
+        let game = self.client.game(&credentials, game_id)?;
         Ok(game_preview(&game))
+    }
+
+    fn apply_new(&self, request: IgdbApplyRequest) -> Result<CollectionSummary, LibraryError> {
+        let credentials = credential::read_igdb_credentials_os()?;
+        let fetched = self.client.game(&credentials, request.game_id)?;
+        let (cover, hero) = validated_selection(&request, &fetched)?;
+        let cover_bytes = cover
+            .map(|candidate| self.client.download_original(&candidate.image_id))
+            .transpose()?;
+        let hero_bytes = hero
+            .map(|candidate| self.client.download_original(&candidate.image_id))
+            .transpose()?;
+        self.library.apply_fetched_igdb_game(
+            request,
+            fetched,
+            cover_bytes.as_deref(),
+            hero_bytes.as_deref(),
+        )
+    }
+
+    fn refresh(&self, collection_id: &str) -> Result<CollectionSummary, LibraryError> {
+        let game_id = self
+            .library
+            .get_igdb_connection(collection_id)?
+            .ok_or(LibraryError::InvalidIgdbIdentity)?
+            .game_id;
+        let credentials = credential::read_igdb_credentials_os()?;
+        let fetched = self.client.game(&credentials, game_id)?;
+        self.library
+            .refresh_fetched_igdb_game(collection_id, fetched)
+    }
+
+    fn replace_artwork(
+        &self,
+        request: IgdbArtworkReplaceRequest,
+    ) -> Result<CollectionSummary, LibraryError> {
+        let game_id = self
+            .library
+            .get_igdb_connection(&request.collection_id)?
+            .ok_or(LibraryError::InvalidIgdbIdentity)?
+            .game_id;
+        let credentials = credential::read_igdb_credentials_os()?;
+        let fetched = self.client.game(&credentials, game_id)?;
+        validate_game_identity(game_id, &fetched)?;
+        let (cover, hero) = validated_artwork_decisions(&request, &fetched)?;
+        let cover_bytes = cover
+            .map(|candidate| self.client.download_original(&candidate.image_id))
+            .transpose()?;
+        let hero_bytes = hero
+            .map(|candidate| self.client.download_original(&candidate.image_id))
+            .transpose()?;
+        self.library.replace_fetched_igdb_game_artwork(
+            request,
+            fetched,
+            cover_bytes.as_deref(),
+            hero_bytes.as_deref(),
+        )
+    }
+}
+
+impl Library {
+    pub fn search_igdb_games(&self, query: &str) -> Result<Vec<IgdbSearchResult>, LibraryError> {
+        GameImportFlow::new(self).search(query)
+    }
+
+    pub fn preview_igdb_game(&self, game_id: i64) -> Result<IgdbGamePreview, LibraryError> {
+        GameImportFlow::new(self).preview(game_id)
     }
 
     pub fn apply_igdb_game(
         &self,
         request: IgdbApplyRequest,
     ) -> Result<CollectionSummary, LibraryError> {
-        let credentials = credential::read_igdb_credentials_os()?;
-        let client = self.igdb_client();
-        let fetched = client.game(&credentials, request.game_id)?;
-        let (cover, hero) = validated_selection(&request, &fetched)?;
-        let cover_bytes = cover
-            .map(|candidate| client.download_original(&candidate.image_id))
-            .transpose()?;
-        let hero_bytes = hero
-            .map(|candidate| client.download_original(&candidate.image_id))
-            .transpose()?;
-        self.apply_fetched_igdb_game(
-            request,
-            fetched,
-            cover_bytes.as_deref(),
-            hero_bytes.as_deref(),
-        )
+        GameImportFlow::new(self).apply_new(request)
     }
 
     pub fn refresh_igdb_game(
         &self,
         collection_id: &str,
     ) -> Result<CollectionSummary, LibraryError> {
-        let game_id = self
-            .get_igdb_connection(collection_id)?
-            .ok_or(LibraryError::InvalidIgdbIdentity)?
-            .game_id;
-        let credentials = credential::read_igdb_credentials_os()?;
-        let fetched = self.igdb_client().game(&credentials, game_id)?;
-        self.refresh_fetched_igdb_game(collection_id, fetched)
+        GameImportFlow::new(self).refresh(collection_id)
     }
 
     pub fn replace_igdb_game_artwork(
         &self,
         request: IgdbArtworkReplaceRequest,
     ) -> Result<CollectionSummary, LibraryError> {
-        let game_id = self
-            .get_igdb_connection(&request.collection_id)?
-            .ok_or(LibraryError::InvalidIgdbIdentity)?
-            .game_id;
-        let credentials = credential::read_igdb_credentials_os()?;
-        let client = self.igdb_client();
-        let fetched = client.game(&credentials, game_id)?;
-        validate_game_identity(game_id, &fetched)?;
-        let (cover, hero) = validated_artwork_decisions(&request, &fetched)?;
-        let cover_bytes = cover
-            .map(|candidate| client.download_original(&candidate.image_id))
-            .transpose()?;
-        let hero_bytes = hero
-            .map(|candidate| client.download_original(&candidate.image_id))
-            .transpose()?;
-        self.replace_fetched_igdb_game_artwork(
-            request,
-            fetched,
-            cover_bytes.as_deref(),
-            hero_bytes.as_deref(),
-        )
+        GameImportFlow::new(self).replace_artwork(request)
     }
 
     pub fn get_igdb_connection(
@@ -298,48 +336,49 @@ impl Library {
                 ))
             },
         )?;
-        let developer = fill_provider_value(
-            current_developer,
-            normalized_optional(fetched.developer.as_deref()),
-            previous.developer.as_deref(),
-        );
-        let publisher = fill_provider_value(
-            current_publisher,
-            normalized_optional(fetched.publisher.as_deref()),
-            previous.publisher.as_deref(),
-        );
-        let release_date = fill_provider_value(
-            current_release_date,
-            normalized_optional(fetched.release_date.as_deref()),
+        let developer_can_fill =
+            may_fill_from_provider(current_developer.as_deref(), previous.developer.as_deref());
+        let publisher_can_fill =
+            may_fill_from_provider(current_publisher.as_deref(), previous.publisher.as_deref());
+        let release_date_can_fill = may_fill_from_provider(
+            current_release_date.as_deref(),
             previous.release_date.as_deref(),
         );
-        let platforms = fill_provider_value(
-            current_platforms,
-            joined(&fetched.platforms),
-            previous.platforms.as_deref(),
-        );
-        let genres = fill_provider_value(
-            current_genres,
-            joined(&fetched.genres),
-            previous.genres.as_deref(),
-        );
-        let overview = fill_provider_value(
-            current_overview,
-            normalized_optional(fetched.summary.as_deref()),
-            previous.overview.as_deref(),
-        );
+        let platforms_can_fill =
+            may_fill_from_provider(current_platforms.as_deref(), previous.platforms.as_deref());
+        let genres_can_fill =
+            may_fill_from_provider(current_genres.as_deref(), previous.genres.as_deref());
+        let overview_can_fill =
+            may_fill_from_provider(current_overview.as_deref(), previous.overview.as_deref());
+        let developer = normalized_optional(fetched.developer.as_deref());
+        let publisher = normalized_optional(fetched.publisher.as_deref());
+        let release_date = normalized_optional(fetched.release_date.as_deref());
+        let platforms = joined(&fetched.platforms);
+        let genres = joined(&fetched.genres);
+        let overview = normalized_optional(fetched.summary.as_deref());
         let now = chrono::Utc::now().to_rfc3339();
         transaction.execute(
             "UPDATE collections
-             SET developer = ?1, publisher = ?2, platforms = ?3,
-                 release_date = ?4, genres = ?5, overview = ?6, updated_at = ?7
-             WHERE id = ?8",
+             SET developer = CASE WHEN ?1 THEN ?2 ELSE developer END,
+                 publisher = CASE WHEN ?3 THEN ?4 ELSE publisher END,
+                 release_date = CASE WHEN ?5 THEN ?6 ELSE release_date END,
+                 platforms = CASE WHEN ?7 THEN ?8 ELSE platforms END,
+                 genres = CASE WHEN ?9 THEN ?10 ELSE genres END,
+                 overview = CASE WHEN ?11 THEN ?12 ELSE overview END,
+                 updated_at = ?13
+             WHERE id = ?14",
             params![
+                developer_can_fill,
                 developer,
+                publisher_can_fill,
                 publisher,
-                platforms,
+                release_date_can_fill,
                 release_date,
+                platforms_can_fill,
+                platforms,
+                genres_can_fill,
                 genres,
+                overview_can_fill,
                 overview,
                 now,
                 collection_id
@@ -586,18 +625,6 @@ fn apply_artwork_decision(
             )?;
             Ok(())
         }
-    }
-}
-
-fn fill_provider_value(
-    current: Option<String>,
-    fresh: Option<String>,
-    previous_provider: Option<&str>,
-) -> Option<String> {
-    if may_fill_from_provider(current.as_deref(), previous_provider) {
-        fresh
-    } else {
-        current
     }
 }
 
