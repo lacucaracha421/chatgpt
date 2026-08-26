@@ -72,6 +72,11 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [igdbBusy, setIgdbBusy] = useState(false);
   const [igdbConfirmingDelete, setIgdbConfirmingDelete] = useState(false);
   const [igdbError, setIgdbError] = useState<string | null>(null);
+  const [tmdbConfigured, setTmdbConfigured] = useState<boolean | null>(null);
+  const [tmdbToken, setTmdbToken] = useState("");
+  const [tmdbBusy, setTmdbBusy] = useState(false);
+  const [tmdbConfirmingDelete, setTmdbConfirmingDelete] = useState(false);
+  const [tmdbError, setTmdbError] = useState<string | null>(null);
   const [catalogStatus, setCatalogStatus] = useState<CatalogStatus | null>(null);
   const [catalogBusy, setCatalogBusy] = useState(false);
   const [catalogError, setCatalogError] = useState<string | null>(null);
@@ -80,9 +85,10 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [catalogCacheMessage, setCatalogCacheMessage] = useState<string | null>(null);
   useAutoDismiss(aladinError, setAladinError);
   useAutoDismiss(igdbError, setIgdbError);
+  useAutoDismiss(tmdbError, setTmdbError);
   useAutoDismiss(catalogError, setCatalogError);
   useAutoDismiss(catalogCacheMessage, setCatalogCacheMessage);
-  const pending = restoring || submitting || aladinBusy || igdbBusy;
+  const pending = restoring || submitting || aladinBusy || igdbBusy || tmdbBusy;
 
   useEffect(() => {
     let active = true;
@@ -110,6 +116,8 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     setAladinError(null);
     setIgdbConfigured(null);
     setIgdbError(null);
+    setTmdbConfigured(null);
+    setTmdbError(null);
     void gateway.getAladinCredentialStatus().then((status) => {
       if (active) setAladinConfigured(status.configured);
     }).catch((loadError: unknown) => {
@@ -119,6 +127,11 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
       if (active) setIgdbConfigured(status.configured);
     }).catch(() => {
       if (active) setIgdbError("IGDB 설정을 확인하지 못했습니다.");
+    });
+    void gateway.getTmdbCredentialStatus().then((status) => {
+      if (active) setTmdbConfigured(status.configured);
+    }).catch((loadError: unknown) => {
+      if (active) setTmdbError(commandErrorMessage(loadError, "TMDB 설정을 확인하지 못했습니다."));
     });
     void gateway.getOnlineCatalogStatus().then((status) => {
       if (active) setCatalogStatus(status);
@@ -342,6 +355,38 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     }
   }
 
+  async function saveTmdbToken() {
+    const token = tmdbToken.trim();
+    if (!token || tmdbBusy) return;
+    setTmdbBusy(true);
+    setTmdbError(null);
+    try {
+      const status = await gateway.setTmdbToken(token);
+      setTmdbConfigured(status.configured);
+      setTmdbToken("");
+    } catch (saveError) {
+      setTmdbError(commandErrorMessage(saveError, "TMDB 토큰을 저장하지 못했습니다."));
+    } finally {
+      setTmdbBusy(false);
+    }
+  }
+
+  async function deleteTmdbToken() {
+    if (tmdbBusy) return;
+    setTmdbBusy(true);
+    setTmdbError(null);
+    try {
+      const status = await gateway.deleteTmdbToken();
+      setTmdbConfigured(status.configured);
+      setTmdbConfirmingDelete(false);
+      setTmdbToken("");
+    } catch (deleteError) {
+      setTmdbError(commandErrorMessage(deleteError, "TMDB 토큰을 삭제하지 못했습니다."));
+    } finally {
+      setTmdbBusy(false);
+    }
+  }
+
   async function saveCatalogSettings(enabled: boolean, intervalSeconds: number) {
     if (!catalogStatus || catalogBusy) return;
     setCatalogBusy(true);
@@ -462,11 +507,12 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
         ) : null}
       </div>
     )}
-    {section === "external_services" && (
+        {section === "external_services" && (
       <div className="settings-view__section">
         <header className="settings-view__header"><h2>외부 서비스</h2><p>온라인 콘텐츠와 단행본 정보를 가져올 서비스를 관리합니다.</p></header>
         {aladinError && <Toast onDismiss={() => setAladinError(null)}>{aladinError}</Toast>}
         {igdbError && <Toast onDismiss={() => setIgdbError(null)}>{igdbError}</Toast>}
+        {tmdbError && <Toast onDismiss={() => setTmdbError(null)}>{tmdbError}</Toast>}
         {catalogError && <Toast onDismiss={() => setCatalogError(null)}>{catalogError}</Toast>}
         {catalogStatus && <dl className="settings-view__property">
           <dt>온라인 카탈로그</dt>
@@ -558,6 +604,38 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             <div className="settings-view__credential-actions">
               <Button size="sm" disabled={igdbBusy} onClick={() => setIgdbConfirmingDelete(false)}>취소</Button>
               <Button size="sm" variant="danger" disabled={igdbBusy} onClick={() => void deleteIgdbCredentials()}>IGDB 삭제 확인</Button>
+            </div>
+          </div>
+        )}
+        <dl className="settings-view__property">
+          <dt>TMDB</dt>
+          <dd className="settings-view__credential-status">{tmdbConfigured === null ? "확인 중…" : tmdbConfigured ? "설정됨" : "설정되지 않음"}</dd>
+          {tmdbConfigured && !tmdbConfirmingDelete && <Button size="sm" variant="danger" disabled={tmdbBusy} onClick={() => setTmdbConfirmingDelete(true)}>TMDB 키 삭제</Button>}
+        </dl>
+        <label className="settings-view__property">
+          <span className="settings-view__property-label">TMDB API Read Access Token</span>
+          <span className="settings-view__token-row">
+            <input
+              className="settings-view__token"
+              aria-label="TMDB API Read Access Token"
+              type="password"
+              autoComplete="off"
+              value={tmdbToken}
+              onChange={(event) => setTmdbToken(event.target.value)}
+            />
+            <Button size="sm" disabled={tmdbBusy || !tmdbToken.trim()} onClick={() => void saveTmdbToken()}>{tmdbBusy ? "처리 중…" : "TMDB 저장"}</Button>
+          </span>
+        </label>
+        <dl className="settings-view__property">
+          <dt>TMDB API</dt>
+          <dd><a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noreferrer">TMDB API 설정 안내</a></dd>
+        </dl>
+        {tmdbConfirmingDelete && (
+          <div className="settings-view__credential-confirm">
+            <p>저장된 TMDB API Read Access Token을 삭제할까요?</p>
+            <div className="settings-view__credential-actions">
+              <Button size="sm" disabled={tmdbBusy} onClick={() => setTmdbConfirmingDelete(false)}>취소</Button>
+              <Button size="sm" variant="danger" disabled={tmdbBusy} onClick={() => void deleteTmdbToken()}>TMDB 삭제 확인</Button>
             </div>
           </div>
         )}

@@ -217,6 +217,37 @@ describe("CollectionBrowser", () => {
     expect((await screen.findAllByRole("menuitem")).map((item) => item.textContent)).toEqual(["IGDB에서 게임 추가", "직접 입력"]);
   });
 
+  it("offers TMDB before direct input for movies", async () => {
+    const user = userEvent.setup();
+    renderBrowser({ collections: [], typeFilter: "movie", showcase: false });
+    await user.click(screen.getByRole("button", { name: "새 컬렉션" }));
+    expect((await screen.findAllByRole("menuitem")).map((item) => item.textContent)).toEqual(["TMDB에서 영화 추가", "직접 입력"]);
+    await user.click(screen.getByRole("menuitem", { name: "직접 입력" }));
+    expect(await screen.findByRole("heading", { name: "새 컬렉션" })).toBeInTheDocument();
+  });
+
+  it("opens the created movie after a successful TMDB import", async () => {
+    const user = userEvent.setup();
+    const onViewChange = vi.fn();
+    const onChanged = vi.fn().mockResolvedValue(undefined);
+    const movie = { ...sample, id: "movie-1", name: "기생충", type: "movie" as const };
+    const gateway = renderBrowser({ collections: [], typeFilter: "movie", showcase: false, onViewChange, onChanged });
+    vi.mocked(gateway.searchTmdbMovies).mockResolvedValue([{ movieId: 10494, title: "기생충", originalTitle: "Parasite", releaseDate: "2019-05-30", posterPath: "/poster.jpg" }]);
+    vi.mocked(gateway.previewTmdbMovie).mockResolvedValue({ movieId: 10494, proposedTitle: "기생충", originalTitle: "Parasite", releaseDate: "2019-05-30", runtimeMinutes: 132, director: "봉준호", productionCompany: null, genres: "드라마", overview: "이야기", externalScore: 87, posters: [{ filePath: "/poster.jpg", width: 500, height: 750 }], backdrops: [] });
+    vi.mocked(gateway.applyTmdbMovie).mockResolvedValue(movie);
+
+    await user.click(screen.getByRole("button", { name: "TMDB에서 영화 추가" }));
+    await user.type(screen.getByRole("searchbox", { name: "영화 검색" }), "기생충");
+    await user.click(screen.getByRole("button", { name: "검색" }));
+    await user.click(await screen.findByRole("button", { name: /기생충/ }));
+    await user.click(screen.getByRole("button", { name: "다음" }));
+    await user.click(screen.getByRole("radio", { name: /poster\.jpg/ }));
+    await user.click(screen.getByRole("button", { name: "가져오기" }));
+
+    await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
+    expect(onViewChange).toHaveBeenCalledWith({ kind: "collection", collectionId: "movie-1" });
+  });
+
   it("opens IGDB from the empty game state and routes after apply", async () => {
     const user = userEvent.setup();
     const onViewChange = vi.fn();

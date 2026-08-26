@@ -18,6 +18,7 @@ import { CollectionCard } from "./CollectionCard";
 import { CollectionEditDialog, type CollectionEditMode } from "./CollectionEditDialog";
 import { MangaDexImportDialog } from "./MangaDexImportDialog";
 import { IgdbImportDialog } from "./IgdbImportDialog";
+import { TmdbMovieDialog } from "./TmdbMovieDialog";
 import { deriveCollectionLibrary, type CollectionLibrarySort, type CollectionLibraryState } from "./collectionLibrary";
 
 const TYPE_LABEL: Record<CollectionType, string> = {
@@ -49,6 +50,7 @@ export function CollectionBrowser({
   const [editMode, setEditMode] = useState<CollectionEditMode | null>(null);
   const [mangaDexOpen, setMangaDexOpen] = useState(false);
   const [igdbOpen, setIgdbOpen] = useState(false);
+  const [tmdbOpen, setTmdbOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<CollectionSummary | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const libraryStateRef = useRef(libraryState);
@@ -115,6 +117,7 @@ export function CollectionBrowser({
             items={[
               ...(typeFilter === "game" ? [{ id: "igdb", label: "IGDB에서 게임 추가", onSelect: () => setIgdbOpen(true) }] : []),
               ...(typeFilter === "manga" ? [{ id: "mangadex", label: "MangaDex에서 만화 추가", onSelect: () => setMangaDexOpen(true) }] : []),
+              ...(typeFilter === "movie" ? [{ id: "tmdb", label: "TMDB에서 영화 추가", onSelect: () => setTmdbOpen(true) }] : []),
               { id: "manual", label: "직접 입력", onSelect: () => setEditMode({ kind: "create", type: typeFilter }) },
             ]}
           />
@@ -179,7 +182,7 @@ export function CollectionBrowser({
           {visible.length === 0 && (
             <div className="collection-browser__empty">
               <EmptyState title={showcase ? "쇼케이스에 컬렉션이 없습니다." : "컬렉션이 없습니다."}>
-                {showcase ? "라이브러리에서 쇼케이스에 추가한 컬렉션이 여기에 표시됩니다." : <><p>새 컬렉션을 만들어 작품을 모아보세요.</p><Button type="button" onClick={() => typeFilter === "manga" ? setMangaDexOpen(true) : typeFilter === "game" ? setIgdbOpen(true) : setEditMode({ kind: "create", type: typeFilter })}>{typeFilter === "manga" ? "MangaDex에서 만화 추가" : typeFilter === "game" ? "IGDB에서 게임 추가" : "직접 입력"}</Button></>}
+                {showcase ? "라이브러리에서 쇼케이스에 추가한 컬렉션이 여기에 표시됩니다." : <><p>새 컬렉션을 만들어 작품을 모아보세요.</p><Button type="button" onClick={() => typeFilter === "manga" ? setMangaDexOpen(true) : typeFilter === "game" ? setIgdbOpen(true) : typeFilter === "movie" ? setTmdbOpen(true) : setEditMode({ kind: "create", type: typeFilter })}>{typeFilter === "manga" ? "MangaDex에서 만화 추가" : typeFilter === "game" ? "IGDB에서 게임 추가" : typeFilter === "movie" ? "TMDB에서 영화 추가" : "직접 입력"}</Button></>}
               </EmptyState>
             </div>
           )}
@@ -219,6 +222,25 @@ export function CollectionBrowser({
               onViewChange({ kind: "collection", collectionId: collection.id });
             } catch (error) {
               setMessage(commandErrorMessage(error, "IGDB 게임을 불러온 뒤 화면을 갱신하지 못했습니다."));
+            }
+          }}
+        />
+      )}
+      {tmdbOpen && (
+        <TmdbMovieDialog
+          open
+          target={{ kind: "new" }}
+          onClose={() => setTmdbOpen(false)}
+          onOpenSettings={() => {
+            setTmdbOpen(false);
+            onViewChange({ kind: "settings", section: "external_services" });
+          }}
+          onApplied={async (collection) => {
+            try {
+              await onChanged();
+              onViewChange({ kind: "collection", collectionId: collection.id });
+            } catch (error) {
+              setMessage(commandErrorMessage(error, "TMDB 영화를 불러온 뒤 화면을 갱신하지 못했습니다."));
             }
           }}
         />

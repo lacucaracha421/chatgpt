@@ -3305,6 +3305,148 @@ input:disabled {
   justify-content: flex-end;
 }
 
+.tmdb-movie-dialog {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.tmdb-movie-dialog__search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--space-2);
+}
+
+.tmdb-movie-dialog__results {
+  display: grid;
+  max-height: 18rem;
+  overflow: auto;
+  border-top: var(--border-width) solid var(--color-border);
+}
+
+.tmdb-movie-dialog__result {
+  display: grid;
+  grid-template-columns: 2.5rem minmax(0, 1fr);
+  grid-template-areas: "poster title" "poster original" "poster date";
+  gap: 0 var(--space-2);
+  width: 100%;
+  padding: var(--space-2);
+  color: var(--color-text);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: var(--border-width) solid var(--color-border);
+  cursor: pointer;
+}
+
+.tmdb-movie-dialog__result:hover,
+.tmdb-movie-dialog__result[aria-pressed="true"] {
+  background: var(--color-selected);
+}
+
+.tmdb-movie-dialog__result img {
+  grid-area: poster;
+  width: 2.5rem;
+  height: 3.5rem;
+  object-fit: cover;
+}
+
+.tmdb-movie-dialog__result-title {
+  grid-area: title;
+  align-self: end;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tmdb-movie-dialog__result small {
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+}
+
+.tmdb-movie-dialog__result small:nth-of-type(1) { grid-area: original; }
+.tmdb-movie-dialog__result small:nth-of-type(2) { grid-area: date; }
+
+.tmdb-movie-dialog__summary {
+  display: grid;
+  gap: var(--space-1);
+  padding-bottom: var(--space-2);
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+
+.tmdb-movie-dialog__summary span,
+.tmdb-movie-dialog__summary small,
+.tmdb-movie-dialog__muted {
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+}
+
+.tmdb-movie-dialog__summary p,
+.tmdb-movie-dialog__muted,
+.tmdb-movie-dialog__error p {
+  margin: 0;
+}
+
+.tmdb-movie-dialog__artwork {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.tmdb-movie-dialog__artwork-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.tmdb-movie-dialog__artwork-heading h3 {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.tmdb-movie-dialog__candidates {
+  display: flex;
+  gap: var(--space-2);
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.tmdb-movie-dialog__candidate {
+  display: grid;
+  flex: 0 0 auto;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border: var(--border-width) solid transparent;
+}
+
+.tmdb-movie-dialog__candidate:has(input:checked) {
+  border-color: var(--color-accent);
+  background: var(--color-selected);
+}
+
+.tmdb-movie-dialog__candidate img {
+  width: 8rem;
+  height: 5rem;
+  object-fit: cover;
+}
+
+.tmdb-movie-dialog__candidate input[type="radio"] {
+  justify-self: start;
+}
+
+.tmdb-movie-dialog__error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  color: var(--color-danger);
+}
+
+.tmdb-movie-dialog__actions {
+  justify-content: flex-end;
+}
+
 .aladin-connect {
   display: grid;
   gap: var(--space-3);
