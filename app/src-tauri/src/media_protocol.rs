@@ -1,11 +1,19 @@
-use std::io::{Read, Seek, SeekFrom};
+use std::{
+    io::{Read, Seek, SeekFrom},
+    sync::OnceLock,
+    time::Duration,
+};
 
 use tauri::http::{
     header::{ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE},
     Method, Response, StatusCode,
 };
 
-use crate::library::{error::LibraryError, mangadex, Library, MediaVariant};
+use crate::library::{
+    error::LibraryError,
+    igdb::{IgdbClient, IgdbImageSize},
+    mangadex, Library, MediaVariant, MAX_WORK_ARTWORK_BYTES,
+};
 
 #[cfg(test)]
 pub(crate) fn media_response(
@@ -24,6 +32,15 @@ pub(crate) fn media_response_with_range(
 ) -> Response<Vec<u8>> {
     if method != Method::GET {
         return empty_response(StatusCode::METHOD_NOT_ALLOWED);
+    }
+    if path.starts_with("/igdb-image-preview/") {
+        let Ok((variant, Some(image_id))) = parse_media_path(path) else {
+            return empty_response(StatusCode::BAD_REQUEST);
+        };
+        if library.is_none() {
+            return empty_response(StatusCode::NOT_FOUND);
+        }
+        return igdb_image_response(&image_id, variant);
     }
     if path.starts_with("/remote-manga-") {
         let Some((work_id, page)) = parse_remote_manga_path(path) else {
@@ -141,6 +158,77 @@ fn parse_remote_manga_path(path: &str) -> Option<(u64, u32)> {
     let work_id = work_id.parse::<u64>().ok().filter(|id| *id > 0)?;
     let page = page.parse::<u32>().ok().filter(|page| *page > 0)?;
     Some((work_id, page))
+}
+
+fn parse_media_path(path: &str) -> Result<(MediaVariant, Option<String>), ()> {
+    let segments = path
+        .strip_prefix('/')
+        .ok_or(())?
+        .split('/')
+        .collect::<Vec<_>>();
+    let ["igdb-image-preview", size, encoded_image_id] = segments.as_slice() else {
+        return Err(());
+    };
+    let image_id = percent_decode(encoded_image_id).ok_or(())?;
+    let variant = match *size {
+        "cover" => MediaVariant::IgdbImagePreviewCover,
+        "hero" => MediaVariant::IgdbImagePreviewHero,
+        _ => return Err(()),
+    };
+    let image_size = match variant {
+        MediaVariant::IgdbImagePreviewCover => IgdbImageSize::CoverBig,
+        MediaVariant::IgdbImagePreviewHero => IgdbImageSize::Hd1080p,
+        _ => return Err(()),
+    };
+    IgdbClient::image_url(&image_id, image_size).map_err(|_| ())?;
+    Ok((variant, Some(image_id)))
+}
+
+fn igdb_image_response(image_id: &str, variant: MediaVariant) -> Response<Vec<u8>> {
+    let size = match variant {
+        MediaVariant::IgdbImagePreviewCover => IgdbImageSize::CoverBig,
+        MediaVariant::IgdbImagePreviewHero => IgdbImageSize::Hd1080p,
+        _ => return empty_response(StatusCode::BAD_REQUEST),
+    };
+    let Ok(url) = IgdbClient::image_url(image_id, size) else {
+        return empty_response(StatusCode::BAD_REQUEST);
+    };
+    let response = igdb_image_agent().get(&url).call();
+    let mut response = match response {
+        Ok(response) => response,
+        Err(ureq::Error::StatusCode(404)) => return empty_response(StatusCode::NOT_FOUND),
+        Err(ureq::Error::StatusCode(429)) => return empty_response(StatusCode::TOO_MANY_REQUESTS),
+        Err(_) => return empty_response(StatusCode::BAD_GATEWAY),
+    };
+    let mut bytes = Vec::new();
+    if response
+        .body_mut()
+        .as_reader()
+        .take((MAX_WORK_ARTWORK_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .is_err()
+        || bytes.len() > MAX_WORK_ARTWORK_BYTES
+    {
+        return empty_response(StatusCode::BAD_GATEWAY);
+    }
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(CONTENT_TYPE, "image/jpeg")
+        .header(CONTENT_LENGTH, bytes.len().to_string())
+        .body(bytes)
+        .expect("IGDB image response is valid")
+}
+
+fn igdb_image_agent() -> &'static ureq::Agent {
+    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+    AGENT.get_or_init(|| {
+        ureq::Agent::config_builder()
+            .https_only(true)
+            .max_redirects(0)
+            .timeout_global(Some(Duration::from_secs(20)))
+            .build()
+            .into()
+    })
 }
 
 fn playback_response(
@@ -305,7 +393,10 @@ mod tests {
 
     use crate::library::{error::LibraryError, Library, MediaVariant};
 
-    use super::{media_response, media_response_with_range, parse_path, parse_remote_manga_path};
+    use super::{
+        media_response, media_response_with_range, parse_media_path, parse_path,
+        parse_remote_manga_path,
+    };
 
     const ASSET_ID: &str = "00000000-0000-4000-8000-000000000001";
     const MISSING_ID: &str = "00000000-0000-4000-8000-000000000002";
@@ -467,6 +558,14 @@ mod tests {
         assert!(matches!(variant, MediaVariant::MangaDexCoverPreview));
         assert_eq!(manga_id, COLLECTION_ID);
         assert_eq!(parsed_file_name.as_deref(), Some(file_name));
+    }
+
+    #[test]
+    fn parses_igdb_image_preview_routes() {
+        let (variant, image_id) = parse_media_path("/igdb-image-preview/cover/co1abc").unwrap();
+        assert!(matches!(variant, MediaVariant::IgdbImagePreviewCover));
+        assert_eq!(image_id.as_deref(), Some("co1abc"));
+        assert!(parse_media_path("/igdb-image-preview/hero/..%2Fsecret").is_err());
     }
 
     #[test]

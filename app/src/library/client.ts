@@ -27,6 +27,12 @@ import type {
   MangaDexConnection,
   MangaDexSearchResult,
   MangaDexWorkPreview,
+  IgdbApplyRequest,
+  IgdbArtworkReplaceRequest,
+  IgdbConnection,
+  IgdbCredentialStatus,
+  IgdbGamePreview,
+  IgdbSearchResult,
   MangaSeries,
   MetadataBackup,
   MetadataImportPlan,
@@ -149,6 +155,24 @@ export const libraryGateway: LibraryGateway = {
     invoke<CollectionSummary>("refresh_mangadex", { collectionId }),
   getMangaDexConnection: (collectionId) =>
     invoke<MangaDexConnection | null>("get_mangadex_connection", { collectionId }),
+  getIgdbCredentialStatus: () =>
+    invoke<IgdbCredentialStatus>("get_igdb_credential_status"),
+  setIgdbCredentials: (input) =>
+    invoke<IgdbCredentialStatus>("set_igdb_credentials", input),
+  deleteIgdbCredentials: () =>
+    invoke<IgdbCredentialStatus>("delete_igdb_credentials"),
+  searchIgdbGames: (query) =>
+    invoke<IgdbSearchResult[]>("search_igdb_games", { query }),
+  previewIgdbGame: (gameId) =>
+    invoke<IgdbGamePreview>("preview_igdb_game", { gameId }),
+  applyIgdbGame: (request: IgdbApplyRequest) =>
+    invoke<CollectionSummary>("apply_igdb_game", { request }),
+  refreshIgdbGame: (collectionId) =>
+    invoke<CollectionSummary>("refresh_igdb_game", { collectionId }),
+  getIgdbConnection: (collectionId) =>
+    invoke<IgdbConnection | null>("get_igdb_connection", { collectionId }),
+  replaceIgdbGameArtwork: (request: IgdbArtworkReplaceRequest) =>
+    invoke<CollectionSummary>("replace_igdb_game_artwork", { request }),
   getAladinCredentialStatus: () =>
     invoke<AladinCredentialStatus>("get_aladin_credential_status"),
   setAladinTtbKey: (ttbKey) =>

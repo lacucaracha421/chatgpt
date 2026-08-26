@@ -51,6 +51,7 @@ pub(crate) use ingestion::MAX_IMAGE_BYTES;
 use lock::LibraryLease;
 use models::{LibrarySummary, MangaSeries, TrashPolicy};
 use rusqlite::{Connection, OptionalExtension};
+pub(crate) use work_artwork::MAX_WORK_ARTWORK_BYTES;
 
 #[derive(Debug, Clone, Copy)]
 pub enum MediaVariant {
@@ -65,6 +66,8 @@ pub enum MediaVariant {
     WorkArtwork,
     WorkArtworkThumbnail,
     MangaDexCoverPreview,
+    IgdbImagePreviewCover,
+    IgdbImagePreviewHero,
 }
 
 #[derive(Debug)]
@@ -402,7 +405,9 @@ impl Library {
             | MediaVariant::CollectionSourcePreview
             | MediaVariant::WorkArtwork
             | MediaVariant::WorkArtworkThumbnail
-            | MediaVariant::MangaDexCoverPreview => {
+            | MediaVariant::MangaDexCoverPreview
+            | MediaVariant::IgdbImagePreviewCover
+            | MediaVariant::IgdbImagePreviewHero => {
                 unreachable!()
             }
         };

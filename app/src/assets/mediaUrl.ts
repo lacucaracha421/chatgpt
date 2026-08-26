@@ -47,3 +47,7 @@ export function workArtworkThumbnailUrl(artworkId: string): string {
 export function mangadexCoverPreviewUrl(mangaId: string, fileName: string): string {
   return `${MEDIA_ORIGIN}/mangadex-cover-preview/${encodeURIComponent(mangaId)}/${encodeURIComponent(fileName)}`;
 }
+
+export function igdbImagePreviewUrl(imageId: string, size: "cover" | "hero"): string {
+  return `${MEDIA_ORIGIN}/igdb-image-preview/${size}/${encodeURIComponent(imageId)}`;
+}

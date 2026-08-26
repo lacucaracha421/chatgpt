@@ -34,6 +34,11 @@ use crate::{
     },
 };
 
+use crate::library::models::{
+    IgdbApplyRequest, IgdbArtworkReplaceRequest, IgdbConnection, IgdbCredentialStatus,
+    IgdbGamePreview, IgdbSearchResult,
+};
+
 #[tauri::command]
 pub async fn inspect_metadata_import(folder: String) -> Result<MetadataImportPlan, CommandError> {
     tauri::async_runtime::spawn_blocking(move || metadata_import::inspect(folder.as_ref()))
@@ -649,6 +654,94 @@ pub async fn refresh_mangadex(
 ) -> Result<CollectionSummary, CommandError> {
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || library.refresh_mangadex(&collection_id))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn get_igdb_credential_status() -> Result<IgdbCredentialStatus, CommandError> {
+    credential::igdb_credential_status().map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn set_igdb_credentials(
+    client_id: String,
+    client_secret: String,
+) -> Result<IgdbCredentialStatus, CommandError> {
+    credential::set_igdb_credentials_os(&client_id, &client_secret).map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn delete_igdb_credentials() -> Result<IgdbCredentialStatus, CommandError> {
+    credential::delete_igdb_credentials_os().map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn search_igdb_games(
+    query: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<IgdbSearchResult>, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.search_igdb_games(&query))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn preview_igdb_game(
+    game_id: i64,
+    state: State<'_, AppState>,
+) -> Result<IgdbGamePreview, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.preview_igdb_game(game_id))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn apply_igdb_game(
+    request: IgdbApplyRequest,
+    state: State<'_, AppState>,
+) -> Result<CollectionSummary, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.apply_igdb_game(request))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn refresh_igdb_game(
+    collection_id: String,
+    state: State<'_, AppState>,
+) -> Result<CollectionSummary, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.refresh_igdb_game(&collection_id))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn get_igdb_connection(
+    collection_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<IgdbConnection>, CommandError> {
+    current_required(state)?
+        .get_igdb_connection(&collection_id)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn replace_igdb_game_artwork(
+    request: IgdbArtworkReplaceRequest,
+    state: State<'_, AppState>,
+) -> Result<CollectionSummary, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.replace_igdb_game_artwork(request))
         .await
         .map_err(|_| background_task_error())?
         .map_err(CommandError::from)
@@ -1493,6 +1586,27 @@ mod tests {
         ];
         for (error, expected) in cases {
             assert_eq!(CommandError::from(error).code, expected);
+        }
+    }
+
+    #[test]
+    fn maps_igdb_errors_without_secret_details() {
+        let cases = [
+            (LibraryError::IgdbUnauthorized, "igdb_unauthorized"),
+            (LibraryError::IgdbRateLimited, "igdb_rate_limited"),
+            // IGDB's transport intentionally redacts both timeout and outage details.
+            (LibraryError::IgdbUnavailable, "igdb_unavailable"),
+            (LibraryError::IgdbUnavailable, "igdb_unavailable"),
+            (LibraryError::IgdbNotFound, "igdb_not_found"),
+            (LibraryError::IgdbInvalidImageId, "igdb_invalid_image_id"),
+            (LibraryError::IgdbInvalidResponse, "igdb_invalid_response"),
+        ];
+        for (error, code) in cases {
+            let public = CommandError::from(error);
+            assert_eq!(public.code, code);
+            assert!(!public.message.contains("client-secret"));
+            assert!(!public.message.contains("access_token"));
+            assert!(!public.message.contains("images.igdb.com"));
         }
     }
 

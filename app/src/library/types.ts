@@ -238,6 +238,58 @@ export type MangaDexConnection = {
   lastSyncedAt: string | null;
 };
 
+export type IgdbCredentialStatus = { configured: boolean };
+
+export type IgdbImageCandidate = {
+  imageId: string;
+  width: number | null;
+  height: number | null;
+};
+
+export type IgdbSearchResult = {
+  gameId: number;
+  title: string;
+  developer: string | null;
+  releaseDate: string | null;
+  cover: IgdbImageCandidate | null;
+};
+
+export type IgdbGamePreview = {
+  gameId: number;
+  proposedTitle: string;
+  developer: string | null;
+  publisher: string | null;
+  releaseDate: string | null;
+  platforms: string[];
+  genres: string[];
+  overview: string | null;
+  covers: IgdbImageCandidate[];
+  artworks: IgdbImageCandidate[];
+  screenshots: IgdbImageCandidate[];
+};
+
+export type IgdbConnection = {
+  gameId: number;
+  lastSyncedAt: string | null;
+};
+
+export type IgdbApplyRequest = {
+  gameId: number;
+  coverImageId: string | null;
+  heroImageId: string | null;
+};
+
+export type IgdbArtworkDecision =
+  | { kind: "keep" }
+  | { kind: "clear" }
+  | { kind: "select"; imageId: string };
+
+export type IgdbArtworkReplaceRequest = {
+  collectionId: string;
+  cover: IgdbArtworkDecision;
+  hero: IgdbArtworkDecision;
+};
+
 export type AladinCredentialStatus = { configured: boolean };
 
 export type AladinConnection = {
@@ -599,6 +651,15 @@ export interface LibraryGateway {
   applyAladin(request: AladinApplyRequest): Promise<AladinSyncResult>;
   refreshAladin(collectionId: string): Promise<AladinSyncResult>;
   getAladinConnection(collectionId: string): Promise<AladinConnection | null>;
+  getIgdbCredentialStatus?(): Promise<IgdbCredentialStatus>;
+  setIgdbCredentials?(input: { clientId: string; clientSecret: string }): Promise<IgdbCredentialStatus>;
+  deleteIgdbCredentials?(): Promise<IgdbCredentialStatus>;
+  searchIgdbGames?(query: string): Promise<IgdbSearchResult[]>;
+  previewIgdbGame?(gameId: number): Promise<IgdbGamePreview>;
+  applyIgdbGame?(request: IgdbApplyRequest): Promise<CollectionSummary>;
+  refreshIgdbGame?(collectionId: string): Promise<CollectionSummary>;
+  getIgdbConnection?(collectionId: string): Promise<IgdbConnection | null>;
+  replaceIgdbGameArtwork?(request: IgdbArtworkReplaceRequest): Promise<CollectionSummary>;
   getReleaseWatchStatus(collectionId: string): Promise<ReleaseWatchStatus>;
   setReleaseWatchEnabled(
     collectionId: string,
