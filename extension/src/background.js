@@ -16,7 +16,8 @@
   const LOCAL_TREE_KEY = "localClassificationTree";
   const RECENT_BROWSER_SAVES_KEY = "recentBrowserSaves";
   const LAST_APP_CLASSIFICATIONS_KEY = "lastAppClassifications";
-  const API_REQUEST_TIMEOUT_MS = 2500;
+  const API_REQUEST_TIMEOUT_MS = 8000;
+  const INGESTION_RETRY_DELAY_MS = 700;
   const RECENT_DUPLICATE_MS = 10_000;
   const X_SYNDICATION_ENDPOINT = "https://cdn.syndication.twimg.com/tweet-result";
   let classificationCache = null;
@@ -399,28 +400,27 @@
       return browserDownload(mediaPayload, preferences);
     }
 
-    if (classificationSource === "app" && mediaPayload.classificationSource === "app-cache") {
-      const endpoint = await activeApiEndpoint();
-      const probe = classificationRefreshPromise && classificationRefreshBaseUrl === endpoint.baseUrl
-        ? await classificationRefreshPromise
-        : (lastClassificationProbe
-          && lastClassificationProbe.baseUrl === endpoint.baseUrl
-          && Date.now() - lastClassificationProbe.checkedAt <= 10_000
-            ? lastClassificationProbe.response
-            : null);
-      if (probe && shouldFallbackToBrowserDownload(probe)) {
-        return browserDownload(mediaPayload, preferences, probe.code || "app_offline");
-      }
-    }
-
-    const appResponse = await apiRequest("/v1/ingestions", {
+    // Never let an earlier classifications probe decide where the media is saved.
+    // Proton/Tailscale can briefly recover between the menu opening and the actual
+    // save, so always make a real ingestion attempt first.
+    const request = {
       method: "POST",
       body: JSON.stringify(stripExtensionFields(mediaPayload)),
-    });
+    };
+    let appResponse = await apiRequest("/v1/ingestions", request);
     if (appResponse.ok || !shouldFallbackToBrowserDownload(appResponse)) {
       return normalizeAppMediaResponse(appResponse, mediaPayload);
     }
-    return browserDownload(mediaPayload, preferences, appResponse.code || "app_offline");
+
+    // A transient proxy/tunnel hiccup should not immediately spill the file onto
+    // the tablet. Give the PC path one short retry before using device fallback.
+    const firstFallbackCode = appResponse.code || "app_offline";
+    await retryDelay(INGESTION_RETRY_DELAY_MS);
+    appResponse = await apiRequest("/v1/ingestions", request);
+    if (appResponse.ok || !shouldFallbackToBrowserDownload(appResponse)) {
+      return normalizeAppMediaResponse(appResponse, mediaPayload);
+    }
+    return browserDownload(mediaPayload, preferences, firstFallbackCode);
   }
 
   function shouldFallbackToBrowserDownload(response) {
@@ -432,6 +432,11 @@
     if (response.code === "app_offline" || response.code === "request_failed") return true;
     const status = Number(response.httpStatus);
     return Number.isFinite(status) && status >= 500 && status <= 599;
+  }
+
+  async function retryDelay(milliseconds) {
+    if (!(milliseconds > 0) || typeof setTimeout !== "function") return;
+    await new Promise((resolve) => setTimeout(resolve, milliseconds));
   }
 
   function normalizeAppMediaResponse(response, payload) {
