@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -205,6 +205,51 @@ describe("CollectionBrowser", () => {
     renderBrowser({ collections: [], typeFilter: "game", showcase: false });
     await user.click(screen.getByRole("button", { name: "새 컬렉션" }));
     expect(screen.queryByRole("menuitem", { name: "MangaDex에서 만화 추가" })).not.toBeInTheDocument();
+  });
+
+  it("offers IGDB before direct input for games", async () => {
+    const user = userEvent.setup();
+    renderBrowser({ collections: [], typeFilter: "game", showcase: false });
+    await user.click(screen.getByRole("button", { name: "새 컬렉션" }));
+    expect((await screen.findAllByRole("menuitem")).map((item) => item.textContent)).toEqual(["IGDB에서 게임 추가", "직접 입력"]);
+  });
+
+  it("opens IGDB from the empty game state and routes after apply", async () => {
+    const user = userEvent.setup();
+    const onViewChange = vi.fn();
+    const onChanged = vi.fn().mockResolvedValue(undefined);
+    const gateway = renderBrowser({ collections: [], typeFilter: "game", showcase: false, onViewChange, onChanged });
+    vi.mocked(gateway.searchIgdbGames).mockResolvedValue([{ ...({
+      gameId: 17, title: "Astral Chain", developer: "PlatinumGames", releaseDate: "2019-08-30", cover: null,
+    }) }]);
+    vi.mocked(gateway.previewIgdbGame).mockResolvedValue({
+      gameId: 17, proposedTitle: "Astral Chain", developer: "PlatinumGames", publisher: null, releaseDate: "2019-08-30",
+      platforms: [], genres: [], overview: null, covers: [], artworks: [], screenshots: [],
+    });
+    vi.mocked(gateway.applyIgdbGame).mockResolvedValue(sample);
+    await user.click(screen.getByRole("button", { name: "IGDB에서 게임 추가" }));
+    await user.type(screen.getByRole("searchbox", { name: "게임 검색" }), "astral");
+    await user.click(screen.getByRole("button", { name: "검색" }));
+    await user.click(await screen.findByRole("button", { name: /Astral Chain/ }));
+    await user.click(screen.getByRole("button", { name: "다음" }));
+    await user.click(screen.getByRole("button", { name: "다음" }));
+    await user.click(screen.getByRole("button", { name: "hero 없이 가져오기" }));
+    await user.click(screen.getByRole("button", { name: "가져오기" }));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    expect(onViewChange).toHaveBeenCalledWith({ kind: "collection", collectionId: "c1" });
+  });
+
+  it("routes IGDB credential setup through Settings and closes import", async () => {
+    const user = userEvent.setup();
+    const onViewChange = vi.fn();
+    const gateway = renderBrowser({ collections: [], typeFilter: "game", showcase: false, onViewChange });
+    vi.mocked(gateway.searchIgdbGames).mockRejectedValue({ code: "igdb_credential_not_configured", message: "secret" });
+    await user.click(screen.getByRole("button", { name: "IGDB에서 게임 추가" }));
+    await user.type(screen.getByRole("searchbox", { name: "게임 검색" }), "astral");
+    await user.click(screen.getByRole("button", { name: "검색" }));
+    await user.click(await screen.findByRole("button", { name: "IGDB 설정 열기" }));
+    expect(onViewChange).toHaveBeenCalledWith({ kind: "settings" });
+    expect(screen.queryByRole("heading", { name: "IGDB에서 게임 추가" })).not.toBeInTheDocument();
   });
 
   it("prefers stored WorkArtwork over other card covers", () => {

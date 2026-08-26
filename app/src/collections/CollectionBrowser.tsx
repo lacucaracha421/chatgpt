@@ -17,6 +17,7 @@ import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { CollectionCard } from "./CollectionCard";
 import { CollectionEditDialog, type CollectionEditMode } from "./CollectionEditDialog";
 import { MangaDexImportDialog } from "./MangaDexImportDialog";
+import { IgdbImportDialog } from "./IgdbImportDialog";
 import { deriveCollectionLibrary, type CollectionLibrarySort, type CollectionLibraryState } from "./collectionLibrary";
 
 const TYPE_LABEL: Record<CollectionType, string> = {
@@ -47,6 +48,7 @@ export function CollectionBrowser({
   const { gateway } = useLibrary();
   const [editMode, setEditMode] = useState<CollectionEditMode | null>(null);
   const [mangaDexOpen, setMangaDexOpen] = useState(false);
+  const [igdbOpen, setIgdbOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<CollectionSummary | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const libraryStateRef = useRef(libraryState);
@@ -111,6 +113,7 @@ export function CollectionBrowser({
             label="새 컬렉션"
             trigger={<PlusIcon aria-hidden="true" />}
             items={[
+              ...(typeFilter === "game" ? [{ id: "igdb", label: "IGDB에서 게임 추가", onSelect: () => setIgdbOpen(true) }] : []),
               ...(typeFilter === "manga" ? [{ id: "mangadex", label: "MangaDex에서 만화 추가", onSelect: () => setMangaDexOpen(true) }] : []),
               { id: "manual", label: "직접 입력", onSelect: () => setEditMode({ kind: "create", type: typeFilter }) },
             ]}
@@ -176,7 +179,7 @@ export function CollectionBrowser({
           {visible.length === 0 && (
             <div className="collection-browser__empty">
               <EmptyState title={showcase ? "쇼케이스에 컬렉션이 없습니다." : "컬렉션이 없습니다."}>
-                {showcase ? "라이브러리에서 쇼케이스에 추가한 컬렉션이 여기에 표시됩니다." : <><p>새 컬렉션을 만들어 작품을 모아보세요.</p><Button type="button" onClick={() => typeFilter === "manga" ? setMangaDexOpen(true) : setEditMode({ kind: "create", type: typeFilter })}>{typeFilter === "manga" ? "MangaDex에서 만화 추가" : "직접 입력"}</Button></>}
+                {showcase ? "라이브러리에서 쇼케이스에 추가한 컬렉션이 여기에 표시됩니다." : <><p>새 컬렉션을 만들어 작품을 모아보세요.</p><Button type="button" onClick={() => typeFilter === "manga" ? setMangaDexOpen(true) : typeFilter === "game" ? setIgdbOpen(true) : setEditMode({ kind: "create", type: typeFilter })}>{typeFilter === "manga" ? "MangaDex에서 만화 추가" : typeFilter === "game" ? "IGDB에서 게임 추가" : "직접 입력"}</Button></>}
               </EmptyState>
             </div>
           )}
@@ -195,6 +198,21 @@ export function CollectionBrowser({
           open
           target={{ kind: "new" }}
           onClose={() => setMangaDexOpen(false)}
+          onApplied={async (collection) => {
+            await onChanged();
+            onViewChange({ kind: "collection", collectionId: collection.id });
+          }}
+        />
+      )}
+      {igdbOpen && (
+        <IgdbImportDialog
+          open
+          target={{ kind: "new" }}
+          onClose={() => setIgdbOpen(false)}
+          onOpenSettings={() => {
+            setIgdbOpen(false);
+            onViewChange({ kind: "settings" });
+          }}
           onApplied={async (collection) => {
             await onChanged();
             onViewChange({ kind: "collection", collectionId: collection.id });
