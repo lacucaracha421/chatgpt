@@ -651,15 +651,15 @@ export interface LibraryGateway {
   applyAladin(request: AladinApplyRequest): Promise<AladinSyncResult>;
   refreshAladin(collectionId: string): Promise<AladinSyncResult>;
   getAladinConnection(collectionId: string): Promise<AladinConnection | null>;
-  getIgdbCredentialStatus?(): Promise<IgdbCredentialStatus>;
-  setIgdbCredentials?(input: { clientId: string; clientSecret: string }): Promise<IgdbCredentialStatus>;
-  deleteIgdbCredentials?(): Promise<IgdbCredentialStatus>;
-  searchIgdbGames?(query: string): Promise<IgdbSearchResult[]>;
-  previewIgdbGame?(gameId: number): Promise<IgdbGamePreview>;
-  applyIgdbGame?(request: IgdbApplyRequest): Promise<CollectionSummary>;
-  refreshIgdbGame?(collectionId: string): Promise<CollectionSummary>;
-  getIgdbConnection?(collectionId: string): Promise<IgdbConnection | null>;
-  replaceIgdbGameArtwork?(request: IgdbArtworkReplaceRequest): Promise<CollectionSummary>;
+  getIgdbCredentialStatus(): Promise<IgdbCredentialStatus>;
+  setIgdbCredentials(input: { clientId: string; clientSecret: string }): Promise<IgdbCredentialStatus>;
+  deleteIgdbCredentials(): Promise<IgdbCredentialStatus>;
+  searchIgdbGames(query: string): Promise<IgdbSearchResult[]>;
+  previewIgdbGame(gameId: number): Promise<IgdbGamePreview>;
+  applyIgdbGame(request: IgdbApplyRequest): Promise<CollectionSummary>;
+  refreshIgdbGame(collectionId: string): Promise<CollectionSummary>;
+  getIgdbConnection(collectionId: string): Promise<IgdbConnection | null>;
+  replaceIgdbGameArtwork(request: IgdbArtworkReplaceRequest): Promise<CollectionSummary>;
   getReleaseWatchStatus(collectionId: string): Promise<ReleaseWatchStatus>;
   setReleaseWatchEnabled(
     collectionId: string,

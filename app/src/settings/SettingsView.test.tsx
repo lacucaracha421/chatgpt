@@ -322,6 +322,15 @@ it("confirms before clearing the remote manga cache", async () => {
 
 function createGateway(): LibraryGateway {
   return {
+    getIgdbCredentialStatus: vi.fn(),
+    setIgdbCredentials: vi.fn(),
+    deleteIgdbCredentials: vi.fn(),
+    searchIgdbGames: vi.fn(),
+    previewIgdbGame: vi.fn(),
+    applyIgdbGame: vi.fn(),
+    refreshIgdbGame: vi.fn(),
+    getIgdbConnection: vi.fn(),
+    replaceIgdbGameArtwork: vi.fn(),
     openLibrary: vi.fn(), importVckCatalog: vi.fn(), getOnlineCatalogStatus: vi.fn().mockResolvedValue({ installed: false, workCount: 0, updateEnabled: true, updateIntervalSeconds: 3600, lastAttemptAt: null, lastSuccessAt: null, lastAdded: 0, lastError: null }), searchOnlineCatalog: vi.fn(), suggestOnlineCatalog: vi.fn(), updateOnlineCatalog: vi.fn(), setOnlineCatalogUpdateSettings: vi.fn(), runDueOnlineCatalogUpdate: vi.fn(), getOnlineCatalogWorkDetail: vi.fn(), setOnlineCatalogBookmark: vi.fn(), resolveOnlineCatalogWork: vi.fn(), getRemoteReadingProgress: vi.fn(), saveRemoteReadingProgress: vi.fn(), clearRemoteMangaCache: vi.fn(), getExtensionConnection: vi.fn(), listClassifications: vi.fn(),
     listAlbums: vi.fn().mockResolvedValue([]), createAlbum: vi.fn(), renameAlbum: vi.fn(), moveAlbum: vi.fn(), updateAlbumAppearance: vi.fn(), deleteAlbum: vi.fn(),
     createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(), updateClassificationAppearance: vi.fn(),

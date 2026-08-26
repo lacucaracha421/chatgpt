@@ -183,6 +183,15 @@ it("uses the shared view toolbar with window controls", async () => {
 
 function createGateway(): LibraryGateway {
   return {
+    getIgdbCredentialStatus: vi.fn(),
+    setIgdbCredentials: vi.fn(),
+    deleteIgdbCredentials: vi.fn(),
+    searchIgdbGames: vi.fn(),
+    previewIgdbGame: vi.fn(),
+    applyIgdbGame: vi.fn(),
+    refreshIgdbGame: vi.fn(),
+    getIgdbConnection: vi.fn(),
+    replaceIgdbGameArtwork: vi.fn(),
     openLibrary: vi.fn(), importVckCatalog: vi.fn(), getOnlineCatalogStatus: vi.fn(), searchOnlineCatalog: vi.fn(), suggestOnlineCatalog: vi.fn(), updateOnlineCatalog: vi.fn(), setOnlineCatalogUpdateSettings: vi.fn(), runDueOnlineCatalogUpdate: vi.fn(), getOnlineCatalogWorkDetail: vi.fn(), setOnlineCatalogBookmark: vi.fn(), resolveOnlineCatalogWork: vi.fn(), getRemoteReadingProgress: vi.fn(), saveRemoteReadingProgress: vi.fn(), clearRemoteMangaCache: vi.fn(), getExtensionConnection: vi.fn(), listClassifications: vi.fn(),
     listAlbums: vi.fn().mockResolvedValue([]), createAlbum: vi.fn(), renameAlbum: vi.fn(), moveAlbum: vi.fn(), updateAlbumAppearance: vi.fn(), deleteAlbum: vi.fn(),
     createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(), updateClassificationAppearance: vi.fn(),

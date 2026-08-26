@@ -109,6 +109,15 @@ describe("MangaBrowser", () => {
 
 function createGateway(overrides: { root: string | null; series: MangaSeries[] }): LibraryGateway {
   const base: LibraryGateway = {
+    getIgdbCredentialStatus: vi.fn(),
+    setIgdbCredentials: vi.fn(),
+    deleteIgdbCredentials: vi.fn(),
+    searchIgdbGames: vi.fn(),
+    previewIgdbGame: vi.fn(),
+    applyIgdbGame: vi.fn(),
+    refreshIgdbGame: vi.fn(),
+    getIgdbConnection: vi.fn(),
+    replaceIgdbGameArtwork: vi.fn(),
     openLibrary: vi.fn(), getExtensionConnection: vi.fn(), listClassifications: vi.fn(),
     listAlbums: vi.fn().mockResolvedValue([]), createAlbum: vi.fn(), renameAlbum: vi.fn(), moveAlbum: vi.fn(), updateAlbumAppearance: vi.fn(), deleteAlbum: vi.fn(),
     createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(), updateClassificationAppearance: vi.fn(),
