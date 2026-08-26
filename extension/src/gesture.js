@@ -11,26 +11,26 @@
   const SECONDARY_OUTER_RADIUS = 180;
   const CONTROL_RADIUS = 210;
   const CONTROL_HIT_HALF_HEIGHT = 72;
-  const SECONDARY_CLUSTER_ARC_MAX = (Math.PI / 180) * 140;
-  const SECONDARY_SECTOR_MIN_SPAN = (Math.PI / 180) * 28;
+  const SECONDARY_CLUSTER_ARC_MAX = (Math.PI / 180) * 270;
+  const SECONDARY_SECTOR_MIN_SPAN = (Math.PI / 180) * 18;
   const SECONDARY_SECTOR_GAP = (Math.PI / 180) * 2;
-  const SECONDARY_FULL_CIRCLE_THRESHOLD = 6;
+  const SECONDARY_ARC_DEGREES = Object.freeze([0, 54, 90, 120, 150, 180, 210, 225, 240, 250, 258, 264, 270]);
 
   function primaryAngle(index, count) {
     return -Math.PI / 2 + (Math.PI * 2 * index) / count;
   }
 
   function secondaryAngles(primaryIndex, primaryCount, secondaryCount) {
-    const safeCount = Math.max(1, secondaryCount || 1);
-    const anchor = primaryAngle(primaryIndex, primaryCount);
+    const safeCount = Math.max(1, Number(secondaryCount) || 1);
+    const safePrimaryIndex = Number.isInteger(primaryIndex) && primaryIndex >= 0 ? primaryIndex : 0;
+    const anchor = primaryAngle(safePrimaryIndex, Math.max(1, primaryCount || 1));
     const gap = SECONDARY_SECTOR_GAP;
-    const useFullCircle = safeCount > SECONDARY_FULL_CIRCLE_THRESHOLD;
-    const maxArc = useFullCircle ? Math.PI * 2 : SECONDARY_CLUSTER_ARC_MAX;
-    const naturalArc = (Math.PI * 2 * safeCount) / Math.max(primaryCount, 1);
+    const tableIndex = Math.min(SECONDARY_ARC_DEGREES.length - 1, safeCount);
+    const desiredArc = (Math.PI / 180) * SECONDARY_ARC_DEGREES[tableIndex];
     const minArc = safeCount * SECONDARY_SECTOR_MIN_SPAN + gap * (safeCount - 1);
-    const arc = Math.min(maxArc, Math.max(naturalArc, minArc));
-    const sectorSpan = (arc - gap * (safeCount - 1)) / safeCount;
-    const startAngle = useFullCircle ? -Math.PI / 2 : anchor - arc / 2;
+    const arc = Math.min(SECONDARY_CLUSTER_ARC_MAX, Math.max(desiredArc, minArc));
+    const sectorSpan = Math.max(0, (arc - gap * (safeCount - 1)) / safeCount);
+    const startAngle = anchor - arc / 2;
     const angles = [];
     for (let i = 0; i < safeCount; i++) {
       const start = startAngle + i * (sectorSpan + gap);
@@ -116,7 +116,7 @@
         }
         if (target?.type === "primary-slot" && target.entry) {
           pendingClassificationId = target.entry.id;
-          const hasChildren = entries.some((entry) => entry.parentId === target.entry.id);
+          const hasChildren = entryHasChildren(target.entry.id);
           if (hasChildren && expandedParentId !== target.entry.id) {
             expandedParentId = target.entry.id;
             secondaryPage = 0;
@@ -138,7 +138,7 @@
         return { type: "select", classificationId: expandedParentId };
       }
       if (target?.type === "primary-slot" && target.entry
-        && entries.some((entry) => entry.parentId === target.entry.id)
+        && entryHasChildren(target.entry.id)
         && expandedParentId !== target.entry.id) {
         expandedParentId = target.entry.id;
         secondaryPage = 0;
@@ -219,12 +219,12 @@
       if (target?.type === "next" || target?.type === "previous") return true;
       if (target?.type !== "primary-slot") return false;
       if (!target.entry) return false;
-      return entries.some((entry) => entry.parentId === target.entry.id);
+      return entryHasChildren(target.entry.id);
     }
 
     function applyDwell() {
       if (hover?.type === "primary-slot" && hover.entry
-        && entries.some((entry) => entry.parentId === hover.entry.id)) {
+        && entryHasChildren(hover.entry.id)) {
         if (expandedParentId !== hover.entry.id) {
           expandedParentId = hover.entry.id;
           secondaryPage = 0;
@@ -241,12 +241,18 @@
       dwellDeadline = null;
     }
 
+    function entryHasChildren(entryId) {
+      if (!entryId) return false;
+      const level = globalThis.LakomicsRadial.getLevel(entries, layout, entryId, 0);
+      return level.slots.some(Boolean);
+    }
+
     function currentPrimaryLevel() {
       return globalThis.LakomicsRadial.getPinnedLevel(entries, layout, pinnedIds, primaryPage);
     }
 
     function currentSecondaryLevel() {
-      return globalThis.LakomicsRadial.getLevel(entries, layout, expandedParentId, secondaryPage);
+      return globalThis.LakomicsRadial.getCompactLevel(entries, layout, expandedParentId, secondaryPage);
     }
 
     function snapshot() {
