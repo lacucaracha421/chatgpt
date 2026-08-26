@@ -355,8 +355,8 @@ export type UpdateCollection = {
   description: string | null;
   type: CollectionType;
   year: number | null;
-  originalTitle: string | null;
-  runtimeMinutes: number | null;
+  originalTitle?: string | null;
+  runtimeMinutes?: number | null;
   author: string | null;
   developer: string | null;
   publisher: string | null;
