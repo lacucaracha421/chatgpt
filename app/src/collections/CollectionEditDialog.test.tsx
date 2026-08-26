@@ -121,6 +121,27 @@ it("shows movie production company separately from director", () => {
   expect(screen.getByLabelText("감독")).toHaveValue("Director");
 });
 
+it("edits movie original title and accepts only a positive runtime", async () => {
+  const user = userEvent.setup();
+  const onSubmit = vi.fn().mockResolvedValue(undefined);
+  render(<CollectionEditDialog open mode={{ kind: "edit", collection: { ...collectionFixture, type: "movie", originalTitle: "Old", runtimeMinutes: 90 } }} onClose={vi.fn()} onSubmit={onSubmit} />);
+
+  const originalTitle = screen.getByLabelText("원제");
+  const runtime = screen.getByLabelText("상영 시간(분)");
+  await user.clear(originalTitle);
+  await user.type(originalTitle, "Perfect Blue");
+  await user.clear(runtime);
+  await user.type(runtime, "0");
+  await user.click(screen.getByRole("button", { name: "저장" }));
+  expect(onSubmit).not.toHaveBeenCalled();
+  expect(screen.getByRole("alert")).toHaveTextContent("상영 시간은 1분 이상이어야 합니다.");
+
+  await user.clear(runtime);
+  await user.type(runtime, "81");
+  await user.click(screen.getByRole("button", { name: "저장" }));
+  expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ originalTitle: "Perfect Blue", runtimeMinutes: 81 }));
+});
+
 it("submits a half-star personal rating for manga", async () => {
   const user = userEvent.setup();
   const onSubmit = vi.fn().mockResolvedValue(undefined);

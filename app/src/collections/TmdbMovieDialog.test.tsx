@@ -43,7 +43,7 @@ function makeGateway(overrides: Partial<LibraryGateway> = {}) {
 
 function renderDialog(
   gateway: LibraryGateway = makeGateway(),
-  target: { kind: "new" } | { kind: "existing"; collectionId: string } = { kind: "new" },
+  target: { kind: "new" } | { kind: "existing"; collectionId: string } | { kind: "artwork"; collectionId: string } = { kind: "new" },
   onOpenSettings = vi.fn(),
 ) {
   const onApplied = vi.fn().mockResolvedValue(undefined);
@@ -184,5 +184,28 @@ describe("TmdbMovieDialog", () => {
       posterPath: "/poster.jpg",
       backdropPath: null,
     }));
+  });
+
+  it("replaces connected movie artwork with independent keep, select, and clear decisions", async () => {
+    const user = userEvent.setup();
+    const gateway = makeGateway({
+      getTmdbConnection: vi.fn().mockResolvedValue({ movieId: 10494, lastSyncedAt: "t" }),
+      replaceTmdbMovieArtwork: vi.fn().mockResolvedValue(collection),
+    });
+    renderDialog(gateway, { kind: "artwork", collectionId: "movie-1" });
+
+    await screen.findByRole("heading", { name: "포스터 선택" });
+    expect(screen.getByRole("button", { name: "포스터 유지" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "배경 유지" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("radio", { name: /poster\.jpg/ }));
+    await user.click(screen.getByRole("button", { name: "배경 제거" }));
+    await user.click(screen.getByRole("button", { name: "저장" }));
+
+    await waitFor(() => expect(gateway.replaceTmdbMovieArtwork).toHaveBeenCalledWith({
+      collectionId: "movie-1",
+      poster: { kind: "select", filePath: "/poster.jpg" },
+      backdrop: { kind: "clear" },
+    }));
+    expect(gateway.applyTmdbMovie).not.toHaveBeenCalled();
   });
 });

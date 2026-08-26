@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { tmdbImagePreviewUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
-import type { CollectionSummary, TmdbImageCandidate, TmdbMoviePreview, TmdbSearchResult } from "../library/types";
+import type { CollectionSummary, TmdbArtworkDecision, TmdbImageCandidate, TmdbMoviePreview, TmdbSearchResult } from "../library/types";
 import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
 import { Skeleton } from "../shared/ui/Skeleton";
@@ -10,7 +10,8 @@ import { TextField } from "../shared/ui/TextField";
 
 export type TmdbMovieTarget =
   | { kind: "new" }
-  | { kind: "existing"; collectionId: string };
+  | { kind: "existing"; collectionId: string }
+  | { kind: "artwork"; collectionId: string };
 
 export type TmdbMovieStep =
   | { kind: "search"; query: string; selectedMovieId: number | null }
@@ -21,6 +22,8 @@ export type TmdbMovieStep =
       posterDecided: boolean;
       backdropPath: string | null;
       backdropDecided: boolean;
+      posterDecision: TmdbArtworkDecision;
+      backdropDecision: TmdbArtworkDecision;
     };
 
 type Props = {
@@ -31,7 +34,7 @@ type Props = {
   onApplied: (collection: CollectionSummary) => Promise<void> | void;
 };
 
-type Busy = "search" | "preview" | "apply" | null;
+type Busy = "search" | "preview" | "apply" | "artwork" | null;
 type SearchStep = Extract<TmdbMovieStep, { kind: "search" }>;
 
 export function TmdbMovieDialog({ open, target, onClose, onOpenSettings, onApplied }: Props) {
@@ -43,7 +46,7 @@ export function TmdbMovieDialog({ open, target, onClose, onOpenSettings, onAppli
   const [credentialError, setCredentialError] = useState(false);
   const generation = useRef(0);
   const searchSnapshot = useRef<SearchStep>(newSearchStep());
-  const targetCollectionId = target.kind === "existing" ? target.collectionId : undefined;
+  const targetCollectionId = target.kind === "new" ? undefined : target.collectionId;
 
   useEffect(() => {
     generation.current += 1;
@@ -55,6 +58,22 @@ export function TmdbMovieDialog({ open, target, onClose, onOpenSettings, onAppli
     setBusy(null);
     setError(null);
     setCredentialError(false);
+    if (target.kind === "artwork") {
+      const requestGeneration = generation.current;
+      setBusy("artwork");
+      void gateway.getTmdbConnection(target.collectionId).then(async (connection) => {
+        if (!connection) throw new Error("TMDB 연결 정보를 찾지 못했습니다.");
+        return gateway.previewTmdbMovie(connection.movieId);
+      }).then((preview) => {
+        if (requestGeneration !== generation.current) return;
+        setStep(buildPreviewStep(preview, true));
+        setBusy(null);
+      }).catch((loadError) => {
+        if (requestGeneration !== generation.current) return;
+        showError(loadError, "TMDB 아트워크를 불러오지 못했습니다.", setError, setCredentialError);
+        setBusy(null);
+      });
+    }
   }, [gateway, open, target.kind, targetCollectionId]);
 
   function updateSearch(update: Partial<SearchStep>) {
@@ -99,14 +118,7 @@ export function TmdbMovieDialog({ open, target, onClose, onOpenSettings, onAppli
     try {
       const preview = await gateway.previewTmdbMovie(movieId);
       if (requestGeneration !== generation.current) return;
-      setStep({
-        kind: "preview",
-        preview,
-        posterPath: null,
-        posterDecided: preview.posters.length === 0,
-        backdropPath: null,
-        backdropDecided: preview.backdrops.length === 0,
-      });
+      setStep(buildPreviewStep(preview, false));
     } catch (previewError) {
       if (requestGeneration === generation.current) showError(previewError, "TMDB 영화 정보를 불러오지 못했습니다.", setError, setCredentialError);
     } finally {
@@ -130,16 +142,13 @@ export function TmdbMovieDialog({ open, target, onClose, onOpenSettings, onAppli
     setError(null);
     setCredentialError(false);
     try {
-      const collection = await gateway.applyTmdbMovie({
-        target,
-        movieId: step.preview.movieId,
-        posterPath: step.posterPath,
-        backdropPath: step.backdropPath,
-      });
+      const collection = target.kind === "artwork"
+        ? await gateway.replaceTmdbMovieArtwork({ collectionId: target.collectionId, poster: step.posterDecision, backdrop: step.backdropDecision })
+        : await gateway.applyTmdbMovie({ target, movieId: step.preview.movieId, posterPath: step.posterPath, backdropPath: step.backdropPath });
       onClose();
       void Promise.resolve().then(() => onApplied(collection)).catch(() => undefined);
     } catch (applyError) {
-      if (requestGeneration === generation.current) showError(applyError, target.kind === "new" ? "TMDB 영화를 가져오지 못했습니다." : "TMDB 정보를 연결하지 못했습니다.", setError, setCredentialError);
+      if (requestGeneration === generation.current) showError(applyError, target.kind === "new" ? "TMDB 영화를 가져오지 못했습니다." : target.kind === "existing" ? "TMDB 정보를 연결하지 못했습니다." : "TMDB 아트워크를 바꾸지 못했습니다.", setError, setCredentialError);
     } finally {
       if (requestGeneration === generation.current) setBusy(null);
     }
@@ -151,7 +160,7 @@ export function TmdbMovieDialog({ open, target, onClose, onOpenSettings, onAppli
     onClose();
   }
 
-  const title = target.kind === "new" ? "TMDB에서 영화 추가" : "TMDB 영화 연결";
+  const title = target.kind === "new" ? "TMDB에서 영화 추가" : target.kind === "existing" ? "TMDB 영화 연결" : "TMDB 영화 아트워크 변경";
   const searchStep = step.kind === "search" ? step : null;
   const previewStep = step.kind === "preview" ? step : null;
 
@@ -160,16 +169,17 @@ export function TmdbMovieDialog({ open, target, onClose, onOpenSettings, onAppli
       <div className="tmdb-movie-dialog">
         {error && <div className="tmdb-movie-dialog__error" role="alert"><p>{error}</p>{credentialError && <Button type="button" onClick={onOpenSettings}>TMDB 설정 열기</Button>}</div>}
         {busy === "search" && <Skeleton className="tmdb-movie-dialog__loading" label="영화 검색 중" />}
-        {searchStep && <SearchStep step={searchStep} results={results} busy={busy} onQuery={(query) => { updateSearch({ query }); setError(null); }} onSearch={() => void search()} onSelect={(movieId) => { updateSearch({ selectedMovieId: movieId }); setError(null); setCredentialError(false); }} />}
+        {busy === "artwork" && <Skeleton className="tmdb-movie-dialog__loading" label="아트워크 불러오는 중" />}
+        {searchStep && target.kind !== "artwork" && <SearchStep step={searchStep} results={results} busy={busy} onQuery={(query) => { updateSearch({ query }); setError(null); }} onSearch={() => void search()} onSelect={(movieId) => { updateSearch({ selectedMovieId: movieId }); setError(null); setCredentialError(false); }} />}
         {previewStep && <>
           <PreviewSummary preview={previewStep.preview} />
-          <ArtworkStep kind="poster" candidates={previewStep.preview.posters} selectedPath={previewStep.posterPath} decided={previewStep.posterDecided} onSelect={(filePath) => setStep((current) => current.kind === "preview" ? { ...current, posterPath: filePath, posterDecided: true } : current)} onClear={() => setStep((current) => current.kind === "preview" ? { ...current, posterPath: null, posterDecided: true } : current)} />
-          <ArtworkStep kind="backdrop" candidates={previewStep.preview.backdrops} selectedPath={previewStep.backdropPath} decided={previewStep.backdropDecided} onSelect={(filePath) => setStep((current) => current.kind === "preview" ? { ...current, backdropPath: filePath, backdropDecided: true } : current)} onClear={() => setStep((current) => current.kind === "preview" ? { ...current, backdropPath: null, backdropDecided: true } : current)} />
+          <ArtworkStep kind="poster" artworkMode={target.kind === "artwork"} decision={previewStep.posterDecision} candidates={previewStep.preview.posters} selectedPath={previewStep.posterPath} decided={previewStep.posterDecided} onKeep={() => setStep((current) => current.kind === "preview" ? { ...current, posterPath: null, posterDecision: { kind: "keep" } } : current)} onSelect={(filePath) => setStep((current) => current.kind === "preview" ? { ...current, posterPath: filePath, posterDecided: true, posterDecision: { kind: "select", filePath } } : current)} onClear={() => setStep((current) => current.kind === "preview" ? { ...current, posterPath: null, posterDecided: true, posterDecision: { kind: target.kind === "artwork" ? "clear" : "keep" } } : current)} />
+          <ArtworkStep kind="backdrop" artworkMode={target.kind === "artwork"} decision={previewStep.backdropDecision} candidates={previewStep.preview.backdrops} selectedPath={previewStep.backdropPath} decided={previewStep.backdropDecided} onKeep={() => setStep((current) => current.kind === "preview" ? { ...current, backdropPath: null, backdropDecision: { kind: "keep" } } : current)} onSelect={(filePath) => setStep((current) => current.kind === "preview" ? { ...current, backdropPath: filePath, backdropDecided: true, backdropDecision: { kind: "select", filePath } } : current)} onClear={() => setStep((current) => current.kind === "preview" ? { ...current, backdropPath: null, backdropDecided: true, backdropDecision: { kind: target.kind === "artwork" ? "clear" : "keep" } } : current)} />
         </>}
         <div className="ui-dialog__actions tmdb-movie-dialog__actions">
           <Button type="button" disabled={busy === "apply"} onClick={handleClose}>취소</Button>
-          {previewStep && <Button type="button" disabled={busy !== null} onClick={back}>뒤로</Button>}
-          {searchStep && <Button type="button" variant="primary" disabled={searchStep.selectedMovieId === null || busy !== null} onClick={() => void previewSelected()}>{busy === "preview" ? "불러오는 중…" : "다음"}</Button>}
+          {previewStep && target.kind !== "artwork" && <Button type="button" disabled={busy !== null} onClick={back}>뒤로</Button>}
+          {searchStep && target.kind !== "artwork" && <Button type="button" variant="primary" disabled={searchStep.selectedMovieId === null || busy !== null} onClick={() => void previewSelected()}>{busy === "preview" ? "불러오는 중…" : "다음"}</Button>}
           {previewStep && <Button type="button" variant="primary" disabled={busy !== null || !previewStep.posterDecided || !previewStep.backdropDecided} onClick={() => void apply()}>{target.kind === "new" ? "가져오기" : "저장"}</Button>}
         </div>
       </div>
@@ -203,10 +213,10 @@ function PreviewSummary({ preview }: { preview: TmdbMoviePreview }) {
   </div>;
 }
 
-function ArtworkStep({ kind, candidates, selectedPath, decided, onSelect, onClear }: { kind: "poster" | "backdrop"; candidates: TmdbImageCandidate[]; selectedPath: string | null; decided: boolean; onSelect: (filePath: string) => void; onClear: () => void }) {
+function ArtworkStep({ kind, artworkMode, decision, candidates, selectedPath, decided, onKeep, onSelect, onClear }: { kind: "poster" | "backdrop"; artworkMode: boolean; decision: TmdbArtworkDecision; candidates: TmdbImageCandidate[]; selectedPath: string | null; decided: boolean; onKeep: () => void; onSelect: (filePath: string) => void; onClear: () => void }) {
   const label = kind === "poster" ? "포스터" : "배경";
   return <section className="tmdb-movie-dialog__artwork" aria-label={`${label} 선택`}>
-    <div className="tmdb-movie-dialog__artwork-heading"><h3>{label} 선택</h3><Button type="button" size="sm" aria-pressed={decided && selectedPath === null} onClick={onClear}>{label} 없이 가져오기</Button></div>
+    <div className="tmdb-movie-dialog__artwork-heading"><h3>{label} 선택</h3><div>{artworkMode && <Button type="button" size="sm" aria-pressed={decision.kind === "keep"} onClick={onKeep}>{label} 유지</Button>}<Button type="button" size="sm" aria-pressed={artworkMode ? decision.kind === "clear" : decided && selectedPath === null} onClick={onClear}>{artworkMode ? `${label} 제거` : `${label} 없이 가져오기`}</Button></div></div>
     {candidates.length === 0 ? <p className="tmdb-movie-dialog__muted">사용 가능한 이미지가 없습니다.</p> : <div className="tmdb-movie-dialog__candidates">
       {candidates.map((candidate, index) => <label key={candidate.filePath} className="tmdb-movie-dialog__candidate">
         <input type="radio" name={kind} value={candidate.filePath} checked={selectedPath === candidate.filePath} aria-label={`${label} ${index + 1} (${candidate.filePath})`} onChange={() => onSelect(candidate.filePath)} />
@@ -240,4 +250,17 @@ function errorCode(error: unknown): string | null {
 
 function newSearchStep(): SearchStep {
   return { kind: "search", query: "", selectedMovieId: null };
+}
+
+function buildPreviewStep(preview: TmdbMoviePreview, artworkMode: boolean): Extract<TmdbMovieStep, { kind: "preview" }> {
+  return {
+    kind: "preview",
+    preview,
+    posterPath: null,
+    posterDecided: artworkMode || preview.posters.length === 0,
+    backdropPath: null,
+    backdropDecided: artworkMode || preview.backdrops.length === 0,
+    posterDecision: { kind: "keep" },
+    backdropDecision: { kind: "keep" },
+  };
 }

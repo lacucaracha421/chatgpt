@@ -55,6 +55,24 @@ const gameCollection: CollectionSummary = {
   overview: "A special ops action game.",
 };
 
+const movieCollection: CollectionSummary = {
+  ...collection,
+  id: "movie-1",
+  name: "퍼펙트 블루",
+  type: "movie",
+  selectedWorkArtworkId: "movie-poster",
+  selectedBackdropArtworkId: "movie-backdrop",
+  originalTitle: "Perfect Blue",
+  runtimeMinutes: 81,
+  author: null,
+  year: 1997,
+  productionCompany: "매드하우스",
+  releaseDate: "1997-07-12",
+  director: "곤 사토시",
+  genres: "애니메이션 · 스릴러",
+  overview: "현실과 환상의 경계가 무너진다.",
+};
+
 const unread: ReleaseWatchEvent[] = [
   { id: "e1", kind: "new_volume", volumeNumber: 13, previousValue: null, currentValue: "2026-09-01", detectedAt: "2026-08-22T00:00:00Z" },
   { id: "e2", kind: "release_date_changed", volumeNumber: 12, previousValue: "2026-08-21", currentValue: "2026-08-23", detectedAt: "2026-08-22T00:00:00Z" },
@@ -82,6 +100,10 @@ function renderOverlay(
     refreshAladin: vi.fn().mockResolvedValue({ added: 0, updated: 0, unchanged: 0, ignored: 0 }),
     getAladinConnection: vi.fn().mockResolvedValue(null),
     getIgdbConnection: vi.fn().mockResolvedValue(null),
+    getTmdbConnection: vi.fn().mockResolvedValue(null),
+    previewTmdbMovie: vi.fn().mockResolvedValue({ movieId: 10494, proposedTitle: movieCollection.name, originalTitle: movieCollection.originalTitle, releaseDate: movieCollection.releaseDate, runtimeMinutes: 81, director: movieCollection.director, productionCompany: movieCollection.productionCompany, genres: movieCollection.genres, overview: movieCollection.overview, externalScore: 84, posters: [], backdrops: [] }),
+    replaceTmdbMovieArtwork: vi.fn().mockResolvedValue(movieCollection),
+    refreshTmdbMovie: vi.fn().mockResolvedValue(movieCollection),
     previewIgdbGame: vi.fn().mockResolvedValue({
       gameId: 17,
       proposedTitle: gameCollection.name,
@@ -627,5 +649,39 @@ describe("CollectionOverlay game detail flow", () => {
 
     expect(onOpenSettings).toHaveBeenCalledOnce();
     expect(screen.queryByRole("dialog", { name: "IGDB 게임 아트워크 변경" })).not.toBeInTheDocument();
+  });
+});
+
+describe("CollectionOverlay movie detail flow", () => {
+  it("renders the local movie immediately and connects an unbound movie", async () => {
+    const user = userEvent.setup();
+    let resolveConnection!: (connection: null) => void;
+    const getTmdbConnection = vi.fn().mockReturnValue(new Promise((resolve) => { resolveConnection = resolve; }));
+    renderOverlay({ getTmdbConnection }, undefined, undefined, movieCollection);
+
+    expect(screen.getByRole("heading", { name: "퍼펙트 블루", level: 1 })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "작품 관리" }));
+    expect(screen.getByRole("menuitem", { name: "TMDB 새로고침" })).toBeDisabled();
+    resolveConnection(null);
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: "TMDB에 연결" })).toBeEnabled());
+    await user.click(screen.getByRole("menuitem", { name: "TMDB에 연결" }));
+    expect(screen.getByRole("dialog", { name: "TMDB 영화 연결" })).toBeInTheDocument();
+  });
+
+  it("keeps the local poster, backdrop, and detail when TMDB refresh fails", async () => {
+    const user = userEvent.setup();
+    renderOverlay({
+      getTmdbConnection: vi.fn().mockResolvedValue({ movieId: 10494, lastSyncedAt: "t" }),
+      refreshTmdbMovie: vi.fn().mockRejectedValue(new Error("TMDB 새로고침 실패")),
+    }, undefined, undefined, movieCollection);
+
+    await user.click(screen.getByRole("button", { name: "작품 관리" }));
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: "TMDB 새로고침" })).toBeEnabled());
+    await user.click(screen.getByRole("menuitem", { name: "TMDB 새로고침" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("TMDB 새로고침 실패");
+    expect(screen.getByRole("img", { name: "퍼펙트 블루 포스터" })).toHaveAttribute("src", "http://lakomics.localhost/work-artwork/movie-poster");
+    expect(screen.getByRole("region", { name: "영화 배경 이미지" })).toHaveStyle({ backgroundImage: 'url("http://lakomics.localhost/work-artwork/movie-backdrop")' });
+    expect(screen.getByText("현실과 환상의 경계가 무너진다.")).toBeVisible();
   });
 });

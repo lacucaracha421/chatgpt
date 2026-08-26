@@ -25,6 +25,8 @@ export function CollectionEditDialog({
   const [description, setDescription] = useState(existing?.description ?? "");
   const [type, setType] = useState<CollectionType>(mode.kind === "create" ? mode.type : existing?.type ?? "manga");
   const [year, setYear] = useState<number | null>(existing?.year ?? null);
+  const [originalTitle, setOriginalTitle] = useState(existing?.originalTitle ?? "");
+  const [runtimeMinutes, setRuntimeMinutes] = useState<number | null>(existing?.runtimeMinutes ?? null);
   const [author, setAuthor] = useState(existing?.author ?? "");
   const [developer, setDeveloper] = useState(existing?.developer ?? "");
   const [publisher, setPublisher] = useState(existing?.publisher ?? "");
@@ -42,6 +44,8 @@ export function CollectionEditDialog({
     setDescription(existing?.description ?? "");
     setType(mode.kind === "create" ? mode.type : existing?.type ?? "manga");
     setYear(existing?.year ?? null);
+    setOriginalTitle(existing?.originalTitle ?? "");
+    setRuntimeMinutes(existing?.runtimeMinutes ?? null);
     setAuthor(existing?.author ?? "");
     setDeveloper(existing?.developer ?? "");
     setPublisher(existing?.publisher ?? "");
@@ -61,13 +65,17 @@ export function CollectionEditDialog({
       setError("이름을 입력해 주세요.");
       return;
     }
+    if (runtimeMinutes !== null && (!Number.isInteger(runtimeMinutes) || runtimeMinutes <= 0)) {
+      setError("상영 시간은 1분 이상이어야 합니다.");
+      return;
+    }
     const base: UpdateCollection = {
       name: trimmedName,
       description: description.trim() || null,
       type,
       year,
-      originalTitle: existing?.originalTitle ?? null,
-      runtimeMinutes: existing?.runtimeMinutes ?? null,
+      originalTitle: originalTitle.trim() || null,
+      runtimeMinutes,
       author: author.trim() || null,
       developer: developer.trim() || null,
       publisher: publisher.trim() || null,
@@ -120,6 +128,8 @@ export function CollectionEditDialog({
         )}
         {mode.kind === "edit" && type === "movie" && (
           <>
+            <TextField label="원제" value={originalTitle} onChange={(event) => setOriginalTitle(event.target.value)} />
+            <TextField label="상영 시간(분)" type="number" min="1" step="1" value={runtimeMinutes?.toString() ?? ""} onChange={(event) => { setRuntimeMinutes(event.target.value ? Number(event.target.value) : null); setError(null); }} />
             {mode.kind === "edit" && <TextField label="제작사" value={productionCompany} onChange={(event) => setProductionCompany(event.target.value)} />}
             <TextField label="감독" value={director} onChange={(event) => setDirector(event.target.value)} />
             <TextField label="개봉 연도" inputMode="numeric" value={year?.toString() ?? ""} onChange={(event) => setYear(event.target.value ? Number(event.target.value) : null)} />
