@@ -469,6 +469,7 @@ impl Library {
              WHERE collection_id = ?3 AND provider = ?4",
             params![snapshot_json, now, request.collection_id, PROVIDER],
         )?;
+        let summary = collection_by_id(&transaction, &request.collection_id)?;
         transaction.commit()?;
         if let Some((_, prepared)) = cover {
             prepared.commit();
@@ -477,9 +478,8 @@ impl Library {
             prepared.commit();
         }
         drop(connection);
-        self.cleanup_unreferenced_work_artwork()?;
-        let connection = self.connection()?;
-        collection_by_id(&connection, &request.collection_id)
+        let _ = self.cleanup_unreferenced_work_artwork();
+        Ok(summary)
     }
 }
 
@@ -1313,5 +1313,34 @@ mod tests {
         assert!(matches!(result, Err(LibraryError::InvalidIgdbIdentity)));
         assert_eq!(artwork_file_count(&library), before_files);
         assert_eq!(library.get_collection(&created.id).unwrap(), before);
+    }
+
+    #[test]
+    fn post_commit_artwork_cleanup_failure_does_not_fail_replacement() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let created = library
+            .apply_fetched_igdb_game(request(None, None), remote(), None, None)
+            .unwrap();
+
+        let artwork_root = library.root().join("work-artwork");
+        std::fs::remove_dir_all(&artwork_root).unwrap();
+        std::fs::write(&artwork_root, b"cleanup should fail").unwrap();
+
+        let replaced = library
+            .replace_fetched_igdb_game_artwork(
+                artwork_request(
+                    &created.id,
+                    IgdbArtworkDecision::Keep,
+                    IgdbArtworkDecision::Clear,
+                ),
+                remote(),
+                None,
+                None,
+            )
+            .unwrap();
+
+        assert_eq!(replaced.id, created.id);
+        assert_eq!(replaced.selected_hero_artwork_id, None);
     }
 }

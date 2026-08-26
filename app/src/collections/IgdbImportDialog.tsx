@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { igdbImagePreviewUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -41,24 +41,31 @@ export function IgdbImportDialog({ open, target, onClose, onApplied, onOpenSetti
   const [busy, setBusy] = useState<Busy>(null);
   const [error, setError] = useState<string | null>(null);
   const [credentialError, setCredentialError] = useState(false);
+  const existingRequestGeneration = useRef(0);
   const targetCollectionId = target.kind === "existing" ? target.collectionId : undefined;
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      existingRequestGeneration.current += 1;
+      return;
+    }
     if (target.kind === "new") {
+      existingRequestGeneration.current += 1;
       setStep(newSearchStep());
       setBusy(null);
       setError(null);
       setCredentialError(false);
       return;
     }
-    return loadExisting();
+    loadExisting();
+    return () => { existingRequestGeneration.current += 1; };
   }, [gateway, open, targetCollectionId, target.kind]);
 
   function loadExisting() {
     if (target.kind !== "existing") return;
     const collectionId = target.collectionId;
-    let active = true;
+    const generation = existingRequestGeneration.current + 1;
+    existingRequestGeneration.current = generation;
     setStep({ kind: "existing-loading" });
     setBusy(null);
     setError(null);
@@ -70,17 +77,18 @@ export function IgdbImportDialog({ open, target, onClose, onApplied, onOpenSetti
         return gateway.previewIgdbGame(connection.gameId);
       })
       .then((preview) => {
-        if (!active) return;
+        if (generation !== existingRequestGeneration.current) return;
         setStep({ kind: "cover", preview, coverImageId: null, coverDecisionMade: false, searchSnapshot: null });
         setError(null);
       })
       .catch((loadError: unknown) => {
-        if (!active) return;
+        if (generation !== existingRequestGeneration.current) return;
         const nextError = errorInfo(loadError, "IGDB 게임 정보를 불러오지 못했습니다.");
         setStep({ kind: "existing-error", ...nextError });
       })
-      .finally(() => { if (active) setBusy(null); });
-    return () => { active = false; };
+      .finally(() => {
+        if (generation === existingRequestGeneration.current) setBusy(null);
+      });
   }
 
   function updateSearch(update: Partial<Extract<IgdbImportStep, { kind: "search" }>>) {
@@ -163,8 +171,10 @@ export function IgdbImportDialog({ open, target, onClose, onApplied, onOpenSetti
             ? step.heroImageId ? { kind: "select", imageId: step.heroImageId } : { kind: "clear" }
             : { kind: "keep" },
         });
-      await onApplied(collection);
       onClose();
+      void Promise.resolve()
+        .then(() => onApplied(collection))
+        .catch(() => undefined);
     } catch (applyError) {
       showError(applyError, target.kind === "new" ? "IGDB 게임을 가져오지 못했습니다." : "IGDB 아트워크를 저장하지 못했습니다.", setError, setCredentialError);
     } finally {

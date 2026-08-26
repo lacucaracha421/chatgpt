@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CollectionSummary } from "../library/types";
@@ -112,6 +112,32 @@ describe("GameCollectionDetail", () => {
     expect(packageButton).toHaveAttribute("aria-pressed", "false");
   });
 
+  it("clears the package tilt immediately when clicking down", async () => {
+    const user = userEvent.setup();
+    renderDetail();
+
+    const packageButton = screen.getByRole("button", { name: "게임 패키지 들어 올리기" });
+    vi.spyOn(packageButton, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 100,
+      bottom: 100,
+      width: 100,
+      height: 100,
+      x: 0,
+      y: 0,
+      toJSON: () => undefined,
+    });
+    await user.click(packageButton);
+    fireEvent.pointerMove(packageButton, { clientX: 100, clientY: 0 });
+    expect(packageButton.style.getPropertyValue("--game-package-tilt-x")).not.toBe("");
+    expect(packageButton.style.getPropertyValue("--game-package-tilt-y")).not.toBe("");
+
+    await user.click(packageButton);
+    expect(packageButton.style.getPropertyValue("--game-package-tilt-x")).toBe("");
+    expect(packageButton.style.getPropertyValue("--game-package-tilt-y")).toBe("");
+  });
+
   it("exposes management actions and invokes each callback", async () => {
     const user = userEvent.setup();
     const callbacks = renderDetail();
@@ -147,5 +173,15 @@ describe("GameCollectionDetail", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("IGDB를 사용할 수 없습니다.");
     expect(screen.getByRole("heading", { name: "Astral Chain" })).toBeInTheDocument();
     expect(screen.getByText("PlatinumGames")).toBeInTheDocument();
+  });
+
+  it("disables IGDB mutations and shows a quiet disconnected status", async () => {
+    const user = userEvent.setup();
+    renderDetail({ providerConnected: false });
+
+    await user.click(screen.getByRole("button", { name: "작품 관리" }));
+    expect(screen.getByRole("menuitem", { name: "IGDB 미연결" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "IGDB 새로고침" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "표지·hero 변경" })).toBeDisabled();
   });
 });

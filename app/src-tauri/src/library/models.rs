@@ -12,7 +12,7 @@ impl fmt::Debug for IgdbCredentials {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("IgdbCredentials")
-            .field("client_id", &self.client_id)
+            .field("client_id", &"[redacted]")
             .field("client_secret", &"[redacted]")
             .finish()
     }

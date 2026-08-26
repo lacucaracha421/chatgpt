@@ -31,9 +31,9 @@ export function GameCollectionDetail({
 }: GameCollectionDetailProps) {
   const [lifted, setLifted] = useState(false);
 
-  function clearTilt(event: PointerEvent<HTMLButtonElement>) {
-    event.currentTarget.style.removeProperty("--game-package-tilt-x");
-    event.currentTarget.style.removeProperty("--game-package-tilt-y");
+  function clearTilt(button: HTMLButtonElement) {
+    button.style.removeProperty("--game-package-tilt-x");
+    button.style.removeProperty("--game-package-tilt-y");
   }
 
   function tiltPackage(event: PointerEvent<HTMLButtonElement>) {
@@ -76,9 +76,12 @@ export function GameCollectionDetail({
               className={`game-collection-detail__package${lifted ? " game-collection-detail__package--lifted" : ""}`}
               aria-label="게임 패키지 들어 올리기"
               aria-pressed={lifted}
-              onClick={() => setLifted((current) => !current)}
+              onClick={(event) => {
+                if (lifted) clearTilt(event.currentTarget);
+                setLifted((current) => !current);
+              }}
               onPointerMove={tiltPackage}
-              onPointerLeave={clearTilt}
+              onPointerLeave={(event) => clearTilt(event.currentTarget)}
             >
               <span className="game-collection-detail__package-shell" aria-hidden="true" />
               <span className="game-collection-detail__package-spine" aria-hidden="true" />
@@ -108,17 +111,17 @@ export function GameCollectionDetail({
                   { id: "delete", label: "삭제", destructive: true, onSelect: onDelete },
                   {
                     id: "provider-status",
-                    label: providerConnected ? "IGDB 연결됨" : "IGDB 연결 안 됨",
+                    label: providerConnected ? "IGDB 연결됨" : "IGDB 미연결",
                     disabled: true,
                     onSelect: () => undefined,
                   },
                   {
                     id: "provider-refresh",
                     label: "IGDB 새로고침",
-                    disabled: providerBusy,
+                    disabled: !providerConnected || providerBusy,
                     onSelect: onRefreshProvider,
                   },
-                  { id: "artwork", label: "표지·hero 변경", onSelect: onChangeArtwork },
+                  { id: "artwork", label: "표지·hero 변경", disabled: !providerConnected, onSelect: onChangeArtwork },
                 ]}
               />
             </div>

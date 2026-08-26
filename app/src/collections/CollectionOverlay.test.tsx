@@ -489,11 +489,24 @@ describe("CollectionOverlay game detail flow", () => {
     expect(screen.getByRole("menuitem", { name: "표지·hero 변경" })).toBeInTheDocument();
   });
 
+  it("keeps disconnected game IGDB mutations disabled", async () => {
+    const user = userEvent.setup();
+    renderOverlay({ getIgdbConnection: vi.fn().mockResolvedValue(null) }, undefined, undefined, gameCollection);
+
+    await user.click(screen.getByRole("button", { name: "작품 관리" }));
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: "IGDB 미연결" })).toBeInTheDocument());
+    expect(screen.getByRole("menuitem", { name: "IGDB 새로고침" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "표지·hero 변경" })).toBeDisabled();
+  });
+
   it("refreshes IGDB and reports success without replacing local detail", async () => {
     const user = userEvent.setup();
     const onChanged = vi.fn().mockResolvedValue(undefined);
     const refreshIgdbGame = vi.fn().mockResolvedValue(gameCollection);
-    const { gateway } = renderOverlay({ refreshIgdbGame }, onChanged, undefined, gameCollection);
+    const { gateway } = renderOverlay({
+      getIgdbConnection: vi.fn().mockResolvedValue({ gameId: 17, lastSyncedAt: "t" }),
+      refreshIgdbGame,
+    }, onChanged, undefined, gameCollection);
 
     await user.click(screen.getByRole("button", { name: "작품 관리" }));
     await waitFor(() => expect(screen.getByRole("menuitem", { name: "IGDB 새로고침" })).toBeEnabled());
@@ -510,7 +523,10 @@ describe("CollectionOverlay game detail flow", () => {
 
   it("keeps local game detail and hero when IGDB refresh fails", async () => {
     const user = userEvent.setup();
-    renderOverlay({ refreshIgdbGame: vi.fn().mockRejectedValue(new Error("IGDB 새로고침 실패")) }, undefined, undefined, gameCollection);
+    renderOverlay({
+      getIgdbConnection: vi.fn().mockResolvedValue({ gameId: 17, lastSyncedAt: "t" }),
+      refreshIgdbGame: vi.fn().mockRejectedValue(new Error("IGDB 새로고침 실패")),
+    }, undefined, undefined, gameCollection);
 
     await user.click(screen.getByRole("button", { name: "작품 관리" }));
     await waitFor(() => expect(screen.getByRole("menuitem", { name: "IGDB 새로고침" })).toBeEnabled());
@@ -574,10 +590,32 @@ describe("CollectionOverlay game detail flow", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("연결 상태 갱신 실패");
   });
 
+  it("closes artwork dialog and surfaces a post-save refresh failure", async () => {
+    const user = userEvent.setup();
+    const onChanged = vi.fn().mockRejectedValue(new Error("컬렉션 갱신 실패"));
+    const { gateway } = renderOverlay({ getIgdbConnection: vi.fn().mockResolvedValue({ gameId: 17, lastSyncedAt: "t" }) }, onChanged, undefined, gameCollection);
+
+    await user.click(screen.getByRole("button", { name: "작품 관리" }));
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: "표지·hero 변경" })).toBeEnabled());
+    await user.click(screen.getByRole("menuitem", { name: "표지·hero 변경" }));
+    await screen.findByRole("heading", { name: "표지 선택" });
+    await user.click(screen.getByRole("button", { name: "다음" }));
+    await screen.findByRole("heading", { name: "대표 이미지 선택" });
+    await user.click(screen.getByRole("button", { name: "저장" }));
+
+    await waitFor(() => expect(gateway.replaceIgdbGameArtwork).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "IGDB 게임 아트워크 변경" })).not.toBeInTheDocument());
+    expect(screen.getByRole("alert")).toHaveTextContent("컬렉션 갱신 실패");
+  });
+
   it("routes missing-credential artwork errors to the external-services settings callback", async () => {
     const user = userEvent.setup();
     const onOpenSettings = vi.fn();
-    renderOverlay({ getIgdbConnection: vi.fn().mockRejectedValue({ code: "igdb_credential_not_configured" }) }, undefined, undefined, gameCollection, onOpenSettings);
+    renderOverlay({
+      getIgdbConnection: vi.fn()
+        .mockResolvedValueOnce({ gameId: 17, lastSyncedAt: "t" })
+        .mockRejectedValue({ code: "igdb_credential_not_configured" }),
+    }, undefined, undefined, gameCollection, onOpenSettings);
 
     await user.click(screen.getByRole("button", { name: "작품 관리" }));
     await waitFor(() => expect(screen.getByRole("menuitem", { name: "표지·hero 변경" })).toBeEnabled());

@@ -181,6 +181,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::IgdbUnauthorized => "igdb_unauthorized",
             LibraryError::IgdbNotFound => "igdb_not_found",
             LibraryError::IgdbRateLimited => "igdb_rate_limited",
+            LibraryError::IgdbTimedOut => "igdb_timed_out",
             LibraryError::IgdbUnavailable => "igdb_unavailable",
             LibraryError::IgdbInvalidResponse => "igdb_invalid_response",
             LibraryError::IgdbInvalidImageId => "igdb_invalid_image_id",
@@ -1594,8 +1595,7 @@ mod tests {
         let cases = [
             (LibraryError::IgdbUnauthorized, "igdb_unauthorized"),
             (LibraryError::IgdbRateLimited, "igdb_rate_limited"),
-            // IGDB's transport intentionally redacts both timeout and outage details.
-            (LibraryError::IgdbUnavailable, "igdb_unavailable"),
+            (LibraryError::IgdbTimedOut, "igdb_timed_out"),
             (LibraryError::IgdbUnavailable, "igdb_unavailable"),
             (LibraryError::IgdbNotFound, "igdb_not_found"),
             (LibraryError::IgdbInvalidImageId, "igdb_invalid_image_id"),

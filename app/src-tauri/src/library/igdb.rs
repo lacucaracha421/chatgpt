@@ -18,6 +18,7 @@ use super::{
 const TOKEN_URL: &str = "https://id.twitch.tv/oauth2/token";
 const GAMES_URL: &str = "https://api.igdb.com/v4/games";
 const MAX_JSON_BYTES: usize = 4 * 1024 * 1024;
+const IGDB_REQUEST_INTERVAL: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IgdbImageSize {
@@ -97,8 +98,11 @@ impl IgdbRequestLimiter {
             .last_request
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let wait = minimum_request_wait(*last, now);
-        *last = Some(now + wait);
+        let reserved = last
+            .and_then(|previous| previous.checked_add(IGDB_REQUEST_INTERVAL))
+            .map_or(now, |next| next.max(now));
+        let wait = reserved.saturating_duration_since(now);
+        *last = Some(reserved);
         wait
     }
 }
@@ -185,16 +189,14 @@ impl IgdbClient {
         }
     }
     fn token(&self, credentials: &IgdbCredentials) -> Result<String, LibraryError> {
-        if credentials.client_id.trim().is_empty() || credentials.client_secret.trim().is_empty() {
-            return Err(LibraryError::InvalidIgdbCredential);
-        }
+        let (client_id, client_secret) = trimmed_credentials(credentials)?;
         if let Some(token) = self.token_cache.valid() {
             return Ok(token.access_token);
         }
         let form = format!(
             "client_id={}&client_secret={}&grant_type=client_credentials",
-            encode_form(&credentials.client_id),
-            encode_form(&credentials.client_secret)
+            encode_form(client_id),
+            encode_form(client_secret)
         );
         let mut response = self
             .agent
@@ -212,11 +214,12 @@ impl IgdbClient {
         credentials: &IgdbCredentials,
         body: &str,
     ) -> Result<String, LibraryError> {
+        let client_id = credentials.client_id.trim();
         self.wait_for_game_request();
         let mut response = self
             .agent
             .post(GAMES_URL)
-            .header("Client-ID", credentials.client_id.trim())
+            .header("Client-ID", client_id)
             .header("Authorization", format!("Bearer {token}"))
             .header("Content-Type", "text/plain")
             .send(body.to_owned())
@@ -462,7 +465,7 @@ fn map_http_status(status: u16) -> LibraryError {
 fn map_ureq_error(error: ureq::Error) -> LibraryError {
     match error {
         ureq::Error::StatusCode(status) => map_http_status(status),
-        ureq::Error::Timeout(_) => LibraryError::IgdbUnavailable,
+        ureq::Error::Timeout(_) => LibraryError::IgdbTimedOut,
         _ => LibraryError::IgdbUnavailable,
     }
 }
@@ -504,9 +507,21 @@ fn minimum_request_wait(last: Option<Instant>, now: Instant) -> Duration {
     })
 }
 
+fn trimmed_credentials(
+    credentials: &IgdbCredentials,
+) -> Result<(&str, &str), LibraryError> {
+    let client_id = credentials.client_id.trim();
+    let client_secret = credentials.client_secret.trim();
+    if client_id.is_empty() || client_secret.is_empty() {
+        return Err(LibraryError::InvalidIgdbCredential);
+    }
+    Ok((client_id, client_secret))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{map_http_status, normalize_game, parse_token, IgdbImageSize, LibraryError};
+    use crate::library::models::IgdbCredentials;
     #[test]
     fn normalizes_game_with_earliest_release_and_all_platforms() {
         let json = r#"{"id":42,"name":"Example Game","summary":"A game.","genres":[{"name":"RPG"},{"name":"Action"}],"release_dates":[{"date":1704067200,"platform":{"name":"Windows"}},{"date":1672531200,"platform":{"name":"Dreamcast"}},{"date":1704067200,"platform":{"name":"Windows"}}],"involved_companies":[{"developer":true,"publisher":false,"company":{"name":"Dev Co"}},{"developer":false,"publisher":true,"company":{"name":"Pub Co"}}],"cover":{"image_id":"cover-id","width":264,"height":374},"artworks":[{"image_id":"hero-id","width":1920,"height":1080}],"screenshots":[{"image_id":"shot-id","width":1280,"height":720}]}"#;
@@ -567,6 +582,32 @@ mod tests {
     }
 
     #[test]
+    fn redacts_both_igdb_credentials_from_debug_output() {
+        let credentials = IgdbCredentials {
+            client_id: "client-id-secret".into(),
+            client_secret: "client-secret-secret".into(),
+        };
+        let debug = format!("{credentials:?}");
+
+        assert!(!debug.contains("client-id-secret"));
+        assert!(!debug.contains("client-secret-secret"));
+        assert!(debug.contains("[redacted]"));
+    }
+
+    #[test]
+    fn trims_directly_constructed_igdb_credentials_before_transport() {
+        let credentials = IgdbCredentials {
+            client_id: "  client-id  ".into(),
+            client_secret: "  client-secret  ".into(),
+        };
+
+        assert_eq!(
+            super::trimmed_credentials(&credentials).unwrap(),
+            ("client-id", "client-secret")
+        );
+    }
+
+    #[test]
     fn calculates_only_the_remaining_igdb_request_spacing() {
         let last = std::time::Instant::now();
         let now = last + std::time::Duration::from_millis(100);
@@ -593,5 +634,32 @@ mod tests {
             second.reserve_request_at(now + std::time::Duration::from_millis(100)),
             std::time::Duration::from_millis(150)
         );
+    }
+
+    #[test]
+    fn reserves_each_same_time_igdb_request_after_the_previous_reservation() {
+        let client = super::IgdbClient::with_cache_and_limiter(
+            super::IgdbTokenCache::default(),
+            super::IgdbRequestLimiter::default(),
+        );
+        let now = std::time::Instant::now();
+
+        assert_eq!(client.reserve_request_at(now), std::time::Duration::ZERO);
+        assert_eq!(
+            client.reserve_request_at(now),
+            std::time::Duration::from_millis(250)
+        );
+        assert_eq!(
+            client.reserve_request_at(now),
+            std::time::Duration::from_millis(500)
+        );
+    }
+
+    #[test]
+    fn maps_ureq_timeout_to_the_distinct_igdb_timeout_error() {
+        assert!(matches!(
+            super::map_ureq_error(ureq::Error::Timeout(ureq::Timeout::Global)),
+            LibraryError::IgdbTimedOut
+        ));
     }
 }

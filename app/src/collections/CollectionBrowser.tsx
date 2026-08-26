@@ -214,8 +214,12 @@ export function CollectionBrowser({
             onViewChange({ kind: "settings", section: "external_services" });
           }}
           onApplied={async (collection) => {
-            await onChanged();
-            onViewChange({ kind: "collection", collectionId: collection.id });
+            try {
+              await onChanged();
+              onViewChange({ kind: "collection", collectionId: collection.id });
+            } catch (error) {
+              setMessage(commandErrorMessage(error, "IGDB 게임을 불러온 뒤 화면을 갱신하지 못했습니다."));
+            }
           }}
         />
       )}

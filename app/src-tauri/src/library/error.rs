@@ -256,6 +256,8 @@ pub enum LibraryError {
     IgdbNotFound,
     #[error("IGDB 요청 한도를 초과했습니다")]
     IgdbRateLimited,
+    #[error("IGDB 요청 시간이 초과됐습니다")]
+    IgdbTimedOut,
     #[error("IGDB에 연결할 수 없습니다")]
     IgdbUnavailable,
     #[error("IGDB 응답을 처리할 수 없습니다")]

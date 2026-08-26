@@ -204,4 +204,91 @@ describe("IgdbImportDialog", () => {
     finishApply(collection);
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
+
+  it("closes after the gateway mutation even when onApplied rejects", async () => {
+    const user = userEvent.setup();
+    const gateway = makeGateway();
+    const onApplied = vi.fn().mockRejectedValue(new Error("후속 갱신 실패"));
+    const onClose = vi.fn();
+    render(
+      <LibraryProvider gateway={gateway}>
+        <IgdbImportDialog
+          open
+          target={{ kind: "existing", collectionId: "collection-9" }}
+          onClose={onClose}
+          onApplied={onApplied}
+          onOpenSettings={vi.fn()}
+        />
+      </LibraryProvider>,
+    );
+
+    await screen.findByRole("heading", { name: "표지 선택" });
+    await user.click(screen.getByRole("button", { name: "다음" }));
+    await screen.findByRole("heading", { name: "대표 이미지 선택" });
+    await user.click(screen.getByRole("button", { name: "저장" }));
+
+    await waitFor(() => expect(gateway.replaceIgdbGameArtwork).toHaveBeenCalledOnce());
+    expect(onApplied).toHaveBeenCalledWith(collection);
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("ignores a retry completion after the existing dialog closes and reopens", async () => {
+    const user = userEvent.setup();
+    let resolveRetryPreview!: (value: IgdbGamePreview) => void;
+    let resolveFreshPreview!: (value: IgdbGamePreview) => void;
+    const connection = { gameId: 17, lastSyncedAt: null };
+    const gateway = makeGateway({
+      getIgdbConnection: vi.fn()
+        .mockRejectedValueOnce(new Error("첫 로드 실패"))
+        .mockResolvedValue(connection),
+      previewIgdbGame: vi.fn()
+        .mockImplementationOnce(() => new Promise<IgdbGamePreview>((resolve) => { resolveRetryPreview = resolve; }))
+        .mockImplementationOnce(() => new Promise<IgdbGamePreview>((resolve) => { resolveFreshPreview = resolve; })),
+    });
+    const view = render(
+      <LibraryProvider gateway={gateway}>
+        <IgdbImportDialog
+          open
+          target={{ kind: "existing", collectionId: "collection-9" }}
+          onClose={vi.fn()}
+          onApplied={vi.fn()}
+          onOpenSettings={vi.fn()}
+        />
+      </LibraryProvider>,
+    );
+
+    await screen.findByRole("alert");
+    await user.click(screen.getByRole("button", { name: "다시 시도" }));
+    await waitFor(() => expect(gateway.previewIgdbGame).toHaveBeenCalledTimes(1));
+
+    view.rerender(
+      <LibraryProvider gateway={gateway}>
+        <IgdbImportDialog
+          open={false}
+          target={{ kind: "existing", collectionId: "collection-9" }}
+          onClose={vi.fn()}
+          onApplied={vi.fn()}
+          onOpenSettings={vi.fn()}
+        />
+      </LibraryProvider>,
+    );
+    view.rerender(
+      <LibraryProvider gateway={gateway}>
+        <IgdbImportDialog
+          open
+          target={{ kind: "existing", collectionId: "collection-9" }}
+          onClose={vi.fn()}
+          onApplied={vi.fn()}
+          onOpenSettings={vi.fn()}
+        />
+      </LibraryProvider>,
+    );
+    await waitFor(() => expect(gateway.previewIgdbGame).toHaveBeenCalledTimes(2));
+
+    resolveRetryPreview(preview);
+    expect(await screen.findByRole("status", { name: "IGDB 게임 정보 불러오는 중" })).toBeInTheDocument();
+    resolveFreshPreview(preview);
+    expect(await screen.findByRole("heading", { name: "표지 선택" })).toBeInTheDocument();
+  });
 });
