@@ -1,9 +1,10 @@
 use super::error::LibraryError;
-use super::models::{IgdbCredentialStatus, IgdbCredentials};
+use super::models::{IgdbCredentialStatus, IgdbCredentials, TmdbCredentialStatus, TmdbCredentials};
 use serde_json;
 
 const ALADIN_TARGET: &str = "Lakomics/AladinTTB";
 const IGDB_TARGET: &str = "Lakomics/Igdb";
+const TMDB_TARGET: &str = "Lakomics/Tmdb";
 
 #[derive(Debug)]
 enum CredentialError {
@@ -212,6 +213,26 @@ pub(crate) fn read_igdb_credentials_os() -> Result<IgdbCredentials, LibraryError
     read_igdb_credentials(&windows::WindowsCredentialBackend)
 }
 
+#[cfg(target_os = "windows")]
+pub(crate) fn tmdb_credential_status() -> Result<TmdbCredentialStatus, LibraryError> {
+    tmdb_token_status(&windows::WindowsCredentialBackend)
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn set_tmdb_token_os(token: &str) -> Result<TmdbCredentialStatus, LibraryError> {
+    set_tmdb_token(&windows::WindowsCredentialBackend, token)
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn delete_tmdb_token_os() -> Result<TmdbCredentialStatus, LibraryError> {
+    delete_tmdb_token(&windows::WindowsCredentialBackend)
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn read_tmdb_token_os() -> Result<TmdbCredentials, LibraryError> {
+    read_tmdb_token(&windows::WindowsCredentialBackend)
+}
+
 #[cfg(not(target_os = "windows"))]
 pub(crate) fn igdb_credential_status() -> Result<IgdbCredentialStatus, LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
@@ -235,13 +256,34 @@ pub(crate) fn read_igdb_credentials_os() -> Result<IgdbCredentials, LibraryError
     Err(LibraryError::CredentialStoreUnavailable)
 }
 
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn tmdb_credential_status() -> Result<TmdbCredentialStatus, LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn set_tmdb_token_os(_token: &str) -> Result<TmdbCredentialStatus, LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn delete_tmdb_token_os() -> Result<TmdbCredentialStatus, LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn read_tmdb_token_os() -> Result<TmdbCredentials, LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
+}
+
 #[cfg(test)]
 mod tests {
     use std::{cell::RefCell, collections::HashMap};
 
     use super::{
-        read_igdb_credentials_with, set_igdb_credentials_with, CredentialBackend, CredentialError,
-        CredentialService, ALADIN_TARGET,
+        read_igdb_credentials_with, read_tmdb_token_with, set_igdb_credentials_with,
+        set_tmdb_token_with, CredentialBackend, CredentialError, CredentialService, ALADIN_TARGET,
+        TMDB_TARGET,
     };
     use crate::library::error::LibraryError;
 
@@ -347,6 +389,46 @@ mod tests {
             Err(LibraryError::IgdbCredentialNotConfigured)
         ));
     }
+
+    #[test]
+    fn stores_and_reads_a_trimmed_tmdb_token_without_exposing_it() {
+        let backend = FakeBackend::default();
+
+        assert!(
+            set_tmdb_token_with(&backend, "  secret-token  ")
+                .unwrap()
+                .configured
+        );
+        let credentials = read_tmdb_token_with(&backend).unwrap();
+        assert_eq!(credentials.read_access_token, "secret-token");
+        assert!(!format!("{credentials:?}").contains("secret-token"));
+        assert_eq!(
+            backend.values.borrow().get(TMDB_TARGET).unwrap(),
+            b"secret-token"
+        );
+    }
+
+    #[test]
+    fn rejects_empty_tmdb_tokens_and_missing_or_corrupt_values() {
+        let backend = FakeBackend::default();
+        assert!(matches!(
+            set_tmdb_token_with(&backend, "   "),
+            Err(LibraryError::InvalidTmdbCredentialValue)
+        ));
+        assert!(matches!(
+            read_tmdb_token_with(&backend),
+            Err(LibraryError::TmdbCredentialNotConfigured)
+        ));
+
+        backend
+            .values
+            .borrow_mut()
+            .insert(TMDB_TARGET.to_owned(), vec![0xff]);
+        assert!(matches!(
+            read_tmdb_token_with(&backend),
+            Err(LibraryError::InvalidTmdbCredentialValue)
+        ));
+    }
 }
 
 fn validate_igdb_credentials(
@@ -409,6 +491,54 @@ fn delete_igdb_credentials<B: CredentialBackend>(
     Ok(IgdbCredentialStatus { configured: false })
 }
 
+fn validate_tmdb_token(token: &str) -> Result<TmdbCredentials, LibraryError> {
+    let token = token.trim();
+    if token.is_empty() {
+        return Err(LibraryError::InvalidTmdbCredentialValue);
+    }
+    Ok(TmdbCredentials {
+        read_access_token: token.to_owned(),
+    })
+}
+
+fn set_tmdb_token<B: CredentialBackend>(
+    backend: &B,
+    token: &str,
+) -> Result<TmdbCredentialStatus, LibraryError> {
+    let token = validate_tmdb_token(token)?;
+    backend
+        .write(TMDB_TARGET, token.read_access_token.as_bytes())
+        .map_err(map_backend_error)?;
+    Ok(TmdbCredentialStatus { configured: true })
+}
+
+fn read_tmdb_token<B: CredentialBackend>(backend: &B) -> Result<TmdbCredentials, LibraryError> {
+    let value = backend
+        .read(TMDB_TARGET)
+        .map_err(map_backend_error)?
+        .ok_or(LibraryError::TmdbCredentialNotConfigured)?;
+    let token = String::from_utf8(value).map_err(|_| LibraryError::InvalidTmdbCredentialValue)?;
+    validate_tmdb_token(&token)
+}
+
+fn tmdb_token_status<B: CredentialBackend>(
+    backend: &B,
+) -> Result<TmdbCredentialStatus, LibraryError> {
+    Ok(TmdbCredentialStatus {
+        configured: backend
+            .read(TMDB_TARGET)
+            .map_err(map_backend_error)?
+            .is_some(),
+    })
+}
+
+fn delete_tmdb_token<B: CredentialBackend>(
+    backend: &B,
+) -> Result<TmdbCredentialStatus, LibraryError> {
+    backend.delete(TMDB_TARGET).map_err(map_backend_error)?;
+    Ok(TmdbCredentialStatus { configured: false })
+}
+
 #[cfg(test)]
 fn set_igdb_credentials_with<B: CredentialBackend>(
     backend: &B,
@@ -423,4 +553,19 @@ fn read_igdb_credentials_with<B: CredentialBackend>(
     backend: &B,
 ) -> Result<IgdbCredentials, LibraryError> {
     read_igdb_credentials(backend)
+}
+
+#[cfg(test)]
+fn set_tmdb_token_with<B: CredentialBackend>(
+    backend: &B,
+    token: &str,
+) -> Result<TmdbCredentialStatus, LibraryError> {
+    set_tmdb_token(backend, token)
+}
+
+#[cfg(test)]
+fn read_tmdb_token_with<B: CredentialBackend>(
+    backend: &B,
+) -> Result<TmdbCredentials, LibraryError> {
+    read_tmdb_token(backend)
 }

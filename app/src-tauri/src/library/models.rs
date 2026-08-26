@@ -18,6 +18,136 @@ impl fmt::Debug for IgdbCredentials {
     }
 }
 
+#[derive(Clone, PartialEq, Eq)]
+pub struct TmdbCredentials {
+    pub read_access_token: String,
+}
+
+impl fmt::Debug for TmdbCredentials {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TmdbCredentials")
+            .field("read_access_token", &"[redacted]")
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TmdbCredentialStatus {
+    pub configured: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TmdbImageRef {
+    pub file_path: String,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TmdbRemoteMovie {
+    pub id: i64,
+    pub title: String,
+    pub original_title: Option<String>,
+    pub overview: Option<String>,
+    pub release_date: Option<String>,
+    pub runtime_minutes: Option<i64>,
+    pub genres: Vec<String>,
+    pub directors: Vec<String>,
+    pub production_companies: Vec<String>,
+    pub external_score: Option<i64>,
+    pub poster_path: Option<String>,
+    pub backdrop_path: Option<String>,
+    pub posters: Vec<TmdbImageRef>,
+    pub backdrops: Vec<TmdbImageRef>,
+    pub snapshot_json: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TmdbSearchResult {
+    pub movie_id: i64,
+    pub title: String,
+    pub original_title: Option<String>,
+    pub release_date: Option<String>,
+    pub poster_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TmdbMoviePreview {
+    pub movie_id: i64,
+    pub proposed_title: String,
+    pub original_title: Option<String>,
+    pub release_date: Option<String>,
+    pub runtime_minutes: Option<i64>,
+    pub director: Option<String>,
+    pub production_company: Option<String>,
+    pub genres: Option<String>,
+    pub overview: Option<String>,
+    pub external_score: Option<i64>,
+    pub posters: Vec<TmdbImageCandidate>,
+    pub backdrops: Vec<TmdbImageCandidate>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TmdbImageCandidate {
+    pub file_path: String,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TmdbConnection {
+    pub movie_id: i64,
+    pub last_synced_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum TmdbApplyTarget {
+    New,
+    Existing { collection_id: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TmdbApplyRequest {
+    pub target: TmdbApplyTarget,
+    pub movie_id: i64,
+    pub poster_path: Option<String>,
+    pub backdrop_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum TmdbArtworkDecision {
+    Keep,
+    Clear,
+    Select { file_path: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TmdbArtworkReplaceRequest {
+    pub collection_id: String,
+    pub poster: TmdbArtworkDecision,
+    pub backdrop: TmdbArtworkDecision,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct IgdbCredentialStatus {

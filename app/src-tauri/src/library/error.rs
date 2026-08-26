@@ -268,6 +268,26 @@ pub enum LibraryError {
     IgdbInvalidImageId,
     #[error("IGDB 게임 식별자가 올바르지 않습니다")]
     InvalidIgdbIdentity,
+    #[error("TMDB API Read Access Token이 설정되지 않았습니다")]
+    TmdbCredentialNotConfigured,
+    #[error("TMDB API Read Access Token이 올바르지 않습니다")]
+    InvalidTmdbCredentialValue,
+    #[error("TMDB 인증이 거부됐습니다")]
+    TmdbUnauthorized,
+    #[error("TMDB 요청 한도를 초과했습니다")]
+    TmdbRateLimited,
+    #[error("TMDB 요청 시간이 초과됐습니다")]
+    TmdbTimedOut,
+    #[error("TMDB에 연결할 수 없습니다")]
+    TmdbUnavailable,
+    #[error("TMDB 영화를 찾을 수 없습니다")]
+    TmdbNotFound,
+    #[error("TMDB 응답을 처리할 수 없습니다")]
+    TmdbInvalidResponse,
+    #[error("TMDB 이미지 경로가 올바르지 않습니다")]
+    TmdbInvalidImagePath,
+    #[error("TMDB 영화 식별자가 올바르지 않습니다")]
+    InvalidTmdbIdentity,
     #[error("알라딘에 연결할 수 없습니다")]
     AladinUnavailable,
     #[error("알라딘 요청 시간이 초과됐습니다")]
