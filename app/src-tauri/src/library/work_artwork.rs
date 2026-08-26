@@ -17,6 +17,7 @@ const WORK_ARTWORK_THUMBNAIL_BOUND: u32 = 360;
 pub(crate) enum WorkArtworkKind {
     Cover,
     Hero,
+    Backdrop,
 }
 
 impl WorkArtworkKind {
@@ -24,6 +25,7 @@ impl WorkArtworkKind {
         match self {
             Self::Cover => "cover",
             Self::Hero => "hero",
+            Self::Backdrop => "backdrop",
         }
     }
 }

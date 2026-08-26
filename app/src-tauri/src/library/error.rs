@@ -129,6 +129,8 @@ pub enum LibraryError {
     InvalidCollectionReleaseDate,
     #[error("개인 별점은 0점에서 5점 사이의 0.5점 단위여야 합니다")]
     InvalidPersonalRating,
+    #[error("영화 상영 시간은 1분 이상이어야 합니다")]
+    InvalidMovieRuntime,
     #[error("요청한 자산을 찾을 수 없습니다")]
     AssetNotFound,
     #[error("하나 이상의 자산을 선택해야 합니다")]

@@ -66,6 +66,8 @@ export function CollectionEditDialog({
       description: description.trim() || null,
       type,
       year,
+      originalTitle: existing?.originalTitle ?? null,
+      runtimeMinutes: existing?.runtimeMinutes ?? null,
       author: author.trim() || null,
       developer: developer.trim() || null,
       publisher: publisher.trim() || null,

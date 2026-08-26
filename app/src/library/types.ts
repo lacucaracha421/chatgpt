@@ -140,9 +140,12 @@ export type CollectionSummary = {
   coverAssetId: string | null;
   selectedWorkArtworkId: string | null;
   selectedHeroArtworkId: string | null;
+  selectedBackdropArtworkId: string | null;
   assetCount: number;
   unreadReleaseCount: number;
   year: number | null;
+  originalTitle: string | null;
+  runtimeMinutes: number | null;
   author: string | null;
   developer: string | null;
   publisher: string | null;
@@ -352,6 +355,8 @@ export type UpdateCollection = {
   description: string | null;
   type: CollectionType;
   year: number | null;
+  originalTitle: string | null;
+  runtimeMinutes: number | null;
   author: string | null;
   developer: string | null;
   publisher: string | null;

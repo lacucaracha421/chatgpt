@@ -50,6 +50,14 @@ const COLLECTION_SUMMARY_SQL: &str = "SELECT
         LIMIT 1
     ),
     (
+        SELECT artwork.id
+        FROM collection_work_artworks AS artwork
+        WHERE artwork.collection_id = collection.id
+          AND artwork.kind = 'backdrop'
+          AND artwork.selected = 1
+        LIMIT 1
+    ),
+    (
         SELECT COUNT(*)
         FROM collection_assets AS count_link
         JOIN assets AS count_asset ON count_asset.id = count_link.asset_id
@@ -57,6 +65,8 @@ const COLLECTION_SUMMARY_SQL: &str = "SELECT
           AND count_asset.status = 'normal'
     ),
     collection.year,
+    collection.original_title,
+    collection.runtime_minutes,
     collection.author,
     collection.director,
     collection.developer,
@@ -115,11 +125,11 @@ impl Library {
             .execute(
                 "INSERT INTO collections (
                     id, name, description, type, cover_asset_id,
-                    year, author, director, developer, production_company, release_date,
+                    year, original_title, runtime_minutes, author, director, developer, production_company, release_date,
                     external_score, my_score, showcase_order,
                     genres, overview, showcase, created_at, updated_at
                  ) VALUES (?1, ?2, ?3, ?4, NULL,
-                    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
                     NULL, NULL, NULL, 0, ?5, ?5)",
                 params![id, name, description, type_str, now],
             )
@@ -135,6 +145,8 @@ impl Library {
         let name = normalized_name(request.name)?;
         let description = normalized_description(request.description)?;
         let type_str = collection_type_str(request.collection_type);
+        let original_title = normalized_optional_text(request.original_title);
+        let runtime_minutes = validated_movie_runtime(request.runtime_minutes)?;
         let author = normalized_optional_text(request.author);
         let director = normalized_optional_text(request.director);
         let developer = normalized_optional_text(request.developer);
@@ -146,27 +158,30 @@ impl Library {
             .execute(
                 "UPDATE collections
                  SET name = ?1, description = ?2, type = ?3,
-                     year = ?4, author = ?5, director = ?6,
-                     developer = ?7, publisher = ?8, platforms = ?9,
-                     production_company = ?10, release_date = ?11,
-                     external_score = ?12, my_score = ?13,
+                     year = ?4, original_title = ?5, runtime_minutes = ?6,
+                     author = ?7, director = ?8, developer = ?9,
+                     publisher = ?10, platforms = ?11,
+                     production_company = ?12, release_date = ?13,
+                     external_score = ?14, my_score = ?15,
                      showcase_order = CASE
                          WHEN showcase = 1 AND type <> ?3 THEN (
                              SELECT COALESCE(MAX(other.showcase_order) + 1, 0)
                              FROM collections AS other
                             WHERE other.type = ?3
-                              AND other.id <> ?15
+                              AND other.id <> ?17
                               AND (other.legacy_kind IS NULL OR other.legacy_kind <> 'gacha')
                          )
                          ELSE showcase_order
                      END,
-                     updated_at = ?14
-                 WHERE id = ?15",
+                     updated_at = ?16
+                  WHERE id = ?17",
                 params![
                     name,
                     description,
                     type_str,
                     request.year,
+                    original_title,
+                    runtime_minutes,
                     author,
                     director,
                     developer,
@@ -423,6 +438,13 @@ pub(crate) fn validated_personal_rating(value: Option<f64>) -> Result<Option<f64
     Ok(value)
 }
 
+fn validated_movie_runtime(value: Option<i64>) -> Result<Option<i64>, LibraryError> {
+    if value.is_some_and(|minutes| minutes <= 0) {
+        return Err(LibraryError::InvalidMovieRuntime);
+    }
+    Ok(value)
+}
+
 pub(crate) fn require_collection(connection: &Connection, id: &str) -> Result<(), LibraryError> {
     let exists: bool = connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM collections WHERE id = ?1)",
@@ -454,7 +476,7 @@ fn collection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollectionSu
         "movie" => CollectionType::Movie,
         _ => CollectionType::Manga,
     };
-    let showcase_int: i64 = row.get(20)?;
+    let showcase_int: i64 = row.get(23)?;
     Ok(CollectionSummary {
         id: row.get(0)?,
         name: row.get(1)?,
@@ -463,25 +485,28 @@ fn collection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollectionSu
         cover_asset_id: row.get(4)?,
         selected_work_artwork_id: row.get(5)?,
         selected_hero_artwork_id: row.get(6)?,
-        asset_count: u64::try_from(row.get::<_, i64>(7)?).unwrap_or(0),
-        unread_release_count: u64::try_from(row.get::<_, i64>(24)?).unwrap_or(0),
-        year: row.get(8)?,
-        author: row.get(9)?,
-        director: row.get(10)?,
-        developer: row.get(11)?,
-        publisher: row.get(12)?,
-        platforms: row.get(13)?,
-        production_company: row.get(14)?,
-        release_date: row.get(15)?,
-        external_score: row.get(16)?,
-        my_score: row.get(17)?,
-        genres: row.get(18)?,
-        overview: row.get(19)?,
+        selected_backdrop_artwork_id: row.get(7)?,
+        asset_count: u64::try_from(row.get::<_, i64>(8)?).unwrap_or(0),
+        unread_release_count: u64::try_from(row.get::<_, i64>(27)?).unwrap_or(0),
+        year: row.get(9)?,
+        original_title: row.get(10)?,
+        runtime_minutes: row.get(11)?,
+        author: row.get(12)?,
+        director: row.get(13)?,
+        developer: row.get(14)?,
+        publisher: row.get(15)?,
+        platforms: row.get(16)?,
+        production_company: row.get(17)?,
+        release_date: row.get(18)?,
+        external_score: row.get(19)?,
+        my_score: row.get(20)?,
+        genres: row.get(21)?,
+        overview: row.get(22)?,
         showcase: showcase_int != 0,
-        showcase_order: row.get(21)?,
-        created_at: row.get(22)?,
-        updated_at: row.get(23)?,
-        source_path: row.get(25)?,
+        showcase_order: row.get(24)?,
+        created_at: row.get(25)?,
+        updated_at: row.get(26)?,
+        source_path: row.get(28)?,
     })
 }
 
@@ -584,6 +609,8 @@ mod tests {
                     description: Some("   ".into()),
                     collection_type: CollectionType::Manga,
                     year: None,
+                    original_title: None,
+                    runtime_minutes: None,
                     author: None,
                     director: None,
                     developer: None,
@@ -869,6 +896,8 @@ mod tests {
                     description: Some("액션 게임".into()),
                     collection_type: CollectionType::Game,
                     year: Some(2019),
+                    original_title: None,
+                    runtime_minutes: None,
                     author: Some("PlatinumGames".into()),
                     director: None,
                     developer: None,
@@ -910,6 +939,8 @@ mod tests {
                     description: None,
                     collection_type: CollectionType::Game,
                     year: Some(2019),
+                    original_title: None,
+                    runtime_minutes: None,
                     author: None,
                     director: None,
                     developer: Some("  PlatinumGames  ".into()),
@@ -939,6 +970,8 @@ mod tests {
             description: None,
             collection_type: CollectionType::Manga,
             year: None,
+            original_title: None,
+            runtime_minutes: None,
             author: None,
             director: None,
             developer: None,
@@ -1089,6 +1122,8 @@ mod tests {
                     description: None,
                     collection_type: CollectionType::Manga,
                     year: Some(2024),
+                    original_title: None,
+                    runtime_minutes: None,
                     author: Some("Imported Author".into()),
                     director: None,
                     developer: None,
