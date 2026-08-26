@@ -550,6 +550,30 @@ describe("CollectionOverlay game detail flow", () => {
     expect(screen.getByRole("heading", { name: "Astral Chain", level: 1 })).toBeInTheDocument();
   });
 
+  it("closes artwork dialog when save succeeds even if connection reload fails", async () => {
+    const user = userEvent.setup();
+    const onChanged = vi.fn().mockResolvedValue(undefined);
+    const connection = { gameId: 17, lastSyncedAt: "t" };
+    const getIgdbConnection = vi.fn()
+      .mockResolvedValueOnce(connection)
+      .mockResolvedValueOnce(connection)
+      .mockRejectedValueOnce(new Error("연결 상태 갱신 실패"));
+    const { gateway } = renderOverlay({ getIgdbConnection }, onChanged, undefined, gameCollection);
+
+    await user.click(screen.getByRole("button", { name: "작품 관리" }));
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: "표지·hero 변경" })).toBeEnabled());
+    await user.click(screen.getByRole("menuitem", { name: "표지·hero 변경" }));
+    await screen.findByRole("heading", { name: "표지 선택" });
+    await user.click(screen.getByRole("button", { name: "다음" }));
+    await screen.findByRole("heading", { name: "대표 이미지 선택" });
+    await user.click(screen.getByRole("button", { name: "저장" }));
+
+    await waitFor(() => expect(gateway.replaceIgdbGameArtwork).toHaveBeenCalledOnce());
+    expect(onChanged).toHaveBeenCalledOnce();
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "IGDB 게임 아트워크 변경" })).not.toBeInTheDocument());
+    expect(screen.getByRole("alert")).toHaveTextContent("연결 상태 갱신 실패");
+  });
+
   it("routes missing-credential artwork errors to the external-services settings callback", async () => {
     const user = userEvent.setup();
     const onOpenSettings = vi.fn();

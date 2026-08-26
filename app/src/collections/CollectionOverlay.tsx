@@ -501,7 +501,14 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
           onOpenSettings={openIgdbSettings}
           onApplied={async () => {
             await onChanged();
-            setIgdbConnection(await gateway.getIgdbConnection(collection.id));
+            setIgdbOpen(false);
+            setIgdbError(null);
+            try {
+              setIgdbConnection(await gateway.getIgdbConnection(collection.id));
+            } catch (error) {
+              setIgdbConnection(null);
+              setIgdbError(commandErrorMessage(error, "IGDB 연결 상태를 불러오지 못했습니다."));
+            }
           }}
         />
       )}
