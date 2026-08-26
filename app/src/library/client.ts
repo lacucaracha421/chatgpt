@@ -33,6 +33,12 @@ import type {
   IgdbCredentialStatus,
   IgdbGamePreview,
   IgdbSearchResult,
+  TmdbApplyRequest,
+  TmdbArtworkReplaceRequest,
+  TmdbConnection,
+  TmdbCredentialStatus,
+  TmdbMoviePreview,
+  TmdbSearchResult,
   MangaSeries,
   MetadataBackup,
   MetadataImportPlan,
@@ -173,6 +179,24 @@ export const libraryGateway: LibraryGateway = {
     invoke<IgdbConnection | null>("get_igdb_connection", { collectionId }),
   replaceIgdbGameArtwork: (request: IgdbArtworkReplaceRequest) =>
     invoke<CollectionSummary>("replace_igdb_game_artwork", { request }),
+  getTmdbCredentialStatus: () =>
+    invoke<TmdbCredentialStatus>("get_tmdb_credential_status"),
+  setTmdbToken: (token) =>
+    invoke<TmdbCredentialStatus>("set_tmdb_token", { token }),
+  deleteTmdbToken: () =>
+    invoke<TmdbCredentialStatus>("delete_tmdb_token"),
+  searchTmdbMovies: (query) =>
+    invoke<TmdbSearchResult[]>("search_tmdb_movies", { query }),
+  previewTmdbMovie: (movieId) =>
+    invoke<TmdbMoviePreview>("preview_tmdb_movie", { movieId }),
+  applyTmdbMovie: (request: TmdbApplyRequest) =>
+    invoke<CollectionSummary>("apply_tmdb_movie", { request }),
+  refreshTmdbMovie: (collectionId) =>
+    invoke<CollectionSummary>("refresh_tmdb_movie", { collectionId }),
+  getTmdbConnection: (collectionId) =>
+    invoke<TmdbConnection | null>("get_tmdb_connection", { collectionId }),
+  replaceTmdbMovieArtwork: (request: TmdbArtworkReplaceRequest) =>
+    invoke<CollectionSummary>("replace_tmdb_movie_artwork", { request }),
   getAladinCredentialStatus: () =>
     invoke<AladinCredentialStatus>("get_aladin_credential_status"),
   setAladinTtbKey: (ttbKey) =>

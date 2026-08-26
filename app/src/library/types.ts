@@ -293,6 +293,64 @@ export type IgdbArtworkReplaceRequest = {
   hero: IgdbArtworkDecision;
 };
 
+export type TmdbCredentialStatus = { configured: boolean };
+
+export type TmdbImageCandidate = {
+  filePath: string;
+  width: number | null;
+  height: number | null;
+};
+
+export type TmdbSearchResult = {
+  movieId: number;
+  title: string;
+  originalTitle: string | null;
+  releaseDate: string | null;
+  posterPath: string | null;
+};
+
+export type TmdbMoviePreview = {
+  movieId: number;
+  proposedTitle: string;
+  originalTitle: string | null;
+  releaseDate: string | null;
+  runtimeMinutes: number | null;
+  director: string | null;
+  productionCompany: string | null;
+  genres: string | null;
+  overview: string | null;
+  externalScore: number | null;
+  posters: TmdbImageCandidate[];
+  backdrops: TmdbImageCandidate[];
+};
+
+export type TmdbConnection = {
+  movieId: number;
+  lastSyncedAt: string | null;
+};
+
+export type TmdbApplyTarget =
+  | { kind: "new" }
+  | { kind: "existing"; collectionId: string };
+
+export type TmdbApplyRequest = {
+  target: TmdbApplyTarget;
+  movieId: number;
+  posterPath: string | null;
+  backdropPath: string | null;
+};
+
+export type TmdbArtworkDecision =
+  | { kind: "keep" }
+  | { kind: "clear" }
+  | { kind: "select"; filePath: string };
+
+export type TmdbArtworkReplaceRequest = {
+  collectionId: string;
+  poster: TmdbArtworkDecision;
+  backdrop: TmdbArtworkDecision;
+};
+
 export type AladinCredentialStatus = { configured: boolean };
 
 export type AladinConnection = {
@@ -665,6 +723,15 @@ export interface LibraryGateway {
   refreshIgdbGame(collectionId: string): Promise<CollectionSummary>;
   getIgdbConnection(collectionId: string): Promise<IgdbConnection | null>;
   replaceIgdbGameArtwork(request: IgdbArtworkReplaceRequest): Promise<CollectionSummary>;
+  getTmdbCredentialStatus(): Promise<TmdbCredentialStatus>;
+  setTmdbToken(token: string): Promise<TmdbCredentialStatus>;
+  deleteTmdbToken(): Promise<TmdbCredentialStatus>;
+  searchTmdbMovies(query: string): Promise<TmdbSearchResult[]>;
+  previewTmdbMovie(movieId: number): Promise<TmdbMoviePreview>;
+  applyTmdbMovie(request: TmdbApplyRequest): Promise<CollectionSummary>;
+  refreshTmdbMovie(collectionId: string): Promise<CollectionSummary>;
+  getTmdbConnection(collectionId: string): Promise<TmdbConnection | null>;
+  replaceTmdbMovieArtwork(request: TmdbArtworkReplaceRequest): Promise<CollectionSummary>;
   getReleaseWatchStatus(collectionId: string): Promise<ReleaseWatchStatus>;
   setReleaseWatchEnabled(
     collectionId: string,

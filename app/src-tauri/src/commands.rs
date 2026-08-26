@@ -36,7 +36,8 @@ use crate::{
 
 use crate::library::models::{
     IgdbApplyRequest, IgdbArtworkReplaceRequest, IgdbConnection, IgdbCredentialStatus,
-    IgdbGamePreview, IgdbSearchResult,
+    IgdbGamePreview, IgdbSearchResult, TmdbApplyRequest, TmdbArtworkReplaceRequest,
+    TmdbConnection, TmdbCredentialStatus, TmdbMoviePreview, TmdbSearchResult,
 };
 
 #[tauri::command]
@@ -754,6 +755,91 @@ pub async fn replace_igdb_game_artwork(
 ) -> Result<CollectionSummary, CommandError> {
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || library.replace_igdb_game_artwork(request))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn get_tmdb_credential_status() -> Result<TmdbCredentialStatus, CommandError> {
+    credential::tmdb_credential_status().map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn set_tmdb_token(token: String) -> Result<TmdbCredentialStatus, CommandError> {
+    credential::set_tmdb_token_os(&token).map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn delete_tmdb_token() -> Result<TmdbCredentialStatus, CommandError> {
+    credential::delete_tmdb_token_os().map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn search_tmdb_movies(
+    query: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<TmdbSearchResult>, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.search_tmdb_movies(&query))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn preview_tmdb_movie(
+    movie_id: i64,
+    state: State<'_, AppState>,
+) -> Result<TmdbMoviePreview, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.preview_tmdb_movie(movie_id))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn apply_tmdb_movie(
+    request: TmdbApplyRequest,
+    state: State<'_, AppState>,
+) -> Result<CollectionSummary, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.apply_tmdb_movie(request))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn refresh_tmdb_movie(
+    collection_id: String,
+    state: State<'_, AppState>,
+) -> Result<CollectionSummary, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.refresh_tmdb_movie(&collection_id))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn get_tmdb_connection(
+    collection_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<TmdbConnection>, CommandError> {
+    current_required(state)?
+        .get_tmdb_connection(&collection_id)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn replace_tmdb_movie_artwork(
+    request: TmdbArtworkReplaceRequest,
+    state: State<'_, AppState>,
+) -> Result<CollectionSummary, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.replace_tmdb_movie_artwork(request))
         .await
         .map_err(|_| background_task_error())?
         .map_err(CommandError::from)
@@ -1618,6 +1704,37 @@ mod tests {
             assert!(!public.message.contains("client-secret"));
             assert!(!public.message.contains("access_token"));
             assert!(!public.message.contains("images.igdb.com"));
+        }
+    }
+
+    #[test]
+    fn maps_tmdb_errors_without_secret_details() {
+        let cases = [
+            (
+                LibraryError::TmdbCredentialNotConfigured,
+                "tmdb_credential_not_configured",
+            ),
+            (
+                LibraryError::InvalidTmdbCredentialValue,
+                "invalid_tmdb_credential_value",
+            ),
+            (LibraryError::TmdbUnauthorized, "tmdb_unauthorized"),
+            (LibraryError::TmdbRateLimited, "tmdb_rate_limited"),
+            (LibraryError::TmdbTimedOut, "tmdb_timed_out"),
+            (LibraryError::TmdbUnavailable, "tmdb_unavailable"),
+            (LibraryError::TmdbNotFound, "tmdb_not_found"),
+            (LibraryError::TmdbInvalidResponse, "tmdb_invalid_response"),
+            (
+                LibraryError::TmdbInvalidImagePath,
+                "tmdb_invalid_image_path",
+            ),
+            (LibraryError::InvalidTmdbIdentity, "invalid_tmdb_identity"),
+        ];
+        for (error, code) in cases {
+            let public = CommandError::from(error);
+            assert_eq!(public.code, code);
+            assert!(!public.message.contains("api.themoviedb.org"));
+            assert!(!public.message.contains("eyJhbGciOiJIUzI1NiIs"));
         }
     }
 

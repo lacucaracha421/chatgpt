@@ -304,6 +304,15 @@ function createGateway(installed: boolean): LibraryGateway {
       reason: "completed",
       lastSuccessAt: "2026-08-22T12:00:00Z",
     }),
+    getTmdbCredentialStatus: vi.fn(),
+    setTmdbToken: vi.fn(),
+    deleteTmdbToken: vi.fn(),
+    searchTmdbMovies: vi.fn(),
+    previewTmdbMovie: vi.fn(),
+    applyTmdbMovie: vi.fn(),
+    refreshTmdbMovie: vi.fn(),
+    getTmdbConnection: vi.fn(),
+    replaceTmdbMovieArtwork: vi.fn(),
   } as unknown as LibraryGateway;
 }
 

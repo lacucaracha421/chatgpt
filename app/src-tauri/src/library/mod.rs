@@ -70,6 +70,8 @@ pub enum MediaVariant {
     MangaDexCoverPreview,
     IgdbImagePreviewCover,
     IgdbImagePreviewHero,
+    TmdbImagePreviewPoster,
+    TmdbImagePreviewBackdrop,
 }
 
 #[derive(Debug)]
@@ -409,7 +411,9 @@ impl Library {
             | MediaVariant::WorkArtworkThumbnail
             | MediaVariant::MangaDexCoverPreview
             | MediaVariant::IgdbImagePreviewCover
-            | MediaVariant::IgdbImagePreviewHero => {
+            | MediaVariant::IgdbImagePreviewHero
+            | MediaVariant::TmdbImagePreviewPoster
+            | MediaVariant::TmdbImagePreviewBackdrop => {
                 unreachable!()
             }
         };

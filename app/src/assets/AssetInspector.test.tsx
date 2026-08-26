@@ -268,6 +268,15 @@ it("hides collection metadata when more than one asset is selected", async () =>
 
 function createGateway(classificationIds: string[], albumIds: string[] = [], reject = false, updateAssetMetadata = vi.fn(), collectionIds: string[] = []): LibraryGateway {
   return {
+    getTmdbCredentialStatus: vi.fn(),
+    setTmdbToken: vi.fn(),
+    deleteTmdbToken: vi.fn(),
+    searchTmdbMovies: vi.fn(),
+    previewTmdbMovie: vi.fn(),
+    applyTmdbMovie: vi.fn(),
+    refreshTmdbMovie: vi.fn(),
+    getTmdbConnection: vi.fn(),
+    replaceTmdbMovieArtwork: vi.fn(),
     getAssetClassifications: vi.fn().mockImplementation(() => reject ? Promise.reject(new Error("membership failed")) : Promise.resolve(classificationIds)),
     getAssetAlbums: vi.fn().mockImplementation(() => reject ? Promise.reject(new Error("membership failed")) : Promise.resolve(albumIds)),
     getAssetCollections: vi.fn().mockImplementation(() => reject ? Promise.reject(new Error("membership failed")) : Promise.resolve(collectionIds)),

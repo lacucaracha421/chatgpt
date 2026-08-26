@@ -51,3 +51,7 @@ export function mangadexCoverPreviewUrl(mangaId: string, fileName: string): stri
 export function igdbImagePreviewUrl(imageId: string, size: "cover" | "hero"): string {
   return `${MEDIA_ORIGIN}/igdb-image-preview/${size}/${encodeURIComponent(imageId)}`;
 }
+
+export function tmdbImagePreviewUrl(filePath: string, size: "poster" | "backdrop"): string {
+  return `${MEDIA_ORIGIN}/tmdb-image-preview/${size}/${encodeURIComponent(filePath)}`;
+}

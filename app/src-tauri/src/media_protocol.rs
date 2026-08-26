@@ -12,7 +12,9 @@ use tauri::http::{
 use crate::library::{
     error::LibraryError,
     igdb::{IgdbClient, IgdbImageSize},
-    mangadex, Library, MediaVariant, MAX_WORK_ARTWORK_BYTES,
+    mangadex,
+    tmdb::{TmdbClient, TmdbImageSize},
+    Library, MediaVariant, MAX_WORK_ARTWORK_BYTES,
 };
 
 #[cfg(test)]
@@ -41,6 +43,15 @@ pub(crate) fn media_response_with_range(
             return empty_response(StatusCode::NOT_FOUND);
         }
         return igdb_image_response(&image_id, variant);
+    }
+    if path.starts_with("/tmdb-image-preview/") {
+        let Ok((variant, Some(file_path))) = parse_media_path(path) else {
+            return empty_response(StatusCode::BAD_REQUEST);
+        };
+        if library.is_none() {
+            return empty_response(StatusCode::NOT_FOUND);
+        }
+        return tmdb_image_response(&file_path, variant);
     }
     if path.starts_with("/remote-manga-") {
         let Some((work_id, page)) = parse_remote_manga_path(path) else {
@@ -166,22 +177,41 @@ fn parse_media_path(path: &str) -> Result<(MediaVariant, Option<String>), ()> {
         .ok_or(())?
         .split('/')
         .collect::<Vec<_>>();
-    let ["igdb-image-preview", size, encoded_image_id] = segments.as_slice() else {
+    let [route, size, encoded_image_path] = segments.as_slice() else {
         return Err(());
     };
-    let image_id = percent_decode(encoded_image_id).ok_or(())?;
-    let variant = match *size {
-        "cover" => MediaVariant::IgdbImagePreviewCover,
-        "hero" => MediaVariant::IgdbImagePreviewHero,
-        _ => return Err(()),
-    };
-    let image_size = match variant {
-        MediaVariant::IgdbImagePreviewCover => IgdbImageSize::CoverBig,
-        MediaVariant::IgdbImagePreviewHero => IgdbImageSize::Hd1080p,
-        _ => return Err(()),
-    };
-    IgdbClient::image_url(&image_id, image_size).map_err(|_| ())?;
-    Ok((variant, Some(image_id)))
+    let image_path = percent_decode(encoded_image_path).ok_or(())?;
+    match *route {
+        "igdb-image-preview" => {
+            let variant = match *size {
+                "cover" => MediaVariant::IgdbImagePreviewCover,
+                "hero" => MediaVariant::IgdbImagePreviewHero,
+                _ => return Err(()),
+            };
+            let image_size = match variant {
+                MediaVariant::IgdbImagePreviewCover => IgdbImageSize::CoverBig,
+                MediaVariant::IgdbImagePreviewHero => IgdbImageSize::Hd1080p,
+                _ => return Err(()),
+            };
+            IgdbClient::image_url(&image_path, image_size).map_err(|_| ())?;
+            Ok((variant, Some(image_path)))
+        }
+        "tmdb-image-preview" => {
+            let variant = match *size {
+                "poster" => MediaVariant::TmdbImagePreviewPoster,
+                "backdrop" => MediaVariant::TmdbImagePreviewBackdrop,
+                _ => return Err(()),
+            };
+            let image_size = match variant {
+                MediaVariant::TmdbImagePreviewPoster => TmdbImageSize::W500,
+                MediaVariant::TmdbImagePreviewBackdrop => TmdbImageSize::W1280,
+                _ => return Err(()),
+            };
+            TmdbClient::image_url(&image_path, image_size).map_err(|_| ())?;
+            Ok((variant, Some(image_path)))
+        }
+        _ => Err(()),
+    }
 }
 
 fn igdb_image_response(image_id: &str, variant: MediaVariant) -> Response<Vec<u8>> {
@@ -229,6 +259,61 @@ fn igdb_image_agent() -> &'static ureq::Agent {
             .build()
             .into()
     })
+}
+
+fn tmdb_image_response(file_path: &str, variant: MediaVariant) -> Response<Vec<u8>> {
+    let size = match variant {
+        MediaVariant::TmdbImagePreviewPoster => TmdbImageSize::W500,
+        MediaVariant::TmdbImagePreviewBackdrop => TmdbImageSize::W1280,
+        _ => return empty_response(StatusCode::BAD_REQUEST),
+    };
+    let Ok(url) = TmdbClient::image_url(file_path, size) else {
+        return empty_response(StatusCode::BAD_REQUEST);
+    };
+    let response = tmdb_image_agent().get(&url).call();
+    let mut response = match response {
+        Ok(response) => response,
+        Err(ureq::Error::StatusCode(404)) => return empty_response(StatusCode::NOT_FOUND),
+        Err(ureq::Error::StatusCode(429)) => return empty_response(StatusCode::TOO_MANY_REQUESTS),
+        Err(_) => return empty_response(StatusCode::BAD_GATEWAY),
+    };
+    let mut bytes = Vec::new();
+    if response
+        .body_mut()
+        .as_reader()
+        .take((MAX_WORK_ARTWORK_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .is_err()
+        || bytes.len() > MAX_WORK_ARTWORK_BYTES
+    {
+        return empty_response(StatusCode::BAD_GATEWAY);
+    }
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(CONTENT_TYPE, tmdb_image_mime(file_path))
+        .header(CONTENT_LENGTH, bytes.len().to_string())
+        .body(bytes)
+        .expect("TMDB image response is valid")
+}
+
+fn tmdb_image_agent() -> &'static ureq::Agent {
+    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+    AGENT.get_or_init(|| {
+        ureq::Agent::config_builder()
+            .https_only(true)
+            .max_redirects(0)
+            .timeout_global(Some(Duration::from_secs(20)))
+            .build()
+            .into()
+    })
+}
+
+fn tmdb_image_mime(file_path: &str) -> &'static str {
+    match file_path.rsplit_once('.').map(|(_, extension)| extension) {
+        Some("png") => "image/png",
+        Some("webp") => "image/webp",
+        _ => "image/jpeg",
+    }
 }
 
 fn playback_response(
@@ -566,6 +651,19 @@ mod tests {
         assert!(matches!(variant, MediaVariant::IgdbImagePreviewCover));
         assert_eq!(image_id.as_deref(), Some("co1abc"));
         assert!(parse_media_path("/igdb-image-preview/hero/..%2Fsecret").is_err());
+    }
+
+    #[test]
+    fn parses_tmdb_image_preview_routes() {
+        let (variant, path) =
+            parse_media_path("/tmdb-image-preview/poster/%2Fabcd1234.jpg").unwrap();
+        assert!(matches!(variant, MediaVariant::TmdbImagePreviewPoster));
+        assert_eq!(path.as_deref(), Some("/abcd1234.jpg"));
+        let (variant, path) =
+            parse_media_path("/tmdb-image-preview/backdrop/%2Fabcd1234.webp").unwrap();
+        assert!(matches!(variant, MediaVariant::TmdbImagePreviewBackdrop));
+        assert_eq!(path.as_deref(), Some("/abcd1234.webp"));
+        assert!(parse_media_path("/tmdb-image-preview/backdrop/..%2Fsecret.jpg").is_err());
     }
 
     #[test]
