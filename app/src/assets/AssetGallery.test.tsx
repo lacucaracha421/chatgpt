@@ -62,6 +62,11 @@ describe("AssetGallery", () => {
     expect(screen.getByRole("img", { name: "asset-0.png" })).toBeInTheDocument();
   });
 
+  it("decodes grid thumbnails asynchronously", async () => {
+    render(<AssetGallery items={[asset(0)]} />);
+    expect(await screen.findByRole("img", { name: "asset-0.png" })).toHaveAttribute("decoding", "async");
+  });
+
   it("selects once and opens on double click or Enter", async () => {
     const user = userEvent.setup(); const select = vi.fn(); const open = vi.fn();
     render(<AssetGallery items={[asset(0)]} selectedAssetIds={new Set()} focusAssetId="asset-0" targetRowHeight={180} onSelectionGesture={select} onOpen={open} />);
@@ -425,7 +430,7 @@ describe("AssetGallery", () => {
     expect(lines[1]).not.toHaveClass("asset-gallery__scrollbar-line--active");
   });
 
-  it("emits at most one date jump per throttle interval while dragging", async () => {
+  it("commits only the final date bucket when a rail drag ends", async () => {
     const onSelectDate = vi.fn();
     const { container } = render(<AssetGallery
       items={[
@@ -439,16 +444,33 @@ describe("AssetGallery", () => {
     const scrollbar = container.querySelector(".asset-gallery__scrollbar") as HTMLElement;
     vi.spyOn(scrollbar, "getBoundingClientRect").mockReturnValue({ top: 0, height: 600, bottom: 600, left: 0, right: 40, width: 40, x: 0, y: 0, toJSON: () => ({}) });
     Object.defineProperty(scrollbar, "hasPointerCapture", { configurable: true, value: () => true });
-    vi.useFakeTimers();
+    Object.defineProperty(scrollbar, "releasePointerCapture", { configurable: true, value: vi.fn() });
 
     fireEvent.pointerDown(scrollbar, { button: 0, pointerId: 1, clientY: 10 });
     fireEvent.pointerMove(scrollbar, { pointerId: 1, clientY: 300 });
     fireEvent.pointerMove(scrollbar, { pointerId: 1, clientY: 590 });
-    expect(onSelectDate).toHaveBeenCalledTimes(1);
+    expect(onSelectDate).not.toHaveBeenCalled();
 
-    act(() => vi.advanceTimersByTime(160));
-    expect(onSelectDate).toHaveBeenCalledTimes(2);
-    expect(onSelectDate.mock.calls[1]![1]).toBeGreaterThan(onSelectDate.mock.calls[0]![1]);
+    fireEvent.pointerUp(scrollbar, { pointerId: 1, clientY: 590 });
+    expect(onSelectDate).toHaveBeenCalledOnce();
+    expect(onSelectDate.mock.calls[0]![0]).toBe("2026-08-01");
+  });
+
+  it("discards a pending date jump when a rail drag is cancelled", async () => {
+    const onSelectDate = vi.fn();
+    const { container } = render(<AssetGallery
+      items={[asset(0), asset(1)]}
+      dateBuckets={[{ date: "2026-07-30", count: 1 }, { date: "2026-08-01", count: 1 }]}
+      onSelectDate={onSelectDate}
+    />);
+    await waitFor(() => expect(container.querySelector(".asset-gallery__scrollbar")).not.toBeNull());
+    const scrollbar = container.querySelector(".asset-gallery__scrollbar") as HTMLElement;
+    vi.spyOn(scrollbar, "getBoundingClientRect").mockReturnValue({ top: 0, height: 600, bottom: 600, left: 0, right: 40, width: 40, x: 0, y: 0, toJSON: () => ({}) });
+
+    fireEvent.pointerDown(scrollbar, { button: 0, pointerId: 1, clientY: 300 });
+    fireEvent.pointerCancel(scrollbar, { pointerId: 1 });
+
+    expect(onSelectDate).not.toHaveBeenCalled();
   });
 });
 

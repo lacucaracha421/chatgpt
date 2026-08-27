@@ -34,6 +34,11 @@ it("attaches muted playback after 200ms and fully cleans it up", () => {
   expect(media.getAttribute("src")).toBeNull();
 });
 
+it("decodes the still thumbnail asynchronously", () => {
+  render(<VideoTileMedia asset={video()} active={false} onRequestActive={vi.fn()} onReleaseActive={vi.fn()} onRetry={vi.fn()} />);
+  expect(screen.getByRole("img", { name: "clip.webm" })).toHaveAttribute("decoding", "async");
+});
+
 it("maps pointer position to a scrub frame and delays video seeking", () => {
   render(<VideoTileMedia asset={video()} active onRequestActive={vi.fn()} onReleaseActive={vi.fn()} onRetry={vi.fn()} />);
   const slider = screen.getByRole("slider", { name: "영상 탐색" });
