@@ -15,4 +15,4 @@ Write-Host ""
 Write-Host "현재 Serve 상태:"
 tailscale serve status
 Write-Host ""
-Write-Host "위 https://...ts.net 주소를 모바일 Lakomics Radial 설정에 입력하세요."
+Write-Host "위 https://...ts.net 주소를 모바일 Lakomics X Collector 설정에 입력하세요."
