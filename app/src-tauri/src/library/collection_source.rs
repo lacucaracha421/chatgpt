@@ -1,14 +1,19 @@
 use std::cmp::Ordering;
 use std::fs;
+use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
 
+use image::ImageFormat;
 use rusqlite::OptionalExtension;
+use sha2::{Digest, Sha256};
 
 use super::error::LibraryError;
 use super::models::CollectionCover;
 use super::{Library, MediaResponse};
 
 const COVERS_DIR: &str = "covers";
+const COLLECTION_THUMBNAIL_BOUND: u32 = 360;
 const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "bmp", "tiff", "jfif", "gif"];
 
 pub(crate) fn collection_source_root(
@@ -285,30 +290,42 @@ impl Library {
         collection_id: &str,
         file_name: &str,
     ) -> Result<MediaResponse, LibraryError> {
-        let connection = self.connection()?;
-        let root =
-            collection_source_root(&connection)?.ok_or(LibraryError::CollectionSourceRootNotSet)?;
-        let source_path: Option<String> = connection
-            .query_row(
-                "SELECT source_path FROM collections WHERE id = ?1",
-                [collection_id],
-                |row| row.get(0),
-            )
-            .optional()?
-            .ok_or(LibraryError::CollectionNotFound)?;
-        let source_path = source_path.ok_or(LibraryError::CollectionSourcePathNotSet)?;
-        let source_root = Path::new(&root);
-        let file_path = source_root
-            .join(&source_path)
-            .join(COVERS_DIR)
-            .join(file_name);
-        self.open_manga_media(source_root, file_path)
+        let (source_root, file_path) =
+            self.collection_source_image_path(collection_id, Some(file_name))?;
+        self.open_manga_media(&source_root, file_path)
+    }
+
+    pub fn collection_cover_thumbnail_media(
+        &self,
+        collection_id: &str,
+        file_name: &str,
+    ) -> Result<MediaResponse, LibraryError> {
+        let (source_root, file_path) =
+            self.collection_source_image_path(collection_id, Some(file_name))?;
+        self.collection_thumbnail_media(collection_id, &source_root, file_path)
     }
 
     pub fn collection_source_preview_media(
         &self,
         collection_id: &str,
     ) -> Result<MediaResponse, LibraryError> {
+        let (source_root, preview) = self.collection_source_image_path(collection_id, None)?;
+        self.open_manga_media(&source_root, preview)
+    }
+
+    pub fn collection_source_thumbnail_media(
+        &self,
+        collection_id: &str,
+    ) -> Result<MediaResponse, LibraryError> {
+        let (source_root, preview) = self.collection_source_image_path(collection_id, None)?;
+        self.collection_thumbnail_media(collection_id, &source_root, preview)
+    }
+
+    fn collection_source_image_path(
+        &self,
+        collection_id: &str,
+        file_name: Option<&str>,
+    ) -> Result<(PathBuf, PathBuf), LibraryError> {
         let connection = self.connection()?;
         let root =
             collection_source_root(&connection)?.ok_or(LibraryError::CollectionSourceRootNotSet)?;
@@ -321,16 +338,123 @@ impl Library {
             .optional()?
             .ok_or(LibraryError::CollectionNotFound)?;
         let source_path = source_path.ok_or(LibraryError::CollectionSourcePathNotSet)?;
-        let source_root = Path::new(&root);
+        let source_root = PathBuf::from(root);
         let collection_dir = source_root.join(source_path);
-        let preview = source_preview_path(&collection_dir)?;
-        self.open_manga_media(source_root, preview)
+        let image_path = match file_name {
+            Some(file_name) => collection_dir.join(COVERS_DIR).join(file_name),
+            None => source_preview_path(&collection_dir)?,
+        };
+        Ok((source_root, image_path))
     }
+
+    fn collection_thumbnail_media(
+        &self,
+        collection_id: &str,
+        source_root: &Path,
+        source_path: PathBuf,
+    ) -> Result<MediaResponse, LibraryError> {
+        let source = self.open_manga_media(source_root, source_path.clone())?;
+        let source_modified_nanos = source
+            .file
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .map_err(|source| LibraryError::ReadMedia {
+                path: source_path.clone(),
+                source,
+            })?
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let canonical_root =
+            fs::canonicalize(source_root).map_err(|source| LibraryError::ReadMedia {
+                path: source_root.to_path_buf(),
+                source,
+            })?;
+        let canonical_source =
+            fs::canonicalize(&source_path).map_err(|source| LibraryError::ReadMedia {
+                path: source_path.clone(),
+                source,
+            })?;
+        let source_relative_path = canonical_source
+            .strip_prefix(&canonical_root)
+            .map_err(|_| LibraryError::UnsafeMediaPath)?;
+        let thumbnail_relative_path = collection_thumbnail_relative_path(
+            collection_id,
+            source_relative_path,
+            source.length,
+            source_modified_nanos,
+        );
+        let thumbnail_path = self.root().join(&thumbnail_relative_path);
+        if thumbnail_path.exists() {
+            return self.open_library_media(&thumbnail_relative_path);
+        }
+
+        let image = image::ImageReader::new(BufReader::new(source.file))
+            .with_guessed_format()
+            .map_err(|_| LibraryError::UnsupportedImage)?
+            .decode()
+            .map_err(|_| LibraryError::UnsupportedImage)?;
+        let temporary_path = thumbnail_path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
+        if let Err(error) = write_collection_thumbnail(&image, &temporary_path) {
+            let _ = fs::remove_file(&temporary_path);
+            return Err(error);
+        }
+        if let Err(source) = fs::rename(&temporary_path, &thumbnail_path) {
+            let _ = fs::remove_file(&temporary_path);
+            if !thumbnail_path.exists() {
+                return Err(LibraryError::WriteCollectionThumbnail {
+                    path: thumbnail_path,
+                    source,
+                });
+            }
+        }
+        self.open_library_media(&thumbnail_relative_path)
+    }
+}
+
+fn collection_thumbnail_relative_path(
+    collection_id: &str,
+    source_relative_path: &Path,
+    source_length: u64,
+    source_modified_nanos: u128,
+) -> String {
+    let normalized = source_relative_path.to_string_lossy().replace('\\', "/");
+    let identity = format!("{normalized}\0{source_length}\0{source_modified_nanos}");
+    let hash = Sha256::digest(identity.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("collection-thumbnails/{collection_id}/{hash}.webp")
+}
+
+fn write_collection_thumbnail(
+    image: &image::DynamicImage,
+    path: &Path,
+) -> Result<(), LibraryError> {
+    let directory = path
+        .parent()
+        .expect("generated Collection thumbnail paths have a parent");
+    fs::create_dir_all(directory).map_err(|source| LibraryError::WriteCollectionThumbnail {
+        path: directory.to_path_buf(),
+        source,
+    })?;
+    let file = fs::File::create(path).map_err(|source| LibraryError::WriteCollectionThumbnail {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    image
+        .thumbnail(COLLECTION_THUMBNAIL_BOUND, COLLECTION_THUMBNAIL_BOUND)
+        .write_to(&mut BufWriter::new(file), ImageFormat::WebP)
+        .map_err(|source| LibraryError::WriteCollectionThumbnail {
+            path: path.to_path_buf(),
+            source: std::io::Error::other(source),
+        })
 }
 
 #[cfg(test)]
 mod tests {
     use std::io::Read;
+    use std::time::{Duration, SystemTime};
 
     use super::*;
 
@@ -361,6 +485,129 @@ mod tests {
         let mut bytes = Vec::new();
         media.file.read_to_end(&mut bytes).unwrap();
         bytes
+    }
+
+    fn write_png(path: &Path, width: u32, height: u32) -> Vec<u8> {
+        image::DynamicImage::new_rgb8(width, height)
+            .save(path)
+            .unwrap();
+        fs::read(path).unwrap()
+    }
+
+    #[test]
+    fn collection_thumbnail_bounds_and_reuses_source_preview() {
+        let (_temp, library, collection_dir) = source_library();
+        write_png(&collection_dir.join("chosen.png"), 1200, 800);
+        fs::write(collection_dir.join("info.txt"), "Cover: chosen.png\n").unwrap();
+
+        let media = library
+            .collection_source_thumbnail_media(COLLECTION_ID)
+            .unwrap();
+        assert_eq!(media.mime, "image/webp");
+        let first = read_media(media);
+        let decoded =
+            image::load_from_memory_with_format(&first, image::ImageFormat::WebP).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (360, 240));
+
+        let cache_dir = library
+            .root()
+            .join("collection-thumbnails")
+            .join(COLLECTION_ID);
+        let cache_files = fs::read_dir(&cache_dir)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(cache_files.len(), 1);
+        let cache_path = cache_files[0].path();
+        let first_modified = fs::metadata(&cache_path).unwrap().modified().unwrap();
+
+        let second = read_media(
+            library
+                .collection_source_thumbnail_media(COLLECTION_ID)
+                .unwrap(),
+        );
+        assert_eq!(second, first);
+        assert_eq!(
+            fs::metadata(cache_path).unwrap().modified().unwrap(),
+            first_modified
+        );
+    }
+
+    #[test]
+    fn collection_thumbnail_isolates_covers_and_preserves_original_media() {
+        let (_temp, library, collection_dir) = source_library();
+        let covers_dir = collection_dir.join(COVERS_DIR);
+        let first_path = covers_dir.join("vol_1_cover.png");
+        let second_path = covers_dir.join("vol_2_cover.png");
+        let first_original = write_png(&first_path, 800, 1200);
+        write_png(&second_path, 900, 600);
+
+        let first = read_media(
+            library
+                .collection_cover_thumbnail_media(COLLECTION_ID, "vol_1_cover.png")
+                .unwrap(),
+        );
+        let second = read_media(
+            library
+                .collection_cover_thumbnail_media(COLLECTION_ID, "vol_2_cover.png")
+                .unwrap(),
+        );
+
+        assert_ne!(first, second);
+        let cache_dir = library
+            .root()
+            .join("collection-thumbnails")
+            .join(COLLECTION_ID);
+        assert_eq!(fs::read_dir(cache_dir).unwrap().count(), 2);
+        assert_eq!(
+            read_media(
+                library
+                    .collection_cover_media(COLLECTION_ID, "vol_1_cover.png")
+                    .unwrap(),
+            ),
+            first_original,
+        );
+    }
+
+    #[test]
+    fn collection_thumbnail_refreshes_when_source_changes() {
+        let (_temp, library, collection_dir) = source_library();
+        let source_path = collection_dir.join("chosen.png");
+        write_png(&source_path, 1200, 800);
+        fs::write(collection_dir.join("info.txt"), "Cover: chosen.png\n").unwrap();
+        read_media(
+            library
+                .collection_source_thumbnail_media(COLLECTION_ID)
+                .unwrap(),
+        );
+
+        write_png(&source_path, 800, 1200);
+        fs::File::options()
+            .write(true)
+            .open(&source_path)
+            .unwrap()
+            .set_modified(SystemTime::now() + Duration::from_secs(1))
+            .unwrap();
+
+        let refreshed = read_media(
+            library
+                .collection_source_thumbnail_media(COLLECTION_ID)
+                .unwrap(),
+        );
+        let decoded =
+            image::load_from_memory_with_format(&refreshed, image::ImageFormat::WebP).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (240, 360));
+        assert_eq!(
+            fs::read_dir(
+                library
+                    .root()
+                    .join("collection-thumbnails")
+                    .join(COLLECTION_ID)
+            )
+            .unwrap()
+            .count(),
+            2,
+        );
     }
 
     #[test]

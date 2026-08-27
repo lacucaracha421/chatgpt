@@ -76,6 +76,9 @@ impl From<LibraryError> for CommandError {
             LibraryError::WriteWorkArtwork { .. } => {
                 "Work 표지 파일을 저장하지 못했습니다. 다시 시도해 주세요.".into()
             }
+            LibraryError::WriteCollectionThumbnail { .. } => {
+                "컬렉션 썸네일을 저장하지 못했습니다. 다시 시도해 주세요.".into()
+            }
             _ => error.to_string(),
         };
         let code = match error {
@@ -162,6 +165,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::UnsupportedImage => "unsupported_image",
             LibraryError::InvalidWorkArtwork => "invalid_work_artwork",
             LibraryError::WriteWorkArtwork { .. } => "write_work_artwork_failed",
+            LibraryError::WriteCollectionThumbnail { .. } => "write_collection_thumbnail_failed",
             LibraryError::InvalidMangaDexQuery => "invalid_mangadex_query",
             LibraryError::InvalidMangaDexIdentity => "invalid_mangadex_identity",
             LibraryError::MangaDexUnavailable => "mangadex_unavailable",
