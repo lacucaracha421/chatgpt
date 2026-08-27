@@ -12,6 +12,13 @@
 
 하드코딩, 공통 UI, Module 설계 규칙은 `docs/agents/implementation.md`를 따르세요.
 
+### Branch hygiene
+
+- Treat non-`main` branches as temporary working branches.
+- After a branch has been merged into `main`, delete the remote branch promptly instead of keeping merged work branches around.
+- Do not use long-lived feature, `codex/*`, `agent/*`, or backup branches to preserve old states. Use tags for meaningful snapshots that must be retained.
+- `main` is the single source of truth for the current Lakomics app and the bundled `extension/` code.
+
 ### Verification
 
 - Default to one most relevant targeted check; expand only after a failure or an identified cross-module risk.
