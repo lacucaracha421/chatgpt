@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CollectionSummary } from "../library/types";
 import { CollectionCard } from "./CollectionCard";
@@ -89,5 +89,21 @@ describe("CollectionCard", () => {
     expect(screen.getByRole("button")).toHaveAttribute("aria-selected", "true");
     screen.getByRole("button").click();
     expect(onClick).toHaveBeenCalledOnce();
+  });
+
+  it("replaces a failed cover with the placeholder and retries a changed URL", () => {
+    const view = render(
+      <CollectionCard collection={sample} coverUrl="broken.jpg" selected={false} onClick={vi.fn()} />,
+    );
+
+    fireEvent.error(screen.getByRole("img", { name: "Sample" }));
+    expect(screen.queryByRole("img", { name: "Sample" })).not.toBeInTheDocument();
+    expect(document.querySelector(".collection-card__placeholder")).toBeInTheDocument();
+
+    view.rerender(
+      <CollectionCard collection={sample} coverUrl="working.jpg" selected={false} onClick={vi.fn()} />,
+    );
+    expect(screen.getByRole("img", { name: "Sample" })).toHaveAttribute("src", "working.jpg");
+    expect(screen.getByRole("img", { name: "Sample" })).toHaveAttribute("decoding", "async");
   });
 });

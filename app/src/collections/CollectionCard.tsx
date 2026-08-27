@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { CollectionSummary } from "../library/types";
 
 export function collectionCredit(collection: CollectionSummary): string {
@@ -20,6 +21,9 @@ export function CollectionCard({
   onClick: () => void;
   selected: boolean;
 }) {
+  const [failedCoverUrl, setFailedCoverUrl] = useState<string | null>(null);
+  const visibleCoverUrl = coverUrl && coverUrl !== failedCoverUrl ? coverUrl : null;
+
   return (
     <button
       type="button"
@@ -29,8 +33,15 @@ export function CollectionCard({
     >
       <span className={`collection-card__object collection-card__object--${collection.type}`}>
         <span className="collection-card__cover">
-          {coverUrl ? (
-            <img src={coverUrl} alt={collection.name} loading="lazy" decoding="async" draggable={false} />
+          {visibleCoverUrl ? (
+            <img
+              src={visibleCoverUrl}
+              alt={collection.name}
+              loading="lazy"
+              decoding="async"
+              draggable={false}
+              onError={() => setFailedCoverUrl(visibleCoverUrl)}
+            />
           ) : (
             <span className="collection-card__placeholder" aria-hidden="true" />
           )}
