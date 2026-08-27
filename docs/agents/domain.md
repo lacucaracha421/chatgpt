@@ -7,7 +7,7 @@ Lakomics 저장소에서 도메인 문서와 현재 구현을 읽는 방법을 �
 - 저장소 루트의 `AGENTS.md`
 - 저장소 루트의 `CONTEXT.md`
 - UI 작업이라면 저장소 루트의 `DESIGN.md`
-- 작업 영역과 관련된 `docs/adr/` 문서
+- 작업 영역과 관련된 `docs/adr/` 문서와 `docs/adr/README.md` 상태 인덱스
 - `AGENTS.md`가 특정 기능에 대해 별도 reference/handoff 문서를 지정하면 그 문서
 
 파일이 아직 없다면 별도로 문제 삼지 않고 현재 코드와 존재하는 문서를 기준으로 계속 진행합니다.
@@ -48,7 +48,7 @@ Lakomics 저장소에서 도메인 문서와 현재 구현을 읽는 방법을 �
 
 ## ADR 상태
 
-ADR은 상단의 `Status`를 확인합니다.
+먼저 `docs/adr/README.md`의 상태 인덱스를 확인하고, 개별 ADR에 `Status`, `Supersedes`, `Clarifies`가 있으면 함께 읽습니다. 초기 ADR 중에는 파일 본문에 상태 표기가 없는 것이 있으므로 인덱스를 현재 상태의 기준으로 사용합니다.
 
 - `Accepted`: 현재 결정
 - `Superseded`: 후속 결정으로 대체된 역사 자료
