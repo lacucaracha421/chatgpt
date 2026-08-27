@@ -154,6 +154,18 @@ Settings는 desktop preference window처럼 구성한다.
 일반 UI에서는 opacity/background/border 같은 상태 전환을 우선한다.
 translateY, scale, spring, 장식용 entrance animation은 피한다.
 
+### Functional motion
+
+모션은 장식이 아니라 **continuity와 feedback**을 위해 사용한다.
+
+- Sidebar/Inspector의 열림·닫힘, view 전환, selection 변화처럼 상태나 공간 관계를 이해시키는 짧은 전환은 허용한다.
+- 레이아웃 변화가 순간적으로 튀어 보이는 경우에는 width/position/opacity 전환으로 관계를 유지하되, 화면 전체를 과도하게 움직이지 않는다.
+- 빠른 반복 조작과 대량 Gallery 스크롤에서는 애니메이션보다 프레임 안정성과 입력 반응성을 우선한다.
+- 스크롤 중 타일마다 transform/shadow를 추가하거나 레이아웃을 계속 재계산하게 만드는 모션은 피한다.
+- 사용자가 기능을 더 잘 이해하거나 상태 변화를 놓치지 않게 만드는 경우에만 모션을 추가한다.
+
+부드러움의 목표는 "많이 움직이는 UI"가 아니라 **갑작스러운 점프 없이 자연스럽게 이어지는 데스크톱 도구**다.
+
 ### Works collectible interaction exception
 
 Works의 만화 표지 감상 뷰어와 게임 패키지 전시는 일반 UI motion 규칙의 제한적 예외다.
