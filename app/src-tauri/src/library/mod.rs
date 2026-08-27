@@ -64,7 +64,9 @@ pub enum MediaVariant {
     MangaCover,
     MangaPage(u32),
     CollectionCover,
+    CollectionCoverThumbnail,
     CollectionSourcePreview,
+    CollectionSourceThumbnail,
     WorkArtwork,
     WorkArtworkThumbnail,
     MangaDexCoverPreview,
@@ -406,7 +408,9 @@ impl Library {
             MediaVariant::MangaCover
             | MediaVariant::MangaPage(_)
             | MediaVariant::CollectionCover
+            | MediaVariant::CollectionCoverThumbnail
             | MediaVariant::CollectionSourcePreview
+            | MediaVariant::CollectionSourceThumbnail
             | MediaVariant::WorkArtwork
             | MediaVariant::WorkArtworkThumbnail
             | MediaVariant::MangaDexCoverPreview
