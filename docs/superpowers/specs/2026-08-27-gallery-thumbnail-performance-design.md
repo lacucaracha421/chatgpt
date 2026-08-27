@@ -58,6 +58,8 @@ Dragging the rail is a preview interaction until pointer release:
 4. `pointercancel` clears the pending jump without calling `onSelectDate`.
 5. Direct activation of a rendered date tick remains a single immediate jump.
 
+When no global date buckets are available, the existing rail fallback continues moving only within the already-loaded gallery and does not create an anchor request.
+
 The 160-millisecond request throttle and its timer are removed because no network or database request occurs during drag.
 
 ### Scroll tracking
@@ -95,10 +97,10 @@ Both new routes resolve a trusted source image through the existing Collection s
 - Maximum bounding box: 360x360 pixels.
 - Output format: WebP.
 - Cache root: `collection-thumbnails/{collectionId}/` inside the managed library root.
-- Cache key: lowercase SHA-256 of the normalized source-relative image path.
-- Cache file: `collection-thumbnails/{collectionId}/{pathHash}.webp`.
+- Cache key: lowercase SHA-256 of the normalized source-relative image path, source byte length, and source modification timestamp.
+- Cache file: `collection-thumbnails/{collectionId}/{sourceIdentityHash}.webp`.
 
-Including the resolved source-relative path in the key prevents a changed source-preview selection from reusing the previous image. If the source file modification time is newer than the cache file, the thumbnail is regenerated. A missing cache file is generated lazily.
+Including the resolved source-relative path prevents a changed source-preview selection from reusing the previous image. Including the source metadata gives a changed file a new immutable cache destination, avoiding platform-specific replacement behavior. A missing cache file is generated lazily; an unchanged source reuses the same path. Older derived files are harmless cache data and the Collection directory cleanup removes them when the Collection is deleted.
 
 The derived cache is not domain state and adds no database column. Deleting a Collection removes its `collection-thumbnails/{collectionId}` directory along with the existing WorkArtwork cleanup.
 
@@ -143,7 +145,7 @@ Collection and cover-grid thumbnail images add `decoding="async"` while retainin
 
 - A Collection source test proves a generated thumbnail is WebP and fits within 360x360.
 - A cache reuse test proves a second request reuses the existing file.
-- A freshness test proves a newer source regenerates the cache.
+- A freshness test proves changed source metadata selects and generates a new cache entry.
 - Route tests prove valid requests return WebP and missing or invalid paths are rejected.
 - A deletion test proves the Collection thumbnail cache directory is removed with its Collection.
 
