@@ -27,7 +27,7 @@ tailscale serve reset
 
 ## Galaxy Tab / Titanium
 
-1. Lakomics Radial 설정을 엽니다.
+1. Lakomics X Collector 설정을 엽니다.
 2. `저장 방식`은 `자동` 또는 `PC · Lakomics 앱으로만 수집`을 사용합니다.
 3. PC Lakomics의 32자리 연결 키를 `Lakomics 연결`에 입력합니다.
 4. `Remote Lakomics · Tailscale`에서 원격 연결을 켭니다.
