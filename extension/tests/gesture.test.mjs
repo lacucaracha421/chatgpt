@@ -46,7 +46,7 @@ test("release before dwell selects a primary and dwell expands secondary ring", 
   assert.equal(descended.snapshot().secondaryLevel, null);
   const afterDwell = descended.tick(300);
   assert.equal(afterDwell.expandedParentId, "parent");
-  assert.equal(afterDwell.secondaryLevel.slots.length, 6);
+  assert.equal(afterDwell.secondaryLevel.slots.length, 2);
   assert.equal(afterDwell.secondaryLevel.slots[0].id, "child-a");
   assert.equal(afterDwell.secondaryLevel.slots[1].id, "child-b");
 });
@@ -65,8 +65,23 @@ test("touch activation opens a parent immediately, then selects a secondary chil
   session.move(pointForPrimarySlot(0), 0);
   assert.deepEqual(plain(session.activate()), { type: "expand", classificationId: "parent" });
   assert.equal(session.snapshot().expandedParentId, "parent");
-  session.move(pointForSecondarySlot(0, 0, 6, 6), 1);
+  session.move(pointForSecondarySlot(0, 0, 6, 2), 1);
   assert.deepEqual(plain(session.activate()), { type: "select", classificationId: "child-a" });
+});
+
+test("secondary donut is centered on its primary and never exceeds 270 degrees", () => {
+  const twelve = secondaryAngles(2, 6, 12);
+  const arc = twelve.at(-1).end - twelve[0].start;
+  assert.ok(arc <= (Math.PI * 1.5) + 1e-9);
+  assert.ok(arc > Math.PI);
+
+  const anchorAngle = primaryAngle(2, 6);
+  const center = (twelve[0].start + twelve.at(-1).end) / 2;
+  assert.ok(Math.abs(center - anchorAngle) < 1e-9);
+
+  const three = secondaryAngles(2, 6, 3);
+  const threeArc = three.at(-1).end - three[0].start;
+  assert.ok(threeArc < arc);
 });
 
 test("secondary ring hit-test selects a child on release", () => {
@@ -74,7 +89,7 @@ test("secondary ring hit-test selects a child on release", () => {
   session.move(pointForPrimarySlot(0), 0);
   session.tick(300);
   assert.notEqual(session.snapshot().secondaryLevel, null);
-  session.move(pointForSecondarySlot(0, 0, 6, 6), 301);
+  session.move(pointForSecondarySlot(0, 0, 6, 2), 301);
   const result = session.release();
   assert.deepEqual(plain(result), { type: "select", classificationId: "child-a" });
 });
@@ -187,7 +202,7 @@ test("mobile confirm mode expands a parent, lets a child become pending, and sav
   session.move(pointForPrimarySlot(0), 0);
   assert.deepEqual(plain(session.activate()), { type: "expand", classificationId: "parent" });
   assert.equal(session.snapshot().pendingClassificationId, "parent");
-  session.move(pointForSecondarySlot(0, 0, 6, 6), 1);
+  session.move(pointForSecondarySlot(0, 0, 6, 2), 1);
   assert.deepEqual(plain(session.activate()), { type: "pending", classificationId: "child-a" });
   assert.equal(session.snapshot().pendingClassificationId, "child-a");
   session.move({ x: 100, y: 100 }, 2);
@@ -203,4 +218,25 @@ test("mobile confirm mode saves the expanded parent from center when no child re
   assert.deepEqual(plain(session.activate()), { type: "expand", classificationId: "parent" });
   session.move({ x: 100, y: 100 }, 1);
   assert.deepEqual(plain(session.activate()), { type: "select", classificationId: "parent" });
+});
+
+test("pinned primary expands a recovered persisted submenu even when parent linkage drifted", () => {
+  const entries = [
+    { id: "game", kind: "root", name: "게임", parentId: null },
+    { id: "reverse", kind: "tag", name: "리버스", parentId: "game" },
+    { id: "char-a", kind: "tag", name: "캐릭터 A", parentId: "game" },
+  ];
+  const layout = context.LakomicsRadial.resetLayout(entries);
+  layout.parents.reverse = [["char-a", null, null, null, null, null]];
+  const session = createSession({ x: 100, y: 100 }, entries, layout, ["reverse"], {
+    openImmediately: true,
+    confirmSelectionWithCenter: true,
+    centerSelectsExpandedParent: true,
+  });
+  const primary = session.snapshot().primaryLevel;
+  const index = primary.slots.findIndex((entry) => entry?.id === "reverse");
+  session.move(pointForPrimarySlot(index, primary.slotCount), 1);
+  const action = session.activate();
+  assert.deepEqual(plain(action), { type: "expand", classificationId: "reverse" });
+  assert.equal(session.snapshot().secondaryLevel.slots[0].id, "char-a");
 });
