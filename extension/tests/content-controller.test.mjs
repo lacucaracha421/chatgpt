@@ -243,11 +243,11 @@ test("nested local selections include the full classification path", async () =>
   };
   controller.begin(
     { mediaUrl: "https://pbs.twimg.com/media/A?format=jpg&name=orig", sourceUrl: "https://x.com/u/status/1/photo/1" },
-    { x: 100, y: 100 }, entries, layout, [], "local", { openImmediately: true },
+    { x: 100, y: 100 }, entries, layout, ["root"], "local", { openImmediately: true },
   );
   controller.move({ x: 100, y: 21 }, 0);
   assert.deepEqual(plain(controller.activate()), { type: "expand", classificationId: "root" });
-  const angles = api.gesture.secondaryAngles(0, 6, 12);
+  const angles = api.gesture.secondaryAngles(0, 6, 1);
   const angle = angles[0].center;
   const r = (118 + 180) / 2;
   controller.move({ x: 100 + Math.cos(angle) * r, y: 100 + Math.sin(angle) * r }, 1);
@@ -267,7 +267,7 @@ test("touch center selects the expanded parent classification", async () => {
   const layout = api.radial.resetLayout(entries);
   controller.begin(
     { mediaUrl: "https://pbs.twimg.com/media/A?format=jpg&name=orig", sourceUrl: "https://x.com/u/status/1/photo/1" },
-    { x: 100, y: 100 }, entries, layout, [], "local",
+    { x: 100, y: 100 }, entries, layout, ["parent"], "local",
     { openImmediately: true, centerSelectsExpandedParent: true },
   );
   controller.move({ x: 100, y: 21 }, 0);
@@ -296,7 +296,7 @@ test("touch activation keeps the controller alive while expanding, then submits 
   assert.deepEqual(plain(controller.activate()), { type: "expand", classificationId: "parent" });
   assert.equal(sent.length, 0);
 
-  const angles = api.gesture.secondaryAngles(0, 6, 6);
+  const angles = api.gesture.secondaryAngles(0, 6, 1);
   const angle = angles[0].center;
   const r = (118 + 180) / 2;
   controller.move({ x: 100 + Math.cos(angle) * r, y: 100 + Math.sin(angle) * r }, 1);
