@@ -24,6 +24,26 @@ test("uses six, twelve, and paged twelve-slot levels", () => {
 });
 
 
+test("getLevel heals a missing stored submenu from the live child tree", () => {
+  const current = [
+    { id: "game", kind: "root", name: "게임", parentId: null },
+    { id: "reverse", kind: "tag", name: "리버스", parentId: "game" },
+    { id: "reverse-child", kind: "tag", name: "리버스 하위", parentId: "reverse" },
+  ];
+  const staleLayout = {
+    version: 1,
+    parents: {
+      __pinned__: [["reverse", null, null, null, null, null]],
+      // Deliberately missing the `reverse` parent page.
+    },
+  };
+
+  const level = layoutApi.getLevel(current, staleLayout, "reverse", 0);
+
+  assert.equal(level.slotCount, 6);
+  assert.equal(level.slots[0].id, "reverse-child");
+});
+
 test("honors an explicit twelve-slot secondary layout even with only one child", () => {
   const current = [
     { id: "root", kind: "root", name: "Root", parentId: null },
@@ -164,3 +184,53 @@ function entries(count) {
 function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
+
+test("getLevel recovers persisted submenu ids when direct parent linkage is temporarily missing", () => {
+  const current = [
+    { id: "game", kind: "root", name: "게임", parentId: null },
+    { id: "reverse", kind: "tag", name: "리버스", parentId: "game" },
+    { id: "char-a", kind: "tag", name: "캐릭터 A", parentId: "game" },
+  ];
+  const legacyLayout = {
+    version: 1,
+    parents: {
+      reverse: [["char-a", null, null, null, null, null]],
+    },
+  };
+  const level = layoutApi.getLevel(current, legacyLayout, "reverse", 0);
+  assert.equal(level.slots[0].id, "char-a");
+});
+
+
+test("pin-only shortcut names stay out of the first ring until explicitly pinned", () => {
+  const current = [
+    { id: "reverse-local", kind: "root", name: "리버스", parentId: null },
+    { id: "wuthering-local", kind: "root", name: "명조", parentId: null },
+    { id: "zenless-local", kind: "root", name: "젠레스", parentId: null },
+    { id: "game", kind: "root", name: "게임", parentId: null },
+    { id: "manga", kind: "root", name: "만화", parentId: null },
+    { id: "other", kind: "root", name: "기타", parentId: null },
+  ];
+  const radialLayout = layoutApi.resetLayout(current);
+  const unpinned = layoutApi.getPinnedLevel(current, radialLayout, [], 0);
+  assert.deepEqual(plain(unpinned.slots.filter(Boolean).map((entry) => entry.name)), ["게임", "만화", "기타"]);
+
+  const pinned = layoutApi.getPinnedLevel(current, radialLayout, ["wuthering-local"], 0);
+  assert.ok(pinned.slots.filter(Boolean).some((entry) => entry.id === "wuthering-local"));
+});
+
+test("compact secondary level drops empty stored slots but preserves item order", () => {
+  const current = [
+    { id: "root", kind: "root", name: "Root", parentId: null },
+    { id: "a", kind: "tag", name: "A", parentId: "root" },
+    { id: "b", kind: "tag", name: "B", parentId: "root" },
+    { id: "c", kind: "tag", name: "C", parentId: "root" },
+  ];
+  const radialLayout = {
+    version: 1,
+    parents: { root: [["a", null, null, "b", null, null, null, null, "c", null, null, null]] },
+  };
+  const level = layoutApi.getCompactLevel(current, radialLayout, "root", 0);
+  assert.equal(level.slotCount, 3);
+  assert.deepEqual(plain(level.slots.map((entry) => entry.id)), ["a", "b", "c"]);
+});
