@@ -27,6 +27,8 @@
   let classificationRefreshBaseUrl = null;
   let lastClassificationProbe = null;
   let browserDownloadQueue = Promise.resolve();
+  const pendingFilenameSuggestions = [];
+  const FILENAME_SUGGESTION_TTL_MS = 15_000;
 
   async function handleMessage(message) {
     switch (message?.type) {
@@ -570,6 +572,83 @@
     return Number.isFinite(number) && number > 0 ? number : null;
   }
 
+  function normalizeDownloadMatchUrl(value) {
+    const raw = String(value ?? "");
+    if (!raw) return "";
+    try {
+      const url = new URL(raw);
+      url.hash = "";
+      return url.href;
+    } catch {
+      return raw;
+    }
+  }
+
+  function pruneFilenameSuggestions(now = Date.now()) {
+    for (let index = pendingFilenameSuggestions.length - 1; index >= 0; index -= 1) {
+      if (now - pendingFilenameSuggestions[index].createdAt > FILENAME_SUGGESTION_TTL_MS) {
+        pendingFilenameSuggestions.splice(index, 1);
+      }
+    }
+  }
+
+  function queueFilenameSuggestion(url, filename, conflictAction = "uniquify") {
+    pruneFilenameSuggestions();
+    const record = {
+      url: normalizeDownloadMatchUrl(url),
+      filename: String(filename ?? ""),
+      conflictAction,
+      createdAt: Date.now(),
+    };
+    pendingFilenameSuggestions.push(record);
+    return record;
+  }
+
+  function removeFilenameSuggestion(record) {
+    const index = pendingFilenameSuggestions.indexOf(record);
+    if (index >= 0) pendingFilenameSuggestions.splice(index, 1);
+  }
+
+  function takeFilenameSuggestion(downloadItem) {
+    pruneFilenameSuggestions();
+    const urls = new Set([
+      normalizeDownloadMatchUrl(downloadItem?.url),
+      normalizeDownloadMatchUrl(downloadItem?.finalUrl),
+    ].filter(Boolean));
+    const index = pendingFilenameSuggestions.findIndex((record) => urls.has(record.url));
+    if (index < 0) return null;
+    return pendingFilenameSuggestions.splice(index, 1)[0];
+  }
+
+  function installDownloadFilenameSuggestionListener() {
+    const event = chrome.downloads?.onDeterminingFilename;
+    if (!event?.addListener) return false;
+    event.addListener((downloadItem, suggest) => {
+      const record = takeFilenameSuggestion(downloadItem);
+      if (!record) return;
+      try {
+        suggest({
+          filename: record.filename,
+          conflictAction: record.conflictAction,
+        });
+      } catch (error) {
+        console.warn("[Lakomics] filename suggestion failed", error);
+        try { suggest(); } catch {}
+      }
+    });
+    return true;
+  }
+
+  async function downloadWithPreferredFilename({ url, filename, conflictAction = "uniquify", saveAs = false }) {
+    const record = queueFilenameSuggestion(url, filename, conflictAction);
+    try {
+      return await chrome.downloads.download({ url, filename, conflictAction, saveAs });
+    } catch (error) {
+      removeFilenameSuggestion(record);
+      throw error;
+    }
+  }
+
   function browserDownload(payload, preferences, fallbackCode = null) {
     const job = browserDownloadQueue
       .catch(() => undefined)
@@ -613,7 +692,7 @@
       && recent.metadataFilename
     ) {
       try {
-        const metadataDownloadId = await chrome.downloads.download({
+        const metadataDownloadId = await downloadWithPreferredFilename({
           url: jsonDataUrl(buildSidecarMetadata(payload, recent.filename)),
           filename: recent.metadataFilename,
           conflictAction: recent.filenameResolved ? "overwrite" : "uniquify",
@@ -648,7 +727,7 @@
     }
 
     try {
-      const downloadId = await chrome.downloads.download({
+      const downloadId = await downloadWithPreferredFilename({
         url: payload.mediaUrl,
         filename: requestedFilename,
         conflictAction: "uniquify",
@@ -667,11 +746,12 @@
         filename,
         metadataFilename,
         filenameResolved: resolved.resolved,
+        folderPreserved: resolved.folderPreserved,
       });
 
       let metadataDownloadId = null;
       try {
-        metadataDownloadId = await chrome.downloads.download({
+        metadataDownloadId = await downloadWithPreferredFilename({
           url: jsonDataUrl(metadata),
           filename: metadataFilename,
           conflictAction: resolved.resolved ? "overwrite" : "uniquify",
@@ -698,6 +778,7 @@
         filename,
         metadataFilename,
         filenameResolved: resolved.resolved,
+        folderPreserved: resolved.folderPreserved,
       });
 
       return {
@@ -707,6 +788,7 @@
         metadataDownloadId,
         filename,
         metadataFilename,
+        folderPreserved: resolved.folderPreserved,
         ...(fallbackCode ? { fallbackCode } : {}),
       };
     } catch (error) {
@@ -721,18 +803,53 @@
   }
 
   async function resolveDownloadedFilename(downloadId, requestedFilename) {
-    if (!chrome.downloads?.search) return { filename: requestedFilename, resolved: false };
+    if (!chrome.downloads?.search) {
+      return {
+        filename: requestedFilename,
+        resolved: false,
+        folderPreserved: null,
+      };
+    }
     try {
       const items = await chrome.downloads.search({ id: downloadId });
       const actual = Array.isArray(items) ? items[0]?.filename : null;
-      if (typeof actual !== "string" || !actual) return { filename: requestedFilename, resolved: false };
-      const basename = actual.replace(/\\/g, "/").split("/").filter(Boolean).at(-1);
-      if (!basename) return { filename: requestedFilename, resolved: false };
-      const slash = requestedFilename.lastIndexOf("/");
-      const folder = slash >= 0 ? requestedFilename.slice(0, slash + 1) : "";
-      return { filename: `${folder}${basename}`, resolved: true };
+      if (typeof actual !== "string" || !actual) {
+        return { filename: requestedFilename, resolved: false, folderPreserved: null };
+      }
+
+      const actualNormalized = actual.replace(/\\/g, "/");
+      const requestedNormalized = String(requestedFilename ?? "").replace(/\\/g, "/").replace(/^\/+/, "");
+      const basename = actualNormalized.split("/").filter(Boolean).at(-1);
+      if (!basename) return { filename: requestedFilename, resolved: false, folderPreserved: null };
+
+      const requestedSlash = requestedNormalized.lastIndexOf("/");
+      const requestedFolder = requestedSlash >= 0 ? requestedNormalized.slice(0, requestedSlash) : "";
+      const actualSlash = actualNormalized.lastIndexOf("/");
+      const actualFolder = actualSlash >= 0 ? actualNormalized.slice(0, actualSlash) : "";
+      const actualFolderLower = actualFolder.toLocaleLowerCase("en-US");
+      const requestedFolderLower = requestedFolder.toLocaleLowerCase("en-US");
+      const folderPreserved = !requestedFolder
+        || actualFolderLower === requestedFolderLower
+        || actualFolderLower.endsWith(`/${requestedFolderLower}`);
+
+      const filename = folderPreserved && requestedFolder
+        ? `${requestedFolder}/${basename}`
+        : basename;
+
+      if (!folderPreserved) {
+        console.warn("[Lakomics] browser flattened the requested download folder", {
+          requested: requestedFilename,
+          actualBasename: basename,
+        });
+      }
+
+      return {
+        filename,
+        resolved: true,
+        folderPreserved,
+      };
     } catch {
-      return { filename: requestedFilename, resolved: false };
+      return { filename: requestedFilename, resolved: false, folderPreserved: null };
     }
   }
 
@@ -1097,6 +1214,7 @@
     }
   }
 
+  installDownloadFilenameSuggestionListener();
   void syncDownloadUiPreference();
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -1121,6 +1239,9 @@
       testRemoteConnection,
       isAllowedTranslateUrl,
       translateHttpRequest,
+      normalizeDownloadMatchUrl,
+      takeFilenameSuggestion,
+      resolveDownloadedFilename,
     };
   }
 })();
