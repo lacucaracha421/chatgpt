@@ -220,23 +220,12 @@ test("mobile confirm mode saves the expanded parent from center when no child re
   assert.deepEqual(plain(session.activate()), { type: "select", classificationId: "parent" });
 });
 
-test("pinned primary expands a recovered persisted submenu even when parent linkage drifted", () => {
-  const entries = [
-    { id: "game", kind: "root", name: "게임", parentId: null },
-    { id: "reverse", kind: "tag", name: "리버스", parentId: "game" },
-    { id: "char-a", kind: "tag", name: "캐릭터 A", parentId: "game" },
-  ];
-  const layout = context.LakomicsRadial.resetLayout(entries);
-  layout.parents.reverse = [["char-a", null, null, null, null, null]];
-  const session = createSession({ x: 100, y: 100 }, entries, layout, ["reverse"], {
-    openImmediately: true,
-    confirmSelectionWithCenter: true,
-    centerSelectsExpandedParent: true,
-  });
-  const primary = session.snapshot().primaryLevel;
-  const index = primary.slots.findIndex((entry) => entry?.id === "reverse");
-  session.move(pointForPrimarySlot(index, primary.slotCount), 1);
-  const action = session.activate();
-  assert.deepEqual(plain(action), { type: "expand", classificationId: "reverse" });
-  assert.equal(session.snapshot().secondaryLevel.slots[0].id, "char-a");
+test("pinned primary ignores stale submenu ids whose live parent differs", () => {
+  const entries = [{ id:"game", kind:"root", name:"Game", parentId:null }, { id:"reverse", kind:"tag", name:"Reverse", parentId:"game" }, { id:"char-a", kind:"tag", name:"Char A", parentId:"game" }];
+  const layout = context.LakomicsRadial.resetLayout(entries); layout.parents.reverse=[["char-a",null,null,null,null,null]];
+  const session=createSession({x:100,y:100},entries,layout,["reverse"],{openImmediately:true,confirmSelectionWithCenter:true,centerSelectsExpandedParent:true});
+  const primary=session.snapshot().primaryLevel; const index=primary.slots.findIndex(e=>e?.id==="reverse");
+  session.move(pointForPrimarySlot(index, primary.slotCount),1);
+  assert.deepEqual(plain(session.activate()), { type:"pending", classificationId:"reverse" });
+  assert.equal(session.snapshot().secondaryLevel, null);
 });

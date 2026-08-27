@@ -1,4 +1,4 @@
-# Lakomics X Collector 2.0.0-alpha.15.21
+# Lakomics X Collector 2.0.0-alpha.15.22
 
 Unified desktop/mobile X media collector for Lakomics.
 

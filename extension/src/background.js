@@ -121,6 +121,16 @@
         await updateLastAppSnapshot({ layout: message.layout });
         return { ok: true };
       }
+      case "radial-state:set": {
+        if (!validLayout(message.layout) || !Array.isArray(message.pinnedIds)) {
+          return { ok: false, code: "invalid_radial_state" };
+        }
+        const pinnedIds = normalizePinnedIds(message.pinnedIds);
+        await chrome.storage.local.set({ [APP_LAYOUT_KEY]: message.layout, [APP_PINNED_KEY]: pinnedIds });
+        if (classificationCache) { classificationCache.layout = message.layout; classificationCache.pinnedIds = pinnedIds; }
+        await updateLastAppSnapshot({ layout: message.layout, pinnedIds });
+        return { ok: true, pinnedIds };
+      }
       case "classifications:get":
         return activeClassifications(false);
       case "classifications:refresh":
@@ -129,9 +139,10 @@
         return { ok: true, pinnedIds: await loadPinned(APP_PINNED_KEY) };
       case "pinned:set": {
         if (!Array.isArray(message.pinnedIds)) return { ok: false, code: "invalid_pinned" };
-        await chrome.storage.local.set({ [APP_PINNED_KEY]: message.pinnedIds });
-        if (classificationCache) classificationCache.pinnedIds = message.pinnedIds;
-        await updateLastAppSnapshot({ pinnedIds: message.pinnedIds });
+        const pinnedIds = normalizePinnedIds(message.pinnedIds);
+        await chrome.storage.local.set({ [APP_PINNED_KEY]: pinnedIds });
+        if (classificationCache) classificationCache.pinnedIds = pinnedIds;
+        await updateLastAppSnapshot({ pinnedIds });
         return { ok: true };
       }
       case "local-tree:get":
@@ -230,63 +241,101 @@
     const response = await apiRequest("/v1/classifications", {}, endpoint.baseUrl);
     if (!response.ok) return response;
     const entries = Array.isArray(response.entries) ? response.entries : [];
-    const stored = await chrome.storage.local.get([APP_LAYOUT_KEY]);
+    const stored = await chrome.storage.local.get([APP_LAYOUT_KEY, LAST_APP_CLASSIFICATIONS_KEY]);
     const radialLayout = stored[APP_LAYOUT_KEY];
-    const pinnedIds = await loadPinned(APP_PINNED_KEY);
-    let layout = globalThis.LakomicsRadial.reconcileLayout(entries, radialLayout);
-    if (endpoint.source === "remote") {
-      layout = applyPreferredRemoteFirstLevelOrder(entries, layout, pinnedIds);
-    }
-    if (JSON.stringify(layout) !== JSON.stringify(radialLayout)) {
-      await chrome.storage.local.set({ [APP_LAYOUT_KEY]: layout });
-    }
-    classificationCache = { entries, layout, pinnedIds };
+    const snapshot = stored[LAST_APP_CLASSIFICATIONS_KEY];
+    const previousEntries = snapshot?.version === 2 && snapshot.baseUrl === endpoint.baseUrl && Array.isArray(snapshot.entries)
+      ? snapshot.entries
+      : (classificationCacheBaseUrl === endpoint.baseUrl && Array.isArray(classificationCache?.entries) ? classificationCache.entries : []);
+    const rawPinnedIds = await loadPinned(APP_PINNED_KEY);
+    const repaired = repairPinnedIds(entries, rawPinnedIds, previousEntries);
+    const remappedLayout = remapLayoutSlotIds(radialLayout, repaired.idRemap);
+    let layout = globalThis.LakomicsRadial.reconcileLayout(entries, remappedLayout);
+    layout = globalThis.LakomicsRadial.reorderPinned(layout, entries, repaired.pinnedIds);
+    const statePatch = {};
+    if (JSON.stringify(layout) !== JSON.stringify(radialLayout)) statePatch[APP_LAYOUT_KEY] = layout;
+    if (JSON.stringify(repaired.pinnedIds) !== JSON.stringify(rawPinnedIds)) statePatch[APP_PINNED_KEY] = repaired.pinnedIds;
+    if (Object.keys(statePatch).length) await chrome.storage.local.set(statePatch);
+    classificationCache = { entries, layout, pinnedIds: repaired.pinnedIds };
     classificationCachedAt = now;
     classificationCacheBaseUrl = endpoint.baseUrl;
     await chrome.storage.local.set({
       [LAST_APP_CLASSIFICATIONS_KEY]: {
-        version: 2,
-        baseUrl: endpoint.baseUrl,
-        endpointSource: endpoint.source,
-        entries,
-        layout,
-        pinnedIds,
-        savedAt: now,
+        version: 2, baseUrl: endpoint.baseUrl, endpointSource: endpoint.source,
+        entries, layout, pinnedIds: repaired.pinnedIds, savedAt: now,
       },
     });
     return { ok: true, classificationSource: endpoint.source, ...classificationCache };
   }
 
+  function normalizePinnedIds(ids) {
+    return [...new Set((Array.isArray(ids) ? ids : []).filter((id) => typeof id === "string" && id))];
+  }
+
+  function repairPinnedIds(entries, pinnedIds, previousEntries) {
+    const normalized = normalizePinnedIds(pinnedIds);
+    if (!Array.isArray(entries) || entries.length === 0) {
+      return { pinnedIds: normalized, idRemap: new Map() };
+    }
+    const current = new Map(entries.filter((e) => e && typeof e.id === "string").map((e) => [e.id, e]));
+    const previous = new Map((Array.isArray(previousEntries) ? previousEntries : []).filter((e) => e && typeof e.id === "string").map((e) => [e.id, e]));
+    const byName = new Map();
+    for (const entry of current.values()) {
+      const key = normalizeEntryName(entry.name);
+      if (!byName.has(key)) byName.set(key, []);
+      byName.get(key).push(entry);
+    }
+    const next = [];
+    const idRemap = new Map();
+    for (const id of normalized) {
+      let resolved = current.has(id) ? id : null;
+      if (!resolved) {
+        const old = previous.get(id);
+        const matches = old ? (byName.get(normalizeEntryName(old.name)) ?? []) : [];
+        if (matches.length === 1) { resolved = matches[0].id; idRemap.set(id, resolved); }
+      }
+      if (resolved && !next.includes(resolved)) next.push(resolved);
+    }
+    return { pinnedIds: next, idRemap };
+  }
+
+  function normalizeEntryName(value) {
+    return String(value ?? "").normalize("NFKC").replace(/\s+/g, "").toLowerCase();
+  }
+
+  function remapLayoutSlotIds(layout, idRemap) {
+    if (!validLayout(layout) || !(idRemap instanceof Map) || idRemap.size === 0) return layout;
+    const next = JSON.parse(JSON.stringify(layout));
+    for (const pages of Object.values(next.parents ?? {})) {
+      if (!Array.isArray(pages)) continue;
+      for (const page of pages) {
+        if (!Array.isArray(page)) continue;
+        for (let i = 0; i < page.length; i += 1) if (idRemap.has(page[i])) page[i] = idRemap.get(page[i]);
+      }
+    }
+    return next;
+  }
+
   async function lastAppClassifications(fallbackCode = null, expectedBaseUrl = null) {
-    const stored = await chrome.storage.local.get([LAST_APP_CLASSIFICATIONS_KEY]);
+    const stored = await chrome.storage.local.get([LAST_APP_CLASSIFICATIONS_KEY, APP_LAYOUT_KEY, APP_PINNED_KEY]);
     let snapshot = stored[LAST_APP_CLASSIFICATIONS_KEY];
     if (snapshot?.version === 1 && expectedBaseUrl && Array.isArray(snapshot.entries)
       && validLayout(snapshot.layout) && Array.isArray(snapshot.pinnedIds)) {
-      snapshot = {
-        ...snapshot,
-        version: 2,
-        baseUrl: expectedBaseUrl,
-        endpointSource: expectedBaseUrl === LOCAL_API_BASE_URL ? "app" : "remote",
-      };
+      snapshot = { ...snapshot, version: 2, baseUrl: expectedBaseUrl,
+        endpointSource: expectedBaseUrl === LOCAL_API_BASE_URL ? "app" : "remote" };
       await chrome.storage.local.set({ [LAST_APP_CLASSIFICATIONS_KEY]: snapshot });
     }
     if (!snapshot || snapshot.version !== 2 || typeof snapshot.baseUrl !== "string"
-      || !Array.isArray(snapshot.entries) || !validLayout(snapshot.layout)
-      || !Array.isArray(snapshot.pinnedIds)) {
-      return null;
-    }
+      || !Array.isArray(snapshot.entries) || !validLayout(snapshot.layout)) return null;
     if (expectedBaseUrl && snapshot.baseUrl !== expectedBaseUrl) return null;
     const entries = snapshot.entries.filter((entry) => entry && typeof entry.id === "string");
     if (!entries.length) return null;
-    return {
-      ok: true,
-      classificationSource: "app-cache",
-      entries,
-      layout: snapshot.layout,
-      pinnedIds: snapshot.pinnedIds,
-      cachedAt: Number(snapshot.savedAt) || null,
-      ...(fallbackCode ? { fallbackCode } : {}),
-    };
+    const pinnedIds = normalizePinnedIds(Array.isArray(stored[APP_PINNED_KEY]) ? stored[APP_PINNED_KEY] : snapshot.pinnedIds);
+    const sourceLayout = validLayout(stored[APP_LAYOUT_KEY]) ? stored[APP_LAYOUT_KEY] : snapshot.layout;
+    let layout = globalThis.LakomicsRadial.reconcileLayout(entries, sourceLayout);
+    layout = globalThis.LakomicsRadial.reorderPinned(layout, entries, pinnedIds);
+    return { ok: true, classificationSource: "app-cache", entries, layout, pinnedIds,
+      cachedAt: Number(snapshot.savedAt) || null, ...(fallbackCode ? { fallbackCode } : {}) };
   }
 
   async function updateLastAppSnapshot(patch) {
@@ -300,57 +349,6 @@
     await chrome.storage.local.set({ [LAST_APP_CLASSIFICATIONS_KEY]: next });
   }
 
-
-  const PREFERRED_REMOTE_FIRST_LEVEL_NAMES = Object.freeze([
-    "리버스", "명조", "젠레스", "게임", "만화", "기타",
-  ]);
-
-  function applyPreferredRemoteFirstLevelOrder(entries, layout, pinnedIds) {
-    const next = JSON.parse(JSON.stringify(layout ?? { version: 1, parents: {} }));
-    next.version = 1;
-    next.parents = next.parents && typeof next.parents === "object" ? next.parents : {};
-
-    const pinnedSet = new Set(Array.isArray(pinnedIds) ? pinnedIds : []);
-    const visible = (Array.isArray(entries) ? entries : []).filter((entry) =>
-      entry && typeof entry.id === "string" && (entry.parentId === null || pinnedSet.has(entry.id))
-    );
-    if (!visible.length) return next;
-
-    const byNormalizedName = new Map();
-    for (const entry of visible) {
-      const key = normalizeClassificationName(entry.name);
-      if (key && !byNormalizedName.has(key)) byNormalizedName.set(key, entry.id);
-    }
-
-    const preferredIds = PREFERRED_REMOTE_FIRST_LEVEL_NAMES
-      .map((name) => byNormalizedName.get(normalizeClassificationName(name)))
-      .filter(Boolean);
-    if (!preferredIds.length) return next;
-
-    const oldIds = Array.isArray(next.parents.__pinned__)
-      ? next.parents.__pinned__.flat().filter((id) => typeof id === "string")
-      : [];
-    const visibleIds = new Set(visible.map((entry) => entry.id));
-    const ordered = [];
-    const seen = new Set();
-    for (const id of [...preferredIds, ...oldIds, ...visible.map((entry) => entry.id)]) {
-      if (!visibleIds.has(id) || seen.has(id)) continue;
-      seen.add(id);
-      ordered.push(id);
-    }
-
-    const count = ordered.length <= 6 ? 6 : 12;
-    while (ordered.length % count !== 0) ordered.push(null);
-    next.parents.__pinned__ = [];
-    for (let index = 0; index < ordered.length; index += count) {
-      next.parents.__pinned__.push(ordered.slice(index, index + count));
-    }
-    return next;
-  }
-
-  function normalizeClassificationName(value) {
-    return String(value ?? "").normalize("NFKC").replace(/\s+/g, "").toLowerCase();
-  }
 
   async function localClassifications(fallbackCode = null) {
     const tree = await loadLocalTree();

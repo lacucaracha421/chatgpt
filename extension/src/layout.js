@@ -3,7 +3,6 @@
 
   const ROOT = "__root__";
   const PINNED = "__pinned__";
-  const PIN_ONLY_FIRST_LEVEL_NAMES = new Set(["리버스", "명조", "젠레스"].map(normalizeName));
 
   function slotCount(childCount) {
     return childCount <= 6 ? 6 : 12;
@@ -17,6 +16,9 @@
     const parents = {};
     for (const [key, children] of groups) {
       parents[key] = reconcileParent(children, storedParents[key]);
+    }
+    if (Array.isArray(storedParents[PINNED])) {
+      parents[PINNED] = storedParents[PINNED].map((page) => Array.isArray(page) ? [...page] : []);
     }
     return { version: 1, parents };
   }
@@ -35,15 +37,7 @@
 
   function getLevel(entries, layout, parentId, requestedPage) {
     const storedPages = layout?.parents?.[parentKey(parentId)];
-    const directChildren = entries.filter((entry) => entry.parentId === parentId);
-    // Prefer the live parent/child tree. If a pinned first-level item was moved or
-    // recreated and the backend relationship briefly disagrees with the persisted
-    // radial layout, keep the user's existing submenu usable by recovering only IDs
-    // that still exist in the current entry set. This is deliberately a fallback:
-    // once real direct children are present they always win.
-    const children = directChildren.length
-      ? directChildren
-      : recoverStoredChildren(entries, storedPages);
+    const children = entries.filter((entry) => entry.parentId === parentId);
     // Always reconcile against the live/recovered tree. Cached/older layouts can be
     // missing a page for a pinned child (for example 리버스/명조/젠레스), which
     // used to make an existing submenu render as an empty ring until refresh.
@@ -74,23 +68,6 @@
   }
 
 
-  function recoverStoredChildren(entries, storedPages) {
-    if (!Array.isArray(storedPages)) return [];
-    const byId = new Map((Array.isArray(entries) ? entries : [])
-      .filter((entry) => entry && typeof entry.id === "string")
-      .map((entry) => [entry.id, entry]));
-    const recovered = [];
-    const seen = new Set();
-    for (const id of storedPages.flat()) {
-      if (typeof id !== "string" || seen.has(id)) continue;
-      const entry = byId.get(id);
-      if (!entry) continue;
-      seen.add(id);
-      recovered.push(entry);
-    }
-    return recovered;
-  }
-
   function moveSlot(layout, parentId, fromIndex, toIndex) {
     const next = JSON.parse(JSON.stringify(layout));
     const key = parentKey(parentId);
@@ -110,24 +87,14 @@
 
   function isFirstLevelVisible(entry, pinnedIds) {
     if (!entry || typeof entry.id !== "string") return false;
-    if (pinnedIds?.has(entry.id)) return true;
-    if (entry.parentId !== null) return false;
-    // These promoted work shortcuts used to leak into the first ring through the
-    // local/offline fallback even when the user had not pinned their real app entry.
-    // Keep them hidden until an explicit pin exists; ordinary roots remain visible.
-    return !PIN_ONLY_FIRST_LEVEL_NAMES.has(normalizeName(entry.name));
-  }
-
-  function normalizeName(value) {
-    return String(value ?? "").normalize("NFKC").replace(/\s+/g, "").toLowerCase();
+    return entry.parentId === null || pinnedIds?.has(entry.id);
   }
 
   function getFirstLevelPinCandidates(entries, pinnedIds) {
     const pinnedSet = new Set(Array.isArray(pinnedIds) ? pinnedIds : []);
-    return (Array.isArray(entries) ? entries : []).filter((entry) => {
-      if (!entry || typeof entry.id !== "string" || pinnedSet.has(entry.id)) return false;
-      return entry.parentId !== null || PIN_ONLY_FIRST_LEVEL_NAMES.has(normalizeName(entry.name));
-    });
+    return (Array.isArray(entries) ? entries : []).filter((entry) =>
+      entry && typeof entry.id === "string" && entry.parentId !== null && !pinnedSet.has(entry.id)
+    );
   }
 
   function getPinnedLevel(entries, layout, pinnedIds, requestedPage) {

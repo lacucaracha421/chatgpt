@@ -37,6 +37,7 @@
   let page = 0;
   let selectedIndex = null;
   let pinnedIds = [];
+  let pinnedPersistQueue = Promise.resolve();
   let localTree = null;
   let localPrimaryIndex = 0;
   let localSecondaryInputs = [];
@@ -411,7 +412,7 @@
         const item = document.createElement("div");
         item.className = "pinned-item";
         const name = document.createElement("span");
-        name.textContent = entry.name;
+        name.textContent = classificationPathLabel(entry);
         const removeButton = document.createElement("button");
         removeButton.type = "button";
         removeButton.textContent = "해제";
@@ -441,7 +442,7 @@
       candidates.forEach((entry) => {
         const option = document.createElement("option");
         option.value = entry.id;
-        option.textContent = entry.name;
+        option.textContent = classificationPathLabel(entry);
         select.append(option);
       });
       const addButton = document.createElement("button");
@@ -460,6 +461,19 @@
     }
 
     return panel;
+  }
+
+  function classificationPathLabel(entry) {
+    const byId = new Map(entries.filter((item) => item && typeof item.id === "string").map((item) => [item.id, item]));
+    const names = [];
+    const seen = new Set();
+    let current = entry;
+    while (current && !seen.has(current.id)) {
+      seen.add(current.id);
+      names.push(current.name || current.id);
+      current = current.parentId == null ? null : byId.get(current.parentId);
+    }
+    return names.reverse().join(" > ");
   }
 
   function selectSlot(globalIndex, entry) {
@@ -496,13 +510,19 @@
     renderEditor();
   }
 
-  async function persistPinnedLayout(successMessage = "방사형 메뉴 배치와 고정 분류를 저장했습니다.") {
-    const pinned = await chrome.runtime.sendMessage({ type: "pinned:set", pinnedIds });
-    if (!pinned.ok) { status.textContent = "고정 분류를 저장하지 못했습니다."; return false; }
-    const response = await chrome.runtime.sendMessage({ type: "layout:set", layout: workingLayout });
-    if (!response.ok) { status.textContent = "고정은 저장했지만 배치를 저장하지 못했습니다."; return false; }
-    status.textContent = successMessage;
-    return true;
+  function persistPinnedLayout(successMessage = "방사형 메뉴 배치와 고정 분류를 저장했습니다.") {
+    const pinnedSnapshot = [...pinnedIds];
+    const layoutSnapshot = JSON.parse(JSON.stringify(workingLayout));
+    const persist = async () => {
+      const response = await chrome.runtime.sendMessage({
+        type: "radial-state:set", pinnedIds: pinnedSnapshot, layout: layoutSnapshot,
+      });
+      if (!response.ok) { status.textContent = "고정 분류와 배치를 저장하지 못했습니다."; return false; }
+      status.textContent = successMessage;
+      return true;
+    };
+    pinnedPersistQueue = pinnedPersistQueue.then(persist, persist);
+    return pinnedPersistQueue;
   }
 
   async function saveLayout() {

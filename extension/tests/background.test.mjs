@@ -114,7 +114,7 @@ test("pinned:get and pinned:set round-trip classification ids in storage", async
 
   const after = await harness.api.handleMessage({ type: "pinned:get" });
   assert.deepEqual(plain(after), { ok: true, pinnedIds: ["reverse"] });
-  assert.deepEqual(harness.storage.pinnedClassificationIds, ["reverse"]);
+  assert.deepEqual(plain(harness.storage.pinnedClassificationIds), ["reverse"]);
 });
 
 test("pinned:set rejects non-array pinnedIds", async () => {
@@ -135,7 +135,7 @@ test("classifications:refresh includes persisted pinned ids", async () => {
   const response = await harness.api.handleMessage({ type: "classifications:refresh" });
 
   assert.equal(response.ok, true);
-  assert.deepEqual(response.pinnedIds, ["reverse"]);
+  assert.deepEqual(plain(response.pinnedIds), ["reverse"]);
 });
 
 test("classifications:get serves fresh pinned ids after pinned:set without cache staleness", async () => {
@@ -197,7 +197,9 @@ test("auto mode preserves the last app tag layout and pinned order while Lakomic
 
   assert.equal(offline.ok, true);
   assert.equal(offline.classificationSource, "app-cache");
-  assert.deepEqual(plain(offline.layout), customLayout);
+  assert.deepEqual(plain(offline.layout.parents.__root__[0]), customLayout.parents.__root__[0]);
+  assert.deepEqual(plain(offline.layout.parents.a[0]), customLayout.parents.a[0]);
+  assert.deepEqual(plain(offline.layout.parents.__pinned__[0]), ["a", "b", "a2", null, null, null]);
   assert.deepEqual(plain(offline.pinnedIds), ["a2"]);
   assert.deepEqual(plain(offline.entries.map((entry) => entry.id)), ["a", "b", "a1", "a2"]);
 });
@@ -316,30 +318,12 @@ test("legacy app-only preference no longer disables offline device collection", 
   assert.equal(harness.downloadCalls.length, 2);
 });
 
-test("remote first-level ring keeps the preferred six-category order", async () => {
-  const harness = createHarness({
-    connectionToken: "0123456789abcdef0123456789abcdef",
-    remoteSettings: { enabled: true, baseUrl: "https://laku.tail0aa1a3.ts.net" },
-    pinnedClassificationIds: ["reverse", "ww", "zzz"],
-  });
-  harness.queueJson({
-    entries: [
-      { id: "game", kind: "root", name: "게임", parentId: null },
-      { id: "manga", kind: "root", name: "만화", parentId: null },
-      { id: "other", kind: "root", name: "기타", parentId: null },
-      { id: "reverse", kind: "tag", name: "리버스", parentId: "game" },
-      { id: "ww", kind: "tag", name: "명조", parentId: "game" },
-      { id: "zzz", kind: "tag", name: "젠레스", parentId: "game" },
-    ],
-  });
-
-  const response = await harness.api.handleMessage({ type: "classifications:refresh" });
-  assert.equal(response.classificationSource, "remote");
-  const firstPage = response.layout.parents.__pinned__[0];
-  const byId = new Map(response.entries.map((entry) => [entry.id, entry.name]));
-  assert.deepEqual(plain(firstPage.map((id) => id ? byId.get(id) : null)), [
-    "리버스", "명조", "젠레스", "게임", "만화", "기타",
-  ]);
+test("remote first-level ring uses roots first and appends explicitly pinned ids", async () => {
+  const harness=createHarness({ connectionToken:"0123456789abcdef0123456789abcdef", remoteSettings:{enabled:true,baseUrl:"https://laku.tail0aa1a3.ts.net"}, pinnedClassificationIds:["reverse","ww","zzz"] });
+  harness.queueJson({ entries:[{id:"game",kind:"root",name:"Game",parentId:null},{id:"manga",kind:"root",name:"Manga",parentId:null},{id:"other",kind:"root",name:"Other",parentId:null},{id:"reverse",kind:"tag",name:"Reverse",parentId:"game"},{id:"ww",kind:"tag",name:"Wuthering",parentId:"game"},{id:"zzz",kind:"tag",name:"Zenless",parentId:"game"}] });
+  const response=await harness.api.handleMessage({type:"classifications:refresh"});
+  assert.equal(response.classificationSource,"remote");
+  assert.deepEqual(plain(response.layout.parents.__pinned__[0]), ["game","manga","other","reverse","ww","zzz"]);
 });
 
 test("mobile local tree stores twelve sparse secondary slots and exposes them to the radial", async () => {
@@ -957,3 +941,81 @@ function createHarness(initialStorage = {}) {
 function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
+
+test("cold cache prefers current persisted pins over stale snapshot pins", async () => {
+  const entries = [
+    { id: "game", kind: "root", name: "Game", parentId: null },
+    { id: "reverse", kind: "tag", name: "Reverse", parentId: "game" },
+  ];
+  const staleLayout = { version: 1, parents: {
+    __root__: [["game", null, null, null, null, null]],
+    game: [["reverse", null, null, null, null, null]],
+    __pinned__: [["game", null, null, null, null, null]],
+  } };
+  const liveLayout = plain(staleLayout);
+  liveLayout.parents.__pinned__[0][1] = "reverse";
+  const harness = createHarness({
+    connectionToken: "0123456789abcdef0123456789abcdef",
+    pinnedClassificationIds: ["reverse"], radialLayout: liveLayout,
+    lastAppClassifications: { version: 2, baseUrl: "http://127.0.0.1:32145", endpointSource: "app", entries, layout: staleLayout, pinnedIds: [], savedAt: 1 },
+  });
+  harness.queueError(new TypeError("offline"));
+  const response = await harness.api.handleMessage({ type: "classifications:get" });
+  assert.deepEqual(plain(response.pinnedIds), ["reverse"]);
+  assert.ok(response.layout.parents.__pinned__.flat().includes("reverse"));
+});
+test("refresh remaps a deleted pinned id to the unique same-name live classification", async () => {
+  const previousEntries = [
+    { id: "old-reverse", kind: "root", name: "Reverse", parentId: null },
+  ];
+  const oldLayout = { version: 1, parents: { __pinned__: [["old-reverse", null, null, null, null, null]] } };
+  const harness = createHarness({
+    connectionToken: "0123456789abcdef0123456789abcdef",
+    pinnedClassificationIds: ["old-reverse"], radialLayout: oldLayout,
+    lastAppClassifications: { version: 2, baseUrl: "http://127.0.0.1:32145", endpointSource: "app", entries: previousEntries, layout: oldLayout, pinnedIds: ["old-reverse"], savedAt: 1 },
+  });
+  harness.queueJson({ entries: [
+    { id: "game", kind: "root", name: "Game", parentId: null },
+    { id: "new-reverse", kind: "tag", name: "Reverse", parentId: "game" },
+    { id: "child", kind: "tag", name: "Child", parentId: "new-reverse" },
+  ] });
+  const response = await harness.api.handleMessage({ type: "classifications:refresh" });
+  assert.deepEqual(plain(response.pinnedIds), ["new-reverse"]);
+  assert.deepEqual(plain(harness.storage.pinnedClassificationIds), ["new-reverse"]);
+  assert.ok(response.layout.parents.__pinned__.flat().includes("new-reverse"));
+  assert.equal(response.layout.parents.__pinned__.flat().includes("old-reverse"), false);
+});
+test("radial-state:set stores layout and deduplicated pins together", async () => {
+  const harness = createHarness();
+  const layout = { version: 1, parents: { __pinned__: [["x", null, null, null, null, null]] } };
+  const response = await harness.api.handleMessage({ type: "radial-state:set", layout, pinnedIds: ["x", "x"] });
+  assert.equal(response.ok, true);
+  assert.deepEqual(plain(response.pinnedIds), ["x"]);
+  assert.deepEqual(plain(harness.storage.radialLayout), layout);
+  assert.deepEqual(plain(harness.storage.pinnedClassificationIds), ["x"]);
+});
+test("refresh does not guess when a deleted pin name matches multiple live classifications", async () => {
+  const oldLayout = { version: 1, parents: { __pinned__: [["old", null, null, null, null, null]] } };
+  const harness = createHarness({
+    connectionToken: "0123456789abcdef0123456789abcdef",
+    pinnedClassificationIds: ["old"], radialLayout: oldLayout,
+    lastAppClassifications: { version: 2, baseUrl: "http://127.0.0.1:32145", endpointSource: "app", entries: [{ id: "old", kind: "root", name: "Same", parentId: null }], layout: oldLayout, pinnedIds: ["old"], savedAt: 1 },
+  });
+  harness.queueJson({ entries: [{ id: "one", kind: "root", name: "Same", parentId: null }, { id: "two", kind: "tag", name: "Same", parentId: "one" }] });
+  const response = await harness.api.handleMessage({ type: "classifications:refresh" });
+  assert.deepEqual(plain(response.pinnedIds), []);
+  assert.deepEqual(plain(harness.storage.pinnedClassificationIds), []);
+});
+test("pin repair never borrows same-name history from a different endpoint", async () => {
+  const oldLayout = { version: 1, parents: { __pinned__: [["old", null, null, null, null, null]] } };
+  const harness = createHarness({
+    connectionToken: "0123456789abcdef0123456789abcdef",
+    remoteSettings: { enabled: true, baseUrl: "https://second.tail0000.ts.net" },
+    pinnedClassificationIds: ["old"], radialLayout: oldLayout,
+    lastAppClassifications: { version: 2, baseUrl: "https://first.tail0000.ts.net", endpointSource: "remote", entries: [{ id: "old", kind: "root", name: "Same", parentId: null }], layout: oldLayout, pinnedIds: ["old"], savedAt: 1 },
+  });
+  harness.queueJson({ entries: [{ id: "new", kind: "tag", name: "Same", parentId: "root" }] });
+  const response = await harness.api.handleMessage({ type: "classifications:refresh" });
+  assert.deepEqual(plain(response.pinnedIds), []);
+  assert.deepEqual(plain(harness.storage.pinnedClassificationIds), []);
+});

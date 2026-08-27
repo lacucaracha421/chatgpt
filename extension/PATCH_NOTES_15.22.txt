@@ -1,0 +1,11 @@
+15.22
+
+- Reworked first-ring visibility to use hierarchy plus explicit pinned classification IDs, not special names.
+- Removed stale submenu recovery that could attach entries to the wrong parent.
+- Cached classifications now overlay the latest persisted pin/layout state instead of stale snapshot state.
+- Added safe migration of deleted pinned IDs to a unique same-name live classification on the same endpoint only.
+- Pin + radial layout changes are stored atomically through radial-state:set and serialized by the options UI.
+- Pin picker labels show full paths such as 게임 > 리버스.
+- Duplicate PC roots created by the legacy migration were merged into the canonical game classifications separately, with a DB backup.
+- Keeps the existing extension manifest key and stored connection/settings values.
+- 125/125 extension tests passed before packaging.
