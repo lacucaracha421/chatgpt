@@ -122,6 +122,14 @@
     return String(value ?? "").normalize("NFKC").replace(/\s+/g, "").toLowerCase();
   }
 
+  function getFirstLevelPinCandidates(entries, pinnedIds) {
+    const pinnedSet = new Set(Array.isArray(pinnedIds) ? pinnedIds : []);
+    return (Array.isArray(entries) ? entries : []).filter((entry) => {
+      if (!entry || typeof entry.id !== "string" || pinnedSet.has(entry.id)) return false;
+      return entry.parentId !== null || PIN_ONLY_FIRST_LEVEL_NAMES.has(normalizeName(entry.name));
+    });
+  }
+
   function getPinnedLevel(entries, layout, pinnedIds, requestedPage) {
     const pinnedSet = new Set(Array.isArray(pinnedIds) ? pinnedIds : []);
     const children = entries.filter((entry) => isFirstLevelVisible(entry, pinnedSet));
@@ -227,6 +235,7 @@
     getLevel,
     getCompactLevel,
     getPinnedLevel,
+    getFirstLevelPinCandidates,
     reorderPinned,
     moveSlot,
   };

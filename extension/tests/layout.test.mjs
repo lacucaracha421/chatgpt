@@ -234,3 +234,14 @@ test("compact secondary level drops empty stored slots but preserves item order"
   assert.equal(level.slotCount, 3);
   assert.deepEqual(plain(level.slots.map((entry) => entry.id)), ["a", "b", "c"]);
 });
+
+
+test("hidden shortcut roots remain available as pin candidates", () => {
+  const current = [
+    { id: "reverse", kind: "root", name: "\uB9AC\uBC84\uC2A4", parentId: null },
+    { id: "game", kind: "root", name: "\uAC8C\uC784", parentId: null },
+    { id: "child", kind: "tag", name: "\uCE90\uB9AD\uD130", parentId: "game" },
+  ];
+  assert.deepEqual(plain(layoutApi.getFirstLevelPinCandidates(current, []).map((e) => e.id)), ["reverse", "child"]);
+  assert.deepEqual(plain(layoutApi.getFirstLevelPinCandidates(current, ["reverse"]).map((e) => e.id)), ["child"]);
+});

@@ -419,6 +419,7 @@
           pinnedIds = pinnedIds.filter((id) => id !== entry.id);
           workingLayout = LakomicsRadial.reorderPinned(workingLayout, entries, pinnedIds);
           renderEditor();
+          void persistPinnedLayout("고정을 해제했습니다.");
         });
         item.append(name, removeButton);
         list.append(item);
@@ -431,7 +432,7 @@
       panel.append(empty);
     }
 
-    const candidates = entries.filter((entry) => entry.parentId !== null && !pinnedIds.includes(entry.id));
+    const candidates = LakomicsRadial.getFirstLevelPinCandidates(entries, pinnedIds);
     if (candidates.length > 0) {
       const addRow = document.createElement("div");
       addRow.className = "pinned-add";
@@ -452,6 +453,7 @@
         pinnedIds = [...pinnedIds, id];
         workingLayout = LakomicsRadial.reorderPinned(workingLayout, entries, pinnedIds);
         renderEditor();
+        void persistPinnedLayout("1차 도넛에 고정했습니다.");
       });
       addRow.append(select, addButton);
       panel.append(addRow);
@@ -494,16 +496,17 @@
     renderEditor();
   }
 
-  async function saveLayout() {
-    const response = await chrome.runtime.sendMessage({ type: "layout:set", layout: workingLayout });
-    if (!response.ok) {
-      status.textContent = "배치를 저장하지 못했습니다.";
-      return;
-    }
+  async function persistPinnedLayout(successMessage = "방사형 메뉴 배치와 고정 분류를 저장했습니다.") {
     const pinned = await chrome.runtime.sendMessage({ type: "pinned:set", pinnedIds });
-    status.textContent = pinned.ok
-      ? "방사형 메뉴 배치와 고정 분류를 저장했습니다."
-      : "배치를 저장했지만 고정 분류를 저장하지 못했습니다.";
+    if (!pinned.ok) { status.textContent = "고정 분류를 저장하지 못했습니다."; return false; }
+    const response = await chrome.runtime.sendMessage({ type: "layout:set", layout: workingLayout });
+    if (!response.ok) { status.textContent = "고정은 저장했지만 배치를 저장하지 못했습니다."; return false; }
+    status.textContent = successMessage;
+    return true;
+  }
+
+  async function saveLayout() {
+    await persistPinnedLayout();
   }
 
   function controlButton(label, enabled, action) {

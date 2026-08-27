@@ -764,7 +764,7 @@ test("new installs prefill the known Tailscale Serve URL without enabling remote
   const settings = await harness.api.handleMessage({ type: "settings:get" });
 
   assert.equal(settings.remote.enabled, false);
-  assert.equal(settings.remote.baseUrl, "https://laku.tail0aa1a3.ts.net");
+  assert.equal(settings.remote.baseUrl, "https://desktop-6oh3e09.tail0aa1a3.ts.net");
 });
 
 test("existing remote settings override the prefilled URL", async () => {
