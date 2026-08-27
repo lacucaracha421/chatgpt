@@ -1,0 +1,6 @@
+Lakomics X Collector 2.0.0-alpha.15.21
+
+- Hidden shortcut roots stay available in the pin picker.
+- Pin/unpin changes are saved immediately.
+- Existing extension key and storage values are preserved.
+- 121/121 tests passed.
