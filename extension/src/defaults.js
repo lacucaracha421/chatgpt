@@ -13,7 +13,7 @@
 
   const DEFAULT_REMOTE_SETTINGS = Object.freeze({
     enabled: false,
-    baseUrl: "https://laku.tail0aa1a3.ts.net",
+    baseUrl: "https://desktop-6oh3e09.tail0aa1a3.ts.net",
   });
 
   const SECONDARY_SLOT_COUNT = 12;
