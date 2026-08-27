@@ -1,4 +1,4 @@
-# Lakomics Radial 2.0.0-alpha.15.1
+# Lakomics X Collector 2.0.0-alpha.15.20
 
 Unified desktop/mobile X media collector for Lakomics.
 
@@ -16,7 +16,7 @@ Unified desktop/mobile X media collector for Lakomics.
 - X 홈의 `추천` 탭에서 화면에 들어온 사진 게시물을 세션 갤러리에 모읍니다.
 - 우측의 `▦` 버튼으로 추천 이미지 갤러리를 엽니다.
 - 갤러리의 `자동 수집`은 추천 피드를 뒤에서 자동 스크롤하며 새 이미지 최대 100장을 수집한 뒤 시작 위치로 복귀합니다.
-- 갤러리 이미지도 기존 Lakomics Radial의 모바일 길게 누르기/PC 드래그 저장 흐름을 그대로 사용합니다.
+- 갤러리 이미지도 기존 Lakomics X Collector의 모바일 길게 누르기/PC 드래그 저장 흐름을 그대로 사용합니다.
 
 
 ## alpha.15.7 - 추천 갤러리 렌더 최적화
