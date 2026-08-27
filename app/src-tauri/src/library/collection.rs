@@ -33,13 +33,23 @@ const COLLECTION_SUMMARY_SQL: &str = "SELECT
             LIMIT 1
         )
     ),
-    (
-        SELECT artwork.id
-        FROM collection_work_artworks AS artwork
-        WHERE artwork.collection_id = collection.id
-          AND artwork.kind = 'cover'
-          AND artwork.selected = 1
-        LIMIT 1
+    COALESCE(
+        (
+            SELECT artwork.id
+            FROM collection_work_artworks AS artwork
+            WHERE artwork.collection_id = collection.id
+              AND artwork.kind = 'cover'
+              AND artwork.selected = 1
+            LIMIT 1
+        ),
+        (
+            SELECT artwork.id
+            FROM collection_volumes AS volume
+            JOIN collection_work_artworks AS artwork ON artwork.id = volume.cover_artwork_id
+            WHERE volume.collection_id = collection.id
+            ORDER BY volume.edition_index, volume.sort_order, volume.volume_number, artwork.id
+            LIMIT 1
+        )
     ),
     (
         SELECT artwork.id
@@ -1214,6 +1224,85 @@ mod tests {
                 .selected_work_artwork_id
                 .as_deref(),
             Some("art-1")
+        );
+    }
+
+    #[test]
+    fn summary_uses_first_volume_cover_when_no_selected_cover() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let collection = create(&library, "Dungeon Meshi");
+        let connection = library.connection().unwrap();
+        for (id, provider_image_id) in [
+            ("volume-2-art", "volume-2"),
+            ("volume-1-art", "volume-1"),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO collection_work_artworks (
+                        id, collection_id, provider, provider_image_id, kind, relative_path,
+                        mime_type, width, height, language, selected, created_at, updated_at
+                     ) VALUES (?1, ?2, 'local', ?3, 'volume_cover', ?4,
+                        'image/jpeg', 100, 150, NULL, 0,
+                        '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z')",
+                    rusqlite::params![
+                        id,
+                        collection.id,
+                        provider_image_id,
+                        format!("work-artwork/{id}.jpg")
+                    ],
+                )
+                .unwrap();
+        }
+        for (id, volume_number, artwork_id) in [
+            ("volume-2", 2, "volume-2-art"),
+            ("volume-1", 1, "volume-1-art"),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO collection_volumes (
+                        id, collection_id, volume_number, edition_index, sort_order,
+                        cover_artwork_id, created_at, updated_at
+                     ) VALUES (?1, ?2, ?3, 0, ?3, ?4,
+                        '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z')",
+                    rusqlite::params![id, collection.id, volume_number, artwork_id],
+                )
+                .unwrap();
+        }
+        drop(connection);
+
+        assert_eq!(
+            library
+                .get_collection(&collection.id)
+                .unwrap()
+                .selected_work_artwork_id
+                .as_deref(),
+            Some("volume-1-art")
+        );
+
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO collection_work_artworks (
+                    id, collection_id, provider, provider_image_id, kind, relative_path,
+                    mime_type, width, height, language, selected, created_at, updated_at
+                 ) VALUES (
+                    'selected-cover-art', ?1, 'mangadex', 'selected-cover', 'cover',
+                    'work-artwork/selected-cover.jpg', 'image/jpeg', 100, 150, NULL, 1,
+                    '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z'
+                 )",
+                [&collection.id],
+            )
+            .unwrap();
+
+        assert_eq!(
+            library
+                .get_collection(&collection.id)
+                .unwrap()
+                .selected_work_artwork_id
+                .as_deref(),
+            Some("selected-cover-art")
         );
     }
 
