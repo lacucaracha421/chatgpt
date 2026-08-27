@@ -116,7 +116,7 @@ describe("CollectionBrowser", () => {
     expect(screen.queryByText("신간 0")).not.toBeInTheDocument();
   });
 
-  it("uses the source preview when a collection has no cover asset", () => {
+  it("uses the source thumbnail when a collection has no cover asset", () => {
     renderBrowser({
       collections: [{ ...sample, sourcePath: "games/astral-chain" }],
       typeFilter: "game",
@@ -125,7 +125,7 @@ describe("CollectionBrowser", () => {
 
     expect(screen.getByRole("img", { name: "Astral Chain" })).toHaveAttribute(
       "src",
-      "http://lakomics.localhost/collection-source-preview/c1",
+      "http://lakomics.localhost/collection-source-thumbnail/c1",
     );
   });
 

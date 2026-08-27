@@ -30,7 +30,7 @@ export function CollectionCard({
       <span className={`collection-card__object collection-card__object--${collection.type}`}>
         <span className="collection-card__cover">
           {coverUrl ? (
-            <img src={coverUrl} alt={collection.name} loading="lazy" draggable={false} />
+            <img src={coverUrl} alt={collection.name} loading="lazy" decoding="async" draggable={false} />
           ) : (
             <span className="collection-card__placeholder" aria-hidden="true" />
           )}
