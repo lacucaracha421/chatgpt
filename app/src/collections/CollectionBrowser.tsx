@@ -1,6 +1,6 @@
 import { PlusIcon } from "@heroicons/react/24/outline";
 import { useRef, useState } from "react";
-import { collectionSourcePreviewUrl, thumbnailUrl, workArtworkThumbnailUrl } from "../assets/mediaUrl";
+import { collectionSourceThumbnailUrl, thumbnailUrl, workArtworkThumbnailUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { AssetView, CollectionSummary, CollectionType, CreateCollection, UpdateCollection } from "../library/types";
@@ -171,7 +171,7 @@ export function CollectionBrowser({
                     : collection.coverAssetId
                     ? thumbnailUrl(collection.coverAssetId)
                     : collection.sourcePath
-                      ? collectionSourcePreviewUrl(collection.id)
+                      ? collectionSourceThumbnailUrl(collection.id)
                       : null
                 }
                 selected={false}

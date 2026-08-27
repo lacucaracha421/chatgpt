@@ -1,4 +1,4 @@
-import { collectionCoverUrl } from "../assets/mediaUrl";
+import { collectionCoverThumbnailUrl } from "../assets/mediaUrl";
 import type { CollectionCover } from "../library/types";
 
 type CollectionCoverGridProps = {
@@ -50,9 +50,10 @@ export function CollectionCoverGrid({
               onClick={() => onSelect(cover.fileName)}
             >
               <img
-                src={collectionCoverUrl(collectionId, cover.fileName)}
+                src={collectionCoverThumbnailUrl(collectionId, cover.fileName)}
                 alt={cover.volumeLabel}
                 loading="lazy"
+                decoding="async"
                 draggable={false}
               />
               <span className="collection-overlay__cover-label">{cover.volumeLabel}</span>

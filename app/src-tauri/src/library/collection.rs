@@ -209,7 +209,20 @@ impl Library {
         if changed == 0 {
             return Err(LibraryError::CollectionNotFound);
         }
+        self.cleanup_collection_thumbnail_cache(id)?;
         self.cleanup_unreferenced_work_artwork()
+    }
+
+    fn cleanup_collection_thumbnail_cache(&self, collection_id: &str) -> Result<(), LibraryError> {
+        let path = self
+            .root()
+            .join("collection-thumbnails")
+            .join(collection_id);
+        match std::fs::remove_dir_all(&path) {
+            Ok(()) => Ok(()),
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(source) => Err(LibraryError::WriteCollectionThumbnail { path, source }),
+        }
     }
 
     pub fn set_collection_cover(
@@ -641,7 +654,7 @@ mod tests {
     }
 
     #[test]
-    fn deleting_collection_removes_managed_work_artwork_and_thumbnail() {
+    fn delete_collection_removes_work_artwork_and_collection_thumbnail_cache() {
         let temp = tempfile::tempdir().unwrap();
         let library = Library::open(temp.path()).unwrap();
         let collection = library
@@ -678,11 +691,18 @@ mod tests {
             transaction.commit().unwrap();
         }
         prepared.commit();
+        let collection_thumbnail_dir = library
+            .root()
+            .join("collection-thumbnails")
+            .join(&collection.id);
+        std::fs::create_dir_all(&collection_thumbnail_dir).unwrap();
+        std::fs::write(collection_thumbnail_dir.join("cached.webp"), b"thumbnail").unwrap();
 
         library.delete_collection(&collection.id).unwrap();
 
         assert!(!original.exists());
         assert!(!thumbnail.exists());
+        assert!(!collection_thumbnail_dir.exists());
     }
 
     #[test]

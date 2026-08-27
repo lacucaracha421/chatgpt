@@ -216,6 +216,12 @@ pub enum LibraryError {
         #[source]
         source: std::io::Error,
     },
+    #[error("컬렉션 썸네일 파일을 쓸 수 없습니다: {path}")]
+    WriteCollectionThumbnail {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("MangaDex 검색어는 두 글자 이상이어야 합니다")]
     InvalidMangaDexQuery,
     #[error("MangaDex 식별자가 올바르지 않습니다")]

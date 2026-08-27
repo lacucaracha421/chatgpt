@@ -85,6 +85,7 @@ describe("CollectionCard", () => {
     const onClick = vi.fn();
     render(<CollectionCard collection={sample} coverUrl="cover.jpg" selected={true} onClick={onClick} />);
     expect(screen.getByRole("img", { name: "Sample" })).toHaveAttribute("src", "cover.jpg");
+    expect(screen.getByRole("img", { name: "Sample" })).toHaveAttribute("decoding", "async");
     expect(screen.getByRole("button")).toHaveAttribute("aria-selected", "true");
     screen.getByRole("button").click();
     expect(onClick).toHaveBeenCalledOnce();

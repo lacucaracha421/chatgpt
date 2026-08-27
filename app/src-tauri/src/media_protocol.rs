@@ -97,8 +97,14 @@ pub(crate) fn media_response_with_range(
         MediaVariant::CollectionCover => {
             Some(library.collection_cover_media(&asset_id, &file_name.unwrap_or_default()))
         }
+        MediaVariant::CollectionCoverThumbnail => Some(
+            library.collection_cover_thumbnail_media(&asset_id, &file_name.unwrap_or_default()),
+        ),
         MediaVariant::CollectionSourcePreview => {
             Some(library.collection_source_preview_media(&asset_id))
+        }
+        MediaVariant::CollectionSourceThumbnail => {
+            Some(library.collection_source_thumbnail_media(&asset_id))
         }
         _ => None,
     };
@@ -389,13 +395,23 @@ fn parse_path(path: &str) -> Option<(MediaVariant, String, Option<String>)> {
         }
         "collection-cover" => {
             let file_name = percent_decode(segments.next()?)?;
-            if segments.next().is_some() {
+            if segments.next().is_some() || !is_single_file_name(&file_name) {
                 return None;
             }
             (MediaVariant::CollectionCover, Some(file_name))
         }
+        "collection-cover-thumbnail" => {
+            let file_name = percent_decode(segments.next()?)?;
+            if segments.next().is_some() || !is_single_file_name(&file_name) {
+                return None;
+            }
+            (MediaVariant::CollectionCoverThumbnail, Some(file_name))
+        }
         "collection-source-preview" if segments.next().is_none() => {
             (MediaVariant::CollectionSourcePreview, None)
+        }
+        "collection-source-thumbnail" if segments.next().is_none() => {
+            (MediaVariant::CollectionSourceThumbnail, None)
         }
         "work-artwork" if segments.next().is_none() => (MediaVariant::WorkArtwork, None),
         "work-artwork-thumbnail" if segments.next().is_none() => {
@@ -420,6 +436,10 @@ fn parse_path(path: &str) -> Option<(MediaVariant, String, Option<String>)> {
         _ => return None,
     };
     Some((variant, asset_id, file_name))
+}
+
+fn is_single_file_name(value: &str) -> bool {
+    !value.is_empty() && value != "." && value != ".." && !value.contains(['/', '\\'])
 }
 
 fn percent_decode(value: &str) -> Option<String> {
@@ -533,6 +553,62 @@ mod tests {
             )
             .unwrap();
         (temp, library)
+    }
+
+    fn collection_thumbnail_library() -> (tempfile::TempDir, Library) {
+        let (temp, library) = collection_source_library(false);
+        let collection_dir = temp.path().join("source").join("series");
+        std::fs::create_dir_all(collection_dir.join("covers")).unwrap();
+        DynamicImage::new_rgb8(1200, 800)
+            .save(collection_dir.join("thumbnail.png"))
+            .unwrap();
+        DynamicImage::new_rgb8(800, 1200)
+            .save(collection_dir.join("covers").join("vol_1_cover.png"))
+            .unwrap();
+        (temp, library)
+    }
+
+    #[test]
+    fn collection_thumbnail_routes_serve_bounded_webp() {
+        let (_temp, library) = collection_thumbnail_library();
+
+        let source = media_response(
+            Some(&library),
+            &Method::GET,
+            &format!("/collection-source-thumbnail/{COLLECTION_ID}"),
+        );
+        assert_eq!(source.status(), StatusCode::OK);
+        assert_eq!(source.headers()[CONTENT_TYPE], "image/webp");
+
+        let cover = media_response(
+            Some(&library),
+            &Method::GET,
+            &format!(
+                "/collection-cover-thumbnail/{COLLECTION_ID}/vol_1_cover.png"
+            ),
+        );
+        assert_eq!(cover.status(), StatusCode::OK);
+        assert_eq!(cover.headers()[CONTENT_TYPE], "image/webp");
+    }
+
+    #[test]
+    fn collection_thumbnail_routes_reject_open_or_traversal_paths() {
+        let (temp, library) = collection_thumbnail_library();
+        DynamicImage::new_rgb8(400, 400)
+            .save(temp.path().join("source").join("series").join("outside.png"))
+            .unwrap();
+
+        for path in [
+            "/collection-source-thumbnail/not-a-uuid".to_string(),
+            format!("/collection-cover-thumbnail/{COLLECTION_ID}"),
+            format!("/collection-cover-thumbnail/{COLLECTION_ID}/..%2Foutside.png"),
+        ] {
+            assert_eq!(
+                media_response(Some(&library), &Method::GET, &path).status(),
+                StatusCode::BAD_REQUEST,
+                "{path}",
+            );
+        }
     }
 
     #[test]

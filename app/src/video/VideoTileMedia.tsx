@@ -47,7 +47,7 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
   }
   const alt = asset.title || asset.originalName;
   return <div className="video-tile" onPointerEnter={() => { if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current); hoverTimer.current = window.setTimeout(onRequestActive, 200); }} onPointerLeave={leave}>
-    <img src={previewFrame === null ? thumbnailUrl(asset.id) : scrubFrameUrl(asset.id, previewFrame)} alt={alt} draggable={false} />
+    <img src={previewFrame === null ? thumbnailUrl(asset.id) : scrubFrameUrl(asset.id, previewFrame)} alt={alt} decoding="async" draggable={false} />
     {active && <video ref={videoRef} src={playbackUrl(asset.id)} muted playsInline preload="metadata" aria-label={`${alt} 미리보기`} />}
     <span className="video-tile__duration">{formatDuration(asset.media.durationMs)}</span><span className="video-tile__icon" aria-hidden="true">▶</span>
     <div className="video-tile__scrub" role="slider" aria-label="영상 탐색" aria-valuemin={0} aria-valuemax={asset.media.durationMs} aria-valuenow={previewFrame === null ? 0 : Math.round(previewFrame / Math.max(1, asset.media.scrubFrameCount - 1) * asset.media.durationMs)} onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()} onPointerDown={(event) => { event.stopPropagation(); event.currentTarget.setPointerCapture?.(event.pointerId); scrub(event); }} onPointerMove={scrub} onPointerUp={(event) => { event.stopPropagation(); event.currentTarget.releasePointerCapture?.(event.pointerId); }} />

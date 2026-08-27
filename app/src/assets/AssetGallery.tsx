@@ -55,13 +55,13 @@ export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new S
   const jumpedTokenRef = useRef<number | null>(null);
   const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
   const [quickPreview, setQuickPreview] = useState<QuickPreviewState | null>(null);
-  const [scrollTop, setScrollTop] = useState(0);
   const [hoveredLine, setHoveredLine] = useState<{ key: string; index: number; top: number; label: string } | null>(null);
   const railRef = useRef<HTMLDivElement>(null);
   const [railExtent, setRailExtent] = useState(0);
   const { width, gap, height } = useGalleryMetrics(scrollRef);
   const rows = useMemo(() => buildJustifiedRows(items, width, targetRowHeight, gap), [gap, items, targetRowHeight, width]);
   const rowVirtualizer = useVirtualizer({ count: rows.length, getScrollElement: () => scrollRef.current, estimateSize: (index) => rows[index]?.height ?? targetRowHeight, getItemKey: (index) => rows[index]?.items[0]?.id ?? index, gap, overscan: VIRTUAL_OVERSCAN_ROWS });
+  const scrollTop = rowVirtualizer.scrollOffset ?? 0;
   const virtualRows = rowVirtualizer.getVirtualItems();
   const rowOffsets = useMemo(() => {
     const offsets = new Float64Array(rows.length + 1);
@@ -99,30 +99,8 @@ export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new S
       quickPreviewTimerRef.current = null;
     }, QUICK_PREVIEW_DELAY_MS);
   };
-  const lastJumpEmitRef = useRef(0);
-  const pendingJumpTimerRef = useRef<number | null>(null);
-  const latestJumpRef = useRef<{ date: string; ratio: number } | null>(null);
-  const flushDateJump = () => {
-    pendingJumpTimerRef.current = null;
-    const jump = latestJumpRef.current; if (!jump || !onSelectDate) return;
-    lastJumpEmitRef.current = Date.now();
-    onSelectDate(jump.date, jump.ratio);
-  };
-  const emitDateJump = (date: string, ratio: number) => {
-    if (!onSelectDate) return;
-    latestJumpRef.current = { date, ratio };
-    const elapsed = Date.now() - lastJumpEmitRef.current;
-    if (elapsed >= JUMP_EMIT_INTERVAL_MS) {
-      if (pendingJumpTimerRef.current !== null) { window.clearTimeout(pendingJumpTimerRef.current); pendingJumpTimerRef.current = null; }
-      flushDateJump();
-    } else if (pendingJumpTimerRef.current === null) {
-      pendingJumpTimerRef.current = window.setTimeout(flushDateJump, JUMP_EMIT_INTERVAL_MS - elapsed);
-    }
-  };
-  useEffect(() => () => {
-    if (pendingJumpTimerRef.current !== null) window.clearTimeout(pendingJumpTimerRef.current);
-  }, []);
-  const scrollToPointer = (clientY: number) => {
+  const pendingJumpRef = useRef<{ date: string; ratio: number } | null>(null);
+  const updatePendingDateJump = (clientY: number) => {
     if (!railInteractive) return;
     const element = scrollRef.current;
     const rail = railRef.current; if (!element) return;
@@ -137,7 +115,12 @@ export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new S
     if (progress == null) return;
     const bucketIndex = dateBuckets.length <= 1 ? 0 : Math.round(progress * (dateBuckets.length - 1));
     const date = dateBuckets[bucketIndex]?.date;
-    if (date) emitDateJump(date, progress);
+    if (date) pendingJumpRef.current = { date, ratio: progress };
+  };
+  const commitPendingDateJump = () => {
+    const jump = pendingJumpRef.current;
+    pendingJumpRef.current = null;
+    if (jump) onSelectDate?.(jump.date, jump.ratio);
   };
   useEffect(() => {
     const last = virtualRows[virtualRows.length - 1];
@@ -177,7 +160,6 @@ export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new S
         let insertedHeight = 0;
         for (let index = 0; index < rowIndex; index += 1) insertedHeight += rows[index].height + gap;
         element.scrollTop += insertedHeight;
-        setScrollTop(element.scrollTop);
       }
     }
     guard.pending = false;
@@ -195,13 +177,7 @@ export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new S
     const ratio = Math.max(0, Math.min(1, jumpTarget.ratio));
     const desired = rowStart + rows[rowIndex].height / 2 - ratio * viewport;
     element.scrollTop = Math.max(0, Math.min(element.scrollHeight - viewport, desired));
-    setScrollTop(element.scrollTop);
   }, [gap, height, jumpTarget, rows]);
-  useLayoutEffect(() => {
-    if (scrollRef.current && scrollRef.current.scrollTop !== scrollTop) {
-      setScrollTop(scrollRef.current.scrollTop);
-    }
-  }, [height, items]);
   useLayoutEffect(() => {
     if (!focusRequestedRef.current || !focusAssetId) return;
     [...(scrollRef.current?.querySelectorAll<HTMLElement>("[role=option]") ?? [])]
@@ -216,7 +192,7 @@ export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new S
       role="listbox"
       aria-label="자산"
       aria-multiselectable="true"
-      onScroll={(event) => { cancelQuickPreview(); setScrollTop(event.currentTarget.scrollTop); }}
+      onScroll={cancelQuickPreview}
       onClick={(event) => { if (!(event.target as HTMLElement).closest(".asset-gallery__asset")) onClearSelection?.(); }}
       onKeyDown={(event) => {
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
@@ -251,7 +227,7 @@ export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new S
         })}
       </div>
     </div>
-    {hasRail && <div ref={railRef} className="asset-gallery__scrollbar" aria-hidden="true" onPointerDown={(event) => { if (event.button === 0) { event.currentTarget.setPointerCapture(event.pointerId); scrollToPointer(event.clientY); } }} onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) scrollToPointer(event.clientY); }} onPointerLeave={() => setHoveredLine(null)} onWheel={(event) => { const element = scrollRef.current; if (!element || dateBuckets.length === 0) return; element.scrollTop += event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY; }}>
+    {hasRail && <div ref={railRef} className="asset-gallery__scrollbar" aria-hidden="true" onPointerDown={(event) => { if (event.button === 0) { event.currentTarget.setPointerCapture(event.pointerId); updatePendingDateJump(event.clientY); } }} onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) updatePendingDateJump(event.clientY); }} onPointerUp={(event) => { updatePendingDateJump(event.clientY); commitPendingDateJump(); event.currentTarget.releasePointerCapture?.(event.pointerId); }} onPointerCancel={() => { pendingJumpRef.current = null; }} onPointerLeave={() => setHoveredLine(null)} onWheel={(event) => { const element = scrollRef.current; if (!element || dateBuckets.length === 0) return; element.scrollTop += event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY; }}>
       {dateLines.map((line, index) => (
         <span
           key={line.key}
@@ -259,7 +235,7 @@ export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new S
           style={{ top: `${line.top}px` }}
           onPointerEnter={() => setHoveredLine({ key: line.key, index, top: line.top, label: line.label })}
           onPointerLeave={() => setHoveredLine((current) => current?.key === line.key ? null : current)}
-          onPointerDown={(event) => { if (event.button === 0 && railInteractive) { event.stopPropagation(); emitDateJump(line.key, line.progress); } }}
+          onPointerDown={(event) => { if (event.button === 0 && railInteractive) { event.stopPropagation(); onSelectDate?.(line.key, line.progress); } }}
         />
       ))}
       {hoveredLine && <span className="asset-gallery__scrollbar-label" style={{ top: `${hoveredLine.top}px` }}>{hoveredLine.label}</span>}
@@ -271,7 +247,7 @@ export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new S
 function AssetTile({ asset, height, selected, selectedAssetIds, focused, metadataVisible, activePreview, onRequestPreview, onReleasePreview, onRequestQuickPreview, onCancelQuickPreview, onRetryVideo, onSelectionGesture, onOpen, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: { asset: AssetSummary; height: number; selected: boolean; selectedAssetIds: ReadonlySet<string>; focused: boolean; metadataVisible: boolean; activePreview: boolean; onRequestPreview(): void; onReleasePreview(): void; onRequestQuickPreview(asset: AssetSummary, trigger: HTMLElement): void; onCancelQuickPreview(): void; onRetryVideo?: AssetGalleryProps["onRetryVideo"]; onSelectionGesture?: (asset: AssetSummary, gesture: SelectionGesture) => void; onOpen?: (asset: AssetSummary) => void; onPointerDragStart?: AssetGalleryProps["onPointerDragStart"]; onPointerDragMove?: AssetGalleryProps["onPointerDragMove"]; onPointerDragEnd?: AssetGalleryProps["onPointerDragEnd"]; onPointerDragCancel?: AssetGalleryProps["onPointerDragCancel"] }) {
   const alt = asset.title || asset.originalName;
   return <div role="option" data-asset-id={asset.id} className="asset-gallery__asset" style={{ width: asset.width, height }} aria-label={alt} aria-selected={selected} tabIndex={focused ? 0 : -1} onClick={(event) => onSelectionGesture?.(asset, { toggle: event.ctrlKey || event.metaKey, range: event.shiftKey })} onDoubleClick={() => onOpen?.(asset)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); onOpen?.(asset); } }} onPointerDown={(event) => { if (event.button === 0) onPointerDragStart?.({ kind: "assets", assetIds: assetDragIds(asset.id, selectedAssetIds) }, event); }} onPointerMove={onPointerDragMove} onPointerUp={onPointerDragEnd} onPointerCancel={onPointerDragCancel}>
-    {asset.media.kind === "video" ? <VideoTileMedia asset={asset as AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> }} active={activePreview} onRequestActive={onRequestPreview} onReleaseActive={onReleasePreview} onRetry={() => onRetryVideo?.(asset)} /> : <img src={thumbnailUrl(asset.id)} alt={alt} width={asset.width} height={asset.height} loading="lazy" draggable={false} />}
+    {asset.media.kind === "video" ? <VideoTileMedia asset={asset as AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> }} active={activePreview} onRequestActive={onRequestPreview} onReleaseActive={onReleasePreview} onRetry={() => onRetryVideo?.(asset)} /> : <img src={thumbnailUrl(asset.id)} alt={alt} width={asset.width} height={asset.height} loading="lazy" decoding="async" draggable={false} />}
     {asset.favorite && <span className="asset-gallery__favorite" aria-hidden="true"><HeartIcon /></span>}
     {metadataVisible && <span className="asset-gallery__metadata"><span>{sourceHost(asset.sourceUrl)}</span><span>{localDate(asset.collectedAt)}</span></span>}
     {asset.media.kind === "image" && <button type="button" className="asset-gallery__quick-preview-trigger" aria-label={`${alt} 빠른 확대 미리보기`} onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onPointerEnter={(event) => onRequestQuickPreview(asset, event.currentTarget)} onPointerLeave={onCancelQuickPreview} onFocus={(event) => onRequestQuickPreview(asset, event.currentTarget)} onBlur={onCancelQuickPreview} onKeyDown={(event) => { event.stopPropagation(); if (event.key === "Escape") { event.preventDefault(); onCancelQuickPreview(); } }}><PlusIcon aria-hidden="true" /></button>}
@@ -287,8 +263,6 @@ type RailGeometry = { start: number; extent: number };
 
 const RAIL_MIN_TICK_GAP = 8;
 const RAIL_EDGE_INSET = 4;
-const JUMP_EMIT_INTERVAL_MS = 160;
-
 function buildDateSummaryFromBuckets(buckets: AssetDateBucket[]): DateSpan[] {
   if (buckets.length === 0) return [];
   const count = buckets.length;

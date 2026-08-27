@@ -32,8 +32,16 @@ export function collectionCoverUrl(collectionId: string, fileName: string): stri
   return `${MEDIA_ORIGIN}/collection-cover/${encodeURIComponent(collectionId)}/${encodeURIComponent(fileName)}`;
 }
 
+export function collectionCoverThumbnailUrl(collectionId: string, fileName: string): string {
+  return `${MEDIA_ORIGIN}/collection-cover-thumbnail/${encodeURIComponent(collectionId)}/${encodeURIComponent(fileName)}`;
+}
+
 export function collectionSourcePreviewUrl(collectionId: string): string {
   return `${MEDIA_ORIGIN}/collection-source-preview/${encodeURIComponent(collectionId)}`;
+}
+
+export function collectionSourceThumbnailUrl(collectionId: string): string {
+  return `${MEDIA_ORIGIN}/collection-source-thumbnail/${encodeURIComponent(collectionId)}`;
 }
 
 export function workArtworkUrl(artworkId: string): string {

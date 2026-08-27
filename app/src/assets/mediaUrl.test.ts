@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   assetUrl,
+  collectionCoverThumbnailUrl,
+  collectionSourceThumbnailUrl,
   mangadexCoverPreviewUrl,
   playbackUrl,
   scrubFrameUrl,
@@ -39,6 +41,12 @@ describe("media URLs", () => {
     );
     expect(mangadexCoverPreviewUrl("manga/one", "cover one.jpg")).toBe(
       "http://lakomics.localhost/mangadex-cover-preview/manga%2Fone/cover%20one.jpg",
+    );
+    expect(collectionSourceThumbnailUrl("collection/one")).toBe(
+      "http://lakomics.localhost/collection-source-thumbnail/collection%2Fone",
+    );
+    expect(collectionCoverThumbnailUrl("collection/one", "cover one.png")).toBe(
+      "http://lakomics.localhost/collection-cover-thumbnail/collection%2Fone/cover%20one.png",
     );
   });
 });
