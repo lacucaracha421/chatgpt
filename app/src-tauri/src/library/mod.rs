@@ -16,6 +16,7 @@ pub mod error;
 mod external_binding;
 mod favorite;
 mod folder_appearance;
+mod image_fingerprint;
 pub(crate) mod igdb;
 mod igdb_flow;
 mod ingestion;

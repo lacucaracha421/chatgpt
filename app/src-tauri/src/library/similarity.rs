@@ -4,13 +4,16 @@ use std::{
     path::Path,
 };
 
-use image::{DynamicImage, ImageReader};
+use image::ImageReader;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use super::{
     classification::classifications_for_asset,
     error::LibraryError,
+    image_fingerprint::{
+        dimensions_are_compatible, fingerprint, minimum_distance, ImageFingerprint,
+    },
     models::{
         AssetCursor, AssetSummary, SimilarityDecision, SimilarityDecisionRequest,
         SimilarityIndexProgress, SimilarityReviewAsset, SimilarityReviewPage,
@@ -20,7 +23,8 @@ use super::{
     Library, MediaVariant,
 };
 
-const SIMILARITY_DISTANCE_MAX: u32 = 6;
+const PDQ_QUALITY_MIN: u8 = 50;
+const PDQ_DISTANCE_MAX: u32 = 20;
 const INDEX_BATCH_SIZE: u32 = 50;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -360,6 +364,7 @@ impl Library {
                 "SELECT id
                  FROM assets
                  WHERE status = 'normal'
+                   AND media_kind IN ('image', 'gif')
                    AND perceptual_hash IS NULL
                    AND perceptual_hash_error IS NULL
                  ORDER BY collected_at, id
@@ -377,12 +382,12 @@ impl Library {
                 .and_then(|media| perceptual_hash_from_file(media.file));
             let connection = self.connection()?;
             match result {
-                Ok(hash) => {
+                Ok(fingerprint) => {
                     connection.execute(
                         "UPDATE assets
-                         SET perceptual_hash = ?2
+                         SET perceptual_hash = ?2, perceptual_hash_quality = ?3
                          WHERE id = ?1 AND status = 'normal'",
-                        params![asset_id, hash.to_be_bytes()],
+                        params![asset_id, fingerprint.to_stored_bytes(), fingerprint.quality],
                     )?;
                 }
                 Err(error) => {
@@ -403,7 +408,7 @@ impl Library {
                 COALESCE(SUM(CASE WHEN perceptual_hash IS NULL AND perceptual_hash_error IS NULL THEN 1 ELSE 0 END), 0),
                 COALESCE(SUM(CASE WHEN perceptual_hash_error IS NOT NULL THEN 1 ELSE 0 END), 0)
              FROM assets
-             WHERE status = 'normal'",
+             WHERE status = 'normal' AND media_kind IN ('image', 'gif')",
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
@@ -415,26 +420,40 @@ impl Library {
 
     pub(crate) fn find_similar_asset(
         &self,
-        target_hash: u64,
+        target: &ImageFingerprint,
+        target_dimensions: (u32, u32),
     ) -> Result<Option<SimilarAssetCandidate>, LibraryError> {
+        if target.quality < PDQ_QUALITY_MIN {
+            return Ok(None);
+        }
         let connection = self.connection()?;
         let mut statement = connection.prepare(
-            "SELECT id, perceptual_hash
+            "SELECT id, perceptual_hash, perceptual_hash_quality, width, height
              FROM assets
-             WHERE status = 'normal' AND perceptual_hash IS NOT NULL
+             WHERE status = 'normal'
+               AND media_kind IN ('image', 'gif')
+               AND perceptual_hash IS NOT NULL
+               AND perceptual_hash_quality >= ?1
              ORDER BY collected_at, id",
         )?;
-        let rows = statement.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
+        let rows = statement.query_map([PDQ_QUALITY_MIN], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Vec<u8>>(1)?,
+                row.get::<_, u8>(2)?,
+                row.get::<_, u32>(3)?,
+                row.get::<_, u32>(4)?,
+            ))
         })?;
         let mut best: Option<SimilarAssetCandidate> = None;
         for row in rows {
-            let (asset_id, bytes) = row?;
-            let bytes: [u8; 8] = bytes
-                .try_into()
-                .map_err(|_| LibraryError::InvalidPerceptualHash)?;
-            let distance = hamming_distance(target_hash, u64::from_be_bytes(bytes));
-            if distance <= SIMILARITY_DISTANCE_MAX
+            let (asset_id, bytes, quality, width, height) = row?;
+            let stored = ImageFingerprint::from_stored_bytes(&bytes, quality)?;
+            if !dimensions_are_compatible(target_dimensions, (width, height)) {
+                continue;
+            }
+            let distance = minimum_distance(target, &stored);
+            if distance <= PDQ_DISTANCE_MAX
                 && best
                     .as_ref()
                     .is_none_or(|candidate| distance < candidate.distance)
@@ -580,7 +599,9 @@ fn run_after_review_resolving_hook() -> Result<(), LibraryError> {
     Ok(())
 }
 
-pub(crate) fn perceptual_hash_from_file(mut file: File) -> Result<u64, LibraryError> {
+pub(crate) fn perceptual_hash_from_file(
+    mut file: File,
+) -> Result<ImageFingerprint, LibraryError> {
     file.seek(SeekFrom::Start(0))
         .map_err(|_| LibraryError::UnsupportedImage)?;
     let image = ImageReader::new(BufReader::new(file))
@@ -588,25 +609,7 @@ pub(crate) fn perceptual_hash_from_file(mut file: File) -> Result<u64, LibraryEr
         .map_err(|_| LibraryError::UnsupportedImage)?
         .decode()
         .map_err(|_| LibraryError::UnsupportedImage)?;
-    Ok(perceptual_hash(&image))
-}
-
-fn perceptual_hash(image: &DynamicImage) -> u64 {
-    let pixels = image
-        .resize_exact(9, 8, image::imageops::FilterType::Triangle)
-        .to_luma8();
-    let mut hash = 0_u64;
-    for y in 0..8 {
-        for x in 0..8 {
-            hash <<= 1;
-            hash |= u64::from(pixels.get_pixel(x, y)[0] > pixels.get_pixel(x + 1, y)[0]);
-        }
-    }
-    hash
-}
-
-fn hamming_distance(left: u64, right: u64) -> u32 {
-    (left ^ right).count_ones()
+    fingerprint(&image)
 }
 
 fn similarity_index_error_code(error: &LibraryError) -> Option<&'static str> {
@@ -638,7 +641,8 @@ mod tests {
         },
         Library,
     };
-    use super::{hamming_distance, perceptual_hash, set_after_review_resolving_hook};
+    use super::super::image_fingerprint::{fingerprint, minimum_distance, ImageFingerprint};
+    use super::set_after_review_resolving_hook;
 
     #[derive(Clone, Copy)]
     enum StripeDirection {
@@ -670,26 +674,91 @@ mod tests {
         let resized_jpeg = jpeg_variant(&base, 450, 300, 70);
         let unrelated = striped_fixture(900, 600, StripeDirection::Horizontal);
 
-        let base_hash = perceptual_hash(&base);
-        let resized_hash = perceptual_hash(&resized_jpeg);
-        let unrelated_hash = perceptual_hash(&unrelated);
+        let base_hash = fingerprint(&base).unwrap();
+        let resized_hash = fingerprint(&resized_jpeg).unwrap();
+        let unrelated_hash = fingerprint(&unrelated).unwrap();
 
-        assert!(hamming_distance(base_hash, resized_hash) <= 6);
-        assert!(hamming_distance(base_hash, unrelated_hash) > 6);
+        let resized_distance = minimum_distance(&base_hash, &resized_hash);
+        let unrelated_distance = minimum_distance(&base_hash, &unrelated_hash);
+        assert!(
+            base_hash.quality >= 50 && resized_hash.quality >= 50,
+            "quality={}/{}",
+            base_hash.quality,
+            resized_hash.quality
+        );
+        assert!(
+            resized_distance <= 20,
+            "resized distance={resized_distance}, quality={}/{}",
+            base_hash.quality,
+            resized_hash.quality
+        );
+        assert!(
+            unrelated_distance > 20,
+            "unrelated distance={unrelated_distance}"
+        );
+    }
+
+    #[test]
+    fn light_crop_and_corner_watermark_stay_within_pdq_threshold() {
+        let base = striped_fixture(900, 600, StripeDirection::Vertical);
+        let cropped = base.crop_imm(45, 30, 810, 540);
+        let mut watermarked = base.to_rgb8();
+        for y in 575..595 {
+            for x in 760..880 {
+                watermarked.put_pixel(x, y, Rgb([245, 245, 245]));
+            }
+        }
+        let watermarked = DynamicImage::ImageRgb8(watermarked);
+        let base = fingerprint(&base).unwrap();
+        let cropped = fingerprint(&cropped).unwrap();
+        let watermarked = fingerprint(&watermarked).unwrap();
+
+        assert!(base.quality >= 50 && cropped.quality >= 50 && watermarked.quality >= 50);
+        let crop_distance = minimum_distance(&base, &cropped);
+        let watermark_distance = minimum_distance(&base, &watermarked);
+        assert!(
+            crop_distance <= 20 && watermark_distance <= 20,
+            "crop distance={crop_distance}, watermark distance={watermark_distance}"
+        );
+    }
+
+    #[test]
+    fn pdq_rejects_images_that_collide_under_dhash() {
+        let first = horizontal_band_fixture(900, 600, 2);
+        let second = horizontal_band_fixture(900, 600, 10);
+        let first_dhash = test_dhash(&first);
+        let second_dhash = test_dhash(&second);
+        let first_pdq = fingerprint(&first).unwrap();
+        let second_pdq = fingerprint(&second).unwrap();
+
+        assert_eq!(first_dhash, second_dhash);
+        assert!(first_pdq.quality >= 50 && second_pdq.quality >= 50);
+        assert!(minimum_distance(&first_pdq, &second_pdq) > 20);
     }
 
     #[test]
     fn candidate_search_uses_distance_then_collected_at_then_id() {
+        let mut one_bit = [0_u8; 32];
+        one_bit[0] = 0b0000_0001;
+        let mut another_bit = [0_u8; 32];
+        another_bit[0] = 0b0000_0010;
+        let mut third_bit = [0_u8; 32];
+        third_bit[0] = 0b0000_0100;
         let fixture = library_with_hashes(&[
-            ("later", 0b0001_u64, "2026-08-09T01:00:00Z"),
-            ("earlier-b", 0b0010_u64, "2026-08-09T00:00:00Z"),
-            ("earlier-a", 0b0100_u64, "2026-08-09T00:00:00Z"),
+            ("later", one_bit, "2026-08-09T01:00:00Z"),
+            ("earlier-b", another_bit, "2026-08-09T00:00:00Z"),
+            ("earlier-a", third_bit, "2026-08-09T00:00:00Z"),
         ]);
+        let target = ImageFingerprint {
+            bytes: [0; 32],
+            cropped_bytes: [0; 32],
+            quality: 100,
+        };
 
         assert_eq!(
             fixture
                 .library
-                .find_similar_asset(0)
+                .find_similar_asset(&target, (100, 100))
                 .unwrap()
                 .unwrap()
                 .asset_id,
@@ -700,16 +769,59 @@ mod tests {
     #[test]
     fn candidate_search_rejects_a_hash_blob_with_the_wrong_length() {
         let fixture = library_with_hashes(&[]);
-        insert_asset(
-            &fixture.library,
-            "broken",
-            "2026-08-09T00:00:00Z",
-            Some(&[0; 7]),
-        );
+        insert_asset(&fixture.library, "broken", "2026-08-09T00:00:00Z", Some(&[0; 7]));
+        let target = ImageFingerprint {
+            bytes: [0; 32],
+            cropped_bytes: [0; 32],
+            quality: 100,
+        };
 
-        let error = fixture.library.find_similar_asset(0).unwrap_err();
+        let error = fixture
+            .library
+            .find_similar_asset(&target, (100, 100))
+            .unwrap_err();
 
         assert!(matches!(error, LibraryError::InvalidPerceptualHash));
+    }
+
+    #[test]
+    fn pdq_candidate_applies_quality_distance_and_aspect_gates() {
+        let fixture = library_with_hashes(&[]);
+        let target = ImageFingerprint {
+            bytes: [0; 32],
+            cropped_bytes: [0; 32],
+            quality: 100,
+        };
+        let mut distance_twenty = [0_u8; 32];
+        distance_twenty[0] = u8::MAX;
+        distance_twenty[1] = u8::MAX;
+        distance_twenty[2] = 0b0000_1111;
+        let mut distance_twenty_one = distance_twenty;
+        distance_twenty_one[3] = 1;
+        insert_policy_asset(&fixture.library, "distance-20", &distance_twenty, 100, 100, 100, "image");
+        insert_policy_asset(&fixture.library, "distance-21", &distance_twenty_one, 100, 100, 100, "image");
+        insert_policy_asset(&fixture.library, "low-quality", &[0; 32], 49, 100, 100, "image");
+        insert_policy_asset(&fixture.library, "wrong-aspect", &[0; 32], 100, 200, 100, "image");
+        insert_policy_asset(&fixture.library, "video", &[0; 32], 100, 100, 100, "video");
+
+        let candidate = fixture
+            .library
+            .find_similar_asset(&target, (100, 100))
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(candidate.asset_id, "distance-20");
+        assert_eq!(candidate.distance, 20);
+        let low_quality_target = ImageFingerprint {
+            bytes: [0; 32],
+            cropped_bytes: [0; 32],
+            quality: 49,
+        };
+        assert!(fixture
+            .library
+            .find_similar_asset(&low_quality_target, (100, 100))
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -741,6 +853,71 @@ mod tests {
         let progress = fixture.library.index_missing_similarity_hashes().unwrap();
 
         assert_eq!((progress.remaining, progress.failed), (0, 0));
+    }
+
+    #[test]
+    fn pdq_index_includes_gif_and_excludes_video_from_counts() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        insert_policy_asset(&library, "gif", &[0; 32], 100, 12, 8, "gif");
+        insert_policy_asset(&library, "video", &[0; 32], 100, 12, 8, "video");
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE assets SET perceptual_hash = NULL, perceptual_hash_quality = NULL",
+                [],
+            )
+            .unwrap();
+        let gif_path = library.root().join("assets/gif.png");
+        fs::create_dir_all(gif_path.parent().unwrap()).unwrap();
+        RgbImage::from_pixel(12, 8, Rgb([80, 80, 80]))
+            .save_with_format(&gif_path, image::ImageFormat::Gif)
+            .unwrap();
+
+        let progress = library.index_missing_similarity_hashes().unwrap();
+        let (gif_length, gif_quality): (i64, i64) = library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT length(perceptual_hash), perceptual_hash_quality
+                 FROM assets WHERE id = 'gif'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let video_state: (Option<Vec<u8>>, Option<i64>, Option<String>) = library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT perceptual_hash, perceptual_hash_quality, perceptual_hash_error
+                 FROM assets WHERE id = 'video'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+
+        assert_eq!((progress.remaining, progress.failed), (0, 0));
+        assert_eq!(gif_length, 64);
+        assert!(gif_quality < 50);
+        assert_eq!(video_state, (None, None, None));
+    }
+
+    #[test]
+    fn new_similarity_reviews_record_pdq_fingerprint_kind() {
+        let fixture = review_fixture();
+        let kind: String = fixture
+            .library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT fingerprint_kind FROM similarity_reviews WHERE id = ?1",
+                [&fixture.review_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(kind, "pdq-v1");
     }
 
     #[test]
@@ -957,20 +1134,21 @@ mod tests {
             let transaction = connection.transaction().unwrap();
             for index in 0..50_000_u64 {
                 let id = format!("asset-{index:05}");
-                let hash = index.rotate_left(17).to_be_bytes();
+                let mut hash = [0_u8; 32];
+                hash[..8].copy_from_slice(&index.rotate_left(17).to_be_bytes());
                 transaction
                     .execute(
                         "INSERT INTO assets (
                             id, content_hash, media_kind, original_name, relative_path,
                             thumbnail_relative_path, byte_size, width, height, collected_at,
-                            perceptual_hash
+                            perceptual_hash, perceptual_hash_quality
                          ) VALUES (?1, ?1, 'image', ?1, ?2, ?3, 1, 1, 1,
-                            '2026-08-09T00:00:00Z', ?4)",
+                            '2026-08-09T00:00:00Z', ?4, 100)",
                         params![
                             id,
                             format!("assets/{id}.png"),
                             format!("thumbnails/{id}.webp"),
-                            hash
+                            stored_hash(hash)
                         ],
                     )
                     .unwrap();
@@ -979,7 +1157,12 @@ mod tests {
         }
 
         let started = Instant::now();
-        let candidate = library.find_similar_asset(0).unwrap();
+        let target = ImageFingerprint {
+            bytes: [0; 32],
+            cropped_bytes: [0; 32],
+            quality: 100,
+        };
+        let candidate = library.find_similar_asset(&target, (1, 1)).unwrap();
         let elapsed = started.elapsed();
 
         assert_eq!(candidate.unwrap().asset_id, "asset-00000");
@@ -989,12 +1172,32 @@ mod tests {
 
     fn striped_fixture(width: u32, height: u32, direction: StripeDirection) -> DynamicImage {
         DynamicImage::ImageRgb8(ImageBuffer::from_fn(width, height, |x, y| {
-            let offset = match direction {
-                StripeDirection::Vertical => x,
-                StripeDirection::Horizontal => y,
+            let nx = x as f32 / width as f32;
+            let ny = y as f32 / height as f32;
+            let mut color = [
+                (35.0 + nx * 90.0) as u8,
+                (45.0 + ny * 100.0) as u8,
+                (170.0 - nx * 55.0) as u8,
+            ];
+            let featured = match direction {
+                StripeDirection::Vertical => {
+                    (0.18..0.43).contains(&nx) && (0.12..0.88).contains(&ny)
+                }
+                StripeDirection::Horizontal => {
+                    (0.12..0.88).contains(&nx) && (0.18..0.43).contains(&ny)
+                }
             };
-            let light = (offset / 32) % 2 == 0;
-            Rgb(if light { [240, 180, 30] } else { [20, 60, 180] })
+            if featured {
+                color = [235, 75, 35];
+            }
+            if (0.55..0.90).contains(&nx) && (0.08..0.20).contains(&ny) {
+                color = [245, 205, 35];
+            }
+            let circle = (nx - 0.72).powi(2) + (ny - 0.68).powi(2) < 0.085;
+            if circle {
+                color = [25, 215, 135];
+            }
+            Rgb(color)
         }))
     }
 
@@ -1005,6 +1208,27 @@ mod tests {
             .encode_image(&resized)
             .unwrap();
         image::load_from_memory(&bytes).unwrap()
+    }
+
+    fn horizontal_band_fixture(width: u32, height: u32, band_count: u32) -> DynamicImage {
+        DynamicImage::ImageRgb8(ImageBuffer::from_fn(width, height, |_, y| {
+            let light = (y * band_count / height) % 2 == 0;
+            Rgb(if light { [235, 235, 235] } else { [20, 20, 20] })
+        }))
+    }
+
+    fn test_dhash(image: &DynamicImage) -> u64 {
+        let pixels = image
+            .resize_exact(9, 8, FilterType::Triangle)
+            .to_luma8();
+        let mut hash = 0_u64;
+        for y in 0..8 {
+            for x in 0..8 {
+                hash <<= 1;
+                hash |= u64::from(pixels.get_pixel(x, y)[0] > pixels.get_pixel(x + 1, y)[0]);
+            }
+        }
+        hash
     }
 
     impl ReviewFixture {
@@ -1219,11 +1443,12 @@ mod tests {
         }
     }
 
-    fn library_with_hashes(rows: &[(&str, u64, &str)]) -> TestLibrary {
+    fn library_with_hashes(rows: &[(&str, [u8; 32], &str)]) -> TestLibrary {
         let temp = tempfile::tempdir().unwrap();
         let library = Library::open(temp.path()).unwrap();
         for (id, hash, collected_at) in rows {
-            insert_asset(&library, id, collected_at, Some(&hash.to_be_bytes()));
+            let stored = stored_hash(*hash);
+            insert_asset(&library, id, collected_at, Some(&stored));
         }
         TestLibrary {
             _temp: temp,
@@ -1259,16 +1484,57 @@ mod tests {
                 "INSERT INTO assets (
                     id, content_hash, media_kind, original_name, relative_path,
                     thumbnail_relative_path, byte_size, width, height, collected_at,
-                    perceptual_hash
-                 ) VALUES (?1, ?1, 'image', ?1, ?2, ?3, 1, 1, 1, ?4, ?5)",
+                    perceptual_hash, perceptual_hash_quality
+                 ) VALUES (?1, ?1, 'image', ?1, ?2, ?3, 1, 100, 100, ?4, ?5, ?6)",
                 params![
                     id,
                     format!("assets/{id}.png"),
                     format!("thumbnails/{id}.webp"),
                     collected_at,
                     hash,
+                    hash.map(|_| 100_u8),
                 ],
             )
             .unwrap();
+    }
+
+    fn insert_policy_asset(
+        library: &Library,
+        id: &str,
+        hash: &[u8; 32],
+        quality: u8,
+        width: u32,
+        height: u32,
+        media_kind: &str,
+    ) {
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO assets (
+                    id, content_hash, media_kind, original_name, relative_path,
+                    thumbnail_relative_path, byte_size, width, height, collected_at,
+                    perceptual_hash, perceptual_hash_quality
+                 ) VALUES (?1, ?1, ?2, ?1, ?3, ?4, 1, ?5, ?6,
+                           '2026-08-09T00:00:00Z', ?7, ?8)",
+                params![
+                    id,
+                    media_kind,
+                    format!("assets/{id}.png"),
+                    (media_kind != "video").then(|| format!("thumbnails/{id}.webp")),
+                    width,
+                    height,
+                    stored_hash(*hash),
+                    quality,
+                ],
+            )
+            .unwrap();
+    }
+
+    fn stored_hash(hash: [u8; 32]) -> [u8; 64] {
+        let mut stored = [0; 64];
+        stored[..32].copy_from_slice(&hash);
+        stored[32..].copy_from_slice(&hash);
+        stored
     }
 }

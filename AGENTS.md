@@ -43,6 +43,13 @@ UI를 만들거나 수정할 때는 루트의 `DESIGN.md`를 먼저 읽고 따�
 - Do not manually edit generated files unless the task explicitly targets generated output.
 - Do not commit build artifacts, temporary files, local caches, or machine-specific output unless the repository intentionally tracks that exact artifact.
 
+## Active library boundary
+
+- The active production library is `C:\New_lakomics_assets`. Do not infer the active library from similarly named directories, old exports, desktop folders, test fixtures, or recently modified paths.
+- Paths other than the active library are excluded unless the user explicitly places them in scope.
+- Read-only audits of the active library are allowed when needed to validate behavior. Any migration, indexing run, metadata update, file move, or other write to it requires separate explicit approval.
+- Application behavior must not branch on this machine-specific path. Resolve the configured library at runtime; this path exists only to guide agent operations.
+
 ## Verification
 
 - Start with the single most relevant targeted check and expand only when the change has broader behavioral risk or the targeted evidence reveals a cross-module problem.

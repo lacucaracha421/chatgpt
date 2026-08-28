@@ -20,11 +20,11 @@ Lakomics의 64비트 difference hash 판정을 256비트 PDQ 판정으로 교체
 
 이번 변경에 포함한다.
 
-- 원본 방향 하나에 대한 256비트 PDQ 해시와 품질 점수 생성
+- 원본 방향의 전체 이미지와 중앙 90% 크롭에 대한 256비트 PDQ 해시 두 개와 품질 점수 생성
 - 엄격한 거리, 품질, 종횡비 정책
-- 구현 시작 전 `pdq-rs` Windows 빌드 스파이크
+- 구현 시작 전 `pdqhash` Windows 빌드 스파이크
 - 활성 실사용 라이브러리의 읽기 전용 PDQ 품질 분포 측정
-- 이미지 자산만을 대상으로 하는 PDQ 생성과 백그라운드 재인덱싱
+- 이미지와 GIF 자산만을 대상으로 하는 PDQ 생성과 백그라운드 재인덱싱
 - 기존 dHash의 안전한 무효화와 백그라운드 재생성
 - 과거 검토 기록의 알고리즘 종류 보존
 - 실제 오탐 형태를 재현하는 합성 회귀 fixture
@@ -48,9 +48,9 @@ Lakomics의 64비트 difference hash 판정을 256비트 PDQ 판정으로 교체
 
 Meta의 PDQ는 256비트 DCT 기반 해시와 0~100 품질 점수를 제공한다. 리사이즈, 품질 저하, 가벼운 크롭, 작은 워터마크와 같은 변형을 대상으로 하며 대규모 선형 Hamming 비교가 저렴하다. 승인된 범위와 가장 잘 맞으므로 채택한다.
 
-Rust에서는 `pdq-rs = "=1.0.0"`을 고정 사용한다. 이 crate는 `image 0.25`의 `DynamicImage`를 받고 vendored Meta C++ reference를 얇게 감싼다. Windows 릴리즈 빌드는 이미 MSVC 도구 체인을 요구하므로 별도 런타임이나 모델 파일을 추가하지 않는다. 구현 시 crate의 MIT 라이선스와 vendored PDQ의 BSD 라이선스를 기존 third-party notice 흐름에 반영한다.
+Rust에서는 `pdqhash = "=0.1.1"`을 고정 사용한다. Meta PDQ README가 Rust 구현으로 안내하는 순수 Rust crate이며 별도 C++ 컴파일러, libclang, 런타임 또는 모델 파일이 필요하지 않다. crate가 사용하는 `image 0.23` 타입과 앱의 `image 0.25` 타입 변환은 `image_fingerprint` 내부에서만 처리한다. 구현 시 Apache-2.0 라이선스를 기존 third-party notice 흐름에 반영한다.
 
-단, 스키마나 저장 형식을 변경하기 전에 의존성 빌드 스파이크를 먼저 통과해야 한다. `pdq-rs` 추가, 최소 fingerprint 단위 테스트, Rust 타깃 테스트와 Windows release build를 먼저 수행한다. 이 단계가 실패하면 DB 마이그레이션을 시작하지 않고 원인을 확인한다. 현재 도구 체인에서 `pdq-rs` 사용이 성립하지 않는다는 구체적 증거가 생길 때만 pHash 설계로 돌아간다.
+단, 스키마나 저장 형식을 변경하기 전에 의존성 빌드 스파이크를 먼저 통과해야 한다. `pdqhash` 추가, 최소 fingerprint 단위 테스트, Rust 타깃 테스트와 Windows release build를 먼저 수행한다. 이 단계가 실패하면 DB 마이그레이션을 시작하지 않고 원인을 확인한다. 현재 도구 체인에서 순수 Rust `pdqhash` 사용도 성립하지 않는다는 구체적 증거가 생길 때만 pHash 설계로 돌아간다.
 
 ### pHash 64비트
 
@@ -69,6 +69,7 @@ PDQ 세부 계산은 `app/src-tauri/src/library/image_fingerprint.rs`라는 라�
 ```rust
 pub(crate) struct ImageFingerprint {
     bytes: [u8; 32],
+    cropped_bytes: [u8; 32],
     quality: u8,
 }
 
@@ -97,16 +98,16 @@ pub(crate) fn dimensions_are_compatible(
 
 1. 관리 임시 위치에 복사하면서 SHA-256을 계산한다.
 2. 완전 중복이면 기존 흐름대로 새 자산을 만들지 않는다.
-3. 첫 디코딩 이미지로 원본 방향 PDQ 해시와 품질 점수를 한 번 계산한다. GIF는 기존 정책처럼 첫 프레임을 사용한다.
+3. 첫 디코딩 이미지로 원본 전체와 각 변을 5% 제거한 중앙 크롭의 PDQ 해시를 계산한다. 품질은 두 해시의 낮은 값을 사용하며 GIF는 기존 정책처럼 첫 프레임을 사용한다.
 4. 해시와 품질 점수는 후보 여부와 관계없이 자산에 저장한다.
 5. 대상 품질이 50 미만이면 유사 검색을 생략하고 정상 자산으로 수집한다.
 6. 기존 정상 이미지 중 해시가 있고 품질이 50 이상인 자산을 순회한다.
 7. 두 종횡비의 큰 값을 작은 값으로 나눈 값이 1.15를 넘으면 Hamming 비교 전에 제외한다.
-8. PDQ Hamming distance가 20 이하인 후보 중 거리가 가장 작은 하나를 선택한다.
+8. 두 자산의 전체·중앙 크롭 해시 네 조합 중 최소 PDQ Hamming distance가 20 이하인 후보 중 거리가 가장 작은 하나를 선택한다.
 9. 거리가 같으면 기존처럼 `collected_at`, 자산 ID 오름차순으로 결정한다.
 10. 후보가 있으면 검토 대기로, 없으면 정상 자산으로 등록한다.
 
-PDQ 생성, 후보 검색과 `index_missing_similarity_hashes()`는 `media_kind = 'image'`인 자산만 대상으로 한다. 영상과 다른 비이미지 자산은 이번 유사도 시스템에 참여하지 않으며 PDQ 생성 실패로 집계하지 않는다. 기존 스키마에 비이미지 자산의 과거 `perceptual_hash_error`가 있더라도 v25 이후 백그라운드 인덱서가 이를 다시 시도하지 않는다.
+PDQ 생성, 후보 검색과 `index_missing_similarity_hashes()`는 `media_kind IN ('image', 'gif')`인 자산만 대상으로 한다. 영상 자산은 이번 유사도 시스템에 참여하지 않으며 PDQ 생성 실패로 집계하지 않는다. 기존 스키마에 영상 자산의 과거 `perceptual_hash_error`가 있더라도 v25 이후 백그라운드 인덱서가 이를 다시 시도하지 않는다.
 
 품질이 낮은 이미지를 정상 수집하는 것은 false negative를 허용하는 대신 신뢰할 수 없는 해시가 검토 대기를 오염시키지 않도록 하는 고정 정책이다. 정확한 중복은 PDQ 품질과 무관하게 SHA-256으로 계속 차단된다.
 
@@ -116,7 +117,7 @@ PDQ 생성, 후보 검색과 `index_missing_similarity_hashes()`는 `media_kind 
 
 `0025_pdq_similarity.sql`과 DB 등록을 추가해 스키마를 25로 올린다. 기존 마이그레이션 전 검증 백업을 그대로 사용한다.
 
-`assets`에는 nullable `perceptual_hash_quality INTEGER`를 추가하고 값이 있으면 0~100인지 검사한다. 기존 `perceptual_hash` BLOB은 컬럼을 늘리지 않고 32바이트 PDQ 저장소로 재사용한다.
+`assets`에는 nullable `perceptual_hash_quality INTEGER`를 추가하고 값이 있으면 0~100인지 검사한다. 기존 `perceptual_hash` BLOB은 컬럼을 늘리지 않고 전체·중앙 크롭의 32바이트 PDQ 두 개를 이어 붙인 64바이트 저장소로 재사용한다. 이 두 번째 해시는 실측에서 중앙 5% 크롭 거리 84와 작은 모서리 워터마크 거리 62가 엄격한 단일 해시 임계값 20을 넘은 문제를 임계값 완화 없이 해결한다.
 
 `similarity_reviews`는 SQLite의 기존 거리 CHECK를 바꿀 수 없으므로 같은 트랜잭션에서 새 테이블로 재작성한다.
 
@@ -128,23 +129,24 @@ PDQ 생성, 후보 검색과 `index_missing_similarity_hashes()`는 `media_kind 
 - 현행 `candidate_asset_id TEXT UNIQUE`의 전역 UNIQUE 의미를 그대로 보존한다. 이를 열린 검토에만 적용되는 partial unique 제약으로 바꾸지 않는다.
 - 외래키와 `ON DELETE SET NULL`, 상태 CHECK와 `similarity_reviews_by_status` 인덱스를 유지한다.
 
-모든 자산의 기존 `perceptual_hash`와 새 `perceptual_hash_quality`는 NULL로 초기화한다. 기존 `perceptual_hash_error`도 NULL로 초기화해 이미지 자산의 과거 디코딩 실패를 새 Implementation에서 한 번 다시 시도할 수 있게 한다. 이후 `index_missing_similarity_hashes()`는 `status = 'normal' AND media_kind = 'image'`인 자산만 50개씩 처리하므로 비이미지 자산은 재시도되지 않는다.
+모든 자산의 기존 `perceptual_hash`와 새 `perceptual_hash_quality`는 NULL로 초기화한다. 기존 `perceptual_hash_error`도 NULL로 초기화해 이미지와 GIF 자산의 과거 디코딩 실패를 새 Implementation에서 한 번 다시 시도할 수 있게 한다. 이후 `index_missing_similarity_hashes()`는 `status = 'normal' AND media_kind IN ('image', 'gif')`인 자산만 50개씩 처리하므로 영상 자산은 재시도되지 않는다.
 
-기존 열린 dHash 검토는 자동으로 승인, 삭제 또는 재분류하지 않는다. 사용자 결정 전 자산 상태를 코드가 바꾸지 않는 ADR-0007 원칙을 따른다. 해당 후보가 이후 `keep_both`로 정상화되어 해시가 비어 있으면 이미지 자산인 경우에만 기존 백그라운드 인덱서가 PDQ를 생성한다.
+기존 열린 dHash 검토는 자동으로 승인, 삭제 또는 재분류하지 않는다. 사용자 결정 전 자산 상태를 코드가 바꾸지 않는 ADR-0007 원칙을 따른다. 해당 후보가 이후 `keep_both`로 정상화되어 해시가 비어 있으면 이미지 또는 GIF 자산인 경우에만 기존 백그라운드 인덱서가 PDQ를 생성한다.
 
 ## 8. 오류와 복구
 
 - PDQ 품질 50 미만은 오류가 아니라 신뢰도 부족 상태다. 해시와 품질은 저장하되 후보 검색에서 제외한다.
+- PDQ가 지원하지 않는 5픽셀 미만의 유효한 초소형 이미지는 정상 수집하되 즉시 유사도 판정에서는 제외한다. 이후 백그라운드 인덱서가 `unsupported_image`를 기록해 반복 시도를 막는다.
 - 디코딩 또는 PDQ 생성이 실패하면 기존 공개 오류 코드 흐름으로 `perceptual_hash_error`를 기록한다.
-- 비이미지 자산은 PDQ 생성 대상이 아니며 `perceptual_hash_error`의 실패 집계에도 포함하지 않는다.
-- 잘못된 길이의 저장 해시는 `InvalidPerceptualHash`로 거부한다. PDQ 행은 정확히 32바이트여야 한다.
+- 영상 자산은 PDQ 생성 대상이 아니며 `perceptual_hash_error`의 실패 집계에도 포함하지 않는다.
+- 잘못된 길이의 저장 해시는 `InvalidPerceptualHash`로 거부한다. PDQ 행은 정확히 64바이트여야 한다.
 - 일부 기존 이미지 해시가 아직 재생성되지 않았어도 완전 중복 검사와 정상 수집은 계속 동작한다.
 - 마이그레이션이나 foreign-key 검증이 실패하면 라이브러리를 열지 않고 기존 pre-migration snapshot을 남긴다.
 - 개발 검증은 임시 라이브러리에서만 수행한다. `C:\New_lakomics_assets`를 여는 첫 릴리즈 실행은 별도 실행 승인 뒤 진행한다.
 
 ## 9. 성능
 
-후보 검색은 SQLite에서 정상 이미지의 ID, 32바이트 해시, 품질, 너비와 높이를 읽고 Rust에서 종횡비와 네 번의 64비트 XOR/popcount를 계산한다. 50,000개 후보에서 릴리즈 빌드 기준 1초 이내라는 기존 목표를 유지한다.
+후보 검색은 SQLite에서 정상 이미지의 ID, 64바이트 해시 묶음, 품질, 너비와 높이를 읽고 Rust에서 종횡비와 네 해시 조합의 XOR/popcount를 계산한다. 50,000개 후보에서 릴리즈 빌드 기준 1초 이내라는 기존 목표를 유지한다.
 
 현재 라이브러리 규모에서는 이미지 디코딩과 PDQ 생성이 검색보다 비싸다. 기존 50개 백그라운드 배치와 즉시 저장 방식을 유지해 앱 재시작 후 이어서 처리한다. 별도 ANN, 캐시 테이블, 병렬 작업 큐는 측정된 실패가 생기기 전에는 추가하지 않는다.
 
@@ -154,7 +156,7 @@ PDQ 생성, 후보 검색과 `index_missing_similarity_hashes()`는 `media_kind 
 
 구현 순서는 다음 검증 게이트를 따른다.
 
-1. `pdq-rs = "=1.0.0"` 의존성만 추가한 최소 fingerprint 스파이크가 Rust 타깃 테스트와 Windows release build를 통과한다.
+1. `pdqhash = "=0.1.1"` 의존성만 추가한 최소 fingerprint 스파이크가 Rust 타깃 테스트와 Windows release build를 통과한다.
 2. 활성 실사용 라이브러리를 수정하지 않는 읽기 전용 분석으로 PDQ 품질 분포를 측정한다. 품질 50 미만 비율이 5%를 넘으면 representative sample을 확인하고 설계를 재검토한 뒤에만 스키마 변경으로 진행한다.
 3. 위 두 게이트를 통과한 뒤 v25 마이그레이션과 실제 similarity 교체를 구현한다.
 
@@ -165,8 +167,8 @@ Rust의 가장 관련 있는 라이브러리 테스트로 다음을 증명한다
 - 흰 배경과 큰 어두운 실루엣 때문에 dHash가 가까워지는 서로 다른 두 합성 이미지는 거리 20을 넘는다.
 - 종횡비 factor가 1.15를 넘는 쌍은 해시 거리와 무관하게 제외된다.
 - 단색 또는 저정보 fixture는 품질 50 미만으로 후보 검색에서 제외된다.
-- 비이미지 자산은 백그라운드 PDQ 인덱싱 대상과 실패 집계에서 제외된다.
-- 32바이트가 아닌 저장 해시는 안정적인 오류가 된다.
+- 영상 자산은 백그라운드 PDQ 인덱싱 대상과 실패 집계에서 제외되고 GIF는 포함된다.
+- 64바이트가 아닌 저장 해시 묶음은 안정적인 오류가 된다.
 - 거리, 수집일, 자산 ID 순서의 후보 선택이 유지된다.
 - v24 라이브러리의 자산과 해결·열린 검토를 v25로 옮긴 뒤 기록과 외래키가 보존되고 해시만 초기화된다.
 - v24→v25 마이그레이션 뒤에도 `candidate_asset_id`의 현행 전역 UNIQUE 의미가 보존된다.
@@ -189,13 +191,15 @@ Rust의 가장 관련 있는 라이브러리 테스트로 다음을 증명한다
 
 ## 12. 완료 기준
 
-- `pdq-rs` 최소 스파이크와 Windows release build가 스키마 변경 전에 성공한다.
+- `pdqhash` 최소 스파이크와 Windows release build가 스키마 변경 전에 성공한다.
 - 활성 실사용 라이브러리의 PDQ 품질 분포가 읽기 전용으로 측정되어 기록된다.
 - 품질 50 미만 비율이 5%를 넘는 경우 대표 표본 검토와 설계 재확인이 완료된다.
 - 합성 positive fixture가 PDQ 거리, 품질과 종횡비 정책을 통과한다.
 - 합성 dHash 충돌 negative fixture가 거부된다.
-- 비이미지 자산이 PDQ 인덱싱과 실패 집계에서 제외된다.
+- 영상 자산이 PDQ 인덱싱과 실패 집계에서 제외되고 GIF는 포함된다.
 - 실사용 라이브러리의 보존된 `keep_both` 네 쌍이 읽기 전용 PDQ 분석에서 모두 거부된다.
+
+2026-08-28 읽기 전용 실측에서는 이미지/GIF 7,627개가 모두 성공했고 품질 50 미만은 0개였다. 품질 구간은 100점 7,617개, 90~99점 5개, 80~89점 4개, 70~79점 1개였다. 보존된 `keep_both` 네 쌍의 최소 거리는 108, 112, 108, 108로 모두 임계값 20을 충분히 넘었다.
 - v24→v25 마이그레이션 테스트가 기록 보존, 현행 `candidate_asset_id` 전역 UNIQUE 보존과 해시 무효화를 증명한다.
 - 50,000개 검색 성능 목표를 유지한다.
 - 타깃 Rust 검증과 Windows 릴리즈 빌드가 성공한다.

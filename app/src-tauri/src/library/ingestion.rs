@@ -19,6 +19,7 @@ use windows_sys::Win32::Storage::FileSystem::{
 use super::{
     asset_metadata::normalize_source_metadata,
     error::LibraryError,
+    image_fingerprint::ImageFingerprint,
     models::{
         AssetSummary, ImportSource, IngestMediaRequest, IngestOutcome, MediaSummary,
         SetAssetClassification, VideoPreparationState,
@@ -142,9 +143,14 @@ impl Library {
         let (perceptual_hash, similar) = if skip_similarity {
             (None, None)
         } else {
-            let hash = perceptual_hash_from_file(pending.owned_file(&staging_path)?)?;
-            let similar = self.find_similar_asset(hash)?;
-            (Some(hash), similar)
+            match perceptual_hash_from_file(pending.owned_file(&staging_path)?) {
+                Ok(fingerprint) => {
+                    let similar = self.find_similar_asset(&fingerprint, (width, height))?;
+                    (Some(fingerprint), similar)
+                }
+                Err(LibraryError::UnsupportedImage) => (None, None),
+                Err(error) => return Err(error),
+            }
         };
 
         let prefix = &content_hash[..2];
@@ -362,7 +368,7 @@ impl Library {
         &self,
         asset: &AssetSummary,
         content_hash: &str,
-        perceptual_hash: Option<u64>,
+        perceptual_hash: Option<ImageFingerprint>,
         format: ImageFormat,
         classification_id: Option<&str>,
         registration: &Registration,
@@ -377,12 +383,13 @@ impl Library {
             "INSERT INTO assets (
                 id, content_hash, media_kind, title, original_name, relative_path,
                 thumbnail_relative_path, byte_size, width, height, source_url,
-                collected_at, favorite, status, perceptual_hash, source_published_at,
+                collected_at, favorite, status, perceptual_hash, perceptual_hash_quality,
+                source_published_at,
                 creator_name, creator_handle, creator_url, import_source, import_batch_id,
                 original_modified_at
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-                ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22
+                ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23
             )",
             params![
                 asset.id,
@@ -399,7 +406,8 @@ impl Library {
                 asset.collected_at,
                 i64::from(asset.favorite),
                 status,
-                perceptual_hash.map(|h| h.to_be_bytes().to_vec()),
+                perceptual_hash.map(|fingerprint| fingerprint.to_stored_bytes().to_vec()),
+                perceptual_hash.map(|fingerprint| fingerprint.quality),
                 asset.source_published_at.as_deref(),
                 asset.creator_name.as_deref(),
                 asset.creator_handle.as_deref(),
@@ -423,8 +431,9 @@ impl Library {
         {
             transaction.execute(
                 "INSERT INTO similarity_reviews (
-                    id, existing_asset_id, candidate_asset_id, distance, status, created_at
-                 ) VALUES (?1, ?2, ?3, ?4, 'open', ?5)",
+                    id, existing_asset_id, candidate_asset_id, distance,
+                    fingerprint_kind, status, created_at
+                 ) VALUES (?1, ?2, ?3, ?4, 'pdq-v1', 'open', ?5)",
                 params![
                     review_id,
                     existing_asset_id,
@@ -1189,16 +1198,37 @@ mod tests {
     }
 
     fn vertical_stripes(width: u32, height: u32) -> DynamicImage {
-        DynamicImage::ImageRgb8(ImageBuffer::from_fn(width, height, |x, _| {
-            let light = (x / 32) % 2 == 0;
-            Rgb(if light { [240, 180, 30] } else { [20, 60, 180] })
-        }))
+        scene_fixture(width, height, true)
     }
 
     fn horizontal_stripes(width: u32, height: u32) -> DynamicImage {
-        DynamicImage::ImageRgb8(ImageBuffer::from_fn(width, height, |_, y| {
-            let light = (y / 32) % 2 == 0;
-            Rgb(if light { [240, 180, 30] } else { [20, 60, 180] })
+        scene_fixture(width, height, false)
+    }
+
+    fn scene_fixture(width: u32, height: u32, vertical: bool) -> DynamicImage {
+        DynamicImage::ImageRgb8(ImageBuffer::from_fn(width, height, |x, y| {
+            let nx = x as f32 / width as f32;
+            let ny = y as f32 / height as f32;
+            let mut color = [
+                (35.0 + nx * 90.0) as u8,
+                (45.0 + ny * 100.0) as u8,
+                (170.0 - nx * 55.0) as u8,
+            ];
+            let featured = if vertical {
+                (0.18..0.43).contains(&nx) && (0.12..0.88).contains(&ny)
+            } else {
+                (0.12..0.88).contains(&nx) && (0.18..0.43).contains(&ny)
+            };
+            if featured {
+                color = [235, 75, 35];
+            }
+            if (0.55..0.90).contains(&nx) && (0.08..0.20).contains(&ny) {
+                color = [245, 205, 35];
+            }
+            if (nx - 0.72).powi(2) + (ny - 0.68).powi(2) < 0.085 {
+                color = [25, 215, 135];
+            }
+            Rgb(color)
         }))
     }
 
@@ -1512,7 +1542,7 @@ mod tests {
                 review_id,
                 "review".into(),
                 Some("https://example.com/new".into()),
-                8
+                64
             )
         );
         assert_eq!(

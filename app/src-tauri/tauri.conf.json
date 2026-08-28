@@ -34,7 +34,8 @@
     "resources": {
       "binaries/*.dll": ".",
       "binaries/ffmpeg-license/*": "ffmpeg-license/",
-      "binaries/THIRD-PARTY-NOTICES.md": "ffmpeg-license/THIRD-PARTY-NOTICES.md"
+      "binaries/THIRD-PARTY-NOTICES.md": "ffmpeg-license/THIRD-PARTY-NOTICES.md",
+      "licenses/*": "licenses/"
     },
     "icon": [
       "icons/32x32.png",

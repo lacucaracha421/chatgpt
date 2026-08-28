@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 24;
+pub(crate) const SCHEMA_VERSION: i64 = 25;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -43,6 +43,7 @@ const GAME_PROVIDER_DETAIL_SCHEMA: &str =
     include_str!("../../migrations/0023_game_provider_detail.sql");
 const MOVIE_PROVIDER_DETAIL_SCHEMA: &str =
     include_str!("../../migrations/0024_movie_provider_detail.sql");
+const PDQ_SIMILARITY_SCHEMA: &str = include_str!("../../migrations/0025_pdq_similarity.sql");
 
 pub fn open_database(path: &Path) -> Result<Connection, LibraryError> {
     let connection = Connection::open(path)?;
@@ -58,7 +59,7 @@ pub fn initialize_database(path: &Path) -> Result<Connection, LibraryError> {
     let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
     match version {
         SCHEMA_VERSION => {}
-        version @ 0..=23 => {
+        version @ 0..=24 => {
             if version > 0 {
                 let root = path
                     .parent()
@@ -149,6 +150,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         if version <= 23 {
             transaction.execute_batch(MOVIE_PROVIDER_DETAIL_SCHEMA)?;
         }
+        if version <= 24 {
+            transaction.execute_batch(PDQ_SIMILARITY_SCHEMA)?;
+        }
         transaction.commit()?;
         Ok::<(), LibraryError>(())
     })();
@@ -165,6 +169,116 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn migrates_v24_similarity_state_to_pdq_v25() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        for schema in [
+            INITIAL_SCHEMA,
+            VAULT_SAFETY_SCHEMA,
+            SIMILARITY_REVIEW_SCHEMA,
+            VIDEO_MEDIA_SCHEMA,
+            MANGA_SCHEMA,
+            MANGA_MODIFIED_SCHEMA,
+            CLASSIFICATION_APPEARANCE_SCHEMA,
+            ASSET_ALBUMS_SCHEMA,
+            ASSET_SOURCE_PROVENANCE_SCHEMA,
+            COLLECTIONS_SCHEMA,
+            COLLECTIONS_TYPED_SCHEMA,
+            COLLECTION_SOURCE_SCHEMA,
+            COLLECTION_EXTERNAL_BINDINGS_SCHEMA,
+            COLLECTION_WORK_ARTWORKS_SCHEMA,
+            COLLECTION_VOLUMES_SCHEMA,
+            ALADIN_VOLUME_SOURCES_SCHEMA,
+            ALADIN_RELEASE_WATCH_SCHEMA,
+            ONLINE_CATALOG_SCHEMA,
+            ONLINE_CATALOG_BOOKMARKS_SCHEMA,
+            LEGACY_PACKAGE_IMPORTS_SCHEMA,
+            COLLECTION_LEGACY_KIND_SCHEMA,
+            COLLECTION_FOUNDATION_SCHEMA,
+            GAME_PROVIDER_DETAIL_SCHEMA,
+            MOVIE_PROVIDER_DETAIL_SCHEMA,
+        ] {
+            connection.execute_batch(schema).unwrap();
+        }
+        connection
+            .execute_batch(
+                "INSERT INTO assets (
+                    id, content_hash, media_kind, original_name, relative_path,
+                    thumbnail_relative_path, byte_size, width, height, collected_at,
+                    status, perceptual_hash, perceptual_hash_error
+                 ) VALUES
+                    ('existing', 'hash-existing', 'image', 'existing.png', 'assets/existing.png',
+                     'thumbnails/existing.webp', 1, 100, 100, '2026-08-01T00:00:00Z',
+                     'normal', X'0102030405060708', NULL),
+                    ('candidate', 'hash-candidate', 'image', 'candidate.png', 'assets/candidate.png',
+                     'thumbnails/candidate.webp', 1, 100, 100, '2026-08-02T00:00:00Z',
+                     'review', X'1112131415161718', 'unsupported_image'),
+                    ('gif', 'hash-gif', 'gif', 'moving.gif', 'assets/moving.gif',
+                     'thumbnails/moving.webp', 1, 100, 100, '2026-08-03T00:00:00Z',
+                     'normal', X'2122232425262728', NULL),
+                    ('video', 'hash-video', 'video', 'clip.mp4', 'assets/clip.mp4',
+                     NULL, 1, 100, 100, '2026-08-04T00:00:00Z',
+                     'normal', NULL, 'unsupported_image');
+
+                 INSERT INTO similarity_reviews (
+                    id, existing_asset_id, candidate_asset_id, distance,
+                    status, decision, created_at, resolved_at
+                 ) VALUES
+                    ('open-review', 'existing', 'candidate', 2,
+                     'open', NULL, '2026-08-02T00:00:00Z', NULL),
+                    ('resolved-review', 'existing', 'gif', 6,
+                     'resolved', 'keep_both', '2026-08-03T00:00:00Z', '2026-08-04T00:00:00Z');",
+            )
+            .unwrap();
+
+        migrate_to_latest(&mut connection, 24).unwrap();
+
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            25,
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM similarity_reviews WHERE fingerprint_kind = 'dhash-v1'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            2,
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM assets
+                     WHERE perceptual_hash IS NOT NULL
+                        OR perceptual_hash_quality IS NOT NULL
+                        OR perceptual_hash_error IS NOT NULL",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0,
+        );
+        assert!(connection
+            .execute(
+                "INSERT INTO similarity_reviews (
+                    id, existing_asset_id, candidate_asset_id, distance,
+                    fingerprint_kind, status, created_at
+                 ) VALUES ('duplicate', 'existing', 'candidate', 20,
+                           'pdq-v1', 'open', '2026-08-05T00:00:00Z')",
+                [],
+            )
+            .is_err());
+        assert!(!connection
+            .prepare("PRAGMA foreign_key_check")
+            .unwrap()
+            .exists([])
+            .unwrap());
+    }
 
     #[test]
     fn opens_a_routine_connection_while_another_connection_is_writing() {
@@ -416,7 +530,7 @@ mod tests {
             connection
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
-            24
+            SCHEMA_VERSION
         );
     }
 
