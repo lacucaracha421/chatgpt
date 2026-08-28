@@ -1515,6 +1515,20 @@ pub async fn list_collection_volumes(
 }
 
 #[tauri::command]
+pub async fn import_collection_artworks(
+    collection_id: String,
+    state: State<'_, AppState>,
+) -> Result<u64, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.import_local_collection_artworks(&collection_id)
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub async fn sync_mangadex_volume_covers(
     collection_id: String,
     state: State<'_, AppState>,

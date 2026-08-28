@@ -763,6 +763,7 @@ export interface LibraryGateway {
   getCollectionSourceRoot(): Promise<string | null>;
   setCollectionSourceRoot(path: string | null): Promise<number>;
   listCollectionCovers(collectionId: string): Promise<CollectionCover[]>;
+  importCollectionArtworks(collectionId: string): Promise<number>;
   listCollectionVolumes(collectionId: string): Promise<CollectionVolume[]>;
   syncMangaDexVolumeCovers(collectionId: string): Promise<MangaDexVolumeSyncResult>;
 }

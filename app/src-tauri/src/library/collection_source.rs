@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::collections::BTreeSet;
 use std::fs;
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
@@ -10,9 +11,12 @@ use sha2::{Digest, Sha256};
 
 use super::error::LibraryError;
 use super::models::CollectionCover;
+use super::work_artwork::WorkArtworkKind;
 use super::{Library, MediaResponse};
 
 const COVERS_DIR: &str = "covers";
+const ARTWORKS_DIR: &str = "artworks";
+const BACKDROPS_DIR: &str = "backdrops";
 
 /// 레거시 book 루트는 유형별 하위 폴더(games/comics/movies)로 구성되어 있고,
 /// DB의 source_path는 폴더 이름만 저장하므로 직속 경로를 먼저 시도한 뒤 하위 폴더를 확인한다.
@@ -187,6 +191,12 @@ fn is_supported_image(path: &Path) -> bool {
         })
 }
 
+fn preferred_path_file_name(preferred_path: Option<&Path>) -> Option<String> {
+    preferred_path
+        .and_then(|path| path.file_name())
+        .map(|name| name.to_string_lossy().into_owned())
+}
+
 fn naturally_sorted_images(directory: &Path) -> Result<Vec<PathBuf>, LibraryError> {
     if !directory.is_dir() {
         return Ok(Vec::new());
@@ -300,6 +310,201 @@ impl Library {
             natural_compare(&a.file_name, &b.file_name)
         });
         Ok(covers)
+    }
+
+    /// 뷰어를 열 때 로컬 소스 폴더의 아트를 작품 아트웍으로 등록한다.
+    /// 첫 조회 때 한 번 import하고 이후에는 이미 등록된 아트웍을 재사용한다.
+    /// IGDB·TMDB처럼 프로바이더가 아트웍을 관리하는 컬렉션은 건드리지 않는다.
+    /// 반환값은 이번 호출에서 새로 등록한 아트웍 수다.
+    pub fn import_local_collection_artworks(
+        &self,
+        collection_id: &str,
+    ) -> Result<u64, LibraryError> {
+        let (collection_type, source_path) = {
+            let connection = self.connection()?;
+            connection
+                .query_row(
+                    "SELECT type, source_path FROM collections WHERE id = ?1",
+                    [collection_id],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+                )
+                .optional()?
+                .ok_or(LibraryError::CollectionNotFound)?
+        };
+        if !matches!(collection_type.as_str(), "game" | "movie") {
+            return Ok(0);
+        }
+        let Some(source_path) = source_path else {
+            return Ok(0);
+        };
+        let root = {
+            let connection = self.connection()?;
+            collection_source_root(&connection)?.ok_or(LibraryError::CollectionSourceRootNotSet)?
+        };
+        let collection_dir = resolve_collection_dir(&root, &source_path);
+        let provider_managed: bool = self.connection()?.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM collection_work_artworks
+                WHERE collection_id = ?1 AND provider != 'local'
+            )",
+            [collection_id],
+            |row| row.get(0),
+        )?;
+        if provider_managed {
+            return Ok(0);
+        }
+
+        let mut imported = 0u64;
+        let preferred_cover = info_cover(&collection_dir)?;
+        // covers가 비면 루트의 thumbnail.*을 표지 대용으로 쓴다.
+        let cover_directory = if naturally_sorted_images(&collection_dir.join(COVERS_DIR))?
+            .is_empty()
+        {
+            collection_dir.clone()
+        } else {
+            collection_dir.join(COVERS_DIR)
+        };
+        imported += self.import_local_artwork_files(
+            collection_id,
+            &cover_directory,
+            WorkArtworkKind::Cover,
+            if cover_directory == collection_dir {
+                "root"
+            } else {
+                "covers"
+            },
+            preferred_cover.as_deref(),
+        )?;
+        let (secondary_dir, secondary_kind) = if collection_type == "game" {
+            (ARTWORKS_DIR, WorkArtworkKind::Hero)
+        } else {
+            (BACKDROPS_DIR, WorkArtworkKind::Backdrop)
+        };
+        imported += self.import_local_artwork_files(
+            collection_id,
+            &collection_dir.join(secondary_dir),
+            secondary_kind,
+            secondary_dir,
+            None,
+        )?;
+        Ok(imported)
+    }
+
+    /// 한 디렉터리의 이미지를 지정한 종류의 작품 아트웍으로 등록한다.
+    /// 이미 등록된 파일과 판독할 수 없는 파일은 건너뛴다.
+    fn import_local_artwork_files(
+        &self,
+        collection_id: &str,
+        directory: &Path,
+        kind: WorkArtworkKind,
+        directory_label: &str,
+        preferred_path: Option<&Path>,
+    ) -> Result<u64, LibraryError> {
+        let images = naturally_sorted_images(directory)?
+            .into_iter()
+            // 루트 대체 import는 thumbnail.*만 대상으로 한다. info.txt 등
+            // 이미지가 아닌 파일은 naturally_sorted_images가 이미 걸러낸다.
+            .filter(|path| {
+                directory_label != "root"
+                    || path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|name| name.to_lowercase().starts_with("thumbnail."))
+            })
+            .collect::<Vec<_>>();
+        if images.is_empty() {
+            return Ok(0);
+        }
+        let existing: BTreeSet<String> = {
+            let connection = self.connection()?;
+            let mut statement = connection.prepare(
+                "SELECT provider_image_id FROM collection_work_artworks
+                 WHERE collection_id = ?1 AND provider = 'local'",
+            )?;
+            let rows = statement
+                .query_map([collection_id], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows.into_iter().collect()
+        };
+        let preferred_file_name = preferred_path_file_name(preferred_path);
+        let mut imported = 0u64;
+        let mut first_artwork_id: Option<String> = None;
+        let mut preferred_artwork_id: Option<String> = None;
+        for path in &images {
+            let file_name = path.file_name().unwrap_or_default().to_string_lossy();
+            let provider_image_id = format!("{directory_label}/{file_name}");
+            if existing.contains(&provider_image_id) {
+                continue;
+            }
+            let bytes = match fs::read(path) {
+                Ok(bytes) => bytes,
+                Err(source) => {
+                    return Err(LibraryError::ReadMedia {
+                        path: path.clone(),
+                        source,
+                    })
+                }
+            };
+            // 지원하지 않는 형식이나 크기 초과 파일은 나머지 import를 막지 않는다.
+            let Ok(prepared) = self.prepare_work_artwork(collection_id, &bytes) else {
+                continue;
+            };
+            let artwork_id = {
+                let mut connection = self.connection()?;
+                let transaction = connection.transaction()?;
+                let artwork_id = Library::insert_work_artwork_in_transaction(
+                    &transaction,
+                    collection_id,
+                    "local",
+                    &provider_image_id,
+                    kind,
+                    None,
+                    &prepared,
+                )?;
+                transaction.commit()?;
+                artwork_id
+            };
+            prepared.commit();
+            imported += 1;
+            if first_artwork_id.is_none() {
+                first_artwork_id = Some(artwork_id.clone());
+            }
+            if preferred_artwork_id.is_none()
+                && preferred_file_name
+                    .as_deref()
+                    .is_some_and(|name| name == file_name)
+            {
+                preferred_artwork_id = Some(artwork_id);
+            }
+        }
+        if imported > 0 {
+            let has_selected: bool = {
+                let connection = self.connection()?;
+                connection.query_row(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM collection_work_artworks
+                        WHERE collection_id = ?1 AND kind = ?2 AND selected = 1
+                    )",
+                    rusqlite::params![collection_id, kind.as_str()],
+                    |row| row.get(0),
+                )?
+            };
+            if !has_selected {
+                let mut connection = self.connection()?;
+                let transaction = connection.transaction()?;
+                Library::select_work_artwork_kind_in_transaction(
+                    &transaction,
+                    collection_id,
+                    preferred_artwork_id
+                        .as_deref()
+                        .or(first_artwork_id.as_deref())
+                        .ok_or(LibraryError::InvalidWorkArtwork)?,
+                    kind,
+                )?;
+                transaction.commit()?;
+            }
+        }
+        Ok(imported)
     }
 
     pub fn collection_cover_media(
@@ -584,6 +789,124 @@ mod tests {
             .collection_cover_media(COLLECTION_ID, "poster.png")
             .unwrap();
         assert_eq!(read_media(media), cover);
+    }
+
+    #[test]
+    fn import_local_artworks_registers_source_images_once() {
+        let (_temp, library, collection_dir) = source_library();
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE collections SET type = 'game' WHERE id = ?1",
+                [COLLECTION_ID],
+            )
+            .unwrap();
+        write_png(
+            &collection_dir.join(COVERS_DIR).join("poster_a.png"),
+            800,
+            1200,
+        );
+        write_png(
+            &collection_dir.join(COVERS_DIR).join("poster_b.png"),
+            800,
+            1200,
+        );
+        fs::write(collection_dir.join("info.txt"), "Cover: poster_b.png\n").unwrap();
+        fs::create_dir_all(collection_dir.join(ARTWORKS_DIR)).unwrap();
+        write_png(
+            &collection_dir.join(ARTWORKS_DIR).join("header_steam_1.png"),
+            920,
+            430,
+        );
+        fs::write(
+            collection_dir.join(COVERS_DIR).join("broken.png"),
+            b"not an image",
+        )
+        .unwrap();
+
+        let imported = library
+            .import_local_collection_artworks(COLLECTION_ID)
+            .unwrap();
+        assert_eq!(imported, 3);
+
+        let rows: Vec<(String, String, i64)> = library
+            .connection()
+            .unwrap()
+            .prepare(
+                "SELECT provider_image_id, kind, selected FROM collection_work_artworks
+                 WHERE collection_id = ?1 ORDER BY provider_image_id",
+            )
+            .unwrap()
+            .query_map([COLLECTION_ID], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                ("artworks/header_steam_1.png".into(), "hero".into(), 1),
+                ("covers/poster_a.png".into(), "cover".into(), 0),
+                // info.txt의 Cover 파일을 표지로 선택한다.
+                ("covers/poster_b.png".into(), "cover".into(), 1),
+            ]
+        );
+
+        let again = library
+            .import_local_collection_artworks(COLLECTION_ID)
+            .unwrap();
+        assert_eq!(again, 0);
+    }
+
+    #[test]
+    fn import_local_artworks_skips_provider_managed_collections() {
+        let (_temp, library, collection_dir) = source_library();
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE collections SET type = 'game' WHERE id = ?1",
+                [COLLECTION_ID],
+            )
+            .unwrap();
+        write_png(
+            &collection_dir.join(COVERS_DIR).join("poster.png"),
+            800,
+            1200,
+        );
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO collection_work_artworks (
+                    id, collection_id, provider, provider_image_id, kind, relative_path,
+                    mime_type, width, height, language, selected, created_at, updated_at
+                 ) VALUES (
+                    'art-igdb', ?1, 'igdb', 'cover-igdb', 'cover',
+                    'work-artwork/x/igdb.png', 'image/png', 100, 150, NULL, 1,
+                    '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z'
+                 )",
+                [COLLECTION_ID],
+            )
+            .unwrap();
+
+        let imported = library
+            .import_local_collection_artworks(COLLECTION_ID)
+            .unwrap();
+
+        assert_eq!(imported, 0);
+        let count: i64 = library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM collection_work_artworks WHERE collection_id = ?1",
+                [COLLECTION_ID],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
     }
 
     #[test]

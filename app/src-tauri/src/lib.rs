@@ -165,6 +165,7 @@ pub fn run() {
             commands::get_collection_source_root,
             commands::set_collection_source_root,
             commands::list_collection_covers,
+            commands::import_collection_artworks,
             commands::list_collection_volumes,
             commands::sync_mangadex_volume_covers,
         ])

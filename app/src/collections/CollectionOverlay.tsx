@@ -118,6 +118,22 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
   }, [gateway, collectionId, isManga]);
 
   useEffect(() => {
+    // 레거시 게임·영화는 로컬 소스 폴더의 표지·아트를 work artwork으로
+    // 지연 등록한다. 한 번 등록되면 이후 호출은 새 파일이 없으면 0을 반환한다.
+    if (!isGame && !isMovie) return;
+    let active = true;
+    void (async () => {
+      try {
+        const imported = await gateway.importCollectionArtworks(collectionId);
+        if (active && imported > 0) await onChangedRef.current();
+      } catch {
+        // 등록에 실패해도 뷰어는 소스 표지로 계속 동작한다.
+      }
+    })();
+    return () => { active = false; };
+  }, [gateway, collectionId, isGame, isMovie]);
+
+  useEffect(() => {
     if (!isManga) {
       setVolumes([]);
       setSelectedVolumeId(null);

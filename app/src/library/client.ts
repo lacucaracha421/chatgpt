@@ -245,6 +245,8 @@ export const libraryGateway: LibraryGateway = {
   getCollectionSourceRoot: () => invoke<string | null>("get_collection_source_root"),
   setCollectionSourceRoot: (path) => invoke<number>("set_collection_source_root", { path }),
   listCollectionCovers: (collectionId) => invoke<CollectionCover[]>("list_collection_covers", { collectionId }),
+  importCollectionArtworks: (collectionId) =>
+    invoke<number>("import_collection_artworks", { collectionId }),
   listCollectionVolumes: (collectionId) =>
     invoke<CollectionVolume[]>("list_collection_volumes", { collectionId }),
   syncMangaDexVolumeCovers: (collectionId) =>
