@@ -1,5 +1,6 @@
 import { useState, type PointerEvent } from "react";
 import type { CollectionSummary } from "../library/types";
+import { usePrivacy } from "../privacy/PrivacyContext";
 import { Menu } from "../shared/ui/Menu";
 
 export type GameCollectionDetailProps = {
@@ -30,6 +31,8 @@ export function GameCollectionDetail({
   onChangeArtwork,
 }: GameCollectionDetailProps) {
   const [lifted, setLifted] = useState(false);
+  const { privacyMode } = usePrivacy();
+  const heroVisible = Boolean(heroUrl) && !privacyMode;
 
   function clearTilt(button: HTMLButtonElement) {
     button.style.removeProperty("--game-package-tilt-x");
@@ -57,13 +60,13 @@ export function GameCollectionDetail({
   return (
     <article className="game-collection-detail" aria-label="게임 상세">
       <section
-        className={`game-collection-detail__hero${heroUrl ? "" : " game-collection-detail__hero--empty"}`}
+        className={`game-collection-detail__hero${heroVisible ? "" : " game-collection-detail__hero--empty"}`}
         aria-label="게임 대표 아트워크"
       >
-        {heroUrl && (
+        {heroVisible && (
           <img
             className="game-collection-detail__hero-art"
-            src={heroUrl}
+            src={heroUrl ?? undefined}
             alt={`${collection.name} 대표 아트워크`}
             draggable={false}
           />
@@ -86,7 +89,7 @@ export function GameCollectionDetail({
               <span className="game-collection-detail__package-shell" aria-hidden="true" />
               <span className="game-collection-detail__package-spine" aria-hidden="true" />
               <span className="game-collection-detail__package-front">
-                {coverUrl ? (
+                {coverUrl && !privacyMode ? (
                   <img src={coverUrl} alt={`${collection.name} 표지`} draggable={false} />
                 ) : (
                   <span className="game-collection-detail__package-placeholder" aria-hidden="true" />

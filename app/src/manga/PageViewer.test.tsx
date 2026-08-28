@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PrivacyProvider } from "../privacy/PrivacyContext";
 import { PageViewer } from "./PageViewer";
 
 afterEach(cleanup);
@@ -48,5 +49,22 @@ describe("PageViewer", () => {
 
     expect(Array.from(document.querySelectorAll(".manga-viewer__preload"), (image) => image.getAttribute("src")))
       .toEqual(["page-2", "page-4", "page-5", "page-6", "page-7", "page-8"]);
+  });
+
+  it("masks pages and skips preloading in privacy mode", () => {
+    render(<PrivacyProvider privacyMode setPrivacyMode={vi.fn()}>
+      <PageViewer
+        title="Remote"
+        pageUrls={Array.from({ length: 10 }, (_, index) => `page-${index + 1}`)}
+        initialPage={3}
+        sourceLabel="K-Hentai"
+        onPageChange={vi.fn()}
+        onClose={vi.fn()}
+      />
+    </PrivacyProvider>);
+
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("status", { name: "비공개 모드" })).toHaveLength(1);
+    expect(document.querySelectorAll(".manga-viewer__preload")).toHaveLength(0);
   });
 });

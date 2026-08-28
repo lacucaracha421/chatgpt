@@ -3,6 +3,8 @@ import * as RadixDialog from "@radix-ui/react-dialog";
 import type { KeyboardEvent, PointerEvent } from "react";
 import { workArtworkUrl } from "../assets/mediaUrl";
 import type { CollectionVolume } from "../library/types";
+import { usePrivacy } from "../privacy/PrivacyContext";
+import { Skeleton } from "../shared/ui/Skeleton";
 
 export type ViewableCollectionVolume = CollectionVolume & {
   coverArtworkId: string;
@@ -23,6 +25,7 @@ export function MangaCoverViewer({
   onActiveVolumeChange,
   onClose,
 }: MangaCoverViewerProps) {
+  const { privacyMode } = usePrivacy();
   const activeIndex = volumes.findIndex((volume) => volume.id === activeVolumeId);
   const active = volumes[activeIndex];
   if (!active) return null;
@@ -94,7 +97,11 @@ export function MangaCoverViewer({
               onPointerMove={handlePointerMove}
               onPointerLeave={resetPointer}
             >
-              <img src={workArtworkUrl(active.coverArtworkId)} alt={`${active.displayLabel}권 표지`} draggable={false} />
+              {privacyMode ? (
+                <Skeleton className="privacy-mask manga-cover-viewer__cover-mask" label="비공개 모드" />
+              ) : (
+                <img src={workArtworkUrl(active.coverArtworkId)} alt={`${active.displayLabel}권 표지`} draggable={false} />
+              )}
               <span className="manga-cover-viewer__glare" aria-hidden="true" />
             </div>
           </div>

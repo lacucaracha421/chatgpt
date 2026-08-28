@@ -292,6 +292,15 @@ describe("AssetGallery", () => {
     expect(screen.getByLabelText("video-1.webm 미리보기")).toBeInTheDocument();
   });
 
+  it("masks every tile with a skeleton and drops quick previews in privacy mode", async () => {
+    render(<AssetGallery items={[asset(0), videoAsset(1)]} privacyMode />);
+
+    await screen.findByRole("option", { name: "asset-0.png" });
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("status", { name: "비공개 모드" })).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: "asset-0.png 빠른 확대 미리보기" })).not.toBeInTheDocument();
+  });
+
   it("renders scrollbar date lines without a thumb", async () => {
     const getComputedStyle = vi.spyOn(window, "getComputedStyle").mockReturnValue({
       getPropertyValue: (name: string) => name === "--gallery-gap" ? "6px" : "",

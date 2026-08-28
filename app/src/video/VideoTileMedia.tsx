@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import type { AssetSummary } from "../library/types";
 import { playbackUrl, scrubFrameUrl, thumbnailUrl } from "../assets/mediaUrl";
 import { Button } from "../shared/ui/Button";
+import { Skeleton } from "../shared/ui/Skeleton";
 
 type VideoAsset = AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> };
-type Props = { asset: VideoAsset; active: boolean; onRequestActive(): void; onReleaseActive(): void; onRetry(): void };
+type Props = { asset: VideoAsset; active: boolean; onRequestActive(): void; onReleaseActive(): void; onRetry(): void; privacyMode?: boolean };
 
-export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive, onRetry }: Props) {
+export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive, onRetry, privacyMode = false }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hoverTimer = useRef<number | null>(null);
   const seekTimer = useRef<number | null>(null);
@@ -18,14 +19,14 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
     seekTimer.current = null;
   };
   useEffect(() => {
-    if (!active) return;
+    if (!active || privacyMode) return;
     const video = videoRef.current;
     if (!video) return;
     video.src = playbackUrl(asset.id);
     video.muted = true;
     void video.play().catch(() => undefined);
     return () => { video.pause(); video.removeAttribute("src"); video.load(); };
-  }, [active, asset.id]);
+  }, [active, asset.id, privacyMode]);
   useEffect(() => () => clearTimers(), []);
   const leave = () => { clearTimers(); setPreviewFrame(null); onReleaseActive(); };
   const scrub = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -44,6 +45,9 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
   }
   if (asset.media.preparationState === "failed") {
     return <div className="video-tile video-tile--failed"><span className="video-tile__status">미리보기 준비 실패</span><Button size="sm" onClick={(event) => { event.stopPropagation(); onRetry(); }}>다시 시도</Button></div>;
+  }
+  if (privacyMode) {
+    return <div className="video-tile video-tile--private"><Skeleton className="privacy-mask" label="비공개 모드" /></div>;
   }
   const alt = asset.title || asset.originalName;
   return <div className="video-tile" onPointerEnter={() => { if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current); hoverTimer.current = window.setTimeout(onRequestActive, 200); }} onPointerLeave={leave}>

@@ -5,6 +5,7 @@ import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { AladinConnection, CollectionCover, CollectionSummary, CollectionVolume, CreateCollection, IgdbConnection, MangaDexConnection, ReleaseWatchEvent, ReleaseWatchStatus, TmdbConnection, UpdateCollection } from "../library/types";
 import { ViewToolbar } from "../layout/ViewToolbar";
+import { usePrivacy } from "../privacy/PrivacyContext";
 import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
 import { Menu } from "../shared/ui/Menu";
@@ -33,6 +34,7 @@ type CollectionOverlayProps = {
 
 export function CollectionOverlay({ collectionId, collections, onExit, onChanged, onOpenSettings }: CollectionOverlayProps) {
   const { gateway } = useLibrary();
+  const { privacyMode } = usePrivacy();
   const [covers, setCovers] = useState<CollectionCover[] | null>(null);
   const [volumes, setVolumes] = useState<CollectionVolume[] | null>(null);
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
@@ -499,7 +501,7 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
         <>
           <div className="collection-overlay__body">
             <div className="collection-overlay__hero">
-              {covers === null ? (
+              {covers === null || privacyMode ? (
                 <Skeleton className="collection-overlay__hero-skeleton" label="표지를 불러오는 중" />
               ) : heroUrl ? (
                 <img

@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import type { LibraryGateway, SimilarityReviewSummary } from "../library/types";
 import { assetUrl } from "../assets/mediaUrl";
+import { PrivacyProvider } from "../privacy/PrivacyContext";
 import { SimilarityReviewBrowser } from "./SimilarityReviewBrowser";
 
 afterEach(cleanup);
@@ -72,6 +73,19 @@ it("uses the shared view toolbar with window controls", async () => {
   expect(await screen.findByRole("toolbar")).toBeInTheDocument();
   expect(container.querySelector(".view-toolbar")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "창 닫기" })).toBeInTheDocument();
+});
+
+it("masks both previews with skeletons in privacy mode", async () => {
+  const gateway = reviewGateway();
+  vi.mocked(gateway.listSimilarityReviews).mockResolvedValue(reviewPage([review("review-1")], 1));
+  render(<PrivacyProvider privacyMode setPrivacyMode={vi.fn()}>
+    <SimilarityReviewBrowser gateway={gateway} onCountChange={vi.fn()} onClose={vi.fn()} />
+  </PrivacyProvider>);
+
+  expect(await screen.findByText("candidate-review-1.png")).toBeInTheDocument();
+  expect(screen.queryByRole("img", { name: "기존 이미지" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("img", { name: "새 이미지" })).not.toBeInTheDocument();
+  expect(screen.getAllByRole("status", { name: "비공개 모드" })).toHaveLength(2);
 });
 
 function review(id: string): SimilarityReviewSummary {

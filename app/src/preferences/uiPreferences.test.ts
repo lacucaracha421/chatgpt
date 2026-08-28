@@ -30,6 +30,7 @@ describe("UI preferences", () => {
     const localStorage = storage();
     const value = {
       metadataVisible: false,
+      privacyMode: false,
       sidebarWidth: 240,
       expandedClassificationIds: ["a"],
       expandedAlbumIds: ["album-a"],
@@ -64,6 +65,7 @@ describe("UI preferences", () => {
 
     expect(loadUiPreferences(localStorage)).toEqual({
       metadataVisible: false,
+      privacyMode: false,
       sidebarWidth: 240,
       expandedClassificationIds: ["a"],
       expandedAlbumIds: [],
@@ -87,6 +89,7 @@ describe("UI preferences", () => {
 
     expect(loadUiPreferences(localStorage)).toEqual({
       metadataVisible: false,
+      privacyMode: false,
       sidebarWidth: 320,
       expandedClassificationIds: ["a"],
       expandedAlbumIds: [],
@@ -94,6 +97,15 @@ describe("UI preferences", () => {
       thumbnailRowHeight: 180,
       collectionType: "manga",
     });
+  });
+
+  it("restores privacy mode and replaces an invalid value with false", () => {
+    const localStorage = storage();
+    localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({ privacyMode: true }));
+    expect(loadUiPreferences(localStorage).privacyMode).toBe(true);
+
+    localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({ privacyMode: "on" }));
+    expect(loadUiPreferences(localStorage).privacyMode).toBe(false);
   });
 
   it("clamps sidebar width to the compact resize range", () => {

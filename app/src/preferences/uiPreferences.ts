@@ -5,6 +5,7 @@ export const UI_PREFERENCES_KEY = "lakomics.uiPreferences.v1";
 
 export type UiPreferences = {
   metadataVisible: boolean;
+  privacyMode: boolean;
   sidebarWidth: number;
   expandedClassificationIds: string[];
   expandedAlbumIds: string[];
@@ -15,6 +16,7 @@ export type UiPreferences = {
 
 export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   metadataVisible: true,
+  privacyMode: false,
   sidebarWidth: 208,
   expandedClassificationIds: [],
   expandedAlbumIds: [],
@@ -40,6 +42,10 @@ export function loadUiPreferences(storage: Storage = localStorage): UiPreference
       typeof value.metadataVisible === "boolean"
         ? value.metadataVisible
         : DEFAULT_UI_PREFERENCES.metadataVisible,
+    privacyMode:
+      typeof value.privacyMode === "boolean"
+        ? value.privacyMode
+        : DEFAULT_UI_PREFERENCES.privacyMode,
     sidebarWidth:
       typeof value.sidebarWidth === "number" && Number.isFinite(value.sidebarWidth)
         ? clampSidebarWidth(value.sidebarWidth)

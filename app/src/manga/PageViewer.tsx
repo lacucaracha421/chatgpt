@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { BookOpenIcon, ChevronLeftIcon, ChevronRightIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { usePrivacy } from "../privacy/PrivacyContext";
 import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
+import { Skeleton } from "../shared/ui/Skeleton";
 
 type PageViewerProps = {
   title: string;
@@ -13,6 +15,7 @@ type PageViewerProps = {
 };
 
 export function PageViewer({ title, pageUrls, initialPage, sourceLabel, onPageChange, onClose }: PageViewerProps) {
+  const { privacyMode } = usePrivacy();
   const pageCount = pageUrls.length;
   const [page, setPage] = useState(() => Math.max(1, Math.min(pageCount, initialPage)));
   const [spread, setSpread] = useState(false);
@@ -53,9 +56,11 @@ export function PageViewer({ title, pageUrls, initialPage, sourceLabel, onPageCh
         <div className={`manga-viewer__spread${spread ? " manga-viewer__spread--double" : ""}`}>
           {pages.map((value) => failedPages.has(value)
             ? <span key={value} className="manga-viewer__page-error">{value}페이지를 불러오지 못했습니다</span>
-            : <img key={value} className="manga-viewer__page" src={pageUrls[value - 1]} alt={`${title} ${value}페이지`} referrerPolicy="no-referrer" draggable={false} onError={() => setFailedPages((current) => new Set(current).add(value))} />)}
+            : privacyMode
+              ? <Skeleton key={value} className="privacy-mask manga-viewer__page" label="비공개 모드" />
+              : <img key={value} className="manga-viewer__page" src={pageUrls[value - 1]} alt={`${title} ${value}페이지`} referrerPolicy="no-referrer" draggable={false} onError={() => setFailedPages((current) => new Set(current).add(value))} />)}
         </div>
-        {preloadPages.filter((value) => !failedPages.has(value)).map((value) => <img key={`preload-${value}`} className="manga-viewer__preload" src={pageUrls[value - 1]} alt="" referrerPolicy="no-referrer" aria-hidden="true" />)}
+        {!privacyMode && preloadPages.filter((value) => !failedPages.has(value)).map((value) => <img key={`preload-${value}`} className="manga-viewer__preload" src={pageUrls[value - 1]} alt="" referrerPolicy="no-referrer" aria-hidden="true" />)}
       </div>
       <div className="manga-viewer__edges">
         <button type="button" className="manga-viewer__edge" aria-label="이전 페이지" disabled={page <= 1} onClick={() => move(prevPage(page))} />

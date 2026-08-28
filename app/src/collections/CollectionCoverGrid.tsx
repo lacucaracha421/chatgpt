@@ -1,5 +1,7 @@
 import { collectionCoverThumbnailUrl } from "../assets/mediaUrl";
 import type { CollectionCover } from "../library/types";
+import { usePrivacy } from "../privacy/PrivacyContext";
+import { Skeleton } from "../shared/ui/Skeleton";
 
 type CollectionCoverGridProps = {
   collectionId: string;
@@ -20,6 +22,7 @@ export function CollectionCoverGrid({
   onShelfFilterChange,
   onSelect,
 }: CollectionCoverGridProps) {
+  const { privacyMode } = usePrivacy();
   const visible = shelfFilter === null ? covers : covers.filter((cover) => cover.shelf === shelfFilter);
 
   return (
@@ -49,13 +52,17 @@ export function CollectionCoverGrid({
               aria-pressed={selectedFileName === cover.fileName}
               onClick={() => onSelect(cover.fileName)}
             >
-              <img
-                src={collectionCoverThumbnailUrl(collectionId, cover.fileName)}
-                alt={cover.volumeLabel}
-                loading="lazy"
-                decoding="async"
-                draggable={false}
-              />
+              {privacyMode ? (
+                <Skeleton className="privacy-mask collection-overlay__cover-mask" label="비공개 모드" />
+              ) : (
+                <img
+                  src={collectionCoverThumbnailUrl(collectionId, cover.fileName)}
+                  alt={cover.volumeLabel}
+                  loading="lazy"
+                  decoding="async"
+                  draggable={false}
+                />
+              )}
               <span className="collection-overlay__cover-label">{cover.volumeLabel}</span>
             </button>
           ))

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useLibrary } from "../library/LibraryContext";
 import type { MangaSeries } from "../library/types";
 import { mangaCoverUrl } from "../assets/mediaUrl";
+import { usePrivacy } from "../privacy/PrivacyContext";
 import { Button } from "../shared/ui/Button";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { Skeleton } from "../shared/ui/Skeleton";
@@ -140,10 +141,11 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
 }
 
 function MangaCoverGrid({ series, cardWidth, onOpenSeries }: { series: MangaSeries[]; cardWidth: number; onOpenSeries?: (series: MangaSeries) => void }) {
+  const { privacyMode } = usePrivacy();
   return <div className="manga-browser__grid" style={{ "--manga-card-width": `${cardWidth}px` } as CSSProperties}>
     {series.map((entry) => (
       <button key={entry.id} type="button" className="manga-browser__cover" onClick={() => onOpenSeries?.(entry)}>
-        <img src={mangaCoverUrl(entry.id)} alt={entry.title} loading="lazy" draggable={false} />
+        {privacyMode ? <Skeleton className="privacy-mask manga-browser__cover-mask" label="비공개 모드" /> : <img src={mangaCoverUrl(entry.id)} alt={entry.title} loading="lazy" draggable={false} />}
         <span className="manga-browser__cover-title">{entry.title}</span>
         <span className="manga-browser__cover-author">{entry.author} · {entry.pageCount}페이지</span>
       </button>

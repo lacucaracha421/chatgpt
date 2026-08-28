@@ -16,6 +16,8 @@ const baseProps = {
   sort: "newest" as AssetSort,
   directOnly: false,
   metadataVisible: true,
+  privacyMode: false,
+  onPrivacyModeChange: vi.fn(),
   thumbnailRowHeight: 180,
   selectedCount: 0,
   inspectorOpen: false,
@@ -42,7 +44,19 @@ it("shows everyday browsing controls when nothing is selected", () => {
   expect(screen.getByLabelText("정렬")).toBeVisible();
   expect(screen.getByLabelText("미리보기 크기")).toBeVisible();
   expect(screen.getByLabelText("정보 표시")).toBeVisible();
+  expect(screen.getByLabelText("비공개 모드")).toBeVisible();
   expect(screen.queryByText(/개 선택/)).not.toBeInTheDocument();
+});
+
+it("toggles privacy mode from the browsing controls", async () => {
+  const user = userEvent.setup();
+  const onPrivacyModeChange = vi.fn();
+  render(<AssetToolbar {...baseProps} privacyMode onPrivacyModeChange={onPrivacyModeChange} />);
+
+  const toggle = screen.getByRole("checkbox", { name: "비공개 모드" });
+  expect(toggle).toBeChecked();
+  await user.click(toggle);
+  expect(onPrivacyModeChange).toHaveBeenCalledWith(false);
 });
 
 it("replaces browsing controls with compact selection actions", async () => {

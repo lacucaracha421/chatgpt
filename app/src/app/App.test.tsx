@@ -372,7 +372,7 @@ describe("App", () => {
     const assetCalls = vi.mocked(libraryGateway.listAssets).mock.calls.length;
 
     await user.click(screen.getByRole("button", { name: "설정" }));
-    await user.click(await screen.findByRole("button", { name: "안전" }));
+    await user.click(await screen.findByRole("button", { name: "데이터 관리" }));
     await user.click(await screen.findByRole("button", { name: "이 시점으로 복구" }));
     await user.click(screen.getByRole("button", { name: "복구 시작" }));
 
@@ -393,7 +393,7 @@ describe("App", () => {
 
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
     await user.click(await screen.findByRole("button", { name: "설정" }));
-    await user.click(await screen.findByRole("button", { name: "안전" }));
+    await user.click(await screen.findByRole("button", { name: "데이터 관리" }));
     await user.click(await screen.findByRole("button", { name: "이 시점으로 복구" }));
     await user.click(screen.getByRole("button", { name: "복구 시작" }));
 
@@ -545,6 +545,7 @@ describe("App", () => {
     await waitFor(() =>
       expect(JSON.parse(localStorage.getItem(UI_PREFERENCES_KEY) ?? "{}")).toEqual({
         metadataVisible: true,
+        privacyMode: false,
         sidebarWidth: 272,
         expandedClassificationIds: [],
         expandedAlbumIds: [],

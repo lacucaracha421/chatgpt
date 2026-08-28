@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { igdbImagePreviewUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
+import { usePrivacy } from "../privacy/PrivacyContext";
 import type { CollectionSummary, IgdbGamePreview, IgdbImageCandidate, IgdbSearchResult } from "../library/types";
 import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
@@ -224,6 +225,7 @@ export function IgdbImportDialog({ open, target, onClose, onApplied, onOpenSetti
 }
 
 function SearchStep({ step, busy, onQuery, onSearch, onSelect }: { step: Extract<IgdbImportStep, { kind: "search" }>; busy: Busy; onQuery: (query: string) => void; onSearch: () => void; onSelect: (gameId: number) => void }) {
+  const { privacyMode } = usePrivacy();
   return <>
     <div className="igdb-import__search">
       <TextField label="게임 검색" type="search" value={step.query} onChange={(event) => onQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onSearch(); }} />
@@ -231,7 +233,7 @@ function SearchStep({ step, busy, onQuery, onSearch, onSelect }: { step: Extract
     </div>
     <div className="igdb-import__results" aria-label="IGDB 검색 결과">
       {step.results.map((result) => <button key={result.gameId} type="button" className="igdb-import__result" aria-pressed={step.selectedGameId === result.gameId} onClick={() => onSelect(result.gameId)}>
-        {result.cover && <img src={igdbImagePreviewUrl(result.cover.imageId, "cover")} alt={`${result.title} 표지`} />}
+        {result.cover && !privacyMode && <img src={igdbImagePreviewUrl(result.cover.imageId, "cover")} alt={`${result.title} 표지`} />}
         <span className="igdb-import__result-title">{result.title}</span>
         <small>{[result.releaseDate, result.developer].filter(Boolean).join(" · ")}</small>
       </button>)}
@@ -244,12 +246,13 @@ function PreviewSummary({ preview }: { preview: IgdbGamePreview }) {
 }
 
 function ArtworkStep({ kind, candidates, selectedId, onSelect }: { kind: "cover" | "hero"; candidates: IgdbImageCandidate[]; selectedId: string | null; onSelect: (imageId: string) => void }) {
+  const { privacyMode } = usePrivacy();
   return <section className="igdb-import__artwork" aria-label={kind === "cover" ? "표지 선택" : "대표 이미지 선택"}>
     <h3>{kind === "cover" ? "표지 선택" : "대표 이미지 선택"}</h3>
     {candidates.length === 0 ? <p className="igdb-import__muted">사용 가능한 이미지가 없습니다.</p> : <div className="igdb-import__candidates">
       {candidates.map((candidate, index) => <label key={candidate.imageId} className="igdb-import__candidate">
         <input type="radio" name={kind} value={candidate.imageId} checked={selectedId === candidate.imageId} aria-label={`${kind === "cover" ? "표지" : "대표 이미지"} ${index + 1} (${candidate.imageId})`} onChange={() => onSelect(candidate.imageId)} />
-        <img src={igdbImagePreviewUrl(candidate.imageId, kind === "cover" ? "cover" : "hero")} alt={`${kind === "cover" ? "표지" : "대표 이미지"} ${index + 1}`} />
+        {privacyMode ? <Skeleton className="privacy-mask igdb-import__candidate-mask" label="비공개 모드" /> : <img src={igdbImagePreviewUrl(candidate.imageId, kind === "cover" ? "cover" : "hero")} alt={`${kind === "cover" ? "표지" : "대표 이미지"} ${index + 1}`} />}
       </label>)}
     </div>}
   </section>;

@@ -2,6 +2,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import type { CollectionSummary } from "../library/types";
+import { PrivacyProvider } from "../privacy/PrivacyContext";
 import { MovieCollectionDetail } from "./MovieCollectionDetail";
 
 afterEach(cleanup);
@@ -37,7 +38,7 @@ const movie: CollectionSummary = {
   updatedAt: "t",
 };
 
-function renderDetail(overrides: Partial<React.ComponentProps<typeof MovieCollectionDetail>> = {}) {
+function renderDetail(overrides: Partial<React.ComponentProps<typeof MovieCollectionDetail>> = {}, privacyMode = false) {
   const props: React.ComponentProps<typeof MovieCollectionDetail> = {
     collection: movie,
     posterUrl: "poster-url",
@@ -53,7 +54,11 @@ function renderDetail(overrides: Partial<React.ComponentProps<typeof MovieCollec
     onChangeArtwork: vi.fn(),
     ...overrides,
   };
-  render(<MovieCollectionDetail {...props} />);
+  render(
+    <PrivacyProvider privacyMode={privacyMode} setPrivacyMode={vi.fn()}>
+      <MovieCollectionDetail {...props} />
+    </PrivacyProvider>,
+  );
   return props;
 }
 
@@ -67,6 +72,16 @@ it("renders a backdrop-led flat-poster movie detail with available metadata", ()
     expect(screen.getByText(value)).toBeVisible();
   }
   expect(document.querySelector(".movie-collection-detail__facts")).toHaveTextContent("1997-07-12 · 81분 · 곤 사토시 · 매드하우스 · 애니메이션 · 스릴러");
+});
+
+it("drops the backdrop image, poster, and skeleton in privacy mode", () => {
+  renderDetail({}, true);
+
+  const backdrop = screen.getByRole("region", { name: "영화 배경 이미지" });
+  expect(backdrop).not.toHaveStyle({ backgroundImage: 'url("backdrop-url")' });
+  expect(backdrop).toHaveClass("movie-collection-detail__backdrop--empty");
+  expect(screen.queryByRole("img", { name: "퍼펙트 블루 포스터" })).not.toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "퍼펙트 블루", level: 1 })).toBeInTheDocument();
 });
 
 it("uses a neutral backdrop and exposes only valid provider actions", async () => {

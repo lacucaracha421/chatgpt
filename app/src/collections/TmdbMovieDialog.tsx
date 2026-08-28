@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { tmdbImagePreviewUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
+import { usePrivacy } from "../privacy/PrivacyContext";
 import type { CollectionSummary, TmdbArtworkDecision, TmdbImageCandidate, TmdbMoviePreview, TmdbSearchResult } from "../library/types";
 import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
@@ -188,6 +189,7 @@ export function TmdbMovieDialog({ open, target, onClose, onOpenSettings, onAppli
 }
 
 function SearchStep({ step, results, busy, onQuery, onSearch, onSelect }: { step: SearchStep; results: TmdbSearchResult[]; busy: Busy; onQuery: (query: string) => void; onSearch: () => void; onSelect: (movieId: number) => void }) {
+  const { privacyMode } = usePrivacy();
   return <>
     <div className="tmdb-movie-dialog__search">
       <TextField label="영화 검색" type="search" value={step.query} onChange={(event) => onQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onSearch(); }} />
@@ -195,7 +197,7 @@ function SearchStep({ step, results, busy, onQuery, onSearch, onSelect }: { step
     </div>
     <div className="tmdb-movie-dialog__results" aria-label="TMDB 검색 결과">
       {results.map((result) => <button key={result.movieId} type="button" className="tmdb-movie-dialog__result" aria-pressed={step.selectedMovieId === result.movieId} onClick={() => onSelect(result.movieId)}>
-        {result.posterPath && <img src={tmdbImagePreviewUrl(result.posterPath, "poster")} alt={`${result.title} 포스터`} />}
+        {result.posterPath && !privacyMode && <img src={tmdbImagePreviewUrl(result.posterPath, "poster")} alt={`${result.title} 포스터`} />}
         <span className="tmdb-movie-dialog__result-title">{result.title}</span>
         {result.originalTitle && result.originalTitle !== result.title && <small>{result.originalTitle}</small>}
         <small>{result.releaseDate ?? "개봉일 정보 없음"}</small>
@@ -214,13 +216,14 @@ function PreviewSummary({ preview }: { preview: TmdbMoviePreview }) {
 }
 
 function ArtworkStep({ kind, artworkMode, decision, candidates, selectedPath, decided, onKeep, onSelect, onClear }: { kind: "poster" | "backdrop"; artworkMode: boolean; decision: TmdbArtworkDecision; candidates: TmdbImageCandidate[]; selectedPath: string | null; decided: boolean; onKeep: () => void; onSelect: (filePath: string) => void; onClear: () => void }) {
+  const { privacyMode } = usePrivacy();
   const label = kind === "poster" ? "포스터" : "배경";
   return <section className="tmdb-movie-dialog__artwork" aria-label={`${label} 선택`}>
     <div className="tmdb-movie-dialog__artwork-heading"><h3>{label} 선택</h3><div>{artworkMode && <Button type="button" size="sm" aria-pressed={decision.kind === "keep"} onClick={onKeep}>{label} 유지</Button>}<Button type="button" size="sm" aria-pressed={artworkMode ? decision.kind === "clear" : decided && selectedPath === null} onClick={onClear}>{artworkMode ? `${label} 제거` : `${label} 없이 가져오기`}</Button></div></div>
     {candidates.length === 0 ? <p className="tmdb-movie-dialog__muted">사용 가능한 이미지가 없습니다.</p> : <div className="tmdb-movie-dialog__candidates">
       {candidates.map((candidate, index) => <label key={candidate.filePath} className="tmdb-movie-dialog__candidate">
         <input type="radio" name={kind} value={candidate.filePath} checked={selectedPath === candidate.filePath} aria-label={`${label} ${index + 1} (${candidate.filePath})`} onChange={() => onSelect(candidate.filePath)} />
-        <img src={tmdbImagePreviewUrl(candidate.filePath, kind)} alt={`${label} ${index + 1}`} />
+        {privacyMode ? <Skeleton className="privacy-mask tmdb-movie-dialog__candidate-mask" label="비공개 모드" /> : <img src={tmdbImagePreviewUrl(candidate.filePath, kind)} alt={`${label} ${index + 1}`} />}
       </label>)}
     </div>}
   </section>;

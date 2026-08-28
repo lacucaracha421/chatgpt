@@ -33,6 +33,7 @@ import {
 } from "../preferences/uiPreferences";
 import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
+import { PrivacyProvider } from "../privacy/PrivacyContext";
 import { DragLayer } from "../shared/ui/DragLayer";
 import { pointerDragReducer, type ClassificationDropTarget, type InternalDragPayload, type PointerDragState } from "../shared/interaction/pointerDrag";
 import { SettingsView } from "../settings/SettingsView";
@@ -455,8 +456,8 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   }
 
   return (
-    <>
-      <div className="library-workspace" inert={maintenance !== null ? true : undefined}>
+    <PrivacyProvider privacyMode={preferences.privacyMode} setPrivacyMode={(privacyMode) => updatePreferences({ privacyMode })}>
+      <div className="library-workspace" data-privacy-mode={preferences.privacyMode ? "true" : undefined} inert={maintenance !== null ? true : undefined}>
         <AppShell
           sidebar={
             <ClassificationSidebar
@@ -498,6 +499,8 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     metadataImportRunning={metadataImportWorks.some((work) => work.status === "running")}
                     onCollectionsChanged={refreshCollections}
                     initialSection={view.section}
+                    privacyMode={preferences.privacyMode}
+                    onPrivacyModeChange={(privacyMode) => updatePreferences({ privacyMode })}
                   />
                 ) : view.kind === "similarity_review" ? (
                   <SimilarityReviewBrowser
@@ -543,6 +546,8 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     onCollectionsChanged={() => void refreshCollections()}
                     sort={preferences.assetSort}
                     metadataVisible={preferences.metadataVisible}
+                    privacyMode={preferences.privacyMode}
+                    onPrivacyModeChange={(privacyMode) => updatePreferences({ privacyMode })}
                     thumbnailRowHeight={preferences.thumbnailRowHeight}
                     refreshVersion={assetRefresh}
                     requestedAsset={requestedAsset}
@@ -574,7 +579,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
       <DropOverlay over={dropState.over} destinationName={entries.find((entry) => entry.id === dropClassificationId)?.name ?? "미분류"} />
       <DragLayer state={dragState} />
       {mangaViewer && <MangaViewer seriesId={mangaViewer.seriesId} title={mangaViewer.title} pageCount={mangaViewer.pageCount} onClose={() => setMangaViewer(null)} />}
-    </>
+    </PrivacyProvider>
   );
 }
 

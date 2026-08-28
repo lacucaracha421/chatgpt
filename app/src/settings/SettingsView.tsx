@@ -21,13 +21,15 @@ type SettingsViewProps = {
   metadataImportRunning?: boolean;
   onCollectionsChanged?: () => void;
   initialSection?: SettingsSection;
+  privacyMode?: boolean;
+  onPrivacyModeChange?: (privacyMode: boolean) => void;
 };
 
-type SettingsSection = "general" | "browser_extension" | "external_services" | "metadata_import" | "legacy_package" | "safety" | "shortcuts";
+type SettingsSection = "general" | "external_services" | "data" | "about";
 
 const METADATA_IMPORT_FOLDER_KEY = "lakomics.metadataImportFolder";
 
-export function SettingsView({ restoring, onRestore, onExit, onImportFolder, metadataImportRunning = false, onCollectionsChanged, initialSection }: SettingsViewProps) {
+export function SettingsView({ restoring, onRestore, onExit, onImportFolder, metadataImportRunning = false, onCollectionsChanged, initialSection, privacyMode = false, onPrivacyModeChange = () => undefined }: SettingsViewProps) {
   const { error: libraryError, gateway, library, openLibrary } = useLibrary();
   const [section, setSection] = useState<SettingsSection>(() => initialSection ?? "general");
   const [lastImportFolder, setLastImportFolder] = useState(() => localStorage.getItem(METADATA_IMPORT_FOLDER_KEY));
@@ -97,7 +99,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   }, [gateway]);
 
   useEffect(() => {
-    if (section !== "browser_extension") return;
+    if (section !== "about") return;
     let active = true;
     setExtensionConnection(null);
     setExtensionError(null);
@@ -152,7 +154,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
       }).catch((loadError: unknown) => {
         if (!controller.signal.aborted) setError(commandErrorMessage(loadError, "백업 목록을 불러오지 못했습니다."));
       });
-    }, section === "safety" ? 0 : 250);
+    }, section === "data" ? 0 : 250);
     return () => { controller.abort(); window.clearTimeout(timer); };
   }, [backupRetryVersion, gateway, section]);
 
@@ -430,17 +432,14 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     <div className="settings-view__body">
     <nav className="settings-view__navigation" aria-label="설정 구역">
       <Button className="settings-view__section-button" variant="ghost" aria-current={section === "general" ? "page" : undefined} onClick={() => setSection("general")}>일반</Button>
-      <Button className="settings-view__section-button" variant="ghost" aria-current={section === "browser_extension" ? "page" : undefined} onClick={() => setSection("browser_extension")}>브라우저 확장</Button>
       <Button className="settings-view__section-button" variant="ghost" aria-current={section === "external_services" ? "page" : undefined} onClick={() => setSection("external_services")}>외부 서비스</Button>
-      <Button className="settings-view__section-button" variant="ghost" aria-current={section === "metadata_import" ? "page" : undefined} onClick={() => setSection("metadata_import")}>메타데이터 가져오기</Button>
-      <Button className="settings-view__section-button" variant="ghost" aria-current={section === "legacy_package" ? "page" : undefined} onClick={() => setSection("legacy_package")}>레거시 패키지 가져오기</Button>
-      <Button className="settings-view__section-button" variant="ghost" aria-current={section === "safety" ? "page" : undefined} onClick={() => setSection("safety")}>안전</Button>
-      <Button className="settings-view__section-button" variant="ghost" aria-current={section === "shortcuts" ? "page" : undefined} onClick={() => setSection("shortcuts")}>단축키</Button>
+      <Button className="settings-view__section-button" variant="ghost" aria-current={section === "data" ? "page" : undefined} onClick={() => setSection("data")}>데이터 관리</Button>
+      <Button className="settings-view__section-button" variant="ghost" aria-current={section === "about" ? "page" : undefined} onClick={() => setSection("about")}>정보</Button>
     </nav>
     <div className="settings-view__content">
     {section === "general" && (
       <div className="settings-view__section">
-        <header className="settings-view__header"><h2>일반</h2><p>라이브러리와 외부 콘텐츠 폴더를 관리합니다.</p></header>
+        <header className="settings-view__header"><h2>일반</h2><p>라이브러리 폴더와 비공개 모드를 관리합니다.</p></header>
         <dl className="settings-view__property">
           <dt>라이브러리 폴더</dt>
           <dd className="settings-view__path">{library?.root ?? "알 수 없음"}</dd>
@@ -454,24 +453,22 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           <dd>{appVersion ?? "알 수 없음"}</dd>
         </dl>
         <dl className="settings-view__property">
+          <dt>비공개 모드</dt>
+          <dd className="settings-view__credential-status">모든 이미지와 영상을 자리표시로 가립니다. 화면 공유 중에 내용이 보이지 않습니다.</dd>
+          <Toggle aria-label="비공개 모드" checked={privacyMode} onChange={(event) => onPrivacyModeChange(event.target.checked)}>켜기</Toggle>
+        </dl>
+        <dl className="settings-view__property">
           <dt>망가 폴더</dt>
           <dd className="settings-view__path">{mangaRoot ?? "설정되지 않음"}</dd>
           <Button size="sm" onClick={() => void chooseMangaFolder()}>변경</Button>
           {mangaRootError && <dd className="settings-view__row-message" role="alert">{mangaRootError}</dd>}
         </dl>
-        <dl className="settings-view__property">
-          <dt>컬렉션 가져오기</dt>
-          <dd className="settings-view__path">book 폴더의 info.txt에서 게임/만화/영화 컬렉션을 가져옵니다.</dd>
-          <Button size="sm" disabled={bookImportRunning} onClick={() => void chooseBookImportFolder()}>
-            {bookImportRunning ? "가져오는 중…" : "폴더 선택"}
-          </Button>
-          {bookImportMessage && <dd className="settings-view__row-message" role="alert">{bookImportMessage}</dd>}
-        </dl>
       </div>
     )}
-    {section === "browser_extension" && (
+    {section === "about" && (
       <div className="settings-view__section">
-        <header className="settings-view__header"><h2>브라우저 확장</h2><p>Edge 확장 프로그램의 로컬 연결을 확인합니다.</p></header>
+        <header className="settings-view__header"><h2>정보</h2><p>확장 프로그램 연결과 단축키를 확인합니다.</p></header>
+        <h3 className="settings-view__group-title">브라우저 확장</h3>
         {extensionError && <Toast onDismiss={() => setExtensionError(null)}>{extensionError}</Toast>}
         {!extensionConnection && !extensionError ? (
           <Skeleton className="settings-view__skeleton" label="확장 프로그램 연결 정보를 불러오는 중" />
@@ -505,15 +502,122 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             {copyMessage && <Toast onDismiss={() => setCopyMessage(null)}>{copyMessage}</Toast>}
           </>
         ) : null}
+        <h3 className="settings-view__group-title">단축키</h3>
+        <table className="settings-view__table">
+          <thead><tr><th scope="col">단축키</th><th scope="col">동작</th></tr></thead>
+          <tbody>
+            {SHORTCUTS.map((shortcut) => <tr key={shortcut.keys}><td><kbd>{shortcut.keys}</kbd></td><td>{shortcut.action}</td></tr>)}
+          </tbody>
+        </table>
+        <h3 className="settings-view__group-title">버튼 설명</h3>
+        <table className="settings-view__table">
+          <thead><tr><th scope="col">버튼</th><th scope="col">용도</th></tr></thead>
+          <tbody>
+            {BUTTONS.map((button) => <tr key={button.name}><td>{button.name}</td><td>{button.purpose}</td></tr>)}
+          </tbody>
+        </table>
       </div>
     )}
         {section === "external_services" && (
       <div className="settings-view__section">
-        <header className="settings-view__header"><h2>외부 서비스</h2><p>온라인 콘텐츠와 단행본 정보를 가져올 서비스를 관리합니다.</p></header>
+        <header className="settings-view__header"><h2>외부 서비스</h2><p>온라인 서비스 연결과 자격 증명을 관리합니다.</p></header>
         {aladinError && <Toast onDismiss={() => setAladinError(null)}>{aladinError}</Toast>}
         {igdbError && <Toast onDismiss={() => setIgdbError(null)}>{igdbError}</Toast>}
         {tmdbError && <Toast onDismiss={() => setTmdbError(null)}>{tmdbError}</Toast>}
         {catalogError && <Toast onDismiss={() => setCatalogError(null)}>{catalogError}</Toast>}
+        <h3 className="settings-view__group-title">연결 상태</h3>
+        <dl className="settings-view__property">
+          <dt>알라딘 OpenAPI</dt>
+          <dd>
+            <span className="settings-view__token-row">
+              <input
+                className="settings-view__token"
+                aria-label="알라딘 TTB 키"
+                type="password"
+                autoComplete="off"
+                placeholder={aladinConfigured === null ? "확인 중…" : aladinConfigured ? "설정됨" : "설정되지 않음"}
+                value={aladinKey}
+                onChange={(event) => setAladinKey(event.target.value)}
+              />
+              <Button size="sm" disabled={aladinBusy || !aladinKey.trim()} onClick={() => void saveAladinKey()}>{aladinBusy ? "처리 중…" : "저장"}</Button>
+            </span>
+          </dd>
+          {aladinConfigured && !aladinConfirmingDelete && <Button size="sm" variant="danger" disabled={aladinBusy} onClick={() => setAladinConfirmingDelete(true)}>키 삭제</Button>}
+        </dl>
+        {aladinConfirmingDelete && (
+          <div className="settings-view__credential-confirm">
+            <p>저장된 알라딘 TTB 키를 삭제할까요?</p>
+            <div className="settings-view__credential-actions">
+              <Button size="sm" disabled={aladinBusy} onClick={() => setAladinConfirmingDelete(false)}>취소</Button>
+              <Button size="sm" variant="danger" disabled={aladinBusy} onClick={() => void deleteAladinKey()}>삭제 확인</Button>
+            </div>
+          </div>
+        )}
+        <dl className="settings-view__property">
+          <dt>IGDB</dt>
+          <dd>
+            <span className="settings-view__token-row">
+              <input
+                className="settings-view__token"
+                aria-label="IGDB Client ID"
+                type="password"
+                autoComplete="off"
+                placeholder={igdbConfigured === null ? "확인 중…" : igdbConfigured ? "설정됨" : "설정되지 않음"}
+                value={igdbClientId}
+                onChange={(event) => setIgdbClientId(event.target.value)}
+              />
+              <input
+                className="settings-view__token"
+                aria-label="IGDB Client Secret"
+                type="password"
+                autoComplete="off"
+                placeholder={igdbConfigured === null ? "확인 중…" : igdbConfigured ? "설정됨" : "설정되지 않음"}
+                value={igdbClientSecret}
+                onChange={(event) => setIgdbClientSecret(event.target.value)}
+              />
+              <Button size="sm" disabled={igdbBusy || !igdbClientId.trim() || !igdbClientSecret.trim()} onClick={() => void saveIgdbCredentials()}>{igdbBusy ? "처리 중…" : "IGDB 저장"}</Button>
+            </span>
+          </dd>
+          {igdbConfigured && !igdbConfirmingDelete && <Button size="sm" variant="danger" disabled={igdbBusy} onClick={() => setIgdbConfirmingDelete(true)}>IGDB 키 삭제</Button>}
+        </dl>
+        {igdbConfirmingDelete && (
+          <div className="settings-view__credential-confirm">
+            <p>저장된 IGDB 자격 증명을 삭제할까요?</p>
+            <div className="settings-view__credential-actions">
+              <Button size="sm" disabled={igdbBusy} onClick={() => setIgdbConfirmingDelete(false)}>취소</Button>
+              <Button size="sm" variant="danger" disabled={igdbBusy} onClick={() => void deleteIgdbCredentials()}>IGDB 삭제 확인</Button>
+            </div>
+          </div>
+        )}
+        <dl className="settings-view__property">
+          <dt>TMDB</dt>
+          <dd>
+            <span className="settings-view__token-row">
+              <input
+                className="settings-view__token"
+                aria-label="TMDB API Read Access Token"
+                type="password"
+                autoComplete="off"
+                placeholder={tmdbConfigured === null ? "확인 중…" : tmdbConfigured ? "설정됨" : "설정되지 않음"}
+                value={tmdbToken}
+                onChange={(event) => setTmdbToken(event.target.value)}
+              />
+              <Button size="sm" disabled={tmdbBusy || !tmdbToken.trim()} onClick={() => void saveTmdbToken()}>{tmdbBusy ? "처리 중…" : "TMDB 저장"}</Button>
+            </span>
+          </dd>
+          {tmdbConfigured && !tmdbConfirmingDelete && <Button size="sm" variant="danger" disabled={tmdbBusy} onClick={() => setTmdbConfirmingDelete(true)}>TMDB 키 삭제</Button>}
+        </dl>
+        {tmdbConfirmingDelete && (
+          <div className="settings-view__credential-confirm">
+            <p>저장된 TMDB API Read Access Token을 삭제할까요?</p>
+            <div className="settings-view__credential-actions">
+              <Button size="sm" disabled={tmdbBusy} onClick={() => setTmdbConfirmingDelete(false)}>취소</Button>
+              <Button size="sm" variant="danger" disabled={tmdbBusy} onClick={() => void deleteTmdbToken()}>TMDB 삭제 확인</Button>
+            </div>
+          </div>
+        )}
+        <p className="settings-view__row-note">TMDB API 키는 <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noreferrer">TMDB API 설정 안내</a>에서 발급합니다.</p>
+        <h3 className="settings-view__group-title">온라인 카탈로그</h3>
         {catalogStatus && <dl className="settings-view__property">
           <dt>온라인 카탈로그</dt>
           <dd><Toggle checked={catalogStatus.updateEnabled} disabled={catalogBusy || !catalogStatus.installed} onChange={(event) => void saveCatalogSettings(event.target.checked, catalogStatus.updateIntervalSeconds)}>자동 갱신</Toggle></dd>
@@ -538,125 +642,30 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           )}
         </dl>
         {catalogCacheMessage && <Toast onDismiss={() => setCatalogCacheMessage(null)}>{catalogCacheMessage}</Toast>}
-        <dl className="settings-view__property">
-          <dt>알라딘 OpenAPI</dt>
-          <dd className="settings-view__credential-status">{aladinConfigured === null ? "확인 중…" : aladinConfigured ? "설정됨" : "설정되지 않음"}</dd>
-          {aladinConfigured && !aladinConfirmingDelete && <Button size="sm" variant="danger" disabled={aladinBusy} onClick={() => setAladinConfirmingDelete(true)}>키 삭제</Button>}
-        </dl>
-        <label className="settings-view__property">
-          <span className="settings-view__property-label">알라딘 TTB 키</span>
-          <span className="settings-view__token-row">
-            <input
-              className="settings-view__token"
-              aria-label="알라딘 TTB 키"
-              type="password"
-              autoComplete="off"
-              value={aladinKey}
-              onChange={(event) => setAladinKey(event.target.value)}
-            />
-            <Button size="sm" disabled={aladinBusy || !aladinKey.trim()} onClick={() => void saveAladinKey()}>{aladinBusy ? "처리 중…" : "저장"}</Button>
-          </span>
-        </label>
-        {aladinConfirmingDelete && (
-          <div className="settings-view__credential-confirm">
-            <p>저장된 알라딘 TTB 키를 삭제할까요?</p>
-            <div className="settings-view__credential-actions">
-              <Button size="sm" disabled={aladinBusy} onClick={() => setAladinConfirmingDelete(false)}>취소</Button>
-              <Button size="sm" variant="danger" disabled={aladinBusy} onClick={() => void deleteAladinKey()}>삭제 확인</Button>
-            </div>
-          </div>
-        )}
-        <dl className="settings-view__property">
-          <dt>IGDB</dt>
-          <dd className="settings-view__credential-status">{igdbConfigured === null ? "확인 중…" : igdbConfigured ? "설정됨" : "설정되지 않음"}</dd>
-          {igdbConfigured && !igdbConfirmingDelete && <Button size="sm" variant="danger" disabled={igdbBusy} onClick={() => setIgdbConfirmingDelete(true)}>IGDB 키 삭제</Button>}
-        </dl>
-        <label className="settings-view__property">
-          <span className="settings-view__property-label">IGDB Client ID</span>
-          <span className="settings-view__token-row">
-            <input
-              className="settings-view__token"
-              aria-label="IGDB Client ID"
-              type="password"
-              autoComplete="off"
-              value={igdbClientId}
-              onChange={(event) => setIgdbClientId(event.target.value)}
-            />
-          </span>
-        </label>
-        <label className="settings-view__property">
-          <span className="settings-view__property-label">IGDB Client Secret</span>
-          <span className="settings-view__token-row">
-            <input
-              className="settings-view__token"
-              aria-label="IGDB Client Secret"
-              type="password"
-              autoComplete="off"
-              value={igdbClientSecret}
-              onChange={(event) => setIgdbClientSecret(event.target.value)}
-            />
-            <Button size="sm" disabled={igdbBusy || !igdbClientId.trim() || !igdbClientSecret.trim()} onClick={() => void saveIgdbCredentials()}>{igdbBusy ? "처리 중…" : "IGDB 저장"}</Button>
-          </span>
-        </label>
-        {igdbConfirmingDelete && (
-          <div className="settings-view__credential-confirm">
-            <p>저장된 IGDB 자격 증명을 삭제할까요?</p>
-            <div className="settings-view__credential-actions">
-              <Button size="sm" disabled={igdbBusy} onClick={() => setIgdbConfirmingDelete(false)}>취소</Button>
-              <Button size="sm" variant="danger" disabled={igdbBusy} onClick={() => void deleteIgdbCredentials()}>IGDB 삭제 확인</Button>
-            </div>
-          </div>
-        )}
-        <dl className="settings-view__property">
-          <dt>TMDB</dt>
-          <dd className="settings-view__credential-status">{tmdbConfigured === null ? "확인 중…" : tmdbConfigured ? "설정됨" : "설정되지 않음"}</dd>
-          {tmdbConfigured && !tmdbConfirmingDelete && <Button size="sm" variant="danger" disabled={tmdbBusy} onClick={() => setTmdbConfirmingDelete(true)}>TMDB 키 삭제</Button>}
-        </dl>
-        <label className="settings-view__property">
-          <span className="settings-view__property-label">TMDB API Read Access Token</span>
-          <span className="settings-view__token-row">
-            <input
-              className="settings-view__token"
-              aria-label="TMDB API Read Access Token"
-              type="password"
-              autoComplete="off"
-              value={tmdbToken}
-              onChange={(event) => setTmdbToken(event.target.value)}
-            />
-            <Button size="sm" disabled={tmdbBusy || !tmdbToken.trim()} onClick={() => void saveTmdbToken()}>{tmdbBusy ? "처리 중…" : "TMDB 저장"}</Button>
-          </span>
-        </label>
-        <dl className="settings-view__property">
-          <dt>TMDB API</dt>
-          <dd><a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noreferrer">TMDB API 설정 안내</a></dd>
-        </dl>
-        {tmdbConfirmingDelete && (
-          <div className="settings-view__credential-confirm">
-            <p>저장된 TMDB API Read Access Token을 삭제할까요?</p>
-            <div className="settings-view__credential-actions">
-              <Button size="sm" disabled={tmdbBusy} onClick={() => setTmdbConfirmingDelete(false)}>취소</Button>
-              <Button size="sm" variant="danger" disabled={tmdbBusy} onClick={() => void deleteTmdbToken()}>TMDB 삭제 확인</Button>
-            </div>
-          </div>
-        )}
       </div>
     )}
-    {section === "metadata_import" && (
+    {section === "data" && (
       <div className="settings-view__section">
-        <header className="settings-view__header"><h2>메타데이터 가져오기</h2><p>내보낸 JSON을 기준으로 분류와 이미지 사본을 가져옵니다. 원본은 변경하지 않습니다.</p></header>
+        <header className="settings-view__header"><h2>데이터 관리</h2><p>가져오기와 백업 복구를 관리합니다.</p></header>
+        <h3 className="settings-view__group-title">컬렉션 가져오기</h3>
+        <dl className="settings-view__property">
+          <dt>book 폴더</dt>
+          <dd className="settings-view__path">book 폴더의 info.txt에서 게임/만화/영화 컬렉션을 가져옵니다.</dd>
+          <Button size="sm" disabled={bookImportRunning} onClick={() => void chooseBookImportFolder()}>
+            {bookImportRunning ? "가져오는 중…" : "폴더 선택"}
+          </Button>
+          {bookImportMessage && <dd className="settings-view__row-message" role="alert">{bookImportMessage}</dd>}
+        </dl>
+        <h3 className="settings-view__group-title">메타데이터 가져오기</h3>
         <dl className="settings-view__property">
           <dt>최근 가져오기 폴더</dt>
           <dd className="settings-view__path">{lastImportFolder ?? "아직 없음"}</dd>
+          <span className="settings-view__credential-actions">
+            {lastImportFolder && <Button size="sm" disabled={pending || metadataImportRunning || !onImportFolder} onClick={() => void onImportFolder?.(lastImportFolder)}>최근 폴더 다시 가져오기</Button>}
+            <Button size="sm" variant="primary" disabled={pending || metadataImportRunning || !onImportFolder} onClick={() => void chooseImportFolder()}>{lastImportFolder ? "다른 폴더 선택" : "폴더 선택"}</Button>
+          </span>
         </dl>
-        <div className="settings-view__actions">
-          {lastImportFolder && <Button disabled={pending || metadataImportRunning || !onImportFolder} onClick={() => void onImportFolder?.(lastImportFolder)}>최근 폴더 다시 가져오기</Button>}
-          <Button variant="primary" disabled={pending || metadataImportRunning || !onImportFolder} onClick={() => void chooseImportFolder()}>{lastImportFolder ? "다른 폴더 선택" : "폴더 선택"}</Button>
-        </div>
-      </div>
-    )}
-    {section === "legacy_package" && (
-      <div className="settings-view__section">
-        <header className="settings-view__header"><h2>레거시 패키지 가져오기</h2><p>구 라코믹스 패키지의 자산과 컬렉션을 현재 라이브러리로 가져옵니다. 원본 패키지는 변경하지 않습니다.</p></header>
+        <h3 className="settings-view__group-title">레거시 패키지 가져오기</h3>
         {legacyError && <Toast onDismiss={() => setLegacyError(null)}>{legacyError}</Toast>}
         <dl className="settings-view__property">
           <dt>패키지 폴더</dt>
@@ -681,7 +690,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
         )}
         {legacyPlan && (
           <div className="settings-view__legacy-plan">
-            <h3>검사 결과</h3>
+            <h3 className="settings-view__group-title">검사 결과</h3>
             <dl className="settings-view__property">
               <dt>라이브러리 ID</dt>
               <dd className="settings-view__path">{legacyPlan.source.libraryId}</dd>
@@ -723,7 +732,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
         )}
         {legacyReport && (
           <div className="settings-view__legacy-report">
-            <h3>가져오기 결과</h3>
+            <h3 className="settings-view__group-title">가져오기 결과</h3>
             <dl className="settings-view__property">
               <dt>자산</dt>
               <dd>추가 {legacyReport.added} · 대상 재사용 {legacyReport.exactTargetReused} · 중복 재사용 {legacyReport.sourceDuplicatesReused} · 이미 매핑 {legacyReport.alreadyMapped} · 실패 {legacyReport.failed}</dd>
@@ -745,11 +754,8 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             )}
           </div>
         )}
-      </div>
-    )}
-    {section === "safety" && (
-      <div className="settings-view__section settings-view__safety">
-        <header className="settings-view__header"><h2>안전</h2><p>자동 백업에서 라이브러리 관리 정보를 복구합니다.</p></header>
+        <h3 className="settings-view__group-title">백업 복구</h3>
+        <div className="settings-view__safety">
         {confirmingId ? (
           <div className="settings-view__safety-confirm">
             <p>현재 상태를 별도로 보존한 뒤 선택한 시점으로 관리 정보를 복구합니다.</p>
@@ -784,25 +790,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             ) : null}
           </>
         )}
-      </div>
-    )}
-    {section === "shortcuts" && (
-      <div className="settings-view__section settings-view__shortcuts">
-        <header className="settings-view__header"><h2>단축키</h2><p>키보드 조작과 주요 화면 버튼을 확인합니다.</p></header>
-        <h3>단축키</h3>
-        <table className="settings-view__table">
-          <thead><tr><th scope="col">단축키</th><th scope="col">동작</th></tr></thead>
-          <tbody>
-            {SHORTCUTS.map((shortcut) => <tr key={shortcut.keys}><td><kbd>{shortcut.keys}</kbd></td><td>{shortcut.action}</td></tr>)}
-          </tbody>
-        </table>
-        <h3>버튼 설명</h3>
-        <table className="settings-view__table">
-          <thead><tr><th scope="col">버튼</th><th scope="col">용도</th></tr></thead>
-          <tbody>
-            {BUTTONS.map((button) => <tr key={button.name}><td>{button.name}</td><td>{button.purpose}</td></tr>)}
-          </tbody>
-        </table>
+        </div>
       </div>
     )}
     </div>

@@ -5,6 +5,7 @@ import { assetUrl } from "../assets/mediaUrl";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { LibraryGateway, SimilarityDecision, SimilarityReviewAsset, SimilarityReviewSummary } from "../library/types";
 import { ViewToolbar } from "../layout/ViewToolbar";
+import { usePrivacy } from "../privacy/PrivacyContext";
 import { Button } from "../shared/ui/Button";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { Skeleton } from "../shared/ui/Skeleton";
@@ -99,9 +100,10 @@ export function SimilarityReviewBrowser({ gateway, onCountChange, onClose }: Pro
 }
 
 function ReviewAssetPanel({ side, reviewAsset }: { side: "기존 이미지" | "새 이미지"; reviewAsset: SimilarityReviewAsset }) {
+  const { privacyMode } = usePrivacy();
   const { asset, format, classifications } = reviewAsset;
   return <section className="similarity-review__asset" aria-label={side}>
-    <div className="similarity-review__preview"><img src={assetUrl(asset.id)} alt={side} /></div>
+    <div className="similarity-review__preview">{privacyMode ? <Skeleton className="privacy-mask similarity-review__preview-mask" label="비공개 모드" /> : <img src={assetUrl(asset.id)} alt={side} />}</div>
     <h3>{asset.title || asset.originalName}</h3>
     <dl>
       <div><dt>해상도</dt><dd>{asset.width} × {asset.height}</dd></div>

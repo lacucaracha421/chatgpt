@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 import type { CollectionSummary } from "../library/types";
+import { usePrivacy } from "../privacy/PrivacyContext";
 import { Menu } from "../shared/ui/Menu";
 
 export type MovieCollectionDetailProps = {
@@ -31,6 +32,8 @@ export function MovieCollectionDetail({
   onRefreshProvider,
   onChangeArtwork,
 }: MovieCollectionDetailProps) {
+  const { privacyMode } = usePrivacy();
+  const backdropVisible = Boolean(backdropUrl) && !privacyMode;
   const facts = [
     collection.releaseDate,
     collection.runtimeMinutes ? `${collection.runtimeMinutes}분` : null,
@@ -42,14 +45,14 @@ export function MovieCollectionDetail({
   return (
     <article className="movie-collection-detail" aria-label="영화 상세">
       <section
-        className={`movie-collection-detail__backdrop${backdropUrl ? "" : " movie-collection-detail__backdrop--empty"}`}
+        className={`movie-collection-detail__backdrop${backdropVisible ? "" : " movie-collection-detail__backdrop--empty"}`}
         aria-label="영화 배경 이미지"
-        style={backdropUrl ? { backgroundImage: `url("${backdropUrl}")` } as CSSProperties : undefined}
+        style={backdropVisible ? { backgroundImage: `url("${backdropUrl}")` } as CSSProperties : undefined}
       >
         <div className="movie-collection-detail__scrim" aria-hidden="true" />
         <div className="movie-collection-detail__content">
           <div className="movie-collection-detail__poster">
-            {posterUrl ? <img src={posterUrl} alt={`${collection.name} 포스터`} draggable={false} /> : <span aria-label="포스터 없음" />}
+            {posterUrl && !privacyMode ? <img src={posterUrl} alt={`${collection.name} 포스터`} draggable={false} /> : <span aria-label="포스터 없음" />}
           </div>
           <div className="movie-collection-detail__identity">
             <div className="movie-collection-detail__actions">

@@ -1,5 +1,6 @@
 import { workArtworkThumbnailUrl } from "../assets/mediaUrl";
 import type { CollectionVolume } from "../library/types";
+import { usePrivacy } from "../privacy/PrivacyContext";
 
 type CollectionVolumeGridProps = {
   volumes: CollectionVolume[];
@@ -18,6 +19,7 @@ export function CollectionVolumeGrid({
   onEditionIndexChange,
   onSelect,
 }: CollectionVolumeGridProps) {
+  const { privacyMode } = usePrivacy();
   const visible = volumes
     .filter((volume) => volume.editionIndex === editionIndex)
     .sort((left, right) => left.volumeNumber - right.volumeNumber);
@@ -59,7 +61,7 @@ export function CollectionVolumeGrid({
                 aria-pressed={selectedVolumeId === volume.id}
                 onClick={() => onSelect(volume.id)}
               >
-                {volume.coverArtworkId ? (
+                {volume.coverArtworkId && !privacyMode ? (
                   <img src={workArtworkThumbnailUrl(volume.coverArtworkId)} alt={label} loading="lazy" draggable={false} />
                 ) : (
                   <span className="collection-overlay__cover-placeholder" aria-hidden="true" />

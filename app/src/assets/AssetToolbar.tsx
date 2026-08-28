@@ -1,4 +1,4 @@
-import { EllipsisHorizontalIcon, InformationCircleIcon, AdjustmentsHorizontalIcon, ArrowPathIcon, StarIcon, TrashIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { EllipsisHorizontalIcon, EyeSlashIcon, InformationCircleIcon, AdjustmentsHorizontalIcon, ArrowPathIcon, StarIcon, TrashIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { useState } from "react";
 import type { AlbumEntry, AssetSort, AssetView, ClassificationEntry, CollectionSummary } from "../library/types";
 import { Button } from "../shared/ui/Button";
@@ -15,6 +15,7 @@ type AssetToolbarProps = {
   sort: AssetSort;
   directOnly: boolean;
   metadataVisible: boolean;
+  privacyMode: boolean;
   thumbnailRowHeight: number;
   selectedCount: number;
   inspectorOpen: boolean;
@@ -22,6 +23,7 @@ type AssetToolbarProps = {
   onSortChange: (sort: AssetSort) => void;
   onDirectOnlyChange: (value: boolean) => void;
   onMetadataVisibleChange: (value: boolean) => void;
+  onPrivacyModeChange: (value: boolean) => void;
   onThumbnailRowHeightChange: (value: number) => void;
   onFavorite: (favorite: boolean) => void;
   onMoveToFolder: (classificationId: string | null) => void;
@@ -36,8 +38,8 @@ type AssetToolbarProps = {
 };
 
 export function AssetToolbar({
-  view: rawView, classifications, albums, collections = [], onRemoveFromCollection, onSetCover, sort, directOnly, metadataVisible, thumbnailRowHeight, selectedCount, inspectorOpen, onInspectorToggle, onSortChange,
-  onDirectOnlyChange, onMetadataVisibleChange, onThumbnailRowHeightChange, onFavorite, onMoveToFolder, onAlbum, onTrash, onClearSelection, batchPending, onReshuffle,
+  view: rawView, classifications, albums, collections = [], onRemoveFromCollection, onSetCover, sort, directOnly, metadataVisible, privacyMode, thumbnailRowHeight, selectedCount, inspectorOpen, onInspectorToggle, onSortChange,
+  onDirectOnlyChange, onMetadataVisibleChange, onPrivacyModeChange, onThumbnailRowHeightChange, onFavorite, onMoveToFolder, onAlbum, onTrash, onClearSelection, batchPending, onReshuffle,
 }: AssetToolbarProps) {
   const view = rawView.kind === "similarity_review" || rawView.kind === "settings" || rawView.kind === "manga"
     ? ({ kind: "classification", classificationId: null } as const)
@@ -80,6 +82,7 @@ export function AssetToolbar({
         {view.kind === "classification" && <Toggle aria-label="이 분류만" checked={directOnly} onChange={(event) => onDirectOnlyChange(event.target.checked)}><AdjustmentsHorizontalIcon aria-hidden="true" /><span className="asset-toolbar__toggle-text">이 분류만</span></Toggle>}
         <Slider label="미리보기 크기" min={96} max={320} step={8} value={thumbnailRowHeight} onChange={(event) => onThumbnailRowHeightChange(Number(event.target.value))} />
         <Toggle aria-label="정보 표시" checked={metadataVisible} onChange={(event) => onMetadataVisibleChange(event.target.checked)}><InformationCircleIcon aria-hidden="true" /><span className="asset-toolbar__toggle-text">정보 표시</span></Toggle>
+        <Toggle aria-label="비공개 모드" checked={privacyMode} onChange={(event) => onPrivacyModeChange(event.target.checked)}><EyeSlashIcon aria-hidden="true" /><span className="asset-toolbar__toggle-text">비공개 모드</span></Toggle>
         {sort === "random" && !recent && <Button size="icon" aria-label="다시 섞기" onClick={onReshuffle}><ArrowPathIcon aria-hidden="true" /></Button>}
       </>}
     </ViewToolbar>

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { CollectionSummary } from "../library/types";
+import { usePrivacy } from "../privacy/PrivacyContext";
 
 export function collectionCredit(collection: CollectionSummary): string {
   const credit = collection.type === "manga"
@@ -22,6 +23,7 @@ export function CollectionCard({
   selected: boolean;
 }) {
   const [failedCoverUrl, setFailedCoverUrl] = useState<string | null>(null);
+  const { privacyMode } = usePrivacy();
   const visibleCoverUrl = coverUrl && coverUrl !== failedCoverUrl ? coverUrl : null;
 
   return (
@@ -33,7 +35,7 @@ export function CollectionCard({
     >
       <span className={`collection-card__object collection-card__object--${collection.type}`}>
         <span className="collection-card__cover">
-          {visibleCoverUrl ? (
+          {visibleCoverUrl && !privacyMode ? (
             <img
               src={visibleCoverUrl}
               alt={collection.name}

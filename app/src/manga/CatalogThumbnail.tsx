@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { usePrivacy } from "../privacy/PrivacyContext";
+import { Skeleton } from "../shared/ui/Skeleton";
 
 type CatalogThumbnailProps = {
   src: string | null;
@@ -9,8 +11,13 @@ type CatalogThumbnailProps = {
 
 export function CatalogThumbnail({ src, title, pageCount, className }: CatalogThumbnailProps) {
   const [failed, setFailed] = useState(false);
+  const { privacyMode } = usePrivacy();
 
   useEffect(() => setFailed(false), [src]);
+
+  if (privacyMode) {
+    return <Skeleton className={className} label="비공개 모드" />;
+  }
 
   if (!src || failed) {
     return <span className={`${className ?? ""} catalog-thumbnail__fallback`.trim()}>

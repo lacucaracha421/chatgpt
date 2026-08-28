@@ -83,8 +83,9 @@ it("starts a repeatable metadata folder import and remembers the selected folder
       <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} onImportFolder={onImportFolder} />
     </LibraryProvider>,
   );
-  await userEvent.click(screen.getByRole("button", { name: "메타데이터 가져오기" }));
-  await userEvent.click(screen.getByRole("button", { name: "폴더 선택" }));
+  await userEvent.click(screen.getByRole("button", { name: "데이터 관리" }));
+  const metadataRow = (await screen.findByText("최근 가져오기 폴더")).parentElement;
+  await userEvent.click(within(metadataRow!).getByRole("button", { name: "폴더 선택" }));
   await waitFor(() => expect(onImportFolder).toHaveBeenCalledWith("C:\\exports\\lakomics"));
   expect(localStorage.getItem("lakomics.metadataImportFolder")).toBe("C:\\exports\\lakomics");
 });
@@ -128,9 +129,78 @@ it("uses desktop settings navigation and compact property rows", async () => {
   expect(screen.getByRole("heading", { name: "일반" })).toBeInTheDocument();
   expect(container.querySelectorAll(".settings-view__property")).toHaveLength(4);
 
-  await userEvent.click(screen.getByRole("button", { name: "메타데이터 가져오기" }));
-  expect(screen.getByRole("heading", { name: "메타데이터 가져오기" })).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "메타데이터 가져오기" })).toHaveAttribute("aria-current", "page");
+  await userEvent.click(screen.getByRole("button", { name: "데이터 관리" }));
+  expect(screen.getByRole("heading", { name: "데이터 관리" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "데이터 관리" })).toHaveAttribute("aria-current", "page");
+  expect(screen.getByRole("heading", { name: "메타데이터 가져오기", level: 3 })).toBeInTheDocument();
+});
+
+it("groups data import and backup restore under 데이터 관리", async () => {
+  const gateway = createGateway();
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="data" />
+    </LibraryProvider>,
+  );
+
+  expect(await screen.findByRole("heading", { name: "데이터 관리" })).toBeInTheDocument();
+  for (const group of ["컬렉션 가져오기", "메타데이터 가져오기", "레거시 패키지 가져오기", "백업 복구"]) {
+    expect(screen.getByRole("heading", { name: group, level: 3 })).toBeInTheDocument();
+  }
+});
+
+it("groups extension diagnostics and shortcuts under 정보", async () => {
+  const gateway = createGateway();
+  vi.mocked(gateway.getExtensionConnection).mockResolvedValue({ baseUrl: "http://127.0.0.1:32145", token: "token", status: "ready" });
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="about" />
+    </LibraryProvider>,
+  );
+
+  expect(await screen.findByRole("heading", { name: "정보" })).toBeInTheDocument();
+  for (const group of ["브라우저 확장", "단축키", "버튼 설명"]) {
+    expect(screen.getByRole("heading", { name: group, level: 3 })).toBeInTheDocument();
+  }
+});
+
+it("toggles privacy mode from the general section", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  const onPrivacyModeChange = vi.fn();
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} privacyMode={false} onPrivacyModeChange={onPrivacyModeChange} />
+    </LibraryProvider>,
+  );
+
+  const toggle = screen.getByRole("checkbox", { name: "비공개 모드" });
+  expect(toggle).not.toBeChecked();
+  await user.click(toggle);
+
+  expect(onPrivacyModeChange).toHaveBeenCalledWith(true);
+});
+
+it("shows every external service status at once in the connection list", async () => {
+  const gateway = createGateway();
+  vi.mocked(gateway.getAladinCredentialStatus).mockResolvedValue({ configured: true });
+  vi.mocked(gateway.getIgdbCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.getTmdbCredentialStatus).mockResolvedValue({ configured: false });
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="external_services" />
+    </LibraryProvider>,
+  );
+
+  const aladinRow = (await screen.findByText("알라딘 OpenAPI")).parentElement;
+  const igdbRow = screen.getByText("IGDB").parentElement;
+  const tmdbRow = screen.getByText("TMDB").parentElement;
+  expect(within(aladinRow!).getByLabelText("알라딘 TTB 키")).toHaveAttribute("placeholder", "설정됨");
+  expect(within(aladinRow!).getByRole("button", { name: "키 삭제" })).toBeVisible();
+  expect(within(igdbRow!).getByLabelText("IGDB Client ID")).toHaveAttribute("placeholder", "설정되지 않음");
+  expect(within(igdbRow!).queryByRole("button", { name: "IGDB 키 삭제" })).not.toBeInTheDocument();
+  expect(within(tmdbRow!).getByLabelText("TMDB API Read Access Token")).toHaveAttribute("placeholder", "설정되지 않음");
+  expect(within(tmdbRow!).queryByRole("button", { name: "TMDB 키 삭제" })).not.toBeInTheDocument();
 });
 
 it("loads the manga root and changes it through the folder picker", async () => {
@@ -183,7 +253,7 @@ it("keeps backup load errors visible for retry", async () => {
     </LibraryProvider>,
   );
 
-  fireEvent.click(screen.getByRole("button", { name: "안전" }));
+  fireEvent.click(screen.getByRole("button", { name: "데이터 관리" }));
   act(() => vi.advanceTimersByTime(0));
   await act(async () => { rejectBackups(new Error("backup failed")); await failed.catch(() => undefined); });
   act(() => vi.advanceTimersByTime(5_000));
@@ -217,7 +287,7 @@ it("shows the Edge connection and copies its hidden key on request", async () =>
     </LibraryProvider>,
   );
 
-  await user.click(screen.getByRole("button", { name: "브라우저 확장" }));
+  await user.click(screen.getByRole("button", { name: "정보" }));
 
   expect(await screen.findByText("연결됨")).toBeVisible();
   expect(screen.getByText("http://127.0.0.1:32145")).toBeVisible();
@@ -246,21 +316,21 @@ it("stores and removes an Aladin key without reading it back", async () => {
 
   await user.click(screen.getByRole("button", { name: "외부 서비스" }));
   const aladinStatusRow = (await screen.findByText("알라딘 OpenAPI")).parentElement;
-  expect(within(aladinStatusRow!).getByText("설정되지 않음")).toBeInTheDocument();
+  expect(within(aladinStatusRow!).getByLabelText("알라딘 TTB 키")).toHaveAttribute("placeholder", "설정되지 않음");
   expect(await gateway.getAladinCredentialStatus()).toEqual({ configured: false });
   await user.type(screen.getByLabelText("알라딘 TTB 키"), "new-secret");
   await user.click(screen.getByRole("button", { name: "저장" }));
 
   expect(gateway.setAladinTtbKey).toHaveBeenCalledWith("new-secret");
   expect(screen.getByLabelText("알라딘 TTB 키")).toHaveValue("");
-  expect(within(aladinStatusRow!).getByText("설정됨")).toBeInTheDocument();
+  expect(within(aladinStatusRow!).getByLabelText("알라딘 TTB 키")).toHaveAttribute("placeholder", "설정됨");
   expect(screen.queryByDisplayValue("new-secret")).not.toBeInTheDocument();
 
   await user.click(screen.getByRole("button", { name: "키 삭제" }));
   expect(screen.getByText("저장된 알라딘 TTB 키를 삭제할까요?")).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "삭제 확인" }));
   expect(gateway.deleteAladinTtbKey).toHaveBeenCalledOnce();
-  expect(within(aladinStatusRow!).getByText("설정되지 않음")).toBeInTheDocument();
+  expect(within(aladinStatusRow!).getByLabelText("알라딘 TTB 키")).toHaveAttribute("placeholder", "설정되지 않음");
 });
 
 it("opens the requested settings section", async () => {
@@ -292,7 +362,7 @@ it("shows only IGDB credential status and keeps stored values out of the inputs"
   await user.click(screen.getByRole("button", { name: "외부 서비스" }));
   const statusRow = (await screen.findByText("IGDB")).parentElement;
   expect(statusRow).not.toBeNull();
-  expect(within(statusRow!).getByText("설정됨")).toBeVisible();
+  expect(within(statusRow!).getByLabelText("IGDB Client ID")).toHaveAttribute("placeholder", "설정됨");
   expect(screen.getByLabelText("IGDB Client ID")).toHaveAttribute("type", "password");
   expect(screen.getByLabelText("IGDB Client Secret")).toHaveAttribute("type", "password");
   expect(screen.getByLabelText("IGDB Client ID")).toHaveValue("");
@@ -325,7 +395,7 @@ it("saves both IGDB credentials exactly and clears them after success", async ()
   expect(clientId).toHaveValue("");
   expect(clientSecret).toHaveValue("");
   const statusRow = screen.getByText("IGDB").parentElement;
-  expect(within(statusRow!).getByText("설정됨")).toBeVisible();
+  expect(within(statusRow!).getByLabelText("IGDB Client ID")).toHaveAttribute("placeholder", "설정됨");
 });
 
 it("requires confirmation before deleting IGDB credentials", async () => {
@@ -348,7 +418,7 @@ it("requires confirmation before deleting IGDB credentials", async () => {
   await user.click(screen.getByRole("button", { name: "IGDB 삭제 확인" }));
 
   expect(gateway.deleteIgdbCredentials).toHaveBeenCalledOnce();
-  expect(within(statusRow!).getByText("설정되지 않음")).toBeVisible();
+  expect(within(statusRow!).getByLabelText("IGDB Client ID")).toHaveAttribute("placeholder", "설정되지 않음");
 });
 
 it("stores and removes a TMDB token without reading it back", async () => {
@@ -365,8 +435,8 @@ it("stores and removes a TMDB token without reading it back", async () => {
 
   const statusRow = (await screen.findByText("TMDB")).parentElement;
   expect(statusRow).not.toBeNull();
-  expect(within(statusRow!).getByText("설정되지 않음")).toBeVisible();
   const token = screen.getByLabelText("TMDB API Read Access Token");
+  expect(within(statusRow!).getByLabelText("TMDB API Read Access Token")).toHaveAttribute("placeholder", "설정되지 않음");
   expect(token).toHaveAttribute("type", "password");
   expect(token).toHaveValue("");
   await user.type(token, "  tmdb-secret  ");
@@ -374,7 +444,7 @@ it("stores and removes a TMDB token without reading it back", async () => {
 
   expect(gateway.setTmdbToken).toHaveBeenCalledWith("tmdb-secret");
   expect(token).toHaveValue("");
-  expect(within(statusRow!).getByText("설정됨")).toBeVisible();
+  expect(within(statusRow!).getByLabelText("TMDB API Read Access Token")).toHaveAttribute("placeholder", "설정됨");
   expect(screen.queryByDisplayValue("tmdb-secret")).not.toBeInTheDocument();
 
   await user.click(screen.getByRole("button", { name: "TMDB 키 삭제" }));
@@ -383,7 +453,7 @@ it("stores and removes a TMDB token without reading it back", async () => {
   await user.click(screen.getByRole("button", { name: "TMDB 삭제 확인" }));
 
   expect(gateway.deleteTmdbToken).toHaveBeenCalledOnce();
-  expect(within(statusRow!).getByText("설정되지 않음")).toBeVisible();
+  expect(within(statusRow!).getByLabelText("TMDB API Read Access Token")).toHaveAttribute("placeholder", "설정되지 않음");
 });
 
 it("changes online catalog automatic update settings", async () => {
