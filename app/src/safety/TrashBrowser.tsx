@@ -16,7 +16,7 @@ import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 const MIN_RETENTION_DAYS = 1;
 const MAX_RETENTION_DAYS = 3650;
 
-export function TrashBrowser() {
+export function TrashBrowser({ onCountChange }: { onCountChange?: (count: number) => void } = {}) {
   const { gateway } = useLibrary();
   const [page, setPage] = useState<TrashPage | null>(null);
   const [policy, setPolicy] = useState<TrashPolicy | null>(null);
@@ -39,7 +39,10 @@ export function TrashBrowser() {
     setPolicy(null);
     void gateway.listTrash({ after: null, limit: ASSET_PAGE_SIZE })
       .then((nextPage) => {
-        if (generation === loadGenerationRef.current) setPage(nextPage);
+        if (generation === loadGenerationRef.current) {
+          setPage(nextPage);
+          onCountChange?.(nextPage.totalCount);
+        }
       })
       .catch((error: unknown) => {
         if (generation === loadGenerationRef.current) setPageError(commandErrorMessage(error, "휴지통을 불러오지 못했습니다."));
@@ -58,7 +61,7 @@ export function TrashBrowser() {
       })
       .finally(() => {
       });
-  }, [gateway]);
+  }, [gateway, onCountChange]);
 
   useEffect(() => {
     load();

@@ -29,6 +29,7 @@ impl Library {
             parent_id: request.parent_id,
             icon_key: None,
             color_key: None,
+            asset_count: 0,
         };
         connection
             .execute(
@@ -131,7 +132,11 @@ impl Library {
     pub fn list_classifications(&self) -> Result<Vec<ClassificationEntry>, LibraryError> {
         let connection = self.connection()?;
         let mut statement = connection.prepare(
-            "SELECT id, kind, name, parent_id, icon_key, color_key
+            "SELECT id, kind, name, parent_id, icon_key, color_key,
+                (SELECT COUNT(*) FROM asset_classifications AS count_link
+                 JOIN assets AS count_asset ON count_asset.id = count_link.asset_id
+                 WHERE count_link.classification_id = classification_entries.id
+                   AND count_asset.status = 'normal') AS asset_count
              FROM classification_entries
              ORDER BY parent_id, name COLLATE NOCASE, id",
         )?;
@@ -256,7 +261,11 @@ pub(crate) fn classifications_for_asset(
     asset_id: &str,
 ) -> Result<Vec<ClassificationEntry>, LibraryError> {
     let mut statement = connection.prepare(
-        "SELECT entry.id, entry.kind, entry.name, entry.parent_id, entry.icon_key, entry.color_key
+        "SELECT entry.id, entry.kind, entry.name, entry.parent_id, entry.icon_key, entry.color_key,
+            (SELECT COUNT(*) FROM asset_classifications AS count_link
+             JOIN assets AS count_asset ON count_asset.id = count_link.asset_id
+             WHERE count_link.classification_id = entry.id
+               AND count_asset.status = 'normal') AS asset_count
          FROM classification_entries AS entry
          JOIN asset_classifications AS link ON link.classification_id = entry.id
          WHERE link.asset_id = ?1
@@ -290,7 +299,11 @@ fn find_classification(
 ) -> Result<Option<ClassificationEntry>, LibraryError> {
     let values = connection
         .query_row(
-            "SELECT id, kind, name, parent_id, icon_key, color_key
+            "SELECT id, kind, name, parent_id, icon_key, color_key,
+                (SELECT COUNT(*) FROM asset_classifications AS count_link
+                 JOIN assets AS count_asset ON count_asset.id = count_link.asset_id
+                 WHERE count_link.classification_id = classification_entries.id
+                   AND count_asset.status = 'normal') AS asset_count
              FROM classification_entries WHERE id = ?1",
             [id],
             |row| {
@@ -301,6 +314,7 @@ fn find_classification(
                     row.get(3)?,
                     row.get(4)?,
                     row.get(5)?,
+                    row.get(6)?,
                 ))
             },
         )
@@ -325,19 +339,21 @@ where
             row.get(3)?,
             row.get(4)?,
             row.get(5)?,
+            row.get(6)?,
         ))?);
     }
     Ok(entries)
 }
 
 fn entry_from_values(
-    (id, kind, name, parent_id, icon_key, color_key): (
+    (id, kind, name, parent_id, icon_key, color_key, asset_count): (
         String,
         String,
         String,
         Option<String>,
         Option<String>,
         Option<String>,
+        i64,
     ),
 ) -> Result<ClassificationEntry, LibraryError> {
     let kind = match kind.as_str() {
@@ -353,6 +369,7 @@ fn entry_from_values(
         parent_id,
         icon_key,
         color_key,
+        asset_count: u64::try_from(asset_count).unwrap_or(0),
     })
 }
 
@@ -698,7 +715,7 @@ mod tests {
 
     #[test]
     fn deleting_a_leaf_moves_every_asset_state_to_its_parent_once() {
-        let fixture = ClassificationFixture::new();
+        let mut fixture = ClassificationFixture::new();
         for (id, status) in [
             ("asset-normal", "normal"),
             ("asset-review", "review"),
@@ -732,6 +749,7 @@ mod tests {
                 remove_classification_ids: vec![],
             })
             .unwrap();
+        fixture.parent_tag.asset_count = 1;
 
         fixture
             .library
@@ -908,8 +926,42 @@ mod tests {
     }
 
     #[test]
-    fn batch_classification_patch_is_additive_selective_and_atomic() {
+    fn list_classifications_counts_only_direct_normal_assets() {
         let fixture = ClassificationFixture::new();
+        for (id, status) in [("asset-normal", "normal"), ("asset-trash", "trash")] {
+            insert_asset(&fixture.library, id);
+            fixture
+                .library
+                .connection()
+                .unwrap()
+                .execute("UPDATE assets SET status = ?1 WHERE id = ?2", [status, id])
+                .unwrap();
+        }
+        fixture
+            .library
+            .patch_asset_classifications(AssetClassificationPatch {
+                asset_ids: vec!["asset-normal".into(), "asset-trash".into()],
+                add_classification_ids: vec![fixture.child_tag.id.clone()],
+                remove_classification_ids: vec![],
+            })
+            .unwrap();
+
+        let entries = fixture.library.list_classifications().unwrap();
+        let child = entries
+            .iter()
+            .find(|entry| entry.id == fixture.child_tag.id)
+            .unwrap();
+        assert_eq!(child.asset_count, 1);
+        let parent = entries
+            .iter()
+            .find(|entry| entry.id == fixture.parent_tag.id)
+            .unwrap();
+        assert_eq!(parent.asset_count, 0);
+    }
+
+    #[test]
+    fn batch_classification_patch_is_additive_selective_and_atomic() {
+        let mut fixture = ClassificationFixture::new();
         insert_asset(&fixture.library, "asset-a");
         insert_asset(&fixture.library, "asset-b");
         fixture
@@ -929,6 +981,7 @@ mod tests {
                 remove_classification_ids: vec![],
             })
             .unwrap();
+        fixture.parent_tag.asset_count = 2;
         assert_eq!(
             fixture
                 .library
@@ -981,7 +1034,7 @@ mod tests {
 
     #[test]
     fn setting_a_folder_replaces_all_direct_links_atomically() {
-        let fixture = ClassificationFixture::new();
+        let mut fixture = ClassificationFixture::new();
         insert_asset(&fixture.library, "asset-a");
         fixture
             .library
@@ -992,6 +1045,7 @@ mod tests {
             })
             .unwrap();
 
+        fixture.parent_tag.asset_count = 1;
         fixture
             .library
             .set_asset_classification(SetAssetClassification {
@@ -1011,7 +1065,7 @@ mod tests {
 
     #[test]
     fn setting_a_folder_can_unsort_and_rejects_partial_batches() {
-        let fixture = ClassificationFixture::new();
+        let mut fixture = ClassificationFixture::new();
         insert_asset(&fixture.library, "asset-a");
         fixture
             .library
@@ -1020,6 +1074,7 @@ mod tests {
                 classification_id: Some(fixture.root.id.clone()),
             })
             .unwrap();
+        fixture.root.asset_count = 1;
 
         let error = fixture
             .library

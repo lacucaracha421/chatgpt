@@ -458,6 +458,22 @@ describe("AssetBrowser", () => {
     expect(screen.getByText("1개 자산을 휴지통으로 이동했습니다.")).toBeVisible();
   });
 
+  it("notifies membership changes after moving assets to trash", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway({ items: [asset(0)], nextCursor: null });
+    const onMembershipChanged = vi.fn();
+    render(
+      <LibraryProvider gateway={gateway}>
+        <AssetBrowser view={{ kind: "classification", classificationId: null }} classifications={[]} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} onMembershipChanged={onMembershipChanged} />
+      </LibraryProvider>,
+    );
+
+    await user.click(await screen.findByRole("option", { name: "asset-0.png" }));
+    await user.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
+
+    expect(onMembershipChanged).toHaveBeenCalledOnce();
+  });
+
   it("expires the trash undo action with its toast", async () => {
     const user = userEvent.setup();
     const gateway = createGateway({ items: [asset(0)], nextCursor: null });

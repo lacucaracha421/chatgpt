@@ -16,13 +16,13 @@ import { AssetViewer } from "./AssetViewer";
 import { applySelectionGesture, emptySelection, moveSelectionFocus, reconcileSelection, selectAllLoaded, type SelectionGesture, type SelectionState } from "./selection";
 
 export type AssetBrowserStatus = { loadedCount: number; selectedAsset: AssetSummary | null; loading: boolean };
-type Props = { view: AssetView; classifications: ClassificationEntry[]; albums?: AlbumEntry[]; collections?: CollectionSummary[]; onCollectionsChanged?: () => void; sort: AssetSort; metadataVisible: boolean; privacyMode: boolean; onPrivacyModeChange: (privacyMode: boolean) => void; thumbnailRowHeight?: number; refreshVersion: number; requestedAsset?: AssetSummary | null; onRequestedAssetHandled?: () => void; onSortChange: (sort: AssetSort) => void; onMetadataVisibleChange: (visible: boolean) => void; onThumbnailRowHeightChange?: (height: number) => void; onStatusChange: (status: AssetBrowserStatus) => void; onPointerDragStart?: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => void; onPointerDragMove?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void };
+type Props = { view: AssetView; classifications: ClassificationEntry[]; albums?: AlbumEntry[]; collections?: CollectionSummary[]; onCollectionsChanged?: () => void; onMembershipChanged?: () => void; sort: AssetSort; metadataVisible: boolean; privacyMode: boolean; onPrivacyModeChange: (privacyMode: boolean) => void; thumbnailRowHeight?: number; refreshVersion: number; requestedAsset?: AssetSummary | null; onRequestedAssetHandled?: () => void; onSortChange: (sort: AssetSort) => void; onMetadataVisibleChange: (visible: boolean) => void; onThumbnailRowHeightChange?: (height: number) => void; onStatusChange: (status: AssetBrowserStatus) => void; onPointerDragStart?: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => void; onPointerDragMove?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void };
 type PageState = { queryKey: string; items: AssetSummary[]; headCursor: AssetCursor | null; tailCursor: AssetCursor | null };
 type QueryError = { queryKey: string; message: string };
 export type GalleryJump = { date: string; ratio: number; token: number };
 const EMPTY_ASSETS: AssetSummary[] = [];
 
-export function AssetBrowser({ view, classifications, albums = [], collections = [], onCollectionsChanged = () => undefined, sort, metadataVisible, privacyMode, onPrivacyModeChange, thumbnailRowHeight = 180, refreshVersion, requestedAsset = null, onRequestedAssetHandled = () => undefined, onSortChange, onMetadataVisibleChange, onThumbnailRowHeightChange = () => undefined, onStatusChange, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: Props) {
+export function AssetBrowser({ view, classifications, albums = [], collections = [], onCollectionsChanged = () => undefined, onMembershipChanged = () => undefined, sort, metadataVisible, privacyMode, onPrivacyModeChange, thumbnailRowHeight = 180, refreshVersion, requestedAsset = null, onRequestedAssetHandled = () => undefined, onSortChange, onMetadataVisibleChange, onThumbnailRowHeightChange = () => undefined, onStatusChange, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: Props) {
   const { gateway } = useLibrary();
   const [directOnly, setDirectOnly] = useState(false);
   const [page, setPage] = useState<PageState | null>(null);
@@ -202,6 +202,7 @@ export function AssetBrowser({ view, classifications, albums = [], collections =
   const moveBatchToFolder = (classificationId: string | null) => void (async () => {
     if (await runBatch(() => gateway.setAssetClassification({ assetIds: selectedIds, classificationId }), "폴더를 변경하지 못했습니다.")) {
       setMembershipVersion((version) => version + 1);
+      onMembershipChanged();
     }
   })();
   const patchBatchAlbum = (albumId: string, operation: "add" | "remove") => void (async () => {
@@ -211,6 +212,7 @@ export function AssetBrowser({ view, classifications, albums = [], collections =
       removeAlbumIds: operation === "remove" ? [albumId] : [],
     }), "앨범을 변경하지 못했습니다.")) {
       setMembershipVersion((version) => version + 1);
+      onMembershipChanged();
     }
   })();
   const patchBatchCollection = (collectionId: string, operation: "add" | "remove") => void (async () => {
@@ -246,6 +248,7 @@ export function AssetBrowser({ view, classifications, albums = [], collections =
     if (succeeded) {
       setUndoAssetIds(assetIds);
       setMessage(`${assetIds.length}개 자산을 휴지통으로 이동했습니다.`);
+      onMembershipChanged();
     }
   })();
   const undoTrash = () => void (async () => {
@@ -257,6 +260,7 @@ export function AssetBrowser({ view, classifications, albums = [], collections =
       setUndoAssetIds(null);
       setMessage("휴지통 이동을 취소했습니다.");
       refresh();
+      onMembershipChanged();
     } catch (error) {
       setMessage(commandErrorMessage(error, "휴지통 이동을 취소하지 못했습니다."));
     } finally {
@@ -272,6 +276,7 @@ export function AssetBrowser({ view, classifications, albums = [], collections =
       setMessage("휴지통으로 이동했습니다.");
       setViewerAssetId(next?.id ?? null);
       refresh();
+      onMembershipChanged();
     } catch (error) {
       setMessage(commandErrorMessage(error, "자산을 휴지통으로 이동하지 못했습니다."));
     }

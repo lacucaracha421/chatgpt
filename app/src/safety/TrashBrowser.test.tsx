@@ -19,6 +19,16 @@ it("loads trash, shows its purge date, and restores an asset", async () => {
   expect(gateway.restoreAsset).toHaveBeenCalledWith("asset-1");
 });
 
+it("reports the trash total count after each load", async () => {
+  const onCountChange = vi.fn();
+  const gateway = createGateway();
+  vi.mocked(gateway.listTrash).mockResolvedValue({ items: [], nextCursor: null, totalCount: 7, totalBytes: 0 });
+
+  render(<LibraryProvider gateway={gateway}><TrashBrowser onCountChange={onCountChange} /></LibraryProvider>);
+
+  await waitFor(() => expect(onCountChange).toHaveBeenLastCalledWith(7));
+});
+
 it("keeps retention controls disabled until the policy is loaded", () => {
   const gateway = createGateway();
   vi.mocked(gateway.getTrashPolicy).mockReturnValue(new Promise(() => undefined));

@@ -6,9 +6,9 @@ use std::{
 use app_lib::library::{
     error::LibraryError,
     models::{
-        AssetCursor, AssetPage, AssetQuery, AssetSort, AssetSummary, ClassificationKind,
-        CreateClassification, ImportSource, IngestMediaRequest, IngestOutcome, MediaSummary,
-        TrashPolicy,
+        AssetCursor, AssetPage, AssetQuery, AssetSort, AssetSummary, ClassificationEntry,
+        ClassificationKind, CreateClassification, ImportSource, IngestMediaRequest, IngestOutcome,
+        MediaSummary, TrashPolicy,
     },
     Library,
 };
@@ -170,7 +170,10 @@ fn image_can_be_ingested_classified_queried_and_deduplicated() {
             .library
             .get_asset_classifications(&added.id)
             .unwrap(),
-        vec![duplicate_target.clone()],
+        vec![ClassificationEntry {
+            asset_count: 1,
+            ..duplicate_target.clone()
+        }],
     );
     assert_eq!(
         fixture.query(&duplicate_target.id).items,

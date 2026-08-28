@@ -25,6 +25,7 @@ type ClassificationSidebarProps = {
   expandedAlbumIds?: string[];
   sidebarWidth: number;
   reviewCount: number;
+  trashCount?: number;
   createClassificationRequest?: number;
   onViewChange: (view: AssetView) => void;
   onExpandedIdsChange: (ids: string[]) => void;
@@ -47,6 +48,7 @@ type SidebarTreeEntry = {
   iconKey: string | null;
   colorKey: string | null;
   kind: ClassificationEntry["kind"];
+  assetCount?: number;
 };
 
 type SidebarTreeNode = TreeNode<SidebarTreeEntry>;
@@ -76,6 +78,7 @@ export function ClassificationSidebar({
   onPointerDragCancel,
   sidebarWidth,
   reviewCount,
+  trashCount,
   view,
   collectionType,
   createClassificationRequest = 0,
@@ -442,7 +445,7 @@ export function ClassificationSidebar({
         </div>
       </ContextMenu>
       <div className="classification-sidebar__footer">
-        <QuickViewButton icon={<TrashIcon aria-hidden="true" />} label="휴지통" selected={view.kind === "trash"} onClick={() => onViewChange({ kind: "trash" })} />
+        <QuickViewButton icon={<TrashIcon aria-hidden="true" />} label="휴지통" count={trashCount} selected={view.kind === "trash"} onClick={() => onViewChange({ kind: "trash" })} />
         <QuickViewButton icon={<Cog6ToothIcon aria-hidden="true" />} label="설정" selected={view.kind === "settings"} onClick={() => onViewChange({ kind: "settings" })} />
       </div>
       <div
@@ -614,6 +617,7 @@ function TreeItem({ activeRowId, editError, editName, expandedIds, hasNextSiblin
             {editingName ? (
               <InlineFolderInput name={editName} error={editError} onNameChange={onEditNameChange} onSave={onEditSave} onCancel={onEditCancel} />
             ) : <span className="classification-sidebar__tree-label">{node.entry.name}</span>}
+            {node.entry.assetCount ? <span className="classification-sidebar__badge" aria-hidden="true">{node.entry.assetCount}</span> : null}
           </span>
         </div>
       </ContextMenu>

@@ -256,7 +256,7 @@ describe("App", () => {
     const user = userEvent.setup();
 
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
-    await user.click(await screen.findByRole("button", { name: "휴지통" }));
+    await user.click(await screen.findByRole("button", { name: "휴지통 0개" }));
 
     await waitFor(() => expect(libraryGateway.listTrash).toHaveBeenCalledWith({ after: null, limit: 100 }));
   });
@@ -272,7 +272,7 @@ describe("App", () => {
     const user = userEvent.setup();
 
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={subscribeDrops} />);
-    await user.click(await screen.findByRole("button", { name: "휴지통" }));
+    await user.click(await screen.findByRole("button", { name: "휴지통 0개" }));
     await waitFor(() => expect(drop).toBeDefined());
     act(() => drop?.(["C:\\images\\ignored.png"]));
 

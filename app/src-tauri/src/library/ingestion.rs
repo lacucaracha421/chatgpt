@@ -1296,9 +1296,11 @@ mod tests {
         assert_eq!(asset.height, 720);
         assert!(source.is_file());
         assert!(library.root().join(&asset.relative_path).is_file());
+        let mut expected_classification = classification;
+        expected_classification.asset_count = 1;
         assert_eq!(
             library.get_asset_classifications(&asset.id).unwrap(),
-            vec![classification]
+            vec![expected_classification]
         );
         let pending_jobs: i64 = library
             .connection()
@@ -1661,12 +1663,14 @@ mod tests {
                 metadata_changed: true,
             },
         );
+        let mut expected_classification = duplicate_classification;
+        expected_classification.asset_count = 1;
         assert_eq!(
             fixture
                 .library
                 .get_asset_classifications(&asset.id)
                 .unwrap(),
-            vec![duplicate_classification],
+            vec![expected_classification],
         );
         assert_eq!(
             fixture

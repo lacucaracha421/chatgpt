@@ -108,11 +108,13 @@ function renderSidebar(
       <LibraryProvider gateway={libraryGateway}>
         <ClassificationSidebar
           entries={props.entries ?? entries}
+          albums={props.albums}
           collectionType={props.collectionType ?? "manga"}
           view={view}
           expandedIds={expandedIds}
           sidebarWidth={sidebarWidth}
           reviewCount={props.reviewCount ?? 0}
+          trashCount={props.trashCount}
           onViewChange={(nextView) => {
             setView(nextView);
             onViewChange(nextView);
@@ -302,6 +304,32 @@ describe("ClassificationSidebar", () => {
     const { onViewChange } = renderSidebar();
 
     await user.click(screen.getByRole("button", { name: "휴지통" }));
+
+    expect(onViewChange).toHaveBeenCalledWith({ kind: "trash" });
+  });
+
+  it("shows direct asset counts next to folder and album names", () => {
+    const countedEntries = [
+      { ...entries[0], assetCount: 3 },
+      { ...entries[1], assetCount: 0 },
+      entries[2],
+    ] satisfies ClassificationEntry[];
+    renderSidebar(gateway(), {
+      entries: countedEntries,
+      albums: [{ id: "album-root", name: "표지", parentId: null, iconKey: null, colorKey: null, assetCount: 2 }],
+    });
+
+    const games = screen.getByRole("treeitem", { name: "Games" });
+    expect(games.querySelector(".classification-sidebar__badge")?.textContent).toBe("3");
+    expect(screen.getByRole("treeitem", { name: "Blue Archive" }).querySelector(".classification-sidebar__badge")).toBeNull();
+    expect(screen.getByRole("treeitem", { name: "표지" }).querySelector(".classification-sidebar__badge")?.textContent).toBe("2");
+  });
+
+  it("exposes the trash count in the footer quick view", async () => {
+    const user = userEvent.setup();
+    const { onViewChange } = renderSidebar(gateway(), { trashCount: 4 });
+
+    await user.click(screen.getByRole("button", { name: "휴지통 4개" }));
 
     expect(onViewChange).toHaveBeenCalledWith({ kind: "trash" });
   });

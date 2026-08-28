@@ -124,6 +124,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const metadataImportRunningRef = useRef(false);
   const [requestedAsset, setRequestedAsset] = useState<AssetSummary | null>(null);
   const [reviewCount, setReviewCount] = useState(0);
+  const [trashCount, setTrashCount] = useState(0);
   const [mangaViewer, setMangaViewer] = useState<{ seriesId: string; title: string; pageCount: number } | null>(null);
   const [videoPreparationTrigger, setVideoPreparationTrigger] = useState(0);
   const settingsReturnViewRef = useRef<AssetView>({ kind: "classification", classificationId: null });
@@ -154,9 +155,19 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     const page = await gateway.listSimilarityReviews({ after: null, limit: 1 });
     setReviewCount(page.totalCount);
   }, [gateway]);
+  const refreshTrashCount = useCallback(async () => {
+    const page = await gateway.listTrash({ after: null, limit: 1 });
+    setTrashCount(page.totalCount);
+  }, [gateway]);
+  const refreshMembershipCounts = useCallback(() => {
+    void refreshClassifications();
+    void refreshAlbums();
+    void refreshTrashCount();
+  }, [refreshClassifications, refreshAlbums, refreshTrashCount]);
   const handleIngested = useCallback((result: IngestOutcome) => {
     if (result.status === "added" || (result.status === "exact_duplicate" && result.classificationChanged)) {
       setAssetRefresh((current) => current + 1);
+      refreshMembershipCounts();
     }
     if (
       result.status === "added"
@@ -166,7 +177,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
       setVideoPreparationTrigger((current) => current + 1);
     }
     if (result.status === "review_pending") void refreshReviewCount();
-  }, [refreshReviewCount]);
+  }, [refreshReviewCount, refreshMembershipCounts]);
   const handleIngestedRef = useRef(handleIngested);
   useLayoutEffect(() => { handleIngestedRef.current = handleIngested; }, [handleIngested]);
   useEffect(() => {
@@ -225,7 +236,8 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   }, [refreshSidebar]);
   useEffect(() => {
     void refreshReviewCount().catch((error) => setMessage(commandErrorMessage(error, "유사 검토 개수를 불러오지 못했습니다.")));
-  }, [refreshReviewCount]);
+    void refreshTrashCount().catch((error) => setMessage(commandErrorMessage(error, "휴지통 개수를 불러오지 못했습니다.")));
+  }, [refreshReviewCount, refreshTrashCount]);
   useEffect(() => {
     let active = true;
     void (async () => {
@@ -241,10 +253,12 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
         }
       } catch (error) {
         if (active) appendMessage(commandErrorMessage(error, "휴지통 자동 정리를 실행하지 못했습니다."));
+      } finally {
+        if (active) void refreshTrashCount().catch(() => undefined);
       }
     })();
     return () => { active = false; };
-  }, [appendMessage, gateway]);
+  }, [appendMessage, gateway, refreshTrashCount]);
   useEffect(() => {
     let active = true;
     void (async () => {
@@ -480,6 +494,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
               onChanged={() => void refreshClassifications()}
               onAlbumsChanged={() => void refreshAlbums()}
               reviewCount={reviewCount}
+              trashCount={trashCount}
               dragTarget={dragTarget}
               onPointerDragStart={startPointerDrag}
               onPointerDragMove={movePointerDrag}
@@ -490,7 +505,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
           content={
             <div className="library-content">
               <section className="library-content__browser" aria-label="자산 내용">
-                {view.kind === "trash" ? <TrashBrowser /> : view.kind === "settings" ? (
+                {view.kind === "trash" ? <TrashBrowser onCountChange={setTrashCount} /> : view.kind === "settings" ? (
                   <SettingsView
                     restoring={maintenance === "restore"}
                     onRestore={restoreBackup}
@@ -544,6 +559,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     albums={albums}
                     collections={collections}
                     onCollectionsChanged={() => void refreshCollections()}
+                    onMembershipChanged={refreshMembershipCounts}
                     sort={preferences.assetSort}
                     metadataVisible={preferences.metadataVisible}
                     privacyMode={preferences.privacyMode}

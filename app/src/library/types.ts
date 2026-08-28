@@ -119,6 +119,7 @@ export type ClassificationEntry = {
   parentId: string | null;
   iconKey: string | null;
   colorKey: string | null;
+  assetCount?: number;
 };
 
 export type AlbumEntry = {
@@ -127,6 +128,7 @@ export type AlbumEntry = {
   parentId: string | null;
   iconKey: string | null;
   colorKey: string | null;
+  assetCount?: number;
 };
 
 export type CollectionType = "game" | "manga" | "movie";

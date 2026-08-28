@@ -22,6 +22,7 @@ impl Library {
             parent_id: request.parent_id,
             icon_key: None,
             color_key: None,
+            asset_count: 0,
         };
         connection
             .execute(
@@ -41,7 +42,11 @@ impl Library {
     pub fn list_albums(&self) -> Result<Vec<AlbumEntry>, LibraryError> {
         let connection = self.connection()?;
         let mut statement = connection.prepare(
-            "SELECT id, name, parent_id, icon_key, color_key
+            "SELECT id, name, parent_id, icon_key, color_key,
+                (SELECT COUNT(*) FROM asset_albums AS count_link
+                 JOIN assets AS count_asset ON count_asset.id = count_link.asset_id
+                 WHERE count_link.album_id = albums.id
+                   AND count_asset.status = 'normal') AS asset_count
              FROM albums
              ORDER BY parent_id, name COLLATE NOCASE, id",
         )?;
@@ -165,7 +170,11 @@ impl Library {
         let connection = self.connection()?;
         validated_asset_ids(&connection, &[asset_id.to_owned()])?;
         let mut statement = connection.prepare(
-            "SELECT album.id, album.name, album.parent_id, album.icon_key, album.color_key
+            "SELECT album.id, album.name, album.parent_id, album.icon_key, album.color_key,
+                (SELECT COUNT(*) FROM asset_albums AS count_link
+                 JOIN assets AS count_asset ON count_asset.id = count_link.asset_id
+                 WHERE count_link.album_id = album.id
+                   AND count_asset.status = 'normal') AS asset_count
              FROM albums AS album
              JOIN asset_albums AS link ON link.album_id = album.id
              WHERE link.asset_id = ?1
@@ -206,6 +215,7 @@ fn album_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AlbumEntry> {
         parent_id: row.get(2)?,
         icon_key: row.get(3)?,
         color_key: row.get(4)?,
+        asset_count: u64::try_from(row.get::<_, i64>(5)?).unwrap_or(0),
     })
 }
 
@@ -257,6 +267,7 @@ mod tests {
                     parent_id: Some(child.parent_id.unwrap()),
                     icon_key: None,
                     color_key: None,
+                    asset_count: 0,
                 },
             ]
         );
@@ -423,7 +434,14 @@ mod tests {
             .into_iter()
             .map(|entry| entry.id)
             .collect::<Vec<_>>();
-        assert_eq!(album_ids, vec![second.id, first.id]);
+        assert_eq!(album_ids.clone(), vec![second.id.clone(), first.id.clone()]);
+        let counts = library
+            .list_albums()
+            .unwrap()
+            .into_iter()
+            .map(|entry| (entry.id, entry.asset_count))
+            .collect::<Vec<_>>();
+        assert_eq!(counts, vec![(second.id, 1), (first.id, 1)]);
         assert_eq!(
             library
                 .connection()

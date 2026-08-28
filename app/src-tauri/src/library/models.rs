@@ -554,6 +554,8 @@ pub struct ClassificationEntry {
     pub parent_id: Option<String>,
     pub icon_key: Option<String>,
     pub color_key: Option<String>,
+    #[serde(default)]
+    pub asset_count: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -579,6 +581,8 @@ pub struct AlbumEntry {
     pub parent_id: Option<String>,
     pub icon_key: Option<String>,
     pub color_key: Option<String>,
+    #[serde(default)]
+    pub asset_count: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1232,6 +1236,7 @@ mod tests {
                 parent_id: Some("work-1".into()),
                 icon_key: None,
                 color_key: None,
+                asset_count: 0,
             }],
         };
         let value = serde_json::to_value(SimilarityReviewSummary {
