@@ -43,6 +43,9 @@ const {
   parseStatusHref,
   pruneArtistAffinity,
   pruneSavedEntries,
+  savedXMediaKey,
+  isSavedMediaState,
+  timelineSavedBadgePosition,
   selectedTabIsFirst,
   sortGalleryItems,
   takeUnrenderedGalleryItems,
@@ -147,6 +150,43 @@ test("auto harvest stops at its image target, on stalled feed, and when leaving 
   }).done, false);
 });
 
+
+test("normal X timeline markers switch to the library index when it is authoritative", () => {
+  const legacy = new Map([["media-A", 1]]);
+  const library = new Set(["123:2"]);
+  const session = new Set();
+  assert.equal(savedXMediaKey("123", 2), "123:2");
+  assert.equal(isSavedMediaState("media-A", "123", 1, legacy, library, false, session), true);
+  assert.equal(isSavedMediaState("media-A", "123", 1, legacy, library, true, session), false);
+  assert.equal(isSavedMediaState("media-B", "123", 2, legacy, library, true, session), true);
+  session.add("media-C");
+  assert.equal(isSavedMediaState("media-C", "999", 1, legacy, library, true, session), true);
+  assert.match(source, /function syncTimelineSavedImage/);
+  assert.match(source, /saved-index:get/);
+  assert.match(source, /refreshTimelineSavedMarkers\(document\)/);
+  assert.doesNotMatch(source, /image\.toggleAttribute\('data-lakomics-saved'/);
+  assert.doesNotMatch(source, /photo\.classList\.(?:toggle|add|remove)\('lakomics-x-timeline-saved'/);
+  assert.doesNotMatch(source, /photo\.append\(/);
+  assert.match(source, /lakomics-x-saved-badge-layer/);
+  assert.match(source, /syncTimelineSavedBadge\(image, isSaved\)/);
+});
+
+test("ordinary X saved badge portal stays inside the viewport and hides offscreen media", () => {
+  const centered = timelineSavedBadgePosition(
+    { left: 100, top: 50, right: 300, bottom: 250, width: 200, height: 200 }, 800, 600,
+  );
+  assert.equal(centered.left, 272);
+  assert.equal(centered.top, 57);
+  const clamped = timelineSavedBadgePosition(
+    { left: 760, top: 580, right: 900, bottom: 800, width: 140, height: 220 }, 800, 600,
+  );
+  assert.equal(clamped.left, 773);
+  assert.equal(clamped.top, 573);
+  assert.equal(
+    timelineSavedBadgePosition({ left: 10, top: -300, right: 210, bottom: -10, width: 200, height: 290 }, 800, 600),
+    null,
+  );
+});
 
 test("saved-media history drops expired entries and caps recent markers", () => {
   const now = 200 * 24 * 60 * 60 * 1000;

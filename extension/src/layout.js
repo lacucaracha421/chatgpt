@@ -57,8 +57,12 @@
     };
   }
 
-  function getCompactLevel(entries, layout, parentId, requestedPage) {
-    const level = getLevel(entries, layout, parentId, requestedPage);
+  function getCompactLevel(entries, layout, parentId, requestedPage, excludedIds = []) {
+    const excluded = new Set(Array.isArray(excludedIds) ? excludedIds : []);
+    const visibleEntries = excluded.size
+      ? entries.filter((entry) => !excluded.has(entry?.id))
+      : entries;
+    const level = getLevel(visibleEntries, layout, parentId, requestedPage);
     const slots = level.slots.filter(Boolean);
     return {
       ...level,

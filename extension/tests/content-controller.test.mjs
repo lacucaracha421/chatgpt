@@ -152,7 +152,12 @@ test("retry resends the identical failed payload", async () => {
   });
   const controller = api.createCollectorController({ send: api.send, status() {}, snapshot: api.snapshot });
   const entries = [{ id: "tag", kind: "tag", name: "Tag", parentId: null }];
-  const candidate = { mediaUrl: "https://pbs.twimg.com/media/A?format=jpg&name=orig", sourceUrl: "https://x.com/u/status/1" };
+  const candidate = {
+    mediaUrl: "https://pbs.twimg.com/media/A?format=jpg&name=orig",
+    sourceUrl: "https://x.com/u/status/1/photo/2",
+    postId: "1",
+    mediaIndex: 2,
+  };
   controller.begin(candidate, { x: 0, y: 0 }, entries, api.radial.resetLayout(entries));
   controller.move({ x: 0, y: -84 }, 0);
   await controller.release();
@@ -176,7 +181,12 @@ test("worker transport failures remain retryable", async () => {
     snapshot: api.snapshot,
   });
   const entries = [{ id: "tag", kind: "tag", name: "Tag", parentId: null }];
-  const candidate = { mediaUrl: "https://pbs.twimg.com/media/A?format=jpg&name=orig", sourceUrl: "https://x.com/u/status/1" };
+  const candidate = {
+    mediaUrl: "https://pbs.twimg.com/media/A?format=jpg&name=orig",
+    sourceUrl: "https://x.com/u/status/1/photo/2",
+    postId: "1",
+    mediaIndex: 2,
+  };
   controller.begin(candidate, { x: 0, y: 0 }, entries, api.radial.resetLayout(entries));
   controller.move({ x: 0, y: -84 }, 0);
 
@@ -424,6 +434,7 @@ test("controller keeps a mobile pending selection alive until center confirms it
 
 
 test("successful image saves notify the gallery marker, but review-pending does not", async () => {
+  assert.match(contentSource, /mediaIndex: payload\.mediaIndex \?\? null/);
   const marked = [];
   const api = loadContent(async () => ({ ok: true, status: "downloaded" }));
   const controller = api.createCollectorController({
@@ -433,12 +444,20 @@ test("successful image saves notify the gallery marker, but review-pending does 
     saved(payload, response) { marked.push({ payload, response }); },
   });
   const entries = [{ id: "tag", kind: "tag", name: "Tag", parentId: null }];
-  const candidate = { mediaUrl: "https://pbs.twimg.com/media/A?format=jpg&name=orig", sourceUrl: "https://x.com/u/status/1" };
+  const candidate = {
+    mediaUrl: "https://pbs.twimg.com/media/A?format=jpg&name=orig",
+    sourceUrl: "https://x.com/u/status/1/photo/2",
+    postId: "1",
+    mediaIndex: 2,
+  };
   controller.begin(candidate, { x: 0, y: 0 }, entries, api.radial.resetLayout(entries));
   controller.move({ x: 0, y: -84 }, 0);
   await controller.release();
   assert.equal(marked.length, 1);
   assert.equal(marked[0].payload.mediaUrl, candidate.mediaUrl);
+  assert.equal(marked[0].payload.postId, "1");
+  assert.equal(marked[0].payload.mediaIndex, 2);
+  assert.equal(marked[0].payload.sourceUrl, "https://x.com/u/status/1/photo/2");
 
   const pendingMarked = [];
   const pending = api.createCollectorController({

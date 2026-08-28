@@ -217,6 +217,18 @@ test("compact secondary level drops empty stored slots but preserves item order"
 });
 
 
+test("compact secondary level hides classifications promoted to the first-level ring", () => {
+  const current = [
+    { id: "game", kind: "root", name: "Game", parentId: null },
+    { id: "reverse", kind: "tag", name: "Reverse", parentId: "game" },
+    { id: "zenless", kind: "tag", name: "Zenless", parentId: "game" },
+  ];
+  const radialLayout = layoutApi.resetLayout(current);
+  const level = layoutApi.getCompactLevel(current, radialLayout, "game", 0, ["reverse"]);
+  assert.equal(level.slotCount, 1);
+  assert.deepEqual(plain(level.slots.map((entry) => entry.id)), ["zenless"]);
+});
+
 test("only non-root classifications are offered as first-level pin candidates", () => {
   const current = [{ id:"reverse-root", kind:"root", name:"Reverse", parentId:null }, { id:"game", kind:"root", name:"Game", parentId:null }, { id:"child", kind:"tag", name:"Child", parentId:"game" }];
   assert.deepEqual(plain(layoutApi.getFirstLevelPinCandidates(current, []).map(e=>e.id)), ["child"]);

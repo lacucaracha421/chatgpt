@@ -86,6 +86,19 @@ AND (?6 IS NULL OR asset.collected_at < ?6 OR (asset.collected_at = ?6 AND asset
 AND (?8 IS NULL OR asset.collected_at < ?8)
 ORDER BY asset.collected_at DESC, asset.id DESC LIMIT ?10";
 impl Library {
+    pub(crate) fn list_normal_x_source_urls(&self) -> Result<Vec<String>, LibraryError> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT DISTINCT source_url FROM assets\n             WHERE status = 'normal'\n               AND source_url IS NOT NULL\n               AND (source_url LIKE 'https://x.com/%' OR source_url LIKE 'https://twitter.com/%')\n             ORDER BY source_url ASC",
+        )?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+        let mut urls = Vec::new();
+        for row in rows {
+            urls.push(row?);
+        }
+        Ok(urls)
+    }
+
     pub fn list_assets(&self, query: AssetQuery) -> Result<AssetPage, LibraryError> {
         if !(1..=200).contains(&query.limit) {
             return Err(LibraryError::InvalidAssetPageLimit);

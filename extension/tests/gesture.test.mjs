@@ -152,6 +152,35 @@ test("pinned first-level ring expands the pinned entry's actual children on dwel
   assert.equal(session.snapshot().secondaryLevel.slots[0].id, "reverse-child");
 });
 
+test("a first-level pin is omitted from its parent's secondary donut", () => {
+  const pinnedTree = [
+    { id: "game", kind: "root", name: "Game", parentId: null },
+    { id: "reverse", kind: "tag", name: "Reverse", parentId: "game" },
+    { id: "zenless", kind: "tag", name: "Zenless", parentId: "game" },
+  ];
+  const pinnedLayout = context.LakomicsRadial.resetLayout(pinnedTree);
+  const session = createSession({ x: 100, y: 100 }, pinnedTree, pinnedLayout, ["reverse"]);
+  const primary = session.snapshot().primaryLevel;
+  const gameIndex = primary.slots.findIndex((entry) => entry?.id === "game");
+  session.move(pointForPrimarySlot(gameIndex, primary.slotCount), 0);
+  session.tick(300);
+  assert.deepEqual(plain(session.snapshot().secondaryLevel.slots.map((entry) => entry.id)), ["zenless"]);
+});
+
+test("a parent does not open an empty secondary donut when all of its children are pinned", () => {
+  const pinnedTree = [
+    { id: "game", kind: "root", name: "Game", parentId: null },
+    { id: "reverse", kind: "tag", name: "Reverse", parentId: "game" },
+  ];
+  const pinnedLayout = context.LakomicsRadial.resetLayout(pinnedTree);
+  const session = createSession({ x: 100, y: 100 }, pinnedTree, pinnedLayout, ["reverse"]);
+  const primary = session.snapshot().primaryLevel;
+  const gameIndex = primary.slots.findIndex((entry) => entry?.id === "game");
+  session.move(pointForPrimarySlot(gameIndex, primary.slotCount), 0);
+  session.tick(300);
+  assert.equal(session.snapshot().secondaryLevel, null);
+});
+
 test("dwell pages through exterior controls for the active ring", () => {
   const many = Array.from({ length: 13 }, (_, index) => ({
     id: `root-${index}`, kind: "root", name: `Root ${index}`, parentId: null,

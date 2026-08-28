@@ -221,3 +221,32 @@ html.lakomics-touch-gesture-active * {
   pointer-events: auto;
   touch-action: none;
 }
+
+
+/* Saved-media marker for ordinary X timeline donut saves.
+   The badge lives in our own fixed layer; no X media node is restyled. */
+#lakomics-x-saved-badge-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483005;
+  pointer-events: none;
+}
+
+.lakomics-x-saved-badge-portal {
+  position: fixed;
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 1px solid rgb(134 239 172 / 72%);
+  border-radius: 999px;
+  color: #86efac;
+  background: rgb(15 23 18 / 92%);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 32%);
+  font: 850 12px/1 "Segoe UI", sans-serif;
+  pointer-events: none;
+}
+
+.lakomics-x-saved-badge-portal[hidden] {
+  display: none !important;
+}

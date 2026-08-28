@@ -1,0 +1,12 @@
+﻿Lakomics X Collector 2.0.0-alpha.15.24
+
+- Saved-image checks are now backed by the open Lakomics library instead of only the browser's 90-day/3000-item history.
+- Added authenticated GET /v1/saved-x-media to the PC Lakomics extension API.
+- The API returns compact tweetId:photoIndex keys for normal library assets with exact X photo source URLs.
+- The extension persists the last successful library index per Lakomics endpoint and reuses it while the PC/Tailscale backend is offline.
+- A live library index is authoritative: removing an asset from the library removes its marker after the next successful sync.
+- Newly saved media is marked immediately in the current X session.
+- First-ring pinned classifications remain hidden from their parent's secondary donut (15.23 change retained).
+- Normal X timeline images and recommendation gallery cards share the same library-backed saved-state decision.
+- 132/132 extension tests pass; 13/13 extension API Rust tests pass.
+

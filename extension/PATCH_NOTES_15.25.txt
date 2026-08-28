@@ -1,0 +1,7 @@
+Lakomics X Collector 2.0.0-alpha.15.25
+
+- Fix: saved-image checks on the normal X timeline no longer inject a span into X/React-owned tweetPhoto DOM.
+- The timeline check badge is now rendered with a CSS ::after pseudo-element only.
+- Legacy injected badge spans are removed during marker refresh.
+- This prevents a saved X image from turning into a black media surface after collection.
+- Library-backed saved-state from 15.24 remains unchanged.

@@ -1,0 +1,9 @@
+Lakomics X Collector 2.0.0-alpha.15.27
+
+- Ordinary X timeline donut saves now show a check badge again.
+- Saved badges render in a separate Lakomics fixed portal layer. X tweet/photo/image DOM is never mutated for the marker.
+- Removed marker layout/compositing changes that could blank X images on Android Chromium.
+- Donut save success now forwards mediaIndex into markSaved, fixing exact multi-photo identity.
+- Saved-state reload still uses the Lakomics library-backed tweetId:photoIndex index.
+- Badge positioning is viewport-clamped and hides for offscreen/disconnected media.
+- Extension tests: 133 passed, 0 failed.

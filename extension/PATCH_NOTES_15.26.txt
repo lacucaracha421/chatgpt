@@ -1,0 +1,8 @@
+Lakomics X Collector 2.0.0-alpha.15.26
+
+- Fixes saved X images turning black on some Android Chromium browsers.
+- Stops changing the tweetPhoto element positioning/compositing entirely.
+- Removes the saved pseudo-element and backdrop-filter marker.
+- Normal timeline saved state now touches only the image via data-lakomics-saved.
+- Saved images use a simple green outline as the safe marker.
+- Existing old injected badges/classes are cleaned up when encountered.

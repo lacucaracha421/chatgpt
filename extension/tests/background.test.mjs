@@ -6,6 +6,34 @@ import vm from "node:vm";
 const source = fs.readFileSync(new URL("../src/background.js", import.meta.url), "utf8");
 const layoutSource = fs.readFileSync(new URL("../src/layout.js", import.meta.url), "utf8");
 const defaultsSource = fs.readFileSync(new URL("../src/defaults.js", import.meta.url), "utf8");
+const workerSource = fs.readFileSync(new URL("../src/background-worker.js", import.meta.url), "utf8");
+const manifest = JSON.parse(fs.readFileSync(new URL("../manifest.json", import.meta.url), "utf8"));
+
+const workerImportBlock = `  if (typeof importScripts === "function") {
+    if (!globalThis.LakomicsRadial) importScripts("layout.js");
+    if (!globalThis.LakomicsDefaults) importScripts("defaults.js");
+  }
+
+`;
+const workerHeader = `// Generated classic MV3 service worker bundle for Android Chromium/Quetta.
+// Keep in sync with layout.js + defaults.js + background.js; tests verify this exactly.
+
+`;
+
+test("MV3 background worker is a self-contained bundle with no importScripts fetches", () => {
+  assert.equal(manifest.background?.service_worker, "src/background-worker.js");
+  const normalizeNewlines = (value) => value.replace(/\r\n/g, "\n");
+  const normalizedSource = normalizeNewlines(source);
+  const normalizedLayout = normalizeNewlines(layoutSource);
+  const normalizedDefaults = normalizeNewlines(defaultsSource);
+  assert.equal(normalizedSource.includes(workerImportBlock), true);
+  const expected = workerHeader
+    + normalizedLayout.trimEnd() + "\n\n"
+    + normalizedDefaults.trimEnd() + "\n\n"
+    + normalizedSource.replace(workerImportBlock, "");
+  assert.equal(normalizeNewlines(workerSource), expected);
+  assert.doesNotMatch(workerSource, /\bimportScripts\s*\(/);
+});
 
 test("keeps the connection token inside the service worker", async () => {
   const harness = createHarness({ connectionToken: "0123456789abcdef0123456789abcdef" });
@@ -784,6 +812,68 @@ test("connection backup round-trips the token and remote endpoint", async () => 
   });
 });
 
+
+
+test("saved X media index is persisted and reused while Lakomics is offline", async () => {
+  const token = "0123456789abcdef0123456789abcdef";
+  const harness = createHarness({ connectionToken: token });
+  harness.queueJson({ keys: ["123:1", "123:2", "bad", "123:2"] });
+
+  const live = await harness.api.handleMessage({ type: "saved-index:get" });
+  assert.equal(live.ok, true);
+  assert.equal(live.authoritative, true);
+  assert.equal(live.indexSource, "app");
+  assert.deepEqual(plain(live.savedKeys), ["123:1", "123:2"]);
+  assert.equal(harness.fetchCalls[0].url, "http://127.0.0.1:32145/v1/saved-x-media");
+
+  harness.queueError(new TypeError("offline"));
+  const cached = await harness.api.handleMessage({ type: "saved-index:get" });
+  assert.equal(cached.ok, true);
+  assert.equal(cached.authoritative, true);
+  assert.equal(cached.indexSource, "app-cache");
+  assert.equal(cached.fallbackCode, "app_offline");
+  assert.deepEqual(plain(cached.savedKeys), ["123:1", "123:2"]);
+});
+
+test("successful PC ingestion immediately advances an existing saved-index cache", async () => {
+  const token = "0123456789abcdef0123456789abcdef";
+  const harness = createHarness({
+    connectionToken: token,
+    lastAppSavedXMediaIndex: {
+      version: 1, baseUrl: "http://127.0.0.1:32145", endpointSource: "app",
+      savedKeys: ["1:1"], savedAt: 1,
+    },
+  });
+  harness.queueJson({ status: "added", assetId: "asset-2" });
+  const response = await harness.api.handleMessage({
+    type: "ingestion:create",
+    payload: {
+      source: "x", mediaType: "image",
+      mediaUrl: "https://pbs.twimg.com/media/NEW?format=jpg&name=orig",
+      sourceUrl: "https://x.com/user/status/222/photo/3",
+      classificationId: "tag", classificationName: "Tag", classificationSource: "app",
+    },
+  });
+  assert.equal(response.ok, true);
+  assert.deepEqual(plain(harness.storage.lastAppSavedXMediaIndex.savedKeys), ["1:1", "222:3"]);
+  assert.equal(harness.api.savedXMediaKeyFromSourceUrl("https://x.com/u/status/222/photo/3"), "222:3");
+  assert.equal(harness.api.savedXMediaKeyFromSourceUrl("https://x.com/u/status/222"), "");
+});
+
+test("saved X media cache never leaks across Lakomics endpoints", async () => {
+  const harness = createHarness({
+    connectionToken: "0123456789abcdef0123456789abcdef",
+    remoteSettings: { enabled: true, baseUrl: "https://second.tail0000.ts.net" },
+    lastAppSavedXMediaIndex: {
+      version: 1, baseUrl: "https://first.tail0000.ts.net", endpointSource: "remote",
+      savedKeys: ["10:1"], savedAt: 1,
+    },
+  });
+  harness.queueError(new TypeError("offline"));
+  const response = await harness.api.handleMessage({ type: "saved-index:get" });
+  assert.equal(response.ok, false);
+  assert.equal(response.code, "app_offline");
+});
 
 test("X Translate proxy only allows the four configured HTTPS API hosts", async () => {
   const harness = createHarness();

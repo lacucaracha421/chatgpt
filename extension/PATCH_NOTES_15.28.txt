@@ -1,0 +1,13 @@
+Lakomics X Collector 2.0.0-alpha.15.28
+
+- Fix Quetta/Android Chromium MV3 service-worker registration failure (Status code 10 / network fetch failure).
+- Manifest now points to src/background-worker.js, a self-contained classic service-worker bundle.
+- The bundle embeds layout.js and defaults.js before background.js, so service-worker startup performs zero importScripts() fetches.
+- Changing the worker path forces a fresh registration instead of reusing the prior worker registration.
+- Added a synchronization test that fails if background-worker.js diverges from layout.js + defaults.js + background.js.
+- Keeps the 15.27 ordinary-X donut-save marker fix: exact mediaIndex propagation and independent saved-check overlay without mutating X media DOM.
+
+Validation:
+- Extension tests: 134/134 passed.
+- node --check: background-worker.js passed.
+- Desktop Chromium/Edge: unpacked extension registered src/background-worker.js as a live service_worker target.

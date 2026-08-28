@@ -1,10 +1,384 @@
+// Generated classic MV3 service worker bundle for Android Chromium/Quetta.
+// Keep in sync with layout.js + defaults.js + background.js; tests verify this exactly.
+
 (() => {
   "use strict";
 
-  if (typeof importScripts === "function") {
-    if (!globalThis.LakomicsRadial) importScripts("layout.js");
-    if (!globalThis.LakomicsDefaults) importScripts("defaults.js");
+  const ROOT = "__root__";
+  const PINNED = "__pinned__";
+
+  function slotCount(childCount) {
+    return childCount <= 6 ? 6 : 12;
   }
+
+  function reconcileLayout(entries, storedLayout) {
+    const groups = groupByParent(entries);
+    const storedParents = storedLayout?.version === 1 && storedLayout.parents
+      ? storedLayout.parents
+      : {};
+    const parents = {};
+    for (const [key, children] of groups) {
+      parents[key] = reconcileParent(children, storedParents[key]);
+    }
+    if (Array.isArray(storedParents[PINNED])) {
+      parents[PINNED] = storedParents[PINNED].map((page) => Array.isArray(page) ? [...page] : []);
+    }
+    return { version: 1, parents };
+  }
+
+  function resetLayout(entries) {
+    const parents = {};
+    for (const [key, children] of groupByParent(entries)) {
+      const count = slotCount(children.length);
+      const pageCount = Math.max(1, Math.ceil(children.length / count));
+      const slots = Array(pageCount * count).fill(null);
+      children.forEach((entry, index) => { slots[index] = entry.id; });
+      parents[key] = chunk(slots, count);
+    }
+    return { version: 1, parents };
+  }
+
+  function getLevel(entries, layout, parentId, requestedPage) {
+    const storedPages = layout?.parents?.[parentKey(parentId)];
+    const children = entries.filter((entry) => entry.parentId === parentId);
+    // Always reconcile against the live/recovered tree. Cached/older layouts can be
+    // missing a page for a pinned child (for example 리버스/명조/젠레스), which
+    // used to make an existing submenu render as an empty ring until refresh.
+    const pages = reconcileParent(children, storedPages);
+    const count = pages[0]?.length ?? slotCount(children.length);
+    const pageCount = Math.max(1, pages.length);
+    const page = Math.min(Math.max(0, Number(requestedPage) || 0), pageCount - 1);
+    const byId = new Map(children.map((entry) => [entry.id, entry]));
+    const ids = [...(pages[page] ?? [])];
+    while (ids.length < count) ids.push(null);
+    return {
+      parentId,
+      page,
+      pageCount,
+      slotCount: count,
+      slots: ids.slice(0, count).map((id) => id ? byId.get(id) ?? null : null),
+    };
+  }
+
+  function getCompactLevel(entries, layout, parentId, requestedPage, excludedIds = []) {
+    const excluded = new Set(Array.isArray(excludedIds) ? excludedIds : []);
+    const visibleEntries = excluded.size
+      ? entries.filter((entry) => !excluded.has(entry?.id))
+      : entries;
+    const level = getLevel(visibleEntries, layout, parentId, requestedPage);
+    const slots = level.slots.filter(Boolean);
+    return {
+      ...level,
+      slotCount: slots.length,
+      slots,
+    };
+  }
+
+
+  function moveSlot(layout, parentId, fromIndex, toIndex) {
+    const next = JSON.parse(JSON.stringify(layout));
+    const key = parentKey(parentId);
+    const pages = next.parents?.[key];
+    if (!pages) return next;
+    const pageSize = pages[0]?.length ?? 0;
+    const flat = pages.flat();
+    if (!Number.isInteger(fromIndex) || !Number.isInteger(toIndex)
+      || fromIndex < 0 || toIndex < 0
+      || fromIndex >= flat.length || toIndex >= flat.length) {
+      return next;
+    }
+    [flat[fromIndex], flat[toIndex]] = [flat[toIndex], flat[fromIndex]];
+    next.parents[key] = chunk(flat, pageSize);
+    return next;
+  }
+
+  function isFirstLevelVisible(entry, pinnedIds) {
+    if (!entry || typeof entry.id !== "string") return false;
+    return entry.parentId === null || pinnedIds?.has(entry.id);
+  }
+
+  function getFirstLevelPinCandidates(entries, pinnedIds) {
+    const pinnedSet = new Set(Array.isArray(pinnedIds) ? pinnedIds : []);
+    return (Array.isArray(entries) ? entries : []).filter((entry) =>
+      entry && typeof entry.id === "string" && entry.parentId !== null && !pinnedSet.has(entry.id)
+    );
+  }
+
+  function getPinnedLevel(entries, layout, pinnedIds, requestedPage) {
+    const pinnedSet = new Set(Array.isArray(pinnedIds) ? pinnedIds : []);
+    const children = entries.filter((entry) => isFirstLevelVisible(entry, pinnedSet));
+    const count = slotCount(children.length);
+    const pages = reconcileParent(children, layout?.parents?.[PINNED]);
+    const pageCount = Math.max(1, pages.length);
+    const page = Math.min(Math.max(0, Number(requestedPage) || 0), pageCount - 1);
+    const byId = new Map(children.map((entry) => [entry.id, entry]));
+    const ids = [...(pages[page] ?? [])];
+    while (ids.length < count) ids.push(null);
+    return {
+      parentId: PINNED,
+      page,
+      pageCount,
+      slotCount: count,
+      slots: ids.slice(0, count).map((id) => id ? byId.get(id) ?? null : null),
+    };
+  }
+
+  function reorderPinned(layout, entries, pinnedIds) {
+    const pinnedSet = new Set(Array.isArray(pinnedIds) ? pinnedIds : []);
+    const children = entries.filter((entry) => isFirstLevelVisible(entry, pinnedSet));
+    const count = slotCount(children.length);
+    const pages = layout?.parents?.[PINNED] ?? [Array(count).fill(null)];
+    const oldFlat = pages.flat();
+    const byId = new Map(children.map((entry) => [entry.id, entry]));
+    const ordered = [];
+    for (const id of oldFlat) {
+      if (id && byId.has(id)) { ordered.push(id); byId.delete(id); }
+    }
+    for (const entry of children) {
+      if (byId.has(entry.id)) { ordered.push(entry.id); byId.delete(entry.id); }
+    }
+    const pageCount = Math.max(1, Math.ceil(ordered.length / count));
+    const capacity = pageCount * count;
+    while (ordered.length < capacity) ordered.push(null);
+    const next = JSON.parse(JSON.stringify(layout));
+    next.parents[PINNED] = chunk(ordered, count);
+    return next;
+  }
+
+  function reconcileParent(children, storedPages) {
+    // Keep an explicitly arranged twelve-slot submenu sparse instead of collapsing
+    // it to six slots, while still healing stale/missing child ids.
+    const storedSlotCount = Array.isArray(storedPages?.[0]) ? storedPages[0].length : 0;
+    const count = storedSlotCount === 12 ? 12 : slotCount(children.length);
+    const pageCount = Math.max(1, Math.ceil(children.length / count));
+    const capacity = pageCount * count;
+    const slots = Array(capacity).fill(null);
+    const valid = new Set(children.map((entry) => entry.id));
+    const placed = new Set();
+    const displaced = [];
+    const oldSlots = Array.isArray(storedPages) ? storedPages.flat() : [];
+
+    oldSlots.forEach((id, index) => {
+      if (typeof id !== "string" || !valid.has(id) || placed.has(id)) return;
+      placed.add(id);
+      if (index < capacity && slots[index] === null) slots[index] = id;
+      else displaced.push(id);
+    });
+
+    const waiting = [
+      ...displaced,
+      ...children.map((entry) => entry.id).filter((id) => !placed.has(id)),
+    ];
+    for (const id of waiting) {
+      const empty = slots.indexOf(null);
+      if (empty === -1) break;
+      slots[empty] = id;
+    }
+    return chunk(slots, count);
+  }
+
+  function groupByParent(entries) {
+    const groups = new Map();
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      if (!entry || typeof entry.id !== "string") continue;
+      const key = parentKey(entry.parentId ?? null);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(entry);
+    }
+    return groups;
+  }
+
+  function parentKey(parentId) {
+    return parentId === null ? ROOT : parentId;
+  }
+
+  function chunk(values, size) {
+    const pages = [];
+    for (let index = 0; index < values.length; index += size) {
+      pages.push(values.slice(index, index + size));
+    }
+    return pages;
+  }
+
+  globalThis.LakomicsRadial = {
+    ROOT,
+    PINNED,
+    slotCount,
+    reconcileLayout,
+    resetLayout,
+    getLevel,
+    getCompactLevel,
+    getPinnedLevel,
+    getFirstLevelPinCandidates,
+    reorderPinned,
+    moveSlot,
+  };
+})();
+
+(() => {
+  "use strict";
+
+  const DEFAULT_PREFERENCES = Object.freeze({
+    saveMode: "auto",
+    downloadFolder: "Lakomics",
+    touchLongPressMs: 450,
+    touchPersistent: true,
+    suppressContextMenu: true,
+    suppressDownloadUi: true,
+    autoLikeOnSave: true,
+  });
+
+  const DEFAULT_REMOTE_SETTINGS = Object.freeze({
+    enabled: false,
+    baseUrl: "https://desktop-6oh3e09.tail0aa1a3.ts.net",
+  });
+
+  const SECONDARY_SLOT_COUNT = 12;
+  const LOCAL_ROOT_DEFINITIONS = Object.freeze([
+    ["local:reverse", "리버스"],
+    ["local:wuthering-waves", "명조"],
+    ["local:zenless", "젠레스"],
+    ["local:game", "게임"],
+    ["local:manga", "만화"],
+    ["local:other", "기타"],
+  ]);
+
+  function defaultLocalTree() {
+    return {
+      version: 1,
+      roots: LOCAL_ROOT_DEFINITIONS.map(([id, name]) => ({
+        id,
+        name,
+        secondarySlots: Array(SECONDARY_SLOT_COUNT).fill(null),
+      })),
+    };
+  }
+
+  function normalizePreferences(value = {}) {
+    // `app` was used by older alpha builds. The current extension promises
+    // automatic device fallback, so migrate that legacy value to `auto`.
+    // Keep `download` only for old/manual configs that intentionally bypass Lakomics.
+    const saveMode = value.saveMode === "download" ? "download" : DEFAULT_PREFERENCES.saveMode;
+    const rawFolder = typeof value.downloadFolder === "string"
+      ? value.downloadFolder.trim()
+      : DEFAULT_PREFERENCES.downloadFolder;
+    const downloadFolder = rawFolder || DEFAULT_PREFERENCES.downloadFolder;
+    const numericLongPress = Number(value.touchLongPressMs);
+    const touchLongPressMs = Number.isFinite(numericLongPress)
+      ? Math.min(900, Math.max(220, Math.round(numericLongPress)))
+      : DEFAULT_PREFERENCES.touchLongPressMs;
+    return {
+      saveMode,
+      downloadFolder,
+      touchLongPressMs,
+      touchPersistent: value.touchPersistent !== false,
+      suppressContextMenu: value.suppressContextMenu !== false,
+      suppressDownloadUi: value.suppressDownloadUi !== false,
+      autoLikeOnSave: value.autoLikeOnSave !== false,
+    };
+  }
+
+  function normalizeRemoteSettings(value = {}) {
+    const hasExplicitBaseUrl = value && Object.prototype.hasOwnProperty.call(value, "baseUrl");
+    const requestedBaseUrl = hasExplicitBaseUrl ? value.baseUrl : DEFAULT_REMOTE_SETTINGS.baseUrl;
+    const baseUrl = normalizeRemoteBaseUrl(requestedBaseUrl);
+    return {
+      enabled: value.enabled === true && Boolean(baseUrl),
+      baseUrl,
+    };
+  }
+
+  function normalizeRemoteBaseUrl(value) {
+    const raw = typeof value === "string" ? value.trim() : "";
+    if (!raw) return "";
+    try {
+      const url = new URL(raw);
+      const host = url.hostname.toLowerCase();
+      if (url.protocol !== "https:" || !host.endsWith(".ts.net")) return "";
+      if (url.username || url.password || url.search || url.hash) return "";
+      return `${url.protocol}//${url.host}`;
+    } catch {
+      return "";
+    }
+  }
+
+  function normalizeLocalTree(value) {
+    const defaults = defaultLocalTree();
+    const roots = Array.isArray(value?.roots) ? value.roots : [];
+    return {
+      version: 1,
+      roots: defaults.roots.map((fallback, index) => {
+        const source = roots.find((entry) => entry?.id === fallback.id) ?? roots[index] ?? {};
+        const name = cleanLabel(source.name) || fallback.name;
+        const rawSlots = Array.isArray(source.secondarySlots) ? source.secondarySlots : [];
+        const secondarySlots = Array.from({ length: SECONDARY_SLOT_COUNT }, (_, slot) => {
+          const value = rawSlots[slot];
+          if (typeof value === "string") return cleanLabel(value) || null;
+          if (value && typeof value === "object") return cleanLabel(value.name) || null;
+          return null;
+        });
+        return { id: fallback.id, name, secondarySlots };
+      }),
+    };
+  }
+
+  function localTreeEntries(value) {
+    const tree = normalizeLocalTree(value);
+    const entries = [];
+    for (const root of tree.roots) {
+      entries.push({ id: root.id, kind: "root", name: root.name, parentId: null });
+      root.secondarySlots.forEach((name, index) => {
+        if (!name) return;
+        entries.push({
+          id: localSecondaryId(root.id, index),
+          kind: "tag",
+          name,
+          parentId: root.id,
+        });
+      });
+    }
+    return entries;
+  }
+
+  function localTreeLayout(value) {
+    const tree = normalizeLocalTree(value);
+    const parents = {
+      __root__: [tree.roots.map((root) => root.id)],
+      __pinned__: [tree.roots.map((root) => root.id)],
+    };
+    for (const root of tree.roots) {
+      parents[root.id] = [root.secondarySlots.map((name, index) =>
+        name ? localSecondaryId(root.id, index) : null)];
+    }
+    return { version: 1, parents };
+  }
+
+  function localSecondaryId(rootId, index) {
+    return `${rootId}:secondary:${index}`;
+  }
+
+  function cleanLabel(value) {
+    return typeof value === "string" ? value.trim().slice(0, 80) : "";
+  }
+
+  globalThis.LakomicsDefaults = {
+    DEFAULT_PREFERENCES,
+    DEFAULT_REMOTE_SETTINGS,
+    SECONDARY_SLOT_COUNT,
+    LOCAL_ROOT_DEFINITIONS,
+    defaultLocalTree,
+    normalizeRemoteSettings,
+    normalizeRemoteBaseUrl,
+    normalizeLocalTree,
+    localTreeEntries,
+    localTreeLayout,
+    localSecondaryId,
+    normalizePreferences,
+  };
+})();
+
+(() => {
+  "use strict";
 
   const LOCAL_API_BASE_URL = "http://127.0.0.1:32145";
   const REMOTE_SETTINGS_KEY = "remoteSettings";

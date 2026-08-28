@@ -451,6 +451,7 @@
           status: response?.status,
           author: payload.author ?? null,
           postId: payload.postId ?? null,
+          mediaIndex: payload.mediaIndex ?? null,
           sourceUrl: payload.sourceUrl ?? null,
         });
       },

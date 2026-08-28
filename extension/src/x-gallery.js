@@ -462,6 +462,41 @@
     return Object.fromEntries(entries);
   }
 
+  function savedXMediaKey(tweetId, imageIndex) {
+    const post = String(tweetId ?? "").trim();
+    const index = Number(imageIndex);
+    if (!/^\d+$/.test(post) || !Number.isInteger(index) || index <= 0) return "";
+    return `${post}:${index}`;
+  }
+
+  function isSavedMediaState(mediaUrl, tweetId, imageIndex, savedMedia, librarySavedKeys, authoritative, sessionSavedMedia) {
+    const normalizedUrl = String(mediaUrl || "");
+    if (normalizedUrl && sessionSavedMedia?.has?.(normalizedUrl)) return true;
+    if (authoritative) {
+      const key = savedXMediaKey(tweetId, imageIndex);
+      return Boolean(key && librarySavedKeys?.has?.(key));
+    }
+    return Boolean(normalizedUrl && savedMedia?.has?.(normalizedUrl));
+  }
+
+  function timelineSavedBadgePosition(rect, viewportWidth, viewportHeight) {
+    const width = Number(viewportWidth);
+    const height = Number(viewportHeight);
+    if (!rect || !Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+    const left = Number(rect.left);
+    const top = Number(rect.top);
+    const right = Number(rect.right);
+    const bottom = Number(rect.bottom);
+    const rectWidth = Number(rect.width);
+    const rectHeight = Number(rect.height);
+    if (![left, top, right, bottom, rectWidth, rectHeight].every(Number.isFinite)) return null;
+    if (rectWidth <= 8 || rectHeight <= 8 || bottom <= 0 || right <= 0 || top >= height || left >= width) return null;
+    return {
+      left: Math.max(4, Math.min(width - 27, right - 28)),
+      top: Math.max(4, Math.min(height - 27, top + 7)),
+    };
+  }
+
   if (globalThis.__LAKOMICS_TEST__) {
     globalThis.LakomicsXGallery = {
       AUTO_TARGET_NEW_IMAGES,
@@ -490,6 +525,9 @@
       parseStatusHref,
       pruneArtistAffinity,
       pruneSavedEntries,
+      savedXMediaKey,
+      isSavedMediaState,
+      timelineSavedBadgePosition,
       compareGalleryItems,
       getArtistAffinityCount,
       getArtistAffinityScore,
@@ -521,12 +559,18 @@
     let galleryRenderQueued = false;
     let galleryLoadMoreQueued = false;
     let galleryFilterMode = "0";
+    let librarySavedIndexAuthoritative = false;
+    let librarySavedLoadPromise = null;
     const observedArticles = new WeakSet();
     const visibleArticles = new WeakSet();
     const pendingArticles = new Set();
     const pendingGalleryItems = new Map();
     const renderedGalleryKeys = new Set();
     const savedMedia = new Map();
+    const librarySavedKeys = new Set();
+    const sessionSavedMedia = new Set();
+    const timelineSavedBadges = new Map();
+    let timelineBadgeFrame = 0;
     const dismissedMedia = new Map();
     const artistAffinity = new Map();
     const artistDisinterest = new Map();
@@ -549,6 +593,7 @@
       if (overlayOpen && !harvest?.running) queueGalleryRender();
     });
     void loadSavedMedia();
+    void loadLibrarySavedIndex();
     void loadDismissedMedia();
     void loadArtistAffinity();
     void loadArtistDisinterest();
@@ -592,11 +637,17 @@
     });
 
     mutationObserver.observe(document.body, { childList: true, subtree: true });
+    document.addEventListener("load", (event) => {
+      if (event.target?.matches?.(PHOTO_SELECTOR)) syncTimelineSavedImage(event.target);
+    }, true);
     for (const article of document.querySelectorAll(TWEET_SELECTOR)) observeArticle(article);
     syncRouteState();
     updateCounters();
 
     window.addEventListener("popstate", syncRouteState);
+    window.addEventListener("focus", () => { void loadLibrarySavedIndex(); });
+    window.addEventListener("scroll", queueTimelineSavedBadgeLayout, true);
+    window.addEventListener("resize", queueTimelineSavedBadgeLayout);
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && overlayOpen) closeGallery();
     }, true);
@@ -633,7 +684,9 @@
     }
 
     function observeArticle(article) {
-      if (!article || observedArticles.has(article)) return;
+      if (!article) return;
+      refreshTimelineSavedMarkers(article);
+      if (observedArticles.has(article)) return;
       observedArticles.add(article);
       intersectionObserver.observe(article);
       if (isElementVisible(article)) {
@@ -846,7 +899,10 @@
     function createCard(item) {
       const card = document.createElement("article");
       card.className = "lakomics-x-gallery-card";
-      const saved = savedMedia.has(item.imageUrl);
+      const saved = isSavedMediaState(
+        item.imageUrl, item.tweetId, item.imageIndex,
+        savedMedia, librarySavedKeys, librarySavedIndexAuthoritative, sessionSavedMedia,
+      );
       card.classList.toggle("is-saved", saved);
       card.setAttribute("data-lakomics-media-url", item.imageUrl);
       card.setAttribute("data-lakomics-collected-at", String(Number(item.collectedAt || 0)));
@@ -972,10 +1028,33 @@
       const pruned = pruneSavedEntries(stored?.[SAVED_STORAGE_KEY]);
       savedMedia.clear();
       for (const [url, timestamp] of Object.entries(pruned)) savedMedia.set(url, Number(timestamp));
+      refreshTimelineSavedMarkers(document);
       if (overlayOpen) refreshSavedMarkers();
       if (Object.keys(pruned).length !== Object.keys(stored?.[SAVED_STORAGE_KEY] ?? {}).length) {
         void storageSet({ [SAVED_STORAGE_KEY]: pruned });
       }
+    }
+
+    async function loadLibrarySavedIndex() {
+      if (librarySavedLoadPromise) return librarySavedLoadPromise;
+      const promise = runtimeMessage({ type: "saved-index:get" })
+        .then((response) => {
+          if (!response?.ok || response.authoritative !== true || !Array.isArray(response.savedKeys)) return false;
+          librarySavedKeys.clear();
+          for (const key of response.savedKeys) {
+            if (typeof key === "string" && /^\d+:\d+$/.test(key)) librarySavedKeys.add(key);
+          }
+          librarySavedIndexAuthoritative = true;
+          refreshSavedMarkers();
+          refreshTimelineSavedMarkers(document);
+          return true;
+        })
+        .catch(() => false)
+        .finally(() => {
+          if (librarySavedLoadPromise === promise) librarySavedLoadPromise = null;
+        });
+      librarySavedLoadPromise = promise;
+      return promise;
     }
 
     async function loadArtistAffinity() {
@@ -1044,6 +1123,11 @@
       const normalizer = globalThis.LakomicsXSource?.normalizeMediaUrl;
       const normalized = typeof normalizer === "function" ? normalizer(mediaUrl) : mediaUrl;
       if (!normalized) return;
+      sessionSavedMedia.add(normalized);
+      if (meta?.status !== "downloaded") {
+        const libraryKey = savedXMediaKey(meta?.postId, meta?.mediaIndex);
+        if (libraryKey) librarySavedKeys.add(libraryKey);
+      }
       const wasAlreadySaved = savedMedia.has(normalized);
       savedMedia.set(normalized, Date.now());
       const snapshot = pruneSavedEntries(Object.fromEntries(savedMedia));
@@ -1063,6 +1147,7 @@
       for (const card of ui.grid.querySelectorAll('.lakomics-x-gallery-card')) {
         if (card.getAttribute('data-lakomics-media-url') === normalized) card.classList.add('is-saved');
       }
+      refreshTimelineSavedMarkers(document, normalized);
       if (overlayOpen) {
         // Do not re-sort/rebuild the gallery after a save. The new preference order
         // is applied the next time the gallery/filter is reopened or changed.
@@ -1104,10 +1189,109 @@
       queueGalleryLoadMore();
     }
 
+    function timelineImageMediaUrl(image) {
+      const normalizer = globalThis.LakomicsXSource?.normalizeMediaUrl;
+      if (typeof normalizer !== "function") return null;
+      const source = image?.currentSrc || image?.src || image?.getAttribute?.("src") || "";
+      return normalizer(source);
+    }
+
+    function timelineImageIdentity(image, mediaUrl) {
+      const article = image?.closest?.(TWEET_SELECTOR);
+      if (!article) return null;
+      const post = extractPost(article, 0);
+      if (!post) return null;
+      const matched = post.images.find((entry) => entry?.url === mediaUrl);
+      if (!matched) return null;
+      return { tweetId: post.tweetId, imageIndex: matched.index };
+    }
+
+    function ensureTimelineSavedBadgeRoot() {
+      let root = document.getElementById("lakomics-x-saved-badge-layer");
+      if (root) return root;
+      root = document.createElement("div");
+      root.id = "lakomics-x-saved-badge-layer";
+      root.setAttribute("aria-hidden", "true");
+      document.documentElement.append(root);
+      return root;
+    }
+
+    function removeTimelineSavedBadge(image) {
+      const badge = timelineSavedBadges.get(image);
+      badge?.remove?.();
+      timelineSavedBadges.delete(image);
+    }
+
+    function positionTimelineSavedBadge(image, badge) {
+      if (!image?.isConnected) {
+        removeTimelineSavedBadge(image);
+        return;
+      }
+      const position = timelineSavedBadgePosition(
+        image.getBoundingClientRect(), globalThis.innerWidth, globalThis.innerHeight,
+      );
+      badge.hidden = !position;
+      if (!position) return;
+      badge.style.left = `${position.left}px`;
+      badge.style.top = `${position.top}px`;
+    }
+
+    function syncTimelineSavedBadge(image, isSaved) {
+      if (!isSaved) {
+        removeTimelineSavedBadge(image);
+        return;
+      }
+      let badge = timelineSavedBadges.get(image);
+      if (!badge) {
+        badge = document.createElement("span");
+        badge.className = "lakomics-x-saved-badge-portal";
+        badge.textContent = "\u2713";
+        badge.title = "Saved in Lakomics";
+        ensureTimelineSavedBadgeRoot().append(badge);
+        timelineSavedBadges.set(image, badge);
+      }
+      positionTimelineSavedBadge(image, badge);
+    }
+
+    function queueTimelineSavedBadgeLayout() {
+      if (timelineBadgeFrame) return;
+      timelineBadgeFrame = requestAnimationFrame(() => {
+        timelineBadgeFrame = 0;
+        for (const [image, badge] of timelineSavedBadges) positionTimelineSavedBadge(image, badge);
+      });
+    }
+
+    function syncTimelineSavedImage(image, onlyMediaUrl = null) {
+      const photo = image?.closest?.('[data-testid="tweetPhoto"]');
+      if (!photo) return;
+      const mediaUrl = timelineImageMediaUrl(image);
+      if (onlyMediaUrl && mediaUrl !== onlyMediaUrl) return;
+      const identity = timelineImageIdentity(image, mediaUrl);
+      const isSaved = isSavedMediaState(
+        mediaUrl, identity?.tweetId, identity?.imageIndex,
+        savedMedia, librarySavedKeys, librarySavedIndexAuthoritative, sessionSavedMedia,
+      );
+      // Never mutate X's media subtree for saved markers. The badge is rendered
+      // in Lakomics' own fixed portal and only reads this image's viewport rect.
+      syncTimelineSavedBadge(image, isSaved);
+    }
+
+    function refreshTimelineSavedMarkers(root = document, onlyMediaUrl = null) {
+      const images = root?.matches?.(PHOTO_SELECTOR)
+        ? [root]
+        : (root?.querySelectorAll?.(PHOTO_SELECTOR) ?? []);
+      for (const image of images) syncTimelineSavedImage(image, onlyMediaUrl);
+    }
+
     function refreshSavedMarkers() {
       for (const card of ui.grid.querySelectorAll('.lakomics-x-gallery-card')) {
         const mediaUrl = card.getAttribute('data-lakomics-media-url');
-        card.classList.toggle('is-saved', savedMedia.has(mediaUrl));
+        const tweetId = card.getAttribute('data-lakomics-tweet-id');
+        const imageIndex = Number(card.getAttribute('data-lakomics-media-index'));
+        card.classList.toggle('is-saved', isSavedMediaState(
+          mediaUrl, tweetId, imageIndex,
+          savedMedia, librarySavedKeys, librarySavedIndexAuthoritative, sessionSavedMedia,
+        ));
       }
     }
 
@@ -1204,6 +1388,28 @@
         poll();
       });
     }
+  }
+
+  function runtimeMessage(message) {
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (value) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+      try {
+        const maybePromise = chrome.runtime.sendMessage(message, (response) => {
+          if (chrome.runtime?.lastError) finish({ ok: false, code: "worker_failed" });
+          else finish(response);
+        });
+        if (maybePromise && typeof maybePromise.then === "function") {
+          maybePromise.then(finish).catch(() => finish({ ok: false, code: "worker_failed" }));
+        }
+      } catch {
+        finish({ ok: false, code: "worker_failed" });
+      }
+    });
   }
 
   function storageGet(key) {

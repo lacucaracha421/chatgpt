@@ -1,0 +1,8 @@
+Lakomics X Collector 2.0.0-alpha.15.23
+
+- Normal X timeline images now show a check badge when the same normalized media URL is already in the saved-media history.
+- Timeline badges update immediately after saving and also recover on image load / DOM refresh.
+- Classifications pinned into the first donut are removed from their original parent second donut.
+- Parents no longer open an empty second donut when every child has been promoted to the first donut.
+- Existing extension key and stored settings remain unchanged.
+- 129/129 extension tests passed.

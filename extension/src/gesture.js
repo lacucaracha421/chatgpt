@@ -243,7 +243,7 @@
 
     function entryHasChildren(entryId) {
       if (!entryId) return false;
-      const level = globalThis.LakomicsRadial.getLevel(entries, layout, entryId, 0);
+      const level = globalThis.LakomicsRadial.getCompactLevel(entries, layout, entryId, 0, pinnedIds);
       return level.slots.some(Boolean);
     }
 
@@ -252,7 +252,7 @@
     }
 
     function currentSecondaryLevel() {
-      return globalThis.LakomicsRadial.getCompactLevel(entries, layout, expandedParentId, secondaryPage);
+      return globalThis.LakomicsRadial.getCompactLevel(entries, layout, expandedParentId, secondaryPage, pinnedIds);
     }
 
     function snapshot() {

@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeSet,
     fs::{self, OpenOptions},
     io::{self, Read, Write},
     path::{Path, PathBuf},
@@ -292,6 +293,12 @@ struct ClassificationsResponse {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedXMediaResponse {
+    keys: Vec<String>,
+}
+
+#[derive(Serialize)]
 struct ErrorResponse {
     code: &'static str,
     message: &'static str,
@@ -419,6 +426,15 @@ fn dispatch(request: ApiRequest, library: Option<&Library>, token: &str) -> (Api
                 Err(_) => error_to_pair(ApiError::Internal),
             }
         }
+        ("GET", "/v1/saved-x-media") => {
+            let Some(library) = library else {
+                return error_to_pair(ApiError::LibraryNotOpen);
+            };
+            match saved_x_media_keys(library) {
+                Ok(keys) => (ApiResponse::json(200, &SavedXMediaResponse { keys }), None),
+                Err(error) => error_to_pair(error),
+            }
+        }
         ("POST", "/v1/ingestions") => {
             let Some(library) = library else {
                 return error_to_pair(ApiError::LibraryNotOpen);
@@ -434,6 +450,44 @@ fn dispatch(request: ApiRequest, library: Option<&Library>, token: &str) -> (Api
         }
         _ => error_to_pair(ApiError::NotFound),
     }
+}
+
+fn saved_x_media_keys(library: &Library) -> Result<Vec<String>, ApiError> {
+    let source_urls = library
+        .list_normal_x_source_urls()
+        .map_err(|_| ApiError::Internal)?;
+    let mut keys = BTreeSet::new();
+    for source_url in source_urls {
+        if let Some(key) = x_photo_key(&source_url) {
+            keys.insert(key);
+        }
+    }
+    Ok(keys.into_iter().collect())
+}
+
+fn x_photo_key(value: &str) -> Option<String> {
+    let url = url::Url::parse(value).ok()?;
+    if url.scheme() != "https" || !matches!(url.host_str(), Some("x.com" | "twitter.com")) {
+        return None;
+    }
+    let mut segments = url.path_segments()?;
+    let _handle = segments.next()?;
+    if segments.next()? != "status" {
+        return None;
+    }
+    let tweet_id = segments.next()?;
+    if tweet_id.is_empty() || !tweet_id.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    if segments.next()? != "photo" {
+        return None;
+    }
+    let photo_index = segments.next()?;
+    let parsed_index = photo_index.parse::<u32>().ok()?;
+    if parsed_index == 0 {
+        return None;
+    }
+    Some(format!("{tweet_id}:{parsed_index}"))
 }
 
 fn ingest_x_image(
@@ -809,6 +863,41 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&response.body).unwrap();
         assert_eq!(json["entries"][0]["name"], "Character");
         assert!(json["entries"][0].get("parentId").is_some());
+    }
+
+    #[test]
+    fn saved_x_media_route_returns_only_normal_photo_keys() {
+        let root = tempfile::tempdir().unwrap();
+        let library = Library::open(root.path()).unwrap();
+        let classification = create_root(&library, "Saved");
+        let downloader = RecordingDownloader::new(png_bytes());
+        let mut first = x_request(&classification.id);
+        first.source_url = "https://x.com/example/status/123/photo/2".into();
+        ingest_x_image(&library, first, &downloader).unwrap();
+
+        let response = dispatch(
+            ApiRequest::get(
+                "/v1/saved-x-media",
+                EXTENSION_ORIGIN,
+                Some("Bearer secret"),
+            ),
+            Some(&library),
+            "secret",
+        );
+        let (response, outcome) = response;
+        assert!(outcome.is_none());
+        assert_eq!(response.status, 200);
+        let json: serde_json::Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(json["keys"], serde_json::json!(["123:2"]));
+    }
+
+    #[test]
+    fn x_photo_key_rejects_ambiguous_post_and_video_urls() {
+        assert_eq!(x_photo_key("https://x.com/u/status/123/photo/3").as_deref(), Some("123:3"));
+        assert_eq!(x_photo_key("https://twitter.com/u/status/123/photo/1").as_deref(), Some("123:1"));
+        assert_eq!(x_photo_key("https://x.com/u/status/123"), None);
+        assert_eq!(x_photo_key("https://x.com/u/status/123/video/1"), None);
+        assert_eq!(x_photo_key("https://example.com/u/status/123/photo/1"), None);
     }
 
     #[test]
