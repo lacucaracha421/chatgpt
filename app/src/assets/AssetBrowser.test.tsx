@@ -509,14 +509,12 @@ describe("AssetBrowser", () => {
     expect(screen.queryByRole("button", { name: "실행 취소" })).not.toBeInTheDocument();
   });
 
-  it("runs explicit batch favorite, classification, trash, and undo actions", async () => {
+  it("runs explicit batch favorite, trash, and undo actions", async () => {
     const user = userEvent.setup();
     const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
-    const tag: ClassificationEntry = { id: "tag", kind: "tag", name: "아로나", parentId: null, iconKey: null, colorKey: null };
-    const album = { id: "album", name: "표지", parentId: null, iconKey: null, colorKey: null };
     render(
       <LibraryProvider gateway={gateway}>
-        <AssetBrowser view={{ kind: "classification", classificationId: null }} classifications={[tag]} albums={[album]} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} />
+        <AssetBrowser view={{ kind: "classification", classificationId: null }} classifications={[]} albums={[]} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} />
       </LibraryProvider>,
     );
     const first = await screen.findByRole("option", { name: "asset-0.png" });
@@ -526,15 +524,6 @@ describe("AssetBrowser", () => {
 
     await user.click(screen.getByRole("button", { name: "좋아요 켜기" }));
     expect(gateway.setAssetsFavorite).toHaveBeenCalledWith(["asset-0", "asset-1"], true);
-    await user.selectOptions(screen.getByLabelText("폴더"), "tag");
-    await user.click(screen.getByRole("button", { name: "폴더로 이동" }));
-    expect(gateway.setAssetClassification).toHaveBeenCalledWith({
-      assetIds: ["asset-0", "asset-1"],
-      classificationId: "tag",
-    });
-    await user.selectOptions(screen.getByLabelText("앨범"), "album");
-    await user.click(screen.getByRole("button", { name: "앨범에 추가" }));
-    expect(gateway.patchAssetAlbums).toHaveBeenCalledWith({ assetIds: ["asset-0", "asset-1"], addAlbumIds: ["album"], removeAlbumIds: [] });
 
     await user.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
     expect(gateway.trashAssets).toHaveBeenCalledWith(["asset-0", "asset-1"]);

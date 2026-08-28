@@ -27,8 +27,6 @@ const baseProps = {
   onMetadataVisibleChange: vi.fn(),
   onThumbnailRowHeightChange: vi.fn(),
   onFavorite: vi.fn(),
-  onMoveToFolder: vi.fn(),
-  onAlbum: vi.fn(),
   onTrash: vi.fn(),
   onClearSelection: vi.fn(),
   batchPending: false,
@@ -59,44 +57,32 @@ it("toggles privacy mode from the browsing controls", async () => {
   expect(onPrivacyModeChange).toHaveBeenCalledWith(false);
 });
 
-it("replaces browsing controls with compact selection actions", async () => {
+it("keeps browsing controls visible alongside selection actions", async () => {
   const user = userEvent.setup();
   const onFavorite = vi.fn();
   const onClearSelection = vi.fn();
   render(<AssetToolbar {...baseProps} selectedCount={3} onFavorite={onFavorite} onClearSelection={onClearSelection} />);
 
   expect(screen.getByText("3개 선택")).toBeVisible();
+  expect(screen.getByLabelText("정렬")).toBeVisible();
+  expect(screen.getByLabelText("미리보기 크기")).toBeVisible();
   await user.click(screen.getByRole("button", { name: "좋아요 켜기" }));
   expect(onFavorite).toHaveBeenCalledWith(true);
+  await user.click(screen.getByRole("button", { name: "좋아요 끄기" }));
+  expect(onFavorite).toHaveBeenCalledWith(false);
   await user.click(screen.getByRole("button", { name: "선택 해제" }));
   expect(onClearSelection).toHaveBeenCalledOnce();
   expect(screen.getByRole("button", { name: "휴지통으로 이동" })).toBeVisible();
-  expect(screen.queryByLabelText("정렬")).not.toBeInTheDocument();
 });
 
-it("keeps uncommon selection actions in the overflow menu", async () => {
-  const user = userEvent.setup();
+it("does not show folder or album transfer controls that duplicate sidebar drag and drop", () => {
   render(<AssetToolbar {...baseProps} selectedCount={2} />);
 
-  await user.click(screen.getByRole("button", { name: "추가 작업" }));
-
-  expect(screen.getByRole("menuitem", { name: "앨범에서 제거" })).toBeVisible();
-  expect(screen.getByRole("menuitem", { name: "좋아요 끄기" })).toBeVisible();
-});
-
-it("moves a selection to one folder and adds it to an album", async () => {
-  const user = userEvent.setup();
-  const onMoveToFolder = vi.fn();
-  const onAlbum = vi.fn();
-  render(<AssetToolbar {...baseProps} selectedCount={2} onMoveToFolder={onMoveToFolder} onAlbum={onAlbum} />);
-
-  await user.selectOptions(screen.getByLabelText("폴더"), "game");
-  await user.click(screen.getByRole("button", { name: "폴더로 이동" }));
-  expect(onMoveToFolder).toHaveBeenCalledWith("game");
-
-  await user.selectOptions(screen.getByLabelText("앨범"), "covers");
-  await user.click(screen.getByRole("button", { name: "앨범에 추가" }));
-  expect(onAlbum).toHaveBeenCalledWith("covers", "add");
+  expect(screen.queryByLabelText("폴더")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "폴더로 이동" })).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("앨범")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "앨범에 추가" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "추가 작업" })).not.toBeInTheDocument();
 });
 
 it("acts as the window title bar with drag region and window controls", () => {

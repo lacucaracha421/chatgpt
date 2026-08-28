@@ -2250,6 +2250,7 @@ input:disabled {
 .similarity-review__asset h3 { margin: 0; font-size: 0.875rem; }
 .view-toolbar__content > strong { color: var(--color-muted); font-size: 0.75rem; font-weight: 600; }
 .view-toolbar__content > span { color: var(--color-muted); font-size: 0.75rem; }
+.view-toolbar__divider { width: 1px; height: 20px; flex-shrink: 0; background: var(--color-border); }
 
 .similarity-review__comparison {
   display: grid;
@@ -2814,15 +2815,6 @@ input:disabled {
 @media (max-width: 1100px) {
   .similarity-review__comparison {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .asset-toolbar__toggle-text {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
   }
 
   .view-toolbar .ui-slider {
