@@ -13,6 +13,23 @@ use super::models::CollectionCover;
 use super::{Library, MediaResponse};
 
 const COVERS_DIR: &str = "covers";
+
+/// 레거시 book 루트는 유형별 하위 폴더(games/comics/movies)로 구성되어 있고,
+/// DB의 source_path는 폴더 이름만 저장하므로 직속 경로를 먼저 시도한 뒤 하위 폴더를 확인한다.
+const LEGACY_SOURCE_SUBDIRS: [&str; 3] = ["games", "comics", "movies"];
+
+fn resolve_collection_dir(root: &str, source_path: &str) -> PathBuf {
+    let root_path = Path::new(root);
+    let direct = root_path.join(source_path);
+    if direct.is_dir() {
+        return direct;
+    }
+    LEGACY_SOURCE_SUBDIRS
+        .iter()
+        .map(|subdir| root_path.join(subdir).join(source_path))
+        .find(|candidate| candidate.is_dir())
+        .unwrap_or(direct)
+}
 const COLLECTION_THUMBNAIL_BOUND: u32 = 360;
 const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "bmp", "tiff", "jfif", "gif"];
 
@@ -247,7 +264,7 @@ impl Library {
             .optional()?
             .ok_or(LibraryError::CollectionNotFound)?;
         let source_path = source_path.ok_or(LibraryError::CollectionSourcePathNotSet)?;
-        let covers_dir = Path::new(&root).join(&source_path).join(COVERS_DIR);
+        let covers_dir = resolve_collection_dir(&root, &source_path).join(COVERS_DIR);
         if !covers_dir.is_dir() {
             return Ok(Vec::new());
         }
@@ -338,8 +355,8 @@ impl Library {
             .optional()?
             .ok_or(LibraryError::CollectionNotFound)?;
         let source_path = source_path.ok_or(LibraryError::CollectionSourcePathNotSet)?;
-        let source_root = PathBuf::from(root);
-        let collection_dir = source_root.join(source_path);
+        let source_root = PathBuf::from(&root);
+        let collection_dir = resolve_collection_dir(&root, &source_path);
         let image_path = match file_name {
             Some(file_name) => collection_dir.join(COVERS_DIR).join(file_name),
             None => source_preview_path(&collection_dir)?,
@@ -375,9 +392,19 @@ impl Library {
                 path: source_path.clone(),
                 source,
             })?;
+        // 하위 폴더(games/comics/movies)에서 해석된 소스는 루트 기준 상대 경로 계산이
+        // 실패할 수 있으므로 소스가 있는 폴더 기준으로도 시도한다. 캐시 키에는
+        // 컬렉션 ID가 함께 들어가므로 상대 경로 기준이 달라져도 충돌하지 않는다.
+        // (open_manga_media에서 루트 하위 경로 검증은 이미 끝난 상태다.)
         let source_relative_path = canonical_source
             .strip_prefix(&canonical_root)
-            .map_err(|_| LibraryError::UnsafeMediaPath)?;
+            .ok()
+            .or_else(|| {
+                canonical_source
+                    .parent()
+                    .and_then(|dir| canonical_source.strip_prefix(dir).ok())
+            })
+            .ok_or(LibraryError::UnsafeMediaPath)?;
         let thumbnail_relative_path = collection_thumbnail_relative_path(
             collection_id,
             source_relative_path,
@@ -531,6 +558,32 @@ mod tests {
             fs::metadata(cache_path).unwrap().modified().unwrap(),
             first_modified
         );
+    }
+
+    #[test]
+    fn collection_source_resolves_legacy_subfolder_layout() {
+        // 레거시 book 루트는 games/comics/movies 하위에 소스 폴더를 둔다.
+        let (temp, library, collection_dir) = source_library();
+        fs::remove_dir_all(&collection_dir).unwrap();
+        let source_root = temp.path().join("source");
+        let game_dir = source_root.join("games").join("series");
+        fs::create_dir_all(&game_dir).unwrap();
+        write_png(&game_dir.join("thumbnail.webp"), 1200, 800);
+
+        let media = library
+            .collection_source_thumbnail_media(COLLECTION_ID)
+            .unwrap();
+        assert_eq!(media.mime, "image/webp");
+
+        fs::create_dir_all(game_dir.join(COVERS_DIR)).unwrap();
+        let cover = write_png(&game_dir.join(COVERS_DIR).join("poster.png"), 800, 1200);
+        let covers = library.list_collection_covers(COLLECTION_ID).unwrap();
+        assert_eq!(covers.len(), 1);
+        assert_eq!(covers[0].file_name, "poster.png");
+        let media = library
+            .collection_cover_media(COLLECTION_ID, "poster.png")
+            .unwrap();
+        assert_eq!(read_media(media), cover);
     }
 
     #[test]
