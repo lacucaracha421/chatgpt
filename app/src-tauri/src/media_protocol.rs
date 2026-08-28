@@ -1,6 +1,6 @@
 use std::{
     io::{Read, Seek, SeekFrom},
-    sync::OnceLock,
+    sync::{Condvar, Mutex, MutexGuard, PoisonError, OnceLock},
     time::Duration,
 };
 
@@ -24,6 +24,49 @@ pub(crate) fn media_response(
     path: &str,
 ) -> Response<Vec<u8>> {
     media_response_with_range(library, method, path, None)
+}
+
+/// 미디어 응답의 동시 실행 수를 제한한다. 썸네일 생성처럼 원본 이미지를
+/// 디코딩하는 요청이 수백 개 동시에 들어와도 메모리와 CPU가 폭증하지 않게 한다.
+const MEDIA_MAX_CONCURRENT: usize = 6;
+static MEDIA_ACTIVE: Mutex<usize> = Mutex::new(0);
+static MEDIA_AVAILABLE: Condvar = Condvar::new();
+
+pub(crate) fn media_response_gated(
+    library: Option<&Library>,
+    method: &Method,
+    path: &str,
+    range_header: Option<&str>,
+) -> Response<Vec<u8>> {
+    let _permit = MediaPermit::acquire();
+    media_response_with_range(library, method, path, range_header)
+}
+
+struct MediaPermit;
+
+impl MediaPermit {
+    fn acquire() -> MediaPermit {
+        let mut active = lock_media_active();
+        while *active >= MEDIA_MAX_CONCURRENT {
+            active = MEDIA_AVAILABLE
+                .wait(active)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+        *active += 1;
+        MediaPermit
+    }
+}
+
+impl Drop for MediaPermit {
+    fn drop(&mut self) {
+        let mut active = lock_media_active();
+        *active -= 1;
+        MEDIA_AVAILABLE.notify_one();
+    }
+}
+
+fn lock_media_active() -> MutexGuard<'static, usize> {
+    MEDIA_ACTIVE.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 pub(crate) fn media_response_with_range(

@@ -33,19 +33,27 @@ pub fn run() {
                 window.app_handle().exit(0);
             }
         })
-        .register_uri_scheme_protocol("lakomics", |context, request| {
+        .register_asynchronous_uri_scheme_protocol("lakomics", |context, request, responder| {
+            // Windows의 WebView2는 프로토콜 핸들러를 UI 스레드에서 호출한다.
+            // 썸네일 생성처럼 오래 걸리는 응답이 화면을 막지 않도록 워커 스레드로 돌린다.
             let state = context.app_handle().state::<commands::AppState>();
             let library = state.current_library();
             let range = request
                 .headers()
                 .get(tauri::http::header::RANGE)
-                .and_then(|value| value.to_str().ok());
-            media_protocol::media_response_with_range(
-                library.as_ref(),
-                request.method(),
-                request.uri().path(),
-                range,
-            )
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_string);
+            let method = request.method().clone();
+            let path = request.uri().path().to_string();
+            tauri::async_runtime::spawn_blocking(move || {
+                let response = media_protocol::media_response_gated(
+                    library.as_ref(),
+                    &method,
+                    &path,
+                    range.as_deref(),
+                );
+                responder.respond(response);
+            });
         })
         .invoke_handler(tauri::generate_handler![
             commands::open_library,
