@@ -43,6 +43,11 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [mangaRoot, setMangaRoot] = useState<string | null>(null);
   const [mangaRootError, setMangaRootError] = useState<string | null>(null);
   useAutoDismiss(mangaRootError, setMangaRootError);
+  const [collectionSourceRoot, setCollectionSourceRootState] = useState<string | null>(null);
+  const [collectionSourceError, setCollectionSourceError] = useState<string | null>(null);
+  useAutoDismiss(collectionSourceError, setCollectionSourceError);
+  const [collectionSourceMessage, setCollectionSourceMessage] = useState<string | null>(null);
+  useAutoDismiss(collectionSourceMessage, setCollectionSourceMessage);
   const [extensionConnection, setExtensionConnection] = useState<ExtensionConnection | null>(null);
   const [extensionError, setExtensionError] = useState<string | null>(null);
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
@@ -95,6 +100,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   useEffect(() => {
     let active = true;
     void gateway.getMangaRoot().then((root) => { if (active) setMangaRoot(root); });
+    void gateway.getCollectionSourceRoot().then((root) => { if (active) setCollectionSourceRootState(root); });
     return () => { active = false; };
   }, [gateway]);
 
@@ -199,6 +205,24 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
       setMangaRoot(selected);
     } catch (error) {
       setMangaRootError(commandErrorMessage(error, "망가 폴더를 설정하지 못했습니다."));
+    }
+  }
+
+  async function chooseCollectionSourceFolder() {
+    const selected = await open({ directory: true, multiple: false });
+    if (typeof selected !== "string") return;
+    try {
+      const updated = await gateway.setCollectionSourceRoot(selected);
+      setCollectionSourceRootState(selected);
+      setCollectionSourceError(null);
+      setCollectionSourceMessage(
+        updated > 0
+          ? `레거시 출처를 ${updated}개 컬렉션에 표시했습니다`
+          : "컬렉션 소스 폴더를 설정했습니다",
+      );
+      if (updated > 0) onCollectionsChanged?.();
+    } catch (error) {
+      setCollectionSourceError(commandErrorMessage(error, "컬렉션 소스 폴더를 설정하지 못했습니다."));
     }
   }
 
@@ -463,6 +487,14 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           <Button size="sm" onClick={() => void chooseMangaFolder()}>변경</Button>
           {mangaRootError && <dd className="settings-view__row-message" role="alert">{mangaRootError}</dd>}
         </dl>
+        <dl className="settings-view__property">
+          <dt>컬렉션 소스 폴더</dt>
+          <dd className="settings-view__path">{collectionSourceRoot ?? "설정되지 않음"}</dd>
+          <Button size="sm" aria-label="컬렉션 소스 폴더 변경" onClick={() => void chooseCollectionSourceFolder()}>변경</Button>
+          <dd className="settings-view__row-note">구버전 book 소스 위치입니다. info.txt로 컬렉션 출처를 판별할 때 사용합니다.</dd>
+          {collectionSourceError && <dd className="settings-view__row-message" role="alert">{collectionSourceError}</dd>}
+        </dl>
+        {collectionSourceMessage && <Toast onDismiss={() => setCollectionSourceMessage(null)}>{collectionSourceMessage}</Toast>}
       </div>
     )}
     {section === "about" && (

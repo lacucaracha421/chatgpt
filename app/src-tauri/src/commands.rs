@@ -1481,10 +1481,13 @@ pub fn get_collection_source_root(
 pub fn set_collection_source_root(
     path: Option<String>,
     state: State<'_, AppState>,
-) -> Result<(), CommandError> {
+) -> Result<u64, CommandError> {
     let library = current_required(state)?;
     library
         .set_collection_source_root(path.as_deref())
+        .map_err(CommandError::from)?;
+    library
+        .backfill_legacy_collection_kinds()
         .map_err(CommandError::from)
 }
 

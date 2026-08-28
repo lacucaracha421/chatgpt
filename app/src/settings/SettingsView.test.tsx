@@ -127,7 +127,7 @@ it("uses desktop settings navigation and compact property rows", async () => {
   expect(navigation).toHaveClass("settings-view__navigation");
   expect(screen.getByRole("button", { name: "일반" })).toHaveAttribute("aria-current", "page");
   expect(screen.getByRole("heading", { name: "일반" })).toBeInTheDocument();
-  expect(container.querySelectorAll(".settings-view__property")).toHaveLength(4);
+  expect(container.querySelectorAll(".settings-view__property")).toHaveLength(5);
 
   await userEvent.click(screen.getByRole("button", { name: "데이터 관리" }));
   expect(screen.getByRole("heading", { name: "데이터 관리" })).toBeInTheDocument();
@@ -237,6 +237,63 @@ it("keeps the current manga root when the folder picker is cancelled", async () 
   await waitFor(() => expect(open).toHaveBeenCalledWith({ directory: true, multiple: false }));
   expect(gateway.setMangaRoot).not.toHaveBeenCalled();
   expect(screen.getByText("C:\\Manga")).toBeInTheDocument();
+});
+
+it("loads the collection source root, backfills legacy kinds, and reports the count", async () => {
+  const user = userEvent.setup();
+  const onCollectionsChanged = vi.fn();
+  const gateway = createGateway();
+  vi.mocked(gateway.getCollectionSourceRoot).mockResolvedValue("C:\\book");
+  vi.mocked(gateway.setCollectionSourceRoot).mockResolvedValue(207);
+  vi.mocked(open).mockResolvedValue("C:\\lakomics\\book");
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} onCollectionsChanged={onCollectionsChanged} />
+    </LibraryProvider>,
+  );
+
+  expect(await screen.findByText("C:\\book")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "컬렉션 소스 폴더 변경" }));
+
+  await waitFor(() => expect(gateway.setCollectionSourceRoot).toHaveBeenCalledWith("C:\\lakomics\\book"));
+  expect(await screen.findByText("레거시 출처를 207개 컬렉션에 표시했습니다")).toBeVisible();
+  expect(onCollectionsChanged).toHaveBeenCalled();
+  expect(screen.getByText("C:\\lakomics\\book")).toBeInTheDocument();
+});
+
+it("keeps the current collection source root when the folder picker is cancelled", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getCollectionSourceRoot).mockResolvedValue("C:\\book");
+  vi.mocked(open).mockResolvedValue(null);
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  await user.click(await screen.findByRole("button", { name: "컬렉션 소스 폴더 변경" }));
+
+  await waitFor(() => expect(open).toHaveBeenCalledWith({ directory: true, multiple: false }));
+  expect(gateway.setCollectionSourceRoot).not.toHaveBeenCalled();
+  expect(screen.getByText("C:\\book")).toBeInTheDocument();
+});
+
+it("shows an error when the collection source root cannot be saved", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getCollectionSourceRoot).mockResolvedValue(null);
+  vi.mocked(gateway.setCollectionSourceRoot).mockRejectedValue(new Error("디스크 오류"));
+  vi.mocked(open).mockResolvedValue("C:\\book");
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  await user.click(await screen.findByRole("button", { name: "컬렉션 소스 폴더 변경" }));
+
+  expect(await screen.findByText("디스크 오류")).toBeVisible();
 });
 
 it("keeps backup load errors visible for retry", async () => {
@@ -541,7 +598,7 @@ function createGateway(): LibraryGateway {
     listSimilarityReviews: vi.fn(), decideSimilarityReview: vi.fn(), getAsset: vi.fn(), updateAssetMetadata: vi.fn(), setAssetFavorite: vi.fn(), setAssetsFavorite: vi.fn(),
     getAssetClassifications: vi.fn(), setAssetClassification: vi.fn(), patchAssetAlbums: vi.fn(), getAssetAlbums: vi.fn().mockResolvedValue([]), ingestMedia: vi.fn(),
     listCollections: vi.fn().mockResolvedValue([]), searchMangaDex: vi.fn(), previewMangaDex: vi.fn(), applyMangaDex: vi.fn(), refreshMangaDex: vi.fn(), getMangaDexConnection: vi.fn().mockResolvedValue(null), createCollection: vi.fn(), updateCollection: vi.fn(), deleteCollection: vi.fn(), setCollectionCover: vi.fn(), setCollectionShowcase: vi.fn(), getAssetCollections: vi.fn().mockResolvedValue([]), patchAssetCollections: vi.fn(),
-    preparePendingVideos: vi.fn(), retryVideoPreparation: vi.fn(), inspectBookImport: vi.fn(), importBookCollections: vi.fn(), getCollectionSourceRoot: vi.fn(), setCollectionSourceRoot: vi.fn(), listCollectionCovers: vi.fn(), listCollectionVolumes: vi.fn(), syncMangaDexVolumeCovers: vi.fn(), inspectLegacyPackageMigration: vi.fn(), executeLegacyPackageMigration: vi.fn(), getAladinCredentialStatus: vi.fn().mockResolvedValue({ configured: false }), setAladinTtbKey: vi.fn(), deleteAladinTtbKey: vi.fn(), searchAladin: vi.fn(), applyAladin: vi.fn(), refreshAladin: vi.fn(), getAladinConnection: vi.fn(), getReleaseWatchStatus: vi.fn().mockResolvedValue({ enabled: false, lastCheckedAt: null }), setReleaseWatchEnabled: vi.fn().mockResolvedValue({ enabled: false, lastCheckedAt: null }), takeUnreadReleaseChanges: vi.fn().mockResolvedValue([]), runDueReleaseWatch: vi.fn().mockResolvedValue({ checked: 0, changedCollections: 0, skipped: 0, stopReason: null }),
+    preparePendingVideos: vi.fn(), retryVideoPreparation: vi.fn(), inspectBookImport: vi.fn(), importBookCollections: vi.fn(), getCollectionSourceRoot: vi.fn().mockResolvedValue(null), setCollectionSourceRoot: vi.fn().mockResolvedValue(0), listCollectionCovers: vi.fn(), listCollectionVolumes: vi.fn(), syncMangaDexVolumeCovers: vi.fn(), inspectLegacyPackageMigration: vi.fn(), executeLegacyPackageMigration: vi.fn(), getAladinCredentialStatus: vi.fn().mockResolvedValue({ configured: false }), setAladinTtbKey: vi.fn(), deleteAladinTtbKey: vi.fn(), searchAladin: vi.fn(), applyAladin: vi.fn(), refreshAladin: vi.fn(), getAladinConnection: vi.fn(), getReleaseWatchStatus: vi.fn().mockResolvedValue({ enabled: false, lastCheckedAt: null }), setReleaseWatchEnabled: vi.fn().mockResolvedValue({ enabled: false, lastCheckedAt: null }), takeUnreadReleaseChanges: vi.fn().mockResolvedValue([]), runDueReleaseWatch: vi.fn().mockResolvedValue({ checked: 0, changedCollections: 0, skipped: 0, stopReason: null }),
     getMangaRoot: vi.fn().mockResolvedValue(null), setMangaRoot: vi.fn().mockResolvedValue(undefined), scanManga: vi.fn().mockResolvedValue(0), listMangaSeries: vi.fn().mockResolvedValue([]),
     trashAssets: vi.fn(), restoreAsset: vi.fn(), restoreAssets: vi.fn(),
     listTrash: vi.fn(), emptyTrash: vi.fn(), getTrashPolicy: vi.fn(), setTrashPolicy: vi.fn(),

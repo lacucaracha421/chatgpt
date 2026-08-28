@@ -243,7 +243,7 @@ export const libraryGateway: LibraryGateway = {
   executeLegacyPackageMigration: (input) =>
     invoke<LegacyPackageMigrationReport>("execute_legacy_package_migration", input),
   getCollectionSourceRoot: () => invoke<string | null>("get_collection_source_root"),
-  setCollectionSourceRoot: (path) => invoke("set_collection_source_root", { path }),
+  setCollectionSourceRoot: (path) => invoke<number>("set_collection_source_root", { path }),
   listCollectionCovers: (collectionId) => invoke<CollectionCover[]>("list_collection_covers", { collectionId }),
   listCollectionVolumes: (collectionId) =>
     invoke<CollectionVolume[]>("list_collection_volumes", { collectionId }),
