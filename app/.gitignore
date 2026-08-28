@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# tsc -b 산출물 (vite.config.ts 컴파일 결과)
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
