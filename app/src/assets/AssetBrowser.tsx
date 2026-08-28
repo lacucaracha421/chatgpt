@@ -13,6 +13,7 @@ import { AssetGallery } from "./AssetGallery";
 import { AssetInspector } from "./AssetInspector";
 import { AssetToolbar } from "./AssetToolbar";
 import { AssetViewer } from "./AssetViewer";
+import { SelectionBar } from "./SelectionBar";
 import { applySelectionGesture, emptySelection, moveSelectionFocus, reconcileSelection, selectAllLoaded, type SelectionGesture, type SelectionState } from "./selection";
 
 export type AssetBrowserStatus = { loadedCount: number; totalCount?: number; selectedAsset: AssetSummary | null; loading: boolean };
@@ -258,7 +259,7 @@ export function AssetBrowser({ view, classifications, albums = [], collections =
     }
   })();
   return <section className="asset-browser" aria-label="저장소">
-    <AssetToolbar view={view} classifications={classifications} albums={albums} collections={collections} sort={sort} directOnly={directOnly} metadataVisible={metadataVisible} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} thumbnailRowHeight={thumbnailRowHeight} selectedCount={selectedIds.length} inspectorOpen={inspectorOpen} onInspectorToggle={() => setInspectorOpen((open) => !open)} onSortChange={(next) => { setAnchor(null); setAnchorViewKey(null); setJumpTarget(null); onSortChange(next); }} onDirectOnlyChange={setDirectOnly} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onFavorite={setBatchFavorite} onRemoveFromCollection={removeFromCollection} onSetCover={selectedIds.length === 1 ? () => setCover(selectedIds[0]!) : undefined} onTrash={trashSelection} onClearSelection={clearSelection} batchPending={batchPending} onReshuffle={reshuffle} />
+    <AssetToolbar view={view} classifications={classifications} albums={albums} collections={collections} sort={sort} directOnly={directOnly} metadataVisible={metadataVisible} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} thumbnailRowHeight={thumbnailRowHeight} onSortChange={(next) => { setAnchor(null); setAnchorViewKey(null); setJumpTarget(null); onSortChange(next); }} onDirectOnlyChange={setDirectOnly} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onReshuffle={reshuffle} />
     {message && <Toast actionLabel={undoAssetIds ? "실행 취소" : undefined} onAction={undoAssetIds ? undoTrash : undefined} actionDisabled={batchPending} onDismiss={() => dismissMessage(null)}>{message}</Toast>}
     {currentFirstError && <Toast>{currentFirstError}</Toast>}
     <div className={`asset-browser__workspace${inspectorOpen ? " asset-browser__workspace--inspector" : ""}`}>
@@ -266,6 +267,18 @@ export function AssetBrowser({ view, classifications, albums = [], collections =
         {firstLoading || !activePage && !currentFirstError ? <Skeleton className="asset-browser__skeleton" label="자산을 불러오는 중" /> : currentFirstError && items.length === 0 ? <EmptyState title="자산을 불러오지 못했습니다"><Button onClick={refresh}>다시 시도</Button></EmptyState> : items.length === 0 ? <EmptyState title={view.kind === "album" ? "이 앨범에 자산이 없습니다." : view.kind === "collection" ? "이 컬렉션에 자산이 없습니다." : "자산이 없습니다"}>{view.kind === "album" ? "원하는 자산을 이 앨범에 추가하세요." : view.kind === "collection" ? "원하는 자산을 이 컬렉션에 추가하세요." : "여기에 이미지와 영상 파일을 놓아 추가하세요."}</EmptyState>         : <AssetGallery items={items} dateBuckets={activeBuckets} onSelectDate={jumpToDate} railInteractive={chronological} jumpTarget={jumpTarget} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} targetRowHeight={thumbnailRowHeight} metadataVisible={metadataVisible} privacyMode={privacyMode} hasNextPage={tailCursor !== null} onLoadNextPage={loadNextPage} hasPreviousPage={headCursor !== null} onLoadPrevPage={loadPrevPage} onSelectionGesture={selectWithGesture} onSelectAll={selectAll} onDeleteSelection={trashSelection} onClearSelection={clearSelection} onMoveFocus={moveFocus} onOpen={(asset) => { viewerViewKeyRef.current = viewKey; setViewerAssetId(asset.id); }} onRetryVideo={(asset) => void gateway.retryVideoPreparation(asset.id).then(() => gateway.preparePendingVideos(1)).then(refresh).catch((error) => setMessage(commandErrorMessage(error, "미리보기 준비를 다시 시작하지 못했습니다.")))} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />}
         {currentNextError && <div className="asset-browser__next-error"><Toast>{currentNextError}</Toast><Button onClick={() => loadNextPage(true)}>다시 시도</Button></div>}
         {currentPrevError && <div className="asset-browser__next-error"><Toast>{currentPrevError}</Toast><Button onClick={() => loadPrevPage(true)}>다시 시도</Button></div>}
+        <SelectionBar
+          view={view}
+          selectedCount={selectedIds.length}
+          inspectorOpen={inspectorOpen}
+          batchPending={batchPending}
+          onInspectorToggle={() => setInspectorOpen((open) => !open)}
+          onFavorite={setBatchFavorite}
+          onRemoveFromCollection={removeFromCollection}
+          onSetCover={selectedIds.length === 1 ? () => setCover(selectedIds[0]!) : undefined}
+          onTrash={trashSelection}
+          onClearSelection={clearSelection}
+        />
       </div>
       <AssetInspector assets={selectedAssets} currentCollection={view.kind === "collection" ? collections.find((entry) => entry.id === view.collectionId) ?? null : null} open={inspectorOpen} onOpenChange={setInspectorOpen} onOpenAsset={(asset) => { viewerViewKeyRef.current = viewKey; setViewerAssetId(asset.id); }} onAssetUpdated={updateAssetSummary} />
     </div>

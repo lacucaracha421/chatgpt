@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { collectionCoverUrl, workArtworkUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
-import type { AladinConnection, CollectionCover, CollectionSummary, CollectionVolume, CreateCollection, IgdbConnection, MangaDexConnection, ReleaseWatchEvent, ReleaseWatchStatus, TmdbConnection, UpdateCollection } from "../library/types";
+import type { AladinConnection, CollectionCover, CollectionSummary, CollectionVolume, CreateCollection, IgdbConnection, MangaDexConnection, ReleaseWatchEvent, ReleaseWatchStatus, TmdbConnection, UpdateCollection, VolumeImportProgress, WorkArtworkSummary } from "../library/types";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { Button } from "../shared/ui/Button";
@@ -37,6 +37,8 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
   const { privacyMode } = usePrivacy();
   const [covers, setCovers] = useState<CollectionCover[] | null>(null);
   const [volumes, setVolumes] = useState<CollectionVolume[] | null>(null);
+  const [volumeImport, setVolumeImport] = useState<VolumeImportProgress | null>(null);
+  const [workArtworks, setWorkArtworks] = useState<WorkArtworkSummary[]>([]);
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [selectedVolumeId, setSelectedVolumeId] = useState<string | null>(null);
   const [viewerVolumeId, setViewerVolumeId] = useState<string | null>(null);
@@ -141,12 +143,16 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
     }
     let active = true;
     setVolumes(null);
+    setVolumeImport(null);
     setSelectedVolumeId(null);
     setEditionIndex(0);
     void (async () => {
       try {
-        const initial = await gateway.listCollectionVolumes(collectionId);
+        const initial = await gateway.listCollectionVolumes(collectionId, (progress) => {
+          if (active) setVolumeImport(progress);
+        });
         if (!active) return;
+        setVolumeImport(null);
         setVolumes(initial);
         setSelectedVolumeId(firstVolumeId(initial, 0));
         const result = await gateway.syncMangaDexVolumeCovers(collectionId);
@@ -247,6 +253,18 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
     );
     return () => { active = false; };
   }, [gateway, collectionId, isManga]);
+
+  useEffect(() => {
+    // 게임 뷰어의 스크린샷·아트웍 갤러리. 컬렉션이 갱신되면(지연 등록 포함) 다시 읽는다.
+    let active = true;
+    setWorkArtworks([]);
+    if (!isGame) return () => { active = false; };
+    void gateway.listCollectionWorkArtworks(collectionId).then(
+      (artworks) => { if (active) setWorkArtworks(artworks); },
+      () => undefined,
+    );
+    return () => { active = false; };
+  }, [gateway, collectionId, isGame, collection]);
 
   useEffect(() => {
     const exit = (event: KeyboardEvent) => {
@@ -471,6 +489,7 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
           collection={collection}
           coverUrl={gameCoverUrl}
           heroUrl={gameHeroUrl}
+          artworks={workArtworks}
           providerConnected={Boolean(igdbConnection)}
           providerBusy={igdbConnection === undefined || igdbRefreshing}
           providerError={igdbError}
@@ -498,7 +517,7 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
       ) : isManga ? (
         <div className="collection-overlay__manga-layout" role="region" aria-label="만화 상세">
             <div className="collection-overlay__manga-main">
-              {volumes !== null && (
+              {volumes !== null ? (
                 <CollectionVolumeGrid
                   volumes={volumes}
                   selectedVolumeId={selectedVolumeId}
@@ -506,6 +525,12 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
                   onEditionIndexChange={selectEdition}
                   onSelect={openVolume}
                 />
+              ) : (
+                <p className="collection-overlay__volume-loading" role="status">
+                  {volumeImport
+                    ? `표지 ${volumeImport.imported}/${volumeImport.total} 가져오는 중…`
+                    : "표지를 가져오는 중…"}
+                </p>
               )}
             </div>
             <aside className="collection-overlay__manga-aside">

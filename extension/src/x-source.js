@@ -25,6 +25,7 @@
       author: source.author,
       postId: source.postId,
       mediaIndex: source.mediaIndex,
+      publishedAt: publishedAtFor(image),
     };
   }
 
@@ -64,7 +65,13 @@
       author: source.author,
       postId: source.postId,
       mediaIndex: source.mediaIndex,
+      publishedAt: publishedAtFor(video),
     };
+  }
+
+  function publishedAtFor(element) {
+    const time = element?.closest?.("article")?.querySelector?.("time[datetime]");
+    return time?.getAttribute?.("datetime") || null;
   }
 
   function findVideoElement(target) {

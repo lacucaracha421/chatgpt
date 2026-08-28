@@ -311,6 +311,9 @@ struct XIngestionRequest {
     media_url: String,
     source_url: String,
     classification_id: String,
+    // 확장이 트윗의 <time datetime>에서 추출한 게시 시각(RFC 3339). 구버전 확장에는 없다.
+    #[serde(default)]
+    published_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -537,6 +540,10 @@ fn ingest_x_image(
     let temporary = TemporaryDownload::new(temporary_path);
     downloader.download(&media_url, temporary.path(), maximum_bytes)?;
 
+    // 게시 시각은 형식이 틀려도 수집 자체는 막지 않는다. 해석 불가면 빈 값으로 둔다.
+    let source_published_at = request
+        .published_at
+        .filter(|value| chrono::DateTime::parse_from_rfc3339(value).is_ok());
     let outcome = library
         .ingest_media(IngestMediaRequest {
             source_path: temporary.path().to_path_buf(),
@@ -544,7 +551,7 @@ fn ingest_x_image(
             source_url: Some(request.source_url),
             collected_at: None,
             replace_duplicate_metadata: false,
-            source_published_at: None,
+            source_published_at,
             creator_name: None,
             creator_handle,
             creator_url,
@@ -980,6 +987,35 @@ mod tests {
     }
 
     #[test]
+    fn ingestion_records_the_extension_publish_timestamp() {
+        let root = tempfile::tempdir().unwrap();
+        let library = Library::open(root.path()).unwrap();
+        let classification = create_root(&library, "Timestamped");
+        let downloader = RecordingDownloader::new(png_bytes());
+
+        let mut request = x_request(&classification.id);
+        request.published_at = Some("2026-08-01T10:20:30.000Z".into());
+        let (response, _) = ingest_x_image(&library, request, &downloader).unwrap();
+        assert_eq!(response.status, IngestionStatus::Added);
+        let asset_id = response.asset_id.unwrap();
+        assert_eq!(
+            library.get_asset(&asset_id).unwrap().source_published_at.as_deref(),
+            Some("2026-08-01T10:20:30.000Z")
+        );
+
+        // 게시 시각이 깨진 페이로드는 기록을 포기하고 수집은 진행한다.
+        let mut broken = x_request(&classification.id);
+        broken.published_at = Some("not-a-time".into());
+        let (response, _) = ingest_x_image(&library, broken, &downloader).unwrap();
+        assert_eq!(response.status, IngestionStatus::DuplicateUnchanged);
+        let asset_id = response.asset_id.unwrap();
+        assert_eq!(
+            library.get_asset(&asset_id).unwrap().source_published_at.as_deref(),
+            Some("2026-08-01T10:20:30.000Z")
+        );
+    }
+
+    #[test]
     fn ingestion_moves_exact_duplicates_without_copying_again() {
         let root = tempfile::tempdir().unwrap();
         let library = Library::open(root.path()).unwrap();
@@ -1093,6 +1129,7 @@ mod tests {
             media_url: "https://pbs.twimg.com/media/ABC?format=png&name=orig".into(),
             source_url: "https://x.com/example/status/123/photo/1".into(),
             classification_id: classification_id.into(),
+            published_at: None,
         }
     }
 

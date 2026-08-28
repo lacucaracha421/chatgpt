@@ -8,7 +8,7 @@ use std::{
 use image::ImageFormat;
 use rusqlite::{params, OptionalExtension, Transaction};
 
-use super::{collection::require_collection, error::LibraryError, Library, MediaResponse};
+use super::{collection::require_collection, error::LibraryError, models::WorkArtworkSummary, Library, MediaResponse};
 
 pub(crate) const MAX_WORK_ARTWORK_BYTES: usize = 32 * 1024 * 1024;
 const WORK_ARTWORK_THUMBNAIL_BOUND: u32 = 360;
@@ -265,6 +265,30 @@ impl Library {
             ],
         )?;
         Ok(prepared.id.clone())
+    }
+
+    // 컬렉션에 등록된 모든 Work 아트워크 목록. 뷰어의 스크린샷·아트웍 갤러리가 쓴다.
+    pub fn list_collection_work_artworks(
+        &self,
+        collection_id: &str,
+    ) -> Result<Vec<WorkArtworkSummary>, LibraryError> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT id, kind, selected FROM collection_work_artworks
+             WHERE collection_id = ?1
+             ORDER BY CASE kind WHEN 'cover' THEN 0 WHEN 'hero' THEN 1 ELSE 2 END,
+                      selected DESC, created_at, id",
+        )?;
+        let artworks = statement
+            .query_map([collection_id], |row| {
+                Ok(WorkArtworkSummary {
+                    id: row.get(0)?,
+                    kind: row.get(1)?,
+                    selected: row.get(2)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(artworks)
     }
 
     pub fn resolve_work_artwork(&self, artwork_id: &str) -> Result<MediaResponse, LibraryError> {
@@ -546,6 +570,59 @@ mod tests {
             .write_to(&mut bytes, ImageFormat::Png)
             .unwrap();
         bytes.into_inner()
+    }
+
+    #[test]
+    fn list_collection_work_artorders_covers_before_hero_and_marks_selection() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let collection = library
+            .create_collection(CreateCollection {
+                name: "Astral Chain".into(),
+                description: None,
+                collection_type: CollectionType::Game,
+            })
+            .unwrap();
+        let insert = |library: &Library, id: &str, kind: &str, selected: bool| {
+            library
+                .connection()
+                .unwrap()
+                .execute(
+                    "INSERT INTO collection_work_artworks (
+                        id, collection_id, provider, provider_image_id, kind, relative_path,
+                        mime_type, width, height, language, selected, created_at, updated_at
+                     ) VALUES (?1, ?2, 'local', ?1, ?3, ?5, 'image/png', 10, 10, NULL, ?4, 't', 't')",
+                    rusqlite::params![
+                        id,
+                        collection.id,
+                        kind,
+                        selected,
+                        format!("work-artwork/{}/{}.jpg", collection.id, id)
+                    ],
+                )
+                .unwrap();
+        };
+        insert(&library, "hero-1", "hero", false);
+        insert(&library, "cover-1", "cover", false);
+        insert(&library, "cover-2", "cover", true);
+        insert(&library, "hero-2", "hero", false);
+        insert(&library, "backdrop-1", "backdrop", false);
+
+        let artworks = library.list_collection_work_artworks(&collection.id).unwrap();
+
+        assert_eq!(
+            artworks
+                .iter()
+                .map(|artwork| (artwork.id.as_str(), artwork.selected))
+                .collect::<Vec<_>>(),
+            [
+                ("cover-2", true),
+                ("cover-1", false),
+                ("hero-1", false),
+                ("hero-2", false),
+                ("backdrop-1", false),
+            ]
+        );
     }
 
     #[test]

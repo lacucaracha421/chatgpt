@@ -50,6 +50,7 @@ function renderDetail(overrides: Partial<React.ComponentProps<typeof GameCollect
       collection={collection}
       coverUrl="cover.jpg"
       heroUrl="hero.jpg"
+      artworks={[]}
       providerConnected
       providerBusy={false}
       providerError={null}

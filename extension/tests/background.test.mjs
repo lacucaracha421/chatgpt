@@ -460,6 +460,7 @@ test("json sidecar follows the browser-resolved uniquified image filename", asyn
       classificationName: "게임",
       classificationPath: ["게임"],
       classificationSource: "local",
+      publishedAt: "2026-08-01T10:20:30.000Z",
     },
   });
 
@@ -468,6 +469,7 @@ test("json sidecar follows the browser-resolved uniquified image filename", asyn
   assert.equal(harness.downloadCalls[1].conflictAction, "overwrite");
   const metadata = JSON.parse(decodeURIComponent(harness.downloadCalls[1].url.split(",", 2)[1]));
   assert.equal(metadata.filename, "Lakomics/게임/artist_900_1_PAIR (1).jpg");
+  assert.equal(metadata.publishedAt, "2026-08-01T10:20:30.000Z");
 });
 
 test("simultaneous identical saves serialize and do not race past duplicate suppression", async () => {
@@ -760,6 +762,32 @@ test("remote app mode sends ingestion to the PC through Tailscale Serve", async 
   assert.equal(response.ok, true);
   assert.equal(harness.fetchCalls[0].url, "https://laku-pc.example-tailnet.ts.net/v1/ingestions");
   assert.equal(harness.fetchCalls[0].options.method, "POST");
+});
+
+test("ingestion POST keeps the tweet publish timestamp for the PC app", async () => {
+  const harness = createHarness({
+    connectionToken: "0123456789abcdef0123456789abcdef",
+    remoteSettings: { enabled: true, baseUrl: "https://laku-pc.example-tailnet.ts.net" },
+    preferences: { saveMode: "app" },
+  });
+  harness.queueJson({ status: "added", assetId: "asset-1" });
+
+  const response = await harness.api.handleMessage({
+    type: "ingestion:create",
+    payload: {
+      source: "x",
+      mediaUrl: "https://pbs.twimg.com/media/ABC?format=png&name=orig",
+      sourceUrl: "https://x.com/user/status/1/photo/1",
+      classificationId: "tag-1",
+      classificationName: "Tag",
+      classificationSource: "remote",
+      publishedAt: "2026-08-01T10:20:30.000Z",
+    },
+  });
+
+  assert.equal(response.ok, true);
+  const body = JSON.parse(harness.fetchCalls[0].options.body);
+  assert.equal(body.publishedAt, "2026-08-01T10:20:30.000Z");
 });
 
 test("invalid remote URLs are rejected instead of broadening host access", async () => {

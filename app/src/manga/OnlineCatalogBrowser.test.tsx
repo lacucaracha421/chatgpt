@@ -213,10 +213,44 @@ describe("OnlineCatalogBrowser", () => {
     const gateway = createGateway(true);
     renderBrowser(gateway);
 
-    await userEvent.click(await screen.findByRole("button", { name: "지금 갱신" }));
+    await userEvent.click(await screen.findByRole("button", { name: "신규 작품 갱신" }));
 
     expect(gateway.updateOnlineCatalog).toHaveBeenCalledOnce();
     expect(await screen.findByText("3개 작품을 갱신했습니다")).toBeInTheDocument();
+  });
+
+  it("shows the last catalog sync status next to the manual update command", async () => {
+    const gateway = createGateway(true);
+    vi.mocked(gateway.getOnlineCatalogStatus).mockResolvedValue({
+      installed: true,
+      workCount: 1,
+      updateEnabled: true,
+      updateIntervalSeconds: 3600,
+      lastAttemptAt: "2026-08-28T09:00:00Z",
+      lastSuccessAt: "2026-08-28T09:00:00Z",
+      lastAdded: 3,
+      lastError: null,
+    });
+    renderBrowser(gateway);
+
+    expect(await screen.findByText(/마지막 갱신/)).toHaveTextContent("신규 3개");
+  });
+
+  it("surfaces the last catalog update error instead of the success time", async () => {
+    const gateway = createGateway(true);
+    vi.mocked(gateway.getOnlineCatalogStatus).mockResolvedValue({
+      installed: true,
+      workCount: 1,
+      updateEnabled: true,
+      updateIntervalSeconds: 3600,
+      lastAttemptAt: "2026-08-28T09:00:00Z",
+      lastSuccessAt: null,
+      lastAdded: 0,
+      lastError: "요청이 제한되었습니다",
+    });
+    renderBrowser(gateway);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("마지막 갱신 실패 — 요청이 제한되었습니다");
   });
 
   it("shows the public command error when a manual catalog update fails", async () => {
@@ -227,7 +261,7 @@ describe("OnlineCatalogBrowser", () => {
     });
     renderBrowser(gateway);
 
-    await userEvent.click(await screen.findByRole("button", { name: "지금 갱신" }));
+    await userEvent.click(await screen.findByRole("button", { name: "신규 작품 갱신" }));
 
     expect(await screen.findByText("온라인 카탈로그 응답을 처리할 수 없습니다")).toBeInTheDocument();
   });

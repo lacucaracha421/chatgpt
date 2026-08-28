@@ -79,9 +79,9 @@ pub enum LibraryError {
         #[source]
         source: std::io::Error,
     },
-    #[error("trash retention must be between 1 and 3650 days, or disabled")]
+    #[error("휴지통 보존 기간은 1일에서 3650일 사이여야 합니다")]
     InvalidTrashRetention,
-    #[error("managed file deletion is supported only on Windows")]
+    #[error("이 운영체제에서는 파일 삭제를 지원하지 않습니다")]
     UnsupportedManagedFileDeletion,
     #[error("분류 이름은 비어 있을 수 없습니다")]
     EmptyClassificationName,
@@ -146,7 +146,7 @@ pub enum LibraryError {
     InvalidAssetPageLimit,
     #[error("분류, 앨범, 컬렉션 범위는 한 번에 하나만 조회할 수 있습니다")]
     InvalidAssetScope,
-    #[error("invalid asset cursor")]
+    #[error("자산 목록 커서가 올바르지 않습니다")]
     InvalidAssetCursor,
     #[error("저장된 유사 이미지 해시가 올바르지 않습니다")]
     InvalidPerceptualHash,
@@ -154,7 +154,7 @@ pub enum LibraryError {
     SimilarityReviewNotFound,
     #[error("이미 다른 결정으로 처리 중이거나 완료된 검토입니다")]
     SimilarityReviewConflict,
-    #[error("invalid trash timestamp")]
+    #[error("휴지통 기록 시각이 올바르지 않습니다")]
     InvalidTrashTimestamp,
     #[error("수집 시각이 RFC 3339 형식이 아닙니다")]
     InvalidCollectedAt,

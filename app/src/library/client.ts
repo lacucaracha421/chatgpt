@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
   AladinApplyRequest,
   AladinConnection,
@@ -49,6 +49,8 @@ import type {
   TrashPolicy,
   UpdateCollection,
   VideoPreparationProgress,
+  VolumeImportProgress,
+  WorkArtworkSummary,
   BookImportPlan,
   BookMigrationReport,
   LegacyPackageMigrationPlan,
@@ -247,8 +249,19 @@ export const libraryGateway: LibraryGateway = {
   listCollectionCovers: (collectionId) => invoke<CollectionCover[]>("list_collection_covers", { collectionId }),
   importCollectionArtworks: (collectionId) =>
     invoke<number>("import_collection_artworks", { collectionId }),
-  listCollectionVolumes: (collectionId) =>
-    invoke<CollectionVolume[]>("list_collection_volumes", { collectionId }),
+  listCollectionWorkArtworks: (collectionId) =>
+    invoke<WorkArtworkSummary[]>("list_collection_work_artworks", { collectionId }),
+  listCollectionVolumes: (collectionId, onProgress) => {
+    if (!onProgress) {
+      return invoke<CollectionVolume[]>("list_collection_volumes", { collectionId });
+    }
+    const onProgressChannel = new Channel<VolumeImportProgress>();
+    onProgressChannel.onmessage = onProgress;
+    return invoke<CollectionVolume[]>("list_collection_volumes", {
+      collectionId,
+      onProgress: onProgressChannel,
+    });
+  },
   syncMangaDexVolumeCovers: (collectionId) =>
     invoke<MangaDexVolumeSyncResult>("sync_mangadex_volume_covers", { collectionId }),
   inspectMetadataImport: (folder) =>

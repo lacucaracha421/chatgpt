@@ -1018,6 +1018,7 @@
       author: payload.author ?? source.author,
       postId: payload.postId ?? source.postId,
       mediaIndex: payload.mediaIndex ?? (source.mediaIndex === null ? null : Number(source.mediaIndex)),
+      publishedAt: payload.publishedAt ?? null,
       ...(video ? { video: {
         bitrate: video.bitrate ?? null,
         width: video.width ?? null,

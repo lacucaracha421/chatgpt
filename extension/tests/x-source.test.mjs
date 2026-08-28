@@ -14,10 +14,21 @@ test("normalizes the largest X media image and nearest post URL", () => {
     src: "https://pbs.twimg.com/media/ABC?format=jpg&name=small",
     srcset: "https://pbs.twimg.com/media/ABC?format=jpg&name=small 400w, https://pbs.twimg.com/media/ABC?format=jpg&name=large 1200w",
     href: "https://twitter.com/user/status/123/photo/1?ref=timeline",
+    datetime: "2026-08-01T10:20:30.000Z",
   }));
 
   assert.equal(candidate.mediaUrl, "https://pbs.twimg.com/media/ABC?format=jpg&name=orig");
   assert.equal(candidate.sourceUrl, "https://x.com/user/status/123/photo/1");
+  assert.equal(candidate.publishedAt, "2026-08-01T10:20:30.000Z");
+});
+
+test("publish timestamp stays empty when the tweet has no time element", () => {
+  const candidate = findCandidate(fakePhoto({
+    src: "https://pbs.twimg.com/media/ABC?format=jpg&name=small",
+    href: "https://x.com/user/status/123/photo/1",
+  }));
+
+  assert.equal(candidate.publishedAt, null);
 });
 
 test("rejects avatars, video thumbnails, misleading hosts, and missing posts", () => {
@@ -50,13 +61,19 @@ test("falls back to currentSrc and normalizes supported extensions", () => {
   assert.equal(candidate.sourceUrl, "https://x.com/user/status/456/photo/1");
 });
 
-function fakePhoto({ src, currentSrc = "", srcset = "", href }) {
+function fakePhoto({ src, currentSrc = "", srcset = "", href, datetime = "" }) {
   const link = { getAttribute: (name) => name === "href" ? href : null, href };
   let image;
   const article = {
     querySelectorAll(selector) {
       if (selector === "img") return [image];
       return [link];
+    },
+    querySelector(selector) {
+      if (selector === "time[datetime]") {
+        return datetime ? { getAttribute: (name) => name === "datetime" ? datetime : null } : null;
+      }
+      return null;
     },
   };
   image = {

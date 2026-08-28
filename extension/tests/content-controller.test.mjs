@@ -131,6 +131,7 @@ test("sends one final selection and cancellation sends nothing", async () => {
     author: null,
     postId: null,
     mediaIndex: null,
+    publishedAt: null,
     classificationId: "tag",
     classificationName: "Tag",
     classificationPath: ["Tag"],

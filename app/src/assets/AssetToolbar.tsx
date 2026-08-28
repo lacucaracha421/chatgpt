@@ -1,5 +1,4 @@
-import { EyeSlashIcon, InformationCircleIcon, AdjustmentsHorizontalIcon, ArrowPathIcon, MinusCircleIcon, PhotoIcon, StarIcon, TrashIcon, XMarkIcon } from "@heroicons/react/24/outline";
-import { StarIcon as StarSolidIcon } from "@heroicons/react/24/solid";
+import { AdjustmentsHorizontalIcon, ArrowPathIcon, EyeSlashIcon, InformationCircleIcon } from "@heroicons/react/24/outline";
 import type { AlbumEntry, AssetSort, AssetView, ClassificationEntry, CollectionSummary } from "../library/types";
 import { Button } from "../shared/ui/Button";
 import { Select } from "../shared/ui/Select";
@@ -16,27 +15,20 @@ type AssetToolbarProps = {
   metadataVisible: boolean;
   privacyMode: boolean;
   thumbnailRowHeight: number;
-  selectedCount: number;
-  inspectorOpen: boolean;
-  onInspectorToggle: () => void;
   onSortChange: (sort: AssetSort) => void;
   onDirectOnlyChange: (value: boolean) => void;
   onMetadataVisibleChange: (value: boolean) => void;
   onPrivacyModeChange: (value: boolean) => void;
   onThumbnailRowHeightChange: (value: number) => void;
-  onFavorite: (favorite: boolean) => void;
   collections?: CollectionSummary[];
-  onRemoveFromCollection?: () => void;
-  onSetCover?: () => void;
-  onTrash: () => void;
-  onClearSelection: () => void;
-  batchPending: boolean;
   onReshuffle: () => void;
 };
 
+// 상단바는 선택 상태와 무관하게 제목·보기 설정·창 제어 슬롯을 고정한다.
+// 선택 작업은 SelectionBar(갤러리 위 고정 바)에서 수행한다.
 export function AssetToolbar({
-  view: rawView, classifications, albums, collections = [], onRemoveFromCollection, onSetCover, sort, directOnly, metadataVisible, privacyMode, thumbnailRowHeight, selectedCount, inspectorOpen, onInspectorToggle, onSortChange,
-  onDirectOnlyChange, onMetadataVisibleChange, onPrivacyModeChange, onThumbnailRowHeightChange, onFavorite, onTrash, onClearSelection, batchPending, onReshuffle,
+  view: rawView, classifications, albums, collections = [], sort, directOnly, metadataVisible, privacyMode, thumbnailRowHeight,
+  onSortChange, onDirectOnlyChange, onMetadataVisibleChange, onPrivacyModeChange, onThumbnailRowHeightChange, onReshuffle,
 }: AssetToolbarProps) {
   const view = rawView.kind === "similarity_review" || rawView.kind === "settings" || rawView.kind === "manga"
     ? ({ kind: "classification", classificationId: null } as const)
@@ -55,17 +47,6 @@ export function AssetToolbar({
       <Toggle aria-label="정보 표시" checked={metadataVisible} onChange={(event) => onMetadataVisibleChange(event.target.checked)}><InformationCircleIcon aria-hidden="true" /></Toggle>
       <Toggle aria-label="비공개 모드" checked={privacyMode} onChange={(event) => onPrivacyModeChange(event.target.checked)}><EyeSlashIcon aria-hidden="true" /></Toggle>
       {sort === "random" && !recent && <Button size="icon" aria-label="다시 섞기" onClick={onReshuffle}><ArrowPathIcon aria-hidden="true" /></Button>}
-      {selectedCount > 0 && <>
-        <span className="view-toolbar__divider" aria-hidden="true" />
-        <strong>{selectedCount}개 선택</strong>
-        <Button aria-label="좋아요 켜기" size="icon" variant="ghost" disabled={batchPending} onClick={() => onFavorite(true)}><StarSolidIcon aria-hidden="true" /></Button>
-        <Button aria-label="좋아요 끄기" size="icon" variant="ghost" disabled={batchPending} onClick={() => onFavorite(false)}><StarIcon aria-hidden="true" /></Button>
-        {view.kind === "collection" && <Button aria-label="이 컬렉션에서 제거" size="icon" variant="ghost" disabled={batchPending} onClick={onRemoveFromCollection}><MinusCircleIcon aria-hidden="true" /></Button>}
-        {view.kind === "collection" && selectedCount === 1 && <Button aria-label="대표 이미지로 지정" size="icon" variant="ghost" disabled={batchPending} onClick={onSetCover}><PhotoIcon aria-hidden="true" /></Button>}
-        <Button aria-label="휴지통으로 이동" size="icon" variant="danger" disabled={batchPending} onClick={onTrash}><TrashIcon aria-hidden="true" /></Button>
-        <Button aria-label={inspectorOpen ? "정보 닫기" : "정보 열기"} size="icon" variant={inspectorOpen ? "secondary" : "ghost"} onClick={onInspectorToggle}><InformationCircleIcon aria-hidden="true" /></Button>
-        <Button aria-label="선택 해제" size="icon" variant="ghost" onClick={onClearSelection}><XMarkIcon aria-hidden="true" /></Button>
-      </>}
     </ViewToolbar>
   );
 }

@@ -1,12 +1,14 @@
 import { useState, type PointerEvent } from "react";
-import type { CollectionSummary } from "../library/types";
+import type { CollectionSummary, WorkArtworkSummary } from "../library/types";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { Menu } from "../shared/ui/Menu";
+import { WorkArtworkGallery } from "./WorkArtworkGallery";
 
 export type GameCollectionDetailProps = {
   collection: CollectionSummary;
   coverUrl: string | null;
   heroUrl: string | null;
+  artworks: WorkArtworkSummary[];
   providerConnected: boolean;
   providerBusy: boolean;
   providerError: string | null;
@@ -21,6 +23,7 @@ export function GameCollectionDetail({
   collection,
   coverUrl,
   heroUrl,
+  artworks,
   providerConnected,
   providerBusy,
   providerError,
@@ -144,6 +147,7 @@ export function GameCollectionDetail({
         </div>
       </section>
       {providerError && <p className="game-collection-detail__provider-error" role="alert">{providerError}</p>}
+      <WorkArtworkGallery workTitle={collection.name} artworks={artworks} />
     </article>
   );
 }

@@ -63,6 +63,7 @@
         author: current.candidate.author ?? null,
         postId: current.candidate.postId ?? null,
         mediaIndex: current.candidate.mediaIndex ?? null,
+        publishedAt: current.candidate.publishedAt ?? null,
         classificationId,
         classificationName: classification?.name ?? "기타",
         classificationPath: classificationPath(current.entries, classificationId),

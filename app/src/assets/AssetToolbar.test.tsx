@@ -19,23 +19,16 @@ const baseProps = {
   privacyMode: false,
   onPrivacyModeChange: vi.fn(),
   thumbnailRowHeight: 180,
-  selectedCount: 0,
-  inspectorOpen: false,
-  onInspectorToggle: vi.fn(),
   onSortChange: vi.fn(),
   onDirectOnlyChange: vi.fn(),
   onMetadataVisibleChange: vi.fn(),
   onThumbnailRowHeightChange: vi.fn(),
-  onFavorite: vi.fn(),
-  onTrash: vi.fn(),
-  onClearSelection: vi.fn(),
-  batchPending: false,
   onReshuffle: vi.fn(),
 };
 
 afterEach(cleanup);
 
-it("shows everyday browsing controls when nothing is selected", () => {
+it("shows the fixed browsing slots regardless of the selection", () => {
   render(<AssetToolbar {...baseProps} />);
 
   expect(screen.getByRole("heading", { name: "저장소" })).toBeVisible();
@@ -43,7 +36,10 @@ it("shows everyday browsing controls when nothing is selected", () => {
   expect(screen.getByLabelText("미리보기 크기")).toBeVisible();
   expect(screen.getByLabelText("정보 표시")).toBeVisible();
   expect(screen.getByLabelText("비공개 모드")).toBeVisible();
+  // 선택 명령은 상단바가 아니라 SelectionBar가 담당한다.
   expect(screen.queryByText(/개 선택/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "좋아요 켜기" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "휴지통으로 이동" })).not.toBeInTheDocument();
 });
 
 it("toggles privacy mode from the browsing controls", async () => {
@@ -57,26 +53,8 @@ it("toggles privacy mode from the browsing controls", async () => {
   expect(onPrivacyModeChange).toHaveBeenCalledWith(false);
 });
 
-it("keeps browsing controls visible alongside selection actions", async () => {
-  const user = userEvent.setup();
-  const onFavorite = vi.fn();
-  const onClearSelection = vi.fn();
-  render(<AssetToolbar {...baseProps} selectedCount={3} onFavorite={onFavorite} onClearSelection={onClearSelection} />);
-
-  expect(screen.getByText("3개 선택")).toBeVisible();
-  expect(screen.getByLabelText("정렬")).toBeVisible();
-  expect(screen.getByLabelText("미리보기 크기")).toBeVisible();
-  await user.click(screen.getByRole("button", { name: "좋아요 켜기" }));
-  expect(onFavorite).toHaveBeenCalledWith(true);
-  await user.click(screen.getByRole("button", { name: "좋아요 끄기" }));
-  expect(onFavorite).toHaveBeenCalledWith(false);
-  await user.click(screen.getByRole("button", { name: "선택 해제" }));
-  expect(onClearSelection).toHaveBeenCalledOnce();
-  expect(screen.getByRole("button", { name: "휴지통으로 이동" })).toBeVisible();
-});
-
 it("does not show folder or album transfer controls that duplicate sidebar drag and drop", () => {
-  render(<AssetToolbar {...baseProps} selectedCount={2} />);
+  render(<AssetToolbar {...baseProps} />);
 
   expect(screen.queryByLabelText("폴더")).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "폴더로 이동" })).not.toBeInTheDocument();
@@ -101,19 +79,6 @@ it("uses the shared view toolbar with window controls", () => {
   expect(screen.getByRole("button", { name: "창 닫기" })).toBeInTheDocument();
 });
 
-it("toggles the inspector from the selection actions", async () => {
-  const user = userEvent.setup();
-  const onInspectorToggle = vi.fn();
-  render(<AssetToolbar {...baseProps} selectedCount={1} inspectorOpen={false} onInspectorToggle={onInspectorToggle} />);
-
-  const open = screen.getByRole("button", { name: "정보 열기" });
-  await user.click(open);
-  expect(onInspectorToggle).toHaveBeenCalledOnce();
-
-  render(<AssetToolbar {...baseProps} selectedCount={1} inspectorOpen={true} onInspectorToggle={onInspectorToggle} />);
-  expect(screen.getByRole("button", { name: "정보 닫기" })).toBeVisible();
-});
-
 it("shows the collection name as the location in a collection detail view", () => {
   const collections: CollectionSummary[] = [{ id: "collection-1", name: "엘든 링", description: null, type: "game", coverAssetId: null, selectedWorkArtworkId: null, selectedHeroArtworkId: null, selectedBackdropArtworkId: null, assetCount: 3, unreadReleaseCount: 0, year: null, originalTitle: null, runtimeMinutes: null, author: null, developer: null, publisher: null, platforms: null, productionCompany: null, releaseDate: null, director: null, externalScore: null, myScore: null, genres: null, overview: null, showcase: false, showcaseOrder: null, createdAt: "2026-08-10T00:00:00Z", updatedAt: "2026-08-10T00:00:00Z" }];
   render(<AssetToolbar {...baseProps} view={{ kind: "collection", collectionId: "collection-1" }} collections={collections} />);
@@ -121,32 +86,14 @@ it("shows the collection name as the location in a collection detail view", () =
   expect(screen.getByRole("heading", { name: "엘든 링" })).toBeVisible();
 });
 
-it("removes the selection from the active collection", async () => {
+it("shows the reshuffle command only for random sort outside the recent view", async () => {
   const user = userEvent.setup();
-  const onRemoveFromCollection = vi.fn();
-  render(<AssetToolbar {...baseProps} view={{ kind: "collection", collectionId: "collection-1" }} selectedCount={2} onRemoveFromCollection={onRemoveFromCollection} />);
+  const onReshuffle = vi.fn();
+  const { rerender } = render(<AssetToolbar {...baseProps} sort="random" onReshuffle={onReshuffle} />);
 
-  await user.click(screen.getByRole("button", { name: "이 컬렉션에서 제거" }));
-  expect(onRemoveFromCollection).toHaveBeenCalledOnce();
-});
+  await user.click(screen.getByRole("button", { name: "다시 섞기" }));
+  expect(onReshuffle).toHaveBeenCalledOnce();
 
-it("sets the selected asset as the collection cover when exactly one is selected", async () => {
-  const user = userEvent.setup();
-  const onSetCover = vi.fn();
-  render(<AssetToolbar {...baseProps} view={{ kind: "collection", collectionId: "collection-1" }} selectedCount={1} onSetCover={onSetCover} />);
-
-  await user.click(screen.getByRole("button", { name: "대표 이미지로 지정" }));
-  expect(onSetCover).toHaveBeenCalledOnce();
-});
-
-it("hides the cover action outside a single-selection collection detail", () => {
-  render(<AssetToolbar {...baseProps} view={{ kind: "collection", collectionId: "collection-1" }} selectedCount={2} />);
-  expect(screen.queryByRole("button", { name: "대표 이미지로 지정" })).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "이 컬렉션에서 제거" })).toBeVisible();
-});
-
-it("does not show collection actions outside a collection detail view", () => {
-  render(<AssetToolbar {...baseProps} selectedCount={1} />);
-  expect(screen.queryByRole("button", { name: "이 컬렉션에서 제거" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "대표 이미지로 지정" })).not.toBeInTheDocument();
+  rerender(<AssetToolbar {...baseProps} />);
+  expect(screen.queryByRole("button", { name: "다시 섞기" })).not.toBeInTheDocument();
 });

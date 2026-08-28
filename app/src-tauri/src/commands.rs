@@ -28,7 +28,8 @@ use crate::{
             ReleaseWatchRunResult, ReleaseWatchRunStopReason, ReleaseWatchStatus, RemoteProvider,
             RemoteReadingProgress, ResolvedGallery, SetAssetClassification,
             SimilarityDecisionRequest, SimilarityIndexProgress, SimilarityReviewPage, TrashPage,
-            TrashPolicy, UpdateCollection, VideoPreparationProgress,
+            TrashPolicy, UpdateCollection, VideoPreparationProgress, VolumeImportProgress,
+            WorkArtworkSummary,
         },
         Library,
     },
@@ -70,6 +71,19 @@ impl From<LibraryError> for CommandError {
     fn from(error: LibraryError) -> Self {
         let message = match &error {
             LibraryError::Backup { .. } => "SQLite 백업 작업에 실패했습니다.".into(),
+            // 데이터베이스 오류는 원인을 그대로 드러낸다. 잠금·경합과 제약 위반을
+            // 구별할 수 있어야 사용자가 재시도할지 신고할지 판단한다.
+            LibraryError::Database(source) => match source {
+                rusqlite::Error::SqliteFailure(code, _)
+                    if matches!(
+                        code.code,
+                        rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+                    ) =>
+                {
+                    "데이터베이스가 다른 작업으로 바쁩니다. 잠시 후 다시 시도해 주세요.".into()
+                }
+                _ => format!("SQLite 작업이 실패했습니다: {source}"),
+            },
             LibraryError::WriteAsset { .. } => {
                 "이미지 파일을 정리하지 못했습니다. 다시 시도해 주세요.".into()
             }
@@ -1505,13 +1519,22 @@ pub fn list_collection_covers(
 #[tauri::command]
 pub async fn list_collection_volumes(
     collection_id: String,
+    on_progress: tauri::ipc::Channel<VolumeImportProgress>,
     state: State<'_, AppState>,
 ) -> Result<Vec<CollectionVolume>, CommandError> {
     let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.list_collection_volumes(&collection_id))
-        .await
-        .map_err(|_| background_task_error())?
-        .map_err(CommandError::from)
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut reporter: Box<dyn FnMut(u32, u32) + Send> = Box::new(move |imported, total| {
+            let _ = on_progress.send(VolumeImportProgress { imported, total });
+        });
+        library.list_collection_volumes_with(
+            &collection_id,
+            Some(reporter.as_mut() as &mut dyn FnMut(u32, u32)),
+        )
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -1526,6 +1549,17 @@ pub async fn import_collection_artworks(
     .await
     .map_err(|_| background_task_error())?
     .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn list_collection_work_artworks(
+    collection_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<WorkArtworkSummary>, CommandError> {
+    let library = current_required(state)?;
+    library
+        .list_collection_work_artworks(&collection_id)
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]

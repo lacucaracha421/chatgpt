@@ -850,6 +850,24 @@ pub struct MangaDexVolumeSyncResult {
     pub failed: u64,
 }
 
+// 만화 뷰어 첫 오픈에서 권 표지 import 진행 상황. 뷰어가 "표지 N/M 가져오는 중"
+// 상태를 보여주는 데 쓰인다.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct VolumeImportProgress {
+    pub imported: u32,
+    pub total: u32,
+}
+
+// 컬렉션에 등록된 Work 아트워크 한 장. 갤러리 목록과 선택 표시에 쓰인다.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkArtworkSummary {
+    pub id: String,
+    pub kind: String,
+    pub selected: bool,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateCollection {

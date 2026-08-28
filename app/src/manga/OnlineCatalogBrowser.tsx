@@ -329,7 +329,10 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
           <option value="hotWeek">주간 인기</option>
           <option value="hotMonth">월간 인기</option>
         </Select>
-        <Button size="sm" disabled={updating} onClick={() => void updateCatalog()}>{updating ? "갱신 중…" : "지금 갱신"}</Button>
+        {status?.lastError ? <span className="online-catalog__sync-status" role="alert">마지막 갱신 실패 — {status.lastError}</span>
+          : status?.lastSuccessAt ? <span className="online-catalog__sync-status">마지막 갱신 {localDateTime(status.lastSuccessAt)}{status.lastAdded > 0 ? ` · 신규 ${status.lastAdded.toLocaleString()}개` : ""}</span>
+          : <span className="online-catalog__sync-status">아직 갱신 기록이 없습니다</span>}
+        <Button size="sm" disabled={updating} onClick={() => void updateCatalog()}>{updating ? "갱신 중…" : "신규 작품 갱신"}</Button>
         <Button size="sm" disabled={loading} onClick={() => void search(query.trim(), sort, scope, page)}>새로고침</Button>
       </div>
     </div>}
@@ -379,4 +382,9 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
       onClose={closeViewer}
     />}
   </section>;
+}
+
+function localDateTime(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("ko-KR");
 }

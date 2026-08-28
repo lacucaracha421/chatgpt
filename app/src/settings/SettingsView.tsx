@@ -87,6 +87,8 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [catalogStatus, setCatalogStatus] = useState<CatalogStatus | null>(null);
   const [catalogBusy, setCatalogBusy] = useState(false);
   const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [catalogRestoreBusy, setCatalogRestoreBusy] = useState(false);
+  const [catalogRestoreMessage, setCatalogRestoreMessage] = useState<string | null>(null);
   const [catalogCacheConfirming, setCatalogCacheConfirming] = useState(false);
   const [catalogCacheBusy, setCatalogCacheBusy] = useState(false);
   const [catalogCacheMessage, setCatalogCacheMessage] = useState<string | null>(null);
@@ -426,6 +428,24 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     }
   }
 
+  async function restoreCatalogFromVck() {
+    if (catalogRestoreBusy) return;
+    setCatalogRestoreBusy(true);
+    setCatalogError(null);
+    setCatalogRestoreMessage(null);
+    try {
+      const selected = await open({ directory: true, multiple: false });
+      if (typeof selected !== "string") return;
+      const next = await gateway.importVckCatalog(selected);
+      setCatalogStatus(next);
+      setCatalogRestoreMessage(`카탈로그를 교체했습니다 · ${next.workCount.toLocaleString()}개 작품`);
+    } catch (restoreError) {
+      setCatalogError(commandErrorMessage(restoreError, "VCK 카탈로그를 교체하지 못했습니다. 기존 카탈로그가 유지됩니다."));
+    } finally {
+      setCatalogRestoreBusy(false);
+    }
+  }
+
   async function clearCatalogCache() {
     if (catalogCacheBusy) return;
     setCatalogCacheBusy(true);
@@ -651,6 +671,26 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
         <p className="settings-view__row-note">TMDB API 키는 <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noreferrer">TMDB API 설정 안내</a>에서 발급합니다.</p>
         <h3 className="settings-view__group-title">온라인 카탈로그</h3>
         {catalogStatus && <dl className="settings-view__property">
+          <dt>카탈로그 상태</dt>
+          <dd>{catalogStatus.installed ? `설치됨 · ${catalogStatus.workCount.toLocaleString()}개 작품` : "미설치"}</dd>
+        </dl>}
+        {catalogStatus?.installed && <dl className="settings-view__property">
+          <dt>마지막 갱신</dt>
+          {catalogStatus.lastError ? <dd className="settings-view__row-message" role="alert">실패 — {catalogStatus.lastError}</dd>
+            : <dd>{catalogStatus.lastSuccessAt
+              ? `${localDateTime(catalogStatus.lastSuccessAt)} · 신규 ${catalogStatus.lastAdded.toLocaleString()}개`
+              : "아직 갱신 기록이 없습니다"}</dd>}
+          <dd className="settings-view__row-note">갱신은 새 작품 추가만 반영하며 기존 작품의 변경은 반영하지 않습니다.</dd>
+        </dl>}
+        {catalogStatus?.installed && <dl className="settings-view__property">
+          <dt>카탈로그 교체·복구</dt>
+          <dd className="settings-view__row-note">VCK 원본 폴더를 다시 선택하면 검증 후 전체 카탈로그를 교체합니다. 북마크와 읽기 기록은 유지됩니다.</dd>
+          <Button size="sm" disabled={catalogRestoreBusy} onClick={() => void restoreCatalogFromVck()}>
+            {catalogRestoreBusy ? "교체 중…" : "VCK 폴더 다시 선택"}
+          </Button>
+          {catalogRestoreMessage && <dd className="settings-view__row-message">{catalogRestoreMessage}</dd>}
+        </dl>}
+        {catalogStatus && <dl className="settings-view__property">
           <dt>온라인 카탈로그</dt>
           <dd><Toggle checked={catalogStatus.updateEnabled} disabled={catalogBusy || !catalogStatus.installed} onChange={(event) => void saveCatalogSettings(event.target.checked, catalogStatus.updateIntervalSeconds)}>자동 갱신</Toggle></dd>
           <Select label="갱신 간격" value={String(catalogStatus.updateIntervalSeconds)} disabled={catalogBusy || !catalogStatus.installed} onChange={(event) => void saveCatalogSettings(catalogStatus.updateEnabled, Number(event.target.value))}>
@@ -871,4 +911,9 @@ function kindLabel(kind: MetadataBackup["kind"]): string {
 function localDate(value: string): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("ko-KR");
+}
+
+function localDateTime(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("ko-KR");
 }

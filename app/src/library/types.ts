@@ -410,6 +410,19 @@ export type MangaDexVolumeSyncResult = {
   failed: number;
 };
 
+// 만화 뷰어 첫 오픈에서 권 표지 import 진행 상황.
+export type VolumeImportProgress = {
+  imported: number;
+  total: number;
+};
+
+// 컬렉션에 등록된 Work 아트워크 한 장. 갤러리 목록과 선택 표시에 쓰인다.
+export type WorkArtworkSummary = {
+  id: string;
+  kind: string;
+  selected: boolean;
+};
+
 export type UpdateCollection = {
   name: string;
   description: string | null;
@@ -764,7 +777,11 @@ export interface LibraryGateway {
   setCollectionSourceRoot(path: string | null): Promise<number>;
   listCollectionCovers(collectionId: string): Promise<CollectionCover[]>;
   importCollectionArtworks(collectionId: string): Promise<number>;
-  listCollectionVolumes(collectionId: string): Promise<CollectionVolume[]>;
+  listCollectionWorkArtworks(collectionId: string): Promise<WorkArtworkSummary[]>;
+  listCollectionVolumes(
+    collectionId: string,
+    onProgress?: (progress: VolumeImportProgress) => void,
+  ): Promise<CollectionVolume[]>;
   syncMangaDexVolumeCovers(collectionId: string): Promise<MangaDexVolumeSyncResult>;
 }
 

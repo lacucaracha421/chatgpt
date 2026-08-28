@@ -90,6 +90,16 @@ impl Library {
         &self,
         collection_id: &str,
     ) -> Result<Vec<CollectionVolume>, LibraryError> {
+        self.list_collection_volumes_with(collection_id, None)
+    }
+
+    // on_progress는 로컬 표지 import가 진행될 때마다 (처리한 슬롯 수, 전체 슬롯 수)를
+    // 받는다. 첫 오픈에서 import가 오래 걸리는 동안 뷰어가 진행 상황을 보여준다.
+    pub fn list_collection_volumes_with(
+        &self,
+        collection_id: &str,
+        mut on_progress: Option<&mut dyn FnMut(u32, u32)>,
+    ) -> Result<Vec<CollectionVolume>, LibraryError> {
         let binding = {
             let connection = self.connection()?;
             let collection_type: Option<String> = connection
@@ -147,49 +157,74 @@ impl Library {
                 local_slots.entry(slot).or_insert(cover.file_name);
             }
         }
-        for ((volume_number, edition_index), file_name) in local_slots {
-            if self
-                .local_volume_artwork(collection_id, volume_number, edition_index)?
-                .is_some()
-            {
-                continue;
-            }
-            let existing_artwork = self
-                .connection()?
-                .query_row(
-                    "SELECT id FROM collection_work_artworks
-                     WHERE collection_id = ?1 AND provider = 'local' AND provider_image_id = ?2",
-                    params![collection_id, file_name],
-                    |row| row.get::<_, String>(0),
-                )
-                .optional()?;
-            let artwork_id = if let Some(artwork_id) = existing_artwork {
-                artwork_id
-            } else {
-                let mut media = self.collection_cover_media(collection_id, &file_name)?;
-                if media.length > MAX_WORK_ARTWORK_BYTES as u64 {
-                    return Err(LibraryError::InvalidWorkArtwork);
+        let total_slots = local_slots.len() as u32;
+        for (index, (slot, file_name)) in local_slots.into_iter().enumerate() {
+            let (volume_number, edition_index) = slot;
+            // 슬롯을 실제로 처리(import)했을 때만 진행을 보고한다. 이미 등록된
+            // 슬롯은 건너뛰므로 진행 이벤트도 만들지 않는다.
+            let slot_result = (|| -> Result<bool, LibraryError> {
+                if self
+                    .local_volume_artwork(collection_id, volume_number, edition_index)?
+                    .is_some()
+                {
+                    return Ok(false);
                 }
-                let mut bytes = Vec::with_capacity(media.length as usize);
-                media
-                    .file
-                    .read_to_end(&mut bytes)
-                    .map_err(|source| LibraryError::ReadMedia {
-                        path: std::path::PathBuf::from(&file_name),
-                        source,
-                    })?;
-                let prepared = self.prepare_work_artwork(collection_id, &bytes)?;
-                let artwork_id = {
+                let existing_artwork = self
+                    .connection()?
+                    .query_row(
+                        "SELECT id FROM collection_work_artworks
+                         WHERE collection_id = ?1 AND provider = 'local' AND provider_image_id = ?2",
+                        params![collection_id, file_name],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()?;
+                let artwork_id = if let Some(artwork_id) = existing_artwork {
+                    artwork_id
+                } else {
+                    let mut media = self.collection_cover_media(collection_id, &file_name)?;
+                    if media.length > MAX_WORK_ARTWORK_BYTES as u64 {
+                        return Err(LibraryError::InvalidWorkArtwork);
+                    }
+                    let mut bytes = Vec::with_capacity(media.length as usize);
+                    media
+                        .file
+                        .read_to_end(&mut bytes)
+                        .map_err(|source| LibraryError::ReadMedia {
+                            path: std::path::PathBuf::from(&file_name),
+                            source,
+                        })?;
+                    let prepared = self.prepare_work_artwork(collection_id, &bytes)?;
+                    let artwork_id = {
+                        let mut connection = self.connection()?;
+                        let transaction = connection.transaction()?;
+                        let artwork_id = Library::insert_volume_work_artwork_in_transaction(
+                            &transaction,
+                            collection_id,
+                            "local",
+                            &file_name,
+                            None,
+                            &prepared,
+                        )?;
+                        set_local_volume(
+                            &transaction,
+                            collection_id,
+                            volume_number,
+                            edition_index,
+                            &file_name,
+                            &artwork_id,
+                        )?;
+                        transaction.commit()?;
+                        artwork_id
+                    };
+                    prepared.commit();
+                    artwork_id
+                };
+                if self
+                    .local_volume_artwork(collection_id, volume_number, edition_index)?
+                    .is_none()
+                {
                     let mut connection = self.connection()?;
                     let transaction = connection.transaction()?;
-                    let artwork_id = Library::insert_volume_work_artwork_in_transaction(
-                        &transaction,
-                        collection_id,
-                        "local",
-                        &file_name,
-                        None,
-                        &prepared,
-                    )?;
                     set_local_volume(
                         &transaction,
                         collection_id,
@@ -199,26 +234,13 @@ impl Library {
                         &artwork_id,
                     )?;
                     transaction.commit()?;
-                    artwork_id
-                };
-                prepared.commit();
-                artwork_id
-            };
-            if self
-                .local_volume_artwork(collection_id, volume_number, edition_index)?
-                .is_none()
-            {
-                let mut connection = self.connection()?;
-                let transaction = connection.transaction()?;
-                set_local_volume(
-                    &transaction,
-                    collection_id,
-                    volume_number,
-                    edition_index,
-                    &file_name,
-                    &artwork_id,
-                )?;
-                transaction.commit()?;
+                }
+                Ok(true)
+            })();
+            if slot_result? {
+                if let Some(report) = on_progress.as_deref_mut() {
+                    report(index as u32 + 1, total_slots);
+                }
             }
         }
 
@@ -690,6 +712,55 @@ mod tests {
         ] {
             assert!(covers_dir.join(file_name).is_file());
         }
+    }
+
+    #[test]
+    fn list_volumes_reports_import_progress_per_slot() {
+        let temp = tempfile::tempdir().unwrap();
+        let library_root = temp.path().join("library");
+        let source_root = temp.path().join("source");
+        let covers_dir = source_root.join("manga/work/covers");
+        fs::create_dir_all(&covers_dir).unwrap();
+        for file_name in ["vol_1_local.png", "vol_2_local.png", "vol_3_local.png"] {
+            fs::write(covers_dir.join(file_name), cover_bytes()).unwrap();
+        }
+        let library = Library::open(&library_root).unwrap();
+        library
+            .set_collection_source_root(Some(source_root.to_str().unwrap()))
+            .unwrap();
+        let work = library
+            .create_collection(CreateCollection {
+                name: "Work".into(),
+                description: None,
+                collection_type: CollectionType::Manga,
+            })
+            .unwrap();
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE collections SET source_path = 'manga/work' WHERE id = ?1",
+                [&work.id],
+            )
+            .unwrap();
+
+        let mut progress = Vec::new();
+        library
+            .list_collection_volumes_with(&work.id, Some(&mut |imported, total| {
+                progress.push((imported, total));
+            }))
+            .unwrap();
+
+        assert_eq!(progress, vec![(1, 3), (2, 3), (3, 3)]);
+
+        // 이미 등록된 컬렉션은 import가 없으므로 진행 이벤트도 없다.
+        let mut replay = Vec::new();
+        library
+            .list_collection_volumes_with(&work.id, Some(&mut |imported, total| {
+                replay.push((imported, total));
+            }))
+            .unwrap();
+        assert!(replay.is_empty());
     }
 
     #[test]

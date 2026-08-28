@@ -552,6 +552,66 @@ it("changes online catalog automatic update settings", async () => {
   expect(gateway.setOnlineCatalogUpdateSettings).toHaveBeenCalledWith(false, 21_600);
 });
 
+it("shows catalog status and restores the catalog from a re-selected VCK folder", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getAladinCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.getOnlineCatalogStatus).mockResolvedValue({
+    installed: true,
+    workCount: 100,
+    updateEnabled: true,
+    updateIntervalSeconds: 3_600,
+    lastAttemptAt: "2026-08-28T09:00:00Z",
+    lastSuccessAt: "2026-08-28T09:00:00Z",
+    lastAdded: 3,
+    lastError: null,
+  });
+  vi.mocked(gateway.importVckCatalog).mockResolvedValue({
+    installed: true,
+    workCount: 200,
+    updateEnabled: true,
+    updateIntervalSeconds: 3_600,
+    lastAttemptAt: null,
+    lastSuccessAt: null,
+    lastAdded: 0,
+    lastError: null,
+  });
+  vi.mocked(open).mockResolvedValue("D:\\VCK");
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  await user.click(screen.getByRole("button", { name: "외부 서비스" }));
+  expect(await screen.findByText("설치됨 · 100개 작품")).toBeVisible();
+  expect(screen.getByText("마지막 갱신").parentElement).toHaveTextContent("신규 3개");
+
+  await user.click(screen.getByRole("button", { name: "VCK 폴더 다시 선택" }));
+
+  expect(gateway.importVckCatalog).toHaveBeenCalledWith("D:\\VCK");
+  expect(await screen.findByText(/카탈로그를 교체했습니다/)).toBeVisible();
+  expect(screen.getByText("설치됨 · 200개 작품")).toBeVisible();
+});
+
+it("keeps the catalog error message when the VCK restore fails", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getAladinCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.getOnlineCatalogStatus).mockResolvedValue({ installed: true, workCount: 100, updateEnabled: true, updateIntervalSeconds: 3600, lastAttemptAt: null, lastSuccessAt: null, lastAdded: 0, lastError: null });
+  vi.mocked(gateway.importVckCatalog).mockRejectedValue({ code: "invalid_online_catalog", message: "온라인 카탈로그 데이터가 올바르지 않습니다" });
+  vi.mocked(open).mockResolvedValue("D:\\Broken");
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="external_services" />
+    </LibraryProvider>,
+  );
+
+  await user.click(await screen.findByRole("button", { name: "VCK 폴더 다시 선택" }));
+
+  expect(await screen.findByText("온라인 카탈로그 데이터가 올바르지 않습니다")).toBeVisible();
+});
+
 it("confirms before clearing the remote manga cache", async () => {
   const user = userEvent.setup();
   const gateway = createGateway();
@@ -598,7 +658,8 @@ function createGateway(): LibraryGateway {
     listSimilarityReviews: vi.fn(), decideSimilarityReview: vi.fn(), getAsset: vi.fn(), updateAssetMetadata: vi.fn(), setAssetFavorite: vi.fn(), setAssetsFavorite: vi.fn(),
     getAssetClassifications: vi.fn(), setAssetClassification: vi.fn(), patchAssetAlbums: vi.fn(), getAssetAlbums: vi.fn().mockResolvedValue([]), ingestMedia: vi.fn(),
     listCollections: vi.fn().mockResolvedValue([]), searchMangaDex: vi.fn(), previewMangaDex: vi.fn(), applyMangaDex: vi.fn(), refreshMangaDex: vi.fn(), getMangaDexConnection: vi.fn().mockResolvedValue(null), createCollection: vi.fn(), updateCollection: vi.fn(), deleteCollection: vi.fn(), setCollectionCover: vi.fn(), setCollectionShowcase: vi.fn(), getAssetCollections: vi.fn().mockResolvedValue([]), patchAssetCollections: vi.fn(),
-    preparePendingVideos: vi.fn(), retryVideoPreparation: vi.fn(), inspectBookImport: vi.fn(), importBookCollections: vi.fn(), getCollectionSourceRoot: vi.fn().mockResolvedValue(null), setCollectionSourceRoot: vi.fn().mockResolvedValue(0), importCollectionArtworks: vi.fn().mockResolvedValue(0), listCollectionCovers: vi.fn(), listCollectionVolumes: vi.fn(), syncMangaDexVolumeCovers: vi.fn(), inspectLegacyPackageMigration: vi.fn(), executeLegacyPackageMigration: vi.fn(), getAladinCredentialStatus: vi.fn().mockResolvedValue({ configured: false }), setAladinTtbKey: vi.fn(), deleteAladinTtbKey: vi.fn(), searchAladin: vi.fn(), applyAladin: vi.fn(), refreshAladin: vi.fn(), getAladinConnection: vi.fn(), getReleaseWatchStatus: vi.fn().mockResolvedValue({ enabled: false, lastCheckedAt: null }), setReleaseWatchEnabled: vi.fn().mockResolvedValue({ enabled: false, lastCheckedAt: null }), takeUnreadReleaseChanges: vi.fn().mockResolvedValue([]), runDueReleaseWatch: vi.fn().mockResolvedValue({ checked: 0, changedCollections: 0, skipped: 0, stopReason: null }),
+    preparePendingVideos: vi.fn(), retryVideoPreparation: vi.fn(), inspectBookImport: vi.fn(), importBookCollections: vi.fn(), getCollectionSourceRoot: vi.fn().mockResolvedValue(null), setCollectionSourceRoot: vi.fn().mockResolvedValue(0), importCollectionArtworks: vi.fn().mockResolvedValue(0),
+  listCollectionWorkArtworks: vi.fn().mockResolvedValue([]), listCollectionCovers: vi.fn(), listCollectionVolumes: vi.fn(), syncMangaDexVolumeCovers: vi.fn(), inspectLegacyPackageMigration: vi.fn(), executeLegacyPackageMigration: vi.fn(), getAladinCredentialStatus: vi.fn().mockResolvedValue({ configured: false }), setAladinTtbKey: vi.fn(), deleteAladinTtbKey: vi.fn(), searchAladin: vi.fn(), applyAladin: vi.fn(), refreshAladin: vi.fn(), getAladinConnection: vi.fn(), getReleaseWatchStatus: vi.fn().mockResolvedValue({ enabled: false, lastCheckedAt: null }), setReleaseWatchEnabled: vi.fn().mockResolvedValue({ enabled: false, lastCheckedAt: null }), takeUnreadReleaseChanges: vi.fn().mockResolvedValue([]), runDueReleaseWatch: vi.fn().mockResolvedValue({ checked: 0, changedCollections: 0, skipped: 0, stopReason: null }),
     getMangaRoot: vi.fn().mockResolvedValue(null), setMangaRoot: vi.fn().mockResolvedValue(undefined), scanManga: vi.fn().mockResolvedValue(0), listMangaSeries: vi.fn().mockResolvedValue([]),
     trashAssets: vi.fn(), restoreAsset: vi.fn(), restoreAssets: vi.fn(),
     listTrash: vi.fn(), emptyTrash: vi.fn(), getTrashPolicy: vi.fn(), setTrashPolicy: vi.fn(),
