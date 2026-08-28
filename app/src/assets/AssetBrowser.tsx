@@ -41,7 +41,6 @@ export function AssetBrowser({ view, classifications, albums = [], collections =
   const [viewerAssetId, setViewerAssetId] = useState<string | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [batchPending, setBatchPending] = useState(false);
-  const [membershipVersion, setMembershipVersion] = useState(0);
   const [undoAssetIds, setUndoAssetIds] = useState<string[] | null>(null);
   const [dateBuckets, setDateBuckets] = useState<{ queryKey: string; buckets: AssetDateBucket[] }>({ queryKey: "", buckets: [] });
   const [anchor, setAnchor] = useState<string | null>(null);
@@ -202,32 +201,6 @@ export function AssetBrowser({ view, classifications, albums = [], collections =
       setMessage(commandErrorMessage(error, "즐겨찾기를 변경하지 못했습니다."));
     }
   })();
-  const moveBatchToFolder = (classificationId: string | null) => void (async () => {
-    if (await runBatch(() => gateway.setAssetClassification({ assetIds: selectedIds, classificationId }), "폴더를 변경하지 못했습니다.")) {
-      setMembershipVersion((version) => version + 1);
-      onMembershipChanged();
-    }
-  })();
-  const patchBatchAlbum = (albumId: string, operation: "add" | "remove") => void (async () => {
-    if (await runBatch(() => gateway.patchAssetAlbums({
-      assetIds: selectedIds,
-      addAlbumIds: operation === "add" ? [albumId] : [],
-      removeAlbumIds: operation === "remove" ? [albumId] : [],
-    }), "앨범을 변경하지 못했습니다.")) {
-      setMembershipVersion((version) => version + 1);
-      onMembershipChanged();
-    }
-  })();
-  const patchBatchCollection = (collectionId: string, operation: "add" | "remove") => void (async () => {
-    if (await runBatch(() => gateway.patchAssetCollections({
-      assetIds: selectedIds,
-      addCollectionIds: operation === "add" ? [collectionId] : [],
-      removeCollectionIds: operation === "remove" ? [collectionId] : [],
-    }), "컬렉션을 변경하지 못했습니다.")) {
-      setMembershipVersion((version) => version + 1);
-      onCollectionsChanged();
-    }
-  })();
   const removeFromCollection = () => void (async () => {
     if (view.kind !== "collection") return;
     await runBatch(() => gateway.patchAssetCollections({
@@ -294,7 +267,7 @@ export function AssetBrowser({ view, classifications, albums = [], collections =
         {currentNextError && <div className="asset-browser__next-error"><Toast>{currentNextError}</Toast><Button onClick={() => loadNextPage(true)}>다시 시도</Button></div>}
         {currentPrevError && <div className="asset-browser__next-error"><Toast>{currentPrevError}</Toast><Button onClick={() => loadPrevPage(true)}>다시 시도</Button></div>}
       </div>
-      <AssetInspector assets={selectedAssets} classifications={classifications} albums={albums} collections={collections} currentCollection={view.kind === "collection" ? collections.find((entry) => entry.id === view.collectionId) ?? null : null} open={inspectorOpen} membershipVersion={membershipVersion} onOpenChange={setInspectorOpen} onMoveToFolder={moveBatchToFolder} onPatchAlbum={patchBatchAlbum} onPatchCollection={patchBatchCollection} onAssetUpdated={updateAssetSummary} />
+      <AssetInspector assets={selectedAssets} currentCollection={view.kind === "collection" ? collections.find((entry) => entry.id === view.collectionId) ?? null : null} open={inspectorOpen} onOpenChange={setInspectorOpen} onOpenAsset={(asset) => { viewerViewKeyRef.current = viewKey; setViewerAssetId(asset.id); }} onAssetUpdated={updateAssetSummary} />
     </div>
     <AssetViewer items={requestedAsset && !items.some((item) => item.id === requestedAsset.id) ? [requestedAsset] : items} activeId={viewerAssetId} onActiveIdChange={setViewerAssetId} onClose={() => { setViewerAssetId(null); onRequestedAssetHandled(); }} onToggleFavorite={toggleFavorite} onTrash={trashViewerAsset} privacyMode={privacyMode} />
   </section>;

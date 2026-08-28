@@ -405,30 +405,6 @@ describe("AssetBrowser", () => {
     expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument();
   });
 
-  it("applies inspector folder and album actions to the selection", async () => {
-    const user = userEvent.setup();
-    const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
-    const tag: ClassificationEntry = { id: "tag", kind: "tag", name: "태그", parentId: null, iconKey: null, colorKey: null };
-    const album = { id: "album", name: "표지", parentId: null, iconKey: null, colorKey: null };
-    vi.mocked(gateway.getAssetClassifications).mockResolvedValue(["tag"]);
-    vi.mocked(gateway.getAssetAlbums).mockResolvedValueOnce([]).mockResolvedValue(["album"]);
-    render(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "classification", classificationId: null }} classifications={[tag]} albums={[album]} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
-    const first = await screen.findByRole("option", { name: "asset-0.png" });
-
-    expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument();
-    first.focus();
-    await user.keyboard("{Control>}a{/Control}");
-    expect(screen.getByText("2개 선택")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "정보 열기" }));
-    const inspector = await screen.findByRole("complementary", { name: "자산 정보" });
-    expect(within(inspector).queryByRole("button", { name: "출처 정보 편집" })).not.toBeInTheDocument();
-    await user.selectOptions(within(inspector).getByLabelText("폴더"), "tag");
-    expect(gateway.setAssetClassification).toHaveBeenCalledWith({ assetIds: ["asset-0", "asset-1"], classificationId: "tag" });
-    const checkbox = await screen.findByRole("checkbox", { name: "표지 앨범" });
-    await user.click(checkbox);
-    expect(gateway.patchAssetAlbums).toHaveBeenCalledWith({ assetIds: ["asset-0", "asset-1"], addAlbumIds: [], removeAlbumIds: ["album"] });
-  });
-
   it("keeps the selected page summary in sync after metadata editing", async () => {
     const user = userEvent.setup();
     const original = asset(0);
@@ -605,21 +581,6 @@ describe("AssetBrowser", () => {
 
     expect(gateway.setCollectionCover).toHaveBeenCalledWith("collection-1", "asset-0");
     expect(onCollectionsChanged).toHaveBeenCalledOnce();
-  });
-
-  it("applies inspector collection actions to the selection", async () => {
-    const user = userEvent.setup();
-    const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
-    vi.mocked(gateway.getAssetCollections).mockResolvedValue(["collection-1"]);
-    render(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "classification", classificationId: null }} classifications={classifications} collections={[{ id: "collection-1", name: "엘든 링", description: null, type: "game", coverAssetId: null, selectedWorkArtworkId: null, selectedHeroArtworkId: null, selectedBackdropArtworkId: null, assetCount: 2, unreadReleaseCount: 0, year: null, originalTitle: null, runtimeMinutes: null, author: null, developer: null, publisher: null, platforms: null, productionCompany: null, releaseDate: null, director: null, externalScore: null, myScore: null, genres: null, overview: null, showcase: false, showcaseOrder: null, createdAt: "2026-08-10T00:00:00Z", updatedAt: "2026-08-10T00:00:00Z" }]} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
-    const first = await screen.findByRole("option", { name: "asset-0.png" });
-    first.focus();
-    await user.keyboard("{Control>}a{/Control}");
-    await user.click(screen.getByRole("button", { name: "정보 열기" }));
-
-    const checkbox = await screen.findByRole("checkbox", { name: "엘든 링 컬렉션" });
-    await user.click(checkbox);
-    expect(gateway.patchAssetCollections).toHaveBeenCalledWith({ assetIds: ["asset-0", "asset-1"], addCollectionIds: [], removeCollectionIds: ["collection-1"] });
   });
 
 });
