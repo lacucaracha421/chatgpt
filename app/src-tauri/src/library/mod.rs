@@ -108,6 +108,9 @@ pub struct Library {
     release_watch_lock: Arc<Mutex<()>>,
     // ponytail: one manga scan per Library; concurrent scans only duplicate disk and image work.
     manga_scan_lock: Arc<Mutex<()>>,
+    // ponytail: one volume import per Library; concurrent runs race on the same volume slots
+    // (뷰어를 연속으로 열면 같은 컬렉션의 import가 겹쳐 UNIQUE 제약 위반이 난다).
+    volume_import_lock: Arc<Mutex<()>>,
     // ponytail: one database handle at a time; use a read/write lock if reads become a bottleneck.
     database_lock: Arc<Mutex<()>>,
     catalog_lookup_cache: Arc<Mutex<Option<online_catalog::CatalogLookupCache>>>,
@@ -163,6 +166,7 @@ impl Library {
             backup_lock: Arc::new(Mutex::new(())),
             release_watch_lock: Arc::new(Mutex::new(())),
             manga_scan_lock: Arc::new(Mutex::new(())),
+            volume_import_lock: Arc::new(Mutex::new(())),
             database_lock: Arc::new(Mutex::new(())),
             catalog_lookup_cache: Arc::new(Mutex::new(None)),
             igdb_token_cache: igdb::IgdbTokenCache::default(),

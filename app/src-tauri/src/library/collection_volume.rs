@@ -123,6 +123,13 @@ impl Library {
             transaction.commit()?;
         }
 
+        // 뷰어를 연속으로 열면(React StrictMode, 재오픈) 같은 컬렉션의 목록 조회가
+        // 동시에 두 번 돌고, 두 흐름이 같은 슬롯을 각자 import해 UNIQUE 제약 위반으로
+        // 실패한다. import 구간을 직렬화해 뒤따른 조회가 앞의 결과를 그대로 재사용하게 한다.
+        let _import_guard = self
+            .volume_import_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let legacy_covers = match self.list_collection_covers(collection_id) {
             Ok(covers) => covers,
             Err(
@@ -683,6 +690,63 @@ mod tests {
         ] {
             assert!(covers_dir.join(file_name).is_file());
         }
+    }
+
+    #[test]
+    fn concurrent_volume_listing_does_not_race_on_local_import() {
+        let temp = tempfile::tempdir().unwrap();
+        let library_root = temp.path().join("library");
+        let source_root = temp.path().join("source");
+        let covers_dir = source_root.join("manga/work/covers");
+        fs::create_dir_all(&covers_dir).unwrap();
+        for file_name in ["vol_1_local.png", "vol_2_local.png", "vol_3_local.png"] {
+            fs::write(covers_dir.join(file_name), cover_bytes()).unwrap();
+        }
+        let library = Library::open(&library_root).unwrap();
+        library
+            .set_collection_source_root(Some(source_root.to_str().unwrap()))
+            .unwrap();
+        let work = library
+            .create_collection(CreateCollection {
+                name: "Work".into(),
+                description: None,
+                collection_type: CollectionType::Manga,
+            })
+            .unwrap();
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE collections SET source_path = 'manga/work' WHERE id = ?1",
+                [&work.id],
+            )
+            .unwrap();
+
+        // 뷰어를 열 때 목록 조회가 동시에 두 번 실행된다(StrictMode·재오픈).
+        // 두 흐름이 같은 슬롯을 이중 import하지 않아야 한다.
+        let handles: Vec<_> = (0..2)
+            .map(|_| {
+                let library = library.clone();
+                let collection_id = work.id.clone();
+                std::thread::spawn(move || library.list_collection_volumes(&collection_id))
+            })
+            .collect();
+        for handle in handles {
+            let volumes = handle.join().unwrap().unwrap();
+            assert_eq!(volumes.len(), 3);
+        }
+        let counts: (i64, i64) = library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT
+                    (SELECT COUNT(*) FROM collection_volumes WHERE collection_id = ?1),
+                    (SELECT COUNT(*) FROM collection_work_artworks WHERE collection_id = ?1)",
+                [&work.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(counts, (3, 3));
     }
 
     #[test]
