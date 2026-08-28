@@ -446,6 +446,17 @@ describe("AssetBrowser", () => {
     expect(await screen.findByText("Updated Artist")).toBeVisible();
   });
 
+  it("reports the query-wide asset total instead of the loaded page size", async () => {
+    const status = vi.fn();
+    const gateway = createGateway({ items: [asset(0)], nextCursor: null });
+    vi.mocked(gateway.listAssetDateBuckets).mockResolvedValue([{ date: "2026-07-01", count: 1 }, { date: "2026-07-15", count: 3 }]);
+    renderBrowser(gateway, { status });
+
+    await screen.findByRole("option", { name: "asset-0.png" });
+
+    await waitFor(() => expect(status).toHaveBeenLastCalledWith(expect.objectContaining({ loadedCount: 1, totalCount: 4 })));
+  });
+
   it("moves the selected asset to trash and refreshes the gallery", async () => {
     const user = userEvent.setup();
     const gateway = createGateway({ items: [{ ...asset(0), title: "Delete me" }], nextCursor: null });
