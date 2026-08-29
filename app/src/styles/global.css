@@ -2220,6 +2220,13 @@ input:disabled {
   margin: 0 0 var(--space-2);
 }
 
+.asset-inspector__collection-description {
+  margin: 0 0 var(--space-2);
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
 .asset-inspector__collection-info dl {
   display: grid;
   gap: var(--space-1);
@@ -3774,7 +3781,6 @@ input:disabled {
 }
 
 .collection-overlay__info h3,
-.collection-overlay__volume h3,
 .collection-overlay__grid-heading h3 {
   margin: 0;
   color: var(--color-text);
@@ -3857,32 +3863,6 @@ input:disabled {
   to { opacity: 1; }
 }
 
-.collection-overlay__volume {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  min-width: 0;
-  border-top: var(--border-width) solid var(--color-border);
-  padding: var(--space-4);
-}
-
-.collection-overlay__volume-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-}
-
-.collection-overlay__volume-label {
-  color: var(--color-muted);
-  font-size: var(--text-xs);
-}
-
-.collection-overlay__volume-value {
-  color: var(--color-text);
-  font-size: var(--text-md);
-}
-
 .collection-overlay__grid-area {
   display: flex;
   flex-direction: column;
@@ -3955,6 +3935,7 @@ input:disabled {
 }
 
 .collection-overlay__cover-tile {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -4013,6 +3994,22 @@ input:disabled {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.collection-overlay__cover-badge {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  max-width: calc(100% - var(--space-2) * 2);
+  padding: 2px var(--space-compact);
+  overflow: hidden;
+  color: var(--color-bg);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: var(--color-accent);
+  border-radius: var(--radius-sm);
 }
 
 .collection-overlay__cover-tile[aria-pressed="true"] img,
@@ -4357,6 +4354,13 @@ input:disabled {
   gap: var(--space-3);
 }
 
+.movie-collection-detail__description {
+  max-width: 48rem;
+  margin: var(--space-4) var(--space-6) 0;
+  color: var(--color-text);
+  line-height: 1.55;
+}
+
 .movie-collection-detail__overview {
   max-width: 48rem;
   margin: var(--space-4) var(--space-6);
@@ -4588,9 +4592,17 @@ input:disabled {
   font-size: var(--text-sm);
 }
 
-.game-collection-detail__overview {
+.game-collection-detail__description {
   max-width: 42rem;
   margin: var(--space-3) 0 0;
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.game-collection-detail__overview {
+  max-width: 42rem;
+  margin: var(--space-2) 0 0;
   color: var(--color-muted);
   font-size: var(--text-sm);
   line-height: 1.5;

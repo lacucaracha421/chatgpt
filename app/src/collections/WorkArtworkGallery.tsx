@@ -15,6 +15,7 @@ const KIND_LABEL: Record<string, string> = {
   cover: "표지",
   hero: "아트워크",
   backdrop: "배경",
+  screenshot: "스크린샷",
   volume_cover: "권 표지",
 };
 

@@ -591,6 +591,7 @@ export type MangaSeries = {
   id: string;
   title: string;
   author: string;
+  galleryId: string | null;
   pageCount: number;
 };
 

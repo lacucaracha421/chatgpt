@@ -114,6 +114,24 @@ pub(crate) fn media_response_with_range(
             Err(_) => empty_response(StatusCode::BAD_GATEWAY),
         };
     }
+    if path.starts_with("/remote-catalog-thumbnail/") {
+        let Some(work_id) = parse_catalog_thumbnail_path(path) else {
+            return empty_response(StatusCode::BAD_REQUEST);
+        };
+        let Some(library) = library else {
+            return empty_response(StatusCode::NOT_FOUND);
+        };
+        return match library.online_catalog_thumbnail(work_id) {
+            Ok(media) => Response::builder()
+                .status(StatusCode::OK)
+                .header(CONTENT_TYPE, media.mime)
+                .header(CONTENT_LENGTH, media.bytes.len().to_string())
+                .body(media.bytes)
+                .expect("catalog thumbnail response is valid"),
+            Err(LibraryError::MediaNotFound) => empty_response(StatusCode::NOT_FOUND),
+            Err(_) => empty_response(StatusCode::BAD_GATEWAY),
+        };
+    }
     let Some((variant, asset_id, file_name)) = parse_path(path) else {
         return empty_response(StatusCode::BAD_REQUEST);
     };
@@ -218,6 +236,17 @@ fn parse_remote_manga_path(path: &str) -> Option<(u64, u32)> {
     let work_id = work_id.parse::<u64>().ok().filter(|id| *id > 0)?;
     let page = page.parse::<u32>().ok().filter(|page| *page > 0)?;
     Some((work_id, page))
+}
+
+fn parse_catalog_thumbnail_path(path: &str) -> Option<u64> {
+    let segments = path.strip_prefix('/')?.split('/').collect::<Vec<_>>();
+    let [route, work_id] = segments.as_slice() else {
+        return None;
+    };
+    if *route != "remote-catalog-thumbnail" {
+        return None;
+    }
+    work_id.parse::<u64>().ok().filter(|id| *id > 0)
 }
 
 fn parse_media_path(path: &str) -> Result<(MediaVariant, Option<String>), ()> {
@@ -542,8 +571,8 @@ mod tests {
     use crate::library::{error::LibraryError, Library, MediaVariant};
 
     use super::{
-        media_response, media_response_with_range, parse_media_path, parse_path,
-        parse_remote_manga_path,
+        media_response, media_response_with_range, parse_catalog_thumbnail_path,
+        parse_media_path, parse_path, parse_remote_manga_path,
     };
 
     const ASSET_ID: &str = "00000000-0000-4000-8000-000000000001";
@@ -571,6 +600,20 @@ mod tests {
             "/remote-manga-thumbnail/42/extra",
         ] {
             assert_eq!(parse_remote_manga_path(path), None, "{path}");
+        }
+    }
+
+    #[test]
+    fn catalog_thumbnail_route_accepts_only_work_id_paths() {
+        assert_eq!(parse_catalog_thumbnail_path("/remote-catalog-thumbnail/42"), Some(42));
+        for path in [
+            "/remote-catalog-thumbnail/0",
+            "/remote-catalog-thumbnail/-1",
+            "/remote-catalog-thumbnail/abc",
+            "/remote-catalog-thumbnail/42/extra",
+            "/remote-catalog-thumbnail/",
+        ] {
+            assert_eq!(parse_catalog_thumbnail_path(path), None, "{path}");
         }
     }
 

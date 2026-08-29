@@ -1059,6 +1059,7 @@ pub struct MangaSeries {
     pub id: String,
     pub title: String,
     pub author: String,
+    pub gallery_id: Option<String>,
     pub page_count: u64,
 }
 

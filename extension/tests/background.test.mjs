@@ -195,6 +195,59 @@ test("auto mode falls back to local classifications when the app is unavailable"
   assert.deepEqual(plain(response.entries.map((entry) => entry.name)), ["리버스", "명조", "젠레스", "게임", "만화", "기타"]);
 });
 
+test("offline backoff skips the network probe and serves the snapshot immediately", async () => {
+  const harness = createHarness({
+    connectionToken: "0123456789abcdef0123456789abcdef",
+    preferences: { saveMode: "auto" },
+    lastAppClassifications: {
+      version: 2, baseUrl: "http://127.0.0.1:32145", endpointSource: "app",
+      entries: [{ id: "game", kind: "root", name: "게임", parentId: null }],
+      layout: { version: 1, parents: {} }, pinnedIds: [], savedAt: 1,
+    },
+  });
+  // 첫 시도는 실제 네트워크로 나가 실패한다.
+  harness.queueError(new TypeError("Failed to fetch"));
+  await harness.api.handleMessage({ type: "classifications:get" });
+  const callsAfterFailure = harness.fetchCalls.length;
+  assert.equal(callsAfterFailure, 1);
+
+  // backoff 60초 안의 재호출은 네트워크를 건드리지 않고 스냅샷을 바로 쓴다.
+  harness.clock.now = 30_000;
+  const cached = await harness.api.handleMessage({ type: "classifications:get" });
+  assert.equal(cached.classificationSource, "app-cache");
+  assert.equal(harness.fetchCalls.length, callsAfterFailure);
+
+  // 60초가 지나면 캐시를 즉시 주고 배경에서 네트워크를 다시 시도한다.
+  harness.clock.now = 90_001;
+  harness.queueJson({ entries: [{ id: "game", kind: "root", name: "게임", parentId: null }] });
+  const refreshed = await harness.api.handleMessage({ type: "classifications:get" });
+  assert.equal(refreshed.classificationSource, "app-cache");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(harness.fetchCalls.length, callsAfterFailure + 1);
+});
+
+test("failed saved-index probes also honor the offline backoff", async () => {
+  const harness = createHarness({ connectionToken: "0123456789abcdef0123456789abcdef" });
+  harness.queueError(new TypeError("Failed to fetch"));
+  await harness.api.handleMessage({ type: "saved-index:get" });
+  const callsAfterFailure = harness.fetchCalls.length;
+
+  harness.clock.now = 10_000;
+  const cached = await harness.api.handleMessage({ type: "saved-index:get" });
+  assert.equal(cached.ok, false);
+  assert.equal(harness.fetchCalls.length, callsAfterFailure);
+});
+
+test("settings:get reports the last connection failure for diagnostics", async () => {
+  const harness = createHarness({ connectionToken: "0123456789abcdef0123456789abcdef" });
+  harness.queueError(new TypeError("Failed to fetch"));
+  await harness.api.handleMessage({ type: "classifications:get" });
+
+  const settings = await harness.api.handleMessage({ type: "settings:get" });
+  assert.equal(settings.lastConnectionFailure.code, "app_offline");
+  assert.equal(settings.lastConnectionFailure.failedAt, harness.clock.now);
+});
+
 
 test("auto mode preserves the last app tag layout and pinned order while Lakomics is offline", async () => {
   const harness = createHarness({

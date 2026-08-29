@@ -392,19 +392,25 @@
   const LAST_APP_CLASSIFICATIONS_KEY = "lastAppClassifications";
   const LAST_APP_SAVED_X_MEDIA_KEY = "lastAppSavedXMediaIndex";
   const API_REQUEST_TIMEOUT_MS = 8000;
+  // 영상 원본은 Tailscale 터널 경유로 8초를 쉽게 상회한다. PC가 받는 중이면 기다린다.
+  const INGESTION_TIMEOUT_MS = 120_000;
   const INGESTION_RETRY_DELAY_MS = 700;
+  // 연속 실패 후 타임아웃 8초를 매번 채우지 않게 한다. 이 시간 동안은
+  // 저장된 스냅샷/기기 폴백을 바로 쓰고, 수집 자체는 계속 시도한다.
+  const OFFLINE_BACKOFF_MS = 60_000;
   const RECENT_DUPLICATE_MS = 10_000;
   const X_SYNDICATION_ENDPOINT = "https://cdn.syndication.twimg.com/tweet-result";
   let classificationCache = null;
   let classificationCachedAt = 0;
   let classificationCacheBaseUrl = null;
+  // 엔드포인트별 마지막 실패. { baseUrl, code, failedAt } 또는 null.
+  let lastConnectionFailure = null;
   let classificationRefreshPromise = null;
   let classificationRefreshBaseUrl = null;
   let lastClassificationProbe = null;
   let browserDownloadQueue = Promise.resolve();
   const pendingFilenameSuggestions = [];
   const FILENAME_SUGGESTION_TTL_MS = 15_000;
-
   async function handleMessage(message) {
     switch (message?.type) {
       case "settings:get": {
@@ -416,6 +422,9 @@
           remote: globalThis.LakomicsDefaults.normalizeRemoteSettings(stored[REMOTE_SETTINGS_KEY]),
           downloadsApiAvailable: Boolean(chrome.downloads?.download),
           downloadsUiApiAvailable: Boolean(chrome.downloads?.setUiOptions),
+          lastConnectionFailure: lastConnectionFailure
+            ? { code: lastConnectionFailure.code, failedAt: lastConnectionFailure.failedAt }
+            : null,
         };
       }
       case "settings:set-token": {
@@ -560,25 +569,51 @@
     // a good persisted app snapshot for this exact endpoint, use it immediately
     // and refresh in the background. A snapshot from another PC/Remote URL must
     // never leak into the current connection.
+    // 직전 실패가 잡혔으면(offline backoff) 네트워크 probe를 바로 던지지 않는다:
+    // 8초 타임아웃을 채우지 않고 저장된 스냅샷/기기 폴백을 즉시 쓴다.
+    const now = Date.now();
+    const backingOff = inOfflineBackoff(endpoint, now);
     if (!force) {
-      const now = Date.now();
       if (classificationCache && classificationCacheBaseUrl === endpoint.baseUrl
         && now - classificationCachedAt <= CACHE_MS) {
         return appClassifications(false);
       }
-      const cached = await lastAppClassifications(null, endpoint.baseUrl);
+      const cached = backingOff
+        ? await lastAppClassifications(lastConnectionFailure?.code ?? null, endpoint.baseUrl)
+        : await lastAppClassifications(null, endpoint.baseUrl);
       if (cached) {
-        void refreshAppClassificationsInBackground(endpoint);
+        if (!backingOff) void refreshAppClassificationsInBackground(endpoint);
         return cached;
       }
     }
 
     const response = await appClassifications(force, endpoint);
-    if (response.ok) return response;
+    if (response.ok) {
+      recordConnectionSuccess(endpoint);
+      return response;
+    }
+    recordConnectionFailure(endpoint, response.code || "app_offline");
 
     const cached = await lastAppClassifications(response.code, endpoint.baseUrl);
     if (cached) return cached;
     return localClassifications(response.code);
+  }
+
+
+  function inOfflineBackoff(endpoint, now = Date.now()) {
+    return Boolean(
+      lastConnectionFailure
+      && lastConnectionFailure.baseUrl === endpoint.baseUrl
+      && now - lastConnectionFailure.failedAt < OFFLINE_BACKOFF_MS,
+    );
+  }
+
+  function recordConnectionFailure(endpoint, code, now = Date.now()) {
+    lastConnectionFailure = { baseUrl: endpoint.baseUrl, code, failedAt: now };
+  }
+
+  function recordConnectionSuccess(endpoint) {
+    if (lastConnectionFailure?.baseUrl === endpoint.baseUrl) lastConnectionFailure = null;
   }
 
   async function refreshAppClassificationsInBackground(endpoint = null) {
@@ -616,7 +651,11 @@
       return { ok: true, classificationSource: endpoint.source, ...classificationCache };
     }
     const response = await apiRequest("/v1/classifications", {}, endpoint.baseUrl);
-    if (!response.ok) return response;
+    if (!response.ok) {
+      recordConnectionFailure(endpoint, response.code || "app_offline");
+      return response;
+    }
+    recordConnectionSuccess(endpoint);
     const entries = Array.isArray(response.entries) ? response.entries : [];
     const stored = await chrome.storage.local.get([APP_LAYOUT_KEY, LAST_APP_CLASSIFICATIONS_KEY]);
     const radialLayout = stored[APP_LAYOUT_KEY];
@@ -647,8 +686,14 @@
 
   async function savedXMediaIndex() {
     const endpoint = await activeApiEndpoint();
+    // 포커스마다 호출되므로 offline backoff 중에는 8초 타임아웃을 기다리지 않고
+    // 저장된 스냅샷을 즉시 쓴다.
+    if (inOfflineBackoff(endpoint)) {
+      return cachedSavedIndex(endpoint, "backoff");
+    }
     const response = await apiRequest("/v1/saved-x-media", {}, endpoint.baseUrl);
     if (response.ok) {
+      recordConnectionSuccess(endpoint);
       const savedKeys = normalizeSavedXMediaKeys(response.keys);
       const snapshot = {
         version: 1,
@@ -660,7 +705,11 @@
       await chrome.storage.local.set({ [LAST_APP_SAVED_X_MEDIA_KEY]: snapshot });
       return { ok: true, authoritative: true, indexSource: endpoint.source, savedKeys };
     }
+    recordConnectionFailure(endpoint, response.code || "app_offline");
+    return cachedSavedIndex(endpoint, response.code || "app_offline");
+  }
 
+  async function cachedSavedIndex(endpoint, fallbackCode) {
     const stored = await chrome.storage.local.get([LAST_APP_SAVED_X_MEDIA_KEY]);
     const snapshot = stored[LAST_APP_SAVED_X_MEDIA_KEY];
     if (snapshot?.version === 1 && snapshot.baseUrl === endpoint.baseUrl && Array.isArray(snapshot.savedKeys)) {
@@ -670,10 +719,10 @@
         indexSource: "app-cache",
         savedKeys: normalizeSavedXMediaKeys(snapshot.savedKeys),
         cachedAt: Number(snapshot.savedAt) || null,
-        fallbackCode: response.code || "app_offline",
+        fallbackCode,
       };
     }
-    return response;
+    return { ok: false, code: fallbackCode };
   }
 
   function normalizeSavedXMediaKeys(keys) {
@@ -841,11 +890,12 @@
     // Never let an earlier classifications probe decide where the media is saved.
     // Proton/Tailscale can briefly recover between the menu opening and the actual
     // save, so always make a real ingestion attempt first.
-    const request = {
+    const ingestionRequest = () => ({
       method: "POST",
       body: JSON.stringify(stripExtensionFields(mediaPayload)),
-    };
-    let appResponse = await apiRequest("/v1/ingestions", request);
+      timeoutMs: INGESTION_TIMEOUT_MS,
+    });
+    let appResponse = await apiRequest("/v1/ingestions", ingestionRequest());
     if (appResponse.ok || !shouldFallbackToBrowserDownload(appResponse)) {
       const normalized = normalizeAppMediaResponse(appResponse, mediaPayload);
       if (normalized.ok && normalized.status !== "review_pending") {
@@ -854,11 +904,20 @@
       return normalized;
     }
 
-    // A transient proxy/tunnel hiccup should not immediately spill the file onto
-    // the tablet. Give the PC path one short retry before using device fallback.
     const firstFallbackCode = appResponse.code || "app_offline";
+    // 터널 복구는 수 초가 걸린다. 1회 700ms 재시도는 지나가는 순간을 못 잡으므로
+    // 넉넉한 간격으로 총 3회까지 시도한 뒤 기기 폴백으로 넘어간다.
     await retryDelay(INGESTION_RETRY_DELAY_MS);
-    appResponse = await apiRequest("/v1/ingestions", request);
+    appResponse = await apiRequest("/v1/ingestions", ingestionRequest());
+    if (appResponse.ok || !shouldFallbackToBrowserDownload(appResponse)) {
+      const normalized = normalizeAppMediaResponse(appResponse, mediaPayload);
+      if (normalized.ok && normalized.status !== "review_pending") {
+        await rememberSavedXMediaSource(mediaPayload.sourceUrl);
+      }
+      return normalized;
+    }
+    await retryDelay(INGESTION_RETRY_DELAY_MS * 3);
+    appResponse = await apiRequest("/v1/ingestions", ingestionRequest());
     if (appResponse.ok || !shouldFallbackToBrowserDownload(appResponse)) {
       const normalized = normalizeAppMediaResponse(appResponse, mediaPayload);
       if (normalized.ok && normalized.status !== "review_pending") {
@@ -1496,6 +1555,7 @@
     classificationRefreshPromise = null;
     classificationRefreshBaseUrl = null;
     lastClassificationProbe = null;
+    lastConnectionFailure = null;
   }
 
   async function loadRemoteSettings() {
@@ -1623,9 +1683,10 @@
       "X-Lakomics-Extension-Id": chrome.runtime.id,
     };
     if (init.body !== undefined) headers["Content-Type"] = "application/json";
+    const timeoutMs = Number.isFinite(init.timeoutMs) ? init.timeoutMs : API_REQUEST_TIMEOUT_MS;
     const controller = typeof AbortController === "function" ? new AbortController() : null;
     const timer = controller && typeof setTimeout === "function"
-      ? setTimeout(() => controller.abort(), API_REQUEST_TIMEOUT_MS)
+      ? setTimeout(() => controller.abort(), timeoutMs)
       : null;
     try {
       const response = await fetch(`${baseUrl}${path}`, {

@@ -66,6 +66,11 @@ export function CollectionVolumeGrid({
                 ) : (
                   <span className="collection-overlay__cover-placeholder" aria-hidden="true" />
                 )}
+                {volume.releaseStatus === "upcoming" && (
+                  <span className="collection-overlay__cover-badge">
+                    {volume.localReleaseDate ? formatKoreanDate(volume.localReleaseDate) : "출간 예정"}
+                  </span>
+                )}
                 <span className="collection-overlay__cover-label">{volume.displayLabel}</span>
               </button>
             );
@@ -74,4 +79,9 @@ export function CollectionVolumeGrid({
       </div>
     </section>
   );
+}
+
+function formatKoreanDate(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  return match ? `${match[1]}. ${match[2]}. ${match[3]}.` : value;
 }

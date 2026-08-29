@@ -1,10 +1,12 @@
 use std::{
+
     collections::BTreeSet,
     fs::{self, OpenOptions},
     io::{self, Read, Write},
     path::{Path, PathBuf},
     sync::{Arc, RwLock},
     thread,
+    time::Duration,
 };
 
 use serde::{Deserialize, Serialize};
@@ -156,8 +158,16 @@ pub(crate) fn start(app: AppHandle, state: AppState, runtime: ExtensionRuntime) 
 }
 
 fn serve(app: AppHandle, server: Server, state: AppState, token: String) {
+    // 영상 수집 한 건이 수 분 걸릴 수 있으므로 요청마다 스레드를 띄운다.
+    // 직렬 처리하면 그동안 태블릿의 health·분류·중복 조회가 전부 막히며
+    // 확장은 그를 "연결 끊김"으로 판단한다.
     for request in server.incoming_requests() {
-        handle_request(app.clone(), request, &state, &token);
+        let app = app.clone();
+        let state = state.clone();
+        let token = token.clone();
+        let _ = thread::Builder::new()
+            .name("lakomics-extension-request".into())
+            .spawn(move || handle_request(app, request, &state, &token));
     }
 }
 
@@ -332,6 +342,7 @@ enum IngestionStatus {
     Added,
     DuplicateTagged,
     DuplicateUnchanged,
+    ExactDuplicate,
     ReviewPending,
 }
 
@@ -350,9 +361,12 @@ struct UreqImageDownloader {
 
 impl UreqImageDownloader {
     fn new() -> Self {
+        // 타임아웃 없이 대기하면 X CDN이 응답을 멈추는 순간
+        // 이 API 서버 스레드가 영구 정지한다. 죽은 연결은 빨리 포기한다.
         let config = ureq::Agent::config_builder()
             .https_only(true)
             .max_redirects(0)
+            .timeout_global(Some(Duration::from_secs(300)))
             .build();
         Self {
             agent: config.into(),

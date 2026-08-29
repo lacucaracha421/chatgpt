@@ -1012,6 +1012,7 @@ describe("App", () => {
       id: "series-1",
       title: "Blue Archive",
       author: "Nexon",
+      galleryId: null,
       pageCount: 12,
     }]);
     const user = userEvent.setup();

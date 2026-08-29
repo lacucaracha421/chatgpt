@@ -79,6 +79,7 @@ export function MovieCollectionDetail({
           </div>
         </div>
       </section>
+      {collection.description?.trim() && <p className="movie-collection-detail__description">{collection.description}</p>}
       {collection.overview?.trim() && <p className="movie-collection-detail__overview">{collection.overview}</p>}
       {providerError && <p className="movie-collection-detail__provider-error" role="alert">{providerError}</p>}
     </article>

@@ -10,6 +10,7 @@ export function CollectionInfoPanel({ collection }: CollectionInfoPanelProps) {
   if (collection.year !== null && collection.year !== undefined) rows.push(["연도", String(collection.year)]);
   if (collection.director) rows.push(["감독", collection.director]);
   if (collection.genres) rows.push(["장르", collection.genres]);
+  if (collection.description?.trim()) rows.push(["설명", collection.description]);
 
   return (
     <aside className="collection-overlay__info" aria-label="컬렉션 정보">

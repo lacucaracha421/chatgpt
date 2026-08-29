@@ -339,13 +339,15 @@ impl Library {
         let mut works = Vec::new();
         for row in rows {
             let (id, title, title_jpn, file_count, views, posted, thumbnail_url, bookmarked) = row?;
+            let work_id = id as u64;
             works.push(CatalogWork {
-                id: id as u64,
+                id: work_id,
                 title,
                 title_jpn,
                 artists: tags_for(&connection, id, "artist")?,
                 series: tags_for(&connection, id, "series")?,
-                thumbnail_url: validated_thumbnail_url(thumbnail_url),
+                thumbnail_url: validated_thumbnail_url(thumbnail_url)
+                    .map(|_| format!("http://lakomics.localhost/remote-catalog-thumbnail/{work_id}")),
                 bookmarked,
                 file_count: file_count as u32,
                 views: views as u64,
@@ -450,7 +452,8 @@ impl Library {
             id: row.0 as u64,
             title: row.1,
             title_jpn: row.2,
-            thumbnail_url: validated_thumbnail_url(row.3),
+            thumbnail_url: validated_thumbnail_url(row.3)
+                .map(|_| format!("http://lakomics.localhost/remote-catalog-thumbnail/{}", row.0 as u64)),
             uploader: row.4,
             category: row.5,
             posted: row.6,
@@ -465,6 +468,33 @@ impl Library {
                 .map(|(namespace, values)| CatalogTagGroup { namespace, values })
                 .collect(),
         })
+    }
+
+    /// 카탈로그 표지 원본 URL을 조회해 디스크 캐시 프록시로 내려준다.
+    /// URL은 카탈로그 DB에 저장된 ehgt.org 값만 신뢰한다.
+    pub fn online_catalog_thumbnail(
+        &self,
+        work_id: u64,
+    ) -> Result<super::remote_media::RemoteMedia, LibraryError> {
+        let catalog_path = self.root.join("catalogs/kdata.db");
+        if !catalog_path.exists() {
+            return Err(LibraryError::OnlineCatalogNotInstalled);
+        }
+        let connection = self.connection()?;
+        connection.execute(
+            "ATTACH DATABASE ?1 AS catalog",
+            [catalog_path.to_string_lossy().as_ref()],
+        )?;
+        let thumb: Option<String> = connection
+            .query_row(
+                "SELECT Thumb FROM catalog.Works WHERE Id = ?1 AND Expunged = 0",
+                [work_id as i64],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or(LibraryError::MediaNotFound)?;
+        let url = validated_thumbnail_url(thumb).ok_or(LibraryError::MediaNotFound)?;
+        super::remote_media::load_catalog_thumbnail(&self.root, work_id, &url)
     }
 
     fn catalog_lookup(&self) -> Result<CatalogLookupCache, LibraryError> {
@@ -984,7 +1014,7 @@ mod tests {
         assert!(page.works[0].bookmarked);
         assert_eq!(
             page.works[0].thumbnail_url.as_deref(),
-            Some("https://ehgt.org/w/00/003/work.webp")
+            Some("http://lakomics.localhost/remote-catalog-thumbnail/3")
         );
     }
 
@@ -1022,7 +1052,7 @@ mod tests {
         assert!(detail.bookmarked);
         assert_eq!(
             detail.thumbnail_url.as_deref(),
-            Some("https://ehgt.org/w/00/003/work.webp")
+            Some("http://lakomics.localhost/remote-catalog-thumbnail/3")
         );
         assert!(detail
             .tag_groups

@@ -286,7 +286,7 @@ pub(crate) fn list_series(
     connection: &rusqlite::Connection,
 ) -> Result<Vec<MangaSeries>, LibraryError> {
     let mut statement = connection.prepare(
-        "SELECT id, title, author, page_count
+        "SELECT id, title, author, gallery_id, page_count
          FROM manga_series ORDER BY modified_at DESC",
     )?;
     let rows = statement.query_map([], |row| {
@@ -294,7 +294,8 @@ pub(crate) fn list_series(
             id: row.get(0)?,
             title: row.get(1)?,
             author: row.get(2)?,
-            page_count: row.get::<_, i64>(3)? as u64,
+            gallery_id: row.get(3)?,
+            page_count: row.get::<_, i64>(4)? as u64,
         })
     })?;
     let mut series = Vec::new();

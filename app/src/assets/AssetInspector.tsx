@@ -21,6 +21,7 @@ import {
   formatDuration,
   importSourceLabel,
   localDate,
+  localDateTime,
   sourceLabel,
 } from "./assetMetadata";
 import { thumbnailUrl } from "./mediaUrl";
@@ -189,6 +190,10 @@ export function AssetInspector({
                 <dt>{asset.creatorUrl ? <button type="button" className="asset-inspector__link" aria-label="제작자 페이지 열기" onClick={() => void openUrl(asset.creatorUrl!)}><ArrowTopRightOnSquareIcon aria-hidden="true" />제작자</button> : "제작자"}</dt>
                 <dd>{creatorLabel(asset.creatorName, asset.creatorHandle)}</dd>
               </div>
+              <div>
+                <dt>게시 시각</dt>
+                <dd>{asset.sourcePublishedAt ? localDateTime(asset.sourcePublishedAt) : "—"}</dd>
+              </div>
             </dl>
           </section>
           <section className="asset-inspector__section">
@@ -225,6 +230,9 @@ export function AssetInspector({
       {currentCollection && assets.length === 1 && (
         <section className="asset-inspector__collection-info" aria-label="컬렉션 정보">
           <h3>{currentCollection.name}</h3>
+          {currentCollection.description?.trim() && (
+            <p className="asset-inspector__collection-description">{currentCollection.description}</p>
+          )}
           <dl>
             {currentCollection.type === "game" && (
               <>

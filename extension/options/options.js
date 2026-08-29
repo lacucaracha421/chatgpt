@@ -47,6 +47,10 @@
   async function initialize() {
     const settings = await chrome.runtime.sendMessage({ type: "settings:get" });
     status.textContent = settings.tokenConfigured ? "연결 키가 저장되어 있습니다." : "Lakomics에서 연결 키를 복사해 입력하세요.";
+    if (settings.lastConnectionFailure) {
+      const when = new Date(settings.lastConnectionFailure.failedAt).toLocaleString();
+      status.textContent += ` · 마지막 실패: ${when} (${describeErrorCode(settings.lastConnectionFailure.code)})`;
+    }
     const preferences = settings.preferences ?? {};
     const remote = settings.remote ?? {};
     remoteEnabled.checked = remote.enabled === true;
@@ -548,5 +552,14 @@
     if (code === "absolute_download_path_unsupported") return "절대 경로는 지정할 수 없습니다. Download 아래의 폴더 이름만 입력하세요.";
     if (code === "library_not_open") return "Lakomics에서 라이브러리를 여세요.";
     return "Lakomics에 연결하지 못했습니다.";
+  }
+
+  function describeErrorCode(code) {
+    if (code === "connection_key_missing") return "연결 키 없음";
+    if (code === "unauthorized") return "연결 키 불일치";
+    if (code === "app_offline") return "PC 오프라인";
+    if (code === "request_failed") return "요청 실패";
+    if (code === "classification_not_found") return "분류 없음";
+    return code;
   }
 })();

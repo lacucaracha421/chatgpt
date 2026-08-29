@@ -54,11 +54,17 @@ impl<'a> GameImportFlow<'a> {
         let hero_bytes = hero
             .map(|candidate| self.client.download_original(&candidate.image_id))
             .transpose()?;
+        let screenshot_bytes = fetched
+            .screenshots
+            .iter()
+            .map(|shot| self.client.download_original(&shot.image_id))
+            .collect::<Result<Vec<_>, _>>()?;
         self.library.apply_fetched_igdb_game(
             request,
             fetched,
             cover_bytes.as_deref(),
             hero_bytes.as_deref(),
+            &screenshot_bytes,
         )
     }
 
@@ -168,6 +174,7 @@ impl Library {
         fetched: IgdbRemoteGame,
         cover_bytes: Option<&[u8]>,
         hero_bytes: Option<&[u8]>,
+        screenshot_bytes: &[Vec<u8>],
     ) -> Result<CollectionSummary, LibraryError> {
         let (cover, hero) = validated_selection(&request, &fetched)?;
         let collection_id = uuid::Uuid::new_v4().to_string();
@@ -178,6 +185,12 @@ impl Library {
             (None, None) => None,
             _ => return Err(LibraryError::InvalidIgdbIdentity),
         };
+        let screenshots = fetched
+            .screenshots
+            .iter()
+            .zip(screenshot_bytes)
+            .map(|(shot, bytes)| Ok((shot, self.prepare_work_artwork(&collection_id, bytes)?)))
+            .collect::<Result<Vec<_>, LibraryError>>()?;
         let hero = match (hero, hero_bytes) {
             (Some(candidate), Some(bytes)) => {
                 Some((candidate, self.prepare_work_artwork(&collection_id, bytes)?))
@@ -270,11 +283,25 @@ impl Library {
                 prepared,
             )?;
         }
+        for (shot, prepared) in &screenshots {
+            Library::insert_work_artwork_in_transaction(
+                &transaction,
+                &collection_id,
+                PROVIDER,
+                &shot.image_id,
+                WorkArtworkKind::Screenshot,
+                None,
+                prepared,
+            )?;
+        }
         transaction.commit()?;
         if let Some((_, prepared)) = cover {
             prepared.commit();
         }
         if let Some((_, prepared)) = hero {
+            prepared.commit();
+        }
+        for (_, prepared) in screenshots {
             prepared.commit();
         }
         drop(connection);
@@ -901,6 +928,7 @@ mod tests {
                 remote(),
                 Some(&cover),
                 Some(&hero),
+            &[],
             )
             .unwrap();
 
@@ -932,12 +960,43 @@ mod tests {
     }
 
     #[test]
+    fn apply_saves_every_screenshot_as_gallery_artwork() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let shot_a = image_bytes(1280, 720);
+        let shot_b = image_bytes(640, 360);
+
+        let created = library
+            .apply_fetched_igdb_game(request(None, None), remote(), None, None, &[shot_a, shot_b])
+            .unwrap();
+
+        let shots: Vec<String> = library
+            .connection()
+            .unwrap()
+            .prepare(
+                "SELECT provider_image_id FROM collection_work_artworks
+                 WHERE collection_id = ?1 AND kind = 'screenshot' ORDER BY provider_image_id",
+            )
+            .unwrap()
+            .query_map([&created.id], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(shots, vec!["screenshot-1".to_string()]);
+        // remote() fixture에는 스크린샷이 1장이므로 정확히 1행만 저장된다.
+        assert_eq!(
+            library.list_collection_work_artworks(&created.id).unwrap().len(),
+            1
+        );
+    }
+
+    #[test]
     fn no_cover_or_hero_import_succeeds_without_artwork() {
         let temp = tempfile::tempdir().unwrap();
         let library = Library::open(temp.path()).unwrap();
 
         let created = library
-            .apply_fetched_igdb_game(request(None, None), remote(), None, None)
+            .apply_fetched_igdb_game(request(None, None), remote(), None, None, &[])
             .unwrap();
 
         assert_eq!(created.name, "Jet Set Radio");
@@ -963,6 +1022,7 @@ mod tests {
                 remote(),
                 Some(&cover),
                 Some(&hero),
+            &[],
             );
 
             assert!(matches!(result, Err(LibraryError::InvalidIgdbIdentity)));
@@ -985,6 +1045,7 @@ mod tests {
                 fetched,
                 None,
                 Some(&hero),
+            &[],
             )
             .unwrap();
 
@@ -1014,6 +1075,7 @@ mod tests {
                 remote(),
                 Some(&cover),
                 Some(&hero),
+            &[],
             )
             .unwrap();
         let files_before = artwork_file_count(&library);
@@ -1023,6 +1085,7 @@ mod tests {
             remote(),
             Some(&cover),
             Some(&hero),
+        &[],
         );
 
         assert!(matches!(
@@ -1052,6 +1115,7 @@ mod tests {
             remote(),
             Some(&cover),
             Some(&hero),
+        &[],
         );
 
         assert!(matches!(result, Err(LibraryError::DuplicateCollectionName)));
@@ -1078,6 +1142,7 @@ mod tests {
                 initial,
                 Some(&cover),
                 Some(&hero),
+            &[],
             )
             .unwrap();
         let updated = library
@@ -1135,7 +1200,7 @@ mod tests {
         let mut initial = remote();
         initial.snapshot_json = r#"{"id":42,"publisher":"Old Publisher"}"#.into();
         let created = library
-            .apply_fetched_igdb_game(request(None, None), initial, None, None)
+            .apply_fetched_igdb_game(request(None, None), initial, None, None, &[])
             .unwrap();
         library
             .update_collection(
@@ -1179,6 +1244,7 @@ mod tests {
                 remote(),
                 Some(&cover),
                 Some(&hero),
+            &[],
             )
             .unwrap();
         let before = artwork_file_count(&library);
@@ -1201,6 +1267,7 @@ mod tests {
                 remote(),
                 Some(&cover),
                 Some(&hero),
+            &[],
             )
             .unwrap();
 
@@ -1236,6 +1303,7 @@ mod tests {
                 remote(),
                 Some(&cover),
                 Some(&hero),
+            &[],
             )
             .unwrap();
         let before: Vec<(String, String, String, i64)> = library
@@ -1296,6 +1364,7 @@ mod tests {
                 remote(),
                 Some(&cover),
                 Some(&hero),
+            &[],
             )
             .unwrap();
         let before_files = artwork_file_count(&library);
@@ -1324,7 +1393,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let library = Library::open(temp.path()).unwrap();
         let created = library
-            .apply_fetched_igdb_game(request(None, None), remote(), None, None)
+            .apply_fetched_igdb_game(request(None, None), remote(), None, None, &[])
             .unwrap();
 
         let artwork_root = library.root().join("work-artwork");

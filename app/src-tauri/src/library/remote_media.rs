@@ -133,6 +133,61 @@ where
     Ok(RemoteMedia { bytes, mime })
 }
 
+/// 카탈로그 표지(게시판 썸네일)를 `cache/remote-manga/catalog-thumbs`에
+/// 디스크 캐시한다. kHentai 검색 결과 카드가 CDN 직접 URL 대신 이 캐시를 쓴다.
+pub(crate) fn load_catalog_thumbnail(
+    root: &Path,
+    work_id: u64,
+    url: &str,
+) -> Result<RemoteMedia, LibraryError> {
+    // URL은 카탈로그 DB에서 검증된 ehgt.org 값만 들어온다(online_catalog::validated_thumbnail_url).
+    let digest = format!("{:x}", url_hash(url.as_bytes()));
+    let cache_path = root
+        .join("cache/remote-manga/catalog-thumbs")
+        .join(format!("{work_id}-{digest}.bin"));
+    if let Ok(bytes) = std::fs::read(&cache_path) {
+        let mime = image_mime(&bytes).ok_or(LibraryError::UnsupportedImage)?;
+        return Ok(RemoteMedia { bytes, mime });
+    }
+    let mut response = image_agent().get(url).call().map_err(|_| LibraryError::RemoteGalleryUnavailable)?;
+    let mut bytes = Vec::new();
+    response
+        .body_mut()
+        .as_reader()
+        .take((MAX_REMOTE_IMAGE_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|_| LibraryError::RemoteGalleryUnavailable)?;
+    if bytes.len() > MAX_REMOTE_IMAGE_BYTES {
+        return Err(LibraryError::UnsupportedImage);
+    }
+    let mime = image_mime(&bytes).ok_or(LibraryError::UnsupportedImage)?;
+    let parent = cache_path.parent().expect("catalog thumb cache has a parent");
+    std::fs::create_dir_all(parent).map_err(|source| LibraryError::WriteAsset {
+        path: parent.into(),
+        source,
+    })?;
+    let partial = cache_path.with_extension("bin.partial");
+    std::fs::write(&partial, &bytes).map_err(|source| LibraryError::WriteAsset {
+        path: partial.clone(),
+        source,
+    })?;
+    std::fs::rename(&partial, &cache_path).map_err(|source| LibraryError::WriteAsset {
+        path: cache_path,
+        source,
+    })?;
+    Ok(RemoteMedia { bytes, mime })
+}
+
+fn url_hash(bytes: &[u8]) -> u128 {
+    // 보안 해시가 필요한 자리가 아니라 캐시 파일명 용도다. FNV-1a 128비트 변형.
+    let mut hash: u128 = 0xcbf2_9ce4_8422_2325_9368_93ba_a7d3_c8d4;
+    for &byte in bytes {
+        hash ^= byte as u128;
+        hash = hash.wrapping_mul(0x1000_0000_0000_0000_0000_0000_0000_013b);
+    }
+    hash
+}
+
 fn fetch_remote_image(descriptor: &RemotePageDescriptor) -> Result<Vec<u8>, LibraryError> {
     let mut response = image_agent()
         .get(&descriptor.url)
