@@ -231,6 +231,14 @@ describe("CollectionOverlay MangaDex flow", () => {
     expect(shelfCover).toHaveAttribute("src", "http://lakomics.localhost/work-artwork-thumbnail/art-1");
   });
 
+  it("contains card refresh failures after taking unread release changes", async () => {
+    const onChanged = vi.fn().mockRejectedValue(new Error("refresh failed"));
+    renderOverlay({ takeUnreadReleaseChanges: vi.fn().mockResolvedValue(unread) }, onChanged);
+
+    expect(await screen.findByRole("region", { name: "새 출간 정보" })).toHaveTextContent("새 권: 13권");
+    await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
+  });
+
   it("renders no release summary and does not refresh cards when there are no unread changes", async () => {
     const onChanged = vi.fn().mockResolvedValue(undefined);
     const { gateway } = renderOverlay({}, onChanged);
@@ -339,6 +347,24 @@ describe("CollectionOverlay MangaDex flow", () => {
     expect(onExit).not.toHaveBeenCalled();
     expect(screen.getByRole("region", { name: "만화 상세" })).toBeInTheDocument();
     await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it.each([
+    ["편집", "컬렉션 편집"],
+    ["삭제", "컬렉션 삭제"],
+  ])("lets the %s dialog handle Escape without exiting detail", async (action, title) => {
+    const user = userEvent.setup();
+    const { onExit } = renderOverlay();
+
+    await openProviderMenu(user);
+    await user.click(screen.getByRole("menuitem", { name: action }));
+    expect(screen.getByRole("dialog", { name: title })).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("dialog", { name: title })).not.toBeInTheDocument();
+    expect(onExit).not.toHaveBeenCalled();
+    expect(screen.getByRole("region", { name: "만화 상세" })).toBeInTheDocument();
   });
 
   it("exposes collection management actions and reuses their callbacks", async () => {

@@ -106,6 +106,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   });
   const collectionReturnViewRef = useRef<Extract<AssetView, { kind: "collections" }> | null>(null);
   const [preferences, setPreferences] = useState<UiPreferences>(loadUiPreferences);
+  const [sidebarWidth, setSidebarWidth] = useState(preferences.sidebarWidth);
   const [message, setMessage] = useState<string | null>(null);
   const [assetRefresh, setAssetRefresh] = useState(0);
   const [maintenance, setMaintenance] = useState<"restore" | null>(null);
@@ -213,10 +214,16 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     if (metadataImportRunningRef.current) return false;
     metadataImportRunningRef.current = true;
     const workId = existingWorkId ?? crypto.randomUUID();
-    const update = (work: MetadataImportWork) => setMetadataImportWorks((current) =>
-      current.some((item) => item.id === work.id)
-        ? current.map((item) => item.id === work.id ? work : item)
-        : [...current, work]);
+    const update = (work: MetadataImportWork) => setMetadataImportWorks((current) => {
+      const previous = current.find((item) => item.id === work.id);
+      // 같은 workId를 재사용하므로 실패해도 이전 시도의 중복·검토 대기 성과는 유지한다.
+      const withPrevious = previous && work.status === "failed"
+        ? { ...work, total: previous.total, completed: previous.completed, added: previous.added, foldersCreated: previous.foldersCreated, pathsReused: previous.pathsReused, exactDuplicates: previous.exactDuplicates, reviewPending: previous.reviewPending, skipped: previous.skipped }
+        : work;
+      return current.some((item) => item.id === work.id)
+        ? current.map((item) => item.id === work.id ? withPrevious : item)
+        : [...current, withPrevious];
+    });
     try {
       await executeMetadataImport(gateway, folder, update, workId);
       await refreshClassifications();
@@ -267,6 +274,15 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   useEffect(() => {
     saveUiPreferences(preferences);
   }, [preferences]);
+  useEffect(() => {
+    if (sidebarWidth === preferences.sidebarWidth) return;
+    const timeout = window.setTimeout(() => {
+      setPreferences((current) => current.sidebarWidth === sidebarWidth
+        ? current
+        : { ...current, sidebarWidth });
+    }, 150);
+    return () => window.clearTimeout(timeout);
+  }, [preferences.sidebarWidth, sidebarWidth]);
   useEffect(() => {
     document.body.classList.toggle("is-pointer-dragging", dragState.phase === "dragging");
     return () => document.body.classList.remove("is-pointer-dragging");
@@ -471,7 +487,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
               collectionType={preferences.collectionType}
               expandedIds={preferences.expandedClassificationIds}
               expandedAlbumIds={preferences.expandedAlbumIds}
-              sidebarWidth={preferences.sidebarWidth}
+              sidebarWidth={sidebarWidth}
               createClassificationRequest={createClassificationRequest}
               onViewChange={navigateView}
               onExpandedIdsChange={(expandedClassificationIds) =>
@@ -480,7 +496,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
               onExpandedAlbumIdsChange={(expandedAlbumIds) =>
                 updatePreferences({ expandedAlbumIds })
               }
-              onSidebarWidthChange={(sidebarWidth) => updatePreferences({ sidebarWidth })}
+              onSidebarWidthChange={setSidebarWidth}
               onChanged={() => void refreshClassifications()}
               onAlbumsChanged={() => void refreshAlbums()}
               reviewCount={reviewCount}

@@ -26,26 +26,38 @@ export function LibraryProvider({
 }: PropsWithChildren<{ gateway: LibraryGateway }>) {
   const [library, setLibrary] = useState<LibrarySummary | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const openLibrary = useCallback(
+  const tryOpenLibrary = useCallback(
     async (path: string) => {
       setError(null);
       try {
         const summary = await gateway.openLibrary(path);
         setLibrary(summary);
         localStorage.setItem(LIBRARY_PATH_STORAGE_KEY, path);
+        return true;
       } catch (error) {
         setError(commandErrorMessage(error, "라이브러리를 열 수 없습니다."));
+        return false;
       }
     },
     [gateway],
+  );
+  const openLibrary = useCallback(
+    async (path: string) => {
+      await tryOpenLibrary(path);
+    },
+    [tryOpenLibrary],
   );
 
   useEffect(() => {
     const path = localStorage.getItem(LIBRARY_PATH_STORAGE_KEY);
     if (path) {
-      void openLibrary(path);
+      void tryOpenLibrary(path).then((opened) => {
+        if (!opened && localStorage.getItem(LIBRARY_PATH_STORAGE_KEY) === path) {
+          localStorage.removeItem(LIBRARY_PATH_STORAGE_KEY);
+        }
+      });
     }
-  }, [openLibrary]);
+  }, [tryOpenLibrary]);
 
   return (
     <LibraryContext.Provider value={{ gateway, library, error, openLibrary }}>

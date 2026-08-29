@@ -84,7 +84,7 @@ function gateway(): LibraryGateway {
     previewIgdbGame: vi.fn(),
     applyIgdbGame: vi.fn(),
     refreshIgdbGame: vi.fn(),
-    getIgdbConnection: vi.fn(),
+    getIgdbConnection: vi.fn().mockResolvedValue(null),
     replaceIgdbGameArtwork: vi.fn(),
     getTmdbCredentialStatus: vi.fn(),
     setTmdbToken: vi.fn(),
@@ -93,7 +93,7 @@ function gateway(): LibraryGateway {
     previewTmdbMovie: vi.fn(),
     applyTmdbMovie: vi.fn(),
     refreshTmdbMovie: vi.fn(),
-    getTmdbConnection: vi.fn(),
+    getTmdbConnection: vi.fn().mockResolvedValue(null),
     replaceTmdbMovieArtwork: vi.fn(),
     openLibrary: vi.fn().mockResolvedValue(summary),
     importVckCatalog: vi.fn(), getOnlineCatalogStatus: vi.fn(), searchOnlineCatalog: vi.fn(), suggestOnlineCatalog: vi.fn(), updateOnlineCatalog: vi.fn(), setOnlineCatalogUpdateSettings: vi.fn(), runDueOnlineCatalogUpdate: vi.fn(), getOnlineCatalogWorkDetail: vi.fn(), setOnlineCatalogBookmark: vi.fn(), resolveOnlineCatalogWork: vi.fn(), getRemoteReadingProgress: vi.fn(), saveRemoteReadingProgress: vi.fn(), clearRemoteMangaCache: vi.fn(),
@@ -556,6 +556,44 @@ describe("App", () => {
         collectionType: "manga",
       }),
     );
+  });
+
+  it("debounces sidebar width preference writes while resizing", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games]);
+
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} />);
+    const sidebar = await screen.findByRole("complementary", { name: "분류" });
+    const resizeHandle = screen.getByRole("separator", { name: "사이드바 너비 조절" });
+    Object.defineProperties(resizeHandle, {
+      setPointerCapture: { configurable: true, value: vi.fn() },
+      releasePointerCapture: { configurable: true, value: vi.fn() },
+    });
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
+    setItem.mockClear();
+    vi.useFakeTimers();
+
+    try {
+      fireEvent.pointerDown(resizeHandle, { pointerId: 1, clientX: 100 });
+      fireEvent.pointerMove(resizeHandle, { pointerId: 1, clientX: -100.4 });
+      fireEvent.pointerMove(resizeHandle, { pointerId: 1, clientX: 400.4 });
+      fireEvent.pointerUp(resizeHandle, { pointerId: 1 });
+
+      expect(sidebar).toHaveStyle({ width: "320px" });
+      const preferenceWrites = () => setItem.mock.calls.filter(([key]) => key === UI_PREFERENCES_KEY);
+      expect(preferenceWrites()).toHaveLength(0);
+
+      act(() => vi.advanceTimersByTime(149));
+      expect(preferenceWrites()).toHaveLength(0);
+      act(() => vi.advanceTimersByTime(1));
+
+      expect(preferenceWrites()).toHaveLength(1);
+      expect(JSON.parse(String(preferenceWrites()[0][1])).sidebarWidth).toBe(320);
+    } finally {
+      vi.useRealTimers();
+      setItem.mockRestore();
+    }
   });
 
   it("keeps completed ingestion feedback in the work tray", async () => {

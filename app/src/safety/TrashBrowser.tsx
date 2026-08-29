@@ -11,6 +11,7 @@ import { Skeleton } from "../shared/ui/Skeleton";
 import { TextField } from "../shared/ui/TextField";
 import { Toast } from "../shared/ui/Toast";
 import { Toggle } from "../shared/ui/Toggle";
+import { formatBytes } from "../assets/assetMetadata";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 
 const MIN_RETENTION_DAYS = 1;
@@ -180,10 +181,4 @@ function remainingDays(purgeAt: string): number {
 function localDate(value: string): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
-}
-
-function formatBytes(value: number): string {
-  if (value < 1024) return `${value} B`;
-  if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
-  return `${Math.round(value / (1024 * 1024))} MB`;
 }

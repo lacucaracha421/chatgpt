@@ -109,10 +109,10 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
     setReleaseChanges([]);
     if (!isManga) return () => { active = false; };
     void gateway.takeUnreadReleaseChanges(collectionId).then(
-      async (events) => {
+      (events) => {
         if (!active) return;
         setReleaseChanges(events);
-        if (events.length > 0) await onChangedRef.current();
+        if (events.length > 0) void onChangedRef.current().catch(() => undefined);
       },
       () => undefined,
     );
@@ -268,11 +268,11 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
 
   useEffect(() => {
     const exit = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !event.defaultPrevented && viewerVolumeId === null && !importOpen && !aladinOpen && !igdbOpen && tmdbTarget === null) onExit();
+      if (event.key === "Escape" && !event.defaultPrevented && viewerVolumeId === null && !importOpen && !aladinOpen && !igdbOpen && tmdbTarget === null && editMode === null && !deleteOpen) onExit();
     };
     window.addEventListener("keydown", exit);
     return () => window.removeEventListener("keydown", exit);
-  }, [aladinOpen, igdbOpen, importOpen, onExit, tmdbTarget, viewerVolumeId]);
+  }, [aladinOpen, deleteOpen, editMode, igdbOpen, importOpen, onExit, tmdbTarget, viewerVolumeId]);
 
   const heroUrl = useMemo(
     () => selectedCover

@@ -1,7 +1,8 @@
 export function formatBytes(value: number): string {
-  return value < 1024
-    ? `${value} B`
-    : `${(value / 1024).toFixed(value % 1024 === 0 ? 0 : 1)} KB`;
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
+  if (value < 1024 * 1024 * 1024) return `${Math.round(value / (1024 * 1024))} MB`;
+  return `${(value / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
 export function sourceLabel(sourceUrl: string | null): string {

@@ -9,6 +9,18 @@ afterEach(() => {
   cleanup();
 });
 
+it("removes a stored startup path when automatic restore fails", async () => {
+  localStorage.setItem(LIBRARY_PATH_STORAGE_KEY, "C:\\Missing");
+  const libraryGateway = gateway();
+  vi.mocked(libraryGateway.openLibrary).mockRejectedValue(new Error("missing"));
+
+  render(<LibraryProvider gateway={libraryGateway}><Probe /></LibraryProvider>);
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("missing");
+  expect(screen.getByText("none")).toBeVisible();
+  expect(localStorage.getItem(LIBRARY_PATH_STORAGE_KEY)).toBeNull();
+});
+
 it("keeps the current library when opening another library fails", async () => {
   localStorage.setItem(LIBRARY_PATH_STORAGE_KEY, "C:\\Current");
   const libraryGateway = gateway();
