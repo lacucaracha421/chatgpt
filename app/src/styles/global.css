@@ -428,6 +428,15 @@ input:disabled {
   gap: var(--space-compact);
 }
 
+.ui-select select {
+  color-scheme: dark;
+}
+
+.ui-select option {
+  color: var(--color-text);
+  background: var(--color-bg);
+}
+
 .ui-toggle {
   display: inline-flex;
   align-items: center;
