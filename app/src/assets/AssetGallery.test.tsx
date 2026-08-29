@@ -481,6 +481,19 @@ describe("AssetGallery", () => {
 
     expect(onSelectDate).not.toHaveBeenCalled();
   });
+  it("clears a pending quick preview when the gallery unmounts", () => {
+    vi.useFakeTimers();
+    const clearTimeout = vi.spyOn(window, "clearTimeout");
+    const { unmount } = render(<AssetGallery items={[asset(0)]} />);
+
+    fireEvent.pointerEnter(screen.getByRole("button", { name: "asset-0.png 빠른 확대 미리보기" }));
+    unmount();
+
+    act(() => vi.advanceTimersByTime(150));
+    expect(clearTimeout).toHaveBeenCalled();
+    expect(screen.queryByRole("img", { name: /빠른 미리보기/ })).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
 });
 
 function asset(index: number): AssetSummary { return { id: `asset-${index}`, title: null, originalName: `asset-${index}.png`, byteSize: 1, width: 200, height: 200, collectedAt: "2026-07-30T00:00:00Z", favorite: false, sourceUrl: null, sourcePublishedAt: null, creatorName: null, creatorHandle: null, creatorUrl: null, importSource: null, importBatchId: null, originalModifiedAt: null, media: { kind: "image" } }; }
