@@ -428,10 +428,10 @@ impl Library {
         };
         let final_directory = self.root().join("video-media").join(&video.asset_id);
         if final_directory.exists() {
-            fs::remove_dir_all(&pending).map_err(|_| LibraryError::VideoPreparationFailed)?;
+            let _ = fs::remove_dir_all(&pending);
             return Err(LibraryError::VideoPreparationFailed);
         }
-        fs::rename(&pending, &final_directory).map_err(|_| LibraryError::VideoPreparationFailed)?;
+        install_prepared_directory(&pending, &final_directory)?;
         let poster_relative_path = format!("video-media/{}/poster.webp", video.asset_id);
         let scrub_relative_dir = format!("video-media/{}/scrub", video.asset_id);
         let proxy_relative_path = (playback_kind == "proxy")
@@ -470,6 +470,14 @@ impl Library {
         )?;
         Ok(())
     }
+}
+
+fn install_prepared_directory(pending: &Path, final_directory: &Path) -> Result<(), LibraryError> {
+    if fs::rename(pending, final_directory).is_ok() {
+        return Ok(());
+    }
+    let _ = fs::remove_dir_all(pending);
+    Err(LibraryError::VideoPreparationFailed)
 }
 
 fn safe_asset_id(asset_id: &str) -> bool {
@@ -617,7 +625,10 @@ mod tests {
 
     use rusqlite::params;
 
-    use super::{direct_playback, parse_probe, scrub_timestamps_ms, VideoProbe, VideoTool};
+    use super::{
+        direct_playback, install_prepared_directory, parse_probe, scrub_timestamps_ms, VideoProbe,
+        VideoTool,
+    };
     use crate::library::{error::LibraryError, models::MediaSummary, Library};
 
     #[derive(Default)]
@@ -787,6 +798,23 @@ mod tests {
             .root()
             .join("video-media/video-1/playback.mp4")
             .exists());
+    }
+
+    #[test]
+    fn failed_derivative_install_removes_the_pending_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let pending = temp.path().join(".pending-test");
+        let destination = temp.path().join("video-1");
+        fs::create_dir(&pending).unwrap();
+        fs::write(pending.join("poster.webp"), b"poster").unwrap();
+        fs::create_dir(&destination).unwrap();
+        fs::write(destination.join("existing"), b"keep").unwrap();
+
+        let result = install_prepared_directory(&pending, &destination);
+
+        assert!(matches!(result, Err(LibraryError::VideoPreparationFailed)));
+        assert!(!pending.exists());
+        assert!(destination.join("existing").is_file());
     }
 
     #[test]
