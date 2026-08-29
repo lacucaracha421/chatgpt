@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use super::{
     error::LibraryError,
     models::{
-        AssetCursor, AssetDateBucket, AssetPage, AssetQuery, AssetSort, AssetSummary, ImportSource,
-        MediaSummary, VideoPreparationState,
+        AspectRatioFilter, AssetCursor, AssetDateBucket, AssetPage, AssetQuery, AssetSort,
+        AssetSummary, ImportSource, MediaKindFilter, MediaSummary, VideoPreparationState,
     },
     Library,
 };
@@ -40,6 +40,21 @@ struct AssetRow {
     random_bucket: Option<i64>,
 }
 
+fn media_filter_value(filter: Option<MediaKindFilter>) -> Option<&'static str> {
+    filter.map(|value| match value {
+        MediaKindFilter::Images => "images",
+        MediaKindFilter::Videos => "videos",
+    })
+}
+
+fn aspect_filter_value(filter: Option<AspectRatioFilter>) -> Option<&'static str> {
+    filter.map(|value| match value {
+        AspectRatioFilter::Square => "square",
+        AspectRatioFilter::Landscape => "landscape",
+        AspectRatioFilter::Portrait => "portrait",
+    })
+}
+
 /// One ascending half-page shared by oldest-first paging, anchor heads/tails,
 /// and upward (before-cursor) pagination in a newest-first listing.
 /// `?1..?5` scope, `?6`/`?7` exclusive cursor tuple, `?8` inclusive date bound,
@@ -62,6 +77,17 @@ AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_
 AND (?9 IS NULL OR EXISTS (SELECT 1 FROM collection_assets AS collection_link WHERE collection_link.asset_id = asset.id AND collection_link.collection_id = ?9))
 AND (?6 IS NULL OR asset.collected_at > ?6 OR (asset.collected_at = ?6 AND asset.id > ?7))
 AND (?8 IS NULL OR asset.collected_at >= ?8)
+AND (
+  (?11 IS NULL)
+  OR (?11 = 'images' AND asset.media_kind IN ('image', 'gif'))
+  OR (?11 = 'videos' AND asset.media_kind = 'video')
+)
+AND (
+  (?12 IS NULL)
+  OR (?12 = 'square' AND asset.width * 5 >= asset.height * 4 AND asset.width * 4 <= asset.height * 5)
+  OR (?12 = 'landscape' AND asset.width * 4 > asset.height * 5)
+  OR (?12 = 'portrait' AND asset.width * 5 < asset.height * 4)
+)
 ORDER BY asset.collected_at ASC, asset.id ASC LIMIT ?10";
 
 /// The descending mirror of CHRONO_ASC_HALF_SQL: newest-first pages,
@@ -84,6 +110,17 @@ AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_
 AND (?9 IS NULL OR EXISTS (SELECT 1 FROM collection_assets AS collection_link WHERE collection_link.asset_id = asset.id AND collection_link.collection_id = ?9))
 AND (?6 IS NULL OR asset.collected_at < ?6 OR (asset.collected_at = ?6 AND asset.id < ?7))
 AND (?8 IS NULL OR asset.collected_at < ?8)
+AND (
+  (?11 IS NULL)
+  OR (?11 = 'images' AND asset.media_kind IN ('image', 'gif'))
+  OR (?11 = 'videos' AND asset.media_kind = 'video')
+)
+AND (
+  (?12 IS NULL)
+  OR (?12 = 'square' AND asset.width * 5 >= asset.height * 4 AND asset.width * 4 <= asset.height * 5)
+  OR (?12 = 'landscape' AND asset.width * 4 > asset.height * 5)
+  OR (?12 = 'portrait' AND asset.width * 5 < asset.height * 4)
+)
 ORDER BY asset.collected_at DESC, asset.id DESC LIMIT ?10";
 impl Library {
     pub(crate) fn list_normal_x_source_urls(&self) -> Result<Vec<String>, LibraryError> {
@@ -165,6 +202,8 @@ impl Library {
             return self.asset_page_before(&connection, &query, cursor);
         }
         let cursor = decode_cursor(&query)?;
+        let media_kind = media_filter_value(query.media_kind);
+        let aspect_ratio = aspect_filter_value(query.aspect_ratio);
         let random_pivot = query.random_pivot.as_deref().unwrap_or("");
         let mut statement = connection.prepare(match query.sort {
             AssetSort::Newest => CHRONO_DESC_HALF_SQL,
@@ -186,6 +225,8 @@ impl Library {
                     None::<String>,
                     query.collection_id.as_deref(),
                     i64::from(query.limit) + 1,
+                    media_kind,
+                    aspect_ratio,
                 ])?
             }
             AssetSort::Oldest => {
@@ -201,6 +242,8 @@ impl Library {
                     None::<String>,
                     query.collection_id.as_deref(),
                     i64::from(query.limit) + 1,
+                    media_kind,
+                    aspect_ratio,
                 ])?
             }
             AssetSort::Favorites => {
@@ -216,6 +259,8 @@ impl Library {
                     id,
                     i64::from(query.limit) + 1,
                     query.collection_id.as_deref(),
+                    media_kind,
+                    aspect_ratio,
                 ])?
             }
             AssetSort::Random => {
@@ -232,6 +277,8 @@ impl Library {
                     id,
                     i64::from(query.limit) + 1,
                     query.collection_id.as_deref(),
+                    media_kind,
+                    aspect_ratio,
                 ])?
             }
         };
@@ -362,6 +409,8 @@ impl Library {
         }
 
         let connection = self.connection()?;
+        let media_kind = media_filter_value(query.media_kind);
+        let aspect_ratio = aspect_filter_value(query.aspect_ratio);
         let mut statement = connection.prepare(DATE_BUCKETS_SQL)?;
         let mut rows = statement.query(params![
             query.classification_id.as_deref(),
@@ -370,6 +419,8 @@ impl Library {
             query.unclassified_only,
             query.album_id.as_deref(),
             query.collection_id.as_deref(),
+            media_kind,
+            aspect_ratio,
         ])?;
         let mut buckets = Vec::new();
         while let Some(row) = rows.next()? {
@@ -449,6 +500,8 @@ fn run_chronological_page(
     limit_plus: i64,
 ) -> Result<Vec<AssetRow>, LibraryError> {
     let (collected_at, id) = cursor.map_or((None, None), |(at, asset_id)| (Some(at), Some(asset_id)));
+    let media_kind = media_filter_value(query.media_kind);
+    let aspect_ratio = aspect_filter_value(query.aspect_ratio);
     let mut statement = connection.prepare(sql)?;
     let mut rows = statement.query(params![
         query.classification_id.as_deref(),
@@ -461,6 +514,8 @@ fn run_chronological_page(
         bound,
         query.collection_id.as_deref(),
         limit_plus,
+        media_kind,
+        aspect_ratio,
     ])?;
     let mut items = Vec::new();
     while let Some(row) = rows.next()? {
@@ -610,6 +665,17 @@ AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link 
 AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
 AND (?10 IS NULL OR EXISTS (SELECT 1 FROM collection_assets AS collection_link WHERE collection_link.asset_id = asset.id AND collection_link.collection_id = ?10))
 AND (?6 IS NULL OR asset.favorite < ?6 OR (asset.favorite = ?6 AND (asset.collected_at < ?7 OR (asset.collected_at = ?7 AND asset.id < ?8))))
+AND (
+  (?11 IS NULL)
+  OR (?11 = 'images' AND asset.media_kind IN ('image', 'gif'))
+  OR (?11 = 'videos' AND asset.media_kind = 'video')
+)
+AND (
+  (?12 IS NULL)
+  OR (?12 = 'square' AND asset.width * 5 >= asset.height * 4 AND asset.width * 4 <= asset.height * 5)
+  OR (?12 = 'landscape' AND asset.width * 4 > asset.height * 5)
+  OR (?12 = 'portrait' AND asset.width * 5 < asset.height * 4)
+)
 ORDER BY asset.favorite DESC, asset.collected_at DESC, asset.id DESC LIMIT ?9";
 
 const RANDOM_SQL: &str = "WITH RECURSIVE descendants(id) AS (
@@ -630,6 +696,17 @@ AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link 
 AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
 AND (?11 IS NULL OR EXISTS (SELECT 1 FROM collection_assets AS collection_link WHERE collection_link.asset_id = asset.id AND collection_link.collection_id = ?11))
 AND (?7 IS NULL OR CASE WHEN asset.content_hash >= ?6 THEN 0 ELSE 1 END > ?7 OR (CASE WHEN asset.content_hash >= ?6 THEN 0 ELSE 1 END = ?7 AND (asset.content_hash > ?8 OR (asset.content_hash = ?8 AND asset.id > ?9))))
+AND (
+  (?12 IS NULL)
+  OR (?12 = 'images' AND asset.media_kind IN ('image', 'gif'))
+  OR (?12 = 'videos' AND asset.media_kind = 'video')
+)
+AND (
+  (?13 IS NULL)
+  OR (?13 = 'square' AND asset.width * 5 >= asset.height * 4 AND asset.width * 4 <= asset.height * 5)
+  OR (?13 = 'landscape' AND asset.width * 4 > asset.height * 5)
+  OR (?13 = 'portrait' AND asset.width * 5 < asset.height * 4)
+)
 ORDER BY CASE WHEN asset.content_hash >= ?6 THEN 0 ELSE 1 END ASC, asset.content_hash ASC, asset.id ASC LIMIT ?10";
 
 const DATE_BUCKETS_SQL: &str = "WITH RECURSIVE descendants(id) AS (
@@ -645,6 +722,17 @@ AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE lin
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
 AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
 AND (?6 IS NULL OR EXISTS (SELECT 1 FROM collection_assets AS collection_link WHERE collection_link.asset_id = asset.id AND collection_link.collection_id = ?6))
+AND (
+  (?7 IS NULL)
+  OR (?7 = 'images' AND asset.media_kind IN ('image', 'gif'))
+  OR (?7 = 'videos' AND asset.media_kind = 'video')
+)
+AND (
+  (?8 IS NULL)
+  OR (?8 = 'square' AND asset.width * 5 >= asset.height * 4 AND asset.width * 4 <= asset.height * 5)
+  OR (?8 = 'landscape' AND asset.width * 4 > asset.height * 5)
+  OR (?8 = 'portrait' AND asset.width * 5 < asset.height * 4)
+)
 GROUP BY date ORDER BY date DESC";
 
 #[cfg(test)]
@@ -655,9 +743,9 @@ mod tests {
         error::LibraryError,
         models::{
             AssetAlbumPatch, AssetClassificationPatch, AssetCollectionPatch, AssetCursor, AssetPage,
-            AssetQuery, AssetSort, ClassificationKind, CollectionType, CreateAlbum,
-            CreateClassification, CreateCollection, ImportSource, MediaSummary,
-            VideoPreparationState,
+            AspectRatioFilter, AssetQuery, AssetSort, ClassificationKind, CollectionType,
+            CreateAlbum, CreateClassification, CreateCollection, ImportSource, MediaKindFilter,
+            MediaSummary, VideoPreparationState,
         },
         Library,
     };
@@ -744,6 +832,83 @@ mod tests {
         );
         assert_eq!(page.items[1].media, MediaSummary::Gif);
         assert_eq!(page.items[2].media, MediaSummary::Image);
+    }
+
+    #[test]
+    fn media_and_aspect_filters_apply_before_pagination() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        insert_filter_asset(&library, "image-square", "image", 1000, 1000, "2026-08-08T00:00:00Z");
+        insert_filter_asset(&library, "gif-portrait", "gif", 600, 1000, "2026-08-07T00:00:00Z");
+        insert_filter_asset(&library, "video-landscape", "video", 1600, 900, "2026-08-06T00:00:00Z");
+        insert_filter_asset(&library, "ratio-4x5", "image", 800, 1000, "2026-08-05T00:00:00Z");
+        insert_filter_asset(&library, "ratio-1x1", "gif", 1000, 1000, "2026-08-04T00:00:00Z");
+        insert_filter_asset(&library, "ratio-5x4", "image", 1250, 1000, "2026-08-03T00:00:00Z");
+        insert_filter_asset(&library, "ratio-wide", "image", 1251, 1000, "2026-08-02T00:00:00Z");
+        insert_filter_asset(&library, "ratio-tall", "image", 799, 1000, "2026-08-01T00:00:00Z");
+
+        let list = |media_kind, aspect_ratio, limit, after| {
+            library
+                .list_assets(AssetQuery {
+                    media_kind,
+                    aspect_ratio,
+                    limit,
+                    after,
+                    sort: AssetSort::Newest,
+                    ..Default::default()
+                })
+                .unwrap()
+        };
+        let sorted_ids = |page: AssetPage| {
+            let mut ids: Vec<_> = page.items.into_iter().map(|asset| asset.id).collect();
+            ids.sort();
+            ids
+        };
+
+        assert_eq!(
+            sorted_ids(list(Some(MediaKindFilter::Images), None, 20, None)),
+            vec!["gif-portrait", "image-square", "ratio-1x1", "ratio-4x5", "ratio-5x4", "ratio-tall", "ratio-wide"],
+        );
+        assert_eq!(
+            sorted_ids(list(Some(MediaKindFilter::Videos), None, 20, None)),
+            vec!["video-landscape"],
+        );
+        assert_eq!(
+            sorted_ids(list(None, Some(AspectRatioFilter::Square), 20, None)),
+            vec!["image-square", "ratio-1x1", "ratio-4x5", "ratio-5x4"],
+        );
+        assert_eq!(
+            sorted_ids(list(None, Some(AspectRatioFilter::Landscape), 20, None)),
+            vec!["ratio-wide", "video-landscape"],
+        );
+        assert_eq!(
+            sorted_ids(list(None, Some(AspectRatioFilter::Portrait), 20, None)),
+            vec!["gif-portrait", "ratio-tall"],
+        );
+
+        let first = list(
+            Some(MediaKindFilter::Images),
+            Some(AspectRatioFilter::Portrait),
+            1,
+            None,
+        );
+        assert_eq!(first.items[0].id, "gif-portrait");
+        let second = list(
+            Some(MediaKindFilter::Images),
+            Some(AspectRatioFilter::Portrait),
+            1,
+            first.next_cursor,
+        );
+        assert_eq!(second.items[0].id, "ratio-tall");
+
+        let buckets = library
+            .list_asset_date_buckets(AssetQuery {
+                media_kind: Some(MediaKindFilter::Images),
+                aspect_ratio: Some(AspectRatioFilter::Portrait),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(buckets.iter().map(|bucket| bucket.count).sum::<u64>(), 2);
     }
 
     #[test]
@@ -1663,5 +1828,46 @@ mod tests {
                 ],
             )
             .unwrap();
+    }
+
+    fn insert_filter_asset(
+        library: &Library,
+        id: &str,
+        media_kind: &str,
+        width: i64,
+        height: i64,
+        collected_at: &str,
+    ) {
+        let connection = library.connection().unwrap();
+        connection
+            .execute(
+                "INSERT INTO assets (
+                    id, content_hash, media_kind, original_name, relative_path,
+                    thumbnail_relative_path, byte_size, width, height, collected_at, favorite
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?8, ?9, 0)",
+                params![
+                    id,
+                    format!("hash-{id}"),
+                    media_kind,
+                    format!("{id}.bin"),
+                    format!("assets/{id}.bin"),
+                    format!("thumbnails/{id}.webp"),
+                    width,
+                    height,
+                    collected_at,
+                ],
+            )
+            .unwrap();
+        if media_kind == "video" {
+            connection
+                .execute(
+                    "INSERT INTO video_assets (
+                        asset_id, duration_ms, container, video_codec, audio_codec,
+                        preparation_state, scrub_frame_count
+                     ) VALUES (?1, 1000, 'mp4', 'h264', 'aac', 'pending', 0)",
+                    [id],
+                )
+                .unwrap();
+        }
     }
 }

@@ -322,6 +322,23 @@ pub enum MediaSummary {
     },
 }
 
+/// 상단바의 미디어 종류 필터.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MediaKindFilter {
+    Images,
+    Videos,
+}
+
+/// 상단바의 종횡비 필터.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AspectRatioFilter {
+    Square,
+    Landscape,
+    Portrait,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ImportSource {
@@ -460,6 +477,10 @@ pub struct AssetQuery {
     pub direct_only: bool,
     pub favorite_only: bool,
     pub unclassified_only: bool,
+    /// 미디어 종류 필터. None은 전체.
+    pub media_kind: Option<MediaKindFilter>,
+    /// 가로·세로·정사각 필터. None은 전체.
+    pub aspect_ratio: Option<AspectRatioFilter>,
     pub sort: AssetSort,
     pub random_pivot: Option<String>,
     pub after: Option<AssetCursor>,

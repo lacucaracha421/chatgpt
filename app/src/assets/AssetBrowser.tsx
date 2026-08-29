@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ASSET_PAGE_SIZE } from "../library/constants";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
-import type { AlbumEntry, AssetCursor, AssetDateBucket, AssetQuery, AssetSort, AssetSummary, AssetView, ClassificationEntry, CollectionSummary } from "../library/types";
+import type { AlbumEntry, AssetAspectFilter, AssetCursor, AssetDateBucket, AssetMediaFilter, AssetQuery, AssetSort, AssetSummary, AssetView, ClassificationEntry, CollectionSummary } from "../library/types";
 import { Button } from "../shared/ui/Button";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { Skeleton } from "../shared/ui/Skeleton";
@@ -27,6 +27,8 @@ const EMPTY_BUCKETS: AssetDateBucket[] = [];
 export function AssetBrowser({ view, classifications, albums = [], collections = [], onCollectionsChanged = () => undefined, onMembershipChanged = () => undefined, sort, metadataVisible, privacyMode, onPrivacyModeChange, thumbnailRowHeight = 180, refreshVersion, requestedAsset = null, onRequestedAssetHandled = () => undefined, onSortChange, onMetadataVisibleChange, onThumbnailRowHeightChange = () => undefined, onStatusChange, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: Props) {
   const { gateway } = useLibrary();
   const [directOnly, setDirectOnly] = useState(false);
+  const [mediaFilter, setMediaFilter] = useState<AssetMediaFilter>("all");
+  const [aspectFilter, setAspectFilter] = useState<AssetAspectFilter>("all");
   const [page, setPage] = useState<PageState | null>(null);
   const [firstLoading, setFirstLoading] = useState(true);
   const [nextLoading, setNextLoading] = useState(false);
@@ -58,11 +60,12 @@ export function AssetBrowser({ view, classifications, albums = [], collections =
   const randomPivotRef = useRef<string | null>(null);
   const [anchorViewKey, setAnchorViewKey] = useState<string | null>(null);
   const effectiveSort = view.kind === "recent" ? "newest" : sort;
+  const filterable = view.kind === "classification" || view.kind === "recent" || view.kind === "favorites" || view.kind === "unsorted" || view.kind === "album";
   const chronological = effectiveSort === "newest" || effectiveSort === "oldest";
   if (effectiveSort === "random" && !randomPivotRef.current) randomPivotRef.current = createRandomPivot();
   useEffect(() => { if (effectiveSort !== "random") randomPivotRef.current = null; }, [effectiveSort]);
   useEffect(() => { if (view.kind !== "classification") setDirectOnly(false); }, [view.kind]);
-  const queryBase = useMemo<Omit<AssetQuery, "after">>(() => ({ classificationId: view.kind === "classification" ? view.classificationId : null, albumId: view.kind === "album" ? view.albumId : null, collectionId: view.kind === "collection" ? view.collectionId : null, directOnly: view.kind === "classification" ? directOnly : false, favoriteOnly: view.kind === "favorites", unclassifiedOnly: view.kind === "unsorted", sort: effectiveSort, randomPivot: effectiveSort === "random" ? randomPivotRef.current : null, limit: ASSET_PAGE_SIZE }), [directOnly, effectiveSort, randomVersion, view]);
+  const queryBase = useMemo<Omit<AssetQuery, "after">>(() => ({ classificationId: view.kind === "classification" ? view.classificationId : null, albumId: view.kind === "album" ? view.albumId : null, collectionId: view.kind === "collection" ? view.collectionId : null, directOnly: view.kind === "classification" ? directOnly : false, favoriteOnly: view.kind === "favorites", unclassifiedOnly: view.kind === "unsorted", mediaKind: filterable && mediaFilter !== "all" ? mediaFilter : null, aspectRatio: filterable && aspectFilter !== "all" ? aspectFilter : null, sort: effectiveSort, randomPivot: effectiveSort === "random" ? randomPivotRef.current : null, limit: ASSET_PAGE_SIZE }), [aspectFilter, directOnly, effectiveSort, filterable, mediaFilter, randomVersion, view]);
   const queryKey = JSON.stringify(queryBase);
   const viewKey = view.kind === "classification" ? `classification:${view.classificationId}` : view.kind === "album" ? `album:${view.albumId}` : view.kind === "collection" ? `collection:${view.collectionId}` : view.kind;
   const effectiveAnchor = anchor !== null && anchorViewKey === viewKey ? anchor : null;
@@ -153,6 +156,20 @@ export function AssetBrowser({ view, classifications, albums = [], collections =
     setSelection(emptySelection());
     selectedViewKeyRef.current = null;
     setSelectedAsset(null);
+  };
+  const resetFilterNavigation = () => {
+    setAnchor(null);
+    setAnchorViewKey(null);
+    setJumpTarget(null);
+    clearSelection();
+  };
+  const changeMediaFilter = (next: AssetMediaFilter) => {
+    resetFilterNavigation();
+    setMediaFilter(next);
+  };
+  const changeAspectFilter = (next: AssetAspectFilter) => {
+    resetFilterNavigation();
+    setAspectFilter(next);
   };
   const selectAll = () => {
     const next = selectAllLoaded(selection, itemIds);
@@ -259,7 +276,7 @@ export function AssetBrowser({ view, classifications, albums = [], collections =
     }
   })();
   return <section className="asset-browser" aria-label="저장소">
-    <AssetToolbar view={view} classifications={classifications} albums={albums} collections={collections} sort={sort} directOnly={directOnly} metadataVisible={metadataVisible} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} thumbnailRowHeight={thumbnailRowHeight} onSortChange={(next) => { setAnchor(null); setAnchorViewKey(null); setJumpTarget(null); onSortChange(next); }} onDirectOnlyChange={setDirectOnly} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onReshuffle={reshuffle} />
+    <AssetToolbar view={view} classifications={classifications} albums={albums} collections={collections} sort={sort} mediaFilter={mediaFilter} aspectFilter={aspectFilter} directOnly={directOnly} metadataVisible={metadataVisible} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} thumbnailRowHeight={thumbnailRowHeight} onSortChange={(next) => { setAnchor(null); setAnchorViewKey(null); setJumpTarget(null); onSortChange(next); }} onMediaFilterChange={changeMediaFilter} onAspectFilterChange={changeAspectFilter} onDirectOnlyChange={setDirectOnly} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onReshuffle={reshuffle} />
     {message && <Toast actionLabel={undoAssetIds ? "실행 취소" : undefined} onAction={undoAssetIds ? undoTrash : undefined} actionDisabled={batchPending} onDismiss={() => dismissMessage(null)}>{message}</Toast>}
     {currentFirstError && <Toast>{currentFirstError}</Toast>}
     <div className={`asset-browser__workspace${inspectorOpen ? " asset-browser__workspace--inspector" : ""}`}>

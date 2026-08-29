@@ -46,12 +46,67 @@ describe("AssetBrowser", () => {
         albumId: null,
         collectionId: null,
         ...expected,
+        mediaKind: null,
+        aspectRatio: null,
         randomPivot: null,
         after: null,
         aroundDate: null,
         limit: 100,
       }),
     );
+  });
+
+  it("applies toolbar filters to asset queries and preserves them across asset views", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway({ items: [asset(0)], nextCursor: null });
+    const renderView = (view: AssetView) => (
+      <LibraryProvider gateway={gateway}>
+        <AssetBrowser
+          view={view}
+          classifications={classifications}
+          sort="newest"
+          metadataVisible={false}
+          privacyMode={false}
+          onPrivacyModeChange={vi.fn()}
+          refreshVersion={0}
+          onSortChange={vi.fn()}
+          onMetadataVisibleChange={vi.fn()}
+          onStatusChange={vi.fn()}
+        />
+      </LibraryProvider>
+    );
+    const { rerender } = render(renderView({ kind: "classification", classificationId: null }));
+    const tile = await screen.findByRole("option", { name: "asset-0.png" });
+    await user.click(tile);
+    expect(tile).toHaveAttribute("aria-selected", "true");
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "미디어" }), "images");
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(
+      expect.objectContaining({ mediaKind: "images", aspectRatio: null, after: null, aroundDate: null }),
+    ));
+    expect(gateway.listAssetDateBuckets).toHaveBeenLastCalledWith(
+      expect.objectContaining({ mediaKind: "images", aspectRatio: null }),
+    );
+    expect(await screen.findByRole("option", { name: "asset-0.png" })).toHaveAttribute("aria-selected", "false");
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "비율" }), "portrait");
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(
+      expect.objectContaining({ mediaKind: "images", aspectRatio: "portrait" }),
+    ));
+
+    rerender(renderView({ kind: "favorites" }));
+    expect(screen.getByRole("combobox", { name: "미디어" })).toHaveValue("images");
+    expect(screen.getByRole("combobox", { name: "비율" })).toHaveValue("portrait");
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(
+      expect.objectContaining({ favoriteOnly: true, mediaKind: "images", aspectRatio: "portrait" }),
+    ));
+
+    rerender(renderView({ kind: "collection", collectionId: "collection-1" }));
+    expect(screen.queryByRole("combobox", { name: "미디어" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "비율" })).not.toBeInTheDocument();
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(
+      expect.objectContaining({ collectionId: "collection-1", mediaKind: null, aspectRatio: null }),
+    ));
   });
 
   it("uses one random pivot for first and next pages", async () => {

@@ -98,6 +98,8 @@ export type ExtensionConnection = {
 export type ClassificationKind = "root" | "work" | "tag";
 
 export type AssetSort = "newest" | "oldest" | "favorites" | "random";
+export type AssetMediaFilter = "all" | "images" | "videos";
+export type AssetAspectFilter = "all" | "square" | "landscape" | "portrait";
 
 export type AssetView =
   | { kind: "classification"; classificationId: string | null }
@@ -537,6 +539,8 @@ export type AssetQuery = {
   directOnly: boolean;
   favoriteOnly: boolean;
   unclassifiedOnly: boolean;
+  mediaKind: Exclude<AssetMediaFilter, "all"> | null;
+  aspectRatio: Exclude<AssetAspectFilter, "all"> | null;
   sort: AssetSort;
   randomPivot: string | null;
   after: AssetCursor | null;

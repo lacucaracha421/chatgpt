@@ -14,12 +14,16 @@ const baseProps = {
   albums: [{ id: "covers", name: "표지", parentId: null, iconKey: null, colorKey: null }],
   collections: [],
   sort: "newest" as AssetSort,
+  mediaFilter: "all" as const,
+  aspectFilter: "all" as const,
   directOnly: false,
   metadataVisible: true,
   privacyMode: false,
   onPrivacyModeChange: vi.fn(),
   thumbnailRowHeight: 180,
   onSortChange: vi.fn(),
+  onMediaFilterChange: vi.fn(),
+  onAspectFilterChange: vi.fn(),
   onDirectOnlyChange: vi.fn(),
   onMetadataVisibleChange: vi.fn(),
   onThumbnailRowHeightChange: vi.fn(),
@@ -40,6 +44,54 @@ it("shows the fixed browsing slots regardless of the selection", () => {
   expect(screen.queryByText(/개 선택/)).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "좋아요 켜기" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "휴지통으로 이동" })).not.toBeInTheDocument();
+});
+
+it("places media and aspect filters after sort only in asset browsing views", async () => {
+  const user = userEvent.setup();
+  const onMediaFilterChange = vi.fn();
+  const onAspectFilterChange = vi.fn();
+  const { rerender } = render(
+    <AssetToolbar
+      {...baseProps}
+      onMediaFilterChange={onMediaFilterChange}
+      onAspectFilterChange={onAspectFilterChange}
+    />,
+  );
+
+  const comboboxes = screen.getAllByRole("combobox");
+  expect(comboboxes).toHaveLength(3);
+  expect(comboboxes[0]).toBe(screen.getByRole("combobox", { name: "정렬" }));
+  expect(comboboxes[1]).toBe(screen.getByRole("combobox", { name: "미디어" }));
+  expect(comboboxes[2]).toBe(screen.getByRole("combobox", { name: "비율" }));
+  expect(screen.getByRole("combobox", { name: "미디어" })).toHaveValue("all");
+  expect(screen.getByRole("combobox", { name: "비율" })).toHaveValue("all");
+
+  await user.selectOptions(screen.getByRole("combobox", { name: "미디어" }), "images");
+  await user.selectOptions(screen.getByRole("combobox", { name: "비율" }), "portrait");
+  expect(onMediaFilterChange).toHaveBeenCalledWith("images");
+  expect(onAspectFilterChange).toHaveBeenCalledWith("portrait");
+
+  rerender(
+    <AssetToolbar
+      {...baseProps}
+      view={{ kind: "collection", collectionId: "collection-1" }}
+      onMediaFilterChange={onMediaFilterChange}
+      onAspectFilterChange={onAspectFilterChange}
+    />,
+  );
+  expect(screen.queryByRole("combobox", { name: "미디어" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("combobox", { name: "비율" })).not.toBeInTheDocument();
+});
+
+it.each<AssetView>([
+  { kind: "manga" },
+  { kind: "settings" },
+  { kind: "similarity_review" },
+])("hides asset filters in the $kind view", (view) => {
+  render(<AssetToolbar {...baseProps} view={view} />);
+
+  expect(screen.queryByRole("combobox", { name: "미디어" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("combobox", { name: "비율" })).not.toBeInTheDocument();
 });
 
 it("toggles privacy mode from the browsing controls", async () => {
