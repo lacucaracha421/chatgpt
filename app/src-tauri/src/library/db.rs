@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 25;
+pub(crate) const SCHEMA_VERSION: i64 = 26;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -44,6 +44,7 @@ const GAME_PROVIDER_DETAIL_SCHEMA: &str =
 const MOVIE_PROVIDER_DETAIL_SCHEMA: &str =
     include_str!("../../migrations/0024_movie_provider_detail.sql");
 const PDQ_SIMILARITY_SCHEMA: &str = include_str!("../../migrations/0025_pdq_similarity.sql");
+const COLLECTED_AT_UTC_SCHEMA: &str = include_str!("../../migrations/0026_collected_at_utc.sql");
 
 pub fn open_database(path: &Path) -> Result<Connection, LibraryError> {
     let connection = Connection::open(path)?;
@@ -59,7 +60,7 @@ pub fn initialize_database(path: &Path) -> Result<Connection, LibraryError> {
     let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
     match version {
         SCHEMA_VERSION => {}
-        version @ 0..=24 => {
+        version @ 0..=25 => {
             if version > 0 {
                 let root = path
                     .parent()
@@ -153,6 +154,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         if version <= 24 {
             transaction.execute_batch(PDQ_SIMILARITY_SCHEMA)?;
         }
+        if version <= 25 {
+            transaction.execute_batch(COLLECTED_AT_UTC_SCHEMA)?;
+        }
         transaction.commit()?;
         Ok::<(), LibraryError>(())
     })();
@@ -169,6 +173,81 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn migrates_v25_collected_at_offsets_to_utc_milliseconds() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        for schema in [
+            INITIAL_SCHEMA,
+            VAULT_SAFETY_SCHEMA,
+            SIMILARITY_REVIEW_SCHEMA,
+            VIDEO_MEDIA_SCHEMA,
+            MANGA_SCHEMA,
+            MANGA_MODIFIED_SCHEMA,
+            CLASSIFICATION_APPEARANCE_SCHEMA,
+            ASSET_ALBUMS_SCHEMA,
+            ASSET_SOURCE_PROVENANCE_SCHEMA,
+            COLLECTIONS_SCHEMA,
+            COLLECTIONS_TYPED_SCHEMA,
+            COLLECTION_SOURCE_SCHEMA,
+            COLLECTION_EXTERNAL_BINDINGS_SCHEMA,
+            COLLECTION_WORK_ARTWORKS_SCHEMA,
+            COLLECTION_VOLUMES_SCHEMA,
+            ALADIN_VOLUME_SOURCES_SCHEMA,
+            ALADIN_RELEASE_WATCH_SCHEMA,
+            ONLINE_CATALOG_SCHEMA,
+            ONLINE_CATALOG_BOOKMARKS_SCHEMA,
+            LEGACY_PACKAGE_IMPORTS_SCHEMA,
+            COLLECTION_LEGACY_KIND_SCHEMA,
+            COLLECTION_FOUNDATION_SCHEMA,
+            GAME_PROVIDER_DETAIL_SCHEMA,
+            MOVIE_PROVIDER_DETAIL_SCHEMA,
+            PDQ_SIMILARITY_SCHEMA,
+        ] {
+            connection.execute_batch(schema).unwrap();
+        }
+        connection
+            .execute_batch(
+                "INSERT INTO assets (
+                    id, content_hash, media_kind, original_name, relative_path,
+                    thumbnail_relative_path, byte_size, width, height, collected_at
+                 ) VALUES
+                    ('later', 'hash-later', 'image', 'later.png', 'assets/later.png',
+                     'thumbnails/later.webp', 1, 1, 1, '2026-08-13T14:00:00+09:00'),
+                    ('earlier', 'hash-earlier', 'image', 'earlier.png', 'assets/earlier.png',
+                     'thumbnails/earlier.webp', 1, 1, 1, '2026-08-13T04:30:00Z'),
+                    ('invalid', 'hash-invalid', 'image', 'invalid.png', 'assets/invalid.png',
+                     'thumbnails/invalid.webp', 1, 1, 1, 'legacy-invalid');",
+            )
+            .unwrap();
+
+        migrate_to_latest(&mut connection, 25).unwrap();
+
+        let mut statement = connection
+            .prepare("SELECT id, collected_at FROM assets ORDER BY collected_at ASC")
+            .unwrap();
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                ("earlier".into(), "2026-08-13T04:30:00.000Z".into()),
+                ("later".into(), "2026-08-13T05:00:00.000Z".into()),
+                ("invalid".into(), "legacy-invalid".into()),
+            ]
+        );
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            26,
+        );
+    }
 
     #[test]
     fn migrates_v24_similarity_state_to_pdq_v25() {
@@ -238,7 +317,7 @@ mod tests {
             connection
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
-            25,
+            SCHEMA_VERSION,
         );
         assert_eq!(
             connection

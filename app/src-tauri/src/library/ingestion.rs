@@ -8,6 +8,7 @@ use std::{
 #[cfg(windows)]
 use std::os::windows::io::AsRawHandle;
 
+use chrono::{DateTime, SecondsFormat, Utc};
 use image::{ImageFormat, ImageReader};
 use rusqlite::{params, OptionalExtension};
 use sha2::{Digest, Sha256};
@@ -32,6 +33,16 @@ use super::{
 pub(crate) const MAX_IMAGE_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_IMAGE_PIXELS: u64 = 200_000_000;
 
+fn normalize_collected_at(value: Option<&str>) -> Result<String, LibraryError> {
+    let timestamp = match value {
+        Some(value) => DateTime::parse_from_rfc3339(value)
+            .map_err(|_| LibraryError::InvalidCollectedAt)?
+            .with_timezone(&Utc),
+        None => Utc::now(),
+    };
+    Ok(timestamp.to_rfc3339_opts(SecondsFormat::Millis, true))
+}
+
 impl Library {
     pub fn ingest_media(
         &self,
@@ -49,6 +60,8 @@ impl Library {
         request.creator_name = normalized.creator_name;
         request.creator_handle = normalized.creator_handle;
         request.creator_url = normalized.creator_url;
+        let collected_at = normalize_collected_at(request.collected_at.as_deref())?;
+        request.collected_at = Some(collected_at.clone());
         let _ingestion_guard = self
             .ingestion_lock
             .lock()
@@ -67,13 +80,6 @@ impl Library {
         }
         if matches!(kind, IngestKind::Image) && source_metadata.len() > MAX_IMAGE_BYTES {
             return Err(LibraryError::UnsupportedImage);
-        }
-        if request
-            .collected_at
-            .as_deref()
-            .is_some_and(|value| chrono::DateTime::parse_from_rfc3339(value).is_err())
-        {
-            return Err(LibraryError::InvalidCollectedAt);
         }
         let original_modified_at = if request.import_source == ImportSource::BrowserExtension {
             None
@@ -111,6 +117,7 @@ impl Library {
                 byte_size,
                 pending,
                 original_modified_at,
+                collected_at,
             ),
             IngestKind::Video(extension) => self.ingest_video(
                 request,
@@ -120,6 +127,7 @@ impl Library {
                 pending,
                 extension,
                 original_modified_at,
+                collected_at,
             ),
         }
     }
@@ -132,6 +140,7 @@ impl Library {
         byte_size: u64,
         mut pending: PendingFiles,
         original_modified_at: Option<String>,
+        collected_at: String,
     ) -> Result<IngestOutcome, LibraryError> {
         let (format, width, height) = inspect_image(pending.owned_file(&staging_path)?)?;
         let existing_asset_id = self.find_asset_by_hash(&content_hash)?;
@@ -178,10 +187,7 @@ impl Library {
             byte_size,
             width,
             height,
-            collected_at: request
-                .collected_at
-                .clone()
-                .unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
+            collected_at,
             favorite: false,
             source_url: request.source_url.clone(),
             source_published_at: request.source_published_at.clone(),
@@ -228,6 +234,7 @@ impl Library {
         mut pending: PendingFiles,
         extension: &'static str,
         original_modified_at: Option<String>,
+        collected_at: String,
     ) -> Result<IngestOutcome, LibraryError> {
         if let Some(existing_asset_id) = self.find_asset_by_hash(&content_hash)? {
             return self.finish_exact_duplicate(existing_asset_id, &request);
@@ -249,10 +256,7 @@ impl Library {
             byte_size,
             width: probe.width,
             height: probe.height,
-            collected_at: request
-                .collected_at
-                .clone()
-                .unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
+            collected_at,
             favorite: false,
             source_url: request.source_url.clone(),
             source_published_at: request.source_published_at.clone(),
@@ -1644,7 +1648,7 @@ mod tests {
                 source_path: fixture.source.clone(),
                 classification_id: Some(duplicate_classification.id.clone()),
                 source_url: Some("https://example.test/duplicate".into()),
-                collected_at: Some("2026-08-13T13:44:55Z".into()),
+                collected_at: Some("2026-08-13T13:44:55+09:00".into()),
                 replace_duplicate_metadata: true,
                 source_published_at: None,
                 creator_name: None,
@@ -1696,7 +1700,7 @@ mod tests {
             stored,
             (
                 Some("https://example.test/duplicate".into()),
-                "2026-08-13T13:44:55Z".into(),
+                "2026-08-13T04:44:55.000Z".into(),
                 1,
                 Some("keep me".into()),
             )
@@ -1704,7 +1708,7 @@ mod tests {
     }
 
     #[test]
-    fn added_asset_preserves_requested_collection_time_and_rejects_invalid_time() {
+    fn added_asset_normalizes_requested_collection_time_and_rejects_invalid_time() {
         let fixture = IngestionFixture::new();
         let outcome = fixture
             .library
@@ -1725,7 +1729,7 @@ mod tests {
         let IngestOutcome::Added { asset } = outcome else {
             panic!("first ingest must add an asset");
         };
-        assert_eq!(asset.collected_at, "2026-08-13T13:44:55+09:00");
+        assert_eq!(asset.collected_at, "2026-08-13T04:44:55.000Z");
 
         let invalid = fixture.library.ingest_media(IngestMediaRequest {
             source_path: fixture.source.clone(),
