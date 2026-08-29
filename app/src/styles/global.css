@@ -1927,6 +1927,11 @@ input:disabled {
 .video-tile__scrub[data-scrubbing="true"] {
   height: 12px;
 }
+/* 드래그 탐색 중에는 정지 프리뷰 프레임이 주인공이다. 재생 화면을 치운다. */
+.video-tile:has(.video-tile__scrub[data-scrubbing="true"]) video {
+  visibility: hidden;
+}
+
 .video-tile__scrub-fill {
   position: absolute;
   inset: 0 auto 0 0;

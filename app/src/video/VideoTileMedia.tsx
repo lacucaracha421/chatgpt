@@ -15,6 +15,7 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
   const [previewFrame, setPreviewFrame] = useState<number | null>(null);
   const [scrubbing, setScrubbing] = useState(false);
   const [playedRatio, setPlayedRatio] = useState(0);
+  const [videoDuration, setVideoDuration] = useState(asset.media.durationMs / 1_000);
   const clearTimers = () => {
     if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current);
     if (seekTimer.current !== null) window.clearTimeout(seekTimer.current);
@@ -62,7 +63,9 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
     scrubbingRef.current = false;
     setScrubbing(false);
   };
-  const durationSeconds = Math.max(1, asset.media.durationMs) / 1_000;
+  // durationchange에서 검증한 실제 길이. DB 메타데이터가 어긋난 파손 파일에서도
+  // 진행 표시가 재생 커서와 일치한다.
+  const durationSeconds = videoDuration;
   const scrubRatio = previewFrame === null
     ? playedRatio
     : Math.max(0.001, asset.media.scrubFrameCount <= 1 ? 0 : previewFrame / (asset.media.scrubFrameCount - 1));
@@ -88,6 +91,7 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
       aria-label={`${alt} 미리보기`}
       onTimeUpdate={(event) => { if (!scrubbingRef.current) setPlayedRatio(Math.min(1, event.currentTarget.currentTime / durationSeconds)); }}
       onSeeked={(event) => { if (!scrubbingRef.current) setPlayedRatio(Math.min(1, event.currentTarget.currentTime / durationSeconds)); }}
+      onDurationChange={(event) => { const d = event.currentTarget.duration; if (Number.isFinite(d) && d > 0) setVideoDuration(d); }}
     />}
     <span className="video-tile__duration">{formatDuration(asset.media.durationMs)}</span><span className="video-tile__icon" aria-hidden="true">▶</span>
     <div
