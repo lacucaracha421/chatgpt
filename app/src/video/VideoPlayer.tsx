@@ -45,9 +45,15 @@ export function VideoPlayer({ asset }: { asset: VideoAsset }) {
     else video.pause();
   };
   const title = asset.title || asset.originalName;
-  const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : asset.media.durationMs / 1_000;
-  const hoverTime = hoverRatio === null ? 0 : hoverRatio * safeDuration;
-  const hoverFrame = Math.round((hoverRatio ?? 0) * Math.max(0, asset.media.scrubFrameCount - 1));
+  const storedDuration = Number.isFinite(asset.media.durationMs) && asset.media.durationMs > 0
+    ? asset.media.durationMs / 1_000
+    : 0;
+  const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : storedDuration;
+  const timelineAvailable = safeDuration > 0;
+  const hoverTime = hoverRatio === null || !timelineAvailable ? 0 : hoverRatio * safeDuration;
+  const hoverFrame = timelineAvailable && hoverRatio !== null
+    ? Math.round(hoverRatio * Math.max(0, asset.media.scrubFrameCount - 1))
+    : 0;
 
   return <div
     ref={rootRef}
@@ -78,21 +84,23 @@ export function VideoPlayer({ asset }: { asset: VideoAsset }) {
     />
     <div className="video-player__controls">
       <div className="video-player__timeline-wrap">
-        {hoverRatio !== null && <img className="video-player__scrub-preview" src={scrubFrameUrl(asset.id, hoverFrame)} alt={`${formatTime(hoverTime)} 미리보기`} style={{ left: `${hoverRatio * 100}%` }} />}
+        {timelineAvailable && hoverRatio !== null && <img className="video-player__scrub-preview" src={scrubFrameUrl(asset.id, hoverFrame)} alt={`${formatTime(hoverTime)} 미리보기`} style={{ left: `${hoverRatio * 100}%` }} />}
         <input
-          className="video-player__timeline"
           type="range"
           aria-label="재생 위치"
           min={0}
           max={safeDuration}
           step={0.01}
-          value={Math.min(currentTime, safeDuration)}
+          disabled={!timelineAvailable}
+          value={timelineAvailable ? Math.min(currentTime, safeDuration) : 0}
           onChange={(event) => {
+            if (!timelineAvailable) return;
             const next = Number(event.currentTarget.value);
             if (videoRef.current) videoRef.current.currentTime = next;
             setCurrentTime(next);
           }}
           onPointerMove={(event) => {
+            if (!timelineAvailable) return;
             const bounds = event.currentTarget.getBoundingClientRect();
             setHoverRatio(Math.max(0, Math.min(1, (event.clientX - bounds.left) / Math.max(1, bounds.width))));
           }}

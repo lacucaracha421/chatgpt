@@ -90,10 +90,28 @@ describe("VideoPlayer", () => {
   });
 });
 
-function videoAsset(): AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> } {
-  return { id: "video-1", title: null, originalName: "sample.webm", byteSize: 1, width: 1920, height: 1080, collectedAt: "2026-08-09T00:00:00Z", favorite: false, sourceUrl: null, sourcePublishedAt: null, creatorName: null, creatorHandle: null, creatorUrl: null, importSource: null, importBatchId: null, originalModifiedAt: null, media: { kind: "video", durationMs: 100_000, preparationState: "ready", scrubFrameCount: 11 } };
+function videoAsset(durationMs = 100_000): AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> } {
+  return { id: "video-1", title: null, originalName: "sample.webm", byteSize: 1, width: 1920, height: 1080, collectedAt: "2026-08-09T00:00:00Z", favorite: false, sourceUrl: null, sourcePublishedAt: null, creatorName: null, creatorHandle: null, creatorUrl: null, importSource: null, importBatchId: null, originalModifiedAt: null, media: { kind: "video", durationMs, preparationState: "ready", scrubFrameCount: 11 } };
 }
 
 function setMediaNumber(element: HTMLElement, property: "duration" | "currentTime", value: number) {
   Object.defineProperty(element, property, { configurable: true, writable: true, value });
 }
+
+describe("VideoPlayer zero-duration guard", () => {
+  it("disables an unavailable timeline and restores it when valid metadata arrives", () => {
+    render(<VideoPlayer asset={videoAsset(0)} />);
+    const video = screen.getByLabelText("sample.webm 영상");
+    const timeline = screen.getByRole("slider", { name: "재생 위치" });
+
+    setMediaNumber(video, "duration", 0);
+    fireEvent.durationChange(video);
+    expect(timeline).toBeDisabled();
+    expect(screen.getByText("0:00 / 0:00")).toBeInTheDocument();
+
+    setMediaNumber(video, "duration", 30);
+    fireEvent.durationChange(video);
+    expect(timeline).not.toBeDisabled();
+    expect(timeline).toHaveAttribute("max", "30");
+  });
+});
