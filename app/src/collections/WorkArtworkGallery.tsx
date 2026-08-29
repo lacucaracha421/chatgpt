@@ -58,7 +58,7 @@ export function WorkArtworkGallery({ workTitle, artworks }: WorkArtworkGalleryPr
       {active && (
         <RadixDialog.Root open onOpenChange={(open) => { if (!open) setActiveId(null); }}>
           <RadixDialog.Portal>
-            <RadixDialog.Overlay className="manga-cover-viewer__backdrop" aria-label="아트웍 감상 닫기" />
+            <RadixDialog.Overlay className="manga-cover-viewer__backdrop" aria-label="아트웍 감상 닫기" onClick={() => setActiveId(null)} />
             <RadixDialog.Content
               className="manga-cover-viewer manga-cover-viewer--flat"
               style={{ pointerEvents: "none" }}
