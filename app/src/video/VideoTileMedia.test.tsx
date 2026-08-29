@@ -51,6 +51,40 @@ it("maps pointer position to a scrub frame and delays video seeking", () => {
   expect(media.currentTime).toBe(5);
 });
 
+it("scrub only follows the pointer while the handle is held", () => {
+  const request = vi.fn();
+  render(<VideoTileMedia asset={video()} active={false} onRequestActive={request} onReleaseActive={vi.fn()} onRetry={vi.fn()} />);
+  const slider = screen.getByRole("slider", { name: "영상 탐색" });
+  vi.spyOn(slider, "getBoundingClientRect").mockReturnValue({ left: 0, width: 100, top: 0, right: 100, bottom: 6, height: 6, x: 0, y: 0, toJSON: () => ({}) });
+
+  // hover move만으로는 프리뷰 프레임을 바꾸지 않는다.
+  fireEvent.pointerMove(slider, { pointerId: 1, clientX: 80 });
+  expect(screen.getByRole("img", { name: "clip.webm" })).toHaveAttribute("src", "http://lakomics.localhost/thumbnail/video-1");
+
+  // 잡은 뒤에는 드래그를 따라간다.
+  fireEvent.pointerDown(slider, { pointerId: 1, clientX: 80 });
+  expect(request).toHaveBeenCalled();
+  fireEvent.pointerMove(slider, { pointerId: 1, clientX: 20 });
+  expect(screen.getByRole("img", { name: "clip.webm" })).toHaveAttribute("src", expect.stringContaining("/scrub-frame/video-1/2"));
+  expect(slider).toHaveAttribute("data-scrubbing");
+
+  // 놓으면 드래그가 끝나고 이후 move는 무시된다.
+  fireEvent.pointerUp(slider, { pointerId: 1, clientX: 20 });
+  expect(slider).not.toHaveAttribute("data-scrubbing");
+  fireEvent.pointerMove(slider, { pointerId: 1, clientX: 60 });
+  expect(screen.getByRole("img", { name: "clip.webm" })).toHaveAttribute("src", expect.stringContaining("/scrub-frame/video-1/2"));
+});
+
+it("reflects playback position in the scrub control while playing", () => {
+  render(<VideoTileMedia asset={video()} active onRequestActive={vi.fn()} onReleaseActive={vi.fn()} onRetry={vi.fn()} />);
+  const media = screen.getByLabelText("clip.webm 미리보기");
+  Object.defineProperty(media, "currentTime", { value: 2.5, writable: true, configurable: true });
+  fireEvent(media, new Event("timeupdate"));
+  const slider = screen.getByRole("slider", { name: "영상 탐색" });
+  expect(slider).toHaveAttribute("aria-valuenow", "2500");
+  expect(slider.querySelector(".video-tile__scrub-fill")).toHaveAttribute("style", "width: 25%;");
+});
+
 it("keeps active playback attached across StrictMode effect checks", () => {
   render(<StrictMode><VideoTileMedia asset={video()} active onRequestActive={vi.fn()} onReleaseActive={vi.fn()} onRetry={vi.fn()} /></StrictMode>);
   expect(screen.getByLabelText("clip.webm 미리보기")).toHaveAttribute("src", "http://lakomics.localhost/playback/video-1");

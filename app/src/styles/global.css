@@ -1909,7 +1909,45 @@ input:disabled {
 .video-tile--failed { background: var(--color-surface-elevated); }
 .video-tile--failed { display: grid; place-content: center; gap: var(--space-2); }
 .video-tile--failed .video-tile__status { position: static; transform: none; }
-.video-tile__scrub { position: absolute; right: 0; bottom: 0; left: 0; height: var(--video-progress-height); background: color-mix(in srgb, var(--color-accent) 45%, transparent); cursor: ew-resize; }
+.video-tile__scrub {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: var(--video-progress-height);
+  padding: 0 var(--video-scrub-inset, 0);
+  background: color-mix(in srgb, var(--color-accent) 45%, transparent);
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+/* 탐색 중인 타일은 유튜브처럼 탐색 바를 키워 잡기 쉽게 한다.
+   실제 마우스 호버는 :hover가 함께 잡아주고, 자동화·터치에서는 data-scrubbing이 담당한다. */
+.video-tile:hover .video-tile__scrub,
+.video-tile__scrub[data-scrubbing="true"] {
+  height: 12px;
+}
+.video-tile__scrub-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--color-accent);
+}
+
+.video-tile__scrub-handle {
+  position: absolute;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  transform: translate(-50%, -50%) scale(0);
+  transition: transform 100ms ease;
+}
+
+.video-tile:hover .video-tile__scrub-handle,
+.video-tile__scrub[data-scrubbing="true"] .video-tile__scrub-handle {
+  transform: translate(-50%, -50%) scale(1);
+}
 
 .asset-gallery__metadata {
   position: absolute;
