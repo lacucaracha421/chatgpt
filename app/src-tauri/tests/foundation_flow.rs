@@ -357,8 +357,10 @@ fn version_two_library_migrates_similarity_state_after_a_verified_backup() {
     connection
         .execute(
             "INSERT INTO similarity_reviews (
-                id, existing_asset_id, candidate_asset_id, distance, status, created_at
-             ) VALUES ('review-1', 'asset-1', 'asset-2', 2, 'open', '2026-08-09T00:00:00Z')",
+                id, existing_asset_id, candidate_asset_id, distance,
+                fingerprint_kind, status, created_at
+             ) VALUES ('review-1', 'asset-1', 'asset-2', 2,
+                       'pdq-v1', 'open', '2026-08-09T00:00:00Z')",
             [],
         )
         .unwrap();
