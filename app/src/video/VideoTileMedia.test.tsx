@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { StrictMode } from "react";
 import type { AssetSummary } from "../library/types";
@@ -108,3 +108,26 @@ function video(state: "pending" | "processing" | "ready" | "failed" = "ready"): 
     media: { kind: "video" as const, durationMs: 10_000, preparationState: state, scrubFrameCount: 10 },
   };
 }
+
+it("seeks the scrub slider by keyboard in five-second steps and clamps endpoints", () => {
+  const request = vi.fn();
+  render(<VideoTileMedia asset={video()} active onRequestActive={request} onReleaseActive={vi.fn()} onRetry={vi.fn()} />);
+  const slider = screen.getByRole("slider", { name: "영상 탐색" });
+  const media = screen.getByLabelText("clip.webm 미리보기") as HTMLVideoElement;
+
+  expect(slider).toHaveAttribute("tabindex", "0");
+  fireEvent.keyDown(slider, { key: "ArrowRight" });
+  expect(slider).toHaveAttribute("aria-valuenow", "5000");
+  act(() => vi.advanceTimersByTime(120));
+  expect(media.currentTime).toBe(5);
+
+  fireEvent.keyDown(slider, { key: "End" });
+  expect(slider).toHaveAttribute("aria-valuenow", "10000");
+  fireEvent.keyDown(slider, { key: "ArrowRight" });
+  expect(slider).toHaveAttribute("aria-valuenow", "10000");
+
+  fireEvent.keyDown(slider, { key: "Home" });
+  fireEvent.keyDown(slider, { key: "ArrowLeft" });
+  expect(slider).toHaveAttribute("aria-valuenow", "0");
+  expect(request).toHaveBeenCalled();
+});

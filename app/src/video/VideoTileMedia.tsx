@@ -12,8 +12,8 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
   const hoverTimer = useRef<number | null>(null);
   const seekTimer = useRef<number | null>(null);
   const scrubbingRef = useRef(false);
-  const [previewFrame, setPreviewFrame] = useState<number | null>(null);
   const [scrubbing, setScrubbing] = useState(false);
+  const [previewRatio, setPreviewRatio] = useState<number | null>(null);
   const [playedRatio, setPlayedRatio] = useState(0);
   const [videoDuration, setVideoDuration] = useState(asset.media.durationMs / 1_000);
   const clearTimers = () => {
@@ -32,17 +32,20 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
     return () => { video.pause(); video.removeAttribute("src"); video.load(); };
   }, [active, asset.id, privacyMode]);
   useEffect(() => () => clearTimers(), []);
-  const leave = () => { clearTimers(); scrubbingRef.current = false; setScrubbing(false); setPreviewFrame(null); onReleaseActive(); };
-  const scrubTo = (element: HTMLElement, clientX: number, live: boolean) => {
-    const bounds = element.getBoundingClientRect();
-    const ratio = Math.max(0, Math.min(1, (clientX - bounds.left) / Math.max(1, bounds.width)));
-    const frame = Math.round(ratio * Math.max(0, asset.media.scrubFrameCount - 1));
-    setPreviewFrame(frame);
+  const leave = () => { clearTimers(); scrubbingRef.current = false; setScrubbing(false); setPreviewRatio(null); onReleaseActive(); };
+  const seekToRatio = (ratio: number, live: boolean) => {
+    const clamped = Math.max(0, Math.min(1, ratio));
+    setPreviewRatio(clamped);
     if (seekTimer.current !== null) window.clearTimeout(seekTimer.current);
     seekTimer.current = window.setTimeout(() => {
-      if (videoRef.current) videoRef.current.currentTime = ratio * asset.media.durationMs / 1_000;
+      if (videoRef.current) videoRef.current.currentTime = clamped * asset.media.durationMs / 1_000;
     }, 120);
     if (live) setScrubbing(true);
+  };
+  const scrubTo = (element: HTMLElement, clientX: number, live: boolean) => {
+    const bounds = element.getBoundingClientRect();
+    const ratio = (clientX - bounds.left) / Math.max(1, bounds.width);
+    seekToRatio(ratio, live);
   };
   const scrub = (event: React.PointerEvent<HTMLDivElement>) => {
     event.stopPropagation();
@@ -63,12 +66,26 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
     scrubbingRef.current = false;
     setScrubbing(false);
   };
-  // durationchange에서 검증한 실제 길이. DB 메타데이터가 어긋난 파손 파일에서도
-  // 진행 표시가 재생 커서와 일치한다.
   const durationSeconds = videoDuration;
-  const scrubRatio = previewFrame === null
-    ? playedRatio
-    : Math.max(0.001, asset.media.scrubFrameCount <= 1 ? 0 : previewFrame / (asset.media.scrubFrameCount - 1));
+  const scrubRatio = previewRatio ?? playedRatio;
+  const scrubWithKeyboard = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const durationMs = Math.max(0, asset.media.durationMs);
+    const currentMs = Math.round(scrubRatio * durationMs);
+    const nextMs = event.key === "ArrowLeft"
+      ? currentMs - 5_000
+      : event.key === "ArrowRight"
+        ? currentMs + 5_000
+        : event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? durationMs
+            : null;
+    if (nextMs === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onRequestActive();
+    seekToRatio(durationMs > 0 ? Math.max(0, Math.min(durationMs, nextMs)) / durationMs : 0, false);
+  };
   if (asset.media.preparationState === "pending" || asset.media.preparationState === "processing") {
     return <div className="video-tile video-tile--pending"><span className="video-tile__status">미리보기 준비 중</span></div>;
   }
@@ -80,8 +97,8 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
   }
   const alt = asset.title || asset.originalName;
   return <div className="video-tile" onPointerEnter={() => { if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current); hoverTimer.current = window.setTimeout(onRequestActive, 200); }} onPointerLeave={leave}>
-    <img src={previewFrame === null ? thumbnailUrl(asset.id) : scrubFrameUrl(asset.id, previewFrame)} alt={alt} decoding="async" draggable={false} />
     {/* 재생 프리뷰가 위에 깔리므로, 정지 타일에서는 scrub 미리보기 프레임을 img로 보여준다. */}
+    <img src={previewRatio === null ? thumbnailUrl(asset.id) : scrubFrameUrl(asset.id, Math.round(previewRatio * Math.max(0, asset.media.scrubFrameCount - 1)))} alt={alt} decoding="async" draggable={false} />
     {active && <video
       ref={videoRef}
       src={playbackUrl(asset.id)}
@@ -96,6 +113,8 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
     <span className="video-tile__duration">{formatDuration(asset.media.durationMs)}</span><span className="video-tile__icon" aria-hidden="true">▶</span>
     <div
       className="video-tile__scrub"
+      tabIndex={0}
+      onKeyDown={scrubWithKeyboard}
       role="slider"
       aria-label="영상 탐색"
       aria-valuemin={0}
