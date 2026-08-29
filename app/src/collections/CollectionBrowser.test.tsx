@@ -337,6 +337,7 @@ function createGateway(): LibraryGateway {
     deleteClassification: vi.fn(),
     listAssets: vi.fn(),
     listAssetDateBuckets: vi.fn().mockResolvedValue([]),
+    listAssetCreators: vi.fn().mockResolvedValue([]),
     indexMissingSimilarityHashes: vi.fn(),
     listSimilarityReviews: vi.fn(),
     decideSimilarityReview: vi.fn(),

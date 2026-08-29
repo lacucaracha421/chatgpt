@@ -1,4 +1,4 @@
-import { BookOpenIcon, ChevronDownIcon, ChevronRightIcon, ClockIcon, FolderIcon, PhotoIcon, InboxIcon, PlusIcon, RectangleStackIcon, Cog6ToothIcon, StarIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { BookOpenIcon, CalendarIcon, ChevronDownIcon, ChevronRightIcon, FolderIcon, PhotoIcon, InboxIcon, PlusIcon, RectangleStackIcon, Cog6ToothIcon, TrashIcon, UserIcon } from "@heroicons/react/24/outline";
 import { useLayoutEffect, useEffect, useRef, useState, type CSSProperties } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
 import { useLibrary } from "../library/LibraryContext";
@@ -350,8 +350,8 @@ export function ClassificationSidebar({
       <nav className="classification-sidebar__quick-views" aria-label="빠른 보기">
         <QuickViewButton icon={<FolderIcon aria-hidden="true" />} label="저장소" selected={view.kind === "classification" && view.classificationId === null} onClick={() => onViewChange({ kind: "classification", classificationId: null })} />
         <QuickViewButton icon={<InboxIcon aria-hidden="true" />} label="미분류" selected={view.kind === "unsorted"} onClick={() => onViewChange({ kind: "unsorted" })} />
-        <QuickViewButton icon={<ClockIcon aria-hidden="true" />} label="최근" selected={view.kind === "recent"} onClick={() => onViewChange({ kind: "recent" })} />
-        <QuickViewButton icon={<StarIcon aria-hidden="true" />} label="즐겨찾기" selected={view.kind === "favorites"} onClick={() => onViewChange({ kind: "favorites" })} />
+        <QuickViewButton icon={<UserIcon aria-hidden="true" />} label="작가" selected={view.kind === "creators" || view.kind === "creator"} onClick={() => onViewChange({ kind: "creators" })} />
+        <QuickViewButton icon={<CalendarIcon aria-hidden="true" />} label="달력" selected={view.kind === "calendar"} onClick={() => onViewChange({ kind: "calendar" })} />
         <QuickViewButton icon={<PhotoIcon aria-hidden="true" />} label="유사 검토" count={reviewCount} selected={view.kind === "similarity_review"} onClick={() => onViewChange({ kind: "similarity_review" })} />
         <QuickViewButton icon={<BookOpenIcon aria-hidden="true" />} label="망가" selected={view.kind === "manga"} onClick={() => onViewChange({ kind: "manga" })} />
         <QuickViewButton icon={<RectangleStackIcon aria-hidden="true" />} label="컬렉션" selected={view.kind === "collections" || view.kind === "collection"} onClick={() => onViewChange({ kind: "collections", typeFilter: collectionType, showcase: false })} />

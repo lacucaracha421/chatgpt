@@ -112,6 +112,7 @@ function gateway(): LibraryGateway {
     deleteClassification: vi.fn(),
     listAssets: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
     listAssetDateBuckets: vi.fn().mockResolvedValue([]),
+    listAssetCreators: vi.fn().mockResolvedValue([]),
     indexMissingSimilarityHashes: vi.fn(),
     listSimilarityReviews: vi.fn().mockResolvedValue({ items: [], nextCursor: null, totalCount: 0 }),
     decideSimilarityReview: vi.fn(),
@@ -439,16 +440,14 @@ describe("App", () => {
 
     await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenCalledWith(expect.objectContaining({
       classificationId: null,
-      favoriteOnly: false,
-      unclassifiedOnly: false,
+            unclassifiedOnly: false,
     })));
     expect(screen.getByRole("button", { name: "저장소" })).toHaveAttribute("aria-current", "page");
 
     await user.click(screen.getByRole("button", { name: "미분류" }));
     await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenLastCalledWith(expect.objectContaining({
       classificationId: null,
-      favoriteOnly: false,
-      unclassifiedOnly: true,
+            unclassifiedOnly: true,
     })));
   });
 
@@ -465,7 +464,7 @@ describe("App", () => {
 
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={subscribeDrops} />);
 
-    await user.click(await screen.findByRole("button", { name: "즐겨찾기" }));
+    await user.click(await screen.findByRole("button", { name: "미분류" }));
     await waitFor(() => expect(drop).toBeDefined());
     act(() => drop?.(["C:\\images\\a.png"]));
     await waitFor(() => expect(libraryGateway.ingestMedia).toHaveBeenCalledWith({
@@ -476,7 +475,7 @@ describe("App", () => {
       importBatchId: expect.any(String),
     }));
 
-    await user.click(screen.getByRole("button", { name: "최근" }));
+    await user.click(screen.getByRole("button", { name: "작가" }));
     act(() => drop?.(["C:\\images\\recent.png"]));
     await user.click(screen.getByRole("button", { name: "저장소" }));
     act(() => drop?.(["C:\\images\\all-assets.png"]));
@@ -686,9 +685,9 @@ describe("App", () => {
         classificationId: "tag-arona",
         albumId: null,
         collectionId: null,
+        creatorKey: null,
         directOnly: false,
-        favoriteOnly: false,
-        unclassifiedOnly: false,
+                unclassifiedOnly: false,
         mediaKind: null,
         aspectRatio: null,
         sort: "newest",
@@ -727,9 +726,9 @@ describe("App", () => {
       classificationId: "tag-arona",
       albumId: null,
       collectionId: null,
+      creatorKey: null,
       directOnly: false,
-      favoriteOnly: false,
-      unclassifiedOnly: false,
+            unclassifiedOnly: false,
       mediaKind: null,
       aspectRatio: null,
       sort: "newest",
@@ -776,9 +775,9 @@ describe("App", () => {
         classificationId: "root-games",
         albumId: null,
         collectionId: null,
+        creatorKey: null,
         directOnly: false,
-        favoriteOnly: false,
-        unclassifiedOnly: false,
+                unclassifiedOnly: false,
         mediaKind: null,
         aspectRatio: null,
         sort: "newest",

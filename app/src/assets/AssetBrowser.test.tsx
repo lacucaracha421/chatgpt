@@ -17,12 +17,10 @@ beforeEach(() => Object.defineProperties(HTMLElement.prototype, {
 
 describe("AssetBrowser", () => {
   it.each<[string, AssetView, AssetSort, Partial<Record<string, unknown>>]>([
-    ["classification", { kind: "classification", classificationId: "tag" }, "oldest", { classificationId: "tag", directOnly: false, favoriteOnly: false, unclassifiedOnly: false, sort: "oldest" }],
-    ["unsorted", { kind: "unsorted" }, "newest", { classificationId: null, directOnly: false, favoriteOnly: false, unclassifiedOnly: true, sort: "newest" }],
-    ["favorites", { kind: "favorites" }, "favorites", { classificationId: null, directOnly: false, favoriteOnly: true, unclassifiedOnly: false, sort: "favorites" }],
-    ["recent", { kind: "recent" }, "oldest", { classificationId: null, directOnly: false, favoriteOnly: false, unclassifiedOnly: false, sort: "newest" }],
-    ["album", { kind: "album", albumId: "album-1" }, "newest", { classificationId: null, albumId: "album-1", directOnly: false, favoriteOnly: false, unclassifiedOnly: false, sort: "newest" }],
-    ["collection", { kind: "collection", collectionId: "collection-1" }, "newest", { classificationId: null, albumId: null, collectionId: "collection-1", directOnly: false, favoriteOnly: false, unclassifiedOnly: false, sort: "newest" }],
+    ["classification", { kind: "classification", classificationId: "tag" }, "oldest", { classificationId: "tag", directOnly: false, unclassifiedOnly: false, sort: "oldest" }],
+    ["unsorted", { kind: "unsorted" }, "newest", { classificationId: null, directOnly: false, unclassifiedOnly: true, sort: "newest" }],
+    ["album", { kind: "album", albumId: "album-1" }, "newest", { classificationId: null, albumId: "album-1", directOnly: false, unclassifiedOnly: false, sort: "newest" }],
+    ["collection", { kind: "collection", collectionId: "collection-1" }, "newest", { classificationId: null, albumId: null, collectionId: "collection-1", directOnly: false, unclassifiedOnly: false, sort: "newest" }],
   ])("maps the %s view to its first-page query", async (_name, view, sort, expected) => {
     const gateway = createGateway();
 
@@ -45,6 +43,7 @@ describe("AssetBrowser", () => {
       expect(gateway.listAssets).toHaveBeenCalledWith({
         albumId: null,
         collectionId: null,
+        creatorKey: null,
         ...expected,
         mediaKind: null,
         aspectRatio: null,
@@ -94,11 +93,11 @@ describe("AssetBrowser", () => {
       expect.objectContaining({ mediaKind: "images", aspectRatio: "portrait" }),
     ));
 
-    rerender(renderView({ kind: "favorites" }));
+    rerender(renderView({ kind: "unsorted" }));
     expect(screen.getByRole("combobox", { name: "미디어" })).toHaveValue("images");
     expect(screen.getByRole("combobox", { name: "비율" })).toHaveValue("portrait");
     await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(
-      expect.objectContaining({ favoriteOnly: true, mediaKind: "images", aspectRatio: "portrait" }),
+      expect.objectContaining({ unclassifiedOnly: true, mediaKind: "images", aspectRatio: "portrait" }),
     ));
 
     rerender(renderView({ kind: "collection", collectionId: "collection-1" }));
@@ -381,7 +380,7 @@ describe("AssetBrowser", () => {
     fireEvent.pointerDown(document.querySelectorAll(".asset-gallery__scrollbar-line")[1]!, { button: 0, pointerId: 1 });
     expect(await screen.findByRole("option", { name: "asset-5.png" })).toBeInTheDocument();
 
-    rerender(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "favorites" }} classifications={classifications} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
+    rerender(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "trash" }} classifications={classifications} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
 
     await waitFor(() => expect(vi.mocked(gateway.listAssets).mock.lastCall![0].aroundDate).toBeNull());
   });
@@ -417,7 +416,7 @@ describe("AssetBrowser", () => {
     const user = userEvent.setup(); const gateway = createGateway();
     vi.mocked(gateway.listAssets).mockResolvedValue({ items: [{ ...asset(0), title: "Selected" }], nextCursor: null });
     const { rerender } = renderBrowser(gateway); await user.click(await screen.findByRole("option", { name: "Selected" }));
-    rerender(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "favorites" }} classifications={classifications} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
+    rerender(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "trash" }} classifications={classifications} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
     expect(await screen.findByRole("option", { name: "Selected" })).toHaveAttribute("aria-selected", "false");
   });
 
@@ -720,6 +719,7 @@ function createGateway(page: AssetPage = { items: [], nextCursor: null }): Libra
     listAlbums: vi.fn().mockResolvedValue([]), createAlbum: vi.fn(), renameAlbum: vi.fn(), moveAlbum: vi.fn(), updateAlbumAppearance: vi.fn(), deleteAlbum: vi.fn(),
     createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(), updateClassificationAppearance: vi.fn(),
     deleteClassification: vi.fn(), listAssets: vi.fn().mockResolvedValue(page), listAssetDateBuckets: vi.fn().mockResolvedValue([]),
+    listAssetCreators: vi.fn().mockResolvedValue([]),
     indexMissingSimilarityHashes: vi.fn(), listSimilarityReviews: vi.fn(), decideSimilarityReview: vi.fn(), getAsset: vi.fn(), updateAssetMetadata: vi.fn(),
     trashAssets: vi.fn().mockResolvedValue(undefined), restoreAsset: vi.fn(), restoreAssets: vi.fn().mockResolvedValue(undefined), listTrash: vi.fn(), emptyTrash: vi.fn(),
     getTrashPolicy: vi.fn(), setTrashPolicy: vi.fn(),

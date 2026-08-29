@@ -50,6 +50,7 @@ function gateway(): LibraryGateway {
     deleteClassification: vi.fn().mockResolvedValue(undefined),
     listAssets: vi.fn(),
     listAssetDateBuckets: vi.fn().mockResolvedValue([]),
+    listAssetCreators: vi.fn().mockResolvedValue([]),
     indexMissingSimilarityHashes: vi.fn(),
     listSimilarityReviews: vi.fn(),
     decideSimilarityReview: vi.fn(),
@@ -221,22 +222,18 @@ describe("ClassificationSidebar", () => {
     expect(within(quickViews).getAllByRole("button").map((button) => button.textContent)).toEqual([
       "저장소",
       "미분류",
-      "최근",
-      "즐겨찾기",
+      "작가",
+      "달력",
       "유사 검토0",
       "망가",
       "컬렉션",
     ]);
 
     await user.click(screen.getByRole("button", { name: "미분류" }));
-    await user.click(screen.getByRole("button", { name: "즐겨찾기" }));
-    await user.click(screen.getByRole("button", { name: "최근" }));
     await user.click(screen.getByRole("button", { name: "저장소" }));
 
     expect(onViewChange).toHaveBeenNthCalledWith(1, { kind: "unsorted" });
-    expect(onViewChange).toHaveBeenNthCalledWith(2, { kind: "favorites" });
-    expect(onViewChange).toHaveBeenNthCalledWith(3, { kind: "recent" });
-    expect(onViewChange).toHaveBeenNthCalledWith(4, { kind: "classification", classificationId: null });
+    expect(onViewChange).toHaveBeenNthCalledWith(2, { kind: "classification", classificationId: null });
   });
 
   it("keeps trash and settings in the sidebar footer", () => {

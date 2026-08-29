@@ -8,6 +8,7 @@ import type {
   AlbumEntry,
   AssetAlbumPatch,
   AssetCollectionPatch,
+  AssetCreatorSummary,
   AssetDateBucket,
   AssetMetadataPatch,
   AssetPage,
@@ -122,6 +123,8 @@ export const libraryGateway: LibraryGateway = {
     invoke<AssetPage>("list_assets", { query }),
   listAssetDateBuckets: (query: AssetQuery) =>
     invoke<AssetDateBucket[]>("list_asset_date_buckets", { query }),
+  listAssetCreators: (query: AssetQuery) =>
+    invoke<AssetCreatorSummary[]>("list_asset_creators", { query }),
   indexMissingSimilarityHashes: () =>
     invoke<SimilarityIndexProgress>("index_missing_similarity_hashes"),
   listSimilarityReviews: ({ after, limit }) =>

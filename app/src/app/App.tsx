@@ -111,6 +111,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const [assetRefresh, setAssetRefresh] = useState(0);
   const [maintenance, setMaintenance] = useState<"restore" | null>(null);
   const [createClassificationRequest, setCreateClassificationRequest] = useState(0);
+  const [requestedDate, setRequestedDate] = useState<string | null>(null);
   const [browserStatus, setBrowserStatus] = useState<AssetBrowserStatus>({
     loadedCount: 0,
     selectedAsset: null,
@@ -307,13 +308,11 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
         setCreateClassificationRequest((current) => current + 1);
         return;
       }
-      if (key === "1" || key === "2" || key === "3" || key === "4") {
+      if (key === "1" || key === "2") {
         event.preventDefault();
         const quickViews: AssetView[] = [
           { kind: "classification", classificationId: null },
           { kind: "unsorted" },
-          { kind: "recent" },
-          { kind: "favorites" },
         ];
         setView(quickViews[Number(key) - 1]);
       }
@@ -331,6 +330,13 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     if (next.kind === "settings" && view.kind !== "settings") settingsReturnViewRef.current = view;
     if (next.kind === "collections") updatePreferences({ collectionType: next.typeFilter });
     setView(next);
+  }
+
+  function openCalendarDay(date: string) {
+    updatePreferences({ assetSort: "newest" });
+    settingsReturnViewRef.current = { kind: "calendar" };
+    setView({ kind: "classification", classificationId: null });
+    setRequestedDate(date);
   }
 
   function updateCollectionLibraryState(type: CollectionSummary["type"], next: CollectionLibraryState) {
@@ -561,6 +567,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                 ) : (
                   <AssetBrowser
                     view={view}
+                    onViewChange={navigateView}
                     classifications={entries}
                     albums={albums}
                     collections={collections}
@@ -574,6 +581,9 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     refreshVersion={assetRefresh}
                     requestedAsset={requestedAsset}
                     onRequestedAssetHandled={() => setRequestedAsset(null)}
+                    requestedDate={requestedDate}
+                    onRequestedDateHandled={() => setRequestedDate(null)}
+                    onOpenCalendarDay={openCalendarDay}
                     onSortChange={(assetSort: AssetSort) => updatePreferences({ assetSort })}
                     onMetadataVisibleChange={(metadataVisible) => updatePreferences({ metadataVisible })}
                     onThumbnailRowHeightChange={(thumbnailRowHeight) => updatePreferences({ thumbnailRowHeight })}

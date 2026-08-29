@@ -105,8 +105,9 @@ export type AssetView =
   | { kind: "classification"; classificationId: string | null }
   | { kind: "album"; albumId: string }
   | { kind: "unsorted" }
-  | { kind: "favorites" }
-  | { kind: "recent" }
+  | { kind: "creators" }
+  | { kind: "creator"; creatorKey: string }
+  | { kind: "calendar" }
   | { kind: "similarity_review" }
   | { kind: "trash" }
   | { kind: "settings"; section?: "external_services" }
@@ -537,7 +538,8 @@ export type AssetQuery = {
   albumId: string | null;
   collectionId: string | null;
   directOnly: boolean;
-  favoriteOnly: boolean;
+  favoriteOnly?: boolean;
+  creatorKey?: string | null;
   unclassifiedOnly: boolean;
   mediaKind: Exclude<AssetMediaFilter, "all"> | null;
   aspectRatio: Exclude<AssetAspectFilter, "all"> | null;
@@ -553,6 +555,16 @@ export type AssetPage = {
   items: AssetSummary[];
   nextCursor: AssetCursor | null;
   previousCursor?: AssetCursor | null;
+};
+
+export type AssetCreatorSummary = {
+  key: string;
+  creatorName: string | null;
+  creatorHandle: string | null;
+  creatorUrl: string | null;
+  assetCount: number;
+  lastCollectedAt: string | null;
+  coverAssetIds: string[];
 };
 
 export type AssetDateBucket = {
@@ -693,6 +705,7 @@ export interface LibraryGateway {
   deleteAlbum(id: string): Promise<void>;
   listAssets(query: AssetQuery): Promise<AssetPage>;
   listAssetDateBuckets(query: AssetQuery): Promise<AssetDateBucket[]>;
+  listAssetCreators(query: AssetQuery): Promise<AssetCreatorSummary[]>;
   indexMissingSimilarityHashes(): Promise<SimilarityIndexProgress>;
   listSimilarityReviews(query: {
     after: AssetCursor | null;

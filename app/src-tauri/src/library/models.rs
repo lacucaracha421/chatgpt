@@ -474,6 +474,7 @@ pub struct AssetQuery {
     pub classification_id: Option<String>,
     pub album_id: Option<String>,
     pub collection_id: Option<String>,
+    pub creator_key: Option<String>,
     pub direct_only: bool,
     pub favorite_only: bool,
     pub unclassified_only: bool,
@@ -487,6 +488,21 @@ pub struct AssetQuery {
     pub before: Option<AssetCursor>,
     pub around_date: Option<String>,
     pub limit: u32,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetCreatorSummary {
+    /// 목록 그룹핑 키. creator_handle이 있으면 그 값, 없으면 creator_url.
+    pub key: String,
+    pub creator_name: Option<String>,
+    pub creator_handle: Option<String>,
+    pub creator_url: Option<String>,
+    pub asset_count: u64,
+    /// 가장 최근에 수집한 자산의 수집일.
+    pub last_collected_at: Option<String>,
+    /// 대표 썸네일 후보(최근 수집 최대 3장). 스택 프리뷰로 쓴다.
+    pub cover_asset_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

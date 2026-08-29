@@ -139,6 +139,7 @@ function reviewGateway(): LibraryGateway {
     listAlbums: vi.fn().mockResolvedValue([]), createAlbum: vi.fn(), renameAlbum: vi.fn(), moveAlbum: vi.fn(), updateAlbumAppearance: vi.fn(), deleteAlbum: vi.fn(),
     createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(), updateClassificationAppearance: vi.fn(), deleteClassification: vi.fn(),
     listAssets: vi.fn(), listAssetDateBuckets: vi.fn().mockResolvedValue([]), indexMissingSimilarityHashes: vi.fn(),
+    listAssetCreators: vi.fn().mockResolvedValue([]),
     listSimilarityReviews: vi.fn(),
     decideSimilarityReview: vi.fn().mockResolvedValue(undefined),
     getAsset: vi.fn(), updateAssetMetadata: vi.fn(), trashAssets: vi.fn(), restoreAsset: vi.fn(), restoreAssets: vi.fn(),

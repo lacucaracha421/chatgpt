@@ -419,6 +419,21 @@ pub fn list_asset_date_buckets(
 }
 
 #[tauri::command]
+pub async fn list_asset_creators(
+    query: AssetQuery,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::library::models::AssetCreatorSummary>, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library
+            .list_asset_creators(query)
+            .map_err(CommandError::from)
+    })
+    .await
+    .map_err(|_| background_task_error())?
+}
+
+#[tauri::command]
 pub async fn index_missing_similarity_hashes(
     state: State<'_, AppState>,
 ) -> Result<SimilarityIndexProgress, CommandError> {

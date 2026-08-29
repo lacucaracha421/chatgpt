@@ -4,8 +4,9 @@ use serde::{Deserialize, Serialize};
 use super::{
     error::LibraryError,
     models::{
-        AspectRatioFilter, AssetCursor, AssetDateBucket, AssetPage, AssetQuery, AssetSort,
-        AssetSummary, ImportSource, MediaKindFilter, MediaSummary, VideoPreparationState,
+        AspectRatioFilter, AssetCreatorSummary, AssetCursor, AssetDateBucket, AssetPage,
+        AssetQuery, AssetSort, AssetSummary, ImportSource, MediaKindFilter, MediaSummary,
+        VideoPreparationState,
     },
     Library,
 };
@@ -71,6 +72,7 @@ asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creat
 asset.import_source, asset.import_batch_id, asset.original_modified_at
 FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
 WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
+AND (?13 IS NULL OR COALESCE(asset.creator_handle, asset.creator_url) = ?13)
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
 AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
@@ -104,6 +106,7 @@ asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creat
 asset.import_source, asset.import_batch_id, asset.original_modified_at
 FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
 WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
+AND (?13 IS NULL OR COALESCE(asset.creator_handle, asset.creator_url) = ?13)
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
 AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
@@ -227,6 +230,7 @@ impl Library {
                     i64::from(query.limit) + 1,
                     media_kind,
                     aspect_ratio,
+                    query.creator_key.as_deref(),
                 ])?
             }
             AssetSort::Oldest => {
@@ -244,6 +248,7 @@ impl Library {
                     i64::from(query.limit) + 1,
                     media_kind,
                     aspect_ratio,
+                    query.creator_key.as_deref(),
                 ])?
             }
             AssetSort::Favorites => {
@@ -261,6 +266,7 @@ impl Library {
                     query.collection_id.as_deref(),
                     media_kind,
                     aspect_ratio,
+                    query.creator_key.as_deref(),
                 ])?
             }
             AssetSort::Random => {
@@ -279,6 +285,7 @@ impl Library {
                     query.collection_id.as_deref(),
                     media_kind,
                     aspect_ratio,
+                    query.creator_key.as_deref(),
                 ])?
             }
         };
@@ -421,6 +428,7 @@ impl Library {
             query.collection_id.as_deref(),
             media_kind,
             aspect_ratio,
+            query.creator_key.as_deref(),
         ])?;
         let mut buckets = Vec::new();
         while let Some(row) = rows.next()? {
@@ -429,6 +437,62 @@ impl Library {
             buckets.push(AssetDateBucket { date, count: count as u64 });
         }
         Ok(buckets)
+    }
+
+    pub fn list_asset_creators(&self, query: AssetQuery) -> Result<Vec<AssetCreatorSummary>, LibraryError> {
+        if [
+            query.classification_id.is_some(),
+            query.album_id.is_some(),
+            query.collection_id.is_some(),
+            query.creator_key.is_some(),
+        ]
+        .into_iter()
+        .filter(|present| *present)
+        .count()
+            > 1
+        {
+            return Err(LibraryError::InvalidAssetScope);
+        }
+
+        let connection = self.connection()?;
+        let media_kind = media_filter_value(query.media_kind);
+        let aspect_ratio = aspect_filter_value(query.aspect_ratio);
+        let mut statement = connection.prepare(CREATORS_SQL)?;
+        let mut rows = statement.query(params![
+            query.classification_id.as_deref(),
+            query.direct_only,
+            query.favorite_only,
+            query.unclassified_only,
+            query.album_id.as_deref(),
+            media_kind,
+            aspect_ratio,
+            query.collection_id.as_deref(),
+        ])?;
+        let mut creators = Vec::new();
+        while let Some(row) = rows.next()? {
+            creators.push(AssetCreatorSummary {
+                key: row.get(0)?,
+                creator_name: row.get(1)?,
+                creator_handle: row.get(2)?,
+                creator_url: row.get(3)?,
+                asset_count: row.get::<_, i64>(4)? as u64,
+                last_collected_at: row.get(5)?,
+                cover_asset_ids: [
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, Option<String>>(9)?,
+                    row.get::<_, Option<String>>(10)?,
+                    row.get::<_, Option<String>>(11)?,
+                    row.get::<_, Option<String>>(12)?,
+                    row.get::<_, Option<String>>(13)?,
+                ]
+                    .into_iter()
+                    .flatten()
+                    .collect(),
+            });
+        }
+        Ok(creators)
     }
 }
 
@@ -516,6 +580,7 @@ fn run_chronological_page(
         limit_plus,
         media_kind,
         aspect_ratio,
+        query.creator_key.as_deref(),
     ])?;
     let mut items = Vec::new();
     while let Some(row) = rows.next()? {
@@ -660,6 +725,7 @@ asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creat
 asset.import_source, asset.import_batch_id, asset.original_modified_at
 FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
 WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
+AND (?13 IS NULL OR COALESCE(asset.creator_handle, asset.creator_url) = ?13)
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
 AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
@@ -691,6 +757,7 @@ asset.import_source, asset.import_batch_id, asset.original_modified_at,
 asset.content_hash, CASE WHEN asset.content_hash >= ?6 THEN 0 ELSE 1 END
 FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
 WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
+AND (?14 IS NULL OR COALESCE(asset.creator_handle, asset.creator_url) = ?14)
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
 AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
@@ -709,6 +776,63 @@ AND (
 )
 ORDER BY CASE WHEN asset.content_hash >= ?6 THEN 0 ELSE 1 END ASC, asset.content_hash ASC, asset.id ASC LIMIT ?10";
 
+const CREATORS_SQL: &str = "WITH RECURSIVE descendants(id) AS (
+    SELECT ?1 WHERE ?1 IS NOT NULL
+    UNION ALL SELECT entry.id FROM classification_entries AS entry JOIN descendants ON entry.parent_id = descendants.id
+) , album_descendants(id) AS (
+    SELECT ?5 WHERE ?5 IS NOT NULL
+    UNION ALL SELECT child.id FROM albums AS child JOIN album_descendants ON child.parent_id = album_descendants.id
+), scoped AS MATERIALIZED (
+    SELECT asset.id, asset.creator_name, asset.creator_handle, asset.creator_url, asset.collected_at
+    FROM assets AS asset
+    WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
+    AND COALESCE(asset.creator_handle, asset.creator_url) IS NOT NULL
+    AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
+    AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
+    AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
+    AND (?8 IS NULL OR EXISTS (SELECT 1 FROM collection_assets AS collection_link WHERE collection_link.asset_id = asset.id AND collection_link.collection_id = ?8))
+    AND (
+      (?6 IS NULL)
+      OR (?6 = 'images' AND asset.media_kind IN ('image', 'gif'))
+      OR (?6 = 'videos' AND asset.media_kind = 'video')
+    )
+    AND (
+      (?7 IS NULL)
+      OR (?7 = 'square' AND asset.width * 5 >= asset.height * 4 AND asset.width * 4 <= asset.height * 5)
+      OR (?7 = 'landscape' AND asset.width * 4 > asset.height * 5)
+      OR (?7 = 'portrait' AND asset.width * 5 < asset.height * 4)
+    )
+), keyed AS (
+    SELECT id, creator_name, creator_handle, creator_url, collected_at,
+           COALESCE(creator_handle, creator_url) AS key,
+           ROW_NUMBER() OVER (PARTITION BY COALESCE(creator_handle, creator_url) ORDER BY collected_at DESC) AS rn
+    FROM scoped
+), covers AS (
+    SELECT key,
+           MAX(CASE WHEN rn = 1 THEN id END) AS cover_0,
+           MAX(CASE WHEN rn = 2 THEN id END) AS cover_1,
+           MAX(CASE WHEN rn = 3 THEN id END) AS cover_2,
+           MAX(CASE WHEN rn = 4 THEN id END) AS cover_3,
+           MAX(CASE WHEN rn = 5 THEN id END) AS cover_4,
+           MAX(CASE WHEN rn = 6 THEN id END) AS cover_5,
+           MAX(CASE WHEN rn = 7 THEN id END) AS cover_6,
+           MAX(CASE WHEN rn = 8 THEN id END) AS cover_7
+    FROM keyed
+    GROUP BY key
+), grouped AS (
+    SELECT key,
+           MAX(creator_name) AS creator_name,
+           MAX(creator_handle) AS creator_handle,
+           MAX(creator_url) AS creator_url,
+           COUNT(*) AS asset_count,
+           MAX(collected_at) AS last_collected_at
+    FROM keyed
+    GROUP BY key
+)
+SELECT g.key, g.creator_name, g.creator_handle, g.creator_url, g.asset_count, g.last_collected_at,
+       covers.cover_0, covers.cover_1, covers.cover_2, covers.cover_3, covers.cover_4, covers.cover_5, covers.cover_6, covers.cover_7
+FROM grouped AS g LEFT JOIN covers ON covers.key = g.key
+ORDER BY g.asset_count DESC, g.key ASC";
 const DATE_BUCKETS_SQL: &str = "WITH RECURSIVE descendants(id) AS (
     SELECT ?1 WHERE ?1 IS NOT NULL
     UNION ALL SELECT entry.id FROM classification_entries AS entry JOIN descendants ON entry.parent_id = descendants.id
@@ -718,6 +842,7 @@ const DATE_BUCKETS_SQL: &str = "WITH RECURSIVE descendants(id) AS (
 ) SELECT substr(asset.collected_at, 1, 10) AS date, COUNT(*) AS count
 FROM assets AS asset
 WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
+AND (?9 IS NULL OR COALESCE(asset.creator_handle, asset.creator_url) = ?9)
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
 AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
