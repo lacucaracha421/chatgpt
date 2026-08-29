@@ -15,6 +15,8 @@ import type {
 } from "../library/types";
 import { Button } from "../shared/ui/Button";
 import { TextField } from "../shared/ui/TextField";
+import { Toast } from "../shared/ui/Toast";
+import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import {
   creatorLabel,
   formatBytes,
@@ -52,6 +54,8 @@ export function AssetInspector({
   const { gateway } = useLibrary();
   const [editing, setEditing] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
+  useAutoDismiss(copyError, setCopyError);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [draft, setDraft] = useState<MetadataDraft | null>(null);
@@ -63,6 +67,7 @@ export function AssetInspector({
     setEditing(false);
     setDraft(null);
     setSaveError(null);
+    setCopyError(null);
   }, [assetIds]);
 
   useEffect(() => {
@@ -79,10 +84,12 @@ export function AssetInspector({
     if (!asset?.sourceUrl) return;
     try {
       await navigator.clipboard.writeText(asset.sourceUrl);
+      setCopyError(null);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1_500);
-    } catch {
+    } catch (error) {
       setCopied(false);
+      setCopyError(commandErrorMessage(error, "출처를 복사하지 못했습니다."));
     }
   };
 
@@ -256,6 +263,7 @@ export function AssetInspector({
           </dl>
         </section>
       )}
+      {copyError && <Toast onDismiss={() => setCopyError(null)}>{copyError}</Toast>}
     </aside>
   );
 }

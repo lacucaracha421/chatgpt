@@ -7,7 +7,7 @@ import { AssetInspector } from "./AssetInspector";
 
 const openUrl = vi.fn().mockResolvedValue(undefined);
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: (url: string) => openUrl(url) }));
-afterEach(() => { cleanup(); openUrl.mockClear(); });
+afterEach(() => { cleanup(); openUrl.mockClear(); vi.unstubAllGlobals(); });
 
 const collections: CollectionSummary[] = [
   { id: "elden", name: "엘든 링", description: null, type: "game", coverAssetId: null, selectedWorkArtworkId: null, selectedHeroArtworkId: null, selectedBackdropArtworkId: null, assetCount: 1, unreadReleaseCount: 0, year: null, originalTitle: null, runtimeMinutes: null, author: "프롬소프트", developer: "프롬소프트", publisher: null, platforms: null, productionCompany: null, releaseDate: null, director: null, externalScore: 96, myScore: 5, genres: null, overview: null, showcase: false, showcaseOrder: null, createdAt: "2026-08-10T00:00:00Z", updatedAt: "2026-08-10T00:00:00Z" },
@@ -254,3 +254,17 @@ function asset(id: string): AssetSummary {
 function videoAsset(): AssetSummary {
   return { ...asset("video"), originalName: "video.mp4", media: { kind: "video", durationMs: 65_000, preparationState: "ready", scrubFrameCount: 0 } };
 }
+it("shows feedback when copying the source URL fails", async () => {
+  const user = userEvent.setup();
+  const writeText = vi.fn().mockRejectedValue(undefined);
+  vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+  render(
+    <LibraryProvider gateway={createGateway()}>
+      <AssetInspector assets={[asset("a")]} open onOpenChange={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  await user.click(screen.getByRole("button", { name: "출처 복사" }));
+
+  expect(await screen.findByText("출처를 복사하지 못했습니다.")).toBeVisible();
+});
