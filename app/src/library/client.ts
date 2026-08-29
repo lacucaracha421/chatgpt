@@ -219,6 +219,8 @@ export const libraryGateway: LibraryGateway = {
     invoke<ReleaseWatchStatus>("set_release_watch_enabled", { collectionId, enabled }),
   takeUnreadReleaseChanges: (collectionId) =>
     invoke<ReleaseWatchEvent[]>("take_unread_release_changes", { collectionId }),
+  listUnreadReleaseChanges: () =>
+    invoke<ReleaseWatchEvent[]>("list_unread_release_changes"),
   runDueReleaseWatch: () =>
     invoke<ReleaseWatchRunResult>("run_due_release_watch"),
   createCollection: (input: CreateCollection) =>

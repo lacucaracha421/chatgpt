@@ -253,6 +253,27 @@ impl Library {
         transaction.commit()?;
         Ok(events)
     }
+
+    /// 모든 컬렉션의 미읽음 출간 이벤트. 컬렉션 상세에 들어가지 않아도
+    /// "이번에 새로 나온 권"을 모아 볼 수 있게 하는 읽기 전용 쿼리다.
+    pub fn list_unread_release_changes(
+        &self,
+    ) -> Result<Vec<ReleaseWatchEvent>, LibraryError> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT event.id, event.event_kind, event.volume_number,
+                    event.previous_value, event.current_value, event.detected_at
+             FROM release_watch_events AS event
+             JOIN collections AS collection ON collection.id = event.collection_id
+             WHERE event.read_at IS NULL
+             ORDER BY event.detected_at, event.rowid",
+        )?;
+        let events = statement
+            .query_map([], release_watch_event_from_row)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(events)
+    }
+
 }
 
 fn stop_reason(error: &LibraryError) -> Option<ReleaseWatchRunStopReason> {

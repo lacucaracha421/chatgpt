@@ -3,25 +3,28 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MangaViewer } from "./MangaViewer";
 
-afterEach(cleanup);
+const openUrl = vi.fn().mockResolvedValue(undefined);
+vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: (url: string) => openUrl(url) }));
+
+afterEach(() => { cleanup(); openUrl.mockClear(); });
 
 describe("MangaViewer", () => {
   it("shows the title and page progress", () => {
-    render(<MangaViewer seriesId="s1" title="Batsu Kano" pageCount={60} onClose={vi.fn()} />);
+    render(<MangaViewer seriesId="s1" galleryId={null} title="Batsu Kano" pageCount={60} onClose={vi.fn()} />);
     expect(screen.getByRole("heading", { name: "Batsu Kano" })).toBeInTheDocument();
     expect(screen.getByText("1 / 60")).toBeVisible();
   });
 
   it("moves to the next page with the right arrow", async () => {
     const user = userEvent.setup();
-    render(<MangaViewer seriesId="s1" title="T" pageCount={60} onClose={vi.fn()} />);
+    render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={60} onClose={vi.fn()} />);
     await user.keyboard("{ArrowRight}");
     expect(screen.getByText("2 / 60")).toBeVisible();
   });
 
   it("moves to the previous page with the left arrow", async () => {
     const user = userEvent.setup();
-    render(<MangaViewer seriesId="s1" title="T" pageCount={60} onClose={vi.fn()} />);
+    render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={60} onClose={vi.fn()} />);
     await user.keyboard("{ArrowRight}");
     await user.keyboard("{ArrowRight}");
     await user.keyboard("{ArrowLeft}");
@@ -30,7 +33,7 @@ describe("MangaViewer", () => {
 
   it("stops at the first and last page", async () => {
     const user = userEvent.setup();
-    render(<MangaViewer seriesId="s1" title="T" pageCount={2} onClose={vi.fn()} />);
+    render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={2} onClose={vi.fn()} />);
     await user.keyboard("{ArrowLeft}");
     expect(screen.getByText("1 / 2")).toBeVisible();
     await user.keyboard("{ArrowRight}");
@@ -41,14 +44,14 @@ describe("MangaViewer", () => {
   it("closes with the close button", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
-    render(<MangaViewer seriesId="s1" title="T" pageCount={60} onClose={onClose} />);
+    render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={60} onClose={onClose} />);
     await user.click(screen.getByRole("button", { name: "망가 뷰어 닫기" }));
     expect(onClose).toHaveBeenCalledOnce();
   });
 
   it("toggles spread mode with the button and shows two pages", async () => {
     const user = userEvent.setup();
-    render(<MangaViewer seriesId="s1" title="T" pageCount={60} onClose={vi.fn()} />);
+    render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={60} onClose={vi.fn()} />);
     await user.click(screen.getByRole("button", { name: "양면 보기" }));
     expect(screen.getByText("1 / 60")).toBeVisible();
     await user.keyboard("{ArrowRight}");
@@ -58,7 +61,7 @@ describe("MangaViewer", () => {
 
   it("toggles spread mode with the V key", async () => {
     const user = userEvent.setup();
-    render(<MangaViewer seriesId="s1" title="T" pageCount={60} onClose={vi.fn()} />);
+    render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={60} onClose={vi.fn()} />);
     await user.keyboard("v");
     await user.keyboard("{ArrowRight}");
     expect(screen.getByText("2-3 / 60")).toBeVisible();
@@ -68,7 +71,7 @@ describe("MangaViewer", () => {
 
   it("shows the last odd page alone in spread mode", async () => {
     const user = userEvent.setup();
-    render(<MangaViewer seriesId="s1" title="T" pageCount={6} onClose={vi.fn()} />);
+    render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={6} onClose={vi.fn()} />);
     await user.click(screen.getByRole("button", { name: "양면 보기" }));
     await user.keyboard("{ArrowRight}");
     await user.keyboard("{ArrowRight}");
@@ -78,9 +81,20 @@ describe("MangaViewer", () => {
   });
 
   it("preloads the next and previous pages without showing them", () => {
-    render(<MangaViewer seriesId="s1" title="T" pageCount={60} onClose={vi.fn()} />);
+    render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={60} onClose={vi.fn()} />);
     const preloads = document.querySelectorAll(".manga-viewer__preload");
     expect(preloads.length).toBeGreaterThan(0);
     expect(preloads[0]).toHaveAttribute("src", expect.stringContaining("/manga-page/s1/2"));
   });
+});
+
+it("renders a kHentai link only when the series carries a gallery id", async () => {
+  const user = userEvent.setup();
+  const { rerender } = render(<MangaViewer seriesId="s1" title="T" pageCount={2} galleryId="12345" onClose={vi.fn()} />);
+  expect(screen.getByRole("button", { name: "kHentai에서 열기" })).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "kHentai에서 열기" }));
+  expect(openUrl).toHaveBeenCalledWith("https://k-hentai.org/r/12345");
+
+  rerender(<MangaViewer seriesId="s1" title="T" pageCount={2} galleryId={null} onClose={vi.fn()} />);
+  expect(screen.queryByRole("button", { name: "kHentai에서 열기" })).not.toBeInTheDocument();
 });

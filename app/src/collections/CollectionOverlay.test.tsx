@@ -125,7 +125,7 @@ function renderOverlay(
     updateCollection: vi.fn().mockResolvedValue(undefined),
     setCollectionShowcase: vi.fn().mockResolvedValue(undefined),
     deleteCollection: vi.fn().mockResolvedValue(undefined),
-    takeUnreadReleaseChanges: vi.fn().mockResolvedValue([]),
+    takeUnreadReleaseChanges: vi.fn().mockResolvedValue([]), listUnreadReleaseChanges: vi.fn().mockResolvedValue([]),
     runDueReleaseWatch: vi.fn().mockResolvedValue({ checked: 0, changedCollections: 0, skipped: 0, stopReason: null }),
     ...overrides,
   } as unknown as LibraryGateway;

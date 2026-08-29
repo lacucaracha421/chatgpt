@@ -754,6 +754,7 @@ export interface LibraryGateway {
     enabled: boolean,
   ): Promise<ReleaseWatchStatus>;
   takeUnreadReleaseChanges(collectionId: string): Promise<ReleaseWatchEvent[]>;
+  listUnreadReleaseChanges(): Promise<ReleaseWatchEvent[]>;
   runDueReleaseWatch(): Promise<ReleaseWatchRunResult>;
   createCollection(input: CreateCollection): Promise<CollectionSummary>;
   updateCollection(id: string, input: UpdateCollection): Promise<CollectionSummary>;

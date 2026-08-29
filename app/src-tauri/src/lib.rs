@@ -155,6 +155,7 @@ pub fn run() {
             commands::run_due_online_catalog_update,
             commands::set_online_catalog_update_settings,
             commands::resolve_online_catalog_work,
+            commands::list_unread_release_changes,
             commands::get_remote_reading_progress,
             commands::save_remote_reading_progress,
             commands::clear_remote_manga_cache,

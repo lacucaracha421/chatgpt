@@ -45,6 +45,7 @@ import { MangaBrowser } from "../manga/MangaBrowser";
 import { MangaViewer } from "../manga/MangaViewer";
 import { useDesktopInteractions } from "./useDesktopInteractions";
 import { useOnlineCatalogUpdate } from "./useOnlineCatalogUpdate";
+import { useReleaseWatchCheck } from "./useReleaseWatchCheck";
 
 export type ExtensionIngestListener = (handler: (outcome: IngestOutcome) => void) => Promise<() => void>;
 
@@ -125,7 +126,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const [requestedAsset, setRequestedAsset] = useState<AssetSummary | null>(null);
   const [reviewCount, setReviewCount] = useState(0);
   const [trashCount, setTrashCount] = useState(0);
-  const [mangaViewer, setMangaViewer] = useState<{ seriesId: string; title: string; pageCount: number } | null>(null);
+  const [mangaViewer, setMangaViewer] = useState<{ seriesId: string; title: string; pageCount: number; galleryId: string | null } | null>(null);
   const [videoPreparationTrigger, setVideoPreparationTrigger] = useState(0);
   const settingsReturnViewRef = useRef<AssetView>({ kind: "classification", classificationId: null });
   const similarityIndex = useSimilarityIndex(gateway.indexMissingSimilarityHashes);
@@ -259,21 +260,10 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     })();
     return () => { active = false; };
   }, [appendMessage, gateway, refreshTrashCount]);
-  useEffect(() => {
-    let active = true;
-    void (async () => {
-      const result = await gateway.runDueReleaseWatch();
-      if (!active) return;
-      await refreshCollections();
-      if (!active || result.changedCollections === 0) return;
-      appendMessage(`새 출간 정보가 있는 작품 ${result.changedCollections}개`);
-    })().catch((error) => {
-      if (active) {
-        console.warn("Release Watch startup check failed", commandErrorMessage(error, "신간 확인을 완료하지 못했습니다."));
-      }
-    });
-    return () => { active = false; };
-  }, [appendMessage, gateway, libraryRoot, refreshCollections]);
+  useReleaseWatchCheck(gateway, libraryRoot, async (result) => {
+    await refreshCollections();
+    if (result.changedCollections > 0) appendMessage(`새 출간 정보가 있는 작품 ${result.changedCollections}개`);
+  });
   useEffect(() => {
     saveUiPreferences(preferences);
   }, [preferences]);
@@ -525,7 +515,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                   />
                 ) : view.kind === "manga" ? (
                   <MangaBrowser
-                    onOpenSeries={(series) => setMangaViewer({ seriesId: series.id, title: series.title, pageCount: series.pageCount })}
+                    onOpenSeries={(series) => setMangaViewer({ seriesId: series.id, title: series.title, pageCount: series.pageCount, galleryId: series.galleryId })}
                   />
                 ) : view.kind === "collection" ? (
                   <CollectionOverlay
@@ -594,7 +584,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
       </div>
       <DropOverlay over={dropState.over} destinationName={entries.find((entry) => entry.id === dropClassificationId)?.name ?? "미분류"} />
       <DragLayer state={dragState} />
-      {mangaViewer && <MangaViewer seriesId={mangaViewer.seriesId} title={mangaViewer.title} pageCount={mangaViewer.pageCount} onClose={() => setMangaViewer(null)} />}
+      {mangaViewer && <MangaViewer seriesId={mangaViewer.seriesId} title={mangaViewer.title} pageCount={mangaViewer.pageCount} galleryId={mangaViewer.galleryId} onClose={() => setMangaViewer(null)} />}
     </PrivacyProvider>
   );
 }

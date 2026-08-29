@@ -979,6 +979,15 @@ pub fn take_unread_release_changes(
 }
 
 #[tauri::command]
+pub fn list_unread_release_changes(
+    state: State<'_, AppState>,
+) -> Result<Vec<ReleaseWatchEvent>, CommandError> {
+    current_required(state)?
+        .list_unread_release_changes()
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub async fn run_due_release_watch(
     state: State<'_, AppState>,
 ) -> Result<ReleaseWatchRunResult, CommandError> {

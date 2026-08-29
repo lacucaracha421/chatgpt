@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { BookOpenIcon, ChevronLeftIcon, ChevronRightIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { Button } from "../shared/ui/Button";
@@ -12,9 +12,10 @@ type PageViewerProps = {
   sourceLabel: string;
   onPageChange: (page: number) => void;
   onClose: () => void;
+  actions?: ReactNode;
 };
 
-export function PageViewer({ title, pageUrls, initialPage, sourceLabel, onPageChange, onClose }: PageViewerProps) {
+export function PageViewer({ title, pageUrls, initialPage, sourceLabel, onPageChange, onClose, actions }: PageViewerProps) {
   const { privacyMode } = usePrivacy();
   const pageCount = pageUrls.length;
   const [page, setPage] = useState(() => Math.max(1, Math.min(pageCount, initialPage)));
@@ -45,6 +46,7 @@ export function PageViewer({ title, pageUrls, initialPage, sourceLabel, onPageCh
   }}>
     <div className="manga-viewer">
       <div className="manga-viewer__controls">
+        {actions}
         <span className="manga-viewer__source">{sourceLabel}</span>
         <span className="manga-viewer__progress">{progress}</span>
         <Button size="icon" variant="ghost" aria-label={spread ? "단면 보기" : "양면 보기"} aria-pressed={spread} onClick={() => setSpread((value) => !value)}><BookOpenIcon aria-hidden="true" /></Button>
