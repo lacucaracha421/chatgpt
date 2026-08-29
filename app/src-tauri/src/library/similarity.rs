@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs::File,
     io::{BufReader, Seek, SeekFrom},
     path::Path,
@@ -15,9 +16,9 @@ use super::{
         dimensions_are_compatible, fingerprint, minimum_distance, ImageFingerprint,
     },
     models::{
-        AssetCursor, AssetSummary, SimilarityDecision, SimilarityDecisionRequest,
-        SimilarityIndexProgress, SimilarityReviewAsset, SimilarityReviewPage,
-        SimilarityReviewSummary,
+        AssetCursor, AssetSummary, ClassificationEntry, ClassificationKind,
+        SimilarityDecision, SimilarityDecisionRequest, SimilarityIndexProgress,
+        SimilarityReviewAsset, SimilarityReviewPage, SimilarityReviewSummary,
     },
     query::asset_summary_from_row,
     Library, MediaVariant,
@@ -109,14 +110,43 @@ impl Library {
                 .expect("review cursor serializes"),
             }
         });
+        // 리뷰당 4회 쿼리(N+1) 대신 자산 요약·분류를 배치로 로드한다.
+        // 상태 보장(normal/review)은 배치 로딩으로 모아 온 뒤 클로저에서 검증한다.
+        let asset_ids: Vec<String> = rows.iter()
+            .flat_map(|row| [row.existing_asset_id.clone(), row.candidate_asset_id.clone()])
+            .collect();
+        let summaries = load_asset_summaries(&transaction, &asset_ids)?;
+        // 상태는 AssetSummary에 없으므로 id별 상태를 별도 맵으로 모은다.
+        let statuses = load_asset_statuses(&transaction, &asset_ids)?;
+        let classifications = classifications_for_assets(&transaction, &asset_ids)?;
+        let review_asset = |asset_id: &str, expected_status: &str| -> Result<SimilarityReviewAsset, LibraryError> {
+            let asset = summaries.get(asset_id).cloned().ok_or(LibraryError::AssetNotFound)?;
+            let actual_status = statuses.get(asset_id).map(String::as_str).ok_or(LibraryError::AssetNotFound)?;
+            if actual_status != expected_status {
+                return Err(LibraryError::AssetNotFound);
+            }
+            let format = Path::new(&asset.relative_path)
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .map(|extension| match extension.to_ascii_uppercase().as_str() {
+                    "JPG" => "JPEG".to_owned(),
+                    other => other.to_owned(),
+                })
+                .unwrap_or_else(|| "IMAGE".to_owned());
+            Ok(SimilarityReviewAsset {
+                asset,
+                format,
+                classifications: classifications.get(asset_id).cloned().unwrap_or_default(),
+            })
+        };
         let items = rows
             .into_iter()
             .map(|row| {
                 Ok(SimilarityReviewSummary {
                     id: row.id,
                     distance: row.distance,
-                    existing: load_review_asset(&transaction, &row.existing_asset_id, "normal")?,
-                    candidate: load_review_asset(&transaction, &row.candidate_asset_id, "review")?,
+                    existing: review_asset(&row.existing_asset_id, "normal")?,
+                    candidate: review_asset(&row.candidate_asset_id, "review")?,
                 })
             })
             .collect::<Result<Vec<_>, LibraryError>>()?;
@@ -463,6 +493,136 @@ impl Library {
         }
         Ok(best)
     }
+}
+
+/// 여러 자산의 요약을 한 번의 IN 쿼리로 로드한다(단건 쿼리 반복 제거).
+/// 상태 판정은 별도 배치 조회 결과로 수행한다. normal·review 자산이
+/// 한 페이지에 섞여 있기 때문이다.
+fn load_asset_summaries(
+    connection: &Connection,
+    asset_ids: &[String],
+) -> Result<HashMap<String, AssetSummary>, LibraryError> {
+    if asset_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let mut sql = String::from(
+        "SELECT asset.id, asset.title, asset.original_name, asset.relative_path,
+                asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height,
+                asset.collected_at, asset.favorite, asset.source_url, asset.media_kind,
+                video.duration_ms, video.preparation_state, video.scrub_frame_count,
+                asset.source_published_at, asset.creator_name, asset.creator_handle,
+                asset.creator_url, asset.import_source, asset.import_batch_id,
+                asset.original_modified_at
+         FROM assets AS asset
+         LEFT JOIN video_assets AS video ON video.asset_id = asset.id
+         WHERE asset.id IN (",
+    );
+    for (index, _) in asset_ids.iter().enumerate() {
+        if index > 0 {
+            sql.push_str(", ");
+        }
+        sql.push_str(&format!("?{}", index + 1));
+    }
+    sql.push(')');
+    let mut statement = connection.prepare(&sql)?;
+    let params: Vec<&str> = asset_ids.iter().map(String::as_str).collect();
+    let mut map = HashMap::new();
+    let rows = statement.query_map(rusqlite::params_from_iter(params.iter()), asset_summary_from_row)?;
+    for summary in rows {
+        let summary = summary?;
+        map.insert(summary.id.clone(), summary);
+    }
+    Ok(map)
+}
+
+/// 여러 자산의 상태를 한 번의 IN 쿼리로 로드한다.
+fn load_asset_statuses(
+    connection: &Connection,
+    asset_ids: &[String],
+) -> Result<HashMap<String, String>, LibraryError> {
+    if asset_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let mut sql = String::from("SELECT id, status FROM assets WHERE id IN (");
+    for (index, _) in asset_ids.iter().enumerate() {
+        if index > 0 {
+            sql.push_str(", ");
+        }
+        sql.push_str(&format!("?{}", index + 1));
+    }
+    sql.push(')');
+    let mut statement = connection.prepare(&sql)?;
+    let params: Vec<&str> = asset_ids.iter().map(String::as_str).collect();
+    let mut map = HashMap::new();
+    let rows = statement.query_map(rusqlite::params_from_iter(params.iter()), |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    for row in rows {
+        let (id, status) = row?;
+        map.insert(id, status);
+    }
+    Ok(map)
+}
+
+/// 여러 자산의 분류를 한 번의 IN 쿼리로 로드한다(단건 쿼리 반복 제거).
+fn classifications_for_assets(
+    connection: &Connection,
+    asset_ids: &[String],
+) -> Result<HashMap<String, Vec<ClassificationEntry>>, LibraryError> {
+    if asset_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let mut sql = String::from(
+        "SELECT link.asset_id, entry.id, entry.kind, entry.name, entry.parent_id, entry.icon_key, entry.color_key,
+            (SELECT COUNT(*) FROM asset_classifications AS count_link
+             JOIN assets AS count_asset ON count_asset.id = count_link.asset_id
+             WHERE count_link.classification_id = entry.id
+               AND count_asset.status = 'normal') AS asset_count
+         FROM classification_entries AS entry
+         JOIN asset_classifications AS link ON link.classification_id = entry.id
+         WHERE link.asset_id IN (",
+    );
+    for (index, _) in asset_ids.iter().enumerate() {
+        if index > 0 {
+            sql.push_str(", ");
+        }
+        sql.push_str(&format!("?{}", index + 1));
+    }
+    sql.push_str(") ORDER BY entry.name COLLATE NOCASE, entry.id");
+    let mut statement = connection.prepare(&sql)?;
+    let params: Vec<&str> = asset_ids.iter().map(String::as_str).collect();
+    let rows = statement.query_map(rusqlite::params_from_iter(params.iter()), |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, Option<String>>(4)?,
+            row.get::<_, Option<String>>(5)?,
+            row.get::<_, Option<String>>(6)?,
+            row.get::<_, i64>(7)?,
+        ))
+    })?;
+    let mut map: HashMap<String, Vec<ClassificationEntry>> = HashMap::new();
+    for row in rows {
+        let (asset_id, id, kind, name, parent_id, icon_key, color_key, asset_count) = row?;
+        let kind = match kind.as_str() {
+            "root" => ClassificationKind::Root,
+            "work" => ClassificationKind::Work,
+            "tag" => ClassificationKind::Tag,
+            _ => return Err(rusqlite::Error::InvalidQuery.into()),
+        };
+        map.entry(asset_id).or_default().push(ClassificationEntry {
+            id,
+            kind,
+            name,
+            parent_id,
+            icon_key,
+            color_key,
+            asset_count: asset_count.max(0) as u64,
+        });
+    }
+    Ok(map)
 }
 
 fn decode_review_cursor(after: Option<AssetCursor>) -> Result<Option<ReviewCursor>, LibraryError> {

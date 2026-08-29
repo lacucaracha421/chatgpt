@@ -255,11 +255,15 @@ pub fn get_extension_connection(
 }
 
 #[tauri::command]
-pub fn open_library(
+pub async fn open_library(
     path: String,
     state: State<'_, AppState>,
 ) -> Result<LibrarySummary, CommandError> {
-    open_library_in_state(path, &state)
+    // 폴더 스캔·스키마 확인이 포함되어 수 초 걸릴 수 있으므로 메인 스레드를 막지 않는다.
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || open_library_in_state(path, &state))
+        .await
+        .map_err(|_| background_task_error())?
 }
 
 fn open_library_in_state(path: String, state: &AppState) -> Result<LibrarySummary, CommandError> {
@@ -291,11 +295,27 @@ fn open_library_at(path: String) -> Result<Library, CommandError> {
 }
 
 #[tauri::command]
-pub fn ensure_daily_backup(
+pub async fn ensure_daily_backup(
     state: State<'_, AppState>,
 ) -> Result<Option<MetadataBackup>, CommandError> {
-    current_required(state)?
-        .ensure_daily_backup(chrono::Utc::now())
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.ensure_daily_backup(chrono::Utc::now())
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn restore_metadata_backup(
+    backup_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.restore_backup(&backup_id))
+        .await
+        .map_err(|_| background_task_error())?
         .map_err(CommandError::from)
 }
 
@@ -307,17 +327,6 @@ pub fn list_metadata_backups(
         .list_backups()
         .map_err(CommandError::from)
 }
-
-#[tauri::command]
-pub fn restore_metadata_backup(
-    backup_id: String,
-    state: State<'_, AppState>,
-) -> Result<(), CommandError> {
-    current_required(state)?
-        .restore_backup(&backup_id)
-        .map_err(CommandError::from)
-}
-
 #[tauri::command]
 pub fn list_classifications(
     state: State<'_, AppState>,
@@ -501,10 +510,13 @@ pub fn list_trash(
         .map_err(CommandError::from)
 }
 
+
 #[tauri::command]
-pub fn empty_trash(state: State<'_, AppState>) -> Result<PurgeSummary, CommandError> {
-    current_required(state)?
-        .empty_trash()
+pub async fn empty_trash(state: State<'_, AppState>) -> Result<PurgeSummary, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.empty_trash())
+        .await
+        .map_err(|_| background_task_error())?
         .map_err(CommandError::from)
 }
 
@@ -526,9 +538,11 @@ pub fn set_trash_policy(
 }
 
 #[tauri::command]
-pub fn purge_expired_trash(state: State<'_, AppState>) -> Result<PurgeSummary, CommandError> {
-    current_required(state)?
-        .purge_expired_trash(chrono::Utc::now())
+pub async fn purge_expired_trash(state: State<'_, AppState>) -> Result<PurgeSummary, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.purge_expired_trash(chrono::Utc::now()))
+        .await
+        .map_err(|_| background_task_error())?
         .map_err(CommandError::from)
 }
 
@@ -1430,16 +1444,6 @@ pub fn inspect_book_import(
         .map_err(CommandError::from)
 }
 
-#[tauri::command]
-pub fn import_book_collections(
-    root: String,
-    state: State<'_, AppState>,
-) -> Result<BookMigrationReport, CommandError> {
-    let library = current_required(state)?;
-    library
-        .import_book_collections(&root)
-        .map_err(CommandError::from)
-}
 
 #[tauri::command]
 pub async fn inspect_legacy_package_migration(
@@ -1461,6 +1465,18 @@ pub async fn inspect_legacy_package_migration(
     .await
     .map_err(|_| background_task_error())?
     .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn import_book_collections(
+    root: String,
+    state: State<'_, AppState>,
+) -> Result<BookMigrationReport, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.import_book_collections(&root))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -1501,17 +1517,19 @@ pub fn get_collection_source_root(
 }
 
 #[tauri::command]
-pub fn set_collection_source_root(
+pub async fn set_collection_source_root(
     path: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<u64, CommandError> {
     let library = current_required(state)?;
-    library
-        .set_collection_source_root(path.as_deref())
-        .map_err(CommandError::from)?;
-    library
-        .backfill_legacy_collection_kinds()
-        .map_err(CommandError::from)
+    tauri::async_runtime::spawn_blocking(move || {
+        library
+            .set_collection_source_root(path.as_deref())
+            .map_err(CommandError::from)?;
+        library.backfill_legacy_collection_kinds().map_err(CommandError::from)
+    })
+    .await
+    .map_err(|_| background_task_error())?
 }
 
 #[tauri::command]

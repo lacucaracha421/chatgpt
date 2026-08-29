@@ -1,10 +1,9 @@
 use std::{
-
     collections::BTreeSet,
     fs::{self, OpenOptions},
     io::{self, Read, Write},
     path::{Path, PathBuf},
-    sync::{Arc, RwLock},
+    sync::{Arc, Mutex, RwLock},
     thread,
     time::Duration,
 };
@@ -158,16 +157,32 @@ pub(crate) fn start(app: AppHandle, state: AppState, runtime: ExtensionRuntime) 
 }
 
 fn serve(app: AppHandle, server: Server, state: AppState, token: String) {
-    // 영상 수집 한 건이 수 분 걸릴 수 있으므로 요청마다 스레드를 띄운다.
-    // 직렬 처리하면 그동안 태블릿의 health·분류·중복 조회가 전부 막히며
-    // 확장은 그를 "연결 끊김"으로 판단한다.
-    for request in server.incoming_requests() {
+    // 영상 수집 한 건이 수 분 걸릴 수 있으므로 처리는 병렬이어야 한다.
+    // 다만 무제한 스레드 스폰은 로컬 플러드 연결이 인증 검사 선점 전에
+    // 스레드·메모리를 태울 수 있게 하므로 고정 워커 풀로 상한을 둔다.
+    // 큐가 가득 차면 초과 연결은 버려진다(확장이 재시도). 큐 여유 64로
+    // health·분류 같은 짧은 요청이 장기 수집에 막히지 않는다.
+    let (sender, receiver) = std::sync::mpsc::sync_channel::<Request>(64);
+    let receiver = Arc::new(Mutex::new(receiver));
+    for worker in 0..8 {
         let app = app.clone();
         let state = state.clone();
         let token = token.clone();
+        let receiver = receiver.clone();
         let _ = thread::Builder::new()
-            .name("lakomics-extension-request".into())
-            .spawn(move || handle_request(app, request, &state, &token));
+            .name(format!("lakomics-extension-worker-{worker}"))
+            .spawn(move || {
+                loop {
+                    let request = { receiver.lock().unwrap_or_else(std::sync::PoisonError::into_inner).recv() };
+                    let Ok(request) = request else { break };
+                    handle_request(app.clone(), request, &state, &token);
+                }
+            });
+    }
+    for request in server.incoming_requests() {
+        if sender.try_send(request).is_err() {
+            continue;
+        }
     }
 }
 

@@ -32,13 +32,26 @@ const MEDIA_MAX_CONCURRENT: usize = 6;
 static MEDIA_ACTIVE: Mutex<usize> = Mutex::new(0);
 static MEDIA_AVAILABLE: Condvar = Condvar::new();
 
+/// 로컬 파일을 읽지 않고 외부 네트워크만 오가는 라우트. 20~60초 걸릴 수
+/// 있어 로컬 미디어의 6슬롯 퍼밋을 점유하면 썸네일·재생 전반이 정체되므로
+/// 퍼밋 밖에서 실행한다.
+fn is_remote_media_path(path: &str) -> bool {
+    ["/igdb-image-preview/", "/tmdb-image-preview/", "/remote-manga-", "/remote-catalog-thumbnail/"]
+        .iter()
+        .any(|prefix| path.starts_with(prefix))
+        || path.starts_with("/mangadex-cover-preview/")
+}
+
 pub(crate) fn media_response_gated(
     library: Option<&Library>,
     method: &Method,
     path: &str,
     range_header: Option<&str>,
 ) -> Response<Vec<u8>> {
-    let _permit = MediaPermit::acquire();
+    // MangaDex 커버는 parse_path 통과 후에 식별되므로 접두어로 직접 판정한다.
+    if !is_remote_media_path(path) {
+        let _permit = MediaPermit::acquire();
+    }
     media_response_with_range(library, method, path, range_header)
 }
 
@@ -394,6 +407,11 @@ fn tmdb_image_mime(file_path: &str) -> &'static str {
     }
 }
 
+/// 단일 재생 응답이 메모리에 버퍼링할 최대 크기(8MiB). `bytes=0-` 같은
+/// 열린 range가 오면 이 지점까지 잘라 반환하고, 플레이어가 후속 요청으로
+/// 이어받는다(206의 Content-Range가 남은 구간을 정확히 안내).
+const PLAYBACK_CHUNK_LIMIT: u64 = 8 * 1024 * 1024;
+
 fn playback_response(
     mut media: crate::library::MediaResponse,
     range_header: Option<&str>,
@@ -401,11 +419,14 @@ fn playback_response(
     let Some((start, end)) = range_header.and_then(|value| parse_range(value, media.length)) else {
         return range_not_satisfiable(media.length);
     };
+    // 열린 range(bytes=start-)는 청크 상한으로 잘라 반환한다. seek·재생이
+    // 이어질 때 플레이어가 후속 range를 요청하므로 연속 재생에 지장이 없다.
+    let end = end.min(start.saturating_add(PLAYBACK_CHUNK_LIMIT - 1));
     let length = end - start + 1;
     if media.file.seek(SeekFrom::Start(start)).is_err() {
         return empty_response(StatusCode::INTERNAL_SERVER_ERROR);
     }
-    let mut bytes = Vec::new();
+    let mut bytes = Vec::with_capacity(length as usize);
     if media.file.take(length).read_to_end(&mut bytes).is_err() || bytes.len() as u64 != length {
         return empty_response(StatusCode::INTERNAL_SERVER_ERROR);
     }
@@ -990,6 +1011,23 @@ mod tests {
         }
     }
 
+    #[test]
+    fn open_playback_range_is_bounded_by_the_chunk_limit() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        insert_prepared_video(&library, ASSET_ID, "normal");
+        // 픽스처 36바이트는 8MiB 상한보다 작다: 열린 range도 잘리지 않고
+        // 전체 구간이 정확히 서빙된다(기존 동작 불변).
+        let response = media_response_with_range(
+            Some(&library),
+            &Method::GET,
+            &format!("/playback/{ASSET_ID}"),
+            Some("bytes=0-1048575"),
+        );
+        assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(response.headers().get(CONTENT_LENGTH).unwrap(), "36");
+        assert_eq!(response.headers().get(CONTENT_RANGE).unwrap(), "bytes 0-35/36");
+    }
     #[test]
     fn playback_rejects_unranged_unsatisfiable_and_multi_range_requests() {
         let temp = tempfile::tempdir().unwrap();
