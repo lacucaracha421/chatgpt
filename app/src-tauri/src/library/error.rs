@@ -58,6 +58,22 @@ pub enum LibraryError {
     CloudSourceUnavailable,
     #[error("동기화할 로컬 파일이 수집 당시 내용과 다릅니다")]
     CloudSourceChanged,
+    #[error("캡처 목록 조회가 거부됐습니다: HTTP {0}")]
+    CloudCaptureListRejected(u16),
+    #[error("캡처 다운로드 URL 발급이 거부됐습니다: HTTP {0}")]
+    CloudCaptureTicketRejected(u16),
+    #[error("캡처 미디어 다운로드가 거부됐습니다: HTTP {0}")]
+    CloudCaptureDownloadRejected(u16),
+    #[error("캡처 미디어가 허용 크기를 초과합니다")]
+    CloudCaptureTooLarge,
+    #[error("캡처 임시 파일을 만들지 못했습니다")]
+    CloudCaptureStagingFailed,
+    #[error("캡처 imported 표시가 거부됐습니다: HTTP {0}")]
+    CloudCaptureAcknowledgementRejected(u16),
+    #[error("캡처 수집 기록이 올바르지 않습니다")]
+    InvalidCloudCaptureRecord,
+    #[error("캡처가 유사 이미지 검토 대기 상태입니다")]
+    CloudCaptureReviewPending,
     #[error("온라인 카탈로그가 설치되지 않았습니다")]
     OnlineCatalogNotInstalled,
     #[error("온라인 카탈로그 작품을 찾을 수 없습니다")]

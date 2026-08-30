@@ -1,7 +1,8 @@
 use std::{fs::File, io::Read, time::Duration};
 
 use super::models::{
-    PreparedAssetUpload, PresignUploadRequest, PresignUploadResponse, RegisterAssetRequest,
+    AcknowledgeCaptureRequest, PreparedAssetUpload, PresignUploadRequest, PresignUploadResponse,
+    RegisterAssetRequest, RemoteCaptureDownloadTicket, RemoteCapturePage, RemoteCapturePayload,
 };
 use crate::library::error::LibraryError;
 
@@ -93,6 +94,97 @@ impl CloudClient {
             .map_err(map_registration_error)?;
         Ok(())
     }
+    /// 캡처 수신함의 pending capture 목록을 조회한다.
+    pub(crate) fn list_pending_captures(
+        &self,
+        token: &str,
+    ) -> Result<Vec<RemoteCapturePayload>, LibraryError> {
+        let authorization = bearer(token)?;
+        let mut response = self
+            .agent
+            .get(self.endpoint("/v1/captures/pending")?)
+            .header("Authorization", authorization)
+            .call()
+            .map_err(map_capture_list_error)?;
+        let page: RemoteCapturePage = read_json(&mut response)?;
+        Ok(page.captures)
+    }
+
+    /// 캡처 미디어 다운로드 URL 발급을 요청한다.
+    pub(crate) fn capture_download_ticket(
+        &self,
+        capture_id: &str,
+        token: &str,
+    ) -> Result<RemoteCaptureDownloadTicket, LibraryError> {
+        let authorization = bearer(token)?;
+        let mut response = self
+            .agent
+            .get(self.endpoint(&format!("/v1/captures/{capture_id}/download"))?)
+            .header("Authorization", authorization)
+            .call()
+            .map_err(map_capture_ticket_error)?;
+        let ticket: RemoteCaptureDownloadTicket = read_json(&mut response)?;
+        validate_download_ticket(&ticket)?;
+        Ok(ticket)
+    }
+
+    /// 캡처 미디어를 staging 경로에 크기 경계를 두고 내려받는다.
+    pub(crate) fn download_capture_media(
+        &self,
+        ticket: &RemoteCaptureDownloadTicket,
+        destination: &std::path::Path,
+        maximum_bytes: u64,
+    ) -> Result<u64, LibraryError> {
+        let download_url =
+            url::Url::parse(&ticket.download_url).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        if !matches!(download_url.scheme(), "http" | "https") {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        let mut request = self.agent.get(download_url.as_str());
+        for (name, value) in &ticket.required_headers {
+            let name = ureq::http::header::HeaderName::try_from(name.as_str())
+                .map_err(|_| LibraryError::InvalidCloudResponse)?;
+            let value = ureq::http::header::HeaderValue::try_from(value.as_str())
+                .map_err(|_| LibraryError::InvalidCloudResponse)?;
+            request = request.header(name, value);
+        }
+        let mut response = request.call().map_err(map_capture_download_error)?;
+        if !response.status().is_success() {
+            return Err(LibraryError::CloudCaptureDownloadRejected(
+                response.status().as_u16(),
+            ));
+        }
+        let mut destination_file = File::create(destination).map_err(|_| LibraryError::CloudCaptureStagingFailed)?;
+        let mut reader = response.body_mut().as_reader().take(maximum_bytes.saturating_add(1));
+        let copied = std::io::copy(&mut reader, &mut destination_file)
+            .map_err(|_| LibraryError::CloudRequestUnavailable)?;
+        if copied > maximum_bytes {
+            return Err(LibraryError::CloudCaptureTooLarge);
+        }
+        Ok(copied)
+    }
+
+    /// 로컬 수집이 확정된 캡처를 imported로 표시한다.
+    pub(crate) fn acknowledge_capture_imported(
+        &self,
+        capture_id: &str,
+        token: &str,
+        imported_at: &str,
+    ) -> Result<(), LibraryError> {
+        let authorization = bearer(token)?;
+        let body = serde_json::to_vec(&AcknowledgeCaptureRequest {
+            imported_at: imported_at.to_string(),
+        })
+        .map_err(|_| LibraryError::InvalidCloudResponse)?;
+        self.agent
+            .post(self.endpoint(&format!("/v1/captures/{capture_id}/acknowledge"))?)
+            .header("Authorization", authorization)
+            .content_type("application/json")
+            .send(&body)
+            .map_err(map_capture_ack_error)?;
+        Ok(())
+    }
+
 
     fn endpoint(&self, path: &str) -> Result<String, LibraryError> {
         self.base_url
@@ -160,4 +252,47 @@ fn map_upload_error(error: ureq::Error) -> LibraryError {
         ureq::Error::Timeout(_) => LibraryError::CloudRequestTimedOut,
         _ => LibraryError::CloudRequestUnavailable,
     }
+}
+
+fn bearer(token: &str) -> Result<String, LibraryError> {
+    let token = token.trim();
+    if token.is_empty() {
+        return Err(LibraryError::CloudCredentialNotConfigured);
+    }
+    Ok(format!("Bearer {token}"))
+}
+
+fn validate_download_ticket(ticket: &RemoteCaptureDownloadTicket) -> Result<(), LibraryError> {
+    if ticket.method != "GET" {
+        return Err(LibraryError::InvalidCloudResponse);
+    }
+    url::Url::parse(&ticket.download_url)
+        .and_then(|url| {
+            if matches!(url.scheme(), "http" | "https") {
+                Ok(())
+            } else {
+                Err(url::ParseError::RelativeUrlWithoutBase)
+            }
+        })
+        .map_err(|_| LibraryError::InvalidCloudResponse)
+}
+
+fn map_capture_list_error(error: ureq::Error) -> LibraryError {
+    map_api_error(error, LibraryError::CloudCaptureListRejected)
+}
+
+fn map_capture_ticket_error(error: ureq::Error) -> LibraryError {
+    map_api_error(error, LibraryError::CloudCaptureTicketRejected)
+}
+
+fn map_capture_download_error(error: ureq::Error) -> LibraryError {
+    match error {
+        ureq::Error::StatusCode(status) => LibraryError::CloudCaptureDownloadRejected(status),
+        ureq::Error::Timeout(_) => LibraryError::CloudRequestTimedOut,
+        _ => LibraryError::CloudRequestUnavailable,
+    }
+}
+
+fn map_capture_ack_error(error: ureq::Error) -> LibraryError {
+    map_api_error(error, LibraryError::CloudCaptureAcknowledgementRejected)
 }

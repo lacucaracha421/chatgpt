@@ -9,7 +9,7 @@ describe("useOnlineCatalogUpdate", () => {
 
   it("checks immediately and once per hour", async () => {
     const gateway = {
-      runDueOnlineCatalogUpdate: vi.fn().mockResolvedValue(null),
+      runDueOnlineCatalogUpdate: vi.fn(), runDueCloudCaptureSync: vi.fn().mockResolvedValue(null).mockResolvedValue(null),
     } as unknown as LibraryGateway;
 
     renderHook(() => useOnlineCatalogUpdate(gateway, "C:\\Library"));

@@ -19,7 +19,7 @@ mod folder_appearance;
 mod image_fingerprint;
 pub(crate) mod igdb;
 mod igdb_flow;
-mod ingestion;
+pub(crate) mod ingestion;
 pub mod legacy_migration;
 pub mod legacy_package_migration;
 mod lock;

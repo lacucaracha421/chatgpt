@@ -118,6 +118,14 @@ impl From<LibraryError> for CommandError {
             LibraryError::CloudObjectKeyConflict => "cloud_object_key_conflict",
             LibraryError::CloudSourceUnavailable => "cloud_source_unavailable",
             LibraryError::CloudSourceChanged => "cloud_source_changed",
+            LibraryError::CloudCaptureListRejected(_) => "cloud_capture_list_rejected",
+            LibraryError::CloudCaptureTicketRejected(_) => "cloud_capture_ticket_rejected",
+            LibraryError::CloudCaptureDownloadRejected(_) => "cloud_capture_download_rejected",
+            LibraryError::CloudCaptureTooLarge => "cloud_capture_too_large",
+            LibraryError::CloudCaptureStagingFailed => "cloud_capture_staging_failed",
+            LibraryError::CloudCaptureAcknowledgementRejected(_) => "cloud_capture_ack_rejected",
+            LibraryError::InvalidCloudCaptureRecord => "invalid_cloud_capture_record",
+            LibraryError::CloudCaptureReviewPending => "cloud_capture_review_pending",
             LibraryError::OnlineCatalogNotInstalled => "online_catalog_not_installed",
             LibraryError::OnlineCatalogWorkNotFound => "online_catalog_work_not_found",
             LibraryError::InvalidOnlineCatalog => "invalid_online_catalog",
@@ -1477,6 +1485,18 @@ pub async fn set_online_catalog_update_settings(
     .await
     .map_err(|_| background_task_error())?
     .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn run_due_cloud_capture_sync(
+    state: State<'_, AppState>,
+) -> Result<Option<String>, CommandError> {
+    // 수집 파일 해시·썸네일 작업이 포함되므로 블로킹 스레드에서 실행한다.
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.sync_next_cloud_capture())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]

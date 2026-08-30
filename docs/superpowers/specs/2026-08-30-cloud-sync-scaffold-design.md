@@ -110,3 +110,15 @@ object key는 UUID 형식의 안정적인 자산 ID와 미디어 종류만 사�
 3. 유사 이미지 검토 대상과 완전 중복은 새 큐 작업을 만들지 않는지 확인한다.
 4. 다음 작업 준비 결과의 object key가 제목·원래 이름·로컬 경로와 무관하고 자산 UUID만 사용하는지 확인한다.
 5. 가장 작은 관련 Rust 테스트부터 실행하고, 변경된 crate의 컴파일 위험이 남을 때만 `cargo test --lib`로 확장한다.
+
+## 후속: 클라우드 캡처 수신함 (원격 → 로컬)
+
+이 스캐폴드는 방향 A(로컬 → 클라우드)만 담았다. 이후 마일스톤에서 X 확장 → VPS Capture API → R2로 적재된 pending capture를 PC가 가져오는 반대 방향이 추가됐다(방향 B).
+
+- **개념 분리**: outbound `cloud_sync_queue`(`pending/processing/synced/failed`)와 inbound 캡처 수신함은 별개다. inbound는 `cloud_capture_imports` 테이블(마이그레이션 0029, `imported`/`acknowledged`)로 추적한다. 두 개념은 테이블·상태·재시도 정책을 공유하지 않는다.
+- **수집은 캐논 경로 하나**: 받은 파일은 `assets/.staging`에 캡처 ID·MIME에서 만든 안전한 이름으로 내려받고, `Library::ingest_media`에 `ImportSource::BrowserExtension`으로 넣는다. 해시 중복 판정, 썸네일, 유사 검토 등 기존 수집 동작이 그대로 권위를 가진다.
+- **ack 순서**: 로컬 수집 확정(Added 또는 ExactDuplicate) → `cloud_capture_imports`에 `imported` 기록 → 원격 acknowledge → 기록을 `acknowledged`로 갱신. ack 실패는 로컬을 되돌리지 않고, 다음 폴이 imported 기록을 보고 ack만 재시도한다.
+- **skip 정책**: 목록 파싱은 관대하게(serde default) 받고, 개별 기록의 형식 오류·미디어 종류 불명·다운로드 실패·수집 실패는 그 캡처만 건너뛴다. 한 건의 고장이 이후 캡처를 막지 않는다. 원격은 실패 건을 pending으로 유지해 재시도한다.
+- **ReviewPending은 확정이 아니다**: 유사 이미지 검토 대기가 된 캡처는 imported로 만들지 않고 다음 폴에서 다시 시도한다.
+- **폴링**: `run_due_cloud_capture_sync` 명령을 프론트가 시작 직후 1회, 이후 5분 간격 실행(겹침 없음). 네트워크 오류는 무시하고 다음 폴에서 재시도한다.
+- **계약 갭(해소 시 갱신 필요)**: 이 저장소에 VPS Capture API 서버 구현이 없어 라우트와 스키마는 이 저장소의 `/v1` 계약 스타일(presign/assets, Bearer 토큰)에 맞춘 최소 가정이다. 확정된 서버 계약이 정해지면 `cloud/client.rs`의 캡처 메서드와 `capture_tests`를 그 계약으로 갱신한다.

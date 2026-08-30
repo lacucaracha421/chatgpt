@@ -95,6 +95,8 @@ export const libraryGateway: LibraryGateway = {
     invoke<CatalogStatus>("set_online_catalog_update_settings", { enabled, intervalSeconds }),
   runDueOnlineCatalogUpdate: () =>
     invoke<CatalogUpdateResult | null>("run_due_online_catalog_update"),
+  runDueCloudCaptureSync: () =>
+    invoke<string | null>("run_due_cloud_capture_sync"),
   resolveOnlineCatalogWork: (workId) =>
     invoke<ResolvedGallery>("resolve_online_catalog_work", { workId }),
   getRemoteReadingProgress: (provider, workId) =>

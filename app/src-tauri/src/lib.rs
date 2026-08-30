@@ -161,6 +161,7 @@ pub fn run() {
             commands::set_online_catalog_bookmark,
             commands::update_online_catalog,
             commands::run_due_online_catalog_update,
+            commands::run_due_cloud_capture_sync,
             commands::set_online_catalog_update_settings,
             commands::resolve_online_catalog_work,
             commands::list_unread_release_changes,

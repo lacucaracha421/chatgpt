@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 28;
+pub(crate) const SCHEMA_VERSION: i64 = 29;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -48,6 +48,8 @@ const COLLECTED_AT_UTC_SCHEMA: &str = include_str!("../../migrations/0026_collec
 
 const REVISIT_SCHEMA: &str = include_str!("../../migrations/0027_revisit.sql");
 const CLOUD_SYNC_QUEUE_SCHEMA: &str = include_str!("../../migrations/0028_cloud_sync_queue.sql");
+const CLOUD_CAPTURE_IMPORTS_SCHEMA: &str =
+    include_str!("../../migrations/0029_cloud_capture_imports.sql");
 
 pub fn open_database(path: &Path) -> Result<Connection, LibraryError> {
     let connection = Connection::open(path)?;
@@ -63,7 +65,7 @@ pub fn initialize_database(path: &Path) -> Result<Connection, LibraryError> {
     let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
     match version {
         SCHEMA_VERSION => {}
-        version @ 0..=27 => {
+        version @ 0..=28 => {
             if version > 0 {
                 let root = path
                     .parent()
@@ -166,6 +168,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         if version <= 27 {
             transaction.execute_batch(CLOUD_SYNC_QUEUE_SCHEMA)?;
         }
+        if version <= 28 {
+            transaction.execute_batch(CLOUD_CAPTURE_IMPORTS_SCHEMA)?;
+        }
         transaction.commit()?;
         Ok::<(), LibraryError>(())
     })();
@@ -240,11 +245,12 @@ mod tests {
                 .unwrap(),
             None,
         );
+        // v28 큐 migration에 이어 0029 캡처 수신함 테이블까지 적용된다.
         assert_eq!(
             connection
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
-            28,
+            SCHEMA_VERSION,
         );
 
         connection

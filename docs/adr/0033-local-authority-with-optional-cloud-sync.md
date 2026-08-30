@@ -12,4 +12,11 @@ Lakomics의 로컬 라이브러리는 계속 권위 원본이며 계정, 네트�
 
 VPS의 `POST /v1/assets`는 동일 자산 ID에 대해 `ON CONFLICT(id) DO UPDATE` 방식의 idempotent upsert를 보장한다. 따라서 자산 등록 응답이 유실돼도 동일 요청을 안전하게 다시 보낼 수 있다. 다른 자산 ID가 이미 사용 중인 object key를 등록하면 의도적으로 409를 반환하며, 클라이언트는 이를 `failed`로 기록하고 반복 재시도하지 않는다.
 
-동기화 실패 중 network 오류, timeout, HTTP 429와 5xx만 `pending`으로 되돌린다. 400, 401, 403, 404, 409를 포함한 비일시적 4xx와 로컬 파일 무결성 오류는 `failed`로 기록한다.
+
+동기화에는 두 방향이 있고 로컬 라이브러리는 항상 권위 원본이다.
+
+**A. 로컬 캐논 라이브러리 → 클라우드 복제**: `cloud_sync_queue`의 transactional outbox가 로컬 커밋을 출발점으로 자산 원본과 메타데이터를 VPS/R2로 복제한다.
+
+**B. 원격 캡처 수신함 → 로컬 수집**: X 확장 → VPS Capture API → R2로 적재된 pending capture를 PC Lakomics가 주기적으로 폴링해 내려받고, 기존 캐논 수집 경로(`Library::ingest_media`)로 로컬 자산을 만든 뒤에만 원격 캡처를 imported로 표시한다. inbound 상태는 `cloud_capture_imports` 테이블로 추적하며 outbound `cloud_sync_queue`와 테이블·상태 기계가 완전히 분리된다. 로컬 수집이 성공하면 ack 실패 여부와 무관하게 재시도 시 exact duplicate 판정으로 중복 자산 없이 acknowledge만 다시 시도한다. 수집 실패, 검토 대기(ReviewPending)는 imported로 만들지 않는다.
+
+R2 자격 증명은 이 방향에서도 데스크톱이 가지지 않는다. 캡처 미디어 다운로드는 VPS가 발급한 signed download URL로만 수행한다.

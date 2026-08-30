@@ -722,6 +722,7 @@ export interface LibraryGateway {
   updateOnlineCatalog(): Promise<CatalogUpdateResult>;
   setOnlineCatalogUpdateSettings(enabled: boolean, intervalSeconds: number): Promise<CatalogStatus>;
   runDueOnlineCatalogUpdate(): Promise<CatalogUpdateResult | null>;
+  runDueCloudCaptureSync(): Promise<string | null>;
   resolveOnlineCatalogWork(workId: number): Promise<ResolvedGallery>;
   getRemoteReadingProgress(provider: RemoteProvider, workId: string): Promise<RemoteReadingProgress | null>;
   saveRemoteReadingProgress(progress: RemoteReadingProgress): Promise<void>;
