@@ -94,6 +94,18 @@ Status: `TODO`
 - Keep controls visible while paused, scrubbing, or changing volume.
 - Controls must overlay the video rather than changing its layout.
 
+### BUG-003 — X video drag-save shows blue selection highlight on PC
+Status: `TODO`
+
+Observed behavior:
+- On PC, dragging the pointer over an X video to invoke the extension save interaction can produce a blue browser selection highlight.
+- The video save itself succeeds; this is a visual/input-side artifact only.
+
+Direction:
+- Prevent native text/media selection only for the active drag/gesture surface used by the extension.
+- Prefer scoped `user-select: none`, selection clearing, or pointer-event handling during the gesture rather than disabling browser selection globally.
+- Do not change the working video save path.
+
 ### NAV-001 — Unify back-navigation behavior
 Status: `TODO`
 
@@ -237,6 +249,34 @@ Preferred automatic behavior:
 - If the PC direct service is available, save locally immediately.
 - Otherwise save through Cloud Capture.
 - The user should not need to manually care which transport is currently available.
+
+### EXT-003 — Group media saved from the same X post
+Status: `TODO`
+
+Goal:
+- When several images or media items are saved from one X post, preserve the fact that they belonged to the same post and make them easy to view together later.
+
+Direction:
+- Reuse the shared source post URL as the primary grouping identity where safe.
+- Preserve per-asset records and normal classifications; grouping should not duplicate media.
+- Provide an easy "same post" view or sibling strip from the asset viewer/inspector.
+- Consider mixed image/video posts as the same group.
+- Avoid coupling this to an X-only storage schema if a generic source-group concept can serve future importers.
+
+### EXT-004 — Adaptive secondary donut ordering and hidden tags
+Status: `TODO`
+
+Goal:
+- Make frequently collected tags faster to reach in the second donut while keeping low-use tags out of the way.
+
+Direction:
+- Rank secondary tags using actual collection/use frequency.
+- Place high-frequency tags toward the visually central/easy-reach portion of the second donut.
+- Push rarely used tags toward left/right outer positions rather than random reshuffling.
+- Keep ordering stable enough that muscle memory is not destroyed by every save; use thresholds or periodic re-ranking rather than live reorder on each click.
+- Add per-tag `숨기기` so hidden tags remain valid classifications but do not appear in the donut UI.
+- Provide a settings/manage path to reveal hidden tags again.
+- Hidden state and usage ranking should be presentation metadata only; do not alter the underlying classification tree or saved asset memberships.
 
 ### PERF-001 — Cache and media optimization policy
 Status: `TODO`
@@ -417,11 +457,12 @@ For each new bug, record:
 2. CLOUD-002 inbound app integration
 3. BUG-001 / BUG-002 DB and migration investigation
 4. VERIFY-001 real X → VPS → PC verification
-5. P1 UX pass: flashing, video controls, navigation, loading/errors, selection clearing, cover crop, sidebar cleanup, scrollbar
+5. P1 UX pass: flashing, video controls, BUG-003 video drag selection artifact, navigation, loading/errors, selection clearing, cover crop, sidebar cleanup, scrollbar
 6. CATALOG-001 / CATALOG-002 Heliotrope-based catalog work
 7. CLOUD-UI-001 cloud status/problem surface
 8. EXT-001 / EXT-002 extension settings and Cloud-first save behavior
-9. PERF-001 / PERF-002 cache optimization and view-state preservation
-10. CLOUD-003 long-video async handling if real-world use requires it
-11. NOTE-001 / STATS-001 / IDEA-001 / UI-008
-12. Long-term collection presentation work
+9. EXT-003 / EXT-004 same-post grouping and adaptive/hidden donut tags
+10. PERF-001 / PERF-002 cache optimization and view-state preservation
+11. CLOUD-003 long-video async handling if real-world use requires it
+12. NOTE-001 / STATS-001 / IDEA-001 / UI-008
+13. Long-term collection presentation work
