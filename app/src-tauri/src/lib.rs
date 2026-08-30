@@ -1,4 +1,5 @@
 mod catalog_transport;
+mod cloud;
 mod commands;
 mod extension_api;
 pub mod library;

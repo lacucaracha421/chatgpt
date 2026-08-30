@@ -12,7 +12,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "node scripts/run-tauri.mjs",
+    "tauri": "call \"%npm_node_execpath%\" scripts/run-tauri.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "npm run test && npm run build"

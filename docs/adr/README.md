@@ -16,7 +16,7 @@
 | --- | --- | --- |
 | 0001 Managed asset ingestion | Accepted | Media Vault가 자산 파일 생명주기를 소유하는 기본 원칙 |
 | 0002 Windows first | Accepted | 현재 데스크톱 제품 기준 |
-| 0003 Local first | Accepted | 로컬 라이브러리와 오프라인 사용 우선 |
+| 0003 Local first | Accepted, clarified by ADR-0033 | 로컬 라이브러리와 오프라인 사용 우선 |
 | 0004 Tags and collections over folders | **Superseded** | ADR-0013이 현재 Classification 모델을 정의함 |
 | 0005 Typed hierarchical tags | **Superseded** | hierarchy 취지는 유지되지만 다중 직접 membership은 ADR-0013으로 대체 |
 | 0006 User-defined classification is not behavior | Accepted | 사용자 이름/위치로 기능 분기하지 않음 |
@@ -27,5 +27,6 @@
 | 0011 Library trash before file deletion | Accepted | 앱 휴지통을 거쳐 삭제 |
 | 0012 Classification tree is primary navigation | Accepted | Asset Library 탐색 원칙; ADR-0013이 membership 경계를 명확히 함 |
 | 0013 Classification tree + single direct membership | **Accepted** | 현재 Classification/Album/Collection 경계 |
+| 0033 Local authority with optional cloud sync | **Accepted** | 로컬 권위를 유지하며 선택적 단방향 클라우드 복제를 허용 |
 
 새 ADR을 추가하거나 기존 결정을 대체할 때 이 인덱스와 해당 ADR의 `Status`/`Supersedes`/`Clarifies` 관계도 같이 갱신합니다.

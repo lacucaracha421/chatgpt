@@ -30,6 +30,34 @@ pub enum LibraryError {
     },
     #[error("SQLite 작업이 실패했습니다")]
     Database(#[from] rusqlite::Error),
+    #[error("클라우드 동기화 설정이 올바르지 않습니다")]
+    InvalidCloudSyncConfig,
+    #[error("클라우드 동기화 큐 항목이 올바르지 않습니다")]
+    InvalidCloudSyncQueueItem,
+    #[error("클라우드 API 토큰이 설정되지 않았습니다")]
+    CloudCredentialNotConfigured,
+    #[error("클라우드 API 토큰이 올바르지 않습니다")]
+    InvalidCloudCredentialValue,
+    #[error("클라우드 API 인증에 실패했습니다")]
+    CloudUnauthorized,
+    #[error("클라우드 요청 시간이 초과됐습니다")]
+    CloudRequestTimedOut,
+    #[error("클라우드 API에 연결할 수 없습니다")]
+    CloudRequestUnavailable,
+    #[error("클라우드 API 응답이 올바르지 않습니다")]
+    InvalidCloudResponse,
+    #[error("업로드 URL 발급 요청이 거부됐습니다: HTTP {0}")]
+    CloudPresignRejected(u16),
+    #[error("R2 업로드가 거부됐습니다: HTTP {0}")]
+    CloudUploadRejected(u16),
+    #[error("클라우드 자산 등록이 거부됐습니다: HTTP {0}")]
+    CloudAssetRegistrationRejected(u16),
+    #[error("다른 클라우드 자산이 같은 object key를 사용하고 있습니다")]
+    CloudObjectKeyConflict,
+    #[error("동기화할 로컬 파일을 열 수 없습니다")]
+    CloudSourceUnavailable,
+    #[error("동기화할 로컬 파일이 수집 당시 내용과 다릅니다")]
+    CloudSourceChanged,
     #[error("온라인 카탈로그가 설치되지 않았습니다")]
     OnlineCatalogNotInstalled,
     #[error("온라인 카탈로그 작품을 찾을 수 없습니다")]

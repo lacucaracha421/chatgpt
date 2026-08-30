@@ -17,6 +17,8 @@ use windows_sys::Win32::Storage::FileSystem::{
     GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
 };
 
+use crate::cloud::queue::enqueue_asset_upsert;
+
 use super::{
     asset_metadata::normalize_source_metadata,
     error::LibraryError,
@@ -447,6 +449,9 @@ impl Library {
                 ],
             )?;
         }
+        if matches!(registration, Registration::Normal) {
+            enqueue_asset_upsert(&transaction, &asset.id, &asset.collected_at)?;
+        }
         transaction.commit()?;
         Ok(())
     }
@@ -510,6 +515,7 @@ impl Library {
                 params![asset.id, classification_id],
             )?;
         }
+        enqueue_asset_upsert(&transaction, &asset.id, &asset.collected_at)?;
         transaction.commit()?;
         Ok(())
     }
@@ -1237,6 +1243,36 @@ mod tests {
     }
 
     #[test]
+    fn successful_asset_commit_creates_one_pending_cloud_upsert() {
+        let fixture = IngestionFixture::new();
+        let IngestOutcome::Added { asset } = fixture.ingest() else {
+            panic!("expected added asset");
+        };
+
+        let count = || {
+            fixture
+                .library
+                .connection()
+                .unwrap()
+                .query_row(
+                    "SELECT COUNT(*) FROM cloud_sync_queue
+                     WHERE entity_type = 'asset' AND entity_id = ?1
+                       AND operation = 'upsert' AND status = 'pending' AND revision = 1",
+                    [&asset.id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap()
+        };
+        assert_eq!(count(), 1);
+
+        assert!(matches!(
+            fixture.ingest(),
+            IngestOutcome::ExactDuplicate { .. }
+        ));
+        assert_eq!(count(), 1);
+    }
+
+    #[test]
     fn ingest_copies_the_image_and_keeps_the_user_source() {
         let fixture = IngestionFixture::new();
 
@@ -1541,6 +1577,13 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .unwrap();
+        let queued_candidate_count = connection
+            .query_row(
+                "SELECT COUNT(*) FROM cloud_sync_queue WHERE entity_id = ?1",
+                [&candidate_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap();
         drop(connection);
         assert_eq!(
             stored,
@@ -1559,6 +1602,7 @@ mod tests {
                 .id,
             fixture.tag_id
         );
+        assert_eq!(queued_candidate_count, 0);
         assert!(existing_path.is_file());
         assert!(variant_path.is_file());
     }

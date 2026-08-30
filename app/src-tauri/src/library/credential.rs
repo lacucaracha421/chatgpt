@@ -3,6 +3,7 @@ use super::models::{IgdbCredentialStatus, IgdbCredentials, TmdbCredentialStatus,
 use serde_json;
 
 const ALADIN_TARGET: &str = "Lakomics/AladinTTB";
+const CLOUD_API_TARGET: &str = "Lakomics/CloudApi";
 const IGDB_TARGET: &str = "Lakomics/Igdb";
 const TMDB_TARGET: &str = "Lakomics/Tmdb";
 
@@ -170,6 +171,28 @@ pub(crate) fn read_aladin_key() -> Result<String, LibraryError> {
     CredentialService::new(&windows::WindowsCredentialBackend, ALADIN_TARGET).read()
 }
 
+#[cfg(target_os = "windows")]
+pub(crate) fn cloud_api_token_status() -> Result<bool, LibraryError> {
+    cloud_api_token_status_with(&windows::WindowsCredentialBackend)
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn set_cloud_api_token_os(token: &str) -> Result<(), LibraryError> {
+    set_cloud_api_token(&windows::WindowsCredentialBackend, token)
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn delete_cloud_api_token_os() -> Result<(), LibraryError> {
+    windows::WindowsCredentialBackend
+        .delete(CLOUD_API_TARGET)
+        .map_err(map_backend_error)
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn read_cloud_api_token_os() -> Result<String, LibraryError> {
+    read_cloud_api_token(&windows::WindowsCredentialBackend)
+}
+
 #[cfg(not(target_os = "windows"))]
 pub(crate) fn aladin_key_status() -> Result<bool, LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
@@ -187,6 +210,26 @@ pub(crate) fn delete_aladin_key() -> Result<(), LibraryError> {
 
 #[cfg(not(target_os = "windows"))]
 pub(crate) fn read_aladin_key() -> Result<String, LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn cloud_api_token_status() -> Result<bool, LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn set_cloud_api_token_os(_token: &str) -> Result<(), LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn delete_cloud_api_token_os() -> Result<(), LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn read_cloud_api_token_os() -> Result<String, LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
 
@@ -281,9 +324,9 @@ mod tests {
     use std::{cell::RefCell, collections::HashMap};
 
     use super::{
-        read_igdb_credentials_with, read_tmdb_token_with, set_igdb_credentials_with,
-        set_tmdb_token_with, CredentialBackend, CredentialError, CredentialService, ALADIN_TARGET,
-        TMDB_TARGET,
+        read_cloud_api_token, read_igdb_credentials_with, read_tmdb_token_with,
+        set_cloud_api_token, set_igdb_credentials_with, set_tmdb_token_with, CredentialBackend,
+        CredentialError, CredentialService, ALADIN_TARGET, CLOUD_API_TARGET, TMDB_TARGET,
     };
     use crate::library::error::LibraryError;
 
@@ -429,6 +472,53 @@ mod tests {
             Err(LibraryError::InvalidTmdbCredentialValue)
         ));
     }
+
+    #[test]
+    fn stores_cloud_token_in_its_own_credential_target() {
+        let backend = FakeBackend::default();
+
+        set_cloud_api_token(&backend, "  cloud-secret  ").unwrap();
+        assert_eq!(read_cloud_api_token(&backend).unwrap(), "cloud-secret");
+        assert_eq!(
+            backend.values.borrow().get(CLOUD_API_TARGET).unwrap(),
+            b"cloud-secret"
+        );
+        assert!(matches!(
+            set_cloud_api_token(&backend, "  "),
+            Err(LibraryError::InvalidCloudCredentialValue)
+        ));
+    }
+}
+
+fn validate_cloud_api_token(token: &str) -> Result<String, LibraryError> {
+    let token = token.trim();
+    if token.is_empty() {
+        return Err(LibraryError::InvalidCloudCredentialValue);
+    }
+    Ok(token.to_owned())
+}
+
+fn set_cloud_api_token<B: CredentialBackend>(backend: &B, token: &str) -> Result<(), LibraryError> {
+    let token = validate_cloud_api_token(token)?;
+    backend
+        .write(CLOUD_API_TARGET, token.as_bytes())
+        .map_err(map_backend_error)
+}
+
+fn read_cloud_api_token<B: CredentialBackend>(backend: &B) -> Result<String, LibraryError> {
+    let value = backend
+        .read(CLOUD_API_TARGET)
+        .map_err(map_backend_error)?
+        .ok_or(LibraryError::CloudCredentialNotConfigured)?;
+    let token = String::from_utf8(value).map_err(|_| LibraryError::InvalidCloudCredentialValue)?;
+    validate_cloud_api_token(&token)
+}
+
+fn cloud_api_token_status_with<B: CredentialBackend>(backend: &B) -> Result<bool, LibraryError> {
+    backend
+        .read(CLOUD_API_TARGET)
+        .map(|value| value.is_some())
+        .map_err(map_backend_error)
 }
 
 fn validate_igdb_credentials(

@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 27;
+pub(crate) const SCHEMA_VERSION: i64 = 28;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -47,6 +47,7 @@ const PDQ_SIMILARITY_SCHEMA: &str = include_str!("../../migrations/0025_pdq_simi
 const COLLECTED_AT_UTC_SCHEMA: &str = include_str!("../../migrations/0026_collected_at_utc.sql");
 
 const REVISIT_SCHEMA: &str = include_str!("../../migrations/0027_revisit.sql");
+const CLOUD_SYNC_QUEUE_SCHEMA: &str = include_str!("../../migrations/0028_cloud_sync_queue.sql");
 
 pub fn open_database(path: &Path) -> Result<Connection, LibraryError> {
     let connection = Connection::open(path)?;
@@ -62,7 +63,7 @@ pub fn initialize_database(path: &Path) -> Result<Connection, LibraryError> {
     let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
     match version {
         SCHEMA_VERSION => {}
-        version @ 0..=26 => {
+        version @ 0..=27 => {
             if version > 0 {
                 let root = path
                     .parent()
@@ -162,6 +163,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         if version <= 26 {
             transaction.execute_batch(REVISIT_SCHEMA)?;
         }
+        if version <= 27 {
+            transaction.execute_batch(CLOUD_SYNC_QUEUE_SCHEMA)?;
+        }
         transaction.commit()?;
         Ok::<(), LibraryError>(())
     })();
@@ -178,6 +182,99 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn migrates_v27_to_cloud_queue_with_disabled_defaults() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        for schema in [
+            INITIAL_SCHEMA,
+            VAULT_SAFETY_SCHEMA,
+            SIMILARITY_REVIEW_SCHEMA,
+            VIDEO_MEDIA_SCHEMA,
+            MANGA_SCHEMA,
+            MANGA_MODIFIED_SCHEMA,
+            CLASSIFICATION_APPEARANCE_SCHEMA,
+            ASSET_ALBUMS_SCHEMA,
+            ASSET_SOURCE_PROVENANCE_SCHEMA,
+            COLLECTIONS_SCHEMA,
+            COLLECTIONS_TYPED_SCHEMA,
+            COLLECTION_SOURCE_SCHEMA,
+            COLLECTION_EXTERNAL_BINDINGS_SCHEMA,
+            COLLECTION_WORK_ARTWORKS_SCHEMA,
+            COLLECTION_VOLUMES_SCHEMA,
+            ALADIN_VOLUME_SOURCES_SCHEMA,
+            ALADIN_RELEASE_WATCH_SCHEMA,
+            ONLINE_CATALOG_SCHEMA,
+            ONLINE_CATALOG_BOOKMARKS_SCHEMA,
+            LEGACY_PACKAGE_IMPORTS_SCHEMA,
+            COLLECTION_LEGACY_KIND_SCHEMA,
+            COLLECTION_FOUNDATION_SCHEMA,
+            GAME_PROVIDER_DETAIL_SCHEMA,
+            MOVIE_PROVIDER_DETAIL_SCHEMA,
+            PDQ_SIMILARITY_SCHEMA,
+            COLLECTED_AT_UTC_SCHEMA,
+            REVISIT_SCHEMA,
+        ] {
+            connection.execute_batch(schema).unwrap();
+        }
+
+        migrate_to_latest(&mut connection, 27).unwrap();
+
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT cloud_sync_enabled FROM library_settings WHERE singleton = 1",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0,
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT cloud_api_base_url FROM library_settings WHERE singleton = 1",
+                    [],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .unwrap(),
+            None,
+        );
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            28,
+        );
+
+        connection
+            .execute(
+                "INSERT INTO cloud_sync_queue (
+                    id, entity_type, entity_id, operation, status, revision, updated_at
+                 ) VALUES ('queue-1', 'asset', 'asset-1', 'upsert', 'pending', 1,
+                           '2026-08-30T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        assert!(connection
+            .execute(
+                "INSERT INTO cloud_sync_queue (
+                    id, entity_type, entity_id, operation, status, revision, updated_at
+                 ) VALUES ('queue-2', 'asset', 'asset-1', 'upsert', 'pending', 1,
+                           '2026-08-30T00:00:01Z')",
+                [],
+            )
+            .is_err());
+        assert!(connection
+            .execute(
+                "INSERT INTO cloud_sync_queue (
+                    id, entity_type, entity_id, operation, status, revision, updated_at
+                 ) VALUES ('queue-3', 'asset', 'asset-2', 'upsert', 'unknown', 1,
+                           '2026-08-30T00:00:02Z')",
+                [],
+            )
+            .is_err());
+    }
 
     #[test]
     fn migrates_v25_collected_at_offsets_to_utc_milliseconds() {
@@ -463,15 +560,16 @@ mod tests {
         ] {
             connection.execute_batch(schema).unwrap();
         }
-        connection.execute_batch(
-            "INSERT INTO collections
+        connection
+            .execute_batch(
+                "INSERT INTO collections
                 (id, name, type, author, my_score, showcase, created_at, updated_at)
              VALUES
                 ('game-a', 'Game A', 'game', 'Studio A', 5, 1, '2026-01-01', '2026-01-01'),
                 ('game-b', 'Game B', 'game', 'Studio B', 4, 1, '2026-01-02', '2026-01-02'),
                 ('movie-a', 'Movie A', 'movie', NULL, 3, 1, '2026-01-01', '2026-01-01');",
-        )
-        .unwrap();
+            )
+            .unwrap();
 
         migrate_to_latest(&mut connection, 21).unwrap();
 
@@ -481,16 +579,32 @@ mod tests {
                 .unwrap(),
             SCHEMA_VERSION
         );
-        let game: (Option<String>, Option<String>, Option<String>, Option<f64>, Option<i64>) =
-            connection
-                .query_row(
-                    "SELECT developer, production_company, release_date, my_score, showcase_order
+        let game: (
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<f64>,
+            Option<i64>,
+        ) = connection
+            .query_row(
+                "SELECT developer, production_company, release_date, my_score, showcase_order
                      FROM collections WHERE id = 'game-a'",
-                    [],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
-                )
-                .unwrap();
-        assert_eq!(game, (Some("Studio A".into()), None, None, Some(5.0), Some(0)));
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            game,
+            (Some("Studio A".into()), None, None, Some(5.0), Some(0))
+        );
         assert_eq!(
             connection
                 .query_row(
@@ -1530,15 +1644,23 @@ mod tests {
 
         migrate_to_latest(&mut connection, 26).unwrap();
 
-        for table in ["asset_activity", "revisit_slates", "revisit_bundles", "revisit_bundle_assets", "revisit_preferences"] {
-            assert!(connection
-                .query_row(
-                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
-                    [table],
-                    |row| row.get::<_, i64>(0),
-                )
-                .unwrap()
-                > 0);
+        for table in [
+            "asset_activity",
+            "revisit_slates",
+            "revisit_bundles",
+            "revisit_bundle_assets",
+            "revisit_preferences",
+        ] {
+            assert!(
+                connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                        [table],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .unwrap()
+                    > 0
+            );
         }
         assert_eq!(
             connection
