@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 26;
+pub(crate) const SCHEMA_VERSION: i64 = 27;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -45,6 +45,8 @@ const MOVIE_PROVIDER_DETAIL_SCHEMA: &str =
     include_str!("../../migrations/0024_movie_provider_detail.sql");
 const PDQ_SIMILARITY_SCHEMA: &str = include_str!("../../migrations/0025_pdq_similarity.sql");
 const COLLECTED_AT_UTC_SCHEMA: &str = include_str!("../../migrations/0026_collected_at_utc.sql");
+
+const REVISIT_SCHEMA: &str = include_str!("../../migrations/0027_revisit.sql");
 
 pub fn open_database(path: &Path) -> Result<Connection, LibraryError> {
     let connection = Connection::open(path)?;
@@ -157,6 +159,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         if version <= 25 {
             transaction.execute_batch(COLLECTED_AT_UTC_SCHEMA)?;
         }
+        if version <= 26 {
+            transaction.execute_batch(REVISIT_SCHEMA)?;
+        }
         transaction.commit()?;
         Ok::<(), LibraryError>(())
     })();
@@ -245,7 +250,7 @@ mod tests {
             connection
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
-            26,
+            SCHEMA_VERSION,
         );
     }
 
@@ -1481,6 +1486,60 @@ mod tests {
             .unwrap()
             .exists([])
             .unwrap());
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION,
+        );
+    }
+
+    #[test]
+    fn migrates_v26_to_revisit_schema() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        for schema in [
+            INITIAL_SCHEMA,
+            VAULT_SAFETY_SCHEMA,
+            SIMILARITY_REVIEW_SCHEMA,
+            VIDEO_MEDIA_SCHEMA,
+            MANGA_SCHEMA,
+            MANGA_MODIFIED_SCHEMA,
+            CLASSIFICATION_APPEARANCE_SCHEMA,
+            ASSET_ALBUMS_SCHEMA,
+            ASSET_SOURCE_PROVENANCE_SCHEMA,
+            COLLECTIONS_SCHEMA,
+            COLLECTIONS_TYPED_SCHEMA,
+            COLLECTION_SOURCE_SCHEMA,
+            COLLECTION_EXTERNAL_BINDINGS_SCHEMA,
+            COLLECTION_WORK_ARTWORKS_SCHEMA,
+            COLLECTION_VOLUMES_SCHEMA,
+            ALADIN_VOLUME_SOURCES_SCHEMA,
+            ALADIN_RELEASE_WATCH_SCHEMA,
+            ONLINE_CATALOG_SCHEMA,
+            ONLINE_CATALOG_BOOKMARKS_SCHEMA,
+            LEGACY_PACKAGE_IMPORTS_SCHEMA,
+            COLLECTION_LEGACY_KIND_SCHEMA,
+            COLLECTION_FOUNDATION_SCHEMA,
+            GAME_PROVIDER_DETAIL_SCHEMA,
+            MOVIE_PROVIDER_DETAIL_SCHEMA,
+            PDQ_SIMILARITY_SCHEMA,
+            COLLECTED_AT_UTC_SCHEMA,
+        ] {
+            connection.execute_batch(schema).unwrap();
+        }
+
+        migrate_to_latest(&mut connection, 26).unwrap();
+
+        for table in ["asset_activity", "revisit_slates", "revisit_bundles", "revisit_bundle_assets", "revisit_preferences"] {
+            assert!(connection
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap()
+                > 0);
+        }
         assert_eq!(
             connection
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))

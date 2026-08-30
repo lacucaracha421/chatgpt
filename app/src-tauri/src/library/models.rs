@@ -525,6 +525,34 @@ pub struct AssetCreatorSummary {
     pub cover_asset_ids: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RevisitBundle {
+    pub id: String,
+    pub kind: String,
+    pub title: String,
+    pub reason: String,
+    pub asset_ids: Vec<String>,
+    pub revision: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RevisitSlate {
+    pub local_date: String,
+    pub created_at: String,
+    pub revision: i64,
+    pub bundles: Vec<RevisitBundle>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RevisitSlateSummary {
+    pub local_date: String,
+    pub created_at: String,
+    pub revision: i64,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AssetClassificationPatch {
