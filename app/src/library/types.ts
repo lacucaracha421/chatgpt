@@ -20,6 +20,13 @@ export type CatalogUpdateResult = {
   lastSuccessAt: string | null;
 };
 
+export type CloudCaptureSyncResult = {
+  attempted: number;
+  acknowledged: number;
+  failed: number;
+  reviewPending: number;
+};
+
 export type RemoteProvider = "kHentai";
 
 export type ResolvedGallery = {
@@ -722,7 +729,7 @@ export interface LibraryGateway {
   updateOnlineCatalog(): Promise<CatalogUpdateResult>;
   setOnlineCatalogUpdateSettings(enabled: boolean, intervalSeconds: number): Promise<CatalogStatus>;
   runDueOnlineCatalogUpdate(): Promise<CatalogUpdateResult | null>;
-  runDueCloudCaptureSync(): Promise<string | null>;
+  runDueCloudCaptureSync(): Promise<CloudCaptureSyncResult>;
   resolveOnlineCatalogWork(workId: number): Promise<ResolvedGallery>;
   getRemoteReadingProgress(provider: RemoteProvider, workId: string): Promise<RemoteReadingProgress | null>;
   saveRemoteReadingProgress(progress: RemoteReadingProgress): Promise<void>;

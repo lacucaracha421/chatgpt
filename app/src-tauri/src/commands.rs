@@ -1490,7 +1490,7 @@ pub async fn set_online_catalog_update_settings(
 #[tauri::command]
 pub async fn run_due_cloud_capture_sync(
     state: State<'_, AppState>,
-) -> Result<Option<String>, CommandError> {
+) -> Result<crate::cloud::captures::CloudCaptureSyncResult, CommandError> {
     // 수집 파일 해시·썸네일 작업이 포함되므로 블로킹 스레드에서 실행한다.
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || library.sync_next_cloud_capture())

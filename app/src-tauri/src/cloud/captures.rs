@@ -9,23 +9,50 @@ use super::{
 };
 use crate::library::{
     error::LibraryError,
-    models::{IngestMediaRequest, IngestOutcome, ImportSource},
+    models::{ImportSource, IngestMediaRequest, IngestOutcome},
     Library,
 };
+
+/// 클라우드 캡처 수신함(원격 → 로컬) 폴 한 번의 결과 요약. 로컬 → 클라우드
+/// `cloud_sync_queue` 동기화와는 무관하다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CloudCaptureSyncResult {
+    /// 이번 폴에서 실제 처리 대상으로 삼은 유효한 pending capture 수.
+    /// malformed 기록은 포함하지 않는다. 25건 상한도 이 값 기준.
+    pub attempted: u32,
+    /// 최종 acknowledge까지 성공한 수. 신규 Added, ExactDuplicate,
+    /// 이전 실행에서 이미 로컬 import돼 ack만 재시도한 경우를 포함한다.
+    pub acknowledged: u32,
+    /// 다운로드·ingest·acknowledge 오류로 이번 폴에서 완료되지 못한 수. 원격 pending 유지.
+    pub failed: u32,
+    /// 유사 이미지 검토로 acknowledge하지 않고 pending에 남긴 수.
+    pub review_pending: u32,
+}
 
 /// 캡처 다운로드 상한. 이미지는 수집 파이프라인의 상한을 따르고,
 /// 영상은 확장 API의 원격 영상 상한을 따른다.
 const MAX_CAPTURE_IMAGE_BYTES: u64 = crate::library::ingestion::MAX_IMAGE_BYTES;
 const MAX_CAPTURE_VIDEO_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+/// 한 건의 캡처를 완전히 소비한 결과. Imported는 로컬 수집 확정 + 원격
+/// acknowledge까지 끝난 경우다.
+enum ConsumedCapture {
+    Imported,
+    ReviewPending,
+}
 
 impl Library {
-    /// 클라우드 캡처 수신함에서 pending capture를 가져와 로컬 수집을 시도한다.
-    /// 성공한 캡처만 원격에서 imported로 표시한다. 방향은 클라우드 → 로컬이며
-    /// `cloud_sync_queue`(로컬 → 클라우드)와 상태를 공유하지 않는다.
-    pub(crate) fn sync_next_cloud_capture(&self) -> Result<Option<String>, LibraryError> {
+    /// 한 번의 폴에서 처리 시도하는 pending capture 상한.
+    const MAX_CAPTURES_PER_SYNC: usize = 25;
+
+    /// 클라우드 캡처 수신함에서 pending capture 목록을 한 번 받아 최대
+    /// `MAX_CAPTURES_PER_SYNC`건까지 순차적으로 수집한다. 성공한 캡처만 원격에서
+    /// imported로 표시한다. 방향은 클라우드 → 로컬이며 `cloud_sync_queue`(로컬 →
+    /// 클라우드)와 상태를 공유하지 않는다.
+    pub(crate) fn sync_next_cloud_capture(&self) -> Result<CloudCaptureSyncResult, LibraryError> {
         let config = self.cloud_sync_config()?;
         if !config.enabled {
-            return Ok(None);
+            return Ok(CloudCaptureSyncResult::default());
         }
         let base_url = config
             .api_base_url
@@ -39,9 +66,15 @@ impl Library {
         &self,
         client: &CloudClient,
         token: &str,
-    ) -> Result<Option<String>, LibraryError> {
+    ) -> Result<CloudCaptureSyncResult, LibraryError> {
+        // 한 번의 폴에서 상한까지 계속 소진한다. 실패한 캡처는 건너뛰고 다음
+        // 캡처로 진행하므로 한 건의 오류가 이후 캡처를 막지 않는다.
         let captures = client.list_pending_captures(token)?;
+        let mut result = CloudCaptureSyncResult::default();
         for payload in captures {
+            if result.attempted >= Self::MAX_CAPTURES_PER_SYNC as u32 {
+                break;
+            }
             let capture = match RemoteCapture::try_from(payload) {
                 Ok(capture) => capture,
                 Err(error) => {
@@ -50,24 +83,29 @@ impl Library {
                     continue;
                 }
             };
+            result.attempted += 1;
             if self.cloud_capture_imported(&capture.id)? {
                 // 이전 실행에서 로컬 수집은 끝났지만 acknowledge가 유실된 케이스.
                 let imported_at = chrono::Utc::now().to_rfc3339();
                 client.acknowledge_capture_imported(&capture.id, token, &imported_at)?;
                 self.mark_cloud_capture_acknowledged(&capture.id)?;
+                result.acknowledged += 1;
                 continue;
             }
             match self.consume_cloud_capture(client, token, &capture) {
-                Ok(()) => return Ok(Some(capture.id)),
+                Ok(outcome) => match outcome {
+                    ConsumedCapture::Imported => result.acknowledged += 1,
+                    ConsumedCapture::ReviewPending => result.review_pending += 1,
+                },
                 Err(error) => {
                     // 한 건의 실패가 이후 캡처를 막지 않는다. 재시도 가능
                     // 오류라도 다음 캡처로 넘어가고, 문제의 원인은 로그로 남긴다.
+                    result.failed += 1;
                     eprintln!("cloud capture {}: {error}", capture.id);
-                    continue;
                 }
             }
         }
-        Ok(None)
+        Ok(result)
     }
 
     fn consume_cloud_capture(
@@ -75,20 +113,22 @@ impl Library {
         client: &CloudClient,
         token: &str,
         capture: &RemoteCapture,
-    ) -> Result<(), LibraryError> {
+    ) -> Result<ConsumedCapture, LibraryError> {
         let maximum_bytes = match capture.media_kind {
             RemoteCaptureKind::Image => MAX_CAPTURE_IMAGE_BYTES,
             RemoteCaptureKind::Video => MAX_CAPTURE_VIDEO_BYTES,
         };
         let ticket = client.capture_download_ticket(&capture.id, token)?;
         let staging_directory = self.root().join("assets").join(".staging");
-        fs::create_dir_all(&staging_directory).map_err(|_| LibraryError::CloudCaptureStagingFailed)?;
+        fs::create_dir_all(&staging_directory)
+            .map_err(|_| LibraryError::CloudCaptureStagingFailed)?;
         let temporary_path = staging_directory.join(format!(
             "remote-capture-{}.{}",
             Uuid::new_v4(),
             capture_extension(capture)?
         ));
-        let downloaded_bytes = client.download_capture_media(&ticket, &temporary_path, maximum_bytes);
+        let downloaded_bytes =
+            client.download_capture_media(&ticket, &temporary_path, maximum_bytes);
         let temporary = TemporaryCaptureDownload::new(temporary_path);
         let downloaded_bytes = downloaded_bytes?;
         if downloaded_bytes == 0 {
@@ -100,13 +140,13 @@ impl Library {
         drop(temporary);
         let (status, asset_id) = match &outcome {
             IngestOutcome::Added { asset } => ("imported", Some(asset.id.clone())),
-            IngestOutcome::ExactDuplicate { existing_asset_id, .. } => {
-                ("imported", Some(existing_asset_id.clone()))
-            }
+            IngestOutcome::ExactDuplicate {
+                existing_asset_id, ..
+            } => ("imported", Some(existing_asset_id.clone())),
             IngestOutcome::ReviewPending { .. } => {
                 // 유사 이미지 검토는 로컬 확정이 아니다. 원격은 imported로 만들지 않고
                 // 다음 폴에서 다시 시도한다.
-                return Err(LibraryError::CloudCaptureReviewPending);
+                return Ok(ConsumedCapture::ReviewPending);
             }
         };
         let imported_at = chrono::Utc::now().to_rfc3339();
@@ -116,7 +156,7 @@ impl Library {
         self.mark_cloud_capture_imported(&capture.id, status, asset_id.as_deref(), &imported_at)?;
         client.acknowledge_capture_imported(&capture.id, token, &imported_at)?;
         self.mark_cloud_capture_acknowledged(&capture.id)?;
-        Ok(())
+        Ok(ConsumedCapture::Imported)
     }
 
     fn ingest_capture_media(
@@ -134,10 +174,9 @@ impl Library {
         source_path: &Path,
     ) -> Result<IngestMediaRequest, LibraryError> {
         // object key와 캡처 ID만 경로 재료로 쓴다. 원격 원본 파일명은 신뢰하지 않는다.
-        let source_url = capture
-            .source_url
-            .as_deref()
-            .filter(|value| value.starts_with("https://x.com/") || value.starts_with("https://twitter.com/"));
+        let source_url = capture.source_url.as_deref().filter(|value| {
+            value.starts_with("https://x.com/") || value.starts_with("https://twitter.com/")
+        });
         let creator_url = source_url.and_then(capture_creator_url);
         let creator_handle = capture.creator_handle.clone().or_else(|| {
             creator_url.as_deref().and_then(|url| {
@@ -213,15 +252,18 @@ impl Library {
 
 /// staging 경로의 접미사는 미디어 종류에서 온다. 원격 파일명은 확장자로도 쓰지 않는다.
 fn capture_extension(capture: &RemoteCapture) -> Result<&'static str, LibraryError> {
-    let from_content_type = capture.content_type.as_deref().and_then(|value| match value {
-        "image/png" => Some("png"),
-        "image/jpeg" => Some("jpg"),
-        "image/webp" => Some("webp"),
-        "image/gif" => Some("gif"),
-        "video/mp4" => Some("mp4"),
-        "video/webm" => Some("webm"),
-        _ => None,
-    });
+    let from_content_type = capture
+        .content_type
+        .as_deref()
+        .and_then(|value| match value {
+            "image/png" => Some("png"),
+            "image/jpeg" => Some("jpg"),
+            "image/webp" => Some("webp"),
+            "image/gif" => Some("gif"),
+            "video/mp4" => Some("mp4"),
+            "video/webm" => Some("webm"),
+            _ => None,
+        });
     match capture.media_kind {
         RemoteCaptureKind::Image => Ok(from_content_type.unwrap_or("png")),
         RemoteCaptureKind::Video => Ok(from_content_type.unwrap_or("mp4")),
@@ -277,6 +319,7 @@ impl TemporaryCaptureDownload {
 impl Drop for TemporaryCaptureDownload {
     fn drop(&mut self) {
         // 삭제 실패는 치명적이지 않다. 남은 임시 파일은 라이브러리 자산이 아니다.
-        let _ = fs::remove_file(&self.path).is_err_and(|error| error.kind() != io::ErrorKind::NotFound);
+        let _ =
+            fs::remove_file(&self.path).is_err_and(|error| error.kind() != io::ErrorKind::NotFound);
     }
 }

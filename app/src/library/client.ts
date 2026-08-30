@@ -64,6 +64,7 @@ import type {
   CatalogStatus,
   CatalogSuggestion,
   CatalogUpdateResult,
+  CloudCaptureSyncResult,
   CatalogWorkDetail,
   CollectionCover,
   CollectionVolume,
@@ -96,7 +97,7 @@ export const libraryGateway: LibraryGateway = {
   runDueOnlineCatalogUpdate: () =>
     invoke<CatalogUpdateResult | null>("run_due_online_catalog_update"),
   runDueCloudCaptureSync: () =>
-    invoke<string | null>("run_due_cloud_capture_sync"),
+    invoke<CloudCaptureSyncResult>("run_due_cloud_capture_sync"),
   resolveOnlineCatalogWork: (workId) =>
     invoke<ResolvedGallery>("resolve_online_catalog_work", { workId }),
   getRemoteReadingProgress: (provider, workId) =>

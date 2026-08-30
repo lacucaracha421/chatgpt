@@ -1,10 +1,10 @@
-mod captures;
+#[cfg(test)]
+mod capture_tests;
+pub(crate) mod captures;
 mod client;
 mod models;
 pub(crate) mod queue;
 mod sync;
-#[cfg(test)]
-mod capture_tests;
 
 #[cfg(test)]
 mod contract_tests;
