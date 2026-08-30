@@ -121,7 +121,14 @@
   function feedbackFor(response) {
     if (response?.ok) {
       if (response.status === "downloaded" && response.fallbackCode) {
-        return { message: "Lakomics 연결 불가 · 기기에 저장됨", retry: false, kind: "success" };
+        const fallbackMessages = {
+          collector_unauthorized: "서버 토큰 불일치 · 기기에 저장됨",
+          collector_timeout: "서버 응답 초과 · 기기에 저장됨",
+          collector_request_failed: "서버 요청 실패 · 기기에 저장됨",
+          collector_media_unsupported: "미디어 미지원 · 기기에 저장됨",
+        };
+        const suffix = fallbackMessages[response.fallbackCode] ?? "Lakomics 연결 불가 · 기기에 저장됨";
+        return { message: suffix, retry: false, kind: "success" };
       }
       const messages = {
         added: "수집 완료",

@@ -1160,6 +1160,35 @@ test("collector-enabled resolved video saves go to the VPS capture inbox", async
   assert.equal(harness.downloadCalls.length, 0);
 });
 
+test("collector still captures video when classifications came from the local fallback tree", async () => {
+  const harness = createHarness({
+    collectorToken: "server-secret-token",
+    collectorSettings: { enabled: true, baseUrl: "http://100.76.119.29:32146" },
+    preferences: { saveMode: "auto", downloadFolder: "Lakomics" },
+  });
+  harness.queueJson({ ok: true, created: true, capture: { id: "video-local-1", status: "pending" } });
+
+  const response = await harness.api.handleMessage({
+    type: "ingestion:create",
+    payload: {
+      source: "x",
+      mediaType: "video",
+      mediaUrl: "https://video.twimg.com/ext_tw_video/1/pu/vid/1280x720/LOCAL.mp4",
+      sourceUrl: "https://x.com/artist/status/6263/video/1",
+      classificationId: "local:game",
+      classificationName: "Game",
+      classificationSource: "local",
+    },
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.status, "captured");
+  assert.equal(harness.fetchCalls.length, 1);
+  assert.equal(harness.fetchCalls[0].url, "http://100.76.119.29:32146/v1/captures");
+  assert.equal(JSON.parse(harness.fetchCalls[0].options.body).classification_id, "local:game");
+  assert.equal(harness.downloadCalls.length, 0);
+});
+
 test("collector resolves the highest bitrate MP4 before server capture", async () => {
   const harness = createHarness({
     collectorToken: "server-secret-token",
@@ -1317,6 +1346,73 @@ test("collector network failure falls back to the device download", async () => 
   assert.equal(response.status, "downloaded");
   assert.equal(response.fallbackCode, "collector_offline");
   assert.equal(harness.downloadCalls.length, 2);
+});
+
+test("video collector HTTP failure records fallback diagnostics with status and detail", async () => {
+  const harness = createHarness({
+    collectorToken: "server-secret-token",
+    collectorSettings: { enabled: true, baseUrl: "http://100.76.119.29:32146" },
+    preferences: { saveMode: "auto", downloadFolder: "Lakomics" },
+  });
+  harness.queueJson({ detail: "X media returned HTTP 403" }, 502);
+
+  const response = await harness.api.handleMessage({
+    type: "ingestion:create",
+    payload: {
+      source: "x",
+      mediaType: "video",
+      mediaUrl: "https://video.twimg.com/ext_tw_video/1/pu/vid/1280x720/DIAG.mp4",
+      sourceUrl: "https://x.com/artist/status/6570/video/1",
+      classificationId: "game",
+      classificationName: "Game",
+      classificationSource: "app-cache",
+    },
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.status, "downloaded");
+  assert.equal(response.fallbackCode, "collector_request_failed");
+  const diagnostics = harness.storage.lakomicsCollectorFallbackDiagnostics;
+  assert.equal(diagnostics.length, 1);
+  assert.equal(diagnostics[0].code, "collector_request_failed");
+  assert.equal(diagnostics[0].httpStatus, 502);
+  assert.equal(diagnostics[0].message, "X media returned HTTP 403");
+  assert.equal(diagnostics[0].mediaType, "video");
+  assert.equal(typeof diagnostics[0].at, "string");
+  assert.equal(diagnostics[0].token, undefined);
+  assert.equal(diagnostics[0].mediaUrl, undefined);
+
+  const diagnosticsResponse = await harness.api.handleMessage({ type: "collector:diagnostics" });
+  assert.equal(diagnosticsResponse.ok, true);
+  assert.equal(diagnosticsResponse.entries.length, 1);
+  assert.equal(diagnosticsResponse.entries[0].code, "collector_request_failed");
+});
+
+test("collector diagnostics keep the most recent failure first and cap at twenty entries", async () => {
+  const harness = createHarness({
+    collectorToken: "server-secret-token",
+    collectorSettings: { enabled: true, baseUrl: "http://100.76.119.29:32146" },
+    preferences: { saveMode: "auto", downloadFolder: "Lakomics" },
+  });
+  for (let index = 0; index < 25; index += 1) {
+    harness.queueError(new TypeError("offline"));
+    await harness.api.handleMessage({
+      type: "ingestion:create",
+      payload: {
+        source: "x",
+        mediaType: "image",
+        mediaUrl: `https://pbs.twimg.com/media/OFF${index}?format=jpg&name=orig`,
+        sourceUrl: `https://x.com/artist/status/70${index}/photo/1`,
+        classificationId: "game",
+        classificationName: "Game",
+        classificationSource: "app-cache",
+      },
+    });
+  }
+
+  const entries = harness.storage.lakomicsCollectorFallbackDiagnostics;
+  assert.equal(entries.length, 20);
+  assert.equal(entries[0].code, "collector_offline");
 });
 
 test("toolbar click opens the extension options page", async () => {

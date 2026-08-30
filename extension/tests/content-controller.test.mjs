@@ -209,6 +209,9 @@ test("partial metadata failure is retryable without pretending the image failed"
     api.feedbackFor({ ok: true, status: "downloaded", fallbackCode: "app_offline" }).message,
     "Lakomics 연결 불가 · 기기에 저장됨",
   );
+  assert.equal(api.feedbackFor({ ok: true, status: "downloaded", fallbackCode: "collector_unauthorized" }).message, "서버 토큰 불일치 · 기기에 저장됨");
+  assert.equal(api.feedbackFor({ ok: true, status: "downloaded", fallbackCode: "collector_timeout" }).message, "서버 응답 초과 · 기기에 저장됨");
+  assert.equal(api.feedbackFor({ ok: true, status: "downloaded", fallbackCode: "collector_request_failed" }).message, "서버 요청 실패 · 기기에 저장됨");
 });
 
 test("video selections preserve post identity while deferring the final media URL", async () => {

@@ -432,6 +432,8 @@
   const COLLECTOR_IMAGE_REQUEST_TIMEOUT_MS = 45_000;
   const COLLECTOR_VIDEO_REQUEST_TIMEOUT_MS = 5 * 60_000;
   const COLLECTOR_SUPPORTED_MEDIA_TYPES = new Set(["image", "video", "animated_gif"]);
+  const COLLECTOR_FALLBACK_DIAGNOSTICS_KEY = "lakomicsCollectorFallbackDiagnostics";
+  const COLLECTOR_FALLBACK_DIAGNOSTICS_LIMIT = 20;
   // 영상 원본은 Tailscale 터널 경유로 8초를 쉽게 상회한다. PC가 받는 중이면 기다린다.
   const INGESTION_TIMEOUT_MS = 120_000;
   const INGESTION_RETRY_DELAY_MS = 700;
@@ -613,6 +615,15 @@
         const tree = localTreeFromApp(response.entries, response.layout, response.pinnedIds);
         await chrome.storage.local.set({ [LOCAL_TREE_KEY]: tree });
         return { ok: true, tree };
+      }
+      case "collector:diagnostics": {
+        const stored = await chrome.storage.local.get([COLLECTOR_FALLBACK_DIAGNOSTICS_KEY]);
+        return {
+          ok: true,
+          entries: Array.isArray(stored[COLLECTOR_FALLBACK_DIAGNOSTICS_KEY])
+            ? stored[COLLECTOR_FALLBACK_DIAGNOSTICS_KEY]
+            : [],
+        };
       }
       case "ingestion:create":
         return saveMedia(message.payload ?? {});
@@ -947,10 +958,12 @@
     const mediaPayload = prepared.payload;
     const classificationSource = mediaPayload.classificationSource === "local" ? "local" : "app";
 
-    if (preferences.saveMode === "download" || classificationSource === "local") {
+    if (preferences.saveMode === "download") {
       return browserDownload(mediaPayload, preferences);
     }
 
+    // Collector is transport-independent from the classification source. A local
+    // fallback tree must not silently force browser download while Collector is enabled.
     if (collectorSupportsMedia(mediaPayload)) {
       const collector = await loadCollectorSettings();
       if (collector.enabled) {
@@ -968,6 +981,10 @@
         }
         return browserDownload(mediaPayload, preferences, captured.code || "collector_failed");
       }
+    }
+
+    if (classificationSource === "local") {
+      return browserDownload(mediaPayload, preferences);
     }
 
     // Never let an earlier classifications probe decide where the media is saved.
@@ -1660,14 +1677,41 @@
     return { ok: true, baseUrl: collector.baseUrl, status: "ready" };
   }
 
+  /// Collector 폴백 시 마지막 실패 진단을 보존한다. 토큰·URL·원본 payload는 기록하지 않는다.
+  async function recordCollectorFallback(code, mediaType, response = null) {
+    const entry = {
+      code,
+      mediaType: mediaType ?? "image",
+      at: new Date().toISOString(),
+      ...(Number.isFinite(response?.httpStatus) ? { httpStatus: response.httpStatus } : {}),
+      ...(typeof response?.message === "string" ? { message: response.message } : {}),
+    };
+    try {
+      const stored = await chrome.storage.local.get([COLLECTOR_FALLBACK_DIAGNOSTICS_KEY]);
+      const entries = Array.isArray(stored[COLLECTOR_FALLBACK_DIAGNOSTICS_KEY])
+        ? stored[COLLECTOR_FALLBACK_DIAGNOSTICS_KEY]
+        : [];
+      entries.unshift(entry);
+      await chrome.storage.local.set({
+        [COLLECTOR_FALLBACK_DIAGNOSTICS_KEY]: entries.slice(0, COLLECTOR_FALLBACK_DIAGNOSTICS_LIMIT),
+      });
+    } catch {}
+  }
+
   function collectorSupportsMedia(payload) {
     return COLLECTOR_SUPPORTED_MEDIA_TYPES.has(payload?.mediaType ?? "image");
   }
 
   async function captureWithCollector(payload, explicitCollector = null) {
     const collector = explicitCollector ?? await loadCollectorSettings();
-    if (!collector.enabled || !collector.baseUrl) return { ok: false, code: "collector_not_configured" };
-    if (!collectorSupportsMedia(payload)) return { ok: false, code: "collector_media_unsupported" };
+    if (!collector.enabled || !collector.baseUrl) {
+      await recordCollectorFallback("collector_not_configured", payload.mediaType);
+      return { ok: false, code: "collector_not_configured" };
+    }
+    if (!collectorSupportsMedia(payload)) {
+      await recordCollectorFallback("collector_media_unsupported", payload.mediaType);
+      return { ok: false, code: "collector_media_unsupported" };
+    }
     const response = await collectorRequest(
       "/v1/captures",
       {
@@ -1685,9 +1729,13 @@
       },
       collector.baseUrl,
     );
-    if (!response.ok) return response;
+    if (!response.ok) {
+      await recordCollectorFallback(response.code || "collector_request_failed", payload.mediaType, response);
+      return response;
+    }
     if (typeof response.capture?.id !== "string" || !response.capture.id
       || !["pending", "imported"].includes(response.capture.status)) {
+      await recordCollectorFallback("collector_request_failed", payload.mediaType, response);
       return { ok: false, code: "collector_request_failed" };
     }
     return {
