@@ -13,33 +13,36 @@
 ## Canonical checkout
 
 - Use `C:\chatgpt` as the canonical local repository for all Lakomics development.
-- Do not use `C:\Users\Laku.LAKU\.gemini\antigravity\scratch\lqc` except when the user explicitly requests recovery or historical comparison.
+- `main` is the single source of truth for the current Lakomics app and bundled `extension/` code.
 
 ## Repository docs
 
-### Issue tracker
+Before changing code, use `docs/README.md` as the document map.
 
-이 저장소의 이슈는 GitHub Issues에서 관리합니다. 자세한 내용은 `docs/agents/issue-tracker.md`를 참고하세요.
+- Product language and domain boundaries: `CONTEXT.md`
+- Visual/UI rules: `DESIGN.md`
+- Architecture decisions: `docs/adr/README.md` and relevant Accepted ADRs
+- Implementation rules: `docs/agents/implementation.md`
+- Living bugs, priorities, and future work: `docs/roadmap/lakomics-backlog.md`
+- Cloud Capture work: `docs/agents/cloud-capture.md`
+- Works / Collection work: `docs/agents/lakomics-works-handoff-v2.md`
+- X Collector behavior: `docs/edge-extension.md`
 
-### Domain docs
+Current code, migrations, and type/contracts are authoritative for implemented behavior. The backlog describes intended work and must not be treated as already implemented.
 
-코드 탐색 전에 루트의 `CONTEXT.md`와 관련 도메인 문서를 확인합니다. 자세한 내용은 `docs/agents/domain.md`를 참고하세요.
+Historical dated implementation plans/specs were removed from the current tree after consolidation. Use Git history only when historical rationale is genuinely needed; do not resurrect an old plan as current instruction.
 
-### Implementation guidelines
+## Issue and backlog tracking
 
-하드코딩, 공통 UI, Module 설계 규칙은 `docs/agents/implementation.md`를 따르세요.
-
-### Visual design
-
-UI를 만들거나 수정할 때는 루트의 `DESIGN.md`를 먼저 읽고 따르세요.
-기능 일관성뿐 아니라 정보 밀도, 표면 계층, 타이포그래피와 "AI 생성물처럼 보이는" 장식 패턴도 검토합니다.
+- Ongoing product bugs, UX tasks, architecture follow-ups, and long-term ideas belong in `docs/roadmap/lakomics-backlog.md` when the user asks to record them.
+- Use GitHub Issues for discrete tickets only when the user explicitly wants issue tracking or an existing task already lives there.
+- Do not maintain competing copies of the same backlog in multiple documents.
 
 ## Branch hygiene
 
 - Treat non-`main` branches as temporary working branches.
 - After a branch has been merged into `main`, delete the remote branch promptly instead of keeping merged work branches around.
 - Do not use long-lived feature, `codex/*`, `agent/*`, or backup branches to preserve old states. Use tags for meaningful snapshots that must be retained.
-- `main` is the single source of truth for the current Lakomics app and the bundled `extension/` code.
 
 ## Credentials and generated files
 
@@ -62,13 +65,6 @@ UI를 만들거나 수정할 때는 루트의 `DESIGN.md`를 먼저 읽고 따�
 - Do not rerun a successful check unless later edits could invalidate it, and do not add tests unless requested or existing coverage would miss a realistic regression introduced by the change.
 - Stop once there is sufficient evidence that the requested change works; generic planning, worktree, commit, push, PR, or completion steps are not reasons to run broader checks.
 
-## Works / Collection v2
+## Works / Collection
 
-Works/Collection 기능을 수정하기 전에는
-`docs/agents/lakomics-works-handoff-v2.md`를 읽으세요.
-시각/상호작용 기준은
-`docs/prototypes/lakomics-works-v6-reference.html`을 함께 참고하세요.
-프로토타입 코드를 그대로 복사하지 말고 기존 React 구조, 공통 UI, 디자인 토큰에 맞게
-시각적 의도와 상호작용만 구현합니다.
-Works/Collection에 한해 handoff v2의 최신 결정은 `CONTEXT.md`의 구형 Showcase /
-단일 provider 설명보다 우선합니다.
+Before substantial Works/Collection changes, read `docs/agents/lakomics-works-handoff-v2.md` and use `docs/prototypes/lakomics-works-v6-reference.html` for visual/interaction intent. Do not copy prototype code directly; preserve the intent through the current React structure, shared UI, and design tokens.

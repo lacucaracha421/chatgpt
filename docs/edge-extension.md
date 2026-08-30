@@ -1,62 +1,69 @@
-# Edge에서 X 이미지 수집하기
+# Lakomics X Collector
 
-Lakomics X Collector는 X의 원본 이미지를 브라우저 다운로드 폴더가 아니라 현재 열린 Lakomics 라이브러리의 미디어 금고로 직접 수집합니다. Windows PC의 Microsoft Edge에서만 사용하며 터치 입력은 지원하지 않습니다.
+This document describes the current bundled browser extension in `extension/`. It is Chromium-extension based; browser-specific extension APIs can vary. The current workflow is used from Chromium-compatible desktop browsers and Titanium Browser on Android.
 
-## 설치와 연결
+## Current save paths
 
-1. Lakomics를 실행하고 사용할 라이브러리를 엽니다.
-2. Edge 주소창에서 `edge://extensions`를 엽니다.
-3. **개발자 모드**를 켜고 **압축 풀린 파일 로드**를 누릅니다.
-4. `C:\chatgpt\extension` 폴더를 선택합니다.
-5. 설치된 확장 프로그램 ID가 `nclkmjmmlcdaeomgadndeangccfidfbk`인지 확인합니다. 다르면 이 빌드는 Lakomics에 연결할 수 없습니다.
-6. Lakomics의 **설정 > 브라우저 확장**에서 연결 키를 복사합니다.
-7. Edge 도구 모음에서 Lakomics 확장 프로그램 아이콘을 누르고 연결 키를 붙여 넣습니다.
-8. **저장하고 연결**을 눌러 키를 저장하고 분류 목록을 가져옵니다.
-9. 필요하면 도넛 편집기에서 분류 위치를 바꾸고 **배치 저장**을 누릅니다.
+The extension has three relevant destinations:
 
-연결 키는 이 PC의 Lakomics 설치와 확장 프로그램 사이에서만 사용합니다. 다른 사람에게 공유하지 마세요.
+1. **VPS Capture Collector** — when Collector is enabled and the media type is supported, the extension sends an image/video capture request to the configured Lakomics Capture API. The VPS fetches the original media and stores the pending capture for later PC import.
+2. **Direct Lakomics PC ingestion** — when Collector is not enabled, the extension can send directly to the local Lakomics extension service (`127.0.0.1:32145`) or the configured Tailscale HTTPS endpoint.
+3. **Browser download fallback** — used when the selected server path cannot complete, and also available as a legacy/manual download mode.
 
-## 이미지 수집
+Current Collector-supported media types are `image`, `video`, and `animated_gif` (the latter two are normalized to video for the Capture API).
 
-1. `x.com` 또는 `twitter.com`에서 이미지가 포함된 게시물을 엽니다.
-2. 이미지 위에서 마우스 왼쪽 버튼을 누른 채 12px 이상 끕니다.
-3. 나타난 도넛에서 원하는 분류 방향으로 포인터를 이동합니다.
-4. 하위 분류가 있는 항목 위에서 300ms 머물면 다음 단계가 열립니다. 머물기 전에 놓으면 현재 항목 자체를 선택합니다.
-5. 항목 위에서 버튼을 놓으면 Lakomics가 원본 이미지를 수집하고 그 분류를 연결합니다. 가운데에서 놓으면 현재 상위 항목을 선택하며, `Esc`를 누르거나 창 포커스를 잃으면 취소됩니다.
+Important current behavior: **when Collector is enabled, it is tried before direct PC ingestion**. A Collector failure falls back to browser download rather than retrying the direct-PC path. The planned save-policy cleanup is tracked as `EXT-001` / `EXT-002` in `docs/roadmap/lakomics-backlog.md`.
 
-분류가 1~6개면 6칸, 7~12개면 12칸을 사용합니다. 13개부터는 바깥쪽 좌우 페이지 컨트롤 위에서 300ms 머물러 이동합니다. 평범한 클릭과 12px 미만 움직임은 X의 원래 동작을 유지합니다.
+## Classification and radial state
 
-수집할 때 확장이 게시물의 게시 시각(`time` 요소의 `datetime` 속성)을 함께 전송하고, Lakomics 자산의 출처 메타데이터에 기록합니다. 게시 시각을 알 수 없는 게시물은 비어 있는 채로 수집되며, 과거에 수집된 자산은 소급되지 않습니다.
+- The extension keeps the app classification tree/layout and pinned classifications when the PC endpoint is reachable.
+- A persisted app snapshot can be used immediately when the PC/Tailscale endpoint is temporarily unavailable.
+- If no usable app classification source exists, the extension has a local fallback classification tree.
+- The radial UI uses the current two-ring layout and pinned entries.
+- Saved-media markers use stored/retrieved X-media state so already collected media can be marked on ordinary X pages as well as gallery-style views.
 
-Edge 다운로드 목록이 비어 있는 것은 정상입니다. Lakomics가 이미지를 직접 받아 라이브러리의 미디어 금고에 기록합니다.
+Do not infer media storage location from classification names. Classification IDs are the identity carried through the ingestion/capture request.
 
-## 문제 해결
+## Connection settings
 
-- **Lakomics를 실행해 주세요**: 앱을 실행하고 라이브러리를 연 뒤 다시 시도합니다.
-- **연결 키 오류**: Lakomics 설정에서 키를 다시 복사해 확장 옵션에 저장합니다. 키 앞뒤 공백은 제거됩니다.
-- **분류를 찾을 수 없음**: 확장 옵션에서 분류를 새로고침하고 다시 선택합니다. 삭제되거나 이동한 분류는 저장된 배치에서 자동 정리됩니다.
-- **이미지 다운로드 실패**: 결과 알림의 **다시 시도**를 누르면 동일한 이미지, 출처, 분류 요청을 다시 보냅니다.
-- **도넛이 나타나지 않음**: 게시물 안의 X 미디어 이미지인지 확인하고 X 탭을 새로고침합니다. 프로필 사진과 영상 썸네일은 대상이 아닙니다.
-- **확장 프로그램 ID가 다름**: 기존 항목을 제거한 뒤 이 저장소의 `extension` 폴더를 다시 로드합니다. 계속 다르면 배포용 매니페스트 키가 변경된 것이므로 연결을 시도하지 마세요.
+The extension stores separate credentials/settings for:
 
-## Windows Edge 수동 인수 확인표
+- the direct Lakomics PC endpoint and its connection key;
+- the VPS Collector endpoint and Collector token;
+- extension preferences and radial/classification state.
 
-아래 표는 실제 Edge와 실행 중인 Lakomics를 사용해 사람이 확인하는 기록입니다. 자동 테스트만 통과한 항목을 수동 PASS로 표시하지 않습니다.
+Credentials belong in browser/app credential storage and must never be committed to the repository.
 
-| 확인 항목 | 상태 | 확인 메모 |
-| --- | --- | --- |
-| 일반 클릭 유지 | 미실행 | 실제 X 페이지 필요 |
-| 12px에서 도넛 열림 | 미실행 | 실제 포인터 확인 필요 |
-| 다단계 300ms 머물기 | 미실행 | 실제 포인터 확인 필요 |
-| 머물기 전 놓아서 상위 분류 선택 | 미실행 | 실제 수집 확인 필요 |
-| 분류 6개 / 12개 / 13개 이상 배치 | 미실행 | 옵션 및 X 양쪽 확인 필요 |
-| 이름 변경·추가·이동·삭제 후 슬롯 안정성 | 미실행 | 실제 옵션 화면 확인 필요 |
-| 새 이미지의 출처와 직접 분류 저장 | 미실행 | 실제 라이브러리 확인 필요 |
-| 같은 이미지를 다른 분류로 수집하면 연결만 추가 | 미실행 | 실제 라이브러리 확인 필요 |
-| 같은 이미지와 같은 분류 재수집은 변경 없음 | 미실행 | 실제 라이브러리 확인 필요 |
-| 유사 이미지 검토 대기 결과 | 미실행 | 유사 이미지 준비 필요 |
-| Escape·포인터 취소·창 포커스 상실 | 미실행 | 실제 Edge 확인 필요 |
-| 앱 종료 상태 안내 | 미실행 | 실제 Edge 확인 필요 |
-| 잘못된 연결 키 안내 | 미실행 | 실제 Edge 확인 필요 |
-| 삭제된 분류 안내 | 미실행 | 실제 Edge 확인 필요 |
-| 다운로드 실패와 동일 요청 재시도 | 미실행 | 실패 조건 준비 필요 |
+The default preference is `saveMode: "auto"`. Legacy `download` mode intentionally bypasses normal Lakomics ingestion and uses local browser downloads.
+
+## Capture timeouts and fallback
+
+Current request limits are intentionally different by media type:
+
+- image Capture request: 45 seconds;
+- video Capture request: 5 minutes;
+- direct-PC ingestion: 120 seconds.
+
+After a Collector timeout/offline response, the extension performs a confirmation lookup for the same source/media/classification before deciding that the capture failed. Long remote video fetches can still race this confirmation path; the future asynchronous reservation/job design is tracked as `CLOUD-003`.
+
+## Current Cloud inbound gap
+
+The VPS Capture path exists, but the desktop side is not yet fully integrated as a polished user-facing feature on current `main`.
+
+Known near-term work is tracked under `CLOUD-001`, `CLOUD-002`, and `CLOUD-UI-001` in the living backlog. In particular, the selected `classification_id` is accepted by Capture creation but is not yet carried through the current pending-response → desktop ingestion path, and successful inbound imports do not yet drive the same immediate UI refresh path as normal local ingestion.
+
+See `docs/agents/cloud-capture.md` for the current architecture and exact known gaps.
+
+## Development install notes
+
+For an unpacked development build, load the repository `extension/` directory in a compatible browser's extension-development UI. The direct PC service expects the bundled extension identity used by the repository build; if a browser repackages the extension under a different ID, direct-PC authorization may not work.
+
+On Android, extension installation and API support depend on the browser. Do not describe the extension as Microsoft Edge-only.
+
+## Troubleshooting principles
+
+- If classifications are stale, refresh the app/remote classification source before editing the local fallback tree.
+- If direct PC ingestion is unavailable, verify the PC service/Tailscale endpoint and connection key independently from Collector settings.
+- If Collector capture is unavailable, test the Collector endpoint/token independently from the direct PC endpoint.
+- A browser-download fallback means the server path did not complete; it is not proof that the Lakomics library imported the media.
+- Never expose connection or Collector tokens in logs, screenshots, or committed files.

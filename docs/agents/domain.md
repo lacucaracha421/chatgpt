@@ -1,57 +1,56 @@
 # Domain Docs
 
-Lakomics 저장소에서 도메인 문서와 현재 구현을 읽는 방법을 정의합니다.
+Lakomics documentation is intentionally small and current. Historical implementation plans live in Git history rather than the active document tree.
 
-## 작업 전에 확인할 것
+## Before work
 
-- 저장소 루트의 `AGENTS.md`
-- 저장소 루트의 `CONTEXT.md`
-- UI 작업이라면 저장소 루트의 `DESIGN.md`
-- 작업 영역과 관련된 `docs/adr/` 문서와 `docs/adr/README.md` 상태 인덱스
-- `AGENTS.md`가 특정 기능에 대해 별도 reference/handoff 문서를 지정하면 그 문서
+Read the smallest relevant set:
 
-파일이 아직 없다면 별도로 문제 삼지 않고 현재 코드와 존재하는 문서를 기준으로 계속 진행합니다.
+- `AGENTS.md`
+- `CONTEXT.md`
+- `DESIGN.md` for UI/interaction work
+- `docs/adr/README.md` and relevant Accepted ADRs for architecture work
+- `docs/roadmap/lakomics-backlog.md` when the task comes from the current product backlog
+- the relevant subsystem reference under `docs/agents/`
 
-## 현재 저장소 구조
+Useful subsystem references:
+
+- Cloud Capture / cloud sync: `docs/agents/cloud-capture.md`
+- Works / Collection: `docs/agents/lakomics-works-handoff-v2.md`
+- X Collector: `docs/edge-extension.md`
+
+## Current repository document structure
 
 ```text
 /
 ├── AGENTS.md
 ├── CONTEXT.md
 ├── DESIGN.md
-├── app/
-│   ├── src/          # React / TypeScript frontend
-│   └── src-tauri/    # Rust / Tauri backend and migrations
-├── extension/        # bundled Lakomics browser extension
 └── docs/
-    ├── agents/
-    ├── adr/
-    ├── prototypes/
-    └── superpowers/  # dated plans/specs; historical unless explicitly promoted
+    ├── README.md
+    ├── agents/       # current subsystem and implementation references
+    ├── adr/          # architecture decisions, including superseded history
+    ├── prototypes/   # explicitly retained visual references
+    └── roadmap/      # living backlog / bug log
 ```
 
-## 문서와 코드의 우선순위
+## Authority and conflicts
 
-서로 다른 자료가 충돌할 때 모든 문서를 같은 권위로 취급하지 않습니다.
+- Current `main` code, migrations, schemas, and type/interfaces are authoritative for implemented behavior.
+- `AGENTS.md`, `CONTEXT.md`, and `DESIGN.md` define current repository and product rules.
+- Accepted ADRs are active architecture constraints. Superseded ADRs are history only.
+- Current `docs/agents/` references define stable subsystem intent, but must still be checked against current code for implementation facts.
+- `docs/roadmap/lakomics-backlog.md` is planning state. `TODO`, `HOLD`, or `IN PROGRESS` items are not implemented merely because they are documented.
+- Old dated plans/specs are historical evidence only and are intentionally absent from the current tree. Retrieve them from Git history only when the rationale is needed.
 
-- **현재 구현 사실**(필드, 스키마, API, 지원 provider, 실제 동작)은 현재 `main`의 코드·migration·type/interface를 기준으로 확인합니다.
-- **현재 제품 의도와 공통 규칙**은 `AGENTS.md`, `CONTEXT.md`, `DESIGN.md`와 현재 상태로 표시된 domain reference를 따릅니다.
-- `docs/adr/`의 **Accepted** 결정은 해당 영역의 설계 제약으로 취급합니다. `Superseded` ADR은 역사 자료일 뿐 현재 결정을 되살리는 근거로 사용하지 않습니다.
-- 날짜가 붙은 `docs/superpowers/plans/`와 `docs/superpowers/specs/`는 완료된 작업의 기록일 수 있습니다. `AGENTS.md`나 현재 reference가 명시적으로 지시하지 않는 한 새 구현 계획처럼 실행하지 않습니다.
-- `docs/prototypes/`는 시각/상호작용 의도를 보여주는 reference이며 production 구조를 그대로 복사하는 소스가 아닙니다.
+If documentation and code disagree, do not silently implement the older description. Verify the current behavior and update the current reference in the same change when appropriate.
 
-문서가 현재 코드와 충돌하면 조용히 오래된 문서를 구현하지 말고 충돌 사실을 확인합니다. 현재 구현을 설명하는 문서는 가능한 한 같은 변경에서 갱신합니다.
+## ADR status
 
-## 도메인 용어
+Use `docs/adr/README.md` as the status index.
 
-이슈 제목, 리팩터링 제안, 가설, 테스트 이름에는 `CONTEXT.md`에 정의된 현재 용어를 사용합니다.
+- `Accepted`: current decision
+- `Superseded`: historical decision replaced by a later one
+- `Proposed`: not yet final
 
-## ADR 상태
-
-먼저 `docs/adr/README.md`의 상태 인덱스를 확인하고, 개별 ADR에 `Status`, `Supersedes`, `Clarifies`가 있으면 함께 읽습니다. 초기 ADR 중에는 파일 본문에 상태 표기가 없는 것이 있으므로 인덱스를 현재 상태의 기준으로 사용합니다.
-
-- `Accepted`: 현재 결정
-- `Superseded`: 후속 결정으로 대체된 역사 자료
-- `Proposed`: 아직 확정되지 않은 제안
-
-ADR끼리 또는 ADR과 현재 reference가 충돌하면 더 최신의 명시적 대체 관계를 우선하고, 대체 관계가 불분명하면 임의로 선택하지 말고 충돌을 명시합니다.
+Do not delete superseded ADRs merely to simplify the tree; their purpose is to preserve decision history. Ordinary implementation plans do not receive the same retention treatment.
