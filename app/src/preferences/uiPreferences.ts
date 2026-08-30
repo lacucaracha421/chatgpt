@@ -11,6 +11,7 @@ export type UiPreferences = {
   expandedAlbumIds: string[];
   assetSort: AssetSort;
   thumbnailRowHeight: number;
+  creatorCardSize: number;
   collectionType: CollectionType;
 };
 
@@ -22,6 +23,7 @@ export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   expandedAlbumIds: [],
   assetSort: "newest",
   thumbnailRowHeight: 180,
+  creatorCardSize: 200,
   collectionType: "manga",
 };
 
@@ -63,6 +65,10 @@ export function loadUiPreferences(storage: Storage = localStorage): UiPreference
       typeof value.thumbnailRowHeight === "number" && Number.isFinite(value.thumbnailRowHeight)
         ? Math.max(96, Math.min(320, value.thumbnailRowHeight))
         : DEFAULT_UI_PREFERENCES.thumbnailRowHeight,
+    creatorCardSize:
+      typeof value.creatorCardSize === "number" && Number.isFinite(value.creatorCardSize)
+        ? Math.max(96, Math.min(320, value.creatorCardSize))
+        : DEFAULT_UI_PREFERENCES.creatorCardSize,
     collectionType: isCollectionType(value.collectionType)
       ? value.collectionType
       : DEFAULT_UI_PREFERENCES.collectionType,

@@ -552,6 +552,7 @@ describe("App", () => {
         expandedAlbumIds: [],
         assetSort: "random",
         thumbnailRowHeight: 180,
+        creatorCardSize: 200,
         collectionType: "manga",
       }),
     );

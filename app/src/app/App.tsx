@@ -577,7 +577,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     metadataVisible={preferences.metadataVisible}
                     privacyMode={preferences.privacyMode}
                     onPrivacyModeChange={(privacyMode) => updatePreferences({ privacyMode })}
-                    thumbnailRowHeight={preferences.thumbnailRowHeight}
+                    thumbnailRowHeight={view.kind === "creators" ? preferences.creatorCardSize : preferences.thumbnailRowHeight}
                     refreshVersion={assetRefresh}
                     requestedAsset={requestedAsset}
                     onRequestedAssetHandled={() => setRequestedAsset(null)}
@@ -586,7 +586,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     onOpenCalendarDay={openCalendarDay}
                     onSortChange={(assetSort: AssetSort) => updatePreferences({ assetSort })}
                     onMetadataVisibleChange={(metadataVisible) => updatePreferences({ metadataVisible })}
-                    onThumbnailRowHeightChange={(thumbnailRowHeight) => updatePreferences({ thumbnailRowHeight })}
+                    onThumbnailRowHeightChange={(thumbnailRowHeight) => view.kind === "creators" ? updatePreferences({ creatorCardSize: thumbnailRowHeight }) : updatePreferences({ thumbnailRowHeight })}
                     onStatusChange={setBrowserStatus}
                     onPointerDragStart={startPointerDrag}
                     onPointerDragMove={movePointerDrag}

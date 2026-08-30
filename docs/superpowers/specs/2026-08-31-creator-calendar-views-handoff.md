@@ -55,8 +55,9 @@
 2. **호버 프리뷰 패널 닫힘 UX** — 카드를 벗어나면 닫히는데, 프리뷰 패널 자체에
    마우스가 가면(카드-프리뷰 사이 틈) 닫히는지 확인 필요. 필요 시 패널쪽에
    onMouseEnter 유지 로직.
-3. **카드 크기 슬라이더** — 갤러리와 같은 `thumbnailRowHeight` 설정 공유 중.
-   작가 탭만 별도 기억하려면 preferences 키 분리.
+3. ~~카드 크기 슬라이더~~ — **완료 (2026-08-30)**. `UiPreferences.creatorCardSize`
+   (기본 200, 클램프 96~320) 추가. 작가 뷰에서만 슬라이더가 이 값을 읽고 쓰고,
+   다른 뷰는 기존 `thumbnailRowHeight`를 유지 (App.tsx 분기).
 4. **커버 8장 SQL의 rn=8 커버_7** — 개수 늘릴 때 covers CTE 패턴 참고
 5. **빌드 배포** — `lakomics-*.tar*`, `.tmp-lakomics-min/` 등 전송용 임시파일은
    untracked로 남음. 필요 없으면 삭제.

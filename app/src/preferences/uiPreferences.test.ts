@@ -36,6 +36,7 @@ describe("UI preferences", () => {
       expandedAlbumIds: ["album-a"],
       assetSort: "oldest" as const,
       thumbnailRowHeight: 220,
+      creatorCardSize: 240,
       collectionType: "manga" as const,
     };
 
@@ -71,6 +72,7 @@ describe("UI preferences", () => {
       expandedAlbumIds: [],
       assetSort: "newest",
       thumbnailRowHeight: 180,
+      creatorCardSize: 200,
       collectionType: "manga",
     });
   });
@@ -95,6 +97,7 @@ describe("UI preferences", () => {
       expandedAlbumIds: [],
       assetSort: "random",
       thumbnailRowHeight: 180,
+      creatorCardSize: 200,
       collectionType: "manga",
     });
   });
@@ -124,6 +127,15 @@ describe("UI preferences", () => {
 
     localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({ thumbnailRowHeight: 40 }));
     expect(loadUiPreferences(localStorage).thumbnailRowHeight).toBe(96);
+  });
+
+  it("migrates a missing creator card size and clamps stored values", () => {
+    const localStorage = storage();
+    localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({ creatorCardSize: 999 }));
+    expect(loadUiPreferences(localStorage).creatorCardSize).toBe(320);
+
+    localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({ creatorCardSize: 40 }));
+    expect(loadUiPreferences(localStorage).creatorCardSize).toBe(96);
   });
 
   it("restores a valid collection type and replaces an invalid one with manga", () => {
