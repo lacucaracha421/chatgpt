@@ -285,6 +285,19 @@ export function AssetBrowser({ view, onViewChange, classifications, albums = [],
       setMessage(commandErrorMessage(error, "자산을 휴지통으로 이동하지 못했습니다."));
     }
   })();
+  const openBundle = (bundleId: string) => void (async () => {
+    try {
+      const now = new Date();
+      const pad = (value: number) => String(value).padStart(2, "0");
+      const localDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+      const slate = await gateway.getRevisitSlate(localDate, now.toISOString());
+      const bundle = slate.bundles.find((entry) => entry.id === bundleId);
+      if (!bundle || bundle.assetIds.length === 0) return;
+      onViewChange?.({ kind: "revisited-bundle", bundleId: bundle.id, title: bundle.title, assetIds: bundle.assetIds });
+    } catch (error) {
+      setMessage(commandErrorMessage(error, "묶음을 열지 못했습니다."));
+    }
+  })();
   const assetResults = firstLoading || !activePage && !currentFirstError
     ? <Skeleton className="asset-browser__skeleton" label="자산을 불러오는 중" />
     : currentFirstError && items.length === 0
@@ -302,6 +315,7 @@ export function AssetBrowser({ view, onViewChange, classifications, albums = [],
           onSelectedDateChange={setRevisitDate}
           renderDay={() => assetResults}
           onOpenCreator={(creatorKey) => onViewChange?.({ kind: "creator", creatorKey })}
+          onOpenBundle={openBundle}
           privacyMode={privacyMode}
           cellSize={thumbnailRowHeight}
         /> : assetResults}

@@ -131,9 +131,9 @@ export const libraryGateway: LibraryGateway = {
   getRevisitSlate: (localDate: string, nowUtc: string) =>
     invoke<RevisitSlate>("get_revisit_slate", { localDate, nowUtc }),
   reshuffleRevisitBundle: (localDate: string, bundleId: string) =>
-    invoke<RevisitSlate>("reshuffle_revisit_bundle", { localDate, bundleId }),
+    invoke<RevisitSlate>("reshuffle_revisit_bundle", { localDate, bundleId, nowUtc: new Date().toISOString() }),
   reshuffleRevisitSlate: (localDate: string) =>
-    invoke<RevisitSlate>("reshuffle_revisit_slate", { localDate }),
+    invoke<RevisitSlate>("reshuffle_revisit_slate", { localDate, nowUtc: new Date().toISOString() }),
   recordAssetOpened: (assetId: string, openedAt: string) =>
     invoke("record_asset_opened", { assetId, openedAt }),
   recordAssetsExposed: (assetIds: string[], exposedAt: string) =>

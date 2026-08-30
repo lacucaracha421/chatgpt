@@ -1,3 +1,4 @@
+import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import { useEffect, useRef, useState } from "react";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -11,7 +12,7 @@ function localDateString(date: Date): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-export function TodayView() {
+export function TodayView({ onOpenBundle }: { onOpenBundle?: (bundleId: string) => void }) {
   const { gateway } = useLibrary();
   const [slate, setSlate] = useState<RevisitSlate | null>(null);
   const [hiddenBundleIds, setHiddenBundleIds] = useState<string[]>([]);
@@ -77,7 +78,7 @@ export function TodayView() {
   return <div className="revisit-today" aria-label="오늘">
     <header className="revisit-today__header">
       <h3>오늘</h3>
-      <button type="button" className="revisit-today__reshuffle-all" disabled={pending} onClick={reshuffleAll}>전체 다시 섞기</button>
+      <button type="button" className="revisit-today__reshuffle-all" title="전체 다시 섞기" aria-label="전체 다시 섞기" disabled={pending} onClick={reshuffleAll}><ArrowPathIcon aria-hidden="true" /></button>
     </header>
     {error && <div role="alert" className="revisit-today__error">{error}</div>}
     {hero && (
@@ -85,6 +86,7 @@ export function TodayView() {
         bundle={hero}
         hero
         pending={pending}
+        onOpen={onOpenBundle ? () => onOpenBundle(hero.id) : undefined}
         onReshuffle={() => reshuffleBundle(hero.id)}
         onDismiss={() => setHiddenBundleIds((current) => [...current, hero.id])}
       />
@@ -94,6 +96,7 @@ export function TodayView() {
         key={bundle.id}
         bundle={bundle}
         pending={pending}
+        onOpen={onOpenBundle ? () => onOpenBundle(bundle.id) : undefined}
         onReshuffle={() => reshuffleBundle(bundle.id)}
         onDismiss={() => setHiddenBundleIds((current) => [...current, bundle.id])}
       />)}

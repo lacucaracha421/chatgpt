@@ -114,7 +114,8 @@ export type AssetView =
   | { kind: "settings"; section?: "external_services" }
   | { kind: "manga" }
   | { kind: "collections"; typeFilter: CollectionType; showcase: boolean }
-  | { kind: "collection"; collectionId: string };
+  | { kind: "collection"; collectionId: string }
+  | { kind: "revisited-bundle"; bundleId: string; title: string; assetIds: string[] };
 
 export type ClassificationEntry = {
   id: string;

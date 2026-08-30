@@ -34,7 +34,7 @@ export function AssetToolbar({
   view: rawView, classifications, albums, collections = [], sort, mediaFilter, aspectFilter, directOnly, metadataVisible, privacyMode, thumbnailRowHeight,
   onSortChange, onMediaFilterChange, onAspectFilterChange, onDirectOnlyChange, onMetadataVisibleChange, onPrivacyModeChange, onThumbnailRowHeightChange, onReshuffle,
 }: AssetToolbarProps) {
-  const view = rawView.kind === "similarity_review" || rawView.kind === "settings" || rawView.kind === "manga" || rawView.kind === "calendar" || rawView.kind === "creators"
+  const view = rawView.kind === "similarity_review" || rawView.kind === "settings" || rawView.kind === "manga" || rawView.kind === "calendar" || rawView.kind === "creators" || rawView.kind === "revisited-bundle"
     ? ({ kind: "classification", classificationId: null } as const)
     : rawView;
   const recent = view.kind === "revisit";

@@ -66,7 +66,7 @@ it("keeps one hero, exposes visible assets, and reshuffles only the requested bu
   expect(vi.mocked(gateway.reshuffleRevisitSlate)).not.toHaveBeenCalled();
 });
 
-it("opens the three explicit 관심 없음 choices", async () => {
+it("opens the 관심 없음 menu with hide choice", async () => {
   const user = userEvent.setup();
   render(
     <LibraryProvider gateway={gateway}>
@@ -75,6 +75,4 @@ it("opens the three explicit 관심 없음 choices", async () => {
   );
   await user.click((await screen.findAllByRole("button", { name: "관심 없음" }))[0]!);
   expect(await screen.findByRole("menuitem", { name: "이 묶음만 숨기기" })).toBeVisible();
-  expect(screen.getByRole("menuitem", { name: "이 작가 덜 보기" })).toBeVisible();
-  expect(screen.getByRole("menuitem", { name: "이 추천 유형 덜 보기" })).toBeVisible();
 });

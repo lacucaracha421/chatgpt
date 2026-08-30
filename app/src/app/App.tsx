@@ -4,6 +4,7 @@ import { AssetBrowser, type AssetBrowserStatus } from "../assets/AssetBrowser";
 import { startAssetDrag as nativeStartAssetDrag, type StartAssetDrag } from "../drag-out/startAssetDrag";
 import { ClassificationSidebar } from "../classification/ClassificationSidebar";
 import { CollectionBrowser } from "../collections/CollectionBrowser";
+import { RevisitedBundleView } from "../revisit/RevisitedBundleView";
 import { createDefaultCollectionLibraryState, type CollectionLibraryState, type CollectionLibraryStateByType } from "../collections/collectionLibrary";
 import { CollectionOverlay } from "../collections/CollectionOverlay";
 import {
@@ -555,6 +556,14 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     onLibraryStateChange={(next) => updateCollectionLibraryState(view.typeFilter, next)}
                     onViewChange={navigateView}
                     onChanged={refreshCollections}
+                  />
+                ) : view.kind === "revisited-bundle" ? (
+                  <RevisitedBundleView
+                    bundleId={view.bundleId}
+                    title={view.title}
+                    assetIds={view.assetIds}
+                    privacyMode={preferences.privacyMode}
+                    onBack={() => setView({ kind: "revisit" })}
                   />
                 ) : (
                   <AssetBrowser

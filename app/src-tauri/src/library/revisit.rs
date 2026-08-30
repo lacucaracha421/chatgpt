@@ -217,7 +217,7 @@ struct BundleMeta {
 fn bundle_meta(kind: &str) -> BundleMeta {
     match kind {
         "rediscovery" => BundleMeta { title: "다시 만난 자산", reason_key: "forgotten" },
-        "creator" => BundleMeta { title: "작가 집중 보기", reason_key: "creator" },
+        "creator" => BundleMeta { title: "작가", reason_key: "creator" },
         "date" => BundleMeta { title: "과거의 이날", reason_key: "date" },
         _ => BundleMeta { title: "뜻밖의 연결", reason_key: "surprise" },
     }
@@ -363,9 +363,8 @@ fn reason_text(reason_key: &str, count: &usize) -> String {
     let _ = count;
     match reason_key {
         "forgotten" => "오랫동안 열지 않은 자산".to_string(),
-        "creator" => "작가의 자산을 모아서 보기".to_string(),
         "date" => "같은 시기에 수집한 자산".to_string(),
-        _ => "평소 탐색하지 않은 영역".to_string(),
+        _ => String::new(),
     }
 }
 

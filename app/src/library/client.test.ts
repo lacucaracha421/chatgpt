@@ -196,11 +196,13 @@ describe("libraryGateway revisit contract", () => {
     expect(invoke).toHaveBeenCalledWith("reshuffle_revisit_bundle", {
       localDate: "2026-08-30",
       bundleId: "bundle-1",
+      nowUtc: expect.any(String),
     });
 
     await libraryGateway.reshuffleRevisitSlate("2026-08-30");
     expect(invoke).toHaveBeenCalledWith("reshuffle_revisit_slate", {
       localDate: "2026-08-30",
+      nowUtc: expect.any(String),
     });
 
     await libraryGateway.recordAssetOpened("asset-1", "2026-08-30T03:00:00.000Z");
