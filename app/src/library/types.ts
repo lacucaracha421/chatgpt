@@ -572,6 +572,8 @@ export type AssetCreatorSummary = {
   creatorUrl: string | null;
   assetCount: number;
   lastCollectedAt: string | null;
+  lastOpenedAt: string | null;
+  recommendationScore: number;
   coverAssetIds: string[];
 };
 

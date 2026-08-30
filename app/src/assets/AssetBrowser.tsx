@@ -11,7 +11,6 @@ import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import type { InternalDragPayload } from "../shared/interaction/pointerDrag";
 import { RevisitBrowser } from "../revisit/RevisitBrowser";
 import { toUtcDateRange } from "../revisit/revisitDate";
-import { CreatorList } from "./CreatorList";
 import { AssetGallery } from "./AssetGallery";
 import { AssetInspector } from "./AssetInspector";
 import { AssetToolbar } from "./AssetToolbar";
@@ -90,7 +89,7 @@ export function AssetBrowser({ view, onViewChange, classifications, albums = [],
   const currentPrevError = prevError?.queryKey === queryKey ? prevError.message : null;
   const refresh = useCallback(() => setRetryVersion((value) => value + 1), []);
   useEffect(() => {
-    if (view.kind === "creators" || view.kind === "revisit" && !revisitDate) { ++generationRef.current; nextLoadingRef.current = false; prevLoadingRef.current = false; setFirstLoading(false); setNextLoading(false); setPrevLoading(false); setFirstError(null); setNextError(null); setPrevError(null); return; }
+    if (view.kind === "revisit" && !revisitDate) { ++generationRef.current; nextLoadingRef.current = false; prevLoadingRef.current = false; setFirstLoading(false); setNextLoading(false); setPrevLoading(false); setFirstError(null); setNextError(null); setPrevError(null); return; }
     nextLoadingRef.current = false; prevLoadingRef.current = false; setFirstLoading(true); setNextLoading(false); setPrevLoading(false); setFirstError(null); setNextError(null); setPrevError(null);
     const generation = ++generationRef.current;
     const anchorDate = anchorRef.current;
@@ -104,7 +103,7 @@ export function AssetBrowser({ view, onViewChange, classifications, albums = [],
     return () => { if (generation === generationRef.current) generationRef.current += 1; };
   }, [gateway, queryBase, queryKey, refreshVersion, retryVersion, revisitDate, view.kind, viewKey]);
   useEffect(() => {
-    if (view.kind === "creators" || view.kind === "revisit") { setDateBuckets({ queryKey, buckets: [] }); return; }
+    if (view.kind === "revisit") { setDateBuckets({ queryKey, buckets: [] }); return; }
     let cancelled = false;
     void gateway.listAssetDateBuckets(ALL_DATE_BUCKETS).then((result) => {
       if (!cancelled) setDateBuckets({ queryKey, buckets: result });
@@ -302,12 +301,10 @@ export function AssetBrowser({ view, onViewChange, classifications, albums = [],
         {view.kind === "revisit" ? <RevisitBrowser
           onSelectedDateChange={setRevisitDate}
           renderDay={() => assetResults}
-          renderCreators={() => <CreatorList privacyMode={privacyMode} cellSize={thumbnailRowHeight} onSelect={(creatorKey) => onViewChange?.({ kind: "creator", creatorKey })} />}
-        /> : <>
-          
-          {view.kind === "creators" && <CreatorList privacyMode={privacyMode} cellSize={thumbnailRowHeight} onSelect={(creatorKey) => onViewChange?.({ kind: "creator", creatorKey })} />}
-          {view.kind !== "creators" && assetResults}
-        </>}
+          onOpenCreator={(creatorKey) => onViewChange?.({ kind: "creator", creatorKey })}
+          privacyMode={privacyMode}
+          cellSize={thumbnailRowHeight}
+        /> : assetResults}
         {currentNextError && <div className="asset-browser__next-error"><Toast>{currentNextError}</Toast><Button onClick={() => loadNextPage(true)}>다시 시도</Button></div>}
         {currentPrevError && <div className="asset-browser__next-error"><Toast>{currentPrevError}</Toast><Button onClick={() => loadPrevPage(true)}>다시 시도</Button></div>}
         {(view.kind !== "revisit" || revisitDate) && <SelectionBar

@@ -516,8 +516,11 @@ pub struct AssetCreatorSummary {
     pub creator_handle: Option<String>,
     pub creator_url: Option<String>,
     pub asset_count: u64,
-    /// 가장 최근에 수집한 자산의 수집일.
     pub last_collected_at: Option<String>,
+    /// 마지막으로 자산을 연 시각. 스키마 27 전까지는 항상 None.
+    pub last_opened_at: Option<String>,
+    /// 메타데이터 기반 추천 점수. 스키마 27 전까지는 수집 개수·시간 기반.
+    pub recommendation_score: i64,
     /// 대표 썸네일 후보(최근 수집 최대 3장). 스택 프리뷰로 쓴다.
     pub cover_asset_ids: Vec<String>,
 }

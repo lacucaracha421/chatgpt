@@ -1,12 +1,15 @@
 import { useState, type ReactNode } from "react";
+import { CreatorBrowse } from "./CreatorBrowse";
 import { DateBrowse } from "./DateBrowse";
 
 type Section = "today" | "browse";
 type BrowseMode = "date" | "creator";
 
-export function RevisitBrowser({ renderDay, renderCreators, onSelectedDateChange }: {
+export function RevisitBrowser({ renderDay, onOpenCreator, privacyMode, cellSize, onSelectedDateChange }: {
   renderDay?: (localDate: string) => ReactNode;
-  renderCreators?: () => ReactNode;
+  onOpenCreator?: (creatorKey: string) => void;
+  privacyMode?: boolean;
+  cellSize?: number;
   onSelectedDateChange?: (localDate: string | null) => void;
 }) {
   const [section, setSection] = useState<Section>("today");
@@ -25,7 +28,7 @@ export function RevisitBrowser({ renderDay, renderCreators, onSelectedDateChange
         <button type="button" role="tab" aria-selected={browseMode === "date"} onClick={() => setBrowseMode("date")}>날짜</button>
         <button type="button" role="tab" aria-selected={browseMode === "creator"} onClick={() => setBrowseMode("creator")}>작가</button>
       </div>
-      {browseMode === "date" ? <DateBrowse renderDay={renderDay} onSelectedDateChange={onSelectedDateChange} /> : renderCreators?.() ?? <div className="revisit-browser__placeholder">작가 탐색을 준비하고 있습니다.</div>}
+      {browseMode === "date" ? <DateBrowse renderDay={renderDay} onSelectedDateChange={onSelectedDateChange} /> : onOpenCreator ? <CreatorBrowse onOpenCreator={onOpenCreator} privacyMode={privacyMode ?? false} cellSize={cellSize} /> : <div className="revisit-browser__placeholder">작가 탐색을 준비하고 있습니다.</div>}
     </>}
   </section>;
 }

@@ -476,15 +476,17 @@ impl Library {
                 creator_url: row.get(3)?,
                 asset_count: row.get::<_, i64>(4)? as u64,
                 last_collected_at: row.get(5)?,
+                last_opened_at: row.get(6)?,
+                recommendation_score: row.get(7)?,
                 cover_asset_ids: [
-                    row.get::<_, Option<String>>(6)?,
-                    row.get::<_, Option<String>>(7)?,
                     row.get::<_, Option<String>>(8)?,
                     row.get::<_, Option<String>>(9)?,
                     row.get::<_, Option<String>>(10)?,
                     row.get::<_, Option<String>>(11)?,
                     row.get::<_, Option<String>>(12)?,
                     row.get::<_, Option<String>>(13)?,
+                    row.get::<_, Option<String>>(14)?,
+                    row.get::<_, Option<String>>(15)?,
                 ]
                     .into_iter()
                     .flatten()
@@ -850,6 +852,8 @@ const CREATORS_SQL: &str = "WITH RECURSIVE descendants(id) AS (
     GROUP BY key
 )
 SELECT g.key, g.creator_name, g.creator_handle, g.creator_url, g.asset_count, g.last_collected_at,
+       NULL AS last_opened_at,
+       (g.asset_count * 4 + CAST((julianday('now') - julianday(g.last_collected_at)) AS INTEGER)) AS recommendation_score,
        covers.cover_0, covers.cover_1, covers.cover_2, covers.cover_3, covers.cover_4, covers.cover_5, covers.cover_6, covers.cover_7
 FROM grouped AS g LEFT JOIN covers ON covers.key = g.key
 ORDER BY g.asset_count DESC, g.key ASC";
