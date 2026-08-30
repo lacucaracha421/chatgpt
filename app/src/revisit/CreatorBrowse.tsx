@@ -144,25 +144,39 @@ export function CreatorBrowse({ onOpenCreator, privacyMode, cellSize = 200 }: { 
   </div>;
 }
 
+function relativeTime(value: string | null): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const days = Math.floor((Date.now() - date.getTime()) / 86_400_000);
+  if (days < 1) return "오늘";
+  if (days < 30) return `${days}일 전`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}개월 전`;
+  return `${Math.floor(months / 12)}년 전`;
+}
+
 function CreatorCard({ creator, privacyMode, cellWidth, cellHeight, onOpen }: { creator: AssetCreatorSummary; privacyMode: boolean; cellWidth: number; cellHeight: number; onOpen: () => void }) {
-  const covers = privacyMode ? [] : creator.coverAssetIds;
-  const hero = covers[0];
-  const secondary = covers.slice(1, 4);
-  const secondaryLayout = creator.assetCount >= 8 ? 3 : creator.assetCount >= 4 ? 2 : 1;
+  const covers = privacyMode ? [] : creator.coverAssetIds.slice(0, 5);
   const label = creator.creatorName || creator.creatorHandle || creator.creatorUrl || creator.key;
+  const opened = relativeTime(creator.lastOpenedAt);
+  const collected = relativeTime(creator.lastCollectedAt);
+  const meta = opened ? `마지막 열람 ${opened}` : collected ? `최근 수집 ${collected}` : null;
   return <button
     type="button"
     className="creator-browse__card"
     style={{ width: cellWidth, height: cellHeight, ["--card-w" as string]: `${cellWidth}px` }}
     onClick={onOpen}
   >
-    {!privacyMode && hero && <img className="creator-browse__hero" src={thumbnailUrl(hero)} alt="" loading="lazy" decoding="async" draggable={false} />}
-    {!privacyMode && secondary.slice(0, secondaryLayout).map((assetId) => (
-      <img key={assetId} className="creator-browse__secondary" src={thumbnailUrl(assetId)} alt="" loading="lazy" decoding="async" draggable={false} />
-    ))}
-    <span className="creator-browse__text">
+    <span className="creator-browse__collage" aria-hidden="true">
+      {covers.map((assetId, index) => (
+        <img key={assetId} className={`creator-browse__media${index === 0 ? " creator-browse__media--hero" : ""}`} src={thumbnailUrl(assetId)} alt="" loading="lazy" decoding="async" draggable={false} />
+      ))}
+    </span>
+    <span className="creator-browse__copy">
       <span className="creator-browse__label">{label}</span>
-      <span className="creator-browse__count">{creator.assetCount.toLocaleString("ko-KR")}개</span>
+      <span className="creator-browse__count">{creator.assetCount.toLocaleString("ko-KR")}</span>
+      {meta && <span className="creator-browse__meta">{meta}</span>}
     </span>
   </button>;
 }

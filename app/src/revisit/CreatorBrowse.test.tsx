@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
@@ -33,7 +33,7 @@ function creator(overrides: Partial<AssetCreatorSummary>): AssetCreatorSummary {
   };
 }
 
-const major = creator({ key: "major", creatorName: "major", assetCount: 8, coverAssetIds: ["a1", "a2", "a3", "a4"] });
+const major = creator({ key: "major", creatorName: "major", assetCount: 8, coverAssetIds: ["a1", "a2", "a3", "a4", "a5"], lastOpenedAt: "2026-08-02T00:00:00Z" });
 const minor = creator({ key: "minor", creatorName: "minor", assetCount: 1, coverAssetIds: ["a5"] });
 
 beforeEach(() => {
@@ -57,13 +57,15 @@ it("shows 3+ creators by default and searches every creator", async () => {
   expect(screen.getByRole("button", { name: /minor/ })).toBeVisible();
 });
 
-it("uses four permanent collage images without hover preview", async () => {
+it("renders the 1+4 asymmetric collage without hover preview", async () => {
   render(
     <LibraryProvider gateway={gateway}>
       <CreatorBrowse onOpenCreator={vi.fn()} privacyMode={false} />
     </LibraryProvider>,
   );
   const card = await screen.findByRole("button", { name: /major/ });
-  expect(within(card).getAllByRole("presentation")).toHaveLength(4);
+  expect(card.querySelectorAll(".creator-browse__media")).toHaveLength(5);
+  expect(card.querySelectorAll(".creator-browse__media--hero")).toHaveLength(1);
+  expect(card.querySelector(".creator-browse__meta")?.textContent).toContain("마지막 열람");
   expect(card.querySelector(".creator-browse__hover-preview")).toBeNull();
 });

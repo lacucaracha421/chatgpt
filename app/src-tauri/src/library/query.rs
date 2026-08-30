@@ -852,10 +852,15 @@ const CREATORS_SQL: &str = "WITH RECURSIVE descendants(id) AS (
     GROUP BY key
 )
 SELECT g.key, g.creator_name, g.creator_handle, g.creator_url, g.asset_count, g.last_collected_at,
-       NULL AS last_opened_at,
-       (g.asset_count * 4 + CAST((julianday('now') - julianday(g.last_collected_at)) AS INTEGER)) AS recommendation_score,
+       MAX(CASE WHEN activity.last_opened_at IS NOT NULL THEN activity.last_opened_at END) AS last_opened_at,
+       (g.asset_count * 4 + CAST((julianday('now') - julianday(g.last_collected_at)) AS INTEGER)
+        + COALESCE(MAX(CASE WHEN activity.last_opened_at IS NULL THEN 10 ELSE 0 END), 0)) AS recommendation_score,
        covers.cover_0, covers.cover_1, covers.cover_2, covers.cover_3, covers.cover_4, covers.cover_5, covers.cover_6, covers.cover_7
-FROM grouped AS g LEFT JOIN covers ON covers.key = g.key
+FROM grouped AS g
+LEFT JOIN covers ON covers.key = g.key
+LEFT JOIN asset_activity AS activity ON activity.asset_id IN (
+    SELECT id FROM keyed WHERE COALESCE(creator_handle, creator_url) = g.key AND rn <= 5
+)
 ORDER BY g.asset_count DESC, g.key ASC";
 const DATE_BUCKETS_SQL: &str = "SELECT date(asset.collected_at, printf('%+d minutes', ?3)) AS date, COUNT(*) AS count
 FROM assets AS asset
