@@ -21,6 +21,29 @@ Status: `IN PROGRESS`
 - Preserve per-capture failure isolation, idempotency, ACK retry, ExactDuplicate ACK, and ReviewPending no-ACK behavior.
 - Return a batch summary instead of the old `Option<String>` result.
 
+### CLOUD-004 — X videos fall back to local download instead of VPS Capture
+Status: `TODO`
+
+Observed behavior:
+- Saving X video on PC succeeds only as a browser/local-folder download.
+- The video is not being retained by the VPS Capture/R2 path.
+- Image Capture behavior must be tested separately; do not assume the same failure.
+
+Current code behavior to verify:
+- The extension supports `video` as a Collector media type.
+- If the Collector request fails, the extension can fall back to browser download, which matches the visible symptom.
+- The VPS Capture path accepts only `video.twimg.com` HTTPS media URLs for video, requires `video/mp4`, downloads server-side, then uploads the temporary file to R2.
+
+Investigation order:
+1. Capture the exact media payload sent by the extension for a failing X video without logging secrets.
+2. Confirm Collector settings/token/base URL are active on the failing browser profile.
+3. Inspect the HTTP status/body returned by `POST /v1/captures` before fallback.
+4. Inspect VPS logs for validation, X remote-fetch, timeout, size-limit, content-type, or R2 upload failures.
+5. Confirm whether a capture row and R2 object are created at all.
+6. Fix the root cause and preserve local download only as a genuine failure fallback.
+
+Do not solve this by disabling fallback or extending timeouts blindly. Do not conflate this with CLOUD-003 long-video async handling unless evidence shows timeout duration is the actual cause.
+
 ### CLOUD-002 — Finish Cloud inbound app integration
 Status: `TODO`
 
@@ -60,7 +83,7 @@ Note:
 ### VERIFY-001 — X → VPS → PC end-to-end check
 Status: `TODO`
 
-After CLOUD-001/CLOUD-002 and DB issues are fixed:
+After CLOUD-001/CLOUD-004/CLOUD-002 and DB issues are fixed:
 - Save a real image from X on the tablet.
 - Confirm capture exists on VPS/R2.
 - Confirm pending is consumed by the PC.
@@ -454,15 +477,16 @@ For each new bug, record:
 ## Current intended implementation order
 
 1. CLOUD-001 batch drain
-2. CLOUD-002 inbound app integration
-3. BUG-001 / BUG-002 DB and migration investigation
-4. VERIFY-001 real X → VPS → PC verification
-5. P1 UX pass: flashing, video controls, BUG-003 video drag selection artifact, navigation, loading/errors, selection clearing, cover crop, sidebar cleanup, scrollbar
-6. CATALOG-001 / CATALOG-002 Heliotrope-based catalog work
-7. CLOUD-UI-001 cloud status/problem surface
-8. EXT-001 / EXT-002 extension settings and Cloud-first save behavior
-9. EXT-003 / EXT-004 same-post grouping and adaptive/hidden donut tags
-10. PERF-001 / PERF-002 cache optimization and view-state preservation
-11. CLOUD-003 long-video async handling if real-world use requires it
-12. NOTE-001 / STATS-001 / IDEA-001 / UI-008
-13. Long-term collection presentation work
+2. CLOUD-004 diagnose/fix X video → VPS Capture fallback
+3. CLOUD-002 inbound app integration
+4. BUG-001 / BUG-002 DB and migration investigation
+5. VERIFY-001 real X → VPS → PC verification
+6. P1 UX pass: flashing, video controls, BUG-003 video drag selection artifact, navigation, loading/errors, selection clearing, cover crop, sidebar cleanup, scrollbar
+7. CATALOG-001 / CATALOG-002 Heliotrope-based catalog work
+8. CLOUD-UI-001 cloud status/problem surface
+9. EXT-001 / EXT-002 extension settings and Cloud-first save behavior
+10. EXT-003 / EXT-004 same-post grouping and adaptive/hidden donut tags
+11. PERF-001 / PERF-002 cache optimization and view-state preservation
+12. CLOUD-003 long-video async handling if real-world use requires it
+13. NOTE-001 / STATS-001 / IDEA-001 / UI-008
+14. Long-term collection presentation work
