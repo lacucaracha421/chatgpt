@@ -1364,3 +1364,33 @@ mod tests {
         }
     }
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum RevisitFeedback {
+    Bundle { bundle_id: String },
+    Creator { creator_key: String },
+    RecommendationType { recommendation_type: String },
+}
+
+impl RevisitFeedback {
+    pub fn dimension(&self) -> &'static str {
+        match self {
+            Self::Bundle { .. } => "bundle",
+            Self::Creator { .. } => "creator",
+            Self::RecommendationType { .. } => "recommendation_type",
+        }
+    }
+
+    pub fn value(&self) -> String {
+        match self {
+            Self::Bundle { bundle_id } => bundle_id.clone(),
+            Self::Creator { creator_key } => creator_key.clone(),
+            Self::RecommendationType { recommendation_type } => recommendation_type.clone(),
+        }
+    }
+
+    pub fn recorded_at(&self) -> String {
+        chrono::Utc::now().to_rfc3339()
+    }
+}

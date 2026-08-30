@@ -577,6 +577,29 @@ export type AssetCreatorSummary = {
   coverAssetIds: string[];
 };
 
+export type RevisitBundleKind = "rediscovery" | "creator" | "date" | "surprise";
+
+export type RevisitBundle = {
+  id: string;
+  kind: RevisitBundleKind;
+  title: string;
+  reason: string;
+  assetIds: string[];
+  revision: number;
+};
+
+export type RevisitSlate = {
+  localDate: string;
+  createdAt: string;
+  revision: number;
+  bundles: RevisitBundle[];
+};
+
+export type RevisitFeedback =
+  | { kind: "bundle"; bundleId: string }
+  | { kind: "creator"; creatorKey: string }
+  | { kind: "recommendation_type"; recommendationType: RevisitBundleKind };
+
 export type AssetDateBucket = {
   date: string;
   count: number;
@@ -722,6 +745,12 @@ export interface LibraryGateway {
   listAssets(query: AssetQuery): Promise<AssetPage>;
   listAssetDateBuckets(query: AssetDateBucketQuery): Promise<AssetDateBucket[]>;
   listAssetCreators(query: AssetQuery): Promise<AssetCreatorSummary[]>;
+  getRevisitSlate(localDate: string, nowUtc: string): Promise<RevisitSlate>;
+  reshuffleRevisitBundle(localDate: string, bundleId: string): Promise<RevisitSlate>;
+  reshuffleRevisitSlate(localDate: string): Promise<RevisitSlate>;
+  recordAssetOpened(assetId: string, openedAt: string): Promise<void>;
+  recordAssetsExposed(assetIds: string[], exposedAt: string): Promise<void>;
+  setRevisitPreference(feedback: RevisitFeedback): Promise<void>;
   indexMissingSimilarityHashes(): Promise<SimilarityIndexProgress>;
   listSimilarityReviews(query: {
     after: AssetCursor | null;

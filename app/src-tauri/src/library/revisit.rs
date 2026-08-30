@@ -684,3 +684,45 @@ mod tests {
         assert_eq!(count, 0);
     }
 }
+impl super::Library {
+    pub fn get_or_create_revisit_slate(&self, local_date: &str, now_utc: &str) -> Result<RevisitSlate, LibraryError> {
+        self.connection()?.with_lock(|connection| get_or_create_revisit_slate(connection, local_date, now_utc))
+    }
+
+    pub fn reshuffle_revisit_bundle(&self, local_date: &str, bundle_id: &str, now_utc: &str) -> Result<RevisitSlate, LibraryError> {
+        self.connection()?.with_lock(|connection| reshuffle_revisit_bundle(connection, local_date, bundle_id, now_utc))
+    }
+
+    pub fn reshuffle_revisit_slate(&self, local_date: &str, now_utc: &str) -> Result<RevisitSlate, LibraryError> {
+        self.connection()?.with_lock(|connection| reshuffle_revisit_slate(connection, local_date, now_utc))
+    }
+
+    pub fn record_asset_opened(&self, asset_id: &str, opened_at: &str) -> Result<(), LibraryError> {
+        self.connection()?.with_lock(|connection| record_asset_opened(connection, asset_id, opened_at))
+    }
+
+    pub fn record_assets_exposed(&self, asset_ids: &[String], exposed_at: &str) -> Result<(), LibraryError> {
+        self.connection()?.with_lock(|connection| record_assets_exposed(connection, asset_ids, exposed_at))
+    }
+
+    pub fn set_revisit_preference(&self, dimension: &str, value: &str, now_utc: &str) -> Result<(), LibraryError> {
+        self.connection()?.with_lock(|connection| {
+            connection.execute(
+                "INSERT INTO revisit_preferences (dimension, value, weight, updated_at) VALUES (?1, ?2, -1, ?3)
+                 ON CONFLICT(dimension, value) DO UPDATE SET weight = revisit_preferences.weight - 1, updated_at = ?3",
+                params![dimension, value, now_utc],
+            )?;
+            Ok(())
+        })
+    }
+}
+
+trait WithLock {
+    fn with_lock<T>(self, f: impl FnOnce(&Connection) -> Result<T, LibraryError>) -> Result<T, LibraryError>;
+}
+
+impl WithLock for super::LockedConnection<'_> {
+    fn with_lock<T>(self, f: impl FnOnce(&Connection) -> Result<T, LibraryError>) -> Result<T, LibraryError> {
+        f(&self)
+    }
+}

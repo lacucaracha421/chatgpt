@@ -10,6 +10,8 @@ import type {
   AssetCollectionPatch,
   AssetCreatorSummary,
   AssetDateBucket,
+  RevisitFeedback,
+  RevisitSlate,
   AssetDateBucketQuery,
   AssetMetadataPatch,
   AssetPage,
@@ -126,6 +128,18 @@ export const libraryGateway: LibraryGateway = {
     invoke<AssetDateBucket[]>("list_asset_date_buckets", { query }),
   listAssetCreators: (query: AssetQuery) =>
     invoke<AssetCreatorSummary[]>("list_asset_creators", { query }),
+  getRevisitSlate: (localDate: string, nowUtc: string) =>
+    invoke<RevisitSlate>("get_revisit_slate", { localDate, nowUtc }),
+  reshuffleRevisitBundle: (localDate: string, bundleId: string) =>
+    invoke<RevisitSlate>("reshuffle_revisit_bundle", { localDate, bundleId }),
+  reshuffleRevisitSlate: (localDate: string) =>
+    invoke<RevisitSlate>("reshuffle_revisit_slate", { localDate }),
+  recordAssetOpened: (assetId: string, openedAt: string) =>
+    invoke("record_asset_opened", { assetId, openedAt }),
+  recordAssetsExposed: (assetIds: string[], exposedAt: string) =>
+    invoke("record_assets_exposed", { assetIds, exposedAt }),
+  setRevisitPreference: (feedback: RevisitFeedback) =>
+    invoke("set_revisit_preference", { feedback }),
   indexMissingSimilarityHashes: () =>
     invoke<SimilarityIndexProgress>("index_missing_similarity_hashes"),
   listSimilarityReviews: ({ after, limit }) =>

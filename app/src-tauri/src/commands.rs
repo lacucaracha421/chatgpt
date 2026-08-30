@@ -436,6 +436,87 @@ pub async fn list_asset_creators(
 }
 
 #[tauri::command]
+pub async fn get_revisit_slate(
+    local_date: String,
+    now_utc: String,
+    state: State<'_, AppState>,
+) -> Result<crate::library::models::RevisitSlate, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library
+            .get_or_create_revisit_slate(&local_date, &now_utc)
+            .map_err(CommandError::from)
+    })
+    .await
+    .map_err(|_| background_task_error())?
+}
+
+#[tauri::command]
+pub async fn reshuffle_revisit_bundle(
+    local_date: String,
+    bundle_id: String,
+    now_utc: String,
+    state: State<'_, AppState>,
+) -> Result<crate::library::models::RevisitSlate, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library
+            .reshuffle_revisit_bundle(&local_date, &bundle_id, &now_utc)
+            .map_err(CommandError::from)
+    })
+    .await
+    .map_err(|_| background_task_error())?
+}
+
+#[tauri::command]
+pub async fn reshuffle_revisit_slate(
+    local_date: String,
+    now_utc: String,
+    state: State<'_, AppState>,
+) -> Result<crate::library::models::RevisitSlate, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library
+            .reshuffle_revisit_slate(&local_date, &now_utc)
+            .map_err(CommandError::from)
+    })
+    .await
+    .map_err(|_| background_task_error())?
+}
+
+#[tauri::command]
+pub fn record_asset_opened(
+    asset_id: String,
+    opened_at: String,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    current_required(state)?
+        .record_asset_opened(&asset_id, &opened_at)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn record_assets_exposed(
+    asset_ids: Vec<String>,
+    exposed_at: String,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    current_required(state)?
+        .record_assets_exposed(&asset_ids, &exposed_at)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn set_revisit_preference(
+    feedback: crate::library::models::RevisitFeedback,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    current_required(state)?
+        .set_revisit_preference(feedback.dimension(), &feedback.value(), &feedback.recorded_at())
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub async fn index_missing_similarity_hashes(
     state: State<'_, AppState>,
 ) -> Result<SimilarityIndexProgress, CommandError> {

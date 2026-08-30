@@ -181,3 +181,43 @@ describe("libraryGateway online catalog contract", () => {
     expect(invoke).toHaveBeenNthCalledWith(13, "clear_remote_manga_cache");
   });
 });
+
+describe("libraryGateway revisit contract", () => {
+  beforeEach(() => invoke.mockClear());
+
+  it("invokes revisit commands with stable payload names", async () => {
+    await libraryGateway.getRevisitSlate("2026-08-30", "2026-08-30T03:00:00.000Z");
+    expect(invoke).toHaveBeenCalledWith("get_revisit_slate", {
+      localDate: "2026-08-30",
+      nowUtc: "2026-08-30T03:00:00.000Z",
+    });
+
+    await libraryGateway.reshuffleRevisitBundle("2026-08-30", "bundle-1");
+    expect(invoke).toHaveBeenCalledWith("reshuffle_revisit_bundle", {
+      localDate: "2026-08-30",
+      bundleId: "bundle-1",
+    });
+
+    await libraryGateway.reshuffleRevisitSlate("2026-08-30");
+    expect(invoke).toHaveBeenCalledWith("reshuffle_revisit_slate", {
+      localDate: "2026-08-30",
+    });
+
+    await libraryGateway.recordAssetOpened("asset-1", "2026-08-30T03:00:00.000Z");
+    expect(invoke).toHaveBeenCalledWith("record_asset_opened", {
+      assetId: "asset-1",
+      openedAt: "2026-08-30T03:00:00.000Z",
+    });
+
+    await libraryGateway.recordAssetsExposed(["asset-1"], "2026-08-30T03:00:00.000Z");
+    expect(invoke).toHaveBeenCalledWith("record_assets_exposed", {
+      assetIds: ["asset-1"],
+      exposedAt: "2026-08-30T03:00:00.000Z",
+    });
+
+    await libraryGateway.setRevisitPreference({ kind: "bundle", bundleId: "bundle-1" });
+    expect(invoke).toHaveBeenCalledWith("set_revisit_preference", {
+      feedback: { kind: "bundle", bundleId: "bundle-1" },
+    });
+  });
+});
