@@ -18,7 +18,8 @@ use crate::{
         models::{
             AladinApplyRequest, AladinConnection, AladinSeriesCandidate, AladinSyncResult,
             AlbumEntry, AssetAlbumPatch, AssetCollectionPatch, AssetCursor, AssetDateBucket,
-            AssetMetadataPatch, AssetPage, AssetQuery, AssetSummary, CatalogSearchPage, CatalogSearchQuery,
+            AssetDateBucketQuery, AssetMetadataPatch, AssetPage, AssetQuery, AssetSummary,
+            CatalogSearchPage, CatalogSearchQuery,
             CatalogStatus, CatalogSuggestion, CatalogUpdateResult, CatalogUpdateStopReason,
             CatalogWorkDetail, ClassificationEntry, CollectionCover, CollectionSummary,
             CollectionVolume, CreateAlbum, CreateClassification, CreateCollection,
@@ -157,6 +158,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::InvalidAssetPageLimit => "invalid_asset_page_limit",
             LibraryError::InvalidAssetScope => "invalid_asset_scope",
             LibraryError::InvalidAssetCursor => "invalid_asset_cursor",
+            LibraryError::InvalidAssetDateRange => "invalid_asset_date_range",
             LibraryError::InvalidPerceptualHash => "invalid_perceptual_hash",
             LibraryError::SimilarityReviewNotFound => "similarity_review_not_found",
             LibraryError::SimilarityReviewConflict => "similarity_review_conflict",
@@ -410,7 +412,7 @@ pub fn list_assets(
 
 #[tauri::command]
 pub fn list_asset_date_buckets(
-    query: AssetQuery,
+    query: AssetDateBucketQuery,
     state: State<'_, AppState>,
 ) -> Result<Vec<AssetDateBucket>, CommandError> {
     current_required(state)?

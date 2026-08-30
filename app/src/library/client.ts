@@ -10,6 +10,7 @@ import type {
   AssetCollectionPatch,
   AssetCreatorSummary,
   AssetDateBucket,
+  AssetDateBucketQuery,
   AssetMetadataPatch,
   AssetPage,
   AssetQuery,
@@ -121,7 +122,7 @@ export const libraryGateway: LibraryGateway = {
   deleteAlbum: (id) => invoke("delete_album", { id }),
   listAssets: (query: AssetQuery) =>
     invoke<AssetPage>("list_assets", { query }),
-  listAssetDateBuckets: (query: AssetQuery) =>
+  listAssetDateBuckets: (query: AssetDateBucketQuery) =>
     invoke<AssetDateBucket[]>("list_asset_date_buckets", { query }),
   listAssetCreators: (query: AssetQuery) =>
     invoke<AssetCreatorSummary[]>("list_asset_creators", { query }),

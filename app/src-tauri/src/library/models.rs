@@ -487,7 +487,24 @@ pub struct AssetQuery {
     pub after: Option<AssetCursor>,
     pub before: Option<AssetCursor>,
     pub around_date: Option<String>,
+    pub collected_range: Option<UtcDateRange>,
     pub limit: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct UtcDateRange {
+    pub local_date: String,
+    pub start_utc: String,
+    pub end_utc: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetDateBucketQuery {
+    pub start_utc: String,
+    pub end_utc: String,
+    pub offset_minutes: i32,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

@@ -548,7 +548,14 @@ export type AssetQuery = {
   after: AssetCursor | null;
   before?: AssetCursor | null;
   aroundDate?: string | null;
+  collectedRange?: UtcDateRange | null;
   limit: number;
+};
+
+export type UtcDateRange = {
+  localDate: string;
+  startUtc: string;
+  endUtc: string;
 };
 
 export type AssetPage = {
@@ -570,6 +577,12 @@ export type AssetCreatorSummary = {
 export type AssetDateBucket = {
   date: string;
   count: number;
+};
+
+export type AssetDateBucketQuery = {
+  startUtc: string;
+  endUtc: string;
+  offsetMinutes: number;
 };
 
 export type AssetAlbumPatch = {
@@ -704,7 +717,7 @@ export interface LibraryGateway {
   updateAlbumAppearance(id: string, iconKey: string | null, colorKey: string | null): Promise<void>;
   deleteAlbum(id: string): Promise<void>;
   listAssets(query: AssetQuery): Promise<AssetPage>;
-  listAssetDateBuckets(query: AssetQuery): Promise<AssetDateBucket[]>;
+  listAssetDateBuckets(query: AssetDateBucketQuery): Promise<AssetDateBucket[]>;
   listAssetCreators(query: AssetQuery): Promise<AssetCreatorSummary[]>;
   indexMissingSimilarityHashes(): Promise<SimilarityIndexProgress>;
   listSimilarityReviews(query: {

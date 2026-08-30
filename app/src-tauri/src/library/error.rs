@@ -148,6 +148,8 @@ pub enum LibraryError {
     InvalidAssetScope,
     #[error("자산 목록 커서가 올바르지 않습니다")]
     InvalidAssetCursor,
+    #[error("자산 날짜 범위가 올바르지 않습니다")]
+    InvalidAssetDateRange,
     #[error("저장된 유사 이미지 해시가 올바르지 않습니다")]
     InvalidPerceptualHash,
     #[error("요청한 유사 이미지 검토를 찾을 수 없습니다")]

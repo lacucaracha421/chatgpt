@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 use super::{
     error::LibraryError,
     models::{
-        AspectRatioFilter, AssetCreatorSummary, AssetCursor, AssetDateBucket, AssetPage,
-        AssetQuery, AssetSort, AssetSummary, ImportSource, MediaKindFilter, MediaSummary,
-        VideoPreparationState,
+        AspectRatioFilter, AssetCreatorSummary, AssetCursor, AssetDateBucket,
+        AssetDateBucketQuery, AssetPage, AssetQuery, AssetSort, AssetSummary, ImportSource,
+        MediaKindFilter, MediaSummary, VideoPreparationState,
     },
     Library,
 };
@@ -79,6 +79,8 @@ AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_
 AND (?9 IS NULL OR EXISTS (SELECT 1 FROM collection_assets AS collection_link WHERE collection_link.asset_id = asset.id AND collection_link.collection_id = ?9))
 AND (?6 IS NULL OR asset.collected_at > ?6 OR (asset.collected_at = ?6 AND asset.id > ?7))
 AND (?8 IS NULL OR asset.collected_at >= ?8)
+AND (?14 IS NULL OR asset.collected_at >= ?14)
+AND (?15 IS NULL OR asset.collected_at < ?15)
 AND (
   (?11 IS NULL)
   OR (?11 = 'images' AND asset.media_kind IN ('image', 'gif'))
@@ -113,6 +115,8 @@ AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_
 AND (?9 IS NULL OR EXISTS (SELECT 1 FROM collection_assets AS collection_link WHERE collection_link.asset_id = asset.id AND collection_link.collection_id = ?9))
 AND (?6 IS NULL OR asset.collected_at < ?6 OR (asset.collected_at = ?6 AND asset.id < ?7))
 AND (?8 IS NULL OR asset.collected_at < ?8)
+AND (?14 IS NULL OR asset.collected_at >= ?14)
+AND (?15 IS NULL OR asset.collected_at < ?15)
 AND (
   (?11 IS NULL)
   OR (?11 = 'images' AND asset.media_kind IN ('image', 'gif'))
@@ -187,6 +191,7 @@ impl Library {
                 return Err(LibraryError::CollectionNotFound);
             }
         }
+        let (range_start, range_end) = collected_range_bounds(&query)?;
         if query.after.is_some() && (query.before.is_some() || query.around_date.is_some()) {
             return Err(LibraryError::InvalidAssetCursor);
         }
@@ -231,6 +236,8 @@ impl Library {
                     media_kind,
                     aspect_ratio,
                     query.creator_key.as_deref(),
+                    range_start,
+                    range_end,
                 ])?
             }
             AssetSort::Oldest => {
@@ -249,6 +256,8 @@ impl Library {
                     media_kind,
                     aspect_ratio,
                     query.creator_key.as_deref(),
+                    range_start,
+                    range_end,
                 ])?
             }
             AssetSort::Favorites => {
@@ -267,6 +276,8 @@ impl Library {
                     media_kind,
                     aspect_ratio,
                     query.creator_key.as_deref(),
+                    range_start,
+                    range_end,
                 ])?
             }
             AssetSort::Random => {
@@ -286,6 +297,8 @@ impl Library {
                     media_kind,
                     aspect_ratio,
                     query.creator_key.as_deref(),
+                    range_start,
+                    range_end,
                 ])?
             }
         };
@@ -401,34 +414,20 @@ impl Library {
         })
     }
 
-    pub fn list_asset_date_buckets(&self, query: AssetQuery) -> Result<Vec<AssetDateBucket>, LibraryError> {
-        if [
-            query.classification_id.is_some(),
-            query.album_id.is_some(),
-            query.collection_id.is_some(),
-        ]
-        .into_iter()
-        .filter(|present| *present)
-        .count()
-            > 1
-        {
-            return Err(LibraryError::InvalidAssetScope);
+    pub fn list_asset_date_buckets(&self, query: AssetDateBucketQuery) -> Result<Vec<AssetDateBucket>, LibraryError> {
+        let start = chrono::DateTime::parse_from_rfc3339(&query.start_utc)
+            .map_err(|_| LibraryError::InvalidAssetDateRange)?;
+        let end = chrono::DateTime::parse_from_rfc3339(&query.end_utc)
+            .map_err(|_| LibraryError::InvalidAssetDateRange)?;
+        if start >= end || !(-840..=840).contains(&query.offset_minutes) {
+            return Err(LibraryError::InvalidAssetDateRange);
         }
-
         let connection = self.connection()?;
-        let media_kind = media_filter_value(query.media_kind);
-        let aspect_ratio = aspect_filter_value(query.aspect_ratio);
         let mut statement = connection.prepare(DATE_BUCKETS_SQL)?;
         let mut rows = statement.query(params![
-            query.classification_id.as_deref(),
-            query.direct_only,
-            query.favorite_only,
-            query.unclassified_only,
-            query.album_id.as_deref(),
-            query.collection_id.as_deref(),
-            media_kind,
-            aspect_ratio,
-            query.creator_key.as_deref(),
+            query.start_utc,
+            query.end_utc,
+            query.offset_minutes,
         ])?;
         let mut buckets = Vec::new();
         while let Some(row) = rows.next()? {
@@ -566,6 +565,7 @@ fn run_chronological_page(
     let (collected_at, id) = cursor.map_or((None, None), |(at, asset_id)| (Some(at), Some(asset_id)));
     let media_kind = media_filter_value(query.media_kind);
     let aspect_ratio = aspect_filter_value(query.aspect_ratio);
+    let (range_start, range_end) = collected_range_bounds(query)?;
     let mut statement = connection.prepare(sql)?;
     let mut rows = statement.query(params![
         query.classification_id.as_deref(),
@@ -581,12 +581,28 @@ fn run_chronological_page(
         media_kind,
         aspect_ratio,
         query.creator_key.as_deref(),
+        range_start,
+        range_end,
     ])?;
     let mut items = Vec::new();
     while let Some(row) = rows.next()? {
         items.push(asset_row(row, false)?);
     }
     Ok(items)
+}
+
+fn collected_range_bounds(query: &AssetQuery) -> Result<(Option<&str>, Option<&str>), LibraryError> {
+    let Some(range) = query.collected_range.as_ref() else {
+        return Ok((None, None));
+    };
+    let start = chrono::DateTime::parse_from_rfc3339(&range.start_utc)
+        .map_err(|_| LibraryError::InvalidAssetDateRange)?;
+    let end = chrono::DateTime::parse_from_rfc3339(&range.end_utc)
+        .map_err(|_| LibraryError::InvalidAssetDateRange)?;
+    if start >= end {
+        return Err(LibraryError::InvalidAssetDateRange);
+    }
+    Ok((Some(&range.start_utc), Some(&range.end_utc)))
 }
 
 fn collected_at_and_id(cursor: &Option<CursorPayload>) -> (Option<&str>, Option<&str>) {
@@ -731,6 +747,8 @@ AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link 
 AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
 AND (?10 IS NULL OR EXISTS (SELECT 1 FROM collection_assets AS collection_link WHERE collection_link.asset_id = asset.id AND collection_link.collection_id = ?10))
 AND (?6 IS NULL OR asset.favorite < ?6 OR (asset.favorite = ?6 AND (asset.collected_at < ?7 OR (asset.collected_at = ?7 AND asset.id < ?8))))
+AND (?14 IS NULL OR asset.collected_at >= ?14)
+AND (?15 IS NULL OR asset.collected_at < ?15)
 AND (
   (?11 IS NULL)
   OR (?11 = 'images' AND asset.media_kind IN ('image', 'gif'))
@@ -763,6 +781,8 @@ AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link 
 AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
 AND (?11 IS NULL OR EXISTS (SELECT 1 FROM collection_assets AS collection_link WHERE collection_link.asset_id = asset.id AND collection_link.collection_id = ?11))
 AND (?7 IS NULL OR CASE WHEN asset.content_hash >= ?6 THEN 0 ELSE 1 END > ?7 OR (CASE WHEN asset.content_hash >= ?6 THEN 0 ELSE 1 END = ?7 AND (asset.content_hash > ?8 OR (asset.content_hash = ?8 AND asset.id > ?9))))
+AND (?15 IS NULL OR asset.collected_at >= ?15)
+AND (?16 IS NULL OR asset.collected_at < ?16)
 AND (
   (?12 IS NULL)
   OR (?12 = 'images' AND asset.media_kind IN ('image', 'gif'))
@@ -833,31 +853,11 @@ SELECT g.key, g.creator_name, g.creator_handle, g.creator_url, g.asset_count, g.
        covers.cover_0, covers.cover_1, covers.cover_2, covers.cover_3, covers.cover_4, covers.cover_5, covers.cover_6, covers.cover_7
 FROM grouped AS g LEFT JOIN covers ON covers.key = g.key
 ORDER BY g.asset_count DESC, g.key ASC";
-const DATE_BUCKETS_SQL: &str = "WITH RECURSIVE descendants(id) AS (
-    SELECT ?1 WHERE ?1 IS NOT NULL
-    UNION ALL SELECT entry.id FROM classification_entries AS entry JOIN descendants ON entry.parent_id = descendants.id
-) , album_descendants(id) AS (
-    SELECT ?5 WHERE ?5 IS NOT NULL
-    UNION ALL SELECT child.id FROM albums AS child JOIN album_descendants ON child.parent_id = album_descendants.id
-) SELECT substr(asset.collected_at, 1, 10) AS date, COUNT(*) AS count
+const DATE_BUCKETS_SQL: &str = "SELECT date(asset.collected_at, printf('%+d minutes', ?3)) AS date, COUNT(*) AS count
 FROM assets AS asset
-WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
-AND (?9 IS NULL OR COALESCE(asset.creator_handle, asset.creator_url) = ?9)
-AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
-AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
-AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
-AND (?6 IS NULL OR EXISTS (SELECT 1 FROM collection_assets AS collection_link WHERE collection_link.asset_id = asset.id AND collection_link.collection_id = ?6))
-AND (
-  (?7 IS NULL)
-  OR (?7 = 'images' AND asset.media_kind IN ('image', 'gif'))
-  OR (?7 = 'videos' AND asset.media_kind = 'video')
-)
-AND (
-  (?8 IS NULL)
-  OR (?8 = 'square' AND asset.width * 5 >= asset.height * 4 AND asset.width * 4 <= asset.height * 5)
-  OR (?8 = 'landscape' AND asset.width * 4 > asset.height * 5)
-  OR (?8 = 'portrait' AND asset.width * 5 < asset.height * 4)
-)
+WHERE asset.status = 'normal'
+AND asset.collected_at >= ?1
+AND asset.collected_at < ?2
 GROUP BY date ORDER BY date DESC";
 
 #[cfg(test)]
@@ -867,13 +867,66 @@ mod tests {
     use crate::library::{
         error::LibraryError,
         models::{
-            AssetAlbumPatch, AssetClassificationPatch, AssetCollectionPatch, AssetCursor, AssetPage,
-            AspectRatioFilter, AssetQuery, AssetSort, ClassificationKind, CollectionType,
+            AssetAlbumPatch, AssetClassificationPatch, AssetCollectionPatch, AssetCursor,
+            AssetDateBucket, AssetDateBucketQuery, AssetPage, AspectRatioFilter, AssetQuery,
+            AssetSort, ClassificationKind, CollectionType,
             CreateAlbum, CreateClassification, CreateCollection, ImportSource, MediaKindFilter,
-            MediaSummary, VideoPreparationState,
+            MediaSummary, UtcDateRange, VideoPreparationState,
         },
         Library,
     };
+
+    #[test]
+    fn exact_collected_range_excludes_neighboring_instants() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        insert_asset(&library, "before", "2026-08-05T14:59:59.999Z");
+        insert_asset(&library, "inside", "2026-08-05T15:00:00.000Z");
+        insert_asset(&library, "after", "2026-08-06T15:00:00.000Z");
+
+        let page = library
+            .list_assets(AssetQuery {
+                collected_range: Some(UtcDateRange {
+                    local_date: "2026-08-06".into(),
+                    start_utc: "2026-08-05T15:00:00.000Z".into(),
+                    end_utc: "2026-08-06T15:00:00.000Z".into(),
+                }),
+                limit: 20,
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert_eq!(
+            page.items
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["inside"]
+        );
+    }
+
+    #[test]
+    fn date_buckets_apply_the_callers_offset() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        insert_asset(&library, "late-utc", "2026-08-05T16:00:00.000Z");
+
+        let buckets = library
+            .list_asset_date_buckets(AssetDateBucketQuery {
+                start_utc: "2026-07-31T15:00:00.000Z".into(),
+                end_utc: "2026-08-31T15:00:00.000Z".into(),
+                offset_minutes: 540,
+            })
+            .unwrap();
+
+        assert_eq!(
+            buckets,
+            vec![AssetDateBucket {
+                date: "2026-08-06".into(),
+                count: 1,
+            }]
+        );
+    }
 
     #[test]
     fn list_assets_returns_tagged_image_gif_and_video_summaries() {
@@ -1026,14 +1079,6 @@ mod tests {
         );
         assert_eq!(second.items[0].id, "ratio-tall");
 
-        let buckets = library
-            .list_asset_date_buckets(AssetQuery {
-                media_kind: Some(MediaKindFilter::Images),
-                aspect_ratio: Some(AspectRatioFilter::Portrait),
-                ..Default::default()
-            })
-            .unwrap();
-        assert_eq!(buckets.iter().map(|bucket| bucket.count).sum::<u64>(), 2);
     }
 
     #[test]

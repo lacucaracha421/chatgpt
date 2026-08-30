@@ -25,6 +25,11 @@ type QueryError = { queryKey: string; message: string };
 export type GalleryJump = { date: string; ratio: number; token: number };
 const EMPTY_ASSETS: AssetSummary[] = [];
 const EMPTY_BUCKETS: AssetDateBucket[] = [];
+const ALL_DATE_BUCKETS = {
+  startUtc: "0001-01-01T00:00:00.000Z",
+  endUtc: "9999-12-31T23:59:59.999Z",
+  offsetMinutes: -new Date().getTimezoneOffset(),
+};
 
 export function AssetBrowser({ view, onViewChange, onOpenCalendarDay, requestedDate = null, onRequestedDateHandled = () => undefined, classifications, albums = [], collections = [], onCollectionsChanged = () => undefined, onMembershipChanged = () => undefined, sort, metadataVisible, privacyMode, onPrivacyModeChange, thumbnailRowHeight = 180, refreshVersion, requestedAsset = null, onRequestedAssetHandled = () => undefined, onSortChange, onMetadataVisibleChange, onThumbnailRowHeightChange = () => undefined, onStatusChange, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: Props) {
   const { gateway } = useLibrary();
@@ -102,7 +107,7 @@ export function AssetBrowser({ view, onViewChange, onOpenCalendarDay, requestedD
   useEffect(() => {
     if (view.kind === "creators") { setDateBuckets({ queryKey, buckets: [] }); return; }
     let cancelled = false;
-    void gateway.listAssetDateBuckets({ ...queryBase, after: null }).then((result) => {
+    void gateway.listAssetDateBuckets(ALL_DATE_BUCKETS).then((result) => {
       if (!cancelled) setDateBuckets({ queryKey, buckets: result });
     }).catch(() => { if (!cancelled) setDateBuckets({ queryKey, buckets: [] }); });
     return () => { cancelled = true; };
@@ -112,7 +117,7 @@ export function AssetBrowser({ view, onViewChange, onOpenCalendarDay, requestedD
     setCalendarLoading(true);
     setCalendarError(null);
     let cancelled = false;
-    void gateway.listAssetDateBuckets({ classificationId: null, albumId: null, collectionId: null, directOnly: false, unclassifiedOnly: false, mediaKind: null, aspectRatio: null, sort: "newest", randomPivot: null, after: null, limit: 1 }).then((result) => {
+    void gateway.listAssetDateBuckets(ALL_DATE_BUCKETS).then((result) => {
       if (cancelled) return;
       const byDay = new Map<string, number>();
       for (const bucket of result) byDay.set(bucket.date, bucket.count);
