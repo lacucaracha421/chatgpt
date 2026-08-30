@@ -1,0 +1,574 @@
+import os
+import sqlite3
+import uuid
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Literal
+
+from fastapi import FastAPI, Header, HTTPException
+from pydantic import AwareDatetime, BaseModel, Field
+
+BASE_DIR = Path(__file__).resolve().parent
+DB_PATH = BASE_DIR / "data" / "lakomics.sqlite3"
+API_TOKEN = os.environ.get("LAKOMICS_API_TOKEN", "")
+
+app = FastAPI(title="Lakomics Cloud API", version="0.1.0")
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+@contextmanager
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+def require_auth(authorization: str | None):
+    if not API_TOKEN:
+        raise HTTPException(status_code=500, detail="API token is not configured")
+
+    if authorization != f"Bearer {API_TOKEN}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+class AssetCreate(BaseModel):
+    id: str | None = None
+    kind: str = Field(default="image")
+    object_key: str
+    thumbnail_key: str | None = None
+    content_type: str | None = None
+    size_bytes: int | None = None
+    sha256: str | None = None
+
+
+@app.on_event("startup")
+def startup():
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    with get_db() as db:
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS assets (
+                id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL,
+                object_key TEXT NOT NULL UNIQUE,
+                thumbnail_key TEXT,
+                content_type TEXT,
+                size_bytes INTEGER,
+                sha256 TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        db.commit()
+
+
+@app.get("/health")
+def health():
+    return {
+        "ok": True,
+        "service": "lakomics-api",
+        "version": "0.1.0",
+    }
+
+
+@app.get("/v1/assets")
+def list_assets(
+    authorization: str | None = Header(default=None),
+    limit: int = 50,
+):
+    require_auth(authorization)
+
+    limit = max(1, min(limit, 200))
+
+    with get_db() as db:
+        rows = db.execute(
+            """
+            SELECT *
+            FROM assets
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+    return {"items": [dict(row) for row in rows]}
+
+
+@app.post("/v1/assets")
+def create_asset(
+    asset: AssetCreate,
+    authorization: str | None = Header(default=None),
+):
+    require_auth(authorization)
+
+    asset_id = asset.id or str(uuid.uuid4())
+    ts = now_iso()
+
+    try:
+        with get_db() as db:
+            db.execute(
+                """
+                INSERT INTO assets (
+                    id,
+                    kind,
+                    object_key,
+                    thumbnail_key,
+                    content_type,
+                    size_bytes,
+                    sha256,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    kind = excluded.kind,
+                    object_key = excluded.object_key,
+                    thumbnail_key = excluded.thumbnail_key,
+                    content_type = excluded.content_type,
+                    size_bytes = excluded.size_bytes,
+                    sha256 = excluded.sha256,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    asset_id,
+                    asset.kind,
+                    asset.object_key,
+                    asset.thumbnail_key,
+                    asset.content_type,
+                    asset.size_bytes,
+                    asset.sha256,
+                    ts,
+                    ts,
+                ),
+            )
+            db.commit()
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+    return {
+        "ok": True,
+        "id": asset_id,
+        "object_key": asset.object_key,
+    }
+
+
+class PresignRequest(BaseModel):
+    object_key: str
+    content_type: str = "application/octet-stream"
+
+
+@app.post("/v1/uploads/presign")
+def create_upload_presign(
+    request: PresignRequest,
+    authorization: str | None = Header(default=None),
+):
+    require_auth(authorization)
+
+    allowed_prefixes = (
+        "images/",
+        "thumbnails/",
+        "videos/",
+        "work-artwork/",
+        "backups/",
+    )
+
+    if not request.object_key.startswith(allowed_prefixes):
+        raise HTTPException(status_code=400, detail="Invalid object key prefix")
+
+    if ".." in request.object_key or request.object_key.startswith("/"):
+        raise HTTPException(status_code=400, detail="Invalid object key")
+
+    from r2 import presign_put
+
+    expires_in = 600
+    upload_url = presign_put(
+        request.object_key,
+        request.content_type,
+        expires_in,
+    )
+
+    return {
+        "method": "PUT",
+        "object_key": request.object_key,
+        "upload_url": upload_url,
+        "expires_in": expires_in,
+        "required_headers": {
+            "Content-Type": request.content_type,
+        },
+    }
+
+
+# --- Mobile Capture Inbox v1 -----------------------------------------------
+
+from urllib.parse import urlparse
+
+from capture_store import (
+    CaptureDownloadError,
+    CaptureValidationError,
+    delete_r2_object,
+    fetch_media_to_r2,
+)
+from r2 import presign_get
+
+
+class CaptureCreate(BaseModel):
+    source_url: str
+    media_url: str
+    classification_id: str
+    published_at: str | None = None
+    media_type: Literal["image", "video"] = "image"
+
+
+class CaptureAcknowledge(BaseModel):
+    imported_at: AwareDatetime
+
+
+@app.on_event("startup")
+def startup_captures():
+    with get_db() as db:
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS captures (
+                id TEXT PRIMARY KEY,
+                source_url TEXT NOT NULL,
+                media_url TEXT NOT NULL,
+                classification_id TEXT NOT NULL,
+                object_key TEXT NOT NULL UNIQUE,
+                content_type TEXT NOT NULL,
+                size_bytes INTEGER NOT NULL,
+                published_at TEXT,
+                status TEXT NOT NULL
+                    CHECK (status IN ('pending', 'imported')),
+                created_at TEXT NOT NULL,
+                imported_at TEXT,
+                media_type TEXT NOT NULL DEFAULT 'image'
+                    CHECK (media_type IN ('image', 'video')),
+                UNIQUE(source_url, media_url, classification_id)
+            )
+            """
+        )
+        columns = {
+            row["name"] for row in db.execute("PRAGMA table_info(captures)")
+        }
+        if "media_type" not in columns:
+            db.execute(
+                """
+                ALTER TABLE captures
+                ADD COLUMN media_type TEXT NOT NULL DEFAULT 'image'
+                """
+            )
+        db.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_captures_status_created
+            ON captures(status, created_at)
+            """
+        )
+        db.commit()
+
+
+def valid_x_source_url(value: str) -> bool:
+    try:
+        url = urlparse(value)
+        return (
+            url.scheme == "https"
+            and url.hostname in {"x.com", "twitter.com"}
+            and bool(url.path)
+        )
+    except Exception:
+        return False
+
+
+@app.post("/v1/captures")
+def create_capture(
+    capture: CaptureCreate,
+    authorization: str | None = Header(default=None),
+):
+    require_auth(authorization)
+
+    classification_id = capture.classification_id.strip()
+
+    if not classification_id or len(classification_id) > 200:
+        raise HTTPException(status_code=400, detail="Invalid classification_id")
+
+    if not valid_x_source_url(capture.source_url):
+        raise HTTPException(status_code=400, detail="Invalid X source URL")
+
+    with get_db() as db:
+        existing = db.execute(
+            """
+            SELECT *
+            FROM captures
+            WHERE source_url = ? AND media_url = ? AND classification_id = ?
+            LIMIT 1
+            """,
+            (capture.source_url, capture.media_url, classification_id),
+        ).fetchone()
+
+    if existing:
+        return {
+            "ok": True,
+            "created": False,
+            "capture": dict(existing),
+        }
+
+    capture_id = str(uuid.uuid4())
+    object_namespace = "videos" if capture.media_type == "video" else "images"
+    object_key = f"{object_namespace}/inbox/{capture_id}/original"
+
+    try:
+        content_type, size_bytes = fetch_media_to_r2(
+            capture.media_url,
+            object_key,
+            capture.media_type,
+        )
+    except CaptureValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except CaptureDownloadError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    ts = now_iso()
+
+    try:
+        with get_db() as db:
+            db.execute(
+                """
+                INSERT INTO captures (
+                    id,
+                    source_url,
+                    media_url,
+                    classification_id,
+                    object_key,
+                    content_type,
+                    size_bytes,
+                    published_at,
+                    status,
+                    created_at,
+                    imported_at,
+                    media_type
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, NULL, ?)
+                """,
+                (
+                    capture_id,
+                    capture.source_url,
+                    capture.media_url,
+                    classification_id,
+                    object_key,
+                    content_type,
+                    size_bytes,
+                    capture.published_at,
+                    ts,
+                    capture.media_type,
+                ),
+            )
+            db.commit()
+    except sqlite3.IntegrityError:
+        try:
+            delete_r2_object(object_key)
+        except Exception:
+            pass
+
+        with get_db() as db:
+            existing = db.execute(
+                """
+                SELECT *
+                FROM captures
+                WHERE source_url = ? AND media_url = ? AND classification_id = ?
+                LIMIT 1
+                """,
+                (capture.source_url, capture.media_url, classification_id),
+            ).fetchone()
+
+        if existing:
+            return {
+                "ok": True,
+                "created": False,
+                "capture": dict(existing),
+            }
+
+        raise HTTPException(status_code=409, detail="Capture conflict")
+
+    return {
+        "ok": True,
+        "created": True,
+        "capture": {
+            "id": capture_id,
+            "source_url": capture.source_url,
+            "media_url": capture.media_url,
+            "classification_id": classification_id,
+            "object_key": object_key,
+            "content_type": content_type,
+            "size_bytes": size_bytes,
+            "published_at": capture.published_at,
+            "status": "pending",
+            "created_at": ts,
+            "imported_at": None,
+            "media_type": capture.media_type,
+        },
+    }
+
+
+def pending_capture_payload(row: sqlite3.Row) -> dict:
+    source = urlparse(row["source_url"])
+    path_parts = [part for part in source.path.split("/") if part]
+    creator_handle = path_parts[0] if path_parts else None
+    return {
+        "id": row["id"],
+        "kind": row["media_type"],
+        "object_key": row["object_key"],
+        "content_type": row["content_type"],
+        "size_bytes": row["size_bytes"],
+        "source_url": row["source_url"],
+        "creator_handle": creator_handle,
+        "source_published_at": row["published_at"],
+        "created_at": row["created_at"],
+    }
+
+
+@app.get("/v1/captures/pending")
+def list_pending_captures(
+    authorization: str | None = Header(default=None),
+    limit: int = 100,
+):
+    require_auth(authorization)
+    limit = max(1, min(limit, 500))
+
+    with get_db() as db:
+        rows = db.execute(
+            """
+            SELECT *
+            FROM captures
+            WHERE status = 'pending'
+            ORDER BY created_at ASC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+    return {"captures": [pending_capture_payload(row) for row in rows]}
+
+
+@app.get("/v1/captures/{capture_id}/download")
+def capture_download_ticket(
+    capture_id: str,
+    authorization: str | None = Header(default=None),
+):
+    require_auth(authorization)
+
+    with get_db() as db:
+        row = db.execute(
+            "SELECT object_key FROM captures WHERE id = ?",
+            (capture_id,),
+        ).fetchone()
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="Capture not found")
+
+    return {
+        "method": "GET",
+        "download_url": presign_get(row["object_key"], 600),
+        "required_headers": {},
+    }
+
+
+@app.get("/v1/captures")
+def list_captures(
+    authorization: str | None = Header(default=None),
+    status: str | None = None,
+    source_url: str | None = None,
+    media_url: str | None = None,
+    classification_id: str | None = None,
+    limit: int = 100,
+):
+    require_auth(authorization)
+
+    limit = max(1, min(limit, 500))
+
+    if status is not None and status not in {"pending", "imported"}:
+        raise HTTPException(status_code=400, detail="Invalid capture status")
+
+    clauses = []
+    parameters = []
+    for column, value in (
+        ("status", status),
+        ("source_url", source_url),
+        ("media_url", media_url),
+        ("classification_id", classification_id),
+    ):
+        if value is not None:
+            clauses.append(f"{column} = ?")
+            parameters.append(value)
+
+    where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    with get_db() as db:
+        rows = db.execute(
+            f"""
+            SELECT *
+            FROM captures
+            {where_clause}
+            ORDER BY created_at ASC
+            LIMIT ?
+            """,
+            (*parameters, limit),
+        ).fetchall()
+
+    return {"items": [dict(row) for row in rows]}
+
+
+@app.post("/v1/captures/{capture_id}/imported")
+def mark_capture_imported(
+    capture_id: str,
+    authorization: str | None = Header(default=None),
+):
+    require_auth(authorization)
+    return mark_capture_imported_state(capture_id, now_iso())
+
+
+def mark_capture_imported_state(capture_id: str, requested_at: str):
+    with get_db() as db:
+        cursor = db.execute(
+            """
+            UPDATE captures
+            SET status = 'imported',
+                imported_at = COALESCE(imported_at, ?)
+            WHERE id = ?
+            """,
+            (requested_at, capture_id),
+        )
+        row = db.execute(
+            "SELECT imported_at FROM captures WHERE id = ?",
+            (capture_id,),
+        ).fetchone()
+        db.commit()
+
+    if cursor.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Capture not found")
+
+    return {
+        "ok": True,
+        "id": capture_id,
+        "status": "imported",
+        "imported_at": row["imported_at"],
+    }
+
+
+@app.post("/v1/captures/{capture_id}/acknowledge")
+def acknowledge_capture_imported(
+    capture_id: str,
+    acknowledgement: CaptureAcknowledge,
+    authorization: str | None = Header(default=None),
+):
+    require_auth(authorization)
+    return mark_capture_imported_state(
+        capture_id,
+        acknowledgement.imported_at.isoformat(),
+    )

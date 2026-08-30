@@ -13,6 +13,23 @@
     <main>
       <h1>Lakomics X Collector</h1>
 
+      <section aria-labelledby="collector-title">
+        <h2 id="collector-title">미디어 저장 서버</h2>
+        <label class="check-row" for="collector-enabled">
+          <input id="collector-enabled" type="checkbox">
+          <span>VPS Capture Inbox 사용</span>
+        </label>
+        <label for="collector-base-url">서버 주소</label>
+        <input id="collector-base-url" type="url" autocomplete="off" spellcheck="false" placeholder="http://100.76.119.29:32146">
+        <label for="collector-token">서버 API 토큰</label>
+        <div class="row">
+          <input id="collector-token" type="password" autocomplete="off" spellcheck="false" placeholder="저장된 토큰이 있으면 비워 두세요">
+          <button id="save-test-collector" type="button">저장하고 테스트</button>
+        </div>
+        <p class="setting-note">이미지·영상·움짤 MP4를 PC를 거치지 않고 서버로 바로 보냅니다. 서버 연결에 실패하면 기존처럼 Download로 자동 저장합니다.</p>
+        <p id="collector-status" role="status"></p>
+      </section>
+
       <section aria-labelledby="connection-title">
         <h2 id="connection-title">Lakomics 연결</h2>
         <label for="connection-token">연결 키</label>

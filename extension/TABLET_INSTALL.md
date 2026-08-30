@@ -1,45 +1,42 @@
-# Lakomics X Collector 태블릿 설치 안내 (alpha.15.29)
+# Lakomics X Collector 태블릿 설치 안내 (alpha.15.30)
 
-PC에서 만든 배포 zip: `C:\chatgpt\lakomics-x-collector-2.0.0-alpha.15.29.zip`
+이 버전은 VPS Capture Inbox로 넘어가는 전환 릴리스다.
+X 이미지·영상·움짤 MP4를 서버로 바로 수집할 수 있고, 분류 조회는 기존 PC/Remote 경로를 유지한다.
 
-갤럭시 탭(Android Chromium 계열 브라우저, 예: Quetta/Levanter)에 이 zip을 설치해
-PC Lakomics로 미디어를 직접 수집한다.
+## 1. 설치
 
-## 1. zip을 태블릿으로 옮기기
+1. `lakomics-x-collector-2.0.0-alpha.15.30.zip`을 갤럭시 탭으로 옮긴다.
+2. Android Chromium 계열 브라우저의 확장 페이지를 연다.
+3. 개발자 모드를 켜고 zip 또는 압축을 푼 폴더를 로드한다.
+4. 기존 PC API도 함께 쓸 경우 확장 ID가 `nclkmjmmlcdaeomgadndeangccfidfbk`인지 확인한다.
 
-아무 방법이나 쓴다.
+## 2. 미디어 저장 서버 설정
 
-- PC의 zip 파일을 Tailscale Drive/SMB/클라우드로 공유해 태블릿 Download에 저장
-- 또는 태블릿 브라우저에서 직접 접근 가능한 공유 폴더에 복사
+확장 설정의 `미디어 저장 서버`에서:
 
-## 2. 태블릿 브라우저에 설치
+- `VPS Capture Inbox 사용`을 켠다.
+- 서버 주소 기본값은 `http://100.76.119.29:32146`이다.
+- VPS의 `LAKOMICS_API_TOKEN` 값을 `서버 API 토큰`에 입력한다.
+- `저장하고 테스트`를 누른다.
 
-1. 태블릿 브라우저의 확장 프로그램 페이지를 연다 (주소창에 `chrome://extensions`).
-2. **개발자 모드**를 켠다.
-3. zip을 그대로 드래그해 확장 페이지에 놓거나, **압축 풀린 파일 로드**로
-   압축을 푼 `lakomics-x-collector-2.0.0-alpha.15.29` 폴더를 선택한다.
-4. 설치된 확장 ID가 `nclkmjmmlcdaeomgadndeangccfidfbk`인지 확인한다.
-   다르면 이 빌드는 PC Lakomics에 연결할 수 없다.
+성공하면 `서버 연결 성공 · 미디어 수집 준비됨`이 표시된다.
+서버 토큰은 확장 로컬 저장소에만 보관되고 설정 조회 응답에는 포함되지 않는다.
 
-## 3. PC Lakomics 연결
+## 3. PC 분류 연결
 
-1. PC에서 Lakomics를 실행하고 라이브러리를 연다.
-2. 이번 안정성 개선(동시 요청 처리·다운로더 타임아웃)을 적용하려면
-   PC 앱도 새 빌드로 다시 실행해야 한다: `npm run tauri dev`
-3. 태블릿 확장 설정에서:
-   - PC의 32자리 연결 키를 `Lakomics 연결`에 입력
-   - `Remote Lakomics · Tailscale` 켜기
-   - PC의 `https://...ts.net` 주소 입력 (PC PowerShell: `tailscale serve status`로 확인)
-   - `저장하고 원격 연결 테스트` 누른 뒤 X 탭 새로고침
+현재 15.30에서는 도넛 분류를 아직 VPS가 제공하지 않는다.
+기존 PC 연결 키와 Remote Lakomics 설정을 유지하면 마지막 PC 분류와 배치를 계속 사용할 수 있다.
+PC가 잠시 꺼져 있어도 저장된 분류 snapshot이 있으면 도넛을 즉시 열고 미디어는 VPS로 수집한다.
 
-## 이 버전에 포함된 연결 안정성 개선
+분류 snapshot이 전혀 없는 상태에서 PC에도 연결할 수 없으면 기존 로컬 도넛/브라우저 다운로드 fallback을 사용한다.
 
-- PC API가 요청을 동시에 처리한다. 영상 수집이 진행 중이어도
-  태블릿의 상태 확인·분류 조회가 막히지 않는다.
-- 영상 수집 요청의 타임아웃이 8초에서 120초로 늘었다.
-  Tailscale 터널을 경유하는 영상 원본 전송이 중간에 끊기지 않는다.
-- 수집 실패 시 3회까지 재시도한다. 터널이 잠깐 끊겨도 복구를 기다린다.
-- PC가 X CDN 응답을 멈춰도 5분 뒤 포기하므로 서버 전체가 정지하지 않는다.
+## 4. 현재 저장 동작
 
-문제가 있으면 `extension/REMOTE_SETUP.md`와 `docs/edge-extension.md` 문제 해결
-섹션을 참고한다.
+- VPS collector ON + X 이미지/영상/움짤 MP4: `확장 -> VPS /v1/captures -> R2`, 상태는 `pending`.
+- PC inbound importer가 signed URL로 원본을 수집하고 ACK한 뒤에만 `imported`가 된다. PC에는 R2 자격 증명이 없다.
+- VPS collector 장애: 갤탭 Download로 자동 fallback.
+- `saveMode=download` 또는 로컬 도넛을 명시적으로 쓰는 경우: 기존 기기 다운로드 동작 유지.
+
+Capture Inbox는 Remote → PC 인바운드이고, `cloud_sync_queue`는 PC → Cloud 아웃바운드다. 두 시스템은 별개다.
+
+다음 단계에서는 분류와 saved-media index도 서버로 옮겨 PC/Tailscale Remote 의존을 제거한다.

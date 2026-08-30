@@ -2,6 +2,11 @@
   "use strict";
 
   const tokenInput = document.querySelector("#connection-token");
+  const collectorEnabled = document.querySelector("#collector-enabled");
+  const collectorBaseUrl = document.querySelector("#collector-base-url");
+  const collectorToken = document.querySelector("#collector-token");
+  const saveTestCollector = document.querySelector("#save-test-collector");
+  const collectorStatus = document.querySelector("#collector-status");
   const downloadFolder = document.querySelector("#download-folder");
   const touchLongPress = document.querySelector("#touch-long-press");
   const suppressDownloadUi = document.querySelector("#suppress-download-ui");
@@ -53,6 +58,12 @@
     }
     const preferences = settings.preferences ?? {};
     const remote = settings.remote ?? {};
+    const collector = settings.collector ?? {};
+    collectorEnabled.checked = collector.enabled === true;
+    collectorBaseUrl.value = collector.baseUrl ?? "";
+    collectorStatus.textContent = settings.collectorTokenConfigured
+      ? (collector.enabled ? "서버 토큰이 저장되어 있습니다." : "서버 토큰이 저장되어 있습니다. 서버 저장은 꺼져 있습니다.")
+      : "미디어 저장 서버 API 토큰을 입력하세요.";
     remoteEnabled.checked = remote.enabled === true;
     remoteBaseUrl.value = remote.baseUrl ?? "";
     downloadFolder.value = preferences.downloadFolder ?? "Lakomics";
@@ -84,6 +95,30 @@
     xTranslateStatus.textContent = xTranslateEnabled.checked
       ? "X Translate를 켰습니다. 열려 있는 X 탭을 새로고침하면 적용됩니다."
       : "X Translate를 껐습니다. 열려 있는 X 탭을 새로고침하면 사라집니다.";
+  });
+
+  saveTestCollector.addEventListener("click", async () => {
+    collectorStatus.textContent = "미디어 저장 서버 설정을 저장하는 중…";
+    const typedToken = collectorToken.value.trim();
+    if (typedToken) {
+      const tokenResponse = await chrome.runtime.sendMessage({ type: "settings:set-collector-token", token: typedToken });
+      if (!tokenResponse.ok) { collectorStatus.textContent = errorMessage(tokenResponse.code); return; }
+      collectorToken.value = "";
+    }
+    const saved = await chrome.runtime.sendMessage({
+      type: "settings:set-collector",
+      collector: { enabled: collectorEnabled.checked, baseUrl: collectorBaseUrl.value },
+    });
+    if (!saved.ok) { collectorStatus.textContent = errorMessage(saved.code); return; }
+    collectorEnabled.checked = saved.collector.enabled;
+    collectorBaseUrl.value = saved.collector.baseUrl;
+    if (!saved.collector.enabled) {
+      collectorStatus.textContent = "서버 저장을 껐습니다. 기존 PC/기기 저장 경로를 사용합니다.";
+      return;
+    }
+    collectorStatus.textContent = "VPS Capture Inbox에 연결하는 중…";
+    const tested = await chrome.runtime.sendMessage({ type: "collector:test" });
+    collectorStatus.textContent = tested.ok ? "서버 연결 성공 · 미디어 저장 준비 완료" : errorMessage(tested.code);
   });
 
   saveTestRemote.addEventListener("click", async () => {
@@ -543,6 +578,14 @@
   }
 
   function errorMessage(code) {
+    if (code === "invalid_collector_token") return "서버 API 토큰을 확인하세요.";
+    if (code === "collector_token_missing") return "서버 API 토큰을 먼저 저장하세요.";
+    if (code === "invalid_collector_url") return "Lakomics VPS 주소를 확인하세요.";
+    if (code === "collector_not_configured") return "VPS Capture Inbox를 켜고 서버 주소를 저장하세요.";
+    if (code === "collector_unauthorized") return "서버 API 토큰이 일치하지 않습니다.";
+    if (code === "collector_timeout") return "서버 연결 시간이 초과되었습니다.";
+    if (code === "collector_offline") return "Lakomics 서버에 연결할 수 없습니다.";
+    if (code === "collector_request_failed") return "Lakomics 서버 요청이 실패했습니다.";
     if (code === "invalid_connection_key") return "32자리 연결 키를 확인하시와요.";
     if (code === "invalid_remote_url") return "Tailscale Serve의 https://...ts.net 주소를 확인하시와요.";
     if (code === "remote_not_configured") return "원격 연결을 켜고 Tailscale Serve 주소를 저장하시와요.";

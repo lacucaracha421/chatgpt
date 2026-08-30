@@ -1,7 +1,15 @@
-# Lakomics X Collector 2.0.0-alpha.15.22
+# Lakomics X Collector 2.0.0-alpha.15.30
 
 Unified desktop/mobile X media collector for Lakomics.
 
+
+## alpha.15.30 - VPS Capture Inbox
+- Added an optional VPS media collector. When enabled, X images and resolved MP4 video are sent to `/v1/captures` instead of directly to the PC ingestion API.
+- The extension sends only X source/media metadata; the VPS downloads images from `pbs.twimg.com` or MP4 video from `video.twimg.com` and stores the original in R2. X animated GIFs use this MP4 video path.
+- Collector URL and API token stay in extension-local storage; the token is never returned by `settings:get`.
+- If the collector cannot be reached, collection falls back to the tablet browser Download path.
+- Captures remain `pending` until the separately completed PC inbound importer downloads them through a signed URL and acknowledges the import. The PC never stores R2 credentials.
+- Capture Inbox is inbound Remote → PC. The app's `cloud_sync_queue` is outbound PC → Cloud; they are separate systems.
 ## alpha.15.1
 - Integrated AI X Translate Lite v1.4.14 OpenRouter edition into the extension.
 - Translation API keys/settings are stored in extension-local storage and requests are proxied by the service worker.

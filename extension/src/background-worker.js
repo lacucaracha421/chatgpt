@@ -233,6 +233,11 @@
     baseUrl: "https://desktop-6oh3e09.tail0aa1a3.ts.net",
   });
 
+  const DEFAULT_COLLECTOR_SETTINGS = Object.freeze({
+    enabled: false,
+    baseUrl: "http://100.76.119.29:32146",
+  });
+
   const SECONDARY_SLOT_COUNT = 12;
   const LOCAL_ROOT_DEFINITIONS = Object.freeze([
     ["local:reverse", "리버스"],
@@ -302,6 +307,32 @@
     }
   }
 
+  function normalizeCollectorSettings(value = {}) {
+    const hasExplicitBaseUrl = value && Object.prototype.hasOwnProperty.call(value, "baseUrl");
+    const requestedBaseUrl = hasExplicitBaseUrl ? value.baseUrl : DEFAULT_COLLECTOR_SETTINGS.baseUrl;
+    const baseUrl = normalizeCollectorBaseUrl(requestedBaseUrl);
+    return {
+      enabled: value.enabled === true && Boolean(baseUrl),
+      baseUrl,
+    };
+  }
+
+  function normalizeCollectorBaseUrl(value) {
+    const raw = typeof value === "string" ? value.trim() : "";
+    if (!raw) return "";
+    try {
+      const url = new URL(raw);
+      const host = url.hostname.toLowerCase();
+      const isKnownVps = url.protocol === "http:" && host === "100.76.119.29" && url.port === "32146";
+      const isTailnetHttps = url.protocol === "https:" && host.endsWith(".ts.net");
+      if (!isKnownVps && !isTailnetHttps) return "";
+      if (url.username || url.password || url.search || url.hash || (url.pathname && url.pathname !== "/")) return "";
+      return `${url.protocol}//${url.host}`;
+    } catch {
+      return "";
+    }
+  }
+
   function normalizeLocalTree(value) {
     const defaults = defaultLocalTree();
     const roots = Array.isArray(value?.roots) ? value.roots : [];
@@ -364,11 +395,14 @@
   globalThis.LakomicsDefaults = {
     DEFAULT_PREFERENCES,
     DEFAULT_REMOTE_SETTINGS,
+    DEFAULT_COLLECTOR_SETTINGS,
     SECONDARY_SLOT_COUNT,
     LOCAL_ROOT_DEFINITIONS,
     defaultLocalTree,
     normalizeRemoteSettings,
     normalizeRemoteBaseUrl,
+    normalizeCollectorSettings,
+    normalizeCollectorBaseUrl,
     normalizeLocalTree,
     localTreeEntries,
     localTreeLayout,
@@ -381,7 +415,10 @@
   "use strict";
 
   const LOCAL_API_BASE_URL = "http://127.0.0.1:32145";
+  const PC_EXTENSION_ID = "nclkmjmmlcdaeomgadndeangccfidfbk";
   const REMOTE_SETTINGS_KEY = "remoteSettings";
+  const COLLECTOR_SETTINGS_KEY = "collectorSettings";
+  const COLLECTOR_TOKEN_KEY = "collectorToken";
   const CACHE_MS = 30_000;
   const TOKEN_PATTERN = /^[0-9a-f]{32}$/;
   const APP_LAYOUT_KEY = "radialLayout";
@@ -392,6 +429,9 @@
   const LAST_APP_CLASSIFICATIONS_KEY = "lastAppClassifications";
   const LAST_APP_SAVED_X_MEDIA_KEY = "lastAppSavedXMediaIndex";
   const API_REQUEST_TIMEOUT_MS = 8000;
+  const COLLECTOR_IMAGE_REQUEST_TIMEOUT_MS = 45_000;
+  const COLLECTOR_VIDEO_REQUEST_TIMEOUT_MS = 5 * 60_000;
+  const COLLECTOR_SUPPORTED_MEDIA_TYPES = new Set(["image", "video", "animated_gif"]);
   // 영상 원본은 Tailscale 터널 경유로 8초를 쉽게 상회한다. PC가 받는 중이면 기다린다.
   const INGESTION_TIMEOUT_MS = 120_000;
   const INGESTION_RETRY_DELAY_MS = 700;
@@ -414,12 +454,16 @@
   async function handleMessage(message) {
     switch (message?.type) {
       case "settings:get": {
-        const stored = await chrome.storage.local.get(["connectionToken", "preferences", REMOTE_SETTINGS_KEY]);
+        const stored = await chrome.storage.local.get([
+          "connectionToken", "preferences", REMOTE_SETTINGS_KEY, COLLECTOR_SETTINGS_KEY, COLLECTOR_TOKEN_KEY,
+        ]);
         return {
           ok: true,
           tokenConfigured: TOKEN_PATTERN.test(stored.connectionToken ?? ""),
+          collectorTokenConfigured: Boolean(normalizeCollectorToken(stored[COLLECTOR_TOKEN_KEY])),
           preferences: globalThis.LakomicsDefaults.normalizePreferences(stored.preferences),
           remote: globalThis.LakomicsDefaults.normalizeRemoteSettings(stored[REMOTE_SETTINGS_KEY]),
+          collector: globalThis.LakomicsDefaults.normalizeCollectorSettings(stored[COLLECTOR_SETTINGS_KEY]),
           downloadsApiAvailable: Boolean(chrome.downloads?.download),
           downloadsUiApiAvailable: Boolean(chrome.downloads?.setUiOptions),
           lastConnectionFailure: lastConnectionFailure
@@ -435,6 +479,24 @@
         await chrome.storage.local.set({ connectionToken: token });
         resetClassificationCache();
         return { ok: true };
+      }
+      case "settings:set-collector-token": {
+        const token = normalizeCollectorToken(message.token);
+        if (!token) return { ok: false, code: "invalid_collector_token" };
+        await chrome.storage.local.set({ [COLLECTOR_TOKEN_KEY]: token });
+        return { ok: true };
+      }
+      case "settings:set-collector": {
+        const requested = {
+          enabled: message.collector?.enabled === true,
+          baseUrl: message.collector?.baseUrl,
+        };
+        const collector = globalThis.LakomicsDefaults.normalizeCollectorSettings(requested);
+        if (requested.enabled && !collector.baseUrl) {
+          return { ok: false, code: "invalid_collector_url" };
+        }
+        await chrome.storage.local.set({ [COLLECTOR_SETTINGS_KEY]: collector });
+        return { ok: true, collector };
       }
       case "settings:set-preferences": {
         if (isUnsupportedAbsoluteDownloadFolder(message.preferences?.downloadFolder)) {
@@ -487,6 +549,8 @@
       }
       case "remote:test":
         return testRemoteConnection();
+      case "collector:test":
+        return testCollectorConnection();
       case "xtranslate:http":
         return translateHttpRequest(message.request);
       case "layout:get": {
@@ -885,6 +949,25 @@
 
     if (preferences.saveMode === "download" || classificationSource === "local") {
       return browserDownload(mediaPayload, preferences);
+    }
+
+    if (collectorSupportsMedia(mediaPayload)) {
+      const collector = await loadCollectorSettings();
+      if (collector.enabled) {
+        const captured = await captureWithCollector(mediaPayload, collector);
+        if (captured.ok) {
+          await rememberSavedXMediaSource(mediaPayload.sourceUrl);
+          return captured;
+        }
+        if (["collector_timeout", "collector_offline"].includes(captured.code)) {
+          const confirmed = await confirmCollectorCapture(mediaPayload, collector);
+          if (confirmed.ok) {
+            await rememberSavedXMediaSource(mediaPayload.sourceUrl);
+            return confirmed;
+          }
+        }
+        return browserDownload(mediaPayload, preferences, captured.code || "collector_failed");
+      }
     }
 
     // Never let an earlier classifications probe decide where the media is saved.
@@ -1558,6 +1641,135 @@
     lastConnectionFailure = null;
   }
 
+  function normalizeCollectorToken(value) {
+    const token = typeof value === "string" ? value.trim() : "";
+    if (!token || token.length > 1024 || /[\r\n]/.test(token)) return "";
+    return token;
+  }
+
+  async function loadCollectorSettings() {
+    const stored = await chrome.storage.local.get([COLLECTOR_SETTINGS_KEY]);
+    return globalThis.LakomicsDefaults.normalizeCollectorSettings(stored[COLLECTOR_SETTINGS_KEY]);
+  }
+
+  async function testCollectorConnection() {
+    const collector = await loadCollectorSettings();
+    if (!collector.enabled || !collector.baseUrl) return { ok: false, code: "collector_not_configured" };
+    const response = await collectorRequest("/v1/captures?limit=1", {}, collector.baseUrl);
+    if (!response.ok) return response;
+    return { ok: true, baseUrl: collector.baseUrl, status: "ready" };
+  }
+
+  function collectorSupportsMedia(payload) {
+    return COLLECTOR_SUPPORTED_MEDIA_TYPES.has(payload?.mediaType ?? "image");
+  }
+
+  async function captureWithCollector(payload, explicitCollector = null) {
+    const collector = explicitCollector ?? await loadCollectorSettings();
+    if (!collector.enabled || !collector.baseUrl) return { ok: false, code: "collector_not_configured" };
+    if (!collectorSupportsMedia(payload)) return { ok: false, code: "collector_media_unsupported" };
+    const response = await collectorRequest(
+      "/v1/captures",
+      {
+        method: "POST",
+        timeoutMs: payload.mediaType === "image"
+          ? COLLECTOR_IMAGE_REQUEST_TIMEOUT_MS
+          : COLLECTOR_VIDEO_REQUEST_TIMEOUT_MS,
+        body: JSON.stringify({
+          source_url: payload.sourceUrl,
+          media_url: payload.mediaUrl,
+          classification_id: payload.classificationId,
+          published_at: payload.publishedAt ?? null,
+          media_type: payload.mediaType === "image" ? "image" : "video",
+        }),
+      },
+      collector.baseUrl,
+    );
+    if (!response.ok) return response;
+    if (typeof response.capture?.id !== "string" || !response.capture.id
+      || !["pending", "imported"].includes(response.capture.status)) {
+      return { ok: false, code: "collector_request_failed" };
+    }
+    return {
+      ok: true,
+      status: response.created === false ? "capture_duplicate" : "captured",
+      captureId: response.capture?.id ?? null,
+      captureStatus: response.capture?.status ?? "pending",
+    };
+  }
+
+  async function confirmCollectorCapture(payload, collector) {
+    const query = [
+      ["source_url", payload.sourceUrl],
+      ["media_url", payload.mediaUrl],
+      ["classification_id", payload.classificationId],
+    ].map(([key, value]) => `${key}=${encodeURIComponent(value)}`).join("&");
+    const response = await collectorRequest(
+      `/v1/captures?${query}&limit=1`,
+      {},
+      collector.baseUrl,
+    );
+    if (!response.ok || !Array.isArray(response.items)) {
+      return { ok: false, code: response.code || "collector_request_failed" };
+    }
+    const capture = response.items.find((item) => item?.source_url === payload.sourceUrl
+      && item?.media_url === payload.mediaUrl
+      && item?.classification_id === payload.classificationId);
+    if (typeof capture?.id !== "string" || !capture.id) {
+      return { ok: false, code: "collector_request_failed" };
+    }
+    return {
+      ok: true,
+      status: "capture_duplicate",
+      captureId: capture.id,
+      captureStatus: capture.status ?? "pending",
+    };
+  }
+
+  async function collectorRequest(path, init = {}, explicitBaseUrl = null) {
+    const stored = await chrome.storage.local.get([COLLECTOR_TOKEN_KEY]);
+    const token = normalizeCollectorToken(stored[COLLECTOR_TOKEN_KEY]);
+    if (!token) return { ok: false, code: "collector_token_missing" };
+    const collector = explicitBaseUrl ? null : await loadCollectorSettings();
+    const baseUrl = explicitBaseUrl ?? collector?.baseUrl;
+    if (!baseUrl) return { ok: false, code: "collector_not_configured" };
+    const headers = { Authorization: `Bearer ${token}` };
+    if (init.body !== undefined) headers["Content-Type"] = "application/json";
+    const timeoutMs = Number.isFinite(init.timeoutMs) ? init.timeoutMs : API_REQUEST_TIMEOUT_MS;
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    const timer = controller && typeof setTimeout === "function"
+      ? setTimeout(() => controller.abort(), timeoutMs)
+      : null;
+    try {
+      const response = await fetch(`${baseUrl}${path}`, {
+        method: init.method ?? "GET",
+        headers,
+        ...(init.body === undefined ? {} : { body: init.body }),
+        ...(controller ? { signal: controller.signal } : {}),
+      });
+      let body = {};
+      try {
+        body = await response.json();
+      } catch {}
+      if (!response.ok) {
+        const code = response.status === 401 || response.status === 403
+          ? "collector_unauthorized"
+          : "collector_request_failed";
+        return {
+          ok: false,
+          code,
+          httpStatus: Number(response.status) || null,
+          ...(typeof body.detail === "string" ? { message: body.detail } : {}),
+        };
+      }
+      return { ok: true, ...body };
+    } catch (error) {
+      return { ok: false, code: error?.name === "AbortError" ? "collector_timeout" : "collector_offline" };
+    } finally {
+      if (timer !== null) clearTimeout(timer);
+    }
+  }
+
   async function loadRemoteSettings() {
     const stored = await chrome.storage.local.get([REMOTE_SETTINGS_KEY]);
     return globalThis.LakomicsDefaults.normalizeRemoteSettings(stored[REMOTE_SETTINGS_KEY]);
@@ -1680,7 +1892,7 @@
     const baseUrl = explicitBaseUrl ?? (await activeApiEndpoint()).baseUrl;
     const headers = {
       Authorization: `Bearer ${connectionToken}`,
-      "X-Lakomics-Extension-Id": chrome.runtime.id,
+      "X-Lakomics-Extension-Id": PC_EXTENSION_ID,
     };
     if (init.body !== undefined) headers["Content-Type"] = "application/json";
     const timeoutMs = Number.isFinite(init.timeoutMs) ? init.timeoutMs : API_REQUEST_TIMEOUT_MS;
@@ -1743,6 +1955,8 @@
       computeSyndicationToken,
       activeApiEndpoint,
       testRemoteConnection,
+      testCollectorConnection,
+      captureWithCollector,
       isAllowedTranslateUrl,
       translateHttpRequest,
       normalizeDownloadMatchUrl,

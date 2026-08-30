@@ -6,3 +6,4 @@ __pycache__/
 probe-report*.json
 share-probe-log.json
 *.lnk
+.tmp/

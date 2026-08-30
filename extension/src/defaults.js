@@ -16,6 +16,11 @@
     baseUrl: "https://desktop-6oh3e09.tail0aa1a3.ts.net",
   });
 
+  const DEFAULT_COLLECTOR_SETTINGS = Object.freeze({
+    enabled: false,
+    baseUrl: "http://100.76.119.29:32146",
+  });
+
   const SECONDARY_SLOT_COUNT = 12;
   const LOCAL_ROOT_DEFINITIONS = Object.freeze([
     ["local:reverse", "리버스"],
@@ -85,6 +90,32 @@
     }
   }
 
+  function normalizeCollectorSettings(value = {}) {
+    const hasExplicitBaseUrl = value && Object.prototype.hasOwnProperty.call(value, "baseUrl");
+    const requestedBaseUrl = hasExplicitBaseUrl ? value.baseUrl : DEFAULT_COLLECTOR_SETTINGS.baseUrl;
+    const baseUrl = normalizeCollectorBaseUrl(requestedBaseUrl);
+    return {
+      enabled: value.enabled === true && Boolean(baseUrl),
+      baseUrl,
+    };
+  }
+
+  function normalizeCollectorBaseUrl(value) {
+    const raw = typeof value === "string" ? value.trim() : "";
+    if (!raw) return "";
+    try {
+      const url = new URL(raw);
+      const host = url.hostname.toLowerCase();
+      const isKnownVps = url.protocol === "http:" && host === "100.76.119.29" && url.port === "32146";
+      const isTailnetHttps = url.protocol === "https:" && host.endsWith(".ts.net");
+      if (!isKnownVps && !isTailnetHttps) return "";
+      if (url.username || url.password || url.search || url.hash || (url.pathname && url.pathname !== "/")) return "";
+      return `${url.protocol}//${url.host}`;
+    } catch {
+      return "";
+    }
+  }
+
   function normalizeLocalTree(value) {
     const defaults = defaultLocalTree();
     const roots = Array.isArray(value?.roots) ? value.roots : [];
@@ -147,11 +178,14 @@
   globalThis.LakomicsDefaults = {
     DEFAULT_PREFERENCES,
     DEFAULT_REMOTE_SETTINGS,
+    DEFAULT_COLLECTOR_SETTINGS,
     SECONDARY_SLOT_COUNT,
     LOCAL_ROOT_DEFINITIONS,
     defaultLocalTree,
     normalizeRemoteSettings,
     normalizeRemoteBaseUrl,
+    normalizeCollectorSettings,
+    normalizeCollectorBaseUrl,
     normalizeLocalTree,
     localTreeEntries,
     localTreeLayout,

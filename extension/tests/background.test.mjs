@@ -60,6 +60,22 @@ test("keeps the connection token inside the service worker", async () => {
   assert.equal(JSON.stringify(settings).includes("0123456789abcdef"), false);
 });
 
+test("CRX runtime id keeps the legacy PC extension identity header", async () => {
+  const harness = createHarness(
+    { connectionToken: "0123456789abcdef0123456789abcdef" },
+    "golmemaokleeigalndaacoolafdlmoai",
+  );
+  harness.queueJson({ entries: [] });
+
+  const response = await harness.api.handleMessage({ type: "classifications:get" });
+
+  assert.equal(response.ok, true);
+  assert.equal(
+    harness.fetchCalls[0].options.headers["X-Lakomics-Extension-Id"],
+    "nclkmjmmlcdaeomgadndeangccfidfbk",
+  );
+});
+
 test("legacy app-only preference migrates to auto and preserves the last classifications offline", async () => {
   const harness = createHarness({
     connectionToken: "0123456789abcdef0123456789abcdef",
@@ -1008,6 +1024,301 @@ test("X Translate proxy blocks unapproved URLs before fetch", async () => {
   assert.equal(harness.fetchCalls.length, 0);
 });
 
+
+test("collector settings stay in extension storage without exposing the token", async () => {
+  const harness = createHarness({
+    collectorToken: "server-secret-token",
+    collectorSettings: { enabled: true, baseUrl: "http://100.76.119.29:32146" },
+  });
+
+  const settings = await harness.api.handleMessage({ type: "settings:get" });
+
+  assert.equal(settings.collectorTokenConfigured, true);
+  assert.deepEqual(plain(settings.collector), {
+    enabled: true,
+    baseUrl: "http://100.76.119.29:32146",
+  });
+  assert.equal(JSON.stringify(settings).includes("server-secret-token"), false);
+  assert.ok(manifest.host_permissions.includes("http://100.76.119.29:32146/*"));
+});
+
+test("collector rejects arbitrary insecure endpoints", async () => {
+  const harness = createHarness();
+
+  const rejected = await harness.api.handleMessage({
+    type: "settings:set-collector",
+    collector: { enabled: true, baseUrl: "http://192.168.0.10:32146" },
+  });
+
+  assert.deepEqual(plain(rejected), { ok: false, code: "invalid_collector_url" });
+});
+
+test("collector-enabled image saves go to the VPS capture inbox instead of the PC", async () => {
+  const harness = createHarness({
+    collectorToken: "server-secret-token",
+    collectorSettings: { enabled: true, baseUrl: "http://100.76.119.29:32146" },
+    connectionToken: "0123456789abcdef0123456789abcdef",
+  });
+  harness.queueJson({
+    ok: true,
+    created: true,
+    capture: { id: "capture-1", status: "pending" },
+  });
+
+  const response = await harness.api.handleMessage({
+    type: "ingestion:create",
+    payload: {
+      source: "x",
+      mediaType: "image",
+      mediaUrl: "https://pbs.twimg.com/media/SERVER?format=jpg&name=orig",
+      sourceUrl: "https://x.com/artist/status/4242/photo/1",
+      classificationId: "game",
+      classificationName: "??",
+      classificationPath: ["??"],
+      classificationSource: "app-cache",
+      publishedAt: "2026-08-01T10:20:30.000Z",
+    },
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.status, "captured");
+  assert.equal(response.captureId, "capture-1");
+  assert.equal(harness.fetchCalls.length, 1);
+  assert.equal(harness.fetchCalls[0].url, "http://100.76.119.29:32146/v1/captures");
+  assert.equal(harness.fetchCalls[0].options.headers.Authorization, "Bearer server-secret-token");
+  assert.equal(harness.fetchCalls[0].options.headers["X-Lakomics-Extension-Id"], undefined);
+  assert.deepEqual(JSON.parse(harness.fetchCalls[0].options.body), {
+    source_url: "https://x.com/artist/status/4242/photo/1",
+    media_url: "https://pbs.twimg.com/media/SERVER?format=jpg&name=orig",
+    classification_id: "game",
+    published_at: "2026-08-01T10:20:30.000Z",
+    media_type: "image",
+  });
+  assert.equal(harness.downloadCalls.length, 0);
+});
+
+test("malformed successful collector response falls back instead of claiming capture", async () => {
+  const harness = createHarness({
+    collectorToken: "server-secret-token",
+    collectorSettings: { enabled: true, baseUrl: "http://100.76.119.29:32146" },
+    preferences: { saveMode: "auto", downloadFolder: "Lakomics" },
+  });
+  harness.queueJson({});
+
+  const response = await harness.api.handleMessage({
+    type: "ingestion:create",
+    payload: {
+      source: "x",
+      mediaType: "image",
+      mediaUrl: "https://pbs.twimg.com/media/MALFORMED?format=jpg&name=orig",
+      sourceUrl: "https://x.com/artist/status/4343/photo/1",
+      classificationId: "game",
+      classificationName: "Game",
+      classificationSource: "app-cache",
+    },
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.status, "downloaded");
+  assert.equal(response.fallbackCode, "collector_request_failed");
+  assert.equal(harness.downloadCalls.length, 2);
+});
+
+test("collector-enabled resolved video saves go to the VPS capture inbox", async () => {
+  const harness = createHarness({
+    collectorToken: "server-secret-token",
+    collectorSettings: { enabled: true, baseUrl: "http://100.76.119.29:32146" },
+    connectionToken: "0123456789abcdef0123456789abcdef",
+    preferences: { saveMode: "app" },
+  });
+  harness.queueJson({ ok: true, created: true, capture: { id: "video-1", status: "pending" } });
+
+  const response = await harness.api.handleMessage({
+    type: "ingestion:create",
+    payload: {
+      source: "x",
+      mediaType: "video",
+      mediaUrl: "https://video.twimg.com/ext_tw_video/1/pu/vid/1280x720/VIDEO.mp4",
+      sourceUrl: "https://x.com/artist/status/6262/video/1",
+      classificationId: "game",
+      classificationName: "Game",
+      classificationSource: "app-cache",
+    },
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.status, "captured");
+  assert.equal(harness.fetchCalls.length, 1);
+  assert.equal(harness.fetchCalls[0].url, "http://100.76.119.29:32146/v1/captures");
+  assert.deepEqual(JSON.parse(harness.fetchCalls[0].options.body), {
+    source_url: "https://x.com/artist/status/6262/video/1",
+    media_url: "https://video.twimg.com/ext_tw_video/1/pu/vid/1280x720/VIDEO.mp4",
+    classification_id: "game",
+    published_at: null,
+    media_type: "video",
+  });
+  assert.equal(harness.downloadCalls.length, 0);
+});
+
+test("collector resolves the highest bitrate MP4 before server capture", async () => {
+  const harness = createHarness({
+    collectorToken: "server-secret-token",
+    collectorSettings: { enabled: true, baseUrl: "http://100.76.119.29:32146" },
+  });
+  harness.queueJson({
+    mediaDetails: [{
+      type: "video",
+      video_info: { variants: [
+        { content_type: "video/mp4", bitrate: 832000, url: "https://video.twimg.com/ext_tw_video/1/pu/vid/640x360/LOW.mp4" },
+        { content_type: "video/mp4", bitrate: 2176000, url: "https://video.twimg.com/ext_tw_video/1/pu/vid/1920x1080/HIGH.mp4" },
+      ] },
+    }],
+  });
+  harness.queueJson({ ok: true, created: true, capture: { id: "video-2", status: "pending" } });
+
+  const response = await harness.api.handleMessage({
+    type: "ingestion:create",
+    payload: {
+      source: "x",
+      mediaType: "video",
+      sourceUrl: "https://x.com/artist/status/6363/video/1",
+      postId: "6363",
+      mediaIndex: 1,
+      classificationId: "game",
+      classificationName: "Game",
+      classificationSource: "app-cache",
+    },
+  });
+
+  assert.equal(response.ok, true);
+  assert.match(harness.fetchCalls[0].url, /^https:\/\/cdn\.syndication\.twimg\.com\/tweet-result/);
+  assert.equal(harness.fetchCalls[1].url, "http://100.76.119.29:32146/v1/captures");
+  const body = JSON.parse(harness.fetchCalls[1].options.body);
+  assert.equal(body.media_url, "https://video.twimg.com/ext_tw_video/1/pu/vid/1920x1080/HIGH.mp4");
+  assert.equal(body.media_type, "video");
+  assert.equal(harness.downloadCalls.length, 0);
+});
+
+test("collector sends animated GIF MP4 media as video", async () => {
+  const harness = createHarness({
+    collectorToken: "server-secret-token",
+    collectorSettings: { enabled: true, baseUrl: "http://100.76.119.29:32146" },
+  });
+  harness.queueJson({ ok: true, created: true, capture: { id: "gif-1", status: "pending" } });
+
+  const response = await harness.api.handleMessage({
+    type: "ingestion:create",
+    payload: {
+      source: "x",
+      mediaType: "animated_gif",
+      mediaUrl: "https://video.twimg.com/tweet_video/GIF123.mp4",
+      sourceUrl: "https://x.com/artist/status/6464/video/1",
+      classificationId: "other",
+      classificationName: "Other",
+      classificationSource: "app-cache",
+    },
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(JSON.parse(harness.fetchCalls[0].options.body).media_type, "video");
+  assert.equal(harness.downloadCalls.length, 0);
+});
+
+test("ambiguous collector failure confirms an idempotent capture before fallback", async () => {
+  const harness = createHarness({
+    collectorToken: "server-secret-token",
+    collectorSettings: { enabled: true, baseUrl: "http://100.76.119.29:32146" },
+  });
+  harness.queueError(new TypeError("response lost"));
+  harness.queueJson({ items: [{
+    id: "confirmed-1",
+    source_url: "https://x.com/artist/status/6555/video/1",
+    media_url: "https://video.twimg.com/ext_tw_video/1/pu/vid/1280x720/CONFIRMED.mp4",
+    classification_id: "game",
+    status: "pending",
+  }] });
+
+  const response = await harness.api.handleMessage({
+    type: "ingestion:create",
+    payload: {
+      source: "x",
+      mediaType: "video",
+      mediaUrl: "https://video.twimg.com/ext_tw_video/1/pu/vid/1280x720/CONFIRMED.mp4",
+      sourceUrl: "https://x.com/artist/status/6555/video/1",
+      classificationId: "game",
+      classificationName: "Game",
+      classificationSource: "app-cache",
+    },
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.status, "capture_duplicate");
+  assert.equal(response.captureId, "confirmed-1");
+  assert.equal(harness.fetchCalls.length, 2);
+  assert.equal(
+    harness.fetchCalls[1].url,
+    "http://100.76.119.29:32146/v1/captures?source_url=https%3A%2F%2Fx.com%2Fartist%2Fstatus%2F6555%2Fvideo%2F1&media_url=https%3A%2F%2Fvideo.twimg.com%2Fext_tw_video%2F1%2Fpu%2Fvid%2F1280x720%2FCONFIRMED.mp4&classification_id=game&limit=1",
+  );
+  assert.equal(harness.downloadCalls.length, 0);
+});
+
+test("video collector network failure falls back to the device download", async () => {
+  const harness = createHarness({
+    collectorToken: "server-secret-token",
+    collectorSettings: { enabled: true, baseUrl: "http://100.76.119.29:32146" },
+    preferences: { saveMode: "auto", downloadFolder: "Lakomics" },
+  });
+  harness.queueError(new TypeError("offline"));
+
+  const response = await harness.api.handleMessage({
+    type: "ingestion:create",
+    payload: {
+      source: "x",
+      mediaType: "video",
+      mediaUrl: "https://video.twimg.com/ext_tw_video/1/pu/vid/1280x720/FALLBACK.mp4",
+      sourceUrl: "https://x.com/artist/status/6565/video/1",
+      classificationId: "game",
+      classificationName: "Game",
+      classificationSource: "app-cache",
+    },
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.status, "downloaded");
+  assert.equal(response.fallbackCode, "collector_offline");
+  assert.equal(harness.fetchCalls.length, 2);
+  assert.equal(harness.fetchCalls[0].url, "http://100.76.119.29:32146/v1/captures");
+  assert.equal(harness.downloadCalls.length, 2);
+});
+
+test("collector network failure falls back to the device download", async () => {
+  const harness = createHarness({
+    collectorToken: "server-secret-token",
+    collectorSettings: { enabled: true, baseUrl: "http://100.76.119.29:32146" },
+    preferences: { saveMode: "auto", downloadFolder: "Lakomics" },
+  });
+  harness.queueError(new TypeError("offline"));
+
+  const response = await harness.api.handleMessage({
+    type: "ingestion:create",
+    payload: {
+      source: "x",
+      mediaType: "image",
+      mediaUrl: "https://pbs.twimg.com/media/FALLBACK?format=jpg&name=orig",
+      sourceUrl: "https://x.com/artist/status/5252/photo/1",
+      classificationId: "game",
+      classificationName: "??",
+      classificationPath: ["??"],
+      classificationSource: "app-cache",
+    },
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.status, "downloaded");
+  assert.equal(response.fallbackCode, "collector_offline");
+  assert.equal(harness.downloadCalls.length, 2);
+});
+
 test("toolbar click opens the extension options page", async () => {
   const harness = createHarness();
 
@@ -1016,7 +1327,7 @@ test("toolbar click opens the extension options page", async () => {
   assert.equal(harness.optionsOpened, 1);
 });
 
-function createHarness(initialStorage = {}) {
+function createHarness(initialStorage = {}, runtimeId = "nclkmjmmlcdaeomgadndeangccfidfbk") {
   const storage = { ...initialStorage };
   const responses = [];
   const fetchCalls = [];
@@ -1045,7 +1356,7 @@ function createHarness(initialStorage = {}) {
       },
     },
     runtime: {
-      id: "nclkmjmmlcdaeomgadndeangccfidfbk",
+      id: runtimeId,
       onMessage: { addListener() {} },
       async openOptionsPage() { optionsOpened += 1; },
     },

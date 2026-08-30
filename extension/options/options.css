@@ -330,6 +330,7 @@ select {
 
 
 #x-translate-status,
+#collector-status,
 #remote-status,
 #connection-backup-status,
 #local-tree-status {
