@@ -105,6 +105,7 @@ export type AssetView =
   | { kind: "classification"; classificationId: string | null }
   | { kind: "album"; albumId: string }
   | { kind: "unsorted" }
+  | { kind: "revisit" }
   | { kind: "creators" }
   | { kind: "creator"; creatorKey: string }
   | { kind: "calendar" }

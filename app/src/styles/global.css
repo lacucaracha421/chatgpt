@@ -4749,7 +4749,7 @@ input:disabled {
   width: calc(100% - 24px);
   height: calc(var(--card-w, 200px) * 0.44);
   transform: translateX(-50%);
-  object-fit: cover;
+  object-fit: contain;
   border-radius: 2px;
   background: var(--color-bg);
   z-index: 3;
@@ -4775,8 +4775,8 @@ input:disabled {
 
 .creator-list__preview {
   position: absolute;
-  left: 4px;
-  right: 4px;
+  left: 50%;
+  width: calc(var(--card-w, 200px) * 1.8);
   bottom: -10px;
   z-index: 10;
   display: flex;
@@ -4788,9 +4788,21 @@ input:disabled {
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
   overflow: hidden;
+  transform: translateX(-50%);
   opacity: 0;
   visibility: hidden;
   transition: opacity 120ms ease;
+}
+
+.creator-list__card:first-child .creator-list__preview {
+  left: 0;
+  transform: none;
+}
+
+.creator-list__card:last-child .creator-list__preview {
+  right: 0;
+  left: auto;
+  transform: none;
 }
 
 .creator-list__card--preview .creator-list__preview {
@@ -4799,9 +4811,10 @@ input:disabled {
 }
 
 .creator-list__preview-thumb {
-  width: calc(var(--card-w, 200px) * 0.42);
-  height: calc(var(--card-w, 200px) * 0.42);
-  object-fit: cover;
+  width: calc(var(--card-w, 200px) * 0.55);
+  height: calc(var(--card-w, 200px) * 0.55);
+  flex: none;
+  object-fit: contain;
   border-radius: 3px;
   background: var(--color-bg);
 }

@@ -48,6 +48,7 @@ describe("AssetBrowser", () => {
         mediaKind: null,
         aspectRatio: null,
         randomPivot: null,
+        collectedRange: null,
         after: null,
         aroundDate: null,
         limit: 100,
@@ -83,9 +84,6 @@ describe("AssetBrowser", () => {
     await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(
       expect.objectContaining({ mediaKind: "images", aspectRatio: null, after: null, aroundDate: null }),
     ));
-    expect(gateway.listAssetDateBuckets).toHaveBeenLastCalledWith(
-      expect.objectContaining({ mediaKind: "images", aspectRatio: null }),
-    );
     expect(await screen.findByRole("option", { name: "asset-0.png" })).toHaveAttribute("aria-selected", "false");
 
     await user.selectOptions(screen.getByRole("combobox", { name: "비율" }), "portrait");
@@ -326,6 +324,30 @@ describe("AssetBrowser", () => {
 
     await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledWith(expect.objectContaining({ sort: "oldest", after: null })));
     expect(vi.mocked(gateway.listAssets).mock.calls).not.toContainEqual([expect.objectContaining({ sort: "oldest", after: { token: "old-cursor" } })]);
+  });
+
+  it("loads only the selected local day from 다시보기", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway({ items: [asset(0)], nextCursor: null });
+    vi.mocked(gateway.listAssetDateBuckets).mockResolvedValue([{ date: "2026-08-06", count: 1 }]);
+    render(
+      <LibraryProvider gateway={gateway}>
+        <AssetBrowser view={{ kind: "revisit" }} classifications={classifications} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} />
+      </LibraryProvider>,
+    );
+
+    await user.click(screen.getByRole("tab", { name: "둘러보기" }));
+    await user.click(await screen.findByRole("button", { name: "2026-08-06 수집 1개" }));
+
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(expect.objectContaining({
+      collectedRange: {
+        localDate: "2026-08-06",
+        startUtc: "2026-08-05T15:00:00.000Z",
+        endUtc: "2026-08-06T15:00:00.000Z",
+      },
+      sort: "newest",
+      after: null,
+    })));
   });
 
   it("jumps to a rail date by loading an anchor window and keeps paginating upward", async () => {

@@ -222,18 +222,19 @@ describe("ClassificationSidebar", () => {
     expect(within(quickViews).getAllByRole("button").map((button) => button.textContent)).toEqual([
       "저장소",
       "미분류",
-      "작가",
-      "달력",
+      "다시보기",
       "유사 검토0",
       "망가",
       "컬렉션",
     ]);
 
     await user.click(screen.getByRole("button", { name: "미분류" }));
+    await user.click(screen.getByRole("button", { name: "다시보기" }));
     await user.click(screen.getByRole("button", { name: "저장소" }));
 
     expect(onViewChange).toHaveBeenNthCalledWith(1, { kind: "unsorted" });
-    expect(onViewChange).toHaveBeenNthCalledWith(2, { kind: "classification", classificationId: null });
+    expect(onViewChange).toHaveBeenNthCalledWith(2, { kind: "revisit" });
+    expect(onViewChange).toHaveBeenNthCalledWith(3, { kind: "classification", classificationId: null });
   });
 
   it("keeps trash and settings in the sidebar footer", () => {

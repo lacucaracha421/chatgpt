@@ -9,8 +9,9 @@ import { Skeleton } from "../shared/ui/Skeleton";
 import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import type { InternalDragPayload } from "../shared/interaction/pointerDrag";
+import { RevisitBrowser } from "../revisit/RevisitBrowser";
+import { toUtcDateRange } from "../revisit/revisitDate";
 import { CreatorList } from "./CreatorList";
-import { CalendarView } from "./CalendarView";
 import { AssetGallery } from "./AssetGallery";
 import { AssetInspector } from "./AssetInspector";
 import { AssetToolbar } from "./AssetToolbar";
@@ -19,7 +20,7 @@ import { SelectionBar } from "./SelectionBar";
 import { applySelectionGesture, emptySelection, moveSelectionFocus, reconcileSelection, selectAllLoaded, type SelectionGesture, type SelectionState } from "./selection";
 
 export type AssetBrowserStatus = { loadedCount: number; totalCount?: number; selectedAsset: AssetSummary | null; loading: boolean };
-type Props = { view: AssetView; onViewChange?: (view: AssetView) => void; onOpenCalendarDay?: (date: string) => void; requestedDate?: string | null; onRequestedDateHandled?: () => void; classifications: ClassificationEntry[]; albums?: AlbumEntry[]; collections?: CollectionSummary[]; onCollectionsChanged?: () => void; onMembershipChanged?: () => void; sort: AssetSort; metadataVisible: boolean; privacyMode: boolean; onPrivacyModeChange: (privacyMode: boolean) => void; thumbnailRowHeight?: number; refreshVersion: number; requestedAsset?: AssetSummary | null; onRequestedAssetHandled?: () => void; onSortChange: (sort: AssetSort) => void; onMetadataVisibleChange: (visible: boolean) => void; onThumbnailRowHeightChange?: (height: number) => void; onStatusChange: (status: AssetBrowserStatus) => void; onPointerDragStart?: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => void; onPointerDragMove?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void };
+type Props = { view: AssetView; onViewChange?: (view: AssetView) => void; classifications: ClassificationEntry[]; albums?: AlbumEntry[]; collections?: CollectionSummary[]; onCollectionsChanged?: () => void; onMembershipChanged?: () => void; sort: AssetSort; metadataVisible: boolean; privacyMode: boolean; onPrivacyModeChange: (privacyMode: boolean) => void; thumbnailRowHeight?: number; refreshVersion: number; requestedAsset?: AssetSummary | null; onRequestedAssetHandled?: () => void; onSortChange: (sort: AssetSort) => void; onMetadataVisibleChange: (visible: boolean) => void; onThumbnailRowHeightChange?: (height: number) => void; onStatusChange: (status: AssetBrowserStatus) => void; onPointerDragStart?: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => void; onPointerDragMove?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void };
 type PageState = { queryKey: string; items: AssetSummary[]; headCursor: AssetCursor | null; tailCursor: AssetCursor | null };
 type QueryError = { queryKey: string; message: string };
 export type GalleryJump = { date: string; ratio: number; token: number };
@@ -31,8 +32,9 @@ const ALL_DATE_BUCKETS = {
   offsetMinutes: -new Date().getTimezoneOffset(),
 };
 
-export function AssetBrowser({ view, onViewChange, onOpenCalendarDay, requestedDate = null, onRequestedDateHandled = () => undefined, classifications, albums = [], collections = [], onCollectionsChanged = () => undefined, onMembershipChanged = () => undefined, sort, metadataVisible, privacyMode, onPrivacyModeChange, thumbnailRowHeight = 180, refreshVersion, requestedAsset = null, onRequestedAssetHandled = () => undefined, onSortChange, onMetadataVisibleChange, onThumbnailRowHeightChange = () => undefined, onStatusChange, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: Props) {
+export function AssetBrowser({ view, onViewChange, classifications, albums = [], collections = [], onCollectionsChanged = () => undefined, onMembershipChanged = () => undefined, sort, metadataVisible, privacyMode, onPrivacyModeChange, thumbnailRowHeight = 180, refreshVersion, requestedAsset = null, onRequestedAssetHandled = () => undefined, onSortChange, onMetadataVisibleChange, onThumbnailRowHeightChange = () => undefined, onStatusChange, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: Props) {
   const { gateway } = useLibrary();
+  const [revisitDate, setRevisitDate] = useState<string | null>(null);
   const [directOnly, setDirectOnly] = useState(false);
   const [mediaFilter, setMediaFilter] = useState<AssetMediaFilter>("all");
   const [aspectFilter, setAspectFilter] = useState<AssetAspectFilter>("all");
@@ -53,9 +55,6 @@ export function AssetBrowser({ view, onViewChange, onOpenCalendarDay, requestedD
   const [batchPending, setBatchPending] = useState(false);
   const [undoAssetIds, setUndoAssetIds] = useState<string[] | null>(null);
   const [dateBuckets, setDateBuckets] = useState<{ queryKey: string; buckets: AssetDateBucket[] }>({ queryKey: "", buckets: [] });
-  const [calendarCounts, setCalendarCounts] = useState<Map<string, number> | null>(null);
-  const [calendarLoading, setCalendarLoading] = useState(false);
-  const [calendarError, setCalendarError] = useState<string | null>(null);
   const [anchor, setAnchor] = useState<string | null>(null);
   const [jumpTarget, setJumpTarget] = useState<GalleryJump | null>(null);
   const dismissMessage = useCallback((value: null) => { setMessage(value); setUndoAssetIds(null); }, []);
@@ -75,9 +74,9 @@ export function AssetBrowser({ view, onViewChange, onOpenCalendarDay, requestedD
   useEffect(() => { if (sort !== "random") randomPivotRef.current = null; }, [sort]);
   useEffect(() => { if (view.kind !== "classification") setDirectOnly(false); }, [view.kind]);
   const creatorKey = view.kind === "creator" ? view.creatorKey : null;
-  const queryBase = useMemo<Omit<AssetQuery, "after">>(() => ({ classificationId: view.kind === "classification" ? view.classificationId : null, albumId: view.kind === "album" ? view.albumId : null, collectionId: view.kind === "collection" ? view.collectionId : null, creatorKey, directOnly: view.kind === "classification" ? directOnly : false, unclassifiedOnly: view.kind === "unsorted", mediaKind: filterable && mediaFilter !== "all" ? mediaFilter : null, aspectRatio: filterable && aspectFilter !== "all" ? aspectFilter : null, sort, randomPivot: sort === "random" ? randomPivotRef.current : null, limit: ASSET_PAGE_SIZE }), [aspectFilter, creatorKey, directOnly, sort, filterable, mediaFilter, randomVersion, view]);
+  const queryBase = useMemo<Omit<AssetQuery, "after">>(() => ({ classificationId: view.kind === "classification" ? view.classificationId : null, albumId: view.kind === "album" ? view.albumId : null, collectionId: view.kind === "collection" ? view.collectionId : null, creatorKey, directOnly: view.kind === "classification" ? directOnly : false, unclassifiedOnly: view.kind === "unsorted", mediaKind: filterable && mediaFilter !== "all" ? mediaFilter : null, aspectRatio: filterable && aspectFilter !== "all" ? aspectFilter : null, sort, randomPivot: sort === "random" ? randomPivotRef.current : null, collectedRange: view.kind === "revisit" && revisitDate ? toUtcDateRange(revisitDate) : null, limit: ASSET_PAGE_SIZE }), [aspectFilter, creatorKey, directOnly, sort, filterable, mediaFilter, randomVersion, revisitDate, view]);
   const queryKey = JSON.stringify(queryBase);
-  const viewKey = view.kind === "classification" ? `classification:${view.classificationId}` : view.kind === "album" ? `album:${view.albumId}` : view.kind === "collection" ? `collection:${view.collectionId}` : view.kind === "creator" ? `creator:${view.creatorKey}` : view.kind;
+  const viewKey = view.kind === "classification" ? `classification:${view.classificationId}` : view.kind === "album" ? `album:${view.albumId}` : view.kind === "collection" ? `collection:${view.collectionId}` : view.kind === "creator" ? `creator:${view.creatorKey}` : view.kind === "revisit" ? `revisit:${revisitDate ?? "index"}` : view.kind;
   const effectiveAnchor = anchor !== null && anchorViewKey === viewKey ? anchor : null;
   const anchorRef = useRef<string | null>(effectiveAnchor);
   anchorRef.current = effectiveAnchor;
@@ -91,7 +90,7 @@ export function AssetBrowser({ view, onViewChange, onOpenCalendarDay, requestedD
   const currentPrevError = prevError?.queryKey === queryKey ? prevError.message : null;
   const refresh = useCallback(() => setRetryVersion((value) => value + 1), []);
   useEffect(() => {
-    if (view.kind === "creators") { ++generationRef.current; nextLoadingRef.current = false; prevLoadingRef.current = false; setFirstLoading(false); setNextLoading(false); setPrevLoading(false); setFirstError(null); setNextError(null); setPrevError(null); return; }
+    if (view.kind === "creators" || view.kind === "revisit" && !revisitDate) { ++generationRef.current; nextLoadingRef.current = false; prevLoadingRef.current = false; setFirstLoading(false); setNextLoading(false); setPrevLoading(false); setFirstError(null); setNextError(null); setPrevError(null); return; }
     nextLoadingRef.current = false; prevLoadingRef.current = false; setFirstLoading(true); setNextLoading(false); setPrevLoading(false); setFirstError(null); setNextError(null); setPrevError(null);
     const generation = ++generationRef.current;
     const anchorDate = anchorRef.current;
@@ -103,32 +102,15 @@ export function AssetBrowser({ view, onViewChange, onOpenCalendarDay, requestedD
       setViewerAssetId((assetId) => requestedAssetRef.current?.id === assetId ? assetId : reconcileAssetId(assetId, viewerViewKeyRef.current, viewKey, result.items));
     }).catch((error: unknown) => { if (generation === generationRef.current) setFirstError({ queryKey, message: commandErrorMessage(error, "자산을 불러오지 못했습니다.") }); }).finally(() => { if (generation === generationRef.current) setFirstLoading(false); });
     return () => { if (generation === generationRef.current) generationRef.current += 1; };
-  }, [gateway, queryBase, queryKey, refreshVersion, retryVersion, viewKey]);
+  }, [gateway, queryBase, queryKey, refreshVersion, retryVersion, revisitDate, view.kind, viewKey]);
   useEffect(() => {
-    if (view.kind === "creators") { setDateBuckets({ queryKey, buckets: [] }); return; }
+    if (view.kind === "creators" || view.kind === "revisit") { setDateBuckets({ queryKey, buckets: [] }); return; }
     let cancelled = false;
     void gateway.listAssetDateBuckets(ALL_DATE_BUCKETS).then((result) => {
       if (!cancelled) setDateBuckets({ queryKey, buckets: result });
     }).catch(() => { if (!cancelled) setDateBuckets({ queryKey, buckets: [] }); });
     return () => { cancelled = true; };
   }, [gateway, queryBase, queryKey, refreshVersion]);
-  useEffect(() => {
-    if (view.kind !== "calendar") return;
-    setCalendarLoading(true);
-    setCalendarError(null);
-    let cancelled = false;
-    void gateway.listAssetDateBuckets(ALL_DATE_BUCKETS).then((result) => {
-      if (cancelled) return;
-      const byDay = new Map<string, number>();
-      for (const bucket of result) byDay.set(bucket.date, bucket.count);
-      setCalendarCounts(byDay);
-    }).catch((error: unknown) => {
-      if (!cancelled) setCalendarError(commandErrorMessage(error, "수집 기록을 불러오지 못했습니다."));
-    }).finally(() => {
-      if (!cancelled) setCalendarLoading(false);
-    });
-    return () => { cancelled = true; };
-  }, [gateway, view.kind]);
   const activeBuckets = dateBuckets.queryKey === queryKey ? dateBuckets.buckets : EMPTY_BUCKETS;
   const totalAssets = useMemo(() => activeBuckets.reduce((sum, bucket) => sum + bucket.count, 0), [activeBuckets]);
   useEffect(() => onStatusChange({ loadedCount: items.length, totalCount: totalAssets, selectedAsset, loading: firstLoading || nextLoading || prevLoading }), [firstLoading, items.length, nextLoading, onStatusChange, prevLoading, selectedAsset, totalAssets]);
@@ -174,11 +156,6 @@ export function AssetBrowser({ view, onViewChange, onOpenCalendarDay, requestedD
       setViewerAssetId((assetId) => requestedAssetRef.current?.id === assetId ? assetId : reconcileAssetId(assetId, viewerViewKeyRef.current, viewKey, result.items));
     }).catch((error: unknown) => { if (generation === generationRef.current) setFirstError({ queryKey, message: commandErrorMessage(error, "해당 날짜로 이동하지 못했습니다.") }); });
   }, [chronological, gateway, queryBase, queryKey, viewKey]);
-  useEffect(() => {
-    if (!requestedDate) return;
-    jumpToDate(requestedDate, 0.5);
-    onRequestedDateHandled();
-  }, [requestedDate, jumpToDate, onRequestedDateHandled]);
   const reshuffle = () => { randomPivotRef.current = createRandomPivot(); setRandomVersion((value) => value + 1); };
   const selectWithGesture = (asset: AssetSummary, gesture: SelectionGesture) => {
     const next = applySelectionGesture(selection, itemIds, asset.id, gesture);
@@ -309,18 +286,31 @@ export function AssetBrowser({ view, onViewChange, onOpenCalendarDay, requestedD
       setMessage(commandErrorMessage(error, "자산을 휴지통으로 이동하지 못했습니다."));
     }
   })();
+  const assetResults = firstLoading || !activePage && !currentFirstError
+    ? <Skeleton className="asset-browser__skeleton" label="자산을 불러오는 중" />
+    : currentFirstError && items.length === 0
+      ? <EmptyState title="자산을 불러오지 못했습니다"><Button onClick={refresh}>다시 시도</Button></EmptyState>
+      : items.length === 0
+        ? <EmptyState title={view.kind === "album" ? "이 앨범에 자산이 없습니다." : view.kind === "collection" ? "이 컬렉션에 자산이 없습니다." : "자산이 없습니다"}>{view.kind === "album" ? "원하는 자산을 이 앨범에 추가하세요." : view.kind === "collection" ? "원하는 자산을 이 컬렉션에 추가하세요." : "여기에 이미지와 영상 파일을 놓아 추가하세요."}</EmptyState>
+        : <AssetGallery items={items} dateBuckets={activeBuckets} onSelectDate={jumpToDate} railInteractive={chronological} jumpTarget={jumpTarget} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} targetRowHeight={thumbnailRowHeight} metadataVisible={metadataVisible} privacyMode={privacyMode} hasNextPage={tailCursor !== null} onLoadNextPage={loadNextPage} hasPreviousPage={headCursor !== null} onLoadPrevPage={loadPrevPage} onSelectionGesture={selectWithGesture} onSelectAll={selectAll} onDeleteSelection={trashSelection} onClearSelection={clearSelection} onMoveFocus={moveFocus} onOpen={(asset) => { viewerViewKeyRef.current = viewKey; setViewerAssetId(asset.id); }} onRetryVideo={(asset) => void gateway.retryVideoPreparation(asset.id).then(() => gateway.preparePendingVideos(1)).then(refresh).catch((error) => setMessage(commandErrorMessage(error, "미리보기 준비를 다시 시작하지 못했습니다.")))} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />;
   return <section className="asset-browser" aria-label="저장소">
     <AssetToolbar view={view} classifications={classifications} albums={albums} collections={collections} sort={sort} mediaFilter={mediaFilter} aspectFilter={aspectFilter} directOnly={directOnly} metadataVisible={metadataVisible} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} thumbnailRowHeight={thumbnailRowHeight} onSortChange={(next) => { setAnchor(null); setAnchorViewKey(null); setJumpTarget(null); onSortChange(next); }} onMediaFilterChange={changeMediaFilter} onAspectFilterChange={changeAspectFilter} onDirectOnlyChange={setDirectOnly} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onReshuffle={reshuffle} />
     {message && <Toast actionLabel={undoAssetIds ? "실행 취소" : undefined} onAction={undoAssetIds ? undoTrash : undefined} actionDisabled={batchPending} onDismiss={() => dismissMessage(null)}>{message}</Toast>}
     {currentFirstError && <Toast>{currentFirstError}</Toast>}
     <div className={`asset-browser__workspace${inspectorOpen ? " asset-browser__workspace--inspector" : ""}`}>
       <div className="asset-browser__gallery">
-        {view.kind === "calendar" && <CalendarView countsByDay={calendarCounts} loading={calendarLoading} error={calendarError} onSelectDay={(date) => onOpenCalendarDay?.(date)} />}
-        {view.kind === "creators" && <CreatorList privacyMode={privacyMode} cellSize={thumbnailRowHeight} onSelect={(creatorKey) => onViewChange?.({ kind: "creator", creatorKey })} />}
-        {view.kind !== "creators" && (firstLoading || !activePage && !currentFirstError ? <Skeleton className="asset-browser__skeleton" label="자산을 불러오는 중" /> : currentFirstError && items.length === 0 ? <EmptyState title="자산을 불러오지 못했습니다"><Button onClick={refresh}>다시 시도</Button></EmptyState> : items.length === 0 ? <EmptyState title={view.kind === "album" ? "이 앨범에 자산이 없습니다." : view.kind === "collection" ? "이 컬렉션에 자산이 없습니다." : "자산이 없습니다"}>{view.kind === "album" ? "원하는 자산을 이 앨범에 추가하세요." : view.kind === "collection" ? "원하는 자산을 이 컬렉션에 추가하세요." : "여기에 이미지와 영상 파일을 놓아 추가하세요."}</EmptyState>         : <AssetGallery items={items} dateBuckets={activeBuckets} onSelectDate={jumpToDate} railInteractive={chronological} jumpTarget={jumpTarget} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} targetRowHeight={thumbnailRowHeight} metadataVisible={metadataVisible} privacyMode={privacyMode} hasNextPage={tailCursor !== null} onLoadNextPage={loadNextPage} hasPreviousPage={headCursor !== null} onLoadPrevPage={loadPrevPage} onSelectionGesture={selectWithGesture} onSelectAll={selectAll} onDeleteSelection={trashSelection} onClearSelection={clearSelection} onMoveFocus={moveFocus} onOpen={(asset) => { viewerViewKeyRef.current = viewKey; setViewerAssetId(asset.id); }} onRetryVideo={(asset) => void gateway.retryVideoPreparation(asset.id).then(() => gateway.preparePendingVideos(1)).then(refresh).catch((error) => setMessage(commandErrorMessage(error, "미리보기 준비를 다시 시작하지 못했습니다.")))} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />)}
+        {view.kind === "revisit" ? <RevisitBrowser
+          onSelectedDateChange={setRevisitDate}
+          renderDay={() => assetResults}
+          renderCreators={() => <CreatorList privacyMode={privacyMode} cellSize={thumbnailRowHeight} onSelect={(creatorKey) => onViewChange?.({ kind: "creator", creatorKey })} />}
+        /> : <>
+          
+          {view.kind === "creators" && <CreatorList privacyMode={privacyMode} cellSize={thumbnailRowHeight} onSelect={(creatorKey) => onViewChange?.({ kind: "creator", creatorKey })} />}
+          {view.kind !== "creators" && assetResults}
+        </>}
         {currentNextError && <div className="asset-browser__next-error"><Toast>{currentNextError}</Toast><Button onClick={() => loadNextPage(true)}>다시 시도</Button></div>}
         {currentPrevError && <div className="asset-browser__next-error"><Toast>{currentPrevError}</Toast><Button onClick={() => loadPrevPage(true)}>다시 시도</Button></div>}
-        <SelectionBar
+        {(view.kind !== "revisit" || revisitDate) && <SelectionBar
           view={view}
           selectedCount={selectedIds.length}
           inspectorOpen={inspectorOpen}
@@ -331,7 +321,7 @@ export function AssetBrowser({ view, onViewChange, onOpenCalendarDay, requestedD
           onSetCover={selectedIds.length === 1 ? () => setCover(selectedIds[0]!) : undefined}
           onTrash={trashSelection}
           onClearSelection={clearSelection}
-        />
+        />}
       </div>
       <AssetInspector assets={selectedAssets} currentCollection={view.kind === "collection" ? collections.find((entry) => entry.id === view.collectionId) ?? null : null} open={inspectorOpen} onOpenChange={setInspectorOpen} onOpenAsset={(asset) => { viewerViewKeyRef.current = viewKey; setViewerAssetId(asset.id); }} onAssetUpdated={updateAssetSummary} />
     </div>

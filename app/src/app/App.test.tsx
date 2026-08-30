@@ -475,7 +475,7 @@ describe("App", () => {
       importBatchId: expect.any(String),
     }));
 
-    await user.click(screen.getByRole("button", { name: "작가" }));
+    await user.click(screen.getByRole("button", { name: "다시보기" }));
     act(() => drop?.(["C:\\images\\recent.png"]));
     await user.click(screen.getByRole("button", { name: "저장소" }));
     act(() => drop?.(["C:\\images\\all-assets.png"]));
@@ -688,11 +688,12 @@ describe("App", () => {
         collectionId: null,
         creatorKey: null,
         directOnly: false,
-                unclassifiedOnly: false,
+        unclassifiedOnly: false,
         mediaKind: null,
         aspectRatio: null,
         sort: "newest",
         randomPivot: null,
+        collectedRange: null,
         after: null,
         aroundDate: null,
         limit: 100,
@@ -726,14 +727,15 @@ describe("App", () => {
     expect(libraryGateway.listAssets).toHaveBeenLastCalledWith({
       classificationId: "tag-arona",
       albumId: null,
+      directOnly: false,
+      unclassifiedOnly: false,
       collectionId: null,
       creatorKey: null,
-      directOnly: false,
-            unclassifiedOnly: false,
       mediaKind: null,
       aspectRatio: null,
       sort: "newest",
       randomPivot: null,
+      collectedRange: null,
       after: null,
       aroundDate: null,
       limit: 100,
@@ -778,11 +780,12 @@ describe("App", () => {
         collectionId: null,
         creatorKey: null,
         directOnly: false,
-                unclassifiedOnly: false,
+        unclassifiedOnly: false,
         mediaKind: null,
         aspectRatio: null,
         sort: "newest",
         randomPivot: null,
+        collectedRange: null,
         after: null,
         aroundDate: null,
         limit: 100,

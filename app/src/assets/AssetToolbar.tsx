@@ -34,12 +34,12 @@ export function AssetToolbar({
   view: rawView, classifications, albums, collections = [], sort, mediaFilter, aspectFilter, directOnly, metadataVisible, privacyMode, thumbnailRowHeight,
   onSortChange, onMediaFilterChange, onAspectFilterChange, onDirectOnlyChange, onMetadataVisibleChange, onPrivacyModeChange, onThumbnailRowHeightChange, onReshuffle,
 }: AssetToolbarProps) {
-  const view = rawView.kind === "similarity_review" || rawView.kind === "settings" || rawView.kind === "manga"
+  const view = rawView.kind === "similarity_review" || rawView.kind === "settings" || rawView.kind === "manga" || rawView.kind === "calendar"
     ? ({ kind: "classification", classificationId: null } as const)
     : rawView;
-  const recent = view.kind === "creators" || view.kind === "calendar";
+  const recent = view.kind === "revisit" || view.kind === "creators";
   const filterable = rawView.kind === "classification" || rawView.kind === "unsorted" || rawView.kind === "album" || rawView.kind === "creator";
-  const location = view.kind === "creators" ? "작가" : view.kind === "calendar" ? "수집 달력" : view.kind === "creator" ? "작가" : view.kind === "collection" ? collections.find((entry) => entry.id === view.collectionId)?.name ?? "컬렉션" : view.kind === "unsorted" ? "미분류" : view.kind === "trash" ? "휴지통" : view.kind === "album" ? albums.find((entry) => entry.id === view.albumId)?.name ?? "앨범" : view.kind === "collections" ? "컬렉션" : classifications.find((entry) => entry.id === view.classificationId)?.name ?? "저장소";
+  const location = view.kind === "revisit" ? "다시보기" : view.kind === "creators" ? "작가" : view.kind === "creator" ? "작가" : view.kind === "collection" ? collections.find((entry) => entry.id === view.collectionId)?.name ?? "컬렉션" : view.kind === "unsorted" ? "미분류" : view.kind === "trash" ? "휴지통" : view.kind === "album" ? albums.find((entry) => entry.id === view.albumId)?.name ?? "앨범" : view.kind === "collections" ? "컬렉션" : classifications.find((entry) => entry.id === view.classificationId)?.name ?? "저장소";
 
   return (
     <ViewToolbar title={location} ariaLabel="자산 도구">
