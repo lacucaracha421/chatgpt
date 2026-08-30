@@ -10,6 +10,11 @@
 - Ignore unrelated pre-existing warnings or failures unless they block the requested task.
 - Keep explanations concise unless detailed analysis is requested.
 
+## Canonical checkout
+
+- Use `C:\chatgpt` as the canonical local repository for all Lakomics development.
+- Do not use `C:\Users\Laku.LAKU\.gemini\antigravity\scratch\lqc` except when the user explicitly requests recovery or historical comparison.
+
 ## Repository docs
 
 ### Issue tracker
