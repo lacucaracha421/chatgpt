@@ -129,7 +129,6 @@ where
     if page_count == 0 {
         return Ok(false); // 빈 폴더는 스킵
     }
-    let first_page = &page_files[0];
     let modified_at = fs::metadata(&folder)
         .and_then(|metadata| metadata.modified())
         .map_err(|source| LibraryError::ReadMedia {
@@ -171,7 +170,16 @@ where
     let thumb_name = format!("{series_id}.webp");
     let thumb_path = thumb_dir.join(&thumb_name);
     if !thumb_path.exists() {
-        thumbnail(&folder.join(first_page), &thumb_path)?;
+        // 썸네일 생성은 색인과 독립적이다. 첫 페이지가 지원하지 않는 형식이면(AVIF 등)
+        // 이후 페이지를 순서대로 시도하고, 그래도 실패하면 썸네일 없이 시리즈를 색인한다.
+        // UnsupportedImage만 격리한다. DB·파일시스템·쓰기 오류는 그대로 전파해 스캔을 중단시킨다.
+        for page in &page_files {
+            match thumbnail(&folder.join(page), &thumb_path) {
+                Ok(()) => break,
+                Err(LibraryError::UnsupportedImage) => continue,
+                Err(error) => return Err(error),
+            }
+        }
     }
 
     let connection = library.connection()?;
@@ -310,7 +318,7 @@ mod tests {
     use std::{fs, sync::mpsc, thread, time::Duration};
 
     use super::{list_page_files, parse_series_metadata, scan_with_thumbnail};
-    use crate::library::Library;
+    use crate::library::{Library, LibraryError};
 
     #[test]
     fn list_page_files_sorts_two_and_three_digit_names() {
@@ -438,5 +446,103 @@ mod tests {
         first.join().unwrap().unwrap();
         second.join().unwrap();
         assert!(!overlapped, "concurrent manga scans overlapped");
+    }
+
+    #[test]
+    fn unsupported_first_page_does_not_block_later_series() {
+        let temp = tempfile::tempdir().unwrap();
+        let manga_root = temp.path().join("manga");
+        // 열거 순서에서 실패 폴더가 먼저 와도 뒤 폴더가 색인돼야 한다.
+        let failing = manga_root.join("a-unsupported");
+        fs::create_dir_all(&failing).unwrap();
+        fs::write(failing.join("1.avif"), b"avif").unwrap();
+        fs::write(failing.join("2.webp"), b"page").unwrap();
+        let good = manga_root.join("b-decodable");
+        fs::create_dir_all(&good).unwrap();
+        fs::write(good.join("1.webp"), b"page").unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        library
+            .set_manga_root(Some(manga_root.to_string_lossy().as_ref()))
+            .unwrap();
+
+        let result = scan_with_thumbnail(&library, |source, target| {
+            if source.extension().is_some_and(|ext| ext == "avif") {
+                Err(LibraryError::UnsupportedImage)
+            } else {
+                fs::write(target, b"thumbnail").unwrap();
+                Ok(())
+            }
+        })
+        .unwrap();
+
+        assert_eq!(result, 2, "both series should be indexed");
+        let connection = library.connection().unwrap();
+        let indexed: String = connection
+            .query_row(
+                "SELECT relative_path FROM manga_series WHERE relative_path = 'b-decodable'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(indexed, "b-decodable");
+    }
+
+    #[test]
+    fn series_without_thumbnailable_pages_stays_indexed() {
+        let temp = tempfile::tempdir().unwrap();
+        let manga_root = temp.path().join("manga");
+        let failing = manga_root.join("unsupported-only");
+        fs::create_dir_all(&failing).unwrap();
+        fs::write(failing.join("1.avif"), b"avif").unwrap();
+        fs::write(failing.join("2.avif"), b"avif").unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        library
+            .set_manga_root(Some(manga_root.to_string_lossy().as_ref()))
+            .unwrap();
+
+        let changed = scan_with_thumbnail(&library, |_, _| {
+            Err(LibraryError::UnsupportedImage)
+        })
+        .unwrap();
+
+        assert_eq!(changed, 1, "the series itself must stay indexed");
+        let connection = library.connection().unwrap();
+        let (relative_path, thumb_relative): (String, String) = connection
+            .query_row(
+                "SELECT relative_path, thumbnail_relative_path FROM manga_series",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(relative_path, "unsupported-only");
+        assert!(thumb_relative.ends_with(".webp"));
+        assert!(!manga_root.join(".lakomics-thumbs").join(&thumb_relative).exists());
+    }
+
+    #[test]
+    fn unexpected_thumbnail_errors_still_propagate() {
+        let temp = tempfile::tempdir().unwrap();
+        let manga_root = temp.path().join("manga");
+        let series = manga_root.join("series-a");
+        fs::create_dir_all(&series).unwrap();
+        fs::write(series.join("1.webp"), b"page").unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        library
+            .set_manga_root(Some(manga_root.to_string_lossy().as_ref()))
+            .unwrap();
+
+        let result = scan_with_thumbnail(&library, |_, _| {
+            Err(LibraryError::WriteAsset {
+                path: std::path::PathBuf::from("thumb.webp"),
+                source: std::io::Error::other("disk full"),
+            })
+        });
+
+        assert!(matches!(result, Err(LibraryError::WriteAsset { .. })));
+        let connection = library.connection().unwrap();
+        let count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM manga_series", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 0, "scan must abort instead of half-indexing on unexpected errors");
     }
 }
