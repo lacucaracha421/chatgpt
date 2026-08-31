@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Lakomics X Collector",
-  "version": "2.0.0.1534",
+  "version": "2.0.0.1535",
   "description": "Collect X media into Lakomics with server capture, radial tagging, integrated X translation, and a For You image gallery.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAoVaw8+c/BZaPfB7fgI7o7qQIZ9MGdYQIGIsbmh/UchG2oiDupRA6UYCaqIku4muCPY7f4EP5rI94UitEkUrPmDFWIvAPqY+1fkESWsHR5qwPKdGxCNPITtoSS7CyRp5m1WwErsAyhRU1q7qZ1+ahjExqYwKC401+058dUGNqGivgfF0rcU9h6RjUfifhC7fg14bwRmI8q63JcetjS3LTMt0USJpnWctvS5NjAzGAycbFiOySrheunxgIcEx81W/Ywz+zexzlVeMtOabo+VaDzM6npx8DiOiPrDHXlz0rDlFCABmcjnWJO1DwMvWeqOnONMHw/ocMMpqWQzzyi22MBQIDAQAB",
   "permissions": [
@@ -55,9 +55,18 @@
         "src/content.css"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://lacucaracha421.github.io/chatgpt/*"
+      ],
+      "js": [
+        "src/mobile-bridge.js"
+      ],
+      "run_at": "document_start"
     }
   ],
-  "version_name": "2.0.0-alpha.15.34",
+  "version_name": "2.0.0-alpha.15.35",
   "options_page": "options/options.html",
   "icons": {
     "32": "icons/icon32.png",
