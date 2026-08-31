@@ -63,6 +63,21 @@ Remaining verification:
 - Deploy the pending-payload server change to the Japanese VPS.
 - Verify real X image and video flows end-to-end from extension -> VPS/R2 -> PC library with classification preservation and immediate UI refresh.
 
+### CLOUD-005 — PC-independent saved-X-media snapshot
+Status: `IN PROGRESS`
+
+Goal:
+- Let Android show already-saved X media badges without a live PC connection.
+- Keep the PC library as the source of truth while publishing a bounded saved-media snapshot to the Japanese VPS.
+
+Direction:
+- Reuse the existing `<tweet_id>:<media_index>` saved-media identity; do not introduce a second identity scheme.
+- Publish saved X media alongside the existing Cloud/Classification snapshot lifecycle rather than creating another tight polling loop.
+- Android + Collector should read the VPS snapshot first, then a matching-base-url cloud cache, and merge bounded `recentBrowserSaves` so a just-saved item is marked immediately.
+- Desktop must continue to prefer the direct/local PC saved-media index and must not become VPS-dependent.
+- Keep PC and cloud saved-index caches separate so endpoints cannot contaminate each other.
+- After this is verified PC-off on Android, reevaluate whether mobile still needs Connection Key / Remote Lakomics controls.
+
 ### BUG-001 — Collection view shows an error toast on entry
 Status: `TODO`
 
@@ -203,29 +218,26 @@ Status: `TODO`
 
 ## P2 — architecture / larger feature work
 
-### CATALOG-001 — Replace direct k-hentai WebView dependency with Heliotrope-backed catalog
-Status: `TODO`
+### CATALOG-001 — Move fragile k-hentai transport behind the Japanese VPS
+Status: `IN PROGRESS`
 
 Current issue:
-- Online catalog transport currently depends on a hidden WebView2 loading `k-hentai.org` directly.
-- Korean network access can be intermittent/restricted and may depend on local HTTPS/SNI workarounds.
+- Online catalog transport depends on direct PC access to `k-hentai.org`, historically through a hidden WebView2 and gallery resolver paths that are unreliable on Korean networks.
 
-Target direction:
-- Use Heliotrope as the primary metadata/search source.
-- Host catalog services on the Japanese VPS.
-- Keep PC search independent from direct k-hentai connectivity.
-- Preserve local catalog usability if the remote provider is unavailable.
+Current Phase 1 direction:
+- Keep the existing VCK/k-hentai catalog DB and work IDs intact.
+- Route only the fragile k-hentai search-page and gallery HTML transport through a narrow authenticated API on the Japanese VPS.
+- Keep search/detail/bookmarks/progress local where possible.
+- Do not introduce a schema migration only for this transport change.
+- Keep direct signed image/CDN page loading on the PC unless evidence shows it also needs proxying.
 
-Desired catalog capabilities:
-- Korean and Japanese language filtering
-- tags
-- artist/group
-- parody/series
-- characters
-- publish date
-- latest ordering
-- daily/weekly/monthly popularity where supported
-- tag autocomplete
+Current checkpoint:
+- Feature work is isolated on the catalog worktree/branch and has focused server/Rust tests.
+- Remaining work is VPS deployment, real catalog-update/gallery-open verification, then merge only after successful real use.
+
+Heliotrope:
+- Do not force Heliotrope into Phase 1 because Hitomi IDs and VCK/k-hentai IDs are different.
+- Treat Heliotrope as a later provider rather than a drop-in replacement.
 
 ### CATALOG-002 — Heliotrope/VCK coexistence and migration strategy
 Status: `TODO`
@@ -236,8 +248,9 @@ Status: `TODO`
 - Define duplicate identity and migration behavior.
 - Keep bookmarks and reading progress in Lakomics-controlled storage.
 - Separate catalog metadata provider from gallery/page resolver.
+- Prefer provider-namespaced identity such as `(provider, provider_work_id)` if/when Heliotrope becomes a second provider.
 
-### CLOUD-UI-001 — Cloud status and problem surface
+### CLOUD-UI-001 — Cloud status, transport diagnostics, and problem surface
 Status: `TODO`
 
 Settings should expose at least:
@@ -248,6 +261,15 @@ Settings should expose at least:
 - last error
 - processed summary
 - manual `지금 동기화` action if useful
+- active classification source (`app`, `remote`, `cloud`, cache, or local fallback)
+- classification count and an explicit fallback reason when the extension is using the six-item local tree
+- saved-media index source/count
+- last classification/saved-media publish time where available
+- whether required credentials are configured, without ever revealing credential values
+
+Debugging goal:
+- A missing Connection Key, stale Remote Lakomics endpoint, Collector failure, or local fallback should be visible from normal settings/status UI without opening DevTools.
+- Do not silently make a six-item local fallback look like a healthy PC-linked classification tree.
 
 Sidebar behavior:
 - Do not create a permanent Cloud Inbox section.
@@ -268,6 +290,7 @@ Reorganize by responsibility:
 - advanced/debug/legacy
 
 Move old or rarely used controls into an advanced section and remove true duplicates.
+After CLOUD-005 is verified, hide or remove mobile-only direct-PC controls that are no longer required while preserving desktop compatibility.
 
 ### EXT-002 — Cloud-first extension save policy
 Status: `TODO`
@@ -334,6 +357,18 @@ Consider preserving per-view:
 - selected classification/album/context
 
 Coordinate this with UI-004 so state preservation also reduces flashing and reload churn.
+
+### OPS-001 — Backup, migration, and settings portability
+Status: `TODO`
+
+Goal:
+- Make moving Lakomics to another PC predictable without rediscovering which state lives in Git, the library, browser storage, Credential Manager, or machine-level services.
+
+Direction:
+- Document and, where safe, automate source checkout/worktree restoration, library/assets transfer, manga originals, browser-extension settings export/import, and required toolchain setup.
+- Keep secrets out of Git; provide explicit restoration checks for Cloud API credentials and Tailscale rather than copying raw secret stores blindly.
+- Add a post-migration health checklist for PC API, classification count/source, Cloud Capture, Collector, catalog transport, and saved-media index.
+- Prefer portable export/import for extension settings so reinstalling an unpacked extension does not silently fall back to the six-item local tree.
 
 ### CLOUD-003 — Long-video asynchronous Capture handling
 Status: `TODO`
@@ -471,6 +506,7 @@ Use these prefixes:
 - `CATALOG-xxx`: online catalog/provider work
 - `EXT-xxx`: browser extension work
 - `PERF-xxx`: performance/cache/state work
+- `OPS-xxx`: backup/migration/operational portability
 - `NOTE-xxx`: notes feature
 - `STATS-xxx`: personal statistics
 - `IDEA-xxx`: lower-priority product ideas
@@ -485,15 +521,19 @@ For each new bug, record:
 
 ## Current intended implementation order
 
-1. CLOUD-002 production rollout / end-to-end verification
-2. BUG-001 / BUG-002 DB and migration investigation
-3. VERIFY-001 real X → VPS → PC verification
-4. P1 UX pass: flashing, video controls, BUG-003 video drag selection artifact, navigation, loading/errors, selection clearing, cover crop, sidebar cleanup, scrollbar
-5. CATALOG-001 / CATALOG-002 Heliotrope-based catalog work
-6. CLOUD-UI-001 cloud status/problem surface
-7. EXT-001 / EXT-002 extension settings and Cloud-first save behavior
-8. EXT-003 / EXT-004 same-post grouping and adaptive/hidden donut tags
-9. PERF-001 / PERF-002 cache optimization and view-state preservation
-10. CLOUD-003 long-video async handling if real-world use requires it
-11. NOTE-001 / STATS-001 / IDEA-001 / UI-008
-12. Long-term collection presentation work
+1. CLOUD-005 saved-X-media VPS snapshot and PC-off Android badge verification
+2. CATALOG-001 Phase 1 Japanese-VPS deployment, real catalog update/gallery verification, then merge if clean
+3. CLOUD-UI-001 connection/transport diagnostics so fallback, endpoint, count, and credential state are visible without DevTools
+4. EXT-001 / EXT-002 extension settings cleanup and automatic Cloud/direct-PC save policy
+5. UI-004 + PERF-002 flashing reduction and view-state preservation
+6. PERF-001 10,000+ asset cache/media optimization
+7. EXT-003 same-X-post media grouping
+8. EXT-004 adaptive/hidden secondary donut tags
+9. BUG-001 and remaining P1 usability work as reproduced/prioritized
+10. OPS-001 backup/migration/settings portability
+11. CLOUD-003 long-video async handling if real-world use requires it
+12. CATALOG-002 Heliotrope as a provider-namespaced second catalog source after Phase 1 is stable
+13. NOTE-001 / STATS-001 / IDEA-001 / UI-008
+14. Long-term collection presentation / shelf work
+
+This order is a working execution preference, not a dependency graph. Reorder when a real regression or production verification failure becomes more urgent.
