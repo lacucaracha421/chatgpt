@@ -239,6 +239,19 @@ Heliotrope:
 - Do not force Heliotrope into Phase 1 because Hitomi IDs and VCK/k-hentai IDs are different.
 - Treat Heliotrope as a later provider rather than a drop-in replacement.
 
+### CATALOG-003 — Add Japanese-language works to the online catalog
+Status: `TODO`
+
+Goal:
+- Extend the current Korean-only k-hentai/VCK catalog ingestion so Japanese-language originals can also be discovered and updated in Lakomics.
+
+Direction:
+- Preserve the current Korean query behavior while adding `language:japanese` as an additional supported catalog source/filter.
+- Prefer an explicit language filter such as Korean / Japanese / both rather than silently changing the meaning of the existing Korean catalog view.
+- Keep the same VPS transport boundary; the PC should request Lakomics VPS catalog endpoints, and the VPS should translate those requests to the appropriate k-hentai language query.
+- Define how Korean translations and Japanese originals of the same underlying work are presented before adding any automatic grouping or deduplication.
+- Do not require Heliotrope for this feature; implement it against the existing k-hentai/VCK path first if practical.
+
 ### CATALOG-002 — Heliotrope/VCK coexistence and migration strategy
 Status: `TODO`
 
@@ -532,8 +545,9 @@ For each new bug, record:
 9. BUG-001 and remaining P1 usability work as reproduced/prioritized
 10. OPS-001 backup/migration/settings portability
 11. CLOUD-003 long-video async handling if real-world use requires it
-12. CATALOG-002 Heliotrope as a provider-namespaced second catalog source after Phase 1 is stable
-13. NOTE-001 / STATS-001 / IDEA-001 / UI-008
-14. Long-term collection presentation / shelf work
+12. CATALOG-003 Japanese-language catalog ingestion/filter after CATALOG-001 transport is stable
+13. CATALOG-002 Heliotrope as a provider-namespaced second catalog source after Phase 1 is stable
+14. NOTE-001 / STATS-001 / IDEA-001 / UI-008
+15. Long-term collection presentation / shelf work
 
 This order is a working execution preference, not a dependency graph. Reorder when a real regression or production verification failure becomes more urgent.
