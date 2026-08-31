@@ -155,6 +155,48 @@ class CatalogTransportApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 502)
         self.assertEqual(len(calls), 1, "4xx must never be retried")
 
+    def test_gallery_upstream_403_preserves_status_in_detail(self) -> None:
+        # 봇 차단 가능성이 있는 403은 다른 장애와 구분돼야 현장 진단이 가능하다.
+        # 상태 코드만 노출하고 토큰·헤더는 절대 노출하지 않는다.
+        def fake_fetch_once(url: str) -> tuple[int, bytes]:
+            return 403, b""
+
+        with mock.patch.object(api_app, "_catalog_fetch_once", side_effect=fake_fetch_once):
+            response = self.client.get("/v1/catalog/gallery/42", headers=AUTH)
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["detail"], "k-hentai rejected the request (upstream status 403)")
+
+    def test_gallery_upstream_429_preserves_status_in_detail(self) -> None:
+        def fake_fetch_once(url: str) -> tuple[int, bytes]:
+            return 429, b""
+
+        with mock.patch.object(api_app, "_catalog_fetch_once", side_effect=fake_fetch_once):
+            response = self.client.get("/v1/catalog/gallery/42", headers=AUTH)
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["detail"], "k-hentai rejected the request (upstream status 429)")
+
+    def test_gallery_upstream_503_detail_keeps_status(self) -> None:
+        def fake_fetch_once(url: str) -> tuple[int, bytes]:
+            return 503, b""
+
+        with mock.patch.object(api_app, "_catalog_fetch_once", side_effect=fake_fetch_once):
+            response = self.client.get("/v1/catalog/gallery/42", headers=AUTH)
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["detail"], "k-hentai unreachable (upstream status 503)")
+
+    def test_gallery_upstream_200_empty_body_reports_no_content(self) -> None:
+        def fake_fetch_once(url: str) -> tuple[int, bytes]:
+            return 200, b""
+
+        with mock.patch.object(api_app, "_catalog_fetch_once", side_effect=fake_fetch_once):
+            response = self.client.get("/v1/catalog/gallery/42", headers=AUTH)
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["detail"], "k-hentai returned HTTP 200 with no content")
+
     # -- transient retry ---------------------------------------------------
 
     def test_search_page_retries_transient_5xx_then_succeeds(self) -> None:
@@ -199,16 +241,14 @@ class CatalogTransportApiTests(unittest.TestCase):
     # -- upstream network failures -> 502, never raw 500 --------------------
 
     def test_dns_or_connection_failure_maps_to_502_not_500(self) -> None:
-        # urlopen이 던지는 URLError(DNS/TLS/connect)는 _catalog_fetch_once 안에서
-        # (0, b"")로 정규화돼야 한다. 그렇지 않으면 FastAPI raw 500이 된다.
-        # 진짜 urlopen을 닫힌 포트로 보내 전체 정규화 경로를 검증한다.
-        real_urlopen = api_app.urllib_request.urlopen
-
-        def refused_urlopen(request, timeout):
-            return real_urlopen("http://127.0.0.1:9/refused", timeout=0.2)
+        # '0 반환' 스텁으로 정규화 계약을 검증한다: curl transport에서 DNS/TLS/connect
+        # 실패는 http_code 000/exit != 0이 되고 (0, b"")로 정규화돼야 하며, 그렇지
+        # 않으면 FastAPI raw 500이 된다. 실제 curl 호출은 하위 단위 테스트에서 검증.
+        def zero_fetch_once(url: str) -> tuple[int, bytes]:
+            return 0, b""
 
         with (
-            mock.patch.object(api_app.urllib_request, "urlopen", side_effect=refused_urlopen),
+            mock.patch.object(api_app, "_catalog_fetch_once", side_effect=zero_fetch_once),
             mock.patch.object(api_app.time, "sleep", side_effect=lambda _s: None),
         ):
             response = self.client.get("/v1/catalog/search-page", headers=AUTH)
@@ -216,20 +256,44 @@ class CatalogTransportApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 502)
         self.assertFalse(response.json().get("traceback", False))
 
-    def test_read_timeout_maps_to_502_not_500(self) -> None:
-        # 업스트림이 응답하지 않아 timeout이 터져도 502로 정규화된다.
-        real_urlopen = api_app.urllib_request.urlopen
+    def test_curl_transport_normalizes_connection_refused_to_status_zero(self) -> None:
+        # 실제 curl이 연결 거부 호스트를 만나면 http_code 000/exit != 0이 되고,
+        # 이는 (0, b"")로 정규화돼야 한다(단위 수준 검증).
+        status = api_app._catalog_fetch_once("http://127.0.0.1:9/refused")[0]
+        self.assertEqual(status, 0)
 
-        def slow_urlopen(request, timeout):
-            return real_urlopen("http://127.0.0.1:9/slow", timeout=0.2)
+    def test_curl_transport_normalizes_bad_host_to_status_zero(self) -> None:
+        status = api_app._catalog_fetch_once("https://no-such-host-9x7.invalid/")[0]
+        self.assertEqual(status, 0)
 
-        with (
-            mock.patch.object(api_app.urllib_request, "urlopen", side_effect=slow_urlopen),
-            mock.patch.object(api_app.time, "sleep", side_effect=lambda _s: None),
-        ):
-            response = self.client.get("/v1/catalog/gallery/42", headers=AUTH)
+    def test_curl_transport_reads_body_alongside_status(self) -> None:
+        # 상태 코드와 body는 -w 마커로 분리된다. 로컬 http.server로 성공 경로의
+        # 분리 결과(200 + 전체 body)를 검증한다.
+        import threading
+        from http.server import BaseHTTPRequestHandler, HTTPServer
 
-        self.assertEqual(response.status_code, 502)
+        payload = b"<html>fetch-body-check</html>"
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, *args):
+                pass
+
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.handle_request, daemon=True)
+        thread.start()
+        port = server.server_address[1]
+
+        status, body = api_app._catalog_fetch_once(f"http://127.0.0.1:{port}/probe")
+        thread.join(timeout=5)
+        server.server_close()
+        self.assertEqual(status, 200)
+        self.assertEqual(body, payload)
 
     def test_normalized_network_status_zero_is_retried_then_502(self) -> None:
         # 정규화 계약: _catalog_fetch_once가 네트워크 실패를 (0, b"")로 돌리면

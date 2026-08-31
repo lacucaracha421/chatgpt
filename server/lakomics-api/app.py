@@ -2,8 +2,8 @@ import json
 import os
 import sqlite3
 import time
-import urllib.error
 import urllib.error as urllib_error
+import subprocess
 import urllib.request as urllib_request
 import uuid
 from contextlib import contextmanager
@@ -238,23 +238,42 @@ _catalog_cache: dict[str, tuple[float, int, bytes]] = {}
 
 
 def _catalog_fetch_once(url: str) -> tuple[int, bytes]:
-    request = urllib_request.Request(
+    # k-hentai는 HTTP/2와 일부 클라이언트 fingerprint(Arbitrary Protocol)에서 /r/{id}를
+    # 451로 거절한다(2026-09 실측: curl 기본 451, curl --http1.1 200). 그래서 카탈로그
+    # transport는 curl --http1.1로 고정한다. URL은 KHENTAI_ORIGIN 기반으로 서버 내부에서만
+    # 생성되며(클라이언트 입력 URL 없음) argv 배열 전달이라 shell 개입도 없다.
+    arguments = [
+        "curl", "--http1.1", "-sS",
+        "-A", CATALOG_UA,
+        "-H", "Accept: text/html,application/json;q=0.9,*/*;q=0.8",
+        # max_redirects=0 계약 유지: 리다이렉트를 따라가지 않는다.
+        "--max-redirs", "0",
+        "--max-time", "30",
+        "--max-filesize", str(CATALOG_MAX_BODY_BYTES + 1),
+        # 마지막 줄에 상태 코드를 붙여 body와 분리한다.
+        "-w", "\\n%{http_code}",
+        "--",
         url,
-        headers={
-            "User-Agent": CATALOG_UA,
-            "Accept": "text/html,application/json;q=0.9,*/*;q=0.8",
-        },
-    )
+    ]
     try:
-        with urllib_request.urlopen(request, timeout=30) as response:
-            return response.status, response.read(CATALOG_MAX_BODY_BYTES + 1)
-    except urllib_error.HTTPError as error:
-        return error.code, b""
-    except (urllib_error.URLError, TimeoutError, OSError):
-        # DNS/TLS/connect/timeout 실패는 k-hentai 쪽 장애다. 예외를 밖으로
-        # 흘려보내면 FastAPI raw 500이 되므로 게이트웨이 오류(0)로 정규화해
-        # 재시도 파이프라인이 502로 응답하게 한다. 프로그래머 오류는 잡지 않는다.
+        completed = subprocess.run(arguments, capture_output=True, timeout=35)
+    except (subprocess.TimeoutExpired, OSError):
+        # curl 미존재/시간 초과/프로세스 실패도 upstream 장애와 같은 게이트웨이 오류다.
         return 0, b""
+    stdout = completed.stdout
+    marker = stdout.rfind(b"\n")
+    if marker < 0:
+        return 0, b""
+    raw_code = stdout[marker + 1 :]
+    body = stdout[:marker]
+    try:
+        status = int(raw_code)
+    except ValueError:
+        return 0, b""
+    if status == 0 or completed.returncode != 0:
+        # 네트워크/DNS/TLS/timeout/파일 크기 초과(-1)는 모두 게이트웨이 오류로 정규화한다.
+        return 0, b""
+    return status, body[: CATALOG_MAX_BODY_BYTES + 1]
 
 
 def _catalog_fetch_with_retry(url: str) -> tuple[int, bytes]:
@@ -280,16 +299,22 @@ def _catalog_cached_get(url: str) -> Response:
         _, status, body = cached
         return Response(content=body, status_code=status, media_type="text/html")
     status, body = _catalog_fetch_with_retry(url)
-    if status >= 500:
-        raise HTTPException(status_code=502, detail="k-hentai unreachable")
+    if status >= 500 or status == 0:
+        raise HTTPException(status_code=502, detail=f"k-hentai unreachable (upstream status {status})")
     if status == 404:
         raise HTTPException(status_code=404, detail="work not found on k-hentai")
+    if status in (403, 429):
+        # Cloudflare/bot 차단 가능성이 있는 403/429는 원인을 구분해 노출한다.
+        # 상태 코드 외에 민감한 정보(토큰·헤더)는 응답에 포함하지 않는다.
+        raise HTTPException(status_code=502, detail=f"k-hentai rejected the request (upstream status {status})")
     if status != 200 or not body:
-        raise HTTPException(status_code=502, detail="k-hentai returned no content")
+        raise HTTPException(status_code=502, detail=f"k-hentai returned HTTP {status} with no content")
     if len(body) > CATALOG_MAX_BODY_BYTES:
         raise HTTPException(status_code=502, detail="k-hentai response too large")
     _catalog_cache[url] = (now, status, body)
     return Response(content=body, status_code=200, media_type="text/html")
+
+
 
 
 @app.get("/v1/catalog/search-page")
