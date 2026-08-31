@@ -8,10 +8,11 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
-from fastapi import FastAPI, Header, HTTPException, Response
-from pydantic import AwareDatetime, BaseModel, Field
+from fastapi import FastAPI, Header, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "data" / "lakomics.sqlite3"
@@ -379,6 +380,22 @@ def startup_classifications():
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS classification_snapshots (
+                singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                payload TEXT NOT NULL,
+                published_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        db.commit()
+
+
+@app.on_event("startup")
+def startup_saved_x_media():
+    with get_db() as db:
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS saved_x_media_snapshots (
                 singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
                 payload TEXT NOT NULL,
                 published_at TEXT NOT NULL,
@@ -761,3 +778,88 @@ def classification_snapshot_meta(
         raise HTTPException(status_code=404, detail="No classification snapshot published yet")
 
     return dict(row)
+
+
+# --- Saved X media snapshot (PC -> VPS publish, extension read) ------------
+
+MAX_SAVED_X_MEDIA_KEYS = 20_000
+MAX_SAVED_X_MEDIA_KEY_BYTES = 64
+MAX_SAVED_X_MEDIA_SNAPSHOT_BYTES = 1024 * 1024
+SavedXMediaKey = Annotated[
+    str,
+    StringConstraints(
+        pattern=r"^\d+:[1-9]\d*$",
+        max_length=MAX_SAVED_X_MEDIA_KEY_BYTES,
+    ),
+]
+
+
+@app.middleware("http")
+async def bound_saved_x_media_snapshot_body(request: Request, call_next):
+    if request.method == "PUT" and request.url.path == "/v1/saved-x-media":
+        declared = request.headers.get("content-length")
+        if declared is not None:
+            try:
+                if int(declared) > MAX_SAVED_X_MEDIA_SNAPSHOT_BYTES:
+                    return JSONResponse(status_code=413, content={"detail": "Snapshot too large"})
+            except ValueError:
+                return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length"})
+        body = await request.body()
+        if len(body) > MAX_SAVED_X_MEDIA_SNAPSHOT_BYTES:
+            return JSONResponse(status_code=413, content={"detail": "Snapshot too large"})
+    return await call_next(request)
+
+
+class SavedXMediaSnapshotPublish(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    keys: list[SavedXMediaKey] = Field(max_length=MAX_SAVED_X_MEDIA_KEYS)
+
+
+@app.put("/v1/saved-x-media")
+def publish_saved_x_media_snapshot(
+    snapshot: SavedXMediaSnapshotPublish,
+    authorization: str | None = Header(default=None),
+    content_length: int | None = Header(default=None),
+):
+    require_auth(authorization)
+    if content_length is not None and content_length > MAX_SAVED_X_MEDIA_SNAPSHOT_BYTES:
+        raise HTTPException(status_code=413, detail="Snapshot too large")
+
+    keys = list(dict.fromkeys(snapshot.keys))
+    published_at = now_iso()
+    payload = json.dumps(
+        {"keys": keys, "published_at": published_at},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    if len(payload.encode("utf-8")) > MAX_SAVED_X_MEDIA_SNAPSHOT_BYTES:
+        raise HTTPException(status_code=413, detail="Snapshot too large")
+
+    with get_db() as db:
+        db.execute(
+            """
+            INSERT INTO saved_x_media_snapshots (singleton, payload, published_at, updated_at)
+            VALUES (1, ?, ?, ?)
+            ON CONFLICT(singleton) DO UPDATE SET
+                payload = excluded.payload,
+                published_at = excluded.published_at,
+                updated_at = excluded.updated_at
+            """,
+            (payload, published_at, now_iso()),
+        )
+        db.commit()
+    return {"ok": True, "count": len(keys), "published_at": published_at}
+
+
+@app.get("/v1/saved-x-media")
+def get_saved_x_media_snapshot(
+    authorization: str | None = Header(default=None),
+):
+    require_auth(authorization)
+    with get_db() as db:
+        row = db.execute(
+            "SELECT payload FROM saved_x_media_snapshots WHERE singleton = 1"
+        ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="No saved X media snapshot published yet")
+    return json.loads(row["payload"])

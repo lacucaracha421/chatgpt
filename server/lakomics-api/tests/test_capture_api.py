@@ -680,3 +680,107 @@ class ClassificationSnapshotApiTests(unittest.TestCase):
             json=self.publish_body(entries=entries),
         )
         self.assertEqual(response.status_code, 413)
+
+
+class SavedXMediaSnapshotApiTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.database_path = Path(self.temp_dir.name) / "lakomics.sqlite3"
+        self.original_database_path = api_app.DB_PATH
+        self.original_api_token = api_app.API_TOKEN
+        api_app.DB_PATH = self.database_path
+        api_app.API_TOKEN = "test-token"
+        api_app.startup()
+        api_app.startup_captures()
+        api_app.startup_classifications()
+        api_app.startup_saved_x_media()
+        self.client = TestClient(api_app.app)
+
+    def tearDown(self) -> None:
+        self.client.close()
+        api_app.DB_PATH = self.original_database_path
+        api_app.API_TOKEN = self.original_api_token
+        self.temp_dir.cleanup()
+
+    @property
+    def auth(self):
+        return {"Authorization": "Bearer test-token"}
+
+    def test_rejects_unauthenticated_reads_and_writes(self):
+        self.assertEqual(self.client.get("/v1/saved-x-media").status_code, 401)
+        self.assertEqual(
+            self.client.put("/v1/saved-x-media", json={"keys": []}).status_code,
+            401,
+        )
+
+    def test_empty_snapshot_round_trips(self):
+        publish = self.client.put(
+            "/v1/saved-x-media", headers=self.auth, json={"keys": []}
+        )
+        self.assertEqual(publish.status_code, 200)
+        response = self.client.get("/v1/saved-x-media", headers=self.auth)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["keys"], [])
+        self.assertIn("published_at", response.json())
+
+    def test_normal_snapshot_deduplicates_and_round_trips(self):
+        publish = self.client.put(
+            "/v1/saved-x-media",
+            headers=self.auth,
+            json={"keys": ["1234567890123456789:1", "123:2", "123:2"]},
+        )
+        self.assertEqual(publish.status_code, 200)
+        self.assertEqual(publish.json()["count"], 2)
+        response = self.client.get("/v1/saved-x-media", headers=self.auth)
+        self.assertEqual(
+            response.json()["keys"], ["1234567890123456789:1", "123:2"]
+        )
+
+    def test_latest_snapshot_replaces_previous_snapshot(self):
+        self.client.put(
+            "/v1/saved-x-media", headers=self.auth, json={"keys": ["1:1", "2:2"]}
+        )
+        self.client.put(
+            "/v1/saved-x-media", headers=self.auth, json={"keys": ["3:1"]}
+        )
+        response = self.client.get("/v1/saved-x-media", headers=self.auth)
+        self.assertEqual(response.json()["keys"], ["3:1"])
+
+    def test_malformed_and_overlong_keys_are_rejected(self):
+        for key in ["bad", "123:0", "123:-1", "123:01", f"{'1' * 64}:1"]:
+            with self.subTest(key=key):
+                response = self.client.put(
+                    "/v1/saved-x-media", headers=self.auth, json={"keys": [key]}
+                )
+                self.assertEqual(response.status_code, 422)
+
+    def test_excessive_key_count_is_rejected(self):
+        response = self.client.put(
+            "/v1/saved-x-media",
+            headers=self.auth,
+            json={
+                "keys": [
+                    f"{index + 1}:1"
+                    for index in range(api_app.MAX_SAVED_X_MEDIA_KEYS + 1)
+                ]
+            },
+        )
+        self.assertEqual(response.status_code, 422)
+
+    def test_excessive_request_body_is_rejected(self):
+        response = self.client.put(
+            "/v1/saved-x-media",
+            headers={**self.auth, "Content-Type": "application/json"},
+            content=b" " * (api_app.MAX_SAVED_X_MEDIA_SNAPSHOT_BYTES + 1),
+        )
+        self.assertEqual(response.status_code, 413)
+
+    def test_capture_and_classification_endpoints_remain_available(self):
+        classification = self.client.put(
+            "/v1/classifications",
+            headers=self.auth,
+            json={"entries": [], "published_at": "2026-08-31T00:00:00+00:00"},
+        )
+        capture = self.client.get("/v1/captures?limit=1", headers=self.auth)
+        self.assertEqual(classification.status_code, 200)
+        self.assertEqual(capture.status_code, 200)

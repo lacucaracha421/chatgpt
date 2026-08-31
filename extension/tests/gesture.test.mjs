@@ -249,12 +249,33 @@ test("mobile confirm mode saves the expanded parent from center when no child re
   assert.deepEqual(plain(session.activate()), { type: "select", classificationId: "parent" });
 });
 
-test("pinned primary ignores stale submenu ids whose live parent differs", () => {
-  const entries = [{ id:"game", kind:"root", name:"Game", parentId:null }, { id:"reverse", kind:"tag", name:"Reverse", parentId:"game" }, { id:"char-a", kind:"tag", name:"Char A", parentId:"game" }];
-  const layout = context.LakomicsRadial.resetLayout(entries); layout.parents.reverse=[["char-a",null,null,null,null,null]];
-  const session=createSession({x:100,y:100},entries,layout,["reverse"],{openImmediately:true,confirmSelectionWithCenter:true,centerSelectsExpandedParent:true});
-  const primary=session.snapshot().primaryLevel; const index=primary.slots.findIndex(e=>e?.id==="reverse");
-  session.move(pointForPrimarySlot(index, primary.slotCount),1);
-  assert.deepEqual(plain(session.activate()), { type:"pending", classificationId:"reverse" });
-  assert.equal(session.snapshot().secondaryLevel, null);
+test("pinned primary expands an explicitly placed live submenu when canonical parent differs", () => {
+  const entries = [
+    { id: "game", kind: "root", name: "Game", parentId: null },
+    { id: "reverse", kind: "tag", name: "Reverse", parentId: "game" },
+    { id: "char-a", kind: "tag", name: "Char A", parentId: "game" },
+  ];
+  const layout = {
+    version: 1,
+    parents: {
+      __pinned__: [["game", "reverse", null, null, null, null]],
+      game: [["reverse", null, null, null, null, null]],
+      reverse: [["char-a", null, null, null, null, null]],
+    },
+  };
+  const session = createSession({ x: 100, y: 100 }, entries, layout, ["reverse"], {
+    openImmediately: true,
+    confirmSelectionWithCenter: true,
+    centerSelectsExpandedParent: true,
+  });
+  const primary = session.snapshot().primaryLevel;
+  const index = primary.slots.findIndex((entry) => entry?.id === "reverse");
+
+  session.move(pointForPrimarySlot(index, primary.slotCount), 1);
+
+  assert.deepEqual(plain(session.activate()), { type: "expand", classificationId: "reverse" });
+  assert.deepEqual(
+    plain(session.snapshot().secondaryLevel.slots.map((entry) => entry.id)),
+    ["char-a"],
+  );
 });

@@ -83,7 +83,7 @@ test("preserves ID positions across rename and fills the first empty slot", () =
   assert.deepEqual(plain(reconciled.parents.__root__[0]), ["id-1", "id-3", "id-0", null, "id-2", null]);
 });
 
-test("removes deleted and moved IDs from their old parent", () => {
+test("keeps explicitly placed live IDs while removing deleted submenu IDs", () => {
   const current = [
     { id: "parent-a", kind: "root", name: "A", parentId: null },
     { id: "parent-b", kind: "root", name: "B", parentId: null },
@@ -99,8 +99,9 @@ test("removes deleted and moved IDs from their old parent", () => {
 
   const reconciled = layoutApi.reconcileLayout(current, stored);
 
-  assert.equal(reconciled.parents["parent-a"], undefined);
-  assert.equal(reconciled.parents["parent-b"][0][0], "child");
+  assert.equal(reconciled.parents["parent-a"][0][0], "child");
+  assert.equal(reconciled.parents["parent-a"].flat().includes("deleted"), false);
+  assert.equal(reconciled.parents["parent-b"], undefined);
 });
 
 test("swaps occupied and empty slots without changing the tree", () => {
@@ -185,11 +186,51 @@ function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-test("getLevel rejects stale submenu ids whose live parent differs", () => {
-  const current = [{ id:"game", kind:"root", name:"Game", parentId:null }, { id:"reverse", kind:"tag", name:"Reverse", parentId:"game" }, { id:"char-a", kind:"tag", name:"Char A", parentId:"game" }];
-  const legacyLayout = { version:1, parents:{ reverse:[["char-a",null,null,null,null,null]] } };
-  const level = layoutApi.getLevel(current, legacyLayout, "reverse", 0);
+test("getLevel keeps an explicitly placed live submenu ID when its canonical parent differs", () => {
+  const current = [
+    { id: "game", kind: "root", name: "Game", parentId: null },
+    { id: "reverse", kind: "tag", name: "Reverse", parentId: "game" },
+    { id: "char-a", kind: "tag", name: "Char A", parentId: "game" },
+  ];
+  const radialLayout = {
+    version: 1,
+    parents: { reverse: [["char-a", null, null, null, null, null]] },
+  };
+
+  const level = layoutApi.getLevel(current, radialLayout, "reverse", 0);
+
+  assert.deepEqual(plain(level.slots.filter(Boolean).map((entry) => entry.id)), ["char-a"]);
+});
+
+test("getLevel removes an explicitly placed submenu ID after the classification is deleted", () => {
+  const current = [
+    { id: "game", kind: "root", name: "Game", parentId: null },
+    { id: "reverse", kind: "tag", name: "Reverse", parentId: "game" },
+  ];
+  const radialLayout = {
+    version: 1,
+    parents: { reverse: [["deleted", null, null, null, null, null]] },
+  };
+
+  const level = layoutApi.getLevel(current, radialLayout, "reverse", 0);
+
   assert.equal(level.slots.filter(Boolean).length, 0);
+});
+
+test("an unknown radial parent does not hide a live child from its canonical parent", () => {
+  const current = [
+    { id: "game", kind: "root", name: "Game", parentId: null },
+    { id: "char-a", kind: "tag", name: "Char A", parentId: "game" },
+  ];
+  const radialLayout = {
+    version: 1,
+    parents: { deleted: [["char-a", null, null, null, null, null]] },
+  };
+
+  const reconciled = layoutApi.reconcileLayout(current, radialLayout);
+
+  assert.equal(reconciled.parents.deleted, undefined);
+  assert.deepEqual(plain(reconciled.parents.game[0]), ["char-a", null, null, null, null, null]);
 });
 
 

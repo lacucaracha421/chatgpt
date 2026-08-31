@@ -21,6 +21,7 @@
   const LAST_APP_CLASSIFICATIONS_KEY = "lastAppClassifications";
   const LAST_CLOUD_CLASSIFICATIONS_KEY = "lastCloudClassifications";
   const LAST_APP_SAVED_X_MEDIA_KEY = "lastAppSavedXMediaIndex";
+  const LAST_CLOUD_SAVED_X_MEDIA_KEY = "lastCloudSavedXMediaIndex";
   const API_REQUEST_TIMEOUT_MS = 8000;
   const COLLECTOR_IMAGE_REQUEST_TIMEOUT_MS = 45_000;
   const COLLECTOR_VIDEO_REQUEST_TIMEOUT_MS = 5 * 60_000;
@@ -34,6 +35,7 @@
   // 저장된 스냅샷/기기 폴백을 바로 쓰고, 수집 자체는 계속 시도한다.
   const OFFLINE_BACKOFF_MS = 60_000;
   const RECENT_DUPLICATE_MS = 10_000;
+  const RECENT_SAVED_BADGE_MS = 10 * 60_000;
   const X_SYNDICATION_ENDPOINT = "https://cdn.syndication.twimg.com/tweet-result";
   let classificationCache = null;
   let classificationCachedAt = 0;
@@ -448,6 +450,23 @@
   }
 
   async function savedXMediaIndex() {
+    const collector = await loadCollectorSettings();
+    if (collector.enabled && collector.baseUrl && await isAndroidRuntime()) {
+      const cloud = await cloudSavedXMediaIndex(collector);
+      if (cloud.ok) return mergeRecentSavedXMedia(cloud);
+
+      // Android+Collector의 목적은 PC 독립성이다. VPS가 끊긴 경우 8초짜리
+      // PC probe를 새로 만들지 않고, 같은 PC 엔드포인트의 기존 캐시만 보조로 쓴다.
+      const endpoint = await activeApiEndpoint();
+      const appCache = await cachedSavedIndex(endpoint, cloud.code || "collector_offline");
+      if (appCache.ok) return mergeRecentSavedXMedia(appCache);
+      const recentKeys = await recentSavedXMediaKeys();
+      if (recentKeys.length) {
+        return { ok: true, authoritative: true, indexSource: "recent", savedKeys: recentKeys };
+      }
+      return cloud;
+    }
+
     const endpoint = await activeApiEndpoint();
     // 포커스마다 호출되므로 offline backoff 중에는 8초 타임아웃을 기다리지 않고
     // 저장된 스냅샷을 즉시 쓴다.
@@ -472,6 +491,46 @@
     return cachedSavedIndex(endpoint, response.code || "app_offline");
   }
 
+  async function cloudSavedXMediaIndex(collector) {
+    const response = await collectorRequest("/v1/saved-x-media", {}, collector.baseUrl);
+    if (response.ok) {
+      const savedKeys = normalizeSavedXMediaKeys(response.keys);
+      const snapshot = {
+        version: 1,
+        baseUrl: collector.baseUrl,
+        savedKeys,
+        savedAt: Date.now(),
+      };
+      await chrome.storage.local.set({ [LAST_CLOUD_SAVED_X_MEDIA_KEY]: snapshot });
+      return { ok: true, authoritative: true, indexSource: "cloud", savedKeys };
+    }
+    const cached = await cachedCloudSavedXMediaIndex(collector.baseUrl, response.code);
+    return cached ?? response;
+  }
+
+  async function cachedCloudSavedXMediaIndex(baseUrl, fallbackCode) {
+    const stored = await chrome.storage.local.get([LAST_CLOUD_SAVED_X_MEDIA_KEY]);
+    const snapshot = stored[LAST_CLOUD_SAVED_X_MEDIA_KEY];
+    if (!snapshot || snapshot.version !== 1 || snapshot.baseUrl !== baseUrl
+      || !Array.isArray(snapshot.savedKeys)) return null;
+    return {
+      ok: true,
+      authoritative: true,
+      indexSource: "cloud-cache",
+      savedKeys: normalizeSavedXMediaKeys(snapshot.savedKeys),
+      cachedAt: Number(snapshot.savedAt) || null,
+      fallbackCode,
+    };
+  }
+
+  async function mergeRecentSavedXMedia(index) {
+    const recentKeys = await recentSavedXMediaKeys();
+    return {
+      ...index,
+      savedKeys: normalizeSavedXMediaKeys([...(index.savedKeys ?? []), ...recentKeys]),
+    };
+  }
+
   async function cachedSavedIndex(endpoint, fallbackCode) {
     const stored = await chrome.storage.local.get([LAST_APP_SAVED_X_MEDIA_KEY]);
     const snapshot = stored[LAST_APP_SAVED_X_MEDIA_KEY];
@@ -490,7 +549,7 @@
 
   function normalizeSavedXMediaKeys(keys) {
     return [...new Set((Array.isArray(keys) ? keys : [])
-      .filter((key) => typeof key === "string" && /^\d+:\d+$/.test(key)))];
+      .filter((key) => typeof key === "string" && /^\d+:[1-9]\d*$/.test(key)))];
   }
 
   function savedXMediaKeyFromSourceUrl(value) {
@@ -516,6 +575,12 @@
     await chrome.storage.local.set({
       [LAST_APP_SAVED_X_MEDIA_KEY]: { ...snapshot, savedKeys, savedAt: Date.now() },
     });
+  }
+
+  async function rememberRecentSavedXMediaSource(sourceUrl) {
+    const key = savedXMediaKeyFromSourceUrl(sourceUrl);
+    if (!key) return;
+    await markRecentSave(`saved-x-media\u0000${key}`, { savedXMediaKey: key });
   }
 
   function normalizePinnedIds(ids) {
@@ -658,12 +723,14 @@
         const captured = await captureWithCollector(mediaPayload, collector);
         if (captured.ok) {
           await rememberSavedXMediaSource(mediaPayload.sourceUrl);
+          await rememberRecentSavedXMediaSource(mediaPayload.sourceUrl);
           return captured;
         }
         if (["collector_timeout", "collector_offline"].includes(captured.code)) {
           const confirmed = await confirmCollectorCapture(mediaPayload, collector);
           if (confirmed.ok) {
             await rememberSavedXMediaSource(mediaPayload.sourceUrl);
+            await rememberRecentSavedXMediaSource(mediaPayload.sourceUrl);
             return confirmed;
           }
         }
@@ -943,7 +1010,11 @@
   function browserDownload(payload, preferences, fallbackCode = null) {
     const job = browserDownloadQueue
       .catch(() => undefined)
-      .then(() => browserDownloadUnlocked(payload, preferences, fallbackCode));
+      .then(() => browserDownloadUnlocked(payload, preferences, fallbackCode))
+      .then(async (result) => {
+        if (result?.ok) await rememberRecentSavedXMediaSource(payload.sourceUrl);
+        return result;
+      });
     browserDownloadQueue = job.then(() => undefined, () => undefined);
     return job;
   }
@@ -1169,6 +1240,33 @@
     return `${payload.classificationId ?? ""}\u0000${payload.mediaUrl ?? ""}`;
   }
 
+  function recentSaveExpired(entry, now) {
+    if (!entry || typeof entry.savedAt !== "number") return true;
+    const ttl = typeof entry.savedXMediaKey === "string"
+      ? RECENT_SAVED_BADGE_MS
+      : RECENT_DUPLICATE_MS;
+    return now - entry.savedAt > ttl;
+  }
+
+  async function recentSavedXMediaKeys() {
+    const stored = await chrome.storage.local.get([RECENT_BROWSER_SAVES_KEY]);
+    const source = stored[RECENT_BROWSER_SAVES_KEY];
+    const recent = source && typeof source === "object" && !Array.isArray(source) ? { ...source } : {};
+    const now = Date.now();
+    let changed = false;
+    const keys = [];
+    for (const [entryKey, entry] of Object.entries(recent)) {
+      if (recentSaveExpired(entry, now)) {
+        delete recent[entryKey];
+        changed = true;
+      } else if (typeof entry.savedXMediaKey === "string") {
+        keys.push(entry.savedXMediaKey);
+      }
+    }
+    if (changed) await chrome.storage.local.set({ [RECENT_BROWSER_SAVES_KEY]: recent });
+    return normalizeSavedXMediaKeys(keys);
+  }
+
   async function loadRecentSave(key) {
     const stored = await chrome.storage.local.get([RECENT_BROWSER_SAVES_KEY]);
     const source = stored[RECENT_BROWSER_SAVES_KEY];
@@ -1176,7 +1274,7 @@
     const now = Date.now();
     let changed = false;
     for (const [entryKey, entry] of Object.entries(recent)) {
-      if (!entry || typeof entry.savedAt !== "number" || now - entry.savedAt > RECENT_DUPLICATE_MS) {
+      if (recentSaveExpired(entry, now)) {
         delete recent[entryKey];
         changed = true;
       }
@@ -1191,7 +1289,7 @@
     const recent = source && typeof source === "object" && !Array.isArray(source) ? { ...source } : {};
     const now = Date.now();
     for (const [entryKey, entry] of Object.entries(recent)) {
-      if (!entry || typeof entry.savedAt !== "number" || now - entry.savedAt > RECENT_DUPLICATE_MS) {
+      if (recentSaveExpired(entry, now)) {
         delete recent[entryKey];
       }
     }

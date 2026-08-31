@@ -9,12 +9,21 @@
   }
 
   function reconcileLayout(entries, storedLayout) {
-    const groups = groupByParent(entries);
     const storedParents = storedLayout?.version === 1 && storedLayout.parents
       ? storedLayout.parents
       : {};
+    const groups = groupByParent(entries);
+    const liveIds = new Set((Array.isArray(entries) ? entries : [])
+      .filter((entry) => entry && typeof entry.id === "string")
+      .map((entry) => entry.id));
+    const parentKeys = new Set(groups.keys());
+    for (const key of Object.keys(storedParents)) {
+      if (key !== PINNED && (key === ROOT || liveIds.has(key))) parentKeys.add(key);
+    }
     const parents = {};
-    for (const [key, children] of groups) {
+    for (const key of parentKeys) {
+      const children = radialChildren(entries, storedParents, key);
+      if (children.length === 0) continue;
       parents[key] = reconcileParent(children, storedParents[key]);
     }
     if (Array.isArray(storedParents[PINNED])) {
@@ -36,11 +45,10 @@
   }
 
   function getLevel(entries, layout, parentId, requestedPage) {
-    const storedPages = layout?.parents?.[parentKey(parentId)];
-    const children = entries.filter((entry) => entry.parentId === parentId);
-    // Always reconcile against the live/recovered tree. Cached/older layouts can be
-    // missing a page for a pinned child (for example 리버스/명조/젠레스), which
-    // used to make an existing submenu render as an empty ring until refresh.
+    const key = parentKey(parentId);
+    const storedParents = layout?.parents ?? {};
+    const storedPages = storedParents[key];
+    const children = radialChildren(entries, storedParents, key);
     const pages = reconcileParent(children, storedPages);
     const count = pages[0]?.length ?? slotCount(children.length);
     const pageCount = Math.max(1, pages.length);
@@ -55,6 +63,38 @@
       slotCount: count,
       slots: ids.slice(0, count).map((id) => id ? byId.get(id) ?? null : null),
     };
+  }
+
+  function radialChildren(entries, storedParents, key) {
+    const liveEntries = (Array.isArray(entries) ? entries : [])
+      .filter((entry) => entry && typeof entry.id === "string");
+    const byId = new Map(liveEntries.map((entry) => [entry.id, entry]));
+    const storedIds = Array.isArray(storedParents?.[key]) ? storedParents[key].flat() : [];
+    const children = [];
+    const placed = new Set();
+
+    for (const id of storedIds) {
+      const entry = byId.get(id);
+      if (!entry || placed.has(id)) continue;
+      placed.add(id);
+      children.push(entry);
+    }
+
+    const explicitlyPlacedElsewhere = new Set();
+    for (const [parent, pages] of Object.entries(storedParents ?? {})) {
+      if (parent === ROOT || parent === PINNED || parent === key
+        || !byId.has(parent) || !Array.isArray(pages)) continue;
+      for (const id of pages.flat()) if (byId.has(id)) explicitlyPlacedElsewhere.add(id);
+    }
+
+    const canonicalParentId = key === ROOT ? null : key;
+    for (const entry of liveEntries) {
+      if (entry.parentId !== canonicalParentId || placed.has(entry.id)
+        || explicitlyPlacedElsewhere.has(entry.id)) continue;
+      placed.add(entry.id);
+      children.push(entry);
+    }
+    return children;
   }
 
   function getCompactLevel(entries, layout, parentId, requestedPage, excludedIds = []) {

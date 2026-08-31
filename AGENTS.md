@@ -65,6 +65,14 @@ Historical dated implementation plans/specs were removed from the current tree a
 - Do not rerun a successful check unless later edits could invalidate it, and do not add tests unless requested or existing coverage would miss a realistic regression introduced by the change.
 - Stop once there is sufficient evidence that the requested change works; generic planning, worktree, commit, push, PR, or completion steps are not reasons to run broader checks.
 
+## Lakomics runtime rule
+
+- NEVER launch `app/src-tauri/target/debug/lakomics.exe` directly.
+- For development/runtime verification, always run:
+  `cd C:\chatgpt\app && npm run tauri -- dev`
+- Use `target/release/lakomics.exe` only for standalone release verification.
+- A localhost/Vite failure from directly launching the debug executable is not an application regression.
+
 ## Works / Collection
 
 Before substantial Works/Collection changes, read `docs/agents/lakomics-works-handoff-v2.md` and use `docs/prototypes/lakomics-works-v6-reference.html` for visual/interaction intent. Do not copy prototype code directly; preserve the intent through the current React structure, shared UI, and design tokens.
