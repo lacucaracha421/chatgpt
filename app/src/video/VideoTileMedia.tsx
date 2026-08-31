@@ -90,7 +90,7 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
     return <div className="video-tile video-tile--pending"><span className="video-tile__status">미리보기 준비 중</span></div>;
   }
   if (asset.media.preparationState === "failed") {
-    return <div className="video-tile video-tile--failed"><span className="video-tile__status">미리보기 준비 실패</span><Button size="sm" onClick={(event) => { event.stopPropagation(); onRetry(); }}>다시 시도</Button></div>;
+    return <div className="video-tile video-tile--failed"><span className="video-tile__status">미리보기 준비 실패</span><Button size="sm" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onRetry(); }}>다시 시도</Button></div>;
   }
   if (privacyMode) {
     return <div className="video-tile video-tile--private"><Skeleton className="privacy-mask" label="비공개 모드" /></div>;
