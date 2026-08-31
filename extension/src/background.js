@@ -19,6 +19,7 @@
   const LOCAL_TREE_KEY = "localClassificationTree";
   const RECENT_BROWSER_SAVES_KEY = "recentBrowserSaves";
   const LAST_APP_CLASSIFICATIONS_KEY = "lastAppClassifications";
+  const LAST_CLOUD_CLASSIFICATIONS_KEY = "lastCloudClassifications";
   const LAST_APP_SAVED_X_MEDIA_KEY = "lastAppSavedXMediaIndex";
   const API_REQUEST_TIMEOUT_MS = 8000;
   const COLLECTOR_IMAGE_REQUEST_TIMEOUT_MS = 45_000;
@@ -224,9 +225,104 @@
     }
   }
 
+  /// VPS에 게시된 분류 스냅샷을 조회한다. 인증은 Collector 토큰(Bearer) 하나고
+  /// PC 연결 없이 동작한다. 30초 메모리 캐시와 오프라인 백오프는 PC 경로와 같은
+  /// 규칙을 따른다. 성공 시 스냅샷을 저장해 VPS 장애 시 cloud-cache로 쓴다.
+  async function cloudClassifications(force) {
+    const collector = await loadCollectorSettings();
+    const now = Date.now();
+    if (!force && classificationCache && classificationCacheBaseUrl === collector.baseUrl
+      && now - classificationCachedAt <= CACHE_MS) {
+      return { ok: true, classificationSource: "cloud", ...classificationCache };
+    }
+    if (!force && inOfflineBackoff(collector, now)) {
+      const cached = await cloudCachedClassifications();
+      if (cached) return cached;
+    }
+    const response = await collectorRequest("/v1/classifications", {}, collector.baseUrl);
+    if (!response.ok) {
+      if (force) return response;
+      const cached = await cloudCachedClassifications();
+      if (cached) return cached;
+      return response;
+    }
+    const entries = Array.isArray(response.entries) ? response.entries : [];
+    const rawPinnedIds = await loadPinned(APP_PINNED_KEY);
+    const repaired = repairPinnedIds(entries, rawPinnedIds, entries);
+    const stored = await chrome.storage.local.get([APP_LAYOUT_KEY]);
+    const sourceLayout = validLayout(stored[APP_LAYOUT_KEY]) ? stored[APP_LAYOUT_KEY] : null;
+    let layout = globalThis.LakomicsRadial.reconcileLayout(entries, sourceLayout);
+    layout = globalThis.LakomicsRadial.reorderPinned(layout, entries, repaired.pinnedIds);
+    classificationCache = { entries, layout, pinnedIds: repaired.pinnedIds };
+    classificationCachedAt = now;
+    classificationCacheBaseUrl = collector.baseUrl;
+    await chrome.storage.local.set({
+      [LAST_CLOUD_CLASSIFICATIONS_KEY]: {
+        version: 1, baseUrl: collector.baseUrl, entries, savedAt: now,
+      },
+    });
+    return { ok: true, classificationSource: "cloud", ...classificationCache };
+  }
+
+  async function cloudCachedClassifications() {
+    const collector = await loadCollectorSettings();
+    const stored = await chrome.storage.local.get([
+      LAST_CLOUD_CLASSIFICATIONS_KEY, APP_LAYOUT_KEY, APP_PINNED_KEY,
+    ]);
+    const snapshot = stored[LAST_CLOUD_CLASSIFICATIONS_KEY];
+    if (!snapshot || snapshot.version !== 1 || snapshot.baseUrl !== collector.baseUrl
+      || !Array.isArray(snapshot.entries) || !snapshot.entries.length) return null;
+    const entries = snapshot.entries.filter((entry) => entry && typeof entry.id === "string");
+    if (!entries.length) return null;
+    const pinnedIds = normalizePinnedIds(Array.isArray(stored[APP_PINNED_KEY]) ? stored[APP_PINNED_KEY] : []);
+    const sourceLayout = validLayout(stored[APP_LAYOUT_KEY]) ? stored[APP_LAYOUT_KEY] : null;
+    let layout = globalThis.LakomicsRadial.reconcileLayout(entries, sourceLayout);
+    layout = globalThis.LakomicsRadial.reorderPinned(layout, entries, pinnedIds);
+    return { ok: true, classificationSource: "cloud-cache", entries, layout, pinnedIds,
+      cachedAt: Number(snapshot.savedAt) || null };
+  }
+
+  let androidRuntimePromise = null;
+  /// 안드로이드(모바il) 런타임인지 한 번만 조회한다. getPlatformInfo가 없는
+  /// 환경(구버전 테스트 샌드박스 등)은 데스크톱으로 취급해 기존 경로를 유지한다.
+  function isAndroidRuntime() {
+    try {
+      if (typeof chrome === "undefined" || !chrome.runtime
+        || typeof chrome.runtime.getPlatformInfo !== "function") {
+        return Promise.resolve(false);
+      }
+      if (!androidRuntimePromise) {
+        androidRuntimePromise = new Promise((resolve) => {
+          try {
+            chrome.runtime.getPlatformInfo((info) => {
+              resolve(String(info?.os ?? "").toLowerCase() === "android");
+            });
+          } catch {
+            resolve(false);
+          }
+        });
+      }
+      return androidRuntimePromise;
+    } catch {
+      return Promise.resolve(false);
+    }
+  }
+
   async function activeClassifications(force) {
     const preferences = await loadPreferences();
     if (preferences.saveMode === "download") return localClassifications();
+
+    // 모바일(원격 Collector) 전용 클라우드 경로. VPS는 PC가 매 폴 게시하는
+    // 분류 스냅샷을 저장하고, 확장은 Collector 엔드포인트+토큰만으로 조회한다.
+    // 목적은 PC 없이(전원이 꺼진 상태에서도) 모바일 donut을 그리는 것이므로
+    // 데스크톱의 정상 경로는 바꾸지 않는다. PC의 로컬 라이브러리가 분류의
+    // 원본이며 엔트리 스키마는 PC API와 동일해 ID 체계가 하나뿐이다.
+    const collector = await loadCollectorSettings();
+    if (collector.enabled && collector.baseUrl && await isAndroidRuntime()) {
+      const cloud = await cloudClassifications(force);
+      if (cloud.ok) return cloud;
+      // VPS 불가 시에도 PC 엔드포인트·스냅샷·로컬 트리 폴백이 그대로 이어진다.
+    }
 
     const { connectionToken } = await chrome.storage.local.get(["connectionToken"]);
     if (!TOKEN_PATTERN.test(connectionToken ?? "")) return localClassifications("connection_key_missing");

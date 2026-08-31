@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use super::{
     client::CloudClient,
-    models::{RemoteCapture, RemoteCaptureKind},
+    models::{ClassificationSnapshotPublish, RemoteCapture, RemoteCaptureKind},
 };
 use crate::library::{
     error::LibraryError,
@@ -66,7 +66,13 @@ impl Library {
             .ok_or(LibraryError::InvalidCloudSyncConfig)?;
         let token = crate::library::credential::read_cloud_api_token_os()?;
         let client = CloudClient::new(&base_url)?;
-        self.sync_next_cloud_capture_with(&client, &token)
+        let result = self.sync_next_cloud_capture_with(&client, &token)?;
+        // 수집 폴과 같은 주기로 분류 스냅샷을 게시해 모바일 확장이 PC 없이
+        // donut을 그릴 수 있게 유지한다. 게시 실패는 수집 결과를 막지 않는다.
+        if let Err(error) = self.publish_classification_snapshot() {
+            eprintln!("cloud classifications publish: {error}");
+        }
+        Ok(result)
     }
 
     pub(crate) fn test_cloud_capture_connection(&self) -> Result<u32, LibraryError> {
@@ -75,6 +81,30 @@ impl Library {
         let token = crate::library::credential::read_cloud_api_token_os()?;
         let client = CloudClient::new(&base_url)?;
         Ok(client.list_pending_captures(&token)?.len() as u32)
+    }
+
+    /// 현재 분류 상태의 스냅샷을 VPS에 게시한다. PC 라이브러리가 분류의
+    /// 원본이며 VPS는 모바일 확장이 PC 없이 donut을 그리기 위한 최소 사본만
+    /// 저장한다. 게시 실패는 수집 폴을 막지 않는다.
+    pub(crate) fn publish_classification_snapshot(&self) -> Result<(), LibraryError> {
+        let config = self.cloud_sync_config()?;
+        if !config.enabled {
+            return Ok(());
+        }
+        let base_url = config
+            .api_base_url
+            .ok_or(LibraryError::InvalidCloudSyncConfig)?;
+        let token = crate::library::credential::read_cloud_api_token_os()?;
+        let client = CloudClient::new(&base_url)?;
+        let entries = self.list_classifications()?;
+        let published_at = chrono::Utc::now().to_rfc3339();
+        client.publish_classification_snapshot(
+            &token,
+            &ClassificationSnapshotPublish {
+                entries: &entries,
+                published_at: &published_at,
+            },
+        )
     }
 
     pub(super) fn sync_next_cloud_capture_with(

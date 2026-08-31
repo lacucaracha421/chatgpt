@@ -159,3 +159,13 @@ pub(crate) struct RemoteCaptureDownloadTicket {
 pub(crate) struct AcknowledgeCaptureRequest {
     pub imported_at: String,
 }
+
+/// PC 라이브러리가 VPS에 게시하는 분류 스냅샷. 모바일 확장의 donut은
+/// entries(레이아웃·핀은 확장 로컬 상태)만 소비하므로 확장 API 계약인
+/// camelCase ClassificationEntry 배열을 그대로 전달한다. VPS는 이 스냅샷의
+/// 보관소일 뿐 분류 데이터의 원본이 아니다.
+#[derive(Debug, Serialize)]
+pub(crate) struct ClassificationSnapshotPublish<'a> {
+    pub entries: &'a [crate::library::models::ClassificationEntry],
+    pub published_at: &'a str,
+}
