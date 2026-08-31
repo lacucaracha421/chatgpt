@@ -1,15 +1,33 @@
 import { useEffect } from "react";
 import type { LibraryGateway } from "../library/types";
 
-// 클라우드 캡처 수신함(원격 → 로컬) 폴링. 시작 직후 1회 실행 뒤 5분 간격으로
-// due 체크를 하고, 겹치는 실행은 허용하지 않는다. 실패는 조용히 무시한다 —
-// 캡처 수집 실패가 로컬 동작을 막지 않는다.
-const CAPTURE_DUE_CHECK_INTERVAL_MS = 5 * 60_000;
+const ACTIVE_POLL_INTERVAL_MS = 15_000;
+const BACKGROUND_POLL_INTERVAL_MS = 60_000;
 
-export function useCloudCaptureSync(gateway: LibraryGateway, libraryRoot: string, onResult: (result: Awaited<ReturnType<LibraryGateway["runDueCloudCaptureSync"]>>) => void) {
+export function useCloudCaptureSync(
+  gateway: LibraryGateway,
+  libraryRoot: string,
+  onResult: (
+    result: Awaited<ReturnType<LibraryGateway["runDueCloudCaptureSync"]>>,
+  ) => void,
+) {
   useEffect(() => {
     let active = true;
     let running = false;
+    let timerId: number | undefined;
+    let windowFocused = document.hasFocus();
+
+    const pollIntervalMs = () =>
+      document.visibilityState === "hidden" || !windowFocused
+        ? BACKGROUND_POLL_INTERVAL_MS
+        : ACTIVE_POLL_INTERVAL_MS;
+
+    const clearTimer = () => {
+      if (timerId === undefined) return;
+      window.clearTimeout(timerId);
+      timerId = undefined;
+    };
+
     const run = async () => {
       if (!active || running) return;
       running = true;
@@ -17,16 +35,60 @@ export function useCloudCaptureSync(gateway: LibraryGateway, libraryRoot: string
         const result = await gateway.runDueCloudCaptureSync();
         if (active) onResult(result);
       } catch {
-        // 네트워크·설정 오류는 다음 폴링에서 다시 시도한다. 로컬 동작에는 영향이 없다.
+        // Network/configuration failures are retried by the next scheduled poll.
       } finally {
         running = false;
       }
     };
-    void run();
-    const timer = window.setInterval(() => void run(), CAPTURE_DUE_CHECK_INTERVAL_MS);
+
+    const scheduleNext = () => {
+      if (!active) return;
+      clearTimer();
+      timerId = window.setTimeout(() => {
+        void runAndReschedule();
+      }, pollIntervalMs());
+    };
+
+    const runAndReschedule = async () => {
+      await run();
+      scheduleNext();
+    };
+
+    const triggerNow = () => {
+      clearTimer();
+      void runAndReschedule();
+    };
+
+    const handleVisibilityChange = () => {
+      if (!active) return;
+      if (document.visibilityState === "hidden" || !windowFocused) {
+        scheduleNext();
+        return;
+      }
+      triggerNow();
+    };
+
+    const handleFocus = () => {
+      windowFocused = true;
+      if (document.visibilityState !== "hidden") triggerNow();
+    };
+
+    const handleBlur = () => {
+      windowFocused = false;
+      scheduleNext();
+    };
+
+    triggerNow();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("blur", handleBlur);
+
     return () => {
       active = false;
-      window.clearInterval(timer);
+      clearTimer();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("blur", handleBlur);
     };
   }, [gateway, libraryRoot, onResult]);
 }
