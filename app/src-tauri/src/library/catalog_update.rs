@@ -128,10 +128,11 @@ pub(crate) async fn execute_catalog_update(
     library: Library,
     transport: &CatalogTransport,
     app: &AppHandle,
+    vps_base_url: Option<String>,
 ) -> Result<CatalogUpdateResult, LibraryError> {
     let attempted_at = chrono::Utc::now().to_rfc3339();
     library.record_catalog_update_attempt(&attempted_at)?;
-    match run_catalog_update(&library, transport, app).await {
+    match run_catalog_update(&library, transport, app, vps_base_url).await {
         Ok(mut result) if result.reason == CatalogUpdateStopReason::RateLimited => {
             library.rebuild_catalog_suggestions()?;
             library.record_catalog_update_error("온라인 카탈로그 요청 한도를 초과했습니다")?;
@@ -156,6 +157,7 @@ async fn run_catalog_update(
     library: &Library,
     transport: &CatalogTransport,
     app: &AppHandle,
+    vps_base_url: Option<String>,
 ) -> Result<CatalogUpdateResult, LibraryError> {
     let catalog_path = library.root().join("catalogs/kdata.db");
     if !catalog_path.exists() {
@@ -177,15 +179,37 @@ async fn run_catalog_update(
     let resuming = checkpoint.is_some();
     let mut added = 0;
     let mut pages = 0;
+    // VPS base url이 있으면 PC가 k-hentai에 직접 닿지 않는다. 없으면 기존
+    // WebView2 전송을 그대로 쓴다(Phase 1: 전송만 교체, 데이터 모델 무변경).
+    // VPS 인증은 기존 Cloud Capture와 같은 Bearer 토큰을 재사용한다.
+    let vps_source = match vps_base_url.as_deref() {
+        Some(base_url) => {
+            let cloud_token = crate::library::credential::read_cloud_api_token_os()?;
+            Some((
+                crate::catalog_source::VpsCatalogSource::new(base_url)?,
+                cloud_token,
+            ))
+        }
+        None => None,
+    };
 
     while pages < MAX_UPDATE_PAGES {
-        let Some(body) = fetch_with_retry(transport, app, &search_page_path(cursor)).await? else {
-            return Ok(CatalogUpdateResult {
-                added,
-                pages,
-                reason: CatalogUpdateStopReason::RateLimited,
-                last_success_at: None,
-            });
+        let body = if let Some((vps, token)) = &vps_source {
+            crate::catalog_source::retry_transient(|| {
+                vps.fetch_catalog_page_bearer(&search_page_path(cursor), token)
+            })
+            .await?
+        } else {
+            let Some(body) = fetch_with_retry(transport, app, &search_page_path(cursor)).await?
+            else {
+                return Ok(CatalogUpdateResult {
+                    added,
+                    pages,
+                    reason: CatalogUpdateStopReason::RateLimited,
+                    last_success_at: None,
+                });
+            };
+            body
         };
         let page = RemoteCatalogPage::parse(&body)?;
         pages += 1;

@@ -40,18 +40,19 @@ impl Library {
         bookmarked: bool,
     ) -> Result<(), LibraryError> {
         let connection = self.connection()?;
+        let provider_tag = super::catalog_provider::LEGACY_VCK_PROVIDER;
         if bookmarked {
             connection.execute(
                 "INSERT INTO online_catalog_bookmarks (provider, work_id, created_at)
-                 VALUES ('kHentai', ?1, ?2)
+                 VALUES (?1, ?2, ?3)
                  ON CONFLICT(provider, work_id) DO NOTHING",
-                rusqlite::params![work_id.to_string(), chrono::Utc::now().to_rfc3339()],
+                rusqlite::params![provider_tag, work_id.to_string(), chrono::Utc::now().to_rfc3339()],
             )?;
         } else {
             connection.execute(
                 "DELETE FROM online_catalog_bookmarks
-                 WHERE provider = 'kHentai' AND work_id = ?1",
-                [work_id.to_string()],
+                 WHERE provider = ?1 AND work_id = ?2",
+                [provider_tag, &work_id.to_string()],
             )?;
         }
         Ok(())
@@ -256,12 +257,15 @@ impl Library {
             "ATTACH DATABASE ?1 AS catalog",
             [catalog_path.to_string_lossy().as_ref()],
         )?;
-        let bookmark_exists = "EXISTS (SELECT 1 FROM online_catalog_bookmarks AS bookmark
-             WHERE bookmark.provider = 'kHentai'
-               AND bookmark.work_id = CAST(work.Id AS TEXT))";
+        let bookmark_exists = format!(
+            "EXISTS (SELECT 1 FROM online_catalog_bookmarks AS bookmark
+             WHERE bookmark.provider = '{}'
+               AND bookmark.work_id = CAST(work.Id AS TEXT))",
+            super::catalog_provider::LEGACY_VCK_PROVIDER
+        );
         let mut clauses = vec!["work.Expunged = 0".to_owned()];
         if query.scope == CatalogScope::Bookmarked {
-            clauses.push(bookmark_exists.into());
+            clauses.push(bookmark_exists.clone());
         }
         let mut values = Vec::<Value>::new();
         let text = query.text.trim();
@@ -403,18 +407,21 @@ impl Library {
             "ATTACH DATABASE ?1 AS catalog",
             [catalog_path.to_string_lossy().as_ref()],
         )?;
+        let detail_provider = super::catalog_provider::LEGACY_VCK_PROVIDER;
         let row = connection
             .query_row(
-                "SELECT work.Id, work.Title, work.TitleJpn, work.Thumb, work.Uploader,
-                        work.Category, work.Posted, work.Updated, work.FileCount,
-                        work.FileSize, work.Rating, work.Views,
-                        EXISTS (
-                            SELECT 1 FROM online_catalog_bookmarks AS bookmark
-                            WHERE bookmark.provider = 'kHentai'
-                              AND bookmark.work_id = CAST(work.Id AS TEXT)
-                        )
-                 FROM catalog.Works AS work
-                 WHERE work.Id = ?1 AND work.Expunged = 0",
+                &format!(
+                    "SELECT work.Id, work.Title, work.TitleJpn, work.Thumb, work.Uploader,
+                            work.Category, work.Posted, work.Updated, work.FileCount,
+                            work.FileSize, work.Rating, work.Views,
+                            EXISTS (
+                                SELECT 1 FROM online_catalog_bookmarks AS bookmark
+                                WHERE bookmark.provider = '{detail_provider}'
+                                  AND bookmark.work_id = CAST(work.Id AS TEXT)
+                            )
+                     FROM catalog.Works AS work
+                     WHERE work.Id = ?1 AND work.Expunged = 0"
+                ),
                 [work_id as i64],
                 |row| {
                     Ok((

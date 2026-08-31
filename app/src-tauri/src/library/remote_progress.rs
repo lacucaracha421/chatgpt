@@ -59,7 +59,11 @@ pub(crate) fn save_progress(
 }
 
 fn validate_identity(provider: &str, work_id: &str) -> Result<(), LibraryError> {
-    if provider != "kHentai" || work_id.parse::<u64>().ok().filter(|id| *id > 0).is_none() {
+    // kHentai는 기존 VCK 식별자, heliotrope는 hitomi gallery id다. 두 id 공간은
+    // 겹치지 않으므로 provider 태그로 격리된다.
+    if provider != super::catalog_provider::LEGACY_VCK_PROVIDER
+        || work_id.parse::<u64>().ok().filter(|id| *id > 0).is_none()
+    {
         return Err(LibraryError::InvalidRemoteReadingProgress);
     }
     Ok(())
