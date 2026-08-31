@@ -100,6 +100,20 @@ Resolution:
 - Existing failed ultra-short videos were retried through the normal application UI and successfully prepared.
 - Real stuck `pending` video transitioned to `ready`; no production DB surgery was required.
 
+### BUG-005 — Manga collection viewer shows an unexpected error tooltip/toast on entry
+Status: `TODO`
+
+Observed behavior:
+- Opening a manga Collection succeeds.
+- Entering the manga viewer shows an unexpected error tooltip/toast.
+- The viewer itself can still open, so the failing operation may be ancillary rather than a fatal viewer failure.
+
+Investigation:
+- Reproduce after the current BUG-001 MangaDex-binding guard fix and confirm whether this is the same failure path or a distinct viewer bug.
+- Inspect viewer initialization, volume-cover loading, artwork lookup, and provider-binding-dependent calls.
+- Preserve normal local Collection/viewer usability when optional provider work fails.
+- Do not merely suppress the error presentation before identifying the failing operation.
+
 ### VERIFY-001 — X → VPS → PC end-to-end check
 Status: `TODO`
 
@@ -148,6 +162,35 @@ Direction:
 - Prevent native text/media selection only for the active drag/gesture surface used by the extension.
 - Prefer scoped `user-select: none`, selection clearing, or pointer-event handling during the gesture rather than disabling browser selection globally.
 - Do not change the working video save path.
+
+### BUG-006 — Sidebar asset counts stay stale after drag-and-drop move
+Status: `TODO`
+
+Observed behavior:
+- Moving an asset to a sidebar classification/folder via drag-and-drop succeeds.
+- The asset counts displayed beside the affected sidebar folders do not update immediately.
+- Counts become correct only after a later refresh/reload.
+
+Direction:
+- Update or invalidate the affected sidebar count state as part of the successful move mutation.
+- Keep both source and destination counts consistent.
+- Verify both single-asset and multi-selection drag moves.
+- Prefer narrow state/cache invalidation over reloading the entire library solely to refresh counts.
+
+### BUG-007 — Asset/library mutations reset the current gallery scroll position
+Status: `TODO`
+
+Observed behavior:
+- Deleting an asset refreshes the current asset view and resets the gallery scroll position to the top.
+- Deleting a sidebar classification/folder can trigger the same full-view refresh and scroll reset.
+- Other narrow mutations that refresh the current asset view may share the same behavior.
+
+Direction:
+- Preserve the current gallery viewport across mutations whenever the current view remains valid.
+- Avoid remounting or replacing the entire gallery for narrow data mutations where an in-place update/invalidation is sufficient.
+- When deleting an item changes layout, preserve the nearest stable viewport position instead of forcing `scrollTop = 0`.
+- Sidebar mutations that do not navigate away from the current asset view must not reset its scroll position.
+- Coordinate with UI-004 and PERF-002; do not regress virtualization while fixing this.
 
 ### NAV-001 — Unify back-navigation behavior
 Status: `TODO`
@@ -208,7 +251,12 @@ Status: `TODO`
 ### UI-003 — Use a standard scrollbar in the asset repository
 Status: `TODO`
 
+Observed behavior:
+- The Asset Repository currently shows the legacy Codex-style/custom scrollbar and the native/default scrollbar at the same time.
+
+Direction:
 - Remove the special/custom scrollbar styling for the asset repository.
+- Ensure the repository has one intended scroll owner rather than nested overflow surfaces producing duplicate scrollbars.
 - Use a normal OS/browser-like scrollbar.
 - Do not change virtualization or scroll behavior.
 
@@ -539,11 +587,11 @@ For each new bug, record:
 1. CATALOG-001 real-use verification (run `신규 작품 갱신` and open a gallery from the merged main build against the real VPS), then DONE
 2. CLOUD-UI-001 connection/transport diagnostics so fallback, endpoint, count, and credential state are visible without DevTools
 3. EXT-001 / EXT-002 extension settings cleanup and automatic Cloud/direct-PC save policy
-4. UI-004 + PERF-002 flashing reduction and view-state preservation
+4. UI-004 + PERF-002 + BUG-007 flashing reduction, view-state preservation, and mutation scroll stability
 5. PERF-001 10,000+ asset cache/media optimization
 6. EXT-003 same-X-post media grouping
 7. EXT-004 adaptive/hidden secondary donut tags
-8. BUG-001 and remaining P1 usability work as reproduced/prioritized
+8. BUG-001 / BUG-005 / BUG-006 / UI-003 and remaining P1 usability work as reproduced/prioritized
 9. OPS-001 backup/migration/settings portability
 10. CLOUD-003 long-video async handling if real-world use requires it
 11. CATALOG-003 Japanese-language catalog ingestion/filter after CATALOG-001 reaches DONE
