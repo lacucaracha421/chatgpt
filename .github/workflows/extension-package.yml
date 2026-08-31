@@ -1,0 +1,36 @@
+name: Package Lakomics Extension
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "extension/**"
+      - ".github/workflows/extension-package.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Validate manifest
+        run: python -m json.tool extension/manifest.json >/dev/null
+
+      - name: Build extension zip
+        run: |
+          cd extension
+          zip -r ../lakomics-extension-alpha-15.35.zip . \
+            -x "*.DS_Store" "__MACOSX/*" "node_modules/*" "tests/*" "*.zip"
+
+      - name: Upload extension package
+        uses: actions/upload-artifact@v4
+        with:
+          name: lakomics-extension-alpha-15.35
+          path: lakomics-extension-alpha-15.35.zip
+          if-no-files-found: error
+          retention-days: 14
