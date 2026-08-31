@@ -64,19 +64,13 @@ Remaining verification:
 - Verify real X image and video flows end-to-end from extension -> VPS/R2 -> PC library with classification preservation and immediate UI refresh.
 
 ### CLOUD-005 — PC-independent saved-X-media snapshot
-Status: `IN PROGRESS`
+Status: `DONE`
 
-Goal:
-- Let Android show already-saved X media badges without a live PC connection.
-- Keep the PC library as the source of truth while publishing a bounded saved-media snapshot to the Japanese VPS.
-
-Direction:
-- Reuse the existing `<tweet_id>:<media_index>` saved-media identity; do not introduce a second identity scheme.
-- Publish saved X media alongside the existing Cloud/Classification snapshot lifecycle rather than creating another tight polling loop.
-- Android + Collector should read the VPS snapshot first, then a matching-base-url cloud cache, and merge bounded `recentBrowserSaves` so a just-saved item is marked immediately.
-- Desktop must continue to prefer the direct/local PC saved-media index and must not become VPS-dependent.
-- Keep PC and cloud saved-index caches separate so endpoints cannot contaminate each other.
-- After this is verified PC-off on Android, reevaluate whether mobile still needs Connection Key / Remote Lakomics controls.
+Resolution / verified behavior:
+- The PC publishes a bounded saved-X-media snapshot to the Japanese VPS alongside the existing Cloud/Classification snapshot lifecycle (`PUT /v1/saved-x-media`), sharing the `<tweet_id>:<media_index>` identity instead of a second scheme.
+- Android/Collector reads the VPS snapshot first, falls back to a matching-base-url cloud cache, and merges bounded `recentBrowserSaves` so a just-saved item is marked immediately; the desktop saved-media index stays local and VPS-independent.
+- PC-off behavior was exercised for real: Android retained and used the cloud saved-X snapshot while the PC API was down, and captures saved during that window synced into the Lakomics library when the PC came back.
+- A video imported through that flow was initially blocked only by the video preparation bug (BUG-004) and reached `ready` after that fix.
 
 ### BUG-001 — Collection view shows an error toast on entry
 Status: `TODO`
@@ -90,19 +84,21 @@ Action:
 - Check DB/schema/migration state before changing UI behavior.
 
 ### BUG-002 — Manga tab reports `망가 목록을 불러오지 못했습니다`
-Status: `TODO`
+Status: `DONE`
 
-Observed behavior:
-- Entering the local Manga tab produces `망가 목록을 불러오지 못했습니다`.
+Resolution:
+- Manga scanning no longer aborts when an unsupported AVIF thumbnail cannot be decoded.
+- Thumbnail generation is best-effort/fallback-safe so one unsupported thumbnail does not fail the entire manga list scan.
 
-Likely paths to inspect:
-- `getMangaRoot()`
-- `listMangaSeries()`
-- `scanManga()`
-- local DB/schema/migration state
+### BUG-004 — Video preview preparation reliability
+Status: `DONE`
 
-Note:
-- This is independent from the online catalog provider and may only share a DB/migration root cause with BUG-001.
+Resolution:
+- Fixed the development StrictMode lifecycle bug that left the video preparation worker permanently inactive and videos stuck in `pending`.
+- Fixed the failed-video `다시 시도` button so pointer events no longer leak into tile drag/selection handling.
+- Fixed poster generation for ultra-short clips by choosing a duration-safe poster seek instead of always seeking to 500 ms.
+- Existing failed ultra-short videos were retried through the normal application UI and successfully prepared.
+- Real stuck `pending` video transitioned to `ready`; no production DB surgery was required.
 
 ### VERIFY-001 — X → VPS → PC end-to-end check
 Status: `TODO`
@@ -219,7 +215,7 @@ Status: `TODO`
 ## P2 — architecture / larger feature work
 
 ### CATALOG-001 — Move fragile k-hentai transport behind the Japanese VPS
-Status: `IN PROGRESS`
+Status: `VERIFY`
 
 Current issue:
 - Online catalog transport depends on direct PC access to `k-hentai.org`, historically through a hidden WebView2 and gallery resolver paths that are unreliable on Korean networks.
@@ -232,8 +228,18 @@ Current Phase 1 direction:
 - Keep direct signed image/CDN page loading on the PC unless evidence shows it also needs proxying.
 
 Current checkpoint:
-- Feature work is isolated on the catalog worktree/branch and has focused server/Rust tests.
-- Remaining work is VPS deployment, real catalog-update/gallery-open verification, then merge only after successful real use.
+- PC catalog update traffic now uses the authenticated Japanese VPS API instead of sending the upstream k-hentai `/ajax/search` path directly to the VPS.
+- `/v1/catalog/search-page(?cursor=N)` is implemented on the VPS boundary and maps internally to the existing Korean k-hentai search query.
+- Upstream HTTP/network failures are normalized so transport failures return meaningful 502 behavior instead of raw FastAPI 500/NameError failures.
+- Server and Rust regression tests cover the VPS route contract, cursor behavior, network normalization, and retries.
+- The corrected server implementation has already been deployed to the Japanese VPS; `/health` returned 200 and the catalog endpoint returned the expected 401 when called without authentication.
+- The catalog implementation has now been integrated into main.
+
+Remaining verification:
+- Run `신규 작품 갱신` from the merged main build against the real VPS.
+- Confirm it returns either newly imported works / already-up-to-date, not the previous raw HTTP 500.
+- Open at least one catalog work/gallery through the real application and confirm page/detail transport still works.
+- After this real-use verification, change CATALOG-001 from VERIFY to DONE.
 
 Heliotrope:
 - Do not force Heliotrope into Phase 1 because Hitomi IDs and VCK/k-hentai IDs are different.
@@ -241,6 +247,9 @@ Heliotrope:
 
 ### CATALOG-003 — Add Japanese-language works to the online catalog
 Status: `TODO`
+
+Prerequisite:
+- CATALOG-001 real-use verification (Korean transport) must reach DONE first; the VPS route contract is implemented and merged, only real-app verification remains.
 
 Goal:
 - Extend the current Korean-only k-hentai/VCK catalog ingestion so Japanese-language originals can also be discovered and updated in Lakomics.
@@ -534,20 +543,19 @@ For each new bug, record:
 
 ## Current intended implementation order
 
-1. CLOUD-005 saved-X-media VPS snapshot and PC-off Android badge verification
-2. CATALOG-001 Phase 1 Japanese-VPS deployment, real catalog update/gallery verification, then merge if clean
-3. CLOUD-UI-001 connection/transport diagnostics so fallback, endpoint, count, and credential state are visible without DevTools
-4. EXT-001 / EXT-002 extension settings cleanup and automatic Cloud/direct-PC save policy
-5. UI-004 + PERF-002 flashing reduction and view-state preservation
-6. PERF-001 10,000+ asset cache/media optimization
-7. EXT-003 same-X-post media grouping
-8. EXT-004 adaptive/hidden secondary donut tags
-9. BUG-001 and remaining P1 usability work as reproduced/prioritized
-10. OPS-001 backup/migration/settings portability
-11. CLOUD-003 long-video async handling if real-world use requires it
-12. CATALOG-003 Japanese-language catalog ingestion/filter after CATALOG-001 transport is stable
-13. CATALOG-002 Heliotrope as a provider-namespaced second catalog source after Phase 1 is stable
-14. NOTE-001 / STATS-001 / IDEA-001 / UI-008
-15. Long-term collection presentation / shelf work
+1. CATALOG-001 real-use verification (run `신규 작품 갱신` and open a gallery from the merged main build against the real VPS), then DONE
+2. CLOUD-UI-001 connection/transport diagnostics so fallback, endpoint, count, and credential state are visible without DevTools
+3. EXT-001 / EXT-002 extension settings cleanup and automatic Cloud/direct-PC save policy
+4. UI-004 + PERF-002 flashing reduction and view-state preservation
+5. PERF-001 10,000+ asset cache/media optimization
+6. EXT-003 same-X-post media grouping
+7. EXT-004 adaptive/hidden secondary donut tags
+8. BUG-001 and remaining P1 usability work as reproduced/prioritized
+9. OPS-001 backup/migration/settings portability
+10. CLOUD-003 long-video async handling if real-world use requires it
+11. CATALOG-003 Japanese-language catalog ingestion/filter after CATALOG-001 reaches DONE
+12. CATALOG-002 Heliotrope as a provider-namespaced second catalog source after Phase 1 is stable
+13. NOTE-001 / STATS-001 / IDEA-001 / UI-008
+14. Long-term collection presentation / shelf work
 
 This order is a working execution preference, not a dependency graph. Reorder when a real regression or production verification failure becomes more urgent.
