@@ -3,7 +3,6 @@ import os
 import sqlite3
 import time
 import urllib.error as urllib_error
-import subprocess
 import urllib.request as urllib_request
 import uuid
 from contextlib import contextmanager
@@ -222,7 +221,12 @@ def create_upload_presign(
 # VPS fetch an arbitrary URL (no open proxy / no SSRF surface).
 
 KHENTAI_ORIGIN = "https://k-hentai.org"
-CATALOG_UA = "Lakomics-Cloud/1.0"
+CATALOG_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/152.0.0.0 Safari/537.36 Edg/152.0.0.0"
+)
+CATALOG_ACCEPT_LANGUAGE = "ko,en;q=0.9,en-US;q=0.8,ko-KR;q=0.7"
 # Bounded retry: transient network failures and 5xx only; 4xx verdicts from
 # k-hentai (expired gallery, unknown id) are final for this request.
 CATALOG_ATTEMPTS = 3
@@ -238,42 +242,27 @@ _catalog_cache: dict[str, tuple[float, int, bytes]] = {}
 
 
 def _catalog_fetch_once(url: str) -> tuple[int, bytes]:
-    # k-hentai는 HTTP/2와 일부 클라이언트 fingerprint(Arbitrary Protocol)에서 /r/{id}를
-    # 451로 거절한다(2026-09 실측: curl 기본 451, curl --http1.1 200). 그래서 카탈로그
-    # transport는 curl --http1.1로 고정한다. URL은 KHENTAI_ORIGIN 기반으로 서버 내부에서만
-    # 생성되며(클라이언트 입력 URL 없음) argv 배열 전달이라 shell 개입도 없다.
-    arguments = [
-        "curl", "--http1.1", "-sS",
-        "-A", CATALOG_UA,
-        "-H", "Accept: text/html,application/json;q=0.9,*/*;q=0.8",
-        # max_redirects=0 계약 유지: 리다이렉트를 따라가지 않는다.
-        "--max-redirs", "0",
-        "--max-time", "30",
-        "--max-filesize", str(CATALOG_MAX_BODY_BYTES + 1),
-        # 마지막 줄에 상태 코드를 붙여 body와 분리한다.
-        "-w", "\\n%{http_code}",
-        "--",
+    # /r/{id}는 비브라우저형 클라이언트(기본 UA/프로토콜 fingerprint)를 451로
+    # 거절한다(2026-09 VPS 실측: Lakomics UA 451, 브라우저 UA + Accept-Language
+    # 200 — curl/HTTP1.1 여부 무관). 그래서 브라우저형 UA와 Accept-Language를 보낸다.
+    request = urllib_request.Request(
         url,
-    ]
+        headers={
+            "User-Agent": CATALOG_UA,
+            "Accept-Language": CATALOG_ACCEPT_LANGUAGE,
+            "Accept": "text/html,application/json;q=0.9,*/*;q=0.8",
+        },
+    )
     try:
-        completed = subprocess.run(arguments, capture_output=True, timeout=35)
-    except (subprocess.TimeoutExpired, OSError):
-        # curl 미존재/시간 초과/프로세스 실패도 upstream 장애와 같은 게이트웨이 오류다.
+        with urllib_request.urlopen(request, timeout=30) as response:
+            return response.status, response.read(CATALOG_MAX_BODY_BYTES + 1)
+    except urllib_error.HTTPError as error:
+        return error.code, b""
+    except (urllib_error.URLError, TimeoutError, OSError):
+        # DNS/TLS/connect/timeout 실패는 k-hentai 쪽 장애다. 예외를 밖으로
+        # 흘려보내면 FastAPI raw 500이 되므로 게이트웨이 오류(0)로 정규화해
+        # 재시도 파이프라인이 502로 응답하게 한다. 프로그래머 오류는 잡지 않는다.
         return 0, b""
-    stdout = completed.stdout
-    marker = stdout.rfind(b"\n")
-    if marker < 0:
-        return 0, b""
-    raw_code = stdout[marker + 1 :]
-    body = stdout[:marker]
-    try:
-        status = int(raw_code)
-    except ValueError:
-        return 0, b""
-    if status == 0 or completed.returncode != 0:
-        # 네트워크/DNS/TLS/timeout/파일 크기 초과(-1)는 모두 게이트웨이 오류로 정규화한다.
-        return 0, b""
-    return status, body[: CATALOG_MAX_BODY_BYTES + 1]
 
 
 def _catalog_fetch_with_retry(url: str) -> tuple[int, bytes]:

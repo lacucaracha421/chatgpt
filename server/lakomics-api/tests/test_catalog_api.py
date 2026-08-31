@@ -256,44 +256,57 @@ class CatalogTransportApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 502)
         self.assertFalse(response.json().get("traceback", False))
 
-    def test_curl_transport_normalizes_connection_refused_to_status_zero(self) -> None:
-        # 실제 curl이 연결 거부 호스트를 만나면 http_code 000/exit != 0이 되고,
-        # 이는 (0, b"")로 정규화돼야 한다(단위 수준 검증).
+    def test_urllib_transport_normalizes_connection_refused_to_status_zero(self) -> None:
+        # urlopen이 연결 거부에서 던지는 URLError는 (0, b"")로 정규화돼야 한다.
         status = api_app._catalog_fetch_once("http://127.0.0.1:9/refused")[0]
         self.assertEqual(status, 0)
 
-    def test_curl_transport_normalizes_bad_host_to_status_zero(self) -> None:
+    def test_urllib_transport_normalizes_bad_host_to_status_zero(self) -> None:
         status = api_app._catalog_fetch_once("https://no-such-host-9x7.invalid/")[0]
         self.assertEqual(status, 0)
 
-    def test_curl_transport_reads_body_alongside_status(self) -> None:
-        # 상태 코드와 body는 -w 마커로 분리된다. 로컬 http.server로 성공 경로의
-        # 분리 결과(200 + 전체 body)를 검증한다.
-        import threading
-        from http.server import BaseHTTPRequestHandler, HTTPServer
+    def test_urllib_transport_sends_browser_ua_and_accept_language(self) -> None:
+        # 451 우회의 핵심: /r/{id}는 비브라우저형 요청을 거절한다. 브라우저형
+        # UA와 Accept-Language가 실제 헤더로 나가는지 캡처해 검증한다.
+        captured: dict[str, str] = {}
 
-        payload = b"<html>fetch-body-check</html>"
+        class FakeResponse:
+            status = 200
 
-        class Handler(BaseHTTPRequestHandler):
-            def do_GET(self):  # noqa: N802
-                self.send_response(200)
-                self.send_header("Content-Length", str(len(payload)))
-                self.end_headers()
-                self.wfile.write(payload)
+            def read(self, limit):
+                return b"<html>ui</html>"
 
-            def log_message(self, *args):
-                pass
+            def __enter__(self):
+                return self
 
-        server = HTTPServer(("127.0.0.1", 0), Handler)
-        thread = threading.Thread(target=server.handle_request, daemon=True)
-        thread.start()
-        port = server.server_address[1]
+            def __exit__(self, *args):
+                return False
 
-        status, body = api_app._catalog_fetch_once(f"http://127.0.0.1:{port}/probe")
-        thread.join(timeout=5)
-        server.server_close()
+        def fake_urlopen(request, timeout):
+            captured.update(dict(request.header_items()))
+            return FakeResponse()
+
+        with mock.patch.object(api_app.urllib_request, "urlopen", side_effect=fake_urlopen):
+            status, body = api_app._catalog_fetch_once("https://k-hentai.org/r/42")
+
         self.assertEqual(status, 200)
-        self.assertEqual(body, payload)
+        self.assertEqual(body, b"<html>ui</html>")
+        self.assertEqual(captured.get("User-agent"), api_app.CATALOG_UA)
+        self.assertEqual(captured.get("Accept-language"), api_app.CATALOG_ACCEPT_LANGUAGE)
+        self.assertEqual(
+            captured.get("Accept"), "text/html,application/json;q=0.9,*/*;q=0.8"
+        )
+
+    def test_urllib_transport_timeout_normalized_to_status_zero(self) -> None:
+        # urlopen 타임아웃(TimeoutError)도 (0, b"")로 정규화돼야 한다.
+        def timeout_urlopen(request, timeout):
+            raise TimeoutError("timed out")
+
+        with mock.patch.object(api_app.urllib_request, "urlopen", side_effect=timeout_urlopen):
+            status, body = api_app._catalog_fetch_once("https://k-hentai.org/r/42")
+
+        self.assertEqual(status, 0)
+        self.assertEqual(body, b"")
 
     def test_normalized_network_status_zero_is_retried_then_502(self) -> None:
         # 정규화 계약: _catalog_fetch_once가 네트워크 실패를 (0, b"")로 돌리면
