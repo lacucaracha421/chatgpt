@@ -42,6 +42,11 @@
   let classificationCacheBaseUrl = null;
   // 엔드포인트별 마지막 실패. { baseUrl, code, failedAt } 또는 null.
   let lastConnectionFailure = null;
+  // CLOUD-UI-001 진단 상태. 토큰·URL은 절대 기록하지 않는다.
+  let lastCollectorFailure = null;
+  let classificationDiagnostics = null;
+  let savedMediaDiagnostics = null;
+  let lastSavedXPublishedAt = null;
   let classificationRefreshPromise = null;
   let classificationRefreshBaseUrl = null;
   let lastClassificationProbe = null;
@@ -66,6 +71,12 @@
           lastConnectionFailure: lastConnectionFailure
             ? { code: lastConnectionFailure.code, failedAt: lastConnectionFailure.failedAt }
             : null,
+          lastCollectorFailure: lastCollectorFailure
+            ? { code: lastCollectorFailure.code, failedAt: lastCollectorFailure.failedAt }
+            : null,
+          classificationDiagnostics: classificationDiagnostics ?? null,
+          savedMediaDiagnostics: savedMediaDiagnostics ?? null,
+          lastSavedXPublishAt: lastSavedXPublishedAt ?? null,
         };
       }
       case "settings:set-token": {
@@ -322,12 +333,14 @@
     const collector = await loadCollectorSettings();
     if (collector.enabled && collector.baseUrl && await isAndroidRuntime()) {
       const cloud = await cloudClassifications(force);
-      if (cloud.ok) return cloud;
+      if (cloud.ok) return recordClassificationDiagnostics(cloud);
       // VPS 불가 시에도 PC 엔드포인트·스냅샷·로컬 트리 폴백이 그대로 이어진다.
     }
 
     const { connectionToken } = await chrome.storage.local.get(["connectionToken"]);
-    if (!TOKEN_PATTERN.test(connectionToken ?? "")) return localClassifications("connection_key_missing");
+    if (!TOKEN_PATTERN.test(connectionToken ?? "")) {
+      return recordClassificationDiagnostics(await localClassifications("connection_key_missing"));
+    }
     const endpoint = await activeApiEndpoint();
 
     // The radial menu must not wait for a dead PC/Tailscale backend. If we have
@@ -341,27 +354,27 @@
     if (!force) {
       if (classificationCache && classificationCacheBaseUrl === endpoint.baseUrl
         && now - classificationCachedAt <= CACHE_MS) {
-        return appClassifications(false);
+        return recordClassificationDiagnostics(appClassifications(false));
       }
       const cached = backingOff
         ? await lastAppClassifications(lastConnectionFailure?.code ?? null, endpoint.baseUrl)
         : await lastAppClassifications(null, endpoint.baseUrl);
       if (cached) {
         if (!backingOff) void refreshAppClassificationsInBackground(endpoint);
-        return cached;
+        return recordClassificationDiagnostics(cached);
       }
     }
 
     const response = await appClassifications(force, endpoint);
     if (response.ok) {
       recordConnectionSuccess(endpoint);
-      return response;
+      return recordClassificationDiagnostics(response);
     }
     recordConnectionFailure(endpoint, response.code || "app_offline");
 
     const cached = await lastAppClassifications(response.code, endpoint.baseUrl);
-    if (cached) return cached;
-    return localClassifications(response.code);
+    if (cached) return recordClassificationDiagnostics(cached);
+    return recordClassificationDiagnostics(await localClassifications(response.code));
   }
 
 
@@ -379,6 +392,34 @@
 
   function recordConnectionSuccess(endpoint) {
     if (lastConnectionFailure?.baseUrl === endpoint.baseUrl) lastConnectionFailure = null;
+  }
+
+  function recordClassificationDiagnostics(response) {
+    if (response?.ok && typeof response.classificationSource === "string") {
+      classificationDiagnostics = {
+        source: response.classificationSource,
+        count: Array.isArray(response.entries) ? response.entries.length : 0,
+        fallbackReason: response.fallbackCode ?? null,
+        recordedAt: Date.now(),
+      };
+    }
+    return response;
+  }
+
+
+
+  function recordSavedMediaDiagnostics(response) {
+    const source = response?.ok ? (response.indexSource ?? null) : null;
+    savedMediaDiagnostics = {
+      source: source ?? "none",
+      keyCount: Array.isArray(response?.savedKeys) ? response.savedKeys.length : 0,
+      recordedAt: Date.now(),
+    };
+    return response;
+  }
+
+  function recordCollectorFailure(code) {
+    lastCollectorFailure = { code, failedAt: Date.now() };
   }
 
   async function refreshAppClassificationsInBackground(endpoint = null) {
@@ -453,17 +494,18 @@
     const collector = await loadCollectorSettings();
     if (collector.enabled && collector.baseUrl && await isAndroidRuntime()) {
       const cloud = await cloudSavedXMediaIndex(collector);
-      if (cloud.ok) return mergeRecentSavedXMedia(cloud);
+      if (cloud.ok) return recordSavedMediaDiagnostics(await mergeRecentSavedXMedia(cloud));
 
       // Android+Collector의 목적은 PC 독립성이다. VPS가 끊긴 경우 8초짜리
       // PC probe를 새로 만들지 않고, 같은 PC 엔드포인트의 기존 캐시만 보조로 쓴다.
       const endpoint = await activeApiEndpoint();
       const appCache = await cachedSavedIndex(endpoint, cloud.code || "collector_offline");
-      if (appCache.ok) return mergeRecentSavedXMedia(appCache);
+      if (appCache.ok) return recordSavedMediaDiagnostics(await mergeRecentSavedXMedia(appCache));
       const recentKeys = await recentSavedXMediaKeys();
       if (recentKeys.length) {
-        return { ok: true, authoritative: true, indexSource: "recent", savedKeys: recentKeys };
+        return recordSavedMediaDiagnostics({ ok: true, authoritative: true, indexSource: "recent", savedKeys: recentKeys });
       }
+      recordCollectorFailure(cloud.code || "collector_offline");
       return cloud;
     }
 
@@ -471,7 +513,7 @@
     // 포커스마다 호출되므로 offline backoff 중에는 8초 타임아웃을 기다리지 않고
     // 저장된 스냅샷을 즉시 쓴다.
     if (inOfflineBackoff(endpoint)) {
-      return cachedSavedIndex(endpoint, "backoff");
+      return recordSavedMediaDiagnostics(cachedSavedIndex(endpoint, "backoff"));
     }
     const response = await apiRequest("/v1/saved-x-media", {}, endpoint.baseUrl);
     if (response.ok) {
@@ -485,10 +527,10 @@
         savedAt: Date.now(),
       };
       await chrome.storage.local.set({ [LAST_APP_SAVED_X_MEDIA_KEY]: snapshot });
-      return { ok: true, authoritative: true, indexSource: endpoint.source, savedKeys };
+      return recordSavedMediaDiagnostics({ ok: true, authoritative: true, indexSource: endpoint.source, savedKeys });
     }
     recordConnectionFailure(endpoint, response.code || "app_offline");
-    return cachedSavedIndex(endpoint, response.code || "app_offline");
+    return recordSavedMediaDiagnostics(cachedSavedIndex(endpoint, response.code || "app_offline"));
   }
 
   async function cloudSavedXMediaIndex(collector) {
@@ -709,78 +751,125 @@
     const prepared = await prepareMediaPayload(payload);
     if (!prepared.ok) return prepared;
     const mediaPayload = prepared.payload;
-    const classificationSource = mediaPayload.classificationSource === "local" ? "local" : "app";
-
+    // 사용자 노출 저장 방식: auto(PC→Cloud→기기), app("PC 직접 연결만"),
+    // cloud("Cloud만"), download(브라우저 Download만). classificationSource는
+    // 전송 수단과 독립적이다. 로컬 폴백 트리여도 Collector가 켜져 있으면 기기
+    // 다운로드로 강등하지 않는다.
     if (preferences.saveMode === "download") {
       return browserDownload(mediaPayload, preferences);
     }
 
-    // Collector is transport-independent from the classification source. A local
-    // fallback tree must not silently force browser download while Collector is enabled.
-    if (collectorSupportsMedia(mediaPayload)) {
-      const collector = await loadCollectorSettings();
-      if (collector.enabled) {
-        const captured = await captureWithCollector(mediaPayload, collector);
-        if (captured.ok) {
-          await rememberSavedXMediaSource(mediaPayload.sourceUrl);
-          await rememberRecentSavedXMediaSource(mediaPayload.sourceUrl);
-          return captured;
-        }
-        if (["collector_timeout", "collector_offline"].includes(captured.code)) {
-          const confirmed = await confirmCollectorCapture(mediaPayload, collector);
-          if (confirmed.ok) {
-            await rememberSavedXMediaSource(mediaPayload.sourceUrl);
-            await rememberRecentSavedXMediaSource(mediaPayload.sourceUrl);
-            return confirmed;
+    const cloudCapable = collectorSupportsMedia(mediaPayload);
+    const appDirectFirst = preferences.saveMode === "pc"
+      || (preferences.saveMode === "auto" && !cloudCapable);
+
+    const markSaved = async () => {
+      await rememberSavedXMediaSource(mediaPayload.sourceUrl);
+      await rememberRecentSavedXMediaSource(mediaPayload.sourceUrl);
+    };
+
+    const tryAppDirect = async () => {
+      // 로컬 폴백 트리 선택은 PC ingestion 대상이 아니므로 null로 '시도 안 함'을
+      // 구분한다. 상위 정책에서 다음 수단으로 넘어간다.
+      if (mediaPayload.classificationSource === "local") return null;
+      const { connectionToken } = await chrome.storage.local.get(["connectionToken"]);
+      if (!TOKEN_PATTERN.test(connectionToken ?? "")) {
+        // PC가 아예 구성되지 않은 경우다. 실패로 취급해 다음 수단(Cloud/기기)으로 넘어간다.
+        return { failed: true, fallbackCode: "connection_key_missing" };
+      }
+      // Never let an earlier classifications probe decide where the media is saved.
+      // Proton/Tailscale can briefly recover between the menu opening and the actual
+      // save, so always make a real ingestion attempt first.
+      const ingestionRequest = () => ({
+        method: "POST",
+        body: JSON.stringify(stripExtensionFields(mediaPayload)),
+        timeoutMs: INGESTION_TIMEOUT_MS,
+      });
+      let appResponse = await apiRequest("/v1/ingestions", ingestionRequest());
+      if (!appResponse.ok && shouldFallbackToBrowserDownload(appResponse)) {
+        const firstFallbackCode = appResponse.code || "app_offline";
+        // 터널 복구는 수 초가 걸린다. 1회 700ms 재시도는 지나가는 순간을 못 잡으므로
+        // 넉넉한 간격으로 총 3회까지 시도한 뒤 다음 수단으로 넘어간다.
+        await retryDelay(INGESTION_RETRY_DELAY_MS);
+        appResponse = await apiRequest("/v1/ingestions", ingestionRequest());
+        if (!appResponse.ok && shouldFallbackToBrowserDownload(appResponse)) {
+          await retryDelay(INGESTION_RETRY_DELAY_MS * 3);
+          appResponse = await apiRequest("/v1/ingestions", ingestionRequest());
+          if (!appResponse.ok && shouldFallbackToBrowserDownload(appResponse)) {
+            return { failed: true, fallbackCode: firstFallbackCode };
           }
         }
-        return browserDownload(mediaPayload, preferences, captured.code || "collector_failed");
       }
+      if (appResponse.ok || !shouldFallbackToBrowserDownload(appResponse)) {
+        const normalized = normalizeAppMediaResponse(appResponse, mediaPayload);
+        if (normalized.ok && normalized.status !== "review_pending") {
+          await rememberSavedXMediaSource(mediaPayload.sourceUrl);
+        }
+        return normalized;
+      }
+      return { failed: true, fallbackCode: appResponse.code || "app_offline" };
+    };
+
+    const tryCloud = async () => {
+      if (!cloudCapable) return { failed: true, fallbackCode: "collector_media_unsupported" };
+      const collector = await loadCollectorSettings();
+      if (!collector.enabled) return { failed: true, fallbackCode: "collector_not_configured" };
+      const captured = await captureWithCollector(mediaPayload, collector);
+      if (captured.ok) {
+        await markSaved();
+        return captured;
+      }
+      if (["collector_timeout", "collector_offline"].includes(captured.code)) {
+        const confirmed = await confirmCollectorCapture(mediaPayload, collector);
+        if (confirmed.ok) {
+          await markSaved();
+          return confirmed;
+        }
+      }
+      return { failed: true, fallbackCode: captured.code || "collector_failed" };
+    };
+
+    if (preferences.saveMode === "pc") {
+      const result = await tryAppDirect();
+      if (!result?.failed) return result;
+      return {
+        ok: false,
+        code: result.fallbackCode || "app_offline",
+        message: "PC 직접 연결 모드에서는 Cloud로 저장하지 않습니다. PC에 연결하거나 저장 방식을 자동/Cloud로 바꾸세요.",
+      };
     }
 
-    if (classificationSource === "local") {
-      return browserDownload(mediaPayload, preferences);
+    if (preferences.saveMode === "cloud") {
+      const result = await tryCloud();
+      if (!result?.failed) return result;
+      return browserDownload(mediaPayload, preferences, result.fallbackCode);
     }
 
-    // Never let an earlier classifications probe decide where the media is saved.
-    // Proton/Tailscale can briefly recover between the menu opening and the actual
-    // save, so always make a real ingestion attempt first.
-    const ingestionRequest = () => ({
-      method: "POST",
-      body: JSON.stringify(stripExtensionFields(mediaPayload)),
-      timeoutMs: INGESTION_TIMEOUT_MS,
-    });
-    let appResponse = await apiRequest("/v1/ingestions", ingestionRequest());
-    if (appResponse.ok || !shouldFallbackToBrowserDownload(appResponse)) {
-      const normalized = normalizeAppMediaResponse(appResponse, mediaPayload);
-      if (normalized.ok && normalized.status !== "review_pending") {
-        await rememberSavedXMediaSource(mediaPayload.sourceUrl);
+    // Automatic: PC direct first when the media type is ingestible by the app,
+    // otherwise Cloud first. Both failures keep the existing device fallback.
+    if (appDirectFirst) {
+      const appResult = await tryAppDirect();
+      if (!appResult?.failed) return appResult;
+      if (cloudCapable) {
+        const cloudResult = await tryCloud();
+        if (!cloudResult?.failed) return cloudResult;
+        return browserDownload(mediaPayload, preferences, cloudResult.fallbackCode || appResult.fallbackCode);
       }
-      return normalized;
+      return browserDownload(mediaPayload, preferences, appResult.fallbackCode);
     }
 
-    const firstFallbackCode = appResponse.code || "app_offline";
-    // 터널 복구는 수 초가 걸린다. 1회 700ms 재시도는 지나가는 순간을 못 잡으므로
-    // 넉넉한 간격으로 총 3회까지 시도한 뒤 기기 폴백으로 넘어간다.
-    await retryDelay(INGESTION_RETRY_DELAY_MS);
-    appResponse = await apiRequest("/v1/ingestions", ingestionRequest());
-    if (appResponse.ok || !shouldFallbackToBrowserDownload(appResponse)) {
-      const normalized = normalizeAppMediaResponse(appResponse, mediaPayload);
-      if (normalized.ok && normalized.status !== "review_pending") {
-        await rememberSavedXMediaSource(mediaPayload.sourceUrl);
-      }
-      return normalized;
-    }
-    await retryDelay(INGESTION_RETRY_DELAY_MS * 3);
-    appResponse = await apiRequest("/v1/ingestions", ingestionRequest());
-    if (appResponse.ok || !shouldFallbackToBrowserDownload(appResponse)) {
-      const normalized = normalizeAppMediaResponse(appResponse, mediaPayload);
-      if (normalized.ok && normalized.status !== "review_pending") {
-        await rememberSavedXMediaSource(mediaPayload.sourceUrl);
-      }
-      return normalized;
-    }
-    return browserDownload(mediaPayload, preferences, firstFallbackCode);
+    const cloudResult = await tryCloud();
+    if (!cloudResult?.failed) return cloudResult;
+    const appResult = await tryAppDirect();
+    if (!appResult?.failed) return appResult;
+    // PC 실시도 판단: connection_key_missing은 '시도했지만 실패'가 아니라
+    // '처음부터 불가'를 뜻하므로, 이때는 실제 네트워크 실패인 Cloud 코드를 노출한다.
+    const appAttempted = appResult.fallbackCode !== "connection_key_missing";
+    return browserDownload(
+      mediaPayload,
+      preferences,
+      appAttempted ? (appResult.fallbackCode || cloudResult.fallbackCode) : cloudResult.fallbackCode,
+    );
   }
 
   function shouldFallbackToBrowserDownload(response) {

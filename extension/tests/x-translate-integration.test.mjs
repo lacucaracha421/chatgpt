@@ -32,7 +32,7 @@ test("settings keep common controls visible and rare recovery tools collapsed", 
   assert.match(optionsHtml, /<details class="advanced-block">/);
   assert.doesNotMatch(optionsHtml, /id="touch-persistent"/);
   assert.doesNotMatch(optionsHtml, /id="suppress-context-menu"/);
-  assert.doesNotMatch(optionsHtml, /id="save-mode"/);
+  assert.match(optionsHtml, /id="save-mode"/);
 });
 
 

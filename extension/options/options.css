@@ -365,3 +365,13 @@ select {
 .advanced-content section {
   background: #1a1a1e;
 }
+
+.diagnostics-line {
+  margin: 4px 0;
+  font-size: 12px;
+  color: var(--text-secondary, #555);
+}
+
+.diagnostics-line.diagnostics-degraded {
+  color: #b45309;
+}

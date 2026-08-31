@@ -45,8 +45,11 @@
   function normalizePreferences(value = {}) {
     // `app` was used by older alpha builds. The current extension promises
     // automatic device fallback, so migrate that legacy value to `auto`.
-    // Keep `download` only for old/manual configs that intentionally bypass Lakomics.
-    const saveMode = value.saveMode === "download" ? "download" : DEFAULT_PREFERENCES.saveMode;
+    // Save modes: auto (PC direct → Cloud → device), pc ("PC 직접 연결만"),
+    // cloud ("Cloud만"), download (브라우저 Download만 = legacy manual bypass).
+    // 레거시 `app`(구 빌드의 app-only 저장 = 자동 폴백 의미)은 `auto`로 마이그레이션한다.
+    // 새 `pc` 값만이 PC 직접 연결 전용 모드이며 구 저장값과 충돌하지 않는다.
+    const saveMode = ["pc", "cloud", "download"].includes(value.saveMode) ? value.saveMode : DEFAULT_PREFERENCES.saveMode;
     const rawFolder = typeof value.downloadFolder === "string"
       ? value.downloadFolder.trim()
       : DEFAULT_PREFERENCES.downloadFolder;

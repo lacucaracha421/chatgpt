@@ -254,6 +254,150 @@ test("failed saved-index probes also honor the offline backoff", async () => {
   assert.equal(harness.fetchCalls.length, callsAfterFailure);
 });
 
+test("classification diagnostics from settings:get reflect the latest lookup", async () => {
+  const harness = createHarness({
+    collectorToken: "server-secret-token",
+    collectorSettings: { enabled: true, baseUrl: "http://100.76.119.29:32146" },
+  });
+  harness.setPlatform("android");
+  harness.queueJson({
+    entries: [
+      { id: "game", kind: "root", name: "게임", parentId: null },
+      { id: "manga", kind: "root", name: "만화", parentId: null },
+    ],
+  });
+
+  await harness.api.handleMessage({ type: "classifications:get" });
+  const settings = await harness.api.handleMessage({ type: "settings:get" });
+  assert.equal(settings.classificationDiagnostics.source, "cloud");
+  assert.equal(settings.classificationDiagnostics.count, 2);
+  assert.equal(settings.classificationDiagnostics.fallbackReason, null);
+});
+
+test("settings:get marks the six-item local fallback explicitly", async () => {
+  const harness = createHarness({ connectionToken: "0123456789abcdef0123456789abcdef" });
+  harness.queueError(new TypeError("Failed to fetch"));
+  await harness.api.handleMessage({ type: "classifications:get" });
+
+  const settings = await harness.api.handleMessage({ type: "settings:get" });
+  assert.equal(settings.classificationDiagnostics.source, "local");
+  assert.equal(settings.classificationDiagnostics.fallbackReason, "app_offline");
+  assert.equal(settings.classificationDiagnostics.count, 6);
+  assert.equal(settings.lastConnectionFailure.code, "app_offline");
+});
+
+test("saved-media diagnostics report the active snapshot source and key count", async () => {
+  const harness = createHarness({
+    collectorToken: "server-secret-token",
+    collectorSettings: { enabled: true, baseUrl: "https://collector.tail.ts.net" },
+  });
+  harness.setPlatform("android");
+  harness.queueJson({ keys: ["123:1", "124:2"] });
+  const index = await harness.api.handleMessage({ type: "saved-index:get" });
+  assert.equal(index.indexSource, "cloud");
+
+  const settings = await harness.api.handleMessage({ type: "settings:get" });
+  assert.equal(settings.savedMediaDiagnostics.source, "cloud");
+  assert.equal(settings.savedMediaDiagnostics.keyCount, 2);
+});
+
+test("collector failure is recorded without leaking token or endpoint material", async () => {
+  const harness = createHarness({
+    collectorToken: "server-secret-token",
+    collectorSettings: { enabled: true, baseUrl: "https://collector.tail.ts.net" },
+  });
+  harness.setPlatform("android");
+  harness.queueError(new TypeError("offline"));
+  await harness.api.handleMessage({ type: "saved-index:get" });
+
+  const settings = await harness.api.handleMessage({ type: "settings:get" });
+  assert.equal(settings.lastCollectorFailure.code, "collector_offline");
+  assert.equal(typeof settings.lastCollectorFailure.failedAt, "number");
+});
+
+test("save mode changes route saves between pc and cloud without duplicate invocations", async () => {
+  const harness = createHarness({
+    collectorToken: "server-secret-token",
+    collectorSettings: { enabled: true, baseUrl: "http://100.76.119.29:32146" },
+    connectionToken: "0123456789abcdef0123456789abcdef",
+    preferences: { saveMode: "cloud" },
+  });
+  harness.queueJson({ ok: true, created: true, capture: { id: "c-1", status: "pending" } });
+  const payload = {
+    source: "x",
+    mediaUrl: "https://pbs.twimg.com/media/MODE?format=jpg&name=orig",
+    sourceUrl: "https://x.com/artist/status/7777/photo/1",
+    classificationId: "game",
+    classificationName: "Game",
+    classificationSource: "app-cache",
+  };
+
+  const cloudSaved = await harness.api.handleMessage({ type: "ingestion:create", payload });
+  assert.equal(cloudSaved.ok, true);
+  assert.equal(cloudSaved.status, "captured");
+  assert.equal(harness.downloadCalls.length, 0);
+  assert.match(harness.fetchCalls[0].url, /\/v1\/captures$/);
+  const callsAfterCloud = harness.fetchCalls.length;
+
+  await harness.api.handleMessage({
+    type: "settings:set-preferences",
+    preferences: { saveMode: "pc" },
+  });
+  harness.queueJson({ entries: [] });
+  const appSaved = await harness.api.handleMessage({ type: "ingestion:create", payload });
+  assert.equal(appSaved.ok, true);
+  assert.match(harness.fetchCalls[callsAfterCloud].url, /\/v1\/ingestions$/);
+  assert.equal(harness.downloadCalls.length, 0);
+});
+
+test("pc save mode reports a direct error instead of falling back to cloud", async () => {
+  const harness = createHarness({
+    collectorToken: "server-secret-token",
+    collectorSettings: { enabled: true, baseUrl: "http://100.76.119.29:32146" },
+    connectionToken: "0123456789abcdef0123456789abcdef",
+    preferences: { saveMode: "pc" },
+  });
+  harness.queueError(new TypeError("Failed to fetch"));
+  harness.queueError(new TypeError("Failed to fetch"));
+  harness.queueError(new TypeError("Failed to fetch"));
+
+  const response = await harness.api.handleMessage({
+    type: "ingestion:create",
+    payload: {
+      source: "x",
+      mediaUrl: "https://pbs.twimg.com/media/PCONLY?format=jpg&name=orig",
+      sourceUrl: "https://x.com/artist/status/8888/photo/1",
+      classificationId: "game",
+      classificationName: "Game",
+      classificationSource: "app-cache",
+    },
+  });
+
+  assert.equal(response.ok, false);
+  assert.equal(harness.fetchCalls.every((call) => call.url.includes("/v1/ingestions")), true);
+  assert.equal(harness.downloadCalls.length, 0);
+});
+
+test("local tree remains intact after switching download modes back and forth", async () => {
+  const harness = createHarness({ preferences: { saveMode: "auto" } });
+  const treeResponse = await harness.api.handleMessage({ type: "local-tree:get" });
+  const originalTree = plain(treeResponse.tree);
+
+  await harness.api.handleMessage({
+    type: "settings:set-preferences",
+    preferences: { saveMode: "download" },
+  });
+  const afterDownload = await harness.api.handleMessage({ type: "local-tree:get" });
+  assert.deepEqual(plain(afterDownload.tree), originalTree);
+
+  await harness.api.handleMessage({
+    type: "settings:set-preferences",
+    preferences: { saveMode: "auto" },
+  });
+  const restored = await harness.api.handleMessage({ type: "local-tree:get" });
+  assert.deepEqual(plain(restored.tree), originalTree);
+});
+
 test("settings:get reports the last connection failure for diagnostics", async () => {
   const harness = createHarness({ connectionToken: "0123456789abcdef0123456789abcdef" });
   harness.queueError(new TypeError("Failed to fetch"));

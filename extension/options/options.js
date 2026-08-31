@@ -1,6 +1,12 @@
 (() => {
   "use strict";
 
+  const saveModeSelect = document.querySelector("#save-mode");
+  const savePolicyNote = document.querySelector("#save-policy-note");
+  const saveModeStatus = document.querySelector("#save-mode-status");
+  const diagnosticsSummary = document.querySelector("#diagnostics-summary");
+  const refreshDiagnostics = document.querySelector("#refresh-diagnostics");
+  const diagnosticsStatus = document.querySelector("#diagnostics-status");
   const tokenInput = document.querySelector("#connection-token");
   const collectorEnabled = document.querySelector("#collector-enabled");
   const collectorBaseUrl = document.querySelector("#collector-base-url");
@@ -62,10 +68,12 @@
     collectorEnabled.checked = collector.enabled === true;
     collectorBaseUrl.value = collector.baseUrl ?? "";
     collectorStatus.textContent = settings.collectorTokenConfigured
-      ? (collector.enabled ? "서버 토큰이 저장되어 있습니다." : "서버 토큰이 저장되어 있습니다. 서버 저장은 꺼져 있습니다.")
-      : "미디어 저장 서버 API 토큰을 입력하세요.";
+      ? (collector.enabled ? "Cloud 토큰이 저장되어 있습니다." : "Cloud 토큰이 저장되어 있습니다. Cloud Capture는 꺼져 있습니다.")
+      : "Cloud API 토큰을 입력하세요.";
     remoteEnabled.checked = remote.enabled === true;
     remoteBaseUrl.value = remote.baseUrl ?? "";
+    saveModeSelect.value = preferences.saveMode ?? "auto";
+    describeSavePolicy(saveModeSelect.value);
     downloadFolder.value = preferences.downloadFolder ?? "Lakomics";
     touchLongPress.value = String(preferences.touchLongPressMs ?? 450);
     suppressDownloadUi.checked = preferences.suppressDownloadUi === true;
@@ -73,6 +81,7 @@
     preferencesStatus.textContent = settings.downloadsApiAvailable
       ? (settings.downloadsUiApiAvailable ? "모바일 다운로드 UI 제어 사용 가능" : "다운로드 UI 숨김 API를 찾지 못했습니다.")
       : "확장 다운로드 API를 찾지 못했습니다.";
+    renderDiagnostics(settings);
     const translateStored = await chrome.storage.local.get(["xTranslateEnabled"]);
     xTranslateEnabled.checked = translateStored.xTranslateEnabled !== false;
     xTranslateStatus.textContent = xTranslateEnabled.checked
@@ -89,6 +98,30 @@
     }
   }
 
+
+
+  saveModeSelect.addEventListener("change", async () => {
+    const mode = saveModeSelect.value;
+    saveModeStatus.textContent = "저장 방식을 저장하는 중…";
+    const response = await chrome.runtime.sendMessage({
+      type: "settings:set-preferences",
+      preferences: { saveMode: mode },
+    });
+    if (!response.ok) {
+      saveModeStatus.textContent = errorMessage(response.code);
+      return;
+    }
+    saveModeSelect.value = response.preferences.saveMode;
+    describeSavePolicy(response.preferences.saveMode);
+    saveModeStatus.textContent = "저장 방식을 변경했습니다.";
+  });
+
+  refreshDiagnostics.addEventListener("click", async () => {
+    diagnosticsStatus.textContent = "상태를 다시 읽는 중…";
+    const settings = await chrome.runtime.sendMessage({ type: "settings:get" });
+    renderDiagnostics(settings);
+    diagnosticsStatus.textContent = "";
+  });
 
   xTranslateEnabled.addEventListener("change", async () => {
     await chrome.storage.local.set({ xTranslateEnabled: xTranslateEnabled.checked });
@@ -571,6 +604,7 @@
   function controlButton(label, enabled, action) {
     const button = document.createElement("button");
     button.type = "button";
+
     button.textContent = label;
     button.disabled = !enabled;
     button.addEventListener("click", action);
@@ -600,9 +634,104 @@
   function describeErrorCode(code) {
     if (code === "connection_key_missing") return "연결 키 없음";
     if (code === "unauthorized") return "연결 키 불일치";
-    if (code === "app_offline") return "PC 오프라인";
-    if (code === "request_failed") return "요청 실패";
     if (code === "classification_not_found") return "분류 없음";
     return code;
+  }
+
+  function describeSavePolicy(mode) {
+    if (mode === "pc") {
+      savePolicyNote.textContent = "PC Lakomics(LAN/Tailscale)로만 저장합니다. PC에 연결할 수 없으면 저장이 실패하고 안내를 표시합니다.";
+      return;
+    }
+    if (mode === "cloud") {
+      savePolicyNote.textContent = "Cloud Capture로만 저장합니다. PC가 꺼져 있어도 동작하며, 실패 시 기존처럼 브라우저 Download로 저장합니다.";
+      return;
+    }
+    if (mode === "download") {
+      savePolicyNote.textContent = "Lakomics를 거치지 않고 브라우저 Download 폴더에 바로 저장합니다.";
+      return;
+    }
+    savePolicyNote.textContent = "PC 직접 연결이 살아 있으면 PC로 저장하고, 아니면 Cloud로 보내고, 둘 다 실패하면 브라우저 Download로 저장합니다.";
+  }
+
+  function describeDiagnostics(settings) {
+    const lines = [];
+    const collector = settings.collector ?? {};
+    const remote = settings.remote ?? {};
+    const preferences = settings.preferences ?? {};
+
+    const cloudParts = [];
+    cloudParts.push(settings.collectorTokenConfigured ? "자격 증명 저장됨" : "자격 증명 없음");
+    cloudParts.push(collector.enabled && collector.baseUrl ? `엔드포인트 ${collector.baseUrl}` : "엔드포인트 미설정");
+    if (settings.lastCollectorFailure?.code) {
+      cloudParts.push(`마지막 실패 ${describeErrorCode(settings.lastCollectorFailure.code)}`);
+    } else if (settings.lastCollectorFailure) {
+      cloudParts.push("마지막 실패 정보 없음");
+    }
+    lines.push({ label: "Cloud", detail: cloudParts.join(" · "), ok: collector.enabled === true && settings.collectorTokenConfigured });
+
+    const pcParts = [];
+    pcParts.push(settings.tokenConfigured ? "연결 키 저장됨" : "연결 키 없음");
+    pcParts.push(remote.enabled && remote.baseUrl ? `Remote ${remote.baseUrl}` : "localhost 사용");
+    if (settings.lastConnectionFailure?.code) {
+      pcParts.push(`마지막 실패 ${describeErrorCode(settings.lastConnectionFailure.code)}`);
+    }
+    lines.push({ label: "PC 직접", detail: pcParts.join(" · "), ok: settings.tokenConfigured });
+
+    const classification = settings.classificationDiagnostics ?? null;
+    if (classification) {
+      const sourceLabels = {
+        app: "PC 분류 (직접)",
+        remote: "PC 분류 (Remote)",
+        "app-cache": "PC 분류 (캐시)",
+        cloud: "Cloud 분류",
+        "cloud-cache": "Cloud 분류 (캐시)",
+        local: "로컬 기본 분류 · PC/Cloud 분류를 불러오지 못함",
+      };
+      const label = sourceLabels[classification.source] ?? classification.source;
+      lines.push({
+        label: "분류",
+        detail: `${label} · ${classification.count}개${classification.fallbackReason ? ` · 사유: ${describeErrorCode(classification.fallbackReason)}` : ""}${classification.source === "local" ? " · 폴백" : ""}`,
+        ok: classification.source !== "local",
+      });
+    }
+
+    const saved = settings.savedMediaDiagnostics ?? null;
+    if (saved) {
+      const savedLabels = {
+        app: "PC 로컬 인덱스",
+        remote: "PC 인덱스 (Remote)",
+        "app-cache": "PC 인덱스 (캐시)",
+        cloud: "Cloud 스냅샷",
+        "cloud-cache": "Cloud 스냅샷 (캐시)",
+        none: "정보 없음",
+      };
+      lines.push({
+        label: "저장됨 표시",
+        detail: `${savedLabels[saved.source] ?? saved.source}${Number.isFinite(saved.keyCount) ? ` · ${saved.keyCount}키` : ""}`,
+        ok: saved.source !== "none",
+      });
+    }
+
+    lines.push({ label: "현재 저장 방식", detail: describeSavePolicyLabel(preferences.saveMode ?? "auto"), ok: true });
+    return lines;
+  }
+
+  function describeSavePolicyLabel(mode) {
+    if (mode === "pc") return "PC 직접 연결만";
+    if (mode === "cloud") return "Cloud만";
+    if (mode === "download") return "브라우저 Download만";
+    return "자동";
+  }
+
+  function renderDiagnostics(settings) {
+    const lines = describeDiagnostics(settings);
+    diagnosticsSummary.replaceChildren(...lines.map((line) => {
+      const item = document.createElement("p");
+      item.className = "diagnostics-line";
+      item.textContent = `${line.label}: ${line.detail}`;
+      if (!line.ok) item.classList.add("diagnostics-degraded");
+      return item;
+    }));
   }
 })();
