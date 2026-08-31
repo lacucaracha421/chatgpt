@@ -2,7 +2,7 @@
 mod capture_tests;
 pub(crate) mod captures;
 mod client;
-mod models;
+pub(crate) mod models;
 pub(crate) mod queue;
 mod sync;
 

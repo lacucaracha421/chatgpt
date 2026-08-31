@@ -631,6 +631,40 @@ it("confirms before clearing the remote manga cache", async () => {
   expect(await screen.findByText("온라인 이미지 캐시를 지웠습니다")).toBeVisible();
 });
 
+
+it("configures Cloud Capture and forwards manual sync results", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  const cloud = { enabled: true, apiBaseUrl: "http://100.76.119.29:32146", tokenConfigured: true };
+  const syncResult = { attempted: 1, acknowledged: 1, failed: 0, reviewPending: 0, added: 1, videoAdded: 1, classificationChanged: 0 };
+  vi.mocked(gateway.getCloudCaptureSettings).mockResolvedValue(cloud);
+  vi.mocked(gateway.setCloudCaptureSettings).mockResolvedValue({ ...cloud, apiBaseUrl: "https://cloud.example.test" });
+  vi.mocked(gateway.setCloudApiToken).mockResolvedValue({ configured: true });
+  vi.mocked(gateway.testCloudCaptureConnection).mockResolvedValue({ pendingCount: 3 });
+  vi.mocked(gateway.runDueCloudCaptureSync).mockResolvedValue(syncResult);
+  const onCloudCaptureSynced = vi.fn();
+
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="external_services" onCloudCaptureSynced={onCloudCaptureSynced} />
+    </LibraryProvider>,
+  );
+
+  const url = await screen.findByRole("textbox", { name: "Cloud API 주소" });
+  fireEvent.change(url, { target: { value: "https://cloud.example.test" } });
+  await user.click(screen.getByRole("button", { name: "주소 저장" }));
+  expect(gateway.setCloudCaptureSettings).toHaveBeenCalledWith(true, "https://cloud.example.test");
+
+  await user.type(screen.getByLabelText("Cloud API 토큰"), "new-secret");
+  await user.click(screen.getByRole("button", { name: "토큰 저장" }));
+  expect(gateway.setCloudApiToken).toHaveBeenCalledWith("new-secret");
+
+  await user.click(screen.getByRole("button", { name: "연결 확인" }));
+  expect(await screen.findByText("Cloud 연결 정상 · 대기 3건")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "지금 동기화" }));
+  expect(onCloudCaptureSynced).toHaveBeenCalledWith(syncResult);
+});
+
 function createGateway(): LibraryGateway {
   return {
     getIgdbCredentialStatus: vi.fn().mockResolvedValue({ configured: false }),
@@ -651,7 +685,7 @@ function createGateway(): LibraryGateway {
     refreshTmdbMovie: vi.fn(),
     getTmdbConnection: vi.fn(),
     replaceTmdbMovieArtwork: vi.fn(),
-    openLibrary: vi.fn(), importVckCatalog: vi.fn(), getOnlineCatalogStatus: vi.fn().mockResolvedValue({ installed: false, workCount: 0, updateEnabled: true, updateIntervalSeconds: 3600, lastAttemptAt: null, lastSuccessAt: null, lastAdded: 0, lastError: null }), searchOnlineCatalog: vi.fn(), suggestOnlineCatalog: vi.fn(), updateOnlineCatalog: vi.fn(), setOnlineCatalogUpdateSettings: vi.fn(), runDueOnlineCatalogUpdate: vi.fn(), runDueCloudCaptureSync: vi.fn().mockResolvedValue(null), getOnlineCatalogWorkDetail: vi.fn(), setOnlineCatalogBookmark: vi.fn(), resolveOnlineCatalogWork: vi.fn(), getRemoteReadingProgress: vi.fn(), saveRemoteReadingProgress: vi.fn(), clearRemoteMangaCache: vi.fn(), getExtensionConnection: vi.fn(), listClassifications: vi.fn(),
+    openLibrary: vi.fn(), importVckCatalog: vi.fn(), getOnlineCatalogStatus: vi.fn().mockResolvedValue({ installed: false, workCount: 0, updateEnabled: true, updateIntervalSeconds: 3600, lastAttemptAt: null, lastSuccessAt: null, lastAdded: 0, lastError: null }), searchOnlineCatalog: vi.fn(), suggestOnlineCatalog: vi.fn(), updateOnlineCatalog: vi.fn(), setOnlineCatalogUpdateSettings: vi.fn(), runDueOnlineCatalogUpdate: vi.fn(), getCloudCaptureSettings: vi.fn().mockResolvedValue({ enabled: false, apiBaseUrl: null, tokenConfigured: false }), setCloudCaptureSettings: vi.fn(), setCloudApiToken: vi.fn(), deleteCloudApiToken: vi.fn(), testCloudCaptureConnection: vi.fn().mockResolvedValue({ pendingCount: 0 }), runDueCloudCaptureSync: vi.fn().mockResolvedValue({ attempted: 0, acknowledged: 0, failed: 0, reviewPending: 0, added: 0, videoAdded: 0, classificationChanged: 0 }), getOnlineCatalogWorkDetail: vi.fn(), setOnlineCatalogBookmark: vi.fn(), resolveOnlineCatalogWork: vi.fn(), getRemoteReadingProgress: vi.fn(), saveRemoteReadingProgress: vi.fn(), clearRemoteMangaCache: vi.fn(), getExtensionConnection: vi.fn(), listClassifications: vi.fn(),
     listAlbums: vi.fn().mockResolvedValue([]), createAlbum: vi.fn(), renameAlbum: vi.fn(), moveAlbum: vi.fn(), updateAlbumAppearance: vi.fn(), deleteAlbum: vi.fn(),
     createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(), updateClassificationAppearance: vi.fn(),
     deleteClassification: vi.fn(), listAssets: vi.fn(), listAssetDateBuckets: vi.fn().mockResolvedValue([]), indexMissingSimilarityHashes: vi.fn(),

@@ -6,7 +6,7 @@ import type { LibraryGateway } from "../library/types";
 // 캡처 수집 실패가 로컬 동작을 막지 않는다.
 const CAPTURE_DUE_CHECK_INTERVAL_MS = 5 * 60_000;
 
-export function useCloudCaptureSync(gateway: LibraryGateway, libraryRoot: string) {
+export function useCloudCaptureSync(gateway: LibraryGateway, libraryRoot: string, onResult: (result: Awaited<ReturnType<LibraryGateway["runDueCloudCaptureSync"]>>) => void) {
   useEffect(() => {
     let active = true;
     let running = false;
@@ -14,7 +14,8 @@ export function useCloudCaptureSync(gateway: LibraryGateway, libraryRoot: string
       if (!active || running) return;
       running = true;
       try {
-        await gateway.runDueCloudCaptureSync();
+        const result = await gateway.runDueCloudCaptureSync();
+        if (active) onResult(result);
       } catch {
         // 네트워크·설정 오류는 다음 폴링에서 다시 시도한다. 로컬 동작에는 영향이 없다.
       } finally {
@@ -27,5 +28,5 @@ export function useCloudCaptureSync(gateway: LibraryGateway, libraryRoot: string
       active = false;
       window.clearInterval(timer);
     };
-  }, [gateway, libraryRoot]);
+  }, [gateway, libraryRoot, onResult]);
 }

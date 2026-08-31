@@ -375,6 +375,7 @@ class CaptureApiTests(unittest.TestCase):
                 "content_type": "video/mp4",
                 "size_bytes": 123,
                 "source_url": "https://x.com/artist/status/456/video/1",
+                "classification_id": "game",
                 "creator_handle": "artist",
                 "source_published_at": "2026-08-01T10:20:30Z",
                 "created_at": created["created_at"],

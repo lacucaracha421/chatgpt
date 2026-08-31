@@ -26,7 +26,7 @@ import {
   selectLibraryFolder,
   type FolderPicker,
 } from "../library/LibrarySetup";
-import type { AlbumEntry, AssetSort, AssetSummary, AssetView, ClassificationEntry, CollectionSummary, IngestOutcome, LibraryGateway } from "../library/types";
+import type { AlbumEntry, AssetSort, AssetSummary, AssetView, ClassificationEntry, CloudCaptureSyncResult, CollectionSummary, IngestOutcome, LibraryGateway } from "../library/types";
 import {
   loadUiPreferences,
   saveUiPreferences,
@@ -98,7 +98,6 @@ function LibraryScreen({
 function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscribeExtensionIngest }: { libraryRoot: string; subscribeDrops: DropSubscriber; startAssetDrag: StartAssetDrag; subscribeExtensionIngest: ExtensionIngestListener }) {
   const { gateway } = useLibrary();
   useOnlineCatalogUpdate(gateway, libraryRoot);
-  useCloudCaptureSync(gateway, libraryRoot);
   const [entries, setEntries] = useState<ClassificationEntry[]>([]);
   const [albums, setAlbums] = useState<AlbumEntry[]>([]);
   const [collections, setCollections] = useState<CollectionSummary[]>([]);
@@ -183,6 +182,15 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     }
     if (result.status === "review_pending") void refreshReviewCount();
   }, [refreshReviewCount, refreshMembershipCounts]);
+  const handleCloudCaptureSync = useCallback((result: CloudCaptureSyncResult) => {
+    if (result.added > 0 || result.classificationChanged > 0) {
+      setAssetRefresh((current) => current + 1);
+      refreshMembershipCounts();
+    }
+    if (result.videoAdded > 0) setVideoPreparationTrigger((current) => current + 1);
+    if (result.reviewPending > 0) void refreshReviewCount();
+  }, [refreshMembershipCounts, refreshReviewCount]);
+  useCloudCaptureSync(gateway, libraryRoot, handleCloudCaptureSync);
   const handleIngestedRef = useRef(handleIngested);
   useLayoutEffect(() => { handleIngestedRef.current = handleIngested; }, [handleIngested]);
   useEffect(() => {
@@ -520,6 +528,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     onImportFolder={beginMetadataImport}
                     metadataImportRunning={metadataImportWorks.some((work) => work.status === "running")}
                     onCollectionsChanged={refreshCollections}
+                    onCloudCaptureSynced={handleCloudCaptureSync}
                     initialSection={view.section}
                     privacyMode={preferences.privacyMode}
                     onPrivacyModeChange={(privacyMode) => updatePreferences({ privacyMode })}

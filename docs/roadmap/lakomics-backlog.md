@@ -6,14 +6,15 @@ Living backlog for Lakomics bugs, UX work, cloud follow-ups, extension work, and
 
 - `IN PROGRESS`: currently being implemented
 - `TODO`: planned work
-- `VERIFY`: confirm existing behavior before changing
+- `VERIFY`: implementation or behavior exists and still needs real-world verification
 - `HOLD`: long-term or intentionally deferred
 - `KEEP`: existing behavior is currently satisfactory
+- `DONE`: implemented and verified in code; production rollout may still be tracked separately
 
 ## P0 — immediate
 
 ### CLOUD-001 — Cloud Capture batch drain
-Status: `IN PROGRESS`
+Status: `DONE`
 
 - Drain multiple pending captures per poll instead of one successful capture per invocation.
 - Sequential processing only.
@@ -22,7 +23,11 @@ Status: `IN PROGRESS`
 - Return a batch summary instead of the old `Option<String>` result.
 
 ### CLOUD-004 — X videos fall back to local download instead of VPS Capture
-Status: `TODO`
+Status: `DONE`
+
+Resolution:
+- The extension was short-circuiting to browser download whenever the active classification source was the local fallback tree.
+- Collector-enabled supported media now tries VPS Capture before that local-download fallback, and fallback diagnostics preserve the failure code.
 
 Observed behavior:
 - Saving X video on PC succeeds only as a browser/local-folder download.
@@ -45,14 +50,18 @@ Investigation order:
 Do not solve this by disabling fallback or extending timeouts blindly. Do not conflate this with CLOUD-003 long-video async handling unless evidence shows timeout duration is the actual cause.
 
 ### CLOUD-002 — Finish Cloud inbound app integration
-Status: `TODO`
+Status: `VERIFY`
 
-- Provide a real app path for `cloud_sync_enabled`, API base URL, and Cloud API token configuration/status.
-- Pass `classification_id` end-to-end from Capture API pending records into `IngestMediaRequest`.
-- Refresh assets and sidebar/classification counts immediately after a successful inbound import.
-- Trigger video preparation when an inbound video is added.
-- Verify the current Japanese VPS Capture API works end-to-end from X extension to the PC library.
-- Keep outbound `cloud_sync_queue` separate.
+Implemented on the current integration branch:
+- Settings exposes Cloud enablement, API base URL, Credential Manager-backed API token, connection test, and manual sync.
+- `classification_id` is carried from Capture pending records into `IngestMediaRequest`; nonexistent local IDs safely fall back to unclassified.
+- Inbound batch results distinguish new assets, video additions, classification-changing duplicates, and review-pending work so the frontend refreshes only what changed.
+- New inbound videos trigger the normal video preparation path.
+- Outbound `cloud_sync_queue` remains separate and unchanged.
+
+Remaining verification:
+- Deploy the pending-payload server change to the Japanese VPS.
+- Verify real X image and video flows end-to-end from extension -> VPS/R2 -> PC library with classification preservation and immediate UI refresh.
 
 ### BUG-001 — Collection view shows an error toast on entry
 Status: `TODO`
@@ -476,17 +485,15 @@ For each new bug, record:
 
 ## Current intended implementation order
 
-1. CLOUD-001 batch drain
-2. CLOUD-004 diagnose/fix X video → VPS Capture fallback
-3. CLOUD-002 inbound app integration
-4. BUG-001 / BUG-002 DB and migration investigation
-5. VERIFY-001 real X → VPS → PC verification
-6. P1 UX pass: flashing, video controls, BUG-003 video drag selection artifact, navigation, loading/errors, selection clearing, cover crop, sidebar cleanup, scrollbar
-7. CATALOG-001 / CATALOG-002 Heliotrope-based catalog work
-8. CLOUD-UI-001 cloud status/problem surface
-9. EXT-001 / EXT-002 extension settings and Cloud-first save behavior
-10. EXT-003 / EXT-004 same-post grouping and adaptive/hidden donut tags
-11. PERF-001 / PERF-002 cache optimization and view-state preservation
-12. CLOUD-003 long-video async handling if real-world use requires it
-13. NOTE-001 / STATS-001 / IDEA-001 / UI-008
-14. Long-term collection presentation work
+1. CLOUD-002 production rollout / end-to-end verification
+2. BUG-001 / BUG-002 DB and migration investigation
+3. VERIFY-001 real X → VPS → PC verification
+4. P1 UX pass: flashing, video controls, BUG-003 video drag selection artifact, navigation, loading/errors, selection clearing, cover crop, sidebar cleanup, scrollbar
+5. CATALOG-001 / CATALOG-002 Heliotrope-based catalog work
+6. CLOUD-UI-001 cloud status/problem surface
+7. EXT-001 / EXT-002 extension settings and Cloud-first save behavior
+8. EXT-003 / EXT-004 same-post grouping and adaptive/hidden donut tags
+9. PERF-001 / PERF-002 cache optimization and view-state preservation
+10. CLOUD-003 long-video async handling if real-world use requires it
+11. NOTE-001 / STATS-001 / IDEA-001 / UI-008
+12. Long-term collection presentation work

@@ -72,6 +72,7 @@ pub(crate) struct RemoteCapture {
     pub content_type: Option<String>,
     pub size_bytes: Option<u64>,
     pub source_url: Option<String>,
+    pub classification_id: Option<String>,
     pub creator_handle: Option<String>,
     pub source_published_at: Option<String>,
     pub created_at: String,
@@ -110,6 +111,10 @@ impl TryFrom<RemoteCapturePayload> for RemoteCapture {
             content_type: payload.content_type,
             size_bytes: payload.size_bytes,
             source_url: payload.source_url,
+            classification_id: payload.classification_id.and_then(|value| {
+                let trimmed = value.trim();
+                (!trimmed.is_empty() && trimmed.len() <= 200).then(|| trimmed.to_owned())
+            }),
             creator_handle: payload.creator_handle,
             source_published_at: payload.source_published_at,
             created_at: payload.created_at,
@@ -136,6 +141,7 @@ pub(crate) struct RemoteCapturePayload {
     pub content_type: Option<String>,
     pub size_bytes: Option<u64>,
     pub source_url: Option<String>,
+    pub classification_id: Option<String>,
     pub creator_handle: Option<String>,
     pub source_published_at: Option<String>,
     #[serde(default)]

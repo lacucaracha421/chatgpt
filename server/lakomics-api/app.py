@@ -428,6 +428,7 @@ def pending_capture_payload(row: sqlite3.Row) -> dict:
         "content_type": row["content_type"],
         "size_bytes": row["size_bytes"],
         "source_url": row["source_url"],
+        "classification_id": row["classification_id"],
         "creator_handle": creator_handle,
         "source_published_at": row["published_at"],
         "created_at": row["created_at"],

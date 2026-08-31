@@ -30,6 +30,7 @@ fn pending_capture_json(id: &str) -> Value {
         "content_type": "image/png",
         "size_bytes": null,
         "source_url": "https://x.com/example/status/123/photo/1",
+        "classification_id": "game",
         "creator_handle": "example",
         "source_published_at": "2026-05-01T10:00:00Z",
         "created_at": "2026-08-30T00:00:00Z",
@@ -176,6 +177,9 @@ fn pending_capture_downloads_ingests_and_acknowledges() {
             acknowledged: 1,
             failed: 0,
             review_pending: 0,
+            added: 1,
+            video_added: 0,
+            classification_changed: 0,
         }
     );
 
@@ -204,6 +208,52 @@ fn pending_capture_downloads_ingests_and_acknowledges() {
         )
         .unwrap();
     assert_eq!(import_status, "acknowledged");
+    handle.join().unwrap();
+}
+
+#[test]
+fn pending_capture_preserves_existing_classification_id() {
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    let classification = library
+        .create_classification(crate::library::models::CreateClassification {
+            kind: crate::library::models::ClassificationKind::Root,
+            name: "Cloud Game".into(),
+            parent_id: None,
+        })
+        .unwrap();
+    let mut capture = pending_capture_json("capture-classified");
+    capture["classification_id"] = json!(classification.id);
+    let media_by_object_key = vec![(
+        "captures/capture-classified/original".to_string(),
+        distinct_png_bytes(44),
+    )];
+    let (base_url, handle) = serve_multi_capture_list(vec![capture], &[], &media_by_object_key);
+
+    let result = library
+        .sync_next_cloud_capture_with(&CloudClient::new(&base_url).unwrap(), "test-token")
+        .unwrap();
+    assert_eq!(result.added, 1);
+    let asset = library
+        .list_assets(crate::library::models::AssetQuery {
+            limit: 1,
+            ..Default::default()
+        })
+        .unwrap()
+        .items
+        .into_iter()
+        .next()
+        .unwrap();
+    let linked: String = library
+        .connection()
+        .unwrap()
+        .query_row(
+            "SELECT classification_id FROM asset_classifications WHERE asset_id = ?1",
+            [asset.id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(linked, classification.id);
     handle.join().unwrap();
 }
 
@@ -725,6 +775,9 @@ fn one_invocation_drains_multiple_valid_captures() {
             acknowledged: 3,
             failed: 0,
             review_pending: 0,
+            added: 3,
+            video_added: 0,
+            classification_changed: 0,
         }
     );
     let acknowledged: i64 = library
@@ -776,6 +829,9 @@ fn one_invocation_processes_at_most_25_attempts() {
             acknowledged: 25,
             failed: 0,
             review_pending: 0,
+            added: 25,
+            video_added: 0,
+            classification_changed: 0,
         }
     );
     let acknowledged: i64 = library
@@ -825,6 +881,9 @@ fn middle_failure_leaves_later_captures_imported() {
             acknowledged: 2,
             failed: 1,
             review_pending: 0,
+            added: 2,
+            video_added: 0,
+            classification_changed: 0,
         }
     );
     let broken_status: Option<String> = library

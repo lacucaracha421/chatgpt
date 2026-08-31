@@ -6,6 +6,7 @@ use tauri::{AppHandle, State};
 
 use crate::{
     catalog_transport::CatalogTransport,
+    cloud::models::CloudSyncConfig,
     library::{
         book_migration::{BookImportPlan, BookMigrationReport},
         catalog_update::{self, CatalogUpdateState},
@@ -66,6 +67,26 @@ pub struct CommandError {
 #[serde(rename_all = "camelCase")]
 pub struct AladinCredentialStatus {
     pub configured: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudCaptureSettings {
+    pub enabled: bool,
+    pub api_base_url: Option<String>,
+    pub token_configured: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudCredentialStatus {
+    pub configured: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudCaptureConnectionStatus {
+    pub pending_count: u32,
 }
 
 impl From<LibraryError> for CommandError {
@@ -1485,6 +1506,62 @@ pub async fn set_online_catalog_update_settings(
     .await
     .map_err(|_| background_task_error())?
     .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn get_cloud_capture_settings(
+    state: State<'_, AppState>,
+) -> Result<CloudCaptureSettings, CommandError> {
+    let library = current_required(state)?;
+    let config = library.cloud_sync_config().map_err(CommandError::from)?;
+    let token_configured = credential::cloud_api_token_status().map_err(CommandError::from)?;
+    Ok(CloudCaptureSettings {
+        enabled: config.enabled,
+        api_base_url: config.api_base_url,
+        token_configured,
+    })
+}
+
+#[tauri::command]
+pub fn set_cloud_capture_settings(
+    enabled: bool,
+    api_base_url: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<CloudCaptureSettings, CommandError> {
+    let library = current_required(state)?;
+    let config = library
+        .set_cloud_sync_config(CloudSyncConfig { enabled, api_base_url })
+        .map_err(CommandError::from)?;
+    let token_configured = credential::cloud_api_token_status().map_err(CommandError::from)?;
+    Ok(CloudCaptureSettings {
+        enabled: config.enabled,
+        api_base_url: config.api_base_url,
+        token_configured,
+    })
+}
+
+#[tauri::command]
+pub fn set_cloud_api_token(token: String) -> Result<CloudCredentialStatus, CommandError> {
+    credential::set_cloud_api_token_os(&token).map_err(CommandError::from)?;
+    Ok(CloudCredentialStatus { configured: true })
+}
+
+#[tauri::command]
+pub fn delete_cloud_api_token() -> Result<CloudCredentialStatus, CommandError> {
+    credential::delete_cloud_api_token_os().map_err(CommandError::from)?;
+    Ok(CloudCredentialStatus { configured: false })
+}
+
+#[tauri::command]
+pub async fn test_cloud_capture_connection(
+    state: State<'_, AppState>,
+) -> Result<CloudCaptureConnectionStatus, CommandError> {
+    let library = current_required(state)?;
+    let pending_count = tauri::async_runtime::spawn_blocking(move || library.test_cloud_capture_connection())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)?;
+    Ok(CloudCaptureConnectionStatus { pending_count })
 }
 
 #[tauri::command]

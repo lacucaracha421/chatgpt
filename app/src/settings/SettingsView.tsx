@@ -3,7 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
-import type { CatalogStatus, ExtensionConnection, LegacyPackageMigrationPlan, LegacyPackageMigrationReport, MetadataBackup } from "../library/types";
+import type { CatalogStatus, CloudCaptureSettings, CloudCaptureSyncResult, ExtensionConnection, LegacyPackageMigrationPlan, LegacyPackageMigrationReport, MetadataBackup } from "../library/types";
 import { formatBytes } from "../assets/assetMetadata";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { Button } from "../shared/ui/Button";
@@ -20,6 +20,7 @@ type SettingsViewProps = {
   onImportFolder?: (folder: string) => Promise<boolean>;
   metadataImportRunning?: boolean;
   onCollectionsChanged?: () => void;
+  onCloudCaptureSynced?: (result: CloudCaptureSyncResult) => void;
   initialSection?: SettingsSection;
   privacyMode?: boolean;
   onPrivacyModeChange?: (privacyMode: boolean) => void;
@@ -29,7 +30,7 @@ type SettingsSection = "general" | "external_services" | "data" | "about";
 
 const METADATA_IMPORT_FOLDER_KEY = "lakomics.metadataImportFolder";
 
-export function SettingsView({ restoring, onRestore, onExit, onImportFolder, metadataImportRunning = false, onCollectionsChanged, initialSection, privacyMode = false, onPrivacyModeChange = () => undefined }: SettingsViewProps) {
+export function SettingsView({ restoring, onRestore, onExit, onImportFolder, metadataImportRunning = false, onCollectionsChanged, onCloudCaptureSynced = () => undefined, initialSection, privacyMode = false, onPrivacyModeChange = () => undefined }: SettingsViewProps) {
   const { error: libraryError, gateway, library, openLibrary } = useLibrary();
   const [section, setSection] = useState<SettingsSection>(() => initialSection ?? "general");
   const [lastImportFolder, setLastImportFolder] = useState(() => localStorage.getItem(METADATA_IMPORT_FOLDER_KEY));
@@ -92,12 +93,20 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [catalogCacheConfirming, setCatalogCacheConfirming] = useState(false);
   const [catalogCacheBusy, setCatalogCacheBusy] = useState(false);
   const [catalogCacheMessage, setCatalogCacheMessage] = useState<string | null>(null);
+  const [cloudSettings, setCloudSettings] = useState<CloudCaptureSettings | null>(null);
+  const [cloudApiBaseUrl, setCloudApiBaseUrl] = useState("");
+  const [cloudToken, setCloudToken] = useState("");
+  const [cloudBusy, setCloudBusy] = useState(false);
+  const [cloudError, setCloudError] = useState<string | null>(null);
+  const [cloudMessage, setCloudMessage] = useState<string | null>(null);
   useAutoDismiss(aladinError, setAladinError);
   useAutoDismiss(igdbError, setIgdbError);
   useAutoDismiss(tmdbError, setTmdbError);
   useAutoDismiss(catalogError, setCatalogError);
   useAutoDismiss(catalogCacheMessage, setCatalogCacheMessage);
-  const pending = restoring || submitting || aladinBusy || igdbBusy || tmdbBusy;
+  useAutoDismiss(cloudError, setCloudError);
+  useAutoDismiss(cloudMessage, setCloudMessage);
+  const pending = restoring || submitting || aladinBusy || igdbBusy || tmdbBusy || cloudBusy;
 
   useEffect(() => {
     let active = true;
@@ -128,6 +137,8 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     setIgdbError(null);
     setTmdbConfigured(null);
     setTmdbError(null);
+    setCloudSettings(null);
+    setCloudError(null);
     void gateway.getAladinCredentialStatus().then((status) => {
       if (active) setAladinConfigured(status.configured);
     }).catch((loadError: unknown) => {
@@ -147,6 +158,13 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
       if (active) setCatalogStatus(status);
     }).catch((loadError: unknown) => {
       if (active) setCatalogError(commandErrorMessage(loadError, "온라인 카탈로그 설정을 확인하지 못했습니다."));
+    });
+    void gateway.getCloudCaptureSettings().then((status) => {
+      if (!active) return;
+      setCloudSettings(status);
+      setCloudApiBaseUrl(status.apiBaseUrl ?? "");
+    }).catch((loadError: unknown) => {
+      if (active) setCloudError(commandErrorMessage(loadError, "Cloud Capture 설정을 확인하지 못했습니다."));
     });
     return () => { active = false; };
   }, [gateway, section]);
@@ -415,6 +433,89 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     }
   }
 
+  async function saveCloudSettings(enabled = cloudSettings?.enabled ?? false) {
+    if (!cloudSettings || cloudBusy) return;
+    const apiBaseUrl = cloudApiBaseUrl.trim() || null;
+    setCloudBusy(true);
+    setCloudError(null);
+    setCloudMessage(null);
+    try {
+      const next = await gateway.setCloudCaptureSettings(enabled, apiBaseUrl);
+      setCloudSettings(next);
+      setCloudApiBaseUrl(next.apiBaseUrl ?? "");
+      setCloudMessage("Cloud Capture 설정을 저장했습니다");
+    } catch (saveError) {
+      setCloudError(commandErrorMessage(saveError, "Cloud Capture 설정을 저장하지 못했습니다."));
+    } finally {
+      setCloudBusy(false);
+    }
+  }
+
+  async function saveCloudToken() {
+    if (!cloudToken.trim() || cloudBusy) return;
+    setCloudBusy(true);
+    setCloudError(null);
+    setCloudMessage(null);
+    try {
+      const status = await gateway.setCloudApiToken(cloudToken);
+      setCloudSettings((current) => current ? { ...current, tokenConfigured: status.configured } : current);
+      setCloudToken("");
+      setCloudMessage("Cloud API 토큰을 저장했습니다");
+    } catch (saveError) {
+      setCloudError(commandErrorMessage(saveError, "Cloud API 토큰을 저장하지 못했습니다."));
+    } finally {
+      setCloudBusy(false);
+    }
+  }
+
+  async function deleteCloudToken() {
+    if (cloudBusy) return;
+    setCloudBusy(true);
+    setCloudError(null);
+    setCloudMessage(null);
+    try {
+      const status = await gateway.deleteCloudApiToken();
+      setCloudSettings((current) => current ? { ...current, tokenConfigured: status.configured } : current);
+      setCloudToken("");
+      setCloudMessage("Cloud API 토큰을 삭제했습니다");
+    } catch (deleteError) {
+      setCloudError(commandErrorMessage(deleteError, "Cloud API 토큰을 삭제하지 못했습니다."));
+    } finally {
+      setCloudBusy(false);
+    }
+  }
+
+  async function testCloudConnection() {
+    if (cloudBusy) return;
+    setCloudBusy(true);
+    setCloudError(null);
+    setCloudMessage(null);
+    try {
+      const status = await gateway.testCloudCaptureConnection();
+      setCloudMessage(`Cloud 연결 정상 · 대기 ${status.pendingCount.toLocaleString()}건`);
+    } catch (connectionError) {
+      setCloudError(commandErrorMessage(connectionError, "Cloud Capture 연결에 실패했습니다."));
+    } finally {
+      setCloudBusy(false);
+    }
+  }
+
+  async function syncCloudNow() {
+    if (cloudBusy) return;
+    setCloudBusy(true);
+    setCloudError(null);
+    setCloudMessage(null);
+    try {
+      const result = await gateway.runDueCloudCaptureSync();
+      onCloudCaptureSynced(result);
+      setCloudMessage(`Cloud 동기화 완료 · 추가 ${result.added} · 검토 ${result.reviewPending} · 실패 ${result.failed}`);
+    } catch (syncError) {
+      setCloudError(commandErrorMessage(syncError, "Cloud Capture 동기화에 실패했습니다."));
+    } finally {
+      setCloudBusy(false);
+    }
+  }
+
   async function saveCatalogSettings(enabled: boolean, intervalSeconds: number) {
     if (!catalogStatus || catalogBusy) return;
     setCatalogBusy(true);
@@ -577,6 +678,8 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
         {igdbError && <Toast onDismiss={() => setIgdbError(null)}>{igdbError}</Toast>}
         {tmdbError && <Toast onDismiss={() => setTmdbError(null)}>{tmdbError}</Toast>}
         {catalogError && <Toast onDismiss={() => setCatalogError(null)}>{catalogError}</Toast>}
+        {cloudError && <Toast onDismiss={() => setCloudError(null)}>{cloudError}</Toast>}
+        {cloudMessage && <Toast onDismiss={() => setCloudMessage(null)}>{cloudMessage}</Toast>}
         <h3 className="settings-view__group-title">연결 상태</h3>
         <dl className="settings-view__property">
           <dt>알라딘 OpenAPI</dt>
@@ -669,6 +772,37 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           </div>
         )}
         <p className="settings-view__row-note">TMDB API 키는 <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noreferrer">TMDB API 설정 안내</a>에서 발급합니다.</p>
+        <h3 className="settings-view__group-title">Cloud Capture</h3>
+        {!cloudSettings ? (
+          <Skeleton className="settings-view__skeleton" label="Cloud Capture 설정을 불러오는 중" />
+        ) : (
+          <>
+            <dl className="settings-view__property">
+              <dt>Cloud 수신</dt>
+              <dd><Toggle checked={cloudSettings.enabled} disabled={cloudBusy || (!cloudSettings.enabled && !cloudApiBaseUrl.trim())} onChange={(event) => void saveCloudSettings(event.target.checked)}>자동 수신</Toggle></dd>
+              <dd className="settings-view__row-note">앱 시작 직후와 약 5분 간격으로 VPS Capture 수신함을 확인합니다.</dd>
+            </dl>
+            <dl className="settings-view__property">
+              <dt>API 주소</dt>
+              <dd className="settings-view__token-row">
+                <input className="settings-view__token" aria-label="Cloud API 주소" type="url" autoComplete="off" placeholder="http://100.x.x.x:32146" value={cloudApiBaseUrl} onChange={(event) => setCloudApiBaseUrl(event.target.value)} />
+                <Button size="sm" disabled={cloudBusy || (cloudSettings.enabled && !cloudApiBaseUrl.trim())} onClick={() => void saveCloudSettings()}>주소 저장</Button>
+              </dd>
+            </dl>
+            <dl className="settings-view__property">
+              <dt>API 토큰</dt>
+              <dd className="settings-view__token-row">
+                <input className="settings-view__token" aria-label="Cloud API 토큰" type="password" autoComplete="off" placeholder={cloudSettings.tokenConfigured ? "설정됨" : "설정되지 않음"} value={cloudToken} onChange={(event) => setCloudToken(event.target.value)} />
+                <Button size="sm" disabled={cloudBusy || !cloudToken.trim()} onClick={() => void saveCloudToken()}>토큰 저장</Button>
+                {cloudSettings.tokenConfigured && <Button size="sm" variant="danger" disabled={cloudBusy} onClick={() => void deleteCloudToken()}>토큰 삭제</Button>}
+              </dd>
+            </dl>
+            <div className="settings-view__actions">
+              <Button size="sm" disabled={cloudBusy || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured} onClick={() => void testCloudConnection()}>연결 확인</Button>
+              <Button size="sm" variant="primary" disabled={cloudBusy || !cloudSettings.enabled || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured} onClick={() => void syncCloudNow()}>지금 동기화</Button>
+            </div>
+          </>
+        )}
         <h3 className="settings-view__group-title">온라인 카탈로그</h3>
         {catalogStatus && <dl className="settings-view__property">
           <dt>카탈로그 상태</dt>

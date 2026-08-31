@@ -28,6 +28,12 @@ pub(crate) struct CloudCaptureSyncResult {
     pub failed: u32,
     /// 유사 이미지 검토로 acknowledge하지 않고 pending에 남긴 수.
     pub review_pending: u32,
+    /// Newly added Assets in this poll.
+    pub added: u32,
+    /// Newly added video Assets; used to trigger normal video preparation.
+    pub video_added: u32,
+    /// ExactDuplicate outcomes whose classification membership actually changed.
+    pub classification_changed: u32,
 }
 
 /// 캡처 다운로드 상한. 이미지는 수집 파이프라인의 상한을 따르고,
@@ -37,7 +43,8 @@ const MAX_CAPTURE_VIDEO_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 /// 한 건의 캡처를 완전히 소비한 결과. Imported는 로컬 수집 확정 + 원격
 /// acknowledge까지 끝난 경우다.
 enum ConsumedCapture {
-    Imported,
+    Added { video: bool },
+    ExactDuplicate { classification_changed: bool },
     ReviewPending,
 }
 
@@ -60,6 +67,14 @@ impl Library {
         let token = crate::library::credential::read_cloud_api_token_os()?;
         let client = CloudClient::new(&base_url)?;
         self.sync_next_cloud_capture_with(&client, &token)
+    }
+
+    pub(crate) fn test_cloud_capture_connection(&self) -> Result<u32, LibraryError> {
+        let config = self.cloud_sync_config()?;
+        let base_url = config.api_base_url.ok_or(LibraryError::InvalidCloudSyncConfig)?;
+        let token = crate::library::credential::read_cloud_api_token_os()?;
+        let client = CloudClient::new(&base_url)?;
+        Ok(client.list_pending_captures(&token)?.len() as u32)
     }
 
     pub(super) fn sync_next_cloud_capture_with(
@@ -94,7 +109,19 @@ impl Library {
             }
             match self.consume_cloud_capture(client, token, &capture) {
                 Ok(outcome) => match outcome {
-                    ConsumedCapture::Imported => result.acknowledged += 1,
+                    ConsumedCapture::Added { video } => {
+                        result.acknowledged += 1;
+                        result.added += 1;
+                        if video {
+                            result.video_added += 1;
+                        }
+                    }
+                    ConsumedCapture::ExactDuplicate { classification_changed } => {
+                        result.acknowledged += 1;
+                        if classification_changed {
+                            result.classification_changed += 1;
+                        }
+                    }
                     ConsumedCapture::ReviewPending => result.review_pending += 1,
                 },
                 Err(error) => {
@@ -138,11 +165,19 @@ impl Library {
         // ingest_media는 성공 시 staging 파일을 library로 이동시키므로
         // TemporaryCaptureDownload의 Drop 정리는 NotFound를 조용히 지나간다.
         drop(temporary);
-        let (status, asset_id) = match &outcome {
-            IngestOutcome::Added { asset } => ("imported", Some(asset.id.clone())),
+        let (status, asset_id, consumed) = match &outcome {
+            IngestOutcome::Added { asset } => (
+                "imported",
+                Some(asset.id.clone()),
+                ConsumedCapture::Added { video: capture.media_kind == RemoteCaptureKind::Video },
+            ),
             IngestOutcome::ExactDuplicate {
-                existing_asset_id, ..
-            } => ("imported", Some(existing_asset_id.clone())),
+                existing_asset_id, classification_changed, ..
+            } => (
+                "imported",
+                Some(existing_asset_id.clone()),
+                ConsumedCapture::ExactDuplicate { classification_changed: *classification_changed },
+            ),
             IngestOutcome::ReviewPending { .. } => {
                 // 유사 이미지 검토는 로컬 확정이 아니다. 원격은 imported로 만들지 않고
                 // 다음 폴에서 다시 시도한다.
@@ -156,7 +191,7 @@ impl Library {
         self.mark_cloud_capture_imported(&capture.id, status, asset_id.as_deref(), &imported_at)?;
         client.acknowledge_capture_imported(&capture.id, token, &imported_at)?;
         self.mark_cloud_capture_acknowledged(&capture.id)?;
-        Ok(ConsumedCapture::Imported)
+        Ok(consumed)
     }
 
     fn ingest_capture_media(
@@ -187,7 +222,7 @@ impl Library {
         });
         Ok(IngestMediaRequest {
             source_path: source_path.to_path_buf(),
-            classification_id: None,
+            classification_id: self.valid_capture_classification_id(capture)?,
             source_url: source_url.map(str::to_string),
             collected_at: Some(capture.created_at.clone()),
             replace_duplicate_metadata: false,
@@ -201,6 +236,21 @@ impl Library {
             import_source: ImportSource::BrowserExtension,
             import_batch_id: Uuid::new_v4().to_string(),
         })
+    }
+
+    fn valid_capture_classification_id(
+        &self,
+        capture: &RemoteCapture,
+    ) -> Result<Option<String>, LibraryError> {
+        let Some(classification_id) = capture.classification_id.as_deref() else {
+            return Ok(None);
+        };
+        let exists = self.connection()?.query_row(
+            "SELECT 1 FROM classification_entries WHERE id = ?1 LIMIT 1",
+            [classification_id],
+            |_| Ok(()),
+        ).optional()?.is_some();
+        Ok(exists.then(|| classification_id.to_owned()))
     }
 }
 

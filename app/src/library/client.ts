@@ -65,6 +65,9 @@ import type {
   CatalogSuggestion,
   CatalogUpdateResult,
   CloudCaptureSyncResult,
+  CloudCaptureSettings,
+  CloudCredentialStatus,
+  CloudCaptureConnectionStatus,
   CatalogWorkDetail,
   CollectionCover,
   CollectionVolume,
@@ -96,6 +99,16 @@ export const libraryGateway: LibraryGateway = {
     invoke<CatalogStatus>("set_online_catalog_update_settings", { enabled, intervalSeconds }),
   runDueOnlineCatalogUpdate: () =>
     invoke<CatalogUpdateResult | null>("run_due_online_catalog_update"),
+  getCloudCaptureSettings: () =>
+    invoke<CloudCaptureSettings>("get_cloud_capture_settings"),
+  setCloudCaptureSettings: (enabled, apiBaseUrl) =>
+    invoke<CloudCaptureSettings>("set_cloud_capture_settings", { enabled, apiBaseUrl }),
+  setCloudApiToken: (token) =>
+    invoke<CloudCredentialStatus>("set_cloud_api_token", { token }),
+  deleteCloudApiToken: () =>
+    invoke<CloudCredentialStatus>("delete_cloud_api_token"),
+  testCloudCaptureConnection: () =>
+    invoke<CloudCaptureConnectionStatus>("test_cloud_capture_connection"),
   runDueCloudCaptureSync: () =>
     invoke<CloudCaptureSyncResult>("run_due_cloud_capture_sync"),
   resolveOnlineCatalogWork: (workId) =>

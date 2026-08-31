@@ -25,7 +25,19 @@ export type CloudCaptureSyncResult = {
   acknowledged: number;
   failed: number;
   reviewPending: number;
+  added: number;
+  videoAdded: number;
+  classificationChanged: number;
 };
+
+export type CloudCaptureSettings = {
+  enabled: boolean;
+  apiBaseUrl: string | null;
+  tokenConfigured: boolean;
+};
+
+export type CloudCredentialStatus = { configured: boolean };
+export type CloudCaptureConnectionStatus = { pendingCount: number };
 
 export type RemoteProvider = "kHentai";
 
@@ -729,6 +741,11 @@ export interface LibraryGateway {
   updateOnlineCatalog(): Promise<CatalogUpdateResult>;
   setOnlineCatalogUpdateSettings(enabled: boolean, intervalSeconds: number): Promise<CatalogStatus>;
   runDueOnlineCatalogUpdate(): Promise<CatalogUpdateResult | null>;
+  getCloudCaptureSettings(): Promise<CloudCaptureSettings>;
+  setCloudCaptureSettings(enabled: boolean, apiBaseUrl: string | null): Promise<CloudCaptureSettings>;
+  setCloudApiToken(token: string): Promise<CloudCredentialStatus>;
+  deleteCloudApiToken(): Promise<CloudCredentialStatus>;
+  testCloudCaptureConnection(): Promise<CloudCaptureConnectionStatus>;
   runDueCloudCaptureSync(): Promise<CloudCaptureSyncResult>;
   resolveOnlineCatalogWork(workId: number): Promise<ResolvedGallery>;
   getRemoteReadingProgress(provider: RemoteProvider, workId: string): Promise<RemoteReadingProgress | null>;

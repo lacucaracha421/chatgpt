@@ -52,24 +52,35 @@ The desktop Cloud Capture consumer:
 
 The frontend currently runs the inbound poll once on startup and then approximately every five minutes.
 
-## Current-main gaps
+## Current inbound behavior
 
-These are implementation facts on current `main`, not the intended final behavior.
+The repository implementation now includes the core `CLOUD-001` / `CLOUD-002` path:
 
-1. **One-success-per-poll throughput** — the current consumer returns after the first successful pending capture. `CLOUD-001` replaces this with a bounded sequential batch drain (target cap: 25 attempted captures per invocation) while preserving failure isolation and idempotency.
-2. **Classification is dropped inbound** — Capture creation stores `classification_id`, but the current pending response does not include it and desktop ingestion currently passes `classification_id: None`. `CLOUD-002` carries it end-to-end.
-3. **Cloud configuration is not fully surfaced in normal app UX** — enablement, API URL, token setup/status, and manual/status visibility need a proper app path.
-4. **Successful inbound imports do not yet use the same immediate frontend refresh path as normal ingestion** — assets/counts/review state can require later refresh/reload, and new video preparation is not triggered through the normal UI ingestion outcome path.
-5. **Long video capture can outlive the request window** — a client timeout can race the server finishing its remote fetch. `CLOUD-003` tracks an optional reservation/job/background-fetch design if this remains a real-world problem.
+- A poll drains pending captures sequentially with a 25-attempt cap and per-capture failure isolation.
+- Capture pending payloads carry `classification_id`; the desktop applies it only when that classification exists locally, otherwise the import safely remains unclassified.
+- Settings exposes Cloud enablement, API base URL, Credential Manager-backed API token management, connection testing, and a manual sync action.
+- The frontend consumes typed inbound summaries: new assets refresh the current asset/sidebar state, classification-changing exact duplicates refresh membership counts, review-pending work refreshes the review count, and newly added videos trigger normal video preparation.
+- ACK-only retries and unchanged exact duplicates do not force an unnecessary asset reload.
+- Outbound replication remains independent in `cloud_sync_queue`.
 
-## Batch-drain target semantics
+Remaining work is verification and richer status UX:
 
-`CLOUD-001` is intended to return a typed summary rather than a single successful capture ID:
+1. The pending-payload server change must be deployed to the production Japanese VPS before classification preservation can be verified there.
+2. `VERIFY-001` must exercise real X image and video capture through VPS/R2 into the PC library and confirm immediate UI updates.
+3. `CLOUD-UI-001` still tracks richer last-run/last-success/last-error/problem visibility beyond the basic Settings controls.
+4. Long video capture can still outlive the request window; `CLOUD-003` remains optional if real-world use reproduces that race.
+
+## Batch-drain semantics
+
+`CLOUD-001` returns a typed summary rather than a single successful capture ID:
 
 - `attempted`: valid pending captures actually processed in this invocation;
 - `acknowledged`: captures whose final ACK succeeded this invocation, including Added, ExactDuplicate, and ACK-only retries for already-local imports;
 - `failed`: attempts that did not complete, including ACK failure;
 - `review_pending`: similarity-review results intentionally left pending.
+- `added`: new Assets created during this invocation;
+- `video_added`: newly added video Assets that should enter normal preparation;
+- `classification_changed`: exact duplicates whose classification membership changed.
 
 Malformed pending records are skipped and do not count toward `attempted`; the batch cap applies to attempted records.
 
@@ -96,8 +107,7 @@ Preserve these invariants when changing either side:
 
 Use the living backlog for status. The intended near-term sequence is:
 
-1. `CLOUD-001` batch drain.
-2. `CLOUD-002` desktop app integration, classification propagation, and immediate UI refresh.
-3. `VERIFY-001` real X → VPS/R2 → PC end-to-end verification for image and video.
-4. `CLOUD-UI-001` minimal status/error/manual-sync surface.
-5. `CLOUD-003` long-video async redesign only if real use still requires it.
+1. Complete `CLOUD-002` production rollout and end-to-end verification.
+2. Run `VERIFY-001` for real image and video capture with classification preservation and immediate UI refresh.
+3. Add `CLOUD-UI-001` richer status/error/problem visibility if needed after verification.
+4. Consider `CLOUD-003` long-video async redesign only if real use still requires it.
