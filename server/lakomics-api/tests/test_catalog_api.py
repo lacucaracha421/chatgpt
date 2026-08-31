@@ -196,6 +196,61 @@ class CatalogTransportApiTests(unittest.TestCase):
         self.assertEqual(len(calls), api_app.CATALOG_ATTEMPTS)
         self.assertEqual(sleeps, [0.75, 1.5])
 
+    # -- upstream network failures -> 502, never raw 500 --------------------
+
+    def test_dns_or_connection_failure_maps_to_502_not_500(self) -> None:
+        # urlopen이 던지는 URLError(DNS/TLS/connect)는 _catalog_fetch_once 안에서
+        # (0, b"")로 정규화돼야 한다. 그렇지 않으면 FastAPI raw 500이 된다.
+        # 진짜 urlopen을 닫힌 포트로 보내 전체 정규화 경로를 검증한다.
+        real_urlopen = api_app.urllib_request.urlopen
+
+        def refused_urlopen(request, timeout):
+            return real_urlopen("http://127.0.0.1:9/refused", timeout=0.2)
+
+        with (
+            mock.patch.object(api_app.urllib_request, "urlopen", side_effect=refused_urlopen),
+            mock.patch.object(api_app.time, "sleep", side_effect=lambda _s: None),
+        ):
+            response = self.client.get("/v1/catalog/search-page", headers=AUTH)
+
+        self.assertEqual(response.status_code, 502)
+        self.assertFalse(response.json().get("traceback", False))
+
+    def test_read_timeout_maps_to_502_not_500(self) -> None:
+        # 업스트림이 응답하지 않아 timeout이 터져도 502로 정규화된다.
+        real_urlopen = api_app.urllib_request.urlopen
+
+        def slow_urlopen(request, timeout):
+            return real_urlopen("http://127.0.0.1:9/slow", timeout=0.2)
+
+        with (
+            mock.patch.object(api_app.urllib_request, "urlopen", side_effect=slow_urlopen),
+            mock.patch.object(api_app.time, "sleep", side_effect=lambda _s: None),
+        ):
+            response = self.client.get("/v1/catalog/gallery/42", headers=AUTH)
+
+        self.assertEqual(response.status_code, 502)
+
+    def test_normalized_network_status_zero_is_retried_then_502(self) -> None:
+        # 정규화 계약: _catalog_fetch_once가 네트워크 실패를 (0, b"")로 돌리면
+        # 재시도 파이프라인이 CATALOG_ATTEMPTS번 재시도 후 502로 마무리한다.
+        calls: list[int] = []
+
+        def zero_status_fetch_once(url: str) -> tuple[int, bytes]:
+            calls.append(1)
+            return 0, b""
+
+        sleeps: list[float] = []
+        with (
+            mock.patch.object(api_app, "_catalog_fetch_once", side_effect=zero_status_fetch_once),
+            mock.patch.object(api_app.time, "sleep", side_effect=sleeps.append),
+        ):
+            response = self.client.get("/v1/catalog/search-page", headers=AUTH)
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(len(calls), api_app.CATALOG_ATTEMPTS)
+        self.assertEqual(sleeps, [0.75, 1.5])
+
     # -- SSRF hardening ----------------------------------------------------
 
     def test_client_cannot_redirect_fetch_to_arbitrary_hosts(self) -> None:

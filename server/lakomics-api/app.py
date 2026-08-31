@@ -3,6 +3,7 @@ import os
 import sqlite3
 import time
 import urllib.error
+import urllib.error as urllib_error
 import urllib.request as urllib_request
 import uuid
 from contextlib import contextmanager
@@ -249,6 +250,11 @@ def _catalog_fetch_once(url: str) -> tuple[int, bytes]:
             return response.status, response.read(CATALOG_MAX_BODY_BYTES + 1)
     except urllib_error.HTTPError as error:
         return error.code, b""
+    except (urllib_error.URLError, TimeoutError, OSError):
+        # DNS/TLS/connect/timeout 실패는 k-hentai 쪽 장애다. 예외를 밖으로
+        # 흘려보내면 FastAPI raw 500이 되므로 게이트웨이 오류(0)로 정규화해
+        # 재시도 파이프라인이 502로 응답하게 한다. 프로그래머 오류는 잡지 않는다.
+        return 0, b""
 
 
 def _catalog_fetch_with_retry(url: str) -> tuple[int, bytes]:
@@ -257,7 +263,9 @@ def _catalog_fetch_with_retry(url: str) -> tuple[int, bytes]:
         status, body = _catalog_fetch_once(url)
         if status == 200:
             return status, body
-        if status < 500:
+        # 0은 _catalog_fetch_once가 네트워크 장애를 정규화한 게이트웨이 오류다.
+        # k-hentai의 영구 4xx 판정(1xx~499)과 달리 재시도 대상이다.
+        if 0 < status < 500:
             return status, body
         last_status = status
         if attempt + 1 < CATALOG_ATTEMPTS:

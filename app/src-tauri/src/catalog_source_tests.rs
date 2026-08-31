@@ -18,12 +18,17 @@ fn respond_json(request: tiny_http::Request, value: &serde_json::Value) {
     let mut request = request;
     let body = serde_json::to_vec(value).unwrap();
     let _ = request.respond(
-        tiny_http::Response::from_data(body).with_header(header("Content-Type", "application/json")),
+        tiny_http::Response::from_data(body)
+            .with_header(header("Content-Type", "application/json")),
     );
 }
 
 /// Authorization: Bearer 토큰을 확인하고 JSON을 내려주는 서버 스레드.
-fn serve_bearer(expected_token: &'static str, url_path: &'static str, body: serde_json::Value) -> (String, std::thread::JoinHandle<()>) {
+fn serve_bearer(
+    expected_token: &'static str,
+    url_path: &'static str,
+    body: serde_json::Value,
+) -> (String, std::thread::JoinHandle<()>) {
     let server = Server::http("127.0.0.1:0").unwrap();
     let base_url = format!("http://{}", server.server_addr());
     let handle = std::thread::spawn(move || {
@@ -69,8 +74,7 @@ fn vps_gallery_source_returns_khentai_html_and_binds_ids_to_the_path() {
             .unwrap_or_default();
         assert_eq!(authorization, "Bearer test-token");
         let _ = request.respond(
-            tiny_http::Response::from_string(html)
-                .with_header(header("Content-Type", "text/html")),
+            tiny_http::Response::from_string(html).with_header(header("Content-Type", "text/html")),
         );
     });
 
@@ -138,7 +142,9 @@ fn permanent_4xx_is_not_retried() {
     });
     let client = VpsCatalogSource::new(&base_url).unwrap();
 
-    let error = client.fetch_gallery_bearer(999_999, "test-token").unwrap_err();
+    let error = client
+        .fetch_gallery_bearer(999_999, "test-token")
+        .unwrap_err();
 
     handle.join().unwrap();
     assert!(matches!(error, LibraryError::OnlineCatalogWorkNotFound));
@@ -147,9 +153,7 @@ fn permanent_4xx_is_not_retried() {
 #[test]
 fn empty_token_fails_closed_before_any_request() {
     let client = VpsCatalogSource::new("http://127.0.0.1:1").unwrap();
-    let error = client
-        .fetch_catalog_page_bearer("/v1/catalog/search-page", "   ")
-        .unwrap_err();
+    let error = client.fetch_search_page_bearer(None, "   ").unwrap_err();
     assert!(matches!(error, LibraryError::CloudCredentialNotConfigured));
 }
 
@@ -158,4 +162,62 @@ fn client_rejects_non_http_origins() {
     assert!(VpsCatalogSource::new("ftp://example.test").is_err());
     assert!(VpsCatalogSource::new("https://user:pw@example.test").is_err());
     assert!(VpsCatalogSource::new("not a url").is_err());
+}
+
+#[test]
+fn vps_search_page_paths_use_the_lakomics_api_contract() {
+    // VPS 전송의 경로 계약: /v1/catalog/search-page + 숫자 cursor 뿐.
+    // k-hentai 업스트림 경로(/ajax/search?...)는 VPS 서버가 내부적으로 번역한다.
+    assert_eq!(
+        VpsCatalogSource::search_page_path(None),
+        "/v1/catalog/search-page"
+    );
+    assert_eq!(
+        VpsCatalogSource::search_page_path(Some(4_127_793)),
+        "/v1/catalog/search-page?cursor=4127793"
+    );
+}
+
+#[test]
+fn vps_search_page_requests_the_vps_api_path_not_the_upstream_path() {
+    // 회귀 방지: 갱신 플로우가 VPS에 k-hentai 경로(/ajax/search?...)를 그대로
+    // 요청하면 VPS는 404/500으로 거절한다("신규 작품 갱신 HTTP 500" 버그).
+    let server = Server::http("127.0.0.1:0").unwrap();
+    let base_url = format!("http://{}", server.server_addr());
+    let handle = std::thread::spawn(move || {
+        let mut request = server.recv().unwrap();
+        assert_eq!(request.url(), "/v1/catalog/search-page?cursor=4127793");
+        let authorization = request
+            .headers()
+            .iter()
+            .find(|header| header.field.equiv("Authorization"))
+            .map(|header| header.value.as_str().to_owned())
+            .unwrap_or_default();
+        assert_eq!(authorization, "Bearer test-token");
+        respond_json(request, &json!([{ "id": 4_127_794, "title": "new" }]));
+    });
+    let client = VpsCatalogSource::new(&base_url).unwrap();
+
+    let body = client
+        .fetch_search_page_bearer(Some(4_127_793), "test-token")
+        .unwrap();
+
+    handle.join().unwrap();
+    assert!(body.contains("4127794"));
+}
+
+#[test]
+fn vps_first_search_page_omits_the_cursor_query() {
+    let server = Server::http("127.0.0.1:0").unwrap();
+    let base_url = format!("http://{}", server.server_addr());
+    let handle = std::thread::spawn(move || {
+        let mut request = server.recv().unwrap();
+        assert_eq!(request.url(), "/v1/catalog/search-page");
+        respond_json(request, &json!([]));
+    });
+    let client = VpsCatalogSource::new(&base_url).unwrap();
+
+    client.fetch_search_page_bearer(None, "test-token").unwrap();
+
+    handle.join().unwrap();
 }

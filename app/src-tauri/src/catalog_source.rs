@@ -10,11 +10,7 @@
 //! 돌려야 하므로 파싱·저장 경로는 완전히 공유된다.
 
 use crate::library::error::LibraryError;
-use std::{
-    io::Read,
-    sync::LazyLock,
-    time::Duration,
-};
+use std::{io::Read, sync::LazyLock, time::Duration};
 
 /// k-hentai 응답 본문의 상한. 갱신 페이지 JSON과 갤러리 HTML 모두에 적용한다.
 const MAX_RESPONSE_BYTES: usize = 5 * 1024 * 1024;
@@ -142,18 +138,34 @@ impl VpsCatalogSource {
         }
     }
 
-    pub(crate) fn fetch_catalog_page_bearer(
-        &self,
-        path: &str,
-        token: &str,
-    ) -> Result<String, LibraryError> {
-        self.get(path, token)
-    }
-
     /// 테스트와 토큰 주입 경로를 위한 갤러리 조회. `work_id`는 u64라서 경로
     /// 구획에 임의 문자열이 들어갈 수 없다.
-    pub(crate) fn fetch_gallery_bearer(&self, work_id: u64, token: &str) -> Result<String, LibraryError> {
+    pub(crate) fn fetch_gallery_bearer(
+        &self,
+        work_id: u64,
+        token: &str,
+    ) -> Result<String, LibraryError> {
         self.get(&format!("/v1/catalog/gallery/{work_id}"), token)
+    }
+
+    /// VPS 카탈로그 API의 검색 페이지 경로. VPS 계약은 `/v1/catalog/search-page`
+    /// + 숫자 `cursor` 뿐이고, k-hentai 업스트림 경로(`/ajax/search?...`)는 VPS가
+    /// 내부적으로 번역한다. PC는 업스트림 URL을 몰라도 된다.
+    pub(crate) fn search_page_path(cursor: Option<u64>) -> String {
+        match cursor {
+            Some(cursor) => format!("/v1/catalog/search-page?cursor={cursor}"),
+            None => "/v1/catalog/search-page".to_owned(),
+        }
+    }
+
+    /// 검색 페이지를 VPS API 경로로 조회. `cursor`는 u64라 경로 구획에 임의
+    /// 문자열이 들어갈 수 없다(갤러리와 같은 SSRF 차단 원칙).
+    pub(crate) fn fetch_search_page_bearer(
+        &self,
+        cursor: Option<u64>,
+        token: &str,
+    ) -> Result<String, LibraryError> {
+        self.get(&Self::search_page_path(cursor), token)
     }
 }
 
@@ -177,4 +189,3 @@ pub(crate) fn gallery_agent() -> &'static ureq::Agent {
     });
     &AGENT
 }
-

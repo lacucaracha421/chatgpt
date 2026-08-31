@@ -195,10 +195,10 @@ async fn run_catalog_update(
 
     while pages < MAX_UPDATE_PAGES {
         let body = if let Some((vps, token)) = &vps_source {
-            crate::catalog_source::retry_transient(|| {
-                vps.fetch_catalog_page_bearer(&search_page_path(cursor), token)
-            })
-            .await?
+            // VPS 전송은 Lakomics VPS API 경로(/v1/catalog/search-page)만 안다.
+            // k-hentai 업스트림 경로는 WebView2 직접 전송 전용이다.
+            crate::catalog_source::retry_transient(|| vps.fetch_search_page_bearer(cursor, token))
+                .await?
         } else {
             let Some(body) = fetch_with_retry(transport, app, &search_page_path(cursor)).await?
             else {
