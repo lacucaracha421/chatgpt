@@ -8,243 +8,77 @@
   <style>
     :root {
       color-scheme: dark;
-      --bg: #101113;
-      --panel: #15171a;
-      --panel-2: #1a1c20;
-      --panel-3: #202329;
-      --line: #2a2e34;
-      --line-soft: #22252a;
-      --text: #f0f2f4;
-      --muted: #9aa0a9;
-      --dim: #6f7680;
-      --accent: #91b4ff;
-      --accent-soft: rgba(145, 180, 255, .13);
-      --good: #91caa0;
-      --bad: #e0a1a1;
-      --nav-h: 66px;
-      --top-h: 52px;
+      --bg:#101113; --panel:#15171a; --panel-2:#1a1c20; --panel-3:#202329;
+      --line:#2a2e34; --line-soft:#22252a; --text:#f0f2f4; --muted:#9aa0a9; --dim:#6f7680;
+      --accent:#91b4ff; --accent-soft:rgba(145,180,255,.13); --good:#91caa0;
+      --nav-h:66px; --top-h:52px; --tree-w:224px;
     }
+    *{box-sizing:border-box} html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text)}
+    body{font-family:"Segoe UI","Noto Sans KR",system-ui,sans-serif;font-size:13px;-webkit-tap-highlight-color:transparent;overscroll-behavior-y:none}
+    button{font:inherit;color:inherit}.app{min-height:100dvh;padding-bottom:calc(var(--nav-h) + env(safe-area-inset-bottom))}
+    .topbar{position:sticky;top:0;z-index:30;height:calc(var(--top-h) + env(safe-area-inset-top));padding:env(safe-area-inset-top) 14px 0;display:flex;align-items:center;gap:10px;background:rgba(16,17,19,.97);border-bottom:1px solid var(--line-soft);backdrop-filter:blur(8px)}
+    .brand{font-size:16px;font-weight:650;letter-spacing:-.2px}.top-spacer{flex:1}.sync-state{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:12px}.dot{width:7px;height:7px;border-radius:50%;background:var(--good)}
+    .icon-btn{width:34px;height:34px;padding:0;border:0;border-radius:4px;background:transparent;display:grid;place-items:center;color:var(--muted)}.icon-btn:active{background:var(--panel-3);color:var(--text)}
+    main{width:100%}.view{display:none}.view.active{display:block}.section{padding:14px;border-bottom:1px solid var(--line-soft)}.section:last-child{border-bottom:0}
+    .section-head{display:flex;align-items:baseline;gap:8px;margin-bottom:10px}.section-title{font-size:14px;font-weight:650}.section-meta{color:var(--dim);font-size:11px}.section-action{margin-left:auto;border:0;background:transparent;color:var(--muted);padding:4px 0 4px 8px}
+    .prototype-banner{margin:10px 14px 0;color:var(--dim);font-size:11px}
+    .hero-row{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(128px,.7fr);gap:8px}.hero-panel,.quick-panel{background:var(--panel);border:1px solid var(--line);border-radius:5px;min-height:124px}.hero-panel{padding:14px;display:flex;flex-direction:column;justify-content:flex-end}.hero-kicker{color:var(--muted);font-size:11px;margin-bottom:5px}.hero-title{font-size:20px;line-height:1.16;font-weight:670;letter-spacing:-.4px;max-width:16ch}.hero-sub{color:var(--muted);margin-top:7px;font-size:12px;line-height:1.45}.quick-panel{display:grid;grid-template-rows:1fr 1fr}.quick-row{padding:11px 12px;display:flex;flex-direction:column;justify-content:center}.quick-row+.quick-row{border-top:1px solid var(--line-soft)}.quick-value{font-size:18px;font-weight:650}.quick-label{color:var(--muted);font-size:11px;margin-top:2px}
+    .media-strip{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(94px,23vw);gap:5px;overflow-x:auto;scrollbar-width:none;padding-bottom:1px}.media-strip::-webkit-scrollbar{display:none}.media-tile,.asset-tile{position:relative;overflow:hidden;background:var(--panel-2);border:1px solid var(--line-soft);border-radius:2px;padding:0}.media-tile{aspect-ratio:1}.media-tile img,.asset-tile img,.cover img{width:100%;height:100%;object-fit:cover;display:block}.media-badge{position:absolute;right:5px;bottom:5px;padding:3px 5px;border-radius:3px;background:rgba(8,9,10,.78);font-size:10px}
+    .showcase{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}.showcase-item{min-width:0}.cover{aspect-ratio:3/4;background:var(--panel-2);border:1px solid var(--line);border-radius:2px;overflow:hidden}.showcase-name{margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px}.showcase-type{color:var(--dim);font-size:10px;margin-top:1px}
 
-    * { box-sizing: border-box; }
-    html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); }
-    body {
-      font-family: "Segoe UI", "Noto Sans KR", system-ui, sans-serif;
-      font-size: 13px;
-      -webkit-tap-highlight-color: transparent;
-      overscroll-behavior-y: none;
+    /* Asset workspace — Galaxy Tab S11 first */
+    .asset-workspace{min-height:calc(100dvh - var(--top-h) - var(--nav-h));display:grid;grid-template-columns:var(--tree-w) minmax(0,1fr)}
+    .asset-sidebar{position:sticky;top:calc(var(--top-h) + env(safe-area-inset-top));height:calc(100dvh - var(--top-h) - var(--nav-h) - env(safe-area-inset-top) - env(safe-area-inset-bottom));background:#121417;border-right:1px solid var(--line);display:flex;flex-direction:column;min-width:0;z-index:16}
+    .asset-sidebar-head{height:42px;flex:0 0 42px;display:flex;align-items:center;padding:0 9px 0 12px;border-bottom:1px solid var(--line-soft);gap:8px}.asset-sidebar-title{font-weight:650}.asset-sidebar-count{margin-left:auto;color:var(--dim);font-size:11px}.sidebar-close{display:none;margin-left:auto;border:0;background:transparent;color:var(--muted);width:32px;height:32px;font-size:20px}
+    .tree-scroll{overflow:auto;overscroll-behavior:contain;padding:5px 5px 12px;scrollbar-width:thin;scrollbar-color:#444a53 transparent}
+    .tree-group-label{padding:10px 8px 5px;color:var(--dim);font-size:10px}.tree-row{height:38px;width:100%;border:0;background:transparent;border-radius:3px;padding:0 7px 0 calc(8px + var(--depth,0)*15px);display:grid;grid-template-columns:21px minmax(0,1fr) auto;align-items:center;text-align:left;color:#c8ccd2;gap:2px}.tree-row:active{background:var(--panel-3)}.tree-row.selected{background:var(--accent-soft);color:#eef3ff;box-shadow:inset 2px 0 0 var(--accent)}.tree-row.pinned .tree-name::after{content:"•";color:#78808b;margin-left:6px}.tree-toggle{width:21px;height:30px;border:0;background:transparent;padding:0;color:#737a84;display:grid;place-items:center}.tree-toggle svg{width:12px;height:12px;transition:transform 110ms ease}.tree-node.expanded>.tree-row .tree-toggle svg{transform:rotate(90deg)}.tree-node.leaf>.tree-row .tree-toggle{visibility:hidden}.tree-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tree-count{color:var(--dim);font-size:10px;padding-left:5px}.tree-children{display:none}.tree-node.expanded>.tree-children{display:block}.tree-divider{height:1px;background:var(--line-soft);margin:5px 7px}
+    .asset-main{min-width:0}.asset-toolbar{position:sticky;top:calc(var(--top-h) + env(safe-area-inset-top));z-index:14;height:43px;background:rgba(16,17,19,.97);border-bottom:1px solid var(--line-soft);display:flex;align-items:center;gap:7px;padding:0 9px}.category-open{display:none;border:1px solid var(--line);background:var(--panel);border-radius:4px;padding:6px 9px}.asset-path{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--muted);font-size:12px}.asset-path strong{color:var(--text);font-weight:600}.asset-total{margin-left:auto;color:var(--dim);font-size:11px;white-space:nowrap}.asset-grid{padding:5px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px}.asset-tile{aspect-ratio:1}.asset-tile:active{outline:2px solid var(--accent);outline-offset:-2px}
+    .sidebar-scrim{display:none}
+
+    .collection-tabs{padding:10px 14px 0;display:flex;gap:16px;border-bottom:1px solid var(--line-soft)}.collection-tab{border:0;background:transparent;padding:0 0 9px;color:var(--muted);position:relative}.collection-tab.active{color:var(--text)}.collection-tab.active::after{content:"";position:absolute;height:2px;left:0;right:0;bottom:-1px;background:var(--accent)}.collection-grid{padding:12px 14px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px 8px}.collection-card{min-width:0}.collection-card .cover{aspect-ratio:2/3}.collection-title{margin-top:6px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.collection-extra{color:var(--dim);font-size:10px;margin-top:2px}
+    .status-list{margin:0;padding:0;list-style:none}.status-row{min-height:54px;padding:8px 14px;display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;border-bottom:1px solid var(--line-soft)}.status-name{font-size:13px}.status-desc{color:var(--muted);font-size:11px;margin-top:2px}.status-value{color:var(--muted);font-size:12px}.status-value.good{color:var(--good)}.status-note{margin:14px;padding:10px 12px;border-left:2px solid #4e628a;background:var(--panel);color:var(--muted);line-height:1.5}
+    .bottom-nav{position:fixed;left:0;right:0;bottom:0;z-index:30;height:calc(var(--nav-h) + env(safe-area-inset-bottom));padding-bottom:env(safe-area-inset-bottom);display:grid;grid-template-columns:repeat(4,1fr);background:rgba(18,19,22,.97);border-top:1px solid var(--line);backdrop-filter:blur(10px)}.nav-btn{border:0;background:transparent;color:var(--dim);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:6px 2px 5px}.nav-btn svg{width:20px;height:20px;stroke-width:1.7}.nav-btn span{font-size:10px}.nav-btn.active{color:var(--text)}.nav-btn.active svg{color:var(--accent)}
+    dialog.viewer{width:100vw;max-width:none;height:100dvh;max-height:none;margin:0;padding:0;border:0;background:#08090a;color:#fff}dialog::backdrop{background:#000}.viewer-top{position:absolute;z-index:2;left:0;right:0;top:0;padding:calc(10px + env(safe-area-inset-top)) 10px 10px;display:flex;align-items:center;background:linear-gradient(to bottom,rgba(0,0,0,.72),transparent)}.viewer-close{width:38px;height:38px;border:0;border-radius:4px;background:rgba(0,0,0,.35);color:#fff;font-size:22px}.viewer-index{margin-left:auto;color:#d4d7db;font-size:12px}.viewer-media{width:100%;height:100%;object-fit:contain}.viewer-bottom{position:absolute;left:0;right:0;bottom:0;padding:28px 14px calc(16px + env(safe-area-inset-bottom));background:linear-gradient(to top,rgba(0,0,0,.78),transparent)}.viewer-title{font-size:13px;font-weight:600}.viewer-meta{color:#adb2b9;font-size:11px;margin-top:4px}
+
+    @media (min-width:700px){.collection-grid{grid-template-columns:repeat(5,minmax(0,1fr))}.showcase{grid-template-columns:repeat(5,minmax(0,1fr))}.media-strip{grid-auto-columns:minmax(110px,15%)}.hero-row{grid-template-columns:minmax(0,2fr) minmax(190px,.7fr)}}
+    @media (min-width:1000px) and (orientation:landscape){:root{--tree-w:228px}.asset-grid{grid-template-columns:repeat(5,minmax(0,1fr))}.app{max-width:none}.asset-sidebar{display:flex}}
+    @media (max-width:999px), (orientation:portrait){
+      .asset-workspace{display:block}.asset-sidebar{position:fixed;left:0;top:calc(var(--top-h) + env(safe-area-inset-top));bottom:calc(var(--nav-h) + env(safe-area-inset-bottom));height:auto;width:min(44vw,330px);transform:translateX(-102%);transition:transform 130ms ease;box-shadow:8px 0 24px rgba(0,0,0,.28);z-index:26}.assets-sidebar-open .asset-sidebar{transform:translateX(0)}.sidebar-close{display:block}.category-open{display:inline-flex;align-items:center}.sidebar-scrim{position:fixed;inset:calc(var(--top-h) + env(safe-area-inset-top)) 0 calc(var(--nav-h) + env(safe-area-inset-bottom));background:rgba(0,0,0,.42);z-index:25}.assets-sidebar-open .sidebar-scrim{display:block}.asset-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
     }
-    button, input { font: inherit; }
-    button { color: inherit; }
-
-    .app { min-height: 100dvh; padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom)); }
-    .topbar {
-      position: sticky;
-      top: 0;
-      z-index: 20;
-      height: calc(var(--top-h) + env(safe-area-inset-top));
-      padding: env(safe-area-inset-top) 14px 0;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      background: rgba(16,17,19,.96);
-      border-bottom: 1px solid var(--line-soft);
-      backdrop-filter: blur(8px);
-    }
-    .brand { font-size: 16px; font-weight: 650; letter-spacing: -.2px; }
-    .top-spacer { flex: 1; }
-    .sync-state { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
-    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 2px rgba(145,202,160,.08); }
-    .icon-btn {
-      width: 34px; height: 34px; padding: 0; border: 0; border-radius: 4px;
-      background: transparent; display: grid; place-items: center; color: var(--muted);
-    }
-    .icon-btn:active { background: var(--panel-3); color: var(--text); }
-
-    main { width: 100%; }
-    .view { display: none; }
-    .view.active { display: block; }
-    .section { padding: 14px; border-bottom: 1px solid var(--line-soft); }
-    .section:last-child { border-bottom: 0; }
-    .section-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
-    .section-title { font-size: 14px; font-weight: 650; }
-    .section-meta { color: var(--dim); font-size: 11px; }
-    .section-action { margin-left: auto; border: 0; background: transparent; color: var(--muted); padding: 4px 0 4px 8px; }
-
-    .hero-row {
-      display: grid;
-      grid-template-columns: minmax(0, 1.5fr) minmax(128px, .7fr);
-      gap: 8px;
-    }
-    .hero-panel, .quick-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 5px; min-height: 124px; }
-    .hero-panel { padding: 14px; display: flex; flex-direction: column; justify-content: flex-end; }
-    .hero-kicker { color: var(--muted); font-size: 11px; margin-bottom: 5px; }
-    .hero-title { font-size: 20px; line-height: 1.16; font-weight: 670; letter-spacing: -.4px; max-width: 16ch; }
-    .hero-sub { color: var(--muted); margin-top: 7px; font-size: 12px; line-height: 1.45; }
-    .quick-panel { display: grid; grid-template-rows: 1fr 1fr; }
-    .quick-row { padding: 11px 12px; display: flex; flex-direction: column; justify-content: center; }
-    .quick-row + .quick-row { border-top: 1px solid var(--line-soft); }
-    .quick-value { font-size: 18px; font-weight: 650; }
-    .quick-label { color: var(--muted); font-size: 11px; margin-top: 2px; }
-
-    .media-strip { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(94px, 23vw); gap: 5px; overflow-x: auto; scrollbar-width: none; padding-bottom: 1px; }
-    .media-strip::-webkit-scrollbar { display: none; }
-    .media-tile, .asset-tile {
-      position: relative; overflow: hidden; background: var(--panel-2); border: 1px solid var(--line-soft); border-radius: 2px; padding: 0;
-    }
-    .media-tile { aspect-ratio: 1 / 1; }
-    .media-tile img, .asset-tile img, .cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
-    .media-badge { position: absolute; right: 5px; bottom: 5px; padding: 3px 5px; border-radius: 3px; background: rgba(8,9,10,.78); color: #dfe2e6; font-size: 10px; }
-
-    .showcase { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 7px; }
-    .showcase-item { min-width: 0; }
-    .cover { aspect-ratio: 3 / 4; background: var(--panel-2); border: 1px solid var(--line); border-radius: 2px; overflow: hidden; }
-    .showcase-name { margin-top: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
-    .showcase-type { color: var(--dim); font-size: 10px; margin-top: 1px; }
-
-    .filter-bar {
-      position: sticky;
-      top: calc(var(--top-h) + env(safe-area-inset-top));
-      z-index: 15;
-      background: rgba(16,17,19,.96);
-      border-bottom: 1px solid var(--line-soft);
-      padding: 8px 10px;
-      display: flex;
-      gap: 5px;
-      overflow-x: auto;
-      scrollbar-width: none;
-    }
-    .filter-bar::-webkit-scrollbar { display: none; }
-    .filter {
-      border: 1px solid var(--line); border-radius: 4px; background: var(--panel); color: var(--muted);
-      padding: 6px 9px; white-space: nowrap;
-    }
-    .filter.active { border-color: #536b9d; background: var(--accent-soft); color: #dbe6ff; }
-
-    .asset-grid { padding: 5px; display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 5px; }
-    .asset-tile { aspect-ratio: 1 / 1; }
-    .asset-tile:active { outline: 2px solid var(--accent); outline-offset: -2px; }
-    .asset-kind { position: absolute; left: 5px; bottom: 5px; font-size: 10px; color: #fff; padding: 2px 4px; background: rgba(0,0,0,.65); border-radius: 2px; }
-
-    .collection-tabs { padding: 10px 14px 0; display: flex; gap: 16px; border-bottom: 1px solid var(--line-soft); }
-    .collection-tab { border: 0; background: transparent; padding: 0 0 9px; color: var(--muted); position: relative; }
-    .collection-tab.active { color: var(--text); }
-    .collection-tab.active::after { content: ""; position: absolute; height: 2px; left: 0; right: 0; bottom: -1px; background: var(--accent); }
-    .collection-grid { padding: 12px 14px; display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 13px 8px; }
-    .collection-card { min-width: 0; }
-    .collection-card .cover { aspect-ratio: 2 / 3; }
-    .collection-title { margin-top: 6px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .collection-extra { color: var(--dim); font-size: 10px; margin-top: 2px; }
-
-    .status-list { margin: 0; padding: 0; list-style: none; }
-    .status-row { min-height: 54px; padding: 8px 14px; display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; border-bottom: 1px solid var(--line-soft); }
-    .status-name { font-size: 13px; }
-    .status-desc { color: var(--muted); font-size: 11px; margin-top: 2px; }
-    .status-value { color: var(--muted); font-size: 12px; }
-    .status-value.good { color: var(--good); }
-    .status-note { margin: 14px; padding: 10px 12px; border-left: 2px solid #4e628a; background: var(--panel); color: var(--muted); line-height: 1.5; }
-
-    .bottom-nav {
-      position: fixed;
-      left: 0; right: 0; bottom: 0;
-      z-index: 30;
-      height: calc(var(--nav-h) + env(safe-area-inset-bottom));
-      padding-bottom: env(safe-area-inset-bottom);
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      background: rgba(18,19,22,.97);
-      border-top: 1px solid var(--line);
-      backdrop-filter: blur(10px);
-    }
-    .nav-btn { border: 0; background: transparent; color: var(--dim); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 6px 2px 5px; }
-    .nav-btn svg { width: 20px; height: 20px; stroke-width: 1.7; }
-    .nav-btn span { font-size: 10px; }
-    .nav-btn.active { color: var(--text); }
-    .nav-btn.active svg { color: var(--accent); }
-
-    dialog.viewer { width: 100vw; max-width: none; height: 100dvh; max-height: none; margin: 0; padding: 0; border: 0; background: #08090a; color: #fff; }
-    dialog::backdrop { background: #000; }
-    .viewer-top { position: absolute; z-index: 2; left: 0; right: 0; top: 0; padding: calc(10px + env(safe-area-inset-top)) 10px 10px; display: flex; align-items: center; background: linear-gradient(to bottom, rgba(0,0,0,.72), transparent); }
-    .viewer-close { width: 38px; height: 38px; border: 0; border-radius: 4px; background: rgba(0,0,0,.35); color: #fff; font-size: 22px; }
-    .viewer-index { margin-left: auto; color: #d4d7db; font-size: 12px; }
-    .viewer-media { width: 100%; height: 100%; object-fit: contain; }
-    .viewer-bottom { position: absolute; left: 0; right: 0; bottom: 0; padding: 28px 14px calc(16px + env(safe-area-inset-bottom)); background: linear-gradient(to top, rgba(0,0,0,.78), transparent); }
-    .viewer-title { font-size: 13px; font-weight: 600; }
-    .viewer-meta { color: #adb2b9; font-size: 11px; margin-top: 4px; }
-
-    .prototype-banner { margin: 10px 14px 0; color: var(--dim); font-size: 11px; }
-
-    @media (min-width: 700px) {
-      .app { max-width: 960px; margin: 0 auto; border-left: 1px solid var(--line-soft); border-right: 1px solid var(--line-soft); }
-      .bottom-nav { left: 50%; transform: translateX(-50%); max-width: 960px; border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
-      .asset-grid { grid-template-columns: repeat(5, minmax(0,1fr)); }
-      .collection-grid { grid-template-columns: repeat(5, minmax(0,1fr)); }
-      .showcase { grid-template-columns: repeat(5, minmax(0,1fr)); }
-      .media-strip { grid-auto-columns: minmax(110px, 15%); }
-      .hero-row { grid-template-columns: minmax(0, 2fr) minmax(190px, .7fr); }
-    }
-
-    @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
+    @media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
   </style>
 </head>
 <body>
-<div class="app">
+<div class="app" id="app">
   <header class="topbar">
-    <div class="brand">Lakomics</div>
-    <div class="top-spacer"></div>
+    <div class="brand">Lakomics</div><div class="top-spacer"></div>
     <div class="sync-state"><span class="dot"></span><span>Cloud 데모</span></div>
-    <button class="icon-btn" id="refreshBtn" aria-label="새로고침" title="새로고침">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 11a8 8 0 1 0-2.35 5.65"/><path d="M20 4v7h-7"/></svg>
-    </button>
+    <button class="icon-btn" id="refreshBtn" aria-label="새로고침"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 11a8 8 0 1 0-2.35 5.65"/><path d="M20 4v7h-7"/></svg></button>
   </header>
-
   <main>
     <section class="view active" data-view="home">
-      <div class="prototype-banner">Mobile prototype · 현재는 UI 확인용 데모 데이터입니다.</div>
-      <div class="section">
-        <div class="hero-row">
-          <div class="hero-panel">
-            <div class="hero-kicker">최근 라이브러리</div>
-            <div class="hero-title">오늘 모은 것들을 이어서 보세요</div>
-            <div class="hero-sub">최근 저장 18개 · 마지막 동기화 방금 전</div>
-          </div>
-          <div class="quick-panel">
-            <div class="quick-row"><div class="quick-value">12,486</div><div class="quick-label">에셋</div></div>
-            <div class="quick-row"><div class="quick-value">184</div><div class="quick-label">컬렉션</div></div>
-          </div>
-        </div>
-      </div>
-
-      <div class="section">
-        <div class="section-head"><div class="section-title">최근 저장</div><div class="section-meta">18개</div><button class="section-action" data-go="assets">전체 보기</button></div>
-        <div class="media-strip" id="recentStrip"></div>
-      </div>
-
-      <div class="section">
-        <div class="section-head"><div class="section-title">Showcase</div><div class="section-meta">직접 고른 컬렉션</div><button class="section-action" data-go="collections">컬렉션</button></div>
-        <div class="showcase" id="showcaseGrid"></div>
-      </div>
+      <div class="prototype-banner">Galaxy Tab S11용 Mobile prototype · 현재는 UI 확인용 데모 데이터입니다.</div>
+      <div class="section"><div class="hero-row"><div class="hero-panel"><div class="hero-kicker">최근 라이브러리</div><div class="hero-title">오늘 모은 것들을 이어서 보세요</div><div class="hero-sub">최근 저장 18개 · 마지막 동기화 방금 전</div></div><div class="quick-panel"><div class="quick-row"><div class="quick-value">12,486</div><div class="quick-label">에셋</div></div><div class="quick-row"><div class="quick-value">184</div><div class="quick-label">컬렉션</div></div></div></div></div>
+      <div class="section"><div class="section-head"><div class="section-title">최근 저장</div><div class="section-meta">18개</div><button class="section-action" data-go="assets">전체 보기</button></div><div class="media-strip" id="recentStrip"></div></div>
+      <div class="section"><div class="section-head"><div class="section-title">Showcase</div><div class="section-meta">직접 고른 컬렉션</div><button class="section-action" data-go="collections">컬렉션</button></div><div class="showcase" id="showcaseGrid"></div></div>
     </section>
 
     <section class="view" data-view="assets">
-      <div class="filter-bar" id="assetFilters"></div>
-      <div class="asset-grid" id="assetGrid"></div>
+      <div class="asset-workspace">
+        <aside class="asset-sidebar" id="assetSidebar" aria-label="분류 트리">
+          <div class="asset-sidebar-head"><span class="asset-sidebar-title">분류</span><span class="asset-sidebar-count">128</span><button class="sidebar-close" id="sidebarClose" aria-label="분류 닫기">×</button></div>
+          <div class="tree-scroll" id="treeScroll"></div>
+        </aside>
+        <div class="sidebar-scrim" id="sidebarScrim"></div>
+        <div class="asset-main">
+          <div class="asset-toolbar"><button class="category-open" id="categoryOpen">☰&nbsp; 분류</button><div class="asset-path" id="assetPath"></div><div class="asset-total" id="assetTotal"></div></div>
+          <div class="asset-grid" id="assetGrid"></div>
+        </div>
+      </div>
     </section>
 
-    <section class="view" data-view="collections">
-      <div class="collection-tabs" id="collectionTabs"></div>
-      <div class="collection-grid" id="collectionGrid"></div>
-    </section>
-
-    <section class="view" data-view="status">
-      <div class="status-note">이 화면은 나중에 실제 VPS 상태 API와 연결할 자리입니다. 첫 프로토타입에서는 연결 구조만 확인합니다.</div>
-      <ul class="status-list">
-        <li class="status-row"><div><div class="status-name">Cloud Capture</div><div class="status-desc">일본 VPS · Capture Inbox</div></div><div class="status-value good">연결됨</div></li>
-        <li class="status-row"><div><div class="status-name">분류 스냅샷</div><div class="status-desc">모바일 도넛과 동일한 읽기 사본</div></div><div class="status-value">방금 전</div></li>
-        <li class="status-row"><div><div class="status-name">PC Lakomics</div><div class="status-desc">모바일 뷰는 PC가 꺼져도 열리는 방향</div></div><div class="status-value">오프라인</div></li>
-        <li class="status-row"><div><div class="status-name">저장된 X 미디어 인덱스</div><div class="status-desc">저장 체크 표시용 스냅샷</div></div><div class="status-value">3,842 keys</div></li>
-        <li class="status-row"><div><div class="status-name">모바일 빌드</div><div class="status-desc">Lakomics Mobile prototype</div></div><div class="status-value">0.1</div></li>
-      </ul>
-    </section>
+    <section class="view" data-view="collections"><div class="collection-tabs" id="collectionTabs"></div><div class="collection-grid" id="collectionGrid"></div></section>
+    <section class="view" data-view="status"><div class="status-note">이 화면은 나중에 실제 VPS 상태 API와 연결할 자리입니다.</div><ul class="status-list"><li class="status-row"><div><div class="status-name">Cloud Capture</div><div class="status-desc">일본 VPS · Capture Inbox</div></div><div class="status-value good">연결됨</div></li><li class="status-row"><div><div class="status-name">분류 스냅샷</div><div class="status-desc">모바일 확장과 동일한 읽기 사본</div></div><div class="status-value">방금 전</div></li><li class="status-row"><div><div class="status-name">PC Lakomics</div><div class="status-desc">PC가 꺼져도 모바일 뷰 열기</div></div><div class="status-value">오프라인</div></li></ul></section>
   </main>
 </div>
 
@@ -255,102 +89,71 @@
   <button class="nav-btn" data-nav="status"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><path d="M12 7.5h.01"/></svg><span>상태</span></button>
 </nav>
 
-<dialog class="viewer" id="viewer">
-  <div class="viewer-top"><button class="viewer-close" id="viewerClose" aria-label="닫기">×</button><div class="viewer-index" id="viewerIndex"></div></div>
-  <img class="viewer-media" id="viewerImage" alt="" />
-  <div class="viewer-bottom"><div class="viewer-title" id="viewerTitle"></div><div class="viewer-meta" id="viewerMeta"></div></div>
-</dialog>
+<dialog class="viewer" id="viewer"><div class="viewer-top"><button class="viewer-close" id="viewerClose">×</button><div class="viewer-index" id="viewerIndex"></div></div><img class="viewer-media" id="viewerImage" alt=""/><div class="viewer-bottom"><div class="viewer-title" id="viewerTitle"></div><div class="viewer-meta" id="viewerMeta"></div></div></dialog>
 
 <script>
-  const img = (seed, w=700, h=700) => `https://picsum.photos/seed/${seed}/${w}/${h}`;
+  const img=(seed,w=700,h=700)=>`https://picsum.photos/seed/${seed}/${w}/${h}`;
+  const assets=[
+    ['re1999-1','리버스: 1999','게임'],['wuwa-1','명조','게임'],['zzz-1','젠레스 존 제로','게임'],['illust-04','일러스트','기타'],['manga-01','만화','만화'],['re1999-2','리버스: 1999','게임'],['illust-07','캐릭터','기타'],['wuwa-2','명조','게임'],['manga-02','만화','만화'],['zzz-2','젠레스 존 제로','게임'],['illust-11','아트워크','기타'],['re1999-3','리버스: 1999','게임'],['manga-03','만화','만화'],['wuwa-3','명조','게임'],['illust-15','일러스트','기타'],['zzz-3','젠레스 존 제로','게임'],['re1999-4','리버스: 1999','게임'],['illust-18','기타','기타'],['manga-04','만화','만화'],['wuwa-4','명조','게임'],['zzz-4','젠레스 존 제로','게임'],['illust-22','아트워크','기타'],['re1999-5','리버스: 1999','게임'],['manga-05','만화','만화']
+  ].map((a,i)=>({id:i+1,seed:a[0],title:a[1],category:a[2],src:img(a[0]),collected:`${i<6?'오늘':'최근'} · X에서 저장`}));
 
-  const assets = [
-    ['re1999-1','리버스: 1999','게임'], ['wuwa-1','명조','게임'], ['zzz-1','젠레스 존 제로','게임'],
-    ['illust-04','일러스트','기타'], ['manga-01','만화 표지','만화'], ['re1999-2','리버스: 1999','게임'],
-    ['illust-07','캐릭터','기타'], ['wuwa-2','명조','게임'], ['manga-02','만화','만화'],
-    ['zzz-2','젠레스 존 제로','게임'], ['illust-11','아트워크','기타'], ['re1999-3','리버스: 1999','게임'],
-    ['manga-03','만화 표지','만화'], ['wuwa-3','명조','게임'], ['illust-15','일러스트','기타'],
-    ['zzz-3','젠레스 존 제로','게임'], ['re1999-4','리버스: 1999','게임'], ['illust-18','기타','기타'],
-    ['manga-04','만화','만화'], ['wuwa-4','명조','게임'], ['zzz-4','젠레스 존 제로','게임'],
-    ['illust-22','아트워크','기타'], ['re1999-5','리버스: 1999','게임'], ['manga-05','만화 표지','만화'],
-  ].map((a, i) => ({ id:i+1, seed:a[0], title:a[1], category:a[2], src:img(a[0]), collected:`${i < 6 ? '오늘' : '최근'} · X에서 저장` }));
+  const collections={게임:[['game-r1999','리버스: 1999','92 assets'],['game-wuwa','명조','74 assets'],['game-zzz','젠레스 존 제로','58 assets'],['game-nier','NieR','41 assets'],['game-ba','블루 아카이브','35 assets']],만화:[['manga-a','던전밥','14권'],['manga-b','요츠바랑!','15권'],['manga-c','장송의 프리렌','16권'],['manga-d','메이드 인 어비스','13권'],['manga-e','스킵과 로퍼','12권']],영화:[['movie-a','Blade Runner','1982'],['movie-b','Alien','1979'],['movie-c','The Thing','1982'],['movie-d','Terminator 2','1991'],['movie-e','Heat','1995']]};
 
-  const collections = {
-    게임: [
-      ['game-r1999','리버스: 1999','92 assets'], ['game-wuwa','명조','74 assets'], ['game-zzz','젠레스 존 제로','58 assets'],
-      ['game-nier','NieR','41 assets'], ['game-ba','블루 아카이브','35 assets'], ['game-etc','Favorite Games','28 assets']
-    ],
-    만화: [
-      ['manga-a','던전밥','14권'], ['manga-b','요츠바랑!','15권'], ['manga-c','장송의 프리렌','16권'],
-      ['manga-d','메이드 인 어비스','13권'], ['manga-e','스킵과 로퍼','12권'], ['manga-f','최근 추가 만화','8권']
-    ],
-    영화: [
-      ['movie-a','Blade Runner','1982'], ['movie-b','Alien','1979'], ['movie-c','The Thing','1982'],
-      ['movie-d','Terminator 2','1991'], ['movie-e','Heat','1995'], ['movie-f','Favorite Movies','12 works']
-    ]
-  };
+  const tree=[
+    {id:'all',name:'전체 에셋',count:12486,pinned:true},
+    {id:'favorite',name:'즐겨찾기',count:418,pinned:true},
+    {id:'recent',name:'최근 저장',count:86,pinned:true},
+    {divider:true},
+    {id:'game',name:'게임',count:8290,children:[
+      {id:'re1999',name:'리버스: 1999',count:1820,children:[{id:'re1999-char',name:'캐릭터',count:1380},{id:'re1999-art',name:'공식 아트',count:244},{id:'re1999-etc',name:'기타',count:196}]},
+      {id:'wuwa',name:'명조',count:1654,children:[{id:'wuwa-char',name:'캐릭터',count:1288},{id:'wuwa-art',name:'공식 아트',count:217}]},
+      {id:'zzz',name:'젠레스 존 제로',count:1431,children:[{id:'zzz-char',name:'캐릭터',count:1082},{id:'zzz-art',name:'공식 아트',count:198}]},
+      {id:'ba',name:'블루 아카이브',count:1204,children:[{id:'ba-char',name:'캐릭터',count:989},{id:'ba-kisaki',name:'키사키',count:142}]},
+      {id:'nier',name:'NieR',count:896},{id:'other-games',name:'기타 게임',count:1285}
+    ]},
+    {id:'manga',name:'만화',count:1930,children:[{id:'manga-cover',name:'표지',count:704},{id:'manga-illust',name:'일러스트',count:882},{id:'manga-etc',name:'기타',count:344}]},
+    {id:'anime',name:'애니메이션',count:1087,children:[{id:'anime-capture',name:'캡처',count:633},{id:'anime-art',name:'아트워크',count:454}]},
+    {id:'etc',name:'기타',count:1179,children:[{id:'illust',name:'일러스트',count:784},{id:'photo',name:'사진',count:201},{id:'unsorted',name:'미분류',count:194}]}
+  ];
 
-  let currentCategory = '전체';
-  let currentCollectionType = '게임';
+  const stateKey='lakomicsMobileAssetTreeV1';
+  const savedState=(()=>{try{return JSON.parse(localStorage.getItem(stateKey)||'{}')}catch{return {}}})();
+  let expanded=new Set(Array.isArray(savedState.expanded)?savedState.expanded:['game','re1999','wuwa','zzz']);
+  let selected=savedState.selected||'all';
+  let currentCollectionType='게임';
+  const app=document.querySelector('#app');
 
-  function mediaButton(asset, className='media-tile') {
-    return `<button class="${className}" data-asset="${asset.id}" aria-label="${asset.title}"><img src="${asset.src}" alt="" loading="lazy">${className==='media-tile' ? '<span class="media-badge">✓ 저장됨</span>' : ''}</button>`;
-  }
+  function persist(){localStorage.setItem(stateKey,JSON.stringify({expanded:[...expanded],selected,scrollTop:document.querySelector('#treeScroll')?.scrollTop||0}))}
+  function mediaButton(a,c='media-tile'){return `<button class="${c}" data-asset="${a.id}" aria-label="${a.title}"><img src="${a.src}" alt="" loading="lazy">${c==='media-tile'?'<span class="media-badge">✓ 저장됨</span>':''}</button>`}
+  function renderHome(){document.querySelector('#recentStrip').innerHTML=assets.slice(0,10).map(a=>mediaButton(a)).join('');const f=[collections.게임[0],collections.만화[0],collections.영화[0],collections.게임[1],collections.만화[1]];document.querySelector('#showcaseGrid').innerHTML=f.map((c,i)=>`<div class="showcase-item"><div class="cover"><img src="${img(c[0],500,700)}" alt="" loading="lazy"></div><div class="showcase-name">${c[1]}</div><div class="showcase-type">${i===2?'영화':i===1||i===4?'만화':'게임'}</div></div>`).join('')}
 
-  function renderHome() {
-    document.querySelector('#recentStrip').innerHTML = assets.slice(0,10).map(a => mediaButton(a)).join('');
-    const featured = [collections.게임[0], collections.만화[0], collections.영화[0], collections.게임[1], collections.만화[1]];
-    document.querySelector('#showcaseGrid').innerHTML = featured.map((c, i) => `
-      <div class="showcase-item"><div class="cover"><img src="${img(c[0],500,700)}" alt="" loading="lazy"></div><div class="showcase-name">${c[1]}</div><div class="showcase-type">${i===2?'영화':i===1||i===4?'만화':'게임'}</div></div>`).join('');
-  }
+  function findNode(nodes,id,path=[]){for(const n of nodes){if(n.divider)continue;const next=[...path,n];if(n.id===id)return {node:n,path:next};if(n.children){const r=findNode(n.children,id,next);if(r)return r}}return null}
+  function rowHtml(n,depth){const has=Array.isArray(n.children)&&n.children.length;return `<div class="tree-node ${has&&expanded.has(n.id)?'expanded ':''}${has?'':'leaf '}" data-node="${n.id}"><button class="tree-row ${selected===n.id?'selected ':''}${n.pinned?'pinned ':''}" style="--depth:${depth}" data-tree-select="${n.id}"><span class="tree-toggle" data-tree-toggle="${n.id}"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor"><path d="m4 2 4 4-4 4"/></svg></span><span class="tree-name">${n.name}</span><span class="tree-count">${n.count??''}</span></button>${has?`<div class="tree-children">${n.children.map(c=>rowHtml(c,depth+1)).join('')}</div>`:''}</div>`}
+  function renderTree(restoreScroll=false){const sc=document.querySelector('#treeScroll');const before=sc.scrollTop;sc.innerHTML=tree.map(n=>n.divider?'<div class="tree-divider"></div>':rowHtml(n,0)).join('');if(restoreScroll)sc.scrollTop=Number(savedState.scrollTop)||0;else sc.scrollTop=before}
 
-  function renderAssets() {
-    const cats = ['전체','리버스: 1999','명조','젠레스 존 제로','만화','기타'];
-    document.querySelector('#assetFilters').innerHTML = cats.map(c => `<button class="filter ${c===currentCategory?'active':''}" data-filter="${c}">${c}</button>`).join('');
-    const visible = currentCategory === '전체' ? assets : assets.filter(a => a.title===currentCategory || a.category===currentCategory);
-    document.querySelector('#assetGrid').innerHTML = visible.map(a => mediaButton(a,'asset-tile')).join('');
-  }
+  function assetFilter(){const r=findNode(tree,selected);if(!r||selected==='all'||selected==='favorite'||selected==='recent')return assets;const names=r.path.map(x=>x.name);if(names.includes('리버스: 1999'))return assets.filter(a=>a.title==='리버스: 1999');if(names.includes('명조'))return assets.filter(a=>a.title==='명조');if(names.includes('젠레스 존 제로'))return assets.filter(a=>a.title==='젠레스 존 제로');if(names.includes('만화'))return assets.filter(a=>a.category==='만화');if(names.includes('기타')||names.includes('일러스트'))return assets.filter(a=>a.category==='기타');return assets}
+  function renderAssets(){const r=findNode(tree,selected)||findNode(tree,'all');const visible=assetFilter();document.querySelector('#assetPath').innerHTML=r.path.map((x,i)=>i===r.path.length-1?`<strong>${x.name}</strong>`:x.name).join(' &nbsp;›&nbsp; ');document.querySelector('#assetTotal').textContent=`${r.node.count.toLocaleString()}개`;document.querySelector('#assetGrid').innerHTML=visible.map(a=>mediaButton(a,'asset-tile')).join('')}
+  function selectTree(id){selected=id;const r=findNode(tree,id);if(r){r.path.slice(0,-1).forEach(x=>{if(x.children)expanded.add(x.id)})}persist();renderTree();renderAssets();if(matchMedia('(max-width:999px), (orientation:portrait)').matches)closeSidebar()}
+  function toggleTree(id){expanded.has(id)?expanded.delete(id):expanded.add(id);persist();renderTree()}
 
-  function renderCollections() {
-    const types = Object.keys(collections);
-    document.querySelector('#collectionTabs').innerHTML = types.map(t => `<button class="collection-tab ${t===currentCollectionType?'active':''}" data-collection-tab="${t}">${t}</button>`).join('');
-    document.querySelector('#collectionGrid').innerHTML = collections[currentCollectionType].map(c => `
-      <div class="collection-card"><div class="cover"><img src="${img(c[0],500,750)}" alt="" loading="lazy"></div><div class="collection-title">${c[1]}</div><div class="collection-extra">${c[2]}</div></div>`).join('');
-  }
+  function renderCollections(){const types=Object.keys(collections);document.querySelector('#collectionTabs').innerHTML=types.map(t=>`<button class="collection-tab ${t===currentCollectionType?'active':''}" data-collection-tab="${t}">${t}</button>`).join('');document.querySelector('#collectionGrid').innerHTML=collections[currentCollectionType].map(c=>`<div class="collection-card"><div class="cover"><img src="${img(c[0],500,750)}" alt="" loading="lazy"></div><div class="collection-title">${c[1]}</div><div class="collection-extra">${c[2]}</div></div>`).join('')}
+  function go(view){document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.dataset.view===view));document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active',b.dataset.nav===view));closeSidebar();window.scrollTo({top:0,behavior:'instant'})}
+  function openSidebar(){app.classList.add('assets-sidebar-open')}function closeSidebar(){app.classList.remove('assets-sidebar-open')}
+  function openAsset(id){const a=assets.find(x=>x.id===Number(id));if(!a)return;const visible=assetFilter();const idx=Math.max(0,visible.findIndex(x=>x.id===a.id));document.querySelector('#viewerImage').src=img(a.seed,1400,1400);document.querySelector('#viewerTitle').textContent=a.title;document.querySelector('#viewerMeta').textContent=a.collected;document.querySelector('#viewerIndex').textContent=`${idx+1} / ${visible.length}`;document.querySelector('#viewer').showModal()}
 
-  function go(view) {
-    document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.dataset.view===view));
-    document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.nav===view));
-    window.scrollTo({top:0, behavior:'instant'});
-  }
-
-  function openAsset(id) {
-    const asset = assets.find(a => a.id===Number(id));
-    if (!asset) return;
-    const visible = currentCategory === '전체' ? assets : assets.filter(a => a.title===currentCategory || a.category===currentCategory);
-    const idx = Math.max(0, visible.findIndex(a => a.id===asset.id));
-    document.querySelector('#viewerImage').src = img(asset.seed,1400,1400);
-    document.querySelector('#viewerTitle').textContent = asset.title;
-    document.querySelector('#viewerMeta').textContent = asset.collected;
-    document.querySelector('#viewerIndex').textContent = `${idx+1} / ${visible.length}`;
-    document.querySelector('#viewer').showModal();
-  }
-
-  document.addEventListener('click', e => {
-    const nav = e.target.closest('[data-nav]'); if (nav) return go(nav.dataset.nav);
-    const direct = e.target.closest('[data-go]'); if (direct) return go(direct.dataset.go);
-    const filter = e.target.closest('[data-filter]'); if (filter) { currentCategory = filter.dataset.filter; renderAssets(); return; }
-    const ctab = e.target.closest('[data-collection-tab]'); if (ctab) { currentCollectionType = ctab.dataset.collectionTab; renderCollections(); return; }
-    const asset = e.target.closest('[data-asset]'); if (asset) return openAsset(asset.dataset.asset);
+  document.addEventListener('click',e=>{
+    const nav=e.target.closest('[data-nav]');if(nav)return go(nav.dataset.nav);
+    const direct=e.target.closest('[data-go]');if(direct)return go(direct.dataset.go);
+    const toggle=e.target.closest('[data-tree-toggle]');if(toggle){e.stopPropagation();return toggleTree(toggle.dataset.treeToggle)}
+    const row=e.target.closest('[data-tree-select]');if(row)return selectTree(row.dataset.treeSelect);
+    const ctab=e.target.closest('[data-collection-tab]');if(ctab){currentCollectionType=ctab.dataset.collectionTab;return renderCollections()}
+    const asset=e.target.closest('[data-asset]');if(asset)return openAsset(asset.dataset.asset)
   });
-
-  document.querySelector('#viewerClose').addEventListener('click', () => document.querySelector('#viewer').close());
-  document.querySelector('#viewer').addEventListener('click', e => { if (e.target.id === 'viewer') e.currentTarget.close(); });
-  document.querySelector('#refreshBtn').addEventListener('click', e => {
-    e.currentTarget.animate([{transform:'rotate(0deg)'},{transform:'rotate(360deg)'}], {duration:350, easing:'ease-out'});
-  });
-
-  renderHome(); renderAssets(); renderCollections();
+  document.querySelector('#categoryOpen').addEventListener('click',openSidebar);document.querySelector('#sidebarClose').addEventListener('click',closeSidebar);document.querySelector('#sidebarScrim').addEventListener('click',closeSidebar);
+  document.querySelector('#treeScroll').addEventListener('scroll',()=>{clearTimeout(window.__treeTimer);window.__treeTimer=setTimeout(persist,120)},{passive:true});
+  document.querySelector('#viewerClose').addEventListener('click',()=>document.querySelector('#viewer').close());document.querySelector('#viewer').addEventListener('click',e=>{if(e.target.id==='viewer')e.currentTarget.close()});
+  document.querySelector('#refreshBtn').addEventListener('click',e=>e.currentTarget.animate([{transform:'rotate(0)'},{transform:'rotate(360deg)'}],{duration:350,easing:'ease-out'}));
+  renderHome();renderTree(true);renderAssets();renderCollections();
 </script>
 </body>
 </html>
