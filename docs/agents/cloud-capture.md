@@ -50,7 +50,7 @@ The desktop Cloud Capture consumer:
 - leaves `ReviewPending` unacknowledged;
 - keeps outbound replication behavior untouched.
 
-The frontend currently runs the inbound poll once on startup and then approximately every five minutes.
+The frontend runs an inbound poll on startup, every 15 seconds while the app is visible, every 60 seconds while hidden, and immediately when the app becomes visible or focused again.
 
 ## Current inbound behavior
 
