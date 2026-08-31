@@ -273,7 +273,13 @@ Status: `TODO`
 - Prefer provider-namespaced identity such as `(provider, provider_work_id)` if/when Heliotrope becomes a second provider.
 
 ### CLOUD-UI-001 — Cloud status, transport diagnostics, and problem surface
-Status: `TODO`
+Status: `VERIFY`
+
+Implemented in main:
+- Settings expose a `연결 · 동기화 상태` surface: Cloud (credential/endpoint/last failure), PC direct (connection key/Remote/last failure), active classification source with count and explicit fallback reason, saved-media index source/key count, and the effective save mode.
+- A six-item local fallback renders as `로컬 기본 분류 · PC/Cloud 분류를 불러오지 못함 · N개 … 폴백` with degraded styling instead of looking healthy.
+- Collector/provider failure codes are surfaced concisely (`자격 증명 없음`, `마지막 실패 …`) without exposing tokens, URLs, or headers.
+- Diagnostics state is backed by regression tests (`settings:get` classification/saved-media/last-collector-failure) and passed manual device E2E verification.
 
 Settings should expose at least:
 - Cloud enabled/disabled state
@@ -298,43 +304,30 @@ Sidebar behavior:
 - Show a dynamic `동기화 문제 N` item in the lower management area only when failed/review-pending work exists.
 
 ### EXT-001 — Reorganize extension settings
-Status: `TODO`
+Status: `VERIFY`
 
-Problem:
-- Settings accumulated over time and are difficult to scan.
-
-Reorganize by responsibility:
-- save mode
-- cloud
-- direct PC connection
-- donut/radial UI
-- notifications
-- advanced/debug/legacy
-
-Move old or rarely used controls into an advanced section and remove true duplicates.
-After CLOUD-005 is verified, hide or remove mobile-only direct-PC controls that are no longer required while preserving desktop compatibility.
+Reorganized in main:
+- `저장 방식` (Automatic/PC direct/Cloud/Download with concise explanation), `Cloud`, `PC 직접 연결` (Lakomics 연결 + Remote), `연결 · 동기화 상태` diagnostics, `X Translate`, `모바일 도넛`, `PC · 방사형 메뉴 배치`, and a collapsed `고급 · 복구 설정` block.
+- Endpoint/key controls exist in exactly one section; legacy recovery tools (connection backup, offline donut JSON, download folder) stay under Advanced.
+- Stored legacy values survive hiding/renaming: legacy stored `saveMode: "app"` migrates to `auto`; the new PC-direct-only mode is the explicit `pc` value, so old saves are never reinterpreted.
+- Manual device E2E verification passed on the packaged test build.
 
 ### EXT-002 — Cloud-first extension save policy
-Status: `TODO`
 
-Possible modes:
-- Cloud first
-- PC direct
-- Automatic
+Status: `VERIFY`
 
-Preferred automatic behavior:
-- If the PC direct service is available, save locally immediately.
-- Otherwise save through Cloud Capture.
-- The user should not need to manually care which transport is currently available.
+Implemented in main:
+- User-facing modes: `자동` (default) / `PC 직접 연결만` (`pc`) / `Cloud만` (`cloud`) / `브라우저 Download만` (`download`).
+- Automatic: real PC ingestion attempt first (with the existing 3-attempt tunnel-recovery backoff, no per-save 8s probe) → Cloud Capture on failure or when the app can't take the media type → browser/device download only when both fail.
+- `pc` mode fails with an explicit direct error instead of silently using Cloud; `cloud` mode works with the PC off and keeps the existing device-download failure path.
+- Legacy stored `saveMode: "app"` migrates to `auto`; regression tests cover mode routing, no duplicate saves, cloud-without-PC, and device fallback.
+- Manual device E2E verification passed on the packaged test build.
 
 ### EXT-003 — Group media saved from the same X post
 Status: `TODO`
 
 Goal:
 - When several images or media items are saved from one X post, preserve the fact that they belonged to the same post and make them easy to view together later.
-
-Direction:
-- Reuse the shared source post URL as the primary grouping identity where safe.
 - Preserve per-asset records and normal classifications; grouping should not duplicate media.
 - Provide an easy "same post" view or sibling strip from the asset viewer/inspector.
 - Consider mixed image/video posts as the same group.
