@@ -47,7 +47,12 @@ struct ProbeFormat {
 
 pub(crate) trait VideoTool {
     fn probe(&self, source: &Path, extension: &str) -> Result<VideoProbe, LibraryError>;
-    fn create_poster(&self, source: &Path, destination: &Path) -> Result<(), LibraryError>;
+    fn create_poster(
+        &self,
+        source: &Path,
+        seek_ms: u64,
+        destination: &Path,
+    ) -> Result<(), LibraryError>;
     fn create_scrub_frames(
         &self,
         source: &Path,
@@ -90,7 +95,13 @@ impl VideoTool for ProcessVideoTool {
         parse_probe(&stdout, extension)
     }
 
-    fn create_poster(&self, source: &Path, destination: &Path) -> Result<(), LibraryError> {
+    fn create_poster(
+        &self,
+        source: &Path,
+        seek_ms: u64,
+        destination: &Path,
+    ) -> Result<(), LibraryError> {
+        let seek_seconds = format!("0.{seek_ms:03}");
         run_tool(
             "ffmpeg",
             [
@@ -98,7 +109,7 @@ impl VideoTool for ProcessVideoTool {
                 "-v".into(),
                 "error".into(),
                 "-ss".into(),
-                "0.5".into(),
+                seek_seconds.into(),
                 "-i".into(),
                 source.as_os_str().to_owned(),
                 "-frames:v".into(),
@@ -396,7 +407,7 @@ impl Library {
         fs::create_dir(&pending).map_err(|_| LibraryError::VideoPreparationFailed)?;
         let prepared = (|| {
             let poster = pending.join("poster.webp");
-            tool.create_poster(&source, &poster)?;
+            tool.create_poster(&source, poster_seek_ms(video.duration_ms), &poster)?;
             let timestamps = scrub_timestamps_ms(video.duration_ms);
             let scrub = pending.join("scrub");
             tool.create_scrub_frames(&source, &timestamps, &scrub)?;
@@ -548,6 +559,10 @@ fn direct_playback(container: &str, video_codec: &str, audio_codec: Option<&str>
     }
 }
 
+fn poster_seek_ms(duration_ms: u64) -> u64 {
+    duration_ms.min(1_000) / 2
+}
+
 fn scrub_timestamps_ms(duration_ms: u64) -> Vec<u64> {
     let count = duration_ms.div_ceil(1_000).clamp(1, MAX_SCRUB_FRAMES);
     (0..count)
@@ -626,14 +641,15 @@ mod tests {
     use rusqlite::params;
 
     use super::{
-        direct_playback, install_prepared_directory, parse_probe, scrub_timestamps_ms, VideoProbe,
-        VideoTool,
+        direct_playback, install_prepared_directory, parse_probe, poster_seek_ms,
+        scrub_timestamps_ms, VideoProbe, VideoTool,
     };
     use crate::library::{error::LibraryError, models::MediaSummary, Library};
 
     #[derive(Default)]
     struct FakeVideoTool {
         proxy_calls: AtomicUsize,
+        poster_seeks_ms: std::cell::RefCell<Vec<u64>>,
     }
 
     struct FailingVideoTool;
@@ -643,7 +659,13 @@ mod tests {
             unreachable!("preparation uses persisted probe metadata")
         }
 
-        fn create_poster(&self, _source: &Path, destination: &Path) -> Result<(), LibraryError> {
+        fn create_poster(
+            &self,
+            _source: &Path,
+            seek_ms: u64,
+            destination: &Path,
+        ) -> Result<(), LibraryError> {
+            self.poster_seeks_ms.borrow_mut().push(seek_ms);
             fs::write(destination, b"poster").map_err(|_| LibraryError::VideoPreparationFailed)
         }
 
@@ -675,7 +697,12 @@ mod tests {
             Err(LibraryError::VideoPreparationFailed)
         }
 
-        fn create_poster(&self, _source: &Path, _destination: &Path) -> Result<(), LibraryError> {
+        fn create_poster(
+            &self,
+            _source: &Path,
+            _seek_ms: u64,
+            _destination: &Path,
+        ) -> Result<(), LibraryError> {
             Err(LibraryError::VideoPreparationFailed)
         }
 
@@ -900,6 +927,59 @@ mod tests {
             .unwrap();
 
         assert_eq!(state, "pending");
+    }
+
+    #[test]
+    fn poster_seek_stays_at_half_second_for_normal_videos() {
+        assert_eq!(poster_seek_ms(1_000), 500);
+        assert_eq!(poster_seek_ms(65_432), 500);
+        assert_eq!(poster_seek_ms(25_263), 500);
+    }
+
+    #[test]
+    fn poster_seek_stays_inside_ultra_short_clips() {
+        assert_eq!(poster_seek_ms(200), 100);
+        assert_eq!(poster_seek_ms(400), 200);
+        assert_eq!(poster_seek_ms(520), 260);
+        for duration in [200, 400, 496, 520] {
+            let seek = poster_seek_ms(duration);
+            assert!(
+                seek < duration,
+                "seek {seek}ms must precede {duration}ms EOF",
+            );
+        }
+    }
+
+    #[test]
+    fn poster_seek_never_underflows_on_zero_duration() {
+        assert_eq!(poster_seek_ms(0), 0);
+        assert_eq!(poster_seek_ms(1), 0);
+    }
+
+    #[test]
+    fn preparation_requests_duration_based_poster_seek() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        insert_pending_video(&library, "short-1", "mp4", "h264", Some("aac"), 200);
+        let tool = FakeVideoTool::default();
+
+        let progress = library.prepare_pending_videos_with(&tool, 1).unwrap();
+
+        assert_eq!(progress.failed, 0);
+        assert_eq!(tool.poster_seeks_ms.borrow().as_slice(), &[100]);
+    }
+
+    #[test]
+    fn preparation_keeps_half_second_seek_for_normal_length_videos() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        insert_pending_video(&library, "normal-1", "mp4", "h264", Some("aac"), 2_000);
+        let tool = FakeVideoTool::default();
+
+        let progress = library.prepare_pending_videos_with(&tool, 1).unwrap();
+
+        assert_eq!(progress.failed, 0);
+        assert_eq!(tool.poster_seeks_ms.borrow().as_slice(), &[500]);
     }
 
     fn insert_pending_video(
