@@ -72,6 +72,10 @@ pub enum LibraryError {
     CloudCaptureAcknowledgementRejected(u16),
     #[error("캡처 수집 기록이 올바르지 않습니다")]
     InvalidCloudCaptureRecord,
+    #[error("분류 스냅샷 게시가 거부됐습니다: HTTP {0}")]
+    CloudClassificationsPublishRejected(u16),
+    #[error("분류 스냅샷 게시 내용이 올바르지 않습니다")]
+    InvalidClassificationSnapshot,
     #[error("캡처가 유사 이미지 검토 대기 상태입니다")]
     CloudCaptureReviewPending,
     #[error("온라인 카탈로그가 설치되지 않았습니다")]

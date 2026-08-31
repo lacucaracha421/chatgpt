@@ -1,3 +1,4 @@
+import json
 import os
 import sqlite3
 import uuid
@@ -270,6 +271,22 @@ def startup_captures():
             """
             CREATE INDEX IF NOT EXISTS idx_captures_status_created
             ON captures(status, created_at)
+            """
+        )
+        db.commit()
+
+
+@app.on_event("startup")
+def startup_classifications():
+    with get_db() as db:
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS classification_snapshots (
+                singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                payload TEXT NOT NULL,
+                published_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
             """
         )
         db.commit()
@@ -573,3 +590,77 @@ def acknowledge_capture_imported(
         capture_id,
         acknowledgement.imported_at.isoformat(),
     )
+
+
+# --- Classification snapshot (PC -> VPS publish, extension read) -----------
+# The PC Lakomics app owns classification data; the VPS only stores the latest
+# published snapshot so the mobile extension needs no live PC connection.
+
+class ClassificationSnapshotPublish(BaseModel):
+    entries: list[dict]
+    published_at: str
+
+
+MAX_SNAPSHOT_BYTES = 512 * 1024
+
+
+@app.put("/v1/classifications")
+def publish_classification_snapshot(
+    snapshot: ClassificationSnapshotPublish,
+    authorization: str | None = Header(default=None),
+):
+    require_auth(authorization)
+
+    payload = snapshot.model_dump_json()
+    if len(payload) > MAX_SNAPSHOT_BYTES:
+        raise HTTPException(status_code=413, detail="Snapshot too large")
+
+    with get_db() as db:
+        db.execute(
+            """
+            INSERT INTO classification_snapshots (singleton, payload, published_at, updated_at)
+            VALUES (1, ?, ?, ?)
+            ON CONFLICT(singleton) DO UPDATE SET
+                payload = excluded.payload,
+                published_at = excluded.published_at,
+                updated_at = excluded.updated_at
+            """,
+            (payload, snapshot.published_at, now_iso()),
+        )
+        db.commit()
+
+    return {"ok": True, "published_at": snapshot.published_at}
+
+
+@app.get("/v1/classifications")
+def get_classification_snapshot(
+    authorization: str | None = Header(default=None),
+):
+    require_auth(authorization)
+
+    with get_db() as db:
+        row = db.execute(
+            "SELECT payload FROM classification_snapshots WHERE singleton = 1"
+        ).fetchone()
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="No classification snapshot published yet")
+
+    return json.loads(row["payload"])
+
+
+@app.get("/v1/classifications/meta")
+def classification_snapshot_meta(
+    authorization: str | None = Header(default=None),
+):
+    require_auth(authorization)
+
+    with get_db() as db:
+        row = db.execute(
+            "SELECT published_at, updated_at FROM classification_snapshots WHERE singleton = 1"
+        ).fetchone()
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="No classification snapshot published yet")
+
+    return dict(row)

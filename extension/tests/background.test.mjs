@@ -1428,6 +1428,7 @@ function createHarness(initialStorage = {}, runtimeId = "nclkmjmmlcdaeomgadndean
   const responses = [];
   const fetchCalls = [];
   const clock = { now: 0 };
+  let harnessPlatform = "win";
   let actionListener;
   let optionsOpened = 0;
   const downloadCalls = [];
@@ -1455,6 +1456,7 @@ function createHarness(initialStorage = {}, runtimeId = "nclkmjmmlcdaeomgadndean
       id: runtimeId,
       onMessage: { addListener() {} },
       async openOptionsPage() { optionsOpened += 1; },
+      getPlatformInfo(callback) { callback({ os: harnessPlatform }); },
     },
     storage: {
       local: {
@@ -1504,6 +1506,7 @@ function createHarness(initialStorage = {}, runtimeId = "nclkmjmmlcdaeomgadndean
   return {
     api: context.LakomicsBackground,
     clock,
+    setPlatform(os) { harnessPlatform = os; },
     fetchCalls,
     downloadCalls,
     storage,
@@ -1596,4 +1599,170 @@ test("pin repair never borrows same-name history from a different endpoint", asy
   const response = await harness.api.handleMessage({ type: "classifications:refresh" });
   assert.deepEqual(plain(response.pinnedIds), []);
   assert.deepEqual(plain(harness.storage.pinnedClassificationIds), []);
+});
+
+test("mobile classifications come from the VPS snapshot without a connection key or PC", async () => {
+  const harness = createHarness({
+    collectorToken: "server-secret-token",
+    collectorSettings: { enabled: true, baseUrl: "http://100.76.119.29:32146" },
+  });
+  harness.setPlatform("android");
+  harness.queueJson({
+    entries: [{ id: "game", kind: "root", name: "게임", parentId: null }],
+  });
+
+  const response = await harness.api.handleMessage({ type: "classifications:get" });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.classificationSource, "cloud");
+  assert.equal(response.entries[0].id, "game");
+  assert.equal(harness.fetchCalls.length, 1);
+  assert.equal(harness.fetchCalls[0].url, "http://100.76.119.29:32146/v1/classifications");
+  assert.equal(
+    harness.fetchCalls[0].options.headers.Authorization,
+    "Bearer server-secret-token",
+  );
+});
+
+test("cached cloud classifications are used when the VPS is temporarily unavailable", async () => {
+  const harness = createHarness({
+    collectorToken: "server-secret-token",
+    collectorSettings: { enabled: true, baseUrl: "http://100.76.119.29:32146" },
+  });
+  harness.setPlatform("android");
+  harness.queueJson({
+    entries: [{ id: "game", kind: "root", name: "게임", parentId: null }],
+  });
+  const first = await harness.api.handleMessage({ type: "classifications:get" });
+  assert.equal(first.classificationSource, "cloud");
+
+  harness.clock.now = 30_001;
+  harness.queueError(new TypeError("Failed to fetch"));
+  const second = await harness.api.handleMessage({ type: "classifications:get" });
+  assert.equal(second.ok, true);
+  assert.equal(second.classificationSource, "cloud-cache");
+  assert.equal(second.entries[0].id, "game");
+  assert.equal(
+    second.entries.some((entry) => entry.id === "local:wuthering-waves"),
+    false,
+    "local fallback tree must not replace a usable cloud snapshot",
+  );
+});
+
+test("capture with cloud classifications sends the existing classification_id", async () => {
+  const harness = createHarness({
+    collectorToken: "server-secret-token",
+    collectorSettings: { enabled: true, baseUrl: "http://100.76.119.29:32146" },
+  });
+  harness.setPlatform("android");
+  harness.queueJson({
+    entries: [{ id: "game", kind: "root", name: "게임", parentId: null }],
+  });
+  const classifications = await harness.api.handleMessage({ type: "classifications:get" });
+  assert.equal(classifications.classificationSource, "cloud");
+
+  harness.queueJson({ capture: { id: "capture-9", status: "pending" } });
+  const response = await harness.api.handleMessage({
+    type: "ingestion:create",
+    payload: {
+      source: "x",
+      mediaType: "image",
+      mediaUrl: "https://pbs.twimg.com/media/CLOUD?format=jpg&name=orig",
+      sourceUrl: "https://x.com/artist/status/9000/photo/1",
+      classificationId: classifications.entries[0].id,
+      classificationName: classifications.entries[0].name,
+      classificationSource: classifications.classificationSource,
+    },
+  });
+
+  assert.equal(response.ok, true);
+  const captureCalls = harness.fetchCalls.filter((call) => call.url.endsWith("/v1/captures"));
+  assert.equal(captureCalls.length, 1);
+  assert.equal(JSON.parse(captureCalls[0].options.body).classification_id, "game");
+});
+
+test("normal mobile save path stays fully on the cloud endpoint when the PC is off", async () => {
+  const harness = createHarness({
+    collectorToken: "server-secret-token",
+    collectorSettings: { enabled: true, baseUrl: "http://100.76.119.29:32146" },
+  });
+  harness.setPlatform("android");
+  harness.queueJson({
+    entries: [{ id: "game", kind: "root", name: "게임", parentId: null }],
+  });
+  const classifications = await harness.api.handleMessage({ type: "classifications:get" });
+
+  harness.queueJson({ capture: { id: "capture-10", status: "pending" } });
+  const response = await harness.api.handleMessage({
+    type: "ingestion:create",
+    payload: {
+      source: "x",
+      mediaType: "image",
+      mediaUrl: "https://pbs.twimg.com/media/OFFPC?format=jpg&name=orig",
+      sourceUrl: "https://x.com/artist/status/10000/photo/1",
+      classificationId: classifications.entries[0].id,
+      classificationName: classifications.entries[0].name,
+      classificationSource: classifications.classificationSource,
+    },
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(
+    harness.fetchCalls.every((call) => call.url.startsWith("http://100.76.119.29:32146/")),
+    true,
+    "no request may reach the direct PC endpoint while the PC is off",
+  );
+  assert.equal(harness.downloadCalls.length, 0);
+});
+
+test("desktop direct-PC classifications still work without collector settings", async () => {
+  const harness = createHarness({
+    connectionToken: "0123456789abcdef0123456789abcdef",
+  });
+  harness.queueJson({
+    entries: [{ id: "pc", kind: "root", name: "PC", parentId: null }],
+  });
+
+  const response = await harness.api.handleMessage({ type: "classifications:get" });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.classificationSource, "app");
+  assert.equal(harness.fetchCalls[0].url, "http://127.0.0.1:32145/v1/classifications");
+});
+
+test("desktop with both paths keeps preferring the live PC endpoint for saved-index", async () => {
+  const harness = createHarness({
+    connectionToken: "0123456789abcdef0123456789abcdef",
+    collectorToken: "server-secret-token",
+    collectorSettings: { enabled: true, baseUrl: "http://100.76.119.29:32146" },
+  });
+  harness.queueJson({ keys: ["111:1"] });
+
+  const saved = await harness.api.handleMessage({ type: "saved-index:get" });
+
+  assert.equal(saved.ok, true);
+  assert.equal(harness.fetchCalls[0].url, "http://127.0.0.1:32145/v1/saved-x-media");
+});
+
+test("normal desktop mode still uses the local PC classifications with collector enabled", async () => {
+  const harness = createHarness({
+    connectionToken: "0123456789abcdef0123456789abcdef",
+    collectorToken: "server-secret-token",
+    collectorSettings: { enabled: true, baseUrl: "http://100.76.119.29:32146" },
+  });
+  harness.queueJson({
+    entries: [{ id: "pc", kind: "root", name: "PC", parentId: null }],
+  });
+
+  const response = await harness.api.handleMessage({ type: "classifications:get" });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.classificationSource, "app", "desktop must keep the direct PC source");
+  assert.equal(response.entries[0].id, "pc");
+  assert.equal(harness.fetchCalls[0].url, "http://127.0.0.1:32145/v1/classifications");
+  assert.equal(
+    harness.fetchCalls.some((call) => call.url.includes("100.76.119.29")),
+    false,
+    "desktop must not hit the VPS snapshot",
+  );
 });

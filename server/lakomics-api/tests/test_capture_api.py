@@ -594,3 +594,93 @@ class CaptureApiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ClassificationSnapshotApiTests(unittest.TestCase):
+    """PC publishes a snapshot; mobile extension reads it. PC는 원본이고 VPS는 저장소."""
+
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.database_path = Path(self.temp_dir.name) / "lakomics.sqlite3"
+        self.original_database_path = api_app.DB_PATH
+        self.original_api_token = api_app.API_TOKEN
+        api_app.DB_PATH = self.database_path
+        api_app.API_TOKEN = "test-token"
+        api_app.startup()
+        api_app.startup_classifications()
+        self.client = TestClient(api_app.app)
+
+    def tearDown(self) -> None:
+        self.client.close()
+        api_app.DB_PATH = self.original_database_path
+        api_app.API_TOKEN = self.original_api_token
+        self.temp_dir.cleanup()
+
+    @property
+    def auth(self):
+        return {"Authorization": "Bearer test-token"}
+
+    def publish_body(self, **overrides):
+        body = {
+            "entries": [
+                {"id": "game", "kind": "root", "name": "게임", "parentId": None},
+                {"id": "rpg", "kind": "tag", "name": "RPG", "parentId": "game"},
+            ],
+            "published_at": "2026-08-31T00:00:00+00:00",
+        }
+        body.update(overrides)
+        return body
+
+    def test_publish_then_retrieve_round_trips_entries_unmodified(self):
+        publish = self.client.put(
+            "/v1/classifications", headers=self.auth, json=self.publish_body()
+        )
+        self.assertEqual(publish.status_code, 200)
+        self.assertTrue(publish.json()["ok"])
+
+        retrievals = self.client.get("/v1/classifications", headers=self.auth)
+        self.assertEqual(retrievals.status_code, 200)
+        self.assertEqual(retrievals.json()["entries"], self.publish_body()["entries"])
+        self.assertEqual(retrievals.json()["published_at"], "2026-08-31T00:00:00+00:00")
+
+    def test_rejects_unauthenticated_reads_and_writes(self):
+        self.assertEqual(
+            self.client.put("/v1/classifications", json=self.publish_body()).status_code,
+            401,
+        )
+        self.assertEqual(
+            self.client.get("/v1/classifications").status_code, 401
+        )
+
+    def test_overwrite_replaces_the_whole_snapshot(self):
+        self.client.put("/v1/classifications", headers=self.auth, json=self.publish_body())
+        replacement = self.publish_body(
+            entries=[{"id": "movie", "kind": "root", "name": "영화", "parentId": None}],
+            published_at="2026-09-01T00:00:00+00:00",
+        )
+        self.client.put("/v1/classifications", headers=self.auth, json=replacement)
+
+        response = self.client.get("/v1/classifications", headers=self.auth)
+        self.assertEqual(response.json()["entries"], replacement["entries"])
+        self.assertEqual(response.json()["published_at"], "2026-09-01T00:00:00+00:00")
+
+    def test_read_before_any_publish_returns_404(self):
+        self.assertEqual(
+            self.client.get("/v1/classifications", headers=self.auth).status_code, 404
+        )
+        self.assertEqual(
+            self.client.get("/v1/classifications/meta", headers=self.auth).status_code,
+            404,
+        )
+
+    def test_oversized_snapshot_is_rejected(self):
+        entries = [
+            {"id": f"id-{n}", "kind": "tag", "name": "이름" * 40, "parentId": None}
+            for n in range(10_000)
+        ]
+        response = self.client.put(
+            "/v1/classifications",
+            headers=self.auth,
+            json=self.publish_body(entries=entries),
+        )
+        self.assertEqual(response.status_code, 413)

@@ -1,8 +1,9 @@
 use std::{fs::File, io::Read, time::Duration};
 
 use super::models::{
-    AcknowledgeCaptureRequest, PreparedAssetUpload, PresignUploadRequest, PresignUploadResponse,
-    RegisterAssetRequest, RemoteCaptureDownloadTicket, RemoteCapturePage, RemoteCapturePayload,
+    AcknowledgeCaptureRequest, ClassificationSnapshotPublish, PreparedAssetUpload,
+    PresignUploadRequest, PresignUploadResponse, RegisterAssetRequest,
+    RemoteCaptureDownloadTicket, RemoteCapturePage, RemoteCapturePayload,
 };
 use crate::library::error::LibraryError;
 
@@ -185,6 +186,31 @@ impl CloudClient {
         Ok(())
     }
 
+
+    /// 분류 스냅샷을 VPS에 게시한다. PC 라이브러리가 분류의 원본이며 VPS는
+    /// 모바일 확장용 최소 스냅샷만 저장한다.
+    pub(crate) fn publish_classification_snapshot(
+        &self,
+        token: &str,
+        snapshot: &ClassificationSnapshotPublish,
+    ) -> Result<(), LibraryError> {
+        let authorization = bearer(token)?;
+        let body =
+            serde_json::to_vec(snapshot).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        self.agent
+            .put(self.endpoint("/v1/classifications")?)
+            .header("Authorization", authorization)
+            .content_type("application/json")
+            .send(&body)
+            .map_err(|error| match error {
+                ureq::Error::StatusCode(status) => {
+                    LibraryError::CloudClassificationsPublishRejected(status)
+                }
+                ureq::Error::Timeout(_) => LibraryError::CloudRequestTimedOut,
+                _ => LibraryError::CloudRequestUnavailable,
+            })?;
+        Ok(())
+    }
 
     fn endpoint(&self, path: &str) -> Result<String, LibraryError> {
         self.base_url
