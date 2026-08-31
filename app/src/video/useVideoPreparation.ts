@@ -27,9 +27,12 @@ export function useVideoPreparation(options: Options) {
     optionsRef.current = options;
   }, [options]);
 
-  useEffect(() => () => {
-    activeRef.current = false;
-    requestedRef.current = false;
+  useEffect(() => {
+    activeRef.current = true;
+    return () => {
+      activeRef.current = false;
+      requestedRef.current = false;
+    };
   }, []);
 
   const applyProgress = useCallback((progress: VideoPreparationProgress) => {
