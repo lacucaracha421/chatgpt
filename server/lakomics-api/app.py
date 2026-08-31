@@ -1,13 +1,17 @@
 import json
 import os
 import sqlite3
+import time
+import urllib.error
+import urllib.error as urllib_error
+import urllib.request as urllib_request
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
 
@@ -207,6 +211,107 @@ def create_upload_presign(
             "Content-Type": request.content_type,
         },
     }
+
+
+
+# --- Online catalog transport v1 (PC -> VPS -> k-hentai) --------------------
+# PC searches the local VCK catalog (catalogs/kdata.db) without any network.
+# Only two operations need k-hentai reachability, and Korean networks cannot
+# reach k-hentai reliably, so the PC asks this VPS (Japan) to fetch on its
+# behalf. The endpoints accept only numeric ids; clients can never make the
+# VPS fetch an arbitrary URL (no open proxy / no SSRF surface).
+
+KHENTAI_ORIGIN = "https://k-hentai.org"
+CATALOG_UA = "Lakomics-Cloud/1.0"
+# Bounded retry: transient network failures and 5xx only; 4xx verdicts from
+# k-hentai (expired gallery, unknown id) are final for this request.
+CATALOG_ATTEMPTS = 3
+CATALOG_BACKOFF_SECONDS = 0.75
+# k-hentai pages are a few MB at most; a larger body means a hijack or an
+# HTML error page loop, so fail instead of buffering forever.
+CATALOG_MAX_BODY_BYTES = 5 * 1024 * 1024
+# Successful responses live in a small TTL cache keyed by URL so repeated PC
+# requests do not hit k-hentai at all. Gallery HTML embeds its own signed-URL
+# expiry, and update pages are short-lived, so 60s is safely conservative.
+CATALOG_CACHE_TTL_SECONDS = 60
+_catalog_cache: dict[str, tuple[float, int, bytes]] = {}
+
+
+def _catalog_fetch_once(url: str) -> tuple[int, bytes]:
+    request = urllib_request.Request(
+        url,
+        headers={
+            "User-Agent": CATALOG_UA,
+            "Accept": "text/html,application/json;q=0.9,*/*;q=0.8",
+        },
+    )
+    try:
+        with urllib_request.urlopen(request, timeout=30) as response:
+            return response.status, response.read(CATALOG_MAX_BODY_BYTES + 1)
+    except urllib_error.HTTPError as error:
+        return error.code, b""
+    except (urllib_error.URLError, TimeoutError, OSError):
+        # DNS/TLS/connect/timeout 실패는 k-hentai 쪽 장애다. 예외를 밖으로
+        # 흘려보내면 FastAPI raw 500이 되므로 게이트웨이 오류(0)로 정규화해
+        # 재시도 파이프라인이 502로 응답하게 한다. 프로그래머 오류는 잡지 않는다.
+        return 0, b""
+
+
+def _catalog_fetch_with_retry(url: str) -> tuple[int, bytes]:
+    last_status = 0
+    for attempt in range(CATALOG_ATTEMPTS):
+        status, body = _catalog_fetch_once(url)
+        if status == 200:
+            return status, body
+        # 0은 _catalog_fetch_once가 네트워크 장애를 정규화한 게이트웨이 오류다.
+        # k-hentai의 영구 4xx 판정(1xx~499)과 달리 재시도 대상이다.
+        if 0 < status < 500:
+            return status, body
+        last_status = status
+        if attempt + 1 < CATALOG_ATTEMPTS:
+            time.sleep(CATALOG_BACKOFF_SECONDS * (2**attempt))
+    return last_status, b""
+
+
+def _catalog_cached_get(url: str) -> Response:
+    now = time.monotonic()
+    cached = _catalog_cache.get(url)
+    if cached is not None and now - cached[0] < CATALOG_CACHE_TTL_SECONDS:
+        _, status, body = cached
+        return Response(content=body, status_code=status, media_type="text/html")
+    status, body = _catalog_fetch_with_retry(url)
+    if status >= 500:
+        raise HTTPException(status_code=502, detail="k-hentai unreachable")
+    if status == 404:
+        raise HTTPException(status_code=404, detail="work not found on k-hentai")
+    if status != 200 or not body:
+        raise HTTPException(status_code=502, detail="k-hentai returned no content")
+    if len(body) > CATALOG_MAX_BODY_BYTES:
+        raise HTTPException(status_code=502, detail="k-hentai response too large")
+    _catalog_cache[url] = (now, status, body)
+    return Response(content=body, status_code=200, media_type="text/html")
+
+
+@app.get("/v1/catalog/search-page")
+def catalog_search_page(
+    cursor: int | None = None,
+    authorization: str | None = Header(default=None),
+):
+    require_auth(authorization)
+    if cursor is not None and cursor <= 0:
+        raise HTTPException(status_code=400, detail="cursor must be a positive id")
+    query = "search=language%3Akorean"
+    if cursor is not None:
+        query += f"&next-id={cursor}"
+    return _catalog_cached_get(f"{KHENTAI_ORIGIN}/ajax/search?{query}")
+
+
+@app.get("/v1/catalog/gallery/{work_id}")
+def catalog_gallery(work_id: int, authorization: str | None = Header(default=None)):
+    require_auth(authorization)
+    if work_id <= 0:
+        raise HTTPException(status_code=400, detail="work id must be a positive id")
+    return _catalog_cached_get(f"{KHENTAI_ORIGIN}/r/{work_id}")
 
 
 # --- Mobile Capture Inbox v1 -----------------------------------------------

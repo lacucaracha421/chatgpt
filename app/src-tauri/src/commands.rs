@@ -1491,7 +1491,12 @@ async fn run_online_catalog_update(
                 .last_success_at,
         });
     };
-    catalog_update::execute_catalog_update(library, &transport, &app)
+    let vps_base_url = library
+        .cloud_sync_config()
+        .ok()
+        .and_then(|config| config.api_base_url);
+    // VPS base url이 설정된 경우 PC는 k-hentai 직접 연결 없이 VPS를 경유한다.
+    catalog_update::execute_catalog_update(library, &transport, &app, vps_base_url)
         .await
         .map_err(CommandError::from)
 }
@@ -1579,6 +1584,37 @@ pub async fn run_due_cloud_capture_sync(
         .map_err(CommandError::from)
 }
 
+/// 가장 최근 저장된 갤러리 HTML을 VPS에서 받아 페이지 목록으로 만든다.
+/// 직렬 resolver: 유효한 manifest 캐시가 있으면 네트워크 없이 즉시 돌아간다.
+fn resolved_gallery_from_cache_or_source(
+    root: &std::path::Path,
+    work_id: u64,
+    source: &dyn crate::catalog_source::CatalogSource,
+) -> Result<ResolvedGallery, LibraryError> {
+    if let Some(manifest) = crate::library::remote_gallery::load_valid_manifest(root, work_id)?
+    {
+        return Ok(ResolvedGallery {
+            provider: RemoteProvider::KHentai,
+            work_id: work_id.to_string(),
+            page_count: manifest.pages.len() as u32,
+            page_urls: manifest.pages.into_iter().map(|page| page.url).collect(),
+        });
+    }
+    let pages = crate::library::remote_gallery::fetch_khentai_gallery(work_id, source)?;
+    let page_count = pages.len() as u32;
+    let page_urls = pages.iter().map(|page| page.url.clone()).collect();
+    crate::library::remote_gallery::write_manifest(
+        root,
+        &crate::library::remote_gallery::RemoteGalleryManifest::khentai(work_id, pages),
+    )?;
+    Ok(ResolvedGallery {
+        provider: RemoteProvider::KHentai,
+        work_id: work_id.to_string(),
+        page_count,
+        page_urls,
+    })
+}
+
 #[tauri::command]
 pub async fn resolve_online_catalog_work(
     work_id: u64,
@@ -1586,29 +1622,34 @@ pub async fn resolve_online_catalog_work(
 ) -> Result<ResolvedGallery, CommandError> {
     let library = current_required(state)?;
     let root = library.root().to_path_buf();
+    let vps_base_url = library
+        .cloud_sync_config()
+        .ok()
+        .and_then(|config| config.api_base_url);
     tauri::async_runtime::spawn_blocking(move || -> Result<ResolvedGallery, LibraryError> {
-        if let Some(manifest) = crate::library::remote_gallery::load_valid_manifest(&root, work_id)?
-        {
-            return Ok(ResolvedGallery {
-                provider: RemoteProvider::KHentai,
-                work_id: work_id.to_string(),
-                page_count: manifest.pages.len() as u32,
-                page_urls: manifest.pages.into_iter().map(|page| page.url).collect(),
-            });
+        match vps_base_url.as_deref() {
+            Some(base_url) => {
+                let client = crate::catalog_source::VpsCatalogSource::new(base_url)?;
+                resolved_gallery_from_cache_or_source(&root, work_id, &client)
+            }
+            None => {
+                // VPS 미설정 시 기존 동작: PC가 k-hentai에 직접 닿는다(레거시).
+                let html = crate::library::remote_gallery::fetch_gallery_html_direct(work_id)?;
+                let pages = crate::library::remote_gallery::parse_khentai_gallery(&html)?;
+                let page_count = pages.len() as u32;
+                let page_urls = pages.iter().map(|page| page.url.clone()).collect();
+                crate::library::remote_gallery::write_manifest(
+                    &root,
+                    &crate::library::remote_gallery::RemoteGalleryManifest::khentai(work_id, pages),
+                )?;
+                Ok(ResolvedGallery {
+                    provider: RemoteProvider::KHentai,
+                    work_id: work_id.to_string(),
+                    page_count,
+                    page_urls,
+                })
+            }
         }
-        let pages = crate::library::remote_gallery::fetch_khentai_gallery(work_id)?;
-        let page_count = pages.len() as u32;
-        let page_urls = pages.iter().map(|page| page.url.clone()).collect();
-        crate::library::remote_gallery::write_manifest(
-            &root,
-            &crate::library::remote_gallery::RemoteGalleryManifest::khentai(work_id, pages),
-        )?;
-        Ok(ResolvedGallery {
-            provider: RemoteProvider::KHentai,
-            work_id: work_id.to_string(),
-            page_count,
-            page_urls,
-        })
     })
     .await
     .map_err(|_| background_task_error())?

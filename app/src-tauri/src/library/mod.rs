@@ -9,6 +9,7 @@ mod classification;
 mod collection;
 mod collection_source;
 mod collection_volume;
+mod catalog_provider;
 pub(crate) mod credential;
 mod db;
 mod drag_out;

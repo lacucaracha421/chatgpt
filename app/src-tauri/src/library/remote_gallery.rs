@@ -1,8 +1,6 @@
 use std::{
     io::Read,
     path::{Path, PathBuf},
-    sync::OnceLock,
-    time::Duration,
 };
 
 use regex::Regex;
@@ -11,6 +9,10 @@ use serde::{Deserialize, Serialize};
 use super::error::LibraryError;
 
 const MAX_GALLERY_HTML_BYTES: usize = 5 * 1024 * 1024;
+
+/// 원본 갤러리 매니페스트에 기록하는 provider 태그. 매니페스트 캐시 경로명과
+/// 검증 모두 이 값 하나로 결정된다.
+pub(crate) const REMOTE_GALLERY_PROVIDER: &str = super::catalog_provider::LEGACY_VCK_PROVIDER;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,7 +35,7 @@ pub(crate) struct RemoteGalleryManifest {
 impl RemoteGalleryManifest {
     pub(crate) fn khentai(work_id: u64, pages: Vec<RemotePageDescriptor>) -> Self {
         Self {
-            provider: "kHentai".into(),
+            provider: super::catalog_provider::LEGACY_VCK_PROVIDER.into(),
             work_id: work_id.to_string(),
             pages,
         }
@@ -98,10 +100,10 @@ pub(crate) fn parse_khentai_gallery(html: &str) -> Result<Vec<RemotePageDescript
     Ok(pages)
 }
 
-pub(crate) fn fetch_khentai_gallery(
-    work_id: u64,
-) -> Result<Vec<RemotePageDescriptor>, LibraryError> {
-    let mut response = gallery_agent()
+/// k-hentai에 (PC가) 직접 닿는 레거시 경로. WebView2 carrier에서만 쓴다.
+/// VPS carrier는 이 함수를 우회한다 — 한국 네트워크에 의존하지 않기 위함.
+pub(crate) fn fetch_gallery_html_direct(work_id: u64) -> Result<String, LibraryError> {
+    let mut response = crate::catalog_source::gallery_agent()
         .get(format!("https://k-hentai.org/r/{work_id}"))
         .header(
             "User-Agent",
@@ -119,21 +121,19 @@ pub(crate) fn fetch_khentai_gallery(
     if bytes.len() > MAX_GALLERY_HTML_BYTES {
         return Err(LibraryError::InvalidRemoteGallery);
     }
-    let html = String::from_utf8(bytes).map_err(|_| LibraryError::InvalidRemoteGallery)?;
+    String::from_utf8(bytes).map_err(|_| LibraryError::InvalidRemoteGallery)
+}
+
+/// 갤러리 HTML을 운영 전송원에서 가져온다. `source`는 k-hentai 직접 전송
+/// (WebView2/직접 ureq)이거나 일본 VPS 프록시다. 응답 본문 형식은 양쪽 동일.
+pub(crate) fn fetch_khentai_gallery(
+    work_id: u64,
+    source: &dyn crate::catalog_source::CatalogSource,
+) -> Result<Vec<RemotePageDescriptor>, LibraryError> {
+    let html = source.fetch_gallery(work_id)?;
     parse_khentai_gallery(&html)
 }
 
-fn gallery_agent() -> &'static ureq::Agent {
-    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
-    AGENT.get_or_init(|| {
-        ureq::Agent::config_builder()
-            .https_only(true)
-            .max_redirects(0)
-            .timeout_global(Some(Duration::from_secs(30)))
-            .build()
-            .into()
-    })
-}
 
 pub(crate) fn load_valid_manifest(
     root: &Path,
@@ -145,7 +145,7 @@ pub(crate) fn load_valid_manifest(
     let Ok(manifest) = serde_json::from_slice::<RemoteGalleryManifest>(&bytes) else {
         return Ok(None);
     };
-    let valid = manifest.provider == "kHentai"
+    let valid = manifest.provider == super::catalog_provider::LEGACY_VCK_PROVIDER
         && manifest.work_id == work_id.to_string()
         && !manifest.pages.is_empty()
         && manifest.pages.iter().all(|page| {

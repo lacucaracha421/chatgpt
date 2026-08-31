@@ -1,9 +1,12 @@
+mod catalog_source;
 mod catalog_transport;
 mod cloud;
 mod commands;
 mod extension_api;
 pub mod library;
 mod media_protocol;
+#[cfg(test)]
+mod catalog_source_tests;
 
 #[cfg(not(windows))]
 compile_error!("Lakomics is supported only on Windows");

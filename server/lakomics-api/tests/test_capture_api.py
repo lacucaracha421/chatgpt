@@ -38,14 +38,10 @@ class FakeS3:
         self.objects.pop(Key, None)
 
 
-fake_s3 = FakeS3()
-fake_r2 = types.ModuleType("r2")
-fake_r2._s3 = fake_s3
-fake_r2.R2_BUCKET = "test-bucket"
-fake_r2.presign_get = lambda object_key, expires_in=600: (
-    f"https://r2.example.test/{object_key}?expires={expires_in}"
-)
-sys.modules["r2"] = fake_r2
+# Canonical stub lives in test_capture_api_stub so test modules that import
+# app.py (catalog transport tests) share the same mutable fake regardless of
+# import order.
+from tests.test_capture_api_stub import fake_s3  # noqa: E402
 
 import capture_store  # noqa: E402
 import app as api_app  # noqa: E402

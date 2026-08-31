@@ -101,7 +101,9 @@ where
         &std::fs::read(manifest_path(root, work_id)).map_err(|_| LibraryError::MediaNotFound)?,
     )
     .map_err(|_| LibraryError::InvalidRemoteGallery)?;
-    if manifest.work_id != work_id.to_string() || manifest.provider != "kHentai" {
+    if manifest.work_id != work_id.to_string()
+        || manifest.provider != super::remote_gallery::REMOTE_GALLERY_PROVIDER
+    {
         return Err(LibraryError::InvalidRemoteGallery);
     }
     let descriptor = manifest
