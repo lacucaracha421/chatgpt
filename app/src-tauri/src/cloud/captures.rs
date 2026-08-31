@@ -5,7 +5,10 @@ use uuid::Uuid;
 
 use super::{
     client::CloudClient,
-    models::{ClassificationSnapshotPublish, RemoteCapture, RemoteCaptureKind},
+    models::{
+        ClassificationSnapshotPublish, RemoteCapture, RemoteCaptureKind,
+        SavedXMediaSnapshotPublish,
+    },
 };
 use crate::library::{
     error::LibraryError,
@@ -66,11 +69,22 @@ impl Library {
             .ok_or(LibraryError::InvalidCloudSyncConfig)?;
         let token = crate::library::credential::read_cloud_api_token_os()?;
         let client = CloudClient::new(&base_url)?;
-        let result = self.sync_next_cloud_capture_with(&client, &token)?;
-        // 수집 폴과 같은 주기로 분류 스냅샷을 게시해 모바일 확장이 PC 없이
-        // donut을 그릴 수 있게 유지한다. 게시 실패는 수집 결과를 막지 않는다.
-        if let Err(error) = self.publish_classification_snapshot() {
+        self.sync_next_cloud_capture_cycle_with(&client, &token)
+    }
+
+    pub(super) fn sync_next_cloud_capture_cycle_with(
+        &self,
+        client: &CloudClient,
+        token: &str,
+    ) -> Result<CloudCaptureSyncResult, LibraryError> {
+        let result = self.sync_next_cloud_capture_with(client, token)?;
+        // 수집 폴과 같은 주기로 모바일용 읽기 스냅샷을 게시한다. 어느 한 게시
+        // 실패도 수집 결과나 다른 스냅샷 게시를 막지 않는다.
+        if let Err(error) = self.publish_classification_snapshot_with(client, token) {
             eprintln!("cloud classifications publish: {error}");
+        }
+        if let Err(error) = self.publish_saved_x_media_snapshot_with(client, token) {
+            eprintln!("cloud saved X media publish: {error}");
         }
         Ok(result)
     }
@@ -86,25 +100,29 @@ impl Library {
     /// 현재 분류 상태의 스냅샷을 VPS에 게시한다. PC 라이브러리가 분류의
     /// 원본이며 VPS는 모바일 확장이 PC 없이 donut을 그리기 위한 최소 사본만
     /// 저장한다. 게시 실패는 수집 폴을 막지 않는다.
-    pub(crate) fn publish_classification_snapshot(&self) -> Result<(), LibraryError> {
-        let config = self.cloud_sync_config()?;
-        if !config.enabled {
-            return Ok(());
-        }
-        let base_url = config
-            .api_base_url
-            .ok_or(LibraryError::InvalidCloudSyncConfig)?;
-        let token = crate::library::credential::read_cloud_api_token_os()?;
-        let client = CloudClient::new(&base_url)?;
+    fn publish_classification_snapshot_with(
+        &self,
+        client: &CloudClient,
+        token: &str,
+    ) -> Result<(), LibraryError> {
         let entries = self.list_classifications()?;
         let published_at = chrono::Utc::now().to_rfc3339();
         client.publish_classification_snapshot(
-            &token,
+            token,
             &ClassificationSnapshotPublish {
                 entries: &entries,
                 published_at: &published_at,
             },
         )
+    }
+
+    fn publish_saved_x_media_snapshot_with(
+        &self,
+        client: &CloudClient,
+        token: &str,
+    ) -> Result<(), LibraryError> {
+        let keys = self.saved_x_media_keys()?;
+        client.publish_saved_x_media_snapshot(token, &SavedXMediaSnapshotPublish { keys: &keys })
     }
 
     pub(super) fn sync_next_cloud_capture_with(

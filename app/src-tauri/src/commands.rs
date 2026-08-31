@@ -148,6 +148,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::InvalidCloudCaptureRecord => "invalid_cloud_capture_record",
             LibraryError::CloudCaptureReviewPending => "cloud_capture_review_pending",
             LibraryError::CloudClassificationsPublishRejected(_) => "cloud_classifications_publish_rejected",
+            LibraryError::CloudSavedXMediaPublishRejected(_) => "cloud_saved_x_media_publish_rejected",
             LibraryError::InvalidClassificationSnapshot => "invalid_classification_snapshot",
             LibraryError::OnlineCatalogNotInstalled => "online_catalog_not_installed",
             LibraryError::OnlineCatalogWorkNotFound => "online_catalog_work_not_found",

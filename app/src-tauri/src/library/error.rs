@@ -74,6 +74,8 @@ pub enum LibraryError {
     InvalidCloudCaptureRecord,
     #[error("분류 스냅샷 게시가 거부됐습니다: HTTP {0}")]
     CloudClassificationsPublishRejected(u16),
+    #[error("저장된 X 미디어 스냅샷 게시가 거부됐습니다: HTTP {0}")]
+    CloudSavedXMediaPublishRejected(u16),
     #[error("분류 스냅샷 게시 내용이 올바르지 않습니다")]
     InvalidClassificationSnapshot,
     #[error("캡처가 유사 이미지 검토 대기 상태입니다")]

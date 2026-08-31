@@ -4,6 +4,7 @@ use super::models::{
     AcknowledgeCaptureRequest, ClassificationSnapshotPublish, PreparedAssetUpload,
     PresignUploadRequest, PresignUploadResponse, RegisterAssetRequest,
     RemoteCaptureDownloadTicket, RemoteCapturePage, RemoteCapturePayload,
+    SavedXMediaSnapshotPublish,
 };
 use crate::library::error::LibraryError;
 
@@ -205,6 +206,28 @@ impl CloudClient {
             .map_err(|error| match error {
                 ureq::Error::StatusCode(status) => {
                     LibraryError::CloudClassificationsPublishRejected(status)
+                }
+                ureq::Error::Timeout(_) => LibraryError::CloudRequestTimedOut,
+                _ => LibraryError::CloudRequestUnavailable,
+            })?;
+        Ok(())
+    }
+
+    pub(crate) fn publish_saved_x_media_snapshot(
+        &self,
+        token: &str,
+        snapshot: &SavedXMediaSnapshotPublish,
+    ) -> Result<(), LibraryError> {
+        let authorization = bearer(token)?;
+        let body = serde_json::to_vec(snapshot).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        self.agent
+            .put(self.endpoint("/v1/saved-x-media")?)
+            .header("Authorization", authorization)
+            .content_type("application/json")
+            .send(&body)
+            .map_err(|error| match error {
+                ureq::Error::StatusCode(status) => {
+                    LibraryError::CloudSavedXMediaPublishRejected(status)
                 }
                 ureq::Error::Timeout(_) => LibraryError::CloudRequestTimedOut,
                 _ => LibraryError::CloudRequestUnavailable,

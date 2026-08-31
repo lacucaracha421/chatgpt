@@ -972,6 +972,94 @@ test("saved X media cache never leaks across Lakomics endpoints", async () => {
   assert.equal(response.code, "app_offline");
 });
 
+test("Android Collector reads saved X media from the VPS and persists a cloud cache", async () => {
+  const harness = createHarness({
+    collectorToken: "server-secret-token",
+    collectorSettings: { enabled: true, baseUrl: "https://collector-a.tail.ts.net" },
+  });
+  harness.setPlatform("android");
+  harness.queueJson({ keys: ["123:1", "123:2", "bad", "123:2"] });
+
+  const response = await harness.api.handleMessage({ type: "saved-index:get" });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.indexSource, "cloud");
+  assert.deepEqual(plain(response.savedKeys), ["123:1", "123:2"]);
+  assert.equal(harness.fetchCalls[0].url, "https://collector-a.tail.ts.net/v1/saved-x-media");
+  assert.equal(harness.storage.lastCloudSavedXMediaIndex.baseUrl, "https://collector-a.tail.ts.net");
+});
+
+test("Android saved index uses only a matching Collector cloud cache when VPS is unavailable", async () => {
+  const matching = createHarness({
+    collectorToken: "server-secret-token",
+    collectorSettings: { enabled: true, baseUrl: "https://collector-a.tail.ts.net" },
+    lastCloudSavedXMediaIndex: {
+      version: 1, baseUrl: "https://collector-a.tail.ts.net", savedKeys: ["10:1"], savedAt: 12,
+    },
+  });
+  matching.setPlatform("android");
+  matching.queueError(new TypeError("offline"));
+  const cached = await matching.api.handleMessage({ type: "saved-index:get" });
+  assert.equal(cached.indexSource, "cloud-cache");
+  assert.deepEqual(plain(cached.savedKeys), ["10:1"]);
+
+  const isolated = createHarness({
+    collectorToken: "server-secret-token",
+    collectorSettings: { enabled: true, baseUrl: "https://collector-b.tail.ts.net" },
+    lastCloudSavedXMediaIndex: {
+      version: 1, baseUrl: "https://collector-a.tail.ts.net", savedKeys: ["10:1"], savedAt: 12,
+    },
+  });
+  isolated.setPlatform("android");
+  isolated.queueError(new TypeError("offline"));
+  const missing = await isolated.api.handleMessage({ type: "saved-index:get" });
+  assert.equal(missing.ok, false);
+  assert.equal(isolated.fetchCalls.length, 1, "Android must not probe a dead PC after VPS failure");
+});
+
+test("Android saved index merges bounded recentBrowserSaves keys into the VPS snapshot", async () => {
+  const harness = createHarness({
+    collectorToken: "server-secret-token",
+    collectorSettings: { enabled: true, baseUrl: "https://collector.tail.ts.net" },
+    recentBrowserSaves: {
+      "saved-x-media\u0000999:2": { savedXMediaKey: "999:2", savedAt: 0 },
+      "saved-x-media\u0000bad": { savedXMediaKey: "bad", savedAt: 0 },
+    },
+  });
+  harness.setPlatform("android");
+  harness.queueJson({ keys: ["123:1"] });
+
+  const response = await harness.api.handleMessage({ type: "saved-index:get" });
+  assert.deepEqual(plain(response.savedKeys), ["123:1", "999:2"]);
+});
+
+test("successful Android Collector save is immediately merged before VPS republishes", async () => {
+  const harness = createHarness({
+    collectorToken: "server-secret-token",
+    collectorSettings: { enabled: true, baseUrl: "http://100.76.119.29:32146" },
+  });
+  harness.setPlatform("android");
+  harness.queueJson({ capture: { id: "capture-1", status: "pending" } });
+  const saved = await harness.api.handleMessage({
+    type: "ingestion:create",
+    payload: {
+      source: "x", mediaType: "image",
+      mediaUrl: "https://pbs.twimg.com/media/NEW?format=jpg&name=orig",
+      sourceUrl: "https://x.com/user/status/222/photo/3",
+      classificationId: "tag", classificationName: "Tag", classificationSource: "cloud",
+    },
+  });
+  assert.equal(saved.ok, true);
+
+  harness.queueJson({ keys: [] });
+  const index = await harness.api.handleMessage({ type: "saved-index:get" });
+  assert.deepEqual(plain(index.savedKeys), ["222:3"]);
+  assert.equal(
+    harness.storage.recentBrowserSaves["saved-x-media\u0000222:3"].savedXMediaKey,
+    "222:3",
+  );
+});
+
 test("X Translate proxy only allows the four configured HTTPS API hosts", async () => {
   const harness = createHarness();
 

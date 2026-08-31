@@ -169,3 +169,9 @@ pub(crate) struct ClassificationSnapshotPublish<'a> {
     pub entries: &'a [crate::library::models::ClassificationEntry],
     pub published_at: &'a str,
 }
+
+/// PC 라이브러리에서 계산한 X 사진 저장 키의 최신 전체 스냅샷.
+#[derive(Debug, Serialize)]
+pub(crate) struct SavedXMediaSnapshotPublish<'a> {
+    pub keys: &'a [String],
+}

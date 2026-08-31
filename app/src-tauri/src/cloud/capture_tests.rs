@@ -989,6 +989,75 @@ fn review_pending_capture_is_not_acknowledged() {
     handle.join().unwrap();
 }
 
+#[test]
+fn snapshot_publish_serializes_saved_keys_and_failure_does_not_fail_sync_cycle() {
+    let server = Server::http("127.0.0.1:0").unwrap();
+    let base_url = format!("http://{}", server.server_addr());
+    let handle = thread::spawn(move || {
+        let mut requests = Vec::new();
+        for _ in 0..3 {
+            let mut request = server.recv().unwrap();
+            assert_eq!(
+                header_value(&request, "authorization"),
+                Some("Bearer test-token")
+            );
+            let url = request.url().to_string();
+            let mut body = String::new();
+            request.as_reader().read_to_string(&mut body).unwrap();
+            requests.push((url.clone(), body));
+            match url.as_str() {
+                "/v1/captures/pending" => request
+                    .respond(json_response(json!({ "captures": [] })))
+                    .unwrap(),
+                "/v1/classifications" => request.respond(Response::empty(200)).unwrap(),
+                "/v1/saved-x-media" => request.respond(Response::empty(503)).unwrap(),
+                _ => panic!("unexpected request: {url}"),
+            }
+        }
+        requests
+    });
+
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    let source = temp.path().join("saved.png");
+    fs::write(&source, png_bytes()).unwrap();
+    library
+        .ingest_media(crate::library::models::IngestMediaRequest {
+            source_path: source,
+            classification_id: None,
+            source_url: Some("https://x.com/example/status/123/photo/2".into()),
+            collected_at: None,
+            replace_duplicate_metadata: false,
+            source_published_at: None,
+            creator_name: None,
+            creator_handle: Some("example".into()),
+            creator_url: Some("https://x.com/example".into()),
+            import_source: crate::library::models::ImportSource::BrowserExtension,
+            import_batch_id: "00000000-0000-4000-8000-000000000002".into(),
+        })
+        .unwrap();
+
+    let result = library
+        .sync_next_cloud_capture_cycle_with(&CloudClient::new(&base_url).unwrap(), "test-token")
+        .unwrap();
+    assert_eq!(result, super::captures::CloudCaptureSyncResult::default());
+
+    let requests = handle.join().unwrap();
+    assert_eq!(
+        requests
+            .iter()
+            .map(|item| item.0.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "/v1/captures/pending",
+            "/v1/classifications",
+            "/v1/saved-x-media",
+        ]
+    );
+    let saved_body: Value = serde_json::from_str(&requests[2].1).unwrap();
+    assert_eq!(saved_body, json!({ "keys": ["123:2"] }));
+}
+
 /// 검토 트리거용 큰 이미지 픽스처. ingestion 테스트의 scene_fixture와 같은
 /// 패턴으로 유사 해시가 결정적으로 나오도록 한다.
 fn vertical_stripes_fixture(width: u32, height: u32) -> image::DynamicImage {

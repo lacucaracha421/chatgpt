@@ -462,9 +462,9 @@ fn dispatch(request: ApiRequest, library: Option<&Library>, token: &str) -> (Api
             let Some(library) = library else {
                 return error_to_pair(ApiError::LibraryNotOpen);
             };
-            match saved_x_media_keys(library) {
+            match library.saved_x_media_keys() {
                 Ok(keys) => (ApiResponse::json(200, &SavedXMediaResponse { keys }), None),
-                Err(error) => error_to_pair(error),
+                Err(_) => error_to_pair(ApiError::Internal),
             }
         }
         ("POST", "/v1/ingestions") => {
@@ -484,17 +484,18 @@ fn dispatch(request: ApiRequest, library: Option<&Library>, token: &str) -> (Api
     }
 }
 
-fn saved_x_media_keys(library: &Library) -> Result<Vec<String>, ApiError> {
-    let source_urls = library
-        .list_normal_x_source_urls()
-        .map_err(|_| ApiError::Internal)?;
-    let mut keys = BTreeSet::new();
-    for source_url in source_urls {
-        if let Some(key) = x_photo_key(&source_url) {
-            keys.insert(key);
+impl Library {
+    pub(crate) fn saved_x_media_keys(
+        &self,
+    ) -> Result<Vec<String>, crate::library::error::LibraryError> {
+        let mut keys = BTreeSet::new();
+        for source_url in self.list_normal_x_source_urls()? {
+            if let Some(key) = x_photo_key(&source_url) {
+                keys.insert(key);
+            }
         }
+        Ok(keys.into_iter().collect())
     }
-    Ok(keys.into_iter().collect())
 }
 
 fn x_photo_key(value: &str) -> Option<String> {
