@@ -500,6 +500,31 @@ Review and define:
 
 Design for 10,000+ assets without unnecessary stutter or uncontrolled disk growth.
 
+### PERF-003 — Bound background work and gallery memory
+Status: `TODO`
+
+Goal:
+- Keep Lakomics responsive and resource usage bounded as the library grows, without removing features or replacing the current React/Tauri foundation.
+- Prefer work that runs only when the app is idle over background loops that compete with active browsing.
+
+Phase 1 — highest-impact structural limits:
+- Similarity indexing: delay startup work, use `requestIdleCallback` where available, process small batches, pause while the user is scrolling/interacting, and leave roughly 100–500 ms between batches.
+- Video preparation: run only during idle periods, reduce each batch to roughly 2–3 videos, pause during gallery interaction, and leave roughly 300 ms between batches.
+- Gallery pagination: replace unbounded page accumulation with a sliding window around the current viewport. Keep roughly 5–8 pages / 600–800 assets in memory, discard distant pages, and reload them by cursor when the user returns.
+- Preserve `@tanstack/react-virtual`; the target is bounded JS data, row-layout calculation, and selection state rather than a second DOM virtualization system.
+
+Phase 2 — startup and repeated-work reductions:
+- Screen lazy loading: convert infrequently visited views such as Settings, Manga, Similarity Review, Trash, and Revisited views to `React.lazy()` / dynamic imports, with a stable loading boundary that does not reintroduce UI-004 flashing.
+- Date-bucket caching: cache the all-library date-bucket query and invalidate it only after relevant asset additions, deletions, or timestamp-changing mutations.
+- Cloud Capture polling: check immediately when the app regains focus, then use a slower cadence such as 60 seconds while active and 5 minutes in the background unless real use demonstrates a need for faster polling.
+
+Verification / acceptance:
+- Compare cold-start time, idle CPU/disk activity, and memory after long scrolling before and after the change.
+- Verify scrolling and selection remain stable when old gallery pages are evicted and reloaded in either direction.
+- Verify pending similarity/video work continues making progress after interaction stops and survives repeated pause/resume cycles.
+- Verify newly captured Cloud items still appear promptly after focus return.
+- Coordinate with PERF-001, PERF-002, UI-004, and BUG-007; do not trade lower resource use for flashing or scroll resets.
+
 ### PERF-002 — Preserve view state across navigation
 Status: `TODO`
 
@@ -679,8 +704,9 @@ For each new bug, record:
 3. EXT-001 / EXT-002 extension settings cleanup and automatic Cloud/direct-PC save policy
 4. CLOUD-006 full-library cloud replication/backfill for Lakomics Mobile, then incremental metadata/classification sync
 5. UI-004 + PERF-002 + BUG-007 flashing reduction, view-state preservation, and mutation scroll stability
-6. PERF-001 10,000+ asset cache/media optimization, including mobile thumbnail/preview optimization after CLOUD-006 correctness
-7. EXT-003 same-X-post media grouping
+6. PERF-003 Phase 1 background-work throttling and bounded gallery memory, then Phase 2 lazy loading/cache/polling reductions
+7. PERF-001 10,000+ asset cache/media optimization, including mobile thumbnail/preview optimization after CLOUD-006 correctness
+18. EXT-003 same-X-post media grouping
 8. EXT-004 adaptive/hidden secondary donut tags
 9. BUG-006 and remaining P1 usability work as reproduced/prioritized
 10. OPS-001 backup/migration/settings portability
