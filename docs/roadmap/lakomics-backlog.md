@@ -73,7 +73,7 @@ Resolution / verified behavior:
 - A video imported through that flow was initially blocked only by the video preparation bug (BUG-004) and reached `ready` after that fix.
 
 ### BUG-001 — Collection view shows an error toast on entry
-Status: `TODO`
+Status: `DONE`
 
 Observed behavior:
 - Collection view itself opens.
@@ -218,7 +218,7 @@ Status: `TODO`
 - Make connection/transport errors more diagnosable without exposing secrets.
 
 ### UI-006 — Easier asset selection clearing
-Status: `TODO`
+Status: `DONE`
 
 Current behavior:
 - Selection is mainly cleared through the bottom X control.
@@ -229,7 +229,7 @@ Improve with:
 - Keep the explicit X button.
 
 ### UI-005 — Collection cover aspect ratio / crop handling
-Status: `TODO`
+Status: `DONE`
 
 Problem:
 - User-selected collection covers are slightly cropped.
@@ -242,14 +242,14 @@ Direction:
 - Reuse consistent cover presentation rules across list/detail/showcase views.
 
 ### UI-001 — Move Similarity Review to the management section
-Status: `TODO`
+Status: `DONE`
 
 - Move `유사 검토` out of the main quick-view group.
 - Place it in the lower management area near Trash/Settings.
 - Preserve count and routing behavior.
 
 ### UI-003 — Use a standard scrollbar in the asset repository
-Status: `TODO`
+Status: `DONE`
 
 Observed behavior:
 - The Asset Repository currently shows the legacy Codex-style/custom scrollbar and the native/default scrollbar at the same time.
@@ -259,6 +259,19 @@ Direction:
 - Ensure the repository has one intended scroll owner rather than nested overflow surfaces producing duplicate scrollbars.
 - Use a normal OS/browser-like scrollbar.
 - Do not change virtualization or scroll behavior.
+
+### BUG-008 — Blue page-edge highlight in catalog double-page viewer
+Status: `TODO`
+
+Observed behavior:
+- In online catalog double-page mode, an intermittent bright blue vertical line appears near the center of the viewer.
+- Screenshot evidence shows the line follows the right edge and lower rounded corner of the left rendered page rather than a fixed center divider.
+- This resembles a native focus/outline/selection artifact more than intentional viewer styling.
+
+Direction:
+- Inspect page image/wrapper focus state, dialog focus management, edge navigation overlays, `:focus` / `:focus-visible`, outline, box-shadow, selection, and drag behavior.
+- Compare against the read-only VCK reference at `C:\chatgpt\reference\VCK-0.1.0-win-x64`, whose double-page layout does not intentionally draw this blue edge.
+- Fix only the affected viewer scope; do not remove keyboard focus indicators globally.
 
 ## P2 — architecture / larger feature work
 
@@ -308,6 +321,49 @@ Direction:
 - Keep the same VPS transport boundary; the PC should request Lakomics VPS catalog endpoints, and the VPS should translate those requests to the appropriate k-hentai language query.
 - Define how Korean translations and Japanese originals of the same underlying work are presented before adding any automatic grouping or deduplication.
 - Do not require Heliotrope for this feature; implement it against the existing k-hentai/VCK path first if practical.
+
+### CATALOG-004 — Advanced VCK-style catalog search syntax
+Status: `TODO`
+
+Goal:
+- Upgrade the current simple title / single `namespace:value` catalog search into a composable query language based on useful VCK behavior.
+
+Initial syntax target:
+- quoted values such as `artist:"two words"`
+- namespace filters and aliases such as `artist:`, `series:`, `character:`, `language:`
+- explicit work lookup with `id:12345` and compatible bare-id lookup if useful
+- page-count comparisons such as `page>20`, `page<=100`
+- negation such as `-female:tag`
+- grouping and boolean operators such as `(artist:a or artist:b) -female:c`
+- implicit AND for adjacent terms
+
+Direction:
+- Parse into a small AST and compile to parameterized local SQLite queries; do not concatenate raw user input into SQL.
+- Preserve the existing simple-search behavior as a valid subset.
+- Use `reference/VCK-0.1.0-win-x64/resources/app/dist/search/query.js` and `dialects.js` as read-only behavioral references rather than copying bundled code blindly.
+- Keep provider transport concerns separate from query parsing.
+- Follow-up candidates after the core grammar is stable: favorite tags, always-excluded tags, and contextual autocomplete counts based on the current query.
+
+### UI-009 — VCK-inspired manga viewer parity improvements
+Status: `TODO`
+
+Goal:
+- Expand the current lightweight `PageViewer` using proven reader behaviors from VCK while keeping Lakomics' own React/Tauri architecture.
+
+Candidate scope:
+- left-to-right / right-to-left reading direction
+- explicit cover pairing behavior for double-page mode
+- thumbnail/page overview with direct page jump
+- real fullscreen mode and convenient keyboard shortcuts
+- paged versus scroll reading modes, with vertical/horizontal scroll where practical
+- configurable viewer margins / page spacing
+- remember reader preferences between sessions, with separate desktop/mobile profiles only if actually useful
+- preserve current reading progress, preload behavior, privacy mode, and error handling
+
+Reference / constraints:
+- Treat `C:\chatgpt\reference\VCK-0.1.0-win-x64` as read-only reference material.
+- Do not port Electron-specific hidden-window/network code into the viewer.
+- Resolve BUG-005's blue page-edge artifact as part of or before this pass so new viewer controls are built on a clean base.
 
 ### CATALOG-002 — Heliotrope/VCK coexistence and migration strategy
 Status: `TODO`
@@ -626,12 +682,14 @@ For each new bug, record:
 6. PERF-001 10,000+ asset cache/media optimization, including mobile thumbnail/preview optimization after CLOUD-006 correctness
 7. EXT-003 same-X-post media grouping
 8. EXT-004 adaptive/hidden secondary donut tags
-9. BUG-001 / BUG-005 / BUG-006 / UI-003 and remaining P1 usability work as reproduced/prioritized
+9. BUG-006 and remaining P1 usability work as reproduced/prioritized
 10. OPS-001 backup/migration/settings portability
 11. CLOUD-003 long-video async handling if real-world use requires it
 12. CATALOG-003 Japanese-language catalog ingestion/filter after CATALOG-001 reaches DONE
-13. CATALOG-002 Heliotrope as a provider-namespaced second catalog source after Phase 1 is stable
-14. NOTE-001 / STATS-001 / IDEA-001 / UI-008
-15. Long-term collection presentation / shelf work
+13. CATALOG-004 advanced VCK-style catalog search syntax
+14. BUG-008 + UI-009 catalog/manga viewer cleanup and VCK-inspired reader improvements
+15. CATALOG-002 Heliotrope as a provider-namespaced second catalog source after Phase 1 is stable
+16. NOTE-001 / STATS-001 / IDEA-001 / UI-008
+17. Long-term collection presentation / shelf work
 
 This order is a working execution preference, not a dependency graph. Reorder when a real regression or production verification failure becomes more urgent.

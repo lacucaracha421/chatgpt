@@ -15,12 +15,18 @@ X 이미지·영상·움짤 MP4를 서버로 바로 수집할 수 있고, 분류
 확장 설정의 `미디어 저장 서버`에서:
 
 - `VPS Capture Inbox 사용`을 켠다.
-- 서버 주소 기본값은 `http://100.76.119.29:32146`이다.
+- 권장 Cloud endpoint는 `https://laku-tokyo.tail0aa1a3.ts.net:8443`이다. 구버전 확장에는 `http://100.76.119.29:32146`이 기본값으로 남아 있을 수 있다.
 - VPS의 `LAKOMICS_API_TOKEN` 값을 `서버 API 토큰`에 입력한다.
 - `저장하고 테스트`를 누른다.
 
 성공하면 `서버 연결 성공 · 미디어 수집 준비됨`이 표시된다.
 서버 토큰은 확장 로컬 저장소에만 보관되고 설정 조회 응답에는 포함되지 않는다.
+
+### Titanium / Tailscale 주의
+
+Titanium에서는 Android Tailscale 앱의 split tunneling `제외 앱` 목록에 Titanium을 넣지 않는다. 제외되어 있으면 `100.x` Tailscale IP 접근이 실패하거나 `*.ts.net` 주소가 `ERR_NAME_NOT_RESOLVED`로 실패할 수 있다.
+
+운영 HTTPS 경로는 `Tailscale Serve :8443 -> 127.0.0.1:32147 -> lakomics-local-proxy.service -> 100.76.119.29:32146`이다. `/health`에서 `{"ok":true,...}`가 반환되면 네트워크 경로가 정상이다. 기존 `http://100.76.119.29:32146` endpoint는 하위 호환을 위해 유지한다.
 
 ## 3. PC 분류 연결
 

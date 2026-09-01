@@ -103,6 +103,24 @@ Preserve these invariants when changing either side:
 - Validate remote media hosts and content/size limits server-side; do not trust browser-provided media metadata alone.
 - Never include API or Collector tokens in committed docs, logs, fixtures, or screenshots.
 
+## VPS HTTPS endpoint
+
+Android/Titanium에서 Cloud Capture에 접근할 때는 Tailscale Serve HTTPS 경로를 사용한다. 운영 주소는 `https://laku-tokyo.tail0aa1a3.ts.net:8443`이며, health check는 `https://laku-tokyo.tail0aa1a3.ts.net:8443/health`다.
+
+현재 운영 라우팅은 다음과 같다.
+
+- Tailscale Serve `:8443` -> `http://127.0.0.1:32147`
+- `lakomics-local-proxy.service` (`socat`) -> `http://100.76.119.29:32146`
+- `lakomics-api.service`는 기존처럼 Tailscale IP `100.76.119.29:32146`에서 uvicorn을 제공한다.
+- 기존 raw endpoint `http://100.76.119.29:32146`도 하위 호환을 위해 유지한다.
+
+이 HTTPS 경로는 Titanium에서 raw Tailscale-IP HTTP 접근 문제가 있었기 때문에 추가되었다. Android Tailscale 앱의 split tunneling에서 Titanium을 제외하면 `100.x` 접근이 실패하거나 `*.ts.net` MagicDNS가 `ERR_NAME_NOT_RESOLVED`가 될 수 있으므로 Titanium은 Tailscale 제외 앱에 두지 않는다. `8443` 경로는 tailnet-only이며 외부 공개 엔드포인트가 아니다.
+
+운영 서비스 이름:
+
+- `lakomics-api.service`
+- `lakomics-local-proxy.service`
+
 ## Current implementation order
 
 Use the living backlog for status. The intended near-term sequence is:
