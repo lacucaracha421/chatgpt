@@ -11,14 +11,6 @@
     return typeof value === "string" ? value.trim().slice(0, max) : "";
   }
 
-  function referrerAllowed() {
-    try {
-      return new URL(document.referrer).origin === PAGE_ORIGIN;
-    } catch {
-      return false;
-    }
-  }
-
   function normalizeBaseUrl(value) {
     const raw = clean(value, 500) || DEFAULT_BASE_URL;
     try {
@@ -128,16 +120,19 @@
     return { ok: true, url };
   }
 
-  function reply(target, requestId, result) {
+  function reply(target, targetOrigin, requestId, result) {
     target.postMessage({
       source: "lakomics-mobile-api",
       requestId,
       result,
-    }, "*");
+    }, targetOrigin);
   }
 
   window.addEventListener("message", async (event) => {
-    if (!referrerAllowed() || event.source !== window.parent) return;
+    // document.referrer is not reliable for chrome-extension iframes on Android.
+    // Validate the actual sender origin instead; only the Lakomics Pages origin
+    // may invoke this privileged bridge.
+    if (event.source !== window.parent || event.origin !== PAGE_ORIGIN) return;
     const data = event.data;
     if (!data || data.source !== "lakomics-mobile-content") return;
     const requestId = clean(data.requestId, 120);
@@ -151,6 +146,6 @@
     } else {
       result = { ok: false, code: "unknown_mobile_api_operation" };
     }
-    reply(event.source, requestId, result);
+    reply(event.source, event.origin, requestId, result);
   });
 })();
