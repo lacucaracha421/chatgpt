@@ -30,6 +30,7 @@ const ALL_DATE_BUCKETS = {
   offsetMinutes: -new Date().getTimezoneOffset(),
 };
 
+
 export function AssetBrowser({ view, onViewChange, classifications, albums = [], collections = [], onCollectionsChanged = () => undefined, onMembershipChanged = () => undefined, sort, metadataVisible, privacyMode, onPrivacyModeChange, thumbnailRowHeight = 180, refreshVersion, clearSelectionRequest = 0, requestedAsset = null, onRequestedAssetHandled = () => undefined, onSortChange, onMetadataVisibleChange, onThumbnailRowHeightChange = () => undefined, onStatusChange, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: Props) {
   const { gateway } = useLibrary();
   const [revisitDate, setRevisitDate] = useState<string | null>(null);
@@ -92,7 +93,6 @@ export function AssetBrowser({ view, onViewChange, classifications, albums = [],
       setSelectedAsset((selected) => reconcileAsset(selected, selectedViewKeyRef.current, viewKey, result.items));
       setViewerAssetId((assetId) => requestedAssetRef.current?.id === assetId ? assetId : reconcileAssetId(assetId, viewerViewKeyRef.current, viewKey, result.items));
     }).catch((error: unknown) => { if (generation === generationRef.current) setFirstError({ queryKey, message: commandErrorMessage(error, "자산을 불러오지 못했습니다.") }); }).finally(() => { if (generation === generationRef.current) setFirstLoading(false); });
-    return () => { if (generation === generationRef.current) generationRef.current += 1; };
   }, [gateway, queryBase, queryKey, refreshVersion, retryVersion, revisitDate, view.kind, viewKey]);
   useEffect(() => {
     if (view.kind === "revisit") { setDateBuckets({ queryKey, buckets: [] }); return; }
@@ -123,12 +123,21 @@ export function AssetBrowser({ view, onViewChange, classifications, albums = [],
   const loadNextPage = useCallback((retry = false) => {
     if (!activePage || !tailCursor || nextLoadingRef.current || (currentNextError && !retry)) return;
     const generation = generationRef.current; const cursor = tailCursor; nextLoadingRef.current = true; setNextLoading(true); setNextError(null);
-    void gateway.listAssets({ ...queryBase, after: cursor, aroundDate: null }).then((result) => { if (generation !== generationRef.current) return; setPage((current) => current?.queryKey === queryKey ? { queryKey, items: [...current.items, ...result.items], headCursor: current.headCursor, tailCursor: result.nextCursor } : current); }).catch((error: unknown) => { if (generation === generationRef.current) setNextError({ queryKey, message: commandErrorMessage(error, "다음 자산을 불러오지 못했습니다.") }); }).finally(() => { if (generation === generationRef.current) { nextLoadingRef.current = false; setNextLoading(false); } });
+    void gateway.listAssets({ ...queryBase, after: cursor, aroundDate: null }).then((result) => {
+      if (generation !== generationRef.current) return;
+      setPage((current) => {
+        if (current?.queryKey !== queryKey) return current;
+        const existing = new Set(current.items.map((asset) => asset.id));
+        const fresh = result.items.filter((asset) => !existing.has(asset.id));
+        if (fresh.length === 0) return current;
+        return { queryKey, items: [...current.items, ...fresh], headCursor: current.headCursor, tailCursor: result.nextCursor };
+      });
+    }).catch((error: unknown) => { if (generation === generationRef.current) setNextError({ queryKey, message: commandErrorMessage(error, "다음 자산을 불러오지 못했습니다.") }); }).finally(() => { if (generation === generationRef.current) { nextLoadingRef.current = false; setNextLoading(false); } });
   }, [activePage, currentNextError, gateway, queryBase, queryKey, tailCursor]);
   const loadPrevPage = useCallback((retry = false) => {
     if (!activePage || !headCursor || prevLoadingRef.current || (currentPrevError && !retry)) return;
     const generation = generationRef.current; const cursor = headCursor; prevLoadingRef.current = true; setPrevLoading(true); setPrevError(null);
-    void gateway.listAssets({ ...queryBase, after: null, before: cursor, aroundDate: null }).then((result) => { if (generation !== generationRef.current) return; setPage((current) => current?.queryKey === queryKey ? { queryKey, items: [...result.items, ...current.items], headCursor: result.previousCursor ?? null, tailCursor: current.tailCursor } : current); }).catch((error: unknown) => { if (generation === generationRef.current) setPrevError({ queryKey, message: commandErrorMessage(error, "이전 자산을 불러오지 못했습니다.") }); }).finally(() => { if (generation === generationRef.current) { prevLoadingRef.current = false; setPrevLoading(false); } });
+    void gateway.listAssets({ ...queryBase, after: null, before: cursor, aroundDate: null }).then((result) => { if (generation !== generationRef.current) return; setPage((current) => { if (current?.queryKey !== queryKey) return current; const existing = new Set(current.items.map((asset) => asset.id)); const fresh = result.items.filter((asset) => !existing.has(asset.id)); if (fresh.length === 0) return current; return { queryKey, items: [...fresh, ...current.items], headCursor: result.previousCursor ?? null, tailCursor: current.tailCursor }; }); }).catch((error: unknown) => { if (generation === generationRef.current) setPrevError({ queryKey, message: commandErrorMessage(error, "이전 자산을 불러오지 못했습니다.") }); }).finally(() => { if (generation === generationRef.current) { prevLoadingRef.current = false; setPrevLoading(false); } });
   }, [activePage, currentPrevError, gateway, queryBase, queryKey, headCursor]);
   const reshuffle = () => { randomPivotRef.current = createRandomPivot(); setRandomVersion((value) => value + 1); };
   const selectWithGesture = (asset: AssetSummary, gesture: SelectionGesture) => {

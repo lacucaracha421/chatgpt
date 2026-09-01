@@ -381,6 +381,43 @@ describe("AssetBrowser", () => {
     expect(nextCall.classificationId).toBe("classification-b");
     expect(nextCall.after).toEqual({ token: "b-cursor" });
   });
+
+  it("rejects a next-page response whose items already exist in the page", async () => {
+    const gateway = createGateway();
+    const status = vi.fn();
+    vi.mocked(gateway.listAssets)
+      .mockResolvedValueOnce({ items: Array.from({ length: 50 }, (_, index) => ({ ...asset(index), title: `B-${index}` })), nextCursor: { token: "b-cursor" } })
+      .mockResolvedValueOnce({ items: Array.from({ length: 50 }, (_, index) => ({ ...asset(index), title: `B-${index}` })), nextCursor: null });
+    renderBrowser(gateway, { view: { kind: "classification", classificationId: "classification-b" }, status });
+    expect(await screen.findByRole("option", { name: "B-0" })).toBeVisible();
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledTimes(2));
+    await act(async () => { await new Promise<void>((resolve) => { setTimeout(resolve, 0); }); });
+
+    expect(status).toHaveBeenLastCalledWith(expect.objectContaining({ loadedCount: 50 }));
+  });
+
+  it("purges stale gallery rows when the scope shrinks while scrolled", async () => {
+    const gateway = createGateway();
+    vi.mocked(gateway.listAssets)
+      .mockResolvedValueOnce({ items: Array.from({ length: 100 }, (_, index) => ({ ...asset(index), title: `A-${index}` })), nextCursor: { token: "a-cursor" } })
+      .mockResolvedValue({ items: Array.from({ length: 100 }, (_, index) => ({ ...asset(index + 100), title: `A-${index + 100}` })), nextCursor: { token: "a-cursor-2" } });
+    const { container, rerender } = renderBrowser(gateway);
+    expect(await screen.findByRole("option", { name: "A-0" })).toBeVisible();
+
+    const scrollElement = container.querySelector(".asset-gallery__scroll") as HTMLElement;
+    scrollElement.scrollTop = 4000;
+    fireEvent.scroll(scrollElement);
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledTimes(2));
+    await act(async () => { await new Promise<void>((resolve) => { setTimeout(resolve, 0); }); });
+
+    vi.mocked(gateway.listAssets).mockResolvedValueOnce({ items: Array.from({ length: 5 }, (_, index) => ({ ...asset(index + 900), title: `B-${index}` })), nextCursor: null });
+    rerender(browserElement(gateway, { view: { kind: "classification", classificationId: "classification-b" } }));
+    expect(await screen.findByRole("option", { name: "B-0" })).toBeVisible();
+
+
+    expect(scrollElement.scrollHeight).toBeLessThan(3000);
+    expect(container.querySelectorAll(".asset-gallery__row").length).toBeLessThanOrEqual(6);
+  });
   it("ignores a stale next-page response that resolves after a scope switch", async () => {
     let resolveANext!: (page: AssetPage) => void;
     const aNext = new Promise<AssetPage>((resolve) => { resolveANext = resolve; });
