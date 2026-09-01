@@ -472,6 +472,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
           await gateway.setAssetClassification({ assetIds: payload.assetIds, classificationId: target.entryId });
         }
         setAssetRefresh((current) => current + 1);
+        refreshMembershipCounts();
         setMessage(`${payload.assetIds.length}개 자산을 ${target.kind === "album" ? "앨범에 추가" : "폴더로 이동"}했습니다.`);
         return;
       }

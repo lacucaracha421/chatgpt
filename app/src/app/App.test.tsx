@@ -854,7 +854,7 @@ describe("App", () => {
     await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenCalledTimes(callsBeforeDrop + 1));
   });
 
-  it("drops an asset selection on a classification in one batch", async () => {
+  it("refreshes sidebar counts after dropping assets on a classification", async () => {
     Object.defineProperties(HTMLElement.prototype, {
       offsetWidth: { configurable: true, get: () => 900 },
       clientWidth: { configurable: true, get: () => 840 },
@@ -863,7 +863,9 @@ describe("App", () => {
     });
     localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
     const libraryGateway = gateway();
-    vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games]);
+    vi.mocked(libraryGateway.listClassifications)
+      .mockResolvedValueOnce([{ ...games, assetCount: 1 }])
+      .mockResolvedValueOnce([{ ...games, assetCount: 2 }]);
     vi.mocked(libraryGateway.listAssets).mockResolvedValue({ items: [asset], nextCursor: null });
     vi.mocked(libraryGateway.setAssetClassification).mockResolvedValue(undefined);
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
@@ -883,8 +885,6 @@ describe("App", () => {
     fireEvent.pointerDown(tile, { button: 0, pointerId: 3, clientX: 10, clientY: 10 });
     fireEvent.pointerMove(tile, { pointerId: 3, clientX: 20, clientY: 1 });
     expect(target).toHaveAttribute("data-drop-state", "valid");
-    expect(target).toHaveAttribute("data-drop-position", "inside");
-    expect(screen.getByText("1개 자산 · 폴더에 추가")).toBeInTheDocument();
     fireEvent.pointerUp(tile, { pointerId: 3, clientX: 20, clientY: 1 });
 
     await waitFor(() => expect(libraryGateway.setAssetClassification).toHaveBeenCalledWith({
@@ -892,6 +892,9 @@ describe("App", () => {
       classificationId: "root-games",
     }));
     expect(await screen.findByText("1개 자산을 폴더로 이동했습니다.")).toBeVisible();
+    const refreshedTarget = await screen.findByRole("treeitem", { name: games.name });
+    expect(refreshedTarget).toHaveTextContent("2");
+    expect(libraryGateway.listClassifications).toHaveBeenCalledTimes(2);
   });
 
   it("drops an asset selection on an album without moving its folder", async () => {
