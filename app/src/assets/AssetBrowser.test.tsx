@@ -314,6 +314,98 @@ describe("AssetBrowser", () => {
     expect(await screen.findByRole("option", { name: "After" })).toBeVisible();
   });
 
+  it("keeps the gallery mounted during a scope switch and resets scroll when it lands", async () => {
+    let resolveNext!: (page: AssetPage) => void;
+    const next = new Promise<AssetPage>((resolve) => { resolveNext = resolve; });
+    const gateway = createGateway();
+    vi.mocked(gateway.listAssets)
+      .mockResolvedValueOnce({ items: [{ ...asset(0), title: "Before" }], nextCursor: null })
+      .mockReturnValueOnce(next);
+    const { container, rerender } = renderBrowser(gateway);
+    expect(await screen.findByRole("option", { name: "Before" })).toBeVisible();
+    const scrollElement = container.querySelector(".asset-gallery__scroll") as HTMLElement;
+    scrollElement.scrollTop = 240;
+
+    rerender(browserElement(gateway, {
+      view: { kind: "classification", classificationId: "classification-2" },
+    }));
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledTimes(2));
+
+    expect(container.querySelector(".asset-gallery__scroll")).toBe(scrollElement);
+    expect(scrollElement.isConnected).toBe(true);
+    expect(screen.queryByRole("option", { name: "After" })).not.toBeInTheDocument();
+
+    await act(async () => resolveNext({ items: [{ ...asset(1), title: "After" }], nextCursor: null }));
+    expect(await screen.findByRole("option", { name: "After" })).toBeVisible();
+    expect(container.querySelector(".asset-gallery__scroll")).toBe(scrollElement);
+    expect(scrollElement.scrollTop).toBe(0);
+    expect(screen.queryByRole("option", { name: "Before" })).not.toBeInTheDocument();
+  });
+
+  it("cannot page outside the destination scope after a sharp shrink", async () => {
+    const gateway = createGateway();
+    vi.mocked(gateway.listAssets)
+      .mockResolvedValueOnce({ items: Array.from({ length: 100 }, (_, index) => ({ ...asset(index), title: `A-${index}` })), nextCursor: { token: "a-cursor" } })
+      .mockResolvedValueOnce({ items: Array.from({ length: 5 }, (_, index) => ({ ...asset(index + 100), title: `B-${index}` })), nextCursor: null });
+    const { container, rerender } = renderBrowser(gateway);
+    expect(await screen.findByRole("option", { name: "A-0" })).toBeVisible();
+
+    rerender(browserElement(gateway, { view: { kind: "classification", classificationId: "classification-b" } }));
+    expect(await screen.findByRole("option", { name: "B-0" })).toBeVisible();
+    for (const title of ["A-0", "A-50", "A-99"]) expect(screen.queryByRole("option", { name: title })).not.toBeInTheDocument();
+    expect(gateway.listAssets).toHaveBeenCalledTimes(2);
+
+    const scrollElement = container.querySelector(".asset-gallery__scroll") as HTMLElement;
+    scrollElement.scrollTop = 4000;
+    fireEvent.scroll(scrollElement);
+    await act(async () => { await Promise.resolve(); });
+    expect(gateway.listAssets).toHaveBeenCalledTimes(2);
+  });
+  it("pages the destination scope with its own classification and cursor", async () => {
+    const gateway = createGateway();
+    vi.mocked(gateway.listAssets)
+      .mockResolvedValueOnce({ items: [{ ...asset(0), title: "A" }], nextCursor: null })
+      .mockResolvedValueOnce({ items: Array.from({ length: 100 }, (_, index) => ({ ...asset(index), title: `B-${index}` })), nextCursor: { token: "b-cursor" } })
+      .mockResolvedValue({ items: [{ ...asset(50), title: "B-next" }], nextCursor: null });
+    const { container, rerender } = renderBrowser(gateway);
+    expect(await screen.findByRole("option", { name: "A" })).toBeVisible();
+
+    rerender(browserElement(gateway, { view: { kind: "classification", classificationId: "classification-b" } }));
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledTimes(2));
+    const scrollElement = container.querySelector(".asset-gallery__scroll") as HTMLElement;
+    scrollElement.scrollTop = 4000;
+    fireEvent.scroll(scrollElement);
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledTimes(3));
+
+    const nextCall = vi.mocked(gateway.listAssets).mock.calls[2]![0];
+    expect(nextCall.classificationId).toBe("classification-b");
+    expect(nextCall.after).toEqual({ token: "b-cursor" });
+  });
+  it("ignores a stale next-page response that resolves after a scope switch", async () => {
+    let resolveANext!: (page: AssetPage) => void;
+    const aNext = new Promise<AssetPage>((resolve) => { resolveANext = resolve; });
+    const gateway = createGateway();
+    vi.mocked(gateway.listAssets)
+      .mockResolvedValueOnce({ items: Array.from({ length: 100 }, (_, index) => ({ ...asset(index), title: `A-${index}` })), nextCursor: { token: "a-cursor" } })
+      .mockReturnValueOnce(aNext)
+      .mockResolvedValueOnce({ items: Array.from({ length: 5 }, (_, index) => ({ ...asset(index + 100), title: `B-${index}` })), nextCursor: null });
+    const { container, rerender } = renderBrowser(gateway);
+    expect(await screen.findByRole("option", { name: "A-0" })).toBeVisible();
+    const scrollElement = container.querySelector(".asset-gallery__scroll") as HTMLElement;
+    scrollElement.scrollTop = 4000;
+    fireEvent.scroll(scrollElement);
+    await act(async () => { await Promise.resolve(); });
+    rerender(browserElement(gateway, { view: { kind: "classification", classificationId: "classification-b" } }));
+    expect(await screen.findByRole("option", { name: "B-0" })).toBeVisible();
+    expect(screen.queryByRole("option", { name: "A-0" })).not.toBeInTheDocument();
+
+    await act(async () => resolveANext({ items: Array.from({ length: 50 }, (_, index) => ({ ...asset(index + 200), title: `A-next-${index}` })), nextCursor: null }));
+    await act(async () => { await aNext; });
+    expect(screen.queryByRole("option", { name: "A-next-0" })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "B-0" })).toBeInTheDocument();
+    expect(gateway.listAssets).toHaveBeenCalledTimes(3);
+  });
+
   it("ignores stale first-page success", async () => {
     let resolveOld!: (page: AssetPage) => void;
     const old = new Promise<AssetPage>((resolve) => { resolveOld = resolve; });
@@ -674,9 +766,9 @@ function renderBrowser(gateway: LibraryGateway, options: BrowserOptions = {}) {
   return render(browserElement(gateway, options));
 }
 
-type BrowserOptions = { sort?: AssetSort; refreshVersion?: number; status?: (status: AssetBrowserStatus) => void };
-function browserElement(gateway: LibraryGateway, { sort = "newest", refreshVersion = 0, status = vi.fn() }: BrowserOptions = {}) {
-  return <LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "classification", classificationId: null }} classifications={classifications} sort={sort} metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={refreshVersion} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={status} /></LibraryProvider>;
+type BrowserOptions = { view?: AssetView; sort?: AssetSort; refreshVersion?: number; status?: (status: AssetBrowserStatus) => void };
+function browserElement(gateway: LibraryGateway, { view = { kind: "classification", classificationId: null }, sort = "newest", refreshVersion = 0, status = vi.fn() }: BrowserOptions = {}) {
+  return <LibraryProvider gateway={gateway}><AssetBrowser view={view} classifications={classifications} sort={sort} metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={refreshVersion} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={status} /></LibraryProvider>;
 }
 
 function asset(index: number) {

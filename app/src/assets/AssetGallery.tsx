@@ -21,6 +21,7 @@ type QuickPreviewState = { asset: AssetSummary; anchor: DOMRect };
 
 type AssetGalleryProps = {
   items: AssetSummary[];
+  scopeKey?: string;
   selectedAssetIds?: ReadonlySet<string>;
   focusAssetId?: string | null;
   targetRowHeight?: number;
@@ -42,8 +43,7 @@ type AssetGalleryProps = {
   onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void;
   onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void;
 };
-
-export function AssetGallery({ items, selectedAssetIds = new Set(), focusAssetId = null, targetRowHeight = 180, metadataVisible = false, privacyMode = false, hasNextPage = false, onLoadNextPage, hasPreviousPage = false, onLoadPrevPage, onSelectionGesture, onSelectAll, onDeleteSelection, onClearSelection, onMoveFocus, onOpen, onRetryVideo, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
+export function AssetGallery({ items, scopeKey, selectedAssetIds = new Set(), focusAssetId = null, targetRowHeight = 180, metadataVisible = false, privacyMode = false, hasNextPage = false, onLoadNextPage, hasPreviousPage = false, onLoadPrevPage, onSelectionGesture, onSelectAll, onDeleteSelection, onClearSelection, onMoveFocus, onOpen, onRetryVideo, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const focusRequestedRef = useRef(false);
   const quickPreviewTimerRef = useRef<number | null>(null);
@@ -54,6 +54,15 @@ export function AssetGallery({ items, selectedAssetIds = new Set(), focusAssetId
   const { width, gap } = useGalleryMetrics(scrollRef);
   const rows = useMemo(() => buildJustifiedRows(items, width, targetRowHeight, gap), [gap, items, targetRowHeight, width]);
   const rowVirtualizer = useVirtualizer({ count: rows.length, getScrollElement: () => scrollRef.current, estimateSize: (index) => rows[index]?.height ?? targetRowHeight, getItemKey: (index) => rows[index]?.items[0]?.id ?? index, gap, overscan: VIRTUAL_OVERSCAN_ROWS });
+  const lastScopeKeyRef = useRef(scopeKey);
+  useLayoutEffect(() => {
+    if (lastScopeKeyRef.current === scopeKey) return;
+    lastScopeKeyRef.current = scopeKey;
+    const element = scrollRef.current;
+    if (!element) return;
+    element.scrollTop = 0;
+    rowVirtualizer.scrollToOffset(0);
+  }, [scopeKey, rowVirtualizer]);
   const virtualRows = rowVirtualizer.getVirtualItems();
   const cancelQuickPreview = () => {
     quickPreviewRequestRef.current += 1;
