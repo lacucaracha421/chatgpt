@@ -105,6 +105,23 @@ describe("AssetGallery", () => {
     expect(screen.queryByRole("img", { name: "asset-1.png 빠른 미리보기" })).not.toBeInTheDocument();
   });
 
+  it("waits for the original image to decode before replacing a quick preview", async () => {
+    vi.useFakeTimers();
+    let finishDecode!: () => void;
+    class DecodingImage {
+      src = "";
+      decode = vi.fn(() => new Promise<void>((resolve) => { finishDecode = resolve; }));
+    }
+    vi.stubGlobal("Image", DecodingImage);
+    render(<AssetGallery items={[asset(0)]} />);
+    fireEvent.pointerEnter(screen.getByRole("button", { name: "asset-0.png 빠른 확대 미리보기" }));
+    act(() => vi.advanceTimersByTime(150));
+    expect(screen.queryByRole("img", { name: "asset-0.png 빠른 미리보기" })).not.toBeInTheDocument();
+
+    await act(async () => finishDecode());
+    expect(screen.getByRole("img", { name: "asset-0.png 빠른 미리보기" })).toBeVisible();
+  });
+
   it("supports keyboard quick preview and dismisses it without selecting or opening the tile", () => {
     vi.useFakeTimers();
     const select = vi.fn();

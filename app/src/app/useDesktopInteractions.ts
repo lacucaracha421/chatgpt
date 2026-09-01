@@ -1,31 +1,26 @@
 import { useEffect } from "react";
 
-export function useDesktopInteractions() {
+export function useDesktopInteractions(requestBack: () => boolean = () => false) {
   useEffect(() => {
     const blockContextMenu = (event: MouseEvent) => event.preventDefault();
     const blockMouseBack = (event: MouseEvent) => {
       if (event.button === 3) event.preventDefault();
     };
-    const requestBack = (event: MouseEvent) => {
+    const handleMouseBack = (event: MouseEvent) => {
       if (event.button !== 3) return;
       event.preventDefault();
-      (document.activeElement ?? window).dispatchEvent(new KeyboardEvent("keydown", {
-        key: "Escape",
-        code: "Escape",
-        bubbles: true,
-        cancelable: true,
-      }));
+      requestBack();
     };
 
     document.addEventListener("contextmenu", blockContextMenu);
     window.addEventListener("mousedown", blockMouseBack);
     window.addEventListener("auxclick", blockMouseBack);
-    window.addEventListener("mouseup", requestBack);
+    window.addEventListener("mouseup", handleMouseBack);
     return () => {
       document.removeEventListener("contextmenu", blockContextMenu);
       window.removeEventListener("mousedown", blockMouseBack);
       window.removeEventListener("auxclick", blockMouseBack);
-      window.removeEventListener("mouseup", requestBack);
+      window.removeEventListener("mouseup", handleMouseBack);
     };
-  }, []);
+  }, [requestBack]);
 }

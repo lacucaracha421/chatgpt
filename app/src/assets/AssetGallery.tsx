@@ -53,6 +53,7 @@ export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new S
   const scrollRef = useRef<HTMLDivElement>(null);
   const focusRequestedRef = useRef(false);
   const quickPreviewTimerRef = useRef<number | null>(null);
+  const quickPreviewRequestRef = useRef(0);
   const prependGuardRef = useRef({ pending: false, firstAssetId: null as string | null });
   const jumpedTokenRef = useRef<number | null>(null);
   const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
@@ -89,16 +90,26 @@ export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new S
   const tickIndexes = useMemo(() => selectTickIndexes(dateSummary, geometry.extent), [dateSummary, geometry.extent]);
   const dateLines = useMemo(() => buildDateLines(geometry, tickIndexes, dateSummary, activeIndex), [activeIndex, dateSummary, geometry, tickIndexes]);
   const cancelQuickPreview = () => {
+    quickPreviewRequestRef.current += 1;
     if (quickPreviewTimerRef.current !== null) window.clearTimeout(quickPreviewTimerRef.current);
     quickPreviewTimerRef.current = null;
     setQuickPreview(null);
   };
   const requestQuickPreview = (asset: AssetSummary, trigger: HTMLElement) => {
+    const request = ++quickPreviewRequestRef.current;
     const sourceAsset = items.find((item) => item.id === asset.id) ?? asset;
     if (quickPreviewTimerRef.current !== null) window.clearTimeout(quickPreviewTimerRef.current);
     quickPreviewTimerRef.current = window.setTimeout(() => {
-      setQuickPreview({ asset: sourceAsset, anchor: trigger.getBoundingClientRect() });
       quickPreviewTimerRef.current = null;
+      const preview = new Image();
+      const reveal = () => {
+        if (request === quickPreviewRequestRef.current) {
+          setQuickPreview({ asset: sourceAsset, anchor: trigger.getBoundingClientRect() });
+        }
+      };
+      preview.src = assetUrl(sourceAsset.id);
+      if (typeof preview.decode === "function") void preview.decode().then(reveal, () => undefined);
+      else reveal();
     }, QUICK_PREVIEW_DELAY_MS);
   };
   const pendingJumpRef = useRef<{ date: string; ratio: number } | null>(null);

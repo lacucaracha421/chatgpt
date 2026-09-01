@@ -457,6 +457,21 @@ describe("App", () => {
     })));
   });
 
+  it("returns to the previous application view once and remains at the root", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    const libraryGateway = gateway();
+    const user = userEvent.setup();
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+
+    await user.click(await screen.findByRole("button", { name: "미분류" }));
+    expect(screen.getByRole("button", { name: "미분류" })).toHaveAttribute("aria-current", "page");
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("button", { name: "저장소" })).toHaveAttribute("aria-current", "page");
+
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("button", { name: "저장소" })).toHaveAttribute("aria-current", "page");
+  });
+
   it("stores drops from broad views in the unclassified destination", async () => {
     localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
     let drop: ((paths: string[]) => void) | undefined;

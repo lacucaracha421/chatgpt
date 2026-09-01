@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import type { AssetSummary } from "../library/types";
@@ -6,6 +6,7 @@ import { AssetViewer } from "./AssetViewer";
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
@@ -68,6 +69,23 @@ it("renders a video player and cleans up its source when navigating", () => {
   expect(load).toHaveBeenCalled();
   expect(oldVideo).not.toHaveAttribute("src");
   expect(screen.getByLabelText("b.webm 영상")).toHaveAttribute("src", "http://lakomics.localhost/playback/video-b");
+});
+
+it("keeps the visible image until the next asset has decoded", async () => {
+  let finishDecode!: () => void;
+  vi.stubGlobal("Image", class {
+    src = "";
+    decode = vi.fn(() => new Promise<void>((resolve) => { finishDecode = resolve; }));
+  });
+  const first = asset("a", "a.png");
+  const second = asset("b", "b.png");
+  const { rerender } = render(<AssetViewer items={[first, second]} activeId="a" onActiveIdChange={vi.fn()} onClose={vi.fn()} />);
+
+  rerender(<AssetViewer items={[first, second]} activeId="b" onActiveIdChange={vi.fn()} onClose={vi.fn()} />);
+  expect(screen.getByRole("img", { name: "a.png" })).toHaveAttribute("src", "http://lakomics.localhost/asset/a");
+
+  await act(async () => finishDecode());
+  expect(screen.getByRole("img", { name: "b.png" })).toHaveAttribute("src", "http://lakomics.localhost/asset/b");
 });
 
 function asset(id: string, originalName: string): AssetSummary {

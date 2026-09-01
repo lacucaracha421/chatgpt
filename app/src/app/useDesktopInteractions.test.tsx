@@ -4,8 +4,8 @@ import { useDesktopInteractions } from "./useDesktopInteractions";
 
 afterEach(cleanup);
 
-function Harness() {
-  useDesktopInteractions();
+function Harness({ onBack = () => false }: { onBack?: () => boolean }) {
+  useDesktopInteractions(onBack);
   return <button>대상</button>;
 }
 
@@ -18,15 +18,12 @@ it("blocks the WebView context menu", () => {
   expect(event.defaultPrevented).toBe(true);
 });
 
-it("routes mouse button four through the existing Escape path", () => {
-  render(<Harness />);
-  const escape = vi.fn();
-  window.addEventListener("keydown", escape);
+it("routes mouse button four through the shared back request", () => {
+  const onBack = vi.fn(() => true);
+  render(<Harness onBack={onBack} />);
 
   fireEvent.mouseUp(window, { button: 3 });
   fireEvent.mouseUp(window, { button: 4 });
 
-  expect(escape).toHaveBeenCalledOnce();
-  expect(escape.mock.calls[0]?.[0]).toMatchObject({ key: "Escape", code: "Escape" });
-  window.removeEventListener("keydown", escape);
+  expect(onBack).toHaveBeenCalledOnce();
 });

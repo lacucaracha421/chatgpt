@@ -89,8 +89,8 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
         pageSize: 48,
       });
       if (request === searchRequest.current) setResults(nextResults);
-    } catch {
-      if (request === searchRequest.current) setMessage("온라인 카탈로그 검색에 실패했습니다");
+    } catch (error) {
+      if (request === searchRequest.current) setMessage(commandErrorMessage(error, "온라인 카탈로그 검색에 실패했습니다"));
     } finally {
       if (request === searchRequest.current) setLoading(false);
     }
@@ -208,8 +208,6 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
         ? Math.min(selectedProgress.lastPage, gallery.pageCount)
         : 1;
       setViewer({ title: selectedDetail.title, ...gallery, initialPage });
-      setDetail(null);
-      setDetailProgress(null);
     } catch (error) {
       if (request === detailRequest.current) {
         setMessage(commandErrorMessage(error, "온라인 작품을 열지 못했습니다"));

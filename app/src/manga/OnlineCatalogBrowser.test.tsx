@@ -147,6 +147,34 @@ describe("OnlineCatalogBrowser", () => {
     expect(await screen.findByText("2 / 3")).toBeVisible();
   });
 
+  it("closes the viewer back to its detail instead of dropping two layers", async () => {
+    const gateway = createGateway(true);
+    renderBrowser(gateway);
+    await userEvent.click(await screen.findByRole("button", { name: "오래된 제독 상세 보기" }));
+    await userEvent.click(await screen.findByRole("button", { name: "이어 읽기" }));
+    await screen.findByRole("button", { name: "망가 뷰어 닫기" });
+    await userEvent.keyboard("{Escape}");
+
+    expect(screen.getByRole("button", { name: "이어 읽기" })).toBeVisible();
+    expect(screen.queryByText("2 / 3")).not.toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("button", { name: "이어 읽기" })).not.toBeInTheDocument();
+  });
+
+  it("keeps valid search results visible and reports the refresh failure detail", async () => {
+    const gateway = createGateway(true);
+    renderBrowser(gateway);
+    expect(await screen.findByRole("button", { name: "오래된 제독 상세 보기" })).toBeVisible();
+    const refresh = deferred<Awaited<ReturnType<LibraryGateway["searchOnlineCatalog"]>>>();
+    vi.mocked(gateway.searchOnlineCatalog).mockReturnValueOnce(refresh.promise);
+
+    await userEvent.click(screen.getByRole("button", { name: "새로고침" }));
+    expect(screen.getByRole("button", { name: "오래된 제독 상세 보기" })).toBeVisible();
+    await act(async () => refresh.reject(new Error("연결 시간이 초과되었습니다")));
+    expect(await screen.findByText("연결 시간이 초과되었습니다")).toBeVisible();
+    expect(screen.getByRole("button", { name: "오래된 제독 상세 보기" })).toBeVisible();
+  });
+
   it("shows cover thumbnails and keeps bookmarks, filters, and paging isolated", async () => {
     const gateway = createGateway(true);
     renderBrowser(gateway);
@@ -365,6 +393,7 @@ function resolvedGallery(): ResolvedGallery {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((next) => { resolve = next; });
-  return { promise, resolve };
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((next, fail) => { resolve = next; reject = fail; });
+  return { promise, resolve, reject };
 }

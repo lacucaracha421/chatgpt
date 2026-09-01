@@ -294,6 +294,26 @@ describe("AssetBrowser", () => {
     expect(vi.mocked(gateway.listAssets).mock.calls[1]![0].randomPivot).toBe(first);
   });
 
+  it("keeps the last valid gallery visible while the first page refreshes", async () => {
+    let resolveRefresh!: (page: AssetPage) => void;
+    const refresh = new Promise<AssetPage>((resolve) => { resolveRefresh = resolve; });
+    const gateway = createGateway();
+    vi.mocked(gateway.listAssets)
+      .mockResolvedValueOnce({ items: [{ ...asset(0), title: "Before" }], nextCursor: null })
+      .mockReturnValueOnce(refresh);
+    const { rerender } = renderBrowser(gateway);
+    expect(await screen.findByRole("option", { name: "Before" })).toBeVisible();
+
+    rerender(browserElement(gateway, { refreshVersion: 1 }));
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledTimes(2));
+
+    expect(screen.getByRole("option", { name: "Before" })).toBeVisible();
+    expect(screen.queryByRole("status", { name: "자산을 불러오는 중" })).not.toBeInTheDocument();
+
+    await act(async () => resolveRefresh({ items: [{ ...asset(1), title: "After" }], nextCursor: null }));
+    expect(await screen.findByRole("option", { name: "After" })).toBeVisible();
+  });
+
   it("ignores stale first-page success", async () => {
     let resolveOld!: (page: AssetPage) => void;
     const old = new Promise<AssetPage>((resolve) => { resolveOld = resolve; });

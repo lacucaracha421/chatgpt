@@ -1,10 +1,11 @@
 import { ArrowsPointingOutIcon, ArrowsPointingInIcon, PauseIcon, PlayIcon, SpeakerWaveIcon, SpeakerXMarkIcon } from "@heroicons/react/24/outline";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { AssetSummary } from "../library/types";
 import { playbackUrl, scrubFrameUrl } from "../assets/mediaUrl";
 import { Button } from "../shared/ui/Button";
 
 type VideoAsset = AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> };
+const CONTROLS_IDLE_MS = 1_800;
 
 export function VideoPlayer({ asset }: { asset: VideoAsset }) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -16,6 +17,25 @@ export function VideoPlayer({ asset }: { asset: VideoAsset }) {
   const [volume, setVolume] = useState(1);
   const [fullscreen, setFullscreen] = useState(false);
   const [hoverRatio, setHoverRatio] = useState<number | null>(null);
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const [scrubbing, setScrubbing] = useState(false);
+  const [volumeInteracting, setVolumeInteracting] = useState(false);
+  const [controlsFocused, setControlsFocused] = useState(false);
+  const idleTimerRef = useRef<number | null>(null);
+
+  const clearIdleTimer = useCallback(() => {
+    if (idleTimerRef.current !== null) window.clearTimeout(idleTimerRef.current);
+    idleTimerRef.current = null;
+  }, []);
+  const scheduleIdle = useCallback(() => {
+    clearIdleTimer();
+    setControlsVisible(true);
+    if (!playing || scrubbing || volumeInteracting || controlsFocused) return;
+    idleTimerRef.current = window.setTimeout(() => {
+      idleTimerRef.current = null;
+      setControlsVisible(false);
+    }, CONTROLS_IDLE_MS);
+  }, [clearIdleTimer, controlsFocused, playing, scrubbing, volumeInteracting]);
 
   useEffect(() => {
     const updateFullscreen = () => setFullscreen(document.fullscreenElement === rootRef.current);
@@ -24,10 +44,19 @@ export function VideoPlayer({ asset }: { asset: VideoAsset }) {
   }, []);
 
   useEffect(() => {
+    scheduleIdle();
+    return clearIdleTimer;
+  }, [clearIdleTimer, scheduleIdle]);
+
+  useEffect(() => {
     setPlaying(false);
     setCurrentTime(0);
     setDuration(asset.media.durationMs / 1_000);
     setHoverRatio(null);
+    setControlsVisible(true);
+    setScrubbing(false);
+    setVolumeInteracting(false);
+    setControlsFocused(false);
     const video = videoRef.current;
     if (video) video.src = playbackUrl(asset.id);
     return () => {
@@ -57,10 +86,13 @@ export function VideoPlayer({ asset }: { asset: VideoAsset }) {
 
   return <div
     ref={rootRef}
-    className="video-player"
+    className={`video-player${controlsVisible ? "" : " video-player--controls-hidden"}`}
     data-testid="video-player"
+    data-controls-visible={controlsVisible}
     tabIndex={0}
+    onPointerMove={scheduleIdle}
     onKeyDown={(event) => {
+      scheduleIdle();
       if ((event.key === " " || event.code === "Space") && !ownsKeyboard(event.target)) {
         event.preventDefault();
         togglePlayback();
@@ -82,11 +114,20 @@ export function VideoPlayer({ asset }: { asset: VideoAsset }) {
       onDurationChange={(event) => setDuration(event.currentTarget.duration)}
       onVolumeChange={(event) => { setMuted(event.currentTarget.muted); setVolume(event.currentTarget.volume); }}
     />
-    <div className="video-player__controls">
+    <div
+      className="video-player__controls"
+      aria-hidden={!controlsVisible}
+      inert={!controlsVisible ? true : undefined}
+      onFocusCapture={() => { setControlsFocused(true); setControlsVisible(true); clearIdleTimer(); }}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setControlsFocused(false);
+      }}
+    >
       <div className="video-player__timeline-wrap">
         {timelineAvailable && hoverRatio !== null && <img className="video-player__scrub-preview" src={scrubFrameUrl(asset.id, hoverFrame)} alt={`${formatTime(hoverTime)} 미리보기`} style={{ left: `${hoverRatio * 100}%` }} />}
         <input
           type="range"
+          className="video-player__timeline"
           aria-label="재생 위치"
           min={0}
           max={safeDuration}
@@ -98,7 +139,11 @@ export function VideoPlayer({ asset }: { asset: VideoAsset }) {
             const next = Number(event.currentTarget.value);
             if (videoRef.current) videoRef.current.currentTime = next;
             setCurrentTime(next);
+            scheduleIdle();
           }}
+          onPointerDown={() => setScrubbing(true)}
+          onPointerUp={() => setScrubbing(false)}
+          onPointerCancel={() => setScrubbing(false)}
           onPointerMove={(event) => {
             if (!timelineAvailable) return;
             const bounds = event.currentTarget.getBoundingClientRect();
@@ -108,11 +153,11 @@ export function VideoPlayer({ asset }: { asset: VideoAsset }) {
         />
       </div>
       <div className="video-player__control-row">
-        <Button size="icon" variant="ghost" aria-label={playing ? "일시 정지" : "재생"} onClick={togglePlayback}>{playing ? <PauseIcon aria-hidden="true" /> : <PlayIcon aria-hidden="true" />}</Button>
+        <Button size="icon" variant="ghost" aria-label={playing ? "일시 정지" : "재생"} title={playing ? "일시 정지" : "재생"} onClick={togglePlayback}>{playing ? <PauseIcon aria-hidden="true" /> : <PlayIcon aria-hidden="true" />}</Button>
         <span className="video-player__time">{formatTime(currentTime)} / {formatTime(safeDuration)}</span>
-        <Button size="icon" variant="ghost" aria-label={muted ? "음소거 해제" : "음소거"} onClick={() => { if (videoRef.current) { videoRef.current.muted = !videoRef.current.muted; setMuted(videoRef.current.muted); } }}>{muted ? <SpeakerXMarkIcon aria-hidden="true" /> : <SpeakerWaveIcon aria-hidden="true" />}</Button>
-        <input type="range" className="video-player__volume" aria-label="음량" min={0} max={1} step={0.05} value={volume} onChange={(event) => { const next = Number(event.currentTarget.value); if (videoRef.current) { videoRef.current.volume = next; videoRef.current.muted = false; } setVolume(next); setMuted(false); }} />
-        <Button size="icon" variant="ghost" aria-label={fullscreen ? "전체 화면 종료" : "전체 화면"} onClick={() => { if (fullscreen) void document.exitFullscreen?.(); else void rootRef.current?.requestFullscreen?.(); }}>{fullscreen ? <ArrowsPointingInIcon aria-hidden="true" /> : <ArrowsPointingOutIcon aria-hidden="true" />}</Button>
+        <Button size="icon" variant="ghost" aria-label={muted ? "음소거 해제" : "음소거"} title={muted ? "음소거 해제" : "음소거"} onClick={() => { if (videoRef.current) { videoRef.current.muted = !videoRef.current.muted; setMuted(videoRef.current.muted); } }}>{muted ? <SpeakerXMarkIcon aria-hidden="true" /> : <SpeakerWaveIcon aria-hidden="true" />}</Button>
+        <input type="range" className="video-player__volume" aria-label="음량" min={0} max={1} step={0.05} value={volume} onPointerDown={() => setVolumeInteracting(true)} onPointerUp={() => setVolumeInteracting(false)} onPointerCancel={() => setVolumeInteracting(false)} onChange={(event) => { const next = Number(event.currentTarget.value); if (videoRef.current) { videoRef.current.volume = next; videoRef.current.muted = false; } setVolume(next); setMuted(false); scheduleIdle(); }} />
+        <Button size="icon" variant="ghost" aria-label={fullscreen ? "전체 화면 종료" : "전체 화면"} title={fullscreen ? "전체 화면 종료" : "전체 화면"} onClick={() => { if (fullscreen) void document.exitFullscreen?.(); else void rootRef.current?.requestFullscreen?.(); }}>{fullscreen ? <ArrowsPointingInIcon aria-hidden="true" /> : <ArrowsPointingOutIcon aria-hidden="true" />}</Button>
       </div>
     </div>
   </div>;

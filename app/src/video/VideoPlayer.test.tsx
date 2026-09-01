@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StrictMode } from "react";
 import type { AssetSummary } from "../library/types";
@@ -12,6 +12,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -57,6 +58,69 @@ describe("VideoPlayer", () => {
 
     fireEvent.change(timeline, { target: { value: "25" } });
     expect(video).toHaveProperty("currentTime", 25);
+  });
+
+  it("lets the timeline consume the available control width", () => {
+    render(<VideoPlayer asset={videoAsset()} />);
+
+    expect(screen.getByRole("slider", { name: "재생 위치" })).toHaveClass("video-player__timeline");
+  });
+
+  it("hides idle controls while playing and keeps them visible while paused", () => {
+    vi.useFakeTimers();
+    render(<VideoPlayer asset={videoAsset()} />);
+    const video = screen.getByLabelText("sample.webm 영상");
+    const player = screen.getByTestId("video-player");
+
+    fireEvent.play(video);
+    act(() => vi.advanceTimersByTime(1_799));
+    expect(player).toHaveAttribute("data-controls-visible", "true");
+    act(() => vi.advanceTimersByTime(1));
+    expect(player).toHaveAttribute("data-controls-visible", "false");
+
+    fireEvent.pause(video);
+    expect(player).toHaveAttribute("data-controls-visible", "true");
+  });
+
+  it("shows controls on pointer activity and defers hiding while scrubbing or focused", () => {
+    vi.useFakeTimers();
+    render(<VideoPlayer asset={videoAsset()} />);
+    const video = screen.getByLabelText("sample.webm 영상");
+    const player = screen.getByTestId("video-player");
+    const timeline = screen.getByRole("slider", { name: "재생 위치" });
+    const play = screen.getByRole("button", { name: "재생" });
+
+    fireEvent.play(video);
+    act(() => vi.advanceTimersByTime(1_800));
+    expect(player).toHaveAttribute("data-controls-visible", "false");
+
+    fireEvent.pointerMove(player);
+    expect(player).toHaveAttribute("data-controls-visible", "true");
+    fireEvent.pointerDown(timeline);
+    act(() => vi.advanceTimersByTime(2_000));
+    expect(player).toHaveAttribute("data-controls-visible", "true");
+    fireEvent.pointerUp(timeline);
+    act(() => vi.advanceTimersByTime(1_800));
+    expect(player).toHaveAttribute("data-controls-visible", "false");
+
+    fireEvent.pointerMove(player);
+    fireEvent.focus(play);
+    act(() => vi.advanceTimersByTime(2_000));
+    expect(player).toHaveAttribute("data-controls-visible", "true");
+    fireEvent.blur(play, { relatedTarget: video });
+    act(() => vi.advanceTimersByTime(1_800));
+    expect(player).toHaveAttribute("data-controls-visible", "false");
+  });
+
+  it("cleans up the idle timer when unmounted", () => {
+    vi.useFakeTimers();
+    const { unmount } = render(<VideoPlayer asset={videoAsset()} />);
+    fireEvent.play(screen.getByLabelText("sample.webm 영상"));
+    expect(vi.getTimerCount()).toBe(1);
+
+    unmount();
+
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("synchronizes mute and volume with media events", () => {

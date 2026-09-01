@@ -51,6 +51,24 @@ describe("PageViewer", () => {
       .toEqual(["page-2", "page-4", "page-5", "page-6", "page-7", "page-8"]);
   });
 
+  it("keeps pointer-only page edge navigation out of keyboard focus", async () => {
+    const user = userEvent.setup();
+    render(<PageViewer
+      title="Remote"
+      pageUrls={["page-1", "page-2"]}
+      initialPage={1}
+      sourceLabel="K-Hentai"
+      onPageChange={vi.fn()}
+      onClose={vi.fn()}
+    />);
+    const nextEdge = document.querySelectorAll<HTMLElement>(".manga-viewer__edge")[1]!;
+
+    await user.click(nextEdge);
+
+    expect(document.activeElement).not.toBe(nextEdge);
+    expect(screen.getByText("2 / 2")).toBeVisible();
+  });
+
   it("masks pages and skips preloading in privacy mode", () => {
     render(<PrivacyProvider privacyMode setPrivacyMode={vi.fn()}>
       <PageViewer

@@ -1,5 +1,6 @@
 import * as RadixDialog from "@radix-ui/react-dialog";
 import { useEffect, useRef, type KeyboardEventHandler, type PropsWithChildren } from "react";
+import { useBackHandler, useBackNavigationContext } from "../navigation/BackNavigation";
 
 type DialogProps = PropsWithChildren<{
   open: boolean;
@@ -10,6 +11,7 @@ type DialogProps = PropsWithChildren<{
 }>;
 
 export function Dialog({ children, open, title, variant = "default", onKeyDown, onClose }: DialogProps) {
+  const backNavigation = useBackNavigationContext();
   const openerRef = useRef<HTMLElement | null>(null);
   const wasOpenRef = useRef(false);
 
@@ -19,6 +21,7 @@ export function Dialog({ children, open, title, variant = "default", onKeyDown, 
     }
     wasOpenRef.current = open;
   }, [open]);
+  useBackHandler(() => { onClose(); }, 100, open);
 
   return (
     <RadixDialog.Root open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
@@ -31,6 +34,10 @@ export function Dialog({ children, open, title, variant = "default", onKeyDown, 
             openerRef.current?.focus();
           }}
           onKeyDown={onKeyDown}
+          onEscapeKeyDown={backNavigation ? (event) => {
+            event.preventDefault();
+            backNavigation.requestBack();
+          } : undefined}
         >
           <RadixDialog.Title className="ui-dialog__title">{title}</RadixDialog.Title>
           {children}

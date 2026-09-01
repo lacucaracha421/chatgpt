@@ -48,6 +48,7 @@ import { useDesktopInteractions } from "./useDesktopInteractions";
 import { useOnlineCatalogUpdate } from "./useOnlineCatalogUpdate";
 import { useCloudCaptureSync } from "./useCloudCaptureSync";
 import { useReleaseWatchCheck } from "./useReleaseWatchCheck";
+import { BackNavigationProvider, useBackHandler, useBackRequest } from "../shared/navigation/BackNavigation";
 
 export type ExtensionIngestListener = (handler: (outcome: IngestOutcome) => void) => Promise<() => void>;
 
@@ -69,12 +70,19 @@ export function App({
   startAssetDrag = nativeStartAssetDrag,
   subscribeExtensionIngest = subscribeToExtensionIngest,
 }: AppProps) {
-  useDesktopInteractions();
   return (
-    <LibraryProvider gateway={gateway}>
-      <LibraryScreen selectFolder={selectFolder} subscribeDrops={subscribeDrops} startAssetDrag={startAssetDrag} subscribeExtensionIngest={subscribeExtensionIngest} />
-    </LibraryProvider>
+    <BackNavigationProvider>
+      <DesktopInteractions />
+      <LibraryProvider gateway={gateway}>
+        <LibraryScreen selectFolder={selectFolder} subscribeDrops={subscribeDrops} startAssetDrag={startAssetDrag} subscribeExtensionIngest={subscribeExtensionIngest} />
+      </LibraryProvider>
+    </BackNavigationProvider>
   );
+}
+
+function DesktopInteractions() {
+  useDesktopInteractions(useBackRequest());
+  return null;
 }
 
 function LibraryScreen({
@@ -106,6 +114,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     kind: "classification",
     classificationId: null,
   });
+  const viewHistoryRef = useRef<AssetView[]>([]);
   const collectionReturnViewRef = useRef<Extract<AssetView, { kind: "collections" }> | null>(null);
   const [preferences, setPreferences] = useState<UiPreferences>(loadUiPreferences);
   const [sidebarWidth, setSidebarWidth] = useState(preferences.sidebarWidth);
@@ -325,12 +334,12 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
           { kind: "classification", classificationId: null },
           { kind: "unsorted" },
         ];
-        setView(quickViews[Number(key) - 1]);
+        navigateView(quickViews[Number(key) - 1]);
       }
     };
     window.addEventListener("keydown", shortcut);
     return () => window.removeEventListener("keydown", shortcut);
-  }, []);
+  }, [view]);
 
   function updatePreferences(update: Partial<UiPreferences>) {
     setPreferences((current) => ({ ...current, ...update }));
@@ -340,8 +349,18 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     if (next.kind === "collection" && view.kind === "collections") collectionReturnViewRef.current = view;
     if (next.kind === "settings" && view.kind !== "settings") settingsReturnViewRef.current = view;
     if (next.kind === "collections") updatePreferences({ collectionType: next.typeFilter });
+    if (JSON.stringify(next) === JSON.stringify(view)) return;
+    viewHistoryRef.current.push(view);
     setView(next);
   }
+
+  function navigateBack(fallback?: AssetView) {
+    const previous = viewHistoryRef.current.pop();
+    if (!previous && !fallback) return false;
+    setView(previous ?? fallback!);
+    return true;
+  }
+  useBackHandler(() => navigateBack(), 0, maintenance === null);
 
   function updateCollectionLibraryState(type: CollectionSummary["type"], next: CollectionLibraryState) {
     setCollectionLibraryState((current) => ({ ...current, [type]: next }));
@@ -419,7 +438,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   async function openExisting(assetId: string) {
     try {
       const asset = await gateway.getAsset(assetId);
-      setView({ kind: "classification", classificationId: null });
+      navigateView({ kind: "classification", classificationId: null });
       setRequestedAsset(asset);
     } catch (error) {
       setMessage(commandErrorMessage(error, "기존 자산을 열지 못했습니다."));
@@ -526,7 +545,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                   <SettingsView
                     restoring={maintenance === "restore"}
                     onRestore={restoreBackup}
-                    onExit={() => { setView(settingsReturnViewRef.current); }}
+                    onExit={() => { navigateBack(settingsReturnViewRef.current); }}
                     onImportFolder={beginMetadataImport}
                     metadataImportRunning={metadataImportWorks.some((work) => work.status === "running")}
                     onCollectionsChanged={refreshCollections}
@@ -539,7 +558,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                   <SimilarityReviewBrowser
                     gateway={gateway}
                     onCountChange={setReviewCount}
-                    onClose={() => setView({ kind: "classification", classificationId: null })}
+                    onClose={() => { navigateBack({ kind: "classification", classificationId: null }); }}
                   />
                 ) : view.kind === "manga" ? (
                   <MangaBrowser
@@ -552,7 +571,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     onOpenSettings={() => navigateView({ kind: "settings", section: "external_services" })}
                     onExit={() => {
                       const detailCollection = collections.find((item) => item.id === view.collectionId);
-                      setView(collectionReturnViewRef.current ?? {
+                      navigateBack(collectionReturnViewRef.current ?? {
                         kind: "collections",
                         typeFilter: detailCollection?.type ?? preferences.collectionType,
                         showcase: false,
@@ -576,7 +595,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     title={view.title}
                     assetIds={view.assetIds}
                     privacyMode={preferences.privacyMode}
-                    onBack={() => setView({ kind: "revisit" })}
+                    onBack={() => { navigateBack({ kind: "revisit" }); }}
                   />
                 ) : (
                   <AssetBrowser
@@ -616,7 +635,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
           works={[...dropState.works, ...nativeDragWorks, ...metadataImportWorks, ...(videoPreparation.work ? [videoPreparation.work] : [])]}
           retryFailed={retryWork}
           dismissWork={dismissWork}
-          openReview={() => setView({ kind: "similarity_review" })}
+          openReview={() => navigateView({ kind: "similarity_review" })}
           openExisting={(assetId) => void openExisting(assetId)}
         />
       </div>
