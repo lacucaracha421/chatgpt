@@ -214,6 +214,37 @@ describe("AssetGallery", () => {
     expect(onMoveFocus).toHaveBeenCalledWith(1, false);
   });
 
+  it("clears selection only from genuinely empty gallery space", async () => {
+    const onClearSelection = vi.fn();
+    const { container } = render(<AssetGallery items={[asset(0)]} selectedAssetIds={new Set(["asset-0"])} onClearSelection={onClearSelection} />);
+    const gallery = container.querySelector(".asset-gallery__scroll")!;
+    const assetTile = await screen.findByRole("option", { name: "asset-0.png" });
+    const previewButton = screen.getByRole("button", { name: "asset-0.png 빠른 확대 미리보기" });
+
+    fireEvent.click(assetTile);
+    fireEvent.click(previewButton);
+    expect(onClearSelection).not.toHaveBeenCalled();
+
+    fireEvent.click(gallery);
+    expect(onClearSelection).toHaveBeenCalledOnce();
+
+    Object.defineProperties(gallery, {
+      clientWidth: { configurable: true, value: 100 },
+      offsetWidth: { configurable: true, value: 116 },
+    });
+    vi.spyOn(gallery, "getBoundingClientRect").mockReturnValue({ left: 0, right: 116, top: 0, bottom: 200, width: 116, height: 200, x: 0, y: 0, toJSON: () => ({}) });
+    fireEvent.click(gallery, { clientX: 108 });
+    expect(onClearSelection).toHaveBeenCalledOnce();
+  });
+
+  it("uses a native scroll container while keeping date navigation separate", async () => {
+    const { container } = render(<AssetGallery items={[asset(0)]} dateBuckets={[{ date: "2026-07-30", count: 1 }]} />);
+
+    await waitFor(() => expect(container.querySelector(".asset-gallery__date-rail")).not.toBeNull());
+    expect(container.querySelector(".asset-gallery__scrollbar")).toBeNull();
+    expect(container.querySelector(".asset-gallery__scroll")).toHaveAttribute("data-native-scrollbar", "true");
+  });
+
   it("renders safe metadata overlays", async () => {
     render(<AssetGallery items={[{ ...asset(0), sourceUrl: "not a URL", collectedAt: "bad date" }]} metadataVisible />);
     expect(await screen.findByRole("img", { name: "asset-0.png" })).toBeInTheDocument();
@@ -316,9 +347,9 @@ describe("AssetGallery", () => {
     await waitFor(() => expect(screen.queryAllByRole("option").length).toBe(4));
     getComputedStyle.mockRestore();
 
-    const scrollbar = container.querySelector(".asset-gallery__scrollbar")!;
-    expect(scrollbar.querySelectorAll(".asset-gallery__scrollbar-line").length).toBeGreaterThan(0);
-    expect(scrollbar.querySelector(".asset-gallery__scrollbar-thumb")).not.toBeInTheDocument();
+    const scrollbar = container.querySelector(".asset-gallery__date-rail")!;
+    expect(scrollbar.querySelectorAll(".asset-gallery__date-rail-line").length).toBeGreaterThan(0);
+    expect(scrollbar.querySelector(".asset-gallery__date-rail-thumb")).not.toBeInTheDocument();
     expect(scrollbar).toHaveAttribute("aria-hidden", "true");
   });
 
@@ -335,9 +366,9 @@ describe("AssetGallery", () => {
     ]} />);
     await waitFor(() => expect(screen.queryAllByRole("option").length).toBe(3));
 
-    const line = container.querySelector(".asset-gallery__scrollbar-line")!;
+    const line = container.querySelector(".asset-gallery__date-rail-line")!;
     fireEvent.pointerEnter(line);
-    const label = await waitFor(() => container.querySelector(".asset-gallery__scrollbar-label"));
+    const label = await waitFor(() => container.querySelector(".asset-gallery__date-rail-label"));
     expect(label).toBeInTheDocument();
     expect(label).toHaveTextContent(/개/);
   });
@@ -356,7 +387,7 @@ describe("AssetGallery", () => {
     const { container } = render(<AssetGallery items={items} />);
     await waitFor(() => expect(screen.queryAllByRole("option").length).toBe(60));
 
-    const scrollbar = container.querySelector(".asset-gallery__scrollbar") as HTMLElement;
+    const scrollbar = container.querySelector(".asset-gallery__date-rail") as HTMLElement;
     expect(scrollbar).toBeInTheDocument();
   });
 
@@ -370,9 +401,9 @@ describe("AssetGallery", () => {
       dateBuckets={[{ date: "2026-07-30", count: 1 }, { date: "2026-08-01", count: 1 }]}
       onSelectDate={onSelectDate}
     />);
-    await waitFor(() => expect(container.querySelector(".asset-gallery__scrollbar-line")).not.toBeNull());
+    await waitFor(() => expect(container.querySelector(".asset-gallery__date-rail-line")).not.toBeNull());
 
-    const lines = container.querySelectorAll(".asset-gallery__scrollbar-line");
+    const lines = container.querySelectorAll(".asset-gallery__date-rail-line");
     fireEvent.pointerDown(lines[1]!, { button: 0, pointerId: 1 });
 
     expect(onSelectDate).toHaveBeenCalledTimes(1);
@@ -391,8 +422,8 @@ describe("AssetGallery", () => {
       dateBuckets={[{ date: "2026-07-30", count: 1 }, { date: "2026-08-01", count: 1 }]}
     />);
 
-    await waitFor(() => expect(container.querySelector(".asset-gallery__scrollbar-line")).not.toBeNull());
-    expect(container.querySelector(".asset-gallery__scrollbar-indicator")).toBeNull();
+    await waitFor(() => expect(container.querySelector(".asset-gallery__date-rail-line")).not.toBeNull());
+    expect(container.querySelector(".asset-gallery__date-rail-indicator")).toBeNull();
   });
 
   it("ignores rail clicks when the rail is not interactive", async () => {
@@ -406,9 +437,9 @@ describe("AssetGallery", () => {
       railInteractive={false}
       onSelectDate={onSelectDate}
     />);
-    await waitFor(() => expect(container.querySelector(".asset-gallery__scrollbar-line")).not.toBeNull());
+    await waitFor(() => expect(container.querySelector(".asset-gallery__date-rail-line")).not.toBeNull());
 
-    fireEvent.pointerDown(container.querySelector(".asset-gallery__scrollbar-line")!, { button: 0, pointerId: 1 });
+    fireEvent.pointerDown(container.querySelector(".asset-gallery__date-rail-line")!, { button: 0, pointerId: 1 });
 
     expect(onSelectDate).not.toHaveBeenCalled();
   });
@@ -432,11 +463,11 @@ describe("AssetGallery", () => {
       items={[{ ...asset(0), collectedAt: "2024-01-28T03:00:00" }]}
       dateBuckets={[{ date: "2024-01-28", count: 1 }, { date: "2024-01-27", count: 1 }]}
     />);
-    await waitFor(() => expect(container.querySelector(".asset-gallery__scrollbar-line")).not.toBeNull());
+    await waitFor(() => expect(container.querySelector(".asset-gallery__date-rail-line")).not.toBeNull());
 
-    const lines = container.querySelectorAll(".asset-gallery__scrollbar-line");
-    expect(lines[0]).toHaveClass("asset-gallery__scrollbar-line--active");
-    expect(lines[1]).not.toHaveClass("asset-gallery__scrollbar-line--active");
+    const lines = container.querySelectorAll(".asset-gallery__date-rail-line");
+    expect(lines[0]).toHaveClass("asset-gallery__date-rail-line--active");
+    expect(lines[1]).not.toHaveClass("asset-gallery__date-rail-line--active");
   });
 
   it("commits only the final date bucket when a rail drag ends", async () => {
@@ -449,8 +480,8 @@ describe("AssetGallery", () => {
       dateBuckets={[{ date: "2026-07-30", count: 1 }, { date: "2026-08-01", count: 1 }]}
       onSelectDate={onSelectDate}
     />);
-    await waitFor(() => expect(container.querySelector(".asset-gallery__scrollbar-line")).not.toBeNull());
-    const scrollbar = container.querySelector(".asset-gallery__scrollbar") as HTMLElement;
+    await waitFor(() => expect(container.querySelector(".asset-gallery__date-rail-line")).not.toBeNull());
+    const scrollbar = container.querySelector(".asset-gallery__date-rail") as HTMLElement;
     vi.spyOn(scrollbar, "getBoundingClientRect").mockReturnValue({ top: 0, height: 600, bottom: 600, left: 0, right: 40, width: 40, x: 0, y: 0, toJSON: () => ({}) });
     Object.defineProperty(scrollbar, "hasPointerCapture", { configurable: true, value: () => true });
     Object.defineProperty(scrollbar, "releasePointerCapture", { configurable: true, value: vi.fn() });
@@ -472,8 +503,8 @@ describe("AssetGallery", () => {
       dateBuckets={[{ date: "2026-07-30", count: 1 }, { date: "2026-08-01", count: 1 }]}
       onSelectDate={onSelectDate}
     />);
-    await waitFor(() => expect(container.querySelector(".asset-gallery__scrollbar")).not.toBeNull());
-    const scrollbar = container.querySelector(".asset-gallery__scrollbar") as HTMLElement;
+    await waitFor(() => expect(container.querySelector(".asset-gallery__date-rail")).not.toBeNull());
+    const scrollbar = container.querySelector(".asset-gallery__date-rail") as HTMLElement;
     vi.spyOn(scrollbar, "getBoundingClientRect").mockReturnValue({ top: 0, height: 600, bottom: 600, left: 0, right: 40, width: 40, x: 0, y: 0, toJSON: () => ({}) });
 
     fireEvent.pointerDown(scrollbar, { button: 0, pointerId: 1, clientY: 300 });

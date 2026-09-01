@@ -93,7 +93,7 @@ export function GameCollectionDetail({
               <span className="game-collection-detail__package-spine" aria-hidden="true" />
               <span className="game-collection-detail__package-front">
                 {coverUrl && !privacyMode ? (
-                  <img src={coverUrl} alt={`${collection.name} 표지`} draggable={false} />
+                  <img className="collection-cover-image" src={coverUrl} alt={`${collection.name} 표지`} draggable={false} />
                 ) : (
                   <span className="game-collection-detail__package-placeholder" aria-hidden="true" />
                 )}

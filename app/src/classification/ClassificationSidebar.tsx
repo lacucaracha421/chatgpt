@@ -32,6 +32,7 @@ type ClassificationSidebarProps = {
   onExpandedAlbumIdsChange?: (ids: string[]) => void;
   onSidebarWidthChange: (width: number) => void;
   onChanged: () => void;
+  onClearAssetSelection?: () => void;
   onAlbumsChanged?: () => void;
   dragTarget?: ClassificationDropTarget | null;
   onPointerDragStart?: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => void;
@@ -76,6 +77,7 @@ export function ClassificationSidebar({
   onPointerDragMove,
   onPointerDragEnd,
   onPointerDragCancel,
+  onClearAssetSelection,
   sidebarWidth,
   reviewCount,
   trashCount,
@@ -340,7 +342,25 @@ export function ClassificationSidebar({
   }
 
   return (
-    <aside className="classification-sidebar" aria-label="분류" style={{ width: sidebarWidth }} onKeyDown={handleSidebarKeyDown}>
+    <aside
+      className="classification-sidebar"
+      aria-label="분류"
+      style={{ width: sidebarWidth }}
+      onKeyDown={handleSidebarKeyDown}
+      onClick={(event) => {
+        const target = event.target as HTMLElement;
+        const sidebar = event.currentTarget;
+        const bounds = sidebar.getBoundingClientRect();
+        const clickedVerticalScrollbar = target === sidebar
+          && sidebar.offsetWidth > sidebar.clientWidth
+          && event.clientX >= bounds.left + sidebar.clientWidth;
+        const clickedHorizontalScrollbar = target === sidebar
+          && sidebar.offsetHeight > sidebar.clientHeight
+          && event.clientY >= bounds.top + sidebar.clientHeight;
+        if (clickedVerticalScrollbar || clickedHorizontalScrollbar) return;
+        if (!target.closest("button, a, input, select, textarea, [contenteditable='true'], [role='treeitem'], [role='menuitem'], [role='dialog'], [role='separator']")) onClearAssetSelection?.();
+      }}
+    >
       <div className="classification-sidebar__heading" data-tauri-drag-region>
         <h2>분류</h2>
         <Button type="button" size="icon" variant="ghost" aria-label="새 폴더" onClick={() => openTopLevelCreate("classification")}>
@@ -351,7 +371,6 @@ export function ClassificationSidebar({
         <QuickViewButton icon={<FolderIcon aria-hidden="true" />} label="저장소" selected={view.kind === "classification" && view.classificationId === null} onClick={() => onViewChange({ kind: "classification", classificationId: null })} />
         <QuickViewButton icon={<InboxIcon aria-hidden="true" />} label="미분류" selected={view.kind === "unsorted"} onClick={() => onViewChange({ kind: "unsorted" })} />
         <QuickViewButton icon={<CalendarIcon aria-hidden="true" />} label="다시보기" selected={view.kind === "revisit" || view.kind === "creator"} onClick={() => onViewChange({ kind: "revisit" })} />
-        <QuickViewButton icon={<PhotoIcon aria-hidden="true" />} label="유사 검토" count={reviewCount} selected={view.kind === "similarity_review"} onClick={() => onViewChange({ kind: "similarity_review" })} />
         <QuickViewButton icon={<BookOpenIcon aria-hidden="true" />} label="망가" selected={view.kind === "manga"} onClick={() => onViewChange({ kind: "manga" })} />
         <QuickViewButton icon={<RectangleStackIcon aria-hidden="true" />} label="컬렉션" selected={view.kind === "collections" || view.kind === "collection"} onClick={() => onViewChange({ kind: "collections", typeFilter: collectionType, showcase: false })} />
       </nav>
@@ -444,6 +463,7 @@ export function ClassificationSidebar({
         </div>
       </ContextMenu>
       <div className="classification-sidebar__footer">
+        <QuickViewButton icon={<PhotoIcon aria-hidden="true" />} label="유사 검토" count={reviewCount} selected={view.kind === "similarity_review"} onClick={() => onViewChange({ kind: "similarity_review" })} />
         <QuickViewButton icon={<TrashIcon aria-hidden="true" />} label="휴지통" count={trashCount} selected={view.kind === "trash"} onClick={() => onViewChange({ kind: "trash" })} />
         <QuickViewButton icon={<Cog6ToothIcon aria-hidden="true" />} label="설정" selected={view.kind === "settings"} onClick={() => onViewChange({ kind: "settings" })} />
       </div>

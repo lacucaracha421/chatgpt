@@ -90,7 +90,7 @@ function renderOverlay(
     listCollectionCovers: vi.fn().mockResolvedValue([]),
     listCollectionVolumes: vi.fn().mockResolvedValue([]),
     listCollectionWorkArtworks: vi.fn().mockResolvedValue([]),
-    syncMangaDexVolumeCovers: vi.fn(), inspectLegacyPackageMigration: vi.fn(), executeLegacyPackageMigration: vi.fn().mockResolvedValue({ completed: 0, skipped: 0, failed: 0 }),
+    syncMangaDexVolumeCovers: vi.fn().mockResolvedValue({ completed: 0, skipped: 0, failed: 0 }), inspectLegacyPackageMigration: vi.fn(), executeLegacyPackageMigration: vi.fn().mockResolvedValue({ completed: 0, skipped: 0, failed: 0 }),
     getMangaDexConnection: vi.fn().mockResolvedValue(null),
     refreshMangaDex: vi.fn().mockResolvedValue(collection),
     getAladinCredentialStatus: vi.fn().mockResolvedValue({ configured: false }),
@@ -142,6 +142,16 @@ async function openProviderMenu(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("CollectionOverlay MangaDex flow", () => {
+  it("loads an unconnected manga without requesting MangaDex cover sync or showing an error toast", async () => {
+    const syncMangaDexVolumeCovers = vi.fn().mockRejectedValue(new Error("MangaDex identity is invalid"));
+    const { gateway } = renderOverlay({ syncMangaDexVolumeCovers });
+
+    expect(await screen.findByRole("heading", { name: "권별 표지" })).toBeInTheDocument();
+    await waitFor(() => expect(gateway.getMangaDexConnection).toHaveBeenCalledWith("collection-1"));
+    expect(syncMangaDexVolumeCovers).not.toHaveBeenCalled();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
   it("composes manga detail around a shelf-first layout", async () => {
     const user = userEvent.setup();
     renderOverlay({
@@ -278,7 +288,11 @@ describe("CollectionOverlay MangaDex flow", () => {
         { id: "v1-1", volumeNumber: 1, editionIndex: 1, displayLabel: "1.1", coverArtworkId: "art-1-1" },
       ]);
     const user = userEvent.setup();
-    renderOverlay({ listCollectionVolumes, syncMangaDexVolumeCovers });
+    renderOverlay({
+      listCollectionVolumes,
+      syncMangaDexVolumeCovers,
+      getMangaDexConnection: vi.fn().mockResolvedValue({ mangaId: "manga-1", lastSyncedAt: "t" }),
+    });
 
     expect(await screen.findAllByRole("button", { name: /^(2|10)권 표지/ })).toHaveLength(2);
     expect(screen.getAllByRole("button", { name: /^(2|10)권 표지/ }).map((button) => button.getAttribute("aria-label"))).toEqual([

@@ -52,7 +52,7 @@ export function MovieCollectionDetail({
         <div className="movie-collection-detail__scrim" aria-hidden="true" />
         <div className="movie-collection-detail__content">
           <div className="movie-collection-detail__poster">
-            {posterUrl && !privacyMode ? <img src={posterUrl} alt={`${collection.name} 포스터`} draggable={false} /> : <span aria-label="포스터 없음" />}
+            {posterUrl && !privacyMode ? <img className="collection-cover-image" src={posterUrl} alt={`${collection.name} 포스터`} draggable={false} /> : <span aria-label="포스터 없음" />}
           </div>
           <div className="movie-collection-detail__identity">
             <div className="movie-collection-detail__actions">

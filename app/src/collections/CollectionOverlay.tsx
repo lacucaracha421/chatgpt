@@ -155,16 +155,6 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
         setVolumeImport(null);
         setVolumes(initial);
         setSelectedVolumeId(firstVolumeId(initial, 0));
-        const result = await gateway.syncMangaDexVolumeCovers(collectionId);
-        const refreshed = await gateway.listCollectionVolumes(collectionId);
-        if (!active) return;
-        setVolumes(refreshed);
-        setSelectedVolumeId((current) => current && refreshed.some((volume) => volume.id === current)
-          ? current
-          : firstVolumeId(refreshed, 0));
-        if (result.failed > 0) {
-          setMessage(`표지 ${result.failed}개를 불러오지 못했습니다. 다음 새로고침에서 다시 시도합니다.`);
-        }
       } catch (error) {
         if (active) {
           setVolumes((current) => current ?? []);
@@ -193,10 +183,32 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
       return () => { active = false; };
     }
     setMangaDexConnection(undefined);
-    void gateway.getMangaDexConnection(collectionId).then(
-      (next) => { if (active) setMangaDexConnection(next); },
-      () => { if (active) setMangaDexConnection(null); },
-    );
+    void (async () => {
+      let next: MangaDexConnection | null;
+      try {
+        next = await gateway.getMangaDexConnection(collectionId);
+      } catch {
+        if (active) setMangaDexConnection(null);
+        return;
+      }
+      if (!active) return;
+      setMangaDexConnection(next);
+      if (!next) return;
+      try {
+        const result = await gateway.syncMangaDexVolumeCovers(collectionId);
+        const refreshed = await gateway.listCollectionVolumes(collectionId);
+        if (!active) return;
+        setVolumes(refreshed);
+        setSelectedVolumeId((current) => current && refreshed.some((volume) => volume.id === current)
+          ? current
+          : firstVolumeId(refreshed, 0));
+        if (result.failed > 0) {
+          setMessage(`표지 ${result.failed}개를 불러오지 못했습니다. 다음 새로고침에서 다시 시도합니다.`);
+        }
+      } catch (error) {
+        if (active) setMessage(commandErrorMessage(error, "권별 표지를 불러오지 못했습니다."));
+      }
+    })();
     return () => { active = false; };
   }, [gateway, collectionId, isManga]);
 

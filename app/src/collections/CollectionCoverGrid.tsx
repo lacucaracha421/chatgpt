@@ -56,6 +56,7 @@ export function CollectionCoverGrid({
                 <Skeleton className="privacy-mask collection-overlay__cover-mask" label="비공개 모드" />
               ) : (
                 <img
+                  className="collection-cover-image"
                   src={collectionCoverThumbnailUrl(collectionId, cover.fileName)}
                   alt={cover.volumeLabel}
                   loading="lazy"

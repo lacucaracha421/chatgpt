@@ -191,11 +191,24 @@ export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new S
     <div
       ref={scrollRef}
       className="asset-gallery__scroll"
+      data-native-scrollbar="true"
       role="listbox"
       aria-label="자산"
       aria-multiselectable="true"
       onScroll={cancelQuickPreview}
-      onClick={(event) => { if (!(event.target as HTMLElement).closest(".asset-gallery__asset")) onClearSelection?.(); }}
+      onClick={(event) => {
+        const target = event.target as HTMLElement;
+        const surface = event.currentTarget;
+        const bounds = surface.getBoundingClientRect();
+        const clickedVerticalScrollbar = target === surface
+          && surface.offsetWidth > surface.clientWidth
+          && event.clientX >= bounds.left + surface.clientWidth;
+        const clickedHorizontalScrollbar = target === surface
+          && surface.offsetHeight > surface.clientHeight
+          && event.clientY >= bounds.top + surface.clientHeight;
+        if (clickedVerticalScrollbar || clickedHorizontalScrollbar) return;
+        if (!target.closest(".asset-gallery__asset, button, a, input, select, textarea, [contenteditable='true']")) onClearSelection?.();
+      }}
       onKeyDown={(event) => {
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
           event.preventDefault();
@@ -229,7 +242,7 @@ export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new S
         })}
       </div>
     </div>
-    {hasRail && <div ref={railRef} className="asset-gallery__scrollbar" aria-hidden="true" onPointerDown={(event) => { if (event.button === 0) { event.currentTarget.setPointerCapture(event.pointerId); updatePendingDateJump(event.clientY); } }} onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) updatePendingDateJump(event.clientY); }} onPointerUp={(event) => { updatePendingDateJump(event.clientY); commitPendingDateJump(); event.currentTarget.releasePointerCapture?.(event.pointerId); }} onPointerCancel={() => { pendingJumpRef.current = null; }} onPointerLeave={() => setHoveredLine(null)} onWheel={(event) => { const element = scrollRef.current; if (!element || dateBuckets.length === 0) return; element.scrollTop += event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY; }}>
+    {hasRail && <div ref={railRef} className="asset-gallery__date-rail" aria-hidden="true" onPointerDown={(event) => { if (event.button === 0) { event.currentTarget.setPointerCapture(event.pointerId); updatePendingDateJump(event.clientY); } }} onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) updatePendingDateJump(event.clientY); }} onPointerUp={(event) => { updatePendingDateJump(event.clientY); commitPendingDateJump(); event.currentTarget.releasePointerCapture?.(event.pointerId); }} onPointerCancel={() => { pendingJumpRef.current = null; }} onPointerLeave={() => setHoveredLine(null)} onWheel={(event) => { const element = scrollRef.current; if (!element || dateBuckets.length === 0) return; element.scrollTop += event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY; }}>
       {dateLines.map((line, index) => (
         <span
           key={line.key}
@@ -240,7 +253,7 @@ export function AssetGallery({ items, dateBuckets = [], selectedAssetIds = new S
           onPointerDown={(event) => { if (event.button === 0 && railInteractive) { event.stopPropagation(); onSelectDate?.(line.key, line.progress); } }}
         />
       ))}
-      {hoveredLine && <span className="asset-gallery__scrollbar-label" style={{ top: `${hoveredLine.top}px` }}>{hoveredLine.label}</span>}
+      {hoveredLine && <span className="asset-gallery__date-rail-label" style={{ top: `${hoveredLine.top}px` }}>{hoveredLine.label}</span>}
     </div>}
     {quickPreview && !privacyMode && <div className="asset-gallery__quick-preview" style={quickPreviewLayout(quickPreview)}><img src={assetUrl(quickPreview.asset.id)} alt={`${quickPreview.asset.title || quickPreview.asset.originalName} 빠른 미리보기`} draggable={false} onError={cancelQuickPreview} /></div>}
   </div>;
@@ -428,7 +441,7 @@ function buildDateLines(geometry: RailGeometry, tickIndexes: number[], dateSumma
 }
 
 function lineClassName(hoveredLine: { key: string; index: number } | null, lineIndex: number, line: DateLine): string {
-  const base = "asset-gallery__scrollbar-line";
+  const base = "asset-gallery__date-rail-line";
   const classes = [base];
   if (line.density >= 0.75) classes.push(`${base}--dense`);
   else if (line.density >= 0.35) classes.push(`${base}--medium`);

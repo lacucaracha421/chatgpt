@@ -111,6 +111,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const [sidebarWidth, setSidebarWidth] = useState(preferences.sidebarWidth);
   const [message, setMessage] = useState<string | null>(null);
   const [assetRefresh, setAssetRefresh] = useState(0);
+  const [clearAssetSelectionRequest, setClearAssetSelectionRequest] = useState(0);
   const [maintenance, setMaintenance] = useState<"restore" | null>(null);
   const [createClassificationRequest, setCreateClassificationRequest] = useState(0);
   const [browserStatus, setBrowserStatus] = useState<AssetBrowserStatus>({
@@ -515,6 +516,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
               onPointerDragMove={movePointerDrag}
               onPointerDragEnd={finishPointerDrag}
               onPointerDragCancel={cancelPointerDrag}
+              onClearAssetSelection={() => setClearAssetSelectionRequest((current) => current + 1)}
             />
           }
           content={
@@ -591,6 +593,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     onPrivacyModeChange={(privacyMode) => updatePreferences({ privacyMode })}
                     thumbnailRowHeight={view.kind === "creators" ? preferences.creatorCardSize : preferences.thumbnailRowHeight}
                     refreshVersion={assetRefresh}
+                    clearSelectionRequest={clearAssetSelectionRequest}
                     requestedAsset={requestedAsset}
                     onRequestedAssetHandled={() => setRequestedAsset(null)}
                     onSortChange={(assetSort: AssetSort) => updatePreferences({ assetSort })}

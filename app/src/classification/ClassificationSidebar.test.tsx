@@ -107,6 +107,7 @@ function renderSidebar(
   const onExpandedIdsChange = vi.fn();
   const onSidebarWidthChange = vi.fn();
   const onChanged = vi.fn();
+  const onClearAssetSelection = vi.fn();
 
   function Fixture() {
     const [view, setView] = useState<AssetView>(props.view ?? { kind: "classification", classificationId: null });
@@ -136,13 +137,14 @@ function renderSidebar(
             onSidebarWidthChange(width);
           }}
           onChanged={onChanged}
+          onClearAssetSelection={props.onClearAssetSelection ?? onClearAssetSelection}
         />
       </LibraryProvider>
     );
   }
 
   render(<Fixture />);
-  return { libraryGateway, onChanged, onExpandedIdsChange, onSidebarWidthChange, onViewChange };
+  return { libraryGateway, onChanged, onExpandedIdsChange, onSidebarWidthChange, onViewChange, onClearAssetSelection };
 }
 
 describe("buildClassificationTree", () => {
@@ -229,7 +231,6 @@ describe("ClassificationSidebar", () => {
       "저장소",
       "미분류",
       "다시보기",
-      "유사 검토0",
       "망가",
       "컬렉션",
     ]);
@@ -778,6 +779,28 @@ describe("ClassificationSidebar", () => {
     const button = screen.getByRole("button", { name: "유사 검토 12개" });
     await user.click(button);
     expect(onViewChange).toHaveBeenCalledWith({ kind: "similarity_review" });
+  });
+
+  it("places Similarity Review with management actions and clears selection only from empty sidebar space", async () => {
+    const user = userEvent.setup();
+    const { onClearAssetSelection } = renderSidebar(gateway(), { reviewCount: 12 });
+    const sidebar = screen.getByRole("complementary", { name: "분류" });
+    const footer = sidebar.querySelector(".classification-sidebar__footer") as HTMLElement;
+
+    expect(within(footer).getAllByRole("button").map((button) => button.textContent)).toEqual(["유사 검토12", "휴지통", "설정"]);
+    await user.click(screen.getByRole("button", { name: "저장소" }));
+    expect(onClearAssetSelection).not.toHaveBeenCalled();
+
+    fireEvent.click(sidebar);
+    expect(onClearAssetSelection).toHaveBeenCalledOnce();
+
+    Object.defineProperties(sidebar, {
+      clientWidth: { configurable: true, value: 200 },
+      offsetWidth: { configurable: true, value: 208 },
+    });
+    vi.spyOn(sidebar, "getBoundingClientRect").mockReturnValue({ left: 0, right: 208, top: 0, bottom: 600, width: 208, height: 600, x: 0, y: 0, toJSON: () => ({}) });
+    fireEvent.click(sidebar, { clientX: 204 });
+    expect(onClearAssetSelection).toHaveBeenCalledOnce();
   });
 
   it("opens the manga quick view", async () => {

@@ -16,6 +16,25 @@ beforeEach(() => Object.defineProperties(HTMLElement.prototype, {
 }));
 
 describe("AssetBrowser", () => {
+  it("clears its current selection when the scoped sidebar request changes", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway({ items: [asset(0)], nextCursor: null });
+    const status = vi.fn();
+    const browser = (clearSelectionRequest: number) => (
+      <LibraryProvider gateway={gateway}>
+        <AssetBrowser view={{ kind: "classification", classificationId: null }} classifications={classifications} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} clearSelectionRequest={clearSelectionRequest} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={status} />
+      </LibraryProvider>
+    );
+    const { rerender } = render(browser(0));
+    await user.click(await screen.findByRole("option", { name: "asset-0.png" }));
+    await waitFor(() => expect(status).toHaveBeenLastCalledWith(expect.objectContaining({ selectedAsset: expect.objectContaining({ id: "asset-0" }) })));
+
+    rerender(browser(1));
+
+    await waitFor(() => expect(status).toHaveBeenLastCalledWith(expect.objectContaining({ selectedAsset: null })));
+    expect(screen.getByRole("option", { name: "asset-0.png" })).toHaveAttribute("aria-selected", "false");
+  });
+
   it.each<[string, AssetView, AssetSort, Partial<Record<string, unknown>>]>([
     ["classification", { kind: "classification", classificationId: "tag" }, "oldest", { classificationId: "tag", directOnly: false, unclassifiedOnly: false, sort: "oldest" }],
     ["unsorted", { kind: "unsorted" }, "newest", { classificationId: null, directOnly: false, unclassifiedOnly: true, sort: "newest" }],
@@ -360,7 +379,7 @@ describe("AssetBrowser", () => {
     renderBrowser(gateway);
     await screen.findByRole("option", { name: "asset-0.png" });
 
-    const line = document.querySelectorAll(".asset-gallery__scrollbar-line")[1] as HTMLElement;
+    const line = document.querySelectorAll(".asset-gallery__date-rail-line")[1] as HTMLElement;
     fireEvent.pointerDown(line, { button: 0, pointerId: 1 });
 
     await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledWith(expect.objectContaining({ sort: "newest", aroundDate: "2026-07-15", after: null })));
@@ -380,7 +399,7 @@ describe("AssetBrowser", () => {
       .mockResolvedValueOnce({ items: [{ ...asset(10), title: "신규" }], nextCursor: null });
     renderBrowser(gateway);
     await screen.findByRole("option", { name: "asset-0.png" });
-    const lines = document.querySelectorAll(".asset-gallery__scrollbar-line");
+    const lines = document.querySelectorAll(".asset-gallery__date-rail-line");
     fireEvent.pointerDown(lines[0]!, { button: 0, pointerId: 1 });
     fireEvent.pointerDown(lines[1]!, { button: 0, pointerId: 1 });
     expect(await screen.findByRole("option", { name: "신규" })).toBeInTheDocument();
@@ -399,7 +418,7 @@ describe("AssetBrowser", () => {
       .mockResolvedValue({ items: [], nextCursor: null });
     const { rerender } = renderBrowser(gateway);
     await screen.findByRole("option", { name: "asset-0.png" });
-    fireEvent.pointerDown(document.querySelectorAll(".asset-gallery__scrollbar-line")[1]!, { button: 0, pointerId: 1 });
+    fireEvent.pointerDown(document.querySelectorAll(".asset-gallery__date-rail-line")[1]!, { button: 0, pointerId: 1 });
     expect(await screen.findByRole("option", { name: "asset-5.png" })).toBeInTheDocument();
 
     rerender(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "trash" }} classifications={classifications} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);

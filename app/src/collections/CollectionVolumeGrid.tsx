@@ -62,7 +62,7 @@ export function CollectionVolumeGrid({
                 onClick={() => onSelect(volume.id)}
               >
                 {volume.coverArtworkId && !privacyMode ? (
-                  <img src={workArtworkThumbnailUrl(volume.coverArtworkId)} alt={label} loading="lazy" draggable={false} />
+                  <img className="collection-cover-image" src={workArtworkThumbnailUrl(volume.coverArtworkId)} alt={label} loading="lazy" draggable={false} />
                 ) : (
                   <span className="collection-overlay__cover-placeholder" aria-hidden="true" />
                 )}

@@ -37,6 +37,7 @@ export function CollectionCard({
         <span className="collection-card__cover">
           {visibleCoverUrl && !privacyMode ? (
             <img
+              className="collection-cover-image"
               src={visibleCoverUrl}
               alt={collection.name}
               loading="lazy"
