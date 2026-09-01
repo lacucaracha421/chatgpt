@@ -346,6 +346,8 @@ describe("AssetBrowser", () => {
   });
 
   it("loads only the selected local day from 다시보기", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 7, 15, 12));
     const user = userEvent.setup();
     const gateway = createGateway({ items: [asset(0)], nextCursor: null });
     vi.mocked(gateway.listAssetDateBuckets).mockResolvedValue([{ date: "2026-08-06", count: 1 }]);
