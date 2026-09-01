@@ -706,16 +706,16 @@ For each new bug, record:
 5. UI-004 + PERF-002 + BUG-007 flashing reduction, view-state preservation, and mutation scroll stability
 6. PERF-003 Phase 1 background-work throttling and bounded gallery memory, then Phase 2 lazy loading/cache/polling reductions
 7. PERF-001 10,000+ asset cache/media optimization, including mobile thumbnail/preview optimization after CLOUD-006 correctness
-18. EXT-003 same-X-post media grouping
-8. EXT-004 adaptive/hidden secondary donut tags
-9. BUG-006 and remaining P1 usability work as reproduced/prioritized
-10. OPS-001 backup/migration/settings portability
-11. CLOUD-003 long-video async handling if real-world use requires it
-12. CATALOG-003 Japanese-language catalog ingestion/filter after CATALOG-001 reaches DONE
-13. CATALOG-004 advanced VCK-style catalog search syntax
-14. BUG-008 + UI-009 catalog/manga viewer cleanup and VCK-inspired reader improvements
-15. CATALOG-002 Heliotrope as a provider-namespaced second catalog source after Phase 1 is stable
-16. NOTE-001 / STATS-001 / IDEA-001 / UI-008
-17. Long-term collection presentation / shelf work
+8. EXT-003 same-X-post media grouping
+9. EXT-004 adaptive/hidden secondary donut tags
+10. BUG-006 and remaining P1 usability work as reproduced/prioritized
+11. OPS-001 backup/migration/settings portability
+12. CLOUD-003 long-video async handling if real-world use requires it
+13. CATALOG-003 Japanese-language catalog ingestion/filter after CATALOG-001 reaches DONE
+14. CATALOG-004 advanced VCK-style catalog search syntax
+15. BUG-008 + UI-009 catalog/manga viewer cleanup and VCK-inspired reader improvements
+16. CATALOG-002 Heliotrope as a provider-namespaced second catalog source after Phase 1 is stable
+17. NOTE-001 / STATS-001 / IDEA-001 / UI-008
+18. Long-term collection presentation / shelf work
 
 This order is a working execution preference, not a dependency graph. Reorder when a real regression or production verification failure becomes more urgent.
