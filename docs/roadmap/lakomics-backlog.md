@@ -351,6 +351,40 @@ Sidebar behavior:
 - Do not create a permanent Cloud Inbox section.
 - Show a dynamic `동기화 문제 N` item in the lower management area only when failed/review-pending work exists.
 
+### CLOUD-006 — Full library cloud replication for mobile
+Status: `TODO`
+
+Goal:
+- Make the full PC Lakomics asset library browsable from Lakomics Mobile while the PC is offline.
+- Keep the PC library authoritative; the Japanese VPS/R2 copy is a read-oriented replica that can be rebuilt from the PC.
+- The current library is only about 7–8 GB, so the first implementation may replicate originals directly instead of making a thumbnail-only architecture a prerequisite.
+
+Initial scope:
+- Backfill all existing local assets to R2 and register their server-side asset records.
+- Reuse the existing outbound `cloud_sync_queue` and upload contracts where practical instead of creating a second independent uploader pipeline.
+- Make the backfill idempotent: detect already-registered asset IDs/object keys and never upload the same asset again merely because a run was restarted.
+- Persist enough mobile metadata to browse and inspect assets without the PC: stable asset ID, media kind/content type, size, collected/source timestamps, source/provenance fields that are already part of the library, and classification memberships.
+- Publish asset ↔ classification relationships so selecting a real classification on mobile returns the matching full-library assets rather than only Cloud Capture inbox history.
+- Make the initial backfill resumable after app restart, network interruption, or partial failure; expose queued/completed/failed counts and retry failed work without starting over.
+- After backfill, enqueue new assets automatically and define narrow incremental updates for classification changes, metadata changes, and deletions.
+- Add paginated/read-only mobile asset endpoints and short-lived media download tickets rather than exposing R2 credentials or the Cloud API token to the public mobile page.
+- Reuse the current extension bridge/security boundary for the GitHub Pages mobile client until a dedicated mobile app/session model replaces it.
+
+Consistency / deletion rules:
+- PC state wins on conflicts in the first phase; mobile editing/write-back is out of scope.
+- Define tombstone versus immediate R2 deletion before propagating local deletions, so a transient sync mistake cannot silently destroy the only remote copy.
+- Capture Inbox rows are transport history, not the canonical mobile library. Once an item is part of the PC library, mobile browsing should use the replicated asset/library model.
+
+Verification:
+- Compare local and server asset counts after the initial backfill and spot-check representative image/video hashes or sizes.
+- Confirm a backfill can be interrupted and resumed without duplicate DB rows or duplicate R2 objects.
+- With the PC off, browse several classifications on the Galaxy Tab mobile view, open real images, and play at least one replicated video.
+- Add one new PC asset and change one asset's classification, then verify both changes appear through incremental sync without another full backfill.
+
+Follow-ups:
+- Coordinate with `PERF-001` for thumbnail/preview generation, caching, WebP policy, and bandwidth optimization after correctness is established.
+- Coordinate with `CLOUD-UI-001` so backfill progress, last success, failures, and retry state are visible from normal settings UI.
+
 ### EXT-001 — Reorganize extension settings
 Status: `VERIFY`
 
@@ -587,16 +621,17 @@ For each new bug, record:
 1. CATALOG-001 real-use verification (run `신규 작품 갱신` and open a gallery from the merged main build against the real VPS), then DONE
 2. CLOUD-UI-001 connection/transport diagnostics so fallback, endpoint, count, and credential state are visible without DevTools
 3. EXT-001 / EXT-002 extension settings cleanup and automatic Cloud/direct-PC save policy
-4. UI-004 + PERF-002 + BUG-007 flashing reduction, view-state preservation, and mutation scroll stability
-5. PERF-001 10,000+ asset cache/media optimization
-6. EXT-003 same-X-post media grouping
-7. EXT-004 adaptive/hidden secondary donut tags
-8. BUG-001 / BUG-005 / BUG-006 / UI-003 and remaining P1 usability work as reproduced/prioritized
-9. OPS-001 backup/migration/settings portability
-10. CLOUD-003 long-video async handling if real-world use requires it
-11. CATALOG-003 Japanese-language catalog ingestion/filter after CATALOG-001 reaches DONE
-12. CATALOG-002 Heliotrope as a provider-namespaced second catalog source after Phase 1 is stable
-13. NOTE-001 / STATS-001 / IDEA-001 / UI-008
-14. Long-term collection presentation / shelf work
+4. CLOUD-006 full-library cloud replication/backfill for Lakomics Mobile, then incremental metadata/classification sync
+5. UI-004 + PERF-002 + BUG-007 flashing reduction, view-state preservation, and mutation scroll stability
+6. PERF-001 10,000+ asset cache/media optimization, including mobile thumbnail/preview optimization after CLOUD-006 correctness
+7. EXT-003 same-X-post media grouping
+8. EXT-004 adaptive/hidden secondary donut tags
+9. BUG-001 / BUG-005 / BUG-006 / UI-003 and remaining P1 usability work as reproduced/prioritized
+10. OPS-001 backup/migration/settings portability
+11. CLOUD-003 long-video async handling if real-world use requires it
+12. CATALOG-003 Japanese-language catalog ingestion/filter after CATALOG-001 reaches DONE
+13. CATALOG-002 Heliotrope as a provider-namespaced second catalog source after Phase 1 is stable
+14. NOTE-001 / STATS-001 / IDEA-001 / UI-008
+15. Long-term collection presentation / shelf work
 
 This order is a working execution preference, not a dependency graph. Reorder when a real regression or production verification failure becomes more urgent.
