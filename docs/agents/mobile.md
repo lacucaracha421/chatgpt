@@ -345,20 +345,121 @@ Exit condition:
 
 This corresponds primarily to `CLOUD-006` and related cloud/performance backlog work.
 
-Implement:
-- complete asset metadata replication
+Confirmed rollout choices:
+- The PC library remains authoritative; the VPS database and R2 objects are a rebuildable read-oriented replica.
+- Run the initial full-library backfill at maximum practical throughput overnight while keeping concurrency bounded.
+- Expose each asset to Mobile immediately after that asset's required objects and metadata are committed; do not wait for the whole backfill.
+- Replicate `original + thumbnail` during the initial pass. Generate `display.webp` later as non-blocking background work.
+- Do not replicate the complete PC SQLite database. Publish only the asset, classification, provenance, media, and sync state required by Mobile.
+- Do not enable destructive cloud deletion during the initial backfill rollout.
+
+#### Phase 1A — read-only preflight
+
+Before enqueuing work, calculate and show:
+- normal asset count and total original bytes
+- counts by image / GIF / video
+- existing and missing thumbnail counts
+- missing originals
+- local DB size versus file-size mismatches
+- stored SHA-256 versus actual-file mismatches where verification is required
+- unclassified asset count
+
+Preflight must not mutate the library. Valid assets may proceed even when a small number of assets require repair; report those assets separately instead of blocking the full backfill.
+
+#### Phase 1B — cloud asset model and upload contract
+
+Extend the existing cloud asset storage rather than creating a second unrelated library.
+
+Store:
+- stable PC asset ID
+- media kind, MIME type, original name, byte size, dimensions, and duration where applicable
+- collected/source timestamps and existing provenance fields needed by Mobile
+- current sync revision and ready/uploading/deleted state
 - classification relationships
-- resumable/idempotent initial backfill
-- incremental metadata/classification sync
-- R2/object availability for the full library
-- paginated classification asset queries
-- media access/ticket contract
-- thumbnail/display variant generation path
-- device-token authentication
-- tombstone/deletion model
+- object variants for `original`, `thumbnail`, and later `display`
+- per-variant object key, MIME type, byte size, SHA-256, and ready timestamp
+
+Keep object keys path-independent and stable:
+
+```text
+images/{asset_id}/original
+images/{asset_id}/thumb.webp
+videos/{asset_id}/original
+videos/{asset_id}/thumb.webp
+```
+
+Use a two-step, idempotent server contract:
+
+1. `prepare`: receive asset/revision/variant metadata, inspect already-present objects, and return signed PUT details only for missing variants.
+2. upload: the desktop PUTs directly to R2 using server-issued signed URLs; R2 credentials never leave the VPS.
+3. `commit`: the server verifies required objects, then atomically upserts asset metadata and classification relationships and marks the asset ready.
+
+A Mobile list query must return only committed ready assets. A retry after upload but before commit must detect and reuse already-uploaded objects instead of transferring them again.
+
+#### Phase 1C — resumable desktop backfill worker
+
+Build on the existing outbound `cloud_sync_queue`; keep it separate from inbound Cloud Capture state.
+
+Backfill behavior:
+- publish the classification snapshot before processing assets
+- enqueue every normal asset using its stable asset ID and latest revision
+- process recently collected assets first so the partial Mobile library is useful quickly
+- upload existing Lakomics WebP thumbnails when valid
+- generate missing thumbnails through the normal local thumbnail path
+- use prepared video poster thumbnails for videos
+- validate the original against stored size/type/hash before upload
+- use bounded concurrent transfers, starting at four and adjusting only from measured behavior
+- keep Windows awake only while an active overnight backfill is running
+- continue while the app is minimized; release the keep-awake request when paused or complete
+
+Queue/retry behavior:
+- recover interrupted `processing` rows to `pending` on reopen
+- retry timeouts, connection failures, HTTP 429, and HTTP 5xx with bounded exponential backoff
+- fail permanent authentication, validation, unsupported-media, and changed-source errors explicitly
+- isolate failures so one asset never blocks later assets
+- allow pause-after-current-item, resume, and failed-only retry
+- coalesce newer revisions so stale metadata is not published after a later local change
+
+Suggested retry delays: 5 seconds, 15 seconds, 1 minute, 5 minutes, then 15 minutes.
+
+#### Phase 1D — progressive cloud read API
+
+Provide at least:
+- library replication/status summary
+- classification tree
+- cursor-paginated ready assets, filterable by classification
+- asset detail
+- short-lived signed media tickets for thumbnail/original variants
+
+Use a stable cursor such as `(collected_at, asset_id)` so new commits during backfill do not cause duplicates or gaps in an existing traversal. Do not expose R2 credentials or permanent public object URLs.
+
+The Mobile prototype may begin reading this API as soon as the first committed batch exists. Cloud Capture inbox rows remain transport history and must not masquerade as the replicated library.
+
+#### Phase 1E — operations and staged rollout
+
+Desktop Settings should show:
+- local total count/bytes
+- ready, pending, processing, failed, and remaining counts
+- uploaded bytes, current throughput, and estimated remaining time
+- last success/failure
+- start, pause, resume, retry-failed, and reconcile actions
+
+Roll out in this order:
+1. one real image with original and thumbnail
+2. one real video with poster thumbnail
+3. a mixed batch of roughly 20 assets
+4. one real classification containing roughly 100–500 assets
+5. forced app exit and network interruption/recovery tests
+6. PC-off Galaxy Tab browse/open/play verification
+7. full overnight backfill
+8. count/size reconciliation and representative hash/size spot checks
+9. one new asset and one classification change through incremental sync
+
+Do not add cross-asset object deduplication to the first rollout. Stable per-asset object keys keep deletion and recovery understandable, and the local library already handles exact-duplicate ingestion.
 
 Exit condition:
-- with the PC off, a client can query real classifications and browse the complete replicated asset set from cloud services
+- with the PC off, a client can query real classifications and browse every successfully replicated asset from cloud services while the backfill is still progressing
+- after completion, local/server counts reconcile, representative image/video objects validate, interrupted work resumes without duplicate rows or unnecessary re-upload, and new local assets continue through incremental sync
 
 ### Phase 2 — Mobile viewing client
 
