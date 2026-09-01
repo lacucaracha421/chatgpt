@@ -342,6 +342,38 @@ describe("AssetBrowser", () => {
     expect(screen.queryByRole("option", { name: "Before" })).not.toBeInTheDocument();
   });
 
+  it("preserves scroll position across a same-scope refresh", async () => {
+    const gateway = createGateway();
+    vi.mocked(gateway.listAssets)
+      .mockResolvedValueOnce({ items: Array.from({ length: 30 }, (_, index) => ({ ...asset(index), title: `Before-${index}` })), nextCursor: null })
+      .mockResolvedValueOnce({ items: [{ ...asset(0), title: "After-0" }, { ...asset(2), title: "After-2" }], nextCursor: null });
+    const { container, rerender } = renderBrowser(gateway, { refreshVersion: 0 });
+    expect(await screen.findByRole("option", { name: "Before-0" })).toBeVisible();
+    const scrollElement = container.querySelector(".asset-gallery__scroll") as HTMLElement;
+    scrollElement.scrollTop = 500;
+
+    rerender(browserElement(gateway, { refreshVersion: 1 }));
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole("option", { name: "After-0" })).toBeVisible();
+
+    expect(container.querySelector(".asset-gallery__scroll")).toBe(scrollElement);
+    expect(scrollElement.scrollTop).toBe(500);
+  });
+
+  it("resets scroll to top when the sort changes within the same classification", async () => {
+    const gateway = createGateway();
+    vi.mocked(gateway.listAssets).mockResolvedValue({ items: Array.from({ length: 30 }, (_, index) => ({ ...asset(index), title: `Item-${index}` })), nextCursor: null });
+    const { container, rerender } = renderBrowser(gateway, { sort: "newest" });
+    expect(await screen.findByRole("option", { name: "Item-0" })).toBeVisible();
+    const scrollElement = container.querySelector(".asset-gallery__scroll") as HTMLElement;
+    scrollElement.scrollTop = 500;
+
+    rerender(browserElement(gateway, { sort: "oldest" }));
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole("option", { name: "Item-0" })).toBeVisible();
+    expect(scrollElement.scrollTop).toBe(0);
+  });
+
   it("cannot page outside the destination scope after a sharp shrink", async () => {
     const gateway = createGateway();
     vi.mocked(gateway.listAssets)

@@ -543,10 +543,13 @@ describe("ClassificationSidebar", () => {
     expect(screen.getByText("자산은 보존되고 이 폴더 연결만 제거됩니다.")).toBeVisible();
   });
 
-  it("selects the parent and removes the deleted child from expanded folders", async () => {
+  it("selects the parent when the deleted child was the current view", async () => {
     const user = userEvent.setup();
     const fixtureGateway = gateway();
-    const { onChanged, onExpandedIdsChange, onViewChange } = renderSidebar(fixtureGateway, { expandedIds: ["root", "work", "tag"] });
+    const { onChanged, onExpandedIdsChange, onViewChange } = renderSidebar(fixtureGateway, {
+      expandedIds: ["root", "work", "tag"],
+      view: { kind: "classification", classificationId: "tag" },
+    });
 
     fireEvent.contextMenu(screen.getByRole("treeitem", { name: "Arona" }), { clientX: 20, clientY: 20 });
     await user.click(screen.getByRole("menuitem", { name: "삭제" }));
@@ -570,6 +573,24 @@ describe("ClassificationSidebar", () => {
 
     await waitFor(() => expect(fixtureGateway.deleteClassification).toHaveBeenCalledWith("empty"));
     expect(onViewChange).toHaveBeenCalledWith({ kind: "classification", classificationId: null });
+  });
+
+  it("keeps the current view when deleting an unrelated folder", async () => {
+    const user = userEvent.setup();
+    const { libraryGateway, onViewChange } = renderSidebar(gateway(), {
+      view: { kind: "classification", classificationId: "work" },
+      entries: [
+        ...entries,
+        { id: "sibling", kind: "root", name: "Unused", parentId: null, iconKey: null, colorKey: null },
+      ],
+    });
+
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: "Unused" }), { clientX: 20, clientY: 20 });
+    await user.click(screen.getByRole("menuitem", { name: "삭제" }));
+    await user.click(screen.getByRole("button", { name: "삭제" }));
+
+    await waitFor(() => expect(libraryGateway.deleteClassification).toHaveBeenCalledWith("sibling"));
+    expect(onViewChange).not.toHaveBeenCalled();
   });
 
   it("omits the moving folder and its descendants from move targets", async () => {

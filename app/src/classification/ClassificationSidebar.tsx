@@ -220,13 +220,17 @@ export function ClassificationSidebar({
       else await gateway.deleteClassification(dialog.entry.id);
       setMessage(null);
       closeDialog();
+      const current = view.kind === "classification" ? view.classificationId : view.kind === "album" ? view.albumId : null;
+      const deletedCurrentView = current !== null && dialog.entry.id === current;
+      const deletedCurrentRoot = (view.kind === "classification" && view.classificationId === null && dialog.entry.kind === "root");
+      const isDeletedEntryCurrentScope = deletedCurrentView || deletedCurrentRoot;
       if (isAlbum) {
         onExpandedAlbumIdsChange(expandedAlbumIds.filter((id) => id !== dialog.entry.id));
-        onViewChange(dialog.entry.parentId ? { kind: "album", albumId: dialog.entry.parentId } : { kind: "classification", classificationId: null });
+        if (isDeletedEntryCurrentScope) onViewChange(dialog.entry.parentId ? { kind: "album", albumId: dialog.entry.parentId } : { kind: "classification", classificationId: null });
         onAlbumsChanged();
       } else {
         onExpandedIdsChange(expandedIds.filter((id) => id !== dialog.entry.id));
-        onViewChange({ kind: "classification", classificationId: dialog.entry.parentId });
+        if (isDeletedEntryCurrentScope) onViewChange({ kind: "classification", classificationId: dialog.entry.parentId });
         onChanged();
       }
     } catch (error) {
