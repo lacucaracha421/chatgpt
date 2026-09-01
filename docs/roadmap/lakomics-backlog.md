@@ -415,6 +415,23 @@ Goal:
 - Keep the PC library authoritative; the Japanese VPS/R2 copy is a read-oriented replica that can be rebuilt from the PC.
 - The current library is only about 7–8 GB, so the first implementation may replicate originals directly instead of making a thumbnail-only architecture a prerequisite.
 
+Confirmed implementation choices:
+- Initial backfill runs at maximum practical overnight throughput with bounded concurrency, starting at four transfers.
+- Mobile exposes each asset immediately after that asset's original, thumbnail, metadata, and classification commit succeeds.
+- Initial representation scope is original + thumbnail; display WebP generation is later non-blocking work.
+- Recently collected assets are queued first.
+- The first rollout does not enable destructive cloud deletion or cross-asset R2 deduplication.
+- The detailed Phase 1 contract, worker, API, and rollout rules live in `docs/agents/mobile.md`.
+
+Implementation batches:
+1. Read-only preflight and repair report for missing/changed originals and thumbnails.
+2. Idempotent prepare/upload/commit server contract plus variant/classification schema.
+3. Resumable full-library queue seeding and bounded overnight desktop worker.
+4. Progressive cursor-paginated read API and signed thumbnail/original media tickets.
+5. Settings progress/pause/resume/retry/reconcile surface.
+6. One image, one video, mixed 20-item, and 100–500-item classification rollout gates.
+7. Full overnight backfill, PC-off Galaxy Tab verification, reconciliation, then incremental-sync verification.
+
 Initial scope:
 - Backfill all existing local assets to R2 and register their server-side asset records.
 - Reuse the existing outbound `cloud_sync_queue` and upload contracts where practical instead of creating a second independent uploader pipeline.
