@@ -59,9 +59,10 @@ Implemented on the current integration branch:
 - New inbound videos trigger the normal video preparation path.
 - Outbound `cloud_sync_queue` remains separate and unchanged.
 
-Remaining verification:
-- Deploy the pending-payload server change to the Japanese VPS.
-- Verify real X image and video flows end-to-end from extension -> VPS/R2 -> PC library with classification preservation and immediate UI refresh.
+Verification:
+- Real X image and video flows have been verified end-to-end from the extension through VPS/R2 into the PC Lakomics library.
+- Selected classification membership is preserved and imported assets appear in the running UI without requiring an app restart.
+- CLOUD-002 inbound integration is complete.
 
 ### CLOUD-005 — PC-independent saved-X-media snapshot
 Status: `DONE`
@@ -117,23 +118,22 @@ Investigation:
 ### VERIFY-001 — X → VPS → PC end-to-end check
 Status: `TODO`
 
-After CLOUD-001/CLOUD-004/CLOUD-002 and DB issues are fixed:
-- Save a real image from X on the tablet.
-- Confirm capture exists on VPS/R2.
-- Confirm pending is consumed by the PC.
-- Confirm selected classification is preserved.
-- Confirm the item becomes visible in the currently running app without restart.
-- Repeat with video.
+Verification:
+- Real image and video saves from X were verified through VPS/R2 into the PC library.
+- Pending capture consumption, selected-classification preservation, and live UI refresh were confirmed in actual use.
+- End-to-end Cloud inbound verification is complete.
 
 ## P1 — visible UX / usability
 
 ### UI-004 — Remove rapid flashing during view transitions and previews
 Status: `TODO`
 
-Problem:
-- Tab switching and image previews cause rapid refresh/flicker that is uncomfortable to look at.
+Recent progress:
+- Classification/folder transitions no longer leak stale virtual rows from previously visited scopes.
+- The giant blank virtual-space gap and cross-folder asset leakage found during the gallery transition work were fixed in `9c19606`, `c0f7f6c`, and `f7715ad`.
+- Keep this item open for the remaining tab-switching and image-preview flicker.
 
-Direction:
+Remaining direction:
 - Keep the previous view visible until replacement content is ready.
 - Avoid replacing the whole view with a blank/skeleton frame when stale content can remain visible.
 - Decode/preload preview images before swapping them in.
@@ -142,14 +142,12 @@ Direction:
 - If a transition is needed, use a very short subtle cross-fade rather than full fade-out/fade-in.
 
 ### UI-007 — Video viewer controls
-Status: `TODO`
+Status: `DONE`
 
-- Fix the progress bar being compressed toward the left.
-- Let the timeline use the available width naturally.
-- Auto-hide playback controls and cursor after roughly 1.5–2 seconds of no input while playing.
-- Show controls immediately on pointer movement.
-- Keep controls visible while paused, scrubbing, or changing volume.
-- Controls must overlay the video rather than changing its layout.
+Resolution:
+- Implemented in `8486552` (`fix: stabilize viewer transitions and navigation`): absolute overlay controls that do not reflow the video, a timeline that consumes the full control width, idle auto-hide (`CONTROLS_IDLE_MS`) while playing, immediate restore on pointer movement, and retained visibility while paused, scrubbing, interacting with volume, or focusing controls.
+- Fullscreen and AssetViewer left/right navigation and shortcuts remain working.
+- Focused VideoPlayer tests pass; behavior re-verified in real use on the running Tauri app.
 
 ### BUG-003 — X video drag-save shows blue selection highlight on PC
 Status: `TODO`
@@ -164,58 +162,46 @@ Direction:
 - Do not change the working video save path.
 
 ### BUG-006 — Sidebar asset counts stay stale after drag-and-drop move
-Status: `TODO`
+Status: `DONE`
 
-Observed behavior:
-- Moving an asset to a sidebar classification/folder via drag-and-drop succeeds.
-- The asset counts displayed beside the affected sidebar folders do not update immediately.
-- Counts become correct only after a later refresh/reload.
-
-Direction:
-- Update or invalidate the affected sidebar count state as part of the successful move mutation.
-- Keep both source and destination counts consistent.
-- Verify both single-asset and multi-selection drag moves.
-- Prefer narrow state/cache invalidation over reloading the entire library solely to refresh counts.
+Resolution:
+- `App.tsx`'s `performInternalDrop` refreshed the gallery after a successful classification drop but did not refresh the sidebar membership/count state.
+- Classification counts come from the authoritative `gateway.listClassifications()` response and count direct normal-asset membership rather than recursive descendants.
+- Classification drag/drop is a move: existing classification memberships are replaced by the destination classification. Album drops remain add-only.
+- Successful drops now call `refreshMembershipCounts()` once in addition to the existing gallery refresh, updating source/destination counts without manual counter patches or refresh storms.
+- Commit: `cd6077a` (`fix: refresh sidebar counts after asset moves`).
+- Verified in real use.
 
 ### BUG-007 — Asset/library mutations reset the current gallery scroll position
-Status: `TODO`
+Status: `DONE`
 
-Observed behavior:
-- Deleting an asset refreshes the current asset view and resets the gallery scroll position to the top.
-- Deleting a sidebar classification/folder can trigger the same full-view refresh and scroll reset.
-- Other narrow mutations that refresh the current asset view may share the same behavior.
-
-Direction:
-- Preserve the current gallery viewport across mutations whenever the current view remains valid.
-- Avoid remounting or replacing the entire gallery for narrow data mutations where an in-place update/invalidation is sufficient.
-- When deleting an item changes layout, preserve the nearest stable viewport position instead of forcing `scrollTop = 0`.
-- Sidebar mutations that do not navigate away from the current asset view must not reset its scroll position.
-- Coordinate with UI-004 and PERF-002; do not regress virtualization while fixing this.
+Resolution:
+- Same-scope asset mutations were already preserving gallery scroll because `refreshVersion` / `retryVersion` do not change the logical `queryKey` / `scopeKey`.
+- The actual bug was `ClassificationSidebar.remove()`: deleting any sidebar folder unconditionally navigated to its parent even when the deleted folder was unrelated to the current view.
+- That unintended navigation changed scope and therefore triggered the gallery's legitimate scope-reset behavior.
+- Sidebar deletion now navigates only when the deleted classification is the active view (or active root); unrelated deletions keep the current view and viewport intact.
+- Genuine scope changes and sort/filter changes still reset to the top as intended.
+- Commit: `fe75db6` (`fix: preserve gallery position across asset mutations`).
+- Verified in real use.
 
 ### NAV-001 — Unify back-navigation behavior
-Status: `TODO`
+Status: `DONE`
 
-Define one navigation priority for:
-- Mouse Button 4
-- Escape
-- overlay close
-- detail → list
-- nested Revisit views
-- previous app view
-
-Expected priority:
-1. Close the topmost overlay/detail layer.
-2. Return to the parent/list view.
-3. Navigate back to the previous app view when applicable.
+Resolution:
+- Architecture from `8486552` is in place and runtime-verified: `BackNavigationProvider` with priority-ordered handlers, shared `Dialog` redirecting Escape through `requestBack` at dialog priority (100), `useDesktopInteractions` routing Mouse Button 4 through the same path, and the App view history fallback.
+- Priority holds: topmost overlay/Dialog closes first, then nested detail, then previous app view; root is a safe no-op.
+- Remaining local Escape handlers (gallery selection clear, sidebar inline editor cancel, CollectionOverlay/Settings/SimilarityReview exits) are intentionally local to their surfaces and guard against overlapping layers; they do not bypass or conflict with the shared chain.
+- Focused BackNavigation / useDesktopInteractions / App suites pass; behavior re-verified in real use on the running Tauri app.
 
 ### UX-009 — Loading, error, retry, and tooltip consistency
-Status: `TODO`
+Status: `DONE`
 
-- Standardize loading and error presentation.
-- Add retry actions where meaningful.
-- Preserve the last valid content instead of clearing the entire view where possible.
-- Add concise tooltips for ambiguous icon-only controls.
-- Make connection/transport errors more diagnosable without exposing secrets.
+Resolution:
+- Audited the high-use surfaces (AssetBrowser/AssetViewer, collection views, manga/catalog views, settings/cloud surfaces) against the shared Button/Dialog/Toast/EmptyState/Skeleton/StableImage components.
+- Already satisfied by accumulated work: blocking Skeleton only on initial load with no previous content; last-valid content preserved during same-scope refreshes and pagination; recoverable next/previous page failures show a Toast plus retry while keeping content; fatal failures show EmptyState with retry; catalog errors go through `commandErrorMessage` without exposing secrets.
+- All icon-only buttons carry `aria-label`s; icon-only buttons without labels were audited and none remain in high-use surfaces.
+- Request-scoped guards in the online catalog prevent stale responses and duplicate retries (buttons disabled while in-flight).
+- No remaining inconsistencies found in the prioritized surfaces; focused and full suites pass, and behavior was re-verified in real use on the running Tauri app.
 
 ### UI-006 — Easier asset selection clearing
 Status: `DONE`
@@ -276,7 +262,7 @@ Direction:
 ## P2 — architecture / larger feature work
 
 ### CATALOG-001 — Move fragile k-hentai transport behind the Japanese VPS
-Status: `VERIFY`
+Status: `DONE`
 
 Current issue:
 - Online catalog transport depends on direct PC access to `k-hentai.org`, historically through a hidden WebView2 and gallery resolver paths that are unreliable on Korean networks.
@@ -296,11 +282,9 @@ Current checkpoint:
 - The corrected server implementation has already been deployed to the Japanese VPS; `/health` returned 200 and the catalog endpoint returned the expected 401 when called without authentication.
 - The catalog implementation has now been integrated into main.
 
-Remaining verification:
-- Run `신규 작품 갱신` from the merged main build against the real VPS.
-- Confirm it returns either newly imported works / already-up-to-date, not the previous raw HTTP 500.
-- Open at least one catalog work/gallery through the real application and confirm page/detail transport still works.
-- After this real-use verification, change CATALOG-001 from VERIFY to DONE.
+Verification:
+- Real application use has been verified after integration; the Japanese VPS catalog transport is working in normal use.
+- CATALOG-001 Phase 1 is complete.
 
 Heliotrope:
 - Do not force Heliotrope into Phase 1 because Hitomi IDs and VCK/k-hentai IDs are different.
@@ -310,7 +294,7 @@ Heliotrope:
 Status: `TODO`
 
 Prerequisite:
-- CATALOG-001 real-use verification (Korean transport) must reach DONE first; the VPS route contract is implemented and merged, only real-app verification remains.
+- CATALOG-001 is DONE; Japanese-language ingestion can build on the existing verified VPS transport boundary.
 
 Goal:
 - Extend the current Korean-only k-hentai/VCK catalog ingestion so Japanese-language originals can also be discovered and updated in Lakomics.
@@ -377,7 +361,7 @@ Status: `TODO`
 - Prefer provider-namespaced identity such as `(provider, provider_work_id)` if/when Heliotrope becomes a second provider.
 
 ### CLOUD-UI-001 — Cloud status, transport diagnostics, and problem surface
-Status: `VERIFY`
+Status: `DONE`
 
 Implemented in main:
 - Settings expose a `연결 · 동기화 상태` surface: Cloud (credential/endpoint/last failure), PC direct (connection key/Remote/last failure), active classification source with count and explicit fallback reason, saved-media index source/key count, and the effective save mode.
@@ -415,23 +399,6 @@ Goal:
 - Keep the PC library authoritative; the Japanese VPS/R2 copy is a read-oriented replica that can be rebuilt from the PC.
 - The current library is only about 7–8 GB, so the first implementation may replicate originals directly instead of making a thumbnail-only architecture a prerequisite.
 
-Confirmed implementation choices:
-- Initial backfill runs at maximum practical overnight throughput with bounded concurrency, starting at four transfers.
-- Mobile exposes each asset immediately after that asset's original, thumbnail, metadata, and classification commit succeeds.
-- Initial representation scope is original + thumbnail; display WebP generation is later non-blocking work.
-- Recently collected assets are queued first.
-- The first rollout does not enable destructive cloud deletion or cross-asset R2 deduplication.
-- The detailed Phase 1 contract, worker, API, and rollout rules live in `docs/agents/mobile.md`.
-
-Implementation batches:
-1. Read-only preflight and repair report for missing/changed originals and thumbnails.
-2. Idempotent prepare/upload/commit server contract plus variant/classification schema.
-3. Resumable full-library queue seeding and bounded overnight desktop worker.
-4. Progressive cursor-paginated read API and signed thumbnail/original media tickets.
-5. Settings progress/pause/resume/retry/reconcile surface.
-6. One image, one video, mixed 20-item, and 100–500-item classification rollout gates.
-7. Full overnight backfill, PC-off Galaxy Tab verification, reconciliation, then incremental-sync verification.
-
 Initial scope:
 - Backfill all existing local assets to R2 and register their server-side asset records.
 - Reuse the existing outbound `cloud_sync_queue` and upload contracts where practical instead of creating a second independent uploader pipeline.
@@ -459,7 +426,7 @@ Follow-ups:
 - Coordinate with `CLOUD-UI-001` so backfill progress, last success, failures, and retry state are visible from normal settings UI.
 
 ### EXT-001 — Reorganize extension settings
-Status: `VERIFY`
+Status: `DONE`
 
 Reorganized in main:
 - `저장 방식` (Automatic/PC direct/Cloud/Download with concise explanation), `Cloud`, `PC 직접 연결` (Lakomics 연결 + Remote), `연결 · 동기화 상태` diagnostics, `X Translate`, `모바일 도넛`, `PC · 방사형 메뉴 배치`, and a collapsed `고급 · 복구 설정` block.
@@ -469,7 +436,7 @@ Reorganized in main:
 
 ### EXT-002 — Cloud-first extension save policy
 
-Status: `VERIFY`
+Status: `DONE`
 
 Implemented in main:
 - User-facing modes: `자동` (default) / `PC 직접 연결만` (`pc`) / `Cloud만` (`cloud`) / `브라우저 Download만` (`download`).
@@ -516,31 +483,6 @@ Review and define:
 - video optimization
 
 Design for 10,000+ assets without unnecessary stutter or uncontrolled disk growth.
-
-### PERF-003 — Bound background work and gallery memory
-Status: `TODO`
-
-Goal:
-- Keep Lakomics responsive and resource usage bounded as the library grows, without removing features or replacing the current React/Tauri foundation.
-- Prefer work that runs only when the app is idle over background loops that compete with active browsing.
-
-Phase 1 — highest-impact structural limits:
-- Similarity indexing: delay startup work, use `requestIdleCallback` where available, process small batches, pause while the user is scrolling/interacting, and leave roughly 100–500 ms between batches.
-- Video preparation: run only during idle periods, reduce each batch to roughly 2–3 videos, pause during gallery interaction, and leave roughly 300 ms between batches.
-- Gallery pagination: replace unbounded page accumulation with a sliding window around the current viewport. Keep roughly 5–8 pages / 600–800 assets in memory, discard distant pages, and reload them by cursor when the user returns.
-- Preserve `@tanstack/react-virtual`; the target is bounded JS data, row-layout calculation, and selection state rather than a second DOM virtualization system.
-
-Phase 2 — startup and repeated-work reductions:
-- Screen lazy loading: convert infrequently visited views such as Settings, Manga, Similarity Review, Trash, and Revisited views to `React.lazy()` / dynamic imports, with a stable loading boundary that does not reintroduce UI-004 flashing.
-- Date-bucket caching: cache the all-library date-bucket query and invalidate it only after relevant asset additions, deletions, or timestamp-changing mutations.
-- Cloud Capture polling: check immediately when the app regains focus, then use a slower cadence such as 60 seconds while active and 5 minutes in the background unless real use demonstrates a need for faster polling.
-
-Verification / acceptance:
-- Compare cold-start time, idle CPU/disk activity, and memory after long scrolling before and after the change.
-- Verify scrolling and selection remain stable when old gallery pages are evicted and reloaded in either direction.
-- Verify pending similarity/video work continues making progress after interaction stops and survives repeated pause/resume cycles.
-- Verify newly captured Cloud items still appear promptly after focus return.
-- Coordinate with PERF-001, PERF-002, UI-004, and BUG-007; do not trade lower resource use for flashing or scroll resets.
 
 ### PERF-002 — Preserve view state across navigation
 Status: `TODO`
@@ -716,23 +658,20 @@ For each new bug, record:
 
 ## Current intended implementation order
 
-1. CATALOG-001 real-use verification (run `신규 작품 갱신` and open a gallery from the merged main build against the real VPS), then DONE
-2. CLOUD-UI-001 connection/transport diagnostics so fallback, endpoint, count, and credential state are visible without DevTools
-3. EXT-001 / EXT-002 extension settings cleanup and automatic Cloud/direct-PC save policy
-4. CLOUD-006 full-library cloud replication/backfill for Lakomics Mobile, then incremental metadata/classification sync
-5. UI-004 + PERF-002 + BUG-007 flashing reduction, view-state preservation, and mutation scroll stability
-6. PERF-003 Phase 1 background-work throttling and bounded gallery memory, then Phase 2 lazy loading/cache/polling reductions
-7. PERF-001 10,000+ asset cache/media optimization, including mobile thumbnail/preview optimization after CLOUD-006 correctness
-8. EXT-003 same-X-post media grouping
-9. EXT-004 adaptive/hidden secondary donut tags
-10. BUG-006 and remaining P1 usability work as reproduced/prioritized
-11. OPS-001 backup/migration/settings portability
-12. CLOUD-003 long-video async handling if real-world use requires it
-13. CATALOG-003 Japanese-language catalog ingestion/filter after CATALOG-001 reaches DONE
-14. CATALOG-004 advanced VCK-style catalog search syntax
-15. BUG-008 + UI-009 catalog/manga viewer cleanup and VCK-inspired reader improvements
-16. CATALOG-002 Heliotrope as a provider-namespaced second catalog source after Phase 1 is stable
-17. NOTE-001 / STATS-001 / IDEA-001 / UI-008
-18. Long-term collection presentation / shelf work
+1. UI-004 + PERF-002 remaining tab/preview flashing reduction and broader view-state preservation
+2. BUG-005 manga collection-viewer entry toast investigation
+3. BUG-003 X video drag-save blue native-selection artifact
+4. BUG-008 + UI-009 catalog/manga viewer cleanup and VCK-inspired reader improvements
+5. CLOUD-006 full-library cloud replication/backfill for Lakomics Mobile, then incremental metadata/classification sync
+6. PERF-001 10,000+ asset cache/media optimization, including mobile thumbnail/preview optimization after CLOUD-006 correctness
+7. EXT-003 same-X-post media grouping
+8. EXT-004 adaptive/hidden secondary donut tags
+9. OPS-001 backup/migration/settings portability
+10. CLOUD-003 long-video async handling if real-world use requires it
+11. CATALOG-003 Japanese-language catalog ingestion/filter on the verified CATALOG-001 transport
+12. CATALOG-004 advanced VCK-style catalog search syntax
+13. CATALOG-002 Heliotrope as a provider-namespaced second catalog source after the current catalog path is stable
+14. NOTE-001 / STATS-001 / IDEA-001 / UI-008
+15. Long-term collection presentation / shelf work
 
 This order is a working execution preference, not a dependency graph. Reorder when a real regression or production verification failure becomes more urgent.
