@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "mobile/**"
+      - "extension/**"
       - ".github/workflows/mobile-pages.yml"
   workflow_dispatch:
 
@@ -32,10 +33,19 @@ jobs:
         with:
           enablement: true
 
+      - name: Build Pages bundle
+        run: |
+          rm -rf _site
+          mkdir -p _site/downloads
+          cp -R mobile/. _site/
+          cd extension
+          zip -r ../_site/downloads/lakomics-extension-latest.zip . \
+            -x "*.DS_Store" "__MACOSX/*" "node_modules/*" "tests/*" "*.zip"
+
       - name: Upload mobile prototype
         uses: actions/upload-pages-artifact@v4
         with:
-          path: mobile
+          path: _site
 
       - name: Deploy
         id: deployment
