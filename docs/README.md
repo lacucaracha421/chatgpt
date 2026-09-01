@@ -15,6 +15,7 @@ This directory contains only current or intentionally retained Lakomics document
 - `agents/domain.md` — how to interpret repository documentation and resolve conflicts.
 - `agents/implementation.md` — implementation and shared-UI rules.
 - `agents/cloud-capture.md` — current Cloud Capture / inbound-outbound sync architecture and known gaps.
+- `agents/mobile.md` — Galaxy Tab-first Lakomics Mobile product direction, v1 success criteria, Android file-picker integration, and phased implementation plan.
 - `agents/lakomics-works-handoff-v2.md` — current Works / Collection product and architecture reference.
 - `agents/claude-ollama.md` — repository-local Claude Code + Ollama Cloud launcher notes.
 - `agents/issue-tracker.md` — when to use the living backlog versus GitHub Issues.
