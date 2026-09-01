@@ -1,39 +1,87 @@
-# Lakomics X Collector 2.0.0-alpha.15.30
+# Lakomics X Collector 2.0.0-alpha.15.38
 
 Unified desktop/mobile X media collector for Lakomics.
 
+The extension collects X images and video into Lakomics, provides radial classification on PC and mobile, includes an integrated X translation layer, and bridges live Lakomics data into the mobile prototype.
 
-## alpha.15.30 - VPS Capture Inbox
-- Added an optional VPS media collector. When enabled, X images and resolved MP4 video are sent to `/v1/captures` instead of directly to the PC ingestion API.
-- The extension sends only X source/media metadata; the VPS downloads images from `pbs.twimg.com` or MP4 video from `video.twimg.com` and stores the original in R2. X animated GIFs use this MP4 video path.
-- Collector URL and API token stay in extension-local storage; the token is never returned by `settings:get`.
-- If the collector cannot be reached, collection falls back to the tablet browser Download path.
-- Captures remain `pending` until the separately completed PC inbound importer downloads them through a signed URL and acknowledges the import. The PC never stores R2 credentials.
-- Capture Inbox is inbound Remote → PC. The app's `cloud_sync_queue` is outbound PC → Cloud; they are separate systems.
-## alpha.15.1
-- Integrated AI X Translate Lite v1.4.14 OpenRouter edition into the extension.
-- Translation API keys/settings are stored in extension-local storage and requests are proxied by the service worker.
-- Added OpenRouter, Ollama Cloud, Gemini and Vercel host permissions only for the translation proxy.
-- Simplified the main settings page: Lakomics connection, X Translate, mobile gesture settings and PC radial layout stay visible.
-- Rare recovery/offline controls moved under Advanced settings.
-- Save mode is now fixed to Auto from the simplified UI; touch persistence and context-menu suppression stay enabled.
-- Keeps alpha.14.1 mobile center-button confirmation and Titanium runtime messaging compatibility.
+For a detailed implementation snapshot, see `IMPLEMENTATION_STATUS.md`.
 
-## alpha.15.5 - 추천 이미지 갤러리
+## Core behavior
 
-- X 홈의 `추천` 탭에서 화면에 들어온 사진 게시물을 세션 갤러리에 모읍니다.
-- 우측의 `▦` 버튼으로 추천 이미지 갤러리를 엽니다.
-- 갤러리의 `자동 수집`은 추천 피드를 뒤에서 자동 스크롤하며 새 이미지 최대 100장을 수집한 뒤 시작 위치로 복귀합니다.
-- 갤러리 이미지도 기존 Lakomics X Collector의 모바일 길게 누르기/PC 드래그 저장 흐름을 그대로 사용합니다.
+- Chrome Manifest V3 extension for `x.com` and `twitter.com`.
+- PC keeps direct radial drag/drop saving.
+- Mobile selects a radial destination first and saves only when the center Save button is tapped.
+- Local PC ingestion uses `127.0.0.1:32145`.
+- Tablet/mobile and Tailscale-hosted endpoints are supported separately.
+- Browser Download fallback remains available when a remote path is unavailable.
+- Saved-state markers and classification snapshots are scoped to the active Lakomics endpoint.
 
+## X Translate
 
-## alpha.15.7 - 추천 갤러리 렌더 최적화
-- 갤러리를 열 때 처음 36장만 렌더링하고, 아래로 내려가면 24장씩 추가합니다.
-- 새 이미지 수집 시 기존 카드 전체를 지우고 다시 만드는 대신 새 카드만 추가합니다.
-- 자동 수집 중에는 갤러리 카드 생성을 미뤄 X 피드 스크롤과 수집을 우선합니다.
+X Translate is built directly into the extension.
 
-## alpha.15.8 - 좋아요 필터
-- 추천 갤러리 카드에 X 게시물의 좋아요 수를 표시합니다.
-- 갤러리 상단에서 `전체`, `♥ 1천+`, `♥ 5천+`, `♥ 1만+` 필터를 즉시 전환할 수 있습니다.
-- 필터는 표시만 제한하며 수집 데이터는 버리지 않으므로 언제든 `전체`로 되돌릴 수 있습니다.
-- X의 일반 숫자와 K/M/B, 한국어 `천/만/억`, 일본어 `万/億` 축약 표기를 처리합니다.
+- Supported providers include OpenRouter, Ollama Cloud, Gemini, and Vercel AI Gateway.
+- Provider/API key/model settings are managed from the floating translation panel on X.
+- Credentials stay in extension-local storage and cross-origin requests are proxied through the background worker.
+- alpha.15.38 requests structured JSON from OpenRouter where supported and adds recovery retries for malformed, truncated, or unparsable translation responses.
+
+## For You image gallery
+
+- Collects photo posts seen in X Home `For You` into an in-session gallery.
+- `Auto harvest` scrolls the feed, gathers new images, then returns to the original position.
+- Gallery items reuse the normal Lakomics mobile long-press / PC drag-save flow.
+- Rendering is incremental: 36 cards initially, then 24 more near the bottom.
+- Like-count filters support all, 1K+, 5K+, and 10K+ without discarding the session data.
+
+## VPS Capture Inbox
+
+Introduced in alpha.15.30.
+
+- Optional VPS collection endpoint receives X images and resolved MP4 video through `/v1/captures`.
+- The VPS downloads supported X media and stores originals in R2.
+- Animated GIF media follows the resolved MP4 path.
+- Collector URL and API token remain extension-local.
+- If the collector is unreachable, collection can fall back to the tablet/browser Download flow.
+- Captures remain pending until the PC inbound importer retrieves them through a signed URL and acknowledges import.
+- Capture Inbox is Remote → PC and is separate from the app's outbound `cloud_sync_queue`.
+
+## Lakomics Mobile prototype bridge
+
+The extension also powers the live-data portions of the Lakomics mobile web prototype hosted on GitHub Pages.
+
+- `mobile-bridge.js` loads the real Lakomics classification tree into the mobile prototype.
+- Selected classification, expanded nodes, and tree scroll position persist locally on the page.
+- `mobile-assets.js` renders real Cloud Capture records in the mobile asset grid.
+- Captures are filtered by the selected classification subtree.
+- Image captures open their original X media in the viewer.
+- Video captures can request a playback ticket and play in the mobile viewer.
+- alpha.15.37 hardened the bridge with parent/page origin validation.
+
+The mobile prototype is not yet a complete native/mobile Lakomics client. The classification tree and Cloud Capture asset view are live; collection, showcase, home, and full local-library replication still contain prototype or incomplete paths.
+
+## Version landmarks
+
+### alpha.15.1
+- Integrated X Translate into the extension.
+- Simplified settings while retaining the mobile center-button save flow.
+
+### alpha.15.4
+- Hardened fallback downloads, JSON sidecars, classification snapshots, offline paths, and API timeout handling.
+
+### alpha.15.5
+- Added the For You image gallery and auto-harvest flow.
+
+### alpha.15.7
+- Added incremental and paged gallery rendering.
+
+### alpha.15.8
+- Added like-count display and gallery filtering.
+
+### alpha.15.30
+- Added the optional VPS Capture Inbox / R2 path.
+
+### alpha.15.34–15.37
+- Added the live mobile classification bridge, Cloud Capture asset rendering, and bridge-origin hardening.
+
+### alpha.15.38
+- Hardened OpenRouter translation JSON handling with structured output and recovery retries.
