@@ -27,6 +27,15 @@ test("integrated translator is based on AI X Translate Lite v1.4.14 OpenRouter",
   assert.match(source, /const GM_KEYS = \[/);
 });
 
+test("OpenRouter translation hardens malformed JSON responses", () => {
+  assert.match(source, /type: 'json_schema'/);
+  assert.match(source, /OPENROUTER_FORMAT_RETRY/);
+  assert.match(source, /OPENROUTER_FORMAT_MODEL_FALLBACK/);
+  assert.match(source, /OPENROUTER_FORMAT_SPLIT/);
+  assert.match(source, /openRouterStructuredOutputRejected/);
+  assert.doesNotMatch(source, /state\.openRouterModelCooldowns/);
+});
+
 test("settings keep common controls visible and rare recovery tools collapsed", () => {
   assert.match(optionsHtml, /id="x-translate-enabled"/);
   assert.match(optionsHtml, /<details class="advanced-block">/);

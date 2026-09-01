@@ -2740,9 +2740,52 @@
         throw new Error('Vercel에서 사용할 번역 모델을 찾지 못했사와요.');
       }
     
-      function openRouterTranslationBody(items, systemPrompt, active) {
-        const contextPrompt = `${systemPrompt}\n\nLAYOUT RULES FOR THIS REQUEST:\nEach input item is one COMPLETE tweet. Read the entire item before translating. Preserve explicit line breaks and paragraph breaks in translated text. Never merge different tweet IDs. Preserve placeholders exactly.`;
+      function openRouterTranslationSchema(items) {
+        const ids = [...new Set(items.map((item) => String(item?.id || '')).filter(Boolean))];
         return {
+          type: 'object',
+          additionalProperties: false,
+          required: ['translations'],
+          properties: {
+            translations: {
+              type: 'array',
+              minItems: items.length,
+              maxItems: items.length,
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['id', 'text', 'hashtags'],
+                properties: {
+                  id: {
+                    type: 'string',
+                    ...(ids.length ? { enum: ids } : {}),
+                  },
+                  text: { type: 'string' },
+                  hashtags: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      additionalProperties: false,
+                      required: ['token', 'text'],
+                      properties: {
+                        token: { type: 'string' },
+                        text: { type: 'string' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        };
+      }
+
+      function openRouterTranslationBody(items, systemPrompt, active, structured = true, strictFormat = false) {
+        const recoveryPrompt = strictFormat
+          ? '\n\nFORMAT RECOVERY RETRY:\nThe previous response could not be parsed. Return one complete valid JSON object only. Do not use Markdown fences. Do not truncate the JSON. Escape quotes and line breaks correctly. Include every requested id exactly once.'
+          : '';
+        const contextPrompt = `${systemPrompt}\n\nLAYOUT RULES FOR THIS REQUEST:\nEach input item is one COMPLETE tweet. Read the entire item before translating. Preserve explicit line breaks and paragraph breaks in translated text. Never merge different tweet IDs. Preserve placeholders exactly.${recoveryPrompt}`;
+        const body = {
           model: active.model,
           messages: [
             { role: 'system', content: contextPrompt },
@@ -2751,8 +2794,33 @@
           temperature: 0,
           stream: false,
         };
+        if (structured) {
+          body.response_format = {
+            type: 'json_schema',
+            json_schema: {
+              name: 'x_translation_batch',
+              strict: true,
+              schema: openRouterTranslationSchema(items),
+            },
+          };
+        }
+        return body;
       }
-    
+
+      function makeOpenRouterFormatError(message, content = '', cause = null) {
+        const error = new Error(message);
+        error.code = 'OPENROUTER_TRANSLATION_FORMAT';
+        error.translationFormatError = true;
+        error.responseBody = sanitizeLogText(String(content || ''));
+        if (cause) error.cause = cause;
+        return error;
+      }
+
+      function isOpenRouterTranslationFormatError(error) {
+        return error?.translationFormatError === true
+          || error?.code === 'OPENROUTER_TRANSLATION_FORMAT';
+      }
+
       function parseOpenRouterResponse(response) {
         if (response.status < 200 || response.status >= 300) {
           const body = safeJsonParse(response.responseText, null);
@@ -2762,14 +2830,35 @@
         const outer = safeJsonParse(response.responseText, null);
         if (!outer) throw new Error('OpenRouter 응답 JSON을 읽지 못했사와요.');
         const content = extractVercelText(outer);
-        if (!content) throw new Error('OpenRouter 응답에 번역 텍스트가 없사와요.');
+        if (!content) {
+          throw makeOpenRouterFormatError('OpenRouter 응답에 번역 텍스트가 없사와요.', '');
+        }
         const parsed = parseModelJson(content);
         if (!parsed) {
-          throw new Error(`OpenRouter 번역 결과 형식을 읽지 못했사와요: ${truncate(content, 180)}`);
+          throw makeOpenRouterFormatError(
+            `OpenRouter 번역 결과 형식을 읽지 못했사와요: ${truncate(content, 180)}`,
+            content
+          );
         }
-        return normalizeTranslationPayload(parsed);
+        try {
+          return normalizeTranslationPayload(parsed);
+        } catch (cause) {
+          throw makeOpenRouterFormatError(
+            `OpenRouter 번역 결과 구조가 올바르지 않사와요: ${truncate(content, 180)}`,
+            content,
+            cause
+          );
+        }
       }
-    
+
+      function openRouterStructuredOutputRejected(response) {
+        const status = Number(response?.status || 0);
+        if (status !== 400 && status !== 422) return false;
+        const body = safeJsonParse(response?.responseText, null);
+        const detail = String(body?.error?.message || body?.error?.code || response?.responseText || '');
+        return /response[_ -]?format|json[_ -]?schema|structured output|unsupported (?:parameter|feature)|does not support/i.test(detail);
+      }
+
       function pruneOpenRouterModelCooldowns() {
         const now = Date.now();
         for (const [model, until] of state.openrouterModelCooldowns) {
@@ -2778,7 +2867,7 @@
           }
         }
       }
-    
+
       function orderedOpenRouterModels(primaryModel) {
         const primary = String(primaryModel || PROVIDERS.openrouter.defaultModel).trim();
         return [...new Set([
@@ -2786,14 +2875,14 @@
           ...OPENROUTER_PRESET_MODELS.map((item) => item.id),
         ].filter(Boolean))];
       }
-    
+
       function openRouterFallbackModels(primaryModel) {
         pruneOpenRouterModelCooldowns();
         const now = Date.now();
         return orderedOpenRouterModels(primaryModel)
           .filter((model) => Number(state.openrouterModelCooldowns.get(model) || 0) <= now);
       }
-    
+
       function nextOpenRouterModelCooldownMs(primaryModel) {
         pruneOpenRouterModelCooldowns();
         const now = Date.now();
@@ -2802,13 +2891,13 @@
           .filter((ms) => Number.isFinite(ms) && ms > 0);
         return waits.length ? Math.min(...waits) : 0;
       }
-    
+
       function isOpenRouterModelFallbackError(error) {
         const status = Number(error?.status || 0);
         return status === 404 || status === 408 || status === 409 || status === 429
           || status >= 500 || isTransientRequestError(error);
       }
-    
+
       function markOpenRouterModelCooldown(model, error) {
         const status = Number(error?.status || 0);
         const serverDelay = Number(error?.retryAfterMs) || 0;
@@ -2819,7 +2908,44 @@
         state.openrouterModelCooldowns.set(model, Date.now() + cooldown);
         return cooldown;
       }
-    
+
+      async function requestOpenRouterModelTranslation(items, systemPrompt, active, strictFormat = false) {
+        const send = async (structured) => {
+          await waitForProviderRequestSlot('openrouter');
+          return gmRequest({
+            method: 'POST',
+            url: `${OPENROUTER_BASE_URL}/chat/completions`,
+            headers: {
+              Authorization: `Bearer ${active.apiKey}`,
+              'Content-Type': 'application/json',
+              'HTTP-Referer': 'https://x.com/',
+              'X-Title': APP,
+            },
+            data: JSON.stringify(openRouterTranslationBody(
+              items,
+              systemPrompt,
+              active,
+              structured,
+              strictFormat
+            )),
+            timeout: LIMITS.requestTimeoutMs,
+            watchdogMs: LIMITS.requestWatchdogMs,
+          });
+        };
+
+        let response = await send(true);
+        if (openRouterStructuredOutputRejected(response)) {
+          addDebugLog('warn', 'OPENROUTER_STRUCTURED_UNSUPPORTED', {
+            provider: 'openrouter',
+            model: active.model,
+            status: response?.status,
+            message: 'structured output 미지원 응답 · 일반 JSON 모드로 재시도',
+          });
+          response = await send(false);
+        }
+        return parseOpenRouterResponse(response);
+      }
+
       async function requestOpenRouterTranslationBody(items, systemPrompt, active) {
         const models = openRouterFallbackModels(active.model);
         if (!models.length) {
@@ -2832,26 +2958,26 @@
           applyProviderRateLimitPause('openrouter', Math.min(waitMs, 60000));
           throw error;
         }
-    
+
         let lastError = null;
         for (const model of models) {
           const modelActive = { ...active, model };
           try {
-            await waitForProviderRequestSlot('openrouter');
-            const response = await gmRequest({
-              method: 'POST',
-              url: `${OPENROUTER_BASE_URL}/chat/completions`,
-              headers: {
-                Authorization: `Bearer ${active.apiKey}`,
-                'Content-Type': 'application/json',
-                'HTTP-Referer': 'https://x.com/',
-                'X-Title': APP,
-              },
-              data: JSON.stringify(openRouterTranslationBody(items, systemPrompt, modelActive)),
-              timeout: LIMITS.requestTimeoutMs,
-              watchdogMs: LIMITS.requestWatchdogMs,
-            });
-            const result = parseOpenRouterResponse(response);
+            let result;
+            try {
+              result = await requestOpenRouterModelTranslation(items, systemPrompt, modelActive, false);
+            } catch (error) {
+              if (!isOpenRouterTranslationFormatError(error)) throw error;
+              addDebugLog('warn', 'OPENROUTER_FORMAT_RETRY', {
+                provider: 'openrouter',
+                model,
+                message: 'malformed translation JSON · 같은 모델로 1회 보정 재시도',
+                responseBody: error?.responseBody,
+              });
+              await sleep(120);
+              result = await requestOpenRouterModelTranslation(items, systemPrompt, modelActive, true);
+            }
+
             state.openrouterModelCooldowns.delete(model);
             if (model !== active.model) {
               addDebugLog('info', 'OPENROUTER_FALLBACK_OK', {
@@ -2863,6 +2989,17 @@
             error.provider = 'openrouter';
             error.model = model;
             lastError = error;
+
+            if (isOpenRouterTranslationFormatError(error)) {
+              addDebugLog('warn', 'OPENROUTER_FORMAT_MODEL_FALLBACK', {
+                provider: 'openrouter',
+                model,
+                message: 'JSON 보정 재시도 실패 · 다음 모델로 우회',
+                responseBody: error?.responseBody,
+              });
+              continue;
+            }
+
             if (!isOpenRouterModelFallbackError(error)) throw error;
             const cooldown = markOpenRouterModelCooldown(model, error);
             addDebugLog('warn', 'OPENROUTER_MODEL_FALLBACK', {
@@ -2872,7 +3009,24 @@
             });
           }
         }
-    
+
+        if (isOpenRouterTranslationFormatError(lastError)) {
+          if (items.length > 1) {
+            const middle = Math.ceil(items.length / 2);
+            const leftItems = items.slice(0, middle);
+            const rightItems = items.slice(middle);
+            addDebugLog('warn', 'OPENROUTER_FORMAT_SPLIT', {
+              provider: 'openrouter',
+              model: active.model,
+              message: `배치 ${items.length}개 JSON 복구 실패 · ${leftItems.length}+${rightItems.length}로 분할 재시도`,
+            });
+            const left = await requestOpenRouterTranslationBody(leftItems, systemPrompt, active);
+            const right = await requestOpenRouterTranslationBody(rightItems, systemPrompt, active);
+            return [...left, ...right];
+          }
+          throw lastError;
+        }
+
         const waitMs = Math.max(1000, nextOpenRouterModelCooldownMs(active.model) || Number(lastError?.retryAfterMs) || 30000);
         const error = new Error('HTTP 429: all OpenRouter translation models are temporarily unavailable');
         error.status = Number(lastError?.status || 429);
@@ -2883,7 +3037,7 @@
         applyProviderRateLimitPause('openrouter', Math.min(waitMs, 60000));
         throw error;
       }
-    
+
       async function fetchOpenRouterModels(apiKey) {
         const response = await gmRequest({
           method: 'GET',

@@ -28,13 +28,13 @@ jobs:
       - name: Build extension zip
         run: |
           cd extension
-          zip -r ../lakomics-extension-alpha-15.37.zip . \
+          zip -r ../lakomics-extension-alpha-15.38.zip . \
             -x "*.DS_Store" "__MACOSX/*" "node_modules/*" "tests/*" "*.zip"
 
       - name: Upload extension package
         uses: actions/upload-artifact@v4
         with:
-          name: lakomics-extension-alpha-15.37
-          path: lakomics-extension-alpha-15.37.zip
+          name: lakomics-extension-alpha-15.38
+          path: lakomics-extension-alpha-15.38.zip
           if-no-files-found: error
           retention-days: 14
