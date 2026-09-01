@@ -61,6 +61,7 @@ export function AssetGallery({ items, scopeKey, selectedAssetIds = new Set(), fo
     const element = scrollRef.current;
     if (!element) return;
     element.scrollTop = 0;
+    rowVirtualizer.measure();
     rowVirtualizer.scrollToOffset(0);
   }, [scopeKey, rowVirtualizer]);
   const virtualRows = rowVirtualizer.getVirtualItems();
@@ -174,7 +175,7 @@ export function AssetGallery({ items, scopeKey, selectedAssetIds = new Set(), fo
         }
       }}
     >
-      <div key={scopeKey ?? "default"} className="asset-gallery__virtual-space" style={{ height: rowVirtualizer.getTotalSize() }}>
+      <div className="asset-gallery__virtual-space" style={{ height: rowVirtualizer.getTotalSize() }}>
         {virtualRows.map((virtualRow) => {
           const row = rows[virtualRow.index]; if (!row) return null;
           return <div key={virtualRow.key} className="asset-gallery__row" style={{ gap, height: row.height + gap, backgroundColor: "var(--color-bg)", transform: `translateY(${virtualRow.start}px)` }}>
