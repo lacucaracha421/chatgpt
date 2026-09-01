@@ -48,7 +48,7 @@ export function RevisitedBundleView({ bundleId, title, assetIds, privacyMode, on
     {assets === null && error && <EmptyState title="묶음 자산을 불러오지 못했습니다"><p role="alert">{error}</p><Button onClick={() => setRetryVersion((value) => value + 1)}>다시 시도</Button></EmptyState>}
     {assets !== null && <>
       <div className="revisited-bundle-view__gallery">
-        <AssetGallery items={assets} railInteractive={false} privacyMode={privacyMode} onOpen={(asset) => setViewerAssetId(asset.id)} />
+        <AssetGallery items={assets} privacyMode={privacyMode} onOpen={(asset) => setViewerAssetId(asset.id)} />
       </div>
       {error && <p className="revisited-bundle-view__error" role="alert">{error} <Button size="sm" onClick={() => setRetryVersion((value) => value + 1)}>다시 시도</Button></p>}
       <AssetViewer items={assets} activeId={viewerAssetId} onActiveIdChange={setViewerAssetId} onClose={() => setViewerAssetId(null)} privacyMode={privacyMode} />

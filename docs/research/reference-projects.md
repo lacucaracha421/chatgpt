@@ -85,7 +85,11 @@ Do **not** blindly replace Lakomics' cursor paging with Lumina's model. A comple
 
 ### Mapping to current Lakomics
 
-Lakomics already uses `@tanstack/react-virtual` in `AssetGallery.tsx`, and it already virtualizes justified rows. `AssetBrowser.tsx` currently owns cursor-based loaded pages with `headCursor` / `tailCursor`, while date buckets provide a library-wide count/date rail.
+Lakomics already uses `@tanstack/react-virtual` in `AssetGallery.tsx`, and it already virtualizes justified rows. `AssetBrowser.tsx` currently owns cursor-based loaded pages with `headCursor` / `tailCursor`. The old date rail was removed because it duplicated the native scrollbar without representing a true global result position.
+
+The current virtualizer's logical length is only the rows built from cursor-loaded `AssetSummary[]`. `AssetPage` has no total count or global start index. The date-bucket query counts all normal assets by local day, but does not accept the gallery's classification, album, collection, creator, media, aspect, favorite, date-range, or sort parameters; it therefore cannot map a filtered scrollbar percentage to an exact asset position. Chronological `aroundDate` can seek to a day boundary, but it cannot resolve an arbitrary global index, within-day rank, favorites order, or random order.
+
+An accurate future fast scroller needs one lightweight positional contract shared with the detail query. The smallest candidates are (a) a filtered, deterministically ordered ID/index spine with sparse `AssetSummary` windows, or (b) sampled global-index-to-keyset-cursor anchors plus an exact filtered count and a keyset seek helper. Either approach must use the same filters and stable tie-break ordering as `list_assets`; deep `OFFSET` is not an acceptable shortcut. The ID spine is simpler for exact thumb geometry, while sampled anchors may bound memory better but need measured seek accuracy and placeholder geometry.
 
 Therefore the useful Lumina lesson is **not** "add virtualization"; Lakomics already has it. The interesting experiment is whether to decouple a lightweight global position/index layer from the heavier loaded `AssetSummary[]` window.
 
@@ -98,7 +102,7 @@ Potential Lakomics hybrid:
 - re-measure virtual rows before paint when thumbnail size/layout metrics change;
 - keep selection subscriptions cell-local where possible.
 
-Before changing architecture, benchmark current cursor paging versus a prototype windowed index on 10k, 100k, and preferably 250k synthetic assets. Record DB query time, first meaningful paint, memory, deep-jump latency, and scroll stability.
+Before changing architecture, benchmark current cursor paging versus both positional candidates on 10k, 100k, and preferably 250k synthetic assets. Record filtered count/index query time, first meaningful paint, ID/anchor memory, cold and warm deep-jump latency, queries issued while scrubbing, and scroll/justified-row stability before and after detail windows arrive.
 
 ## FML: unified chips and contextual facets
 

@@ -391,63 +391,6 @@ describe("AssetBrowser", () => {
     })));
   });
 
-  it("jumps to a rail date by loading an anchor window and keeps paginating upward", async () => {
-    const gateway = createGateway();
-    vi.mocked(gateway.listAssetDateBuckets).mockResolvedValue([{ date: "2026-07-01", count: 1 }, { date: "2026-07-15", count: 3 }]);
-    vi.mocked(gateway.listAssets)
-      .mockResolvedValueOnce({ items: [asset(0)], nextCursor: null })
-      .mockResolvedValueOnce({ items: [asset(2), asset(3)], nextCursor: null, previousCursor: { token: "head" } })
-      .mockResolvedValueOnce({ items: [asset(1)], nextCursor: null, previousCursor: null });
-    renderBrowser(gateway);
-    await screen.findByRole("option", { name: "asset-0.png" });
-
-    const line = document.querySelectorAll(".asset-gallery__date-rail-line")[1] as HTMLElement;
-    fireEvent.pointerDown(line, { button: 0, pointerId: 1 });
-
-    await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledWith(expect.objectContaining({ sort: "newest", aroundDate: "2026-07-15", after: null })));
-    await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "newest", before: { token: "head" }, aroundDate: null })));
-    expect(await screen.findByRole("option", { name: "asset-1.png" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "asset-3.png" })).toBeInTheDocument();
-  });
-
-  it("ignores an obsolete jump once a newer jump superseded it", async () => {
-    let resolveOld!: (page: AssetPage) => void;
-    const old = new Promise<AssetPage>((resolve) => { resolveOld = resolve; });
-    const gateway = createGateway();
-    vi.mocked(gateway.listAssetDateBuckets).mockResolvedValue([{ date: "2026-07-01", count: 1 }, { date: "2026-07-20", count: 1 }]);
-    vi.mocked(gateway.listAssets)
-      .mockResolvedValueOnce({ items: [asset(0)], nextCursor: null })
-      .mockReturnValueOnce(old)
-      .mockResolvedValueOnce({ items: [{ ...asset(10), title: "신규" }], nextCursor: null });
-    renderBrowser(gateway);
-    await screen.findByRole("option", { name: "asset-0.png" });
-    const lines = document.querySelectorAll(".asset-gallery__date-rail-line");
-    fireEvent.pointerDown(lines[0]!, { button: 0, pointerId: 1 });
-    fireEvent.pointerDown(lines[1]!, { button: 0, pointerId: 1 });
-    expect(await screen.findByRole("option", { name: "신규" })).toBeInTheDocument();
-
-    await act(async () => { resolveOld({ items: [{ ...asset(20), title: "낡음" }], nextCursor: null }); await old; });
-
-    expect(screen.queryByRole("option", { name: "낡음" })).not.toBeInTheDocument();
-  });
-
-  it("resets the anchor state when the view changes", async () => {
-    const gateway = createGateway();
-    vi.mocked(gateway.listAssetDateBuckets).mockResolvedValue([{ date: "2026-07-01", count: 1 }, { date: "2026-07-15", count: 1 }]);
-    vi.mocked(gateway.listAssets)
-      .mockResolvedValueOnce({ items: [asset(0)], nextCursor: null })
-      .mockResolvedValueOnce({ items: [asset(5)], nextCursor: null })
-      .mockResolvedValue({ items: [], nextCursor: null });
-    const { rerender } = renderBrowser(gateway);
-    await screen.findByRole("option", { name: "asset-0.png" });
-    fireEvent.pointerDown(document.querySelectorAll(".asset-gallery__date-rail-line")[1]!, { button: 0, pointerId: 1 });
-    expect(await screen.findByRole("option", { name: "asset-5.png" })).toBeInTheDocument();
-
-    rerender(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "trash" }} classifications={classifications} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
-
-    await waitFor(() => expect(vi.mocked(gateway.listAssets).mock.lastCall![0].aroundDate).toBeNull());
-  });
-
   it("preserves selection and detail through refresh when the asset remains", async () => {
     const user = userEvent.setup();
     const gateway = createGateway();
