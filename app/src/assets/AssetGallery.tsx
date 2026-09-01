@@ -54,16 +54,32 @@ export function AssetGallery({ items, scopeKey, selectedAssetIds = new Set(), fo
   const { width, gap } = useGalleryMetrics(scrollRef);
   const rows = useMemo(() => buildJustifiedRows(items, width, targetRowHeight, gap), [gap, items, targetRowHeight, width]);
   const rowVirtualizer = useVirtualizer({ count: rows.length, getScrollElement: () => scrollRef.current, estimateSize: (index) => rows[index]?.height ?? targetRowHeight, getItemKey: (index) => rows[index]?.items[0]?.id ?? index, gap, overscan: VIRTUAL_OVERSCAN_ROWS });
-  const lastScopeKeyRef = useRef(scopeKey);
+  const lastScopeKeyRef = useRef<string | null>(scopeKey ?? null);
+  const scrollMemoryRef = useRef(new Map<string, number>());
+  const pendingRestoreRef = useRef<{ scopeKey: string | null; offset: number } | null>(null);
   useLayoutEffect(() => {
-    if (lastScopeKeyRef.current === scopeKey) return;
-    lastScopeKeyRef.current = scopeKey;
+    const currentScopeKey = scopeKey ?? null;
+    if (lastScopeKeyRef.current === currentScopeKey) return;
+    const previousScopeKey = lastScopeKeyRef.current;
     const element = scrollRef.current;
+    if (previousScopeKey !== null && element) scrollMemoryRef.current.set(previousScopeKey, element.scrollTop);
+    lastScopeKeyRef.current = currentScopeKey;
     if (!element) return;
-    element.scrollTop = 0;
+    const remembered = currentScopeKey !== null ? scrollMemoryRef.current.get(currentScopeKey) ?? 0 : 0;
+    element.scrollTop = remembered;
+    pendingRestoreRef.current = remembered > 0 ? { scopeKey: currentScopeKey, offset: remembered } : null;
     rowVirtualizer.measure();
     rowVirtualizer.scrollToOffset(0);
+    if (remembered > 0) element.scrollTop = remembered;
   }, [scopeKey, rowVirtualizer]);
+  useLayoutEffect(() => {
+    const pending = pendingRestoreRef.current;
+    if (!pending || pending.scopeKey !== scopeKey || rows.length === 0) return;
+    const element = scrollRef.current;
+    if (!element) return;
+    if (element.scrollTop < pending.offset) element.scrollTop = pending.offset;
+    pendingRestoreRef.current = null;
+  }, [rows.length, scopeKey]);
   const virtualRows = rowVirtualizer.getVirtualItems();
   const cancelQuickPreview = () => {
     quickPreviewRequestRef.current += 1;

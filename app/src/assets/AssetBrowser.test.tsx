@@ -393,6 +393,31 @@ describe("AssetBrowser", () => {
     await act(async () => { await Promise.resolve(); });
     expect(gateway.listAssets).toHaveBeenCalledTimes(2);
   });
+
+  it("returns to the top when visiting a classification for the first time", async () => {
+    const gateway = createGateway();
+    vi.mocked(gateway.listAssets).mockResolvedValue({ items: Array.from({ length: 30 }, (_, index) => ({ ...asset(index), title: `Item-${index}` })), nextCursor: null });
+    const { container } = renderBrowser(gateway, { view: { kind: "classification", classificationId: "classification-a" } });
+    expect(await screen.findByRole("option", { name: "Item-0" })).toBeVisible();
+    expect((container.querySelector(".asset-gallery__scroll") as HTMLElement).scrollTop).toBe(0);
+  });
+
+  it("restores a previous scroll position when returning to a classification", async () => {
+    const gateway = createGateway();
+    vi.mocked(gateway.listAssets).mockResolvedValue({ items: Array.from({ length: 30 }, (_, index) => ({ ...asset(index), title: `Item-${index}` })), nextCursor: null });
+    const { container, rerender } = renderBrowser(gateway, { view: { kind: "classification", classificationId: "classification-a" } });
+    expect(await screen.findByRole("option", { name: "Item-0" })).toBeVisible();
+    const scrollA = container.querySelector(".asset-gallery__scroll") as HTMLElement;
+    scrollA.scrollTop = 900;
+
+    rerender(browserElement(gateway, { view: { kind: "classification", classificationId: "classification-b" } }));
+    expect(await screen.findByRole("option", { name: "Item-0" })).toBeVisible();
+    expect((container.querySelector(".asset-gallery__scroll") as HTMLElement).scrollTop).toBe(0);
+
+    rerender(browserElement(gateway, { view: { kind: "classification", classificationId: "classification-a" } }));
+    expect(await screen.findByRole("option", { name: "Item-0" })).toBeVisible();
+    expect((container.querySelector(".asset-gallery__scroll") as HTMLElement).scrollTop).toBe(900);
+  });
   it("pages the destination scope with its own classification and cursor", async () => {
     const gateway = createGateway();
     vi.mocked(gateway.listAssets)
