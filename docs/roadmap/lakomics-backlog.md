@@ -126,20 +126,13 @@ Verification:
 ## P1 — visible UX / usability
 
 ### UI-004 — Remove rapid flashing during view transitions and previews
-Status: `TODO`
+Status: `DONE`
 
-Recent progress:
-- Classification/folder transitions no longer leak stale virtual rows from previously visited scopes.
-- The giant blank virtual-space gap and cross-folder asset leakage found during the gallery transition work were fixed in `9c19606`, `c0f7f6c`, and `f7715ad`.
-- Keep this item open for the remaining tab-switching and image-preview flicker.
-
-Remaining direction:
-- Keep the previous view visible until replacement content is ready.
-- Avoid replacing the whole view with a blank/skeleton frame when stale content can remain visible.
-- Decode/preload preview images before swapping them in.
-- Avoid unnecessary React unmount/remount cycles.
-- Keep layout dimensions stable during loading.
-- If a transition is needed, use a very short subtle cross-fade rather than full fade-out/fade-in.
+Resolution:
+- Folder transitions (`9c19606`, `c0f7f6c`, `f7715ad`): no stale virtual rows, no giant blank virtual-space gap, no cross-folder asset leakage; destination opens at the top.
+- Gallery first-page replacement keeps last-valid content visible instead of flashing a skeleton (`5094c2e`); same-scope mutations preserve the viewport (`fe75db6`).
+- AssetViewer image swaps go through StableImage, and gallery height is bounded by the workspace (`f7715ad`), so no media/layout flash was reproducible in the remaining transitions.
+- Verified on the running Tauri app across folder switches, viewer navigation, and top-level destination tabs; no blank-frame, layout-collapse, or stale-row flashes remain in these paths.
 
 ### UI-007 — Video viewer controls
 Status: `DONE`
@@ -485,15 +478,13 @@ Review and define:
 Design for 10,000+ assets without unnecessary stutter or uncontrolled disk growth.
 
 ### PERF-002 — Preserve view state across navigation
-Status: `TODO`
+Status: `DONE`
 
-Consider preserving per-view:
-- scroll position
-- filter
-- sort
-- selected classification/album/context
-
-Coordinate this with UI-004 so state preservation also reduces flashing and reload churn.
+Resolution:
+- Gallery: per-classification scroll offsets are memorized when leaving a scope and restored when returning to the same one (`AssetGallery` internal keyed map of scalars). First visit to a scope opens at the top; sort/filter changes are treated as different result sets and reset.
+- Sort and filter choices persist app-wide through existing preferences; selection and inspector state are intentionally not preserved across navigation (selection is cleared on view change by design).
+- Catalog search/results and manga viewer progress live in unmounted per-tab components and remain deferred; revisit date resets on tab leave by design.
+- Kept scalar-only scroll memory: no virtualizer state reuse across scopes, no stale rows, no giant blank space.
 
 ### OPS-001 — Backup, migration, and settings portability
 Status: `TODO`
