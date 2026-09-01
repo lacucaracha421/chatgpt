@@ -102,21 +102,17 @@ Resolution:
 - Real stuck `pending` video transitioned to `ready`; no production DB surgery was required.
 
 ### BUG-005 — Manga collection viewer shows an unexpected error tooltip/toast on entry
-Status: `TODO`
+Status: `DONE`
 
-Observed behavior:
-- Opening a manga Collection succeeds.
-- Entering the manga viewer shows an unexpected error tooltip/toast.
-- The viewer itself can still open, so the failing operation may be ancillary rather than a fatal viewer failure.
-
-Investigation:
-- Reproduce after the current BUG-001 MangaDex-binding guard fix and confirm whether this is the same failure path or a distinct viewer bug.
-- Inspect viewer initialization, volume-cover loading, artwork lookup, and provider-binding-dependent calls.
-- Preserve normal local Collection/viewer usability when optional provider work fails.
-- Do not merely suppress the error presentation before identifying the failing operation.
+Resolution:
+- Re-tested in the real Tauri app with multiple manga collections covering normal MangaDex bindings, legacy bindings with `provider_data_json` NULL, large multi-volume collections, and the legacy `unlinked_*` sentinel case.
+- No unexpected toast reproduced. Both historical message classes were absent: "권별 표지를 불러오지 못했습니다." and "표지 N개를 불러오지 못했습니다. 다음 새로고침에서 다시 시도합니다."
+- Viewer navigation and content remained usable in every tested case, repeat entry stayed clean, and console errors were 0. No implementation change was required.
+- Strongest evidence-supported historical explanation: during the 2026-08-27~28 MangaDex cover-import/backfill window, collections could still contain MangaDex volumes with missing `cover_artwork_id`, so entry-time `syncMangaDexVolumeCovers` ran actual downloads and partial download failures could surface the `failed > 0` message repeatedly on entry. Before the BUG-001-era restructuring, provider sync also shared a broader try/error path, making the visible fallback more fragile. Current data has no MangaDex volume rows with missing `cover_artwork_id`, so that trigger no longer exists.
+- Retained structural observation (harmless today, not user-visible): many legacy MangaDex bindings have `provider_data_json` NULL, but `getMangaDexConnection` still returns a binding, so Collection entry can run `syncMangaDexVolumeCovers` followed by `listCollectionVolumes` even when no cover work is needed. Keep as a future provider-cleanup/performance candidate only if real latency or network churn becomes observable.
 
 ### VERIFY-001 — X → VPS → PC end-to-end check
-Status: `TODO`
+Status: `DONE`
 
 Verification:
 - Real image and video saves from X were verified through VPS/R2 into the PC library.
@@ -649,20 +645,12 @@ For each new bug, record:
 
 ## Current intended implementation order
 
-1. UI-004 + PERF-002 remaining tab/preview flashing reduction and broader view-state preservation
-2. BUG-005 manga collection-viewer entry toast investigation
-3. BUG-003 X video drag-save blue native-selection artifact
-4. BUG-008 + UI-009 catalog/manga viewer cleanup and VCK-inspired reader improvements
-5. CLOUD-006 full-library cloud replication/backfill for Lakomics Mobile, then incremental metadata/classification sync
-6. PERF-001 10,000+ asset cache/media optimization, including mobile thumbnail/preview optimization after CLOUD-006 correctness
-7. EXT-003 same-X-post media grouping
-8. EXT-004 adaptive/hidden secondary donut tags
-9. OPS-001 backup/migration/settings portability
-10. CLOUD-003 long-video async handling if real-world use requires it
-11. CATALOG-003 Japanese-language catalog ingestion/filter on the verified CATALOG-001 transport
-12. CATALOG-004 advanced VCK-style catalog search syntax
-13. CATALOG-002 Heliotrope as a provider-namespaced second catalog source after the current catalog path is stable
-14. NOTE-001 / STATS-001 / IDEA-001 / UI-008
-15. Long-term collection presentation / shelf work
-
-This order is a working execution preference, not a dependency graph. Reorder when a real regression or production verification failure becomes more urgent.
+1. BUG-003 X video drag-save blue native-selection artifact
+2. BUG-008 + UI-009 catalog/manga viewer cleanup and VCK-inspired reader improvements
+3. CLOUD-006 full-library cloud replication/backfill for Lakomics Mobile, then incremental metadata/classification sync
+4. EXT-003 same-X-post media grouping
+5. EXT-004 adaptive/hidden secondary donut tags
+6. OPS-001 backup/migration/settings portability
+7. CLOUD-003 long-video async handling if real-world use requires it
+8. CATALOG-003 Japanese-language catalog ingestion/filter on the verified CATALOG-001 transport
+9. CATALOG-004 advanced VCK-style catalog search syntax
