@@ -210,33 +210,30 @@
     document.documentElement.dataset.lakomicsLiveClassifications = "failed";
   }
 
-  function frameRequest(op, payload = {}) {
+  function runtimeRequest(type, payload = {}) {
     return new Promise((resolve) => {
       let settled = false;
-      const onMessage = (event) => {
-        if (event.source !== frameWindow || event.data?.source !== "lakomics-mobile-api") return;
-        if (event.data.requestId !== requestId) return;
-        settled = true;
-        window.removeEventListener("message", onMessage);
-        const result = event.data.result;
-        resolve(result && typeof result === "object" ? result : { ok: false, code: "mobile_api_empty_response" });
-      };
-      const requestId = `b${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-      window.addEventListener("message", onMessage);
-      window.setTimeout(() => {
+      const finish = (result) => {
         if (settled) return;
-        window.removeEventListener("message", onMessage);
-        resolve({ ok: false, code: "mobile_api_timeout" });
-      }, 15000);
-      frameWindow?.postMessage({ source: "lakomics-mobile-content", requestId, op, ...payload }, "*");
+        settled = true;
+        window.clearTimeout(timer);
+        resolve(result && typeof result === "object" ? result : { ok: false, code: "mobile_runtime_empty_response" });
+      };
+      const timer = window.setTimeout(() => finish({ ok: false, code: "mobile_runtime_timeout" }), 15000);
+      try {
+        chrome.runtime.sendMessage({ type, ...payload }, (response) => {
+          if (chrome.runtime.lastError) return finish({ ok: false, code: "mobile_runtime_error" });
+          finish(response);
+        });
+      } catch {
+        finish({ ok: false, code: "mobile_runtime_error" });
+      }
     });
   }
 
-  // 분류 원본은 배포된 Cloud Library API 하나다. 확장의 PC 우선 분류 캐시는
-  // Mobile 라이브러리 경로에서 더 이상 사용하지 않는다.
   async function loadClassifications(force = false) {
     const generation = ++loadGeneration;
-    const response = await frameRequest("library:classifications");
+    const response = await runtimeRequest("mobile-library:classifications");
     if (generation !== loadGeneration) return;
 
     const entries = Array.isArray(response?.items)
@@ -310,7 +307,7 @@
     scroll.addEventListener("click", handleTreePointer, true);
     scroll.addEventListener("scroll", () => saveState(), { passive: true });
     document.querySelector("#refreshBtn")?.addEventListener("click", () => loadClassifications(true));
-    awaitFrameWindow().then(() => loadClassifications(false));
+    loadClassifications(false);
   }
 
   if (document.readyState === "loading") {

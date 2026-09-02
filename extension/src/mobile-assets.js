@@ -80,9 +80,6 @@
     return frameReadyPromise;
   }
 
-  // Bootstrap the privileged API frame immediately to avoid a circular startup wait.
-  void ensureFrame().catch(() => {});
-
   window.addEventListener("message", (event) => {
     if (!frame?.contentWindow || event.source !== frame.contentWindow) return;
     const data = event.data;
@@ -97,34 +94,32 @@
       : { ok: false, code: "mobile_api_empty_response" });
   });
 
-  async function frameRequest(op, payload = {}) {
-    try {
-      await ensureFrame();
-    } catch {
-      return { ok: false, code: "mobile_api_frame_failed" };
-    }
-    const requestId = `m${Date.now().toString(36)}-${(++requestSequence).toString(36)}`;
+  function runtimeRequest(type, payload = {}) {
     return new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        pendingRequests.delete(requestId);
-        resolve({ ok: false, code: "mobile_api_timeout" });
-      }, REQUEST_TIMEOUT_MS);
-      pendingRequests.set(requestId, { resolve, timer });
-      frame.contentWindow.postMessage({
-        source: "lakomics-mobile-content",
-        requestId,
-        op,
-        ...payload,
-      }, "*");
+      let settled = false;
+      const finish = (result) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(result && typeof result === "object" ? result : { ok: false, code: "mobile_runtime_empty_response" });
+      };
+      const timer = setTimeout(() => finish({ ok: false, code: "mobile_runtime_timeout" }), REQUEST_TIMEOUT_MS);
+      try {
+        chrome.runtime.sendMessage({ type, ...payload }, (response) => {
+          if (chrome.runtime.lastError) return finish({ ok: false, code: "mobile_runtime_error" });
+          finish(response);
+        });
+      } catch {
+        finish({ ok: false, code: "mobile_runtime_error" });
+      }
     });
   }
 
-  // --- 스토어 (브릿지 주입) ---
   const store = createStore({
     requestAssets: ({ classificationId, cursor, limit }) =>
-      frameRequest("library:assets", { classificationId, cursor: cursor || undefined, limit }),
+      runtimeRequest("mobile-library:assets", { classificationId, cursor: cursor || undefined, limit }),
     requestTicket: ({ assetId, variant }) =>
-      frameRequest("library:media-ticket", { assetId, variant }),
+      runtimeRequest("mobile-library:media-ticket", { assetId, variant }),
   });
 
   function inflightTicket(key, loader) {
@@ -475,8 +470,6 @@
   // --- 이벤트 ---
   function installHooks() {
     installStyles();
-    ensureFrame().catch(() => {});
-
     document.addEventListener("click", (event) => {
       const retry = event.target.closest?.("[data-grid-retry]");
       if (retry) {

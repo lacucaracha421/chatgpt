@@ -343,8 +343,8 @@ function setupStoreVm() {
 const mobilePageSource = fs.readFileSync(new URL("../../mobile/index.html", import.meta.url), "utf8");
 const mobileShellSource = fs.readFileSync(new URL("../../mobile/mobile-shell.js", import.meta.url), "utf8");
 
-test("mobile bootstraps the API frame and keeps the static shell interactive", () => {
-  assert.match(assetsSource, /void ensureFrame\(\)\.catch\(\(\) => \{\}\);/);
+test("mobile uses the runtime bridge and keeps the static shell interactive", () => {
+  assert.match(assetsSource, /chrome\.runtime\.sendMessage/);
   assert.match(mobilePageSource, /mobile-shell\.js/);
   assert.match(mobileShellSource, /\[data-nav\]/);
   assert.match(mobileShellSource, /\[data-go\]/);
@@ -356,4 +356,12 @@ test("mobile bootstraps the API frame and keeps the static shell interactive", (
 test("mobile page has explicit host access and exposes an injection probe", () => {
   assert.ok(manifest.host_permissions.includes("https://lacucaracha421.github.io/*"));
   assert.match(bridgeSource, /data-lakomics-extension-bridge/);
+});
+
+
+test("mobile content scripts use runtime messaging instead of iframe postMessage", () => {
+  assert.match(bridgeSource, /chrome\.runtime\.sendMessage/);
+  assert.match(assetsSource, /chrome\.runtime\.sendMessage/);
+  assert.doesNotMatch(bridgeSource, /frameRequest\(/);
+  assert.doesNotMatch(assetsSource, /frameRequest\(/);
 });

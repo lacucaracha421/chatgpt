@@ -642,6 +642,12 @@
         return activeClassifications(false);
       case "classifications:refresh":
         return activeClassifications(true);
+      case "mobile-library:classifications":
+        return mobileLibraryClassifications();
+      case "mobile-library:assets":
+        return mobileLibraryAssets(message);
+      case "mobile-library:media-ticket":
+        return mobileLibraryMediaTicket(message);
       case "saved-index:get":
         return savedXMediaIndex();
       case "pinned:get":
@@ -2098,6 +2104,51 @@
       captureId: capture.id,
       captureStatus: capture.status ?? "pending",
     };
+  }
+
+  async function mobileLibraryClassifications() {
+    const result = await collectorRequest("/v1/library/classifications");
+    if (!result.ok) return result;
+    const items = (Array.isArray(result.items) ? result.items : []).map((value) => ({
+      id: String(value?.id || "").slice(0, 240), name: String(value?.name || "").slice(0, 120),
+      parentId: value?.parent_id ? String(value.parent_id).slice(0, 240) : null, kind: String(value?.kind || "tag").slice(0, 40),
+      assetCount: Number.isFinite(Number(value?.asset_count)) ? Math.max(0, Math.round(Number(value.asset_count))) : 0,
+      sortIndex: Number.isFinite(Number(value?.sort_index)) ? Number(value.sort_index) : null,
+      iconKey: value?.icon_key ? String(value.icon_key).slice(0, 60) : null, colorKey: value?.color_key ? String(value.color_key).slice(0, 60) : null,
+    })).filter((value) => value.id && value.name);
+    return { ok: true, items, publishedAt: typeof result.published_at === "string" ? result.published_at : null };
+  }
+
+  async function mobileLibraryAssets(message = {}) {
+    const classificationId = String(message.classificationId || "").trim().slice(0, 240);
+    if (!classificationId) return { ok: false, code: "invalid_classification_id" };
+    const cursor = typeof message.cursor === "string" ? message.cursor.slice(0, 2000) : "";
+    const requested = Number(message.limit);
+    const limit = Math.max(1, Math.min(100, Number.isFinite(requested) ? Math.round(requested) : 50));
+    const query = `classification_id=${encodeURIComponent(classificationId)}&limit=${limit}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+    const result = await collectorRequest(`/v1/library/assets?${query}`);
+    if (!result.ok) return result;
+    const items = (Array.isArray(result.items) ? result.items : []).map((value) => ({
+      id: String(value?.id || "").slice(0, 240), kind: String(value?.kind || "").slice(0, 20),
+      contentType: typeof value?.content_type === "string" ? value.content_type.slice(0, 120) : null,
+      sizeBytes: Number.isFinite(Number(value?.size_bytes)) ? Number(value.size_bytes) : null, collectedAt: typeof value?.collected_at === "string" ? value.collected_at : null,
+      committedAt: typeof value?.committed_at === "string" ? value.committed_at : null, sourcePublishedAt: typeof value?.source_published_at === "string" ? value.source_published_at : null,
+      sourceUrl: typeof value?.source_url === "string" ? value.source_url.slice(0, 2000) : null, creatorName: typeof value?.creator_name === "string" ? value.creator_name.slice(0, 200) : null,
+      creatorHandle: typeof value?.creator_handle === "string" ? value.creator_handle.slice(0, 200) : null, importSource: typeof value?.import_source === "string" ? value.import_source.slice(0, 60) : null,
+      classificationIds: Array.isArray(value?.classification_ids) ? value.classification_ids.map((id) => String(id).slice(0, 240)).filter(Boolean).slice(0, 200) : [],
+      originalAvailable: value?.original_available === true, thumbnailAvailable: value?.thumbnail_available === true,
+    })).filter((value) => value.id);
+    return { ok: true, items, hasMore: result.has_more === true, nextCursor: result.has_more === true && typeof result.next_cursor === "string" ? result.next_cursor.slice(0, 2000) : null };
+  }
+
+  async function mobileLibraryMediaTicket(message = {}) {
+    const assetId = String(message.assetId || "").trim().slice(0, 240); const variant = String(message.variant || "").trim();
+    if (!assetId) return { ok: false, code: "invalid_asset_id" };
+    if (variant !== "thumbnail" && variant !== "original") return { ok: false, code: "invalid_media_variant" };
+    const result = await collectorRequest(`/v1/library/assets/${encodeURIComponent(assetId)}/media-ticket`, { method: "POST", body: JSON.stringify({ variant }) });
+    if (!result.ok) return result;
+    if (typeof result.url !== "string" || !/^https?:\/\//.test(result.url)) return { ok: false, code: "invalid_media_ticket" };
+    return { ok: true, url: result.url, variant, contentType: typeof result.content_type === "string" ? result.content_type : null, sizeBytes: Number.isFinite(Number(result.size_bytes)) ? Number(result.size_bytes) : null, expiresAt: typeof result.expires_at === "string" ? result.expires_at : null };
   }
 
   async function collectorRequest(path, init = {}, explicitBaseUrl = null) {
