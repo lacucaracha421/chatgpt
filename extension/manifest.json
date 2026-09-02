@@ -61,6 +61,7 @@
         "https://lacucaracha421.github.io/chatgpt/*"
       ],
       "js": [
+        "src/mobile-library-store.js",
         "src/mobile-bridge.js",
         "src/mobile-assets.js"
       ],

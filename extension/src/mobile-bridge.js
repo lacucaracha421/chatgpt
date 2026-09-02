@@ -15,6 +15,7 @@
   let selectedId = null;
   let expandedIds = new Set();
   let loadGeneration = 0;
+  let frameWindow = null;
 
   function cleanString(value, maxLength = 200) {
     return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
@@ -64,29 +65,6 @@
       // Persistence is a convenience only. The live tree must still work if
       // site storage is disabled.
     }
-  }
-
-  function sendRuntimeMessage(message) {
-    return new Promise((resolve) => {
-      try {
-        chrome.runtime.sendMessage(message, (response) => {
-          const error = chrome.runtime.lastError;
-          if (error) {
-            resolve({ ok: false, code: "extension_message_failed", detail: error.message });
-            return;
-          }
-          resolve(response && typeof response === "object"
-            ? response
-            : { ok: false, code: "extension_empty_response" });
-        });
-      } catch (error) {
-        resolve({
-          ok: false,
-          code: "extension_message_failed",
-          detail: error instanceof Error ? error.message : String(error),
-        });
-      }
-    });
   }
 
   function rebuildIndex(entries) {
@@ -199,7 +177,7 @@
     const selected = nodeById.get(selectedId);
     if (totalElement) {
       totalElement.textContent = selected?.count === null || selected?.count === undefined
-        ? "에셋 연결 전"
+        ? "라이브러리 로드 중"
         : `${selected.count.toLocaleString()}개`;
     }
   }
@@ -210,14 +188,10 @@
     const banner = document.querySelector(".prototype-banner");
     const sidebarCount = document.querySelector(".asset-sidebar-count");
 
-    if (label) {
-      label.textContent = response.classificationSource === "cloud-cache"
-        ? "분류 캐시"
-        : "분류 연결됨";
-    }
+    if (label) label.textContent = "클라우드 라이브러리 연결됨";
     if (dot) dot.style.background = "var(--good)";
     if (sidebarCount) sidebarCount.textContent = String(entries.length);
-    if (banner) banner.textContent = "Galaxy Tab S11용 Mobile prototype · 분류는 실제 Lakomics 데이터, 에셋/컬렉션은 아직 데모입니다.";
+    if (banner) banner.textContent = "Galaxy Tab S11용 Mobile · 전체 클라우드 라이브러리를 PC 없이 열람합니다.";
     document.documentElement.dataset.lakomicsLiveClassifications = "connected";
   }
 
@@ -228,20 +202,42 @@
     if (label) label.textContent = "확장 연결 필요";
     if (dot) dot.style.background = "#d7a36e";
     if (banner) {
-      banner.textContent = `분류 실데이터 연결 실패 (${cleanString(response?.code, 60) || "unknown"}) · 현재 데모 분류를 표시합니다.`;
+      banner.textContent = `클라우드 라이브러리 분류 로드 실패 (${cleanString(response?.code, 60) || "unknown"}) · 새로고침으로 다시 시도할 수 있습니다.`;
     }
     document.documentElement.dataset.lakomicsLiveClassifications = "failed";
   }
 
+  function frameRequest(op, payload = {}) {
+    return new Promise((resolve) => {
+      let settled = false;
+      const onMessage = (event) => {
+        if (event.source !== frameWindow || event.data?.source !== "lakomics-mobile-api") return;
+        if (event.data.requestId !== requestId) return;
+        settled = true;
+        window.removeEventListener("message", onMessage);
+        const result = event.data.result;
+        resolve(result && typeof result === "object" ? result : { ok: false, code: "mobile_api_empty_response" });
+      };
+      const requestId = `b${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      window.addEventListener("message", onMessage);
+      window.setTimeout(() => {
+        if (settled) return;
+        window.removeEventListener("message", onMessage);
+        resolve({ ok: false, code: "mobile_api_timeout" });
+      }, 15000);
+      frameWindow?.postMessage({ source: "lakomics-mobile-content", requestId, op, ...payload }, "*");
+    });
+  }
+
+  // 분류 원본은 배포된 Cloud Library API 하나다. 확장의 PC 우선 분류 캐시는
+  // Mobile 라이브러리 경로에서 더 이상 사용하지 않는다.
   async function loadClassifications(force = false) {
     const generation = ++loadGeneration;
-    const response = await sendRuntimeMessage({
-      type: force ? "classifications:refresh" : "classifications:get",
-    });
+    const response = await frameRequest("library:classifications");
     if (generation !== loadGeneration) return;
 
-    const entries = Array.isArray(response?.entries)
-      ? response.entries.map(normalizeEntry).filter(Boolean)
+    const entries = Array.isArray(response?.items)
+      ? response.items.map(normalizeEntry).filter(Boolean)
       : [];
     if (!response?.ok || !entries.length) {
       setFailureUi(response);
@@ -290,6 +286,17 @@
     }
   }
 
+  function awaitFrameWindow(attempt = 0) {
+    const existing = document.querySelector("#lakomics-mobile-api-frame");
+    if (existing?.contentWindow) {
+      frameWindow = existing.contentWindow;
+      return Promise.resolve();
+    }
+    if (attempt > 100) return Promise.resolve();
+    return new Promise((resolve) => setTimeout(resolve, 100))
+      .then(() => awaitFrameWindow(attempt + 1));
+  }
+
   function installDomHooks() {
     const scroll = document.querySelector("#treeScroll");
     if (!scroll) {
@@ -300,7 +307,7 @@
     scroll.addEventListener("click", handleTreePointer, true);
     scroll.addEventListener("scroll", () => saveState(), { passive: true });
     document.querySelector("#refreshBtn")?.addEventListener("click", () => loadClassifications(true));
-    loadClassifications(false);
+    awaitFrameWindow().then(() => loadClassifications(false));
   }
 
   if (document.readyState === "loading") {

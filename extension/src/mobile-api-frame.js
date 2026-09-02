@@ -5,7 +5,9 @@
   const COLLECTOR_SETTINGS_KEY = "collectorSettings";
   const COLLECTOR_TOKEN_KEY = "collectorToken";
   const DEFAULT_BASE_URL = "http://100.76.119.29:32146";
-  const MAX_CAPTURES = 500;
+  const LIBRARY_MAX_LIMIT = 100;
+  const LIBRARY_DEFAULT_LIMIT = 50;
+  const MEDIA_VARIANTS = new Set(["thumbnail", "original"]);
 
   function clean(value, max = 500) {
     return typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -36,15 +38,21 @@
     return { ok: true, token, baseUrl };
   }
 
-  async function collectorRequest(path) {
+  async function collectorRequest(path, options = {}) {
     const config = await collectorConfig();
     if (!config.ok) return config;
+    const method = options.method === "POST" ? "POST" : "GET";
+    const body = method === "POST" && options.body ? JSON.stringify(options.body) : undefined;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 12000);
     try {
       const response = await fetch(`${config.baseUrl}${path}`, {
-        method: "GET",
-        headers: { Authorization: `Bearer ${config.token}` },
+        method,
+        headers: {
+          Authorization: `Bearer ${config.token}`,
+          ...(body ? { "Content-Type": "application/json" } : {}),
+        },
+        ...(body ? { body } : {}),
         signal: controller.signal,
         cache: "no-store",
       });
@@ -69,55 +77,110 @@
     }
   }
 
-  function normalizeCapture(value) {
+  function normalizeLibraryClassification(value) {
     if (!value || typeof value !== "object") return null;
     const id = clean(value.id, 240);
-    const classificationId = clean(value.classification_id, 240);
-    const mediaType = clean(value.media_type, 40) === "video" ? "video" : "image";
-    const mediaUrl = clean(value.media_url, 2000);
-    const sourceUrl = clean(value.source_url, 2000);
-    if (!id || !classificationId || !sourceUrl) return null;
+    const name = clean(value.name, 120);
+    if (!id || !name) return null;
+    const parentId = clean(value.parent_id, 240) || null;
+    const numericCount = Number(value.asset_count);
     return {
       id,
-      classificationId,
-      mediaType,
-      mediaUrl,
-      sourceUrl,
-      status: clean(value.status, 40),
-      createdAt: clean(value.created_at, 120),
-      importedAt: clean(value.imported_at, 120) || null,
-      publishedAt: clean(value.published_at, 120) || null,
-      contentType: clean(value.content_type, 120),
-      sizeBytes: Number.isFinite(Number(value.size_bytes)) ? Number(value.size_bytes) : null,
+      name,
+      parentId,
+      kind: clean(value.kind, 40) || "tag",
+      iconKey: clean(value.icon_key, 60) || null,
+      colorKey: clean(value.color_key, 60) || null,
+      sortIndex: Number.isFinite(Number(value.sort_index)) ? Number(value.sort_index) : null,
+      assetCount: Number.isFinite(numericCount) && numericCount >= 0 ? Math.round(numericCount) : 0,
     };
   }
 
-  async function listCaptures(requestedLimit) {
-    const limit = Math.max(1, Math.min(MAX_CAPTURES, Number(requestedLimit) || MAX_CAPTURES));
-    const result = await collectorRequest(`/v1/captures?limit=${limit}`);
-    if (!result.ok) return result;
-    const items = Array.isArray(result.payload?.items)
-      ? result.payload.items.map(normalizeCapture).filter(Boolean)
+  function normalizeLibraryAsset(value) {
+    if (!value || typeof value !== "object") return null;
+    const id = clean(value.id, 240);
+    if (!id) return null;
+    const numericSize = Number(value.size_bytes);
+    const classificationIds = Array.isArray(value.classification_ids)
+      ? value.classification_ids.map((entry) => clean(entry, 240)).filter(Boolean).slice(0, 200)
       : [];
-    return { ok: true, items };
+    return {
+      id,
+      kind: clean(value.kind, 20),
+      contentType: clean(value.content_type, 120),
+      sizeBytes: Number.isFinite(numericSize) && numericSize >= 0 ? Math.round(numericSize) : null,
+      collectedAt: clean(value.collected_at, 120) || null,
+      committedAt: clean(value.committed_at, 120) || null,
+      sourcePublishedAt: clean(value.source_published_at, 120) || null,
+      sourceUrl: clean(value.source_url, 2000) || null,
+      creatorName: clean(value.creator_name, 200) || null,
+      creatorHandle: clean(value.creator_handle, 200) || null,
+      importSource: clean(value.import_source, 60) || null,
+      classificationIds,
+      originalAvailable: value.original_available === true,
+      thumbnailAvailable: value.thumbnail_available === true,
+    };
   }
 
-  async function captureTicket(captureId) {
-    const id = clean(captureId, 240);
-    if (!id) return { ok: false, code: "invalid_capture_id" };
-    const result = await collectorRequest(`/v1/captures/${encodeURIComponent(id)}/download`);
+  async function libraryClassifications() {
+    const result = await collectorRequest("/v1/library/classifications");
     if (!result.ok) return result;
-    const url = clean(result.payload?.download_url, 4000);
-    if (result.payload?.method !== "GET" || !url) return { ok: false, code: "invalid_download_ticket" };
+    const items = Array.isArray(result.payload?.items)
+      ? result.payload.items.map(normalizeLibraryClassification).filter(Boolean)
+      : [];
+    return { ok: true, items, publishedAt: clean(result.payload?.published_at, 120) || null };
+  }
+
+  async function libraryAssets(params = {}) {
+    const classificationId = clean(params.classificationId, 240);
+    if (!classificationId) return { ok: false, code: "invalid_classification_id" };
+    const cursor = typeof params.cursor === "string" ? params.cursor.slice(0, 2000) : "";
+    const requested = Number(params.limit);
+    const limit = Math.max(1, Math.min(LIBRARY_MAX_LIMIT, Number.isFinite(requested) ? Math.round(requested) : LIBRARY_DEFAULT_LIMIT));
+    const query = new URLSearchParams({ classification_id: classificationId, limit: String(limit) });
+    if (cursor) query.set("cursor", cursor);
+    const result = await collectorRequest(`/v1/library/assets?${query.toString()}`);
+    if (!result.ok) return result;
+    const items = Array.isArray(result.payload?.items)
+      ? result.payload.items.map(normalizeLibraryAsset).filter(Boolean)
+      : [];
+    const nextCursor = clean(result.payload?.next_cursor, 2000) || null;
+    return {
+      ok: true,
+      items,
+      hasMore: result.payload?.has_more === true,
+      nextCursor: result.payload?.has_more === true ? nextCursor : null,
+    };
+  }
+
+  async function libraryMediaTicket(params = {}) {
+    const assetId = clean(params.assetId, 240);
+    const variant = clean(params.variant, 20);
+    if (!assetId) return { ok: false, code: "invalid_asset_id" };
+    if (!MEDIA_VARIANTS.has(variant)) return { ok: false, code: "invalid_media_variant" };
+    const result = await collectorRequest(
+      `/v1/library/assets/${encodeURIComponent(assetId)}/media-ticket`,
+      { method: "POST", body: { variant } },
+    );
+    if (!result.ok) return result;
+    const url = clean(result.payload?.url, 4000);
+    if (!url) return { ok: false, code: "invalid_media_ticket" };
     try {
       const parsed = new URL(url);
       if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-        return { ok: false, code: "invalid_download_ticket" };
+        return { ok: false, code: "invalid_media_ticket" };
       }
     } catch {
-      return { ok: false, code: "invalid_download_ticket" };
+      return { ok: false, code: "invalid_media_ticket" };
     }
-    return { ok: true, url };
+    return {
+      ok: true,
+      url,
+      variant,
+      contentType: clean(result.payload?.content_type, 120) || null,
+      sizeBytes: Number.isFinite(Number(result.payload?.size_bytes)) ? Number(result.payload.size_bytes) : null,
+      expiresAt: clean(result.payload?.expires_at, 120) || null,
+    };
   }
 
   function reply(target, targetOrigin, requestId, result) {
@@ -139,10 +202,16 @@
     if (!requestId) return;
 
     let result;
-    if (data.op === "captures:list") {
-      result = await listCaptures(data.limit);
-    } else if (data.op === "capture:ticket") {
-      result = await captureTicket(data.captureId);
+    if (data.op === "library:classifications") {
+      result = await libraryClassifications();
+    } else if (data.op === "library:assets") {
+      result = await libraryAssets({
+        classificationId: data.classificationId,
+        cursor: data.cursor,
+        limit: data.limit,
+      });
+    } else if (data.op === "library:media-ticket") {
+      result = await libraryMediaTicket({ assetId: data.assetId, variant: data.variant });
     } else {
       result = { ok: false, code: "unknown_mobile_api_operation" };
     }
