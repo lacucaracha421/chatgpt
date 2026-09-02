@@ -2,31 +2,42 @@
 //
 // 데이터 원본은 배포된 Cloud Library API (VPS) 하나다. PC Lakomics와
 // Cloud Capture Inbox는 라이브러리 열람 경로에 등장하지 않는다.
-// 인증은 확장 컨텍스트(mobile-api-frame)만 수행하며, 페이지는 논리 op만 요청한다.
+// 인증은 확장 서비스 워커만 수행하며, 페이지는 runtime message로 논리 op만 요청한다.
 (() => {
   "use strict";
 
   const PAGE_ORIGIN = "https://lacucaracha421.github.io";
   const PAGE_PATH_PREFIX = "/chatgpt/";
-  const FRAME_PATH = "mobile-api-frame.html";
   const REQUEST_TIMEOUT_MS = 15_000;
+  const SORT_KEY = "lakomics.mobile.asset-sort.v1";
 
   if (location.origin !== PAGE_ORIGIN || !location.pathname.startsWith(PAGE_PATH_PREFIX)) return;
 
   const library = globalThis.LakomicsMobileLibrary;
   if (!library) return;
-  const { createStore, GRID_MAX_TILES } = library;
+  const {
+    createStore, GRID_MAX_TILES, loadGridThumbnail, swipeDirection, mobileMetadata,
+    normalizeView, viewKey, createViewTransition, createViewerChrome, isNativeVideoControlHit,
+  } = library;
 
-  let frame = null;
-  let frameReadyPromise = null;
-  let requestSequence = 0;
-  const pendingRequests = new Map();
   let renderTimer = null;
   let viewerGeneration = 0;
-  let activeClassificationId = null;
-  let viewerClassificationId = null;
+  let activeView = null;
+  let viewerView = null;
   let viewerAssetId = null;
   let ticketInflight = new Map(); // `${assetId}:${variant}` → Promise
+  let thumbnailObserver = null;
+  let swipeStart = null;
+  let activeSort = "newest";
+  const viewTransition = createViewTransition();
+  const viewerChrome = createViewerChrome({
+    delayMs: 3200,
+    onChange: (visible) => document.querySelector("#viewer")?.classList.toggle("viewer-chrome-visible", visible),
+  });
+  try {
+    const savedSort = sessionStorage.getItem(SORT_KEY);
+    if (savedSort === "oldest") activeSort = savedSort;
+  } catch {}
 
   function clean(value, max = 1000) {
     return typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -37,8 +48,9 @@
     const style = document.createElement("style");
     style.id = "lakomics-mobile-assets-style";
     style.textContent = `
-      .lakomics-live-video-thumb{width:100%;height:100%;display:grid;place-items:center;background:linear-gradient(145deg,#16191e,#0d0f12);color:#cdd6e6}
+      .lakomics-live-video-thumb{position:absolute;inset:0;width:100%;height:100%;display:grid;place-items:center;background:linear-gradient(145deg,#16191e,#0d0f12);color:#cdd6e6}
       .lakomics-live-video-thumb svg{width:30px;height:30px;opacity:.9}
+      .asset-tile[data-lib-kind="video"] img{position:absolute;inset:0;opacity:0}.asset-tile[data-lib-kind="video"].lakomics-tile-has-thumb img{opacity:1}.asset-tile.lakomics-tile-has-thumb .lakomics-live-video-thumb{display:none}
       .lakomics-live-media-mark{position:absolute;left:5px;bottom:5px;padding:2px 5px;border-radius:3px;background:rgba(5,6,8,.76);font-size:9px;color:#dce1e8;pointer-events:none}
       .lakomics-live-empty{grid-column:1/-1;min-height:160px;display:grid;place-items:center;text-align:center;color:#757c86;font-size:12px;padding:24px}
       .lakomics-live-loading{grid-column:1/-1;min-height:140px;display:grid;place-items:center;color:#777f89;font-size:12px}
@@ -46,53 +58,83 @@
       .lakomics-tile-retry{position:absolute;inset:0;display:grid;place-items:center;color:#98a0ab;font-size:11px;background:transparent;border:0}
       .asset-tile{cursor:pointer}
       .viewer-nav{position:absolute;z-index:2;top:50%;transform:translateY(-50%);width:44px;height:64px;border:0;border-radius:6px;background:rgba(0,0,0,.38);color:#fff;font-size:24px;display:grid;place-items:center}
+      .viewer-top,.viewer-bottom,.viewer-nav{opacity:0;pointer-events:none;transition:opacity 150ms ease}
+      .viewer.viewer-chrome-visible .viewer-top,.viewer.viewer-chrome-visible .viewer-bottom,.viewer.viewer-chrome-visible .viewer-nav{opacity:1;pointer-events:auto}
       .viewer-nav:active{background:rgba(0,0,0,.6)}
       #viewerPrev{left:8px}#viewerNext{right:8px}
-      .viewer-media-wrap{position:absolute;inset:0;display:grid;place-items:center;overflow:auto}
+      .viewer-media-wrap{position:absolute;inset:0;display:grid;place-items:center;overflow:auto;touch-action:pan-y pinch-zoom}
       .viewer-media-wrap img,.viewer-media-wrap video{max-width:100%;max-height:100%}
       .viewer-media-wrap.zoomable img{max-width:none;max-height:none;cursor:grab}
       #viewerSpinner{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#aab1ba;font-size:12px;display:none}
+      .asset-sort{min-height:32px;border:1px solid #2a2e34;border-radius:4px;background:#15171a;color:#f0f2f4;padding:4px 25px 4px 8px}
+      .asset-sort:disabled{opacity:.55}.lakomics-grid-status{min-height:32px;border:0;background:transparent;color:#929aa5;font-size:11px}.lakomics-grid-status[data-error=true]{color:#d7a36e;text-decoration:underline}
+      .viewer-details-toggle{width:38px;height:38px;padding:0;border:0;border-radius:4px;background:rgba(0,0,0,.35);color:#fff;font-size:18px}
+      .viewer-details{position:absolute;z-index:5;left:0;right:0;bottom:0;max-height:min(62dvh,560px);overflow:auto;padding:12px 16px calc(18px + env(safe-area-inset-bottom));border-top:1px solid #2a2e34;border-radius:14px 14px 0 0;background:rgba(22,24,28,.98);box-shadow:0 -16px 40px rgba(0,0,0,.4);transform:translateY(105%);transition:transform 160ms ease}.viewer-details.open{transform:translateY(0)}
+      .viewer-details-head{display:flex;align-items:center;margin-bottom:8px}.viewer-details-head strong{font-size:14px}.viewer-details-close{margin-left:auto;width:38px;height:38px;border:0;background:transparent;color:#9aa0a9;font-size:22px}
+      .viewer-details-section{padding:11px 0;border-top:1px solid #22252a}.viewer-details-section h3{margin:0 0 7px;color:#9aa0a9;font-size:11px;font-weight:600}.viewer-details-row{display:grid;grid-template-columns:88px minmax(0,1fr);gap:10px;padding:4px 0}.viewer-details-label{color:#6f7680;font-size:11px}.viewer-details-value{min-width:0;color:#f0f2f4;font-size:12px;overflow-wrap:anywhere}.viewer-details-value a{color:#91b4ff}.viewer-details-chips{display:flex;flex-wrap:wrap;gap:5px}.viewer-details-chip{padding:4px 7px;border:1px solid #2a2e34;border-radius:99px;color:#d7dce4;font-size:11px}
       @media (prefers-reduced-motion:reduce){.viewer-nav{transition:none!important}}
     `;
     (document.head || document.documentElement).append(style);
   }
 
-  function ensureFrame() {
-    if (frameReadyPromise) return frameReadyPromise;
-    frameReadyPromise = new Promise((resolve, reject) => {
-      const mount = () => {
-        if (!document.documentElement) {
-          setTimeout(mount, 25);
-          return;
-        }
-        frame = document.createElement("iframe");
-        frame.id = "lakomics-mobile-api-frame";
-        frame.src = chrome.runtime.getURL(FRAME_PATH);
-        frame.hidden = true;
-        frame.setAttribute("aria-hidden", "true");
-        frame.style.display = "none";
-        frame.addEventListener("load", () => resolve(frame), { once: true });
-        frame.addEventListener("error", () => reject(new Error("mobile_api_frame_failed")), { once: true });
-        document.documentElement.append(frame);
-      };
-      mount();
-    });
-    return frameReadyPromise;
+  function ensurePolishUi() {
+    const toolbar = document.querySelector(".asset-toolbar");
+    if (toolbar && !document.querySelector("#assetSort")) {
+      const select = document.createElement("select");
+      select.id = "assetSort";
+      select.className = "asset-sort";
+      select.setAttribute("aria-label", "에셋 정렬");
+      for (const [value, label] of [["newest", "최신순"], ["oldest", "오래된순"]]) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = label;
+        select.append(option);
+      }
+      toolbar.append(select);
+    }
+    if (toolbar && !document.querySelector("#lakomicsGridStatus")) {
+      const status = document.createElement("button");
+      status.id = "lakomicsGridStatus";
+      status.className = "lakomics-grid-status";
+      status.hidden = true;
+      toolbar.append(status);
+    }
+    const dialog = document.querySelector("#viewer");
+    const top = dialog?.querySelector(".viewer-top");
+    let toggle = document.querySelector("#viewerDetailsToggle");
+    if (top && !toggle) {
+      toggle = document.createElement("button");
+      toggle.id = "viewerDetailsToggle";
+      toggle.className = "viewer-details-toggle";
+      toggle.setAttribute("aria-controls", "viewerDetails");
+      toggle.setAttribute("aria-expanded", "false");
+      top.insertBefore(toggle, top.querySelector("#viewerIndex"));
+    }
+    if (toggle) {
+      toggle.setAttribute("aria-label", "정보");
+      toggle.textContent = "ⓘ";
+    }
+    if (dialog && !document.querySelector("#viewerDetails")) {
+      const sheet = document.createElement("aside");
+      sheet.id = "viewerDetails";
+      sheet.className = "viewer-details";
+      sheet.setAttribute("aria-hidden", "true");
+      const head = document.createElement("div");
+      head.className = "viewer-details-head";
+      const title = document.createElement("strong");
+      title.textContent = "에셋 정보";
+      const close = document.createElement("button");
+      close.id = "viewerDetailsClose";
+      close.className = "viewer-details-close";
+      close.setAttribute("aria-label", "정보 닫기");
+      close.textContent = "×";
+      const content = document.createElement("div");
+      content.id = "viewerDetailsContent";
+      head.append(title, close);
+      sheet.append(head, content);
+      dialog.append(sheet);
+    }
   }
-
-  window.addEventListener("message", (event) => {
-    if (!frame?.contentWindow || event.source !== frame.contentWindow) return;
-    const data = event.data;
-    if (!data || data.source !== "lakomics-mobile-api") return;
-    const requestId = clean(data.requestId, 120);
-    const pending = pendingRequests.get(requestId);
-    if (!pending) return;
-    pendingRequests.delete(requestId);
-    clearTimeout(pending.timer);
-    pending.resolve(data.result && typeof data.result === "object"
-      ? data.result
-      : { ok: false, code: "mobile_api_empty_response" });
-  });
 
   function runtimeRequest(type, payload = {}) {
     return new Promise((resolve) => {
@@ -116,8 +158,10 @@
   }
 
   const store = createStore({
-    requestAssets: ({ classificationId, cursor, limit }) =>
-      runtimeRequest("mobile-library:assets", { classificationId, cursor: cursor || undefined, limit }),
+    requestAssets: ({ viewType, classificationId, cursor, limit, sort }) => {
+      const view = normalizeView(viewType === "recent" ? { type: "recent" } : { type: "classification", classificationId });
+      return runtimeRequest("mobile-library:assets", { viewType: view.type, classificationId, cursor: cursor || undefined, limit, sort });
+    },
     requestTicket: ({ assetId, variant }) =>
       runtimeRequest("mobile-library:media-ticket", { assetId, variant }),
   });
@@ -131,16 +175,16 @@
   }
 
   // --- 그리드 ---
-  function selectedLiveRow() {
-    return document.querySelector("#treeScroll .tree-row.selected[data-lakomics-live-select]");
+  function selectedMobileView() {
+    if (document.querySelector('#treeScroll .tree-row.selected[data-lakomics-live-view="recent"]')) return { type: "recent" };
+    const row = document.querySelector("#treeScroll .tree-row.selected[data-lakomics-live-select]");
+    const classificationId = clean(row?.dataset?.lakomicsLiveSelect, 240);
+    return classificationId ? { type: "classification", classificationId } : null;
   }
 
-  function selectedClassificationId() {
-    return clean(selectedLiveRow()?.dataset?.lakomicsLiveSelect, 240) || null;
-  }
-
-  function selectedName() {
-    return clean(selectedLiveRow()?.querySelector(".tree-name")?.textContent, 120) || "분류";
+  function selectedName(view) {
+    if (normalizeView(view).type === "recent") return "최근 100개";
+    return clean(document.querySelector("#treeScroll .tree-row.selected[data-lakomics-live-select] .tree-name")?.textContent, 120) || "분류";
   }
 
   function escapeHtml(value) {
@@ -174,6 +218,7 @@
     if (asset.kind === "video") {
       return `<button class="asset-tile" data-lib-index="${index}" data-lib-asset="${id}" aria-label="라이브러리 영상" data-lib-kind="video">
         <span class="lakomics-live-video-thumb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="9"/><path d="m10 8 6 4-6 4z"/></svg></span>
+        <img alt="" loading="lazy" decoding="async" data-lib-thumb="${id}">
         <span class="lakomics-live-media-mark">VIDEO</span>
       </button>`;
     }
@@ -198,42 +243,61 @@
 
   function fillTileImage(img, asset) {
     const key = `${asset.id}:thumbnail`;
-    inflightTicket(key, () => store.ticketFor(asset.id, "thumbnail"))
+    inflightTicket(key, () => loadGridThumbnail(asset, (assetId, variant) => store.ticketFor(assetId, variant)))
       .then((ticket) => {
         if (!ticket.ok) {
           img.closest(".asset-tile")?.classList.add("lakomics-tile-failed");
           return;
         }
-        img.src = ticket.url;
+        img.addEventListener("load", () => {
+          img.closest(".asset-tile")?.classList.add("lakomics-tile-has-thumb");
+        }, { once: true });
         img.addEventListener("error", () => {
           img.closest(".asset-tile")?.classList.add("lakomics-tile-failed");
         }, { once: true });
+        img.src = ticket.url;
       });
   }
 
-  function renderGrid({ preserveScroll = false } = {}) {
+  function observeThumbnails(grid, scope) {
+    thumbnailObserver?.disconnect();
+    const images = [...grid.querySelectorAll("img[data-lib-thumb]")];
+    const load = (img) => {
+      const index = Number(img.closest("[data-lib-index]")?.dataset.libIndex);
+      const asset = scope.items[index];
+      if (asset) fillTileImage(img, asset);
+    };
+    if (typeof IntersectionObserver !== "function") {
+      images.forEach(load);
+      return;
+    }
+    thumbnailObserver = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        thumbnailObserver?.unobserve(entry.target);
+        load(entry.target);
+      }
+    }, { root: null, rootMargin: "500px" });
+    images.forEach((img) => thumbnailObserver.observe(img));
+  }
+
+  function renderGrid({ preserveScroll = false, view = viewTransition.visible() || activeView } = {}) {
     const grid = document.querySelector("#assetGrid");
     if (!grid) return;
-    const classificationId = activeClassificationId;
-    if (!classificationId) return;
-    const scope = store.getScope(classificationId);
+    if (!view) return;
+    const scope = store.getScope(view);
     if (!scope || !scope.loadedFirstPage) return;
 
     const previousScroll = grid.parentElement?.scrollTop ?? 0;
     const visible = scope.items;
     grid.innerHTML = visible.length
       ? visible.map((asset, index) => tileHtml(asset, index)).join("") + (scope.hasMore ? sentinelHtml() : "")
-      : emptyHtml(selectedName());
+      : emptyHtml(selectedName(view));
 
-    grid.querySelectorAll("img[data-lib-thumb]").forEach((img) => {
-      const assetId = img.dataset.libThumb;
-      const index = Number(img.closest("[data-lib-index]")?.dataset.libIndex);
-      const asset = scope.items[index];
-      if (asset) fillTileImage(img, asset);
-    });
+    observeThumbnails(grid, scope);
 
     if (preserveScroll && grid.parentElement) grid.parentElement.scrollTop = previousScroll;
-    observeSentinel(grid, classificationId);
+    observeSentinel(grid, view);
     const total = document.querySelector("#assetTotal");
     if (total) {
       const label = `${visible.length.toLocaleString()}개 표시${scope.hasMore ? " (더 있음)" : ""}`;
@@ -247,15 +311,15 @@
   }
 
   let sentinelObserver = null;
-  function observeSentinel(grid, classificationId) {
+  function observeSentinel(grid, view) {
     sentinelObserver?.disconnect();
     const sentinel = grid.querySelector("#gridSentinel");
-    if (!sentinel || !store.getScope(classificationId)?.hasMore) return;
+    if (!sentinel || !store.getScope(view)?.hasMore) return;
     sentinelObserver = new IntersectionObserver((entries) => {
       if (!entries.some((entry) => entry.isIntersecting)) return;
-      const scope = store.getScope(classificationId);
+      const scope = store.getScope(view);
       if (!scope?.hasMore || scope.loading) return;
-      store.loadNextPage(classificationId);
+      store.loadNextPage(view);
     }, { rootMargin: "600px" });
     sentinelObserver.observe(sentinel);
   }
@@ -272,28 +336,69 @@
     grid.innerHTML = `<div class="lakomics-live-loading">라이브러리 에셋 불러오는 중…</div>`;
   }
 
-  async function openClassification(classificationId, { force = false } = {}) {
-    if (!classificationId) return;
-    activeClassificationId = classificationId;
-    const scope = store.getScope(classificationId);
-    if (!scope || force) {
-      showGridLoadingOrEmpty(classificationId);
-      const result = await store.loadFirstPage(classificationId);
-      if (activeClassificationId !== classificationId) return;
-      if (!result.ok) showGridError(result.code || "unknown");
-      else renderGrid();
+  function syncSortControl(view) {
+    const sortSelect = document.querySelector("#assetSort");
+    if (!sortSelect) return;
+    const recent = normalizeView(view).type === "recent";
+    sortSelect.disabled = recent;
+    sortSelect.value = recent ? "newest" : activeSort;
+  }
+
+  function setTransitionStatus(message = "", error = false) {
+    const status = document.querySelector("#lakomicsGridStatus");
+    if (!status) return;
+    status.hidden = !message;
+    status.textContent = message;
+    status.dataset.error = error ? "true" : "false";
+  }
+
+  async function openView(view, { force = false } = {}) {
+    if (!view) return;
+    view = normalizeView(view);
+    activeView = view;
+    syncSortControl(view);
+    const request = viewTransition.begin(view);
+    const requestedSort = view.type === "recent" ? "newest" : activeSort;
+    const scope = store.getScope(view);
+    const sortChanged = Boolean(scope && scope.sort !== requestedSort);
+    if (scope?.loading && !scope.loadedFirstPage && !force && !sortChanged) {
+      if (request.keepVisible) setTransitionStatus("불러오는 중…");
+      else showGridLoading();
+      const result = await store.waitForFirstPage(view);
+      if (!viewTransition.isCurrent(request.token)) return;
+      if (!result.ok) {
+        viewTransition.fail(request.token);
+        if (request.keepVisible) setTransitionStatus("로드 실패 · 다시 시도", true);
+        else showGridError(result.code || "unknown");
+        return;
+      }
+      if (!viewTransition.commit(request.token)) return;
+      setTransitionStatus();
+      renderGrid({ view });
       return;
     }
-    renderGrid();
+    if (!scope || sortChanged || force) {
+      if (request.keepVisible) setTransitionStatus("불러오는 중…");
+      else showGridLoading();
+      const result = await store.loadFirstPage(view, { sort: requestedSort });
+      if (!viewTransition.isCurrent(request.token)) return;
+      if (!result.ok) {
+        viewTransition.fail(request.token);
+        if (request.keepVisible) setTransitionStatus("로드 실패 · 다시 시도", true);
+        else showGridError(result.code || "unknown");
+        return;
+      }
+      if (!viewTransition.commit(request.token)) return;
+      setTransitionStatus();
+      renderGrid({ view });
+      return;
+    }
+    if (!viewTransition.commit(request.token)) return;
+    setTransitionStatus();
+    renderGrid({ view });
     const parent = document.querySelector("#assetGrid")?.parentElement;
     if (parent) parent.scrollTop = 0;
     window.scrollTo({ top: 0, behavior: "instant" });
-  }
-
-  function showGridLoadingOrEmpty(classificationId) {
-    const scope = store.getScope(classificationId);
-    if (scope?.loadedFirstPage) renderGrid();
-    else showGridLoading();
   }
 
   function ensureViewerWrap() {
@@ -348,8 +453,8 @@
     next.textContent = "›";
     next.setAttribute("aria-label", "다음 에셋");
     dialog.append(prev, next);
-    prev.addEventListener("click", () => stepViewer(-1));
-    next.addEventListener("click", () => stepViewer(1));
+    prev.addEventListener("click", () => { viewerChrome.interact(); stepViewer(-1); });
+    next.addEventListener("click", () => { viewerChrome.interact(); stepViewer(1); });
   }
 
   function viewerKindLabel(asset) {
@@ -381,19 +486,97 @@
     image.style.display = "none";
     image.removeAttribute("src");
     wrap.classList.remove("zoomable");
-    if (title) title.textContent = asset.creatorName || asset.importSource || "라이브러리 에셋";
+    const metadata = mobileMetadata(asset, globalThis.LakomicsMobileClassificationEntries || []);
+    if (title) title.textContent = metadata.creator || asset.importSource || "라이브러리 에셋";
     const parts = [dateLabel(asset.collectedAt || asset.committedAt), sizeLabel(asset.sizeBytes)].filter(Boolean);
     if (meta) meta.textContent = parts.join(" · ");
     if (indexEl) indexEl.textContent = `${index + 1} · ${viewerKindLabel(asset)}`;
+    renderViewerDetails(asset);
     ensureNavButtons();
-    if (!dialog.open) dialog.showModal();
+    if (!dialog.open) {
+      dialog.showModal();
+      viewerChrome.open();
+    }
     return { dialog, wrap, image, video, meta, indexEl };
   }
 
-  async function showViewerAsset(classificationId, assetId) {
+  function setDetailsOpen(open) {
+    const sheet = document.querySelector("#viewerDetails");
+    const toggle = document.querySelector("#viewerDetailsToggle");
+    sheet?.classList.toggle("open", open);
+    sheet?.setAttribute("aria-hidden", open ? "false" : "true");
+    toggle?.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+
+  function appendDetailsSection(container, heading, rows) {
+    if (!rows.length) return;
+    const section = document.createElement("section");
+    section.className = "viewer-details-section";
+    const title = document.createElement("h3");
+    title.textContent = heading;
+    section.append(title);
+    for (const row of rows) {
+      const line = document.createElement("div");
+      line.className = "viewer-details-row";
+      const label = document.createElement("div");
+      label.className = "viewer-details-label";
+      label.textContent = row.label;
+      const value = document.createElement("div");
+      value.className = "viewer-details-value";
+      value.textContent = row.value;
+      line.append(label, value);
+      section.append(line);
+    }
+    container.append(section);
+  }
+
+  function renderViewerDetails(asset) {
+    const container = document.querySelector("#viewerDetailsContent");
+    if (!container) return;
+    container.textContent = "";
+    const metadata = mobileMetadata(asset, globalThis.LakomicsMobileClassificationEntries || []);
+    const sourceRows = [];
+    if (metadata.sourceUrl) sourceRows.push({ label: "출처", value: metadata.sourceUrl, link: true });
+    if (metadata.creator) sourceRows.push({ label: "제작자", value: metadata.creator });
+    sourceRows.push(...metadata.source);
+    appendDetailsSection(container, "출처", sourceRows);
+    const sourceSection = container.lastElementChild;
+    if (metadata.sourceUrl && sourceSection) {
+      const value = sourceSection.querySelector(".viewer-details-value");
+      if (value) {
+        value.textContent = "";
+        const link = document.createElement("a");
+        link.href = metadata.sourceUrl;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = metadata.sourceUrl;
+        value.append(link);
+      }
+    }
+    if (metadata.classifications.length) {
+      const section = document.createElement("section");
+      section.className = "viewer-details-section";
+      const title = document.createElement("h3");
+      title.textContent = "분류";
+      const chips = document.createElement("div");
+      chips.className = "viewer-details-chips";
+      for (const path of metadata.classifications) {
+        const chip = document.createElement("span");
+        chip.className = "viewer-details-chip";
+        chip.textContent = path;
+        chips.append(chip);
+      }
+      section.append(title, chips);
+      container.append(section);
+    }
+    appendDetailsSection(container, "파일", metadata.file);
+    appendDetailsSection(container, "가져오기", metadata.imported);
+  }
+
+  async function showViewerAsset(view, assetId) {
     const generation = ++viewerGeneration;
-    const scope = store.getScope(classificationId);
-    const index = store.indexOf(classificationId, assetId);
+    const scope = store.getScope(view);
+    const index = store.indexOf(view, assetId);
     if (!scope || index < 0) return;
     const asset = scope.items[index];
     const viewer = prepareViewer(asset, index);
@@ -422,17 +605,17 @@
   }
 
   async function stepViewer(direction) {
-    const classificationId = viewerClassificationId;
-    if (!classificationId || !viewerAssetId) return;
-    const neighbor = store.neighbor(classificationId, viewerAssetId, direction);
+    const view = viewerView;
+    if (!view || !viewerAssetId) return;
+    const neighbor = store.neighbor(view, viewerAssetId, direction);
     if (!neighbor) return;
     if (neighbor.pending) {
-      const result = await store.loadNextPage(classificationId);
+      const result = await store.loadNextPage(view);
       if (result.ok) {
-        const after = store.neighbor(classificationId, viewerAssetId, direction);
+        const after = store.neighbor(view, viewerAssetId, direction);
         if (after?.item) {
           viewerAssetId = after.item.id;
-          showViewerAsset(classificationId, viewerAssetId);
+          showViewerAsset(view, viewerAssetId);
           return;
         }
       }
@@ -441,7 +624,7 @@
       return;
     }
     viewerAssetId = neighbor.item.id;
-    showViewerAsset(classificationId, viewerAssetId);
+    showViewerAsset(view, viewerAssetId);
   }
 
   function handleViewerClose() {
@@ -456,13 +639,16 @@
     if (image) {
       image.removeAttribute("src");
     }
-    viewerClassificationId = null;
+    viewerChrome.close();
+    viewerView = null;
     viewerAssetId = null;
+    setDetailsOpen(false);
     // 스크롤 위치 복원: 그리드 상태는 그대로 두고 위치만 되돌린다 (리패치 금지)
-    if (activeClassificationId) {
+    const visibleView = viewTransition.visible();
+    if (visibleView) {
       const grid = document.querySelector("#assetGrid");
       const wrap = grid?.parentElement;
-      const saved = store.restoreScroll(activeClassificationId);
+      const saved = store.restoreScroll(visibleView);
       if (wrap) wrap.scrollTop = saved;
     }
   }
@@ -470,14 +656,27 @@
   // --- 이벤트 ---
   function installHooks() {
     installStyles();
+    ensurePolishUi();
+    const sortSelect = document.querySelector("#assetSort");
+    if (sortSelect) {
+      sortSelect.value = activeSort;
+      sortSelect.addEventListener("change", async () => {
+        if (normalizeView(activeView).type === "recent") return;
+        activeSort = sortSelect.value === "oldest" ? "oldest" : "newest";
+        try { sessionStorage.setItem(SORT_KEY, activeSort); } catch {}
+        const view = activeView || selectedMobileView();
+        if (view) await openView(view, { force: true });
+      });
+    }
     document.addEventListener("click", (event) => {
       const retry = event.target.closest?.("[data-grid-retry]");
       if (retry) {
-        const classificationId = activeClassificationId;
-        if (classificationId) {
-          store.reset(classificationId);
-          openClassification(classificationId, { force: true });
-        }
+        const view = activeView;
+        if (view) openView(view, { force: true });
+        return;
+      }
+      if (event.target.closest?.("#lakomicsGridStatus[data-error=true]")) {
+        if (activeView) openView(activeView, { force: true });
         return;
       }
 
@@ -486,27 +685,22 @@
         event.preventDefault();
         event.stopPropagation();
         event.stopImmediatePropagation();
-        const classificationId = activeClassificationId;
-        if (!classificationId) return;
-        viewerClassificationId = classificationId;
+        const view = viewTransition.visible();
+        if (!view) return;
+        viewerView = view;
         viewerAssetId = clean(tile.dataset.libAsset, 240);
         // 그리드 스크롤 저장 후 뷰어 열기
         const wrap = document.querySelector("#assetGrid")?.parentElement;
-        if (wrap) store.saveScroll(classificationId, wrap.scrollTop);
-        showViewerAsset(classificationId, viewerAssetId);
+        if (wrap) store.saveScroll(view, wrap.scrollTop);
+        showViewerAsset(view, viewerAssetId);
         return;
       }
 
-      if (event.target.closest?.("[data-lakomics-live-select]")) {
-        const id = selectedClassificationId();
-        if (id) openClassification(id);
-        return;
-      }
       if (event.target.closest?.("#refreshBtn")) {
-        const id = activeClassificationId || selectedClassificationId();
-        if (id) {
+        const view = activeView || selectedMobileView();
+        if (view) {
           store.clearTickets();
-          openClassification(id, { force: true });
+          openView(view, { force: true });
         }
       }
     }, true);
@@ -516,7 +710,8 @@
       const wrap = grid.parentElement;
       if (wrap) {
         wrap.addEventListener("scroll", () => {
-          if (activeClassificationId) store.saveScroll(activeClassificationId, wrap.scrollTop);
+          const visibleView = viewTransition.visible();
+          if (visibleView) store.saveScroll(visibleView, wrap.scrollTop);
         }, { passive: true });
       }
     }
@@ -525,14 +720,60 @@
     document.querySelector("#viewer")?.addEventListener("click", (event) => {
       if (event.target.id === "viewer") event.currentTarget.close();
     });
+    document.querySelector("#viewerDetailsToggle")?.addEventListener("click", () => {
+      viewerChrome.hold();
+      const open = document.querySelector("#viewerDetails")?.classList.contains("open") !== true;
+      setDetailsOpen(open);
+      if (!open) viewerChrome.interact();
+    });
+    document.querySelector("#viewerDetailsClose")?.addEventListener("click", () => {
+      setDetailsOpen(false);
+      viewerChrome.interact();
+    });
+
+    const viewerWrap = ensureViewerWrap();
+    viewerWrap?.addEventListener("pointerdown", (event) => {
+      const directControl = Boolean(event.target.closest?.("button,a,input,select,textarea,[role=button]"));
+      const video = event.target.closest?.("video");
+      const rect = video?.getBoundingClientRect?.();
+      const nativeVideoControl = Boolean(video && isNativeVideoControlHit({
+        clientY: event.clientY,
+        top: rect?.top,
+        bottom: rect?.bottom,
+        paused: video.paused,
+        currentTime: video.currentTime,
+      }));
+      const interactive = directControl || nativeVideoControl;
+      swipeStart = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, interactive };
+    });
+    viewerWrap?.addEventListener("pointerup", (event) => {
+      if (!swipeStart || swipeStart.pointerId !== event.pointerId) return;
+      const completed = { ...swipeStart, endX: event.clientX, endY: event.clientY };
+      const direction = swipeDirection(completed);
+      swipeStart = null;
+      if (direction) {
+        viewerChrome.mediaTap({ swiped: true });
+        stepViewer(direction);
+        return;
+      }
+      const moved = Math.max(Math.abs(completed.endX - completed.startX), Math.abs(completed.endY - completed.startY)) > 10;
+      viewerChrome.mediaTap({ interactive: completed.interactive, moved });
+    });
+    viewerWrap?.addEventListener("pointercancel", () => { swipeStart = null; });
+    document.addEventListener("keydown", (event) => {
+      if (!document.querySelector("#viewer")?.open) return;
+      if (event.key === "ArrowLeft") stepViewer(-1);
+      if (event.key === "ArrowRight") stepViewer(1);
+    });
 
     // 스토어 이벤트 → 그리드 부분 갱신
     store.subscribe((event) => {
-      if (event.classificationId !== activeClassificationId) return;
+      if (!activeView || event.viewKey !== viewKey(activeView)) return;
       if (event.type === "loaded") {
-        const scope = store.getScope(activeClassificationId);
+        if (event.initial) return;
+        const scope = store.getScope(activeView);
         if (scope && scope.items.length > GRID_MAX_TILES) {
-          const drop = store.trimWindow(activeClassificationId, scope.items.length - GRID_MAX_TILES);
+          const drop = store.trimWindow(activeView, scope.items.length - GRID_MAX_TILES);
           if (drop > 0) {
             const grid = document.querySelector("#assetGrid");
             const tileHeight = grid?.firstElementChild?.offsetHeight || 0;
@@ -542,9 +783,9 @@
             }
           }
         }
-        renderGrid({ preserveScroll: !event.initial });
+        if (viewKey(viewTransition.visible()) === event.viewKey) renderGrid({ preserveScroll: true });
       } else if (event.type === "error") {
-        if (!store.getScope(activeClassificationId)?.loadedFirstPage) showGridError(event.code);
+        if (!event.initial && !store.getScope(activeView)?.loadedFirstPage) showGridError(event.code);
       }
     });
 
@@ -558,11 +799,11 @@
       return;
     }
     new MutationObserver(() => {
-      const id = selectedClassificationId();
-      if (id && id !== activeClassificationId) openClassification(id);
+      const view = selectedMobileView();
+      if (view && (!activeView || viewKey(view) !== viewKey(activeView))) openView(view);
     }).observe(tree, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
-    const initial = selectedClassificationId();
-    if (initial) openClassification(initial);
+    const initial = selectedMobileView();
+    if (initial) openView(initial);
   }
 
   // mobile-bridge.js가 분류를 로드하면 초기 선택이 확정된다.
@@ -572,12 +813,12 @@
     }
   }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-lakomics-live-classifications"] });
 
-  function openAssetByIndex(classificationId, index) {
-    const asset = store.itemAt(classificationId, index);
+  function openAssetByIndex(view, index) {
+    const asset = store.itemAt(view, index);
     if (!asset) return;
-    viewerClassificationId = classificationId;
+    viewerView = view;
     viewerAssetId = asset.id;
-    showViewerAsset(classificationId, asset.id);
+    showViewerAsset(view, asset.id);
   }
 
   if (document.readyState === "loading") {

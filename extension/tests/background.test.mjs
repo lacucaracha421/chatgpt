@@ -2007,10 +2007,22 @@ test("mobile library runtime messages bypass the iframe bridge", async () => {
   assert.equal(cls.ok, true); assert.equal(cls.items[0].assetCount, 2);
   assert.equal(harness.fetchCalls[0].url, "http://100.76.119.29:32146/v1/library/classifications");
   harness.queueJson({ items: [{ id: "a1", kind: "image", content_type: "image/jpeg", size_bytes: 123, classification_ids: ["c1"], original_available: true, thumbnail_available: true }], has_more: false, next_cursor: null });
-  const assets = await harness.api.handleMessage({ type: "mobile-library:assets", classificationId: "c1", limit: 100 });
+  const assets = await harness.api.handleMessage({ type: "mobile-library:assets", classificationId: "c1", limit: 100, sort: "oldest" });
   assert.equal(assets.ok, true); assert.equal(assets.items[0].contentType, "image/jpeg");
+  assert.equal(harness.fetchCalls[1].url, "http://100.76.119.29:32146/v1/library/assets?classification_id=c1&limit=100&sort=oldest");
   harness.queueJson({ url: "https://r2.example/signed", content_type: "image/webp", size_bytes: 456, expires_at: "2026-09-02T10:00:00Z" });
   const ticket = await harness.api.handleMessage({ type: "mobile-library:media-ticket", assetId: "a1", variant: "thumbnail" });
   assert.equal(ticket.ok, true); assert.equal(ticket.contentType, "image/webp");
   assert.equal(JSON.stringify({ cls, assets, ticket }).includes("server-secret-token"), false);
+});
+
+test("recent Mobile library request omits classification and stays newest at 100", async () => {
+  const harness = createHarness({ collectorToken: "server-secret-token", collectorSettings: { enabled: true, baseUrl: "http://100.76.119.29:32146" } });
+  harness.queueJson({ items: [{ id: "recent-1", kind: "image" }], has_more: true, next_cursor: "ignored" });
+
+  const response = await harness.api.handleMessage({ type: "mobile-library:assets", viewType: "recent", limit: 100, sort: "oldest" });
+
+  assert.equal(response.ok, true);
+  assert.equal(harness.fetchCalls[0].url, "http://100.76.119.29:32146/v1/library/assets?limit=100&sort=newest");
+  assert.equal(harness.fetchCalls[0].url.includes("classification_id"), false);
 });

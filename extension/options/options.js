@@ -42,6 +42,10 @@
   const importLocalTree = document.querySelector("#import-local-tree");
   const localTreeJson = document.querySelector("#local-tree-json");
   const localTreeStatus = document.querySelector("#local-tree-status");
+  const mobileSiteAccess = document.querySelector("#mobile-site-access");
+  const requestMobileSiteAccess = document.querySelector("#request-mobile-site-access");
+  const mobileSiteAccessResult = document.querySelector("#mobile-site-access-result");
+  const mobileSiteAccessDiagnostic = document.querySelector("#mobile-site-access-diagnostic");
   let entries = [];
   let workingLayout = { version: 1, parents: {} };
   let path = [];
@@ -54,6 +58,50 @@
   let localSecondaryInputs = [];
 
   void initialize();
+  void refreshMobileAccessStatus();
+
+  function renderMobileAccessState(result, afterRequest = false) {
+    const state = result?.state || "error";
+    if (state === "granted") {
+      mobileSiteAccess.textContent = "접근 허용됨";
+      mobileSiteAccessResult.textContent = afterRequest
+        ? "Mobile Lakomics 사이트 접근 권한이 허용되었습니다."
+        : "";
+      mobileSiteAccessDiagnostic.textContent = "이 상태인데 Mobile 페이지가 확장을 감지하지 못하면 Titanium 콘텐츠 스크립트 호환 문제입니다. 확장은 감지되지만 라이브러리가 열리지 않으면 서비스 워커/API 상태를 확인하세요.";
+      return;
+    }
+    if (state === "needed") {
+      mobileSiteAccess.textContent = "접근 권한 필요";
+      mobileSiteAccessResult.textContent = afterRequest ? "사이트 접근 권한이 허용되지 않았습니다." : "";
+      mobileSiteAccessDiagnostic.textContent = "브라우저가 Mobile Lakomics 사이트의 확장 접근 권한을 보류 중입니다.";
+      return;
+    }
+    mobileSiteAccess.textContent = "권한 상태 확인 실패";
+    mobileSiteAccessResult.textContent = afterRequest
+      ? "이 브라우저에서는 사이트 권한 요청을 처리하지 못했습니다."
+      : "";
+    mobileSiteAccessDiagnostic.textContent = "이 브라우저에서 사이트 권한 API 상태를 확인할 수 없습니다.";
+  }
+
+  async function refreshMobileAccessStatus() {
+    const helper = globalThis.LakomicsMobileAccess;
+    if (!helper) {
+      renderMobileAccessState({ state: "error" });
+      return;
+    }
+    renderMobileAccessState(await helper.checkMobileAccess(chrome.permissions));
+  }
+
+  requestMobileSiteAccess.addEventListener("click", async () => {
+    mobileSiteAccessResult.textContent = "사이트 접근 권한을 확인하는 중…";
+    const helper = globalThis.LakomicsMobileAccess;
+    if (!helper) {
+      renderMobileAccessState({ state: "error" }, true);
+      return;
+    }
+    const result = await helper.requestMobileAccess(chrome.permissions);
+    renderMobileAccessState(result, true);
+  });
 
   async function initialize() {
     const settings = await chrome.runtime.sendMessage({ type: "settings:get" });

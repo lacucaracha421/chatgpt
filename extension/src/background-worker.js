@@ -2120,18 +2120,29 @@
   }
 
   async function mobileLibraryAssets(message = {}) {
+    const viewType = String(message.viewType || "classification").trim();
+    if (viewType !== "classification" && viewType !== "recent") return { ok: false, code: "invalid_mobile_view" };
+    const recent = viewType === "recent";
     const classificationId = String(message.classificationId || "").trim().slice(0, 240);
-    if (!classificationId) return { ok: false, code: "invalid_classification_id" };
+    if (!recent && !classificationId) return { ok: false, code: "invalid_classification_id" };
+    const sort = recent ? "newest" : String(message.sort || "newest").trim();
+    if (sort !== "newest" && sort !== "oldest") return { ok: false, code: "invalid_mobile_sort" };
     const cursor = typeof message.cursor === "string" ? message.cursor.slice(0, 2000) : "";
     const requested = Number(message.limit);
-    const limit = Math.max(1, Math.min(100, Number.isFinite(requested) ? Math.round(requested) : 50));
-    const query = `classification_id=${encodeURIComponent(classificationId)}&limit=${limit}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+    const limit = recent ? 100 : Math.max(1, Math.min(100, Number.isFinite(requested) ? Math.round(requested) : 50));
+    const query = recent
+      ? `limit=${limit}&sort=newest`
+      : `classification_id=${encodeURIComponent(classificationId)}&limit=${limit}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}&sort=${sort}`;
     const result = await collectorRequest(`/v1/library/assets?${query}`);
     if (!result.ok) return result;
     const items = (Array.isArray(result.items) ? result.items : []).map((value) => ({
       id: String(value?.id || "").slice(0, 240), kind: String(value?.kind || "").slice(0, 20),
       contentType: typeof value?.content_type === "string" ? value.content_type.slice(0, 120) : null,
-      sizeBytes: Number.isFinite(Number(value?.size_bytes)) ? Number(value.size_bytes) : null, collectedAt: typeof value?.collected_at === "string" ? value.collected_at : null,
+      sizeBytes: Number.isFinite(Number(value?.size_bytes)) ? Number(value.size_bytes) : null,
+      width: Number.isFinite(Number(value?.width)) ? Number(value.width) : null,
+      height: Number.isFinite(Number(value?.height)) ? Number(value.height) : null,
+      durationMs: Number.isFinite(Number(value?.duration_ms)) ? Number(value.duration_ms) : null,
+      collectedAt: typeof value?.collected_at === "string" ? value.collected_at : null,
       committedAt: typeof value?.committed_at === "string" ? value.committed_at : null, sourcePublishedAt: typeof value?.source_published_at === "string" ? value.source_published_at : null,
       sourceUrl: typeof value?.source_url === "string" ? value.source_url.slice(0, 2000) : null, creatorName: typeof value?.creator_name === "string" ? value.creator_name.slice(0, 200) : null,
       creatorHandle: typeof value?.creator_handle === "string" ? value.creator_handle.slice(0, 200) : null, importSource: typeof value?.import_source === "string" ? value.import_source.slice(0, 60) : null,

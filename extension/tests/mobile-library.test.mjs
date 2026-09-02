@@ -214,7 +214,7 @@ function createStoreHarness(pageSize = 100, total = 250) {
   const ticketCalls = [];
   let cursorCounter = 0;
   const store = globalThis.LakomicsMobileLibrary.createStore({
-    requestAssets: async ({ cursor, limit }) => {
+    requestAssets: async ({ cursor, limit, sort }) => {
       const start = pages.length * pageSize;
       const items = assetIds.slice(start, start + limit).map((id) => ({
         id,
@@ -225,7 +225,7 @@ function createStoreHarness(pageSize = 100, total = 250) {
         originalAvailable: true,
         thumbnailAvailable: true,
       }));
-      pages.push({ cursor, limit, ids: items.map((item) => item.id) });
+      pages.push({ cursor, limit, sort, ids: items.map((item) => item.id) });
       const hasMore = start + limit < total;
       const nextCursor = hasMore ? `cursor-${++cursorCounter}` : null;
       return { ok: true, items, hasMore, nextCursor };
@@ -260,6 +260,260 @@ test("store paginates by has_more and terminates without inferring counts", asyn
   assert.equal(extra.ok, false);
   assert.equal(extra.code, "no_next_page");
   assert.equal(pages.length, 3);
+});
+
+test("changing sort discards the old cursor and starts a clean first page", async () => {
+  setupStoreVm();
+  const { store, pages } = createStoreHarness(100, 250);
+  await store.loadFirstPage("c1", { sort: "newest" });
+  await store.loadNextPage("c1");
+  await store.loadFirstPage("c1", { sort: "oldest" });
+
+  assert.equal(pages.at(-1).cursor, null);
+  assert.equal(pages.at(-1).sort, "oldest");
+  assert.equal(store.getScope("c1").sort, "oldest");
+  assert.equal(store.getScope("c1").items[0].id, "asset-0201");
+});
+
+test("Recent view requests global newest 100 once and caps the result", async () => {
+  setupStoreVm();
+  const calls = [];
+  const store = globalThis.LakomicsMobileLibrary.createStore({
+    requestAssets: async (request) => {
+      calls.push(request);
+      return {
+        ok: true,
+        items: Array.from({ length: 120 }, (_, index) => ({ id: `recent-${index + 1}` })),
+        hasMore: true,
+        nextCursor: "must-not-be-used",
+      };
+    },
+    requestTicket: async () => ({ ok: false, code: "unused" }),
+  });
+
+  await store.loadFirstPage({ type: "recent" }, { sort: "oldest" });
+  const scope = store.getScope({ type: "recent" });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].viewType, "recent");
+  assert.equal(calls[0].classificationId, undefined);
+  assert.equal(calls[0].sort, "newest");
+  assert.equal(calls[0].limit, 100);
+  assert.equal(scope.items.length, 100);
+  assert.equal(scope.hasMore, false);
+  assert.equal((await store.loadNextPage({ type: "recent" })).code, "no_next_page");
+});
+
+test("view transition keeps the old grid until one current replacement commits", () => {
+  setupStoreVm();
+  const transition = globalThis.LakomicsMobileLibrary.createViewTransition({ type: "classification", classificationId: "A" });
+  const request = transition.begin({ type: "classification", classificationId: "B" });
+
+  assert.equal(request.keepVisible, true);
+  assert.equal(transition.visible().classificationId, "A");
+  assert.equal(transition.commit(request.token), true);
+  assert.equal(transition.visible().classificationId, "B");
+  assert.equal(transition.commit(request.token), false, "a response may replace the grid only once");
+});
+
+test("view transition ignores stale responses and rapid A to B to C ends on C", () => {
+  setupStoreVm();
+  const transition = globalThis.LakomicsMobileLibrary.createViewTransition({ type: "classification", classificationId: "A" });
+  const requestB = transition.begin({ type: "classification", classificationId: "B" });
+  const requestC = transition.begin({ type: "classification", classificationId: "C" });
+
+  assert.equal(transition.commit(requestB.token), false);
+  assert.equal(transition.visible().classificationId, "A");
+  assert.equal(transition.commit(requestC.token), true);
+  assert.equal(transition.visible().classificationId, "C");
+});
+
+test("reselecting an in-flight view waits for its first page and commits the latest selection", async () => {
+  setupStoreVm();
+  let resolveA;
+  const store = globalThis.LakomicsMobileLibrary.createStore({
+    requestAssets: () => new Promise((resolve) => { resolveA = resolve; }),
+    requestTicket: async () => ({ ok: false }),
+  });
+  const transition = globalThis.LakomicsMobileLibrary.createViewTransition({ type: "classification", classificationId: "old" });
+  const viewA = { type: "classification", classificationId: "A" };
+  const firstA = transition.begin(viewA);
+  const loading = store.loadFirstPage(viewA);
+  transition.begin({ type: "classification", classificationId: "B" });
+  const latestA = transition.begin(viewA);
+  const waiting = store.waitForFirstPage(viewA);
+
+  resolveA({ ok: true, items: [{ id: "a1" }], hasMore: false, nextCursor: null });
+  assert.equal((await waiting).ok, true);
+  await loading;
+  assert.equal(transition.commit(firstA.token), false);
+  assert.equal(transition.commit(latestA.token), true);
+  assert.equal(transition.visible().classificationId, "A");
+  assert.equal(store.getScope(viewA).items.map((item) => item.id).join(","), "a1");
+});
+
+test("failed replacement keeps the old view and a retry can commit cleanly", () => {
+  setupStoreVm();
+  const transition = globalThis.LakomicsMobileLibrary.createViewTransition({ type: "classification", classificationId: "A" });
+  const failed = transition.begin({ type: "classification", classificationId: "B" });
+  assert.equal(transition.fail(failed.token), true);
+  assert.equal(transition.visible().classificationId, "A");
+  const retry = transition.begin({ type: "classification", classificationId: "B" });
+  assert.equal(transition.commit(retry.token), true);
+  assert.equal(transition.visible().classificationId, "B");
+});
+
+test("saved real classification wins, otherwise Mobile restores Recent", () => {
+  setupStoreVm();
+  const restore = globalThis.LakomicsMobileLibrary.restoreMobileView;
+  assert.equal(restore({ selectedId: "c2" }, new Set(["c1", "c2"])).classificationId, "c2");
+  assert.equal(restore({ selectedId: "deleted" }, new Set(["c1", "c2"])).type, "recent");
+  assert.equal(restore({}, new Set(["c1", "c2"])).type, "recent");
+  assert.equal(restore({}, new Set()).type, "recent");
+});
+
+test("viewer chrome starts hidden, toggles on taps, and auto-hides", () => {
+  setupStoreVm();
+  const scheduled = [];
+  const states = [];
+  const chromeState = globalThis.LakomicsMobileLibrary.createViewerChrome({
+    delayMs: 3200,
+    setTimer: (callback, delay) => { scheduled.push({ callback, delay }); return scheduled.length; },
+    clearTimer: () => {},
+    onChange: (visible) => states.push(visible),
+  });
+
+  chromeState.open();
+  assert.equal(chromeState.visible(), false);
+  chromeState.mediaTap();
+  assert.equal(chromeState.visible(), true);
+  assert.equal(scheduled.at(-1).delay, 3200);
+  chromeState.mediaTap();
+  assert.equal(chromeState.visible(), false);
+  chromeState.mediaTap();
+  scheduled.at(-1).callback();
+  assert.equal(chromeState.visible(), false);
+  assert.deepEqual(states, [false, true, false, true, false]);
+});
+
+test("viewer chrome ignores buttons, swipes, movement, and video controls", () => {
+  setupStoreVm();
+  const chromeState = globalThis.LakomicsMobileLibrary.createViewerChrome({ onChange: () => {} });
+  chromeState.open();
+  chromeState.mediaTap({ interactive: true });
+  chromeState.mediaTap({ swiped: true });
+  chromeState.mediaTap({ moved: true });
+  assert.equal(chromeState.visible(), false);
+  chromeState.interact();
+  assert.equal(chromeState.visible(), true, "button interaction reveals and resets chrome without toggling it");
+});
+
+test("native video controls are protected while the playing video surface remains a chrome tap", () => {
+  setupStoreVm();
+  const hit = globalThis.LakomicsMobileLibrary.isNativeVideoControlHit;
+  assert.equal(hit({ clientY: 490, top: 100, bottom: 500, paused: false, currentTime: 12 }), true);
+  assert.equal(hit({ clientY: 250, top: 100, bottom: 500, paused: false, currentTime: 12 }), false);
+  assert.equal(hit({ clientY: 250, top: 100, bottom: 500, paused: true, currentTime: 0 }), true);
+});
+
+test("video grid thumbnails request only the thumbnail variant and preserve failure", async () => {
+  setupStoreVm();
+  const calls = [];
+  const success = await globalThis.LakomicsMobileLibrary.loadGridThumbnail(
+    { id: "video-1", kind: "video" },
+    async (assetId, variant) => {
+      calls.push({ assetId, variant });
+      return { ok: true, url: "https://r2.example/video-1/thumb.webp", contentType: "image/webp" };
+    },
+  );
+  const failure = await globalThis.LakomicsMobileLibrary.loadGridThumbnail(
+    { id: "video-2", kind: "video" },
+    async (assetId, variant) => {
+      calls.push({ assetId, variant });
+      return { ok: false, code: "unavailable" };
+    },
+  );
+
+  assert.deepEqual(calls, [
+    { assetId: "video-1", variant: "thumbnail" },
+    { assetId: "video-2", variant: "thumbnail" },
+  ]);
+  assert.equal(success.url, "https://r2.example/video-1/thumb.webp");
+  assert.equal(failure.ok, false);
+});
+
+test("swipe navigation requires dominant horizontal travel and ignores video controls", () => {
+  setupStoreVm();
+  const swipe = globalThis.LakomicsMobileLibrary.swipeDirection;
+  assert.equal(swipe({ startX: 200, startY: 100, endX: 110, endY: 112 }), 1);
+  assert.equal(swipe({ startX: 100, startY: 100, endX: 190, endY: 92 }), -1);
+  assert.equal(swipe({ startX: 100, startY: 100, endX: 130, endY: 101 }), 0);
+  assert.equal(swipe({ startX: 100, startY: 100, endX: 160, endY: 170 }), 0);
+  assert.equal(swipe({ startX: 200, startY: 100, endX: 110, endY: 100, interactive: true }), 0);
+});
+
+test("mobile metadata follows PC labels, fallbacks, classifications, and safe source URLs", () => {
+  setupStoreVm();
+  const metadata = globalThis.LakomicsMobileLibrary.mobileMetadata({
+    id: "a1",
+    kind: "video",
+    contentType: "video/mp4",
+    sizeBytes: 1_048_576,
+    collectedAt: "2026-09-02T00:00:00Z",
+    sourcePublishedAt: "2026-09-01T12:30:00Z",
+    sourceUrl: "https://x.com/example/status/1",
+    creatorName: "Example Artist",
+    creatorHandle: "@example",
+    importSource: "browser_extension",
+    classificationIds: ["child", "missing"],
+  }, [
+    { id: "root", name: "게임", parentId: null },
+    { id: "child", name: "명조", parentId: "root" },
+  ]);
+
+  assert.equal(metadata.creator, "Example Artist (@example)");
+  assert.equal(metadata.sourceUrl, "https://x.com/example/status/1");
+  assert.deepEqual(metadata.classifications, ["게임 › 명조"]);
+  assert.equal(metadata.file.find((row) => row.label === "형식").value, "VIDEO · video/mp4");
+  assert.equal(metadata.file.find((row) => row.label === "크기").value, "1 MB");
+  assert.ok(metadata.source.find((row) => row.label === "게시 시각").value);
+  assert.ok(metadata.imported.find((row) => row.label === "가져온 날짜").value);
+  assert.equal(metadata.imported.find((row) => row.label === "가져온 방식").value, "브라우저 확장");
+
+  const missing = globalThis.LakomicsMobileLibrary.mobileMetadata({
+    id: "a2", kind: "image", sourceUrl: "javascript:alert(1)", classificationIds: [],
+  }, []);
+  assert.equal(missing.creator, "");
+  assert.equal(missing.sourceUrl, "");
+  assert.deepEqual(missing.classifications, []);
+});
+
+test("mobile asset source includes real video thumbnails, fallback, swipe hooks, and details sheet", () => {
+  assert.match(assetsSource, /data-lib-thumb/);
+  assert.match(assetsSource, /lakomics-live-video-thumb/);
+  assert.match(assetsSource, /pointerdown/);
+  assert.match(assetsSource, /pointerup/);
+  assert.match(assetsSource, /viewer-details/);
+  assert.match(mobilePageSource, /최신순/);
+  assert.match(mobilePageSource, /오래된순/);
+});
+
+test("viewer uses hidden chrome and an accessible icon without visible information text", () => {
+  assert.match(assetsSource, /viewer-chrome-visible/);
+  assert.match(assetsSource, /aria-label", "정보"/);
+  assert.match(assetsSource, /textContent = "ⓘ"/);
+  assert.doesNotMatch(assetsSource, /toggle\.textContent = "정보"/);
+  assert.doesNotMatch(mobilePageSource, /viewer-details-toggle"[^>]*>정보</);
+  assert.match(assetsSource, /isNativeVideoControlHit/);
+  assert.match(assetsSource, /button,a,input,select,textarea/);
+});
+
+test("Recent 100 is a special top-level view with fixed newest sorting", () => {
+  assert.match(bridgeSource, /data-lakomics-live-view="recent"/);
+  assert.match(bridgeSource, /최근 100개/);
+  assert.match(assetsSource, /sortSelect\.disabled/);
+  assert.match(assetsSource, /viewType: view\.type/);
+  assert.doesNotMatch(bridgeSource, /!response\?\.ok \|\| !entries\.length/);
 });
 
 test("store drops duplicate asset ids on retried pages", async () => {

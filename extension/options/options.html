@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="options.css">
     <script src="../src/layout.js" defer></script>
     <script src="../src/options-connection.js" defer></script>
+    <script src="../src/options-mobile-access.js" defer></script>
     <script src="options.js" defer></script>
   </head>
   <body>
@@ -72,6 +73,23 @@
           <button id="refresh-diagnostics" type="button">상태 새로고침</button>
         </div>
         <p id="diagnostics-status" role="status"></p>
+      </section>
+
+      <section aria-labelledby="mobile-site-access-title">
+        <h2 id="mobile-site-access-title">Mobile Lakomics</h2>
+        <div class="mobile-site-heading">
+          <div>
+            <strong>사이트 접근 권한</strong>
+            <p class="setting-note">lacucaracha421.github.io</p>
+          </div>
+          <span id="mobile-site-access" class="compact-status" role="status">권한 상태 확인 중…</span>
+        </div>
+        <div class="row">
+          <button id="request-mobile-site-access" type="button">사이트 접근 허용</button>
+          <a class="button-link" href="https://lacucaracha421.github.io/chatgpt/" target="_blank" rel="noopener noreferrer">Mobile Lakomics 열기</a>
+        </div>
+        <p id="mobile-site-access-result" class="setting-note" role="status"></p>
+        <p id="mobile-site-access-diagnostic" class="setting-note"></p>
       </section>
 
       <section aria-labelledby="translate-title">

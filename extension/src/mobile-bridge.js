@@ -16,6 +16,7 @@
   let nodeById = new Map();
   let childrenByParent = new Map();
   let selectedId = null;
+  let selectedView = { type: "recent" };
   let expandedIds = new Set();
   let loadGeneration = 0;
   let frameWindow = null;
@@ -45,6 +46,7 @@
     try {
       const parsed = JSON.parse(localStorage.getItem(STATE_KEY) || "{}");
       return {
+        view: parsed.view && typeof parsed.view === "object" ? parsed.view : null,
         selectedId: cleanString(parsed.selectedId, 240) || null,
         expandedIds: Array.isArray(parsed.expandedIds)
           ? parsed.expandedIds.map((id) => cleanString(id, 240)).filter(Boolean)
@@ -52,7 +54,7 @@
         scrollTop: Number.isFinite(Number(parsed.scrollTop)) ? Number(parsed.scrollTop) : 0,
       };
     } catch {
-      return { selectedId: null, expandedIds: [], scrollTop: 0 };
+      return { view: null, selectedId: null, expandedIds: [], scrollTop: 0 };
     }
   }
 
@@ -60,6 +62,7 @@
     const scroll = document.querySelector("#treeScroll");
     try {
       localStorage.setItem(STATE_KEY, JSON.stringify({
+        view: selectedView,
         selectedId,
         expandedIds: [...expandedIds],
         scrollTop: scroll?.scrollTop || 0,
@@ -72,6 +75,7 @@
 
   function rebuildIndex(entries) {
     liveEntries = entries;
+    globalThis.LakomicsMobileClassificationEntries = entries.map((entry) => ({ ...entry }));
     nodeById = new Map(entries.map((entry) => [entry.id, entry]));
     childrenByParent = new Map();
 
@@ -128,7 +132,7 @@
     const children = childrenOf(entry.id);
     const hasChildren = children.length > 0;
     const expanded = hasChildren && expandedIds.has(entry.id);
-    const selected = selectedId === entry.id;
+    const selected = selectedView.type === "classification" && selectedId === entry.id;
     const count = entry.count === null ? "" : entry.count.toLocaleString();
 
     return `<div class="tree-node ${expanded ? "expanded " : ""}${hasChildren ? "" : "leaf "}" data-live-node="${escapeHtml(entry.id)}">
@@ -145,11 +149,19 @@
 
   function renderTree({ restoreScroll = false } = {}) {
     const scroll = document.querySelector("#treeScroll");
-    if (!scroll || !liveEntries.length) return;
+    if (!scroll) return;
 
     const previousScrollTop = scroll.scrollTop;
     const rootEntries = roots();
-    scroll.innerHTML = rootEntries.map((entry) => rowHtml(entry, 0, new Set())).join("");
+    scroll.innerHTML = `<div class="tree-group-label">라이브러리</div>
+      <button class="tree-row ${selectedView.type === "recent" ? "selected" : ""}" style="--depth:0" data-lakomics-live-view="recent">
+        <span class="tree-toggle"></span>
+        <span class="tree-name">최근 100개</span>
+        <span class="tree-count">100</span>
+      </button>
+      <div class="tree-divider"></div>
+      <div class="tree-group-label">분류</div>
+      ${rootEntries.map((entry) => rowHtml(entry, 0, new Set())).join("")}`;
 
     const saved = loadSavedState();
     scroll.scrollTop = restoreScroll ? saved.scrollTop : previousScrollTop;
@@ -157,6 +169,13 @@
   }
 
   function updateSelectedPath() {
+    if (selectedView.type === "recent") {
+      const pathElement = document.querySelector("#assetPath");
+      if (pathElement) pathElement.innerHTML = "<strong>최근 100개</strong>";
+      const totalElement = document.querySelector("#assetTotal");
+      if (totalElement) totalElement.textContent = "최대 100개";
+      return;
+    }
     if (!selectedId) return;
     const path = pathTo(selectedId);
     if (!path.length) return;
@@ -239,7 +258,7 @@
     const entries = Array.isArray(response?.items)
       ? response.items.map(normalizeEntry).filter(Boolean)
       : [];
-    if (!response?.ok || !entries.length) {
+    if (!response?.ok) {
       setFailureUi(response);
       return;
     }
@@ -247,39 +266,48 @@
     rebuildIndex(entries);
     const saved = loadSavedState();
     expandedIds = new Set(saved.expandedIds.filter((id) => nodeById.has(id)));
-    selectedId = saved.selectedId && nodeById.has(saved.selectedId)
-      ? saved.selectedId
-      : roots()[0]?.id || entries[0].id;
-    expandAncestors(selectedId);
+    const restoreMobileView = globalThis.LakomicsMobileLibrary?.restoreMobileView;
+    selectedView = restoreMobileView
+      ? restoreMobileView(saved, new Set(nodeById.keys()))
+      : { type: "recent" };
+    selectedId = selectedView.type === "classification" ? selectedView.classificationId : null;
+    if (selectedId) expandAncestors(selectedId);
     setConnectionUi(response, entries);
     renderTree({ restoreScroll: true });
     saveState();
   }
 
   function handleTreePointer(event) {
+    const viewRow = event.target.closest?.("[data-lakomics-live-view]");
     const toggle = event.target.closest?.("[data-lakomics-live-toggle]");
     const row = event.target.closest?.("[data-lakomics-live-select]");
-    if (!toggle && !row) return;
+    if (!viewRow && !toggle && !row) return;
 
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
 
-    if (toggle) {
+    if (viewRow) {
+      selectedView = { type: "recent" };
+      selectedId = null;
+      saveState();
+      renderTree();
+    } else if (toggle) {
       const id = toggle.dataset.lakomicsLiveToggle;
       if (expandedIds.has(id)) expandedIds.delete(id);
       else expandedIds.add(id);
       saveState();
       renderTree();
       return;
+    } else {
+      const id = row.dataset.lakomicsLiveSelect;
+      if (!nodeById.has(id)) return;
+      selectedView = { type: "classification", classificationId: id };
+      selectedId = id;
+      expandAncestors(id);
+      saveState();
+      renderTree();
     }
-
-    const id = row.dataset.lakomicsLiveSelect;
-    if (!nodeById.has(id)) return;
-    selectedId = id;
-    expandAncestors(id);
-    saveState();
-    renderTree();
 
     if (matchMedia("(max-width:999px), (orientation:portrait)").matches) {
       document.querySelector("#app")?.classList.remove("assets-sidebar-open");

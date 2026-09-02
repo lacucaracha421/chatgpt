@@ -37,7 +37,8 @@ p {
 }
 
 input,
-button {
+button,
+.button-link {
   min-height: 38px;
   padding: 0 12px;
   color: inherit;
@@ -55,8 +56,30 @@ button {
   cursor: pointer;
 }
 
-button:hover {
+button:hover,
+.button-link:hover {
   background: #32323a;
+}
+
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  text-decoration: none;
+}
+
+.mobile-site-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.compact-status {
+  color: #b9d8ff;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 #connection-status {
