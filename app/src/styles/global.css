@@ -1658,6 +1658,48 @@ input:disabled {
   padding-top: var(--space-3);
 }
 
+.cloud-backfill {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.cloud-backfill__status {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.cloud-backfill__headline,
+.cloud-backfill__summary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+}
+
+.cloud-backfill__status progress {
+  width: 100%;
+}
+
+.cloud-backfill__status p,
+.cloud-backfill__summary {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.cloud-backfill__status .cloud-backfill__problem,
+.cloud-backfill__status .cloud-backfill__error {
+  color: var(--color-danger);
+}
+
+.cloud-backfill__actions {
+  flex-wrap: wrap;
+}
+
 .settings-view__safety,
 .settings-view__safety-confirm {
   display: grid;

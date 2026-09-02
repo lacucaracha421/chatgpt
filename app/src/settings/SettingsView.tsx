@@ -12,6 +12,7 @@ import { Select } from "../shared/ui/Select";
 import { Toast } from "../shared/ui/Toast";
 import { Toggle } from "../shared/ui/Toggle";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
+import { CloudBackfillSettings } from "./CloudBackfillSettings";
 
 type SettingsViewProps = {
   restoring: boolean;
@@ -803,6 +804,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             </div>
           </>
         )}
+        <CloudBackfillSettings />
         <h3 className="settings-view__group-title">온라인 카탈로그</h3>
         {catalogStatus && <dl className="settings-view__property">
           <dt>카탈로그 상태</dt>
