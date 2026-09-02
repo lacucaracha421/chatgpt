@@ -162,6 +162,19 @@
       const view = normalizeView(viewType === "recent" ? { type: "recent" } : { type: "classification", classificationId });
       return runtimeRequest("mobile-library:assets", { viewType: view.type, classificationId, cursor: cursor || undefined, limit, sort });
     },
+    requestVirtualView: async (view, limit) => {
+      // home: 최근 추가(전체 라이브러리 최신순) + 다시보기를 합성한다.
+      if (view.type === "revisit") {
+        const result = await runtimeRequest("mobile-library:revisit", { limit });
+        if (!result.ok) return result;
+        const items = (result.bundles || []).flatMap((bundle) => bundle.items || []);
+        return { ok: true, items, hasMore: false, nextCursor: null };
+      }
+      // home은 최근 추가 미리보기(작은 limit)를 그리드 아이템으로 사용한다.
+      const result = await runtimeRequest("mobile-library:assets", { viewType: "recent", limit: Math.min(limit, 12) });
+      if (!result.ok) return result;
+      return { ok: true, items: result.items || [], hasMore: false, nextCursor: null };
+    },
     requestTicket: ({ assetId, variant }) =>
       runtimeRequest("mobile-library:media-ticket", { assetId, variant }),
   });
@@ -176,14 +189,23 @@
 
   // --- 그리드 ---
   function selectedMobileView() {
-    if (document.querySelector('#treeScroll .tree-row.selected[data-lakomics-live-view="recent"]')) return { type: "recent" };
+    const viewRow = document.querySelector("#treeScroll .tree-row.selected[data-lakomics-live-view]");
+    if (viewRow) {
+      const requestedView = clean(viewRow.dataset.lakomicsLiveView, 40);
+      if (requestedView === "home") return { type: "home" };
+      if (requestedView === "revisit") return { type: "revisit" };
+      return { type: "recent" };
+    }
     const row = document.querySelector("#treeScroll .tree-row.selected[data-lakomics-live-select]");
     const classificationId = clean(row?.dataset?.lakomicsLiveSelect, 240);
     return classificationId ? { type: "classification", classificationId } : null;
   }
 
   function selectedName(view) {
-    if (normalizeView(view).type === "recent") return "최근 100개";
+    const type = normalizeView(view).type;
+    if (type === "recent") return "최근 100개";
+    if (type === "home") return "홈";
+    if (type === "revisit") return "다시보기";
     return clean(document.querySelector("#treeScroll .tree-row.selected[data-lakomics-live-select] .tree-name")?.textContent, 120) || "분류";
   }
 
@@ -281,10 +303,37 @@
     images.forEach((img) => thumbnailObserver.observe(img));
   }
 
+  function homeRailHtml(title, assets, { moreAction = "" } = {}) {
+    const tiles = assets.map((asset, index) => tileHtml(asset, index)).join("");
+    return `<section class="home-rail" aria-label="${escapeHtml(title)}">
+      <div class="home-rail__head"><h3>${escapeHtml(title)}</h3>${moreAction}</div>
+      <div class="home-rail__strip">${tiles}</div>
+    </section>`;
+  }
+
+  function renderHomeSections({ view }) {
+    const grid = document.querySelector("#assetGrid");
+    if (!grid) return;
+    const scope = store.getScope(view);
+    if (!scope || !scope.loadedFirstPage) return;
+    const items = scope.items;
+    // Home은 최근 추가(가상 최신순 미리보기) 단일 rail로 시작하고, 다시보기는
+    // 전용 뷰에서 제공한다. rail의 타일은 기존 그리드와 동일한 ticket 흐름을
+    // 쓰므로 뷰어/썸네일 인프라가 그대로 재사용된다.
+    const more = `<button class="home-rail__more" data-lakomics-live-view="recent">더 보기 ›</button>`;
+    grid.innerHTML = items.length
+      ? homeRailHtml("최근 추가", items.slice(0, 12), { moreAction: more })
+      : `<div class="lakomics-live-empty">커밋된 라이브러리 에셋이 아직 없습니다.</div>`;
+    observeThumbnails(grid, scope);
+    const total = document.querySelector("#assetTotal");
+    if (total) total.textContent = "";
+  }
+
   function renderGrid({ preserveScroll = false, view = viewTransition.visible() || activeView } = {}) {
     const grid = document.querySelector("#assetGrid");
     if (!grid) return;
     if (!view) return;
+    if (normalizeView(view).type === "home") return renderHome(view);
     const scope = store.getScope(view);
     if (!scope || !scope.loadedFirstPage) return;
 
@@ -303,6 +352,35 @@
       const label = `${visible.length.toLocaleString()}개 표시${scope.hasMore ? " (더 있음)" : ""}`;
       total.textContent = scope.loadedFirstPage ? label : total.textContent;
     }
+  }
+
+  let revisitFetchGeneration = 0;
+  async function renderHome(view) {
+    const grid = document.querySelector("#assetGrid");
+    if (!grid) return;
+    const generation = ++revisitFetchGeneration;
+    // 최근 추가 rail: store scope(가상 최신순 미리보기)를 사용한다.
+    const recentScope = store.getScope(view);
+    const recentItems = recentScope?.loadedFirstPage ? recentScope.items.slice(0, 12) : [];
+    // 다시보기 rail: 전용 엔드포인트 (독립 실패).
+    let revisitHtml = `<section class="home-rail" aria-label="다시보기"><div class="home-rail__head"><h3>다시보기</h3></div><div class="home-rail__strip"><div class="lakomics-live-loading">불러오는 중…</div></div></section>`;
+    const revisitResult = await runtimeRequest("mobile-library:revisit", { limit: 12 });
+    if (generation !== revisitFetchGeneration) return; // stale
+    let revisitError = "";
+    if (revisitResult.ok) {
+      const bundle = (revisitResult.bundles || [])[0];
+      const items = bundle?.items || [];
+      revisitHtml = items.length
+        ? homeRailHtml("다시보기", items, { moreAction: `<button class="home-rail__more" data-lakomics-live-view="revisit">더 보기 ›</button>` })
+        : `<section class="home-rail" aria-label="다시보기"><div class="home-rail__head"><h3>다시보기</h3></div><div class="home-rail__strip"><div class="lakomics-live-empty">표시할 다시보기가 없습니다.</div></div></section>`;
+    } else {
+      revisitHtml = `<section class="home-rail" aria-label="다시보기"><div class="home-rail__head"><h3>다시보기</h3></div><div class="home-rail__strip"><div class="lakomics-live-empty">불러오지 못했습니다 · <button data-home-revisit-retry>다시 시도</button></div></div></section>`;
+    }
+    const recentHtml = recentItems.length
+      ? homeRailHtml("최근 추가", recentItems, { moreAction: `<button class="home-rail__more" data-lakomics-live-view="recent">더 보기 ›</button>` })
+      : `<section class="home-rail" aria-label="최근 추가"><div class="home-rail__head"><h3>최근 추가</h3></div><div class="home-rail__strip"><div class="lakomics-live-empty">아직 에셋이 없습니다.</div></div></section>`;
+    grid.innerHTML = recentHtml + revisitHtml;
+    observeThumbnails(grid, store.getScope(view));
   }
 
   function scheduleRender(preserveScroll = false) {
@@ -339,9 +417,10 @@
   function syncSortControl(view) {
     const sortSelect = document.querySelector("#assetSort");
     if (!sortSelect) return;
-    const recent = normalizeView(view).type === "recent";
-    sortSelect.disabled = recent;
-    sortSelect.value = recent ? "newest" : activeSort;
+    const type = normalizeView(view).type;
+    const fixedOrder = type === "recent" || type === "home" || type === "revisit";
+    sortSelect.disabled = fixedOrder;
+    sortSelect.value = fixedOrder ? "newest" : activeSort;
   }
 
   function setTransitionStatus(message = "", error = false) {
@@ -374,6 +453,7 @@
       }
       if (!viewTransition.commit(request.token)) return;
       setTransitionStatus();
+      if (view.type === "home") return renderHome(view);
       renderGrid({ view });
       return;
     }
@@ -390,13 +470,16 @@
       }
       if (!viewTransition.commit(request.token)) return;
       setTransitionStatus();
+      if (view.type === "home") return renderHome(view);
       renderGrid({ view });
       return;
     }
     if (!viewTransition.commit(request.token)) return;
     setTransitionStatus();
+    if (view.type === "home") return renderHome(view);
     renderGrid({ view });
     const parent = document.querySelector("#assetGrid")?.parentElement;
+    if (parent) parent.scrollTop = 0;
     if (parent) parent.scrollTop = 0;
     window.scrollTo({ top: 0, behavior: "instant" });
   }
@@ -693,6 +776,12 @@
         const wrap = document.querySelector("#assetGrid")?.parentElement;
         if (wrap) store.saveScroll(view, wrap.scrollTop);
         showViewerAsset(view, viewerAssetId);
+        return;
+      }
+
+      const homeRetry = event.target.closest?.("[data-home-revisit-retry]");
+      if (homeRetry) {
+        if (activeView?.type === "home") renderHome(activeView);
         return;
       }
 

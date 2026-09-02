@@ -26,22 +26,30 @@ function normalizeView(view) {
   if (view?.type === "classification" && typeof view.classificationId === "string" && view.classificationId) {
     return { type: "classification", classificationId: view.classificationId };
   }
+  if (view?.type === "home") return { type: "home" };
+  if (view?.type === "revisit") return { type: "revisit" };
   return { type: "recent" };
 }
 
 function viewKey(view) {
   const normalized = normalizeView(view);
-  return normalized.type === "recent" ? "view:recent" : `classification:${normalized.classificationId}`;
+  if (normalized.type === "home") return "view:home";
+  if (normalized.type === "recent") return "view:recent";
+  if (normalized.type === "revisit") return "view:revisit";
+  return `classification:${normalized.classificationId}`;
 }
 
 function restoreMobileView(saved, validIds) {
   const valid = validIds instanceof Set ? validIds : new Set(validIds || []);
+  if (saved?.view?.type === "home") return { type: "home" };
   if (saved?.view?.type === "recent") return { type: "recent" };
+  if (saved?.view?.type === "revisit") return { type: "revisit" };
   if (saved?.view?.type === "classification" && valid.has(saved.view.classificationId)) {
     return { type: "classification", classificationId: saved.view.classificationId };
   }
   if (valid.has(saved?.selectedId)) return { type: "classification", classificationId: saved.selectedId };
-  return { type: "recent" };
+  // 유효한 저장 상태가 없으면 Home이 기본 뷰다.
+  return { type: "home" };
 }
 
 function createViewTransition(initialView = null) {
@@ -203,7 +211,7 @@ function mobileMetadata(asset = {}, classifications = []) {
   };
 }
 
-function createStore({ requestAssets, requestTicket } = {}) {
+function createStore({ requestAssets, requestVirtualView, requestTicket } = {}) {
   const scopes = new Map(); // viewKey → scope state
   const tickets = new Map(); // `${assetId}:${variant}` → {url, contentType, sizeBytes, expiresAt}
   let listeners = new Set();
@@ -257,7 +265,8 @@ function createStore({ requestAssets, requestTicket } = {}) {
   async function loadPage(view, { cursor = null, sort } = {}) {
     const normalizedView = normalizeView(view);
     const key = viewKey(normalizedView);
-    const recent = normalizedView.type === "recent";
+    const recent = normalizedView.type === "recent" || normalizedView.type === "home" || normalizedView.type === "revisit";
+    const virtualView = normalizedView.type === "home" || normalizedView.type === "revisit";
     const resolvedSort = recent ? "newest" : normalizeSort(sort || scopes.get(key)?.sort);
     const scope = scopeOf(normalizedView, resolvedSort);
     if (scope.loading) return { ok: false, code: "already_loading" };
@@ -271,13 +280,15 @@ function createStore({ requestAssets, requestTicket } = {}) {
     notify({ type: "loading", view: normalizedView, viewKey: key, classificationId: scope.classificationId, initial });
     let result;
     try {
-      result = await requestAssets({
-        viewType: normalizedView.type,
-        classificationId: scope.classificationId ?? undefined,
-        cursor: recent ? null : cursor,
-        limit: PAGE_SIZE,
-        sort: resolvedSort,
-      });
+      result = virtualView
+        ? await requestVirtualView(normalizedView, PAGE_SIZE)
+        : await requestAssets({
+            viewType: normalizedView.type,
+            classificationId: scope.classificationId ?? undefined,
+            cursor: recent ? null : cursor,
+            limit: PAGE_SIZE,
+            sort: resolvedSort,
+          });
     } catch (error) {
       result = { ok: false, code: error?.name === "AbortError" ? "timeout" : "request_failed" };
     }

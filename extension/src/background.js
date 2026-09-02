@@ -197,6 +197,8 @@
         return mobileLibraryAssets(message);
       case "mobile-library:media-ticket":
         return mobileLibraryMediaTicket(message);
+      case "mobile-library:revisit":
+        return mobileLibraryRevisit(message);
       case "saved-index:get":
         return savedXMediaIndex();
       case "pinned:get":
@@ -1699,6 +1701,38 @@
       originalAvailable: value?.original_available === true, thumbnailAvailable: value?.thumbnail_available === true,
     })).filter((value) => value.id);
     return { ok: true, items, hasMore: result.has_more === true, nextCursor: result.has_more === true && typeof result.next_cursor === "string" ? result.next_cursor.slice(0, 2000) : null };
+  }
+
+  async function mobileLibraryRevisit(message = {}) {
+    const requested = Number(message.limit);
+    const limit = Math.max(1, Math.min(50, Number.isFinite(requested) ? Math.round(requested) : 12));
+    const result = await collectorRequest(`/v1/library/revisit?limit=${limit}`);
+    if (!result.ok) return result;
+    const bundles = (Array.isArray(result.bundles) ? result.bundles : [])
+      .map((bundle) => ({
+        kind: String(bundle?.kind || "").slice(0, 40),
+        title: String(bundle?.title || "").slice(0, 120),
+        reason: String(bundle?.reason || "").slice(0, 200),
+        items: (Array.isArray(bundle?.items) ? bundle.items : []).map((value) => ({
+          id: String(value?.id || "").slice(0, 240), kind: String(value?.kind || "").slice(0, 20),
+          contentType: typeof value?.content_type === "string" ? value.content_type.slice(0, 120) : null,
+          sizeBytes: Number.isFinite(Number(value?.size_bytes)) ? Number(value.size_bytes) : null,
+          width: Number.isFinite(Number(value?.width)) ? Number(value.width) : null,
+          height: Number.isFinite(Number(value?.height)) ? Number(value.height) : null,
+          durationMs: Number.isFinite(Number(value?.duration_ms)) ? Number(value.duration_ms) : null,
+          collectedAt: typeof value?.collected_at === "string" ? value.collected_at : null,
+          committedAt: typeof value?.committed_at === "string" ? value.committed_at : null,
+          sourcePublishedAt: typeof value?.source_published_at === "string" ? value.source_published_at : null,
+          sourceUrl: typeof value?.source_url === "string" ? value.source_url.slice(0, 2000) : null,
+          creatorName: typeof value?.creator_name === "string" ? value.creator_name.slice(0, 200) : null,
+          creatorHandle: typeof value?.creator_handle === "string" ? value.creator_handle.slice(0, 200) : null,
+          importSource: typeof value?.import_source === "string" ? value.import_source.slice(0, 60) : null,
+          classificationIds: Array.isArray(value?.classification_ids) ? value.classification_ids.map((id) => String(id).slice(0, 240)).filter(Boolean).slice(0, 200) : [],
+          originalAvailable: value?.original_available === true, thumbnailAvailable: value?.thumbnail_available === true,
+        })).filter((value) => value.id),
+      }))
+      .filter((bundle) => bundle.kind && bundle.items.length > 0);
+    return { ok: true, bundles };
   }
 
   async function mobileLibraryMediaTicket(message = {}) {

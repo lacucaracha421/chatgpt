@@ -16,7 +16,7 @@
   let nodeById = new Map();
   let childrenByParent = new Map();
   let selectedId = null;
-  let selectedView = { type: "recent" };
+  let selectedView = { type: "home" };
   let expandedIds = new Set();
   let loadGeneration = 0;
   let frameWindow = null;
@@ -154,10 +154,20 @@
     const previousScrollTop = scroll.scrollTop;
     const rootEntries = roots();
     scroll.innerHTML = `<div class="tree-group-label">라이브러리</div>
+      <button class="tree-row ${selectedView.type === "home" ? "selected" : ""}" style="--depth:0" data-lakomics-live-view="home">
+        <span class="tree-toggle"></span>
+        <span class="tree-name">홈</span>
+        <span class="tree-count"></span>
+      </button>
       <button class="tree-row ${selectedView.type === "recent" ? "selected" : ""}" style="--depth:0" data-lakomics-live-view="recent">
         <span class="tree-toggle"></span>
         <span class="tree-name">최근 100개</span>
         <span class="tree-count">100</span>
+      </button>
+      <button class="tree-row ${selectedView.type === "revisit" ? "selected" : ""}" style="--depth:0" data-lakomics-live-view="revisit">
+        <span class="tree-toggle"></span>
+        <span class="tree-name">다시보기</span>
+        <span class="tree-count"></span>
       </button>
       <div class="tree-divider"></div>
       <div class="tree-group-label">분류</div>
@@ -288,7 +298,10 @@
     event.stopImmediatePropagation();
 
     if (viewRow) {
-      selectedView = { type: "recent" };
+      const requestedView = cleanString(viewRow.dataset.lakomicsLiveView, 40);
+      selectedView = requestedView === "home" ? { type: "home" }
+        : requestedView === "revisit" ? { type: "revisit" }
+        : { type: "recent" };
       selectedId = null;
       saveState();
       renderTree();

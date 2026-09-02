@@ -363,13 +363,61 @@ test("failed replacement keeps the old view and a retry can commit cleanly", () 
   assert.equal(transition.visible().classificationId, "B");
 });
 
-test("saved real classification wins, otherwise Mobile restores Recent", () => {
+test("saved views restore in priority order; fresh state defaults to Home", () => {
   setupStoreVm();
   const restore = globalThis.LakomicsMobileLibrary.restoreMobileView;
+  assert.equal(restore({ view: { type: "home" } }, new Set()).type, "home");
+  assert.equal(restore({ view: { type: "revisit" } }, new Set()).type, "revisit");
+  assert.equal(restore({ view: { type: "recent" } }, new Set()).type, "recent");
   assert.equal(restore({ selectedId: "c2" }, new Set(["c1", "c2"])).classificationId, "c2");
-  assert.equal(restore({ selectedId: "deleted" }, new Set(["c1", "c2"])).type, "recent");
-  assert.equal(restore({}, new Set(["c1", "c2"])).type, "recent");
-  assert.equal(restore({}, new Set()).type, "recent");
+  assert.equal(restore({ selectedId: "deleted" }, new Set(["c1", "c2"])).type, "home");
+  assert.equal(restore({}, new Set(["c1", "c2"])).type, "home");
+  assert.equal(restore({}, new Set()).type, "home");
+});
+
+test("home/revisit virtual views use requestVirtualView and never send classification ids", async () => {
+  setupStoreVm();
+  const { createStore } = globalThis.LakomicsMobileLibrary;
+  const calls = [];
+  const store = createStore({
+    requestAssets: ({ viewType, classificationId }) => {
+      calls.push({ viewType, classificationId });
+      return { ok: true, items: [], hasMore: false, nextCursor: null };
+    },
+    requestVirtualView: async (view) => {
+      calls.push({ virtual: view.type });
+      return { ok: true, items: [{ id: "h1" }], hasMore: false, nextCursor: null };
+    },
+    requestTicket: async () => ({ ok: false, code: "unused" }),
+  });
+  await store.loadFirstPage({ type: "home" });
+  await store.loadFirstPage({ type: "revisit" });
+  await store.loadFirstPage({ type: "classification", classificationId: "c1" });
+  assert.deepEqual(calls, [
+    { virtual: "home" },
+    { virtual: "revisit" },
+    { viewType: "classification", classificationId: "c1" },
+  ]);
+});
+
+test("home store scope is bounded: has_more stays false for virtual views", async () => {
+  setupStoreVm();
+  const { createStore } = globalThis.LakomicsMobileLibrary;
+  const store = createStore({
+    requestAssets: async () => ({ ok: true, items: [], hasMore: false, nextCursor: null }),
+    requestVirtualView: async () => ({
+      ok: true,
+      items: [{ id: "a" }, { id: "b" }],
+      // 서버가 실수로 has_more를 true로 보내도 가상 뷰는 페이지네이션하지 않는다.
+      hasMore: true,
+      nextCursor: "x",
+    }),
+    requestTicket: async () => ({ ok: false, code: "unused" }),
+  });
+  await store.loadFirstPage({ type: "home" });
+  const scope = store.getScope({ type: "home" });
+  assert.equal(scope.hasMore, false);
+  assert.equal(scope.items.length, 2);
 });
 
 test("viewer chrome starts hidden, toggles on taps, and auto-hides", () => {
@@ -618,4 +666,20 @@ test("mobile content scripts use runtime messaging instead of iframe postMessage
   assert.match(assetsSource, /chrome\.runtime\.sendMessage/);
   assert.doesNotMatch(bridgeSource, /frameRequest\(/);
   assert.doesNotMatch(assetsSource, /frameRequest\(/);
+});
+
+
+test("home, recent, revisit, and classifications use distinct store keys", () => {
+  setupStoreVm();
+  const { viewKey } = globalThis.LakomicsMobileLibrary;
+  assert.equal(viewKey({ type: "home" }), "view:home");
+  assert.equal(viewKey({ type: "recent" }), "view:recent");
+  assert.equal(viewKey({ type: "revisit" }), "view:revisit");
+  assert.equal(viewKey({ type: "classification", classificationId: "c1" }), "classification:c1");
+  assert.equal(new Set([
+    viewKey({ type: "home" }),
+    viewKey({ type: "recent" }),
+    viewKey({ type: "revisit" }),
+    viewKey({ type: "classification", classificationId: "c1" }),
+  ]).size, 4);
 });

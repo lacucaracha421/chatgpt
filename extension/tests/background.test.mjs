@@ -2026,3 +2026,16 @@ test("recent Mobile library request omits classification and stays newest at 100
   assert.equal(harness.fetchCalls[0].url, "http://100.76.119.29:32146/v1/library/assets?limit=100&sort=newest");
   assert.equal(harness.fetchCalls[0].url.includes("classification_id"), false);
 });
+
+
+test("mobile revisit runtime reads the server bundles contract", async () => {
+  const harness = createHarness({ collectorToken: "server-secret-token", collectorSettings: { enabled: true, baseUrl: "http://100.76.119.29:32146" } });
+  harness.queueJson({ bundles: [{ kind: "date", title: "과거의 이날", reason: "같은 시기", items: [{ id: "r1", kind: "image", content_type: "image/jpeg", classification_ids: ["c1"] }] }] });
+
+  const response = await harness.api.handleMessage({ type: "mobile-library:revisit", limit: 12 });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.bundles.length, 1);
+  assert.equal(response.bundles[0].items[0].id, "r1");
+  assert.equal(harness.fetchCalls[0].url, "http://100.76.119.29:32146/v1/library/revisit?limit=12");
+});
