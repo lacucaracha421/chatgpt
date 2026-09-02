@@ -95,6 +95,7 @@ class MobileLibraryApiTests(unittest.TestCase):
         *,
         kind: str = "image",
         collected_at: str = "2026-09-02T00:00:00.000Z",
+        creator: str | None = None,
     ):
         return self.client.post(
             "/v1/replication/prepare",
@@ -117,9 +118,15 @@ class MobileLibraryApiTests(unittest.TestCase):
         classification_ids: list[str] | None = None,
         collected_at: str = "2026-09-02T00:00:00.000Z",
         thumbnail: bool = True,
+        creator: str | None = None,
     ) -> None:
         self.assertEqual(
-            self.prepare_asset(asset_id, kind=kind, collected_at=collected_at).status_code,
+            self.prepare_asset(
+                asset_id,
+                kind=kind,
+                collected_at=collected_at,
+                creator=creator,
+            ).status_code,
             200,
         )
         content_type = "video/mp4" if kind == "video" else "image/png"
@@ -144,8 +151,8 @@ class MobileLibraryApiTests(unittest.TestCase):
                 "collected_at": collected_at,
                 "source_published_at": "2026-09-01T00:00:00.000Z",
                 "source_url": f"https://fixture.invalid/{asset_id}",
-                "creator_name": "Fixture Creator",
-                "creator_handle": "fixture",
+                "creator_name": creator or "Fixture Creator",
+                "creator_handle": creator or "fixture",
                 "import_source": "Direct",
                 "classification_ids": classification_ids or [CLASSIFICATION_ID],
             },
@@ -479,3 +486,91 @@ class MobileLibraryApiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MobileRevisitTests(MobileLibraryApiTests):
+    def test_revisit_date_bundle_uses_current_month_and_creator_threshold(self):
+        # date bundle: 이번 달(UTC) 수집 자산만. creator bundle: 같은
+        # creator_handle이 3개 이상인 그룹만 (PC creator_spotlight 임계값).
+        now_month = "09"
+        same_month = "41000000-0000-4000-8000-000000000001"
+        other_month = "41000000-0000-4000-8000-000000000002"
+        self.commit_asset(
+            same_month,
+            classification_ids=[CLASSIFICATION_ID],
+            collected_at=f"2026-{now_month}-10T00:00:00.000Z",
+        )
+        self.commit_asset(
+            other_month,
+            collected_at="2026-01-10T00:00:00.000Z",
+        )
+
+        response = self.client.get(
+            "/v1/library/revisit", headers=self.auth, params={"limit": 12}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        bundles = {bundle["kind"]: bundle for bundle in response.json()["bundles"]}
+        self.assertEqual(
+            {item["id"] for item in bundles["date"]["items"]}, {same_month}
+        )
+
+    def test_revisit_creator_bundle_requires_three_or_more_assets(self):
+        solo = "42000000-0000-4000-8000-000000000001"
+        trio = ["42000000-0000-4000-8000-000000000002",
+                "42000000-0000-4000-8000-000000000003",
+                "42000000-0000-4000-8000-000000000004"]
+        self.commit_asset(solo, creator="solo-creator")
+        for index, asset_id in enumerate(trio):
+            self.commit_asset(
+                asset_id,
+                collected_at=f"2026-08-{10 + index:02d}T00:00:00.000Z",
+                creator="team",
+            )
+
+        response = self.client.get(
+            "/v1/library/revisit", headers=self.auth, params={"limit": 12}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        bundles = {bundle["kind"]: bundle for bundle in response.json()["bundles"]}
+        creator_ids = {item["id"] for item in bundles["creator"]["items"]}
+        self.assertIn(trio[0], creator_ids)
+        self.assertNotIn(solo, creator_ids)
+
+    def test_revisit_deduplicates_assets_across_bundles_and_orders_deterministically(self):
+        first = "43000000-0000-4000-8000-000000000001"
+        second = "43000000-0000-4000-8000-000000000002"
+        for asset_id, day in ((first, 20), (second, 10)):
+            self.commit_asset(
+                asset_id,
+                collected_at=f"2026-09-{day:02d}T00:00:00.000Z",
+                creator="team",
+            )
+
+        response = self.client.get(
+            "/v1/library/revisit", headers=self.auth, params={"limit": 12}
+        )
+
+        raw_bundles = response.json()["bundles"]
+        by_kind = {bundle["kind"]: bundle for bundle in raw_bundles}
+        date_ids = [item["id"] for item in by_kind["date"]["items"]]
+        creator_ids = [item["id"] for item in by_kind["creator"]["items"]]
+        # date(최신 우선)가 먼저 오고 creator는 중복을 배제한다.
+        self.assertEqual(date_ids, [first, second])
+        self.assertEqual(creator_ids, [])
+        combined = date_ids + creator_ids
+        self.assertEqual(len(combined), len(set(combined)))
+
+    def test_revisit_rejects_oversized_limit_and_requires_authentication(self):
+        self.assertEqual(
+            self.client.get("/v1/library/revisit").status_code, 401
+        )
+        self.assertEqual(
+            self.client.get(
+                "/v1/library/revisit",
+                headers=self.auth,
+                params={"limit": 51},
+            ).status_code,
+            422,
+        )

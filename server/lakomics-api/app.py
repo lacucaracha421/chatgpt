@@ -1139,6 +1139,123 @@ def list_mobile_classification_assets(
     return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
 
 
+def mobile_asset_item(row) -> dict:
+    return {
+        "id": row["id"],
+        "kind": row["kind"],
+        "content_type": row["content_type"],
+        "size_bytes": row["size_bytes"],
+        "width": None,
+        "height": None,
+        "duration_ms": None,
+        "collected_at": row["collected_at"],
+        "committed_at": row["committed_at"],
+        "source_published_at": row["source_published_at"],
+        "source_url": row["source_url"],
+        "creator_name": row["creator_name"],
+        "creator_handle": row["creator_handle"],
+        "import_source": row["import_source"],
+        "committed": True,
+    }
+
+
+@app.get("/v1/library/revisit")
+def list_mobile_revisit(
+    authorization: str | None = Header(default=None),
+    limit: int = Query(default=12, ge=1, le=50),
+):
+    """Mobile Home 다시보기. PC revisit.rs의 묶음 유형 중 복제본에서 계산
+    가능한 두 가지를 PC 시맨틱 그대로 제공한다:
+
+    - date "과거의 이날": 현재 달(UTC)에 수집한 자산 (PC date_capsule의
+      'collected_at 월 일치' 규칙과 동일)
+    - creator "작가": 같은 작가(creator_handle)가 3개 이상인 그룹의 자산
+      (PC creator_spotlight 동일 임계값 >= 3)
+
+    rediscovery(다시 만난 자산)는 favorite/asset_activity가 PC 전용 상태라
+    복제본에 없어 제공하지 않는다. 묶음은 결정론적 순서(collected_at DESC,
+    id DESC)로 PC의 결정론을 보존하고, 중복 자산은 앞 묶음 우선으로 배제한다.
+    읽기 전용 엔드포인트다.
+    """
+    require_auth(authorization)
+    used: set[str] = set()
+    with get_db() as db:
+        date_bundle = db.execute(
+            """
+            SELECT asset.*, COALESCE(asset.collected_at, asset.created_at) AS mobile_sort_at
+            FROM assets AS asset
+            WHERE asset.committed = 1
+              AND COALESCE(asset.collected_at, asset.created_at, '')
+                  LIKE strftime('%Y-%m', 'now') || '%'
+            ORDER BY mobile_sort_at DESC, asset.id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        creator_bundle = db.execute(
+            """
+            SELECT asset.*, COALESCE(asset.collected_at, asset.created_at) AS mobile_sort_at
+            FROM assets AS asset
+            WHERE asset.committed = 1
+              AND asset.creator_handle IS NOT NULL
+              AND asset.creator_handle IN (
+                  SELECT creator_handle FROM assets
+                  WHERE committed = 1 AND creator_handle IS NOT NULL
+                  GROUP BY creator_handle HAVING COUNT(*) >= 3
+              )
+            ORDER BY mobile_sort_at DESC, asset.id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        ids = [row["id"] for row in date_bundle] + [
+            row["id"] for row in creator_bundle
+        ]
+        memberships: dict[str, list[str]] = {}
+        if ids:
+            placeholders = ",".join("?" for _ in ids)
+            for relation in db.execute(
+                f"""
+                SELECT asset_id, classification_id
+                FROM asset_classifications
+                WHERE asset_id IN ({placeholders})
+                ORDER BY asset_id, classification_id
+                """,
+                ids,
+            ).fetchall():
+                memberships.setdefault(relation["asset_id"], []).append(
+                    relation["classification_id"]
+                )
+
+    def serialize(rows) -> list[dict]:
+        items = []
+        for row in rows:
+            if row["id"] in used:
+                continue
+            used.add(row["id"])
+            item = mobile_asset_item(row)
+            item["classification_ids"] = memberships.get(row["id"], [])
+            items.append(item)
+        return items
+
+    return {
+        "bundles": [
+            {
+                "kind": "date",
+                "title": "과거의 이날",
+                "reason": "같은 시기에 수집한 자산",
+                "items": serialize(date_bundle),
+            },
+            {
+                "kind": "creator",
+                "title": "작가",
+                "reason": "최근 저장한 작가의 자산",
+                "items": serialize(creator_bundle),
+            },
+        ]
+    }
+
+
 @app.post("/v1/library/assets/{asset_id}/media-ticket")
 def create_mobile_media_ticket(
     asset_id: str,
