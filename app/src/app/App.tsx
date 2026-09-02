@@ -47,6 +47,7 @@ import { MangaViewer } from "../manga/MangaViewer";
 import { useDesktopInteractions } from "./useDesktopInteractions";
 import { useOnlineCatalogUpdate } from "./useOnlineCatalogUpdate";
 import { useCloudCaptureSync } from "./useCloudCaptureSync";
+import { useCloudBackfillSupervisor } from "./useCloudBackfillSupervisor";
 import { useReleaseWatchCheck } from "./useReleaseWatchCheck";
 import { BackNavigationProvider, useBackHandler, useBackRequest } from "../shared/navigation/BackNavigation";
 
@@ -106,6 +107,7 @@ function LibraryScreen({
 function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscribeExtensionIngest }: { libraryRoot: string; subscribeDrops: DropSubscriber; startAssetDrag: StartAssetDrag; subscribeExtensionIngest: ExtensionIngestListener }) {
   const { gateway } = useLibrary();
   useOnlineCatalogUpdate(gateway, libraryRoot);
+  useCloudBackfillSupervisor(gateway, libraryRoot);
   const [entries, setEntries] = useState<ClassificationEntry[]>([]);
   const [albums, setAlbums] = useState<AlbumEntry[]>([]);
   const [collections, setCollections] = useState<CollectionSummary[]>([]);

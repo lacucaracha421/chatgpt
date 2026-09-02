@@ -20,6 +20,75 @@ export type CatalogUpdateResult = {
   lastSuccessAt: string | null;
 };
 
+export type CloudBackfillPreflightAssetReport = {
+  assetId: string;
+  mediaKind: string;
+  originalExists: boolean;
+  originalSizeBytes: number | null;
+  contentType: string | null;
+  thumbnailAvailable: boolean;
+  thumbnailGeneratable: boolean;
+  ready: boolean;
+  alreadyReplicated: boolean;
+  originalMissingOrChanged: boolean;
+  problems: string[];
+  classificationIds: string[];
+  collectedAt: string | null;
+  sourcePublishedAt: string | null;
+  sourceUrl: string | null;
+  creatorName: string | null;
+  creatorHandle: string | null;
+  importSource: string | null;
+  recordedSizeBytes: number;
+  relativePath: string;
+  thumbnailRelativePath: string | null;
+};
+
+export type CloudBackfillPreflightReport = {
+  totalAssets: number;
+  readyAssets: number;
+  alreadyReplicated: number;
+  missingOriginals: number;
+  thumbnailWorkRequired: number;
+  problemAssets: number;
+  assets: CloudBackfillPreflightAssetReport[];
+};
+
+export type CloudBackfillSeedReport = {
+  seeded: number;
+  skippedReplicated: number;
+  skippedProblem: number;
+};
+
+export type CloudBackfillRunSummary = {
+  committed: number;
+  retryScheduled: number;
+  permanentFailures: number;
+};
+
+export type CloudBackfillProgress = {
+  controlState: CloudBackfillControlState;
+  totalAssets: number;
+  queued: number;
+  preparing: number;
+  uploading: number;
+  committing: number;
+  completed: number;
+  failed: number;
+  activeWorkers: number;
+  lastError: string | null;
+};
+
+export type CloudBackfillControlState = "idle" | "running" | "paused";
+
+export type CloudBackfillReconcileReport = {
+  requeued: number;
+};
+
+export type CloudBackfillRetryReport = {
+  retried: number;
+};
+
 export type CloudCaptureSyncResult = {
   attempted: number;
   acknowledged: number;
@@ -747,6 +816,13 @@ export interface LibraryGateway {
   deleteCloudApiToken(): Promise<CloudCredentialStatus>;
   testCloudCaptureConnection(): Promise<CloudCaptureConnectionStatus>;
   runDueCloudCaptureSync(): Promise<CloudCaptureSyncResult>;
+  cloudBackfillPreflight(): Promise<CloudBackfillPreflightReport>;
+  cloudBackfillSeed(): Promise<CloudBackfillSeedReport>;
+  cloudBackfillRunCycle(): Promise<CloudBackfillRunSummary>;
+  cloudBackfillProgress(): Promise<CloudBackfillProgress>;
+  cloudBackfillRetryFailed(): Promise<CloudBackfillRetryReport>;
+  cloudBackfillSetControlState?(state: CloudBackfillControlState): Promise<CloudBackfillControlState>;
+  cloudBackfillReconcile?(): Promise<CloudBackfillReconcileReport>;
   resolveOnlineCatalogWork(workId: number): Promise<ResolvedGallery>;
   getRemoteReadingProgress(provider: RemoteProvider, workId: string): Promise<RemoteReadingProgress | null>;
   saveRemoteReadingProgress(progress: RemoteReadingProgress): Promise<void>;

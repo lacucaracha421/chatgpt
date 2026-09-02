@@ -77,6 +77,13 @@ import type {
   ReleaseWatchStatus,
   RemoteReadingProgress,
   ResolvedGallery,
+  CloudBackfillPreflightReport,
+  CloudBackfillSeedReport,
+  CloudBackfillRunSummary,
+  CloudBackfillProgress,
+  CloudBackfillRetryReport,
+  CloudBackfillControlState,
+  CloudBackfillReconcileReport,
 } from "./types";
 
 export const libraryGateway: LibraryGateway = {
@@ -111,6 +118,20 @@ export const libraryGateway: LibraryGateway = {
     invoke<CloudCaptureConnectionStatus>("test_cloud_capture_connection"),
   runDueCloudCaptureSync: () =>
     invoke<CloudCaptureSyncResult>("run_due_cloud_capture_sync"),
+  cloudBackfillPreflight: () =>
+    invoke<CloudBackfillPreflightReport>("cloud_backfill_preflight"),
+  cloudBackfillSeed: () =>
+    invoke<CloudBackfillSeedReport>("cloud_backfill_seed"),
+  cloudBackfillRunCycle: () =>
+    invoke<CloudBackfillRunSummary>("cloud_backfill_run_cycle"),
+  cloudBackfillProgress: () =>
+    invoke<CloudBackfillProgress>("cloud_backfill_progress"),
+  cloudBackfillRetryFailed: () =>
+    invoke<CloudBackfillRetryReport>("cloud_backfill_retry_failed"),
+  cloudBackfillSetControlState: (state) =>
+    invoke<CloudBackfillControlState>("cloud_backfill_set_control_state", { state }),
+  cloudBackfillReconcile: () =>
+    invoke<CloudBackfillReconcileReport>("cloud_backfill_reconcile"),
   resolveOnlineCatalogWork: (workId) =>
     invoke<ResolvedGallery>("resolve_online_catalog_work", { workId }),
   getRemoteReadingProgress: (provider, workId) =>
