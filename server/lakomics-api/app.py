@@ -1,3 +1,5 @@
+import base64
+import binascii
 import json
 import os
 import sqlite3
@@ -6,11 +8,12 @@ import urllib.error as urllib_error
 import urllib.request as urllib_request
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import FastAPI, Header, HTTPException, Request, Response
+from botocore.exceptions import ClientError
+from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
 
@@ -53,6 +56,54 @@ class AssetCreate(BaseModel):
     sha256: str | None = None
 
 
+def startup_replication():
+    """CLOUD-006 배치 2: 전체 라이브러리 복제용 가산 스키마.
+
+    기존 captures/스냅샷 기능에 영향을 주지 않는다. 기존 assets 테이블은
+    그대로 두고 커밋 상태·모바일 메타데이터 컬럼을 추가하고, 분류 관계는
+    별도 테이블로 기록한다.
+    """
+    with get_db() as db:
+        columns = {row["name"] for row in db.execute("PRAGMA table_info(assets)")}
+        additions = {
+            "committed": "INTEGER NOT NULL DEFAULT 0 CHECK (committed IN (0, 1))",
+            "committed_at": "TEXT",
+            "collected_at": "TEXT",
+            "source_published_at": "TEXT",
+            "source_url": "TEXT",
+            "creator_name": "TEXT",
+            "creator_handle": "TEXT",
+            "import_source": "TEXT",
+        }
+        for column, definition in additions.items():
+            if column not in columns:
+                db.execute(f"ALTER TABLE assets ADD COLUMN {column} {definition}")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_assets_committed ON assets(committed)")
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS asset_classifications (
+                asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+                classification_id TEXT NOT NULL,
+                added_at TEXT NOT NULL,
+                PRIMARY KEY (asset_id, classification_id)
+            )
+            """
+        )
+        db.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_asset_classifications_classification
+            ON asset_classifications(classification_id, asset_id)
+            """
+        )
+        db.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_assets_mobile_order
+            ON assets(committed, COALESCE(collected_at, created_at) DESC, id DESC)
+            """
+        )
+        db.commit()
+
+
 @app.on_event("startup")
 def startup():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -74,6 +125,9 @@ def startup():
             """
         )
         db.commit()
+
+
+app.on_event("startup")(startup_replication)
 
 
 @app.get("/health")
@@ -99,6 +153,7 @@ def list_assets(
             """
             SELECT *
             FROM assets
+            WHERE committed = 1
             ORDER BY created_at DESC
             LIMIT ?
             """,
@@ -171,6 +226,19 @@ class PresignRequest(BaseModel):
     content_type: str = "application/octet-stream"
 
 
+def is_replication_object_key(object_key: str) -> bool:
+    parts = object_key.split("/")
+    if len(parts) != 3 or parts[0] != "library":
+        return False
+    asset_id, variant = parts[1:]
+    if variant not in ("original", "thumbnail"):
+        return False
+    try:
+        return str(uuid.UUID(asset_id)) == asset_id
+    except ValueError:
+        return False
+
+
 @app.post("/v1/uploads/presign")
 def create_upload_presign(
     request: PresignRequest,
@@ -186,7 +254,10 @@ def create_upload_presign(
         "backups/",
     )
 
-    if not request.object_key.startswith(allowed_prefixes):
+    if request.object_key.startswith("library/"):
+        if not is_replication_object_key(request.object_key):
+            raise HTTPException(status_code=400, detail="Invalid replication object key")
+    elif not request.object_key.startswith(allowed_prefixes):
         raise HTTPException(status_code=400, detail="Invalid object key prefix")
 
     if ".." in request.object_key or request.object_key.startswith("/"):
@@ -338,7 +409,7 @@ from capture_store import (
     delete_r2_object,
     fetch_media_to_r2,
 )
-from r2 import presign_get
+from r2 import R2_BUCKET, _s3, presign_get
 
 
 class CaptureCreate(BaseModel):
@@ -885,3 +956,413 @@ def get_saved_x_media_snapshot(
     if row is None:
         raise HTTPException(status_code=404, detail="No saved X media snapshot published yet")
     return json.loads(row["payload"])
+
+
+# --- CLOUD-006 Batch 4: replicated mobile library reads --------------------
+
+MOBILE_LIBRARY_DEFAULT_LIMIT = 50
+MOBILE_LIBRARY_MAX_LIMIT = 100
+MEDIA_TICKET_TTL_SECONDS = 300
+
+
+class MediaTicketRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    variant: Literal["thumbnail", "original"]
+
+
+def encode_mobile_cursor(sort_at: str, asset_id: str) -> str:
+    payload = json.dumps([sort_at, asset_id], separators=(",", ":")).encode()
+    return base64.urlsafe_b64encode(payload).rstrip(b"=").decode()
+
+
+def decode_mobile_cursor(cursor: str) -> tuple[str, str]:
+    try:
+        padding = "=" * (-len(cursor) % 4)
+        payload = json.loads(base64.b64decode(cursor + padding, altchars=b"-_", validate=True))
+    except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid cursor")
+    if (
+        not isinstance(payload, list)
+        or len(payload) != 2
+        or not all(isinstance(value, str) and value for value in payload)
+    ):
+        raise HTTPException(status_code=400, detail="Invalid cursor")
+    return payload[0], payload[1]
+
+
+@app.get("/v1/library/classifications")
+def list_mobile_classifications(
+    authorization: str | None = Header(default=None),
+):
+    require_auth(authorization)
+    with get_db() as db:
+        snapshot = db.execute(
+            "SELECT payload FROM classification_snapshots WHERE singleton = 1"
+        ).fetchone()
+        if snapshot is None:
+            raise HTTPException(status_code=404, detail="No classification snapshot published yet")
+        counts = {
+            row["classification_id"]: row["asset_count"]
+            for row in db.execute(
+                """
+                SELECT relationship.classification_id, COUNT(*) AS asset_count
+                FROM asset_classifications AS relationship
+                JOIN assets AS asset ON asset.id = relationship.asset_id
+                WHERE asset.committed = 1
+                GROUP BY relationship.classification_id
+                """
+            ).fetchall()
+        }
+
+    payload = json.loads(snapshot["payload"])
+    items = []
+    for sort_index, entry in enumerate(payload.get("entries", [])):
+        classification_id = entry.get("id")
+        if not isinstance(classification_id, str) or not classification_id:
+            continue
+        items.append(
+            {
+                "id": classification_id,
+                "kind": entry.get("kind"),
+                "name": entry.get("name"),
+                "parent_id": entry.get("parentId"),
+                "icon_key": entry.get("iconKey"),
+                "color_key": entry.get("colorKey"),
+                "sort_index": sort_index,
+                "asset_count": counts.get(classification_id, 0),
+            }
+        )
+    return {"items": items, "published_at": payload.get("published_at")}
+
+
+@app.get("/v1/library/assets")
+def list_mobile_classification_assets(
+    classification_id: str,
+    authorization: str | None = Header(default=None),
+    cursor: str | None = None,
+    limit: int = Query(
+        default=MOBILE_LIBRARY_DEFAULT_LIMIT,
+        ge=1,
+        le=MOBILE_LIBRARY_MAX_LIMIT,
+    ),
+):
+    require_auth(authorization)
+    params: list[object] = [classification_id]
+    cursor_clause = ""
+    if cursor is not None:
+        cursor_sort_at, cursor_asset_id = decode_mobile_cursor(cursor)
+        cursor_clause = """
+            AND (
+                COALESCE(asset.collected_at, asset.created_at) < ?
+                OR (
+                    COALESCE(asset.collected_at, asset.created_at) = ?
+                    AND asset.id < ?
+                )
+            )
+        """
+        params.extend([cursor_sort_at, cursor_sort_at, cursor_asset_id])
+    params.append(limit + 1)
+
+    with get_db() as db:
+        rows = db.execute(
+            f"""
+            SELECT asset.*,
+                   COALESCE(asset.collected_at, asset.created_at) AS mobile_sort_at
+            FROM assets AS asset
+            JOIN asset_classifications AS relationship
+              ON relationship.asset_id = asset.id
+            WHERE relationship.classification_id = ?
+              AND asset.committed = 1
+              {cursor_clause}
+            ORDER BY mobile_sort_at DESC, asset.id DESC
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+        has_more = len(rows) > limit
+        page_rows = rows[:limit]
+        memberships: dict[str, list[str]] = {row["id"]: [] for row in page_rows}
+        if page_rows:
+            placeholders = ",".join("?" for _ in page_rows)
+            for relation in db.execute(
+                f"""
+                SELECT asset_id, classification_id
+                FROM asset_classifications
+                WHERE asset_id IN ({placeholders})
+                ORDER BY asset_id, classification_id
+                """,
+                [row["id"] for row in page_rows],
+            ).fetchall():
+                memberships[relation["asset_id"]].append(relation["classification_id"])
+
+    items = [
+        {
+            "id": row["id"],
+            "kind": row["kind"],
+            "content_type": row["content_type"],
+            "size_bytes": row["size_bytes"],
+            "width": None,
+            "height": None,
+            "duration_ms": None,
+            "collected_at": row["collected_at"],
+            "committed_at": row["committed_at"],
+            "source_published_at": row["source_published_at"],
+            "source_url": row["source_url"],
+            "creator_name": row["creator_name"],
+            "creator_handle": row["creator_handle"],
+            "import_source": row["import_source"],
+            "classification_ids": memberships[row["id"]],
+            "original_available": bool(row["object_key"]),
+            "thumbnail_available": bool(row["thumbnail_key"]),
+            "committed": True,
+        }
+        for row in page_rows
+    ]
+    next_cursor = None
+    if has_more and page_rows:
+        last = page_rows[-1]
+        next_cursor = encode_mobile_cursor(last["mobile_sort_at"], last["id"])
+    return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
+
+
+@app.post("/v1/library/assets/{asset_id}/media-ticket")
+def create_mobile_media_ticket(
+    asset_id: str,
+    request: MediaTicketRequest,
+    authorization: str | None = Header(default=None),
+):
+    require_auth(authorization)
+    with get_db() as db:
+        asset = db.execute(
+            "SELECT * FROM assets WHERE id = ? AND committed = 1",
+            (asset_id,),
+        ).fetchone()
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Committed asset not found")
+
+    object_key = asset["object_key"] if request.variant == "original" else asset["thumbnail_key"]
+    if not object_key:
+        raise HTTPException(status_code=409, detail="Requested media variant is unavailable")
+    try:
+        metadata = _s3.head_object(Bucket=R2_BUCKET, Key=object_key)
+    except ClientError as exc:
+        code = str(exc.response.get("Error", {}).get("Code", ""))
+        if code in ("404", "NoSuchKey", "NotFound"):
+            raise HTTPException(status_code=409, detail="Requested media variant is unavailable")
+        raise HTTPException(status_code=502, detail="Media storage is unavailable")
+
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=MEDIA_TICKET_TTL_SECONDS)
+    return {
+        "url": presign_get(object_key, MEDIA_TICKET_TTL_SECONDS),
+        "expires_at": expires_at.isoformat(),
+        "expires_in": MEDIA_TICKET_TTL_SECONDS,
+        "variant": request.variant,
+        "content_type": metadata.get("ContentType") or asset["content_type"],
+        "size_bytes": metadata.get("ContentLength"),
+    }
+
+
+# --- CLOUD-006 full-library replication (PC -> VPS/R2) -----------------------
+# PC Lakomics 라이브러리가 원본이다. VPS/R2 사본은 읽기 전용 복제본이며 PC에서
+# 언제든 다시 만들 수 있어야 한다. prepare → 업로드(기존 presign 재사용) →
+# commit의 멱등 3단계로 자산 한 건을 복제한다. committed=1이 되기 전까지
+# 모바일 라이브러리 조회에 노출하지 않는다. captures 흐름과 무관하다.
+
+ALLOWED_KINDS = ("image", "gif", "video")
+
+
+class ReplicationVariant(BaseModel):
+    object_key: str
+    content_type: str
+    size_bytes: int = Field(ge=0)
+    sha256: str | None = None
+
+
+class ReplicationPrepare(BaseModel):
+    asset_id: str = Field(min_length=1, max_length=64)
+    kind: Literal["image", "gif", "video"]
+    content_type: str | None = None
+    size_bytes: int | None = Field(default=None, ge=0)
+    sha256: str | None = None
+    collected_at: str | None = None
+
+
+class ReplicationCommit(BaseModel):
+    asset_id: str = Field(min_length=1, max_length=64)
+    kind: Literal["image", "gif", "video"]
+    original: ReplicationVariant
+    thumbnail: ReplicationVariant
+    content_type: str
+    collected_at: str | None = None
+    source_published_at: str | None = None
+    source_url: str | None = None
+    creator_name: str | None = None
+    creator_handle: str | None = None
+    import_source: str | None = None
+    classification_ids: list[str] = Field(default_factory=list, max_length=200)
+
+
+def replication_variant_keys(asset_id: str) -> dict[str, str]:
+    """variant별 결정적 R2 object key. 재시도·재실행에도 동일한 키를 쓴다."""
+    return {
+        "original": f"library/{asset_id}/original",
+        "thumbnail": f"library/{asset_id}/thumbnail",
+    }
+
+
+def _replication_row(db: sqlite3.Connection, asset_id: str) -> sqlite3.Row | None:
+    return db.execute("SELECT * FROM assets WHERE id = ?", (asset_id,)).fetchone()
+
+
+@app.post("/v1/replication/prepare")
+def replication_prepare(
+    request: ReplicationPrepare,
+    authorization: str | None = Header(default=None),
+):
+    require_auth(authorization)
+    if request.kind not in ALLOWED_KINDS:
+        raise HTTPException(status_code=400, detail="Invalid media kind")
+    ts = now_iso()
+    keys = replication_variant_keys(request.asset_id)
+    with get_db() as db:
+        # 멱등: 같은 asset_id로 다시 prepare하면 상태를 보존하고 같은 키를
+        # 돌려준다. 이미 커밋된 자산이면 재업로드 없이 멱등 통과한다.
+        existing = _replication_row(db, request.asset_id)
+        if existing is None:
+            db.execute(
+                """
+                INSERT INTO assets (
+                    id, kind, object_key, content_type, size_bytes, sha256,
+                    collected_at, committed, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+                ON CONFLICT(id) DO NOTHING
+                """,
+                (
+                    request.asset_id,
+                    request.kind,
+                    keys["original"],
+                    request.content_type,
+                    request.size_bytes,
+                    request.sha256,
+                    request.collected_at,
+                    ts,
+                    ts,
+                ),
+            )
+            db.commit()
+            existing = _replication_row(db, request.asset_id)
+        elif existing["committed"] == 1:
+            return {
+                "asset_id": request.asset_id,
+                "already_committed": True,
+                "object_keys": keys,
+            }
+        if existing["object_key"] != keys["original"]:
+            raise HTTPException(
+                status_code=409,
+                detail="Asset id already bound to different object keys",
+            )
+    return {
+        "asset_id": request.asset_id,
+        "already_committed": False,
+        "object_keys": keys,
+    }
+
+
+@app.post("/v1/replication/commit")
+def replication_commit(
+    request: ReplicationCommit,
+    authorization: str | None = Header(default=None),
+):
+    require_auth(authorization)
+    if request.kind not in ALLOWED_KINDS:
+        raise HTTPException(status_code=400, detail="Invalid media kind")
+    ts = now_iso()
+    keys = replication_variant_keys(request.asset_id)
+    if (
+        request.original.object_key != keys["original"]
+        or request.thumbnail.object_key != keys["thumbnail"]
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Variant object keys do not match deterministic keys",
+        )
+    if request.thumbnail.size_bytes <= 0:
+        raise HTTPException(status_code=400, detail="Thumbnail variant required")
+
+    with get_db() as db:
+        db.execute("BEGIN")
+        row = _replication_row(db, request.asset_id)
+        if row is None:
+            db.execute("ROLLBACK")
+            raise HTTPException(
+                status_code=404,
+                detail="Asset was not prepared; call /v1/replication/prepare first",
+            )
+        db.execute(
+            """
+            INSERT INTO assets (
+                id, kind, object_key, thumbnail_key, content_type,
+                size_bytes, sha256, collected_at, source_published_at,
+                source_url, creator_name, creator_handle, import_source,
+                committed, committed_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                kind = excluded.kind,
+                object_key = excluded.object_key,
+                thumbnail_key = excluded.thumbnail_key,
+                content_type = excluded.content_type,
+                size_bytes = excluded.size_bytes,
+                sha256 = excluded.sha256,
+                collected_at = COALESCE(excluded.collected_at, assets.collected_at),
+                source_published_at = COALESCE(excluded.source_published_at, assets.source_published_at),
+                source_url = COALESCE(excluded.source_url, assets.source_url),
+                creator_name = COALESCE(excluded.creator_name, assets.creator_name),
+                creator_handle = COALESCE(excluded.creator_handle, assets.creator_handle),
+                import_source = COALESCE(excluded.import_source, assets.import_source),
+                committed = 1,
+                committed_at = excluded.committed_at,
+                updated_at = excluded.updated_at
+            """,
+            (
+                request.asset_id,
+                request.kind,
+                request.original.object_key,
+                request.thumbnail.object_key,
+                request.content_type,
+                request.original.size_bytes,
+                request.original.sha256,
+                request.collected_at,
+                request.source_published_at,
+                request.source_url,
+                request.creator_name,
+                request.creator_handle,
+                request.import_source,
+                ts,
+                ts,
+                ts,
+            ),
+        )
+        db.execute(
+            "DELETE FROM asset_classifications WHERE asset_id = ?",
+            (request.asset_id,),
+        )
+        for classification_id in sorted(set(request.classification_ids)):
+            db.execute(
+                """
+                INSERT INTO asset_classifications
+                    (asset_id, classification_id, added_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(asset_id, classification_id) DO NOTHING
+                """,
+                (request.asset_id, classification_id, ts),
+            )
+        db.commit()
+    return {
+        "ok": True,
+        "asset_id": request.asset_id,
+        "committed": True,
+        "committed_at": ts,
+        "object_keys": keys,
+    }

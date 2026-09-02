@@ -10,6 +10,8 @@ from __future__ import annotations
 import sys
 import types
 
+from botocore.exceptions import ClientError
+
 
 class FakeS3:
     def __init__(self) -> None:
@@ -30,6 +32,18 @@ class FakeS3:
         self.deleted.append(Key)
         self.objects.pop(Key, None)
 
+    def head_object(self, *, Bucket, Key):
+        if Key not in self.objects:
+            raise ClientError(
+                {"Error": {"Code": "NoSuchKey", "Message": "missing"}},
+                "HeadObject",
+            )
+        stored = self.objects[Key]
+        return {
+            "ContentLength": len(stored["body"]),
+            "ContentType": stored["content_type"],
+        }
+
 
 fake_s3 = FakeS3()
 fake_r2 = types.ModuleType("r2")
@@ -38,6 +52,11 @@ fake_r2.R2_BUCKET = "test-bucket"  # type: ignore[attr-defined]
 fake_r2.presign_get = (  # type: ignore[attr-defined]
     lambda object_key, expires_in=600: (
         f"https://r2.example.test/{object_key}?expires={expires_in}"
+    )
+)
+fake_r2.presign_put = (  # type: ignore[attr-defined]
+    lambda object_key, content_type, expires_in=600: (
+        f"https://r2.example.test/{object_key}?content_type={content_type}&expires={expires_in}"
     )
 )
 sys.modules.setdefault("r2", fake_r2)
