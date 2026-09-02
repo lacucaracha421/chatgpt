@@ -971,12 +971,12 @@ class MediaTicketRequest(BaseModel):
     variant: Literal["thumbnail", "original"]
 
 
-def encode_mobile_cursor(sort_at: str, asset_id: str) -> str:
-    payload = json.dumps([sort_at, asset_id], separators=(",", ":")).encode()
+def encode_mobile_cursor(sort: str, sort_at: str, asset_id: str) -> str:
+    payload = json.dumps([sort, sort_at, asset_id], separators=(",", ":")).encode()
     return base64.urlsafe_b64encode(payload).rstrip(b"=").decode()
 
 
-def decode_mobile_cursor(cursor: str) -> tuple[str, str]:
+def decode_mobile_cursor(cursor: str, expected_sort: str) -> tuple[str, str]:
     try:
         padding = "=" * (-len(cursor) % 4)
         payload = json.loads(base64.b64decode(cursor + padding, altchars=b"-_", validate=True))
@@ -984,11 +984,12 @@ def decode_mobile_cursor(cursor: str) -> tuple[str, str]:
         raise HTTPException(status_code=400, detail="Invalid cursor")
     if (
         not isinstance(payload, list)
-        or len(payload) != 2
+        or len(payload) != 3
         or not all(isinstance(value, str) and value for value in payload)
+        or payload[0] != expected_sort
     ):
         raise HTTPException(status_code=400, detail="Invalid cursor")
-    return payload[0], payload[1]
+    return payload[1], payload[2]
 
 
 @app.get("/v1/library/classifications")
@@ -1038,9 +1039,10 @@ def list_mobile_classifications(
 
 @app.get("/v1/library/assets")
 def list_mobile_classification_assets(
-    classification_id: str,
+    classification_id: str | None = None,
     authorization: str | None = Header(default=None),
     cursor: str | None = None,
+    sort: Literal["newest", "oldest"] = "newest",
     limit: int = Query(
         default=MOBILE_LIBRARY_DEFAULT_LIMIT,
         ge=1,
@@ -1048,16 +1050,29 @@ def list_mobile_classification_assets(
     ),
 ):
     require_auth(authorization)
-    params: list[object] = [classification_id]
+    comparison = "<" if sort == "newest" else ">"
+    direction = "DESC" if sort == "newest" else "ASC"
+    params: list[object] = []
+    classification_clause = ""
+    if classification_id is not None:
+        classification_clause = """
+            AND EXISTS (
+                SELECT 1
+                FROM asset_classifications AS relationship
+                WHERE relationship.asset_id = asset.id
+                  AND relationship.classification_id = ?
+            )
+        """
+        params.append(classification_id)
     cursor_clause = ""
     if cursor is not None:
-        cursor_sort_at, cursor_asset_id = decode_mobile_cursor(cursor)
-        cursor_clause = """
+        cursor_sort_at, cursor_asset_id = decode_mobile_cursor(cursor, sort)
+        cursor_clause = f"""
             AND (
-                COALESCE(asset.collected_at, asset.created_at) < ?
+                COALESCE(asset.collected_at, asset.created_at) {comparison} ?
                 OR (
                     COALESCE(asset.collected_at, asset.created_at) = ?
-                    AND asset.id < ?
+                    AND asset.id {comparison} ?
                 )
             )
         """
@@ -1070,12 +1085,10 @@ def list_mobile_classification_assets(
             SELECT asset.*,
                    COALESCE(asset.collected_at, asset.created_at) AS mobile_sort_at
             FROM assets AS asset
-            JOIN asset_classifications AS relationship
-              ON relationship.asset_id = asset.id
-            WHERE relationship.classification_id = ?
-              AND asset.committed = 1
+            WHERE asset.committed = 1
+              {classification_clause}
               {cursor_clause}
-            ORDER BY mobile_sort_at DESC, asset.id DESC
+            ORDER BY mobile_sort_at {direction}, asset.id {direction}
             LIMIT ?
             """,
             params,
@@ -1122,7 +1135,7 @@ def list_mobile_classification_assets(
     next_cursor = None
     if has_more and page_rows:
         last = page_rows[-1]
-        next_cursor = encode_mobile_cursor(last["mobile_sort_at"], last["id"])
+        next_cursor = encode_mobile_cursor(sort, last["mobile_sort_at"], last["id"])
     return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
 
 

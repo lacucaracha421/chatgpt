@@ -279,6 +279,50 @@ class MobileLibraryApiTests(unittest.TestCase):
         self.assertEqual(seen, expected)
         self.assertEqual(len(seen), len(set(seen)))
 
+    def test_oldest_sort_matches_pc_collected_order_across_cursor_pages(self):
+        expected = self.seed_pagination_assets()
+        seen: list[str] = []
+        cursor = None
+        while True:
+            params = {
+                "classification_id": CLASSIFICATION_ID,
+                "limit": 2,
+                "sort": "oldest",
+            }
+            if cursor:
+                params["cursor"] = cursor
+            response = self.client.get("/v1/library/assets", headers=self.auth, params=params)
+            self.assertEqual(response.status_code, 200)
+            page = response.json()
+            seen.extend(item["id"] for item in page["items"])
+            if not page["has_more"]:
+                break
+            cursor = page["next_cursor"]
+
+        self.assertEqual(seen, expected)
+        self.assertEqual(len(seen), len(set(seen)))
+
+    def test_cursor_cannot_be_reused_with_another_sort(self):
+        self.seed_pagination_assets()
+        first = self.client.get(
+            "/v1/library/assets",
+            headers=self.auth,
+            params={"classification_id": CLASSIFICATION_ID, "limit": 2, "sort": "newest"},
+        ).json()
+
+        response = self.client.get(
+            "/v1/library/assets",
+            headers=self.auth,
+            params={
+                "classification_id": CLASSIFICATION_ID,
+                "limit": 2,
+                "sort": "oldest",
+                "cursor": first["next_cursor"],
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+
     def test_asset_page_excludes_other_classification_and_incomplete_assets(self):
         expected = set(self.seed_pagination_assets())
 
@@ -291,6 +335,34 @@ class MobileLibraryApiTests(unittest.TestCase):
         self.assertEqual({item["id"] for item in response.json()["items"]}, expected)
         self.assertTrue(all(item["committed"] for item in response.json()["items"]))
         self.assertTrue(all(item["classification_ids"] == [CLASSIFICATION_ID] for item in response.json()["items"]))
+
+    def test_recent_assets_without_classification_are_global_newest_and_unique(self):
+        older = "31000000-0000-4000-8000-000000000001"
+        newer = "31000000-0000-4000-8000-000000000002"
+        incomplete = "31000000-0000-4000-8000-000000000003"
+        self.commit_asset(
+            older,
+            classification_ids=[CLASSIFICATION_ID, OTHER_CLASSIFICATION_ID],
+            collected_at="2026-09-01T00:00:00.000Z",
+        )
+        self.commit_asset(
+            newer,
+            classification_ids=[OTHER_CLASSIFICATION_ID],
+            collected_at="2026-09-02T00:00:00.000Z",
+        )
+        self.prepare_asset(incomplete, collected_at="2026-09-03T00:00:00.000Z")
+
+        response = self.client.get(
+            "/v1/library/assets",
+            headers=self.auth,
+            params={"sort": "newest", "limit": 100},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        items = response.json()["items"]
+        self.assertEqual([item["id"] for item in items], [newer, older])
+        self.assertEqual(len({item["id"] for item in items}), len(items))
+        self.assertEqual(items[1]["classification_ids"], [CLASSIFICATION_ID, OTHER_CLASSIFICATION_ID])
 
     def test_asset_summary_contains_mobile_metadata_without_media_urls(self):
         asset_id = "40000000-0000-4000-8000-000000000001"
@@ -326,8 +398,14 @@ class MobileLibraryApiTests(unittest.TestCase):
             headers=self.auth,
             params={"classification_id": CLASSIFICATION_ID, "cursor": "not-a-cursor"},
         )
+        invalid_sort = self.client.get(
+            "/v1/library/assets",
+            headers=self.auth,
+            params={"classification_id": CLASSIFICATION_ID, "sort": "creator"},
+        )
         self.assertEqual(too_large.status_code, 422)
         self.assertEqual(invalid_cursor.status_code, 400)
+        self.assertEqual(invalid_sort.status_code, 422)
 
     def test_read_routes_require_authentication(self):
         self.assertEqual(self.client.get("/v1/library/classifications").status_code, 401)
