@@ -11,6 +11,7 @@ mod collection_source;
 mod collection_volume;
 mod catalog_provider;
 pub(crate) mod credential;
+pub mod cloud_preflight;
 mod db;
 mod drag_out;
 pub mod error;
@@ -57,6 +58,7 @@ use lock::LibraryLease;
 use models::{LibrarySummary, MangaSeries, TrashPolicy};
 use rusqlite::{Connection, OptionalExtension};
 pub(crate) use work_artwork::MAX_WORK_ARTWORK_BYTES;
+pub(crate) use video_media::VideoProbe;
 
 #[derive(Debug, Clone, Copy)]
 pub enum MediaVariant {
@@ -180,6 +182,7 @@ impl Library {
         library.cleanup_resolving_similarity_reviews()?;
         library.requeue_interrupted_video_preparation()?;
         library.requeue_interrupted_cloud_sync()?;
+        library.suspend_running_cloud_backfill_on_open()?;
         library.cleanup_unreferenced_work_artwork()?;
         library.start_work_artwork_thumbnail_backfill();
         Ok(library)

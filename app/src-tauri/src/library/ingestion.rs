@@ -948,7 +948,7 @@ thread_local! {
 }
 
 #[cfg(test)]
-fn set_video_probe_hook(hook: impl Fn(&Path, &str) -> Result<VideoProbe, LibraryError> + 'static) {
+pub(crate) fn set_video_probe_hook(hook: impl Fn(&Path, &str) -> Result<VideoProbe, LibraryError> + 'static) {
     VIDEO_PROBE_HOOK.with(|video_probe_hook| {
         *video_probe_hook.borrow_mut() = Some(Box::new(hook));
     });
