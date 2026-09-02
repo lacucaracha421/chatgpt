@@ -352,3 +352,8 @@ test("mobile bootstraps the API frame and keeps the static shell interactive", (
   assert.match(mobileShellSource, /#viewerClose/);
   assert.match(mobilePageSource, /\["connected", "failed"\]/);
 });
+
+test("mobile page has explicit host access and exposes an injection probe", () => {
+  assert.ok(manifest.host_permissions.includes("https://lacucaracha421.github.io/*"));
+  assert.match(bridgeSource, /data-lakomics-extension-bridge/);
+});

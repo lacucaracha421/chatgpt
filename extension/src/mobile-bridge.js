@@ -9,6 +9,9 @@
     return;
   }
 
+  // DOM-visible probe: distinguishes content-script injection from API failures.
+  document.documentElement?.setAttribute("data-lakomics-extension-bridge", "loaded");
+
   let liveEntries = [];
   let nodeById = new Map();
   let childrenByParent = new Map();
