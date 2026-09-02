@@ -80,6 +80,9 @@
     return frameReadyPromise;
   }
 
+  // Bootstrap the privileged API frame immediately to avoid a circular startup wait.
+  void ensureFrame().catch(() => {});
+
   window.addEventListener("message", (event) => {
     if (!frame?.contentWindow || event.source !== frame.contentWindow) return;
     const data = event.data;

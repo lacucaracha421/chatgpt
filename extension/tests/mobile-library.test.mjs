@@ -340,3 +340,15 @@ function setupStoreVm() {
   vm.runInNewContext(storeSource, context, { filename: "mobile-library-store.js" });
   globalThis.LakomicsMobileLibrary = context.globalThis.LakomicsMobileLibrary;
 }
+const mobilePageSource = fs.readFileSync(new URL("../../mobile/index.html", import.meta.url), "utf8");
+const mobileShellSource = fs.readFileSync(new URL("../../mobile/mobile-shell.js", import.meta.url), "utf8");
+
+test("mobile bootstraps the API frame and keeps the static shell interactive", () => {
+  assert.match(assetsSource, /void ensureFrame\(\)\.catch\(\(\) => \{\}\);/);
+  assert.match(mobilePageSource, /mobile-shell\.js/);
+  assert.match(mobileShellSource, /\[data-nav\]/);
+  assert.match(mobileShellSource, /\[data-go\]/);
+  assert.match(mobileShellSource, /#categoryOpen/);
+  assert.match(mobileShellSource, /#viewerClose/);
+  assert.match(mobilePageSource, /\["connected", "failed"\]/);
+});

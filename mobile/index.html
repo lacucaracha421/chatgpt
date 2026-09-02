@@ -91,12 +91,14 @@
 
 <dialog class="viewer" id="viewer"><div class="viewer-top"><button class="viewer-close" id="viewerClose">×</button><div class="viewer-index" id="viewerIndex"></div></div><img class="viewer-media" id="viewerImage" alt=""/><div class="viewer-bottom"><div class="viewer-title" id="viewerTitle"></div><div class="viewer-meta" id="viewerMeta"></div></div></dialog>
 
+<script src="./mobile-shell.js"></script>
+
 <script>
   // 데모 데이터는 제거되었다. 실제 분류/에셋은 Lakomics 확장이
   // 배포된 Cloud Library API(mobile-bridge.js + mobile-assets.js)로 공급한다.
   // 확장 미설치 환경에서는 아래 안내를 표시한다.
   window.setTimeout(() => {
-    if (document.documentElement.dataset.lakomicsLiveClassifications !== "connected") {
+    if (!["connected", "failed"].includes(document.documentElement.dataset.lakomicsLiveClassifications)) {
       const banner = document.querySelector(".prototype-banner");
       if (banner && !banner.dataset.lakomicsNotice) {
         banner.dataset.lakomicsNotice = "1";
