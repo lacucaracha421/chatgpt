@@ -208,6 +208,29 @@ impl Library {
                     params![asset_id, classification_id],
                 )?;
             }
+            // 관계-only 변경도 복제본에 전파되어야 한다. 증분 복제는 커밋 시
+            // classification_ids를 다시 읽으므로, 다음 revision을 pending으로
+            // 만들면 원본 미디어 재업로드 없이 관계가 수렴한다.
+            let next_revision: i64 = transaction
+                .query_row(
+                    "SELECT COALESCE(MAX(revision), 0) + 1 FROM cloud_sync_queue
+                     WHERE entity_type = 'asset' AND entity_id = ?1
+                       AND operation = 'upsert'",
+                    [asset_id],
+                    |row| row.get(0),
+                )?;
+            transaction.execute(
+                "INSERT INTO cloud_sync_queue (
+                    id, entity_type, entity_id, operation, status, revision, updated_at
+                 ) VALUES (?1, 'asset', ?2, 'upsert', 'pending', ?3, ?4)
+                 ON CONFLICT(entity_type, entity_id, operation, revision) DO NOTHING",
+                params![
+                    uuid::Uuid::new_v4().to_string(),
+                    asset_id,
+                    next_revision,
+                    chrono::Utc::now().to_rfc3339()
+                ],
+            )?;
         }
         transaction.commit()?;
         Ok(())
@@ -220,7 +243,6 @@ impl Library {
         let connection = self.connection()?;
         classifications_for_asset(&connection, asset_id)
     }
-
     fn change_asset_classifications(
         &self,
         asset_ids: &[String],
@@ -1030,6 +1052,80 @@ mod tests {
                 .unwrap(),
             vec![fixture.parent_tag.clone()]
         );
+    }
+
+    #[test]
+    fn setting_a_classification_enqueues_incremental_replica_work() {
+        // Flow C 회귀: 관계-only 변경은 원본 재업로드 없이 복제본에 수렴해야
+        // 한다. 다음 revision의 pending 큐 row가 트랜잭션 안에서 만들어지는지
+        // 검증한다.
+        let mut fixture = ClassificationFixture::new();
+        insert_asset(&fixture.library, "asset-a");
+        fixture
+            .library
+            .set_asset_classification(SetAssetClassification {
+                asset_ids: vec!["asset-a".into()],
+                classification_id: Some(fixture.root.id.clone()),
+            })
+            .unwrap();
+
+        let connection = fixture.library.connection().unwrap();
+        let pending: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM cloud_sync_queue
+                 WHERE entity_type = 'asset' AND entity_id = 'asset-a'
+                   AND operation = 'upsert' AND status = 'pending'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(pending, 1);
+        let revisions: Vec<i64> = connection
+            .prepare(
+                "SELECT revision FROM cloud_sync_queue
+                 WHERE entity_type = 'asset' AND entity_id = 'asset-a'
+                   AND operation = 'upsert' AND status = 'pending'
+                 ORDER BY revision",
+            )
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(revisions, vec![1]);
+        drop(connection); // Library 단일 커넥션 잠금 해제 후 다음 mutation 진행
+
+        // unset(제거)도 증분 work를 만든다 (제거 전파) — revision이 또 올라간다.
+        fixture
+            .library
+            .set_asset_classification(SetAssetClassification {
+                asset_ids: vec!["asset-a".into()],
+                classification_id: None,
+            })
+            .unwrap();
+        let connection = fixture.library.connection().unwrap();
+        let pending_after: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM cloud_sync_queue
+                 WHERE entity_type = 'asset' AND entity_id = 'asset-a'
+                   AND operation = 'upsert' AND status = 'pending'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        // 워커가 없는 테스트 환경에서는 첫 pending(rev1)도 그대로 남아
+        // 있으므로 pending은 2개(rev 1,2)가 된다.
+        assert_eq!(pending_after, 2);
+        let max_revision: i64 = connection
+            .query_row(
+                "SELECT MAX(revision) FROM cloud_sync_queue
+                 WHERE entity_type = 'asset' AND entity_id = 'asset-a'
+                   AND operation = 'upsert' AND status = 'pending'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(max_revision, 2);
     }
 
     #[test]
