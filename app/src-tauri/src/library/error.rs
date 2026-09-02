@@ -58,6 +58,12 @@ pub enum LibraryError {
     CloudSourceUnavailable,
     #[error("동기화할 로컬 파일이 수집 당시 내용과 다릅니다")]
     CloudSourceChanged,
+    #[error("복제할 썸네일이 아직 준비되지 않았습니다")]
+    CloudThumbnailUnavailable,
+    #[error("복제 prepare 요청이 거부됐습니다: HTTP {0}")]
+    CloudReplicationPrepareRejected(u16),
+    #[error("복제 commit 요청이 거부됐습니다: HTTP {0}")]
+    CloudReplicationCommitRejected(u16),
     #[error("캡처 목록 조회가 거부됐습니다: HTTP {0}")]
     CloudCaptureListRejected(u16),
     #[error("캡처 다운로드 URL 발급이 거부됐습니다: HTTP {0}")]

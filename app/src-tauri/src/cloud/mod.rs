@@ -1,3 +1,6 @@
+pub(crate) mod backfill;
+#[cfg(test)]
+mod backfill_tests;
 #[cfg(test)]
 mod capture_tests;
 pub(crate) mod captures;

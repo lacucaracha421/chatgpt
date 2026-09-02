@@ -123,7 +123,7 @@ impl Library {
         self.cloud_sync_queue_item(&queue_id)
     }
 
-    fn open_validated_cloud_source(
+    pub(super) fn open_validated_cloud_source(
         &self,
         prepared: &PreparedAssetUpload,
     ) -> Result<std::fs::File, LibraryError> {
@@ -158,7 +158,7 @@ impl Library {
     }
 }
 
-fn content_type(media_kind: &str, relative_path: &str) -> Result<String, LibraryError> {
+pub(super) fn content_type(media_kind: &str, relative_path: &str) -> Result<String, LibraryError> {
     let extension = std::path::Path::new(relative_path)
         .extension()
         .and_then(|value| value.to_str())
@@ -177,7 +177,7 @@ fn content_type(media_kind: &str, relative_path: &str) -> Result<String, Library
     Ok(value.into())
 }
 
-fn hex_digest(bytes: &[u8]) -> String {
+pub(super) fn hex_digest(bytes: &[u8]) -> String {
     use std::fmt::Write;
 
     let mut value = String::with_capacity(bytes.len() * 2);
@@ -187,12 +187,14 @@ fn hex_digest(bytes: &[u8]) -> String {
     value
 }
 
-fn is_retryable_cloud_error(error: &LibraryError) -> bool {
+pub(super) fn is_retryable_cloud_error(error: &LibraryError) -> bool {
     match error {
         LibraryError::CloudRequestTimedOut | LibraryError::CloudRequestUnavailable => true,
         LibraryError::CloudPresignRejected(status)
         | LibraryError::CloudUploadRejected(status)
-        | LibraryError::CloudAssetRegistrationRejected(status) => {
+        | LibraryError::CloudAssetRegistrationRejected(status)
+        | LibraryError::CloudReplicationPrepareRejected(status)
+        | LibraryError::CloudReplicationCommitRejected(status) => {
             *status == 429 || (500..=599).contains(status)
         }
         _ => false,

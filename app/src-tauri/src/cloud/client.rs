@@ -235,6 +235,86 @@ impl CloudClient {
         Ok(())
     }
 
+    /// CLOUD-006 복제 prepare. 멱등: 같은 asset_id 재호출은 같은 키를 돌려준다.
+    pub(crate) fn replication_prepare(
+        &self,
+        request: super::models::ReplicationPrepareRequest<'_>,
+        token: &str,
+    ) -> Result<super::models::ReplicationPrepareResponse, LibraryError> {
+        let authorization = bearer(token)?;
+        let body = serde_json::to_vec(&request).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        let mut response = self
+            .agent
+            .post(self.endpoint("/v1/replication/prepare")?)
+            .header("Authorization", authorization)
+            .content_type("application/json")
+            .send(&body)
+            .map_err(|error| {
+                map_api_error(error, LibraryError::CloudReplicationPrepareRejected)
+            })?;
+        read_json(&mut response)
+    }
+
+    /// CLOUD-006 복제 commit. 원자적으로 메타데이터 + 분류 관계를 커밋한다.
+    pub(crate) fn commit_replication(
+        &self,
+        request: &super::models::ReplicationCommitRequest,
+        token: &str,
+    ) -> Result<(), LibraryError> {
+        let authorization = bearer(token)?;
+        let body = serde_json::to_vec(request).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        self.agent
+            .post(self.endpoint("/v1/replication/commit")?)
+            .header("Authorization", authorization)
+            .content_type("application/json")
+            .send(&body)
+            .map(|_| ())
+            .map_err(|error| {
+                map_api_error(error, LibraryError::CloudReplicationCommitRejected)
+            })
+    }
+
+    /// 복제 variant(썸네일 등) 업로드: presign → R2 PUT. 원본 업로드는
+    /// upload_asset이 담당하고, 이 메서드는 임의 variant 하나를 올린다.
+    pub(crate) fn upload_replication_variant(
+        &self,
+        object_key: &str,
+        content_type: &str,
+        bytes: Vec<u8>,
+        sha256: &str,
+        token: &str,
+    ) -> Result<(), LibraryError> {
+        let authorization = bearer(token)?;
+        let presign_body = serde_json::to_vec(&PresignUploadRequest {
+            object_key,
+            content_type,
+        })
+        .map_err(|_| LibraryError::InvalidCloudResponse)?;
+        let mut response = self
+            .agent
+            .post(self.endpoint("/v1/uploads/presign")?)
+            .header("Authorization", &authorization)
+            .content_type("application/json")
+            .send(&presign_body)
+            .map_err(map_presign_error)?;
+        let presign: PresignUploadResponse = read_json(&mut response)?;
+        validate_presign(&presign, object_key)?;
+
+        let mut request = self.agent.put(&presign.upload_url);
+        for (name, value) in &presign.required_headers {
+            let name = ureq::http::header::HeaderName::try_from(name.as_str())
+                .map_err(|_| LibraryError::InvalidCloudResponse)?;
+            let value = ureq::http::header::HeaderValue::try_from(value.as_str())
+                .map_err(|_| LibraryError::InvalidCloudResponse)?;
+            request = request.header(name, value);
+        }
+        request
+            .send(&bytes[..])
+            .map_err(map_upload_error)?;
+        let _ = sha256;
+        Ok(())
+    }
+
     fn endpoint(&self, path: &str) -> Result<String, LibraryError> {
         self.base_url
             .join(path)

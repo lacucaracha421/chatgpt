@@ -175,3 +175,47 @@ pub(crate) struct ClassificationSnapshotPublish<'a> {
 pub(crate) struct SavedXMediaSnapshotPublish<'a> {
     pub keys: &'a [String],
 }
+
+/// CLOUD-006 복제: 서버 prepare 요청. 멱등 — 같은 asset_id로 재호출해도
+/// 같은 object key를 돌려준다.
+#[derive(Debug, Serialize)]
+pub(crate) struct ReplicationPrepareRequest<'a> {
+    pub asset_id: &'a str,
+    pub kind: &'a str,
+    pub content_type: &'a str,
+    pub size_bytes: u64,
+    pub sha256: &'a str,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct ReplicationPrepareResponse {
+    pub asset_id: String,
+    pub already_committed: bool,
+    pub object_keys: BTreeMap<String, String>,
+}
+
+/// CLOUD-006 복제: 서버 commit 요청. 원본·썸네일 variant와 모바일 브라우징
+/// 메타데이터, 분류 관계를 한 번에 커밋한다.
+#[derive(Debug, Serialize)]
+pub(crate) struct ReplicationCommitRequest {
+    pub asset_id: String,
+    pub kind: String,
+    pub original: ReplicationVariantPayload,
+    pub thumbnail: ReplicationVariantPayload,
+    pub content_type: String,
+    pub collected_at: Option<String>,
+    pub source_published_at: Option<String>,
+    pub source_url: Option<String>,
+    pub creator_name: Option<String>,
+    pub creator_handle: Option<String>,
+    pub import_source: Option<String>,
+    pub classification_ids: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct ReplicationVariantPayload {
+    pub object_key: String,
+    pub content_type: String,
+    pub size_bytes: u64,
+    pub sha256: Option<String>,
+}

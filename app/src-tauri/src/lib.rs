@@ -4,6 +4,7 @@ mod cloud;
 mod commands;
 mod extension_api;
 pub mod library;
+pub use cloud::backfill::BackfillControlState;
 mod media_protocol;
 #[cfg(test)]
 mod catalog_source_tests;
@@ -170,6 +171,13 @@ pub fn run() {
             commands::delete_cloud_api_token,
             commands::test_cloud_capture_connection,
             commands::run_due_cloud_capture_sync,
+            commands::cloud_backfill_preflight,
+            commands::cloud_backfill_seed,
+            commands::cloud_backfill_run_cycle,
+            commands::cloud_backfill_progress,
+            commands::cloud_backfill_retry_failed,
+            commands::cloud_backfill_set_control_state,
+            commands::cloud_backfill_reconcile,
             commands::set_online_catalog_update_settings,
             commands::resolve_online_catalog_work,
             commands::list_unread_release_changes,

@@ -139,6 +139,9 @@ impl From<LibraryError> for CommandError {
             LibraryError::CloudObjectKeyConflict => "cloud_object_key_conflict",
             LibraryError::CloudSourceUnavailable => "cloud_source_unavailable",
             LibraryError::CloudSourceChanged => "cloud_source_changed",
+            LibraryError::CloudThumbnailUnavailable => "cloud_thumbnail_unavailable",
+            LibraryError::CloudReplicationPrepareRejected(_) => "cloud_replication_prepare_rejected",
+            LibraryError::CloudReplicationCommitRejected(_) => "cloud_replication_commit_rejected",
             LibraryError::CloudCaptureListRejected(_) => "cloud_capture_list_rejected",
             LibraryError::CloudCaptureTicketRejected(_) => "cloud_capture_ticket_rejected",
             LibraryError::CloudCaptureDownloadRejected(_) => "cloud_capture_download_rejected",
@@ -1570,6 +1573,89 @@ pub async fn test_cloud_capture_connection(
         .map_err(|_| background_task_error())?
         .map_err(CommandError::from)?;
     Ok(CloudCaptureConnectionStatus { pending_count })
+}
+
+// --- CLOUD-006 배치 3.5: 백필 수동 제어 커맨드 ------------------------------
+// 설정 UI 없이 제어된 수동 호출과 향후 UI 재사용을 위한 최소 표면.
+// 비즈니스 로직은 cloud/backfill.rs 구현을 그대로 위임한다.
+// 자동 시작은 없다: 앱 시작 시 백필을 임의로 구동하지 않는다.
+
+#[tauri::command]
+pub async fn cloud_backfill_preflight(
+    state: State<'_, AppState>,
+) -> Result<crate::library::cloud_preflight::PreflightReport, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.preflight_full_library())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn cloud_backfill_seed(
+    state: State<'_, AppState>,
+) -> Result<crate::cloud::backfill::BackfillSeedReport, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.seed_cloud_backfill_queue())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn cloud_backfill_run_cycle(
+    state: State<'_, AppState>,
+) -> Result<crate::cloud::backfill::BackfillRunSummary, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.run_cloud_backfill_cycle())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn cloud_backfill_progress(
+    state: State<'_, AppState>,
+) -> Result<crate::cloud::backfill::BackfillProgress, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.cloud_backfill_progress())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn cloud_backfill_retry_failed(
+    state: State<'_, AppState>,
+) -> Result<crate::cloud::backfill::BackfillRetryReport, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.retry_failed_cloud_backfill())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn cloud_backfill_set_control_state(
+    state: crate::cloud::backfill::BackfillControlState,
+    app_state: State<'_, AppState>,
+) -> Result<crate::cloud::backfill::BackfillControlState, CommandError> {
+    let library = current_required(app_state)?;
+    tauri::async_runtime::spawn_blocking(move || library.set_cloud_backfill_control_state(state))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn cloud_backfill_reconcile(
+    state: State<'_, AppState>,
+) -> Result<crate::cloud::backfill::BackfillReconcileReport, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.reconcile_cloud_backfill())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]

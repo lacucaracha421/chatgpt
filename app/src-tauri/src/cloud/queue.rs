@@ -55,7 +55,7 @@ impl Library {
         let changed = self.connection()?.execute(
             "UPDATE cloud_sync_queue
              SET status = 'synced', updated_at = ?2, synced_at = ?2, last_error = NULL
-             WHERE id = ?1 AND status = 'processing'",
+             WHERE id = ?1 AND status IN ('processing', 'preparing', 'uploading', 'committing')",
             params![id, now],
         )?;
         if changed == 1 {
@@ -76,7 +76,7 @@ impl Library {
             "UPDATE cloud_sync_queue
              SET status = 'pending', retry_count = retry_count + 1,
                  updated_at = ?2, synced_at = NULL, last_error = ?3
-             WHERE id = ?1 AND status = 'processing'",
+             WHERE id = ?1 AND status IN ('processing', 'preparing', 'uploading', 'committing')",
             params![id, now, last_error],
         )?;
         if changed == 1 {
@@ -97,7 +97,7 @@ impl Library {
             "UPDATE cloud_sync_queue
              SET status = 'failed', retry_count = retry_count + 1,
                  updated_at = ?2, synced_at = NULL, last_error = ?3
-             WHERE id = ?1 AND status = 'processing'",
+             WHERE id = ?1 AND status IN ('processing', 'preparing', 'uploading', 'committing')",
             params![id, now, last_error],
         )?;
         if changed == 1 {
@@ -113,7 +113,7 @@ impl Library {
             "UPDATE cloud_sync_queue
              SET status = 'pending', updated_at = ?1,
                  last_error = COALESCE(last_error, 'interrupted before completion')
-             WHERE status = 'processing'",
+             WHERE status IN ('processing', 'preparing', 'uploading', 'committing')",
             [now],
         )?;
         Ok(())

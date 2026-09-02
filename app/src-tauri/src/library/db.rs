@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 29;
+pub(crate) const SCHEMA_VERSION: i64 = 31;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -50,6 +50,10 @@ const REVISIT_SCHEMA: &str = include_str!("../../migrations/0027_revisit.sql");
 const CLOUD_SYNC_QUEUE_SCHEMA: &str = include_str!("../../migrations/0028_cloud_sync_queue.sql");
 const CLOUD_CAPTURE_IMPORTS_SCHEMA: &str =
     include_str!("../../migrations/0029_cloud_capture_imports.sql");
+const CLOUD_BACKFILL_QUEUE_SCHEMA: &str =
+    include_str!("../../migrations/0030_cloud_backfill_queue.sql");
+const CLOUD_BACKFILL_CONTROL_SCHEMA: &str =
+    include_str!("../../migrations/0031_cloud_backfill_control.sql");
 
 pub fn open_database(path: &Path) -> Result<Connection, LibraryError> {
     let connection = Connection::open(path)?;
@@ -65,7 +69,7 @@ pub fn initialize_database(path: &Path) -> Result<Connection, LibraryError> {
     let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
     match version {
         SCHEMA_VERSION => {}
-        version @ 0..=28 => {
+        version @ 0..=30 => {
             if version > 0 {
                 let root = path
                     .parent()
@@ -170,6 +174,12 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         }
         if version <= 28 {
             transaction.execute_batch(CLOUD_CAPTURE_IMPORTS_SCHEMA)?;
+        }
+        if version <= 29 {
+            transaction.execute_batch(CLOUD_BACKFILL_QUEUE_SCHEMA)?;
+        }
+        if version <= 30 {
+            transaction.execute_batch(CLOUD_BACKFILL_CONTROL_SCHEMA)?;
         }
         transaction.commit()?;
         Ok::<(), LibraryError>(())
