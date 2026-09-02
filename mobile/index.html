@@ -102,7 +102,10 @@
       const banner = document.querySelector(".prototype-banner");
       if (banner && !banner.dataset.lakomicsNotice) {
         banner.dataset.lakomicsNotice = "1";
-        banner.textContent = "Lakomics 확장이 연결되지 않았습니다. 태블릿의 확장(최신 버전)을 활성화하면 실제 라이브러리가 표시됩니다.";
+        const injected = document.documentElement.hasAttribute("data-lakomics-extension-bridge");
+        banner.textContent = injected
+          ? "Lakomics 확장 스크립트는 감지됐지만 클라우드 API 응답을 기다리는 중입니다."
+          : "Lakomics 확장이 이 사이트에 주입되지 않았습니다. 확장 설정에서 lacucaracha421.github.io 사이트 액세스를 허용해 주세요.";
       }
     }
   }, 3000);
