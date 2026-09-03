@@ -68,7 +68,7 @@ export function ClassificationAppearanceDialog({
         <fieldset className="classification-appearance__fieldset" disabled={saving}>
           <legend>아이콘</legend>
           <div className="classification-appearance__grid">
-            {CLASSIFICATION_ICONS.map(({ key, label, icon: Icon }) => (
+            {CLASSIFICATION_ICONS.map(({ key, label }) => (
               <label className="classification-appearance__choice" key={key} title={label}>
                 <input
                   type="radio"
@@ -78,7 +78,7 @@ export function ClassificationAppearanceDialog({
                   onChange={() => setIconKey(key)}
                   aria-label={label}
                 />
-                <Icon aria-hidden="true" />
+                <ClassificationIcon kind={entry.kind} iconKey={key} testId={false} />
               </label>
             ))}
           </div>
