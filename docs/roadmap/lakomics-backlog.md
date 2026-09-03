@@ -705,16 +705,24 @@ Status: `HOLD`
 ### LONG-002 — Media-type-specific collection presentation presets
 Status: `HOLD`
 
-Replace the current uniformly flat collection presentation with reusable presets by collection type.
+Replace the current uniformly flat collection presentation with reusable presets by collection type. The default design principle is **front-cover-first physical objects**: preserve the recognizability of the real front artwork, then add only enough depth/material/shadow to make it feel like a collectible object.
 
 Examples:
-- game: game box/package depth, lift, floor shadow, tilt
-- manga: book thickness, spine/page cues, subtle 3D tilt
-- movie: Blu-ray/DVD case or poster framing
-- AV: realistic DVD-case presentation
+- game: game box/package depth, restrained plastic-case cues, lift, floor shadow, subtle tilt
+- manga: thin book depth/page edge cues, but do not invent a fake illustrated spine when only front artwork exists
+- movie: Blu-ray/DVD case or poster framing with the front cover kept visually dominant
+- AV: realistic DVD-case presentation; when real front/spine/back artwork is available, map all three surfaces to the case
 
-Build this as `collectionType → presentation preset` rather than one-off CSS effects.
+Rendering / interaction direction:
+- Prefer lightweight DOM/CSS 3D (`perspective`, `transform-style: preserve-3d`, transforms) over Three.js/WebGL for ordinary collection grids.
+- In normal grids, keep objects nearly front-facing so cover recognition stays better than shelf/spine-only browsing; use a small static tilt/depth and a simple hover lift/straighten transition rather than continuous pointer tracking.
+- Do not require fabricated spine/back artwork. Missing surfaces should fall back to neutral material/page/plastic edges while the real front cover remains the main visual information.
+- Reserve richer interactive rotation for a focused/detail object instead of every visible tile, minimizing per-card animation and GPU-layer cost.
+- AV is the complete-data variant: front/spine/back cover sets can support horizontal drag/touch rotation with useful snap points around front, spine, and back views; vertical pitch should remain subtle.
+- Keep shadows outside the preserve-3d object when practical so shadow/filter effects do not flatten the 3D subtree.
+- Share one reusable physical-cover component/presentation contract across types, with optional surfaces and type-specific depth/material rather than separate one-off implementations.
 
+Build this as `collectionType → presentation preset` rather than one-off CSS effects. Keep LONG-004 shelf/display mode as an optional decorative view; the everyday collection browser should prioritize visible front covers over spine-only realism.
 
 ### LONG-003 — Private Vault for sensitive or bulky personal media
 Status: `HOLD`
