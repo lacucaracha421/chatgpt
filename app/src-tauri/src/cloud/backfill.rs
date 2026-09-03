@@ -135,7 +135,9 @@ impl Library {
     }
 
     pub fn reconcile_cloud_backfill(&self) -> Result<BackfillReconcileReport, LibraryError> {
-        let changed = self.connection()?.execute(
+        let connection = self.connection()?;
+        let now = chrono::Utc::now().to_rfc3339();
+        let interrupted = connection.execute(
             "UPDATE cloud_sync_queue
              SET status = 'pending', updated_at = ?1,
                  last_error = COALESCE(last_error, 'interrupted before completion')
@@ -143,9 +145,43 @@ impl Library {
                AND status IN ('preparing', 'uploading', 'committing')
                AND (NOT EXISTS (SELECT 1 FROM cloud_backfill_scope)
                     OR entity_id IN (SELECT asset_id FROM cloud_backfill_scope))",
-            [chrono::Utc::now().to_rfc3339()],
+            [&now],
         )? as u64;
-        Ok(BackfillReconcileReport { requeued: changed })
+        let thumbnail_waiting = connection.execute(
+            "UPDATE cloud_sync_queue
+             SET status = 'pending', updated_at = ?1, last_error = NULL
+             WHERE entity_type = 'asset' AND operation = 'upsert'
+               AND status = 'failed' AND last_error = ?2
+               AND EXISTS (
+                 SELECT 1 FROM assets
+                 WHERE assets.id = cloud_sync_queue.entity_id
+                   AND assets.thumbnail_relative_path IS NOT NULL
+               )
+               AND (NOT EXISTS (SELECT 1 FROM cloud_backfill_scope)
+                    OR entity_id IN (SELECT asset_id FROM cloud_backfill_scope))",
+            params![now, LibraryError::CloudThumbnailUnavailable.to_string()],
+        )? as u64;
+        Ok(BackfillReconcileReport {
+            requeued: interrupted + thumbnail_waiting,
+        })
+    }
+
+    pub(crate) fn requeue_cloud_asset_after_thumbnail_ready(
+        &self,
+        asset_id: &str,
+    ) -> Result<bool, LibraryError> {
+        let changed = self.connection()?.execute(
+            "UPDATE cloud_sync_queue
+             SET status = 'pending', updated_at = ?2, last_error = NULL
+             WHERE entity_type = 'asset' AND entity_id = ?1 AND operation = 'upsert'
+               AND status = 'failed' AND last_error = ?3",
+            params![
+                asset_id,
+                chrono::Utc::now().to_rfc3339(),
+                LibraryError::CloudThumbnailUnavailable.to_string()
+            ],
+        )?;
+        Ok(changed > 0)
     }
 
     /// 전체 라이브러리 자산을 백필 큐에 등록한다. 이미 synced인 자산은

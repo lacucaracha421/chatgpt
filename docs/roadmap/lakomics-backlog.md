@@ -468,6 +468,16 @@ Follow-ups:
 - Coordinate with `PERF-001` for thumbnail/preview generation, caching, WebP policy, and bandwidth optimization after correctness is established.
 - Coordinate with `CLOUD-UI-001` so backfill progress, last success, failures, and retry state are visible from normal settings UI.
 
+### CLOUD-007 — Recover video replica work that outruns poster preparation
+Status: `DONE`
+
+Runtime finding / resolution:
+- PC Core Polish Pass 1 runtime verification exposed a startup race where Cloud backfill could claim a newly ingested video before its poster thumbnail existed and classify `CloudThumbnailUnavailable` as a permanent failure.
+- Video preparation now requeues only that asset's failed thumbnail-wait replica row when the poster becomes ready; unrelated permanent failures remain untouched.
+- Startup backfill reconciliation also revives historical thumbnail-wait failures whose asset now has a prepared thumbnail, so rows already stranded by the race recover without rerunning a full backfill.
+- Explicit manual retry remains available as a fallback.
+- Regression coverage verifies both preparation-time recovery and restart reconciliation while preserving the existing independent-failure behavior.
+
 ### EXT-001 — Reorganize extension settings
 Status: `DONE`
 
