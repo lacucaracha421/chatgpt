@@ -296,6 +296,32 @@ Runtime verification:
 - Real Tauri drag-out/re-entry keeps the external import overlay hidden for Lakomics-owned assets while genuine external files still show the overlay and import normally.
 - The follow-up re-entry path also restores sidebar folder drop targets so a still-held native asset drag can be dropped back into a Lakomics folder.
 
+
+### UI-010 — Richer video previews in the Asset Repository
+Status: `TODO`
+
+Goal:
+- Make video assets readable at a glance more like image assets, without requiring the full viewer just to understand what a clip contains.
+
+Direction:
+- Keep an immediate poster/thumbnail, then add a lightweight hover-motion or scrub-preview experience where useful.
+- Prefer reusable preview derivatives or cached frames over repeatedly decoding full originals.
+- Coordinate with `PERF-001` for preview cache bounds, derivative reuse, CPU/memory cost, and disk growth.
+- Preserve the selection/drag behavior fixed under BUG-009; preview media must not steal ordinary tile pointer input.
+- Measure cold/warm preview latency before choosing a preview format or generation policy, and avoid destructive original-media transcoding.
+
+### BUG-012 — Asset Repository scrollbar/thumb jumps upward while scrolling
+Status: `TODO`
+
+Observed behavior:
+- While scrolling a large Asset Repository view, the scrollbar/thumb can suddenly jump noticeably upward, making the current position feel unstable even when the user is continuing in the same direction.
+
+Direction:
+- Reproduce in long real classifications and determine whether the actual viewport offset moves or only the scrollbar's virtual total-size/thumb mapping changes.
+- Inspect virtualizer estimate/measurement changes, asynchronous image/video sizing, preview activation, grid-column changes, and scroll-owner nesting.
+- Keep the existing virtualization model; fix the source of unstable measurement/scroll range rather than masking it with arbitrary clamps.
+- Verify stable scrollbar motion during long continuous scrolling, media loading, hover video preview, and resize without reintroducing stale rows or giant blank gaps.
+
 ## P2 — architecture / larger feature work
 
 ### CATALOG-001 — Move fragile k-hentai transport behind the Japanese VPS
@@ -364,6 +390,64 @@ Direction:
 - Use `reference/VCK-0.1.0-win-x64/resources/app/dist/search/query.js` and `dialects.js` as read-only behavioral references rather than copying bundled code blindly.
 - Keep provider transport concerns separate from query parsing.
 - Follow-up candidates after the core grammar is stable: favorite tags, always-excluded tags, and contextual autocomplete counts based on the current query.
+
+### MANGA-001 — Recover orphaned local manga into online catalog bookmarks
+Status: `TODO`
+
+Problem:
+- Local manga source files can disappear while `manga_series` metadata still survives in `library.sqlite` and metadata backups.
+- The current scanner hard-deletes DB rows for paths not seen under a valid manga root, so pointing Lakomics at a new/empty root before recovery can destroy the remaining metadata index.
+- Manga Browser loads cached series and then automatically starts a refresh scan whenever a manga root is configured.
+
+2026-09-03 read-only live-library audit:
+- The current DB still contains 243 `manga_series` rows even though the configured manga root no longer exists; no original series folders or `.lakomics-thumbs` survive.
+- 232 rows have a numeric `gallery_id`.
+- 226 / 232 `gallery_id` values match the current kHentai catalog `Works.Id` directly.
+- Of those 226 direct matches, 219 are active (`Expunged = 0`) and 7 are historical/expunged rows. Normal catalog browsing excludes expunged works, so those 7 must not be silently bookmarked into an invisible state.
+- Checking `CurrentGid`, `FirstGid`, and `ParentGid` adds no extra coverage for the six `gallery_id` values absent from the local catalog.
+- 6 rows have a `gallery_id` that is absent from the local catalog and 11 rows have no usable `gallery_id`, leaving 17 fallback cases.
+- The current kHentai bookmark table has 32 bookmarks; none of the 226 direct local matches are already bookmarked.
+- All inspected daily/manual/pre-migration metadata snapshots retain the same 243 total rows / 232 rows with `gallery_id`, so recovery can read backup snapshots without replacing the current DB.
+- No local cover thumbnails remain for this incident. Image/pHash matching is an optional future signal only when an image actually survives; it is not the primary recovery path here.
+
+Goal:
+- Convert orphaned local manga records into catalog bookmarks/links without requiring the lost originals or restoring an old database wholesale.
+- Keep the process non-destructive, explain every non-exact match, and retain enough mapping/audit state to rerun or undo the migration safely.
+
+Safety / preservation:
+- Read recovery candidates from the current `manga_series` table and, when needed, selected metadata backup snapshots in read-only mode. Never require a full DB restore just to recover manga metadata.
+- Add orphan-safe scan behavior before or together with this feature: missing series should become soft-orphaned, require explicit deletion, or trigger a large-deletion safety gate instead of being hard-deleted silently.
+- Do not require changing the current manga root or forcing a successful rescan before recovery.
+- Always provide a dry-run/preview before bookmark writes. Apply writes transactionally and idempotently.
+- Keep orphaned local metadata after bookmark conversion unless the user explicitly chooses a later archive/removal action.
+
+Matching tiers:
+1. Exact active identity: `gallery_id -> (provider=kHentai, Works.Id)` with `Expunged = 0`. Auto-match and make these bulk-selectable for bookmark creation.
+2. Exact historical identity: the ID exists but is expunged. Preserve it as a historical exact match, then search for an active replacement/edition using provider lineage plus metadata; otherwise require review. Do not silently create a bookmark that normal catalog browsing cannot show.
+3. ID absent from the local catalog: perform a narrow provider lookup/backfill by exact ID and/or targeted title/artist query through the existing Japanese VPS boundary. If found, import only the required candidate(s) rather than requiring a broad catalog rebuild.
+4. No usable ID: generate candidates from normalized title, artist tags, page count, and surviving `relative_path`/source text. Require multiple independent signals for automatic confidence; title similarity alone must never auto-confirm.
+- Empirical calibration from the 226 known local-to-catalog pairs: page count is exactly equal in 194 cases and within ±2 in 197; at least one local author matches a catalog `artist` tag in 192; raw title similarity has only about a 0.70 median because translations/formatting differ. Weight matching accordingly.
+- In the current 17 fallback cases, artist + page-count filtering produces a unique local-catalog candidate for only a small minority, so ambiguous rows must remain reviewable rather than being forced.
+- Persist provider-namespaced identity `(provider, work_id)` rather than assuming every future catalog uses the same numeric ID; stay compatible with later CATALOG-002 work.
+
+Review / apply UX:
+- Result buckets: `exact active`, `historical/expunged`, `high-confidence candidate`, `multiple candidates`, and `not found`.
+- For each candidate, show the surviving local title/author/page count/gallery ID beside the catalog title/artist/page count and the reasons for the match.
+- Bulk-apply only exact-active matches by default. Heuristic matches require explicit approval.
+- Reuse the existing catalog bookmark contract, but persist a recovery link/audit record (for example: local manga ID, source snapshot/current DB, provider, work ID, match method, confidence, created time) so the mapping is explainable and reversible.
+- Re-running the recovery must not duplicate bookmarks or links, and undo must only remove relationships/bookmarks created by this migration rather than pre-existing user bookmarks.
+
+Acceptance target:
+- Against the 2026-09-03 live-library checkpoint, dry-run classifies 219 active exact matches automatically, separates the 7 expunged exact matches, and leaves the 17 fallback rows for targeted lookup/review without mutating current data.
+- Applying the exact-active batch creates the missing bookmarks without duplicates and is safe to rerun.
+- Recovery works with no original manga files and no surviving cover thumbnails.
+- Backup snapshots are read without replacing `library.sqlite`.
+- A future manga-root change/rescan cannot silently purge orphan metadata that has not been recovered or explicitly discarded.
+
+Relationship to catalog work:
+- CATALOG-003 may improve fallback coverage by adding Japanese-language originals, but MANGA-001 should not wait for broad Japanese ingestion to recover the 219 exact active Korean-catalog matches.
+- Targeted remote fallback must reuse the CATALOG-001 Japanese VPS boundary rather than reintroducing fragile direct PC access to k-hentai.
+- CATALOG-004's future `id:` syntax can reuse the same identity lookup logic, but the recovery pipeline should not depend on the full query-language feature.
 
 ### UI-009 — VCK-inspired manga viewer parity improvements
 Status: `TODO`
@@ -561,6 +645,26 @@ Review and define:
 
 Design for 10,000+ assets without unnecessary stutter or uncontrolled disk growth. Prefer measured, reversible changes over a one-time bulk rewrite of the library.
 
+### PERF-003 — Collection artwork import and reuse fast path
+Status: `TODO`
+
+Observed behavior:
+- Opening or importing Collection artwork can take noticeably too long, including when the relevant artwork or source image already exists locally.
+- Game/movie Collection entry currently invokes local artwork import on each viewer open. Existing registered local artwork skips the expensive image-byte path, but the source directories are still enumerated, filtered, naturally sorted, and compared with DB state each time.
+- New Work artwork preparation fully decodes the image, writes a Collection-specific original, and generates a bounded WebP thumbnail; this is wasteful when the source is already a reusable Lakomics asset/derivative.
+
+Direction:
+- Instrument the path first: source-directory scan/sort, DB identity lookup, provider/network fetch, image decode, thumbnail encode, file writes, and UI refresh should have separate timings.
+- Add a cheap unchanged-source fast path so reopening an unchanged Collection does not rescan/sort all source artwork. Preserve an explicit refresh/rescan route and reliable change detection.
+- When artwork originates from an existing Lakomics asset, prefer referencing/reusing the existing asset and suitable thumbnail/preview derivative instead of copying the original and decoding/encoding another thumbnail without need.
+- For provider-managed IGDB/TMDB/MangaDex artwork, audit identity checks so unchanged provider image IDs can avoid redundant fetch/prepare work where safe.
+- Preserve provenance and Collection-specific selection/order semantics even when the underlying media/derivative is shared.
+
+Acceptance target:
+- Reopening an unchanged Collection should make artwork availability effectively immediate.
+- Reusing an existing Lakomics asset as artwork should not perform redundant full-image decode/copy/thumbnail generation unless a Collection-specific derivative is genuinely required.
+- Newly added or changed source artwork must still be detected predictably.
+
 ### PERF-002 — Preserve view state across navigation
 Status: `DONE`
 
@@ -653,26 +757,57 @@ Pending follow-up — memo only, do not implement yet:
 
 ## Long-term
 
-### LONG-001 — AV actor and title collection
+### LONG-001 — AV actor/title works and full package cover sets
 Status: `HOLD`
 
-- Actor profiles and associated title library.
-- Manage AV covers as collection media.
+- Treat an AV title as a work-level entity rather than only a loose video asset: title metadata, actors, label/series, cover set, sample images, and linked video(s) can belong to the same work.
+- Actor profiles should lead naturally to the associated title library and back again.
+- Where an authorized source provides front, spine, and back artwork, import them as one provenance-preserving cover set with explicit `front` / `spine` / `back` roles instead of three unrelated gallery images.
+- Keep graceful fallbacks: front-only works remain valid, while a complete cover set unlocks richer package presentation.
 - Provide a stronger physical-media presentation rather than plain flat cards.
-- DVD case presentation can include front/spine/back and interactive rotation.
+- The AV presentation preset should be able to map real front/spine/back artwork onto a DVD-style case with depth, shadow, and optional interactive rotation.
+- Later shelf/display views may use the real spine art for browsing while opening the full case for closer cover appreciation.
+- Keep metadata/cover importing separate from video acquisition; support only sources and media the user is authorized to store, and do not make DRM bypass part of the importer.
 
 ### LONG-002 — Media-type-specific collection presentation presets
 Status: `HOLD`
 
-Replace the current uniformly flat collection presentation with reusable presets by collection type.
+Replace the current uniformly flat collection presentation with reusable presets by collection type. The default design principle is **front-cover-first physical objects**: preserve the recognizability of the real front artwork, then add only enough depth/material/shadow to make it feel like a collectible object.
 
 Examples:
-- game: game box/package depth, lift, floor shadow, tilt
-- manga: book thickness, spine/page cues, subtle 3D tilt
-- movie: Blu-ray/DVD case or poster framing
-- AV: realistic DVD-case presentation
+- game: game box/package depth, restrained plastic-case cues, lift, floor shadow, subtle tilt
+- manga: thin book depth/page edge cues, but do not invent a fake illustrated spine when only front artwork exists
+- movie: Blu-ray/DVD case or poster framing with the front cover kept visually dominant
+- AV: realistic DVD-case presentation; when real front/spine/back artwork is available, map all three surfaces to the case
 
-Build this as `collectionType → presentation preset` rather than one-off CSS effects.
+Rendering / interaction direction:
+- Prefer lightweight DOM/CSS 3D (`perspective`, `transform-style: preserve-3d`, transforms) over Three.js/WebGL for ordinary collection grids.
+- In normal grids, keep objects nearly front-facing so cover recognition stays better than shelf/spine-only browsing; use a small static tilt/depth and a simple hover lift/straighten transition rather than continuous pointer tracking.
+- Do not require fabricated spine/back artwork. Missing surfaces should fall back to neutral material/page/plastic edges while the real front cover remains the main visual information.
+- Reserve richer interactive rotation for a focused/detail object instead of every visible tile, minimizing per-card animation and GPU-layer cost.
+- AV is the complete-data variant: front/spine/back cover sets can support horizontal drag/touch rotation with useful snap points around front, spine, and back views; vertical pitch should remain subtle.
+- Keep shadows outside the preserve-3d object when practical so shadow/filter effects do not flatten the 3D subtree.
+- Share one reusable physical-cover component/presentation contract across types, with optional surfaces and type-specific depth/material rather than separate one-off implementations.
+
+Build this as `collectionType → presentation preset` rather than one-off CSS effects. Keep LONG-004 shelf/display mode as an optional decorative view; the everyday collection browser should prioritize visible front covers over spine-only realism.
+
+### LONG-003 — Private Vault for sensitive or bulky personal media
+Status: `HOLD`
+
+Goal:
+- Provide a deliberately separate Lakomics library context for sensitive or large personal media that should not casually mix into the normal library experience.
+
+Storage / privacy direction:
+- Use a separate R2 bucket plus separate API/permission boundaries from the normal Lakomics replica; a folder prefix inside the normal bucket is not the preferred boundary.
+- Keep Vault media out of normal Home, Revisit, search, statistics, and ordinary Mobile surfaces unless the Vault context is explicitly unlocked.
+- Consider client-side authenticated encryption for originals, thumbnails/previews, and sensitive metadata, with the master secret kept in OS/Android secure storage rather than on the VPS/R2 side.
+- For large video, investigate independently authenticated chunks plus prefetch/local cache so seeking and streaming remain practical; measure the real overhead before locking the format.
+
+Capture / retention direction:
+- Unify X donut Vault saves, supported browser-site capture, and local-file import behind one Vault Capture pipeline instead of creating source-specific libraries.
+- Preserve source/provenance metadata while keeping source type (`x`, `web`, `local`, etc.) as metadata rather than a browsing silo.
+- Add a Vault Inbox / temporary-retention concept so newly collected media can be reviewed before becoming permanent; initially surface cleanup candidates rather than silently auto-deleting them.
+- The AV work/cover-set model from LONG-001 may live inside the Vault when desired, but AV presentation and Vault privacy are separate concerns and should not be hard-coupled.
 
 ### LONG-004 — Display / shelf mode
 Status: `HOLD`
@@ -723,6 +858,7 @@ Use these prefixes:
 - `CLOUD-UI-xxx`: cloud visibility/status UX
 - `CATALOG-xxx`: online catalog/provider work
 - `EXT-xxx`: browser extension work
+- `MANGA-xxx`: local manga indexing/recovery/migration work
 - `PERF-xxx`: performance/cache/state work
 - `OPS-xxx`: backup/migration/operational portability
 - `NOTE-xxx`: notes feature
@@ -743,16 +879,21 @@ CLOUD-006 is complete and no longer blocks the PC roadmap. Mobile Home/viewer/pr
 
 PC Core Polish Pass 1 runtime gate is complete: BUG-009, BUG-010, BUG-011, and UI-008 all passed real Tauri verification.
 
-1. PERF-001 Phase B — measured cache/media/runtime work: repeat decode, thumbnail/preview bounds, video derivative reuse, cold/warm navigation, and storage growth
-2. BUG-003 — historical X video drag-save blue native-selection artifact, if still reproducible
-3. UI-009 — VCK-inspired manga viewer parity improvements
-4. EXT-003 — same-X-post media grouping
-5. EXT-004 — adaptive/hidden secondary donut tags
-6. OPS-001 — backup/migration/settings portability
-7. CATALOG-003 — Japanese-language catalog ingestion/filter on the verified CATALOG-001 transport
-8. CATALOG-004 — advanced VCK-style catalog search syntax
-9. P3 feature expansion — NOTE-001 first, then STATS-001 / IDEA-001 according to actual use
+1. PERF-001 Phase B — measured cache/media/runtime work: repeat decode, thumbnail/preview bounds, video derivative reuse, cold/warm navigation, and storage growth; include the measurements needed to diagnose BUG-012 and choose UI-010 preview derivatives safely
+2. BUG-012 — stabilize Asset Repository scrollbar/thumb behavior during long virtualized scrolling
+3. UI-010 — richer image-like video previews without regressing selection/drag behavior or eagerly decoding full originals
+4. PERF-003 — make Collection artwork import/reopen and existing-asset reuse fast, avoiding redundant scans, copies, decodes, and thumbnail work
+5. MANGA-001 — preserve orphaned local manga metadata and migrate recoverable works into catalog bookmarks with exact-ID-first matching and review for the remainder
+6. BUG-003 — historical X video drag-save blue native-selection artifact, if still reproducible
+7. UI-009 — VCK-inspired manga viewer parity improvements
+8. EXT-003 — same-X-post media grouping
+9. EXT-004 — adaptive/hidden secondary donut tags
+10. OPS-001 — backup/migration/settings portability
+11. CATALOG-003 — Japanese-language catalog ingestion/filter on the verified CATALOG-001 transport
+12. CATALOG-004 — advanced VCK-style catalog search syntax
+13. P3 feature expansion — NOTE-001 first, then STATS-001 / IDEA-001 according to actual use
 
 Conditional work:
 - CLOUD-003 stays deferred unless real long-video Capture use reproduces the request-window race.
 - CATALOG-002 remains a later provider/coexistence strategy and should not block the current k-hentai/VCK catalog path.
+- LONG-001's AV work/full cover-set presentation and LONG-003's Private Vault are retained design directions; they should not interrupt the current PC polish sequence unless explicitly reprioritized.
