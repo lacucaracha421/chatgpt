@@ -4,6 +4,7 @@ mod backfill_tests;
 #[cfg(test)]
 mod capture_tests;
 pub(crate) mod captures;
+pub(crate) mod thumbnail_refresh;
 mod client;
 pub(crate) mod models;
 pub(crate) mod queue;

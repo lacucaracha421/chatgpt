@@ -12,6 +12,30 @@ const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 const SHORT_NETWORK_TIMEOUT: Duration = Duration::from_secs(30);
 const UPLOAD_BODY_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
+#[derive(serde::Serialize)]
+struct MediaTicketBatchRequest<'a> {
+    items: Vec<MediaTicketBatchItem<'a>>,
+}
+
+#[derive(serde::Serialize)]
+struct MediaTicketBatchItem<'a> {
+    asset_id: &'a str,
+    variant: &'static str,
+}
+
+#[derive(serde::Deserialize)]
+struct MediaTicketBatchResponse {
+    items: Vec<MediaTicketBatchResponseItem>,
+}
+
+#[derive(serde::Deserialize)]
+struct MediaTicketBatchResponseItem {
+    asset_id: String,
+    ok: bool,
+    size_bytes: Option<u64>,
+    error: Option<String>,
+}
+
 pub(crate) struct CloudClient {
     agent: ureq::Agent,
     base_url: url::Url,
@@ -313,6 +337,44 @@ impl CloudClient {
             .map_err(map_upload_error)?;
         let _ = sha256;
         Ok(())
+    }
+
+    pub(crate) fn thumbnail_remote_sizes(
+        &self,
+        asset_ids: &[String],
+        token: &str,
+    ) -> Result<Vec<(String, Result<u64, String>)>, LibraryError> {
+        if asset_ids.len() > 50 {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        let authorization = bearer(token)?;
+        let body = serde_json::to_vec(&MediaTicketBatchRequest {
+            items: asset_ids
+                .iter()
+                .map(|asset_id| MediaTicketBatchItem { asset_id, variant: "thumbnail" })
+                .collect(),
+        })
+        .map_err(|_| LibraryError::InvalidCloudResponse)?;
+        let mut response = self
+            .agent
+            .post(self.endpoint("/v1/library/media-tickets")?)
+            .header("Authorization", authorization)
+            .content_type("application/json")
+            .send(&body)
+            .map_err(|error| map_api_error(error, |_| LibraryError::InvalidCloudResponse))?;
+        let response: MediaTicketBatchResponse = read_json(&mut response)?;
+        Ok(response
+            .items
+            .into_iter()
+            .map(|item| {
+                let result = if item.ok {
+                    item.size_bytes.ok_or_else(|| "missing size_bytes".to_owned())
+                } else {
+                    Err(item.error.unwrap_or_else(|| "remote unavailable".to_owned()))
+                };
+                (item.asset_id, result)
+            })
+            .collect())
     }
 
     fn endpoint(&self, path: &str) -> Result<String, LibraryError> {

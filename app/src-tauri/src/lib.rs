@@ -5,6 +5,9 @@ mod commands;
 mod extension_api;
 pub mod library;
 pub use cloud::backfill::BackfillControlState;
+pub use cloud::thumbnail_refresh::{
+    refresh_cloud_thumbnails, CloudThumbnailRefreshOptions, CloudThumbnailRefreshReport,
+};
 mod media_protocol;
 #[cfg(test)]
 mod catalog_source_tests;
