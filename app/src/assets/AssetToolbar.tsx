@@ -1,4 +1,4 @@
-import { ArrowPathIcon, EyeSlashIcon, FolderIcon, InformationCircleIcon, PhotoIcon, RectangleGroupIcon, Squares2X2Icon, VideoCameraIcon } from "@heroicons/react/24/outline";
+import { ArrowPathIcon, ComputerDesktopIcon, DevicePhoneMobileIcon, EyeSlashIcon, FolderIcon, InformationCircleIcon, PhotoIcon, RectangleGroupIcon, RectangleStackIcon, Square2StackIcon, VideoCameraIcon } from "@heroicons/react/24/outline";
 import type { AlbumEntry, AssetAspectFilter, AssetMediaFilter, AssetSort, AssetView, ClassificationEntry, CollectionSummary } from "../library/types";
 import { Button } from "../shared/ui/Button";
 import { Menu } from "../shared/ui/Menu";
@@ -42,8 +42,9 @@ export function AssetToolbar({
   const filterable = rawView.kind === "classification" || rawView.kind === "unsorted" || rawView.kind === "album" || rawView.kind === "creator";
   const location = view.kind === "revisit" ? "다시보기" : view.kind === "creator" ? "작가" : view.kind === "collection" ? collections.find((entry) => entry.id === view.collectionId)?.name ?? "컬렉션" : view.kind === "unsorted" ? "미분류" : view.kind === "trash" ? "휴지통" : view.kind === "album" ? albums.find((entry) => entry.id === view.albumId)?.name ?? "앨범" : view.kind === "collections" ? "컬렉션" : classifications.find((entry) => entry.id === view.classificationId)?.name ?? "저장소";
 
-  const MediaFilterIcon = mediaFilter === "images" ? PhotoIcon : mediaFilter === "videos" ? VideoCameraIcon : Squares2X2Icon;
+  const MediaFilterIcon = mediaFilter === "images" ? PhotoIcon : mediaFilter === "videos" ? VideoCameraIcon : RectangleStackIcon;
   const mediaFilterLabel = mediaFilter === "images" ? "이미지" : mediaFilter === "videos" ? "영상" : "전체";
+  const AspectFilterIcon = aspectFilter === "square" ? Square2StackIcon : aspectFilter === "landscape" ? ComputerDesktopIcon : aspectFilter === "portrait" ? DevicePhoneMobileIcon : RectangleGroupIcon;
   const aspectFilterLabel = aspectFilter === "square" ? "정사각형" : aspectFilter === "landscape" ? "가로형" : aspectFilter === "portrait" ? "세로형" : "전체";
   const reshuffleAction = sort === "random"
     ? <Button size="sm" aria-label="다시 섞기" onClick={onReshuffle}><ArrowPathIcon aria-hidden="true" /><span>다시 섞기</span></Button>
@@ -61,15 +62,15 @@ export function AssetToolbar({
           <option value="favorites">좋아요순</option><option value="random">랜덤</option>
         </Select>}
         {filterable && <span className="asset-toolbar__filter-menu" data-active={mediaFilter !== "all"} title={`미디어 필터: ${mediaFilterLabel}`}><Menu label={`미디어 필터: ${mediaFilterLabel}`} trigger={<MediaFilterIcon aria-hidden="true" />} items={[
-          { id: "all", label: mediaFilter === "all" ? "✓ 전체" : "전체", onSelect: () => onMediaFilterChange("all") },
-          { id: "images", label: mediaFilter === "images" ? "✓ 이미지" : "이미지", onSelect: () => onMediaFilterChange("images") },
-          { id: "videos", label: mediaFilter === "videos" ? "✓ 영상" : "영상", onSelect: () => onMediaFilterChange("videos") },
+          { id: "all", label: "전체", icon: <RectangleStackIcon />, selected: mediaFilter === "all", onSelect: () => onMediaFilterChange("all") },
+          { id: "images", label: "이미지", icon: <PhotoIcon />, selected: mediaFilter === "images", onSelect: () => onMediaFilterChange("images") },
+          { id: "videos", label: "영상", icon: <VideoCameraIcon />, selected: mediaFilter === "videos", onSelect: () => onMediaFilterChange("videos") },
         ]} /></span>}
-        {filterable && <span className="asset-toolbar__filter-menu" data-active={aspectFilter !== "all"} title={`비율 필터: ${aspectFilterLabel}`}><Menu label={`비율 필터: ${aspectFilterLabel}`} trigger={<RectangleGroupIcon aria-hidden="true" />} items={[
-          { id: "all", label: aspectFilter === "all" ? "✓ 전체" : "전체", onSelect: () => onAspectFilterChange("all") },
-          { id: "square", label: aspectFilter === "square" ? "✓ 정사각형" : "정사각형", onSelect: () => onAspectFilterChange("square") },
-          { id: "landscape", label: aspectFilter === "landscape" ? "✓ 가로형" : "가로형", onSelect: () => onAspectFilterChange("landscape") },
-          { id: "portrait", label: aspectFilter === "portrait" ? "✓ 세로형" : "세로형", onSelect: () => onAspectFilterChange("portrait") },
+        {filterable && <span className="asset-toolbar__filter-menu" data-active={aspectFilter !== "all"} title={`비율 필터: ${aspectFilterLabel}`}><Menu label={`비율 필터: ${aspectFilterLabel}`} trigger={<AspectFilterIcon aria-hidden="true" />} items={[
+          { id: "all", label: "전체", icon: <RectangleGroupIcon />, selected: aspectFilter === "all", onSelect: () => onAspectFilterChange("all") },
+          { id: "square", label: "정사각형", icon: <Square2StackIcon />, selected: aspectFilter === "square", onSelect: () => onAspectFilterChange("square") },
+          { id: "landscape", label: "가로형", icon: <ComputerDesktopIcon />, selected: aspectFilter === "landscape", onSelect: () => onAspectFilterChange("landscape") },
+          { id: "portrait", label: "세로형", icon: <DevicePhoneMobileIcon />, selected: aspectFilter === "portrait", onSelect: () => onAspectFilterChange("portrait") },
         ]} /></span>}
       </div>
       <div className="asset-toolbar__group" aria-label="보기 설정">
