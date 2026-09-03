@@ -7,6 +7,7 @@ import time
 import urllib.error as urllib_error
 import urllib.request as urllib_request
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -992,6 +993,28 @@ def decode_mobile_cursor(cursor: str, expected_sort: str) -> tuple[str, str]:
     return payload[1], payload[2]
 
 
+def encode_revisit_date_cursor(rank: int, sort_at: str, asset_id: str) -> str:
+    payload = json.dumps(["revisit-date", str(rank), sort_at, asset_id], separators=(",", ":")).encode()
+    return base64.urlsafe_b64encode(payload).rstrip(b"=").decode()
+
+
+def decode_revisit_date_cursor(cursor: str) -> tuple[int, str, str]:
+    try:
+        padding = "=" * (-len(cursor) % 4)
+        payload = json.loads(base64.b64decode(cursor + padding, altchars=b"-_", validate=True))
+    except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid cursor")
+    if (
+        not isinstance(payload, list)
+        or len(payload) != 4
+        or payload[0] != "revisit-date"
+        or payload[1] not in {"0", "1", "2"}
+        or not all(isinstance(value, str) and value for value in payload[2:])
+    ):
+        raise HTTPException(status_code=400, detail="Invalid cursor")
+    return int(payload[1]), payload[2], payload[3]
+
+
 @app.get("/v1/library/classifications")
 def list_mobile_classifications(
     authorization: str | None = Header(default=None),
@@ -1139,7 +1162,152 @@ def list_mobile_classification_assets(
     return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
 
 
-def mobile_asset_item(row) -> dict:
+def _revisit_creator_exclusion_sql(alias: str = "asset") -> str:
+    return f"""
+          AND (
+            {alias}.creator_handle IS NULL OR {alias}.creator_handle = '' OR {alias}.creator_handle NOT IN (
+              SELECT eligible.creator_handle FROM assets AS eligible
+              WHERE eligible.committed = 1 AND eligible.creator_handle IS NOT NULL AND eligible.creator_handle != ''
+              GROUP BY eligible.creator_handle HAVING COUNT(*) >= 3
+                AND MIN(COALESCE(eligible.collected_at, eligible.created_at)) <= datetime('now', '-30 days')
+            )
+          )"""
+
+
+def _revisit_calendar_distance_sql(timestamp_sql: str, reference_sql: str = "'now'") -> str:
+    fixed_asset = f"julianday('2000-' || strftime('%m-%d', {timestamp_sql}))"
+    fixed_now = f"julianday('2000-' || strftime('%m-%d', {reference_sql}))"
+    delta = f"ABS({fixed_asset} - {fixed_now})"
+    # Year 2000 is leap-safe; circular distance makes Dec 31 and Jan 1 adjacent.
+    return f"MIN({delta}, 366 - {delta})"
+
+
+def _revisit_date_bundle(db, limit: int) -> list:
+    """과거의 이날 후보: 30일 이전 자산 중 오늘의 월/일 ±7일 근처 수집 자산.
+    부족하면 같은 달의 오래된 자산, 그래도 부족하면 결정론적 오래된 자산으로
+    확장한다(항상 30일 이전만 포함)."""
+    creator_exclusion = _revisit_creator_exclusion_sql("asset")
+    calendar_distance = _revisit_calendar_distance_sql("COALESCE(asset.collected_at, asset.created_at)")
+    rows = db.execute(
+        f"""
+        SELECT asset.*, COALESCE(asset.collected_at, asset.created_at) AS mobile_sort_at
+        FROM assets AS asset
+        WHERE asset.committed = 1
+          AND COALESCE(asset.collected_at, asset.created_at) <= datetime('now', '-30 days')
+          {creator_exclusion}
+          AND ({calendar_distance}) <= 7
+        ORDER BY mobile_sort_at DESC, asset.id DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    if len(rows) >= limit:
+        return rows
+    seen = {row["id"] for row in rows}
+    month_rows = db.execute(
+        f"""
+        SELECT asset.*, COALESCE(asset.collected_at, asset.created_at) AS mobile_sort_at
+        FROM assets AS asset
+        WHERE asset.committed = 1
+          AND COALESCE(asset.collected_at, asset.created_at) <= datetime('now', '-30 days')
+          {creator_exclusion}
+          AND strftime('%m', COALESCE(asset.collected_at, asset.created_at)) = strftime('%m', 'now')
+        ORDER BY mobile_sort_at DESC, asset.id DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    for row in month_rows:
+        if row["id"] not in seen:
+            rows.append(row)
+            seen.add(row["id"])
+            if len(rows) >= limit:
+                return rows
+    oldest_rows = db.execute(
+        f"""
+        SELECT asset.*, COALESCE(asset.collected_at, asset.created_at) AS mobile_sort_at
+        FROM assets AS asset
+        WHERE asset.committed = 1
+          AND COALESCE(asset.collected_at, asset.created_at) <= datetime('now', '-30 days')
+          {creator_exclusion}
+        ORDER BY mobile_sort_at ASC, asset.id ASC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    for row in oldest_rows:
+        if row["id"] not in seen:
+            rows.append(row)
+            seen.add(row["id"])
+            if len(rows) >= limit:
+                break
+    return rows[:limit]
+
+
+def _revisit_creator_groups(db, limit: int) -> list[dict]:
+    """작가 그룹 선택: 3개 이상 자산 + 30일 이전 자산 보유 작가를 결정론적으로
+    선택한다(최다 자산 작가와 가장 오래된 자산 보유 작가를 번갈아). 홈에는
+    최대 3그룹, 그룹당 4~6개 미리보기."""
+    creators = db.execute(
+        """
+        SELECT creator_handle,
+               COUNT(*) AS asset_count,
+               MIN(COALESCE(assets.collected_at, assets.created_at)) AS oldest_at,
+               MAX(COALESCE(assets.collected_at, assets.created_at)) AS newest_at
+        FROM assets
+        WHERE committed = 1
+          AND creator_handle IS NOT NULL
+          AND creator_handle != ''
+        GROUP BY creator_handle
+        HAVING COUNT(*) >= 3
+          AND MIN(COALESCE(assets.collected_at, assets.created_at)) <= datetime('now', '-30 days')
+        ORDER BY asset_count DESC, creator_handle ASC
+        LIMIT 12
+        """
+    ).fetchall()
+    if not creators:
+        return []
+    chosen = []
+    pool = [dict(row) for row in creators]
+    seen_handles: set[str] = set()
+    pick_by_count = True
+    while len(chosen) < 3 and pool:
+        if pick_by_count:
+            pool.sort(key=lambda row: (-(row["asset_count"] or 0), row["creator_handle"]))
+        else:
+            pool.sort(key=lambda row: (row["oldest_at"] or "", row["creator_handle"]))
+        candidate = pool.pop(0)
+        if candidate["creator_handle"] in seen_handles:
+            continue
+        seen_handles.add(candidate["creator_handle"])
+        chosen.append(candidate)
+        pick_by_count = not pick_by_count
+    groups = []
+    for creator in chosen[:3]:
+        rows = db.execute(
+            """
+            SELECT asset.*, COALESCE(asset.collected_at, asset.created_at) AS mobile_sort_at
+            FROM assets AS asset
+            WHERE asset.committed = 1
+              AND asset.creator_handle = ?
+            ORDER BY mobile_sort_at DESC, asset.id DESC
+            LIMIT ?
+            """,
+            (creator["creator_handle"], min(6, max(4, limit // 3))),
+        ).fetchall()
+        if len(rows) < 2:
+            continue
+        groups.append({
+            "creator_key": creator["creator_handle"],
+            "creator_name": rows[0]["creator_name"] or creator["creator_handle"],
+            "creator_handle": creator["creator_handle"],
+            "asset_count": creator["asset_count"],
+            "rows": rows,
+        })
+    return groups[:3]
+
+
+def mobile_asset_item(row, classification_ids: list[str] | None = None) -> dict:
     return {
         "id": row["id"],
         "kind": row["kind"],
@@ -1155,8 +1323,29 @@ def mobile_asset_item(row) -> dict:
         "creator_name": row["creator_name"],
         "creator_handle": row["creator_handle"],
         "import_source": row["import_source"],
+        "classification_ids": list(classification_ids or []),
+        "original_available": bool(row["object_key"]),
+        "thumbnail_available": bool(row["thumbnail_key"]),
         "committed": True,
     }
+
+
+def _mobile_memberships(db: sqlite3.Connection, rows) -> dict[str, list[str]]:
+    memberships: dict[str, list[str]] = {row["id"]: [] for row in rows}
+    if not rows:
+        return memberships
+    placeholders = ",".join("?" for _ in rows)
+    for relation in db.execute(
+        f"""
+        SELECT asset_id, classification_id
+        FROM asset_classifications
+        WHERE asset_id IN ({placeholders})
+        ORDER BY asset_id, classification_id
+        """,
+        [row["id"] for row in rows],
+    ).fetchall():
+        memberships[relation["asset_id"]].append(relation["classification_id"])
+    return memberships
 
 
 @app.get("/v1/library/revisit")
@@ -1165,52 +1354,26 @@ def list_mobile_revisit(
     limit: int = Query(default=12, ge=1, le=50),
 ):
     """Mobile Home 다시보기. PC revisit.rs의 묶음 유형 중 복제본에서 계산
-    가능한 두 가지를 PC 시맨틱 그대로 제공한다:
+    가능한 두 가지를 제공한다:
 
-    - date "과거의 이날": 현재 달(UTC)에 수집한 자산 (PC date_capsule의
-      'collected_at 월 일치' 규칙과 동일)
-    - creator "작가": 같은 작가(creator_handle)가 3개 이상인 그룹의 자산
-      (PC creator_spotlight 동일 임계값 >= 3)
+    - date "과거의 이날": 30일 이상 지난 자산 중 오늘의 월/일 ±7일 근처 수집
+      자산(PC rediscovery 지향). 부족하면 같은 달의 오래된 자산, 그래도
+      부족하면 결정론적 오래된 자산으로 확장한다.
+    - creator "다시 만난 작가": 같은 작가(creator_handle)가 3개 이상인 그룹을
+      그룹 단위로 돌려준다(flat 목록 아님). 홈에서는 작가별 rail로 렌더링된다.
 
     rediscovery(다시 만난 자산)는 favorite/asset_activity가 PC 전용 상태라
-    복제본에 없어 제공하지 않는다. 묶음은 결정론적 순서(collected_at DESC,
-    id DESC)로 PC의 결정론을 보존하고, 중복 자산은 앞 묶음 우선으로 배제한다.
-    읽기 전용 엔드포인트다.
+    복제본에 없어 제공하지 않는다. 정렬은 결정론적(collected_at DESC,
+    id DESC)이며 랜덤 SQL 정렬은 없다. 읽기 전용 엔드포인트다.
     """
     require_auth(authorization)
-    used: set[str] = set()
     with get_db() as db:
-        date_bundle = db.execute(
-            """
-            SELECT asset.*, COALESCE(asset.collected_at, asset.created_at) AS mobile_sort_at
-            FROM assets AS asset
-            WHERE asset.committed = 1
-              AND COALESCE(asset.collected_at, asset.created_at, '')
-                  LIKE strftime('%Y-%m', 'now') || '%'
-            ORDER BY mobile_sort_at DESC, asset.id DESC
-            LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
-        creator_bundle = db.execute(
-            """
-            SELECT asset.*, COALESCE(asset.collected_at, asset.created_at) AS mobile_sort_at
-            FROM assets AS asset
-            WHERE asset.committed = 1
-              AND asset.creator_handle IS NOT NULL
-              AND asset.creator_handle IN (
-                  SELECT creator_handle FROM assets
-                  WHERE committed = 1 AND creator_handle IS NOT NULL
-                  GROUP BY creator_handle HAVING COUNT(*) >= 3
-              )
-            ORDER BY mobile_sort_at DESC, asset.id DESC
-            LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
-        ids = [row["id"] for row in date_bundle] + [
-            row["id"] for row in creator_bundle
-        ]
+        date_bundle = _revisit_date_bundle(db, limit)
+        creator_groups = _revisit_creator_groups(db, limit)
+
+        ids = [row["id"] for row in date_bundle]
+        for group in creator_groups:
+            ids.extend(row["id"] for row in group["rows"])
         memberships: dict[str, list[str]] = {}
         if ids:
             placeholders = ",".join("?" for _ in ids)
@@ -1227,33 +1390,160 @@ def list_mobile_revisit(
                     relation["classification_id"]
                 )
 
+    used: set[str] = set()
+
     def serialize(rows) -> list[dict]:
         items = []
         for row in rows:
             if row["id"] in used:
                 continue
             used.add(row["id"])
-            item = mobile_asset_item(row)
-            item["classification_ids"] = memberships.get(row["id"], [])
+            item = mobile_asset_item(row, memberships.get(row["id"], []))
             items.append(item)
         return items
+
+    groups = []
+    for group in creator_groups:
+        items = serialize(group["rows"])
+        if not items:
+            continue
+        groups.append({
+            "creator_key": group["creator_key"],
+            "creator_name": group["creator_name"],
+            "creator_handle": group["creator_handle"],
+            "asset_count": group["asset_count"],
+            "items": items,
+        })
 
     return {
         "bundles": [
             {
                 "kind": "date",
                 "title": "과거의 이날",
-                "reason": "같은 시기에 수집한 자산",
+                "reason": "예전에 이맘때 저장한 자산",
                 "items": serialize(date_bundle),
             },
             {
                 "kind": "creator",
-                "title": "작가",
-                "reason": "최근 저장한 작가의 자산",
-                "items": serialize(creator_bundle),
+                "title": "다시 만난 작가",
+                "reason": "예전에 저장한 작가의 작품",
+                "groups": groups,
             },
         ]
     }
+
+
+@app.get("/v1/library/revisit/date")
+def list_mobile_revisit_date(
+    authorization: str | None = Header(default=None),
+    cursor: str | None = None,
+    limit: int = Query(default=50, ge=1, le=100),
+):
+    """과거의 이날 전체 결과. Home preview와 같은 우선순위(±7일, 같은 달,
+    그 외 오래된 자산)를 유지하면서 rank+timestamp+id 커서로 페이지네이션한다."""
+    require_auth(authorization)
+    timestamp_sql = "COALESCE(asset.collected_at, asset.created_at)"
+    calendar_distance = _revisit_calendar_distance_sql(timestamp_sql)
+    creator_exclusion = _revisit_creator_exclusion_sql("asset")
+    rank_sql = f"""CASE
+        WHEN ({calendar_distance}) <= 7 THEN 0
+        WHEN strftime('%m', {timestamp_sql}) = strftime('%m', 'now') THEN 1
+        ELSE 2
+      END"""
+    cursor_clause = ""
+    params: list[object] = []
+    if cursor is not None:
+        cursor_rank, cursor_sort_at, cursor_asset_id = decode_revisit_date_cursor(cursor)
+        cursor_clause = """
+        WHERE revisit_rank > ?
+           OR (
+             revisit_rank = ? AND (
+               mobile_sort_at < ?
+               OR (mobile_sort_at = ? AND id < ?)
+             )
+           )
+        """
+        params.extend([cursor_rank, cursor_rank, cursor_sort_at, cursor_sort_at, cursor_asset_id])
+    params.append(limit + 1)
+    with get_db() as db:
+        rows = db.execute(
+            f"""
+            WITH ranked AS (
+              SELECT asset.*, {timestamp_sql} AS mobile_sort_at, {rank_sql} AS revisit_rank
+              FROM assets AS asset
+              WHERE asset.committed = 1
+                AND {timestamp_sql} <= datetime('now', '-30 days')
+                {creator_exclusion}
+            )
+            SELECT * FROM ranked
+            {cursor_clause}
+            ORDER BY revisit_rank ASC, mobile_sort_at DESC, id DESC
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+        has_more = len(rows) > limit
+        page_rows = rows[:limit]
+        memberships = _mobile_memberships(db, page_rows)
+    items = [mobile_asset_item(row, memberships.get(row["id"], [])) for row in page_rows]
+    next_cursor = None
+    if has_more and page_rows:
+        last = page_rows[-1]
+        next_cursor = encode_revisit_date_cursor(last["revisit_rank"], last["mobile_sort_at"], last["id"])
+    return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
+
+
+@app.get("/v1/library/revisit/creator/{creator_key}/assets")
+def list_mobile_revisit_creator_assets(
+    creator_key: str,
+    authorization: str | None = Header(default=None),
+    cursor: str | None = None,
+    sort: Literal["newest", "oldest"] = "newest",
+    limit: int = Query(default=50, ge=1, le=100),
+):
+    """특정 작가의 전체 자산(홈 '모두 보기'). creator_key는 creator_handle
+    값이며 파라미터 바인딩으로만 쿼리된다. 커서는 정렬과 묶여 있어 정렬을
+    바꾸면 거절된다."""
+    require_auth(authorization)
+    comparison = "<" if sort == "newest" else ">"
+    direction = "DESC" if sort == "newest" else "ASC"
+    params: list[object] = [creator_key]
+    cursor_clause = ""
+    if cursor is not None:
+        cursor_sort_at, cursor_asset_id = decode_mobile_cursor(cursor, sort)
+        cursor_clause = f"""
+            AND (
+                COALESCE(asset.collected_at, asset.created_at) {comparison} ?
+                OR (
+                    COALESCE(asset.collected_at, asset.created_at) = ?
+                    AND asset.id {comparison} ?
+                )
+            )
+        """
+        params.extend([cursor_sort_at, cursor_sort_at, cursor_asset_id])
+    params.append(limit + 1)
+    with get_db() as db:
+        rows = db.execute(
+            f"""
+            SELECT asset.*, COALESCE(asset.collected_at, asset.created_at) AS mobile_sort_at
+            FROM assets AS asset
+            WHERE asset.committed = 1
+              AND asset.creator_handle = ?
+              {cursor_clause}
+            ORDER BY mobile_sort_at {direction}, asset.id {direction}
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+        has_more = len(rows) > limit
+        page_rows = rows[:limit]
+        memberships = _mobile_memberships(db, page_rows)
+    items = [mobile_asset_item(row, memberships.get(row["id"], [])) for row in page_rows]
+    next_cursor = None
+    if has_more and page_rows:
+        last = page_rows[-1]
+        next_cursor = encode_mobile_cursor(sort, last["mobile_sort_at"], last["id"])
+    return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
 
 
 @app.post("/v1/library/assets/{asset_id}/media-ticket")
@@ -1291,6 +1581,86 @@ def create_mobile_media_ticket(
         "content_type": metadata.get("ContentType") or asset["content_type"],
         "size_bytes": metadata.get("ContentLength"),
     }
+
+
+MAX_MEDIA_TICKET_BATCH = 50
+
+
+class MediaTicketBatchItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    asset_id: str = Field(min_length=1, max_length=64)
+    variant: Literal["thumbnail", "original"]
+
+
+class MediaTicketBatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[MediaTicketBatchItem] = Field(max_length=MAX_MEDIA_TICKET_BATCH)
+
+
+@app.post("/v1/library/media-tickets")
+def create_mobile_media_tickets(
+    request: MediaTicketBatchRequest,
+    authorization: str | None = Header(default=None),
+):
+    """바운스된 썸네일 티켓 묶음 발급. 개별 티켓과 동일한 인증/변형 화이트
+    리스트/서명 규칙을 적용하며, 개별 항목 실패는 배치 전체를 실패시키지
+    않는다. 임의 object key는 절대 요청할 수 없다 (asset id만 허용).
+    """
+    require_auth(authorization)
+
+    # 중복 제거: 같은 asset+variant는 한 번만 서명한다.
+    unique: dict[tuple[str, str], None] = {}
+    for entry in request.items:
+        unique.setdefault((entry.asset_id, entry.variant), None)
+    pairs = list(unique.keys())
+    if not pairs:
+        return {"items": []}
+
+    asset_ids = list(dict.fromkeys(asset_id for asset_id, _ in pairs))
+    placeholders = ",".join("?" for _ in asset_ids)
+    with get_db() as db:
+        assets_by_id = {
+            row["id"]: dict(row)
+            for row in db.execute(
+                f"SELECT * FROM assets WHERE committed = 1 AND id IN ({placeholders})",
+                asset_ids,
+            ).fetchall()
+        }
+
+    def resolve_ticket(pair: tuple[str, str]) -> dict:
+        asset_id, variant = pair
+        asset = assets_by_id.get(asset_id)
+        if asset is None:
+            return {"asset_id": asset_id, "variant": variant, "ok": False, "error": "not_found"}
+        object_key = asset["object_key"] if variant == "original" else asset["thumbnail_key"]
+        if not object_key:
+            return {"asset_id": asset_id, "variant": variant, "ok": False, "error": "unavailable"}
+        try:
+            metadata = _s3.head_object(Bucket=R2_BUCKET, Key=object_key)
+        except ClientError as exc:
+            code = str(exc.response.get("Error", {}).get("Code", ""))
+            if code in ("404", "NoSuchKey", "NotFound"):
+                return {"asset_id": asset_id, "variant": variant, "ok": False, "error": "unavailable"}
+            return {"asset_id": asset_id, "variant": variant, "ok": False, "error": "storage_unavailable"}
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=MEDIA_TICKET_TTL_SECONDS)
+        return {
+            "asset_id": asset_id,
+            "variant": variant,
+            "ok": True,
+            "url": presign_get(object_key, MEDIA_TICKET_TTL_SECONDS),
+            "content_type": metadata.get("ContentType") or asset["content_type"],
+            "size_bytes": metadata.get("ContentLength"),
+            "expires_at": expires_at.isoformat(),
+        }
+
+    # boto clients support concurrent request use; keep the pool bounded to avoid
+    # turning a 50-thumbnail Home batch into 50 serial R2 round trips.
+    workers = min(8, len(pairs))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        results = list(executor.map(resolve_ticket, pairs))
+    return {"items": results}
 
 
 # --- CLOUD-006 full-library replication (PC -> VPS/R2) -----------------------

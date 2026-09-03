@@ -489,21 +489,13 @@ if __name__ == "__main__":
 
 
 class MobileRevisitTests(MobileLibraryApiTests):
-    def test_revisit_date_bundle_uses_current_month_and_creator_threshold(self):
-        # date bundle: 이번 달(UTC) 수집 자산만. creator bundle: 같은
-        # creator_handle이 3개 이상인 그룹만 (PC creator_spotlight 임계값).
-        now_month = "09"
-        same_month = "41000000-0000-4000-8000-000000000001"
-        other_month = "41000000-0000-4000-8000-000000000002"
-        self.commit_asset(
-            same_month,
-            classification_ids=[CLASSIFICATION_ID],
-            collected_at=f"2026-{now_month}-10T00:00:00.000Z",
-        )
-        self.commit_asset(
-            other_month,
-            collected_at="2026-01-10T00:00:00.000Z",
-        )
+    def test_revisit_date_excludes_recent_and_prefers_calendar_near_dates(self):
+        # 30일 이내 자산은 date bundle에서 제외된다(최근 추가와 중복 방지).
+        # 오래된 ±7일 캘린더 근처/같은 달/결정론적 오래된 자산만 후보다.
+        recent = "41000000-0000-4000-8000-000000000001"
+        old_near = "41000000-0000-4000-8000-000000000002"
+        self.commit_asset(recent, collected_at="2026-09-10T00:00:00.000Z")
+        self.commit_asset(old_near, collected_at="2025-09-12T00:00:00.000Z")
 
         response = self.client.get(
             "/v1/library/revisit", headers=self.auth, params={"limit": 12}
@@ -511,20 +503,32 @@ class MobileRevisitTests(MobileLibraryApiTests):
 
         self.assertEqual(response.status_code, 200)
         bundles = {bundle["kind"]: bundle for bundle in response.json()["bundles"]}
-        self.assertEqual(
-            {item["id"] for item in bundles["date"]["items"]}, {same_month}
-        )
+        date_ids = {item["id"] for item in bundles["date"]["items"]}
+        self.assertNotIn(recent, date_ids)
+        self.assertIn(old_near, date_ids)
 
-    def test_revisit_creator_bundle_requires_three_or_more_assets(self):
+    def test_revisit_calendar_distance_wraps_year_boundary(self):
+        expression = api_app._revisit_calendar_distance_sql(
+            "'2024-12-31T00:00:00Z'",
+            "'2025-01-01T00:00:00Z'",
+        )
+        with closing(sqlite3.connect(":memory:")) as db:
+            distance = db.execute(f"SELECT {expression}").fetchone()[0]
+        self.assertEqual(distance, 1)
+
+    def test_revisit_creator_bundle_is_grouped_and_requires_three_or_more(self):
         solo = "42000000-0000-4000-8000-000000000001"
         trio = ["42000000-0000-4000-8000-000000000002",
                 "42000000-0000-4000-8000-000000000003",
-                "42000000-0000-4000-8000-000000000004"]
-        self.commit_asset(solo, creator="solo-creator")
+                "42000000-0000-4000-8000-000000000004",
+                "42000000-0000-4000-8000-000000000005",
+                "42000000-0000-4000-8000-000000000006"]
+        self.commit_asset(solo, creator="solo-creator",
+                          collected_at="2025-08-10T00:00:00.000Z")
         for index, asset_id in enumerate(trio):
             self.commit_asset(
                 asset_id,
-                collected_at=f"2026-08-{10 + index:02d}T00:00:00.000Z",
+                collected_at=f"2025-08-{10 + index:02d}T00:00:00.000Z",
                 creator="team",
             )
 
@@ -534,9 +538,18 @@ class MobileRevisitTests(MobileLibraryApiTests):
 
         self.assertEqual(response.status_code, 200)
         bundles = {bundle["kind"]: bundle for bundle in response.json()["bundles"]}
-        creator_ids = {item["id"] for item in bundles["creator"]["items"]}
-        self.assertIn(trio[0], creator_ids)
-        self.assertNotIn(solo, creator_ids)
+        groups = bundles["creator"]["groups"]
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(groups[0]["creator_key"], "team")
+        self.assertEqual(groups[0]["creator_key"], "team")
+        self.assertEqual(groups[0]["asset_count"], len(trio))
+        # preview items는 홈 미리보기 cap(최대 4~6)을 따른다 — 전체는
+        # creator detail('모두 보기')에서 제공된다.
+        preview_ids = {item["id"] for item in groups[0]["items"]}
+        self.assertTrue(preview_ids.issubset(set(trio)))
+        self.assertGreaterEqual(len(preview_ids), 4)
+        # solo 작가(1개)는 그룹에서 제외된다.
+        self.assertTrue(all(group["creator_key"] != "solo-creator" for group in groups))
 
     def test_revisit_deduplicates_assets_across_bundles_and_orders_deterministically(self):
         first = "43000000-0000-4000-8000-000000000001"
@@ -547,20 +560,50 @@ class MobileRevisitTests(MobileLibraryApiTests):
                 collected_at=f"2026-09-{day:02d}T00:00:00.000Z",
                 creator="team",
             )
+        # 오래된 자산도 추가해 date bundle이 30일 제외 규칙을 따르는지 확인
+        old_asset = "43000000-0000-4000-8000-000000000003"
+        self.commit_asset(old_asset, collected_at="2024-09-11T00:00:00.000Z")
 
         response = self.client.get(
             "/v1/library/revisit", headers=self.auth, params={"limit": 12}
         )
 
-        raw_bundles = response.json()["bundles"]
-        by_kind = {bundle["kind"]: bundle for bundle in raw_bundles}
+        by_kind = {bundle["kind"]: bundle for bundle in response.json()["bundles"]}
         date_ids = [item["id"] for item in by_kind["date"]["items"]]
-        creator_ids = [item["id"] for item in by_kind["creator"]["items"]]
-        # date(최신 우선)가 먼저 오고 creator는 중복을 배제한다.
-        self.assertEqual(date_ids, [first, second])
-        self.assertEqual(creator_ids, [])
-        combined = date_ids + creator_ids
-        self.assertEqual(len(combined), len(set(combined)))
+        # 최근 30일 자산은 date에서 배제되고 오래된 자산이 채택된다.
+        self.assertNotIn(first, date_ids)
+        self.assertNotIn(second, date_ids)
+        self.assertIn(old_asset, date_ids)
+        # 교차 묶음 중복 없음
+        all_ids = [item["id"] for bundle in response.json()["bundles"]
+                   for item in bundle.get("items", [])]
+        for group in by_kind["creator"].get("groups", []):
+            all_ids.extend(item["id"] for item in group["items"])
+        self.assertEqual(len(all_ids), len(set(all_ids)))
+
+    def test_revisit_creator_selection_alternates_count_and_oldest_history(self):
+        specs = [
+            ("count-top", 6, "2025-05"),
+            ("count-second", 5, "2025-04"),
+            ("oldest-history", 3, "2023-01"),
+            ("count-third", 4, "2025-03"),
+        ]
+        serial = 1
+        for creator, count, month in specs:
+            for index in range(count):
+                asset_id = f"44000000-0000-4000-8000-{serial:012d}"
+                serial += 1
+                self.commit_asset(
+                    asset_id,
+                    creator=creator,
+                    collected_at=f"{month}-{10 + index:02d}T00:00:00.000Z",
+                )
+
+        response = self.client.get("/v1/library/revisit", headers=self.auth, params={"limit": 12})
+        self.assertEqual(response.status_code, 200)
+        creator_bundle = next(bundle for bundle in response.json()["bundles"] if bundle["kind"] == "creator")
+        keys = [group["creator_key"] for group in creator_bundle["groups"]]
+        self.assertEqual(keys, ["count-top", "oldest-history", "count-second"])
 
     def test_revisit_rejects_oversized_limit_and_requires_authentication(self):
         self.assertEqual(
@@ -573,4 +616,173 @@ class MobileRevisitTests(MobileLibraryApiTests):
                 params={"limit": 51},
             ).status_code,
             422,
+        )
+
+
+class MobileBatchMediaTicketTests(MobileLibraryApiTests):
+    def test_batch_tickets_require_auth_and_enforce_bounds(self):
+        asset_id = "51000000-0000-4000-8000-000000000001"
+        self.commit_asset(asset_id)
+
+        self.assertEqual(
+            self.client.post(
+                "/v1/library/media-tickets",
+                json={"items": [{"asset_id": asset_id, "variant": "thumbnail"}]},
+            ).status_code,
+            401,
+        )
+        oversized = [{"asset_id": asset_id, "variant": "thumbnail"} for _ in range(51)]
+        self.assertEqual(
+            self.client.post(
+                "/v1/library/media-tickets",
+                headers=self.auth,
+                json={"items": oversized},
+            ).status_code,
+            422,
+        )
+
+    def test_batch_tickets_return_signed_items_and_isolate_failures(self):
+        good = "52000000-0000-4000-8000-000000000001"
+        unknown = "52000000-0000-4000-8000-000000000002"
+        self.commit_asset(good)
+
+        response = self.client.post(
+            "/v1/library/media-tickets",
+            headers=self.auth,
+            json={"items": [
+                {"asset_id": good, "variant": "thumbnail"},
+                {"asset_id": unknown, "variant": "thumbnail"},
+                {"asset_id": good, "variant": "original"},
+                {"asset_id": good, "variant": "original"},  # 중복: 한 번만 서명
+            ]},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        items = response.json()["items"]
+        ok_items = {(entry["asset_id"], entry["variant"]): entry for entry in items if entry["ok"]}
+        self.assertIn((good, "thumbnail"), ok_items)
+        self.assertIn((good, "original"), ok_items)
+        self.assertTrue(ok_items[(good, "thumbnail")]["url"].startswith("https://"))
+        self.assertEqual(
+            [entry for entry in items if not entry["ok"]],
+            [{"asset_id": unknown, "variant": "thumbnail", "ok": False, "error": "not_found"}],
+        )
+        # 중복은 단일 항목으로 병합된다.
+        self.assertEqual(len([entry for entry in items if entry["asset_id"] == good]), 2)
+
+    def test_batch_rejects_invalid_variant_and_extra_fields(self):
+        good = "53000000-0000-4000-8000-000000000001"
+        self.commit_asset(good)
+        response = self.client.post(
+            "/v1/library/media-tickets",
+            headers=self.auth,
+            json={"items": [{"asset_id": good, "variant": "originals/evil"}]},
+        )
+        self.assertEqual(response.status_code, 422)
+
+        injection = self.client.post(
+            "/v1/library/media-tickets",
+            headers=self.auth,
+            json={"items": [{"asset_id": good, "variant": "thumbnail", "object_key": "library/other/original"}]},
+        )
+        self.assertEqual(injection.status_code, 422)
+
+
+class MobileRevisitDetailTests(MobileLibraryApiTests):
+    def _seed_team(self):
+        ids = ["61000000-0000-4000-8000-000000000001",
+               "61000000-0000-4000-8000-000000000002",
+               "61000000-0000-4000-8000-000000000003",
+               "61000000-0000-4000-8000-000000000004",
+               "61000000-0000-4000-8000-000000000005",
+               "61000000-0000-4000-8000-000000000006"]
+        for index, asset_id in enumerate(ids):
+            self.commit_asset(
+                asset_id,
+                collected_at=f"2025-0{1 + (index % 3)}-{10 + index:02d}T00:00:00.000Z",
+                creator="detail-team",
+            )
+        return ids
+
+    def test_creator_detail_returns_only_requested_creator_with_pagination(self):
+        ids = self._seed_team()
+        other = "61000000-0000-4000-8000-000000000099"
+        self.commit_asset(other, creator="other-team", collected_at="2024-01-01T00:00:00.000Z")
+
+        first = self.client.get(
+            "/v1/library/revisit/creator/detail-team/assets",
+            headers=self.auth, params={"limit": 2, "sort": "newest"},
+        )
+        self.assertEqual(first.status_code, 200)
+        body = first.json()
+        self.assertTrue(all(item["creator_handle"] == "detail-team" for item in body["items"]))
+        self.assertEqual(body["items"][0]["classification_ids"], [CLASSIFICATION_ID])
+        self.assertTrue(body["items"][0]["original_available"])
+        self.assertTrue(body["items"][0]["thumbnail_available"])
+        self.assertNotIn(other, [item["id"] for item in body["items"]])
+        self.assertTrue(body["has_more"])
+
+        second = self.client.get(
+            "/v1/library/revisit/creator/detail-team/assets",
+            headers=self.auth,
+            params={"limit": 2, "sort": "newest", "cursor": body["next_cursor"]},
+        )
+        self.assertEqual(second.status_code, 200)
+        second_ids = [item["id"] for item in second.json()["items"]]
+        self.assertFalse(set(second_ids) & {item["id"] for item in body["items"]})
+
+    def test_creator_detail_rejects_cross_sort_cursor(self):
+        self._seed_team()
+        page = self.client.get(
+            "/v1/library/revisit/creator/detail-team/assets",
+            headers=self.auth, params={"limit": 2, "sort": "newest"},
+        ).json()
+        swapped = self.client.get(
+            "/v1/library/revisit/creator/detail-team/assets",
+            headers=self.auth, params={"limit": 2, "sort": "oldest", "cursor": page["next_cursor"]},
+        )
+        self.assertEqual(swapped.status_code, 400)
+
+    def test_date_detail_excludes_recent_and_paginates(self):
+        recent = "62000000-0000-4000-8000-000000000001"
+        self.commit_asset(recent, collected_at="2026-09-02T00:00:00.000Z", creator="recent-only")
+        old_ids = []
+        for index in range(5):
+            asset_id = f"62000000-0000-4000-8000-{index + 2:012d}"
+            old_ids.append(asset_id)
+            self.commit_asset(
+                asset_id,
+                collected_at=f"2024-01-{index + 1:02d}T00:00:00.000Z",
+                creator=f"old-creator-{index}",
+            )
+
+        seen = []
+        cursor = None
+        for _ in range(3):
+            params = {"limit": 2}
+            if cursor:
+                params["cursor"] = cursor
+            page = self.client.get("/v1/library/revisit/date", headers=self.auth, params=params)
+            self.assertEqual(page.status_code, 200)
+            body = page.json()
+            page_ids = [item["id"] for item in body["items"]]
+            self.assertFalse(set(page_ids) & set(seen), "date detail pages must not overlap")
+            seen.extend(page_ids)
+            cursor = body["next_cursor"]
+            if not body["has_more"]:
+                break
+
+        self.assertNotIn(recent, seen)
+        self.assertEqual(set(seen), set(old_ids))
+        self.assertEqual(len(seen), len(set(seen)))
+
+    def test_revisit_detail_routes_require_authentication(self):
+        self.assertEqual(
+            self.client.get("/v1/library/revisit/date").status_code, 401
+        )
+        self.assertEqual(
+            self.client.get(
+                "/v1/library/revisit/creator/some-team/assets"
+            ).status_code,
+            401,
         )
