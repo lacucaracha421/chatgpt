@@ -25,7 +25,8 @@ use crate::{
             CatalogWorkDetail, ClassificationEntry, CollectionCover, CollectionSummary,
             CollectionVolume, CreateAlbum, CreateClassification, CreateCollection,
             IngestMediaRequest, IngestOutcome, LibrarySummary, MangaDexApplyRequest,
-            MangaCatalogRecoveryApplyResult, MangaCatalogRecoveryPreview, MangaDexConnection,
+            MangaCatalogRecoveryApplyResult, MangaCatalogRecoveryPreview,
+            MangaCatalogRecoverySelection, MangaDexConnection,
             MangaDexSearchResult, MangaDexVolumeSyncResult, MangaDexWorkPreview, MangaSeries,
             MetadataBackup, PurgeSummary, ReleaseWatchEvent,
             ReleaseWatchRunResult, ReleaseWatchRunStopReason, ReleaseWatchStatus, RemoteProvider,
@@ -1395,6 +1396,20 @@ pub async fn apply_manga_catalog_recovery(
         .await
         .map_err(|_| background_task_error())?
         .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn apply_manga_catalog_recovery_selection(
+    selections: Vec<MangaCatalogRecoverySelection>,
+    state: State<'_, AppState>,
+) -> Result<MangaCatalogRecoveryApplyResult, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.apply_manga_catalog_recovery_selection(&selections)
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
 }
 
 #[tauri::command]

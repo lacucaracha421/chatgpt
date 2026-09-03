@@ -8,7 +8,8 @@ use rusqlite::OptionalExtension;
 use super::error::LibraryError;
 use super::models::{
     MangaCatalogRecoveryApplyResult, MangaCatalogRecoveryItem, MangaCatalogRecoveryPreview,
-    MangaCatalogRecoveryStatus, MangaSeries,
+    MangaCatalogRecoverySelection, MangaCatalogRecoveryStatus, MangaRecoveryCandidate,
+    MangaRecoveryConfidence, MangaSeries,
 };
 use super::Library;
 
@@ -297,11 +298,17 @@ pub(crate) fn preview_catalog_recovery(
         "SELECT m.id, m.title, m.author, m.gallery_id, m.page_count,
                 w.Id, w.Title, w.TitleJpn, w.FileCount, w.Expunged,
                 EXISTS(SELECT 1 FROM online_catalog_bookmarks AS bookmark
-                       WHERE bookmark.provider = ?1 AND bookmark.work_id = CAST(w.Id AS TEXT))
+                       WHERE bookmark.provider = ?1 AND bookmark.work_id = CAST(w.Id AS TEXT)),
+                m.relative_path, w.CurrentGid, w.FirstGid, w.ParentGid
          FROM manga_series AS m
          LEFT JOIN catalog.Works AS w ON w.Id = CAST(m.gallery_id AS INTEGER)
          ORDER BY m.title COLLATE NOCASE, m.id",
     )?;
+    struct RecoveryRow {
+        item: MangaCatalogRecoveryItem,
+        relative_path: String,
+        lineage: (Option<i64>, Option<i64>, Option<i64>),
+    }
     let rows = statement.query_map([provider], |row| {
         let work_id = row.get::<_, Option<i64>>(5)?;
         let expunged = row.get::<_, Option<i64>>(9)?.unwrap_or_default() != 0;
@@ -310,23 +317,60 @@ pub(crate) fn preview_catalog_recovery(
             (Some(_), true) => MangaCatalogRecoveryStatus::Historical,
             (None, _) => MangaCatalogRecoveryStatus::Fallback,
         };
-        Ok(MangaCatalogRecoveryItem {
-            manga_id: row.get(0)?,
-            title: row.get(1)?,
-            author: row.get(2)?,
-            gallery_id: row.get(3)?,
-            page_count: row.get::<_, i64>(4)?.max(0) as u64,
-            status,
-            work_id: work_id.and_then(|value| u64::try_from(value).ok()),
-            catalog_title: row.get(6)?,
-            catalog_title_jpn: row.get(7)?,
-            catalog_file_count: row
-                .get::<_, Option<i64>>(8)?
-                .map(|value| value.max(0) as u64),
-            bookmarked: row.get::<_, i64>(10)? != 0,
+        Ok(RecoveryRow {
+            item: MangaCatalogRecoveryItem {
+                manga_id: row.get(0)?,
+                title: row.get(1)?,
+                author: row.get(2)?,
+                gallery_id: row.get(3)?,
+                page_count: row.get::<_, i64>(4)?.max(0) as u64,
+                status,
+                work_id: work_id.and_then(|value| u64::try_from(value).ok()),
+                catalog_title: row.get(6)?,
+                catalog_title_jpn: row.get(7)?,
+                catalog_file_count: row
+                    .get::<_, Option<i64>>(8)?
+                    .map(|value| value.max(0) as u64),
+                bookmarked: row.get::<_, i64>(10)? != 0,
+                suggested_work_id: None,
+                suggestion_reason: None,
+                suggestion_title: None,
+                candidates: Vec::new(),
+            },
+            relative_path: row.get::<_, Option<String>>(11)?.unwrap_or_default(),
+            lineage: (
+                row.get::<_, Option<i64>>(12)?,
+                row.get::<_, Option<i64>>(13)?,
+                row.get::<_, Option<i64>>(14)?,
+            ),
         })
     })?;
-    let items = rows.collect::<Result<Vec<_>, _>>()?;
+    let mut rows = rows.collect::<Result<Vec<_>, _>>()?;
+    for row in &mut rows {
+        match row.item.status {
+            MangaCatalogRecoveryStatus::Historical => {
+                if let Some((target, reason, title)) =
+                    resolve_lineage_suggestion(&connection, row.item.work_id, row.lineage)?
+                {
+                    row.item.suggested_work_id = Some(target);
+                    row.item.suggestion_reason = Some(reason.to_string());
+                    row.item.suggestion_title = Some(title);
+                }
+            }
+            MangaCatalogRecoveryStatus::Fallback => {
+                row.item.candidates = rank_recovery_candidates(
+                    &connection,
+                    &row.item.title,
+                    &row.item.author,
+                    row.item.gallery_id.as_deref(),
+                    &row.relative_path,
+                    row.item.page_count,
+                )?;
+            }
+            MangaCatalogRecoveryStatus::ExactActive => {}
+        }
+    }
+    let items = rows.into_iter().map(|row| row.item).collect::<Vec<_>>();
     Ok(MangaCatalogRecoveryPreview {
         total_count: items.len() as u64,
         exact_active_count: items
@@ -344,6 +388,348 @@ pub(crate) fn preview_catalog_recovery(
         already_bookmarked_count: items.iter().filter(|item| item.bookmarked).count() as u64,
         items,
     })
+}
+
+fn active_work_title(
+    connection: &rusqlite::Connection,
+    work_id: i64,
+) -> Result<Option<String>, LibraryError> {
+    connection
+        .query_row(
+            "SELECT Title FROM catalog.Works WHERE Id = ?1 AND Expunged = 0",
+            [work_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(LibraryError::from)
+}
+
+/// 삭제/만료된 작품을 카탈로그 계보 필드로 현행 작품에 연결한다.
+/// CurrentGid -> FirstGid -> ParentGid 순서로 확인하며, 각 후보는 반드시
+/// 현행(`Expunged = 0`) 작품이어야 하고 자기 자신으로 돌아오면 안 된다.
+/// 계보로 연결되지 않으면 `Ok(None)`이며 해당 항목은 계속 검토 전용이다.
+fn resolve_lineage_suggestion(
+    connection: &rusqlite::Connection,
+    work_id: Option<u64>,
+    lineage: (Option<i64>, Option<i64>, Option<i64>),
+) -> Result<Option<(u64, &'static str, String)>, LibraryError> {
+    let Some(original) = work_id else {
+        return Ok(None);
+    };
+    for (candidate, reason) in [
+        (lineage.0, "현행판"),
+        (lineage.1, "초판"),
+        (lineage.2, "상위 작품"),
+    ] {
+        let Some(candidate) = candidate else {
+            continue;
+        };
+        if candidate <= 0 {
+            continue;
+        }
+        let Ok(target) = u64::try_from(candidate) else {
+            continue;
+        };
+        if target == original {
+            continue;
+        }
+        if let Some(title) = active_work_title(connection, candidate)? {
+            return Ok(Some((target, reason, title)));
+        }
+    }
+    Ok(None)
+}
+
+fn normalize_recovery_text(value: &str) -> String {
+    value
+        .to_lowercase()
+        .chars()
+        .map(|character| {
+            if character.is_alphanumeric() {
+                character
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn split_author_tokens(author: &str) -> Vec<String> {
+    author
+        .split([',', '/', '、', '&', '＆', '+', ';', '|'])
+        .map(|token| normalize_recovery_text(token))
+        .filter(|token| !token.is_empty())
+        .collect()
+}
+
+fn title_supports(local_title: &str, catalog_title: &str, catalog_title_jpn: &str) -> bool {
+    let local = normalize_recovery_text(local_title).replace(' ', "");
+    if local.len() < 2 {
+        return false;
+    }
+    for candidate in [catalog_title, catalog_title_jpn] {
+        let normalized = normalize_recovery_text(candidate).replace(' ', "");
+        if normalized.len() >= 2 && (normalized.contains(&local) || local.contains(&normalized)) {
+            return true;
+        }
+    }
+    false
+}
+
+fn digit_sequences(value: &str) -> Vec<i64> {
+    let mut sequences = Vec::new();
+    let mut current = String::new();
+    for character in value.chars() {
+        if character.is_ascii_digit() {
+            current.push(character);
+        } else if !current.is_empty() {
+            if let Ok(number) = current.parse::<i64>() {
+                sequences.push(number);
+            }
+            current.clear();
+        }
+    }
+    if !current.is_empty() {
+        if let Ok(number) = current.parse::<i64>() {
+            sequences.push(number);
+        }
+    }
+    sequences.sort_unstable();
+    sequences.dedup();
+    sequences
+}
+
+struct CandidateWork {
+    id: i64,
+    title: String,
+    title_jpn: Option<String>,
+    file_count: i64,
+    artists: Vec<String>,
+}
+
+/// Fallback 항목의 후보를 순위 매겨 최대 3개 반환한다.
+/// - 숫자 ID 일치는 결정적이므로 항상 제안(confidence `suggested`)
+/// - 작가+페이지+제목 3신호는 제안, 2신호는 검토용
+/// - 제목 유사도 단독(또는 단일 신호)은 후보에서 제외한다
+fn rank_recovery_candidates(
+    connection: &rusqlite::Connection,
+    title: &str,
+    author: &str,
+    gallery_id: Option<&str>,
+    relative_path: &str,
+    page_count: u64,
+) -> Result<Vec<MangaRecoveryCandidate>, LibraryError> {
+    let mut candidates: Vec<MangaRecoveryCandidate> = Vec::new();
+    let mut seen: std::collections::BTreeSet<i64> = std::collections::BTreeSet::new();
+
+    let mut numeric_hits = Vec::new();
+    for source in [gallery_id.unwrap_or_default(), title, relative_path] {
+        numeric_hits.extend(digit_sequences(source));
+    }
+    numeric_hits.sort_unstable();
+    numeric_hits.dedup();
+    for number in numeric_hits {
+        if number <= 0 {
+            continue;
+        }
+        let hit: Option<(i64, String, Option<String>, Option<i64>)> = connection
+            .query_row(
+                "SELECT Id, Title, TitleJpn, FileCount FROM catalog.Works
+                 WHERE Id = ?1 AND Expunged = 0",
+                [number],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .optional()?;
+        if let Some((id, work_title, work_title_jpn, file_count)) = hit {
+            if seen.insert(id) {
+                let artists = catalog_artists(connection, &[id])?;
+                candidates.push(MangaRecoveryCandidate {
+                    work_id: id as u64,
+                    title: work_title,
+                    title_jpn: work_title_jpn,
+                    artist: artists.get(&id).and_then(|values| values.first()).cloned(),
+                    file_count: file_count.and_then(|value| u64::try_from(value.max(0)).ok()),
+                    reasons: vec!["ID 숫자 일치".to_string()],
+                    confidence: MangaRecoveryConfidence::Suggested,
+                });
+            }
+        }
+    }
+
+    let author_tokens = split_author_tokens(author);
+    let pool: Vec<CandidateWork> = if page_count > 0 {
+        let low = page_count.saturating_sub(2) as i64;
+        let high = page_count.saturating_add(2) as i64;
+        let mut statement = connection.prepare(
+            "SELECT Id, Title, TitleJpn, FileCount FROM catalog.Works
+             WHERE Expunged = 0 AND FileCount BETWEEN ?1 AND ?2 ORDER BY Id LIMIT 2000",
+        )?;
+        let rows = statement.query_map([low, high], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        })?;
+        let mut works = Vec::new();
+        for row in rows {
+            let (id, work_title, work_title_jpn, file_count) = row?;
+            works.push(CandidateWork {
+                id,
+                title: work_title,
+                title_jpn: work_title_jpn,
+                file_count,
+                artists: Vec::new(),
+            });
+        }
+        works
+    } else if author_tokens.is_empty() {
+        Vec::new()
+    } else {
+        let placeholders = author_tokens
+            .iter()
+            .map(|_| "?".to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT DISTINCT w.Id, w.Title, w.TitleJpn, w.FileCount
+             FROM catalog.Works AS w
+             JOIN catalog.Tags AS t ON t.WorkId = w.Id
+             WHERE w.Expunged = 0 AND t.Namespace = 'artist'
+               AND lower(t.Value) IN ({placeholders}) ORDER BY w.Id LIMIT 500"
+        );
+        let mut statement = connection.prepare(&sql)?;
+        let rows =
+            statement.query_map(rusqlite::params_from_iter(author_tokens.iter()), |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            })?;
+        let mut works = Vec::new();
+        for row in rows {
+            let (id, work_title, work_title_jpn, file_count) = row?;
+            works.push(CandidateWork {
+                id,
+                title: work_title,
+                title_jpn: work_title_jpn,
+                file_count,
+                artists: Vec::new(),
+            });
+        }
+        works
+    };
+    if !pool.is_empty() {
+        let ids = pool.iter().map(|work| work.id).collect::<Vec<_>>();
+        let artists = catalog_artists(connection, &ids)?;
+        let mut scored: Vec<(usize, MangaRecoveryCandidate)> = Vec::new();
+        for mut work in pool {
+            if !seen.insert(work.id) {
+                continue;
+            }
+            work.artists = artists.get(&work.id).cloned().unwrap_or_default();
+            let artist_hit = !author_tokens.is_empty()
+                && work.artists.iter().any(|artist| {
+                    let normalized = normalize_recovery_text(artist);
+                    author_tokens.iter().any(|token| {
+                        normalized == *token
+                            || normalized.contains(token.as_str())
+                            || token.contains(normalized.as_str())
+                    })
+                });
+            let page_hit =
+                page_count > 0 && (work.file_count.max(0) as u64).abs_diff(page_count) <= 2;
+            let title_hit = title_supports(
+                title,
+                &work.title,
+                work.title_jpn.as_deref().unwrap_or_default(),
+            );
+            let mut reasons = Vec::new();
+            if artist_hit {
+                reasons.push("작가 일치".to_string());
+            }
+            if page_hit {
+                reasons.push("페이지 수 일치".to_string());
+            }
+            if title_hit {
+                reasons.push("제목 유사".to_string());
+            }
+            let signals = reasons.len();
+            let confidence = if signals >= 3 {
+                Some(MangaRecoveryConfidence::Suggested)
+            } else if signals == 2 {
+                Some(MangaRecoveryConfidence::Review)
+            } else {
+                None
+            };
+            if let Some(confidence) = confidence {
+                scored.push((
+                    signals,
+                    MangaRecoveryCandidate {
+                        work_id: work.id as u64,
+                        artist: work.artists.first().cloned(),
+                        title: work.title,
+                        title_jpn: work.title_jpn,
+                        file_count: u64::try_from(work.file_count.max(0)).ok(),
+                        reasons,
+                        confidence,
+                    },
+                ));
+            }
+        }
+        scored.sort_by(|left, right| {
+            let confidence_rank = |confidence: MangaRecoveryConfidence| match confidence {
+                MangaRecoveryConfidence::Suggested => 0,
+                MangaRecoveryConfidence::Review => 1,
+            };
+            confidence_rank(left.1.confidence)
+                .cmp(&confidence_rank(right.1.confidence))
+                .then(right.0.cmp(&left.0))
+                .then(left.1.work_id.cmp(&right.1.work_id))
+        });
+        for (_, candidate) in scored {
+            candidates.push(candidate);
+            if candidates.len() >= 3 {
+                break;
+            }
+        }
+    }
+    candidates.truncate(3);
+    Ok(candidates)
+}
+
+fn catalog_artists(
+    connection: &rusqlite::Connection,
+    work_ids: &[i64],
+) -> Result<std::collections::BTreeMap<i64, Vec<String>>, LibraryError> {
+    let mut map: std::collections::BTreeMap<i64, Vec<String>> = std::collections::BTreeMap::new();
+    if work_ids.is_empty() {
+        return Ok(map);
+    }
+    let placeholders = work_ids
+        .iter()
+        .map(|_| "?".to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!(
+        "SELECT WorkId, Value FROM catalog.Tags
+         WHERE Namespace = 'artist' AND WorkId IN ({placeholders}) ORDER BY WorkId, Value"
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(rusqlite::params_from_iter(work_ids.iter()), |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+    })?;
+    for row in rows {
+        let (work_id, artist) = row?;
+        map.entry(work_id).or_default().push(artist);
+    }
+    Ok(map)
 }
 
 pub(crate) fn apply_exact_catalog_recovery(
@@ -404,6 +790,111 @@ pub(crate) fn apply_exact_catalog_recovery(
     transaction.commit()?;
     Ok(MangaCatalogRecoveryApplyResult {
         matched_count: candidates.len() as u64,
+        created_bookmarks,
+        existing_bookmarks,
+    })
+}
+
+/// 검토된 historical/fallback 항목을 사용자가 명시적으로 선택한 작품에 연결한다.
+///
+/// 각 선택은 미리보기 기준으로 재검증한다: 해당 manga가 historical이면서 제안된
+/// 작품과 일치하거나, fallback이면서 후보 목록에 포함된 작품이어야 하며, 작품은
+/// 반드시 현행(`Expunged = 0`)이어야 한다. 검증을 통과하지 못한 선택은 무시된다.
+/// 트랜잭션·멱등이며 매핑을 `manga_catalog_recovery_links`에 기록한다.
+pub(crate) fn apply_selected_catalog_recovery(
+    library: &Library,
+    selections: &[MangaCatalogRecoverySelection],
+) -> Result<MangaCatalogRecoveryApplyResult, LibraryError> {
+    if selections.is_empty() {
+        return Ok(MangaCatalogRecoveryApplyResult {
+            matched_count: 0,
+            created_bookmarks: 0,
+            existing_bookmarks: 0,
+        });
+    }
+    let preview = preview_catalog_recovery(library)?;
+    let items = preview
+        .items
+        .iter()
+        .map(|item| (item.manga_id.as_str(), item))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let provider = super::catalog_provider::LEGACY_VCK_PROVIDER;
+    let now = chrono::Utc::now().to_rfc3339();
+    let catalog_path = library.root().join("catalogs/kdata.db");
+    let mut connection = library.connection()?;
+    connection.execute(
+        "ATTACH DATABASE ?1 AS catalog",
+        [catalog_path.to_string_lossy().as_ref()],
+    )?;
+    let transaction = connection.transaction()?;
+    let mut matched_count = 0u64;
+    let mut created_bookmarks = 0u64;
+    let mut existing_bookmarks = 0u64;
+    for selection in selections {
+        let Some(item) = items.get(selection.manga_id.as_str()) else {
+            continue;
+        };
+        let (method, allowed) = match item.status {
+            MangaCatalogRecoveryStatus::Historical => (
+                "historical_lineage",
+                item.suggested_work_id == Some(selection.work_id),
+            ),
+            MangaCatalogRecoveryStatus::Fallback => (
+                "candidate_review",
+                item.candidates
+                    .iter()
+                    .any(|candidate| candidate.work_id == selection.work_id),
+            ),
+            MangaCatalogRecoveryStatus::ExactActive => ("exact_active", false),
+        };
+        if !allowed {
+            continue;
+        }
+        let work_id = selection.work_id.to_string();
+        let catalog_active: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM catalog.Works WHERE Id = ?1 AND Expunged = 0)",
+            [selection.work_id as i64],
+            |row| row.get(0),
+        )?;
+        if !catalog_active {
+            continue;
+        }
+        let already_bookmarked: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM online_catalog_bookmarks WHERE provider = ?1 AND work_id = ?2)",
+            rusqlite::params![provider, work_id], |row| row.get(0),
+        )?;
+        let inserted = if already_bookmarked {
+            existing_bookmarks += 1;
+            false
+        } else {
+            transaction.execute(
+                "INSERT INTO online_catalog_bookmarks (provider, work_id, created_at) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(provider, work_id) DO NOTHING",
+                rusqlite::params![provider, work_id, now],
+            )? > 0
+        };
+        if inserted {
+            created_bookmarks += 1;
+        }
+        transaction.execute(
+            "INSERT INTO manga_catalog_recovery_links
+                (manga_id, provider, work_id, match_method, bookmark_created, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(manga_id) DO NOTHING",
+            rusqlite::params![
+                selection.manga_id,
+                provider,
+                work_id,
+                method,
+                i64::from(inserted),
+                now
+            ],
+        )?;
+        matched_count += 1;
+    }
+    transaction.commit()?;
+    Ok(MangaCatalogRecoveryApplyResult {
+        matched_count,
         created_bookmarks,
         existing_bookmarks,
     })
@@ -712,8 +1203,13 @@ mod tests {
                     Title TEXT NOT NULL DEFAULT '',
                     TitleJpn TEXT,
                     FileCount INTEGER NOT NULL DEFAULT 0,
-                    Expunged INTEGER NOT NULL DEFAULT 0
+                    Expunged INTEGER NOT NULL DEFAULT 0,
+                    ParentGid INTEGER, CurrentGid INTEGER, FirstGid INTEGER
                 );
+                CREATE TABLE Tags (
+                    WorkId INTEGER NOT NULL, Namespace TEXT NOT NULL, Value TEXT NOT NULL,
+                    PRIMARY KEY (WorkId, Namespace, Value)
+                ) WITHOUT ROWID;
                 INSERT INTO Works (Id, Title, TitleJpn, FileCount, Expunged) VALUES
                     (10, 'Active A', 'Active A JP', 20, 0),
                     (11, 'Historical', NULL, 21, 1),
@@ -792,4 +1288,292 @@ mod tests {
         assert_eq!(created_by_recovery, 1);
     }
 
+    fn write_lineage_catalog(library: &Library) {
+        let catalogs = library.root().join("catalogs");
+        fs::create_dir_all(&catalogs).unwrap();
+        let catalog = Connection::open(catalogs.join("kdata.db")).unwrap();
+        catalog
+            .execute_batch(
+                r#"                CREATE TABLE Works (
+                    Id INTEGER PRIMARY KEY,
+                    Title TEXT NOT NULL DEFAULT '',
+                    TitleJpn TEXT,
+                    FileCount INTEGER NOT NULL DEFAULT 0,
+                    Expunged INTEGER NOT NULL DEFAULT 0,
+                    ParentGid INTEGER, CurrentGid INTEGER, FirstGid INTEGER
+                );
+                CREATE TABLE Tags (
+                    WorkId INTEGER NOT NULL, Namespace TEXT NOT NULL, Value TEXT NOT NULL,
+                    PRIMARY KEY (WorkId, Namespace, Value)
+                ) WITHOUT ROWID;
+                -- 101: expunged, current edition 102 / 103: expunged without lineage
+                -- 104: expunged pointing at another expunged work (no active target)
+                INSERT INTO Works (Id, Title, FileCount, Expunged, CurrentGid) VALUES
+                    (101, 'Old Edition', 20, 1, 102),
+                    (102, 'New Edition', 20, 0, NULL),
+                    (103, 'Lost Edition', 20, 1, NULL),
+                    (104, 'Moved Twice', 20, 1, 105),
+                    (105, 'Also Gone', 20, 1, NULL);
+                -- 201: fallback candidate pool (artist + pages + title)
+                INSERT INTO Works (Id, Title, TitleJpn, FileCount, Expunged) VALUES
+                    (201, 'Starlight Academy', '스타라이트 아카데미', 30, 0),
+                    (202, 'Starlight Academy Extra', NULL, 31, 0),
+                    (203, 'Unrelated Title', NULL, 30, 0);
+                INSERT INTO Tags (WorkId, Namespace, Value) VALUES
+                    (201, 'artist', 'hana'),
+                    (202, 'artist', 'hana'),
+                    (203, 'artist', 'someone-else');
+                "#,
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn historical_lineage_suggests_the_current_edition() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        write_lineage_catalog(&library);
+        insert_recovery_manga(&library, "m-old", "101", 20);
+        insert_recovery_manga(&library, "m-lost", "103", 20);
+        insert_recovery_manga(&library, "m-moved", "104", 20);
+
+        let preview = library.preview_manga_catalog_recovery().unwrap();
+        assert_eq!(preview.historical_count, 3);
+        let by_id = preview
+            .items
+            .iter()
+            .map(|item| (item.manga_id.as_str(), item))
+            .collect::<std::collections::BTreeMap<_, _>>();
+
+        let old = by_id["m-old"];
+        assert_eq!(old.suggested_work_id, Some(102));
+        assert_eq!(old.suggestion_reason.as_deref(), Some("현행판"));
+        assert_eq!(old.suggestion_title.as_deref(), Some("New Edition"));
+
+        // 계보가 없거나 현행 작품으로 이어지지 않으면 제안이 없고 검토 전용으로 남는다.
+        assert_eq!(by_id["m-lost"].suggested_work_id, None);
+        assert_eq!(by_id["m-moved"].suggested_work_id, None);
+        assert!(by_id["m-moved"].candidates.is_empty());
+    }
+
+    #[test]
+    fn historical_selection_apply_is_explicit_idempotent_and_recorded() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        write_lineage_catalog(&library);
+        insert_recovery_manga(&library, "m-old", "101", 20);
+
+        let selection = vec![crate::library::models::MangaCatalogRecoverySelection {
+            manga_id: "m-old".to_string(),
+            work_id: 102,
+        }];
+        let first = library
+            .apply_manga_catalog_recovery_selection(&selection)
+            .unwrap();
+        assert_eq!(first.matched_count, 1);
+        assert_eq!(first.created_bookmarks, 1);
+
+        let second = library
+            .apply_manga_catalog_recovery_selection(&selection)
+            .unwrap();
+        assert_eq!(second.matched_count, 1);
+        assert_eq!(second.created_bookmarks, 0);
+        assert_eq!(second.existing_bookmarks, 1);
+
+        let connection = library.connection().unwrap();
+        let (method, bookmark_created, work_id): (String, i64, String) = connection
+            .query_row(
+                "SELECT match_method, bookmark_created, work_id
+                 FROM manga_catalog_recovery_links WHERE manga_id = 'm-old'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(method, "historical_lineage");
+        assert_eq!(bookmark_created, 1);
+        assert_eq!(work_id, "102");
+    }
+
+    #[test]
+    fn historical_selection_rejects_unreviewed_or_inactive_targets() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        write_lineage_catalog(&library);
+        insert_recovery_manga(&library, "m-lost", "103", 20);
+
+        // 제안되지 않은 작품·존재하지 않는 manga·삭제된 작품은 모두 무시된다.
+        let result = library
+            .apply_manga_catalog_recovery_selection(&[
+                crate::library::models::MangaCatalogRecoverySelection {
+                    manga_id: "m-lost".to_string(),
+                    work_id: 102,
+                },
+                crate::library::models::MangaCatalogRecoverySelection {
+                    manga_id: "m-missing".to_string(),
+                    work_id: 102,
+                },
+                crate::library::models::MangaCatalogRecoverySelection {
+                    manga_id: "m-lost".to_string(),
+                    work_id: 101,
+                },
+            ])
+            .unwrap();
+        assert_eq!(result.matched_count, 0);
+        assert_eq!(result.created_bookmarks, 0);
+        let bookmarks: i64 = library
+            .connection()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM online_catalog_bookmarks", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(bookmarks, 0);
+    }
+
+    #[test]
+    fn fallback_candidates_rank_artist_pages_and_title() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        write_lineage_catalog(&library);
+        // 작가+페이지+제목 3신호: 제안. 작가는 info 형식이 아니라 폴더명에서 오므로 직접 넣는다.
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO manga_series
+                    (id, relative_path, title, author, gallery_id, page_count,
+                     thumbnail_relative_path, scanned_at, modified_at)
+                 VALUES ('m-cand', 'path-cand', 'Starlight Academy', 'hana', NULL, 30,
+                         'thumb.webp', 'now', 'now')",
+                [],
+            )
+            .unwrap();
+        // 제목만 유사(작가·페이지 불일치): 후보에서 제외된다.
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO manga_series
+                    (id, relative_path, title, author, gallery_id, page_count,
+                     thumbnail_relative_path, scanned_at, modified_at)
+                 VALUES ('m-title-only', 'path-title', 'Starlight Academy', 'stranger', NULL, 99,
+                         'thumb.webp', 'now', 'now')",
+                [],
+            )
+            .unwrap();
+
+        let preview = library.preview_manga_catalog_recovery().unwrap();
+        assert_eq!(preview.fallback_count, 2);
+        let by_id = preview
+            .items
+            .iter()
+            .map(|item| (item.manga_id.as_str(), item))
+            .collect::<std::collections::BTreeMap<_, _>>();
+
+        let ranked = &by_id["m-cand"].candidates;
+        assert!(!ranked.is_empty());
+        assert_eq!(ranked[0].work_id, 201);
+        assert_eq!(
+            ranked[0].confidence,
+            crate::library::models::MangaRecoveryConfidence::Suggested
+        );
+        assert!(ranked[0]
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("작가")));
+        assert!(ranked.len() <= 3);
+        // 페이지 신호 단일(작가·제목 불일치) 작품은 후보에서 제외된다.
+        assert!(ranked.iter().all(|candidate| candidate.work_id != 203));
+
+        assert!(by_id["m-title-only"].candidates.is_empty());
+    }
+
+    #[test]
+    fn fallback_selection_apply_records_the_chosen_mapping() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        write_lineage_catalog(&library);
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO manga_series
+                    (id, relative_path, title, author, gallery_id, page_count,
+                     thumbnail_relative_path, scanned_at, modified_at)
+                 VALUES ('m-cand', 'path-cand', 'Starlight Academy', 'hana', NULL, 30,
+                         'thumb.webp', 'now', 'now')",
+                [],
+            )
+            .unwrap();
+
+        let result = library
+            .apply_manga_catalog_recovery_selection(&[
+                crate::library::models::MangaCatalogRecoverySelection {
+                    manga_id: "m-cand".to_string(),
+                    work_id: 201,
+                },
+            ])
+            .unwrap();
+        assert_eq!(result.matched_count, 1);
+        assert_eq!(result.created_bookmarks, 1);
+
+        // 재실행해도 북마크·링크가 중복되지 않는다.
+        let again = library
+            .apply_manga_catalog_recovery_selection(&[
+                crate::library::models::MangaCatalogRecoverySelection {
+                    manga_id: "m-cand".to_string(),
+                    work_id: 201,
+                },
+            ])
+            .unwrap();
+        assert_eq!(again.created_bookmarks, 0);
+
+        let connection = library.connection().unwrap();
+        let (method, work_id): (String, String) = connection
+            .query_row(
+                "SELECT match_method, work_id FROM manga_catalog_recovery_links
+                 WHERE manga_id = 'm-cand'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(method, "candidate_review");
+        assert_eq!(work_id, "201");
+    }
+
+    #[test]
+    fn numeric_id_in_title_recovers_a_missing_gallery_id() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        write_lineage_catalog(&library);
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO manga_series
+                    (id, relative_path, title, author, gallery_id, page_count,
+                     thumbnail_relative_path, scanned_at, modified_at)
+                 VALUES ('m-num', 'path-num', 'Series #202 memo', 'unknown', 'no-id', 31,
+                         'thumb.webp', 'now', 'now')",
+                [],
+            )
+            .unwrap();
+
+        let preview = library.preview_manga_catalog_recovery().unwrap();
+        let item = preview
+            .items
+            .iter()
+            .find(|item| item.manga_id == "m-num")
+            .unwrap();
+        assert_eq!(
+            item.status,
+            crate::library::models::MangaCatalogRecoveryStatus::Fallback
+        );
+        assert!(item
+            .candidates
+            .iter()
+            .any(|candidate| candidate.work_id == 202
+                && candidate.confidence
+                    == crate::library::models::MangaRecoveryConfidence::Suggested));
+    }
 }

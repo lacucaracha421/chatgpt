@@ -437,6 +437,18 @@ Remaining:
 - Add targeted VPS-backed lookup/candidate review for the 17 fallback rows; never auto-confirm from title similarity alone.
 - Add read-only selected-backup ingestion only if current DB metadata is insufficient; do not require whole-DB restore.
 
+2026-09-04 fallback-phase implementation:
+- Preview now attaches a deterministic lineage suggestion to historical items (`CurrentGid` -> `FirstGid` -> `ParentGid`, each required to resolve to an active `Expunged = 0` work; otherwise the item stays review-only) with old ID -> proposed active ID, reason, and title.
+- Preview now attaches up to 3 ranked fallback candidates with reasons and confidence: exact numeric-ID hits and 3-signal (artist + pages + title) matches are `suggested`, 2-signal matches are `review`, single-signal (including title-only) matches are excluded entirely.
+- New explicit `apply_manga_catalog_recovery_selection` command bookmarks only preview-validated (manga, work) pairs, transactionally and idempotently, recording `historical_lineage` / `candidate_review` in `manga_catalog_recovery_links`. Exact-active bulk apply is unchanged.
+- Manga Browser shows lineage suggestions and candidate lists with per-item registration; nothing auto-applies.
+- Rust coverage: lineage suggestion/unresolved stays review-only, selection apply + idempotency + rejection of unreviewed/inactive targets, candidate ranking + single-signal exclusion, mapping recording, numeric-ID recovery. Manga Browser UI coverage passes.
+- No schema migration, no catalog reimport, no deletion of `manga_series` metadata.
+
+Remaining:
+- Targeted VPS-backed lookup for gallery IDs absent from the local catalog (needs network + credentials; local ranking covers review in the meantime).
+- Read-only selected-backup ingestion only if current DB metadata proves insufficient.
+
 2026-09-03 read-only live-library audit:
 - The current DB still contains 243 `manga_series` rows even though the configured manga root no longer exists; no original series folders or `.lakomics-thumbs` survive.
 - 232 rows have a numeric `gallery_id`.

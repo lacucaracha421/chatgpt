@@ -2619,6 +2619,34 @@ input:disabled {
   gap: var(--space-2);
 }
 
+.manga-browser__recovery-list {
+  display: grid;
+  gap: var(--space-2);
+  font-size: 0.75rem;
+}
+
+.manga-browser__recovery-list > strong {
+  font-size: 0.78rem;
+}
+
+.manga-browser__recovery-item {
+  display: grid;
+  gap: var(--space-1);
+  padding-top: var(--space-2);
+  border-top: var(--border-width) solid var(--color-border);
+}
+
+.manga-browser__recovery-item > span,
+.manga-browser__recovery-candidate > span {
+  color: var(--color-muted);
+}
+
+.manga-browser__recovery-candidate {
+  display: grid;
+  gap: var(--space-1);
+  padding-left: var(--space-2);
+}
+
 :is(.view-toolbar__content, .collection-browser__library-controls) > .manga-browser__search {
   display: flex;
   align-items: center;

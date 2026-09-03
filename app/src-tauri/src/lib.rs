@@ -162,6 +162,7 @@ pub fn run() {
             commands::list_manga_series,
             commands::preview_manga_catalog_recovery,
             commands::apply_manga_catalog_recovery,
+            commands::apply_manga_catalog_recovery_selection,
             commands::import_vck_catalog,
             commands::get_online_catalog_status,
             commands::search_online_catalog,

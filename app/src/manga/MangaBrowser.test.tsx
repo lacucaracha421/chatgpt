@@ -125,6 +125,57 @@ describe("MangaBrowser", () => {
     expect(screen.getByRole("button", { name: "확정 0개 북마크 등록" })).toBeDisabled();
   });
 
+  it("shows lineage suggestions and fallback candidates with explicit per-item apply", async () => {
+    const gateway = createGateway({ root: "C:\\manga", series });
+    gateway.previewMangaCatalogRecovery = vi.fn()
+      .mockResolvedValueOnce({
+        totalCount: 3,
+        exactActiveCount: 1,
+        historicalCount: 1,
+        fallbackCount: 1,
+        alreadyBookmarkedCount: 0,
+        items: [
+          { mangaId: "m1", title: "A", author: "a", galleryId: "10", pageCount: 20, status: "exact_active" as const, workId: 10, catalogTitle: "A", catalogTitleJpn: null, catalogFileCount: 20, bookmarked: false, suggestedWorkId: null, suggestionReason: null, suggestionTitle: null, candidates: [] },
+          { mangaId: "m3", title: "C", author: "c", galleryId: "11", pageCount: 21, status: "historical" as const, workId: 11, catalogTitle: "C", catalogTitleJpn: null, catalogFileCount: 21, bookmarked: false, suggestedWorkId: 12, suggestionReason: "현행판", suggestionTitle: "C New", candidates: [] },
+          {
+            mangaId: "m4", title: "D", author: "d", galleryId: null, pageCount: 23, status: "fallback" as const, workId: null, catalogTitle: null, catalogTitleJpn: null, catalogFileCount: null, bookmarked: false,
+            suggestedWorkId: null, suggestionReason: null, suggestionTitle: null,
+            candidates: [
+              { workId: 13, title: "D New", titleJpn: null, artist: "d", fileCount: 23, reasons: ["작가 일치", "페이지 수 일치"], confidence: "review" as const },
+            ],
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        totalCount: 3,
+        exactActiveCount: 1,
+        historicalCount: 1,
+        fallbackCount: 1,
+        alreadyBookmarkedCount: 1,
+        items: [],
+      });
+    gateway.applyMangaCatalogRecoverySelection = vi.fn().mockResolvedValue({
+      matchedCount: 1,
+      createdBookmarks: 1,
+      existingBookmarks: 0,
+    });
+
+    render(<LibraryProvider gateway={gateway}><MangaBrowser /></LibraryProvider>);
+    await screen.findByText("T1");
+    await userEvent.click(screen.getByRole("button", { name: "카탈로그로 복구" }));
+
+    expect(await screen.findByText("과거 작품 계보 제안 (자동 등록 안 함)")).toBeVisible();
+    expect(screen.getByText("→ 현행판 C New (ID 12)")).toBeVisible();
+    expect(screen.getByText("검토 필요 (자동 등록 안 함)")).toBeVisible();
+    expect(screen.getByText("D New · d · 23페이지 (ID 13)")).toBeVisible();
+
+    const applyButtons = screen.getAllByRole("button", { name: "이 작품으로 등록" });
+    expect(applyButtons.length).toBe(2);
+    await userEvent.click(applyButtons[0]!);
+    await waitFor(() => expect(gateway.applyMangaCatalogRecoverySelection).toHaveBeenCalledWith([{ mangaId: "m3", workId: 12 }]));
+    await waitFor(() => expect(gateway.previewMangaCatalogRecovery).toHaveBeenCalledTimes(2));
+  });
+
   it("switches between local and online manga sources", async () => {
     const gateway = createGateway({ root: "C:\\manga", series });
     gateway.getOnlineCatalogStatus = vi.fn().mockResolvedValue({

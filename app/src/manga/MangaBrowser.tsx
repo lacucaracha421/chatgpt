@@ -86,6 +86,18 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
     } finally { setRecoveryBusy(false); }
   }
 
+  async function applyRecoverySelection(mangaId: string, workId: number) {
+    if (!gateway.applyMangaCatalogRecoverySelection || !gateway.previewMangaCatalogRecovery) return;
+    setRecoveryBusy(true);
+    try {
+      const result = await gateway.applyMangaCatalogRecoverySelection([{ mangaId, workId }]);
+      setMessage(result.createdBookmarks > 0 ? "선택한 작품을 북마크에 등록했습니다" : "이미 등록된 북마크입니다");
+      setRecovery(await gateway.previewMangaCatalogRecovery());
+    } catch {
+      setMessage("선택한 작품 등록에 실패했습니다");
+    } finally { setRecoveryBusy(false); }
+  }
+
   useEffect(() => {
     let active = true;
     void (async () => {
@@ -157,7 +169,7 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
       </>}
     />
     {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
-    {recovery && <MangaRecoveryPanel preview={recovery} busy={recoveryBusy} onApply={() => void applyRecovery()} onClose={() => setRecovery(null)} />}
+    {recovery && <MangaRecoveryPanel preview={recovery} busy={recoveryBusy} onApply={() => void applyRecovery()} onApplySelection={(mangaId, workId) => void applyRecoverySelection(mangaId, workId)} onClose={() => setRecovery(null)} />}
     <div className="manga-browser__content">
       {!series ? <Skeleton className="manga-browser__skeleton" label="망가를 불러오는 중" /> : series.length === 0 ? (
         <EmptyState title="망가가 없습니다">망가 폴더에 시리즈 폴더를 추가하세요.</EmptyState>
@@ -168,8 +180,10 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
   </section>;
 }
 
-function MangaRecoveryPanel({ preview, busy, onApply, onClose }: { preview: MangaCatalogRecoveryPreview; busy: boolean; onApply(): void; onClose(): void }) {
+function MangaRecoveryPanel({ preview, busy, onApply, onApplySelection, onClose }: { preview: MangaCatalogRecoveryPreview; busy: boolean; onApply(): void; onApplySelection(mangaId: string, workId: number): void; onClose(): void }) {
   const exactPending = preview.items.filter((item) => item.status === "exact_active" && !item.bookmarked).length;
+  const historicalItems = preview.items.filter((item) => item.status === "historical");
+  const fallbackItems = preview.items.filter((item) => item.status === "fallback");
   return <div className="manga-browser__recovery" role="region" aria-label="카탈로그 복구 미리보기">
     <div className="manga-browser__recovery-summary">
       <strong>카탈로그 복구 미리보기</strong>
@@ -183,6 +197,32 @@ function MangaRecoveryPanel({ preview, busy, onApply, onClose }: { preview: Mang
       <Button size="sm" disabled={busy || exactPending === 0} onClick={onApply}>확정 {exactPending}개 북마크 등록</Button>
       <Button size="sm" variant="ghost" disabled={busy} onClick={onClose}>닫기</Button>
     </div>
+    {historicalItems.length > 0 && <div className="manga-browser__recovery-list" aria-label="과거 작품 계보 제안">
+      <strong>과거 작품 계보 제안 (자동 등록 안 함)</strong>
+      {historicalItems.map((item) => <div key={item.mangaId} className="manga-browser__recovery-item">
+        <span>{item.title} · {item.author} · {item.pageCount}페이지 · ID {item.galleryId ?? "없음"}</span>
+        {item.suggestedWorkId != null
+          ? <span>→ {item.suggestionReason} {item.suggestionTitle} (ID {item.suggestedWorkId})</span>
+          : <span>연결 가능한 현행 작품이 없어 검토 전용으로 남습니다</span>}
+        {item.suggestedWorkId != null && <div className="manga-browser__recovery-actions">
+          <Button size="sm" disabled={busy || item.bookmarked} onClick={() => onApplySelection(item.mangaId, item.suggestedWorkId!)}>이 작품으로 등록</Button>
+        </div>}
+      </div>)}
+    </div>}
+    {fallbackItems.length > 0 && <div className="manga-browser__recovery-list" aria-label="검토 필요 후보">
+      <strong>검토 필요 (자동 등록 안 함)</strong>
+      {fallbackItems.map((item) => <div key={item.mangaId} className="manga-browser__recovery-item">
+        <span>{item.title} · {item.author} · {item.pageCount}페이지 · ID {item.galleryId ?? "없음"}</span>
+        {(item.candidates ?? []).length === 0 && <span>후보가 없습니다</span>}
+        {(item.candidates ?? []).map((candidate) => <div key={candidate.workId} className="manga-browser__recovery-candidate">
+          <span>{candidate.title}{candidate.artist ? ` · ${candidate.artist}` : ""}{candidate.fileCount != null ? ` · ${candidate.fileCount}페이지` : ""} (ID {candidate.workId})</span>
+          <span>{candidate.reasons.join(" · ")}{candidate.confidence === "suggested" ? " · 제안" : " · 검토용"}</span>
+          <div className="manga-browser__recovery-actions">
+            <Button size="sm" disabled={busy} onClick={() => onApplySelection(item.mangaId, candidate.workId)}>이 작품으로 등록</Button>
+          </div>
+        </div>)}
+      </div>)}
+    </div>}
   </div>;
 }
 

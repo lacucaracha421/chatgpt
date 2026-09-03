@@ -57,8 +57,8 @@ use error::LibraryError;
 pub(crate) use ingestion::MAX_IMAGE_BYTES;
 use lock::LibraryLease;
 use models::{
-    LibrarySummary, MangaCatalogRecoveryApplyResult, MangaCatalogRecoveryPreview, MangaSeries,
-    TrashPolicy,
+    LibrarySummary, MangaCatalogRecoveryApplyResult, MangaCatalogRecoveryPreview,
+    MangaCatalogRecoverySelection, MangaSeries, TrashPolicy,
 };
 use rusqlite::{Connection, OptionalExtension};
 pub(crate) use work_artwork::MAX_WORK_ARTWORK_BYTES;
@@ -278,6 +278,13 @@ impl Library {
         &self,
     ) -> Result<MangaCatalogRecoveryApplyResult, LibraryError> {
         manga::apply_exact_catalog_recovery(self)
+    }
+
+    pub fn apply_manga_catalog_recovery_selection(
+        &self,
+        selections: &[MangaCatalogRecoverySelection],
+    ) -> Result<MangaCatalogRecoveryApplyResult, LibraryError> {
+        manga::apply_selected_catalog_recovery(self, selections)
     }
 
     pub fn manga_cover(&self, series_id: &str) -> Result<MediaResponse, LibraryError> {

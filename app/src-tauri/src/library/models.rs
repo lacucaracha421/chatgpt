@@ -1156,6 +1156,25 @@ pub enum MangaCatalogRecoveryStatus {
     Fallback,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MangaRecoveryConfidence {
+    Suggested,
+    Review,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MangaRecoveryCandidate {
+    pub work_id: u64,
+    pub title: String,
+    pub title_jpn: Option<String>,
+    pub artist: Option<String>,
+    pub file_count: Option<u64>,
+    pub reasons: Vec<String>,
+    pub confidence: MangaRecoveryConfidence,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MangaCatalogRecoveryItem {
@@ -1170,6 +1189,17 @@ pub struct MangaCatalogRecoveryItem {
     pub catalog_title_jpn: Option<String>,
     pub catalog_file_count: Option<u64>,
     pub bookmarked: bool,
+    pub suggested_work_id: Option<u64>,
+    pub suggestion_reason: Option<String>,
+    pub suggestion_title: Option<String>,
+    pub candidates: Vec<MangaRecoveryCandidate>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MangaCatalogRecoverySelection {
+    pub manga_id: String,
+    pub work_id: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
