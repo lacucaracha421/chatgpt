@@ -41,15 +41,13 @@ function viewKey(view) {
 
 function restoreMobileView(saved, validIds) {
   const valid = validIds instanceof Set ? validIds : new Set(validIds || []);
-  if (saved?.view?.type === "home") return { type: "home" };
   if (saved?.view?.type === "recent") return { type: "recent" };
-  if (saved?.view?.type === "revisit") return { type: "revisit" };
   if (saved?.view?.type === "classification" && valid.has(saved.view.classificationId)) {
     return { type: "classification", classificationId: saved.view.classificationId };
   }
   if (valid.has(saved?.selectedId)) return { type: "classification", classificationId: saved.selectedId };
-  // 유효한 저장 상태가 없으면 Home이 기본 뷰다.
-  return { type: "home" };
+  // 홈은 상위 탭 대시보드이고 Assets 뷰 모델의 기본은 최근 100개다.
+  return { type: "recent" };
 }
 
 function createViewTransition(initialView = null) {
@@ -211,7 +209,7 @@ function mobileMetadata(asset = {}, classifications = []) {
   };
 }
 
-function createStore({ requestAssets, requestVirtualView, requestTicket } = {}) {
+function createStore({ requestAssets, requestVirtualView, requestTicket, requestTickets } = {}) {
   const scopes = new Map(); // viewKey → scope state
   const tickets = new Map(); // `${assetId}:${variant}` → {url, contentType, sizeBytes, expiresAt}
   let listeners = new Set();
@@ -348,6 +346,66 @@ function createStore({ requestAssets, requestVirtualView, requestTicket } = {}) 
   }
 
   // --- 미디어 티켓 캐시 ---
+  const batchInflight = new Map(); // key → Promise
+  async function ticketsFor(requests) {
+    // Split cache hits and existing inflight work first. Register every key in a
+    // new batch before awaiting it so overlapping callers can dedupe all misses.
+    const results = new Map();
+    const missing = [];
+    const waiting = [];
+    for (const item of requests || []) {
+      const assetId = typeof item === "string" ? item : item?.assetId;
+      const variant = (typeof item === "object" ? item?.variant : null) || "thumbnail";
+      if (!assetId) continue;
+      const key = `${assetId}:${variant}`;
+      const cached = cachedTicket(assetId, variant);
+      if (cached) { results.set(key, cached); continue; }
+      const inflight = batchInflight.get(key);
+      if (inflight) { waiting.push([key, inflight]); continue; }
+      missing.push({ assetId, variant });
+    }
+
+    if (missing.length && typeof requestTickets === "function") {
+      const batchPromise = (async () => {
+        const result = await requestTickets(missing);
+        for (const entry of result?.items || []) {
+          if (!entry?.ok) continue;
+          const key = `${entry.asset_id}:${entry.variant}`;
+          const value = {
+            ok: true,
+            url: entry.url,
+            contentType: entry.contentType,
+            sizeBytes: entry.sizeBytes,
+            expiresAt: Date.parse(entry.expiresAt || "") || Date.now() + TICKET_TTL_MS,
+          };
+          tickets.set(key, value);
+          results.set(key, value);
+        }
+        return result;
+      })();
+
+      const owned = [];
+      for (const entry of missing) {
+        const key = `${entry.assetId}:${entry.variant}`;
+        const perItem = batchPromise.then(() => results.get(key) || { ok: false, code: "ticket_failed" });
+        batchInflight.set(key, perItem);
+        owned.push([key, perItem]);
+      }
+      try {
+        await batchPromise;
+        for (const [key, promise] of owned) results.set(key, await promise);
+      } finally {
+        for (const [key, promise] of owned) {
+          if (batchInflight.get(key) === promise) batchInflight.delete(key);
+        }
+      }
+    }
+
+    // Existing inflight work may belong to a different overlapping batch.
+    for (const [key, promise] of waiting) results.set(key, await promise);
+    return { ok: true, items: [...results.values()] };
+  }
+
   async function ticketFor(assetId, variant, { force = false } = {}) {
     const key = `${assetId}:${variant}`;
     if (!force) {
@@ -422,6 +480,7 @@ function createStore({ requestAssets, requestVirtualView, requestTicket } = {}) 
     saveScroll,
     restoreScroll,
     ticketFor,
+    ticketsFor,
     cachedTicket,
     clearTickets,
     neighbor,

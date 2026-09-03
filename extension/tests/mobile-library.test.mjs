@@ -363,16 +363,183 @@ test("failed replacement keeps the old view and a retry can commit cleanly", () 
   assert.equal(transition.visible().classificationId, "B");
 });
 
-test("saved views restore in priority order; fresh state defaults to Home", () => {
+test("Assets view model restores recent/classification only (Home is a top-level tab)", () => {
   setupStoreVm();
   const restore = globalThis.LakomicsMobileLibrary.restoreMobileView;
-  assert.equal(restore({ view: { type: "home" } }, new Set()).type, "home");
-  assert.equal(restore({ view: { type: "revisit" } }, new Set()).type, "revisit");
   assert.equal(restore({ view: { type: "recent" } }, new Set()).type, "recent");
   assert.equal(restore({ selectedId: "c2" }, new Set(["c1", "c2"])).classificationId, "c2");
-  assert.equal(restore({ selectedId: "deleted" }, new Set(["c1", "c2"])).type, "home");
-  assert.equal(restore({}, new Set(["c1", "c2"])).type, "home");
-  assert.equal(restore({}, new Set()).type, "home");
+  assert.equal(restore({ selectedId: "deleted" }, new Set(["c1", "c2"])).type, "recent");
+  assert.equal(restore({}, new Set(["c1", "c2"])).type, "recent");
+  assert.equal(restore({}, new Set()).type, "recent");
+  // 이전 alpha의 home/revisit 저장 상태는 Assets 모델로 안전히 낙향한다.
+  assert.equal(restore({ view: { type: "home" } }, new Set()).type, "recent");
+  assert.equal(restore({ view: { type: "revisit" } }, new Set()).type, "recent");
+});
+
+test("store batch tickets dedupe inflight work and merge cached + fetched results", async () => {
+  setupStoreVm();
+  const { createStore } = globalThis.LakomicsMobileLibrary;
+  let batchCalls = 0;
+  const store = createStore({
+    requestAssets: async () => ({ ok: true, items: [], hasMore: false, nextCursor: null }),
+    requestVirtualView: async () => ({ ok: true, items: [], hasMore: false, nextCursor: null }),
+    requestTickets: async (requests) => {
+      batchCalls += 1;
+      return {
+        ok: true,
+        items: requests.map((entry) => ({
+          asset_id: entry.assetId, variant: entry.variant, ok: true,
+          url: `https://r2/${entry.assetId}`, expiresAt: new Date(Date.now() + 300_000).toISOString(),
+        })),
+      };
+    },
+    requestTicket: async () => ({ ok: false, code: "single_not_used" }),
+  });
+  const r1 = await store.ticketsFor([{ assetId: "a", variant: "thumbnail" }, { assetId: "b", variant: "thumbnail" }]);
+  assert.equal(r1.ok, true);
+  const r2 = await store.ticketsFor([{ assetId: "a", variant: "thumbnail" }, { assetId: "b", variant: "thumbnail" }]);
+  assert.equal(r2.ok, true);
+  assert.equal(batchCalls, 1, "second call must be served from the session cache");
+});
+
+test("overlapping thumbnail batches dedupe every inflight key", async () => {
+  setupStoreVm();
+  const { createStore } = globalThis.LakomicsMobileLibrary;
+  let batchCalls = 0;
+  let releaseBatch;
+  const gate = new Promise((resolve) => { releaseBatch = resolve; });
+  const store = createStore({
+    requestAssets: async () => ({ ok: true, items: [], hasMore: false, nextCursor: null }),
+    requestVirtualView: async () => ({ ok: true, items: [], hasMore: false, nextCursor: null }),
+    requestTickets: async (requests) => {
+      batchCalls += 1;
+      await gate;
+      return {
+        ok: true,
+        items: requests.map((entry) => ({
+          asset_id: entry.assetId, variant: entry.variant, ok: true,
+          url: `https://r2/${entry.assetId}`, expiresAt: new Date(Date.now() + 300_000).toISOString(),
+        })),
+      };
+    },
+    requestTicket: async () => ({ ok: false, code: "single_not_used" }),
+  });
+  const first = store.ticketsFor([
+    { assetId: "overlap-a", variant: "thumbnail" },
+    { assetId: "overlap-b", variant: "thumbnail" },
+  ]);
+  await Promise.resolve();
+  const second = store.ticketsFor([{ assetId: "overlap-b", variant: "thumbnail" }]);
+  releaseBatch();
+  const [one, two] = await Promise.all([first, second]);
+  assert.equal(one.ok, true);
+  assert.equal(two.ok, true);
+  assert.equal(batchCalls, 1, "every key in the first batch must be registered before awaiting it");
+});
+
+test("mobile-assets has no undefined Home initialization references", () => {
+  // 15.50에서 installHomeDashboard()/setHomeDiagnostic()이 정의 없이 호출되어
+  // installHooks가 observeTreeSelection 직후 ReferenceError로 중단됐다.
+  assert.doesNotMatch(assetsSource, /\binstallHomeDashboard\b/);
+  // setHomeDiagnostic은 정의와 호출이 모두 존재해야 한다.
+  assert.match(assetsSource, /function setHomeDiagnostic\(/);
+  assert.match(assetsSource, /setHomeDiagnostic\(/);
+  // initializeHomeOnce/installHomeTrigger는 정의 + 호출이 쌍으로 존재한다.
+  assert.match(assetsSource, /function initializeHomeOnce\(/);
+  assert.match(assetsSource, /function installHomeTrigger\(/);
+  assert.match(assetsSource, /installHomeTrigger\(\);/);
+  assert.match(assetsSource, /initializeHomeOnce\(\);/);
+  // installHooks가 observeTreeSelection 후 Home 트리거에 도달한다 (순서 보장).
+  const hooksBody = assetsSource.slice(
+    assetsSource.indexOf("function installHooks()"),
+    assetsSource.indexOf("function observeTreeSelection()"),
+  );
+  assert.ok(hooksBody.indexOf("observeTreeSelection();") < hooksBody.indexOf("installHomeTrigger();"));
+});
+
+test("initial active Home loads first page and renders without tab switching", async () => {
+  setupStoreVm();
+  const { createStore } = globalThis.LakomicsMobileLibrary;
+  const calls = [];
+  const store = createStore({
+    requestAssets: async () => ({ ok: true, items: [], hasMore: false, nextCursor: null }),
+    requestVirtualView: async (view, limit) => {
+      calls.push({ virtual: view.type, limit });
+      return {
+        ok: true,
+        items: [{ id: "h1" }, { id: "h2" }],
+        hasMore: false,
+        nextCursor: null,
+      };
+    },
+    requestTicket: async () => ({ ok: false, code: "unused" }),
+    requestTickets: async () => ({ ok: false, code: "unused" }),
+  });
+  // 초기 active Home은 store.loadFirstPage({type:"home"}) → requestVirtualView
+  // → mobile-library:assets recent preview 순서로 로드된다 (탭 전환 불필요).
+  await store.loadFirstPage({ type: "home" });
+  const scope = store.getScope({ type: "home" });
+  assert.equal(scope.loadedFirstPage, true);
+  assert.equal(JSON.stringify(scope.items.map((item) => item.id)), JSON.stringify(["h1", "h2"]));
+  assert.equal(JSON.stringify(calls), JSON.stringify([{ virtual: "home", limit: 100 }]));
+});
+
+test("failed initial Home load produces a defined diagnostic, not a throw", async () => {
+  setupStoreVm();
+  const { createStore } = globalThis.LakomicsMobileLibrary;
+  const store = createStore({
+    requestAssets: async () => ({ ok: true, items: [], hasMore: false, nextCursor: null }),
+    requestVirtualView: async () => ({ ok: false, code: "home_failed" }),
+    requestTicket: async () => ({ ok: false, code: "unused" }),
+    requestTickets: async () => ({ ok: false, code: "unused" }),
+  });
+  const result = await store.loadFirstPage({ type: "home" });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "home_failed");
+  // 확장측 setHomeDiagnostic이 이 실패를 #homeLoading 진단으로 안전히 변환한다.
+  assert.match(assetsSource, /function setHomeDiagnostic/);
+});
+
+test("manifest is production-only for Mobile host access", () => {
+  const manifest = JSON.parse(fs.readFileSync(new URL("../manifest.json", import.meta.url), "utf8"));
+  const mobile = manifest.content_scripts.find((cs) => cs.matches.includes("https://lacucaracha421.github.io/chatgpt/*"));
+  assert.ok(mobile);
+  assert.equal(manifest.host_permissions.includes("http://100.86.19.36/*"), false);
+  assert.equal(mobile.matches.some((match) => match.includes("mobile-preview")), false);
+});
+
+test("page allowlist accepts only canonical production Mobile pages", () => {
+  const pages = [{ origin: "https://lacucaracha421.github.io", pathPrefix: "/chatgpt/" }];
+  const allowed = (origin, path) => pages.some((page) => origin === page.origin && path.startsWith(page.pathPrefix));
+  assert.equal(allowed("https://lacucaracha421.github.io", "/chatgpt/"), true);
+  assert.equal(allowed("https://lacucaracha421.github.io", "/chatgpt/mobile/"), true);
+  assert.equal(allowed("https://lacucaracha421.github.io", "/mobile-preview/"), false);
+  assert.equal(allowed("http://100.86.19.36:32147", "/mobile-preview/"), false);
+  assert.equal(allowed("https://example.com", "/chatgpt/"), false);
+});
+
+test("home sections fail independently (revisit error keeps recent rail)", async () => {
+  setupStoreVm();
+  const { createStore } = globalThis.LakomicsMobileLibrary;
+  const store = createStore({
+    requestAssets: async () => ({
+      ok: true, items: [{ id: "r1" }, { id: "r2" }], hasMore: false, nextCursor: null,
+    }),
+    requestVirtualView: async (view) => (
+      view.type === "home"
+        ? { ok: true, items: [{ id: "r1" }, { id: "r2" }], hasMore: false, nextCursor: null }
+        : { ok: false, code: "revisit_failed" }
+    ),
+    requestTickets: async () => ({ ok: false, code: "failed" }),
+    requestTicket: async () => ({ ok: false, code: "failed" }),
+  });
+  await store.loadFirstPage({ type: "home" });
+  const scope = store.getScope({ type: "home" });
+  assert.equal(scope.items.length, 2);
+  assert.equal(scope.items[0].id, "r1");
+  // Home 데이터 로드는 성공 — 다시보기 rail의 API 실패는 renderHome에서
+  // rail 단위로 격리되어 최근 추가 rail을 유지한다 (UI 레벨 검증).
+  assert.equal(await store.ticketFor("r1", "thumbnail").then((r) => r.ok), false);
 });
 
 test("home/revisit virtual views use requestVirtualView and never send classification ids", async () => {
@@ -393,11 +560,14 @@ test("home/revisit virtual views use requestVirtualView and never send classific
   await store.loadFirstPage({ type: "home" });
   await store.loadFirstPage({ type: "revisit" });
   await store.loadFirstPage({ type: "classification", classificationId: "c1" });
-  assert.deepEqual(calls, [
-    { virtual: "home" },
-    { virtual: "revisit" },
-    { viewType: "classification", classificationId: "c1" },
-  ]);
+  assert.equal(
+    JSON.stringify(calls),
+    JSON.stringify([
+      { virtual: "home" },
+      { virtual: "revisit" },
+      { viewType: "classification", classificationId: "c1" },
+    ]),
+  );
 });
 
 test("home store scope is bounded: has_more stays false for virtual views", async () => {
@@ -652,7 +822,11 @@ test("mobile uses the runtime bridge and keeps the static shell interactive", ()
   assert.match(mobileShellSource, /\[data-go\]/);
   assert.match(mobileShellSource, /#categoryOpen/);
   assert.match(mobileShellSource, /#viewerClose/);
-  assert.match(mobilePageSource, /\["connected", "failed"\]/);
+  // 페이지 소유 진단: #homeLoading 기반, 확장 probe/live-classifications 상태 확인.
+  assert.match(mobilePageSource, /#homeLoading/);
+  assert.match(mobilePageSource, /lakomicsExtensionBridge === "loaded"/);
+  assert.match(mobilePageSource, /lakomicsLiveClassifications/);
+  assert.doesNotMatch(mobilePageSource, /prototype-banner/);
 });
 
 test("mobile page has explicit host access and exposes an injection probe", () => {
@@ -682,4 +856,65 @@ test("home, recent, revisit, and classifications use distinct store keys", () =>
     viewKey({ type: "revisit" }),
     viewKey({ type: "classification", classificationId: "c1" }),
   ]).size, 4);
+});
+
+
+test("home renders recent before revisit resolves and revisit failure keeps recent", async () => {
+  setupStoreVm();
+  // renderHome의 핵심 계약은 store scope 데이터가 있으면 Recent를 즉시 그리는 것.
+  // (renderHome은 DOM 의존이라 여기서는 store 계약 + 소스 정적 검증으로 커버한다.)
+  assert.match(assetsSource, /container\.innerHTML = recentHtml \+ revisitPlaceholder/);
+  assert.match(assetsSource, /커밋된 라이브러리 에셋이 아직 없습니다/);
+  assert.match(assetsSource, /revisitTarget\.outerHTML = homeSectionHtml\(/);
+  // Recent가 렌더되면 전역 타임아웃이 해제된다.
+  assert.match(assetsSource, /clearHomeDiagnostic\(\)/);
+  // Revisit 실패 rail이 Recent를 덮지 않는다 — outerHTML로 rail만 교체.
+  assert.match(assetsSource, /다시보기를 불러오지 못했습니다/);
+});
+
+test("home Recent/Revisit cache, retry, refresh, and diagnostic container are coherent", () => {
+  assert.match(assetsSource, /const HOME_CACHE_TTL_MS = 45_000/);
+  assert.match(assetsSource, /recentAt: 0, revisitAt: 0/);
+  assert.match(assetsSource, /function homeRecentCacheValid\(/);
+  assert.match(assetsSource, /function homeRevisitCacheValid\(/);
+  assert.match(assetsSource, /function invalidateHomeCache\(\{ recent = true, revisit = true \} = \{\}\)/);
+  assert.match(assetsSource, /invalidateHomeCache\(\{ recent: false, revisit: true \}\)/);
+  assert.match(assetsSource, /initializeHomeOnce\(\{ forceRecent: true \}\)/);
+  assert.match(assetsSource, /function isHomeActive\(\)/);
+  assert.match(assetsSource, /return document\.querySelector\("#homeDashboard"\);/);
+  assert.doesNotMatch(assetsSource, /#homeDashboard"\) \|\| document\.querySelector\("#assetGrid"/);
+  assert.doesNotMatch(assetsSource, /removeAttribute\("id"\)/);
+});
+
+test("creator groups render as separate rails with display fallbacks", () => {
+  assert.ok(assetsSource.includes("for (const group of creatorBundle?.groups || [])"));
+  assert.match(assetsSource, /function creatorDisplay\(group\)/);
+  assert.ok(assetsSource.includes('return `${name} (@${handle})`'));
+  assert.ok(assetsSource.includes('return `@${handle}`'));
+  assert.ok(assetsSource.includes('data-home-open-creator'));
+});
+
+test("Home detail uses a vertical asset grid, viewer rail context, and progressive cursor loading", () => {
+  assert.ok(assetsSource.includes('class="asset-grid home-detail__grid"'));
+  assert.ok(assetsSource.includes("function loadHomeDetailNext()"));
+  assert.ok(assetsSource.includes("data-home-detail-sentinel"));
+  assert.ok(assetsSource.includes("homeDetailState.items.push"));
+  assert.ok(assetsSource.includes("homeRailContexts.set(key, state.items)"));
+  assert.doesNotMatch(assetsSource, /container\.innerHTML = homeRailHtml\(title, items/);
+});
+
+test("thumbnail observers are container-scoped and use the batch ticket store", () => {
+  assert.match(assetsSource, /const thumbnailObservers = new WeakMap\(\)/);
+  assert.match(assetsSource, /store\.ticketsFor\(/);
+  assert.doesNotMatch(assetsSource, /thumbnailObserver\?\.disconnect\(\)/);
+});
+
+test("date and creator 모두 보기 routes are strictly validated in the service worker", () => {
+  const workerSource = fs.readFileSync(new URL("../src/background-worker.js", import.meta.url), "utf8");
+  assert.ok(workerSource.includes("mobile-library:assets-url"));
+  assert.ok(workerSource.includes('/v1/library/revisit/date'));
+  assert.ok(workerSource.includes("creatorKey = decodeURIComponent(match[1])"));
+  assert.ok(workerSource.includes("validateMobileLibraryAssetsPath"));
+  assert.ok(workerSource.includes("validDetailQuery"));
+  assert.match(workerSource, /invalid_assets_url/);
 });

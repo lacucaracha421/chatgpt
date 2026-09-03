@@ -6,12 +6,15 @@
 (() => {
   "use strict";
 
-  const PAGE_ORIGIN = "https://lacucaracha421.github.io";
-  const PAGE_PATH_PREFIX = "/chatgpt/";
+  // Mobile pages: canonical GitHub Pages only.
+  // origin과 path prefix가 정확히 일치해야 하며 와일드카드 origin은 없다.
+  const MOBILE_PAGES = [
+    { origin: "https://lacucaracha421.github.io", pathPrefix: "/chatgpt/" },
+  ];
   const REQUEST_TIMEOUT_MS = 15_000;
   const SORT_KEY = "lakomics.mobile.asset-sort.v1";
 
-  if (location.origin !== PAGE_ORIGIN || !location.pathname.startsWith(PAGE_PATH_PREFIX)) return;
+  if (!MOBILE_PAGES.some((page) => location.origin === page.origin && location.pathname.startsWith(page.pathPrefix))) return;
 
   const library = globalThis.LakomicsMobileLibrary;
   if (!library) return;
@@ -25,8 +28,12 @@
   let activeView = null;
   let viewerView = null;
   let viewerAssetId = null;
+  let viewerRailItems = null; // Home rail/detail 전용 시퀀스
   let ticketInflight = new Map(); // `${assetId}:${variant}` → Promise
-  let thumbnailObserver = null;
+  const thumbnailObservers = new WeakMap(); // container → IntersectionObserver
+  let homeDetailObserver = null;
+  let homeDetailState = null;
+  let homeDashboardScrollY = 0;
   let swipeStart = null;
   let activeSort = "newest";
   const viewTransition = createViewTransition();
@@ -177,6 +184,8 @@
     },
     requestTicket: ({ assetId, variant }) =>
       runtimeRequest("mobile-library:media-ticket", { assetId, variant }),
+    requestTickets: (items) =>
+      runtimeRequest("mobile-library:media-tickets", { items }),
   });
 
   function inflightTicket(key, loader) {
@@ -190,12 +199,7 @@
   // --- 그리드 ---
   function selectedMobileView() {
     const viewRow = document.querySelector("#treeScroll .tree-row.selected[data-lakomics-live-view]");
-    if (viewRow) {
-      const requestedView = clean(viewRow.dataset.lakomicsLiveView, 40);
-      if (requestedView === "home") return { type: "home" };
-      if (requestedView === "revisit") return { type: "revisit" };
-      return { type: "recent" };
-    }
+    if (viewRow) return { type: "recent" };
     const row = document.querySelector("#treeScroll .tree-row.selected[data-lakomics-live-select]");
     const classificationId = clean(row?.dataset?.lakomicsLiveSelect, 240);
     return classificationId ? { type: "classification", classificationId } : null;
@@ -263,70 +267,147 @@
     return `<div class="lakomics-live-empty"><strong>${escapeHtml(name)}</strong><br>커밋된 라이브러리 에셋이 아직 없습니다.</div>`;
   }
 
-  function fillTileImage(img, asset) {
-    const key = `${asset.id}:thumbnail`;
-    inflightTicket(key, () => loadGridThumbnail(asset, (assetId, variant) => store.ticketFor(assetId, variant)))
-      .then((ticket) => {
-        if (!ticket.ok) {
-          img.closest(".asset-tile")?.classList.add("lakomics-tile-failed");
-          return;
-        }
-        img.addEventListener("load", () => {
-          img.closest(".asset-tile")?.classList.add("lakomics-tile-has-thumb");
-        }, { once: true });
-        img.addEventListener("error", () => {
-          img.closest(".asset-tile")?.classList.add("lakomics-tile-failed");
-        }, { once: true });
-        img.src = ticket.url;
-      });
-  }
-
-  function observeThumbnails(grid, scope) {
-    thumbnailObserver?.disconnect();
-    const images = [...grid.querySelectorAll("img[data-lib-thumb]")];
-    const load = (img) => {
-      const index = Number(img.closest("[data-lib-index]")?.dataset.libIndex);
-      const asset = scope.items[index];
-      if (asset) fillTileImage(img, asset);
-    };
-    if (typeof IntersectionObserver !== "function") {
-      images.forEach(load);
+  function applyTileTicket(img, asset, ticket, { highPriority = false } = {}) {
+    if (!img || !asset || !ticket?.ok) {
+      img?.closest(".asset-tile")?.classList.add("lakomics-tile-failed");
       return;
     }
-    thumbnailObserver = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        if (!entry.isIntersecting) continue;
-        thumbnailObserver?.unobserve(entry.target);
-        load(entry.target);
-      }
-    }, { root: null, rootMargin: "500px" });
-    images.forEach((img) => thumbnailObserver.observe(img));
+    if (highPriority) {
+      img.fetchPriority = "high";
+      img.setAttribute("fetchpriority", "high");
+    }
+    img.addEventListener("load", () => {
+      img.closest(".asset-tile")?.classList.add("lakomics-tile-has-thumb");
+    }, { once: true });
+    img.addEventListener("error", () => {
+      img.closest(".asset-tile")?.classList.add("lakomics-tile-failed");
+    }, { once: true });
+    img.src = ticket.url;
   }
 
-  function homeRailHtml(title, assets, { moreAction = "" } = {}) {
-    const tiles = assets.map((asset, index) => tileHtml(asset, index)).join("");
-    return `<section class="home-rail" aria-label="${escapeHtml(title)}">
-      <div class="home-rail__head"><h3>${escapeHtml(title)}</h3>${moreAction}</div>
+  function fillTileImage(img, asset, options = {}) {
+    if (!img || !asset || img.dataset.libThumbLoading === "1") return;
+    img.dataset.libThumbLoading = "1";
+    const key = `${asset.id}:thumbnail`;
+    inflightTicket(key, () => loadGridThumbnail(asset, (assetId, variant) => store.ticketFor(assetId, variant)))
+      .then((ticket) => applyTileTicket(img, asset, ticket, options));
+  }
+
+  const FIRST_VIEWPORT_TILES = 24;
+
+  function railItemsFor(element, scope) {
+    const rail = element.closest("[data-lib-rail]");
+    if (rail) {
+      const items = homeRailContexts.get(rail.dataset.libRail);
+      if (items) return items;
+    }
+    return scope?.items || [];
+  }
+
+  function thumbnailEntries(container, scope) {
+    return [...container.querySelectorAll("img[data-lib-thumb]")].map((img) => {
+      const index = Number(img.closest("[data-lib-index]")?.dataset.libIndex);
+      const items = railItemsFor(img, scope);
+      return { img, asset: items[index] };
+    }).filter((entry) => entry.asset);
+  }
+
+  async function loadThumbnailBatch(entries, { highPriority = false } = {}) {
+    if (!entries.length) return;
+    // Warm the store cache in one bounded request, then each tile resolves locally.
+    await store.ticketsFor(entries.map(({ asset }) => ({ assetId: asset.id, variant: "thumbnail" })));
+    for (const { img, asset } of entries) fillTileImage(img, asset, { highPriority });
+  }
+
+  function observeThumbnails(container, scope) {
+    const previous = thumbnailObservers.get(container);
+    previous?.disconnect();
+    thumbnailObservers.delete(container);
+
+    const entries = thumbnailEntries(container, scope);
+    if (!entries.length) return;
+    if (typeof IntersectionObserver !== "function") {
+      void loadThumbnailBatch(entries, { highPriority: true });
+      return;
+    }
+
+    // First viewport is one/few batch ticket calls rather than one request per tile.
+    const firstBatch = entries.slice(0, FIRST_VIEWPORT_TILES);
+    void loadThumbnailBatch(firstBatch, { highPriority: true });
+    const lazyEntries = entries.slice(FIRST_VIEWPORT_TILES);
+    if (!lazyEntries.length) return;
+
+    const byImage = new Map(lazyEntries.map((entry) => [entry.img, entry]));
+    const observer = new IntersectionObserver((changes) => {
+      const visible = [];
+      for (const change of changes) {
+        if (!change.isIntersecting) continue;
+        observer.unobserve(change.target);
+        const entry = byImage.get(change.target);
+        if (entry) visible.push(entry);
+      }
+      if (visible.length) void loadThumbnailBatch(visible);
+    }, { root: null, rootMargin: "500px" });
+    thumbnailObservers.set(container, observer);
+    lazyEntries.forEach(({ img }) => observer.observe(img));
+  }
+
+  const homeRailContexts = new Map(); // railKey → items (Revisit rail별 독립 시퀀스)
+  let homeRailSequence = 0;
+
+  function homeRailHtml(title, assets, { moreAction = "", subtitle = "", railKey } = {}) {
+    // 각 rail은 자체 asset 시퀀스를 소유한다: Revisit 묶음의 스와이프는 해당
+    // 묶음 안에 머문다. 썸네일/뷰어 조회도 이 시퀀스를 사용한다.
+    const key = railKey || `rail-${++homeRailSequence}`;
+    homeRailContexts.set(key, assets);
+    const tiles = assets.map((asset, index) => {
+      const tile = tileHtml(asset, index)
+        .replace('data-lib-asset="', `data-lib-rail="${escapeHtml(key)}" data-lib-asset="`);
+      return tile;
+    }).join("");
+    const reason = subtitle ? `<span class="home-rail__reason">${escapeHtml(subtitle)}</span>` : "";
+    return `<section class="home-rail" data-lib-rail="${escapeHtml(key)}" aria-label="${escapeHtml(title)}">
+      <div class="home-rail__head"><h3>${escapeHtml(title)}</h3>${reason}${moreAction}</div>
       <div class="home-rail__strip">${tiles}</div>
     </section>`;
   }
 
-  function renderHomeSections({ view }) {
-    const grid = document.querySelector("#assetGrid");
-    if (!grid) return;
-    const scope = store.getScope(view);
-    if (!scope || !scope.loadedFirstPage) return;
-    const items = scope.items;
-    // Home은 최근 추가(가상 최신순 미리보기) 단일 rail로 시작하고, 다시보기는
-    // 전용 뷰에서 제공한다. rail의 타일은 기존 그리드와 동일한 ticket 흐름을
-    // 쓰므로 뷰어/썸네일 인프라가 그대로 재사용된다.
-    const more = `<button class="home-rail__more" data-lakomics-live-view="recent">더 보기 ›</button>`;
-    grid.innerHTML = items.length
-      ? homeRailHtml("최근 추가", items.slice(0, 12), { moreAction: more })
-      : `<div class="lakomics-live-empty">커밋된 라이브러리 에셋이 아직 없습니다.</div>`;
-    observeThumbnails(grid, scope);
-    const total = document.querySelector("#assetTotal");
-    if (total) total.textContent = "";
+  function homeContainer() {
+    // Home owns a dedicated DOM container. Never fall back to #assetGrid.
+    return document.querySelector("#homeDashboard");
+  }
+
+  function isHomeActive() {
+    return document.querySelector('.view[data-view="home"]')?.classList.contains("active") === true;
+  }
+
+  function setHomeDiagnostic(message) {
+    const container = homeContainer();
+    if (!container) return;
+    // A late global diagnostic must not overwrite an already useful Recent rail.
+    if (container.querySelector('[aria-label="최근 추가"]')) return;
+    container.innerHTML = `<div class="lakomics-live-empty" id="homeLoading">${escapeHtml(String(message || "").slice(0, 200))}</div>`;
+  }
+
+  const HOME_DIAGNOSTIC_TIMEOUT_MS = 15_000;
+  let homeDiagnosticTimer = null;
+
+  function clearHomeDiagnostic() {
+    if (homeDiagnosticTimer !== null) clearTimeout(homeDiagnosticTimer);
+    homeDiagnosticTimer = null;
+  }
+
+  function armHomeDiagnostic() {
+    clearHomeDiagnostic();
+    homeDiagnosticTimer = setTimeout(() => {
+      const connected = document.documentElement.dataset.lakomicsLiveClassifications === "connected";
+      const injected = document.documentElement.dataset.lakomicsExtensionBridge === "loaded";
+      let message;
+      if (!injected) message = "Lakomics 확장이 이 페이지에 연결되지 않았습니다. 확장(최신 버전)을 확인해 주세요.";
+      else if (!connected) message = "확장은 연결되었지만 클라우드 라이브러리 응답을 기다리는 중입니다.";
+      else message = "클라우드 라이브러리 응답이 지연됩니다. 새로고침으로 다시 시도할 수 있습니다.";
+      setHomeDiagnostic(message);
+    }, HOME_DIAGNOSTIC_TIMEOUT_MS);
   }
 
   function renderGrid({ preserveScroll = false, view = viewTransition.visible() || activeView } = {}) {
@@ -354,33 +435,240 @@
     }
   }
 
-  let revisitFetchGeneration = 0;
+  let homeRenderGeneration = 0;
+  const HOME_CACHE_TTL_MS = 45_000;
+  let homeCache = { recentAt: 0, revisitAt: 0, revisit: null };
+
+  function homeRevisitCacheValid() {
+    return Date.now() - homeCache.revisitAt < HOME_CACHE_TTL_MS && homeCache.revisit !== null;
+  }
+
+  function homeRecentCacheValid(view = { type: "home" }) {
+    const scope = store.getScope(view);
+    return Boolean(scope?.loadedFirstPage) && Date.now() - homeCache.recentAt < HOME_CACHE_TTL_MS;
+  }
+
+  function invalidateHomeCache({ recent = true, revisit = true } = {}) {
+    if (recent) homeCache.recentAt = 0;
+    if (revisit) {
+      homeCache.revisitAt = 0;
+      homeCache.revisit = null;
+    }
+  }
+
+  function homeSectionHtml(html) {
+    return `<section class="home-rail" aria-label="다시보기"><div class="home-rail__head"><h3>다시보기</h3></div><div class="home-rail__strip">${html}</div></section>`;
+  }
+
+  function creatorDisplay(group) {
+    const name = clean(group?.creator_name, 200);
+    const handle = clean(group?.creator_handle, 200).replace(/^@/, "");
+    if (name && handle) return `${name} (@${handle})`;
+    if (name) return name;
+    if (handle) return `@${handle}`;
+    return clean(group?.creator_key, 200) || "작가";
+  }
+
   async function renderHome(view) {
-    const grid = document.querySelector("#assetGrid");
-    if (!grid) return;
-    const generation = ++revisitFetchGeneration;
-    // 최근 추가 rail: store scope(가상 최신순 미리보기)를 사용한다.
+    const container = homeContainer();
+    if (!container) return;
+    const generation = ++homeRenderGeneration;
+    homeDetailObserver?.disconnect();
+    homeDetailObserver = null;
+    homeDetailState = null;
+
+    // Recent is useful on its own, so never wait for Revisit before painting it.
     const recentScope = store.getScope(view);
     const recentItems = recentScope?.loadedFirstPage ? recentScope.items.slice(0, 12) : [];
-    // 다시보기 rail: 전용 엔드포인트 (독립 실패).
-    let revisitHtml = `<section class="home-rail" aria-label="다시보기"><div class="home-rail__head"><h3>다시보기</h3></div><div class="home-rail__strip"><div class="lakomics-live-loading">불러오는 중…</div></div></section>`;
-    const revisitResult = await runtimeRequest("mobile-library:revisit", { limit: 12 });
-    if (generation !== revisitFetchGeneration) return; // stale
-    let revisitError = "";
-    if (revisitResult.ok) {
-      const bundle = (revisitResult.bundles || [])[0];
-      const items = bundle?.items || [];
-      revisitHtml = items.length
-        ? homeRailHtml("다시보기", items, { moreAction: `<button class="home-rail__more" data-lakomics-live-view="revisit">더 보기 ›</button>` })
-        : `<section class="home-rail" aria-label="다시보기"><div class="home-rail__head"><h3>다시보기</h3></div><div class="home-rail__strip"><div class="lakomics-live-empty">표시할 다시보기가 없습니다.</div></div></section>`;
-    } else {
-      revisitHtml = `<section class="home-rail" aria-label="다시보기"><div class="home-rail__head"><h3>다시보기</h3></div><div class="home-rail__strip"><div class="lakomics-live-empty">불러오지 못했습니다 · <button data-home-revisit-retry>다시 시도</button></div></div></section>`;
-    }
     const recentHtml = recentItems.length
-      ? homeRailHtml("최근 추가", recentItems, { moreAction: `<button class="home-rail__more" data-lakomics-live-view="recent">더 보기 ›</button>` })
-      : `<section class="home-rail" aria-label="최근 추가"><div class="home-rail__head"><h3>최근 추가</h3></div><div class="home-rail__strip"><div class="lakomics-live-empty">아직 에셋이 없습니다.</div></div></section>`;
-    grid.innerHTML = recentHtml + revisitHtml;
-    observeThumbnails(grid, store.getScope(view));
+      ? homeRailHtml("최근 추가", recentItems, { moreAction: `<button class="home-rail__more" data-home-open-recent>더 보기 ›</button>` })
+      : recentScope?.loadedFirstPage
+        ? `<section class="home-rail" aria-label="최근 추가"><div class="home-rail__head"><h3>최근 추가</h3></div><div class="home-rail__strip"><div class="lakomics-live-empty">커밋된 라이브러리 에셋이 아직 없습니다.</div></div></section>`
+        : `<section class="home-rail" aria-label="최근 추가"><div class="home-rail__head"><h3>최근 추가</h3></div><div class="home-rail__strip"><div class="lakomics-live-loading">최근 자산 불러오는 중…</div></div></section>`;
+    const revisitPlaceholder = homeSectionHtml(`<div class="lakomics-live-loading">다시보기 불러오는 중…</div>`);
+    container.innerHTML = recentHtml + revisitPlaceholder;
+    if (recentItems.length && recentScope?.loadedFirstPage) observeThumbnails(container, recentScope);
+    clearHomeDiagnostic();
+
+    let revisitResult;
+    if (homeRevisitCacheValid()) {
+      revisitResult = homeCache.revisit;
+    } else {
+      revisitResult = await runtimeRequest("mobile-library:revisit", { limit: 12 });
+      if (generation !== homeRenderGeneration) return;
+      if (revisitResult.ok) { homeCache.revisitAt = Date.now(); homeCache.revisit = revisitResult; }
+    }
+    if (generation !== homeRenderGeneration) return;
+
+    const revisitTarget = container.querySelector('[aria-label="다시보기"]');
+    if (!revisitTarget) return;
+    if (!revisitResult.ok) {
+      revisitTarget.outerHTML = homeSectionHtml(
+        `<div class="lakomics-live-empty">다시보기를 불러오지 못했습니다 · <button data-home-revisit-retry>다시 시도</button></div>`,
+      );
+      return;
+    }
+
+    const bundles = revisitResult.bundles || [];
+    const dateBundle = bundles.find((bundle) => bundle.kind === "date");
+    const creatorBundle = bundles.find((bundle) => bundle.kind === "creator");
+    const parts = [];
+    if (dateBundle && (dateBundle.items || []).length) {
+      parts.push(homeRailHtml(dateBundle.title || "과거의 이날", dateBundle.items, {
+        subtitle: dateBundle.reason,
+        railKey: "revisit:date:0",
+        moreAction: `<button class="home-rail__more" data-home-open-date data-home-title="${escapeHtml(dateBundle.title || "과거의 이날")}">모두 보기 ›</button>`,
+      }));
+    }
+    for (const group of creatorBundle?.groups || []) {
+      const display = creatorDisplay(group);
+      const count = Number.isFinite(Number(group.asset_count)) ? Number(group.asset_count) : group.items?.length || 0;
+      parts.push(homeRailHtml(`${display} · ${count.toLocaleString()}개`, group.items || [], {
+        subtitle: creatorBundle.reason || "",
+        railKey: `revisit:creator:${group.creator_key}`,
+        moreAction: `<button class="home-rail__more" data-home-open-creator="${escapeHtml(group.creator_key)}" data-home-title="${escapeHtml(display)}" data-home-count="${count}">모두 보기 ›</button>`,
+      }));
+    }
+    revisitTarget.outerHTML = parts.length
+      ? parts.join("")
+      : homeSectionHtml(`<div class="lakomics-live-empty">표시할 다시보기가 없습니다.</div>`);
+
+    // Each rail owns its observer; initializing a lower creator rail must not disconnect earlier rails.
+    container.querySelectorAll("[data-lib-rail]").forEach((rail) => {
+      const items = homeRailContexts.get(rail.dataset.libRail);
+      if (items?.length) observeThumbnails(rail, { items });
+    });
+  }
+
+  function homeDetailKey(state) {
+    return state.type === "creator-detail"
+      ? `detail:creator:${state.creatorKey}`
+      : "detail:date";
+  }
+
+  function homeDetailPath(state, cursor = null) {
+    const params = new URLSearchParams();
+    params.set("limit", "100");
+    if (state.type === "creator-detail") params.set("sort", "newest");
+    if (cursor) params.set("cursor", cursor);
+    return state.type === "creator-detail"
+      ? `/v1/library/revisit/creator/${encodeURIComponent(state.creatorKey)}/assets?${params}`
+      : `/v1/library/revisit/date?${params}`;
+  }
+
+  function homeDetailCountLabel(state) {
+    const known = Number.isFinite(Number(state.totalCount)) && Number(state.totalCount) > 0 ? Number(state.totalCount) : null;
+    if (known !== null) return `${known.toLocaleString()}개`;
+    return `${state.items.length.toLocaleString()}개${state.hasMore ? "+" : ""}`;
+  }
+
+  function renderHomeDetail({ preserveScroll = false } = {}) {
+    const state = homeDetailState;
+    const container = homeContainer();
+    if (!state || !container) return;
+    const scrollY = preserveScroll ? window.scrollY : 0;
+    const key = homeDetailKey(state);
+    homeRailContexts.set(key, state.items);
+
+    let body;
+    if (state.initialError && state.items.length === 0) {
+      body = `<div class="lakomics-live-empty home-detail__message">불러오지 못했습니다 · <button data-home-detail-retry>다시 시도</button></div>`;
+    } else if (!state.items.length && !state.loading) {
+      body = `<div class="lakomics-live-empty home-detail__message">${state.type === "creator-detail" ? "이 작가의 표시 가능한 자산이 없습니다." : "표시할 과거 자산이 없습니다."}</div>`;
+    } else {
+      body = state.items.map((asset, index) => tileHtml(asset, index)).join("");
+      if (state.loading) body += `<div class="lakomics-live-loading home-detail__sentinel" data-home-detail-sentinel>불러오는 중…</div>`;
+      else if (state.hasMore) body += `<div class="home-detail__sentinel" data-home-detail-sentinel aria-hidden="true"></div>`;
+      if (state.pageError) body += `<div class="home-detail__page-error">더 불러오지 못했습니다 · <button data-home-detail-retry>다시 시도</button></div>`;
+    }
+
+    container.innerHTML = `<section class="home-detail" data-home-detail>
+      <header class="home-detail__header">
+        <button class="home-detail__back" data-home-back aria-label="홈으로 돌아가기">‹</button>
+        <div class="home-detail__heading"><h2>${escapeHtml(state.title)}</h2><span>${escapeHtml(homeDetailCountLabel(state))}</span></div>
+      </header>
+      <div class="asset-grid home-detail__grid" data-lib-rail="${escapeHtml(key)}">${body}</div>
+    </section>`;
+
+    const grid = container.querySelector(".home-detail__grid");
+    if (grid && state.items.length) observeThumbnails(grid, { items: state.items });
+    observeHomeDetailSentinel();
+    if (preserveScroll) requestAnimationFrame(() => window.scrollTo({ top: scrollY, behavior: "instant" }));
+    else window.scrollTo({ top: 0, behavior: "instant" });
+  }
+
+  function observeHomeDetailSentinel() {
+    homeDetailObserver?.disconnect();
+    homeDetailObserver = null;
+    const sentinel = document.querySelector("[data-home-detail-sentinel]");
+    if (!sentinel || !homeDetailState?.hasMore || homeDetailState.loading || typeof IntersectionObserver !== "function") return;
+    homeDetailObserver = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) void loadHomeDetailNext();
+    }, { rootMargin: "700px" });
+    homeDetailObserver.observe(sentinel);
+  }
+
+  async function loadHomeDetailNext() {
+    const state = homeDetailState;
+    if (!state || state.loading || !state.hasMore || !state.nextCursor) return false;
+    state.loading = true;
+    state.pageError = null;
+    renderHomeDetail({ preserveScroll: true });
+    const result = await runtimeRequest("mobile-library:assets-url", { path: homeDetailPath(state, state.nextCursor) });
+    if (homeDetailState !== state) return false;
+    state.loading = false;
+    if (!result.ok) {
+      state.pageError = result.code || "detail_page_failed";
+      renderHomeDetail({ preserveScroll: true });
+      return false;
+    }
+    const seen = new Set(state.items.map((item) => item.id));
+    for (const item of result.items || []) {
+      if (item?.id && !seen.has(item.id)) {
+        seen.add(item.id);
+        state.items.push(item);
+      }
+    }
+    state.hasMore = result.hasMore === true;
+    state.nextCursor = state.hasMore ? result.nextCursor : null;
+    renderHomeDetail({ preserveScroll: true });
+    return true;
+  }
+
+  async function openHomeDetail(detail) {
+    const container = homeContainer();
+    if (!container) return;
+    const generation = ++homeRenderGeneration;
+    homeDashboardScrollY = window.scrollY;
+    homeDetailState = {
+      type: detail.type,
+      creatorKey: detail.creatorKey || null,
+      title: detail.title || (detail.type === "creator-detail" ? "작가" : "과거의 이날"),
+      totalCount: detail.totalCount ?? null,
+      items: [], nextCursor: null, hasMore: false, loading: true,
+      initialError: null, pageError: null,
+    };
+    container.innerHTML = `<section class="home-detail" data-home-detail><header class="home-detail__header"><button class="home-detail__back" data-home-back>‹</button><div class="home-detail__heading"><h2>${escapeHtml(homeDetailState.title)}</h2></div></header><div class="lakomics-live-loading">불러오는 중…</div></section>`;
+    const result = await runtimeRequest("mobile-library:assets-url", { path: homeDetailPath(homeDetailState) });
+    if (generation !== homeRenderGeneration || !homeDetailState) return;
+    homeDetailState.loading = false;
+    if (!result.ok) {
+      homeDetailState.initialError = result.code || "detail_load_failed";
+      renderHomeDetail();
+      return;
+    }
+    homeDetailState.items.push(...(result.items || []).filter((item) => item?.id));
+    homeDetailState.hasMore = result.hasMore === true;
+    homeDetailState.nextCursor = homeDetailState.hasMore ? result.nextCursor : null;
+    renderHomeDetail();
+  }
+
+  function closeHomeDetail() {
+    homeDetailObserver?.disconnect();
+    homeDetailObserver = null;
+    homeDetailState = null;
+    renderHome({ type: "home" });
+    requestAnimationFrame(() => window.scrollTo({ top: homeDashboardScrollY, behavior: "instant" }));
   }
 
   function scheduleRender(preserveScroll = false) {
@@ -658,6 +946,35 @@
 
   async function showViewerAsset(view, assetId) {
     const generation = ++viewerGeneration;
+    // Home rail 타일은 rail 자체 시퀀스를 사용한다 (Revisit 묶음 스와이프가
+    // 다른 묶음으로 넘어가지 않도록). 그리드/스코프 기반 뷰어는 기존 경로.
+    if (viewerRailItems) {
+      const railIndex = viewerRailItems.findIndex((item) => item.id === assetId);
+      if (railIndex < 0) return;
+      const asset = viewerRailItems[railIndex];
+      const viewer = prepareViewer(asset, railIndex);
+      if (!viewer) return;
+      setViewerSpinner(true);
+      const ticket = await inflightTicket(`${assetId}:original`, () => store.ticketFor(assetId, "original"));
+      if (generation !== viewerGeneration || !viewer.dialog.open) return;
+      setViewerSpinner(false);
+      if (!ticket.ok) {
+        if (viewer.meta) viewer.meta.textContent = `원본 로드 실패 · ${clean(ticket.code, 80) || "unknown"}`;
+        return;
+      }
+      if (asset.kind === "video") {
+        if (!viewer.video) return;
+        viewer.video.style.display = "block";
+        viewer.video.src = ticket.url;
+        viewer.video.load();
+        viewer.video.play().catch(() => {});
+      } else {
+        viewer.image.style.display = "block";
+        viewer.image.src = ticket.url;
+        viewer.wrap.classList.add("zoomable");
+      }
+      return;
+    }
     const scope = store.getScope(view);
     const index = store.indexOf(view, assetId);
     if (!scope || index < 0) return;
@@ -688,6 +1005,29 @@
   }
 
   async function stepViewer(direction) {
+    // Home rail/detail viewer stays inside its own sequence. Detail may extend its
+    // same array at the forward boundary, so the viewer never leaks to another rail.
+    if (viewerRailItems) {
+      if (!viewerAssetId) return;
+      let index = viewerRailItems.findIndex((item) => item.id === viewerAssetId);
+      if (index < 0) return;
+      let nextIndex = index + direction;
+      if (direction > 0 && nextIndex >= viewerRailItems.length && homeDetailState?.items === viewerRailItems && homeDetailState.hasMore) {
+        const loaded = await loadHomeDetailNext();
+        if (loaded) {
+          index = viewerRailItems.findIndex((item) => item.id === viewerAssetId);
+          nextIndex = index + direction;
+        }
+      }
+      if (nextIndex < 0 || nextIndex >= viewerRailItems.length) {
+        const indexEl = document.querySelector("#viewerIndex");
+        if (indexEl) indexEl.textContent = direction > 0 ? "마지막 에셋" : "처음 에셋";
+        return;
+      }
+      viewerAssetId = viewerRailItems[nextIndex].id;
+      showViewerAsset(null, viewerAssetId);
+      return;
+    }
     const view = viewerView;
     if (!view || !viewerAssetId) return;
     const neighbor = store.neighbor(view, viewerAssetId, direction);
@@ -723,12 +1063,15 @@
       image.removeAttribute("src");
     }
     viewerChrome.close();
+    const wasRailViewer = Boolean(viewerRailItems);
     viewerView = null;
     viewerAssetId = null;
+    viewerRailItems = null;
     setDetailsOpen(false);
-    // 스크롤 위치 복원: 그리드 상태는 그대로 두고 위치만 되돌린다 (리패치 금지)
+    // Home/detail viewers keep the page exactly where it was. Asset workspace
+    // viewers continue using the scoped gallery scroll restoration.
     const visibleView = viewTransition.visible();
-    if (visibleView) {
+    if (!wasRailViewer && visibleView) {
       const grid = document.querySelector("#assetGrid");
       const wrap = grid?.parentElement;
       const saved = store.restoreScroll(visibleView);
@@ -768,29 +1111,83 @@
         event.preventDefault();
         event.stopPropagation();
         event.stopImmediatePropagation();
-        const view = viewTransition.visible();
-        if (!view) return;
-        viewerView = view;
+        const rail = tile.closest("[data-lib-rail]");
+        viewerRailItems = rail ? homeRailContexts.get(rail.dataset.libRail) || null : null;
+        const view = viewerRailItems ? null : viewTransition.visible();
+        if (!viewerRailItems && !view) return;
+        viewerView = viewerRailItems ? null : view;
         viewerAssetId = clean(tile.dataset.libAsset, 240);
-        // 그리드 스크롤 저장 후 뷰어 열기
-        const wrap = document.querySelector("#assetGrid")?.parentElement;
-        if (wrap) store.saveScroll(view, wrap.scrollTop);
+        if (!viewerRailItems && view) {
+          const wrap = document.querySelector("#assetGrid")?.parentElement;
+          if (wrap) store.saveScroll(view, wrap.scrollTop);
+        }
         showViewerAsset(view, viewerAssetId);
         return;
       }
 
+      const homeOpenDate = event.target.closest?.("[data-home-open-date]");
+      if (homeOpenDate) {
+        openHomeDetail({ type: "date-detail", title: clean(homeOpenDate.dataset.homeTitle, 120) || "과거의 이날" });
+        return;
+      }
+      const homeOpenCreator = event.target.closest?.("[data-home-open-creator]");
+      if (homeOpenCreator) {
+        const creatorKey = clean(homeOpenCreator.dataset.homeOpenCreator, 200);
+        const totalCount = Number(homeOpenCreator.dataset.homeCount);
+        openHomeDetail({
+          type: "creator-detail",
+          creatorKey,
+          title: clean(homeOpenCreator.dataset.homeTitle, 200) || creatorKey,
+          totalCount: Number.isFinite(totalCount) ? totalCount : null,
+        });
+        return;
+      }
+      const homeBack = event.target.closest?.("[data-home-back]");
+      if (homeBack) {
+        closeHomeDetail();
+        return;
+      }
+      const homeDetailRetry = event.target.closest?.("[data-home-detail-retry]");
+      if (homeDetailRetry && homeDetailState) {
+        if (homeDetailState.items.length === 0) {
+          openHomeDetail({
+            type: homeDetailState.type,
+            creatorKey: homeDetailState.creatorKey,
+            title: homeDetailState.title,
+            totalCount: homeDetailState.totalCount,
+          });
+        } else {
+          homeDetailState.pageError = null;
+          void loadHomeDetailNext();
+        }
+        return;
+      }
       const homeRetry = event.target.closest?.("[data-home-revisit-retry]");
       if (homeRetry) {
-        if (activeView?.type === "home") renderHome(activeView);
+        if (isHomeActive()) {
+          invalidateHomeCache({ recent: false, revisit: true });
+          renderHome({ type: "home" });
+        }
+        return;
+      }
+      const homeRecent = event.target.closest?.("[data-home-open-recent]");
+      if (homeRecent) {
+        // 최근 추가 더 보기: 상위 에셋 탭으로 전환 후 기존 최근 100개 뷰 선택.
+        document.querySelector('.bottom-nav [data-nav="assets"]')?.click();
+        const recentRow = document.querySelector('#treeScroll [data-lakomics-live-view="recent"]');
+        recentRow?.click();
         return;
       }
 
       if (event.target.closest?.("#refreshBtn")) {
-        const view = activeView || selectedMobileView();
-        if (view) {
-          store.clearTickets();
-          openView(view, { force: true });
+        store.clearTickets();
+        if (isHomeActive()) {
+          invalidateHomeCache();
+          void initializeHomeOnce({ forceRecent: true });
+          return;
         }
+        const view = activeView || selectedMobileView();
+        if (view) openView(view, { force: true });
       }
     }, true);
 
@@ -879,6 +1276,37 @@
     });
 
     observeTreeSelection();
+    // top-level 홈 탭 활성 시 대시보드를 채운다. 데이터/티켓이 유효하면
+    // 재요청 없이 기존 scope/티켓 캐시를 재사용한다.
+    async function initializeHomeOnce({ forceRecent = false } = {}) {
+      if (!isHomeActive()) return;
+      const view = { type: "home" };
+      if (!forceRecent && homeRecentCacheValid(view)) {
+        renderHome(view);
+        return;
+      }
+
+      if (forceRecent || store.getScope(view)?.loadedFirstPage) store.reset(view);
+      armHomeDiagnostic();
+      const result = await store.loadFirstPage(view);
+      if (!isHomeActive()) return;
+      if (result?.ok) {
+        homeCache.recentAt = Date.now();
+        renderHome(view);
+      } else {
+        clearHomeDiagnostic();
+        setHomeDiagnostic("클라우드 라이브러리 응답을 불러오지 못했습니다. 새로고침으로 다시 시도할 수 있습니다.");
+      }
+    }
+
+    function installHomeTrigger() {
+      const observer = new MutationObserver(() => {
+        if (isHomeActive()) void initializeHomeOnce();
+      });
+      observer.observe(document.querySelector(".bottom-nav") || document.body, { attributes: true, subtree: true, attributeFilter: ["class"] });
+      void initializeHomeOnce();
+    }
+    installHomeTrigger();
   }
 
   function observeTreeSelection() {

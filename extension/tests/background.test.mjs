@@ -2030,12 +2030,54 @@ test("recent Mobile library request omits classification and stays newest at 100
 
 test("mobile revisit runtime reads the server bundles contract", async () => {
   const harness = createHarness({ collectorToken: "server-secret-token", collectorSettings: { enabled: true, baseUrl: "http://100.76.119.29:32146" } });
-  harness.queueJson({ bundles: [{ kind: "date", title: "과거의 이날", reason: "같은 시기", items: [{ id: "r1", kind: "image", content_type: "image/jpeg", classification_ids: ["c1"] }] }] });
+  harness.queueJson({ bundles: [
+    { kind: "date", title: "과거의 이날", reason: "같은 시기", items: [{ id: "r1", kind: "image", content_type: "image/jpeg", classification_ids: ["c1"] }] },
+    { kind: "creator", title: "다시 만난 작가", reason: "작가", groups: [
+      { creator_key: "team", creator_name: "Team", creator_handle: "team", asset_count: 5, items: [{ id: "g1", kind: "image", content_type: "image/jpeg", classification_ids: ["c1"] }] },
+    ] },
+    { kind: "creator", title: "빈 그룹", reason: "버려짐", groups: [] },
+  ] });
 
   const response = await harness.api.handleMessage({ type: "mobile-library:revisit", limit: 12 });
 
   assert.equal(response.ok, true);
-  assert.equal(response.bundles.length, 1);
+  // date bundle items 생존 + creator groups 생존 + 빈 그룹 묶음 제거
+  assert.equal(response.bundles.length, 2);
   assert.equal(response.bundles[0].items[0].id, "r1");
+  assert.equal(response.bundles[1].kind, "creator");
+  assert.equal(response.bundles[1].groups.length, 1);
+  assert.equal(response.bundles[1].groups[0].creator_key, "team");
+  assert.equal(response.bundles[1].groups[0].asset_count, 5);
+  assert.equal(response.bundles[1].groups[0].items[0].id, "g1");
   assert.equal(harness.fetchCalls[0].url, "http://100.76.119.29:32146/v1/library/revisit?limit=12");
+});
+
+
+test("mobile Home detail proxy accepts only date/creator cursor routes", async () => {
+  const harness = createHarness({ collectorToken: "server-secret-token", collectorSettings: { enabled: true, baseUrl: "http://100.76.119.29:32146" } });
+  harness.queueJson({ items: [{ id: "d1", kind: "image" }], has_more: true, next_cursor: "cursor_next" });
+  const date = await harness.api.handleMessage({ type: "mobile-library:assets-url", path: "/v1/library/revisit/date?limit=100&cursor=cursor_old" });
+  assert.equal(date.ok, true);
+  assert.equal(date.items[0].id, "d1");
+  assert.equal(date.nextCursor, "cursor_next");
+  assert.equal(harness.fetchCalls[0].url, "http://100.76.119.29:32146/v1/library/revisit/date?limit=100&cursor=cursor_old");
+
+  harness.queueJson({ items: [{ id: "c1", kind: "image" }], has_more: false, next_cursor: null });
+  const creator = await harness.api.handleMessage({ type: "mobile-library:assets-url", path: "/v1/library/revisit/creator/artist_1/assets?limit=50&sort=newest&cursor=abc_DEF-123" });
+  assert.equal(creator.ok, true);
+  assert.equal(creator.items[0].id, "c1");
+
+  const before = harness.fetchCalls.length;
+  for (const path of [
+    "/v1/library/assets?limit=100",
+    "/v1/admin/users?limit=1",
+    "/v1/library/revisit/date?limit=100&evil=1",
+    "/v1/library/revisit/creator/a/assets?limit=100&sort=random",
+    "/v1/library/revisit/creator/a/b/assets?limit=100&sort=newest",
+  ]) {
+    const rejected = await harness.api.handleMessage({ type: "mobile-library:assets-url", path });
+    assert.equal(rejected.ok, false);
+    assert.equal(rejected.code, "invalid_assets_url");
+  }
+  assert.equal(harness.fetchCalls.length, before, "invalid detail paths must not reach fetch");
 });

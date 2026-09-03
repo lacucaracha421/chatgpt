@@ -199,6 +199,10 @@
         return mobileLibraryMediaTicket(message);
       case "mobile-library:revisit":
         return mobileLibraryRevisit(message);
+      case "mobile-library:media-tickets":
+        return mobileLibraryMediaTickets(message);
+      case "mobile-library:assets-url":
+        return mobileLibraryAssetsUrl(message);
       case "saved-index:get":
         return savedXMediaIndex();
       case "pinned:get":
@@ -1703,46 +1707,194 @@
     return { ok: true, items, hasMore: result.has_more === true, nextCursor: result.has_more === true && typeof result.next_cursor === "string" ? result.next_cursor.slice(0, 2000) : null };
   }
 
+  const mediaTicketCache = new Map(); // assetId:variant → {url, contentType, sizeBytes, expiresAt}
+  const MEDIA_TICKET_CACHE_MARGIN_MS = 10_000;
+  const MEDIA_TICKET_TTL_MS = 300_000;
+
+  function cacheableTicket(entry) {
+    const size = entry?.size_bytes ?? entry?.sizeBytes;
+    return {
+      url: entry.url,
+      contentType: entry?.content_type ?? entry?.contentType ?? null,
+      sizeBytes: Number.isFinite(Number(size)) ? Number(size) : null,
+      expiresAt: Date.parse(entry?.expires_at || entry?.expiresAt || "") || Date.now() + MEDIA_TICKET_TTL_MS,
+    };
+  }
+
+  function ticketCacheGet(key) {
+    const cached = mediaTicketCache.get(key);
+    if (cached && cached.expiresAt > Date.now() + MEDIA_TICKET_CACHE_MARGIN_MS) return cached;
+    if (cached) mediaTicketCache.delete(key);
+    return null;
+  }
+
+  function validDetailQuery(url, allowedNames) {
+    for (const key of url.searchParams.keys()) if (!allowedNames.has(key)) return false;
+    for (const key of allowedNames) if (url.searchParams.getAll(key).length > 1) return false;
+    const limitRaw = url.searchParams.get("limit");
+    if (limitRaw !== null) {
+      if (!/^\d{1,3}$/.test(limitRaw)) return false;
+      const limit = Number(limitRaw);
+      if (limit < 1 || limit > 100) return false;
+    }
+    const cursor = url.searchParams.get("cursor");
+    if (cursor !== null && (!cursor || cursor.length > 1600 || /[\u0000-\u001f\u007f]/.test(cursor))) return false;
+    return true;
+  }
+
+  function validateMobileLibraryAssetsPath(raw) {
+    if (!raw || raw.length > 2000 || !raw.startsWith("/v1/library/revisit/")) return null;
+    let url;
+    try { url = new URL(raw, "https://lakomics.invalid"); } catch { return null; }
+    if (url.origin !== "https://lakomics.invalid" || url.hash) return null;
+
+    if (url.pathname === "/v1/library/revisit/date") {
+      if (!validDetailQuery(url, new Set(["limit", "cursor"]))) return null;
+      return `${url.pathname}${url.search}`;
+    }
+
+    const match = url.pathname.match(/^\/v1\/library\/revisit\/creator\/([^/]+)\/assets$/);
+    if (!match || !validDetailQuery(url, new Set(["limit", "sort", "cursor"]))) return null;
+    const sort = url.searchParams.get("sort");
+    if (sort !== null && sort !== "newest" && sort !== "oldest") return null;
+    let creatorKey;
+    try { creatorKey = decodeURIComponent(match[1]); } catch { return null; }
+    if (!creatorKey || creatorKey.length > 240 || /[\u0000-\u001f\u007f/]/.test(creatorKey)) return null;
+    return `${url.pathname}${url.search}`;
+  }
+
+  async function mobileLibraryAssetsUrl(message = {}) {
+    // Home detail only: two explicit read-only Revisit API families.
+    const raw = String(message.path || "").slice(0, 2001);
+    const path = validateMobileLibraryAssetsPath(raw);
+    if (!path) return { ok: false, code: "invalid_assets_url" };
+    const result = await collectorRequest(path);
+    if (!result.ok) return result;
+    const items = (Array.isArray(result.items) ? result.items : []).map(normalizeMobileAssetValue).filter((value) => value.id);
+    return {
+      ok: true,
+      items,
+      hasMore: result.has_more === true,
+      nextCursor: result.has_more === true && typeof result.next_cursor === "string" ? result.next_cursor.slice(0, 1600) : null,
+    };
+  }
+
+  async function mobileLibraryMediaTicket(message = {}) {
+    const assetId = String(message.assetId || "").trim().slice(0, 240);
+    const variant = String(message.variant || "").trim();
+    if (!assetId) return { ok: false, code: "invalid_asset_id" };
+    if (variant !== "thumbnail" && variant !== "original") return { ok: false, code: "invalid_media_variant" };
+    const key = `${assetId}:${variant}`;
+    const cached = ticketCacheGet(key);
+    if (cached) return {
+      ok: true, url: cached.url, variant, contentType: cached.contentType,
+      sizeBytes: cached.sizeBytes, expiresAt: new Date(cached.expiresAt).toISOString(), cached: true,
+    };
+    const result = await collectorRequest(`/v1/library/assets/${encodeURIComponent(assetId)}/media-ticket`, {
+      method: "POST", body: JSON.stringify({ variant }),
+    });
+    if (!result.ok) return result;
+    if (typeof result.url !== "string" || !/^https?:\/\//.test(result.url)) return { ok: false, code: "invalid_media_ticket" };
+    const ticket = cacheableTicket(result);
+    mediaTicketCache.set(key, ticket);
+    return {
+      ok: true, url: ticket.url, variant, contentType: ticket.contentType,
+      sizeBytes: ticket.sizeBytes, expiresAt: new Date(ticket.expiresAt).toISOString(),
+    };
+  }
+  async function mobileLibraryMediaTickets(message = {}) {
+    const requested = Array.isArray(message.items) ? message.items : [];
+    if (!requested.length) return { ok: false, code: "empty_media_ticket_batch" };
+    const bounded = requested.slice(0, 50).map((entry) => ({
+      assetId: String(entry?.assetId || "").trim().slice(0, 240),
+      variant: String(entry?.variant || "").trim().slice(0, 20),
+    })).filter((entry) => entry.assetId && (entry.variant === "thumbnail" || entry.variant === "original"));
+    if (!bounded.length) return { ok: false, code: "invalid_media_ticket_batch" };
+
+    // SW 세션 캐시: 유효한 티켓은 재요청하지 않는다 (Home → Recent → 분류
+    // 이동에서 같은 썸네일 재사용).
+    const fresh = [];
+    const cachedResults = [];
+    const seen = new Set();
+    for (const entry of bounded) {
+      const key = `${entry.assetId}:${entry.variant}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const cached = ticketCacheGet(key);
+      if (cached) cachedResults.push({
+        asset_id: entry.assetId, variant: entry.variant, ok: true,
+        url: cached.url, contentType: cached.contentType, sizeBytes: cached.sizeBytes,
+        expiresAt: new Date(cached.expiresAt).toISOString(), cached: true,
+      });
+      else fresh.push(entry);
+    }
+    if (!fresh.length) return { ok: true, items: cachedResults };
+
+    const result = await collectorRequest("/v1/library/media-tickets", {
+      method: "POST",
+      body: JSON.stringify({ items: fresh.map((entry) => ({ asset_id: entry.asset_id ?? entry.assetId, variant: entry.variant ?? entry.variant })) }),
+    });
+    if (!result.ok) return result;
+    const items = (Array.isArray(result.items) ? result.items : []).map((entry) => {
+      if (!entry?.ok) return { asset_id: String(entry?.asset_id || "").slice(0, 240), variant: String(entry?.variant || "").slice(0, 20), ok: false, error: String(entry?.error || "failed").slice(0, 40) };
+      const ticket = cacheableTicket(entry);
+      mediaTicketCache.set(`${entry.asset_id}:${entry.variant}`, ticket);
+      return { asset_id: String(entry.asset_id).slice(0, 240), variant: String(entry.variant).slice(0, 20), ok: true, url: entry.url, contentType: entry.content_type ?? null, sizeBytes: Number.isFinite(Number(entry.size_bytes)) ? Number(entry.size_bytes) : null, expiresAt: entry.expires_at ?? null };
+    });
+    return { ok: true, items: [...items, ...cachedResults] };
+  }
+
+  function normalizeMobileAssetValue(value) {
+    return {
+      id: String(value?.id || "").slice(0, 240), kind: String(value?.kind || "").slice(0, 20),
+      contentType: typeof value?.content_type === "string" ? value.content_type.slice(0, 120) : null,
+      sizeBytes: Number.isFinite(Number(value?.size_bytes)) ? Number(value.size_bytes) : null,
+      width: Number.isFinite(Number(value?.width)) ? Number(value.width) : null,
+      height: Number.isFinite(Number(value?.height)) ? Number(value.height) : null,
+      durationMs: Number.isFinite(Number(value?.duration_ms)) ? Number(value.duration_ms) : null,
+      collectedAt: typeof value?.collected_at === "string" ? value.collected_at : null,
+      committedAt: typeof value?.committed_at === "string" ? value.committed_at : null, sourcePublishedAt: typeof value?.source_published_at === "string" ? value.source_published_at : null,
+      sourceUrl: typeof value?.source_url === "string" ? value.source_url.slice(0, 2000) : null, creatorName: typeof value?.creator_name === "string" ? value.creator_name.slice(0, 200) : null,
+      creatorHandle: typeof value?.creator_handle === "string" ? value.creator_handle.slice(0, 200) : null, importSource: typeof value?.import_source === "string" ? value.import_source.slice(0, 60) : null,
+      classificationIds: Array.isArray(value?.classification_ids) ? value.classification_ids.map((id) => String(id).slice(0, 240)).filter(Boolean).slice(0, 200) : [],
+      originalAvailable: value?.original_available === true, thumbnailAvailable: value?.thumbnail_available === true,
+    };
+  }
+
+  function normalizeRevisitBundles(rawBundles) {
+    // date: items 배열. creator: groups 배열(그룹당 items). 서버 계약 그대로
+    // 전달하며, 빈 묶음/빈 그룹은 안전히 제거한다.
+    return (Array.isArray(rawBundles) ? rawBundles : []).map((bundle) => {
+      const base = {
+        kind: String(bundle?.kind || "").slice(0, 40),
+        title: String(bundle?.title || "").slice(0, 120),
+        reason: String(bundle?.reason || "").slice(0, 200),
+        items: (Array.isArray(bundle?.items) ? bundle.items : []).map(normalizeMobileAssetValue).filter((value) => value.id),
+      };
+      if (bundle?.kind === "creator") {
+        base.groups = (Array.isArray(bundle?.groups) ? bundle.groups : []).map((group) => ({
+          creator_key: String(group?.creator_key || "").slice(0, 240),
+          creator_name: String(group?.creator_name || "").slice(0, 200),
+          creator_handle: String(group?.creator_handle || "").slice(0, 200),
+          asset_count: Number.isFinite(Number(group?.asset_count)) ? Number(group.asset_count) : 0,
+          items: (Array.isArray(group?.items) ? group.items : []).map(normalizeMobileAssetValue).filter((value) => value.id),
+        })).filter((group) => group.creator_key && group.items.length > 0);
+      }
+      return base;
+    }).filter((bundle) => {
+      if (!bundle.kind) return false;
+      if (bundle.kind === "creator") return (bundle.groups || []).length > 0;
+      return bundle.items.length > 0;
+    });
+  }
+
   async function mobileLibraryRevisit(message = {}) {
     const requested = Number(message.limit);
     const limit = Math.max(1, Math.min(50, Number.isFinite(requested) ? Math.round(requested) : 12));
     const result = await collectorRequest(`/v1/library/revisit?limit=${limit}`);
     if (!result.ok) return result;
-    const bundles = (Array.isArray(result.bundles) ? result.bundles : [])
-      .map((bundle) => ({
-        kind: String(bundle?.kind || "").slice(0, 40),
-        title: String(bundle?.title || "").slice(0, 120),
-        reason: String(bundle?.reason || "").slice(0, 200),
-        items: (Array.isArray(bundle?.items) ? bundle.items : []).map((value) => ({
-          id: String(value?.id || "").slice(0, 240), kind: String(value?.kind || "").slice(0, 20),
-          contentType: typeof value?.content_type === "string" ? value.content_type.slice(0, 120) : null,
-          sizeBytes: Number.isFinite(Number(value?.size_bytes)) ? Number(value.size_bytes) : null,
-          width: Number.isFinite(Number(value?.width)) ? Number(value.width) : null,
-          height: Number.isFinite(Number(value?.height)) ? Number(value.height) : null,
-          durationMs: Number.isFinite(Number(value?.duration_ms)) ? Number(value.duration_ms) : null,
-          collectedAt: typeof value?.collected_at === "string" ? value.collected_at : null,
-          committedAt: typeof value?.committed_at === "string" ? value.committed_at : null,
-          sourcePublishedAt: typeof value?.source_published_at === "string" ? value.source_published_at : null,
-          sourceUrl: typeof value?.source_url === "string" ? value.source_url.slice(0, 2000) : null,
-          creatorName: typeof value?.creator_name === "string" ? value.creator_name.slice(0, 200) : null,
-          creatorHandle: typeof value?.creator_handle === "string" ? value.creator_handle.slice(0, 200) : null,
-          importSource: typeof value?.import_source === "string" ? value.import_source.slice(0, 60) : null,
-          classificationIds: Array.isArray(value?.classification_ids) ? value.classification_ids.map((id) => String(id).slice(0, 240)).filter(Boolean).slice(0, 200) : [],
-          originalAvailable: value?.original_available === true, thumbnailAvailable: value?.thumbnail_available === true,
-        })).filter((value) => value.id),
-      }))
-      .filter((bundle) => bundle.kind && bundle.items.length > 0);
+    const bundles = normalizeRevisitBundles(result.bundles);
     return { ok: true, bundles };
-  }
-
-  async function mobileLibraryMediaTicket(message = {}) {
-    const assetId = String(message.assetId || "").trim().slice(0, 240); const variant = String(message.variant || "").trim();
-    if (!assetId) return { ok: false, code: "invalid_asset_id" };
-    if (variant !== "thumbnail" && variant !== "original") return { ok: false, code: "invalid_media_variant" };
-    const result = await collectorRequest(`/v1/library/assets/${encodeURIComponent(assetId)}/media-ticket`, { method: "POST", body: JSON.stringify({ variant }) });
-    if (!result.ok) return result;
-    if (typeof result.url !== "string" || !/^https?:\/\//.test(result.url)) return { ok: false, code: "invalid_media_ticket" };
-    return { ok: true, url: result.url, variant, contentType: typeof result.content_type === "string" ? result.content_type : null, sizeBytes: Number.isFinite(Number(result.size_bytes)) ? Number(result.size_bytes) : null, expiresAt: typeof result.expires_at === "string" ? result.expires_at : null };
   }
 
   async function collectorRequest(path, init = {}, explicitBaseUrl = null) {
