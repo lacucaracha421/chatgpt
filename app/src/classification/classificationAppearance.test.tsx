@@ -8,9 +8,9 @@ import {
 } from "./classificationAppearance";
 
 describe("classification appearance catalog", () => {
-  it("provides 24 unique icons and 12 unique colors", () => {
-    expect(CLASSIFICATION_ICONS).toHaveLength(24);
-    expect(new Set(CLASSIFICATION_ICONS.map(({ key }) => key)).size).toBe(24);
+  it("provides 48 unique icons and 12 unique colors", () => {
+    expect(CLASSIFICATION_ICONS).toHaveLength(48);
+    expect(new Set(CLASSIFICATION_ICONS.map(({ key }) => key)).size).toBe(48);
     expect(CLASSIFICATION_COLORS).toHaveLength(12);
     expect(new Set(CLASSIFICATION_COLORS.map(({ key }) => key)).size).toBe(12);
   });

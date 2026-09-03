@@ -339,6 +339,14 @@ input:disabled {
   gap: var(--space-2);
 }
 
+.classification-appearance__grid:not(.classification-appearance__colors) {
+  grid-template-columns: repeat(auto-fill, 28px);
+  max-height: calc(4 * 28px + 3 * var(--space-2));
+  overflow-y: auto;
+  align-content: start;
+  scrollbar-gutter: stable;
+}
+
 .classification-appearance__choice {
   position: relative;
   display: grid;

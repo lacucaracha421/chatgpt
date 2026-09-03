@@ -1,4 +1,4 @@
-const ICON_KEYS: [&str; 24] = [
+const ICON_KEYS: [&str; 48] = [
     "folder",
     "photo",
     "film",
@@ -23,6 +23,30 @@ const ICON_KEYS: [&str; 24] = [
     "trophy",
     "puzzle",
     "cube",
+    "camera",
+    "video",
+    "tv",
+    "mic",
+    "speaker",
+    "document",
+    "doc-text",
+    "archive",
+    "inbox",
+    "gift",
+    "flag",
+    "bell",
+    "moon",
+    "sun",
+    "cloud",
+    "eye",
+    "key",
+    "lock",
+    "search",
+    "brush",
+    "chat",
+    "smile",
+    "idea",
+    "rocket",
 ];
 
 const COLOR_KEYS: [&str; 12] = [
