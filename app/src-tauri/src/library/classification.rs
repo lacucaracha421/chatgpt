@@ -132,13 +132,17 @@ impl Library {
     pub fn list_classifications(&self) -> Result<Vec<ClassificationEntry>, LibraryError> {
         let connection = self.connection()?;
         let mut statement = connection.prepare(
-            "SELECT id, kind, name, parent_id, icon_key, color_key,
-                (SELECT COUNT(*) FROM asset_classifications AS count_link
-                 JOIN assets AS count_asset ON count_asset.id = count_link.asset_id
-                 WHERE count_link.classification_id = classification_entries.id
-                   AND count_asset.status = 'normal') AS asset_count
-             FROM classification_entries
-             ORDER BY parent_id, name COLLATE NOCASE, id",
+            "SELECT entry.id, entry.kind, entry.name, entry.parent_id, entry.icon_key, entry.color_key,
+                    COALESCE(counts.asset_count, 0) AS asset_count
+             FROM classification_entries AS entry
+             LEFT JOIN (
+                 SELECT link.classification_id, COUNT(*) AS asset_count
+                 FROM asset_classifications AS link
+                 JOIN assets AS asset ON asset.id = link.asset_id
+                 WHERE asset.status = 'normal'
+                 GROUP BY link.classification_id
+             ) AS counts ON counts.classification_id = entry.id
+             ORDER BY entry.parent_id, entry.name COLLATE NOCASE, entry.id",
         )?;
         read_entries(&mut statement, [])
     }

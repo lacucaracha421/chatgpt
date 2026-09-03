@@ -318,13 +318,9 @@ impl Library {
             return false;
         }
         let directory = self.root().join("video-media").join(asset_id);
-        if require_non_empty_file(&directory.join("poster.webp")).is_err() {
-            return false;
-        }
-        if (0..scrub_frame_count).any(|index| {
-            require_non_empty_file(&directory.join("scrub").join(format!("{index:03}.webp")))
-                .is_err()
-        }) {
+        if require_non_empty_file(&directory.join("poster.webp")).is_err()
+            || !scrub_frames_complete(&directory.join("scrub"), scrub_frame_count)
+        {
             return false;
         }
         match playback_kind {
@@ -538,6 +534,41 @@ fn tool_path(name: &str) -> Option<PathBuf> {
         .into_iter()
         .flatten()
         .find(|path| path.is_file())
+}
+
+fn scrub_frames_complete(directory: &Path, expected_count: u64) -> bool {
+    let Ok(expected_count) = usize::try_from(expected_count) else {
+        return false;
+    };
+    let Ok(entries) = fs::read_dir(directory) else {
+        return false;
+    };
+    let mut found = vec![false; expected_count];
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            return false;
+        };
+        if !file_type.is_file() {
+            continue;
+        }
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        let Some(stem) = name.strip_suffix(".webp") else {
+            continue;
+        };
+        if stem.len() != 3 || !stem.bytes().all(|byte| byte.is_ascii_digit()) {
+            continue;
+        }
+        let Ok(index) = stem.parse::<usize>() else {
+            continue;
+        };
+        if let Some(slot) = found.get_mut(index) {
+            *slot = true;
+        }
+    }
+    found.into_iter().all(|present| present)
 }
 
 fn require_non_empty_file(path: &Path) -> Result<(), LibraryError> {
@@ -924,6 +955,60 @@ mod tests {
             .prepare_pending_videos_with(&FakeVideoTool::default(), 1)
             .unwrap();
         assert_eq!((recovered.processed, recovered.failed), (1, 0));
+    }
+
+    #[test]
+    fn complete_ready_video_stays_ready_when_library_opens() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        insert_pending_video(&library, "video-1", "mp4", "h264", Some("aac"), 2_000);
+        library
+            .prepare_pending_videos_with(&FakeVideoTool::default(), 1)
+            .unwrap();
+        drop(library);
+
+        let reopened = Library::open(temp.path()).unwrap();
+        let state: String = reopened
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT preparation_state FROM video_assets WHERE asset_id = 'video-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(state, "ready");
+        assert!(reopened.root().join("video-media/video-1/scrub/001.webp").is_file());
+    }
+
+    #[test]
+    fn ready_video_with_missing_scrub_frame_is_requeued_when_library_opens() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        insert_pending_video(&library, "video-1", "mp4", "h264", Some("aac"), 2_000);
+        library
+            .prepare_pending_videos_with(&FakeVideoTool::default(), 1)
+            .unwrap();
+        fs::remove_file(library.root().join("video-media/video-1/scrub/001.webp")).unwrap();
+        drop(library);
+
+        let reopened = Library::open(temp.path()).unwrap();
+        let (state, thumbnail): (String, Option<String>) = reopened
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT video.preparation_state, asset.thumbnail_relative_path
+                 FROM video_assets AS video JOIN assets AS asset ON asset.id = video.asset_id
+                 WHERE video.asset_id = 'video-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+
+        assert_eq!(state, "pending");
+        assert_eq!(thumbnail, None);
+        assert!(!reopened.root().join("video-media/video-1").exists());
     }
 
     #[test]
