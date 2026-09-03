@@ -632,7 +632,7 @@ fn write_thumbnail(staging: File, mut thumbnail_file: File) -> Result<(), Librar
         .map_err(|_| LibraryError::UnsupportedImage)
 }
 
-fn encode_thumbnail_webp(image: &image::DynamicImage) -> Result<Vec<u8>, LibraryError> {
+pub(super) fn encode_thumbnail_webp(image: &image::DynamicImage) -> Result<Vec<u8>, LibraryError> {
     let thumbnail = image.thumbnail(THUMBNAIL_BOUND, THUMBNAIL_BOUND).to_rgba8();
     let mut config = webp::WebPConfig::new().map_err(|_| LibraryError::UnsupportedImage)?;
     config.lossless = 0;
