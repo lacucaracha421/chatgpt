@@ -16,7 +16,7 @@ export type CollectionLibraryStateByType = Record<CollectionType, CollectionLibr
 export function createDefaultCollectionLibraryState(): CollectionLibraryStateByType {
   const initial = (): CollectionLibraryState => ({
     query: "",
-    sort: "recent",
+    sort: "media_date",
     direction: "desc",
     rating: "all",
   });

@@ -1,4 +1,4 @@
-import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
+import { ArrowDownTrayIcon, ArrowPathIcon, BarsArrowDownIcon, BookmarkIcon, ClockIcon, EyeIcon, FireIcon, MagnifyingGlassIcon, RectangleStackIcon } from "@heroicons/react/24/outline";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ViewToolbar } from "../layout/ViewToolbar";
@@ -15,7 +15,7 @@ import type {
 } from "../library/types";
 import { Button } from "../shared/ui/Button";
 import { EmptyState } from "../shared/ui/EmptyState";
-import { Select } from "../shared/ui/Select";
+import { Menu } from "../shared/ui/Menu";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
@@ -33,8 +33,8 @@ export function MangaSourceTabs({ source, onLocal, onOnline }: {
   onOnline: () => void;
 }) {
   return <div className="manga-source-tabs" aria-label="망가 출처">
-    <button type="button" aria-pressed={source === "local"} onClick={onLocal}>로컬 폴더</button>
-    <button type="button" aria-pressed={source === "online"} onClick={onOnline}>온라인 카탈로그</button>
+    <button type="button" aria-pressed={source === "local"} onClick={onLocal}>폴더</button>
+    <button type="button" aria-pressed={source === "online"} onClick={onOnline}>카탈로그</button>
   </div>;
 }
 
@@ -303,36 +303,30 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
           </div>}
         </form>}
       </>}
+      actions={status?.installed ? <>
+        <span className="manga-browser__icon-control" title={`결과 범위: ${scopeLabel(scope)}`}>
+          <Menu label={`결과 범위: ${scopeLabel(scope)}`} trigger={scope === "bookmarked" ? <BookmarkIcon aria-hidden="true" /> : <RectangleStackIcon aria-hidden="true" />} items={[
+            { id: "all", label: "전체 보기", icon: <RectangleStackIcon />, selected: scope === "all", onSelect: () => { setScope("all"); void search(query.trim(), sort, "all", 0); } },
+            { id: "bookmarked", label: "북마크만 보기", icon: <BookmarkIcon />, selected: scope === "bookmarked", onSelect: () => { setScope("bookmarked"); void search(query.trim(), sort, "bookmarked", 0); } },
+          ]} />
+        </span>
+        <span className="manga-browser__icon-control" title={`정렬: ${catalogSortLabel(sort)}`}>
+          <Menu label={`정렬: ${catalogSortLabel(sort)}`} trigger={<BarsArrowDownIcon aria-hidden="true" />} items={[
+            { id: "latest", label: "최신순", icon: <ClockIcon />, selected: sort === "latest", onSelect: () => { setSort("latest"); void search(query.trim(), "latest", scope, 0); } },
+            { id: "views", label: "조회순", icon: <EyeIcon />, selected: sort === "views", onSelect: () => { setSort("views"); void search(query.trim(), "views", scope, 0); } },
+            { id: "hotDay", label: "오늘 인기", icon: <FireIcon />, selected: sort === "hotDay", onSelect: () => { setSort("hotDay"); void search(query.trim(), "hotDay", scope, 0); } },
+            { id: "hotWeek", label: "주간 인기", icon: <FireIcon />, selected: sort === "hotWeek", onSelect: () => { setSort("hotWeek"); void search(query.trim(), "hotWeek", scope, 0); } },
+            { id: "hotMonth", label: "월간 인기", icon: <FireIcon />, selected: sort === "hotMonth", onSelect: () => { setSort("hotMonth"); void search(query.trim(), "hotMonth", scope, 0); } },
+          ]} />
+        </span>
+        <Button size="icon" variant="ghost" title={updating ? "갱신 중…" : "신규 작품 갱신"} aria-label="신규 작품 갱신" disabled={updating} onClick={() => void updateCatalog()}><ArrowDownTrayIcon aria-hidden="true" /></Button>
+        <Button size="icon" variant="ghost" title="새로고침" aria-label="새로고침" disabled={loading} onClick={() => void search(query.trim(), sort, scope, page)}><ArrowPathIcon aria-hidden="true" /></Button>
+      </> : undefined}
     />
-    {status?.installed && <div className="online-catalog__controls" role="toolbar" aria-label="온라인 카탈로그 보기 설정">
-      <div className="online-catalog__scope" aria-label="결과 범위">
-        <button type="button" aria-pressed={scope === "all"} onClick={() => {
-          setScope("all");
-          void search(query.trim(), sort, "all", 0);
-        }}>전체 보기</button>
-        <button type="button" aria-pressed={scope === "bookmarked"} onClick={() => {
-          setScope("bookmarked");
-          void search(query.trim(), sort, "bookmarked", 0);
-        }}>북마크만 보기</button>
-      </div>
-      <div className="online-catalog__control-actions">
-        <Select label="정렬" value={sort} onChange={(event) => {
-          const next = event.target.value as CatalogSort;
-          setSort(next);
-          void search(query.trim(), next, scope, 0);
-        }}>
-          <option value="latest">최신순</option>
-          <option value="views">조회순</option>
-          <option value="hotDay">오늘 인기</option>
-          <option value="hotWeek">주간 인기</option>
-          <option value="hotMonth">월간 인기</option>
-        </Select>
-        {status?.lastError ? <span className="online-catalog__sync-status" role="alert">마지막 갱신 실패 — {status.lastError}</span>
-          : status?.lastSuccessAt ? <span className="online-catalog__sync-status">마지막 갱신 {localDateTime(status.lastSuccessAt)}{status.lastAdded > 0 ? ` · 신규 ${status.lastAdded.toLocaleString()}개` : ""}</span>
-          : <span className="online-catalog__sync-status">아직 갱신 기록이 없습니다</span>}
-        <Button size="sm" disabled={updating} onClick={() => void updateCatalog()}>{updating ? "갱신 중…" : "신규 작품 갱신"}</Button>
-        <Button size="sm" disabled={loading} onClick={() => void search(query.trim(), sort, scope, page)}>새로고침</Button>
-      </div>
+    {status?.installed && <div className="online-catalog__sync-summary">
+      {status?.lastError ? <span className="online-catalog__sync-status" role="alert">마지막 갱신 실패 — {status.lastError}</span>
+        : status?.lastSuccessAt ? <span className="online-catalog__sync-status">마지막 갱신 {localDateTime(status.lastSuccessAt)}{status.lastAdded > 0 ? ` · 신규 ${status.lastAdded.toLocaleString()}개` : ""}</span>
+        : <span className="online-catalog__sync-status">아직 갱신 기록이 없습니다</span>}
     </div>}
     {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
     <div className="manga-browser__content online-catalog__content">
@@ -380,6 +374,14 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
       onClose={closeViewer}
     />}
   </section>;
+}
+
+function scopeLabel(scope: CatalogScope): string {
+  return scope === "bookmarked" ? "북마크만 보기" : "전체 보기";
+}
+
+function catalogSortLabel(sort: CatalogSort): string {
+  return sort === "views" ? "조회순" : sort === "hotDay" ? "오늘 인기" : sort === "hotWeek" ? "주간 인기" : sort === "hotMonth" ? "월간 인기" : "최신순";
 }
 
 function localDateTime(value: string): string {

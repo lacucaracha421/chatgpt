@@ -70,15 +70,15 @@ describe("CollectionBrowser", () => {
     renderBrowser({ collections: [sample], typeFilter: "game", showcase: false, libraryState: defaults.game });
     expect(screen.getByRole("button", { name: "라이브러리" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "쇼케이스" })).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByRole("textbox", { name: "제목 검색" })).toBeVisible();
-    expect(screen.getByRole("combobox", { name: "정렬" })).toHaveValue("recent");
-    expect(screen.getByRole("combobox", { name: "내 별점" })).toHaveValue("all");
+    expect(screen.getByRole("searchbox", { name: "제목 검색" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "정렬: 출시·출간·개봉일" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "내 별점: 전체" })).toBeVisible();
   });
 
   it("updates only the active media browse state", async () => {
     const onLibraryStateChange = vi.fn();
     renderBrowser({ collections: [sample], typeFilter: "game", showcase: false, onLibraryStateChange });
-    await userEvent.setup().type(screen.getByRole("textbox", { name: "제목 검색" }), "nier");
+    await userEvent.setup().type(screen.getByRole("searchbox", { name: "제목 검색" }), "nier");
     expect(onLibraryStateChange).toHaveBeenLastCalledWith({ ...createDefaultCollectionLibraryState().game, query: "nier" });
   });
 
@@ -88,10 +88,10 @@ describe("CollectionBrowser", () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "내림차순" }));
     expect(onLibraryStateChange).toHaveBeenLastCalledWith({ ...createDefaultCollectionLibraryState().game, direction: "asc" });
-    await user.selectOptions(screen.getByRole("combobox", { name: "내 별점" }), "4.5");
+    await user.click(screen.getByRole("button", { name: "내 별점: 전체" }));
+    expect(screen.getByRole("menuitem", { name: "미평가" })).toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: "4.5" }));
     expect(onLibraryStateChange).toHaveBeenLastCalledWith({ ...createDefaultCollectionLibraryState().game, direction: "asc", rating: 4.5 });
-    expect(screen.getByRole("option", { name: "전체" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "미평가" })).toBeInTheDocument();
   });
 
   it("renders a grid of collection cards", () => {

@@ -97,7 +97,8 @@ describe("OnlineCatalogBrowser", () => {
     }));
     renderBrowser(gateway);
     await screen.findByRole("button", { name: "오래된 제독 상세 보기" });
-    await userEvent.click(screen.getByRole("button", { name: "북마크만 보기" }));
+    await userEvent.click(screen.getByRole("button", { name: "결과 범위: 전체 보기" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "북마크만 보기" }));
     await userEvent.click(await screen.findByRole("button", { name: "다음 결과" }));
     await userEvent.click(await screen.findByRole("button", { name: "오래된 제독 북마크 해제" }));
     await waitFor(() => expect(gateway.searchOnlineCatalog).toHaveBeenLastCalledWith(
@@ -115,11 +116,13 @@ describe("OnlineCatalogBrowser", () => {
     }));
     renderBrowser(gateway);
     await screen.findByRole("button", { name: "오래된 제독 상세 보기" });
-    await userEvent.click(screen.getByRole("button", { name: "북마크만 보기" }));
+    await userEvent.click(screen.getByRole("button", { name: "결과 범위: 전체 보기" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "북마크만 보기" }));
     const pending = deferred<void>();
     vi.mocked(gateway.setOnlineCatalogBookmark).mockReturnValueOnce(pending.promise);
     await userEvent.click(await screen.findByRole("button", { name: "오래된 제독 북마크 해제" }));
-    await userEvent.click(screen.getByRole("button", { name: "전체 보기" }));
+    await userEvent.click(screen.getByRole("button", { name: "결과 범위: 북마크만 보기" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "전체 보기" }));
     await act(async () => pending.resolve());
 
     expect(gateway.searchOnlineCatalog).toHaveBeenLastCalledWith(
@@ -187,7 +190,8 @@ describe("OnlineCatalogBrowser", () => {
     expect(gateway.setOnlineCatalogBookmark).toHaveBeenCalledWith(3, true);
     expect(gateway.getOnlineCatalogWorkDetail).not.toHaveBeenCalled();
 
-    await userEvent.click(screen.getByRole("button", { name: "북마크만 보기" }));
+    await userEvent.click(screen.getByRole("button", { name: "결과 범위: 전체 보기" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "북마크만 보기" }));
     expect(gateway.searchOnlineCatalog).toHaveBeenLastCalledWith(
       expect.objectContaining({ scope: "bookmarked", page: 0 }),
     );
@@ -222,7 +226,8 @@ describe("OnlineCatalogBrowser", () => {
     await waitFor(() => expect(gateway.searchOnlineCatalog).toHaveBeenCalledWith(
       expect.objectContaining({ text: "character:teitoku" }),
     ));
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "정렬" }), "hotWeek");
+    await userEvent.click(screen.getByRole("button", { name: "정렬: 최신순" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "주간 인기" }));
     await waitFor(() => expect(gateway.searchOnlineCatalog).toHaveBeenCalledWith(
       expect.objectContaining({ sort: "hotWeek" }),
     ));

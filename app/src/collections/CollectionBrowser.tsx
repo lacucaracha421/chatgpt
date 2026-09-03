@@ -1,4 +1,4 @@
-import { PlusIcon } from "@heroicons/react/24/outline";
+import { ArrowDownIcon, ArrowUpIcon, Bars3BottomLeftIcon, BarsArrowDownIcon, CalendarDaysIcon, ClockIcon, MagnifyingGlassIcon, PlusIcon, StarIcon } from "@heroicons/react/24/outline";
 import { useRef, useState } from "react";
 import { collectionSourceThumbnailUrl, thumbnailUrl, workArtworkThumbnailUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
@@ -11,8 +11,6 @@ import { Dialog } from "../shared/ui/Dialog";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { Menu } from "../shared/ui/Menu";
 import { Toast } from "../shared/ui/Toast";
-import { Select } from "../shared/ui/Select";
-import { TextField } from "../shared/ui/TextField";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { CollectionCard } from "./CollectionCard";
 import { CollectionEditDialog, type CollectionEditMode } from "./CollectionEditDialog";
@@ -127,14 +125,27 @@ export function CollectionBrowser({
           <ModeSegment showcase={showcase} onChange={setShowcase} />
           <TypeSegment current={typeFilter} onChange={setTypeFilter} />
           {!showcase && <div className="collection-browser__library-controls">
-            <TextField label="제목 검색" placeholder="제목 검색" value={libraryState.query} onChange={(event) => patchLibraryState({ query: event.target.value })} />
-            <Select label="정렬" value={libraryState.sort} onChange={(event) => patchLibraryState({ sort: event.target.value as CollectionLibrarySort })}>
-              <option value="recent">최근 추가</option><option value="name">제목</option><option value="media_date">출시·출간·개봉일</option>
-            </Select>
-            <button type="button" aria-label={libraryState.direction === "desc" ? "내림차순" : "오름차순"} onClick={() => patchLibraryState({ direction: libraryState.direction === "desc" ? "asc" : "desc" })}>↕</button>
-            <Select label="내 별점" value={String(libraryState.rating)} onChange={(event) => patchLibraryState({ rating: event.target.value === "all" || event.target.value === "unrated" ? event.target.value : Number(event.target.value) })}>
-              <option value="all">전체</option>{[5, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1, 0.5, 0].map((rating) => <option key={rating} value={rating}>{rating.toFixed(1)}</option>)}<option value="unrated">미평가</option>
-            </Select>
+            <label className="manga-browser__search">
+              <MagnifyingGlassIcon aria-hidden="true" />
+              <input type="search" aria-label="제목 검색" placeholder="제목 검색" value={libraryState.query} onChange={(event) => patchLibraryState({ query: event.target.value })} />
+            </label>
+            <span className="collection-browser__icon-control" title={`정렬: ${sortLabel(libraryState.sort)}`}>
+              <Menu label={`정렬: ${sortLabel(libraryState.sort)}`} trigger={<BarsArrowDownIcon aria-hidden="true" />} items={[
+                { id: "media_date", label: "출시·출간·개봉일", icon: <CalendarDaysIcon />, selected: libraryState.sort === "media_date", onSelect: () => patchLibraryState({ sort: "media_date" }) },
+                { id: "recent", label: "최근 추가", icon: <ClockIcon />, selected: libraryState.sort === "recent", onSelect: () => patchLibraryState({ sort: "recent" }) },
+                { id: "name", label: "제목", icon: <Bars3BottomLeftIcon />, selected: libraryState.sort === "name", onSelect: () => patchLibraryState({ sort: "name" }) },
+              ]} />
+            </span>
+            <Button size="icon" variant="ghost" title={libraryState.direction === "desc" ? "내림차순" : "오름차순"} aria-label={libraryState.direction === "desc" ? "내림차순" : "오름차순"} onClick={() => patchLibraryState({ direction: libraryState.direction === "desc" ? "asc" : "desc" })}>
+              {libraryState.direction === "desc" ? <ArrowDownIcon aria-hidden="true" /> : <ArrowUpIcon aria-hidden="true" />}
+            </Button>
+            <span className="collection-browser__icon-control" title={`내 별점: ${ratingLabel(libraryState.rating)}`}>
+              <Menu label={`내 별점: ${ratingLabel(libraryState.rating)}`} trigger={<StarIcon aria-hidden="true" />} items={[
+                { id: "all", label: "전체", selected: libraryState.rating === "all", onSelect: () => patchLibraryState({ rating: "all" }) },
+                ...[5, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1, 0.5, 0].map((rating) => ({ id: String(rating), label: rating.toFixed(1), selected: libraryState.rating === rating, onSelect: () => patchLibraryState({ rating }) })),
+                { id: "unrated", label: "미평가", selected: libraryState.rating === "unrated", onSelect: () => patchLibraryState({ rating: "unrated" }) },
+              ]} />
+            </span>
           </div>}
         </div>
       </ViewToolbar>
@@ -258,6 +269,14 @@ export function CollectionBrowser({
       )}
     </section>
   );
+}
+
+function sortLabel(sort: CollectionLibrarySort): string {
+  return sort === "media_date" ? "출시·출간·개봉일" : sort === "name" ? "제목" : "최근 추가";
+}
+
+function ratingLabel(rating: CollectionLibraryState["rating"]): string {
+  return rating === "all" ? "전체" : rating === "unrated" ? "미평가" : rating.toFixed(1);
 }
 
 function TypeSegment({

@@ -99,27 +99,29 @@ describe("AssetBrowser", () => {
     await user.click(tile);
     expect(tile).toHaveAttribute("aria-selected", "true");
 
-    await user.selectOptions(screen.getByRole("combobox", { name: "미디어" }), "images");
+    await user.click(screen.getByRole("button", { name: "미디어 필터: 전체" }));
+    await user.click(screen.getByRole("menuitem", { name: "이미지" }));
     await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(
       expect.objectContaining({ mediaKind: "images", aspectRatio: null, after: null, aroundDate: null }),
     ));
     expect(await screen.findByRole("option", { name: "asset-0.png" })).toHaveAttribute("aria-selected", "false");
 
-    await user.selectOptions(screen.getByRole("combobox", { name: "비율" }), "portrait");
+    await user.click(screen.getByRole("button", { name: "비율 필터: 전체" }));
+    await user.click(screen.getByRole("menuitem", { name: "세로형" }));
     await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(
       expect.objectContaining({ mediaKind: "images", aspectRatio: "portrait" }),
     ));
 
     rerender(renderView({ kind: "unsorted" }));
-    expect(screen.getByRole("combobox", { name: "미디어" })).toHaveValue("images");
-    expect(screen.getByRole("combobox", { name: "비율" })).toHaveValue("portrait");
+    expect(screen.getByRole("button", { name: "미디어 필터: 이미지" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "비율 필터: 세로형" })).toBeVisible();
     await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(
       expect.objectContaining({ unclassifiedOnly: true, mediaKind: "images", aspectRatio: "portrait" }),
     ));
 
     rerender(renderView({ kind: "collection", collectionId: "collection-1" }));
-    expect(screen.queryByRole("combobox", { name: "미디어" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("combobox", { name: "비율" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /미디어 필터/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /비율 필터/ })).not.toBeInTheDocument();
     await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(
       expect.objectContaining({ collectionId: "collection-1", mediaKind: null, aspectRatio: null }),
     ));
@@ -563,6 +565,7 @@ describe("AssetBrowser", () => {
       </LibraryProvider>,
     );
 
+    expect(screen.getAllByRole("toolbar", { name: "다시보기 도구" })).toHaveLength(1);
     await user.click(screen.getByRole("tab", { name: "둘러보기" }));
     await user.click(await screen.findByRole("button", { name: "2026-08-06 수집 1개" }));
 

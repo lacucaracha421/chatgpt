@@ -69,7 +69,8 @@ describe("MangaBrowser", () => {
     const { container } = render(<LibraryProvider gateway={gateway}><MangaBrowser /></LibraryProvider>);
     await screen.findByText("T1");
 
-    await user.selectOptions(screen.getByRole("combobox", { name: "정렬" }), "pages_desc");
+    await user.click(screen.getByRole("button", { name: "정렬: 최근 변경순" }));
+    await user.click(screen.getByRole("menuitem", { name: "페이지 많은 순" }));
     expect(container.querySelectorAll(".manga-browser__cover-title")[0]).toHaveTextContent("T1");
 
     fireEvent.change(screen.getByRole("slider", { name: "카드 크기" }), { target: { value: "200" } });
@@ -99,10 +100,10 @@ describe("MangaBrowser", () => {
     render(<LibraryProvider gateway={gateway}><MangaBrowser /></LibraryProvider>);
     await screen.findByText("T1");
 
-    await userEvent.click(screen.getByRole("button", { name: "온라인 카탈로그" }));
+    await userEvent.click(screen.getByRole("button", { name: "카탈로그" }));
 
     expect(await screen.findByText("온라인 카탈로그가 없습니다")).toBeVisible();
-    await userEvent.click(screen.getByRole("button", { name: "로컬 폴더" }));
+    await userEvent.click(screen.getByRole("button", { name: "폴더" }));
     expect(screen.getByText("T1")).toBeVisible();
   });
 });

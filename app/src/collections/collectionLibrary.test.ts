@@ -122,6 +122,6 @@ describe("collection library derivation", () => {
     const defaults = createDefaultCollectionLibraryState();
     defaults.game.query = "changed";
     expect(defaults.manga.query).toBe("");
-    expect(defaults.movie).toEqual({ query: "", sort: "recent", direction: "desc", rating: "all" });
+    expect(defaults.movie).toEqual({ query: "", sort: "media_date", direction: "desc", rating: "all" });
   });
 });

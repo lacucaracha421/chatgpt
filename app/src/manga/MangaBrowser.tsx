@@ -1,4 +1,4 @@
-import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
+import { ArrowPathIcon, ArrowsPointingOutIcon, Bars3BottomLeftIcon, BarsArrowDownIcon, ClockIcon, DocumentTextIcon, MagnifyingGlassIcon, UserIcon } from "@heroicons/react/24/outline";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useLibrary } from "../library/LibraryContext";
 import type { MangaSeries } from "../library/types";
@@ -10,7 +10,7 @@ import { Skeleton } from "../shared/ui/Skeleton";
 import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { ViewToolbar } from "../layout/ViewToolbar";
-import { Select } from "../shared/ui/Select";
+import { Menu } from "../shared/ui/Menu";
 import { Slider } from "../shared/ui/Slider";
 import { MangaSourceTabs, OnlineCatalogBrowser } from "./OnlineCatalogBrowser";
 
@@ -119,14 +119,16 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
         </label>
       </>}
       actions={<>
-        <Select label="정렬" value={sort} onChange={(event) => setSort(event.target.value as MangaSort)}>
-          <option value="recent">최근 변경순</option>
-          <option value="title_asc">제목순</option>
-          <option value="author_asc">작가순</option>
-          <option value="pages_desc">페이지 많은 순</option>
-        </Select>
-        <Slider label="카드 크기" min={112} max={220} step={8} value={cardWidth} onChange={(event) => setCardWidth(Number(event.target.value))} />
-        <Button size="sm" disabled={scanning} onClick={() => void refreshSeries()}>{scanning ? "스캔 중" : "새로고침"}</Button>
+        <span className="manga-browser__icon-control" title={`정렬: ${mangaSortLabel(sort)}`}>
+          <Menu label={`정렬: ${mangaSortLabel(sort)}`} trigger={<BarsArrowDownIcon aria-hidden="true" />} items={[
+            { id: "recent", label: "최근 변경순", icon: <ClockIcon />, selected: sort === "recent", onSelect: () => setSort("recent") },
+            { id: "title_asc", label: "제목순", icon: <Bars3BottomLeftIcon />, selected: sort === "title_asc", onSelect: () => setSort("title_asc") },
+            { id: "author_asc", label: "작가순", icon: <UserIcon />, selected: sort === "author_asc", onSelect: () => setSort("author_asc") },
+            { id: "pages_desc", label: "페이지 많은 순", icon: <DocumentTextIcon />, selected: sort === "pages_desc", onSelect: () => setSort("pages_desc") },
+          ]} />
+        </span>
+        <span className="manga-browser__size-control" title="카드 크기"><ArrowsPointingOutIcon aria-hidden="true" /><Slider label="카드 크기" min={112} max={220} step={8} value={cardWidth} onChange={(event) => setCardWidth(Number(event.target.value))} /></span>
+        <Button size="icon" variant="ghost" title={scanning ? "스캔 중" : "새로고침"} aria-label={scanning ? "스캔 중" : "새로고침"} disabled={scanning} onClick={() => void refreshSeries()}><ArrowPathIcon aria-hidden="true" /></Button>
       </>}
     />
     {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
@@ -138,6 +140,10 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
       ) : <MangaCoverGrid series={visibleSeries} cardWidth={cardWidth} onOpenSeries={onOpenSeries} />}
     </div>
   </section>;
+}
+
+function mangaSortLabel(sort: MangaSort): string {
+  return sort === "title_asc" ? "제목순" : sort === "author_asc" ? "작가순" : sort === "pages_desc" ? "페이지 많은 순" : "최근 변경순";
 }
 
 function MangaCoverGrid({ series, cardWidth, onOpenSeries }: { series: MangaSeries[]; cardWidth: number; onOpenSeries?: (series: MangaSeries) => void }) {
