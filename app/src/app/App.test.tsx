@@ -1208,11 +1208,11 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
     await user.click(await screen.findByRole("button", { name: "컬렉션" }));
-    const search = await screen.findByRole("textbox", { name: "제목 검색" });
+    const search = await screen.findByRole("searchbox", { name: "제목 검색" });
     await user.type(search, "nier");
     await user.click(await screen.findByText("NieR: Automata"));
     await user.click(await screen.findByRole("button", { name: "컬렉션 표지 보기 닫기" }));
-    expect(await screen.findByRole("textbox", { name: "제목 검색" })).toHaveValue("nier");
+    expect(await screen.findByRole("searchbox", { name: "제목 검색" })).toHaveValue("nier");
   });
 
   it("returns from a manga Collection detail to the manga list", async () => {
