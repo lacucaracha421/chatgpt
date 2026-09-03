@@ -104,6 +104,7 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
       src={playbackUrl(asset.id)}
       muted
       playsInline
+      draggable={false}
       preload="metadata"
       aria-label={`${alt} 미리보기`}
       onTimeUpdate={(event) => { if (!scrubbingRef.current) setPlayedRatio(Math.min(1, event.currentTarget.currentTime / durationSeconds)); }}

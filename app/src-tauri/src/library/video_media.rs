@@ -222,6 +222,8 @@ impl Library {
             if self.prepare_video(tool, video).is_err() {
                 self.mark_video_failed(&asset_id)?;
                 progress.failed += 1;
+            } else if let Err(error) = self.requeue_cloud_asset_after_thumbnail_ready(&asset_id) {
+                eprintln!("cloud thumbnail-wait requeue failed for {asset_id}: {error}");
             }
             progress.processed += 1;
             progress.changed_asset_ids.push(asset_id);
@@ -787,6 +789,19 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let library = Library::open(temp.path()).unwrap();
         insert_pending_video(&library, "video-1", "mp4", "h264", Some("aac"), 2_000);
+        library.seed_cloud_backfill_queue().unwrap();
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE cloud_sync_queue SET status = 'failed', last_error = ?2
+                 WHERE entity_type = 'asset' AND entity_id = ?1 AND operation = 'upsert'",
+                params![
+                    "video-1",
+                    LibraryError::CloudThumbnailUnavailable.to_string()
+                ],
+            )
+            .unwrap();
         let tool = FakeVideoTool::default();
 
         let progress = library.prepare_pending_videos_with(&tool, 1).unwrap();
@@ -809,6 +824,17 @@ mod tests {
             asset.thumbnail_relative_path.as_deref(),
             Some("video-media/video-1/poster.webp")
         );
+        let cloud_queue: (String, Option<String>) = library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT status, last_error FROM cloud_sync_queue
+                 WHERE entity_type = 'asset' AND entity_id = 'video-1' AND operation = 'upsert'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(cloud_queue, ("pending".into(), None));
         assert!(library
             .root()
             .join("video-media/video-1/poster.webp")

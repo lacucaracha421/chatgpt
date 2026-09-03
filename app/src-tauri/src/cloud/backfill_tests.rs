@@ -12,7 +12,7 @@ use tiny_http::{Header, Response, Server};
 
 use super::backfill::BackfillControlState;
 use super::client::CloudClient;
-use crate::library::Library;
+use crate::library::{error::LibraryError, Library};
 
 fn png_bytes(seed: u32) -> Vec<u8> {
     let image = image::DynamicImage::ImageRgb8(image::ImageBuffer::from_fn(8, 8, |x, _y| {
@@ -142,10 +142,14 @@ fn paused_backfill_does_not_claim_new_work_and_resume_preserves_queue() {
 }
 
 #[test]
-fn reconcile_only_requeues_interrupted_backfill_stages() {
+fn reconcile_requeues_interrupted_and_thumbnail_ready_backfill_stages() {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
+    let source = temp.path().join("thumbnail-ready.png");
+    fs::write(&source, png_bytes(31)).unwrap();
+    let thumbnail_ready_id = ingest_png(&library, &source, "2026-09-02T00:00:00Z");
     let connection = library.connection().unwrap();
+    connection.execute("DELETE FROM cloud_sync_queue", []).unwrap();
     for (index, status) in ["preparing", "uploading", "committing", "synced", "failed"]
         .into_iter()
         .enumerate()
@@ -159,15 +163,27 @@ fn reconcile_only_requeues_interrupted_backfill_stages() {
             )
             .unwrap();
     }
+    connection
+        .execute(
+            "INSERT INTO cloud_sync_queue (
+                id, entity_type, entity_id, operation, status, revision, updated_at, last_error
+             ) VALUES ('queue-thumbnail', 'asset', ?1, 'upsert', 'failed', 1,
+                       '2026-09-02T00:00:00Z', ?2)",
+            rusqlite::params![
+                thumbnail_ready_id,
+                LibraryError::CloudThumbnailUnavailable.to_string()
+            ],
+        )
+        .unwrap();
     drop(connection);
 
-    assert_eq!(library.reconcile_cloud_backfill().unwrap().requeued, 3);
+    assert_eq!(library.reconcile_cloud_backfill().unwrap().requeued, 4);
     assert_eq!(
         count_rows(
             &library,
             "SELECT COUNT(*) FROM cloud_sync_queue WHERE status = 'pending'"
         ),
-        3
+        4
     );
     assert_eq!(
         count_rows(

@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { DropSubscriber } from "../ingestion/useFileDrop";
+import type { DropSubscriber, NativeFileDropEvent } from "../ingestion/useFileDrop";
 import type {
   AssetSummary,
   ClassificationEntry,
@@ -197,7 +197,7 @@ describe("App", () => {
 
     expect(await screen.findByRole("treeitem", { name: "Old library" })).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: "설정" }));
-    await userEvent.click(screen.getByRole("button", { name: "다른 저장소 열기" }));
+    await userEvent.click(await screen.findByRole("button", { name: "다른 저장소 열기" }));
 
     expect(await screen.findByRole("treeitem", { name: "New library" })).toBeVisible();
     expect(screen.queryByRole("treeitem", { name: "Old library" })).not.toBeInTheDocument();
@@ -1053,6 +1053,38 @@ describe("App", () => {
     fireEvent.pointerMove(tile, { pointerId: 9, clientX: 1002, clientY: 100 });
     await waitFor(() => expect(startAssetDrag).toHaveBeenCalledOnce());
     expect(startAssetDrag).toHaveBeenCalledWith([asset.id]);
+  });
+
+  it("restores sidebar folder drop targets when a native asset drag re-enters", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    Object.defineProperties(HTMLElement.prototype, {
+      offsetWidth: { configurable: true, get: () => 900 }, clientWidth: { configurable: true, get: () => 840 },
+      offsetHeight: { configurable: true, get: () => 600 }, clientHeight: { configurable: true, get: () => 600 },
+    });
+    Object.defineProperties(window, { innerWidth: { configurable: true, value: 1000 }, innerHeight: { configurable: true, value: 700 }, devicePixelRatio: { configurable: true, value: 1 } });
+    let send: ((event: NativeFileDropEvent) => void) | undefined;
+    const subscribeDrops: DropSubscriber = async (handler) => { send = handler; return () => undefined; };
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listAssets).mockResolvedValue({ items: [asset], nextCursor: null });
+    vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games]);
+    const startAssetDrag = vi.fn().mockResolvedValue(undefined);
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={subscribeDrops} startAssetDrag={startAssetDrag} />);
+    const tile = await screen.findByRole("option", { name: "arona.png" });
+    const folder = await screen.findByRole("treeitem", { name: "게임" });
+    Object.defineProperties(tile, { setPointerCapture: { configurable: true, value: vi.fn() }, releasePointerCapture: { configurable: true, value: vi.fn() } });
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: vi.fn().mockReturnValue(folder) });
+
+    fireEvent.pointerDown(tile, { button: 0, pointerId: 12, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(tile, { pointerId: 12, clientX: 1001, clientY: 100 });
+    await waitFor(() => expect(startAssetDrag).toHaveBeenCalledOnce());
+    await waitFor(() => expect(send).toBeDefined());
+
+    act(() => send?.({ type: "enter", paths: ["C:\\Lakomics\\.drag-out\\session\\arona.png"], position: { x: 20, y: 20 } }));
+    expect(folder).toHaveAttribute("data-drop-state", "valid");
+    act(() => send?.({ type: "drop", paths: ["C:\\Lakomics\\.drag-out\\session\\arona.png"], position: { x: 20, y: 20 } }));
+
+    await waitFor(() => expect(libraryGateway.setAssetClassification).toHaveBeenCalledWith({ assetIds: [asset.id], classificationId: games.id }));
+    expect(libraryGateway.ingestMedia).not.toHaveBeenCalled();
   });
 
   it("does not start native drag after Escape and reports native failures in the work tray", async () => {

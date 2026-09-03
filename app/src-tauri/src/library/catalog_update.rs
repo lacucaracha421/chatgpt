@@ -326,8 +326,8 @@ impl RemoteWork {
             title_jpn: text(object.get("title_jpn"))?,
             category: object.get("category").and_then(number),
             uploader: text(object.get("uploader"))?,
-            posted: object.get("posted").and_then(number),
-            updated: object.get("updated").and_then(number),
+            posted: super::catalog_provider::normalize_optional_legacy_timestamp(object.get("posted").and_then(number)),
+            updated: super::catalog_provider::normalize_optional_legacy_timestamp(object.get("updated").and_then(number)),
             file_count: object.get("filecount").and_then(number).unwrap_or(0),
             file_size: object.get("filesize").and_then(number),
             rating: object.get("rating").and_then(decimal),
@@ -609,6 +609,20 @@ mod tests {
         assert_eq!(parsed.works[0].title_jpn.as_deref(), Some("작품-120"));
         assert_eq!(parsed.works[0].tags.len(), 2);
         assert!(parsed.works[0].raw_json.contains("\"token\":\"token-120\""));
+    }
+
+    #[test]
+    fn normalizes_remote_posted_and_updated_units_before_storage() {
+        let body = serde_json::json!([{
+            "id": 1,
+            "title": "timestamp fixture",
+            "posted": 1_700_000_000_000_i64,
+            "updated": 1_700_100_000_000_i64
+        }]).to_string();
+        let parsed = RemoteCatalogPage::parse(&body).unwrap();
+
+        assert_eq!(parsed.works[0].posted, Some(1_700_000_000));
+        assert_eq!(parsed.works[0].updated, Some(1_700_100_000));
     }
 
     #[test]

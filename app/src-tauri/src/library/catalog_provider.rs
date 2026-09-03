@@ -8,20 +8,39 @@
 
 pub(crate) const LEGACY_VCK_PROVIDER: &str = "kHentai";
 
+const UNIX_SECONDS_CEILING: u64 = 100_000_000_000;
+
+pub(crate) fn normalize_legacy_timestamp(value: i64) -> i64 {
+    let mut normalized = value;
+    while normalized.unsigned_abs() >= UNIX_SECONDS_CEILING {
+        normalized /= 1_000;
+    }
+    normalized
+}
+
+pub(crate) fn normalize_optional_legacy_timestamp(value: Option<i64>) -> Option<i64> {
+    value.map(normalize_legacy_timestamp)
+}
+
 /// Phase 2 전용. heliotrope.rs 문서 참고. 현재 어떤 데이터 행에도 기록되지 않는다.
 #[cfg(test)]
 pub(crate) const HELIOTROPE_PROVIDER: &str = "heliotrope";
 
-
-
 #[cfg(test)]
 mod tests {
-    use super::LEGACY_VCK_PROVIDER;
+    use super::{normalize_legacy_timestamp, LEGACY_VCK_PROVIDER};
 
     #[test]
     fn legacy_vck_provider_tag_is_stable() {
         // 이 문자열이 바뀌면 기존 VCK 북마크·읽기 위치 행과 갤러리 매니페스트가
         // 전부 끊긴다. Phase 1(2026-09) 기준으로 고정값이다.
         assert_eq!(LEGACY_VCK_PROVIDER, "kHentai");
+    }
+
+    #[test]
+    fn normalizes_legacy_timestamp_units_to_unix_seconds() {
+        assert_eq!(normalize_legacy_timestamp(1_700_000_000), 1_700_000_000);
+        assert_eq!(normalize_legacy_timestamp(1_700_000_000_000), 1_700_000_000);
+        assert_eq!(normalize_legacy_timestamp(1_700_000_000_000_000), 1_700_000_000);
     }
 }

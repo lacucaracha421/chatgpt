@@ -2,7 +2,7 @@ use std::sync::RwLock;
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 
 use crate::{
     catalog_transport::CatalogTransport,
@@ -1307,11 +1307,14 @@ pub fn start_asset_drag(
     let preview = prepared.preview.clone();
     let cleanup = Arc::new(Mutex::new(Some(prepared)));
     let callback_cleanup = Arc::clone(&cleanup);
+    let callback_window = window.clone();
+    let ended_asset_ids = asset_ids.clone();
     let result = drag::start_drag(
         &window,
         drag::DragItem::Files(files),
         drag::Image::File(preview),
         move |_result, _cursor| {
+            let _ = callback_window.emit("asset-drag://ended", ended_asset_ids.clone());
             drop(
                 callback_cleanup
                     .lock()

@@ -106,6 +106,8 @@ export function VideoPlayer({ asset }: { asset: VideoAsset }) {
       aria-label={`${title} 영상`}
       playsInline
       preload="metadata"
+      tabIndex={-1}
+      onPointerDown={(event) => event.preventDefault()}
       onClick={togglePlayback}
       onPlay={() => setPlaying(true)}
       onPause={() => setPlaying(false)}

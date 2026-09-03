@@ -94,6 +94,11 @@ input:disabled {
   overflow: hidden;
 }
 
+.library-content__deferred {
+  height: 100%;
+  background: var(--color-bg);
+}
+
 .app-shell__workspace {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -456,13 +461,42 @@ input:disabled {
 }
 
 .ui-menu__item {
+  display: flex;
+  align-items: center;
   min-height: var(--control-height-md);
+  gap: var(--space-2);
   padding: 0 var(--space-2);
   color: var(--color-text);
   text-align: left;
   background: transparent;
   border: 0;
   border-radius: var(--radius-sm);
+}
+
+.ui-menu__item-icon,
+.ui-menu__item-check {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
+.ui-menu__item-icon {
+  display: inline-flex;
+  color: var(--color-muted);
+}
+
+.ui-menu__item-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.ui-menu__item-label {
+  flex: 1;
+}
+
+.ui-menu__item-check {
+  margin-left: auto;
+  color: var(--color-accent);
 }
 
 .ui-menu__item:hover:not(:disabled),
@@ -1208,6 +1242,65 @@ input:disabled {
   flex-shrink: 0;
 }
 
+.view-toolbar__view-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-compact);
+  padding-right: var(--space-2);
+  margin-right: var(--space-1);
+  border-right: var(--border-width) solid var(--color-border);
+}
+
+.asset-toolbar__group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-compact);
+  padding-left: var(--space-2);
+  border-left: var(--border-width) solid var(--color-border);
+}
+
+.asset-toolbar__group:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.asset-toolbar__group-label {
+  color: var(--color-muted);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+.asset-toolbar__control-label {
+  white-space: nowrap;
+}
+
+.asset-toolbar__filter-menu .ui-menu__trigger,
+.asset-toolbar__icon-toggle .ui-toggle {
+  box-sizing: border-box;
+  width: var(--control-height-md);
+  min-height: var(--control-height-md);
+  padding: 0;
+  justify-content: center;
+}
+
+.asset-toolbar__filter-menu .ui-menu__trigger svg,
+.asset-toolbar__icon-toggle .ui-toggle svg {
+  width: 16px;
+  height: 16px;
+}
+
+.asset-toolbar__filter-menu[data-active="true"] .ui-menu__trigger {
+  color: var(--color-text);
+  background: var(--color-surface-hover);
+  border-color: var(--color-border);
+}
+
+.view-toolbar .ui-toggle > span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
 .asset-browser__next-error {
   display: flex;
   align-items: center;
@@ -1843,8 +1936,42 @@ input:disabled {
 }
 
 .asset-gallery__asset[aria-selected="true"] {
-  outline: var(--focus-width) solid var(--color-accent);
-  outline-offset: calc(var(--focus-width) * -1);
+  outline: 3px solid var(--color-accent);
+  outline-offset: -3px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-bg) 78%, transparent);
+}
+
+.asset-gallery__asset[aria-selected="true"]::after {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  content: "";
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  pointer-events: none;
+}
+
+.asset-gallery__selection-indicator {
+  position: absolute;
+  z-index: 4;
+  top: 0;
+  left: 0;
+  width: 22px;
+  height: 22px;
+  background: var(--color-accent);
+  border-radius: 0 0 9px 0;
+  box-shadow: 1px 1px 0 color-mix(in srgb, var(--color-bg) 62%, transparent);
+  pointer-events: none;
+}
+
+.asset-gallery__selection-indicator::after {
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  width: 6px;
+  height: 6px;
+  content: "";
+  background: color-mix(in srgb, var(--color-bg) 92%, white 8%);
+  border-radius: 50%;
 }
 
 .asset-gallery__asset img {
@@ -1862,7 +1989,10 @@ input:disabled {
   height: 100%;
 }
 
-.video-tile video { object-fit: cover; }
+.video-tile video {
+  object-fit: cover;
+  pointer-events: none;
+}
 
 .video-tile__duration,
 .video-tile__icon,
@@ -1884,22 +2014,39 @@ input:disabled {
 .video-tile--failed .video-tile__status { position: static; transform: none; }
 .video-tile__scrub {
   position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: var(--video-progress-height);
-  padding: 0 var(--video-scrub-inset, 0);
-  background: color-mix(in srgb, var(--color-accent) 45%, transparent);
-  cursor: ew-resize;
+  z-index: 2;
+  right: var(--space-1);
+  bottom: -2px;
+  left: var(--space-1);
+  height: 18px;
+  overflow: visible;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
   touch-action: none;
+  transition: opacity 100ms ease;
 }
 
-/* 탐색 중인 타일은 유튜브처럼 탐색 바를 키워 잡기 쉽게 한다.
-   실제 마우스 호버는 :hover가 함께 잡아주고, 자동화·터치에서는 data-scrubbing이 담당한다. */
-.video-tile:hover .video-tile__scrub,
-.video-tile__scrub[data-scrubbing="true"] {
-  height: 12px;
+.video-tile__scrub::before {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  left: 0;
+  height: 2px;
+  content: "";
+  background: color-mix(in srgb, var(--color-text) 36%, transparent);
+  border-radius: 999px;
+  transform: translateY(-50%);
 }
+
+/* 보이는 선은 얇게 유지하지만 실제 포인터 판정 영역은 18px로 넓힌다. */
+.video-tile:hover .video-tile__scrub,
+.video-tile:focus-within .video-tile__scrub,
+.video-tile__scrub[data-scrubbing="true"] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 /* 드래그 탐색 중에는 정지 프리뷰 프레임이 주인공이다. 재생 화면을 치운다. */
 .video-tile:has(.video-tile__scrub[data-scrubbing="true"]) video {
   visibility: hidden;
@@ -1907,24 +2054,33 @@ input:disabled {
 
 .video-tile__scrub-fill {
   position: absolute;
-  inset: 0 auto 0 0;
+  top: 50%;
+  left: 0;
+  height: 3px;
+  min-width: 0;
   background: var(--color-accent);
+  border-radius: 999px;
+  transform: translateY(-50%);
 }
 
 .video-tile__scrub-handle {
   position: absolute;
   top: 50%;
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--color-accent);
   transform: translate(-50%, -50%) scale(0);
-  transition: transform 100ms ease;
+  transition: transform 90ms ease;
 }
 
 .video-tile:hover .video-tile__scrub-handle,
-.video-tile__scrub[data-scrubbing="true"] .video-tile__scrub-handle {
+.video-tile:focus-within .video-tile__scrub-handle {
   transform: translate(-50%, -50%) scale(1);
+}
+
+.video-tile__scrub[data-scrubbing="true"] .video-tile__scrub-handle {
+  transform: translate(-50%, -50%) scale(1.25);
 }
 
 .asset-gallery__metadata {
@@ -2071,6 +2227,13 @@ input:disabled {
   height: 100%;
   min-height: 0;
   object-fit: contain;
+  outline: none;
+}
+
+.video-player__media:focus,
+.video-player__media:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 .video-player__controls {

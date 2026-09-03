@@ -35,6 +35,16 @@ describe("VideoPlayer", () => {
     expect(screen.getByLabelText("sample.webm 영상")).toHaveAttribute("src", "http://lakomics.localhost/playback/video-1");
   });
 
+  it("keeps pointer clicks from focusing the native video surface", () => {
+    render(<VideoPlayer asset={videoAsset()} />);
+    const video = screen.getByLabelText("sample.webm 영상");
+
+    expect(video).toHaveAttribute("tabindex", "-1");
+    expect(fireEvent.pointerDown(video)).toBe(false);
+    fireEvent.click(video);
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalledOnce();
+  });
+
   it("toggles playback with Space unless a control owns focus", () => {
     render(<VideoPlayer asset={videoAsset()} />);
     const player = screen.getByTestId("video-player");

@@ -213,6 +213,8 @@ describe("AssetGallery", () => {
     const first = await screen.findByRole("option", { name: "asset-0.png" });
     const second = screen.getByRole("option", { name: "asset-1.png" });
     expect(first).toHaveAttribute("aria-selected", "true");
+    expect(first.querySelector(".asset-gallery__selection-indicator")).not.toBeNull();
+    expect(second.querySelector(".asset-gallery__selection-indicator")).toBeNull();
     expect(first).not.toHaveAttribute("aria-pressed");
 
     await user.keyboard("{Control>}");
@@ -339,6 +341,22 @@ describe("AssetGallery", () => {
     act(() => vi.advanceTimersByTime(200));
     expect(screen.queryByLabelText("video-0.webm 미리보기")).not.toBeInTheDocument();
     expect(screen.getByLabelText("video-1.webm 미리보기")).toBeInTheDocument();
+  });
+
+  it("keeps active video preview clicks routed to normal tile selection", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined);
+    const onSelectionGesture = vi.fn();
+    render(<AssetGallery items={[videoAsset(0)]} onSelectionGesture={onSelectionGesture} />);
+    const tile = screen.getByRole("option", { name: "video-0.webm" });
+    fireEvent.pointerEnter(tile.querySelector(".video-tile")!);
+    act(() => vi.advanceTimersByTime(200));
+    const preview = screen.getByLabelText("video-0.webm 미리보기");
+    expect(preview).toHaveAttribute("draggable", "false");
+    fireEvent.click(preview, { ctrlKey: true });
+    expect(onSelectionGesture).toHaveBeenCalledWith(expect.objectContaining({ id: "video-0" }), { toggle: true, range: false });
   });
 
   it("masks every tile with a skeleton and drops quick previews in privacy mode", async () => {
