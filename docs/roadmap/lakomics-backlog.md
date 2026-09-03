@@ -249,54 +249,50 @@ Resolution:
 - Current source therefore no longer has the focusable edge control that could draw the reported native blue outline.
 
 ### BUG-009 — Video preview interaction interferes with asset selection
-Status: `TODO`
+Status: `VERIFY`
 
 Observed behavior:
 - In the Asset Repository, video assets can be difficult or impossible to select for normal Ctrl/Shift multi-selection because the video preview/scrub interaction appears to win over the tile-selection gesture.
 - This is separate from BUG-003, which is an X/browser extension drag-selection artifact.
 
-Current source audit:
-- `AssetGallery` still owns the normal tile selection (`onClick`) and pointer-drag arming (`onPointerDown`) for video tiles just like image tiles.
-- `VideoTileMedia` starts hover playback after 200 ms, while its scrub bar explicitly calls `stopPropagation()`, captures the pointer, and consumes click/double-click events.
-- Therefore the source proves a selection conflict on the scrub surface, but does not by itself prove that the entire video tile should be unselectable; reproduce in the running app and scope the exact hit area before changing behavior.
+Implemented in PC Core Polish Pass 1:
+- Active hover-preview `<video>` elements no longer receive pointer events or native drag gestures; ordinary pointer input continues to land on the parent asset tile just like image tiles.
+- The dedicated scrub control remains interactive and keeps its scoped pointer capture/propagation behavior.
+- Regression coverage activates a real video hover preview, clicks through it with Ctrl selection, and verifies that the normal `AssetGallery` selection gesture is emitted.
 
-Direction:
-- Keep hover video preview and intentional scrub seeking.
-- Clicking ordinary video-tile media should select exactly like an image tile; Ctrl/Cmd toggle and Shift range selection must work.
-- Pointer drag from ordinary video-tile media must still arm the selected asset set.
-- Keep the actual scrub control interactive without letting its behavior accidentally consume the rest of the tile.
+Verification remaining:
+- In the packaged/running Tauri app, confirm ordinary video-tile click, Ctrl/Cmd toggle, Shift range selection, selected-set drag, hover playback, and intentional scrub seeking together on real videos.
 
 ### BUG-010 — Online manga catalog shows impossible future modified dates
-Status: `TODO`
+Status: `VERIFY`
 
 Observed behavior:
 - Online manga catalog detail can display `수정일` around tens of thousands of years in the future (roughly the 50,000-year range).
 
-Evidence / suspected cause:
-- `OnlineCatalogDetailDialog.unixDate()` currently treats every numeric timestamp as Unix seconds and multiplies it by 1,000.
-- Catalog ingestion stores upstream `posted` and `updated` numeric fields without unit normalization.
-- The symptom strongly matches `updated` arriving in milliseconds while the UI multiplies it as if it were seconds; verify the failing row/raw provider payload before finalizing the fix.
+Implemented in PC Core Polish Pass 1:
+- Legacy catalog timestamps are normalized to Unix seconds at the provider ingestion boundary instead of applying a display-only year clamp.
+- Seconds remain unchanged; millisecond/microsecond-style legacy values are reduced to the canonical seconds unit before storage.
+- Search/detail reads also normalize existing catalog rows, so already-imported malformed timestamps can display correctly without a catalog reimport.
+- Rust regression coverage verifies both new remote-page normalization and compatibility reads from an existing millisecond-valued catalog row.
 
-Direction:
-- Normalize provider timestamp units at the catalog boundary so frontend date fields have one explicit unit.
-- Do not add an arbitrary display-only year clamp that hides malformed data.
-- Add regression coverage with realistic `posted` and `updated` values so both display as normal calendar dates.
+Verification remaining:
+- Open one previously affected real online-catalog work and confirm both `게시일` and `수정일` render as normal calendar dates.
 
 ### BUG-011 — Internal asset drag-out re-entry shows external import overlay
-Status: `TODO`
+Status: `VERIFY`
 
 Observed behavior:
 - Dragging a Lakomics asset out toward another application and then moving the same still-held drag back over Lakomics shows the external-file `여기에 놓아 추가` overlay.
 - An asset already owned by the current library should not be presented as a new import candidate during that drag.
 
-Evidence / suspected cause:
-- `useFileDrop` currently sets `over = true` unconditionally for native `enter` / `over` events whenever dropping is enabled.
-- The `isInsideLibrary(path, root)` filtering happens only on the final `drop`, so a library-owned drag can show the import overlay even though the actual drop is later ignored.
+Implemented in PC Core Polish Pass 1:
+- `useFileDrop` now classifies paths on native `enter` and remembers whether the current drag contains any genuinely external path.
+- Subsequent path-less `over` events reuse that decision, so a Lakomics-owned drag does not suddenly acquire the external-import overlay on re-entry.
+- The final drop-side library-root filter remains intact, and mixed internal/external drags still show the overlay while ingesting only external paths.
+- Regression tests cover both library-only re-entry and mixed-path drag behavior.
 
-Direction:
-- Classify `enter.paths` against the active library root and remember whether the native drag contains any genuinely external importable path; `over` events without paths should reuse that decision.
-- Suppress the external import overlay for Lakomics-origin/library-owned asset drags.
-- Keep actual external image/video file drops working and preserve the existing final drop-side safety filter.
+Verification remaining:
+- Drag a real Lakomics asset outside the Tauri window and back in while still holding it; confirm the import overlay stays hidden, then confirm a real external file still shows the overlay and imports normally.
 
 ## P2 — architecture / larger feature work
 
@@ -520,8 +516,16 @@ Direction:
 ### PERF-001 — Cache and media optimization policy
 Status: `TODO`
 
+Phase A checkpoint — PC Core Polish Pass 1:
+- Measured the production frontend before optimization: the initial JavaScript chunk was 626.18 kB (179.71 kB gzip) and exceeded Vite's 500 kB chunk warning.
+- Deferred non-initial desktop surfaces (Settings, Trash, Similarity Review, Manga, Manga Viewer, Collection browser/detail, and Revisited bundle detail) behind route-level React lazy chunks while keeping the everyday Asset Browser/sidebar path eager.
+- The post-split initial chunk is 478.80 kB (145.50 kB gzip): about 23.5% smaller raw and 19.0% smaller gzip, with the >500 kB warning removed.
+- Deferred surfaces use a same-background Suspense fallback to avoid introducing a white/layout flash during chunk loading.
+- Full frontend regression: 73 files / 608 tests passed; production TypeScript/Vite build passed.
+- PERF-001 remains open: cache bounds, repeated decode/work, video derivative reuse, cold/warm navigation measurements, and storage/runtime growth still belong to later phases.
+
 Priority:
-- Promote this immediately after the remaining small visual/input bugs. The core library, Cloud replica foundation, and 0.2.0 release path are now stable enough that optimization work can be measured without moving architectural targets.
+- Continue with measured cache/media work after the PC Core Polish Pass 1 runtime verification gate.
 - Use the current real library (8,000+ assets and growing) as the baseline, while keeping the original 10,000+ asset performance target.
 
 Review and define:
@@ -612,13 +616,16 @@ Candidate themes:
 Prefer understandable recommendation rules over pure randomization and reduce repeated exposure.
 
 ### UI-008 — Rework the top bar for readability
-Status: `TODO`
+Status: `VERIFY`
 
-- Reconsider information hierarchy and grouping.
-- Separate state indicators from actions.
-- Make common actions more visually discoverable.
-- Reduce ambiguous icon-only affordances.
-- Prefer grouping/spacing/priority changes over simply making the bar taller.
+Implemented in PC Core Polish Pass 1:
+- Asset browsing controls are now grouped into `정렬·필터` and `보기` clusters instead of presenting every control at equal visual priority.
+- The formerly icon-only `이 분류만`, metadata visibility, and privacy toggles now expose compact visible labels (`현재 분류`, `정보`, `비공개`) while preserving their existing accessible names.
+- Random-sort `다시 섞기` moved out of browsing state controls into the ViewToolbar action slot and now renders as a labelled action button.
+- View-specific actions are visually separated from native window controls without increasing toolbar height.
+
+Verification remaining:
+- Check the real Tauri window at normal and narrower desktop widths for comfortable spacing, no unintended wrapping/clipping, and clear distinction between browsing controls, view actions, and window controls.
 
 ## Long-term
 
@@ -710,18 +717,16 @@ For each new bug, record:
 
 CLOUD-006 is complete and no longer blocks the PC roadmap. Mobile Home/viewer/presentation polish continues separately under `docs/agents/mobile.md` and should not keep completed PC/cloud foundation work open.
 
-1. BUG-009 — verify/fix video asset selection versus hover preview/scrub interaction
-2. BUG-010 — normalize online-catalog modified timestamps that render as impossible future dates
-3. BUG-011 — suppress external-import overlay when a Lakomics-owned drag re-enters the app
-4. BUG-003 — historical X video drag-save blue native-selection artifact, if still reproducible
-5. PERF-001 — Lakomics lightweight/cache/media optimization pass, measured against the real 8,000+ asset library
-6. UI-009 — VCK-inspired manga viewer parity improvements
-7. EXT-003 — same-X-post media grouping
-8. EXT-004 — adaptive/hidden secondary donut tags
-9. OPS-001 — backup/migration/settings portability
-10. CATALOG-003 — Japanese-language catalog ingestion/filter on the verified CATALOG-001 transport
-11. CATALOG-004 — advanced VCK-style catalog search syntax
-12. P3 feature expansion — NOTE-001 first, then STATS-001 / IDEA-001 / UI-008 according to actual use
+1. PC Core Polish Pass 1 runtime gate — verify BUG-009, BUG-010, BUG-011, and UI-008 together in the real Tauri app; close each item only after the reported behavior is gone
+2. PERF-001 Phase B — measured cache/media/runtime work: repeat decode, thumbnail/preview bounds, video derivative reuse, cold/warm navigation, and storage growth
+3. BUG-003 — historical X video drag-save blue native-selection artifact, if still reproducible
+4. UI-009 — VCK-inspired manga viewer parity improvements
+5. EXT-003 — same-X-post media grouping
+6. EXT-004 — adaptive/hidden secondary donut tags
+7. OPS-001 — backup/migration/settings portability
+8. CATALOG-003 — Japanese-language catalog ingestion/filter on the verified CATALOG-001 transport
+9. CATALOG-004 — advanced VCK-style catalog search syntax
+10. P3 feature expansion — NOTE-001 first, then STATS-001 / IDEA-001 according to actual use
 
 Conditional work:
 - CLOUD-003 stays deferred unless real long-video Capture use reproduces the request-window race.

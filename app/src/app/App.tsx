@@ -1,12 +1,9 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { AssetBrowser, type AssetBrowserStatus } from "../assets/AssetBrowser";
 import { startAssetDrag as nativeStartAssetDrag, type StartAssetDrag } from "../drag-out/startAssetDrag";
 import { ClassificationSidebar } from "../classification/ClassificationSidebar";
-import { CollectionBrowser } from "../collections/CollectionBrowser";
-import { RevisitedBundleView } from "../revisit/RevisitedBundleView";
 import { createDefaultCollectionLibraryState, type CollectionLibraryState, type CollectionLibraryStateByType } from "../collections/collectionLibrary";
-import { CollectionOverlay } from "../collections/CollectionOverlay";
 import {
   type DropSubscriber,
   type IngestionWork,
@@ -37,19 +34,23 @@ import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { PrivacyProvider } from "../privacy/PrivacyContext";
 import { DragLayer } from "../shared/ui/DragLayer";
 import { pointerDragReducer, type ClassificationDropTarget, type InternalDragPayload, type PointerDragState } from "../shared/interaction/pointerDrag";
-import { SettingsView } from "../settings/SettingsView";
-import { TrashBrowser } from "../safety/TrashBrowser";
-import { SimilarityReviewBrowser } from "../similarity/SimilarityReviewBrowser";
 import { useSimilarityIndex } from "../similarity/useSimilarityIndex";
 import { useVideoPreparation } from "../video/useVideoPreparation";
-import { MangaBrowser } from "../manga/MangaBrowser";
-import { MangaViewer } from "../manga/MangaViewer";
 import { useDesktopInteractions } from "./useDesktopInteractions";
 import { useOnlineCatalogUpdate } from "./useOnlineCatalogUpdate";
 import { useCloudCaptureSync } from "./useCloudCaptureSync";
 import { useCloudBackfillSupervisor } from "./useCloudBackfillSupervisor";
 import { useReleaseWatchCheck } from "./useReleaseWatchCheck";
 import { BackNavigationProvider, useBackHandler, useBackRequest } from "../shared/navigation/BackNavigation";
+
+const CollectionBrowser = lazy(() => import("../collections/CollectionBrowser").then((module) => ({ default: module.CollectionBrowser })));
+const CollectionOverlay = lazy(() => import("../collections/CollectionOverlay").then((module) => ({ default: module.CollectionOverlay })));
+const RevisitedBundleView = lazy(() => import("../revisit/RevisitedBundleView").then((module) => ({ default: module.RevisitedBundleView })));
+const SettingsView = lazy(() => import("../settings/SettingsView").then((module) => ({ default: module.SettingsView })));
+const TrashBrowser = lazy(() => import("../safety/TrashBrowser").then((module) => ({ default: module.TrashBrowser })));
+const SimilarityReviewBrowser = lazy(() => import("../similarity/SimilarityReviewBrowser").then((module) => ({ default: module.SimilarityReviewBrowser })));
+const MangaBrowser = lazy(() => import("../manga/MangaBrowser").then((module) => ({ default: module.MangaBrowser })));
+const MangaViewer = lazy(() => import("../manga/MangaViewer").then((module) => ({ default: module.MangaViewer })));
 
 export type ExtensionIngestListener = (handler: (outcome: IngestOutcome) => void) => Promise<() => void>;
 
@@ -544,6 +545,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
           content={
             <div className="library-content">
               <section className="library-content__browser" aria-label="자산 내용">
+                <Suspense fallback={<DeferredViewFallback />}>
                 {view.kind === "trash" ? <TrashBrowser onCountChange={setTrashCount} /> : view.kind === "settings" ? (
                   <SettingsView
                     restoring={maintenance === "restore"}
@@ -628,6 +630,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     onPointerDragCancel={cancelPointerDrag}
                   />
                 )}
+                </Suspense>
                 {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
               </section>
             </div>
@@ -644,9 +647,13 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
       </div>
       <DropOverlay over={dropState.over} destinationName={entries.find((entry) => entry.id === dropClassificationId)?.name ?? "미분류"} />
       <DragLayer state={dragState} />
-      {mangaViewer && <MangaViewer seriesId={mangaViewer.seriesId} title={mangaViewer.title} pageCount={mangaViewer.pageCount} galleryId={mangaViewer.galleryId} onClose={() => setMangaViewer(null)} />}
+      {mangaViewer && <Suspense fallback={null}><MangaViewer seriesId={mangaViewer.seriesId} title={mangaViewer.title} pageCount={mangaViewer.pageCount} galleryId={mangaViewer.galleryId} onClose={() => setMangaViewer(null)} /></Suspense>}
     </PrivacyProvider>
   );
+}
+
+function DeferredViewFallback() {
+  return <div className="library-content__deferred" role="status" aria-label="화면 불러오는 중" />;
 }
 
 function sidebarTargetAt(x: number, y: number, payload: InternalDragPayload, entries: ClassificationEntry[], albums: AlbumEntry[]): ClassificationDropTarget | null {

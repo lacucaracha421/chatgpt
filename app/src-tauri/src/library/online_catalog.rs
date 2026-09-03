@@ -355,7 +355,7 @@ impl Library {
                 bookmarked,
                 file_count: file_count as u32,
                 views: views as u64,
-                posted,
+                posted: super::catalog_provider::normalize_legacy_timestamp(posted),
             });
         }
         Ok(CatalogSearchPage {
@@ -463,8 +463,8 @@ impl Library {
                 .map(|_| format!("http://lakomics.localhost/remote-catalog-thumbnail/{}", row.0 as u64)),
             uploader: row.4,
             category: row.5,
-            posted: row.6,
-            updated: row.7,
+            posted: super::catalog_provider::normalize_optional_legacy_timestamp(row.6),
+            updated: super::catalog_provider::normalize_optional_legacy_timestamp(row.7),
             file_count: row.8.max(0) as u32,
             file_size: row.9.map(|value| value.max(0) as u64),
             rating: row.10,
@@ -1069,6 +1069,25 @@ mod tests {
             .tag_groups
             .iter()
             .any(|group| { group.namespace == "language" && group.values == ["korean"] }));
+    }
+
+    #[test]
+    fn detail_normalizes_legacy_millisecond_timestamps_without_reimport() {
+        let (_root, library) = searchable_library();
+        let catalog = Connection::open(library.root().join("catalogs/kdata.db")).unwrap();
+        let posted = 1_700_000_000_i64;
+        let updated = 1_700_100_000_i64;
+        catalog
+            .execute(
+                "UPDATE Works SET Posted = ?1, Updated = ?2 WHERE Id = 3",
+                (posted * 1_000, updated * 1_000),
+            )
+            .unwrap();
+        drop(catalog);
+
+        let detail = library.online_catalog_work_detail(3).unwrap();
+        assert_eq!(detail.posted, Some(posted));
+        assert_eq!(detail.updated, Some(updated));
     }
 
     #[test]

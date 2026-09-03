@@ -75,6 +75,7 @@ export function useFileDrop(options: UseFileDropOptions): FileDropState {
     let unlisten: (() => void) | undefined;
     let pendingBatches = 0;
     let queue = Promise.resolve();
+    let dragContainsExternalPaths: boolean | null = null;
 
     const enqueue = (paths: string[], destination: string | null, existingWorkId?: string) => {
       if (!active || paths.length === 0) return;
@@ -143,17 +144,26 @@ export function useFileDrop(options: UseFileDropOptions): FileDropState {
       if (!active) return;
       const event = incoming;
       if (event.type === "cancel" || event.type === "leave") {
+        dragContainsExternalPaths = null;
         setOver(false);
         return;
       }
       if (!optionsRef.current.enabled) {
+        dragContainsExternalPaths = null;
         setOver(false);
         return;
       }
-      if (event.type === "enter" || event.type === "over") {
-        setOver(true);
+      if (event.type === "enter") {
+        const root = optionsRef.current.libraryRoot;
+        dragContainsExternalPaths = event.paths.some((path) => !root || !isInsideLibrary(path, root));
+        setOver(dragContainsExternalPaths);
         return;
       }
+      if (event.type === "over") {
+        setOver(dragContainsExternalPaths ?? true);
+        return;
+      }
+      dragContainsExternalPaths = null;
       setOver(false);
       const root = optionsRef.current.libraryRoot;
       const externalPaths = root

@@ -41,23 +41,32 @@ export function AssetToolbar({
   const filterable = rawView.kind === "classification" || rawView.kind === "unsorted" || rawView.kind === "album" || rawView.kind === "creator";
   const location = view.kind === "revisit" ? "다시보기" : view.kind === "creator" ? "작가" : view.kind === "collection" ? collections.find((entry) => entry.id === view.collectionId)?.name ?? "컬렉션" : view.kind === "unsorted" ? "미분류" : view.kind === "trash" ? "휴지통" : view.kind === "album" ? albums.find((entry) => entry.id === view.albumId)?.name ?? "앨범" : view.kind === "collections" ? "컬렉션" : classifications.find((entry) => entry.id === view.classificationId)?.name ?? "저장소";
 
+  const reshuffleAction = sort === "random"
+    ? <Button size="sm" aria-label="다시 섞기" onClick={onReshuffle}><ArrowPathIcon aria-hidden="true" /><span>다시 섞기</span></Button>
+    : undefined;
+
   return (
-    <ViewToolbar title={location} ariaLabel="자산 도구">
-      {!recent && <Select label="정렬" value={sort} onChange={(event) => onSortChange(event.target.value as AssetSort)}>
-        <option value="newest">최신순</option><option value="oldest">오래된순</option>
-        <option value="favorites">좋아요순</option><option value="random">랜덤</option>
-      </Select>}
-      {filterable && <Select label="미디어" value={mediaFilter} onChange={(event) => onMediaFilterChange(event.target.value as AssetMediaFilter)}>
-        <option value="all">전체</option><option value="images">이미지</option><option value="videos">영상</option>
-      </Select>}
-      {filterable && <Select label="비율" value={aspectFilter} onChange={(event) => onAspectFilterChange(event.target.value as AssetAspectFilter)}>
-        <option value="all">전체</option><option value="square">정사각형</option><option value="landscape">가로형</option><option value="portrait">세로형</option>
-      </Select>}
-      {view.kind === "classification" && <Toggle aria-label="이 분류만" checked={directOnly} onChange={(event) => onDirectOnlyChange(event.target.checked)}><AdjustmentsHorizontalIcon aria-hidden="true" /></Toggle>}
-      <Slider label="미리보기 크기" min={96} max={320} step={8} value={thumbnailRowHeight} onChange={(event) => onThumbnailRowHeightChange(Number(event.target.value))} />
-      <Toggle aria-label="정보 표시" checked={metadataVisible} onChange={(event) => onMetadataVisibleChange(event.target.checked)}><InformationCircleIcon aria-hidden="true" /></Toggle>
-      <Toggle aria-label="비공개 모드" checked={privacyMode} onChange={(event) => onPrivacyModeChange(event.target.checked)}><EyeSlashIcon aria-hidden="true" /></Toggle>
-      {sort === "random" && <Button size="icon" aria-label="다시 섞기" onClick={onReshuffle}><ArrowPathIcon aria-hidden="true" /></Button>}
+    <ViewToolbar title={location} ariaLabel="자산 도구" actions={reshuffleAction}>
+      <div className="asset-toolbar__group" aria-label="정렬 및 필터">
+        <span className="asset-toolbar__group-label" aria-hidden="true">정렬·필터</span>
+        {!recent && <Select label="정렬" value={sort} onChange={(event) => onSortChange(event.target.value as AssetSort)}>
+          <option value="newest">최신순</option><option value="oldest">오래된순</option>
+          <option value="favorites">좋아요순</option><option value="random">랜덤</option>
+        </Select>}
+        {filterable && <Select label="미디어" value={mediaFilter} onChange={(event) => onMediaFilterChange(event.target.value as AssetMediaFilter)}>
+          <option value="all">전체</option><option value="images">이미지</option><option value="videos">영상</option>
+        </Select>}
+        {filterable && <Select label="비율" value={aspectFilter} onChange={(event) => onAspectFilterChange(event.target.value as AssetAspectFilter)}>
+          <option value="all">전체</option><option value="square">정사각형</option><option value="landscape">가로형</option><option value="portrait">세로형</option>
+        </Select>}
+        {view.kind === "classification" && <Toggle aria-label="이 분류만" checked={directOnly} onChange={(event) => onDirectOnlyChange(event.target.checked)}><AdjustmentsHorizontalIcon aria-hidden="true" /><span className="asset-toolbar__control-label">현재 분류</span></Toggle>}
+      </div>
+      <div className="asset-toolbar__group" aria-label="보기 설정">
+        <span className="asset-toolbar__group-label" aria-hidden="true">보기</span>
+        <Slider label="미리보기 크기" min={96} max={320} step={8} value={thumbnailRowHeight} onChange={(event) => onThumbnailRowHeightChange(Number(event.target.value))} />
+        <Toggle aria-label="정보 표시" checked={metadataVisible} onChange={(event) => onMetadataVisibleChange(event.target.checked)}><InformationCircleIcon aria-hidden="true" /><span className="asset-toolbar__control-label">정보</span></Toggle>
+        <Toggle aria-label="비공개 모드" checked={privacyMode} onChange={(event) => onPrivacyModeChange(event.target.checked)}><EyeSlashIcon aria-hidden="true" /><span className="asset-toolbar__control-label">비공개</span></Toggle>
+      </div>
     </ViewToolbar>
   );
 }

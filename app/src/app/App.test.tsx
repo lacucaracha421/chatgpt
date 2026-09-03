@@ -197,7 +197,7 @@ describe("App", () => {
 
     expect(await screen.findByRole("treeitem", { name: "Old library" })).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: "설정" }));
-    await userEvent.click(screen.getByRole("button", { name: "다른 저장소 열기" }));
+    await userEvent.click(await screen.findByRole("button", { name: "다른 저장소 열기" }));
 
     expect(await screen.findByRole("treeitem", { name: "New library" })).toBeVisible();
     expect(screen.queryByRole("treeitem", { name: "Old library" })).not.toBeInTheDocument();

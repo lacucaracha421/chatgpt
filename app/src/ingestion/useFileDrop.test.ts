@@ -606,6 +606,39 @@ it("does not ingest until the drop event after dragging over", async () => {
   await waitFor(() => expect(ingestMedia).toHaveBeenCalledOnce());
 });
 
+it("suppresses the import overlay when a library-owned drag re-enters the app", async () => {
+  let send: ((event: NativeFileDropEvent) => void) | undefined;
+  const subscribe: DropSubscriber = async (handler) => { send = handler; return () => undefined; };
+  const ingestMedia = vi.fn().mockResolvedValue({ status: "added", asset: fixtureAsset });
+  const { result } = renderHook(() => useFileDrop({ enabled: true, subscribe, classificationId: null, libraryRoot: "C:\\Library", ingestMedia }));
+  await waitFor(() => expect(send).toBeDefined());
+
+  act(() => send?.({ type: "enter", paths: ["C:\\Library\\assets\\owned.png"], position: { x: 1, y: 2 } }));
+  expect(result.current.over).toBe(false);
+  act(() => send?.({ type: "over", position: { x: 2, y: 3 } }));
+  expect(result.current.over).toBe(false);
+  act(() => send?.({ type: "drop", paths: ["C:\\Library\\assets\\owned.png"], position: { x: 2, y: 3 } }));
+  await Promise.resolve();
+  expect(ingestMedia).not.toHaveBeenCalled();
+});
+
+it("keeps the import overlay for mixed drags and ingests only external paths", async () => {
+  let send: ((event: NativeFileDropEvent) => void) | undefined;
+  const subscribe: DropSubscriber = async (handler) => { send = handler; return () => undefined; };
+  const ingestMedia = vi.fn().mockResolvedValue({ status: "added", asset: fixtureAsset });
+  const { result } = renderHook(() => useFileDrop({ enabled: true, subscribe, classificationId: null, libraryRoot: "C:\\Library", ingestMedia }));
+  await waitFor(() => expect(send).toBeDefined());
+
+  const paths = ["C:\\Library\\assets\\owned.png", "D:\\Incoming\\new.png"];
+  act(() => send?.({ type: "enter", paths, position: { x: 1, y: 2 } }));
+  expect(result.current.over).toBe(true);
+  act(() => send?.({ type: "over", position: { x: 2, y: 3 } }));
+  expect(result.current.over).toBe(true);
+  act(() => send?.({ type: "drop", paths, position: { x: 2, y: 3 } }));
+  await waitFor(() => expect(ingestMedia).toHaveBeenCalledOnce());
+  expect(ingestMedia.mock.calls[0][0].sourcePath).toBe("D:\\Incoming\\new.png");
+});
+
 it("retries only the paths that failed in a work batch", async () => {
   let drop: ((paths: string[]) => void) | undefined;
   const subscribe: DropSubscriber = async (handler) => {

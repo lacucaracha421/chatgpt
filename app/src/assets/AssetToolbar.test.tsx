@@ -40,6 +40,11 @@ it("shows the fixed browsing slots regardless of the selection", () => {
   expect(screen.getByLabelText("미리보기 크기")).toBeVisible();
   expect(screen.getByLabelText("정보 표시")).toBeVisible();
   expect(screen.getByLabelText("비공개 모드")).toBeVisible();
+  expect(screen.getByLabelText("정렬 및 필터")).toBeVisible();
+  expect(screen.getByLabelText("보기 설정")).toBeVisible();
+  expect(screen.getByText("현재 분류")).toBeVisible();
+  expect(screen.getByText("정보")).toBeVisible();
+  expect(screen.getByText("비공개")).toBeVisible();
   // 선택 명령은 상단바가 아니라 SelectionBar가 담당한다.
   expect(screen.queryByText(/개 선택/)).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "좋아요 켜기" })).not.toBeInTheDocument();
