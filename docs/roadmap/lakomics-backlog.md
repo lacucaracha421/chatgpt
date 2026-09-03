@@ -249,7 +249,7 @@ Resolution:
 - Current source therefore no longer has the focusable edge control that could draw the reported native blue outline.
 
 ### BUG-009 — Video preview interaction interferes with asset selection
-Status: `VERIFY`
+Status: `DONE`
 
 Observed behavior:
 - In the Asset Repository, video assets can be difficult or impossible to select for normal Ctrl/Shift multi-selection because the video preview/scrub interaction appears to win over the tile-selection gesture.
@@ -260,11 +260,12 @@ Implemented in PC Core Polish Pass 1:
 - The dedicated scrub control remains interactive and keeps its scoped pointer capture/propagation behavior.
 - Regression coverage activates a real video hover preview, clicks through it with Ctrl selection, and verifies that the normal `AssetGallery` selection gesture is emitted.
 
-Verification remaining:
-- In the packaged/running Tauri app, confirm ordinary video-tile click, Ctrl/Cmd toggle, Shift range selection, selected-set drag, hover playback, and intentional scrub seeking together on real videos.
+Runtime verification:
+- Real Tauri use passed ordinary video-tile click, Ctrl/Cmd toggle, Shift range selection, selected-set drag, hover playback, and intentional scrub seeking together on real videos.
+- The follow-up selection styling and hover-only thumbnail scrub affordance were also accepted in real use.
 
 ### BUG-010 — Online manga catalog shows impossible future modified dates
-Status: `VERIFY`
+Status: `DONE`
 
 Observed behavior:
 - Online manga catalog detail can display `수정일` around tens of thousands of years in the future (roughly the 50,000-year range).
@@ -275,11 +276,11 @@ Implemented in PC Core Polish Pass 1:
 - Search/detail reads also normalize existing catalog rows, so already-imported malformed timestamps can display correctly without a catalog reimport.
 - Rust regression coverage verifies both new remote-page normalization and compatibility reads from an existing millisecond-valued catalog row.
 
-Verification remaining:
-- Open one previously affected real online-catalog work and confirm both `게시일` and `수정일` render as normal calendar dates.
+Runtime verification:
+- Previously affected real online-catalog work now renders both `게시일` and `수정일` as normal calendar dates in the running Tauri app.
 
 ### BUG-011 — Internal asset drag-out re-entry shows external import overlay
-Status: `VERIFY`
+Status: `DONE`
 
 Observed behavior:
 - Dragging a Lakomics asset out toward another application and then moving the same still-held drag back over Lakomics shows the external-file `여기에 놓아 추가` overlay.
@@ -291,8 +292,9 @@ Implemented in PC Core Polish Pass 1:
 - The final drop-side library-root filter remains intact, and mixed internal/external drags still show the overlay while ingesting only external paths.
 - Regression tests cover both library-only re-entry and mixed-path drag behavior.
 
-Verification remaining:
-- Drag a real Lakomics asset outside the Tauri window and back in while still holding it; confirm the import overlay stays hidden, then confirm a real external file still shows the overlay and imports normally.
+Runtime verification:
+- Real Tauri drag-out/re-entry keeps the external import overlay hidden for Lakomics-owned assets while genuine external files still show the overlay and import normally.
+- The follow-up re-entry path also restores sidebar folder drop targets so a still-held native asset drag can be dropped back into a Lakomics folder.
 
 ## P2 — architecture / larger feature work
 
@@ -626,16 +628,16 @@ Candidate themes:
 Prefer understandable recommendation rules over pure randomization and reduce repeated exposure.
 
 ### UI-008 — Rework the top bar for readability
-Status: `VERIFY`
+Status: `DONE`
 
 Implemented in PC Core Polish Pass 1:
-- Asset browsing controls are now grouped into `정렬·필터` and `보기` clusters instead of presenting every control at equal visual priority.
-- The formerly icon-only `이 분류만`, metadata visibility, and privacy toggles now expose compact visible labels (`현재 분류`, `정보`, `비공개`) while preserving their existing accessible names.
-- Random-sort `다시 섞기` moved out of browsing state controls into the ViewToolbar action slot and now renders as a labelled action button.
-- View-specific actions are visually separated from native window controls without increasing toolbar height.
+- The noisy `정렬·필터` label was removed and browsing filters were compacted into icon-driven controls.
+- Media and aspect-ratio filters use distinct icons and icon-bearing popup menu items, with clear accessible labels/tooltips.
+- `현재 분류` moved beside the native window controls as a folder icon; metadata visibility and privacy are icon-only controls as well.
+- Random-sort `다시 섞기` remains a visible ViewToolbar action, and view-specific actions stay visually separated from native window controls without increasing toolbar height.
 
-Verification remaining:
-- Check the real Tauri window at normal and narrower desktop widths for comfortable spacing, no unintended wrapping/clipping, and clear distinction between browsing controls, view actions, and window controls.
+Runtime verification:
+- Real Tauri use at normal and narrower widths passed with the compact toolbar controls readable, unclipped, and functionally distinct.
 
 Pending follow-up — memo only, do not implement yet:
 - Remove the visible `보기` label from the asset toolbar as well; keep the controls accessible without adding replacement text clutter.
@@ -730,16 +732,17 @@ For each new bug, record:
 
 CLOUD-006 is complete and no longer blocks the PC roadmap. Mobile Home/viewer/presentation polish continues separately under `docs/agents/mobile.md` and should not keep completed PC/cloud foundation work open.
 
-1. PC Core Polish Pass 1 runtime gate — verify BUG-009, BUG-010, BUG-011, and UI-008 together in the real Tauri app; close each item only after the reported behavior is gone
-2. PERF-001 Phase B — measured cache/media/runtime work: repeat decode, thumbnail/preview bounds, video derivative reuse, cold/warm navigation, and storage growth
-3. BUG-003 — historical X video drag-save blue native-selection artifact, if still reproducible
-4. UI-009 — VCK-inspired manga viewer parity improvements
-5. EXT-003 — same-X-post media grouping
-6. EXT-004 — adaptive/hidden secondary donut tags
-7. OPS-001 — backup/migration/settings portability
-8. CATALOG-003 — Japanese-language catalog ingestion/filter on the verified CATALOG-001 transport
-9. CATALOG-004 — advanced VCK-style catalog search syntax
-10. P3 feature expansion — NOTE-001 first, then STATS-001 / IDEA-001 according to actual use
+PC Core Polish Pass 1 runtime gate is complete: BUG-009, BUG-010, BUG-011, and UI-008 all passed real Tauri verification.
+
+1. PERF-001 Phase B — measured cache/media/runtime work: repeat decode, thumbnail/preview bounds, video derivative reuse, cold/warm navigation, and storage growth
+2. BUG-003 — historical X video drag-save blue native-selection artifact, if still reproducible
+3. UI-009 — VCK-inspired manga viewer parity improvements
+4. EXT-003 — same-X-post media grouping
+5. EXT-004 — adaptive/hidden secondary donut tags
+6. OPS-001 — backup/migration/settings portability
+7. CATALOG-003 — Japanese-language catalog ingestion/filter on the verified CATALOG-001 transport
+8. CATALOG-004 — advanced VCK-style catalog search syntax
+9. P3 feature expansion — NOTE-001 first, then STATS-001 / IDEA-001 according to actual use
 
 Conditional work:
 - CLOUD-003 stays deferred unless real long-video Capture use reproduces the request-window race.
