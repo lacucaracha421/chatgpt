@@ -7,6 +7,7 @@ use std::{
 
 use image::ImageFormat;
 use rusqlite::{params, OptionalExtension, Transaction};
+use sha2::{Digest, Sha256};
 
 use super::{collection::require_collection, error::LibraryError, models::WorkArtworkSummary, Library, MediaResponse};
 
@@ -56,6 +57,14 @@ impl PreparedWorkArtwork {
     pub(crate) fn commit(mut self) {
         self.committed = true;
     }
+}
+
+struct ReusableAssetFile {
+    relative_path: String,
+    thumbnail_relative_path: Option<String>,
+    byte_size: i64,
+    width: i64,
+    height: i64,
 }
 
 impl Library {
@@ -111,6 +120,110 @@ impl Library {
             thumbnail_absolute_path,
             committed: false,
         })
+    }
+
+    /// 이미 중앙 라이브러리 에셋으로 존재하는 바이트를 작품 아트웍으로 재사용한다.
+    ///
+    /// Collection 전용 원본 복사·디코드·썸네일 인코딩 대신, 에셋 파일과 썸네일을
+    /// 아트웍 전용 경로에 하드링크로 연결한다(실패하면 복사로 폴백). 각 아트웍 행은
+    /// 여전히 고유한 `relative_path`를 가지므로 스키마·정리·삭제 경로가 그대로 동작하고,
+    /// 에셋이 휴지통 비우기로 사라져도 링크가 바이트를 유지하므로 아트웍이 깨지지 않는다.
+    /// 재사용할 에셋이 없으면 `Ok(None)`을 반환하고 호출자는 기존 prepare 경로를 쓴다.
+    pub(crate) fn reuse_asset_artwork(
+        &self,
+        collection_id: &str,
+        bytes: &[u8],
+    ) -> Result<Option<PreparedWorkArtwork>, LibraryError> {
+        if bytes.is_empty() || bytes.len() > MAX_WORK_ARTWORK_BYTES {
+            return Ok(None);
+        }
+        uuid::Uuid::parse_str(collection_id).map_err(|_| LibraryError::InvalidWorkArtwork)?;
+        let content_hash = Sha256::digest(bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let asset: Option<ReusableAssetFile> = self
+            .connection()?
+            .query_row(
+                "SELECT relative_path, thumbnail_relative_path, byte_size, width, height
+                 FROM assets WHERE content_hash = ?1 AND media_kind = 'image'",
+                [&content_hash],
+                |row| {
+                    Ok(ReusableAssetFile {
+                        relative_path: row.get(0)?,
+                        thumbnail_relative_path: row.get(1)?,
+                        byte_size: row.get(2)?,
+                        width: row.get(3)?,
+                        height: row.get(4)?,
+                    })
+                },
+            )
+            .optional()?;
+        let Some(asset) = asset else {
+            return Ok(None);
+        };
+        if asset.width <= 0 || asset.height <= 0 || asset.byte_size > MAX_WORK_ARTWORK_BYTES as i64
+        {
+            return Ok(None);
+        }
+        let (extension, mime_type) = match asset
+            .relative_path
+            .rsplit('.')
+            .next()
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            Some("jpg") | Some("jpeg") => ("jpg", "image/jpeg"),
+            Some("png") => ("png", "image/png"),
+            Some("webp") => ("webp", "image/webp"),
+            _ => return Ok(None),
+        };
+        let asset_absolute_path = self.root().join(&asset.relative_path);
+        if !asset_absolute_path.is_file() {
+            return Ok(None);
+        }
+        let id = uuid::Uuid::new_v4().to_string();
+        let relative_path = format!("work-artwork/{collection_id}/{id}.{extension}");
+        let absolute_path = self.root().join(&relative_path);
+        if let Some(parent) = absolute_path.parent() {
+            fs::create_dir_all(parent).map_err(|source| LibraryError::WriteWorkArtwork {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+        }
+        if fs::hard_link(&asset_absolute_path, &absolute_path).is_err() {
+            if fs::copy(&asset_absolute_path, &absolute_path).is_err() {
+                let _ = fs::remove_file(&absolute_path);
+                return Ok(None);
+            }
+        }
+        let thumbnail_relative_path = work_artwork_thumbnail_relative_path(collection_id, &id);
+        let thumbnail_absolute_path = self.root().join(&thumbnail_relative_path);
+        if let Some(asset_thumbnail) = asset.thumbnail_relative_path {
+            let asset_thumbnail_absolute = self.root().join(&asset_thumbnail);
+            if asset_thumbnail_absolute.is_file() {
+                if let Some(parent) = thumbnail_absolute_path.parent() {
+                    let _ = fs::create_dir_all(parent);
+                }
+                if fs::hard_link(&asset_thumbnail_absolute, &thumbnail_absolute_path).is_err() {
+                    let _ = fs::copy(&asset_thumbnail_absolute, &thumbnail_absolute_path);
+                }
+            }
+        }
+        #[allow(clippy::cast_sign_loss)]
+        let width = asset.width as u32;
+        #[allow(clippy::cast_sign_loss)]
+        let height = asset.height as u32;
+        Ok(Some(PreparedWorkArtwork {
+            id,
+            relative_path,
+            mime_type,
+            width,
+            height,
+            absolute_path,
+            thumbnail_absolute_path,
+            committed: false,
+        }))
     }
 
     pub(crate) fn select_work_artwork_in_transaction(

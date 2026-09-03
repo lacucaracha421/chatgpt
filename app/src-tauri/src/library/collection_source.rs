@@ -496,8 +496,15 @@ impl Library {
                 }
             };
             // 지원하지 않는 형식이나 크기 초과 파일은 나머지 import를 막지 않는다.
-            let Ok(prepared) = self.prepare_work_artwork(collection_id, &bytes) else {
-                continue;
+            // 중앙 에셋과 바이트가 같으면 디코드·복사 없이 기존 파일을 링크로 재사용한다.
+            let prepared = match self.reuse_asset_artwork(collection_id, &bytes)? {
+                Some(prepared) => prepared,
+                None => {
+                    let Ok(prepared) = self.prepare_work_artwork(collection_id, &bytes) else {
+                        continue;
+                    };
+                    prepared
+                }
             };
             let artwork_id = {
                 let mut connection = self.connection()?;
@@ -918,6 +925,246 @@ mod tests {
             .import_local_collection_artworks(COLLECTION_ID)
             .unwrap();
         assert_eq!(after_source_change, 1);
+    }
+
+    fn set_game_collection(library: &Library) {
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE collections SET type = 'game' WHERE id = ?1",
+                [COLLECTION_ID],
+            )
+            .unwrap();
+    }
+
+    fn register_existing_image_asset(
+        library: &Library,
+        bytes: &[u8],
+        width: u32,
+        height: u32,
+    ) -> (String, String) {
+        let hash = Sha256::digest(bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let relative_path = format!("assets/{}/{hash}.png", &hash[..2]);
+        let thumbnail_relative_path = format!("thumbnails/{}/{hash}.webp", &hash[..2]);
+        let asset_path = library.root().join(&relative_path);
+        fs::create_dir_all(asset_path.parent().unwrap()).unwrap();
+        fs::write(&asset_path, bytes).unwrap();
+        let thumb_path = library.root().join(&thumbnail_relative_path);
+        fs::create_dir_all(thumb_path.parent().unwrap()).unwrap();
+        fs::write(&thumb_path, b"linked-thumbnail-marker").unwrap();
+        let asset_id = "11111111-1111-4111-8111-111111111111";
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO assets (
+                    id, content_hash, media_kind, original_name, relative_path,
+                    thumbnail_relative_path, byte_size, width, height, collected_at, status
+                 ) VALUES (
+                    ?1, ?2, 'image', 'poster.png', ?3, ?4, ?5, ?6, ?7,
+                    '2026-08-20T00:00:00Z', 'normal'
+                 )",
+                rusqlite::params![
+                    asset_id,
+                    hash,
+                    relative_path,
+                    thumbnail_relative_path,
+                    bytes.len() as i64,
+                    width as i64,
+                    height as i64,
+                ],
+            )
+            .unwrap();
+        (asset_id.to_string(), relative_path)
+    }
+
+    fn artwork_row(library: &Library) -> (String, String, String, i64, i64) {
+        library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT id, relative_path, mime_type, width, height
+                 FROM collection_work_artworks WHERE collection_id = ?1",
+                [COLLECTION_ID],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn import_local_artwork_reuses_existing_asset_without_duplicate_bytes() {
+        let (_temp, library, collection_dir) = source_library();
+        set_game_collection(&library);
+        let source_bytes = write_png(
+            &collection_dir.join(COVERS_DIR).join("poster.png"),
+            800,
+            1200,
+        );
+        let (_asset_id, asset_relative) =
+            register_existing_image_asset(&library, &source_bytes, 800, 1200);
+
+        let imported = library
+            .import_local_collection_artworks(COLLECTION_ID)
+            .unwrap();
+        assert_eq!(imported, 1);
+
+        let (artwork_id, relative_path, mime_type, width, height) = artwork_row(&library);
+        assert!(relative_path.starts_with("work-artwork/"));
+        assert_ne!(relative_path, asset_relative);
+        assert_eq!(mime_type, "image/png");
+        assert_eq!((width, height), (800, 1200));
+        assert_eq!(
+            fs::read(library.root().join(&relative_path)).unwrap(),
+            source_bytes
+        );
+
+        // 썸네일도 다시 인코딩하지 않고 기존 썸네일을 링크한다.
+        let thumb_bytes = fs::read(library.root().join(format!(
+            "work-artwork-thumbnails/{COLLECTION_ID}/{artwork_id}.webp"
+        )))
+        .unwrap();
+        assert_eq!(thumb_bytes, b"linked-thumbnail-marker");
+
+        // 같은 바이트를 공유함을 증명한다: 에셋 파일을 바꾸면 복사본이 아닌
+        // 링크이므로 아트웍 파일 내용도 함께 바뀐다.
+        let probe_path = collection_dir.join("probe.png");
+        let probe_bytes = write_png(&probe_path, 100, 100);
+        assert_ne!(probe_bytes, source_bytes);
+        fs::write(library.root().join(&asset_relative), &probe_bytes).unwrap();
+        assert_eq!(
+            fs::read(library.root().join(&relative_path)).unwrap(),
+            probe_bytes
+        );
+
+        assert_eq!(
+            read_media(library.resolve_work_artwork(&artwork_id).unwrap()),
+            probe_bytes
+        );
+
+        // DB identity로 재방문해도 추가 import가 없다.
+        assert_eq!(
+            library
+                .import_local_collection_artworks(COLLECTION_ID)
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn deleting_collection_keeps_referenced_library_asset() {
+        let (_temp, library, collection_dir) = source_library();
+        set_game_collection(&library);
+        let source_bytes = write_png(
+            &collection_dir.join(COVERS_DIR).join("poster.png"),
+            800,
+            1200,
+        );
+        let (_asset_id, asset_relative) =
+            register_existing_image_asset(&library, &source_bytes, 800, 1200);
+        assert_eq!(
+            library
+                .import_local_collection_artworks(COLLECTION_ID)
+                .unwrap(),
+            1
+        );
+
+        library.delete_collection(COLLECTION_ID).unwrap();
+
+        let assets: i64 = library
+            .connection()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM assets", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(assets, 1);
+        assert!(library.root().join(&asset_relative).is_file());
+        let artworks: i64 = library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM collection_work_artworks WHERE collection_id = ?1",
+                [COLLECTION_ID],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(artworks, 0);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn purging_referenced_asset_keeps_artwork_bytes() {
+        let (_temp, library, collection_dir) = source_library();
+        set_game_collection(&library);
+        let source_bytes = write_png(
+            &collection_dir.join(COVERS_DIR).join("poster.png"),
+            800,
+            1200,
+        );
+        let (asset_id, _asset_relative) =
+            register_existing_image_asset(&library, &source_bytes, 800, 1200);
+        assert_eq!(
+            library
+                .import_local_collection_artworks(COLLECTION_ID)
+                .unwrap(),
+            1
+        );
+        let (artwork_id, _, _, _, _) = artwork_row(&library);
+
+        library.trash_assets(&[asset_id]).unwrap();
+        library.empty_trash().unwrap();
+
+        assert_eq!(
+            read_media(library.resolve_work_artwork(&artwork_id).unwrap()),
+            source_bytes
+        );
+    }
+
+    #[test]
+    fn import_local_artwork_prepares_unknown_bytes_normally() {
+        let (_temp, library, collection_dir) = source_library();
+        set_game_collection(&library);
+        let source_bytes = write_png(
+            &collection_dir.join(COVERS_DIR).join("fresh.png"),
+            800,
+            1200,
+        );
+
+        assert_eq!(
+            library
+                .import_local_collection_artworks(COLLECTION_ID)
+                .unwrap(),
+            1
+        );
+
+        let (artwork_id, relative_path, mime_type, width, height) = artwork_row(&library);
+        assert!(relative_path.starts_with("work-artwork/"));
+        assert_eq!(mime_type, "image/png");
+        assert_eq!((width, height), (800, 1200));
+        assert_eq!(
+            fs::read(library.root().join(&relative_path)).unwrap(),
+            source_bytes
+        );
+        assert!(library
+            .root()
+            .join(format!(
+                "work-artwork-thumbnails/{COLLECTION_ID}/{artwork_id}.webp"
+            ))
+            .is_file());
+        assert_eq!(
+            read_media(library.resolve_work_artwork(&artwork_id).unwrap()),
+            source_bytes
+        );
     }
 
     #[test]

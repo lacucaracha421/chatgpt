@@ -713,6 +713,17 @@ Remaining Phase B:
 - Reuse an existing central Lakomics asset/derivative directly when Collection artwork already refers to that media, avoiding Collection-specific copy/decode/thumbnail generation where safe.
 - Instrument provider fetch/prepare and local import timings before broadening the reuse path.
 
+2026-09-04 Phase B implementation:
+- Local import (`import_local_artwork_files`) now hashes each new source file (sha256) and looks up `assets.content_hash` for an `image` asset before decoding.
+- On a match it links (hardlink, copy fallback) the asset file and its 360px thumbnail into artwork-scoped paths (`work-artwork/{collection}/{id}.ext`, `work-artwork-thumbnails/{collection}/{id}.webp`) instead of read -> decode -> duplicate original -> encode thumbnail. No schema change: every artwork row keeps a unique Collection-owned `relative_path`, so the UNIQUE constraint, cascade delete, unreferenced-file cleanup, and media-protocol routes behave exactly as before.
+- Lifecycle safety: Collection delete only removes Collection-scoped links (shared asset rows/files untouched); asset trash/purge only removes the asset's own links while artwork links retain the bytes, so purging a referenced asset cannot break its artwork; classification moves never touch files.
+- Provider flows (IGDB/TMDB/MangaDex) are untouched; genuinely new external bytes still go through full `prepare_work_artwork`; Phase A signature fast path is intact.
+- Rust coverage: reuse links shared bytes (mutation-proves-sharing test), Collection delete preserves the asset, purge preserves artwork bytes, unknown bytes prepare normally, reopen stays idempotent. Affected modules green: collection_source (21), work_artwork (16), collection (18), collection_volume (8), trash (10), media_protocol (22), igdb/tmdb/mangadex flows, ingestion (32).
+
+Remaining:
+- Instrument provider fetch/prepare and local import timings (per-file stage timings) to quantify the reuse win on real libraries.
+- Audit provider identity checks for redundant fetch/prepare where safe (explicitly out of this change).
+
 ### PERF-002 — Preserve view state across navigation
 Status: `DONE`
 
