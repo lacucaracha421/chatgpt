@@ -578,6 +578,26 @@ Review and define:
 
 Design for 10,000+ assets without unnecessary stutter or uncontrolled disk growth. Prefer measured, reversible changes over a one-time bulk rewrite of the library.
 
+### PERF-003 — Collection artwork import and reuse fast path
+Status: `TODO`
+
+Observed behavior:
+- Opening or importing Collection artwork can take noticeably too long, including when the relevant artwork or source image already exists locally.
+- Game/movie Collection entry currently invokes local artwork import on each viewer open. Existing registered local artwork skips the expensive image-byte path, but the source directories are still enumerated, filtered, naturally sorted, and compared with DB state each time.
+- New Work artwork preparation fully decodes the image, writes a Collection-specific original, and generates a bounded WebP thumbnail; this is wasteful when the source is already a reusable Lakomics asset/derivative.
+
+Direction:
+- Instrument the path first: source-directory scan/sort, DB identity lookup, provider/network fetch, image decode, thumbnail encode, file writes, and UI refresh should have separate timings.
+- Add a cheap unchanged-source fast path so reopening an unchanged Collection does not rescan/sort all source artwork. Preserve an explicit refresh/rescan route and reliable change detection.
+- When artwork originates from an existing Lakomics asset, prefer referencing/reusing the existing asset and suitable thumbnail/preview derivative instead of copying the original and decoding/encoding another thumbnail without need.
+- For provider-managed IGDB/TMDB/MangaDex artwork, audit identity checks so unchanged provider image IDs can avoid redundant fetch/prepare work where safe.
+- Preserve provenance and Collection-specific selection/order semantics even when the underlying media/derivative is shared.
+
+Acceptance target:
+- Reopening an unchanged Collection should make artwork availability effectively immediate.
+- Reusing an existing Lakomics asset as artwork should not perform redundant full-image decode/copy/thumbnail generation unless a Collection-specific derivative is genuinely required.
+- Newly added or changed source artwork must still be detected predictably.
+
 ### PERF-002 — Preserve view state across navigation
 Status: `DONE`
 
@@ -786,14 +806,15 @@ PC Core Polish Pass 1 runtime gate is complete: BUG-009, BUG-010, BUG-011, and U
 1. PERF-001 Phase B — measured cache/media/runtime work: repeat decode, thumbnail/preview bounds, video derivative reuse, cold/warm navigation, and storage growth; include the measurements needed to diagnose BUG-012 and choose UI-010 preview derivatives safely
 2. BUG-012 — stabilize Asset Repository scrollbar/thumb behavior during long virtualized scrolling
 3. UI-010 — richer image-like video previews without regressing selection/drag behavior or eagerly decoding full originals
-4. BUG-003 — historical X video drag-save blue native-selection artifact, if still reproducible
-5. UI-009 — VCK-inspired manga viewer parity improvements
-6. EXT-003 — same-X-post media grouping
-7. EXT-004 — adaptive/hidden secondary donut tags
-8. OPS-001 — backup/migration/settings portability
-9. CATALOG-003 — Japanese-language catalog ingestion/filter on the verified CATALOG-001 transport
-10. CATALOG-004 — advanced VCK-style catalog search syntax
-11. P3 feature expansion — NOTE-001 first, then STATS-001 / IDEA-001 according to actual use
+4. PERF-003 — make Collection artwork import/reopen and existing-asset reuse fast, avoiding redundant scans, copies, decodes, and thumbnail work
+5. BUG-003 — historical X video drag-save blue native-selection artifact, if still reproducible
+6. UI-009 — VCK-inspired manga viewer parity improvements
+7. EXT-003 — same-X-post media grouping
+8. EXT-004 — adaptive/hidden secondary donut tags
+9. OPS-001 — backup/migration/settings portability
+10. CATALOG-003 — Japanese-language catalog ingestion/filter on the verified CATALOG-001 transport
+11. CATALOG-004 — advanced VCK-style catalog search syntax
+12. P3 feature expansion — NOTE-001 first, then STATS-001 / IDEA-001 according to actual use
 
 Conditional work:
 - CLOUD-003 stays deferred unless real long-video Capture use reproduces the request-window race.
