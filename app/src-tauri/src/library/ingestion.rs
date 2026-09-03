@@ -34,6 +34,8 @@ use super::{
 
 pub(crate) const MAX_IMAGE_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_IMAGE_PIXELS: u64 = 200_000_000;
+const THUMBNAIL_BOUND: u32 = 360;
+const THUMBNAIL_WEBP_QUALITY: f32 = 85.0;
 
 fn normalize_collected_at(value: Option<&str>) -> Result<String, LibraryError> {
     let timestamp = match value {
@@ -624,9 +626,25 @@ fn write_thumbnail(staging: File, mut thumbnail_file: File) -> Result<(), Librar
     let image = reader
         .decode()
         .map_err(|_| LibraryError::UnsupportedImage)?;
-    image
-        .thumbnail(360, 360)
-        .write_to(&mut thumbnail_file, ImageFormat::WebP)
+    let encoded = encode_thumbnail_webp(&image)?;
+    thumbnail_file
+        .write_all(&encoded)
+        .map_err(|_| LibraryError::UnsupportedImage)
+}
+
+fn encode_thumbnail_webp(image: &image::DynamicImage) -> Result<Vec<u8>, LibraryError> {
+    let thumbnail = image.thumbnail(THUMBNAIL_BOUND, THUMBNAIL_BOUND).to_rgba8();
+    let mut config = webp::WebPConfig::new().map_err(|_| LibraryError::UnsupportedImage)?;
+    config.lossless = 0;
+    config.quality = THUMBNAIL_WEBP_QUALITY;
+    config.method = 1;
+    config.alpha_compression = 1;
+    config.alpha_filtering = 0;
+    config.alpha_quality = 100;
+    config.exact = 1;
+    webp::Encoder::from_rgba(thumbnail.as_raw(), thumbnail.width(), thumbnail.height())
+        .encode_advanced(&config)
+        .map(|encoded| encoded.to_vec())
         .map_err(|_| LibraryError::UnsupportedImage)
 }
 
@@ -1025,8 +1043,9 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{
-        clear_after_duplicate_hook, copy_and_hash, install_staged_asset, set_after_duplicate_hook,
-        set_staging_hook, set_video_probe_hook, LibraryError, PendingFiles, MAX_IMAGE_BYTES,
+        clear_after_duplicate_hook, copy_and_hash, encode_thumbnail_webp, install_staged_asset,
+        set_after_duplicate_hook, set_staging_hook, set_video_probe_hook, LibraryError,
+        PendingFiles, MAX_IMAGE_BYTES,
     };
     use crate::library::{
         models::{
@@ -1192,6 +1211,68 @@ mod tests {
         image
             .save_with_format(path, image::ImageFormat::Png)
             .unwrap();
+    }
+
+    #[test]
+    fn thumbnail_webp_is_bounded_and_decodable() {
+        let image = DynamicImage::ImageRgb8(ImageBuffer::from_fn(1200, 800, |x, y| {
+            Rgb([
+                ((x + y) % 251) as u8,
+                ((x * 3) % 253) as u8,
+                ((y * 5) % 247) as u8,
+            ])
+        }));
+        let encoded = encode_thumbnail_webp(&image).unwrap();
+        let decoded =
+            image::load_from_memory_with_format(&encoded, image::ImageFormat::WebP).unwrap();
+
+        assert_eq!((decoded.width(), decoded.height()), (360, 240));
+    }
+
+    #[test]
+    fn thumbnail_webp_preserves_alpha_channel() {
+        let image = DynamicImage::ImageRgba8(ImageBuffer::from_fn(360, 240, |x, _| {
+            let alpha = if x < 120 {
+                0
+            } else if x < 240 {
+                128
+            } else {
+                255
+            };
+            image::Rgba([220, 80, 40, alpha])
+        }));
+        let encoded = encode_thumbnail_webp(&image).unwrap();
+        let decoded = image::load_from_memory_with_format(&encoded, image::ImageFormat::WebP)
+            .unwrap()
+            .to_rgba8();
+
+        assert_eq!(decoded.get_pixel(40, 120)[3], 0);
+        assert_eq!(decoded.get_pixel(180, 120)[3], 128);
+        assert_eq!(decoded.get_pixel(320, 120)[3], 255);
+    }
+
+    #[test]
+    fn thumbnail_webp_is_materially_smaller_than_lossless_webp_for_detailed_art() {
+        let image = DynamicImage::ImageRgb8(ImageBuffer::from_fn(360, 360, |x, y| {
+            let seed = x
+                .wrapping_mul(1_664_525)
+                .wrapping_add(y.wrapping_mul(1_013_904_223))
+                .wrapping_add((x ^ y).wrapping_mul(2_654_435_761));
+            Rgb([(seed >> 16) as u8, (seed >> 8) as u8, seed as u8])
+        }));
+        let lossy = encode_thumbnail_webp(&image).unwrap();
+        let mut lossless = std::io::Cursor::new(Vec::new());
+        image
+            .write_to(&mut lossless, image::ImageFormat::WebP)
+            .unwrap();
+        let lossless = lossless.into_inner();
+
+        assert!(
+            lossy.len() * 5 < lossless.len() * 3,
+            "lossy={} lossless={}",
+            lossy.len(),
+            lossless.len()
+        );
     }
 
     fn stub_video_probe() {
