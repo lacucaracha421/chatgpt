@@ -1245,6 +1245,27 @@ input:disabled {
   white-space: nowrap;
 }
 
+.asset-toolbar__filter-menu .ui-menu__trigger,
+.asset-toolbar__icon-toggle .ui-toggle {
+  box-sizing: border-box;
+  width: var(--control-height-md);
+  min-height: var(--control-height-md);
+  padding: 0;
+  justify-content: center;
+}
+
+.asset-toolbar__filter-menu .ui-menu__trigger svg,
+.asset-toolbar__icon-toggle .ui-toggle svg {
+  width: 16px;
+  height: 16px;
+}
+
+.asset-toolbar__filter-menu[data-active="true"] .ui-menu__trigger {
+  color: var(--color-text);
+  background: var(--color-surface-hover);
+  border-color: var(--color-border);
+}
+
 .view-toolbar .ui-toggle > span {
   display: inline-flex;
   align-items: center;

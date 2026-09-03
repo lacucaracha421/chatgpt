@@ -42,9 +42,12 @@ it("shows the fixed browsing slots regardless of the selection", () => {
   expect(screen.getByLabelText("비공개 모드")).toBeVisible();
   expect(screen.getByLabelText("정렬 및 필터")).toBeVisible();
   expect(screen.getByLabelText("보기 설정")).toBeVisible();
-  expect(screen.getByText("현재 분류")).toBeVisible();
-  expect(screen.getByText("정보")).toBeVisible();
-  expect(screen.getByText("비공개")).toBeVisible();
+  expect(screen.getByRole("button", { name: "미디어 필터: 전체" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "비율 필터: 전체" })).toBeVisible();
+  expect(screen.queryByText("정렬·필터")).not.toBeInTheDocument();
+  expect(screen.queryByText("현재 분류")).not.toBeInTheDocument();
+  expect(screen.queryByText("정보")).not.toBeInTheDocument();
+  expect(screen.queryByText("비공개")).not.toBeInTheDocument();
   // 선택 명령은 상단바가 아니라 SelectionBar가 담당한다.
   expect(screen.queryByText(/개 선택/)).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "좋아요 켜기" })).not.toBeInTheDocument();
@@ -63,17 +66,15 @@ it("places media and aspect filters after sort only in asset browsing views", as
     />,
   );
 
-  const comboboxes = screen.getAllByRole("combobox");
-  expect(comboboxes).toHaveLength(3);
-  expect(comboboxes[0]).toBe(screen.getByRole("combobox", { name: "정렬" }));
-  expect(comboboxes[1]).toBe(screen.getByRole("combobox", { name: "미디어" }));
-  expect(comboboxes[2]).toBe(screen.getByRole("combobox", { name: "비율" }));
-  expect(screen.getByRole("combobox", { name: "미디어" })).toHaveValue("all");
-  expect(screen.getByRole("combobox", { name: "비율" })).toHaveValue("all");
+  expect(screen.getAllByRole("combobox")).toHaveLength(1);
+  expect(screen.getByRole("combobox", { name: "정렬" })).toBeVisible();
 
-  await user.selectOptions(screen.getByRole("combobox", { name: "미디어" }), "images");
-  await user.selectOptions(screen.getByRole("combobox", { name: "비율" }), "portrait");
+  await user.click(screen.getByRole("button", { name: "미디어 필터: 전체" }));
+  await user.click(screen.getByRole("menuitem", { name: "이미지" }));
   expect(onMediaFilterChange).toHaveBeenCalledWith("images");
+
+  await user.click(screen.getByRole("button", { name: "비율 필터: 전체" }));
+  await user.click(screen.getByRole("menuitem", { name: "세로형" }));
   expect(onAspectFilterChange).toHaveBeenCalledWith("portrait");
 
   rerender(
@@ -84,8 +85,8 @@ it("places media and aspect filters after sort only in asset browsing views", as
       onAspectFilterChange={onAspectFilterChange}
     />,
   );
-  expect(screen.queryByRole("combobox", { name: "미디어" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("combobox", { name: "비율" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /미디어 필터/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /비율 필터/ })).not.toBeInTheDocument();
 });
 
 it.each<AssetView>([
@@ -95,8 +96,8 @@ it.each<AssetView>([
 ])("hides asset filters in the $kind view", (view) => {
   render(<AssetToolbar {...baseProps} view={view} />);
 
-  expect(screen.queryByRole("combobox", { name: "미디어" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("combobox", { name: "비율" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /미디어 필터/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /비율 필터/ })).not.toBeInTheDocument();
 });
 
 it("toggles privacy mode from the browsing controls", async () => {
@@ -118,6 +119,15 @@ it("does not show folder or album transfer controls that duplicate sidebar drag 
   expect(screen.queryByLabelText("앨범")).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "앨범에 추가" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "추가 작업" })).not.toBeInTheDocument();
+});
+
+it("places the current-classification folder toggle immediately before window controls", () => {
+  const { container } = render(<AssetToolbar {...baseProps} />);
+  const actions = container.querySelector(".view-toolbar__view-actions")!;
+  const windowControls = container.querySelector(".window-controls")!;
+
+  expect(actions.querySelector('input[aria-label="이 분류만"]')).toBeInTheDocument();
+  expect(actions.nextElementSibling).toBe(windowControls);
 });
 
 it("acts as the window title bar with drag region and window controls", () => {
