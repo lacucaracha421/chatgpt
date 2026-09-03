@@ -2,6 +2,15 @@
 
 Status: current product direction
 
+## Current implementation checkpoint (2026-09-03)
+
+- Phase 1 full-library cloud replication is complete and production-verified. The PC remains authoritative; VPS/R2 serve the read-oriented replica.
+- The Galaxy Tab browser prototype now provides production cloud classification browsing, Recent, Home/Revisit, grouped creator rails, date/creator detail grids, image/video viewing, metadata, cursor pagination, and short-lived media-ticket access.
+- Alpha 15.54 passed the Galaxy Tab S11 device gate in portrait/landscape use after the final Home/detail stabilization pass.
+- The temporary device-gate preview host is not part of the production architecture; canonical web access is `https://lacucaracha421.github.io/chatgpt/`.
+- Mobile feature polish is intentionally paused at this checkpoint. The next major Mobile milestones remain Phase 3 native Android shell and Phase 4 `DocumentsProvider`, not more browser-only Home features.
+- The browser prototype still uses the extension runtime for authenticated Cloud API mediation, so the long-term direct/native client boundary described below remains future work.
+
 This document defines the intended role, scope, UX, and implementation order for Lakomics Mobile. It is a durable product reference, not a second backlog. Concrete implementation work remains tracked in `docs/roadmap/lakomics-backlog.md`, especially the full-library cloud replication work under `CLOUD-006`.
 
 ## Product definition
