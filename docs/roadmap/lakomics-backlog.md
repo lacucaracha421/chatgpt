@@ -50,9 +50,9 @@ Investigation order:
 Do not solve this by disabling fallback or extending timeouts blindly. Do not conflate this with CLOUD-003 long-video async handling unless evidence shows timeout duration is the actual cause.
 
 ### CLOUD-002 — Finish Cloud inbound app integration
-Status: `VERIFY`
+Status: `DONE`
 
-Implemented on the current integration branch:
+Implemented and verified in the current mainline product flow:
 - Settings exposes Cloud enablement, API base URL, Credential Manager-backed API token, connection test, and manual sync.
 - `classification_id` is carried from Capture pending records into `IngestMediaRequest`; nonexistent local IDs safely fall back to unclassified.
 - Inbound batch results distinguish new assets, video additions, classification-changing duplicates, and review-pending work so the frontend refreshes only what changed.
@@ -145,6 +145,10 @@ Observed behavior:
 - On PC, dragging the pointer over an X video to invoke the extension save interaction can produce a blue browser selection highlight.
 - The video save itself succeeds; this is a visual/input-side artifact only.
 
+Clarification:
+- This historical BUG-003 has always referred to the browser/X extension drag gesture, not to selecting video assets inside the Lakomics gallery.
+- The separate gallery video-selection / preview-interaction problem is tracked as BUG-009 below.
+
 Direction:
 - Prevent native text/media selection only for the active drag/gesture surface used by the extension.
 - Prefer scoped `user-select: none`, selection clearing, or pointer-event handling during the gesture rather than disabling browser selection globally.
@@ -236,17 +240,63 @@ Direction:
 - Do not change virtualization or scroll behavior.
 
 ### BUG-008 — Blue page-edge highlight in catalog double-page viewer
+Status: `DONE`
+
+Resolution:
+- The blue edge was consistent with focus reaching the transparent pointer-only page-edge navigation buttons rather than an intentional spread divider.
+- `6f22b5d` (`fix: stabilize viewer transitions and navigation`) replaced those edge-navigation buttons with `aria-hidden` non-focusable pointer surfaces while keeping the real toolbar Previous/Next buttons keyboard-accessible.
+- `PageViewer.test.tsx` explicitly verifies that clicking `.manga-viewer__edge` changes page without leaving keyboard focus on the edge surface.
+- Current source therefore no longer has the focusable edge control that could draw the reported native blue outline.
+
+### BUG-009 — Video preview interaction interferes with asset selection
 Status: `TODO`
 
 Observed behavior:
-- In online catalog double-page mode, an intermittent bright blue vertical line appears near the center of the viewer.
-- Screenshot evidence shows the line follows the right edge and lower rounded corner of the left rendered page rather than a fixed center divider.
-- This resembles a native focus/outline/selection artifact more than intentional viewer styling.
+- In the Asset Repository, video assets can be difficult or impossible to select for normal Ctrl/Shift multi-selection because the video preview/scrub interaction appears to win over the tile-selection gesture.
+- This is separate from BUG-003, which is an X/browser extension drag-selection artifact.
+
+Current source audit:
+- `AssetGallery` still owns the normal tile selection (`onClick`) and pointer-drag arming (`onPointerDown`) for video tiles just like image tiles.
+- `VideoTileMedia` starts hover playback after 200 ms, while its scrub bar explicitly calls `stopPropagation()`, captures the pointer, and consumes click/double-click events.
+- Therefore the source proves a selection conflict on the scrub surface, but does not by itself prove that the entire video tile should be unselectable; reproduce in the running app and scope the exact hit area before changing behavior.
 
 Direction:
-- Inspect page image/wrapper focus state, dialog focus management, edge navigation overlays, `:focus` / `:focus-visible`, outline, box-shadow, selection, and drag behavior.
-- Compare against the read-only VCK reference at `C:\chatgpt\reference\VCK-0.1.0-win-x64`, whose double-page layout does not intentionally draw this blue edge.
-- Fix only the affected viewer scope; do not remove keyboard focus indicators globally.
+- Keep hover video preview and intentional scrub seeking.
+- Clicking ordinary video-tile media should select exactly like an image tile; Ctrl/Cmd toggle and Shift range selection must work.
+- Pointer drag from ordinary video-tile media must still arm the selected asset set.
+- Keep the actual scrub control interactive without letting its behavior accidentally consume the rest of the tile.
+
+### BUG-010 — Online manga catalog shows impossible future modified dates
+Status: `TODO`
+
+Observed behavior:
+- Online manga catalog detail can display `수정일` around tens of thousands of years in the future (roughly the 50,000-year range).
+
+Evidence / suspected cause:
+- `OnlineCatalogDetailDialog.unixDate()` currently treats every numeric timestamp as Unix seconds and multiplies it by 1,000.
+- Catalog ingestion stores upstream `posted` and `updated` numeric fields without unit normalization.
+- The symptom strongly matches `updated` arriving in milliseconds while the UI multiplies it as if it were seconds; verify the failing row/raw provider payload before finalizing the fix.
+
+Direction:
+- Normalize provider timestamp units at the catalog boundary so frontend date fields have one explicit unit.
+- Do not add an arbitrary display-only year clamp that hides malformed data.
+- Add regression coverage with realistic `posted` and `updated` values so both display as normal calendar dates.
+
+### BUG-011 — Internal asset drag-out re-entry shows external import overlay
+Status: `TODO`
+
+Observed behavior:
+- Dragging a Lakomics asset out toward another application and then moving the same still-held drag back over Lakomics shows the external-file `여기에 놓아 추가` overlay.
+- An asset already owned by the current library should not be presented as a new import candidate during that drag.
+
+Evidence / suspected cause:
+- `useFileDrop` currently sets `over = true` unconditionally for native `enter` / `over` events whenever dropping is enabled.
+- The `isInsideLibrary(path, root)` filtering happens only on the final `drop`, so a library-owned drag can show the import overlay even though the actual drop is later ignored.
+
+Direction:
+- Classify `enter.paths` against the active library root and remember whether the native drag contains any genuinely external importable path; `over` events without paths should reuse that decision.
+- Suppress the external import overlay for Lakomics-origin/library-owned asset drags.
+- Keep actual external image/video file drops working and preserve the existing final drop-side safety filter.
 
 ## P2 — architecture / larger feature work
 
@@ -381,7 +431,15 @@ Sidebar behavior:
 - Show a dynamic `동기화 문제 N` item in the lower management area only when failed/review-pending work exists.
 
 ### CLOUD-006 — Full library cloud replication for mobile
-Status: `TODO`
+Status: `DONE`
+
+Resolution / verified behavior:
+- Desktop 0.2.0 ships the schema-31 full-library replica pipeline: idempotent prepare → upload → commit, resumable backfill control, bounded retry/failure isolation, and PC-authoritative replica semantics.
+- The production library completed its initial full backfill to the Japanese VPS/R2, and local/server asset plus classification-relationship counts were reconciled without duplicate rows or duplicate uploads.
+- Normal steady-state saves now drain automatically while backfill control is idle; new image/video assets reach the replica without manually starting another full backfill.
+- Classification-only membership changes enqueue replica revisions and converge remotely without re-uploading unchanged media; already-committed assets can re-commit relationships only.
+- Read-only Mobile library endpoints, deterministic pagination/sorting, short-lived media tickets, and PC-off Galaxy Tab browsing of replicated images/videos are implemented and device-verified.
+- Mobile Home/viewer/presentation polish is follow-up client UX and does not keep CLOUD-006 open; detailed Mobile product work remains tracked in `docs/agents/mobile.md`.
 
 Goal:
 - Make the full PC Lakomics asset library browsable from Lakomics Mobile while the PC is offline.
@@ -462,16 +520,21 @@ Direction:
 ### PERF-001 — Cache and media optimization policy
 Status: `TODO`
 
-Review and define:
-- thumbnail cache
-- preview cache
-- video preview/preparation cache
-- stale cache cleanup
-- WebP conversion
-- image asset optimization
-- video optimization
+Priority:
+- Promote this immediately after the remaining small visual/input bugs. The core library, Cloud replica foundation, and 0.2.0 release path are now stable enough that optimization work can be measured without moving architectural targets.
+- Use the current real library (8,000+ assets and growing) as the baseline, while keeping the original 10,000+ asset performance target.
 
-Design for 10,000+ assets without unnecessary stutter or uncontrolled disk growth.
+Review and define:
+- thumbnail cache: hit rate, memory/disk bounds, invalidation, and stale cleanup
+- preview cache: avoid repeat decode/work when revisiting the same assets
+- video preview/preparation cache: poster/frame reuse, concurrency limits, and cleanup
+- WebP policy: distinguish already-useful thumbnail WebP from any optional original/preview conversion; never bulk-convert originals without measured benefit and an explicit migration plan
+- image asset optimization: decode cost, dimensions, thumbnail generation, storage/bandwidth trade-offs
+- video optimization: preview generation, poster/scrub assets, startup latency, and storage growth
+- startup/runtime footprint: identify avoidable work, eager initialization, repeated scans, and caches that grow without bounds
+- benchmark representative cold/warm navigation, large classifications, viewer open/close, image/GIF/video mixes, and disk usage before and after changes
+
+Design for 10,000+ assets without unnecessary stutter or uncontrolled disk growth. Prefer measured, reversible changes over a one-time bulk rewrite of the library.
 
 ### PERF-002 — Preserve view state across navigation
 Status: `DONE`
@@ -645,12 +708,21 @@ For each new bug, record:
 
 ## Current intended implementation order
 
-1. BUG-003 X video drag-save blue native-selection artifact
-2. BUG-008 + UI-009 catalog/manga viewer cleanup and VCK-inspired reader improvements
-3. CLOUD-006 full-library cloud replication/backfill for Lakomics Mobile, then incremental metadata/classification sync
-4. EXT-003 same-X-post media grouping
-5. EXT-004 adaptive/hidden secondary donut tags
-6. OPS-001 backup/migration/settings portability
-7. CLOUD-003 long-video async handling if real-world use requires it
-8. CATALOG-003 Japanese-language catalog ingestion/filter on the verified CATALOG-001 transport
-9. CATALOG-004 advanced VCK-style catalog search syntax
+CLOUD-006 is complete and no longer blocks the PC roadmap. Mobile Home/viewer/presentation polish continues separately under `docs/agents/mobile.md` and should not keep completed PC/cloud foundation work open.
+
+1. BUG-009 — verify/fix video asset selection versus hover preview/scrub interaction
+2. BUG-010 — normalize online-catalog modified timestamps that render as impossible future dates
+3. BUG-011 — suppress external-import overlay when a Lakomics-owned drag re-enters the app
+4. BUG-003 — historical X video drag-save blue native-selection artifact, if still reproducible
+5. PERF-001 — Lakomics lightweight/cache/media optimization pass, measured against the real 8,000+ asset library
+6. UI-009 — VCK-inspired manga viewer parity improvements
+7. EXT-003 — same-X-post media grouping
+8. EXT-004 — adaptive/hidden secondary donut tags
+9. OPS-001 — backup/migration/settings portability
+10. CATALOG-003 — Japanese-language catalog ingestion/filter on the verified CATALOG-001 transport
+11. CATALOG-004 — advanced VCK-style catalog search syntax
+12. P3 feature expansion — NOTE-001 first, then STATS-001 / IDEA-001 / UI-008 according to actual use
+
+Conditional work:
+- CLOUD-003 stays deferred unless real long-video Capture use reproduces the request-window race.
+- CATALOG-002 remains a later provider/coexistence strategy and should not block the current k-hentai/VCK catalog path.
