@@ -298,7 +298,7 @@ Runtime verification:
 
 
 ### UI-010 — Richer video previews in the Asset Repository
-Status: `TODO`
+Status: `DONE`
 
 Goal:
 - Make video assets readable at a glance more like image assets, without requiring the full viewer just to understand what a clip contains.
@@ -310,8 +310,14 @@ Direction:
 - Preserve the selection/drag behavior fixed under BUG-009; preview media must not steal ordinary tile pointer input.
 - Measure cold/warm preview latency before choosing a preview format or generation policy, and avoid destructive original-media transcoding.
 
+2026-09-04 implementation:
+- Reused already-prepared scrub frames for a lightweight hover-motion preview instead of attaching the original video on hover.
+- Only attach the real `<video>` after explicit timeline/keyboard interaction, keeping ordinary tile selection and drag behavior on the tile.
+- Hover activation keeps only one active preview and cleans up frame timers on leave/unmount.
+- Focused regression coverage passed for `VideoTileMedia` and `AssetGallery`; production frontend build passed.
+
 ### BUG-012 — Asset Repository scrollbar/thumb jumps upward while scrolling
-Status: `TODO`
+Status: `VERIFY`
 
 Observed behavior:
 - While scrolling a large Asset Repository view, the scrollbar/thumb can suddenly jump noticeably upward, making the current position feel unstable even when the user is continuing in the same direction.
@@ -321,6 +327,11 @@ Direction:
 - Inspect virtualizer estimate/measurement changes, asynchronous image/video sizing, preview activation, grid-column changes, and scroll-owner nesting.
 - Keep the existing virtualization model; fix the source of unstable measurement/scroll range rather than masking it with arbitrary clamps.
 - Verify stable scrollbar motion during long continuous scrolling, media loading, hover video preview, and resize without reintroducing stale rows or giant blank gaps.
+
+2026-09-04 implementation checkpoint:
+- Disabled browser-native scroll anchoring on the Asset Repository scroll owner and virtual space so the browser does not independently compensate while the virtualizer mounts/unmounts rows.
+- Existing virtualizer ownership, paging, selection, and DOM-bounds tests remain green.
+- Keep this item in `VERIFY` until a long real-library Tauri scroll confirms that the original upward thumb/viewport jump is gone.
 
 ## P2 — architecture / larger feature work
 
@@ -392,12 +403,25 @@ Direction:
 - Follow-up candidates after the core grammar is stable: favorite tags, always-excluded tags, and contextual autocomplete counts based on the current query.
 
 ### MANGA-001 — Recover orphaned local manga into online catalog bookmarks
-Status: `TODO`
+Status: `IN PROGRESS`
 
 Problem:
 - Local manga source files can disappear while `manga_series` metadata still survives in `library.sqlite` and metadata backups.
-- The current scanner hard-deletes DB rows for paths not seen under a valid manga root, so pointing Lakomics at a new/empty root before recovery can destroy the remaining metadata index.
+- Before the MANGA-001 safety change, the scanner hard-deleted DB rows for paths not seen under a valid manga root, so pointing Lakomics at a new/empty root could destroy the remaining metadata index.
 - Manga Browser loads cached series and then automatically starts a refresh scan whenever a manga root is configured.
+
+2026-09-04 implementation checkpoint:
+- Schema 32 adds `manga_catalog_recovery_links` so migration-created relationships are auditable and reruns can distinguish bookmarks created by recovery from pre-existing bookmarks.
+- Manga scanning no longer hard-deletes DB rows merely because a source folder is missing; orphaned metadata remains available for recovery.
+- Added a non-mutating preview that classifies direct `gallery_id -> Works.Id` matches as exact-active, historical/expunged, or fallback and reports existing bookmark state.
+- Added an explicit apply action for exact-active matches only. It is transactional/idempotent, preserves pre-existing bookmarks, and records whether each bookmark was created by recovery.
+- Manga Browser exposes the preview counts and only enables bulk apply for exact-active items that are not already bookmarked. Historical and fallback items remain untouched.
+- Rust coverage locks orphan preservation, exact/historical/fallback classification, idempotent apply, and v31 -> v32 migration; Manga Browser recovery UI coverage passes.
+
+Remaining:
+- Resolve historical/expunged items to an active edition where possible.
+- Add targeted VPS-backed lookup/candidate review for the 17 fallback rows; never auto-confirm from title similarity alone.
+- Add read-only selected-backup ingestion only if current DB metadata is insufficient; do not require whole-DB restore.
 
 2026-09-03 read-only live-library audit:
 - The current DB still contains 243 `manga_series` rows even though the configured manga root no longer exists; no original series folders or `.lakomics-thumbs` survive.
@@ -610,7 +634,7 @@ Direction:
 - Hidden state and usage ranking should be presentation metadata only; do not alter the underlying classification tree or saved asset memberships.
 
 ### PERF-001 — Cache and media optimization policy
-Status: `TODO`
+Status: `IN PROGRESS`
 
 Phase A checkpoint — PC Core Polish Pass 1:
 - Measured the production frontend before optimization: the initial JavaScript chunk was 626.18 kB (179.71 kB gzip) and exceeded Vite's 500 kB chunk warning.
@@ -628,6 +652,7 @@ Phase B checkpoint - measured startup and thumbnail storage:
 - Added an explicit resumable thumbnail maintenance CLI with dry-run default, `--limit N` / `--all` apply gates, active-library lock refusal, temp-file validation, atomic Windows replacement, and already-lossy resume skipping.
 - After a 20-file production canary passed, recompressed the real library. Final thumbnail state: 7,784 files = 7,783 lossy + 1 intentionally retained smaller lossless file, 0 missing, 0 unknown. Thumbnail storage fell from 727.67 MiB to 163.75 MiB, saving about 563.92 MiB (77.5%). Originals were not converted.
 - A post-migration validator false-positive on 12 large/alpha lossy WebPs was fixed by falling back from the 4 KiB header probe to a full-file WebP feature check; regression coverage includes that case.
+- Added a separate cloud-thumbnail refresh utility for already-synced image/GIF replicas: read-only local candidate discovery, remote size preflight in batches, explicit `--apply --limit N|--all` gates, and bounded parallel upload through the existing replication presign path. It refreshes only the thumbnail object and does not rewrite originals or pretend the whole asset needs a new sync revision.
 
 Priority:
 - Continue with measured cache/media work after the PC Core Polish Pass 1 runtime verification gate.
@@ -646,7 +671,7 @@ Review and define:
 Design for 10,000+ assets without unnecessary stutter or uncontrolled disk growth. Prefer measured, reversible changes over a one-time bulk rewrite of the library.
 
 ### PERF-003 — Collection artwork import and reuse fast path
-Status: `TODO`
+Status: `IN PROGRESS`
 
 Observed behavior:
 - Opening or importing Collection artwork can take noticeably too long, including when the relevant artwork or source image already exists locally.
@@ -664,6 +689,15 @@ Acceptance target:
 - Reopening an unchanged Collection should make artwork availability effectively immediate.
 - Reusing an existing Lakomics asset as artwork should not perform redundant full-image decode/copy/thumbnail generation unless a Collection-specific derivative is genuinely required.
 - Newly added or changed source artwork must still be detected predictably.
+
+2026-09-04 Phase A implementation:
+- Added a cheap per-session source signature from collection/info/covers/secondary-artwork directory metadata. Reopening the same unchanged game/movie Collection now returns before image enumeration, natural sorting, and DB identity comparison.
+- A source-change regression adds a new cover after the cached reopen and confirms that the new artwork is still imported.
+- Existing provider-managed collections keep their previous skip behavior.
+
+Remaining Phase B:
+- Reuse an existing central Lakomics asset/derivative directly when Collection artwork already refers to that media, avoiding Collection-specific copy/decode/thumbnail generation where safe.
+- Instrument provider fetch/prepare and local import timings before broadening the reuse path.
 
 ### PERF-002 — Preserve view state across navigation
 Status: `DONE`
@@ -879,19 +913,18 @@ CLOUD-006 is complete and no longer blocks the PC roadmap. Mobile Home/viewer/pr
 
 PC Core Polish Pass 1 runtime gate is complete: BUG-009, BUG-010, BUG-011, and UI-008 all passed real Tauri verification.
 
-1. PERF-001 Phase B — measured cache/media/runtime work: repeat decode, thumbnail/preview bounds, video derivative reuse, cold/warm navigation, and storage growth; include the measurements needed to diagnose BUG-012 and choose UI-010 preview derivatives safely
-2. BUG-012 — stabilize Asset Repository scrollbar/thumb behavior during long virtualized scrolling
-3. UI-010 — richer image-like video previews without regressing selection/drag behavior or eagerly decoding full originals
-4. PERF-003 — make Collection artwork import/reopen and existing-asset reuse fast, avoiding redundant scans, copies, decodes, and thumbnail work
-5. MANGA-001 — preserve orphaned local manga metadata and migrate recoverable works into catalog bookmarks with exact-ID-first matching and review for the remainder
-6. BUG-003 — historical X video drag-save blue native-selection artifact, if still reproducible
-7. UI-009 — VCK-inspired manga viewer parity improvements
-8. EXT-003 — same-X-post media grouping
-9. EXT-004 — adaptive/hidden secondary donut tags
-10. OPS-001 — backup/migration/settings portability
-11. CATALOG-003 — Japanese-language catalog ingestion/filter on the verified CATALOG-001 transport
-12. CATALOG-004 — advanced VCK-style catalog search syntax
-13. P3 feature expansion — NOTE-001 first, then STATS-001 / IDEA-001 according to actual use
+1. BUG-012 runtime verification — confirm the scroll-anchor mitigation on a long real Asset Repository session; close if the original jump is gone
+2. PERF-003 Phase B — reuse existing Lakomics assets/derivatives for Collection artwork where safe; Phase A unchanged-source reopen fast path is implemented
+3. MANGA-001 fallback phase — exact-active recovery is implemented; resolve 7 historical/expunged and 17 fallback rows through targeted lookup/review
+4. PERF-001 continuation — measure remaining preview/cache/runtime bounds after the thumbnail-storage and cloud-thumbnail refresh work
+5. BUG-003 — historical X video drag-save blue native-selection artifact, if still reproducible
+6. UI-009 — VCK-inspired manga viewer parity improvements
+7. EXT-003 — same-X-post media grouping
+8. EXT-004 — adaptive/hidden secondary donut tags
+9. OPS-001 — backup/migration/settings portability
+10. CATALOG-003 — Japanese-language catalog ingestion/filter on the verified CATALOG-001 transport
+11. CATALOG-004 — advanced VCK-style catalog search syntax
+12. P3 feature expansion — NOTE-001 first, then STATS-001 / IDEA-001 according to actual use
 
 Conditional work:
 - CLOUD-003 stays deferred unless real long-video Capture use reproduces the request-window race.
