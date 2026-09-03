@@ -333,6 +333,20 @@ Direction:
 - Existing virtualizer ownership, paging, selection, and DOM-bounds tests remain green.
 - Keep this item in `VERIFY` until a long real-library Tauri scroll confirms that the original upward thumb/viewport jump is gone.
 
+2026-09-04 follow-up inspection (static, no runtime):
+- Row geometry is fully data-driven: `buildJustifiedRows` computes every row height from asset width/height metadata, the virtualizer uses those exact heights with no DOM re-measurement, tiles render at fixed heights inside `overflow: hidden`, and row chunking is prefix-stable when pages append (new regression test locks this).
+- One concrete residual cause found and fixed: the scroll container used classic layout scrollbars with no reserved gutter, so the scrollbar appearing/disappearing changed `clientWidth`, re-justified every row, and shifted the scroll range. Added `scrollbar-gutter: stable` to `.asset-gallery__scroll` (not a clamp; removes a measurement feedback loop).
+- Video hover preview cannot move rows: it swaps same-box image sources inside fixed-height clipped tiles, and only one preview is active at a time.
+- No change to virtualization, paging, selection, or prepend compensation.
+
+Manual verification checklist (real Tauri, long library):
+1. Scroll continuously down 8k+ assets: no upward thumb/viewport jump, no giant blanks, no stale rows.
+2. Scroll continuously back up through async-loaded thumbnails: same stability.
+3. Hover video tiles while scrolling: previews activate without moving the viewport.
+4. Resize the window mid-list: content may re-justify (expected) but must not jump upward on its own.
+5. Confirm pages load at the bottom/top without viewport repositioning.
+- Keep status `VERIFY` until all five pass; then mark `DONE`.
+
 ## P2 — architecture / larger feature work
 
 ### CATALOG-001 — Move fragile k-hentai transport behind the Japanese VPS

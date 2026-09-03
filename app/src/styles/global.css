@@ -1896,6 +1896,9 @@ input:disabled {
   overflow: auto;
   /* The virtualizer owns scroll positioning; native anchoring can fight mounted row changes. */
   overflow-anchor: none;
+  /* Reserve the scrollbar gutter so the scrollbar appearing/disappearing cannot
+     change clientWidth, re-justify every row, and shift the scroll range. */
+  scrollbar-gutter: stable;
   padding: var(--gallery-gap);
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--color-muted) 46%, transparent) transparent;

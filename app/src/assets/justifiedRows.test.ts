@@ -195,4 +195,22 @@ describe("buildJustifiedRows", () => {
         Number.MAX_VALUE,
     ).toBeCloseTo(1);
   });
+
+  it("keeps earlier rows identical when items are appended", () => {
+    const items = Array.from({ length: 40 }, (_, index) => ({
+      id: `asset-${index}`,
+      width: 300 + ((index * 37) % 200),
+      height: 200 + ((index * 53) % 150),
+    }));
+    const before = buildJustifiedRows(items.slice(0, 25), 900, 180, 8);
+    const after = buildJustifiedRows(items, 900, 180, 8);
+
+    expect(after.length).toBeGreaterThanOrEqual(before.length);
+    for (let index = 0; index < before.length - 1; index += 1) {
+      expect(after[index].items.map((item) => item.id)).toEqual(
+        before[index].items.map((item) => item.id),
+      );
+      expect(after[index].height).toBe(before[index].height);
+    }
+  });
 });
