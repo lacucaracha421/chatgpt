@@ -536,6 +536,15 @@ Phase A checkpoint — PC Core Polish Pass 1:
 - Full frontend regression: 73 files / 608 tests passed; production TypeScript/Vite build passed.
 - PERF-001 remains open: cache bounds, repeated decode/work, video derivative reuse, cold/warm navigation measurements, and storage/runtime growth still belong to later phases.
 
+Phase B checkpoint - measured startup and thumbnail storage:
+- Real-library baseline: 8,104 normal assets (7,759 images, 5 GIFs, 340 videos); originals 6.34 GiB, image thumbnails 727.67 MiB, video derivatives 163.3 MiB.
+- Reworked startup video recovery so ready videos validate scrub-frame directories in one pass instead of issuing metadata checks for about 10,487 individual frames. On the real-library snapshot, video recovery fell from 480.6 ms to 42.4 ms and total `Library::open` from 527.6 ms to 94.9 ms in the controlled comparison; a later release run measured 136.0 ms total open time.
+- Replaced per-classification correlated asset counts with a single pre-aggregation query. `list_classifications` fell from about 144 ms to about 12 ms in the final probe (about 4 ms in isolated SQL testing), without changing list-page query latency.
+- Image thumbnails were confirmed to be 360 px lossless WebP. Representative testing selected lossy WebP q85 / method 1: about 0.9897 mean SSIM, about 43.6 dB mean PSNR, and about 8.97 ms encode time versus about 6.57 ms for the prior lossless path. New ingests now use this policy.
+- Added an explicit resumable thumbnail maintenance CLI with dry-run default, `--limit N` / `--all` apply gates, active-library lock refusal, temp-file validation, atomic Windows replacement, and already-lossy resume skipping.
+- After a 20-file production canary passed, recompressed the real library. Final thumbnail state: 7,784 files = 7,783 lossy + 1 intentionally retained smaller lossless file, 0 missing, 0 unknown. Thumbnail storage fell from 727.67 MiB to 163.75 MiB, saving about 563.92 MiB (77.5%). Originals were not converted.
+- A post-migration validator false-positive on 12 large/alpha lossy WebPs was fixed by falling back from the 4 KiB header probe to a full-file WebP feature check; regression coverage includes that case.
+
 Priority:
 - Continue with measured cache/media work after the PC Core Polish Pass 1 runtime verification gate.
 - Use the current real library (8,000+ assets and growing) as the baseline, while keeping the original 10,000+ asset performance target.

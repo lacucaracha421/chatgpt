@@ -240,15 +240,23 @@ fn inspect_thumbnail(path: &Path) -> Result<(ThumbnailFormat, u64), ThumbnailMai
     let mut header = vec![0u8; 4096.min(metadata.len() as usize)];
     file.read_exact(&mut header)
         .map_err(|source| io_error(path, source))?;
-    let format = webp::BitstreamFeatures::new(&header)
+    let mut format = classify_webp(&header);
+    if format == ThumbnailFormat::Unknown && metadata.len() as usize > header.len() {
+        let bytes = fs::read(path).map_err(|source| io_error(path, source))?;
+        format = classify_webp(&bytes);
+    }
+    Ok((format, metadata.len()))
+}
+
+fn classify_webp(bytes: &[u8]) -> ThumbnailFormat {
+    webp::BitstreamFeatures::new(bytes)
         .and_then(|features| features.format())
         .map(|format| match format {
             webp::BitstreamFormat::Lossless => ThumbnailFormat::Lossless,
             webp::BitstreamFormat::Lossy => ThumbnailFormat::Lossy,
             webp::BitstreamFormat::Undefined => ThumbnailFormat::Unknown,
         })
-        .unwrap_or(ThumbnailFormat::Unknown);
-    Ok((format, metadata.len()))
+        .unwrap_or(ThumbnailFormat::Unknown)
 }
 
 fn recompress_one(root: &Path, item: &ScannedThumbnail) -> Result<RecompressOutcome, String> {
@@ -393,7 +401,7 @@ fn io_error(path: &Path, source: std::io::Error) -> ThumbnailMaintenanceError {
 
 #[cfg(test)]
 mod tests {
-    use image::{DynamicImage, ImageBuffer, ImageFormat, Rgb};
+    use image::{DynamicImage, ImageBuffer, ImageFormat, Rgb, Rgba};
     use rusqlite::params;
     use tempfile::TempDir;
 
@@ -517,6 +525,32 @@ mod tests {
             recompress_thumbnails(&fixture.root, ThumbnailRecompressOptions::dry_run()).unwrap();
         assert_eq!(final_report.lossless, 0);
         assert_eq!(final_report.lossy, 2);
+    }
+
+    #[test]
+    fn inspect_thumbnail_recognizes_large_lossy_alpha_webp() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("alpha.webp");
+        let image = DynamicImage::ImageRgba8(ImageBuffer::from_fn(360, 360, |x, y| {
+            let seed = x
+                .wrapping_mul(1_664_525)
+                .wrapping_add(y.wrapping_mul(1_013_904_223))
+                .wrapping_add((x ^ y).wrapping_mul(2_654_435_761));
+            Rgba([
+                (seed >> 16) as u8,
+                (seed >> 8) as u8,
+                seed as u8,
+                seed.rotate_left(7) as u8,
+            ])
+        }));
+        let encoded = encode_thumbnail_webp(&image).unwrap();
+        assert!(encoded.len() > 4096);
+        fs::write(&path, &encoded).unwrap();
+
+        let (format, bytes) = inspect_thumbnail(&path).unwrap();
+
+        assert_eq!(format, ThumbnailFormat::Lossy);
+        assert_eq!(bytes, encoded.len() as u64);
     }
 
     #[cfg(windows)]
