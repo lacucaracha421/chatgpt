@@ -213,6 +213,8 @@ describe("AssetGallery", () => {
     const first = await screen.findByRole("option", { name: "asset-0.png" });
     const second = screen.getByRole("option", { name: "asset-1.png" });
     expect(first).toHaveAttribute("aria-selected", "true");
+    expect(first.querySelector(".asset-gallery__selection-indicator")).not.toBeNull();
+    expect(second.querySelector(".asset-gallery__selection-indicator")).toBeNull();
     expect(first).not.toHaveAttribute("aria-pressed");
 
     await user.keyboard("{Control>}");

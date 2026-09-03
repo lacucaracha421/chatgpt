@@ -637,6 +637,9 @@ Implemented in PC Core Polish Pass 1:
 Verification remaining:
 - Check the real Tauri window at normal and narrower desktop widths for comfortable spacing, no unintended wrapping/clipping, and clear distinction between browsing controls, view actions, and window controls.
 
+Pending follow-up — memo only, do not implement yet:
+- Remove the visible `보기` label from the asset toolbar as well; keep the controls accessible without adding replacement text clutter.
+
 ## Long-term
 
 ### LONG-001 — AV actor and title collection

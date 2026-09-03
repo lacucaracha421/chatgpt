@@ -11,6 +11,7 @@ export type NativeFileDropEvent =
   | { type: "cancel" };
 
 export type DropSubscriber = (handler: (event: NativeFileDropEvent) => void) => Promise<() => void>;
+export type NativeFileDragDisposition = "internal" | "external" | "mixed" | "unknown";
 
 export const subscribeToTauriDrops: DropSubscriber = async (handler) =>
   getCurrentWebview().onDragDropEvent((event) => handler(event.payload as NativeFileDropEvent));
@@ -36,6 +37,7 @@ type UseFileDropOptions = {
   ingestMedia: LibraryGateway["ingestMedia"];
   onIngested?: (result: IngestOutcome) => void;
   onFatalError?: (message: string) => void;
+  onNativeDragEvent?: (event: NativeFileDropEvent, disposition: NativeFileDragDisposition) => void;
 };
 
 export type FileDropState = {
@@ -76,6 +78,7 @@ export function useFileDrop(options: UseFileDropOptions): FileDropState {
     let pendingBatches = 0;
     let queue = Promise.resolve();
     let dragContainsExternalPaths: boolean | null = null;
+    let dragDisposition: NativeFileDragDisposition = "unknown";
 
     const enqueue = (paths: string[], destination: string | null, existingWorkId?: string) => {
       if (!active || paths.length === 0) return;
@@ -144,28 +147,37 @@ export function useFileDrop(options: UseFileDropOptions): FileDropState {
       if (!active) return;
       const event = incoming;
       if (event.type === "cancel" || event.type === "leave") {
+        optionsRef.current.onNativeDragEvent?.(event, dragDisposition);
         dragContainsExternalPaths = null;
+        dragDisposition = "unknown";
         setOver(false);
         return;
       }
       if (!optionsRef.current.enabled) {
         dragContainsExternalPaths = null;
+        dragDisposition = "unknown";
         setOver(false);
         return;
       }
       if (event.type === "enter") {
         const root = optionsRef.current.libraryRoot;
-        dragContainsExternalPaths = event.paths.some((path) => !root || !isInsideLibrary(path, root));
+        dragDisposition = classifyPaths(event.paths, root);
+        dragContainsExternalPaths = dragDisposition === "external" || dragDisposition === "mixed";
+        optionsRef.current.onNativeDragEvent?.(event, dragDisposition);
         setOver(dragContainsExternalPaths);
         return;
       }
       if (event.type === "over") {
+        optionsRef.current.onNativeDragEvent?.(event, dragDisposition);
         setOver(dragContainsExternalPaths ?? true);
         return;
       }
-      dragContainsExternalPaths = null;
-      setOver(false);
       const root = optionsRef.current.libraryRoot;
+      const dropDisposition = classifyPaths(event.paths, root);
+      optionsRef.current.onNativeDragEvent?.(event, dropDisposition);
+      dragContainsExternalPaths = null;
+      dragDisposition = "unknown";
+      setOver(false);
       const externalPaths = root
         ? event.paths.filter((p) => !isInsideLibrary(p, root))
         : event.paths;
@@ -205,6 +217,15 @@ function emptyWork(id: string, total: number): IngestionWork {
 
 function fileName(path: string) {
   return path.split(/[\\/]/).pop() ?? path;
+}
+
+function classifyPaths(paths: string[], root?: string | null): NativeFileDragDisposition {
+  if (paths.length === 0) return "unknown";
+  if (!root) return "external";
+  const internalCount = paths.filter((path) => isInsideLibrary(path, root)).length;
+  if (internalCount === 0) return "external";
+  if (internalCount === paths.length) return "internal";
+  return "mixed";
 }
 
 function isInsideLibrary(path: string, root: string): boolean {

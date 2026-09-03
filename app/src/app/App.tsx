@@ -7,6 +7,8 @@ import { createDefaultCollectionLibraryState, type CollectionLibraryState, type 
 import {
   type DropSubscriber,
   type IngestionWork,
+  type NativeFileDragDisposition,
+  type NativeFileDropEvent,
   subscribeToTauriDrops,
   useFileDrop,
 } from "../ingestion/useFileDrop";
@@ -135,6 +137,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const dragStateRef = useRef<PointerDragState>({ phase: "idle" });
   const [dragTarget, setDragTarget] = useState<ClassificationDropTarget | null>(null);
   const nativeDragStartedRef = useRef(false);
+  const activeNativeDragAssetIdsRef = useRef<string[] | null>(null);
   const nativeDragAssetsRef = useRef(new Map<string, string[]>());
   const [nativeDragWorks, setNativeDragWorks] = useState<IngestionWork[]>([]);
   const [metadataImportWorks, setMetadataImportWorks] = useState<MetadataImportWork[]>([]);
@@ -224,6 +227,28 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   });
   const dropEnabled = maintenance === null && view.kind !== "trash" && view.kind !== "similarity_review" && view.kind !== "settings" && view.kind !== "manga";
   const dropClassificationId = view.kind === "classification" ? view.classificationId : null;
+  function handleNativeDragEvent(event: NativeFileDropEvent, disposition: NativeFileDragDisposition) {
+    const assetIds = activeNativeDragAssetIdsRef.current;
+    if (!assetIds || disposition !== "internal") {
+      if (event.type !== "leave" && event.type !== "cancel") setDragTarget(null);
+      else if (assetIds) setDragTarget(null);
+      return;
+    }
+    if (event.type === "leave" || event.type === "cancel") {
+      setDragTarget(null);
+      return;
+    }
+    const point = nativeDropClientPoint(event.position);
+    const payload: InternalDragPayload = { kind: "assets", assetIds };
+    const target = sidebarTargetAt(point.x, point.y, payload, entries, albums);
+    if (event.type === "drop") {
+      activeNativeDragAssetIdsRef.current = null;
+      setDragTarget(null);
+      if (target?.valid) void performInternalDrop(payload, target);
+      return;
+    }
+    setDragTarget(target);
+  }
   const dropState = useFileDrop({
     subscribe: subscribeDrops,
     enabled: dropEnabled,
@@ -232,6 +257,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     ingestMedia: gateway.ingestMedia,
     onIngested: handleIngested,
     onFatalError: setMessage,
+    onNativeDragEvent: handleNativeDragEvent,
   });
 
   const beginMetadataImport = useCallback(async (folder: string, existingWorkId?: string) => {
@@ -312,6 +338,26 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     return () => document.body.classList.remove("is-pointer-dragging");
   }, [dragState.phase]);
   useEffect(() => {
+    let active = true;
+    let unlisten: (() => void) | undefined;
+    let clearTimer: number | null = null;
+    void listen<string[]>("asset-drag://ended", (event) => {
+      if (!active) return;
+      if (clearTimer !== null) window.clearTimeout(clearTimer);
+      clearTimer = window.setTimeout(() => {
+        clearTimer = null;
+        if (!sameAssetIds(activeNativeDragAssetIdsRef.current, event.payload)) return;
+        activeNativeDragAssetIdsRef.current = null;
+        setDragTarget(null);
+      }, 100);
+    }).then((stop) => { if (active) unlisten = stop; else stop(); }).catch(() => undefined);
+    return () => {
+      active = false;
+      if (clearTimer !== null) window.clearTimeout(clearTimer);
+      unlisten?.();
+    };
+  }, []);
+  useEffect(() => {
     const cancel = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || dragStateRef.current.phase === "idle") return;
       transitionDrag({ type: "cancel" });
@@ -378,6 +424,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
 
   function startPointerDrag(payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) {
     nativeDragStartedRef.current = false;
+    activeNativeDragAssetIdsRef.current = null;
     transitionDrag({ type: "arm", payload, x: event.clientX, y: event.clientY });
     setDragTarget(null);
     event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -399,6 +446,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   }
 
   async function beginNativeDrag(assetIds: string[], workId: string = crypto.randomUUID()) {
+    activeNativeDragAssetIdsRef.current = [...assetIds];
     nativeDragAssetsRef.current.set(workId, assetIds);
     setNativeDragWorks((current) => {
       const running: IngestionWork = { kind: "drag_out", id: workId, total: 1, completed: 0, added: 0, exactDuplicates: [], reviewPending: [], failures: [], status: "running" };
@@ -410,6 +458,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
       await startAssetDrag(assetIds);
       setNativeDragWorks((current) => current.map((work) => work.id === workId ? { ...work, completed: 1, status: "completed" } : work));
     } catch (error) {
+      if (sameAssetIds(activeNativeDragAssetIdsRef.current, assetIds)) activeNativeDragAssetIdsRef.current = null;
       const message = commandErrorMessage(error, "탐색기로 자산을 복사하지 못했습니다.");
       setNativeDragWorks((current) => current.map((work) => work.id === workId ? { ...work, completed: 1, failures: [{ fileName: "선택한 자산", message }], status: "failed" } : work));
     }
@@ -695,6 +744,15 @@ function isDescendant(candidateId: string | null, ancestorId: string, entries: A
     current = entries.find((entry) => entry.id === current?.parentId);
   }
   return false;
+}
+
+function nativeDropClientPoint(position: { x: number; y: number }) {
+  const scale = Number.isFinite(window.devicePixelRatio) && window.devicePixelRatio > 0 ? window.devicePixelRatio : 1;
+  return { x: position.x / scale, y: position.y / scale };
+}
+
+function sameAssetIds(left: string[] | null, right: string[]) {
+  return Boolean(left && left.length === right.length && left.every((id, index) => id === right[index]));
 }
 
 function outsideViewport(x: number, y: number) {

@@ -610,7 +610,8 @@ it("suppresses the import overlay when a library-owned drag re-enters the app", 
   let send: ((event: NativeFileDropEvent) => void) | undefined;
   const subscribe: DropSubscriber = async (handler) => { send = handler; return () => undefined; };
   const ingestMedia = vi.fn().mockResolvedValue({ status: "added", asset: fixtureAsset });
-  const { result } = renderHook(() => useFileDrop({ enabled: true, subscribe, classificationId: null, libraryRoot: "C:\\Library", ingestMedia }));
+  const onNativeDragEvent = vi.fn();
+  const { result } = renderHook(() => useFileDrop({ enabled: true, subscribe, classificationId: null, libraryRoot: "C:\\Library", ingestMedia, onNativeDragEvent }));
   await waitFor(() => expect(send).toBeDefined());
 
   act(() => send?.({ type: "enter", paths: ["C:\\Library\\assets\\owned.png"], position: { x: 1, y: 2 } }));
@@ -620,6 +621,9 @@ it("suppresses the import overlay when a library-owned drag re-enters the app", 
   act(() => send?.({ type: "drop", paths: ["C:\\Library\\assets\\owned.png"], position: { x: 2, y: 3 } }));
   await Promise.resolve();
   expect(ingestMedia).not.toHaveBeenCalled();
+  expect(onNativeDragEvent).toHaveBeenNthCalledWith(1, expect.objectContaining({ type: "enter" }), "internal");
+  expect(onNativeDragEvent).toHaveBeenNthCalledWith(2, expect.objectContaining({ type: "over" }), "internal");
+  expect(onNativeDragEvent).toHaveBeenNthCalledWith(3, expect.objectContaining({ type: "drop" }), "internal");
 });
 
 it("keeps the import overlay for mixed drags and ingests only external paths", async () => {
