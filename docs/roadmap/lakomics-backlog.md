@@ -296,6 +296,32 @@ Runtime verification:
 - Real Tauri drag-out/re-entry keeps the external import overlay hidden for Lakomics-owned assets while genuine external files still show the overlay and import normally.
 - The follow-up re-entry path also restores sidebar folder drop targets so a still-held native asset drag can be dropped back into a Lakomics folder.
 
+
+### UI-010 — Richer video previews in the Asset Repository
+Status: `TODO`
+
+Goal:
+- Make video assets readable at a glance more like image assets, without requiring the full viewer just to understand what a clip contains.
+
+Direction:
+- Keep an immediate poster/thumbnail, then add a lightweight hover-motion or scrub-preview experience where useful.
+- Prefer reusable preview derivatives or cached frames over repeatedly decoding full originals.
+- Coordinate with `PERF-001` for preview cache bounds, derivative reuse, CPU/memory cost, and disk growth.
+- Preserve the selection/drag behavior fixed under BUG-009; preview media must not steal ordinary tile pointer input.
+- Measure cold/warm preview latency before choosing a preview format or generation policy, and avoid destructive original-media transcoding.
+
+### BUG-012 — Asset Repository scrollbar/thumb jumps upward while scrolling
+Status: `TODO`
+
+Observed behavior:
+- While scrolling a large Asset Repository view, the scrollbar/thumb can suddenly jump noticeably upward, making the current position feel unstable even when the user is continuing in the same direction.
+
+Direction:
+- Reproduce in long real classifications and determine whether the actual viewport offset moves or only the scrollbar's virtual total-size/thumb mapping changes.
+- Inspect virtualizer estimate/measurement changes, asynchronous image/video sizing, preview activation, grid-column changes, and scroll-owner nesting.
+- Keep the existing virtualization model; fix the source of unstable measurement/scroll range rather than masking it with arbitrary clamps.
+- Verify stable scrollbar motion during long continuous scrolling, media loading, hover video preview, and resize without reintroducing stale rows or giant blank gaps.
+
 ## P2 — architecture / larger feature work
 
 ### CATALOG-001 — Move fragile k-hentai transport behind the Japanese VPS
@@ -644,13 +670,17 @@ Pending follow-up — memo only, do not implement yet:
 
 ## Long-term
 
-### LONG-001 — AV actor and title collection
+### LONG-001 — AV actor/title works and full package cover sets
 Status: `HOLD`
 
-- Actor profiles and associated title library.
-- Manage AV covers as collection media.
+- Treat an AV title as a work-level entity rather than only a loose video asset: title metadata, actors, label/series, cover set, sample images, and linked video(s) can belong to the same work.
+- Actor profiles should lead naturally to the associated title library and back again.
+- Where an authorized source provides front, spine, and back artwork, import them as one provenance-preserving cover set with explicit `front` / `spine` / `back` roles instead of three unrelated gallery images.
+- Keep graceful fallbacks: front-only works remain valid, while a complete cover set unlocks richer package presentation.
 - Provide a stronger physical-media presentation rather than plain flat cards.
-- DVD case presentation can include front/spine/back and interactive rotation.
+- The AV presentation preset should be able to map real front/spine/back artwork onto a DVD-style case with depth, shadow, and optional interactive rotation.
+- Later shelf/display views may use the real spine art for browsing while opening the full case for closer cover appreciation.
+- Keep metadata/cover importing separate from video acquisition; support only sources and media the user is authorized to store, and do not make DRM bypass part of the importer.
 
 ### LONG-002 — Media-type-specific collection presentation presets
 Status: `HOLD`
@@ -664,6 +694,25 @@ Examples:
 - AV: realistic DVD-case presentation
 
 Build this as `collectionType → presentation preset` rather than one-off CSS effects.
+
+
+### LONG-003 — Private Vault for sensitive or bulky personal media
+Status: `HOLD`
+
+Goal:
+- Provide a deliberately separate Lakomics library context for sensitive or large personal media that should not casually mix into the normal library experience.
+
+Storage / privacy direction:
+- Use a separate R2 bucket plus separate API/permission boundaries from the normal Lakomics replica; a folder prefix inside the normal bucket is not the preferred boundary.
+- Keep Vault media out of normal Home, Revisit, search, statistics, and ordinary Mobile surfaces unless the Vault context is explicitly unlocked.
+- Consider client-side authenticated encryption for originals, thumbnails/previews, and sensitive metadata, with the master secret kept in OS/Android secure storage rather than on the VPS/R2 side.
+- For large video, investigate independently authenticated chunks plus prefetch/local cache so seeking and streaming remain practical; measure the real overhead before locking the format.
+
+Capture / retention direction:
+- Unify X donut Vault saves, supported browser-site capture, and local-file import behind one Vault Capture pipeline instead of creating source-specific libraries.
+- Preserve source/provenance metadata while keeping source type (`x`, `web`, `local`, etc.) as metadata rather than a browsing silo.
+- Add a Vault Inbox / temporary-retention concept so newly collected media can be reviewed before becoming permanent; initially surface cleanup candidates rather than silently auto-deleting them.
+- The AV work/cover-set model from LONG-001 may live inside the Vault when desired, but AV presentation and Vault privacy are separate concerns and should not be hard-coupled.
 
 ### LONG-004 — Display / shelf mode
 Status: `HOLD`
@@ -734,16 +783,19 @@ CLOUD-006 is complete and no longer blocks the PC roadmap. Mobile Home/viewer/pr
 
 PC Core Polish Pass 1 runtime gate is complete: BUG-009, BUG-010, BUG-011, and UI-008 all passed real Tauri verification.
 
-1. PERF-001 Phase B — measured cache/media/runtime work: repeat decode, thumbnail/preview bounds, video derivative reuse, cold/warm navigation, and storage growth
-2. BUG-003 — historical X video drag-save blue native-selection artifact, if still reproducible
-3. UI-009 — VCK-inspired manga viewer parity improvements
-4. EXT-003 — same-X-post media grouping
-5. EXT-004 — adaptive/hidden secondary donut tags
-6. OPS-001 — backup/migration/settings portability
-7. CATALOG-003 — Japanese-language catalog ingestion/filter on the verified CATALOG-001 transport
-8. CATALOG-004 — advanced VCK-style catalog search syntax
-9. P3 feature expansion — NOTE-001 first, then STATS-001 / IDEA-001 according to actual use
+1. PERF-001 Phase B — measured cache/media/runtime work: repeat decode, thumbnail/preview bounds, video derivative reuse, cold/warm navigation, and storage growth; include the measurements needed to diagnose BUG-012 and choose UI-010 preview derivatives safely
+2. BUG-012 — stabilize Asset Repository scrollbar/thumb behavior during long virtualized scrolling
+3. UI-010 — richer image-like video previews without regressing selection/drag behavior or eagerly decoding full originals
+4. BUG-003 — historical X video drag-save blue native-selection artifact, if still reproducible
+5. UI-009 — VCK-inspired manga viewer parity improvements
+6. EXT-003 — same-X-post media grouping
+7. EXT-004 — adaptive/hidden secondary donut tags
+8. OPS-001 — backup/migration/settings portability
+9. CATALOG-003 — Japanese-language catalog ingestion/filter on the verified CATALOG-001 transport
+10. CATALOG-004 — advanced VCK-style catalog search syntax
+11. P3 feature expansion — NOTE-001 first, then STATS-001 / IDEA-001 according to actual use
 
 Conditional work:
 - CLOUD-003 stays deferred unless real long-video Capture use reproduces the request-window race.
 - CATALOG-002 remains a later provider/coexistence strategy and should not block the current k-hentai/VCK catalog path.
+- LONG-001's AV work/full cover-set presentation and LONG-003's Private Vault are retained design directions; they should not interrupt the current PC polish sequence unless explicitly reprioritized.
