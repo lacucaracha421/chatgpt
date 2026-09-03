@@ -950,9 +950,9 @@ CLOUD-006 is complete and no longer blocks the PC roadmap. Mobile Home/viewer/pr
 
 PC Core Polish Pass 1 runtime gate is complete: BUG-009, BUG-010, BUG-011, and UI-008 all passed real Tauri verification.
 
-1. BUG-012 runtime verification — confirm the scroll-anchor mitigation on a long real Asset Repository session; close if the original jump is gone
-2. PERF-003 Phase B — reuse existing Lakomics assets/derivatives for Collection artwork where safe; Phase A unchanged-source reopen fast path is implemented
-3. MANGA-001 fallback phase — exact-active recovery is implemented; resolve 7 historical/expunged and 17 fallback rows through targeted lookup/review
+1. BUG-012 scroll-anchor follow-up — `scrollbar-gutter: stable` added plus row prefix-stability coverage; still `VERIFY` until a long real Tauri scroll passes the 5-item manual checklist
+2. PERF-003 Phase B — existing-asset hardlink reuse for Collection artwork is implemented; remaining: stage timings instrumentation and provider identity audit
+3. MANGA-001 fallback phase — lineage suggestions, ranked fallback candidates, and explicit selection apply are implemented; remaining: VPS-backed targeted lookup for absent IDs (needs network) and selected-backup ingestion only if DB metadata proves insufficient
 4. PERF-001 continuation — measure remaining preview/cache/runtime bounds after the thumbnail-storage and cloud-thumbnail refresh work
 5. BUG-003 — historical X video drag-save blue native-selection artifact, if still reproducible
 6. UI-009 — VCK-inspired manga viewer parity improvements
