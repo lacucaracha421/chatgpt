@@ -391,6 +391,64 @@ Direction:
 - Keep provider transport concerns separate from query parsing.
 - Follow-up candidates after the core grammar is stable: favorite tags, always-excluded tags, and contextual autocomplete counts based on the current query.
 
+### MANGA-001 — Recover orphaned local manga into online catalog bookmarks
+Status: `TODO`
+
+Problem:
+- Local manga source files can disappear while `manga_series` metadata still survives in `library.sqlite` and metadata backups.
+- The current scanner hard-deletes DB rows for paths not seen under a valid manga root, so pointing Lakomics at a new/empty root before recovery can destroy the remaining metadata index.
+- Manga Browser loads cached series and then automatically starts a refresh scan whenever a manga root is configured.
+
+2026-09-03 read-only live-library audit:
+- The current DB still contains 243 `manga_series` rows even though the configured manga root no longer exists; no original series folders or `.lakomics-thumbs` survive.
+- 232 rows have a numeric `gallery_id`.
+- 226 / 232 `gallery_id` values match the current kHentai catalog `Works.Id` directly.
+- Of those 226 direct matches, 219 are active (`Expunged = 0`) and 7 are historical/expunged rows. Normal catalog browsing excludes expunged works, so those 7 must not be silently bookmarked into an invisible state.
+- Checking `CurrentGid`, `FirstGid`, and `ParentGid` adds no extra coverage for the six `gallery_id` values absent from the local catalog.
+- 6 rows have a `gallery_id` that is absent from the local catalog and 11 rows have no usable `gallery_id`, leaving 17 fallback cases.
+- The current kHentai bookmark table has 32 bookmarks; none of the 226 direct local matches are already bookmarked.
+- All inspected daily/manual/pre-migration metadata snapshots retain the same 243 total rows / 232 rows with `gallery_id`, so recovery can read backup snapshots without replacing the current DB.
+- No local cover thumbnails remain for this incident. Image/pHash matching is an optional future signal only when an image actually survives; it is not the primary recovery path here.
+
+Goal:
+- Convert orphaned local manga records into catalog bookmarks/links without requiring the lost originals or restoring an old database wholesale.
+- Keep the process non-destructive, explain every non-exact match, and retain enough mapping/audit state to rerun or undo the migration safely.
+
+Safety / preservation:
+- Read recovery candidates from the current `manga_series` table and, when needed, selected metadata backup snapshots in read-only mode. Never require a full DB restore just to recover manga metadata.
+- Add orphan-safe scan behavior before or together with this feature: missing series should become soft-orphaned, require explicit deletion, or trigger a large-deletion safety gate instead of being hard-deleted silently.
+- Do not require changing the current manga root or forcing a successful rescan before recovery.
+- Always provide a dry-run/preview before bookmark writes. Apply writes transactionally and idempotently.
+- Keep orphaned local metadata after bookmark conversion unless the user explicitly chooses a later archive/removal action.
+
+Matching tiers:
+1. Exact active identity: `gallery_id -> (provider=kHentai, Works.Id)` with `Expunged = 0`. Auto-match and make these bulk-selectable for bookmark creation.
+2. Exact historical identity: the ID exists but is expunged. Preserve it as a historical exact match, then search for an active replacement/edition using provider lineage plus metadata; otherwise require review. Do not silently create a bookmark that normal catalog browsing cannot show.
+3. ID absent from the local catalog: perform a narrow provider lookup/backfill by exact ID and/or targeted title/artist query through the existing Japanese VPS boundary. If found, import only the required candidate(s) rather than requiring a broad catalog rebuild.
+4. No usable ID: generate candidates from normalized title, artist tags, page count, and surviving `relative_path`/source text. Require multiple independent signals for automatic confidence; title similarity alone must never auto-confirm.
+- Empirical calibration from the 226 known local-to-catalog pairs: page count is exactly equal in 194 cases and within ±2 in 197; at least one local author matches a catalog `artist` tag in 192; raw title similarity has only about a 0.70 median because translations/formatting differ. Weight matching accordingly.
+- In the current 17 fallback cases, artist + page-count filtering produces a unique local-catalog candidate for only a small minority, so ambiguous rows must remain reviewable rather than being forced.
+- Persist provider-namespaced identity `(provider, work_id)` rather than assuming every future catalog uses the same numeric ID; stay compatible with later CATALOG-002 work.
+
+Review / apply UX:
+- Result buckets: `exact active`, `historical/expunged`, `high-confidence candidate`, `multiple candidates`, and `not found`.
+- For each candidate, show the surviving local title/author/page count/gallery ID beside the catalog title/artist/page count and the reasons for the match.
+- Bulk-apply only exact-active matches by default. Heuristic matches require explicit approval.
+- Reuse the existing catalog bookmark contract, but persist a recovery link/audit record (for example: local manga ID, source snapshot/current DB, provider, work ID, match method, confidence, created time) so the mapping is explainable and reversible.
+- Re-running the recovery must not duplicate bookmarks or links, and undo must only remove relationships/bookmarks created by this migration rather than pre-existing user bookmarks.
+
+Acceptance target:
+- Against the 2026-09-03 live-library checkpoint, dry-run classifies 219 active exact matches automatically, separates the 7 expunged exact matches, and leaves the 17 fallback rows for targeted lookup/review without mutating current data.
+- Applying the exact-active batch creates the missing bookmarks without duplicates and is safe to rerun.
+- Recovery works with no original manga files and no surviving cover thumbnails.
+- Backup snapshots are read without replacing `library.sqlite`.
+- A future manga-root change/rescan cannot silently purge orphan metadata that has not been recovered or explicitly discarded.
+
+Relationship to catalog work:
+- CATALOG-003 may improve fallback coverage by adding Japanese-language originals, but MANGA-001 should not wait for broad Japanese ingestion to recover the 219 exact active Korean-catalog matches.
+- Targeted remote fallback must reuse the CATALOG-001 Japanese VPS boundary rather than reintroducing fragile direct PC access to k-hentai.
+- CATALOG-004's future `id:` syntax can reuse the same identity lookup logic, but the recovery pipeline should not depend on the full query-language feature.
+
 ### UI-009 — VCK-inspired manga viewer parity improvements
 Status: `TODO`
 
@@ -791,6 +849,7 @@ Use these prefixes:
 - `CLOUD-UI-xxx`: cloud visibility/status UX
 - `CATALOG-xxx`: online catalog/provider work
 - `EXT-xxx`: browser extension work
+- `MANGA-xxx`: local manga indexing/recovery/migration work
 - `PERF-xxx`: performance/cache/state work
 - `OPS-xxx`: backup/migration/operational portability
 - `NOTE-xxx`: notes feature
@@ -815,14 +874,15 @@ PC Core Polish Pass 1 runtime gate is complete: BUG-009, BUG-010, BUG-011, and U
 2. BUG-012 — stabilize Asset Repository scrollbar/thumb behavior during long virtualized scrolling
 3. UI-010 — richer image-like video previews without regressing selection/drag behavior or eagerly decoding full originals
 4. PERF-003 — make Collection artwork import/reopen and existing-asset reuse fast, avoiding redundant scans, copies, decodes, and thumbnail work
-5. BUG-003 — historical X video drag-save blue native-selection artifact, if still reproducible
-6. UI-009 — VCK-inspired manga viewer parity improvements
-7. EXT-003 — same-X-post media grouping
-8. EXT-004 — adaptive/hidden secondary donut tags
-9. OPS-001 — backup/migration/settings portability
-10. CATALOG-003 — Japanese-language catalog ingestion/filter on the verified CATALOG-001 transport
-11. CATALOG-004 — advanced VCK-style catalog search syntax
-12. P3 feature expansion — NOTE-001 first, then STATS-001 / IDEA-001 according to actual use
+5. MANGA-001 — preserve orphaned local manga metadata and migrate recoverable works into catalog bookmarks with exact-ID-first matching and review for the remainder
+6. BUG-003 — historical X video drag-save blue native-selection artifact, if still reproducible
+7. UI-009 — VCK-inspired manga viewer parity improvements
+8. EXT-003 — same-X-post media grouping
+9. EXT-004 — adaptive/hidden secondary donut tags
+10. OPS-001 — backup/migration/settings portability
+11. CATALOG-003 — Japanese-language catalog ingestion/filter on the verified CATALOG-001 transport
+12. CATALOG-004 — advanced VCK-style catalog search syntax
+13. P3 feature expansion — NOTE-001 first, then STATS-001 / IDEA-001 according to actual use
 
 Conditional work:
 - CLOUD-003 stays deferred unless real long-video Capture use reproduces the request-window race.
