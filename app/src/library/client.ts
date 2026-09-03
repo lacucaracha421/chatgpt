@@ -44,6 +44,8 @@ import type {
   TmdbMoviePreview,
   TmdbSearchResult,
   MangaSeries,
+  MangaCatalogRecoveryApplyResult,
+  MangaCatalogRecoveryPreview,
   MetadataBackup,
   MetadataImportPlan,
   PurgeSummary,
@@ -295,6 +297,10 @@ export const libraryGateway: LibraryGateway = {
   setMangaRoot: (path) => invoke("set_manga_root", { path }),
   scanManga: () => invoke<number>("scan_manga"),
   listMangaSeries: () => invoke<MangaSeries[]>("list_manga_series"),
+  previewMangaCatalogRecovery: () =>
+    invoke<MangaCatalogRecoveryPreview>("preview_manga_catalog_recovery"),
+  applyMangaCatalogRecovery: () =>
+    invoke<MangaCatalogRecoveryApplyResult>("apply_manga_catalog_recovery"),
   inspectBookImport: (root) => invoke<BookImportPlan>("inspect_book_import", { root }),
   importBookCollections: (root) => invoke<BookMigrationReport>("import_book_collections", { root }),
   inspectLegacyPackageMigration: (input) =>

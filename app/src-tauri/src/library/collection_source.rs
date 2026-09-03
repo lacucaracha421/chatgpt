@@ -219,6 +219,37 @@ fn naturally_sorted_images(directory: &Path) -> Result<Vec<PathBuf>, LibraryErro
     Ok(images)
 }
 
+fn source_metadata_stamp(path: &Path) -> u128 {
+    let Ok(metadata) = fs::metadata(path) else {
+        return 0;
+    };
+    let modified = metadata
+        .modified()
+        .ok()
+        .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+        .map(|value| value.as_nanos())
+        .unwrap_or_default();
+    modified ^ ((metadata.len() as u128) << 64)
+}
+
+fn collection_artwork_source_signature(collection_dir: &Path, collection_type: &str) -> u128 {
+    let secondary = if collection_type == "game" {
+        ARTWORKS_DIR
+    } else {
+        BACKDROPS_DIR
+    };
+    [
+        collection_dir.to_path_buf(),
+        collection_dir.join("info.txt"),
+        collection_dir.join(COVERS_DIR),
+        collection_dir.join(secondary),
+    ]
+    .into_iter()
+    .fold(0u128, |signature, path| {
+        signature.rotate_left(23) ^ source_metadata_stamp(&path)
+    })
+}
+
 fn source_preview_path(collection_dir: &Path) -> Result<PathBuf, LibraryError> {
     if let Some(cover) = info_cover(collection_dir)? {
         return Ok(cover);
@@ -354,6 +385,21 @@ impl Library {
             return Ok(0);
         }
 
+        let source_signature =
+            collection_artwork_source_signature(&collection_dir, &collection_type);
+        {
+            let cache = self
+                .collection_artwork_scan_cache
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if cache
+                .get(collection_id)
+                .is_some_and(|cached| *cached == source_signature)
+            {
+                return Ok(0);
+            }
+        }
+
         let mut imported = 0u64;
         let preferred_cover = info_cover(&collection_dir)?;
         // covers가 비면 루트의 thumbnail.*을 표지 대용으로 쓴다.
@@ -387,6 +433,10 @@ impl Library {
             secondary_dir,
             None,
         )?;
+        self.collection_artwork_scan_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(collection_id.to_owned(), source_signature);
         Ok(imported)
     }
 
@@ -858,6 +908,16 @@ mod tests {
             .import_local_collection_artworks(COLLECTION_ID)
             .unwrap();
         assert_eq!(again, 0);
+
+        write_png(
+            &collection_dir.join(COVERS_DIR).join("poster_c.png"),
+            800,
+            1200,
+        );
+        let after_source_change = library
+            .import_local_collection_artworks(COLLECTION_ID)
+            .unwrap();
+        assert_eq!(after_source_change, 1);
     }
 
     #[test]

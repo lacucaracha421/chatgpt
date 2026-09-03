@@ -1148,6 +1148,49 @@ pub struct MangaSeries {
     pub page_count: u64,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MangaCatalogRecoveryStatus {
+    ExactActive,
+    Historical,
+    Fallback,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MangaCatalogRecoveryItem {
+    pub manga_id: String,
+    pub title: String,
+    pub author: String,
+    pub gallery_id: Option<String>,
+    pub page_count: u64,
+    pub status: MangaCatalogRecoveryStatus,
+    pub work_id: Option<u64>,
+    pub catalog_title: Option<String>,
+    pub catalog_title_jpn: Option<String>,
+    pub catalog_file_count: Option<u64>,
+    pub bookmarked: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MangaCatalogRecoveryPreview {
+    pub total_count: u64,
+    pub exact_active_count: u64,
+    pub historical_count: u64,
+    pub fallback_count: u64,
+    pub already_bookmarked_count: u64,
+    pub items: Vec<MangaCatalogRecoveryItem>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MangaCatalogRecoveryApplyResult {
+    pub matched_count: u64,
+    pub created_bookmarks: u64,
+    pub existing_bookmarks: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

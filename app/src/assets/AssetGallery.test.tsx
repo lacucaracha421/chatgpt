@@ -328,32 +328,26 @@ describe("AssetGallery", () => {
 
   it("keeps only one video hover preview active", async () => {
     vi.useFakeTimers();
-    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
-    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
-    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined);
     render(<AssetGallery items={[videoAsset(0), videoAsset(1)]} />);
     const first = screen.getByRole("option", { name: "video-0.webm" }).querySelector(".video-tile")!;
     const second = screen.getByRole("option", { name: "video-1.webm" }).querySelector(".video-tile")!;
     fireEvent.pointerEnter(first);
     act(() => vi.advanceTimersByTime(200));
-    expect(screen.getByLabelText("video-0.webm 미리보기")).toBeInTheDocument();
+    expect(first.querySelector("img")).toHaveAttribute("src", expect.stringContaining("/scrub-frame/video-0/"));
     fireEvent.pointerEnter(second);
     act(() => vi.advanceTimersByTime(200));
-    expect(screen.queryByLabelText("video-0.webm 미리보기")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("video-1.webm 미리보기")).toBeInTheDocument();
+    expect(first.querySelector("img")).toHaveAttribute("src", "http://lakomics.localhost/thumbnail/video-0");
+    expect(second.querySelector("img")).toHaveAttribute("src", expect.stringContaining("/scrub-frame/video-1/"));
   });
 
   it("keeps active video preview clicks routed to normal tile selection", async () => {
     vi.useFakeTimers();
-    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
-    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
-    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined);
     const onSelectionGesture = vi.fn();
     render(<AssetGallery items={[videoAsset(0)]} onSelectionGesture={onSelectionGesture} />);
     const tile = screen.getByRole("option", { name: "video-0.webm" });
     fireEvent.pointerEnter(tile.querySelector(".video-tile")!);
     act(() => vi.advanceTimersByTime(200));
-    const preview = screen.getByLabelText("video-0.webm 미리보기");
+    const preview = tile.querySelector("img")!;
     expect(preview).toHaveAttribute("draggable", "false");
     fireEvent.click(preview, { ctrlKey: true });
     expect(onSelectionGesture).toHaveBeenCalledWith(expect.objectContaining({ id: "video-0" }), { toggle: true, range: false });

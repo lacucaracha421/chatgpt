@@ -25,8 +25,9 @@ use crate::{
             CatalogWorkDetail, ClassificationEntry, CollectionCover, CollectionSummary,
             CollectionVolume, CreateAlbum, CreateClassification, CreateCollection,
             IngestMediaRequest, IngestOutcome, LibrarySummary, MangaDexApplyRequest,
-            MangaDexConnection, MangaDexSearchResult, MangaDexVolumeSyncResult,
-            MangaDexWorkPreview, MangaSeries, MetadataBackup, PurgeSummary, ReleaseWatchEvent,
+            MangaCatalogRecoveryApplyResult, MangaCatalogRecoveryPreview, MangaDexConnection,
+            MangaDexSearchResult, MangaDexVolumeSyncResult, MangaDexWorkPreview, MangaSeries,
+            MetadataBackup, PurgeSummary, ReleaseWatchEvent,
             ReleaseWatchRunResult, ReleaseWatchRunStopReason, ReleaseWatchStatus, RemoteProvider,
             RemoteReadingProgress, ResolvedGallery, SetAssetClassification,
             SimilarityDecisionRequest, SimilarityIndexProgress, SimilarityReviewPage, TrashPage,
@@ -1372,6 +1373,28 @@ pub async fn scan_manga(state: State<'_, AppState>) -> Result<u64, CommandError>
 pub fn list_manga_series(state: State<'_, AppState>) -> Result<Vec<MangaSeries>, CommandError> {
     let library = current_required(state)?;
     library.list_manga_series().map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn preview_manga_catalog_recovery(
+    state: State<'_, AppState>,
+) -> Result<MangaCatalogRecoveryPreview, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.preview_manga_catalog_recovery())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn apply_manga_catalog_recovery(
+    state: State<'_, AppState>,
+) -> Result<MangaCatalogRecoveryApplyResult, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.apply_manga_catalog_recovery())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]

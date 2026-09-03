@@ -85,6 +85,46 @@ describe("MangaBrowser", () => {
     expect(onOpenSeries).toHaveBeenCalledWith(series[0]);
   });
 
+  it("previews exact catalog recovery and applies only pending exact bookmarks", async () => {
+    const gateway = createGateway({ root: "C:\\manga", series });
+    const firstPreview = {
+      totalCount: 4,
+      exactActiveCount: 2,
+      historicalCount: 1,
+      fallbackCount: 1,
+      alreadyBookmarkedCount: 1,
+      items: [
+        { mangaId: "m1", title: "A", author: "a", galleryId: "10", pageCount: 20, status: "exact_active" as const, workId: 10, catalogTitle: "A", catalogTitleJpn: null, catalogFileCount: 20, bookmarked: false },
+        { mangaId: "m2", title: "B", author: "b", galleryId: "12", pageCount: 22, status: "exact_active" as const, workId: 12, catalogTitle: "B", catalogTitleJpn: null, catalogFileCount: 22, bookmarked: true },
+        { mangaId: "m3", title: "C", author: "c", galleryId: "11", pageCount: 21, status: "historical" as const, workId: 11, catalogTitle: "C", catalogTitleJpn: null, catalogFileCount: 21, bookmarked: false },
+        { mangaId: "m4", title: "D", author: "d", galleryId: null, pageCount: 23, status: "fallback" as const, workId: null, catalogTitle: null, catalogTitleJpn: null, catalogFileCount: null, bookmarked: false },
+      ],
+    };
+    const finalPreview = { ...firstPreview, alreadyBookmarkedCount: 2, items: firstPreview.items.map((item) => item.status === "exact_active" ? { ...item, bookmarked: true } : item) };
+    gateway.previewMangaCatalogRecovery = vi.fn()
+      .mockResolvedValueOnce(firstPreview)
+      .mockResolvedValueOnce(finalPreview);
+    gateway.applyMangaCatalogRecovery = vi.fn().mockResolvedValue({
+      matchedCount: 2,
+      createdBookmarks: 1,
+      existingBookmarks: 1,
+    });
+
+    render(<LibraryProvider gateway={gateway}><MangaBrowser /></LibraryProvider>);
+    await screen.findByText("T1");
+    await userEvent.click(screen.getByRole("button", { name: "카탈로그로 복구" }));
+
+    expect(await screen.findByRole("region", { name: "카탈로그 복구 미리보기" })).toBeVisible();
+    expect(screen.getByText("정확한 현행 작품 2개")).toBeVisible();
+    expect(screen.getByText("과거/삭제 작품 1개")).toBeVisible();
+    expect(screen.getByText("검토 필요 1개")).toBeVisible();
+
+    await userEvent.click(screen.getByRole("button", { name: "확정 1개 북마크 등록" }));
+    await waitFor(() => expect(gateway.applyMangaCatalogRecovery).toHaveBeenCalledOnce());
+    await waitFor(() => expect(gateway.previewMangaCatalogRecovery).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole("button", { name: "확정 0개 북마크 등록" })).toBeDisabled();
+  });
+
   it("switches between local and online manga sources", async () => {
     const gateway = createGateway({ root: "C:\\manga", series });
     gateway.getOnlineCatalogStatus = vi.fn().mockResolvedValue({

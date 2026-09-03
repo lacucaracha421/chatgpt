@@ -1,6 +1,5 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { StrictMode } from "react";
 import type { AssetSummary } from "../library/types";
 import { VideoTileMedia } from "./VideoTileMedia";
 
@@ -12,26 +11,30 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
-it("attaches muted playback after 200ms and fully cleans it up", () => {
+it("uses prepared frames on hover and delays full playback until timeline interaction", () => {
   const request = vi.fn();
   const release = vi.fn();
   const { container, rerender } = render(<VideoTileMedia asset={video()} active={false} onRequestActive={request} onReleaseActive={release} onRetry={vi.fn()} />);
   fireEvent.pointerEnter(container.querySelector(".video-tile")!);
-  vi.advanceTimersByTime(199);
+  vi.advanceTimersByTime(159);
   expect(request).not.toHaveBeenCalled();
   vi.advanceTimersByTime(1);
   expect(request).toHaveBeenCalledOnce();
 
   rerender(<VideoTileMedia asset={video()} active onRequestActive={request} onReleaseActive={release} onRetry={vi.fn()} />);
-  const media = screen.getByLabelText("clip.webm 미리보기") as HTMLVideoElement;
+  expect(container.querySelector("video")).toBeNull();
+  expect(screen.getByRole("img", { name: "clip.webm" })).toHaveAttribute("src", expect.stringContaining("/scrub-frame/video-1/1"));
+  act(() => vi.advanceTimersByTime(720));
+  expect(screen.getByRole("img", { name: "clip.webm" })).toHaveAttribute("src", expect.stringContaining("/scrub-frame/video-1/3"));
+
+  const slider = container.querySelector(".video-tile__scrub") as HTMLDivElement;
+  vi.spyOn(slider, "getBoundingClientRect").mockReturnValue({ left: 0, width: 100, top: 0, right: 100, bottom: 6, height: 6, x: 0, y: 0, toJSON: () => ({}) });
+  fireEvent.pointerDown(slider, { pointerId: 1, clientX: 50 });
+  const media = container.querySelector("video") as HTMLVideoElement;
   expect(media.muted).toBe(true);
   expect(media.play).toHaveBeenCalledOnce();
   fireEvent.pointerLeave(container.querySelector(".video-tile")!);
   expect(release).toHaveBeenCalledOnce();
-  rerender(<VideoTileMedia asset={video()} active={false} onRequestActive={request} onReleaseActive={release} onRetry={vi.fn()} />);
-  expect(media.pause).toHaveBeenCalledOnce();
-  expect(media.load).toHaveBeenCalledOnce();
-  expect(media.getAttribute("src")).toBeNull();
 });
 
 it("decodes the still thumbnail asynchronously", () => {
@@ -76,18 +79,21 @@ it("scrub only follows the pointer while the handle is held", () => {
 });
 
 it("reflects playback position in the scrub control while playing", () => {
-  render(<VideoTileMedia asset={video()} active onRequestActive={vi.fn()} onReleaseActive={vi.fn()} onRetry={vi.fn()} />);
-  const media = screen.getByLabelText("clip.webm 미리보기");
+  const { container } = render(<VideoTileMedia asset={video()} active onRequestActive={vi.fn()} onReleaseActive={vi.fn()} onRetry={vi.fn()} />);
+  const slider = container.querySelector(".video-tile__scrub") as HTMLDivElement;
+  fireEvent.keyDown(slider, { key: "ArrowRight" });
+  const media = container.querySelector("video") as HTMLVideoElement;
   Object.defineProperty(media, "currentTime", { value: 2.5, writable: true, configurable: true });
+  fireEvent.seeked(media);
   fireEvent(media, new Event("timeupdate"));
-  const slider = screen.getByRole("slider", { name: "영상 탐색" });
   expect(slider).toHaveAttribute("aria-valuenow", "2500");
   expect(slider.querySelector(".video-tile__scrub-fill")).toHaveAttribute("style", "width: 25%;");
 });
 
-it("keeps active playback attached across StrictMode effect checks", () => {
-  render(<StrictMode><VideoTileMedia asset={video()} active onRequestActive={vi.fn()} onReleaseActive={vi.fn()} onRetry={vi.fn()} /></StrictMode>);
-  expect(screen.getByLabelText("clip.webm 미리보기")).toHaveAttribute("src", "http://lakomics.localhost/playback/video-1");
+it("does not attach the original video merely because a tile is active", () => {
+  const { container } = render(<VideoTileMedia asset={video()} active onRequestActive={vi.fn()} onReleaseActive={vi.fn()} onRetry={vi.fn()} />);
+  expect(container.querySelector("video")).toBeNull();
+  expect(screen.getByRole("img", { name: "clip.webm" })).toHaveAttribute("src", expect.stringContaining("/scrub-frame/video-1/1"));
 });
 
 it("renders pending and failed states with a retry action", () => {
@@ -111,12 +117,12 @@ function video(state: "pending" | "processing" | "ready" | "failed" = "ready"): 
 
 it("seeks the scrub slider by keyboard in five-second steps and clamps endpoints", () => {
   const request = vi.fn();
-  render(<VideoTileMedia asset={video()} active onRequestActive={request} onReleaseActive={vi.fn()} onRetry={vi.fn()} />);
-  const slider = screen.getByRole("slider", { name: "영상 탐색" });
-  const media = screen.getByLabelText("clip.webm 미리보기") as HTMLVideoElement;
+  const { container } = render(<VideoTileMedia asset={video()} active onRequestActive={request} onReleaseActive={vi.fn()} onRetry={vi.fn()} />);
+  const slider = container.querySelector(".video-tile__scrub") as HTMLDivElement;
 
   expect(slider).toHaveAttribute("tabindex", "0");
   fireEvent.keyDown(slider, { key: "ArrowRight" });
+  const media = container.querySelector("video") as HTMLVideoElement;
   expect(slider).toHaveAttribute("aria-valuenow", "5000");
   act(() => vi.advanceTimersByTime(120));
   expect(media.currentTime).toBe(5);
@@ -125,7 +131,6 @@ it("seeks the scrub slider by keyboard in five-second steps and clamps endpoints
   expect(slider).toHaveAttribute("aria-valuenow", "10000");
   fireEvent.keyDown(slider, { key: "ArrowRight" });
   expect(slider).toHaveAttribute("aria-valuenow", "10000");
-
   fireEvent.keyDown(slider, { key: "Home" });
   fireEvent.keyDown(slider, { key: "ArrowLeft" });
   expect(slider).toHaveAttribute("aria-valuenow", "0");

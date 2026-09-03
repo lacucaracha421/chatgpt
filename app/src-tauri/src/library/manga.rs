@@ -6,7 +6,10 @@ use std::{
 use rusqlite::OptionalExtension;
 
 use super::error::LibraryError;
-use super::models::MangaSeries;
+use super::models::{
+    MangaCatalogRecoveryApplyResult, MangaCatalogRecoveryItem, MangaCatalogRecoveryPreview,
+    MangaCatalogRecoveryStatus, MangaSeries,
+};
 use super::Library;
 
 const THUMB_DIR: &str = ".lakomics-thumbs";
@@ -71,7 +74,6 @@ where
     })?;
 
     let mut changed: u64 = 0;
-    let mut seen_paths: Vec<String> = Vec::new();
     let entries = fs::read_dir(&root_path).map_err(|source| LibraryError::ReadMedia {
         path: root_path.clone(),
         source,
@@ -84,7 +86,6 @@ where
         if folder_name == THUMB_DIR {
             continue;
         }
-        seen_paths.push(folder_name.clone());
         if scan_series_folder(
             library,
             &root_path,
@@ -95,20 +96,9 @@ where
             changed += 1;
         }
     }
-    // 삭제된 폴더 정리: DB에 있지만 이번 스캔에서 못 본 시리즈는 제거
-    let connection = library.connection()?;
-    let mut statement = connection.prepare("SELECT relative_path FROM manga_series")?;
-    let db_paths: Vec<String> = statement
-        .query_map([], |row| row.get(0))?
-        .collect::<Result<_, _>>()?;
-    for db_path in db_paths {
-        if !seen_paths.contains(&db_path) {
-            connection.execute(
-                "DELETE FROM manga_series WHERE relative_path = ?1",
-                [&db_path],
-            )?;
-        }
-    }
+    // Missing folders are retained as soft-orphaned metadata. A root can move or disappear,
+    // and the index may be the only surviving record needed for catalog recovery.
+    // Explicit cleanup belongs to a separate user action instead of scan-time deletion.
     Ok(changed)
 }
 
@@ -290,6 +280,135 @@ fn create_thumbnail(source: &Path, target: &Path) -> Result<(), LibraryError> {
         .map_err(|_| LibraryError::UnsupportedImage)
 }
 
+pub(crate) fn preview_catalog_recovery(
+    library: &Library,
+) -> Result<MangaCatalogRecoveryPreview, LibraryError> {
+    let catalog_path = library.root().join("catalogs/kdata.db");
+    if !catalog_path.exists() {
+        return Err(LibraryError::OnlineCatalogNotInstalled);
+    }
+    let connection = library.connection()?;
+    connection.execute(
+        "ATTACH DATABASE ?1 AS catalog",
+        [catalog_path.to_string_lossy().as_ref()],
+    )?;
+    let provider = super::catalog_provider::LEGACY_VCK_PROVIDER;
+    let mut statement = connection.prepare(
+        "SELECT m.id, m.title, m.author, m.gallery_id, m.page_count,
+                w.Id, w.Title, w.TitleJpn, w.FileCount, w.Expunged,
+                EXISTS(SELECT 1 FROM online_catalog_bookmarks AS bookmark
+                       WHERE bookmark.provider = ?1 AND bookmark.work_id = CAST(w.Id AS TEXT))
+         FROM manga_series AS m
+         LEFT JOIN catalog.Works AS w ON w.Id = CAST(m.gallery_id AS INTEGER)
+         ORDER BY m.title COLLATE NOCASE, m.id",
+    )?;
+    let rows = statement.query_map([provider], |row| {
+        let work_id = row.get::<_, Option<i64>>(5)?;
+        let expunged = row.get::<_, Option<i64>>(9)?.unwrap_or_default() != 0;
+        let status = match (work_id, expunged) {
+            (Some(_), false) => MangaCatalogRecoveryStatus::ExactActive,
+            (Some(_), true) => MangaCatalogRecoveryStatus::Historical,
+            (None, _) => MangaCatalogRecoveryStatus::Fallback,
+        };
+        Ok(MangaCatalogRecoveryItem {
+            manga_id: row.get(0)?,
+            title: row.get(1)?,
+            author: row.get(2)?,
+            gallery_id: row.get(3)?,
+            page_count: row.get::<_, i64>(4)?.max(0) as u64,
+            status,
+            work_id: work_id.and_then(|value| u64::try_from(value).ok()),
+            catalog_title: row.get(6)?,
+            catalog_title_jpn: row.get(7)?,
+            catalog_file_count: row
+                .get::<_, Option<i64>>(8)?
+                .map(|value| value.max(0) as u64),
+            bookmarked: row.get::<_, i64>(10)? != 0,
+        })
+    })?;
+    let items = rows.collect::<Result<Vec<_>, _>>()?;
+    Ok(MangaCatalogRecoveryPreview {
+        total_count: items.len() as u64,
+        exact_active_count: items
+            .iter()
+            .filter(|item| item.status == MangaCatalogRecoveryStatus::ExactActive)
+            .count() as u64,
+        historical_count: items
+            .iter()
+            .filter(|item| item.status == MangaCatalogRecoveryStatus::Historical)
+            .count() as u64,
+        fallback_count: items
+            .iter()
+            .filter(|item| item.status == MangaCatalogRecoveryStatus::Fallback)
+            .count() as u64,
+        already_bookmarked_count: items.iter().filter(|item| item.bookmarked).count() as u64,
+        items,
+    })
+}
+
+pub(crate) fn apply_exact_catalog_recovery(
+    library: &Library,
+) -> Result<MangaCatalogRecoveryApplyResult, LibraryError> {
+    let catalog_path = library.root().join("catalogs/kdata.db");
+    if !catalog_path.exists() {
+        return Err(LibraryError::OnlineCatalogNotInstalled);
+    }
+    let mut connection = library.connection()?;
+    connection.execute(
+        "ATTACH DATABASE ?1 AS catalog",
+        [catalog_path.to_string_lossy().as_ref()],
+    )?;
+    let candidates = {
+        let mut statement = connection.prepare(
+            "SELECT m.id, w.Id FROM manga_series AS m
+             JOIN catalog.Works AS w ON w.Id = CAST(m.gallery_id AS INTEGER)
+             WHERE w.Expunged = 0 ORDER BY m.id",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+    let provider = super::catalog_provider::LEGACY_VCK_PROVIDER;
+    let now = chrono::Utc::now().to_rfc3339();
+    let transaction = connection.transaction()?;
+    let mut created_bookmarks = 0u64;
+    let mut existing_bookmarks = 0u64;
+    for (manga_id, work_id) in &candidates {
+        let work_id = work_id.to_string();
+        let already_bookmarked: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM online_catalog_bookmarks WHERE provider = ?1 AND work_id = ?2)",
+            rusqlite::params![provider, work_id], |row| row.get(0),
+        )?;
+        let inserted = if already_bookmarked {
+            existing_bookmarks += 1;
+            false
+        } else {
+            transaction.execute(
+                "INSERT INTO online_catalog_bookmarks (provider, work_id, created_at) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(provider, work_id) DO NOTHING",
+                rusqlite::params![provider, work_id, now],
+            )? > 0
+        };
+        if inserted {
+            created_bookmarks += 1;
+        }
+        transaction.execute(
+            "INSERT INTO manga_catalog_recovery_links
+                (manga_id, provider, work_id, match_method, bookmark_created, created_at)
+             VALUES (?1, ?2, ?3, 'exact_active', ?4, ?5)
+             ON CONFLICT(manga_id) DO NOTHING",
+            rusqlite::params![manga_id, provider, work_id, i64::from(inserted), now],
+        )?;
+    }
+    transaction.commit()?;
+    Ok(MangaCatalogRecoveryApplyResult {
+        matched_count: candidates.len() as u64,
+        created_bookmarks,
+        existing_bookmarks,
+    })
+}
+
 pub(crate) fn list_series(
     connection: &rusqlite::Connection,
 ) -> Result<Vec<MangaSeries>, LibraryError> {
@@ -316,6 +435,8 @@ pub(crate) fn list_series(
 #[cfg(test)]
 mod tests {
     use std::{fs, sync::mpsc, thread, time::Duration};
+
+    use rusqlite::Connection;
 
     use super::{list_page_files, parse_series_metadata, scan_with_thumbnail};
     use crate::library::{Library, LibraryError};
@@ -545,4 +666,130 @@ mod tests {
             .unwrap();
         assert_eq!(count, 0, "scan must abort instead of half-indexing on unexpected errors");
     }
+
+    #[test]
+    fn scan_preserves_series_whose_source_folder_disappeared() {
+        let temp = tempfile::tempdir().unwrap();
+        let manga_root = temp.path().join("manga");
+        let series = manga_root.join("series-a");
+        fs::create_dir_all(&series).unwrap();
+        fs::write(series.join("1.webp"), b"page").unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        library
+            .set_manga_root(Some(manga_root.to_string_lossy().as_ref()))
+            .unwrap();
+
+        scan_with_thumbnail(&library, |_, target| {
+            fs::write(target, b"thumbnail").unwrap();
+            Ok(())
+        })
+        .unwrap();
+        fs::remove_dir_all(&series).unwrap();
+
+        let changed = scan_with_thumbnail(&library, |_, target| {
+            fs::write(target, b"thumbnail").unwrap();
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(changed, 0);
+        let count: i64 = library
+            .connection()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM manga_series", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1, "missing source folders must not erase recovery metadata");
+    }
+
+    fn write_recovery_catalog(library: &Library) {
+        let catalogs = library.root().join("catalogs");
+        fs::create_dir_all(&catalogs).unwrap();
+        let catalog = Connection::open(catalogs.join("kdata.db")).unwrap();
+        catalog
+            .execute_batch(
+                r#"                CREATE TABLE Works (
+                    Id INTEGER PRIMARY KEY,
+                    Title TEXT NOT NULL DEFAULT '',
+                    TitleJpn TEXT,
+                    FileCount INTEGER NOT NULL DEFAULT 0,
+                    Expunged INTEGER NOT NULL DEFAULT 0
+                );
+                INSERT INTO Works (Id, Title, TitleJpn, FileCount, Expunged) VALUES
+                    (10, 'Active A', 'Active A JP', 20, 0),
+                    (11, 'Historical', NULL, 21, 1),
+                    (12, 'Active B', NULL, 22, 0);
+                "#,
+            )
+            .unwrap();
+    }
+
+    fn insert_recovery_manga(library: &Library, id: &str, gallery_id: &str, page_count: i64) {
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO manga_series
+                    (id, relative_path, title, author, gallery_id, page_count,
+                     thumbnail_relative_path, scanned_at, modified_at)
+                 VALUES (?1, ?2, ?3, 'artist', ?4, ?5, 'thumb.webp', 'now', 'now')",
+                rusqlite::params![id, format!("path-{id}"), format!("Title {id}"), gallery_id, page_count],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn catalog_recovery_preview_and_apply_are_idempotent() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        write_recovery_catalog(&library);
+        insert_recovery_manga(&library, "m-active-a", "10", 20);
+        insert_recovery_manga(&library, "m-historical", "11", 21);
+        insert_recovery_manga(&library, "m-active-b", "12", 22);
+        insert_recovery_manga(&library, "m-fallback", "999", 23);
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO online_catalog_bookmarks (provider, work_id, created_at)
+                 VALUES ('kHentai', '12', 'before-recovery')",
+                [],
+            )
+            .unwrap();
+
+        let preview = library.preview_manga_catalog_recovery().unwrap();
+        assert_eq!(preview.total_count, 4);
+        assert_eq!(preview.exact_active_count, 2);
+        assert_eq!(preview.historical_count, 1);
+        assert_eq!(preview.fallback_count, 1);
+        assert_eq!(preview.already_bookmarked_count, 1);
+
+        let first = library.apply_manga_catalog_recovery().unwrap();
+        assert_eq!(first.matched_count, 2);
+        assert_eq!(first.created_bookmarks, 1);
+        assert_eq!(first.existing_bookmarks, 1);
+
+        let second = library.apply_manga_catalog_recovery().unwrap();
+        assert_eq!(second.matched_count, 2);
+        assert_eq!(second.created_bookmarks, 0);
+        assert_eq!(second.existing_bookmarks, 2);
+
+        let connection = library.connection().unwrap();
+        let bookmark_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM online_catalog_bookmarks", [], |row| row.get(0))
+            .unwrap();
+        let link_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM manga_catalog_recovery_links", [], |row| row.get(0))
+            .unwrap();
+        let created_by_recovery: i64 = connection
+            .query_row(
+                "SELECT COALESCE(SUM(bookmark_created), 0) FROM manga_catalog_recovery_links",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(bookmark_count, 2);
+        assert_eq!(link_count, 2);
+        assert_eq!(created_by_recovery, 1);
+    }
+
 }

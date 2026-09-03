@@ -11,28 +11,52 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
   const videoRef = useRef<HTMLVideoElement>(null);
   const hoverTimer = useRef<number | null>(null);
   const seekTimer = useRef<number | null>(null);
+  const frameTimer = useRef<number | null>(null);
   const scrubbingRef = useRef(false);
   const [scrubbing, setScrubbing] = useState(false);
   const [previewRatio, setPreviewRatio] = useState<number | null>(null);
   const [playedRatio, setPlayedRatio] = useState(0);
+  const [hoverFrame, setHoverFrame] = useState<number | null>(null);
+  const [playbackRequested, setPlaybackRequested] = useState(false);
   const [videoDuration, setVideoDuration] = useState(asset.media.durationMs / 1_000);
   const clearTimers = () => {
     if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current);
     if (seekTimer.current !== null) window.clearTimeout(seekTimer.current);
+    if (frameTimer.current !== null) window.clearInterval(frameTimer.current);
     hoverTimer.current = null;
     seekTimer.current = null;
+    frameTimer.current = null;
   };
   useEffect(() => {
-    if (!active || privacyMode) return;
+    if (!active || !playbackRequested || privacyMode) return;
     const video = videoRef.current;
     if (!video) return;
     video.src = playbackUrl(asset.id);
     video.muted = true;
     void video.play().catch(() => undefined);
     return () => { video.pause(); video.removeAttribute("src"); video.load(); };
-  }, [active, asset.id, privacyMode]);
+  }, [active, asset.id, playbackRequested, privacyMode]);
+  useEffect(() => {
+    if (!active || privacyMode || asset.media.scrubFrameCount <= 1) {
+      setHoverFrame(null);
+      return;
+    }
+    const frameCount = asset.media.scrubFrameCount;
+    const frames = [0.14, 0.38, 0.62, 0.86].map((ratio) => Math.min(frameCount - 1, Math.round(ratio * (frameCount - 1))));
+    let index = 0;
+    setHoverFrame(frames[index]);
+    frameTimer.current = window.setInterval(() => {
+      index = (index + 1) % frames.length;
+      setHoverFrame(frames[index]);
+    }, 720);
+    return () => {
+      if (frameTimer.current !== null) window.clearInterval(frameTimer.current);
+      frameTimer.current = null;
+      setHoverFrame(null);
+    };
+  }, [active, asset.media.scrubFrameCount, privacyMode]);
   useEffect(() => () => clearTimers(), []);
-  const leave = () => { clearTimers(); scrubbingRef.current = false; setScrubbing(false); setPreviewRatio(null); onReleaseActive(); };
+  const leave = () => { clearTimers(); scrubbingRef.current = false; setScrubbing(false); setPreviewRatio(null); setHoverFrame(null); setPlaybackRequested(false); onReleaseActive(); };
   const seekToRatio = (ratio: number, live: boolean) => {
     const clamped = Math.max(0, Math.min(1, ratio));
     setPreviewRatio(clamped);
@@ -56,6 +80,7 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
     event.stopPropagation();
     event.currentTarget.setPointerCapture?.(event.pointerId);
     scrubbingRef.current = true;
+    setPlaybackRequested(true);
     onRequestActive();
     scrubTo(event.currentTarget, event.clientX, true);
   };
@@ -83,6 +108,7 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
     if (nextMs === null) return;
     event.preventDefault();
     event.stopPropagation();
+    setPlaybackRequested(true);
     onRequestActive();
     seekToRatio(durationMs > 0 ? Math.max(0, Math.min(durationMs, nextMs)) / durationMs : 0, false);
   };
@@ -96,10 +122,12 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
     return <div className="video-tile video-tile--private"><Skeleton className="privacy-mask" label="비공개 모드" /></div>;
   }
   const alt = asset.title || asset.originalName;
-  return <div className="video-tile" onPointerEnter={() => { if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current); hoverTimer.current = window.setTimeout(onRequestActive, 200); }} onPointerLeave={leave}>
+  const previewFrame = previewRatio === null ? hoverFrame : Math.round(previewRatio * Math.max(0, asset.media.scrubFrameCount - 1));
+  const stillUrl = previewFrame === null || asset.media.scrubFrameCount <= 0 ? thumbnailUrl(asset.id) : scrubFrameUrl(asset.id, previewFrame);
+  return <div className="video-tile" onPointerEnter={() => { if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current); hoverTimer.current = window.setTimeout(onRequestActive, 160); }} onPointerLeave={leave}>
     {/* 재생 프리뷰가 위에 깔리므로, 정지 타일에서는 scrub 미리보기 프레임을 img로 보여준다. */}
-    <img src={previewRatio === null ? thumbnailUrl(asset.id) : scrubFrameUrl(asset.id, Math.round(previewRatio * Math.max(0, asset.media.scrubFrameCount - 1)))} alt={alt} decoding="async" draggable={false} />
-    {active && <video
+    <img src={stillUrl} alt={alt} decoding="async" draggable={false} />
+    {active && playbackRequested && <video
       ref={videoRef}
       src={playbackUrl(asset.id)}
       muted
@@ -107,8 +135,8 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
       draggable={false}
       preload="metadata"
       aria-label={`${alt} 미리보기`}
-      onTimeUpdate={(event) => { if (!scrubbingRef.current) setPlayedRatio(Math.min(1, event.currentTarget.currentTime / durationSeconds)); }}
-      onSeeked={(event) => { if (!scrubbingRef.current) setPlayedRatio(Math.min(1, event.currentTarget.currentTime / durationSeconds)); }}
+      onTimeUpdate={(event) => { if (!scrubbingRef.current) setPlayedRatio(Math.min(1, event.currentTarget.currentTime / Math.max(0.001, durationSeconds))); }}
+      onSeeked={(event) => { if (!scrubbingRef.current) { setPlayedRatio(Math.min(1, event.currentTarget.currentTime / Math.max(0.001, durationSeconds))); setPreviewRatio(null); } }}
       onDurationChange={(event) => { const d = event.currentTarget.duration; if (Number.isFinite(d) && d > 0) setVideoDuration(d); }}
     />}
     <span className="video-tile__duration">{formatDuration(asset.media.durationMs)}</span><span className="video-tile__icon" aria-hidden="true">▶</span>

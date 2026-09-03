@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 31;
+pub(crate) const SCHEMA_VERSION: i64 = 32;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -54,6 +54,8 @@ const CLOUD_BACKFILL_QUEUE_SCHEMA: &str =
     include_str!("../../migrations/0030_cloud_backfill_queue.sql");
 const CLOUD_BACKFILL_CONTROL_SCHEMA: &str =
     include_str!("../../migrations/0031_cloud_backfill_control.sql");
+const MANGA_CATALOG_RECOVERY_SCHEMA: &str =
+    include_str!("../../migrations/0032_manga_catalog_recovery.sql");
 
 pub fn open_database(path: &Path) -> Result<Connection, LibraryError> {
     let connection = Connection::open(path)?;
@@ -69,7 +71,7 @@ pub fn initialize_database(path: &Path) -> Result<Connection, LibraryError> {
     let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
     match version {
         SCHEMA_VERSION => {}
-        version @ 0..=30 => {
+        version @ 0..=31 => {
             if version > 0 {
                 let root = path
                     .parent()
@@ -180,6 +182,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         }
         if version <= 30 {
             transaction.execute_batch(CLOUD_BACKFILL_CONTROL_SCHEMA)?;
+        }
+        if version <= 31 {
+            transaction.execute_batch(MANGA_CATALOG_RECOVERY_SCHEMA)?;
         }
         transaction.commit()?;
         Ok::<(), LibraryError>(())
@@ -1678,6 +1683,29 @@ mod tests {
                     > 0
             );
         }
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION,
+        );
+    }
+    #[test]
+    fn migrates_v31_to_manga_catalog_recovery_links() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection.pragma_update(None, "user_version", 31).unwrap();
+
+        migrate_to_latest(&mut connection, 31).unwrap();
+
+        let table_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type = 'table' AND name = 'manga_catalog_recovery_links'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(table_count, 1);
         assert_eq!(
             connection
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))

@@ -1886,6 +1886,8 @@ input:disabled {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  /* The virtualizer owns scroll positioning; native anchoring can fight mounted row changes. */
+  overflow-anchor: none;
   padding: var(--gallery-gap);
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--color-muted) 46%, transparent) transparent;
@@ -1918,6 +1920,7 @@ input:disabled {
 .asset-gallery__virtual-space {
   position: relative;
   width: 100%;
+  overflow-anchor: none;
 }
 
 .asset-gallery__row {
@@ -2570,6 +2573,39 @@ input:disabled {
   min-height: 0;
   padding: var(--space-3);
   overflow: auto;
+}
+
+.manga-browser__recovery {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-2) var(--space-3) 0;
+  padding: var(--space-3);
+  background: color-mix(in srgb, var(--color-surface) 88%, var(--color-bg));
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.manga-browser__recovery-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  font-size: 0.78rem;
+}
+
+.manga-browser__recovery-summary span,
+.manga-browser__recovery p {
+  color: var(--color-muted);
+}
+
+.manga-browser__recovery p {
+  margin: 0;
+  font-size: 0.75rem;
+}
+
+.manga-browser__recovery-actions {
+  display: flex;
+  gap: var(--space-2);
 }
 
 :is(.view-toolbar__content, .collection-browser__library-controls) > .manga-browser__search {

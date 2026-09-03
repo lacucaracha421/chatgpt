@@ -739,6 +739,37 @@ export type MangaSeries = {
   pageCount: number;
 };
 
+export type MangaCatalogRecoveryStatus = "exact_active" | "historical" | "fallback";
+
+export type MangaCatalogRecoveryItem = {
+  mangaId: string;
+  title: string;
+  author: string;
+  galleryId: string | null;
+  pageCount: number;
+  status: MangaCatalogRecoveryStatus;
+  workId: number | null;
+  catalogTitle: string | null;
+  catalogTitleJpn: string | null;
+  catalogFileCount: number | null;
+  bookmarked: boolean;
+};
+
+export type MangaCatalogRecoveryPreview = {
+  totalCount: number;
+  exactActiveCount: number;
+  historicalCount: number;
+  fallbackCount: number;
+  alreadyBookmarkedCount: number;
+  items: MangaCatalogRecoveryItem[];
+};
+
+export type MangaCatalogRecoveryApplyResult = {
+  matchedCount: number;
+  createdBookmarks: number;
+  existingBookmarks: number;
+};
+
 export type MetadataBackup = {
   id: string;
   kind: "daily" | "pre_migration" | "pre_restore";
@@ -931,6 +962,8 @@ export interface LibraryGateway {
   setMangaRoot(path: string | null): Promise<void>;
   scanManga(): Promise<number>;
   listMangaSeries(): Promise<MangaSeries[]>;
+  previewMangaCatalogRecovery?(): Promise<MangaCatalogRecoveryPreview>;
+  applyMangaCatalogRecovery?(): Promise<MangaCatalogRecoveryApplyResult>;
   inspectMetadataImport?(folder: string): Promise<MetadataImportPlan>;
   ingestMedia(input: IngestMediaInput): Promise<IngestOutcome>;
   preparePendingVideos(limit: number): Promise<VideoPreparationProgress>;

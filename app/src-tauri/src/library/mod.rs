@@ -46,7 +46,7 @@ mod video_media;
 mod work_artwork;
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeSet, HashMap},
     fs::{self, File},
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
@@ -56,7 +56,10 @@ use std::{
 use error::LibraryError;
 pub(crate) use ingestion::MAX_IMAGE_BYTES;
 use lock::LibraryLease;
-use models::{LibrarySummary, MangaSeries, TrashPolicy};
+use models::{
+    LibrarySummary, MangaCatalogRecoveryApplyResult, MangaCatalogRecoveryPreview, MangaSeries,
+    TrashPolicy,
+};
 use rusqlite::{Connection, OptionalExtension};
 pub(crate) use work_artwork::MAX_WORK_ARTWORK_BYTES;
 pub(crate) use video_media::VideoProbe;
@@ -119,6 +122,7 @@ pub struct Library {
     // ponytail: one database handle at a time; use a read/write lock if reads become a bottleneck.
     database_lock: Arc<Mutex<()>>,
     catalog_lookup_cache: Arc<Mutex<Option<online_catalog::CatalogLookupCache>>>,
+    collection_artwork_scan_cache: Arc<Mutex<HashMap<String, u128>>>,
     igdb_token_cache: igdb::IgdbTokenCache,
     igdb_request_limiter: igdb::IgdbRequestLimiter,
 }
@@ -174,6 +178,7 @@ impl Library {
             volume_import_lock: Arc::new(Mutex::new(())),
             database_lock: Arc::new(Mutex::new(())),
             catalog_lookup_cache: Arc::new(Mutex::new(None)),
+            collection_artwork_scan_cache: Arc::new(Mutex::new(HashMap::new())),
             igdb_token_cache: igdb::IgdbTokenCache::default(),
             igdb_request_limiter: igdb::IgdbRequestLimiter::default(),
         };
@@ -261,6 +266,18 @@ impl Library {
     pub fn list_manga_series(&self) -> Result<Vec<MangaSeries>, LibraryError> {
         let connection = self.connection()?;
         manga::list_series(&connection)
+    }
+
+    pub fn preview_manga_catalog_recovery(
+        &self,
+    ) -> Result<MangaCatalogRecoveryPreview, LibraryError> {
+        manga::preview_catalog_recovery(self)
+    }
+
+    pub fn apply_manga_catalog_recovery(
+        &self,
+    ) -> Result<MangaCatalogRecoveryApplyResult, LibraryError> {
+        manga::apply_exact_catalog_recovery(self)
     }
 
     pub fn manga_cover(&self, series_id: &str) -> Result<MediaResponse, LibraryError> {
