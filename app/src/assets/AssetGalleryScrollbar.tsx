@@ -87,6 +87,7 @@ export function AssetGalleryScrollbar({ scrollRef, totalHeight }: AssetGallerySc
   }, [scrollRef, totalHeight]);
 
   const beginThumbDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
     const element = scrollRef.current;
     if (!element) return;
     event.preventDefault();
@@ -139,6 +140,16 @@ export function AssetGalleryScrollbar({ scrollRef, totalHeight }: AssetGallerySc
     element.scrollTop = ratio * maxScroll;
   };
 
+  // The overlay sits beside the scroll container, so wheel input landing on
+  // it must be forwarded or the 18px strip would swallow scrolling.
+  const rollWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    const element = scrollRef.current;
+    if (!element) return;
+    const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? element.clientHeight : 1;
+    if (event.deltaY !== 0) element.scrollTop += event.deltaY * scale;
+    if (event.deltaX !== 0) element.scrollLeft += event.deltaX * scale;
+  };
+
   return <div
     ref={trackRef}
     className="asset-gallery__scrollbar"
@@ -149,6 +160,7 @@ export function AssetGalleryScrollbar({ scrollRef, totalHeight }: AssetGallerySc
     aria-valuemax={100}
     aria-valuenow={0}
     onPointerDown={jumpTrack}
+    onWheel={rollWheel}
   >
     <div
       ref={thumbRef}

@@ -75,48 +75,62 @@ export function AssetGallery({ items, scopeKey, totalCount = null, selectedAsset
     rowVirtualizer.scrollToOffset(0);
     if (remembered > 0) element.scrollTop = remembered;
   }, [scopeKey, rowVirtualizer]);
-  useLayoutEffect(() => {
-    const pending = pendingRestoreRef.current;
-    if (!pending || pending.scopeKey !== scopeKey || rows.length === 0) return;
-    const element = scrollRef.current;
-    if (!element) return;
-    if (element.scrollTop < pending.offset) element.scrollTop = pending.offset;
-    pendingRestoreRef.current = null;
-  }, [rows.length, scopeKey]);
   const virtualRows = rowVirtualizer.getVirtualItems();
   const measuredTotal = rowVirtualizer.getTotalSize();
   // Freeze the estimation base on the first measured rows so appended pages
   // never shift the reserved range (which would yank the scrollbar thumb).
-  // The base resets only when rows empty out (new scope), and the estimate
-  // changes only when the backend total itself changes.
-  // Freeze the estimation base on the first measured rows so appended pages
-  // never shift the reserved range (which would yank the scrollbar thumb).
-  // The base resets only when rows empty out (new scope), and the estimate
-  // changes only when the backend total itself changes.
+  // The base is scoped: a new scope re-samples instead of reusing stale
+  // aspect data. The estimate changes only when the backend total changes.
   const [estimateBase, setEstimateBase] = useState<{
+    scopeKey: string | null;
     avgItemsPerRow: number;
     avgRowHeight: number;
   } | null>(null);
   useLayoutEffect(() => {
+    const currentScopeKey = scopeKey ?? null;
     if (rows.length === 0) {
       if (estimateBase) setEstimateBase(null);
-    } else if (!estimateBase && measuredTotal > 0 && items.length > 0) {
+    } else if (
+      (!estimateBase || estimateBase.scopeKey !== currentScopeKey) &&
+      measuredTotal > 0 &&
+      items.length > 0
+    ) {
       setEstimateBase({
+        scopeKey: currentScopeKey,
         avgItemsPerRow: items.length / rows.length,
         avgRowHeight: measuredTotal / rows.length,
       });
     }
-  });
+  }, [estimateBase, items.length, measuredTotal, rows.length, scopeKey]);
   // Reserve the full filtered range up front so appended pages stop growing
   // the scroll range (which yanks the scrollbar thumb upward mid-drag).
   // Once everything is loaded the measured size is exact again.
   let reservedTotal = measuredTotal;
-  if (hasNextPage && totalCount != null && estimateBase) {
+  if (
+    hasNextPage &&
+    totalCount != null &&
+    Number.isFinite(totalCount) &&
+    totalCount >= 0 &&
+    estimateBase
+  ) {
     reservedTotal = Math.max(
       measuredTotal,
       Math.ceil(totalCount / estimateBase.avgItemsPerRow) * estimateBase.avgRowHeight,
     );
   }
+  useLayoutEffect(() => {
+    const pending = pendingRestoreRef.current;
+    if (!pending || pending.scopeKey !== scopeKey || rows.length === 0) return;
+    const element = scrollRef.current;
+    if (!element) return;
+    if (element.scrollTop < pending.offset - 1) {
+      element.scrollTop = pending.offset;
+      // Still clamped (range not reserved yet): keep pending and retry when
+      // rows or the reserved total grow instead of losing the position.
+      if (element.scrollTop < pending.offset - 1) return;
+    }
+    pendingRestoreRef.current = null;
+  }, [rows.length, scopeKey, reservedTotal]);
   const cancelQuickPreview = () => {
     quickPreviewRequestRef.current += 1;
     if (quickPreviewTimerRef.current !== null) window.clearTimeout(quickPreviewTimerRef.current);

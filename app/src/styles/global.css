@@ -1901,39 +1901,12 @@ input:disabled {
   /* Dedicated home for the overlay scrollbar so tiles never slide under it.
      (The native scrollbar is hidden below, so no stable gutter is needed.) */
   padding-right: var(--gallery-scrollbar-width);
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--color-muted) 46%, transparent) transparent;
-}
-
-.asset-gallery__scroll::-webkit-scrollbar {
-  width: 18px;
-  height: 18px;
-}
-
-.asset-gallery__scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.asset-gallery__scroll::-webkit-scrollbar-thumb {
-  min-width: 32px;
-  min-height: 32px;
-  background: color-mix(in srgb, var(--color-muted) 46%, transparent);
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background-clip: padding-box;
-}
-
-.asset-gallery__scroll::-webkit-scrollbar-thumb:hover,
-.asset-gallery__scroll::-webkit-scrollbar-thumb:active {
-  background: color-mix(in srgb, var(--color-muted) 78%, transparent);
-  background-clip: padding-box;
 }
 
 /* The native scrollbar is hidden: its thumb length is engine-computed and
    cannot be floored, so a huge virtual range shrinks it to an ungrabbable
    sliver. AssetGalleryScrollbar draws the visible thumb instead while this
-   container keeps owning all scrolling. The stable gutter stays reserved so
-   the overlay has a home and clientWidth never shifts. */
+   container keeps owning all scrolling. */
 .asset-gallery__scroll {
   scrollbar-width: none;
 }
@@ -1957,6 +1930,7 @@ input:disabled {
   right: 4px;
   width: 10px;
   min-height: 32px;
+  touch-action: none;
   background: color-mix(in srgb, var(--color-muted) 46%, transparent);
   border-radius: var(--radius-sm);
   cursor: pointer;

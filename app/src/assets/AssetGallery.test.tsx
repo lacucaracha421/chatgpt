@@ -516,6 +516,98 @@ describe("AssetGallery", () => {
     expect(scroller.scrollTop).toBeCloseTo(730.8, 0);
   });
 
+  it("ignores a thumb drag started with a non-primary button", async () => {
+    const { container } = render(
+      <AssetGallery
+        items={Array.from({ length: 8 }, (_, index) => asset(index))}
+        totalCount={100}
+        hasNextPage
+        onLoadNextPage={vi.fn()}
+      />,
+    );
+    await screen.findByRole("option", { name: "asset-0.png" });
+
+    const scroller = container.querySelector(".asset-gallery__scroll") as HTMLElement;
+    const thumb = container.querySelector(".asset-gallery__scrollbar-thumb") as HTMLElement;
+    fireEvent.pointerDown(thumb, { pointerId: 7, button: 2, clientY: 100 });
+    fireEvent.pointerMove(thumb, { pointerId: 7, button: 2, clientY: 300 });
+
+    expect(scroller.scrollTop).toBe(0);
+  });
+
+  it("forwards wheel input landing on the overlay strip", async () => {
+    const { container } = render(
+      <AssetGallery
+        items={Array.from({ length: 8 }, (_, index) => asset(index))}
+        totalCount={100}
+        hasNextPage
+        onLoadNextPage={vi.fn()}
+      />,
+    );
+    await screen.findByRole("option", { name: "asset-0.png" });
+
+    const scroller = container.querySelector(".asset-gallery__scroll") as HTMLElement;
+    const track = container.querySelector(".asset-gallery__scrollbar") as HTMLElement;
+    fireEvent.wheel(track, { deltaY: 100 });
+
+    expect(scroller.scrollTop).toBe(100);
+  });
+
+  it("re-samples the estimate base when the scope changes", async () => {
+    const wide = (index: number) => ({ ...asset(index), id: `wide-${index}`, width: 400, height: 100 });
+    const { container, rerender } = render(
+      <AssetGallery
+        items={Array.from({ length: 8 }, (_, index) => asset(index))}
+        scopeKey="a"
+        totalCount={100}
+        hasNextPage
+        onLoadNextPage={vi.fn()}
+      />,
+    );
+    await screen.findByRole("option", { name: "asset-0.png" });
+    const space = () =>
+      container.querySelector(".asset-gallery__virtual-space") as HTMLElement;
+    expect(space().style.height).toBe("4385px");
+
+    rerender(
+      <AssetGallery
+        items={Array.from({ length: 8 }, (_, index) => wide(index))}
+        scopeKey="b"
+        totalCount={100}
+        hasNextPage
+        onLoadNextPage={vi.fn()}
+      />,
+    );
+    await screen.findByRole("option", { name: "asset-0.png" });
+
+    expect(space().style.height).not.toBe("4385px");
+  });
+
+  it("falls back to the measured range without a total count", async () => {
+    const { container, rerender } = render(
+      <AssetGallery
+        items={Array.from({ length: 8 }, (_, index) => asset(index))}
+        totalCount={100}
+        hasNextPage
+        onLoadNextPage={vi.fn()}
+      />,
+    );
+    await screen.findByRole("option", { name: "asset-0.png" });
+    const space = () =>
+      container.querySelector(".asset-gallery__virtual-space") as HTMLElement;
+    expect(space().style.height).toBe("4385px");
+
+    rerender(
+      <AssetGallery
+        items={Array.from({ length: 8 }, (_, index) => asset(index))}
+        hasNextPage
+        onLoadNextPage={vi.fn()}
+      />,
+    );
+
+    expect(space().style.height).toBe("350.8px");
+  });
+
   it("jumps the track click to the matching scroll position", async () => {
     const { container } = render(
       <AssetGallery

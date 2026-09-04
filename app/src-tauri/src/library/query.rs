@@ -1676,6 +1676,244 @@ mod tests {
         assert_eq!(head.total_count, 6);
     }
 
+    fn insert_matrix_asset(
+        library: &Library,
+        id: &str,
+        media_kind: &str,
+        width: i64,
+        height: i64,
+        creator: Option<&str>,
+        collected_at: &str,
+        favorite: bool,
+    ) {
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO assets (
+                    id, content_hash, media_kind, original_name, relative_path,
+                    thumbnail_relative_path, byte_size, width, height,
+                    collected_at, favorite, creator_handle
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?8, ?9, ?10, ?11)",
+                rusqlite::params![
+                    id,
+                    format!("hash-{id}"),
+                    media_kind,
+                    format!("{id}.bin"),
+                    format!("assets/{id}.bin"),
+                    format!("thumbnails/{id}.webp"),
+                    width,
+                    height,
+                    collected_at,
+                    favorite,
+                    creator,
+                ],
+            )
+            .unwrap();
+    }
+
+    fn matrix_totals(library: &Library, mutate: impl FnOnce(&mut AssetQuery)) -> (usize, u64) {
+        let mut query = chrono_query(AssetSort::Newest);
+        query.limit = 20;
+        mutate(&mut query);
+        let page = library.list_assets(query).unwrap();
+        (page.items.len(), page.total_count)
+    }
+
+    #[test]
+    fn total_count_matches_items_across_the_full_filter_matrix() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        insert_matrix_asset(
+            &library,
+            "land",
+            "image",
+            400,
+            200,
+            Some("hana"),
+            "2026-07-30T00:00:00Z",
+            false,
+        );
+        insert_matrix_asset(
+            &library,
+            "port",
+            "image",
+            200,
+            400,
+            Some("hana"),
+            "2026-07-31T00:00:00Z",
+            false,
+        );
+        insert_matrix_asset(
+            &library,
+            "sq",
+            "image",
+            200,
+            200,
+            Some("other"),
+            "2026-07-29T00:00:00Z",
+            false,
+        );
+        insert_matrix_asset(
+            &library,
+            "vid",
+            "video",
+            640,
+            360,
+            Some("hana"),
+            "2026-07-28T00:00:00Z",
+            false,
+        );
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO video_assets (asset_id, duration_ms, container, video_codec, preparation_state)
+                 VALUES ('vid', 10000, 'mp4', 'h264', 'pending')",
+                [],
+            )
+            .unwrap();
+        insert_matrix_asset(
+            &library,
+            "fav",
+            "image",
+            800,
+            600,
+            None,
+            "2026-07-27T00:00:00Z",
+            true,
+        );
+        insert_matrix_asset(
+            &library,
+            "anim",
+            "gif",
+            100,
+            100,
+            None,
+            "2026-07-26T00:00:00Z",
+            false,
+        );
+
+        let root = classification(&library, ClassificationKind::Root, "게임", None);
+        let child = classification(
+            &library,
+            ClassificationKind::Tag,
+            "하위",
+            Some(root.id.clone()),
+        );
+        library
+            .patch_asset_classifications(AssetClassificationPatch {
+                asset_ids: vec!["land".into()],
+                add_classification_ids: vec![root.id.clone()],
+                remove_classification_ids: vec![],
+            })
+            .unwrap();
+        library
+            .patch_asset_classifications(AssetClassificationPatch {
+                asset_ids: vec!["port".into()],
+                add_classification_ids: vec![child.id],
+                remove_classification_ids: vec![],
+            })
+            .unwrap();
+        let album = library
+            .create_album(CreateAlbum {
+                name: "표지".into(),
+                parent_id: None,
+            })
+            .unwrap();
+        library
+            .patch_asset_albums(AssetAlbumPatch {
+                asset_ids: vec!["sq".into()],
+                add_album_ids: vec![album.id.clone()],
+                remove_album_ids: vec![],
+            })
+            .unwrap();
+        let collection = library
+            .create_collection(CreateCollection {
+                name: "Ref".into(),
+                description: None,
+                collection_type: CollectionType::Manga,
+            })
+            .unwrap();
+        library
+            .patch_asset_collections(AssetCollectionPatch {
+                asset_ids: vec!["vid".into()],
+                add_collection_ids: vec![collection.id.clone()],
+                remove_collection_ids: vec![],
+            })
+            .unwrap();
+
+        assert_eq!(matrix_totals(&library, |_| {}), (6, 6));
+        assert_eq!(
+            matrix_totals(&library, |query| query.media_kind =
+                Some(MediaKindFilter::Images)),
+            (5, 5)
+        );
+        assert_eq!(
+            matrix_totals(&library, |query| query.media_kind =
+                Some(MediaKindFilter::Videos)),
+            (1, 1)
+        );
+        assert_eq!(
+            matrix_totals(&library, |query| query.aspect_ratio =
+                Some(AspectRatioFilter::Landscape)),
+            (3, 3)
+        );
+        assert_eq!(
+            matrix_totals(&library, |query| query.aspect_ratio =
+                Some(AspectRatioFilter::Portrait)),
+            (1, 1)
+        );
+        assert_eq!(
+            matrix_totals(&library, |query| query.aspect_ratio =
+                Some(AspectRatioFilter::Square)),
+            (2, 2)
+        );
+        assert_eq!(
+            matrix_totals(&library, |query| query.creator_key = Some("hana".into())),
+            (3, 3)
+        );
+        assert_eq!(
+            matrix_totals(&library, |query| {
+                query.classification_id = Some(root.id.clone());
+                query.direct_only = true;
+            }),
+            (1, 1)
+        );
+        assert_eq!(
+            matrix_totals(&library, |query| query.classification_id =
+                Some(root.id.clone())),
+            (2, 2)
+        );
+        assert_eq!(
+            matrix_totals(&library, |query| query.album_id = Some(album.id.clone())),
+            (1, 1)
+        );
+        assert_eq!(
+            matrix_totals(&library, |query| query.collection_id =
+                Some(collection.id.clone())),
+            (1, 1)
+        );
+        assert_eq!(
+            matrix_totals(&library, |query| query.favorite_only = true),
+            (1, 1)
+        );
+        assert_eq!(
+            matrix_totals(&library, |query| query.unclassified_only = true),
+            (4, 4)
+        );
+        assert_eq!(
+            matrix_totals(&library, |query| {
+                query.collected_range = Some(crate::library::models::UtcDateRange {
+                    local_date: "2026-07-30".into(),
+                    start_utc: "2026-07-29T00:00:00Z".into(),
+                    end_utc: "2026-08-01T00:00:00Z".into(),
+                })
+            }),
+            (3, 3)
+        );
+    }
+
     fn chrono_query(sort: AssetSort) -> AssetQuery {
         AssetQuery {
             classification_id: None,

@@ -360,6 +360,12 @@ Manual verification checklist (real Tauri, long library):
 - Runtime follow-ups fixed the same day: (1) a hidden-attribute latch-up hid the overlay forever when the first paint ran before styles applied — now uses visibility so later scrolls/resizes always recover; (2) pointer capture was set on the scroll container instead of the thumb, so the first drag's release was missed and later hovers kept scrolling — capture is on the thumb now, releases outside also clear via window listeners, and unpressed mouse moves never scroll; (3) the overlay gets a dedicated 18px gutter (`--gallery-scrollbar-width`) so tiles never slide under it.
 - Re-verify with HMR or a window refresh (frontend-only change); then mark `DONE` if items 1-6 pass.
 
+2026-09-04 code-review follow-ups (same item, all implemented + covered):
+- Overlay strip forwards wheel input to the scroll container (the sibling strip otherwise swallows it); thumb drag requires the primary button; thumb has `touch-action: none` so touch drags work.
+- Estimate base is keyed by scope (no stale aspect sample across scopes); non-finite totals fall back to measured; scroll-restore retries once the reserved range covers a clamped offset.
+- `total_count` parity is now asserted across the full filter matrix (media/aspect/creator/direct/scope/album/collection/favorite/unclassified/range) in addition to sorts and anchor/before windows.
+- Removed dead gallery scrollbar CSS (old webkit sizing, overridden thin/color rules) and fixed the stale gutter comment. Per-page `COUNT(*)` cost stays as-is until measured otherwise.
+
 ## P2 — architecture / larger feature work
 
 ### CATALOG-001 — Move fragile k-hentai transport behind the Japanese VPS
