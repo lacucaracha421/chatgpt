@@ -200,6 +200,24 @@ describe("OnlineCatalogBrowser", () => {
     expect(screen.getByRole("button", { name: "오래된 제독 상세 보기" })).toBeVisible();
   });
 
+  it("shows structured query syntax errors without replacing the last valid results", async () => {
+    const gateway = createGateway(true);
+    renderBrowser(gateway);
+    expect(await screen.findByRole("button", { name: "오래된 제독 상세 보기" })).toBeVisible();
+    vi.mocked(gateway.searchOnlineCatalog).mockRejectedValueOnce({
+      code: "catalog_query_syntax",
+      message: "검색식 7..7 위치: 검색 조건이 더 필요합니다",
+    });
+
+    const search = screen.getByRole("combobox", { name: "온라인 만화 검색" });
+    await userEvent.clear(search);
+    await userEvent.type(search, "제독 AND");
+    fireEvent.submit(search.closest("form")!);
+
+    expect(await screen.findByText("검색식 7..7 위치: 검색 조건이 더 필요합니다")).toBeVisible();
+    expect(screen.getByRole("button", { name: "오래된 제독 상세 보기" })).toBeVisible();
+  });
+
   it("shows cover thumbnails and keeps bookmarks, filters, and paging isolated", async () => {
     const gateway = createGateway(true);
     renderBrowser(gateway);

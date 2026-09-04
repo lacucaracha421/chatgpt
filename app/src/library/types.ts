@@ -139,9 +139,11 @@ export type RemoteReadingProgress = CatalogWorkIdentity & {
 
 export type CatalogSort = "latest" | "views" | "hotDay" | "hotWeek" | "hotMonth";
 export type CatalogScope = "all" | "bookmarked";
+export type CatalogLanguage = "korean" | "japanese";
 
 export type CatalogSearchQuery = {
   provider: CatalogProvider;
+  language?: CatalogLanguage | null;
   text: string;
   sort: CatalogSort;
   scope: CatalogScope;

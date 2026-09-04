@@ -183,7 +183,7 @@ Prerequisite: CATALOG-002A.
 
 ## CATALOG-004 — Advanced VCK-style query language + result hydration fix
 
-Status: `PARTIAL`
+Status: `DONE`
 
 Current implementation already supports plain title text and one exact `namespace:value` form.
 
@@ -213,6 +213,14 @@ Performance scope folded into this item:
 - replace current per-result artist/series `tags_for()` calls with one bounded bulk tag hydration query for the page;
 - this absorbs the audit candidate `PERF-004`; do not create a separate performance project for the same query surface;
 - measure before adding FTS5 or temporary hit tables.
+
+Completed evidence (2026-09-05):
+
+- a bounded Rust tokenizer/parser/AST/compiler now supports title and quoted terms, exact namespace predicates, unary negation, explicit and implicit Boolean operators, parentheses, typed ID/category/uploader predicates, and page-count comparisons with source-positioned syntax errors;
+- every user value is compiled to a SQLite bound parameter, including escaped title wildcard patterns, while provider, optional language scope, bookmark scope, and mandatory expunged policy remain outside the user expression;
+- result artist/series hydration is one bulk query for a non-empty page (zero for an empty page), replacing the former per-result `2N` lookup path with parity coverage through the 100-result page limit;
+- the desktop keeps the previous valid result set when a structured `catalog_query_syntax` error arrives and still ignores stale search responses;
+- the representative 100-result fixture query, including bulk hydration, measured approximately 5–6 ms in the recorded debug test runs; no FTS5 or temporary hit tables were added.
 
 Prerequisite: CATALOG-002A. CATALOG-003 may proceed independently after that contract.
 

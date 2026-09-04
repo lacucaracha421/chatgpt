@@ -98,6 +98,12 @@ pub enum LibraryError {
     InvalidOnlineCatalog,
     #[error("지원하지 않는 온라인 카탈로그 제공자입니다")]
     UnsupportedCatalogProvider,
+    #[error("검색식 {start}..{end} 위치: {message}")]
+    CatalogQuerySyntax {
+        start: usize,
+        end: usize,
+        message: String,
+    },
     #[error("온라인 카탈로그 요청 경로가 올바르지 않습니다")]
     InvalidCatalogTransportPath,
     #[error("온라인 카탈로그 서버가 요청을 거부했습니다: HTTP {0}")]
@@ -392,4 +398,14 @@ pub enum LibraryError {
     CollectionSourcePathNotSet,
     #[error("망가 시리즈를 찾을 수 없습니다")]
     MangaSeriesNotFound,
+}
+
+impl From<super::catalog_query::CatalogQueryError> for LibraryError {
+    fn from(error: super::catalog_query::CatalogQueryError) -> Self {
+        Self::CatalogQuerySyntax {
+            start: error.span.start,
+            end: error.span.end,
+            message: error.message,
+        }
+    }
 }

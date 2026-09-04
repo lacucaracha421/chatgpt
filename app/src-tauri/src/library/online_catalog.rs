@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     catalog_provider::{CatalogProvider, CatalogWorkIdentity},
+    catalog_query::{compile as compile_catalog_query, parse as parse_catalog_query},
     error::LibraryError,
     models::{
         CatalogScope, CatalogSearchPage, CatalogSearchQuery, CatalogSort, CatalogStatus,
@@ -274,24 +275,20 @@ impl Library {
             clauses.push(bookmark_exists.clone());
         }
         let mut values = Vec::<Value>::new();
-        let text = query.text.trim();
-        if let Some((namespace, value)) = text
-            .split_once(':')
-            .filter(|(a, b)| !a.is_empty() && !b.is_empty())
-        {
+        if let Some(language) = query.language {
             clauses.push(
-                "EXISTS (SELECT 1 FROM catalog.Tags AS tag
-                         WHERE tag.WorkId = work.Id AND tag.Namespace = ? AND tag.Value = ?)"
+                "EXISTS (SELECT 1 FROM catalog.Tags AS policy_tag
+                         WHERE policy_tag.WorkId = work.Id
+                           AND policy_tag.Namespace = 'language'
+                           AND policy_tag.Value = ?)"
                     .into(),
             );
-            values.push(namespace.to_owned().into());
-            values.push(value.to_owned().into());
-        } else if !text.is_empty() {
-            clauses
-                .push("(work.Title LIKE ? ESCAPE '\\' OR work.TitleJpn LIKE ? ESCAPE '\\')".into());
-            let pattern = format!("%{}%", escape_like(text));
-            values.push(pattern.clone().into());
-            values.push(pattern.into());
+            values.push(language.as_tag().to_owned().into());
+        }
+        if let Some(expression) = parse_catalog_query(&query.text)? {
+            let compiled = compile_catalog_query(&expression);
+            clauses.push(compiled.sql);
+            values.extend(compiled.params);
         }
 
         let order = match query.sort {
@@ -346,16 +343,19 @@ impl Library {
                 row.get::<_, bool>(7)?,
             ))
         })?;
-        let mut works = Vec::new();
-        for row in rows {
-            let (id, title, title_jpn, file_count, views, posted, thumbnail_url, bookmarked) = row?;
+        let rows = rows.collect::<Result<Vec<_>, _>>()?;
+        let work_ids = rows.iter().map(|row| row.0).collect::<Vec<_>>();
+        let (summary_tags, _) = bulk_summary_tags(&connection, &work_ids)?;
+        let mut works = Vec::with_capacity(rows.len());
+        for (id, title, title_jpn, file_count, views, posted, thumbnail_url, bookmarked) in rows {
             let work_id = id as u64;
+            let tags = summary_tags.get(&id);
             works.push(CatalogWork {
                 identity: CatalogWorkIdentity::khentai(work_id),
                 title,
                 title_jpn,
-                artists: tags_for(&connection, id, "artist")?,
-                series: tags_for(&connection, id, "series")?,
+                artists: tags.map(|tags| tags.artists.clone()).unwrap_or_default(),
+                series: tags.map(|tags| tags.series.clone()).unwrap_or_default(),
                 thumbnail_url: validated_thumbnail_url(thumbnail_url)
                     .map(|_| format!("http://lakomics.localhost/remote-catalog-thumbnail/{}/{work_id}", query.provider.as_str())),
                 bookmarked,
@@ -537,19 +537,46 @@ impl Library {
     }
 }
 
-fn tags_for(
+#[derive(Default)]
+struct SummaryTags {
+    artists: Vec<String>,
+    series: Vec<String>,
+}
+
+fn bulk_summary_tags(
     connection: &Connection,
-    work_id: i64,
-    namespace: &str,
-) -> Result<Vec<String>, LibraryError> {
-    let mut statement = connection.prepare(
-        "SELECT Value FROM catalog.Tags
-             WHERE WorkId = ?1 AND Namespace = ?2 ORDER BY Value",
-    )?;
-    let tags = statement
-        .query_map((work_id, namespace), |row| row.get(0))?
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(tags)
+    work_ids: &[i64],
+) -> Result<(BTreeMap<i64, SummaryTags>, usize), LibraryError> {
+    if work_ids.is_empty() {
+        return Ok((BTreeMap::new(), 0));
+    }
+    let placeholders = std::iter::repeat_n("?", work_ids.len())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "SELECT WorkId, Namespace, Value FROM catalog.Tags
+         WHERE WorkId IN ({placeholders}) AND Namespace IN ('artist', 'series')
+         ORDER BY WorkId, Namespace, Value"
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(params_from_iter(work_ids.iter()), |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+    let mut by_work = BTreeMap::<i64, SummaryTags>::new();
+    for row in rows {
+        let (work_id, namespace, value) = row?;
+        let tags = by_work.entry(work_id).or_default();
+        if namespace == "artist" {
+            tags.artists.push(value);
+        } else {
+            tags.series.push(value);
+        }
+    }
+    Ok((by_work, 1))
 }
 
 fn validated_thumbnail_url(raw: Option<String>) -> Option<String> {
@@ -585,13 +612,6 @@ fn suggestions_from_database(path: &Path) -> Result<Vec<ImportedSuggestion>, Lib
         })
     })?;
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
-}
-
-fn escape_like(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('%', "\\%")
-        .replace('_', "\\_")
 }
 
 fn has_table(connection: &Connection, table: &str) -> bool {
@@ -986,6 +1006,13 @@ mod tests {
             [],
         )
         .unwrap();
+        db.execute_batch(
+            "INSERT INTO Tags (WorkId, Namespace, Value) VALUES (1, 'artist', 'alpha artist');
+             INSERT INTO Tags (WorkId, Namespace, Value) VALUES (2, 'series', 'fleet log');
+             INSERT INTO Tags (WorkId, Namespace, Value) VALUES (3, 'artist', 'circle artist');
+             INSERT INTO Tags (WorkId, Namespace, Value) VALUES (3, 'series', 'fleet saga');",
+        )
+        .unwrap();
         db.execute(
             "UPDATE Works
              SET Category = 2, Uploader = 'tester', Updated = ?2,
@@ -1004,6 +1031,7 @@ mod tests {
     fn query(text: &str, sort: CatalogSort, page: u32, page_size: u32) -> CatalogSearchQuery {
         CatalogSearchQuery {
             provider: CatalogProvider::KHentai,
+            language: None,
             text: text.into(),
             sort,
             scope: CatalogScope::All,
@@ -1028,6 +1056,114 @@ mod tests {
         .unwrap();
 
         assert_eq!(query.provider, CatalogProvider::KHentai);
+        assert_eq!(query.language, None);
+    }
+
+    #[test]
+    fn advanced_query_executes_boolean_typed_and_negative_predicates() {
+        let (_root, library) = searchable_library();
+
+        let boolean = library
+            .search_online_catalog(query("제독 OR id:2", CatalogSort::Latest, 0, 10))
+            .unwrap();
+        assert_eq!(
+            boolean
+                .works
+                .iter()
+                .map(|work| work.identity.provider_work_id.as_str())
+                .collect::<Vec<_>>(),
+            ["1", "2", "3"]
+        );
+
+        let negative = library
+            .search_online_catalog(query("-character:teitoku", CatalogSort::Latest, 0, 10))
+            .unwrap();
+        assert_eq!(negative.total_count, 2);
+        let missing_metadata = library
+            .search_online_catalog(query("-uploader:tester", CatalogSort::Latest, 0, 10))
+            .unwrap();
+        assert_eq!(missing_metadata.total_count, 2);
+
+        let typed = library
+            .search_online_catalog(query(
+                "category:manga uploader:tester pages>=10",
+                CatalogSort::Latest,
+                0,
+                10,
+            ))
+            .unwrap();
+        assert_eq!(typed.works[0].identity, khentai(3));
+    }
+
+    #[test]
+    fn language_and_expunged_policies_remain_outside_the_user_expression() {
+        let (_root, library) = searchable_library();
+        let catalog_path = library.root().join("catalogs/kdata.db");
+        let catalog = Connection::open(catalog_path).unwrap();
+        catalog
+            .execute("UPDATE Works SET Expunged = 1 WHERE Id = 2", [])
+            .unwrap();
+        drop(catalog);
+        let mut scoped = query("id:2 OR id:3", CatalogSort::Latest, 0, 10);
+        scoped.language = Some(super::super::models::CatalogLanguage::Korean);
+
+        let page = library.search_online_catalog(scoped).unwrap();
+
+        assert_eq!(page.total_count, 1);
+        assert_eq!(page.works[0].identity, khentai(3));
+    }
+
+    #[test]
+    fn bulk_summary_hydration_is_zero_or_one_query_for_a_bounded_page() {
+        let library_root = tempfile::tempdir().unwrap();
+        let vck_root = tempfile::tempdir().unwrap();
+        write_vck_fixture(vck_root.path(), 100, r#"{}"#);
+        let source = Connection::open(vck_root.path().join("data/kdata.db")).unwrap();
+        for id in 1..=100 {
+            source
+                .execute(
+                    "INSERT INTO Tags (WorkId, Namespace, Value) VALUES (?1, 'artist', ?2)",
+                    (id, format!("artist-{id}")),
+                )
+                .unwrap();
+            source
+                .execute(
+                    "INSERT INTO Tags (WorkId, Namespace, Value) VALUES (?1, 'series', ?2)",
+                    (id, format!("series-{id}")),
+                )
+                .unwrap();
+        }
+        drop(source);
+        let library = Library::open(library_root.path()).unwrap();
+        library.import_vck_catalog(vck_root.path()).unwrap();
+        let started = std::time::Instant::now();
+        let page = library
+            .search_online_catalog(query("", CatalogSort::Latest, 0, 100))
+            .unwrap();
+        let elapsed = started.elapsed();
+        assert_eq!(page.works.len(), 100);
+        for work in &page.works {
+            let id = &work.identity.provider_work_id;
+            assert_eq!(work.artists, [format!("artist-{id}")]);
+            assert_eq!(work.series, [format!("series-{id}")]);
+        }
+
+        let connection = library.connection().unwrap();
+        connection
+            .execute(
+                "ATTACH DATABASE ?1 AS catalog",
+                [library.root().join("catalogs/kdata.db").to_string_lossy().as_ref()],
+            )
+            .unwrap();
+        let ids = (1_i64..=100).collect::<Vec<_>>();
+        assert_eq!(super::bulk_summary_tags(&connection, &[]).unwrap().1, 0);
+        let (hydrated, query_count) = super::bulk_summary_tags(&connection, &ids).unwrap();
+        assert_eq!(query_count, 1);
+        assert_eq!(hydrated.len(), 100);
+        eprintln!(
+            "CATALOG-004 fixture query: 100 results with bulk hydration in {:.2?}",
+            elapsed
+        );
     }
 
     #[test]
@@ -1099,6 +1235,7 @@ mod tests {
         let page = library
             .search_online_catalog(CatalogSearchQuery {
                 provider: CatalogProvider::KHentai,
+                language: None,
                 text: String::new(),
                 sort: CatalogSort::Latest,
                 scope: CatalogScope::Bookmarked,
@@ -1201,6 +1338,8 @@ mod tests {
             .search_online_catalog(query("", CatalogSort::Latest, 1, 1))
             .unwrap();
         assert_eq!((page.total_count, page.works[0].identity.clone()), (3, khentai(2)));
+        assert!(page.works[0].artists.is_empty());
+        assert_eq!(page.works[0].series, ["fleet log"]);
         for (sort, expected) in [
             (CatalogSort::Latest, 1),
             (CatalogSort::Views, 3),

@@ -1061,11 +1061,29 @@ pub enum CatalogScope {
     Bookmarked,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum CatalogLanguage {
+    Korean,
+    Japanese,
+}
+
+impl CatalogLanguage {
+    pub(crate) const fn as_tag(self) -> &'static str {
+        match self {
+            Self::Korean => "korean",
+            Self::Japanese => "japanese",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct CatalogSearchQuery {
     #[serde(default)]
     pub provider: super::catalog_provider::CatalogProvider,
+    #[serde(default)]
+    pub language: Option<CatalogLanguage>,
     pub text: String,
     pub sort: CatalogSort,
     pub scope: CatalogScope,

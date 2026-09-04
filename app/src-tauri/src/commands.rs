@@ -173,6 +173,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::OnlineCatalogWorkNotFound => "online_catalog_work_not_found",
             LibraryError::InvalidOnlineCatalog => "invalid_online_catalog",
             LibraryError::UnsupportedCatalogProvider => "unsupported_catalog_provider",
+            LibraryError::CatalogQuerySyntax { .. } => "catalog_query_syntax",
             LibraryError::InvalidCatalogTransportPath => "invalid_catalog_transport_path",
             LibraryError::CatalogTransportRejected(_) => "catalog_transport_rejected",
             LibraryError::InvalidCatalogTransportResponse => "invalid_catalog_transport_response",
@@ -2145,6 +2146,19 @@ mod tests {
 
         assert_eq!(value["code"], "classification_not_found");
         assert_eq!(value["message"], "요청한 분류 항목을 찾을 수 없습니다.");
+    }
+
+    #[test]
+    fn catalog_query_errors_have_a_stable_code_and_source_position() {
+        let error = CommandError::from(LibraryError::CatalogQuerySyntax {
+            start: 7,
+            end: 7,
+            message: "검색 조건이 더 필요합니다".into(),
+        });
+        let value = serde_json::to_value(error).unwrap();
+
+        assert_eq!(value["code"], "catalog_query_syntax");
+        assert_eq!(value["message"], "검색식 7..7 위치: 검색 조건이 더 필요합니다");
     }
 
     #[test]
