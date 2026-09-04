@@ -133,8 +133,8 @@ it("places the current-classification folder toggle immediately before window co
 it("acts as the window title bar with drag region and window controls", () => {
   const { container } = render(<AssetToolbar {...baseProps} />);
   const header = container.querySelector(".view-toolbar")!;
-  expect(header).toHaveAttribute("data-tauri-drag-region");
-  expect(container.querySelector(".view-toolbar h2")).toHaveAttribute("data-tauri-drag-region");
+  expect(header).toHaveAttribute("data-tauri-drag-region", "deep");
+  expect(container.querySelector(".view-toolbar h2")).not.toHaveAttribute("data-tauri-drag-region");
   expect(screen.getByRole("button", { name: "창 최소화" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "창 최대화" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "창 최소화" }).querySelector("svg")).toBeInTheDocument();

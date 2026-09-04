@@ -1,9 +1,10 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import "../../styles/tokens.css";
 import "../../styles/global.css";
+import { BackNavigationProvider, useBackHandler } from "../navigation/BackNavigation";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
 
@@ -54,4 +55,55 @@ it("layers shared dialog content above its overlay and application content", asy
   expect(overlayLayer).toBeGreaterThan(1);
   expect(dialogLayer).toBeGreaterThan(overlayLayer);
   expect(floatingMenuLayer).toBeGreaterThan(dialogLayer);
+});
+
+it("treats a strong horizontal trackpad swipe as back", async () => {
+  const user = userEvent.setup();
+  render(<DialogFixture />);
+  await user.click(screen.getByRole("button", { name: "열기" }));
+  const dialog = screen.getByRole("dialog");
+
+  fireEvent.wheel(dialog, { deltaX: 30, deltaY: 0 });
+  fireEvent.wheel(dialog, { deltaX: 30, deltaY: 0 });
+  expect(screen.queryByRole("heading", { name: "확인" })).toBeInTheDocument();
+  fireEvent.wheel(dialog, { deltaX: 30, deltaY: 0 });
+
+  expect(screen.queryByRole("heading", { name: "확인" })).not.toBeInTheDocument();
+});
+
+it("ignores vertical scrolling and small horizontal jitter", async () => {
+  const user = userEvent.setup();
+  render(<DialogFixture />);
+  await user.click(screen.getByRole("button", { name: "열기" }));
+  const dialog = screen.getByRole("dialog");
+
+  fireEvent.wheel(dialog, { deltaX: 5, deltaY: 200 });
+  fireEvent.wheel(dialog, { deltaX: 10, deltaY: 0 });
+  fireEvent.wheel(dialog, { deltaX: 10, deltaY: 0 });
+
+  expect(screen.getByRole("heading", { name: "확인" })).toBeVisible();
+});
+
+it("prefers the registered back chain over closing directly", async () => {
+  const onBack = vi.fn(() => true);
+  const onClose = vi.fn();
+  function BackFixture() {
+    useBackHandler(onBack, 200, true);
+    return (
+      <Dialog open title="확인" onClose={onClose}>
+        <span>내용</span>
+      </Dialog>
+    );
+  }
+  render(
+    <BackNavigationProvider>
+      <BackFixture />
+    </BackNavigationProvider>,
+  );
+
+  fireEvent.wheel(screen.getByRole("dialog"), { deltaX: 100, deltaY: 0 });
+
+  expect(onBack).toHaveBeenCalledOnce();
+  expect(onClose).not.toHaveBeenCalled();
+  expect(screen.getByRole("heading", { name: "확인" })).toBeVisible();
 });

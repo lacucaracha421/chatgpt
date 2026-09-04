@@ -5,11 +5,11 @@ import { ViewToolbar } from "./ViewToolbar";
 afterEach(cleanup);
 
 describe("ViewToolbar", () => {
-  it("renders the title with a drag region", () => {
+  it("marks the whole bar as a deep native drag region", () => {
     const { container } = render(<ViewToolbar title="망가" />);
     const header = container.querySelector(".view-toolbar")!;
-    expect(header).toHaveAttribute("data-tauri-drag-region");
-    expect(container.querySelector(".view-toolbar h2")).toHaveAttribute("data-tauri-drag-region");
+    expect(header).toHaveAttribute("data-tauri-drag-region", "deep");
+    expect(container.querySelector(".view-toolbar h2")).not.toHaveAttribute("data-tauri-drag-region");
     expect(screen.getByRole("heading", { name: "망가" })).toBeInTheDocument();
   });
 
@@ -17,7 +17,7 @@ describe("ViewToolbar", () => {
     const { container } = render(<ViewToolbar title="T" actions={<button type="button">새로고침</button>}>좌측 내용</ViewToolbar>);
     expect(screen.getByText("좌측 내용")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "새로고침" })).toBeInTheDocument();
-    expect(container.querySelector(".view-toolbar__content")).toHaveAttribute("data-tauri-drag-region");
+    expect(container.querySelector(".view-toolbar__content")).not.toHaveAttribute("data-tauri-drag-region");
   });
 
   it("always includes the window controls", () => {

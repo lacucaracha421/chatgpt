@@ -98,8 +98,8 @@ it("acts as the window title bar", async () => {
     </LibraryProvider>,
   );
   await screen.findByRole("toolbar");
-  expect(container.querySelector(".view-toolbar")).toHaveAttribute("data-tauri-drag-region");
-  expect(container.querySelector(".view-toolbar h2")).toHaveAttribute("data-tauri-drag-region");
+  expect(container.querySelector(".view-toolbar")).toHaveAttribute("data-tauri-drag-region", "deep");
+  expect(container.querySelector(".view-toolbar h2")).not.toHaveAttribute("data-tauri-drag-region");
   expect(screen.getByRole("button", { name: "창 닫기" })).toBeInTheDocument();
 });
 
