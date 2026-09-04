@@ -63,6 +63,8 @@ describe("CollectionCard", () => {
     expect(screen.queryByText("2019")).not.toBeInTheDocument();
     expect(screen.queryByText("87")).not.toBeInTheDocument();
     expect(screen.queryByText("5")).not.toBeInTheDocument();
+    expect(screen.getByText("Sample")).toHaveAttribute("title", "Sample");
+    expect(screen.getByText("Developer")).toHaveAttribute("title", "Developer");
   });
 
   it("renders release badges only for positive unread counts", () => {

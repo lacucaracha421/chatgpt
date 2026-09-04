@@ -15,12 +15,13 @@ const series: MangaSeries[] = [
 describe("MangaBrowser", () => {
   it("scans and shows the cover grid when the root is set", async () => {
     const gateway = createGateway({ root: "C:\\manga", series });
-    render(<LibraryProvider gateway={gateway}><MangaBrowser /></LibraryProvider>);
+    const { container } = render(<LibraryProvider gateway={gateway}><MangaBrowser /></LibraryProvider>);
     await userEvent.click(await screen.findByRole("button", { name: "로컬" }));
     await waitFor(() => expect(gateway.scanManga).toHaveBeenCalled());
     expect(await screen.findByText("T1")).toBeVisible();
     expect(screen.getByText("T2")).toBeVisible();
-    expect(screen.getAllByRole("img").length).toBe(2);
+    expect(container.querySelectorAll(".manga-browser__cover img").length).toBe(2);
+    expect(container.querySelector(".manga-browser__cover img")).toHaveAttribute("alt", "");
   });
 
   it("shows cached manga while a slow scan continues", async () => {

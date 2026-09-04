@@ -1,6 +1,6 @@
 import { ArrowDownTrayIcon, ArrowPathIcon, BarsArrowDownIcon, ClockIcon, EyeIcon, FireIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { open } from "@tauri-apps/plugin-dialog";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -49,6 +49,8 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
   const [scope, setScope] = useState<CatalogScope>("all");
   const [page, setPage] = useState(0);
   const [suggestions, setSuggestions] = useState<CatalogSuggestion[]>([]);
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
+  const suggestionsListboxId = useId();
   const [loading, setLoading] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [openingWorkId, setOpeningWorkId] = useState<number | null>(null);
@@ -67,6 +69,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
   const progressTimer = useRef<number | null>(null);
   const pendingProgress = useRef<RemoteReadingProgress | null>(null);
   const searchRequest = useRef(0);
+  const suggestionRequest = useRef(0);
   const detailRequest = useRef(0);
   const bookmarkRequests = useRef(new Set<number>());
   const [message, setMessage] = useState<string | null>(null);
@@ -81,7 +84,9 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
     const request = ++searchRequest.current;
     setLoading(true);
     setPage(nextPage);
+    suggestionRequest.current += 1;
     setSuggestions([]);
+    setActiveSuggestionIndex(-1);
     try {
       const nextResults = await gateway.searchOnlineCatalog({
         text,
@@ -110,13 +115,23 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
   }, [gateway]);
 
   useEffect(() => {
+    const request = ++suggestionRequest.current;
     const text = query.trim();
     if (!status?.installed || text.length < 1 || text.includes(":")) {
       setSuggestions([]);
+      setActiveSuggestionIndex(-1);
       return;
     }
     const timer = window.setTimeout(() => {
-      void gateway.suggestOnlineCatalog(text, 10).then(setSuggestions).catch(() => setSuggestions([]));
+      void gateway.suggestOnlineCatalog(text, 10).then((nextSuggestions) => {
+        if (request !== suggestionRequest.current) return;
+        setSuggestions(nextSuggestions);
+        setActiveSuggestionIndex(-1);
+      }).catch(() => {
+        if (request !== suggestionRequest.current) return;
+        setSuggestions([]);
+        setActiveSuggestionIndex(-1);
+      });
     }, 120);
     return () => window.clearTimeout(timer);
   }, [gateway, query, status?.installed]);
@@ -136,8 +151,38 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
     }
   }
 
+  function closeSuggestions() {
+    suggestionRequest.current += 1;
+    setSuggestions([]);
+    setActiveSuggestionIndex(-1);
+  }
+
+  function selectSuggestion(suggestion: CatalogSuggestion) {
+    setQuery(suggestion.value);
+    closeSuggestions();
+    void search(suggestion.value);
+  }
+
+  function handleSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (suggestions.length === 0) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveSuggestionIndex((current) => current >= suggestions.length - 1 ? 0 : current + 1);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveSuggestionIndex((current) => current <= 0 ? suggestions.length - 1 : current - 1);
+    } else if (event.key === "Enter" && activeSuggestionIndex >= 0) {
+      event.preventDefault();
+      selectSuggestion(suggestions[activeSuggestionIndex]);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      closeSuggestions();
+    }
+  }
+
   function submit(event: FormEvent) {
     event.preventDefault();
+    closeSuggestions();
     void search(query.trim());
   }
 
@@ -300,14 +345,35 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
         <span className="manga-browser__count">{results ? `${results.totalCount.toLocaleString()}개 결과` : status?.installed ? `${status.workCount.toLocaleString()}개 작품` : ""}</span>
         {status?.installed && <form className="manga-browser__search online-catalog__search" role="search" onSubmit={submit}>
           <MagnifyingGlassIcon aria-hidden="true" />
-          <input type="search" aria-label="온라인 만화 검색" placeholder="제목 또는 한국어 태그 검색" value={query} onChange={(event) => setQuery(event.target.value)} />
-          {suggestions.length > 0 && <div className="online-catalog__suggestions" role="listbox" aria-label="검색 제안">
-            {suggestions.map((suggestion) => <button
+          <input
+            type="search"
+            role="combobox"
+            aria-label="온라인 만화 검색"
+            aria-autocomplete="list"
+            aria-expanded={suggestions.length > 0}
+            aria-controls={suggestions.length > 0 ? suggestionsListboxId : undefined}
+            aria-activedescendant={activeSuggestionIndex >= 0 ? `${suggestionsListboxId}-option-${activeSuggestionIndex}` : undefined}
+            placeholder="제목 또는 한국어 태그 검색"
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setSuggestions([]);
+              setActiveSuggestionIndex(-1);
+            }}
+            onKeyDown={handleSearchKeyDown}
+            onBlur={closeSuggestions}
+          />
+          {suggestions.length > 0 && <div id={suggestionsListboxId} className="online-catalog__suggestions" role="listbox" aria-label="검색 제안">
+            {suggestions.map((suggestion, index) => <button
+              id={`${suggestionsListboxId}-option-${index}`}
               key={suggestion.value}
               type="button"
               role="option"
-              aria-selected="false"
-              onClick={() => { setQuery(suggestion.value); void search(suggestion.value); }}
+              tabIndex={-1}
+              aria-selected={activeSuggestionIndex === index}
+              onMouseDown={(event) => event.preventDefault()}
+              onMouseEnter={() => setActiveSuggestionIndex(index)}
+              onClick={() => selectSuggestion(suggestion)}
             >
               <span>{suggestion.label}</span><small>{suggestion.value} · {suggestion.count.toLocaleString()}</small>
             </button>)}
@@ -353,8 +419,8 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
           />)}
         </div>}
     </div>
-    {results && results.totalCount > 0 && <footer className="online-catalog__pagination">
-      <span>{(results.page * results.pageSize + 1).toLocaleString()}–{Math.min(results.totalCount, (results.page + 1) * results.pageSize).toLocaleString()} / {results.totalCount.toLocaleString()}</span>
+    {results && results.totalCount > 0 && <footer className="online-catalog__pagination" aria-busy={loading}>
+      <span>{(results.page * results.pageSize + 1).toLocaleString()}–{Math.min(results.totalCount, (results.page + 1) * results.pageSize).toLocaleString()} / {results.totalCount.toLocaleString()}{loading && <em className="online-catalog__pagination-loading" role="status"> · 불러오는 중…</em>}</span>
       <div>
         <Button size="sm" disabled={loading || results.page === 0} onClick={() => void search(query.trim(), sort, scope, results.page - 1)}>이전 결과</Button>
         <Button size="sm" disabled={loading || (results.page + 1) * results.pageSize >= results.totalCount} onClick={() => void search(query.trim(), sort, scope, results.page + 1)}>다음 결과</Button>

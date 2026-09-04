@@ -448,7 +448,7 @@ Direction:
 - Follow-up candidates after the core grammar is stable: favorite tags, always-excluded tags, and contextual autocomplete counts based on the current query.
 
 ### MANGA-001 — Recover orphaned local manga into online catalog bookmarks
-Status: `VERIFY`
+Status: `DONE`
 
 Problem:
 - Local manga source files can disappear while `manga_series` metadata still survives in `library.sqlite` and metadata backups.
@@ -480,6 +480,7 @@ Remaining:
 - Manga now opens the online catalog by default; Local is secondary and is scanned only when entered.
 - Source controls are ordered `카탈로그/북마크` then `로컬`. The first control toggles Catalog <-> Bookmarks with one click; the separate bookmark-scope icon/menu is removed.
 - Exact or explicitly reviewed recovery apply now creates/preserves the catalog bookmark + audit link and removes only the successfully consumed `manga_series` row transactionally, so migrated works disappear from Local immediately. Unresolved and self-translated/local-only rows remain.
+- 2026-09-04 regression fix: schema 33 records the consumed `source_relative_path` in the recovery audit. Local scanning permanently skips those transferred folders, and legacy schema-32 audit rows are reconciled against re-indexed exact/lineage/review candidates before stale `manga_series` rows are removed. `listMangaSeries` performs this repair before returning cached Local results, preventing transferred works from flashing back into the Local view.
 
 2026-09-04 targeted remote lookup implementation:
 - Recovery preview now offers an explicit `원격 ID 확인` action only for fallback rows that still have a positive numeric gallery ID missing from the local catalog.
@@ -489,9 +490,9 @@ Remaining:
 - Selected metadata-backup ingestion is not required for the current incident: the audited backups contain the same 243 rows / 232 gallery IDs as the current DB, so no additional identity signal is available there.
 - Added Rust coverage for numeric-only remote lookup selection and exact-only targeted import with checkpoint preservation; Manga Browser coverage locks the no-match/self-translation behavior.
 
-Remaining verification:
-- Run the new remote-ID action once against the configured real VPS and confirm found IDs are promoted while genuinely absent/self-translated works stay unresolved without an error.
-- Keep at `VERIFY` until that real-network pass is confirmed; no bulk bookmark write is required for this verification.
+Verification:
+- Real catalog/recovery flow was verified in the Tauri app on 2026-09-04; catalog browsing and migrated-bookmark behavior worked as expected.
+- Scanner regression coverage now locks permanent suppression of transferred source paths and one-time repair of pre-schema-33 recovery audit rows.
 
 2026-09-03 read-only live-library audit:
 - The current DB still contains 243 `manga_series` rows even though the configured manga root no longer exists; no original series folders or `.lakomics-thumbs` survive.
@@ -579,7 +580,8 @@ Reference / constraints:
 - Shared Menu: explicit checkbox (`menuitemcheckbox`) and grouped radio (`menuitemradio`) paths; reader settings and manga sort migrated, ordinary actions unchanged.
 - Failed-video retry stops Enter/Space propagation (tile no longer opens); AssetViewer shows an explicit failure placeholder instead of a stale image (StableImage now surfaces undecodable preloads via onPreloadError).
 - Full frontend 74 files / 661 tests green; production build green (initial chunk 497.40 kB, under 500 kB warning). No Rust changes.
-- Deferred polish (from the interface review, untouched): OnlineCatalog suggestions APG rewrite, Toast lifecycle/role redesign, Collection showcase gradient/shadow/hover cleanup, manga cover duplicate alt, truncated-title fallbacks, shelf aria-labels, catalog pagination loading state.
+- 2026-09-04 visual polish pass: removed showcase-only decorative gradient/extra cover shadows and hover shadow changes; decorative manga/volume cover images no longer duplicate adjacent text in accessible names; truncated collection/catalog/local-manga labels expose their full text via native title; shelf buttons expose `선반 N`; catalog pagination exposes `aria-busy` plus a visible loading status while preserving the previous result page.
+- 2026-09-04 final UI polish pass: OnlineCatalog suggestions now use an input-owned ARIA combobox/listbox pattern with ArrowUp/ArrowDown, Enter, Escape, active-descendant state, mouse/keyboard synchronization, and stale-suggestion guards. Shared Toast now distinguishes polite status vs explicit error alerts, wraps long messages instead of truncating them, and pauses the 5-second auto-dismiss countdown while hovered or keyboard-focused. Full frontend: 75 files / 670 tests green; production build green (initial JS 498.74 kB, gzip 153.34 kB).
 
 ### CATALOG-002 — Heliotrope/VCK coexistence and migration strategy
 Status: `TODO`

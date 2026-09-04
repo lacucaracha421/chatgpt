@@ -34,6 +34,7 @@ export function CollectionCoverGrid({
             type="button"
             className="collection-overlay__shelf-button"
             aria-pressed={shelfFilter === shelf}
+            aria-label={`선반 ${shelf}`}
             onClick={() => onShelfFilterChange(shelfFilter === shelf ? null : shelf)}
           >
             {shelf}
@@ -58,7 +59,7 @@ export function CollectionCoverGrid({
                 <img
                   className="collection-cover-image"
                   src={collectionCoverThumbnailUrl(collectionId, cover.fileName)}
-                  alt={cover.volumeLabel}
+                  alt=""
                   loading="lazy"
                   decoding="async"
                   draggable={false}

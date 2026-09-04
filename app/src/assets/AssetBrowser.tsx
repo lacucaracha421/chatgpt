@@ -296,7 +296,7 @@ export function AssetBrowser({ view, onViewChange, classifications, albums = [],
   return <section className="asset-browser" aria-label="저장소">
     {view.kind !== "revisit" && <AssetToolbar view={view} classifications={classifications} albums={albums} collections={collections} sort={sort} mediaFilter={mediaFilter} aspectFilter={aspectFilter} directOnly={directOnly} metadataVisible={metadataVisible} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} thumbnailRowHeight={thumbnailRowHeight} onSortChange={onSortChange} onMediaFilterChange={changeMediaFilter} onAspectFilterChange={changeAspectFilter} onDirectOnlyChange={setDirectOnly} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onReshuffle={reshuffle} />}
     {message && <Toast actionLabel={undoAssetIds ? "실행 취소" : undefined} onAction={undoAssetIds ? undoTrash : undefined} actionDisabled={batchPending} onDismiss={() => dismissMessage(null)}>{message}</Toast>}
-    {currentFirstError && <Toast>{currentFirstError}</Toast>}
+    {currentFirstError && <Toast tone="error">{currentFirstError}</Toast>}
     <div className={`asset-browser__workspace${inspectorOpen ? " asset-browser__workspace--inspector" : ""}`}>
       <div className="asset-browser__gallery">
         {view.kind === "revisit" ? <RevisitBrowser
@@ -307,8 +307,8 @@ export function AssetBrowser({ view, onViewChange, classifications, albums = [],
           privacyMode={privacyMode}
           cellSize={thumbnailRowHeight}
         /> : assetResults}
-        {currentNextError && <div className="asset-browser__next-error"><Toast>{currentNextError}</Toast><Button onClick={() => loadNextPage(true)}>다시 시도</Button></div>}
-        {currentPrevError && <div className="asset-browser__next-error"><Toast>{currentPrevError}</Toast><Button onClick={() => loadPrevPage(true)}>다시 시도</Button></div>}
+        {currentNextError && <div className="asset-browser__next-error"><Toast tone="error">{currentNextError}</Toast><Button onClick={() => loadNextPage(true)}>다시 시도</Button></div>}
+        {currentPrevError && <div className="asset-browser__next-error"><Toast tone="error">{currentPrevError}</Toast><Button onClick={() => loadPrevPage(true)}>다시 시도</Button></div>}
         {(view.kind !== "revisit" || revisitDate) && <SelectionBar
           view={view}
           selectedCount={selectedIds.length}

@@ -829,11 +829,19 @@ input:disabled {
   pointer-events: auto;
 }
 
+.ui-toast--error {
+  border-color: color-mix(in srgb, var(--color-danger) 50%, var(--color-border));
+}
+
+.ui-toast--error .ui-toast__message {
+  color: var(--color-danger);
+}
+
 .ui-toast__message {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .ui-toggle input {
@@ -2841,7 +2849,7 @@ input:disabled {
 }
 
 .online-catalog__suggestions button:hover,
-.online-catalog__suggestions button:focus-visible { background: var(--color-surface-hover); }
+.online-catalog__suggestions button[aria-selected="true"] { background: var(--color-surface-hover); }
 .online-catalog__suggestions small { color: var(--color-muted); }
 
 .online-catalog__controls {
@@ -3045,6 +3053,10 @@ input:disabled {
 }
 
 .online-catalog__pagination > div { display: flex; gap: var(--space-2); }
+.online-catalog__pagination-loading {
+  color: var(--color-text);
+  font-style: normal;
+}
 
 .online-catalog-detail {
   display: grid;
@@ -3390,9 +3402,7 @@ input:disabled {
 }
 
 .collection-browser__stage--showcase {
-  background:
-    radial-gradient(circle at 50% 10%, color-mix(in srgb, var(--color-accent) 8%, transparent), transparent 38%),
-    var(--color-bg);
+  background: var(--color-bg);
 }
 
 .collection-browser__heading {
@@ -3479,7 +3489,7 @@ input:disabled {
   outline-offset: calc(var(--border-width) * -1);
   border-radius: var(--radius-tile);
   box-shadow: none;
-  transition: outline-color 130ms ease, box-shadow 130ms ease;
+  transition: outline-color 130ms ease;
 }
 
 .collection-card__object--game {
@@ -3503,14 +3513,7 @@ input:disabled {
   outline-color: var(--color-muted);
 }
 
-.collection-card:hover .collection-card__object--game .collection-card__cover,
-.collection-card:focus-visible .collection-card__object--game .collection-card__cover {
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.16);
-}
-
-.collection-browser__stage--showcase .collection-card__cover {
-  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.32);
-}
+/* Browsing hover uses outline/color only. Package depth stays static; showcase adds no extra shadow. */
 
 .collection-card__release-badge {
   position: absolute;

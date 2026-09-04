@@ -263,7 +263,7 @@ export function AssetInspector({
           </dl>
         </section>
       )}
-      {copyError && <Toast onDismiss={() => setCopyError(null)}>{copyError}</Toast>}
+      {copyError && <Toast tone="error" onDismiss={() => setCopyError(null)}>{copyError}</Toast>}
     </aside>
   );
 }

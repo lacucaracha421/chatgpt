@@ -264,6 +264,7 @@ impl Library {
     }
 
     pub fn list_manga_series(&self) -> Result<Vec<MangaSeries>, LibraryError> {
+        manga::repair_legacy_recovery_source_paths(self)?;
         let connection = self.connection()?;
         manga::list_series(&connection)
     }

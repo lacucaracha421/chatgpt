@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 32;
+pub(crate) const SCHEMA_VERSION: i64 = 33;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -56,6 +56,8 @@ const CLOUD_BACKFILL_CONTROL_SCHEMA: &str =
     include_str!("../../migrations/0031_cloud_backfill_control.sql");
 const MANGA_CATALOG_RECOVERY_SCHEMA: &str =
     include_str!("../../migrations/0032_manga_catalog_recovery.sql");
+const MANGA_CATALOG_RECOVERY_SOURCE_PATH_SCHEMA: &str =
+    include_str!("../../migrations/0033_manga_catalog_recovery_source_path.sql");
 
 pub fn open_database(path: &Path) -> Result<Connection, LibraryError> {
     let connection = Connection::open(path)?;
@@ -71,7 +73,7 @@ pub fn initialize_database(path: &Path) -> Result<Connection, LibraryError> {
     let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
     match version {
         SCHEMA_VERSION => {}
-        version @ 0..=31 => {
+        version if (0..SCHEMA_VERSION).contains(&version) => {
             if version > 0 {
                 let root = path
                     .parent()
@@ -185,6 +187,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         }
         if version <= 31 {
             transaction.execute_batch(MANGA_CATALOG_RECOVERY_SCHEMA)?;
+        }
+        if version <= 32 {
+            transaction.execute_batch(MANGA_CATALOG_RECOVERY_SOURCE_PATH_SCHEMA)?;
         }
         transaction.commit()?;
         Ok::<(), LibraryError>(())
@@ -1690,6 +1695,32 @@ mod tests {
             SCHEMA_VERSION,
         );
     }
+    #[test]
+    fn migrates_v32_to_manga_catalog_recovery_source_paths() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(MANGA_CATALOG_RECOVERY_SCHEMA)
+            .unwrap();
+
+        migrate_to_latest(&mut connection, 32).unwrap();
+
+        let source_column_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('manga_catalog_recovery_links')
+                 WHERE name = 'source_relative_path'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(source_column_count, 1);
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION,
+        );
+    }
+
     #[test]
     fn migrates_v31_to_manga_catalog_recovery_links() {
         let mut connection = Connection::open_in_memory().unwrap();

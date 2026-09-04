@@ -6,7 +6,7 @@ afterEach(cleanup);
 
 describe("CollectionCoverGrid", () => {
   it("uses asynchronously decoded thumbnails for cover tiles", () => {
-    render(
+    const { container } = render(
       <CollectionCoverGrid
         collectionId="collection/one"
         covers={[{ fileName: "vol 1.png", shelf: 1, volumeLabel: "vol.1" }]}
@@ -17,10 +17,13 @@ describe("CollectionCoverGrid", () => {
       />,
     );
 
-    expect(screen.getByRole("img", { name: "vol.1" })).toHaveAttribute(
+    const image = container.querySelector(".collection-overlay__cover-tile img");
+    expect(image).toHaveAttribute(
       "src",
       "http://lakomics.localhost/collection-cover-thumbnail/collection%2Fone/vol%201.png",
     );
-    expect(screen.getByRole("img", { name: "vol.1" })).toHaveAttribute("decoding", "async");
+    expect(image).toHaveAttribute("decoding", "async");
+    expect(image).toHaveAttribute("alt", "");
+    expect(screen.getByRole("button", { name: "선반 1" })).toBeInTheDocument();
   });
 });

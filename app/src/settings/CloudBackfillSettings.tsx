@@ -114,7 +114,7 @@ export function CloudBackfillSettings() {
     <section className="cloud-backfill" aria-labelledby="cloud-backfill-title">
       <h3 className="settings-view__group-title" id="cloud-backfill-title">모바일 라이브러리 동기화</h3>
       <p className="settings-view__row-note">PC 라이브러리가 원본입니다. PC가 꺼져 있어도 Lakomics Mobile에서 볼 수 있도록 비공개 Cloud에 복사하며, Cloud Capture와는 별개입니다.</p>
-      {error && <Toast onDismiss={() => setError(null)}>{error}</Toast>}
+      {error && <Toast tone="error" onDismiss={() => setError(null)}>{error}</Toast>}
       {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
 
       <div className="cloud-backfill__status">

@@ -260,9 +260,9 @@ function MangaCoverGrid({ series, cardWidth, onOpenSeries }: { series: MangaSeri
         {privacyMode ? <Skeleton className="privacy-mask manga-browser__cover-mask" label="비공개 모드" />
           : failedCovers.has(entry.id)
             ? <span className="manga-browser__cover-fallback catalog-thumbnail__fallback"><strong>{entry.pageCount}페이지</strong></span>
-            : <img src={mangaCoverUrl(entry.id)} alt={entry.title} loading="lazy" draggable={false} onError={() => setFailedCovers((current) => new Set(current).add(entry.id))} />}
-        <span className="manga-browser__cover-title">{entry.title}</span>
-        <span className="manga-browser__cover-author">{entry.author} · {entry.pageCount}페이지</span>
+            : <img src={mangaCoverUrl(entry.id)} alt="" loading="lazy" draggable={false} onError={() => setFailedCovers((current) => new Set(current).add(entry.id))} />}
+        <span className="manga-browser__cover-title" title={entry.title}>{entry.title}</span>
+        <span className="manga-browser__cover-author" title={`${entry.author} · ${entry.pageCount}페이지`}>{entry.author} · {entry.pageCount}페이지</span>
       </button>
     ))}
   </div>;

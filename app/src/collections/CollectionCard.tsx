@@ -54,8 +54,8 @@ export function CollectionCard({
         </span>
       </span>
       <span className="collection-card__meta">
-        <span className="collection-card__name">{collection.name}</span>
-        <span className="collection-card__credit">{collectionCredit(collection)}</span>
+        <span className="collection-card__name" title={collection.name}>{collection.name}</span>
+        <span className="collection-card__credit" title={collectionCredit(collection) || undefined}>{collectionCredit(collection)}</span>
       </span>
     </button>
   );

@@ -623,7 +623,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
       <div className="settings-view__section">
         <header className="settings-view__header"><h2>정보</h2><p>확장 프로그램 연결과 단축키를 확인합니다.</p></header>
         <h3 className="settings-view__group-title">브라우저 확장</h3>
-        {extensionError && <Toast onDismiss={() => setExtensionError(null)}>{extensionError}</Toast>}
+        {extensionError && <Toast tone="error" onDismiss={() => setExtensionError(null)}>{extensionError}</Toast>}
         {!extensionConnection && !extensionError ? (
           <Skeleton className="settings-view__skeleton" label="확장 프로그램 연결 정보를 불러오는 중" />
         ) : extensionConnection ? (
@@ -675,11 +675,11 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
         {section === "external_services" && (
       <div className="settings-view__section">
         <header className="settings-view__header"><h2>외부 서비스</h2><p>온라인 서비스 연결과 자격 증명을 관리합니다.</p></header>
-        {aladinError && <Toast onDismiss={() => setAladinError(null)}>{aladinError}</Toast>}
-        {igdbError && <Toast onDismiss={() => setIgdbError(null)}>{igdbError}</Toast>}
-        {tmdbError && <Toast onDismiss={() => setTmdbError(null)}>{tmdbError}</Toast>}
-        {catalogError && <Toast onDismiss={() => setCatalogError(null)}>{catalogError}</Toast>}
-        {cloudError && <Toast onDismiss={() => setCloudError(null)}>{cloudError}</Toast>}
+        {aladinError && <Toast tone="error" onDismiss={() => setAladinError(null)}>{aladinError}</Toast>}
+        {igdbError && <Toast tone="error" onDismiss={() => setIgdbError(null)}>{igdbError}</Toast>}
+        {tmdbError && <Toast tone="error" onDismiss={() => setTmdbError(null)}>{tmdbError}</Toast>}
+        {catalogError && <Toast tone="error" onDismiss={() => setCatalogError(null)}>{catalogError}</Toast>}
+        {cloudError && <Toast tone="error" onDismiss={() => setCloudError(null)}>{cloudError}</Toast>}
         {cloudMessage && <Toast onDismiss={() => setCloudMessage(null)}>{cloudMessage}</Toast>}
         <h3 className="settings-view__group-title">연결 상태</h3>
         <dl className="settings-view__property">
@@ -874,7 +874,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           </span>
         </dl>
         <h3 className="settings-view__group-title">레거시 패키지 가져오기</h3>
-        {legacyError && <Toast onDismiss={() => setLegacyError(null)}>{legacyError}</Toast>}
+        {legacyError && <Toast tone="error" onDismiss={() => setLegacyError(null)}>{legacyError}</Toast>}
         <dl className="settings-view__property">
           <dt>패키지 폴더</dt>
           <dd className="settings-view__path">{legacyPackage?.packageRoot ?? "선택되지 않음"}</dd>
@@ -967,7 +967,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
         {confirmingId ? (
           <div className="settings-view__safety-confirm">
             <p>현재 상태를 별도로 보존한 뒤 선택한 시점으로 관리 정보를 복구합니다.</p>
-            {error && <Toast onDismiss={() => setError(null)}>{error}</Toast>}
+            {error && <Toast tone="error" onDismiss={() => setError(null)}>{error}</Toast>}
             <div className="ui-dialog__actions">
               <Button disabled={pending} onClick={() => setConfirmingId(null)}>취소</Button>
               <Button variant="primary" disabled={pending} onClick={() => void restore()}>
@@ -977,7 +977,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           </div>
         ) : (
           <>
-            {error && <div className="settings-view__safety-error"><Toast>{error}</Toast><Button onClick={() => { setError(null); setBackups(null); setBackupRetryVersion((version) => version + 1); }}>다시 시도</Button></div>}
+            {error && <div className="settings-view__safety-error"><Toast tone="error">{error}</Toast><Button onClick={() => { setError(null); setBackups(null); setBackupRetryVersion((version) => version + 1); }}>다시 시도</Button></div>}
             {!backups && !error ? (
               <Skeleton className="settings-view__skeleton" label="백업 목록을 불러오는 중" />
             ) : backups?.length === 0 ? (

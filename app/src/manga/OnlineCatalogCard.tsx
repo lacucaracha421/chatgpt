@@ -30,8 +30,8 @@ export function OnlineCatalogCard({ work, opening, bookmarkPending, onOpen, onBo
         pageCount={work.fileCount}
       />
       <span className="online-catalog-card__metadata">
-        <strong>{opening ? "작품을 여는 중…" : work.title}</strong>
-        <span>{byline}</span>
+        <strong title={opening ? undefined : work.title}>{opening ? "작품을 여는 중…" : work.title}</strong>
+        <span title={byline}>{byline}</span>
         <small>조회 {work.views.toLocaleString()} · {work.fileCount}페이지</small>
       </span>
     </button>

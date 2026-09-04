@@ -43,7 +43,7 @@ describe("OnlineCatalogBrowser", () => {
   it("keeps only the newest search response", async () => {
     const gateway = createGateway(true);
     renderBrowser(gateway);
-    const search = await screen.findByRole("searchbox", { name: "온라인 만화 검색" });
+    const search = await screen.findByRole("combobox", { name: "온라인 만화 검색" });
     const older = deferred<Awaited<ReturnType<LibraryGateway["searchOnlineCatalog"]>>>();
     const newer = deferred<Awaited<ReturnType<LibraryGateway["searchOnlineCatalog"]>>>();
     vi.mocked(gateway.searchOnlineCatalog)
@@ -182,6 +182,8 @@ describe("OnlineCatalogBrowser", () => {
     const cover = await screen.findByRole("img", { name: "오래된 제독 표지" });
     const card = cover.closest("article")!;
     expect(cover).toHaveAttribute("src", work.thumbnailUrl);
+    expect(within(card).getByText("오래된 제독")).toHaveAttribute("title", "오래된 제독");
+    expect(within(card).getByText("artist · series")).toHaveAttribute("title", "artist · series");
 
     await userEvent.click(screen.getByRole("button", { name: "오래된 제독 북마크" }));
     expect(gateway.setOnlineCatalogBookmark).toHaveBeenCalledWith(3, true);
@@ -212,10 +214,38 @@ describe("OnlineCatalogBrowser", () => {
     expect(gateway.importVckCatalog).toHaveBeenCalledWith("C:\\VCK");
   });
 
+  it("keeps focus on the combobox while keyboard navigation selects a suggestion", async () => {
+    const gateway = createGateway(true);
+    renderBrowser(gateway);
+    const search = await screen.findByRole("combobox", { name: "온라인 만화 검색" });
+
+    await userEvent.type(search, "제독");
+    const suggestion = await screen.findByRole("option", { name: /제독/ });
+    const listbox = suggestion.closest('[role="listbox"]')!;
+    expect(search).toHaveFocus();
+    expect(search).toHaveAttribute("aria-expanded", "true");
+    expect(search).toHaveAttribute("aria-controls", listbox.id);
+
+    await userEvent.keyboard("{ArrowDown}");
+    expect(suggestion).toHaveAttribute("aria-selected", "true");
+    expect(search).toHaveAttribute("aria-activedescendant", suggestion.id);
+
+    const pending = deferred<Awaited<ReturnType<LibraryGateway["searchOnlineCatalog"]>>>();
+    vi.mocked(gateway.searchOnlineCatalog).mockReturnValueOnce(pending.promise);
+    await userEvent.keyboard("{Enter}");
+    expect(search).toHaveFocus();
+    expect(search).toHaveValue("character:teitoku");
+    expect(search).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("option", { name: /제독/ })).not.toBeInTheDocument();
+    expect(gateway.searchOnlineCatalog).toHaveBeenLastCalledWith(
+      expect.objectContaining({ text: "character:teitoku", page: 0 }),
+    );
+  });
+
   it("searches by a Korean suggestion, changes sort, and opens a result", async () => {
     const gateway = createGateway(true);
     renderBrowser(gateway);
-    const search = await screen.findByRole("searchbox", { name: "온라인 만화 검색" });
+    const search = await screen.findByRole("combobox", { name: "온라인 만화 검색" });
 
     await userEvent.type(search, "제독");
     await userEvent.click(await screen.findByRole("option", { name: /제독/ }));

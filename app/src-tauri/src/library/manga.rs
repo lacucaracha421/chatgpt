@@ -74,6 +74,8 @@ where
         source,
     })?;
 
+    repair_legacy_recovery_source_paths(library)?;
+
     let mut changed: u64 = 0;
     let entries = fs::read_dir(&root_path).map_err(|source| LibraryError::ReadMedia {
         path: root_path.clone(),
@@ -103,6 +105,107 @@ where
     Ok(changed)
 }
 
+pub(crate) fn repair_legacy_recovery_source_paths(library: &Library) -> Result<(), LibraryError> {
+    let unresolved_links: i64 = {
+        let connection = library.connection()?;
+        connection.query_row(
+            "SELECT COUNT(*) FROM manga_catalog_recovery_links WHERE source_relative_path IS NULL",
+            [],
+            |row| row.get(0),
+        )?
+    };
+    let catalog_path = library.root().join("catalogs/kdata.db");
+    if unresolved_links == 0 || !catalog_path.exists() {
+        return Ok(());
+    }
+
+    let preview = preview_catalog_recovery(library)?;
+    let relative_paths = {
+        let connection = library.connection()?;
+        let mut statement = connection.prepare("SELECT id, relative_path FROM manga_series")?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.collect::<Result<std::collections::BTreeMap<_, _>, _>>()?
+    };
+
+    let links = {
+        let connection = library.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT manga_id, work_id, match_method FROM manga_catalog_recovery_links
+             WHERE source_relative_path IS NULL ORDER BY created_at, manga_id",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+
+    let mut claimed = std::collections::BTreeSet::new();
+    let mut resolved = Vec::new();
+    for (link_manga_id, work_id_raw, method) in links {
+        let Ok(work_id) = work_id_raw.parse::<u64>() else {
+            continue;
+        };
+        let matches = preview
+            .items
+            .iter()
+            .filter(|item| {
+                let matches_method = match method.as_str() {
+                    "exact_active" => {
+                        item.status == MangaCatalogRecoveryStatus::ExactActive
+                            && item.work_id == Some(work_id)
+                    }
+                    "historical_lineage" => {
+                        item.status == MangaCatalogRecoveryStatus::Historical
+                            && item.suggested_work_id == Some(work_id)
+                    }
+                    "candidate_review" => {
+                        item.status == MangaCatalogRecoveryStatus::Fallback
+                            && item
+                                .candidates
+                                .iter()
+                                .any(|candidate| candidate.work_id == work_id)
+                    }
+                    _ => false,
+                };
+                matches_method && relative_paths.contains_key(&item.manga_id)
+            })
+            .collect::<Vec<_>>();
+        if matches.len() != 1 {
+            continue;
+        }
+        let current_manga_id = matches[0].manga_id.clone();
+        if !claimed.insert(current_manga_id.clone()) {
+            continue;
+        }
+        let relative_path = relative_paths[&current_manga_id].clone();
+        resolved.push((link_manga_id, current_manga_id, relative_path));
+    }
+
+    if resolved.is_empty() {
+        return Ok(());
+    }
+    let mut connection = library.connection()?;
+    let transaction = connection.transaction()?;
+    for (link_manga_id, current_manga_id, relative_path) in resolved {
+        let updated = transaction.execute(
+            "UPDATE manga_catalog_recovery_links SET source_relative_path = ?1
+             WHERE manga_id = ?2 AND source_relative_path IS NULL",
+            rusqlite::params![relative_path, link_manga_id],
+        )?;
+        if updated > 0 {
+            transaction.execute("DELETE FROM manga_series WHERE id = ?1", [current_manga_id])?;
+        }
+    }
+    transaction.commit()?;
+    Ok(())
+}
+
 fn scan_series_folder<F>(
     library: &Library,
     root: &Path,
@@ -113,6 +216,25 @@ fn scan_series_folder<F>(
 where
     F: FnMut(&Path, &Path) -> Result<(), LibraryError>,
 {
+    let recovered = {
+        let connection = library.connection()?;
+        let recovered: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM manga_catalog_recovery_links WHERE source_relative_path = ?1)",
+            [relative_path],
+            |row| row.get(0),
+        )?;
+        if recovered {
+            connection.execute(
+                "DELETE FROM manga_series WHERE relative_path = ?1",
+                [relative_path],
+            )?;
+        }
+        recovered
+    };
+    if recovered {
+        return Ok(false);
+    }
+
     let folder = root.join(relative_path);
     let (title, author, gallery_id) = parse_series_metadata(&folder, relative_path);
     let page_files = list_page_files(&folder)?;
@@ -790,12 +912,16 @@ pub(crate) fn apply_exact_catalog_recovery(
     )?;
     let candidates = {
         let mut statement = connection.prepare(
-            "SELECT m.id, w.Id FROM manga_series AS m
+            "SELECT m.id, m.relative_path, w.Id FROM manga_series AS m
              JOIN catalog.Works AS w ON w.Id = CAST(m.gallery_id AS INTEGER)
              WHERE w.Expunged = 0 ORDER BY m.id",
         )?;
         let rows = statement.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
         })?;
         rows.collect::<Result<Vec<_>, _>>()?
     };
@@ -804,7 +930,7 @@ pub(crate) fn apply_exact_catalog_recovery(
     let transaction = connection.transaction()?;
     let mut created_bookmarks = 0u64;
     let mut existing_bookmarks = 0u64;
-    for (manga_id, work_id) in &candidates {
+    for (manga_id, source_relative_path, work_id) in &candidates {
         let work_id = work_id.to_string();
         let already_bookmarked: bool = transaction.query_row(
             "SELECT EXISTS(SELECT 1 FROM online_catalog_bookmarks WHERE provider = ?1 AND work_id = ?2)",
@@ -825,10 +951,10 @@ pub(crate) fn apply_exact_catalog_recovery(
         }
         transaction.execute(
             "INSERT INTO manga_catalog_recovery_links
-                (manga_id, provider, work_id, match_method, bookmark_created, created_at)
-             VALUES (?1, ?2, ?3, 'exact_active', ?4, ?5)
+                (manga_id, provider, work_id, match_method, bookmark_created, created_at, source_relative_path)
+             VALUES (?1, ?2, ?3, 'exact_active', ?4, ?5, ?6)
              ON CONFLICT(manga_id) DO NOTHING",
-            rusqlite::params![manga_id, provider, work_id, i64::from(inserted), now],
+            rusqlite::params![manga_id, provider, work_id, i64::from(inserted), now, source_relative_path],
         )?;
         transaction.execute("DELETE FROM manga_series WHERE id = ?1", [manga_id])?;
     }
@@ -895,6 +1021,16 @@ pub(crate) fn apply_selected_catalog_recovery(
         if !allowed {
             continue;
         }
+        let source_relative_path: Option<String> = transaction
+            .query_row(
+                "SELECT relative_path FROM manga_series WHERE id = ?1",
+                [&selection.manga_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(source_relative_path) = source_relative_path else {
+            continue;
+        };
         let work_id = selection.work_id.to_string();
         let catalog_active: bool = transaction.query_row(
             "SELECT EXISTS(SELECT 1 FROM catalog.Works WHERE Id = ?1 AND Expunged = 0)",
@@ -923,8 +1059,8 @@ pub(crate) fn apply_selected_catalog_recovery(
         }
         transaction.execute(
             "INSERT INTO manga_catalog_recovery_links
-                (manga_id, provider, work_id, match_method, bookmark_created, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                (manga_id, provider, work_id, match_method, bookmark_created, created_at, source_relative_path)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
              ON CONFLICT(manga_id) DO NOTHING",
             rusqlite::params![
                 selection.manga_id,
@@ -932,10 +1068,14 @@ pub(crate) fn apply_selected_catalog_recovery(
                 work_id,
                 method,
                 i64::from(inserted),
-                now
+                now,
+                source_relative_path
             ],
         )?;
-        transaction.execute("DELETE FROM manga_series WHERE id = ?1", [&selection.manga_id])?;
+        transaction.execute(
+            "DELETE FROM manga_series WHERE id = ?1",
+            [&selection.manga_id],
+        )?;
         matched_count += 1;
     }
     transaction.commit()?;
@@ -1158,10 +1298,8 @@ mod tests {
             .set_manga_root(Some(manga_root.to_string_lossy().as_ref()))
             .unwrap();
 
-        let changed = scan_with_thumbnail(&library, |_, _| {
-            Err(LibraryError::UnsupportedImage)
-        })
-        .unwrap();
+        let changed =
+            scan_with_thumbnail(&library, |_, _| Err(LibraryError::UnsupportedImage)).unwrap();
 
         assert_eq!(changed, 1, "the series itself must stay indexed");
         let connection = library.connection().unwrap();
@@ -1174,7 +1312,10 @@ mod tests {
             .unwrap();
         assert_eq!(relative_path, "unsupported-only");
         assert!(thumb_relative.ends_with(".webp"));
-        assert!(!manga_root.join(".lakomics-thumbs").join(&thumb_relative).exists());
+        assert!(!manga_root
+            .join(".lakomics-thumbs")
+            .join(&thumb_relative)
+            .exists());
     }
 
     #[test]
@@ -1201,7 +1342,10 @@ mod tests {
         let count: i64 = connection
             .query_row("SELECT COUNT(*) FROM manga_series", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(count, 0, "scan must abort instead of half-indexing on unexpected errors");
+        assert_eq!(
+            count, 0,
+            "scan must abort instead of half-indexing on unexpected errors"
+        );
     }
 
     #[test]
@@ -1235,7 +1379,96 @@ mod tests {
             .unwrap()
             .query_row("SELECT COUNT(*) FROM manga_series", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(count, 1, "missing source folders must not erase recovery metadata");
+        assert_eq!(
+            count, 1,
+            "missing source folders must not erase recovery metadata"
+        );
+    }
+
+    #[test]
+    fn scan_never_reindexes_a_recovered_source_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let manga_root = temp.path().join("manga");
+        let series = manga_root.join("series-a");
+        fs::create_dir_all(&series).unwrap();
+        fs::write(series.join("1.webp"), b"page").unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        library
+            .set_manga_root(Some(manga_root.to_string_lossy().as_ref()))
+            .unwrap();
+        library.connection().unwrap().execute(
+            "INSERT INTO manga_catalog_recovery_links
+             (manga_id, provider, work_id, match_method, bookmark_created, created_at, source_relative_path)
+             VALUES ('old-id', 'kHentai', '10', 'exact_active', 1, 'now', 'series-a')",
+            [],
+        ).unwrap();
+
+        let changed = scan_with_thumbnail(&library, |_, target| {
+            fs::write(target, b"thumbnail").unwrap();
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(changed, 0);
+        let count: i64 = library
+            .connection()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM manga_series", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn scan_repairs_legacy_recovery_links_before_reindexing() {
+        let temp = tempfile::tempdir().unwrap();
+        let manga_root = temp.path().join("manga");
+        let series = manga_root.join("series-a");
+        fs::create_dir_all(&series).unwrap();
+        fs::write(series.join("1.webp"), b"page").unwrap();
+        fs::write(
+            series.join("info.txt"),
+            "갤러리 넘버: 10\n제목: Active A\n작가: artist\n",
+        )
+        .unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        library
+            .set_manga_root(Some(manga_root.to_string_lossy().as_ref()))
+            .unwrap();
+        write_recovery_catalog(&library);
+        scan_with_thumbnail(&library, |_, target| {
+            fs::write(target, b"thumbnail").unwrap();
+            Ok(())
+        })
+        .unwrap();
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO manga_catalog_recovery_links
+             (manga_id, provider, work_id, match_method, bookmark_created, created_at)
+             VALUES ('pre-path-audit', 'kHentai', '10', 'exact_active', 1, 'now')",
+                [],
+            )
+            .unwrap();
+
+        let changed = scan_with_thumbnail(&library, |_, target| {
+            fs::write(target, b"thumbnail").unwrap();
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(changed, 0);
+        let connection = library.connection().unwrap();
+        let count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM manga_series", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+        let source_relative_path: String = connection.query_row(
+            "SELECT source_relative_path FROM manga_catalog_recovery_links WHERE manga_id = 'pre-path-audit'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(source_relative_path, "series-a");
     }
 
     fn write_recovery_catalog(library: &Library) {
@@ -1274,7 +1507,13 @@ mod tests {
                     (id, relative_path, title, author, gallery_id, page_count,
                      thumbnail_relative_path, scanned_at, modified_at)
                  VALUES (?1, ?2, ?3, 'artist', ?4, ?5, 'thumb.webp', 'now', 'now')",
-                rusqlite::params![id, format!("path-{id}"), format!("Title {id}"), gallery_id, page_count],
+                rusqlite::params![
+                    id,
+                    format!("path-{id}"),
+                    format!("Title {id}"),
+                    gallery_id,
+                    page_count
+                ],
             )
             .unwrap();
     }
@@ -1317,10 +1556,16 @@ mod tests {
 
         let connection = library.connection().unwrap();
         let bookmark_count: i64 = connection
-            .query_row("SELECT COUNT(*) FROM online_catalog_bookmarks", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM online_catalog_bookmarks", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         let link_count: i64 = connection
-            .query_row("SELECT COUNT(*) FROM manga_catalog_recovery_links", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM manga_catalog_recovery_links",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         let created_by_recovery: i64 = connection
             .query_row(
@@ -1336,6 +1581,15 @@ mod tests {
         assert_eq!(link_count, 2);
         assert_eq!(created_by_recovery, 1);
         assert_eq!(local_count, 2);
+        let mut source_statement = connection.prepare(
+            "SELECT source_relative_path FROM manga_catalog_recovery_links ORDER BY source_relative_path"
+        ).unwrap();
+        let source_paths = source_statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(source_paths, vec!["path-m-active-a", "path-m-active-b"]);
     }
 
     #[test]
@@ -1346,7 +1600,12 @@ mod tests {
         insert_recovery_manga(&library, "m-known", "10", 20);
         insert_recovery_manga(&library, "m-missing", "999", 20);
         insert_recovery_manga(&library, "m-custom", "self-translation", 20);
-        assert_eq!(library.missing_manga_catalog_recovery_gallery_ids().unwrap(), vec![999]);
+        assert_eq!(
+            library
+                .missing_manga_catalog_recovery_gallery_ids()
+                .unwrap(),
+            vec![999]
+        );
     }
 
     fn write_lineage_catalog(library: &Library) {
@@ -1453,6 +1712,12 @@ mod tests {
         assert_eq!(method, "historical_lineage");
         assert_eq!(bookmark_created, 1);
         assert_eq!(work_id, "102");
+        let source_relative_path: String = connection.query_row(
+            "SELECT source_relative_path FROM manga_catalog_recovery_links WHERE manga_id = 'm-old'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(source_relative_path, "path-m-old");
     }
 
     #[test]
@@ -1601,8 +1866,18 @@ mod tests {
             .unwrap();
         assert_eq!(method, "candidate_review");
         assert_eq!(work_id, "201");
+        let source_relative_path: String = connection.query_row(
+            "SELECT source_relative_path FROM manga_catalog_recovery_links WHERE manga_id = 'm-cand'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(source_relative_path, "path-cand");
         let local_count: i64 = connection
-            .query_row("SELECT COUNT(*) FROM manga_series WHERE id = 'm-cand'", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM manga_series WHERE id = 'm-cand'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(local_count, 0);
     }
