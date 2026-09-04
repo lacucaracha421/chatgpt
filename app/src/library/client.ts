@@ -102,10 +102,10 @@ export const libraryGateway: LibraryGateway = {
     invoke<CatalogSearchPage>("search_online_catalog", { query }),
   suggestOnlineCatalog: (text, limit) =>
     invoke<CatalogSuggestion[]>("suggest_online_catalog", { text, limit }),
-  getOnlineCatalogWorkDetail: (workId) =>
-    invoke<CatalogWorkDetail>("get_online_catalog_work_detail", { workId }),
-  setOnlineCatalogBookmark: (workId, bookmarked) =>
-    invoke("set_online_catalog_bookmark", { workId, bookmarked }),
+  getOnlineCatalogWorkDetail: (identity) =>
+    invoke<CatalogWorkDetail>("get_online_catalog_work_detail", { identity }),
+  setOnlineCatalogBookmark: (identity, bookmarked) =>
+    invoke("set_online_catalog_bookmark", { identity, bookmarked }),
   updateOnlineCatalog: () =>
     invoke<CatalogUpdateResult>("update_online_catalog"),
   setOnlineCatalogUpdateSettings: (enabled, intervalSeconds) =>
@@ -142,10 +142,10 @@ export const libraryGateway: LibraryGateway = {
     invoke<CloudBackfillControlState>("cloud_backfill_set_control_state", { state }),
   cloudBackfillReconcile: () =>
     invoke<CloudBackfillReconcileReport>("cloud_backfill_reconcile"),
-  resolveOnlineCatalogWork: (workId) =>
-    invoke<ResolvedGallery>("resolve_online_catalog_work", { workId }),
-  getRemoteReadingProgress: (provider, workId) =>
-    invoke<RemoteReadingProgress | null>("get_remote_reading_progress", { provider, workId }),
+  resolveOnlineCatalogWork: (identity) =>
+    invoke<ResolvedGallery>("resolve_online_catalog_work", { identity }),
+  getRemoteReadingProgress: (identity) =>
+    invoke<RemoteReadingProgress | null>("get_remote_reading_progress", { identity }),
   saveRemoteReadingProgress: (progress) =>
     invoke("save_remote_reading_progress", { progress }),
   clearRemoteMangaCache: () => invoke("clear_remote_manga_cache"),

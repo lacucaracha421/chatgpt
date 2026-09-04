@@ -128,13 +128,13 @@ pub(crate) fn media_response_with_range(
         };
     }
     if path.starts_with("/remote-catalog-thumbnail/") {
-        let Some(work_id) = parse_catalog_thumbnail_path(path) else {
+        let Some(identity) = parse_catalog_thumbnail_path(path) else {
             return empty_response(StatusCode::BAD_REQUEST);
         };
         let Some(library) = library else {
             return empty_response(StatusCode::NOT_FOUND);
         };
-        return match library.online_catalog_thumbnail(work_id) {
+        return match library.online_catalog_thumbnail(&identity) {
             Ok(media) => Response::builder()
                 .status(StatusCode::OK)
                 .header(CONTENT_TYPE, media.mime)
@@ -251,15 +251,28 @@ fn parse_remote_manga_path(path: &str) -> Option<(u64, u32)> {
     Some((work_id, page))
 }
 
-fn parse_catalog_thumbnail_path(path: &str) -> Option<u64> {
+fn parse_catalog_thumbnail_path(
+    path: &str,
+) -> Option<crate::library::catalog_provider::CatalogWorkIdentity> {
     let segments = path.strip_prefix('/')?.split('/').collect::<Vec<_>>();
-    let [route, work_id] = segments.as_slice() else {
+    let [route, provider, provider_work_id] = segments.as_slice() else {
         return None;
     };
     if *route != "remote-catalog-thumbnail" {
         return None;
     }
-    work_id.parse::<u64>().ok().filter(|id| *id > 0)
+    let provider = crate::library::catalog_provider::CatalogProvider::from_tag(provider)?;
+    let identity = crate::library::catalog_provider::CatalogWorkIdentity::new(
+        provider,
+        *provider_work_id,
+    )
+    .ok()?;
+    if provider == crate::library::catalog_provider::CatalogProvider::KHentai
+        && identity.khentai_numeric_id().is_err()
+    {
+        return None;
+    }
+    Some(identity)
 }
 
 fn parse_media_path(path: &str) -> Result<(MediaVariant, Option<String>), ()> {
@@ -625,13 +638,17 @@ mod tests {
     }
 
     #[test]
-    fn catalog_thumbnail_route_accepts_only_work_id_paths() {
-        assert_eq!(parse_catalog_thumbnail_path("/remote-catalog-thumbnail/42"), Some(42));
+    fn catalog_thumbnail_route_requires_a_provider_qualified_identity() {
+        let identity = parse_catalog_thumbnail_path("/remote-catalog-thumbnail/kHentai/42").unwrap();
+        assert_eq!(identity.provider, crate::library::catalog_provider::CatalogProvider::KHentai);
+        assert_eq!(identity.provider_work_id, "42");
         for path in [
+            "/remote-catalog-thumbnail/42",
+            "/remote-catalog-thumbnail/unknown/42",
             "/remote-catalog-thumbnail/0",
             "/remote-catalog-thumbnail/-1",
             "/remote-catalog-thumbnail/abc",
-            "/remote-catalog-thumbnail/42/extra",
+            "/remote-catalog-thumbnail/kHentai/42/extra",
             "/remote-catalog-thumbnail/",
         ] {
             assert_eq!(parse_catalog_thumbnail_path(path), None, "{path}");

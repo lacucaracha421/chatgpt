@@ -132,6 +132,7 @@ describe("libraryGateway online catalog contract", () => {
 
   it("maps catalog import, status, search, and suggestions", async () => {
     const query = {
+      provider: "kHentai" as const,
       text: "던전",
       sort: "latest" as const,
       scope: "all" as const,
@@ -146,11 +147,12 @@ describe("libraryGateway online catalog contract", () => {
     await libraryGateway.updateOnlineCatalog();
     await libraryGateway.setOnlineCatalogUpdateSettings(true, 21_600);
     await libraryGateway.runDueOnlineCatalogUpdate();
-    await libraryGateway.getOnlineCatalogWorkDetail(3);
-    await libraryGateway.setOnlineCatalogBookmark(3, true);
-    await libraryGateway.resolveOnlineCatalogWork(3);
-    await libraryGateway.getRemoteReadingProgress("kHentai", "3");
-    await libraryGateway.saveRemoteReadingProgress({ provider: "kHentai", workId: "3", lastPage: 2, pageCount: 10, lastReadAt: "" });
+    const identity = { provider: "kHentai" as const, providerWorkId: "3" };
+    await libraryGateway.getOnlineCatalogWorkDetail(identity);
+    await libraryGateway.setOnlineCatalogBookmark(identity, true);
+    await libraryGateway.resolveOnlineCatalogWork(identity);
+    await libraryGateway.getRemoteReadingProgress(identity);
+    await libraryGateway.saveRemoteReadingProgress({ ...identity, lastPage: 2, pageCount: 10, lastReadAt: "" });
     await libraryGateway.clearRemoteMangaCache();
 
     expect(invoke).toHaveBeenNthCalledWith(1, "import_vck_catalog", {
@@ -168,15 +170,15 @@ describe("libraryGateway online catalog contract", () => {
       intervalSeconds: 21_600,
     });
     expect(invoke).toHaveBeenNthCalledWith(7, "run_due_online_catalog_update");
-    expect(invoke).toHaveBeenNthCalledWith(8, "get_online_catalog_work_detail", { workId: 3 });
+    expect(invoke).toHaveBeenNthCalledWith(8, "get_online_catalog_work_detail", { identity });
     expect(invoke).toHaveBeenNthCalledWith(9, "set_online_catalog_bookmark", {
-      workId: 3,
+      identity,
       bookmarked: true,
     });
-    expect(invoke).toHaveBeenNthCalledWith(10, "resolve_online_catalog_work", { workId: 3 });
-    expect(invoke).toHaveBeenNthCalledWith(11, "get_remote_reading_progress", { provider: "kHentai", workId: "3" });
+    expect(invoke).toHaveBeenNthCalledWith(10, "resolve_online_catalog_work", { identity });
+    expect(invoke).toHaveBeenNthCalledWith(11, "get_remote_reading_progress", { identity });
     expect(invoke).toHaveBeenNthCalledWith(12, "save_remote_reading_progress", {
-      progress: { provider: "kHentai", workId: "3", lastPage: 2, pageCount: 10, lastReadAt: "" },
+      progress: { ...identity, lastPage: 2, pageCount: 10, lastReadAt: "" },
     });
     expect(invoke).toHaveBeenNthCalledWith(13, "clear_remote_manga_cache");
   });

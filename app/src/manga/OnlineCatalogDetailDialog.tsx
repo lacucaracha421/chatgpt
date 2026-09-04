@@ -39,7 +39,9 @@ export function OnlineCatalogDetailDialog({
   onRead,
   onClose,
 }: Props) {
-  const canResume = progress?.pageCount === detail.fileCount && progress.lastPage > 1;
+  const canResume = progress !== null
+    && progress.pageCount === detail.fileCount
+    && progress.lastPage > 1;
   const category = detail.category === null ? null : categories[detail.category] ?? null;
   const tagValues = (namespace: string) => detail.tagGroups
     .find((group) => group.namespace === namespace)?.values.join(" · ") ?? null;

@@ -1,3 +1,5 @@
+import type { RemoteProvider } from "../library/types";
+
 const MEDIA_ORIGIN = "http://lakomics.localhost";
 
 export function thumbnailUrl(assetId: string): string {
@@ -24,7 +26,7 @@ export function mangaPageUrl(seriesId: string, pageIndex: number): string {
   return `${MEDIA_ORIGIN}/manga-page/${encodeURIComponent(seriesId)}/${pageIndex}`;
 }
 
-export function remoteMangaPageUrl(provider: "kHentai", workId: string, pageIndex: number): string {
+export function remoteMangaPageUrl(provider: RemoteProvider, workId: string, pageIndex: number): string {
   return `${MEDIA_ORIGIN}/remote-manga-page/${provider}/${encodeURIComponent(workId)}/${pageIndex}`;
 }
 

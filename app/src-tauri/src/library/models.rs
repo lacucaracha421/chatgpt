@@ -1023,17 +1023,13 @@ pub struct CatalogUpdateResult {
     pub last_success_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum RemoteProvider {
-    KHentai,
-}
+pub type RemoteProvider = super::catalog_provider::CatalogProvider;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolvedGallery {
-    pub provider: RemoteProvider,
-    pub work_id: String,
+    #[serde(flatten)]
+    pub identity: super::catalog_provider::CatalogWorkIdentity,
     pub page_count: u32,
     pub page_urls: Vec<String>,
 }
@@ -1041,8 +1037,8 @@ pub struct ResolvedGallery {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteReadingProgress {
-    pub provider: String,
-    pub work_id: String,
+    #[serde(flatten)]
+    pub identity: super::catalog_provider::CatalogWorkIdentity,
     pub last_page: u32,
     pub page_count: u32,
     pub last_read_at: String,
@@ -1068,6 +1064,8 @@ pub enum CatalogScope {
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct CatalogSearchQuery {
+    #[serde(default)]
+    pub provider: super::catalog_provider::CatalogProvider,
     pub text: String,
     pub sort: CatalogSort,
     pub scope: CatalogScope,
@@ -1086,7 +1084,8 @@ pub struct CatalogSuggestion {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct CatalogWork {
-    pub id: u64,
+    #[serde(flatten)]
+    pub identity: super::catalog_provider::CatalogWorkIdentity,
     pub title: String,
     pub title_jpn: Option<String>,
     pub artists: Vec<String>,
@@ -1108,7 +1107,8 @@ pub struct CatalogTagGroup {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct CatalogWorkDetail {
-    pub id: u64,
+    #[serde(flatten)]
+    pub identity: super::catalog_provider::CatalogWorkIdentity,
     pub title: String,
     pub title_jpn: Option<String>,
     pub thumbnail_url: Option<String>,

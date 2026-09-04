@@ -1,6 +1,7 @@
 import { StarIcon as StarOutlineIcon } from "@heroicons/react/24/outline";
 import { StarIcon as StarSolidIcon } from "@heroicons/react/24/solid";
-import type { CatalogWork } from "../library/types";
+import type { CatalogWork, CatalogWorkIdentity } from "../library/types";
+import { catalogIdentityOf } from "./catalogIdentity";
 import { CatalogThumbnail } from "./CatalogThumbnail";
 
 type OnlineCatalogCardProps = {
@@ -8,7 +9,7 @@ type OnlineCatalogCardProps = {
   opening: boolean;
   bookmarkPending: boolean;
   onOpen: (work: CatalogWork) => void;
-  onBookmark: (workId: number, bookmarked: boolean) => void;
+  onBookmark: (identity: CatalogWorkIdentity, bookmarked: boolean) => void;
 };
 
 export function OnlineCatalogCard({ work, opening, bookmarkPending, onOpen, onBookmark }: OnlineCatalogCardProps) {
@@ -41,7 +42,7 @@ export function OnlineCatalogCard({ work, opening, bookmarkPending, onOpen, onBo
       aria-label={`${work.title} ${work.bookmarked ? "북마크 해제" : "북마크"}`}
       aria-pressed={work.bookmarked}
       disabled={bookmarkPending}
-      onClick={() => onBookmark(work.id, !work.bookmarked)}
+      onClick={() => onBookmark(catalogIdentityOf(work), !work.bookmarked)}
     >
       <BookmarkIcon aria-hidden="true" />
     </button>

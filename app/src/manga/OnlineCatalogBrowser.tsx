@@ -10,7 +10,9 @@ import type {
   CatalogSort,
   CatalogStatus,
   CatalogSuggestion,
+  CatalogWork,
   CatalogWorkDetail,
+  CatalogWorkIdentity,
   RemoteReadingProgress,
 } from "../library/types";
 import { Button } from "../shared/ui/Button";
@@ -22,6 +24,7 @@ import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { PageViewer } from "./PageViewer";
 import { OnlineCatalogCard } from "./OnlineCatalogCard";
 import { OnlineCatalogDetailDialog } from "./OnlineCatalogDetailDialog";
+import { catalogIdentityKey, catalogIdentityOf } from "./catalogIdentity";
 
 type OnlineCatalogBrowserProps = {
   onSwitchLocal: () => void;
@@ -53,15 +56,15 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
   const suggestionsListboxId = useId();
   const [loading, setLoading] = useState(false);
   const [updating, setUpdating] = useState(false);
-  const [openingWorkId, setOpeningWorkId] = useState<number | null>(null);
+  const [openingWorkKey, setOpeningWorkKey] = useState<string | null>(null);
   const [detail, setDetail] = useState<CatalogWorkDetail | null>(null);
   const [detailProgress, setDetailProgress] = useState<RemoteReadingProgress | null>(null);
-  const [bookmarkPendingIds, setBookmarkPendingIds] = useState<Set<number>>(() => new Set());
+  const [bookmarkPendingKeys, setBookmarkPendingKeys] = useState<Set<string>>(() => new Set());
   const [reading, setReading] = useState(false);
   const [viewer, setViewer] = useState<{
     title: string;
-    provider: "kHentai";
-    workId: string;
+    provider: CatalogWorkIdentity["provider"];
+    providerWorkId: string;
     pageCount: number;
     pageUrls: string[];
     initialPage: number;
@@ -71,7 +74,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
   const searchRequest = useRef(0);
   const suggestionRequest = useRef(0);
   const detailRequest = useRef(0);
-  const bookmarkRequests = useRef(new Set<number>());
+  const bookmarkRequests = useRef(new Set<string>());
   const [message, setMessage] = useState<string | null>(null);
   useAutoDismiss(message, setMessage);
 
@@ -89,6 +92,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
     setActiveSuggestionIndex(-1);
     try {
       const nextResults = await gateway.searchOnlineCatalog({
+        provider: "kHentai",
         text,
         sort: nextSort,
         scope: nextScope,
@@ -186,13 +190,14 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
     void search(query.trim());
   }
 
-  async function openDetail(workId: number) {
+  async function openDetail(work: CatalogWork) {
     const request = ++detailRequest.current;
-    setOpeningWorkId(workId);
+    const identity = catalogIdentityOf(work);
+    setOpeningWorkKey(catalogIdentityKey(identity));
     try {
       const [nextDetail, progress] = await Promise.all([
-        gateway.getOnlineCatalogWorkDetail(workId),
-        gateway.getRemoteReadingProgress("kHentai", String(workId)),
+        gateway.getOnlineCatalogWorkDetail(identity),
+        gateway.getRemoteReadingProgress(identity),
       ]);
       if (request === detailRequest.current) {
         setDetail(nextDetail);
@@ -203,27 +208,28 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
         setMessage(commandErrorMessage(error, "작품 정보를 불러오지 못했습니다"));
       }
     } finally {
-      if (request === detailRequest.current) setOpeningWorkId(null);
+      if (request === detailRequest.current) setOpeningWorkKey(null);
     }
   }
 
-  async function bookmarkWork(workId: number, bookmarked: boolean) {
-    if (bookmarkRequests.current.has(workId)) return false;
+  async function bookmarkWork(identity: CatalogWorkIdentity, bookmarked: boolean) {
+    const identityKey = catalogIdentityKey(identity);
+    if (bookmarkRequests.current.has(identityKey)) return false;
     const searchVersion = searchRequest.current;
-    bookmarkRequests.current.add(workId);
-    setBookmarkPendingIds(new Set(bookmarkRequests.current));
+    bookmarkRequests.current.add(identityKey);
+    setBookmarkPendingKeys(new Set(bookmarkRequests.current));
     try {
-      await gateway.setOnlineCatalogBookmark(workId, bookmarked);
+      await gateway.setOnlineCatalogBookmark(identity, bookmarked);
       setResults((current) => current && ({
         ...current,
-        works: current.works.map((work) => work.id === workId ? { ...work, bookmarked } : work),
+        works: current.works.map((work) => catalogIdentityKey(work) === identityKey ? { ...work, bookmarked } : work),
       }));
-      setDetail((current) => current?.id === workId ? { ...current, bookmarked } : current);
+      setDetail((current) => current && catalogIdentityKey(current) === identityKey ? { ...current, bookmarked } : current);
       if (!bookmarked && scope === "bookmarked" && searchRequest.current === searchVersion) {
         const targetPage = page > 0 && results?.works.length === 1 ? page - 1 : page;
         setResults((current) => current && ({
           ...current,
-          works: current.works.filter((work) => work.id !== workId),
+          works: current.works.filter((work) => catalogIdentityKey(work) !== identityKey),
         }));
         await search(query.trim(), sort, scope, targetPage);
       }
@@ -232,14 +238,14 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
       setMessage("북마크를 변경하지 못했습니다");
       return false;
     } finally {
-      bookmarkRequests.current.delete(workId);
-      setBookmarkPendingIds(new Set(bookmarkRequests.current));
+      bookmarkRequests.current.delete(identityKey);
+      setBookmarkPendingKeys(new Set(bookmarkRequests.current));
     }
   }
 
   async function bookmarkDetail(bookmarked: boolean) {
     if (!detail) return;
-    await bookmarkWork(detail.id, bookmarked);
+    await bookmarkWork(catalogIdentityOf(detail), bookmarked);
   }
 
   async function readDetail() {
@@ -249,7 +255,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
     const selectedProgress = detailProgress;
     setReading(true);
     try {
-      const gallery = await gateway.resolveOnlineCatalogWork(selectedDetail.id);
+      const gallery = await gateway.resolveOnlineCatalogWork(catalogIdentityOf(selectedDetail));
       if (request !== detailRequest.current) return;
       const initialPage = selectedProgress?.pageCount === gallery.pageCount
         ? Math.min(selectedProgress.lastPage, gallery.pageCount)
@@ -266,7 +272,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
 
   function closeDetail() {
     detailRequest.current += 1;
-    setOpeningWorkId(null);
+    setOpeningWorkKey(null);
     setReading(false);
     setDetail(null);
     setDetailProgress(null);
@@ -283,7 +289,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
     if (progressTimer.current !== null) window.clearTimeout(progressTimer.current);
     pendingProgress.current = {
       provider: viewer.provider,
-      workId: viewer.workId,
+      providerWorkId: viewer.providerWorkId,
       lastPage: page,
       pageCount: viewer.pageCount,
       lastReadAt: "",
@@ -410,12 +416,12 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
         : results?.works.length === 0 ? <EmptyState title="검색 결과가 없습니다">다른 제목이나 태그로 검색하세요.</EmptyState>
         : <div className="online-catalog__grid">
           {results?.works.map((work) => <OnlineCatalogCard
-            key={work.id}
+            key={catalogIdentityKey(work)}
             work={work}
-            opening={openingWorkId === work.id}
-            bookmarkPending={bookmarkPendingIds.has(work.id)}
-            onOpen={(selected) => void openDetail(selected.id)}
-            onBookmark={(workId, bookmarked) => void bookmarkWork(workId, bookmarked)}
+            opening={openingWorkKey === catalogIdentityKey(work)}
+            bookmarkPending={bookmarkPendingKeys.has(catalogIdentityKey(work))}
+            onOpen={(selected) => void openDetail(selected)}
+            onBookmark={(identity, bookmarked) => void bookmarkWork(identity, bookmarked)}
           />)}
         </div>}
     </div>
@@ -429,7 +435,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
     {detail && <OnlineCatalogDetailDialog
       detail={detail}
       progress={detailProgress}
-      bookmarkPending={bookmarkPendingIds.has(detail.id)}
+      bookmarkPending={bookmarkPendingKeys.has(catalogIdentityKey(detail))}
       reading={reading}
       onBookmark={(bookmarked) => void bookmarkDetail(bookmarked)}
       onTagSearch={searchTag}

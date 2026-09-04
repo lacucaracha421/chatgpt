@@ -10,7 +10,8 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 const work: CatalogWork = {
-  id: 3,
+  provider: "kHentai",
+  providerWorkId: "3",
   title: "오래된 제독",
   titleJpn: null,
   artists: ["artist"],
@@ -23,7 +24,8 @@ const work: CatalogWork = {
 };
 
 const detail: CatalogWorkDetail = {
-  id: work.id,
+  provider: work.provider,
+  providerWorkId: work.providerWorkId,
   title: work.title,
   titleJpn: null,
   thumbnailUrl: work.thumbnailUrl,
@@ -73,6 +75,29 @@ describe("OnlineCatalogBrowser", () => {
     expect(gateway.setOnlineCatalogBookmark).toHaveBeenCalledTimes(1);
     await act(async () => pending.resolve());
     expect(await screen.findByRole("button", { name: "오래된 제독 북마크 해제" })).toBeEnabled();
+  });
+
+  it("keeps equal provider work ids isolated in UI state and gateway calls", async () => {
+    const gateway = createGateway(true);
+    vi.mocked(gateway.searchOnlineCatalog).mockResolvedValue({
+      works: [
+        work,
+        { ...work, provider: "heliotrope", title: "다른 공급자 작품" },
+      ],
+      totalCount: 2,
+      page: 0,
+      pageSize: 48,
+    });
+    renderBrowser(gateway);
+
+    await userEvent.click(await screen.findByRole("button", { name: "다른 공급자 작품 북마크" }));
+
+    expect(gateway.setOnlineCatalogBookmark).toHaveBeenCalledWith(
+      { provider: "heliotrope", providerWorkId: "3" },
+      true,
+    );
+    expect(screen.getByRole("button", { name: "다른 공급자 작품 북마크 해제" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "오래된 제독 북마크" })).toBeEnabled();
   });
 
   it("does not open a viewer after closing a pending read", async () => {
@@ -132,8 +157,8 @@ describe("OnlineCatalogBrowser", () => {
     renderBrowser(gateway);
 
     await userEvent.click(await screen.findByRole("button", { name: "오래된 제독 상세 보기" }));
-    expect(gateway.getOnlineCatalogWorkDetail).toHaveBeenCalledWith(3);
-    expect(gateway.getRemoteReadingProgress).toHaveBeenCalledWith("kHentai", "3");
+    expect(gateway.getOnlineCatalogWorkDetail).toHaveBeenCalledWith({ provider: "kHentai", providerWorkId: "3" });
+    expect(gateway.getRemoteReadingProgress).toHaveBeenCalledWith({ provider: "kHentai", providerWorkId: "3" });
     expect(gateway.resolveOnlineCatalogWork).not.toHaveBeenCalled();
 
     await userEvent.click(await screen.findByRole("button", { name: "character:teitoku 검색" }));
@@ -143,7 +168,7 @@ describe("OnlineCatalogBrowser", () => {
 
     await userEvent.click(await screen.findByRole("button", { name: "오래된 제독 상세 보기" }));
     await userEvent.click(await screen.findByRole("button", { name: "이어 읽기" }));
-    expect(gateway.resolveOnlineCatalogWork).toHaveBeenCalledWith(3);
+    expect(gateway.resolveOnlineCatalogWork).toHaveBeenCalledWith({ provider: "kHentai", providerWorkId: "3" });
     expect(await screen.findByText("2 / 3")).toBeVisible();
   });
 
@@ -186,7 +211,7 @@ describe("OnlineCatalogBrowser", () => {
     expect(within(card).getByText("artist · series")).toHaveAttribute("title", "artist · series");
 
     await userEvent.click(screen.getByRole("button", { name: "오래된 제독 북마크" }));
-    expect(gateway.setOnlineCatalogBookmark).toHaveBeenCalledWith(3, true);
+    expect(gateway.setOnlineCatalogBookmark).toHaveBeenCalledWith({ provider: "kHentai", providerWorkId: "3" }, true);
     expect(gateway.getOnlineCatalogWorkDetail).not.toHaveBeenCalled();
 
     await userEvent.click(screen.getByRole("button", { name: "카탈로그" }));
@@ -259,12 +284,12 @@ describe("OnlineCatalogBrowser", () => {
     ));
     await userEvent.click(await screen.findByRole("button", { name: "오래된 제독 상세 보기" }));
     await userEvent.click(await screen.findByRole("button", { name: "이어 읽기" }));
-    expect(gateway.resolveOnlineCatalogWork).toHaveBeenCalledWith(work.id);
+    expect(gateway.resolveOnlineCatalogWork).toHaveBeenCalledWith({ provider: "kHentai", providerWorkId: "3" });
     expect(await screen.findByText("2 / 3")).toBeVisible();
     expect(screen.getByText("K-Hentai")).toBeVisible();
     await userEvent.keyboard("{ArrowRight}");
     await waitFor(() => expect(gateway.saveRemoteReadingProgress).toHaveBeenCalledWith(
-      expect.objectContaining({ provider: "kHentai", workId: "3", lastPage: 3, pageCount: 3 }),
+      expect.objectContaining({ provider: "kHentai", providerWorkId: "3", lastPage: 3, pageCount: 3 }),
     ));
   });
 
@@ -349,7 +374,7 @@ describe("OnlineCatalogBrowser", () => {
     fireEvent.click(screen.getByRole("button", { name: "망가 뷰어 닫기" }));
 
     expect(gateway.saveRemoteReadingProgress).toHaveBeenCalledWith(
-      expect.objectContaining({ workId: "3", lastPage: 3 }),
+      expect.objectContaining({ providerWorkId: "3", lastPage: 3 }),
     );
   });
 });
@@ -378,8 +403,8 @@ function createGateway(installed: boolean): LibraryGateway {
     searchOnlineCatalog: vi.fn().mockImplementation(async (query) => ({
       works: [
         work,
-        { ...work, id: 4, title: "함대 일지", thumbnailUrl: null },
-        { ...work, id: 5, title: "제독의 하루", thumbnailUrl: null },
+        { ...work, providerWorkId: "4", title: "함대 일지", thumbnailUrl: null },
+        { ...work, providerWorkId: "5", title: "제독의 하루", thumbnailUrl: null },
       ],
       totalCount: 97,
       page: query.page,
@@ -389,7 +414,7 @@ function createGateway(installed: boolean): LibraryGateway {
     getOnlineCatalogWorkDetail: vi.fn().mockResolvedValue(detail),
     setOnlineCatalogBookmark: vi.fn().mockResolvedValue(undefined),
     resolveOnlineCatalogWork: vi.fn().mockResolvedValue(resolvedGallery()),
-    getRemoteReadingProgress: vi.fn().mockResolvedValue({ provider: "kHentai", workId: "3", lastPage: 2, pageCount: 3, lastReadAt: "2026-08-22T12:00:00Z" }),
+    getRemoteReadingProgress: vi.fn().mockResolvedValue({ provider: "kHentai", providerWorkId: "3", lastPage: 2, pageCount: 3, lastReadAt: "2026-08-22T12:00:00Z" }),
     saveRemoteReadingProgress: vi.fn().mockResolvedValue(undefined),
     updateOnlineCatalog: vi.fn().mockResolvedValue({
       added: 3,
@@ -412,7 +437,7 @@ function createGateway(installed: boolean): LibraryGateway {
 function resolvedGallery(): ResolvedGallery {
   return {
     provider: "kHentai",
-    workId: "3",
+    providerWorkId: "3",
     pageCount: 3,
     pageUrls: [
       "https://a.siam-cdn.net/1.webp?expires=1800000000",

@@ -9,7 +9,7 @@ mod classification;
 mod collection;
 mod collection_source;
 mod collection_volume;
-mod catalog_provider;
+pub(crate) mod catalog_provider;
 pub(crate) mod credential;
 pub mod cloud_preflight;
 mod db;

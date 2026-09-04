@@ -118,18 +118,20 @@ export type CloudLibraryRestoreReport = {
   bytesDownloaded: number;
 };
 
-export type RemoteProvider = "kHentai";
+export type CatalogProvider = "kHentai" | "heliotrope";
+export type RemoteProvider = CatalogProvider;
 
-export type ResolvedGallery = {
-  provider: RemoteProvider;
-  workId: string;
+export type CatalogWorkIdentity = {
+  provider: CatalogProvider;
+  providerWorkId: string;
+};
+
+export type ResolvedGallery = CatalogWorkIdentity & {
   pageCount: number;
   pageUrls: string[];
 };
 
-export type RemoteReadingProgress = {
-  provider: RemoteProvider;
-  workId: string;
+export type RemoteReadingProgress = CatalogWorkIdentity & {
   lastPage: number;
   pageCount: number;
   lastReadAt: string;
@@ -139,6 +141,7 @@ export type CatalogSort = "latest" | "views" | "hotDay" | "hotWeek" | "hotMonth"
 export type CatalogScope = "all" | "bookmarked";
 
 export type CatalogSearchQuery = {
+  provider: CatalogProvider;
   text: string;
   sort: CatalogSort;
   scope: CatalogScope;
@@ -148,8 +151,7 @@ export type CatalogSearchQuery = {
 
 export type CatalogSuggestion = { value: string; label: string; count: number };
 
-export type CatalogWork = {
-  id: number;
+export type CatalogWork = CatalogWorkIdentity & {
   title: string;
   titleJpn: string | null;
   artists: string[];
@@ -163,8 +165,7 @@ export type CatalogWork = {
 
 export type CatalogTagGroup = { namespace: string; values: string[] };
 
-export type CatalogWorkDetail = {
-  id: number;
+export type CatalogWorkDetail = CatalogWorkIdentity & {
   title: string;
   titleJpn: string | null;
   thumbnailUrl: string | null;
@@ -874,8 +875,8 @@ export interface LibraryGateway {
   getOnlineCatalogStatus(): Promise<CatalogStatus>;
   searchOnlineCatalog(query: CatalogSearchQuery): Promise<CatalogSearchPage>;
   suggestOnlineCatalog(text: string, limit: number): Promise<CatalogSuggestion[]>;
-  getOnlineCatalogWorkDetail(workId: number): Promise<CatalogWorkDetail>;
-  setOnlineCatalogBookmark(workId: number, bookmarked: boolean): Promise<void>;
+  getOnlineCatalogWorkDetail(identity: CatalogWorkIdentity): Promise<CatalogWorkDetail>;
+  setOnlineCatalogBookmark(identity: CatalogWorkIdentity, bookmarked: boolean): Promise<void>;
   updateOnlineCatalog(): Promise<CatalogUpdateResult>;
   setOnlineCatalogUpdateSettings(enabled: boolean, intervalSeconds: number): Promise<CatalogStatus>;
   runDueOnlineCatalogUpdate(): Promise<CatalogUpdateResult | null>;
@@ -894,8 +895,8 @@ export interface LibraryGateway {
   cloudBackfillRetryFailed(): Promise<CloudBackfillRetryReport>;
   cloudBackfillSetControlState?(state: CloudBackfillControlState): Promise<CloudBackfillControlState>;
   cloudBackfillReconcile?(): Promise<CloudBackfillReconcileReport>;
-  resolveOnlineCatalogWork(workId: number): Promise<ResolvedGallery>;
-  getRemoteReadingProgress(provider: RemoteProvider, workId: string): Promise<RemoteReadingProgress | null>;
+  resolveOnlineCatalogWork(identity: CatalogWorkIdentity): Promise<ResolvedGallery>;
+  getRemoteReadingProgress(identity: CatalogWorkIdentity): Promise<RemoteReadingProgress | null>;
   saveRemoteReadingProgress(progress: RemoteReadingProgress): Promise<void>;
   clearRemoteMangaCache(): Promise<void>;
   getExtensionConnection(): Promise<ExtensionConnection>;

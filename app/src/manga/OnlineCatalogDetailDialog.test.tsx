@@ -7,7 +7,8 @@ import { OnlineCatalogDetailDialog } from "./OnlineCatalogDetailDialog";
 afterEach(cleanup);
 
 const detail: CatalogWorkDetail = {
-  id: 3,
+  provider: "kHentai",
+  providerWorkId: "3",
   title: "오래된 제독",
   titleJpn: "古い提督",
   thumbnailUrl: "https://ehgt.org/w/00/003/work.webp",
@@ -34,7 +35,7 @@ describe("OnlineCatalogDetailDialog", () => {
     const onRead = vi.fn();
     render(<OnlineCatalogDetailDialog
       detail={detail}
-      progress={{ provider: "kHentai", workId: "3", lastPage: 7, pageCount: 24, lastReadAt: "" }}
+      progress={{ provider: "kHentai", providerWorkId: "3", lastPage: 7, pageCount: 24, lastReadAt: "" }}
       bookmarkPending={false}
       reading={false}
       onBookmark={vi.fn()}

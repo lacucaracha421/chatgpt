@@ -135,7 +135,7 @@ Prerequisite: close the CLOUD-006 pause semantics first.
 ## CATALOG-002A — Provider-aware identity contract
 
 Parent item: legacy `CATALOG-002`
-Status: `TODO`
+Status: `DONE`
 
 Goal:
 
@@ -146,6 +146,13 @@ Goal:
 - do not introduce a generic plugin system.
 
 This is the prerequisite for provider-safe groups and Heliotrope coexistence.
+
+Completed evidence (2026-09-05):
+
+- public Rust/TypeScript catalog work, detail, gallery, bookmark, progress, command, and thumbnail contracts now carry `(provider, providerWorkId)` explicitly;
+- legacy search payloads without `provider` deserialize as `kHentai`, while the existing numeric VCK database IDs and provider-namespaced bookmark/progress rows remain unchanged;
+- React keys and pending/open state use a composite provider-qualified key, with regression coverage proving equal provider work IDs do not collide;
+- the `heliotrope` namespace is recognized for durable identity isolation, but search/detail/read paths fail closed without enabling Heliotrope network integration or migration.
 
 ## CATALOG-003 — Independent Japanese-language source
 

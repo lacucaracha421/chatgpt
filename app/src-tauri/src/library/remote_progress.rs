@@ -1,6 +1,11 @@
 use rusqlite::OptionalExtension;
 
-use super::{error::LibraryError, models::RemoteReadingProgress, Library};
+use super::{
+    catalog_provider::{CatalogProvider, CatalogWorkIdentity},
+    error::LibraryError,
+    models::RemoteReadingProgress,
+    Library,
+};
 
 pub(crate) fn get_progress(
     library: &Library,
@@ -16,8 +21,12 @@ pub(crate) fn get_progress(
             (provider, work_id),
             |row| {
                 Ok(RemoteReadingProgress {
-                    provider: row.get(0)?,
-                    work_id: row.get(1)?,
+                    identity: CatalogWorkIdentity::new(
+                        CatalogProvider::from_tag(row.get_ref(0)?.as_str()?)
+                            .ok_or(rusqlite::Error::InvalidQuery)?,
+                        row.get::<_, String>(1)?,
+                    )
+                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
                     last_page: row.get::<_, i64>(2)? as u32,
                     page_count: row.get::<_, i64>(3)? as u32,
                     last_read_at: row.get(4)?,
@@ -32,7 +41,10 @@ pub(crate) fn save_progress(
     library: &Library,
     progress: &RemoteReadingProgress,
 ) -> Result<(), LibraryError> {
-    validate_identity(&progress.provider, &progress.work_id)?;
+    validate_identity(
+        progress.identity.provider.as_str(),
+        &progress.identity.provider_work_id,
+    )?;
     if progress.last_page == 0
         || progress.page_count == 0
         || progress.last_page > progress.page_count
@@ -48,8 +60,8 @@ pub(crate) fn save_progress(
             page_count = excluded.page_count,
             last_read_at = excluded.last_read_at",
         rusqlite::params![
-            progress.provider,
-            progress.work_id,
+            progress.identity.provider.as_str(),
+            progress.identity.provider_work_id,
             progress.last_page,
             progress.page_count,
             chrono::Utc::now().to_rfc3339(),
@@ -61,8 +73,8 @@ pub(crate) fn save_progress(
 fn validate_identity(provider: &str, work_id: &str) -> Result<(), LibraryError> {
     // kHentai는 기존 VCK 식별자, heliotrope는 hitomi gallery id다. 두 id 공간은
     // 겹치지 않으므로 provider 태그로 격리된다.
-    if provider != super::catalog_provider::LEGACY_VCK_PROVIDER
-        || work_id.parse::<u64>().ok().filter(|id| *id > 0).is_none()
+    if super::catalog_provider::CatalogProvider::from_tag(provider).is_none()
+        || work_id.trim().is_empty()
     {
         return Err(LibraryError::InvalidRemoteReadingProgress);
     }
@@ -72,7 +84,24 @@ fn validate_identity(provider: &str, work_id: &str) -> Result<(), LibraryError> 
 #[cfg(test)]
 mod tests {
     use super::{get_progress, save_progress};
-    use crate::library::{models::RemoteReadingProgress, Library};
+    use crate::library::{
+        catalog_provider::{CatalogProvider, CatalogWorkIdentity},
+        models::RemoteReadingProgress,
+        Library,
+    };
+
+    fn progress(
+        identity: CatalogWorkIdentity,
+        last_page: u32,
+        page_count: u32,
+    ) -> RemoteReadingProgress {
+        RemoteReadingProgress {
+            identity,
+            last_page,
+            page_count,
+            last_read_at: String::new(),
+        }
+    }
 
     #[test]
     fn progress_upsert_is_isolated_by_provider_and_work() {
@@ -80,35 +109,26 @@ mod tests {
         let library = Library::open(root.path()).unwrap();
         save_progress(
             &library,
-            &RemoteReadingProgress {
-                provider: "kHentai".into(),
-                work_id: "42".into(),
-                last_page: 2,
-                page_count: 10,
-                last_read_at: String::new(),
-            },
+            &progress(CatalogWorkIdentity::khentai(42), 2, 10),
         )
         .unwrap();
         save_progress(
             &library,
-            &RemoteReadingProgress {
-                provider: "kHentai".into(),
-                work_id: "43".into(),
-                last_page: 4,
-                page_count: 8,
-                last_read_at: String::new(),
-            },
+            &progress(
+                CatalogWorkIdentity::new(CatalogProvider::Heliotrope, "42").unwrap(),
+                9,
+                10,
+            ),
         )
         .unwrap();
         save_progress(
             &library,
-            &RemoteReadingProgress {
-                provider: "kHentai".into(),
-                work_id: "42".into(),
-                last_page: 7,
-                page_count: 10,
-                last_read_at: String::new(),
-            },
+            &progress(CatalogWorkIdentity::khentai(43), 4, 8),
+        )
+        .unwrap();
+        save_progress(
+            &library,
+            &progress(CatalogWorkIdentity::khentai(42), 7, 10),
         )
         .unwrap();
 
@@ -126,6 +146,13 @@ mod tests {
                 .last_page,
             4
         );
+        assert_eq!(
+            get_progress(&library, "heliotrope", "42")
+                .unwrap()
+                .unwrap()
+                .last_page,
+            9
+        );
     }
 
     #[test]
@@ -133,27 +160,16 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let library = Library::open(root.path()).unwrap();
         for progress in [
-            RemoteReadingProgress {
-                provider: "hitomi".into(),
-                work_id: "42".into(),
-                last_page: 1,
-                page_count: 1,
-                last_read_at: String::new(),
-            },
-            RemoteReadingProgress {
-                provider: "kHentai".into(),
-                work_id: "42".into(),
-                last_page: 0,
-                page_count: 1,
-                last_read_at: String::new(),
-            },
-            RemoteReadingProgress {
-                provider: "kHentai".into(),
-                work_id: "42".into(),
-                last_page: 2,
-                page_count: 1,
-                last_read_at: String::new(),
-            },
+            progress(
+                CatalogWorkIdentity {
+                    provider: CatalogProvider::KHentai,
+                    provider_work_id: String::new(),
+                },
+                1,
+                1,
+            ),
+            progress(CatalogWorkIdentity::khentai(42), 0, 1),
+            progress(CatalogWorkIdentity::khentai(42), 2, 1),
         ] {
             assert!(save_progress(&library, &progress).is_err());
         }

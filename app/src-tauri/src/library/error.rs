@@ -96,6 +96,8 @@ pub enum LibraryError {
     OnlineCatalogWorkNotFound,
     #[error("온라인 카탈로그 데이터가 올바르지 않습니다")]
     InvalidOnlineCatalog,
+    #[error("지원하지 않는 온라인 카탈로그 제공자입니다")]
+    UnsupportedCatalogProvider,
     #[error("온라인 카탈로그 요청 경로가 올바르지 않습니다")]
     InvalidCatalogTransportPath,
     #[error("온라인 카탈로그 서버가 요청을 거부했습니다: HTTP {0}")]

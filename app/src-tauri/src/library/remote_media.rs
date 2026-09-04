@@ -139,14 +139,15 @@ where
 /// 디스크 캐시한다. kHentai 검색 결과 카드가 CDN 직접 URL 대신 이 캐시를 쓴다.
 pub(crate) fn load_catalog_thumbnail(
     root: &Path,
-    work_id: u64,
+    identity: &super::catalog_provider::CatalogWorkIdentity,
     url: &str,
 ) -> Result<RemoteMedia, LibraryError> {
     // URL은 카탈로그 DB에서 검증된 ehgt.org 값만 들어온다(online_catalog::validated_thumbnail_url).
     let digest = format!("{:x}", url_hash(url.as_bytes()));
     let cache_path = root
         .join("cache/remote-manga/catalog-thumbs")
-        .join(format!("{work_id}-{digest}.bin"));
+        .join(identity.provider.as_str())
+        .join(format!("{}-{digest}.bin", identity.provider_work_id));
     if let Ok(bytes) = std::fs::read(&cache_path) {
         let mime = image_mime(&bytes).ok_or(LibraryError::UnsupportedImage)?;
         return Ok(RemoteMedia { bytes, mime });

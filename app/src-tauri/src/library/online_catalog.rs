@@ -11,6 +11,7 @@ use rusqlite::{
 use serde::{Deserialize, Serialize};
 
 use super::{
+    catalog_provider::{CatalogProvider, CatalogWorkIdentity},
     error::LibraryError,
     models::{
         CatalogScope, CatalogSearchPage, CatalogSearchQuery, CatalogSort, CatalogStatus,
@@ -36,23 +37,25 @@ pub(super) struct CatalogLookupCache {
 impl Library {
     pub fn set_online_catalog_bookmark(
         &self,
-        work_id: u64,
+        identity: &CatalogWorkIdentity,
         bookmarked: bool,
     ) -> Result<(), LibraryError> {
+        identity.validate()?;
         let connection = self.connection()?;
-        let provider_tag = super::catalog_provider::LEGACY_VCK_PROVIDER;
+        let provider_tag = identity.provider.as_str();
+        let work_id = identity.provider_work_id.as_str();
         if bookmarked {
             connection.execute(
                 "INSERT INTO online_catalog_bookmarks (provider, work_id, created_at)
                  VALUES (?1, ?2, ?3)
                  ON CONFLICT(provider, work_id) DO NOTHING",
-                rusqlite::params![provider_tag, work_id.to_string(), chrono::Utc::now().to_rfc3339()],
+                rusqlite::params![provider_tag, work_id, chrono::Utc::now().to_rfc3339()],
             )?;
         } else {
             connection.execute(
                 "DELETE FROM online_catalog_bookmarks
                  WHERE provider = ?1 AND work_id = ?2",
-                [provider_tag, &work_id.to_string()],
+                [provider_tag, work_id],
             )?;
         }
         Ok(())
@@ -248,6 +251,9 @@ impl Library {
         &self,
         query: CatalogSearchQuery,
     ) -> Result<CatalogSearchPage, LibraryError> {
+        if query.provider != CatalogProvider::KHentai {
+            return Err(LibraryError::UnsupportedCatalogProvider);
+        }
         let catalog_path = self.root.join("catalogs/kdata.db");
         if !catalog_path.exists() {
             return Err(LibraryError::OnlineCatalogNotInstalled);
@@ -261,7 +267,7 @@ impl Library {
             "EXISTS (SELECT 1 FROM online_catalog_bookmarks AS bookmark
              WHERE bookmark.provider = '{}'
                AND bookmark.work_id = CAST(work.Id AS TEXT))",
-            super::catalog_provider::LEGACY_VCK_PROVIDER
+            query.provider.as_str()
         );
         let mut clauses = vec!["work.Expunged = 0".to_owned()];
         if query.scope == CatalogScope::Bookmarked {
@@ -345,13 +351,13 @@ impl Library {
             let (id, title, title_jpn, file_count, views, posted, thumbnail_url, bookmarked) = row?;
             let work_id = id as u64;
             works.push(CatalogWork {
-                id: work_id,
+                identity: CatalogWorkIdentity::khentai(work_id),
                 title,
                 title_jpn,
                 artists: tags_for(&connection, id, "artist")?,
                 series: tags_for(&connection, id, "series")?,
                 thumbnail_url: validated_thumbnail_url(thumbnail_url)
-                    .map(|_| format!("http://lakomics.localhost/remote-catalog-thumbnail/{work_id}")),
+                    .map(|_| format!("http://lakomics.localhost/remote-catalog-thumbnail/{}/{work_id}", query.provider.as_str())),
                 bookmarked,
                 file_count: file_count as u32,
                 views: views as u64,
@@ -396,8 +402,9 @@ impl Library {
 
     pub fn online_catalog_work_detail(
         &self,
-        work_id: u64,
+        identity: &CatalogWorkIdentity,
     ) -> Result<CatalogWorkDetail, LibraryError> {
+        let work_id = identity.khentai_numeric_id()?;
         let catalog_path = self.root.join("catalogs/kdata.db");
         if !catalog_path.exists() {
             return Err(LibraryError::OnlineCatalogNotInstalled);
@@ -456,11 +463,11 @@ impl Library {
         }
 
         Ok(CatalogWorkDetail {
-            id: row.0 as u64,
+            identity: CatalogWorkIdentity::khentai(row.0 as u64),
             title: row.1,
             title_jpn: row.2,
             thumbnail_url: validated_thumbnail_url(row.3)
-                .map(|_| format!("http://lakomics.localhost/remote-catalog-thumbnail/{}", row.0 as u64)),
+                .map(|_| format!("http://lakomics.localhost/remote-catalog-thumbnail/{}/{}", identity.provider.as_str(), row.0 as u64)),
             uploader: row.4,
             category: row.5,
             posted: super::catalog_provider::normalize_optional_legacy_timestamp(row.6),
@@ -479,10 +486,11 @@ impl Library {
 
     /// 카탈로그 표지 원본 URL을 조회해 디스크 캐시 프록시로 내려준다.
     /// URL은 카탈로그 DB에 저장된 ehgt.org 값만 신뢰한다.
-    pub fn online_catalog_thumbnail(
+    pub(crate) fn online_catalog_thumbnail(
         &self,
-        work_id: u64,
+        identity: &CatalogWorkIdentity,
     ) -> Result<super::remote_media::RemoteMedia, LibraryError> {
+        let work_id = identity.khentai_numeric_id()?;
         let catalog_path = self.root.join("catalogs/kdata.db");
         if !catalog_path.exists() {
             return Err(LibraryError::OnlineCatalogNotInstalled);
@@ -501,7 +509,7 @@ impl Library {
             .optional()?
             .ok_or(LibraryError::MediaNotFound)?;
         let url = validated_thumbnail_url(thumb).ok_or(LibraryError::MediaNotFound)?;
-        super::remote_media::load_catalog_thumbnail(&self.root, work_id, &url)
+        super::remote_media::load_catalog_thumbnail(&self.root, identity, &url)
     }
 
     fn catalog_lookup(&self) -> Result<CatalogLookupCache, LibraryError> {
@@ -785,6 +793,8 @@ mod tests {
     use rusqlite::Connection;
 
     use super::super::{
+        catalog_provider::{CatalogProvider, CatalogWorkIdentity},
+        error::LibraryError,
         models::{CatalogScope, CatalogSearchQuery, CatalogSort},
         Library,
     };
@@ -993,6 +1003,7 @@ mod tests {
 
     fn query(text: &str, sort: CatalogSort, page: u32, page_size: u32) -> CatalogSearchQuery {
         CatalogSearchQuery {
+            provider: CatalogProvider::KHentai,
             text: text.into(),
             sort,
             scope: CatalogScope::All,
@@ -1001,13 +1012,93 @@ mod tests {
         }
     }
 
+    fn khentai(work_id: u64) -> CatalogWorkIdentity {
+        CatalogWorkIdentity::khentai(work_id)
+    }
+
+    #[test]
+    fn legacy_search_query_defaults_to_the_khentai_provider() {
+        let query: CatalogSearchQuery = serde_json::from_value(serde_json::json!({
+            "text": "제독",
+            "sort": "latest",
+            "scope": "all",
+            "page": 0,
+            "pageSize": 10
+        }))
+        .unwrap();
+
+        assert_eq!(query.provider, CatalogProvider::KHentai);
+    }
+
+    #[test]
+    fn search_and_detail_expose_provider_qualified_identities() {
+        let (_root, library) = searchable_library();
+        let page = library
+            .search_online_catalog(query("제독", CatalogSort::Latest, 0, 10))
+            .unwrap();
+
+        assert_eq!(page.works[0].identity.provider, CatalogProvider::KHentai);
+        assert_eq!(page.works[0].identity.provider_work_id, "1");
+        let detail = library
+            .online_catalog_work_detail(&page.works[0].identity)
+            .unwrap();
+        assert_eq!(detail.identity, page.works[0].identity);
+    }
+
+    #[test]
+    fn unsupported_provider_is_rejected_before_catalog_lookup() {
+        let (_root, library) = searchable_library();
+        let mut query = query("", CatalogSort::Latest, 0, 10);
+        query.provider = CatalogProvider::Heliotrope;
+
+        assert!(matches!(
+            library.search_online_catalog(query),
+            Err(LibraryError::UnsupportedCatalogProvider)
+        ));
+    }
+
+    #[test]
+    fn bookmarks_isolate_the_same_work_id_by_provider() {
+        let root = tempfile::tempdir().unwrap();
+        let library = Library::open(root.path()).unwrap();
+        let khentai = CatalogWorkIdentity::new(CatalogProvider::KHentai, "42").unwrap();
+        let heliotrope = CatalogWorkIdentity::new(CatalogProvider::Heliotrope, "42").unwrap();
+
+        library.set_online_catalog_bookmark(&khentai, true).unwrap();
+        library.set_online_catalog_bookmark(&heliotrope, true).unwrap();
+        library.set_online_catalog_bookmark(&khentai, false).unwrap();
+
+        let connection = library.connection().unwrap();
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM online_catalog_bookmarks WHERE work_id = '42'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT provider FROM online_catalog_bookmarks WHERE work_id = '42'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "heliotrope"
+        );
+    }
+
     #[test]
     fn search_filters_bookmarks_before_counting_and_paging() {
         let (_root, library) = searchable_library();
-        library.set_online_catalog_bookmark(3, true).unwrap();
+        library.set_online_catalog_bookmark(&khentai(3), true).unwrap();
 
         let page = library
             .search_online_catalog(CatalogSearchQuery {
+                provider: CatalogProvider::KHentai,
                 text: String::new(),
                 sort: CatalogSort::Latest,
                 scope: CatalogScope::Bookmarked,
@@ -1017,11 +1108,11 @@ mod tests {
             .unwrap();
 
         assert_eq!(page.total_count, 1);
-        assert_eq!(page.works[0].id, 3);
+        assert_eq!(page.works[0].identity, khentai(3));
         assert!(page.works[0].bookmarked);
         assert_eq!(
             page.works[0].thumbnail_url.as_deref(),
-            Some("http://lakomics.localhost/remote-catalog-thumbnail/3")
+            Some("http://lakomics.localhost/remote-catalog-thumbnail/kHentai/3")
         );
     }
 
@@ -1048,18 +1139,18 @@ mod tests {
     #[test]
     fn detail_returns_optional_metadata_and_grouped_tags() {
         let (_root, library) = searchable_library();
-        library.set_online_catalog_bookmark(3, true).unwrap();
+        library.set_online_catalog_bookmark(&khentai(3), true).unwrap();
 
-        let detail = library.online_catalog_work_detail(3).unwrap();
+        let detail = library.online_catalog_work_detail(&khentai(3)).unwrap();
 
-        assert_eq!(detail.id, 3);
+        assert_eq!(detail.identity, khentai(3));
         assert_eq!(detail.uploader.as_deref(), Some("tester"));
         assert_eq!(detail.file_size, Some(12345));
         assert_eq!(detail.rating, Some(457));
         assert!(detail.bookmarked);
         assert_eq!(
             detail.thumbnail_url.as_deref(),
-            Some("http://lakomics.localhost/remote-catalog-thumbnail/3")
+            Some("http://lakomics.localhost/remote-catalog-thumbnail/kHentai/3")
         );
         assert!(detail
             .tag_groups
@@ -1085,7 +1176,7 @@ mod tests {
             .unwrap();
         drop(catalog);
 
-        let detail = library.online_catalog_work_detail(3).unwrap();
+        let detail = library.online_catalog_work_detail(&khentai(3)).unwrap();
         assert_eq!(detail.posted, Some(posted));
         assert_eq!(detail.updated, Some(updated));
     }
@@ -1098,18 +1189,18 @@ mod tests {
             .search_online_catalog(query("제독", CatalogSort::Latest, 0, 10))
             .unwrap();
         assert_eq!(
-            title.works.iter().map(|work| work.id).collect::<Vec<_>>(),
-            [1, 3]
+            title.works.iter().map(|work| work.identity.provider_work_id.as_str()).collect::<Vec<_>>(),
+            ["1", "3"]
         );
         let tag = library
             .search_online_catalog(query("character:teitoku", CatalogSort::Latest, 0, 10))
             .unwrap();
-        assert_eq!(tag.works[0].id, 3);
+        assert_eq!(tag.works[0].identity, khentai(3));
 
         let page = library
             .search_online_catalog(query("", CatalogSort::Latest, 1, 1))
             .unwrap();
-        assert_eq!((page.total_count, page.works[0].id), (3, 2));
+        assert_eq!((page.total_count, page.works[0].identity.clone()), (3, khentai(2)));
         for (sort, expected) in [
             (CatalogSort::Latest, 1),
             (CatalogSort::Views, 3),
@@ -1122,8 +1213,8 @@ mod tests {
                     .search_online_catalog(query("", sort, 0, 10))
                     .unwrap()
                     .works[0]
-                    .id,
-                expected,
+                    .identity,
+                khentai(expected),
             );
         }
     }
@@ -1150,8 +1241,8 @@ mod tests {
 
         assert_eq!(page.total_count, 2);
         assert_eq!(
-            page.works.iter().map(|work| work.id).collect::<Vec<_>>(),
-            [2, 1]
+            page.works.iter().map(|work| work.identity.provider_work_id.as_str()).collect::<Vec<_>>(),
+            ["2", "1"]
         );
     }
 
@@ -1163,8 +1254,8 @@ mod tests {
         let library = Library::open(library_root.path()).unwrap();
         library.import_vck_catalog(vck_root.path()).unwrap();
 
-        library.set_online_catalog_bookmark(3, true).unwrap();
-        library.set_online_catalog_bookmark(3, true).unwrap();
+        library.set_online_catalog_bookmark(&khentai(3), true).unwrap();
+        library.set_online_catalog_bookmark(&khentai(3), true).unwrap();
         library.import_vck_catalog(vck_root.path()).unwrap();
         assert_eq!(
             library
@@ -1180,7 +1271,7 @@ mod tests {
             1,
         );
 
-        library.set_online_catalog_bookmark(3, false).unwrap();
+        library.set_online_catalog_bookmark(&khentai(3), false).unwrap();
         assert_eq!(
             library
                 .connection()

@@ -9,6 +9,7 @@ use crate::{
     cloud::models::CloudSyncConfig,
     library::{
         book_migration::{BookImportPlan, BookMigrationReport},
+        catalog_provider::CatalogWorkIdentity,
         catalog_update::{self, CatalogUpdateState},
         credential,
         error::LibraryError,
@@ -28,7 +29,7 @@ use crate::{
             MangaCatalogRecoveryRemoteResult, MangaCatalogRecoverySelection, MangaDexApplyRequest,
             MangaDexConnection, MangaDexSearchResult, MangaDexVolumeSyncResult,
             MangaDexWorkPreview, MangaSeries, MetadataBackup, PurgeSummary, ReleaseWatchEvent,
-            ReleaseWatchRunResult, ReleaseWatchRunStopReason, ReleaseWatchStatus, RemoteProvider,
+            ReleaseWatchRunResult, ReleaseWatchRunStopReason, ReleaseWatchStatus,
             RemoteReadingProgress, ResolvedGallery, SetAssetClassification,
             SimilarityDecisionRequest, SimilarityIndexProgress, SimilarityReviewPage, TrashPage,
             TrashPolicy, UpdateCollection, VideoPreparationProgress, VolumeImportProgress,
@@ -171,6 +172,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::OnlineCatalogNotInstalled => "online_catalog_not_installed",
             LibraryError::OnlineCatalogWorkNotFound => "online_catalog_work_not_found",
             LibraryError::InvalidOnlineCatalog => "invalid_online_catalog",
+            LibraryError::UnsupportedCatalogProvider => "unsupported_catalog_provider",
             LibraryError::InvalidCatalogTransportPath => "invalid_catalog_transport_path",
             LibraryError::CatalogTransportRejected(_) => "catalog_transport_rejected",
             LibraryError::InvalidCatalogTransportResponse => "invalid_catalog_transport_response",
@@ -1552,11 +1554,11 @@ pub async fn suggest_online_catalog(
 
 #[tauri::command]
 pub async fn get_online_catalog_work_detail(
-    work_id: u64,
+    identity: CatalogWorkIdentity,
     state: State<'_, AppState>,
 ) -> Result<CatalogWorkDetail, CommandError> {
     let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.online_catalog_work_detail(work_id))
+    tauri::async_runtime::spawn_blocking(move || library.online_catalog_work_detail(&identity))
         .await
         .map_err(|_| background_task_error())?
         .map_err(CommandError::from)
@@ -1564,12 +1566,12 @@ pub async fn get_online_catalog_work_detail(
 
 #[tauri::command]
 pub fn set_online_catalog_bookmark(
-    work_id: u64,
+    identity: CatalogWorkIdentity,
     bookmarked: bool,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
     current_required(state)?
-        .set_online_catalog_bookmark(work_id, bookmarked)
+        .set_online_catalog_bookmark(&identity, bookmarked)
         .map_err(CommandError::from)
 }
 
@@ -1838,8 +1840,7 @@ fn resolved_gallery_from_cache_or_source(
 ) -> Result<ResolvedGallery, LibraryError> {
     if let Some(manifest) = crate::library::remote_gallery::load_valid_manifest(root, work_id)? {
         return Ok(ResolvedGallery {
-            provider: RemoteProvider::KHentai,
-            work_id: work_id.to_string(),
+            identity: CatalogWorkIdentity::khentai(work_id),
             page_count: manifest.pages.len() as u32,
             page_urls: manifest.pages.into_iter().map(|page| page.url).collect(),
         });
@@ -1852,8 +1853,7 @@ fn resolved_gallery_from_cache_or_source(
         &crate::library::remote_gallery::RemoteGalleryManifest::khentai(work_id, pages),
     )?;
     Ok(ResolvedGallery {
-        provider: RemoteProvider::KHentai,
-        work_id: work_id.to_string(),
+        identity: CatalogWorkIdentity::khentai(work_id),
         page_count,
         page_urls,
     })
@@ -1861,9 +1861,10 @@ fn resolved_gallery_from_cache_or_source(
 
 #[tauri::command]
 pub async fn resolve_online_catalog_work(
-    work_id: u64,
+    identity: CatalogWorkIdentity,
     state: State<'_, AppState>,
 ) -> Result<ResolvedGallery, CommandError> {
+    let work_id = identity.khentai_numeric_id()?;
     let library = current_required(state)?;
     let root = library.root().to_path_buf();
     let vps_base_url = library
@@ -1887,8 +1888,7 @@ pub async fn resolve_online_catalog_work(
                     &crate::library::remote_gallery::RemoteGalleryManifest::khentai(work_id, pages),
                 )?;
                 Ok(ResolvedGallery {
-                    provider: RemoteProvider::KHentai,
-                    work_id: work_id.to_string(),
+                    identity: CatalogWorkIdentity::khentai(work_id),
                     page_count,
                     page_urls,
                 })
@@ -1902,12 +1902,15 @@ pub async fn resolve_online_catalog_work(
 
 #[tauri::command]
 pub fn get_remote_reading_progress(
-    provider: String,
-    work_id: String,
+    identity: CatalogWorkIdentity,
     state: State<'_, AppState>,
 ) -> Result<Option<RemoteReadingProgress>, CommandError> {
-    crate::library::remote_progress::get_progress(&current_required(state)?, &provider, &work_id)
-        .map_err(CommandError::from)
+    crate::library::remote_progress::get_progress(
+        &current_required(state)?,
+        identity.provider.as_str(),
+        &identity.provider_work_id,
+    )
+    .map_err(CommandError::from)
 }
 
 #[tauri::command]
