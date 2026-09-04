@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
+use std::time::{Instant, UNIX_EPOCH};
 
 use image::ImageFormat;
 use rusqlite::OptionalExtension;
@@ -401,6 +401,7 @@ impl Library {
         }
 
         let mut imported = 0u64;
+        let import_started = Instant::now();
         let preferred_cover = info_cover(&collection_dir)?;
         // covers가 비면 루트의 thumbnail.*을 표지 대용으로 쓴다.
         let cover_directory = if naturally_sorted_images(&collection_dir.join(COVERS_DIR))?
@@ -437,6 +438,10 @@ impl Library {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(collection_id.to_owned(), source_signature);
+        eprintln!(
+            "collection artwork import: {imported} new in {:?}",
+            import_started.elapsed(),
+        );
         Ok(imported)
     }
 
@@ -450,6 +455,7 @@ impl Library {
         directory_label: &str,
         preferred_path: Option<&Path>,
     ) -> Result<u64, LibraryError> {
+        let scan_started = Instant::now();
         let images = naturally_sorted_images(directory)?
             .into_iter()
             // 루트 대체 import는 thumbnail.*만 대상으로 한다. info.txt 등
@@ -462,9 +468,11 @@ impl Library {
                         .is_some_and(|name| name.to_lowercase().starts_with("thumbnail."))
             })
             .collect::<Vec<_>>();
+        let scan_elapsed = scan_started.elapsed();
         if images.is_empty() {
             return Ok(0);
         }
+        let identity_started = Instant::now();
         let existing: BTreeSet<String> = {
             let connection = self.connection()?;
             let mut statement = connection.prepare(
@@ -476,8 +484,13 @@ impl Library {
                 .collect::<Result<Vec<_>, _>>()?;
             rows.into_iter().collect()
         };
+        let identity_elapsed = identity_started.elapsed();
         let preferred_file_name = preferred_path_file_name(preferred_path);
         let mut imported = 0u64;
+        let mut reused = 0u64;
+        let mut prepared_fallback = 0u64;
+        let mut reuse_elapsed = std::time::Duration::ZERO;
+        let mut prepare_elapsed = std::time::Duration::ZERO;
         let mut first_artwork_id: Option<String> = None;
         let mut preferred_artwork_id: Option<String> = None;
         for path in &images {
@@ -497,12 +510,21 @@ impl Library {
             };
             // 지원하지 않는 형식이나 크기 초과 파일은 나머지 import를 막지 않는다.
             // 중앙 에셋과 바이트가 같으면 디코드·복사 없이 기존 파일을 링크로 재사용한다.
-            let prepared = match self.reuse_asset_artwork(collection_id, &bytes)? {
-                Some(prepared) => prepared,
+            let reuse_started = Instant::now();
+            let reused_prepared = self.reuse_asset_artwork(collection_id, &bytes)?;
+            reuse_elapsed += reuse_started.elapsed();
+            let prepared = match reused_prepared {
+                Some(prepared) => {
+                    reused += 1;
+                    prepared
+                }
                 None => {
+                    let prepare_started = Instant::now();
                     let Ok(prepared) = self.prepare_work_artwork(collection_id, &bytes) else {
                         continue;
                     };
+                    prepare_elapsed += prepare_started.elapsed();
+                    prepared_fallback += 1;
                     prepared
                 }
             };
@@ -560,6 +582,15 @@ impl Library {
                 )?;
                 transaction.commit()?;
             }
+        }
+        if imported > 0 {
+            eprintln!(
+                "collection artwork import [{directory_label}]: {imported} new \
+                 ({reused} reused, {prepared_fallback} prepared) in {:?} \
+                 (scan {scan_elapsed:?}, identity {identity_elapsed:?}, \
+                 reuse {reuse_elapsed:?}, prepare {prepare_elapsed:?})",
+                scan_elapsed + identity_elapsed + reuse_elapsed + prepare_elapsed,
+            );
         }
         Ok(imported)
     }

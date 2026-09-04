@@ -3,6 +3,7 @@ use std::{
     fs,
     io::{BufReader, BufWriter},
     path::{Path, PathBuf},
+    time::Instant,
 };
 
 use image::ImageFormat;
@@ -84,8 +85,10 @@ impl Library {
             ImageFormat::WebP => ("webp", "image/webp"),
             _ => return Err(LibraryError::InvalidWorkArtwork),
         };
+        let decode_started = Instant::now();
         let image = image::load_from_memory_with_format(bytes, format)
             .map_err(|_| LibraryError::InvalidWorkArtwork)?;
+        let decode_elapsed = decode_started.elapsed();
         let id = uuid::Uuid::new_v4().to_string();
         let relative_path = format!("work-artwork/{collection_id}/{id}.{extension}");
         let absolute_path = self.root().join(&relative_path);
@@ -98,6 +101,7 @@ impl Library {
             path: directory.to_path_buf(),
             source,
         })?;
+        let write_started = Instant::now();
         if let Err(source) = fs::write(&absolute_path, bytes) {
             let _ = fs::remove_file(&absolute_path);
             return Err(LibraryError::WriteWorkArtwork {
@@ -105,11 +109,22 @@ impl Library {
                 source,
             });
         }
+        let write_elapsed = write_started.elapsed();
+        let thumbnail_started = Instant::now();
         if let Err(error) = write_work_artwork_thumbnail(&image, &thumbnail_absolute_path) {
             let _ = fs::remove_file(&absolute_path);
             let _ = fs::remove_file(&thumbnail_absolute_path);
             return Err(error);
         }
+        let thumbnail_elapsed = thumbnail_started.elapsed();
+        eprintln!(
+            "prepare_work_artwork: {mime_type} {}B in {:?} (decode {:?}, original {:?}, thumbnail {:?})",
+            bytes.len(),
+            decode_elapsed + write_elapsed + thumbnail_elapsed,
+            decode_elapsed,
+            write_elapsed,
+            thumbnail_elapsed,
+        );
         Ok(PreparedWorkArtwork {
             id,
             relative_path,
