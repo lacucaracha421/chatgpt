@@ -317,7 +317,7 @@ Direction:
 - Focused regression coverage passed for `VideoTileMedia` and `AssetGallery`; production frontend build passed.
 
 ### BUG-012 — Asset Repository scrollbar/thumb jumps upward while scrolling
-Status: `VERIFY`
+Status: `DONE`
 
 Observed behavior:
 - While scrolling a large Asset Repository view, the scrollbar/thumb can suddenly jump noticeably upward, making the current position feel unstable even when the user is continuing in the same direction.
@@ -345,7 +345,7 @@ Manual verification checklist (real Tauri, long library):
 3. Hover video tiles while scrolling: previews activate without moving the viewport.
 4. Resize the window mid-list: content may re-justify (expected) but must not jump upward on its own.
 5. Confirm pages load at the bottom/top without viewport repositioning.
-- Keep status `VERIFY` until all five pass; then mark `DONE`.
+- All five passed on 2026-09-04 in the real Tauri app against the large library (plus overlay checks: 32px+ thumb, jump-free drag, ratio track-click, wheel over strip). Marked `DONE`.
 
 2026-09-04 runtime finding + root-cause fix (uncommitted verification, needs app restart):
 - Real-runtime report: viewport stays stable, but the scrollbar thumb still jumps upward while dragging down. Row geometry, anchoring, and prepend compensation are all stable, so the remaining cause is pagination itself: 100-item pages grow the virtual total on every append (80+ growth events across 8k assets), and each growth shrinks/repositions the thumb mid-drag.
@@ -969,8 +969,8 @@ CLOUD-006 is complete and no longer blocks the PC roadmap. Mobile Home/viewer/pr
 
 PC Core Polish Pass 1 runtime gate is complete: BUG-009, BUG-010, BUG-011, and UI-008 all passed real Tauri verification.
 
-1. BUG-012 scroll-anchor follow-up — `scrollbar-gutter: stable` added plus row prefix-stability coverage; still `VERIFY` until a long real Tauri scroll passes the 5-item manual checklist
-2. PERF-003 Phase B — existing-asset hardlink reuse for Collection artwork is implemented; remaining: stage timings instrumentation and provider identity audit
+1. BUG-012 runtime verification — DONE (scroll-anchor mitigation + full-range reservation + overlay scrollbar all verified in the real app)
+2. PERF-003 Phase B — reuse existing Lakomics assets/derivatives for Collection artwork is implemented; remaining: stage timings instrumentation and provider identity audit
 3. MANGA-001 fallback phase — lineage suggestions, ranked fallback candidates, and explicit selection apply are implemented; remaining: VPS-backed targeted lookup for absent IDs (needs network) and selected-backup ingestion only if DB metadata proves insufficient
 4. PERF-001 continuation — measure remaining preview/cache/runtime bounds after the thumbnail-storage and cloud-thumbnail refresh work
 5. BUG-003 — historical X video drag-save blue native-selection artifact, if still reproducible
