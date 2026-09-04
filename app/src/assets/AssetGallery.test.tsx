@@ -256,13 +256,16 @@ describe("AssetGallery", () => {
     expect(onClearSelection).toHaveBeenCalledOnce();
   });
 
-  it("uses only the native scroll container for gallery scrolling", async () => {
+  it("keeps scrolling on the native container with a visual-only overlay scrollbar", async () => {
     const { container } = render(<AssetGallery items={[asset(0)]} />);
 
     await screen.findByRole("option", { name: "asset-0.png" });
     expect(container.querySelector(".asset-gallery__date-rail")).toBeNull();
-    expect(container.querySelector(".asset-gallery__scrollbar")).toBeNull();
     expect(container.querySelector(".asset-gallery__scroll")).toHaveAttribute("data-native-scrollbar", "true");
+    // The overlay draws the thumb (native thumb length cannot be floored);
+    // it stays hidden while everything fits.
+    const overlay = container.querySelector(".asset-gallery__scrollbar") as HTMLElement;
+    expect(overlay).toHaveAttribute("hidden");
   });
 
   it("renders safe metadata overlays", async () => {
@@ -426,6 +429,118 @@ describe("AssetGallery", () => {
     fireEvent.scroll(scroller);
 
     await waitFor(() => expect(onLoadNextPage).toHaveBeenCalled());
+  });
+
+  it("floors the overlay thumb at 32px for a huge reserved range", async () => {
+    const { container } = render(
+      <AssetGallery
+        items={Array.from({ length: 8 }, (_, index) => asset(index))}
+        totalCount={100000}
+        hasNextPage
+        onLoadNextPage={vi.fn()}
+      />,
+    );
+
+    const thumb = await waitFor(() =>
+      container.querySelector(".asset-gallery__scrollbar-thumb") as HTMLElement,
+    );
+    expect(thumb.style.height).toBe("32px");
+  });
+
+  it("moves the overlay thumb with the scroll position", async () => {
+    const { container } = render(
+      <AssetGallery
+        items={Array.from({ length: 8 }, (_, index) => asset(index))}
+        totalCount={100}
+        hasNextPage
+        onLoadNextPage={vi.fn()}
+      />,
+    );
+    await screen.findByRole("option", { name: "asset-0.png" });
+
+    const scroller = container.querySelector(".asset-gallery__scroll") as HTMLElement;
+    scroller.scrollTop = 1892.5;
+    fireEvent.scroll(scroller);
+
+    const thumb = container.querySelector(".asset-gallery__scrollbar-thumb") as HTMLElement;
+    // Reserved 4385px, viewport 600px: thumb 82px over 518px of travel.
+    expect(Number.parseFloat(thumb.style.height)).toBeCloseTo(82.06, 0);
+    const top = Number.parseFloat(thumb.style.transform.replace("translateY(", ""));
+    expect(top).toBeCloseTo(259, 0);
+  });
+
+  it("drags the overlay thumb to scroll", async () => {
+    const { container } = render(
+      <AssetGallery
+        items={Array.from({ length: 8 }, (_, index) => asset(index))}
+        totalCount={100}
+        hasNextPage
+        onLoadNextPage={vi.fn()}
+      />,
+    );
+    await screen.findByRole("option", { name: "asset-0.png" });
+
+    const scroller = container.querySelector(".asset-gallery__scroll") as HTMLElement;
+    const thumb = container.querySelector(".asset-gallery__scrollbar-thumb") as HTMLElement;
+    fireEvent.pointerDown(thumb, { pointerId: 7, clientY: 100 });
+    fireEvent.pointerMove(thumb, { pointerId: 7, clientY: 200 });
+    fireEvent.pointerUp(thumb, { pointerId: 7 });
+
+    // 100px over 518px of travel maps onto 3785px of scroll range.
+    expect(scroller.scrollTop).toBeCloseTo(730.8, 0);
+  });
+
+  it("jumps the track click to the matching scroll position", async () => {
+    const { container } = render(
+      <AssetGallery
+        items={Array.from({ length: 8 }, (_, index) => asset(index))}
+        totalCount={100}
+        hasNextPage
+        onLoadNextPage={vi.fn()}
+      />,
+    );
+    await screen.findByRole("option", { name: "asset-0.png" });
+
+    const track = container.querySelector(".asset-gallery__scrollbar") as HTMLElement;
+    vi.spyOn(track, "getBoundingClientRect").mockReturnValue({
+      top: 100, height: 600, bottom: 700, left: 0, right: 0, width: 0, x: 0, y: 100,
+    } as DOMRect);
+    const scroller = container.querySelector(".asset-gallery__scroll") as HTMLElement;
+    fireEvent.pointerDown(track, { clientY: 400 });
+
+    expect(scroller.scrollTop).toBeCloseTo(1892.5, 0);
+  });
+
+  it("keeps the overlay thumb steady when pages append at the same offset", async () => {
+    const onLoadNextPage = vi.fn();
+    const { container, rerender } = render(
+      <AssetGallery
+        items={Array.from({ length: 8 }, (_, index) => asset(index))}
+        totalCount={100}
+        hasNextPage
+        onLoadNextPage={onLoadNextPage}
+      />,
+    );
+    await screen.findByRole("option", { name: "asset-0.png" });
+    const scroller = container.querySelector(".asset-gallery__scroll") as HTMLElement;
+    scroller.scrollTop = 1000;
+    fireEvent.scroll(scroller);
+    const thumb = () =>
+      container.querySelector(".asset-gallery__scrollbar-thumb") as HTMLElement;
+    const before = thumb().style.transform;
+
+    rerender(
+      <AssetGallery
+        items={Array.from({ length: 24 }, (_, index) => asset(index))}
+        totalCount={100}
+        hasNextPage
+        onLoadNextPage={onLoadNextPage}
+      />,
+    );
+    await screen.findByRole("option", { name: "asset-23.png" });
+
+    expect(scroller.scrollTop).toBe(1000);
+    expect(thumb().style.transform).toBe(before);
   });
 
   it("clears a pending quick preview when the gallery unmounts", () => {

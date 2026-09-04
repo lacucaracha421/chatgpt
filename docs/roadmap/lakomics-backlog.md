@@ -353,6 +353,12 @@ Manual verification checklist (real Tauri, long library):
 - Rust coverage: total matches filtered length across sorts/filters/pages/windows. Frontend coverage: reservation height, measured-only fallback without a total, deep-scroll prefetch, browser wiring.
 - Re-verify items 1-6 above after restarting the app (Rust change requires rebuild); then mark `DONE`.
 
+2026-09-04 usability follow-up (custom overlay scrollbar, same item):
+- Full-range reservation works (jumps reduced) but the proportional native thumb shrinks to the ~17px engine minimum on 8k-scale lists, which is hard to grab. Author `min-height` on `::-webkit-scrollbar-thumb` is ignored by Chromium, so CSS cannot floor it.
+- Decision: keep reservation + native scroll ownership (wheel/touch/keyboard/programmatic behavior unchanged) and draw a visual-only overlay scrollbar with a real 32px minimum thumb. Thumb position = scrollTop/maxScroll over the reserved range; drag maps back to scrollTop; track click jumps to the ratio position.
+- Regression coverage: 32px floor, position tracking, drag mapping, track-click jump, hidden-when-fits, and thumb steadiness across appends at a fixed offset.
+- Re-verify with HMR or a window refresh (frontend-only change); then mark `DONE` if items 1-6 pass.
+
 ## P2 — architecture / larger feature work
 
 ### CATALOG-001 — Move fragile k-hentai transport behind the Japanese VPS

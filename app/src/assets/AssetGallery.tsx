@@ -8,6 +8,7 @@ import { Skeleton } from "../shared/ui/Skeleton";
 import type { SelectionGesture } from "./selection";
 import { buildJustifiedRows } from "./justifiedRows";
 import { assetUrl, thumbnailUrl } from "./mediaUrl";
+import { AssetGalleryScrollbar } from "./AssetGalleryScrollbar";
 import { VideoTileMedia } from "../video/VideoTileMedia";
 import "../styles/tokens.css";
 
@@ -84,20 +85,37 @@ export function AssetGallery({ items, scopeKey, totalCount = null, selectedAsset
   }, [rows.length, scopeKey]);
   const virtualRows = rowVirtualizer.getVirtualItems();
   const measuredTotal = rowVirtualizer.getTotalSize();
+  // Freeze the estimation base on the first measured rows so appended pages
+  // never shift the reserved range (which would yank the scrollbar thumb).
+  // The base resets only when rows empty out (new scope), and the estimate
+  // changes only when the backend total itself changes.
+  // Freeze the estimation base on the first measured rows so appended pages
+  // never shift the reserved range (which would yank the scrollbar thumb).
+  // The base resets only when rows empty out (new scope), and the estimate
+  // changes only when the backend total itself changes.
+  const [estimateBase, setEstimateBase] = useState<{
+    avgItemsPerRow: number;
+    avgRowHeight: number;
+  } | null>(null);
+  useLayoutEffect(() => {
+    if (rows.length === 0) {
+      if (estimateBase) setEstimateBase(null);
+    } else if (!estimateBase && measuredTotal > 0 && items.length > 0) {
+      setEstimateBase({
+        avgItemsPerRow: items.length / rows.length,
+        avgRowHeight: measuredTotal / rows.length,
+      });
+    }
+  });
   // Reserve the full filtered range up front so appended pages stop growing
   // the scroll range (which yanks the scrollbar thumb upward mid-drag).
-  // The estimate refines from measured rows as pages load; once everything
-  // is loaded the measured size is exact again.
+  // Once everything is loaded the measured size is exact again.
   let reservedTotal = measuredTotal;
-  if (hasNextPage && totalCount != null && rows.length > 0 && items.length > 0) {
-    const avgItemsPerRow = items.length / rows.length;
-    const avgRowHeight = measuredTotal / rows.length;
-    if (avgItemsPerRow > 0 && avgRowHeight > 0) {
-      reservedTotal = Math.max(
-        measuredTotal,
-        Math.ceil(totalCount / avgItemsPerRow) * avgRowHeight,
-      );
-    }
+  if (hasNextPage && totalCount != null && estimateBase) {
+    reservedTotal = Math.max(
+      measuredTotal,
+      Math.ceil(totalCount / estimateBase.avgItemsPerRow) * estimateBase.avgRowHeight,
+    );
   }
   const cancelQuickPreview = () => {
     quickPreviewRequestRef.current += 1;
@@ -238,6 +256,7 @@ export function AssetGallery({ items, scopeKey, totalCount = null, selectedAsset
       </div>
     </div>
     {quickPreview && !privacyMode && <div className="asset-gallery__quick-preview" style={quickPreviewLayout(quickPreview)}><img src={assetUrl(quickPreview.asset.id)} alt={`${quickPreview.asset.title || quickPreview.asset.originalName} 빠른 미리보기`} draggable={false} onError={cancelQuickPreview} /></div>}
+    <AssetGalleryScrollbar scrollRef={scrollRef} totalHeight={reservedTotal} />
   </div>;
 }
 
