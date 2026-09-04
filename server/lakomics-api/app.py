@@ -500,6 +500,96 @@ def startup_saved_x_media():
         db.commit()
 
 
+MAX_EXTENSION_BACKUP_BYTES = 256 * 1024
+
+
+class ExtensionBackupSnapshot(BaseModel):
+    version: Literal[1]
+    algorithm: Literal["AES-GCM"]
+    iv: str = Field(min_length=16, max_length=64)
+    ciphertext: str = Field(min_length=16, max_length=MAX_EXTENSION_BACKUP_BYTES * 2)
+
+
+@app.on_event("startup")
+def startup_extension_backup():
+    with get_db() as db:
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS extension_backup_snapshots (
+                singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                payload TEXT NOT NULL,
+                published_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        db.commit()
+
+
+@app.put("/v1/extension-backup")
+def publish_extension_backup(
+    snapshot: ExtensionBackupSnapshot,
+    authorization: str | None = Header(default=None),
+):
+    require_auth(authorization)
+    payload = snapshot.model_dump_json()
+    byte_size = len(payload.encode("utf-8"))
+    if byte_size > MAX_EXTENSION_BACKUP_BYTES:
+        raise HTTPException(status_code=413, detail="Extension backup too large")
+    published_at = now_iso()
+    with get_db() as db:
+        db.execute(
+            """
+            INSERT INTO extension_backup_snapshots (singleton, payload, published_at, updated_at)
+            VALUES (1, ?, ?, ?)
+            ON CONFLICT(singleton) DO UPDATE SET
+                payload = excluded.payload,
+                published_at = excluded.published_at,
+                updated_at = excluded.updated_at
+            """,
+            (payload, published_at, now_iso()),
+        )
+        db.commit()
+    return {"ok": True, "published_at": published_at, "byte_size": byte_size}
+
+
+@app.get("/v1/extension-backup")
+def get_extension_backup(authorization: str | None = Header(default=None)):
+    require_auth(authorization)
+    with get_db() as db:
+        row = db.execute(
+            "SELECT payload, published_at FROM extension_backup_snapshots WHERE singleton = 1"
+        ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="No extension backup published yet")
+    payload = json.loads(row["payload"])
+    payload["published_at"] = row["published_at"]
+    return payload
+
+
+METADATA_BACKUP_OBJECT_KEY = "backups/library-metadata.sqlite"
+METADATA_BACKUP_TICKET_TTL_SECONDS = 600
+
+
+@app.get("/v1/library/metadata-backup")
+def get_library_metadata_backup(authorization: str | None = Header(default=None)):
+    require_auth(authorization)
+    try:
+        metadata = _s3.head_object(Bucket=R2_BUCKET, Key=METADATA_BACKUP_OBJECT_KEY)
+    except ClientError as exc:
+        code = str(exc.response.get("Error", {}).get("Code", ""))
+        if code in ("404", "NoSuchKey", "NotFound"):
+            raise HTTPException(status_code=404, detail="No library metadata backup published yet")
+        raise HTTPException(status_code=502, detail="Metadata backup storage is unavailable")
+    return {
+        "download_url": presign_get(METADATA_BACKUP_OBJECT_KEY, METADATA_BACKUP_TICKET_TTL_SECONDS),
+        "required_headers": {},
+        "size_bytes": metadata.get("ContentLength"),
+        "content_type": metadata.get("ContentType") or "application/vnd.sqlite3",
+        "expires_in": METADATA_BACKUP_TICKET_TTL_SECONDS,
+    }
+
+
 def valid_x_source_url(value: str) -> bool:
     try:
         url = urlparse(value)

@@ -8,9 +8,9 @@ pub use cloud::backfill::BackfillControlState;
 pub use cloud::thumbnail_refresh::{
     refresh_cloud_thumbnails, CloudThumbnailRefreshOptions, CloudThumbnailRefreshReport,
 };
-mod media_protocol;
 #[cfg(test)]
 mod catalog_source_tests;
+mod media_protocol;
 
 #[cfg(not(windows))]
 compile_error!("Lakomics is supported only on Windows");
@@ -178,6 +178,8 @@ pub fn run() {
             commands::set_cloud_api_token,
             commands::delete_cloud_api_token,
             commands::test_cloud_capture_connection,
+            commands::push_cloud_metadata_backup,
+            commands::restore_cloud_metadata_backup,
             commands::run_due_cloud_capture_sync,
             commands::cloud_backfill_preflight,
             commands::cloud_backfill_seed,

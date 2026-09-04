@@ -4,11 +4,12 @@ mod backfill_tests;
 #[cfg(test)]
 mod capture_tests;
 pub(crate) mod captures;
-pub(crate) mod thumbnail_refresh;
 mod client;
+pub(crate) mod metadata_backup;
 pub(crate) mod models;
 pub(crate) mod queue;
 mod sync;
+pub(crate) mod thumbnail_refresh;
 
 #[cfg(test)]
 mod contract_tests;

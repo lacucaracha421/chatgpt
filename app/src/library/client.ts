@@ -72,6 +72,8 @@ import type {
   CloudCaptureSettings,
   CloudCredentialStatus,
   CloudCaptureConnectionStatus,
+  CloudMetadataBackupResult,
+  CloudLibraryRestoreReport,
   CatalogWorkDetail,
   CollectionCover,
   CollectionVolume,
@@ -120,6 +122,10 @@ export const libraryGateway: LibraryGateway = {
     invoke<CloudCredentialStatus>("delete_cloud_api_token"),
   testCloudCaptureConnection: () =>
     invoke<CloudCaptureConnectionStatus>("test_cloud_capture_connection"),
+  pushCloudMetadataBackup: () =>
+    invoke<CloudMetadataBackupResult>("push_cloud_metadata_backup"),
+  restoreCloudMetadataBackup: () =>
+    invoke<CloudLibraryRestoreReport>("restore_cloud_metadata_backup"),
   runDueCloudCaptureSync: () =>
     invoke<CloudCaptureSyncResult>("run_due_cloud_capture_sync"),
   cloudBackfillPreflight: () =>

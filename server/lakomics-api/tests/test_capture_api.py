@@ -682,6 +682,105 @@ class ClassificationSnapshotApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 413)
 
 
+class ExtensionBackupApiTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.database_path = Path(self.temp_dir.name) / "lakomics.sqlite3"
+        self.original_database_path = api_app.DB_PATH
+        self.original_api_token = api_app.API_TOKEN
+        api_app.DB_PATH = self.database_path
+        api_app.API_TOKEN = "test-token"
+        api_app.startup()
+        api_app.startup_extension_backup()
+        self.client = TestClient(api_app.app)
+
+    def tearDown(self) -> None:
+        self.client.close()
+        api_app.DB_PATH = self.original_database_path
+        api_app.API_TOKEN = self.original_api_token
+        self.temp_dir.cleanup()
+
+    @property
+    def auth(self):
+        return {"Authorization": "Bearer test-token"}
+
+    @staticmethod
+    def envelope(ciphertext: str = "Y2lwaGVydGV4dC1wYXlsb2Fk"):
+        return {
+            "version": 1,
+            "algorithm": "AES-GCM",
+            "iv": "MDEyMzQ1Njc4OWFi",
+            "ciphertext": ciphertext,
+        }
+
+    def test_server_backup_requires_auth_and_round_trips_latest_ciphertext(self):
+        body = self.envelope()
+        self.assertEqual(self.client.put("/v1/extension-backup", json=body).status_code, 401)
+        self.assertEqual(self.client.get("/v1/extension-backup").status_code, 401)
+        publish = self.client.put("/v1/extension-backup", headers=self.auth, json=body)
+        self.assertEqual(publish.status_code, 200)
+        self.assertGreater(publish.json()["byte_size"], 0)
+        restored = self.client.get("/v1/extension-backup", headers=self.auth)
+        self.assertEqual(restored.status_code, 200)
+        self.assertEqual(restored.json()["version"], 1)
+        self.assertEqual(restored.json()["algorithm"], "AES-GCM")
+        self.assertEqual(restored.json()["iv"], body["iv"])
+        self.assertEqual(restored.json()["ciphertext"], body["ciphertext"])
+        self.assertIn("published_at", restored.json())
+
+        replacement = self.envelope("bmV3LWNpcGhlcnRleHQtcGF5bG9hZA==")
+        self.client.put("/v1/extension-backup", headers=self.auth, json=replacement)
+        latest = self.client.get("/v1/extension-backup", headers=self.auth).json()
+        self.assertEqual(latest["ciphertext"], replacement["ciphertext"])
+
+    def test_missing_and_oversized_server_backup_are_bounded(self):
+        self.assertEqual(self.client.get("/v1/extension-backup", headers=self.auth).status_code, 404)
+        oversized = self.envelope("x" * (api_app.MAX_EXTENSION_BACKUP_BYTES * 2 + 1))
+        response = self.client.put("/v1/extension-backup", headers=self.auth, json=oversized)
+        self.assertEqual(response.status_code, 422)
+
+    def test_plaintext_snapshot_shape_is_rejected(self):
+        response = self.client.put(
+            "/v1/extension-backup",
+            headers=self.auth,
+            json={"version": 1, "data": {"connectionToken": "secret"}},
+        )
+        self.assertEqual(response.status_code, 422)
+
+
+class MetadataBackupApiTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.original_api_token = api_app.API_TOKEN
+        api_app.API_TOKEN = "test-token"
+        fake_s3.objects.clear()
+        self.client = TestClient(api_app.app)
+
+    def tearDown(self) -> None:
+        self.client.close()
+        api_app.API_TOKEN = self.original_api_token
+        fake_s3.objects.clear()
+
+    @property
+    def auth(self):
+        return {"Authorization": "Bearer test-token"}
+
+    def test_metadata_backup_ticket_requires_auth_and_returns_fixed_r2_object(self):
+        self.assertEqual(self.client.get("/v1/library/metadata-backup").status_code, 401)
+        self.assertEqual(self.client.get("/v1/library/metadata-backup", headers=self.auth).status_code, 404)
+        fake_s3.objects[api_app.METADATA_BACKUP_OBJECT_KEY] = {
+            "bucket": "test-bucket",
+            "body": b"sqlite-snapshot",
+            "content_type": "application/vnd.sqlite3",
+        }
+        response = self.client.get("/v1/library/metadata-backup", headers=self.auth)
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["size_bytes"], len(b"sqlite-snapshot"))
+        self.assertEqual(payload["content_type"], "application/vnd.sqlite3")
+        self.assertIn(api_app.METADATA_BACKUP_OBJECT_KEY, payload["download_url"])
+        self.assertEqual(payload["required_headers"], {})
+
+
 class SavedXMediaSnapshotApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()

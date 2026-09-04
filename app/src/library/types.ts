@@ -107,6 +107,16 @@ export type CloudCaptureSettings = {
 
 export type CloudCredentialStatus = { configured: boolean };
 export type CloudCaptureConnectionStatus = { pendingCount: number };
+export type CloudMetadataBackupResult = { byteSize: number };
+export type CloudLibraryRestoreReport = {
+  metadataByteSize: number;
+  totalAssets: number;
+  originalsRestored: number;
+  thumbnailsRestored: number;
+  filesSkipped: number;
+  filesUnavailable: number;
+  bytesDownloaded: number;
+};
 
 export type RemoteProvider = "kHentai";
 
@@ -874,6 +884,8 @@ export interface LibraryGateway {
   setCloudApiToken(token: string): Promise<CloudCredentialStatus>;
   deleteCloudApiToken(): Promise<CloudCredentialStatus>;
   testCloudCaptureConnection(): Promise<CloudCaptureConnectionStatus>;
+  pushCloudMetadataBackup?(): Promise<CloudMetadataBackupResult>;
+  restoreCloudMetadataBackup?(): Promise<CloudLibraryRestoreReport>;
   runDueCloudCaptureSync(): Promise<CloudCaptureSyncResult>;
   cloudBackfillPreflight(): Promise<CloudBackfillPreflightReport>;
   cloudBackfillSeed(): Promise<CloudBackfillSeedReport>;

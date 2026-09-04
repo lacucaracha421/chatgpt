@@ -11,167 +11,173 @@
     <script src="options.js" defer></script>
   </head>
   <body>
-    <main>
-      <h1>Lakomics X Collector</h1>
-
-      <section aria-labelledby="save-policy-title">
-        <h2 id="save-policy-title">저장 방식</h2>
-        <label for="save-mode">저장 방식 선택</label>
-        <select id="save-mode" aria-describedby="save-policy-note">
-          <option value="auto">자동 (권장)</option>
-          <option value="pc">PC 직접 연결만</option>
-          <option value="cloud">Cloud만</option>
-          <option value="download">브라우저 Download만</option>
-        </select>
-        <p id="save-policy-note" class="setting-note"></p>
-        <p id="save-mode-status" role="status"></p>
-      </section>
-
-      <section aria-labelledby="collector-title">
-        <h2 id="collector-title">Cloud</h2>
-        <label class="check-row" for="collector-enabled">
-          <input id="collector-enabled" type="checkbox">
-          <span>Cloud Capture 사용</span>
-        </label>
-        <label for="collector-base-url">Cloud 엔드포인트</label>
-        <input id="collector-base-url" type="url" autocomplete="off" spellcheck="false" placeholder="http://100.76.119.29:32146">
-        <label for="collector-token">Cloud API 토큰</label>
-        <div class="row">
-          <input id="collector-token" type="password" autocomplete="off" spellcheck="false" placeholder="저장된 토큰이 있으면 비워 두세요">
-          <button id="save-test-collector" type="button">저장하고 테스트</button>
+    <main class="options-shell">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">LAKOMICS</p>
+          <h1>X Collector</h1>
         </div>
-        <p class="setting-note">이미지·영상·움짤 MP4를 PC를 거치지 않고 Cloud로 바로 보냅니다.</p>
-        <p id="collector-status" role="status"></p>
-      </section>
+        <p>저장 경로와 방사형 메뉴만 빠르게 관리합니다.</p>
+      </header>
 
-      <section aria-labelledby="connection-title">
-        <h2 id="connection-title">PC 직접 연결</h2>
-        <p class="setting-note">LAN/Tailscale로 PC Lakomics에 바로 저장합니다. 자동 모드에서는 Cloud보다 이 경로를 먼저 시도합니다.</p>
-        <label for="connection-token">연결 키</label>
-        <div class="row">
-          <input id="connection-token" type="password" autocomplete="off" spellcheck="false" placeholder="저장된 키가 있으면 비워 두세요">
-          <button id="refresh-classifications" type="button">저장하고 연결</button>
+      <section class="settings-card settings-card--compact" aria-labelledby="quick-title">
+        <div class="section-heading">
+          <h2 id="quick-title">기본</h2>
+          <span>자주 쓰는 설정</span>
         </div>
-        <p id="connection-status" role="status"></p>
-
-        <label class="check-row" for="remote-enabled">
-          <input id="remote-enabled" type="checkbox">
-          <span>Remote Lakomics · Tailscale 사용</span>
-        </label>
-        <label for="remote-base-url">Remote 주소</label>
-        <input id="remote-base-url" type="url" autocomplete="off" spellcheck="false" placeholder="https://desktop-6oh3e09.tail0aa1a3.ts.net">
-        <div class="row">
-          <button id="save-test-remote" type="button">저장하고 원격 연결 테스트</button>
-        </div>
-        <p id="remote-status" role="status"></p>
-      </section>
-
-      <section aria-labelledby="diagnostics-title">
-        <h2 id="diagnostics-title">연결 · 동기화 상태</h2>
-        <div id="diagnostics-summary" aria-live="polite"></div>
-        <div class="row">
-          <button id="refresh-diagnostics" type="button">상태 새로고침</button>
-        </div>
-        <p id="diagnostics-status" role="status"></p>
-      </section>
-
-      <section aria-labelledby="mobile-site-access-title">
-        <h2 id="mobile-site-access-title">Mobile Lakomics</h2>
-        <div class="mobile-site-heading">
+        <div class="compact-setting-row">
           <div>
-            <strong>사이트 접근 권한</strong>
-            <p class="setting-note">lacucaracha421.github.io</p>
+            <label for="save-mode">저장 방식</label>
+            <p id="save-policy-note" class="setting-note"></p>
           </div>
-          <span id="mobile-site-access" class="compact-status" role="status">권한 상태 확인 중…</span>
+          <select id="save-mode">
+            <option value="auto">자동 (권장)</option>
+            <option value="pc">PC만</option>
+            <option value="cloud">Cloud만</option>
+            <option value="download">Download만</option>
+          </select>
         </div>
-        <div class="row">
-          <button id="request-mobile-site-access" type="button">사이트 접근 허용</button>
+        <div class="toggle-strip">
+          <label class="check-row" for="auto-like-on-save">
+            <input id="auto-like-on-save" type="checkbox">
+            <span>저장 시 X 좋아요</span>
+          </label>
+          <label class="check-row" for="x-translate-enabled">
+            <input id="x-translate-enabled" type="checkbox">
+            <span>X Translate</span>
+          </label>
+        </div>
+        <div class="status-line">
+          <p id="save-mode-status" role="status"></p>
+          <p id="x-translate-status" role="status"></p>
+        </div>
+      </section>
+
+      <section class="settings-card" aria-labelledby="connection-title">
+        <div class="section-heading">
+          <h2 id="connection-title">연결</h2>
+          <span>Cloud와 PC를 한곳에서</span>
+        </div>
+        <div class="connection-grid">
+          <div class="connection-panel" aria-labelledby="collector-title">
+            <div class="panel-heading">
+              <h3 id="collector-title">Cloud</h3>
+              <label class="check-row inline-check" for="collector-enabled">
+                <input id="collector-enabled" type="checkbox">
+                <span>사용</span>
+              </label>
+            </div>
+            <label for="collector-base-url">VPS 주소</label>
+            <input id="collector-base-url" type="url" autocomplete="off" spellcheck="false" placeholder="http://100.76.119.29:32146">
+            <label for="collector-token">API 토큰</label>
+            <input id="collector-token" type="password" autocomplete="off" spellcheck="false" placeholder="저장된 토큰 유지">
+            <button id="save-test-collector" type="button">저장 · 테스트</button>
+            <p id="collector-status" class="setting-status" role="status"></p>
+          </div>
+
+          <div class="connection-panel" aria-labelledby="pc-title">
+            <div class="panel-heading"><h3 id="pc-title">PC 직접</h3></div>
+            <label for="connection-token">연결 키</label>
+            <div class="row">
+              <input id="connection-token" type="password" autocomplete="off" spellcheck="false" placeholder="저장된 키 유지">
+              <button id="refresh-classifications" type="button">저장하고 연결</button>
+            </div>
+            <label class="check-row inline-check" for="remote-enabled">
+              <input id="remote-enabled" type="checkbox">
+              <span>Tailscale Remote</span>
+            </label>
+            <div class="row">
+              <input id="remote-base-url" type="url" autocomplete="off" spellcheck="false" placeholder="https://desktop....ts.net">
+              <button id="save-test-remote" type="button">원격 테스트</button>
+            </div>
+            <p id="connection-status" class="setting-status" role="status"></p>
+            <p id="remote-status" class="setting-status" role="status"></p>
+          </div>
+        </div>
+      </section>
+
+      <section class="settings-card settings-card--compact" aria-labelledby="backup-title">
+        <div class="section-heading">
+          <h2 id="backup-title">백업 · 이전</h2>
+          <span>서버에 암호화 저장</span>
+        </div>
+        <div class="action-row">
+          <button id="push-portable-backup" type="button">현재 설정 백업</button>
+          <button id="restore-portable-backup" type="button">서버에서 가져오기</button>
+        </div>
+        <p class="setting-note">Cloud API 토큰을 복원 열쇠로 사용합니다. 서버에는 AES-GCM 암호문만 저장됩니다.</p>
+        <p id="portable-backup-status" class="setting-status" role="status"></p>
+      </section>
+
+      <section class="settings-card settings-card--compact" aria-labelledby="mobile-site-access-title">
+        <div class="section-heading mobile-site-heading">
+          <div>
+            <h2 id="mobile-site-access-title">Mobile Lakomics</h2>
+            <span>lacucaracha421.github.io</span>
+          </div>
+          <span id="mobile-site-access" class="compact-status" role="status">권한 확인 중…</span>
+        </div>
+        <div class="action-row">
+          <button id="request-mobile-site-access" type="button">사이트 접근 권한 허용</button>
           <a class="button-link" href="https://lacucaracha421.github.io/chatgpt/" target="_blank" rel="noopener noreferrer">Mobile Lakomics 열기</a>
         </div>
         <p id="mobile-site-access-result" class="setting-note" role="status"></p>
         <p id="mobile-site-access-diagnostic" class="setting-note"></p>
       </section>
 
-      <section aria-labelledby="translate-title">
-        <h2 id="translate-title">X Translate</h2>
-        <label class="check-row" for="x-translate-enabled">
-          <input id="x-translate-enabled" type="checkbox">
-          <span>X에서 번역 버튼(訳) 사용</span>
-        </label>
-        <p class="setting-note">AI X Translate Lite v1.4.14 OpenRouter판을 내장합니다. API 제공자·키·모델은 X 화면의 訳 패널에서 설정합니다.</p>
-        <p id="x-translate-status" role="status"></p>
-      </section>
-
-      <section aria-labelledby="mobile-title">
-        <h2 id="mobile-title">모바일 도넛</h2>
-        <div class="settings-grid compact-grid">
-          <label for="touch-long-press">롱프레스 시간 (ms)</label>
-          <input id="touch-long-press" type="number" min="220" max="900" step="10">
-          <label class="check-row" for="suppress-download-ui">
-            <input id="suppress-download-ui" type="checkbox">
-            <span>다운로드 완료 UI 숨기기</span>
-          </label>
-          <label class="check-row" for="auto-like-on-save">
-            <input id="auto-like-on-save" type="checkbox">
-            <span>Lakomics 저장 시 X 좋아요</span>
-          </label>
-          <p class="setting-note">현재 화면에 원본 게시물이 남아 있을 때만 자동으로 좋아요를 누릅니다. 이미 좋아요한 게시물은 건드리지 않습니다.</p>
+      <section class="settings-card settings-card--layout" aria-labelledby="layout-title">
+        <div class="section-heading">
+          <h2 id="layout-title">방사형 메뉴</h2>
+          <span>배치 · 1차 고정 · 2차 숨김</span>
         </div>
-        <div class="row">
-          <button id="save-preferences" type="button">모바일 설정 저장</button>
-        </div>
-        <p id="preferences-status" role="status"></p>
-      </section>
-
-      <section aria-labelledby="layout-title">
-        <h2 id="layout-title">PC · 방사형 메뉴 배치</h2>
         <div id="layout-editor" aria-live="polite">Lakomics에 연결하면 편집기를 준비합니다.</div>
       </section>
 
       <details class="advanced-block">
-        <summary>고급 · 복구 설정</summary>
+        <summary>고급 설정</summary>
         <div class="advanced-content">
-          <section aria-labelledby="fallback-title">
-            <h2 id="fallback-title">오프라인 저장</h2>
-            <p class="setting-note">Lakomics에 연결되지 않을 때 브라우저의 기본 Download 폴더 아래에 저장합니다. Android의 /storage/emulated/0 같은 절대 경로는 확장 API로 지정할 수 없습니다.</p>
-            <label for="download-folder">Download 아래 하위 폴더</label>
-            <input id="download-folder" type="text" autocomplete="off" spellcheck="false" placeholder="Lakomics images">
-            <p class="setting-note">예: <code>Lakomics images</code> → <code>내장 저장공간/Download/Lakomics images</code></p>
-          </section>
-
-          <section aria-labelledby="connection-backup-title">
-            <h2 id="connection-backup-title">연결 설정 백업</h2>
-            <p class="setting-note">완전 재설치로 저장소가 초기화될 때만 사용합니다. JSON에는 Lakomics 연결 키가 평문으로 포함됩니다.</p>
-            <textarea id="connection-backup-json" rows="7" spellcheck="false" placeholder="연결 설정 백업 JSON"></textarea>
-            <div class="row">
-              <button id="export-connection-backup" type="button">연결 설정 내보내기</button>
-              <button id="import-connection-backup" type="button">연결 설정 가져오기</button>
+          <section class="settings-card settings-card--compact" aria-labelledby="device-title">
+            <h2 id="device-title">기기 · 다운로드</h2>
+            <div class="settings-grid compact-grid">
+              <label for="download-folder">Download 하위 폴더</label>
+              <input id="download-folder" type="text" autocomplete="off" spellcheck="false" placeholder="Lakomics images">
+              <label for="touch-long-press">롱프레스 시간 (ms)</label>
+              <input id="touch-long-press" type="number" min="220" max="900" step="10">
+              <label class="check-row" for="suppress-download-ui">
+                <input id="suppress-download-ui" type="checkbox">
+                <span>다운로드 완료 UI 숨기기</span>
+              </label>
             </div>
-            <p id="connection-backup-status" role="status"></p>
+            <button id="save-preferences" type="button">기기 설정 저장</button>
+            <p id="preferences-status" class="setting-status" role="status"></p>
           </section>
 
-          <section aria-labelledby="mobile-tree-title">
-            <h2 id="mobile-tree-title">오프라인 도넛 분류</h2>
-            <p class="setting-note">PC에 연결되지 않았을 때만 쓰는 로컬 분류입니다. 평소에는 PC Lakomics 분류가 우선됩니다.</p>
+          <section class="settings-card settings-card--compact" aria-labelledby="diagnostics-title">
+            <div class="section-heading">
+              <h2 id="diagnostics-title">진단</h2>
+              <button id="refresh-diagnostics" type="button">새로고침</button>
+            </div>
+            <div id="diagnostics-summary" aria-live="polite"></div>
+            <p id="diagnostics-status" role="status"></p>
+          </section>
+
+          <section class="settings-card" aria-labelledby="mobile-tree-title">
+            <div class="section-heading">
+              <h2 id="mobile-tree-title">오프라인 도넛</h2>
+              <span>PC/Cloud 연결이 없을 때만 사용</span>
+            </div>
             <div class="row">
-              <label for="local-primary-select">편집할 1차 분류</label>
+              <label for="local-primary-select">1차 분류</label>
               <select id="local-primary-select"></select>
-              <label for="local-primary-name">1차 이름</label>
-              <input id="local-primary-name" type="text" maxlength="80" autocomplete="off">
+              <input id="local-primary-name" aria-label="1차 분류 이름" type="text" maxlength="80" autocomplete="off">
             </div>
             <div id="local-secondary-grid" class="secondary-slot-grid" aria-live="polite"></div>
-            <div class="row">
-              <button id="save-local-tree" type="button">도넛 저장</button>
+            <div class="action-row">
+              <button id="save-local-tree" type="button">저장</button>
+              <button id="copy-app-tree" type="button">PC 분류 복사</button>
               <button id="reset-local-tree" type="button">기본값</button>
-              <button id="copy-app-tree" type="button">PC 분류에서 복사</button>
             </div>
-            <p id="local-tree-status" role="status"></p>
-            <label for="local-tree-json">오프라인 도넛 JSON</label>
-            <textarea id="local-tree-json" rows="10" spellcheck="false"></textarea>
-            <div class="row">
-              <button id="export-local-tree" type="button">JSON 내보내기</button>
-              <button id="import-local-tree" type="button">JSON 가져오기</button>
-            </div>
+            <p id="local-tree-status" class="setting-status" role="status"></p>
           </section>
         </div>
       </details>

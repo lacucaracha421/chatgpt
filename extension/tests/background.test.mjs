@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
+import { webcrypto } from "node:crypto";
+import { TextDecoder, TextEncoder } from "node:util";
 
 const source = fs.readFileSync(new URL("../src/background.js", import.meta.url), "utf8");
 const layoutSource = fs.readFileSync(new URL("../src/layout.js", import.meta.url), "utf8");
@@ -1030,6 +1032,93 @@ test("existing remote settings override the prefilled URL", async () => {
   assert.equal(settings.remote.baseUrl, "https://other.tail123.ts.net");
 });
 
+test("server portable backup encrypts settings without duplicating the Cloud API token", async () => {
+  const connectionToken = "0123456789abcdef0123456789abcdef";
+  const harness = createHarness({
+    connectionToken,
+    collectorToken: "server-secret-token",
+    collectorSettings: { enabled: true, baseUrl: "http://100.76.119.29:32146" },
+    remoteSettings: { enabled: true, baseUrl: "https://laku.tail0aa1a3.ts.net" },
+    preferences: { saveMode: "cloud", downloadFolder: "Lakomics images" },
+    radialLayout: { version: 1, parents: { game: [["tag-1", null, null, null, null, null]] } },
+    pinnedClassificationIds: ["tag-1"],
+    secondaryRadialPresentation: { version: 1, usage: { "tag-1": 31 }, hiddenIds: ["tag-2"] },
+    xTranslateEnabled: true,
+    "xtranslate:gm:oit.settings.v2": { provider: "openrouter" },
+    "xtranslate:gm:oit.apiKey": "translate-secret",
+  });
+  harness.queueJson({ ok: true, published_at: "2026-09-04T12:00:00+00:00", byte_size: 2048 });
+
+  const response = await harness.api.handleMessage({ type: "portable-backup:push" });
+  assert.equal(response.ok, true);
+  assert.equal(harness.fetchCalls[0].url, "http://100.76.119.29:32146/v1/extension-backup");
+  assert.equal(harness.fetchCalls[0].options.method, "PUT");
+  assert.equal(harness.fetchCalls[0].options.headers.Authorization, "Bearer server-secret-token");
+  const sent = JSON.parse(harness.fetchCalls[0].options.body);
+  assert.equal(sent.version, 1);
+  assert.equal(sent.algorithm, "AES-GCM");
+  assert.equal(typeof sent.iv, "string");
+  assert.equal(typeof sent.ciphertext, "string");
+  assert.equal(JSON.stringify(sent).includes(connectionToken), false);
+  assert.equal(JSON.stringify(sent).includes("translate-secret"), false);
+  assert.equal(JSON.stringify(sent).includes("server-secret-token"), false);
+  assert.equal(JSON.stringify(sent).includes("recentBrowserSaves"), false);
+});
+
+test("server portable restore decrypts with the bootstrap Cloud token and restores portable state", async () => {
+  const bootstrapToken = "bootstrap-token";
+  const sourceHarness = createHarness({
+    collectorToken: bootstrapToken,
+    collectorSettings: { enabled: true, baseUrl: "http://100.76.119.29:32146" },
+    connectionToken: "fedcba9876543210fedcba9876543210",
+    preferences: { saveMode: "pc", downloadFolder: "Lakomics images" },
+    remoteSettings: { enabled: true, baseUrl: "https://desktop.tail0aa1a3.ts.net" },
+    radialLayout: { version: 1, parents: { game: [["tag-1", null, null, null, null, null]] } },
+    pinnedClassificationIds: ["tag-1"],
+    secondaryRadialPresentation: { version: 1, usage: { "tag-1": 15 }, hiddenIds: ["tag-2"] },
+    xTranslateEnabled: false,
+    "xtranslate:gm:oit.model": "openai/gpt-5-mini",
+  });
+  sourceHarness.queueJson({ ok: true, published_at: "2026-09-04T12:00:00+00:00", byte_size: 2048 });
+  const pushed = await sourceHarness.api.handleMessage({ type: "portable-backup:push" });
+  assert.equal(pushed.ok, true);
+  const envelope = JSON.parse(sourceHarness.fetchCalls[0].options.body);
+
+  const harness = createHarness({
+    collectorToken: bootstrapToken,
+    collectorSettings: { enabled: true, baseUrl: "http://100.76.119.29:32146" },
+  });
+  harness.queueJson({ ...envelope, published_at: "2026-09-04T12:00:00+00:00" });
+
+  const response = await harness.api.handleMessage({ type: "portable-backup:restore" });
+  assert.equal(response.ok, true);
+  assert.equal(harness.fetchCalls[0].options.headers.Authorization, `Bearer ${bootstrapToken}`);
+  assert.equal(harness.storage.collectorToken, bootstrapToken);
+  assert.equal(harness.storage.connectionToken, "fedcba9876543210fedcba9876543210");
+  assert.equal(harness.storage.preferences.saveMode, "pc");
+  assert.deepEqual(plain(harness.storage.pinnedClassificationIds), ["tag-1"]);
+  assert.deepEqual(plain(harness.storage.secondaryRadialPresentation.hiddenIds), ["tag-2"]);
+  assert.equal(harness.storage.xTranslateEnabled, false);
+  assert.equal(harness.storage["xtranslate:gm:oit.model"], "openai/gpt-5-mini");
+});
+
+test("portable restore rejects a backup encrypted with a different Cloud token", async () => {
+  const source = createHarness({
+    collectorToken: "token-a",
+    collectorSettings: { enabled: true, baseUrl: "http://100.76.119.29:32146" },
+  });
+  source.queueJson({ ok: true });
+  await source.api.handleMessage({ type: "portable-backup:push" });
+  const envelope = JSON.parse(source.fetchCalls[0].options.body);
+  const target = createHarness({
+    collectorToken: "token-b",
+    collectorSettings: { enabled: true, baseUrl: "http://100.76.119.29:32146" },
+  });
+  target.queueJson(envelope);
+  const response = await target.api.handleMessage({ type: "portable-backup:restore" });
+  assert.deepEqual(plain(response), { ok: false, code: "portable_backup_decrypt_failed" });
+});
+
 test("connection backup round-trips the token and remote endpoint", async () => {
   const token = "0123456789abcdef0123456789abcdef";
   const sourceHarness = createHarness({
@@ -1728,6 +1817,11 @@ function createHarness(initialStorage = {}, runtimeId = "nclkmjmmlcdaeomgadndean
     Date: MockDate,
     URL,
     console,
+    crypto: webcrypto,
+    TextEncoder,
+    TextDecoder,
+    btoa: (value) => Buffer.from(value, "binary").toString("base64"),
+    atob: (value) => Buffer.from(value, "base64").toString("binary"),
     globalThis: null,
     __LAKOMICS_TEST__: true,
   };

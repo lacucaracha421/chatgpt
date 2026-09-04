@@ -46,6 +46,10 @@ pub enum LibraryError {
     CloudRequestUnavailable,
     #[error("클라우드 API 응답이 올바르지 않습니다")]
     InvalidCloudResponse,
+    #[error("서버에 라이브러리 메타데이터 백업이 없습니다")]
+    CloudMetadataBackupNotFound,
+    #[error("서버 메타데이터 백업이 허용 크기를 초과합니다")]
+    CloudMetadataBackupTooLarge,
     #[error("업로드 URL 발급 요청이 거부됐습니다: HTTP {0}")]
     CloudPresignRejected(u16),
     #[error("R2 업로드가 거부됐습니다: HTTP {0}")]

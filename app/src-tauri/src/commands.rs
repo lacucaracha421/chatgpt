@@ -20,15 +20,14 @@ use crate::{
             AladinApplyRequest, AladinConnection, AladinSeriesCandidate, AladinSyncResult,
             AlbumEntry, AssetAlbumPatch, AssetCollectionPatch, AssetCursor, AssetDateBucket,
             AssetDateBucketQuery, AssetMetadataPatch, AssetPage, AssetQuery, AssetSummary,
-            CatalogSearchPage, CatalogSearchQuery,
-            CatalogStatus, CatalogSuggestion, CatalogUpdateResult, CatalogUpdateStopReason,
-            CatalogWorkDetail, ClassificationEntry, CollectionCover, CollectionSummary,
-            CollectionVolume, CreateAlbum, CreateClassification, CreateCollection,
-            IngestMediaRequest, IngestOutcome, LibrarySummary, MangaDexApplyRequest,
-            MangaCatalogRecoveryApplyResult, MangaCatalogRecoveryPreview,
-            MangaCatalogRecoveryRemoteResult, MangaCatalogRecoverySelection, MangaDexConnection,
-            MangaDexSearchResult, MangaDexVolumeSyncResult, MangaDexWorkPreview, MangaSeries,
-            MetadataBackup, PurgeSummary, ReleaseWatchEvent,
+            CatalogSearchPage, CatalogSearchQuery, CatalogStatus, CatalogSuggestion,
+            CatalogUpdateResult, CatalogUpdateStopReason, CatalogWorkDetail, ClassificationEntry,
+            CollectionCover, CollectionSummary, CollectionVolume, CreateAlbum,
+            CreateClassification, CreateCollection, IngestMediaRequest, IngestOutcome,
+            LibrarySummary, MangaCatalogRecoveryApplyResult, MangaCatalogRecoveryPreview,
+            MangaCatalogRecoveryRemoteResult, MangaCatalogRecoverySelection, MangaDexApplyRequest,
+            MangaDexConnection, MangaDexSearchResult, MangaDexVolumeSyncResult,
+            MangaDexWorkPreview, MangaSeries, MetadataBackup, PurgeSummary, ReleaseWatchEvent,
             ReleaseWatchRunResult, ReleaseWatchRunStopReason, ReleaseWatchStatus, RemoteProvider,
             RemoteReadingProgress, ResolvedGallery, SetAssetClassification,
             SimilarityDecisionRequest, SimilarityIndexProgress, SimilarityReviewPage, TrashPage,
@@ -41,8 +40,8 @@ use crate::{
 
 use crate::library::models::{
     IgdbApplyRequest, IgdbArtworkReplaceRequest, IgdbConnection, IgdbCredentialStatus,
-    IgdbGamePreview, IgdbSearchResult, TmdbApplyRequest, TmdbArtworkReplaceRequest,
-    TmdbConnection, TmdbCredentialStatus, TmdbMoviePreview, TmdbSearchResult,
+    IgdbGamePreview, IgdbSearchResult, TmdbApplyRequest, TmdbArtworkReplaceRequest, TmdbConnection,
+    TmdbCredentialStatus, TmdbMoviePreview, TmdbSearchResult,
 };
 
 #[tauri::command]
@@ -91,6 +90,12 @@ pub struct CloudCaptureConnectionStatus {
     pub pending_count: u32,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudMetadataBackupResult {
+    pub byte_size: u64,
+}
+
 impl From<LibraryError> for CommandError {
     fn from(error: LibraryError) -> Self {
         let message = match &error {
@@ -135,6 +140,8 @@ impl From<LibraryError> for CommandError {
             LibraryError::CloudRequestTimedOut => "cloud_request_timed_out",
             LibraryError::CloudRequestUnavailable => "cloud_request_unavailable",
             LibraryError::InvalidCloudResponse => "invalid_cloud_response",
+            LibraryError::CloudMetadataBackupNotFound => "cloud_metadata_backup_not_found",
+            LibraryError::CloudMetadataBackupTooLarge => "cloud_metadata_backup_too_large",
             LibraryError::CloudPresignRejected(_) => "cloud_presign_rejected",
             LibraryError::CloudUploadRejected(_) => "cloud_upload_rejected",
             LibraryError::CloudAssetRegistrationRejected(_) => "cloud_asset_registration_rejected",
@@ -142,7 +149,9 @@ impl From<LibraryError> for CommandError {
             LibraryError::CloudSourceUnavailable => "cloud_source_unavailable",
             LibraryError::CloudSourceChanged => "cloud_source_changed",
             LibraryError::CloudThumbnailUnavailable => "cloud_thumbnail_unavailable",
-            LibraryError::CloudReplicationPrepareRejected(_) => "cloud_replication_prepare_rejected",
+            LibraryError::CloudReplicationPrepareRejected(_) => {
+                "cloud_replication_prepare_rejected"
+            }
             LibraryError::CloudReplicationCommitRejected(_) => "cloud_replication_commit_rejected",
             LibraryError::CloudCaptureListRejected(_) => "cloud_capture_list_rejected",
             LibraryError::CloudCaptureTicketRejected(_) => "cloud_capture_ticket_rejected",
@@ -152,8 +161,12 @@ impl From<LibraryError> for CommandError {
             LibraryError::CloudCaptureAcknowledgementRejected(_) => "cloud_capture_ack_rejected",
             LibraryError::InvalidCloudCaptureRecord => "invalid_cloud_capture_record",
             LibraryError::CloudCaptureReviewPending => "cloud_capture_review_pending",
-            LibraryError::CloudClassificationsPublishRejected(_) => "cloud_classifications_publish_rejected",
-            LibraryError::CloudSavedXMediaPublishRejected(_) => "cloud_saved_x_media_publish_rejected",
+            LibraryError::CloudClassificationsPublishRejected(_) => {
+                "cloud_classifications_publish_rejected"
+            }
+            LibraryError::CloudSavedXMediaPublishRejected(_) => {
+                "cloud_saved_x_media_publish_rejected"
+            }
             LibraryError::InvalidClassificationSnapshot => "invalid_classification_snapshot",
             LibraryError::OnlineCatalogNotInstalled => "online_catalog_not_installed",
             LibraryError::OnlineCatalogWorkNotFound => "online_catalog_work_not_found",
@@ -352,12 +365,10 @@ pub async fn ensure_daily_backup(
     state: State<'_, AppState>,
 ) -> Result<Option<MetadataBackup>, CommandError> {
     let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        library.ensure_daily_backup(chrono::Utc::now())
-    })
-    .await
-    .map_err(|_| background_task_error())?
-    .map_err(CommandError::from)
+    tauri::async_runtime::spawn_blocking(move || library.ensure_daily_backup(chrono::Utc::now()))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -573,7 +584,11 @@ pub fn set_revisit_preference(
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
     current_required(state)?
-        .set_revisit_preference(feedback.dimension(), &feedback.value(), &feedback.recorded_at())
+        .set_revisit_preference(
+            feedback.dimension(),
+            &feedback.value(),
+            &feedback.recorded_at(),
+        )
         .map_err(CommandError::from)
 }
 
@@ -668,7 +683,6 @@ pub fn list_trash(
         .list_trash(after, limit)
         .map_err(CommandError::from)
 }
-
 
 #[tauri::command]
 pub async fn empty_trash(state: State<'_, AppState>) -> Result<PurgeSummary, CommandError> {
@@ -1403,28 +1417,50 @@ pub async fn refresh_manga_catalog_recovery_remote(
 ) -> Result<MangaCatalogRecoveryRemoteResult, CommandError> {
     let library = current_required(state)?;
     let lookup_library = library.clone();
-    let ids = tauri::async_runtime::spawn_blocking(move || lookup_library.missing_manga_catalog_recovery_gallery_ids())
-        .await
-        .map_err(|_| background_task_error())?
-        .map_err(CommandError::from)?;
+    let ids = tauri::async_runtime::spawn_blocking(move || {
+        lookup_library.missing_manga_catalog_recovery_gallery_ids()
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)?;
     if ids.is_empty() {
-        return Ok(MangaCatalogRecoveryRemoteResult { attempted_count: 0, imported_count: 0, not_found_count: 0 });
+        return Ok(MangaCatalogRecoveryRemoteResult {
+            attempted_count: 0,
+            imported_count: 0,
+            not_found_count: 0,
+        });
     }
-    let base_url = library.cloud_sync_config().map_err(CommandError::from)?.api_base_url
-        .ok_or_else(|| CommandError { code: "catalog_remote_not_configured", message: "카탈로그 원격 조회용 VPS 주소가 설정되지 않았습니다.".into() })?;
+    let base_url = library
+        .cloud_sync_config()
+        .map_err(CommandError::from)?
+        .api_base_url
+        .ok_or_else(|| CommandError {
+            code: "catalog_remote_not_configured",
+            message: "카탈로그 원격 조회용 VPS 주소가 설정되지 않았습니다.".into(),
+        })?;
     let token = credential::read_cloud_api_token_os().map_err(CommandError::from)?;
-    let source = crate::catalog_source::VpsCatalogSource::new(&base_url).map_err(CommandError::from)?;
+    let source =
+        crate::catalog_source::VpsCatalogSource::new(&base_url).map_err(CommandError::from)?;
     let catalog_path = library.root().join("catalogs/kdata.db");
     let attempted_count = ids.len() as u64;
     let mut imported_count = 0u64;
     for id in ids {
-        let cursor = id.checked_add(1).ok_or_else(|| CommandError { code: "invalid_catalog_id", message: "카탈로그 ID가 올바르지 않습니다.".into() })?;
-        let body = crate::catalog_source::retry_transient(|| source.fetch_search_page_bearer(Some(cursor), &token)).await.map_err(CommandError::from)?;
+        let cursor = id.checked_add(1).ok_or_else(|| CommandError {
+            code: "invalid_catalog_id",
+            message: "카탈로그 ID가 올바르지 않습니다.".into(),
+        })?;
+        let body = crate::catalog_source::retry_transient(|| {
+            source.fetch_search_page_bearer(Some(cursor), &token)
+        })
+        .await
+        .map_err(CommandError::from)?;
         let path = catalog_path.clone();
-        let found = tauri::async_runtime::spawn_blocking(move || catalog_update::import_targeted_work(&path, &body, id))
-            .await
-            .map_err(|_| background_task_error())?
-            .map_err(CommandError::from)?;
+        let found = tauri::async_runtime::spawn_blocking(move || {
+            catalog_update::import_targeted_work(&path, &body, id)
+        })
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)?;
         imported_count += u64::from(found);
     }
     if imported_count > 0 {
@@ -1434,7 +1470,11 @@ pub async fn refresh_manga_catalog_recovery_remote(
             .map_err(|_| background_task_error())?
             .map_err(CommandError::from)?;
     }
-    Ok(MangaCatalogRecoveryRemoteResult { attempted_count, imported_count, not_found_count: attempted_count - imported_count })
+    Ok(MangaCatalogRecoveryRemoteResult {
+        attempted_count,
+        imported_count,
+        not_found_count: attempted_count - imported_count,
+    })
 }
 
 #[tauri::command]
@@ -1632,7 +1672,10 @@ pub fn set_cloud_capture_settings(
 ) -> Result<CloudCaptureSettings, CommandError> {
     let library = current_required(state)?;
     let config = library
-        .set_cloud_sync_config(CloudSyncConfig { enabled, api_base_url })
+        .set_cloud_sync_config(CloudSyncConfig {
+            enabled,
+            api_base_url,
+        })
         .map_err(CommandError::from)?;
     let token_configured = credential::cloud_api_token_status().map_err(CommandError::from)?;
     Ok(CloudCaptureSettings {
@@ -1659,11 +1702,36 @@ pub async fn test_cloud_capture_connection(
     state: State<'_, AppState>,
 ) -> Result<CloudCaptureConnectionStatus, CommandError> {
     let library = current_required(state)?;
-    let pending_count = tauri::async_runtime::spawn_blocking(move || library.test_cloud_capture_connection())
+    let pending_count =
+        tauri::async_runtime::spawn_blocking(move || library.test_cloud_capture_connection())
+            .await
+            .map_err(|_| background_task_error())?
+            .map_err(CommandError::from)?;
+    Ok(CloudCaptureConnectionStatus { pending_count })
+}
+
+#[tauri::command]
+pub async fn push_cloud_metadata_backup(
+    state: State<'_, AppState>,
+) -> Result<CloudMetadataBackupResult, CommandError> {
+    let library = current_required(state)?;
+    let byte_size =
+        tauri::async_runtime::spawn_blocking(move || library.push_cloud_metadata_backup())
+            .await
+            .map_err(|_| background_task_error())?
+            .map_err(CommandError::from)?;
+    Ok(CloudMetadataBackupResult { byte_size })
+}
+
+#[tauri::command]
+pub async fn restore_cloud_metadata_backup(
+    state: State<'_, AppState>,
+) -> Result<crate::cloud::metadata_backup::CloudLibraryRestoreReport, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.restore_cloud_library_from_server())
         .await
         .map_err(|_| background_task_error())?
-        .map_err(CommandError::from)?;
-    Ok(CloudCaptureConnectionStatus { pending_count })
+        .map_err(CommandError::from)
 }
 
 // --- CLOUD-006 배치 3.5: 백필 수동 제어 커맨드 ------------------------------
@@ -1768,8 +1836,7 @@ fn resolved_gallery_from_cache_or_source(
     work_id: u64,
     source: &dyn crate::catalog_source::CatalogSource,
 ) -> Result<ResolvedGallery, LibraryError> {
-    if let Some(manifest) = crate::library::remote_gallery::load_valid_manifest(root, work_id)?
-    {
+    if let Some(manifest) = crate::library::remote_gallery::load_valid_manifest(root, work_id)? {
         return Ok(ResolvedGallery {
             provider: RemoteProvider::KHentai,
             work_id: work_id.to_string(),
@@ -1874,7 +1941,6 @@ pub fn inspect_book_import(
         .map_err(CommandError::from)
 }
 
-
 #[tauri::command]
 pub async fn inspect_legacy_package_migration(
     package_root: String,
@@ -1956,7 +2022,9 @@ pub async fn set_collection_source_root(
         library
             .set_collection_source_root(path.as_deref())
             .map_err(CommandError::from)?;
-        library.backfill_legacy_collection_kinds().map_err(CommandError::from)
+        library
+            .backfill_legacy_collection_kinds()
+            .map_err(CommandError::from)
     })
     .await
     .map_err(|_| background_task_error())?

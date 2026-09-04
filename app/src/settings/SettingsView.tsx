@@ -3,7 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
-import type { CatalogStatus, CloudCaptureSettings, CloudCaptureSyncResult, ExtensionConnection, LegacyPackageMigrationPlan, LegacyPackageMigrationReport, MetadataBackup } from "../library/types";
+import type { CatalogStatus, CloudCaptureSettings, CloudCaptureSyncResult, CloudLibraryRestoreReport, ExtensionConnection, LegacyPackageMigrationPlan, LegacyPackageMigrationReport, MetadataBackup } from "../library/types";
 import { formatBytes } from "../assets/assetMetadata";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { Button } from "../shared/ui/Button";
@@ -22,6 +22,7 @@ type SettingsViewProps = {
   metadataImportRunning?: boolean;
   onCollectionsChanged?: () => void;
   onCloudCaptureSynced?: (result: CloudCaptureSyncResult) => void;
+  onRestoreCloudMetadata?: () => Promise<CloudLibraryRestoreReport>;
   initialSection?: SettingsSection;
   privacyMode?: boolean;
   onPrivacyModeChange?: (privacyMode: boolean) => void;
@@ -31,7 +32,7 @@ type SettingsSection = "general" | "external_services" | "data" | "about";
 
 const METADATA_IMPORT_FOLDER_KEY = "lakomics.metadataImportFolder";
 
-export function SettingsView({ restoring, onRestore, onExit, onImportFolder, metadataImportRunning = false, onCollectionsChanged, onCloudCaptureSynced = () => undefined, initialSection, privacyMode = false, onPrivacyModeChange = () => undefined }: SettingsViewProps) {
+export function SettingsView({ restoring, onRestore, onExit, onImportFolder, metadataImportRunning = false, onCollectionsChanged, onCloudCaptureSynced = () => undefined, onRestoreCloudMetadata, initialSection, privacyMode = false, onPrivacyModeChange = () => undefined }: SettingsViewProps) {
   const { error: libraryError, gateway, library, openLibrary } = useLibrary();
   const [section, setSection] = useState<SettingsSection>(() => initialSection ?? "general");
   const [lastImportFolder, setLastImportFolder] = useState(() => localStorage.getItem(METADATA_IMPORT_FOLDER_KEY));
@@ -501,6 +502,51 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     }
   }
 
+  async function pushCloudMetadataBackup() {
+    if (cloudBusy) return;
+    if (!gateway.pushCloudMetadataBackup) {
+      setCloudError("현재 앱 빌드에서는 서버 메타데이터 백업을 지원하지 않습니다.");
+      return;
+    }
+    setCloudBusy(true);
+    setCloudError(null);
+    setCloudMessage(null);
+    try {
+      const result = await gateway.pushCloudMetadataBackup();
+      setCloudMessage(`메타데이터 서버 백업 완료 · ${formatBytes(result.byteSize)}`);
+    } catch (backupError) {
+      setCloudError(commandErrorMessage(backupError, "메타데이터를 서버에 백업하지 못했습니다."));
+    } finally {
+      setCloudBusy(false);
+    }
+  }
+
+  async function restoreCloudMetadataBackup() {
+    if (cloudBusy) return;
+    if (!onRestoreCloudMetadata && !gateway.restoreCloudMetadataBackup) {
+      setCloudError("현재 앱 빌드에서는 서버 메타데이터 복원을 지원하지 않습니다.");
+      return;
+    }
+    if (!window.confirm("서버의 최신 복구 지점으로 현재 PC 라이브러리를 복원할까요? 현재 DB는 pre-restore 백업으로 먼저 보존되고, 관리 에셋은 R2에서 다시 내려받습니다.")) return;
+    setCloudBusy(true);
+    setCloudError(null);
+    setCloudMessage(null);
+    try {
+      const report = onRestoreCloudMetadata
+        ? await onRestoreCloudMetadata()
+        : await gateway.restoreCloudMetadataBackup!();
+      setCloudMessage(
+        `서버 복원 완료 · 원본 ${report.originalsRestored.toLocaleString()} · 썸네일 ${report.thumbnailsRestored.toLocaleString()} · `
+        + `건너뜀 ${report.filesSkipped.toLocaleString()} · 서버 미보유 ${report.filesUnavailable.toLocaleString()} · ${formatBytes(report.bytesDownloaded)}`,
+      );
+      setBackupRetryVersion((current) => current + 1);
+    } catch (restoreError) {
+      setCloudError(commandErrorMessage(restoreError, "서버 메타데이터를 복원하지 못했습니다."));
+    } finally {
+      setCloudBusy(false);
+    }
+  }
+
   async function syncCloudNow() {
     if (cloudBusy) return;
     setCloudBusy(true);
@@ -802,6 +848,14 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
               <Button size="sm" disabled={cloudBusy || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured} onClick={() => void testCloudConnection()}>연결 확인</Button>
               <Button size="sm" variant="primary" disabled={cloudBusy || !cloudSettings.enabled || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured} onClick={() => void syncCloudNow()}>지금 동기화</Button>
             </div>
+            <dl className="settings-view__property">
+              <dt>PC 복구 지점</dt>
+              <dd className="settings-view__row-note">library.sqlite 최신 스냅샷을 서버에 저장합니다. 복원할 때 관리 에셋 원본·이미지 썸네일은 기존 Cloud Library R2 사본에서 다시 받습니다. 영상 파생물은 원본에서 재생성합니다. 외부 망가 원본 폴더 자체는 포함하지 않습니다.</dd>
+              <dd className="settings-view__actions">
+                <Button size="sm" disabled={cloudBusy || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured} onClick={() => void pushCloudMetadataBackup()}>서버 복구 지점 만들기</Button>
+                <Button size="sm" variant="danger" disabled={cloudBusy || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured} onClick={() => void restoreCloudMetadataBackup()}>서버에서 PC 복원</Button>
+              </dd>
+            </dl>
           </>
         )}
         <CloudBackfillSettings />

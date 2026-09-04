@@ -557,6 +557,23 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     }
   }
 
+  async function restoreCloudMetadataBackup() {
+    if (maintenance || !gateway.restoreCloudMetadataBackup) {
+      throw new Error("서버 메타데이터 복원을 사용할 수 없습니다.");
+    }
+    setMaintenance("restore");
+    try {
+      const result = await gateway.restoreCloudMetadataBackup();
+      await refreshSidebar();
+      setAssetRefresh((current) => current + 1);
+      setVideoPreparationTrigger((current) => current + 1);
+      setMessage(`서버 복원이 완료되었습니다. 원본 ${result.originalsRestored.toLocaleString()}개 복원`);
+      return result;
+    } finally {
+      setMaintenance(null);
+    }
+  }
+
   return (
     <PrivacyProvider privacyMode={preferences.privacyMode} setPrivacyMode={(privacyMode) => updatePreferences({ privacyMode })}>
       <div className="library-workspace" data-privacy-mode={preferences.privacyMode ? "true" : undefined} inert={maintenance !== null ? true : undefined}>
@@ -604,6 +621,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     metadataImportRunning={metadataImportWorks.some((work) => work.status === "running")}
                     onCollectionsChanged={refreshCollections}
                     onCloudCaptureSynced={handleCloudCaptureSync}
+                    onRestoreCloudMetadata={restoreCloudMetadataBackup}
                     initialSection={view.section}
                     privacyMode={preferences.privacyMode}
                     onPrivacyModeChange={(privacyMode) => updatePreferences({ privacyMode })}

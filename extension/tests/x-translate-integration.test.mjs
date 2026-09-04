@@ -45,6 +45,23 @@ test("settings keep common controls visible and rare recovery tools collapsed", 
 });
 
 
+test("server portability controls replace plaintext JSON backup", () => {
+  assert.match(optionsHtml, /id="push-portable-backup"/);
+  assert.match(optionsHtml, /id="restore-portable-backup"/);
+  assert.match(optionsHtml, /AES-GCM/);
+  assert.doesNotMatch(optionsHtml, /id="connection-backup-json"/);
+});
+
+
+test("radial settings switch targets directly without hierarchical enter/back navigation", () => {
+  const optionsJs = fs.readFileSync(new URL("../options/options.js", import.meta.url), "utf8");
+  assert.match(optionsJs, /radial-editor-target/);
+  assert.match(optionsJs, /activeEditorParentId/);
+  assert.doesNotMatch(optionsJs, /function openSelected/);
+  assert.doesNotMatch(optionsJs, /selectedHasChildren/);
+  assert.doesNotMatch(optionsJs, /path\.pop/);
+});
+
 test("translator FAB explicitly closes an already-open panel", () => {
   assert.match(source, /if \(ui\.panel\.classList\.contains\('open'\)\) \{\s*ui\.panel\.classList\.remove\('open'\);\s*return;/);
 });

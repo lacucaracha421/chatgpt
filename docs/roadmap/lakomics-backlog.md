@@ -879,17 +879,19 @@ Resolution:
 - Catalog search/results and manga viewer progress live in unmounted per-tab components and remain deferred; revisit date resets on tab leave by design.
 - Kept scalar-only scroll memory: no virtualizer state reuse across scopes, no stale rows, no giant blank space.
 
-### OPS-001 — Backup, migration, and settings portability
-Status: `TODO`
+### OPS-001 ? Backup, migration, and settings portability
+Status: `DONE`
 
-Goal:
-- Make moving Lakomics to another PC predictable without rediscovering which state lives in Git, the library, browser storage, Credential Manager, or machine-level services.
-
-Direction:
-- Document and, where safe, automate source checkout/worktree restoration, library/assets transfer, manga originals, browser-extension settings export/import, and required toolchain setup.
-- Keep secrets out of Git; provide explicit restoration checks for Cloud API credentials and Tailscale rather than copying raw secret stores blindly.
-- Add a post-migration health checklist for PC API, classification count/source, Cloud Capture, Collector, catalog transport, and saved-media index.
-- Prefer portable export/import for extension settings so reinstalling an unpacked extension does not silently fall back to the six-item local tree.
+Resolution (2026-09-04):
+- Added server-backed PC recovery points: the app creates a verified SQLite snapshot and uploads the latest `library.sqlite` to R2 through the existing authenticated/presigned backup namespace.
+- Restore first uses the existing transactional/pre-restore DB safety path, then reconstructs managed originals and image thumbnails from committed Cloud Library replicas in bounded 50-item media-ticket batches. Correct local files are skipped; unavailable individual variants are reported without discarding successful restores.
+- Video poster/scrub/proxy derivatives are intentionally regenerated from restored originals through the normal preparation pipeline instead of becoming a second recovery payload.
+- Added extension portability backup/restore on the VPS. Portable state is encrypted client-side with AES-GCM using a key derived from the Collector token; the raw Cloud/Collector bootstrap token is not duplicated inside the encrypted snapshot.
+- Simplified extension settings so common connection/backup/radial controls stay visible while rare recovery controls are under Advanced. The radial editor now switches directly between first-level and each secondary parent; hierarchical enter/back navigation is removed and regression-tested.
+- Credential Manager secrets and Tailscale identity remain machine-local by design. Cloud API and external-provider credentials are re-entered; external manga originals are copied/remounted separately.
+- Added `docs/operations/pc-migration.md` with old-PC preparation, new-PC toolchain, restore sequence, extension restore, secret boundaries, and post-migration checks for PC API, classifications, Cloud Capture, Collector, catalog transport, saved-media index, donut state, and manga roots.
+- Server deployment verified on `laku-tokyo`: service active, `/health` green, new `/v1/library/metadata-backup` present in OpenAPI, unauthenticated access returns 401. Pre-deploy `app.py` was preserved as a timestamped rollback copy.
+- Validation: extension 245/245 and packaged as `2.0.0-alpha.15.56`; server 41/41; frontend 75 files / 671 tests; production build green. Rust app-library suite reached 544 pass / 1 known flaky Cloud Capture mock timeout / 2 ignored; the same flaky test passed immediately when rerun alone. OPS-001 restore-focused Rust tests pass 3/3.
 
 ### CLOUD-003 — Long-video asynchronous Capture handling
 Status: `TODO`
@@ -1090,9 +1092,9 @@ PC Core Polish Pass 1 runtime gate is complete: BUG-009, BUG-010, BUG-011, and U
 4. PERF-001 — DONE (Phase C audit: bounded caches, proportional disk, sub-second open at 8k, no HIGH bottlenecks; zero code changes per measured-healthy rule)
 5. BUG-003 — X video drag-save blue native-selection artifact ? DONE (implemented, contract-tested, real-X verification passed)
 6. UI-009 — VCK-inspired manga viewer parity improvements — DONE (implemented, tested, real-Tauri visual pass green)
-7. EXT-003 — same-X-post media grouping
-8. EXT-004 — adaptive/hidden secondary donut tags
-9. OPS-001 — backup/migration/settings portability
+7. EXT-003 ? DONE (same-X-post media grouping, live verified)
+8. EXT-004 ? DONE (adaptive/hidden secondary donut tags, direct-target settings UX, live verified)
+9. OPS-001 ? DONE (server PC recovery point + R2 media reconstruction + encrypted extension portability + migration runbook)
 10. CATALOG-003 — Japanese-language catalog ingestion/filter on the verified CATALOG-001 transport
 11. CATALOG-004 — advanced VCK-style catalog search syntax
 12. P3 feature expansion — NOTE-001 first, then STATS-001 / IDEA-001 according to actual use

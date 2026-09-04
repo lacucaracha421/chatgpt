@@ -562,6 +562,14 @@
   const COLLECTOR_SUPPORTED_MEDIA_TYPES = new Set(["image", "video", "animated_gif"]);
   const COLLECTOR_FALLBACK_DIAGNOSTICS_KEY = "lakomicsCollectorFallbackDiagnostics";
   const COLLECTOR_FALLBACK_DIAGNOSTICS_LIMIT = 20;
+  const PORTABLE_BACKUP_VERSION = 1;
+  const PORTABLE_BACKUP_ALGORITHM = "AES-GCM";
+  const PORTABLE_BACKUP_KEY_CONTEXT = "lakomics-extension-backup-v1";
+  const PORTABLE_XTRANSLATE_KEYS = [
+    "xtranslate:gm:oit.settings.v2",
+    "xtranslate:gm:oit.apiKey",
+    "xtranslate:gm:oit.model",
+  ];
   // 영상 원본은 Tailscale 터널 경유로 8초를 쉽게 상회한다. PC가 받는 중이면 기다린다.
   const INGESTION_TIMEOUT_MS = 120_000;
   const INGESTION_RETRY_DELAY_MS = 700;
@@ -689,6 +697,10 @@
         resetClassificationCache();
         return { ok: true, remote };
       }
+      case "portable-backup:push":
+        return pushPortableBackup();
+      case "portable-backup:restore":
+        return restorePortableBackup();
       case "remote:test":
         return testRemoteConnection();
       case "collector:test":
@@ -2567,6 +2579,173 @@
     if (!result.ok) return result;
     const bundles = normalizeRevisitBundles(result.bundles);
     return { ok: true, bundles };
+  }
+
+  function clonePortableValue(value) {
+    if (value === undefined) return undefined;
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  async function buildPortableBackup() {
+    const keys = [
+      "connectionToken", "preferences", "xTranslateEnabled",
+      REMOTE_SETTINGS_KEY, COLLECTOR_SETTINGS_KEY, APP_LAYOUT_KEY, APP_PINNED_KEY,
+      SECONDARY_PRESENTATION_KEY, LOCAL_TREE_KEY, ...PORTABLE_XTRANSLATE_KEYS,
+    ];
+    const stored = await chrome.storage.local.get(keys);
+    const xTranslate = {};
+    for (const key of PORTABLE_XTRANSLATE_KEYS) {
+      if (Object.prototype.hasOwnProperty.call(stored, key)) xTranslate[key] = clonePortableValue(stored[key]);
+    }
+    const data = {
+      connectionToken: TOKEN_PATTERN.test(String(stored.connectionToken ?? "")) ? String(stored.connectionToken) : null,
+      preferences: globalThis.LakomicsDefaults.normalizePreferences(stored.preferences),
+      remote: globalThis.LakomicsDefaults.normalizeRemoteSettings(stored[REMOTE_SETTINGS_KEY]),
+      collector: globalThis.LakomicsDefaults.normalizeCollectorSettings(stored[COLLECTOR_SETTINGS_KEY]),
+      radialLayout: validLayout(stored[APP_LAYOUT_KEY]) ? clonePortableValue(stored[APP_LAYOUT_KEY]) : { version: 1, parents: {} },
+      pinnedIds: normalizePinnedIds(stored[APP_PINNED_KEY]),
+      secondaryPresentation: normalizeSecondaryPresentation(stored[SECONDARY_PRESENTATION_KEY]),
+      localTree: globalThis.LakomicsDefaults.normalizeLocalTree(stored[LOCAL_TREE_KEY]),
+      xTranslateEnabled: stored.xTranslateEnabled !== false,
+      xTranslate,
+    };
+    return { version: PORTABLE_BACKUP_VERSION, data };
+  }
+
+  function validatePortableBackup(snapshot) {
+    if (!snapshot || snapshot.version !== PORTABLE_BACKUP_VERSION || !snapshot.data || typeof snapshot.data !== "object") {
+      return null;
+    }
+    const data = snapshot.data;
+    const connectionToken = data.connectionToken == null ? null : String(data.connectionToken);
+    if (connectionToken !== null && !TOKEN_PATTERN.test(connectionToken)) return null;
+    if (data.radialLayout !== undefined && !validLayout(data.radialLayout)) return null;
+    return {
+      connectionToken,
+      preferences: globalThis.LakomicsDefaults.normalizePreferences(data.preferences),
+      remote: globalThis.LakomicsDefaults.normalizeRemoteSettings(data.remote),
+      collector: globalThis.LakomicsDefaults.normalizeCollectorSettings(data.collector),
+      radialLayout: validLayout(data.radialLayout) ? data.radialLayout : { version: 1, parents: {} },
+      pinnedIds: normalizePinnedIds(data.pinnedIds),
+      secondaryPresentation: normalizeSecondaryPresentation(data.secondaryPresentation),
+      localTree: globalThis.LakomicsDefaults.normalizeLocalTree(data.localTree),
+      xTranslateEnabled: data.xTranslateEnabled !== false,
+      xTranslate: data.xTranslate && typeof data.xTranslate === "object" ? data.xTranslate : {},
+    };
+  }
+
+  async function applyPortableBackup(snapshot) {
+    const data = validatePortableBackup(snapshot);
+    if (!data) return { ok: false, code: "invalid_portable_backup" };
+    const values = {
+      preferences: data.preferences,
+      [REMOTE_SETTINGS_KEY]: data.remote,
+      [COLLECTOR_SETTINGS_KEY]: data.collector,
+      [APP_LAYOUT_KEY]: data.radialLayout,
+      [APP_PINNED_KEY]: data.pinnedIds,
+      [SECONDARY_PRESENTATION_KEY]: data.secondaryPresentation,
+      [LOCAL_TREE_KEY]: data.localTree,
+      xTranslateEnabled: data.xTranslateEnabled,
+    };
+    if (data.connectionToken) values.connectionToken = data.connectionToken;
+    for (const key of PORTABLE_XTRANSLATE_KEYS) {
+      if (Object.prototype.hasOwnProperty.call(data.xTranslate, key)) values[key] = clonePortableValue(data.xTranslate[key]);
+    }
+    await chrome.storage.local.set(values);
+    resetClassificationCache();
+    await applyDownloadUiPreference(data.preferences.suppressDownloadUi);
+    return { ok: true, restored: true, collector: data.collector, remote: data.remote };
+  }
+
+  function bytesToBase64(bytes) {
+    let binary = "";
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary);
+  }
+
+  function base64ToBytes(value) {
+    const binary = atob(String(value ?? ""));
+    return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  }
+
+  async function portableBackupCryptoKey(token) {
+    const encoder = new TextEncoder();
+    const digest = await crypto.subtle.digest(
+      "SHA-256",
+      encoder.encode(`${PORTABLE_BACKUP_KEY_CONTEXT}\n${token}`),
+    );
+    return crypto.subtle.importKey("raw", digest, { name: PORTABLE_BACKUP_ALGORITHM }, false, ["encrypt", "decrypt"]);
+  }
+
+  async function encryptPortableBackup(snapshot, token) {
+    const encoder = new TextEncoder();
+    const key = await portableBackupCryptoKey(token);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ciphertext = await crypto.subtle.encrypt(
+      { name: PORTABLE_BACKUP_ALGORITHM, iv, additionalData: encoder.encode(PORTABLE_BACKUP_KEY_CONTEXT) },
+      key,
+      encoder.encode(JSON.stringify(snapshot)),
+    );
+    return {
+      version: PORTABLE_BACKUP_VERSION,
+      algorithm: PORTABLE_BACKUP_ALGORITHM,
+      iv: bytesToBase64(iv),
+      ciphertext: bytesToBase64(new Uint8Array(ciphertext)),
+    };
+  }
+
+  async function decryptPortableBackup(envelope, token) {
+    if (!envelope || envelope.version !== PORTABLE_BACKUP_VERSION || envelope.algorithm !== PORTABLE_BACKUP_ALGORITHM) return null;
+    try {
+      const encoder = new TextEncoder();
+      const key = await portableBackupCryptoKey(token);
+      const plaintext = await crypto.subtle.decrypt(
+        {
+          name: PORTABLE_BACKUP_ALGORITHM,
+          iv: base64ToBytes(envelope.iv),
+          additionalData: encoder.encode(PORTABLE_BACKUP_KEY_CONTEXT),
+        },
+        key,
+        base64ToBytes(envelope.ciphertext),
+      );
+      return JSON.parse(new TextDecoder().decode(plaintext));
+    } catch {
+      return null;
+    }
+  }
+
+  async function portableBackupCollectorToken() {
+    const stored = await chrome.storage.local.get([COLLECTOR_TOKEN_KEY]);
+    return normalizeCollectorToken(stored[COLLECTOR_TOKEN_KEY]);
+  }
+
+  async function pushPortableBackup() {
+    const token = await portableBackupCollectorToken();
+    if (!token) return { ok: false, code: "collector_token_missing" };
+    const snapshot = await buildPortableBackup();
+    const envelope = await encryptPortableBackup(snapshot, token);
+    const response = await collectorRequest("/v1/extension-backup", {
+      method: "PUT",
+      body: JSON.stringify(envelope),
+    });
+    if (!response.ok) return response;
+    return {
+      ok: true,
+      publishedAt: typeof response.published_at === "string" ? response.published_at : null,
+      byteSize: Number.isFinite(Number(response.byte_size)) ? Number(response.byte_size) : null,
+    };
+  }
+
+  async function restorePortableBackup() {
+    const token = await portableBackupCollectorToken();
+    if (!token) return { ok: false, code: "collector_token_missing" };
+    const response = await collectorRequest("/v1/extension-backup");
+    if (!response.ok) return response;
+    const snapshot = await decryptPortableBackup(response, token);
+    if (!snapshot) return { ok: false, code: "portable_backup_decrypt_failed" };
+    const applied = await applyPortableBackup(snapshot);
+    if (!applied.ok) return applied;
+    return { ...applied, publishedAt: typeof response.published_at === "string" ? response.published_at : null };
   }
 
   async function collectorRequest(path, init = {}, explicitBaseUrl = null) {

@@ -2,13 +2,14 @@ use std::{fs::File, io::Read, time::Duration};
 
 use super::models::{
     AcknowledgeCaptureRequest, ClassificationSnapshotPublish, PreparedAssetUpload,
-    PresignUploadRequest, PresignUploadResponse, RegisterAssetRequest,
-    RemoteCaptureDownloadTicket, RemoteCapturePage, RemoteCapturePayload,
-    SavedXMediaSnapshotPublish,
+    PresignUploadRequest, PresignUploadResponse, RegisterAssetRequest, RemoteCaptureDownloadTicket,
+    RemoteCapturePage, RemoteCapturePayload, SavedXMediaSnapshotPublish,
 };
 use crate::library::error::LibraryError;
 
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
+const METADATA_BACKUP_OBJECT_KEY: &str = "backups/library-metadata.sqlite";
+const MAX_METADATA_BACKUP_BYTES: u64 = 512 * 1024 * 1024;
 const SHORT_NETWORK_TIMEOUT: Duration = Duration::from_secs(30);
 const UPLOAD_BODY_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
@@ -20,7 +21,7 @@ struct MediaTicketBatchRequest<'a> {
 #[derive(serde::Serialize)]
 struct MediaTicketBatchItem<'a> {
     asset_id: &'a str,
-    variant: &'static str,
+    variant: &'a str,
 }
 
 #[derive(serde::Deserialize)]
@@ -31,9 +32,27 @@ struct MediaTicketBatchResponse {
 #[derive(serde::Deserialize)]
 struct MediaTicketBatchResponseItem {
     asset_id: String,
+    variant: String,
     ok: bool,
+    url: Option<String>,
     size_bytes: Option<u64>,
     error: Option<String>,
+}
+
+#[derive(Debug)]
+pub(crate) struct RestoreMediaTicket {
+    pub asset_id: String,
+    pub variant: String,
+    pub url: Option<String>,
+    pub size_bytes: Option<u64>,
+    pub error: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct MetadataBackupTicket {
+    download_url: String,
+    required_headers: std::collections::BTreeMap<String, String>,
+    size_bytes: Option<u64>,
 }
 
 pub(crate) struct CloudClient {
@@ -161,8 +180,8 @@ impl CloudClient {
         destination: &std::path::Path,
         maximum_bytes: u64,
     ) -> Result<u64, LibraryError> {
-        let download_url =
-            url::Url::parse(&ticket.download_url).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        let download_url = url::Url::parse(&ticket.download_url)
+            .map_err(|_| LibraryError::InvalidCloudResponse)?;
         if !matches!(download_url.scheme(), "http" | "https") {
             return Err(LibraryError::InvalidCloudResponse);
         }
@@ -180,8 +199,12 @@ impl CloudClient {
                 response.status().as_u16(),
             ));
         }
-        let mut destination_file = File::create(destination).map_err(|_| LibraryError::CloudCaptureStagingFailed)?;
-        let mut reader = response.body_mut().as_reader().take(maximum_bytes.saturating_add(1));
+        let mut destination_file =
+            File::create(destination).map_err(|_| LibraryError::CloudCaptureStagingFailed)?;
+        let mut reader = response
+            .body_mut()
+            .as_reader()
+            .take(maximum_bytes.saturating_add(1));
         let copied = std::io::copy(&mut reader, &mut destination_file)
             .map_err(|_| LibraryError::CloudRequestUnavailable)?;
         if copied > maximum_bytes {
@@ -211,7 +234,6 @@ impl CloudClient {
         Ok(())
     }
 
-
     /// 분류 스냅샷을 VPS에 게시한다. PC 라이브러리가 분류의 원본이며 VPS는
     /// 모바일 확장용 최소 스냅샷만 저장한다.
     pub(crate) fn publish_classification_snapshot(
@@ -220,8 +242,7 @@ impl CloudClient {
         snapshot: &ClassificationSnapshotPublish,
     ) -> Result<(), LibraryError> {
         let authorization = bearer(token)?;
-        let body =
-            serde_json::to_vec(snapshot).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        let body = serde_json::to_vec(snapshot).map_err(|_| LibraryError::InvalidCloudResponse)?;
         self.agent
             .put(self.endpoint("/v1/classifications")?)
             .header("Authorization", authorization)
@@ -273,9 +294,7 @@ impl CloudClient {
             .header("Authorization", authorization)
             .content_type("application/json")
             .send(&body)
-            .map_err(|error| {
-                map_api_error(error, LibraryError::CloudReplicationPrepareRejected)
-            })?;
+            .map_err(|error| map_api_error(error, LibraryError::CloudReplicationPrepareRejected))?;
         read_json(&mut response)
     }
 
@@ -293,9 +312,7 @@ impl CloudClient {
             .content_type("application/json")
             .send(&body)
             .map(|_| ())
-            .map_err(|error| {
-                map_api_error(error, LibraryError::CloudReplicationCommitRejected)
-            })
+            .map_err(|error| map_api_error(error, LibraryError::CloudReplicationCommitRejected))
     }
 
     /// 복제 variant(썸네일 등) 업로드: presign → R2 PUT. 원본 업로드는
@@ -332,11 +349,171 @@ impl CloudClient {
                 .map_err(|_| LibraryError::InvalidCloudResponse)?;
             request = request.header(name, value);
         }
-        request
-            .send(&bytes[..])
-            .map_err(map_upload_error)?;
+        request.send(&bytes[..]).map_err(map_upload_error)?;
         let _ = sha256;
         Ok(())
+    }
+
+    pub(crate) fn upload_metadata_backup(
+        &self,
+        source: File,
+        token: &str,
+    ) -> Result<(), LibraryError> {
+        let authorization = bearer(token)?;
+        let presign_body = serde_json::to_vec(&PresignUploadRequest {
+            object_key: METADATA_BACKUP_OBJECT_KEY,
+            content_type: "application/vnd.sqlite3",
+        })
+        .map_err(|_| LibraryError::InvalidCloudResponse)?;
+        let mut response = self
+            .agent
+            .post(self.endpoint("/v1/uploads/presign")?)
+            .header("Authorization", &authorization)
+            .content_type("application/json")
+            .send(&presign_body)
+            .map_err(map_presign_error)?;
+        let presign: PresignUploadResponse = read_json(&mut response)?;
+        validate_presign(&presign, METADATA_BACKUP_OBJECT_KEY)?;
+        let mut request = self.agent.put(&presign.upload_url);
+        for (name, value) in &presign.required_headers {
+            let name = ureq::http::header::HeaderName::try_from(name.as_str())
+                .map_err(|_| LibraryError::InvalidCloudResponse)?;
+            let value = ureq::http::header::HeaderValue::try_from(value.as_str())
+                .map_err(|_| LibraryError::InvalidCloudResponse)?;
+            request = request.header(name, value);
+        }
+        request.send(source).map_err(map_upload_error)?;
+        Ok(())
+    }
+
+    pub(crate) fn download_metadata_backup(
+        &self,
+        destination: &std::path::Path,
+        token: &str,
+    ) -> Result<u64, LibraryError> {
+        let authorization = bearer(token)?;
+        let mut response = self
+            .agent
+            .get(self.endpoint("/v1/library/metadata-backup")?)
+            .header("Authorization", authorization)
+            .call()
+            .map_err(|error| match error {
+                ureq::Error::StatusCode(404) => LibraryError::CloudMetadataBackupNotFound,
+                other => map_api_error(other, |_| LibraryError::InvalidCloudResponse),
+            })?;
+        let ticket: MetadataBackupTicket = read_json(&mut response)?;
+        if ticket
+            .size_bytes
+            .is_some_and(|size| size > MAX_METADATA_BACKUP_BYTES)
+        {
+            return Err(LibraryError::CloudMetadataBackupTooLarge);
+        }
+        let download_url = url::Url::parse(&ticket.download_url)
+            .map_err(|_| LibraryError::InvalidCloudResponse)?;
+        if !matches!(download_url.scheme(), "http" | "https") {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        let mut request = self.agent.get(download_url.as_str());
+        for (name, value) in &ticket.required_headers {
+            let name = ureq::http::header::HeaderName::try_from(name.as_str())
+                .map_err(|_| LibraryError::InvalidCloudResponse)?;
+            let value = ureq::http::header::HeaderValue::try_from(value.as_str())
+                .map_err(|_| LibraryError::InvalidCloudResponse)?;
+            request = request.header(name, value);
+        }
+        let mut response = request
+            .call()
+            .map_err(|error| map_api_error(error, |_| LibraryError::CloudRequestUnavailable))?;
+        let mut file = File::create(destination).map_err(|source| LibraryError::Backup {
+            path: destination.to_path_buf(),
+            source,
+        })?;
+        let mut reader = response
+            .body_mut()
+            .as_reader()
+            .take(MAX_METADATA_BACKUP_BYTES.saturating_add(1));
+        let copied = std::io::copy(&mut reader, &mut file)
+            .map_err(|_| LibraryError::CloudRequestUnavailable)?;
+        if copied > MAX_METADATA_BACKUP_BYTES {
+            return Err(LibraryError::CloudMetadataBackupTooLarge);
+        }
+        Ok(copied)
+    }
+
+    pub(crate) fn restore_media_tickets(
+        &self,
+        items: &[(&str, &str)],
+        token: &str,
+    ) -> Result<Vec<RestoreMediaTicket>, LibraryError> {
+        if items.len() > 50 {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        let authorization = bearer(token)?;
+        let body = serde_json::to_vec(&MediaTicketBatchRequest {
+            items: items
+                .iter()
+                .map(|(asset_id, variant)| MediaTicketBatchItem { asset_id, variant })
+                .collect(),
+        })
+        .map_err(|_| LibraryError::InvalidCloudResponse)?;
+        let mut response = self
+            .agent
+            .post(self.endpoint("/v1/library/media-tickets")?)
+            .header("Authorization", authorization)
+            .content_type("application/json")
+            .send(&body)
+            .map_err(|error| map_api_error(error, |_| LibraryError::InvalidCloudResponse))?;
+        let response: MediaTicketBatchResponse = read_json(&mut response)?;
+        Ok(response
+            .items
+            .into_iter()
+            .map(|item| RestoreMediaTicket {
+                asset_id: item.asset_id,
+                variant: item.variant,
+                url: item.ok.then_some(item.url).flatten(),
+                size_bytes: item.size_bytes,
+                error: if item.ok {
+                    None
+                } else {
+                    item.error.or(Some("unavailable".into()))
+                },
+            })
+            .collect())
+    }
+
+    pub(crate) fn download_restore_media(
+        &self,
+        ticket: &RestoreMediaTicket,
+        destination: &std::path::Path,
+    ) -> Result<u64, LibraryError> {
+        let url = ticket
+            .url
+            .as_deref()
+            .ok_or(LibraryError::InvalidCloudResponse)?;
+        let parsed = url::Url::parse(url).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        if !matches!(parsed.scheme(), "http" | "https") {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        let mut response = self
+            .agent
+            .get(parsed.as_str())
+            .call()
+            .map_err(|error| map_api_error(error, |_| LibraryError::CloudRequestUnavailable))?;
+        let mut file = File::create(destination).map_err(|source| LibraryError::Backup {
+            path: destination.to_path_buf(),
+            source,
+        })?;
+        let maximum = ticket.size_bytes.unwrap_or(16 * 1024 * 1024 * 1024);
+        let mut reader = response
+            .body_mut()
+            .as_reader()
+            .take(maximum.saturating_add(1));
+        let copied = std::io::copy(&mut reader, &mut file)
+            .map_err(|_| LibraryError::CloudRequestUnavailable)?;
+        if copied > maximum || ticket.size_bytes.is_some_and(|expected| expected != copied) {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        Ok(copied)
     }
 
     pub(crate) fn thumbnail_remote_sizes(
@@ -351,7 +528,10 @@ impl CloudClient {
         let body = serde_json::to_vec(&MediaTicketBatchRequest {
             items: asset_ids
                 .iter()
-                .map(|asset_id| MediaTicketBatchItem { asset_id, variant: "thumbnail" })
+                .map(|asset_id| MediaTicketBatchItem {
+                    asset_id,
+                    variant: "thumbnail",
+                })
                 .collect(),
         })
         .map_err(|_| LibraryError::InvalidCloudResponse)?;
@@ -368,9 +548,12 @@ impl CloudClient {
             .into_iter()
             .map(|item| {
                 let result = if item.ok {
-                    item.size_bytes.ok_or_else(|| "missing size_bytes".to_owned())
+                    item.size_bytes
+                        .ok_or_else(|| "missing size_bytes".to_owned())
                 } else {
-                    Err(item.error.unwrap_or_else(|| "remote unavailable".to_owned()))
+                    Err(item
+                        .error
+                        .unwrap_or_else(|| "remote unavailable".to_owned()))
                 };
                 (item.asset_id, result)
             })

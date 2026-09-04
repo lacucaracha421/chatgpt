@@ -93,6 +93,44 @@ impl Library {
             .into_iter()
             .find(|entry| entry.metadata.id == backup_id)
             .ok_or(LibraryError::InvalidBackup)?;
+        self.restore_snapshot_locked(&selected.path)
+    }
+
+    pub(crate) fn create_cloud_metadata_snapshot(
+        &self,
+        destination: &Path,
+    ) -> Result<u64, LibraryError> {
+        let _backup_guard = self
+            .backup_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(|source| backup_error(parent, source))?;
+        }
+        let connection = self.connection()?;
+        create_verified_snapshot(&connection, destination)?;
+        fs::metadata(destination)
+            .map(|metadata| metadata.len())
+            .map_err(|source| backup_error(destination, source))
+    }
+
+    pub(crate) fn restore_cloud_metadata_snapshot(
+        &self,
+        snapshot: &Path,
+    ) -> Result<(), LibraryError> {
+        let _backup_guard = self
+            .backup_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _database_guard = self
+            .database_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        verify_snapshot(snapshot)?;
+        self.restore_snapshot_locked(snapshot)
+    }
+
+    fn restore_snapshot_locked(&self, selected_path: &Path) -> Result<(), LibraryError> {
         let current = self.root.join("library.sqlite");
         let temporary = self.root.join("library.sqlite.restore.part");
         let recovery = self.root.join(format!(
@@ -108,8 +146,8 @@ impl Library {
         drop(current_connection);
 
         let selected_connection =
-            Connection::open_with_flags(&selected.path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-                .map_err(|source| backup_error(&selected.path, std::io::Error::other(source)))?;
+            Connection::open_with_flags(selected_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .map_err(|source| backup_error(selected_path, std::io::Error::other(source)))?;
         create_verified_snapshot(&selected_connection, &temporary)?;
         drop(selected_connection);
 

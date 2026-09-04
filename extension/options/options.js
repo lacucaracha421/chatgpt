@@ -28,19 +28,15 @@
   const remoteBaseUrl = document.querySelector("#remote-base-url");
   const saveTestRemote = document.querySelector("#save-test-remote");
   const remoteStatus = document.querySelector("#remote-status");
-  const connectionBackupJson = document.querySelector("#connection-backup-json");
-  const exportConnectionBackup = document.querySelector("#export-connection-backup");
-  const importConnectionBackup = document.querySelector("#import-connection-backup");
-  const connectionBackupStatus = document.querySelector("#connection-backup-status");
+  const pushPortableBackup = document.querySelector("#push-portable-backup");
+  const restorePortableBackup = document.querySelector("#restore-portable-backup");
+  const portableBackupStatus = document.querySelector("#portable-backup-status");
   const localPrimarySelect = document.querySelector("#local-primary-select");
   const localPrimaryName = document.querySelector("#local-primary-name");
   const localSecondaryGrid = document.querySelector("#local-secondary-grid");
   const saveLocalTree = document.querySelector("#save-local-tree");
   const resetLocalTree = document.querySelector("#reset-local-tree");
   const copyAppTree = document.querySelector("#copy-app-tree");
-  const exportLocalTree = document.querySelector("#export-local-tree");
-  const importLocalTree = document.querySelector("#import-local-tree");
-  const localTreeJson = document.querySelector("#local-tree-json");
   const localTreeStatus = document.querySelector("#local-tree-status");
   const mobileSiteAccess = document.querySelector("#mobile-site-access");
   const requestMobileSiteAccess = document.querySelector("#request-mobile-site-access");
@@ -48,7 +44,7 @@
   const mobileSiteAccessDiagnostic = document.querySelector("#mobile-site-access-diagnostic");
   let entries = [];
   let workingLayout = { version: 1, parents: {} };
-  let path = [];
+  let activeEditorParentId = null;
   let page = 0;
   let selectedIndex = null;
   let pinnedIds = [];
@@ -178,6 +174,13 @@
     diagnosticsStatus.textContent = "";
   });
 
+  autoLikeOnSave.addEventListener("change", async () => {
+    const response = await chrome.runtime.sendMessage({
+      type: "settings:set-preferences", preferences: { autoLikeOnSave: autoLikeOnSave.checked },
+    });
+    saveModeStatus.textContent = response.ok ? "좋아요 설정을 변경했습니다." : "좋아요 설정을 저장하지 못했습니다.";
+  });
+
   xTranslateEnabled.addEventListener("change", async () => {
     await chrome.storage.local.set({ xTranslateEnabled: xTranslateEnabled.checked });
     xTranslateStatus.textContent = xTranslateEnabled.checked
@@ -246,40 +249,56 @@
       : `원격 연결 성공${version}`;
   });
 
-  exportConnectionBackup.addEventListener("click", async () => {
-    connectionBackupStatus.textContent = "연결 설정을 내보내는 중…";
-    const response = await chrome.runtime.sendMessage({ type: "connection-backup:export" });
-    if (!response.ok) {
-      connectionBackupStatus.textContent = errorMessage(response.code);
+  async function savePortableBackupBootstrap() {
+    const typedToken = collectorToken.value.trim();
+    if (typedToken) {
+      const tokenResponse = await chrome.runtime.sendMessage({ type: "settings:set-collector-token", token: typedToken });
+      if (!tokenResponse.ok) return tokenResponse;
+      collectorToken.value = "";
+    }
+    const saved = await chrome.runtime.sendMessage({
+      type: "settings:set-collector",
+      collector: { enabled: collectorEnabled.checked, baseUrl: collectorBaseUrl.value },
+    });
+    if (!saved.ok) return saved;
+    collectorEnabled.checked = saved.collector.enabled;
+    collectorBaseUrl.value = saved.collector.baseUrl;
+    return { ok: true };
+  }
+
+  pushPortableBackup.addEventListener("click", async () => {
+    portableBackupStatus.textContent = "현재 확장 설정을 암호화해 서버에 백업하는 중…";
+    const bootstrap = await savePortableBackupBootstrap();
+    if (!bootstrap.ok) {
+      portableBackupStatus.textContent = errorMessage(bootstrap.code);
       return;
     }
-    connectionBackupJson.value = JSON.stringify(response.backup, null, 2);
-    try {
-      await navigator.clipboard.writeText(connectionBackupJson.value);
-      connectionBackupStatus.textContent = "연결 설정 JSON을 내보내고 클립보드에도 복사했습니다. 이 JSON은 비밀로 보관하세요.";
-    } catch {
-      connectionBackupStatus.textContent = "연결 설정 JSON을 내보냈습니다. 이 JSON은 비밀로 보관하세요.";
+    const response = await chrome.runtime.sendMessage({ type: "portable-backup:push" });
+    if (!response.ok) {
+      portableBackupStatus.textContent = errorMessage(response.code);
+      return;
     }
+    const when = response.publishedAt ? new Date(response.publishedAt).toLocaleString() : "방금";
+    const size = Number.isFinite(response.byteSize) ? ` · ${Math.max(1, Math.round(response.byteSize / 1024))} KiB` : "";
+    portableBackupStatus.textContent = `서버 백업 완료 · ${when}${size}`;
   });
 
-  importConnectionBackup.addEventListener("click", async () => {
-    let backup;
-    try {
-      backup = JSON.parse(connectionBackupJson.value);
-    } catch {
-      connectionBackupStatus.textContent = "연결 설정 JSON 형식이 올바르지 않습니다.";
+  restorePortableBackup.addEventListener("click", async () => {
+    if (!globalThis.confirm("서버의 최신 확장 설정으로 현재 설정을 덮어쓸까요? Cloud API 토큰은 현재 기기의 값을 유지합니다.")) return;
+    portableBackupStatus.textContent = "서버 백업을 내려받아 복호화하는 중…";
+    const bootstrap = await savePortableBackupBootstrap();
+    if (!bootstrap.ok) {
+      portableBackupStatus.textContent = errorMessage(bootstrap.code);
       return;
     }
-    const response = await chrome.runtime.sendMessage({ type: "connection-backup:import", backup });
+    const response = await chrome.runtime.sendMessage({ type: "portable-backup:restore" });
     if (!response.ok) {
-      connectionBackupStatus.textContent = errorMessage(response.code);
+      portableBackupStatus.textContent = errorMessage(response.code);
       return;
     }
-    remoteEnabled.checked = response.remote.enabled;
-    remoteBaseUrl.value = response.remote.baseUrl;
-    tokenInput.value = "";
-    status.textContent = "연결 키가 복원되었습니다.";
-    connectionBackupStatus.textContent = "연결 키와 Remote 주소를 복원했습니다. 원격 연결 테스트를 실행하면 바로 확인할 수 있습니다.";
+    await initialize();
+    const when = response.publishedAt ? new Date(response.publishedAt).toLocaleString() : "최신 백업";
+    portableBackupStatus.textContent = `서버 설정 복원 완료 · ${when} · 열려 있는 X 탭을 새로고침하면 적용됩니다.`;
   });
 
   localPrimarySelect.addEventListener("change", () => {
@@ -331,41 +350,11 @@
     localTreeStatus.textContent = "현재 연결된 Lakomics 분류를 모바일 도넛으로 복사했습니다.";
   });
 
-  exportLocalTree.addEventListener("click", async () => {
-    commitLocalEditor();
-    localTreeJson.value = JSON.stringify(localTree, null, 2);
-    try {
-      await navigator.clipboard.writeText(localTreeJson.value);
-      localTreeStatus.textContent = "모바일 도넛 JSON을 아래에 내보내고 클립보드에도 복사했습니다.";
-    } catch {
-      localTreeStatus.textContent = "모바일 도넛 JSON을 아래에 내보냈습니다.";
-    }
-  });
-
-  importLocalTree.addEventListener("click", async () => {
-    let parsed;
-    try {
-      parsed = JSON.parse(localTreeJson.value);
-    } catch {
-      localTreeStatus.textContent = "JSON 형식이 올바르지 않습니다.";
-      return;
-    }
-    const response = await chrome.runtime.sendMessage({ type: "local-tree:set", tree: parsed });
-    if (!response.ok) {
-      localTreeStatus.textContent = "모바일 도넛 JSON을 가져오지 못했습니다.";
-      return;
-    }
-    localTree = response.tree;
-    localPrimaryIndex = 0;
-    renderLocalTreeEditor();
-    localTreeStatus.textContent = "모바일 도넛 JSON을 가져와 저장했습니다.";
-  });
-
   savePreferences.addEventListener("click", async () => {
     const response = await chrome.runtime.sendMessage({
       type: "settings:set-preferences",
       preferences: {
-        saveMode: "auto",
+        saveMode: saveModeSelect.value,
         downloadFolder: downloadFolder.value,
         touchLongPressMs: Number(touchLongPress.value),
         touchPersistent: true,
@@ -452,7 +441,7 @@
     pinnedIds = response.pinnedIds;
     secondaryUsageById = response.usageById ?? secondaryUsageById;
     hiddenSecondaryIds = response.hiddenSecondaryIds ?? hiddenSecondaryIds;
-    path = [];
+    activeEditorParentId = null;
     page = 0;
     selectedIndex = null;
     status.textContent = `연결됨 · 분류 ${entries.length}개`;
@@ -461,22 +450,50 @@
 
   function renderEditor() {
     editor.replaceChildren();
-    if (path.length === 0 && !workingLayout.parents?.[LakomicsRadial.PINNED]) {
+    if (!workingLayout.parents?.[LakomicsRadial.PINNED]) {
       workingLayout = LakomicsRadial.reorderPinned(workingLayout, entries, pinnedIds);
     }
-    const parentId = path.at(-1)?.id ?? null;
-    const level = path.length === 0
+    if (activeEditorParentId && !entries.some((entry) => entry.id === activeEditorParentId)) {
+      activeEditorParentId = null;
+    }
+    const parentEntry = activeEditorParentId
+      ? entries.find((entry) => entry.id === activeEditorParentId) ?? null
+      : null;
+    const level = activeEditorParentId == null
       ? LakomicsRadial.getPinnedLevel(entries, workingLayout, pinnedIds, page)
-      : LakomicsRadial.getLevel(entries, workingLayout, parentId, page);
+      : LakomicsRadial.getLevel(entries, workingLayout, activeEditorParentId, page);
     page = level.page;
 
     const heading = document.createElement("div");
-    heading.className = "editor-heading";
-    const title = document.createElement("strong");
-    title.textContent = path.length ? path.map((entry) => entry.name).join(" › ") : "최상위 분류";
+    heading.className = "editor-heading editor-heading--target";
+    const targetLabel = document.createElement("label");
+    targetLabel.textContent = "편집 대상";
+    targetLabel.htmlFor = "radial-editor-target";
+    const targetSelect = document.createElement("select");
+    targetSelect.id = "radial-editor-target";
+    const topOption = document.createElement("option");
+    topOption.value = "";
+    topOption.textContent = "1차 도넛";
+    targetSelect.append(topOption);
+    entries
+      .filter((entry) => entries.some((child) => child.parentId === entry.id))
+      .sort((a, b) => classificationPathLabel(a).localeCompare(classificationPathLabel(b), "ko"))
+      .forEach((entry) => {
+        const option = document.createElement("option");
+        option.value = entry.id;
+        option.textContent = `2차 · ${classificationPathLabel(entry)}`;
+        targetSelect.append(option);
+      });
+    targetSelect.value = activeEditorParentId ?? "";
+    targetSelect.addEventListener("change", () => {
+      activeEditorParentId = targetSelect.value || null;
+      page = 0;
+      selectedIndex = null;
+      renderEditor();
+    });
     const pageLabel = document.createElement("span");
-    pageLabel.textContent = `${level.page + 1} / ${level.pageCount} 페이지`;
-    heading.append(title, pageLabel);
+    pageLabel.textContent = level.pageCount > 1 ? `${level.page + 1} / ${level.pageCount} 페이지` : "";
+    heading.append(targetLabel, targetSelect, pageLabel);
 
     const radial = document.createElement("div");
     radial.className = "radial-editor";
@@ -498,17 +515,15 @@
     });
     const center = document.createElement("div");
     center.className = "radial-center";
-    center.textContent = path.at(-1)?.name ?? "ROOT";
+    center.textContent = parentEntry?.name ?? "1차";
     radial.append(center);
 
     const controls = document.createElement("div");
     controls.className = "editor-controls";
     controls.append(
-      controlButton("이전 페이지", level.page > 0, () => { page -= 1; selectedIndex = null; renderEditor(); }),
-      controlButton("다음 페이지", level.page + 1 < level.pageCount, () => { page += 1; selectedIndex = null; renderEditor(); }),
-      controlButton("한 단계 위", path.length > 0, () => { path.pop(); page = 0; selectedIndex = null; renderEditor(); }),
-      controlButton("선택한 분류 열기", selectedHasChildren(level), () => openSelected(level)),
-      controlButton("자동 배치로 초기화", true, () => {
+      controlButton("이전", level.page > 0, () => { page -= 1; selectedIndex = null; renderEditor(); }),
+      controlButton("다음", level.page + 1 < level.pageCount, () => { page += 1; selectedIndex = null; renderEditor(); }),
+      controlButton("자동 배치", true, () => {
         workingLayout = LakomicsRadial.resetLayout(entries);
         selectedIndex = null;
         renderEditor();
@@ -518,9 +533,12 @@
 
     const help = document.createElement("p");
     help.className = "editor-help";
-    help.textContent = "분류 슬롯을 선택한 뒤 다른 슬롯을 누르면 두 위치를 바꿉니다. 빈 슬롯으로도 이동할 수 있습니다.";
-    const blocks = [heading, renderPinnedPanel()];
-    if (path.length > 0) blocks.push(renderSecondaryPresentationPanel(parentId));
+    help.textContent = activeEditorParentId == null
+      ? "1차 슬롯을 선택한 뒤 다른 슬롯을 누르면 위치가 바뀝니다. 2차 편집은 위 ‘편집 대상’에서 바로 고르세요."
+      : "2차 슬롯을 선택한 뒤 다른 슬롯을 누르면 위치가 바뀝니다. 아래에서 사용량과 숨김도 바로 관리할 수 있습니다.";
+    const blocks = [heading];
+    if (activeEditorParentId == null) blocks.push(renderPinnedPanel());
+    else blocks.push(renderSecondaryPresentationPanel(activeEditorParentId));
     blocks.push(radial, controls, help);
     editor.append(...blocks);
   }
@@ -670,30 +688,10 @@
     } else if (selectedIndex === globalIndex) {
       selectedIndex = null;
     } else {
-      const parentId = path.length === 0 ? LakomicsRadial.PINNED : path.at(-1)?.id ?? null;
+      const parentId = activeEditorParentId ?? LakomicsRadial.PINNED;
       workingLayout = LakomicsRadial.moveSlot(workingLayout, parentId, selectedIndex, globalIndex);
       selectedIndex = null;
     }
-    renderEditor();
-  }
-
-  function selectedEntry(level) {
-    if (selectedIndex === null) return null;
-    const slot = selectedIndex - level.page * level.slotCount;
-    return level.slots[slot] ?? null;
-  }
-
-  function selectedHasChildren(level) {
-    const selected = selectedEntry(level);
-    return Boolean(selected && entries.some((entry) => entry.parentId === selected.id));
-  }
-
-  function openSelected(level) {
-    const selected = selectedEntry(level);
-    if (!selected || !entries.some((entry) => entry.parentId === selected.id)) return;
-    path.push(selected);
-    page = 0;
-    selectedIndex = null;
     renderEditor();
   }
 
