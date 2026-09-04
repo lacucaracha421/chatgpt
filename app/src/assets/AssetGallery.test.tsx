@@ -491,6 +491,31 @@ describe("AssetGallery", () => {
     expect(scroller.scrollTop).toBeCloseTo(730.8, 0);
   });
 
+  it("ignores hovers after a release outside the thumb", async () => {
+    const { container } = render(
+      <AssetGallery
+        items={Array.from({ length: 8 }, (_, index) => asset(index))}
+        totalCount={100}
+        hasNextPage
+        onLoadNextPage={vi.fn()}
+      />,
+    );
+    await screen.findByRole("option", { name: "asset-0.png" });
+
+    const scroller = container.querySelector(".asset-gallery__scroll") as HTMLElement;
+    const thumb = container.querySelector(".asset-gallery__scrollbar-thumb") as HTMLElement;
+    fireEvent.pointerDown(thumb, { pointerId: 7, clientY: 100 });
+    fireEvent.pointerMove(thumb, { pointerId: 7, clientY: 200 });
+    expect(scroller.scrollTop).toBeCloseTo(730.8, 0);
+
+    // The release lands outside the thumb (missed capture): later hovers
+    // must not keep scrolling as if still grabbed.
+    fireEvent.pointerUp(window, { pointerId: 7 });
+    fireEvent.pointerMove(thumb, { pointerId: 7, clientY: 400, buttons: 0 });
+
+    expect(scroller.scrollTop).toBeCloseTo(730.8, 0);
+  });
+
   it("jumps the track click to the matching scroll position", async () => {
     const { container } = render(
       <AssetGallery

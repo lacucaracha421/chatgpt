@@ -1887,6 +1887,7 @@ input:disabled {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  --gallery-scrollbar-width: 18px;
 }
 
 .asset-gallery__scroll {
@@ -1896,10 +1897,10 @@ input:disabled {
   overflow: auto;
   /* The virtualizer owns scroll positioning; native anchoring can fight mounted row changes. */
   overflow-anchor: none;
-  /* Reserve the scrollbar gutter so the scrollbar appearing/disappearing cannot
-     change clientWidth, re-justify every row, and shift the scroll range. */
-  scrollbar-gutter: stable;
   padding: var(--gallery-gap);
+  /* Dedicated home for the overlay scrollbar so tiles never slide under it.
+     (The native scrollbar is hidden below, so no stable gutter is needed.) */
+  padding-right: var(--gallery-scrollbar-width);
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--color-muted) 46%, transparent) transparent;
 }
@@ -1947,7 +1948,7 @@ input:disabled {
   right: 0;
   bottom: 0;
   z-index: 1;
-  width: 18px;
+  width: var(--gallery-scrollbar-width);
 }
 
 .asset-gallery__scrollbar-thumb {

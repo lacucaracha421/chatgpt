@@ -34,7 +34,6 @@ export function AssetGalleryScrollbar({ scrollRef, totalHeight }: AssetGallerySc
     const track = trackRef.current;
     const thumb = thumbRef.current;
     if (!element || !track || !thumb) return;
-
     const update = () => {
       const viewportHeight = element.clientHeight;
       const trackHeight = track.clientHeight;
@@ -65,6 +64,14 @@ export function AssetGalleryScrollbar({ scrollRef, totalHeight }: AssetGallerySc
 
     update();
     element.addEventListener("scroll", update, { passive: true });
+    // A release outside the thumb still ends the drag: pointer capture
+    // normally retargets it to the thumb, but a missed release must never
+    // leave a stale drag behind (it would scroll on later hovers).
+    const cancelDrag = () => {
+      dragRef.current = null;
+    };
+    window.addEventListener("pointerup", cancelDrag);
+    window.addEventListener("pointercancel", cancelDrag);
     let observer: ResizeObserver | undefined;
     if (typeof window.ResizeObserver !== "undefined") {
       observer = new ResizeObserver(() => update());
@@ -73,6 +80,8 @@ export function AssetGalleryScrollbar({ scrollRef, totalHeight }: AssetGallerySc
     }
     return () => {
       element.removeEventListener("scroll", update);
+      window.removeEventListener("pointerup", cancelDrag);
+      window.removeEventListener("pointercancel", cancelDrag);
       observer?.disconnect();
     };
   }, [scrollRef, totalHeight]);
@@ -82,7 +91,9 @@ export function AssetGalleryScrollbar({ scrollRef, totalHeight }: AssetGallerySc
     if (!element) return;
     event.preventDefault();
     event.stopPropagation();
-    element.setPointerCapture?.(event.pointerId);
+    // Capture on the thumb itself so moves/ups keep targeting it even when
+    // the cursor leaves the track mid-drag.
+    event.currentTarget.setPointerCapture?.(event.pointerId);
     dragRef.current = {
       pointerId: event.pointerId,
       startY: event.clientY,
@@ -94,6 +105,9 @@ export function AssetGalleryScrollbar({ scrollRef, totalHeight }: AssetGallerySc
     const drag = dragRef.current;
     const element = scrollRef.current;
     if (!drag || drag.pointerId !== event.pointerId || !element) return;
+    // A hover without buttons must never scroll, even if a stale drag
+    // somehow survived (mouse hover reports buttons === 0).
+    if (event.pointerType === "mouse" && event.buttons === 0) return;
     const { trackHeight, thumbHeight, maxScroll } = metricsRef.current;
     const travel = trackHeight - thumbHeight;
     if (!(travel > 0) || !(maxScroll > 0)) return;
