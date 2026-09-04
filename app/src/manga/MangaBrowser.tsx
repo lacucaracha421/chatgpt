@@ -157,10 +157,10 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
       actions={<>
         <span className="manga-browser__icon-control" title={`정렬: ${mangaSortLabel(sort)}`}>
           <Menu label={`정렬: ${mangaSortLabel(sort)}`} trigger={<BarsArrowDownIcon aria-hidden="true" />} items={[
-            { id: "recent", label: "최근 변경순", icon: <ClockIcon />, selected: sort === "recent", onSelect: () => setSort("recent") },
-            { id: "title_asc", label: "제목순", icon: <Bars3BottomLeftIcon />, selected: sort === "title_asc", onSelect: () => setSort("title_asc") },
-            { id: "author_asc", label: "작가순", icon: <UserIcon />, selected: sort === "author_asc", onSelect: () => setSort("author_asc") },
-            { id: "pages_desc", label: "페이지 많은 순", icon: <DocumentTextIcon />, selected: sort === "pages_desc", onSelect: () => setSort("pages_desc") },
+            { id: "recent", label: "최근 변경순", icon: <ClockIcon />, group: "sort", selected: sort === "recent", onSelect: () => setSort("recent") },
+            { id: "title_asc", label: "제목순", icon: <Bars3BottomLeftIcon />, group: "sort", selected: sort === "title_asc", onSelect: () => setSort("title_asc") },
+            { id: "author_asc", label: "작가순", icon: <UserIcon />, group: "sort", selected: sort === "author_asc", onSelect: () => setSort("author_asc") },
+            { id: "pages_desc", label: "페이지 많은 순", icon: <DocumentTextIcon />, group: "sort", selected: sort === "pages_desc", onSelect: () => setSort("pages_desc") },
           ]} />
         </span>
         <span className="manga-browser__size-control" title="카드 크기"><ArrowsPointingOutIcon aria-hidden="true" /><Slider label="카드 크기" min={112} max={220} step={8} value={cardWidth} onChange={(event) => setCardWidth(Number(event.target.value))} /></span>

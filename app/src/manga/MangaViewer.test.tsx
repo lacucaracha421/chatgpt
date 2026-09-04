@@ -6,7 +6,7 @@ import { MangaViewer } from "./MangaViewer";
 const openUrl = vi.fn().mockResolvedValue(undefined);
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: (url: string) => openUrl(url) }));
 
-afterEach(() => { cleanup(); openUrl.mockClear(); });
+afterEach(() => { cleanup(); openUrl.mockClear(); localStorage.clear(); });
 
 describe("MangaViewer", () => {
   it("shows the title and page progress", () => {

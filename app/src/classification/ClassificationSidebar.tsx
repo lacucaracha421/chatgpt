@@ -111,15 +111,30 @@ export function ClassificationSidebar({
   const resize = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
   const allEntries = [...classificationEntries, ...albumEntries];
-  const allVisibleNodes = [...visibleNodes, ...visibleAlbumNodes];
-  const activeRowId = nearestVisibleTreeRowId(focusedId, allEntries, allVisibleNodes);
+  // Each role="tree" keeps its own roving tabindex stop: the focused row when
+  // it belongs to that tree, otherwise the nearest visible row. A collapsed
+  // or empty tree exposes no stop at all.
+  const activeFolderRowId = foldersOpen
+    ? nearestVisibleTreeRowId(focusedId, classificationEntries, visibleNodes)
+    : null;
+  const activeAlbumRowId = albumsOpen
+    ? nearestVisibleTreeRowId(focusedId, albumEntries, visibleAlbumNodes)
+    : null;
 
   useLayoutEffect(() => {
-    if (focusedId && activeRowId && focusedId !== activeRowId) {
-      setFocusedId(activeRowId);
-      rowRefs.current.get(activeRowId)?.focus();
+    if (!focusedId) return;
+    const focusedEntry = allEntries.find((candidate) => candidate.id === focusedId);
+    const sameTree = focusedEntry?.treeKind === "album";
+    const visible = sameTree ? visibleAlbumNodes : visibleNodes;
+    const entries = sameTree ? albumEntries : classificationEntries;
+    const open = sameTree ? albumsOpen : foldersOpen;
+    if (!open) return;
+    const next = nearestVisibleTreeRowId(focusedId, entries, visible);
+    if (next && next !== focusedId) {
+      setFocusedId(next);
+      rowRefs.current.get(next)?.focus();
     }
-  }, [activeRowId, focusedId]);
+  }, [focusedId, visibleNodes, visibleAlbumNodes, foldersOpen, albumsOpen]);
 
   function closeDialog() {
     setDialog(null);
@@ -392,7 +407,7 @@ export function ClassificationSidebar({
               hasNextSibling={index < tree.length - 1}
               view={view}
               expandedIds={expandedIds}
-              activeRowId={activeRowId}
+              activeRowId={activeFolderRowId}
               inlineEdit={inlineEdit}
               editName={name}
               editError={editError}
@@ -436,7 +451,7 @@ export function ClassificationSidebar({
                 hasNextSibling={index < albumTree.length - 1}
                 view={view}
                 expandedIds={expandedAlbumIds}
-                activeRowId={activeRowId}
+                activeRowId={activeAlbumRowId}
                 inlineEdit={inlineEdit}
                 editName={name}
                 editError={editError}

@@ -164,3 +164,15 @@ it("shows the reshuffle command only for random sort outside the recent view", a
   rerender(<AssetToolbar {...baseProps} />);
   expect(screen.queryByRole("button", { name: "다시 섞기" })).not.toBeInTheDocument();
 });
+
+it("reserves the reshuffle slot without an interactive control", () => {
+  const { container, rerender } = render(<AssetToolbar {...baseProps} />);
+
+  const placeholder = container.querySelector(".asset-toolbar__action-placeholder") as HTMLElement;
+  expect(placeholder.getAttribute("aria-hidden")).toBe("true");
+  expect(placeholder.closest("button")).toBeNull();
+
+  rerender(<AssetToolbar {...baseProps} sort="random" />);
+  expect(container.querySelector(".asset-toolbar__action-placeholder")).toBeNull();
+  expect(screen.getByRole("button", { name: "다시 섞기" })).toBeVisible();
+});

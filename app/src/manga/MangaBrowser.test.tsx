@@ -70,7 +70,7 @@ describe("MangaBrowser", () => {
     await screen.findByText("T1");
 
     await user.click(screen.getByRole("button", { name: "정렬: 최근 변경순" }));
-    await user.click(screen.getByRole("menuitem", { name: "페이지 많은 순" }));
+    await user.click(screen.getByRole("menuitemradio", { name: "페이지 많은 순" }));
     expect(container.querySelectorAll(".manga-browser__cover-title")[0]).toHaveTextContent("T1");
 
     fireEvent.change(screen.getByRole("slider", { name: "카드 크기" }), { target: { value: "200" } });

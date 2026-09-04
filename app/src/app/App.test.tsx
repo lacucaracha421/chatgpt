@@ -575,6 +575,11 @@ describe("App", () => {
         thumbnailRowHeight: 180,
         creatorCardSize: 200,
         collectionType: "manga",
+        mangaReadingDirection: "ltr",
+        mangaPageMode: "single",
+        mangaCoverSingle: true,
+        mangaViewerMargin: "compact",
+        mangaViewerGap: "narrow",
       }),
     );
   });

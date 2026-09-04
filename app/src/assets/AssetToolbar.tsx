@@ -48,7 +48,9 @@ export function AssetToolbar({
   const aspectFilterLabel = aspectFilter === "square" ? "정사각형" : aspectFilter === "landscape" ? "가로형" : aspectFilter === "portrait" ? "세로형" : "전체";
   const reshuffleAction = sort === "random"
     ? <Button size="sm" aria-label="다시 섞기" onClick={onReshuffle}><ArrowPathIcon aria-hidden="true" /><span>다시 섞기</span></Button>
-    : null;
+    : !recent
+      ? <span className="ui-button ui-button--sm asset-toolbar__action-placeholder" aria-hidden="true"><ArrowPathIcon aria-hidden="true" /><span>다시 섞기</span></span>
+      : null;
   const directOnlyAction = view.kind === "classification"
     ? <span className="asset-toolbar__icon-toggle" title="현재 분류만 보기"><Toggle aria-label="이 분류만" checked={directOnly} onChange={(event) => onDirectOnlyChange(event.target.checked)}><FolderIcon aria-hidden="true" /></Toggle></span>
     : null;

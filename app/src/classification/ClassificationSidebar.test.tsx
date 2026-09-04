@@ -698,6 +698,29 @@ describe("ClassificationSidebar", () => {
     expect(games).toHaveFocus();
   });
 
+  it("exposes one tab stop per tree and keeps arrows scoped", () => {
+    renderSidebar(gateway(), {
+      albums: [{ id: "album-root", name: "표지", parentId: null, iconKey: null, colorKey: null }],
+    });
+    const games = screen.getByRole("treeitem", { name: "Games" });
+    const blueArchive = screen.getByRole("treeitem", { name: "Blue Archive" });
+    const album = screen.getByRole("treeitem", { name: "표지" });
+
+    expect([games, blueArchive, album].map((row) => row.tabIndex)).toEqual([0, -1, 0]);
+
+    games.focus();
+    fireEvent.keyDown(games, { key: "ArrowDown" });
+    expect(blueArchive).toHaveFocus();
+    fireEvent.keyDown(blueArchive, { key: "ArrowDown" });
+    expect(screen.getByRole("treeitem", { name: "Arona" })).toHaveFocus();
+
+    album.focus();
+    fireEvent.keyDown(album, { key: "ArrowDown" });
+    expect(album).toHaveFocus();
+    fireEvent.keyDown(album, { key: "ArrowUp" });
+    expect(album).toHaveFocus();
+  });
+
   it("uses Left and Right for visible hierarchy without selecting rows", () => {
     const { onExpandedIdsChange, onViewChange } = renderSidebar(gateway(), { expandedIds: [] });
     const games = screen.getByRole("treeitem", { name: "Games" });

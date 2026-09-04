@@ -3,6 +3,11 @@ import { clampSidebarWidth } from "../layout/sidebarWidth";
 
 export const UI_PREFERENCES_KEY = "lakomics.uiPreferences.v1";
 
+export type MangaReadingDirection = "rtl" | "ltr";
+export type MangaPageMode = "single" | "double";
+export type MangaViewerMargin = "compact" | "normal" | "wide";
+export type MangaViewerGap = "none" | "narrow" | "wide";
+
 export type UiPreferences = {
   metadataVisible: boolean;
   privacyMode: boolean;
@@ -13,6 +18,11 @@ export type UiPreferences = {
   thumbnailRowHeight: number;
   creatorCardSize: number;
   collectionType: CollectionType;
+  mangaReadingDirection: MangaReadingDirection;
+  mangaPageMode: MangaPageMode;
+  mangaCoverSingle: boolean;
+  mangaViewerMargin: MangaViewerMargin;
+  mangaViewerGap: MangaViewerGap;
 };
 
 export const DEFAULT_UI_PREFERENCES: UiPreferences = {
@@ -25,6 +35,11 @@ export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   thumbnailRowHeight: 180,
   creatorCardSize: 200,
   collectionType: "manga",
+  mangaReadingDirection: "ltr",
+  mangaPageMode: "single",
+  mangaCoverSingle: true,
+  mangaViewerMargin: "compact",
+  mangaViewerGap: "narrow",
 };
 
 export function loadUiPreferences(storage: Storage = localStorage): UiPreferences {
@@ -72,6 +87,22 @@ export function loadUiPreferences(storage: Storage = localStorage): UiPreference
     collectionType: isCollectionType(value.collectionType)
       ? value.collectionType
       : DEFAULT_UI_PREFERENCES.collectionType,
+    mangaReadingDirection: isMangaReadingDirection(value.mangaReadingDirection)
+      ? value.mangaReadingDirection
+      : DEFAULT_UI_PREFERENCES.mangaReadingDirection,
+    mangaPageMode: isMangaPageMode(value.mangaPageMode)
+      ? value.mangaPageMode
+      : DEFAULT_UI_PREFERENCES.mangaPageMode,
+    mangaCoverSingle:
+      typeof value.mangaCoverSingle === "boolean"
+        ? value.mangaCoverSingle
+        : DEFAULT_UI_PREFERENCES.mangaCoverSingle,
+    mangaViewerMargin: isMangaViewerMargin(value.mangaViewerMargin)
+      ? value.mangaViewerMargin
+      : DEFAULT_UI_PREFERENCES.mangaViewerMargin,
+    mangaViewerGap: isMangaViewerGap(value.mangaViewerGap)
+      ? value.mangaViewerGap
+      : DEFAULT_UI_PREFERENCES.mangaViewerGap,
   };
 }
 
@@ -101,4 +132,20 @@ function isAssetSort(value: unknown): value is AssetSort {
 
 function isCollectionType(value: unknown): value is CollectionType {
   return value === "game" || value === "manga" || value === "movie";
+}
+
+function isMangaReadingDirection(value: unknown): value is MangaReadingDirection {
+  return value === "rtl" || value === "ltr";
+}
+
+function isMangaPageMode(value: unknown): value is MangaPageMode {
+  return value === "single" || value === "double";
+}
+
+function isMangaViewerMargin(value: unknown): value is MangaViewerMargin {
+  return value === "compact" || value === "normal" || value === "wide";
+}
+
+function isMangaViewerGap(value: unknown): value is MangaViewerGap {
+  return value === "none" || value === "narrow" || value === "wide";
 }

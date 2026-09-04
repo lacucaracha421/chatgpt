@@ -82,6 +82,43 @@ describe("Menu", () => {
     expect(screen.getByRole("button", { name: "분류 작업" })).toHaveFocus();
   });
 
+  it("exposes checkbox items with menuitemcheckbox semantics", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    render(
+      <MenuFixture
+        items={[{ id: "cover", label: "표지 단독 보기", checked: true, onSelect }]}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "분류 작업" }));
+    const item = screen.getByRole("menuitemcheckbox", { name: "표지 단독 보기" });
+    expect(item).toHaveAttribute("aria-checked", "true");
+    await user.click(item);
+    expect(onSelect).toHaveBeenCalledOnce();
+  });
+
+  it("exposes grouped items as a radio group with the active option checked", async () => {
+    const user = userEvent.setup();
+    const onNarrow = vi.fn();
+    render(
+      <MenuFixture
+        items={[
+          { id: "narrow", label: "좁게", group: "gap", selected: true, onSelect: onNarrow },
+          { id: "wide", label: "넓게", group: "gap", selected: false, onSelect: vi.fn() },
+          { id: "plain", label: "일반 동작", onSelect: vi.fn() },
+        ]}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "분류 작업" }));
+    const narrow = screen.getByRole("menuitemradio", { name: "좁게" });
+    expect(narrow).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("menuitemradio", { name: "넓게" })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("menuitem", { name: "일반 동작" })).toBeVisible();
+    await user.click(narrow);
+    expect(onNarrow).toHaveBeenCalledOnce();
+  });
 });
 
 describe("Button", () => {

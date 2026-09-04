@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssetSummary } from "../library/types";
 import { AssetGallery } from "./AssetGallery";
@@ -84,5 +85,25 @@ describe("failed video retry isolation", () => {
 
     expect(onSelectionGesture).toHaveBeenCalledOnce();
     expect(onRetryVideo).not.toHaveBeenCalled();
+  });
+
+  it("activating retry from the keyboard retries without opening the tile", async () => {
+    const user = userEvent.setup();
+    const onRetryVideo = vi.fn();
+    const onOpen = vi.fn();
+    render(
+      <AssetGallery
+        items={[failedVideoAsset()]}
+        onRetryVideo={onRetryVideo}
+        onOpen={onOpen}
+      />,
+    );
+    const button = await waitFor(() => screen.getByRole("button", { name: "다시 시도" }));
+
+    button.focus();
+    await user.keyboard("{Enter}");
+
+    expect(onRetryVideo).toHaveBeenCalledOnce();
+    expect(onOpen).not.toHaveBeenCalled();
   });
 });

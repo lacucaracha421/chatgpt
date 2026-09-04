@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import type { AssetSummary } from "../library/types";
@@ -86,6 +86,28 @@ it("keeps the visible image until the next asset has decoded", async () => {
 
   await act(async () => finishDecode());
   expect(screen.getByRole("img", { name: "b.png" })).toHaveAttribute("src", "http://lakomics.localhost/asset/b");
+});
+
+it("shows a failure placeholder instead of a stale image when preload fails", async () => {
+  let decodeImpl: () => Promise<void> = () => Promise.reject(new Error("decode failed"));
+  vi.stubGlobal("Image", class {
+    src = "";
+    complete = false;
+    naturalWidth = 0;
+    decode = () => decodeImpl();
+  });
+  const items = [asset("a", "a.png"), asset("b", "b.png"), asset("c", "c.png")];
+  const { rerender } = render(<AssetViewer items={items} activeId="a" onActiveIdChange={vi.fn()} onClose={vi.fn()} />);
+  expect(screen.getByRole("img", { name: "a.png" })).toBeInTheDocument();
+
+  rerender(<AssetViewer items={items} activeId="b" onActiveIdChange={vi.fn()} onClose={vi.fn()} />);
+  await waitFor(() => expect(screen.getByText("이미지를 불러오지 못했습니다")).toBeVisible());
+  expect(screen.queryByRole("img", { name: "a.png" })).not.toBeInTheDocument();
+
+  decodeImpl = () => Promise.resolve();
+  rerender(<AssetViewer items={items} activeId="c" onActiveIdChange={vi.fn()} onClose={vi.fn()} />);
+  await waitFor(() => expect(screen.getByRole("img", { name: "c.png" })).toBeInTheDocument());
+  expect(screen.queryByText("이미지를 불러오지 못했습니다")).not.toBeInTheDocument();
 });
 
 function asset(id: string, originalName: string): AssetSummary {

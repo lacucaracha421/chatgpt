@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, PropsWithChildren } from "react";
+import type { ButtonHTMLAttributes, PropsWithChildren, Ref } from "react";
 
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 type ButtonSize = "sm" | "md" | "icon";
@@ -6,6 +6,7 @@ type ButtonSize = "sm" | "md" | "icon";
 type SharedButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "className"> & {
   className?: string;
   variant?: ButtonVariant;
+  ref?: Ref<HTMLButtonElement>;
 };
 
 type ButtonProps =
@@ -17,10 +18,11 @@ export function Button({
   className,
   size = "md",
   variant = "secondary",
+  ref,
   ...props
 }: PropsWithChildren<ButtonProps>) {
   return (
-    <button className={`ui-button ui-button--${variant} ui-button--${size}${className ? ` ${className}` : ""}`} {...props}>
+    <button ref={ref} className={`ui-button ui-button--${variant} ui-button--${size}${className ? ` ${className}` : ""}`} {...props}>
       {children}
     </button>
   );

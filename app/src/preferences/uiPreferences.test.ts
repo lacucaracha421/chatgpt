@@ -38,6 +38,11 @@ describe("UI preferences", () => {
       thumbnailRowHeight: 220,
       creatorCardSize: 240,
       collectionType: "manga" as const,
+      mangaReadingDirection: "rtl" as const,
+      mangaPageMode: "double" as const,
+      mangaCoverSingle: false,
+      mangaViewerMargin: "wide" as const,
+      mangaViewerGap: "wide" as const,
     };
 
     saveUiPreferences(value, localStorage);
@@ -74,6 +79,11 @@ describe("UI preferences", () => {
       thumbnailRowHeight: 180,
       creatorCardSize: 200,
       collectionType: "manga",
+      mangaReadingDirection: "ltr",
+      mangaPageMode: "single",
+      mangaCoverSingle: true,
+      mangaViewerMargin: "compact",
+      mangaViewerGap: "narrow",
     });
   });
 
@@ -99,6 +109,11 @@ describe("UI preferences", () => {
       thumbnailRowHeight: 180,
       creatorCardSize: 200,
       collectionType: "manga",
+      mangaReadingDirection: "ltr",
+      mangaPageMode: "single",
+      mangaCoverSingle: true,
+      mangaViewerMargin: "compact",
+      mangaViewerGap: "narrow",
     });
   });
 
@@ -145,5 +160,38 @@ describe("UI preferences", () => {
 
     localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({ collectionType: "gacha" }));
     expect(loadUiPreferences(localStorage).collectionType).toBe("manga");
+  });
+
+  it("restores reader preferences and falls back safely on invalid values", () => {
+    const localStorage = storage();
+    localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({
+      mangaReadingDirection: "rtl",
+      mangaPageMode: "double",
+      mangaCoverSingle: false,
+      mangaViewerMargin: "wide",
+      mangaViewerGap: "wide",
+    }));
+    expect(loadUiPreferences(localStorage)).toMatchObject({
+      mangaReadingDirection: "rtl",
+      mangaPageMode: "double",
+      mangaCoverSingle: false,
+      mangaViewerMargin: "wide",
+      mangaViewerGap: "wide",
+    });
+
+    localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({
+      mangaReadingDirection: "vertical",
+      mangaPageMode: "triple",
+      mangaCoverSingle: "yes",
+      mangaViewerMargin: 48,
+      mangaViewerGap: null,
+    }));
+    expect(loadUiPreferences(localStorage)).toMatchObject({
+      mangaReadingDirection: "ltr",
+      mangaPageMode: "single",
+      mangaCoverSingle: true,
+      mangaViewerMargin: "compact",
+      mangaViewerGap: "narrow",
+    });
   });
 });
