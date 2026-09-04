@@ -38,7 +38,7 @@ export function useCloudBackfillSupervisor(gateway: LibraryGateway, libraryRoot:
         // 일상 저장 활동이 만든 증분 work다. 두 경우 모두 같은 워커
         // 사이클이 처리하며, idle 구간 처리는 컨트롤 상태를 바꾸지
         // 않는다(설정 UI의 진행 표시와 무관하게 동작).
-        if (progress.controlState === "running" || remainingWork(progress) > 0) {
+        if (progress.controlState !== "paused" && (progress.controlState === "running" || remainingWork(progress) > 0)) {
           if (remainingWork(progress) > 0) {
             await gateway.cloudBackfillRunCycle();
             progress = await gateway.cloudBackfillProgress();

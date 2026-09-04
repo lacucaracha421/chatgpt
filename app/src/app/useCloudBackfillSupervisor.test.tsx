@@ -67,3 +67,26 @@ it("keeps polling while idle pending work remains after a cycle", async () => {
     vi.useRealTimers();
   }
 });
+
+it("does not start upload cycles while replication is paused", async () => {
+  vi.useFakeTimers();
+  try {
+    const pausedPending = { ...running, controlState: "paused" as const };
+    const run = vi.fn();
+    const progress = vi.fn().mockResolvedValue(pausedPending);
+    const gateway = {
+      cloudBackfillProgress: progress,
+      cloudBackfillRunCycle: run,
+      cloudBackfillSetControlState: vi.fn(),
+    } as unknown as LibraryGateway;
+
+    render(<Harness gateway={gateway} />);
+    await vi.waitFor(() => expect(progress).toHaveBeenCalledTimes(1));
+    await vi.advanceTimersByTimeAsync(11_000);
+
+    expect(progress.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(run).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
+});
