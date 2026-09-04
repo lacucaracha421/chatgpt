@@ -376,6 +376,58 @@ describe("AssetGallery", () => {
     expect(onLoadPrevPage).not.toHaveBeenCalled();
   });
 
+  it("reserves the full filtered range so appended pages stop growing the scroll range", async () => {
+    const onLoadNextPage = vi.fn();
+    const { container } = render(
+      <AssetGallery
+        items={Array.from({ length: 8 }, (_, index) => asset(index))}
+        totalCount={100}
+        hasNextPage
+        onLoadNextPage={onLoadNextPage}
+      />,
+    );
+
+    // 200px squares in an 840px gallery (6px gap from tokens) form rows of 5
+    // at 164.8px; 100 total items estimate 25 rows: 25 * 175.4 = 4385.
+    const space = await waitFor(() =>
+      container.querySelector(".asset-gallery__virtual-space") as HTMLElement,
+    );
+    expect(space.style.height).toBe("4385px");
+  });
+
+  it("sizes the virtual space from measured rows without a total count", async () => {
+    const { container } = render(
+      <AssetGallery items={Array.from({ length: 8 }, (_, index) => asset(index))} hasNextPage />,
+    );
+
+    const space = await waitFor(() =>
+      container.querySelector(".asset-gallery__virtual-space") as HTMLElement,
+    );
+    expect(space.style.height).toBe("350.8px");
+  });
+
+  it("loads the next page when scrolled deep into the reserved range", async () => {
+    const onLoadNextPage = vi.fn();
+    const { container } = render(
+      <AssetGallery
+        items={Array.from({ length: 160 }, (_, index) => asset(index))}
+        totalCount={100000}
+        hasNextPage
+        onLoadNextPage={onLoadNextPage}
+      />,
+    );
+    await waitFor(() =>
+      expect(container.querySelector(".asset-gallery__virtual-space")).toBeInTheDocument(),
+    );
+    expect(onLoadNextPage).not.toHaveBeenCalled();
+
+    const scroller = container.querySelector(".asset-gallery__scroll") as HTMLElement;
+    scroller.scrollTop = 20000;
+    fireEvent.scroll(scroller);
+
+    await waitFor(() => expect(onLoadNextPage).toHaveBeenCalled());
+  });
+
   it("clears a pending quick preview when the gallery unmounts", () => {
     vi.useFakeTimers();
     const clearTimeout = vi.spyOn(window, "clearTimeout");

@@ -254,6 +254,24 @@ describe("AssetBrowser", () => {
     expect(await screen.findByRole("button", { name: "다시 시도" })).toBeInTheDocument();
   });
 
+  it("reserves the full result range from the page total count", async () => {
+    const gateway = createGateway();
+    vi.mocked(gateway.listAssets).mockResolvedValue({
+      items: Array.from({ length: 30 }, (_, index) => asset(index)),
+      nextCursor: { token: "next" },
+      totalCount: 10000,
+    });
+
+    const { container } = renderBrowser(gateway);
+    await screen.findByRole("img", { name: "asset-0.png" });
+    const space = container.querySelector(
+      ".asset-gallery__virtual-space",
+    ) as HTMLElement;
+    // 30 loaded items against a 10000 total must reserve far beyond the
+    // measured rows so later appends stop moving the scrollbar thumb.
+    expect(Number.parseFloat(space.style.height)).toBeGreaterThan(10000);
+  });
+
   it("maps direct-only and every selectable sort", async () => {
     const user = userEvent.setup();
     const gateway = createGateway();

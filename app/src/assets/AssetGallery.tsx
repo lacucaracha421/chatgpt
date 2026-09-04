@@ -13,6 +13,7 @@ import "../styles/tokens.css";
 
 const VIRTUAL_OVERSCAN_ROWS = 3;
 const NEXT_PAGE_THRESHOLD_ROWS = 5;
+const NEXT_PAGE_PREFETCH_VIEWPORTS = 1.5;
 const QUICK_PREVIEW_DELAY_MS = 150;
 const QUICK_PREVIEW_GAP = 8;
 const QUICK_PREVIEW_MARGIN = 12;
@@ -22,6 +23,7 @@ type QuickPreviewState = { asset: AssetSummary; anchor: DOMRect };
 type AssetGalleryProps = {
   items: AssetSummary[];
   scopeKey?: string;
+  totalCount?: number | null;
   selectedAssetIds?: ReadonlySet<string>;
   focusAssetId?: string | null;
   targetRowHeight?: number;
@@ -43,7 +45,7 @@ type AssetGalleryProps = {
   onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void;
   onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void;
 };
-export function AssetGallery({ items, scopeKey, selectedAssetIds = new Set(), focusAssetId = null, targetRowHeight = 180, metadataVisible = false, privacyMode = false, hasNextPage = false, onLoadNextPage, hasPreviousPage = false, onLoadPrevPage, onSelectionGesture, onSelectAll, onDeleteSelection, onClearSelection, onMoveFocus, onOpen, onRetryVideo, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
+export function AssetGallery({ items, scopeKey, totalCount = null, selectedAssetIds = new Set(), focusAssetId = null, targetRowHeight = 180, metadataVisible = false, privacyMode = false, hasNextPage = false, onLoadNextPage, hasPreviousPage = false, onLoadPrevPage, onSelectionGesture, onSelectAll, onDeleteSelection, onClearSelection, onMoveFocus, onOpen, onRetryVideo, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const focusRequestedRef = useRef(false);
   const quickPreviewTimerRef = useRef<number | null>(null);
@@ -81,6 +83,22 @@ export function AssetGallery({ items, scopeKey, selectedAssetIds = new Set(), fo
     pendingRestoreRef.current = null;
   }, [rows.length, scopeKey]);
   const virtualRows = rowVirtualizer.getVirtualItems();
+  const measuredTotal = rowVirtualizer.getTotalSize();
+  // Reserve the full filtered range up front so appended pages stop growing
+  // the scroll range (which yanks the scrollbar thumb upward mid-drag).
+  // The estimate refines from measured rows as pages load; once everything
+  // is loaded the measured size is exact again.
+  let reservedTotal = measuredTotal;
+  if (hasNextPage && totalCount != null && rows.length > 0 && items.length > 0) {
+    const avgItemsPerRow = items.length / rows.length;
+    const avgRowHeight = measuredTotal / rows.length;
+    if (avgItemsPerRow > 0 && avgRowHeight > 0) {
+      reservedTotal = Math.max(
+        measuredTotal,
+        Math.ceil(totalCount / avgItemsPerRow) * avgRowHeight,
+      );
+    }
+  }
   const cancelQuickPreview = () => {
     quickPreviewRequestRef.current += 1;
     if (quickPreviewTimerRef.current !== null) window.clearTimeout(quickPreviewTimerRef.current);
@@ -105,9 +123,19 @@ export function AssetGallery({ items, scopeKey, selectedAssetIds = new Set(), fo
     }, QUICK_PREVIEW_DELAY_MS);
   };
   useEffect(() => {
+    if (!hasNextPage || !onLoadNextPage || rows.length === 0) return;
     const last = virtualRows[virtualRows.length - 1];
-    if (hasNextPage && onLoadNextPage && last && last.index >= rows.length - NEXT_PAGE_THRESHOLD_ROWS) onLoadNextPage();
-  }, [hasNextPage, onLoadNextPage, rows.length, virtualRows]);
+    if (last && last.index >= rows.length - NEXT_PAGE_THRESHOLD_ROWS) {
+      onLoadNextPage();
+      return;
+    }
+    const element = scrollRef.current;
+    if (element && element.clientHeight > 0
+      && measuredTotal - (element.scrollTop + element.clientHeight)
+        <= element.clientHeight * NEXT_PAGE_PREFETCH_VIEWPORTS) {
+      onLoadNextPage();
+    }
+  }, [hasNextPage, onLoadNextPage, rows.length, virtualRows, measuredTotal]);
   useEffect(() => {
     const first = virtualRows[0];
     if (hasPreviousPage && onLoadPrevPage && first && first.index < NEXT_PAGE_THRESHOLD_ROWS) {
@@ -153,7 +181,16 @@ export function AssetGallery({ items, scopeKey, selectedAssetIds = new Set(), fo
       role="listbox"
       aria-label="자산"
       aria-multiselectable="true"
-      onScroll={cancelQuickPreview}
+      onScroll={(event) => {
+        cancelQuickPreview();
+        if (rows.length === 0) return;
+        const element = event.currentTarget;
+        if (hasNextPage && onLoadNextPage && element.clientHeight > 0
+          && measuredTotal - (element.scrollTop + element.clientHeight)
+            <= element.clientHeight * NEXT_PAGE_PREFETCH_VIEWPORTS) {
+          onLoadNextPage();
+        }
+      }}
       onClick={(event) => {
         const target = event.target as HTMLElement;
         const surface = event.currentTarget;
@@ -191,7 +228,7 @@ export function AssetGallery({ items, scopeKey, selectedAssetIds = new Set(), fo
         }
       }}
     >
-      <div className="asset-gallery__virtual-space" style={{ height: rowVirtualizer.getTotalSize() }}>
+      <div className="asset-gallery__virtual-space" style={{ height: reservedTotal }}>
         {virtualRows.map((virtualRow) => {
           const row = rows[virtualRow.index]; if (!row) return null;
           return <div key={virtualRow.key} className="asset-gallery__row" style={{ gap, height: row.height + gap, backgroundColor: "var(--color-bg)", transform: `translateY(${virtualRow.start}px)` }}>

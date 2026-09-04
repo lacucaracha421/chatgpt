@@ -568,6 +568,7 @@ pub struct AssetPage {
     pub next_cursor: Option<AssetCursor>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub previous_cursor: Option<AssetCursor>,
+    pub total_count: u64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

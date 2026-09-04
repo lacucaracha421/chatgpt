@@ -347,6 +347,12 @@ Manual verification checklist (real Tauri, long library):
 5. Confirm pages load at the bottom/top without viewport repositioning.
 - Keep status `VERIFY` until all five pass; then mark `DONE`.
 
+2026-09-04 runtime finding + root-cause fix (uncommitted verification, needs app restart):
+- Real-runtime report: viewport stays stable, but the scrollbar thumb still jumps upward while dragging down. Row geometry, anchoring, and prepend compensation are all stable, so the remaining cause is pagination itself: 100-item pages grow the virtual total on every append (80+ growth events across 8k assets), and each growth shrinks/repositions the thumb mid-drag.
+- Fix: `list_assets` now returns `total_count` for the full filtered set (one shared `ASSET_COUNT_SQL` mirroring the list predicates; all sorts, both directions, anchored windows), and the gallery reserves the estimated full range up front from measured row averages. Appends then fill reserved space instead of growing it, with an offset-based prefetch trigger so deep drags keep loading. No clamps; once fully loaded the measured size is exact again.
+- Rust coverage: total matches filtered length across sorts/filters/pages/windows. Frontend coverage: reservation height, measured-only fallback without a total, deep-scroll prefetch, browser wiring.
+- Re-verify items 1-6 above after restarting the app (Rust change requires rebuild); then mark `DONE`.
+
 ## P2 — architecture / larger feature work
 
 ### CATALOG-001 — Move fragile k-hentai transport behind the Japanese VPS

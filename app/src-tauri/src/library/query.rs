@@ -129,6 +129,67 @@ AND (
   OR (?12 = 'portrait' AND asset.width * 5 < asset.height * 4)
 )
 ORDER BY asset.collected_at DESC, asset.id DESC LIMIT ?10";
+
+/// Filter-only asset count shared by every `list_assets` path (all sorts,
+/// both paging directions, anchored windows). It mirrors the scope/filter
+/// predicates of the list queries exactly but ignores cursors, date anchors,
+/// ordering, and limits, so the gallery can reserve the full scroll range
+/// up front instead of growing it on every appended page.
+/// `?1` classification scope, `?2` album scope, `?3` favorite flag,
+/// `?4` creator key, `?5` direct-only flag, `?6` unclassified flag,
+/// `?7` collection scope, `?8` media filter, `?9` aspect filter,
+/// `?10`/`?11` collected range bounds.
+const ASSET_COUNT_SQL: &str = "WITH RECURSIVE descendants(id) AS (
+    SELECT ?1 WHERE ?1 IS NOT NULL
+    UNION ALL SELECT entry.id FROM classification_entries AS entry JOIN descendants ON entry.parent_id = descendants.id
+) , album_descendants(id) AS (
+    SELECT ?2 WHERE ?2 IS NOT NULL
+    UNION ALL SELECT child.id FROM albums AS child JOIN album_descendants ON child.parent_id = album_descendants.id
+) SELECT COUNT(*) FROM assets AS asset
+WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
+AND (?4 IS NULL OR COALESCE(asset.creator_handle, asset.creator_url) = ?4)
+AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?5 AND link.classification_id = ?1) OR (NOT ?5 AND link.classification_id IN (SELECT id FROM descendants)))))
+AND (?6 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
+AND (?2 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
+AND (?7 IS NULL OR EXISTS (SELECT 1 FROM collection_assets AS collection_link WHERE collection_link.asset_id = asset.id AND collection_link.collection_id = ?7))
+AND (
+  (?8 IS NULL)
+  OR (?8 = 'images' AND asset.media_kind IN ('image', 'gif'))
+  OR (?8 = 'videos' AND asset.media_kind = 'video')
+)
+AND (
+  (?9 IS NULL)
+  OR (?9 = 'square' AND asset.width * 5 >= asset.height * 4 AND asset.width * 4 <= asset.height * 5)
+  OR (?9 = 'landscape' AND asset.width * 4 > asset.height * 5)
+  OR (?9 = 'portrait' AND asset.width * 5 < asset.height * 4)
+)
+AND (?10 IS NULL OR asset.collected_at >= ?10)
+AND (?11 IS NULL OR asset.collected_at < ?11)";
+
+fn count_filtered_assets(
+    connection: &rusqlite::Connection,
+    query: &AssetQuery,
+) -> Result<u64, LibraryError> {
+    let (range_start, range_end) = collected_range_bounds(query)?;
+    let total: i64 = connection.query_row(
+        ASSET_COUNT_SQL,
+        rusqlite::params![
+            query.classification_id.as_deref(),
+            query.album_id.as_deref(),
+            query.favorite_only,
+            query.creator_key.as_deref(),
+            query.direct_only,
+            query.unclassified_only,
+            query.collection_id.as_deref(),
+            media_filter_value(query.media_kind),
+            aspect_filter_value(query.aspect_ratio),
+            range_start,
+            range_end,
+        ],
+        |row| row.get(0),
+    )?;
+    Ok(u64::try_from(total.max(0)).unwrap_or(0))
+}
 impl Library {
     pub(crate) fn list_normal_x_source_urls(&self) -> Result<Vec<String>, LibraryError> {
         let connection = self.connection()?;
@@ -319,6 +380,7 @@ impl Library {
             items: items.into_iter().map(|asset| asset.summary).collect(),
             next_cursor,
             previous_cursor: None,
+            total_count: count_filtered_assets(&connection, &query)?,
         })
     }
 
@@ -365,6 +427,7 @@ impl Library {
             items,
             next_cursor,
             previous_cursor,
+            total_count: count_filtered_assets(connection, query)?,
         })
     }
 
@@ -411,6 +474,7 @@ impl Library {
             items,
             next_cursor: None,
             previous_cursor,
+            total_count: count_filtered_assets(connection, query)?,
         })
     }
 
@@ -1540,6 +1604,76 @@ mod tests {
             ["asset-a"]
         );
         assert!(second.next_cursor.is_none());
+    }
+
+    #[test]
+    fn total_count_covers_all_pages_sorts_and_filters() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let root = classification(&library, ClassificationKind::Root, "게임", None);
+        insert_asset_with_fields(&library, "a", "hash-a", "2026-07-30T00:00:00Z", false);
+        insert_asset_with_fields(&library, "b", "hash-b", "2026-07-31T00:00:00Z", true);
+        insert_asset_with_fields(&library, "c", "hash-c", "2026-07-30T00:00:00Z", false);
+        library
+            .patch_asset_classifications(AssetClassificationPatch {
+                asset_ids: vec!["c".into()],
+                add_classification_ids: vec![root.id.clone()],
+                remove_classification_ids: vec![],
+            })
+            .unwrap();
+
+        let mut query = chrono_query(AssetSort::Newest);
+        query.limit = 2;
+        let first = library.list_assets(query.clone()).unwrap();
+        assert_eq!(first.total_count, 3);
+        let mut next = query.clone();
+        next.after = first.next_cursor.clone();
+        let second = library.list_assets(next).unwrap();
+        assert_eq!(second.total_count, 3);
+
+        let mut oldest = chrono_query(AssetSort::Oldest);
+        oldest.limit = 2;
+        assert_eq!(library.list_assets(oldest).unwrap().total_count, 3);
+
+        let mut favorites = chrono_query(AssetSort::Favorites);
+        favorites.favorite_only = true;
+        assert_eq!(library.list_assets(favorites).unwrap().total_count, 1);
+
+        let mut scoped = chrono_query(AssetSort::Newest);
+        scoped.classification_id = Some(root.id);
+        assert_eq!(library.list_assets(scoped).unwrap().total_count, 1);
+
+        let mut unclassified = chrono_query(AssetSort::Newest);
+        unclassified.unclassified_only = true;
+        assert_eq!(library.list_assets(unclassified).unwrap().total_count, 2);
+
+        let mut random = chrono_query(AssetSort::Random);
+        random.random_pivot = Some("pivot".into());
+        assert_eq!(library.list_assets(random).unwrap().total_count, 3);
+    }
+
+    #[test]
+    fn total_count_matches_anchor_and_before_windows() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        for day in 26..=31 {
+            insert_asset(
+                &library,
+                &format!("a{day}"),
+                &format!("2026-07-{day:02}T00:00:00Z"),
+            );
+        }
+
+        let mut query = chrono_query(AssetSort::Newest);
+        query.limit = 4;
+        query.around_date = Some("2026-07-29".into());
+        let anchor = library.list_assets(query.clone()).unwrap();
+        assert_eq!(anchor.total_count, 6);
+
+        query.around_date = None;
+        query.before = anchor.previous_cursor.clone();
+        let head = library.list_assets(query).unwrap();
+        assert_eq!(head.total_count, 6);
     }
 
     fn chrono_query(sort: AssetSort) -> AssetQuery {

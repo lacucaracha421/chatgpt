@@ -652,6 +652,7 @@ export type AssetPage = {
   items: AssetSummary[];
   nextCursor: AssetCursor | null;
   previousCursor?: AssetCursor | null;
+  totalCount?: number;
 };
 
 export type AssetCreatorSummary = {
