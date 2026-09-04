@@ -662,7 +662,12 @@
     }
 
     function onSelectStart(event) {
-      if (!isTouchGestureActive()) return;
+      // Suppress native selection only while one of our save gestures is in
+      // progress. A mouse press on saveable media (videos resolve from up to
+      // 4 levels of surrounding post content) would otherwise leave a blue
+      // native highlight across the drag. Outside a session the page behaves
+      // exactly as before.
+      if (!isTouchGestureActive() && !pointer) return;
       event.preventDefault();
       event.stopImmediatePropagation();
     }
