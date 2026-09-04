@@ -406,6 +406,22 @@ fn parse_tags(value: Option<&Value>) -> Result<Vec<(String, String)>, LibraryErr
         .collect())
 }
 
+pub(crate) fn import_targeted_work(
+    path: &Path,
+    body: &str,
+    target_id: u64,
+) -> Result<bool, LibraryError> {
+    let page = RemoteCatalogPage::parse(body)?;
+    let Some(work) = page.works.into_iter().find(|work| work.id == target_id) else {
+        return Ok(false);
+    };
+    let mut connection = Connection::open(path)?;
+    let transaction = connection.transaction()?;
+    write_catalog_work(&transaction, &work, chrono::Utc::now().timestamp())?;
+    transaction.commit()?;
+    Ok(true)
+}
+
 pub(crate) fn highest_stored_id(path: &Path) -> Result<u64, LibraryError> {
     Ok(
         Connection::open(path)?.query_row("SELECT COALESCE(MAX(Id), 0) FROM Works", [], |row| {
@@ -423,6 +439,50 @@ pub(crate) fn write_catalog_page(
     write_catalog_page_with_checkpoint(path, works, crawled_at, None)
 }
 
+fn write_catalog_work(
+    transaction: &rusqlite::Transaction<'_>,
+    work: &RemoteWork,
+    crawled_at: i64,
+) -> Result<(), LibraryError> {
+    let work_id = work.id as i64;
+    transaction.execute(
+        "INSERT INTO Works (
+            Id, Token, Title, TitleJpn, Category, Uploader, Posted, Updated,
+            FileCount, FileSize, Rating, Views, Thumb, ThumbExtension,
+            Expunged, Blocked, Archived, TorrentCount, ParentGid, ParentKey,
+            CurrentGid, CurrentKey, FirstGid, FirstKey, RawJson, CrawledAt
+         ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+            ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26
+         ) ON CONFLICT(Id) DO UPDATE SET
+            Token=excluded.Token, Title=excluded.Title, TitleJpn=excluded.TitleJpn,
+            Category=excluded.Category, Uploader=excluded.Uploader, Posted=excluded.Posted,
+            Updated=excluded.Updated, FileCount=excluded.FileCount, FileSize=excluded.FileSize,
+            Rating=excluded.Rating, Views=excluded.Views, Thumb=excluded.Thumb,
+            ThumbExtension=excluded.ThumbExtension, Expunged=excluded.Expunged,
+            Blocked=excluded.Blocked, Archived=excluded.Archived,
+            TorrentCount=excluded.TorrentCount, ParentGid=excluded.ParentGid,
+            ParentKey=excluded.ParentKey, CurrentGid=excluded.CurrentGid,
+            CurrentKey=excluded.CurrentKey, FirstGid=excluded.FirstGid,
+            FirstKey=excluded.FirstKey, RawJson=excluded.RawJson, CrawledAt=excluded.CrawledAt",
+        params![
+            work_id, work.token, work.title, work.title_jpn, work.category, work.uploader,
+            work.posted, work.updated, work.file_count, work.file_size, work.rating, work.views,
+            work.thumb, work.thumb_extension, work.expunged, work.blocked, work.archived,
+            work.torrent_count, work.parent_gid, work.parent_key, work.current_gid, work.current_key,
+            work.first_gid, work.first_key, work.raw_json, crawled_at,
+        ],
+    )?;
+    transaction.execute("DELETE FROM Tags WHERE WorkId = ?1", [work_id])?;
+    for (namespace, value) in &work.tags {
+        transaction.execute(
+            "INSERT OR IGNORE INTO Tags (WorkId, Namespace, Value) VALUES (?1, ?2, ?3)",
+            params![work_id, namespace, value],
+        )?;
+    }
+    Ok(())
+}
+
 fn write_catalog_page_with_checkpoint(
     path: &Path,
     works: &[RemoteWork],
@@ -432,63 +492,7 @@ fn write_catalog_page_with_checkpoint(
     let mut connection = Connection::open(path)?;
     let transaction = connection.transaction()?;
     for work in works {
-        let work_id = work.id as i64;
-        transaction.execute(
-            "INSERT INTO Works (
-                Id, Token, Title, TitleJpn, Category, Uploader, Posted, Updated,
-                FileCount, FileSize, Rating, Views, Thumb, ThumbExtension,
-                Expunged, Blocked, Archived, TorrentCount, ParentGid, ParentKey,
-                CurrentGid, CurrentKey, FirstGid, FirstKey, RawJson, CrawledAt
-             ) VALUES (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26
-             ) ON CONFLICT(Id) DO UPDATE SET
-                Token=excluded.Token, Title=excluded.Title, TitleJpn=excluded.TitleJpn,
-                Category=excluded.Category, Uploader=excluded.Uploader, Posted=excluded.Posted,
-                Updated=excluded.Updated, FileCount=excluded.FileCount, FileSize=excluded.FileSize,
-                Rating=excluded.Rating, Views=excluded.Views, Thumb=excluded.Thumb,
-                ThumbExtension=excluded.ThumbExtension, Expunged=excluded.Expunged,
-                Blocked=excluded.Blocked, Archived=excluded.Archived,
-                TorrentCount=excluded.TorrentCount, ParentGid=excluded.ParentGid,
-                ParentKey=excluded.ParentKey, CurrentGid=excluded.CurrentGid,
-                CurrentKey=excluded.CurrentKey, FirstGid=excluded.FirstGid,
-                FirstKey=excluded.FirstKey, RawJson=excluded.RawJson, CrawledAt=excluded.CrawledAt",
-            params![
-                work_id,
-                work.token,
-                work.title,
-                work.title_jpn,
-                work.category,
-                work.uploader,
-                work.posted,
-                work.updated,
-                work.file_count,
-                work.file_size,
-                work.rating,
-                work.views,
-                work.thumb,
-                work.thumb_extension,
-                work.expunged,
-                work.blocked,
-                work.archived,
-                work.torrent_count,
-                work.parent_gid,
-                work.parent_key,
-                work.current_gid,
-                work.current_key,
-                work.first_gid,
-                work.first_key,
-                work.raw_json,
-                crawled_at,
-            ],
-        )?;
-        transaction.execute("DELETE FROM Tags WHERE WorkId = ?1", [work_id])?;
-        for (namespace, value) in &work.tags {
-            transaction.execute(
-                "INSERT OR IGNORE INTO Tags (WorkId, Namespace, Value) VALUES (?1, ?2, ?3)",
-                params![work_id, namespace, value],
-            )?;
-        }
+        write_catalog_work(&transaction, work, crawled_at)?;
     }
     if let Some(checkpoint) = checkpoint {
         for (key, value) in [
@@ -541,7 +545,7 @@ fn clear_checkpoint(path: &Path) -> Result<(), LibraryError> {
 mod tests {
     use super::super::Library;
     use super::{
-        highest_stored_id, is_update_due, load_checkpoint, next_page_cursor, write_catalog_page,
+        highest_stored_id, import_targeted_work, is_update_due, load_checkpoint, next_page_cursor, write_catalog_page,
         write_catalog_page_with_checkpoint, CatalogUpdateState, RemoteCatalogPage,
         UpdateCheckpoint,
     };
@@ -609,6 +613,22 @@ mod tests {
         assert_eq!(parsed.works[0].title_jpn.as_deref(), Some("작품-120"));
         assert_eq!(parsed.works[0].tags.len(), 2);
         assert!(parsed.works[0].raw_json.contains("\"token\":\"token-120\""));
+    }
+
+    #[test]
+    fn targeted_import_stores_only_exact_work_and_preserves_update_checkpoint() {
+        let (_directory, path) = catalog();
+        let seed = RemoteCatalogPage::parse(&page(&[200])).unwrap();
+        let checkpoint = UpdateCheckpoint { watermark: 100, cursor: 150 };
+        write_catalog_page_with_checkpoint(&path, &seed.works, 1, Some(checkpoint)).unwrap();
+
+        assert!(import_targeted_work(&path, &page(&[77, 76]), 77).unwrap());
+        assert_eq!(load_checkpoint(&path).unwrap(), Some(checkpoint));
+        let connection = Connection::open(&path).unwrap();
+        let found: i64 = connection.query_row("SELECT COUNT(*) FROM Works WHERE Id = 77", [], |row| row.get(0)).unwrap();
+        let neighbour: i64 = connection.query_row("SELECT COUNT(*) FROM Works WHERE Id = 76", [], |row| row.get(0)).unwrap();
+        assert_eq!((found, neighbour), (1, 0));
+        assert!(!import_targeted_work(&path, &page(&[75, 74]), 73).unwrap());
     }
 
     #[test]

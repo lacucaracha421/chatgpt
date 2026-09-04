@@ -1,4 +1,4 @@
-import { ArrowDownTrayIcon, ArrowPathIcon, BarsArrowDownIcon, BookmarkIcon, ClockIcon, EyeIcon, FireIcon, MagnifyingGlassIcon, RectangleStackIcon } from "@heroicons/react/24/outline";
+import { ArrowDownTrayIcon, ArrowPathIcon, BarsArrowDownIcon, ClockIcon, EyeIcon, FireIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ViewToolbar } from "../layout/ViewToolbar";
@@ -27,14 +27,16 @@ type OnlineCatalogBrowserProps = {
   onSwitchLocal: () => void;
 };
 
-export function MangaSourceTabs({ source, onLocal, onOnline }: {
+export function MangaSourceTabs({ source, onlineScope = "all", onLocal, onOnline }: {
   source: "local" | "online";
+  onlineScope?: CatalogScope;
   onLocal: () => void;
   onOnline: () => void;
 }) {
+  const onlineLabel = source === "online" && onlineScope === "bookmarked" ? "북마크" : "카탈로그";
   return <div className="manga-source-tabs" aria-label="망가 출처">
-    <button type="button" aria-pressed={source === "local"} onClick={onLocal}>폴더</button>
-    <button type="button" aria-pressed={source === "online"} onClick={onOnline}>카탈로그</button>
+    <button type="button" aria-pressed={source === "online"} onClick={onOnline}>{onlineLabel}</button>
+    <button type="button" aria-pressed={source === "local"} onClick={onLocal}>로컬</button>
   </div>;
 }
 
@@ -285,7 +287,16 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
       title="망가"
       ariaLabel="온라인 망가 도구"
       children={<>
-        <MangaSourceTabs source="online" onLocal={() => { closeDetail(); closeViewer(); onSwitchLocal(); }} onOnline={() => undefined} />
+        <MangaSourceTabs
+          source="online"
+          onlineScope={scope}
+          onLocal={() => { closeDetail(); closeViewer(); onSwitchLocal(); }}
+          onOnline={() => {
+            const nextScope: CatalogScope = scope === "all" ? "bookmarked" : "all";
+            setScope(nextScope);
+            void search(query.trim(), sort, nextScope, 0);
+          }}
+        />
         <span className="manga-browser__count">{results ? `${results.totalCount.toLocaleString()}개 결과` : status?.installed ? `${status.workCount.toLocaleString()}개 작품` : ""}</span>
         {status?.installed && <form className="manga-browser__search online-catalog__search" role="search" onSubmit={submit}>
           <MagnifyingGlassIcon aria-hidden="true" />
@@ -304,12 +315,6 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
         </form>}
       </>}
       actions={status?.installed ? <>
-        <span className="manga-browser__icon-control" title={`결과 범위: ${scopeLabel(scope)}`}>
-          <Menu label={`결과 범위: ${scopeLabel(scope)}`} trigger={scope === "bookmarked" ? <BookmarkIcon aria-hidden="true" /> : <RectangleStackIcon aria-hidden="true" />} items={[
-            { id: "all", label: "전체 보기", icon: <RectangleStackIcon />, selected: scope === "all", onSelect: () => { setScope("all"); void search(query.trim(), sort, "all", 0); } },
-            { id: "bookmarked", label: "북마크만 보기", icon: <BookmarkIcon />, selected: scope === "bookmarked", onSelect: () => { setScope("bookmarked"); void search(query.trim(), sort, "bookmarked", 0); } },
-          ]} />
-        </span>
         <span className="manga-browser__icon-control" title={`정렬: ${catalogSortLabel(sort)}`}>
           <Menu label={`정렬: ${catalogSortLabel(sort)}`} trigger={<BarsArrowDownIcon aria-hidden="true" />} items={[
             { id: "latest", label: "최신순", icon: <ClockIcon />, selected: sort === "latest", onSelect: () => { setSort("latest"); void search(query.trim(), "latest", scope, 0); } },
@@ -374,10 +379,6 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
       onClose={closeViewer}
     />}
   </section>;
-}
-
-function scopeLabel(scope: CatalogScope): string {
-  return scope === "bookmarked" ? "북마크만 보기" : "전체 보기";
 }
 
 function catalogSortLabel(sort: CatalogSort): string {

@@ -390,6 +390,50 @@ pub(crate) fn preview_catalog_recovery(
     })
 }
 
+pub(crate) fn missing_catalog_recovery_gallery_ids(
+    library: &Library,
+) -> Result<Vec<u64>, LibraryError> {
+    let catalog_path = library.root().join("catalogs/kdata.db");
+    if !catalog_path.exists() {
+        return Err(LibraryError::OnlineCatalogNotInstalled);
+    }
+    let connection = library.connection()?;
+    connection.execute(
+        "ATTACH DATABASE ?1 AS catalog",
+        [catalog_path.to_string_lossy().as_ref()],
+    )?;
+    let mut statement = connection.prepare(
+        "SELECT DISTINCT gallery_id FROM manga_series
+         WHERE gallery_id IS NOT NULL AND trim(gallery_id) <> ''
+         ORDER BY gallery_id",
+    )?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+    let mut ids = Vec::new();
+    for row in rows {
+        let raw = row?;
+        let Ok(id) = raw.trim().parse::<u64>() else {
+            continue;
+        };
+        let Ok(sql_id) = i64::try_from(id) else {
+            continue;
+        };
+        if id == 0 {
+            continue;
+        }
+        let exists: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM catalog.Works WHERE Id = ?1)",
+            [sql_id],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            ids.push(id);
+        }
+    }
+    ids.sort_unstable();
+    ids.dedup();
+    Ok(ids)
+}
+
 fn active_work_title(
     connection: &rusqlite::Connection,
     work_id: i64,
@@ -786,6 +830,7 @@ pub(crate) fn apply_exact_catalog_recovery(
              ON CONFLICT(manga_id) DO NOTHING",
             rusqlite::params![manga_id, provider, work_id, i64::from(inserted), now],
         )?;
+        transaction.execute("DELETE FROM manga_series WHERE id = ?1", [manga_id])?;
     }
     transaction.commit()?;
     Ok(MangaCatalogRecoveryApplyResult {
@@ -890,6 +935,7 @@ pub(crate) fn apply_selected_catalog_recovery(
                 now
             ],
         )?;
+        transaction.execute("DELETE FROM manga_series WHERE id = ?1", [&selection.manga_id])?;
         matched_count += 1;
     }
     transaction.commit()?;
@@ -1265,9 +1311,9 @@ mod tests {
         assert_eq!(first.existing_bookmarks, 1);
 
         let second = library.apply_manga_catalog_recovery().unwrap();
-        assert_eq!(second.matched_count, 2);
+        assert_eq!(second.matched_count, 0);
         assert_eq!(second.created_bookmarks, 0);
-        assert_eq!(second.existing_bookmarks, 2);
+        assert_eq!(second.existing_bookmarks, 0);
 
         let connection = library.connection().unwrap();
         let bookmark_count: i64 = connection
@@ -1283,9 +1329,24 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
+        let local_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM manga_series", [], |row| row.get(0))
+            .unwrap();
         assert_eq!(bookmark_count, 2);
         assert_eq!(link_count, 2);
         assert_eq!(created_by_recovery, 1);
+        assert_eq!(local_count, 2);
+    }
+
+    #[test]
+    fn remote_recovery_ids_include_only_numeric_ids_missing_from_local_catalog() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        write_recovery_catalog(&library);
+        insert_recovery_manga(&library, "m-known", "10", 20);
+        insert_recovery_manga(&library, "m-missing", "999", 20);
+        insert_recovery_manga(&library, "m-custom", "self-translation", 20);
+        assert_eq!(library.missing_manga_catalog_recovery_gallery_ids().unwrap(), vec![999]);
     }
 
     fn write_lineage_catalog(library: &Library) {
@@ -1376,9 +1437,9 @@ mod tests {
         let second = library
             .apply_manga_catalog_recovery_selection(&selection)
             .unwrap();
-        assert_eq!(second.matched_count, 1);
+        assert_eq!(second.matched_count, 0);
         assert_eq!(second.created_bookmarks, 0);
-        assert_eq!(second.existing_bookmarks, 1);
+        assert_eq!(second.existing_bookmarks, 0);
 
         let connection = library.connection().unwrap();
         let (method, bookmark_created, work_id): (String, i64, String) = connection
@@ -1526,6 +1587,7 @@ mod tests {
                 },
             ])
             .unwrap();
+        assert_eq!(again.matched_count, 0);
         assert_eq!(again.created_bookmarks, 0);
 
         let connection = library.connection().unwrap();
@@ -1539,6 +1601,10 @@ mod tests {
             .unwrap();
         assert_eq!(method, "candidate_review");
         assert_eq!(work_id, "201");
+        let local_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM manga_series WHERE id = 'm-cand'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(local_count, 0);
     }
 
     #[test]

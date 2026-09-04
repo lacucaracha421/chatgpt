@@ -792,6 +792,12 @@ export type MangaCatalogRecoveryApplyResult = {
   existingBookmarks: number;
 };
 
+export type MangaCatalogRecoveryRemoteResult = {
+  attemptedCount: number;
+  importedCount: number;
+  notFoundCount: number;
+};
+
 export type MetadataBackup = {
   id: string;
   kind: "daily" | "pre_migration" | "pre_restore";
@@ -985,6 +991,7 @@ export interface LibraryGateway {
   scanManga(): Promise<number>;
   listMangaSeries(): Promise<MangaSeries[]>;
   previewMangaCatalogRecovery?(): Promise<MangaCatalogRecoveryPreview>;
+  refreshMangaCatalogRecoveryRemote?(): Promise<MangaCatalogRecoveryRemoteResult>;
   applyMangaCatalogRecovery?(): Promise<MangaCatalogRecoveryApplyResult>;
   applyMangaCatalogRecoverySelection?(selections: MangaCatalogRecoverySelection[]): Promise<MangaCatalogRecoveryApplyResult>;
   inspectMetadataImport?(folder: string): Promise<MetadataImportPlan>;

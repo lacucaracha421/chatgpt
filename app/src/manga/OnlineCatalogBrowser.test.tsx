@@ -97,8 +97,7 @@ describe("OnlineCatalogBrowser", () => {
     }));
     renderBrowser(gateway);
     await screen.findByRole("button", { name: "오래된 제독 상세 보기" });
-    await userEvent.click(screen.getByRole("button", { name: "결과 범위: 전체 보기" }));
-    await userEvent.click(screen.getByRole("menuitem", { name: "북마크만 보기" }));
+    await userEvent.click(screen.getByRole("button", { name: "카탈로그" }));
     await userEvent.click(await screen.findByRole("button", { name: "다음 결과" }));
     await userEvent.click(await screen.findByRole("button", { name: "오래된 제독 북마크 해제" }));
     await waitFor(() => expect(gateway.searchOnlineCatalog).toHaveBeenLastCalledWith(
@@ -116,13 +115,11 @@ describe("OnlineCatalogBrowser", () => {
     }));
     renderBrowser(gateway);
     await screen.findByRole("button", { name: "오래된 제독 상세 보기" });
-    await userEvent.click(screen.getByRole("button", { name: "결과 범위: 전체 보기" }));
-    await userEvent.click(screen.getByRole("menuitem", { name: "북마크만 보기" }));
+    await userEvent.click(screen.getByRole("button", { name: "카탈로그" }));
     const pending = deferred<void>();
     vi.mocked(gateway.setOnlineCatalogBookmark).mockReturnValueOnce(pending.promise);
     await userEvent.click(await screen.findByRole("button", { name: "오래된 제독 북마크 해제" }));
-    await userEvent.click(screen.getByRole("button", { name: "결과 범위: 북마크만 보기" }));
-    await userEvent.click(screen.getByRole("menuitem", { name: "전체 보기" }));
+    await userEvent.click(screen.getByRole("button", { name: "북마크" }));
     await act(async () => pending.resolve());
 
     expect(gateway.searchOnlineCatalog).toHaveBeenLastCalledWith(
@@ -190,8 +187,7 @@ describe("OnlineCatalogBrowser", () => {
     expect(gateway.setOnlineCatalogBookmark).toHaveBeenCalledWith(3, true);
     expect(gateway.getOnlineCatalogWorkDetail).not.toHaveBeenCalled();
 
-    await userEvent.click(screen.getByRole("button", { name: "결과 범위: 전체 보기" }));
-    await userEvent.click(screen.getByRole("menuitem", { name: "북마크만 보기" }));
+    await userEvent.click(screen.getByRole("button", { name: "카탈로그" }));
     expect(gateway.searchOnlineCatalog).toHaveBeenLastCalledWith(
       expect.objectContaining({ scope: "bookmarked", page: 0 }),
     );

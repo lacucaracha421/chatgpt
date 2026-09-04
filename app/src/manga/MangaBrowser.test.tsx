@@ -16,6 +16,7 @@ describe("MangaBrowser", () => {
   it("scans and shows the cover grid when the root is set", async () => {
     const gateway = createGateway({ root: "C:\\manga", series });
     render(<LibraryProvider gateway={gateway}><MangaBrowser /></LibraryProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "로컬" }));
     await waitFor(() => expect(gateway.scanManga).toHaveBeenCalled());
     expect(await screen.findByText("T1")).toBeVisible();
     expect(screen.getByText("T2")).toBeVisible();
@@ -29,6 +30,7 @@ describe("MangaBrowser", () => {
     gateway.scanManga = vi.fn().mockReturnValue(scanning);
 
     render(<LibraryProvider gateway={gateway}><MangaBrowser /></LibraryProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "로컬" }));
 
     expect(await screen.findByText("T1")).toBeVisible();
     expect(screen.getByRole("button", { name: "스캔 중" })).toBeDisabled();
@@ -39,12 +41,14 @@ describe("MangaBrowser", () => {
   it("shows the setup prompt when the root is not set", async () => {
     const gateway = createGateway({ root: null, series: [] });
     render(<LibraryProvider gateway={gateway}><MangaBrowser /></LibraryProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "로컬" }));
     expect(await screen.findByText("망가 폴더가 설정되지 않았습니다")).toBeVisible();
   });
 
   it("uses the shared view toolbar with window controls", async () => {
     const gateway = createGateway({ root: "C:\\manga", series });
     const { container } = render(<LibraryProvider gateway={gateway}><MangaBrowser /></LibraryProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "로컬" }));
     expect(await screen.findByRole("toolbar")).toBeInTheDocument();
     expect(container.querySelector(".view-toolbar")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "창 닫기" })).toBeInTheDocument();
@@ -54,6 +58,7 @@ describe("MangaBrowser", () => {
     const gateway = createGateway({ root: "C:\\manga", series });
     const user = userEvent.setup();
     render(<LibraryProvider gateway={gateway}><MangaBrowser /></LibraryProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "로컬" }));
 
     expect(await screen.findByText("2개 작품")).toBeVisible();
     await user.type(screen.getByRole("searchbox", { name: "망가 검색" }), "b");
@@ -67,6 +72,7 @@ describe("MangaBrowser", () => {
     const gateway = createGateway({ root: "C:\\manga", series: [series[1]!, series[0]!] });
     const user = userEvent.setup();
     const { container } = render(<LibraryProvider gateway={gateway}><MangaBrowser /></LibraryProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "로컬" }));
     await screen.findByText("T1");
 
     await user.click(screen.getByRole("button", { name: "정렬: 최근 변경순" }));
@@ -81,6 +87,7 @@ describe("MangaBrowser", () => {
     const gateway = createGateway({ root: "C:\\manga", series });
     const onOpenSeries = vi.fn();
     render(<LibraryProvider gateway={gateway}><MangaBrowser onOpenSeries={onOpenSeries} /></LibraryProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "로컬" }));
     await userEvent.click(await screen.findByText("T1"));
     expect(onOpenSeries).toHaveBeenCalledWith(series[0]);
   });
@@ -111,6 +118,7 @@ describe("MangaBrowser", () => {
     });
 
     render(<LibraryProvider gateway={gateway}><MangaBrowser /></LibraryProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "로컬" }));
     await screen.findByText("T1");
     await userEvent.click(screen.getByRole("button", { name: "카탈로그로 복구" }));
 
@@ -161,6 +169,7 @@ describe("MangaBrowser", () => {
     });
 
     render(<LibraryProvider gateway={gateway}><MangaBrowser /></LibraryProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "로컬" }));
     await screen.findByText("T1");
     await userEvent.click(screen.getByRole("button", { name: "카탈로그로 복구" }));
 
@@ -176,26 +185,39 @@ describe("MangaBrowser", () => {
     await waitFor(() => expect(gateway.previewMangaCatalogRecovery).toHaveBeenCalledTimes(2));
   });
 
-  it("switches between local and online manga sources", async () => {
+  it("checks missing numeric gallery ids remotely without forcing unmatched local works", async () => {
     const gateway = createGateway({ root: "C:\\manga", series });
-    gateway.getOnlineCatalogStatus = vi.fn().mockResolvedValue({
-      installed: false,
-      workCount: 0,
-      updateEnabled: true,
-      updateIntervalSeconds: 3600,
-      lastAttemptAt: null,
-      lastSuccessAt: null,
-      lastAdded: 0,
-      lastError: null,
-    });
+    const firstPreview = {
+      totalCount: 2, exactActiveCount: 0, historicalCount: 0, fallbackCount: 2, alreadyBookmarkedCount: 0,
+      items: [
+        { mangaId: "m-id", title: "ID 있음", author: "a", galleryId: "123", pageCount: 20, status: "fallback" as const, workId: null, catalogTitle: null, catalogTitleJpn: null, catalogFileCount: null, bookmarked: false, candidates: [] },
+        { mangaId: "m-custom", title: "자체번역", author: "me", galleryId: null, pageCount: 18, status: "fallback" as const, workId: null, catalogTitle: null, catalogTitleJpn: null, catalogFileCount: null, bookmarked: false, candidates: [] },
+      ],
+    };
+    gateway.previewMangaCatalogRecovery = vi.fn().mockResolvedValue(firstPreview);
+    gateway.refreshMangaCatalogRecoveryRemote = vi.fn().mockResolvedValue({ attemptedCount: 1, importedCount: 0, notFoundCount: 1 });
     render(<LibraryProvider gateway={gateway}><MangaBrowser /></LibraryProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "로컬" }));
     await screen.findByText("T1");
+    await userEvent.click(screen.getByRole("button", { name: "카탈로그로 복구" }));
+    expect((await screen.findAllByText(/카탈로그에 없는 로컬\/자체번역 작품일 수 있습니다/)).length).toBe(2);
+    await userEvent.click(screen.getByRole("button", { name: "원격 ID 확인 1개" }));
+    await waitFor(() => expect(gateway.refreshMangaCatalogRecoveryRemote).toHaveBeenCalledOnce());
+    expect(await screen.findByText(/원격에서도 1개 ID를 찾지 못했습니다/)).toBeVisible();
+  });
 
-    await userEvent.click(screen.getByRole("button", { name: "카탈로그" }));
+  it("prefers the catalog and orders the source switch as catalog then local", async () => {
+    const gateway = createGateway({ root: "C:\\manga", series });
+    render(<LibraryProvider gateway={gateway}><MangaBrowser /></LibraryProvider>);
 
     expect(await screen.findByText("온라인 카탈로그가 없습니다")).toBeVisible();
-    await userEvent.click(screen.getByRole("button", { name: "폴더" }));
-    expect(screen.getByText("T1")).toBeVisible();
+    const sourceButtons = screen.getByLabelText("망가 출처").querySelectorAll("button");
+    expect([...sourceButtons].map((button) => button.textContent)).toEqual(["카탈로그", "로컬"]);
+
+    await userEvent.click(screen.getByRole("button", { name: "로컬" }));
+    expect(await screen.findByText("T1")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "카탈로그" }));
+    expect(await screen.findByText("온라인 카탈로그가 없습니다")).toBeVisible();
   });
 });
 
@@ -242,7 +264,7 @@ function createGateway(overrides: { root: string | null; series: MangaSeries[] }
     setMangaRoot: vi.fn().mockResolvedValue(undefined),
     scanManga: vi.fn().mockResolvedValue(overrides.series.length),
     listMangaSeries: vi.fn().mockResolvedValue(overrides.series),
-    importVckCatalog: vi.fn(), getOnlineCatalogStatus: vi.fn(), searchOnlineCatalog: vi.fn(), suggestOnlineCatalog: vi.fn(), updateOnlineCatalog: vi.fn(), setOnlineCatalogUpdateSettings: vi.fn(), runDueOnlineCatalogUpdate: vi.fn(), getCloudCaptureSettings: vi.fn().mockResolvedValue({ enabled: false, apiBaseUrl: null, tokenConfigured: false }), setCloudCaptureSettings: vi.fn(), setCloudApiToken: vi.fn(), deleteCloudApiToken: vi.fn(), testCloudCaptureConnection: vi.fn().mockResolvedValue({ pendingCount: 0 }), runDueCloudCaptureSync: vi.fn().mockResolvedValue({ attempted: 0, acknowledged: 0, failed: 0, reviewPending: 0, added: 0, videoAdded: 0, classificationChanged: 0 }), cloudBackfillPreflight: vi.fn(), cloudBackfillSeed: vi.fn(), cloudBackfillRunCycle: vi.fn(), cloudBackfillProgress: vi.fn(), cloudBackfillRetryFailed: vi.fn(), getOnlineCatalogWorkDetail: vi.fn(), setOnlineCatalogBookmark: vi.fn(), resolveOnlineCatalogWork: vi.fn(), getRemoteReadingProgress: vi.fn(), saveRemoteReadingProgress: vi.fn(), clearRemoteMangaCache: vi.fn(),
+    importVckCatalog: vi.fn(), getOnlineCatalogStatus: vi.fn().mockResolvedValue({ installed: false, workCount: 0, updateEnabled: true, updateIntervalSeconds: 3600, lastAttemptAt: null, lastSuccessAt: null, lastAdded: 0, lastError: null }), searchOnlineCatalog: vi.fn(), suggestOnlineCatalog: vi.fn(), updateOnlineCatalog: vi.fn(), setOnlineCatalogUpdateSettings: vi.fn(), runDueOnlineCatalogUpdate: vi.fn(), getCloudCaptureSettings: vi.fn().mockResolvedValue({ enabled: false, apiBaseUrl: null, tokenConfigured: false }), setCloudCaptureSettings: vi.fn(), setCloudApiToken: vi.fn(), deleteCloudApiToken: vi.fn(), testCloudCaptureConnection: vi.fn().mockResolvedValue({ pendingCount: 0 }), runDueCloudCaptureSync: vi.fn().mockResolvedValue({ attempted: 0, acknowledged: 0, failed: 0, reviewPending: 0, added: 0, videoAdded: 0, classificationChanged: 0 }), cloudBackfillPreflight: vi.fn(), cloudBackfillSeed: vi.fn(), cloudBackfillRunCycle: vi.fn(), cloudBackfillProgress: vi.fn(), cloudBackfillRetryFailed: vi.fn(), getOnlineCatalogWorkDetail: vi.fn(), setOnlineCatalogBookmark: vi.fn(), resolveOnlineCatalogWork: vi.fn(), getRemoteReadingProgress: vi.fn(), saveRemoteReadingProgress: vi.fn(), clearRemoteMangaCache: vi.fn(),
   };
   return base;
 }

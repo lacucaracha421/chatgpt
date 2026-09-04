@@ -280,6 +280,10 @@ impl Library {
         manga::apply_exact_catalog_recovery(self)
     }
 
+    pub fn missing_manga_catalog_recovery_gallery_ids(&self) -> Result<Vec<u64>, LibraryError> {
+        manga::missing_catalog_recovery_gallery_ids(self)
+    }
+
     pub fn apply_manga_catalog_recovery_selection(
         &self,
         selections: &[MangaCatalogRecoverySelection],

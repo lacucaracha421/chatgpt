@@ -46,6 +46,7 @@ import type {
   MangaSeries,
   MangaCatalogRecoveryApplyResult,
   MangaCatalogRecoveryPreview,
+  MangaCatalogRecoveryRemoteResult,
   MangaCatalogRecoverySelection,
   MetadataBackup,
   MetadataImportPlan,
@@ -300,6 +301,8 @@ export const libraryGateway: LibraryGateway = {
   listMangaSeries: () => invoke<MangaSeries[]>("list_manga_series"),
   previewMangaCatalogRecovery: () =>
     invoke<MangaCatalogRecoveryPreview>("preview_manga_catalog_recovery"),
+  refreshMangaCatalogRecoveryRemote: () =>
+    invoke<MangaCatalogRecoveryRemoteResult>("refresh_manga_catalog_recovery_remote"),
   applyMangaCatalogRecovery: () =>
     invoke<MangaCatalogRecoveryApplyResult>("apply_manga_catalog_recovery"),
   applyMangaCatalogRecoverySelection: (selections: MangaCatalogRecoverySelection[]) =>

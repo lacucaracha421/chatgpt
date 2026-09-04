@@ -26,7 +26,7 @@ use crate::{
             CollectionVolume, CreateAlbum, CreateClassification, CreateCollection,
             IngestMediaRequest, IngestOutcome, LibrarySummary, MangaDexApplyRequest,
             MangaCatalogRecoveryApplyResult, MangaCatalogRecoveryPreview,
-            MangaCatalogRecoverySelection, MangaDexConnection,
+            MangaCatalogRecoveryRemoteResult, MangaCatalogRecoverySelection, MangaDexConnection,
             MangaDexSearchResult, MangaDexVolumeSyncResult, MangaDexWorkPreview, MangaSeries,
             MetadataBackup, PurgeSummary, ReleaseWatchEvent,
             ReleaseWatchRunResult, ReleaseWatchRunStopReason, ReleaseWatchStatus, RemoteProvider,
@@ -1385,6 +1385,46 @@ pub async fn preview_manga_catalog_recovery(
         .await
         .map_err(|_| background_task_error())?
         .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn refresh_manga_catalog_recovery_remote(
+    state: State<'_, AppState>,
+) -> Result<MangaCatalogRecoveryRemoteResult, CommandError> {
+    let library = current_required(state)?;
+    let lookup_library = library.clone();
+    let ids = tauri::async_runtime::spawn_blocking(move || lookup_library.missing_manga_catalog_recovery_gallery_ids())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)?;
+    if ids.is_empty() {
+        return Ok(MangaCatalogRecoveryRemoteResult { attempted_count: 0, imported_count: 0, not_found_count: 0 });
+    }
+    let base_url = library.cloud_sync_config().map_err(CommandError::from)?.api_base_url
+        .ok_or_else(|| CommandError { code: "catalog_remote_not_configured", message: "카탈로그 원격 조회용 VPS 주소가 설정되지 않았습니다.".into() })?;
+    let token = credential::read_cloud_api_token_os().map_err(CommandError::from)?;
+    let source = crate::catalog_source::VpsCatalogSource::new(&base_url).map_err(CommandError::from)?;
+    let catalog_path = library.root().join("catalogs/kdata.db");
+    let attempted_count = ids.len() as u64;
+    let mut imported_count = 0u64;
+    for id in ids {
+        let cursor = id.checked_add(1).ok_or_else(|| CommandError { code: "invalid_catalog_id", message: "카탈로그 ID가 올바르지 않습니다.".into() })?;
+        let body = crate::catalog_source::retry_transient(|| source.fetch_search_page_bearer(Some(cursor), &token)).await.map_err(CommandError::from)?;
+        let path = catalog_path.clone();
+        let found = tauri::async_runtime::spawn_blocking(move || catalog_update::import_targeted_work(&path, &body, id))
+            .await
+            .map_err(|_| background_task_error())?
+            .map_err(CommandError::from)?;
+        imported_count += u64::from(found);
+    }
+    if imported_count > 0 {
+        let rebuild_library = library.clone();
+        tauri::async_runtime::spawn_blocking(move || rebuild_library.rebuild_catalog_suggestions())
+            .await
+            .map_err(|_| background_task_error())?
+            .map_err(CommandError::from)?;
+    }
+    Ok(MangaCatalogRecoveryRemoteResult { attempted_count, imported_count, not_found_count: attempted_count - imported_count })
 }
 
 #[tauri::command]

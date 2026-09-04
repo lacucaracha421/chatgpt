@@ -1222,6 +1222,14 @@ pub struct MangaCatalogRecoveryApplyResult {
     pub existing_bookmarks: u64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MangaCatalogRecoveryRemoteResult {
+    pub attempted_count: u64,
+    pub imported_count: u64,
+    pub not_found_count: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
