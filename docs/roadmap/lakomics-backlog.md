@@ -139,7 +139,7 @@ Resolution:
 - Focused VideoPlayer tests pass; behavior re-verified in real use on the running Tauri app.
 
 ### BUG-003 — X video drag-save shows blue selection highlight on PC
-Status: `TODO`
+Status: `VERIFY`
 
 Observed behavior:
 - On PC, dragging the pointer over an X video to invoke the extension save interaction can produce a blue browser selection highlight.
@@ -153,6 +153,13 @@ Direction:
 - Prevent native text/media selection only for the active drag/gesture surface used by the extension.
 - Prefer scoped `user-select: none`, selection clearing, or pointer-event handling during the gesture rather than disabling browser selection globally.
 - Do not change the working video save path.
+
+2026-09-04 investigation + scoped fix (uncommitted, needs real-X confirmation):
+- Root cause: video save gestures resolve from up to 4 ancestor levels (`findVideoElement` in `x-source.js`), so a press often starts on selectable post text, while image gestures require pressing directly on the `<img>`. Mouse `pointerdown` is never preventDefaulted and mouse `selectstart` was never suppressed (`onSelectStart` in `extension/src/content.js` only guarded touch gestures), so a native selection starts in the first 12px and persists through the gesture. Nothing ever clears it.
+- Fix: `onSelectStart` now also suppresses while any pointer save-session is active (`extension/src/content.js`, one condition). Stateless cleanup — release/cancel/Escape paths already null the session, so normal page selection resumes automatically. No global CSS, no drag-threshold or trigger changes, no save-path changes.
+- Regression: new `extension/tests/content-select-guard.test.mjs` drives the real installed listeners with a stub document (suppressed during session, restored after up/cancel, untouched with no session). Extension suite 233 passed / 0 failed.
+- Runtime checklist (real X, desktop Chrome/Edge): video save shows no blue highlight (also try starting the press on post text and dragging slightly first); image save unchanged; page scroll/selection/controls normal outside the gesture; no stuck state after cancel/Escape.
+- Kept at `VERIFY` until that real-X pass confirms it.
 
 ### BUG-006 — Sidebar asset counts stay stale after drag-and-drop move
 Status: `DONE`
@@ -366,6 +373,11 @@ Manual verification checklist (real Tauri, long library):
 - `total_count` parity is now asserted across the full filter matrix (media/aspect/creator/direct/scope/album/collection/favorite/unclassified/range) in addition to sorts and anchor/before windows.
 - Removed dead gallery scrollbar CSS (old webkit sizing, overridden thin/color rules) and fixed the stale gutter comment. Per-page `COUNT(*)` cost stays as-is until measured otherwise.
 
+2026-09-04 final runtime verification (real Tauri app, large library): PASSED.
+- Overlay visible with 32px+ grabbable thumb in the dedicated gutter; thumb drag scrolls without upward jumps; track click jumps to the ratio position; wheel over the strip scrolls; items 1-6 of the checklist hold with no blanks, stale rows, or viewport repositioning.
+- A mid-pass black screen was traced to HMR-poisoned modules in the long-lived dev session, not to the changes; a clean `npm run tauri -- dev` relaunch renders normally. No code change for it.
+- Item stays `DONE`.
+
 ## P2 — architecture / larger feature work
 
 ### CATALOG-001 — Move fragile k-hentai transport behind the Japanese VPS
@@ -519,7 +531,7 @@ Relationship to catalog work:
 - CATALOG-004's future `id:` syntax can reuse the same identity lookup logic, but the recovery pipeline should not depend on the full query-language feature.
 
 ### UI-009 — VCK-inspired manga viewer parity improvements
-Status: `TODO`
+Status: `DONE`
 
 Goal:
 - Expand the current lightweight `PageViewer` using proven reader behaviors from VCK while keeping Lakomics' own React/Tauri architecture.
@@ -538,6 +550,23 @@ Reference / constraints:
 - Treat `C:\chatgpt\reference\VCK-0.1.0-win-x64` as read-only reference material.
 - Do not port Electron-specific hidden-window/network code into the viewer.
 - Resolve BUG-005's blue page-edge artifact as part of or before this pass so new viewer controls are built on a clean base.
+
+2026-09-04 implementation (uncommitted, needs real-Tauri visual pass):
+- VCK behaviors reviewed (violet-web bundle): RTL/LTR toggle, explicit cover-alone vs normal pairing, thumbnails overview, padding setting, resume prompt, discoverable shortcuts. Adopted: direction, cover pairing, overview, padding/gap. Deliberately NOT copied: device profiles, scroll-vs-paged modes, in-viewer crop/bookmarks, fullscreen (already fullscreen), any networking.
+- Reader preferences (`mangaReadingDirection` rtl|ltr, `mangaPageMode` single|double, `mangaCoverSingle` bool, `mangaViewerMargin` compact|normal|wide, `mangaViewerGap` none|narrow|wide) extend the existing `UiPreferences` localStorage mechanism with per-field validation — no DB table, no profiles. All defaults (ltr/single/cover-single/compact/narrow) reproduce the previous viewer exactly.
+- Semantics: pairing is logical (cover-single: [1],[2,3],[4,5]…; normal: [1,2],[3,4]…); direction only mirrors visual order and maps edges/arrows (RTL: left edge and ArrowLeft advance). Progress persists the lowest logical page of the spread; double-mode jumps normalize to the spread start. Mode/direction/margin/gap/overview changes never fire onPageChange.
+- Overview: in-viewer panel with lazy thumbnails, page numbers, current-spread indication, direct jump (closes + returns focus), privacy masking, failed-page placeholders; toggle button + T shortcut; Escape closes overview first without closing the viewer.
+- Tests: readerSpread unit suite, UiPreferences restore/fallback, PageViewer behavior suite (26 checklist items incl. BUG-008 edge-focus regression), MangaViewer prefs-isolation fix, App prefs-object update. Full frontend 74 files / 652 tests green; production build green (initial chunk 493.63 kB, under 500 kB warning). No Rust changes.
+- 2026-09-04 runtime verification: PASSED in the real Tauri app (reader basics, RTL/LTR, overview jump/focus, margin/gap, preference restore, progress resume, a11y keyboard pass). Marked `DONE`.
+
+2026-09-04 accessibility stabilization (uncommitted, same item):
+- AssetToolbar icon toggles show a focus-visible outline (existing focus tokens); reshuffle slot keeps layout width via an aria-hidden placeholder instead of mount/unmount.
+- ClassificationSidebar: independent roving tabindex per tree (collapsed/empty trees expose no stop); arrow navigation stays per-tree.
+- PageViewer overview: roving tabindex with arrow/Home/End navigation, Enter activates; Escape ordering is Menu > overview > viewer (window-capture handler steps aside for open Radix menus); overview focus moves in on open and returns to the trigger on close.
+- Shared Menu: explicit checkbox (`menuitemcheckbox`) and grouped radio (`menuitemradio`) paths; reader settings and manga sort migrated, ordinary actions unchanged.
+- Failed-video retry stops Enter/Space propagation (tile no longer opens); AssetViewer shows an explicit failure placeholder instead of a stale image (StableImage now surfaces undecodable preloads via onPreloadError).
+- Full frontend 74 files / 661 tests green; production build green (initial chunk 497.40 kB, under 500 kB warning). No Rust changes.
+- Deferred polish (from the interface review, untouched): OnlineCatalog suggestions APG rewrite, Toast lifecycle/role redesign, Collection showcase gradient/shadow/hover cleanup, manga cover duplicate alt, truncated-title fallbacks, shelf aria-labels, catalog pagination loading state.
 
 ### CATALOG-002 — Heliotrope/VCK coexistence and migration strategy
 Status: `TODO`
@@ -679,7 +708,7 @@ Direction:
 - Hidden state and usage ranking should be presentation metadata only; do not alter the underlying classification tree or saved asset memberships.
 
 ### PERF-001 — Cache and media optimization policy
-Status: `IN PROGRESS`
+Status: `DONE`
 
 Phase A checkpoint — PC Core Polish Pass 1:
 - Measured the production frontend before optimization: the initial JavaScript chunk was 626.18 kB (179.71 kB gzip) and exceeded Vite's 500 kB chunk warning.
@@ -699,6 +728,15 @@ Phase B checkpoint - measured startup and thumbnail storage:
 - A post-migration validator false-positive on 12 large/alpha lossy WebPs was fixed by falling back from the 4 KiB header probe to a full-file WebP feature check; regression coverage includes that case.
 - Added a separate cloud-thumbnail refresh utility for already-synced image/GIF replicas: read-only local candidate discovery, remote size preflight in batches, explicit `--apply --limit N|--all` gates, and bounded parallel upload through the existing replication presign path. It refreshes only the thumbnail object and does not rewrite originals or pretend the whole asset needs a new sync revision.
 
+Phase C checkpoint - remaining cache/preview/runtime audit (2026-09-04, measurement-first, zero code changes):
+- Audit: gallery tiles use explicit-dimension lazy imgs in fixed-height rows with bounded virtualized DOM (50k-row test); video hover is single-active with timers cleared on leave/unmount; viewer preloads only the current original (StableImage) with keyed VideoPlayer remounts; no `createObjectURL` anywhere (no URL-leak class); media protocol serves through a concurrency gate; cloud sync polls at 15s active / 60s background with overlap guard and cleanup.
+- Baseline (synthetic libraries, temp tests deleted after): `Library::open` 22ms empty / 121ms at 2k assets+600 artwork files / 338ms at 8k+2000 files (one-time per launch, 8 maintenance passes incl. 2 FS walks); first-page list (100 items) 4.4ms at 2k / 5.1ms at 8k; new `total_count` share 2.6ms / 3.2ms / 4.3ms — negligible at every scale.
+- Disk (production library, read-only audit): originals 6.8GB / 8141 files; thumbnails 164MB / 7792 (~21KB each, matches post-recompression state); video-media 166MB / 10965; work-artwork 220MB / 397; work-artwork-thumbnails 54MB; collection-thumbnails 41MB; cache 5.6MB. Derivatives ≈7% of originals, every category proportional to durable assets — no unbounded growth.
+- Ranked findings: no HIGH bottlenecks. Open cost, per-batch gallery refetch (~5ms), COUNT overhead (~4ms), startup video-prep drain (bounded by pending count, one empty call at steady state), manga auto-scan (bounded stat walk) are all LOW — left alone per the measured-healthy rule.
+- Deliberately NOT implemented: bigger pages or prefetch tuning (no evidence of need); original/preview WebP conversion (fails the 4-condition rule — no bottleneck to solve); second cache architecture; virtualization changes; eager-init surgery (open is sub-second at 8k).
+- Suites green with no behavior change: Rust full lib 537 passed / 0 failed; gallery/browser/manga frontend suites pass; no frontend changes so no build needed.
+- All acceptance intents hold (measured, bounded, no repeated-work bottleneck, disk understood, image/GIF/video correct, 10k scaling reasonable). Marking `DONE`.
+
 Priority:
 - Continue with measured cache/media work after the PC Core Polish Pass 1 runtime verification gate.
 - Use the current real library (8,000+ assets and growing) as the baseline, while keeping the original 10,000+ asset performance target.
@@ -716,7 +754,7 @@ Review and define:
 Design for 10,000+ assets without unnecessary stutter or uncontrolled disk growth. Prefer measured, reversible changes over a one-time bulk rewrite of the library.
 
 ### PERF-003 — Collection artwork import and reuse fast path
-Status: `IN PROGRESS`
+Status: `DONE`
 
 Observed behavior:
 - Opening or importing Collection artwork can take noticeably too long, including when the relevant artwork or source image already exists locally.
@@ -754,6 +792,13 @@ Remaining Phase B:
 Remaining:
 - Instrument provider fetch/prepare and local import timings (per-file stage timings) to quantify the reuse win on real libraries.
 - Audit provider identity checks for redundant fetch/prepare where safe (explicitly out of this change).
+
+2026-09-04 Phase B completion (instrumentation + measurements):
+- Timing instrumentation (all `eprintln`, counts + durations only, no paths/URLs/secrets): `prepare_work_artwork` logs mime/bytes with decode/original-write/thumbnail split (covers local fallback and all provider flows); `import_local_artwork_files` logs per-directory counts (reused vs prepared) with scan/identity-lookup/reuse/prepare split; `import_local_collection_artworks` logs one total line per open.
+- Measured on 6 × 1600×2400 PNG covers (371KB total, temp benchmark, deleted after): fallback path 3.05s total (509ms/file: decode + Collection-original write + thumbnail encode); reuse path 101ms total (16.9ms/file: scan 287µs + identity 2.5ms + hash/lookup/link 31ms). ~30× faster per file; eliminated full decode, duplicate-original bytes, and thumbnail re-encode. Remaining cost is fs read + sha256 + one indexed lookup + hardlinks.
+- Phase A fast path unchanged (signature hit returns before enumeration; covered by existing idempotency test). Provider flows keep existing skip/refresh semantics; their prepare stages are now timed by the shared `prepare_work_artwork` line.
+- Both acceptance targets hold: unchanged reopen is effectively immediate; reuse avoids redundant decode/copy/thumbnail unless genuinely required (fallback preserved). Rust full suite 537 passed / 0 failed.
+- Marking `DONE`. Optional future (non-blocking): provider-side redundant fetch audit; per-page `COUNT(*)`-style timing rollups if real-library profiling ever asks for them.
 
 ### PERF-002 — Preserve view state across navigation
 Status: `DONE`
@@ -970,11 +1015,11 @@ CLOUD-006 is complete and no longer blocks the PC roadmap. Mobile Home/viewer/pr
 PC Core Polish Pass 1 runtime gate is complete: BUG-009, BUG-010, BUG-011, and UI-008 all passed real Tauri verification.
 
 1. BUG-012 runtime verification — DONE (scroll-anchor mitigation + full-range reservation + overlay scrollbar all verified in the real app)
-2. PERF-003 Phase B — reuse existing Lakomics assets/derivatives for Collection artwork is implemented; remaining: stage timings instrumentation and provider identity audit
+2. PERF-003 Phase B — DONE (asset hardlink reuse, ~30× measured, stage timings instrumented; provider fetch audit remains optional non-blocking future work)
 3. MANGA-001 fallback phase — lineage suggestions, ranked fallback candidates, and explicit selection apply are implemented; remaining: VPS-backed targeted lookup for absent IDs (needs network) and selected-backup ingestion only if DB metadata proves insufficient
-4. PERF-001 continuation — measure remaining preview/cache/runtime bounds after the thumbnail-storage and cloud-thumbnail refresh work
-5. BUG-003 — historical X video drag-save blue native-selection artifact, if still reproducible
-6. UI-009 — VCK-inspired manga viewer parity improvements
+4. PERF-001 — DONE (Phase C audit: bounded caches, proportional disk, sub-second open at 8k, no HIGH bottlenecks; zero code changes per measured-healthy rule)
+5. BUG-003 — X video drag-save blue native-selection artifact (fix implemented + contract-tested, awaiting real-X confirmation; still VERIFY)
+6. UI-009 — VCK-inspired manga viewer parity improvements — DONE (implemented, tested, real-Tauri visual pass green)
 7. EXT-003 — same-X-post media grouping
 8. EXT-004 — adaptive/hidden secondary donut tags
 9. OPS-001 — backup/migration/settings portability
