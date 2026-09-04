@@ -1,1105 +1,868 @@
 # Lakomics Backlog
 
-Living backlog for Lakomics bugs, UX work, cloud follow-ups, extension work, and long-term ideas.
+Living source of truth for Lakomics bugs, product work, cloud/mobile follow-ups, Collection/Works evolution, and long-term ideas.
+
+This backlog was reconciled on 2026-09-05 against:
+
+- the full repository audit snapshot taken from the real `C:\chatgpt` codebase and production databases;
+- `docs/agents/mobile-consumption-ux.md`;
+- `docs/agents/works-viewer-design.md`;
+- `docs/roadmap/works-collection-visual-redesign-plan.md`;
+- current code, schemas, ADRs, `CONTEXT.md`, and `DESIGN.md`.
+
+Current code and migrations remain authoritative for implemented behavior. Git history retains the old verbose completion notes; this file intentionally keeps completed work compact so stale historical text does not look executable.
 
 ## Status legend
 
 - `IN PROGRESS`: currently being implemented
-- `TODO`: planned work
-- `VERIFY`: implementation or behavior exists and still needs real-world verification
-- `HOLD`: long-term or intentionally deferred
-- `KEEP`: existing behavior is currently satisfactory
-- `DONE`: implemented and verified in code; production rollout may still be tracked separately
+- `PARTIAL`: useful implementation exists, but a material acceptance condition is still missing
+- `TODO`: planned executable work
+- `VERIFY`: implementation exists but still needs explicit real-world verification
+- `MERGE CANDIDATE`: real scope, but should be implemented as part of another listed batch rather than independently
+- `HOLD`: intentionally deferred or gated long-term work
+- `KEEP`: existing behavior is intentionally retained
+- `DONE`: implemented and sufficiently verified
+- `OBSOLETE`: superseded or incident-only work that should not be selected for implementation
 
-## P0 — immediate
+## Repository-wide execution rules
 
-### CLOUD-001 — Cloud Capture batch drain
-Status: `DONE`
+- Preserve existing user data and provider bindings.
+- Prefer additive, reversible changes over rewrites.
+- Do not rerun the completed full Cloud Library backfill unless a separately approved recovery operation requires it.
+- Do not replace `kdata.db` wholesale for catalog work.
+- Do not use frontend-only filtering where count/pagination correctness belongs in the Rust/SQLite query boundary.
+- Do not extend the browser-extension mobile prototype into the production Android architecture; native transport is the production destination.
+- Do not build a second Collection renderer for Shelf/Display mode; it must consume the normal presentation contract.
+- Do not copy GPL/AGPL reference source into Lakomics without an explicit license decision. Reimplement validated concepts.
+- Before each implementation batch, re-check Git status/diff and establish ownership of concurrent working-tree changes.
 
-- Drain multiple pending captures per poll instead of one successful capture per invocation.
-- Sequential processing only.
-- Safety cap: 25 attempted captures per invocation.
-- Preserve per-capture failure isolation, idempotency, ACK retry, ExactDuplicate ACK, and ReviewPending no-ACK behavior.
-- Return a batch summary instead of the old `Option<String>` result.
+---
 
-### CLOUD-004 — X videos fall back to local download instead of VPS Capture
-Status: `DONE`
+# P0 — correctness and operational truth
 
-Resolution:
-- The extension was short-circuiting to browser download whenever the active classification source was the local fallback tree.
-- Collector-enabled supported media now tries VPS Capture before that local-download fallback, and fallback diagnostics preserve the failure code.
+## CLOUD-006 — Full library cloud replication for mobile
 
-Observed behavior:
-- Saving X video on PC succeeds only as a browser/local-folder download.
-- The video is not being retained by the VPS Capture/R2 path.
-- Image Capture behavior must be tested separately; do not assume the same failure.
+Status: `PARTIAL`
 
-Current code behavior to verify:
-- The extension supports `video` as a Collector media type.
-- If the Collector request fails, the extension can fall back to browser download, which matches the visible symptom.
-- The VPS Capture path accepts only `video.twimg.com` HTTPS media URLs for video, requires `video/mp4`, downloads server-side, then uploads the temporary file to R2.
+The major feature is implemented and already proved against the real library:
 
-Investigation order:
-1. Capture the exact media payload sent by the extension for a failing X video without logging secrets.
-2. Confirm Collector settings/token/base URL are active on the failing browser profile.
-3. Inspect the HTTP status/body returned by `POST /v1/captures` before fallback.
-4. Inspect VPS logs for validation, X remote-fetch, timeout, size-limit, content-type, or R2 upload failures.
-5. Confirm whether a capture row and R2 object are created at all.
-6. Fix the root cause and preserve local download only as a genuine failure fallback.
+- prepare -> upload -> commit replication exists;
+- retries, reconciliation, incremental replication, mobile APIs, and media tickets exist;
+- the completed real-library backfill must not be rerun by default;
+- Galaxy Tab browsing from the server replica has been verified.
 
-Do not solve this by disabling fallback or extending timeouts blindly. Do not conflate this with CLOUD-003 long-video async handling unless evidence shows timeout duration is the actual cause.
+Remaining closure:
 
-### CLOUD-002 — Finish Cloud inbound app integration
-Status: `DONE`
+- a paused supervisor must never start a new queued replica cycle;
+- the current pause guard and regression test must be executed and verified in the real app;
+- an in-flight cycle may finish, but no next cycle may begin while paused;
+- paused state must survive restart with pending work unchanged;
+- Resume must process the existing queued work once without reseeding/full backfill.
 
-Implemented and verified in the current mainline product flow:
-- Settings exposes Cloud enablement, API base URL, Credential Manager-backed API token, connection test, and manual sync.
-- `classification_id` is carried from Capture pending records into `IngestMediaRequest`; nonexistent local IDs safely fall back to unclassified.
-- Inbound batch results distinguish new assets, video additions, classification-changing duplicates, and review-pending work so the frontend refreshes only what changed.
-- New inbound videos trigger the normal video preparation path.
-- Outbound `cloud_sync_queue` remains separate and unchanged.
+The repository-audit candidate `CLOUD-008` is absorbed into this item. Do not create a second long-lived Cloud pause feature after this closes.
 
-Verification:
-- Real X image and video flows have been verified end-to-end from the extension through VPS/R2 into the PC Lakomics library.
-- Selected classification membership is preserved and imported assets appear in the running UI without requiring an app restart.
-- CLOUD-002 inbound integration is complete.
+Acceptance:
 
-### CLOUD-005 — PC-independent saved-X-media snapshot
-Status: `DONE`
+- focused supervisor timer/control-state tests pass;
+- real pause -> wait -> restart -> resume passes with a queued item;
+- idle incremental replication still works automatically;
+- then return this item to `DONE`.
 
-Resolution / verified behavior:
-- The PC publishes a bounded saved-X-media snapshot to the Japanese VPS alongside the existing Cloud/Classification snapshot lifecycle (`PUT /v1/saved-x-media`), sharing the `<tweet_id>:<media_index>` identity instead of a second scheme.
-- Android/Collector reads the VPS snapshot first, falls back to a matching-base-url cloud cache, and merges bounded `recentBrowserSaves` so a just-saved item is marked immediately; the desktop saved-media index stays local and VPS-independent.
-- PC-off behavior was exercised for real: Android retained and used the cloud saved-X snapshot while the PC API was down, and captures saved during that window synced into the Lakomics library when the PC came back.
-- A video imported through that flow was initially blocked only by the video preparation bug (BUG-004) and reached `ready` after that fix.
+## BUG-013 — Asset viewer opens are never recorded
 
-### BUG-001 — Collection view shows an error toast on entry
-Status: `DONE`
-
-Observed behavior:
-- Collection view itself opens.
-- An error toast appears immediately after entering the collection viewer.
-
-Action:
-- Reproduce and identify the failing collection/work detail path.
-- Check DB/schema/migration state before changing UI behavior.
-
-### BUG-002 — Manga tab reports `망가 목록을 불러오지 못했습니다`
-Status: `DONE`
-
-Resolution:
-- Manga scanning no longer aborts when an unsupported AVIF thumbnail cannot be decoded.
-- Thumbnail generation is best-effort/fallback-safe so one unsupported thumbnail does not fail the entire manga list scan.
-
-### BUG-004 — Video preview preparation reliability
-Status: `DONE`
-
-Resolution:
-- Fixed the development StrictMode lifecycle bug that left the video preparation worker permanently inactive and videos stuck in `pending`.
-- Fixed the failed-video `다시 시도` button so pointer events no longer leak into tile drag/selection handling.
-- Fixed poster generation for ultra-short clips by choosing a duration-safe poster seek instead of always seeking to 500 ms.
-- Existing failed ultra-short videos were retried through the normal application UI and successfully prepared.
-- Real stuck `pending` video transitioned to `ready`; no production DB surgery was required.
-
-### BUG-005 — Manga collection viewer shows an unexpected error tooltip/toast on entry
-Status: `DONE`
-
-Resolution:
-- Re-tested in the real Tauri app with multiple manga collections covering normal MangaDex bindings, legacy bindings with `provider_data_json` NULL, large multi-volume collections, and the legacy `unlinked_*` sentinel case.
-- No unexpected toast reproduced. Both historical message classes were absent: "권별 표지를 불러오지 못했습니다." and "표지 N개를 불러오지 못했습니다. 다음 새로고침에서 다시 시도합니다."
-- Viewer navigation and content remained usable in every tested case, repeat entry stayed clean, and console errors were 0. No implementation change was required.
-- Strongest evidence-supported historical explanation: during the 2026-08-27~28 MangaDex cover-import/backfill window, collections could still contain MangaDex volumes with missing `cover_artwork_id`, so entry-time `syncMangaDexVolumeCovers` ran actual downloads and partial download failures could surface the `failed > 0` message repeatedly on entry. Before the BUG-001-era restructuring, provider sync also shared a broader try/error path, making the visible fallback more fragile. Current data has no MangaDex volume rows with missing `cover_artwork_id`, so that trigger no longer exists.
-- Retained structural observation (harmless today, not user-visible): many legacy MangaDex bindings have `provider_data_json` NULL, but `getMangaDexConnection` still returns a binding, so Collection entry can run `syncMangaDexVolumeCovers` followed by `listCollectionVolumes` even when no cover work is needed. Keep as a future provider-cleanup/performance candidate only if real latency or network churn becomes observable.
-
-### VERIFY-001 — X → VPS → PC end-to-end check
-Status: `DONE`
-
-Verification:
-- Real image and video saves from X were verified through VPS/R2 into the PC library.
-- Pending capture consumption, selected-classification preservation, and live UI refresh were confirmed in actual use.
-- End-to-end Cloud inbound verification is complete.
-
-## P1 — visible UX / usability
-
-### UI-004 — Remove rapid flashing during view transitions and previews
-Status: `DONE`
-
-Resolution:
-- Folder transitions (`9c19606`, `c0f7f6c`, `f7715ad`): no stale virtual rows, no giant blank virtual-space gap, no cross-folder asset leakage; destination opens at the top.
-- Gallery first-page replacement keeps last-valid content visible instead of flashing a skeleton (`5094c2e`); same-scope mutations preserve the viewport (`fe75db6`).
-- AssetViewer image swaps go through StableImage, and gallery height is bounded by the workspace (`f7715ad`), so no media/layout flash was reproducible in the remaining transitions.
-- Verified on the running Tauri app across folder switches, viewer navigation, and top-level destination tabs; no blank-frame, layout-collapse, or stale-row flashes remain in these paths.
-
-### UI-007 — Video viewer controls
-Status: `DONE`
-
-Resolution:
-- Implemented in `8486552` (`fix: stabilize viewer transitions and navigation`): absolute overlay controls that do not reflow the video, a timeline that consumes the full control width, idle auto-hide (`CONTROLS_IDLE_MS`) while playing, immediate restore on pointer movement, and retained visibility while paused, scrubbing, interacting with volume, or focusing controls.
-- Fullscreen and AssetViewer left/right navigation and shortcuts remain working.
-- Focused VideoPlayer tests pass; behavior re-verified in real use on the running Tauri app.
-
-### BUG-003 — X video drag-save shows blue selection highlight on PC
-Status: `DONE`
-
-Observed behavior:
-- On PC, dragging the pointer over an X video to invoke the extension save interaction can produce a blue browser selection highlight.
-- The video save itself succeeds; this is a visual/input-side artifact only.
-
-Clarification:
-- This historical BUG-003 has always referred to the browser/X extension drag gesture, not to selecting video assets inside the Lakomics gallery.
-- The separate gallery video-selection / preview-interaction problem is tracked as BUG-009 below.
-
-Direction:
-- Prevent native text/media selection only for the active drag/gesture surface used by the extension.
-- Prefer scoped `user-select: none`, selection clearing, or pointer-event handling during the gesture rather than disabling browser selection globally.
-- Do not change the working video save path.
-
-2026-09-04 investigation + scoped fix (uncommitted, needs real-X confirmation):
-- Root cause: video save gestures resolve from up to 4 ancestor levels (`findVideoElement` in `x-source.js`), so a press often starts on selectable post text, while image gestures require pressing directly on the `<img>`. Mouse `pointerdown` is never preventDefaulted and mouse `selectstart` was never suppressed (`onSelectStart` in `extension/src/content.js` only guarded touch gestures), so a native selection starts in the first 12px and persists through the gesture. Nothing ever clears it.
-- Fix: `onSelectStart` now also suppresses while any pointer save-session is active (`extension/src/content.js`, one condition). Stateless cleanup — release/cancel/Escape paths already null the session, so normal page selection resumes automatically. No global CSS, no drag-threshold or trigger changes, no save-path changes.
-- Regression: new `extension/tests/content-select-guard.test.mjs` drives the real installed listeners with a stub document (suppressed during session, restored after up/cancel, untouched with no session). Extension suite 233 passed / 0 failed.
-- Runtime checklist (real X, desktop Chrome/Edge): video save shows no blue highlight (also try starting the press on post text and dragging slightly first); image save unchanged; page scroll/selection/controls normal outside the gesture; no stuck state after cancel/Escape.
-- 2026-09-04 real-X desktop verification passed: video drag-save no longer produces the blue native selection highlight; image save and normal page selection/controls remain unchanged; cancel/Escape leaves no stuck selection guard. Closed as `DONE`.
-
-### BUG-006 — Sidebar asset counts stay stale after drag-and-drop move
-Status: `DONE`
-
-Resolution:
-- `App.tsx`'s `performInternalDrop` refreshed the gallery after a successful classification drop but did not refresh the sidebar membership/count state.
-- Classification counts come from the authoritative `gateway.listClassifications()` response and count direct normal-asset membership rather than recursive descendants.
-- Classification drag/drop is a move: existing classification memberships are replaced by the destination classification. Album drops remain add-only.
-- Successful drops now call `refreshMembershipCounts()` once in addition to the existing gallery refresh, updating source/destination counts without manual counter patches or refresh storms.
-- Commit: `cd6077a` (`fix: refresh sidebar counts after asset moves`).
-- Verified in real use.
-
-### BUG-007 — Asset/library mutations reset the current gallery scroll position
-Status: `DONE`
-
-Resolution:
-- Same-scope asset mutations were already preserving gallery scroll because `refreshVersion` / `retryVersion` do not change the logical `queryKey` / `scopeKey`.
-- The actual bug was `ClassificationSidebar.remove()`: deleting any sidebar folder unconditionally navigated to its parent even when the deleted folder was unrelated to the current view.
-- That unintended navigation changed scope and therefore triggered the gallery's legitimate scope-reset behavior.
-- Sidebar deletion now navigates only when the deleted classification is the active view (or active root); unrelated deletions keep the current view and viewport intact.
-- Genuine scope changes and sort/filter changes still reset to the top as intended.
-- Commit: `fe75db6` (`fix: preserve gallery position across asset mutations`).
-- Verified in real use.
-
-### NAV-001 — Unify back-navigation behavior
-Status: `DONE`
-
-Resolution:
-- Architecture from `8486552` is in place and runtime-verified: `BackNavigationProvider` with priority-ordered handlers, shared `Dialog` redirecting Escape through `requestBack` at dialog priority (100), `useDesktopInteractions` routing Mouse Button 4 through the same path, and the App view history fallback.
-- Priority holds: topmost overlay/Dialog closes first, then nested detail, then previous app view; root is a safe no-op.
-- Remaining local Escape handlers (gallery selection clear, sidebar inline editor cancel, CollectionOverlay/Settings/SimilarityReview exits) are intentionally local to their surfaces and guard against overlapping layers; they do not bypass or conflict with the shared chain.
-- Focused BackNavigation / useDesktopInteractions / App suites pass; behavior re-verified in real use on the running Tauri app.
-
-### UX-009 — Loading, error, retry, and tooltip consistency
-Status: `DONE`
-
-Resolution:
-- Audited the high-use surfaces (AssetBrowser/AssetViewer, collection views, manga/catalog views, settings/cloud surfaces) against the shared Button/Dialog/Toast/EmptyState/Skeleton/StableImage components.
-- Already satisfied by accumulated work: blocking Skeleton only on initial load with no previous content; last-valid content preserved during same-scope refreshes and pagination; recoverable next/previous page failures show a Toast plus retry while keeping content; fatal failures show EmptyState with retry; catalog errors go through `commandErrorMessage` without exposing secrets.
-- All icon-only buttons carry `aria-label`s; icon-only buttons without labels were audited and none remain in high-use surfaces.
-- Request-scoped guards in the online catalog prevent stale responses and duplicate retries (buttons disabled while in-flight).
-- No remaining inconsistencies found in the prioritized surfaces; focused and full suites pass, and behavior was re-verified in real use on the running Tauri app.
-
-### UI-006 — Easier asset selection clearing
-Status: `DONE`
-
-Current behavior:
-- Selection is mainly cleared through the bottom X control.
-
-Improve with:
-- Clicking empty gallery/sidebar space clears selection where it does not conflict with navigation.
-- Consider right-click to clear selection only if it does not conflict with current/future context menus.
-- Keep the explicit X button.
-
-### UI-005 — Collection cover aspect ratio / crop handling
-Status: `DONE`
-
-Problem:
-- User-selected collection covers are slightly cropped.
-
-Direction:
-- Reconsider fixed aspect ratios and unconditional `object-fit: cover`.
-- Preserve book/manga covers and other source artwork more faithfully.
-- Prefer `contain` or reduced crop where appropriate.
-- Keep the original user-selected artwork untouched; change presentation only.
-- Reuse consistent cover presentation rules across list/detail/showcase views.
-
-### UI-001 — Move Similarity Review to the management section
-Status: `DONE`
-
-- Move `유사 검토` out of the main quick-view group.
-- Place it in the lower management area near Trash/Settings.
-- Preserve count and routing behavior.
-
-### UI-003 — Use a standard scrollbar in the asset repository
-Status: `DONE`
-
-Observed behavior:
-- The Asset Repository currently shows the legacy Codex-style/custom scrollbar and the native/default scrollbar at the same time.
-
-Direction:
-- Remove the special/custom scrollbar styling for the asset repository.
-- Ensure the repository has one intended scroll owner rather than nested overflow surfaces producing duplicate scrollbars.
-- Use a normal OS/browser-like scrollbar.
-- Do not change virtualization or scroll behavior.
-
-### BUG-008 — Blue page-edge highlight in catalog double-page viewer
-Status: `DONE`
-
-Resolution:
-- The blue edge was consistent with focus reaching the transparent pointer-only page-edge navigation buttons rather than an intentional spread divider.
-- `6f22b5d` (`fix: stabilize viewer transitions and navigation`) replaced those edge-navigation buttons with `aria-hidden` non-focusable pointer surfaces while keeping the real toolbar Previous/Next buttons keyboard-accessible.
-- `PageViewer.test.tsx` explicitly verifies that clicking `.manga-viewer__edge` changes page without leaving keyboard focus on the edge surface.
-- Current source therefore no longer has the focusable edge control that could draw the reported native blue outline.
-
-### BUG-009 — Video preview interaction interferes with asset selection
-Status: `DONE`
-
-Observed behavior:
-- In the Asset Repository, video assets can be difficult or impossible to select for normal Ctrl/Shift multi-selection because the video preview/scrub interaction appears to win over the tile-selection gesture.
-- This is separate from BUG-003, which is an X/browser extension drag-selection artifact.
-
-Implemented in PC Core Polish Pass 1:
-- Active hover-preview `<video>` elements no longer receive pointer events or native drag gestures; ordinary pointer input continues to land on the parent asset tile just like image tiles.
-- The dedicated scrub control remains interactive and keeps its scoped pointer capture/propagation behavior.
-- Regression coverage activates a real video hover preview, clicks through it with Ctrl selection, and verifies that the normal `AssetGallery` selection gesture is emitted.
-
-Runtime verification:
-- Real Tauri use passed ordinary video-tile click, Ctrl/Cmd toggle, Shift range selection, selected-set drag, hover playback, and intentional scrub seeking together on real videos.
-- The follow-up selection styling and hover-only thumbnail scrub affordance were also accepted in real use.
-
-### BUG-010 — Online manga catalog shows impossible future modified dates
-Status: `DONE`
-
-Observed behavior:
-- Online manga catalog detail can display `수정일` around tens of thousands of years in the future (roughly the 50,000-year range).
-
-Implemented in PC Core Polish Pass 1:
-- Legacy catalog timestamps are normalized to Unix seconds at the provider ingestion boundary instead of applying a display-only year clamp.
-- Seconds remain unchanged; millisecond/microsecond-style legacy values are reduced to the canonical seconds unit before storage.
-- Search/detail reads also normalize existing catalog rows, so already-imported malformed timestamps can display correctly without a catalog reimport.
-- Rust regression coverage verifies both new remote-page normalization and compatibility reads from an existing millisecond-valued catalog row.
-
-Runtime verification:
-- Previously affected real online-catalog work now renders both `게시일` and `수정일` as normal calendar dates in the running Tauri app.
-
-### BUG-011 — Internal asset drag-out re-entry shows external import overlay
-Status: `DONE`
-
-Observed behavior:
-- Dragging a Lakomics asset out toward another application and then moving the same still-held drag back over Lakomics shows the external-file `여기에 놓아 추가` overlay.
-- An asset already owned by the current library should not be presented as a new import candidate during that drag.
-
-Implemented in PC Core Polish Pass 1:
-- `useFileDrop` now classifies paths on native `enter` and remembers whether the current drag contains any genuinely external path.
-- Subsequent path-less `over` events reuse that decision, so a Lakomics-owned drag does not suddenly acquire the external-import overlay on re-entry.
-- The final drop-side library-root filter remains intact, and mixed internal/external drags still show the overlay while ingesting only external paths.
-- Regression tests cover both library-only re-entry and mixed-path drag behavior.
-
-Runtime verification:
-- Real Tauri drag-out/re-entry keeps the external import overlay hidden for Lakomics-owned assets while genuine external files still show the overlay and import normally.
-- The follow-up re-entry path also restores sidebar folder drop targets so a still-held native asset drag can be dropped back into a Lakomics folder.
-
-
-### UI-010 — Richer video previews in the Asset Repository
-Status: `DONE`
-
-Goal:
-- Make video assets readable at a glance more like image assets, without requiring the full viewer just to understand what a clip contains.
-
-Direction:
-- Keep an immediate poster/thumbnail, then add a lightweight hover-motion or scrub-preview experience where useful.
-- Prefer reusable preview derivatives or cached frames over repeatedly decoding full originals.
-- Coordinate with `PERF-001` for preview cache bounds, derivative reuse, CPU/memory cost, and disk growth.
-- Preserve the selection/drag behavior fixed under BUG-009; preview media must not steal ordinary tile pointer input.
-- Measure cold/warm preview latency before choosing a preview format or generation policy, and avoid destructive original-media transcoding.
-
-2026-09-04 implementation:
-- Reused already-prepared scrub frames for a lightweight hover-motion preview instead of attaching the original video on hover.
-- Only attach the real `<video>` after explicit timeline/keyboard interaction, keeping ordinary tile selection and drag behavior on the tile.
-- Hover activation keeps only one active preview and cleans up frame timers on leave/unmount.
-- Focused regression coverage passed for `VideoTileMedia` and `AssetGallery`; production frontend build passed.
-
-### BUG-012 — Asset Repository scrollbar/thumb jumps upward while scrolling
-Status: `DONE`
-
-Observed behavior:
-- While scrolling a large Asset Repository view, the scrollbar/thumb can suddenly jump noticeably upward, making the current position feel unstable even when the user is continuing in the same direction.
-
-Direction:
-- Reproduce in long real classifications and determine whether the actual viewport offset moves or only the scrollbar's virtual total-size/thumb mapping changes.
-- Inspect virtualizer estimate/measurement changes, asynchronous image/video sizing, preview activation, grid-column changes, and scroll-owner nesting.
-- Keep the existing virtualization model; fix the source of unstable measurement/scroll range rather than masking it with arbitrary clamps.
-- Verify stable scrollbar motion during long continuous scrolling, media loading, hover video preview, and resize without reintroducing stale rows or giant blank gaps.
-
-2026-09-04 implementation checkpoint:
-- Disabled browser-native scroll anchoring on the Asset Repository scroll owner and virtual space so the browser does not independently compensate while the virtualizer mounts/unmounts rows.
-- Existing virtualizer ownership, paging, selection, and DOM-bounds tests remain green.
-- Keep this item in `VERIFY` until a long real-library Tauri scroll confirms that the original upward thumb/viewport jump is gone.
-
-2026-09-04 follow-up inspection (static, no runtime):
-- Row geometry is fully data-driven: `buildJustifiedRows` computes every row height from asset width/height metadata, the virtualizer uses those exact heights with no DOM re-measurement, tiles render at fixed heights inside `overflow: hidden`, and row chunking is prefix-stable when pages append (new regression test locks this).
-- One concrete residual cause found and fixed: the scroll container used classic layout scrollbars with no reserved gutter, so the scrollbar appearing/disappearing changed `clientWidth`, re-justified every row, and shifted the scroll range. Added `scrollbar-gutter: stable` to `.asset-gallery__scroll` (not a clamp; removes a measurement feedback loop).
-- Video hover preview cannot move rows: it swaps same-box image sources inside fixed-height clipped tiles, and only one preview is active at a time.
-- No change to virtualization, paging, selection, or prepend compensation.
-
-Manual verification checklist (real Tauri, long library):
-1. Scroll continuously down 8k+ assets: no upward thumb/viewport jump, no giant blanks, no stale rows.
-2. Scroll continuously back up through async-loaded thumbnails: same stability.
-3. Hover video tiles while scrolling: previews activate without moving the viewport.
-4. Resize the window mid-list: content may re-justify (expected) but must not jump upward on its own.
-5. Confirm pages load at the bottom/top without viewport repositioning.
-- All five passed on 2026-09-04 in the real Tauri app against the large library (plus overlay checks: 32px+ thumb, jump-free drag, ratio track-click, wheel over strip). Marked `DONE`.
-
-2026-09-04 runtime finding + root-cause fix (uncommitted verification, needs app restart):
-- Real-runtime report: viewport stays stable, but the scrollbar thumb still jumps upward while dragging down. Row geometry, anchoring, and prepend compensation are all stable, so the remaining cause is pagination itself: 100-item pages grow the virtual total on every append (80+ growth events across 8k assets), and each growth shrinks/repositions the thumb mid-drag.
-- Fix: `list_assets` now returns `total_count` for the full filtered set (one shared `ASSET_COUNT_SQL` mirroring the list predicates; all sorts, both directions, anchored windows), and the gallery reserves the estimated full range up front from measured row averages. Appends then fill reserved space instead of growing it, with an offset-based prefetch trigger so deep drags keep loading. No clamps; once fully loaded the measured size is exact again.
-- Rust coverage: total matches filtered length across sorts/filters/pages/windows. Frontend coverage: reservation height, measured-only fallback without a total, deep-scroll prefetch, browser wiring.
-- Re-verify items 1-6 above after restarting the app (Rust change requires rebuild); then mark `DONE`.
-
-2026-09-04 usability follow-up (custom overlay scrollbar, same item):
-- Full-range reservation works (jumps reduced) but the proportional native thumb shrinks to the ~17px engine minimum on 8k-scale lists, which is hard to grab. Author `min-height` on `::-webkit-scrollbar-thumb` is ignored by Chromium, so CSS cannot floor it.
-- Decision: keep reservation + native scroll ownership (wheel/touch/keyboard/programmatic behavior unchanged) and draw a visual-only overlay scrollbar with a real 32px minimum thumb. Thumb position = scrollTop/maxScroll over the reserved range; drag maps back to scrollTop; track click jumps to the ratio position.
-- Regression coverage: 32px floor, position tracking, drag mapping, track-click jump, hidden-when-fits, and thumb steadiness across appends at a fixed offset.
-- Runtime follow-ups fixed the same day: (1) a hidden-attribute latch-up hid the overlay forever when the first paint ran before styles applied — now uses visibility so later scrolls/resizes always recover; (2) pointer capture was set on the scroll container instead of the thumb, so the first drag's release was missed and later hovers kept scrolling — capture is on the thumb now, releases outside also clear via window listeners, and unpressed mouse moves never scroll; (3) the overlay gets a dedicated 18px gutter (`--gallery-scrollbar-width`) so tiles never slide under it.
-- Re-verify with HMR or a window refresh (frontend-only change); then mark `DONE` if items 1-6 pass.
-
-2026-09-04 code-review follow-ups (same item, all implemented + covered):
-- Overlay strip forwards wheel input to the scroll container (the sibling strip otherwise swallows it); thumb drag requires the primary button; thumb has `touch-action: none` so touch drags work.
-- Estimate base is keyed by scope (no stale aspect sample across scopes); non-finite totals fall back to measured; scroll-restore retries once the reserved range covers a clamped offset.
-- `total_count` parity is now asserted across the full filter matrix (media/aspect/creator/direct/scope/album/collection/favorite/unclassified/range) in addition to sorts and anchor/before windows.
-- Removed dead gallery scrollbar CSS (old webkit sizing, overridden thin/color rules) and fixed the stale gutter comment. Per-page `COUNT(*)` cost stays as-is until measured otherwise.
-
-2026-09-04 final runtime verification (real Tauri app, large library): PASSED.
-- Overlay visible with 32px+ grabbable thumb in the dedicated gutter; thumb drag scrolls without upward jumps; track click jumps to the ratio position; wheel over the strip scrolls; items 1-6 of the checklist hold with no blanks, stale rows, or viewport repositioning.
-- A mid-pass black screen was traced to HMR-poisoned modules in the long-lived dev session, not to the changes; a clean `npm run tauri -- dev` relaunch renders normally. No code change for it.
-- Item stays `DONE`.
-
-## P2 — architecture / larger feature work
-
-### CATALOG-001 — Move fragile k-hentai transport behind the Japanese VPS
-Status: `DONE`
-
-Current issue:
-- Online catalog transport depends on direct PC access to `k-hentai.org`, historically through a hidden WebView2 and gallery resolver paths that are unreliable on Korean networks.
-
-Current Phase 1 direction:
-- Keep the existing VCK/k-hentai catalog DB and work IDs intact.
-- Route only the fragile k-hentai search-page and gallery HTML transport through a narrow authenticated API on the Japanese VPS.
-- Keep search/detail/bookmarks/progress local where possible.
-- Do not introduce a schema migration only for this transport change.
-- Keep direct signed image/CDN page loading on the PC unless evidence shows it also needs proxying.
-
-Current checkpoint:
-- PC catalog update traffic now uses the authenticated Japanese VPS API instead of sending the upstream k-hentai `/ajax/search` path directly to the VPS.
-- `/v1/catalog/search-page(?cursor=N)` is implemented on the VPS boundary and maps internally to the existing Korean k-hentai search query.
-- Upstream HTTP/network failures are normalized so transport failures return meaningful 502 behavior instead of raw FastAPI 500/NameError failures.
-- Server and Rust regression tests cover the VPS route contract, cursor behavior, network normalization, and retries.
-- The corrected server implementation has already been deployed to the Japanese VPS; `/health` returned 200 and the catalog endpoint returned the expected 401 when called without authentication.
-- The catalog implementation has now been integrated into main.
-
-Verification:
-- Real application use has been verified after integration; the Japanese VPS catalog transport is working in normal use.
-- CATALOG-001 Phase 1 is complete.
-
-Heliotrope:
-- Do not force Heliotrope into Phase 1 because Hitomi IDs and VCK/k-hentai IDs are different.
-- Treat Heliotrope as a later provider rather than a drop-in replacement.
-
-### CATALOG-003 — Add Japanese-language works to the online catalog
 Status: `TODO`
+Priority: P1 correctness prerequisite, schedule immediately after CLOUD-006 closure.
 
-Prerequisite:
-- CATALOG-001 is DONE; Japanese-language ingestion can build on the existing verified VPS transport boundary.
+Evidence:
+
+- `recordAssetOpened` exists through gateway, Tauri, Rust, schema, and tests;
+- production viewer code has no caller;
+- the audited live `asset_activity` rows had exposure history but zero recorded opens.
 
 Goal:
-- Extend the current Korean-only k-hentai/VCK catalog ingestion so Japanese-language originals can also be discovered and updated in Lakomics.
+
+- record one open per active asset transition in the full Asset Viewer;
+- count initial viewer entry and next/previous/sibling navigation;
+- do not count hover, selection, thumbnail visibility, preload, or Inspector-only interaction;
+- deduplicate StrictMode/rerenders within one uninterrupted viewer session;
+- close/reopen of the same asset is a new deliberate open;
+- telemetry failure must never block viewer rendering.
+
+No migration is required. Do not fabricate historical open data.
+
+This is a prerequisite for activity-based `STATS-001B` and `IDEA-001` scoring.
+
+## CLOUD-UI-001 — Durable Cloud status, diagnostics, and problem surface
+
+Status: `PARTIAL`
+
+Already present:
+
+- Cloud enablement/base URL/token status;
+- connection test;
+- manual inbound sync;
+- recovery/backfill controls;
+- transient manual result summaries.
+
+Missing:
+
+- durable last attempt;
+- durable last success independent of later failure;
+- sanitized last error;
+- persisted last processed summary;
+- current combined actionable problem count;
+- conditional `동기화 문제 N` navigation into the existing Cloud Settings/recovery surface.
 
 Direction:
-- Preserve the current Korean query behavior while adding `language:japanese` as an additional supported catalog source/filter.
-- Prefer an explicit language filter such as Korean / Japanese / both rather than silently changing the meaning of the existing Korean catalog view.
-- Keep the same VPS transport boundary; the PC should request Lakomics VPS catalog endpoints, and the VPS should translate those requests to the appropriate k-hentai language query.
-- Define how Korean translations and Japanese originals of the same underlying work are presented before adding any automatic grouping or deduplication.
-- Do not require Heliotrope for this feature; implement it against the existing k-hentai/VCK path first if practical.
 
-### CATALOG-004 — Advanced VCK-style catalog search syntax
+- extend the existing local settings/status boundary rather than create a second diagnostics service;
+- persist only sanitized public errors, never tokens, signed URLs, object keys, or local paths;
+- reuse the existing supervisor polling cadence rather than add another timer.
+
+Prerequisite: close the CLOUD-006 pause semantics first.
+
+---
+
+# P1 — Online Manga Catalog lane
+
+## CATALOG-002A — Provider-aware identity contract
+
+Parent item: legacy `CATALOG-002`
 Status: `TODO`
 
 Goal:
-- Upgrade the current simple title / single `namespace:value` catalog search into a composable query language based on useful VCK behavior.
 
-Initial syntax target:
-- quoted values such as `artist:"two words"`
-- namespace filters and aliases such as `artist:`, `series:`, `character:`, `language:`
-- explicit work lookup with `id:12345` and compatible bare-id lookup if useful
-- page-count comparisons such as `page>20`, `page<=100`
-- negation such as `-female:tag`
-- grouping and boolean operators such as `(artist:a or artist:b) -female:c`
-- implicit AND for adjacent terms
+- make every public catalog identity explicitly `(provider, provider_work_id)` before persistent grouping or a second provider;
+- keep the existing VCK/kHentai catalog database and numeric IDs unchanged internally;
+- preserve existing bookmarks and reading progress, which are already provider-namespaced;
+- legacy state without provider defaults to kHentai;
+- do not introduce a generic plugin system.
 
-Direction:
-- Parse into a small AST and compile to parameterized local SQLite queries; do not concatenate raw user input into SQL.
-- Preserve the existing simple-search behavior as a valid subset.
-- Use `reference/VCK-0.1.0-win-x64/resources/app/dist/search/query.js` and `dialects.js` as read-only behavioral references rather than copying bundled code blindly.
-- Keep provider transport concerns separate from query parsing.
-- Follow-up candidates after the core grammar is stable: favorite tags, always-excluded tags, and contextual autocomplete counts based on the current query.
+This is the prerequisite for provider-safe groups and Heliotrope coexistence.
 
-### CATALOG-005 ? Category visibility and search filters
-Status: `TODO`
+## CATALOG-003 — Independent Japanese-language source
 
-Goal:
-- Let the user choose which catalog categories are visible and searchable instead of treating every upstream category as equally relevant.
+Status: `PARTIAL`
 
-Direction:
-- Use the actual category values present in the catalog/source schema; do not invent unsupported category names.
-- Persist default category visibility in Settings.
-- Normal catalog browsing/search respects those defaults, with an optional temporary per-search override when useful.
-- Filtering is presentation/query behavior only; do not delete catalog rows.
+Already present:
 
-### CATALOG-006 ? Blocked / excluded catalog tags
-Status: `TODO`
+- language tags;
+- Japanese tag display/filter primitives.
 
-Goal:
-- Let the user register disliked tags so matching catalog works are hidden by default.
+Missing:
+
+- a genuinely independent Japanese ingestion stream;
+- per-provider/per-language cursor or watermark state;
+- a Japanese initial crawl that does not reuse the Korean global max-ID gate;
+- separate status/recovery for Korean and Japanese streams.
 
 Direction:
-- Keep blocked-tag state as user preference/filter metadata; never delete source catalog data.
-- Support explicit reveal/temporary override so hidden results can still be inspected when needed.
-- Respect real tag namespaces/classes from the catalog schema (artist/group/parody/character/etc.).
-- Leave room for a later preferred-tag ranking boost without coupling it to blocking.
 
-### CATALOG-007 ? Duplicate-work grouping and representative ranking
+- allowlist `korean` and `japanese` on the existing authenticated VPS transport;
+- keep Korean as the default scope;
+- transactionally upsert every returned Japanese work/tag during the first pass, including IDs lower than the Korean max;
+- advance a language checkpoint only after its page commits;
+- use bounded canary pages and a verified `kdata.db` backup before a broad initial crawl;
+- never replace the catalog wholesale.
+
+Prerequisite: CATALOG-002A.
+
+## CATALOG-004 — Advanced VCK-style query language + result hydration fix
+
+Status: `PARTIAL`
+
+Current implementation already supports plain title text and one exact `namespace:value` form.
+
+Target grammar is deliberately bounded:
+
+- plain and quoted title terms;
+- `namespace:value`;
+- unary `-` / `NOT`;
+- explicit `AND` / `OR`;
+- parentheses;
+- implicit AND between adjacent primaries;
+- `id:<value>`;
+- `category:<alias-or-code>`;
+- `uploader:<value>`;
+- `pages`, `pages>`, `pages>=`, `pages<`, `pages<=`.
+
+Implementation:
+
+- small Rust tokenizer/parser/AST/compiler adjacent to the current catalog query code;
+- precedence: NOT > AND/implicit AND > OR;
+- bound parameters only; user values are never interpolated into SQL;
+- keep provider, language, expunged, category policy, and blocked-tag policy outside user syntax as mandatory/default predicates;
+- structured syntax errors must preserve the previous valid result set in the UI.
+
+Performance scope folded into this item:
+
+- replace current per-result artist/series `tags_for()` calls with one bounded bulk tag hydration query for the page;
+- this absorbs the audit candidate `PERF-004`; do not create a separate performance project for the same query surface;
+- measure before adding FTS5 or temporary hit tables.
+
+Prerequisite: CATALOG-002A. CATALOG-003 may proceed independently after that contract.
+
+## CATALOG-005 + CATALOG-006 — Catalog visibility/block policy
+
+Status: `MERGE CANDIDATE`
+Execute as one implementation batch after CATALOG-004.
+
+One persistent policy must cover:
+
+- hidden categories;
+- exact blocked `(namespace, value)` tags;
+- temporary `reveal blocked` override;
+- one Settings management surface;
+- identical predicates in result and count queries;
+- future group representatives chosen only from visible members.
+
+Persistence belongs in additive `library.sqlite` preference tables so existing metadata backup/restore protects it.
+
+Do not implement either feature as post-pagination React filtering.
+
+## CATALOG-007A — Strong-lineage duplicate groups
+
+Parent item: legacy `CATALOG-007`
 Status: `TODO`
 
 Goal:
-- Fold multiple uploads/editions of the same underlying work into a single browse result while preserving every catalog record.
 
-Direction:
-- Never delete duplicates; expose a representative card with an expandable `?? N?` group.
-- Rank representatives conservatively by preferred language, completeness/page count, popularity/views, then recency.
-- Preferred language outranks raw page count: e.g. a 41-page Korean translation may remain representative over a 42-page Japanese original when Korean is preferred.
-- Use strong identity/lineage signals first, then normalized title + artist/group + series/character/tag similarity + page-count proximity; auto-fold only high-confidence matches.
-- Reuse MANGA-001 lineage/ranking logic where compatible.
+- materialize only high-confidence provider-safe lineage groups first;
+- result cardinality and pagination operate on groups/singletons, not raw rows folded in React;
+- return representative + stable group ID + version count;
+- every edition remains accessible;
+- no provider work is deleted or irreversibly merged.
 
-### MANGA-001 — Recover orphaned local manga into online catalog bookmarks
-Status: `DONE`
+Representative ranking must consider:
 
-Problem:
-- Local manga source files can disappear while `manga_series` metadata still survives in `library.sqlite` and metadata backups.
-- Before the MANGA-001 safety change, the scanner hard-deleted DB rows for paths not seen under a valid manga root, so pointing Lakomics at a new/empty root could destroy the remaining metadata index.
-- Manga Browser loads cached series and then automatically starts a refresh scan whenever a manga root is configured.
+- manual representative when present;
+- preferred language;
+- current visibility/block policy;
+- completeness/thumb availability;
+- deterministic lineage/current-edition signal;
+- deterministic tie-break.
 
-2026-09-04 implementation checkpoint:
-- Schema 32 adds `manga_catalog_recovery_links` so migration-created relationships are auditable and reruns can distinguish bookmarks created by recovery from pre-existing bookmarks.
-- Manga scanning no longer hard-deletes DB rows merely because a source folder is missing; orphaned metadata remains available for recovery.
-- Added a non-mutating preview that classifies direct `gallery_id -> Works.Id` matches as exact-active, historical/expunged, or fallback and reports existing bookmark state.
-- Added an explicit apply action for exact-active matches only. It is transactional/idempotent, preserves pre-existing bookmarks, and records whether each bookmark was created by recovery.
-- Manga Browser exposes the preview counts and only enables bulk apply for exact-active items that are not already bookmarked. Historical and fallback items remain untouched.
-- Rust coverage locks orphan preservation, exact/historical/fallback classification, idempotent apply, and v31 -> v32 migration; Manga Browser recovery UI coverage passes.
+Prerequisites: CATALOG-002A, CATALOG-003, CATALOG-004, CATALOG-005/006.
 
-Remaining:
-- Resolve historical/expunged items to an active edition where possible.
-- Add targeted VPS-backed lookup/candidate review for the 17 fallback rows; never auto-confirm from title similarity alone.
-- Add read-only selected-backup ingestion only if current DB metadata is insufficient; do not require whole-DB restore.
+## CATALOG-007B — Reviewed heuristic duplicate groups
 
-2026-09-04 fallback-phase implementation:
-- Preview now attaches a deterministic lineage suggestion to historical items (`CurrentGid` -> `FirstGid` -> `ParentGid`, each required to resolve to an active `Expunged = 0` work; otherwise the item stays review-only) with old ID -> proposed active ID, reason, and title.
-- Preview now attaches up to 3 ranked fallback candidates with reasons and confidence: exact numeric-ID hits and 3-signal (artist + pages + title) matches are `suggested`, 2-signal matches are `review`, single-signal (including title-only) matches are excluded entirely.
-- New explicit `apply_manga_catalog_recovery_selection` command bookmarks only preview-validated (manga, work) pairs, transactionally and idempotently, recording `historical_lineage` / `candidate_review` in `manga_catalog_recovery_links`. Exact-active bulk apply is unchanged.
-- Manga Browser shows lineage suggestions and candidate lists with per-item registration; nothing auto-applies.
-- Rust coverage: lineage suggestion/unresolved stays review-only, selection apply + idempotency + rejection of unreviewed/inactive targets, candidate ranking + single-signal exclusion, mapping recording, numeric-ID recovery. Manga Browser UI coverage passes.
-- No catalog reimport is required. After the user explicitly transfers a recovered work into catalog bookmarks, its consumed `manga_series` row is removed so it no longer appears in the Local view; unresolved/local-only rows remain untouched.
+Status: `TODO`
+Prerequisite: CATALOG-007A.
 
-2026-09-04 catalog-first UX + consumed-local cleanup:
-- Manga now opens the online catalog by default; Local is secondary and is scanned only when entered.
-- Source controls are ordered `카탈로그/북마크` then `로컬`. The first control toggles Catalog <-> Bookmarks with one click; the separate bookmark-scope icon/menu is removed.
-- Exact or explicitly reviewed recovery apply now creates/preserves the catalog bookmark + audit link and removes only the successfully consumed `manga_series` row transactionally, so migrated works disappear from Local immediately. Unresolved and self-translated/local-only rows remain.
-- 2026-09-04 regression fix: schema 33 records the consumed `source_relative_path` in the recovery audit. Local scanning permanently skips those transferred folders, and legacy schema-32 audit rows are reconciled against re-indexed exact/lineage/review candidates before stale `manga_series` rows are removed. `listMangaSeries` performs this repair before returning cached Local results, preventing transferred works from flashing back into the Local view.
+After lineage groups are stable, add a bounded review candidate system using combinations such as normalized title + artist/group + compatible category/page/language evidence.
 
-2026-09-04 targeted remote lookup implementation:
-- Recovery preview now offers an explicit `원격 ID 확인` action only for fallback rows that still have a positive numeric gallery ID missing from the local catalog.
-- The lookup reuses the existing authenticated Japanese VPS `/v1/catalog/search-page` boundary with exclusive `next-id = gallery_id + 1`, then imports only the exact requested work if that ID is present. Neighboring page results are never persisted by this recovery path, and the normal catalog-update checkpoint is preserved.
-- Missing remote IDs are a valid outcome, not an error: self-translated/local-only works, rows without a usable ID, and IDs not present in the current Korean catalog remain unresolved and are never force-matched from title similarity.
-- After an exact remote import the ordinary preview is recomputed, so the item becomes exact-active or historical and continues through the existing safe apply/review flow.
-- Selected metadata-backup ingestion is not required for the current incident: the audited backups contain the same 243 rows / 232 gallery IDs as the current DB, so no additional identity signal is available there.
-- Added Rust coverage for numeric-only remote lookup selection and exact-only targeted import with checkpoint preservation; Manga Browser coverage locks the no-match/self-translation behavior.
+Requirements:
 
-Verification:
-- Real catalog/recovery flow was verified in the Tauri app on 2026-09-04; catalog browsing and migrated-bookmark behavior worked as expected.
-- Scanner regression coverage now locks permanent suppression of transferred source paths and one-time repair of pre-schema-33 recovery audit rows.
+- title alone is never automatic identity;
+- explicit confirm / false-positive / split decisions;
+- manual decisions survive group rebuilds/algorithm versions;
+- canary review before enabling broader candidate generation.
 
-2026-09-03 read-only live-library audit:
-- The current DB still contains 243 `manga_series` rows even though the configured manga root no longer exists; no original series folders or `.lakomics-thumbs` survive.
-- 232 rows have a numeric `gallery_id`.
-- 226 / 232 `gallery_id` values match the current kHentai catalog `Works.Id` directly.
-- Of those 226 direct matches, 219 are active (`Expunged = 0`) and 7 are historical/expunged rows. Normal catalog browsing excludes expunged works, so those 7 must not be silently bookmarked into an invisible state.
-- Checking `CurrentGid`, `FirstGid`, and `ParentGid` adds no extra coverage for the six `gallery_id` values absent from the local catalog.
-- 6 rows have a `gallery_id` that is absent from the local catalog and 11 rows have no usable `gallery_id`, leaving 17 fallback cases.
-- The current kHentai bookmark table has 32 bookmarks; none of the 226 direct local matches are already bookmarked.
-- All inspected daily/manual/pre-migration metadata snapshots retain the same 243 total rows / 232 rows with `gallery_id`, so recovery can read backup snapshots without replacing the current DB.
-- No local cover thumbnails remain for this incident. Image/pHash matching is an optional future signal only when an image actually survives; it is not the primary recovery path here.
+## CATALOG-002B — Optional Heliotrope coexistence
 
-Goal:
-- Convert orphaned local manga records into catalog bookmarks/links without requiring the lost originals or restoring an old database wholesale.
-- Keep the process non-destructive, explain every non-exact match, and retain enough mapping/audit state to rerun or undo the migration safely.
-
-Safety / preservation:
-- Read recovery candidates from the current `manga_series` table and, when needed, selected metadata backup snapshots in read-only mode. Never require a full DB restore just to recover manga metadata.
-- Add orphan-safe scan behavior before or together with this feature: missing series should become soft-orphaned, require explicit deletion, or trigger a large-deletion safety gate instead of being hard-deleted silently.
-- Do not require changing the current manga root or forcing a successful rescan before recovery.
-- Always provide a dry-run/preview before bookmark writes. Apply writes transactionally and idempotently.
-- The user has explicitly chosen removal after successful conversion: once a recovery mapping/bookmark is accepted, delete that source `manga_series` metadata in the same transaction while preserving the audit link. Never delete unresolved/local-only metadata.
-
-Matching tiers:
-1. Exact active identity: `gallery_id -> (provider=kHentai, Works.Id)` with `Expunged = 0`. Auto-match and make these bulk-selectable for bookmark creation.
-2. Exact historical identity: the ID exists but is expunged. Preserve it as a historical exact match, then search for an active replacement/edition using provider lineage plus metadata; otherwise require review. Do not silently create a bookmark that normal catalog browsing cannot show.
-3. ID absent from the local catalog: perform a narrow provider lookup/backfill by exact ID and/or targeted title/artist query through the existing Japanese VPS boundary. If found, import only the required candidate(s) rather than requiring a broad catalog rebuild.
-4. No usable ID: generate candidates from normalized title, artist tags, page count, and surviving `relative_path`/source text. Require multiple independent signals for automatic confidence; title similarity alone must never auto-confirm.
-- Empirical calibration from the 226 known local-to-catalog pairs: page count is exactly equal in 194 cases and within ±2 in 197; at least one local author matches a catalog `artist` tag in 192; raw title similarity has only about a 0.70 median because translations/formatting differ. Weight matching accordingly.
-- In the current 17 fallback cases, artist + page-count filtering produces a unique local-catalog candidate for only a small minority, so ambiguous rows must remain reviewable rather than being forced.
-- Persist provider-namespaced identity `(provider, work_id)` rather than assuming every future catalog uses the same numeric ID; stay compatible with later CATALOG-002 work.
-
-Review / apply UX:
-- Result buckets: `exact active`, `historical/expunged`, `high-confidence candidate`, `multiple candidates`, and `not found`.
-- For each candidate, show the surviving local title/author/page count/gallery ID beside the catalog title/artist/page count and the reasons for the match.
-- Bulk-apply only exact-active matches by default. Heuristic matches require explicit approval.
-- Reuse the existing catalog bookmark contract, but persist a recovery link/audit record (for example: local manga ID, source snapshot/current DB, provider, work ID, match method, confidence, created time) so the mapping is explainable and reversible.
-- Re-running the recovery must not duplicate bookmarks or links, and undo must only remove relationships/bookmarks created by this migration rather than pre-existing user bookmarks.
-
-Acceptance target:
-- Against the 2026-09-03 live-library checkpoint, dry-run classifies 219 active exact matches automatically, separates the 7 expunged exact matches, and leaves the 17 fallback rows for targeted lookup/review without mutating current data.
-- Applying the exact-active batch creates the missing bookmarks without duplicates and is safe to rerun.
-- Recovery works with no original manga files and no surviving cover thumbnails.
-- Backup snapshots are read without replacing `library.sqlite`.
-- A future manga-root change/rescan cannot silently purge orphan metadata that has not been recovered or explicitly discarded.
-
-Relationship to catalog work:
-- CATALOG-003 may improve fallback coverage by adding Japanese-language originals, but MANGA-001 should not wait for broad Japanese ingestion to recover the 219 exact active Korean-catalog matches.
-- Targeted remote fallback must reuse the CATALOG-001 Japanese VPS boundary rather than reintroducing fragile direct PC access to k-hentai.
-- CATALOG-004's future `id:` syntax can reuse the same identity lookup logic, but the recovery pipeline should not depend on the full query-language feature.
-
-### UI-009 — VCK-inspired manga viewer parity improvements
-Status: `DONE`
-
-Goal:
-- Expand the current lightweight `PageViewer` using proven reader behaviors from VCK while keeping Lakomics' own React/Tauri architecture.
-
-Candidate scope:
-- left-to-right / right-to-left reading direction
-- explicit cover pairing behavior for double-page mode
-- thumbnail/page overview with direct page jump
-- real fullscreen mode and convenient keyboard shortcuts
-- paged versus scroll reading modes, with vertical/horizontal scroll where practical
-- configurable viewer margins / page spacing
-- remember reader preferences between sessions, with separate desktop/mobile profiles only if actually useful
-- preserve current reading progress, preload behavior, privacy mode, and error handling
-
-Reference / constraints:
-- Treat `C:\chatgpt\reference\VCK-0.1.0-win-x64` as read-only reference material.
-- Do not port Electron-specific hidden-window/network code into the viewer.
-- Resolve BUG-005's blue page-edge artifact as part of or before this pass so new viewer controls are built on a clean base.
-
-2026-09-04 implementation (uncommitted, needs real-Tauri visual pass):
-- VCK behaviors reviewed (violet-web bundle): RTL/LTR toggle, explicit cover-alone vs normal pairing, thumbnails overview, padding setting, resume prompt, discoverable shortcuts. Adopted: direction, cover pairing, overview, padding/gap. Deliberately NOT copied: device profiles, scroll-vs-paged modes, in-viewer crop/bookmarks, fullscreen (already fullscreen), any networking.
-- Reader preferences (`mangaReadingDirection` rtl|ltr, `mangaPageMode` single|double, `mangaCoverSingle` bool, `mangaViewerMargin` compact|normal|wide, `mangaViewerGap` none|narrow|wide) extend the existing `UiPreferences` localStorage mechanism with per-field validation — no DB table, no profiles. All defaults (ltr/single/cover-single/compact/narrow) reproduce the previous viewer exactly.
-- Semantics: pairing is logical (cover-single: [1],[2,3],[4,5]…; normal: [1,2],[3,4]…); direction only mirrors visual order and maps edges/arrows (RTL: left edge and ArrowLeft advance). Progress persists the lowest logical page of the spread; double-mode jumps normalize to the spread start. Mode/direction/margin/gap/overview changes never fire onPageChange.
-- Overview: in-viewer panel with lazy thumbnails, page numbers, current-spread indication, direct jump (closes + returns focus), privacy masking, failed-page placeholders; toggle button + T shortcut; Escape closes overview first without closing the viewer.
-- Tests: readerSpread unit suite, UiPreferences restore/fallback, PageViewer behavior suite (26 checklist items incl. BUG-008 edge-focus regression), MangaViewer prefs-isolation fix, App prefs-object update. Full frontend 74 files / 652 tests green; production build green (initial chunk 493.63 kB, under 500 kB warning). No Rust changes.
-- 2026-09-04 runtime verification: PASSED in the real Tauri app (reader basics, RTL/LTR, overview jump/focus, margin/gap, preference restore, progress resume, a11y keyboard pass). Marked `DONE`.
-
-2026-09-04 accessibility stabilization (uncommitted, same item):
-- AssetToolbar icon toggles show a focus-visible outline (existing focus tokens); reshuffle slot keeps layout width via an aria-hidden placeholder instead of mount/unmount.
-- ClassificationSidebar: independent roving tabindex per tree (collapsed/empty trees expose no stop); arrow navigation stays per-tree.
-- PageViewer overview: roving tabindex with arrow/Home/End navigation, Enter activates; Escape ordering is Menu > overview > viewer (window-capture handler steps aside for open Radix menus); overview focus moves in on open and returns to the trigger on close.
-- Shared Menu: explicit checkbox (`menuitemcheckbox`) and grouped radio (`menuitemradio`) paths; reader settings and manga sort migrated, ordinary actions unchanged.
-- Failed-video retry stops Enter/Space propagation (tile no longer opens); AssetViewer shows an explicit failure placeholder instead of a stale image (StableImage now surfaces undecodable preloads via onPreloadError).
-- Full frontend 74 files / 661 tests green; production build green (initial chunk 497.40 kB, under 500 kB warning). No Rust changes.
-- 2026-09-04 visual polish pass: removed showcase-only decorative gradient/extra cover shadows and hover shadow changes; decorative manga/volume cover images no longer duplicate adjacent text in accessible names; truncated collection/catalog/local-manga labels expose their full text via native title; shelf buttons expose `선반 N`; catalog pagination exposes `aria-busy` plus a visible loading status while preserving the previous result page.
-- 2026-09-04 final UI polish pass: OnlineCatalog suggestions now use an input-owned ARIA combobox/listbox pattern with ArrowUp/ArrowDown, Enter, Escape, active-descendant state, mouse/keyboard synchronization, and stale-suggestion guards. Shared Toast now distinguishes polite status vs explicit error alerts, wraps long messages instead of truncating them, and pauses the 5-second auto-dismiss countdown while hovered or keyboard-focused. Full frontend: 75 files / 670 tests green; production build green (initial JS 498.74 kB, gzip 153.34 kB).
-
-### CATALOG-002 — Heliotrope/VCK coexistence and migration strategy
+Parent item: legacy `CATALOG-002`
 Status: `TODO`
 
-- Do not discard existing imported VCK catalog data immediately.
-- Reuse the current local catalog schema where practical.
-- Add provider/source identity such as `legacy_vck` and `heliotrope`.
-- Define duplicate identity and migration behavior.
-- Keep bookmarks and reading progress in Lakomics-controlled storage.
-- Separate catalog metadata provider from gallery/page resolver.
-- Prefer provider-namespaced identity such as `(provider, provider_work_id)` if/when Heliotrope becomes a second provider.
-
-### CLOUD-UI-001 — Cloud status, transport diagnostics, and problem surface
-Status: `DONE`
-
-Implemented in main:
-- Settings expose a `연결 · 동기화 상태` surface: Cloud (credential/endpoint/last failure), PC direct (connection key/Remote/last failure), active classification source with count and explicit fallback reason, saved-media index source/key count, and the effective save mode.
-- A six-item local fallback renders as `로컬 기본 분류 · PC/Cloud 분류를 불러오지 못함 · N개 … 폴백` with degraded styling instead of looking healthy.
-- Collector/provider failure codes are surfaced concisely (`자격 증명 없음`, `마지막 실패 …`) without exposing tokens, URLs, or headers.
-- Diagnostics state is backed by regression tests (`settings:get` classification/saved-media/last-collector-failure) and passed manual device E2E verification.
-
-Settings should expose at least:
-- Cloud enabled/disabled state
-- API connection state
-- last inbound run
-- last success
-- last error
-- processed summary
-- manual `지금 동기화` action if useful
-- active classification source (`app`, `remote`, `cloud`, cache, or local fallback)
-- classification count and an explicit fallback reason when the extension is using the six-item local tree
-- saved-media index source/count
-- last classification/saved-media publish time where available
-- whether required credentials are configured, without ever revealing credential values
-
-Debugging goal:
-- A missing Connection Key, stale Remote Lakomics endpoint, Collector failure, or local fallback should be visible from normal settings/status UI without opening DevTools.
-- Do not silently make a six-item local fallback look like a healthy PC-linked classification tree.
-
-Sidebar behavior:
-- Do not create a permanent Cloud Inbox section.
-- Show a dynamic `동기화 문제 N` item in the lower management area only when failed/review-pending work exists.
-
-### CLOUD-006 — Full library cloud replication for mobile
-Status: `DONE`
-
-Resolution / verified behavior:
-- Desktop 0.2.0 ships the schema-31 full-library replica pipeline: idempotent prepare → upload → commit, resumable backfill control, bounded retry/failure isolation, and PC-authoritative replica semantics.
-- The production library completed its initial full backfill to the Japanese VPS/R2, and local/server asset plus classification-relationship counts were reconciled without duplicate rows or duplicate uploads.
-- Normal steady-state saves now drain automatically while backfill control is idle; new image/video assets reach the replica without manually starting another full backfill.
-- Classification-only membership changes enqueue replica revisions and converge remotely without re-uploading unchanged media; already-committed assets can re-commit relationships only.
-- Read-only Mobile library endpoints, deterministic pagination/sorting, short-lived media tickets, and PC-off Galaxy Tab browsing of replicated images/videos are implemented and device-verified.
-- Mobile Home/viewer/presentation polish is follow-up client UX and does not keep CLOUD-006 open; detailed Mobile product work remains tracked in `docs/agents/mobile.md`.
-
 Goal:
-- Make the full PC Lakomics asset library browsable from Lakomics Mobile while the PC is offline.
-- Keep the PC library authoritative; the Japanese VPS/R2 copy is a read-oriented replica that can be rebuilt from the PC.
-- The current library is only about 7–8 GB, so the first implementation may replicate originals directly instead of making a thumbnail-only architecture a prerequisite.
 
-Initial scope:
-- Backfill all existing local assets to R2 and register their server-side asset records.
-- Reuse the existing outbound `cloud_sync_queue` and upload contracts where practical instead of creating a second independent uploader pipeline.
-- Make the backfill idempotent: detect already-registered asset IDs/object keys and never upload the same asset again merely because a run was restarted.
-- Persist enough mobile metadata to browse and inspect assets without the PC: stable asset ID, media kind/content type, size, collected/source timestamps, source/provenance fields that are already part of the library, and classification memberships.
-- Publish asset ↔ classification relationships so selecting a real classification on mobile returns the matching full-library assets rather than only Cloud Capture inbox history.
-- Make the initial backfill resumable after app restart, network interruption, or partial failure; expose queued/completed/failed counts and retry failed work without starting over.
-- After backfill, enqueue new assets automatically and define narrow incremental updates for classification changes, metadata changes, and deletions.
-- Add paginated/read-only mobile asset endpoints and short-lived media download tickets rather than exposing R2 credentials or the Cloud API token to the public mobile page.
-- Reuse the current extension bridge/security boundary for the GitHub Pages mobile client until a dedicated mobile app/session model replaces it.
+- add Heliotrope as a disabled-by-default second metadata provider behind the authenticated Japanese VPS;
+- keep a separate provider cache;
+- preserve VCK/kHentai as the default/current provider;
+- never assume Heliotrope metadata implies Lakomics can resolve/read pages;
+- if no verified page resolver exists, reading stays unavailable for that provider;
+- provider disable/cache clear must not remove user bookmarks/progress.
 
-Consistency / deletion rules:
-- PC state wins on conflicts in the first phase; mobile editing/write-back is out of scope.
-- Define tombstone versus immediate R2 deletion before propagating local deletions, so a transient sync mistake cannot silently destroy the only remote copy.
-- Capture Inbox rows are transport history, not the canonical mobile library. Once an item is part of the PC library, mobile browsing should use the replicated asset/library model.
+Prerequisites: CATALOG-002A and CATALOG-007A; preferably complete reviewed grouping behavior first.
 
-Verification:
-- Compare local and server asset counts after the initial backfill and spot-check representative image/video hashes or sizes.
-- Confirm a backfill can be interrupted and resumed without duplicate DB rows or duplicate R2 objects.
-- With the PC off, browse several classifications on the Galaxy Tab mobile view, open real images, and play at least one replicated video.
-- Add one new PC asset and change one asset's classification, then verify both changes appear through incremental sync without another full backfill.
+---
 
-Follow-ups:
-- Coordinate with `PERF-001` for thumbnail/preview generation, caching, WebP policy, and bandwidth optimization after correctness is established.
-- Coordinate with `CLOUD-UI-001` so backfill progress, last success, failures, and retry state are visible from normal settings UI.
+# P2 — Personal library features
 
-### CLOUD-007 — Recover video replica work that outruns poster preparation
-Status: `DONE`
+## NOTE-001A — Revision-safe server Notes foundation
 
-Runtime finding / resolution:
-- PC Core Polish Pass 1 runtime verification exposed a startup race where Cloud backfill could claim a newly ingested video before its poster thumbnail existed and classify `CloudThumbnailUnavailable` as a permanent failure.
-- Video preparation now requeues only that asset's failed thumbnail-wait replica row when the poster becomes ready; unrelated permanent failures remain untouched.
-- Startup backfill reconciliation also revives historical thumbnail-wait failures whose asset now has a prepared thumbnail, so rows already stranded by the race recover without rerunning a full backfill.
-- Explicit manual retry remains available as a fallback.
-- Regression coverage verifies both preparation-time recovery and restart reconciliation while preserving the existing independent-failure behavior.
-
-### EXT-001 — Reorganize extension settings
-Status: `DONE`
-
-Reorganized in main:
-- `저장 방식` (Automatic/PC direct/Cloud/Download with concise explanation), `Cloud`, `PC 직접 연결` (Lakomics 연결 + Remote), `연결 · 동기화 상태` diagnostics, `X Translate`, `모바일 도넛`, `PC · 방사형 메뉴 배치`, and a collapsed `고급 · 복구 설정` block.
-- Endpoint/key controls exist in exactly one section; legacy recovery tools (connection backup, offline donut JSON, download folder) stay under Advanced.
-- Stored legacy values survive hiding/renaming: legacy stored `saveMode: "app"` migrates to `auto`; the new PC-direct-only mode is the explicit `pc` value, so old saves are never reinterpreted.
-- Manual device E2E verification passed on the packaged test build.
-
-### EXT-002 — Cloud-first extension save policy
-
-Status: `DONE`
-
-Implemented in main:
-- User-facing modes: `자동` (default) / `PC 직접 연결만` (`pc`) / `Cloud만` (`cloud`) / `브라우저 Download만` (`download`).
-- Automatic: real PC ingestion attempt first (with the existing 3-attempt tunnel-recovery backoff, no per-save 8s probe) → Cloud Capture on failure or when the app can't take the media type → browser/device download only when both fail.
-- `pc` mode fails with an explicit direct error instead of silently using Cloud; `cloud` mode works with the PC off and keeps the existing device-download failure path.
-- Legacy stored `saveMode: "app"` migrates to `auto`; regression tests cover mode routing, no duplicate saves, cloud-without-PC, and device fallback.
-- Manual device E2E verification passed on the packaged test build.
-
-### EXT-003 — Group media saved from the same X post
-Status: `DONE`
-
-Goal:
-- When several images or media items are saved from one X post, preserve the fact that they belonged to the same post and make them easy to view together later.
-- Preserve per-asset records and normal classifications; grouping should not duplicate media.
-- Provide an easy "same post" view or sibling strip from the asset viewer/inspector.
-- Consider mixed image/video posts as the same group.
-- Avoid coupling this to an X-only storage schema if a generic source-group concept can serve future importers.
-
-2026-09-04 implementation checkpoint:
-- Reuses already-preserved `source_url` metadata instead of adding X-specific asset columns, so previously saved X media and Cloud-imported assets are grouped retroactively.
-- Added a generic source-group lookup boundary (`list_source_group_assets`) whose first provider rule canonicalizes `x.com` / `twitter.com` media URLs by exact `/status/{postId}` identity. Media suffixes (`/photo/N`, `/video/N`) and host/handle changes do not split the group; neighboring numeric IDs do not collide.
-- Asset Inspector now loads the source group only for a single selected asset and shows a compact `?? ??? N?` sibling strip when at least two assets share the post. Clicking a sibling routes through the existing asset viewer callback.
-- Grouping never duplicates media or changes classifications/collections. Mixed image/video assets are eligible because grouping depends on source identity, not media kind.
-- Validation: AssetInspector 16/16 focused; full frontend 75 files / 671 tests; full Rust lib 543 passed / 2 ignored / 0 failed; production build green (initial JS 499.75 kB, gzip 153.57 kB). Rust source-group coverage verifies x.com/twitter.com equivalence and exact status-ID matching.
-- 2026-09-04 live verification: real multi-media X post grouping, sibling count, and sibling-to-viewer navigation were confirmed by the user. EXT-003 is complete.
-
-### EXT-004 — Adaptive secondary donut ordering and hidden tags
-Status: `DONE`
-
-Goal:
-- Make frequently collected tags faster to reach in the second donut while keeping low-use tags out of the way.
-
-Direction:
-- Rank secondary tags using actual collection/use frequency.
-- Place high-frequency tags toward the visually central/easy-reach portion of the second donut.
-- Push rarely used tags toward left/right outer positions rather than random reshuffling.
-- Keep ordering stable enough that muscle memory is not destroyed by every save; use thresholds or periodic re-ranking rather than live reorder on each click.
-- Add per-tag `숨기기` so hidden tags remain valid classifications but do not appear in the donut UI.
-- Provide a settings/manage path to reveal hidden tags again.
-- Hidden state and usage ranking should be presentation metadata only; do not alter the underlying classification tree or saved asset memberships.
-
-2026-09-04 implementation checkpoint:
-- Added persisted secondary-donut presentation state with per-classification successful-use counts and hidden IDs; existing `assetCount` values seed effective usage so previously collected tags start from real library frequency instead of zero. Classification tree and asset memberships are unchanged.
-- Adaptive ordering uses logarithmic usage buckets (1, 3, 7, 15, 31...) so repeated saves inside the same bucket do not reshuffle the ring. Higher buckets move toward center/easy-reach slots while equal-bucket manual ordering stays stable.
-- Successful PC, Cloud, and device-fallback saves increment usage; failed saves and immediate duplicate suppression do not.
-- Hidden secondary tags are excluded from the live gesture hit-test while remaining present in classification data and the layout editor.
-- The extension settings layout editor now exposes per-parent secondary usage counts with `숨기기` / `다시 표시` controls.
-- MV3 background-worker bundle regenerated from layout/defaults/background sources; extension version bumped to 2.0.0-alpha.15.55.
-- Automated validation: final MV3 worker sync + full extension suite 240/240 passed; source syntax checks passed.
-- Runtime verification: user confirmed the adaptive ordering counts and extension behavior in the real extension UI on 2026-09-04.
-
-### PERF-001 — Cache and media optimization policy
-Status: `DONE`
-
-Phase A checkpoint — PC Core Polish Pass 1:
-- Measured the production frontend before optimization: the initial JavaScript chunk was 626.18 kB (179.71 kB gzip) and exceeded Vite's 500 kB chunk warning.
-- Deferred non-initial desktop surfaces (Settings, Trash, Similarity Review, Manga, Manga Viewer, Collection browser/detail, and Revisited bundle detail) behind route-level React lazy chunks while keeping the everyday Asset Browser/sidebar path eager.
-- The post-split initial chunk is 478.80 kB (145.50 kB gzip): about 23.5% smaller raw and 19.0% smaller gzip, with the >500 kB warning removed.
-- Deferred surfaces use a same-background Suspense fallback to avoid introducing a white/layout flash during chunk loading.
-- Full frontend regression: 73 files / 608 tests passed; production TypeScript/Vite build passed.
-- PERF-001 remains open: cache bounds, repeated decode/work, video derivative reuse, cold/warm navigation measurements, and storage/runtime growth still belong to later phases.
-
-Phase B checkpoint - measured startup and thumbnail storage:
-- Real-library baseline: 8,104 normal assets (7,759 images, 5 GIFs, 340 videos); originals 6.34 GiB, image thumbnails 727.67 MiB, video derivatives 163.3 MiB.
-- Reworked startup video recovery so ready videos validate scrub-frame directories in one pass instead of issuing metadata checks for about 10,487 individual frames. On the real-library snapshot, video recovery fell from 480.6 ms to 42.4 ms and total `Library::open` from 527.6 ms to 94.9 ms in the controlled comparison; a later release run measured 136.0 ms total open time.
-- Replaced per-classification correlated asset counts with a single pre-aggregation query. `list_classifications` fell from about 144 ms to about 12 ms in the final probe (about 4 ms in isolated SQL testing), without changing list-page query latency.
-- Image thumbnails were confirmed to be 360 px lossless WebP. Representative testing selected lossy WebP q85 / method 1: about 0.9897 mean SSIM, about 43.6 dB mean PSNR, and about 8.97 ms encode time versus about 6.57 ms for the prior lossless path. New ingests now use this policy.
-- Added an explicit resumable thumbnail maintenance CLI with dry-run default, `--limit N` / `--all` apply gates, active-library lock refusal, temp-file validation, atomic Windows replacement, and already-lossy resume skipping.
-- After a 20-file production canary passed, recompressed the real library. Final thumbnail state: 7,784 files = 7,783 lossy + 1 intentionally retained smaller lossless file, 0 missing, 0 unknown. Thumbnail storage fell from 727.67 MiB to 163.75 MiB, saving about 563.92 MiB (77.5%). Originals were not converted.
-- A post-migration validator false-positive on 12 large/alpha lossy WebPs was fixed by falling back from the 4 KiB header probe to a full-file WebP feature check; regression coverage includes that case.
-- Added a separate cloud-thumbnail refresh utility for already-synced image/GIF replicas: read-only local candidate discovery, remote size preflight in batches, explicit `--apply --limit N|--all` gates, and bounded parallel upload through the existing replication presign path. It refreshes only the thumbnail object and does not rewrite originals or pretend the whole asset needs a new sync revision.
-
-Phase C checkpoint - remaining cache/preview/runtime audit (2026-09-04, measurement-first, zero code changes):
-- Audit: gallery tiles use explicit-dimension lazy imgs in fixed-height rows with bounded virtualized DOM (50k-row test); video hover is single-active with timers cleared on leave/unmount; viewer preloads only the current original (StableImage) with keyed VideoPlayer remounts; no `createObjectURL` anywhere (no URL-leak class); media protocol serves through a concurrency gate; cloud sync polls at 15s active / 60s background with overlap guard and cleanup.
-- Baseline (synthetic libraries, temp tests deleted after): `Library::open` 22ms empty / 121ms at 2k assets+600 artwork files / 338ms at 8k+2000 files (one-time per launch, 8 maintenance passes incl. 2 FS walks); first-page list (100 items) 4.4ms at 2k / 5.1ms at 8k; new `total_count` share 2.6ms / 3.2ms / 4.3ms — negligible at every scale.
-- Disk (production library, read-only audit): originals 6.8GB / 8141 files; thumbnails 164MB / 7792 (~21KB each, matches post-recompression state); video-media 166MB / 10965; work-artwork 220MB / 397; work-artwork-thumbnails 54MB; collection-thumbnails 41MB; cache 5.6MB. Derivatives ≈7% of originals, every category proportional to durable assets — no unbounded growth.
-- Ranked findings: no HIGH bottlenecks. Open cost, per-batch gallery refetch (~5ms), COUNT overhead (~4ms), startup video-prep drain (bounded by pending count, one empty call at steady state), manga auto-scan (bounded stat walk) are all LOW — left alone per the measured-healthy rule.
-- Deliberately NOT implemented: bigger pages or prefetch tuning (no evidence of need); original/preview WebP conversion (fails the 4-condition rule — no bottleneck to solve); second cache architecture; virtualization changes; eager-init surgery (open is sub-second at 8k).
-- Suites green with no behavior change: Rust full lib 537 passed / 0 failed; gallery/browser/manga frontend suites pass; no frontend changes so no build needed.
-- All acceptance intents hold (measured, bounded, no repeated-work bottleneck, disk understood, image/GIF/video correct, 10k scaling reasonable). Marking `DONE`.
-
-Priority:
-- Continue with measured cache/media work after the PC Core Polish Pass 1 runtime verification gate.
-- Use the current real library (8,000+ assets and growing) as the baseline, while keeping the original 10,000+ asset performance target.
-
-Review and define:
-- thumbnail cache: hit rate, memory/disk bounds, invalidation, and stale cleanup
-- preview cache: avoid repeat decode/work when revisiting the same assets
-- video preview/preparation cache: poster/frame reuse, concurrency limits, and cleanup
-- WebP policy: distinguish already-useful thumbnail WebP from any optional original/preview conversion; never bulk-convert originals without measured benefit and an explicit migration plan
-- image asset optimization: decode cost, dimensions, thumbnail generation, storage/bandwidth trade-offs
-- video optimization: preview generation, poster/scrub assets, startup latency, and storage growth
-- startup/runtime footprint: identify avoidable work, eager initialization, repeated scans, and caches that grow without bounds
-- benchmark representative cold/warm navigation, large classifications, viewer open/close, image/GIF/video mixes, and disk usage before and after changes
-
-Design for 10,000+ assets without unnecessary stutter or uncontrolled disk growth. Prefer measured, reversible changes over a one-time bulk rewrite of the library.
-
-### PERF-003 — Collection artwork import and reuse fast path
-Status: `DONE`
-
-Observed behavior:
-- Opening or importing Collection artwork can take noticeably too long, including when the relevant artwork or source image already exists locally.
-- Game/movie Collection entry currently invokes local artwork import on each viewer open. Existing registered local artwork skips the expensive image-byte path, but the source directories are still enumerated, filtered, naturally sorted, and compared with DB state each time.
-- New Work artwork preparation fully decodes the image, writes a Collection-specific original, and generates a bounded WebP thumbnail; this is wasteful when the source is already a reusable Lakomics asset/derivative.
-
-Direction:
-- Instrument the path first: source-directory scan/sort, DB identity lookup, provider/network fetch, image decode, thumbnail encode, file writes, and UI refresh should have separate timings.
-- Add a cheap unchanged-source fast path so reopening an unchanged Collection does not rescan/sort all source artwork. Preserve an explicit refresh/rescan route and reliable change detection.
-- When artwork originates from an existing Lakomics asset, prefer referencing/reusing the existing asset and suitable thumbnail/preview derivative instead of copying the original and decoding/encoding another thumbnail without need.
-- For provider-managed IGDB/TMDB/MangaDex artwork, audit identity checks so unchanged provider image IDs can avoid redundant fetch/prepare work where safe.
-- Preserve provenance and Collection-specific selection/order semantics even when the underlying media/derivative is shared.
-
-Acceptance target:
-- Reopening an unchanged Collection should make artwork availability effectively immediate.
-- Reusing an existing Lakomics asset as artwork should not perform redundant full-image decode/copy/thumbnail generation unless a Collection-specific derivative is genuinely required.
-- Newly added or changed source artwork must still be detected predictably.
-
-2026-09-04 Phase A implementation:
-- Added a cheap per-session source signature from collection/info/covers/secondary-artwork directory metadata. Reopening the same unchanged game/movie Collection now returns before image enumeration, natural sorting, and DB identity comparison.
-- A source-change regression adds a new cover after the cached reopen and confirms that the new artwork is still imported.
-- Existing provider-managed collections keep their previous skip behavior.
-
-Remaining Phase B:
-- Reuse an existing central Lakomics asset/derivative directly when Collection artwork already refers to that media, avoiding Collection-specific copy/decode/thumbnail generation where safe.
-- Instrument provider fetch/prepare and local import timings before broadening the reuse path.
-
-2026-09-04 Phase B implementation:
-- Local import (`import_local_artwork_files`) now hashes each new source file (sha256) and looks up `assets.content_hash` for an `image` asset before decoding.
-- On a match it links (hardlink, copy fallback) the asset file and its 360px thumbnail into artwork-scoped paths (`work-artwork/{collection}/{id}.ext`, `work-artwork-thumbnails/{collection}/{id}.webp`) instead of read -> decode -> duplicate original -> encode thumbnail. No schema change: every artwork row keeps a unique Collection-owned `relative_path`, so the UNIQUE constraint, cascade delete, unreferenced-file cleanup, and media-protocol routes behave exactly as before.
-- Lifecycle safety: Collection delete only removes Collection-scoped links (shared asset rows/files untouched); asset trash/purge only removes the asset's own links while artwork links retain the bytes, so purging a referenced asset cannot break its artwork; classification moves never touch files.
-- Provider flows (IGDB/TMDB/MangaDex) are untouched; genuinely new external bytes still go through full `prepare_work_artwork`; Phase A signature fast path is intact.
-- Rust coverage: reuse links shared bytes (mutation-proves-sharing test), Collection delete preserves the asset, purge preserves artwork bytes, unknown bytes prepare normally, reopen stays idempotent. Affected modules green: collection_source (21), work_artwork (16), collection (18), collection_volume (8), trash (10), media_protocol (22), igdb/tmdb/mangadex flows, ingestion (32).
-
-Remaining:
-- Instrument provider fetch/prepare and local import timings (per-file stage timings) to quantify the reuse win on real libraries.
-- Audit provider identity checks for redundant fetch/prepare where safe (explicitly out of this change).
-
-2026-09-04 Phase B completion (instrumentation + measurements):
-- Timing instrumentation (all `eprintln`, counts + durations only, no paths/URLs/secrets): `prepare_work_artwork` logs mime/bytes with decode/original-write/thumbnail split (covers local fallback and all provider flows); `import_local_artwork_files` logs per-directory counts (reused vs prepared) with scan/identity-lookup/reuse/prepare split; `import_local_collection_artworks` logs one total line per open.
-- Measured on 6 × 1600×2400 PNG covers (371KB total, temp benchmark, deleted after): fallback path 3.05s total (509ms/file: decode + Collection-original write + thumbnail encode); reuse path 101ms total (16.9ms/file: scan 287µs + identity 2.5ms + hash/lookup/link 31ms). ~30× faster per file; eliminated full decode, duplicate-original bytes, and thumbnail re-encode. Remaining cost is fs read + sha256 + one indexed lookup + hardlinks.
-- Phase A fast path unchanged (signature hit returns before enumeration; covered by existing idempotency test). Provider flows keep existing skip/refresh semantics; their prepare stages are now timed by the shared `prepare_work_artwork` line.
-- Both acceptance targets hold: unchanged reopen is effectively immediate; reuse avoids redundant decode/copy/thumbnail unless genuinely required (fallback preserved). Rust full suite 537 passed / 0 failed.
-- Marking `DONE`. Optional future (non-blocking): provider-side redundant fetch audit; per-page `COUNT(*)`-style timing rollups if real-library profiling ever asks for them.
-
-### PERF-002 — Preserve view state across navigation
-Status: `DONE`
-
-Resolution:
-- Gallery: per-classification scroll offsets are memorized when leaving a scope and restored when returning to the same one (`AssetGallery` internal keyed map of scalars). First visit to a scope opens at the top; sort/filter changes are treated as different result sets and reset.
-- Sort and filter choices persist app-wide through existing preferences; selection and inspector state are intentionally not preserved across navigation (selection is cleared on view change by design).
-- Catalog search/results and manga viewer progress live in unmounted per-tab components and remain deferred; revisit date resets on tab leave by design.
-- Kept scalar-only scroll memory: no virtualizer state reuse across scopes, no stale rows, no giant blank space.
-
-### OPS-001 ? Backup, migration, and settings portability
-Status: `DONE`
-
-Resolution (2026-09-04):
-- Added server-backed PC recovery points: the app creates a verified SQLite snapshot and uploads the latest `library.sqlite` to R2 through the existing authenticated/presigned backup namespace.
-- Restore first uses the existing transactional/pre-restore DB safety path, then reconstructs managed originals and image thumbnails from committed Cloud Library replicas in bounded 50-item media-ticket batches. Correct local files are skipped; unavailable individual variants are reported without discarding successful restores.
-- Video poster/scrub/proxy derivatives are intentionally regenerated from restored originals through the normal preparation pipeline instead of becoming a second recovery payload.
-- Added extension portability backup/restore on the VPS. Portable state is encrypted client-side with AES-GCM using a key derived from the Collector token; the raw Cloud/Collector bootstrap token is not duplicated inside the encrypted snapshot.
-- Simplified extension settings so common connection/backup/radial controls stay visible while rare recovery controls are under Advanced. The radial editor now switches directly between first-level and each secondary parent; hierarchical enter/back navigation is removed and regression-tested.
-- Credential Manager secrets and Tailscale identity remain machine-local by design. Cloud API and external-provider credentials are re-entered; external manga originals are copied/remounted separately.
-- Added `docs/operations/pc-migration.md` with old-PC preparation, new-PC toolchain, restore sequence, extension restore, secret boundaries, and post-migration checks for PC API, classifications, Cloud Capture, Collector, catalog transport, saved-media index, donut state, and manga roots.
-- Server deployment verified on `laku-tokyo`: service active, `/health` green, new `/v1/library/metadata-backup` present in OpenAPI, unauthenticated access returns 401. Pre-deploy `app.py` was preserved as a timestamped rollback copy.
-- Validation: extension 245/245 and packaged as `2.0.0-alpha.15.56`; server 41/41; frontend 75 files / 671 tests; production build green. Rust app-library suite reached 544 pass / 1 known flaky Cloud Capture mock timeout / 2 ignored; the same flaky test passed immediately when rerun alone. OPS-001 restore-focused Rust tests pass 3/3.
-
-### CLOUD-003 — Long-video asynchronous Capture handling
+Parent item: legacy `NOTE-001`
 Status: `TODO`
 
-Current request-response upload path can race against long client timeouts.
+Notes are a separate everyday text domain, not Asset metadata.
 
-If real use shows this is a problem, consider:
-- capture reservation/job creation
-- VPS background fetch
-- ready state
-- expose only ready items as pending inbound work
+Initial server model:
 
-Do not prioritize ahead of the core inbound usability fixes.
+- client-generated stable ID;
+- title/body;
+- monotonically increasing revision;
+- created/updated timestamps;
+- tombstone deletion;
+- cursor-paginated list;
+- versioned JSON export/recovery.
 
-## P3 — new product features
+Updates/deletes require expected revision and return conflict instead of last-write-wins.
 
-### NOTE-001 — Server-synced everyday Notes section
+Reuse the existing authenticated Cloud API and server SQLite patterns. Ensure server DB backup/recovery exists before real notes become relied upon.
+
+## NOTE-001B — Desktop Notes section
+
 Status: `TODO`
+Prerequisite: NOTE-001A.
 
-This is not asset metadata.
+Add a dedicated sidebar destination and list/editor with explicit unsaved/saving/saved/error/conflict states.
 
-- Add `메모` as a dedicated sidebar destination.
-- Intended for normal everyday notes, thoughts, reminders, and lightweight personal writing.
-- Store/sync through the server so the same notes are available across PCs.
-- Initial scope can stay simple: title, body, created/updated timestamps.
-- Later candidates: search, pinning, tags.
+A conflict must offer a safe decision such as reload server copy or duplicate the local draft as a new note. React must never receive/store the Cloud bearer token.
 
-### STATS-001 — Personal statistics
+## STATS-001 — Personal statistics
+
+Status: `PARTIAL`
+
+Split into two truthful phases.
+
+### STATS-001A — Inventory Statistics
+
 Status: `TODO`
+No activity prerequisite.
 
-Potential views:
-- assets collected per month
-- most collected creators
-- most collected classifications
-- most viewed collections
-- long-unseen collections/items
-- recent activity patterns
+Use current authoritative data for bounded aggregates such as:
 
-Reuse the data where useful for Revisit recommendations.
+- media-kind totals;
+- collected counts by local month;
+- top creators;
+- current direct classification counts;
+- favorites;
+- reliable original/derivative storage totals.
 
-### IDEA-001 — More varied Revisit mixes
+Aggregate in Rust/SQL, not React, and make metric definitions visible.
+
+### STATS-001B — Activity Statistics
+
 Status: `TODO`
+Prerequisites: BUG-013 and STATS-001A.
 
-Current mixes feel repetitive.
+Add only recorded-era activity views, for example:
+
+- most-opened assets/Collections;
+- long-unseen items;
+- recent bounded daily patterns.
+
+Record Collection opens with the same deliberate-session semantics used for Asset opens. If daily rollups are needed, use bounded aggregate rows rather than unbounded raw history.
+
+Always show the telemetry start date. Never infer past opens from file dates or exposure counts.
+
+## IDEA-001 — More varied Revisit mixes
+
+Status: `PARTIAL`
+
+Current creator/date/surprise foundation exists, but preference weights and open history are not yet trustworthy inputs.
+
+### IDEA-001A — Scoring, feedback, and cooldown correctness
+
+Status: `TODO`
+Prerequisite: BUG-013.
+
+- version the daily slate algorithm;
+- apply hard recent-exposure cooldown then explicit fallback tiers;
+- use days since open/exposure, counts, collected age, favorite where available, and saved preference weights;
+- add a small `덜 보기` feedback affordance;
+- keep one deterministic complete slate transaction per local date/revision.
+
+### IDEA-001B — Theme expansion
+
+Status: `TODO`
+Prerequisite: IDEA-001A.
 
 Candidate themes:
-- long-unseen favorites
-- creator/character combinations
-- date/period nostalgia
-- recently collected but rarely opened
-- high-rated plus discovery mix
-- cross-classification mixes
 
-Prefer understandable recommendation rules over pure randomization and reduce repeated exposure.
+- one focused creator per bundle;
+- bounded period nostalgia;
+- recently collected but rarely opened;
+- favorite + discovery only when favorites exist;
+- cross-classification discovery;
+- Collection-level high-rated discovery only where Collection scores actually exist.
 
-### UI-008 — Rework the top bar for readability
-Status: `DONE`
+A theme label must match its actual selection logic. Missing data should omit/fallback rather than fabricate meaning.
 
-Implemented in PC Core Polish Pass 1:
-- The noisy `정렬·필터` label was removed and browsing filters were compacted into icon-driven controls.
-- Media and aspect-ratio filters use distinct icons and icon-bearing popup menu items, with clear accessible labels/tooltips.
-- `현재 분류` moved beside the native window controls as a folder icon; metadata visibility and privacy are icon-only controls as well.
-- Random-sort `다시 섞기` remains a visible ViewToolbar action, and view-specific actions stay visually separated from native window controls without increasing toolbar height.
+---
 
-Runtime verification:
-- Real Tauri use at normal and narrower widths passed with the compact toolbar controls readable, unclipped, and functionally distinct.
+# Mobile lane — Galaxy Tab production client
 
-Pending follow-up — memo only, do not implement yet:
-- Remove the visible `보기` label from the asset toolbar as well; keep the controls accessible without adding replacement text clutter.
+The approved consumption specification is `docs/agents/mobile-consumption-ux.md`.
 
-## Long-term
+The current browser/mobile-extension prototype remains a verified behavioral reference, not the preferred production destination.
 
-### LONG-001 — AV actor/title works and full package cover sets
-Status: `HOLD`
+## MOBILE-001 — Direct authenticated native Android shell
 
-- Treat an AV title as a work-level entity rather than only a loose video asset: title metadata, actors, label/series, cover set, sample images, and linked video(s) can belong to the same work.
-- Actor profiles should lead naturally to the associated title library and back again.
-- Where an authorized source provides front, spine, and back artwork, import them as one provenance-preserving cover set with explicit `front` / `spine` / `back` roles instead of three unrelated gallery images.
-- Keep graceful fallbacks: front-only works remain valid, while a complete cover set unlocks richer package presentation.
-- Provide a stronger physical-media presentation rather than plain flat cards.
-- The AV presentation preset should be able to map real front/spine/back artwork onto a DVD-style case with depth, shadow, and optional interactive rotation.
-- Later shelf/display views may use the real spine art for browsing while opening the full case for closer cover appreciation.
-- Keep metadata/cover importing separate from video acquisition; support only sources and media the user is authorized to store, and do not make DRM bypass part of the importer.
-
-### LONG-002 — Media-type-specific collection presentation presets
-Status: `HOLD`
-
-Replace the current uniformly flat collection presentation with reusable presets by collection type. The default design principle is **front-cover-first physical objects**: preserve the recognizability of the real front artwork, then add only enough depth/material/shadow to make it feel like a collectible object.
-
-Examples:
-- game: game box/package depth, restrained plastic-case cues, lift, floor shadow, subtle tilt
-- manga: thin book depth/page edge cues, but do not invent a fake illustrated spine when only front artwork exists
-- movie: Blu-ray/DVD case or poster framing with the front cover kept visually dominant
-- AV: realistic DVD-case presentation; when real front/spine/back artwork is available, map all three surfaces to the case
-
-Rendering / interaction direction:
-- Prefer lightweight DOM/CSS 3D (`perspective`, `transform-style: preserve-3d`, transforms) over Three.js/WebGL for ordinary collection grids.
-- In normal grids, keep objects nearly front-facing so cover recognition stays better than shelf/spine-only browsing; use a small static tilt/depth and a simple hover lift/straighten transition rather than continuous pointer tracking.
-- Do not require fabricated spine/back artwork. Missing surfaces should fall back to neutral material/page/plastic edges while the real front cover remains the main visual information.
-- Reserve richer interactive rotation for a focused/detail object instead of every visible tile, minimizing per-card animation and GPU-layer cost.
-- AV is the complete-data variant: front/spine/back cover sets can support horizontal drag/touch rotation with useful snap points around front, spine, and back views; vertical pitch should remain subtle.
-- Keep shadows outside the preserve-3d object when practical so shadow/filter effects do not flatten the 3D subtree.
-- Share one reusable physical-cover component/presentation contract across types, with optional surfaces and type-specific depth/material rather than separate one-off implementations.
-
-Build this as `collectionType → presentation preset` rather than one-off CSS effects. Keep LONG-004 shelf/display mode as an optional decorative view; the everyday collection browser should prioritize visible front covers over spine-only realism.
-
-### LONG-003 — Private Vault for sensitive or bulky personal media
-Status: `HOLD`
+Status: `TODO`
 
 Goal:
-- Provide a deliberately separate Lakomics library context for sensitive or large personal media that should not casually mix into the normal library experience.
 
-Storage / privacy direction:
-- Use a separate R2 bucket plus separate API/permission boundaries from the normal Lakomics replica; a folder prefix inside the normal bucket is not the preferred boundary.
-- Keep Vault media out of normal Home, Revisit, search, statistics, and ordinary Mobile surfaces unless the Vault context is explicitly unlocked.
-- Consider client-side authenticated encryption for originals, thumbnails/previews, and sensitive metadata, with the master secret kept in OS/Android secure storage rather than on the VPS/R2 side.
-- For large video, investigate independently authenticated chunks plus prefetch/local cache so seeking and streaming remain practical; measure the real overhead before locking the format.
+- establish the production Android client boundary without extension injection or `chrome.storage`;
+- direct authenticated server client;
+- Android secure token storage;
+- classifications/assets/Revisit/media-ticket API parity sufficient for read-only browsing;
+- reusable cache/auth/request-cancellation foundation for consumption UI and DocumentsProvider.
 
-Capture / retention direction:
-- Unify X donut Vault saves, supported browser-site capture, and local-file import behind one Vault Capture pipeline instead of creating source-specific libraries.
-- Preserve source/provenance metadata while keeping source type (`x`, `web`, `local`, etc.) as metadata rather than a browsing silo.
-- Add a Vault Inbox / temporary-retention concept so newly collected media can be reviewed before becoming permanent; initially surface cleanup candidates rather than silently auto-deleting them.
-- The AV work/cover-set model from LONG-001 may live inside the Vault when desired, but AV presentation and Vault privacy are separate concerns and should not be hard-coupled.
+Do not change the stable browser X Collector merely to support the native client.
 
-### LONG-004 — Display / shelf mode
+## MOBILE-004 — Approved portrait-first consumption UX
+
+Status: `TODO`
+Prerequisite for production integration: MOBILE-001. Pure layout/state algorithms may be developed/tested earlier.
+
+Initial destinations:
+
+- Home;
+- Library.
+
+Home order:
+
+1. optional Continue card restoring useful prior context;
+2. dominant canonical Recent gallery using `{type: "recent"}`;
+3. secondary Revisit/discovery that must not delay first useful Recent paint.
+
+Gallery requirements:
+
+- justified rows preserving every item’s full intrinsic aspect ratio;
+- ragged final row allowed;
+- video uses the same geometry with a clear marker;
+- Large / Balanced / Compact target-row-height modes;
+- density preference persisted on device;
+- reflow should preserve the visual anchor where practical;
+- bounded pagination/DOM.
+
+State continuity:
+
+- keep the previous useful grid until the new view’s first page commits;
+- ignore stale/superseded requests;
+- restore route/view, density, viewer sequence, and scroll position when returning;
+- portrait classification navigation is a drawer/sheet; landscape may use a persistent sidebar.
+
+Viewer requirements:
+
+- image/video initially fit completely inside the usable Galaxy Tab viewport;
+- contain/letterbox rather than crop;
+- image pinch zoom only; pan only after zoom beyond fitted scale;
+- fitted horizontal gesture belongs to previous/next;
+- native video controls remain usable and do not trigger gallery swipes.
+
+Progressive loading:
+
+- reuse the already rendered thumbnail immediately;
+- request original in the background;
+- decode original before in-place replacement;
+- never blank a useful thumbnail while loading;
+- original failure leaves thumbnail/poster with non-destructive retry;
+- preload at most previous and next image originals, deduplicated by asset/variant;
+- do not preload neighboring video originals.
+
+First pass explicitly excludes:
+
+- Collections/Showcase;
+- Online Manga Catalog;
+- classification editing/bulk management;
+- a third `display.webp` derivative;
+- server/mobile write-back.
+
+Device gate: pass all documented Galaxy Tab S11 portrait checks first, then landscape, and measure cold/warm first visual, original replacement, adjacent navigation, and video first frame before adding another derivative.
+
+## MOBILE-002 — Read-only Android DocumentsProvider
+
+Status: `TODO`
+Prerequisite: MOBILE-001. May proceed in parallel with MOBILE-004 after the native cache/auth boundary is stable.
+
+Initial boundary:
+
+- one read-only Lakomics root in Android system file picker;
+- classification folders;
+- stable asset document IDs;
+- cached cursor metadata;
+- thumbnail support;
+- short-lived on-demand media-ticket download to app cache;
+- cancellation/cleanup and `notifyChange` after refresh;
+- no rename/move/delete/upload-on-close in the first version.
+
+## MOBILE-003 — Safe global deletion / tombstone protocol
+
 Status: `HOLD`
+Risk: HIGH.
+Prerequisite: native client plus explicit conflict/acknowledgement design; preferably after MOBILE-004/MOBILE-002 are stable read-only consumers.
 
-Potential future views:
-- bookshelf
-- DVD shelf
-- game package display
-- showcase cabinet
+Never propagate immediate deletion by default across PC, server, R2, mobile cache, and potentially offline clients.
 
-Implement only after the reusable collection presentation system is mature enough.
+Required concepts before implementation:
 
-## Existing features — do not duplicate
+- tombstone;
+- grace period;
+- client acknowledgement/reconciliation;
+- explicit purge;
+- conflict/recovery behavior.
 
-### Creator browsing
-Status: `KEEP`
+---
 
-Already exists under:
-- `다시보기 → 둘러보기 → 작가`
+# Works / Collection presentation lane
 
-It already supports creator cards and sorting such as recommended, asset count, recent collection, unseen, and name.
+Stable product intent: `docs/agents/works-viewer-design.md`.
+Concrete visual plan: `docs/roadmap/works-collection-visual-redesign-plan.md`.
 
-### Multi-selection
-Status: `KEEP`
+The central principle is a shared Lakomics shell with type-specific viewing grammar:
 
-Multi-selection and batch-selection infrastructure already exists. Improve selection clearing through UI-006 rather than rebuilding selection.
+- Manga = volume-centered personal shelf;
+- Game = hero/package-centered work exhibit;
+- Video = poster-centered archive; series expand into seasons/episodes;
+- Showcase = a higher-appreciation view using the same primitives, not a separate renderer.
 
-### Duplicate management
-Status: `KEEP`
+Artwork > work identity > personal state > useful provider metadata > provider/maintenance controls.
 
-Current duplicate/similarity management is satisfactory. Only relocate Similarity Review through UI-001 unless new problems appear.
+## LONG-002A — Type-aware presentation foundation and normal Works visual pass
 
-### Asset provenance / import history
-Status: `KEEP`
+Parent item: legacy `LONG-002`
+Status: `TODO`
+Legacy LONG-002 remains `PARTIAL` because type-specific classes and a game package seed already exist.
 
-Asset metadata already records useful provenance including source URL, creator, source publish time, collected time, and import source. Extend only when a concrete diagnostic need appears.
+Shared primitives should remain lightweight DOM/CSS:
 
-## Bug intake rules
+- `WorkTile`;
+- `PhysicalCover`;
+- `ArtworkStrip`;
+- `RelatedWorksRail`;
+- `MetadataLine`;
+- a small `collectionType -> presentation preset` mapping.
 
-New reports from Laku should be appended to this document rather than kept only in chat history.
+No Three.js/WebGL for ordinary grids. Dense library grids remain static or use one restrained hover/focus lift; no continuous pointer tracking.
 
-Use these prefixes:
-- `BUG-xxx`: broken behavior or errors
-- `UI-xxx`: visual/layout/input usability
-- `UX-xxx`: interaction/system-wide experience
-- `NAV-xxx`: navigation/back behavior
-- `CLOUD-xxx`: Cloud Capture/data-flow work
-- `CLOUD-UI-xxx`: cloud visibility/status UX
-- `CATALOG-xxx`: online catalog/provider work
-- `EXT-xxx`: browser extension work
-- `MANGA-xxx`: local manga indexing/recovery/migration work
-- `PERF-xxx`: performance/cache/state work
-- `OPS-xxx`: backup/migration/operational portability
-- `NOTE-xxx`: notes feature
-- `STATS-xxx`: personal statistics
-- `IDEA-xxx`: lower-priority product ideas
-- `LONG-xxx`: long-term ideas
+### LONG-002A.1 — Manga Shelf Grid quality baseline
 
-For each new bug, record:
-- observed behavior
-- reproducibility/conditions when known
-- suspected area only when evidence exists
-- status
-- related task IDs if any
+Implement first as the visual calibration target.
 
-## Current intended implementation order
+Normal manga detail:
 
-CLOUD-006 is complete and no longer blocks the PC roadmap. Mobile Home/viewer/presentation polish continues separately under `docs/agents/mobile.md` and should not keep completed PC/cloud foundation work open.
+- replace independent `CollectionVolumeGrid` tiles with an open shelf presentation;
+- shelf is only a horizontal support/contact cue, not simulated furniture;
+- cover front remains roughly 90–95% of perceived object;
+- minimal book/page-edge depth;
+- shared baseline and subtle contact shadow;
+- routine state moves below/around the cover rather than obscuring artwork;
+- hide edition controls when only one edition exists;
+- prefer meaningful edition names over numbered implementation drawers;
+- clicking a volume prioritizes cover appreciation with ordered previous/next.
 
-PC Core Polish Pass 1 runtime gate is complete: BUG-009, BUG-010, BUG-011, and UI-008 all passed real Tauri verification.
+This manga shelf is part of the normal type-specific detail preset. It is **not** the later LONG-004 global Display/Shelf mode.
 
-1. BUG-012 runtime verification — DONE (scroll-anchor mitigation + full-range reservation + overlay scrollbar all verified in the real app)
-2. PERF-003 Phase B — DONE (asset hardlink reuse, ~30× measured, stage timings instrumented; provider fetch audit remains optional non-blocking future work)
-3. MANGA-001 fallback phase — lineage suggestions, ranked fallback candidates, and explicit selection apply are implemented; remaining: VPS-backed targeted lookup for absent IDs (needs network) and selected-backup ingestion only if DB metadata proves insufficient
-4. PERF-001 — DONE (Phase C audit: bounded caches, proportional disk, sub-second open at 8k, no HIGH bottlenecks; zero code changes per measured-healthy rule)
-5. BUG-003 — X video drag-save blue native-selection artifact ? DONE (implemented, contract-tested, real-X verification passed)
-6. UI-009 — VCK-inspired manga viewer parity improvements — DONE (implemented, tested, real-Tauri visual pass green)
-7. EXT-003 ? DONE (same-X-post media grouping, live verified)
-8. EXT-004 ? DONE (adaptive/hidden secondary donut tags, direct-target settings UX, live verified)
-9. OPS-001 ? DONE (server PC recovery point + R2 media reconstruction + encrypted extension portability + migration runbook)
-10. CATALOG-003 — Japanese-language catalog ingestion/filter on the verified CATALOG-001 transport
-11. CATALOG-004 — advanced VCK-style catalog search syntax
-12. P3 feature expansion — NOTE-001 first, then STATS-001 / IDEA-001 according to actual use
+### LONG-002A.2 — Game Exhibit refinement
 
-Conditional work:
-- CLOUD-003 stays deferred unless real long-video Capture use reproduces the request-window race.
-- CATALOG-002 remains a later provider/coexistence strategy and should not block the current k-hentai/VCK catalog path.
-- LONG-001's AV work/full cover-set presentation and LONG-003's Private Vault are retained design directions; they should not interrupt the current PC polish sequence unless explicitly reprioritized.
+Preserve current hero + package foundation, then improve composition:
+
+- reduce excessive hero vertical dominance so lower content enters the viewport earlier;
+- make hero, package, title, and identity one coherent composition;
+- use compact sentence-like metadata instead of field-box rhythm;
+- personal rating outranks provider state/external scores;
+- `ArtworkStrip` adapts gracefully to 1, 2, 3, or many screenshots instead of leaving a dead lower half;
+- move `작품 관리` toward quiet overflow chrome;
+- richer IGDB data is added only when it becomes structural UI such as release history, franchise/related works, or useful artwork.
+
+### LONG-002A.3 — Type-specific Collection library `WorkTile`
+
+Preserve the current compact toolbar/search/sort/rating shell.
+
+At a glance:
+
+- Game reads as a shallow package collection;
+- Manga reads as shallow books/shelf library;
+- Video reads as a flat poster archive.
+
+Reduce redundant body headings when the toolbar already communicates Collection -> Library/Showcase -> type, allowing artwork to begin sooner.
+
+Do not turn the normal library into a decorative showcase.
+
+## WORKS-001 — Video Works: film + series / TV animation
+
+Status: `TODO`
+
+The current Collection implementation and TMDB flow are film/movie-only. The product category must expand conceptually to Video Works without forcing an immediate persistence rename.
+
+Structural distinction:
+
+- Film: one work, poster/backdrop, runtime, release history, cast/staff, related works;
+- Series: work -> seasons -> episodes, season posters, selected-season summary, compact episode list, aggregate cast/staff;
+- animation vs live action is an attribute/filter/presentation nuance, not the main structural type split;
+- TV anime therefore uses the Series structure, while anime films use Film.
+
+Provider/API direction:
+
+- extend TMDB integration to TV search/detail, seasons, episodes, season images, and appropriate credits/relations;
+- preserve current provider ownership/refresh rules and local usability when the network fails;
+- cache only data needed for normal browsing;
+- external/provider score remains visually secondary to personal state.
+
+Video visual grammar:
+
+- shared backdrop + poster hero;
+- Film content sequence: identity -> overview -> cast/staff -> artwork -> release history -> related works -> personal state;
+- Series content sequence: identity -> season poster grid -> selected season/episodes -> cast/staff -> artwork -> related works -> personal state;
+- default episode presentation is compact, not a giant still grid.
+
+Data-model/type migration should be decided only when the concrete Film/Series contract requires it. Do not rename `movie` merely for cosmetic consistency.
+
+Dependency: use LONG-002A primitives/presets for final presentation; provider/data work can be developed in a reviewable adjacent batch.
+
+## LONG-001 — AV typed Collections, people relations, and full cover sets
+
+Status: `TODO`
+
+Extend the existing Collection work model rather than create a parallel work system.
+
+Required foundation:
+
+- AV Collection type;
+- normalized people + Collection-person role/order relations;
+- explicit front/spine/back artwork roles using the existing Collection-owned artwork lifecycle;
+- front-only remains valid;
+- full surfaces unlock richer focused presentation;
+- provider import uses preview/apply and never silently overwrites manual intent;
+- AV metadata is not coupled to acquisition/download or Private Vault.
+
+Prerequisite for full-cover interaction: LONG-002A should establish the presentation contract first.
+
+## LONG-002B — Focused complete-cover interaction
+
+Status: `TODO`
+Prerequisites: LONG-002A and truthful front/spine/back surfaces from LONG-001.
+
+- activate side/back interaction only in focused/detail contexts;
+- front remains default;
+- snap to predictable front/side/back stops;
+- keyboard and reduced-motion support;
+- missing surfaces fall back to front-only/neutral thickness;
+- never invent a fake illustrated spine from unrelated artwork.
+
+## LONG-004 — Optional Display / Shelf mode
+
+Status: `MERGE CANDIDATE`
+
+This remains real product scope, but it must not own a separate rendering system.
+
+Implement only after LONG-002A is stable, as an opt-in view consuming the same presets, artwork roles, filters, and Showcase membership/order.
+
+Potential views remain:
+
+- bookshelf;
+- DVD/video shelf;
+- game package display;
+- showcase cabinet.
+
+Rules:
+
+- normal productive grid remains available/default unless the user chooses otherwise;
+- front artwork stays recognizable; shelf realism never forces spine-only browsing;
+- bounded/virtualized rendering for larger sets;
+- only view-mode preference persists, not transient object rotation;
+- no room, furniture, lamp, wall, window, or heavy material simulation.
+
+## LONG-003 — Private Vault
+
+Status: `HOLD`
+Risk: CRITICAL/HIGH.
+
+This is an encrypted private-media program, not an extension of normal Trash or AV metadata.
+
+Do not put real user media into a Vault format until all of the following are independently resolved and tested:
+
+1. threat model and leakage budget;
+2. key lifecycle + user-held recovery path;
+3. versioned authenticated-encryption/object format;
+4. nonce/associated-data rules and known-answer/tamper tests;
+5. wrong-key and corruption health behavior;
+6. encrypted metadata/thumbnails and plaintext-cache rules;
+7. interrupted copy/upload/atomic commit semantics;
+8. independent security review.
+
+Initial adoption is copy-in only; original normal media remains intact. Video authenticated chunks are a later phase after metadata/image recovery is proven.
+
+---
+
+# Reconciled legacy status index — audit baseline
+
+The 2026-09-05 repository audit classified the original 55 backlog items as **38 DONE, 8 PARTIAL, 4 TODO, 3 MERGE CANDIDATE, 2 OBSOLETE**. The active items above replace stale verbose wording; this index preserves the audit result.
+
+## DONE
+
+- CLOUD-001 — Cloud Capture batch drain
+- CLOUD-004 — X media Cloud/VPS routing failure fallback corrected
+- CLOUD-002 — Cloud inbound app integration
+- CLOUD-005 — PC-independent saved-X-media snapshot
+- BUG-001 — Collection entry error toast
+- BUG-002 — Manga list scan failure from unsupported thumbnail
+- BUG-004 — Video preview preparation reliability
+- BUG-005 — Historical manga Collection entry error no longer reproducible
+- VERIFY-001 — X -> VPS -> PC E2E verification
+- UI-004 — Transition/preview flashing
+- UI-007 — Video viewer controls
+- BUG-003 — X drag-save native selection highlight
+- BUG-006 — Sidebar counts after drag/drop move
+- BUG-007 — Same-scope mutation scroll preservation
+- NAV-001 — Shared back navigation
+- UX-009 — Loading/error/retry/tooltip consistency
+- UI-006 — Easier asset selection clearing
+- UI-005 — Collection cover aspect/crop handling
+- UI-001 — Similarity Review placement
+- BUG-008 — Catalog viewer page-edge focus highlight
+- BUG-009 — Video preview/selection conflict
+- BUG-010 — Impossible future catalog dates
+- BUG-011 — Drag-out re-entry import overlay
+- UI-010 — Richer video previews
+- BUG-012 — Stable custom overlay gallery scrollbar
+- CATALOG-001 — Fragile catalog transport moved behind Japanese VPS
+- MANGA-001 — Orphaned local manga recovery foundation and targeted cleanup
+- UI-009 — VCK-inspired manga reader parity
+- CLOUD-007 — Replica work recovery after video poster preparation
+- EXT-001 — Extension settings reorganization
+- EXT-002 — **Cloud-first** extension save policy (`Cloud -> PC -> browser download` where supported)
+- EXT-003 — Same-X-post media grouping
+- EXT-004 — Adaptive/hidden secondary donut tags
+- PERF-001 — Current cache/media optimization policy
+- PERF-003 — Collection artwork fast path
+- PERF-002 — Intended per-scope view-state preservation
+- OPS-001 — Backup/migration/settings portability
+- UI-008 — Top-bar rework
+
+## PARTIAL / TODO / MERGE CANDIDATE
+
+These are detailed in active sections above:
+
+- CATALOG-003 — `PARTIAL`
+- CATALOG-004 — `PARTIAL`
+- CATALOG-005 — `MERGE CANDIDATE` with CATALOG-006
+- CATALOG-006 — `MERGE CANDIDATE` with CATALOG-005
+- CATALOG-007 — `TODO` split into A/B
+- CATALOG-002 — `PARTIAL` split into provider-key foundation + Heliotrope
+- CLOUD-UI-001 — `PARTIAL`
+- CLOUD-006 — `PARTIAL`
+- NOTE-001 — `TODO` split server/desktop
+- STATS-001 — `PARTIAL` split inventory/activity
+- IDEA-001 — `PARTIAL` split correctness/themes
+- LONG-001 — `TODO`
+- LONG-002 — `PARTIAL` split foundation/focused interaction
+- LONG-003 — `TODO` in audit, intentionally `HOLD` here until security gate is approved
+- LONG-004 — `MERGE CANDIDATE` consuming LONG-002 renderer
+
+## OBSOLETE / incident-only
+
+### UI-003 — Replace Asset Repository scrollbar with a native/standard scrollbar
+
+Status: `OBSOLETE`
+
+Superseded by the later runtime-verified BUG-012 solution: the accepted implementation is the custom overlay scrollbar with native scroll ownership and stable reserved range. Do not reintroduce the older native-only request.
+
+### CLOUD-003 — Long-video asynchronous Capture handling
+
+Status: `OBSOLETE`
+
+No validated incident currently requires an async redesign. Keep the current bounded synchronous path and ambiguous-timeout confirmation behavior. Reopen only if a reproducible long-video timeout race produces real failures.
+
+---
+
+# Newly promoted scope from the reconciliation
+
+The audit was read-only, so it recorded several candidates without mutating this backlog. This reconciliation promotes only independent, evidence-backed scope:
+
+- BUG-013 — real Asset viewer open recording;
+- MOBILE-001 — native authenticated Android shell;
+- MOBILE-002 — read-only DocumentsProvider;
+- MOBILE-003 — global deletion/tombstone protocol, held until safe;
+- MOBILE-004 — approved Mobile consumption UX;
+- WORKS-001 — Video Works Film/Series + TV animation expansion.
+
+Candidates intentionally absorbed rather than added as standalone backlog:
+
+- `CLOUD-008` -> CLOUD-006 pause closure;
+- `PERF-004` -> CATALOG-004 query/hydration batch;
+- `DOC-001` -> completed by this 2026-09-05 truth-alignment rewrite.
+
+---
+
+# Dependency-safe master execution roadmap
+
+This is the authoritative dependency order, not a prohibition on parallel work in independent subsystems. In particular, Collection presentation and pure Mobile layout/state work may proceed in parallel once worktree ownership is clear.
+
+0. **Backlog truth alignment — DONE by this reconciliation**
+   - retire UI-003 and CLOUD-003 from executable work;
+   - correct EXT-002 Cloud-first wording;
+   - remove stale MANGA-001/performance completion ambiguity;
+   - reopen CLOUD-UI-001 and CLOUD-006 as `PARTIAL`;
+   - promote the approved Mobile/Works scope above.
+
+1. **CLOUD-006 pause closure**
+   - validate current pause guard/test and real pause/restart/resume.
+
+2. **BUG-013 Asset-open recording**
+   - begin trustworthy activity data immediately.
+
+3. **CLOUD-UI-001 durable status**
+   - persistent operational truth before further server/mobile expansion.
+
+4. **CATALOG-002A provider-key contract**
+
+5. **CATALOG-003 independent Japanese source**
+
+6. **CATALOG-004 AST compiler + bulk tag hydration**
+
+7. **CATALOG-005/006 unified visibility/block policy**
+
+8. **CATALOG-007A lineage groups**
+
+9. **CATALOG-007B reviewed heuristic groups**
+
+10. **CATALOG-002B optional Heliotrope**
+
+11. **NOTE-001A server foundation**
+
+12. **NOTE-001B desktop Notes**
+
+13. **STATS-001A inventory statistics**
+
+14. **STATS-001B activity statistics**
+
+15. **IDEA-001A Revisit scoring/cooldown**
+
+16. **IDEA-001B Revisit themes**
+
+17. **LONG-002A presentation foundation / normal Works visual pass**
+    - Manga Shelf Grid establishes the aesthetic quality bar;
+    - Game Exhibit refinement;
+    - type-specific `WorkTile` library surface.
+
+18. **WORKS-001 Video Works Film/Series expansion**
+    - TMDB TV/season/episode structure and Video archive viewer.
+
+19. **LONG-001 AV model and explicit cover roles**
+
+20. **LONG-002B focused complete-cover interaction**
+
+21. **LONG-004 optional Display/Shelf mode**
+
+22. **LONG-003 Phase 0 threat model/format/recovery gate**
+
+23. **LONG-003 Phase 1 encrypted metadata/image copy-in**
+
+24. **LONG-003 Phase 2 health/recovery/key rotation**
+
+25. **LONG-003 Phase 3 authenticated video chunks**
+
+## Separately promoted Mobile production order
+
+M1. **MOBILE-001 native authenticated shell**
+- may begin after the immediate Cloud correctness/status foundation is stable;
+- production mobile work does not require waiting for the entire catalog/Notes lane.
+
+M2. **MOBILE-004 approved consumption UX**
+- production integration after M1;
+- justified-row calculator, cancellation/state models, and tests may start earlier.
+
+M3. **MOBILE-002 read-only DocumentsProvider**
+- technically parallel with M2 after the M1 auth/cache boundary is stable;
+- ship after/alongside consumption according to product priority.
+
+M4. **MOBILE-003 global tombstone deletion**
+- only after read-only behavior is stable and the high-risk acknowledgement/grace-period protocol is explicitly approved.
+
+## Parallelism note for the Collection lane
+
+LONG-002A has no catalog/Notes dependency. After the immediate correctness gates (roughly steps 0–3), its visual prototype work can proceed without waiting for catalog batches 4–16, provided it does not collide with another agent’s Collection files.
+
+The first recommended aesthetic implementation is still **Manga Shelf Grid**, because it calibrates cover density, physical depth, shadow, hover, and appreciation behavior used by the rest of Works.

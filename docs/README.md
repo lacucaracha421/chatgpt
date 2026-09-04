@@ -16,11 +16,17 @@ This directory contains only current or intentionally retained Lakomics document
 - `agents/implementation.md` — implementation and shared-UI rules.
 - `agents/cloud-capture.md` — current Cloud Capture / inbound-outbound sync architecture and known gaps.
 - `agents/mobile.md` — Galaxy Tab-first Lakomics Mobile product direction, v1 success criteria, Android file-picker integration, and phased implementation plan.
+- `agents/mobile-consumption-ux.md` — approved, not-yet-implemented Mobile Home/Library, justified-row gallery, viewer-fit, state-continuity, and progressive media-loading design.
 - `agents/lakomics-works-handoff-v2.md` — current Works / Collection product and architecture reference.
+- `agents/works-viewer-design.md` — type-specific Works browsing/viewer presentation direction for manga shelves, game exhibits, and film/series poster archives.
 - `agents/claude-ollama.md` — repository-local Claude Code + Ollama Cloud launcher notes.
 - `agents/issue-tracker.md` — when to use the living backlog versus GitHub Issues.
 - `edge-extension.md` — current bundled X Collector behavior and save paths.
 - `prototypes/lakomics-works-v6-reference.html` — retained Works visual/interaction reference only; not production code.
+
+## Current execution plans
+
+- `roadmap/works-collection-visual-redesign-plan.md` — staged PC Works / Collection visual redesign plan covering Manga Shelf Grid, Game Exhibit refinement, type-aware library tiles, Film/Series Video Works, and Showcase polish. Task status still belongs in the living backlog.
 
 ## Source-of-truth order
 
