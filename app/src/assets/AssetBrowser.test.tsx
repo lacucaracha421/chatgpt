@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { AssetPage, AssetSort, AssetView, ClassificationEntry, LibraryGateway } from "../library/types";
@@ -649,6 +650,56 @@ describe("AssetBrowser", () => {
     expect(tile).toHaveFocus();
   });
 
+  it("records each asset once per uninterrupted viewer session and records it again after reopening", async () => {
+    const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
+    vi.mocked(gateway.recordAssetOpened).mockRejectedValue(new Error("telemetry unavailable"));
+    const browser = () => <StrictMode>{browserElement(gateway)}</StrictMode>;
+    const { rerender } = render(browser());
+    const first = await screen.findByRole("option", { name: "asset-0.png" });
+
+    fireEvent.pointerEnter(first);
+    fireEvent.click(first);
+    expect(gateway.recordAssetOpened).not.toHaveBeenCalled();
+
+    fireEvent.doubleClick(first);
+    await waitFor(() => expect(gateway.recordAssetOpened).toHaveBeenCalledTimes(1));
+    expect(gateway.recordAssetOpened).toHaveBeenLastCalledWith("asset-0", expect.any(String));
+    expect(screen.getByRole("dialog", { name: "asset-0.png" })).toBeVisible();
+
+    rerender(browser());
+    expect(gateway.recordAssetOpened).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "ArrowRight" });
+    await waitFor(() => expect(gateway.recordAssetOpened).toHaveBeenCalledTimes(2));
+    expect(gateway.recordAssetOpened).toHaveBeenLastCalledWith("asset-1", expect.any(String));
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "ArrowLeft" });
+    expect(gateway.recordAssetOpened).toHaveBeenCalledTimes(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "감상 화면 닫기" }));
+    fireEvent.doubleClick(first);
+    await waitFor(() => expect(gateway.recordAssetOpened).toHaveBeenCalledTimes(3));
+    expect(gateway.recordAssetOpened).toHaveBeenLastCalledWith("asset-0", expect.any(String));
+    expect(screen.getByRole("dialog", { name: "asset-0.png" })).toBeVisible();
+  });
+
+  it("records a source-group asset only when it opens in the full viewer", async () => {
+    const user = userEvent.setup();
+    const items = [asset(0), asset(1)];
+    const gateway = createGateway({ items, nextCursor: null });
+    vi.mocked(gateway.listSourceGroupAssets!).mockResolvedValue(items);
+    renderBrowser(gateway);
+
+    await user.click(await screen.findByRole("option", { name: "asset-0.png" }));
+    await user.click(screen.getByRole("button", { name: "정보 열기" }));
+    const sourceGroup = await screen.findByRole("region", { name: "같은 게시물" });
+    expect(gateway.recordAssetOpened).not.toHaveBeenCalled();
+
+    await user.click(within(sourceGroup).getByRole("button", { name: "asset-1.png 같은 게시물에서 열기" }));
+    await waitFor(() => expect(gateway.recordAssetOpened).toHaveBeenCalledTimes(1));
+    expect(gateway.recordAssetOpened).toHaveBeenCalledWith("asset-1", expect.any(String));
+    expect(screen.getByRole("dialog", { name: "asset-1.png" })).toBeVisible();
+  });
+
   it("keeps the inspector closed on selection and opens it only from the toolbar toggle", async () => {
     const user = userEvent.setup();
     const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
@@ -932,6 +983,7 @@ function createGateway(page: AssetPage = { items: [], nextCursor: null }): Libra
     listAlbums: vi.fn().mockResolvedValue([]), createAlbum: vi.fn(), renameAlbum: vi.fn(), moveAlbum: vi.fn(), updateAlbumAppearance: vi.fn(), deleteAlbum: vi.fn(),
     createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(), updateClassificationAppearance: vi.fn(),
     deleteClassification: vi.fn(), listAssets: vi.fn().mockResolvedValue(page), listAssetDateBuckets: vi.fn().mockResolvedValue([]),
+    listSourceGroupAssets: vi.fn().mockResolvedValue([]),
     listAssetCreators: vi.fn().mockResolvedValue([]),
     getRevisitSlate: vi.fn().mockResolvedValue({ localDate: "", createdAt: "", revision: 0, bundles: [] }),
     reshuffleRevisitBundle: vi.fn().mockResolvedValue({ localDate: "", createdAt: "", revision: 0, bundles: [] }),

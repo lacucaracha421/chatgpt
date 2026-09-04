@@ -70,7 +70,7 @@ Acceptance:
 
 ## BUG-013 — Asset viewer opens are never recorded
 
-Status: `TODO`
+Status: `DONE`
 Priority: P1 correctness prerequisite, schedule immediately after CLOUD-006 closure.
 
 Evidence:
@@ -89,6 +89,13 @@ Goal:
 - telemetry failure must never block viewer rendering.
 
 No migration is required. Do not fabricate historical open data.
+
+Implemented evidence:
+
+- the full Asset Viewer records initial entry and active-asset navigation through the existing activity gateway;
+- a viewer-session asset-ID set prevents rerender/StrictMode duplicates and resets on close;
+- rejected or synchronously failing telemetry is isolated from viewer rendering;
+- focused frontend coverage includes selection/non-viewer exclusion, previous/next and source-group navigation, close/reopen, StrictMode, and telemetry failure.
 
 This is a prerequisite for activity-based `STATS-001B` and `IDEA-001` scoring.
 

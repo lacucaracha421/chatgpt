@@ -1,5 +1,5 @@
 import { ChevronLeftIcon, ChevronRightIcon, StarIcon, TrashIcon, XMarkIcon } from "@heroicons/react/24/outline";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AssetSummary } from "../library/types";
 import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
@@ -9,13 +9,27 @@ import { StableImage } from "../shared/ui/StableImage";
 import { VideoPlayer } from "../video/VideoPlayer";
 import { assetUrl } from "./mediaUrl";
 
-export function AssetViewer({ items, activeId, onActiveIdChange, onClose, onToggleFavorite, onTrash, privacyMode = false }: { items: AssetSummary[]; activeId: string | null; onActiveIdChange: (id: string) => void; onClose: () => void; onToggleFavorite?: (asset: AssetSummary) => void; onTrash?: (asset: AssetSummary) => void; privacyMode?: boolean }) {
+export function AssetViewer({ items, activeId, onActiveIdChange, onClose, onAssetOpened, onToggleFavorite, onTrash, privacyMode = false }: { items: AssetSummary[]; activeId: string | null; onActiveIdChange: (id: string) => void; onClose: () => void; onAssetOpened?: (asset: AssetSummary) => void | Promise<void>; onToggleFavorite?: (asset: AssetSummary) => void; onTrash?: (asset: AssetSummary) => void; privacyMode?: boolean }) {
   const index = items.findIndex((item) => item.id === activeId);
   const asset = items[index];
   const [imageFailed, setImageFailed] = useState(false);
+  const openedAssetIds = useRef(new Set<string>());
   useEffect(() => {
     setImageFailed(false);
   }, [asset?.id]);
+  useEffect(() => {
+    if (!asset) {
+      openedAssetIds.current.clear();
+      return;
+    }
+    if (openedAssetIds.current.has(asset.id)) return;
+    openedAssetIds.current.add(asset.id);
+    try {
+      void Promise.resolve(onAssetOpened?.(asset)).catch(() => undefined);
+    } catch {
+      // Activity telemetry must never disrupt the viewer.
+    }
+  }, [asset, onAssetOpened]);
   if (!asset) return null;
   const previous = items[index - 1];
   const next = items[index + 1];

@@ -324,7 +324,7 @@ export function AssetBrowser({ view, onViewChange, classifications, albums = [],
       </div>
       <AssetInspector assets={selectedAssets} currentCollection={view.kind === "collection" ? collections.find((entry) => entry.id === view.collectionId) ?? null : null} open={inspectorOpen} onOpenChange={setInspectorOpen} onOpenAsset={(asset) => { viewerViewKeyRef.current = viewKey; setViewerAssetId(asset.id); }} onAssetUpdated={updateAssetSummary} />
     </div>
-    <AssetViewer items={requestedAsset && !items.some((item) => item.id === requestedAsset.id) ? [requestedAsset] : items} activeId={viewerAssetId} onActiveIdChange={setViewerAssetId} onClose={() => { setViewerAssetId(null); onRequestedAssetHandled(); }} onToggleFavorite={toggleFavorite} onTrash={trashViewerAsset} privacyMode={privacyMode} />
+    <AssetViewer items={requestedAsset && !items.some((item) => item.id === requestedAsset.id) ? [requestedAsset] : items} activeId={viewerAssetId} onActiveIdChange={setViewerAssetId} onClose={() => { setViewerAssetId(null); onRequestedAssetHandled(); }} onAssetOpened={(asset) => gateway.recordAssetOpened(asset.id, new Date().toISOString())} onToggleFavorite={toggleFavorite} onTrash={trashViewerAsset} privacyMode={privacyMode} />
   </section>;
 }
 
