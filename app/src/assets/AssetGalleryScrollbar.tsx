@@ -39,11 +39,18 @@ export function AssetGalleryScrollbar({ scrollRef, totalHeight }: AssetGallerySc
       const viewportHeight = element.clientHeight;
       const trackHeight = track.clientHeight;
       const maxScroll = totalHeight - viewportHeight;
+      // NOTE: never use the `hidden` attribute here. On first mount the
+      // stylesheet may not be applied yet, so the track can measure 0 and
+      // `hidden` (= display:none) would freeze it at 0 forever: no resize
+      // would ever fire again to recover. `visibility` keeps layout (and
+      // real measurements) while hiding the control.
       if (!(viewportHeight > 0) || !(trackHeight > 0) || !(maxScroll > 0)) {
-        track.hidden = true;
+        track.style.visibility = "hidden";
+        track.style.pointerEvents = "none";
         return;
       }
-      track.hidden = false;
+      track.style.visibility = "visible";
+      track.style.pointerEvents = "auto";
       const thumbHeight = Math.max(
         GALLERY_SCROLLBAR_MIN_THUMB,
         (viewportHeight / totalHeight) * trackHeight,

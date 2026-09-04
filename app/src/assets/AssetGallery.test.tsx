@@ -263,9 +263,10 @@ describe("AssetGallery", () => {
     expect(container.querySelector(".asset-gallery__date-rail")).toBeNull();
     expect(container.querySelector(".asset-gallery__scroll")).toHaveAttribute("data-native-scrollbar", "true");
     // The overlay draws the thumb (native thumb length cannot be floored);
-    // it stays hidden while everything fits.
+    // it stays out of the way while everything fits.
     const overlay = container.querySelector(".asset-gallery__scrollbar") as HTMLElement;
-    expect(overlay).toHaveAttribute("hidden");
+    expect(overlay.style.visibility).toBe("hidden");
+    expect(overlay.style.pointerEvents).toBe("none");
   });
 
   it("renders safe metadata overlays", async () => {
@@ -541,6 +542,33 @@ describe("AssetGallery", () => {
 
     expect(scroller.scrollTop).toBe(1000);
     expect(thumb().style.transform).toBe(before);
+  });
+
+  it("recovers the overlay thumb when styles arrive after mount", async () => {
+    const { container } = render(
+      <AssetGallery
+        items={Array.from({ length: 8 }, (_, index) => asset(index))}
+        totalCount={100000}
+        hasNextPage
+        onLoadNextPage={vi.fn()}
+      />,
+    );
+    await screen.findByRole("option", { name: "asset-0.png" });
+    const overlay = container.querySelector(".asset-gallery__scrollbar") as HTMLElement;
+    const scroller = container.querySelector(".asset-gallery__scroll") as HTMLElement;
+    expect(overlay.style.visibility).toBe("visible");
+
+    // Simulate a first paint before the stylesheet applies: zero track size
+    // must hide the control without latching it hidden forever.
+    Object.defineProperty(overlay, "clientHeight", { configurable: true, get: () => 0 });
+    fireEvent.scroll(scroller);
+    expect(overlay.style.visibility).toBe("hidden");
+
+    delete (overlay as unknown as Record<string, unknown>).clientHeight;
+    fireEvent.scroll(scroller);
+    expect(overlay.style.visibility).toBe("visible");
+    const thumb = container.querySelector(".asset-gallery__scrollbar-thumb") as HTMLElement;
+    expect(thumb.style.height).toBe("32px");
   });
 
   it("clears a pending quick preview when the gallery unmounts", () => {
