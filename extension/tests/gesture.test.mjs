@@ -279,3 +279,16 @@ test("pinned primary expands an explicitly placed live submenu when canonical pa
     ["char-a"],
   );
 });
+
+test("hidden secondary classifications stay out of the donut without changing the tree", () => {
+  const session = createSession(
+    { x: 100, y: 100 }, tree, layout, [],
+    { hiddenSecondaryIds: ["child-a"] },
+  );
+  session.move(pointForPrimarySlot(0), 0);
+  session.tick(300);
+  const secondary = session.snapshot().secondaryLevel;
+  assert.notEqual(secondary, null);
+  assert.deepEqual(plain(secondary.slots.map((entry) => entry.id)), ["child-b"]);
+  assert.equal(tree.some((entry) => entry.id === "child-a"), true);
+});

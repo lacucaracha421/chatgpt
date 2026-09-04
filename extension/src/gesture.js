@@ -57,6 +57,9 @@
     let opened = options.openImmediately === true;
     const centerSelectsExpandedParent = options.centerSelectsExpandedParent === true;
     const confirmSelectionWithCenter = options.confirmSelectionWithCenter === true;
+    const hiddenSecondaryIds = Array.isArray(options.hiddenSecondaryIds)
+      ? options.hiddenSecondaryIds.filter((id) => typeof id === "string" && id)
+      : [];
     let expandedParentId = null;
     let pendingClassificationId = null;
     let lastExpandedParentId = null;
@@ -252,7 +255,10 @@
     }
 
     function currentSecondaryLevel() {
-      return globalThis.LakomicsRadial.getCompactLevel(entries, layout, expandedParentId, secondaryPage, pinnedIds);
+      const excludedIds = [...new Set([...pinnedIds, ...hiddenSecondaryIds])];
+      return globalThis.LakomicsRadial.getCompactLevel(
+        entries, layout, expandedParentId, secondaryPage, excludedIds,
+      );
     }
 
     function snapshot() {

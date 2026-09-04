@@ -2081,3 +2081,74 @@ test("mobile Home detail proxy accepts only date/creator cursor routes", async (
   }
   assert.equal(harness.fetchCalls.length, before, "invalid detail paths must not reach fetch");
 });
+
+test("secondary presentation state round-trips hidden ids and reaches classification responses", async () => {
+  const harness = createHarness({
+    connectionToken: "0123456789abcdef0123456789abcdef",
+    preferences: { saveMode: "pc" },
+  });
+  harness.queueJson({ entries: [
+    { id: "game", kind: "root", name: "Game", parentId: null },
+    { id: "reverse", kind: "tag", name: "Reverse", parentId: "game", assetCount: 12 },
+    { id: "zenless", kind: "tag", name: "Zenless", parentId: "game", assetCount: 2 },
+  ] });
+  await harness.api.handleMessage({ type: "classifications:refresh" });
+
+  const hidden = await harness.api.handleMessage({
+    type: "secondary-presentation:set-hidden",
+    classificationId: "reverse",
+    hidden: true,
+  });
+  assert.equal(hidden.ok, true);
+  assert.deepEqual(plain(hidden.hiddenIds), ["reverse"]);
+  assert.equal(hidden.usage.reverse, 12);
+
+  const state = await harness.api.handleMessage({ type: "secondary-presentation:get" });
+  assert.deepEqual(plain(state.hiddenIds), ["reverse"]);
+  const cached = await harness.api.handleMessage({ type: "classifications:get" });
+  assert.deepEqual(plain(cached.hiddenSecondaryIds), ["reverse"]);
+  assert.equal(cached.usageById.reverse, 12);
+  assert.deepEqual(plain(harness.storage.secondaryRadialPresentation.hiddenIds), ["reverse"]);
+});
+
+test("successful secondary saves increment usage without counting failed saves", async () => {
+  const harness = createHarness({
+    connectionToken: "0123456789abcdef0123456789abcdef",
+    preferences: { saveMode: "pc" },
+  });
+  harness.queueJson({ entries: [
+    { id: "game", kind: "root", name: "Game", parentId: null },
+    { id: "reverse", kind: "tag", name: "Reverse", parentId: "game" },
+  ] });
+  await harness.api.handleMessage({ type: "classifications:refresh" });
+
+  harness.queueJson({ status: "added", assetId: "asset-1" });
+  const saved = await harness.api.handleMessage({
+    type: "ingestion:create",
+    payload: {
+      source: "x", mediaType: "image",
+      mediaUrl: "https://pbs.twimg.com/media/USAGE?format=jpg&name=orig",
+      sourceUrl: "https://x.com/user/status/901/photo/1",
+      classificationId: "reverse", classificationName: "Reverse",
+      classificationSource: "app",
+    },
+  });
+  assert.equal(saved.ok, true);
+  let state = await harness.api.handleMessage({ type: "secondary-presentation:get" });
+  assert.equal(state.usage.reverse, 1);
+
+  harness.queueJson({ code: "classification_not_found", message: "gone" }, 404);
+  const failed = await harness.api.handleMessage({
+    type: "ingestion:create",
+    payload: {
+      source: "x", mediaType: "image",
+      mediaUrl: "https://pbs.twimg.com/media/USAGE2?format=jpg&name=orig",
+      sourceUrl: "https://x.com/user/status/902/photo/1",
+      classificationId: "reverse", classificationName: "Reverse",
+      classificationSource: "app",
+    },
+  });
+  assert.equal(failed.ok, false);
+  state = await harness.api.handleMessage({ type: "secondary-presentation:get" });
+  assert.equal(state.usage.reverse, 1);
+});

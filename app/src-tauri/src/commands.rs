@@ -462,6 +462,16 @@ pub fn list_assets(
 }
 
 #[tauri::command]
+pub fn list_source_group_assets(
+    asset_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<AssetSummary>, CommandError> {
+    current_required(state)?
+        .list_source_group_assets(&asset_id)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub fn list_asset_date_buckets(
     query: AssetDateBucketQuery,
     state: State<'_, AppState>,

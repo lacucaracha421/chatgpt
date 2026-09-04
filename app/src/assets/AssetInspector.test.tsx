@@ -94,6 +94,25 @@ it("opens the viewer from the preview and groups the metadata into sections", as
   expect(onOpenAsset).toHaveBeenCalledWith(expect.objectContaining({ id: "a" }));
 });
 
+it("shows and opens assets saved from the same X post", async () => {
+  const user = userEvent.setup();
+  const siblings = [xAsset("x-1", 1), xAsset("x-2", 2)];
+  const listSourceGroupAssets = vi.fn().mockResolvedValue(siblings);
+  const onOpenAsset = vi.fn();
+  render(
+    <LibraryProvider gateway={createGateway(undefined, listSourceGroupAssets)}>
+      <AssetInspector assets={[siblings[0]]} open onOpenChange={vi.fn()} onOpenAsset={onOpenAsset} />
+    </LibraryProvider>,
+  );
+
+  const group = await screen.findByRole("region", { name: "같은 게시물" });
+  expect(listSourceGroupAssets).toHaveBeenCalledWith("x-1");
+  expect(within(group).getByText("2개")).toBeVisible();
+  expect(within(group).getByRole("button", { name: `x-1.png 같은 게시물에서 열기` })).toHaveAttribute("aria-current", "true");
+  await user.click(within(group).getByRole("button", { name: `x-2.png 같은 게시물에서 열기` }));
+  expect(onOpenAsset).toHaveBeenCalledWith(expect.objectContaining({ id: "x-2" }));
+});
+
 it("shows the playback duration only for video assets", () => {
   render(
     <LibraryProvider gateway={createGateway()}>
@@ -228,9 +247,13 @@ it("hides collection metadata when more than one asset is selected", () => {
   expect(screen.queryByRole("region", { name: "컬렉션 정보" })).not.toBeInTheDocument();
 });
 
-function createGateway(updateAssetMetadata = vi.fn()): LibraryGateway {
+function createGateway(
+  updateAssetMetadata = vi.fn(),
+  listSourceGroupAssets = vi.fn().mockResolvedValue([]),
+): LibraryGateway {
   return {
     updateAssetMetadata,
+    listSourceGroupAssets,
   } as unknown as LibraryGateway;
 }
 
@@ -249,6 +272,17 @@ function completeAsset(): AssetSummary {
 
 function asset(id: string): AssetSummary {
   return { id, title: null, originalName: `${id}.png`, byteSize: 1024, width: 200, height: 100, collectedAt: "2026-08-09T00:00:00Z", favorite: false, sourceUrl: `https://example.com/source/${id}`, sourcePublishedAt: null, creatorName: null, creatorHandle: null, creatorUrl: null, importSource: null, importBatchId: null, originalModifiedAt: null, media: { kind: "image" } };
+}
+
+
+function xAsset(id: string, mediaIndex: number): AssetSummary {
+  return {
+    ...asset(id),
+    sourceUrl: `https://x.com/example/status/123/photo/${mediaIndex}`,
+    creatorHandle: "example",
+    creatorUrl: "https://x.com/example",
+    importSource: "browser_extension",
+  };
 }
 
 function videoAsset(): AssetSummary {

@@ -129,6 +129,7 @@ pub fn run() {
             commands::set_collection_showcase,
             commands::get_asset_classifications,
             commands::list_assets,
+            commands::list_source_group_assets,
             commands::list_asset_creators,
             commands::get_revisit_slate,
             commands::reshuffle_revisit_bundle,

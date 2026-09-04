@@ -904,6 +904,7 @@ export interface LibraryGateway {
   updateAlbumAppearance(id: string, iconKey: string | null, colorKey: string | null): Promise<void>;
   deleteAlbum(id: string): Promise<void>;
   listAssets(query: AssetQuery): Promise<AssetPage>;
+  listSourceGroupAssets?(assetId: string): Promise<AssetSummary[]>;
   listAssetDateBuckets(query: AssetDateBucketQuery): Promise<AssetDateBucket[]>;
   listAssetCreators(query: AssetQuery): Promise<AssetCreatorSummary[]>;
   getRevisitSlate(localDate: string, nowUtc: string): Promise<RevisitSlate>;

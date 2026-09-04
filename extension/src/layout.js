@@ -112,6 +112,85 @@
   }
 
 
+  function usageBucket(value) {
+    const raw = typeof value === "object" && value !== null ? value.count : value;
+    const count = Math.max(0, Math.floor(Number(raw) || 0));
+    return count > 0 ? Math.floor(Math.log2(count + 1)) : 0;
+  }
+
+  function centerOutIndices(count) {
+    const size = Math.max(0, Math.floor(Number(count) || 0));
+    const indices = [];
+    if (size === 0) return indices;
+    if (size % 2 === 1) {
+      const center = Math.floor(size / 2);
+      indices.push(center);
+      for (let offset = 1; indices.length < size; offset += 1) {
+        if (center - offset >= 0) indices.push(center - offset);
+        if (center + offset < size) indices.push(center + offset);
+      }
+      return indices;
+    }
+    const left = size / 2 - 1;
+    const right = size / 2;
+    indices.push(left, right);
+    for (let offset = 1; indices.length < size; offset += 1) {
+      if (left - offset >= 0) indices.push(left - offset);
+      if (right + offset < size) indices.push(right + offset);
+    }
+    return indices;
+  }
+
+  function adaptiveSecondaryLayout(entries, layout, usageById = {}, hiddenIds = []) {
+    const liveEntries = (Array.isArray(entries) ? entries : [])
+      .filter((entry) => entry && typeof entry.id === "string");
+    const next = reconcileLayout(liveEntries, layout);
+    const hidden = new Set(Array.isArray(hiddenIds) ? hiddenIds : []);
+    const groups = groupByParent(liveEntries);
+
+    for (const [key, children] of groups) {
+      if (key === ROOT || children.length < 2) continue;
+      const hasHiddenChild = children.some((entry) => hidden.has(entry.id));
+      const visibleBuckets = new Set(children
+        .filter((entry) => !hidden.has(entry.id))
+        .map((entry) => usageBucket(usageById?.[entry.id])));
+      if (!hasHiddenChild && visibleBuckets.size <= 1) continue;
+
+      const pages = reconcileParent(children, next.parents[key]);
+      const pageSize = pages[0]?.length ?? slotCount(children.length);
+      const flat = pages.flat();
+      const currentPosition = new Map();
+      flat.forEach((id, index) => { if (typeof id === "string") currentPosition.set(id, index); });
+
+      const priorityPositions = [];
+      for (let start = 0; start < flat.length; start += pageSize) {
+        const localCount = Math.min(pageSize, flat.length - start);
+        for (const localIndex of centerOutIndices(localCount)) priorityPositions.push(start + localIndex);
+      }
+      const easeRankByPosition = new Map(priorityPositions.map((position, rank) => [position, rank]));
+      const canonicalIndex = new Map(children.map((entry, index) => [entry.id, index]));
+      const ids = children.map((entry) => entry.id);
+      ids.sort((a, b) => {
+        const hiddenDelta = Number(hidden.has(a)) - Number(hidden.has(b));
+        if (hiddenDelta !== 0) return hiddenDelta;
+        const bucketDelta = usageBucket(usageById?.[b]) - usageBucket(usageById?.[a]);
+        if (bucketDelta !== 0) return bucketDelta;
+        const aEase = easeRankByPosition.get(currentPosition.get(a)) ?? Number.MAX_SAFE_INTEGER;
+        const bEase = easeRankByPosition.get(currentPosition.get(b)) ?? Number.MAX_SAFE_INTEGER;
+        if (aEase !== bEase) return aEase - bEase;
+        return (canonicalIndex.get(a) ?? 0) - (canonicalIndex.get(b) ?? 0);
+      });
+
+      const ranked = Array(flat.length).fill(null);
+      ids.forEach((id, index) => {
+        const target = priorityPositions[index];
+        if (target !== undefined) ranked[target] = id;
+      });
+      next.parents[key] = chunk(ranked, pageSize);
+    }
+    return next;
+  }
+
   function moveSlot(layout, parentId, fromIndex, toIndex) {
     const next = JSON.parse(JSON.stringify(layout));
     const key = parentKey(parentId);
@@ -248,6 +327,9 @@
     getPinnedLevel,
     getFirstLevelPinCandidates,
     reorderPinned,
+    usageBucket,
+    centerOutIndices,
+    adaptiveSecondaryLayout,
     moveSlot,
   };
 })();

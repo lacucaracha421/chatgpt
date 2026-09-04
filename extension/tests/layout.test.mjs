@@ -275,3 +275,44 @@ test("only non-root classifications are offered as first-level pin candidates", 
   assert.deepEqual(plain(layoutApi.getFirstLevelPinCandidates(current, []).map(e=>e.id)), ["child"]);
   assert.deepEqual(plain(layoutApi.getFirstLevelPinCandidates(current, ["child"]).map(e=>e.id)), []);
 });
+
+
+test("adaptive secondary ordering promotes higher usage buckets toward the center and stays idempotent", () => {
+  const current = [
+    { id: "root", kind: "root", name: "Root", parentId: null },
+    ...Array.from({ length: 6 }, (_, index) => ({ id: `c${index}`, kind: "tag", name: `C${index}`, parentId: "root" })),
+  ];
+  const layout = layoutApi.resetLayout(current);
+  const ranked = layoutApi.adaptiveSecondaryLayout(current, layout, { c5: { count: 7 }, c4: { count: 3 }, c3: { count: 1 } });
+  const level = layoutApi.getCompactLevel(current, ranked, "root", 0);
+
+  assert.deepEqual(plain(level.slots.map((entry) => entry.id)), ["c1", "c3", "c5", "c4", "c2", "c0"]);
+  assert.equal(level.slots[2].id, "c5");
+  assert.equal(level.slots[3].id, "c4");
+  assert.deepEqual(plain(layoutApi.adaptiveSecondaryLayout(current, ranked, { c5: 7, c4: 3, c3: 1 })), plain(ranked));
+});
+
+test("adaptive secondary ordering does not move equal-bucket manual placements", () => {
+  const current = [
+    { id: "root", kind: "root", name: "Root", parentId: null },
+    { id: "a", kind: "tag", name: "A", parentId: "root" },
+    { id: "b", kind: "tag", name: "B", parentId: "root" },
+    { id: "c", kind: "tag", name: "C", parentId: "root" },
+  ];
+  const layout = { version: 1, parents: { root: [["c", null, "a", null, "b", null]] } };
+  const ranked = layoutApi.adaptiveSecondaryLayout(current, layout, { a: 1, b: 1, c: 1 });
+  assert.deepEqual(plain(ranked.parents.root), plain(layout.parents.root));
+});
+
+test("adaptive secondary ordering pushes hidden tags to the least prominent positions", () => {
+  const current = [
+    { id: "root", kind: "root", name: "Root", parentId: null },
+    { id: "a", kind: "tag", name: "A", parentId: "root" },
+    { id: "b", kind: "tag", name: "B", parentId: "root" },
+    { id: "c", kind: "tag", name: "C", parentId: "root" },
+  ];
+  const ranked = layoutApi.adaptiveSecondaryLayout(current, layoutApi.resetLayout(current), { a: 7 }, ["a"]);
+  const visible = layoutApi.getCompactLevel(current, ranked, "root", 0, ["a"]);
+  assert.deepEqual(plain(visible.slots.map((entry) => entry.id)).sort(), ["b", "c"]);
+  assert.equal(visible.slots.some((entry) => entry.id === "a"), false);
+});

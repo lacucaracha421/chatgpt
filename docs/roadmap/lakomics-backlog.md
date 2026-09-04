@@ -139,7 +139,7 @@ Resolution:
 - Focused VideoPlayer tests pass; behavior re-verified in real use on the running Tauri app.
 
 ### BUG-003 — X video drag-save shows blue selection highlight on PC
-Status: `VERIFY`
+Status: `DONE`
 
 Observed behavior:
 - On PC, dragging the pointer over an X video to invoke the extension save interaction can produce a blue browser selection highlight.
@@ -159,7 +159,7 @@ Direction:
 - Fix: `onSelectStart` now also suppresses while any pointer save-session is active (`extension/src/content.js`, one condition). Stateless cleanup — release/cancel/Escape paths already null the session, so normal page selection resumes automatically. No global CSS, no drag-threshold or trigger changes, no save-path changes.
 - Regression: new `extension/tests/content-select-guard.test.mjs` drives the real installed listeners with a stub document (suppressed during session, restored after up/cancel, untouched with no session). Extension suite 233 passed / 0 failed.
 - Runtime checklist (real X, desktop Chrome/Edge): video save shows no blue highlight (also try starting the press on post text and dragging slightly first); image save unchanged; page scroll/selection/controls normal outside the gesture; no stuck state after cancel/Escape.
-- Kept at `VERIFY` until that real-X pass confirms it.
+- 2026-09-04 real-X desktop verification passed: video drag-save no longer produces the blue native selection highlight; image save and normal page selection/controls remain unchanged; cancel/Escape leaves no stuck selection guard. Closed as `DONE`.
 
 ### BUG-006 — Sidebar asset counts stay stale after drag-and-drop move
 Status: `DONE`
@@ -447,6 +447,43 @@ Direction:
 - Keep provider transport concerns separate from query parsing.
 - Follow-up candidates after the core grammar is stable: favorite tags, always-excluded tags, and contextual autocomplete counts based on the current query.
 
+### CATALOG-005 ? Category visibility and search filters
+Status: `TODO`
+
+Goal:
+- Let the user choose which catalog categories are visible and searchable instead of treating every upstream category as equally relevant.
+
+Direction:
+- Use the actual category values present in the catalog/source schema; do not invent unsupported category names.
+- Persist default category visibility in Settings.
+- Normal catalog browsing/search respects those defaults, with an optional temporary per-search override when useful.
+- Filtering is presentation/query behavior only; do not delete catalog rows.
+
+### CATALOG-006 ? Blocked / excluded catalog tags
+Status: `TODO`
+
+Goal:
+- Let the user register disliked tags so matching catalog works are hidden by default.
+
+Direction:
+- Keep blocked-tag state as user preference/filter metadata; never delete source catalog data.
+- Support explicit reveal/temporary override so hidden results can still be inspected when needed.
+- Respect real tag namespaces/classes from the catalog schema (artist/group/parody/character/etc.).
+- Leave room for a later preferred-tag ranking boost without coupling it to blocking.
+
+### CATALOG-007 ? Duplicate-work grouping and representative ranking
+Status: `TODO`
+
+Goal:
+- Fold multiple uploads/editions of the same underlying work into a single browse result while preserving every catalog record.
+
+Direction:
+- Never delete duplicates; expose a representative card with an expandable `?? N?` group.
+- Rank representatives conservatively by preferred language, completeness/page count, popularity/views, then recency.
+- Preferred language outranks raw page count: e.g. a 41-page Korean translation may remain representative over a 42-page Japanese original when Korean is preferred.
+- Use strong identity/lineage signals first, then normalized title + artist/group + series/character/tag similarity + page-count proximity; auto-fold only high-confidence matches.
+- Reuse MANGA-001 lineage/ranking logic where compatible.
+
 ### MANGA-001 — Recover orphaned local manga into online catalog bookmarks
 Status: `DONE`
 
@@ -698,7 +735,7 @@ Implemented in main:
 - Manual device E2E verification passed on the packaged test build.
 
 ### EXT-003 — Group media saved from the same X post
-Status: `TODO`
+Status: `DONE`
 
 Goal:
 - When several images or media items are saved from one X post, preserve the fact that they belonged to the same post and make them easy to view together later.
@@ -707,8 +744,16 @@ Goal:
 - Consider mixed image/video posts as the same group.
 - Avoid coupling this to an X-only storage schema if a generic source-group concept can serve future importers.
 
+2026-09-04 implementation checkpoint:
+- Reuses already-preserved `source_url` metadata instead of adding X-specific asset columns, so previously saved X media and Cloud-imported assets are grouped retroactively.
+- Added a generic source-group lookup boundary (`list_source_group_assets`) whose first provider rule canonicalizes `x.com` / `twitter.com` media URLs by exact `/status/{postId}` identity. Media suffixes (`/photo/N`, `/video/N`) and host/handle changes do not split the group; neighboring numeric IDs do not collide.
+- Asset Inspector now loads the source group only for a single selected asset and shows a compact `?? ??? N?` sibling strip when at least two assets share the post. Clicking a sibling routes through the existing asset viewer callback.
+- Grouping never duplicates media or changes classifications/collections. Mixed image/video assets are eligible because grouping depends on source identity, not media kind.
+- Validation: AssetInspector 16/16 focused; full frontend 75 files / 671 tests; full Rust lib 543 passed / 2 ignored / 0 failed; production build green (initial JS 499.75 kB, gzip 153.57 kB). Rust source-group coverage verifies x.com/twitter.com equivalence and exact status-ID matching.
+- 2026-09-04 live verification: real multi-media X post grouping, sibling count, and sibling-to-viewer navigation were confirmed by the user. EXT-003 is complete.
+
 ### EXT-004 — Adaptive secondary donut ordering and hidden tags
-Status: `TODO`
+Status: `DONE`
 
 Goal:
 - Make frequently collected tags faster to reach in the second donut while keeping low-use tags out of the way.
@@ -721,6 +766,16 @@ Direction:
 - Add per-tag `숨기기` so hidden tags remain valid classifications but do not appear in the donut UI.
 - Provide a settings/manage path to reveal hidden tags again.
 - Hidden state and usage ranking should be presentation metadata only; do not alter the underlying classification tree or saved asset memberships.
+
+2026-09-04 implementation checkpoint:
+- Added persisted secondary-donut presentation state with per-classification successful-use counts and hidden IDs; existing `assetCount` values seed effective usage so previously collected tags start from real library frequency instead of zero. Classification tree and asset memberships are unchanged.
+- Adaptive ordering uses logarithmic usage buckets (1, 3, 7, 15, 31...) so repeated saves inside the same bucket do not reshuffle the ring. Higher buckets move toward center/easy-reach slots while equal-bucket manual ordering stays stable.
+- Successful PC, Cloud, and device-fallback saves increment usage; failed saves and immediate duplicate suppression do not.
+- Hidden secondary tags are excluded from the live gesture hit-test while remaining present in classification data and the layout editor.
+- The extension settings layout editor now exposes per-parent secondary usage counts with `숨기기` / `다시 표시` controls.
+- MV3 background-worker bundle regenerated from layout/defaults/background sources; extension version bumped to 2.0.0-alpha.15.55.
+- Automated validation: final MV3 worker sync + full extension suite 240/240 passed; source syntax checks passed.
+- Runtime verification: user confirmed the adaptive ordering counts and extension behavior in the real extension UI on 2026-09-04.
 
 ### PERF-001 — Cache and media optimization policy
 Status: `DONE`
@@ -1033,7 +1088,7 @@ PC Core Polish Pass 1 runtime gate is complete: BUG-009, BUG-010, BUG-011, and U
 2. PERF-003 Phase B — DONE (asset hardlink reuse, ~30× measured, stage timings instrumented; provider fetch audit remains optional non-blocking future work)
 3. MANGA-001 fallback phase — lineage suggestions, ranked fallback candidates, and explicit selection apply are implemented; remaining: VPS-backed targeted lookup for absent IDs (needs network) and selected-backup ingestion only if DB metadata proves insufficient
 4. PERF-001 — DONE (Phase C audit: bounded caches, proportional disk, sub-second open at 8k, no HIGH bottlenecks; zero code changes per measured-healthy rule)
-5. BUG-003 — X video drag-save blue native-selection artifact (fix implemented + contract-tested, awaiting real-X confirmation; still VERIFY)
+5. BUG-003 — X video drag-save blue native-selection artifact ? DONE (implemented, contract-tested, real-X verification passed)
 6. UI-009 — VCK-inspired manga viewer parity improvements — DONE (implemented, tested, real-Tauri visual pass green)
 7. EXT-003 — same-X-post media grouping
 8. EXT-004 — adaptive/hidden secondary donut tags

@@ -59,9 +59,11 @@ export function AssetInspector({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [draft, setDraft] = useState<MetadataDraft | null>(null);
+  const [sourceGroup, setSourceGroup] = useState<AssetSummary[]>([]);
   const inspectorRef = useRef<HTMLElement>(null);
   const restoreEditFocusRef = useRef(false);
   const assetIds = assets.map((asset) => asset.id).join(",");
+  const asset = assets.length === 1 ? assets[0] : null;
 
   useEffect(() => {
     setEditing(false);
@@ -77,8 +79,25 @@ export function AssetInspector({
     }
   }, [editing]);
 
+  useEffect(() => {
+    let active = true;
+    if (!open || !asset) {
+      setSourceGroup([]);
+      return () => { active = false; };
+    }
+    if (typeof gateway.listSourceGroupAssets !== "function") {
+      setSourceGroup([]);
+      return () => { active = false; };
+    }
+    void gateway.listSourceGroupAssets(asset.id).then((group) => {
+      if (active) setSourceGroup(group);
+    }).catch(() => {
+      if (active) setSourceGroup([]);
+    });
+    return () => { active = false; };
+  }, [asset?.id, gateway, open]);
+
   if (!open) return null;
-  const asset = assets.length === 1 ? assets[0] : null;
 
   const copySource = async () => {
     if (!asset?.sourceUrl) return;
@@ -181,6 +200,28 @@ export function AssetInspector({
           >
             <img src={thumbnailUrl(asset.id)} alt="" loading="lazy" decoding="async" draggable={false} />
           </button>
+          {sourceGroup.length > 1 && (
+            <section className="asset-inspector__section asset-inspector__source-group" aria-label="같은 게시물">
+              <div className="asset-inspector__source-group-heading">
+                <h3>같은 게시물</h3>
+                <span>{sourceGroup.length}개</span>
+              </div>
+              <div className="asset-inspector__source-group-strip">
+                {sourceGroup.map((sibling) => (
+                  <button
+                    key={sibling.id}
+                    type="button"
+                    className="asset-inspector__source-group-item"
+                    aria-label={`${sibling.title || sibling.originalName} 같은 게시물에서 열기`}
+                    aria-current={sibling.id === asset.id ? "true" : undefined}
+                    onClick={() => onOpenAsset?.(sibling)}
+                  >
+                    <img src={thumbnailUrl(sibling.id)} alt="" loading="lazy" decoding="async" draggable={false} />
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
           <section className="asset-inspector__section">
             <h3>출처</h3>
             <dl className="asset-inspector__metadata">

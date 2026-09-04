@@ -711,6 +711,7 @@
           openImmediately,
           centerSelectsExpandedParent: pointer.input === "touch",
           confirmSelectionWithCenter: pointer.input === "touch",
+          hiddenSecondaryIds: pointer.classifications.hiddenSecondaryIds ?? [],
         },
       );
       if (openImmediately) {

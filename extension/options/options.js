@@ -53,6 +53,8 @@
   let selectedIndex = null;
   let pinnedIds = [];
   let pinnedPersistQueue = Promise.resolve();
+  let secondaryUsageById = {};
+  let hiddenSecondaryIds = [];
   let localTree = null;
   let localPrimaryIndex = 0;
   let localSecondaryInputs = [];
@@ -139,6 +141,11 @@
     if (stored.ok) workingLayout = stored.layout;
     const pinned = await chrome.runtime.sendMessage({ type: "pinned:get" });
     if (pinned.ok) pinnedIds = pinned.pinnedIds;
+    const presentation = await chrome.runtime.sendMessage({ type: "secondary-presentation:get" });
+    if (presentation.ok) {
+      secondaryUsageById = presentation.usage ?? {};
+      hiddenSecondaryIds = presentation.hiddenIds ?? [];
+    }
     const local = await chrome.runtime.sendMessage({ type: "local-tree:get" });
     if (local.ok) {
       localTree = local.tree;
@@ -443,6 +450,8 @@
     entries = response.entries;
     workingLayout = response.layout;
     pinnedIds = response.pinnedIds;
+    secondaryUsageById = response.usageById ?? secondaryUsageById;
+    hiddenSecondaryIds = response.hiddenSecondaryIds ?? hiddenSecondaryIds;
     path = [];
     page = 0;
     selectedIndex = null;
@@ -510,7 +519,65 @@
     const help = document.createElement("p");
     help.className = "editor-help";
     help.textContent = "분류 슬롯을 선택한 뒤 다른 슬롯을 누르면 두 위치를 바꿉니다. 빈 슬롯으로도 이동할 수 있습니다.";
-    editor.append(heading, renderPinnedPanel(), radial, controls, help);
+    const blocks = [heading, renderPinnedPanel()];
+    if (path.length > 0) blocks.push(renderSecondaryPresentationPanel(parentId));
+    blocks.push(radial, controls, help);
+    editor.append(...blocks);
+  }
+
+  function renderSecondaryPresentationPanel(parentId) {
+    const panel = document.createElement("div");
+    panel.className = "pinned-panel secondary-presentation-panel";
+    const title = document.createElement("strong");
+    title.textContent = "2차 도넛 자동 정렬 · 숨김";
+    panel.append(title);
+    const children = entries
+      .filter((entry) => entry?.parentId === parentId && !pinnedIds.includes(entry.id))
+      .sort((a, b) => (Number(secondaryUsageById[b.id]) || 0) - (Number(secondaryUsageById[a.id]) || 0)
+        || String(a.name).localeCompare(String(b.name), "ko"));
+    if (!children.length) {
+      const empty = document.createElement("p");
+      empty.className = "pinned-empty";
+      empty.textContent = "이 분류의 2차 태그가 없습니다.";
+      panel.append(empty);
+      return panel;
+    }
+    const hidden = new Set(hiddenSecondaryIds);
+    const list = document.createElement("div");
+    list.className = "pinned-list";
+    children.forEach((entry) => {
+      const item = document.createElement("div");
+      item.className = "pinned-item";
+      const name = document.createElement("span");
+      const count = Math.max(0, Math.floor(Number(secondaryUsageById[entry.id]) || 0));
+      name.textContent = `${entry.name} · ${count}회`;
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      const isHidden = hidden.has(entry.id);
+      toggle.textContent = isHidden ? "다시 표시" : "숨기기";
+      toggle.addEventListener("click", async () => {
+        const response = await chrome.runtime.sendMessage({
+          type: "secondary-presentation:set-hidden",
+          classificationId: entry.id,
+          hidden: !isHidden,
+        });
+        if (!response.ok) {
+          status.textContent = "2차 태그 표시 설정을 저장하지 못했습니다.";
+          return;
+        }
+        secondaryUsageById = response.usage ?? secondaryUsageById;
+        hiddenSecondaryIds = response.hiddenIds ?? hiddenSecondaryIds;
+        workingLayout = LakomicsRadial.adaptiveSecondaryLayout(
+          entries, workingLayout, secondaryUsageById, hiddenSecondaryIds,
+        );
+        status.textContent = isHidden ? "2차 태그를 다시 표시합니다." : "2차 태그를 숨겼습니다.";
+        renderEditor();
+      });
+      item.append(name, toggle);
+      list.append(item);
+    });
+    panel.append(list);
+    return panel;
   }
 
   function renderPinnedPanel() {

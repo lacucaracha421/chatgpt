@@ -15,6 +15,7 @@
   const TOKEN_PATTERN = /^[0-9a-f]{32}$/;
   const APP_LAYOUT_KEY = "radialLayout";
   const APP_PINNED_KEY = "pinnedClassificationIds";
+  const SECONDARY_PRESENTATION_KEY = "secondaryRadialPresentation";
   const LOCAL_LAYOUT_KEY = "localRadialLayout"; // legacy alpha storage
   const LOCAL_TREE_KEY = "localClassificationTree";
   const RECENT_BROWSER_SAVES_KEY = "recentBrowserSaves";
@@ -173,7 +174,13 @@
           return { ok: false, code: "invalid_layout" };
         }
         await chrome.storage.local.set({ [APP_LAYOUT_KEY]: message.layout });
-        if (classificationCache) classificationCache.layout = message.layout;
+        if (classificationCache) {
+          const presentation = await secondaryPresentationLayout(classificationCache.entries, message.layout);
+          classificationCache = {
+            ...classificationCache, layout: presentation.layout,
+            usageById: presentation.usage, hiddenSecondaryIds: presentation.hiddenIds,
+          };
+        }
         await updateLastAppSnapshot({ layout: message.layout });
         return { ok: true };
       }
@@ -183,10 +190,22 @@
         }
         const pinnedIds = normalizePinnedIds(message.pinnedIds);
         await chrome.storage.local.set({ [APP_LAYOUT_KEY]: message.layout, [APP_PINNED_KEY]: pinnedIds });
-        if (classificationCache) { classificationCache.layout = message.layout; classificationCache.pinnedIds = pinnedIds; }
+        if (classificationCache) {
+          const presentation = await secondaryPresentationLayout(classificationCache.entries, message.layout);
+          classificationCache = {
+            ...classificationCache, layout: presentation.layout, pinnedIds,
+            usageById: presentation.usage, hiddenSecondaryIds: presentation.hiddenIds,
+          };
+        }
         await updateLastAppSnapshot({ layout: message.layout, pinnedIds });
         return { ok: true, pinnedIds };
       }
+      case "secondary-presentation:get": {
+        const presentation = await loadSecondaryPresentation();
+        return { ok: true, usage: classificationCache?.usageById ?? effectiveSecondaryUsage(classificationCache?.entries, presentation.usage), hiddenIds: presentation.hiddenIds };
+      }
+      case "secondary-presentation:set-hidden":
+        return setSecondaryHidden(message);
       case "classifications:get":
         return activeClassifications(false);
       case "classifications:refresh":
@@ -278,7 +297,12 @@
     const sourceLayout = validLayout(stored[APP_LAYOUT_KEY]) ? stored[APP_LAYOUT_KEY] : null;
     let layout = globalThis.LakomicsRadial.reconcileLayout(entries, sourceLayout);
     layout = globalThis.LakomicsRadial.reorderPinned(layout, entries, repaired.pinnedIds);
-    classificationCache = { entries, layout, pinnedIds: repaired.pinnedIds };
+    const presentation = await secondaryPresentationLayout(entries, layout);
+    layout = presentation.layout;
+    classificationCache = {
+      entries, layout, pinnedIds: repaired.pinnedIds,
+      usageById: presentation.usage, hiddenSecondaryIds: presentation.hiddenIds,
+    };
     classificationCachedAt = now;
     classificationCacheBaseUrl = collector.baseUrl;
     await chrome.storage.local.set({
@@ -303,8 +327,12 @@
     const sourceLayout = validLayout(stored[APP_LAYOUT_KEY]) ? stored[APP_LAYOUT_KEY] : null;
     let layout = globalThis.LakomicsRadial.reconcileLayout(entries, sourceLayout);
     layout = globalThis.LakomicsRadial.reorderPinned(layout, entries, pinnedIds);
-    return { ok: true, classificationSource: "cloud-cache", entries, layout, pinnedIds,
-      cachedAt: Number(snapshot.savedAt) || null };
+    const presentation = await secondaryPresentationLayout(entries, layout);
+    return {
+      ok: true, classificationSource: "cloud-cache", entries, layout: presentation.layout, pinnedIds,
+      usageById: presentation.usage, hiddenSecondaryIds: presentation.hiddenIds,
+      cachedAt: Number(snapshot.savedAt) || null,
+    };
   }
 
   let androidRuntimePromise = null;
@@ -484,22 +512,121 @@
     const rawPinnedIds = await loadPinned(APP_PINNED_KEY);
     const repaired = repairPinnedIds(entries, rawPinnedIds, previousEntries);
     const remappedLayout = remapLayoutSlotIds(radialLayout, repaired.idRemap);
-    let layout = globalThis.LakomicsRadial.reconcileLayout(entries, remappedLayout);
-    layout = globalThis.LakomicsRadial.reorderPinned(layout, entries, repaired.pinnedIds);
+    let baseLayout = globalThis.LakomicsRadial.reconcileLayout(entries, remappedLayout);
+    baseLayout = globalThis.LakomicsRadial.reorderPinned(baseLayout, entries, repaired.pinnedIds);
     const statePatch = {};
-    if (JSON.stringify(layout) !== JSON.stringify(radialLayout)) statePatch[APP_LAYOUT_KEY] = layout;
+    if (JSON.stringify(baseLayout) !== JSON.stringify(radialLayout)) statePatch[APP_LAYOUT_KEY] = baseLayout;
     if (JSON.stringify(repaired.pinnedIds) !== JSON.stringify(rawPinnedIds)) statePatch[APP_PINNED_KEY] = repaired.pinnedIds;
     if (Object.keys(statePatch).length) await chrome.storage.local.set(statePatch);
-    classificationCache = { entries, layout, pinnedIds: repaired.pinnedIds };
+    const presentation = await secondaryPresentationLayout(entries, baseLayout);
+    const layout = presentation.layout;
+    classificationCache = {
+      entries, layout, pinnedIds: repaired.pinnedIds,
+      usageById: presentation.usage, hiddenSecondaryIds: presentation.hiddenIds,
+    };
     classificationCachedAt = now;
     classificationCacheBaseUrl = endpoint.baseUrl;
     await chrome.storage.local.set({
       [LAST_APP_CLASSIFICATIONS_KEY]: {
         version: 2, baseUrl: endpoint.baseUrl, endpointSource: endpoint.source,
-        entries, layout, pinnedIds: repaired.pinnedIds, savedAt: now,
+        entries, layout: baseLayout, pinnedIds: repaired.pinnedIds, savedAt: now,
       },
     });
     return { ok: true, classificationSource: endpoint.source, ...classificationCache };
+  }
+
+  function normalizeSecondaryPresentation(value) {
+    const usage = {};
+    for (const [id, raw] of Object.entries(value?.usage ?? {})) {
+      if (typeof id !== "string" || !id) continue;
+      const count = Math.max(0, Math.min(1_000_000_000, Math.floor(Number(raw) || 0)));
+      if (count > 0) usage[id] = count;
+    }
+    return { version: 1, usage, hiddenIds: normalizePinnedIds(value?.hiddenIds) };
+  }
+
+  async function loadSecondaryPresentation() {
+    const stored = await chrome.storage.local.get([SECONDARY_PRESENTATION_KEY]);
+    return normalizeSecondaryPresentation(stored[SECONDARY_PRESENTATION_KEY]);
+  }
+
+  function effectiveSecondaryUsage(entries, storedUsage = {}) {
+    const usage = { ...storedUsage };
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      if (!entry || typeof entry.id !== "string" || entry.parentId === null) continue;
+      const assetCount = Math.max(0, Math.floor(Number(entry.assetCount) || 0));
+      usage[entry.id] = Math.max(assetCount, Math.floor(Number(usage[entry.id]) || 0));
+    }
+    return usage;
+  }
+
+  async function secondaryPresentationLayout(entries, layout) {
+    const presentation = await loadSecondaryPresentation();
+    const usage = effectiveSecondaryUsage(entries, presentation.usage);
+    return {
+      ...presentation,
+      usage,
+      layout: globalThis.LakomicsRadial.adaptiveSecondaryLayout(
+        entries, layout, usage, presentation.hiddenIds,
+      ),
+    };
+  }
+
+  async function refreshSecondaryPresentationCache(presentation) {
+    if (!classificationCache?.entries?.length || !classificationCache?.layout) return;
+    const usage = effectiveSecondaryUsage(classificationCache.entries, presentation.usage);
+    const layout = globalThis.LakomicsRadial.adaptiveSecondaryLayout(
+      classificationCache.entries,
+      classificationCache.layout,
+      usage,
+      presentation.hiddenIds,
+    );
+    classificationCache = {
+      ...classificationCache,
+      layout,
+      usageById: usage,
+      hiddenSecondaryIds: presentation.hiddenIds,
+    };
+  }
+
+  async function setSecondaryHidden(message) {
+    const classificationId = typeof message?.classificationId === "string"
+      ? message.classificationId.trim() : "";
+    if (!classificationId) return { ok: false, code: "invalid_secondary_classification" };
+    const entry = classificationCache?.entries?.find((item) => item?.id === classificationId);
+    if (entry?.parentId === null) return { ok: false, code: "invalid_secondary_classification" };
+    const presentation = await loadSecondaryPresentation();
+    const hidden = new Set(presentation.hiddenIds);
+    if (message.hidden === true) hidden.add(classificationId);
+    else hidden.delete(classificationId);
+    presentation.hiddenIds = [...hidden];
+    await chrome.storage.local.set({ [SECONDARY_PRESENTATION_KEY]: presentation });
+    await refreshSecondaryPresentationCache(presentation);
+    return { ok: true, usage: classificationCache?.usageById ?? effectiveSecondaryUsage(classificationCache?.entries, presentation.usage), hiddenIds: presentation.hiddenIds };
+  }
+
+  async function recordSecondaryUsage(classificationId) {
+    const id = typeof classificationId === "string" ? classificationId.trim() : "";
+    if (!id) return;
+    const entry = classificationCache?.entries?.find((item) => item?.id === id);
+    if (entry?.parentId === null) return;
+    const presentation = await loadSecondaryPresentation();
+    const assetCount = Math.max(0, Math.floor(Number(entry?.assetCount) || 0));
+    const previous = Math.max(assetCount, Math.floor(Number(presentation.usage[id]) || 0));
+    const next = Math.min(1_000_000_000, previous + 1);
+    presentation.usage[id] = next;
+    await chrome.storage.local.set({ [SECONDARY_PRESENTATION_KEY]: presentation });
+    if (classificationCache) {
+      classificationCache = {
+        ...classificationCache,
+        usageById: effectiveSecondaryUsage(classificationCache.entries, presentation.usage),
+        hiddenSecondaryIds: presentation.hiddenIds,
+      };
+    }
+    if (globalThis.LakomicsRadial.usageBucket(previous)
+      !== globalThis.LakomicsRadial.usageBucket(next)) {
+      await refreshSecondaryPresentationCache(presentation);
+    }
   }
 
   async function savedXMediaIndex() {
@@ -703,8 +830,13 @@
     const sourceLayout = validLayout(stored[APP_LAYOUT_KEY]) ? stored[APP_LAYOUT_KEY] : snapshot.layout;
     let layout = globalThis.LakomicsRadial.reconcileLayout(entries, sourceLayout);
     layout = globalThis.LakomicsRadial.reorderPinned(layout, entries, pinnedIds);
-    return { ok: true, classificationSource: "app-cache", entries, layout, pinnedIds,
-      cachedAt: Number(snapshot.savedAt) || null, ...(fallbackCode ? { fallbackCode } : {}) };
+    const presentation = await secondaryPresentationLayout(entries, layout);
+    return {
+      ok: true, classificationSource: "app-cache", entries, layout: presentation.layout, pinnedIds,
+      usageById: presentation.usage, hiddenSecondaryIds: presentation.hiddenIds,
+      cachedAt: Number(snapshot.savedAt) || null,
+      ...(fallbackCode ? { fallbackCode } : {}),
+    };
   }
 
   async function updateLastAppSnapshot(patch) {
@@ -729,6 +861,8 @@
       entries,
       layout,
       pinnedIds: [],
+      usageById: {},
+      hiddenSecondaryIds: [],
       ...(fallbackCode ? { fallbackCode } : {}),
     };
   }
@@ -778,6 +912,7 @@
     const markSaved = async () => {
       await rememberSavedXMediaSource(mediaPayload.sourceUrl);
       await rememberRecentSavedXMediaSource(mediaPayload.sourceUrl);
+      await recordSecondaryUsage(mediaPayload.classificationId);
     };
 
     const tryAppDirect = async () => {
@@ -816,6 +951,7 @@
         const normalized = normalizeAppMediaResponse(appResponse, mediaPayload);
         if (normalized.ok && normalized.status !== "review_pending") {
           await rememberSavedXMediaSource(mediaPayload.sourceUrl);
+          await recordSecondaryUsage(mediaPayload.classificationId);
         }
         return normalized;
       }
@@ -1114,6 +1250,9 @@
       .then(() => browserDownloadUnlocked(payload, preferences, fallbackCode))
       .then(async (result) => {
         if (result?.ok) await rememberRecentSavedXMediaSource(payload.sourceUrl);
+        if (result?.ok && result.status !== "duplicate_recent") {
+          await recordSecondaryUsage(payload.classificationId);
+        }
         return result;
       });
     browserDownloadQueue = job.then(() => undefined, () => undefined);
