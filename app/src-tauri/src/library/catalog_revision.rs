@@ -16,6 +16,19 @@ pub(crate) fn content_revision(connection: &Connection) -> Result<String, Librar
         .unwrap_or_else(|| "legacy".to_owned()))
 }
 
+/// Establish a durable source identity at an authorized publication/setup boundary.
+/// Reads intentionally do not call this function because initialization is a write.
+pub(crate) fn initialize_content_revision(connection: &Connection) -> Result<String, LibraryError> {
+    let candidate = uuid::Uuid::new_v4().to_string();
+    connection.execute(
+        "INSERT INTO CrawlState(Key,Value) VALUES(?1,?2)
+         ON CONFLICT(Key) DO UPDATE SET Value=excluded.Value
+         WHERE CrawlState.Value='legacy'",
+        rusqlite::params![REVISION_KEY, candidate],
+    )?;
+    content_revision(connection)
+}
+
 /// The caller owns the transaction, including publication/import staging.
 pub(crate) fn mark_catalog_changed(connection: &Connection) -> Result<(), LibraryError> {
     connection.execute(

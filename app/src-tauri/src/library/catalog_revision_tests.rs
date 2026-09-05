@@ -3,7 +3,7 @@ use super::{
     tests::{catalog, page},
     write_catalog_work, RemoteCatalogPage,
 };
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::{Connection, OpenFlags, OptionalExtension};
 
 fn revision(connection: &Connection) -> String {
     connection
@@ -15,6 +15,93 @@ fn revision(connection: &Connection) -> String {
         .optional()
         .unwrap()
         .unwrap_or_else(|| "legacy".into())
+}
+
+#[test]
+fn content_revision_read_does_not_initialize_legacy_catalog() {
+    let (_dir, path) = catalog();
+    let connection = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+
+    assert_eq!(
+        super::super::catalog_revision::content_revision(&connection).unwrap(),
+        "legacy"
+    );
+    assert_eq!(revision(&connection), "legacy");
+    assert!(super::super::catalog_revision::initialize_content_revision(&connection).is_err());
+    assert_eq!(revision(&connection), "legacy");
+}
+
+#[test]
+fn content_revision_initialization_is_stable_across_calls_and_restarts() {
+    let (_dir, path) = catalog();
+    let connection = Connection::open(&path).unwrap();
+    let first = super::super::catalog_revision::initialize_content_revision(&connection).unwrap();
+    assert_ne!(first, "legacy");
+    assert!(uuid::Uuid::parse_str(&first).is_ok());
+    assert_eq!(
+        super::super::catalog_revision::initialize_content_revision(&connection).unwrap(),
+        first
+    );
+    drop(connection);
+
+    let reopened = Connection::open(&path).unwrap();
+    assert_eq!(
+        super::super::catalog_revision::initialize_content_revision(&reopened).unwrap(),
+        first
+    );
+    assert_eq!(revision(&reopened), first);
+}
+
+#[test]
+fn content_revision_initialization_preserves_existing_revision() {
+    let (_dir, path) = catalog();
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute(
+            "INSERT INTO CrawlState(Key,Value) VALUES('lakomics.catalog.contentRevision','existing-revision')",
+            [],
+        )
+        .unwrap();
+
+    assert_eq!(
+        super::super::catalog_revision::initialize_content_revision(&connection).unwrap(),
+        "existing-revision"
+    );
+    assert_eq!(revision(&connection), "existing-revision");
+}
+
+#[test]
+fn content_revision_initialization_replaces_persisted_legacy_sentinel_once() {
+    let (_dir, path) = catalog();
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute(
+            "INSERT INTO CrawlState(Key,Value) VALUES('lakomics.catalog.contentRevision','legacy')",
+            [],
+        )
+        .unwrap();
+
+    let initialized =
+        super::super::catalog_revision::initialize_content_revision(&connection).unwrap();
+    assert_ne!(initialized, "legacy");
+    assert!(uuid::Uuid::parse_str(&initialized).is_ok());
+    assert_eq!(
+        super::super::catalog_revision::initialize_content_revision(&connection).unwrap(),
+        initialized
+    );
+}
+
+#[test]
+fn content_revision_initialization_rolls_back_with_publication_transaction() {
+    let (_dir, path) = catalog();
+    let mut connection = Connection::open(&path).unwrap();
+    let transaction = connection.transaction().unwrap();
+    let initialized =
+        super::super::catalog_revision::initialize_content_revision(&transaction).unwrap();
+    assert_ne!(initialized, "legacy");
+    transaction.rollback().unwrap();
+
+    assert_eq!(revision(&connection), "legacy");
 }
 
 #[test]
