@@ -3,6 +3,7 @@ import type { CatalogWorkDetail, RemoteReadingProgress } from "../library/types"
 import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
 import { CatalogThumbnail } from "./CatalogThumbnail";
+import { catalogCategoryLabel } from "./catalogCategories";
 
 type Props = {
   detail: CatalogWorkDetail;
@@ -13,12 +14,6 @@ type Props = {
   onTagSearch: (query: string) => void;
   onRead: () => void;
   onClose: () => void;
-};
-
-const categories: Record<number, string> = {
-  1: "동인지", 2: "만화", 3: "아티스트 CG", 4: "게임 CG", 5: "서양",
-  6: "이미지 세트", 7: "비성인", 8: "코스프레", 9: "아시아 포르노",
-  10: "기타", 11: "비공개",
 };
 
 const dateFormatter = new Intl.DateTimeFormat("ko-KR", {
@@ -42,7 +37,7 @@ export function OnlineCatalogDetailDialog({
   const canResume = progress !== null
     && progress.pageCount === detail.fileCount
     && progress.lastPage > 1;
-  const category = detail.category === null ? null : categories[detail.category] ?? null;
+  const category = detail.category === null ? null : catalogCategoryLabel(detail.category);
   const tagValues = (namespace: string) => detail.tagGroups
     .find((group) => group.namespace === namespace)?.values.join(" · ") ?? null;
   const artists = tagValues("artist");

@@ -118,6 +118,8 @@ pub enum LibraryError {
     CatalogTransportUnavailable,
     #[error("온라인 카탈로그 갱신 간격은 60초 이상이어야 합니다")]
     InvalidCatalogUpdateInterval,
+    #[error("온라인 카탈로그 표시 정책이 올바르지 않습니다")]
+    InvalidCatalogVisibilityPolicy,
     #[error("온라인 작품의 이미지 목록이 올바르지 않습니다")]
     InvalidRemoteGallery,
     #[error("온라인 작품의 이미지 목록을 가져올 수 없습니다")]

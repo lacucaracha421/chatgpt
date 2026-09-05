@@ -226,7 +226,7 @@ Prerequisite: CATALOG-002A. CATALOG-003 may proceed independently after that con
 
 ## CATALOG-005 + CATALOG-006 — Catalog visibility/block policy
 
-Status: `MERGE CANDIDATE`
+Status: `DONE`
 Execute as one implementation batch after CATALOG-004.
 
 One persistent policy must cover:
@@ -241,6 +241,13 @@ One persistent policy must cover:
 Persistence belongs in additive `library.sqlite` preference tables so existing metadata backup/restore protects it.
 
 Do not implement either feature as post-pagination React filtering.
+
+Completed evidence (2026-09-05):
+
+- schema v34 adds global hidden-category and exact `(namespace, value)` blocked-tag preference tables in `library.sqlite`; a full v33 fixture migration preserves existing catalog bookmark data;
+- one reusable Rust visibility predicate is composed into the shared result/count `WHERE` clause, while `revealBlocked` removes only that predicate and leaves provider, language, bookmark, expunged, and user-query constraints intact;
+- Settings manages persistent categories and exact tags with load retry, and the catalog's temporary reveal control re-queries page zero without React post-pagination filtering; reopening the catalog reloads policy-filtered counts;
+- verification passed 38 focused Rust tests, 77 focused frontend tests, all 682 frontend tests, TypeScript typecheck, and the production frontend build.
 
 ## CATALOG-007A — Strong-lineage duplicate groups
 

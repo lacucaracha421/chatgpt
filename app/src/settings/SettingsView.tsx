@@ -13,6 +13,7 @@ import { Toast } from "../shared/ui/Toast";
 import { Toggle } from "../shared/ui/Toggle";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { CloudBackfillSettings } from "./CloudBackfillSettings";
+import { CatalogVisibilitySettings } from "./CatalogVisibilitySettings";
 
 type SettingsViewProps = {
   restoring: boolean;
@@ -889,6 +890,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             <option value="86400">24시간</option>
           </Select>
         </dl>}
+        <CatalogVisibilitySettings />
         <dl className="settings-view__property">
           <dt>온라인 이미지 캐시</dt>
           <dd>열어 본 온라인 작품의 페이지 이미지만 삭제합니다.</dd>

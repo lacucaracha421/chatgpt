@@ -1,4 +1,4 @@
-import { ArrowDownTrayIcon, ArrowPathIcon, BarsArrowDownIcon, ClockIcon, EyeIcon, FireIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
+import { ArrowDownTrayIcon, ArrowPathIcon, BarsArrowDownIcon, ClockIcon, EyeIcon, EyeSlashIcon, FireIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { ViewToolbar } from "../layout/ViewToolbar";
@@ -50,6 +50,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<CatalogSort>("latest");
   const [scope, setScope] = useState<CatalogScope>("all");
+  const [revealBlocked, setRevealBlocked] = useState(false);
   const [page, setPage] = useState(0);
   const [suggestions, setSuggestions] = useState<CatalogSuggestion[]>([]);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
@@ -83,7 +84,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
     if (pendingProgress.current) void gateway.saveRemoteReadingProgress(pendingProgress.current);
   }, [gateway]);
 
-  async function search(text: string, nextSort = sort, nextScope = scope, nextPage = 0) {
+  async function search(text: string, nextSort = sort, nextScope = scope, nextPage = 0, nextRevealBlocked = revealBlocked) {
     const request = ++searchRequest.current;
     setLoading(true);
     setPage(nextPage);
@@ -93,6 +94,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
     try {
       const nextResults = await gateway.searchOnlineCatalog({
         provider: "kHentai",
+        revealBlocked: nextRevealBlocked,
         text,
         sort: nextSort,
         scope: nextScope,
@@ -210,6 +212,12 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
     } finally {
       if (request === detailRequest.current) setOpeningWorkKey(null);
     }
+  }
+
+  function toggleRevealBlocked() {
+    const next = !revealBlocked;
+    setRevealBlocked(next);
+    void search(query.trim(), sort, scope, 0, next);
   }
 
   async function bookmarkWork(identity: CatalogWorkIdentity, bookmarked: boolean) {
@@ -387,6 +395,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
         </form>}
       </>}
       actions={status?.installed ? <>
+        <Button size="icon" variant={revealBlocked ? "primary" : "ghost"} title="숨긴 결과 표시" aria-label="숨긴 결과 표시" aria-pressed={revealBlocked} disabled={loading} onClick={toggleRevealBlocked}><EyeSlashIcon aria-hidden="true" /></Button>
         <span className="manga-browser__icon-control" title={`정렬: ${catalogSortLabel(sort)}`}>
           <Menu label={`정렬: ${catalogSortLabel(sort)}`} trigger={<BarsArrowDownIcon aria-hidden="true" />} items={[
             { id: "latest", label: "최신순", icon: <ClockIcon />, selected: sort === "latest", onSelect: () => { setSort("latest"); void search(query.trim(), "latest", scope, 0); } },
@@ -401,6 +410,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
       </> : undefined}
     />
     {status?.installed && <div className="online-catalog__sync-summary">
+      {revealBlocked && <span className="online-catalog__visibility-status" role="status">숨긴 분류와 차단 태그를 표시 중입니다</span>}
       {status?.lastError ? <span className="online-catalog__sync-status" role="alert">마지막 갱신 실패 — {status.lastError}</span>
         : status?.lastSuccessAt ? <span className="online-catalog__sync-status">마지막 갱신 {localDateTime(status.lastSuccessAt)}{status.lastAdded > 0 ? ` · 신규 ${status.lastAdded.toLocaleString()}개` : ""}</span>
         : <span className="online-catalog__sync-status">아직 갱신 기록이 없습니다</span>}

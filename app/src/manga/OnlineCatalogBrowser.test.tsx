@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { open } from "@tauri-apps/plugin-dialog";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { CatalogWork, CatalogWorkDetail, LibraryGateway, ResolvedGallery } from "../library/types";
+import { CatalogVisibilitySettings } from "../settings/CatalogVisibilitySettings";
 import { OnlineCatalogBrowser } from "./OnlineCatalogBrowser";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
@@ -42,6 +43,68 @@ const detail: CatalogWorkDetail = {
 };
 
 describe("OnlineCatalogBrowser", () => {
+  it("temporarily reveals blocked results and sends the policy override to SQLite", async () => {
+    const gateway = createGateway(true);
+    vi.mocked(gateway.searchOnlineCatalog).mockImplementation(async (query) => ({
+      works: [work],
+      totalCount: query.revealBlocked ? 3 : 1,
+      page: query.page,
+      pageSize: 48,
+    }));
+    renderBrowser(gateway);
+
+    const reveal = await screen.findByRole("button", { name: "숨긴 결과 표시" });
+    expect(reveal).toHaveAttribute("aria-pressed", "false");
+    expect(gateway.searchOnlineCatalog).toHaveBeenLastCalledWith(
+      expect.objectContaining({ revealBlocked: false }),
+    );
+
+    await userEvent.click(reveal);
+
+    await waitFor(() => expect(gateway.searchOnlineCatalog).toHaveBeenLastCalledWith(
+      expect.objectContaining({ revealBlocked: true, page: 0 }),
+    ));
+    expect(reveal).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByText("숨긴 분류와 차단 태그를 표시 중입니다")).toBeVisible();
+    expect(screen.getByText("3개 결과")).toBeVisible();
+  });
+
+  it("reloads policy-filtered counts after settings change and catalog reentry", async () => {
+    const gateway = createGateway(true);
+    let hiddenCategories: number[] = [];
+    vi.mocked(gateway.getCatalogVisibilityPolicy).mockImplementation(async () => ({
+      hiddenCategories,
+      blockedTags: [],
+    }));
+    vi.mocked(gateway.setCatalogCategoryHidden).mockImplementation(async (category, hidden) => {
+      hiddenCategories = hidden ? [category] : [];
+      return { hiddenCategories, blockedTags: [] };
+    });
+    vi.mocked(gateway.searchOnlineCatalog).mockImplementation(async (query) => ({
+      works: [work],
+      totalCount: hiddenCategories.includes(2) ? 1 : 3,
+      page: query.page,
+      pageSize: 48,
+    }));
+    const first = renderBrowser(gateway);
+    expect(await screen.findByText("3개 결과")).toBeVisible();
+    first.unmount();
+
+    const settings = render(
+      <LibraryProvider gateway={gateway}>
+        <CatalogVisibilitySettings />
+      </LibraryProvider>,
+    );
+    await userEvent.click(await screen.findByRole("checkbox", { name: "만화 숨기기" }));
+    expect(gateway.setCatalogCategoryHidden).toHaveBeenCalledWith(2, true);
+    settings.unmount();
+
+    renderBrowser(gateway);
+
+    expect(await screen.findByText("1개 결과")).toBeVisible();
+    expect(gateway.searchOnlineCatalog).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps only the newest search response", async () => {
     const gateway = createGateway(true);
     renderBrowser(gateway);
@@ -439,6 +502,18 @@ function createGateway(installed: boolean): LibraryGateway {
       pages: 1,
       reason: "completed",
       lastSuccessAt: "2026-08-22T12:00:00Z",
+    }),
+    getCatalogVisibilityPolicy: vi.fn().mockResolvedValue({
+      hiddenCategories: [],
+      blockedTags: [],
+    }),
+    setCatalogCategoryHidden: vi.fn().mockResolvedValue({
+      hiddenCategories: [],
+      blockedTags: [],
+    }),
+    setCatalogTagBlocked: vi.fn().mockResolvedValue({
+      hiddenCategories: [],
+      blockedTags: [],
     }),
     getTmdbCredentialStatus: vi.fn(),
     setTmdbToken: vi.fn(),

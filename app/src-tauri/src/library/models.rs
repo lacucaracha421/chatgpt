@@ -1068,6 +1068,20 @@ pub enum CatalogLanguage {
     Japanese,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogBlockedTag {
+    pub namespace: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogVisibilityPolicy {
+    pub hidden_categories: Vec<i64>,
+    pub blocked_tags: Vec<CatalogBlockedTag>,
+}
+
 impl CatalogLanguage {
     pub(crate) const fn as_tag(self) -> &'static str {
         match self {
@@ -1084,6 +1098,8 @@ pub struct CatalogSearchQuery {
     pub provider: super::catalog_provider::CatalogProvider,
     #[serde(default)]
     pub language: Option<CatalogLanguage>,
+    #[serde(default)]
+    pub reveal_blocked: bool,
     pub text: String,
     pub sort: CatalogSort,
     pub scope: CatalogScope,

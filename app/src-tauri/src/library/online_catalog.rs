@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use super::{
     catalog_provider::{CatalogProvider, CatalogWorkIdentity},
     catalog_query::{compile as compile_catalog_query, parse as parse_catalog_query},
+    catalog_visibility::VISIBLE_WORK_PREDICATE,
     error::LibraryError,
     models::{
         CatalogScope, CatalogSearchPage, CatalogSearchQuery, CatalogSort, CatalogStatus,
@@ -284,6 +285,9 @@ impl Library {
                     .into(),
             );
             values.push(language.as_tag().to_owned().into());
+        }
+        if !query.reveal_blocked {
+            clauses.push(VISIBLE_WORK_PREDICATE.into());
         }
         if let Some(expression) = parse_catalog_query(&query.text)? {
             let compiled = compile_catalog_query(&expression);
@@ -815,7 +819,7 @@ mod tests {
     use super::super::{
         catalog_provider::{CatalogProvider, CatalogWorkIdentity},
         error::LibraryError,
-        models::{CatalogScope, CatalogSearchQuery, CatalogSort},
+        models::{CatalogBlockedTag, CatalogScope, CatalogSearchQuery, CatalogSort},
         Library,
     };
 
@@ -1032,6 +1036,7 @@ mod tests {
         CatalogSearchQuery {
             provider: CatalogProvider::KHentai,
             language: None,
+            reveal_blocked: false,
             text: text.into(),
             sort,
             scope: CatalogScope::All,
@@ -1057,6 +1062,176 @@ mod tests {
 
         assert_eq!(query.provider, CatalogProvider::KHentai);
         assert_eq!(query.language, None);
+        assert!(!query.reveal_blocked);
+    }
+
+    #[test]
+    fn visibility_policy_combines_hidden_categories_and_exact_blocked_tags() {
+        let (_root, library) = searchable_library();
+        let catalog = Connection::open(library.root().join("catalogs/kdata.db")).unwrap();
+        catalog
+            .execute_batch(
+                "UPDATE Works SET Category = 1 WHERE Id IN (1, 2);
+                 UPDATE Works SET Category = 2 WHERE Id = 3;",
+            )
+            .unwrap();
+        drop(catalog);
+        library.set_catalog_category_hidden(2, true).unwrap();
+        library
+            .set_catalog_tag_blocked(
+                CatalogBlockedTag {
+                    namespace: "group".into(),
+                    value: "alpha artist".into(),
+                },
+                true,
+            )
+            .unwrap();
+        library
+            .set_catalog_tag_blocked(
+                CatalogBlockedTag {
+                    namespace: "series".into(),
+                    value: "fleet log".into(),
+                },
+                true,
+            )
+            .unwrap();
+
+        let filtered = library
+            .search_online_catalog(query("", CatalogSort::Latest, 0, 10))
+            .unwrap();
+        assert_eq!(filtered.total_count, 1);
+        assert_eq!(filtered.works[0].identity, khentai(1));
+
+        let mut revealed = query("", CatalogSort::Latest, 0, 10);
+        revealed.reveal_blocked = true;
+        let revealed = library.search_online_catalog(revealed).unwrap();
+        assert_eq!(revealed.total_count, 3);
+        assert_eq!(revealed.works.len(), 3);
+    }
+
+    #[test]
+    fn empty_visibility_policy_preserves_existing_search_results() {
+        let (_root, library) = searchable_library();
+
+        let page = library
+            .search_online_catalog(query("", CatalogSort::Latest, 0, 10))
+            .unwrap();
+
+        assert_eq!(page.total_count, 3);
+        assert_eq!(page.works.len(), 3);
+    }
+
+    #[test]
+    fn boolean_or_and_not_cannot_escape_visibility_policy() {
+        let (_root, library) = searchable_library();
+        library.set_catalog_category_hidden(2, true).unwrap();
+        library
+            .set_catalog_tag_blocked(
+                CatalogBlockedTag {
+                    namespace: "character".into(),
+                    value: "teitoku".into(),
+                },
+                true,
+            )
+            .unwrap();
+
+        let page = library
+            .search_online_catalog(query("id:3 OR NOT id:1", CatalogSort::Latest, 0, 10))
+            .unwrap();
+
+        assert_eq!(page.total_count, 1);
+        assert_eq!(page.works[0].identity, khentai(2));
+    }
+
+    #[test]
+    fn visibility_policy_count_and_pages_use_the_same_sql_predicate() {
+        let library_root = tempfile::tempdir().unwrap();
+        let vck_root = tempfile::tempdir().unwrap();
+        write_vck_fixture(vck_root.path(), 6, r#"{}"#);
+        let source = Connection::open(vck_root.path().join("data/kdata.db")).unwrap();
+        source
+            .execute(
+                "UPDATE Works SET Category = CASE WHEN Id % 2 = 0 THEN 2 ELSE 1 END",
+                [],
+            )
+            .unwrap();
+        drop(source);
+        let library = Library::open(library_root.path()).unwrap();
+        library.import_vck_catalog(vck_root.path()).unwrap();
+        library.set_catalog_category_hidden(2, true).unwrap();
+
+        let first = library
+            .search_online_catalog(query("", CatalogSort::Latest, 0, 2))
+            .unwrap();
+        let second = library
+            .search_online_catalog(query("", CatalogSort::Latest, 1, 2))
+            .unwrap();
+
+        assert_eq!((first.total_count, first.works.len()), (3, 2));
+        assert_eq!((second.total_count, second.works.len()), (3, 1));
+        assert!(first.works.iter().chain(&second.works).all(|work| work
+            .identity
+            .provider_work_id
+            .parse::<u64>()
+            .unwrap()
+            % 2
+            == 1));
+    }
+
+    #[test]
+    fn reveal_blocked_bypasses_only_visibility_predicates() {
+        let (_root, library) = searchable_library();
+        let catalog = Connection::open(library.root().join("catalogs/kdata.db")).unwrap();
+        catalog
+            .execute_batch(
+                "UPDATE Works SET Category = Id;
+                 UPDATE Works SET Expunged = 1 WHERE Id = 1;",
+            )
+            .unwrap();
+        drop(catalog);
+        for category in 1..=3 {
+            library.set_catalog_category_hidden(category, true).unwrap();
+        }
+        library
+            .set_online_catalog_bookmark(&khentai(2), true)
+            .unwrap();
+        library
+            .set_online_catalog_bookmark(&khentai(3), true)
+            .unwrap();
+
+        let mut revealed = query("id:1 OR id:3", CatalogSort::Latest, 0, 10);
+        revealed.reveal_blocked = true;
+        assert_eq!(
+            library.search_online_catalog(revealed).unwrap().works[0].identity,
+            khentai(3)
+        );
+
+        let mut language = query("", CatalogSort::Latest, 0, 10);
+        language.reveal_blocked = true;
+        language.language = Some(super::super::models::CatalogLanguage::Korean);
+        assert_eq!(
+            library.search_online_catalog(language).unwrap().total_count,
+            1
+        );
+
+        let mut bookmarked = query("", CatalogSort::Latest, 0, 10);
+        bookmarked.reveal_blocked = true;
+        bookmarked.scope = CatalogScope::Bookmarked;
+        assert_eq!(
+            library
+                .search_online_catalog(bookmarked)
+                .unwrap()
+                .total_count,
+            2
+        );
+
+        let mut unsupported = query("", CatalogSort::Latest, 0, 10);
+        unsupported.reveal_blocked = true;
+        unsupported.provider = CatalogProvider::Heliotrope;
+        assert!(matches!(
+            library.search_online_catalog(unsupported),
+            Err(LibraryError::UnsupportedCatalogProvider)
+        ));
     }
 
     #[test]
@@ -1236,6 +1411,7 @@ mod tests {
             .search_online_catalog(CatalogSearchQuery {
                 provider: CatalogProvider::KHentai,
                 language: None,
+                reveal_blocked: false,
                 text: String::new(),
                 sort: CatalogSort::Latest,
                 scope: CatalogScope::Bookmarked,

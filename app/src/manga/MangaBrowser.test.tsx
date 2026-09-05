@@ -224,6 +224,9 @@ describe("MangaBrowser", () => {
 
 function createGateway(overrides: { root: string | null; series: MangaSeries[] }): LibraryGateway {
   const base: LibraryGateway = {
+    getCatalogVisibilityPolicy: vi.fn().mockResolvedValue({ hiddenCategories: [], blockedTags: [] }),
+    setCatalogCategoryHidden: vi.fn(),
+    setCatalogTagBlocked: vi.fn(),
     getIgdbCredentialStatus: vi.fn(),
     setIgdbCredentials: vi.fn(),
     deleteIgdbCredentials: vi.fn(),

@@ -21,11 +21,12 @@ use crate::{
             AladinApplyRequest, AladinConnection, AladinSeriesCandidate, AladinSyncResult,
             AlbumEntry, AssetAlbumPatch, AssetCollectionPatch, AssetCursor, AssetDateBucket,
             AssetDateBucketQuery, AssetMetadataPatch, AssetPage, AssetQuery, AssetSummary,
-            CatalogSearchPage, CatalogSearchQuery, CatalogStatus, CatalogSuggestion,
-            CatalogUpdateResult, CatalogUpdateStopReason, CatalogWorkDetail, ClassificationEntry,
-            CollectionCover, CollectionSummary, CollectionVolume, CreateAlbum,
-            CreateClassification, CreateCollection, IngestMediaRequest, IngestOutcome,
-            LibrarySummary, MangaCatalogRecoveryApplyResult, MangaCatalogRecoveryPreview,
+            CatalogBlockedTag, CatalogSearchPage, CatalogSearchQuery, CatalogStatus,
+            CatalogSuggestion, CatalogUpdateResult, CatalogUpdateStopReason,
+            CatalogVisibilityPolicy, CatalogWorkDetail, ClassificationEntry, CollectionCover,
+            CollectionSummary, CollectionVolume, CreateAlbum, CreateClassification,
+            CreateCollection, IngestMediaRequest, IngestOutcome, LibrarySummary,
+            MangaCatalogRecoveryApplyResult, MangaCatalogRecoveryPreview,
             MangaCatalogRecoveryRemoteResult, MangaCatalogRecoverySelection, MangaDexApplyRequest,
             MangaDexConnection, MangaDexSearchResult, MangaDexVolumeSyncResult,
             MangaDexWorkPreview, MangaSeries, MetadataBackup, PurgeSummary, ReleaseWatchEvent,
@@ -181,6 +182,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::CatalogTransportBusy => "catalog_transport_busy",
             LibraryError::CatalogTransportUnavailable => "catalog_transport_unavailable",
             LibraryError::InvalidCatalogUpdateInterval => "invalid_catalog_update_interval",
+            LibraryError::InvalidCatalogVisibilityPolicy => "invalid_catalog_visibility_policy",
             LibraryError::InvalidRemoteGallery => "invalid_remote_gallery",
             LibraryError::RemoteGalleryUnavailable => "remote_gallery_unavailable",
             LibraryError::InvalidRemoteReadingProgress => "invalid_remote_reading_progress",
@@ -1525,6 +1527,37 @@ pub async fn get_online_catalog_status(
     tauri::async_runtime::spawn_blocking(move || library.catalog_status())
         .await
         .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn get_catalog_visibility_policy(
+    state: State<'_, AppState>,
+) -> Result<CatalogVisibilityPolicy, CommandError> {
+    current_required(state)?
+        .catalog_visibility_policy()
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn set_catalog_category_hidden(
+    category: i64,
+    hidden: bool,
+    state: State<'_, AppState>,
+) -> Result<CatalogVisibilityPolicy, CommandError> {
+    current_required(state)?
+        .set_catalog_category_hidden(category, hidden)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn set_catalog_tag_blocked(
+    tag: CatalogBlockedTag,
+    blocked: bool,
+    state: State<'_, AppState>,
+) -> Result<CatalogVisibilityPolicy, CommandError> {
+    current_required(state)?
+        .set_catalog_tag_blocked(tag, blocked)
         .map_err(CommandError::from)
 }
 

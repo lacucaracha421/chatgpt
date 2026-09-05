@@ -133,6 +133,7 @@ describe("libraryGateway online catalog contract", () => {
   it("maps catalog import, status, search, and suggestions", async () => {
     const query = {
       provider: "kHentai" as const,
+      revealBlocked: false,
       text: "던전",
       sort: "latest" as const,
       scope: "all" as const,
@@ -154,6 +155,12 @@ describe("libraryGateway online catalog contract", () => {
     await libraryGateway.getRemoteReadingProgress(identity);
     await libraryGateway.saveRemoteReadingProgress({ ...identity, lastPage: 2, pageCount: 10, lastReadAt: "" });
     await libraryGateway.clearRemoteMangaCache();
+    await libraryGateway.getCatalogVisibilityPolicy();
+    await libraryGateway.setCatalogCategoryHidden(2, true);
+    await libraryGateway.setCatalogTagBlocked(
+      { namespace: "artist", value: "sample" },
+      true,
+    );
 
     expect(invoke).toHaveBeenNthCalledWith(1, "import_vck_catalog", {
       vckRoot: "C:\\VCK",
@@ -181,6 +188,15 @@ describe("libraryGateway online catalog contract", () => {
       progress: { ...identity, lastPage: 2, pageCount: 10, lastReadAt: "" },
     });
     expect(invoke).toHaveBeenNthCalledWith(13, "clear_remote_manga_cache");
+    expect(invoke).toHaveBeenNthCalledWith(14, "get_catalog_visibility_policy");
+    expect(invoke).toHaveBeenNthCalledWith(15, "set_catalog_category_hidden", {
+      category: 2,
+      hidden: true,
+    });
+    expect(invoke).toHaveBeenNthCalledWith(16, "set_catalog_tag_blocked", {
+      tag: { namespace: "artist", value: "sample" },
+      blocked: true,
+    });
   });
 });
 

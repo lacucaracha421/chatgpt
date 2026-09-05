@@ -65,6 +65,8 @@ import type {
   LegacyPackageMigrationReport,
   CatalogSearchPage,
   CatalogSearchQuery,
+  CatalogBlockedTag,
+  CatalogVisibilityPolicy,
   CatalogStatus,
   CatalogSuggestion,
   CatalogUpdateResult,
@@ -98,6 +100,12 @@ export const libraryGateway: LibraryGateway = {
     invoke<CatalogStatus>("import_vck_catalog", { vckRoot }),
   getOnlineCatalogStatus: () =>
     invoke<CatalogStatus>("get_online_catalog_status"),
+  getCatalogVisibilityPolicy: () =>
+    invoke<CatalogVisibilityPolicy>("get_catalog_visibility_policy"),
+  setCatalogCategoryHidden: (category, hidden) =>
+    invoke<CatalogVisibilityPolicy>("set_catalog_category_hidden", { category, hidden }),
+  setCatalogTagBlocked: (tag: CatalogBlockedTag, blocked) =>
+    invoke<CatalogVisibilityPolicy>("set_catalog_tag_blocked", { tag, blocked }),
   searchOnlineCatalog: (query: CatalogSearchQuery) =>
     invoke<CatalogSearchPage>("search_online_catalog", { query }),
   suggestOnlineCatalog: (text, limit) =>

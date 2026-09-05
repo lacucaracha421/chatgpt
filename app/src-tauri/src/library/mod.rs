@@ -11,6 +11,7 @@ mod collection_source;
 mod collection_volume;
 pub(crate) mod catalog_provider;
 mod catalog_query;
+mod catalog_visibility;
 pub(crate) mod credential;
 pub mod cloud_preflight;
 mod db;

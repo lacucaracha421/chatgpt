@@ -141,9 +141,20 @@ export type CatalogSort = "latest" | "views" | "hotDay" | "hotWeek" | "hotMonth"
 export type CatalogScope = "all" | "bookmarked";
 export type CatalogLanguage = "korean" | "japanese";
 
+export type CatalogBlockedTag = {
+  namespace: string;
+  value: string;
+};
+
+export type CatalogVisibilityPolicy = {
+  hiddenCategories: number[];
+  blockedTags: CatalogBlockedTag[];
+};
+
 export type CatalogSearchQuery = {
   provider: CatalogProvider;
   language?: CatalogLanguage | null;
+  revealBlocked?: boolean;
   text: string;
   sort: CatalogSort;
   scope: CatalogScope;
@@ -875,6 +886,9 @@ export interface LibraryGateway {
   openLibrary(path: string): Promise<LibrarySummary>;
   importVckCatalog(vckRoot: string): Promise<CatalogStatus>;
   getOnlineCatalogStatus(): Promise<CatalogStatus>;
+  getCatalogVisibilityPolicy(): Promise<CatalogVisibilityPolicy>;
+  setCatalogCategoryHidden(category: number, hidden: boolean): Promise<CatalogVisibilityPolicy>;
+  setCatalogTagBlocked(tag: CatalogBlockedTag, blocked: boolean): Promise<CatalogVisibilityPolicy>;
   searchOnlineCatalog(query: CatalogSearchQuery): Promise<CatalogSearchPage>;
   suggestOnlineCatalog(text: string, limit: number): Promise<CatalogSuggestion[]>;
   getOnlineCatalogWorkDetail(identity: CatalogWorkIdentity): Promise<CatalogWorkDetail>;

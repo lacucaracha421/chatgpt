@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 33;
+pub(crate) const SCHEMA_VERSION: i64 = 34;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -58,6 +58,8 @@ const MANGA_CATALOG_RECOVERY_SCHEMA: &str =
     include_str!("../../migrations/0032_manga_catalog_recovery.sql");
 const MANGA_CATALOG_RECOVERY_SOURCE_PATH_SCHEMA: &str =
     include_str!("../../migrations/0033_manga_catalog_recovery_source_path.sql");
+const ONLINE_CATALOG_VISIBILITY_SCHEMA: &str =
+    include_str!("../../migrations/0034_online_catalog_visibility.sql");
 
 pub fn open_database(path: &Path) -> Result<Connection, LibraryError> {
     let connection = Connection::open(path)?;
@@ -190,6 +192,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         }
         if version <= 32 {
             transaction.execute_batch(MANGA_CATALOG_RECOVERY_SOURCE_PATH_SCHEMA)?;
+        }
+        if version <= 33 {
+            transaction.execute_batch(ONLINE_CATALOG_VISIBILITY_SCHEMA)?;
         }
         transaction.commit()?;
         Ok::<(), LibraryError>(())
@@ -1718,6 +1723,87 @@ mod tests {
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
             SCHEMA_VERSION,
+        );
+    }
+
+    #[test]
+    fn migrates_v33_to_online_catalog_visibility_preferences() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        for schema in [
+            INITIAL_SCHEMA,
+            VAULT_SAFETY_SCHEMA,
+            SIMILARITY_REVIEW_SCHEMA,
+            VIDEO_MEDIA_SCHEMA,
+            MANGA_SCHEMA,
+            MANGA_MODIFIED_SCHEMA,
+            CLASSIFICATION_APPEARANCE_SCHEMA,
+            ASSET_ALBUMS_SCHEMA,
+            ASSET_SOURCE_PROVENANCE_SCHEMA,
+            COLLECTIONS_SCHEMA,
+            COLLECTIONS_TYPED_SCHEMA,
+            COLLECTION_SOURCE_SCHEMA,
+            COLLECTION_EXTERNAL_BINDINGS_SCHEMA,
+            COLLECTION_WORK_ARTWORKS_SCHEMA,
+            COLLECTION_VOLUMES_SCHEMA,
+            ALADIN_VOLUME_SOURCES_SCHEMA,
+            ALADIN_RELEASE_WATCH_SCHEMA,
+            ONLINE_CATALOG_SCHEMA,
+            ONLINE_CATALOG_BOOKMARKS_SCHEMA,
+            LEGACY_PACKAGE_IMPORTS_SCHEMA,
+            COLLECTION_LEGACY_KIND_SCHEMA,
+            COLLECTION_FOUNDATION_SCHEMA,
+            GAME_PROVIDER_DETAIL_SCHEMA,
+            MOVIE_PROVIDER_DETAIL_SCHEMA,
+            PDQ_SIMILARITY_SCHEMA,
+            COLLECTED_AT_UTC_SCHEMA,
+            REVISIT_SCHEMA,
+            CLOUD_SYNC_QUEUE_SCHEMA,
+            CLOUD_CAPTURE_IMPORTS_SCHEMA,
+            CLOUD_BACKFILL_QUEUE_SCHEMA,
+            CLOUD_BACKFILL_CONTROL_SCHEMA,
+            MANGA_CATALOG_RECOVERY_SCHEMA,
+            MANGA_CATALOG_RECOVERY_SOURCE_PATH_SCHEMA,
+        ] {
+            connection.execute_batch(schema).unwrap();
+        }
+        connection
+            .execute(
+                "INSERT INTO online_catalog_bookmarks (provider, work_id, created_at)
+                 VALUES ('kHentai', 'preserved-v33-work', '2026-09-05T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+
+        migrate_to_latest(&mut connection, 33).unwrap();
+
+        for table in [
+            "online_catalog_hidden_categories",
+            "online_catalog_blocked_tags",
+        ] {
+            let table_count: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(table_count, 1, "missing migrated table {table}");
+        }
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT provider || ':' || work_id FROM online_catalog_bookmarks",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "kHentai:preserved-v33-work",
+        );
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            34,
         );
     }
 

@@ -302,6 +302,9 @@ describe("CollectionBrowser", () => {
 
 function createGateway(): LibraryGateway {
   return {
+    getCatalogVisibilityPolicy: vi.fn().mockResolvedValue({ hiddenCategories: [], blockedTags: [] }),
+    setCatalogCategoryHidden: vi.fn(),
+    setCatalogTagBlocked: vi.fn(),
     getIgdbCredentialStatus: vi.fn(),
     setIgdbCredentials: vi.fn(),
     deleteIgdbCredentials: vi.fn(),
