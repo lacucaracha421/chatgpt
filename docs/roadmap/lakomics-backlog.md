@@ -156,7 +156,7 @@ Completed evidence (2026-09-05):
 
 ## CATALOG-003 — Independent Japanese-language source
 
-Status: `PARTIAL`
+Status: `DONE`
 
 Implemented and fixture-verified:
 
@@ -166,10 +166,14 @@ Implemented and fixture-verified:
 - separate Settings progress/error/recovery, Japanese-only checkpoint reset, bounded manual initial pages, and automatic incremental updates only after initial completion;
 - Korean default browsing and existing search/visibility/performance behavior preserved; no schema/index change or catalog replacement.
 
-Remaining gate: separately authorized deployment of the language-aware VPS, then
-the bounded real Japanese-source canary (maximum two pages on a verified backup's
-disposable copy). Real-source low-ID ingestion/resume/idempotence has **not** yet
-been demonstrated. No production ingestion or broad initial crawl was run.
+Operational gate verified: the production VPS language contract and Japanese
+acknowledgement passed. The bounded real-source canary passed with exactly two
+pages / 100 Japanese works on a verified SQLite backup's disposable copy,
+including ID 4169846 below the prior global/Korean maximum 4169932. Independent
+checkpoint progression, reopen/resume, replay idempotence, unchanged Korean
+state, and both language memberships on 16 overlapping works were verified.
+Post-canary SQLite quick-check passed and the original catalog SHA-256 was
+unchanged. No active-catalog ingestion or broad initial crawl was run.
 See [catalog troubleshooting](../agents/catalog-troubleshooting.md#bounded-real-source-canary-deployment-gate)
 for the exact procedure and retained-backup requirement before active-catalog mutation.
 

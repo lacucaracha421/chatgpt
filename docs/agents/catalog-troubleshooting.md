@@ -6,8 +6,46 @@ Implementation verification: 105 Rust catalog regressions passed (the real-data
 benchmark and real-source canary remain opt-in/ignored), 33 server API tests
 passed, and 270 frontend tests across 15 affected/regression files passed.
 TypeScript checking, production build, scoped formatting/whitespace checks, and
-`git diff --check` passed. The canary was prepared but not executed; the VPS was
-not deployed and the active catalog was not mutated.
+`git diff --check` passed. The operational gate subsequently passed as recorded
+below; the active catalog was not mutated.
+
+### Verified operational result
+
+The authorized single-file deployment used `server/lakomics-api/app.py` from
+commit `8d644c40ed88ab1ba6ec00ead23ae04eeff35768`. The production file at
+`/home/linuxuser/lakomics-api/app.py` matched SHA-256
+`609fa6aa92af308d447e96a5d68dd21ff8fa96783e8ac76e8d739d1b6fcaa226`.
+`lakomics-api.service` remained active/running with `NRestarts=0`. Health, legacy
+and explicit Korean search, Japanese search and cursor composition, and gallery
+requests succeeded; language acknowledgements were correct, invalid language
+returned 400, and missing authentication returned 401. This retry needed no
+rollback. The retained pre-deployment rollback file remains available.
+
+The earlier deployment failure came from PowerShell's final CRLF on piped SSH
+input: Bash received `fi\r`, leaving the `if` block unterminated after file
+replacement. The retry used individual transfer, hash, atomic replacement,
+restart, and status commands, each with its own checked exit code.
+
+The unchanged `japanese_real_source_two_page_canary` test passed once: exactly
+two Japanese pages, 100 committed works. Representative IDs were 4169846,
+4169813, and 4160148, below the read-only source's global/Korean maximum 4169932.
+The Japanese checkpoint moved from watermark 0 / no cursor / pending maximum 0
+to watermark 0 / cursor 4160148 / pending maximum 4169846; initial completion
+correctly remained false. Reopening resumed from Japanese state, and replaying
+each page left data/checkpoint counts unchanged. The frozen Korean checkpoint
+remained watermark 4169932 / no cursor; preexisting importer state was unchanged.
+
+A read-only audit of the disposable result additionally verified Japanese tags,
+both language memberships on 16 real Korean-overlapping works (including
+4167777 and 4166996), and post-canary `PRAGMA quick_check = ok`. The test's backup
+quick-check also passed. Temporary audit links retained the disposable files
+only until inspection; those links and the test's temporary files were removed.
+The source `C:\New_lakomics_assets\catalogs\kdata.db` was opened read-only and its
+SHA-256 before and after was
+`9a3d7462a95af35a002cfa03bf49a5e0275601c8a6e06f6f483365c7f8f0834f`.
+No broad Japanese crawl or active-catalog ingestion was performed. CATALOG-003's
+implementation/operational gate is complete; this is not a claim that a full
+Japanese initial crawl has completed.
 
 The existing `catalogs/kdata.db` remains the canonical catalog. No table, index,
 or user-metadata migration is required. `CrawlState(Key, Value)` stores JSON under
@@ -54,9 +92,9 @@ state keys; it does not delete works, tags, Korean state, or user metadata.
 
 ### Bounded real-source canary (deployment gate)
 
-Implementation and fixture tests do **not** prove real-source ingestion. Deploying
-the language-aware VPS requires separate authorization. Until that deployment and
-the following canary succeed, CATALOG-003 remains `PARTIAL`. No broad initial
+Implementation and fixture tests alone do **not** prove real-source ingestion.
+The deployment and bounded canary gate has now passed as recorded above.
+Future production deployments still require authorization; no broad initial
 Japanese crawl is authorized by this procedure.
 
 After the VPS supports the acknowledgement header, set these process environment
