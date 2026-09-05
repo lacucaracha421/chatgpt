@@ -116,6 +116,8 @@ pub enum LibraryError {
     CatalogTransportBusy,
     #[error("온라인 카탈로그에 연결할 수 없습니다")]
     CatalogTransportUnavailable,
+    #[error("일본어 수집에는 언어별 수집을 지원하는 VPS 연결이 필요합니다. VPS 배포와 연결 설정을 확인해 주세요")]
+    CatalogJapaneseTransportRequired,
     #[error("온라인 카탈로그 갱신 간격은 60초 이상이어야 합니다")]
     InvalidCatalogUpdateInterval,
     #[error("온라인 카탈로그 표시 정책이 올바르지 않습니다")]

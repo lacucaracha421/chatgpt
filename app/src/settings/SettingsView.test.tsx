@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
-import type { LibraryGateway, MetadataBackup } from "../library/types";
+import type { CatalogStatus, LibraryGateway, MetadataBackup } from "../library/types";
 import { SettingsView } from "./SettingsView";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
@@ -394,7 +394,7 @@ it("opens the requested settings section", async () => {
   const gateway = createGateway();
   vi.mocked(gateway.getAladinCredentialStatus).mockResolvedValue({ configured: false });
   vi.mocked(gateway.getIgdbCredentialStatus).mockResolvedValue({ configured: false });
-  vi.mocked(gateway.getOnlineCatalogStatus).mockResolvedValue({ installed: false, workCount: 0, updateEnabled: false, updateIntervalSeconds: 0, lastAttemptAt: null, lastSuccessAt: null, lastAdded: 0, lastError: null });
+  vi.mocked(gateway.getOnlineCatalogStatus).mockResolvedValue({ installed: false, workCount: 0, updateEnabled: false, updateIntervalSeconds: 0, lastAttemptAt: null, lastSuccessAt: null, lastAdded: 0, lastError: null, streams: [] });
   render(
     <LibraryProvider gateway={gateway}>
       <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="external_services" />
@@ -526,6 +526,7 @@ it("changes online catalog automatic update settings", async () => {
     lastSuccessAt: null,
     lastAdded: 0,
     lastError: null,
+    streams: [],
   });
   vi.mocked(gateway.setOnlineCatalogUpdateSettings).mockImplementation(async (enabled, intervalSeconds) => ({
     installed: true,
@@ -536,6 +537,7 @@ it("changes online catalog automatic update settings", async () => {
     lastSuccessAt: null,
     lastAdded: 0,
     lastError: null,
+    streams: [],
   }));
   render(
     <LibraryProvider gateway={gateway}>
@@ -552,6 +554,127 @@ it("changes online catalog automatic update settings", async () => {
   expect(gateway.setOnlineCatalogUpdateSettings).toHaveBeenCalledWith(false, 21_600);
 });
 
+it("shows separate catalog stream progress and bounds an incomplete Japanese update to one page", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getOnlineCatalogStatus).mockResolvedValue({
+    installed: true,
+    workCount: 100,
+    updateEnabled: true,
+    updateIntervalSeconds: 3_600,
+    lastAttemptAt: "2026-09-05T01:00:00Z",
+    lastSuccessAt: "2026-09-05T01:00:00Z",
+    lastAdded: 2,
+    lastError: null,
+    streams: [
+      {
+        provider: "kHentai",
+        language: "korean",
+        hasState: true,
+        initialComplete: true,
+        watermark: 100,
+        cursor: null,
+        pendingMax: 5,
+        lastAttemptAt: "2026-09-05T01:00:00Z",
+        lastProgressAt: "2026-09-05T01:00:00Z",
+        lastCompletedAt: "2026-09-05T01:00:00Z",
+        lastAdded: 2,
+        lastError: null,
+      },
+      {
+        provider: "kHentai",
+        language: "japanese",
+        hasState: true,
+        initialComplete: false,
+        watermark: 90,
+        cursor: 80,
+        pendingMax: 10,
+        lastAttemptAt: "2026-09-05T00:30:00Z",
+        lastProgressAt: "2026-09-05T00:20:00Z",
+        lastCompletedAt: null,
+        lastAdded: 1,
+        lastError: "요청이 제한되었습니다",
+      },
+    ],
+  });
+  vi.mocked(gateway.updateOnlineCatalog).mockResolvedValue({
+    language: "japanese",
+    added: 1,
+    pages: 1,
+    reason: "pageLimit",
+    lastSuccessAt: "2026-09-05T01:10:00Z",
+  });
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="external_services" />
+    </LibraryProvider>,
+  );
+
+  expect((await screen.findByText("한국어 카탈로그")).parentElement).toHaveTextContent("초기 수집 완료 · 대기 5개");
+  const japaneseRow = screen.getByText("일본어 카탈로그").parentElement;
+  expect(japaneseRow).toHaveTextContent("초기 수집 진행 중 · 대기 10개");
+  expect(japaneseRow).toHaveTextContent("마지막 진행");
+  expect(japaneseRow).toHaveTextContent("마지막 시도 실패 — 요청이 제한되었습니다");
+
+  await user.click(within(japaneseRow!).getByRole("button", { name: "일본어 초기 수집 계속" }));
+
+  expect(gateway.updateOnlineCatalog).toHaveBeenCalledWith("japanese", 1);
+});
+
+it("bounds a completed Japanese settings update to forty pages", async () => {
+  const gateway = createGateway();
+  vi.mocked(gateway.getOnlineCatalogStatus).mockResolvedValue(catalogStatusWithJapanese(true));
+  vi.mocked(gateway.updateOnlineCatalog).mockResolvedValue({
+    language: "japanese",
+    added: 0,
+    pages: 1,
+    reason: "upToDate",
+    lastSuccessAt: "2026-09-05T02:00:00Z",
+  });
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="external_services" />
+    </LibraryProvider>,
+  );
+
+  const japaneseRow = (await screen.findByText("일본어 카탈로그")).parentElement;
+  await userEvent.click(within(japaneseRow!).getByRole("button", { name: "일본어 신규 작품 갱신" }));
+
+  expect(gateway.updateOnlineCatalog).toHaveBeenCalledWith("japanese", 40);
+});
+
+it("confirms a Japanese checkpoint-only reset and keeps catalog data wording explicit", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  const resetStatus = {
+    installed: true,
+    workCount: 100,
+    updateEnabled: true,
+    updateIntervalSeconds: 3_600,
+    lastAttemptAt: null,
+    lastSuccessAt: null,
+    lastAdded: 0,
+    lastError: null,
+    streams: [],
+  };
+  vi.mocked(gateway.getOnlineCatalogStatus).mockResolvedValue(resetStatus);
+  vi.mocked(gateway.resetJapaneseCatalogCheckpoint).mockResolvedValue(resetStatus);
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="external_services" />
+    </LibraryProvider>,
+  );
+
+  await user.click(await screen.findByRole("button", { name: "일본어 체크포인트 재설정" }));
+  expect(gateway.resetJapaneseCatalogCheckpoint).not.toHaveBeenCalled();
+  expect(screen.getByText("일본어 카탈로그 체크포인트만 재설정할까요? 기존 카탈로그와 북마크·읽기 기록은 그대로 유지됩니다.")).toBeVisible();
+
+  await user.click(screen.getByRole("button", { name: "체크포인트 재설정 확인" }));
+
+  expect(gateway.resetJapaneseCatalogCheckpoint).toHaveBeenCalledOnce();
+  expect(screen.getByText("일본어 카탈로그").parentElement).toHaveTextContent("초기 수집 전");
+});
+
 it("shows catalog status and restores the catalog from a re-selected VCK folder", async () => {
   const user = userEvent.setup();
   const gateway = createGateway();
@@ -565,6 +688,7 @@ it("shows catalog status and restores the catalog from a re-selected VCK folder"
     lastSuccessAt: "2026-08-28T09:00:00Z",
     lastAdded: 3,
     lastError: null,
+    streams: [],
   });
   vi.mocked(gateway.importVckCatalog).mockResolvedValue({
     installed: true,
@@ -575,6 +699,7 @@ it("shows catalog status and restores the catalog from a re-selected VCK folder"
     lastSuccessAt: null,
     lastAdded: 0,
     lastError: null,
+    streams: [],
   });
   vi.mocked(open).mockResolvedValue("D:\\VCK");
   render(
@@ -585,7 +710,7 @@ it("shows catalog status and restores the catalog from a re-selected VCK folder"
 
   await user.click(screen.getByRole("button", { name: "외부 서비스" }));
   expect(await screen.findByText("설치됨 · 100개 작품")).toBeVisible();
-  expect(screen.getByText("마지막 갱신").parentElement).toHaveTextContent("신규 3개");
+  expect(screen.getByText("한국어 카탈로그").parentElement).toHaveTextContent("신규 3개");
 
   await user.click(screen.getByRole("button", { name: "VCK 폴더 다시 선택" }));
 
@@ -598,7 +723,7 @@ it("keeps the catalog error message when the VCK restore fails", async () => {
   const user = userEvent.setup();
   const gateway = createGateway();
   vi.mocked(gateway.getAladinCredentialStatus).mockResolvedValue({ configured: false });
-  vi.mocked(gateway.getOnlineCatalogStatus).mockResolvedValue({ installed: true, workCount: 100, updateEnabled: true, updateIntervalSeconds: 3600, lastAttemptAt: null, lastSuccessAt: null, lastAdded: 0, lastError: null });
+  vi.mocked(gateway.getOnlineCatalogStatus).mockResolvedValue({ installed: true, workCount: 100, updateEnabled: true, updateIntervalSeconds: 3600, lastAttemptAt: null, lastSuccessAt: null, lastAdded: 0, lastError: null, streams: [] });
   vi.mocked(gateway.importVckCatalog).mockRejectedValue({ code: "invalid_online_catalog", message: "온라인 카탈로그 데이터가 올바르지 않습니다" });
   vi.mocked(open).mockResolvedValue("D:\\Broken");
   render(
@@ -685,7 +810,7 @@ function createGateway(): LibraryGateway {
     refreshTmdbMovie: vi.fn(),
     getTmdbConnection: vi.fn(),
     replaceTmdbMovieArtwork: vi.fn(),
-    openLibrary: vi.fn(), importVckCatalog: vi.fn(), getOnlineCatalogStatus: vi.fn().mockResolvedValue({ installed: false, workCount: 0, updateEnabled: true, updateIntervalSeconds: 3600, lastAttemptAt: null, lastSuccessAt: null, lastAdded: 0, lastError: null }), getCatalogVisibilityPolicy: vi.fn().mockResolvedValue({ hiddenCategories: [], blockedTags: [] }), setCatalogCategoryHidden: vi.fn(), setCatalogTagBlocked: vi.fn(), searchOnlineCatalog: vi.fn(), suggestOnlineCatalog: vi.fn(), updateOnlineCatalog: vi.fn(), setOnlineCatalogUpdateSettings: vi.fn(), runDueOnlineCatalogUpdate: vi.fn(), getCloudCaptureSettings: vi.fn().mockResolvedValue({ enabled: false, apiBaseUrl: null, tokenConfigured: false }), setCloudCaptureSettings: vi.fn(), setCloudApiToken: vi.fn(), deleteCloudApiToken: vi.fn(), testCloudCaptureConnection: vi.fn().mockResolvedValue({ pendingCount: 0 }), runDueCloudCaptureSync: vi.fn().mockResolvedValue({ attempted: 0, acknowledged: 0, failed: 0, reviewPending: 0, added: 0, videoAdded: 0, classificationChanged: 0 }), cloudBackfillPreflight: vi.fn(), cloudBackfillSeed: vi.fn(), cloudBackfillRunCycle: vi.fn(), cloudBackfillProgress: vi.fn(), cloudBackfillRetryFailed: vi.fn(), getOnlineCatalogWorkDetail: vi.fn(), setOnlineCatalogBookmark: vi.fn(), resolveOnlineCatalogWork: vi.fn(), getRemoteReadingProgress: vi.fn(), saveRemoteReadingProgress: vi.fn(), clearRemoteMangaCache: vi.fn(), getExtensionConnection: vi.fn(), listClassifications: vi.fn(),
+    openLibrary: vi.fn(), importVckCatalog: vi.fn(), getOnlineCatalogStatus: vi.fn().mockResolvedValue({ installed: false, workCount: 0, updateEnabled: true, updateIntervalSeconds: 3600, lastAttemptAt: null, lastSuccessAt: null, lastAdded: 0, lastError: null }), getCatalogVisibilityPolicy: vi.fn().mockResolvedValue({ hiddenCategories: [], blockedTags: [] }), setCatalogCategoryHidden: vi.fn(), setCatalogTagBlocked: vi.fn(), searchOnlineCatalog: vi.fn(), suggestOnlineCatalog: vi.fn(), updateOnlineCatalog: vi.fn(), resetJapaneseCatalogCheckpoint: vi.fn(), setOnlineCatalogUpdateSettings: vi.fn(), runDueOnlineCatalogUpdate: vi.fn(), getCloudCaptureSettings: vi.fn().mockResolvedValue({ enabled: false, apiBaseUrl: null, tokenConfigured: false }), setCloudCaptureSettings: vi.fn(), setCloudApiToken: vi.fn(), deleteCloudApiToken: vi.fn(), testCloudCaptureConnection: vi.fn().mockResolvedValue({ pendingCount: 0 }), runDueCloudCaptureSync: vi.fn().mockResolvedValue({ attempted: 0, acknowledged: 0, failed: 0, reviewPending: 0, added: 0, videoAdded: 0, classificationChanged: 0 }), cloudBackfillPreflight: vi.fn(), cloudBackfillSeed: vi.fn(), cloudBackfillRunCycle: vi.fn(), cloudBackfillProgress: vi.fn(), cloudBackfillRetryFailed: vi.fn(), getOnlineCatalogWorkDetail: vi.fn(), setOnlineCatalogBookmark: vi.fn(), resolveOnlineCatalogWork: vi.fn(), getRemoteReadingProgress: vi.fn(), saveRemoteReadingProgress: vi.fn(), clearRemoteMangaCache: vi.fn(), getExtensionConnection: vi.fn(), listClassifications: vi.fn(),
     listAlbums: vi.fn().mockResolvedValue([]), createAlbum: vi.fn(), renameAlbum: vi.fn(), moveAlbum: vi.fn(), updateAlbumAppearance: vi.fn(), deleteAlbum: vi.fn(),
     createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(), updateClassificationAppearance: vi.fn(),
     deleteClassification: vi.fn(), listAssets: vi.fn(), listAssetDateBuckets: vi.fn().mockResolvedValue([]), indexMissingSimilarityHashes: vi.fn(),
@@ -706,5 +831,32 @@ function createGateway(): LibraryGateway {
     listTrash: vi.fn(), emptyTrash: vi.fn(), getTrashPolicy: vi.fn(), setTrashPolicy: vi.fn(),
     ensureDailyBackup: vi.fn(), listMetadataBackups: vi.fn().mockResolvedValue([]),
     restoreMetadataBackup: vi.fn(), purgeExpiredTrash: vi.fn(),
+  };
+}
+
+function catalogStatusWithJapanese(initialComplete: boolean): CatalogStatus {
+  return {
+    installed: true,
+    workCount: 100,
+    updateEnabled: true,
+    updateIntervalSeconds: 3_600,
+    lastAttemptAt: null,
+    lastSuccessAt: null,
+    lastAdded: 0,
+    lastError: null,
+    streams: [{
+      provider: "kHentai",
+      language: "japanese",
+      hasState: true,
+      initialComplete,
+      watermark: 100,
+      cursor: null,
+      pendingMax: 0,
+      lastAttemptAt: null,
+      lastProgressAt: null,
+      lastCompletedAt: initialComplete ? "2026-09-05T01:00:00Z" : null,
+      lastAdded: 0,
+      lastError: null,
+    }],
   };
 }

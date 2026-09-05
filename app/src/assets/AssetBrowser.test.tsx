@@ -961,6 +961,7 @@ function asset(index: number) {
 
 function createGateway(page: AssetPage = { items: [], nextCursor: null }): LibraryGateway {
   return {
+    resetJapaneseCatalogCheckpoint: vi.fn(),
     getIgdbCredentialStatus: vi.fn(),
     setIgdbCredentials: vi.fn(),
     deleteIgdbCredentials: vi.fn(),

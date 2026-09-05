@@ -302,6 +302,7 @@ describe("CollectionBrowser", () => {
 
 function createGateway(): LibraryGateway {
   return {
+    resetJapaneseCatalogCheckpoint: vi.fn(),
     getCatalogVisibilityPolicy: vi.fn().mockResolvedValue({ hiddenCategories: [], blockedTags: [] }),
     setCatalogCategoryHidden: vi.fn(),
     setCatalogTagBlocked: vi.fn(),

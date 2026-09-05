@@ -221,3 +221,63 @@ fn vps_first_search_page_omits_the_cursor_query() {
 
     handle.join().unwrap();
 }
+
+#[test]
+fn japanese_transport_composes_language_cursor_and_requires_server_acknowledgement() {
+    use crate::library::models::CatalogLanguage;
+    for acknowledgement in [None, Some("korean"), Some("japanese")] {
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let base_url = format!("http://{}", server.server_addr());
+        let handle = std::thread::spawn(move || {
+            let request = server.recv().unwrap();
+            assert_eq!(
+                request.url(),
+                "/v1/catalog/search-page?language=japanese&cursor=150"
+            );
+            assert!(request
+                .headers()
+                .iter()
+                .any(|header| header.field.equiv("Authorization")
+                    && header.value.as_str() == "Bearer test-token"));
+            let mut response = tiny_http::Response::from_string("[]");
+            if let Some(value) = acknowledgement {
+                response.add_header(header("X-Lakomics-Catalog-Language", value));
+            }
+            request.respond(response).unwrap();
+        });
+        let result = VpsCatalogSource::new(&base_url)
+            .unwrap()
+            .fetch_search_page_for_language_bearer(
+                Some(150),
+                CatalogLanguage::Japanese,
+                "test-token",
+            );
+        handle.join().unwrap();
+        if acknowledgement == Some("japanese") {
+            assert_eq!(result.unwrap(), "[]");
+        } else {
+            assert!(matches!(
+                result,
+                Err(LibraryError::CatalogJapaneseTransportRequired)
+            ));
+        }
+    }
+}
+
+#[test]
+fn typed_catalog_transport_validates_cursor_and_auth_before_fetching() {
+    use crate::library::models::CatalogLanguage;
+    let client = VpsCatalogSource::new("http://127.0.0.1:1").unwrap();
+    for language in [CatalogLanguage::Korean, CatalogLanguage::Japanese] {
+        for cursor in [0, u64::MAX] {
+            assert!(matches!(
+                client.fetch_search_page_for_language_bearer(Some(cursor), language, "token"),
+                Err(LibraryError::InvalidCatalogTransportPath)
+            ));
+        }
+        assert!(matches!(
+            client.fetch_search_page_for_language_bearer(None, language, ""),
+            Err(LibraryError::CloudCredentialNotConfigured)
+        ));
+    }
+}

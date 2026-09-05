@@ -193,6 +193,7 @@ it("uses the shared view toolbar with window controls", async () => {
 
 function createGateway(): LibraryGateway {
   return {
+    resetJapaneseCatalogCheckpoint: vi.fn(),
     getIgdbCredentialStatus: vi.fn(),
     setIgdbCredentials: vi.fn(),
     deleteIgdbCredentials: vi.fn(),

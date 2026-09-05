@@ -310,6 +310,7 @@ CATALOG_MAX_BODY_BYTES = 5 * 1024 * 1024
 # requests do not hit k-hentai at all. Gallery HTML embeds its own signed-URL
 # expiry, and update pages are short-lived, so 60s is safely conservative.
 CATALOG_CACHE_TTL_SECONDS = 60
+CATALOG_CURSOR_MAX = 9223372036854775807
 _catalog_cache: dict[str, tuple[float, int, bytes]] = {}
 
 
@@ -381,15 +382,25 @@ def _catalog_cached_get(url: str) -> Response:
 @app.get("/v1/catalog/search-page")
 def catalog_search_page(
     cursor: int | None = None,
+    language: str = "korean",
     authorization: str | None = Header(default=None),
 ):
     require_auth(authorization)
+    if language not in ("korean", "japanese"):
+        raise HTTPException(status_code=400, detail="language must be korean or japanese")
     if cursor is not None and cursor <= 0:
         raise HTTPException(status_code=400, detail="cursor must be a positive id")
-    query = "search=language%3Akorean"
+    if cursor is not None and cursor > CATALOG_CURSOR_MAX:
+        raise HTTPException(
+            status_code=400,
+            detail=f"cursor must be at most {CATALOG_CURSOR_MAX}",
+        )
+    query = f"search=language%3A{language}"
     if cursor is not None:
         query += f"&next-id={cursor}"
-    return _catalog_cached_get(f"{KHENTAI_ORIGIN}/ajax/search?{query}")
+    response = _catalog_cached_get(f"{KHENTAI_ORIGIN}/ajax/search?{query}")
+    response.headers["X-Lakomics-Catalog-Language"] = language
+    return response
 
 
 @app.get("/v1/catalog/gallery/{work_id}")

@@ -198,6 +198,29 @@ describe("libraryGateway online catalog contract", () => {
       blocked: true,
     });
   });
+
+  it("keeps legacy catalog update calls argument-free and forwards Japanese bounds", async () => {
+    await libraryGateway.updateOnlineCatalog();
+    await libraryGateway.updateOnlineCatalog("japanese", 1);
+    await libraryGateway.runDueOnlineCatalogUpdate();
+    await libraryGateway.runDueOnlineCatalogUpdate("japanese");
+
+    expect(invoke).toHaveBeenNthCalledWith(1, "update_online_catalog");
+    expect(invoke).toHaveBeenNthCalledWith(2, "update_online_catalog", {
+      language: "japanese",
+      maxPages: 1,
+    });
+    expect(invoke).toHaveBeenNthCalledWith(3, "run_due_online_catalog_update");
+    expect(invoke).toHaveBeenNthCalledWith(4, "run_due_online_catalog_update", {
+      language: "japanese",
+    });
+  });
+
+  it("resets only the Japanese catalog checkpoint through its dedicated command", async () => {
+    await libraryGateway.resetJapaneseCatalogCheckpoint();
+
+    expect(invoke).toHaveBeenCalledWith("reset_japanese_catalog_checkpoint");
+  });
 });
 
 describe("libraryGateway revisit contract", () => {

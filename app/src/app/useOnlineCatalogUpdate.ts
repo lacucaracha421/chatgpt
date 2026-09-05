@@ -11,9 +11,17 @@ export function useOnlineCatalogUpdate(gateway: LibraryGateway, libraryRoot: str
       if (!active || running) return;
       running = true;
       try {
-        await gateway.runDueOnlineCatalogUpdate();
-      } catch {
-        // The catalog screen and settings expose persisted update errors.
+        try {
+          await gateway.runDueOnlineCatalogUpdate();
+        } catch {
+          // The catalog screen and settings expose persisted Korean update errors.
+        }
+        if (!active) return;
+        try {
+          await gateway.runDueOnlineCatalogUpdate("japanese");
+        } catch {
+          // The catalog screen and settings expose persisted Japanese update errors.
+        }
       } finally {
         running = false;
       }

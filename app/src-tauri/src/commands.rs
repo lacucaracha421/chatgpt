@@ -21,8 +21,8 @@ use crate::{
             AladinApplyRequest, AladinConnection, AladinSeriesCandidate, AladinSyncResult,
             AlbumEntry, AssetAlbumPatch, AssetCollectionPatch, AssetCursor, AssetDateBucket,
             AssetDateBucketQuery, AssetMetadataPatch, AssetPage, AssetQuery, AssetSummary,
-            CatalogBlockedTag, CatalogSearchPage, CatalogSearchQuery, CatalogStatus,
-            CatalogSuggestion, CatalogUpdateResult, CatalogUpdateStopReason,
+            CatalogBlockedTag, CatalogLanguage, CatalogSearchPage, CatalogSearchQuery,
+            CatalogStatus, CatalogSuggestion, CatalogUpdateResult, CatalogUpdateStopReason,
             CatalogVisibilityPolicy, CatalogWorkDetail, ClassificationEntry, CollectionCover,
             CollectionSummary, CollectionVolume, CreateAlbum, CreateClassification,
             CreateCollection, IngestMediaRequest, IngestOutcome, LibrarySummary,
@@ -182,6 +182,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::CatalogTransportBusy => "catalog_transport_busy",
             LibraryError::CatalogTransportUnavailable => "catalog_transport_unavailable",
             LibraryError::InvalidCatalogUpdateInterval => "invalid_catalog_update_interval",
+            LibraryError::CatalogJapaneseTransportRequired => "catalog_japanese_transport_required",
             LibraryError::InvalidCatalogVisibilityPolicy => "invalid_catalog_visibility_policy",
             LibraryError::InvalidRemoteGallery => "invalid_remote_gallery",
             LibraryError::RemoteGalleryUnavailable => "remote_gallery_unavailable",
@@ -1611,16 +1612,45 @@ pub fn set_online_catalog_bookmark(
 
 #[tauri::command]
 pub async fn update_online_catalog(
+    language: Option<CatalogLanguage>,
+    max_pages: Option<u32>,
     app: AppHandle,
     state: State<'_, AppState>,
     transport: State<'_, CatalogTransport>,
     update_state: State<'_, CatalogUpdateState>,
 ) -> Result<CatalogUpdateResult, CommandError> {
-    run_online_catalog_update(app, state, transport, update_state).await
+    let language = language.unwrap_or(CatalogLanguage::Korean);
+    let max_pages = max_pages.unwrap_or(if language == CatalogLanguage::Japanese {
+        1
+    } else {
+        catalog_update::MAX_UPDATE_PAGES
+    });
+    run_online_catalog_update(app, state, transport, update_state, language, max_pages).await
+}
+
+#[tauri::command]
+pub async fn reset_japanese_catalog_checkpoint(
+    state: State<'_, AppState>,
+    update_state: State<'_, CatalogUpdateState>,
+) -> Result<CatalogStatus, CommandError> {
+    let library = current_required(state)?;
+    let _guard = update_state
+        .begin()
+        .ok_or_else(|| CommandError::from(LibraryError::CatalogTransportBusy))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::library::catalog_checkpoint::reset_japanese(
+            &library.root().join("catalogs/kdata.db"),
+        )?;
+        library.catalog_status()
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
 }
 
 #[tauri::command]
 pub async fn run_due_online_catalog_update(
+    language: Option<CatalogLanguage>,
     app: AppHandle,
     state: State<'_, AppState>,
     transport: State<'_, CatalogTransport>,
@@ -1628,19 +1658,43 @@ pub async fn run_due_online_catalog_update(
 ) -> Result<Option<CatalogUpdateResult>, CommandError> {
     let library = current_required(state.clone())?;
     let status = library.catalog_status().map_err(CommandError::from)?;
+    let language = language.unwrap_or(CatalogLanguage::Korean);
+    let stream = status
+        .streams
+        .iter()
+        .find(|stream| stream.language == language);
+    // Initial Japanese ingestion is an explicit, bounded user action only.
+    if language == CatalogLanguage::Japanese && stream.is_none_or(|stream| !stream.initial_complete)
+    {
+        return Ok(None);
+    }
+    let last_attempt = stream
+        .and_then(|stream| stream.last_attempt_at.as_deref())
+        .or_else(|| {
+            (language == CatalogLanguage::Korean)
+                .then_some(status.last_attempt_at.as_deref())
+                .flatten()
+        });
     if !status.installed
         || !catalog_update::is_update_due(
             status.update_enabled,
             status.update_interval_seconds,
-            status.last_attempt_at.as_deref(),
+            last_attempt,
             chrono::Utc::now(),
         )
     {
         return Ok(None);
     }
-    run_online_catalog_update(app, state, transport, update_state)
-        .await
-        .map(Some)
+    run_online_catalog_update(
+        app,
+        state,
+        transport,
+        update_state,
+        language,
+        catalog_update::MAX_UPDATE_PAGES,
+    )
+    .await
+    .map(Some)
 }
 
 async fn run_online_catalog_update(
@@ -1648,17 +1702,23 @@ async fn run_online_catalog_update(
     state: State<'_, AppState>,
     transport: State<'_, CatalogTransport>,
     update_state: State<'_, CatalogUpdateState>,
+    language: CatalogLanguage,
+    max_pages: u32,
 ) -> Result<CatalogUpdateResult, CommandError> {
     let library = current_required(state)?;
     let Some(_guard) = update_state.begin() else {
         return Ok(CatalogUpdateResult {
+            language,
             added: 0,
             pages: 0,
             reason: CatalogUpdateStopReason::AlreadyRunning,
             last_success_at: library
                 .catalog_status()
                 .map_err(CommandError::from)?
-                .last_success_at,
+                .streams
+                .into_iter()
+                .find(|stream| stream.language == language)
+                .and_then(|stream| stream.last_progress_at),
         });
     };
     let vps_base_url = library
@@ -1666,9 +1726,16 @@ async fn run_online_catalog_update(
         .ok()
         .and_then(|config| config.api_base_url);
     // VPS base url이 설정된 경우 PC는 k-hentai 직접 연결 없이 VPS를 경유한다.
-    catalog_update::execute_catalog_update(library, &transport, &app, vps_base_url)
-        .await
-        .map_err(CommandError::from)
+    catalog_update::execute_catalog_update(
+        library,
+        &transport,
+        &app,
+        vps_base_url,
+        language,
+        max_pages,
+    )
+    .await
+    .map_err(CommandError::from)
 }
 
 #[tauri::command]

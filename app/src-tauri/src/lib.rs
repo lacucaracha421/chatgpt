@@ -175,6 +175,7 @@ pub fn run() {
             commands::get_online_catalog_work_detail,
             commands::set_online_catalog_bookmark,
             commands::update_online_catalog,
+            commands::reset_japanese_catalog_checkpoint,
             commands::run_due_online_catalog_update,
             commands::get_cloud_capture_settings,
             commands::set_cloud_capture_settings,

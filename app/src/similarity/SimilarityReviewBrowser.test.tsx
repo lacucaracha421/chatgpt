@@ -117,6 +117,7 @@ function reviewPage(items: SimilarityReviewSummary[], totalCount: number) {
 
 function reviewGateway(): LibraryGateway {
   return {
+    resetJapaneseCatalogCheckpoint: vi.fn(),
     getIgdbCredentialStatus: vi.fn(),
     setIgdbCredentials: vi.fn(),
     deleteIgdbCredentials: vi.fn(),

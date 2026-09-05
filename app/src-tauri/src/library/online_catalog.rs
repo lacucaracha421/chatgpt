@@ -217,6 +217,7 @@ impl Library {
 
     pub fn catalog_status(&self) -> Result<CatalogStatus, LibraryError> {
         let catalog_path = self.root.join("catalogs/kdata.db");
+        let streams = super::catalog_checkpoint::statuses(&catalog_path)?;
         let work_count = if catalog_path.exists() {
             Connection::open_with_flags(&catalog_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?
                 .query_row("SELECT COUNT(*) FROM Works", [], |row| row.get::<_, i64>(0))?
@@ -241,6 +242,7 @@ impl Library {
                         last_success_at: row.get(3)?,
                         last_added: row.get::<_, i64>(4)? as u64,
                         last_error: row.get(5)?,
+                        streams: streams.clone(),
                     })
                 },
             )

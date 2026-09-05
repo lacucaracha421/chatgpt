@@ -1002,6 +1002,25 @@ pub struct CatalogStatus {
     pub last_success_at: Option<String>,
     pub last_added: u64,
     pub last_error: Option<String>,
+    #[serde(default)]
+    pub streams: Vec<CatalogStreamStatus>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogStreamStatus {
+    pub provider: super::catalog_provider::CatalogProvider,
+    pub language: CatalogLanguage,
+    pub has_state: bool,
+    pub initial_complete: bool,
+    pub watermark: u64,
+    pub cursor: Option<u64>,
+    pub pending_max: u64,
+    pub last_attempt_at: Option<String>,
+    pub last_progress_at: Option<String>,
+    pub last_completed_at: Option<String>,
+    pub last_added: u64,
+    pub last_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -1017,6 +1036,7 @@ pub enum CatalogUpdateStopReason {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct CatalogUpdateResult {
+    pub language: CatalogLanguage,
     pub added: u64,
     pub pages: u32,
     pub reason: CatalogUpdateStopReason,

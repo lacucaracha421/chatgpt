@@ -4,6 +4,7 @@ mod album;
 mod asset_metadata;
 mod backup;
 pub mod book_migration;
+pub(crate) mod catalog_checkpoint;
 pub(crate) mod catalog_update;
 mod classification;
 mod collection;

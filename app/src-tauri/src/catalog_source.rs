@@ -9,7 +9,7 @@
 //! 두 구현 모두 k-hentai 원본과 동일한 본문(갱신 JSON 배열 / 갤러리 HTML)을
 //! 돌려야 하므로 파싱·저장 경로는 완전히 공유된다.
 
-use crate::library::error::LibraryError;
+use crate::library::{error::LibraryError, models::CatalogLanguage};
 use std::{io::Read, sync::LazyLock, time::Duration};
 
 /// k-hentai 응답 본문의 상한. 갱신 페이지 JSON과 갤러리 HTML 모두에 적용한다.
@@ -54,6 +54,7 @@ where
             Err(LibraryError::CatalogTransportRejected(status)) if status < 500 => {
                 return Err(LibraryError::CatalogTransportRejected(status));
             }
+            Err(error @ LibraryError::CatalogJapaneseTransportRequired) => return Err(error),
             Err(error) => {
                 last_error = Some(error);
             }
@@ -114,6 +115,15 @@ impl VpsCatalogSource {
     }
 
     fn get(&self, path: &str, token: &str) -> Result<String, LibraryError> {
+        self.get_with_language(path, token, None)
+    }
+
+    fn get_with_language(
+        &self,
+        path: &str,
+        token: &str,
+        language: Option<CatalogLanguage>,
+    ) -> Result<String, LibraryError> {
         if token.trim().is_empty() {
             return Err(LibraryError::CloudCredentialNotConfigured);
         }
@@ -132,7 +142,18 @@ impl VpsCatalogSource {
             .call()
             .map_err(source_transport_error)?;
         match response.status().as_u16() {
-            200 => read_bounded_body(&mut response),
+            200 => {
+                if language == Some(CatalogLanguage::Japanese)
+                    && response
+                        .headers()
+                        .get("X-Lakomics-Catalog-Language")
+                        .and_then(|value| value.to_str().ok())
+                        != Some("japanese")
+                {
+                    return Err(LibraryError::CatalogJapaneseTransportRequired);
+                }
+                read_bounded_body(&mut response)
+            }
             404 => Err(LibraryError::OnlineCatalogWorkNotFound),
             status => Err(LibraryError::CatalogTransportRejected(status)),
         }
@@ -166,6 +187,28 @@ impl VpsCatalogSource {
         token: &str,
     ) -> Result<String, LibraryError> {
         self.get(&Self::search_page_path(cursor), token)
+    }
+
+    pub(crate) fn fetch_search_page_for_language_bearer(
+        &self,
+        cursor: Option<u64>,
+        language: CatalogLanguage,
+        token: &str,
+    ) -> Result<String, LibraryError> {
+        if cursor.is_some_and(|cursor| cursor == 0 || cursor > i64::MAX as u64) {
+            return Err(LibraryError::InvalidCatalogTransportPath);
+        }
+        let path = match language {
+            CatalogLanguage::Korean => Self::search_page_path(cursor),
+            CatalogLanguage::Japanese => {
+                let mut path = "/v1/catalog/search-page?language=japanese".to_owned();
+                if let Some(cursor) = cursor {
+                    path.push_str(&format!("&cursor={cursor}"));
+                }
+                path
+            }
+        };
+        self.get_with_language(&path, token, Some(language))
     }
 }
 

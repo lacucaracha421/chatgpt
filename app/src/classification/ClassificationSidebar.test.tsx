@@ -15,6 +15,7 @@ const entries: ClassificationEntry[] = [
 
 function gateway(): LibraryGateway {
   return {
+    resetJapaneseCatalogCheckpoint: vi.fn(),
     getCatalogVisibilityPolicy: vi.fn().mockResolvedValue({ hiddenCategories: [], blockedTags: [] }),
     setCatalogCategoryHidden: vi.fn(),
     setCatalogTagBlocked: vi.fn(),

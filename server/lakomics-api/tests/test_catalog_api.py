@@ -64,6 +64,13 @@ class CatalogTransportApiTests(unittest.TestCase):
         response = self.client.get("/v1/catalog/search-page", headers={"Authorization": "Bearer wrong"})
         self.assertEqual(response.status_code, 401)
 
+    def test_japanese_search_page_requires_correct_bearer_token(self) -> None:
+        for headers in ({}, {"Authorization": "Bearer wrong"}):
+            response = self.client.get(
+                "/v1/catalog/search-page", params={"language": "japanese"}, headers=headers
+            )
+            self.assertEqual(response.status_code, 401)
+
     def test_gallery_requires_bearer_token(self) -> None:
         response = self.client.get("/v1/catalog/gallery/42")
         self.assertEqual(response.status_code, 401)
@@ -83,6 +90,43 @@ class CatalogTransportApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"works": []})
         self.assertEqual(fetched, ["https://k-hentai.org/ajax/search?search=language%3Akorean"])
+        self.assertEqual(response.headers["X-Lakomics-Catalog-Language"], "korean")
+
+    def test_search_page_accepts_explicit_supported_languages(self) -> None:
+        fetched: list[str] = []
+
+        def fake_fetch_once(url: str) -> tuple[int, bytes]:
+            fetched.append(url)
+            return 200, b"page"
+
+        with mock.patch.object(api_app, "_catalog_fetch_once", side_effect=fake_fetch_once):
+            korean = self.client.get(
+                "/v1/catalog/search-page", params={"language": "korean"}, headers=AUTH
+            )
+            japanese = self.client.get(
+                "/v1/catalog/search-page", params={"language": "japanese"}, headers=AUTH
+            )
+
+        self.assertEqual(korean.status_code, 200)
+        self.assertEqual(japanese.status_code, 200)
+        self.assertEqual(
+            fetched,
+            [
+                "https://k-hentai.org/ajax/search?search=language%3Akorean",
+                "https://k-hentai.org/ajax/search?search=language%3Ajapanese",
+            ],
+        )
+        self.assertEqual(korean.headers["X-Lakomics-Catalog-Language"], "korean")
+        self.assertEqual(japanese.headers["X-Lakomics-Catalog-Language"], "japanese")
+
+    def test_search_page_rejects_invalid_languages(self) -> None:
+        for language in ["", "english", "japanese&next-id=1", "KOREAN"]:
+            with self.subTest(language=language):
+                response = self.client.get(
+                    "/v1/catalog/search-page", params={"language": language}, headers=AUTH
+                )
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.json()["detail"], "language must be korean or japanese")
 
     def test_search_page_valid_cursor_is_forwarded(self) -> None:
         fetched: list[str] = []
@@ -98,6 +142,30 @@ class CatalogTransportApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(fetched, ["https://k-hentai.org/ajax/search?search=language%3Akorean&next-id=4127793"])
+
+    def test_search_page_forwards_cursor_with_japanese_language(self) -> None:
+        fetched: list[str] = []
+
+        def fake_fetch_once(url: str) -> tuple[int, bytes]:
+            fetched.append(url)
+            return 200, b"page"
+
+        with mock.patch.object(api_app, "_catalog_fetch_once", side_effect=fake_fetch_once):
+            response = self.client.get(
+                "/v1/catalog/search-page",
+                params={"cursor": 9223372036854775807, "language": "japanese"},
+                headers=AUTH,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            fetched,
+            [
+                "https://k-hentai.org/ajax/search?search=language%3Ajapanese"
+                "&next-id=9223372036854775807"
+            ],
+        )
+        self.assertEqual(response.headers["X-Lakomics-Catalog-Language"], "japanese")
 
     def test_gallery_valid_request_returns_html(self) -> None:
         html = b'<html><script>const gallery = {"files": []};</script></html>'
@@ -123,6 +191,17 @@ class CatalogTransportApiTests(unittest.TestCase):
             )
             self.assertEqual(response.status_code, 400)
             self.assertEqual(response.json()["detail"], "cursor must be a positive id")
+
+    def test_search_page_rejects_cursor_above_signed_64_bit_range(self) -> None:
+        with mock.patch.object(api_app, "_catalog_fetch_once") as fetch_once:
+            response = self.client.get(
+                "/v1/catalog/search-page",
+                params={"cursor": "9223372036854775808", "language": "japanese"},
+                headers=AUTH,
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "cursor must be at most 9223372036854775807")
+        fetch_once.assert_not_called()
 
     def test_gallery_rejects_non_positive_id(self) -> None:
         response = self.client.get("/v1/catalog/gallery/0", headers=AUTH)
@@ -401,6 +480,31 @@ class CatalogTransportApiTests(unittest.TestCase):
         self.assertEqual(second.status_code, 200)
         self.assertEqual(second.content, b"cached-body")
         self.assertEqual(len(calls), 1, "second request must hit the VPS cache")
+
+    def test_search_cache_is_separate_per_language_and_cached_response_has_header(self) -> None:
+        calls: list[str] = []
+
+        def fake_fetch_once(url: str) -> tuple[int, bytes]:
+            calls.append(url)
+            return 200, url.encode()
+
+        with mock.patch.object(api_app, "_catalog_fetch_once", side_effect=fake_fetch_once):
+            korean = self.client.get(
+                "/v1/catalog/search-page", params={"language": "korean"}, headers=AUTH
+            )
+            japanese = self.client.get(
+                "/v1/catalog/search-page", params={"language": "japanese"}, headers=AUTH
+            )
+            cached_japanese = self.client.get(
+                "/v1/catalog/search-page", params={"language": "japanese"}, headers=AUTH
+            )
+
+        self.assertEqual(len(calls), 2)
+        self.assertNotEqual(korean.content, japanese.content)
+        self.assertEqual(cached_japanese.content, japanese.content)
+        self.assertEqual(
+            cached_japanese.headers["X-Lakomics-Catalog-Language"], "japanese"
+        )
 
     def test_cache_is_not_shared_across_different_ids(self) -> None:
         calls: list[str] = []

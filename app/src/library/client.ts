@@ -114,12 +114,21 @@ export const libraryGateway: LibraryGateway = {
     invoke<CatalogWorkDetail>("get_online_catalog_work_detail", { identity }),
   setOnlineCatalogBookmark: (identity, bookmarked) =>
     invoke("set_online_catalog_bookmark", { identity, bookmarked }),
-  updateOnlineCatalog: () =>
-    invoke<CatalogUpdateResult>("update_online_catalog"),
+  updateOnlineCatalog: (language, maxPages) =>
+    language === undefined && maxPages === undefined
+      ? invoke<CatalogUpdateResult>("update_online_catalog")
+      : invoke<CatalogUpdateResult>("update_online_catalog", {
+        ...(language === undefined ? {} : { language }),
+        ...(maxPages === undefined ? {} : { maxPages }),
+      }),
+  resetJapaneseCatalogCheckpoint: () =>
+    invoke<CatalogStatus>("reset_japanese_catalog_checkpoint"),
   setOnlineCatalogUpdateSettings: (enabled, intervalSeconds) =>
     invoke<CatalogStatus>("set_online_catalog_update_settings", { enabled, intervalSeconds }),
-  runDueOnlineCatalogUpdate: () =>
-    invoke<CatalogUpdateResult | null>("run_due_online_catalog_update"),
+  runDueOnlineCatalogUpdate: (language) =>
+    language === undefined
+      ? invoke<CatalogUpdateResult | null>("run_due_online_catalog_update")
+      : invoke<CatalogUpdateResult | null>("run_due_online_catalog_update", { language }),
   getCloudCaptureSettings: () =>
     invoke<CloudCaptureSettings>("get_cloud_capture_settings"),
   setCloudCaptureSettings: (enabled, apiBaseUrl) =>

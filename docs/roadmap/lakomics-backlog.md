@@ -158,26 +158,20 @@ Completed evidence (2026-09-05):
 
 Status: `PARTIAL`
 
-Already present:
+Implemented and fixture-verified:
 
-- language tags;
-- Japanese tag display/filter primitives.
+- typed Korean/Japanese ingestion on the existing authenticated VPS transport, with Korean legacy default and a Japanese response acknowledgement;
+- provider/language-qualified `CrawlState` checkpoints and status, Korean legacy migration, independent resumable cursors, and a zero-boundary Japanese initial pass;
+- atomic work/tag/checkpoint page commits, low-ID Japanese upserts, replay/rollback coverage, and canonical cross-language membership preservation;
+- separate Settings progress/error/recovery, Japanese-only checkpoint reset, bounded manual initial pages, and automatic incremental updates only after initial completion;
+- Korean default browsing and existing search/visibility/performance behavior preserved; no schema/index change or catalog replacement.
 
-Missing:
-
-- a genuinely independent Japanese ingestion stream;
-- per-provider/per-language cursor or watermark state;
-- a Japanese initial crawl that does not reuse the Korean global max-ID gate;
-- separate status/recovery for Korean and Japanese streams.
-
-Direction:
-
-- allowlist `korean` and `japanese` on the existing authenticated VPS transport;
-- keep Korean as the default scope;
-- transactionally upsert every returned Japanese work/tag during the first pass, including IDs lower than the Korean max;
-- advance a language checkpoint only after its page commits;
-- use bounded canary pages and a verified `kdata.db` backup before a broad initial crawl;
-- never replace the catalog wholesale.
+Remaining gate: separately authorized deployment of the language-aware VPS, then
+the bounded real Japanese-source canary (maximum two pages on a verified backup's
+disposable copy). Real-source low-ID ingestion/resume/idempotence has **not** yet
+been demonstrated. No production ingestion or broad initial crawl was run.
+See [catalog troubleshooting](../agents/catalog-troubleshooting.md#bounded-real-source-canary-deployment-gate)
+for the exact procedure and retained-backup requirement before active-catalog mutation.
 
 Prerequisite: CATALOG-002A.
 

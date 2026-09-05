@@ -3,7 +3,8 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
-import type { CatalogStatus, CloudCaptureSettings, CloudCaptureSyncResult, CloudLibraryRestoreReport, ExtensionConnection, LegacyPackageMigrationPlan, LegacyPackageMigrationReport, MetadataBackup } from "../library/types";
+import { catalogStreamStatus } from "../library/catalogStreams";
+import type { CatalogLanguage, CatalogStatus, CatalogStreamStatus, CloudCaptureSettings, CloudCaptureSyncResult, CloudLibraryRestoreReport, ExtensionConnection, LegacyPackageMigrationPlan, LegacyPackageMigrationReport, MetadataBackup } from "../library/types";
 import { formatBytes } from "../assets/assetMetadata";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { Button } from "../shared/ui/Button";
@@ -91,6 +92,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [catalogStatus, setCatalogStatus] = useState<CatalogStatus | null>(null);
   const [catalogBusy, setCatalogBusy] = useState(false);
   const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [catalogCheckpointConfirming, setCatalogCheckpointConfirming] = useState(false);
   const [catalogRestoreBusy, setCatalogRestoreBusy] = useState(false);
   const [catalogRestoreMessage, setCatalogRestoreMessage] = useState<string | null>(null);
   const [catalogCacheConfirming, setCatalogCacheConfirming] = useState(false);
@@ -577,6 +579,34 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     }
   }
 
+  async function updateCatalogStream(language: CatalogLanguage, maxPages: number) {
+    if (!catalogStatus || catalogBusy) return;
+    setCatalogBusy(true);
+    setCatalogError(null);
+    try {
+      await gateway.updateOnlineCatalog(language, maxPages);
+      setCatalogStatus(await gateway.getOnlineCatalogStatus());
+    } catch (updateError) {
+      setCatalogError(commandErrorMessage(updateError, `${catalogLanguageLabel(language)} 카탈로그를 갱신하지 못했습니다.`));
+    } finally {
+      setCatalogBusy(false);
+    }
+  }
+
+  async function resetJapaneseCatalogCheckpoint() {
+    if (catalogBusy) return;
+    setCatalogBusy(true);
+    setCatalogError(null);
+    try {
+      setCatalogStatus(await gateway.resetJapaneseCatalogCheckpoint());
+      setCatalogCheckpointConfirming(false);
+    } catch (resetError) {
+      setCatalogError(commandErrorMessage(resetError, "일본어 카탈로그 체크포인트를 재설정하지 못했습니다."));
+    } finally {
+      setCatalogBusy(false);
+    }
+  }
+
   async function restoreCatalogFromVck() {
     if (catalogRestoreBusy) return;
     setCatalogRestoreBusy(true);
@@ -865,14 +895,31 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           <dt>카탈로그 상태</dt>
           <dd>{catalogStatus.installed ? `설치됨 · ${catalogStatus.workCount.toLocaleString()}개 작품` : "미설치"}</dd>
         </dl>}
-        {catalogStatus?.installed && <dl className="settings-view__property">
-          <dt>마지막 갱신</dt>
-          {catalogStatus.lastError ? <dd className="settings-view__row-message" role="alert">실패 — {catalogStatus.lastError}</dd>
-            : <dd>{catalogStatus.lastSuccessAt
-              ? `${localDateTime(catalogStatus.lastSuccessAt)} · 신규 ${catalogStatus.lastAdded.toLocaleString()}개`
-              : "아직 갱신 기록이 없습니다"}</dd>}
-          <dd className="settings-view__row-note">갱신은 새 작품 추가만 반영하며 기존 작품의 변경은 반영하지 않습니다.</dd>
-        </dl>}
+        {catalogStatus?.installed && <>
+          <CatalogStreamSettings
+            stream={catalogStreamStatus(catalogStatus, "korean")}
+            busy={catalogBusy}
+            onUpdate={updateCatalogStream}
+          />
+          <CatalogStreamSettings
+            stream={catalogStreamStatus(catalogStatus, "japanese")}
+            busy={catalogBusy}
+            onUpdate={updateCatalogStream}
+          />
+          <dl className="settings-view__property">
+            <dt>일본어 체크포인트</dt>
+            <dd className="settings-view__row-note">초기 수집 위치만 재설정하며 기존 카탈로그와 사용자 데이터는 유지합니다.</dd>
+            {!catalogCheckpointConfirming ? (
+              <Button size="sm" disabled={catalogBusy} onClick={() => setCatalogCheckpointConfirming(true)}>일본어 체크포인트 재설정</Button>
+            ) : (
+              <span className="settings-view__credential-actions">
+                <Button size="sm" disabled={catalogBusy} onClick={() => setCatalogCheckpointConfirming(false)}>취소</Button>
+                <Button size="sm" variant="danger" disabled={catalogBusy} onClick={() => void resetJapaneseCatalogCheckpoint()}>체크포인트 재설정 확인</Button>
+              </span>
+            )}
+            {catalogCheckpointConfirming && <dd className="settings-view__row-message">일본어 카탈로그 체크포인트만 재설정할까요? 기존 카탈로그와 북마크·읽기 기록은 그대로 유지됩니다.</dd>}
+          </dl>
+        </>}
         {catalogStatus?.installed && <dl className="settings-view__property">
           <dt>카탈로그 교체·복구</dt>
           <dd className="settings-view__row-note">VCK 원본 폴더를 다시 선택하면 검증 후 전체 카탈로그를 교체합니다. 북마크와 읽기 기록은 유지됩니다.</dd>
@@ -1060,6 +1107,41 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     </div>
     </div>
   </section>;
+}
+
+function CatalogStreamSettings({ stream, busy, onUpdate }: {
+  stream: CatalogStreamStatus;
+  busy: boolean;
+  onUpdate: (language: CatalogLanguage, maxPages: number) => Promise<void>;
+}) {
+  const languageLabel = catalogLanguageLabel(stream.language);
+  const stateLabel = stream.initialComplete
+    ? "초기 수집 완료"
+    : stream.hasState
+      ? "초기 수집 진행 중"
+      : "초기 수집 전";
+  const updateLabel = stream.initialComplete
+    ? `${languageLabel} 신규 작품 갱신`
+    : stream.hasState
+      ? `${languageLabel} 초기 수집 계속`
+      : `${languageLabel} 초기 수집 시작`;
+  const maxPages = stream.language === "japanese" && !stream.initialComplete ? 1 : 40;
+
+  return <dl className="settings-view__property">
+    <dt>{languageLabel} 카탈로그</dt>
+    <dd>
+      <div>{stateLabel} · 대기 {stream.pendingMax.toLocaleString()}개</div>
+      {stream.lastProgressAt
+        ? <div className="settings-view__row-note">마지막 진행 {localDateTime(stream.lastProgressAt)} · 신규 {stream.lastAdded.toLocaleString()}개</div>
+        : <div className="settings-view__row-note">아직 진행 기록이 없습니다</div>}
+      {stream.lastError && <div className="settings-view__row-message" role="alert">마지막 시도 실패 — {stream.lastError}</div>}
+    </dd>
+    <Button size="sm" disabled={busy} onClick={() => void onUpdate(stream.language, maxPages)}>{updateLabel}</Button>
+  </dl>;
+}
+
+function catalogLanguageLabel(language: CatalogLanguage): string {
+  return language === "korean" ? "한국어" : "일본어";
 }
 
 const SHORTCUTS = [

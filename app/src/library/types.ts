@@ -11,9 +11,11 @@ export type CatalogStatus = {
   lastSuccessAt: string | null;
   lastAdded: number;
   lastError: string | null;
+  streams: CatalogStreamStatus[];
 };
 
 export type CatalogUpdateResult = {
+  language: CatalogLanguage;
   added: number;
   pages: number;
   reason: "completed" | "upToDate" | "pageLimit" | "rateLimited" | "alreadyRunning";
@@ -140,6 +142,21 @@ export type RemoteReadingProgress = CatalogWorkIdentity & {
 export type CatalogSort = "latest" | "views" | "hotDay" | "hotWeek" | "hotMonth";
 export type CatalogScope = "all" | "bookmarked";
 export type CatalogLanguage = "korean" | "japanese";
+
+export type CatalogStreamStatus = {
+  provider: CatalogProvider;
+  language: CatalogLanguage;
+  hasState: boolean;
+  initialComplete: boolean;
+  watermark: number;
+  cursor: number | null;
+  pendingMax: number;
+  lastAttemptAt: string | null;
+  lastProgressAt: string | null;
+  lastCompletedAt: string | null;
+  lastAdded: number;
+  lastError: string | null;
+};
 
 export type CatalogBlockedTag = {
   namespace: string;
@@ -893,9 +910,10 @@ export interface LibraryGateway {
   suggestOnlineCatalog(text: string, limit: number): Promise<CatalogSuggestion[]>;
   getOnlineCatalogWorkDetail(identity: CatalogWorkIdentity): Promise<CatalogWorkDetail>;
   setOnlineCatalogBookmark(identity: CatalogWorkIdentity, bookmarked: boolean): Promise<void>;
-  updateOnlineCatalog(): Promise<CatalogUpdateResult>;
+  updateOnlineCatalog(language?: CatalogLanguage, maxPages?: number): Promise<CatalogUpdateResult>;
+  resetJapaneseCatalogCheckpoint(): Promise<CatalogStatus>;
   setOnlineCatalogUpdateSettings(enabled: boolean, intervalSeconds: number): Promise<CatalogStatus>;
-  runDueOnlineCatalogUpdate(): Promise<CatalogUpdateResult | null>;
+  runDueOnlineCatalogUpdate(language?: CatalogLanguage): Promise<CatalogUpdateResult | null>;
   getCloudCaptureSettings(): Promise<CloudCaptureSettings>;
   setCloudCaptureSettings(enabled: boolean, apiBaseUrl: string | null): Promise<CloudCaptureSettings>;
   setCloudApiToken(token: string): Promise<CloudCredentialStatus>;

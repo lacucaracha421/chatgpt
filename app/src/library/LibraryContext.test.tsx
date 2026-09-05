@@ -48,6 +48,7 @@ function Probe() {
 
 function gateway(): LibraryGateway {
   return {
+    resetJapaneseCatalogCheckpoint: vi.fn(),
     getIgdbCredentialStatus: vi.fn(),
     setIgdbCredentials: vi.fn(),
     deleteIgdbCredentials: vi.fn(),

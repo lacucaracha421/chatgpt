@@ -11,17 +11,21 @@ use tauri::AppHandle;
 use crate::catalog_transport::{search_page_path, CatalogTransport};
 
 use super::{
+    catalog_checkpoint,
     error::LibraryError,
-    models::{CatalogUpdateResult, CatalogUpdateStopReason},
+    models::{CatalogLanguage, CatalogUpdateResult, CatalogUpdateStopReason},
     Library,
 };
 
 const REMOTE_PAGE_SIZE: usize = 50;
 const MAX_REMOTE_TEXT_BYTES: usize = 1_000_000;
-const MAX_UPDATE_PAGES: u32 = 40;
+pub(crate) const MAX_UPDATE_PAGES: u32 = 40;
+#[cfg(test)]
 const WATERMARK_KEY: &str = "lakomics_update_watermark";
+#[cfg(test)]
 const CURSOR_KEY: &str = "lakomics_update_cursor";
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct UpdateCheckpoint {
     watermark: u64,
@@ -55,6 +59,7 @@ pub(crate) struct RemoteCatalogPage {
     pub(crate) works: Vec<RemoteWork>,
     pub(crate) lowest_id: Option<u64>,
     pub(crate) is_last_page: bool,
+    raw_count: usize,
 }
 
 #[derive(Debug)]
@@ -98,6 +103,7 @@ impl RemoteCatalogPage {
             }
         }
         Ok(Self {
+            raw_count: values.len(),
             lowest_id: works.iter().map(|work| work.id).min(),
             is_last_page: values.len() < REMOTE_PAGE_SIZE,
             works,
@@ -129,25 +135,40 @@ pub(crate) async fn execute_catalog_update(
     transport: &CatalogTransport,
     app: &AppHandle,
     vps_base_url: Option<String>,
+    language: CatalogLanguage,
+    max_pages: u32,
 ) -> Result<CatalogUpdateResult, LibraryError> {
-    let attempted_at = chrono::Utc::now().to_rfc3339();
-    library.record_catalog_update_attempt(&attempted_at)?;
-    match run_catalog_update(&library, transport, app, vps_base_url).await {
-        Ok(mut result) if result.reason == CatalogUpdateStopReason::RateLimited => {
-            library.rebuild_catalog_suggestions()?;
-            library.record_catalog_update_error("온라인 카탈로그 요청 한도를 초과했습니다")?;
-            result.last_success_at = library.catalog_status()?.last_success_at;
-            Ok(result)
-        }
+    if language == CatalogLanguage::Korean {
+        library.record_catalog_update_attempt(&chrono::Utc::now().to_rfc3339())?;
+    }
+    let outcome =
+        run_catalog_update(&library, transport, app, vps_base_url, language, max_pages).await;
+    match outcome {
         Ok(mut result) => {
             library.rebuild_catalog_suggestions()?;
-            let completed_at = chrono::Utc::now().to_rfc3339();
-            library.record_catalog_update_success(&completed_at, result.added)?;
-            result.last_success_at = Some(completed_at);
+            let stream = catalog_checkpoint::statuses(&library.root().join("catalogs/kdata.db"))?
+                .into_iter()
+                .find(|stream| stream.language == language)
+                .unwrap();
+            result.last_success_at = stream.last_progress_at;
+            if language == CatalogLanguage::Korean {
+                if result.reason == CatalogUpdateStopReason::RateLimited {
+                    library
+                        .record_catalog_update_error("온라인 카탈로그 요청 한도를 초과했습니다")?;
+                } else if let Some(at) = &result.last_success_at {
+                    library.record_catalog_update_success(at, result.added)?;
+                }
+            }
             Ok(result)
         }
         Err(error) => {
-            let _ = library.record_catalog_update_error(&error.to_string());
+            let path = library.root().join("catalogs/kdata.db");
+            if path.exists() {
+                let _ = catalog_checkpoint::record_error(&path, language, &error.to_string());
+            }
+            if language == CatalogLanguage::Korean {
+                let _ = library.record_catalog_update_error(&error.to_string());
+            }
             Err(error)
         }
     }
@@ -158,51 +179,52 @@ async fn run_catalog_update(
     transport: &CatalogTransport,
     app: &AppHandle,
     vps_base_url: Option<String>,
+    language: CatalogLanguage,
+    max_pages: u32,
 ) -> Result<CatalogUpdateResult, LibraryError> {
+    if !(1..=MAX_UPDATE_PAGES).contains(&max_pages) {
+        return Err(LibraryError::InvalidOnlineCatalog);
+    }
     let catalog_path = library.root().join("catalogs/kdata.db");
     if !catalog_path.exists() {
         return Err(LibraryError::OnlineCatalogNotInstalled);
     }
-    let lookup_path = catalog_path.clone();
-    let checkpoint = tauri::async_runtime::spawn_blocking(move || load_checkpoint(&lookup_path))
-        .await
-        .map_err(|_| LibraryError::CatalogTransportUnavailable)??;
-    let lookup_path = catalog_path.clone();
-    let known_max_id = if let Some(checkpoint) = checkpoint {
-        checkpoint.watermark
-    } else {
-        tauri::async_runtime::spawn_blocking(move || highest_stored_id(&lookup_path))
-            .await
-            .map_err(|_| LibraryError::CatalogTransportUnavailable)??
-    };
-    let mut cursor = checkpoint.map(|checkpoint| checkpoint.cursor);
-    let resuming = checkpoint.is_some();
-    let mut added = 0;
-    let mut pages = 0;
-    // VPS base url이 있으면 PC가 k-hentai에 직접 닿지 않는다. 없으면 기존
-    // WebView2 전송을 그대로 쓴다(Phase 1: 전송만 교체, 데이터 모델 무변경).
-    // VPS 인증은 기존 Cloud Capture와 같은 Bearer 토큰을 재사용한다.
+    // Japanese cannot silently fall back to the old Korean-only transport.
+    if language == CatalogLanguage::Japanese && vps_base_url.is_none() {
+        return Err(LibraryError::CatalogJapaneseTransportRequired);
+    }
     let vps_source = match vps_base_url.as_deref() {
-        Some(base_url) => {
-            let cloud_token = crate::library::credential::read_cloud_api_token_os()?;
-            Some((
-                crate::catalog_source::VpsCatalogSource::new(base_url)?,
-                cloud_token,
-            ))
-        }
+        Some(base_url) => Some((
+            crate::catalog_source::VpsCatalogSource::new(base_url)?,
+            crate::library::credential::read_cloud_api_token_os()?,
+        )),
         None => None,
     };
-
-    while pages < MAX_UPDATE_PAGES {
+    let path = catalog_path.clone();
+    let mut checkpoint = tauri::async_runtime::spawn_blocking(move || {
+        catalog_checkpoint::start(&path, language, &chrono::Utc::now().to_rfc3339())
+    })
+    .await
+    .map_err(|_| LibraryError::CatalogTransportUnavailable)??;
+    let mut added = 0;
+    let mut pages = 0;
+    while pages < max_pages {
         let body = if let Some((vps, token)) = &vps_source {
-            // VPS 전송은 Lakomics VPS API 경로(/v1/catalog/search-page)만 안다.
-            // k-hentai 업스트림 경로는 WebView2 직접 전송 전용이다.
-            crate::catalog_source::retry_transient(|| vps.fetch_search_page_bearer(cursor, token))
-                .await?
+            crate::catalog_source::retry_transient(|| {
+                vps.fetch_search_page_for_language_bearer(checkpoint.cursor, language, token)
+            })
+            .await?
         } else {
-            let Some(body) = fetch_with_retry(transport, app, &search_page_path(cursor)).await?
+            let Some(body) =
+                fetch_with_retry(transport, app, &search_page_path(checkpoint.cursor)).await?
             else {
+                catalog_checkpoint::record_error(
+                    &catalog_path,
+                    language,
+                    "온라인 카탈로그 요청 한도를 초과했습니다",
+                )?;
                 return Ok(CatalogUpdateResult {
+                    language,
                     added,
                     pages,
                     reason: CatalogUpdateStopReason::RateLimited,
@@ -212,69 +234,127 @@ async fn run_catalog_update(
             body
         };
         let page = RemoteCatalogPage::parse(&body)?;
+        let path = catalog_path.clone();
+        let expected = checkpoint.clone();
+        let (page_added, next) = tauri::async_runtime::spawn_blocking(move || {
+            commit_stream_page(
+                &path,
+                language,
+                &expected,
+                &page,
+                chrono::Utc::now().timestamp(),
+            )
+        })
+        .await
+        .map_err(|_| LibraryError::CatalogTransportUnavailable)??;
+        added += page_added;
         pages += 1;
-        if !resuming
-            && pages == 1
-            && page
-                .works
-                .iter()
-                .map(|work| work.id)
-                .max()
-                .is_none_or(|site_max_id| site_max_id <= known_max_id)
-        {
+        let up_to_date = checkpoint.initial_complete
+            && checkpoint.cursor.is_none()
+            && next.pending_max == checkpoint.watermark;
+        checkpoint = next;
+        if checkpoint.cursor.is_none() {
             return Ok(CatalogUpdateResult {
-                added: 0,
-                pages,
-                reason: CatalogUpdateStopReason::UpToDate,
-                last_success_at: None,
-            });
-        }
-
-        let next_cursor = next_page_cursor(&page, known_max_id);
-        let fresh = page
-            .works
-            .into_iter()
-            .filter(|work| work.id > known_max_id)
-            .collect::<Vec<_>>();
-        if !fresh.is_empty() || next_cursor.is_some() {
-            let write_path = catalog_path.clone();
-            let crawled_at = chrono::Utc::now().timestamp();
-            added += tauri::async_runtime::spawn_blocking(move || {
-                write_catalog_page_with_checkpoint(
-                    &write_path,
-                    &fresh,
-                    crawled_at,
-                    next_cursor.map(|cursor| UpdateCheckpoint {
-                        watermark: known_max_id,
-                        cursor,
-                    }),
-                )
-            })
-            .await
-            .map_err(|_| LibraryError::CatalogTransportUnavailable)??;
-        }
-        let Some(next_cursor) = next_cursor else {
-            let clear_path = catalog_path.clone();
-            tauri::async_runtime::spawn_blocking(move || clear_checkpoint(&clear_path))
-                .await
-                .map_err(|_| LibraryError::CatalogTransportUnavailable)??;
-            return Ok(CatalogUpdateResult {
+                language,
                 added,
                 pages,
-                reason: CatalogUpdateStopReason::Completed,
+                reason: if up_to_date {
+                    CatalogUpdateStopReason::UpToDate
+                } else {
+                    CatalogUpdateStopReason::Completed
+                },
                 last_success_at: None,
             });
-        };
-        cursor = Some(next_cursor);
-        delay(std::time::Duration::from_millis(400)).await?;
+        }
+        if pages < max_pages {
+            delay(std::time::Duration::from_millis(400)).await?;
+        }
     }
-
     Ok(CatalogUpdateResult {
+        language,
         added,
         pages,
         reason: CatalogUpdateStopReason::PageLimit,
         last_success_at: None,
     })
+}
+
+fn commit_stream_page(
+    path: &Path,
+    language: CatalogLanguage,
+    expected: &catalog_checkpoint::Checkpoint,
+    page: &RemoteCatalogPage,
+    crawled_at: i64,
+) -> Result<(u64, catalog_checkpoint::Checkpoint), LibraryError> {
+    // Reject an old VPS's Korean response or malformed non-progress page before
+    // it can claim the independent Japanese stream has reached its end.
+    if (language == CatalogLanguage::Japanese
+        && page.works.iter().any(|work| {
+            !work
+                .tags
+                .iter()
+                .any(|(namespace, value)| namespace == "language" && value == language.as_tag())
+        }))
+        || (page.raw_count > 0 && page.lowest_id.is_none())
+    {
+        return Err(LibraryError::InvalidOnlineCatalog);
+    }
+    let next_cursor = next_page_cursor(page, expected.watermark);
+    let mut next = expected.clone();
+    next.pending_max = expected
+        .pending_max
+        .max(page.works.iter().map(|work| work.id).max().unwrap_or(0));
+    next.cursor = next_cursor;
+    if next_cursor.is_none() {
+        next.watermark = next.pending_max;
+        next.initial_complete = true;
+    }
+    let mut connection = Connection::open(path)?;
+    let transaction = connection.transaction()?;
+    let current = catalog_checkpoint::load(&transaction, language)?;
+    if current != *expected {
+        // A lost response may replay the same already committed page. Never
+        // move a cursor backwards or repeat writes against a later checkpoint.
+        if current == next {
+            return Ok((0, current));
+        }
+        return Err(LibraryError::InvalidOnlineCatalog);
+    }
+    if expected
+        .cursor
+        .zip(next_cursor)
+        .is_some_and(|(previous, next)| next >= previous)
+    {
+        return Err(LibraryError::InvalidOnlineCatalog);
+    }
+    let mut added = 0;
+    for work in page
+        .works
+        .iter()
+        .filter(|work| !expected.initial_complete || work.id > expected.watermark)
+    {
+        let exists: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM Works WHERE Id=?1)",
+            [work.id as i64],
+            |row| row.get(0),
+        )?;
+        write_catalog_work(&transaction, work, crawled_at)?;
+        added += u64::from(!exists);
+    }
+    catalog_checkpoint::save(&transaction, language, &next)?;
+    let mut status = catalog_checkpoint::run_status(&transaction, language)?;
+    let at = chrono::DateTime::from_timestamp(crawled_at, 0)
+        .ok_or(LibraryError::InvalidOnlineCatalog)?
+        .to_rfc3339();
+    status.last_progress_at = Some(at.clone());
+    status.last_added += added;
+    status.last_error = None;
+    if next.cursor.is_none() {
+        status.last_completed_at = Some(at);
+    }
+    catalog_checkpoint::save_status(&transaction, language, &status)?;
+    transaction.commit()?;
+    Ok((added, next))
 }
 
 async fn fetch_with_retry(
@@ -422,6 +502,7 @@ pub(crate) fn import_targeted_work(
     Ok(true)
 }
 
+#[cfg(test)]
 pub(crate) fn highest_stored_id(path: &Path) -> Result<u64, LibraryError> {
     Ok(
         Connection::open(path)?.query_row("SELECT COALESCE(MAX(Id), 0) FROM Works", [], |row| {
@@ -445,6 +526,15 @@ fn write_catalog_work(
     crawled_at: i64,
 ) -> Result<(), LibraryError> {
     let work_id = work.id as i64;
+    // Shared by stream ingestion and targeted recovery: a late recovery
+    // response must not erase the other stream's canonical membership.
+    let language_tags = {
+        let mut statement = transaction.prepare("SELECT Value FROM Tags WHERE WorkId=?1 AND Namespace='language' AND Value IN ('korean','japanese')")?;
+        let values = statement
+            .query_map([work_id], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        values
+    };
     transaction.execute(
         "INSERT INTO Works (
             Id, Token, Title, TitleJpn, Category, Uploader, Posted, Updated,
@@ -480,9 +570,16 @@ fn write_catalog_work(
             params![work_id, namespace, value],
         )?;
     }
+    for value in language_tags {
+        transaction.execute(
+            "INSERT OR IGNORE INTO Tags(WorkId,Namespace,Value) VALUES(?1,'language',?2)",
+            params![work_id, value],
+        )?;
+    }
     Ok(())
 }
 
+#[cfg(test)]
 fn write_catalog_page_with_checkpoint(
     path: &Path,
     works: &[RemoteWork],
@@ -515,6 +612,7 @@ fn write_catalog_page_with_checkpoint(
     Ok(works.len() as u64)
 }
 
+#[cfg(test)]
 fn load_checkpoint(path: &Path) -> Result<Option<UpdateCheckpoint>, LibraryError> {
     let connection = Connection::open(path)?;
     let value = |key| -> Result<Option<u64>, LibraryError> {
@@ -533,13 +631,9 @@ fn load_checkpoint(path: &Path) -> Result<Option<UpdateCheckpoint>, LibraryError
     })
 }
 
-fn clear_checkpoint(path: &Path) -> Result<(), LibraryError> {
-    Connection::open(path)?.execute(
-        "DELETE FROM CrawlState WHERE Key IN (?1, ?2)",
-        params![WATERMARK_KEY, CURSOR_KEY],
-    )?;
-    Ok(())
-}
+#[cfg(test)]
+#[path = "catalog_stream_tests.rs"]
+mod stream_tests;
 
 #[cfg(test)]
 mod tests {
@@ -569,7 +663,7 @@ mod tests {
         CREATE TABLE CrawlState (Key TEXT PRIMARY KEY, Value TEXT);
     "#;
 
-    fn catalog() -> (tempfile::TempDir, std::path::PathBuf) {
+    pub(super) fn catalog() -> (tempfile::TempDir, std::path::PathBuf) {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("kdata.db");
         Connection::open(&path)
@@ -579,7 +673,7 @@ mod tests {
         (directory, path)
     }
 
-    fn page(ids: &[u64]) -> String {
+    pub(super) fn page(ids: &[u64]) -> String {
         serde_json::to_string(
             &ids.iter()
                 .map(|id| {
@@ -691,13 +785,15 @@ mod tests {
                     row.get::<_, i64>(0)
                 })
                 .unwrap(),
-            1
+            2
         );
         assert_eq!(
             connection
-                .query_row("SELECT Value FROM Tags WHERE WorkId = 120", [], |row| {
-                    row.get::<_, String>(0)
-                })
+                .query_row(
+                    "SELECT Value FROM Tags WHERE WorkId = 120 AND Namespace='group'",
+                    [],
+                    |row| { row.get::<_, String>(0) }
+                )
                 .unwrap(),
             "new-group"
         );
@@ -781,6 +877,17 @@ mod tests {
         assert_eq!(next_page_cursor(&first, 100), Some(101));
         let second = RemoteCatalogPage::parse(&page(&[100, 99])).unwrap();
         assert_eq!(next_page_cursor(&second, 100), None);
+    }
+
+    #[test]
+    fn japanese_initial_pass_must_not_use_the_korean_global_maximum() {
+        let initial =
+            RemoteCatalogPage::parse(&page(&(101..=150).rev().collect::<Vec<_>>())).unwrap();
+        let (_directory, path) = catalog();
+        let connection = Connection::open(&path).unwrap();
+        let checkpoint =
+            super::catalog_checkpoint::load(&connection, super::CatalogLanguage::Japanese).unwrap();
+        assert_eq!(next_page_cursor(&initial, checkpoint.watermark), Some(101));
     }
 
     #[test]

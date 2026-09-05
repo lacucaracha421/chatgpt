@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { open } from "@tauri-apps/plugin-dialog";
 import { LibraryProvider } from "../library/LibraryContext";
-import type { CatalogWork, CatalogWorkDetail, LibraryGateway, ResolvedGallery } from "../library/types";
+import type { CatalogStatus, CatalogWork, CatalogWorkDetail, LibraryGateway, ResolvedGallery } from "../library/types";
 import { CatalogVisibilitySettings } from "../settings/CatalogVisibilitySettings";
 import { OnlineCatalogBrowser } from "./OnlineCatalogBrowser";
 
@@ -43,6 +43,72 @@ const detail: CatalogWorkDetail = {
 };
 
 describe("OnlineCatalogBrowser", () => {
+  it("searches Korean by default and explicitly switches to Japanese from page zero", async () => {
+    const gateway = createGateway(true);
+    renderBrowser(gateway);
+
+    await waitFor(() => expect(gateway.searchOnlineCatalog).toHaveBeenLastCalledWith(
+      expect.objectContaining({ language: "korean", page: 0 }),
+    ));
+
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "카탈로그 언어" }), "japanese");
+
+    await waitFor(() => expect(gateway.searchOnlineCatalog).toHaveBeenLastCalledWith(
+      expect.objectContaining({ language: "japanese", page: 0 }),
+    ));
+  });
+
+  it("does not restore Japanese results when a Japanese update finishes after switching to Korean", async () => {
+    const gateway = createGateway(true);
+    const update = deferred<Awaited<ReturnType<LibraryGateway["updateOnlineCatalog"]>>>();
+    vi.mocked(gateway.getOnlineCatalogStatus).mockResolvedValue(catalogStatusWithJapanese(true));
+    vi.mocked(gateway.searchOnlineCatalog).mockImplementation(async (searchQuery) => ({
+      works: [{ ...work, title: searchQuery.language === "japanese" ? "일본어 결과" : "한국어 결과" }],
+      totalCount: 1,
+      page: searchQuery.page,
+      pageSize: 48,
+    }));
+    vi.mocked(gateway.updateOnlineCatalog).mockReturnValue(update.promise);
+    renderBrowser(gateway);
+
+    expect(await screen.findByRole("button", { name: "한국어 결과 상세 보기" })).toBeVisible();
+    const language = screen.getByRole("combobox", { name: "카탈로그 언어" });
+    await userEvent.selectOptions(language, "japanese");
+    expect(await screen.findByRole("button", { name: "일본어 결과 상세 보기" })).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "신규 작품 갱신" }));
+
+    await userEvent.selectOptions(language, "korean");
+    expect(await screen.findByRole("button", { name: "한국어 결과 상세 보기" })).toBeVisible();
+    await act(async () => update.resolve({
+      language: "japanese",
+      added: 1,
+      pages: 1,
+      reason: "completed",
+      lastSuccessAt: "2026-09-05T02:00:00Z",
+    }));
+
+    await screen.findByText("1개 작품을 갱신했습니다");
+    expect(gateway.searchOnlineCatalog).toHaveBeenLastCalledWith(
+      expect.objectContaining({ language: "korean", page: 0 }),
+    );
+    expect(screen.queryByRole("button", { name: "일본어 결과 상세 보기" })).not.toBeInTheDocument();
+  });
+
+  it("bounds a completed Japanese manual update to forty pages", async () => {
+    const gateway = createGateway(true);
+    vi.mocked(gateway.getOnlineCatalogStatus).mockResolvedValue(catalogStatusWithJapanese(true));
+    renderBrowser(gateway);
+
+    const language = await screen.findByRole("combobox", { name: "카탈로그 언어" });
+    await userEvent.selectOptions(language, "japanese");
+    await waitFor(() => expect(gateway.searchOnlineCatalog).toHaveBeenLastCalledWith(
+      expect.objectContaining({ language: "japanese" }),
+    ));
+    await userEvent.click(screen.getByRole("button", { name: "신규 작품 갱신" }));
+
+    expect(gateway.updateOnlineCatalog).toHaveBeenCalledWith("japanese", 40);
+  });
+
   it("temporarily reveals blocked results and sends the policy override to SQLite", async () => {
     const gateway = createGateway(true);
     vi.mocked(gateway.searchOnlineCatalog).mockImplementation(async (query) => ({
@@ -395,6 +461,7 @@ describe("OnlineCatalogBrowser", () => {
       lastSuccessAt: "2026-08-28T09:00:00Z",
       lastAdded: 3,
       lastError: null,
+      streams: [],
     });
     renderBrowser(gateway);
 
@@ -412,6 +479,7 @@ describe("OnlineCatalogBrowser", () => {
       lastSuccessAt: null,
       lastAdded: 0,
       lastError: "요청이 제한되었습니다",
+      streams: [],
     });
     renderBrowser(gateway);
 
@@ -525,6 +593,33 @@ function createGateway(installed: boolean): LibraryGateway {
     getTmdbConnection: vi.fn(),
     replaceTmdbMovieArtwork: vi.fn(),
   } as unknown as LibraryGateway;
+}
+
+function catalogStatusWithJapanese(initialComplete: boolean): CatalogStatus {
+  return {
+    installed: true,
+    workCount: 1,
+    updateEnabled: true,
+    updateIntervalSeconds: 3_600,
+    lastAttemptAt: null,
+    lastSuccessAt: null,
+    lastAdded: 0,
+    lastError: null,
+    streams: [{
+      provider: "kHentai",
+      language: "japanese",
+      hasState: true,
+      initialComplete,
+      watermark: 100,
+      cursor: null,
+      pendingMax: 0,
+      lastAttemptAt: null,
+      lastProgressAt: null,
+      lastCompletedAt: initialComplete ? "2026-09-05T01:00:00Z" : null,
+      lastAdded: 0,
+      lastError: null,
+    }],
+  };
 }
 
 function resolvedGallery(): ResolvedGallery {

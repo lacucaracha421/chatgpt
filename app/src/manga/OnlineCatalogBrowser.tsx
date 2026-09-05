@@ -3,8 +3,10 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { useLibrary } from "../library/LibraryContext";
+import { catalogStreamStatus } from "../library/catalogStreams";
 import { commandErrorMessage } from "../library/errorMessage";
 import type {
+  CatalogLanguage,
   CatalogSearchPage,
   CatalogScope,
   CatalogSort,
@@ -18,6 +20,7 @@ import type {
 import { Button } from "../shared/ui/Button";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { Menu } from "../shared/ui/Menu";
+import { Select } from "../shared/ui/Select";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
@@ -48,6 +51,8 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
   const [status, setStatus] = useState<CatalogStatus | null>(null);
   const [results, setResults] = useState<CatalogSearchPage | null>(null);
   const [query, setQuery] = useState("");
+  const [language, setLanguage] = useState<CatalogLanguage>("korean");
+  const languageRef = useRef<CatalogLanguage>("korean");
   const [sort, setSort] = useState<CatalogSort>("latest");
   const [scope, setScope] = useState<CatalogScope>("all");
   const [revealBlocked, setRevealBlocked] = useState(false);
@@ -84,7 +89,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
     if (pendingProgress.current) void gateway.saveRemoteReadingProgress(pendingProgress.current);
   }, [gateway]);
 
-  async function search(text: string, nextSort = sort, nextScope = scope, nextPage = 0, nextRevealBlocked = revealBlocked) {
+  async function search(text: string, nextSort = sort, nextScope = scope, nextPage = 0, nextRevealBlocked = revealBlocked, nextLanguage = language) {
     const request = ++searchRequest.current;
     setLoading(true);
     setPage(nextPage);
@@ -94,6 +99,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
     try {
       const nextResults = await gateway.searchOnlineCatalog({
         provider: "kHentai",
+        language: nextLanguage,
         revealBlocked: nextRevealBlocked,
         text,
         sort: nextSort,
@@ -321,12 +327,18 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
 
   async function updateCatalog() {
     if (updating) return;
+    const updateLanguage = language;
     setUpdating(true);
     try {
-      const result = await gateway.updateOnlineCatalog();
+      const currentStream = status ? catalogStreamStatus(status, updateLanguage) : null;
+      const result = updateLanguage === "korean"
+        ? await gateway.updateOnlineCatalog()
+        : await gateway.updateOnlineCatalog("japanese", currentStream?.initialComplete ? 40 : 1);
       const next = await gateway.getOnlineCatalogStatus();
       setStatus(next);
-      if (result.added > 0) await search(query.trim(), sort, scope, 0);
+      if (result.added > 0 && languageRef.current === updateLanguage) {
+        await search(query.trim(), sort, scope, 0, revealBlocked, updateLanguage);
+      }
       setMessage(result.reason === "alreadyRunning"
         ? "카탈로그 갱신이 이미 진행 중입니다"
         : result.reason === "upToDate"
@@ -356,6 +368,21 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
             void search(query.trim(), sort, nextScope, 0);
           }}
         />
+        <Select
+          label="카탈로그 언어"
+          value={language}
+          disabled={loading}
+          onChange={(event) => {
+            const nextLanguage = event.target.value as CatalogLanguage;
+            languageRef.current = nextLanguage;
+            setLanguage(nextLanguage);
+            setResults(null);
+            void search(query.trim(), sort, scope, 0, revealBlocked, nextLanguage);
+          }}
+        >
+          <option value="korean">한국어</option>
+          <option value="japanese">일본어</option>
+        </Select>
         <span className="manga-browser__count">{results ? `${results.totalCount.toLocaleString()}개 결과` : status?.installed ? `${status.workCount.toLocaleString()}개 작품` : ""}</span>
         {status?.installed && <form className="manga-browser__search online-catalog__search" role="search" onSubmit={submit}>
           <MagnifyingGlassIcon aria-hidden="true" />
@@ -367,7 +394,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
             aria-expanded={suggestions.length > 0}
             aria-controls={suggestions.length > 0 ? suggestionsListboxId : undefined}
             aria-activedescendant={activeSuggestionIndex >= 0 ? `${suggestionsListboxId}-option-${activeSuggestionIndex}` : undefined}
-            placeholder="제목 또는 한국어 태그 검색"
+            placeholder={`제목 또는 ${language === "korean" ? "한국어" : "일본어"} 태그 검색`}
             value={query}
             onChange={(event) => {
               setQuery(event.target.value);
@@ -411,8 +438,8 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
     />
     {status?.installed && <div className="online-catalog__sync-summary">
       {revealBlocked && <span className="online-catalog__visibility-status" role="status">숨긴 분류와 차단 태그를 표시 중입니다</span>}
-      {status?.lastError ? <span className="online-catalog__sync-status" role="alert">마지막 갱신 실패 — {status.lastError}</span>
-        : status?.lastSuccessAt ? <span className="online-catalog__sync-status">마지막 갱신 {localDateTime(status.lastSuccessAt)}{status.lastAdded > 0 ? ` · 신규 ${status.lastAdded.toLocaleString()}개` : ""}</span>
+      {catalogStreamStatus(status, language).lastError ? <span className="online-catalog__sync-status" role="alert">마지막 갱신 실패 — {catalogStreamStatus(status, language).lastError}</span>
+        : catalogStreamStatus(status, language).lastProgressAt ? <span className="online-catalog__sync-status">마지막 갱신 {localDateTime(catalogStreamStatus(status, language).lastProgressAt!)}{catalogStreamStatus(status, language).lastAdded > 0 ? ` · 신규 ${catalogStreamStatus(status, language).lastAdded.toLocaleString()}개` : ""}</span>
         : <span className="online-catalog__sync-status">아직 갱신 기록이 없습니다</span>}
     </div>}
     {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
