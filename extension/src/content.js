@@ -1,6 +1,12 @@
 (() => {
   "use strict";
 
+  function findMediaCandidate(target) {
+    return globalThis.LakomicsForumSource?.findCandidate(target)
+      ?? globalThis.LakomicsXSource?.findCandidate(target)
+      ?? globalThis.LakomicsForumSource?.findGenericCandidate(target) ?? null;
+  }
+
   function createCollectorController({ send, status, snapshot = () => {}, close = () => {}, saved = () => {} }) {
     let active = null;
     let failedPayload = null;
@@ -56,7 +62,8 @@
     function payloadFor(current, classificationId) {
       const classification = current.entries.find((entry) => entry.id === classificationId);
       return {
-        source: "x",
+        source: current.candidate.source ?? "x",
+        ...(current.candidate.filename ? { filename: current.candidate.filename } : {}),
         mediaType: current.candidate.type ?? "image",
         mediaUrl: current.candidate.mediaUrl ?? null,
         sourceUrl: current.candidate.sourceUrl,
@@ -126,6 +133,10 @@
           collector_timeout: "서버 응답 초과 · 기기에 저장됨",
           collector_request_failed: "서버 요청 실패 · 기기에 저장됨",
           collector_media_unsupported: "미디어 미지원 · 기기에 저장됨",
+          invalid_media_url: "PC에서 지원하지 않는 파일 주소 · 기기에 저장됨",
+          download_failed: "PC에서 원본 다운로드 실패 · 기기에 저장됨",
+          unsupported_image: "PC에서 지원하지 않는 미디어 · 기기에 저장됨",
+          invalid_request: "PC 수집 요청 미지원 · 기기에 저장됨",
         };
         const suffix = fallbackMessages[response.fallbackCode] ?? "Lakomics 연결 불가 · 기기에 저장됨";
         return { message: suffix, retry: false, kind: "success" };
@@ -156,6 +167,8 @@
       invalid_media_url: ["미디어 주소를 읽지 못했습니다", false],
       download_too_large: ["미디어가 너무 큽니다", false],
       unsupported_image: ["지원하지 않는 이미지입니다", false],
+      unsupported_media: ["이 파일은 저장 방식을 자동 또는 다운로드로 바꿔 저장해 주세요", false],
+      classification_local_only: ["PC 분류를 새로고침하거나 저장 방식을 자동으로 바꿔 주세요", false],
       request_failed: ["수집 요청에 실패했습니다", true],
       worker_failed: ["확장 프로그램 요청에 실패했습니다", true],
     };
@@ -208,6 +221,7 @@
         const href = link?.getAttribute?.("href") || link?.href || "";
         const match = String(href).match(/\/status\/(\d+)/);
         if (match?.[1] === targetId) return article;
+        if (match) break; // Later status links can belong to a quoted post, not this like button.
       }
     }
     return null;
@@ -440,7 +454,7 @@
       snapshot: renderSnapshot,
       close: closeRadial,
       saved: (payload, response) => {
-        if (preferences.autoLikeOnSave !== false && payload?.postId) {
+        if (payload?.source === "x" && preferences.autoLikeOnSave !== false && payload?.postId) {
           void autoLikePost({
             root: document,
             postId: payload.postId,
@@ -506,7 +520,7 @@
 
       const input = pointerInput(event);
       if (!input) return;
-      const candidate = globalThis.LakomicsXSource.findCandidate(event.target);
+      const candidate = findMediaCandidate(event.target);
       if (!candidate) return;
 
       const origin = pointFromEvent(event);
@@ -653,7 +667,7 @@
     function onContextMenu(event) {
       if (!preferences.suppressContextMenu) return;
       const touchActive = isTouchGestureActive();
-      const candidate = globalThis.LakomicsXSource.findCandidate(event.target);
+      const candidate = findMediaCandidate(event.target);
       if (!touchActive && !candidate) return;
       if (touchActive || pointer?.candidate?.element === candidate?.element) {
         event.preventDefault();
@@ -673,7 +687,7 @@
     }
 
     function onDragStart(event) {
-      if (globalThis.LakomicsXSource.findCandidate(event.target)) event.preventDefault();
+      if (findMediaCandidate(event.target)) event.preventDefault();
     }
 
     async function loadClassifications(candidate) {

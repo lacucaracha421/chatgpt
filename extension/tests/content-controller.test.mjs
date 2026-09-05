@@ -37,6 +37,41 @@ test("auto-like clicks only the matching visible post and never unlikes an exist
   assert.deepEqual(plain(api.autoLikeVisiblePost(root, "404")), { ok: false, status: "not_found" });
 });
 
+test("saving quoted media cannot click the outer tweet's like button", () => {
+  const api = loadContent(async () => ({ ok: true }));
+  let clicks = 0;
+  const article = {
+    querySelectorAll: () => ["/outer/status/111", "/quoted/status/222"].map(href => ({ getAttribute: () => href })),
+    querySelector: () => ({ click: () => { clicks += 1; } }),
+  };
+  const result = api.autoLikeVisiblePost({ querySelectorAll: () => [article] }, "222");
+  assert.equal(result.status, "not_found");
+  assert.equal(clicks, 0);
+});
+
+test("PC media rejection and download errors do not claim the app is disconnected", () => {
+  const api = loadContent(async () => ({ ok: true }));
+  for (const fallbackCode of ["invalid_media_url", "download_failed", "unsupported_image", "invalid_request"]) {
+    const feedback = api.feedbackFor({ ok: true, status: "downloaded", fallbackCode });
+    assert.doesNotMatch(feedback.message, /연결 불가/);
+    assert.match(feedback.message, /기기에 저장됨/);
+  }
+});
+
+test("forum selection keeps site identity, attachment filename and classification", async () => {
+  const sent = [];
+  const api = loadContent(async payload => { sent.push(payload); return { ok: true }; });
+  const controller = api.createCollectorController({ send: async payload => { sent.push(payload); return { ok: true }; }, status: () => {} });
+  const entries = [{ id: "tag", name: "그림", parentId: null }];
+  controller.begin({ source: "arca", type: "file", filename: "art.zip", mediaUrl: "https://arca.live/download/1", sourceUrl: "https://arca.live/b/art/1" },
+    { x: 100, y: 100 }, entries, api.radial.resetLayout(entries));
+  controller.move({ x: 100, y: 16 }, 0);
+  await controller.release();
+  assert.equal(sent[0].source, "arca");
+  assert.equal(sent[0].filename, "art.zip");
+  assert.equal(sent[0].classificationId, "tag");
+});
+
 test("FavoriteTweet API fallback uses the logged-in X session and csrf cookie", async () => {
   const api = loadContent(async () => ({ ok: true }));
   let request = null;

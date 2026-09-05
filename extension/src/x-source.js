@@ -2,9 +2,11 @@
   "use strict";
 
   function findCandidate(target) {
+    const imageCandidate = findImageCandidate(target);
+    if (imageCandidate) return imageCandidate;
     const videoCandidate = findVideoCandidate(target);
     if (videoCandidate) return videoCandidate;
-    return findImageCandidate(target);
+    return null;
   }
 
   function findImageCandidate(target) {
@@ -70,8 +72,16 @@
   }
 
   function publishedAtFor(element) {
-    const time = element?.closest?.("article")?.querySelector?.("time[datetime]");
+    const time = postScope(element)?.querySelector?.("time[datetime]");
     return time?.getAttribute?.("datetime") || null;
+  }
+
+  function postScope(element) {
+    const article = element?.closest?.("article");
+    // Quote cards are not necessarily nested articles. Stop at their own link
+    // container so their media ordinal and timestamp cannot come from the parent.
+    const quote = element?.closest?.('[data-testid="quoteTweet"], [data-testid="quotedTweet"], div[role="link"]');
+    return quote ?? article;
   }
 
   function findVideoElement(target) {
@@ -148,8 +158,9 @@
       return withMediaIndex(direct, mediaIndex, kind);
     }
 
-    const article = element.closest?.("article");
-    const links = [...(article?.querySelectorAll?.('a[href*="/status/"]') ?? [])];
+    const article = postScope(element);
+    const links = [...(article?.querySelectorAll?.('a[href*="/status/"]') ?? [])]
+      .filter(link => !link.closest || postScope(link) === article);
     const parsed = links.map(parseStatusLink).filter(Boolean);
     if (!parsed.length) return null;
 
@@ -216,12 +227,13 @@
   }
 
   function inferPhotoIndex(image, mediaUrl) {
-    const article = image.closest?.("article");
+    const article = postScope(image);
     if (!article?.querySelectorAll) return null;
     const images = [...article.querySelectorAll("img")];
     const uniqueMedia = [];
     const seen = new Set();
     for (const item of images) {
+      if (postScope(item) !== article) continue;
       const normalized = normalizeMediaUrl(imageSource(item));
       if (!normalized || seen.has(normalized)) continue;
       seen.add(normalized);
@@ -232,15 +244,16 @@
   }
 
   function inferVideoIndex(video) {
-    const article = video.closest?.("article");
+    const article = postScope(video);
     if (!article?.querySelectorAll) return 1;
-    const players = [...article.querySelectorAll('[data-testid="videoPlayer"]')];
+    const players = [...article.querySelectorAll('[data-testid="videoPlayer"]')]
+      .filter(player => !player.closest || postScope(player) === article);
     const currentPlayer = video.closest?.('[data-testid="videoPlayer"]');
     if (currentPlayer && players.length) {
       const index = players.indexOf(currentPlayer);
       if (index >= 0) return index + 1;
     }
-    const videos = [...article.querySelectorAll("video")];
+    const videos = [...article.querySelectorAll("video")].filter(item => postScope(item) === article);
     const index = videos.indexOf(video);
     return index >= 0 ? index + 1 : 1;
   }

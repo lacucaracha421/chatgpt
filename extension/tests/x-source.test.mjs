@@ -9,6 +9,50 @@ context.globalThis = context;
 vm.runInNewContext(source, context, { filename: "x-source.js" });
 const { findCandidate } = context.LakomicsXSource;
 
+test("quoted image uses the quote's post, media index and timestamp", () => {
+  const link = { getAttribute: () => "/quoted/status/222" };
+  const quote = {
+    querySelectorAll: selector => selector === "img" ? [image] : [link],
+    querySelector: () => ({ getAttribute: () => "2026-08-01T00:00:00Z" }),
+  };
+  const parent = { querySelectorAll: () => [{ getAttribute: () => "/outer/status/111" }] };
+  const image = {
+    src: "https://pbs.twimg.com/media/QUOTE.jpg",
+    getAttribute: () => null,
+    closest(selector) {
+      if (selector === "img") return image;
+      if (selector === "article") return parent;
+      if (selector.includes('quoteTweet')) return quote;
+      return null;
+    },
+  };
+  const result = findCandidate(image);
+  assert.equal(result.sourceUrl, "https://x.com/quoted/status/222/photo/1");
+  assert.equal(result.mediaIndex, 1);
+  assert.equal(result.publishedAt, "2026-08-01T00:00:00Z");
+  quote.querySelectorAll = selector => selector === "img" ? [image] : [];
+  assert.equal(findCandidate(image), null, "an unresolved quote must not be assigned to the outer post");
+});
+
+test("quoted video resolves the quoted post and its own video ordinal", () => {
+  const link = { getAttribute: () => "/quoted/status/333" };
+  const quote = { querySelectorAll: selector => selector === "video" ? [video] : selector === '[data-testid="videoPlayer"]' ? [player] : [link] };
+  const outer = { querySelectorAll: () => [{ getAttribute: () => "/outer/status/111" }] };
+  function closest(selector) {
+    if (selector === "video") return video;
+    if (selector === '[data-testid="videoPlayer"]') return player;
+    if (selector === "article") return outer;
+    if (selector.includes('quoteTweet')) return quote;
+    return null;
+  }
+  const player = { closest };
+  const video = { closest };
+  const result = findCandidate(video);
+  assert.equal(result.type, "video");
+  assert.equal(result.sourceUrl, "https://x.com/quoted/status/333/video/1");
+  assert.equal(result.mediaIndex, 1);
+});
+
 test("normalizes the largest X media image and nearest post URL", () => {
   const candidate = findCandidate(fakePhoto({
     src: "https://pbs.twimg.com/media/ABC?format=jpg&name=small",

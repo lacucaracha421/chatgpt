@@ -25,16 +25,24 @@ jobs:
           node --check extension/src/mobile-assets.js
           node --check extension/src/mobile-api-frame.js
 
+      - name: Read package version
+        id: version
+        run: |
+          version=$(python -c "import json; print(json.load(open('extension/manifest.json', encoding='utf-8'))['version_name'])")
+          echo "name=lakomics-extension-${version}" >> "$GITHUB_OUTPUT"
+
       - name: Build extension zip
+        env:
+          PACKAGE_NAME: ${{ steps.version.outputs.name }}
         run: |
           cd extension
-          zip -r ../lakomics-extension-alpha-15.38.zip . \
+          zip -r "../${PACKAGE_NAME}.zip" . \
             -x "*.DS_Store" "__MACOSX/*" "node_modules/*" "tests/*" "*.zip"
 
       - name: Upload extension package
         uses: actions/upload-artifact@v4
         with:
-          name: lakomics-extension-alpha-15.38
-          path: lakomics-extension-alpha-15.38.zip
+          name: ${{ steps.version.outputs.name }}
+          path: ${{ steps.version.outputs.name }}.zip
           if-no-files-found: error
           retention-days: 14

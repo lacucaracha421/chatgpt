@@ -60,6 +60,7 @@
   let classificationRefreshBaseUrl = null;
   let lastClassificationProbe = null;
   let browserDownloadQueue = Promise.resolve();
+  let secondaryUsageQueue = Promise.resolve();
   const pendingFilenameSuggestions = [];
   const FILENAME_SUGGESTION_TTL_MS = 15_000;
   async function handleMessage(message) {
@@ -242,7 +243,10 @@
         if (!Array.isArray(message.pinnedIds)) return { ok: false, code: "invalid_pinned" };
         const pinnedIds = normalizePinnedIds(message.pinnedIds);
         await chrome.storage.local.set({ [APP_PINNED_KEY]: pinnedIds });
-        if (classificationCache) classificationCache.pinnedIds = pinnedIds;
+        if (classificationCache) {
+          classificationCache.pinnedIds = pinnedIds;
+          await refreshSecondaryPresentationCache(await loadSecondaryPresentation());
+        }
         await updateLastAppSnapshot({ pinnedIds });
         return { ok: true };
       }
@@ -592,6 +596,7 @@
       classificationCache.layout,
       usage,
       presentation.hiddenIds,
+      classificationCache.pinnedIds ?? [],
     );
     classificationCache = {
       ...classificationCache,
@@ -617,7 +622,14 @@
     return { ok: true, usage: classificationCache?.usageById ?? effectiveSecondaryUsage(classificationCache?.entries, presentation.usage), hiddenIds: presentation.hiddenIds };
   }
 
-  async function recordSecondaryUsage(classificationId) {
+  function recordSecondaryUsage(classificationId) {
+    const job = secondaryUsageQueue.catch(() => undefined)
+      .then(() => recordSecondaryUsageUnlocked(classificationId));
+    secondaryUsageQueue = job.then(() => undefined, () => undefined);
+    return job;
+  }
+
+  async function recordSecondaryUsageUnlocked(classificationId) {
     const id = typeof classificationId === "string" ? classificationId.trim() : "";
     if (!id) return;
     const entry = classificationCache?.entries?.find((item) => item?.id === id);
@@ -866,15 +878,15 @@
   async function localClassifications(fallbackCode = null) {
     const tree = await loadLocalTree();
     const entries = globalThis.LakomicsDefaults.localTreeEntries(tree);
-    const layout = globalThis.LakomicsDefaults.localTreeLayout(tree);
+    const presentation = await secondaryPresentationLayout(entries, globalThis.LakomicsDefaults.localTreeLayout(tree));
     return {
       ok: true,
       classificationSource: "local",
       entries,
-      layout,
+      layout: presentation.layout,
       pinnedIds: [],
-      usageById: {},
-      hiddenSecondaryIds: [],
+      usageById: presentation.usage,
+      hiddenSecondaryIds: presentation.hiddenIds,
       ...(fallbackCode ? { fallbackCode } : {}),
     };
   }
@@ -909,10 +921,13 @@
     const prepared = await prepareMediaPayload(payload);
     if (!prepared.ok) return prepared;
     const mediaPayload = prepared.payload;
-    // 사용자 노출 저장 방식: auto(PC→Cloud→기기), app("PC 직접 연결만"),
-    // cloud("Cloud만"), download(브라우저 Download만). classificationSource는
-    // 전송 수단과 독립적이다. 로컬 폴백 트리여도 Collector가 켜져 있으면 기기
-    // 다운로드로 강등하지 않는다.
+    const forum = ["arca", "dcinside", "web"].includes(mediaPayload.source);
+    if (forum && ["file", "audio"].includes(mediaPayload.mediaType)) {
+      if (preferences.saveMode === "pc") return { ok: false, code: "unsupported_media" };
+      return browserDownload(mediaPayload, preferences);
+    }
+    // Automatic uses Cloud first for X media and PC first for forum media.
+    // Classification source is independent of the selected transport.
     if (preferences.saveMode === "download") {
       return browserDownload(mediaPayload, preferences);
     }
@@ -928,9 +943,8 @@
     };
 
     const tryAppDirect = async () => {
-      // 로컬 폴백 트리 선택은 PC ingestion 대상이 아니므로 null로 '시도 안 함'을
-      // 구분한다. 상위 정책에서 다음 수단으로 넘어간다.
-      if (mediaPayload.classificationSource === "local") return null;
+      // Local-only IDs cannot be sent to the PC; let automatic routing continue.
+      if (mediaPayload.classificationSource === "local") return { failed: true, fallbackCode: "classification_local_only" };
       const { connectionToken } = await chrome.storage.local.get(["connectionToken"]);
       if (!TOKEN_PATTERN.test(connectionToken ?? "")) {
         // PC가 아예 구성되지 않은 경우다. 실패로 취급해 다음 수단(Cloud/기기)으로 넘어간다.
@@ -960,6 +974,9 @@
         }
       }
       if (appResponse.ok || !shouldFallbackToBrowserDownload(appResponse)) {
+        if (forum && !appResponse.ok && ["invalid_request", "invalid_media_url", "download_failed", "unsupported_image"].includes(appResponse.code)) {
+          return { failed: true, fallbackCode: appResponse.code };
+        }
         const normalized = normalizeAppMediaResponse(appResponse, mediaPayload);
         if (normalized.ok && normalized.status !== "review_pending") {
           await rememberSavedXMediaSource(mediaPayload.sourceUrl);
@@ -1005,8 +1022,7 @@
       return browserDownload(mediaPayload, preferences, result.fallbackCode);
     }
 
-    // Automatic: PC direct first when the media type is ingestible by the app,
-    // otherwise Cloud first. Both failures keep the existing device fallback.
+    // Automatic: unsupported Cloud sources start with PC. Both retain device fallback.
     if (appDirectFirst) {
       const appResult = await tryAppDirect();
       if (!appResult?.failed) return appResult;
@@ -1057,6 +1073,21 @@
   }
 
   async function prepareMediaPayload(payload) {
+    if (["arca", "dcinside", "web"].includes(payload.source)) {
+      try {
+        const source = new URL(payload.sourceUrl);
+        const media = new URL(payload.mediaUrl);
+        const hosts = payload.source === "arca" ? ["arca.live"] : ["gall.dcinside.com", "m.dcinside.com"];
+        if (source.protocol !== "https:" || (payload.source !== "web" && !hosts.includes(source.hostname))
+          || source.username || source.password || source.port
+          || media.protocol !== "https:" || media.username || media.password || media.port
+          || /\.(m3u8|mpd)(?:$|[?#])/i.test(media.href)
+          || !["image", "video", "audio", "file"].includes(payload.mediaType)) {
+          return { ok: false, code: "invalid_media_url" };
+        }
+        return { ok: true, payload };
+      } catch { return { ok: false, code: "invalid_media_url" }; }
+    }
     const mediaType = payload.mediaType === "video" || payload.mediaType === "animated_gif"
       ? payload.mediaType
       : "image";
@@ -1285,7 +1316,7 @@
     }
 
     const requestedFilename = buildDownloadFilename(payload, preferences);
-    const requestedMetadataFilename = replaceExtension(requestedFilename, "json");
+    const requestedMetadataFilename = metadataFilenameFor(payload, requestedFilename);
     const recentKey = recentSaveKey(payload);
     const recent = await loadRecentSave(recentKey);
 
@@ -1350,7 +1381,7 @@
 
       const resolved = await resolveDownloadedFilename(downloadId, requestedFilename);
       const filename = resolved.filename;
-      const metadataFilename = replaceExtension(filename, "json");
+      const metadataFilename = metadataFilenameFor(payload, filename);
       const metadata = buildSidecarMetadata(payload, filename);
 
       await markRecentSave(recentKey, {
@@ -1559,6 +1590,18 @@
       .map(sanitizeSegment)
       .filter(Boolean);
     const folders = classificationPath.length ? classificationPath : ["기타"];
+    if (["arca", "dcinside", "web"].includes(payload.source)) {
+      const url = new URL(payload.mediaUrl);
+      let urlName = url.pathname.split("/").pop() || "media";
+      try { urlName = decodeURIComponent(urlName); } catch {}
+      let name = payload.filename || urlName;
+      name = sanitizeSegment(name.split(/[\\/]/).pop());
+      if (!/\.[a-z0-9]{1,8}$/i.test(name) || /\.php$/i.test(name)) {
+        const extension = { image: "jpg", video: "mp4", audio: "mp3", file: "bin" }[payload.mediaType];
+        name = `${name || "media"}.${extension}`;
+      }
+      return `${root}/${folders.join("/")}/${name}`;
+    }
     const source = parseSourceUrl(payload.sourceUrl);
     const media = parseMediaUrl(payload.mediaUrl);
     const parts = [source.author, source.postId, source.mediaIndex, media.token]
@@ -1570,6 +1613,10 @@
 
   function replaceExtension(filename, extension) {
     return String(filename).replace(/\.[^/.]+$/, `.${extension}`);
+  }
+
+  function metadataFilenameFor(payload, filename) {
+    return ["arca", "dcinside", "web"].includes(payload.source) ? `${filename}.lakomics.json` : replaceExtension(filename, "json");
   }
 
   function buildSidecarMetadata(payload, filename) {
@@ -1661,9 +1708,10 @@
       postId: _postId,
       mediaIndex: _mediaIndex,
       videoMetadata: _videoMetadata,
+      filename: _filename,
       ...rest
     } = payload;
-    return rest;
+    return payload.source === "web" ? { ...rest, mediaType: payload.mediaType } : rest;
   }
 
   async function loadPreferences() {
@@ -1737,7 +1785,7 @@
   }
 
   function collectorSupportsMedia(payload) {
-    return COLLECTOR_SUPPORTED_MEDIA_TYPES.has(payload?.mediaType ?? "image");
+    return (!payload?.source || payload.source === "x") && COLLECTOR_SUPPORTED_MEDIA_TYPES.has(payload?.mediaType ?? "image");
   }
 
   async function captureWithCollector(payload, explicitCollector = null) {

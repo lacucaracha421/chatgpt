@@ -304,6 +304,22 @@ test("adaptive secondary ordering does not move equal-bucket manual placements",
   assert.deepEqual(plain(ranked.parents.root), plain(layout.parents.root));
 });
 
+test("adaptive ordering centers the most used tag after empty slots are compacted", () => {
+  const current = [{ id: "root", parentId: null }, ...["a", "b", "c"].map(id => ({ id, parentId: "root" }))];
+  const ranked = layoutApi.adaptiveSecondaryLayout(current, layoutApi.resetLayout(current), { c: 7 });
+  assert.equal(layoutApi.getCompactLevel(current, ranked, "root", 0).slots[1].id, "c");
+});
+
+test("adaptive ordering preserves cross-parent placements and centers visible unpinned tags", () => {
+  const current = [{ id: "root", parentId: null }, { id: "other", parentId: null },
+    ...["a", "b", "c", "d", "e"].map(id => ({ id, parentId: "root" }))];
+  const layout = { version: 1, parents: { root: [["a", "b", "c", "d", null, null]], other: [["e", null, null, null, null, null]] } };
+  const ranked = layoutApi.adaptiveSecondaryLayout(current, layout, { c: 31, d: 15, e: 7 }, ["a"], ["b"]);
+  assert.equal(ranked.parents.root.flat().includes("e"), false);
+  assert.equal(ranked.parents.other.flat().includes("e"), true);
+  assert.deepEqual(plain(layoutApi.getCompactLevel(current, ranked, "root", 0, ["a", "b"]).slots.map(e => e.id)).sort(), ["c", "d"]);
+});
+
 test("adaptive secondary ordering pushes hidden tags to the least prominent positions", () => {
   const current = [
     { id: "root", kind: "root", name: "Root", parentId: null },

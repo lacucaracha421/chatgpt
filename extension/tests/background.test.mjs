@@ -1849,6 +1849,109 @@ function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+test("forum attachments download with classification sidecar without calling X or Cloud", async () => {
+  const harness = createHarness({ preferences: { saveMode: "auto" } });
+  const response = await harness.api.handleMessage({ type: "ingestion:create", payload: {
+    source: "arca", mediaType: "file", mediaUrl: "https://arca.live/download/123",
+    sourceUrl: "https://arca.live/b/art/1", filename: "drawing.json",
+    classificationId: "tag", classificationName: "그림", classificationPath: ["자료", "그림"],
+    classificationSource: "local",
+  } });
+  assert.equal(response.ok, true);
+  assert.equal(harness.fetchCalls.length, 0);
+  assert.equal(harness.downloadCalls.length, 2);
+  assert.match(harness.downloadCalls[0].filename, /자료\/그림\/drawing\.json$/);
+  assert.match(harness.downloadCalls[1].filename, /drawing\.json\.lakomics\.json$/);
+  const metadata = JSON.parse(decodeURIComponent(harness.downloadCalls[1].url.split(",").slice(1).join(",")));
+  assert.equal(metadata.source, "arca");
+  assert.equal(metadata.classificationId, "tag");
+  assert.equal(metadata.sourceUrl, "https://arca.live/b/art/1");
+});
+
+test("forum progressive video goes to PC with original source and classification", async () => {
+  const harness = createHarness({ connectionToken: "0123456789abcdef0123456789abcdef", preferences: { saveMode: "auto" } });
+  harness.queueJson({ status: "added", assetId: "forum-video" });
+  const response = await harness.api.handleMessage({ type: "ingestion:create", payload: {
+    source: "dcinside", mediaType: "video", mediaUrl: "https://vod.dcinside.com/video.mp4",
+    sourceUrl: "https://gall.dcinside.com/board/view/?id=art&no=1", classificationId: "tag", classificationSource: "app",
+  } });
+  assert.equal(response.ok, true);
+  assert.equal(harness.fetchCalls.length, 1);
+  assert.match(harness.fetchCalls[0].url, /\/v1\/ingestions$/);
+  const body = JSON.parse(harness.fetchCalls[0].options.body);
+  assert.equal(body.source, "dcinside");
+  assert.equal(body.classificationId, "tag");
+  assert.equal(harness.downloadCalls.length, 0);
+});
+
+test("generic media uses PC ingestion with media type and no extension-only filename", async () => {
+  const harness = createHarness({ connectionToken: "0123456789abcdef0123456789abcdef", preferences: { saveMode: "auto" } });
+  harness.queueJson({ status: "added", assetId: "web-image" });
+  const response = await harness.api.handleMessage({ type: "ingestion:create", payload: {
+    source: "web", mediaType: "image", mediaUrl: "https://cdn.example.com/image?id=1",
+    sourceUrl: "https://blog.example.com/posts/1", classificationId: "tag", classificationSource: "app", filename: "art.png",
+  } });
+  assert.equal(response.ok, true);
+  assert.equal(harness.fetchCalls.length, 1);
+  const body = JSON.parse(harness.fetchCalls[0].options.body);
+  assert.equal(body.mediaType, "image");
+  assert.equal(body.source, "web");
+  assert.equal(body.filename, undefined);
+  assert.equal(body.classificationId, "tag");
+});
+
+test("generic attachments retain source and tagging in browser download metadata", async () => {
+  const harness = createHarness({ preferences: { saveMode: "auto" } });
+  const response = await harness.api.handleMessage({ type: "ingestion:create", payload: {
+    source: "web", mediaType: "file", mediaUrl: "https://cdn.example.com/download?id=1",
+    sourceUrl: "https://blog.example.com/post/1", filename: "art.zip", classificationId: "tag", classificationName: "Art",
+  } });
+  assert.equal(response.ok, true);
+  assert.equal(harness.fetchCalls.length, 0);
+  assert.match(harness.downloadCalls[0].filename, /Art\/art.zip$/);
+  const metadata = JSON.parse(decodeURIComponent(harness.downloadCalls[1].url.split(",").slice(1).join(",")));
+  assert.equal(metadata.source, "web");
+  assert.equal(metadata.classificationId, "tag");
+});
+
+test("generic media falls back after older PC rejects the source without calling Cloud", async () => {
+  const harness = createHarness({ connectionToken: "0123456789abcdef0123456789abcdef", preferences: { saveMode: "auto" } });
+  harness.queueJson({ code: "invalid_request" }, 400);
+  const response = await harness.api.handleMessage({ type: "ingestion:create", payload: {
+    source: "web", mediaType: "video", mediaUrl: "https://cdn.example.com/movie.mp4",
+    sourceUrl: "https://blog.example.com/post/1", classificationId: "tag", classificationSource: "app",
+  } });
+  assert.equal(response.status, "downloaded");
+  assert.equal(harness.fetchCalls.length, 1);
+  assert.equal(harness.downloadCalls.length, 2);
+});
+
+test("local-only forum image falls back to tagged download instead of returning null", async () => {
+  const harness = createHarness({ preferences: { saveMode: "auto" } });
+  const response = await harness.api.handleMessage({ type: "ingestion:create", payload: {
+    source: "arca", mediaType: "image", mediaUrl: "https://ac-o.namu.la/image.png",
+    sourceUrl: "https://arca.live/b/art/1", classificationId: "tag", classificationSource: "local",
+  } });
+  assert.equal(response.ok, true);
+  assert.equal(response.status, "downloaded");
+  assert.equal(harness.fetchCalls.length, 0);
+});
+
+test("forum stream and spoofed source are rejected before saving", async () => {
+  const harness = createHarness();
+  for (const [sourceUrl, mediaUrl] of [
+    ["https://arca.live/b/art/1", "https://ac-o.namu.la/stream.m3u8"],
+    ["https://arca.live.evil/b/art/1", "https://ac-o.namu.la/image.png"],
+  ]) {
+    const response = await harness.api.handleMessage({ type: "ingestion:create", payload: {
+      source: "arca", mediaType: "video", mediaUrl, sourceUrl, classificationId: "tag",
+    } });
+    assert.equal(response.code, "invalid_media_url");
+  }
+  assert.equal(harness.fetchCalls.length, 0);
+  assert.equal(harness.downloadCalls.length, 0);
+});
+
 test("cold cache prefers current persisted pins over stale snapshot pins", async () => {
   const entries = [
     { id: "game", kind: "root", name: "Game", parentId: null },
@@ -2245,4 +2348,30 @@ test("successful secondary saves increment usage without counting failed saves",
   assert.equal(failed.ok, false);
   state = await harness.api.handleMessage({ type: "secondary-presentation:get" });
   assert.equal(state.usage.reverse, 1);
+});
+
+test("concurrent PC saves do not lose secondary usage increments", async () => {
+  const harness = createHarness({ connectionToken: "0123456789abcdef0123456789abcdef", preferences: { saveMode: "pc" } });
+  harness.queueJson({ status: "added", assetId: "one" });
+  harness.queueJson({ status: "added", assetId: "two" });
+  await Promise.all([1, 2].map(index => harness.api.handleMessage({ type: "ingestion:create", payload: {
+    source: "x", mediaType: "image", mediaUrl: `https://pbs.twimg.com/media/${index}.jpg`,
+    sourceUrl: `https://x.com/user/status/${index}/photo/1`, classificationId: "tag", classificationSource: "app",
+  } })));
+  assert.equal(harness.storage.secondaryRadialPresentation.usage.tag, 2);
+});
+
+test("local download classifications apply persisted frequency to the secondary donut", async () => {
+  const harness = createHarness({ preferences: { saveMode: "download" } });
+  const { tree } = await harness.api.handleMessage({ type: "local-tree:get" });
+  tree.roots[0].secondarySlots[0] = "A";
+  tree.roots[0].secondarySlots[1] = "B";
+  tree.roots[0].secondarySlots[2] = "C";
+  await harness.api.handleMessage({ type: "local-tree:set", tree });
+  const first = await harness.api.handleMessage({ type: "classifications:get" });
+  const child = first.entries.find(entry => entry.name === "C");
+  harness.storage.secondaryRadialPresentation = { version: 1, usage: { [child.id]: 7 }, hiddenIds: [] };
+  const updated = await harness.api.handleMessage({ type: "classifications:get" });
+  assert.equal(updated.usageById[child.id], 7);
+  assert.equal(updated.layout.parents[child.parentId].flat().filter(Boolean)[1], child.id);
 });

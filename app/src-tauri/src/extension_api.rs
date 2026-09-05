@@ -5,7 +5,6 @@ use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex, RwLock},
     thread,
-    time::Duration,
 };
 
 use serde::{Deserialize, Serialize};
@@ -13,6 +12,8 @@ use tauri::{AppHandle, Emitter, Manager};
 use thiserror::Error;
 use tiny_http::{Header, Request, Response, Server};
 use uuid::Uuid;
+
+mod public_media;
 
 use crate::{
     commands::AppState,
@@ -339,6 +340,8 @@ struct XIngestionRequest {
     // 확장이 트윗의 <time datetime>에서 추출한 게시 시각(RFC 3339). 구버전 확장에는 없다.
     #[serde(default)]
     published_at: Option<String>,
+    #[serde(default)]
+    media_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -365,6 +368,7 @@ trait ImageDownloader: Send + Sync {
     fn download(
         &self,
         media_url: &url::Url,
+        source_url: &url::Url,
         destination: &Path,
         maximum_bytes: u64,
     ) -> Result<(), ApiError>;
@@ -376,15 +380,8 @@ struct UreqImageDownloader {
 
 impl UreqImageDownloader {
     fn new() -> Self {
-        // 타임아웃 없이 대기하면 X CDN이 응답을 멈추는 순간
-        // 이 API 서버 스레드가 영구 정지한다. 죽은 연결은 빨리 포기한다.
-        let config = ureq::Agent::config_builder()
-            .https_only(true)
-            .max_redirects(0)
-            .timeout_global(Some(Duration::from_secs(300)))
-            .build();
         Self {
-            agent: config.into(),
+            agent: public_media::agent(),
         }
     }
 }
@@ -393,12 +390,14 @@ impl ImageDownloader for UreqImageDownloader {
     fn download(
         &self,
         media_url: &url::Url,
+        source_url: &url::Url,
         destination: &Path,
         maximum_bytes: u64,
     ) -> Result<(), ApiError> {
         let mut response = self
             .agent
             .get(media_url.as_str())
+            .header("Referer", source_url.as_str())
             .call()
             .map_err(|_| ApiError::DownloadFailed)?;
         if !response.status().is_success() {
@@ -528,7 +527,7 @@ fn ingest_x_image(
     request: XIngestionRequest,
     downloader: &dyn ImageDownloader,
 ) -> Result<(XIngestionResponse, IngestOutcome), ApiError> {
-    if request.source != "x" || request.classification_id.trim().is_empty() {
+    if !matches!(request.source.as_str(), "x" | "arca" | "dcinside" | "web") || request.classification_id.trim().is_empty() {
         return Err(ApiError::InvalidRequest);
     }
     let classification_exists = library
@@ -540,10 +539,7 @@ fn ingest_x_image(
         return Err(ApiError::ClassificationNotFound);
     }
 
-    let media_url = validate_url(&request.media_url, &["pbs.twimg.com", "video.twimg.com"])
-        .map_err(|_| ApiError::InvalidMediaUrl)?;
-    let source_url = validate_url(&request.source_url, &["x.com", "twitter.com"])
-        .map_err(|_| ApiError::InvalidSourceUrl)?;
+    let (media_url, source_url, temporary_extension, maximum_bytes) = remote_media_target(&request)?;
     let (creator_handle, creator_url) = x_creator(&source_url)
         .map(|handle| {
             (
@@ -555,20 +551,18 @@ fn ingest_x_image(
 
     let staging_directory = library.root().join("assets").join(".staging");
     fs::create_dir_all(&staging_directory).map_err(|_| ApiError::DownloadFailed)?;
-    let (temporary_extension, maximum_bytes) = match media_url.host_str() {
-        Some("pbs.twimg.com") => ("png", MAX_IMAGE_BYTES),
-        Some("video.twimg.com") if media_url.path().to_ascii_lowercase().ends_with(".mp4") => {
-            ("mp4", MAX_REMOTE_VIDEO_BYTES)
-        }
-        _ => return Err(ApiError::InvalidMediaUrl),
-    };
     let temporary_path = staging_directory.join(format!(
         "remote-{}.{}",
         Uuid::new_v4(),
         temporary_extension
     ));
     let temporary = TemporaryDownload::new(temporary_path);
-    downloader.download(&media_url, temporary.path(), maximum_bytes)?;
+    let referer = if request.source == "web" {
+        source_url.join("/").map_err(|_| ApiError::InvalidSourceUrl)?
+    } else {
+        source_url.clone()
+    };
+    downloader.download(&media_url, &referer, temporary.path(), maximum_bytes)?;
 
     // 게시 시각은 형식이 틀려도 수집 자체는 막지 않는다. 해석 불가면 빈 값으로 둔다.
     let source_published_at = request
@@ -606,9 +600,66 @@ fn x_creator(url: &url::Url) -> Option<&str> {
     Some(handle)
 }
 
+fn remote_media_target(request: &XIngestionRequest) -> Result<(url::Url, url::Url, &'static str, u64), ApiError> {
+    if request.source == "web" {
+        let source = public_media::valid_url(&request.source_url).map_err(|_| ApiError::InvalidSourceUrl)?;
+        let media = public_media::valid_url(&request.media_url).map_err(|_| ApiError::InvalidMediaUrl)?;
+        let path = media.path().to_ascii_lowercase();
+        if path.ends_with(".m3u8") || path.ends_with(".mpd") {
+            return Err(ApiError::InvalidMediaUrl);
+        }
+        let (extension, maximum) = match request.media_type.as_deref() {
+            Some("image") => ("png", MAX_IMAGE_BYTES),
+            Some("video") => (match path.rsplit('.').next() {
+                Some("webm") => "webm", Some("mov") => "mov", Some("m4v") => "m4v", _ => "mp4",
+            }, MAX_REMOTE_VIDEO_BYTES),
+            _ => return Err(ApiError::InvalidMediaUrl),
+        };
+        return Ok((media, source, extension, maximum));
+    }
+    let source_hosts: &[&str] = match request.source.as_str() {
+        "x" => &["x.com", "twitter.com"],
+        "arca" => &["arca.live"],
+        "dcinside" => &["gall.dcinside.com", "m.dcinside.com"],
+        _ => return Err(ApiError::InvalidRequest),
+    };
+    let source = validate_url(&request.source_url, source_hosts).map_err(|_| ApiError::InvalidSourceUrl)?;
+    let media = url::Url::parse(&request.media_url).map_err(|_| ApiError::InvalidMediaUrl)?;
+    let host = media.host_str().ok_or(ApiError::InvalidMediaUrl)?;
+    let allowed = match request.source.as_str() {
+        "x" => matches!(host, "pbs.twimg.com" | "video.twimg.com"),
+        "arca" => matches!(host, "arca.live" | "ac-o.arca.live" | "ac.namu.la")
+            || host.strip_suffix(".namu.la").is_some_and(|label| label.starts_with("ac-") && !label.contains('.')),
+        "dcinside" => matches!(host, "image.dcinside.com" | "vod.dcinside.com")
+            || [".dcinside.com", ".dcinside.co.kr"].iter().any(|suffix| {
+                host.strip_suffix(suffix).is_some_and(|label| label.strip_prefix("dcimg")
+                    .is_some_and(|number| number.bytes().all(|byte| byte.is_ascii_digit())))
+            }),
+        _ => false,
+    };
+    if !allowed || media.scheme() != "https" || !media.username().is_empty()
+        || media.password().is_some() || media.port().is_some() {
+        return Err(ApiError::InvalidMediaUrl);
+    }
+    let path = media.path().to_ascii_lowercase();
+    let extension = match path.rsplit('.').next().unwrap_or("") {
+        "mp4" => "mp4", "webm" => "webm", "mov" => "mov", "m4v" => "m4v",
+        "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "avif" => "png",
+        _ if host == "pbs.twimg.com" || (request.source == "dcinside" && path.ends_with("/viewimage.php")) => "png",
+        _ => return Err(ApiError::InvalidMediaUrl),
+    };
+    // Keep X's existing CDN contract; forum files outside media support use the browser.
+    if request.source == "x" && host == "video.twimg.com" && extension != "mp4" {
+        return Err(ApiError::InvalidMediaUrl);
+    }
+    let maximum = if extension == "png" { MAX_IMAGE_BYTES } else { MAX_REMOTE_VIDEO_BYTES };
+    Ok((media, source, extension, maximum))
+}
+
 fn validate_url(value: &str, allowed_hosts: &[&str]) -> Result<url::Url, ()> {
     let parsed = url::Url::parse(value).map_err(|_| ())?;
     if parsed.scheme() != "https"
+        || !parsed.username().is_empty() || parsed.password().is_some() || parsed.port().is_some()
         || !parsed
             .host_str()
             .is_some_and(|host| allowed_hosts.contains(&host))
@@ -788,6 +839,83 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
+
+    #[test]
+    fn forum_media_hosts_and_source_identity_are_validated() {
+        for (source, page, media) in [
+            ("arca", "https://arca.live/b/art/1", "https://ac-o.namu.la/art.png?type=orig"),
+            ("dcinside", "https://gall.dcinside.com/board/view/?id=art&no=1", "https://dcimg8.dcinside.co.kr/viewimage.php?id=art&no=1"),
+            ("dcinside", "https://m.dcinside.com/board/art/1", "https://vod.dcinside.com/art.mp4"),
+        ] {
+            let mut request = x_request("tag");
+            request.source = source.into();
+            request.source_url = page.into();
+            request.media_url = media.into();
+            assert!(remote_media_target(&request).is_ok());
+            request.media_url = "https://dcimg8.dcinside.co.kr.evil/viewimage.php".into();
+            assert_eq!(remote_media_target(&request), Err(ApiError::InvalidMediaUrl));
+            request.media_url = media.into();
+            request.source_url = "https://x.com/other/status/1".into();
+            assert_eq!(remote_media_target(&request), Err(ApiError::InvalidSourceUrl));
+        }
+    }
+
+    #[test]
+    fn arca_original_cdn_is_accepted_without_accepting_unrelated_subdomains() {
+        let mut request = x_request("tag");
+        request.source = "arca".into();
+        request.source_url = "https://arca.live/b/art/123?p=1".into();
+        request.media_url = "https://ac-o.arca.live/20260905sac/art.jpg?expires=1&key=fixture&type=orig&type=orig".into();
+        let (media, _, extension, limit) = remote_media_target(&request).unwrap();
+        assert_eq!(media.as_str(), request.media_url);
+        assert_eq!(extension, "png");
+        assert_eq!(limit, MAX_IMAGE_BYTES);
+        for host in ["ac-o.arca.live.evil", "unrelated.arca.live", "ac-o.arca.live:8443"] {
+            request.media_url = format!("https://{host}/art.jpg");
+            assert_eq!(remote_media_target(&request), Err(ApiError::InvalidMediaUrl));
+        }
+    }
+
+    #[test]
+    fn forum_image_ingestion_preserves_classification_and_source_without_x_creator() {
+        let root = tempfile::tempdir().unwrap();
+        let library = Library::open(root.path()).unwrap();
+        let classification = create_root(&library, "Art");
+        let mut request = x_request(&classification.id);
+        request.source = "arca".into();
+        request.source_url = "https://arca.live/b/art/123".into();
+        request.media_url = "https://ac-o.namu.la/art.png".into();
+        let downloader = RecordingDownloader::new(png_bytes());
+        let (_, outcome) = ingest_x_image(&library, request, &downloader).unwrap();
+        let IngestOutcome::Added { asset } = outcome else { panic!("expected imported image") };
+        assert_eq!(asset.source_url.as_deref(), Some("https://arca.live/b/art/123"));
+        assert_eq!(asset.creator_handle, None);
+        assert_eq!(downloader.calls(), 1);
+        assert_eq!(library.get_asset_classifications(&asset.id).unwrap()[0].id, classification.id);
+    }
+
+    #[test]
+    fn generic_extensionless_image_ingestion_keeps_classification_and_source() {
+        let root = tempfile::tempdir().unwrap();
+        let library = Library::open(root.path()).unwrap();
+        let classification = create_root(&library, "Art");
+        let mut request = x_request(&classification.id);
+        request.source = "web".into();
+        request.source_url = "https://blog.example.com/post/1?private-query=fixture".into();
+        request.media_url = "https://cdn.example.com/image?id=1".into();
+        request.media_type = Some("image".into());
+        let downloader = RecordingDownloader::new(png_bytes());
+        let (_, outcome) = ingest_x_image(&library, request.clone(), &downloader).unwrap();
+        let IngestOutcome::Added { asset } = outcome else { panic!("expected imported image") };
+        assert_eq!(asset.source_url.as_deref(), Some(request.source_url.as_str()));
+        assert_eq!(library.get_asset_classifications(&asset.id).unwrap()[0].id, classification.id);
+        assert_eq!(asset.creator_handle, None);
+        request.media_url = "https://127.0.0.1/private.jpg".into();
+        assert_eq!(downloader.last_referer.lock().unwrap().as_deref(), Some("https://blog.example.com/"));
+        assert_eq!(remote_media_target(&request), Err(ApiError::InvalidMediaUrl));
+        request.media_url = "https://cdn.example.com/stream.m3u8".into();
+        assert_eq!(remote_media_target(&request), Err(ApiError::InvalidMediaUrl));
+    }
 
     #[test]
     fn creator_handle_is_derived_only_from_account_status_urls() {
@@ -1116,6 +1244,7 @@ mod tests {
     struct RecordingDownloader {
         bytes: Vec<u8>,
         calls: AtomicUsize,
+        last_referer: Mutex<Option<String>>,
     }
 
     impl RecordingDownloader {
@@ -1123,6 +1252,7 @@ mod tests {
             Self {
                 bytes,
                 calls: AtomicUsize::new(0),
+                last_referer: Mutex::new(None),
             }
         }
 
@@ -1135,10 +1265,12 @@ mod tests {
         fn download(
             &self,
             _media_url: &url::Url,
+            source_url: &url::Url,
             destination: &Path,
             _maximum_bytes: u64,
         ) -> Result<(), ApiError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
+            *self.last_referer.lock().unwrap() = Some(source_url.to_string());
             fs::write(destination, &self.bytes).map_err(|_| ApiError::DownloadFailed)
         }
     }
@@ -1160,6 +1292,7 @@ mod tests {
             source_url: "https://x.com/example/status/123/photo/1".into(),
             classification_id: classification_id.into(),
             published_at: None,
+            media_type: None,
         }
     }
 

@@ -141,20 +141,21 @@
     return indices;
   }
 
-  function adaptiveSecondaryLayout(entries, layout, usageById = {}, hiddenIds = []) {
+  function adaptiveSecondaryLayout(entries, layout, usageById = {}, hiddenIds = [], pinnedIds = layout?.parents?.[PINNED]?.flat() ?? []) {
     const liveEntries = (Array.isArray(entries) ? entries : [])
       .filter((entry) => entry && typeof entry.id === "string");
     const next = reconcileLayout(liveEntries, layout);
-    const hidden = new Set(Array.isArray(hiddenIds) ? hiddenIds : []);
-    const groups = groupByParent(liveEntries);
+    const hidden = new Set([...(Array.isArray(hiddenIds) ? hiddenIds : []), ...pinnedIds]);
+    const storedParents = next.parents;
+    const groups = Object.keys(storedParents).filter(key => key !== PINNED)
+      .map(key => [key, radialChildren(liveEntries, storedParents, key)]);
 
     for (const [key, children] of groups) {
       if (key === ROOT || children.length < 2) continue;
-      const hasHiddenChild = children.some((entry) => hidden.has(entry.id));
       const visibleBuckets = new Set(children
         .filter((entry) => !hidden.has(entry.id))
         .map((entry) => usageBucket(usageById?.[entry.id])));
-      if (!hasHiddenChild && visibleBuckets.size <= 1) continue;
+      if (visibleBuckets.size <= 1) continue;
 
       const pages = reconcileParent(children, next.parents[key]);
       const pageSize = pages[0]?.length ?? slotCount(children.length);
@@ -163,10 +164,12 @@
       flat.forEach((id, index) => { if (typeof id === "string") currentPosition.set(id, index); });
 
       const priorityPositions = [];
-      for (let start = 0; start < flat.length; start += pageSize) {
-        const localCount = Math.min(pageSize, flat.length - start);
+      const visibleCount = children.filter(entry => !hidden.has(entry.id)).length;
+      for (let start = 0; start < visibleCount; start += pageSize) {
+        const localCount = Math.min(pageSize, visibleCount - start);
         for (const localIndex of centerOutIndices(localCount)) priorityPositions.push(start + localIndex);
       }
+      for (let index = visibleCount; index < flat.length; index += 1) priorityPositions.push(index);
       const easeRankByPosition = new Map(priorityPositions.map((position, rank) => [position, rank]));
       const canonicalIndex = new Map(children.map((entry, index) => [entry.id, index]));
       const ids = children.map((entry) => entry.id);
