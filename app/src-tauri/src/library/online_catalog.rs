@@ -22,7 +22,7 @@ use super::{
     Library,
 };
 
-fn active_work_predicate(sort: CatalogSort) -> &'static str {
+pub(super) fn active_work_predicate(sort: CatalogSort) -> &'static str {
     // Almost all imported works are active (97% in the measured catalog).
     // This no-op hint avoids rank-index row lookups and a full latest sort.
     // Views/hot sorts must retain the Expunged-leading rank-index lookup.
@@ -35,6 +35,10 @@ fn active_work_predicate(sort: CatalogSort) -> &'static str {
 #[cfg(test)]
 #[path = "catalog_performance_tests.rs"]
 mod performance_tests;
+
+#[cfg(test)]
+#[path = "catalog_group_performance_tests.rs"]
+mod group_performance_tests;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct ImportedSuggestion {
@@ -604,7 +608,7 @@ fn bulk_summary_tags(
     Ok((by_work, 1))
 }
 
-fn validated_thumbnail_url(raw: Option<String>) -> Option<String> {
+pub(super) fn validated_thumbnail_url(raw: Option<String>) -> Option<String> {
     let raw = raw?;
     let parsed = url::Url::parse(&raw).ok()?;
     let host = parsed.host_str()?;

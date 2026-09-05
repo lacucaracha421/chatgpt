@@ -6,6 +6,8 @@ mod backup;
 pub mod book_migration;
 pub(crate) mod catalog_checkpoint;
 mod catalog_group_identity;
+mod catalog_group_query;
+mod catalog_groups;
 mod catalog_lineage;
 mod catalog_revision;
 pub(crate) mod catalog_update;

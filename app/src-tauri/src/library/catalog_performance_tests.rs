@@ -13,7 +13,7 @@ use super::{
     tests::{khentai, query, SCHEMA},
 };
 
-fn measured_where(
+pub(super) fn measured_where(
     connection: &Connection,
     text: &str,
     reveal: bool,
