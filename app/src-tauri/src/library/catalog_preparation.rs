@@ -280,6 +280,47 @@ mod tests {
     }
 
     #[test]
+    fn catalog_preparation_restore_waits_for_reader_and_prepares_restored_state() {
+        let (_root, library) = fixture();
+        let backup = library
+            .create_pre_migration_backup("legacy-lakomics")
+            .unwrap();
+        library.prepare_online_catalog_counts().unwrap();
+        let reader = library.catalog_read_connection().unwrap();
+        let restore_library = library.clone();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (finished_tx, finished_rx) = std::sync::mpsc::channel();
+        let restore = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            finished_tx
+                .send(restore_library.restore_backup(&backup.id))
+                .unwrap();
+        });
+        started_rx.recv().unwrap();
+        let completed_while_reading = finished_rx.recv_timeout(Duration::from_millis(100));
+        drop(reader);
+        assert!(matches!(
+            completed_while_reading,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+        ));
+        finished_rx
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+        restore.join().unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while library.catalog_preparation_status().0 {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let reader = library.catalog_read_connection().unwrap();
+        assert_eq!(
+            catalog_counts::lookup(&reader, None, false).unwrap(),
+            Some(2)
+        );
+    }
+
+    #[test]
     fn catalog_preparation_refreshes_after_policy_and_source_changes() {
         let (root, library) = fixture();
         assert!(library.prepare_online_catalog_counts().unwrap());

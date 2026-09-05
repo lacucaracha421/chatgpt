@@ -85,7 +85,11 @@ impl Library {
             .backup_lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let _database_guard = self
+        let file_guard = self
+            .catalog_file_lock
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let database_guard = self
             .database_lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -93,7 +97,13 @@ impl Library {
             .into_iter()
             .find(|entry| entry.metadata.id == backup_id)
             .ok_or(LibraryError::InvalidBackup)?;
-        self.restore_snapshot_locked(&selected.path)
+        let result = self.restore_snapshot_locked(&selected.path);
+        drop(database_guard);
+        drop(file_guard);
+        if result.is_ok() {
+            self.request_catalog_preparation();
+        }
+        result
     }
 
     pub(crate) fn create_cloud_metadata_snapshot(
@@ -122,12 +132,22 @@ impl Library {
             .backup_lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let _database_guard = self
+        let file_guard = self
+            .catalog_file_lock
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let database_guard = self
             .database_lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         verify_snapshot(snapshot)?;
-        self.restore_snapshot_locked(snapshot)
+        let result = self.restore_snapshot_locked(snapshot);
+        drop(database_guard);
+        drop(file_guard);
+        if result.is_ok() {
+            self.request_catalog_preparation();
+        }
+        result
     }
 
     fn restore_snapshot_locked(&self, selected_path: &Path) -> Result<(), LibraryError> {
