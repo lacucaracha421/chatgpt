@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 34;
+pub(crate) const SCHEMA_VERSION: i64 = 35;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -60,6 +60,8 @@ const MANGA_CATALOG_RECOVERY_SOURCE_PATH_SCHEMA: &str =
     include_str!("../../migrations/0033_manga_catalog_recovery_source_path.sql");
 const ONLINE_CATALOG_VISIBILITY_SCHEMA: &str =
     include_str!("../../migrations/0034_online_catalog_visibility.sql");
+const ONLINE_CATALOG_GROUPS_SCHEMA: &str =
+    include_str!("../../migrations/0035_online_catalog_groups.sql");
 
 pub fn open_database(path: &Path) -> Result<Connection, LibraryError> {
     let connection = Connection::open(path)?;
@@ -196,6 +198,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         if version <= 33 {
             transaction.execute_batch(ONLINE_CATALOG_VISIBILITY_SCHEMA)?;
         }
+        if version <= 34 {
+            transaction.execute_batch(ONLINE_CATALOG_GROUPS_SCHEMA)?;
+        }
         transaction.commit()?;
         Ok::<(), LibraryError>(())
     })();
@@ -212,6 +217,94 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn catalog_groups_v35_preserves_v34_user_state_and_snapshot() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(temp.path().join("backups")).unwrap();
+        let path = temp.path().join("library.sqlite");
+        let mut connection = Connection::open(&path).unwrap();
+        // Build the previous schema using the migration path, then remove only
+        // the additive group tables if this test runs against the new schema.
+        migrate_to_latest(&mut connection, 0).unwrap();
+        connection
+            .execute_batch(
+                "DROP TABLE IF EXISTS online_catalog_group_diagnostics;
+            DROP TABLE IF EXISTS online_catalog_group_state;
+            DROP TABLE IF EXISTS online_catalog_group_members;
+            DROP TABLE IF EXISTS online_catalog_group_preferences;
+            DROP TABLE IF EXISTS online_catalog_group_handles;
+            PRAGMA user_version = 34;
+            INSERT INTO online_catalog_bookmarks VALUES ('provider','work','before');
+            INSERT INTO remote_reading_progress VALUES ('provider','work',2,9,'before');
+            INSERT INTO online_catalog_hidden_categories VALUES (2,'before');
+            INSERT INTO online_catalog_blocked_tags VALUES ('artist','blocked','before');
+            UPDATE online_catalog_settings SET last_success_at='checkpoint', last_added=123;",
+            )
+            .unwrap();
+        drop(connection);
+        let connection = initialize_database(&path).unwrap();
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+                .unwrap(),
+            35
+        );
+        for (sql, expected) in [
+            ("SELECT work_id FROM online_catalog_bookmarks", "work"),
+            ("SELECT last_read_at FROM remote_reading_progress", "before"),
+            (
+                "SELECT created_at FROM online_catalog_hidden_categories",
+                "before",
+            ),
+            ("SELECT value FROM online_catalog_blocked_tags", "blocked"),
+            (
+                "SELECT last_success_at FROM online_catalog_settings",
+                "checkpoint",
+            ),
+        ] {
+            assert_eq!(
+                connection
+                    .query_row(sql, [], |r| r.get::<_, String>(0))
+                    .unwrap(),
+                expected
+            );
+        }
+        assert_eq!(
+            connection
+                .query_row("SELECT last_added FROM online_catalog_settings", [], |r| {
+                    r.get::<_, i64>(0)
+                })
+                .unwrap(),
+            123
+        );
+        let snapshot = std::fs::read_dir(temp.path().join("backups"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let snapshot_db = Connection::open(snapshot).unwrap();
+        assert_eq!(
+            snapshot_db
+                .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+                .unwrap(),
+            34
+        );
+        assert_eq!(
+            snapshot_db
+                .query_row("SELECT work_id FROM online_catalog_bookmarks", [], |r| {
+                    r.get::<_, String>(0)
+                })
+                .unwrap(),
+            "work"
+        );
+        assert!(!connection
+            .prepare("PRAGMA foreign_key_check")
+            .unwrap()
+            .exists([])
+            .unwrap());
+    }
 
     #[test]
     fn migrates_v27_to_cloud_queue_with_disabled_defaults() {
@@ -1803,7 +1896,7 @@ mod tests {
             connection
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
-            34,
+            SCHEMA_VERSION,
         );
     }
 

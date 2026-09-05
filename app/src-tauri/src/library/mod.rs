@@ -5,6 +5,7 @@ mod asset_metadata;
 mod backup;
 pub mod book_migration;
 pub(crate) mod catalog_checkpoint;
+mod catalog_group_identity;
 pub(crate) mod catalog_update;
 mod classification;
 mod collection;
