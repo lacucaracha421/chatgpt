@@ -1,57 +1,25 @@
 ---
 name: using-superpowers
-description: Use when starting any conversation - establishes how to find and use skills, requiring skill invocation before ANY response including clarifying questions
+description: Select a relevant skill when a task needs a specialized method; preserve repository scope, permissions, and risk-based verification.
 ---
 
 <SUBAGENT-STOP>
 If you were dispatched as a subagent to execute a specific task, ignore this skill.
 </SUBAGENT-STOP>
 
-<EXTREMELY-IMPORTANT>
-If you think there is even a 1% chance a skill might apply to what you are doing, you ABSOLUTELY MUST invoke the skill.
+## Selecting a skill
 
-IF A SKILL APPLIES TO YOUR TASK, YOU DO NOT HAVE A CHOICE. YOU MUST USE IT.
+Inspect the task and repository context first. Load an explicitly requested skill or the smallest relevant method when it adds concrete value; do not invoke skills merely because a topic might be related. Ordinary questions and bounded implementation do not need a process chain.
 
-This is not negotiable. You cannot rationalize your way out of this.
-</EXTREMELY-IMPORTANT>
+Repository instructions control approval, Git, deployment, data safety, documentation, and verification. An already clear, authorized request does not need renewed design approval. Reuse still-valid evidence; do not add tests, builds, plans, reviews, or subagents just to complete a checklist.
 
-## The Rule
+For ambiguous design use brainstorming. For a nontrivial failure use systematic-debugging. For an approved multi-step task, execute it directly or use executing-plans. Use a specialist only when the framework/runtime and tools actually match; do not provision, install, or change permissions to make a skill applicable.
 
-**Invoke relevant or requested skills BEFORE any response or action** — including clarifying questions, exploring the codebase, or checking files. If it turns out wrong for the situation, you don't have to use it.
-
-**Before entering plan mode:** if you haven't already brainstormed, invoke the brainstorming skill first.
-
-Then announce "Using [skill] to [purpose]" and follow the skill exactly. If it has a checklist, create a todo per item.
-
-## Skill Priority
-
-When multiple skills apply, process skills come first — they set the approach, then implementation skills (frontend-design, etc.) carry it out. Brainstorming and systematic-debugging are Superpowers' most common process skills, but the rule holds for any of them.
-
-- "Let's build X" → superpowers:brainstorming first, then implementation skills.
-- "Fix this bug" → superpowers:systematic-debugging first, then domain skills.
-
-## Red Flags
-
-These thoughts mean STOP—you're rationalizing:
-
-| Thought | Reality |
-|---------|---------|
-| "This is just a simple question" | Questions are tasks. Check for skills. |
-| "I need more context first" | Skill check comes BEFORE clarifying questions. |
-| "Let me explore the codebase first" | Skills tell you HOW to explore. Check first. |
-| "I can check git/files quickly" | Files lack conversation context. Check for skills. |
-| "Let me gather information first" | Skills tell you HOW to gather information. |
-| "This doesn't need a formal skill" | If a skill exists, use it. |
-| "I remember this skill" | Skills evolve. Read current version. |
-| "This doesn't count as a task" | Action = task. Check for skills. |
-| "The skill is overkill" | Simple things become complex. Use it. |
-| "I'll just do this one thing first" | Check BEFORE doing anything. |
-| "This feels productive" | Undisciplined action wastes time. Skills prevent this. |
-| "I know what that means" | Knowing the concept ≠ using the skill. Invoke it. |
+If a named skill or subagent is unavailable, use a supported equivalent or carry out the relevant method inline. Report limitations rather than inventing tool names or blocking independent work.
 
 ## Platform Adaptation
 
-If your harness appears here, read its reference file for special instructions:
+Only when a tool mapping is needed, consult the matching reference below. Verify it against callable tools; do not assume a reference enables a capability or overrides host permissions:
 
 - Codex: `references/codex-tools.md`
 - Pi: `references/pi-tools.md`
@@ -60,4 +28,4 @@ If your harness appears here, read its reference file for special instructions:
 
 ## User Instructions
 
-User instructions (CLAUDE.md, AGENTS.md, GEMINI.md, etc, direct requests) take precedence over skills, which in turn override default behavior. Only skip skill workflows or instructions when your human partner has explicitly told you to.
+The current request and applicable repository instructions take precedence over this method, subject to host/system rules. Omit inapplicable workflow steps without seeking permission for the omission. Never infer authorization for external or destructive actions.

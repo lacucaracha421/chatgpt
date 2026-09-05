@@ -15,12 +15,13 @@ powershell -ExecutionPolicy Bypass -File scripts/fetch-ffmpeg-windows.ps1
 powershell -ExecutionPolicy Bypass -File scripts/fetch-ffmpeg-windows.ps1 -VerifyOnly
 ```
 
-When a test app has no library registered, use
-`C:\Users\namwoojun\Desktop\test` as the temporary library.
+Do not infer a test library from an old machine path. Use only a disposable fixture/library explicitly placed in task scope. The active production-library boundary and separate write approval are defined in `../AGENTS.md`.
+
+The commands below are a reference, not a per-change checklist. Follow `../AGENTS.md` for risk-based verification and reuse of valid evidence. Dependency installation is a setup operation, not part of a documentation review. Run these app commands from `app/`.
 
 ```powershell
 npm ci
-npm run tauri dev
+npm run tauri -- dev
 npm test
 npm run build
 npm run tauri build -- --debug

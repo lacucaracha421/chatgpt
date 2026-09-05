@@ -6,14 +6,23 @@
 - Investigate the relevant code path before making substantial changes.
 - Do not refactor, clean up, revert, or overwrite unrelated code or user changes unless explicitly requested.
 - When fixing a bug, prefer the root cause over an unnecessary workaround.
-- Do not create commits or push to a remote repository unless explicitly requested.
+- Git writes (including commits, pushes, merges, tags, branch/worktree creation or deletion), deployment, service provisioning, and writes to production data require explicit authorization for that action. Implementation or skill activation alone does not authorize them.
 - Ignore unrelated pre-existing warnings or failures unless they block the requested task.
 - Keep explanations concise unless detailed analysis is requested.
 
 ## Canonical checkout
 
 - Use `C:\chatgpt` as the canonical local repository for all Lakomics development.
-- `main` is the single source of truth for the current Lakomics app and bundled `extension/` code.
+- `main` is the accepted integration baseline for the Lakomics app and bundled `extension/` code. For ongoing work, inspect the current branch, staged/unstaged changes, and relevant untracked files; do not treat an older `main` snapshot as the current task state.
+
+## Instruction and skill applicability
+
+- Subject to host/system instructions, the current user request and applicable repository instructions govern scope, authorization, and verification. Skills supply methods, not additional authority or mandatory process gates.
+- Continue clear, authorized implementation without repeating design approval. Ask only when an unresolved decision materially changes scope, risk, or authorization; continue independent unblocked work.
+- Use skills for an explicit request or a concrete task need. Before a platform/runtime recipe, verify the actual package, owning directory, callable tools, and permissions. A cached skill is not proof of an available capability.
+- Ordinary Lakomics work does not authorize adopting Vercel hosting, Next.js, shadcn, AI SDK, new persistence, or another browser runtime. Existing direct Vercel AI Gateway integration is not consent to adopt that stack. Preserve the current framework, custom UI, and package manager.
+- Do not edit managed/plugin caches, broaden tool access, disable sandboxing, or install dependencies merely to activate a skill. If a named skill/subagent is unavailable, use a supported equivalent or perform the scoped method inline; disclose any missing independent/native evidence.
+- Current repository sources outrank stale remembered workflow facts. Do not recreate retired backlog/plan files referenced by memory.
 
 ## Repository docs
 
@@ -22,11 +31,13 @@ Before changing code, use `docs/README.md` as the document map.
 - Product language and domain boundaries: `CONTEXT.md`
 - Visual/UI rules: `DESIGN.md`
 - Architecture decisions: `docs/adr/README.md` and relevant Accepted ADRs
-- Implementation rules: `docs/agents/implementation.md`
+- Implementation rules, review scope, and verification evidence: `docs/agents/implementation.md`
 - Living bugs, priorities, and future work: `docs/roadmap/lakomics-backlog.md`
 - Cloud Capture work: `docs/agents/cloud-capture.md`
 - Works / Collection work: `docs/agents/lakomics-works-handoff-v2.md`
-- X Collector behavior: `docs/edge-extension.md`
+- X Collector behavior: `docs/edge-extension.md`; extension source/generation rules: `extension/AGENTS.md`
+- Catalog changes, production deployment/canary safeguards: `docs/agents/catalog-troubleshooting.md`
+- Backup, recovery, and PC migration: `docs/operations/pc-migration.md`
 
 Current code, migrations, and type/contracts are authoritative for implemented behavior. The backlog describes intended work and must not be treated as already implemented.
 
@@ -41,7 +52,7 @@ Historical dated implementation plans/specs were removed from the current tree a
 ## Branch hygiene
 
 - Treat non-`main` branches as temporary working branches.
-- After a branch has been merged into `main`, delete the remote branch promptly instead of keeping merged work branches around.
+- After a verified merge into `main`, remove the remote branch only when that deletion is explicitly authorized; otherwise leave it in place and report its state.
 - Do not use long-lived feature, `codex/*`, `agent/*`, or backup branches to preserve old states. Use tags for meaningful snapshots that must be retained.
 
 ## Credentials and generated files
@@ -64,6 +75,8 @@ Historical dated implementation plans/specs were removed from the current tree a
 - For visual-only CSS, spacing, typography, color, shadow, or animation changes, skip automated tests and production builds unless there is plausible compile or behavioral risk.
 - Do not rerun a successful check unless later edits could invalidate it, and do not add tests unless requested or existing coverage would miss a realistic regression introduced by the change.
 - Stop once there is sufficient evidence that the requested change works; generic planning, worktree, commit, push, PR, or completion steps are not reasons to run broader checks.
+- Distinguish static checks, browser/frontend checks, and native Tauri acceptance. Browser rendering does not prove native commands, filesystem integration, or production sync. Preserve required native/device gates and report them unverified when unavailable.
+- Never reseed/rerun the completed full Cloud Library backfill or replace the catalog database merely to verify a change; recovery/active-data writes require separate approval.
 
 ## Lakomics runtime rule
 

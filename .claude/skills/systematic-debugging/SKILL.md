@@ -1,6 +1,6 @@
 ---
 name: systematic-debugging
-description: Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes
+description: Investigate a nontrivial bug, test failure, or unexpected behavior using targeted evidence before choosing a fix; preserve task and permission boundaries.
 ---
 
 # Systematic Debugging
@@ -43,7 +43,7 @@ Use for ANY technical issue:
 
 ## The Four Phases
 
-You MUST complete each phase before proceeding to the next.
+Use the relevant phases in order of evidence, not as a mandatory checklist. `AGENTS.md` controls scope, authorization, and risk-based verification; a read-only investigation does not authorize instrumentation, fixture writes, or repairs.
 
 ### Phase 1: Root Cause Investigation
 
@@ -71,39 +71,7 @@ You MUST complete each phase before proceeding to the next.
 
    **WHEN system has multiple components (CI → build → signing, API → service → database):**
 
-   **BEFORE proposing fixes, add diagnostic instrumentation:**
-   ```
-   For EACH component boundary:
-     - Log what data enters component
-     - Log what data exits component
-     - Verify environment/config propagation
-     - Check state at each layer
-
-   Run once to gather evidence showing WHERE it breaks
-   THEN analyze evidence to identify failing component
-   THEN investigate that specific component
-   ```
-
-   **Example (multi-layer system):**
-   ```bash
-   # Layer 1: Workflow
-   echo "=== Secrets available in workflow: ==="
-   echo "IDENTITY: ${IDENTITY:+SET}${IDENTITY:-UNSET}"
-
-   # Layer 2: Build script
-   echo "=== Env vars in build script: ==="
-   env | grep IDENTITY || echo "IDENTITY not in environment"
-
-   # Layer 3: Signing script
-   echo "=== Keychain state: ==="
-   security list-keychains
-   security find-identity -v
-
-   # Layer 4: Actual signing
-   codesign --sign "$IDENTITY" --verbose=4 "$APP"
-   ```
-
-   **This reveals:** Which layer fails (secrets → workflow ✓, workflow → build ✗)
+   Inspect existing errors, traces, sanitized logs, configuration presence, and relevant code first. Add narrowly scoped instrumentation only when missing evidence warrants it and file/runtime writes are authorized. Do not log raw payloads, credentials, signed URLs, private paths, or the full environment. Check key presence without printing secret values. Stop gathering once the failing boundary is established; do not instrument every boundary by default.
 
 5. **Trace Data Flow**
 
@@ -169,12 +137,11 @@ You MUST complete each phase before proceeding to the next.
 
 **Fix the root cause, not the symptom:**
 
-1. **Create Failing Test Case**
-   - Simplest possible reproduction
-   - Automated test if possible
-   - One-off test script if no framework
-   - MUST have before fixing
-   - Use the `superpowers:test-driven-development` skill for writing proper failing tests
+1. **Select regression evidence**
+   - Use the simplest relevant existing reproduction or test
+   - Add a focused test only when requested or a realistic regression is otherwise uncovered
+   - Prefer test-first for new regression coverage; preserve already-written code
+   - Use the available `test-driven-development` method if needed, or apply this guidance inline
 
 2. **Implement Single Fix**
    - Address the root cause identified
@@ -184,9 +151,9 @@ You MUST complete each phase before proceeding to the next.
 
 3. **Verify Fix**
    - Test passes now?
-   - No other tests broken?
+   - Relevant dependent behavior still covered without unrelated cleanup?
    - Issue actually resolved?
-   - Use the `superpowers:verification-before-completion` skill before claiming success
+   - Match claims to still-valid evidence under `AGENTS.md`; disclose native/device gates not exercised
 
 4. **If Fix Doesn't Work**
    - STOP
@@ -217,7 +184,7 @@ If you catch yourself thinking:
 - "Quick fix for now, investigate later"
 - "Just try changing X and see if it works"
 - "Add multiple changes, run tests"
-- "Skip the test, I'll manually verify"
+- "Claim a test passed when only manual evidence exists"
 - "It's probably X, let me fix that"
 - "I don't fully understand but this might work"
 - "Pattern says X but I'll adapt it differently"
@@ -248,7 +215,7 @@ If you catch yourself thinking:
 | "Issue is simple, don't need process" | Simple issues have root causes too. Process is fast for simple bugs. |
 | "Emergency, no time for process" | Systematic debugging is FASTER than guess-and-check thrashing. |
 | "Just try this first, then investigate" | First fix sets the pattern. Do it right from the start. |
-| "I'll write test after confirming fix works" | Untested fixes don't stick. Test first proves it. |
+| "The fix already exists" | Preserve it, inspect coverage of the original failure, and disclose unobserved red behavior. |
 | "Multiple fixes at once saves time" | Can't isolate what worked. Causes new bugs. |
 | "Reference too long, I'll adapt the pattern" | Partial understanding guarantees bugs. Read it completely. |
 | "I see the problem, let me fix it" | Seeing symptoms ≠ understanding root cause. |
@@ -270,7 +237,7 @@ If systematic investigation reveals issue is truly environmental, timing-depende
 1. You've completed the process
 2. Document what you investigated
 3. Implement appropriate handling (retry, timeout, error message)
-4. Add monitoring/logging for future investigation
+4. Recommend narrowly scoped observability only if needed; add it only within authorized writes
 
 **But:** 95% of "no root cause" cases are incomplete investigation.
 

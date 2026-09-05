@@ -4,4 +4,4 @@ description: A relentless interview to sharpen a plan or design, which also crea
 disable-model-invocation: true
 ---
 
-Call the Skill tool twice, for "grilling" and "domain-modeling".
+Use the method in [grill-me](../grill-me/SKILL.md), including its inline fallback when `grilling` is unavailable. Use the available [domain-modeling](../domain-modeling/SKILL.md) guidance only for domain questions. Record settled decisions in the appropriate existing reference or an in-scope ADR under `docs/README.md`; do not create a parallel backlog or commit documents without authorization.

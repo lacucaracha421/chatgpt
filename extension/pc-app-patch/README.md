@@ -1,5 +1,7 @@
 # PC Lakomics X video ingestion patch
 
+> Historical patch record: the video-ingestion changes are already incorporated in the current `app/src-tauri/src/extension_api.rs`. Do not apply this legacy patch to the current checkout. Original context and commands below are retained for history; [the X Collector reference](../../docs/edge-extension.md) owns current behavior.
+
 현재 PC Lakomics의 `/v1/ingestions` 확장 API는 `pbs.twimg.com` 이미지만 허용하고 임시 파일을 항상 `.png`로 만들기 때문에, 확장이 X의 `video.twimg.com/*.mp4` URL을 정상적으로 해석해도 PC 앱이 거부합니다.
 
 Lakomics 라이브러리의 일반 `ingest_media()` 경로 자체는 MP4 비디오를 이미 지원하므로, 이 패치는 extension API의 원격 미디어 게이트만 최소 수정합니다.

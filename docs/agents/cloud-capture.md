@@ -1,6 +1,6 @@
 # Cloud Capture / Cloud Sync Reference
 
-> Status: current architecture/reference for `main` as of 2026-08-31. Planned fixes live in `docs/roadmap/lakomics-backlog.md`.
+> Status: current repository architecture/reference, reviewed 2026-09-05. Task status lives in `docs/roadmap/lakomics-backlog.md`; code changes do not by themselves prove deployment.
 
 Lakomics keeps the local library authoritative. Cloud features are optional transport/replication paths; they do not make the VPS or R2 the canonical library.
 
@@ -50,7 +50,7 @@ The desktop Cloud Capture consumer:
 - leaves `ReviewPending` unacknowledged;
 - keeps outbound replication behavior untouched.
 
-The frontend runs an inbound poll on startup, every 15 seconds while the app is visible, every 60 seconds while hidden, and immediately when the app becomes visible or focused again.
+The frontend runs an inbound poll on startup, every 15 seconds while the app is visible and focused, every 60 seconds while hidden or unfocused, and immediately when the app becomes visible or focused again.
 
 ## Current inbound behavior
 
@@ -63,12 +63,9 @@ The repository implementation now includes the core `CLOUD-001` / `CLOUD-002` pa
 - ACK-only retries and unchanged exact duplicates do not force an unnecessary asset reload.
 - Outbound replication remains independent in `cloud_sync_queue`.
 
-Remaining work is verification and richer status UX:
+The backlog records the `CLOUD-001` / `CLOUD-002` rollout and `VERIFY-001` real-image/video verification as completed. These are retained results, not pending rollout tasks.
 
-1. The pending-payload server change must be deployed to the production Japanese VPS before classification preservation can be verified there.
-2. `VERIFY-001` must exercise real X image and video capture through VPS/R2 into the PC library and confirm immediate UI updates.
-3. `CLOUD-UI-001` still tracks richer last-run/last-success/last-error/problem visibility beyond the basic Settings controls.
-4. Long video capture can still outlive the request window; `CLOUD-003` remains optional if real-world use reproduces that race.
+Current follow-ups are `CLOUD-UI-001` durable last-attempt/success/error/problem visibility and `CLOUD-006`'s queued-work pause/wait/restart/resume acceptance gate. The full-library backfill itself is complete and must not be rerun by default. `CLOUD-003` is obsolete/incident-only unless a real reproducible failure warrants reopening it.
 
 ## Batch-drain semantics
 
@@ -123,9 +120,4 @@ Android/Titanium에서 Cloud Capture에 접근할 때는 Tailscale Serve HTTPS �
 
 ## Current implementation order
 
-Use the living backlog for status. The intended near-term sequence is:
-
-1. Complete `CLOUD-002` production rollout and end-to-end verification.
-2. Run `VERIFY-001` for real image and video capture with classification preservation and immediate UI refresh.
-3. Add `CLOUD-UI-001` richer status/error/problem visibility if needed after verification.
-4. Consider `CLOUD-003` long-video async redesign only if real use still requires it.
+Use the living backlog's active item statuses and dependencies rather than a second execution sequence here. Preserve the remaining CLOUD-006 pause gate, then follow its relationship to CLOUD-UI-001. Do not repeat the completed inbound rollout, E2E verification, or full backfill merely because an older procedure mentions them. Production writes and deployments require separate explicit authorization.

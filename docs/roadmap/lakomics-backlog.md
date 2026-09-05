@@ -71,15 +71,15 @@ Acceptance:
 ## BUG-013 — Asset viewer opens are never recorded
 
 Status: `DONE`
-Priority: P1 correctness prerequisite, schedule immediately after CLOUD-006 closure.
+Original scheduling note (completed): P1 correctness prerequisite after CLOUD-006 closure.
 
-Evidence:
+Original pre-fix audit evidence (not current behavior):
 
 - `recordAssetOpened` exists through gateway, Tauri, Rust, schema, and tests;
 - production viewer code has no caller;
 - the audited live `asset_activity` rows had exposure history but zero recorded opens.
 
-Goal:
+Original goal (implemented session semantics are recorded below):
 
 - record one open per active asset transition in the full Asset Viewer;
 - count initial viewer entry and next/previous/sibling navigation;
@@ -183,7 +183,7 @@ Prerequisite: CATALOG-002A.
 
 Status: `DONE`
 
-Current implementation already supports plain title text and one exact `namespace:value` form.
+Before this completed batch, the implementation supported plain title text and one exact `namespace:value` form. The implemented result is recorded below; this is not pending work.
 
 Target grammar is deliberately bounded:
 
@@ -225,7 +225,7 @@ Prerequisite: CATALOG-002A. CATALOG-003 may proceed independently after that con
 ## CATALOG-005 + CATALOG-006 — Catalog visibility/block policy
 
 Status: `DONE`
-Execute as one implementation batch after CATALOG-004.
+Completed as one implementation batch after CATALOG-004; the retained requirements below are not a new execution request.
 
 One persistent policy must cover:
 
@@ -804,6 +804,8 @@ Candidates intentionally absorbed rather than added as standalone backlog:
 ---
 
 # Dependency-safe master execution roadmap
+
+This is a dependency map, not a list of unfinished tasks: consult each active item status above and skip completed work. Historical audit-index statuses do not supersede later completion evidence.
 
 This is the authoritative dependency order, not a prohibition on parallel work in independent subsystems. In particular, Collection presentation and pure Mobile layout/state work may proceed in parallel once worktree ownership is clear.
 

@@ -17,7 +17,7 @@ Do not create a second markdown backlog for the same work.
 
 ## GitHub Issues
 
-Use GitHub Issues when the user explicitly asks for an issue/ticket, when a specific unit of work is already being tracked as an Issue, or when discussion/assignment/history on GitHub is useful.
+Use GitHub Issues when the user explicitly asks for issue tracking or the task already lives in an Issue. An existing Issue may be read for context; creating, editing, commenting on, or closing it still requires that write to be within the authorized task. Perceived usefulness alone is not authorization.
 
 Do not automatically mirror every roadmap item into an Issue. If an Issue is created from a roadmap item, link/reference the issue from the roadmap rather than maintaining two independent descriptions.
 

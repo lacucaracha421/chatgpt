@@ -1,12 +1,14 @@
 ---
 name: setup-matt-pocock-skills
-description: "Configure this repo for the engineering skills: set up its issue tracker, triage label vocabulary, and domain doc layout. Run once before first use of the other engineering skills."
+description: "Explicitly configure or repair engineering-skill adapters when requested. Preserve existing repository tracking/domain rules; not a prerequisite for other skills."
 disable-model-invocation: true
 ---
 
 # Setup Matt Pocock's Skills
 
-Scaffold the per-repo configuration that the engineering skills assume:
+Repair only missing, requested per-repo configuration. Lakomics already has `AGENTS.md`, a document map, and tracking/domain references; do not scaffold over them or switch trackers based on the remote URL. Existing authorization and documentation rules take precedence over the generic setup examples below.
+
+For an explicitly requested new setup, the supported concepts are:
 
 - **Issue tracker**: where issues live (GitHub by default; local markdown is also supported out of the box)
 - **Triage labels**: the strings used for the five canonical triage roles
@@ -73,11 +75,9 @@ Let them edit before writing.
 
 **Pick the file to edit:**
 
-- If `CLAUDE.md` exists, edit it.
-- Else if `AGENTS.md` exists, edit it.
-- If neither exists, ask the user which one to create; don't pick for them.
-
-Never create `AGENTS.md` when `CLAUDE.md` already exists (or vice versa); always edit the one that's already there.
+- Put shared repository rules/routing in the existing `AGENTS.md`; do not duplicate its existing sections.
+- Keep `CLAUDE.md` limited to importing shared guidance and Claude-specific adapters. Its existence is not a reason to hide model-agnostic rules there.
+- If the requested target is unclear and no shared entrypoint exists, resolve that choice before creating one. Preserve existing imports and user edits.
 
 If an `## Agent skills` block already exists in the chosen file, update its contents in-place rather than appending a duplicate. Don't overwrite user edits to the surrounding sections.
 

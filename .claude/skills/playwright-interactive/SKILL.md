@@ -1,41 +1,22 @@
 ---
 name: "playwright-interactive"
-description: "Persistent browser and Electron interaction through `js_repl` for fast iterative UI debugging."
+description: "Explicitly requested legacy Playwright/js_repl browser or Electron debugging only when that exact runtime is already available. Not native Tauri verification or a generic browser workflow."
+disable-model-invocation: true
 ---
 
 # Playwright Interactive Skill
 
 Use a persistent `js_repl` Playwright session to debug local web or Electron apps, keep the same handles alive across iterations, and run functional plus visual QA without restarting the whole toolchain unless the process ownership changed.
 
-## Preconditions
+## Preconditions and applicability
 
-- `js_repl` must be enabled for this skill.
-- If `js_repl` is missing, enable it in `~/.codex/config.toml`:
+This is a legacy runtime recipe, not an environment installer. `AGENTS.md` governs permissions and verification. Use it only for an explicitly requested matching browser/Electron task with callable `js_repl` and an existing resolvable Playwright installation. A different Node REPL or managed browser API is not interchangeable with `js_repl`.
 
-```toml
-[features]
-js_repl = true
-```
+If these prerequisites are missing, stop this recipe. Use the current host's supported browser tooling and its documentation for browser work, or report the missing capability; do not change global config, broaden filesystem access, disable sandboxing, initialize a package, or install dependencies to activate this skill.
 
-- You can also start a new session with `--enable js_repl` (equivalent to `-c features.js_repl=true`).
-- After enabling `js_repl`, start a new Codex session so the tool list refreshes.
-- For now, run this workflow with sandboxing disabled: start Codex with `--sandbox danger-full-access` (or the equivalent config for `sandbox_mode=danger-full-access`). This is a temporary requirement while `js_repl` + Playwright support inside the sandbox is still being completed.
-- Run setup from the same project directory you need to debug.
-- Treat `js_repl_reset` as a recovery tool, not routine cleanup. Resetting the kernel destroys your Playwright handles.
+Lakomics is Tauri, not Electron. For its native behavior use an available native inspection surface with the launch path in root `AGENTS.md`. Browser-only frontend results cannot close native command, filesystem, synchronization, or device acceptance gates. If a native surface is unavailable, report that gate as unverified.
 
-## One-time setup
-
-```bash
-test -f package.json || npm init -y
-npm install playwright
-# Web-only, for headed Chromium or mobile emulation:
-# npx playwright install chromium
-# Electron-only, and only if the target workspace is the app itself:
-# npm install --save-dev electron
-node -e "import('playwright').then(() => console.log('playwright import ok')).catch((error) => { console.error(error); process.exit(1); })"
-```
-
-If you switch to a different workspace later, repeat setup there.
+When this exact legacy runtime is selected, reuse existing handles and run from the owning package directory. The examples below apply only within that runtime and the authorized task scope. Reset the REPL only to recover genuinely unusable state.
 
 ## Core Workflow
 
@@ -48,7 +29,7 @@ If you switch to a different workspace later, repeat setup there.
    - Use this as the shared coverage list for both functional QA and visual QA.
    - For each claim or control-state pair, note the intended functional check, the specific state where the visual check must happen, and the evidence you expect to capture.
    - If a requirement is visually central but subjective, convert it into an observable QA check instead of leaving it implicit.
-   - Add at least 2 exploratory or off-happy-path scenarios that could expose fragile behavior.
+   - Add relevant off-happy-path scenarios only when the change risk warrants them; reuse valid evidence.
 2. Run the bootstrap cell once.
 3. Start or confirm any required dev server in a persistent TTY session.
 4. Launch the correct runtime and keep reusing the same Playwright handles.
@@ -76,7 +57,7 @@ try {
   console.log("Playwright loaded");
 } catch (error) {
   throw new Error(
-    `Could not load playwright from the current js_repl cwd. Run the setup commands from this workspace first. Original error: ${error}`
+    `Could not load playwright from the current js_repl cwd. Check the owning package directory for an existing installation; if unavailable, stop this recipe and use an appropriate already-supported alternative or report the limitation. Do not install/bootstrap dependencies or disable sandboxing. Original error: ${error}`
   );
 }
 ```
@@ -683,11 +664,11 @@ If you plan to exit Codex immediately after debugging, run the cleanup cell firs
 
 ## Common Failure Modes
 
-- `Cannot find module 'playwright'`: run the one-time setup in the current workspace and verify the import before using `js_repl`.
-- Playwright package is installed but the browser executable is missing: run `npx playwright install chromium`.
+- `Cannot find module 'playwright'`: check the owning package directory and whether an existing Playwright installation is resolvable. If the required runtime is unavailable, stop this recipe and use an appropriate already-supported alternative when available; otherwise report the limitation. Do not install or bootstrap dependencies to make this skill work.
+- Browser executable missing: report the unavailable prerequisite and use an already supported surface when suitable. Installation requires an explicit setup request; it is not an automatic recovery action.
 - `page.goto: net::ERR_CONNECTION_REFUSED`: make sure the dev server is still running in a persistent TTY session, recheck the port, and prefer `http://127.0.0.1:<port>`.
 - `electron.launch` hangs, times out, or exits immediately: verify the local `electron` dependency, confirm the `args` target, and make sure any renderer dev server is already running before launch.
 - `Identifier has already been declared`: reuse the existing top-level bindings, choose a new name, or wrap the code in `{ ... }`. Use `js_repl_reset` only when the kernel is genuinely stuck.
 - `browserContext.newPage: Protocol error (Target.createTarget): Not supported` while working with Electron: do not use `appWindow.context().newPage()` or `electronApp.context().newPage()` as a scratch page; use the Electron-specific screenshot normalization flow in the model-bound screenshots section.
 - `js_repl` timed out or reset: rerun the bootstrap cell and recreate the session with shorter, more focused cells.
-- Browser launch or network operations fail immediately: confirm the session was started with `--sandbox danger-full-access` and restart that way if needed.
+- Browser launch or network operations fail immediately: inspect the error and existing runtime/server availability within current permissions. Do not disable sandboxing, expand permissions, or install/bootstrap dependencies as recovery. If the required runtime is unavailable or unusable, use an appropriate already-supported alternative when available; otherwise report the limitation.

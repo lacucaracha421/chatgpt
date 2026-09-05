@@ -29,3 +29,34 @@ Lakomics를 구현하거나 수정할 때 다음 규칙을 적용합니다.
 - 같은 기능을 복사한 코드가 생기지 않았는지 검색합니다.
 - 공통 UI의 키보드 조작, 포커스, 간격과 색상이 기존 화면과 일치하는지 확인합니다.
 - 사용자 설정값을 이름이나 위치로 추측하지 않고 저장된 식별자와 자료형으로 처리하는지 확인합니다.
+
+## Review scope
+
+A review is read-only unless its task explicitly authorizes repairs. Follow this scope contract for delegated and inline reviews alike.
+
+1. Establish the requested scope: named commit(s), branch/PR, or the current task including working changes. Record the checkout, HEAD, task paths, and exclusions. For a task review, include relevant committed, staged, unstaged, and untracked changes, not just the latest commit.
+2. Select BASE from the user's explicit range, the recorded task-start commit, or the merge-base with the verified integration target. Do not use `HEAD~1` or the current branch's remote-tracking branch as a guessed task base. If BASE is unresolved, inspect the working changes and report the missing committed coverage; do not claim a complete task review.
+3. Inspect each applicable layer below, then the combined final tracked state. Staged/unstaged edits can cancel each other, so the combined diff alone is not enough. For an explicitly commit-only review, exclude working changes and say so rather than silently expanding the request.
+
+```text
+git status --short --untracked-files=all
+git diff BASE HEAD -- <task paths>          # committed task changes
+git diff --cached HEAD -- <task paths>      # staged changes
+git diff -- <task paths>                    # unstaged changes
+git diff BASE -- <task paths>               # combined tracked working state
+git ls-files --others --exclude-standard -- <task paths>
+```
+
+Replace BASE/HEAD with verified revisions and quote paths for the actual shell; use literal pathspecs for filenames containing wildcard characters. When processing filenames programmatically, use NUL-delimited Git output. Read relevant untracked files directly: ordinary `git diff` does not include their contents. Do not stage files just to review them or read ignored secrets/generated output without a concrete authorized need.
+
+4. Inspect surrounding code and contracts needed to evaluate the changes. Separate task-owned work from pre-existing or concurrent edits; do not silently attribute the whole dirty tree to one agent. Include renames/deletions and their dependent references.
+5. Supply the reviewer with the requirements, exact BASE/HEAD, included paths/layers, relevant untracked files, exclusions, and available evidence. Use a supported reviewer if available; otherwise perform the same review inline and disclose that it was not independent.
+6. At the end recheck HEAD/status and relevant file contents (or hashes) against the review snapshot. If they changed during review, revisit only the affected findings and evidence. A clean status alone does not prove an unchanged snapshot.
+
+Use read-only Git inspection such as `show`, `log`, and `diff`; no fetch, checkout, worktree creation, index changes, or test-generated writes in a strictly read-only review. Missing historical objects are a coverage limit, not permission to fetch or mutate.
+
+## Verification evidence
+
+`AGENTS.md` owns the risk-based verification policy. For each material claim, retain the command or manual check, scope, observed result, and the revision/files or inputs it covered. This may remain in the task conversation; no permanent test ledger is required.
+
+Reuse inspected evidence while relevant code, dependencies, configuration, fixtures, and runtime assumptions remain unchanged. If any of those invalidate it, repeat only the affected check. Never upgrade a focused test result to a full-suite claim, browser checks to native Tauri acceptance, or fixture success to a real deployment/data acceptance gate. State gaps without manufacturing new tests or silently writing to production data.

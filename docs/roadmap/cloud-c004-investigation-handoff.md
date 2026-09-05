@@ -1,5 +1,7 @@
 # CLOUD-004 조사 핸드오프 문서
 
+> Status: resolved historical investigation, retained in place. Section 9 records the final real-device confirmation. The original dated notes, intermediate hypotheses, and commands below are preserved as history, not current instructions or authorization to repeat rollout work. Use [the current backlog](lakomics-backlog.md) and [X Collector reference](../edge-extension.md) for current work.
+
 > 날짜: 2026-08-31
 > 브랜치: `fix/cloud-capture-video-server` (main `5c496d3`에서 분기, 진행 중)
 > 상태: **VPS 원인 확정 완료, 확장 진단 기능 구현 중간, 테스트/커밋 전**

@@ -1,6 +1,10 @@
 # Lakomics Mobile product direction
 
-Status: current product direction
+Status: current product direction with retained rollout history
+
+Current-status clarification (2026-09-05): the initial full-library backfill and browser browsing milestone are complete. `CLOUD-006` remains `PARTIAL` only for the separate queued-work pause/wait/restart/resume gate in the living backlog. Do not reseed or rerun the completed backfill without a separately approved recovery operation.
+
+The checkpoint below records the browser prototype, not a completed native Android client. Current production-client scope follows [the approved consumption UX](mobile-consumption-ux.md) and [the living backlog](../roadmap/lakomics-backlog.md). Older rollout proposals below, including a later `display.webp` derivative, are not authorization to implement them; measure the current original/thumbnail path before considering another derivative.
 
 ## Current implementation checkpoint (2026-09-03)
 
@@ -352,6 +356,8 @@ Exit condition:
 
 ### Phase 1 — full-library cloud foundation
 
+**Retained initial-rollout design, not a current execution checklist.** The initial backfill has been completed. The original choices and Phase 1A–1E sequence remain below to preserve their rationale and acceptance design; they do not instruct an agent to repeat preflight, seed the queue, or run another full backfill. Current remaining acceptance/status work is in `CLOUD-006` / `CLOUD-UI-001` in the backlog.
+
 This corresponds primarily to `CLOUD-006` and related cloud/performance backlog work.
 
 Confirmed rollout choices:
@@ -471,6 +477,8 @@ Exit condition:
 - after completion, local/server counts reconcile, representative image/video objects validate, interrupted work resumes without duplicate rows or unnecessary re-upload, and new local assets continue through incremental sync
 
 ### Phase 2 — Mobile viewing client
+
+**Scope note:** the browser prototype already has live Cloud Library browsing and Home/Revisit via the extension worker. The list below preserves the client direction; direct/native transport and the approved native consumption UX remain future work rather than reasons to rebuild completed browser features.
 
 Replace demo/bridge-dependent data with direct cloud-library data.
 

@@ -5,7 +5,7 @@ Use this template when dispatching a code reviewer subagent.
 **Purpose:** Review completed work against requirements and code quality standards before it cascades into more work.
 
 ```
-Subagent (general-purpose):
+Supported read-only reviewer / general-purpose subagent, or inline fallback:
   description: "Review code changes"
   prompt: |
     You are a Senior Code Reviewer with expertise in software architecture,
@@ -20,19 +20,29 @@ Subagent (general-purpose):
 
     [PLAN_OR_REQUIREMENTS]
 
-    ## Git Range to Review
+    ## Scope to Review
 
     **Base:** [BASE_SHA]
     **Head:** [HEAD_SHA]
+    **Task paths:** [TASK_PATHS]
+    **Working-tree scope:** [WORKTREE_SCOPE]
+    **Relevant untracked files:** [UNTRACKED_FILES]
+    **Exclusions / concurrent work:** [EXCLUSIONS]
+    **Available verification evidence:** [EVIDENCE]
 
-    ```bash
-    git diff --stat [BASE_SHA]..[HEAD_SHA]
-    git diff [BASE_SHA]..[HEAD_SHA]
-    ```
+    Read docs/agents/implementation.md, section "Review scope". Inspect the
+    committed, staged, unstaged, and relevant untracked layers specified above,
+    plus the combined tracked final state. Ordinary diff omits untracked file
+    contents. Do not guess a missing base or attribute unrelated work to this task.
 
     ## Read-Only Review
 
-    Your review is read-only on this checkout. Do not mutate the working tree, the index, HEAD, or branch state in any way. Use tools like `git show`, `git diff`, and `git log` to inspect history. If you need a working copy of a different revision, check it out into a separate temporary directory (e.g. `git worktree add /tmp/review-[SHA] [SHA]`) — never move HEAD on this checkout.
+    Do not mutate files, the index, HEAD, refs, or worktrees; do not fetch or run
+    write-producing checks. Inspect history with git show/log/diff, not checkout
+    or worktree creation. Report unavailable objects/evidence as a coverage gap.
+    Inspect supplied evidence and whether subsequent changes invalidate it;
+    do not automatically rerun the implementer's tests. Recheck HEAD/status and
+    relevant contents at the end, revisiting only changes affecting the review.
 
     ## You Do Not Dispatch Subagents
 
@@ -67,7 +77,7 @@ Subagent (general-purpose):
     - Tests verify real behavior, not mocks?
     - Edge cases covered?
     - Integration tests where they matter?
-    - All tests passing?
+    - Sufficient still-valid evidence for the reviewed scope, with missing checks disclosed?
 
     **Production readiness:**
     - Migration strategy if schema changed?
@@ -113,7 +123,8 @@ Subagent (general-purpose):
 
     ### Assessment
 
-    **Ready to merge?** [Yes | No | With fixes]
+    **Reviewed scope and coverage gaps:** [Exact layers/paths; unresolved base or evidence]
+    **Technical readiness:** [Ready | Not ready | With fixes; not authorization to merge]
 
     **Reasoning:** [1-2 sentence technical assessment]
 
@@ -138,7 +149,12 @@ Subagent (general-purpose):
 - `[DESCRIPTION]` — brief summary of what was built
 - `[PLAN_OR_REQUIREMENTS]` — what it should do (plan file path, task text, or requirements)
 - `[BASE_SHA]` — starting commit
-- `[HEAD_SHA]` — ending commit
+- `[HEAD_SHA]` — verified ending commit
+- `[TASK_PATHS]` — included task-owned paths and required dependencies
+- `[WORKTREE_SCOPE]` — staged/unstaged inclusion or explicit commit-only scope
+- `[UNTRACKED_FILES]` — relevant untracked files, or none
+- `[EXCLUSIONS]` — unrelated/pre-existing/concurrent work excluded
+- `[EVIDENCE]` — inspected results and remaining acceptance gates
 
 **Reviewer returns:** Strengths, Issues (Critical / Important / Minor), Recommendations, Assessment
 
@@ -175,7 +191,8 @@ Subagent (general-purpose):
 
 ### Assessment
 
-**Ready to merge: With fixes**
+**Reviewed scope and coverage gaps:** Named task range plus staged, unstaged, and relevant untracked changes; list any exclusions.
+**Technical readiness: With fixes** (not authorization to merge)
 
 **Reasoning:** Core implementation is solid with good architecture and tests. Important issues (help text, date validation) are easily fixed and don't affect core functionality.
 ```

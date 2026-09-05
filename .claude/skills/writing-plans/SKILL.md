@@ -1,22 +1,21 @@
 ---
 name: writing-plans
-description: Use when you have a spec or requirements for a multi-step task, before touching code
+description: Prepare a concrete plan when requested or when complex dependencies need an explicit handoff; do not re-plan a clear approved implementation.
 ---
 
 # Writing Plans
 
 ## Overview
 
-Write comprehensive implementation plans assuming the engineer has zero context for our codebase and questionable taste. Document everything they need to know: which files to touch for each task, code, testing, docs they might need to check, how to test it. Give them the whole plan as bite-sized tasks. DRY. YAGNI. TDD. Frequent commits.
+Provide the affected files, contracts, dependencies, realistic acceptance cases, and minimum relevant verification. Keep enough context for the next engineer without writing the implementation twice. Authorization and verification remain governed by `AGENTS.md`; planning does not imply TDD, commits, or additional approval gates.
 
 Assume they are a skilled developer, but know almost nothing about our toolset or problem domain. Assume they don't know good test design very well.
 
 **Announce at start:** "I'm using the writing-plans skill to create the implementation plan."
 
-**Context:** If working in an isolated worktree, it should have been created via the `superpowers:using-git-worktrees` skill at execution time.
+**Context:** Inspect the current checkout and ownership of existing changes. Reuse it unless isolation is needed and a separate worktree is authorized; no worktree skill is required.
 
-**Save plans to:** `docs/superpowers/plans/YYYY-MM-DD-<feature-name>.md`
-- (User preferences for plan location override this default)
+**Location:** Reuse the user-selected plan or current task context. Persist a new plan only when warranted by the request or an in-scope handoff, using `docs/README.md` for placement. Do not recreate retired plan directories.
 
 ## Scope Check
 
@@ -35,30 +34,20 @@ This structure informs the task decomposition. Each task should produce self-con
 
 ## Task Right-Sizing
 
-A task is the smallest unit that carries its own test cycle and is worth a
-fresh reviewer's gate. When drawing task boundaries: fold setup,
-configuration, scaffolding, and documentation steps into the task whose
-deliverable needs them; split only where a reviewer could meaningfully
-reject one task while approving its neighbor. Each task ends with an
-independently testable deliverable.
+A task is a coherent deliverable with clear ownership and acceptance criteria. Fold setup, configuration, and documentation into the deliverable they support. A task boundary does not itself require another test run or reviewer; reuse relevant evidence and review at meaningful risk boundaries.
 
 ## Bite-Sized Task Granularity
 
-**Each step is one action (2-5 minutes):**
-- "Write the failing test" - step
-- "Run it to make sure it fails" - step
-- "Implement the minimal code to make the test pass" - step
-- "Run the tests and make sure they pass" - step
-- "Commit" - step
+Use steps at the granularity needed to execute safely, not a fixed time or line budget. Include tests only for requested coverage or realistic uncovered regressions; exclude Git/deployment/provisioning actions unless separately authorized.
 
 ## Plan Document Header
 
-**Every plan MUST start with this header:**
+**Suggested header for a written plan:**
 
 ```markdown
 # [Feature Name] Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Execution:** Follow `AGENTS.md`. Use available delegation only when it adds value; otherwise execute inline. This plan grants no additional Git, deployment, provisioning, or production-data permissions.
 
 **Goal:** [One sentence describing what this builds]
 
@@ -66,8 +55,7 @@ independently testable deliverable.
 
 **Tech Stack:** [Key technologies/libraries]
 
-**Spec:** [path to the spec/design doc this plan implements — the plan
-argues from the spec, so the spec travels with it; executors read both]
+**Requirements:** [the approved task text or existing spec/design path; do not create a second document merely to fill this field]
 
 ## Global Constraints
 
@@ -80,6 +68,8 @@ include this section.]
 ```
 
 ## Task Structure
+
+The example is schematic. Use real package roots/scripts for the target repository; omit an inapplicable test step instead of manufacturing coverage or installing a runner.
 
 ````markdown
 ### Task N: [Component Name]
@@ -95,7 +85,7 @@ include this section.]
   and return types. A task's implementer sees only their own task; this
   block is how they learn the names and types neighboring tasks use.]
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Add a focused regression test, if existing coverage misses this risk**
 
 ```python
 def test_specific_behavior():
@@ -103,7 +93,7 @@ def test_specific_behavior():
     assert result == expected
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: For new test-first work, verify the expected failing behavior**
 
 Run: `pytest tests/path/test.py::test_name -v`
 Expected: FAIL with "function not defined"
@@ -115,17 +105,13 @@ def function(input):
     return expected
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 4: Verify the changed behavior with the selected targeted check**
 
 Run: `pytest tests/path/test.py::test_name -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Record the result and any remaining acceptance gate**
 
-```bash
-git add tests/path/test.py src/path/file.py
-git commit -m "feat: add specific feature"
-```
 ````
 
 ## No Placeholders
@@ -133,9 +119,9 @@ git commit -m "feat: add specific feature"
 Every step must contain the actual content an engineer needs. These are **plan failures** — never write them:
 - "TBD", "TODO", "implement later", "fill in details"
 - "Add appropriate error handling" / "add validation" / "handle edge cases"
-- "Write tests for the above" (without actual test code)
-- "Similar to Task N" (repeat the code — the engineer may be reading tasks out of order)
-- Steps that describe what to do without showing how (code blocks required for code steps)
+- "Write tests for the above" without naming the behavior, relevant test file, and expected result
+- Ambiguous cross-task references without an exact contract or source path
+- Instructions lacking enough detail to execute; include code only where it resolves real ambiguity
 - References to types, functions, or methods not defined in any task
 
 ## Self-Review
@@ -152,20 +138,4 @@ If you find issues, fix them inline. No need to re-review — just fix and move 
 
 ## Execution Handoff
 
-After saving the plan, offer execution choice:
-
-**"Plan complete and saved to `docs/superpowers/plans/<filename>.md`. Two execution options:**
-
-**1. Subagent-Driven (recommended)** - I dispatch a fresh subagent per task, review between tasks, fast iteration
-
-**2. Inline Execution** - Execute tasks in this session using executing-plans, batch execution with checkpoints
-
-**Which approach?"**
-
-**If Subagent-Driven chosen:**
-- **REQUIRED SUB-SKILL:** Use superpowers:subagent-driven-development
-- Fresh subagent per task + two-stage review
-
-**If Inline Execution chosen:**
-- **REQUIRED SUB-SKILL:** Use superpowers:executing-plans
-- Batch execution with checkpoints for review
+For plan-only requests, deliver the plan and stop. When implementation is already authorized, continue without asking the user to choose a process again. Use supported subagents for independent work when useful; otherwise execute inline with the available `executing-plans` method or the steps above. A missing orchestration skill is not a reason to install software or delay unblocked work.

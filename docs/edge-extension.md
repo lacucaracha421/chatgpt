@@ -7,12 +7,21 @@ This document describes the current bundled browser extension in `extension/`. I
 The extension has three relevant destinations:
 
 1. **VPS Capture Collector** — when Collector is enabled and the media type is supported, the extension sends an image/video capture request to the configured Lakomics Capture API. The VPS fetches the original media and stores the pending capture for later PC import.
-2. **Direct Lakomics PC ingestion** — when Collector is not enabled, the extension can send directly to the local Lakomics extension service (`127.0.0.1:32145`) or the configured Tailscale HTTPS endpoint.
+2. **Direct Lakomics PC ingestion** — the extension can send to the local service (`127.0.0.1:32145`) or configured Tailscale HTTPS endpoint, either in PC-only mode or as the eligible PC leg of automatic routing.
 3. **Browser download fallback** — used when the selected server path cannot complete, and also available as a legacy/manual download mode.
 
 Current Collector-supported media types are `image`, `video`, and `animated_gif` (the latter two are normalized to video for the Capture API).
 
-Important current behavior: **when Collector is enabled, it is tried before direct PC ingestion**. A Collector failure falls back to browser download rather than retrying the direct-PC path. The planned save-policy cleanup is tracked as `EXT-001` / `EXT-002` in `docs/roadmap/lakomics-backlog.md`.
+`saveMedia()` in `extension/src/background.js` owns routing. The current mode policy is:
+
+- `auto` (default): Cloud first for Collector-supported media, then eligible direct PC ingestion, then browser download after fallback-eligible failures. Unsupported Cloud media starts with the PC path. A local-only classification source cannot be used for direct PC ingestion.
+- `pc`: direct PC only; no implicit Cloud or browser-download fallback.
+- `cloud`: Cloud, with browser download on failure; no direct-PC attempt.
+- `download`: browser download only, intentionally bypassing server ingestion.
+
+Source-level edge case (not runtime-tested in this documentation repair): `tryAppDirect()` returns `null` for a local-only classification, and the current automatic/PC-only caller can return that value before reaching a download fallback. The mode list states routing policy, not a guarantee that every failure reaches Download. This repair leaves that application behavior unchanged.
+
+`EXT-001` / `EXT-002` are recorded as completed in the backlog. Do not reimplement an older PC-first policy from a historical guide or stale source comment; inspect the current routing conditions and tests.
 
 ## Classification and radial state
 
@@ -44,15 +53,15 @@ Current request limits are intentionally different by media type:
 - video Capture request: 5 minutes;
 - direct-PC ingestion: 120 seconds.
 
-After a Collector timeout/offline response, the extension performs a confirmation lookup for the same source/media/classification before deciding that the capture failed. Long remote video fetches can still race this confirmation path; the future asynchronous reservation/job design is tracked as `CLOUD-003`.
+After a Collector timeout/offline response, the extension performs a confirmation lookup for the same source/media/classification before fallback. `CLOUD-003` is recorded as obsolete/incident-only, not a scheduled async redesign. Reopen it only for a reproducible real failure; preserve bounded timeout and confirmation behavior.
 
-## Current Cloud inbound gap
+## Cloud inbound and Mobile library
 
-The VPS Capture path exists, but the desktop side is not yet fully integrated as a polished user-facing feature on current `main`.
+The desktop inbound consumer carries valid `classification_id` values through ingestion and uses typed results to refresh assets, membership/review counts, and video preparation. The backlog records `CLOUD-001`, `CLOUD-002`, and `VERIFY-001` as completed; durable status UX remains under `CLOUD-UI-001`. See [Cloud Capture](agents/cloud-capture.md).
 
-Known near-term work is tracked under `CLOUD-001`, `CLOUD-002`, and `CLOUD-UI-001` in the living backlog. In particular, the selected `classification_id` is accepted by Capture creation but is not yet carried through the current pending-response → desktop ingestion path, and successful inbound imports do not yet drive the same immediate UI refresh path as normal local ingestion.
+The mobile browser prototype reads the committed Cloud Library replica through worker-mediated `/v1/library/classifications`, `/v1/library/assets`, Revisit, and media-ticket APIs. It no longer uses pending Capture Inbox records as its library. Full-library replication/backfill has been performed; do not reseed it for verification. The separate queued-work pause/restart/resume gate remains under `CLOUD-006`.
 
-See `docs/agents/cloud-capture.md` for the current architecture and exact known gaps.
+The extension-mediated browser client is a behavioral reference, not the native Android production architecture. See [Mobile direction](agents/mobile.md), [approved consumption UX](agents/mobile-consumption-ux.md), and the [current backlog](roadmap/lakomics-backlog.md) for the remaining native work.
 
 ## Development install notes
 

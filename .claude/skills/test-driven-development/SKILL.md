@@ -1,6 +1,6 @@
 ---
 name: test-driven-development
-description: Use when implementing any feature or bugfix, before writing implementation code
+description: Use test-first development when requested or when a realistic behavioral regression lacks existing coverage; not a mandatory gate for every edit.
 ---
 
 # Test-Driven Development (TDD)
@@ -11,38 +11,11 @@ Write the test first. Watch it fail. Write minimal code to pass.
 
 **Core principle:** If you didn't watch the test fail, you don't know if it tests the right thing.
 
-**Violating the letter of the rules is violating the spirit of the rules.**
+## Applicability and preservation
 
-## When to Use
+`AGENTS.md` determines whether new tests are needed and which checks to run. Use this method for requested test-first work or a realistic regression not covered already. Documentation, visual-only changes, and existing adequate coverage do not need an exception request.
 
-**Always:**
-- New features
-- Bug fixes
-- Refactoring
-- Behavior changes
-
-**Exceptions (ask your human partner):**
-- Throwaway prototypes
-- Generated code
-- Configuration files
-
-Thinking "skip TDD just this once"? Stop. That's rationalization.
-
-## The Iron Law
-
-```
-NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST
-```
-
-Write code before the test? Delete it. Start over.
-
-**No exceptions:**
-- Don't keep it as "reference"
-- Don't "adapt" it while writing tests
-- Don't look at it
-- Delete means delete
-
-Implement fresh from tests. Period.
+For new behavior, prefer a focused failing test before the fix. Preserve already-written implementation and unrelated work; never delete code or reset/revert the shared checkout merely to manufacture a red-green cycle. For an existing fix, review the test against the original failure and honestly report whether red behavior was observed. A safe, authorized isolated fixture can be used when negative-control evidence is necessary.
 
 ## Red-Green-Refactor
 
@@ -112,7 +85,7 @@ Vague name, tests mock not code
 
 ### Verify RED - Watch It Fail
 
-**MANDATORY. Never skip.**
+For a new test-first change, establish the expected failure once; reuse that evidence while it remains valid.
 
 ```bash
 npm test path/to/test.test.ts
@@ -123,7 +96,7 @@ Confirm:
 - Failure message is expected
 - Fails because feature missing (not typos)
 
-**Test passes?** You're testing existing behavior. Fix test.
+**Test already passes?** Check whether the behavior is already implemented or the test misses the failure. Do not break working code just to obtain a red result.
 
 **Test errors?** Fix error, re-run until it fails correctly.
 
@@ -175,12 +148,12 @@ npm test path/to/test.test.ts
 
 Confirm:
 - Test passes
-- Other tests still pass
-- Output pristine (no errors, warnings)
+- Relevant existing coverage remains valid
+- No new relevant errors; unrelated pre-existing warnings/failures are not cleanup tasks
 
 **Test fails?** Fix code, not test.
 
-**Other tests fail?** Fix now.
+**Other tests fail?** Investigate failures caused by this change or blocking it. Preserve and report unrelated pre-existing failures without broadening the task.
 
 ### REFACTOR - Clean Up
 
@@ -209,39 +182,9 @@ When writing or changing any test, read [writing-good-tests.md](writing-good-tes
 - Keep test-only code in test utilities, out of production classes
 - Understand a dependency's side effects before mocking it
 
-## Common Rationalizations
+## Evidence checks
 
-| Excuse | Reality |
-|--------|---------|
-| "Too simple to test" | Simple code breaks. Test takes 30 seconds. |
-| "I'll test after" | Tests written after pass immediately — which proves nothing. They may test the wrong thing, test the implementation instead of the behavior, or miss the edge case you forgot. You never watched it fail, so you never proved it can catch the bug. Test-first forces that failure. |
-| "Tests after achieve same goals (spirit not ritual)" | Tests-after answer "what does this do?"; tests-first answer "what should this do?" Tests written after are biased by the code you already wrote — you verify the cases you remembered, not the ones you'd have discovered. Coverage without proof the tests work. |
-| "Already manually tested" | Manual testing is ad-hoc: no record of what you covered, no way to re-run it when the code changes, easy to forget cases under pressure. "Worked when I tried it" ≠ comprehensive. Automated tests run the same way every time. |
-| "Deleting X hours is wasteful" | Sunk cost fallacy — that time is already spent either way. The real choice: rewrite with TDD (high confidence) vs. keep it and bolt tests on after (low confidence, likely bugs). Keeping code you can't trust is the waste. |
-| "Keep as reference, write tests first" | You'll adapt it. That's testing after. Delete means delete. |
-| "Need to explore first" | Fine. Throw away exploration, start with TDD. |
-| "Test hard = design unclear" | Listen to test. Hard to test = hard to use. |
-| "TDD will slow me down" | TDD IS the pragmatic path: catches bugs before commit, prevents regressions, lets you refactor without fear. "Pragmatic" shortcuts mean debugging in production — slower, not faster. |
-| "Manual test faster" | Manual doesn't prove edge cases. You'll re-test every change. |
-| "Existing code has no tests" | You're improving it. Add tests for existing code. |
-
-## Red Flags - STOP and Start Over
-
-- Code before test
-- Test after implementation
-- Test passes immediately
-- Can't explain why test failed
-- Tests added "later"
-- Rationalizing "just this once"
-- "I already manually tested it"
-- "Tests after achieve the same purpose"
-- "It's about spirit not ritual"
-- "Keep as reference" or "adapt existing code"
-- "Already spent X hours, deleting is wasteful"
-- "TDD is dogmatic, I'm being pragmatic"
-- "This is different because..."
-
-**All of these mean: Delete code. Start over with TDD.**
+Do not mistake a passing test for proof that it catches the original regression. Check the assertion, failure condition, and production path. Reuse valid automated or native/manual evidence for the claims it actually supports; neither kind proves unrelated behavior. Missing historical red evidence is a limitation to report, not permission to discard working code.
 
 ## Example: Bug Fix
 
@@ -284,16 +227,16 @@ Extract validation for multiple fields if needed.
 
 Before marking work complete:
 
-- [ ] Every new function/method has a test
-- [ ] Watched each test fail before implementing
-- [ ] Each test failed for expected reason (feature missing, not typo)
+- [ ] Realistic changed behaviors have sufficient existing or new coverage
+- [ ] For new test-first work, the observed failure is the intended regression, not a setup error
+- [ ] Any unobserved red behavior is reported rather than invented
 - [ ] Wrote minimal code to pass each test
-- [ ] All tests pass
-- [ ] Output pristine (no errors, warnings)
+- [ ] Selected targeted checks pass or limitations are reported
+- [ ] No newly introduced relevant errors; unrelated warnings are left alone
 - [ ] Tests use real code (mocks only if unavoidable)
 - [ ] Edge cases and errors covered
 
-Can't check all boxes? You skipped TDD. Start over.
+Address material evidence gaps within scope. A checklist does not authorize extra tests, broader suites, or restarting completed work.
 
 ## When Stuck
 
@@ -306,15 +249,4 @@ Can't check all boxes? You skipped TDD. Start over.
 
 ## Debugging Integration
 
-Bug found? Write failing test reproducing it. Follow TDD cycle. Test proves fix and prevents regression.
-
-Never fix bugs without a test.
-
-## Final Rule
-
-```
-Production code → test exists and failed first
-Otherwise → not TDD
-```
-
-No exceptions without your human partner's permission.
+When a bug lacks realistic regression coverage, prefer a focused reproducer/test before the fix. Otherwise use the relevant existing check. Stop when evidence is sufficient under `AGENTS.md`; do not claim a red-green sequence that was not observed.

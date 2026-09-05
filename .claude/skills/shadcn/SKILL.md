@@ -1,23 +1,20 @@
 ---
 name: shadcn
-description: Manages shadcn components and projects — adding, searching, fixing, debugging, styling, and composing UI, including chat interfaces. Provides project context, component docs, and usage examples. Applies when working with shadcn/ui, component registries, presets, --preset codes, or any project with a components.json file. Also triggers for "shadcn init", "create an app with --preset", or "switch to --preset".
-user-invocable: false
-allowed-tools: Bash(npx shadcn@latest *), Bash(pnpm dlx shadcn@latest *), Bash(bunx --bun shadcn@latest *)
+description: "Use only for explicitly requested shadcn work in a confirmed shadcn target or an explicitly approved adoption. Ordinary Lakomics UI work uses its existing custom UI, not this recipe."
+disable-model-invocation: true
 ---
 
 # shadcn/ui
 
 A framework for building ui, components and design systems. Components are added as source code to the user's project via the CLI.
 
+**Applicability:** Lakomics currently uses its own shared React/Radix controls and CSS tokens. Inspect the actual target and explicit request before this recipe. Do not initialize shadcn, replace existing controls, or install packages simply because this skill is present. `AGENTS.md` and normal tool permissions remain authoritative.
+
 > **IMPORTANT:** Run all CLI commands using the project's package runner: `npx shadcn@latest`, `pnpm dlx shadcn@latest`, or `bunx --bun shadcn@latest` — based on the project's `packageManager`. Examples below use `npx shadcn@latest` but substitute the correct runner for the project.
 
 ## Current Project Context
 
-```json
-!`npx shadcn@latest info --json`
-```
-
-The JSON above contains the project config and installed components. Use `npx shadcn@latest docs <component>` to get documentation and example URLs for any component.
+Inspect the target package/config files first; loading this skill must not execute a command. In an authorized matching shadcn workflow, the explicit command `npx shadcn@latest info --json` can obtain project context. Do not run it merely to discover whether shadcn should be adopted.
 
 ## Principles
 
@@ -28,7 +25,7 @@ The JSON above contains the project config and installed components. Use `npx sh
 
 ## Critical Rules
 
-These rules are **always enforced**. Each links to a file with Incorrect/Correct code pairs.
+These rules apply only inside the selected, authorized shadcn workflow. They do not prescribe Lakomics UI architecture. Each links to Incorrect/Correct code pairs.
 
 ### Styling & Tailwind → [styling.md](./rules/styling.md)
 
@@ -148,7 +145,7 @@ These are the most common patterns that differentiate correct shadcn/ui code. Fo
 
 ## Key Fields
 
-The injected project context contains these key fields:
+Context explicitly obtained for a confirmed shadcn target may contain these fields:
 
 - **`aliases`** → use the actual alias prefix for imports (e.g. `@/`, `~/`), never hardcode.
 - **`isRSC`** → when `true`, components using `useState`, `useEffect`, event handlers, or browser APIs need `"use client"` at the top of the file. Always reference this field when advising on the directive.
@@ -176,7 +173,7 @@ npx shadcn@latest docs button dialog select
 
 ## Workflow
 
-1. **Get project context** — already injected above. Run `npx shadcn@latest info` again if you need to refresh.
+1. **Get project context** — inspect the actual target as described above; no context is injected by loading this file. Reuse valid context rather than rerunning commands.
 2. **Check installed components first** — before running `add`, always check the `components` list from project context or list the `resolvedPaths.ui` directory. Don't import components that haven't been added, and don't re-add ones already installed.
 3. **Find components** — `npx shadcn@latest search`.
 4. **Get docs and examples** — run `npx shadcn@latest docs <component>` to get URLs, then fetch them. Use `npx shadcn@latest view` to browse registry items you haven't installed. To preview changes to installed components, use `npx shadcn@latest add --diff`.

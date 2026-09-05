@@ -21,7 +21,7 @@ WHEN receiving code review feedback:
 3. VERIFY: Check against codebase reality
 4. EVALUATE: Technically sound for THIS codebase?
 5. RESPOND: Technical acknowledgment or reasoned pushback
-6. IMPLEMENT: One item at a time, test each
+6. IMPLEMENT: Only authorized, in-scope fixes; choose risk-based checks and reuse valid evidence under AGENTS.md
 ```
 
 ## Forbidden Responses
@@ -40,11 +40,12 @@ WHEN receiving code review feedback:
 ## Handling Unclear Feedback
 
 ```
-IF any item is unclear:
-  STOP - do not implement anything yet
-  ASK for clarification on unclear items
+IF an item is unclear:
+  Inspect the relevant code and dependencies first.
+  Pause only the affected work if a consequential decision remains unresolved.
+  Ask about that decision; continue independent, understood, authorized fixes.
 
-WHY: Items may be related. Partial understanding = wrong implementation.
+WHY: Related items may need a joint decision, but unrelated clear fixes need not stall.
 ```
 
 **Example:**
@@ -52,8 +53,8 @@ WHY: Items may be related. Partial understanding = wrong implementation.
 your human partner: "Fix 1-6"
 You understand 1,2,3,6. Unclear on 4,5.
 
-❌ WRONG: Implement 1,2,3,6 now, ask about 4,5 later
-✅ RIGHT: "I understand items 1,2,3,6. Need clarification on 4 and 5 before proceeding."
+✅ If independent: implement the understood authorized items and ask about 4/5.
+✅ If coupled: explain the dependency and pause only the affected subset.
 ```
 
 ## Source-Specific Handling
@@ -101,13 +102,13 @@ IF reviewer suggests "implementing properly":
 
 ```
 FOR multi-item feedback:
-  1. Clarify anything unclear FIRST
+  1. Resolve unclear dependencies; pause only the affected subset
   2. Then implement in this order:
      - Blocking issues (breaks, security)
      - Simple fixes (typos, imports)
      - Complex fixes (refactoring, logic)
-  3. Test each fix individually
-  4. Verify no regressions
+  3. Run the smallest risk-relevant check, reusing evidence when still valid
+  4. Report verification scope and remaining native/device gates
 ```
 
 ## When To Push Back
@@ -167,10 +168,10 @@ State the correction factually and move on.
 |---------|-----|
 | Performative agreement | State requirement or just act |
 | Blind implementation | Verify against codebase first |
-| Batch without testing | One at a time, test each |
+| Batch without evidence | Match checks to actual risk, not the number of review items |
 | Assuming reviewer is right | Check if breaks things |
 | Avoiding pushback | Technical correctness > comfort |
-| Partial implementation | Clarify all items first |
+| Blocking independent fixes on one unclear item | Resolve dependencies and continue unblocked authorized work |
 | Can't verify, proceed anyway | State limitation, ask for direction |
 
 ## Real Examples
@@ -197,9 +198,9 @@ Reviewer: "Implement proper metrics tracking with database, date filters, CSV ex
 ```
 your human partner: "Fix items 1-6"
 You understand 1,2,3,6. Unclear on 4,5.
-✅ "Understand 1,2,3,6. Need clarification on 4 and 5 before implementing."
+✅ "Items 1,2,3,6 are independent and clear. I will address those; items 4/5 need a decision before their implementation."
 ```
 
 ## GitHub Thread Replies
 
-When replying to inline review comments on GitHub, reply in the comment thread (`gh api repos/{owner}/{repo}/pulls/{pr}/comments/{id}/replies`), not as a top-level PR comment.
+Only when a GitHub reply is within the authorized task, reply in the comment thread (`gh api repos/{owner}/{repo}/pulls/{pr}/comments/{id}/replies`), not as a top-level PR comment.

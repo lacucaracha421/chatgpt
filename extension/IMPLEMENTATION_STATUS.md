@@ -1,8 +1,8 @@
 # Lakomics X Collector implementation status
 
-Current extension version: **2.0.0-alpha.15.38** (`2.0.0.1538`)
+Current extension version: read `version` / `version_name` in `manifest.json`; release names below are historical landmarks, not the current package version.
 
-This document describes the current implementation rather than serving as a complete patch-note archive. Older patch notes remain in the repository where available.
+This document retains implementation detail and version landmarks. [The X Collector reference](../docs/edge-extension.md) owns current routing and Cloud Library behavior; the living backlog owns pending work.
 
 ## Current architecture
 
@@ -52,32 +52,17 @@ Introduced around alpha.15.30.
 - The VPS downloads supported X media and stores originals in R2.
 - X animated GIF media follows the resolved MP4 path.
 - Collector URL and API token remain extension-local; the token is not exposed by normal settings reads.
-- If the collector is unreachable, the extension can fall back to the tablet/browser Download flow.
+- Fallback follows the selected save mode in the X Collector reference, including eligible direct PC ingestion after Cloud failure in automatic mode.
 - Captures stay pending until the PC inbound importer downloads them using a signed URL and acknowledges import.
 - Capture Inbox is Remote → PC and is separate from the app's outbound `cloud_sync_queue`.
 
 ## Lakomics Mobile prototype bridge
 
-Implemented across the alpha.15.34–15.37 work.
-
-- The extension recognizes the Lakomics GitHub Pages mobile prototype at `https://lacucaracha421.github.io/chatgpt/`.
-- `mobile-bridge.js` replaces the prototype classification tree with live Lakomics classification data when available.
-- Selected classification, expanded tree nodes, and tree scroll position persist locally on the mobile page.
-- Classification refresh is available from the mobile prototype UI.
-- `mobile-assets.js` connects the mobile asset grid to real Cloud Capture records.
-- Cloud captures are filtered by the selected classification subtree.
-- Images use live X thumbnails and can open their original media in the viewer.
-- Video captures can request a playback ticket and open in the mobile viewer.
-- Capture loading uses a short-lived cache and bounded grid rendering to avoid loading the entire remote set into the DOM at once.
-- The mobile page still contains demo-only areas; the classification tree and Cloud Capture asset view are the live-data portions currently implemented.
-- alpha.15.37 hardens the mobile bridge by validating the parent/page origin before accepting bridge traffic.
+Current browsing uses the committed Cloud Library replica, not Capture Inbox rows. Worker-mediated classification/assets/Revisit/media-ticket APIs support the browser client's Home, Recent, discovery, detail grids, and image/video viewing. See [current behavior](../docs/edge-extension.md#cloud-inbound-and-mobile-library).
 
 ## Current mobile limitations
 
-- The mobile prototype is a responsive web view, not a full native Android Lakomics application.
-- Full PC library replication is not yet implemented in the mobile UI.
-- Collection/showcase/home sections still contain prototype/demo data where no live bridge has been implemented.
-- Current live asset rendering is centered on Cloud Capture data rather than the complete local Lakomics asset database.
+The extension-mediated browser client is not the native Android shell or DocumentsProvider. Full initial replication/backfill is complete; the independent CLOUD-006 queued-work pause acceptance gate remains open. The approved native consumption UX and current task statuses live in the Mobile references and backlog, not in the historical release notes below.
 
 ## Version landmarks
 

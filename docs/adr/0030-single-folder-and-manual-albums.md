@@ -1,5 +1,7 @@
 # 일반 폴더는 단일 직접 소속, 앨범은 다중 수동 묶음으로 사용한다
 
+> Status: Accepted for single direct classification and manual Albums; clarified by [the membership decision](0013-classification-tree-single-direct-membership.md) and [ADR-0031](0031-collection-as-typed-work-model.md). The original future-Collection paragraph below records rollout intent, not a current TODO.
+
 ADR 0004와 ADR 0029 중 자산의 다중 분류 폴더 소속 및 폴더 드롭의 추가 동작을 대체한다.
 
 일반 폴더 드롭은 이동이며 자산의 직접 연결은 최대 하나다. 하위 폴더 자산이 상위 폴더에서도 보이는 것은 재귀 조회 결과이며 상위 연결을 중복 저장하지 않는다. 여러 수동 묶음이 필요한 경우 별도 앨범을 사용한다.

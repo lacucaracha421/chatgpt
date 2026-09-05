@@ -1,29 +1,21 @@
 ---
 name: finishing-a-development-branch
-description: Use when implementation is complete, all tests pass, and you need to decide how to integrate the work
+description: Integrate completed work only when the user requests that Git workflow; reuse valid verification evidence and preserve worktree ownership.
 ---
 
 # Finishing a Development Branch
 
 ## Overview
 
-**Core principle:** Verify tests → Detect environment → Present options → Execute choice → Clean up.
+**Core principle:** Check scope/authority and evidence → Detect environment → Resolve only an undecided integration choice → Execute the authorized action. Ordinary implementation completion keeps the branch/worktree as-is without a menu.
 
 **Announce at start:** "I'm using the finishing-a-development-branch skill to complete this work."
 
-## Step 1: Verify Tests
+## Step 1: Check authority and evidence
 
-Run the project's full test suite (`npm test` / `cargo test` / `pytest` / `go test ./...`).
+Do not commit, push, merge, create a PR, change branch/worktree state, or clean up merely because implementation is complete. If no integration action is authorized, report the current state and stop this skill.
 
-**If tests fail**, report the failures and stop — the menu comes after a green suite:
-
-```
-Tests failing (<N> failures). Must fix before completing:
-
-[Show failures]
-```
-
-**If tests pass:** continue to Step 2.
+Inspect the existing verification evidence under `AGENTS.md`. Reuse passing checks whose inputs are unchanged. Run only missing/invalidated checks justified by the integration risk; branch completion does not require the full test suite. Relevant failures block the affected integration; unrelated pre-existing failures are not cleanup work. Keep native acceptance gaps explicit.
 
 ## Step 2: Detect Environment
 
@@ -45,12 +37,11 @@ This determines which menu to show and how cleanup works:
 
 ## Step 3: Determine Base Branch
 
-The base branch is whatever this work forked from — usually named in the
-plan, the conversation, or the branch's upstream. If it is not already
-known, ask: "This branch split from <your best guess> - is that correct?"
-Confirm before merging: merging into the wrong base is expensive to undo.
+Determine the intended integration target from the task, PR, or verified local history. A feature branch tracking itself on a remote does not identify its base. Ask only if the actual target remains ambiguous; never guess the merge destination.
 
 ## Step 4: Present Options
+
+Use a menu only when the user requested an integration decision and has not already selected the action. Otherwise execute only the specifically authorized action or retain the work as-is. The examples below do not authorize Git writes.
 
 **Normal repo and named-branch worktree — present exactly these 3 options:**
 
@@ -92,19 +83,17 @@ cd "$MAIN_ROOT"
 
 # Merge first — verify success before removing anything
 git checkout <base-branch>
-git pull
-git merge <feature-branch>
+git merge <feature-branch>  # use the verified target state; no implicit pull
 
-# Verify tests on merged result
-<test command>
+# Only run a targeted check when the merge invalidates existing evidence
+<relevant check, if needed>
 ```
 
 If tests fail on the merged result: stop, leave the worktree and branch in
 place, and investigate — nothing has been pushed, so the merge is local
 and recoverable.
 
-Once the merged result is green: clean up the worktree (Step 6), then
-delete the branch:
+Once integration has sufficient valid evidence, perform Step 6/branch cleanup only if separately authorized and ownership is established. Otherwise retain the branch and worktree. An authorized local branch deletion uses:
 
 ```bash
 git branch -d <feature-branch>
@@ -158,7 +147,7 @@ git branch -D <feature-branch>
 
 ## Step 6: Cleanup Workspace
 
-**Runs for Option 1 and confirmed discards.** Options 2 and 3 always
+**Runs only for explicitly authorized cleanup after Option 1 or a confirmed discard.** Options 2 and 3 always
 preserve the worktree. Both callers have already changed directory to the
 main repo root — worktree removal must run from outside the worktree —
 and use the `GIT_DIR`/`GIT_COMMON`/`WORKTREE_PATH` values captured in
@@ -166,12 +155,11 @@ Step 2, from before that directory change.
 
 **If `GIT_DIR == GIT_COMMON`:** Normal repo, no worktree to clean up. Done.
 
-**If `WORKTREE_PATH` is under `.worktrees/` or `worktrees/`:** Superpowers
-created this worktree — we own cleanup:
+**Only with verified task ownership and cleanup authorization:** A `.worktrees/` or `worktrees/` path alone does not establish ownership. Confirm provenance and absence of unrelated/uncommitted work before removal:
 
 ```bash
 git worktree remove "$WORKTREE_PATH"
-git worktree prune  # Self-healing: clean up any stale registrations
+ # Do not prune unrelated registrations as part of task cleanup
 ```
 
 **If removal is refused** (`contains modified or untracked files`): the
@@ -204,7 +192,7 @@ place. If your platform provides a workspace-exit tool, use it.
 
 | Option | Merge | Push | Keep Worktree | Cleanup Branch |
 |--------|-------|------|---------------|----------------|
-| 1. Merge locally | yes | - | - | yes |
+| 1. Merge locally | if authorized | - | unless cleanup authorized | only if authorized |
 | 2. Create PR | - | yes | yes | - |
 | 3. Keep as-is | - | - | yes | - |
 | Discard (explicit request only) | - | - | - | yes (force) |
@@ -213,12 +201,12 @@ place. If your platform provides a workspace-exit tool, use it.
 
 | Excuse | Reality |
 |--------|---------|
-| "Tests passed earlier this session" | Run the suite on the tree you are about to integrate. A green run only proves the tree it ran on. |
+| "Tests passed earlier this session" | Reuse them if relevant inputs are unchanged; otherwise run only the invalidated, risk-relevant checks. |
 | "They obviously want it merged" | Integration is your human partner's decision. Present the menu and wait. |
 | "They seem done with this feature — I'll offer to discard it" | The menu is complete as written. Discard happens only when your human partner asks for it in so many words. |
 | "'Yeah, get rid of it' counts as confirmation" | Only the typed word `discard` authorizes deletion. |
 | "The PR is up, so the worktree is clutter now" | PR feedback gets fixed in that worktree. It stays until the work lands. |
-| "This other worktree looks stale — I'll clean it too" | Clean up only worktrees under `.worktrees/` or `worktrees/`. Everything else belongs to the host. |
+| "This other worktree looks stale — I'll clean it too" | Never infer ownership from a directory name; cleanup requires verified task ownership and explicit authorization. |
 | "Removal refused — `--force` is just finishing the cleanup" | The refusal means files exist only in that worktree. `--force` destroys them permanently. Show your human partner and ask. |
 | "The merged-result failure is probably flaky" | A failing merged result stops everything. Branch and worktree stay put while you investigate. |
 | "The base branch is obviously main" | Confirm the fork point or ask. Merging into the wrong base is expensive to undo. |
