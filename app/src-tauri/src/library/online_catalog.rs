@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use super::{
     catalog_provider::{CatalogProvider, CatalogWorkIdentity},
     catalog_query::{compile as compile_catalog_query, parse as parse_catalog_query},
-    catalog_visibility::VISIBLE_WORK_PREDICATE,
+    catalog_visibility::append_visibility_predicates,
     error::LibraryError,
     models::{
         CatalogScope, CatalogSearchPage, CatalogSearchQuery, CatalogSort, CatalogStatus,
@@ -21,6 +21,20 @@ use super::{
     },
     Library,
 };
+
+fn active_work_predicate(sort: CatalogSort) -> &'static str {
+    // Almost all imported works are active (97% in the measured catalog).
+    // This no-op hint avoids rank-index row lookups and a full latest sort.
+    // Views/hot sorts must retain the Expunged-leading rank-index lookup.
+    match sort {
+        CatalogSort::Latest => "likely(work.Expunged = 0)",
+        _ => "work.Expunged = 0",
+    }
+}
+
+#[cfg(test)]
+#[path = "catalog_performance_tests.rs"]
+mod performance_tests;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct ImportedSuggestion {
@@ -271,7 +285,7 @@ impl Library {
                AND bookmark.work_id = CAST(work.Id AS TEXT))",
             query.provider.as_str()
         );
-        let mut clauses = vec!["work.Expunged = 0".to_owned()];
+        let mut clauses = vec![active_work_predicate(query.sort).to_owned()];
         if query.scope == CatalogScope::Bookmarked {
             clauses.push(bookmark_exists.clone());
         }
@@ -287,7 +301,7 @@ impl Library {
             values.push(language.as_tag().to_owned().into());
         }
         if !query.reveal_blocked {
-            clauses.push(VISIBLE_WORK_PREDICATE.into());
+            append_visibility_predicates(&connection, &mut clauses)?;
         }
         if let Some(expression) = parse_catalog_query(&query.text)? {
             let compiled = compile_catalog_query(&expression);
@@ -823,7 +837,7 @@ mod tests {
         Library,
     };
 
-    const SCHEMA: &str = r#"
+    pub(super) const SCHEMA: &str = r#"
         CREATE TABLE Works (
             Id INTEGER PRIMARY KEY,
             Title TEXT NOT NULL DEFAULT '',
@@ -1032,7 +1046,12 @@ mod tests {
         (library_root, library)
     }
 
-    fn query(text: &str, sort: CatalogSort, page: u32, page_size: u32) -> CatalogSearchQuery {
+    pub(super) fn query(
+        text: &str,
+        sort: CatalogSort,
+        page: u32,
+        page_size: u32,
+    ) -> CatalogSearchQuery {
         CatalogSearchQuery {
             provider: CatalogProvider::KHentai,
             language: None,
@@ -1045,7 +1064,7 @@ mod tests {
         }
     }
 
-    fn khentai(work_id: u64) -> CatalogWorkIdentity {
+    pub(super) fn khentai(work_id: u64) -> CatalogWorkIdentity {
         CatalogWorkIdentity::khentai(work_id)
     }
 

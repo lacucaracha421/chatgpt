@@ -22,6 +22,7 @@ This directory contains only current or intentionally retained Lakomics document
 - `agents/claude-ollama.md` — repository-local Claude Code + Ollama Cloud launcher notes.
 - `agents/issue-tracker.md` — when to use the living backlog versus GitHub Issues.
 - `edge-extension.md` — current bundled X Collector behavior and save paths.
+- `performance/online-catalog-query-regression-20260905.md` — measured Online Catalog query plans, performance fix, and read-only benchmark reproduction.
 - `prototypes/lakomics-works-v6-reference.html` — retained Works visual/interaction reference only; not production code.
 
 ## Current execution plans

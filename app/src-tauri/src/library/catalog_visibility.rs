@@ -1,4 +1,4 @@
-use rusqlite::params;
+use rusqlite::{params, Connection};
 
 use super::{
     error::LibraryError,
@@ -6,11 +6,12 @@ use super::{
     Library,
 };
 
-pub(crate) const VISIBLE_WORK_PREDICATE: &str = "NOT EXISTS (
+const HIDDEN_CATEGORY_PREDICATE: &str = "NOT EXISTS (
         SELECT 1 FROM main.online_catalog_hidden_categories AS hidden_category
         WHERE hidden_category.category = work.Category
-    )
-    AND NOT EXISTS (
+    )";
+
+const BLOCKED_TAG_PREDICATE: &str = "NOT EXISTS (
         SELECT 1
         FROM catalog.Tags AS blocked_work_tag
         JOIN main.online_catalog_blocked_tags AS blocked_tag
@@ -18,6 +19,27 @@ pub(crate) const VISIBLE_WORK_PREDICATE: &str = "NOT EXISTS (
          AND blocked_tag.value = blocked_work_tag.Value
         WHERE blocked_work_tag.WorkId = work.Id
     )";
+
+pub(crate) fn append_visibility_predicates(
+    connection: &Connection,
+    clauses: &mut Vec<String>,
+) -> Result<(), LibraryError> {
+    // Read once on the search connection while Library's database lock is held.
+    // Empty policies otherwise still cause per-work probes into catalog.Tags.
+    let (has_hidden_categories, has_blocked_tags): (bool, bool) = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM main.online_catalog_hidden_categories),
+                EXISTS(SELECT 1 FROM main.online_catalog_blocked_tags)",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    if has_hidden_categories {
+        clauses.push(HIDDEN_CATEGORY_PREDICATE.into());
+    }
+    if has_blocked_tags {
+        clauses.push(BLOCKED_TAG_PREDICATE.into());
+    }
+    Ok(())
+}
 
 impl Library {
     pub fn catalog_visibility_policy(&self) -> Result<CatalogVisibilityPolicy, LibraryError> {
