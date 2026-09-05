@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke, Channel: class { onmessage = () => {}; } }));
 
 import { libraryGateway } from "./client";
 
@@ -263,4 +263,21 @@ describe("libraryGateway revisit contract", () => {
       feedback: { kind: "bundle", bundleId: "bundle-1" },
     });
   });
+});
+
+
+it("streams grouped count through Channel and sends edition requests", async () => {
+  const query = { provider: "kHentai" as const, text: "love", sort: "latest" as const, scope: "all" as const, page: 0, pageSize: 48 };
+  const onEvent = vi.fn();
+  await libraryGateway.searchCatalogGroups(query, onEvent);
+  const payload = invoke.mock.calls[invoke.mock.calls.length - 1][1];
+  expect(invoke).toHaveBeenLastCalledWith("search_catalog_groups", { query, onEvent: expect.any(Object) });
+  payload.onEvent.onmessage({ type: "count", totalCount: 0 });
+  expect(onEvent).toHaveBeenCalledWith({ type: "count", totalCount: 0 });
+  const editions = { provider: "kHentai" as const, groupId: "uuid", language: "korean" as const, revealBlocked: false, page: 0, pageSize: 40 };
+  await libraryGateway.getCatalogGroupEditions(editions);
+  expect(invoke).toHaveBeenLastCalledWith("get_catalog_group_editions", { query: editions });
+  const preference = { provider: "kHentai" as const, groupId: "uuid", selectedProviderWorkId: null };
+  await libraryGateway.setCatalogGroupRepresentative(preference);
+  expect(invoke).toHaveBeenLastCalledWith("set_catalog_group_representative", { query: preference });
 });

@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { open } from "@tauri-apps/plugin-dialog";
 import { LibraryProvider } from "../library/LibraryContext";
-import type { CatalogStatus, CatalogWork, CatalogWorkDetail, LibraryGateway, ResolvedGallery } from "../library/types";
+import type { CatalogGroupedSearchEvent, CatalogStatus, CatalogWork, CatalogWorkDetail, LibraryGateway, ResolvedGallery } from "../library/types";
 import { CatalogVisibilitySettings } from "../settings/CatalogVisibilitySettings";
 import { OnlineCatalogBrowser } from "./OnlineCatalogBrowser";
 
@@ -202,6 +202,7 @@ describe("OnlineCatalogBrowser", () => {
     expect(bookmark).toBeDisabled();
     fireEvent.click(bookmark);
     expect(gateway.setOnlineCatalogBookmark).toHaveBeenCalledTimes(1);
+    vi.mocked(gateway.searchOnlineCatalog).mockResolvedValue({ works: [{ ...work, bookmarked: true }], totalCount: 1, page: 0, pageSize: 48 });
     await act(async () => pending.resolve());
     expect(await screen.findByRole("button", { name: "오래된 제독 북마크 해제" })).toBeEnabled();
   });
@@ -219,7 +220,9 @@ describe("OnlineCatalogBrowser", () => {
     });
     renderBrowser(gateway);
 
-    await userEvent.click(await screen.findByRole("button", { name: "다른 공급자 작품 북마크" }));
+    await screen.findByRole("button", { name: "다른 공급자 작품 북마크" });
+    vi.mocked(gateway.searchOnlineCatalog).mockResolvedValue({ works: [work, { ...work, provider: "heliotrope", title: "다른 공급자 작품", bookmarked: true }], totalCount: 2, page: 0, pageSize: 48 });
+    await userEvent.click(screen.getByRole("button", { name: "다른 공급자 작품 북마크" }));
 
     expect(gateway.setOnlineCatalogBookmark).toHaveBeenCalledWith(
       { provider: "heliotrope", providerWorkId: "3" },
@@ -245,7 +248,7 @@ describe("OnlineCatalogBrowser", () => {
     const gateway = createGateway(true);
     vi.mocked(gateway.searchOnlineCatalog).mockImplementation(async (query) => ({
       works: query.scope === "bookmarked" ? [{ ...work, bookmarked: true }] : [work],
-      totalCount: query.scope === "bookmarked" ? 49 : 97,
+      totalCount: query.scope === "bookmarked" ? (vi.mocked(gateway.setOnlineCatalogBookmark).mock.calls.length ? 48 : 49) : 97,
       page: query.page,
       pageSize: 48,
     }));
@@ -537,7 +540,7 @@ function renderBrowser(gateway: LibraryGateway) {
 }
 
 function createGateway(installed: boolean): LibraryGateway {
-  return {
+  const gateway = {
     getOnlineCatalogStatus: vi.fn().mockResolvedValue({
       installed,
       workCount: installed ? 1 : 0,
@@ -593,6 +596,12 @@ function createGateway(installed: boolean): LibraryGateway {
     getTmdbConnection: vi.fn(),
     replaceTmdbMovieArtwork: vi.fn(),
   } as unknown as LibraryGateway;
+  gateway.searchCatalogGroups = vi.fn().mockImplementation(async (query, emit) => {
+    const result = await gateway.searchOnlineCatalog(query);
+    emit({ type: "page", page: { ...result, works: result.works.map((work) => ({ ...work, groupId: work.providerWorkId, versionCount: 1, hasBookmarkedVersion: work.bookmarked })) } });
+    emit({ type: "count", totalCount: result.totalCount });
+  });
+  return gateway;
 }
 
 function catalogStatusWithJapanese(initialComplete: boolean): CatalogStatus {
@@ -641,3 +650,108 @@ function deferred<T>() {
   const promise = new Promise<T>((next, fail) => { resolve = next; reject = fail; });
   return { promise, resolve, reject };
 }
+
+
+it("shows grouped cards before exact count and rejects stale counts and failures", async () => {
+  const gateway = createGateway(true);
+  const events: Array<(event: CatalogGroupedSearchEvent) => void> = [];
+  const old = deferred<void>();
+  gateway.searchCatalogGroups = vi.fn().mockImplementation((_query, onEvent) => {
+    events.push(onEvent);
+    onEvent({ type: "page", page: { works: [{ ...work, groupId: "uuid", versionCount: 104, hasBookmarkedVersion: true }], page: 0, pageSize: 48 } });
+    return events.length === 1 ? old.promise : Promise.resolve();
+  });
+  renderBrowser(gateway);
+  expect(await screen.findByRole("button", { name: `${work.title} 상세 보기` })).toBeVisible();
+  expect(screen.getByText("결과 수 계산 중…")).toBeVisible();
+  expect(screen.getByRole("button", { name: "다음 결과" })).toBeDisabled();
+  await userEvent.selectOptions(screen.getByRole("combobox", { name: "카탈로그 언어" }), "japanese");
+  await act(async () => { events[1]({ type: "count", totalCount: 0 }); events[0]({ type: "count", totalCount: 999 }); old.reject(new Error("old failure")); });
+  expect(screen.getByText("0개 결과")).toBeVisible();
+  expect(screen.queryByText("999개 결과")).not.toBeInTheDocument();
+  expect(screen.queryByText("old failure")).not.toBeInTheDocument();
+});
+
+
+it("loads editions only on request in bounded pages and persists manual and automatic selection", async () => {
+  const gateway = createGateway(true);
+  gateway.searchCatalogGroups = vi.fn().mockImplementation(async (_query, emit) => {
+    emit({ type: "page", page: { works: [{ ...work, groupId: "uuid", versionCount: 104, hasBookmarkedVersion: true }], page: 0, pageSize: 48 } });
+    emit({ type: "count", totalCount: 1 });
+  });
+  let selectedProviderWorkId: string | null = null;
+  gateway.getCatalogGroupEditions = vi.fn().mockImplementation(async (query) => ({ groupId: "uuid", works: [{ ...work, providerWorkId: String(query.page + 10), title: `판본 ${query.page}` }], totalCount: 104, page: query.page, pageSize: 40, selectedProviderWorkId }));
+  gateway.setCatalogGroupRepresentative = vi.fn().mockImplementation(async (query) => { selectedProviderWorkId = query.selectedProviderWorkId; });
+  renderBrowser(gateway);
+  await screen.findByRole("button", { name: `${work.title} 상세 보기` });
+  expect(gateway.getCatalogGroupEditions).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole("button", { name: "104개 판본" }));
+  expect(await screen.findByRole("button", { name: "판본 0 열기" })).toBeVisible();
+  expect(gateway.getCatalogGroupEditions).toHaveBeenLastCalledWith({ provider: "kHentai", groupId: "uuid", language: "korean", revealBlocked: false, page: 0, pageSize: 40 });
+  await userEvent.click(screen.getByRole("button", { name: "판본 더 보기" }));
+  expect(await screen.findByRole("button", { name: "판본 1 열기" })).toBeVisible();
+  expect(gateway.getCatalogGroupEditions).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, pageSize: 40 }));
+  await userEvent.click(screen.getByRole("button", { name: "판본 더 보기" }));
+  expect(await screen.findByRole("button", { name: "판본 2 열기" })).toBeVisible();
+  expect(gateway.getCatalogGroupEditions).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, pageSize: 40 }));
+  expect(screen.queryByRole("button", { name: "판본 더 보기" })).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "판본 0 대표로 지정" }));
+  expect(gateway.setCatalogGroupRepresentative).toHaveBeenLastCalledWith({ provider: "kHentai", groupId: "uuid", selectedProviderWorkId: "10" });
+  await userEvent.click(screen.getByRole("button", { name: "닫기" }));
+  await userEvent.click(screen.getByRole("button", { name: "104개 판본" }));
+  expect(await screen.findByRole("button", { name: "판본 0 대표로 지정" })).toHaveAttribute("aria-pressed", "true");
+  await userEvent.click(screen.getByRole("button", { name: "자동 선택" }));
+  expect(gateway.setCatalogGroupRepresentative).toHaveBeenLastCalledWith({ provider: "kHentai", groupId: "uuid", selectedProviderWorkId: null });
+  expect(gateway.searchCatalogGroups).toHaveBeenCalledTimes(3);
+  await userEvent.click(screen.getByRole("button", { name: "판본 0 열기" }));
+  expect(gateway.getOnlineCatalogWorkDetail).toHaveBeenLastCalledWith({ provider: "kHentai", providerWorkId: "10" });
+});
+
+
+it("invalidates pending counts on bookmark and reveal changes and retains cards on count error", async () => {
+  const gateway = createGateway(true);
+  const events: Array<(event: CatalogGroupedSearchEvent) => void> = [];
+  const bookmark = deferred<void>();
+  gateway.setOnlineCatalogBookmark = vi.fn().mockReturnValue(bookmark.promise);
+  gateway.searchCatalogGroups = vi.fn().mockImplementation(async (_query, emit) => {
+    events.push(emit);
+    emit({ type: "page", page: { works: [{ ...work, groupId: "uuid", versionCount: 2, hasBookmarkedVersion: false }], page: 0, pageSize: 48 } });
+  });
+  const view = renderBrowser(gateway);
+  await userEvent.click(await screen.findByRole("button", { name: `${work.title} 북마크` }));
+  act(() => events[0]({ type: "count", totalCount: 100 }));
+  expect(screen.queryByText("100개 결과")).not.toBeInTheDocument();
+  await act(async () => bookmark.resolve());
+  act(() => events[1]({ type: "count", totalCount: 200 }));
+  expect(screen.getByText("200개 결과")).toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: "숨긴 결과 표시" }));
+  expect(screen.queryByText("200개 결과")).not.toBeInTheDocument();
+  act(() => { events[1]({ type: "count", totalCount: 999 }); events[2]({ type: "countError", message: "snapshot changed" }); });
+  expect(screen.getByRole("button", { name: `${work.title} 상세 보기` })).toBeVisible();
+  expect(screen.getByText("결과 수 확인 실패")).toBeVisible();
+  expect(screen.getByRole("button", { name: "다음 결과" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "이전 결과" })).toBeDisabled();
+  view.unmount();
+  act(() => events[2]({ type: "count", totalCount: 999 }));
+  expect(screen.queryByText("999개 결과")).not.toBeInTheDocument();
+});
+
+
+it("refreshes the grouped card when a representative save finishes after closing editions", async () => {
+  const gateway = createGateway(true);
+  const save = deferred<void>();
+  let title = work.title;
+  gateway.searchCatalogGroups = vi.fn().mockImplementation(async (_query, emit) => {
+    emit({ type: "page", page: { works: [{ ...work, title, groupId: "uuid", versionCount: 2, hasBookmarkedVersion: false }], page: 0, pageSize: 48 } });
+    emit({ type: "count", totalCount: 1 });
+  });
+  gateway.getCatalogGroupEditions = vi.fn().mockResolvedValue({ groupId: "uuid", works: [{ ...work, title: "새 대표 판본" }], totalCount: 1, page: 0, pageSize: 40, selectedProviderWorkId: null });
+  gateway.setCatalogGroupRepresentative = vi.fn().mockReturnValue(save.promise);
+  renderBrowser(gateway);
+  await userEvent.click(await screen.findByRole("button", { name: "2개 판본" }));
+  await userEvent.click(await screen.findByRole("button", { name: "새 대표 판본 대표로 지정" }));
+  await userEvent.click(screen.getByRole("button", { name: "닫기" }));
+  title = "새 대표 판본";
+  await act(async () => save.resolve());
+  expect(await screen.findByRole("button", { name: "새 대표 판본 상세 보기" })).toBeVisible();
+});

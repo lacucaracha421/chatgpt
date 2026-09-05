@@ -5,8 +5,8 @@ Starting revision: `2a3328736679683944e1229e17b0c89c33e05b55`, branch
 [stopped gate](catalog-lineage-performance-gate.md); it does not repeat or replace
 that historical investigation.
 
-Current status: **COUNT correctness/performance gate passed; page/API/UI acceptance
-is still in progress. CATALOG-007A is not DONE.** No production database migration,
+Current status: **COUNT correctness/performance gate passed; grouped API/UI is
+implemented, with native application acceptance still outstanding. CATALOG-007A is not DONE.** No production database migration,
 source revision initialization, ingestion, catalog replacement, deployment, or
 Heliotrope integration has been performed during this continuation.
 
@@ -156,9 +156,10 @@ Production EXPLAIN confirmed candidate enumeration and no outer rank scan.
 ## Reproduction and remaining acceptance
 
 ```powershell
+Set-Location C:\chatgpt\app # selects the repository-pinned Rust toolchain
 $env:LAKOMICS_CATALOG_COUNT_GATE_SOURCE = '<explicit read-only library root>'
-cargo test --manifest-path app/src-tauri/Cargo.toml --lib catalog_count_integrated_real_gate -- --ignored --nocapture
-cargo test --manifest-path app/src-tauri/Cargo.toml --lib catalog_count_fresh_generation_gate -- --ignored --nocapture
+cargo test --manifest-path src-tauri/Cargo.toml --lib catalog_count_integrated_real_gate -- --ignored --nocapture
+cargo test --manifest-path src-tauri/Cargo.toml --lib catalog_count_fresh_generation_gate -- --ignored --nocapture
 ```
 
 Run measurements sequentially with no concurrent compiler/benchmark. The
@@ -172,11 +173,70 @@ Machine evidence is JSON under TEMP. One expanded page experiment exited after
 dependencies disappeared from the shared workspace. Its incomplete observations
 are not reported as a passing test. Subsequent focused boundary/probe runs passed.
 
-Page-first delivery, grouped API/types, lazy editions, manual control, frontend
-regressions, final checks and actual application acceptance are not yet complete.
-CATALOG-007B and Heliotrope remain untouched.
+## Page-first delivery and editions
+
+`search_catalog_groups` uses one invocation-local Tauri channel. It emits a
+hydrated grouped page before executing exact COUNT, then emits `count` or
+`countError`. Admission is bounded to four workers before spawning. The read-only
+transaction pins source revision, membership generation, policy, bookmarks and
+the single Hot cutoff; the normal Library DB mutex is not held during COUNT.
+
+When a prepared scalar is pending, the page is retained, the old reader is
+released, and the request waits up to 30 seconds for already scheduled eager
+preparation. A new lookup must match source/generation and saved policy; reveal
+ignores policy identity. Failure or context drift produces a count error, never
+a stale or raw total. Searches do not initiate preparation themselves.
+
+The browser now uses grouped results, renders on the page event and clears the
+previous exact total when a new request starts. A request sequence rejects stale
+page/count/error callbacks. Count-dependent pagination waits for an exact total.
+Bookmark mutations invalidate pending callbacks and refresh the current request.
+
+Cards use provider/public-group UUID keys and display eligible edition counts.
+Editions load only on demand, 40 at a time (server cap 100), with visibility and
+language enforced in SQL. Manual selection persists through existing durable
+anchor preferences; automatic selection writes null. Historical handles resolve
+through their anchor after merge/split. Closing the dialog during a successful
+save still refreshes the parent card. Provider-work bookmarks and reading
+progress retain their existing identities.
+
+Native verification is blocked: the Computer Use `node_repl` initialization
+failed twice with `failed to write kernel assets` / Windows path error 3. No
+native UI action or app launch was performed. Real Tauri rendering/interaction,
+IPC perceived latency, and an operational library opening remain unverified.
+An isolated TEMP library/profile should be used for that check; opening the
+active production library would require separate authorization because startup
+can initialize revision and migrate/prepare derived state.
+
+CATALOG-007B and Heliotrope remain untouched; no push, merge or deployment occurred.
 
 Backend checkpoint: the pinned-toolchain catalog suite passed **166 tests**, with
 8 opt-in benchmarks ignored; the focused backup suite passed **14**. Separate
 opt-in gates passed for the 136-case matrix, fresh generation plus four historical
 query cases, focused page boundaries/probes, and final production page SQL.
+
+Final frontend verification: **41 tests passed** across client, browser and detail
+regressions; `npx tsc --noEmit` and `npm run build` returned exit 0. The migration
+suite passed **26 tests**, including v34/v35 preservation. The expanded catalog
+run returned exit 1 with **175 passed / 1 failed / 9 ignored**: the new 104-edition
+fixture incorrectly formed a branching lineage, which the conservative analyzer
+correctly rejected. The fixture was changed to a verified linear chain; production
+grouping rules were not loosened. Its focused rerun is recorded below.
+
+Corrected final API rerun: **10 passed / 0 failed**, exit 0 (7.50 seconds).
+The broader 175 passing cases were not repeated after this test-fixture-only
+correction. Scoped Rust formatting and `git diff --check` passed. Independent
+integration review found no remaining actionable blocker after the dialog-save
+refresh fix; native acceptance remains open.
+
+Earlier focused commits:
+
+- `ece61cf52a074da2761d3b3c76250b92092c7faa`: one-time source revision.
+- `37a8f3e6db4b3d2030647d81045583e06b102a20`: six exact counts and lifecycle.
+- `3df3d6eb3892bb2d1617020200ab0353e8999cdc`: restore/read-connection coordination.
+- `eed72c4bc3989367a423bf8cf2bcfa6485c88afb`: exact routes and sparse bookmark page.
+
+Remote branch was checked directly and remained at
+`2a3328736679683944e1229e17b0c89c33e05b55`; continuation commits are local.
+Unrelated `app/phosphor.html`, `app/src/prototypes/`, and
+`docs/roadmap/lakomics-backlog.md` changes were preserved and excluded from commits.

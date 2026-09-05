@@ -569,6 +569,74 @@ impl Library {
     }
 }
 
+/// Bounded metadata hydration shared by grouped cards and lazy editions.
+/// Caller supplies the fixed snapshot and presentation order.
+pub(super) fn load_catalog_works(
+    connection: &Connection,
+    work_ids: &[i64],
+) -> Result<Vec<CatalogWork>, LibraryError> {
+    if work_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    if work_ids.len() > 100 {
+        return Err(LibraryError::InvalidOnlineCatalog);
+    }
+    let placeholders = std::iter::repeat_n("?", work_ids.len())
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!(
+        "SELECT work.Id,work.Title,work.TitleJpn,work.FileCount,work.Views,
+        COALESCE(work.Posted,0),work.Thumb,EXISTS(SELECT 1 FROM online_catalog_bookmarks b
+        WHERE b.provider='kHentai' AND b.work_id=CAST(work.Id AS TEXT))
+        FROM catalog.Works work WHERE work.Id IN ({placeholders})"
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement
+        .query_map(params_from_iter(work_ids.iter()), |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, bool>(7)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    let (summary_tags, _) = bulk_summary_tags(connection, work_ids)?;
+    let mut by_id = BTreeMap::new();
+    for (id, title, title_jpn, file_count, views, posted, thumbnail_url, bookmarked) in rows {
+        let tags = summary_tags.get(&id);
+        by_id.insert(
+            id,
+            CatalogWork {
+                identity: CatalogWorkIdentity::khentai(id as u64),
+                title,
+                title_jpn,
+                artists: tags.map(|tags| tags.artists.clone()).unwrap_or_default(),
+                series: tags.map(|tags| tags.series.clone()).unwrap_or_default(),
+                thumbnail_url: validated_thumbnail_url(thumbnail_url).map(|_| {
+                    format!("http://lakomics.localhost/remote-catalog-thumbnail/kHentai/{id}")
+                }),
+                bookmarked,
+                file_count: file_count as u32,
+                views: views as u64,
+                posted: super::catalog_provider::normalize_legacy_timestamp(posted),
+            },
+        );
+    }
+    work_ids
+        .iter()
+        .map(|id| {
+            by_id
+                .remove(id)
+                .ok_or(LibraryError::OnlineCatalogWorkNotFound)
+        })
+        .collect()
+}
+
 #[derive(Default)]
 struct SummaryTags {
     artists: Vec<String>,

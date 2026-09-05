@@ -64,6 +64,8 @@ import type {
   LegacyPackageMigrationPlan,
   LegacyPackageMigrationReport,
   CatalogSearchPage,
+  CatalogGroupedSearchEvent,
+  CatalogGroupEditionsPage,
   CatalogSearchQuery,
   CatalogBlockedTag,
   CatalogVisibilityPolicy,
@@ -106,6 +108,13 @@ export const libraryGateway: LibraryGateway = {
     invoke<CatalogVisibilityPolicy>("set_catalog_category_hidden", { category, hidden }),
   setCatalogTagBlocked: (tag: CatalogBlockedTag, blocked) =>
     invoke<CatalogVisibilityPolicy>("set_catalog_tag_blocked", { tag, blocked }),
+  searchCatalogGroups: (query, onEvent) => {
+    const channel = new Channel<CatalogGroupedSearchEvent>();
+    channel.onmessage = onEvent;
+    return invoke<void>("search_catalog_groups", { query, onEvent: channel });
+  },
+  getCatalogGroupEditions: (query) => invoke<CatalogGroupEditionsPage>("get_catalog_group_editions", { query }),
+  setCatalogGroupRepresentative: (query) => invoke<void>("set_catalog_group_representative", { query }),
   searchOnlineCatalog: (query: CatalogSearchQuery) =>
     invoke<CatalogSearchPage>("search_online_catalog", { query }),
   suggestOnlineCatalog: (text, limit) =>

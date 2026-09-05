@@ -193,6 +193,23 @@ export type CatalogWork = CatalogWorkIdentity & {
   posted: number;
 };
 
+export type CatalogGroupedWork = CatalogWork & {
+  groupId: string;
+  versionCount: number;
+  hasBookmarkedVersion: boolean;
+};
+export type CatalogGroupedPage = { works: CatalogGroupedWork[]; page: number; pageSize: number };
+export type CatalogGroupedSearchEvent =
+  | { type: "page"; page: CatalogGroupedPage }
+  | { type: "count"; totalCount: number }
+  | { type: "countError"; message: string };
+export type CatalogGroupEditionsQuery = {
+  provider: CatalogProvider; groupId: string; language?: CatalogLanguage;
+  revealBlocked: boolean; page: number; pageSize: number;
+};
+export type CatalogGroupEditionsPage = CatalogSearchPage & { groupId: string; selectedProviderWorkId: string | null };
+export type CatalogGroupRepresentativeQuery = { provider: CatalogProvider; groupId: string; selectedProviderWorkId: string | null };
+
 export type CatalogTagGroup = { namespace: string; values: string[] };
 
 export type CatalogWorkDetail = CatalogWorkIdentity & {
@@ -906,6 +923,9 @@ export interface LibraryGateway {
   getCatalogVisibilityPolicy(): Promise<CatalogVisibilityPolicy>;
   setCatalogCategoryHidden(category: number, hidden: boolean): Promise<CatalogVisibilityPolicy>;
   setCatalogTagBlocked(tag: CatalogBlockedTag, blocked: boolean): Promise<CatalogVisibilityPolicy>;
+  searchCatalogGroups(query: CatalogSearchQuery, onEvent: (event: CatalogGroupedSearchEvent) => void): Promise<void>;
+  getCatalogGroupEditions(query: CatalogGroupEditionsQuery): Promise<CatalogGroupEditionsPage>;
+  setCatalogGroupRepresentative(query: CatalogGroupRepresentativeQuery): Promise<void>;
   searchOnlineCatalog(query: CatalogSearchQuery): Promise<CatalogSearchPage>;
   suggestOnlineCatalog(text: string, limit: number): Promise<CatalogSuggestion[]>;
   getOnlineCatalogWorkDetail(identity: CatalogWorkIdentity): Promise<CatalogWorkDetail>;

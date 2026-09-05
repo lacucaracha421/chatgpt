@@ -1,0 +1,9 @@
+.catalog-editions { display: flex; flex-direction: column; gap: var(--space-2); min-height: 0; }
+.catalog-editions__toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.catalog-editions__list { overflow-y: auto; max-height: 60vh; }
+.catalog-editions__row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: var(--space-2); align-items: center; padding: var(--space-1) 0; border-bottom: var(--border-width) solid var(--color-border); }
+.catalog-editions__row > :first-child { justify-content: flex-start; overflow: hidden; text-overflow: ellipsis; }
+.catalog-editions__row > span, .online-catalog-card__saved-edition { color: var(--color-text-muted); font-size: var(--text-xs); }
+.online-catalog-card__editions { margin: var(--space-1) var(--space-2); padding: var(--space-1); border: 0; background: transparent; color: var(--color-text-muted); cursor: pointer; }
+.online-catalog-card__editions:hover { color: var(--color-text); }
+.online-catalog-card__saved-edition { display: block; padding: 0 var(--space-2) var(--space-1); }

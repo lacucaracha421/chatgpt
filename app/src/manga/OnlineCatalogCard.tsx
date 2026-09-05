@@ -1,18 +1,20 @@
 import { StarIcon as StarOutlineIcon } from "@heroicons/react/24/outline";
 import { StarIcon as StarSolidIcon } from "@heroicons/react/24/solid";
-import type { CatalogWork, CatalogWorkIdentity } from "../library/types";
+import type { CatalogGroupedWork, CatalogWork, CatalogWorkIdentity } from "../library/types";
+import { Button } from "../shared/ui/Button";
 import { catalogIdentityOf } from "./catalogIdentity";
 import { CatalogThumbnail } from "./CatalogThumbnail";
 
 type OnlineCatalogCardProps = {
-  work: CatalogWork;
+  work: CatalogGroupedWork;
+  onEditions: (work: CatalogGroupedWork) => void;
   opening: boolean;
   bookmarkPending: boolean;
   onOpen: (work: CatalogWork) => void;
   onBookmark: (identity: CatalogWorkIdentity, bookmarked: boolean) => void;
 };
 
-export function OnlineCatalogCard({ work, opening, bookmarkPending, onOpen, onBookmark }: OnlineCatalogCardProps) {
+export function OnlineCatalogCard({ work, opening, bookmarkPending, onOpen, onBookmark, onEditions }: OnlineCatalogCardProps) {
   const BookmarkIcon = work.bookmarked ? StarSolidIcon : StarOutlineIcon;
   const byline = [...work.artists, ...work.series].join(" · ") || "작가 정보 없음";
 
@@ -36,6 +38,8 @@ export function OnlineCatalogCard({ work, opening, bookmarkPending, onOpen, onBo
         <small>조회 {work.views.toLocaleString()} · {work.fileCount}페이지</small>
       </span>
     </button>
+    <Button size="sm" variant="ghost" className="online-catalog-card__editions" onClick={() => onEditions(work)}>{work.versionCount}개 판본</Button>
+    {work.hasBookmarkedVersion && !work.bookmarked && <span className="online-catalog-card__saved-edition">북마크된 판본 있음</span>}
     <button
       type="button"
       className="online-catalog-card__bookmark"

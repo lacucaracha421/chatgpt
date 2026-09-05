@@ -12,6 +12,7 @@ mod catalog_count_gate_tests;
 mod catalog_count_fixture_tests;
 mod catalog_preparation;
 mod catalog_group_identity;
+mod catalog_group_api;
 mod catalog_group_query;
 mod catalog_groups;
 mod catalog_lineage;

@@ -1578,6 +1578,73 @@ pub async fn search_online_catalog(
         .map_err(CommandError::from)
 }
 
+// Admission happens before spawning, so rapid navigation cannot build an
+// unbounded queue of long exact COUNT workers.
+static CATALOG_SEARCH_WORKERS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+struct CatalogSearchPermit;
+impl CatalogSearchPermit {
+    fn acquire() -> Result<Self, CommandError> {
+        use std::sync::atomic::Ordering;
+        CATALOG_SEARCH_WORKERS
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+                (n < 4).then_some(n + 1)
+            })
+            .map(|_| Self)
+            .map_err(|_| CommandError::from(LibraryError::InvalidOnlineCatalog))
+    }
+}
+impl Drop for CatalogSearchPermit {
+    fn drop(&mut self) {
+        CATALOG_SEARCH_WORKERS.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+    }
+}
+
+#[tauri::command]
+pub async fn search_catalog_groups(
+    query: CatalogSearchQuery,
+    on_event: tauri::ipc::Channel<crate::library::models::CatalogGroupedSearchEvent>,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    let permit = CatalogSearchPermit::acquire()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _permit = permit;
+        library.search_catalog_groups(query, |event| {
+            on_event
+                .send(event)
+                .map_err(|_| LibraryError::InvalidOnlineCatalog)
+        })
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn get_catalog_group_editions(
+    query: crate::library::models::CatalogGroupEditionsQuery,
+    state: State<'_, AppState>,
+) -> Result<crate::library::models::CatalogGroupEditionsPage, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.get_catalog_group_editions(query))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn set_catalog_group_representative(
+    query: crate::library::models::CatalogGroupRepresentativeQuery,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.set_catalog_group_representative(query))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
 #[tauri::command]
 pub async fn suggest_online_catalog(
     text: String,

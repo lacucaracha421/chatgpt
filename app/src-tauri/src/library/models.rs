@@ -1530,3 +1530,70 @@ impl RevisitFeedback {
         chrono::Utc::now().to_rfc3339()
     }
 }
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogGroupedWork {
+    #[serde(flatten)]
+    pub work: CatalogWork,
+    pub group_id: String,
+    pub version_count: u64,
+    pub has_bookmarked_version: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogGroupedPage {
+    pub works: Vec<CatalogGroupedWork>,
+    pub page: u32,
+    pub page_size: u32,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum CatalogGroupedSearchEvent {
+    Page { page: CatalogGroupedPage },
+    Count { total_count: u64 },
+    CountError { message: String },
+}
+
+fn default_editions_page_size() -> u32 {
+    40
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogGroupEditionsQuery {
+    pub provider: super::catalog_provider::CatalogProvider,
+    pub group_id: String,
+    #[serde(default)]
+    pub language: Option<CatalogLanguage>,
+    #[serde(default)]
+    pub reveal_blocked: bool,
+    #[serde(default)]
+    pub page: u32,
+    #[serde(default = "default_editions_page_size")]
+    pub page_size: u32,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogGroupEditionsPage {
+    pub group_id: String,
+    pub works: Vec<CatalogWork>,
+    pub total_count: u64,
+    pub page: u32,
+    pub page_size: u32,
+    pub selected_provider_work_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogGroupRepresentativeQuery {
+    pub provider: super::catalog_provider::CatalogProvider,
+    pub group_id: String,
+    pub selected_provider_work_id: Option<String>,
+}
