@@ -250,16 +250,21 @@ Completed evidence (2026-09-05):
 ## CATALOG-007A — Strong-lineage duplicate groups
 
 Parent item: legacy `CATALOG-007`
-Status: `BLOCKED` — grouped COUNT performance gate; backend foundation only.
+Status: `DONE`
 
-Durable handles/preferences, conservative lineage validation and source publication
-revision tracking are implemented. The materializer/grouped query remains unexposed;
-API/UI work was not started. On 131,210 real works, default grouped UUID COUNT was
-about 1,008ms versus 522ms with saved policy, and 434ms versus 14ms with reveal.
-An internal numeric covering-index experiment still added 132–166ms for default
-queries. Review an exact default-count preparation/cache lifecycle before continuing;
-do not mark this item DONE or activate grouped search with the current COUNT path.
-See [measured performance gate and remaining implementation](../operations/catalog-lineage-performance-gate.md).
+Strong-lineage grouping is now end-to-end. Conservative provider-safe lineage
+materialization, durable group handles/preferences, source-revision tracking, exact
+group cardinality/pagination, six eagerly prepared default counts, bounded exact
+COUNT routing, streamed grouped API delivery, lazy editions, and manual/automatic
+representative selection are implemented. The earlier grouped COUNT blocker was
+closed with real-data measurements and the final native Tauri acceptance passed on
+an isolated library/profile: 105 fixture works produced exactly two cards (one
+singleton plus one 104-edition lineage group), editions loaded 40 → 80 → 104, and a
+manual representative persisted across dialog reopen before automatic selection was
+restored. The active production library was not opened or migrated for this check.
+See [final COUNT and native acceptance evidence](../operations/catalog-hybrid-count-gate.md);
+the earlier [stopped performance gate](../operations/catalog-lineage-performance-gate.md)
+is retained as historical evidence.
 
 Goal:
 

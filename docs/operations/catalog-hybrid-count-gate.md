@@ -5,10 +5,10 @@ Starting revision: `2a3328736679683944e1229e17b0c89c33e05b55`, branch
 [stopped gate](catalog-lineage-performance-gate.md); it does not repeat or replace
 that historical investigation.
 
-Current status: **COUNT correctness/performance gate passed; grouped API/UI is
-implemented, with native application acceptance still outstanding. CATALOG-007A is not DONE.** No production database migration,
-source revision initialization, ingestion, catalog replacement, deployment, or
-Heliotrope integration has been performed during this continuation.
+Current status: **DONE. COUNT correctness/performance, grouped API/UI, and native
+Tauri application acceptance all passed for CATALOG-007A.** No production database
+migration, source revision initialization, ingestion, catalog replacement, deployment,
+or Heliotrope integration was performed during this continuation.
 
 ## Revision and six persisted scalars
 
@@ -200,13 +200,28 @@ through their anchor after merge/split. Closing the dialog during a successful
 save still refreshes the parent card. Provider-work bookmarks and reading
 progress retain their existing identities.
 
-Native verification is blocked: the Computer Use `node_repl` initialization
-failed twice with `failed to write kernel assets` / Windows path error 3. No
-native UI action or app launch was performed. Real Tauri rendering/interaction,
-IPC perceived latency, and an operational library opening remain unverified.
-An isolated TEMP library/profile should be used for that check; opening the
-active production library would require separate authorization because startup
-can initialize revision and migrate/prepare derived state.
+## Native application acceptance — 2026-09-05
+
+The earlier Computer Use `node_repl` path remained unusable after two
+`failed to write kernel assets` / Windows path error 3 failures. Final acceptance
+used the actual debug Tauri executable instead, with an isolated APPDATA,
+LOCALAPPDATA, WebView2 profile and Lakomics library under a disposable repository
+fixture. WebView2 remote debugging attached directly to the native Lakomics page;
+no browser mock or production library was used.
+
+The fixture contained 105 Korean catalog works: one singleton plus a verified
+linear 104-work lineage. Native Manga catalog rendering returned exactly **2**
+grouped results. The lineage card exposed **104 editions**, which loaded lazily as
+**40 → 80 → 104** rows. Selecting `Native Edition 050` as the representative
+updated the parent grouped card, persisted after closing/reopening the editions
+dialog, and `Automatic selection` restored `Native Edition 104`. A full app
+restart reopened the isolated library and reproduced the same two grouped cards.
+
+The minimal catalog fixture intentionally did not reproduce the unrelated VCK
+update/import schema, so catalog updater status is outside this acceptance. The
+CATALOG-007A grouped search/count/edition/representative paths all completed over
+real Tauri IPC. The active production library was never opened, migrated, or
+modified during this check.
 
 CATALOG-007B and Heliotrope remain untouched; no push, merge or deployment occurred.
 
@@ -227,7 +242,7 @@ Corrected final API rerun: **10 passed / 0 failed**, exit 0 (7.50 seconds).
 The broader 175 passing cases were not repeated after this test-fixture-only
 correction. Scoped Rust formatting and `git diff --check` passed. Independent
 integration review found no remaining actionable blocker after the dialog-save
-refresh fix; native acceptance remains open.
+refresh fix; the isolated native acceptance above closes the final outstanding gate.
 
 Earlier focused commits:
 
@@ -236,7 +251,7 @@ Earlier focused commits:
 - `3df3d6eb3892bb2d1617020200ab0353e8999cdc`: restore/read-connection coordination.
 - `eed72c4bc3989367a423bf8cf2bcfa6485c88afb`: exact routes and sparse bookmark page.
 
-Remote branch was checked directly and remained at
-`2a3328736679683944e1229e17b0c89c33e05b55`; continuation commits are local.
-Unrelated `app/phosphor.html`, `app/src/prototypes/`, and
-`docs/roadmap/lakomics-backlog.md` changes were preserved and excluded from commits.
+At the 2026-09-05 native-acceptance closure pass, local and remote branch heads
+started synchronized at `8cee4ec`. The isolated acceptance and documentation closure
+were performed locally; no deployment or production-data operation was part of the
+check. Unrelated worktree files remain outside this acceptance scope.
