@@ -26,6 +26,7 @@ This directory contains only current or intentionally retained Lakomics document
 - `operations/pc-migration.md` — backup, recovery, credential portability, and PC migration procedures; production writes require separate approval.
 - `research/reference-projects.md` — optional external-project research, not adopted implementation or a second backlog.
 - `performance/online-catalog-query-regression-20260905.md` — measured Online Catalog query plans, performance fix, and read-only benchmark reproduction.
+- `operations/catalog-hybrid-count-gate.md` — CATALOG-007A exact prepared/routed COUNT evidence and current acceptance boundary; preserves the earlier stopped gate as history.
 - `prototypes/lakomics-works-v6-reference.html` — retained Works visual/interaction reference only; not production code.
 
 ## Current execution plans

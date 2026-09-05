@@ -1,5 +1,9 @@
 # CATALOG-007A performance gate
 
+Continuation: [hybrid COUNT implementation and measurements](catalog-hybrid-count-gate.md)
+records the subsequent backend gate. The original measurements and stopping point
+below are retained as historical evidence.
+
 Status: **STOPPED before API/UI integration; not DONE.**
 
 The reviewed lineage design is safe on the observed data, but exact grouped COUNT

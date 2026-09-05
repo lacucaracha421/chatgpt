@@ -6,6 +6,10 @@ mod backup;
 pub mod book_migration;
 pub(crate) mod catalog_checkpoint;
 mod catalog_counts;
+#[cfg(test)]
+mod catalog_count_gate_tests;
+#[cfg(test)]
+mod catalog_count_fixture_tests;
 mod catalog_preparation;
 mod catalog_group_identity;
 mod catalog_group_query;
