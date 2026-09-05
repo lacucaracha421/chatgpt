@@ -433,6 +433,12 @@ Goal:
 - Android secure token storage;
 - classifications/assets/Revisit/media-ticket API parity sufficient for read-only browsing;
 - reusable cache/auth/request-cancellation foundation for consumption UI and DocumentsProvider.
+- read-only access to server-stored pending Capture previews so a mobile client can show newly saved media while the desktop is offline;
+- keep pending Capture identity/state separate from canonical Cloud Library Asset identity/state;
+- reuse the existing authenticated pending-list/download boundary or a minimal mobile-safe adapter rather than exposing R2 object keys or credentials;
+- define deterministic reconciliation after desktop processing so a pending Capture can disappear or be replaced when the canonical library result becomes observable.
+
+Pending Capture visibility is a presentation/preview feature, not early admission into the canonical library. The local Lakomics library remains authoritative. The server must not promote a Capture into a canonical Asset merely so mobile can display it.
 
 Do not change the stable browser X Collector merely to support the native client.
 
@@ -467,7 +473,19 @@ State continuity:
 - keep the previous useful grid until the new view’s first page commits;
 - ignore stale/superseded requests;
 - restore route/view, density, viewer sequence, and scroll position when returning;
+- on foreground/visibility return, Home/Recent re-entry, or explicit refresh, silently refresh the first useful page instead of requiring a full page reload;
+- reconcile changed server state in place so newly replicated canonical Assets appear without blanking the current grid or losing the visual anchor;
 - portrait classification navigation is a drawer/sheet; landscape may use a persistent sidebar.
+
+Pending Capture preview:
+
+- Home/Recent may compose server-stored pending Captures with canonical Cloud Library results so media saved while the PC is offline becomes visible promptly;
+- pending items must carry an explicit lightweight state such as `처리 대기` and must never count as canonical Asset/classification membership;
+- ordering may use the server-received/capture time, but canonical Asset ordering remains authoritative once desktop ingestion finishes;
+- after desktop processing, `Added` should converge to the canonical Asset without showing both copies;
+- confirmed `ExactDuplicate` must not remain as a second pending tile once the existing canonical Asset is known;
+- `ReviewPending` remains non-canonical and should be surfaced as review-needed or kept out of the ordinary canonical Recent stream until resolved;
+- mobile does not independently reimplement the desktop duplicate/similarity decision; before desktop processing, a pending Capture may still later prove to be a duplicate.
 
 Viewer requirements:
 
