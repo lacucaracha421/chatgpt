@@ -1,5 +1,10 @@
 # Lakomics Design Language
 
+## Approved PC visual amendment - 2026-09-06
+
+`docs/agents/approved-design-direction.md` records the user-approved Lab 06 final direction and Codex handoff. Its scoped rules take precedence over older visual prescriptions below: date-grouped asset masonry with artist/HH:mm captions, ivory single selection versus neutral-gray multi-select, line icons, closed seam-side game cases, media-specific physicality, and hero/cover/fallback composition.
+Game-case depth/contact shadow and unified projection are limited collectible exceptions, not permission to decorate ordinary Asset/UI surfaces. Unspecified typography, shared UI, product boundaries, safety rules, and existing behavior remain unchanged. The approval is visual intent, not implementation or production-verification evidence.
+
 Lakomics는 장시간 사용하는 고밀도 Windows 데스크톱 미디어 라이브러리다.
 SaaS 대시보드, 랜딩 페이지, 모바일 앱, shadcn 데모처럼 보이면 안 된다.
 

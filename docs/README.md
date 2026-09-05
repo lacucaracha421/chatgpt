@@ -12,6 +12,8 @@ This directory contains only current or intentionally retained Lakomics document
 
 ## Current reference documents
 
+- `agents/approved-design-direction.md` - user-approved PC Lab 06 final design direction, scoped visual supersession, reference values, and Codex handoff; not implemented merely by this documentation.
+
 - `agents/domain.md` — how to interpret repository documentation and resolve conflicts.
 - `agents/implementation.md` — implementation/shared-UI rules, complete review scope, and verification-evidence reuse.
 - `agents/cloud-capture.md` — current Cloud Capture / inbound-outbound sync architecture and known gaps.

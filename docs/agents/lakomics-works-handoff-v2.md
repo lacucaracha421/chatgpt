@@ -1,7 +1,8 @@
 # Lakomics — Works / Collection Reference
 
 > Status: current product/architecture/UX reference. Updated 2026-08-31. This is not a backlog.
-> Visual reference: `docs/prototypes/lakomics-works-v6-reference.html`
+> Retained product/interaction reference: `docs/prototypes/lakomics-works-v6-reference.html`.
+> Latest approved PC visual rules: `docs/agents/approved-design-direction.md` (2026-09-06). This scoped Lab 06 final approval supersedes overlapping older visual examples, not the domain/ownership contracts below. Works v6 and Lab 06 final are different artifacts.
 
 ## Product boundary
 

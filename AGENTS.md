@@ -29,7 +29,7 @@
 Before changing code, use `docs/README.md` as the document map.
 
 - Product language and domain boundaries: `CONTEXT.md`
-- Visual/UI rules: `DESIGN.md`
+- Visual/UI rules: `DESIGN.md`; approved PC design direction and Codex handoff: `docs/agents/approved-design-direction.md`
 - Architecture decisions: `docs/adr/README.md` and relevant Accepted ADRs
 - Implementation rules, review scope, and verification evidence: `docs/agents/implementation.md`
 - Living bugs, priorities, and future work: `docs/roadmap/lakomics-backlog.md`
@@ -88,4 +88,4 @@ Historical dated implementation plans/specs were removed from the current tree a
 
 ## Works / Collection
 
-Before substantial Works/Collection changes, read `docs/agents/lakomics-works-handoff-v2.md` and use `docs/prototypes/lakomics-works-v6-reference.html` for visual/interaction intent. Do not copy prototype code directly; preserve the intent through the current React structure, shared UI, and design tokens.
+Before substantial Works/Collection changes, read `docs/agents/lakomics-works-handoff-v2.md` and use `docs/prototypes/lakomics-works-v6-reference.html` for retained product/interaction intent. For the latest approved PC visual details, read `docs/agents/approved-design-direction.md`; its scoped Lab 06 final decisions supersede older visual examples, not domain or safety rules. The old Works v6 prototype is not the Lab 06 final artifact. Do not copy prototype code directly; preserve the intent through the current React structure, shared UI, and design tokens.
