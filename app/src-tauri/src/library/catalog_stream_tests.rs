@@ -361,10 +361,19 @@ fn korean_ingestion_and_late_targeted_recovery_retain_japanese_membership() {
         3,
     )
     .unwrap();
-    let checkpoint_before = snapshot(&path);
+    let checkpoint_before: Vec<_> = snapshot(&path)
+        .into_iter()
+        .filter(|(key, _)| key != "lakomics.catalog.contentRevision")
+        .collect();
     // Recovery selected the missing ID before Japanese ingestion committed it.
     assert!(super::import_targeted_work(&path, &page(&[70]), 70).unwrap());
-    assert_eq!(snapshot(&path), checkpoint_before);
+    assert_eq!(
+        snapshot(&path)
+            .into_iter()
+            .filter(|(key, _)| key != "lakomics.catalog.contentRevision")
+            .collect::<Vec<_>>(),
+        checkpoint_before
+    );
     let connection = Connection::open(&path).unwrap();
     for id in [2000, 70] {
         assert_eq!(connection.query_row("SELECT COUNT(*) FROM Tags WHERE WorkId=?1 AND Namespace='language' AND Value IN ('korean','japanese')",[id],|row|row.get::<_,i64>(0)).unwrap(),2);
@@ -434,7 +443,10 @@ fn japanese_real_source_two_page_canary() {
     let global_max = super::highest_stored_id(&path).unwrap();
     checkpoints::reset_japanese(&path).unwrap();
     checkpoints::start(&path, KO, AT).unwrap();
-    let korean_before = snapshot(&path);
+    let korean_before: Vec<_> = snapshot(&path)
+        .into_iter()
+        .filter(|(key, _)| key != "lakomics.catalog.contentRevision")
+        .collect();
     let client = VpsCatalogSource::new(&base_url).unwrap();
     let mut found_below_max = false;
     let mut previous_cursor = None;
@@ -486,7 +498,8 @@ fn japanese_real_source_two_page_canary() {
         assert_eq!(
             snapshot(&path)
                 .into_iter()
-                .filter(|(key, _)| !key.contains(".japanese."))
+                .filter(|(key, _)| !key.contains(".japanese.")
+                    && key != "lakomics.catalog.contentRevision")
                 .collect::<Vec<_>>(),
             korean_before
         );

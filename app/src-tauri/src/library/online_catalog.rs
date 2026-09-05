@@ -189,6 +189,11 @@ impl Library {
             &imported_tags_path,
             &serde_json::to_vec(&tags).map_err(|_| LibraryError::InvalidOnlineCatalog)?,
         )?;
+        // A replacement is a new source even if it came from an older copy
+        // with the same revision key. Only the disposable staging DB is changed.
+        let staged = Connection::open(&imported_db_path)?;
+        super::catalog_revision::mark_catalog_changed(&staged)?;
+        drop(staged);
         replace_catalog_files(&[
             (
                 imported_suggestions_path.as_path(),

@@ -526,6 +526,7 @@ fn write_catalog_work(
     crawled_at: i64,
 ) -> Result<(), LibraryError> {
     let work_id = work.id as i64;
+    let before = super::catalog_revision::read_work_content(transaction, work_id)?;
     // Shared by stream ingestion and targeted recovery: a late recovery
     // response must not erase the other stream's canonical membership.
     let language_tags = {
@@ -575,6 +576,9 @@ fn write_catalog_work(
             "INSERT OR IGNORE INTO Tags(WorkId,Namespace,Value) VALUES(?1,'language',?2)",
             params![work_id, value],
         )?;
+    }
+    if before != super::catalog_revision::read_work_content(transaction, work_id)? {
+        super::catalog_revision::mark_catalog_changed(transaction)?;
     }
     Ok(())
 }
@@ -634,6 +638,10 @@ fn load_checkpoint(path: &Path) -> Result<Option<UpdateCheckpoint>, LibraryError
 #[cfg(test)]
 #[path = "catalog_stream_tests.rs"]
 mod stream_tests;
+
+#[cfg(test)]
+#[path = "catalog_revision_tests.rs"]
+mod revision_tests;
 
 #[cfg(test)]
 mod tests {
