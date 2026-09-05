@@ -1461,8 +1461,12 @@ pub async fn refresh_manga_catalog_recovery_remote(
         .await
         .map_err(CommandError::from)?;
         let path = catalog_path.clone();
+        let import_library = library.clone();
         let found = tauri::async_runtime::spawn_blocking(move || {
-            catalog_update::import_targeted_work(&path, &body, id)
+            let previous = import_library.catalog_source_revision().ok().flatten();
+            let result = catalog_update::import_targeted_work(&path, &body, id);
+            let _ = import_library.catalog_source_published(previous.as_deref());
+            result
         })
         .await
         .map_err(|_| background_task_error())?

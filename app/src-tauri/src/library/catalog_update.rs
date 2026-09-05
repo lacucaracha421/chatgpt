@@ -141,8 +141,12 @@ pub(crate) async fn execute_catalog_update(
     if language == CatalogLanguage::Korean {
         library.record_catalog_update_attempt(&chrono::Utc::now().to_rfc3339())?;
     }
+    let previous_revision = library.catalog_source_revision().ok().flatten();
     let outcome =
         run_catalog_update(&library, transport, app, vps_base_url, language, max_pages).await;
+    // An interrupted stream may already have committed content. Derived count
+    // preparation must not change the ingestion result or checkpoint semantics.
+    let _ = library.catalog_source_published(previous_revision.as_deref());
     match outcome {
         Ok(mut result) => {
             library.rebuild_catalog_suggestions()?;

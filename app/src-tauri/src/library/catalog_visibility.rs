@@ -96,6 +96,7 @@ impl Library {
             )?;
         }
         drop(connection);
+        self.request_catalog_preparation();
         self.catalog_visibility_policy()
     }
 
@@ -124,6 +125,7 @@ impl Library {
             )?;
         }
         drop(connection);
+        self.request_catalog_preparation();
         self.catalog_visibility_policy()
     }
 }

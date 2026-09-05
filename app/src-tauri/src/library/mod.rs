@@ -5,6 +5,8 @@ mod asset_metadata;
 mod backup;
 pub mod book_migration;
 pub(crate) mod catalog_checkpoint;
+mod catalog_counts;
+mod catalog_preparation;
 mod catalog_group_identity;
 mod catalog_group_query;
 mod catalog_groups;
@@ -59,7 +61,7 @@ use std::{
     fs::{self, File},
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{Arc, Mutex, MutexGuard, RwLock},
 };
 
 use error::LibraryError;
@@ -130,6 +132,9 @@ pub struct Library {
     volume_import_lock: Arc<Mutex<()>>,
     // ponytail: one database handle at a time; use a read/write lock if reads become a bottleneck.
     database_lock: Arc<Mutex<()>>,
+    // Long catalog reads share this lock; only file replacement is exclusive.
+    catalog_file_lock: Arc<RwLock<()>>,
+    catalog_preparation: Arc<Mutex<catalog_preparation::PreparationState>>,
     catalog_lookup_cache: Arc<Mutex<Option<online_catalog::CatalogLookupCache>>>,
     collection_artwork_scan_cache: Arc<Mutex<HashMap<String, u128>>>,
     igdb_token_cache: igdb::IgdbTokenCache,
@@ -186,6 +191,8 @@ impl Library {
             manga_scan_lock: Arc::new(Mutex::new(())),
             volume_import_lock: Arc::new(Mutex::new(())),
             database_lock: Arc::new(Mutex::new(())),
+            catalog_file_lock: Arc::default(),
+            catalog_preparation: Arc::default(),
             catalog_lookup_cache: Arc::new(Mutex::new(None)),
             collection_artwork_scan_cache: Arc::new(Mutex::new(HashMap::new())),
             igdb_token_cache: igdb::IgdbTokenCache::default(),
@@ -200,6 +207,7 @@ impl Library {
         library.suspend_running_cloud_backfill_on_open()?;
         library.cleanup_unreferenced_work_artwork()?;
         library.start_work_artwork_thumbnail_backfill();
+        library.request_catalog_preparation();
         Ok(library)
     }
 

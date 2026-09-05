@@ -198,6 +198,7 @@ impl Library {
         let staged = Connection::open(&imported_db_path)?;
         super::catalog_revision::mark_catalog_changed(&staged)?;
         drop(staged);
+        let file_guard = self.catalog_file_lock.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         replace_catalog_files(&[
             (
                 imported_suggestions_path.as_path(),
@@ -212,6 +213,7 @@ impl Library {
                 catalogs.join("kdata.db").as_path(),
             ),
         ])?;
+        drop(file_guard);
         *self
             .catalog_lookup_cache
             .lock()
@@ -221,6 +223,7 @@ impl Library {
             "UPDATE online_catalog_settings SET installed_at = ?1 WHERE singleton = 1",
             [chrono::Utc::now().to_rfc3339()],
         )?;
+        self.request_catalog_preparation();
         self.catalog_status()
     }
 

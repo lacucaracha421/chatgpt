@@ -8,7 +8,7 @@ use super::{
 };
 
 const PROVIDER: &str = "kHentai";
-const ALGORITHM: &str = "strong-lineage-v1";
+pub(super) const ALGORITHM: &str = "strong-lineage-v1";
 
 pub(super) fn ensure_membership(connection: &Connection) -> Result<String, LibraryError> {
     let source: String = connection.query_row(
