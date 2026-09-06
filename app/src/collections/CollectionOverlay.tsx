@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { assetUrl, collectionCoverUrl, collectionSourcePreviewUrl, workArtworkUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
-import type { AladinConnection, CollectionCover, CollectionSummary, CollectionVolume, CreateCollection, IgdbConnection, MangaDexConnection, ReleaseWatchEvent, ReleaseWatchStatus, TmdbConnection, UpdateCollection, VolumeImportProgress, WorkArtworkSummary } from "../library/types";
+import type { BookConnection, CollectionCover, CollectionSummary, CollectionVolume, CreateCollection, IgdbConnection, MangaDexConnection, ReleaseWatchEvent, ReleaseWatchStatus, TmdbConnection, UpdateCollection, VolumeImportProgress, WorkArtworkSummary } from "../library/types";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { Button } from "../shared/ui/Button";
@@ -16,7 +16,7 @@ import { CollectionInfoPanel } from "./CollectionInfoPanel";
 import { CollectionEditDialog, type CollectionEditMode } from "./CollectionEditDialog";
 import { CollectionVolumeGrid } from "./CollectionVolumeGrid";
 import { MangaCoverViewer } from "./MangaCoverViewer";
-import { AladinConnectDialog } from "./AladinConnectDialog";
+import { KakaoConnectDialog } from "./KakaoConnectDialog";
 import { MangaDexImportDialog } from "./MangaDexImportDialog";
 import { ReleaseWatchSummary } from "./ReleaseWatchSummary";
 import { GameCollectionDetail } from "./GameCollectionDetail";
@@ -45,15 +45,15 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
   const [shelfFilter, setShelfFilter] = useState<number | null>(null);
   const [editionIndex, setEditionIndex] = useState(0);
   const [mangaDexConnection, setMangaDexConnection] = useState<MangaDexConnection | null | undefined>(undefined);
-  const [aladinConnection, setAladinConnection] = useState<AladinConnection | null | undefined>(undefined);
+  const [kakaoConnection, setBookConnection] = useState<BookConnection | null | undefined>(undefined);
   const [igdbConnection, setIgdbConnection] = useState<IgdbConnection | null | undefined>(undefined);
   const [tmdbConnection, setTmdbConnection] = useState<TmdbConnection | null | undefined>(undefined);
   const [importOpen, setImportOpen] = useState(false);
-  const [aladinOpen, setAladinOpen] = useState(false);
+  const [kakaoOpen, setKakaoOpen] = useState(false);
   const [igdbOpen, setIgdbOpen] = useState(false);
   const [tmdbTarget, setTmdbTarget] = useState<TmdbMovieTarget | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [aladinRefreshing, setAladinRefreshing] = useState(false);
+  const [kakaoRefreshing, setKakaoRefreshing] = useState(false);
   const [igdbRefreshing, setIgdbRefreshing] = useState(false);
   const [tmdbRefreshing, setTmdbRefreshing] = useState(false);
   const [releaseWatchStatus, setReleaseWatchStatus] = useState<ReleaseWatchStatus | null>(null);
@@ -75,7 +75,8 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
   const isManga = collection?.type === "manga";
   const isGame = collection?.type === "game";
   const isMovie = collection?.type === "movie";
-  const hasAladinConnection = Boolean(aladinConnection);
+  const hasBookConnection = Boolean(kakaoConnection);
+  const needsBookReconnect = kakaoConnection?.provider === "aladin";
   const selectedCover = covers?.find((cover) => cover.fileName === selectedFileName) ?? null;
   const viewerVolumes = useMemo(
     () => (volumes ?? [])
@@ -168,13 +169,13 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
   useEffect(() => {
     let active = true;
     setReleaseWatchStatus(null);
-    if (!hasAladinConnection) return () => { active = false; };
+    if (!hasBookConnection) return () => { active = false; };
     void gateway.getReleaseWatchStatus(collectionId).then(
       (status) => { if (active) setReleaseWatchStatus(status); },
       () => undefined,
     );
     return () => { active = false; };
-  }, [collectionId, gateway, hasAladinConnection]);
+  }, [collectionId, gateway, hasBookConnection]);
 
   useEffect(() => {
     let active = true;
@@ -255,13 +256,13 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
   useEffect(() => {
     let active = true;
     if (!isManga) {
-      setAladinConnection(null);
+      setBookConnection(null);
       return () => { active = false; };
     }
-    setAladinConnection(undefined);
-    void gateway.getAladinConnection(collectionId).then(
-      (next) => { if (active) setAladinConnection(next); },
-      () => { if (active) setAladinConnection(null); },
+    setBookConnection(undefined);
+    void gateway.getBookConnection(collectionId).then(
+      (next) => { if (active) setBookConnection(next); },
+      () => { if (active) setBookConnection(null); },
     );
     return () => { active = false; };
   }, [gateway, collectionId, isManga]);
@@ -280,11 +281,11 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
 
   useEffect(() => {
     const exit = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !event.defaultPrevented && viewerVolumeId === null && !importOpen && !aladinOpen && !igdbOpen && tmdbTarget === null && editMode === null && !deleteOpen) onExit();
+      if (event.key === "Escape" && !event.defaultPrevented && viewerVolumeId === null && !importOpen && !kakaoOpen && !igdbOpen && tmdbTarget === null && editMode === null && !deleteOpen) onExit();
     };
     window.addEventListener("keydown", exit);
     return () => window.removeEventListener("keydown", exit);
-  }, [aladinOpen, deleteOpen, editMode, igdbOpen, importOpen, onExit, tmdbTarget, viewerVolumeId]);
+  }, [kakaoOpen, deleteOpen, editMode, igdbOpen, importOpen, onExit, tmdbTarget, viewerVolumeId]);
 
   const heroUrl = useMemo(
     () => selectedCover
@@ -333,15 +334,15 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
           onSelect: () => mangaDexConnection ? void refresh() : setImportOpen(true),
         },
         {
-          id: "aladin",
-          label: aladinConnection ? "Aladin 새로고침" : "Aladin 연결",
-          disabled: aladinConnection === undefined || aladinRefreshing,
-          onSelect: () => aladinConnection ? void refreshAladin() : setAladinOpen(true),
+          id: "kakao",
+          label: needsBookReconnect ? "카카오로 재연결" : kakaoConnection ? "Kakao 새로고침" : "Kakao 연결",
+          disabled: kakaoConnection === undefined || kakaoRefreshing,
+          onSelect: () => kakaoConnection && !needsBookReconnect ? void refreshKakao() : setKakaoOpen(true),
         },
-        ...(aladinConnection && releaseWatchStatus ? [{
+        ...(kakaoConnection && releaseWatchStatus ? [{
           id: "release-watch",
           label: releaseWatchStatus.enabled ? "신간 알림 끄기" : "신간 알림 켜기",
-          disabled: releaseWatchSaving,
+          disabled: releaseWatchSaving || (needsBookReconnect && !releaseWatchStatus.enabled),
           onSelect: () => void toggleReleaseWatch(),
         }] : []),
       ]}
@@ -400,23 +401,23 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
     }
   }
 
-  async function refreshAladin() {
-    setAladinRefreshing(true);
+  async function refreshKakao() {
+    setKakaoRefreshing(true);
     setMessage(null);
     try {
-      const result = await gateway.refreshAladin(collectionId);
+      const result = await gateway.refreshKakao(collectionId);
       const refreshed = await gateway.listCollectionVolumes(collectionId);
       setVolumes(refreshed);
       setSelectedVolumeId((current) => current && refreshed.some((volume) => volume.id === current)
         ? current
         : firstVolumeId(refreshed, editionIndex));
-      setAladinConnection(await gateway.getAladinConnection(collectionId));
+      setBookConnection(await gateway.getBookConnection(collectionId));
       setReleaseWatchStatus(await gateway.getReleaseWatchStatus(collectionId));
-      setMessage(aladinResultMessage(result));
+      setMessage(kakaoResultMessage(result));
     } catch (error) {
-      setMessage(commandErrorMessage(error, "Aladin 정보를 새로고침하지 못했습니다."));
+      setMessage(commandErrorMessage(error, "Kakao 정보를 새로고침하지 못했습니다."));
     } finally {
-      setAladinRefreshing(false);
+      setKakaoRefreshing(false);
     }
   }
 
@@ -495,6 +496,7 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
           </Button>
         </>}
       />
+      {needsBookReconnect && <p role="status">기존 알라딘 신간 확인은 중단된 상태입니다. 카카오로 다시 연결해 주세요. <Button size="sm" onClick={() => setKakaoOpen(true)}>카카오 연결</Button></p>}
       {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
       <ReleaseWatchSummary events={releaseChanges} />
       {isGame && collection ? (
@@ -590,6 +592,8 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
       {viewerVolumeId && viewerVolumes.some((volume) => volume.id === viewerVolumeId) && (
         <MangaCoverViewer
           workTitle={collection?.name ?? "컬렉션"}
+          scope={library?.root ?? ""}
+          revision={collection?.updatedAt ?? ""}
           volumes={viewerVolumes}
           activeVolumeId={viewerVolumeId}
           onActiveVolumeChange={(volumeId) => {
@@ -649,20 +653,20 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
           }}
         />
       )}
-      {aladinOpen && collection && (
-        <AladinConnectDialog
+      {kakaoOpen && collection && (
+        <KakaoConnectDialog
           open
           collectionId={collection.id}
-          initialQuery={collection.name}
-          onClose={() => setAladinOpen(false)}
+          initialQuery={kakaoConnection?.query ?? collection.name}
+          onClose={() => setKakaoOpen(false)}
           onApplied={async (result) => {
             const refreshed = await gateway.listCollectionVolumes(collection.id);
             setVolumes(refreshed);
             setSelectedVolumeId((current) => current && refreshed.some((volume) => volume.id === current)
               ? current
               : firstVolumeId(refreshed, editionIndex));
-            setAladinConnection(await gateway.getAladinConnection(collection.id));
-            setMessage(aladinResultMessage(result));
+            setBookConnection(await gateway.getBookConnection(collection.id));
+            setMessage(kakaoResultMessage(result));
           }}
         />
       )}
@@ -689,7 +693,7 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
   );
 }
 
-function aladinResultMessage(result: { added: number; updated: number; unchanged: number; ignored: number }) {
+function kakaoResultMessage(result: { added: number; updated: number; unchanged: number; ignored: number }) {
   return `국내 발매 정보: 추가 ${result.added}권, 갱신 ${result.updated}권, 유지 ${result.unchanged}권, 제외 ${result.ignored}개`;
 }
 

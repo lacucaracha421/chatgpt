@@ -73,11 +73,11 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [legacyError, setLegacyError] = useState<string | null>(null);
   const [legacyConfirming, setLegacyConfirming] = useState(false);
   useAutoDismiss(legacyError, setLegacyError);
-  const [aladinConfigured, setAladinConfigured] = useState<boolean | null>(null);
-  const [aladinKey, setAladinKey] = useState("");
-  const [aladinBusy, setAladinBusy] = useState(false);
-  const [aladinConfirmingDelete, setAladinConfirmingDelete] = useState(false);
-  const [aladinError, setAladinError] = useState<string | null>(null);
+  const [kakaoConfigured, setKakaoConfigured] = useState<boolean | null>(null);
+  const [kakaoKey, setKakaoKey] = useState("");
+  const [kakaoBusy, setKakaoBusy] = useState(false);
+  const [kakaoConfirmingDelete, setKakaoConfirmingDelete] = useState(false);
+  const [kakaoError, setKakaoError] = useState<string | null>(null);
   const [igdbConfigured, setIgdbConfigured] = useState<boolean | null>(null);
   const [igdbClientId, setIgdbClientId] = useState("");
   const [igdbClientSecret, setIgdbClientSecret] = useState("");
@@ -104,14 +104,14 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [cloudBusy, setCloudBusy] = useState(false);
   const [cloudError, setCloudError] = useState<string | null>(null);
   const [cloudMessage, setCloudMessage] = useState<string | null>(null);
-  useAutoDismiss(aladinError, setAladinError);
+  useAutoDismiss(kakaoError, setKakaoError);
   useAutoDismiss(igdbError, setIgdbError);
   useAutoDismiss(tmdbError, setTmdbError);
   useAutoDismiss(catalogError, setCatalogError);
   useAutoDismiss(catalogCacheMessage, setCatalogCacheMessage);
   useAutoDismiss(cloudError, setCloudError);
   useAutoDismiss(cloudMessage, setCloudMessage);
-  const pending = restoring || submitting || aladinBusy || igdbBusy || tmdbBusy || cloudBusy;
+  const pending = restoring || submitting || kakaoBusy || igdbBusy || tmdbBusy || cloudBusy;
 
   useEffect(() => {
     let active = true;
@@ -136,18 +136,18 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   useEffect(() => {
     if (section !== "external_services") return;
     let active = true;
-    setAladinConfigured(null);
-    setAladinError(null);
+    setKakaoConfigured(null);
+    setKakaoError(null);
     setIgdbConfigured(null);
     setIgdbError(null);
     setTmdbConfigured(null);
     setTmdbError(null);
     setCloudSettings(null);
     setCloudError(null);
-    void gateway.getAladinCredentialStatus().then((status) => {
-      if (active) setAladinConfigured(status.configured);
+    void gateway.getKakaoCredentialStatus().then((status) => {
+      if (active) setKakaoConfigured(status.configured);
     }).catch((loadError: unknown) => {
-      if (active) setAladinError(commandErrorMessage(loadError, "알라딘 설정을 확인하지 못했습니다."));
+      if (active) setKakaoError(commandErrorMessage(loadError, "카카오 설정을 확인하지 못했습니다."));
     });
     void gateway.getIgdbCredentialStatus().then((status) => {
       if (active) setIgdbConfigured(status.configured);
@@ -342,34 +342,34 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     }
   }
 
-  async function saveAladinKey() {
-    if (!aladinKey.trim() || aladinBusy) return;
-    setAladinBusy(true);
-    setAladinError(null);
+  async function saveKakaoKey() {
+    if (!kakaoKey.trim() || kakaoBusy) return;
+    setKakaoBusy(true);
+    setKakaoError(null);
     try {
-      const status = await gateway.setAladinTtbKey(aladinKey);
-      setAladinConfigured(status.configured);
-      setAladinKey("");
+      const status = await gateway.setKakaoApiKey(kakaoKey);
+      setKakaoConfigured(status.configured);
+      setKakaoKey("");
     } catch (saveError) {
-      setAladinError(commandErrorMessage(saveError, "알라딘 TTB 키를 저장하지 못했습니다."));
+      setKakaoError(commandErrorMessage(saveError, "카카오 REST API 키를 저장하지 못했습니다."));
     } finally {
-      setAladinBusy(false);
+      setKakaoBusy(false);
     }
   }
 
-  async function deleteAladinKey() {
-    if (aladinBusy) return;
-    setAladinBusy(true);
-    setAladinError(null);
+  async function deleteKakaoKey() {
+    if (kakaoBusy) return;
+    setKakaoBusy(true);
+    setKakaoError(null);
     try {
-      const status = await gateway.deleteAladinTtbKey();
-      setAladinConfigured(status.configured);
-      setAladinConfirmingDelete(false);
-      setAladinKey("");
+      const status = await gateway.deleteKakaoApiKey();
+      setKakaoConfigured(status.configured);
+      setKakaoConfirmingDelete(false);
+      setKakaoKey("");
     } catch (deleteError) {
-      setAladinError(commandErrorMessage(deleteError, "알라딘 TTB 키를 삭제하지 못했습니다."));
+      setKakaoError(commandErrorMessage(deleteError, "카카오 REST API 키를 삭제하지 못했습니다."));
     } finally {
-      setAladinBusy(false);
+      setKakaoBusy(false);
     }
   }
 
@@ -752,7 +752,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
         {section === "external_services" && (
       <div className="settings-view__section">
         <header className="settings-view__header"><h2>외부 서비스</h2><p>온라인 서비스 연결과 자격 증명을 관리합니다.</p></header>
-        {aladinError && <Toast tone="error" onDismiss={() => setAladinError(null)}>{aladinError}</Toast>}
+        {kakaoError && <Toast tone="error" onDismiss={() => setKakaoError(null)}>{kakaoError}</Toast>}
         {igdbError && <Toast tone="error" onDismiss={() => setIgdbError(null)}>{igdbError}</Toast>}
         {tmdbError && <Toast tone="error" onDismiss={() => setTmdbError(null)}>{tmdbError}</Toast>}
         {catalogError && <Toast tone="error" onDismiss={() => setCatalogError(null)}>{catalogError}</Toast>}
@@ -760,29 +760,29 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
         {cloudMessage && <Toast onDismiss={() => setCloudMessage(null)}>{cloudMessage}</Toast>}
         <h3 className="settings-view__group-title">연결 상태</h3>
         <dl className="settings-view__property">
-          <dt>알라딘 OpenAPI</dt>
+          <dt>카카오 책 검색</dt>
           <dd>
             <span className="settings-view__token-row">
               <input
                 className="settings-view__token"
-                aria-label="알라딘 TTB 키"
+                aria-label="카카오 REST API 키"
                 type="password"
                 autoComplete="off"
-                placeholder={aladinConfigured === null ? "확인 중…" : aladinConfigured ? "설정됨" : "설정되지 않음"}
-                value={aladinKey}
-                onChange={(event) => setAladinKey(event.target.value)}
+                placeholder={kakaoConfigured === null ? "확인 중…" : kakaoConfigured ? "설정됨" : "설정되지 않음"}
+                value={kakaoKey}
+                onChange={(event) => setKakaoKey(event.target.value)}
               />
-              <Button size="sm" disabled={aladinBusy || !aladinKey.trim()} onClick={() => void saveAladinKey()}>{aladinBusy ? "처리 중…" : "저장"}</Button>
+              <Button size="sm" disabled={kakaoBusy || !kakaoKey.trim()} onClick={() => void saveKakaoKey()}>{kakaoBusy ? "처리 중…" : "저장"}</Button>
             </span>
           </dd>
-          {aladinConfigured && !aladinConfirmingDelete && <Button size="sm" variant="danger" disabled={aladinBusy} onClick={() => setAladinConfirmingDelete(true)}>키 삭제</Button>}
+          {kakaoConfigured && !kakaoConfirmingDelete && <Button size="sm" variant="danger" disabled={kakaoBusy} onClick={() => setKakaoConfirmingDelete(true)}>키 삭제</Button>}
         </dl>
-        {aladinConfirmingDelete && (
+        {kakaoConfirmingDelete && (
           <div className="settings-view__credential-confirm">
-            <p>저장된 알라딘 TTB 키를 삭제할까요?</p>
+            <p>저장된 카카오 REST API 키를 삭제할까요?</p>
             <div className="settings-view__credential-actions">
-              <Button size="sm" disabled={aladinBusy} onClick={() => setAladinConfirmingDelete(false)}>취소</Button>
-              <Button size="sm" variant="danger" disabled={aladinBusy} onClick={() => void deleteAladinKey()}>삭제 확인</Button>
+              <Button size="sm" disabled={kakaoBusy} onClick={() => setKakaoConfirmingDelete(false)}>취소</Button>
+              <Button size="sm" variant="danger" disabled={kakaoBusy} onClick={() => void deleteKakaoKey()}>삭제 확인</Button>
             </div>
           </div>
         )}

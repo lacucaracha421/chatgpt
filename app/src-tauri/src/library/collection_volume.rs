@@ -252,7 +252,13 @@ impl Library {
              LEFT JOIN collection_volume_sources AS source
                ON source.collection_id = volume.collection_id
               AND source.volume_number = volume.volume_number
-              AND source.provider = 'aladin'
+              AND source.provider = (
+                  SELECT candidate.provider FROM collection_volume_sources AS candidate
+                  WHERE candidate.collection_id = volume.collection_id
+                    AND candidate.volume_number = volume.volume_number
+                    AND candidate.provider IN ('kakao', 'aladin')
+                  ORDER BY CASE candidate.provider WHEN 'kakao' THEN 0 ELSE 1 END LIMIT 1
+              )
              WHERE volume.collection_id = ?1
              ORDER BY volume.edition_index, volume.sort_order, volume.volume_number",
         )?;

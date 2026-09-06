@@ -85,7 +85,7 @@ export function MangaDexImportDialog({ open, target, onClose, onApplied }: Props
 
         {error && <p className="mangadex-import__error" role="alert">{error}</p>}
         <p className="mangadex-import__provider-note">
-          MangaDex에서 작품 정보를 검색합니다. 한국 정발 정보는 작품 생성 후 Aladin에 연결할 수 있습니다.
+          MangaDex에서 작품 정보를 검색합니다. 한국 정발 정보는 작품 생성 후 Kakao에 연결할 수 있습니다.
         </p>
         {busy === "search" && <Skeleton className="mangadex-import__loading" label="검색 중" />}
 

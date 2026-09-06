@@ -914,6 +914,7 @@ pub struct AladinApplyRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AladinConnection {
+    pub provider: String,
     pub anchor_item_id: String,
     pub query: String,
     pub last_synced_at: Option<String>,

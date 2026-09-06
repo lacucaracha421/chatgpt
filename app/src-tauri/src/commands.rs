@@ -1141,6 +1141,85 @@ pub fn get_aladin_connection(
 }
 
 #[tauri::command]
+pub fn get_kakao_credential_status() -> Result<AladinCredentialStatus, CommandError> {
+    credential::kakao_key_status()
+        .map(|configured| AladinCredentialStatus { configured })
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn set_kakao_api_key(api_key: String) -> Result<AladinCredentialStatus, CommandError> {
+    credential::set_kakao_key(&api_key).map_err(CommandError::from)?;
+    Ok(AladinCredentialStatus { configured: true })
+}
+
+#[tauri::command]
+pub fn delete_kakao_api_key() -> Result<AladinCredentialStatus, CommandError> {
+    credential::delete_kakao_key().map_err(CommandError::from)?;
+    Ok(AladinCredentialStatus { configured: false })
+}
+
+#[tauri::command]
+pub async fn search_kakao(
+    query: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<AladinSeriesCandidate>, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let key = credential::read_kakao_key()?;
+        library.search_kakao(&key, &query)
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn apply_kakao(
+    request: AladinApplyRequest,
+    state: State<'_, AppState>,
+) -> Result<AladinSyncResult, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let key = credential::read_kakao_key()?;
+        library.apply_kakao(&key, request)
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn refresh_kakao(
+    collection_id: String,
+    state: State<'_, AppState>,
+) -> Result<AladinSyncResult, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let key = credential::read_kakao_key()?;
+        library.refresh_kakao(&key, &collection_id)
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn get_kakao_connection(
+    collection_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<AladinConnection>, CommandError> {
+    current_required(state)?
+        .get_kakao_connection(&collection_id)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn get_book_connection(collection_id: String, state: State<'_, AppState>) -> Result<Option<AladinConnection>, CommandError> {
+    current_required(state)?.get_book_connection(&collection_id).map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub fn get_release_watch_status(
     collection_id: String,
     state: State<'_, AppState>,
@@ -1186,7 +1265,7 @@ pub async fn run_due_release_watch(
 ) -> Result<ReleaseWatchRunResult, CommandError> {
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || {
-        run_release_watch_with_key(&library, credential::read_aladin_key())
+        run_release_watch_with_key(&library, credential::read_kakao_key())
     })
     .await
     .map_err(|_| background_task_error())?
@@ -1198,7 +1277,7 @@ fn run_release_watch_with_key(
     key: Result<String, LibraryError>,
 ) -> Result<ReleaseWatchRunResult, LibraryError> {
     match key {
-        Ok(key) => library.run_due_release_watch(&key),
+        Ok(key) => library.run_due_kakao_release_watch(&key),
         Err(LibraryError::AladinCredentialNotConfigured) => Ok(ReleaseWatchRunResult {
             checked: 0,
             changed_collections: 0,

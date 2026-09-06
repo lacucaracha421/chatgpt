@@ -183,7 +183,7 @@ it("toggles privacy mode from the general section", async () => {
 
 it("shows every external service status at once in the connection list", async () => {
   const gateway = createGateway();
-  vi.mocked(gateway.getAladinCredentialStatus).mockResolvedValue({ configured: true });
+  vi.mocked(gateway.getKakaoCredentialStatus).mockResolvedValue({ configured: true });
   vi.mocked(gateway.getIgdbCredentialStatus).mockResolvedValue({ configured: false });
   vi.mocked(gateway.getTmdbCredentialStatus).mockResolvedValue({ configured: false });
   render(
@@ -192,11 +192,11 @@ it("shows every external service status at once in the connection list", async (
     </LibraryProvider>,
   );
 
-  const aladinRow = (await screen.findByText("알라딘 OpenAPI")).parentElement;
+  const kakaoRow = (await screen.findByText("카카오 책 검색")).parentElement;
   const igdbRow = screen.getByText("IGDB").parentElement;
   const tmdbRow = screen.getByText("TMDB").parentElement;
-  expect(within(aladinRow!).getByLabelText("알라딘 TTB 키")).toHaveAttribute("placeholder", "설정됨");
-  expect(within(aladinRow!).getByRole("button", { name: "키 삭제" })).toBeVisible();
+  expect(within(kakaoRow!).getByLabelText("카카오 REST API 키")).toHaveAttribute("placeholder", "설정됨");
+  expect(within(kakaoRow!).getByRole("button", { name: "키 삭제" })).toBeVisible();
   expect(within(igdbRow!).getByLabelText("IGDB Client ID")).toHaveAttribute("placeholder", "설정되지 않음");
   expect(within(igdbRow!).queryByRole("button", { name: "IGDB 키 삭제" })).not.toBeInTheDocument();
   expect(within(tmdbRow!).getByLabelText("TMDB API Read Access Token")).toHaveAttribute("placeholder", "설정되지 않음");
@@ -359,12 +359,12 @@ it("shows the Edge connection and copies its hidden key on request", async () =>
   expect(await screen.findByText("연결 키를 복사했습니다")).toBeVisible();
 });
 
-it("stores and removes an Aladin key without reading it back", async () => {
+it("stores and removes an Kakao key without reading it back", async () => {
   const user = userEvent.setup();
   const gateway = createGateway();
-  vi.mocked(gateway.getAladinCredentialStatus).mockResolvedValue({ configured: false });
-  vi.mocked(gateway.setAladinTtbKey).mockResolvedValue({ configured: true });
-  vi.mocked(gateway.deleteAladinTtbKey).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.getKakaoCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.setKakaoApiKey).mockResolvedValue({ configured: true });
+  vi.mocked(gateway.deleteKakaoApiKey).mockResolvedValue({ configured: false });
   render(
     <LibraryProvider gateway={gateway}>
       <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
@@ -372,27 +372,27 @@ it("stores and removes an Aladin key without reading it back", async () => {
   );
 
   await user.click(screen.getByRole("button", { name: "외부 서비스" }));
-  const aladinStatusRow = (await screen.findByText("알라딘 OpenAPI")).parentElement;
-  expect(within(aladinStatusRow!).getByLabelText("알라딘 TTB 키")).toHaveAttribute("placeholder", "설정되지 않음");
-  expect(await gateway.getAladinCredentialStatus()).toEqual({ configured: false });
-  await user.type(screen.getByLabelText("알라딘 TTB 키"), "new-secret");
+  const kakaoStatusRow = (await screen.findByText("카카오 책 검색")).parentElement;
+  expect(within(kakaoStatusRow!).getByLabelText("카카오 REST API 키")).toHaveAttribute("placeholder", "설정되지 않음");
+  expect(await gateway.getKakaoCredentialStatus()).toEqual({ configured: false });
+  await user.type(screen.getByLabelText("카카오 REST API 키"), "new-secret");
   await user.click(screen.getByRole("button", { name: "저장" }));
 
-  expect(gateway.setAladinTtbKey).toHaveBeenCalledWith("new-secret");
-  expect(screen.getByLabelText("알라딘 TTB 키")).toHaveValue("");
-  expect(within(aladinStatusRow!).getByLabelText("알라딘 TTB 키")).toHaveAttribute("placeholder", "설정됨");
+  expect(gateway.setKakaoApiKey).toHaveBeenCalledWith("new-secret");
+  expect(screen.getByLabelText("카카오 REST API 키")).toHaveValue("");
+  expect(within(kakaoStatusRow!).getByLabelText("카카오 REST API 키")).toHaveAttribute("placeholder", "설정됨");
   expect(screen.queryByDisplayValue("new-secret")).not.toBeInTheDocument();
 
   await user.click(screen.getByRole("button", { name: "키 삭제" }));
-  expect(screen.getByText("저장된 알라딘 TTB 키를 삭제할까요?")).toBeInTheDocument();
+  expect(screen.getByText("저장된 카카오 REST API 키를 삭제할까요?")).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "삭제 확인" }));
-  expect(gateway.deleteAladinTtbKey).toHaveBeenCalledOnce();
-  expect(within(aladinStatusRow!).getByLabelText("알라딘 TTB 키")).toHaveAttribute("placeholder", "설정되지 않음");
+  expect(gateway.deleteKakaoApiKey).toHaveBeenCalledOnce();
+  expect(within(kakaoStatusRow!).getByLabelText("카카오 REST API 키")).toHaveAttribute("placeholder", "설정되지 않음");
 });
 
 it("opens the requested settings section", async () => {
   const gateway = createGateway();
-  vi.mocked(gateway.getAladinCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.getKakaoCredentialStatus).mockResolvedValue({ configured: false });
   vi.mocked(gateway.getIgdbCredentialStatus).mockResolvedValue({ configured: false });
   vi.mocked(gateway.getOnlineCatalogStatus).mockResolvedValue({ installed: false, workCount: 0, updateEnabled: false, updateIntervalSeconds: 0, lastAttemptAt: null, lastSuccessAt: null, lastAdded: 0, lastError: null, streams: [] });
   render(
@@ -408,7 +408,7 @@ it("opens the requested settings section", async () => {
 it("shows only IGDB credential status and keeps stored values out of the inputs", async () => {
   const user = userEvent.setup();
   const gateway = createGateway();
-  vi.mocked(gateway.getAladinCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.getKakaoCredentialStatus).mockResolvedValue({ configured: false });
   vi.mocked(gateway.getIgdbCredentialStatus).mockResolvedValue({ configured: true });
   render(
     <LibraryProvider gateway={gateway}>
@@ -431,7 +431,7 @@ it("shows only IGDB credential status and keeps stored values out of the inputs"
 it("saves both IGDB credentials exactly and clears them after success", async () => {
   const user = userEvent.setup();
   const gateway = createGateway();
-  vi.mocked(gateway.getAladinCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.getKakaoCredentialStatus).mockResolvedValue({ configured: false });
   vi.mocked(gateway.getIgdbCredentialStatus).mockResolvedValue({ configured: false });
   vi.mocked(gateway.setIgdbCredentials).mockResolvedValue({ configured: true });
   render(
@@ -458,7 +458,7 @@ it("saves both IGDB credentials exactly and clears them after success", async ()
 it("requires confirmation before deleting IGDB credentials", async () => {
   const user = userEvent.setup();
   const gateway = createGateway();
-  vi.mocked(gateway.getAladinCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.getKakaoCredentialStatus).mockResolvedValue({ configured: false });
   vi.mocked(gateway.getIgdbCredentialStatus).mockResolvedValue({ configured: true });
   vi.mocked(gateway.deleteIgdbCredentials).mockResolvedValue({ configured: false });
   render(
@@ -516,7 +516,7 @@ it("stores and removes a TMDB token without reading it back", async () => {
 it("changes online catalog automatic update settings", async () => {
   const user = userEvent.setup();
   const gateway = createGateway();
-  vi.mocked(gateway.getAladinCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.getKakaoCredentialStatus).mockResolvedValue({ configured: false });
   vi.mocked(gateway.getOnlineCatalogStatus).mockResolvedValue({
     installed: true,
     workCount: 100,
@@ -678,7 +678,7 @@ it("confirms a Japanese checkpoint-only reset and keeps catalog data wording exp
 it("shows catalog status and restores the catalog from a re-selected VCK folder", async () => {
   const user = userEvent.setup();
   const gateway = createGateway();
-  vi.mocked(gateway.getAladinCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.getKakaoCredentialStatus).mockResolvedValue({ configured: false });
   vi.mocked(gateway.getOnlineCatalogStatus).mockResolvedValue({
     installed: true,
     workCount: 100,
@@ -722,7 +722,7 @@ it("shows catalog status and restores the catalog from a re-selected VCK folder"
 it("keeps the catalog error message when the VCK restore fails", async () => {
   const user = userEvent.setup();
   const gateway = createGateway();
-  vi.mocked(gateway.getAladinCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.getKakaoCredentialStatus).mockResolvedValue({ configured: false });
   vi.mocked(gateway.getOnlineCatalogStatus).mockResolvedValue({ installed: true, workCount: 100, updateEnabled: true, updateIntervalSeconds: 3600, lastAttemptAt: null, lastSuccessAt: null, lastAdded: 0, lastError: null, streams: [] });
   vi.mocked(gateway.importVckCatalog).mockRejectedValue({ code: "invalid_online_catalog", message: "온라인 카탈로그 데이터가 올바르지 않습니다" });
   vi.mocked(open).mockResolvedValue("D:\\Broken");
@@ -740,7 +740,7 @@ it("keeps the catalog error message when the VCK restore fails", async () => {
 it("confirms before clearing the remote manga cache", async () => {
   const user = userEvent.setup();
   const gateway = createGateway();
-  vi.mocked(gateway.getAladinCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.getKakaoCredentialStatus).mockResolvedValue({ configured: false });
   vi.mocked(gateway.clearRemoteMangaCache).mockResolvedValue(undefined);
   render(
     <LibraryProvider gateway={gateway}>
@@ -825,7 +825,7 @@ function createGateway(): LibraryGateway {
     getAssetClassifications: vi.fn(), setAssetClassification: vi.fn(), patchAssetAlbums: vi.fn(), getAssetAlbums: vi.fn().mockResolvedValue([]), ingestMedia: vi.fn(),
     listCollections: vi.fn().mockResolvedValue([]), searchMangaDex: vi.fn(), previewMangaDex: vi.fn(), applyMangaDex: vi.fn(), refreshMangaDex: vi.fn(), getMangaDexConnection: vi.fn().mockResolvedValue(null), createCollection: vi.fn(), updateCollection: vi.fn(), deleteCollection: vi.fn(), setCollectionCover: vi.fn(), setCollectionShowcase: vi.fn(), getAssetCollections: vi.fn().mockResolvedValue([]), patchAssetCollections: vi.fn(),
     preparePendingVideos: vi.fn(), retryVideoPreparation: vi.fn(), inspectBookImport: vi.fn(), importBookCollections: vi.fn(), getCollectionSourceRoot: vi.fn().mockResolvedValue(null), setCollectionSourceRoot: vi.fn().mockResolvedValue(0), importCollectionArtworks: vi.fn().mockResolvedValue(0),
-  listCollectionWorkArtworks: vi.fn().mockResolvedValue([]), listCollectionCovers: vi.fn(), listCollectionVolumes: vi.fn(), syncMangaDexVolumeCovers: vi.fn(), inspectLegacyPackageMigration: vi.fn(), executeLegacyPackageMigration: vi.fn(), getAladinCredentialStatus: vi.fn().mockResolvedValue({ configured: false }), setAladinTtbKey: vi.fn(), deleteAladinTtbKey: vi.fn(), searchAladin: vi.fn(), applyAladin: vi.fn(), refreshAladin: vi.fn(), getAladinConnection: vi.fn(), getReleaseWatchStatus: vi.fn().mockResolvedValue({ enabled: false, lastCheckedAt: null }), setReleaseWatchEnabled: vi.fn().mockResolvedValue({ enabled: false, lastCheckedAt: null }), takeUnreadReleaseChanges: vi.fn().mockResolvedValue([]), listUnreadReleaseChanges: vi.fn().mockResolvedValue([]), runDueReleaseWatch: vi.fn().mockResolvedValue({ checked: 0, changedCollections: 0, skipped: 0, stopReason: null }),
+  listCollectionWorkArtworks: vi.fn().mockResolvedValue([]), listCollectionCovers: vi.fn(), listCollectionVolumes: vi.fn(), syncMangaDexVolumeCovers: vi.fn(), inspectLegacyPackageMigration: vi.fn(), executeLegacyPackageMigration: vi.fn(), getKakaoCredentialStatus: vi.fn().mockResolvedValue({ configured: false }), setKakaoApiKey: vi.fn(), deleteKakaoApiKey: vi.fn(), searchKakao: vi.fn(), applyKakao: vi.fn(), refreshKakao: vi.fn(), getBookConnection: vi.fn(), getReleaseWatchStatus: vi.fn().mockResolvedValue({ enabled: false, lastCheckedAt: null }), setReleaseWatchEnabled: vi.fn().mockResolvedValue({ enabled: false, lastCheckedAt: null }), takeUnreadReleaseChanges: vi.fn().mockResolvedValue([]), listUnreadReleaseChanges: vi.fn().mockResolvedValue([]), runDueReleaseWatch: vi.fn().mockResolvedValue({ checked: 0, changedCollections: 0, skipped: 0, stopReason: null }),
     getMangaRoot: vi.fn().mockResolvedValue(null), setMangaRoot: vi.fn().mockResolvedValue(undefined), scanManga: vi.fn().mockResolvedValue(0), listMangaSeries: vi.fn().mockResolvedValue([]),
     trashAssets: vi.fn(), restoreAsset: vi.fn(), restoreAssets: vi.fn(),
     listTrash: vi.fn(), emptyTrash: vi.fn(), getTrashPolicy: vi.fn(), setTrashPolicy: vi.fn(),

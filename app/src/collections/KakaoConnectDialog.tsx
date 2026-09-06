@@ -1,32 +1,32 @@
 import { useState } from "react";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
-import type { AladinSeriesCandidate, AladinSyncResult } from "../library/types";
+import type { KakaoSeriesCandidate, KakaoSyncResult } from "../library/types";
 import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { TextField } from "../shared/ui/TextField";
 
-type AladinConnectDialogProps = {
+type KakaoConnectDialogProps = {
   open: boolean;
   collectionId: string;
   initialQuery: string;
   onClose: () => void;
-  onApplied: (result: AladinSyncResult) => Promise<void> | void;
+  onApplied: (result: KakaoSyncResult) => Promise<void> | void;
 };
 
-export function AladinConnectDialog({
+export function KakaoConnectDialog({
   open,
   collectionId,
   initialQuery,
   onClose,
   onApplied,
-}: AladinConnectDialogProps) {
+}: KakaoConnectDialogProps) {
   const { gateway } = useLibrary();
   const [query, setQuery] = useState(initialQuery);
   const [submittedQuery, setSubmittedQuery] = useState("");
-  const [results, setResults] = useState<AladinSeriesCandidate[] | null>(null);
-  const [selected, setSelected] = useState<AladinSeriesCandidate | null>(null);
+  const [results, setResults] = useState<KakaoSeriesCandidate[] | null>(null);
+  const [selected, setSelected] = useState<KakaoSeriesCandidate | null>(null);
   const [busy, setBusy] = useState<"search" | "apply" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,11 +44,11 @@ export function AladinConnectDialog({
     setError(null);
     setSelected(null);
     try {
-      const nextResults = await gateway.searchAladin(trimmed);
+      const nextResults = await gateway.searchKakao(trimmed);
       setSubmittedQuery(trimmed);
       setResults(nextResults);
     } catch (searchError) {
-      setError(commandErrorMessage(searchError, "알라딘에서 검색하지 못했습니다."));
+      setError(commandErrorMessage(searchError, "카카오에서 검색하지 못했습니다."));
     } finally {
       setBusy(null);
     }
@@ -59,7 +59,7 @@ export function AladinConnectDialog({
     setBusy("apply");
     setError(null);
     try {
-      const result = await gateway.applyAladin({
+      const result = await gateway.applyKakao({
         collectionId,
         query: submittedQuery,
         anchorItemId: selected.anchorItemId,
@@ -68,17 +68,17 @@ export function AladinConnectDialog({
       await onApplied(result);
       onClose();
     } catch (applyError) {
-      setError(commandErrorMessage(applyError, "알라딘 정보를 연결하지 못했습니다."));
+      setError(commandErrorMessage(applyError, "카카오 정보를 연결하지 못했습니다."));
       setBusy(null);
     }
   }
 
   return (
-    <Dialog open={open} title="Aladin 연결" variant="wide" onClose={close}>
-      <div className="aladin-connect">
-        <div className="aladin-connect__search">
+    <Dialog open={open} title="Kakao 연결" variant="wide" onClose={close}>
+      <div className="book-connect">
+        <div className="book-connect__search">
           <TextField
-            label="알라딘 작품 검색"
+            label="카카오 작품 검색"
             type="search"
             value={query}
             onChange={(event) => { setQuery(event.target.value); setError(null); }}
@@ -89,18 +89,18 @@ export function AladinConnectDialog({
           </Button>
         </div>
 
-        {error && <p className="aladin-connect__error" role="alert">{error}</p>}
-        <p className="aladin-connect__note">표지 없이 국내 단행본·전자책 시리즈와 발매 정보만 검색합니다.</p>
-        {busy === "search" && <Skeleton className="aladin-connect__loading" label="알라딘 검색 중" />}
+        {error && <p className="book-connect__error" role="alert">{error}</p>}
+        <p className="book-connect__note">국내 출판 제목으로 검색하세요. 출판사별 권 목록과 발매 정보를 연결합니다.</p>
+        {busy === "search" && <Skeleton className="book-connect__loading" label="카카오 검색 중" />}
 
-        <div className="aladin-connect__body">
-          <div className="aladin-connect__results" aria-label="알라딘 검색 결과">
-            {results?.length === 0 && <p className="aladin-connect__empty">검색 결과가 없습니다.</p>}
+        <div className="book-connect__body">
+          <div className="book-connect__results" aria-label="카카오 검색 결과">
+            {results?.length === 0 && <p className="book-connect__empty">검색 결과가 없습니다.</p>}
             {results?.map((candidate) => (
               <button
                 key={candidate.groupFingerprint}
                 type="button"
-                className="aladin-connect__result"
+                className="book-connect__result"
                 aria-pressed={selected?.groupFingerprint === candidate.groupFingerprint}
                 disabled={busy !== null}
                 onClick={() => { setSelected(candidate); setError(null); }}
@@ -111,10 +111,10 @@ export function AladinConnectDialog({
             ))}
           </div>
 
-          <div className="aladin-connect__preview" aria-label="선택한 시리즈 권 목록">
+          <div className="book-connect__preview" aria-label="선택한 시리즈 권 목록">
             {selected ? (
               <>
-                <div className="aladin-connect__preview-header">
+                <div className="book-connect__preview-header">
                   <strong>{selected.title}</strong>
                   {selected.ignoredCount > 0 && <small>제외된 상품 {selected.ignoredCount}개</small>}
                 </div>
@@ -128,13 +128,13 @@ export function AladinConnectDialog({
                 </ul>
               </>
             ) : (
-              <p className="aladin-connect__empty">검색 결과에서 연결할 시리즈를 선택하세요.</p>
+              <p className="book-connect__empty">검색 결과에서 연결할 시리즈를 선택하세요.</p>
             )}
           </div>
         </div>
 
-        <div className="ui-dialog__actions aladin-connect__actions">
-          <span>Aladin 정보는 기존 작품명과 일본어 표지를 변경하지 않습니다.</span>
+        <div className="ui-dialog__actions book-connect__actions">
+          <span>기존 작품명과 선택한 표지는 유지됩니다.</span>
           <Button type="button" disabled={busy !== null} onClick={close}>취소</Button>
           <Button type="button" variant="primary" disabled={!selected || busy !== null} onClick={() => void apply()}>
             {busy === "apply" ? "연결 중…" : "연결"}
@@ -145,7 +145,7 @@ export function AladinConnectDialog({
   );
 }
 
-function volumeSummary(candidate: AladinSeriesCandidate) {
+function volumeSummary(candidate: KakaoSeriesCandidate) {
   if (candidate.volumes.length === 0) return "0권";
   const numbers = candidate.volumes.map((volume) => volume.volumeNumber);
   const first = Math.min(...numbers);

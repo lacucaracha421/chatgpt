@@ -46,7 +46,7 @@ The volume shelf is the primary content, not a generic metadata hero.
 - the selected volume lifts slightly; compact work information stays secondary to the shelf; large lists use row virtualization without losing order, keyboard focus or scroll restoration;
 - ISBN, publisher, provider identity and other deep edition data stay secondary.
 
-MangaDex may supply work identity/general metadata and cover candidates. Korean release providers such as Aladin supply local commercial-edition/release information. The shelf design must survive provider replacement.
+MangaDex may supply work identity/general metadata and cover candidates. Korean release providers such as Kakao book search supply local commercial-edition/release information. The shelf design must survive provider replacement.
 
 ## 3. Game — closed package exhibit
 

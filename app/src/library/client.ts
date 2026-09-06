@@ -1,11 +1,11 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
   CatalogReviewPage,
-  AladinApplyRequest,
-  AladinConnection,
-  AladinCredentialStatus,
-  AladinSeriesCandidate,
-  AladinSyncResult,
+  KakaoApplyRequest,
+  BookConnection,
+  KakaoCredentialStatus,
+  KakaoSeriesCandidate,
+  KakaoSyncResult,
   AlbumEntry,
   AssetAlbumPatch,
   AssetCollectionPatch,
@@ -296,20 +296,20 @@ export const libraryGateway: LibraryGateway = {
     invoke<TmdbConnection | null>("get_tmdb_connection", { collectionId }),
   replaceTmdbMovieArtwork: (request: TmdbArtworkReplaceRequest) =>
     invoke<CollectionSummary>("replace_tmdb_movie_artwork", { request }),
-  getAladinCredentialStatus: () =>
-    invoke<AladinCredentialStatus>("get_aladin_credential_status"),
-  setAladinTtbKey: (ttbKey) =>
-    invoke<AladinCredentialStatus>("set_aladin_ttb_key", { ttbKey }),
-  deleteAladinTtbKey: () =>
-    invoke<AladinCredentialStatus>("delete_aladin_ttb_key"),
-  searchAladin: (query) =>
-    invoke<AladinSeriesCandidate[]>("search_aladin", { query }),
-  applyAladin: (request: AladinApplyRequest) =>
-    invoke<AladinSyncResult>("apply_aladin", { request }),
-  refreshAladin: (collectionId) =>
-    invoke<AladinSyncResult>("refresh_aladin", { collectionId }),
-  getAladinConnection: (collectionId) =>
-    invoke<AladinConnection | null>("get_aladin_connection", { collectionId }),
+  getKakaoCredentialStatus: () =>
+    invoke<KakaoCredentialStatus>("get_kakao_credential_status"),
+  setKakaoApiKey: (apiKey) =>
+    invoke<KakaoCredentialStatus>("set_kakao_api_key", { apiKey }),
+  deleteKakaoApiKey: () =>
+    invoke<KakaoCredentialStatus>("delete_kakao_api_key"),
+  searchKakao: (query) =>
+    invoke<KakaoSeriesCandidate[]>("search_kakao", { query }),
+  applyKakao: (request: KakaoApplyRequest) =>
+    invoke<KakaoSyncResult>("apply_kakao", { request }),
+  refreshKakao: (collectionId) =>
+    invoke<KakaoSyncResult>("refresh_kakao", { collectionId }),
+  getBookConnection: (collectionId) =>
+    invoke<BookConnection | null>("get_book_connection", { collectionId }),
   getReleaseWatchStatus: (collectionId) =>
     invoke<ReleaseWatchStatus>("get_release_watch_status", { collectionId }),
   setReleaseWatchEnabled: (collectionId, enabled) =>

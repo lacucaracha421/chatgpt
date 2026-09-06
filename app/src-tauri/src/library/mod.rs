@@ -1,5 +1,6 @@
 pub(crate) mod aladin;
 mod aladin_flow;
+pub(crate) mod kakao_books;
 mod album;
 mod asset_metadata;
 mod backup;

@@ -16,7 +16,83 @@ use super::{
     Library,
 };
 
-const PROVIDER: &str = "aladin";
+pub(super) struct BookFlow<'a> {
+    library: &'a Library,
+    provider: &'static str,
+}
+impl Library {
+    pub fn get_book_connection(
+        &self,
+        collection_id: &str,
+    ) -> Result<Option<AladinConnection>, LibraryError> {
+        match self.get_kakao_connection(collection_id)? {
+            Some(connection) => Ok(Some(connection)),
+            None => self.get_aladin_connection(collection_id),
+        }
+    }
+
+    pub(super) fn book_flow(&self, provider: &'static str) -> BookFlow<'_> {
+        BookFlow {
+            library: self,
+            provider,
+        }
+    }
+    pub fn search_aladin(
+        &self,
+        key: &str,
+        query: &str,
+    ) -> Result<Vec<AladinSeriesCandidate>, LibraryError> {
+        self.book_flow("aladin").search_aladin(key, query)
+    }
+    pub fn apply_aladin(
+        &self,
+        key: &str,
+        request: AladinApplyRequest,
+    ) -> Result<AladinSyncResult, LibraryError> {
+        self.book_flow("aladin").apply_aladin(key, request)
+    }
+    pub fn refresh_aladin(
+        &self,
+        key: &str,
+        collection_id: &str,
+    ) -> Result<AladinSyncResult, LibraryError> {
+        self.book_flow("aladin").refresh_aladin(key, collection_id)
+    }
+    pub fn get_aladin_connection(
+        &self,
+        collection_id: &str,
+    ) -> Result<Option<AladinConnection>, LibraryError> {
+        self.book_flow("aladin")
+            .get_aladin_connection(collection_id)
+    }
+    pub fn search_kakao(
+        &self,
+        key: &str,
+        query: &str,
+    ) -> Result<Vec<AladinSeriesCandidate>, LibraryError> {
+        self.book_flow("kakao").search_aladin(key, query)
+    }
+    pub fn apply_kakao(
+        &self,
+        key: &str,
+        request: AladinApplyRequest,
+    ) -> Result<AladinSyncResult, LibraryError> {
+        self.book_flow("kakao").apply_aladin(key, request)
+    }
+    pub fn refresh_kakao(
+        &self,
+        key: &str,
+        collection_id: &str,
+    ) -> Result<AladinSyncResult, LibraryError> {
+        self.book_flow("kakao").refresh_aladin(key, collection_id)
+    }
+    pub fn get_kakao_connection(
+        &self,
+        collection_id: &str,
+    ) -> Result<Option<AladinConnection>, LibraryError> {
+        self.book_flow("kakao").get_aladin_connection(collection_id)
+    }
+}
 
 #[derive(Debug, Clone)]
 struct GroupedSeries {
@@ -51,13 +127,19 @@ pub(super) struct AladinReconcileOutcome {
     pub(super) release_event_count: u64,
 }
 
-impl Library {
+impl BookFlow<'_> {
+    fn search_items(&self, key: &str, query: &str) -> Result<Vec<AladinItem>, LibraryError> {
+        match self.provider {
+            "kakao" => super::kakao_books::search(key, query),
+            _ => aladin::search(key, query),
+        }
+    }
     pub fn search_aladin(
         &self,
         ttb_key: &str,
         query: &str,
     ) -> Result<Vec<AladinSeriesCandidate>, LibraryError> {
-        Ok(group_items(aladin::search(ttb_key, query)?))
+        Ok(group_items(self.search_items(ttb_key, query)?))
     }
 
     pub fn apply_aladin(
@@ -65,7 +147,7 @@ impl Library {
         ttb_key: &str,
         request: AladinApplyRequest,
     ) -> Result<AladinSyncResult, LibraryError> {
-        let items = aladin::search(ttb_key, &request.query)?;
+        let items = self.search_items(ttb_key, &request.query)?;
         self.apply_aladin_items(request, items, Vec::new())
     }
 
@@ -75,7 +157,7 @@ impl Library {
         collection_id: &str,
     ) -> Result<AladinSyncResult, LibraryError> {
         let (anchor_item_id, config) = self.aladin_binding_config(collection_id)?;
-        let items = aladin::search(ttb_key, &config.query)?;
+        let items = self.search_items(ttb_key, &config.query)?;
         self.refresh_aladin_items(collection_id, anchor_item_id, config, items)
     }
 
@@ -158,14 +240,14 @@ impl Library {
         &self,
         collection_id: &str,
     ) -> Result<Option<AladinConnection>, LibraryError> {
-        let connection = self.connection()?;
+        let connection = self.library.connection()?;
         require_collection(&connection, collection_id)?;
         let binding = connection
             .query_row(
                 "SELECT external_id, provider_config_json, last_synced_at
                  FROM collection_external_bindings
                  WHERE collection_id = ?1 AND provider = ?2",
-                params![collection_id, PROVIDER],
+                params![collection_id, self.provider],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
@@ -184,6 +266,7 @@ impl Library {
                 )
                 .map_err(|_| LibraryError::AmbiguousAladinBinding)?;
                 Ok(AladinConnection {
+                    provider: self.provider.to_owned(),
                     anchor_item_id,
                     query: config.query,
                     last_synced_at,
@@ -196,14 +279,14 @@ impl Library {
         &self,
         collection_id: &str,
     ) -> Result<(String, ProviderConfig), LibraryError> {
-        let connection = self.connection()?;
+        let connection = self.library.connection()?;
         require_collection(&connection, collection_id)?;
         let (anchor, config): (String, Option<String>) = connection
             .query_row(
                 "SELECT external_id, provider_config_json
                  FROM collection_external_bindings
                  WHERE collection_id = ?1 AND provider = ?2",
-                params![collection_id, PROVIDER],
+                params![collection_id, self.provider],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()?
@@ -270,7 +353,7 @@ impl Library {
             serde_json::to_string(&config).map_err(|_| LibraryError::InvalidAladinResponse)?;
         let snapshot_json = serde_json::to_string(&selected.candidate)
             .map_err(|_| LibraryError::InvalidAladinResponse)?;
-        let mut connection = self.connection()?;
+        let mut connection = self.library.connection()?;
         let transaction = connection.transaction()?;
         require_collection(&transaction, &request.collection_id)?;
         let subscription_last_checked_at = transaction
@@ -278,7 +361,7 @@ impl Library {
                 "SELECT last_checked_at
                  FROM release_watch_subscriptions
                  WHERE collection_id = ?1 AND provider = ?2",
-                params![request.collection_id, PROVIDER],
+                params![request.collection_id, self.provider],
                 |row| row.get::<_, Option<String>>(0),
             )
             .optional()?;
@@ -291,6 +374,7 @@ impl Library {
         let mut release_event_count = 0;
         for item in &selected.items {
             let existing = reconcile_source(
+                self.provider,
                 &transaction,
                 &request.collection_id,
                 item,
@@ -327,7 +411,7 @@ impl Library {
             &transaction,
             &request.collection_id,
             ExternalBindingInput {
-                provider: PROVIDER.into(),
+                provider: self.provider.into(),
                 external_id: request.anchor_item_id,
                 provider_config_json: Some(config_json),
                 provider_data_json: Some(snapshot_json),
@@ -339,8 +423,18 @@ impl Library {
             transaction.execute(
                 "UPDATE release_watch_subscriptions SET last_checked_at = ?1
                  WHERE collection_id = ?2 AND provider = ?3",
-                params![checked_at, request.collection_id, PROVIDER],
+                params![checked_at, request.collection_id, self.provider],
             )?;
+        }
+        if self.provider == "kakao" {
+            transaction.execute(
+                "INSERT INTO release_watch_subscriptions (collection_id, provider, last_checked_at)
+                 SELECT collection_id, 'kakao', ?2 FROM release_watch_subscriptions
+                 WHERE collection_id = ?1 AND provider = 'aladin'
+                 ON CONFLICT(collection_id, provider) DO NOTHING",
+                params![request.collection_id, checked_at],
+            )?;
+            transaction.execute("DELETE FROM release_watch_subscriptions WHERE collection_id = ?1 AND provider = 'aladin'", [&request.collection_id])?;
         }
         transaction.commit()?;
         Ok(AladinReconcileOutcome {
@@ -351,6 +445,7 @@ impl Library {
 }
 
 fn reconcile_source(
+    provider: &str,
     transaction: &Transaction<'_>,
     collection_id: &str,
     item: &AladinItem,
@@ -363,7 +458,7 @@ fn reconcile_source(
                     publication_date, item_url, provider_data_json
              FROM collection_volume_sources
              WHERE collection_id = ?1 AND volume_number = ?2 AND provider = ?3",
-            params![collection_id, item.volume_number, PROVIDER],
+            params![collection_id, item.volume_number, provider],
             |row| {
                 Ok(StoredAladinSource {
                     provider_item_id: row.get(0)?,
@@ -414,7 +509,7 @@ fn reconcile_source(
             params![
                 collection_id,
                 item.volume_number,
-                PROVIDER,
+                provider,
                 current.provider_item_id,
                 current.title,
                 current.author,
@@ -718,10 +813,12 @@ mod tests {
         ];
 
         let first = library
+            .book_flow("aladin")
             .apply_aladin_items(request(&work_id, &items), items.clone(), Vec::new())
             .unwrap();
         assert_eq!((first.added, first.updated, first.unchanged), (2, 0, 0));
         let second = library
+            .book_flow("aladin")
             .apply_aladin_items(request(&work_id, &items), items.clone(), Vec::new())
             .unwrap();
         assert_eq!((second.added, second.updated, second.unchanged), (0, 0, 2));
@@ -813,7 +910,11 @@ mod tests {
             None,
         )];
 
-        let result = library.apply_aladin_items(request(&target_id, &items), items, Vec::new());
+        let result = library.book_flow("aladin").apply_aladin_items(
+            request(&target_id, &items),
+            items,
+            Vec::new(),
+        );
         assert!(matches!(
             result,
             Err(LibraryError::DuplicateAladinProviderItem)
@@ -840,6 +941,7 @@ mod tests {
             item("item-2", "던전밥", 2, "A출판", Some("9782"), None),
         ];
         library
+            .book_flow("aladin")
             .apply_aladin_items(request(&work_id, &initial), initial.clone(), Vec::new())
             .unwrap();
         let candidate = group_items(initial.clone()).remove(0);
@@ -850,6 +952,7 @@ mod tests {
             known_item_ids: vec!["item-1".into(), "item-2".into()],
         };
         library
+            .book_flow("aladin")
             .refresh_aladin_items(
                 &work_id,
                 "missing-anchor".into(),
@@ -869,7 +972,7 @@ mod tests {
         assert_eq!(source_count, 2);
 
         let unrelated = vec![item("other", "다른책", 1, "B출판", None, None)];
-        let error = library.refresh_aladin_items(
+        let error = library.book_flow("aladin").refresh_aladin_items(
             &work_id,
             "missing-anchor".into(),
             ProviderConfig {
@@ -897,6 +1000,7 @@ mod tests {
             Some("2026-08-21"),
         )];
         library
+            .book_flow("aladin")
             .apply_aladin_items(request(&work_id, &initial), initial, Vec::new())
             .unwrap();
         library.set_release_watch_enabled(&work_id, true).unwrap();
@@ -930,6 +1034,7 @@ mod tests {
         ];
 
         let first = library
+            .book_flow("aladin")
             .refresh_aladin_items_at(&work_id, refreshed.clone(), "2026-08-22T00:00:00Z")
             .unwrap();
         assert_eq!(first.release_event_count, 3);
@@ -948,6 +1053,7 @@ mod tests {
         );
 
         let second = library
+            .book_flow("aladin")
             .refresh_aladin_items_at(&work_id, refreshed, "2026-08-22T00:00:00Z")
             .unwrap();
         assert_eq!(second.release_event_count, 0);
@@ -972,9 +1078,11 @@ mod tests {
         let work_id = create_work(&library, "던전밥");
         let initial = vec![item("item-1", "던전밥", 1, "A출판", Some("9781"), None)];
         library
+            .book_flow("aladin")
             .apply_aladin_items(request(&work_id, &initial), initial, Vec::new())
             .unwrap();
         library
+            .book_flow("aladin")
             .refresh_aladin_items_at(
                 &work_id,
                 vec![
@@ -1023,6 +1131,7 @@ mod tests {
             Some("2026-08-21"),
         )];
         library
+            .book_flow("aladin")
             .apply_aladin_items(request(&target_id, &initial), initial, Vec::new())
             .unwrap();
         library.set_release_watch_enabled(&target_id, true).unwrap();
@@ -1037,7 +1146,7 @@ mod tests {
             )
             .unwrap();
 
-        let result = library.refresh_aladin_items_at(
+        let result = library.book_flow("aladin").refresh_aladin_items_at(
             &target_id,
             vec![
                 item(
@@ -1077,5 +1186,97 @@ mod tests {
                 Some("2026-08-20T00:00:00Z".into())
             )
         );
+    }
+    #[test]
+    fn kakao_connection_preserves_aladin_sources_volume_ids_and_transfers_watch() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let id = create_work(&library, "사용자 작품명");
+        let old = vec![item(
+            "aladin-1",
+            "스틸 볼 런",
+            1,
+            "문학동네",
+            Some("9788954677530"),
+            Some("2020-01-01"),
+        )];
+        library
+            .book_flow("aladin")
+            .apply_aladin_items(request(&id, &old), old, Vec::new())
+            .unwrap();
+        library.set_release_watch_enabled(&id, true).unwrap();
+        let before: String = library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT id FROM collection_volumes WHERE collection_id = ?1",
+                [&id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let newer = vec![item(
+            "isbn13:9788954677530",
+            "스틸 볼 런",
+            1,
+            "문학동네",
+            Some("9788954677530"),
+            Some("2021-01-01"),
+        )];
+        library
+            .book_flow("kakao")
+            .apply_aladin_items(request(&id, &newer), newer.clone(), Vec::new())
+            .unwrap();
+        assert!(library.get_aladin_connection(&id).unwrap().is_some());
+        assert!(library.get_kakao_connection(&id).unwrap().is_some());
+        let after: String = library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT id FROM collection_volumes WHERE collection_id = ?1",
+                [&id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(before, after);
+        let sources: i64 = library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM collection_volume_sources WHERE collection_id = ?1",
+                [&id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(sources, 2);
+        let provider: String = library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT provider FROM release_watch_subscriptions WHERE collection_id = ?1",
+                [&id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(provider, "kakao");
+        assert!(library.take_unread_release_changes(&id).unwrap().is_empty());
+        let mut refreshed = newer;
+        refreshed.push(item(
+            "isbn13:new-2",
+            "스틸 볼 런",
+            2,
+            "문학동네",
+            Some("new-2"),
+            Some("2026-10-01"),
+        ));
+        library
+            .book_flow("kakao")
+            .refresh_aladin_items_at(&id, refreshed, "2026-09-06T00:00:00Z")
+            .unwrap();
+        let events = library.take_unread_release_changes(&id).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].volume_number, 2);
+        assert_eq!(events[0].kind, ReleaseWatchEventKind::NewVolume);
+        library.set_release_watch_enabled(&id, false).unwrap();
+        assert!(!library.get_release_watch_status(&id).unwrap().enabled);
     }
 }

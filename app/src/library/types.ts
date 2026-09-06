@@ -504,22 +504,23 @@ export type TmdbArtworkReplaceRequest = {
   backdrop: TmdbArtworkDecision;
 };
 
-export type AladinCredentialStatus = { configured: boolean };
+export type KakaoCredentialStatus = { configured: boolean };
 
-export type AladinConnection = {
+export type BookConnection = {
+  provider?: "aladin" | "kakao";
   anchorItemId: string;
   query: string;
   lastSyncedAt: string | null;
 };
 
-export type AladinSyncResult = {
+export type KakaoSyncResult = {
   added: number;
   updated: number;
   unchanged: number;
   ignored: number;
 };
 
-export type AladinVolumeCandidate = {
+export type KakaoVolumeCandidate = {
   volumeNumber: number;
   providerItemId: string;
   title: string;
@@ -527,17 +528,17 @@ export type AladinVolumeCandidate = {
   isbn13: string | null;
 };
 
-export type AladinSeriesCandidate = {
+export type KakaoSeriesCandidate = {
   anchorItemId: string;
   groupFingerprint: string;
   title: string;
   author: string | null;
   publisher: string | null;
-  volumes: AladinVolumeCandidate[];
+  volumes: KakaoVolumeCandidate[];
   ignoredCount: number;
 };
 
-export type AladinApplyRequest = {
+export type KakaoApplyRequest = {
   collectionId: string;
   query: string;
   anchorItemId: string;
@@ -1017,13 +1018,13 @@ export interface LibraryGateway {
   applyMangaDex(request: MangaDexApplyRequest): Promise<CollectionSummary>;
   refreshMangaDex(collectionId: string): Promise<CollectionSummary>;
   getMangaDexConnection(collectionId: string): Promise<MangaDexConnection | null>;
-  getAladinCredentialStatus(): Promise<AladinCredentialStatus>;
-  setAladinTtbKey(ttbKey: string): Promise<AladinCredentialStatus>;
-  deleteAladinTtbKey(): Promise<AladinCredentialStatus>;
-  searchAladin(query: string): Promise<AladinSeriesCandidate[]>;
-  applyAladin(request: AladinApplyRequest): Promise<AladinSyncResult>;
-  refreshAladin(collectionId: string): Promise<AladinSyncResult>;
-  getAladinConnection(collectionId: string): Promise<AladinConnection | null>;
+  getKakaoCredentialStatus(): Promise<KakaoCredentialStatus>;
+  setKakaoApiKey(apiKey: string): Promise<KakaoCredentialStatus>;
+  deleteKakaoApiKey(): Promise<KakaoCredentialStatus>;
+  searchKakao(query: string): Promise<KakaoSeriesCandidate[]>;
+  applyKakao(request: KakaoApplyRequest): Promise<KakaoSyncResult>;
+  refreshKakao(collectionId: string): Promise<KakaoSyncResult>;
+  getBookConnection(collectionId: string): Promise<BookConnection | null>;
   getIgdbCredentialStatus(): Promise<IgdbCredentialStatus>;
   setIgdbCredentials(input: { clientId: string; clientSecret: string }): Promise<IgdbCredentialStatus>;
   deleteIgdbCredentials(): Promise<IgdbCredentialStatus>;

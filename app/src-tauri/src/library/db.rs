@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 37;
+pub(crate) const SCHEMA_VERSION: i64 = 40;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -210,6 +210,15 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         if version <= 36 {
             transaction.execute_batch(include_str!("../../migrations/0037_catalog_review.sql"))?;
         }
+        if version <= 37 {
+            transaction.execute_batch(include_str!("../../migrations/0038_cloud_settings.sql"))?;
+        }
+        if version <= 38 {
+            transaction.execute_batch(include_str!("../../migrations/0039_cloud_metadata_status.sql"))?;
+        }
+        if version <= 39 {
+            transaction.execute_batch(include_str!("../../migrations/0040_book_release_providers.sql"))?;
+        }
         transaction.commit()?;
         Ok::<(), LibraryError>(())
     })();
@@ -236,6 +245,7 @@ mod tests {
         // Build the previous schema using the migration path, then remove only
         // the additive group tables if this test runs against the new schema.
         migrate_to_latest(&mut connection, 0).unwrap();
+        connection.execute_batch("ALTER TABLE library_settings DROP COLUMN cloud_capture_enabled; DROP TABLE cloud_activity;").unwrap();
         connection
             .execute_batch(
                 "DROP TABLE IF EXISTS online_catalog_review_candidates;
@@ -327,6 +337,7 @@ mod tests {
         // Build the previous schema using the migration path, then remove only
         // the additive group tables if this test runs against the new schema.
         migrate_to_latest(&mut connection, 0).unwrap();
+        connection.execute_batch("ALTER TABLE library_settings DROP COLUMN cloud_capture_enabled; DROP TABLE cloud_activity;").unwrap();
         connection
             .execute_batch(
                 "DROP TABLE IF EXISTS online_catalog_review_candidates;
@@ -1908,6 +1919,12 @@ mod tests {
             .execute_batch(MANGA_CATALOG_RECOVERY_SCHEMA)
             .unwrap();
 
+        // Match the pre-existing book watch tables in real v31/v32 libraries.
+        connection.execute_batch("CREATE TABLE collections(id TEXT PRIMARY KEY, external_source TEXT, external_id TEXT, external_metadata_json TEXT, external_synced_at TEXT, created_at TEXT, updated_at TEXT);").unwrap();
+        connection.execute_batch(COLLECTION_EXTERNAL_BINDINGS_SCHEMA).unwrap();
+        connection.execute_batch(ALADIN_RELEASE_WATCH_SCHEMA).unwrap();
+        // This focused legacy fixture also needs the cloud settings present in real v31/v32 libraries.
+        connection.execute_batch("CREATE TABLE library_settings(singleton INTEGER PRIMARY KEY, cloud_sync_enabled INTEGER NOT NULL DEFAULT 0, cloud_api_base_url TEXT); INSERT INTO library_settings(singleton) VALUES(1); CREATE TABLE cloud_backfill_control(singleton INTEGER PRIMARY KEY, state TEXT NOT NULL); INSERT INTO cloud_backfill_control VALUES(1, 'idle');").unwrap();
         migrate_to_latest(&mut connection, 32).unwrap();
 
         let source_column_count: i64 = connection
@@ -2013,6 +2030,12 @@ mod tests {
         let mut connection = Connection::open_in_memory().unwrap();
         connection.pragma_update(None, "user_version", 31).unwrap();
 
+        // Match the pre-existing book watch tables in real v31/v32 libraries.
+        connection.execute_batch("CREATE TABLE collections(id TEXT PRIMARY KEY, external_source TEXT, external_id TEXT, external_metadata_json TEXT, external_synced_at TEXT, created_at TEXT, updated_at TEXT);").unwrap();
+        connection.execute_batch(COLLECTION_EXTERNAL_BINDINGS_SCHEMA).unwrap();
+        connection.execute_batch(ALADIN_RELEASE_WATCH_SCHEMA).unwrap();
+        // This focused legacy fixture also needs the cloud settings present in real v31/v32 libraries.
+        connection.execute_batch("CREATE TABLE library_settings(singleton INTEGER PRIMARY KEY, cloud_sync_enabled INTEGER NOT NULL DEFAULT 0, cloud_api_base_url TEXT); INSERT INTO library_settings(singleton) VALUES(1); CREATE TABLE cloud_backfill_control(singleton INTEGER PRIMARY KEY, state TEXT NOT NULL); INSERT INTO cloud_backfill_control VALUES(1, 'idle');").unwrap();
         migrate_to_latest(&mut connection, 31).unwrap();
 
         let table_count: i64 = connection
@@ -2031,4 +2054,22 @@ mod tests {
             SCHEMA_VERSION,
         );
     }
+    #[test]
+    fn kakao_watch_migration_preserves_legacy_subscription_and_foreign_keys() {
+        let connection = rusqlite::Connection::open_in_memory().unwrap();
+        connection.execute_batch("PRAGMA foreign_keys=ON;
+            CREATE TABLE collection_external_bindings(collection_id TEXT, provider TEXT, PRIMARY KEY(collection_id,provider));
+            CREATE TABLE release_watch_subscriptions(collection_id TEXT NOT NULL, provider TEXT NOT NULL CHECK(provider='aladin'), last_checked_at TEXT,
+                PRIMARY KEY(collection_id,provider), FOREIGN KEY(collection_id,provider) REFERENCES collection_external_bindings(collection_id,provider) ON DELETE CASCADE);
+            CREATE INDEX release_watch_subscriptions_by_due ON release_watch_subscriptions(last_checked_at,collection_id);
+            INSERT INTO collection_external_bindings VALUES ('work','aladin'),('work','kakao');
+            INSERT INTO release_watch_subscriptions VALUES ('work','aladin','2026-09-05');").unwrap();
+        connection.execute_batch(include_str!("../../migrations/0040_book_release_providers.sql")).unwrap();
+        let old: String = connection.query_row("SELECT last_checked_at FROM release_watch_subscriptions WHERE provider='aladin'", [], |r| r.get(0)).unwrap();
+        assert_eq!(old, "2026-09-05");
+        connection.execute("INSERT INTO release_watch_subscriptions VALUES ('work','kakao',NULL)", []).unwrap();
+        assert!(!connection.prepare("PRAGMA foreign_key_check").unwrap().exists([]).unwrap());
+        assert!(connection.execute("INSERT INTO release_watch_subscriptions VALUES ('missing','kakao',NULL)", []).is_err());
+    }
+
 }

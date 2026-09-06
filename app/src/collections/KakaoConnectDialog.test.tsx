@@ -2,12 +2,12 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
-import type { AladinSeriesCandidate, LibraryGateway } from "../library/types";
-import { AladinConnectDialog } from "./AladinConnectDialog";
+import type { KakaoSeriesCandidate, LibraryGateway } from "../library/types";
+import { KakaoConnectDialog } from "./KakaoConnectDialog";
 
 afterEach(cleanup);
 
-const candidates: AladinSeriesCandidate[] = [{
+const candidates: KakaoSeriesCandidate[] = [{
   anchorItemId: "item-1",
   groupFingerprint: "fingerprint-a",
   title: "던전밥",
@@ -22,15 +22,15 @@ const candidates: AladinSeriesCandidate[] = [{
 
 function renderDialog(overrides: Partial<LibraryGateway> = {}) {
   const gateway = {
-    searchAladin: vi.fn().mockResolvedValue(candidates),
-    applyAladin: vi.fn().mockResolvedValue({ added: 2, updated: 0, unchanged: 0, ignored: 2 }),
+    searchKakao: vi.fn().mockResolvedValue(candidates),
+    applyKakao: vi.fn().mockResolvedValue({ added: 2, updated: 0, unchanged: 0, ignored: 2 }),
     ...overrides,
   } as unknown as LibraryGateway;
   const onClose = vi.fn();
   const onApplied = vi.fn().mockResolvedValue(undefined);
   render(
     <LibraryProvider gateway={gateway}>
-      <AladinConnectDialog
+      <KakaoConnectDialog
         open
         collectionId="collection-1"
         initialQuery="던전밥"
@@ -42,17 +42,17 @@ function renderDialog(overrides: Partial<LibraryGateway> = {}) {
   return { gateway, onClose, onApplied };
 }
 
-describe("AladinConnectDialog", () => {
+describe("KakaoConnectDialog", () => {
   it("searches only on submit and shows text-only grouped volume details", async () => {
     const user = userEvent.setup();
     const { gateway } = renderDialog();
 
-    expect(screen.getByRole("searchbox", { name: "알라딘 작품 검색" })).toHaveValue("던전밥");
-    expect(gateway.searchAladin).not.toHaveBeenCalled();
+    expect(screen.getByRole("searchbox", { name: "카카오 작품 검색" })).toHaveValue("던전밥");
+    expect(gateway.searchKakao).not.toHaveBeenCalled();
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "검색" }));
 
-    expect(gateway.searchAladin).toHaveBeenCalledWith("던전밥");
+    expect(gateway.searchKakao).toHaveBeenCalledWith("던전밥");
     const result = await screen.findByRole("button", { name: /던전밥.*쿠이 료코.*소미미디어.*1–3권.*2권/ });
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
     await user.click(result);
@@ -64,12 +64,12 @@ describe("AladinConnectDialog", () => {
   it("rejects a one-character query locally and applies exactly the selected identity", async () => {
     const user = userEvent.setup();
     const { gateway, onApplied, onClose } = renderDialog();
-    const searchbox = screen.getByRole("searchbox", { name: "알라딘 작품 검색" });
+    const searchbox = screen.getByRole("searchbox", { name: "카카오 작품 검색" });
     await user.clear(searchbox);
     await user.type(searchbox, " 가 ");
     await user.click(screen.getByRole("button", { name: "검색" }));
     expect(screen.getByRole("alert")).toHaveTextContent("두 글자 이상");
-    expect(gateway.searchAladin).not.toHaveBeenCalled();
+    expect(gateway.searchKakao).not.toHaveBeenCalled();
 
     await user.clear(searchbox);
     await user.type(searchbox, " 던전밥 ");
@@ -77,7 +77,7 @@ describe("AladinConnectDialog", () => {
     await user.click(await screen.findByRole("button", { name: /던전밥.*쿠이 료코/ }));
     await user.click(screen.getByRole("button", { name: "연결" }));
 
-    expect(gateway.applyAladin).toHaveBeenCalledWith({
+    expect(gateway.applyKakao).toHaveBeenCalledWith({
       collectionId: "collection-1",
       query: "던전밥",
       anchorItemId: "item-1",
@@ -89,9 +89,9 @@ describe("AladinConnectDialog", () => {
 
   it("keeps errors and pending requests inside the dialog", async () => {
     const user = userEvent.setup();
-    let resolveSearch!: (value: AladinSeriesCandidate[]) => void;
-    const pending = new Promise<AladinSeriesCandidate[]>((resolve) => { resolveSearch = resolve; });
-    const { gateway, onClose } = renderDialog({ searchAladin: vi.fn().mockReturnValue(pending) });
+    let resolveSearch!: (value: KakaoSeriesCandidate[]) => void;
+    const pending = new Promise<KakaoSeriesCandidate[]>((resolve) => { resolveSearch = resolve; });
+    const { gateway, onClose } = renderDialog({ searchKakao: vi.fn().mockReturnValue(pending) });
 
     await user.click(screen.getByRole("button", { name: "검색" }));
     expect(screen.getByRole("button", { name: "검색 중…" })).toBeDisabled();
@@ -100,7 +100,7 @@ describe("AladinConnectDialog", () => {
     resolveSearch([]);
     expect(await screen.findByText("검색 결과가 없습니다.")).toBeInTheDocument();
 
-    vi.mocked(gateway.searchAladin).mockRejectedValueOnce(new Error("검색 실패"));
+    vi.mocked(gateway.searchKakao).mockRejectedValueOnce(new Error("검색 실패"));
     await user.click(screen.getByRole("button", { name: "검색" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("검색 실패");
   });

@@ -2,6 +2,7 @@ use super::error::LibraryError;
 use super::models::{IgdbCredentialStatus, IgdbCredentials, TmdbCredentialStatus, TmdbCredentials};
 use serde_json;
 
+const KAKAO_TARGET: &str = "Lakomics/KakaoBooks";
 const ALADIN_TARGET: &str = "Lakomics/AladinTTB";
 const CLOUD_API_TARGET: &str = "Lakomics/CloudApi";
 const IGDB_TARGET: &str = "Lakomics/Igdb";
@@ -658,4 +659,44 @@ fn read_tmdb_token_with<B: CredentialBackend>(
     backend: &B,
 ) -> Result<TmdbCredentials, LibraryError> {
     read_tmdb_token(backend)
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn kakao_key_status() -> Result<bool, LibraryError> {
+    CredentialService::new(&windows::WindowsCredentialBackend, KAKAO_TARGET).configured()
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn set_kakao_key(value: &str) -> Result<(), LibraryError> {
+    CredentialService::new(&windows::WindowsCredentialBackend, KAKAO_TARGET).set(value)
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn delete_kakao_key() -> Result<(), LibraryError> {
+    CredentialService::new(&windows::WindowsCredentialBackend, KAKAO_TARGET).delete()
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn read_kakao_key() -> Result<String, LibraryError> {
+    CredentialService::new(&windows::WindowsCredentialBackend, KAKAO_TARGET).read()
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn kakao_key_status() -> Result<bool, LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn set_kakao_key(_value: &str) -> Result<(), LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn delete_kakao_key() -> Result<(), LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn read_kakao_key() -> Result<String, LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
 }

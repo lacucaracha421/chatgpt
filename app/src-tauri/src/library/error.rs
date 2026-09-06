@@ -312,13 +312,13 @@ pub enum LibraryError {
     InvalidMangaDexResponse,
     #[error("이 MangaDex 작품은 이미 다른 Work에 연결되어 있습니다")]
     DuplicateProviderBinding,
-    #[error("알라딘 검색어는 두 글자 이상이어야 합니다")]
+    #[error("도서 검색 서비스 검색어는 두 글자 이상이어야 합니다")]
     InvalidAladinQuery,
-    #[error("알라딘 TTB 키가 올바르지 않습니다")]
+    #[error("도서 검색 API 키가 올바르지 않습니다")]
     InvalidAladinCredential,
-    #[error("알라딘 TTB 키가 설정되지 않았습니다")]
+    #[error("도서 검색 API 키가 설정되지 않았습니다")]
     AladinCredentialNotConfigured,
-    #[error("알라딘 TTB 키는 비어 있을 수 없습니다")]
+    #[error("도서 검색 API 키는 비어 있을 수 없습니다")]
     InvalidAladinCredentialValue,
     #[error("이 운영체제에서는 보안 자격 증명 저장소를 사용할 수 없습니다")]
     CredentialStoreUnavailable,
@@ -368,19 +368,19 @@ pub enum LibraryError {
     TmdbInvalidImagePath,
     #[error("TMDB 영화 식별자가 올바르지 않습니다")]
     InvalidTmdbIdentity,
-    #[error("알라딘에 연결할 수 없습니다")]
+    #[error("도서 검색 서비스에 연결할 수 없습니다")]
     AladinUnavailable,
-    #[error("알라딘 요청 시간이 초과됐습니다")]
+    #[error("도서 검색 서비스 요청 시간이 초과됐습니다")]
     AladinTimedOut,
-    #[error("알라딘 요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요")]
+    #[error("도서 검색 서비스 요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요")]
     AladinRateLimited,
-    #[error("알라딘 응답을 처리할 수 없습니다")]
+    #[error("도서 검색 서비스 응답을 처리할 수 없습니다")]
     InvalidAladinResponse,
-    #[error("기존 알라딘 연결과 같은 시리즈를 확실하게 찾을 수 없습니다")]
+    #[error("기존 도서 검색 서비스 연결과 같은 시리즈를 확실하게 찾을 수 없습니다")]
     AmbiguousAladinBinding,
-    #[error("만화 컬렉션을 알라딘에 연결한 뒤 신간 알림을 켤 수 있습니다")]
+    #[error("만화 컬렉션을 도서 검색 서비스에 연결한 뒤 신간 알림을 켤 수 있습니다")]
     ReleaseWatchRequiresAladinBinding,
-    #[error("이 알라딘 상품은 이미 다른 Work에 연결되어 있습니다")]
+    #[error("이 도서 검색 서비스 상품은 이미 다른 Work에 연결되어 있습니다")]
     DuplicateAladinProviderItem,
     #[error("영상 형식을 지원하지 않거나 파일이 손상됐습니다")]
     UnsupportedVideo,

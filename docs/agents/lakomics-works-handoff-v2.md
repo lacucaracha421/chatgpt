@@ -41,8 +41,13 @@ Different presentation roles may use different artwork; game hero/main artwork i
 ## Manga
 
 - MangaDex is useful for work identity/general manga metadata.
-- Aladin is useful for Korean commercial edition/release tracking.
+- Kakao book search supplies Korean commercial edition/release tracking. Legacy Aladin bindings and source snapshots are retained for existing collections.
 - These providers are complementary and can coexist on one Collection.
+- New connections use Kakao REST API credentials stored separately as `Lakomics/KakaoBooks`. Legacy Aladin credentials are not overwritten or deleted.
+- Existing Aladin-linked collections require an explicit Kakao series selection; title similarity alone never migrates their provider identity. Connecting Kakao preserves volume IDs/artwork and transfers an existing release watch without creating notifications for the initial import.
+- Automatic release checks use Kakao and run only for subscriptions due after 24 hours. Legacy-only subscriptions are retained but are dormant until reconnection.
+- Kakao search follows all result pages (`size=50`, at most 50 pages); incomplete results fail rather than silently apply. Publisher/author/title groups remain distinct. Covers remain owned by the current artwork selection; Kakao thumbnail URLs in raw snapshots are not automatically applied.
+- Schema v40 expands the release subscription provider constraint without rewriting legacy sources. Applying it to an active library requires the separate operational approval in `AGENTS.md`.
 - Volume is a first-class concept; stable volume identity/order must not regress to loose filename labels.
 - Manga volume shelves are ordered primarily by volume number, not a generic date rail.
 - Clicking a manga cover is primarily collectible/cover appreciation, not a metadata-dialog action.

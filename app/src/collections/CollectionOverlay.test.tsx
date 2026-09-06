@@ -104,13 +104,13 @@ function renderOverlay(
     syncMangaDexVolumeCovers: vi.fn().mockResolvedValue({ completed: 0, skipped: 0, failed: 0 }), inspectLegacyPackageMigration: vi.fn(), executeLegacyPackageMigration: vi.fn().mockResolvedValue({ completed: 0, skipped: 0, failed: 0 }),
     getMangaDexConnection: vi.fn().mockResolvedValue(null),
     refreshMangaDex: vi.fn().mockResolvedValue(collection),
-    getAladinCredentialStatus: vi.fn().mockResolvedValue({ configured: false }),
-    setAladinTtbKey: vi.fn().mockResolvedValue({ configured: true }),
-    deleteAladinTtbKey: vi.fn().mockResolvedValue({ configured: false }),
-    searchAladin: vi.fn().mockResolvedValue([]),
-    applyAladin: vi.fn().mockResolvedValue({ added: 0, updated: 0, unchanged: 0, ignored: 0 }),
-    refreshAladin: vi.fn().mockResolvedValue({ added: 0, updated: 0, unchanged: 0, ignored: 0 }),
-    getAladinConnection: vi.fn().mockResolvedValue(null),
+    getKakaoCredentialStatus: vi.fn().mockResolvedValue({ configured: false }),
+    setKakaoApiKey: vi.fn().mockResolvedValue({ configured: true }),
+    deleteKakaoApiKey: vi.fn().mockResolvedValue({ configured: false }),
+    searchKakao: vi.fn().mockResolvedValue([]),
+    applyKakao: vi.fn().mockResolvedValue({ added: 0, updated: 0, unchanged: 0, ignored: 0 }),
+    refreshKakao: vi.fn().mockResolvedValue({ added: 0, updated: 0, unchanged: 0, ignored: 0 }),
+    getBookConnection: vi.fn().mockResolvedValue(null),
     getIgdbConnection: vi.fn().mockResolvedValue(null),
     getTmdbConnection: vi.fn().mockResolvedValue(null),
     previewTmdbMovie: vi.fn().mockResolvedValue({ movieId: 10494, proposedTitle: movieCollection.name, originalTitle: movieCollection.originalTitle, releaseDate: movieCollection.releaseDate, runtimeMinutes: 81, director: movieCollection.director, productionCompany: movieCollection.productionCompany, genres: movieCollection.genres, overview: movieCollection.overview, externalScore: 84, posters: [], backdrops: [] }),
@@ -153,6 +153,18 @@ async function openProviderMenu(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("CollectionOverlay MangaDex flow", () => {
+  it("explains legacy Aladin reconnection and opens Kakao without refreshing the old provider", async () => {
+    const user = userEvent.setup();
+    const { gateway } = renderOverlay({
+      getBookConnection: vi.fn().mockResolvedValue({ provider: "aladin", anchorItemId: "old-1", query: "던전밥", lastSyncedAt: "t" }),
+    });
+    expect(await screen.findByText(/기존 알라딘 신간 확인은 중단된 상태입니다/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "카카오 연결" }));
+    expect(await screen.findByRole("dialog", { name: "Kakao 연결" })).toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "카카오 작품 검색" })).toHaveValue("던전밥");
+    expect(gateway.refreshKakao).not.toHaveBeenCalled();
+  });
+
   it("loads an unconnected manga without requesting MangaDex cover sync or showing an error toast", async () => {
     const syncMangaDexVolumeCovers = vi.fn().mockRejectedValue(new Error("MangaDex identity is invalid"));
     const { gateway } = renderOverlay({ syncMangaDexVolumeCovers });
@@ -188,11 +200,11 @@ describe("CollectionOverlay MangaDex flow", () => {
     expect(screen.getByRole("dialog", { name: "던전밥 2권 표지 감상" })).toBeInTheDocument();
   });
 
-  it("enables release watch for a connected Aladin manga", async () => {
+  it("enables release watch for a connected Kakao manga", async () => {
     const user = userEvent.setup();
     const setReleaseWatchEnabled = vi.fn().mockResolvedValue({ enabled: true, lastCheckedAt: null });
     const { gateway } = renderOverlay({
-      getAladinConnection: vi.fn().mockResolvedValue({ anchorItemId: "item-1", query: "던전밥", lastSyncedAt: "t" }),
+      getBookConnection: vi.fn().mockResolvedValue({ anchorItemId: "item-1", query: "던전밥", lastSyncedAt: "t" }),
       getReleaseWatchStatus: vi.fn().mockResolvedValue({ enabled: false, lastCheckedAt: null }),
       setReleaseWatchEnabled,
     });
@@ -211,7 +223,7 @@ describe("CollectionOverlay MangaDex flow", () => {
     const user = userEvent.setup();
     const setReleaseWatchEnabled = vi.fn().mockResolvedValue({ enabled: false, lastCheckedAt: "t" });
     renderOverlay({
-      getAladinConnection: vi.fn().mockResolvedValue({ anchorItemId: "item-1", query: "던전밥", lastSyncedAt: "t" }),
+      getBookConnection: vi.fn().mockResolvedValue({ anchorItemId: "item-1", query: "던전밥", lastSyncedAt: "t" }),
       getReleaseWatchStatus: vi.fn().mockResolvedValue({ enabled: true, lastCheckedAt: "t" }),
       setReleaseWatchEnabled,
     });
@@ -224,11 +236,11 @@ describe("CollectionOverlay MangaDex flow", () => {
     expect(await screen.findByRole("menuitem", { name: "신간 알림 켜기" })).toBeInTheDocument();
   });
 
-  it("does not expose release watch without an Aladin binding", async () => {
+  it("does not expose release watch without an Kakao binding", async () => {
     const user = userEvent.setup();
     const { gateway } = renderOverlay();
 
-    await waitFor(() => expect(gateway.getAladinConnection).toHaveBeenCalledOnce());
+    await waitFor(() => expect(gateway.getBookConnection).toHaveBeenCalledOnce());
     expect(screen.queryByRole("button", { name: /신간 알림/ })).not.toBeInTheDocument();
     await openProviderMenu(user);
     expect(screen.queryByRole("menuitem", { name: /신간 알림/ })).not.toBeInTheDocument();
@@ -431,7 +443,7 @@ describe("CollectionOverlay MangaDex flow", () => {
     expect(onExit).toHaveBeenCalledOnce();
   });
 
-  it("keeps MangaDex separate and opens the text-only Aladin connection dialog", async () => {
+  it("keeps MangaDex separate and opens the text-only Kakao connection dialog", async () => {
     const user = userEvent.setup();
     const { onExit } = renderOverlay({
       getMangaDexConnection: vi.fn().mockResolvedValue({ mangaId: "manga-1", lastSyncedAt: "t" }),
@@ -439,15 +451,15 @@ describe("CollectionOverlay MangaDex flow", () => {
 
     await openProviderMenu(user);
     expect(screen.getByRole("menuitem", { name: "MangaDex 새로고침" })).toBeInTheDocument();
-    await user.click(screen.getByRole("menuitem", { name: "Aladin 연결" }));
-    const dialog = screen.getByRole("dialog", { name: "Aladin 연결" });
+    await user.click(screen.getByRole("menuitem", { name: "Kakao 연결" }));
+    const dialog = screen.getByRole("dialog", { name: "Kakao 연결" });
     expect(dialog).toBeInTheDocument();
     expect(dialog.querySelector("img")).toBeNull();
     await user.keyboard("{Escape}");
     expect(onExit).not.toHaveBeenCalled();
   });
 
-  it("refreshes Aladin releases once without changing shelf covers", async () => {
+  it("refreshes Kakao releases once without changing shelf covers", async () => {
     const user = userEvent.setup();
     const initial = {
       id: "v1", volumeNumber: 1, editionIndex: 0, displayLabel: "1", coverArtworkId: "art-1",
@@ -462,9 +474,9 @@ describe("CollectionOverlay MangaDex flow", () => {
     const { gateway } = renderOverlay({
       listCollectionVolumes,
       getMangaDexConnection: vi.fn().mockResolvedValue({ mangaId: "manga-1", lastSyncedAt: "t" }),
-      getAladinConnection: vi.fn().mockResolvedValue({ anchorItemId: "item-1", query: "던전밥", lastSyncedAt: "t" }),
+      getBookConnection: vi.fn().mockResolvedValue({ anchorItemId: "item-1", query: "던전밥", lastSyncedAt: "t" }),
       getReleaseWatchStatus,
-      refreshAladin: vi.fn().mockResolvedValue({ added: 0, updated: 1, unchanged: 0, ignored: 0 }),
+      refreshKakao: vi.fn().mockResolvedValue({ added: 0, updated: 1, unchanged: 0, ignored: 0 }),
     });
     const shelfCover = await screen.findByRole("img", { name: "1권 표지" });
     expect(shelfCover).toHaveAttribute("src", "http://lakomics.localhost/work-artwork-thumbnail/art-1");
@@ -473,29 +485,29 @@ describe("CollectionOverlay MangaDex flow", () => {
     listCollectionVolumes.mockResolvedValue([released]);
 
     await openProviderMenu(user);
-    await user.click(screen.getByRole("menuitem", { name: "Aladin 새로고침" }));
+    await user.click(screen.getByRole("menuitem", { name: "Kakao 새로고침" }));
 
-    await waitFor(() => expect(gateway.refreshAladin).toHaveBeenCalledWith("collection-1"));
+    await waitFor(() => expect(gateway.refreshKakao).toHaveBeenCalledWith("collection-1"));
     expect(getReleaseWatchStatus).toHaveBeenCalledTimes(2);
     expect(listCollectionVolumes).toHaveBeenCalledOnce();
     expect(shelfCover).toHaveAttribute("src", "http://lakomics.localhost/work-artwork-thumbnail/art-1");
   });
 
-  it("keeps the shelf visible when Aladin refresh fails", async () => {
+  it("keeps the shelf visible when Kakao refresh fails", async () => {
     const user = userEvent.setup();
     renderOverlay({
       listCollectionVolumes: vi.fn().mockResolvedValue([{
         id: "v1", volumeNumber: 1, editionIndex: 0, displayLabel: "1", coverArtworkId: "art-1",
         localReleaseDate: null, isbn13: null, releaseStatus: null,
       }]),
-      getAladinConnection: vi.fn().mockResolvedValue({ anchorItemId: "item-1", query: "던전밥", lastSyncedAt: "t" }),
-      refreshAladin: vi.fn().mockRejectedValue(new Error("알라딘 실패")),
+      getBookConnection: vi.fn().mockResolvedValue({ anchorItemId: "item-1", query: "던전밥", lastSyncedAt: "t" }),
+      refreshKakao: vi.fn().mockRejectedValue(new Error("카카오 실패")),
     });
 
     expect(await screen.findByRole("button", { name: "1권 표지" })).toBeInTheDocument();
     await openProviderMenu(user);
-    await user.click(screen.getByRole("menuitem", { name: "Aladin 새로고침" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("알라딘 실패");
+    await user.click(screen.getByRole("menuitem", { name: "Kakao 새로고침" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("카카오 실패");
     expect(screen.getByRole("button", { name: "1권 표지" })).toBeInTheDocument();
   });
 

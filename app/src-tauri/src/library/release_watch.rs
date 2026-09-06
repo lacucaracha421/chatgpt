@@ -91,8 +91,29 @@ impl Library {
         self.run_due_release_watch_with(&checked_at, |query| aladin::search(ttb_key, query))
     }
 
+    pub fn run_due_kakao_release_watch(
+        &self,
+        key: &str,
+    ) -> Result<ReleaseWatchRunResult, LibraryError> {
+        self.run_due_book_release_watch_with("kakao", &chrono::Utc::now().to_rfc3339(), |query| {
+            super::kakao_books::search(key, query)
+        })
+    }
+
     fn run_due_release_watch_with<F>(
         &self,
+        checked_at: &str,
+        fetch: F,
+    ) -> Result<ReleaseWatchRunResult, LibraryError>
+    where
+        F: FnMut(&str) -> Result<Vec<AladinItem>, LibraryError>,
+    {
+        self.run_due_book_release_watch_with("aladin", checked_at, fetch)
+    }
+
+    fn run_due_book_release_watch_with<F>(
+        &self,
+        provider: &'static str,
         checked_at: &str,
         mut fetch: F,
     ) -> Result<ReleaseWatchRunResult, LibraryError>
@@ -111,10 +132,11 @@ impl Library {
             let mut statement = connection.prepare(
                 "SELECT collection_id, last_checked_at
                  FROM release_watch_subscriptions
+                 WHERE provider = ?1
                  ORDER BY COALESCE(last_checked_at, ''), collection_id",
             )?;
             let rows = statement
-                .query_map([], |row| {
+                .query_map([provider], |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -135,7 +157,10 @@ impl Library {
             stop_reason: None,
         };
         for (collection_id, _) in due {
-            let query = match self.get_aladin_connection(&collection_id) {
+            let query = match self
+                .book_flow(provider)
+                .get_aladin_connection(&collection_id)
+            {
                 Ok(Some(connection)) => connection.query,
                 Ok(None) => {
                     result.skipped += 1;
@@ -161,7 +186,11 @@ impl Library {
                     continue;
                 }
             };
-            match self.refresh_aladin_items_at(&collection_id, items, checked_at) {
+            match self.book_flow(provider).refresh_aladin_items_at(
+                &collection_id,
+                items,
+                checked_at,
+            ) {
                 Ok(outcome) => {
                     result.checked += 1;
                     if outcome.release_event_count > 0 {
@@ -205,7 +234,9 @@ impl Library {
                  FROM collection_external_bindings AS binding
                  JOIN collections AS collection ON collection.id = binding.collection_id
                  WHERE binding.collection_id = ?1
-                   AND binding.provider = 'aladin'
+                   AND binding.provider = CASE WHEN EXISTS (
+                       SELECT 1 FROM collection_external_bindings WHERE collection_id = ?1 AND provider = 'kakao'
+                   ) THEN 'kakao' ELSE 'aladin' END
                    AND collection.type = 'manga'
                  ON CONFLICT(collection_id, provider) DO NOTHING",
                 [collection_id],
@@ -216,7 +247,7 @@ impl Library {
         } else {
             connection.execute(
                 "DELETE FROM release_watch_subscriptions
-                 WHERE collection_id = ?1 AND provider = 'aladin'",
+                 WHERE collection_id = ?1 AND provider IN ('aladin', 'kakao')",
                 [collection_id],
             )?;
         }
@@ -256,9 +287,7 @@ impl Library {
 
     /// 모든 컬렉션의 미읽음 출간 이벤트. 컬렉션 상세에 들어가지 않아도
     /// "이번에 새로 나온 권"을 모아 볼 수 있게 하는 읽기 전용 쿼리다.
-    pub fn list_unread_release_changes(
-        &self,
-    ) -> Result<Vec<ReleaseWatchEvent>, LibraryError> {
+    pub fn list_unread_release_changes(&self) -> Result<Vec<ReleaseWatchEvent>, LibraryError> {
         let connection = self.connection()?;
         let mut statement = connection.prepare(
             "SELECT event.id, event.event_kind, event.volume_number,
@@ -273,7 +302,6 @@ impl Library {
             .collect::<Result<Vec<_>, _>>()?;
         Ok(events)
     }
-
 }
 
 fn stop_reason(error: &LibraryError) -> Option<ReleaseWatchRunStopReason> {
@@ -294,7 +322,7 @@ fn subscription_exists(
     Ok(connection.query_row(
         "SELECT EXISTS(
             SELECT 1 FROM release_watch_subscriptions
-            WHERE collection_id = ?1 AND provider = 'aladin'
+            WHERE collection_id = ?1 AND provider IN ('aladin', 'kakao')
          )",
         [collection_id],
         |row| row.get(0),
@@ -309,7 +337,8 @@ fn release_watch_status(
         .query_row(
             "SELECT last_checked_at
              FROM release_watch_subscriptions
-             WHERE collection_id = ?1 AND provider = 'aladin'",
+             WHERE collection_id = ?1 AND provider IN ('aladin', 'kakao')
+             ORDER BY CASE provider WHEN 'kakao' THEN 0 ELSE 1 END LIMIT 1",
             [collection_id],
             |row| row.get::<_, Option<String>>(0),
         )

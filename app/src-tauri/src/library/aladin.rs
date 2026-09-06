@@ -125,7 +125,9 @@ pub(crate) fn parse_volume_product(title: &str) -> Option<ParsedVolumeProduct> {
         r"(?i)\s*(?:[-–—]\s*)?(?:\([^)]*(?:특별판|한정판|초판)[^)]*\)|\[[^\]]*(?:특별판|한정판|초판)[^\]]*\]|(?:초판\s*)?(?:한정판|특별판))\s*$",
     )
     .unwrap();
-    let volume_title = edition_suffix.replace(title, "");
+    let completion_suffix = Regex::new(r"\s*[\(\[]\s*완결\s*[\)\]]\s*$").unwrap();
+    let title = completion_suffix.replace(title, "");
+    let volume_title = edition_suffix.replace(&title, "");
 
     for pattern in [
         r"(?i)(?:\s|^)(?:제\s*)?(\d+)\s*권\s*$",
@@ -142,7 +144,7 @@ pub(crate) fn parse_volume_product(title: &str) -> Option<ParsedVolumeProduct> {
         }
         let matched = captures.get(0)?;
         let base_title = volume_title[..matched.start()]
-            .trim_end_matches([' ', '-'])
+            .trim_end_matches([' ', '-', '.'])
             .trim()
             .to_owned();
         if base_title.is_empty() {
@@ -590,4 +592,15 @@ mod tests {
             ]
         );
     }
+    #[test]
+    fn korean_completion_and_dotted_volume_titles_are_recognized() {
+        for (title, number) in [("스틸 볼 런 24(완결)", 24), ("스틸 볼 런. 23", 23)] {
+            let parsed = parse_volume_product(title).unwrap();
+            assert_eq!(parsed.volume_number, number);
+            assert_eq!(parsed.base_title, "스틸 볼 런");
+        }
+        assert!(parse_volume_product("학생회에도 구멍은 있다! 공식 일러스트북").is_none());
+        assert!(parse_volume_product("학생회에도 구멍은 있다! 공식 풀컬러판 구멍 셀렉션!").is_none());
+    }
+
 }
