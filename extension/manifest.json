@@ -54,6 +54,7 @@
         "src/gesture.js",
         "src/x-source.js",
         "src/x-gallery.js",
+        "src/list-collector.js",
         "src/content.js"
       ],
       "css": [
@@ -64,7 +65,8 @@
     {
       "matches": ["https://*/*"],
       "exclude_matches": ["https://x.com/*", "https://twitter.com/*", "https://lacucaracha421.github.io/chatgpt/*"],
-      "js": ["src/defaults.js", "src/layout.js", "src/gesture.js", "src/forum-source.js", "src/content.js"],
+      "js": ["src/defaults.js", "src/layout.js", "src/gesture.js", "src/forum-source.js", "src/list-collector.js",
+        "src/content.js"],
       "css": ["src/content.css"],
       "run_at": "document_idle"
     },

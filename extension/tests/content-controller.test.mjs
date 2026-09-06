@@ -510,3 +510,36 @@ test("successful image saves notify the gallery marker, but review-pending does 
   await pending.release();
   assert.equal(pendingMarked.length, 0);
 });
+
+test('multi-ring viewport fitting maps visible targets back to gesture coordinates', () => {
+  const api = loadContent(async () => ({ok:true}));
+  const origin = {x:15,y:25};
+  for (const [width,height,extent] of [[390,844,262],[1200,800,327],[600,320,392]]) {
+    const presentation = api.radialPresentation(origin,width,height,extent);
+    const radius = extent * presentation.scale;
+    assert.ok(presentation.origin.x - radius >= 7.99);
+    assert.ok(presentation.origin.x + radius <= width - 7.99);
+    assert.ok(presentation.origin.y - radius >= 7.99);
+    assert.ok(presentation.origin.y + radius <= height - 7.99);
+    const target = {x:origin.x+110,y:origin.y-220};
+    const screen = {
+      x:presentation.origin.x+(target.x-origin.x)*presentation.scale,
+      y:presentation.origin.y+(target.y-origin.y)*presentation.scale,
+    };
+    const mapped = api.radialInputPoint(screen,origin,presentation);
+    assert.ok(Math.abs(mapped.x-target.x)<1e-9);
+    assert.ok(Math.abs(mapped.y-target.y)<1e-9);
+  }
+});
+
+test('list saves exactly the requested folder or leaf and rejects unknown IDs', async () => {
+  const sent=[];
+  const api=loadContent(async payload=>{sent.push(payload.classificationId);return {ok:true,status:'added'};});
+  const controller=api.createCollectorController({send:api.send,status(){}});
+  const entries=[{id:'root',name:'게임',parentId:null},{id:'leaf',name:'리버스',parentId:'root'}];
+  controller.begin({mediaUrl:'https://example.com/test.jpg',sourceUrl:'https://example.com'}, {x:0,y:0},entries,api.radial.resetLayout(entries));
+  assert.equal((await controller.saveClassification('root')).ok,true);
+  assert.equal((await controller.saveClassification('leaf')).ok,true);
+  assert.equal((await controller.saveClassification('missing')).ok,false);
+  assert.deepEqual(sent,['root','leaf']);
+});

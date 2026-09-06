@@ -101,8 +101,8 @@
       return submit({ ...failedPayload });
     }
 
-    async function submit(payload) {
-      status("저장 중…", false, "progress");
+    async function submit(payload, announce = true) {
+      if (announce) status("저장 중…", false, "progress");
       let response;
       try {
         response = await send(payload);
@@ -113,12 +113,21 @@
       if (response.ok) failedPayload = null;
       else if (feedback.retry) failedPayload = { ...payload };
       else failedPayload = null;
-      status(feedback.message, feedback.retry, feedback.kind);
+      if (announce) status(feedback.message, feedback.retry, feedback.kind);
       if (isSavedResponse(response)) saved(payload, response);
       return response;
     }
 
-    return { begin, move, tick, release, activate, cancel, retry };
+    async function saveClassification(id) {
+      const current = active;
+      if (!current || !current.entries.some(entry => entry.id === id)) {
+        return {ok:false, message:"분류를 다시 선택해 주세요."};
+      }
+      const response = await submit(payloadFor(current,id), false);
+      return {ok:Boolean(response.ok), message:feedbackFor(response).message};
+    }
+
+    return { begin, move, tick, release, activate, cancel, retry, saveClassification };
   }
 
   function isSavedResponse(response) {
@@ -195,6 +204,19 @@
   function clampAxis(value, size, inset) {
     if (size <= inset * 2) return size / 2;
     return Math.min(size - inset, Math.max(inset, value));
+  }
+
+  function radialPresentation(origin, width, height, extent = RADIAL_VIEWPORT_EXTENT_PX) {
+    const scale = Math.min(1, Math.max(1, width - 16) / (extent * 2), Math.max(1, height - 16) / (extent * 2));
+    return { origin: clampRadialOrigin(origin, width, height, extent * scale), scale, extent };
+  }
+
+  function radialInputPoint(point, sessionOrigin, presentation) {
+    if (!presentation) return point;
+    return {
+      x: sessionOrigin.x + (point.x - presentation.origin.x) / presentation.scale,
+      y: sessionOrigin.y + (point.y - presentation.origin.y) / presentation.scale,
+    };
   }
 
   function currentViewportSize() {
@@ -402,6 +424,8 @@
       isSavedResponse,
       normalizePostId,
       clampRadialOrigin,
+      radialPresentation,
+      radialInputPoint,
     };
     return;
   }
@@ -440,6 +464,7 @@
     let pointer = null;
     let menuContext = null;
     let overlay = null;
+    let listPicker = null;
     let dwellTimer = null;
     let longPressTimer = null;
     let resultToast = null;
@@ -485,13 +510,20 @@
       })
       .catch(() => {});
 
+    globalThis.chrome?.storage?.onChanged?.addListener((changes, area) => {
+      if (area === "local" && changes.preferences) preferences = globalThis.LakomicsDefaults.normalizePreferences(changes.preferences.newValue);
+    });
+
     document.addEventListener("pointerdown", onPointerDown, true);
     document.addEventListener("pointermove", onPointerMove, true);
     document.addEventListener("pointerup", onPointerUp, true);
     document.addEventListener("pointercancel", onPointerCancel, true);
     document.addEventListener("contextmenu", onContextMenu, true);
     document.addEventListener("selectstart", onSelectStart, true);
-    document.addEventListener("click", (event) => clickSuppressor.consume(event), true);
+    document.addEventListener("click", (event) => {
+      if (listPicker && event.composedPath().includes(listPicker.host)) return;
+      clickSuppressor.consume(event);
+    }, true);
     document.addEventListener("dragstart", onDragStart, true);
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") cancelAll();
@@ -501,6 +533,7 @@
     });
 
     function onPointerDown(event) {
+      if (listPicker) return;
       if (pointer) return;
 
       if (menuContext?.state === "touch-held") {
@@ -514,7 +547,7 @@
         };
         event.preventDefault();
         event.stopImmediatePropagation();
-        scheduleDwell(controller.move(pointer.latest, pointer.latestTime));
+        scheduleDwell(controller.move(radialInputPoint(pointer.latest, menuContext.origin, menuContext.presentation), pointer.latestTime));
         return;
       }
 
@@ -557,11 +590,12 @@
       if (!pointer || event.pointerId !== pointer.id) return;
       pointer.latest = pointFromEvent(event);
       pointer.latestTime = event.timeStamp;
+      if (listPicker) return;
 
       if (pointer.input === "touch-select") {
         event.preventDefault();
         event.stopPropagation();
-        scheduleDwell(controller.move(pointer.latest, pointer.latestTime));
+        scheduleDwell(controller.move(radialInputPoint(pointer.latest, menuContext.origin, menuContext.presentation), pointer.latestTime));
         return;
       }
 
@@ -585,11 +619,18 @@
       event.preventDefault();
       event.stopPropagation();
       startControllerIfReady(pointer.input === "touch");
-      if (pointer?.started) scheduleDwell(controller.move(pointer.latest, pointer.latestTime));
+      if (pointer?.started && !listPicker) scheduleDwell(controller.move(radialInputPoint(pointer.latest, menuContext.origin, menuContext.presentation), pointer.latestTime));
     }
 
     function onPointerUp(event) {
       if (!pointer || event.pointerId !== pointer.id) return;
+
+      if (listPicker) {
+        clickSuppressor.arm();
+        event.preventDefault(); event.stopImmediatePropagation();
+        pointer = null; clearDwellTimer(); clearLongPressTimer(); setTouchGuard(false);
+        return;
+      }
 
       if (pointer.input === "touch-select") {
         clickSuppressor.arm();
@@ -653,6 +694,7 @@
 
     function onPointerCancel(event) {
       if (!pointer || event.pointerId !== pointer.id) return;
+      if (listPicker) { pointer = null; clearDwellTimer(); clearLongPressTimer(); setTouchGuard(false); return; }
       if (pointer.input === "touch" && pointer.longPressReady && preferences.touchPersistent && pointer.started) {
         clickSuppressor.arm();
         pointer = null;
@@ -726,8 +768,26 @@
           centerSelectsExpandedParent: pointer.input === "touch",
           confirmSelectionWithCenter: pointer.input === "touch",
           hiddenSecondaryIds: pointer.classifications.hiddenSecondaryIds ?? [],
+          usageById: pointer.classifications.usageById ?? {},
         },
       );
+      if (preferences.collectorMenu === "list" && globalThis.LakomicsListCollector) {
+        closeRadial();
+        listPicker = globalThis.LakomicsListCollector.mount({
+          entries: pointer.classifications.entries,
+          layout: pointer.classifications.layout,
+          pinnedIds: pointer.classifications.pinnedIds ?? [],
+          hiddenIds: pointer.classifications.hiddenSecondaryIds ?? [],
+          origin: pointer.origin,
+          onSave: id => controller.saveClassification(id),
+          onClose: result => {
+            listPicker = null; menuContext = null; pointer = null;
+            setTouchGuard(false); clearDwellTimer(); clearLongPressTimer(); controller.cancel();
+            if (result?.ok) showStatus(result.message, false, "success");
+          },
+        });
+        return;
+      }
       if (openImmediately) {
         renderSnapshot(first);
         // A touch menu may be shifted away from the press point to stay fully
@@ -735,7 +795,7 @@
         // an edge does not accidentally hover/expand a sector.
         scheduleDwell(controller.move(radialOrigin, pointer.latestTime));
       } else {
-        scheduleDwell(controller.move(pointer.latest, pointer.latestTime));
+        scheduleDwell(controller.move(radialInputPoint(pointer.latest, menuContext.origin, menuContext.presentation), pointer.latestTime));
       }
     }
 
@@ -763,6 +823,7 @@
     }
 
     function cancelAll() {
+      listPicker?.close(); listPicker = null;
       if (pointer?.thresholdCrossed || menuContext) clickSuppressor.arm();
       pointer = null;
       menuContext = null;
@@ -822,9 +883,15 @@
       overlay = document.createElement("div");
       overlay.className = `lakomics-radial-overlay${menuContext.input === "touch" ? " is-touch" : ""}`;
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      svg.setAttribute("viewBox", "-220 -220 440 440");
-      svg.style.left = `${menuContext.origin.x}px`;
-      svg.style.top = `${menuContext.origin.y}px`;
+      const extent = Math.max(RADIAL_VIEWPORT_EXTENT_PX, ...((snapshot.secondaryAngles ?? []).map((angle) => angle.outerRadius + 12)));
+      const viewport = currentViewportSize();
+      const presentation = radialPresentation(menuContext.origin, viewport.width, viewport.height, extent);
+      menuContext.presentation = presentation;
+      svg.setAttribute("viewBox", `${-extent} ${-extent} ${extent * 2} ${extent * 2}`);
+      svg.style.width = `${extent * 2 * presentation.scale}px`;
+      svg.style.height = `${extent * 2 * presentation.scale}px`;
+      svg.style.left = `${presentation.origin.x}px`;
+      svg.style.top = `${presentation.origin.y}px`;
       svg.classList.add("lakomics-radial-menu");
       renderPrimarySectors(svg, snapshot);
       if (snapshot.secondaryLevel) renderSecondarySectors(svg, snapshot);
@@ -862,13 +929,13 @@
         const angle = angles[index];
         if (!angle) return;
         const path = svgElement("path", {
-          d: sectorPath(130, 185, angle.start, angle.end),
+          d: sectorPath(angle.innerRadius, angle.outerRadius, angle.start, angle.end),
           class: `lakomics-sector-secondary${snapshot.hover?.type === "secondary-slot" && snapshot.hover.index === index ? " is-active" : ""}${entry ? "" : " is-empty"}${snapshot.pendingClassificationId === entry?.id ? " is-selected" : ""}`,
         });
         svg.append(path);
         const text = svgElement("text", {
-          x: Math.cos(angle.center) * 157,
-          y: Math.sin(angle.center) * 157,
+          x: Math.cos(angle.center) * angle.labelRadius,
+          y: Math.sin(angle.center) * angle.labelRadius,
           class: "lakomics-sector-label-secondary",
         });
         text.textContent = entry?.name ?? "";

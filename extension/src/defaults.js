@@ -3,6 +3,7 @@
 
   const DEFAULT_PREFERENCES = Object.freeze({
     saveMode: "auto",
+    collectorMenu: "radial",
     downloadFolder: "Lakomics",
     touchLongPressMs: 450,
     touchPersistent: true,
@@ -60,6 +61,7 @@
       : DEFAULT_PREFERENCES.touchLongPressMs;
     return {
       saveMode,
+      collectorMenu: value.collectorMenu === "list" ? "list" : "radial",
       downloadFolder,
       touchLongPressMs,
       touchPersistent: value.touchPersistent !== false,

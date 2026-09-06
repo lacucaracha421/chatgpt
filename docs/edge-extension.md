@@ -2,6 +2,12 @@
 
 This document describes the current bundled browser extension in `extension/`. It is Chromium-extension based; browser-specific extension APIs can vary. The current workflow is used from Chromium-compatible desktop browsers and Titanium Browser on Android.
 
+## Collector menu
+
+Settings → 수집 메뉴 selects the existing donut (`radial`, default) or the fixed list window (`list`). Existing tabs apply preference changes to the next gesture. The list opens after the usual image drag or touch long press and stays open after release. Its header shows only the current breadcrumb and action icons. Clicking a folder opens its children; clicking a leaf selects that one classification. There is no multi-selection.
+
+Drag a row left past the threshold and release to save directly to that classification, including a top-level folder. The row slides aside to reveal the save action. A short or cancelled drag does not save. Drag right to return to the previous folder. The header save icon submits the current classification; Ctrl+Enter saves a focused row. Each action uses the existing single-classification ingestion API. Hidden secondary tags and pinned placement are respected. Secondary donut entries are sorted by descending save count, preserving their existing order for ties; the order stays fixed while the menu is open. The list UI is isolated in a shadow root and never receives connection credentials.
+
 ## Current save paths
 
 The extension has three relevant destinations:

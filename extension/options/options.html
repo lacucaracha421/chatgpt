@@ -15,15 +15,13 @@
       <header class="page-header">
         <div>
           <p class="eyebrow">LAKOMICS</p>
-          <h1>X Collector</h1>
+          <h1>Collector</h1>
         </div>
-        <p>저장 경로와 방사형 메뉴만 빠르게 관리합니다.</p>
       </header>
 
       <section class="settings-card settings-card--compact" aria-labelledby="quick-title">
         <div class="section-heading">
-          <h2 id="quick-title">기본</h2>
-          <span>자주 쓰는 설정</span>
+          <h2 id="quick-title">수집</h2>
         </div>
         <div class="compact-setting-row">
           <div>
@@ -38,13 +36,21 @@
           </select>
         </div>
         <div class="toggle-strip">
+          <label for="collector-menu">수집 메뉴</label>
+          <select id="collector-menu">
+            <option value="radial">도넛</option>
+            <option value="list">목록 창</option>
+          </select>
+        </div>
+        <p id="collector-menu-status" class="setting-status" role="status"></p>
+        <div class="toggle-strip">
           <label class="check-row" for="auto-like-on-save">
             <input id="auto-like-on-save" type="checkbox">
             <span>저장 시 X 좋아요</span>
           </label>
           <label class="check-row" for="x-translate-enabled">
             <input id="x-translate-enabled" type="checkbox">
-            <span>X Translate</span>
+            <span>X 번역</span>
           </label>
         </div>
         <div class="status-line">
@@ -53,10 +59,38 @@
         </div>
       </section>
 
+      <section class="settings-card settings-card--layout" aria-labelledby="layout-title">
+        <div class="section-heading">
+          <h2 id="layout-title">분류 배치</h2>
+          <p id="connection-status" class="setting-status" role="status"></p>
+        </div>
+        <div id="layout-editor" aria-live="polite">PC 연결 후 편집 가능</div>
+        <details class="advanced-block offline-settings">
+          <summary>오프라인 분류</summary>
+          <section class="settings-card" aria-label="오프라인 분류">
+
+            <div class="row">
+              <label for="local-primary-select">1차 분류</label>
+              <select id="local-primary-select"></select>
+              <input id="local-primary-name" aria-label="1차 분류 이름" type="text" maxlength="80" autocomplete="off">
+            </div>
+            <div id="local-secondary-grid" class="secondary-slot-grid" aria-live="polite"></div>
+            <div class="action-row">
+              <button id="save-local-tree" type="button">저장</button>
+              <button id="copy-app-tree" type="button">PC 분류 복사</button>
+              <button id="reset-local-tree" type="button">기본값</button>
+            </div>
+            <p id="local-tree-status" class="setting-status" role="status"></p>
+          </section>
+        </details>
+      </section>
+
+      <details class="advanced-block" id="connection-settings">
+        <summary>연결 · 백업</summary>
+        <div class="advanced-content">
       <section class="settings-card" aria-labelledby="connection-title">
         <div class="section-heading">
           <h2 id="connection-title">연결</h2>
-          <span>Cloud와 PC를 한곳에서</span>
         </div>
         <div class="connection-grid">
           <div class="connection-panel" aria-labelledby="collector-title">
@@ -87,33 +121,33 @@
               <span>Tailscale Remote</span>
             </label>
             <div class="row">
-              <input id="remote-base-url" type="url" autocomplete="off" spellcheck="false" placeholder="https://desktop....ts.net">
+              <input id="remote-base-url" aria-label="Tailscale 주소" type="url" autocomplete="off" spellcheck="false" placeholder="https://desktop....ts.net">
               <button id="save-test-remote" type="button">원격 테스트</button>
             </div>
-            <p id="connection-status" class="setting-status" role="status"></p>
             <p id="remote-status" class="setting-status" role="status"></p>
           </div>
         </div>
       </section>
-
       <section class="settings-card settings-card--compact" aria-labelledby="backup-title">
         <div class="section-heading">
           <h2 id="backup-title">백업 · 이전</h2>
-          <span>서버에 암호화 저장</span>
         </div>
         <div class="action-row">
           <button id="push-portable-backup" type="button">현재 설정 백업</button>
           <button id="restore-portable-backup" type="button">서버에서 가져오기</button>
         </div>
-        <p class="setting-note">Cloud API 토큰을 복원 열쇠로 사용합니다. 서버에는 AES-GCM 암호문만 저장됩니다.</p>
+        <p class="setting-note">복원 시 동일한 Cloud API 토큰 필요</p>
         <p id="portable-backup-status" class="setting-status" role="status"></p>
       </section>
-
+        </div>
+      </details>
+      <details class="advanced-block">
+        <summary>모바일 연결</summary>
+        <div class="advanced-content">
       <section class="settings-card settings-card--compact" aria-labelledby="mobile-site-access-title">
         <div class="section-heading mobile-site-heading">
           <div>
             <h2 id="mobile-site-access-title">Mobile Lakomics</h2>
-            <span>lacucaracha421.github.io</span>
           </div>
           <span id="mobile-site-access" class="compact-status" role="status">권한 확인 중…</span>
         </div>
@@ -124,17 +158,10 @@
         <p id="mobile-site-access-result" class="setting-note" role="status"></p>
         <p id="mobile-site-access-diagnostic" class="setting-note"></p>
       </section>
-
-      <section class="settings-card settings-card--layout" aria-labelledby="layout-title">
-        <div class="section-heading">
-          <h2 id="layout-title">방사형 메뉴</h2>
-          <span>배치 · 1차 고정 · 2차 숨김</span>
         </div>
-        <div id="layout-editor" aria-live="polite">Lakomics에 연결하면 편집기를 준비합니다.</div>
-      </section>
-
+      </details>
       <details class="advanced-block">
-        <summary>고급 설정</summary>
+        <summary>기기 · 진단</summary>
         <div class="advanced-content">
           <section class="settings-card settings-card--compact" aria-labelledby="device-title">
             <h2 id="device-title">기기 · 다운로드</h2>
@@ -161,24 +188,7 @@
             <p id="diagnostics-status" role="status"></p>
           </section>
 
-          <section class="settings-card" aria-labelledby="mobile-tree-title">
-            <div class="section-heading">
-              <h2 id="mobile-tree-title">오프라인 도넛</h2>
-              <span>PC/Cloud 연결이 없을 때만 사용</span>
-            </div>
-            <div class="row">
-              <label for="local-primary-select">1차 분류</label>
-              <select id="local-primary-select"></select>
-              <input id="local-primary-name" aria-label="1차 분류 이름" type="text" maxlength="80" autocomplete="off">
-            </div>
-            <div id="local-secondary-grid" class="secondary-slot-grid" aria-live="polite"></div>
-            <div class="action-row">
-              <button id="save-local-tree" type="button">저장</button>
-              <button id="copy-app-tree" type="button">PC 분류 복사</button>
-              <button id="reset-local-tree" type="button">기본값</button>
-            </div>
-            <p id="local-tree-status" class="setting-status" role="status"></p>
-          </section>
+
         </div>
       </details>
     </main>

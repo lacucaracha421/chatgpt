@@ -2375,3 +2375,11 @@ test("local download classifications apply persisted frequency to the secondary 
   assert.equal(updated.usageById[child.id], 7);
   assert.equal(updated.layout.parents[child.parentId].flat().filter(Boolean)[1], child.id);
 });
+
+test('menu preference updates preserve other saved preferences', async () => {
+  const harness = createHarness({preferences:{saveMode:'pc',downloadFolder:'Archive',autoLikeOnSave:false}});
+  const first=await harness.api.handleMessage({type:'settings:set-preferences',preferences:{collectorMenu:'list'}});
+  assert.equal(first.preferences.collectorMenu,'list');assert.equal(first.preferences.saveMode,'pc');assert.equal(first.preferences.downloadFolder,'Archive');assert.equal(first.preferences.autoLikeOnSave,false);
+  const second=await harness.api.handleMessage({type:'settings:set-preferences',preferences:{saveMode:'auto'}});
+  assert.equal(second.preferences.collectorMenu,'list');
+});

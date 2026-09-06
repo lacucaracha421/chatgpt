@@ -7,35 +7,44 @@
   const CENTER_RADIUS = 42;
   const PRIMARY_INNER_RADIUS = 48;
   const PRIMARY_OUTER_RADIUS = 110;
-  const SECONDARY_INNER_RADIUS = 118;
-  const SECONDARY_OUTER_RADIUS = 180;
+  const SECONDARY_INNER_RADIUS = 130;
+  const SECONDARY_OUTER_RADIUS = 185;
+  const SECONDARY_RING_STEP = 65;
   const CONTROL_RADIUS = 210;
   const CONTROL_HIT_HALF_HEIGHT = 72;
-  const SECONDARY_CLUSTER_ARC_MAX = (Math.PI / 180) * 270;
-  const SECONDARY_SECTOR_MIN_SPAN = (Math.PI / 180) * 18;
+  const SECONDARY_CLUSTER_ARC_MAX = Math.PI * 2;
   const SECONDARY_SECTOR_GAP = (Math.PI / 180) * 2;
-  const SECONDARY_ARC_DEGREES = Object.freeze([0, 54, 90, 120, 150, 180, 210, 225, 240, 250, 258, 264, 270]);
+  const SECONDARY_ARC_DEGREES = Object.freeze([0, 54, 90, 120, 150, 180, 210]);
 
   function primaryAngle(index, count) {
     return -Math.PI / 2 + (Math.PI * 2 * index) / count;
   }
 
   function secondaryAngles(primaryIndex, primaryCount, secondaryCount) {
-    const safeCount = Math.max(1, Number(secondaryCount) || 1);
-    const safePrimaryIndex = Number.isInteger(primaryIndex) && primaryIndex >= 0 ? primaryIndex : 0;
-    const anchor = primaryAngle(safePrimaryIndex, Math.max(1, primaryCount || 1));
-    const gap = SECONDARY_SECTOR_GAP;
-    const tableIndex = Math.min(SECONDARY_ARC_DEGREES.length - 1, safeCount);
-    const desiredArc = (Math.PI / 180) * SECONDARY_ARC_DEGREES[tableIndex];
-    const minArc = safeCount * SECONDARY_SECTOR_MIN_SPAN + gap * (safeCount - 1);
-    const arc = Math.min(SECONDARY_CLUSTER_ARC_MAX, Math.max(desiredArc, minArc));
-    const sectorSpan = Math.max(0, (arc - gap * (safeCount - 1)) / safeCount);
-    const startAngle = anchor - arc / 2;
+    const count = Math.max(0, Math.floor(Number(secondaryCount) || 0));
+    const anchor = primaryAngle(Math.max(0, primaryIndex), Math.max(1, primaryCount || 1));
     const angles = [];
-    for (let i = 0; i < safeCount; i++) {
-      const start = startAngle + i * (sectorSpan + gap);
-      const end = start + sectorSpan;
-      angles.push({ start, end, center: (start + end) / 2 });
+    let remaining = count;
+    for (let ring = 0; remaining > 0; ring++) {
+      const innerRadius = SECONDARY_INNER_RADIUS + ring * SECONDARY_RING_STEP;
+      const outerRadius = SECONDARY_OUTER_RADIUS + ring * SECONDARY_RING_STEP;
+      const labelRadius = (innerRadius + outerRadius) / 2;
+      // Keep labels at least as wide as the first ring's sixteen sectors.
+      const capacity = Math.floor(16 * labelRadius / ((SECONDARY_INNER_RADIUS + SECONDARY_OUTER_RADIUS) / 2));
+      const ringCount = Math.min(remaining, capacity);
+      const fullCircle = ringCount > 6;
+      const arc = fullCircle ? Math.PI * 2 : SECONDARY_ARC_DEGREES[ringCount] * Math.PI / 180;
+      const gap = SECONDARY_SECTOR_GAP;
+      const span = (arc - gap * (fullCircle ? ringCount : ringCount - 1)) / ringCount;
+      // Overflow starts above the inner donut, rather than behind a next button.
+      const ringAnchor = ring === 0 ? anchor : -Math.PI / 2;
+      const startAngle = ringAnchor - arc / 2;
+      for (let i = 0; i < ringCount; i++) {
+        const start = startAngle + i * (span + gap);
+        const end = start + span;
+        angles.push({ start, end, center: (start + end) / 2, innerRadius, outerRadius, labelRadius });
+      }
+      remaining -= ringCount;
     }
     return angles;
   }
@@ -60,6 +69,7 @@
     const hiddenSecondaryIds = Array.isArray(options.hiddenSecondaryIds)
       ? options.hiddenSecondaryIds.filter((id) => typeof id === "string" && id)
       : [];
+    const secondaryLevels = new Map();
     let expandedParentId = null;
     let pendingClassificationId = null;
     let lastExpandedParentId = null;
@@ -176,14 +186,15 @@
 
       if (radius <= CENTER_RADIUS) return { type: "center" };
 
-      if (expandedParentId !== null && radius >= SECONDARY_INNER_RADIUS && radius <= SECONDARY_OUTER_RADIUS) {
+      if (expandedParentId !== null && radius >= SECONDARY_INNER_RADIUS) {
         const primaryLevel = currentPrimaryLevel();
         const secondaryLevel = currentSecondaryLevel();
         const primaryIndex = primaryLevel.slots.findIndex((s) => s?.id === expandedParentId);
         const angles = secondaryAngles(primaryIndex, primaryLevel.slotCount, secondaryLevel.slotCount);
         const pointAngle = Math.atan2(dy, dx);
         for (let i = 0; i < angles.length; i++) {
-          if (isAngleWithin(pointAngle, angles[i].start, angles[i].end)) {
+          if (radius >= angles[i].innerRadius && radius <= angles[i].outerRadius
+            && isAngleWithin(pointAngle, angles[i].start, angles[i].end)) {
             return { type: "secondary-slot", index: i, entry: secondaryLevel.slots[i] ?? null };
           }
         }
@@ -246,7 +257,7 @@
 
     function entryHasChildren(entryId) {
       if (!entryId) return false;
-      const level = globalThis.LakomicsRadial.getCompactLevel(entries, layout, entryId, 0, pinnedIds);
+      const level = secondaryLevelFor(entryId);
       return level.slots.some(Boolean);
     }
 
@@ -254,11 +265,27 @@
       return globalThis.LakomicsRadial.getPinnedLevel(entries, layout, pinnedIds, primaryPage);
     }
 
-    function currentSecondaryLevel() {
+    function secondaryLevelFor(parentId) {
+      if (secondaryLevels.has(parentId)) return secondaryLevels.get(parentId);
       const excludedIds = [...new Set([...pinnedIds, ...hiddenSecondaryIds])];
-      return globalThis.LakomicsRadial.getCompactLevel(
-        entries, layout, expandedParentId, secondaryPage, excludedIds,
-      );
+      const first = globalThis.LakomicsRadial.getCompactLevel(entries, layout, parentId, 0, excludedIds);
+      const slots = [...first.slots];
+      for (let page = 1; page < first.pageCount; page++) {
+        slots.push(...globalThis.LakomicsRadial.getCompactLevel(entries, layout, parentId, page, excludedIds).slots);
+      }
+      const count = entry => {
+        const value = options.usageById?.[entry?.id];
+        const numeric = Number(value && typeof value === "object" ? value.count : value);
+        return Number.isFinite(numeric) ? Math.max(0, numeric) : 0;
+      };
+      slots.sort((a, b) => count(b) - count(a));
+      const level = { ...first, page: 0, pageCount: 1, slotCount: slots.length, slots };
+      secondaryLevels.set(parentId, level);
+      return level;
+    }
+
+    function currentSecondaryLevel() {
+      return secondaryLevelFor(expandedParentId);
     }
 
     function snapshot() {

@@ -69,19 +69,17 @@ test("touch activation opens a parent immediately, then selects a secondary chil
   assert.deepEqual(plain(session.activate()), { type: "select", classificationId: "child-a" });
 });
 
-test("secondary donut is centered on its primary and never exceeds 270 degrees", () => {
-  const twelve = secondaryAngles(2, 6, 12);
-  const arc = twelve.at(-1).end - twelve[0].start;
-  assert.ok(arc <= (Math.PI * 1.5) + 1e-9);
-  assert.ok(arc > Math.PI);
-
-  const anchorAngle = primaryAngle(2, 6);
-  const center = (twelve[0].start + twelve.at(-1).end) / 2;
-  assert.ok(Math.abs(center - anchorAngle) < 1e-9);
-
+test("large secondary donuts use the full circle and overflow into outer rings", () => {
+  const sixteen = secondaryAngles(2, 6, 16);
+  const arc = sixteen.at(-1).end - sixteen[0].start;
+  assert.ok(arc > Math.PI * 1.9);
+  assert.equal(new Set(sixteen.map(a => a.innerRadius)).size, 1);
+  const overflow = secondaryAngles(2, 6, 17);
+  assert.ok(overflow[16].innerRadius > overflow[0].outerRadius);
+  assert.ok(Math.abs(overflow[16].center + Math.PI / 2) < 1e-9);
+  assert.equal(secondaryAngles(0, 6, 0).length, 0);
   const three = secondaryAngles(2, 6, 3);
-  const threeArc = three.at(-1).end - three[0].start;
-  assert.ok(threeArc < arc);
+  assert.ok(three.at(-1).end - three[0].start < Math.PI);
 });
 
 test("secondary ring hit-test selects a child on release", () => {
@@ -291,4 +289,55 @@ test("hidden secondary classifications stay out of the donut without changing th
   assert.notEqual(secondary, null);
   assert.deepEqual(plain(secondary.slots.map((entry) => entry.id)), ["child-b"]);
   assert.equal(tree.some((entry) => entry.id === "child-a"), true);
+});
+
+for (const count of [13, 16, 17, 39, 80]) {
+  test(`all ${count} secondary tags are visible and selectable without paging`, () => {
+    const entries = [{ id: 'parent', name: 'Parent', parentId: null },
+      ...Array.from({length: count}, (_, i) => ({id: `child-${i}`, name: `Child ${i}`, parentId: 'parent'}))];
+    const session = createSession({x:100,y:100}, entries, context.LakomicsRadial.resetLayout(entries));
+    session.move(pointForPrimarySlot(0, 1), 0);
+    const snapshot = session.tick(300);
+    assert.equal(snapshot.secondaryLevel.pageCount, 1);
+    assert.equal(snapshot.secondaryLevel.slots.length, count);
+    assert.equal(snapshot.secondaryAngles.length, count);
+    snapshot.secondaryAngles.forEach((angle, i) => {
+      session.move({x:100+Math.cos(angle.center)*angle.labelRadius,y:100+Math.sin(angle.center)*angle.labelRadius},301+i);
+      assert.deepEqual(plain(session.release()), {type:'select',classificationId:`child-${i}`});
+    });
+  });
+}
+
+test('all hidden children do not open an empty donut', () => {
+  const session = createSession({x:100,y:100}, tree, layout, [], {hiddenSecondaryIds:['child-a','child-b']});
+  session.move(pointForPrimarySlot(0),0);
+  assert.equal(session.tick(300).secondaryLevel,null);
+});
+
+test('multi-ring flattening preserves saved ordering, hidden tags and pinned exclusions', () => {
+  const entries = [{id:'parent',name:'Parent',parentId:null},
+    ...Array.from({length:25},(_,i)=>({id:`child-${i}`,name:`Child ${i}`,parentId:'parent'}))];
+  const stored = context.LakomicsRadial.resetLayout(entries);
+  [stored.parents.parent[0][0],stored.parents.parent[1][3]] = [stored.parents.parent[1][3],stored.parents.parent[0][0]];
+  const session = createSession({x:100,y:100},entries,stored,['child-24'],{hiddenSecondaryIds:['child-2','child-17']});
+  const primary = session.snapshot().primaryLevel;
+  session.move(pointForPrimarySlot(primary.slots.findIndex(e=>e?.id==='parent'),primary.slotCount),0);
+  const snapshot = session.tick(300);
+  const actual = plain(snapshot.secondaryLevel.slots.map(e=>e.id));
+  const expected = stored.parents.parent.flat().filter(id=>id && !['child-24','child-2','child-17'].includes(id));
+  assert.deepEqual(actual,plain(expected));
+});
+
+test('secondary donut sorts exact save counts across pages and retains ties', () => {
+  const entries = [{id:'parent',name:'Parent',parentId:null},
+    ...Array.from({length:20},(_,i)=>({id:`child-${i}`,name:`Child ${i}`,parentId:'parent'}))];
+  const session = createSession({x:100,y:100},entries,context.LakomicsRadial.resetLayout(entries),[],{
+    usageById:{'child-19':{count:19},'child-18':18,'child-17':18,'child-16':-1},
+    hiddenSecondaryIds:['child-15'],
+  });
+  session.move(pointForPrimarySlot(0,1),0);
+  const ids=plain(session.tick(300).secondaryLevel.slots.map(e=>e.id));
+  assert.deepEqual(ids.slice(0,3),['child-19','child-17','child-18']);
+  assert.equal(ids.includes('child-15'),false);
+  assert.equal(ids.length,19);
 });

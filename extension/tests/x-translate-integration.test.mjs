@@ -48,7 +48,7 @@ test("settings keep common controls visible and rare recovery tools collapsed", 
 test("server portability controls replace plaintext JSON backup", () => {
   assert.match(optionsHtml, /id="push-portable-backup"/);
   assert.match(optionsHtml, /id="restore-portable-backup"/);
-  assert.match(optionsHtml, /AES-GCM/);
+  assert.match(optionsHtml, /복원 시 동일한 Cloud API 토큰 필요/);
   assert.doesNotMatch(optionsHtml, /id="connection-backup-json"/);
 });
 

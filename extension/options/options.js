@@ -2,6 +2,8 @@
   "use strict";
 
   const saveModeSelect = document.querySelector("#save-mode");
+  const collectorMenu = document.querySelector("#collector-menu");
+  const collectorMenuStatus = document.querySelector("#collector-menu-status");
   const savePolicyNote = document.querySelector("#save-policy-note");
   const saveModeStatus = document.querySelector("#save-mode-status");
   const diagnosticsSummary = document.querySelector("#diagnostics-summary");
@@ -65,7 +67,7 @@
       mobileSiteAccessResult.textContent = afterRequest
         ? "Mobile Lakomics 사이트 접근 권한이 허용되었습니다."
         : "";
-      mobileSiteAccessDiagnostic.textContent = "이 상태인데 Mobile 페이지가 확장을 감지하지 못하면 Titanium 콘텐츠 스크립트 호환 문제입니다. 확장은 감지되지만 라이브러리가 열리지 않으면 서비스 워커/API 상태를 확인하세요.";
+      mobileSiteAccessDiagnostic.textContent = "";
       return;
     }
     if (state === "needed") {
@@ -103,12 +105,13 @@
 
   async function initialize() {
     const settings = await chrome.runtime.sendMessage({ type: "settings:get" });
-    status.textContent = settings.tokenConfigured ? "연결 키가 저장되어 있습니다." : "Lakomics에서 연결 키를 복사해 입력하세요.";
+    status.textContent = settings.tokenConfigured ? "연결 키 저장됨" : "연결 키 필요";
     if (settings.lastConnectionFailure) {
       const when = new Date(settings.lastConnectionFailure.failedAt).toLocaleString();
       status.textContent += ` · 마지막 실패: ${when} (${describeErrorCode(settings.lastConnectionFailure.code)})`;
     }
     const preferences = settings.preferences ?? {};
+    collectorMenu.value = preferences.collectorMenu === "list" ? "list" : "radial";
     const remote = settings.remote ?? {};
     const collector = settings.collector ?? {};
     collectorEnabled.checked = collector.enabled === true;
@@ -130,9 +133,7 @@
     renderDiagnostics(settings);
     const translateStored = await chrome.storage.local.get(["xTranslateEnabled"]);
     xTranslateEnabled.checked = translateStored.xTranslateEnabled !== false;
-    xTranslateStatus.textContent = xTranslateEnabled.checked
-      ? "활성화됨 · X에서 訳 버튼으로 설정할 수 있습니다."
-      : "꺼져 있습니다.";
+    xTranslateStatus.textContent = "";
     const stored = await chrome.runtime.sendMessage({ type: "layout:get" });
     if (stored.ok) workingLayout = stored.layout;
     const pinned = await chrome.runtime.sendMessage({ type: "pinned:get" });
@@ -150,6 +151,16 @@
   }
 
 
+
+  collectorMenu.addEventListener("change", async () => {
+    collectorMenu.disabled = true;
+    try {
+      const response = await chrome.runtime.sendMessage({type: "settings:set-preferences", preferences: {collectorMenu: collectorMenu.value}});
+      collectorMenuStatus.textContent = response.ok ? "저장됨" : "저장하지 못했습니다.";
+      if (response.ok) collectorMenu.value = response.preferences.collectorMenu;
+    } catch { collectorMenuStatus.textContent = "저장하지 못했습니다."; }
+    finally { collectorMenu.disabled = false; }
+  });
 
   saveModeSelect.addEventListener("change", async () => {
     const mode = saveModeSelect.value;
@@ -520,9 +531,11 @@
 
     const controls = document.createElement("div");
     controls.className = "editor-controls";
-    controls.append(
+    if (level.pageCount > 1) controls.append(
       controlButton("이전", level.page > 0, () => { page -= 1; selectedIndex = null; renderEditor(); }),
       controlButton("다음", level.page + 1 < level.pageCount, () => { page += 1; selectedIndex = null; renderEditor(); }),
+    );
+    controls.append(
       controlButton("자동 배치", true, () => {
         workingLayout = LakomicsRadial.resetLayout(entries);
         selectedIndex = null;
@@ -533,13 +546,13 @@
 
     const help = document.createElement("p");
     help.className = "editor-help";
-    help.textContent = activeEditorParentId == null
-      ? "1차 슬롯을 선택한 뒤 다른 슬롯을 누르면 위치가 바뀝니다. 2차 편집은 위 ‘편집 대상’에서 바로 고르세요."
-      : "2차 슬롯을 선택한 뒤 다른 슬롯을 누르면 위치가 바뀝니다. 아래에서 사용량과 숨김도 바로 관리할 수 있습니다.";
-    const blocks = [heading];
+    help.textContent = "슬롯 두 개를 차례로 눌러 위치 교환";
+    const canvas = document.createElement("div");
+    canvas.className = "editor-canvas";
+    canvas.append(radial, controls, help);
+    const blocks = [heading, canvas];
     if (activeEditorParentId == null) blocks.push(renderPinnedPanel());
     else blocks.push(renderSecondaryPresentationPanel(activeEditorParentId));
-    blocks.push(radial, controls, help);
     editor.append(...blocks);
   }
 
@@ -547,7 +560,7 @@
     const panel = document.createElement("div");
     panel.className = "pinned-panel secondary-presentation-panel";
     const title = document.createElement("strong");
-    title.textContent = "2차 도넛 자동 정렬 · 숨김";
+    title.textContent = "2차 분류";
     panel.append(title);
     const children = entries
       .filter((entry) => entry?.parentId === parentId && !pinnedIds.includes(entry.id))
@@ -603,7 +616,7 @@
     panel.className = "pinned-panel";
 
     const title = document.createElement("strong");
-    title.textContent = "1차 도넛에 고정된 분류";
+    title.textContent = "고정 분류";
     panel.append(title);
 
     const pinnedEntries = pinnedIds
@@ -634,7 +647,7 @@
     } else {
       const empty = document.createElement("p");
       empty.className = "pinned-empty";
-      empty.textContent = "아직 고정된 분류가 없습니다.";
+      empty.textContent = "고정 분류 없음";
       panel.append(empty);
     }
 
@@ -753,18 +766,18 @@
 
   function describeSavePolicy(mode) {
     if (mode === "pc") {
-      savePolicyNote.textContent = "PC Lakomics(LAN/Tailscale)로만 저장합니다. PC에 연결할 수 없으면 저장이 실패하고 안내를 표시합니다.";
+      savePolicyNote.textContent = "PC 연결 필요";
       return;
     }
     if (mode === "cloud") {
-      savePolicyNote.textContent = "Cloud Capture로만 저장합니다. PC가 꺼져 있어도 동작하며, 실패 시 기존처럼 브라우저 Download로 저장합니다.";
+      savePolicyNote.textContent = "Cloud 실패 시 다운로드";
       return;
     }
     if (mode === "download") {
-      savePolicyNote.textContent = "Lakomics를 거치지 않고 브라우저 Download 폴더에 바로 저장합니다.";
+      savePolicyNote.textContent = "브라우저 다운로드 폴더에 저장";
       return;
     }
-    savePolicyNote.textContent = "PC 직접 연결이 살아 있으면 PC로 저장하고, 아니면 Cloud로 보내고, 둘 다 실패하면 브라우저 Download로 저장합니다.";
+    savePolicyNote.textContent = "PC → Cloud → 다운로드";
   }
 
   function describeDiagnostics(settings) {

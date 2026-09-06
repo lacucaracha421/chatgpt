@@ -120,7 +120,8 @@
         if (isUnsupportedAbsoluteDownloadFolder(message.preferences?.downloadFolder)) {
           return { ok: false, code: "absolute_download_path_unsupported" };
         }
-        const preferences = globalThis.LakomicsDefaults.normalizePreferences(message.preferences);
+        const stored = await chrome.storage.local.get(["preferences"]);
+        const preferences = globalThis.LakomicsDefaults.normalizePreferences({ ...stored.preferences, ...message.preferences });
         await chrome.storage.local.set({ preferences });
         const downloadUiControl = await applyDownloadUiPreference(preferences.suppressDownloadUi);
         resetClassificationCache();

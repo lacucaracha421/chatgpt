@@ -3,7 +3,7 @@
   inset: 0;
   z-index: 2147483646;
   pointer-events: none;
-  font-family: "Segoe UI", sans-serif;
+  font-family: SUIT, "Segoe UI", "Malgun Gothic", sans-serif;
 }
 
 .lakomics-radial-menu {
@@ -17,15 +17,15 @@
 
 .lakomics-sector {
   fill: rgb(28 29 34 / 96%);
-  stroke: #4a4d57;
-  stroke-width: 1.5;
+  stroke: #60615f;
+  stroke-width: 1;
 }
 
 .lakomics-sector.is-active,
 .lakomics-radial-center.is-active,
 .lakomics-radial-control.is-active circle {
-  fill: #2f6db5;
-  stroke: #8ec4ff;
+  fill: #ddd8ca;
+  stroke: #ddd8ca;
 }
 
 .lakomics-sector.is-empty {
@@ -34,19 +34,19 @@
 }
 
 .lakomics-sector.is-expanded {
-  fill: #2a3f5f;
-  stroke: #5a8ab5;
+  fill: #383a3b;
+  stroke: #9b9d98;
 }
 
 .lakomics-sector-secondary {
   fill: rgb(24 25 29 / 92%);
-  stroke: #3a3d47;
-  stroke-width: 1.5;
+  stroke: #4b4d4c;
+  stroke-width: 1;
 }
 
 .lakomics-sector-secondary.is-active {
-  fill: #2f6db5;
-  stroke: #8ec4ff;
+  fill: #ddd8ca;
+  stroke: #ddd8ca;
 }
 
 .lakomics-sector-secondary.is-empty {
@@ -56,13 +56,13 @@
 
 .lakomics-sector.is-selected,
 .lakomics-sector-secondary.is-selected {
-  fill: #365f8f;
-  stroke: #d6ebff;
-  stroke-width: 2.5;
+  fill: #ddd8ca;
+  stroke: #ddd8ca;
+  stroke-width: 1;
 }
 
 .lakomics-sector-label-secondary {
-  fill: #d8dbe0;
+  fill: #d1d2cc;
   font-size: 12px;
   font-weight: 600;
   text-anchor: middle;
@@ -73,7 +73,7 @@
 .lakomics-sector-label,
 .lakomics-center-label,
 .lakomics-control-label {
-  fill: #f8fafc;
+  fill: #e5e3dd;
   font-size: 12px;
   font-weight: 600;
   text-anchor: middle;
@@ -82,25 +82,25 @@
 }
 
 .lakomics-radial-center {
-  fill: #202127;
-  stroke: #525560;
-  stroke-width: 1.5;
+  fill: #242628;
+  stroke: #60615f;
+  stroke-width: 1;
 }
 
 .lakomics-radial-control circle {
-  fill: #202127;
-  stroke: #525560;
-  stroke-width: 1.5;
+  fill: #242628;
+  stroke: #60615f;
+  stroke-width: 1;
 }
 
 .lakomics-radial-loading {
   position: fixed;
   min-width: 150px;
   padding: 10px 14px;
-  color: #f8fafc;
+  color: #e5e3dd;
   background: rgb(28 29 34 / 96%);
-  border: 1px solid #4a4d57;
-  border-radius: 10px;
+  border: 1px solid #60615f;
+  border-radius: 3px;
   transform: translate(-50%, -50%);
   text-align: center;
 }
@@ -116,12 +116,12 @@
   gap: 10px;
   max-width: min(360px, calc(100vw - 24px));
   padding: 10px 12px;
-  color: #f8fafc;
+  color: #e5e3dd;
   background: rgb(28 29 34 / 97%);
   border: 1px solid #535761;
-  border-radius: 10px;
+  border-radius: 3px;
   box-shadow: 0 8px 24px rgb(0 0 0 / 45%);
-  font: 13px/1.4 "Segoe UI", sans-serif;
+  font: 13px/1.4 SUIT, "Segoe UI", "Malgun Gothic", sans-serif;
 }
 
 
@@ -130,10 +130,10 @@
   max-width: min(460px, calc(100vw - 24px));
   padding: 14px 16px;
   gap: 12px;
-  background: rgb(92 22 28 / 98%);
-  border: 2px solid #ff7a84;
-  border-radius: 13px;
-  box-shadow: 0 10px 34px rgb(0 0 0 / 58%), 0 0 0 1px rgb(255 122 132 / 18%);
+  background: rgb(46 29 31 / 98%);
+  border: 1px solid #d9959b;
+  border-radius: 3px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 45%);
   font-size: 16px;
   font-weight: 700;
 }
@@ -167,10 +167,10 @@
 .lakomics-result-toast button {
   min-height: 30px;
   padding: 0 10px;
-  color: #fff;
-  background: #2f6db5;
-  border: 1px solid #8ec4ff;
-  border-radius: 7px;
+  color: #242522;
+  background: #ddd8ca;
+  border: 1px solid #ddd8ca;
+  border-radius: 3px;
   cursor: pointer;
 }
 
@@ -238,15 +238,36 @@ html.lakomics-touch-gesture-active * {
   width: 22px;
   height: 22px;
   place-items: center;
-  border: 1px solid rgb(134 239 172 / 72%);
-  border-radius: 999px;
-  color: #86efac;
-  background: rgb(15 23 18 / 92%);
+  border: 1px solid #ddd8ca;
+  border-radius: 2px;
+  color: #242522;
+  background: #ddd8ca;
   box-shadow: 0 2px 8px rgb(0 0 0 / 32%);
-  font: 850 12px/1 "Segoe UI", sans-serif;
+  font: 850 12px/1 SUIT, "Segoe UI", "Malgun Gothic", sans-serif;
   pointer-events: none;
 }
 
 .lakomics-x-saved-badge-portal[hidden] {
   display: none !important;
 }
+
+/* Labels follow their adjacent sector so ivory selection retains contrast. */
+.lakomics-sector.is-active,
+.lakomics-sector-secondary.is-active {
+  fill: #ddd8ca;
+  stroke: #ddd8ca;
+}
+.lakomics-sector.is-active + .lakomics-sector-label,
+.lakomics-sector.is-selected + .lakomics-sector-label,
+.lakomics-sector-secondary.is-active + .lakomics-sector-label-secondary,
+.lakomics-sector-secondary.is-selected + .lakomics-sector-label-secondary,
+.lakomics-radial-center.is-active + .lakomics-center-label,
+.lakomics-radial-control.is-active .lakomics-control-label {
+  fill: #242522;
+}
+.lakomics-result-toast button:focus-visible {
+  outline: 2px solid #ddd8ca;
+  outline-offset: 3px;
+}
+.lakomics-result-toast.is-error button { color: #ffe3e5; }
+.lakomics-result-toast-text { overflow-wrap: anywhere; }
