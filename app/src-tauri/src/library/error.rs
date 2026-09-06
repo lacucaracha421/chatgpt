@@ -197,6 +197,8 @@ pub enum LibraryError {
     CollectionCoverNotMember,
     #[error("지원하지 않는 컬렉션 유형입니다")]
     InvalidCollectionType,
+    #[error("Invalid collection ownership selection")]
+    InvalidCollectionMetadata,
     #[error("출시·출간·개봉일은 YYYY-MM-DD 형식이어야 합니다")]
     InvalidCollectionReleaseDate,
     #[error("개인 별점은 0점에서 5점 사이의 0.5점 단위여야 합니다")]

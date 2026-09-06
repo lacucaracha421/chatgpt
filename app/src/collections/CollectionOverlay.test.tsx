@@ -9,7 +9,8 @@ vi.mock("./physical/collectibleRuntime", () => ({
   attachLiveBook: (_host: unknown, _request: unknown, onReady: (value: boolean) => void) => { onReady(false); return { tilt: () => undefined, refresh: () => undefined, dispose: () => undefined }; },
 }));
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
@@ -90,14 +91,26 @@ const unread: ReleaseWatchEvent[] = [
   { id: "e3", kind: "release_status_changed", volumeNumber: 11, previousValue: "upcoming", currentValue: "released", detectedAt: "2026-08-22T00:00:00Z" },
 ];
 
+function tracking(events: ReleaseWatchEvent[] = []) {
+  return {
+    setOwnedCount: vi.fn().mockResolvedValue([]),
+    listOwnership: vi.fn().mockResolvedValue([]),
+    setOwnership: vi.fn().mockResolvedValue([]),
+    listInbox: vi.fn().mockResolvedValue(events.map(event => ({ collectionId: "collection-1", collectionName: "던전밥", event }))),
+    acknowledge: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
 function renderOverlay(
   overrides: Partial<LibraryGateway> = {},
   onChanged = vi.fn().mockResolvedValue(undefined),
   onExit = vi.fn(),
   targetCollection = collection,
   onOpenSettings = vi.fn(),
+  withSidebar = false,
 ) {
   const gateway = {
+    collectionTracking: tracking(),
     listCollectionCovers: vi.fn().mockResolvedValue([]),
     listCollectionVolumes: vi.fn().mockResolvedValue([]),
     listCollectionWorkArtworks: vi.fn().mockResolvedValue([]),
@@ -140,10 +153,13 @@ function renderOverlay(
     runDueReleaseWatch: vi.fn().mockResolvedValue({ checked: 0, changedCollections: 0, skipped: 0, stopReason: null }),
     ...overrides,
   } as unknown as LibraryGateway;
-  render(
+  const content = (
     <LibraryProvider gateway={gateway}>
       <CollectionOverlay collectionId={targetCollection.id} collections={[targetCollection]} onExit={onExit} onChanged={onChanged} onOpenSettings={onOpenSettings} />
-    </LibraryProvider>,
+    </LibraryProvider>
+  );
+  render(
+    withSidebar ? <WorkspaceChromeProvider scope={targetCollection.id}><aside aria-label="작품 사이드바"><ChromeTarget name="details" /></aside>{content}</WorkspaceChromeProvider> : content,
   );
   return { gateway, onChanged, onExit, onOpenSettings };
 }
@@ -153,6 +169,31 @@ async function openProviderMenu(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("CollectionOverlay MangaDex flow", () => {
+  it.each([collection, gameCollection, movieCollection])("places $type information and working management actions in the sidebar", async (target) => {
+    const user = userEvent.setup();
+    const { gateway } = renderOverlay({}, undefined, undefined, target, undefined, true);
+    const sidebar = within(screen.getByRole("complementary", { name: "작품 사이드바" }));
+    expect(await sidebar.findByRole("heading", { name: target.name })).toBeInTheDocument();
+    expect(sidebar.getByRole("complementary", { name: "컬렉션 정보" })).toBeInTheDocument();
+    const label = target.type === "manga" ? "연결 및 갱신" : "작품 관리";
+    await user.click(sidebar.getByRole("button", { name: label }));
+    await user.click(await screen.findByRole("menuitem", { name: "쇼케이스에 추가" }));
+    expect(gateway.setCollectionShowcase).toHaveBeenCalledWith(target.id, true);
+    expect(screen.getAllByRole("button", { name: label })).toHaveLength(1);
+    expect(document.querySelector(".collection-overlay__manga-aside")).toBeNull();
+  });
+
+  it("switches shelf editions from the sidebar without duplicate controls", async () => {
+    const user = userEvent.setup();
+    const volumes = [0, 1].map(editionIndex => ({ id: `v${editionIndex}`, volumeNumber: 1, editionIndex, displayLabel: "1", coverArtworkId: `art${editionIndex}`, localReleaseDate: null, isbn13: null, releaseStatus: null }));
+    renderOverlay({ listCollectionVolumes: vi.fn().mockResolvedValue(volumes) }, undefined, undefined, collection, undefined, true);
+    const sidebar = within(screen.getByRole("complementary", { name: "작품 사이드바" }));
+    await user.click(await sidebar.findByRole("button", { name: "대체판 1 선택" }));
+    expect(sidebar.getByRole("button", { name: "대체판 1 선택" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getAllByRole("group", { name: "판본 선택" })).toHaveLength(1);
+    expect(screen.getByRole("img", { name: "1권 표지" })).toHaveAttribute("src", "http://lakomics.localhost/work-artwork-thumbnail/art1");
+  });
+
   it("explains legacy Aladin reconnection and opens Kakao without refreshing the old provider", async () => {
     const user = userEvent.setup();
     const { gateway } = renderOverlay({
@@ -216,7 +257,7 @@ describe("CollectionOverlay MangaDex flow", () => {
     expect(setReleaseWatchEnabled).toHaveBeenCalledWith("collection-1", true);
     await openProviderMenu(user);
     expect(await screen.findByRole("menuitem", { name: "신간 알림 끄기" })).toBeInTheDocument();
-    expect(gateway.takeUnreadReleaseChanges).toHaveBeenCalledOnce();
+    expect(gateway.takeUnreadReleaseChanges).not.toHaveBeenCalled();
   });
 
   it("disables an enabled release watch", async () => {
@@ -246,13 +287,13 @@ describe("CollectionOverlay MangaDex flow", () => {
     expect(screen.queryByRole("menuitem", { name: /신간 알림/ })).not.toBeInTheDocument();
   });
 
-  it("takes unread changes once, keeps the selected shelf cover, and refreshes the card projection", async () => {
+  it("keeps unread changes until explicitly acknowledged and preserves the selected cover", async () => {
     const onChanged = vi.fn().mockResolvedValue(undefined);
     renderOverlay({
       listCollectionVolumes: vi.fn().mockResolvedValue([{
         id: "v1", volumeNumber: 1, editionIndex: 0, displayLabel: "1", coverArtworkId: "art-1",
       }]),
-      takeUnreadReleaseChanges: vi.fn().mockResolvedValue(unread),
+      collectionTracking: tracking(unread),
     }, onChanged);
 
     const shelfCover = await screen.findByRole("img", { name: "1권 표지" });
@@ -261,15 +302,18 @@ describe("CollectionOverlay MangaDex flow", () => {
     expect(summary).toHaveTextContent("새 권: 13권");
     expect(summary).toHaveTextContent("출간일 변경: 12권 2026-08-21 → 2026-08-23");
     expect(summary).toHaveTextContent("출간 상태 변경: 11권 출간 예정 → 출간됨");
-    expect(onChanged).toHaveBeenCalledOnce();
+    expect(onChanged).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "표시된 신간 알림 확인" }));
+    await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
     expect(shelfCover).toHaveAttribute("src", "http://lakomics.localhost/work-artwork-thumbnail/art-1");
   });
 
   it("contains card refresh failures after taking unread release changes", async () => {
     const onChanged = vi.fn().mockRejectedValue(new Error("refresh failed"));
-    renderOverlay({ takeUnreadReleaseChanges: vi.fn().mockResolvedValue(unread) }, onChanged);
+    renderOverlay({ collectionTracking: tracking(unread) }, onChanged);
 
     expect(await screen.findByRole("region", { name: "새 출간 정보" })).toHaveTextContent("새 권: 13권");
+    await userEvent.click(screen.getByRole("button", { name: "표시된 신간 알림 확인" }));
     await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
   });
 
@@ -277,7 +321,7 @@ describe("CollectionOverlay MangaDex flow", () => {
     const onChanged = vi.fn().mockResolvedValue(undefined);
     const { gateway } = renderOverlay({}, onChanged);
 
-    await waitFor(() => expect(gateway.takeUnreadReleaseChanges).toHaveBeenCalledOnce());
+    await waitFor(() => expect(gateway.collectionTracking!.listInbox).toHaveBeenCalledOnce());
     expect(screen.queryByRole("region", { name: "새 출간 정보" })).not.toBeInTheDocument();
     expect(onChanged).not.toHaveBeenCalled();
   });

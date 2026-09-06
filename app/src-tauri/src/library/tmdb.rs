@@ -17,16 +17,18 @@ const SEARCH_LIMIT: usize = 20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TmdbImageSize {
+    W342,
     W500,
-    W1280,
+    W780,
     Original,
 }
 
 impl TmdbImageSize {
     fn as_str(self) -> &'static str {
         match self {
+            Self::W342 => "w342",
             Self::W500 => "w500",
-            Self::W1280 => "w1280",
+            Self::W780 => "w780",
             Self::Original => "original",
         }
     }
@@ -156,6 +158,24 @@ struct RawMovie {
     production_companies: Vec<RawName>,
     credits: Option<RawCredits>,
     images: Option<RawImages>,
+    release_dates: Option<RawReleaseDates>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawReleaseDates {
+    #[serde(default)]
+    results: Vec<RawCountryReleases>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawCountryReleases {
+    #[serde(default)]
+    release_dates: Vec<RawRelease>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawRelease {
+    release_date: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -241,7 +261,7 @@ fn movie_url(movie_id: i64, language: &str) -> Url {
     let mut url = Url::parse(&format!("{API_ORIGIN}/movie/{movie_id}"))
         .expect("TMDB API origin is a compile-time-valid URL");
     url.query_pairs_mut()
-        .append_pair("append_to_response", "credits,images")
+        .append_pair("append_to_response", "credits,images,release_dates")
         .append_pair("language", language)
         .append_pair("include_image_language", "ko,null,en");
     url
@@ -293,7 +313,14 @@ fn normalize_raw_movie(raw: RawMovie) -> Result<TmdbRemoteMovie, LibraryError> {
         .ok_or(LibraryError::TmdbInvalidResponse)?;
     let original_title = original_title.filter(|original| original != &title);
     let overview = non_empty(raw.overview);
-    let release_date = non_empty(raw.release_date);
+    let release_date = raw.release_dates.into_iter()
+        .flat_map(|dates| dates.results)
+        .flat_map(|country| country.release_dates)
+        .filter_map(|release| release.release_date)
+        .chain(raw.release_date)
+        .filter_map(|date| chrono::NaiveDate::parse_from_str(date.get(..10)?, "%Y-%m-%d").ok())
+        .min()
+        .map(|date| date.format("%Y-%m-%d").to_string());
     let poster_path = checked_optional_path(raw.poster_path)?;
     let backdrop_path = checked_optional_path(raw.backdrop_path)?;
     let images = raw.images.unwrap_or(RawImages {
@@ -371,6 +398,9 @@ fn normalize_raw_movie(raw: RawMovie) -> Result<TmdbRemoteMovie, LibraryError> {
 }
 
 fn merge_raw_movie(primary: &mut RawMovie, fallback: RawMovie) {
+    if primary.release_dates.is_none() {
+        primary.release_dates = fallback.release_dates;
+    }
     if text_is_blank(primary.title.as_deref()) && text_is_blank(primary.original_title.as_deref()) {
         primary.title = fallback.title;
     }
@@ -581,6 +611,12 @@ mod tests {
         parse_search, validate_image_path, TmdbImageSize,
     };
     use crate::library::{error::LibraryError, models::TmdbCredentials};
+
+    #[test]
+    fn selects_earliest_worldwide_release_date() {
+        let movie = normalize_movie(r#"{"id":1,"title":"Movie","release_date":"2026-10-10","release_dates":{"results":[{"release_dates":[{"release_date":"2026-10-01T00:00:00.000Z"},{"release_date":"invalid"}]},{"release_dates":[{"release_date":"2026-09-28T00:00:00.000Z"}]}]}}"#).unwrap();
+        assert_eq!(movie.release_date.as_deref(), Some("2026-09-28"));
+    }
 
     #[test]
     fn normalizes_movie_score_and_redacts_token() {

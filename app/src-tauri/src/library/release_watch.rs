@@ -349,7 +349,7 @@ fn release_watch_status(
     })
 }
 
-fn release_watch_event_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReleaseWatchEvent> {
+pub(super) fn release_watch_event_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReleaseWatchEvent> {
     let kind = match row.get::<_, String>(1)?.as_str() {
         "new_volume" => ReleaseWatchEventKind::NewVolume,
         "release_date_changed" => ReleaseWatchEventKind::ReleaseDateChanged,

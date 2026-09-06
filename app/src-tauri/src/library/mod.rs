@@ -50,6 +50,7 @@ pub mod models;
 mod online_catalog;
 mod query;
 mod release_watch;
+pub mod collection_tracking;
 pub(crate) mod remote_gallery;
 pub(crate) mod remote_media;
 pub(crate) mod remote_progress;

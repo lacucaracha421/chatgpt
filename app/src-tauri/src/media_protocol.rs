@@ -307,8 +307,8 @@ fn parse_media_path(path: &str) -> Result<(MediaVariant, Option<String>), ()> {
                 _ => return Err(()),
             };
             let image_size = match variant {
-                MediaVariant::TmdbImagePreviewPoster => TmdbImageSize::W500,
-                MediaVariant::TmdbImagePreviewBackdrop => TmdbImageSize::W1280,
+                MediaVariant::TmdbImagePreviewPoster => TmdbImageSize::W342,
+                MediaVariant::TmdbImagePreviewBackdrop => TmdbImageSize::W780,
                 _ => return Err(()),
             };
             TmdbClient::image_url(&image_path, image_size).map_err(|_| ())?;
@@ -321,7 +321,7 @@ fn parse_media_path(path: &str) -> Result<(MediaVariant, Option<String>), ()> {
 fn igdb_image_response(image_id: &str, variant: MediaVariant) -> Response<Vec<u8>> {
     let size = match variant {
         MediaVariant::IgdbImagePreviewCover => IgdbImageSize::CoverBig,
-        MediaVariant::IgdbImagePreviewHero => IgdbImageSize::Hd1080p,
+        MediaVariant::IgdbImagePreviewHero => IgdbImageSize::Hd720p,
         _ => return empty_response(StatusCode::BAD_REQUEST),
     };
     let Ok(url) = IgdbClient::image_url(image_id, size) else {
@@ -348,6 +348,7 @@ fn igdb_image_response(image_id: &str, variant: MediaVariant) -> Response<Vec<u8
     Response::builder()
         .status(StatusCode::OK)
         .header(CONTENT_TYPE, "image/jpeg")
+        .header("Cache-Control", "private, max-age=86400")
         .header(CONTENT_LENGTH, bytes.len().to_string())
         .body(bytes)
         .expect("IGDB image response is valid")
@@ -367,8 +368,8 @@ fn igdb_image_agent() -> &'static ureq::Agent {
 
 fn tmdb_image_response(file_path: &str, variant: MediaVariant) -> Response<Vec<u8>> {
     let size = match variant {
-        MediaVariant::TmdbImagePreviewPoster => TmdbImageSize::W500,
-        MediaVariant::TmdbImagePreviewBackdrop => TmdbImageSize::W1280,
+        MediaVariant::TmdbImagePreviewPoster => TmdbImageSize::W342,
+        MediaVariant::TmdbImagePreviewBackdrop => TmdbImageSize::W780,
         _ => return empty_response(StatusCode::BAD_REQUEST),
     };
     let Ok(url) = TmdbClient::image_url(file_path, size) else {
@@ -395,6 +396,7 @@ fn tmdb_image_response(file_path: &str, variant: MediaVariant) -> Response<Vec<u
     Response::builder()
         .status(StatusCode::OK)
         .header(CONTENT_TYPE, tmdb_image_mime(file_path))
+        .header("Cache-Control", "private, max-age=86400")
         .header(CONTENT_LENGTH, bytes.len().to_string())
         .body(bytes)
         .expect("TMDB image response is valid")

@@ -5,6 +5,8 @@ import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { BookConnection, CollectionCover, CollectionSummary, CollectionVolume, CreateCollection, IgdbConnection, MangaDexConnection, ReleaseWatchEvent, ReleaseWatchStatus, TmdbConnection, UpdateCollection, VolumeImportProgress, WorkArtworkSummary } from "../library/types";
 import { ViewToolbar } from "../layout/ViewToolbar";
+import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
+import { CollectionSidebarSection } from "./CollectionSidebarSection";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
@@ -14,11 +16,12 @@ import { Toast } from "../shared/ui/Toast";
 import { CollectionCoverGrid } from "./CollectionCoverGrid";
 import { CollectionInfoPanel } from "./CollectionInfoPanel";
 import { CollectionEditDialog, type CollectionEditMode } from "./CollectionEditDialog";
-import { CollectionVolumeGrid } from "./CollectionVolumeGrid";
+import { CollectionVolumeGrid, CollectionEditionSelector } from "./CollectionVolumeGrid";
 import { MangaCoverViewer } from "./MangaCoverViewer";
 import { KakaoConnectDialog } from "./KakaoConnectDialog";
 import { MangaDexImportDialog } from "./MangaDexImportDialog";
 import { ReleaseWatchSummary } from "./ReleaseWatchSummary";
+import { CollectionOwnershipPanel } from "./CollectionOwnershipPanel";
 import { GameCollectionDetail } from "./GameCollectionDetail";
 import { IgdbImportDialog } from "./IgdbImportDialog";
 import { MovieCollectionDetail } from "./MovieCollectionDetail";
@@ -33,6 +36,7 @@ type CollectionOverlayProps = {
 };
 
 export function CollectionOverlay({ collectionId, collections, onExit, onChanged, onOpenSettings }: CollectionOverlayProps) {
+  const sidebar = Boolean(useWorkspaceChrome());
   const { gateway, library } = useLibrary();
   const { privacyMode } = usePrivacy();
   const [covers, setCovers] = useState<CollectionCover[] | null>(null);
@@ -109,11 +113,11 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
     let active = true;
     setReleaseChanges([]);
     if (!isManga) return () => { active = false; };
-    void gateway.takeUnreadReleaseChanges(collectionId).then(
-      (events) => {
+    if (!gateway.collectionTracking) return () => { active = false; };
+    void gateway.collectionTracking.listInbox().then(
+      (items) => {
         if (!active) return;
-        setReleaseChanges(events);
-        if (events.length > 0) void onChangedRef.current().catch(() => undefined);
+        setReleaseChanges(items.filter(item => item.collectionId === collectionId).map(item => item.event));
       },
       () => undefined,
     );
@@ -487,6 +491,21 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
 
   return (
     <section className="collection-overlay" aria-label="컬렉션 표지 보기">
+      {sidebar && collection && <CollectionSidebarSection>
+        <h2 className="collection-detail-sidebar__title">{collection.name}</h2>
+        <CollectionInfoPanel collection={collection} compact />
+        {isManga && volumes && <CollectionEditionSelector volumes={volumes} editionIndex={editionIndex} onEditionIndexChange={selectEdition} />}
+      </CollectionSidebarSection>}
+      {sidebar && isManga && <CollectionSidebarSection actions>{providerMenu}</CollectionSidebarSection>}
+      {isManga && <CollectionSidebarSection>
+        <CollectionOwnershipPanel key={collectionId} collectionId={collectionId} volumes={volumes ?? []} editionIndex={editionIndex} />
+        {releaseWatchStatus && <div className="collection-release-status">
+          <strong>신간 알림 {releaseWatchStatus.enabled ? "켜짐" : "꺼짐"}</strong>
+          <small>마지막 확인: {releaseWatchStatus.lastCheckedAt ? new Date(releaseWatchStatus.lastCheckedAt).toLocaleString("ko-KR") : "아직 확인하지 않음"}</small>
+          {releaseWatchStatus.enabled && <small>앱 실행 중 하루 간격으로 확인합니다.</small>}
+          {releaseWatchStatus.enabled && releaseWatchStatus.lastCheckedAt && Number.isFinite(Date.parse(releaseWatchStatus.lastCheckedAt)) && <small>다음 확인: {new Date(Date.parse(releaseWatchStatus.lastCheckedAt) + 86_400_000).toLocaleString("ko-KR")} 이후 앱 실행 중</small>}
+        </div>}
+      </CollectionSidebarSection>}
       <ViewToolbar
         title={collection?.name ?? "컬렉션"}
         ariaLabel="컬렉션 표지 도구"
@@ -499,6 +518,15 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
       {needsBookReconnect && <p role="status">기존 알라딘 신간 확인은 중단된 상태입니다. 카카오로 다시 연결해 주세요. <Button size="sm" onClick={() => setKakaoOpen(true)}>카카오 연결</Button></p>}
       {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
       <ReleaseWatchSummary events={releaseChanges} />
+      {releaseChanges.length > 0 && gateway.collectionTracking && <Button size="sm" disabled={releaseWatchSaving} onClick={async () => {
+        setReleaseWatchSaving(true);
+        try {
+          await gateway.collectionTracking!.acknowledge(collectionId, releaseChanges.map(event => event.id));
+          setReleaseChanges([]);
+          void onChangedRef.current().catch(() => undefined);
+        } catch (error) { setMessage(commandErrorMessage(error, "신간 알림을 확인 처리하지 못했습니다.")); }
+        finally { setReleaseWatchSaving(false); }
+      }}>표시된 신간 알림 확인</Button>}
       {isGame && collection ? (
         <GameCollectionDetail
           collection={collection}
@@ -541,6 +569,7 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
                   selectedVolumeId={selectedVolumeId}
                   editionIndex={editionIndex}
                   onEditionIndexChange={selectEdition}
+                  showEditionSelector={!sidebar}
                   onSelect={openVolume}
                 />
               ) : (
@@ -551,10 +580,14 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
                 </p>
               )}
             </div>
-            <aside className="collection-overlay__manga-aside">
+            {!sidebar && <aside className="collection-overlay__manga-aside">
               {collection && <CollectionInfoPanel collection={collection} />}
               {providerMenu}
-            </aside>
+            </aside>}
+            {sidebar && (collection?.description?.trim() || collection?.overview?.trim()) && <div className="collection-detail-description">
+              {collection.description?.trim() && <p>{collection.description}</p>}
+              {collection.overview?.trim() && <p>{collection.overview}</p>}
+            </div>}
         </div>
       ) : (
         <>

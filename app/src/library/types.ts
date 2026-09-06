@@ -932,7 +932,18 @@ export type IngestOutcome =
   | { status: "exact_duplicate"; existingAssetId: string; classificationChanged: boolean; metadataChanged?: boolean }
   | { status: "review_pending"; reviewId: string };
 
+export type VolumeOwnership = { volumeNumber: number; editionIndex: number; physical: boolean; digital: boolean };
+export type ReleaseInboxItem = { collectionId: string; collectionName: string; event: ReleaseWatchEvent };
+export interface CollectionTrackingGateway {
+  setOwnedCount(collectionId: string, editionIndex: number, count: number): Promise<VolumeOwnership[]>;
+  listOwnership(collectionId: string): Promise<VolumeOwnership[]>;
+  setOwnership(collectionId: string, editionIndex: number, volumeNumbers: number[], format: "physical" | "digital", owned: boolean): Promise<VolumeOwnership[]>;
+  listInbox(): Promise<ReleaseInboxItem[]>;
+  acknowledge(collectionId: string, eventIds: string[]): Promise<void>;
+}
+
 export interface LibraryGateway {
+  collectionTracking?: CollectionTrackingGateway;
   listCatalogReview(): Promise<CatalogReviewPage>;
   generateCatalogReview(): Promise<CatalogReviewPage>;
   decideCatalogReview(query: CatalogReviewDecision): Promise<void>;

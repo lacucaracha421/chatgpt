@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
 
-export type Slot = "navigation" | "actions" | "search" | "settings" | "header";
+export type Slot = "navigation" | "actions" | "search" | "settings" | "header" | "details";
 export type Targets = Record<Slot, HTMLElement | null>;
 export type ChromeMeta = { owner: string; scope: string; title: string; summary: string; settings: boolean; navigation: boolean; actions: boolean; search: boolean };
 type ChromeContextValue = {

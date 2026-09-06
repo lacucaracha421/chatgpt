@@ -4,6 +4,8 @@ import type { CollectionSummary, WorkArtworkSummary } from "../library/types";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { Menu } from "../shared/ui/Menu";
 import { WorkArtworkGallery } from "./WorkArtworkGallery";
+import { CollectionSidebarSection } from "./CollectionSidebarSection";
+import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 
 export type GameCollectionDetailProps = {
   collection: CollectionSummary;
@@ -37,6 +39,7 @@ export function GameCollectionDetail({
   onChangeArtwork,
 }: GameCollectionDetailProps) {
   const [lifted, setLifted] = useState(false);
+  const sidebar = Boolean(useWorkspaceChrome());
   const { privacyMode } = usePrivacy();
   const [failedCover, setFailedCover] = useState<string | null>(null);
   const coverVisible = Boolean(coverUrl) && coverUrl !== failedCover && !privacyMode;
@@ -100,7 +103,7 @@ export function GameCollectionDetail({
             </button>
           </div>}
           <div className="game-collection-detail__copy">
-            <div className="game-collection-detail__actions">
+            <CollectionSidebarSection actions><div className="game-collection-detail__actions">
               <Menu
                 label="작품 관리"
                 trigger="작품 관리"
@@ -127,9 +130,9 @@ export function GameCollectionDetail({
                   { id: "artwork", label: "표지·hero 변경", disabled: !providerConnected, onSelect: onChangeArtwork },
                 ]}
               />
-            </div>
+            </div></CollectionSidebarSection>
             <h1>{collection.name}</h1>
-            {metadata.length > 0 && (
+            {!sidebar && metadata.length > 0 && (
               <dl className="game-collection-detail__facts">
                 {metadata.map(([label, value]) => (
                   <div key={label} className="game-collection-detail__fact">

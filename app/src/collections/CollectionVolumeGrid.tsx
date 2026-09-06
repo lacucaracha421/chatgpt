@@ -13,17 +13,15 @@ type CollectionVolumeGridProps = {
   onSelect: (volumeId: string) => void;
   scope?: string;
   revision?: string;
+  showEditionSelector?: boolean;
 };
-export function CollectionVolumeGrid({ volumes, selectedVolumeId, editionIndex, onEditionIndexChange, onSelect, scope = "", revision = "" }: CollectionVolumeGridProps) {
+export function CollectionVolumeGrid({ volumes, selectedVolumeId, editionIndex, onEditionIndexChange, onSelect, scope = "", revision = "", showEditionSelector = true }: CollectionVolumeGridProps) {
   const { privacyMode } = usePrivacy();
   const visible = useMemo(() => volumes.filter(volume => volume.editionIndex === editionIndex).sort((a,b) => a.volumeNumber-b.volumeNumber), [volumes,editionIndex]);
-  const editions = useMemo(() => [...new Set(volumes.map(volume => volume.editionIndex))].sort((a,b) => a-b), [volumes]);
   return <section className="collection-overlay__grid-area collection-volume-shelf collection-volume-shelf--final" aria-labelledby="collection-volume-grid-heading">
     <div className="collection-overlay__grid-heading">
       <div><h3 id="collection-volume-grid-heading">권별 표지</h3><span>총 {visible.length}권</span></div>
-      {editions.length > 1 && <div className="collection-overlay__shelves" role="group" aria-label="판본 선택">
-        {editions.map(edition => <button key={edition} type="button" className="collection-overlay__shelf-button" aria-label={`${editionLabel(edition)} 선택`} aria-pressed={editionIndex === edition} onClick={() => onEditionIndexChange(edition)}>{editionLabel(edition)}</button>)}
-      </div>}
+      {showEditionSelector && <CollectionEditionSelector volumes={volumes} editionIndex={editionIndex} onEditionIndexChange={onEditionIndexChange} />}
     </div>
     {visible.length === 0 ? <div className="collection-overlay__cover-empty">이 판본의 표지가 없습니다.</div> :
       <VirtualCoverGrid key={editionIndex} items={visible} itemKey={volume => volume.id} label="권별 표지 목록" centered metadataHeight={38} className="collection-volume-shelf__viewport" render={volume => {
@@ -39,6 +37,13 @@ export function CollectionVolumeGrid({ volumes, selectedVolumeId, editionIndex, 
         </button>;
       }} />}
   </section>;
+}
+export function CollectionEditionSelector({ volumes, editionIndex, onEditionIndexChange }: Pick<CollectionVolumeGridProps, "volumes" | "editionIndex" | "onEditionIndexChange">) {
+  const editions = [...new Set(volumes.map(volume => volume.editionIndex))].sort((a,b) => a-b);
+  if (editions.length < 2) return null;
+  return <div className="collection-overlay__shelves" role="group" aria-label="판본 선택">
+    {editions.map(edition => <button key={edition} type="button" className="collection-overlay__shelf-button" aria-label={`${editionLabel(edition)} 선택`} aria-pressed={editionIndex === edition} onClick={() => onEditionIndexChange(edition)}>{editionLabel(edition)}</button>)}
+  </div>;
 }
 function editionLabel(index: number) { return index === 0 ? "기본판" : `대체판 ${index}`; }
 function formatKoreanDate(value: string) {

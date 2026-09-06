@@ -1,12 +1,18 @@
 type Point = { x: number; y: number; z?: number };
-const WIDTH = 154;
-const HEIGHT = 231;
+const MAX_WIDTH = 168;
+const MAX_HEIGHT = 231;
 const DEPTH = 15;
 const VIEW_WIDTH = 184;
 const VIEW_HEIGHT = 260;
+const CASE_SCALE = 0.95;
 
 /** One projected surface for the closed shells, seam, artwork and lip. */
 export function drawGameCase(canvas: HTMLCanvasElement, image: HTMLImageElement | null, width: number) {
+  // Fit the shell to the artwork, so the full cover reaches every front edge.
+  const artworkRatio = image && image.naturalWidth > 0 && image.naturalHeight > 0
+    ? image.naturalWidth / image.naturalHeight : MAX_WIDTH / MAX_HEIGHT;
+  const WIDTH = Math.min(MAX_WIDTH, MAX_HEIGHT * artworkRatio);
+  const HEIGHT = WIDTH / artworkRatio;
   const ratio = Math.min(6, Math.max(1, window.devicePixelRatio * 2 * width / VIEW_WIDTH));
   canvas.width = Math.ceil(VIEW_WIDTH * ratio);
   canvas.height = Math.ceil(VIEW_HEIGHT * ratio);
@@ -22,7 +28,7 @@ export function drawGameCase(canvas: HTMLCanvasElement, image: HTMLImageElement 
     const tz = -Math.sin(ry) * x + Math.cos(ry) * z;
     const ty = Math.cos(rx) * y - Math.sin(rx) * tz;
     const depth = Math.sin(rx) * y + Math.cos(rx) * tz;
-    const perspective = 1100 / (1100 - depth);
+    const perspective = CASE_SCALE * 1100 / (1100 - depth);
     return { x: VIEW_WIDTH / 2 + tx * perspective, y: VIEW_HEIGHT / 2 + ty * perspective, z: depth };
   };
   const polygon = (points: Point[]) => {
@@ -55,7 +61,7 @@ export function drawGameCase(canvas: HTMLCanvasElement, image: HTMLImageElement 
     polygon(points); ctx.fillStyle = `rgb(${tone},${tone + 3},${tone + 3})`;
     ctx.strokeStyle = ctx.fillStyle; ctx.lineWidth = 0.28; ctx.fill(); ctx.stroke();
   });
-  // Loading uses exactly the same shell silhouette as the final artwork.
+  // Use the standard shell while the artwork's proportions are unknown.
   if (!image) {
     polygon(edge.map((p) => project(p.x, p.y, DEPTH / 2)));
     ctx.fillStyle = "#303434"; ctx.fill();
@@ -63,11 +69,10 @@ export function drawGameCase(canvas: HTMLCanvasElement, image: HTMLImageElement 
     return true;
   }
   const texture = document.createElement("canvas");
-  texture.width = 462; texture.height = 693;
+  texture.width = WIDTH * 3; texture.height = HEIGHT * 3;
   const paint = texture.getContext("2d");
   if (!paint) return false;
-  const scale = Math.max(texture.width / image.naturalWidth, texture.height / image.naturalHeight);
-  paint.drawImage(image, (texture.width - image.naturalWidth * scale) / 2, (texture.height - image.naturalHeight * scale) / 2, image.naturalWidth * scale, image.naturalHeight * scale);
+  paint.drawImage(image, 0, 0, texture.width, texture.height);
   ctx.save();
   polygon(edge.map((p) => project(p.x, p.y, DEPTH / 2))); ctx.clip();
   // Shared UV coordinates avoid independently antialiased CSS face edges.

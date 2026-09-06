@@ -44,6 +44,18 @@ const sample: CollectionSummary = {
 };
 
 describe("CollectionCard", () => {
+  it("shows a compact movie release date on a separate line after the studio", () => {
+    render(<CollectionCard collection={{ ...sample, type: "movie", productionCompany: "MAPPA", releaseDate: "2026-10-01" }} coverUrl={null} selected={false} onClick={vi.fn()} />);
+    const date = screen.getByText("26.10.1");
+    expect(date).toHaveAttribute("datetime", "2026-10-01");
+    expect(screen.getByText("MAPPA").nextElementSibling).toBe(date);
+  });
+  it.each(["game", "manga"] as const)("shows the %s release date or the known year", (type) => {
+    const view = render(<CollectionCard collection={{ ...sample, type, releaseDate: "2026-10-01" }} coverUrl={null} selected={false} onClick={vi.fn()} />);
+    expect(screen.getByText("26.10.1")).toHaveAttribute("datetime", "2026-10-01");
+    view.rerender(<CollectionCard collection={{ ...sample, type, releaseDate: null, year: 2019 }} coverUrl={null} selected={false} onClick={vi.fn()} />);
+    expect(screen.getByText("2019")).toHaveAttribute("datetime", "2019");
+  });
   it.each([
     ["manga", { author: "Kui Ryoko", developer: "Wrong", productionCompany: "Wrong" }, "Kui Ryoko"],
     ["game", { author: "Wrong", developer: "PlatinumGames", productionCompany: "Wrong" }, "PlatinumGames"],
@@ -67,7 +79,7 @@ describe("CollectionCard", () => {
     render(<CollectionCard collection={sample} coverUrl={null} selected={false} onClick={vi.fn()} />);
     expect(screen.queryByText("게임")).not.toBeInTheDocument();
     expect(screen.queryByText("3개")).not.toBeInTheDocument();
-    expect(screen.queryByText("2019")).not.toBeInTheDocument();
+    expect(screen.getByText("2019")).toHaveAttribute("datetime", "2019");
     expect(screen.queryByText("87")).not.toBeInTheDocument();
     expect(screen.queryByText("5")).not.toBeInTheDocument();
     expect(screen.getByText("Sample")).toHaveAttribute("title", "Sample");

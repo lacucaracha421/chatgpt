@@ -349,7 +349,7 @@ describe("OnlineCatalogBrowser", () => {
     await userEvent.click(await screen.findByRole("button", { name: "다음 결과" }));
     await userEvent.click(await screen.findByRole("button", { name: "오래된 제독 북마크 해제" }));
     await waitFor(() => expect(gateway.searchOnlineCatalog).toHaveBeenLastCalledWith(
-      expect.objectContaining({ scope: "bookmarked", page: 0 }),
+      expect.objectContaining({ scope: "bookmarked", page: 0, sort: "latest" }),
     ));
   });
 
@@ -634,10 +634,18 @@ describe("OnlineCatalogBrowser", () => {
   });
 });
 
-function renderBrowser(gateway: LibraryGateway) {
+it("opens bookmarks without the default hot-day date restriction", async () => {
+  const gateway = createGateway(true);
+  renderBrowser(gateway, "bookmarked");
+  await waitFor(() => expect(gateway.searchOnlineCatalog).toHaveBeenCalledWith(
+    expect.objectContaining({ scope: "bookmarked", sort: "latest", page: 0 }),
+  ));
+});
+
+function renderBrowser(gateway: LibraryGateway, initialScope: "all" | "bookmarked" = "all") {
   return render(
     <LibraryProvider gateway={gateway}>
-      <OnlineCatalogBrowser onSwitchLocal={vi.fn()} />
+      <OnlineCatalogBrowser onSwitchLocal={vi.fn()} initialScope={initialScope} />
     </LibraryProvider>,
   );
 }

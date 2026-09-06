@@ -22,6 +22,7 @@ const IGDB_REQUEST_INTERVAL: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IgdbImageSize {
+    Hd720p,
     CoverBig,
     Hd1080p,
     Original,
@@ -446,6 +447,7 @@ fn image_url(image_id: &str, size: IgdbImageSize) -> Result<String, LibraryError
     let size = match size {
         IgdbImageSize::CoverBig => "t_cover_big",
         IgdbImageSize::Hd1080p => "t_1080p",
+        IgdbImageSize::Hd720p => "t_720p",
         IgdbImageSize::Original => "t_original",
     };
     Ok(format!(
@@ -562,6 +564,10 @@ mod tests {
         assert_eq!(
             super::image_url("abc_-12", IgdbImageSize::CoverBig).unwrap(),
             "https://images.igdb.com/igdb/image/upload/t_cover_big/abc_-12.jpg"
+        );
+        assert_eq!(
+            super::image_url("abc_-12", IgdbImageSize::Hd720p).unwrap(),
+            "https://images.igdb.com/igdb/image/upload/t_720p/abc_-12.jpg"
         );
         assert_eq!(
             super::image_url("abc_-12", IgdbImageSize::Original).unwrap(),

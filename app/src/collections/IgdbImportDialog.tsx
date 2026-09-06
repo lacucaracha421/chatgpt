@@ -185,7 +185,7 @@ export function IgdbImportDialog({ open, target, onClose, onApplied, onOpenSetti
 
   const title = target.kind === "new" ? "IGDB에서 게임 추가" : "IGDB 게임 아트워크 변경";
   const preview = step.kind === "cover" || step.kind === "hero" ? step.preview : null;
-  const candidates = step.kind === "cover" ? step.preview.covers : step.kind === "hero" ? (step.preview.artworks.length > 0 ? step.preview.artworks : step.preview.screenshots) : [];
+  const candidates = step.kind === "cover" ? step.preview.covers : step.kind === "hero" ? [...new Map([...step.preview.artworks, ...step.preview.screenshots].map((image) => [image.imageId, image])).values()] : [];
   const loadingExisting = step.kind === "existing-loading";
   const existingError = step.kind === "existing-error" ? step : null;
 
@@ -252,7 +252,7 @@ function ArtworkStep({ kind, candidates, selectedId, onSelect }: { kind: "cover"
     {candidates.length === 0 ? <p className="igdb-import__muted">사용 가능한 이미지가 없습니다.</p> : <div className="igdb-import__candidates">
       {candidates.map((candidate, index) => <label key={candidate.imageId} className="igdb-import__candidate">
         <input type="radio" name={kind} value={candidate.imageId} checked={selectedId === candidate.imageId} aria-label={`${kind === "cover" ? "표지" : "대표 이미지"} ${index + 1} (${candidate.imageId})`} onChange={() => onSelect(candidate.imageId)} />
-        {privacyMode ? <Skeleton className="privacy-mask igdb-import__candidate-mask" label="비공개 모드" /> : <img src={igdbImagePreviewUrl(candidate.imageId, kind === "cover" ? "cover" : "hero")} alt={`${kind === "cover" ? "표지" : "대표 이미지"} ${index + 1}`} />}
+        {privacyMode ? <Skeleton className="privacy-mask igdb-import__candidate-mask" label="비공개 모드" /> : <img loading="lazy" decoding="async" src={igdbImagePreviewUrl(candidate.imageId, kind === "cover" ? "cover" : "hero")} alt={`${kind === "cover" ? "표지" : "대표 이미지"} ${index + 1}`} />}
       </label>)}
     </div>}
   </section>;

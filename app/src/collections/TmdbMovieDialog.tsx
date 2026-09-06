@@ -223,7 +223,7 @@ function ArtworkStep({ kind, artworkMode, decision, candidates, selectedPath, de
     {candidates.length === 0 ? <p className="tmdb-movie-dialog__muted">사용 가능한 이미지가 없습니다.</p> : <div className="tmdb-movie-dialog__candidates">
       {candidates.map((candidate, index) => <label key={candidate.filePath} className="tmdb-movie-dialog__candidate">
         <input type="radio" name={kind} value={candidate.filePath} checked={selectedPath === candidate.filePath} aria-label={`${label} ${index + 1} (${candidate.filePath})`} onChange={() => onSelect(candidate.filePath)} />
-        {privacyMode ? <Skeleton className="privacy-mask tmdb-movie-dialog__candidate-mask" label="비공개 모드" /> : <img src={tmdbImagePreviewUrl(candidate.filePath, kind)} alt={`${label} ${index + 1}`} />}
+        {privacyMode ? <Skeleton className="privacy-mask tmdb-movie-dialog__candidate-mask" label="비공개 모드" /> : <img loading="lazy" decoding="async" src={tmdbImagePreviewUrl(candidate.filePath, kind)} alt={`${label} ${index + 1}`} />}
       </label>)}
     </div>}
   </section>;

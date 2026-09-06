@@ -1,4 +1,7 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
+import { BackNavigationProvider, useBackHandler, useBackRequest } from "../shared/navigation/BackNavigation";
+import { useDesktopInteractions } from "../app/useDesktopInteractions";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CollectionVolume } from "../library/types";
@@ -13,6 +16,24 @@ const volumes: ViewableCollectionVolume[] = [
 ] satisfies CollectionVolume[];
 
 describe("MangaCoverViewer", () => {
+  it.each(["mouse", "escape"])("closes only the viewer on %s back, then allows leaving the collection", async (input) => {
+    const leaveCollection = vi.fn();
+    function Harness() {
+      const [open, setOpen] = useState(true);
+      useDesktopInteractions(useBackRequest());
+      useBackHandler(leaveCollection);
+      return open ? <MangaCoverViewer workTitle="던전밥" volumes={volumes} activeVolumeId="v1" onActiveVolumeChange={() => undefined} onClose={() => setOpen(false)} /> : <p>권별 표지</p>;
+    }
+    render(<BackNavigationProvider><Harness /></BackNavigationProvider>);
+    if (input === "mouse") fireEvent.mouseUp(window, { button: 3 });
+    else await userEvent.setup().keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByText("권별 표지")).toBeInTheDocument();
+    expect(leaveCollection).not.toHaveBeenCalled();
+    fireEvent.mouseUp(window, { button: 3 });
+    expect(leaveCollection).toHaveBeenCalledOnce();
+  });
+
   it("shows the original cover and supports keyboard navigation and close", async () => {
     const user = userEvent.setup();
     const onActiveVolumeChange = vi.fn();

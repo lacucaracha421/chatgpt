@@ -79,7 +79,7 @@ describe("IgdbImportDialog", () => {
     await user.click(screen.getByRole("button", { name: "다음" }));
     expect(screen.getByRole("heading", { name: "대표 이미지 선택" })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /art-1/ })).toBeInTheDocument();
-    expect(screen.queryByRole("radio", { name: /ss-1/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /ss-1/ })).toBeInTheDocument();
     expect(screen.getAllByRole("radio").some((radio) => (radio as HTMLInputElement).checked)).toBe(false);
     await user.click(screen.getByRole("button", { name: "hero 없이 가져오기" }));
     await user.click(screen.getByRole("button", { name: "가져오기" }));

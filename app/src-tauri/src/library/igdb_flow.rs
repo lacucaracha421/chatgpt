@@ -529,18 +529,14 @@ fn validated_selection<'a>(
                 .ok_or(LibraryError::InvalidIgdbIdentity)
         })
         .transpose()?;
-    let hero_candidates = if fetched.artworks.is_empty() {
-        &fetched.screenshots
-    } else {
-        &fetched.artworks
-    };
     let hero = request
         .hero_image_id
         .as_deref()
         .map(|image_id| {
             igdb::IgdbClient::image_url(image_id, IgdbImageSize::Original)?;
-            hero_candidates
+            fetched.artworks
                 .iter()
+                .chain(fetched.screenshots.iter())
                 .find(|candidate| candidate.image_id == image_id)
                 .ok_or(LibraryError::InvalidIgdbIdentity)
         })
@@ -563,17 +559,13 @@ fn validated_artwork_decisions<'a>(
         return Err(LibraryError::InvalidIgdbIdentity);
     }
     let cover = artwork_decision_candidate(&request.cover, fetched.cover.as_ref())?;
-    let hero_candidates = if fetched.artworks.is_empty() {
-        &fetched.screenshots
-    } else {
-        &fetched.artworks
-    };
     let hero = match &request.hero {
         IgdbArtworkDecision::Select { image_id } => {
             igdb::IgdbClient::image_url(image_id, IgdbImageSize::Original)?;
             Some(
-                hero_candidates
+                fetched.artworks
                     .iter()
+                    .chain(fetched.screenshots.iter())
                     .find(|candidate| candidate.image_id == *image_id)
                     .ok_or(LibraryError::InvalidIgdbIdentity)?,
             )
@@ -1029,6 +1021,21 @@ mod tests {
             assert_eq!(library.list_collections().unwrap().len(), 0);
             assert_eq!(artwork_file_count(&library), 0);
         }
+    }
+
+    #[test]
+    fn hero_accepts_screenshots_alongside_artworks_for_import_and_replacement() {
+        let fetched = remote();
+        let selection = request(None, Some("screenshot-1"));
+        let (_, hero) = super::validated_selection(&selection, &fetched).unwrap();
+        assert_eq!(hero.unwrap().image_id, "screenshot-1");
+        let replacement = artwork_request(
+            "collection-1",
+            IgdbArtworkDecision::Keep,
+            IgdbArtworkDecision::Select { image_id: "screenshot-1".into() },
+        );
+        let (_, hero) = super::validated_artwork_decisions(&replacement, &fetched).unwrap();
+        assert_eq!(hero.unwrap().image_id, "screenshot-1");
     }
 
     #[test]

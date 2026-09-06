@@ -20,8 +20,8 @@
 .virtual-cover-grid .collection-card__meta { min-height:38px; }
 .collection-overlay .collection-overlay__manga-layout { display:flex; flex-direction:column; gap:var(--space-3); overflow:hidden; }
 .collection-overlay .collection-overlay__manga-main { flex:1; min-height:0; overflow:hidden; }
-.collection-volume-shelf--final.collection-overlay__grid-area { display:flex; flex-direction:column; flex:1; min-height:0; height:auto; gap:var(--space-2); }
-.collection-volume-shelf.collection-volume-shelf--final .collection-overlay__grid-heading { padding:var(--space-2) var(--space-3); flex:none; }
+.collection-volume-shelf--final.collection-overlay__grid-area { display:flex; flex-direction:column; flex:1; min-width:0; min-height:0; height:auto; gap:var(--space-2); }
+.collection-volume-shelf.collection-volume-shelf--final .collection-overlay__grid-heading { padding:var(--space-2) var(--space-3); flex:none; flex-wrap:wrap; }
 .collection-volume-shelf.collection-volume-shelf--final .collection-overlay__cover-tile { display:grid; grid-template-rows:auto var(--line-meta) var(--line-meta); gap:var(--space-1); width:100%; padding:0; border:0; background:transparent; color:var(--color-text); }
 .collection-volume-shelf.collection-volume-shelf--final .collection-volume-shelf__cover { display:block; aspect-ratio:256 / 368; padding:0; min-height:0; transition:transform 120ms ease; }
 .collection-volume-shelf.collection-volume-shelf--final .collection-volume-shelf__cover::after { display:none; }

@@ -25,7 +25,7 @@ function watchVisibility() {
 function snapshot(canvas:HTMLCanvasElement, width=canvas.width, height=canvas.height):Promise<RenderResult> {
   return new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve({blob,width,height}):reject(new Error("Snapshot unavailable")),"image/png"));
 }
-export function coverKey(request:CoverRequest) { return JSON.stringify(["collectible-final-v1",request.kind,request.scope,request.src,request.revision,request.pixels]); }
+export function coverKey(request:CoverRequest) { return JSON.stringify([request.kind==="game"?"collectible-game-fit-v3":"collectible-final-v1",request.kind,request.scope,request.src,request.revision,request.pixels]); }
 function sourceUrl(request:Pick<CoverRequest,"src"|"revision"|"scope">) {
   if((!request.revision&&!request.scope)||request.src.startsWith("data:")||request.src.startsWith("blob:")) return request.src;
   const scopeTag=[...request.scope].reduce((hash,char)=>Math.imul(hash^char.charCodeAt(0),16777619)>>>0,2166136261).toString(16);

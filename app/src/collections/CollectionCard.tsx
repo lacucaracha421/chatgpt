@@ -32,6 +32,10 @@ export function CollectionCard({
   const [failedCoverUrl, setFailedCoverUrl] = useState<string | null>(null);
   const { privacyMode } = usePrivacy();
   const visibleCoverUrl = coverUrl && coverUrl !== failedCoverUrl ? coverUrl : null;
+  const release = /^(\d{4})-(\d{2})-(\d{2})$/.exec(collection.releaseDate ?? "");
+  const releaseLabel = release
+    ? `${release[1].slice(-2)}.${Number(release[2])}.${Number(release[3])}`
+    : collection.year ? String(collection.year) : null;
 
   return (
     <button
@@ -68,6 +72,7 @@ export function CollectionCard({
       <span className="collection-card__meta">
         <span className="collection-card__name" title={collection.name}>{collection.name}</span>
         <span className="collection-card__credit" title={collectionCredit(collection) || undefined}>{collectionCredit(collection)}</span>
+        {releaseLabel && <time className="collection-card__credit" dateTime={release ? collection.releaseDate! : releaseLabel}>{releaseLabel}</time>}
       </span>
     </button>
   );

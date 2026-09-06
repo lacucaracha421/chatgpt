@@ -219,6 +219,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::DuplicateCollectionName => "duplicate_collection_name",
             LibraryError::CollectionCoverNotMember => "collection_cover_not_member",
             LibraryError::InvalidCollectionType => "invalid_collection_type",
+            LibraryError::InvalidCollectionMetadata => "invalid_collection_metadata",
             LibraryError::InvalidCollectionReleaseDate => "invalid_collection_release_date",
             LibraryError::InvalidPersonalRating => "invalid_personal_rating",
             LibraryError::InvalidMovieRuntime => "invalid_movie_runtime",
@@ -1260,6 +1261,31 @@ pub fn list_unread_release_changes(
     current_required(state)?
         .list_unread_release_changes()
         .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn list_volume_ownership(collection_id: String, state: State<'_, AppState>) -> Result<Vec<crate::library::collection_tracking::VolumeOwnership>, CommandError> {
+    current_required(state)?.list_volume_ownership(&collection_id).map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn set_owned_volume_count(collection_id: String, edition_index: u8, count: i64, state: State<'_, AppState>) -> Result<Vec<crate::library::collection_tracking::VolumeOwnership>, CommandError> {
+    current_required(state)?.set_owned_volume_count(&collection_id, edition_index, count).map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn set_volume_ownership(collection_id: String, edition_index: u8, volume_numbers: Vec<i64>, format: String, owned: bool, state: State<'_, AppState>) -> Result<Vec<crate::library::collection_tracking::VolumeOwnership>, CommandError> {
+    current_required(state)?.set_volume_ownership(&collection_id, edition_index, volume_numbers, &format, owned).map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn list_release_inbox(state: State<'_, AppState>) -> Result<Vec<crate::library::collection_tracking::ReleaseInboxItem>, CommandError> {
+    current_required(state)?.list_release_inbox().map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn acknowledge_release_events(collection_id: String, event_ids: Vec<String>, state: State<'_, AppState>) -> Result<(), CommandError> {
+    current_required(state)?.acknowledge_release_events(&collection_id, event_ids).map_err(CommandError::from)
 }
 
 #[tauri::command]

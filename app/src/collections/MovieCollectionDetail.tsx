@@ -2,6 +2,8 @@ import { useState } from "react";
 import type { CollectionSummary } from "../library/types";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { Menu } from "../shared/ui/Menu";
+import { CollectionSidebarSection } from "./CollectionSidebarSection";
+import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 
 export type MovieCollectionDetailProps = {
   collection: CollectionSummary;
@@ -33,6 +35,7 @@ export function MovieCollectionDetail({
   onChangeArtwork,
 }: MovieCollectionDetailProps) {
   const { privacyMode } = usePrivacy();
+  const sidebar = Boolean(useWorkspaceChrome());
   const [failedPoster, setFailedPoster] = useState<string | null>(null);
   const posterVisible = Boolean(posterUrl) && posterUrl !== failedPoster && !privacyMode;
   const [failedBackdrop, setFailedBackdrop] = useState<string | null>(null);
@@ -58,7 +61,7 @@ export function MovieCollectionDetail({
             {posterUrl && !privacyMode ? <img className="collection-cover-image" src={posterUrl} onError={() => setFailedPoster(posterUrl)} alt={`${collection.name} 포스터`} draggable={false} /> : <span aria-label="포스터 없음" />}
           </div>}
           <div className="movie-collection-detail__identity">
-            <div className="movie-collection-detail__actions">
+            <CollectionSidebarSection actions><div className="movie-collection-detail__actions">
               <Menu
                 label="작품 관리"
                 trigger="작품 관리"
@@ -71,14 +74,14 @@ export function MovieCollectionDetail({
                   { id: "artwork", label: "포스터·배경 변경", disabled: !providerConnected || providerBusy, onSelect: onChangeArtwork },
                 ]}
               />
-            </div>
+            </div></CollectionSidebarSection>
             <h1>{collection.name}</h1>
             {collection.originalTitle?.trim() && collection.originalTitle !== collection.name && <p className="movie-collection-detail__original">{collection.originalTitle}</p>}
-            {facts.length > 0 && <p className="movie-collection-detail__facts">{facts.join(" · ")}</p>}
-            <div className="movie-collection-detail__scores">
+            {!sidebar && facts.length > 0 && <p className="movie-collection-detail__facts">{facts.join(" · ")}</p>}
+            {!sidebar && <div className="movie-collection-detail__scores">
               {collection.externalScore !== null && <span>TMDB {collection.externalScore}</span>}
               {collection.myScore !== null && <span>내 평점 {collection.myScore}</span>}
-            </div>
+            </div>}
           </div>
         </div>
       </section>

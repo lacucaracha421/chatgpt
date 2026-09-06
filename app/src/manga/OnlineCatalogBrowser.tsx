@@ -78,7 +78,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all" }: On
   const [query, setQuery] = useState("");
   const [language, setLanguage] = useState<CatalogLanguage>("korean");
   const languageRef = useRef<CatalogLanguage>("korean");
-  const [sort, setSort] = useState<CatalogSort>("hotDay");
+  const [sort, setSort] = useState<CatalogSort>(initialScope === "bookmarked" ? "latest" : "hotDay");
   const [scope, setScope] = useState<CatalogScope>(initialScope);
   const [revealBlocked, setRevealBlocked] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -412,8 +412,10 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all" }: On
           onLocal={() => { closeDetail(); closeViewer(); onSwitchLocal(); }}
           onOnline={(nextScope) => {
             if (nextScope === scope) return;
+            const nextSort = nextScope === "bookmarked" ? "latest" : sort;
             setScope(nextScope);
-            void search(query.trim(), sort, nextScope, 0);
+            setSort(nextSort);
+            void search(query.trim(), nextSort, nextScope, 0);
           }}
         />
         <Select

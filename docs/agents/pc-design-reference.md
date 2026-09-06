@@ -58,7 +58,7 @@ The visual system is dark-neutral, square/rectilinear, low-radius, line-icon hea
 ### Contextual index
 
 - **Assets**: broad scopes, Classification tree, Album tree, current folder counts and user appearance.
-- **Collections**: Library/Showcase and game/manga/movie type navigation, plus controls that genuinely belong to the collection browser.
+- **Collections**: Library/Showcase and game/manga/movie type navigation, plus controls that genuinely belong to the collection browser. An open work replaces type navigation with its title, concise metadata, personal/external rating, management/provider menu and manga edition selector at the top of the index. These controls move out of the detail body; long descriptions and artwork remain in the body. The detail owns state and callbacks through the shared chrome portal.
 - **Manga**: local/online/catalog context and controls owned by the corresponding browser.
 - Do not merge a user Classification named “만화”, Collection type `manga`, local Manga Root, and Online Catalog into one product concept.
 
@@ -170,6 +170,10 @@ Treat these as semantic token inputs rather than repeated raw colors. Multi-sele
 The old “no icon tooltips anywhere” rule is superseded for the PC shell by ADR-0034.
 
 ## 9. Collection / Works presentation
+
+Manga ownership uses one numeric input per edition: N means volumes 1 through N are owned, without distinguishing physical and digital copies. The sidebar shows the latest known domestic released volume, missing count (latest released number minus owned count, floored at zero), and the next known release date. Upcoming volumes are not counted as missing. Covers alone do not establish publication or ownership. Existing format records remain readable; saving a count atomically replaces that edition's holdings, including when the count decreases to zero.
+
+Release notifications remain unread when opening a work. The collection toolbar opens a persistent unread inbox; users explicitly acknowledge an event, independently of editing the owned count. Acknowledgement uses exact event IDs so later events are retained. The work sidebar exposes the last check and the next eligible time. Checks run while the desktop app is open, with an hourly scheduler and a 24-hour per-work eligibility interval; this is not an OS push service. Schema 41 adds ownership storage without inferring holdings or rewriting past notification states. Native migration/application acceptance remains separate from implementation tests.
 
 ### Game browser object
 

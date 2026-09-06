@@ -21,6 +21,7 @@ import { CollectionEditDialog, type CollectionEditMode } from "./CollectionEditD
 import { MangaDexImportDialog } from "./MangaDexImportDialog";
 import { IgdbImportDialog } from "./IgdbImportDialog";
 import { TmdbMovieDialog } from "./TmdbMovieDialog";
+import { ReleaseInbox } from "./ReleaseInbox";
 import { deriveCollectionLibrary, type CollectionLibrarySort, type CollectionLibraryState } from "./collectionLibrary";
 
 const TYPE_LABEL: Record<CollectionType, string> = {
@@ -57,6 +58,7 @@ export function CollectionBrowser({
   const [mangaDexOpen, setMangaDexOpen] = useState(false);
   const [igdbOpen, setIgdbOpen] = useState(false);
   const [tmdbOpen, setTmdbOpen] = useState(false);
+  const [releaseInboxOpen, setReleaseInboxOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<CollectionSummary | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const libraryStateRef = useRef(libraryState);
@@ -173,6 +175,8 @@ export function CollectionBrowser({
   );
 
   const indexActions = (
+          <>
+          {gateway.collectionTracking && <Button size="sm" onClick={() => setReleaseInboxOpen(true)}>신간 알림함 {collections.reduce((sum, collection) => sum + collection.unreadReleaseCount, 0) || ""}</Button>}
           <Menu
             label="새 컬렉션"
             trigger={<PlusIcon aria-hidden="true" />}
@@ -183,7 +187,8 @@ export function CollectionBrowser({
               { id: "manual", label: "직접 입력", onSelect: () => setEditMode({ kind: "create", type: typeFilter }) },
             ]}
           />
-  );
+          </>
+        );
 
   const indexControls = <fieldset className="chrome-settings-group"><legend>정렬 · 필터</legend>
             <Select label="정렬" value={libraryState.sort} onChange={(event) => patchLibraryState({ sort: event.target.value as CollectionLibrarySort })}><option value="media_date">출시·출간·개봉일</option><option value="recent">최근 추가</option><option value="name">제목</option></Select>
@@ -193,6 +198,7 @@ export function CollectionBrowser({
 
   return (
     <section className="collection-browser" aria-label="컬렉션">
+      {releaseInboxOpen && <ReleaseInbox onClose={() => setReleaseInboxOpen(false)} onChanged={onChanged} />}
       <ViewToolbar
         title={workspace ? `${sectionLabel} ${showcase ? "쇼케이스" : "컬렉션"}` : "컬렉션"}
         ariaLabel="컬렉션 도구"
@@ -252,7 +258,7 @@ export function CollectionBrowser({
         >
           {visible.length > 0 && (showcase ?
             <CollectionExhibition items={visible} page={exhibition.page} onPageChange={changeExhibitionPage} render={renderCollection} scrollRef={stageRef} /> :
-            <VirtualCoverGrid items={visible} itemKey={collection => collection.id} render={renderCollection} legacyMetrics={typeFilter !== "manga"} metadataHeight={38} label={`${sectionLabel} 작품 목록`} scrollRef={stageRef} />)}
+            <VirtualCoverGrid items={visible} itemKey={collection => collection.id} render={renderCollection} legacyMetrics={typeFilter !== "manga"} metadataHeight={56} label={`${sectionLabel} 작품 목록`} scrollRef={stageRef} />)}
           {visible.length === 0 && (
             <div className="collection-browser__empty">
               {!showcase && (libraryState.query.trim() || libraryState.rating !== "all") ? <EmptyState title="조건에 맞는 작품이 없습니다."><p>검색어나 별점 조건을 바꿔보세요.</p><Button onClick={() => patchLibraryState({ query: "", rating: "all" })}>검색·필터 초기화</Button></EmptyState> : <EmptyState title={showcase ? "쇼케이스에 컬렉션이 없습니다." : "컬렉션이 없습니다."}>

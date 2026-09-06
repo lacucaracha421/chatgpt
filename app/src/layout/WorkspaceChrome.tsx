@@ -17,7 +17,7 @@ export type ViewChromeSpec = {
   status?: ReactNode;
 };
 export function WorkspaceChromeProvider({ scope, children }: PropsWithChildren<{ scope: string }>) {
-  const [targets, setTargets] = useState<Targets>({ navigation: null, actions: null, search: null, settings: null, header: null });
+  const [targets, setTargets] = useState<Targets>({ navigation: null, actions: null, search: null, settings: null, header: null, details: null });
   const [registration, setRegistration] = useState<ChromeMeta | null>(null);
   const setTarget = useCallback((slot: Slot, element: HTMLElement | null) => {
     setTargets((current) => current[slot] === element ? current : { ...current, [slot]: element });

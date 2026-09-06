@@ -5,6 +5,7 @@ import { workArtworkThumbnailUrl, workArtworkUrl } from "../assets/mediaUrl";
 import type { WorkArtworkSummary } from "../library/types";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { Skeleton } from "../shared/ui/Skeleton";
+import { useBackHandler } from "../shared/navigation/BackNavigation";
 
 type WorkArtworkGalleryProps = {
   workTitle: string;
@@ -24,6 +25,7 @@ const KIND_LABEL: Record<string, string> = {
 export function WorkArtworkGallery({ workTitle, artworks }: WorkArtworkGalleryProps) {
   const { privacyMode } = usePrivacy();
   const [activeId, setActiveId] = useState<string | null>(null);
+  useBackHandler(() => setActiveId(null), 100, artworks.some(artwork => artwork.id === activeId));
   if (artworks.length === 0) return null;
 
   const activeIndex = artworks.findIndex((artwork) => artwork.id === activeId);
@@ -61,6 +63,7 @@ export function WorkArtworkGallery({ workTitle, artworks }: WorkArtworkGalleryPr
             <RadixDialog.Overlay className="manga-cover-viewer__backdrop" aria-label="아트웍 감상 닫기" onClick={() => setActiveId(null)} />
             <RadixDialog.Content
               className="manga-cover-viewer manga-cover-viewer--flat"
+              onEscapeKeyDown={event => { event.preventDefault(); setActiveId(null); }}
               style={{ pointerEvents: "none" }}
               aria-describedby={undefined}
               onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
