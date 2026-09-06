@@ -1,0 +1,6 @@
+.catalog-review { display: flex; flex-direction: column; gap: var(--space-2); min-height: 0; }
+.catalog-review p { margin: var(--space-1) 0; color: var(--color-text-muted); font-size: var(--text-xs); overflow-wrap: anywhere; }
+.catalog-review__list { overflow-y: auto; max-height: 55vh; }
+.catalog-review__pair { padding: var(--space-2) 0; border-bottom: var(--border-width) solid var(--color-border); }
+.catalog-review__works { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); overflow-wrap: anywhere; }
+.catalog-review__actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }

@@ -9,7 +9,7 @@ fn fixture() -> Connection {
         "../../migrations/0035_online_catalog_groups.sql"
     ))
     .unwrap();
-    c.execute_batch("ATTACH ':memory:' AS catalog; CREATE TABLE catalog.CrawlState(Key TEXT PRIMARY KEY,Value TEXT); INSERT INTO catalog.CrawlState VALUES('lakomics.catalog.contentRevision','source-a'); CREATE TABLE catalog.Works(Id INTEGER PRIMARY KEY,Expunged INTEGER,Category INTEGER); CREATE TABLE catalog.Tags(WorkId INTEGER,Namespace TEXT,Value TEXT); CREATE INDEX catalog.IdxTagsWork ON Tags(WorkId,Namespace,Value); INSERT INTO catalog.Works VALUES(1,0,2),(2,0,1),(3,0,1),(4,1,1); INSERT INTO catalog.Tags VALUES(1,'language','korean'),(2,'language','japanese'),(3,'language','korean'),(3,'artist','blocked'),(4,'language','japanese'); INSERT INTO online_catalog_hidden_categories VALUES(2,'x'); INSERT INTO online_catalog_blocked_tags VALUES('artist','blocked','x'); INSERT INTO online_catalog_group_members VALUES('kHentai','1',1,'a',0,0,0),('kHentai','2',2,'a',0,0,0),('kHentai','3',3,'b',0,0,0),('kHentai','4',4,'c',0,0,0); INSERT INTO online_catalog_group_state VALUES('kHentai','strong-lineage-v1:source-a',1,'x',NULL);").unwrap();
+    c.execute_batch("ATTACH ':memory:' AS catalog; CREATE TABLE catalog.CrawlState(Key TEXT PRIMARY KEY,Value TEXT); INSERT INTO catalog.CrawlState VALUES('lakomics.catalog.contentRevision','source-a'); CREATE TABLE catalog.Works(Id INTEGER PRIMARY KEY,Expunged INTEGER,Category INTEGER); CREATE TABLE catalog.Tags(WorkId INTEGER,Namespace TEXT,Value TEXT); CREATE INDEX catalog.IdxTagsWork ON Tags(WorkId,Namespace,Value); INSERT INTO catalog.Works VALUES(1,0,2),(2,0,1),(3,0,1),(4,1,1); INSERT INTO catalog.Tags VALUES(1,'language','korean'),(2,'language','japanese'),(3,'language','korean'),(3,'artist','blocked'),(4,'language','japanese'); INSERT INTO online_catalog_hidden_categories VALUES(2,'x'); INSERT INTO online_catalog_blocked_tags VALUES('artist','blocked','x'); INSERT INTO online_catalog_group_members VALUES('kHentai','1',1,'a',0,0,0),('kHentai','2',2,'a',0,0,0),('kHentai','3',3,'b',0,0,0),('kHentai','4',4,'c',0,0,0); INSERT INTO online_catalog_group_state VALUES('kHentai','strong-lineage-v1+review-v1:source-a',1,'x',NULL);").unwrap();
     c.execute_batch(include_str!(
         "../../migrations/0036_online_catalog_counts.sql"
     ))
@@ -121,7 +121,7 @@ fn changed_language_and_split_merge_require_new_generation() {
         lookup(&c, Some(CatalogLanguage::Korean), true).unwrap(),
         None
     );
-    c.execute_batch("UPDATE online_catalog_group_state SET source_revision='strong-lineage-v1:source-b',generation=2; UPDATE online_catalog_group_members SET group_id='a' WHERE catalog_work_id=3").unwrap();
+    c.execute_batch("UPDATE online_catalog_group_state SET source_revision='strong-lineage-v1+review-v1:source-b',generation=2; UPDATE online_catalog_group_members SET group_id='a' WHERE catalog_work_id=3").unwrap();
     let p = prepare(&c);
     assert!(save(&c, &p));
     assert_eq!(lookup(&c, None, true).unwrap(), Some(1));

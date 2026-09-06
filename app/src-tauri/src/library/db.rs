@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 36;
+pub(crate) const SCHEMA_VERSION: i64 = 37;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -207,6 +207,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         if version <= 35 {
             transaction.execute_batch(ONLINE_CATALOG_COUNTS_SCHEMA)?;
         }
+        if version <= 36 {
+            transaction.execute_batch(include_str!("../../migrations/0037_catalog_review.sql"))?;
+        }
         transaction.commit()?;
         Ok::<(), LibraryError>(())
     })();
@@ -235,7 +238,9 @@ mod tests {
         migrate_to_latest(&mut connection, 0).unwrap();
         connection
             .execute_batch(
-                "DROP TABLE IF EXISTS online_catalog_prepared_counts;
+                "DROP TABLE IF EXISTS online_catalog_review_candidates;
+            DROP TABLE IF EXISTS online_catalog_review_decisions;
+            DROP TABLE IF EXISTS online_catalog_prepared_counts;
             DROP TABLE IF EXISTS online_catalog_group_diagnostics;
             DROP TABLE IF EXISTS online_catalog_group_state;
             DROP TABLE IF EXISTS online_catalog_group_members;
@@ -324,7 +329,9 @@ mod tests {
         migrate_to_latest(&mut connection, 0).unwrap();
         connection
             .execute_batch(
-                "DROP TABLE IF EXISTS online_catalog_prepared_counts;
+                "DROP TABLE IF EXISTS online_catalog_review_candidates;
+            DROP TABLE IF EXISTS online_catalog_review_decisions;
+            DROP TABLE IF EXISTS online_catalog_prepared_counts;
             PRAGMA user_version = 35;
             INSERT INTO online_catalog_group_handles(provider,anchor_work_id,group_id) VALUES('provider','work','stable-uuid');
             INSERT INTO online_catalog_group_preferences VALUES('provider','work','edition',1);

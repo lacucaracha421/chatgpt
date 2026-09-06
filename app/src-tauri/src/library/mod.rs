@@ -15,6 +15,7 @@ mod catalog_group_identity;
 mod catalog_group_api;
 mod catalog_group_query;
 mod catalog_groups;
+pub(crate) mod catalog_review;
 mod catalog_lineage;
 mod catalog_revision;
 pub(crate) mod catalog_update;

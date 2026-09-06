@@ -287,9 +287,10 @@ Prerequisites: CATALOG-002A, CATALOG-003, CATALOG-004, CATALOG-005/006.
 
 ## CATALOG-007B — Reviewed heuristic duplicate groups
 
-Status: `PARTIAL` — implementation/native checks passed; the 2026-09-05 incident
-audit preserves this status because the exact pre-incident provider DB/checkpoint
-baseline is unavailable. Verified local differences do not indicate recovery.
+Status: `DONE` — accepted by the user on 2026-09-06 after hands-on testing.
+Implementation/native checks passed. The user explicitly waived the remaining
+incident-audit gate; the unavailable pre-incident provider DB/checkpoint baseline
+remains an evidence limitation, not a completion blocker. No recovery was performed.
 Prerequisite: CATALOG-007A.
 
 Implemented in the working tree:
@@ -304,6 +305,13 @@ Implemented in the working tree:
   artist/group tag, identical nonempty language sets, equal positive page counts,
   and equal known category. Punctuation, numbers and edition qualifiers remain.
   Title alone cannot create a candidate or a grouping relationship.
+- 2026-09-06 extension: a Korean alternate title appended with ` | ` may be
+  excluded from the comparison key while retaining bracketed identity qualifiers.
+  Only these non-exact title matches permit a positive page-count difference of
+  at most two pages and 10% of the shorter work. The review reason discloses the
+  difference; this neither merges automatically nor selects a newer edition.
+  Seven focused Rust review tests passed, including the 32/34-page example and
+  exclusions for differing event/franchise/edition, language and larger page gaps.
 - Each work has at most two title keys, each bucket at most **8** works; larger
   buckets are skipped. At most **3,500** pair examinations, **50** stored candidates,
   and **65** fetched creator/language tags per work (overflow is ineligible).
@@ -422,9 +430,9 @@ between the audit snapshot and final filesystem fence (09:53:46–10:04:31 UTC).
   attempt timestamp advanced. The unchanged provider revision, old crawl/progress
   timestamps and update transaction code support start/status-only writes. The
   retained backup contains no kdata.db, so exact source rows and Korean/Japanese
-  checkpoint deltas cannot be proved. No source corruption was found; nevertheless
-  DONE requires closing this explicit audit gate. Seek a trustworthy prior catalog
-  copy/checkpoint snapshot, without updating or restoring production. A complete
+  checkpoint deltas cannot be proved. No source corruption was found. The user
+  explicitly waived this audit gate on 2026-09-06 and accepted completion; no
+  further baseline search is required for this item. A complete
   pre-incident filesystem manifest is also unavailable for transient/unreferenced
   files; all surviving incident-window files are accounted for.
 

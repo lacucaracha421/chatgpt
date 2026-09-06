@@ -1,5 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
+  CatalogReviewPage,
   AladinApplyRequest,
   AladinConnection,
   AladinCredentialStatus,
@@ -115,6 +116,9 @@ export const libraryGateway: LibraryGateway = {
   },
   getCatalogGroupEditions: (query) => invoke<CatalogGroupEditionsPage>("get_catalog_group_editions", { query }),
   setCatalogGroupRepresentative: (query) => invoke<void>("set_catalog_group_representative", { query }),
+  listCatalogReview: () => invoke<CatalogReviewPage>("list_catalog_review"),
+  generateCatalogReview: () => invoke<CatalogReviewPage>("generate_catalog_review"),
+  decideCatalogReview: (query) => invoke<void>("decide_catalog_review", { query }),
   searchOnlineCatalog: (query: CatalogSearchQuery) =>
     invoke<CatalogSearchPage>("search_online_catalog", { query }),
   suggestOnlineCatalog: (text, limit) =>

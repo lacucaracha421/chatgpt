@@ -1634,6 +1634,40 @@ pub async fn get_catalog_group_editions(
 }
 
 #[tauri::command]
+pub async fn list_catalog_review(
+    state: State<'_, AppState>,
+) -> Result<crate::library::catalog_review::ReviewPage, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.list_catalog_review())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn generate_catalog_review(
+    state: State<'_, AppState>,
+) -> Result<crate::library::catalog_review::ReviewPage, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.generate_catalog_review())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn decide_catalog_review(
+    query: crate::library::catalog_review::ReviewDecision,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.decide_catalog_review(query))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub async fn set_catalog_group_representative(
     query: crate::library::models::CatalogGroupRepresentativeQuery,
     state: State<'_, AppState>,

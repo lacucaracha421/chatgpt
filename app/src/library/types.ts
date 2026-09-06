@@ -917,6 +917,9 @@ export type IngestOutcome =
   | { status: "review_pending"; reviewId: string };
 
 export interface LibraryGateway {
+  listCatalogReview(): Promise<CatalogReviewPage>;
+  generateCatalogReview(): Promise<CatalogReviewPage>;
+  decideCatalogReview(query: CatalogReviewDecision): Promise<void>;
   openLibrary(path: string): Promise<LibrarySummary>;
   importVckCatalog(vckRoot: string): Promise<CatalogStatus>;
   getOnlineCatalogStatus(): Promise<CatalogStatus>;
@@ -1081,6 +1084,18 @@ export interface LibraryGateway {
   ): Promise<CollectionVolume[]>;
   syncMangaDexVolumeCovers(collectionId: string): Promise<MangaDexVolumeSyncResult>;
 }
+
+export type CatalogReviewWork = {
+  workId: string; groupId: string; title: string; titleJpn: string | null;
+  pages: number; category: number; creators: string[]; languages: string[];
+};
+export type CatalogReviewDecision = { leftAnchor: string; rightAnchor: string; reviewToken: string; decision: "confirm" | "falsePositive" | "split" };
+export type CatalogReviewRow = {
+  reviewToken: string;
+  leftAnchor: string; rightAnchor: string; state: "pending" | "confirm" | "falsePositive" | "split"; actionable: boolean;
+  evidence: { left: CatalogReviewWork; right: CatalogReviewWork; reason: string; algorithm: string };
+};
+export type CatalogReviewPage = { rows: CatalogReviewRow[]; inspectedWorks: number; comparisons: number; skippedBuckets: number };
 
 export type BookExternalBinding = {
   provider: string;

@@ -8,7 +8,7 @@ use super::{
 };
 
 const PROVIDER: &str = "kHentai";
-pub(super) const ALGORITHM: &str = "strong-lineage-v1";
+pub(super) const ALGORITHM: &str = "strong-lineage-v1+review-v1";
 
 pub(super) fn ensure_membership(connection: &Connection) -> Result<String, LibraryError> {
     let source: String = connection.query_row(
@@ -30,7 +30,7 @@ pub(super) fn ensure_membership(connection: &Connection) -> Result<String, Libra
     Ok(revision)
 }
 
-fn rebuild(connection: &Connection, revision: &str) -> Result<(), LibraryError> {
+pub(super) fn rebuild(connection: &Connection, revision: &str) -> Result<(), LibraryError> {
     // Caller owns a short read/write transaction. Catalog reads, publication,
     // COUNT and page share its snapshot; no network work occurs inside it.
     let mut statement = connection.prepare(
@@ -82,6 +82,7 @@ fn rebuild(connection: &Connection, revision: &str) -> Result<(), LibraryError> 
         .iter()
         .map(|group| group.iter().map(i64::to_string).collect())
         .collect::<Vec<_>>();
+    let components = super::catalog_review::apply_decisions(connection, components)?;
     let handles = reconcile_handles(connection, PROVIDER, &components)?;
     connection.execute(
         "DELETE FROM online_catalog_group_members WHERE provider=?1",
@@ -166,6 +167,9 @@ mod tests {
                 )
                 .unwrap();
         }
+        connection
+            .execute_batch(include_str!("../../migrations/0037_catalog_review.sql"))
+            .unwrap();
         let tx = connection.unchecked_transaction().unwrap();
         let start = std::time::Instant::now();
         ensure_membership(&tx).unwrap();

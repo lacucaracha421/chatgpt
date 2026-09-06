@@ -31,6 +31,7 @@ import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { PageViewer } from "./PageViewer";
 import { CatalogEditionsDialog } from "./CatalogEditionsDialog";
+import { CatalogReviewDialog } from "./CatalogReviewDialog";
 import { OnlineCatalogCard } from "./OnlineCatalogCard";
 import { OnlineCatalogDetailDialog } from "./OnlineCatalogDetailDialog";
 import { catalogIdentityKey, catalogIdentityOf } from "./catalogIdentity";
@@ -72,6 +73,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
   const [sort, setSort] = useState<CatalogSort>("latest");
   const [scope, setScope] = useState<CatalogScope>("all");
   const [revealBlocked, setRevealBlocked] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<CatalogSuggestion[]>([]);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
   const suggestionsListboxId = useId();
@@ -417,7 +419,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
           <option value="korean">한국어</option>
           <option value="japanese">일본어</option>
         </Select>
-        {workspace && status?.installed && <div className="chrome-index-controls chrome-settings-controls">{catalogControls}<Button size="sm" variant="ghost" disabled={loading} onClick={() => refreshSearch.current()}><ArrowPathIcon aria-hidden="true" />새로고침</Button><Button size="sm" variant="ghost" disabled={updating} onClick={() => void updateCatalog()}><ArrowDownTrayIcon aria-hidden="true" />{updating ? "갱신 중…" : "신규 작품 갱신"}</Button></div>}
+        {workspace && status?.installed && <div className="chrome-index-controls chrome-settings-controls">{catalogControls}<Button size="sm" variant="ghost" onClick={() => setReviewOpen(true)}>중복 후보 검토</Button><Button size="sm" variant="ghost" disabled={loading} onClick={() => refreshSearch.current()}><ArrowPathIcon aria-hidden="true" />새로고침</Button><Button size="sm" variant="ghost" disabled={updating} onClick={() => void updateCatalog()}><ArrowDownTrayIcon aria-hidden="true" />{updating ? "갱신 중…" : "신규 작품 갱신"}</Button></div>}
   </>;
   const searchForm = (status?.installed && <form className="manga-browser__search online-catalog__search" role="search" onSubmit={submit}>
           <MagnifyingGlassIcon aria-hidden="true" />
@@ -491,6 +493,8 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
       </> : undefined}
     />
     {status?.installed && <div className="online-catalog__sync-summary">
+      {!workspace && <Button size="sm" variant="ghost" onClick={() => setReviewOpen(true)}>중복 후보 검토</Button>}
+      {reviewOpen && <CatalogReviewDialog onClose={() => setReviewOpen(false)} onChange={() => refreshSearch.current()} />}
       {revealBlocked && <span className="online-catalog__visibility-status" role="status">숨긴 분류와 차단 태그를 표시 중입니다</span>}
       {catalogStreamStatus(status, language).lastError ? <span className="online-catalog__sync-status" role="alert">마지막 갱신 실패 — {catalogStreamStatus(status, language).lastError}</span>
         : !workspace && catalogStreamStatus(status, language).lastProgressAt ? <span className="online-catalog__sync-status">마지막 갱신 {localDateTime(catalogStreamStatus(status, language).lastProgressAt!)}{catalogStreamStatus(status, language).lastAdded > 0 ? ` · 신규 ${catalogStreamStatus(status, language).lastAdded.toLocaleString()}개` : ""}</span>

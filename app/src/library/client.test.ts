@@ -5,6 +5,15 @@ const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke, Channel: class { onmessage = () => {}; } }));
 
 import { libraryGateway } from "./client";
+it("routes catalog review to explicit native commands", async () => {
+  await libraryGateway.listCatalogReview();
+  expect(invoke).toHaveBeenLastCalledWith("list_catalog_review");
+  await libraryGateway.generateCatalogReview();
+  expect(invoke).toHaveBeenLastCalledWith("generate_catalog_review");
+  const query = { leftAnchor: "1", rightAnchor: "2", reviewToken: "displayed-evidence", decision: "split" as const };
+  await libraryGateway.decideCatalogReview(query);
+  expect(invoke).toHaveBeenLastCalledWith("decide_catalog_review", { query });
+});
 
 describe("libraryGateway similarity contract", () => {
   beforeEach(() => invoke.mockClear());
