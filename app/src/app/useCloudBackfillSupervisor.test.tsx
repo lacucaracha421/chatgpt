@@ -1,7 +1,7 @@
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { LibraryGateway } from "../library/types";
-import { notifyCloudBackfillSupervisor, useCloudBackfillSupervisor } from "./useCloudBackfillSupervisor";
+import { CLOUD_PROGRESS_EVENT, notifyCloudBackfillSupervisor, useCloudBackfillSupervisor } from "./useCloudBackfillSupervisor";
 
 function Harness({ gateway }: { gateway: LibraryGateway }) {
   useCloudBackfillSupervisor(gateway, "C:\\test-library");
@@ -89,4 +89,19 @@ it("does not start upload cycles while replication is paused", async () => {
   } finally {
     vi.useRealTimers();
   }
+});
+
+
+it("publishes fresh progress during a long worker cycle without starting another cycle", async () => {
+  vi.useFakeTimers();
+  const receive = vi.fn();
+  window.addEventListener(CLOUD_PROGRESS_EVENT, receive);
+  try {
+    const run = vi.fn().mockReturnValue(new Promise(() => {}));
+    const progress = vi.fn().mockResolvedValue(running);
+    render(<Harness gateway={{ cloudBackfillProgress: progress, cloudBackfillRunCycle: run } as unknown as LibraryGateway} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(receive.mock.calls.length).toBeGreaterThanOrEqual(3);
+  } finally { window.removeEventListener(CLOUD_PROGRESS_EVENT, receive); vi.useRealTimers(); }
 });

@@ -6,6 +6,8 @@ import { commandErrorMessage } from "../library/errorMessage";
 import { catalogStreamStatus } from "../library/catalogStreams";
 import type { CatalogLanguage, CatalogStatus, CatalogStreamStatus, CloudCaptureSettings, CloudCaptureSyncResult, CloudLibraryRestoreReport, ExtensionConnection, LegacyPackageMigrationPlan, LegacyPackageMigrationReport, MetadataBackup } from "../library/types";
 import { formatBytes } from "../assets/assetMetadata";
+import { notifyCloudBackfillSupervisor } from "../app/useCloudBackfillSupervisor";
+import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { Button } from "../shared/ui/Button";
 import { Skeleton } from "../shared/ui/Skeleton";
@@ -30,34 +32,38 @@ type SettingsViewProps = {
   onPrivacyModeChange?: (privacyMode: boolean) => void;
 };
 
-type SettingsSection = "general" | "external_services" | "data" | "about";
+type SettingsSection = "general" | "cloud" | "catalog" | "external_services" | "data" | "about";
+const SECTIONS: { id: SettingsSection; label: string }[] = [
+  { id: "general", label: "일반" }, { id: "cloud", label: "클라우드" },
+  { id: "catalog", label: "온라인 카탈로그" }, { id: "external_services", label: "연결" },
+  { id: "data", label: "데이터 관리" }, { id: "about", label: "정보·도움말" },
+];
 
 const METADATA_IMPORT_FOLDER_KEY = "lakomics.metadataImportFolder";
 
 export function SettingsView({ restoring, onRestore, onExit, onImportFolder, metadataImportRunning = false, onCollectionsChanged, onCloudCaptureSynced = () => undefined, onRestoreCloudMetadata, initialSection, privacyMode = false, onPrivacyModeChange = () => undefined }: SettingsViewProps) {
+  const workspace = useWorkspaceChrome();
   const { error: libraryError, gateway, library, openLibrary } = useLibrary();
   const [section, setSection] = useState<SettingsSection>(() => initialSection ?? "general");
+  useEffect(() => { if (initialSection) setSection(initialSection); }, [initialSection]);
+  const [saved, setSaved] = useState<string | null>(null);
   const [lastImportFolder, setLastImportFolder] = useState(() => localStorage.getItem(METADATA_IMPORT_FOLDER_KEY));
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [backups, setBackups] = useState<MetadataBackup[] | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [backupRetryVersion, setBackupRetryVersion] = useState(0);
-  useAutoDismiss(backups === null ? null : error, setError);
   const [submitting, setSubmitting] = useState(false);
   const [mangaRoot, setMangaRoot] = useState<string | null>(null);
   const [mangaRootError, setMangaRootError] = useState<string | null>(null);
-  useAutoDismiss(mangaRootError, setMangaRootError);
   const [collectionSourceRoot, setCollectionSourceRootState] = useState<string | null>(null);
   const [collectionSourceError, setCollectionSourceError] = useState<string | null>(null);
-  useAutoDismiss(collectionSourceError, setCollectionSourceError);
   const [collectionSourceMessage, setCollectionSourceMessage] = useState<string | null>(null);
   useAutoDismiss(collectionSourceMessage, setCollectionSourceMessage);
   const [extensionConnection, setExtensionConnection] = useState<ExtensionConnection | null>(null);
   const [extensionError, setExtensionError] = useState<string | null>(null);
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
   const [switchingLibrary, setSwitchingLibrary] = useState(false);
-  useAutoDismiss(extensionError, setExtensionError);
   useAutoDismiss(copyMessage, setCopyMessage);
   const [bookImportRunning, setBookImportRunning] = useState(false);
   const [bookImportMessage, setBookImportMessage] = useState<string | null>(null);
@@ -72,7 +78,6 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [legacyBusy, setLegacyBusy] = useState(false);
   const [legacyError, setLegacyError] = useState<string | null>(null);
   const [legacyConfirming, setLegacyConfirming] = useState(false);
-  useAutoDismiss(legacyError, setLegacyError);
   const [kakaoConfigured, setKakaoConfigured] = useState<boolean | null>(null);
   const [kakaoKey, setKakaoKey] = useState("");
   const [kakaoBusy, setKakaoBusy] = useState(false);
@@ -104,24 +109,23 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [cloudBusy, setCloudBusy] = useState(false);
   const [cloudError, setCloudError] = useState<string | null>(null);
   const [cloudMessage, setCloudMessage] = useState<string | null>(null);
-  useAutoDismiss(kakaoError, setKakaoError);
-  useAutoDismiss(igdbError, setIgdbError);
-  useAutoDismiss(tmdbError, setTmdbError);
-  useAutoDismiss(catalogError, setCatalogError);
   useAutoDismiss(catalogCacheMessage, setCatalogCacheMessage);
-  useAutoDismiss(cloudError, setCloudError);
   useAutoDismiss(cloudMessage, setCloudMessage);
-  const pending = restoring || submitting || kakaoBusy || igdbBusy || tmdbBusy || cloudBusy;
+  const pending = restoring || submitting || kakaoBusy || igdbBusy || tmdbBusy || cloudBusy || catalogBusy || catalogRestoreBusy || catalogCacheBusy || legacyBusy || bookImportRunning || switchingLibrary;
 
   useEffect(() => {
     let active = true;
-    void gateway.getMangaRoot().then((root) => { if (active) setMangaRoot(root); });
-    void gateway.getCollectionSourceRoot().then((root) => { if (active) setCollectionSourceRootState(root); });
+    if (section === "general") void gateway.getMangaRoot()
+      .then((root) => { if (active) setMangaRoot(root); })
+      .catch((error) => { if (active) setMangaRootError(commandErrorMessage(error, "망가 폴더를 확인하지 못했습니다.")); });
+    if (section === "data") void gateway.getCollectionSourceRoot()
+      .then((root) => { if (active) setCollectionSourceRootState(root); })
+      .catch((error) => { if (active) setCollectionSourceError(commandErrorMessage(error, "구버전 소스 폴더를 확인하지 못했습니다.")); });
     return () => { active = false; };
-  }, [gateway]);
+  }, [gateway, section]);
 
   useEffect(() => {
-    if (section !== "about") return;
+    if (section !== "external_services") return;
     let active = true;
     setExtensionConnection(null);
     setExtensionError(null);
@@ -142,8 +146,6 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     setIgdbError(null);
     setTmdbConfigured(null);
     setTmdbError(null);
-    setCloudSettings(null);
-    setCloudError(null);
     void gateway.getKakaoCredentialStatus().then((status) => {
       if (active) setKakaoConfigured(status.configured);
     }).catch((loadError: unknown) => {
@@ -159,25 +161,38 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     }).catch((loadError: unknown) => {
       if (active) setTmdbError(commandErrorMessage(loadError, "TMDB 설정을 확인하지 못했습니다."));
     });
+    return () => { active = false; };
+  }, [gateway, section]);
+
+  useEffect(() => {
+    if (section !== "catalog") return;
+    let active = true;
     void gateway.getOnlineCatalogStatus().then((status) => {
       if (active) setCatalogStatus(status);
     }).catch((loadError: unknown) => {
       if (active) setCatalogError(commandErrorMessage(loadError, "온라인 카탈로그 설정을 확인하지 못했습니다."));
     });
+    return () => { active = false; };
+  }, [gateway, section]);
+  useEffect(() => {
+    if (section !== "cloud" && section !== "data") return;
+    if (cloudSettings) return;
+    let active = true;
     void gateway.getCloudCaptureSettings().then((status) => {
       if (!active) return;
       setCloudSettings(status);
       setCloudApiBaseUrl(status.apiBaseUrl ?? "");
     }).catch((loadError: unknown) => {
-      if (active) setCloudError(commandErrorMessage(loadError, "Cloud Capture 설정을 확인하지 못했습니다."));
+      if (active) setCloudError(commandErrorMessage(loadError, "클라우드 설정을 확인하지 못했습니다."));
     });
     return () => { active = false; };
   }, [gateway, section]);
 
   useEffect(() => {
-    void getVersion().then(setAppVersion).catch(() => setAppVersion(null));
-  }, []);
+    if (section === "about") void getVersion().then(setAppVersion).catch(() => setAppVersion(null));
+  }, [section]);
   useEffect(() => {
+    if (section !== "data") return;
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       void gateway.listMetadataBackups().then((nextBackups) => {
@@ -185,7 +200,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
       }).catch((loadError: unknown) => {
         if (!controller.signal.aborted) setError(commandErrorMessage(loadError, "백업 목록을 불러오지 못했습니다."));
       });
-    }, section === "data" ? 0 : 250);
+    }, 0);
     return () => { controller.abort(); window.clearTimeout(timer); };
   }, [backupRetryVersion, gateway, section]);
 
@@ -228,6 +243,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     try {
       await gateway.setMangaRoot(selected);
       setMangaRoot(selected);
+      setSaved("망가 폴더를 저장했습니다");
     } catch (error) {
       setMangaRootError(commandErrorMessage(error, "망가 폴더를 설정하지 못했습니다."));
     }
@@ -350,6 +366,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
       const status = await gateway.setKakaoApiKey(kakaoKey);
       setKakaoConfigured(status.configured);
       setKakaoKey("");
+      setSaved("카카오 설정을 저장했습니다");
     } catch (saveError) {
       setKakaoError(commandErrorMessage(saveError, "카카오 REST API 키를 저장하지 못했습니다."));
     } finally {
@@ -366,6 +383,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
       setKakaoConfigured(status.configured);
       setKakaoConfirmingDelete(false);
       setKakaoKey("");
+      setSaved("카카오 설정을 저장했습니다");
     } catch (deleteError) {
       setKakaoError(commandErrorMessage(deleteError, "카카오 REST API 키를 삭제하지 못했습니다."));
     } finally {
@@ -382,6 +400,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
       setIgdbConfigured(status.configured);
       setIgdbClientId("");
       setIgdbClientSecret("");
+      setSaved("IGDB 설정을 저장했습니다");
     } catch {
       setIgdbError("IGDB 자격 증명을 저장하지 못했습니다.");
     } finally {
@@ -399,6 +418,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
       setIgdbConfirmingDelete(false);
       setIgdbClientId("");
       setIgdbClientSecret("");
+      setSaved("IGDB 설정을 저장했습니다");
     } catch {
       setIgdbError("IGDB 자격 증명을 삭제하지 못했습니다.");
     } finally {
@@ -415,6 +435,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
       const status = await gateway.setTmdbToken(token);
       setTmdbConfigured(status.configured);
       setTmdbToken("");
+      setSaved("TMDB 설정을 저장했습니다");
     } catch (saveError) {
       setTmdbError(commandErrorMessage(saveError, "TMDB 토큰을 저장하지 못했습니다."));
     } finally {
@@ -431,6 +452,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
       setTmdbConfigured(status.configured);
       setTmdbConfirmingDelete(false);
       setTmdbToken("");
+      setSaved("TMDB 설정을 저장했습니다");
     } catch (deleteError) {
       setTmdbError(commandErrorMessage(deleteError, "TMDB 토큰을 삭제하지 못했습니다."));
     } finally {
@@ -438,19 +460,20 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     }
   }
 
-  async function saveCloudSettings(enabled = cloudSettings?.enabled ?? false) {
+  async function saveCloudSettings(enabled = cloudSettings?.enabled ?? false, captureEnabled = cloudSettings?.captureEnabled ?? cloudSettings?.enabled ?? false, saveAddress = false) {
     if (!cloudSettings || cloudBusy) return;
-    const apiBaseUrl = cloudApiBaseUrl.trim() || null;
+    const apiBaseUrl = saveAddress ? cloudApiBaseUrl.trim() || null : cloudSettings.apiBaseUrl;
     setCloudBusy(true);
     setCloudError(null);
     setCloudMessage(null);
     try {
-      const next = await gateway.setCloudCaptureSettings(enabled, apiBaseUrl);
+      const next = await gateway.setCloudCaptureSettings(enabled, apiBaseUrl, captureEnabled);
       setCloudSettings(next);
-      setCloudApiBaseUrl(next.apiBaseUrl ?? "");
-      setCloudMessage("Cloud Capture 설정을 저장했습니다");
+      if (saveAddress) setCloudApiBaseUrl(next.apiBaseUrl ?? "");
+      notifyCloudBackfillSupervisor();
+      setCloudMessage("클라우드 설정을 저장했습니다");
     } catch (saveError) {
-      setCloudError(commandErrorMessage(saveError, "Cloud Capture 설정을 저장하지 못했습니다."));
+      setCloudError(commandErrorMessage(saveError, "클라우드 설정을 저장하지 못했습니다."));
     } finally {
       setCloudBusy(false);
     }
@@ -465,9 +488,9 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
       const status = await gateway.setCloudApiToken(cloudToken);
       setCloudSettings((current) => current ? { ...current, tokenConfigured: status.configured } : current);
       setCloudToken("");
-      setCloudMessage("Cloud API 토큰을 저장했습니다");
+      setCloudMessage("서버 연결 키을 저장했습니다");
     } catch (saveError) {
-      setCloudError(commandErrorMessage(saveError, "Cloud API 토큰을 저장하지 못했습니다."));
+      setCloudError(commandErrorMessage(saveError, "서버 연결 키을 저장하지 못했습니다."));
     } finally {
       setCloudBusy(false);
     }
@@ -482,9 +505,9 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
       const status = await gateway.deleteCloudApiToken();
       setCloudSettings((current) => current ? { ...current, tokenConfigured: status.configured } : current);
       setCloudToken("");
-      setCloudMessage("Cloud API 토큰을 삭제했습니다");
+      setCloudMessage("서버 연결 키을 삭제했습니다");
     } catch (deleteError) {
-      setCloudError(commandErrorMessage(deleteError, "Cloud API 토큰을 삭제하지 못했습니다."));
+      setCloudError(commandErrorMessage(deleteError, "서버 연결 키을 삭제하지 못했습니다."));
     } finally {
       setCloudBusy(false);
     }
@@ -572,6 +595,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     setCatalogError(null);
     try {
       setCatalogStatus(await gateway.setOnlineCatalogUpdateSettings(enabled, intervalSeconds));
+      setSaved("자동 갱신 설정을 저장했습니다");
     } catch (saveError) {
       setCatalogError(commandErrorMessage(saveError, "온라인 카탈로그 설정을 저장하지 못했습니다."));
     } finally {
@@ -650,19 +674,23 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     }
   }
 
-  return <section className="settings-view" aria-label="설정" onKeyDown={(event) => { if (event.key === "Escape" && !pending) onExit(); }}>
-    <ViewToolbar title="설정" />
-    <div className="settings-view__body">
-    <nav className="settings-view__navigation" aria-label="설정 구역">
-      <Button className="settings-view__section-button" variant="ghost" aria-current={section === "general" ? "page" : undefined} onClick={() => setSection("general")}>일반</Button>
-      <Button className="settings-view__section-button" variant="ghost" aria-current={section === "external_services" ? "page" : undefined} onClick={() => setSection("external_services")}>외부 서비스</Button>
-      <Button className="settings-view__section-button" variant="ghost" aria-current={section === "data" ? "page" : undefined} onClick={() => setSection("data")}>데이터 관리</Button>
-      <Button className="settings-view__section-button" variant="ghost" aria-current={section === "about" ? "page" : undefined} onClick={() => setSection("about")}>정보</Button>
-    </nav>
-    <div className="settings-view__content">
+  const navigation = <nav className="settings-view__navigation" aria-label="설정 구역">
+    {SECTIONS.map(({ id, label }) => <Button key={id} className="settings-view__section-button" variant="ghost" aria-current={section === id ? "page" : undefined} onClick={() => { setSection(id); setSaved(null); }}>{label}</Button>)}
+  </nav>;
+  return <section className="settings-view" aria-label="설정" >
+    <ViewToolbar title={`설정 · ${SECTIONS.find((item) => item.id === section)?.label}`} chrome={{ navigation }} />
+    <div className={`settings-view__body${workspace ? " settings-view__body--integrated" : ""}`}>
+    {!workspace && navigation}
+    <div className="settings-view__content" key={section}>
+    {saved && <p className="settings-view__saved" role="status">{saved}</p>}
     {section === "general" && (
       <div className="settings-view__section">
-        <header className="settings-view__header"><h2>일반</h2><p>라이브러리 폴더와 비공개 모드를 관리합니다.</p></header>
+        <header className="settings-view__header"><h2>일반</h2></header>
+        <dl className="settings-view__property">
+          <dt>비공개 모드</dt>
+          <dd className="settings-view__credential-status">모든 이미지와 영상을 자리표시로 가립니다. 화면 공유 중에 내용이 보이지 않습니다.</dd>
+          <Toggle aria-label="비공개 모드" checked={privacyMode} onChange={(event) => { onPrivacyModeChange(event.target.checked); setSaved("비공개 모드 설정을 저장했습니다"); }}>켜기</Toggle>
+        </dl>
         <dl className="settings-view__property">
           <dt>라이브러리 폴더</dt>
           <dd className="settings-view__path">{library?.root ?? "알 수 없음"}</dd>
@@ -671,34 +699,38 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           </Button>
           {libraryError && <dd className="settings-view__row-message" role="alert">{libraryError}</dd>}
         </dl>
-        <dl className="settings-view__property">
-          <dt>앱 버전</dt>
-          <dd>{appVersion ?? "알 수 없음"}</dd>
-        </dl>
-        <dl className="settings-view__property">
-          <dt>비공개 모드</dt>
-          <dd className="settings-view__credential-status">모든 이미지와 영상을 자리표시로 가립니다. 화면 공유 중에 내용이 보이지 않습니다.</dd>
-          <Toggle aria-label="비공개 모드" checked={privacyMode} onChange={(event) => onPrivacyModeChange(event.target.checked)}>켜기</Toggle>
-        </dl>
+
+
         <dl className="settings-view__property">
           <dt>망가 폴더</dt>
           <dd className="settings-view__path">{mangaRoot ?? "설정되지 않음"}</dd>
           <Button size="sm" onClick={() => void chooseMangaFolder()}>변경</Button>
           {mangaRootError && <dd className="settings-view__row-message" role="alert">{mangaRootError}</dd>}
         </dl>
-        <dl className="settings-view__property">
-          <dt>컬렉션 소스 폴더</dt>
-          <dd className="settings-view__path">{collectionSourceRoot ?? "설정되지 않음"}</dd>
-          <Button size="sm" aria-label="컬렉션 소스 폴더 변경" onClick={() => void chooseCollectionSourceFolder()}>변경</Button>
-          <dd className="settings-view__row-note">구버전 book 소스 위치입니다. info.txt로 컬렉션 출처를 판별할 때 사용합니다.</dd>
-          {collectionSourceError && <dd className="settings-view__row-message" role="alert">{collectionSourceError}</dd>}
-        </dl>
-        {collectionSourceMessage && <Toast onDismiss={() => setCollectionSourceMessage(null)}>{collectionSourceMessage}</Toast>}
       </div>
     )}
     {section === "about" && (
       <div className="settings-view__section">
-        <header className="settings-view__header"><h2>정보</h2><p>확장 프로그램 연결과 단축키를 확인합니다.</p></header>
+        <header className="settings-view__header"><h2>정보·도움말</h2></header>
+        <dl className="settings-view__property">
+          <dt>앱 버전</dt>
+          <dd>{appVersion ?? "알 수 없음"}</dd>
+        </dl>
+        <h3 className="settings-view__group-title">단축키</h3>
+        <table className="settings-view__table">
+          <thead><tr><th scope="col">단축키</th><th scope="col">동작</th></tr></thead>
+          <tbody>
+            {SHORTCUTS.map((shortcut) => <tr key={shortcut.keys}><td><kbd>{shortcut.keys}</kbd></td><td>{shortcut.action}</td></tr>)}
+          </tbody>
+        </table>
+      </div>
+    )}
+        {section === "external_services" && (
+      <div className="settings-view__section">
+        <header className="settings-view__header"><h2>연결</h2></header>
+        {kakaoError && <Toast tone="error" onDismiss={() => setKakaoError(null)}>{kakaoError}</Toast>}
+        {igdbError && <Toast tone="error" onDismiss={() => setIgdbError(null)}>{igdbError}</Toast>}
+        {tmdbError && <Toast tone="error" onDismiss={() => setTmdbError(null)}>{tmdbError}</Toast>}
         <h3 className="settings-view__group-title">브라우저 확장</h3>
         {extensionError && <Toast tone="error" onDismiss={() => setExtensionError(null)}>{extensionError}</Toast>}
         {!extensionConnection && !extensionError ? (
@@ -707,7 +739,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           <>
             <dl className="settings-view__property">
               <dt>연결 상태</dt>
-              <dd>{extensionConnection.status === "ready" ? "연결됨" : "사용 불가"}</dd>
+              <dd>{extensionConnection.status === "ready" ? "PC 연결 준비됨" : "사용 불가"}</dd>
             </dl>
             <dl className="settings-view__property">
               <dt>로컬 주소</dt>
@@ -733,33 +765,8 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             {copyMessage && <Toast onDismiss={() => setCopyMessage(null)}>{copyMessage}</Toast>}
           </>
         ) : null}
-        <h3 className="settings-view__group-title">단축키</h3>
-        <table className="settings-view__table">
-          <thead><tr><th scope="col">단축키</th><th scope="col">동작</th></tr></thead>
-          <tbody>
-            {SHORTCUTS.map((shortcut) => <tr key={shortcut.keys}><td><kbd>{shortcut.keys}</kbd></td><td>{shortcut.action}</td></tr>)}
-          </tbody>
-        </table>
-        <h3 className="settings-view__group-title">버튼 설명</h3>
-        <table className="settings-view__table">
-          <thead><tr><th scope="col">버튼</th><th scope="col">용도</th></tr></thead>
-          <tbody>
-            {BUTTONS.map((button) => <tr key={button.name}><td>{button.name}</td><td>{button.purpose}</td></tr>)}
-          </tbody>
-        </table>
-      </div>
-    )}
-        {section === "external_services" && (
-      <div className="settings-view__section">
-        <header className="settings-view__header"><h2>외부 서비스</h2><p>온라인 서비스 연결과 자격 증명을 관리합니다.</p></header>
-        {kakaoError && <Toast tone="error" onDismiss={() => setKakaoError(null)}>{kakaoError}</Toast>}
-        {igdbError && <Toast tone="error" onDismiss={() => setIgdbError(null)}>{igdbError}</Toast>}
-        {tmdbError && <Toast tone="error" onDismiss={() => setTmdbError(null)}>{tmdbError}</Toast>}
-        {catalogError && <Toast tone="error" onDismiss={() => setCatalogError(null)}>{catalogError}</Toast>}
-        {cloudError && <Toast tone="error" onDismiss={() => setCloudError(null)}>{cloudError}</Toast>}
-        {cloudMessage && <Toast onDismiss={() => setCloudMessage(null)}>{cloudMessage}</Toast>}
-        <h3 className="settings-view__group-title">연결 상태</h3>
-        <dl className="settings-view__property">
+        <h3 className="settings-view__group-title">작품 정보 서비스</h3>
+        <dl className="settings-view__property settings-view__property--credential">
           <dt>카카오 책 검색</dt>
           <dd>
             <span className="settings-view__token-row">
@@ -770,7 +777,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
                 autoComplete="off"
                 placeholder={kakaoConfigured === null ? "확인 중…" : kakaoConfigured ? "설정됨" : "설정되지 않음"}
                 value={kakaoKey}
-                onChange={(event) => setKakaoKey(event.target.value)}
+                onChange={(event) => { setKakaoKey(event.target.value); setSaved(null); }}
               />
               <Button size="sm" disabled={kakaoBusy || !kakaoKey.trim()} onClick={() => void saveKakaoKey()}>{kakaoBusy ? "처리 중…" : "저장"}</Button>
             </span>
@@ -786,7 +793,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             </div>
           </div>
         )}
-        <dl className="settings-view__property">
+        <dl className="settings-view__property settings-view__property--credential">
           <dt>IGDB</dt>
           <dd>
             <span className="settings-view__token-row">
@@ -797,7 +804,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
                 autoComplete="off"
                 placeholder={igdbConfigured === null ? "확인 중…" : igdbConfigured ? "설정됨" : "설정되지 않음"}
                 value={igdbClientId}
-                onChange={(event) => setIgdbClientId(event.target.value)}
+                onChange={(event) => { setIgdbClientId(event.target.value); setSaved(null); }}
               />
               <input
                 className="settings-view__token"
@@ -806,7 +813,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
                 autoComplete="off"
                 placeholder={igdbConfigured === null ? "확인 중…" : igdbConfigured ? "설정됨" : "설정되지 않음"}
                 value={igdbClientSecret}
-                onChange={(event) => setIgdbClientSecret(event.target.value)}
+                onChange={(event) => { setIgdbClientSecret(event.target.value); setSaved(null); }}
               />
               <Button size="sm" disabled={igdbBusy || !igdbClientId.trim() || !igdbClientSecret.trim()} onClick={() => void saveIgdbCredentials()}>{igdbBusy ? "처리 중…" : "IGDB 저장"}</Button>
             </span>
@@ -822,7 +829,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             </div>
           </div>
         )}
-        <dl className="settings-view__property">
+        <dl className="settings-view__property settings-view__property--credential">
           <dt>TMDB</dt>
           <dd>
             <span className="settings-view__token-row">
@@ -833,7 +840,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
                 autoComplete="off"
                 placeholder={tmdbConfigured === null ? "확인 중…" : tmdbConfigured ? "설정됨" : "설정되지 않음"}
                 value={tmdbToken}
-                onChange={(event) => setTmdbToken(event.target.value)}
+                onChange={(event) => { setTmdbToken(event.target.value); setSaved(null); }}
               />
               <Button size="sm" disabled={tmdbBusy || !tmdbToken.trim()} onClick={() => void saveTmdbToken()}>{tmdbBusy ? "처리 중…" : "TMDB 저장"}</Button>
             </span>
@@ -850,51 +857,87 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           </div>
         )}
         <p className="settings-view__row-note">TMDB API 키는 <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noreferrer">TMDB API 설정 안내</a>에서 발급합니다.</p>
-        <h3 className="settings-view__group-title">Cloud Capture</h3>
+      </div>
+    )}
+    {section === "cloud" && <div className="settings-view__section">
+      <header className="settings-view__header"><h2>클라우드</h2></header>
+      {cloudError && <Toast tone="error" onDismiss={() => setCloudError(null)}>{cloudError}</Toast>}
+      {cloudBusy ? <p role="status">처리 중…</p> : cloudMessage && <p role="status">{cloudMessage}</p>}
+
         {!cloudSettings ? (
-          <Skeleton className="settings-view__skeleton" label="Cloud Capture 설정을 불러오는 중" />
+          <Skeleton className="settings-view__skeleton" label="클라우드 설정을 불러오는 중" />
         ) : (
           <>
             <dl className="settings-view__property">
-              <dt>Cloud 수신</dt>
-              <dd><Toggle checked={cloudSettings.enabled} disabled={cloudBusy || (!cloudSettings.enabled && !cloudApiBaseUrl.trim())} onChange={(event) => void saveCloudSettings(event.target.checked)}>자동 수신</Toggle></dd>
-              <dd className="settings-view__row-note">앱 시작 직후와 약 5분 간격으로 VPS Capture 수신함을 확인합니다.</dd>
+              <dt>클라우드 → PC</dt>
+              <dd><Toggle checked={cloudSettings.captureEnabled ?? cloudSettings.enabled} disabled={cloudBusy || !cloudSettings.apiBaseUrl} onChange={(event) => void saveCloudSettings(cloudSettings.enabled, event.target.checked)}>자동 수신</Toggle></dd>
+              <dd className="settings-view__row-note">브라우저에서 클라우드로 수집한 자료를 PC로 가져옵니다.</dd>
             </dl>
             <dl className="settings-view__property">
-              <dt>API 주소</dt>
+              <dt>PC → 클라우드</dt>
+              <dd><Toggle checked={cloudSettings.enabled} disabled={cloudBusy || !cloudSettings.apiBaseUrl} onChange={(event) => void saveCloudSettings(event.target.checked)}>자동 복제</Toggle></dd>
+              <dd className="settings-view__row-note">끄면 진행 중인 전송을 마친 뒤 멈춥니다. 저장된 사본과 대기 자료는 유지됩니다.</dd>
+            </dl>
+            <details className="settings-view__advanced"><summary>서버 연결 설정</summary>
+            <dl className="settings-view__property">
+              <dt>서버 주소{cloudApiBaseUrl.trim() !== (cloudSettings.apiBaseUrl ?? "") && <span className="settings-view__row-note"> · 저장 전</span>}</dt>
               <dd className="settings-view__token-row">
-                <input className="settings-view__token" aria-label="Cloud API 주소" type="url" autoComplete="off" placeholder="http://100.x.x.x:32146" value={cloudApiBaseUrl} onChange={(event) => setCloudApiBaseUrl(event.target.value)} />
-                <Button size="sm" disabled={cloudBusy || (cloudSettings.enabled && !cloudApiBaseUrl.trim())} onClick={() => void saveCloudSettings()}>주소 저장</Button>
+                <input className="settings-view__token" aria-label="서버 주소" type="url" autoComplete="off" placeholder="http://100.x.x.x:32146" value={cloudApiBaseUrl} onChange={(event) => { setCloudApiBaseUrl(event.target.value); setCloudMessage(null); }} />
+                <Button size="sm" disabled={cloudBusy || ((cloudSettings.enabled || cloudSettings.captureEnabled) && !cloudApiBaseUrl.trim())} onClick={() => void saveCloudSettings(cloudSettings.enabled, cloudSettings.captureEnabled ?? cloudSettings.enabled, true)}>저장</Button>
               </dd>
             </dl>
             <dl className="settings-view__property">
-              <dt>API 토큰</dt>
+              <dt>연결 키</dt>
               <dd className="settings-view__token-row">
-                <input className="settings-view__token" aria-label="Cloud API 토큰" type="password" autoComplete="off" placeholder={cloudSettings.tokenConfigured ? "설정됨" : "설정되지 않음"} value={cloudToken} onChange={(event) => setCloudToken(event.target.value)} />
+                <input className="settings-view__token" aria-label="서버 연결 키" type="password" autoComplete="off" placeholder={cloudSettings.tokenConfigured ? "설정됨" : "설정되지 않음"} value={cloudToken} onChange={(event) => { setCloudToken(event.target.value); setCloudMessage(null); }} />
                 <Button size="sm" disabled={cloudBusy || !cloudToken.trim()} onClick={() => void saveCloudToken()}>토큰 저장</Button>
                 {cloudSettings.tokenConfigured && <Button size="sm" variant="danger" disabled={cloudBusy} onClick={() => void deleteCloudToken()}>토큰 삭제</Button>}
               </dd>
             </dl>
+            </details>
             <div className="settings-view__actions">
               <Button size="sm" disabled={cloudBusy || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured} onClick={() => void testCloudConnection()}>연결 확인</Button>
-              <Button size="sm" variant="primary" disabled={cloudBusy || !cloudSettings.enabled || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured} onClick={() => void syncCloudNow()}>지금 동기화</Button>
+              <Button size="sm" variant="primary" disabled={cloudBusy || !(cloudSettings.captureEnabled ?? cloudSettings.enabled) || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured} onClick={() => void syncCloudNow()}>지금 수신</Button>
             </div>
-            <dl className="settings-view__property">
-              <dt>PC 복구 지점</dt>
-              <dd className="settings-view__row-note">library.sqlite 최신 스냅샷을 서버에 저장합니다. 복원할 때 관리 에셋 원본·이미지 썸네일은 기존 Cloud Library R2 사본에서 다시 받습니다. 영상 파생물은 원본에서 재생성합니다. 외부 망가 원본 폴더 자체는 포함하지 않습니다.</dd>
-              <dd className="settings-view__actions">
-                <Button size="sm" disabled={cloudBusy || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured} onClick={() => void pushCloudMetadataBackup()}>서버 복구 지점 만들기</Button>
-                <Button size="sm" variant="danger" disabled={cloudBusy || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured} onClick={() => void restoreCloudMetadataBackup()}>서버에서 PC 복원</Button>
-              </dd>
-            </dl>
+
           </>
         )}
         <CloudBackfillSettings />
-        <h3 className="settings-view__group-title">온라인 카탈로그</h3>
+    </div>}
+    {section === "catalog" && <div className="settings-view__section">
+      <header className="settings-view__header"><h2>온라인 카탈로그</h2></header>
+      {catalogError && <Toast tone="error" onDismiss={() => setCatalogError(null)}>{catalogError}</Toast>}
+
         {catalogStatus && <dl className="settings-view__property">
           <dt>카탈로그 상태</dt>
           <dd>{catalogStatus.installed ? `설치됨 · ${catalogStatus.workCount.toLocaleString()}개 작품` : "미설치"}</dd>
         </dl>}
+
+        {catalogStatus && <dl className="settings-view__property">
+          <dt>온라인 카탈로그</dt>
+          <dd><Toggle checked={catalogStatus.updateEnabled} disabled={catalogBusy || !catalogStatus.installed} onChange={(event) => void saveCatalogSettings(event.target.checked, catalogStatus.updateIntervalSeconds)}>자동 갱신</Toggle></dd>
+          <Select label="갱신 간격" value={String(catalogStatus.updateIntervalSeconds)} disabled={catalogBusy || !catalogStatus.installed} onChange={(event) => void saveCatalogSettings(catalogStatus.updateEnabled, Number(event.target.value))}>
+            <option value="3600">1시간</option>
+            <option value="21600">6시간</option>
+            <option value="86400">24시간</option>
+          </Select>
+        </dl>}
+        <CatalogVisibilitySettings />
+        <dl className="settings-view__property">
+          <dt>온라인 이미지 캐시</dt>
+          <dd>열어 본 온라인 작품의 페이지 이미지만 삭제합니다.</dd>
+          {!catalogCacheConfirming ? (
+            <Button size="sm" disabled={catalogCacheBusy} onClick={() => setCatalogCacheConfirming(true)}>이미지 캐시 지우기</Button>
+          ) : (
+            <span className="settings-view__credential-actions">
+              <Button size="sm" disabled={catalogCacheBusy} onClick={() => setCatalogCacheConfirming(false)}>취소</Button>
+              <Button size="sm" variant="danger" disabled={catalogCacheBusy} onClick={() => void clearCatalogCache()}>
+                {catalogCacheBusy ? "삭제 중…" : "캐시 삭제 확인"}
+              </Button>
+            </span>
+          )}
+        </dl>
+        <details className="settings-view__advanced"><summary>수집 상세·카탈로그 복구</summary>
         {catalogStatus?.installed && <>
           <CatalogStreamSettings
             stream={catalogStreamStatus(catalogStatus, "korean")}
@@ -928,36 +971,12 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           </Button>
           {catalogRestoreMessage && <dd className="settings-view__row-message">{catalogRestoreMessage}</dd>}
         </dl>}
-        {catalogStatus && <dl className="settings-view__property">
-          <dt>온라인 카탈로그</dt>
-          <dd><Toggle checked={catalogStatus.updateEnabled} disabled={catalogBusy || !catalogStatus.installed} onChange={(event) => void saveCatalogSettings(event.target.checked, catalogStatus.updateIntervalSeconds)}>자동 갱신</Toggle></dd>
-          <Select label="갱신 간격" value={String(catalogStatus.updateIntervalSeconds)} disabled={catalogBusy || !catalogStatus.installed} onChange={(event) => void saveCatalogSettings(catalogStatus.updateEnabled, Number(event.target.value))}>
-            <option value="3600">1시간</option>
-            <option value="21600">6시간</option>
-            <option value="86400">24시간</option>
-          </Select>
-        </dl>}
-        <CatalogVisibilitySettings />
-        <dl className="settings-view__property">
-          <dt>온라인 이미지 캐시</dt>
-          <dd>열어 본 온라인 작품의 페이지 이미지만 삭제합니다.</dd>
-          {!catalogCacheConfirming ? (
-            <Button size="sm" disabled={catalogCacheBusy} onClick={() => setCatalogCacheConfirming(true)}>이미지 캐시 지우기</Button>
-          ) : (
-            <span className="settings-view__credential-actions">
-              <Button size="sm" disabled={catalogCacheBusy} onClick={() => setCatalogCacheConfirming(false)}>취소</Button>
-              <Button size="sm" variant="danger" disabled={catalogCacheBusy} onClick={() => void clearCatalogCache()}>
-                {catalogCacheBusy ? "삭제 중…" : "캐시 삭제 확인"}
-              </Button>
-            </span>
-          )}
-        </dl>
+        </details>
         {catalogCacheMessage && <Toast onDismiss={() => setCatalogCacheMessage(null)}>{catalogCacheMessage}</Toast>}
-      </div>
-    )}
+    </div>}
     {section === "data" && (
       <div className="settings-view__section">
-        <header className="settings-view__header"><h2>데이터 관리</h2><p>가져오기와 백업 복구를 관리합니다.</p></header>
+        <header className="settings-view__header"><h2>데이터 관리</h2></header>
         <h3 className="settings-view__group-title">컬렉션 가져오기</h3>
         <dl className="settings-view__property">
           <dt>book 폴더</dt>
@@ -976,6 +995,15 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             <Button size="sm" variant="primary" disabled={pending || metadataImportRunning || !onImportFolder} onClick={() => void chooseImportFolder()}>{lastImportFolder ? "다른 폴더 선택" : "폴더 선택"}</Button>
           </span>
         </dl>
+        <details className="settings-view__advanced"><summary>구버전 자료 가져오기</summary>
+        <dl className="settings-view__property">
+          <dt>컬렉션 소스 폴더</dt>
+          <dd className="settings-view__path">{collectionSourceRoot ?? "설정되지 않음"}</dd>
+          <Button size="sm" aria-label="컬렉션 소스 폴더 변경" onClick={() => void chooseCollectionSourceFolder()}>변경</Button>
+          <dd className="settings-view__row-note">구버전 book 소스 위치입니다. info.txt로 컬렉션 출처를 판별할 때 사용합니다.</dd>
+          {collectionSourceError && <dd className="settings-view__row-message" role="alert">{collectionSourceError}</dd>}
+        </dl>
+        {collectionSourceMessage && <Toast onDismiss={() => setCollectionSourceMessage(null)}>{collectionSourceMessage}</Toast>}
         <h3 className="settings-view__group-title">레거시 패키지 가져오기</h3>
         {legacyError && <Toast tone="error" onDismiss={() => setLegacyError(null)}>{legacyError}</Toast>}
         <dl className="settings-view__property">
@@ -1065,7 +1093,19 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             )}
           </div>
         )}
-        <h3 className="settings-view__group-title">백업 복구</h3>
+        </details>
+        <h3 className="settings-view__group-title">서버 백업·복원</h3>
+        {cloudError && <Toast tone="error" onDismiss={() => setCloudError(null)}>{cloudError}</Toast>}
+        {cloudBusy ? <p role="status">처리 중…</p> : cloudMessage && <p role="status">{cloudMessage}</p>}
+        {cloudSettings && <>            <dl className="settings-view__property">
+              <dt>PC 복구 지점</dt>
+              <dd className="settings-view__row-note">라이브러리 관리 정보를 서버에 백업합니다. 복원 시 서버에 보관된 자료도 내려받습니다. 외부 망가 폴더는 포함되지 않습니다.</dd>
+              <dd className="settings-view__actions">
+                <Button size="sm" disabled={cloudBusy || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured} onClick={() => void pushCloudMetadataBackup()}>서버 복구 지점 만들기</Button>
+                <Button size="sm" variant="danger" disabled={cloudBusy || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured} onClick={() => void restoreCloudMetadataBackup()}>서버에서 PC 복원</Button>
+              </dd>
+            </dl></>}
+        <h3 className="settings-view__group-title">로컬 백업 복구</h3>
         <div className="settings-view__safety">
         {confirmingId ? (
           <div className="settings-view__safety-confirm">
@@ -1159,19 +1199,6 @@ const SHORTCUTS = [
   { keys: "F", action: "감상 화면에서 즐겨찾기 토글" },
   { keys: "Delete", action: "선택/감상 자산을 휴지통으로 이동" },
   { keys: "Escape", action: "감상 화면·선택 닫기" },
-];
-
-const BUTTONS = [
-  { name: "즐겨찾기", purpose: "해당 자산의 즐겨찾기를 켜거나 끕니다." },
-  { name: "이전/다음 자산", purpose: "감상 화면에서 이전·다음 자산을 봅니다." },
-  { name: "감상 화면 닫기", purpose: "감상 화면을 닫고 갤러리로 돌아갑니다." },
-  { name: "휴지통으로 이동", purpose: "감상 중인 자산을 휴지통으로 보냅니다." },
-  { name: "정보", purpose: "선택 자산의 원본 정보와 분류를 보여주는 정보창을 엽니다." },
-  { name: "정렬", purpose: "불러온 자산의 정렬 기준을 바꿉니다." },
-  { name: "미리보기 크기", purpose: "갤러리 행의 목표 높이를 조절합니다." },
-  { name: "메타데이터 표시", purpose: "타일에 출처와 수집일을 표시합니다." },
-  { name: "분류 추가", purpose: "새 분류 항목 추가 대화상자를 엽니다." },
-  { name: "실행 취소", purpose: "마지막 휴지통 이동을 되돌립니다." },
 ];
 
 function kindLabel(kind: MetadataBackup["kind"]): string {

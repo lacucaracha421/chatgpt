@@ -121,3 +121,15 @@ Android/Titanium에서 Cloud Capture에 접근할 때는 Tailscale Serve HTTPS �
 ## Current implementation order
 
 Use the living backlog's active item statuses and dependencies rather than a second execution sequence here. Preserve the remaining CLOUD-006 pause gate, then follow its relationship to CLOUD-UI-001. Do not repeat the completed inbound rollout, E2E verification, or full backfill merely because an older procedure mentions them. Production writes and deployments require separate explicit authorization.
+
+
+## Settings reorganization (2026-09-06 working change)
+
+- Settings navigation occupies the existing contextual sidebar. General, Cloud, Catalog, Connections, Data management, and About own their respective controls.
+- v38 preserves the old cloud enablement for inbound capture, independently controls outbound replication, and maps an old paused choice to outbound disabled. Restart no longer silently introduces pause. Existing internal control values remain compatible, but normal UI has no Pause/Resume actions.
+- v39 adds independent metadata publish timestamps/errors to the replication activity row so successful media uploads cannot hide a failed mobile metadata publish (or vice versa).
+- New asset claims check replication enablement atomically. Capture consumption checks enablement before each next item. Already active transfers can finish; pending data is retained.
+- The application supervisor owns the sole progress timer and publishes progress during long worker cycles. Settings subscribes, with one initial read; it does not own a periodic timer.
+- Last successful capture/media cycle survives later errors. Diagnostic messages persisted by the activity boundary are fixed public strings, excluding transport payloads and credentials.
+- Backup lists load only in Data management, on a blocking worker thread. Existing snapshot verification and restore validation remain intact.
+- This implementation does not close device/native acceptance by itself. During editing an already-running development watcher unexpectedly migrated the active library to v38; it was stopped. A verified pre-migration v37 backup exists. v39 must not be applied to the active library without authorization.

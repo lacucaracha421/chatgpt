@@ -52,11 +52,7 @@ pub fn run() {
                 .get(tauri::http::header::RANGE)
                 .and_then(|value| value.to_str().ok())
                 .map(str::to_string);
-            let origin = request
-                .headers()
-                .get(tauri::http::header::ORIGIN)
-                .and_then(|value| value.to_str().ok())
-                .map(str::to_owned);
+            let origin = request.headers().get(tauri::http::header::ORIGIN).and_then(|value| value.to_str().ok()).map(str::to_owned);
             let method = request.method().clone();
             let path = request.uri().path().to_string();
             tauri::async_runtime::spawn_blocking(move || {

@@ -24,13 +24,29 @@ impl Library {
         &self,
         config: CloudSyncConfig,
     ) -> Result<CloudSyncConfig, LibraryError> {
+        let capture_enabled = config.enabled;
+        self.set_cloud_settings(config, capture_enabled)
+    }
+
+    pub(crate) fn cloud_capture_enabled(&self) -> Result<bool, LibraryError> {
+        Ok(self.connection()?.query_row("SELECT cloud_capture_enabled FROM library_settings WHERE singleton = 1", [], |row| row.get(0))?)
+    }
+
+    pub(crate) fn set_cloud_settings(&self, config: CloudSyncConfig, capture_enabled: bool) -> Result<CloudSyncConfig, LibraryError> {
         let config = validated_config(config)?;
-        self.connection()?.execute(
+        if capture_enabled && config.api_base_url.is_none() { return Err(LibraryError::InvalidCloudSyncConfig); }
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        transaction.execute(
             "UPDATE library_settings
-             SET cloud_sync_enabled = ?1, cloud_api_base_url = ?2
+             SET cloud_sync_enabled = ?1, cloud_api_base_url = ?2, cloud_capture_enabled = ?3
              WHERE singleton = 1",
-            params![i64::from(config.enabled), config.api_base_url],
+            params![i64::from(config.enabled), config.api_base_url, i64::from(capture_enabled)],
         )?;
+        if config.enabled {
+            transaction.execute("UPDATE cloud_backfill_control SET state = 'idle' WHERE state = 'paused'", [])?;
+        }
+        transaction.commit()?;
         Ok(config)
     }
 

@@ -1,4 +1,5 @@
 pub(crate) mod backfill;
+pub(crate) mod activity;
 #[cfg(test)]
 mod backfill_tests;
 #[cfg(test)]

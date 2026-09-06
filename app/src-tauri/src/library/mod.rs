@@ -211,7 +211,6 @@ impl Library {
         library.cleanup_resolving_similarity_reviews()?;
         library.requeue_interrupted_video_preparation()?;
         library.requeue_interrupted_cloud_sync()?;
-        library.suspend_running_cloud_backfill_on_open()?;
         library.cleanup_unreferenced_work_artwork()?;
         library.start_work_artwork_thumbnail_backfill();
         library.request_catalog_preparation();

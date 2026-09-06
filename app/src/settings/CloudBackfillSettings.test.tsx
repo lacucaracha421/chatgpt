@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
@@ -58,7 +58,7 @@ it("renders the compact read-only preflight summary", async () => {
 
 it("does not seed or run work while initially inactive", async () => {
   const gateway = renderSection();
-  await screen.findByText("시작 전");
+  await screen.findByText("최신 상태");
   expect(gateway.cloudBackfillSeed).not.toHaveBeenCalled();
   expect(gateway.cloudBackfillRunCycle).not.toHaveBeenCalled();
 });
@@ -81,27 +81,16 @@ it("renders persistent progress counts and percentage", async () => {
 
 it("renders active transfer stages and worker count", async () => {
   renderSection({ cloudBackfillProgress: vi.fn().mockResolvedValue({ ...inactive, controlState: "running", queued: 4, preparing: 1, uploading: 2, committing: 1, activeWorkers: 4 }) });
-  expect(await screen.findByText("업로드 중")).toBeInTheDocument();
-  expect(screen.getByText(/준비 1 · 업로드 2 · 커밋 1 · 작업자 4/)).toBeInTheDocument();
+  expect(await screen.findByText("복제 대기·진행 중")).toBeInTheDocument();
+  expect(screen.getByText(/대기 4 · 전송 중 4/)).toBeInTheDocument();
 });
 
-it("pauses by changing control state without changing queue rows", async () => {
-  const setState = vi.fn().mockResolvedValue("paused");
-  const gateway = renderSection({ cloudBackfillProgress: vi.fn().mockResolvedValue({ ...inactive, controlState: "running", queued: 2 }), cloudBackfillSetControlState: setState });
-  await userEvent.click(await screen.findByRole("button", { name: "일시정지" }));
-  expect(setState).toHaveBeenCalledWith("paused");
-  expect(gateway.cloudBackfillRetryFailed).not.toHaveBeenCalled();
-});
-
-it("resumes by reconciling before setting running and never reseeds", async () => {
-  const calls: string[] = [];
-  const gateway = renderSection({
-    cloudBackfillProgress: vi.fn().mockResolvedValue({ ...inactive, controlState: "paused", queued: 2 }),
-    cloudBackfillReconcile: vi.fn().mockImplementation(async () => { calls.push("reconcile"); return { requeued: 1 }; }),
-    cloudBackfillSetControlState: vi.fn().mockImplementation(async () => { calls.push("running"); return "running"; }),
-  });
-  await userEvent.click(await screen.findByRole("button", { name: "계속" }));
-  await waitFor(() => expect(calls).toEqual(["reconcile", "running"]));
+it("does not expose pause or resume and preserves disabled replication", async () => {
+  const gateway = renderSection({ cloudBackfillProgress: vi.fn().mockResolvedValue({ ...inactive, replicationEnabled: false, queued: 2 }) });
+  await screen.findByText("자동 복제 꺼짐");
+  expect(screen.queryByRole("button", { name: "일시정지" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "계속" })).not.toBeInTheDocument();
+  expect(gateway.cloudBackfillSetControlState).not.toHaveBeenCalled();
   expect(gateway.cloudBackfillSeed).not.toHaveBeenCalled();
 });
 
@@ -147,10 +136,20 @@ it("refreshes persistent counts immediately after an operator action", async () 
 
 it("never creates a worker cycle when the Settings section is reopened", async () => {
   const first = renderSection({ cloudBackfillProgress: vi.fn().mockResolvedValue({ ...inactive, controlState: "running", queued: 2 }) });
-  await screen.findByText("업로드 중");
+  await screen.findByText("복제 대기·진행 중");
   cleanup();
   const second = renderSection({ cloudBackfillProgress: vi.fn().mockResolvedValue({ ...inactive, controlState: "running", queued: 2 }) });
-  await screen.findByText("업로드 중");
+  await screen.findByText("복제 대기·진행 중");
   expect(first.cloudBackfillRunCycle).not.toHaveBeenCalled();
   expect(second.cloudBackfillRunCycle).not.toHaveBeenCalled();
+});
+
+
+it("adds no polling timer while waiting for supervisor progress", async () => {
+  const gateway = renderSection();
+  await screen.findByText("최신 상태");
+  vi.useFakeTimers();
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+  expect(gateway.cloudBackfillProgress).toHaveBeenCalledTimes(1);
+  vi.useRealTimers();
 });

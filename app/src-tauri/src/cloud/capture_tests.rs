@@ -166,6 +166,7 @@ fn pending_capture_downloads_ingests_and_acknowledges() {
     );
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
 
     let result = library
         .sync_next_cloud_capture_with(&CloudClient::new(&base_url).unwrap(), "test-token")
@@ -215,6 +216,7 @@ fn pending_capture_downloads_ingests_and_acknowledges() {
 fn pending_capture_preserves_existing_classification_id() {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
     let classification = library
         .create_classification(crate::library::models::CreateClassification {
             kind: crate::library::models::ClassificationKind::Root,
@@ -262,6 +264,7 @@ fn download_failure_does_not_acknowledge() {
     let (base_url, handle) = thread_handle_with_failing_download();
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
 
     // 다운로드 실패는 그 캡처만 건너뛴다(원격은 pending 유지). 폴 자체는 오류가 아니다.
     let result = library
@@ -314,6 +317,7 @@ fn duplicate_capture_is_still_acknowledged_without_new_asset() {
     );
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
 
     let first = library
         .sync_next_cloud_capture_with(&CloudClient::new(&base_url).unwrap(), "test-token")
@@ -366,6 +370,7 @@ fn acknowledgement_failure_after_import_is_safe_to_retry() {
     );
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
     // 로컬 수집 + imported 기록은 됐지만 acknowledge가 503 → 이번 폴의 이 캡처는
     // failed로 집계하고 재시도는 다음 폴에서 한다. 원격과 로컬 기록이 불일치한다.
     let result = library
@@ -431,6 +436,7 @@ fn interrupted_import_is_recovered_as_duplicate_on_next_run() {
     );
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
 
     // 첫 실행: 로컬 수집 + imported 기록 (ack 성공).
     let first = library
@@ -467,6 +473,7 @@ fn malformed_capture_record_cannot_escape_staging() {
     });
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
     // malformed 기록도 그 항목만 건너뛴다. staging은 건드리지 않는다. 시도 집계에도
     // 들어가지 않는다. malformed 항목은 상한 소비량도 차지하지 않는다.
     let result = library
@@ -493,6 +500,7 @@ fn unknown_media_kind_is_rejected() {
     });
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
 
     // 알 수 없는 종류의 기록은 그 캡처만 건너뛴다. 폴은 정상이고 시도 집계에도
     // 들어가지 않는다.
@@ -514,6 +522,7 @@ fn empty_capture_list_is_a_clean_noop() {
     });
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
 
     let result = library
         .sync_next_cloud_capture_with(&CloudClient::new(&base_url).unwrap(), "test-token")
@@ -551,6 +560,7 @@ fn broken_capture_does_not_block_a_healthy_later_capture() {
     });
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
 
     let result = library
         .sync_next_cloud_capture_with(&CloudClient::new(&base_url).unwrap(), "test-token")
@@ -568,6 +578,7 @@ fn ingest_failure_does_not_acknowledge() {
     let (base_url, handle) = thread_handle_with_invalid_media();
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
 
     // 수집 실패도 그 캡처만 건너뛴다. 원격은 imported로 만들지 않는다.
     let result = library
@@ -627,6 +638,7 @@ fn inbound_captures_and_outbound_queue_remain_independent() {
     });
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
     // outbound 개념의 로컬 레코드를 심는다.
     library
         .connection()
@@ -764,6 +776,7 @@ fn one_invocation_drains_multiple_valid_captures() {
     let (base_url, handle) = serve_multi_capture_list(captures, &[], &media_by_object_key);
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
 
     let result = library
         .sync_next_cloud_capture_with(&CloudClient::new(&base_url).unwrap(), "test-token")
@@ -818,6 +831,7 @@ fn one_invocation_processes_at_most_25_attempts() {
     let (base_url, handle) = serve_multi_capture_list(captures, &[], &media_by_object_key);
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
 
     let result = library
         .sync_next_cloud_capture_with(&CloudClient::new(&base_url).unwrap(), "test-token")
@@ -870,6 +884,7 @@ fn middle_failure_leaves_later_captures_imported() {
         serve_multi_capture_list(captures, &["capture-broken"], &media_by_object_key);
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
 
     let result = library
         .sync_next_cloud_capture_with(&CloudClient::new(&base_url).unwrap(), "test-token")
@@ -936,6 +951,7 @@ fn review_pending_capture_is_not_acknowledged() {
 
     let library = tempfile::tempdir().unwrap();
     let library = Library::open(library.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
     // 먼저 라이브러리에 유사한 이미지를 수집해 둔다.
     library
         .ingest_media(crate::library::models::IngestMediaRequest {
@@ -1019,6 +1035,8 @@ fn snapshot_publish_serializes_saved_keys_and_failure_does_not_fail_sync_cycle()
 
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some(base_url.clone()) }, true).unwrap();
     let source = temp.path().join("saved.png");
     fs::write(&source, png_bytes()).unwrap();
     library
@@ -1042,6 +1060,9 @@ fn snapshot_publish_serializes_saved_keys_and_failure_does_not_fail_sync_cycle()
         .unwrap();
     assert_eq!(result, super::captures::CloudCaptureSyncResult::default());
 
+    let activity = super::activity::read_activity(&library.connection().unwrap()).unwrap();
+    assert!(activity[1].metadata_last_error.is_some());
+    assert!(activity[1].metadata_last_success_at.is_none());
     let requests = handle.join().unwrap();
     assert_eq!(
         requests

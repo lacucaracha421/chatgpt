@@ -81,6 +81,8 @@ pub struct BackfillProgress {
     pub failed: u64,
     pub active_workers: u64,
     pub last_error: Option<String>,
+    pub activity: Vec<super::activity::CloudActivity>,
+    pub replication_enabled: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -104,15 +106,6 @@ pub struct BackfillRunSummary {
 }
 
 impl Library {
-    pub(crate) fn suspend_running_cloud_backfill_on_open(&self) -> Result<(), LibraryError> {
-        self.connection()?.execute(
-            "UPDATE cloud_backfill_control SET state = 'paused', updated_at = ?1
-             WHERE singleton = 1 AND state = 'running'",
-            [chrono::Utc::now().to_rfc3339()],
-        )?;
-        Ok(())
-    }
-
     pub fn cloud_backfill_control_state(&self) -> Result<BackfillControlState, LibraryError> {
         let value = self.connection()?.query_row(
             "SELECT state FROM cloud_backfill_control WHERE singleton = 1",
@@ -387,6 +380,8 @@ impl Library {
             failed: count("failed")?,
             active_workers: preparing + uploading + committing,
             last_error,
+            activity: super::activity::read_activity(&connection)?,
+            replication_enabled: connection.query_row("SELECT cloud_sync_enabled FROM library_settings WHERE singleton = 1", [], |row| row.get(0))?,
         })
     }
 
@@ -418,6 +413,18 @@ impl Library {
         if !config.enabled {
             return Ok(BackfillRunSummary::default());
         }
+        self.begin_cloud_activity("replication")?;
+        let result = self.run_configured_cloud_backfill_cycle(config);
+        let (processed, problems, error) = match &result {
+            Ok(summary) => (summary.committed, summary.retry_scheduled + summary.permanent_failures,
+                (summary.retry_scheduled + summary.permanent_failures > 0).then_some("전송하지 못한 자료가 있습니다. 연결과 원본 파일을 확인해 주세요.")),
+            Err(_) => (0, 1, Some("복제 연결을 확인하지 못했습니다. 서버 주소·연결 키와 네트워크를 확인해 주세요.")),
+        };
+        self.finish_cloud_activity("replication", processed, problems, error)?;
+        result
+    }
+
+    fn run_configured_cloud_backfill_cycle(&self, config: super::models::CloudSyncConfig) -> Result<BackfillRunSummary, LibraryError> {
         let base_url = config
             .api_base_url
             .ok_or(LibraryError::InvalidCloudSyncConfig)?;
@@ -613,6 +620,7 @@ impl Library {
                  FROM cloud_sync_queue AS queue
                  JOIN assets AS asset ON asset.id = queue.entity_id
                  WHERE queue.status = 'pending'
+                   AND EXISTS (SELECT 1 FROM library_settings WHERE singleton = 1 AND cloud_sync_enabled = 1)
                    AND queue.entity_type = 'asset'
                    AND queue.operation = 'upsert'
                    AND asset.status = 'normal'

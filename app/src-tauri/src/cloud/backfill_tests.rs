@@ -73,6 +73,7 @@ fn backfill_control_state_is_idle_by_default_and_persists_pause() {
     let temp = tempfile::tempdir().unwrap();
     {
         let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
         assert_eq!(
             library.cloud_backfill_control_state().unwrap(),
             BackfillControlState::Idle
@@ -93,10 +94,11 @@ fn backfill_control_state_is_idle_by_default_and_persists_pause() {
 }
 
 #[test]
-fn reopening_suspends_a_previously_running_backfill_until_explicit_resume() {
+fn reopening_preserves_running_backfill_without_introducing_a_hidden_pause() {
     let temp = tempfile::tempdir().unwrap();
     {
         let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
         library
             .set_cloud_backfill_control_state(BackfillControlState::Running)
             .unwrap();
@@ -105,7 +107,7 @@ fn reopening_suspends_a_previously_running_backfill_until_explicit_resume() {
     let reopened = Library::open(temp.path()).unwrap();
     assert_eq!(
         reopened.cloud_backfill_control_state().unwrap(),
-        BackfillControlState::Paused
+        BackfillControlState::Running
     );
 }
 
@@ -113,6 +115,7 @@ fn reopening_suspends_a_previously_running_backfill_until_explicit_resume() {
 fn paused_backfill_does_not_claim_new_work_and_resume_preserves_queue() {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
     let source = temp.path().join("paused.png");
     fs::write(&source, png_bytes(99)).unwrap();
     let asset_id = ingest_png(&library, &source, "2026-09-02T00:00:00Z");
@@ -145,6 +148,7 @@ fn paused_backfill_does_not_claim_new_work_and_resume_preserves_queue() {
 fn reconcile_requeues_interrupted_and_thumbnail_ready_backfill_stages() {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
     let source = temp.path().join("thumbnail-ready.png");
     fs::write(&source, png_bytes(31)).unwrap();
     let thumbnail_ready_id = ingest_png(&library, &source, "2026-09-02T00:00:00Z");
@@ -205,6 +209,7 @@ fn reconcile_requeues_interrupted_and_thumbnail_ready_backfill_stages() {
 fn bounded_scope_excludes_preexisting_pending_work_from_progress_and_claims() {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
     let mut ids = Vec::new();
     for index in 0..3 {
         let source = temp.path().join(format!("bounded-{index}.png"));
@@ -236,6 +241,7 @@ fn bounded_scope_excludes_preexisting_pending_work_from_progress_and_claims() {
 fn normal_full_seed_clears_a_previous_bounded_scope() {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
     let mut ids = Vec::new();
     for index in 0..2 {
         let source = temp.path().join(format!("full-{index}.png"));
@@ -260,6 +266,7 @@ fn normal_full_seed_clears_a_previous_bounded_scope() {
 fn full_backfill_progress_excludes_non_normal_queue_rows_without_deleting_them() {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
     let normal_source = temp.path().join("normal-progress.png");
     let trashed_source = temp.path().join("trashed-progress.png");
     fs::write(&normal_source, png_bytes(230)).unwrap();
@@ -349,6 +356,7 @@ fn report_assets_ready(
 fn preflight_reports_classification_membership() {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
     let classification = library
         .create_classification(crate::library::models::CreateClassification {
             kind: crate::library::models::ClassificationKind::Root,
@@ -393,6 +401,7 @@ fn preflight_reports_classification_membership() {
 fn seeding_enqueues_recent_first_and_is_idempotent() {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
 
     let mut ids = Vec::new();
     for (index, collected_at) in [
@@ -453,6 +462,7 @@ fn seeding_enqueues_recent_first_and_is_idempotent() {
 fn seeding_skips_already_synced_assets() {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
     let source = temp.path().join("synced.png");
     fs::write(&source, png_bytes(7)).unwrap();
     let asset_id = ingest_png(&library, &source, "2026-08-30T00:00:00Z");
@@ -580,6 +590,7 @@ fn backfill_worker_prepares_uploads_and_commits_one_image() {
 
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
     let source = temp.path().join("worker.png");
     fs::write(&source, png_bytes(9)).unwrap();
     let asset_id = ingest_png(&library, &source, "2026-08-30T00:00:00Z");
@@ -658,6 +669,7 @@ fn already_committed_asset_recommits_relationships_without_reupload() {
 
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
     let source = temp.path().join("committed.png");
     fs::write(&source, png_bytes(11)).unwrap();
     let asset_id = ingest_png(&library, &source, "2026-08-30T00:00:00Z");
@@ -878,6 +890,7 @@ fn video_prepare_upload_and_commit_flow() {
 
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
     stub_video_probe();
     let asset_id = ingest_mp4(&library, temp.path(), "2026-08-30T00:00:00Z");
     // 비디오는 포스터가 준비되기 전까지 썸네일이 없다. 테스트를 위해 DB에
@@ -908,6 +921,7 @@ fn video_prepare_upload_and_commit_flow() {
 fn video_without_thumbnail_fails_independently_and_succeeds_after_retry() {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
     stub_video_probe();
 
     let image_source = temp.path().join("healthy.png");
@@ -990,6 +1004,7 @@ fn video_without_thumbnail_fails_independently_and_succeeds_after_retry() {
 fn retry_does_not_duplicate_assets_or_relations_and_permanent_failure_is_isolated() {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
     let source = temp.path().join("retry.png");
     fs::write(&source, png_bytes(11)).unwrap();
     let asset_id = ingest_png(&library, &source, "2026-08-30T00:00:00Z");
@@ -1119,6 +1134,7 @@ fn retry_does_not_duplicate_assets_or_relations_and_permanent_failure_is_isolate
 fn missing_original_fails_that_asset_only_and_later_assets_still_commit() {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
 
     // 오래된 자산(먼저 claim됨): 원본을 지워 영구 실패로 만든다.
     let old_source = temp.path().join("old.png");
@@ -1211,4 +1227,21 @@ fn missing_original_fails_that_asset_only_and_later_assets_still_commit() {
     assert_eq!(queue_status(&library, &new_id).as_deref(), Some("synced"));
     assert_eq!(queue_status(&library, &old_id).as_deref(), Some("failed"));
     server_thread.join().unwrap();
+}
+
+#[test]
+fn disabling_replication_prevents_the_next_claim_without_discarding_pending_work() {
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    let config = super::models::CloudSyncConfig { enabled: true, api_base_url: Some("http://127.0.0.1:1".into()) };
+    library.set_cloud_settings(config.clone(), true).unwrap();
+    let source = temp.path().join("pending.png");
+    fs::write(&source, png_bytes(99)).unwrap();
+    let asset_id = ingest_png(&library, &source, "2026-09-06T00:00:00Z");
+    library.seed_cloud_backfill_queue().unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: false, ..config }, true).unwrap();
+    let result = library.replicate_next_cloud_asset(&CloudClient::new("http://127.0.0.1:1").unwrap(), "fixture");
+    assert!(matches!(result, Ok(None)));
+    assert_eq!(queue_status(&library, &asset_id).as_deref(), Some("pending"));
+    assert!(library.cloud_capture_enabled().unwrap());
 }

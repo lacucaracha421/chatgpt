@@ -15,6 +15,7 @@ export function CatalogVisibilitySettings() {
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
 
   useEffect(() => {
@@ -44,9 +45,11 @@ export function CatalogVisibilitySettings() {
   async function changeCategory(category: number, hidden: boolean) {
     if (busy) return;
     setBusy(true);
+    setSaved(false);
     setError(null);
     try {
       setPolicy(await gateway.setCatalogCategoryHidden(category, hidden));
+      setSaved(true);
     } catch (changeError) {
       setError(commandErrorMessage(changeError, "분류 표시 설정을 저장하지 못했습니다."));
     } finally {
@@ -57,9 +60,11 @@ export function CatalogVisibilitySettings() {
   async function changeTag(tag: CatalogBlockedTag, blocked: boolean) {
     if (busy) return;
     setBusy(true);
+    setSaved(false);
     setError(null);
     try {
       setPolicy(await gateway.setCatalogTagBlocked(tag, blocked));
+      setSaved(true);
       if (blocked) {
         setNamespace("");
         setValue("");
@@ -80,7 +85,8 @@ export function CatalogVisibilitySettings() {
 
   return <section className="catalog-visibility-settings" aria-labelledby="catalog-visibility-title">
     <h4 id="catalog-visibility-title">검색 결과 숨김</h4>
-    <p className="settings-view__row-note">선택한 분류나 정확히 일치하는 태그를 기본 검색 결과에서 숨깁니다. 저장된 설정은 백업과 복원에 포함됩니다.</p>
+    <p className="settings-view__row-note">선택한 분류와 정확히 일치하는 태그를 검색 결과에서 숨깁니다.</p>
+    {busy ? <p role="status">저장 중…</p> : saved && <p role="status">저장됨</p>}
     {error && <Toast tone="error" onDismiss={() => setError(null)}>{error}</Toast>}
     {!policy ? loadFailed
       ? <Button size="sm" onClick={() => void retryLoad()}>다시 시도</Button>
@@ -98,7 +104,7 @@ export function CatalogVisibilitySettings() {
       <div className="catalog-visibility-settings__tags">
         <span className="catalog-visibility-settings__label">차단 태그</span>
         <form className="catalog-visibility-settings__tag-form" onSubmit={addTag}>
-          <input className="settings-view__token" aria-label="차단 태그 네임스페이스" autoComplete="off" placeholder="artist" value={namespace} disabled={busy} onChange={(event) => setNamespace(event.target.value)} />
+          <input className="settings-view__token" aria-label="차단 태그 종류" autoComplete="off" placeholder="artist" value={namespace} disabled={busy} onChange={(event) => setNamespace(event.target.value)} />
           <input className="settings-view__token" aria-label="차단 태그 값" autoComplete="off" placeholder="태그 값" value={value} disabled={busy} onChange={(event) => setValue(event.target.value)} />
           <Button size="sm" type="submit" disabled={busy || !namespace.trim() || !value.trim()}>태그 차단</Button>
         </form>

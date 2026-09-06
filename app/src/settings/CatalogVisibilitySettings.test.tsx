@@ -59,7 +59,7 @@ it("adds and removes exact namespace and value tag pairs", async () => {
   const { gateway } = renderSettings();
   expect(await screen.findByText("artist:sample")).toBeVisible();
 
-  await userEvent.type(screen.getByLabelText("차단 태그 네임스페이스"), "group");
+  await userEvent.type(screen.getByLabelText("차단 태그 종류"), "group");
   await userEvent.type(screen.getByLabelText("차단 태그 값"), "circle");
   await userEvent.click(screen.getByRole("button", { name: "태그 차단" }));
 

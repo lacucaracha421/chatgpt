@@ -68,7 +68,21 @@ export type CloudBackfillRunSummary = {
   permanentFailures: number;
 };
 
+export type CloudActivity = {
+  metadataLastAttemptAt?: string | null;
+  metadataLastSuccessAt?: string | null;
+  metadataLastError?: string | null;
+  direction: "capture" | "replication";
+  lastAttemptAt: string | null;
+  lastSuccessAt: string | null;
+  lastError: string | null;
+  processed: number;
+  problems: number;
+};
+
 export type CloudBackfillProgress = {
+  activity?: CloudActivity[];
+  replicationEnabled?: boolean;
   controlState: CloudBackfillControlState;
   totalAssets: number;
   queued: number;
@@ -103,6 +117,7 @@ export type CloudCaptureSyncResult = {
 
 export type CloudCaptureSettings = {
   enabled: boolean;
+  captureEnabled?: boolean;
   apiBaseUrl: string | null;
   tokenConfigured: boolean;
 };
@@ -257,7 +272,7 @@ export type AssetView =
   | { kind: "calendar" }
   | { kind: "similarity_review" }
   | { kind: "trash" }
-  | { kind: "settings"; section?: "external_services" }
+  | { kind: "settings"; section?: "general" | "cloud" | "catalog" | "external_services" | "data" | "about" }
   | { kind: "manga" }
   | { kind: "collections"; typeFilter: CollectionType; showcase: boolean }
   | { kind: "collection"; collectionId: string }
@@ -939,7 +954,7 @@ export interface LibraryGateway {
   setOnlineCatalogUpdateSettings(enabled: boolean, intervalSeconds: number): Promise<CatalogStatus>;
   runDueOnlineCatalogUpdate(language?: CatalogLanguage): Promise<CatalogUpdateResult | null>;
   getCloudCaptureSettings(): Promise<CloudCaptureSettings>;
-  setCloudCaptureSettings(enabled: boolean, apiBaseUrl: string | null): Promise<CloudCaptureSettings>;
+  setCloudCaptureSettings(enabled: boolean, apiBaseUrl: string | null, captureEnabled?: boolean): Promise<CloudCaptureSettings>;
   setCloudApiToken(token: string): Promise<CloudCredentialStatus>;
   deleteCloudApiToken(): Promise<CloudCredentialStatus>;
   testCloudCaptureConnection(): Promise<CloudCaptureConnectionStatus>;

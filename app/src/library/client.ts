@@ -144,8 +144,8 @@ export const libraryGateway: LibraryGateway = {
       : invoke<CatalogUpdateResult | null>("run_due_online_catalog_update", { language }),
   getCloudCaptureSettings: () =>
     invoke<CloudCaptureSettings>("get_cloud_capture_settings"),
-  setCloudCaptureSettings: (enabled, apiBaseUrl) =>
-    invoke<CloudCaptureSettings>("set_cloud_capture_settings", { enabled, apiBaseUrl }),
+  setCloudCaptureSettings: (enabled, apiBaseUrl, captureEnabled) =>
+    invoke<CloudCaptureSettings>("set_cloud_capture_settings", { enabled, apiBaseUrl, ...(captureEnabled === undefined ? {} : { captureEnabled }) }),
   setCloudApiToken: (token) =>
     invoke<CloudCredentialStatus>("set_cloud_api_token", { token }),
   deleteCloudApiToken: () =>

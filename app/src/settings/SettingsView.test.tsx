@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { CatalogStatus, LibraryGateway, MetadataBackup } from "../library/types";
+import { WorkspaceChromeProvider, ChromeTarget } from "../layout/WorkspaceChrome";
 import { SettingsView } from "./SettingsView";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
@@ -127,7 +128,7 @@ it("uses desktop settings navigation and compact property rows", async () => {
   expect(navigation).toHaveClass("settings-view__navigation");
   expect(screen.getByRole("button", { name: "일반" })).toHaveAttribute("aria-current", "page");
   expect(screen.getByRole("heading", { name: "일반" })).toBeInTheDocument();
-  expect(container.querySelectorAll(".settings-view__property")).toHaveLength(5);
+  expect(container.querySelectorAll(".settings-view__property")).toHaveLength(3);
 
   await userEvent.click(screen.getByRole("button", { name: "데이터 관리" }));
   expect(screen.getByRole("heading", { name: "데이터 관리" })).toBeInTheDocument();
@@ -144,7 +145,7 @@ it("groups data import and backup restore under 데이터 관리", async () => {
   );
 
   expect(await screen.findByRole("heading", { name: "데이터 관리" })).toBeInTheDocument();
-  for (const group of ["컬렉션 가져오기", "메타데이터 가져오기", "레거시 패키지 가져오기", "백업 복구"]) {
+  for (const group of ["컬렉션 가져오기", "메타데이터 가져오기", "레거시 패키지 가져오기", "로컬 백업 복구"]) {
     expect(screen.getByRole("heading", { name: group, level: 3 })).toBeInTheDocument();
   }
 });
@@ -154,12 +155,12 @@ it("groups extension diagnostics and shortcuts under 정보", async () => {
   vi.mocked(gateway.getExtensionConnection).mockResolvedValue({ baseUrl: "http://127.0.0.1:32145", token: "token", status: "ready" });
   render(
     <LibraryProvider gateway={gateway}>
-      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="about" />
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="external_services" />
     </LibraryProvider>,
   );
 
-  expect(await screen.findByRole("heading", { name: "정보" })).toBeInTheDocument();
-  for (const group of ["브라우저 확장", "단축키", "버튼 설명"]) {
+  expect(await screen.findByRole("heading", { name: "연결" })).toBeInTheDocument();
+  for (const group of ["브라우저 확장", "작품 정보 서비스"]) {
     expect(screen.getByRole("heading", { name: group, level: 3 })).toBeInTheDocument();
   }
 });
@@ -248,9 +249,10 @@ it("loads the collection source root, backfills legacy kinds, and reports the co
   vi.mocked(open).mockResolvedValue("C:\\lakomics\\book");
   render(
     <LibraryProvider gateway={gateway}>
-      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} onCollectionsChanged={onCollectionsChanged} />
+      <SettingsView initialSection="data" restoring={false} onRestore={vi.fn()} onExit={vi.fn()} onCollectionsChanged={onCollectionsChanged} />
     </LibraryProvider>,
   );
+  await userEvent.click(screen.getByText("구버전 자료 가져오기"));
 
   expect(await screen.findByText("C:\\book")).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "컬렉션 소스 폴더 변경" }));
@@ -268,9 +270,10 @@ it("keeps the current collection source root when the folder picker is cancelled
   vi.mocked(open).mockResolvedValue(null);
   render(
     <LibraryProvider gateway={gateway}>
-      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+      <SettingsView initialSection="data" restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
     </LibraryProvider>,
   );
+  await userEvent.click(screen.getByText("구버전 자료 가져오기"));
 
   await user.click(await screen.findByRole("button", { name: "컬렉션 소스 폴더 변경" }));
 
@@ -287,9 +290,10 @@ it("shows an error when the collection source root cannot be saved", async () =>
   vi.mocked(open).mockResolvedValue("C:\\book");
   render(
     <LibraryProvider gateway={gateway}>
-      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+      <SettingsView initialSection="data" restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
     </LibraryProvider>,
   );
+  await userEvent.click(screen.getByText("구버전 자료 가져오기"));
 
   await user.click(await screen.findByRole("button", { name: "컬렉션 소스 폴더 변경" }));
 
@@ -344,9 +348,9 @@ it("shows the Edge connection and copies its hidden key on request", async () =>
     </LibraryProvider>,
   );
 
-  await user.click(screen.getByRole("button", { name: "정보" }));
+  await user.click(screen.getByRole("button", { name: "연결" }));
 
-  expect(await screen.findByText("연결됨")).toBeVisible();
+  expect(await screen.findByText("PC 연결 준비됨")).toBeVisible();
   expect(screen.getByText("http://127.0.0.1:32145")).toBeVisible();
   const token = screen.getByLabelText("확장 프로그램 연결 키");
   expect(token).toHaveAttribute("type", "password");
@@ -371,7 +375,7 @@ it("stores and removes an Kakao key without reading it back", async () => {
     </LibraryProvider>,
   );
 
-  await user.click(screen.getByRole("button", { name: "외부 서비스" }));
+  await user.click(screen.getByRole("button", { name: "연결" }));
   const kakaoStatusRow = (await screen.findByText("카카오 책 검색")).parentElement;
   expect(within(kakaoStatusRow!).getByLabelText("카카오 REST API 키")).toHaveAttribute("placeholder", "설정되지 않음");
   expect(await gateway.getKakaoCredentialStatus()).toEqual({ configured: false });
@@ -401,8 +405,8 @@ it("opens the requested settings section", async () => {
     </LibraryProvider>,
   );
 
-  expect(await screen.findByRole("heading", { name: "외부 서비스" })).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "외부 서비스" })).toHaveAttribute("aria-current", "page");
+  expect(await screen.findByRole("heading", { name: "연결" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "연결" })).toHaveAttribute("aria-current", "page");
 });
 
 it("shows only IGDB credential status and keeps stored values out of the inputs", async () => {
@@ -416,7 +420,7 @@ it("shows only IGDB credential status and keeps stored values out of the inputs"
     </LibraryProvider>,
   );
 
-  await user.click(screen.getByRole("button", { name: "외부 서비스" }));
+  await user.click(screen.getByRole("button", { name: "연결" }));
   const statusRow = (await screen.findByText("IGDB")).parentElement;
   expect(statusRow).not.toBeNull();
   expect(within(statusRow!).getByLabelText("IGDB Client ID")).toHaveAttribute("placeholder", "설정됨");
@@ -440,7 +444,7 @@ it("saves both IGDB credentials exactly and clears them after success", async ()
     </LibraryProvider>,
   );
 
-  await user.click(screen.getByRole("button", { name: "외부 서비스" }));
+  await user.click(screen.getByRole("button", { name: "연결" }));
   const clientId = await screen.findByLabelText("IGDB Client ID");
   const clientSecret = screen.getByLabelText("IGDB Client Secret");
   expect(screen.getByRole("button", { name: "IGDB 저장" })).toBeDisabled();
@@ -467,7 +471,7 @@ it("requires confirmation before deleting IGDB credentials", async () => {
     </LibraryProvider>,
   );
 
-  await user.click(screen.getByRole("button", { name: "외부 서비스" }));
+  await user.click(screen.getByRole("button", { name: "연결" }));
   const statusRow = (await screen.findByText("IGDB")).parentElement;
   await user.click(within(statusRow!).getByRole("button", { name: "IGDB 키 삭제" }));
   expect(gateway.deleteIgdbCredentials).not.toHaveBeenCalled();
@@ -545,7 +549,7 @@ it("changes online catalog automatic update settings", async () => {
     </LibraryProvider>,
   );
 
-  await user.click(screen.getByRole("button", { name: "외부 서비스" }));
+  await user.click(screen.getByRole("button", { name: "온라인 카탈로그" }));
   const toggle = await screen.findByRole("checkbox", { name: "자동 갱신" });
   expect(toggle).toBeChecked();
   await user.selectOptions(screen.getByRole("combobox", { name: "갱신 간격" }), "21600");
@@ -606,9 +610,11 @@ it("shows separate catalog stream progress and bounds an incomplete Japanese upd
   });
   render(
     <LibraryProvider gateway={gateway}>
-      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="external_services" />
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="catalog" />
     </LibraryProvider>,
   );
+  await userEvent.click(screen.getByRole("button", { name: "온라인 카탈로그" }));
+  await userEvent.click(await screen.findByText("수집 상세·카탈로그 복구"));
 
   expect((await screen.findByText("한국어 카탈로그")).parentElement).toHaveTextContent("초기 수집 완료 · 대기 5개");
   const japaneseRow = screen.getByText("일본어 카탈로그").parentElement;
@@ -633,9 +639,11 @@ it("bounds a completed Japanese settings update to forty pages", async () => {
   });
   render(
     <LibraryProvider gateway={gateway}>
-      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="external_services" />
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="catalog" />
     </LibraryProvider>,
   );
+  await userEvent.click(screen.getByRole("button", { name: "온라인 카탈로그" }));
+  await userEvent.click(await screen.findByText("수집 상세·카탈로그 복구"));
 
   const japaneseRow = (await screen.findByText("일본어 카탈로그")).parentElement;
   await userEvent.click(within(japaneseRow!).getByRole("button", { name: "일본어 신규 작품 갱신" }));
@@ -661,9 +669,11 @@ it("confirms a Japanese checkpoint-only reset and keeps catalog data wording exp
   vi.mocked(gateway.resetJapaneseCatalogCheckpoint).mockResolvedValue(resetStatus);
   render(
     <LibraryProvider gateway={gateway}>
-      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="external_services" />
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="catalog" />
     </LibraryProvider>,
   );
+  await userEvent.click(screen.getByRole("button", { name: "온라인 카탈로그" }));
+  await userEvent.click(await screen.findByText("수집 상세·카탈로그 복구"));
 
   await user.click(await screen.findByRole("button", { name: "일본어 체크포인트 재설정" }));
   expect(gateway.resetJapaneseCatalogCheckpoint).not.toHaveBeenCalled();
@@ -707,8 +717,10 @@ it("shows catalog status and restores the catalog from a re-selected VCK folder"
       <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
     </LibraryProvider>,
   );
+  await userEvent.click(screen.getByRole("button", { name: "온라인 카탈로그" }));
+  await userEvent.click(await screen.findByText("수집 상세·카탈로그 복구"));
 
-  await user.click(screen.getByRole("button", { name: "외부 서비스" }));
+  await user.click(screen.getByRole("button", { name: "온라인 카탈로그" }));
   expect(await screen.findByText("설치됨 · 100개 작품")).toBeVisible();
   expect(screen.getByText("한국어 카탈로그").parentElement).toHaveTextContent("신규 3개");
 
@@ -728,9 +740,11 @@ it("keeps the catalog error message when the VCK restore fails", async () => {
   vi.mocked(open).mockResolvedValue("D:\\Broken");
   render(
     <LibraryProvider gateway={gateway}>
-      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="external_services" />
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="catalog" />
     </LibraryProvider>,
   );
+  await userEvent.click(screen.getByRole("button", { name: "온라인 카탈로그" }));
+  await userEvent.click(await screen.findByText("수집 상세·카탈로그 복구"));
 
   await user.click(await screen.findByRole("button", { name: "VCK 폴더 다시 선택" }));
 
@@ -748,7 +762,7 @@ it("confirms before clearing the remote manga cache", async () => {
     </LibraryProvider>,
   );
 
-  await user.click(screen.getByRole("button", { name: "외부 서비스" }));
+  await user.click(screen.getByRole("button", { name: "온라인 카탈로그" }));
   await user.click(await screen.findByRole("button", { name: "이미지 캐시 지우기" }));
   expect(gateway.clearRemoteMangaCache).not.toHaveBeenCalled();
   await user.click(screen.getByRole("button", { name: "캐시 삭제 확인" }));
@@ -771,22 +785,23 @@ it("configures Cloud Capture and forwards manual sync results", async () => {
 
   render(
     <LibraryProvider gateway={gateway}>
-      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="external_services" onCloudCaptureSynced={onCloudCaptureSynced} />
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="cloud" onCloudCaptureSynced={onCloudCaptureSynced} />
     </LibraryProvider>,
   );
 
-  const url = await screen.findByRole("textbox", { name: "Cloud API 주소" });
+  await user.click(await screen.findByText("서버 연결 설정"));
+  const url = await screen.findByRole("textbox", { name: "서버 주소" });
   fireEvent.change(url, { target: { value: "https://cloud.example.test" } });
-  await user.click(screen.getByRole("button", { name: "주소 저장" }));
-  expect(gateway.setCloudCaptureSettings).toHaveBeenCalledWith(true, "https://cloud.example.test");
+  await user.click(screen.getByRole("button", { name: "저장" }));
+  expect(gateway.setCloudCaptureSettings).toHaveBeenCalledWith(true, "https://cloud.example.test", true);
 
-  await user.type(screen.getByLabelText("Cloud API 토큰"), "new-secret");
+  await user.type(screen.getByLabelText("서버 연결 키"), "new-secret");
   await user.click(screen.getByRole("button", { name: "토큰 저장" }));
   expect(gateway.setCloudApiToken).toHaveBeenCalledWith("new-secret");
 
   await user.click(screen.getByRole("button", { name: "연결 확인" }));
   expect(await screen.findByText("Cloud 연결 정상 · 대기 3건")).toBeVisible();
-  await user.click(screen.getByRole("button", { name: "지금 동기화" }));
+  await user.click(screen.getByRole("button", { name: "지금 수신" }));
   expect(onCloudCaptureSynced).toHaveBeenCalledWith(syncResult);
 });
 
@@ -810,7 +825,7 @@ function createGateway(): LibraryGateway {
     refreshTmdbMovie: vi.fn(),
     getTmdbConnection: vi.fn(),
     replaceTmdbMovieArtwork: vi.fn(),
-    openLibrary: vi.fn(), importVckCatalog: vi.fn(), getOnlineCatalogStatus: vi.fn().mockResolvedValue({ installed: false, workCount: 0, updateEnabled: true, updateIntervalSeconds: 3600, lastAttemptAt: null, lastSuccessAt: null, lastAdded: 0, lastError: null }), getCatalogVisibilityPolicy: vi.fn().mockResolvedValue({ hiddenCategories: [], blockedTags: [] }), setCatalogCategoryHidden: vi.fn(), setCatalogTagBlocked: vi.fn(), searchCatalogGroups: vi.fn(), getCatalogGroupEditions: vi.fn(), setCatalogGroupRepresentative: vi.fn(), listCatalogReview: vi.fn(), generateCatalogReview: vi.fn(), decideCatalogReview: vi.fn(), searchOnlineCatalog: vi.fn(), suggestOnlineCatalog: vi.fn(), updateOnlineCatalog: vi.fn(), resetJapaneseCatalogCheckpoint: vi.fn(), setOnlineCatalogUpdateSettings: vi.fn(), runDueOnlineCatalogUpdate: vi.fn(), getCloudCaptureSettings: vi.fn().mockResolvedValue({ enabled: false, apiBaseUrl: null, tokenConfigured: false }), setCloudCaptureSettings: vi.fn(), setCloudApiToken: vi.fn(), deleteCloudApiToken: vi.fn(), testCloudCaptureConnection: vi.fn().mockResolvedValue({ pendingCount: 0 }), runDueCloudCaptureSync: vi.fn().mockResolvedValue({ attempted: 0, acknowledged: 0, failed: 0, reviewPending: 0, added: 0, videoAdded: 0, classificationChanged: 0 }), cloudBackfillPreflight: vi.fn(), cloudBackfillSeed: vi.fn(), cloudBackfillRunCycle: vi.fn(), cloudBackfillProgress: vi.fn(), cloudBackfillRetryFailed: vi.fn(), getOnlineCatalogWorkDetail: vi.fn(), setOnlineCatalogBookmark: vi.fn(), resolveOnlineCatalogWork: vi.fn(), getRemoteReadingProgress: vi.fn(), saveRemoteReadingProgress: vi.fn(), clearRemoteMangaCache: vi.fn(), getExtensionConnection: vi.fn(), listClassifications: vi.fn(),
+    openLibrary: vi.fn(), importVckCatalog: vi.fn(), getOnlineCatalogStatus: vi.fn().mockResolvedValue({ installed: false, workCount: 0, updateEnabled: true, updateIntervalSeconds: 3600, lastAttemptAt: null, lastSuccessAt: null, lastAdded: 0, lastError: null }), getCatalogVisibilityPolicy: vi.fn().mockResolvedValue({ hiddenCategories: [], blockedTags: [] }), setCatalogCategoryHidden: vi.fn(), setCatalogTagBlocked: vi.fn(), searchCatalogGroups: vi.fn(), getCatalogGroupEditions: vi.fn(), setCatalogGroupRepresentative: vi.fn(), listCatalogReview: vi.fn(), generateCatalogReview: vi.fn(), decideCatalogReview: vi.fn(), searchOnlineCatalog: vi.fn(), suggestOnlineCatalog: vi.fn(), updateOnlineCatalog: vi.fn(), resetJapaneseCatalogCheckpoint: vi.fn(), setOnlineCatalogUpdateSettings: vi.fn(), runDueOnlineCatalogUpdate: vi.fn(), getCloudCaptureSettings: vi.fn().mockResolvedValue({ enabled: false, apiBaseUrl: null, tokenConfigured: false }), setCloudCaptureSettings: vi.fn(), setCloudApiToken: vi.fn(), deleteCloudApiToken: vi.fn(), testCloudCaptureConnection: vi.fn().mockResolvedValue({ pendingCount: 0 }), runDueCloudCaptureSync: vi.fn().mockResolvedValue({ attempted: 0, acknowledged: 0, failed: 0, reviewPending: 0, added: 0, videoAdded: 0, classificationChanged: 0 }), cloudBackfillPreflight: vi.fn(), cloudBackfillSeed: vi.fn(), cloudBackfillRunCycle: vi.fn(), cloudBackfillProgress: vi.fn().mockResolvedValue({ controlState: "idle", totalAssets: 0, queued: 0, preparing: 0, uploading: 0, committing: 0, completed: 0, failed: 0, activeWorkers: 0, lastError: null }), cloudBackfillRetryFailed: vi.fn(), getOnlineCatalogWorkDetail: vi.fn(), setOnlineCatalogBookmark: vi.fn(), resolveOnlineCatalogWork: vi.fn(), getRemoteReadingProgress: vi.fn(), saveRemoteReadingProgress: vi.fn(), clearRemoteMangaCache: vi.fn(), getExtensionConnection: vi.fn().mockResolvedValue({ baseUrl: "http://127.0.0.1:32145", token: "test", status: "ready" }), listClassifications: vi.fn(),
     listAlbums: vi.fn().mockResolvedValue([]), createAlbum: vi.fn(), renameAlbum: vi.fn(), moveAlbum: vi.fn(), updateAlbumAppearance: vi.fn(), deleteAlbum: vi.fn(),
     createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(), updateClassificationAppearance: vi.fn(),
     deleteClassification: vi.fn(), listAssets: vi.fn(), listAssetDateBuckets: vi.fn().mockResolvedValue([]), indexMissingSimilarityHashes: vi.fn(),
@@ -860,3 +875,37 @@ function catalogStatusWithJapanese(initialComplete: boolean): CatalogStatus {
     }],
   };
 }
+
+
+it("uses the existing sidebar and avoids backup work outside data management", async () => {
+  const gateway = createGateway();
+  const { container } = render(<LibraryProvider gateway={gateway}>
+    <WorkspaceChromeProvider scope="settings">
+      <aside data-testid="settings-sidebar"><ChromeTarget name="navigation" /></aside>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </WorkspaceChromeProvider>
+  </LibraryProvider>);
+  const sidebar = screen.getByTestId("settings-sidebar");
+  expect(within(sidebar).getByRole("navigation", { name: "설정 구역" })).toBeInTheDocument();
+  expect(container.querySelector(".settings-view__body nav")).toBeNull();
+  await userEvent.click(within(sidebar).getByRole("button", { name: "클라우드" }));
+  await screen.findByText("클라우드 → PC");
+  await userEvent.click(within(sidebar).getByRole("button", { name: "정보·도움말" }));
+  expect(gateway.listMetadataBackups).not.toHaveBeenCalled();
+  await userEvent.click(within(sidebar).getByRole("button", { name: "데이터 관리" }));
+  await waitFor(() => expect(gateway.listMetadataBackups).toHaveBeenCalledTimes(1));
+});
+
+it("saves replication independently without applying an unsaved server address", async () => {
+  const gateway = createGateway();
+  const settings = { enabled: true, captureEnabled: true, apiBaseUrl: "https://saved.example", tokenConfigured: true };
+  vi.mocked(gateway.getCloudCaptureSettings).mockResolvedValue(settings);
+  vi.mocked(gateway.setCloudCaptureSettings).mockResolvedValue({ ...settings, enabled: false });
+  render(<LibraryProvider gateway={gateway}><SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="cloud" /></LibraryProvider>);
+  await userEvent.click(await screen.findByText("서버 연결 설정"));
+  fireEvent.change(screen.getByRole("textbox", { name: "서버 주소" }), { target: { value: "https://draft.example" } });
+  await userEvent.click(screen.getByRole("checkbox", { name: "자동 복제" }));
+  await waitFor(() => expect(gateway.setCloudCaptureSettings).toHaveBeenCalledWith(false, "https://saved.example", true));
+  expect(screen.getByRole("checkbox", { name: "자동 수신" })).toBeChecked();
+  expect(screen.getByRole("textbox", { name: "서버 주소" })).toHaveValue("https://draft.example");
+});

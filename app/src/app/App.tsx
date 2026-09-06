@@ -699,7 +699,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                   <CollectionOverlay
                     collectionId={view.collectionId}
                     collections={collections}
-                    onOpenSettings={() => navigateView({ kind: "settings", section: "external_services" })}
+                    onOpenSettings={() => navigateView({ kind: "settings", section: "catalog" })}
                     onExit={() => {
                       const detailCollection = collections.find((item) => item.id === view.collectionId);
                       navigateBack(collectionReturnViewRef.current ?? {

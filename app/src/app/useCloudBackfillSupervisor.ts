@@ -1,5 +1,7 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { CloudBackfillProgress, LibraryGateway } from "../library/types";
+
+export const CLOUD_PROGRESS_EVENT = "lakomics:cloud-progress";
 
 const CONTROL_EVENT = "lakomics:cloud-backfill-control-changed";
 const ACTIVE_DELAY_MS = 1_500;
@@ -14,51 +16,46 @@ function remainingWork(progress: CloudBackfillProgress): number {
 }
 
 export function useCloudBackfillSupervisor(gateway: LibraryGateway, libraryRoot: string) {
+  const worker = useRef<{ gateway: LibraryGateway; root: string; promise: Promise<unknown> } | null>(null);
   useEffect(() => {
     let disposed = false;
-    let cycleActive = false;
+    let checking = false;
     let timer: number | null = null;
-
     const schedule = (delay: number) => {
       if (disposed) return;
       if (timer !== null) window.clearTimeout(timer);
       timer = window.setTimeout(() => { void tick(); }, delay);
     };
-
     const tick = async () => {
-      if (disposed || cycleActive) return;
-      cycleActive = true;
+      if (disposed || checking) return;
+      checking = true;
       let nextDelay = INACTIVE_DELAY_MS;
       try {
-        let progress = await gateway.cloudBackfillProgress();
-        if (!progress) return;
-        // 정상(steady-state) 흐름: 컨트롤이 idle이어도 ingestion이 만든
-        // 증분 pending 자산은 자동으로 복제되어야 한다. running 컨트롤은
-        // 사용자가 시작한 전체 백필 주행이고, idle 구간의 pending은
-        // 일상 저장 활동이 만든 증분 work다. 두 경우 모두 같은 워커
-        // 사이클이 처리하며, idle 구간 처리는 컨트롤 상태를 바꾸지
-        // 않는다(설정 UI의 진행 표시와 무관하게 동작).
-        if (progress.controlState !== "paused" && (progress.controlState === "running" || remainingWork(progress) > 0)) {
-          if (remainingWork(progress) > 0) {
-            await gateway.cloudBackfillRunCycle();
-            progress = await gateway.cloudBackfillProgress();
-            if (!progress) return;
+        const progress = await gateway.cloudBackfillProgress();
+        if (disposed || !progress) return;
+        const workerActive = worker.current?.gateway === gateway && worker.current.root === libraryRoot;
+        const enabled = progress.replicationEnabled !== false && progress.controlState !== "paused";
+        if (enabled && remainingWork(progress) > 0) {
+          nextDelay = ACTIVE_DELAY_MS;
+          if (!workerActive) {
+            // Keep the single status timer live while a long native cycle runs.
+            const request = { gateway, root: libraryRoot, promise: gateway.cloudBackfillRunCycle() };
+            worker.current = request;
+            void request.promise.catch((error) => console.error("cloud replication failed", error))
+              .finally(() => { if (worker.current === request) worker.current = null; });
           }
-          if (progress.controlState === "running" && remainingWork(progress) === 0) {
-            await gateway.cloudBackfillSetControlState?.("idle");
-            window.dispatchEvent(new Event(CONTROL_EVENT));
-          } else if (remainingWork(progress) > 0) {
-            nextDelay = ACTIVE_DELAY_MS;
-          }
+        } else if (enabled && !workerActive && progress.controlState === "running") {
+          await gateway.cloudBackfillSetControlState?.("idle");
+          progress.controlState = "idle";
         }
+        if (!disposed) window.dispatchEvent(new CustomEvent(CLOUD_PROGRESS_EVENT, { detail: { gateway, libraryRoot, progress } }));
       } catch (error) {
         console.error("cloud backfill supervisor failed", error);
       } finally {
-        cycleActive = false;
+        checking = false;
         schedule(nextDelay);
       }
     };
-
     const wake = () => schedule(0);
     window.addEventListener(CONTROL_EVENT, wake);
     schedule(0);

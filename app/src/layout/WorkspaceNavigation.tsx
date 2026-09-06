@@ -59,8 +59,9 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
     <aside className="workspace-index" style={{ "--workspace-index-width": `${width}px` } as CSSProperties} aria-label="탐색 인덱스">
       <header className="workspace-index__head" aria-label={areaName} data-tauri-drag-region="deep">
         <div className="workspace-index__head-actions">
+          {view.kind === "settings" && <span className="workspace-section-label">설정</span>}
           <ChromeTarget name="search" />
-          {!chrome?.meta?.search && <span title="이 화면에는 별도의 텍스트 검색이 없습니다"><button type="button" className="ui-button ui-button--icon ui-button--ghost" disabled aria-label="검색 미지원"><MagnifyingGlassIcon aria-hidden="true" /></button></span>}
+          {view.kind !== "settings" && !chrome?.meta?.search && <span title="이 화면에는 별도의 텍스트 검색이 없습니다"><button type="button" className="ui-button ui-button--icon ui-button--ghost" disabled aria-label="검색 미지원"><MagnifyingGlassIcon aria-hidden="true" /></button></span>}
           <ChromeTarget name="actions" />
           {area === "assets" && !chrome?.meta?.actions && onImportFiles && <button type="button" className="ui-button ui-button--icon ui-button--ghost" aria-label="파일 가져오기" data-tooltip="선택한 파일을 라이브러리로 가져오기" onClick={onImportFiles}><PlusIcon aria-hidden="true" /></button>}
         </div>
@@ -69,7 +70,7 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
         <div hidden={area !== "assets"} className="workspace-index__assets">{assetNavigation}</div>
         <ChromeTarget name="navigation" className="workspace-index__view-navigation" />
         {area === "collections" && !chrome?.meta?.navigation && <div className="workspace-index__fallback"><span className="workspace-section-label">작품 유형</span>{(["game", "manga", "movie"] as const).map((type) => <button key={type} type="button" className="workspace-index-link" onClick={() => onNavigate({ kind: "collections", typeFilter: type, showcase: false })}>{({ game: "게임", manga: "만화", movie: "영화" })[type]}</button>)}</div>}
-        {area === "manage" && <div className="workspace-index__fallback">{management.map((item) => <button key={item.id} type="button" className="workspace-index-link" aria-current={(item.id === "review" ? view.kind === "similarity_review" : view.kind === item.id) ? "page" : undefined} onClick={item.onSelect}>{item.icon}{item.label}</button>)}</div>}
+        {area === "manage" && view.kind !== "settings" && <div className="workspace-index__fallback">{management.map((item) => <button key={item.id} type="button" className="workspace-index-link" aria-current={(item.id === "review" ? view.kind === "similarity_review" : view.kind === item.id) ? "page" : undefined} onClick={item.onSelect}>{item.icon}{item.label}</button>)}</div>}
       </div>
       <ChromeSettingsDock />
       <div className="workspace-index__resize" role="separator" aria-label="사이드바 너비 조절" aria-orientation="vertical"

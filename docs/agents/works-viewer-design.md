@@ -109,7 +109,7 @@ Showcase is a manually curated exhibition, not an automatic favorites filter or 
 
 - membership and order remain user-controlled;
 - game, manga and film are separate exhibition scopes; type-aware presentation remains intact;
-- selected works, not synthetic ranking or recommendations, fill a cover-only wall: up to 9 uses 3?3, 10?16 uses 4?4, more than 16 continues on pages;
+- selected works, not synthetic ranking or recommendations, fill a cover-only wall: up to 9 uses 3×3, 10–16 uses 4×4, more than 16 continues on pages;
 - pack the wall by the available book/poster height rather than distributing narrow objects across the whole window; titles may appear on hover/focus;
 - use the same primitives as normal Library/Detail with slightly more space and appreciation;
 - stronger book/package lift or larger artwork is allowed, but no simulated room, cabinet renderer, or continuous animation;

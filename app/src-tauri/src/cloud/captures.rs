@@ -60,16 +60,37 @@ impl Library {
     /// imported로 표시한다. 방향은 클라우드 → 로컬이며 `cloud_sync_queue`(로컬 →
     /// 클라우드)와 상태를 공유하지 않는다.
     pub(crate) fn sync_next_cloud_capture(&self) -> Result<CloudCaptureSyncResult, LibraryError> {
-        let config = self.cloud_sync_config()?;
-        if !config.enabled {
+        if !self.cloud_capture_enabled()? {
+            // The metadata replica remains independent of receiving captures.
+            if self.cloud_sync_config()?.enabled { return self.sync_configured_cloud_capture(); }
             return Ok(CloudCaptureSyncResult::default());
         }
+        self.begin_cloud_activity("capture")?;
+        let result = self.sync_configured_cloud_capture();
+        let (processed, problems, error) = match &result {
+            Ok(summary) => (u64::from(summary.acknowledged), u64::from(summary.failed + summary.review_pending),
+                if summary.failed > 0 { Some("수신하지 못한 자료가 있습니다. 서버 연결을 확인한 뒤 다시 시도해 주세요.") }
+                else if summary.review_pending > 0 { Some("유사 자료 검토를 완료해 주세요.") } else { None }),
+            Err(_) => (0, 1, Some("수신 연결을 확인하지 못했습니다. 서버 주소·연결 키와 네트워크를 확인해 주세요.")),
+        };
+        self.finish_cloud_activity("capture", processed, problems, error)?;
+        result
+    }
+
+    fn sync_configured_cloud_capture(&self) -> Result<CloudCaptureSyncResult, LibraryError> {
+        let config = self.cloud_sync_config()?;
         let base_url = config
             .api_base_url
             .ok_or(LibraryError::InvalidCloudSyncConfig)?;
-        let token = crate::library::credential::read_cloud_api_token_os()?;
-        let client = CloudClient::new(&base_url)?;
-        self.sync_next_cloud_capture_cycle_with(&client, &token)
+        let result = (|| {
+            let token = crate::library::credential::read_cloud_api_token_os()?;
+            let client = CloudClient::new(&base_url)?;
+            self.sync_next_cloud_capture_cycle_with(&client, &token)
+        })();
+        if config.enabled && result.is_err() {
+            self.record_cloud_metadata_activity(Some("모바일 기록을 전송하지 못했습니다. 서버 연결을 확인해 주세요."))?;
+        }
+        result
     }
 
     pub(super) fn sync_next_cloud_capture_cycle_with(
@@ -77,15 +98,20 @@ impl Library {
         client: &CloudClient,
         token: &str,
     ) -> Result<CloudCaptureSyncResult, LibraryError> {
-        let result = self.sync_next_cloud_capture_with(client, token)?;
+        let result = if self.cloud_capture_enabled()? { self.sync_next_cloud_capture_with(client, token)? } else { CloudCaptureSyncResult::default() };
+        if !self.cloud_sync_config()?.enabled { return Ok(result); }
         // 수집 폴과 같은 주기로 모바일용 읽기 스냅샷을 게시한다. 어느 한 게시
         // 실패도 수집 결과나 다른 스냅샷 게시를 막지 않는다.
+        let mut publish_failed = false;
         if let Err(error) = self.publish_classification_snapshot_with(client, token) {
+            publish_failed = true;
             eprintln!("cloud classifications publish: {error}");
         }
         if let Err(error) = self.publish_saved_x_media_snapshot_with(client, token) {
+            publish_failed = true;
             eprintln!("cloud saved X media publish: {error}");
         }
+        self.record_cloud_metadata_activity(publish_failed.then_some("모바일 분류·수집 기록을 전송하지 못했습니다. 서버 연결을 확인해 주세요."))?;
         Ok(result)
     }
 
@@ -135,6 +161,7 @@ impl Library {
         let captures = client.list_pending_captures(token)?;
         let mut result = CloudCaptureSyncResult::default();
         for payload in captures {
+            if !self.cloud_capture_enabled()? { break; }
             if result.attempted >= Self::MAX_CAPTURES_PER_SYNC as u32 {
                 break;
             }

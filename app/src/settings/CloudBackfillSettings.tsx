@@ -1,16 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
-import { notifyCloudBackfillSupervisor } from "../app/useCloudBackfillSupervisor";
+import { CLOUD_PROGRESS_EVENT, notifyCloudBackfillSupervisor } from "../app/useCloudBackfillSupervisor";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { CloudBackfillPreflightReport, CloudBackfillProgress } from "../library/types";
 import { Button } from "../shared/ui/Button";
 import { Toast } from "../shared/ui/Toast";
 
-const ACTIVE_POLL_MS = 1_500;
-const INACTIVE_POLL_MS = 10_000;
 
 export function CloudBackfillSettings() {
-  const { gateway } = useLibrary();
+  const { gateway, library } = useLibrary();
   const [progress, setProgress] = useState<CloudBackfillProgress | null>(null);
   const [preflight, setPreflight] = useState<CloudBackfillPreflightReport | null>(null);
   const [busy, setBusy] = useState(false);
@@ -25,28 +23,19 @@ export function CloudBackfillSettings() {
   }, [gateway]);
 
   useEffect(() => {
-    let disposed = false;
-    let timer: number | null = null;
-    const poll = async () => {
-      try {
-        const next = await gateway.cloudBackfillProgress();
-        if (disposed) return;
-        if (!next) {
-          timer = window.setTimeout(poll, INACTIVE_POLL_MS);
-          return;
-        }
-        setProgress(next);
-        timer = window.setTimeout(poll, next.controlState === "running" ? ACTIVE_POLL_MS : INACTIVE_POLL_MS);
-      } catch (loadError) {
-        if (!disposed) {
-          setError(commandErrorMessage(loadError, "모바일 동기화 상태를 불러오지 못했습니다."));
-          timer = window.setTimeout(poll, INACTIVE_POLL_MS);
-        }
+    let active = true;
+    const receive = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (detail.gateway === gateway && detail.libraryRoot === library?.root) {
+        setProgress(detail.progress);
+        setError(null);
       }
     };
-    void poll();
-    return () => { disposed = true; if (timer !== null) window.clearTimeout(timer); };
-  }, [gateway]);
+    window.addEventListener(CLOUD_PROGRESS_EVENT, receive);
+    void gateway.cloudBackfillProgress().then((next) => { if (active) setProgress(next); })
+      .catch((loadError) => { if (active) setError(commandErrorMessage(loadError, "동기화 상태를 불러오지 못했습니다.")); });
+    return () => { active = false; window.removeEventListener(CLOUD_PROGRESS_EVENT, receive); };
+  }, [gateway, library?.root]);
 
   const act = async (action: () => Promise<void>, fallback: string) => {
     if (busy) return;
@@ -76,19 +65,6 @@ export function CloudBackfillSettings() {
     notifyCloudBackfillSupervisor();
   }, "전체 라이브러리 업로드를 시작하지 못했습니다.");
 
-  const pause = () => act(async () => {
-    await gateway.cloudBackfillSetControlState?.("paused");
-    setMessage("진행 중인 전송을 마친 뒤 새 작업을 시작하지 않습니다.");
-    notifyCloudBackfillSupervisor();
-  }, "모바일 동기화를 일시정지하지 못했습니다.");
-
-  const resume = () => act(async () => {
-    await gateway.cloudBackfillReconcile?.();
-    await gateway.cloudBackfillSetControlState?.("running");
-    setMessage("남은 작업을 계속합니다.");
-    notifyCloudBackfillSupervisor();
-  }, "모바일 동기화를 계속하지 못했습니다.");
-
   const retry = () => act(async () => {
     const report = await gateway.cloudBackfillRetryFailed();
     if (report.retried > 0 && progress?.controlState === "idle") {
@@ -112,8 +88,8 @@ export function CloudBackfillSettings() {
 
   return (
     <section className="cloud-backfill" aria-labelledby="cloud-backfill-title">
-      <h3 className="settings-view__group-title" id="cloud-backfill-title">모바일 라이브러리 동기화</h3>
-      <p className="settings-view__row-note">PC 라이브러리가 원본입니다. PC가 꺼져 있어도 Lakomics Mobile에서 볼 수 있도록 비공개 Cloud에 복사하며, Cloud Capture와는 별개입니다.</p>
+      <h3 className="settings-view__group-title" id="cloud-backfill-title">동기화 상태</h3>
+      <p className="settings-view__row-note">PC의 자료를 모바일에서도 볼 수 있도록 복사합니다.</p>
       {error && <Toast tone="error" onDismiss={() => setError(null)}>{error}</Toast>}
       {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
 
@@ -123,11 +99,26 @@ export function CloudBackfillSettings() {
           {progress && <span>{progress.completed.toLocaleString()} / {total.toLocaleString()}개 ({percent}%)</span>}
         </div>
         <progress aria-label="모바일 라이브러리 동기화 진행률" aria-valuenow={percent} max={100} value={percent} />
-        {progress && <p>대기 {progress.queued} · 준비 {progress.preparing} · 업로드 {progress.uploading} · 커밋 {progress.committing} · 작업자 {progress.activeWorkers}</p>}
+        {progress && <p>대기 {progress.queued} · 전송 중 {active}</p>}
         {progress && progress.failed > 0 && <p className="cloud-backfill__problem">확인 필요 {progress.failed.toLocaleString()}개</p>}
         {progress?.lastError && <p className="cloud-backfill__error">최근 오류: {progress.lastError}</p>}
       </div>
 
+      {progress?.activity?.map((activity) => <dl className="settings-view__property" key={activity.direction}>
+        <dt>{activity.direction === "capture" ? "클라우드 → PC" : "PC → 클라우드"}</dt>
+        <dd>
+          <div>마지막 성공 {activity.lastSuccessAt ? new Date(activity.lastSuccessAt).toLocaleString("ko-KR") : "아직 기록 없음"}</div>
+          {activity.metadataLastError && <p role="alert">{activity.metadataLastError}</p>}
+          {activity.metadataLastSuccessAt && <p>모바일 기록 전송 {new Date(activity.metadataLastSuccessAt).toLocaleString("ko-KR")}</p>}
+          {activity.lastError && <p role="alert">{activity.lastError}</p>}
+          {activity.problems > 0 && <p>확인 필요 {activity.problems}개</p>}
+          <details><summary>최근 실행 상세</summary>
+            <p>마지막 시도 {activity.lastAttemptAt ? new Date(activity.lastAttemptAt).toLocaleString("ko-KR") : "아직 기록 없음"} · 처리 {activity.processed}개</p>
+          </details>
+        </dd>
+      </dl>)}
+      {(progress?.failed ?? 0) > 0 && <Button size="sm" disabled={busy} onClick={() => void retry()}>실패 항목 다시 시도</Button>}
+      <details className="settings-view__advanced"><summary>점검·복구</summary>
       {preflight && <div className="cloud-backfill__summary" aria-label="모바일 동기화 사전 점검 결과">
         <span>전체 {preflight.totalAssets.toLocaleString()}개</span>
         <span>준비됨 {preflight.readyAssets.toLocaleString()}개</span>
@@ -139,30 +130,24 @@ export function CloudBackfillSettings() {
 
       <div className="settings-view__actions cloud-backfill__actions">
         <Button size="sm" disabled={busy} onClick={() => void runPreflight()}>사전 점검</Button>
-        {progress?.controlState === "running" ? (
-          <Button size="sm" disabled={busy} onClick={() => void pause()}>일시정지</Button>
-        ) : progress?.controlState === "paused" ? (
-          <Button size="sm" variant="primary" disabled={busy} onClick={() => void resume()}>계속</Button>
-        ) : !confirmingStart ? (
-          <Button size="sm" variant="primary" disabled={busy} onClick={() => setConfirmingStart(true)}>전체 라이브러리 업로드 준비</Button>
-        ) : (
-          <>
-            <Button size="sm" disabled={busy} onClick={() => setConfirmingStart(false)}>취소</Button>
-            <Button size="sm" variant="primary" disabled={busy} onClick={() => void start()}>업로드 시작 확인</Button>
-          </>
-        )}
-        {(progress?.failed ?? 0) > 0 && <Button size="sm" disabled={busy} onClick={() => void retry()}>실패 항목 다시 시도</Button>}
+        {!confirmingStart ? <Button size="sm" disabled={busy || progress?.replicationEnabled === false} onClick={() => setConfirmingStart(true)}>전체 라이브러리 업로드 준비</Button> : <>
+          <Button size="sm" disabled={busy} onClick={() => setConfirmingStart(false)}>취소</Button>
+          <Button size="sm" disabled={busy} onClick={() => void start()}>업로드 시작 확인</Button>
+        </>}
         <Button size="sm" disabled={busy} onClick={() => void reconcile()}>중단된 작업 복구</Button>
       </div>
+      </details>
     </section>
   );
 }
 
 function stateLabel(progress: CloudBackfillProgress | null, settled: boolean): string {
   if (!progress) return "상태 확인 중…";
+  if (progress.replicationEnabled === false) return "자동 복제 꺼짐";
+  if (progress.queued + progress.preparing + progress.uploading + progress.committing > 0) return "복제 대기·진행 중";
   if (progress.controlState === "running") return "업로드 중";
-  if (progress.controlState === "paused") return "일시정지됨";
+  if (progress.controlState === "paused") return "자동 복제 꺼짐";
   if (settled && progress.failed > 0) return `복제 완료 — ${progress.completed.toLocaleString()}개 완료, ${progress.failed.toLocaleString()}개 확인 필요`;
   if (settled) return `복제 완료 — ${progress.completed.toLocaleString()}개 완료`;
-  return "시작 전";
+  return "최신 상태";
 }

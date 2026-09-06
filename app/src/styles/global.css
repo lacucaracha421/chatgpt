@@ -1645,6 +1645,32 @@ input:disabled {
   min-width: 0;
 }
 
+.settings-view__property--credential {
+  grid-template-columns: 144px minmax(0, 1fr) 8rem;
+}
+
+.settings-view__property--credential .settings-view__token-row > .ui-button {
+  flex: 0 0 6.75rem;
+  white-space: nowrap;
+}
+
+.settings-view__property--credential > .ui-button {
+  justify-self: end;
+  white-space: nowrap;
+}
+
+.settings-view__property > .settings-view__actions {
+  grid-column: 2 / -1;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  padding-top: 0;
+}
+
+.settings-view__property > .settings-view__actions > .ui-button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 .settings-view__path {
   word-break: break-all;
   font-size: var(--text-sm);
@@ -6039,3 +6065,20 @@ input:disabled {
 .collection-card__object--manga { box-shadow: var(--work-shadow-rest); }
 
 .game-collection-detail__hero-content[data-no-cover="true"], .movie-collection-detail__content[data-no-cover="true"] { grid-template-columns: minmax(0, 1fr); }
+
+/* Settings uses the contextual index, leaving a single content column. */
+.settings-view__body--integrated { display: flex; }
+.settings-view__body--integrated > .settings-view__content { flex: 1; }
+.workspace-index .settings-view__navigation { border: 0; background: transparent; }
+.settings-view__advanced { border-top: var(--border-width) solid var(--color-border); padding: var(--space-3) 0; }
+.settings-view__advanced > summary { cursor: pointer; color: var(--color-muted); padding: var(--space-2) 0; }
+.settings-view__saved { color: var(--color-muted); font-size: var(--text-sm); }
+
+.settings-view__section-button[aria-current="page"]:hover:not(:disabled) { background: var(--color-accent); color: var(--color-on-accent); }
+.cloud-backfill__status { padding: var(--space-2) 0; border: 0; border-radius: 0; background: transparent; }
+.cloud-backfill__status progress { appearance: none; height: 3px; border: 0; background: var(--color-border); }
+.cloud-backfill__status progress::-webkit-progress-bar { background: var(--color-border); }
+.cloud-backfill__status progress::-webkit-progress-value { background: var(--color-accent); }
+.settings-view__property > .settings-view__row-note { grid-column: 2 / -1; }
+
+.settings-view__body--integrated .settings-view__header { display: none; }

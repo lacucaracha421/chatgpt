@@ -76,6 +76,7 @@ pub struct AladinCredentialStatus {
 #[serde(rename_all = "camelCase")]
 pub struct CloudCaptureSettings {
     pub enabled: bool,
+    pub capture_enabled: bool,
     pub api_base_url: Option<String>,
     pub token_configured: bool,
 }
@@ -390,11 +391,13 @@ pub async fn restore_metadata_backup(
 }
 
 #[tauri::command]
-pub fn list_metadata_backups(
+pub async fn list_metadata_backups(
     state: State<'_, AppState>,
 ) -> Result<Vec<MetadataBackup>, CommandError> {
-    current_required(state)?
-        .list_backups()
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.list_backups())
+        .await
+        .map_err(|_| background_task_error())?
         .map_err(CommandError::from)
 }
 #[tauri::command]
@@ -1946,6 +1949,7 @@ pub fn get_cloud_capture_settings(
     let token_configured = credential::cloud_api_token_status().map_err(CommandError::from)?;
     Ok(CloudCaptureSettings {
         enabled: config.enabled,
+        capture_enabled: library.cloud_capture_enabled().map_err(CommandError::from)?,
         api_base_url: config.api_base_url,
         token_configured,
     })
@@ -1955,18 +1959,17 @@ pub fn get_cloud_capture_settings(
 pub fn set_cloud_capture_settings(
     enabled: bool,
     api_base_url: Option<String>,
+    capture_enabled: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<CloudCaptureSettings, CommandError> {
     let library = current_required(state)?;
     let config = library
-        .set_cloud_sync_config(CloudSyncConfig {
-            enabled,
-            api_base_url,
-        })
+        .set_cloud_settings(CloudSyncConfig { enabled, api_base_url }, capture_enabled.unwrap_or(enabled))
         .map_err(CommandError::from)?;
     let token_configured = credential::cloud_api_token_status().map_err(CommandError::from)?;
     Ok(CloudCaptureSettings {
         enabled: config.enabled,
+        capture_enabled: library.cloud_capture_enabled().map_err(CommandError::from)?,
         api_base_url: config.api_base_url,
         token_configured,
     })
