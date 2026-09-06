@@ -20,6 +20,8 @@ Do not restart the 1–6 reference comparison or Chrome A/B/C vote unless the us
 
 ## 2. Product character
 
+Typography approved after user trial on 2026-09-06: SUIT for Korean UI, Barlow for Latin UI and creator names, and Rajdhani Medium for date headings, caption times and sidebar counts. Preserve Barlow digits within creator names and the existing Japanese fallback. Numeric roles use tabular figures; caption times use the small-text size rather than extra-small. Bundle font files and OFL notices locally for offline use. Implementation: `app/src/styles/fonts.css` and the `--font-ui` / `--font-numeric` tokens.
+
 Lakomics is a **media-first personal archive**, not a dashboard, launcher, streaming service, or room simulator.
 
 The screen should feel:

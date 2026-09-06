@@ -1,3 +1,5 @@
+@import "./fonts.css";
+
 :root {
   --color-bg: #171819;
   --color-sidebar: #1c1d1e;
@@ -83,7 +85,8 @@
   --shadow-floating: 0 2px 6px rgba(0, 0, 0, 0.2), 0 8px 24px rgba(0, 0, 0, 0.32);
   --shadow-dialog: 0 4px 12px rgba(0, 0, 0, 0.24), 0 16px 40px rgba(0, 0, 0, 0.36);
   --inset-light: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  --font-ui: "Segoe UI", "Malgun Gothic", "Yu Gothic UI", "Meiryo", sans-serif;
+  --font-ui: "Barlow", "SUIT", "Segoe UI", "Malgun Gothic", "Yu Gothic UI", "Meiryo", sans-serif;
+  --font-numeric: "Rajdhani Numbers", var(--font-ui);
   --font-ja: "Yu Gothic UI", "Meiryo", sans-serif;
   --font-mono: "Cascadia Mono", "Consolas", monospace;
   --bevel-light: #2b2f35;

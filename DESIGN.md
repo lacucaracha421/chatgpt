@@ -51,8 +51,9 @@ PC의 기본 shell은 **Chrome 03b B 좌측 중심 구조**다.
 
 ## 5. Typography와 색
 
-- UI는 Segoe UI 계열을 기본으로 하고 한국어는 Malgun Gothic, 일본어는 Yu Gothic UI/Meiryo 폴백을 우선한다.
-- display webfont를 전역 도입하지 않는다.
+- 2026-09-06 실제 화면 확인 후 확정: 한글 UI는 SUIT, 영문·작가명은 Barlow를 사용한다. 일본어는 Yu Gothic UI/Meiryo를 유지한다.
+- 날짜·시각·사이드바 개수에는 Rajdhani Medium과 폭이 일정한 숫자를 사용한다. 작가명 안의 숫자는 Barlow로 유지한다.
+- 폰트 파일과 라이선스를 앱에 포함해 오프라인에서도 표시한다. Segoe UI/Malgun Gothic은 폴백으로 유지한다.
 - 역할 기준은 metadata 11–12px, 기본 UI 13px, 강조 label 14px, section 16px 안팎을 출발점으로 한다.
 - monospace는 경로·ID·timestamp 같은 실제 기술 값에만 제한한다.
 - 사용자 폴더/앨범 이름을 uppercase로 바꾸지 않는다.
