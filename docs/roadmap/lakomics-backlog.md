@@ -561,6 +561,20 @@ A theme label must match its actual selection logic. Missing data should omit/fa
 
 ---
 
+## IDEA-002 — Asset date timeline exploration
+
+Status: `HOLD`
+
+User decision (2026-09-06): defer changes to Asset Repository scrolling. Of the explored alternatives, the date timeline was the most appealing, but its fit with Lakomics remains uncertain; this is not an approved implementation direction.
+
+- Revisit a compact date timeline showing daily asset counts and allowing direct date jumps for large libraries.
+- Preserve date grouping and the time caption beneath each asset; account for both sparse days and days containing many assets.
+- Evaluate compatibility with the restrained NieR:Automata-inspired UI and existing browsing workflow before adopting it.
+- Screen-by-screen paging and calendar drill-down were comparison ideas, not accepted requirements. Do not assume the proposed paging/timeline combination was approved.
+- Keep current scrolling behavior until the user resumes this discussion.
+
+---
+
 # Mobile lane — Galaxy Tab production client
 
 The approved consumption specification is `docs/agents/mobile-consumption-ux.md`.
