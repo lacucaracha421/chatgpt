@@ -272,10 +272,11 @@ export type AssetView =
   | { kind: "calendar" }
   | { kind: "similarity_review" }
   | { kind: "trash" }
+  | { kind: "statistics" }
   | { kind: "settings"; section?: "general" | "cloud" | "catalog" | "external_services" | "data" | "about" }
   | { kind: "manga" }
   | { kind: "collections"; typeFilter: CollectionType; showcase: boolean }
-  | { kind: "collection"; collectionId: string }
+  | { kind: "collection"; collectionId: string; tmdbSearch?: { query: string; mediaType: "movie" | "tv" } }
   | { kind: "revisited-bundle"; bundleId: string; title: string; assetIds: string[] };
 
 export type ClassificationEntry = {
@@ -301,6 +302,7 @@ export type CollectionType = "game" | "manga" | "movie";
 export type LegacyCollectionKind = "game" | "manga" | "movie" | "gacha";
 
 export type CollectionSummary = {
+  seasonDateRange?: [string, string] | null;
   id: string;
   name: string;
   description: string | null;
@@ -461,6 +463,23 @@ export type IgdbArtworkReplaceRequest = {
   hero: IgdbArtworkDecision;
 };
 
+export type TmdbSeriesData = {
+  status: string | null;
+  lastAirDate: string | null;
+  cast: string[];
+  seasons: TmdbSeason[];
+};
+export type TmdbSeason = {
+  id: number;
+  seasonNumber: number;
+  name: string;
+  overview: string | null;
+  airDate: string | null;
+  posterPath: string | null;
+  posterArtworkId: string | null;
+  episodes: { id: number; episodeNumber: number; name: string; overview: string | null; airDate: string | null; runtimeMinutes: number | null }[];
+};
+
 export type TmdbCredentialStatus = { configured: boolean };
 
 export type TmdbImageCandidate = {
@@ -470,6 +489,7 @@ export type TmdbImageCandidate = {
 };
 
 export type TmdbSearchResult = {
+  mediaType?: "movie" | "tv" | null;
   movieId: number;
   title: string;
   originalTitle: string | null;
@@ -478,6 +498,8 @@ export type TmdbSearchResult = {
 };
 
 export type TmdbMoviePreview = {
+  series?: TmdbSeriesData | null;
+  mediaType?: "movie" | "tv" | null;
   movieId: number;
   proposedTitle: string;
   originalTitle: string | null;
@@ -493,15 +515,19 @@ export type TmdbMoviePreview = {
 };
 
 export type TmdbConnection = {
+  series?: TmdbSeriesData | null;
+  mediaType?: "movie" | "tv" | null;
   movieId: number;
   lastSyncedAt: string | null;
 };
 
 export type TmdbApplyTarget =
   | { kind: "new" }
-  | { kind: "existing"; collectionId: string };
+  | { kind: "existing"; collectionId: string }
+  | { kind: "reconnect"; collectionId: string };
 
 export type TmdbApplyRequest = {
+  mediaType?: "movie" | "tv" | null;
   target: TmdbApplyTarget;
   movieId: number;
   posterPath: string | null;
@@ -943,6 +969,9 @@ export interface CollectionTrackingGateway {
 }
 
 export interface LibraryGateway {
+  getLibraryStatistics?(): Promise<import("../statistics/types").LibraryStatistics>;
+  measureLibraryDerivativeStorage?(): Promise<import("../statistics/types").DerivativeStorage>;
+  recordCollectionOpened?(collectionId: string, openedAt: string): Promise<void>;
   collectionTracking?: CollectionTrackingGateway;
   listCatalogReview(): Promise<CatalogReviewPage>;
   generateCatalogReview(): Promise<CatalogReviewPage>;
@@ -1063,8 +1092,8 @@ export interface LibraryGateway {
   getTmdbCredentialStatus(): Promise<TmdbCredentialStatus>;
   setTmdbToken(token: string): Promise<TmdbCredentialStatus>;
   deleteTmdbToken(): Promise<TmdbCredentialStatus>;
-  searchTmdbMovies(query: string): Promise<TmdbSearchResult[]>;
-  previewTmdbMovie(movieId: number): Promise<TmdbMoviePreview>;
+  searchTmdbMovies(query: string, mediaType?: "movie" | "tv"): Promise<TmdbSearchResult[]>;
+  previewTmdbMovie(movieId: number, mediaType?: "movie" | "tv" | null): Promise<TmdbMoviePreview>;
   applyTmdbMovie(request: TmdbApplyRequest): Promise<CollectionSummary>;
   refreshTmdbMovie(collectionId: string): Promise<CollectionSummary>;
   getTmdbConnection(collectionId: string): Promise<TmdbConnection | null>;

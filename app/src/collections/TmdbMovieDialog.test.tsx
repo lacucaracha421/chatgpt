@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { CollectionSummary, LibraryGateway, TmdbMoviePreview, TmdbSearchResult } from "../library/types";
-import { TmdbMovieDialog } from "./TmdbMovieDialog";
+import { TmdbMovieDialog, type TmdbMovieTarget } from "./TmdbMovieDialog";
 
 afterEach(cleanup);
 
@@ -43,7 +43,7 @@ function makeGateway(overrides: Partial<LibraryGateway> = {}) {
 
 function renderDialog(
   gateway: LibraryGateway = makeGateway(),
-  target: { kind: "new" } | { kind: "existing"; collectionId: string } | { kind: "artwork"; collectionId: string } = { kind: "new" },
+  target: TmdbMovieTarget = { kind: "new" },
   onOpenSettings = vi.fn(),
 ) {
   const onApplied = vi.fn().mockResolvedValue(undefined);
@@ -67,6 +67,36 @@ async function reachPreview(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("TmdbMovieDialog", () => {
+  it("saves a manually selected replacement using the explicit reconnect target", async () => {
+    const user = userEvent.setup();
+    const gateway = makeGateway({ previewTmdbMovie: vi.fn().mockResolvedValue({ ...preview, posters: [], backdrops: [] }) });
+    const target = { kind: "reconnect" as const, collectionId: "movie-1" };
+    renderDialog(gateway, target);
+    await reachPreview(user);
+    await user.click(screen.getByRole("button", { name: "저장" }));
+    await waitFor(() => expect(gateway.applyTmdbMovie).toHaveBeenCalledWith({ target, movieId: 10494, posterPath: null, backdropPath: null }));
+  });
+  it.each(["movie", "tv"] as const)("automatically searches a new collection title as %s", async (mediaType) => {
+    const gateway = makeGateway();
+    renderDialog(gateway, { kind: "existing", collectionId: "new-work", initialSearch: { query: "기생충", mediaType } });
+    expect(screen.getByRole("searchbox", { name: "영화 검색" })).toHaveValue("기생충");
+    expect(screen.getByRole("combobox", { name: "영상 형식" })).toHaveValue(mediaType);
+    await screen.findByRole("button", { name: /기생충/ });
+    expect(gateway.searchTmdbMovies).toHaveBeenCalledTimes(1);
+    expect(gateway.searchTmdbMovies).toHaveBeenCalledWith(...(mediaType === "tv" ? ["기생충", "tv"] : ["기생충"]));
+  });
+  it("keeps TV search, preview and apply identities separate from movie IDs", async () => {
+    const user = userEvent.setup();
+    const gateway = makeGateway({ previewTmdbMovie: vi.fn().mockResolvedValue({ ...preview, mediaType: "tv", posters: [], backdrops: [], series: { seasons: [], status: null, lastAirDate: null, cast: [] } }) });
+    renderDialog(gateway);
+    await user.selectOptions(screen.getByRole("combobox", { name: "영상 형식" }), "tv");
+    await reachPreview(user);
+    expect(gateway.searchTmdbMovies).toHaveBeenCalledWith("기생충", "tv");
+    expect(gateway.previewTmdbMovie).toHaveBeenCalledWith(10494, "tv");
+    await user.click(screen.getByRole("button", { name: "가져오기" }));
+    await waitFor(() => expect(gateway.applyTmdbMovie).toHaveBeenCalledWith({ target: { kind: "new" }, movieId: 10494, mediaType: "tv", posterPath: null, backdropPath: null }));
+  });
+
   it("searches, keeps artwork unselected, applies one poster and no backdrop", async () => {
     const user = userEvent.setup();
     const gateway = makeGateway();

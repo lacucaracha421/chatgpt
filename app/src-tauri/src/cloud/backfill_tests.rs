@@ -206,6 +206,26 @@ fn reconcile_requeues_interrupted_and_thumbnail_ready_backfill_stages() {
 }
 
 #[test]
+fn progress_redacts_queue_errors_and_hides_resolved_failures() {
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    let source = temp.path().join("redacted.png");
+    fs::write(&source, png_bytes(31)).unwrap();
+    let id = ingest_png(&library, &source, "2026-09-02T00:00:00Z");
+    library.connection().unwrap().execute(
+        "INSERT INTO cloud_sync_queue (id, entity_type, entity_id, operation, status, revision, updated_at, last_error)
+         VALUES ('redaction-test', 'asset', ?1, 'upsert', 'failed', 1, '2026-09-02', 'https://secret.test/?token=private C:/private/file')
+         ON CONFLICT(entity_type, entity_id, operation, revision) DO UPDATE SET status = 'failed', last_error = excluded.last_error",
+        [&id],
+    ).unwrap();
+    let progress = library.cloud_backfill_progress().unwrap();
+    assert_eq!(progress.failed, 1);
+    assert!(!progress.last_error.unwrap().contains("private"));
+    library.connection().unwrap().execute("UPDATE cloud_sync_queue SET status = 'synced' WHERE entity_id = ?1", [&id]).unwrap();
+    assert_eq!(library.cloud_backfill_progress().unwrap().last_error, None);
+}
+
+#[test]
 fn bounded_scope_excludes_preexisting_pending_work_from_progress_and_claims() {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();

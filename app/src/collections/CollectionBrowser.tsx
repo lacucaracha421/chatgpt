@@ -113,9 +113,14 @@ export function CollectionBrowser({
     onLibraryStateChange(next);
   }
 
-  async function handleSubmit(input: CreateCollection | UpdateCollection) {
+  async function handleSubmit(input: CreateCollection | UpdateCollection, mediaType?: "movie" | "tv") {
     if (editMode?.kind === "create") {
-      await gateway.createCollection(input as CreateCollection);
+      const created = await gateway.createCollection(input as CreateCollection);
+      await onChanged();
+      onViewChange({ kind: "collection", collectionId: created.id,
+        ...(created.type === "movie" ? { tmdbSearch: { query: created.name, mediaType: mediaType ?? "movie" } } : {}),
+      });
+      return;
     } else if (editMode?.kind === "edit") {
       await gateway.updateCollection(editMode.collection.id, input as UpdateCollection);
     }

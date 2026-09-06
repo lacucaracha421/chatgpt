@@ -12,6 +12,11 @@ The backlog was reconciled from the 2026-09-05 full repository audit and its doc
 
 Current code and migrations remain authoritative for implemented behavior. Git history retains the old verbose completion notes; this file intentionally keeps completed work compact so stale historical text does not look executable.
 
+2026-09-06 Collection follow-up: reconciled against commit `9a99ed5` and the
+recorded checks from that implementation. This refresh covers Collection presentation,
+ownership/release notifications, and the catalog bookmark filter fix; it is not a new
+repository-wide or production-data audit. Unrelated Cloud/Mobile acceptance gates remain unchanged.
+
 ## Status legend
 
 - `IN PROGRESS`: currently being implemented
@@ -42,7 +47,7 @@ Current code and migrations remain authoritative for implemented behavior. Git h
 
 ## CLOUD-006 — Full library cloud replication for mobile
 
-Status: `PARTIAL`
+Status: `DONE` — user accepted closure on 2026-09-06.
 
 The major feature is implemented and already proved against the real library:
 
@@ -51,7 +56,7 @@ The major feature is implemented and already proved against the real library:
 - the completed real-library backfill must not be rerun by default;
 - Galaxy Tab browsing from the server replica has been verified.
 
-Remaining closure:
+Accepted closure criteria (user confirmation; no new operational run in this update):
 
 - a paused supervisor must never start a new queued replica cycle;
 - the current pause guard and regression test must be executed and verified in the real app;
@@ -66,7 +71,7 @@ Acceptance:
 - focused supervisor timer/control-state tests pass;
 - real pause -> wait -> restart -> resume passes with a queued item;
 - idle incremental replication still works automatically;
-- then return this item to `DONE`.
+- user confirmation closes this item; do not rerun the full backfill.
 
 ## BUG-013 — Asset viewer opens are never recorded
 
@@ -101,7 +106,7 @@ This is a prerequisite for activity-based `STATS-001B` and `IDEA-001` scoring.
 
 ## CLOUD-UI-001 — Durable Cloud status, diagnostics, and problem surface
 
-Status: `PARTIAL`
+Status: `VERIFY`
 
 Already present:
 
@@ -111,7 +116,7 @@ Already present:
 - recovery/backfill controls;
 - transient manual result summaries.
 
-Missing:
+Implemented status boundary (schema v38 onward, retained and extended):
 
 - durable last attempt;
 - durable last success independent of later failure;
@@ -119,6 +124,20 @@ Missing:
 - persisted last processed summary;
 - current combined actionable problem count;
 - conditional `동기화 문제 N` navigation into the existing Cloud Settings/recovery surface.
+
+2026-09-06 implementation: the existing `cloud_activity` persistence already records
+attempt/success/error/processed summaries per direction and metadata publishing. The
+new sidebar indicator consumes the existing supervisor event stream, with one initial
+read and no additional timer. It counts current failed queue items plus independent
+capture/metadata errors; a replication error is not added again when failed assets
+already represent it. Settings explains that count and links to existing recovery
+controls. Public queue errors are fixed messages and resolved queue entries no longer
+appear as current errors. Native acceptance of this new indicator remains separate
+from the user-accepted CLOUD-006 pause behavior.
+
+Verification: focused UI status/count/navigation tests and the Rust queue-error
+redaction/resolution test passed. The new indicator has not been exercised in the
+native app; use existing data/status and do not seed a new backfill for verification.
 
 Direction:
 
@@ -497,7 +516,7 @@ Split into two truthful phases.
 
 ### STATS-001A — Inventory Statistics
 
-Status: `TODO`
+Status: `VERIFY`
 No activity prerequisite.
 
 Use current authoritative data for bounded aggregates such as:
@@ -511,9 +530,15 @@ Use current authoritative data for bounded aggregates such as:
 
 Aggregate in Rust/SQL, not React, and make metric definitions visible.
 
+Implemented 2026-09-06: Management -> Statistics shows normal-Asset totals,
+favorites/unclassified counts, Collection total, local collection-month buckets (24),
+top creators/direct classifications (10), and recorded original bytes. Explicit
+derivative measurement snapshots at most 10,000 registered paths, releases the DB
+lock, and reports measured/missing/partial totals. No full filesystem scan on entry.
+
 ### STATS-001B — Activity Statistics
 
-Status: `TODO`
+Status: `VERIFY`
 Prerequisites: BUG-013 and STATS-001A.
 
 Add only recorded-era activity views, for example:
@@ -525,6 +550,20 @@ Add only recorded-era activity views, for example:
 Record Collection opens with the same deliberate-session semantics used for Asset opens. If daily rollups are needed, use bounded aggregate rows rather than unbounded raw history.
 
 Always show the telemetry start date. Never infer past opens from file dates or exposure counts.
+
+Implemented 2026-09-06: most-opened Assets/Collections, Assets not opened for at least
+30 days, and recorded daily opens. v42 adds Collection activity, a start timestamp and
+bounded daily triggers (90 retained dates; 30 displayed); existing counters are never
+backfilled into dates. Legacy Asset cumulative telemetry start remains explicitly
+unknown. Collection recording uses a per-detail-session set and isolates failures.
+
+Verification for A/B: four focused Rust tests and four frontend tests passed, including
+migration without fabricated history, trash exclusion, direct counts, session replay,
+and optional storage measurement/retry. TypeScript passed. On 2026-09-06 the user
+authorized v42 application: SQLite backup `before-statistics-v42-20260906-212711.sqlite`
+was retained, quick-check passed, and all 43 pre-existing tables retained identical
+row counts and data hashes before app startup. Collection/daily history starts empty;
+no historical activity was fabricated. Feature-level native/visual acceptance remains open.
 
 ## IDEA-001 — More varied Revisit mixes
 
@@ -725,8 +764,9 @@ Artwork > work identity > personal state > useful provider metadata > provider/m
 ## LONG-002A — Type-aware presentation foundation and normal Works visual pass
 
 Parent item: legacy `LONG-002`
-Status: `PARTIAL`
-Legacy LONG-002 remains `PARTIAL` because type-specific classes and a game package seed already exist.
+Status: `DONE` — user accepted the Collection finishing checks on 2026-09-06.
+Legacy LONG-002 remains `PARTIAL` only for the separate later focused-cover/Display
+scope. Normal type-specific presentation and its user visual acceptance are complete.
 
 2026-09-05 first reskin slice: Quiet Archive typography/fallback and Works depth tokens,
 flat Collection captions, Manga cover baselines/shared support lines and below-cover release
@@ -734,9 +774,36 @@ captions, conditional edition controls, and Game hero/package calibration are im
 Existing CollectionOverlay/CollectionCard/GameCollectionDetail tests: 51 passed; TypeScript
 check passed. Isolated browser fixtures covered mixed cover ratios, 20 volumes, multiple/single
 editions, long Korean/Japanese titles, keyboard focus, and sparse Game art at 960/800px widths.
-Native Tauri visual acceptance remains unverified; no active production library was opened
-or mutated for this check. Game metadata/artwork composition and type-specific WorkTile
-work remain pending, as do the later Video/Series and Showcase slices.
+Native Tauri visual acceptance for that first slice was unverified; no active production
+library was opened or mutated for that check. The later implementation below supersedes
+its pending Game composition and type-specific tile wording.
+
+Implemented follow-up (2026-09-06, `9a99ed5`):
+
+- Game case dimensions follow the cover aspect ratio with bounded scaling, preserving
+  the full image without exposed empty case areas; Manga shelf content wraps within
+  the available width; Film posters use a transparent surround.
+- Artwork candidates and galleries preserve portrait images. Only the candidate image
+  row scrolls horizontally; selection/navigation actions stay in the dialog width.
+- IGDB hero choices include both artworks and screenshots, with smaller candidate
+  thumbnails; TMDB candidate thumbnails are also smaller. Live provider latency is
+  not guaranteed by these changes.
+- Collection cover/artwork viewers consume Back before leaving the work detail.
+- Work information, editions, ownership, release status and management controls use
+  the existing sidebar. Detail views omit the redundant work-type navigation; the
+  library retains it. The notification button shares the search/add centerline.
+- Game/Manga/Film cards show release dates below creator/company, formatted `YY.M.D`
+  with a full-year fallback. Film metadata selects the earliest available TMDB release
+  date; this does not imply every previously saved work has been refreshed.
+- Existing `CollectionCard`, physical cover and artwork gallery components provide
+  the type-specific presentation; do not add a second renderer just to introduce the
+  planned `WorkTile`/`ArtworkStrip` names.
+
+Verification: focused frontend/Rust checks and TypeScript passed during implementation.
+The latest spacing-only adjustment was not agent browser-tested. The user accepted
+clipping, portrait artwork, sidebar density and Back behavior on 2026-09-06;
+this is user acceptance, not a new automated/native test run. Film/Series expansion remains WORKS-001, and
+complete-cover interaction remains LONG-002B.
 
 Shared presentation primitives should remain lightweight and type-aware:
 
@@ -751,7 +818,7 @@ Ordinary grids prefer DOM/CSS and bounded static rendering. The approved closed 
 
 ### LONG-002A.1 — Manga Shelf Grid quality baseline
 
-Implement first as the visual calibration target.
+Implemented baseline; use the retained criteria below for final visual acceptance.
 
 Normal manga detail:
 
@@ -769,7 +836,8 @@ This manga shelf is part of the normal type-specific detail preset. It is **not*
 
 ### LONG-002A.2 — Game Exhibit refinement
 
-Preserve current hero + package foundation, then improve composition:
+The hero/package composition and artwork improvements above are implemented. Use the
+following criteria for final refinement, rather than restarting the visual pass:
 
 - reduce excessive hero vertical dominance so lower content enters the viewport earlier;
 - make hero, package, title, and identity one coherent composition;
@@ -793,11 +861,67 @@ Reduce redundant body headings when the contextual index/current location alread
 
 Do not turn the normal library into a decorative showcase.
 
+## WORKS-002 — Simple manga ownership and Korean release notifications
+
+Status: `DONE` — user accepted the Collection finishing checks on 2026-09-06.
+
+Implemented (2026-09-06, `9a99ed5`):
+
+- One current-owned count per edition; saving N records ownership of volumes 1..N.
+  Physical/digital choices are absent from the UI. Schema v41 retains compatible
+  volume ownership storage; decreasing the count, including zero, is atomic.
+- Show latest released volume, missing count and next scheduled volume/date.
+  Upcoming volumes are excluded from missing count; unavailable dates stay unknown.
+- Korean publication tracking uses the connected Kakao series and an enabled release
+  subscription. App startup/hourly checks query works due after 24 hours; this is
+  app-running polling, not an OS push notification service.
+- New provider volumes (including scheduled ones), date changes and scheduled-to-released
+  transitions create persistent events. Opening a work does not acknowledge them;
+  explicit confirmation clears the selected events.
+- A grid cover badge, total inbox count and in-app discovery message expose unread
+  events. Badge numbers count events, not distinct new volumes or missing volumes.
+- Ownership only changes the missing count; it does not suppress release events.
+
+Verification already recorded: TypeScript, three focused frontend tests and four Rust
+tracking tests passed. The authorized v40 -> v41 active-library migration passed
+SQLite quick-check with existing collection, volume, bookmark and release-event rows
+preserved. This is migration evidence, not proof of real future-provider detection.
+
+The user accepted the remaining Collection finishing checks on 2026-09-06. No new
+native/provider test was run to mark this status. No reseeding or production-data
+mutation is authorized by this item.
+
+Known boundaries: Kakao must publish the information; MangaDex-only connections cannot
+detect Korean releases. Publisher changes may create a separate series and are deliberately
+deferred by the user. Publisher-announcement crawling, OS notifications and off-app polling
+are not implemented or implicitly approved follow-up scope.
+
 ## WORKS-001 — Video Works: film + series / TV animation
 
-Status: `TODO`
+Status: `PARTIAL`
 
-The current Collection implementation and TMDB flow are film/movie-only. The product category must expand conceptually to Video Works without forcing an immediate persistence rename.
+The Collection persistence type remains `movie`, while TMDB now supports both Film
+and TV Series. Numeric movie bindings stay unchanged; TV uses `tv:ID`, so the same
+numeric provider ID cannot collide across media types.
+
+Film poster, artwork browsing, sidebar and earliest-release-date improvements shipped
+in `9a99ed5`. The following 2026-09-06 TV extension is implemented in the working tree:
+
+- Film/Series search selector with lightweight metadata/artwork preview;
+- explicit apply/refresh caches all returned season/episode metadata and season posters
+  in the existing binding/artwork lifecycle; no new TV schema or background polling;
+- local season poster selector, selected-season summary, paged compact episode list
+  (50 rows), air dates/runtimes/descriptions and aggregate cast;
+- existing metadata overrides and chosen poster/backdrop survive refresh; existing
+  movie imports remain compatible and cached series details reopen offline.
+
+Verification: 20 focused TMDB Rust tests and 33 matched frontend tests passed;
+TypeScript passed. Native API/import and user visual acceptance remain unverified.
+Full explicit TV import/refresh still fetches season endpoints/posters sequentially;
+preview and artwork replacement do not wait for the full episode sync.
+
+Remaining broader scope: provider related-work rails and richer Film cast/release-history
+presentation. Episode still grids are not part of the default compact presentation.
 
 Structural distinction:
 
@@ -904,6 +1028,11 @@ Initial adoption is copy-in only; original normal media remains intact. Video au
 The 2026-09-05 repository audit classified the original 55 backlog items as **38 DONE, 8 PARTIAL, 4 TODO, 3 MERGE CANDIDATE, 2 OBSOLETE**. The active items above replace stale verbose wording; this index preserves the audit result.
 
 ## DONE
+
+2026-09-06 follow-up (outside the original 55-item audit counts): catalog bookmark
+entry now starts in Latest instead of retaining a restrictive day ranking. The
+reported disappearance was filter visibility, not deleted bookmarks; the recorded
+read-only inspection found 253 bookmarks intact. Focused catalog tests passed.
 
 - CLOUD-001 — Cloud Capture batch drain
 - CLOUD-004 — X media Cloud/VPS routing failure fallback corrected
@@ -1090,4 +1219,7 @@ M4. **MOBILE-003 global tombstone deletion**
 
 LONG-002A has no catalog/Notes dependency. After the immediate correctness gates (roughly steps 0–3), its visual prototype work can proceed without waiting for catalog batches 4–16, provided it does not collide with another agent’s Collection files.
 
-The first recommended aesthetic implementation is still **Manga Shelf Grid**, because it calibrates cover density, physical depth, shadow, hover, and appreciation behavior used by the rest of Works.
+The Manga Shelf Grid and Game/Film normal presentation baseline are implemented.
+LONG-002A and WORKS-002 are user-accepted; do not restart the shelf reskin.
+CLOUD-UI-001 and STATS-001A/B await native acceptance. WORKS-001 has the TV/season/episode
+structure implemented, with related-work/richer Film surfaces still partial.

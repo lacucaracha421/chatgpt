@@ -993,10 +993,11 @@ pub fn delete_tmdb_token() -> Result<TmdbCredentialStatus, CommandError> {
 #[tauri::command]
 pub async fn search_tmdb_movies(
     query: String,
+    media_type: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<TmdbSearchResult>, CommandError> {
     let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.search_tmdb_movies(&query))
+    tauri::async_runtime::spawn_blocking(move || library.search_tmdb_titles(&query, media_type.as_deref()))
         .await
         .map_err(|_| background_task_error())?
         .map_err(CommandError::from)
@@ -1005,10 +1006,11 @@ pub async fn search_tmdb_movies(
 #[tauri::command]
 pub async fn preview_tmdb_movie(
     movie_id: i64,
+    media_type: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<TmdbMoviePreview, CommandError> {
     let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.preview_tmdb_movie(movie_id))
+    tauri::async_runtime::spawn_blocking(move || library.preview_tmdb_title(movie_id, media_type.as_deref()))
         .await
         .map_err(|_| background_task_error())?
         .map_err(CommandError::from)
@@ -1266,6 +1268,27 @@ pub fn list_unread_release_changes(
 #[tauri::command]
 pub fn list_volume_ownership(collection_id: String, state: State<'_, AppState>) -> Result<Vec<crate::library::collection_tracking::VolumeOwnership>, CommandError> {
     current_required(state)?.list_volume_ownership(&collection_id).map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn get_library_statistics(state: State<'_, AppState>) -> Result<crate::library::statistics::LibraryStatistics, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.get_library_statistics()).await
+        .map_err(|_| background_task_error())?.map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn measure_library_derivative_storage(state: State<'_, AppState>) -> Result<crate::library::statistics::DerivativeStorage, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.measure_library_derivative_storage()).await
+        .map_err(|_| background_task_error())?.map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn record_collection_opened(collection_id: String, opened_at: String, state: State<'_, AppState>) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.record_collection_opened(&collection_id, &opened_at)).await
+        .map_err(|_| background_task_error())?.map_err(CommandError::from)
 }
 
 #[tauri::command]

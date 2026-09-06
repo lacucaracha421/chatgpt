@@ -281,6 +281,24 @@ These are isolated browser observations, not a benchmark of 1,000 distinct high-
 
 ## 14. Review checklist
 
+2026-09-06 status/statistics additions:
+
+- The rail shows `동기화 문제 N` only while failed queue items or direction-specific
+  transport/metadata errors remain. It opens Cloud Settings directly and reuses the
+  existing supervisor updates. Queue details expose public fixed messages, not paths
+  or raw transport errors.
+- Management contains `통계`, using the existing toolbar and dense tables. Inventory
+  aggregates include normal Assets only; Collection totals include all works. Metrics
+  state their scope, local-time basis and recorded-era limits.
+- Collection opens are recorded once per work in an uninterrupted detail session;
+  returning to another view ends the session. Recording failure never blocks viewing.
+  v42 starts Collection/daily telemetry without backfilling old counts; legacy Asset
+  lifetime start is explicitly unknown. Daily rows are bounded to 90 days, with the
+  latest 30 days displayed.
+- Storage inspection is opt-in and capped at 10,000 registered derivative paths.
+  File measurements occur outside the SQLite lock. Partial/missing-file counts are
+  visible; original sizes are labeled as recorded sizes rather than current disk use.
+
 Before accepting a PC UI change, ask:
 
 - Does media still dominate the first glance?

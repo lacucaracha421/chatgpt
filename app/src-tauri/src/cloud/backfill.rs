@@ -344,11 +344,12 @@ impl Library {
         let committing = count("committing")?;
         let last_error = connection
             .query_row(
-                "SELECT queue.last_error
+                "SELECT '전송하지 못한 자료가 있습니다. 연결과 원본 파일을 확인해 주세요.'
                  FROM cloud_sync_queue AS queue
                  JOIN assets AS asset ON asset.id = queue.entity_id
                  WHERE queue.entity_type = 'asset' AND queue.operation = 'upsert'
                    AND queue.last_error IS NOT NULL
+                   AND queue.status = 'failed'
                    AND asset.status = 'normal'
                    AND (NOT EXISTS (SELECT 1 FROM cloud_backfill_scope)
                         OR queue.entity_id IN (SELECT asset_id FROM cloud_backfill_scope))

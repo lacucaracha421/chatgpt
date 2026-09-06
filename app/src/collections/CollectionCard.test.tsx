@@ -43,6 +43,14 @@ const sample: CollectionSummary = {
   updatedAt: "t",
 };
 
+it("shows series season premiere range and a single date for one season", () => {
+  const props = { coverUrl: null, onClick: vi.fn(), selected: false };
+  const { rerender } = render(<CollectionCard {...props} collection={{ ...sample, type: "movie", seasonDateRange: ["2016-01-14", "2024-05-05"] }} />);
+  expect(screen.getByText("16.1.14~24.5.5")).toBeInTheDocument();
+  rerender(<CollectionCard {...props} collection={{ ...sample, type: "movie", seasonDateRange: ["2016-01-14", "2016-01-14"] }} />);
+  expect(screen.getByText("16.1.14")).toBeInTheDocument();
+});
+
 describe("CollectionCard", () => {
   it("shows a compact movie release date on a separate line after the studio", () => {
     render(<CollectionCard collection={{ ...sample, type: "movie", productionCompany: "MAPPA", releaseDate: "2026-10-01" }} coverUrl={null} selected={false} onClick={vi.fn()} />);

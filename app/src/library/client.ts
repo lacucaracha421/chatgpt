@@ -98,6 +98,9 @@ import type {
 } from "./types";
 
 export const libraryGateway: LibraryGateway = {
+  getLibraryStatistics: () => invoke("get_library_statistics"),
+  measureLibraryDerivativeStorage: () => invoke("measure_library_derivative_storage"),
+  recordCollectionOpened: (collectionId, openedAt) => invoke("record_collection_opened", { collectionId, openedAt }),
   collectionTracking: {
     setOwnedCount: (collectionId, editionIndex, count) => invoke("set_owned_volume_count", { collectionId, editionIndex, count }),
     listOwnership: (collectionId) => invoke("list_volume_ownership", { collectionId }),
@@ -291,10 +294,10 @@ export const libraryGateway: LibraryGateway = {
     invoke<TmdbCredentialStatus>("set_tmdb_token", { token }),
   deleteTmdbToken: () =>
     invoke<TmdbCredentialStatus>("delete_tmdb_token"),
-  searchTmdbMovies: (query) =>
-    invoke<TmdbSearchResult[]>("search_tmdb_movies", { query }),
-  previewTmdbMovie: (movieId) =>
-    invoke<TmdbMoviePreview>("preview_tmdb_movie", { movieId }),
+  searchTmdbMovies: (query, mediaType) =>
+    invoke<TmdbSearchResult[]>("search_tmdb_movies", { query, ...(mediaType ? { mediaType } : {}) }),
+  previewTmdbMovie: (movieId, mediaType) =>
+    invoke<TmdbMoviePreview>("preview_tmdb_movie", { movieId, ...(mediaType ? { mediaType } : {}) }),
   applyTmdbMovie: (request: TmdbApplyRequest) =>
     invoke<CollectionSummary>("apply_tmdb_movie", { request }),
   refreshTmdbMovie: (collectionId) =>

@@ -15,6 +15,14 @@ Do not collapse Asset, Classification, Album, Collection/Work, WorkArtwork, Volu
 
 Current implemented Collection types are game, manga, and movie. Future collection types or specialized presentation systems belong in the roadmap until implemented.
 
+The `movie` persistence type now contains Film and TV Series (2026-09-06). TMDB's
+numeric movie binding identity is preserved; TV identities use `tv:ID`. Media type
+must accompany searches/previews and is validated during apply/refresh/artwork updates.
+Series season/episode data is cached in the provider snapshot, with season posters
+stored as Collection-owned artwork. Preview/artwork selection does not fetch all
+episodes; explicit import/refresh performs the full season sync. Normal viewing reads
+the local snapshot with a compact paged episode list, including when offline.
+
 ## Provider and ownership rules
 
 A Collection may have multiple external bindings. Provider protocol details belong in provider modules/flows, not `App.tsx` or large UI components.

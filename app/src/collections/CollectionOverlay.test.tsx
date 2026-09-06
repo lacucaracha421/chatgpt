@@ -10,6 +10,7 @@ vi.mock("./physical/collectibleRuntime", () => ({
 }));
 
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -108,6 +109,7 @@ function renderOverlay(
   targetCollection = collection,
   onOpenSettings = vi.fn(),
   withSidebar = false,
+  initialSearch?: { query: string; mediaType: "movie" | "tv" },
 ) {
   const gateway = {
     collectionTracking: tracking(),
@@ -153,9 +155,14 @@ function renderOverlay(
     runDueReleaseWatch: vi.fn().mockResolvedValue({ checked: 0, changedCollections: 0, skipped: 0, stopReason: null }),
     ...overrides,
   } as unknown as LibraryGateway;
+  function Detail() {
+    const [pendingSearch, setPendingSearch] = useState(initialSearch);
+    return <CollectionOverlay collectionId={targetCollection.id} collections={[targetCollection]} onExit={onExit} onChanged={onChanged} onOpenSettings={onOpenSettings}
+      initialTmdbSearch={pendingSearch} onTmdbSearchConsumed={() => setPendingSearch(undefined)} />;
+  }
   const content = (
     <LibraryProvider gateway={gateway}>
-      <CollectionOverlay collectionId={targetCollection.id} collections={[targetCollection]} onExit={onExit} onChanged={onChanged} onOpenSettings={onOpenSettings} />
+      <Detail />
     </LibraryProvider>
   );
   render(
@@ -762,6 +769,30 @@ describe("CollectionOverlay game detail flow", () => {
 });
 
 describe("CollectionOverlay movie detail flow", () => {
+  it("lets a connected series search for a replacement without changing its binding on cancel", async () => {
+    const user = userEvent.setup();
+    const searchTmdbMovies = vi.fn().mockResolvedValue([]);
+    const applyTmdbMovie = vi.fn();
+    renderOverlay({ searchTmdbMovies, applyTmdbMovie, getTmdbConnection: vi.fn().mockResolvedValue({ movieId: 42, mediaType: "tv", lastSyncedAt: "t" }) }, undefined, undefined, movieCollection);
+    await user.click(screen.getByRole("button", { name: "작품 관리" }));
+    await user.click(await screen.findByRole("menuitem", { name: "TMDB 연결 작품 변경" }));
+    const dialog = await screen.findByRole("dialog", { name: "TMDB 시리즈 연결 작품 변경" });
+    await waitFor(() => expect(searchTmdbMovies).toHaveBeenCalledWith(movieCollection.name, "tv"));
+    await user.click(within(dialog).getByRole("button", { name: "취소" }));
+    expect(applyTmdbMovie).not.toHaveBeenCalled();
+  });
+  it("consumes the creation search once and keeps the detail after closing it", async () => {
+    const user = userEvent.setup();
+    const searchTmdbMovies = vi.fn().mockResolvedValue([]);
+    renderOverlay({ searchTmdbMovies }, undefined, undefined, movieCollection, undefined, false,
+      { query: movieCollection.name, mediaType: "tv" });
+    const dialog = await screen.findByRole("dialog", { name: "TMDB 시리즈 연결" });
+    await waitFor(() => expect(searchTmdbMovies).toHaveBeenCalledWith(movieCollection.name, "tv"));
+    await user.click(within(dialog).getByRole("button", { name: "취소" }));
+    expect(screen.queryByRole("dialog", { name: "TMDB 시리즈 연결" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: movieCollection.name, level: 1 })).toBeInTheDocument();
+    expect(searchTmdbMovies).toHaveBeenCalledTimes(1);
+  });
   it("renders the local movie immediately and connects an unbound movie", async () => {
     const user = userEvent.setup();
     let resolveConnection!: (connection: null) => void;

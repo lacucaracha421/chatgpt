@@ -5,7 +5,7 @@ use url::Url;
 
 use super::{
     error::LibraryError,
-    models::{TmdbCredentials, TmdbImageRef, TmdbRemoteMovie, TmdbSearchResult},
+    models::{TmdbCredentials, TmdbImageRef, TmdbRemoteMovie, TmdbSearchResult, TmdbSeriesData, TmdbSeason, TmdbEpisode},
     work_artwork::MAX_WORK_ARTWORK_BYTES,
 };
 
@@ -45,6 +45,77 @@ impl Default for TmdbClient {
 }
 
 impl TmdbClient {
+    pub fn search_titles(&self, credentials: &TmdbCredentials, query: &str, media_type: Option<&str>) -> Result<Vec<TmdbSearchResult>, LibraryError> {
+        if media_kind(media_type)? == "movie" { return self.search(credentials, query); }
+        let mut url = search_url(query)?;
+        url.set_path("/3/search/tv");
+        let mut response = self.get(&url, &trimmed_token(credentials)?)?;
+        let mut results = parse_search(&read_body(&mut response)?)?;
+        for result in &mut results { result.media_type = Some("tv".into()); }
+        Ok(results)
+    }
+
+    pub fn title(&self, credentials: &TmdbCredentials, id: i64, media_type: Option<&str>) -> Result<TmdbRemoteMovie, LibraryError> {
+        self.fetch_title(credentials, id, media_type, true)
+    }
+
+    pub fn preview_title(&self, credentials: &TmdbCredentials, id: i64, media_type: Option<&str>) -> Result<TmdbRemoteMovie, LibraryError> {
+        self.fetch_title(credentials, id, media_type, false)
+    }
+
+    fn fetch_title(&self, credentials: &TmdbCredentials, id: i64, media_type: Option<&str>, include_episodes: bool) -> Result<TmdbRemoteMovie, LibraryError> {
+        if media_kind(media_type)? == "movie" { return self.movie(credentials, id); }
+        validate_movie_id(id)?;
+        let token = trimmed_token(credentials)?;
+        let mut url = movie_url(id, "ko-KR");
+        url.set_path(&format!("/3/tv/{id}"));
+        url.query_pairs_mut().clear().append_pair("language", "ko-KR")
+            .append_pair("append_to_response", "aggregate_credits,images")
+            .append_pair("include_image_language", "ko,null,en");
+        let mut response = self.get(&url, &token)?;
+        let mut raw: serde_json::Value = serde_json::from_str(&read_body(&mut response)?)
+            .map_err(|_| LibraryError::TmdbInvalidResponse)?;
+        if raw.get("id").and_then(serde_json::Value::as_i64) != Some(id) { return Err(LibraryError::InvalidTmdbIdentity); }
+        if raw.get("overview").and_then(serde_json::Value::as_str).is_none_or(|s| s.trim().is_empty()) {
+            let mut fallback_url = url.clone();
+            fallback_url.query_pairs_mut().clear().append_pair("language", "en-US");
+            let mut response = self.get(&fallback_url, &token)?;
+            let fallback: serde_json::Value = serde_json::from_str(&read_body(&mut response)?)
+                .map_err(|_| LibraryError::TmdbInvalidResponse)?;
+            if fallback.get("id").and_then(serde_json::Value::as_i64) != Some(id) { return Err(LibraryError::InvalidTmdbIdentity); }
+            raw["overview"] = fallback["overview"].clone();
+        }
+        let seasons = raw.get("seasons").and_then(serde_json::Value::as_array).ok_or(LibraryError::TmdbInvalidResponse)?;
+        // Fail closed on unexpectedly large payloads; never persist a silently partial series.
+        if seasons.len() > 200 { return Err(LibraryError::TmdbInvalidResponse); }
+        let mut cached_seasons = Vec::with_capacity(seasons.len());
+        let mut cached_bytes = 0usize;
+        for season in seasons {
+            let number = season.get("season_number").and_then(serde_json::Value::as_i64)
+                .filter(|number| *number >= 0).ok_or(LibraryError::TmdbInvalidResponse)?;
+            let season_id = season.get("id").and_then(serde_json::Value::as_i64).ok_or(LibraryError::TmdbInvalidResponse)?;
+            if !include_episodes {
+                let mut summary = season.clone();
+                summary["episodes"] = serde_json::json!([]);
+                cached_seasons.push(parse_season(&summary.to_string(), season_id, number)?);
+                continue;
+            }
+            let mut season_url = Url::parse(&format!("{API_ORIGIN}/tv/{id}/season/{number}")).expect("static TMDB origin");
+            season_url.query_pairs_mut().append_pair("language", "ko-KR");
+            let mut response = self.get(&season_url, &token)?;
+            let season_json = read_body(&mut response)?;
+            cached_bytes += season_json.len();
+            if cached_bytes > MAX_JSON_BYTES { return Err(LibraryError::TmdbInvalidResponse); }
+            cached_seasons.push(parse_season(&season_json, season_id, number)?);
+        }
+        normalize_series(raw, cached_seasons)
+    }
+
+    pub(crate) fn download_season_poster(&self, file_path: &str) -> Result<Vec<u8>, LibraryError> {
+        let url = Self::image_url(file_path, TmdbImageSize::W342)?;
+        let mut response = self.agent.get(&url).call().map_err(map_ureq_error)?;
+        read_bytes(&mut response, MAX_WORK_ARTWORK_BYTES)
+    }
     pub fn new() -> Self {
         Self {
             agent: ureq::Agent::config_builder()
@@ -132,8 +203,11 @@ struct RawSearchResponse {
 #[derive(Debug, Deserialize)]
 struct RawSearchMovie {
     id: i64,
+    #[serde(alias = "name")]
     title: Option<String>,
+    #[serde(alias = "original_name")]
     original_title: Option<String>,
+    #[serde(alias = "first_air_date")]
     release_date: Option<String>,
     poster_path: Option<String>,
 }
@@ -228,6 +302,98 @@ struct TmdbSnapshot<'a> {
     backdrops: &'a [TmdbImageRef],
 }
 
+pub(crate) fn media_kind(value: Option<&str>) -> Result<&'static str, LibraryError> {
+    match value {
+        None | Some("movie") => Ok("movie"),
+        Some("tv") => Ok("tv"),
+        _ => Err(LibraryError::InvalidTmdbIdentity),
+    }
+}
+
+#[derive(Deserialize)]
+struct RawSeason {
+    id: i64,
+    season_number: i64,
+    name: Option<String>,
+    overview: Option<String>,
+    air_date: Option<String>,
+    poster_path: Option<String>,
+    episodes: Vec<RawEpisode>,
+}
+
+#[derive(Deserialize)]
+struct RawEpisode {
+    id: i64,
+    season_number: i64,
+    episode_number: i64,
+    name: Option<String>,
+    overview: Option<String>,
+    air_date: Option<String>,
+    runtime: Option<i64>,
+}
+
+fn parse_season(json: &str, expected_id: i64, expected_number: i64) -> Result<TmdbSeason, LibraryError> {
+    let raw: RawSeason = serde_json::from_str(json).map_err(|_| LibraryError::TmdbInvalidResponse)?;
+    if raw.id <= 0 || raw.id != expected_id || raw.season_number != expected_number || raw.episodes.len() > 2000 {
+        return Err(LibraryError::InvalidTmdbIdentity);
+    }
+    let mut episode_ids = std::collections::HashSet::new();
+    let mut episode_numbers = std::collections::HashSet::new();
+    let mut episodes = raw.episodes.into_iter().map(|episode| {
+        if episode.id <= 0 || episode.season_number != expected_number || episode.episode_number <= 0
+            || !episode_ids.insert(episode.id) || !episode_numbers.insert(episode.episode_number) {
+            return Err(LibraryError::InvalidTmdbIdentity);
+        }
+        Ok(TmdbEpisode {
+            id: episode.id, episode_number: episode.episode_number,
+            name: non_empty(episode.name).unwrap_or_else(|| format!("에피소드 {}", episode.episode_number)),
+            overview: non_empty(episode.overview), air_date: non_empty(episode.air_date),
+            runtime_minutes: episode.runtime.filter(|runtime| *runtime > 0),
+        })
+    }).collect::<Result<Vec<_>, LibraryError>>()?;
+    episodes.sort_by_key(|episode| episode.episode_number);
+    Ok(TmdbSeason {
+        id: raw.id, season_number: raw.season_number,
+        name: non_empty(raw.name).unwrap_or_else(|| format!("시즌 {}", raw.season_number)),
+        overview: non_empty(raw.overview), air_date: non_empty(raw.air_date),
+        poster_path: checked_optional_path(raw.poster_path)?, poster_artwork_id: None, episodes,
+    })
+}
+
+fn normalize_series(mut raw: serde_json::Value, mut seasons: Vec<TmdbSeason>) -> Result<TmdbRemoteMovie, LibraryError> {
+    let mut season_ids = std::collections::HashSet::new();
+    let mut season_numbers = std::collections::HashSet::new();
+    if seasons.iter().any(|season| !season_ids.insert(season.id) || !season_numbers.insert(season.season_number)) {
+        return Err(LibraryError::InvalidTmdbIdentity);
+    }
+    seasons.sort_by_key(|season| season.season_number);
+    let text = |key: &str| raw.get(key).and_then(serde_json::Value::as_str).map(str::to_owned).and_then(|v| non_empty(Some(v)));
+    let series = TmdbSeriesData {
+        status: text("status"), last_air_date: text("last_air_date"), seasons,
+        cast: raw.pointer("/aggregate_credits/cast").and_then(serde_json::Value::as_array)
+            .into_iter().flatten().take(12)
+            .filter_map(|person| person.get("name").and_then(serde_json::Value::as_str))
+            .map(str::to_owned).collect(),
+    };
+    let creators = raw.get("created_by").and_then(serde_json::Value::as_array).into_iter().flatten()
+        .filter_map(|person| person.get("name").and_then(serde_json::Value::as_str)).map(str::to_owned).collect::<Vec<_>>();
+    raw["title"] = raw["name"].clone();
+    raw["original_title"] = raw["original_name"].clone();
+    raw["release_date"] = raw["first_air_date"].clone();
+    raw["runtime"] = raw.get("episode_run_time").and_then(serde_json::Value::as_array)
+        .and_then(|times| times.first()).cloned().unwrap_or(serde_json::Value::Null);
+    let mut result = normalize_movie(&raw.to_string())?;
+    result.directors = creators;
+    result.media_type = Some("tv".into());
+    result.series = Some(series);
+    let mut snapshot: serde_json::Value = serde_json::from_str(&result.snapshot_json).map_err(|_| LibraryError::TmdbInvalidResponse)?;
+    snapshot["media_type"] = serde_json::json!("tv");
+    snapshot["directors"] = serde_json::json!(result.directors);
+    snapshot["series"] = serde_json::json!(result.series);
+    result.snapshot_json = snapshot.to_string();
+    Ok(result)
+}
+
 fn trimmed_token(credentials: &TmdbCredentials) -> Result<String, LibraryError> {
     let token = credentials.read_access_token.trim();
     if token.is_empty() {
@@ -287,6 +453,7 @@ fn normalize_search_result(raw: RawSearchMovie) -> Result<TmdbSearchResult, Libr
     let original_title = original_title.filter(|original| original != &title);
     let poster_path = checked_optional_path(raw.poster_path)?;
     Ok(TmdbSearchResult {
+        media_type: None,
         movie_id: raw.id,
         title,
         original_title,
@@ -361,6 +528,8 @@ fn normalize_raw_movie(raw: RawMovie) -> Result<TmdbRemoteMovie, LibraryError> {
     };
     let runtime_minutes = raw.runtime.filter(|runtime| *runtime > 0);
     let mut movie = TmdbRemoteMovie {
+        media_type: None,
+        series: None,
         id: raw.id,
         title,
         original_title,
@@ -606,6 +775,35 @@ fn push_unique_limited(mut values: Vec<String>, value: String) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn tv_search_uses_names_and_air_dates_without_movie_id_collision() {
+        let results = super::parse_search(r#"{"results":[{"id":12,"name":"시리즈","original_name":"Series","first_air_date":"2024-01-01"}]}"#).unwrap();
+        assert_eq!(results[0].title, "시리즈");
+        assert_eq!(results[0].release_date.as_deref(), Some("2024-01-01"));
+    }
+
+    #[test]
+    fn season_validates_parent_identity_and_orders_episodes() {
+        let json = r#"{"id":100,"season_number":1,"name":"Season 1","episodes":[{"id":2,"season_number":1,"episode_number":2,"name":"Second"},{"id":1,"season_number":1,"episode_number":1,"name":"First"}]}"#;
+        let season = super::parse_season(json, 100, 1).unwrap();
+        assert_eq!(season.episodes[0].id, 1);
+        assert!(super::parse_season(json, 101, 1).is_err());
+        assert!(super::parse_season(json, 100, 2).is_err());
+        let duplicate = json.replace("\"episode_number\":2", "\"episode_number\":1");
+        assert!(super::parse_season(&duplicate, 100, 1).is_err());
+    }
+
+    #[test]
+    fn series_normalization_keeps_tv_identity_and_local_snapshot_structure() {
+        let raw = serde_json::json!({"id":12,"name":"시리즈","original_name":"Series","first_air_date":"2020-01-01","status":"Ended","created_by":[{"name":"Creator"}],"aggregate_credits":{"cast":[{"name":"Actor"}]}});
+        let title = super::normalize_series(raw, vec![]).unwrap();
+        assert_eq!(title.media_type.as_deref(), Some("tv"));
+        assert_eq!(title.directors, vec!["Creator"]);
+        assert_eq!(title.series.unwrap().cast, vec!["Actor"]);
+        let snapshot: serde_json::Value = serde_json::from_str(&title.snapshot_json).unwrap();
+        assert_eq!(snapshot["media_type"], "tv");
+        assert_eq!(snapshot["series"]["status"], "Ended");
+    }
     use super::{
         map_http_status, merge_raw_movie, normalize_movie, normalize_raw_movie, parse_raw_movie,
         parse_search, validate_image_path, TmdbImageSize,

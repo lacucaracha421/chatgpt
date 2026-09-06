@@ -57,6 +57,7 @@ pub(crate) mod remote_progress;
 mod revisit;
 mod similarity;
 mod source_group;
+pub mod statistics;
 mod tmdb_flow;
 pub mod thumbnail_maintenance;
 pub(crate) mod tmdb;

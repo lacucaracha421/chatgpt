@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 41;
+pub(crate) const SCHEMA_VERSION: i64 = 42;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -221,6 +221,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         }
         if version <= 40 {
             transaction.execute_batch(include_str!("../../migrations/0041_collection_ownership.sql"))?;
+        }
+        if version <= 41 {
+            transaction.execute_batch(include_str!("../../migrations/0042_statistics.sql"))?;
         }
         transaction.commit()?;
         Ok::<(), LibraryError>(())

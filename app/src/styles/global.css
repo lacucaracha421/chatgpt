@@ -3663,6 +3663,16 @@ input:disabled {
   gap: var(--space-3);
 }
 
+.collection-edit-dialog__types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.collection-edit-dialog__types > button {
+  flex: 1;
+}
+
 .collection-edit-dialog__error {
   margin: 0;
   color: var(--color-danger);

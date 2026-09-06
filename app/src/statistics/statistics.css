@@ -1,0 +1,17 @@
+.statistics-panel { flex: 1; min-width: 0; overflow: auto; padding: var(--space-6); color: var(--color-text); }
+.statistics-panel > header { display: flex; justify-content: space-between; align-items: start; gap: var(--space-4); }
+.statistics-panel h1 { margin: 0; font-size: var(--text-title); }
+.statistics-panel h2 { margin: 0 0 var(--space-2); font-size: var(--text-section); }
+.statistics-panel p { color: var(--color-muted); font-size: var(--text-sm); line-height: var(--line-copy); }
+.statistics-section { margin-top: var(--space-6); border-top: 1px solid var(--color-border); padding-top: var(--space-4); min-width: 0; }
+.statistics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: var(--space-6); }
+.statistics-panel dl { margin: var(--space-3) 0; }
+.statistics-panel dl > div { display: flex; gap: var(--space-4); justify-content: space-between; padding: var(--space-compact) 0; }
+.statistics-panel dt { overflow-wrap: anywhere; }
+.statistics-panel dd { margin: 0; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.statistics-totals { display: flex; flex-wrap: wrap; gap: var(--space-6); }
+.statistics-totals > div { min-width: 140px; }
+.statistics-panel table { width: 100%; border-collapse: collapse; font-size: var(--text-md); table-layout: fixed; }
+.statistics-panel th, .statistics-panel td { padding: var(--space-2) var(--space-compact); border-bottom: 1px solid var(--color-border); text-align: right; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.statistics-panel th:first-child { text-align: left; font-weight: normal; width: 50%; }
+.statistics-panel thead { color: var(--color-muted); }

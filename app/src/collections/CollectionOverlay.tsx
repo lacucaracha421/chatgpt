@@ -29,13 +29,15 @@ import { TmdbMovieDialog, type TmdbMovieTarget } from "./TmdbMovieDialog";
 
 type CollectionOverlayProps = {
   collectionId: string;
+  initialTmdbSearch?: { query: string; mediaType: "movie" | "tv" };
+  onTmdbSearchConsumed?: () => void;
   collections: CollectionSummary[];
   onExit: () => void;
   onChanged: () => Promise<void>;
   onOpenSettings: () => void;
 };
 
-export function CollectionOverlay({ collectionId, collections, onExit, onChanged, onOpenSettings }: CollectionOverlayProps) {
+export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearchConsumed, collections, onExit, onChanged, onOpenSettings }: CollectionOverlayProps) {
   const sidebar = Boolean(useWorkspaceChrome());
   const { gateway, library } = useLibrary();
   const { privacyMode } = usePrivacy();
@@ -79,6 +81,11 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
   const isManga = collection?.type === "manga";
   const isGame = collection?.type === "game";
   const isMovie = collection?.type === "movie";
+  useEffect(() => {
+    if (!initialTmdbSearch || !isMovie) return;
+    setTmdbTarget({ kind: "existing", collectionId, initialSearch: initialTmdbSearch });
+    onTmdbSearchConsumed?.();
+  }, [collectionId, initialTmdbSearch, isMovie, onTmdbSearchConsumed]);
   const hasBookConnection = Boolean(kakaoConnection);
   const needsBookReconnect = kakaoConnection?.provider === "aladin";
   const selectedCover = covers?.find((cover) => cover.fileName === selectedFileName) ?? null;
@@ -545,6 +552,7 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
         />
       ) : isMovie && collection ? (
         <MovieCollectionDetail
+          series={tmdbConnection?.series}
           collection={collection}
           posterUrl={moviePosterUrl}
           backdropUrl={movieBackdropUrl}
@@ -554,7 +562,9 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
           onEdit={() => setEditMode({ kind: "edit", collection })}
           onToggleShowcase={() => void toggleShowcase()}
           onDelete={() => setDeleteOpen(true)}
-          onConnectProvider={() => setTmdbTarget({ kind: "existing", collectionId: collection.id })}
+          onConnectProvider={() => setTmdbTarget(tmdbConnection
+            ? { kind: "reconnect", collectionId: collection.id, initialSearch: { query: collection.name, mediaType: tmdbConnection.mediaType === "tv" ? "tv" : "movie" } }
+            : { kind: "existing", collectionId: collection.id })}
           onRefreshProvider={() => void refreshTmdb()}
           onChangeArtwork={() => setTmdbTarget({ kind: "artwork", collectionId: collection.id })}
         />

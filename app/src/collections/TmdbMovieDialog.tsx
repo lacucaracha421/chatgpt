@@ -6,12 +6,13 @@ import { usePrivacy } from "../privacy/PrivacyContext";
 import type { CollectionSummary, TmdbArtworkDecision, TmdbImageCandidate, TmdbMoviePreview, TmdbSearchResult } from "../library/types";
 import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
+import { Select } from "../shared/ui/Select";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { TextField } from "../shared/ui/TextField";
 
 export type TmdbMovieTarget =
   | { kind: "new" }
-  | { kind: "existing"; collectionId: string }
+  | { kind: "existing" | "reconnect"; collectionId: string; initialSearch?: { query: string; mediaType: "movie" | "tv" } }
   | { kind: "artwork"; collectionId: string };
 
 export type TmdbMovieStep =
@@ -41,6 +42,7 @@ type SearchStep = Extract<TmdbMovieStep, { kind: "search" }>;
 export function TmdbMovieDialog({ open, target, onClose, onOpenSettings, onApplied }: Props) {
   const { gateway } = useLibrary();
   const [step, setStep] = useState<TmdbMovieStep>(newSearchStep);
+  const [mediaType, setMediaType] = useState<"movie" | "tv">("movie");
   const [results, setResults] = useState<TmdbSearchResult[]>([]);
   const [busy, setBusy] = useState<Busy>(null);
   const [error, setError] = useState<string | null>(null);
@@ -48,23 +50,28 @@ export function TmdbMovieDialog({ open, target, onClose, onOpenSettings, onAppli
   const generation = useRef(0);
   const searchSnapshot = useRef<SearchStep>(newSearchStep());
   const targetCollectionId = target.kind === "new" ? undefined : target.collectionId;
+  const initialQuery = target.kind === "existing" || target.kind === "reconnect" ? target.initialSearch?.query ?? "" : "";
+  const initialMediaType = target.kind === "existing" || target.kind === "reconnect" ? target.initialSearch?.mediaType ?? "movie" : "movie";
 
   useEffect(() => {
     generation.current += 1;
     if (!open) return;
     const next = newSearchStep();
+    next.query = initialQuery;
     setStep(next);
     setResults([]);
+    setMediaType(initialMediaType);
     searchSnapshot.current = next;
     setBusy(null);
     setError(null);
     setCredentialError(false);
+    if (initialQuery.trim() && target.kind !== "artwork") void search(initialQuery, initialMediaType);
     if (target.kind === "artwork") {
       const requestGeneration = generation.current;
       setBusy("artwork");
       void gateway.getTmdbConnection(target.collectionId).then(async (connection) => {
         if (!connection) throw new Error("TMDB 연결 정보를 찾지 못했습니다.");
-        return gateway.previewTmdbMovie(connection.movieId);
+        return gateway.previewTmdbMovie(connection.movieId, connection.mediaType);
       }).then((preview) => {
         if (requestGeneration !== generation.current) return;
         setStep(buildPreviewStep(preview, true));
@@ -75,15 +82,16 @@ export function TmdbMovieDialog({ open, target, onClose, onOpenSettings, onAppli
         setBusy(null);
       });
     }
-  }, [gateway, open, target.kind, targetCollectionId]);
+    return () => { generation.current += 1; };
+  }, [gateway, open, target.kind, targetCollectionId, initialQuery, initialMediaType]);
 
   function updateSearch(update: Partial<SearchStep>) {
     setStep((current) => current.kind === "search" ? { ...current, ...update } : current);
   }
 
-  async function search() {
-    if (step.kind !== "search") return;
-    const query = step.query.trim();
+  async function search(initialSearchQuery?: string, searchMediaType = mediaType) {
+    if (initialSearchQuery === undefined && step.kind !== "search") return;
+    const query = (initialSearchQuery ?? (step.kind === "search" ? step.query : "")).trim();
     if (!query) {
       setError("검색어를 입력해 주세요.");
       setCredentialError(false);
@@ -95,7 +103,7 @@ export function TmdbMovieDialog({ open, target, onClose, onOpenSettings, onAppli
     setError(null);
     setCredentialError(false);
     try {
-      const nextResults = await gateway.searchTmdbMovies(query);
+      const nextResults = searchMediaType === "tv" ? await gateway.searchTmdbMovies(query, "tv") : await gateway.searchTmdbMovies(query);
       if (requestGeneration !== generation.current) return;
       setResults(nextResults);
       updateSearch({ selectedMovieId: null });
@@ -117,7 +125,7 @@ export function TmdbMovieDialog({ open, target, onClose, onOpenSettings, onAppli
     setError(null);
     setCredentialError(false);
     try {
-      const preview = await gateway.previewTmdbMovie(movieId);
+      const preview = mediaType === "tv" ? await gateway.previewTmdbMovie(movieId, "tv") : await gateway.previewTmdbMovie(movieId);
       if (requestGeneration !== generation.current) return;
       setStep(buildPreviewStep(preview, false));
     } catch (previewError) {
@@ -145,11 +153,11 @@ export function TmdbMovieDialog({ open, target, onClose, onOpenSettings, onAppli
     try {
       const collection = target.kind === "artwork"
         ? await gateway.replaceTmdbMovieArtwork({ collectionId: target.collectionId, poster: step.posterDecision, backdrop: step.backdropDecision })
-        : await gateway.applyTmdbMovie({ target, movieId: step.preview.movieId, posterPath: step.posterPath, backdropPath: step.backdropPath });
+        : await gateway.applyTmdbMovie({ target, ...(step.preview.mediaType === "tv" ? { mediaType: "tv" as const } : {}), movieId: step.preview.movieId, posterPath: step.posterPath, backdropPath: step.backdropPath });
       onClose();
       void Promise.resolve().then(() => onApplied(collection)).catch(() => undefined);
     } catch (applyError) {
-      if (requestGeneration === generation.current) showError(applyError, target.kind === "new" ? "TMDB 영화를 가져오지 못했습니다." : target.kind === "existing" ? "TMDB 정보를 연결하지 못했습니다." : "TMDB 아트워크를 바꾸지 못했습니다.", setError, setCredentialError);
+      if (requestGeneration === generation.current) showError(applyError, target.kind === "new" ? "TMDB 영화를 가져오지 못했습니다." : target.kind !== "artwork" ? "TMDB 정보를 연결하지 못했습니다." : "TMDB 아트워크를 바꾸지 못했습니다.", setError, setCredentialError);
     } finally {
       if (requestGeneration === generation.current) setBusy(null);
     }
@@ -161,19 +169,30 @@ export function TmdbMovieDialog({ open, target, onClose, onOpenSettings, onAppli
     onClose();
   }
 
-  const title = target.kind === "new" ? "TMDB에서 영화 추가" : target.kind === "existing" ? "TMDB 영화 연결" : "TMDB 영화 아트워크 변경";
+  const formatLabel = (step.kind === "preview" ? step.preview.mediaType : mediaType) === "tv" ? "시리즈" : "영화";
+  const title = target.kind === "new" ? `TMDB에서 ${formatLabel} 추가` : target.kind === "existing" ? `TMDB ${formatLabel} 연결` : target.kind === "reconnect" ? `TMDB ${formatLabel} 연결 작품 변경` : `TMDB ${formatLabel} 아트워크 변경`;
   const searchStep = step.kind === "search" ? step : null;
   const previewStep = step.kind === "preview" ? step : null;
 
   return (
     <Dialog open={open} title={title} variant="wide" onClose={handleClose}>
       <div className="tmdb-movie-dialog">
+        {target.kind === "reconnect" && <p>정확한 작품을 검색해 선택한 뒤 저장하세요. 저장하기 전까지 기존 연결은 유지됩니다.</p>}
         {error && <div className="tmdb-movie-dialog__error" role="alert"><p>{error}</p>{credentialError && <Button type="button" onClick={onOpenSettings}>TMDB 설정 열기</Button>}</div>}
-        {busy === "search" && <Skeleton className="tmdb-movie-dialog__loading" label="영화 검색 중" />}
+        {busy === "search" && <Skeleton className="tmdb-movie-dialog__loading" label={`${formatLabel} 검색 중`} />}
+        {busy === "apply" && step.kind === "preview" && step.preview.mediaType === "tv" && <p role="status">시즌별 에피소드와 포스터를 저장하고 있습니다. 시즌 수에 따라 시간이 걸릴 수 있습니다.</p>}
         {busy === "artwork" && <Skeleton className="tmdb-movie-dialog__loading" label="아트워크 불러오는 중" />}
+        {searchStep && target.kind !== "artwork" && <Select label="영상 형식" value={mediaType} disabled={busy !== null} onChange={(event) => {
+          generation.current += 1;
+          setMediaType(event.target.value as "movie" | "tv");
+          setResults([]);
+          updateSearch({ selectedMovieId: null });
+          setError(null);
+        }}><option value="movie">영화</option><option value="tv">시리즈</option></Select>}
         {searchStep && target.kind !== "artwork" && <SearchStep step={searchStep} results={results} busy={busy} onQuery={(query) => { updateSearch({ query }); setError(null); }} onSearch={() => void search()} onSelect={(movieId) => { updateSearch({ selectedMovieId: movieId }); setError(null); setCredentialError(false); }} />}
         {previewStep && <>
           <PreviewSummary preview={previewStep.preview} />
+          {previewStep.preview.series && <p>시리즈 · 시즌 {previewStep.preview.series.seasons.length}개. 가져올 때 전체 에피소드와 시즌 포스터를 저장합니다.</p>}
           <ArtworkStep kind="poster" artworkMode={target.kind === "artwork"} decision={previewStep.posterDecision} candidates={previewStep.preview.posters} selectedPath={previewStep.posterPath} decided={previewStep.posterDecided} onKeep={() => setStep((current) => current.kind === "preview" ? { ...current, posterPath: null, posterDecision: { kind: "keep" } } : current)} onSelect={(filePath) => setStep((current) => current.kind === "preview" ? { ...current, posterPath: filePath, posterDecided: true, posterDecision: { kind: "select", filePath } } : current)} onClear={() => setStep((current) => current.kind === "preview" ? { ...current, posterPath: null, posterDecided: true, posterDecision: { kind: target.kind === "artwork" ? "clear" : "keep" } } : current)} />
           <ArtworkStep kind="backdrop" artworkMode={target.kind === "artwork"} decision={previewStep.backdropDecision} candidates={previewStep.preview.backdrops} selectedPath={previewStep.backdropPath} decided={previewStep.backdropDecided} onKeep={() => setStep((current) => current.kind === "preview" ? { ...current, backdropPath: null, backdropDecision: { kind: "keep" } } : current)} onSelect={(filePath) => setStep((current) => current.kind === "preview" ? { ...current, backdropPath: filePath, backdropDecided: true, backdropDecision: { kind: "select", filePath } } : current)} onClear={() => setStep((current) => current.kind === "preview" ? { ...current, backdropPath: null, backdropDecided: true, backdropDecision: { kind: target.kind === "artwork" ? "clear" : "keep" } } : current)} />
         </>}
@@ -181,7 +200,7 @@ export function TmdbMovieDialog({ open, target, onClose, onOpenSettings, onAppli
           <Button type="button" disabled={busy === "apply"} onClick={handleClose}>취소</Button>
           {previewStep && target.kind !== "artwork" && <Button type="button" disabled={busy !== null} onClick={back}>뒤로</Button>}
           {searchStep && target.kind !== "artwork" && <Button type="button" variant="primary" disabled={searchStep.selectedMovieId === null || busy !== null} onClick={() => void previewSelected()}>{busy === "preview" ? "불러오는 중…" : "다음"}</Button>}
-          {previewStep && <Button type="button" variant="primary" disabled={busy !== null || !previewStep.posterDecided || !previewStep.backdropDecided} onClick={() => void apply()}>{target.kind === "new" ? "가져오기" : "저장"}</Button>}
+          {previewStep && <Button type="button" variant="primary" disabled={busy !== null || !previewStep.posterDecided || !previewStep.backdropDecided} onClick={() => void apply()}>{busy === "apply" ? "저장 중…" : target.kind === "new" ? "가져오기" : "저장"}</Button>}
         </div>
       </div>
     </Dialog>

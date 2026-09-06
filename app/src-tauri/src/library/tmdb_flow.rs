@@ -10,7 +10,7 @@ use super::{
         TmdbArtworkDecision, TmdbArtworkReplaceRequest, TmdbConnection, TmdbImageCandidate,
         TmdbImageRef, TmdbMoviePreview, TmdbRemoteMovie, TmdbSearchResult,
     },
-    tmdb::{TmdbClient, TmdbImageSize},
+    tmdb::{media_kind, TmdbClient, TmdbImageSize},
     work_artwork::{PreparedWorkArtwork, WorkArtworkKind},
     Library,
 };
@@ -30,20 +30,20 @@ impl<'a> MovieImportFlow<'a> {
         }
     }
 
-    fn search(&self, query: &str) -> Result<Vec<TmdbSearchResult>, LibraryError> {
+    fn search(&self, query: &str, media_type: Option<&str>) -> Result<Vec<TmdbSearchResult>, LibraryError> {
         let credentials = credential::read_tmdb_token_os()?;
-        self.client.search(&credentials, query)
+        self.client.search_titles(&credentials, query, media_type)
     }
 
-    fn preview(&self, movie_id: i64) -> Result<TmdbMoviePreview, LibraryError> {
+    fn preview(&self, movie_id: i64, media_type: Option<&str>) -> Result<TmdbMoviePreview, LibraryError> {
         let credentials = credential::read_tmdb_token_os()?;
-        let fetched = self.client.movie(&credentials, movie_id)?;
+        let fetched = self.client.preview_title(&credentials, movie_id, media_type)?;
         Ok(movie_preview(&fetched))
     }
 
     fn apply(&self, request: TmdbApplyRequest) -> Result<CollectionSummary, LibraryError> {
         let credentials = credential::read_tmdb_token_os()?;
-        let fetched = self.client.movie(&credentials, request.movie_id)?;
+        let fetched = self.client.title(&credentials, request.movie_id, request.media_type.as_deref())?;
         let (poster, backdrop) = validated_selection(&request, &fetched)?;
         let poster_bytes = poster
             .map(|candidate| self.client.download_original(&candidate.file_path))
@@ -51,37 +51,50 @@ impl<'a> MovieImportFlow<'a> {
         let backdrop_bytes = backdrop
             .map(|candidate| self.client.download_original(&candidate.file_path))
             .transpose()?;
-        self.library.apply_fetched_tmdb_movie(
+        let season_posters = self.season_posters(&fetched)?;
+        self.library.apply_fetched_tmdb_title(
             request,
             fetched,
             poster_bytes.as_deref(),
             backdrop_bytes.as_deref(),
+            &season_posters,
         )
     }
 
     fn refresh(&self, collection_id: &str) -> Result<CollectionSummary, LibraryError> {
-        let movie_id = self
+        let binding = self
             .library
             .get_tmdb_connection(collection_id)?
-            .ok_or(LibraryError::InvalidTmdbIdentity)?
-            .movie_id;
+            .ok_or(LibraryError::InvalidTmdbIdentity)?;
         let credentials = credential::read_tmdb_token_os()?;
-        let fetched = self.client.movie(&credentials, movie_id)?;
-        self.library
-            .refresh_fetched_tmdb_movie(collection_id, fetched)
+        let fetched = self.client.title(&credentials, binding.movie_id, binding.media_type.as_deref())?;
+        let season_posters = self.season_posters(&fetched)?;
+        self.library.refresh_fetched_tmdb_title(collection_id, fetched, &season_posters)
+    }
+
+    fn season_posters(&self, fetched: &TmdbRemoteMovie) -> Result<Vec<(i64, Vec<u8>)>, LibraryError> {
+        let mut posters = Vec::new();
+        let mut total_bytes = 0usize;
+        for (id, path) in fetched.series.iter().flat_map(|series| &series.seasons)
+            .filter_map(|season| season.poster_path.as_deref().map(|path| (season.id, path))) {
+            let bytes = self.client.download_season_poster(path)?;
+            total_bytes += bytes.len();
+            if total_bytes > super::work_artwork::MAX_WORK_ARTWORK_BYTES { return Err(LibraryError::TmdbInvalidResponse); }
+            posters.push((id, bytes));
+        }
+        Ok(posters)
     }
 
     fn replace_artwork(
         &self,
         request: TmdbArtworkReplaceRequest,
     ) -> Result<CollectionSummary, LibraryError> {
-        let movie_id = self
+        let binding = self
             .library
             .get_tmdb_connection(&request.collection_id)?
-            .ok_or(LibraryError::InvalidTmdbIdentity)?
-            .movie_id;
+            .ok_or(LibraryError::InvalidTmdbIdentity)?;
         let credentials = credential::read_tmdb_token_os()?;
-        let fetched = self.client.movie(&credentials, movie_id)?;
+        let fetched = self.client.preview_title(&credentials, binding.movie_id, binding.media_type.as_deref())?;
         let (poster, backdrop) = validated_artwork_decisions(&request, &fetched)?;
         let poster_bytes = poster
             .map(|candidate| self.client.download_original(&candidate.file_path))
@@ -99,12 +112,20 @@ impl<'a> MovieImportFlow<'a> {
 }
 
 impl Library {
+    pub fn search_tmdb_titles(&self, query: &str, media_type: Option<&str>) -> Result<Vec<TmdbSearchResult>, LibraryError> {
+        MovieImportFlow::new(self).search(query, media_type)
+    }
+
+    pub fn preview_tmdb_title(&self, movie_id: i64, media_type: Option<&str>) -> Result<TmdbMoviePreview, LibraryError> {
+        MovieImportFlow::new(self).preview(movie_id, media_type)
+    }
+
     pub fn search_tmdb_movies(&self, query: &str) -> Result<Vec<TmdbSearchResult>, LibraryError> {
-        MovieImportFlow::new(self).search(query)
+        MovieImportFlow::new(self).search(query, None)
     }
 
     pub fn preview_tmdb_movie(&self, movie_id: i64) -> Result<TmdbMoviePreview, LibraryError> {
-        MovieImportFlow::new(self).preview(movie_id)
+        MovieImportFlow::new(self).preview(movie_id, None)
     }
 
     pub fn apply_tmdb_movie(
@@ -135,26 +156,23 @@ impl Library {
         if collection_type != "movie" {
             return Err(LibraryError::InvalidCollectionType);
         }
-        let binding: Option<(String, Option<String>)> = connection
+        let binding: Option<(String, Option<String>, Option<String>)> = connection
             .query_row(
-                "SELECT external_id, last_synced_at
+                "SELECT external_id, last_synced_at, provider_data_json
                  FROM collection_external_bindings
                  WHERE collection_id = ?1 AND provider = ?2",
                 params![collection_id, PROVIDER],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .optional()?;
         binding
-            .map(|(external_id, last_synced_at)| {
-                let movie_id = external_id
-                    .parse::<i64>()
-                    .ok()
-                    .filter(|id| *id > 0)
-                    .ok_or(LibraryError::InvalidTmdbIdentity)?;
-                Ok(TmdbConnection {
-                    movie_id,
-                    last_synced_at,
-                })
+            .map(|(external_id, last_synced_at, snapshot)| {
+                let (media_type, movie_id) = parse_binding_identity(&external_id)?;
+                let series = snapshot.as_deref().map(serde_json::from_str::<serde_json::Value>).transpose()
+                    .map_err(|_| LibraryError::TmdbInvalidResponse)?
+                    .and_then(|value| value.get("series").cloned()).filter(|value| !value.is_null())
+                    .map(serde_json::from_value).transpose().map_err(|_| LibraryError::TmdbInvalidResponse)?;
+                Ok(TmdbConnection { movie_id, media_type: Some(media_type.into()), series, last_synced_at })
             })
             .transpose()
     }
@@ -173,8 +191,18 @@ impl Library {
         poster_bytes: Option<&[u8]>,
         backdrop_bytes: Option<&[u8]>,
     ) -> Result<CollectionSummary, LibraryError> {
+        self.apply_fetched_tmdb_title(request, fetched, poster_bytes, backdrop_bytes, &[])
+    }
+
+    fn apply_fetched_tmdb_title(
+        &self,
+        request: TmdbApplyRequest,
+        mut fetched: TmdbRemoteMovie,
+        poster_bytes: Option<&[u8]>,
+        backdrop_bytes: Option<&[u8]>,
+        season_bytes: &[(i64, Vec<u8>)],
+    ) -> Result<CollectionSummary, LibraryError> {
         let (poster_candidate, backdrop_candidate) = validated_selection(&request, &fetched)?;
-        let snapshot_json = normalized_snapshot(&fetched.snapshot_json)?;
         let name = normalized_name(fetched.title.clone())?;
         let original_title = normalized_optional(fetched.original_title.as_deref());
         let director = joined(&fetched.directors);
@@ -187,18 +215,20 @@ impl Library {
 
         let collection_id = match &request.target {
             TmdbApplyTarget::New => uuid::Uuid::new_v4().to_string(),
-            TmdbApplyTarget::Existing { collection_id } => collection_id.clone(),
+            TmdbApplyTarget::Existing { collection_id } | TmdbApplyTarget::Reconnect { collection_id } => collection_id.clone(),
         };
         let poster =
             prepare_selected_artwork(self, &collection_id, poster_candidate, poster_bytes)?;
         let backdrop =
             prepare_selected_artwork(self, &collection_id, backdrop_candidate, backdrop_bytes)?;
+        let season_artwork = prepare_season_artwork(self, &collection_id, &mut fetched, season_bytes)?;
+        let snapshot_json = normalized_snapshot(&fetched.snapshot_json)?;
 
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
         match &request.target {
             TmdbApplyTarget::New => {
-                ensure_identity_available(&transaction, fetched.id)?;
+                ensure_identity_available(&transaction, &binding_identity(&fetched)?)?;
                 transaction
                     .execute(
                         "INSERT INTO collections (
@@ -227,9 +257,25 @@ impl Library {
                     )
                     .map_err(map_duplicate_name)?;
             }
+            TmdbApplyTarget::Reconnect { collection_id } => {
+                let old_identity = tmdb_binding_id_in_transaction(&transaction, collection_id)?;
+                if old_identity != binding_identity(&fetched)? {
+                    ensure_identity_available(&transaction, &binding_identity(&fetched)?)?;
+                }
+                let previous_json: Option<String> = transaction.query_row(
+                    "SELECT provider_data_json FROM collection_external_bindings WHERE collection_id = ?1 AND provider = ?2",
+                    params![collection_id, PROVIDER], |row| row.get(0),
+                )?;
+                let previous = provider_snapshot(previous_json.as_deref())?;
+                update_provider_metadata(&transaction, collection_id, &fetched, &previous)?;
+                transaction.execute(
+                    "UPDATE collections SET year = CASE WHEN year IS ?1 THEN ?2 ELSE year END WHERE id = ?3",
+                    params![year_from_date(previous.release_date.as_deref()), year, collection_id],
+                )?;
+            }
             TmdbApplyTarget::Existing { collection_id } => {
                 require_movie_without_tmdb_binding(&transaction, collection_id)?;
-                ensure_identity_available(&transaction, fetched.id)?;
+                ensure_identity_available(&transaction, &binding_identity(&fetched)?)?;
                 transaction.execute(
                     "UPDATE collections
                      SET year = CASE WHEN year IS NULL THEN ?1 ELSE year END,
@@ -260,12 +306,13 @@ impl Library {
             }
         }
         let now = chrono::Utc::now().to_rfc3339();
+        insert_season_artwork(&transaction, &collection_id, &season_artwork, &now)?;
         upsert_external_binding(
             &transaction,
             &collection_id,
             ExternalBindingInput {
                 provider: PROVIDER.into(),
-                external_id: fetched.id.to_string(),
+                external_id: binding_identity(&fetched)?,
                 provider_config_json: None,
                 provider_data_json: Some(snapshot_json),
                 last_synced_at: Some(now.clone()),
@@ -296,6 +343,7 @@ impl Library {
         }
         let summary = collection_by_id(&transaction, &collection_id)?;
         transaction.commit()?;
+        for (_, artwork) in season_artwork { artwork.commit(); }
         if let Some((_, prepared)) = poster {
             prepared.commit();
         }
@@ -312,6 +360,16 @@ impl Library {
         collection_id: &str,
         fetched: TmdbRemoteMovie,
     ) -> Result<CollectionSummary, LibraryError> {
+        self.refresh_fetched_tmdb_title(collection_id, fetched, &[])
+    }
+
+    fn refresh_fetched_tmdb_title(
+        &self,
+        collection_id: &str,
+        mut fetched: TmdbRemoteMovie,
+        season_bytes: &[(i64, Vec<u8>)],
+    ) -> Result<CollectionSummary, LibraryError> {
+        let season_artwork = prepare_season_artwork(self, collection_id, &mut fetched, season_bytes)?;
         let snapshot_json = normalized_snapshot(&fetched.snapshot_json)?;
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
@@ -331,13 +389,439 @@ impl Library {
         if collection_type != "movie" {
             return Err(LibraryError::InvalidCollectionType);
         }
-        let movie_id = external_id
-            .parse::<i64>()
-            .ok()
-            .filter(|id| *id > 0)
-            .ok_or(LibraryError::InvalidTmdbIdentity)?;
-        validate_movie_identity(movie_id, &fetched)?;
+        validate_binding_identity(&external_id, &fetched)?;
         let previous = provider_snapshot(previous_snapshot.as_deref())?;
+        update_provider_metadata(&transaction, collection_id, &fetched, &previous)?;
+        let now = chrono::Utc::now().to_rfc3339();
+        insert_season_artwork(&transaction, collection_id, &season_artwork, &now)?;
+        transaction.execute(
+            "UPDATE collection_external_bindings
+             SET provider_data_json = ?1, last_synced_at = ?2, updated_at = ?2
+             WHERE collection_id = ?3 AND provider = ?4",
+            params![snapshot_json, now, collection_id, PROVIDER],
+        )?;
+        let summary = collection_by_id(&transaction, collection_id)?;
+        transaction.commit()?;
+        for (_, artwork) in season_artwork { artwork.commit(); }
+        drop(connection);
+        let _ = self.cleanup_unreferenced_work_artwork();
+        Ok(summary)
+    }
+
+    pub(crate) fn replace_fetched_tmdb_movie_artwork(
+        &self,
+        request: TmdbArtworkReplaceRequest,
+        fetched: TmdbRemoteMovie,
+        poster_bytes: Option<&[u8]>,
+        backdrop_bytes: Option<&[u8]>,
+    ) -> Result<CollectionSummary, LibraryError> {
+        let (poster_candidate, backdrop_candidate) =
+            validated_artwork_decisions(&request, &fetched)?;
+        let movie_id = self.tmdb_binding_id(&request.collection_id)?;
+        validate_binding_identity(&movie_id, &fetched)?;
+        let poster =
+            prepare_selected_artwork(self, &request.collection_id, poster_candidate, poster_bytes)?;
+        let backdrop = prepare_selected_artwork(
+            self,
+            &request.collection_id,
+            backdrop_candidate,
+            backdrop_bytes,
+        )?;
+
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let transaction_movie_id =
+            tmdb_binding_id_in_transaction(&transaction, &request.collection_id)?;
+        validate_binding_identity(&transaction_movie_id, &fetched)?;
+        apply_artwork_decision(
+            &transaction,
+            &request.collection_id,
+            &request.poster,
+            WorkArtworkKind::Cover,
+            poster.as_ref(),
+        )?;
+        apply_artwork_decision(
+            &transaction,
+            &request.collection_id,
+            &request.backdrop,
+            WorkArtworkKind::Backdrop,
+            backdrop.as_ref(),
+        )?;
+        let summary = collection_by_id(&transaction, &request.collection_id)?;
+        transaction.commit()?;
+        if let Some((_, prepared)) = poster {
+            prepared.commit();
+        }
+        if let Some((_, prepared)) = backdrop {
+            prepared.commit();
+        }
+        drop(connection);
+        let _ = self.cleanup_unreferenced_work_artwork();
+        Ok(summary)
+    }
+
+    fn tmdb_binding_id(&self, collection_id: &str) -> Result<String, LibraryError> {
+        let connection = self.connection()?;
+        let collection_type: String = connection
+            .query_row(
+                "SELECT type FROM collections WHERE id = ?1",
+                [collection_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or(LibraryError::CollectionNotFound)?;
+        if collection_type != "movie" {
+            return Err(LibraryError::InvalidCollectionType);
+        }
+        let external_id: String = connection
+            .query_row(
+                "SELECT external_id FROM collection_external_bindings
+                 WHERE collection_id = ?1 AND provider = ?2",
+                params![collection_id, PROVIDER],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or(LibraryError::InvalidTmdbIdentity)?;
+        parse_binding_identity(&external_id)?;
+        Ok(external_id)
+    }
+}
+
+fn prepare_season_artwork(
+    library: &Library,
+    collection_id: &str,
+    fetched: &mut TmdbRemoteMovie,
+    bytes: &[(i64, Vec<u8>)],
+) -> Result<Vec<(String, PreparedWorkArtwork)>, LibraryError> {
+    let mut prepared = Vec::new();
+    if let Some(series) = fetched.series.as_mut() {
+        for season in &mut series.seasons {
+            if let Some((_, bytes)) = bytes.iter().find(|(id, _)| *id == season.id) {
+                let image = library.prepare_work_artwork(collection_id, bytes)?;
+                season.poster_artwork_id = Some(image.id.clone());
+                prepared.push((format!("season:{}:{}", season.id, image.id), image));
+            }
+        }
+        let mut snapshot: serde_json::Value = serde_json::from_str(&fetched.snapshot_json)
+            .map_err(|_| LibraryError::TmdbInvalidResponse)?;
+        snapshot["series"] = serde_json::json!(series);
+        fetched.snapshot_json = snapshot.to_string();
+    }
+    Ok(prepared)
+}
+
+fn insert_season_artwork(
+    transaction: &Transaction<'_>,
+    collection_id: &str,
+    artworks: &[(String, PreparedWorkArtwork)],
+    now: &str,
+) -> Result<(), LibraryError> {
+    for (identity, artwork) in artworks {
+        // Season posters are cached presentation images, never the selected work cover.
+        transaction.execute(
+            "DELETE FROM collection_work_artworks WHERE collection_id = ?1 AND provider = 'tmdb' AND provider_image_id LIKE ?2 AND selected = 0",
+            params![collection_id, format!("season:{}:%", identity.split(':').nth(1).ok_or(LibraryError::InvalidTmdbIdentity)?)],
+        )?;
+        transaction.execute(
+            "INSERT INTO collection_work_artworks (id, collection_id, provider, provider_image_id, kind, relative_path, mime_type, width, height, selected, created_at, updated_at)
+             VALUES (?1, ?2, 'tmdb', ?3, 'cover', ?4, ?5, ?6, ?7, 0, ?8, ?8)",
+            params![artwork.id, collection_id, identity, artwork.relative_path, artwork.mime_type, artwork.width, artwork.height, now],
+        )?;
+    }
+    Ok(())
+}
+
+fn parse_binding_identity(external_id: &str) -> Result<(&'static str, i64), LibraryError> {
+    let (kind, id) = external_id.strip_prefix("tv:").map(|id| ("tv", id)).unwrap_or(("movie", external_id));
+    let id = id.parse::<i64>().ok().filter(|id| *id > 0).ok_or(LibraryError::InvalidTmdbIdentity)?;
+    Ok((kind, id))
+}
+
+fn binding_identity(fetched: &TmdbRemoteMovie) -> Result<String, LibraryError> {
+    if fetched.id <= 0 { return Err(LibraryError::InvalidTmdbIdentity); }
+    Ok(if media_kind(fetched.media_type.as_deref())? == "tv" { format!("tv:{}", fetched.id) } else { fetched.id.to_string() })
+}
+
+fn validate_binding_identity(external_id: &str, fetched: &TmdbRemoteMovie) -> Result<(), LibraryError> {
+    if parse_binding_identity(external_id)? != (media_kind(fetched.media_type.as_deref())?, fetched.id) {
+        return Err(LibraryError::InvalidTmdbIdentity);
+    }
+    Ok(())
+}
+
+fn validate_movie_identity(movie_id: i64, fetched: &TmdbRemoteMovie) -> Result<(), LibraryError> {
+    if movie_id <= 0 || fetched.id <= 0 || movie_id != fetched.id {
+        return Err(LibraryError::InvalidTmdbIdentity);
+    }
+    Ok(())
+}
+
+fn validated_selection<'a>(
+    request: &TmdbApplyRequest,
+    fetched: &'a TmdbRemoteMovie,
+) -> Result<(Option<&'a TmdbImageRef>, Option<&'a TmdbImageRef>), LibraryError> {
+    validate_movie_identity(request.movie_id, fetched)?;
+    if media_kind(request.media_type.as_deref())? != media_kind(fetched.media_type.as_deref())? {
+        return Err(LibraryError::InvalidTmdbIdentity);
+    }
+    let poster = request
+        .poster_path
+        .as_deref()
+        .map(|path| selected_candidate(path, &fetched.posters))
+        .transpose()?;
+    let backdrop = request
+        .backdrop_path
+        .as_deref()
+        .map(|path| selected_candidate(path, &fetched.backdrops))
+        .transpose()?;
+    Ok((poster, backdrop))
+}
+
+fn validated_artwork_decisions<'a>(
+    request: &TmdbArtworkReplaceRequest,
+    fetched: &'a TmdbRemoteMovie,
+) -> Result<(Option<&'a TmdbImageRef>, Option<&'a TmdbImageRef>), LibraryError> {
+    if fetched.id <= 0 {
+        return Err(LibraryError::InvalidTmdbIdentity);
+    }
+    let poster = artwork_decision_candidate(&request.poster, &fetched.posters)?;
+    let backdrop = artwork_decision_candidate(&request.backdrop, &fetched.backdrops)?;
+    Ok((poster, backdrop))
+}
+
+fn selected_candidate<'a>(
+    path: &str,
+    candidates: &'a [TmdbImageRef],
+) -> Result<&'a TmdbImageRef, LibraryError> {
+    TmdbClient::image_url(path, TmdbImageSize::Original)?;
+    candidates
+        .iter()
+        .find(|candidate| candidate.file_path == path)
+        .ok_or(LibraryError::InvalidTmdbIdentity)
+}
+
+fn artwork_decision_candidate<'a>(
+    decision: &TmdbArtworkDecision,
+    candidates: &'a [TmdbImageRef],
+) -> Result<Option<&'a TmdbImageRef>, LibraryError> {
+    match decision {
+        TmdbArtworkDecision::Keep | TmdbArtworkDecision::Clear => Ok(None),
+        TmdbArtworkDecision::Select { file_path } => {
+            selected_candidate(file_path, candidates).map(Some)
+        }
+    }
+}
+
+fn prepare_selected_artwork(
+    library: &Library,
+    collection_id: &str,
+    candidate: Option<&TmdbImageRef>,
+    bytes: Option<&[u8]>,
+) -> Result<Option<(String, PreparedWorkArtwork)>, LibraryError> {
+    match (candidate, bytes) {
+        (Some(candidate), Some(bytes)) => Ok(Some((
+            candidate.file_path.clone(),
+            library.prepare_work_artwork(collection_id, bytes)?,
+        ))),
+        (None, None) => Ok(None),
+        _ => Err(LibraryError::InvalidTmdbIdentity),
+    }
+}
+
+fn apply_artwork_decision(
+    transaction: &Transaction<'_>,
+    collection_id: &str,
+    decision: &TmdbArtworkDecision,
+    kind: WorkArtworkKind,
+    prepared: Option<&(String, PreparedWorkArtwork)>,
+) -> Result<(), LibraryError> {
+    match decision {
+        TmdbArtworkDecision::Keep => Ok(()),
+        TmdbArtworkDecision::Clear => {
+            Library::clear_work_artwork_kind_in_transaction(transaction, collection_id, kind)?;
+            transaction.execute(
+                "DELETE FROM collection_work_artworks
+                 WHERE collection_id = ?1 AND provider = ?2 AND kind = ?3 AND provider_image_id NOT LIKE 'season:%'",
+                params![collection_id, PROVIDER, kind.as_str()],
+            )?;
+            Ok(())
+        }
+        TmdbArtworkDecision::Select { .. } => {
+            let (file_path, prepared) = prepared.ok_or(LibraryError::InvalidTmdbIdentity)?;
+            Library::insert_work_artwork_in_transaction(
+                transaction,
+                collection_id,
+                PROVIDER,
+                file_path,
+                kind,
+                None,
+                prepared,
+            )?;
+            transaction.execute(
+                "DELETE FROM collection_work_artworks
+                 WHERE collection_id = ?1 AND provider = ?2 AND kind = ?3 AND selected = 0 AND provider_image_id NOT LIKE 'season:%'",
+                params![collection_id, PROVIDER, kind.as_str()],
+            )?;
+            Ok(())
+        }
+    }
+}
+
+fn ensure_identity_available(
+    connection: &rusqlite::Connection,
+    external_id: &str,
+) -> Result<(), LibraryError> {
+    let owner: Option<String> = connection
+        .query_row(
+            "SELECT collection_id FROM collection_external_bindings
+             WHERE provider = ?1 AND external_id = ?2 LIMIT 1",
+            params![PROVIDER, external_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if owner.is_some() {
+        Err(LibraryError::DuplicateProviderBinding)
+    } else {
+        Ok(())
+    }
+}
+
+fn require_movie_without_tmdb_binding(
+    connection: &rusqlite::Connection,
+    collection_id: &str,
+) -> Result<(), LibraryError> {
+    let collection_type: String = connection
+        .query_row(
+            "SELECT type FROM collections WHERE id = ?1",
+            [collection_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .ok_or(LibraryError::CollectionNotFound)?;
+    if collection_type != "movie" {
+        return Err(LibraryError::InvalidCollectionType);
+    }
+    let has_binding: bool = connection.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM collection_external_bindings
+            WHERE collection_id = ?1 AND provider = ?2
+        )",
+        params![collection_id, PROVIDER],
+        |row| row.get(0),
+    )?;
+    if has_binding {
+        return Err(LibraryError::DuplicateProviderBinding);
+    }
+    Ok(())
+}
+
+fn tmdb_binding_id_in_transaction(
+    transaction: &Transaction<'_>,
+    collection_id: &str,
+) -> Result<String, LibraryError> {
+    let collection_type: String = transaction
+        .query_row(
+            "SELECT type FROM collections WHERE id = ?1",
+            [collection_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .ok_or(LibraryError::CollectionNotFound)?;
+    if collection_type != "movie" {
+        return Err(LibraryError::InvalidCollectionType);
+    }
+    let external_id: String = transaction
+        .query_row(
+            "SELECT external_id FROM collection_external_bindings
+             WHERE collection_id = ?1 AND provider = ?2",
+            params![collection_id, PROVIDER],
+            |row| row.get(0),
+        )
+        .optional()?
+        .ok_or(LibraryError::InvalidTmdbIdentity)?;
+    parse_binding_identity(&external_id)?;
+    Ok(external_id)
+}
+
+fn movie_preview(movie: &TmdbRemoteMovie) -> TmdbMoviePreview {
+    TmdbMoviePreview {
+        media_type: movie.media_type.clone(),
+        series: movie.series.clone(),
+        movie_id: movie.id,
+        proposed_title: movie.title.clone(),
+        original_title: movie.original_title.clone(),
+        release_date: movie.release_date.clone(),
+        runtime_minutes: movie.runtime_minutes,
+        director: joined(&movie.directors),
+        production_company: joined(&movie.production_companies),
+        genres: joined(&movie.genres),
+        overview: movie.overview.clone(),
+        external_score: movie.external_score,
+        posters: movie.posters.iter().cloned().map(image_candidate).collect(),
+        backdrops: movie
+            .backdrops
+            .iter()
+            .cloned()
+            .map(image_candidate)
+            .collect(),
+    }
+}
+
+fn image_candidate(image: TmdbImageRef) -> TmdbImageCandidate {
+    TmdbImageCandidate {
+        file_path: image.file_path,
+        width: image.width,
+        height: image.height,
+    }
+}
+
+fn normalized_optional(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+}
+
+fn joined(values: &[String]) -> Option<String> {
+    let values = values
+        .iter()
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    (!values.is_empty()).then(|| values.join(" · "))
+}
+
+fn year_from_date(date: Option<&str>) -> Option<i64> {
+    date.and_then(|date| date.get(..4))
+        .and_then(|year| year.parse::<i64>().ok())
+}
+
+fn normalized_snapshot(snapshot_json: &str) -> Result<String, LibraryError> {
+    let value: serde_json::Value =
+        serde_json::from_str(snapshot_json).map_err(|_| LibraryError::TmdbInvalidResponse)?;
+    serde_json::to_string(&value).map_err(|_| LibraryError::TmdbInvalidResponse)
+}
+
+#[derive(Default)]
+struct ProviderSnapshot {
+    original_title: Option<String>,
+    director: Option<String>,
+    production_company: Option<String>,
+    release_date: Option<String>,
+    runtime_minutes: Option<i64>,
+    genres: Option<String>,
+    overview: Option<String>,
+    external_score: Option<i64>,
+}
+
+
+fn update_provider_metadata(
+    transaction: &Transaction<'_>,
+    collection_id: &str,
+    fetched: &TmdbRemoteMovie,
+    previous: &ProviderSnapshot,
+) -> Result<(), LibraryError> {
         let (
             current_original_title,
             current_director,
@@ -424,369 +908,7 @@ impl Library {
                 collection_id,
             ],
         )?;
-        transaction.execute(
-            "UPDATE collection_external_bindings
-             SET provider_data_json = ?1, last_synced_at = ?2, updated_at = ?2
-             WHERE collection_id = ?3 AND provider = ?4",
-            params![snapshot_json, now, collection_id, PROVIDER],
-        )?;
-        let summary = collection_by_id(&transaction, collection_id)?;
-        transaction.commit()?;
-        Ok(summary)
-    }
-
-    pub(crate) fn replace_fetched_tmdb_movie_artwork(
-        &self,
-        request: TmdbArtworkReplaceRequest,
-        fetched: TmdbRemoteMovie,
-        poster_bytes: Option<&[u8]>,
-        backdrop_bytes: Option<&[u8]>,
-    ) -> Result<CollectionSummary, LibraryError> {
-        let snapshot_json = normalized_snapshot(&fetched.snapshot_json)?;
-        let (poster_candidate, backdrop_candidate) =
-            validated_artwork_decisions(&request, &fetched)?;
-        let movie_id = self.tmdb_binding_id(&request.collection_id)?;
-        validate_movie_identity(movie_id, &fetched)?;
-        let poster =
-            prepare_selected_artwork(self, &request.collection_id, poster_candidate, poster_bytes)?;
-        let backdrop = prepare_selected_artwork(
-            self,
-            &request.collection_id,
-            backdrop_candidate,
-            backdrop_bytes,
-        )?;
-
-        let mut connection = self.connection()?;
-        let transaction = connection.transaction()?;
-        let transaction_movie_id =
-            tmdb_binding_id_in_transaction(&transaction, &request.collection_id)?;
-        validate_movie_identity(transaction_movie_id, &fetched)?;
-        apply_artwork_decision(
-            &transaction,
-            &request.collection_id,
-            &request.poster,
-            WorkArtworkKind::Cover,
-            poster.as_ref(),
-        )?;
-        apply_artwork_decision(
-            &transaction,
-            &request.collection_id,
-            &request.backdrop,
-            WorkArtworkKind::Backdrop,
-            backdrop.as_ref(),
-        )?;
-        let now = chrono::Utc::now().to_rfc3339();
-        transaction.execute(
-            "UPDATE collection_external_bindings
-             SET provider_data_json = ?1, last_synced_at = ?2, updated_at = ?2
-             WHERE collection_id = ?3 AND provider = ?4",
-            params![snapshot_json, now, request.collection_id, PROVIDER],
-        )?;
-        let summary = collection_by_id(&transaction, &request.collection_id)?;
-        transaction.commit()?;
-        if let Some((_, prepared)) = poster {
-            prepared.commit();
-        }
-        if let Some((_, prepared)) = backdrop {
-            prepared.commit();
-        }
-        drop(connection);
-        let _ = self.cleanup_unreferenced_work_artwork();
-        Ok(summary)
-    }
-
-    fn tmdb_binding_id(&self, collection_id: &str) -> Result<i64, LibraryError> {
-        let connection = self.connection()?;
-        let collection_type: String = connection
-            .query_row(
-                "SELECT type FROM collections WHERE id = ?1",
-                [collection_id],
-                |row| row.get(0),
-            )
-            .optional()?
-            .ok_or(LibraryError::CollectionNotFound)?;
-        if collection_type != "movie" {
-            return Err(LibraryError::InvalidCollectionType);
-        }
-        let external_id: String = connection
-            .query_row(
-                "SELECT external_id FROM collection_external_bindings
-                 WHERE collection_id = ?1 AND provider = ?2",
-                params![collection_id, PROVIDER],
-                |row| row.get(0),
-            )
-            .optional()?
-            .ok_or(LibraryError::InvalidTmdbIdentity)?;
-        external_id
-            .parse::<i64>()
-            .ok()
-            .filter(|id| *id > 0)
-            .ok_or(LibraryError::InvalidTmdbIdentity)
-    }
-}
-
-fn validate_movie_identity(movie_id: i64, fetched: &TmdbRemoteMovie) -> Result<(), LibraryError> {
-    if movie_id <= 0 || fetched.id <= 0 || movie_id != fetched.id {
-        return Err(LibraryError::InvalidTmdbIdentity);
-    }
     Ok(())
-}
-
-fn validated_selection<'a>(
-    request: &TmdbApplyRequest,
-    fetched: &'a TmdbRemoteMovie,
-) -> Result<(Option<&'a TmdbImageRef>, Option<&'a TmdbImageRef>), LibraryError> {
-    validate_movie_identity(request.movie_id, fetched)?;
-    let poster = request
-        .poster_path
-        .as_deref()
-        .map(|path| selected_candidate(path, &fetched.posters))
-        .transpose()?;
-    let backdrop = request
-        .backdrop_path
-        .as_deref()
-        .map(|path| selected_candidate(path, &fetched.backdrops))
-        .transpose()?;
-    Ok((poster, backdrop))
-}
-
-fn validated_artwork_decisions<'a>(
-    request: &TmdbArtworkReplaceRequest,
-    fetched: &'a TmdbRemoteMovie,
-) -> Result<(Option<&'a TmdbImageRef>, Option<&'a TmdbImageRef>), LibraryError> {
-    if fetched.id <= 0 {
-        return Err(LibraryError::InvalidTmdbIdentity);
-    }
-    let poster = artwork_decision_candidate(&request.poster, &fetched.posters)?;
-    let backdrop = artwork_decision_candidate(&request.backdrop, &fetched.backdrops)?;
-    Ok((poster, backdrop))
-}
-
-fn selected_candidate<'a>(
-    path: &str,
-    candidates: &'a [TmdbImageRef],
-) -> Result<&'a TmdbImageRef, LibraryError> {
-    TmdbClient::image_url(path, TmdbImageSize::Original)?;
-    candidates
-        .iter()
-        .find(|candidate| candidate.file_path == path)
-        .ok_or(LibraryError::InvalidTmdbIdentity)
-}
-
-fn artwork_decision_candidate<'a>(
-    decision: &TmdbArtworkDecision,
-    candidates: &'a [TmdbImageRef],
-) -> Result<Option<&'a TmdbImageRef>, LibraryError> {
-    match decision {
-        TmdbArtworkDecision::Keep | TmdbArtworkDecision::Clear => Ok(None),
-        TmdbArtworkDecision::Select { file_path } => {
-            selected_candidate(file_path, candidates).map(Some)
-        }
-    }
-}
-
-fn prepare_selected_artwork(
-    library: &Library,
-    collection_id: &str,
-    candidate: Option<&TmdbImageRef>,
-    bytes: Option<&[u8]>,
-) -> Result<Option<(String, PreparedWorkArtwork)>, LibraryError> {
-    match (candidate, bytes) {
-        (Some(candidate), Some(bytes)) => Ok(Some((
-            candidate.file_path.clone(),
-            library.prepare_work_artwork(collection_id, bytes)?,
-        ))),
-        (None, None) => Ok(None),
-        _ => Err(LibraryError::InvalidTmdbIdentity),
-    }
-}
-
-fn apply_artwork_decision(
-    transaction: &Transaction<'_>,
-    collection_id: &str,
-    decision: &TmdbArtworkDecision,
-    kind: WorkArtworkKind,
-    prepared: Option<&(String, PreparedWorkArtwork)>,
-) -> Result<(), LibraryError> {
-    match decision {
-        TmdbArtworkDecision::Keep => Ok(()),
-        TmdbArtworkDecision::Clear => {
-            Library::clear_work_artwork_kind_in_transaction(transaction, collection_id, kind)?;
-            transaction.execute(
-                "DELETE FROM collection_work_artworks
-                 WHERE collection_id = ?1 AND provider = ?2 AND kind = ?3",
-                params![collection_id, PROVIDER, kind.as_str()],
-            )?;
-            Ok(())
-        }
-        TmdbArtworkDecision::Select { .. } => {
-            let (file_path, prepared) = prepared.ok_or(LibraryError::InvalidTmdbIdentity)?;
-            Library::insert_work_artwork_in_transaction(
-                transaction,
-                collection_id,
-                PROVIDER,
-                file_path,
-                kind,
-                None,
-                prepared,
-            )?;
-            transaction.execute(
-                "DELETE FROM collection_work_artworks
-                 WHERE collection_id = ?1 AND provider = ?2 AND kind = ?3 AND selected = 0",
-                params![collection_id, PROVIDER, kind.as_str()],
-            )?;
-            Ok(())
-        }
-    }
-}
-
-fn ensure_identity_available(
-    connection: &rusqlite::Connection,
-    movie_id: i64,
-) -> Result<(), LibraryError> {
-    let owner: Option<String> = connection
-        .query_row(
-            "SELECT collection_id FROM collection_external_bindings
-             WHERE provider = ?1 AND external_id = ?2 LIMIT 1",
-            params![PROVIDER, movie_id.to_string()],
-            |row| row.get(0),
-        )
-        .optional()?;
-    if owner.is_some() {
-        Err(LibraryError::DuplicateProviderBinding)
-    } else {
-        Ok(())
-    }
-}
-
-fn require_movie_without_tmdb_binding(
-    connection: &rusqlite::Connection,
-    collection_id: &str,
-) -> Result<(), LibraryError> {
-    let collection_type: String = connection
-        .query_row(
-            "SELECT type FROM collections WHERE id = ?1",
-            [collection_id],
-            |row| row.get(0),
-        )
-        .optional()?
-        .ok_or(LibraryError::CollectionNotFound)?;
-    if collection_type != "movie" {
-        return Err(LibraryError::InvalidCollectionType);
-    }
-    let has_binding: bool = connection.query_row(
-        "SELECT EXISTS(
-            SELECT 1 FROM collection_external_bindings
-            WHERE collection_id = ?1 AND provider = ?2
-        )",
-        params![collection_id, PROVIDER],
-        |row| row.get(0),
-    )?;
-    if has_binding {
-        return Err(LibraryError::DuplicateProviderBinding);
-    }
-    Ok(())
-}
-
-fn tmdb_binding_id_in_transaction(
-    transaction: &Transaction<'_>,
-    collection_id: &str,
-) -> Result<i64, LibraryError> {
-    let collection_type: String = transaction
-        .query_row(
-            "SELECT type FROM collections WHERE id = ?1",
-            [collection_id],
-            |row| row.get(0),
-        )
-        .optional()?
-        .ok_or(LibraryError::CollectionNotFound)?;
-    if collection_type != "movie" {
-        return Err(LibraryError::InvalidCollectionType);
-    }
-    let external_id: String = transaction
-        .query_row(
-            "SELECT external_id FROM collection_external_bindings
-             WHERE collection_id = ?1 AND provider = ?2",
-            params![collection_id, PROVIDER],
-            |row| row.get(0),
-        )
-        .optional()?
-        .ok_or(LibraryError::InvalidTmdbIdentity)?;
-    external_id
-        .parse::<i64>()
-        .ok()
-        .filter(|id| *id > 0)
-        .ok_or(LibraryError::InvalidTmdbIdentity)
-}
-
-fn movie_preview(movie: &TmdbRemoteMovie) -> TmdbMoviePreview {
-    TmdbMoviePreview {
-        movie_id: movie.id,
-        proposed_title: movie.title.clone(),
-        original_title: movie.original_title.clone(),
-        release_date: movie.release_date.clone(),
-        runtime_minutes: movie.runtime_minutes,
-        director: joined(&movie.directors),
-        production_company: joined(&movie.production_companies),
-        genres: joined(&movie.genres),
-        overview: movie.overview.clone(),
-        external_score: movie.external_score,
-        posters: movie.posters.iter().cloned().map(image_candidate).collect(),
-        backdrops: movie
-            .backdrops
-            .iter()
-            .cloned()
-            .map(image_candidate)
-            .collect(),
-    }
-}
-
-fn image_candidate(image: TmdbImageRef) -> TmdbImageCandidate {
-    TmdbImageCandidate {
-        file_path: image.file_path,
-        width: image.width,
-        height: image.height,
-    }
-}
-
-fn normalized_optional(value: Option<&str>) -> Option<String> {
-    value
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned)
-}
-
-fn joined(values: &[String]) -> Option<String> {
-    let values = values
-        .iter()
-        .map(String::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .collect::<Vec<_>>();
-    (!values.is_empty()).then(|| values.join(" · "))
-}
-
-fn year_from_date(date: Option<&str>) -> Option<i64> {
-    date.and_then(|date| date.get(..4))
-        .and_then(|year| year.parse::<i64>().ok())
-}
-
-fn normalized_snapshot(snapshot_json: &str) -> Result<String, LibraryError> {
-    let value: serde_json::Value =
-        serde_json::from_str(snapshot_json).map_err(|_| LibraryError::TmdbInvalidResponse)?;
-    serde_json::to_string(&value).map_err(|_| LibraryError::TmdbInvalidResponse)
-}
-
-#[derive(Default)]
-struct ProviderSnapshot {
-    original_title: Option<String>,
-    director: Option<String>,
-    production_company: Option<String>,
-    release_date: Option<String>,
-    runtime_minutes: Option<i64>,
-    genres: Option<String>,
-    overview: Option<String>,
-    external_score: Option<i64>,
 }
 
 fn provider_snapshot(json: Option<&str>) -> Result<ProviderSnapshot, LibraryError> {
@@ -870,6 +992,8 @@ mod tests {
 
     fn movie() -> TmdbRemoteMovie {
         let mut movie = TmdbRemoteMovie {
+            media_type: None,
+            series: None,
             id: 10494,
             title: "Perfect Blue".into(),
             original_title: Some("Perfect Blue".into()),
@@ -900,6 +1024,8 @@ mod tests {
 
     fn snapshot(movie: &TmdbRemoteMovie) -> String {
         serde_json::json!({
+            "media_type": movie.media_type,
+            "series": movie.series,
             "id": movie.id,
             "title": movie.title,
             "original_title": movie.original_title,
@@ -929,6 +1055,7 @@ mod tests {
         library
             .apply_fetched_tmdb_movie(
                 TmdbApplyRequest {
+                    media_type: None,
                     target: TmdbApplyTarget::New,
                     movie_id: movie.id,
                     poster_path: poster_path.map(str::to_owned),
@@ -960,6 +1087,55 @@ mod tests {
     }
 
     #[test]
+    fn tv_import_caches_seasons_and_preserves_movie_identity_and_artwork_on_refresh() {
+        use crate::library::models::{TmdbSeriesData, TmdbSeason, TmdbEpisode};
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let film = apply_movie(&library, movie(), None, None, None, None);
+        let mut tv = movie();
+        tv.title = "TV series with same TMDB number".into();
+        tv.media_type = Some("tv".into());
+        tv.series = Some(TmdbSeriesData {
+            status: Some("Returning Series".into()), last_air_date: None, cast: vec!["Actor".into()],
+            seasons: vec![TmdbSeason {
+                id: 22, season_number: 1, name: "Season 1".into(), overview: None, air_date: None,
+                poster_path: Some("/season.jpg".into()), poster_artwork_id: None,
+                episodes: vec![TmdbEpisode { id: 33, episode_number: 1, name: "Pilot".into(), overview: Some("Pilot summary".into()), air_date: None, runtime_minutes: Some(24) }],
+            }],
+        });
+        tv.snapshot_json = snapshot(&tv);
+        let request = TmdbApplyRequest { media_type: Some("tv".into()), target: TmdbApplyTarget::New, movie_id: tv.id, poster_path: Some("/perfect-blue-poster.jpg".into()), backdrop_path: None };
+        let created = library.apply_fetched_tmdb_title(request.clone(), tv.clone(), Some(&png_bytes(2, 3)), None, &[(22, png_bytes(2, 3))]).unwrap();
+        assert_ne!(created.id, film.id);
+        assert_eq!(created.collection_type, CollectionType::Movie);
+        let cached = library.get_tmdb_connection(&created.id).unwrap().unwrap();
+        assert_eq!(cached.media_type.as_deref(), Some("tv"));
+        let season = &cached.series.unwrap().seasons[0];
+        assert_eq!(season.episodes[0].name, "Pilot");
+        let season_poster = season.poster_artwork_id.clone().unwrap();
+        assert_ne!(Some(season_poster.as_str()), created.selected_work_artwork_id.as_deref());
+        assert!(matches!(library.apply_fetched_tmdb_title(request, tv.clone(), Some(&png_bytes(2, 3)), None, &[]), Err(LibraryError::DuplicateProviderBinding)));
+        assert!(matches!(library.refresh_fetched_tmdb_movie(&film.id, tv.clone()), Err(LibraryError::InvalidTmdbIdentity)));
+        library.connection().unwrap().execute("UPDATE collections SET overview = 'Personal overview', my_score = 4 WHERE id = ?1", [&created.id]).unwrap();
+        tv.series.as_mut().unwrap().seasons[0].episodes[0].name = "Updated pilot".into();
+        tv.snapshot_json = snapshot(&tv);
+        let refreshed = library.refresh_fetched_tmdb_title(&created.id, tv.clone(), &[(22, png_bytes(2, 3))]).unwrap();
+        assert_eq!(refreshed.selected_work_artwork_id, created.selected_work_artwork_id);
+        assert_eq!(refreshed.overview.as_deref(), Some("Personal overview"));
+        assert_eq!(refreshed.my_score, Some(4.0));
+        let cached = library.get_tmdb_connection(&created.id).unwrap().unwrap();
+        assert_eq!(cached.series.unwrap().seasons[0].episodes[0].name, "Updated pilot");
+        library.replace_fetched_tmdb_movie_artwork(TmdbArtworkReplaceRequest { collection_id: created.id.clone(), poster: TmdbArtworkDecision::Clear, backdrop: TmdbArtworkDecision::Keep }, tv, None, None).unwrap();
+        let cached = library.get_tmdb_connection(&created.id).unwrap().unwrap();
+        let poster_id = cached.series.unwrap().seasons[0].poster_artwork_id.clone().unwrap();
+        let exists: bool = library.connection().unwrap().query_row("SELECT EXISTS(SELECT 1 FROM collection_work_artworks WHERE id = ?1)", [&poster_id], |row| row.get(0)).unwrap();
+        assert!(exists, "clearing work poster must preserve cached season posters");
+        drop(library);
+        let reopened = Library::open(temp.path()).unwrap();
+        assert_eq!(reopened.get_tmdb_connection(&created.id).unwrap().unwrap().series.unwrap().seasons[0].episodes[0].name, "Updated pilot");
+    }
+
+    #[test]
     fn imports_movie_binding_poster_and_backdrop_atomically() {
         let temp = tempfile::tempdir().unwrap();
         let library = Library::open(temp.path()).unwrap();
@@ -967,6 +1143,7 @@ mod tests {
         let created = library
             .apply_fetched_tmdb_movie(
                 TmdbApplyRequest {
+                    media_type: None,
                     target: TmdbApplyTarget::New,
                     movie_id: 10494,
                     poster_path: Some("/perfect-blue-poster.jpg".into()),
@@ -1015,6 +1192,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let library = Library::open(temp.path()).unwrap();
         let request = TmdbApplyRequest {
+                    media_type: None,
             target: TmdbApplyTarget::New,
             movie_id: 10494,
             poster_path: Some("/not-in-preview.jpg".into()),
@@ -1040,6 +1218,7 @@ mod tests {
 
         let duplicate = library.apply_fetched_tmdb_movie(
             TmdbApplyRequest {
+                    media_type: None,
                 target: TmdbApplyTarget::New,
                 movie_id: 10494,
                 poster_path: None,
@@ -1064,6 +1243,55 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn reconnects_wrong_title_atomically_and_preserves_personal_fields() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let created = apply_movie(&library, movie(), None, None, None, None);
+        library.connection().unwrap().execute(
+            "UPDATE collections SET description = 'My memo', my_score = 4.5, overview = 'My overview' WHERE id = ?1",
+            [&created.id],
+        ).unwrap();
+        let mut correct = movie();
+        correct.id = 555;
+        correct.original_title = Some("Correct title".into());
+        correct.release_date = Some("2020-01-02".into());
+        correct.snapshot_json = snapshot(&correct);
+        let request = TmdbApplyRequest { media_type: None, target: TmdbApplyTarget::Reconnect { collection_id: created.id.clone() }, movie_id: correct.id, poster_path: None, backdrop_path: None };
+        let fixed = library.apply_fetched_tmdb_movie(request.clone(), correct.clone(), None, None).unwrap();
+        assert_eq!(fixed.id, created.id);
+        assert_eq!(fixed.name, created.name);
+        assert_eq!(fixed.description.as_deref(), Some("My memo"));
+        assert_eq!(fixed.my_score, Some(4.5));
+        assert_eq!(fixed.overview.as_deref(), Some("My overview"));
+        assert_eq!(fixed.original_title.as_deref(), Some("Correct title"));
+        assert_eq!(fixed.year, Some(2020));
+        assert_eq!(library.get_tmdb_connection(&created.id).unwrap().unwrap().movie_id, 555);
+        // Selecting the currently connected identity again is harmless.
+        library.apply_fetched_tmdb_movie(request, correct.clone(), None, None).unwrap();
+        // Refresh follows the replacement identity, and rejects the old one.
+        library.refresh_fetched_tmdb_movie(&created.id, correct).unwrap();
+        assert!(matches!(library.refresh_fetched_tmdb_movie(&created.id, movie()), Err(LibraryError::InvalidTmdbIdentity)));
+    }
+
+    #[test]
+    fn reconnect_to_another_collections_identity_keeps_the_old_binding() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let created = apply_movie(&library, movie(), None, None, None, None);
+        let mut other = movie();
+        other.id = 555;
+        other.title = "Another work".into();
+        other.snapshot_json = snapshot(&other);
+        apply_movie(&library, other.clone(), None, None, None, None);
+        let result = library.apply_fetched_tmdb_movie(TmdbApplyRequest {
+            media_type: None, target: TmdbApplyTarget::Reconnect { collection_id: created.id.clone() },
+            movie_id: other.id, poster_path: None, backdrop_path: None,
+        }, other, None, None);
+        assert!(matches!(result, Err(LibraryError::DuplicateProviderBinding)));
+        assert_eq!(library.get_tmdb_connection(&created.id).unwrap().unwrap().movie_id, 10494);
     }
 
     #[test]
@@ -1092,6 +1320,7 @@ mod tests {
         let connected = library
             .apply_fetched_tmdb_movie(
                 TmdbApplyRequest {
+                    media_type: None,
                     target: TmdbApplyTarget::Existing {
                         collection_id: manual.id.clone(),
                     },
@@ -1273,6 +1502,7 @@ mod tests {
         let artwork_directory = library.root().join("work-artwork").join(&game.id);
         let result = library.apply_fetched_tmdb_movie(
             TmdbApplyRequest {
+                    media_type: None,
                 target: TmdbApplyTarget::Existing {
                     collection_id: game.id,
                 },

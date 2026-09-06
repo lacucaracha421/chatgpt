@@ -18,12 +18,13 @@ export function CollectionEditDialog({
   open: boolean;
   mode: CollectionEditMode;
   onClose: () => void;
-  onSubmit: (input: CreateCollection | UpdateCollection) => Promise<void>;
+  onSubmit: (input: CreateCollection | UpdateCollection, mediaType?: "movie" | "tv") => Promise<void>;
 }) {
   const existing = mode.kind === "edit" ? mode.collection : null;
   const [name, setName] = useState(existing?.name ?? "");
   const [description, setDescription] = useState(existing?.description ?? "");
   const [type, setType] = useState<CollectionType>(mode.kind === "create" ? mode.type : existing?.type ?? "manga");
+  const [series, setSeries] = useState(false);
   const [year, setYear] = useState<number | null>(existing?.year ?? null);
   const [originalTitle, setOriginalTitle] = useState(existing?.originalTitle ?? "");
   const [runtimeMinutes, setRuntimeMinutes] = useState<number | null>(existing?.runtimeMinutes ?? null);
@@ -43,6 +44,7 @@ export function CollectionEditDialog({
     setName(existing?.name ?? "");
     setDescription(existing?.description ?? "");
     setType(mode.kind === "create" ? mode.type : existing?.type ?? "manga");
+    setSeries(false);
     setYear(existing?.year ?? null);
     setOriginalTitle(existing?.originalTitle ?? "");
     setRuntimeMinutes(existing?.runtimeMinutes ?? null);
@@ -89,11 +91,11 @@ export function CollectionEditDialog({
     setSaving(true);
     setError(null);
     try {
-      await onSubmit(
-        mode.kind === "create"
-          ? { name: base.name, description: base.description, type: base.type }
-          : base,
-      );
+      if (mode.kind === "create") {
+        const input = { name: base.name, description: base.description, type: base.type };
+        if (type === "movie") await onSubmit(input, series ? "tv" : "movie");
+        else await onSubmit(input);
+      } else await onSubmit(base);
       onClose();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "저장하지 못했습니다.");
@@ -106,11 +108,19 @@ export function CollectionEditDialog({
       <div className="collection-edit-dialog">
         <TextField label="이름" value={name} onChange={(event) => { setName(event.target.value); setError(null); }} />
         <TextField label="설명" value={description} onChange={(event) => setDescription(event.target.value)} />
-        <Select label="유형" value={type} onChange={(event) => setType(event.target.value as CollectionType)}>
+        {mode.kind === "create" ? <div role="group" aria-label="유형" className="collection-edit-dialog__types">
+          {(["game", "manga", "movie", "tv"] as const).map(value => (
+            <Button key={value} type="button" aria-pressed={value === "tv" ? type === "movie" && series : type === value && !series}
+              variant={(value === "tv" ? type === "movie" && series : type === value && !series) ? "primary" : "secondary"}
+              disabled={saving} onClick={() => { setType(value === "tv" ? "movie" : value); setSeries(value === "tv"); }}>
+              {{ game: "게임", manga: "만화", movie: "영화", tv: "시리즈" }[value]}
+            </Button>
+          ))}
+        </div> : <Select label="유형" value={type} onChange={(event) => setType(event.target.value as CollectionType)}>
           <option value="game">게임</option>
           <option value="manga">만화</option>
           <option value="movie">영화</option>
-        </Select>
+        </Select>}
         {mode.kind === "edit" && type === "manga" && (
           <>
             <TextField label="작가" value={author} onChange={(event) => setAuthor(event.target.value)} />

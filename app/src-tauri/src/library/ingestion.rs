@@ -170,9 +170,12 @@ impl Library {
         let thumbnail_relative_path = format!("thumbnails/{prefix}/{content_hash}.webp");
         let thumbnail_path = self.root().join(&thumbnail_relative_path);
         create_parent_directory(&thumbnail_path)?;
-        let thumbnail_file = create_new_asset_file(&thumbnail_path)?;
-        pending.track_created(thumbnail_path.clone(), &thumbnail_file)?;
-        write_thumbnail(pending.owned_file(&staging_path)?, thumbnail_file)?;
+        self.install_thumbnail(
+            pending.owned_file(&staging_path)?,
+            &thumbnail_path,
+            &thumbnail_relative_path,
+            &mut pending,
+        )?;
 
         let relative_path = format!(
             "assets/{prefix}/{content_hash}.{}",
@@ -226,6 +229,47 @@ impl Library {
             Registration::Normal => IngestOutcome::Added { asset },
             Registration::Review { review_id, .. } => IngestOutcome::ReviewPending { review_id },
         })
+    }
+
+    fn install_thumbnail(&self, staging: File, path: &Path, relative: &str, pending: &mut PendingFiles) -> Result<(), LibraryError> {
+        // Never expose the final name before decoding/encoding and disk writes finish.
+        let image = staging_image_reader(staging)?.decode().map_err(|_| LibraryError::UnsupportedImage)?;
+        let encoded = encode_thumbnail_webp(&image)?;
+        let error = |source| LibraryError::WriteAsset { path: path.to_path_buf(), source };
+        let mut temporary = tempfile::NamedTempFile::new_in(path.parent().expect("thumbnail parent")).map_err(error)?;
+        temporary.write_all(&encoded).map_err(error)?;
+        temporary.as_file().sync_all().map_err(error)?;
+
+        if let Ok(metadata) = fs::symlink_metadata(path) {
+            // A crash after publication but before DB commit can leave a complete
+            // thumbnail. Reuse only an exact match; never overwrite foreign bytes.
+            if metadata.file_type().is_file() && metadata.len() == encoded.len() as u64
+                && fs::read(path).map_err(error)? == encoded {
+                return Ok(());
+            }
+            if metadata.file_type().is_file() && metadata.len() == 0 {
+                // Recover only an unregistered, empty artifact from an interrupted old
+                // writer. Preserve the artifact and verify its identity after claiming it.
+                let referenced: bool = self.connection()?.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM assets WHERE thumbnail_relative_path = ?1)",
+                    [relative], |row| row.get(0),
+                )?;
+                if !referenced {
+                    let file = File::open(path).map_err(error)?;
+                    let identity = FileIdentity::from_file(&file).map_err(error)?;
+                    drop(file);
+                    let quarantine = path.with_file_name(format!(".{}.orphan", uuid::Uuid::new_v4()));
+                    rename_no_replace(path, &quarantine).map_err(error)?;
+                    if !identity.matches_path(&quarantine) || fs::metadata(&quarantine).map_err(error)?.len() != 0 {
+                        restore_unverified_file(&quarantine, path).map_err(error)?;
+                        return Err(error(io::Error::new(io::ErrorKind::AlreadyExists, "thumbnail changed during recovery")));
+                    }
+                }
+            }
+        }
+        let file = temporary.persist_noclobber(path).map_err(|failure| error(failure.error))?;
+        pending.track_created(path.to_path_buf(), &file)?;
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)] // Mirrors the image path; a context type would only move these one-shot values.
@@ -621,17 +665,6 @@ fn inspect_image(staging: File) -> Result<(ImageFormat, u32, u32), LibraryError>
     Ok((format, width, height))
 }
 
-fn write_thumbnail(staging: File, mut thumbnail_file: File) -> Result<(), LibraryError> {
-    let reader = staging_image_reader(staging)?;
-    let image = reader
-        .decode()
-        .map_err(|_| LibraryError::UnsupportedImage)?;
-    let encoded = encode_thumbnail_webp(&image)?;
-    thumbnail_file
-        .write_all(&encoded)
-        .map_err(|_| LibraryError::UnsupportedImage)
-}
-
 pub(super) fn encode_thumbnail_webp(image: &image::DynamicImage) -> Result<Vec<u8>, LibraryError> {
     let thumbnail = image.thumbnail(THUMBNAIL_BOUND, THUMBNAIL_BOUND).to_rgba8();
     let mut config = webp::WebPConfig::new().map_err(|_| LibraryError::UnsupportedImage)?;
@@ -691,19 +724,50 @@ fn install_staged_asset(
             path: staging_path.to_path_buf(),
             source,
         })?;
-    let mut asset = create_new_asset_file(asset_path)?;
-    pending.track_created(asset_path.to_path_buf(), &asset)?;
+    let mut asset = tempfile::NamedTempFile::new_in(asset_path.parent().expect("asset parent"))
+        .map_err(|source| LibraryError::WriteAsset { path: asset_path.to_path_buf(), source })?;
     io::copy(&mut staging, &mut asset).map_err(|source| LibraryError::WriteAsset {
         path: asset_path.to_path_buf(),
         source,
     })?;
-    asset.flush().map_err(|source| LibraryError::WriteAsset {
+    asset.as_file().sync_all().map_err(|source| LibraryError::WriteAsset {
         path: asset_path.to_path_buf(),
         source,
     })?;
-    drop(asset);
+    // A complete unregistered original from an interrupted DB commit is safe to
+    // reuse only if every byte matches the owned staged input.
+    let identical = fs::symlink_metadata(asset_path).ok().filter(|metadata| metadata.file_type().is_file())
+        .is_some_and(|metadata| metadata.len() == asset.as_file().metadata().map(|m| m.len()).unwrap_or(u64::MAX))
+        && same_file_contents(asset.as_file(), asset_path)?;
+    if !identical {
+        let asset = asset.persist_noclobber(asset_path).map_err(|error| LibraryError::WriteAsset {
+            path: asset_path.to_path_buf(), source: error.error,
+        })?;
+        pending.track_created(asset_path.to_path_buf(), &asset)?;
+    }
     drop(staging);
     pending.remove_owned(staging_path)
+}
+
+fn same_file_contents(expected: &File, path: &Path) -> Result<bool, LibraryError> {
+    let compare = || -> io::Result<bool> {
+        let mut expected = expected.try_clone()?;
+        expected.seek(SeekFrom::Start(0))?;
+        let mut actual = File::open(path)?;
+        let mut left = [0u8; 65536];
+        let mut right = [0u8; 65536];
+        loop {
+            let count = expected.read(&mut left)?;
+            if count == 0 { return Ok(actual.read(&mut right)? == 0); }
+            match actual.read_exact(&mut right[..count]) {
+                Ok(()) if left[..count] == right[..count] => {},
+                Ok(()) => return Ok(false),
+                Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => return Ok(false),
+                Err(error) => return Err(error),
+            }
+        }
+    };
+    compare().map_err(|source| LibraryError::WriteAsset { path: path.to_path_buf(), source })
 }
 
 fn extension_for(format: ImageFormat) -> Option<&'static str> {
@@ -2038,6 +2102,60 @@ mod tests {
 
         assert!(result.is_err());
         assert!(fixture.source.is_file());
+    }
+
+    #[test]
+    fn thumbnail_publication_recovers_empty_orphan_without_overwriting_nonempty_files() {
+        let fixture = IngestionFixture::new();
+        let relative = "thumbnails/test.webp";
+        let path = fixture.library.root().join(relative);
+        std::fs::write(&path, []).unwrap();
+        let mut pending = PendingFiles::new();
+        fixture.library.install_thumbnail(File::open(&fixture.source).unwrap(), &path, relative, &mut pending).unwrap();
+        assert!(image::open(&path).is_ok());
+        assert!(std::fs::read_dir(path.parent().unwrap()).unwrap().any(|entry| entry.unwrap().path().extension().is_some_and(|ext| ext == "orphan")));
+        pending.commit();
+        std::fs::write(&path, b"unrelated existing thumbnail").unwrap();
+        let original = std::fs::read(&path).unwrap();
+        let result = fixture.library.install_thumbnail(File::open(&fixture.source).unwrap(), &path, relative, &mut PendingFiles::new());
+        assert!(matches!(result, Err(LibraryError::WriteAsset { .. })));
+        assert_eq!(std::fs::read(path).unwrap(), original);
+    }
+
+    #[test]
+    fn thumbnail_decode_failure_never_publishes_final_path() {
+        let fixture = IngestionFixture::new();
+        std::fs::write(&fixture.source, b"broken image").unwrap();
+        let relative = "thumbnails/test.webp";
+        let path = fixture.library.root().join(relative);
+        assert!(fixture.library.install_thumbnail(File::open(&fixture.source).unwrap(), &path, relative, &mut PendingFiles::new()).is_err());
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn ingestion_reuses_complete_files_left_before_database_commit() {
+        let fixture = IngestionFixture::new();
+        let IngestOutcome::Added { asset } = fixture.ingest() else { panic!("expected asset") };
+        let path = fixture.library.root().join(&asset.relative_path);
+        let original = std::fs::read(&path).unwrap();
+        fixture.library.connection().unwrap().execute("DELETE FROM assets WHERE id = ?1", [&asset.id]).unwrap();
+        let IngestOutcome::Added { asset: recovered } = fixture.ingest() else { panic!("expected recovered asset") };
+        assert_ne!(recovered.id, asset.id);
+        assert_eq!(std::fs::read(path).unwrap(), original);
+        assert!(image::open(fixture.library.root().join(recovered.thumbnail_relative_path.unwrap())).is_ok());
+    }
+
+    #[test]
+    fn thumbnail_recovery_preserves_referenced_empty_files() {
+        let fixture = IngestionFixture::new();
+        let asset = fixture.ingest();
+        let IngestOutcome::Added { asset } = asset else { panic!("expected asset") };
+        let relative = asset.thumbnail_relative_path.unwrap();
+        let path = fixture.library.root().join(&relative);
+        std::fs::write(&path, []).unwrap();
+        let result = fixture.library.install_thumbnail(File::open(&fixture.source).unwrap(), &path, &relative, &mut PendingFiles::new());
+        assert!(matches!(result, Err(LibraryError::WriteAsset { .. })));
+        assert_eq!(std::fs::metadata(path).unwrap().len(), 0);
     }
 
     #[test]

@@ -100,6 +100,7 @@ it("uses a neutral backdrop and exposes only valid provider actions", async () =
   renderDetail();
   await user.click(screen.getByRole("button", { name: "작품 관리" }));
   expect(screen.queryByRole("menuitem", { name: "TMDB에 연결" })).not.toBeInTheDocument();
+  expect(screen.getByRole("menuitem", { name: "TMDB 연결 작품 변경" })).toBeEnabled();
   expect(screen.getByRole("menuitem", { name: "TMDB 새로고침" })).toBeEnabled();
   expect(screen.getByRole("menuitem", { name: "포스터·배경 변경" })).toBeEnabled();
 });

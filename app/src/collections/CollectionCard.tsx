@@ -36,6 +36,9 @@ export function CollectionCard({
   const releaseLabel = release
     ? `${release[1].slice(-2)}.${Number(release[2])}.${Number(release[3])}`
     : collection.year ? String(collection.year) : null;
+  const shortDate = (date: string) => { const [year, month, day] = date.split("-"); return `${year.slice(-2)}.${Number(month)}.${Number(day)}`; };
+  const seasonRange = collection.type === "movie" ? collection.seasonDateRange : null;
+  const seasonLabel = seasonRange ? seasonRange[0] === seasonRange[1] ? shortDate(seasonRange[0]) : `${shortDate(seasonRange[0])}~${shortDate(seasonRange[1])}` : null;
 
   return (
     <button
@@ -72,7 +75,7 @@ export function CollectionCard({
       <span className="collection-card__meta">
         <span className="collection-card__name" title={collection.name}>{collection.name}</span>
         <span className="collection-card__credit" title={collectionCredit(collection) || undefined}>{collectionCredit(collection)}</span>
-        {releaseLabel && <time className="collection-card__credit" dateTime={release ? collection.releaseDate! : releaseLabel}>{releaseLabel}</time>}
+        {seasonLabel ? <span className="collection-card__credit" title="첫 시즌 시작일 ~ 마지막 시즌 시작일">{seasonLabel}</span> : releaseLabel && <time className="collection-card__credit" dateTime={release ? collection.releaseDate! : releaseLabel}>{releaseLabel}</time>}
       </span>
     </button>
   );

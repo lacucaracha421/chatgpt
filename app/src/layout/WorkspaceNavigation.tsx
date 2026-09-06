@@ -9,7 +9,7 @@ import { clampSidebarWidth, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH } from "./sideb
 export function workspaceArea(view: AssetView): "assets" | "collections" | "manga" | "manage" {
   if (view.kind === "collections" || view.kind === "collection") return "collections";
   if (view.kind === "manga") return "manga";
-  if (view.kind === "settings" || view.kind === "trash" || view.kind === "similarity_review") return "manage";
+  if (view.kind === "settings" || view.kind === "trash" || view.kind === "similarity_review" || view.kind === "statistics") return "manage";
   return "assets";
 }
 type Props = {
@@ -21,10 +21,11 @@ type Props = {
   assetNavigation: ReactNode;
   reviewCount: number;
   trashCount: number;
+  cloudProblemCount?: number;
   onImportFiles?: () => void;
 };
 
-export function WorkspaceNavigation({ view, collectionType, width, onWidthChange, onNavigate, assetNavigation, reviewCount, trashCount, onImportFiles }: Props) {
+export function WorkspaceNavigation({ view, collectionType, width, onWidthChange, onNavigate, assetNavigation, reviewCount, trashCount, cloudProblemCount = 0, onImportFiles }: Props) {
   const chrome = useWorkspaceChrome();
   const area = workspaceArea(view);
   const history = useRef<Partial<Record<ReturnType<typeof workspaceArea>, AssetView>>>({});
@@ -37,6 +38,7 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
     onNavigate(history.current[next] ?? (next === "collections" ? { kind: "collections", typeFilter: collectionType, showcase: false } : next === "manga" ? { kind: "manga" } : { kind: "classification", classificationId: null }));
   };
   const management = [
+    { id: "statistics", label: "통계", icon: <CalendarIcon />, onSelect: () => onNavigate({ kind: "statistics" }) },
     { id: "review", label: `유사 검토 (${reviewCount})`, icon: <PhotoIcon />, onSelect: () => onNavigate({ kind: "similarity_review" }) },
     { id: "trash", label: `휴지통 (${trashCount})`, icon: <TrashIcon />, onSelect: () => onNavigate({ kind: "trash" }) },
     { id: "settings", label: "설정", icon: <Cog6ToothIcon />, onSelect: () => onNavigate({ kind: "settings" }) },
@@ -51,6 +53,7 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
       })}
       <button type="button" className="workspace-rail__item" aria-current={view.kind === "revisit" || view.kind === "creator" ? "page" : undefined} onClick={() => onNavigate({ kind: "revisit" })}><CalendarIcon aria-hidden="true" /><span>다시보기</span></button>
       <div className="workspace-rail__tail">
+        {cloudProblemCount > 0 && <button type="button" className="workspace-rail__item" onClick={() => onNavigate({ kind: "settings", section: "cloud" })} aria-label={`동기화 문제 ${cloudProblemCount}개`}><span aria-hidden="true">!</span><span>동기화 문제 {cloudProblemCount}</span></button>}
         <button type="button" className="workspace-rail__item" aria-current={view.kind === "unsorted" ? "page" : undefined} onClick={() => onNavigate({ kind: "unsorted" })}><InboxIcon aria-hidden="true" /><span>미분류</span></button>
         <button type="button" className="workspace-rail__item" aria-label={`휴지통 ${trashCount}개`} aria-current={view.kind === "trash" ? "page" : undefined} onClick={() => onNavigate({ kind: "trash" })}><TrashIcon aria-hidden="true" /><span>휴지통</span></button>
         <Menu label="라이브러리 관리" trigger={<><EllipsisHorizontalIcon aria-hidden="true" /><span>관리</span>{reviewCount > 0 && <span className="workspace-rail__review-alert" role="img" aria-label={`유사 검토 ${reviewCount}개 대기`} title={`유사 검토 ${reviewCount}개 대기`}>!</span>}</>} items={management} />

@@ -9,7 +9,10 @@ import { useBackHandler } from "../shared/navigation/BackNavigation";
 
 type WorkArtworkGalleryProps = {
   workTitle: string;
-  artworks: WorkArtworkSummary[];
+  artworks: (Pick<WorkArtworkSummary, "id" | "kind"> & Partial<WorkArtworkSummary>)[];
+  initialActiveId?: string;
+  viewerOnly?: boolean;
+  onClose?: () => void;
 };
 
 const KIND_LABEL: Record<string, string> = {
@@ -22,10 +25,11 @@ const KIND_LABEL: Record<string, string> = {
 
 // 레거시·원격으로 등록된 Work 아트워크를 한 화면에서 훑어보는 갤러리.
 // 썸네일 줄과 확대 감상 다이얼로그로 구성된다.
-export function WorkArtworkGallery({ workTitle, artworks }: WorkArtworkGalleryProps) {
+export function WorkArtworkGallery({ workTitle, artworks, initialActiveId, viewerOnly = false, onClose }: WorkArtworkGalleryProps) {
   const { privacyMode } = usePrivacy();
-  const [activeId, setActiveId] = useState<string | null>(null);
-  useBackHandler(() => setActiveId(null), 100, artworks.some(artwork => artwork.id === activeId));
+  const [activeId, setActiveId] = useState<string | null>(initialActiveId ?? null);
+  const close = () => { setActiveId(null); onClose?.(); };
+  useBackHandler(close, 100, artworks.some(artwork => artwork.id === activeId));
   if (artworks.length === 0) return null;
 
   const activeIndex = artworks.findIndex((artwork) => artwork.id === activeId);
@@ -38,7 +42,7 @@ export function WorkArtworkGallery({ workTitle, artworks }: WorkArtworkGalleryPr
 
   return (
     <section className="work-artwork-gallery" aria-label="스크린샷·아트웍">
-      <h2 className="work-artwork-gallery__title">스크린샷 · 아트웍 {artworks.length}장</h2>
+      {!viewerOnly && <><h2 className="work-artwork-gallery__title">스크린샷 · 아트웍 {artworks.length}장</h2>
       <div className="work-artwork-gallery__strip">
         {artworks.map((artwork) => (
           <button
@@ -57,13 +61,14 @@ export function WorkArtworkGallery({ workTitle, artworks }: WorkArtworkGalleryPr
           </button>
         ))}
       </div>
+      </>}
       {active && (
-        <RadixDialog.Root open onOpenChange={(open) => { if (!open) setActiveId(null); }}>
+        <RadixDialog.Root open onOpenChange={(open) => { if (!open) close(); }}>
           <RadixDialog.Portal>
-            <RadixDialog.Overlay className="manga-cover-viewer__backdrop" aria-label="아트웍 감상 닫기" onClick={() => setActiveId(null)} />
+            <RadixDialog.Overlay className="manga-cover-viewer__backdrop" aria-label="아트웍 감상 닫기" onClick={close} />
             <RadixDialog.Content
               className="manga-cover-viewer manga-cover-viewer--flat"
-              onEscapeKeyDown={event => { event.preventDefault(); setActiveId(null); }}
+              onEscapeKeyDown={event => { event.preventDefault(); close(); }}
               style={{ pointerEvents: "none" }}
               aria-describedby={undefined}
               onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {

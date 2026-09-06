@@ -18,6 +18,39 @@ impl fmt::Debug for IgdbCredentials {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TmdbSeriesData {
+    pub status: Option<String>,
+    pub last_air_date: Option<String>,
+    pub seasons: Vec<TmdbSeason>,
+    pub cast: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TmdbSeason {
+    pub id: i64,
+    pub season_number: i64,
+    pub name: String,
+    pub overview: Option<String>,
+    pub air_date: Option<String>,
+    pub poster_path: Option<String>,
+    pub poster_artwork_id: Option<String>,
+    pub episodes: Vec<TmdbEpisode>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TmdbEpisode {
+    pub id: i64,
+    pub episode_number: i64,
+    pub name: String,
+    pub overview: Option<String>,
+    pub air_date: Option<String>,
+    pub runtime_minutes: Option<i64>,
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub struct TmdbCredentials {
     pub read_access_token: String,
@@ -49,6 +82,8 @@ pub struct TmdbImageRef {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TmdbRemoteMovie {
+    pub series: Option<TmdbSeriesData>,
+    pub media_type: Option<String>,
     pub id: i64,
     pub title: String,
     pub original_title: Option<String>,
@@ -69,6 +104,7 @@ pub struct TmdbRemoteMovie {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TmdbSearchResult {
+    pub media_type: Option<String>,
     pub movie_id: i64,
     pub title: String,
     pub original_title: Option<String>,
@@ -79,6 +115,8 @@ pub struct TmdbSearchResult {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TmdbMoviePreview {
+    pub series: Option<TmdbSeriesData>,
+    pub media_type: Option<String>,
     pub movie_id: i64,
     pub proposed_title: String,
     pub original_title: Option<String>,
@@ -104,6 +142,8 @@ pub struct TmdbImageCandidate {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TmdbConnection {
+    pub series: Option<TmdbSeriesData>,
+    pub media_type: Option<String>,
     pub movie_id: i64,
     pub last_synced_at: Option<String>,
 }
@@ -117,11 +157,13 @@ pub struct TmdbConnection {
 pub enum TmdbApplyTarget {
     New,
     Existing { collection_id: String },
+    Reconnect { collection_id: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TmdbApplyRequest {
+    pub media_type: Option<String>,
     pub target: TmdbApplyTarget,
     pub movie_id: i64,
     pub poster_path: Option<String>,
@@ -697,6 +739,8 @@ pub enum CollectionType {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CollectionSummary {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub season_date_range: Option<[String; 2]>,
     pub id: String,
     pub name: String,
     pub description: Option<String>,
@@ -1316,6 +1360,7 @@ mod tests {
     #[test]
     fn collection_summary_omits_legacy_provider_identity() {
         let value = serde_json::to_value(CollectionSummary {
+            season_date_range: None,
             id: "work-1".into(),
             name: "Dungeon Meshi".into(),
             description: None,

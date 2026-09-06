@@ -98,7 +98,12 @@ const COLLECTION_SUMMARY_SQL: &str = "SELECT
         WHERE release_event.collection_id = collection.id
           AND release_event.read_at IS NULL
     ),
-    collection.source_path
+    collection.source_path,
+    (SELECT json_group_array(json_extract(season.value, '$.airDate'))
+     FROM collection_external_bindings binding,
+          json_each(CASE WHEN json_valid(binding.provider_data_json) THEN binding.provider_data_json ELSE '{}' END, '$.series.seasons') season
+     WHERE binding.collection_id = collection.id AND binding.provider = 'tmdb'
+       AND binding.external_id LIKE 'tv:%' AND json_extract(season.value, '$.seasonNumber') > 0)
 FROM collections AS collection";
 
 impl Library {
@@ -501,6 +506,7 @@ fn collection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollectionSu
     };
     let showcase_int: i64 = row.get(23)?;
     Ok(CollectionSummary {
+        season_date_range: season_date_range(&row.get::<_, String>(29)?),
         id: row.get(0)?,
         name: row.get(1)?,
         description: row.get(2)?,
@@ -533,6 +539,15 @@ fn collection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollectionSu
     })
 }
 
+fn season_date_range(json: &str) -> Option<[String; 2]> {
+    let dates: Vec<Option<String>> = serde_json::from_str(json).ok()?;
+    let mut dates: Vec<_> = dates.into_iter().flatten()
+        .filter_map(|date| chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d").ok())
+        .collect();
+    dates.sort();
+    Some([dates.first()?.to_string(), dates.last()?.to_string()])
+}
+
 pub(crate) fn collection_type_str(collection_type: CollectionType) -> &'static str {
     match collection_type {
         CollectionType::Game => "game",
@@ -554,6 +569,26 @@ pub(crate) fn map_duplicate_name(error: rusqlite::Error) -> LibraryError {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn series_card_dates_use_regular_season_premieres_from_cached_binding() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let item = library.create_collection(CreateCollection { name: "Series".into(), description: None, collection_type: CollectionType::Movie }).unwrap();
+        let snapshot = serde_json::json!({"series":{"seasons":[
+            {"seasonNumber":0,"airDate":"2010-01-01"},
+            {"seasonNumber":3,"airDate":null},
+            {"seasonNumber":2,"airDate":"2024-05-05"},
+            {"seasonNumber":1,"airDate":"2016-01-14"},
+            {"seasonNumber":4,"airDate":"2025-02-30"}
+        ]}}).to_string();
+        for (identity, expected) in [("tv:42", Some(["2016-01-14".to_string(), "2024-05-05".to_string()])), ("42", None)] {
+            library.upsert_collection_external_binding(&item.id, ExternalBindingInput {
+                provider: "tmdb".into(), external_id: identity.into(), provider_config_json: None,
+                provider_data_json: Some(snapshot.clone()), last_synced_at: None,
+            }).unwrap();
+            assert_eq!(library.list_collections().unwrap()[0].season_date_range, expected);
+        }
+    }
     use std::io::Cursor;
 
     use image::{DynamicImage, ImageFormat};

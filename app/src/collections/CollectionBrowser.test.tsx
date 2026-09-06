@@ -72,6 +72,20 @@ function renderBrowser(props: {
 }
 
 describe("CollectionBrowser", () => {
+  it("opens a newly created series with its title and TV search intent", async () => {
+    const user = userEvent.setup();
+    const onViewChange = vi.fn();
+    const onChanged = vi.fn().mockResolvedValue(undefined);
+    const gateway = renderBrowser({ collections: [], typeFilter: "movie", showcase: false, onViewChange, onChanged });
+    vi.mocked(gateway.createCollection).mockResolvedValue({ ...sample, id: "new-tv", name: "시리즈 제목", type: "movie" });
+    await user.click(screen.getByRole("button", { name: "새 컬렉션" }));
+    await user.click(await screen.findByRole("menuitem", { name: "직접 입력" }));
+    await user.click(screen.getByRole("button", { name: "시리즈" }));
+    await user.type(screen.getByRole("textbox", { name: "이름" }), "시리즈 제목");
+    await user.click(screen.getByRole("button", { name: "저장" }));
+    await waitFor(() => expect(onViewChange).toHaveBeenCalledWith({ kind: "collection", collectionId: "new-tv", tmdbSearch: { query: "시리즈 제목", mediaType: "tv" } }));
+    expect(onChanged).toHaveBeenCalledOnce();
+  });
   it("renders stable mode, media, search, sort, direction, and rating controls", () => {
     const defaults = createDefaultCollectionLibraryState();
     renderBrowser({ collections: [sample], typeFilter: "game", showcase: false, libraryState: defaults.game });

@@ -168,7 +168,7 @@ it("shows only core fields while creating a game", async () => {
   const user = userEvent.setup();
   render(<CollectionEditDialog open mode={{ kind: "create", type: "manga" }} onClose={vi.fn()} onSubmit={vi.fn()} />);
 
-  await user.selectOptions(screen.getByLabelText("유형"), "game");
+  await user.click(screen.getByRole("button", { name: "게임" }));
 
   expect(screen.queryByLabelText("내 별점")).not.toBeInTheDocument();
   expect(screen.queryByLabelText("개발사")).not.toBeInTheDocument();
@@ -179,7 +179,7 @@ it("starts creation with the active type and submits it", async () => {
   const user = userEvent.setup();
   const onSubmit = vi.fn().mockResolvedValue(undefined);
   render(<CollectionEditDialog open mode={{ kind: "create", type: "game" }} onClose={vi.fn()} onSubmit={onSubmit} />);
-  expect(screen.getByLabelText("유형")).toHaveValue("game");
+  expect(screen.getByRole("button", { name: "게임" })).toHaveAttribute("aria-pressed", "true");
   await user.type(screen.getByRole("textbox", { name: "이름" }), "A game");
   await user.click(screen.getByRole("button", { name: "저장" }));
   expect(onSubmit).toHaveBeenCalledWith({ name: "A game", description: null, type: "game" });
@@ -197,12 +197,24 @@ it("shows only core fields while creating a movie", async () => {
   const user = userEvent.setup();
   render(<CollectionEditDialog open mode={{ kind: "create", type: "movie" }} onClose={vi.fn()} onSubmit={vi.fn()} />);
 
-  await user.selectOptions(screen.getByLabelText("유형"), "movie");
+  await user.click(screen.getByRole("button", { name: "영화" }));
 
   expect(screen.queryByLabelText("내 별점")).not.toBeInTheDocument();
   expect(screen.queryByLabelText("제작사")).not.toBeInTheDocument();
   expect(screen.queryByLabelText("감독")).not.toBeInTheDocument();
   expect(screen.queryByLabelText("개봉 연도")).not.toBeInTheDocument();
+});
+
+it("creates a series using the video collection type and TV search intent", async () => {
+  const user = userEvent.setup();
+  const onSubmit = vi.fn().mockResolvedValue(undefined);
+  render(<CollectionEditDialog open mode={{ kind: "create", type: "game" }} onClose={vi.fn()} onSubmit={onSubmit} />);
+  await user.click(screen.getByRole("button", { name: "시리즈" }));
+  expect(screen.getByRole("button", { name: "시리즈" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: "게임" })).toHaveAttribute("aria-pressed", "false");
+  await user.type(screen.getByRole("textbox", { name: "이름" }), "  시리즈 제목  ");
+  await user.click(screen.getByRole("button", { name: "저장" }));
+  expect(onSubmit).toHaveBeenCalledWith({ name: "시리즈 제목", description: null, type: "movie" }, "tv");
 });
 
 const collectionFixture: CollectionSummary = {

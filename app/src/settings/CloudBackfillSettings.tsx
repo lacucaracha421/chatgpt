@@ -4,6 +4,7 @@ import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { CloudBackfillPreflightReport, CloudBackfillProgress } from "../library/types";
 import { Button } from "../shared/ui/Button";
+import { cloudProblemCount } from "../app/useCloudProblems";
 import { Toast } from "../shared/ui/Toast";
 
 
@@ -90,6 +91,7 @@ export function CloudBackfillSettings() {
     <section className="cloud-backfill" aria-labelledby="cloud-backfill-title">
       <h3 className="settings-view__group-title" id="cloud-backfill-title">동기화 상태</h3>
       <p className="settings-view__row-note">PC의 자료를 모바일에서도 볼 수 있도록 복사합니다.</p>
+      {progress && cloudProblemCount(progress) > 0 && <p role="status">동기화 문제 {cloudProblemCount(progress)}개 · 실패 자료와 수신·연결·기록 전송 문제를 합산합니다.</p>}
       {error && <Toast tone="error" onDismiss={() => setError(null)}>{error}</Toast>}
       {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
 
