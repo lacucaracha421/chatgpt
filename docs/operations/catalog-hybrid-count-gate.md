@@ -204,10 +204,10 @@ progress retain their existing identities.
 
 The earlier Computer Use `node_repl` path remained unusable after two
 `failed to write kernel assets` / Windows path error 3 failures. Final acceptance
-used the actual debug Tauri executable instead, with an isolated APPDATA,
-LOCALAPPDATA, WebView2 profile and Lakomics library under a disposable repository
-fixture. WebView2 remote debugging attached directly to the native Lakomics page;
-no browser mock or production library was used.
+followed the repository runtime rule with `cd C:\chatgpt\app && npm run tauri -- dev`,
+using isolated APPDATA, LOCALAPPDATA, WebView2 profile and Lakomics library paths
+under a disposable repository fixture. WebView2 remote debugging attached directly
+to the native Lakomics page; no browser mock or production library was used.
 
 The fixture contained 105 Korean catalog works: one singleton plus a verified
 linear 104-work lineage. Native Manga catalog rendering returned exactly **2**

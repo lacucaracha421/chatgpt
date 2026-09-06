@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { UI_PREFERENCES_KEY } from "../preferences/uiPreferences";
 import { PrivacyProvider } from "../privacy/PrivacyContext";
 import { PageViewer } from "./PageViewer";
+import { BackNavigationProvider, useBackRequest } from "../shared/navigation/BackNavigation";
 
 afterEach(() => {
   cleanup();
@@ -233,6 +234,25 @@ describe("PageViewer", () => {
     expect(screen.queryByRole("dialog", { name: "페이지 목록" })).not.toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByText("1 / 6")).toBeVisible();
+  });
+
+  it("returns from the overview before closing the viewer through shared back navigation", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    let requestBack = () => false;
+    function BackProbe() { requestBack = useBackRequest(); return null; }
+    const { act } = await import("@testing-library/react");
+    render(<BackNavigationProvider><BackProbe /><PageViewer {...viewerProps({ initialPage: 3, onClose })} /></BackNavigationProvider>);
+    await user.click(screen.getByRole("button", { name: "페이지 목록" }));
+    act(() => { requestBack(); });
+    expect(screen.queryByRole("dialog", { name: "페이지 목록" })).not.toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByText("3 / 6")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "페이지 목록" }));
+    await user.click(screen.getByRole("button", { name: "뷰어로 돌아가기" }));
+    expect(onClose).not.toHaveBeenCalled();
+    act(() => { requestBack(); });
+    expect(onClose).toHaveBeenCalledOnce();
   });
 
   it("lets an open settings menu own Escape before the overview", async () => {

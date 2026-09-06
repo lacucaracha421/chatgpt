@@ -169,6 +169,7 @@ describe("CollectionOverlay MangaDex flow", () => {
     expect(screen.getByRole("heading", { name: "작품 정보" })).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "권별 표지" })).toBeInTheDocument();
     expect(screen.getByText("총 2권")).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "판본 선택" })).not.toBeInTheDocument();
     expect(detail.querySelector(".collection-overlay__manga-aside")).toContainElement(
       screen.getByRole("button", { name: "연결 및 갱신" }),
     );
@@ -271,7 +272,7 @@ describe("CollectionOverlay MangaDex flow", () => {
     expect(document.querySelector(".collection-overlay__hero")).toBeNull();
   });
 
-  it("shows ordered manga Volume drawers, fills placeholders, and has no fake editor", async () => {
+  it("shows only available manga editions, fills placeholders, and has no fake editor", async () => {
     let finishSync!: (result: { completed: number; skipped: number; failed: number }) => void;
     const syncMangaDexVolumeCovers = vi.fn().mockReturnValue(
       new Promise((resolve) => { finishSync = resolve; }),
@@ -300,11 +301,11 @@ describe("CollectionOverlay MangaDex flow", () => {
       "10권 표지 불러오는 중",
     ]);
     expect(screen.queryByRole("textbox", { name: "권 번호" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "서랍 2" }));
+    await user.click(screen.getByRole("button", { name: "대체판 1 선택" }));
     expect(screen.getByRole("button", { name: "1.1권 표지" })).toBeInTheDocument();
 
     finishSync({ completed: 1, skipped: 2, failed: 0 });
-    await user.click(screen.getByRole("button", { name: "서랍 1" }));
+    await user.click(screen.getByRole("button", { name: "기본판 선택" }));
     expect(await screen.findByRole("img", { name: "10권 표지" })).toHaveAttribute(
       "src",
       "http://lakomics.localhost/work-artwork-thumbnail/art-10",

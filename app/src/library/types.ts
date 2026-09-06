@@ -210,7 +210,7 @@ export type CatalogGroupEditionsQuery = {
 export type CatalogGroupEditionsPage = CatalogSearchPage & { groupId: string; selectedProviderWorkId: string | null };
 export type CatalogGroupRepresentativeQuery = { provider: CatalogProvider; groupId: string; selectedProviderWorkId: string | null };
 
-export type CatalogTagGroup = { namespace: string; values: string[] };
+export type CatalogTagGroup = { namespace: string; values: string[]; labels?: Record<string, string> };
 
 export type CatalogWorkDetail = CatalogWorkIdentity & {
   title: string;

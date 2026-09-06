@@ -494,6 +494,8 @@ impl Library {
             grouped_tags.entry(namespace).or_default().push(value);
         }
 
+        // Missing optional translations must not prevent opening a work.
+        let lookup = self.catalog_lookup().ok();
         Ok(CatalogWorkDetail {
             identity: CatalogWorkIdentity::khentai(row.0 as u64),
             title: row.1,
@@ -511,7 +513,13 @@ impl Library {
             bookmarked: row.12,
             tag_groups: grouped_tags
                 .into_iter()
-                .map(|(namespace, values)| CatalogTagGroup { namespace, values })
+                .map(|(namespace, values)| {
+                    let labels = values.iter().filter_map(|value| {
+                        translated_detail_tag(&lookup.as_ref()?.translations, &namespace, value)
+                            .map(|label| (value.clone(), label))
+                    }).collect();
+                    CatalogTagGroup { namespace, values, labels }
+                })
                 .collect(),
         })
     }
@@ -567,6 +575,32 @@ impl Library {
         *cache = Some(loaded.clone());
         Ok(loaded)
     }
+}
+
+fn translated_detail_tag(
+    translations: &BTreeMap<String, String>,
+    namespace: &str,
+    value: &str,
+) -> Option<String> {
+    let exact = format!("{namespace}:{value}");
+    let normalized = exact.replace('_', " ");
+    let unprefixed = normalized.strip_prefix("tag:").unwrap_or(&normalized);
+    let prefixed = format!("tag:{unprefixed}");
+    // Catalog namespaces differ from the imported dictionary's categories.
+    let alias = match namespace {
+        "parody" => Some(format!("series:{}", value.replace('_', " "))),
+        "mixed" | "other" | "misc" => Some(format!("tag:{}", value.replace('_', " "))),
+        _ => None,
+    };
+    let label = translations.get(&exact)
+        .or_else(|| translations.get(&normalized))
+        .or_else(|| translations.get(&prefixed))
+        .or_else(|| translations.get(unprefixed))
+        .or_else(|| alias.as_ref().and_then(|key| translations.get(key)))?;
+    // The imported dictionary repeats gender namespaces in translated labels.
+    let qualifier = unprefixed.split_once(':').map(|(prefix, _)| prefix);
+    Some(qualifier.and_then(|prefix| label.strip_prefix(&format!("{prefix}:")))
+        .unwrap_or(label).to_owned())
 }
 
 /// Bounded metadata hydration shared by grouped cards and lazy editions.
@@ -1551,6 +1585,36 @@ mod tests {
     }
 
     #[test]
+    fn detail_tag_translation_matches_imported_prefixes_and_spaces() {
+        let translations = std::collections::BTreeMap::from([
+            ("tag:female:beauty mark".to_owned(), "female:애교점".to_owned()),
+            ("character:cure beauty".to_owned(), "아오키 레이카".to_owned()),
+            ("tag:body swap".to_owned(), "신체교환".to_owned()),
+            ("tag:ffm threesome".to_owned(), "여여남 쓰리썸".to_owned()),
+            ("tag:group".to_owned(), "그룹".to_owned()),
+            ("series:fate stay night".to_owned(), "페이트 스테이 나이트|페스나".to_owned()),
+        ]);
+        for (namespace, value, expected) in [
+            ("female", "beauty_mark", "애교점"),
+            ("female", "beauty mark", "애교점"),
+            ("tag", "female:beauty_mark", "애교점"),
+            ("character", "cure_beauty", "아오키 레이카"),
+            ("tag", "body_swap", "신체교환"),
+            ("mixed", "ffm_threesome", "여여남 쓰리썸"),
+            ("mixed", "group", "그룹"),
+            ("parody", "fate_stay_night", "페이트 스테이 나이트|페스나"),
+        ] {
+            assert_eq!(super::translated_detail_tag(&translations, namespace, value).as_deref(), Some(expected));
+        }
+        assert_eq!(super::translated_detail_tag(&translations, "male", "beauty_mark"), None);
+        assert_eq!(super::translated_detail_tag(&translations, "group", "royal_bitch"), None);
+        assert_eq!(super::translated_detail_tag(&translations, "artist", "group"), None);
+        let mut exact = translations;
+        exact.insert("female:beauty_mark".into(), "정확 일치".into());
+        assert_eq!(super::translated_detail_tag(&exact, "female", "beauty_mark").as_deref(), Some("정확 일치"));
+    }
+
+    #[test]
     fn detail_returns_optional_metadata_and_grouped_tags() {
         let (_root, library) = searchable_library();
         library.set_online_catalog_bookmark(&khentai(3), true).unwrap();
@@ -1570,10 +1634,21 @@ mod tests {
             .tag_groups
             .iter()
             .any(|group| { group.namespace == "character" && group.values == ["teitoku"] }));
+        assert_eq!(detail.tag_groups.iter().find(|group| group.namespace == "character")
+            .unwrap().labels.get("teitoku").map(String::as_str), Some("제독"));
         assert!(detail
             .tag_groups
             .iter()
             .any(|group| { group.namespace == "language" && group.values == ["korean"] }));
+    }
+
+    #[test]
+    fn detail_opens_without_optional_tag_translations() {
+        let (_root, library) = searchable_library();
+        fs::remove_file(library.root().join("catalogs/tag-ko.json")).unwrap();
+        let detail = library.online_catalog_work_detail(&khentai(3)).unwrap();
+        assert!(detail.tag_groups.iter().all(|group| group.labels.is_empty()));
+        assert!(detail.tag_groups.iter().any(|group| group.values == ["teitoku"]));
     }
 
     #[test]

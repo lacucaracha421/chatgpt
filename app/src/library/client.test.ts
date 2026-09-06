@@ -5,6 +5,29 @@ const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke, Channel: class { onmessage = () => {}; } }));
 
 import { libraryGateway } from "./client";
+import { Channel } from "@tauri-apps/api/core";
+
+it("supplies the required volume progress channel even without a listener", async () => {
+  await libraryGateway.listCollectionVolumes("collection-1");
+  expect(invoke).toHaveBeenLastCalledWith("list_collection_volumes", {
+    collectionId: "collection-1",
+    onProgress: expect.any(Channel),
+  });
+  const channel = invoke.mock.lastCall![1].onProgress;
+  expect(() => channel.onmessage({ imported: 1, total: 2 })).not.toThrow();
+});
+
+it("forwards volume progress to an optional listener", async () => {
+  const onProgress = vi.fn();
+  await libraryGateway.listCollectionVolumes("collection-2", onProgress);
+  expect(invoke).toHaveBeenLastCalledWith("list_collection_volumes", {
+    collectionId: "collection-2",
+    onProgress: expect.any(Channel),
+  });
+  invoke.mock.lastCall![1].onProgress.onmessage({ imported: 1, total: 2 });
+  expect(onProgress).toHaveBeenCalledExactlyOnceWith({ imported: 1, total: 2 });
+});
+
 it("routes catalog review to explicit native commands", async () => {
   await libraryGateway.listCatalogReview();
   expect(invoke).toHaveBeenLastCalledWith("list_catalog_review");

@@ -1,8 +1,8 @@
 import { ArrowDownTrayIcon, ArrowPathIcon, BarsArrowDownIcon, ClockIcon, EyeIcon, EyeSlashIcon, FireIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { open } from "@tauri-apps/plugin-dialog";
-import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { ViewToolbar } from "../layout/ViewToolbar";
-import { useWorkspaceChrome } from "../layout/WorkspaceChrome";
+import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 import { SearchSurface } from "../layout/SearchSurface";
 import { ChromeQueryBadge } from "../layout/ChromeSearch";
 import { Toggle } from "../shared/ui/Toggle";
@@ -40,44 +40,53 @@ const CATALOG_PAGE_SIZE = 48;
 
 type OnlineCatalogBrowserProps = {
   onSwitchLocal: () => void;
+  initialScope?: CatalogScope;
 };
 
 export function MangaSourceTabs({ source, onlineScope = "all", onLocal, onOnline }: {
   source: "local" | "online";
   onlineScope?: CatalogScope;
   onLocal: () => void;
-  onOnline: () => void;
+  onOnline: (scope: CatalogScope) => void;
 }) {
-  const onlineLabel = source === "online" && onlineScope === "bookmarked" ? "북마크" : "카탈로그";
   return <div className="manga-source-tabs" aria-label="망가 출처">
-    <button type="button" aria-pressed={source === "online"} onClick={onOnline}>{onlineLabel}</button>
+    <button type="button" aria-pressed={source === "online" && onlineScope === "all"} onClick={() => onOnline("all")}>카탈로그</button>
+    <button type="button" aria-pressed={source === "online" && onlineScope === "bookmarked"} onClick={() => onOnline("bookmarked")}>북마크</button>
     <button type="button" aria-pressed={source === "local"} onClick={onLocal}>로컬</button>
   </div>;
 }
 
-export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProps) {
+export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all" }: OnlineCatalogBrowserProps) {
   const { gateway } = useLibrary();
   const workspace = useWorkspaceChrome();
   const [searchOpen, setSearchOpen] = useState(false);
   const [appliedQuery, setAppliedQuery] = useState("");
   const [status, setStatus] = useState<CatalogStatus | null>(null);
   const [results, setResults] = useState<CatalogGroupedPage | null>(null);
+  const gridScroll = useRef<HTMLDivElement>(null);
+  const displayedOrder = useRef<{ page: number; sort: CatalogSort } | null>(null);
+  const resetGridScroll = useRef(false);
+  useLayoutEffect(() => {
+    if (resetGridScroll.current && gridScroll.current) gridScroll.current.scrollTop = 0;
+    resetGridScroll.current = false;
+  }, [results]);
   const [totalCount, setTotalCount] = useState<number | null>(null);
   const [countError, setCountError] = useState<string | null>(null);
   const [editions, setEditions] = useState<CatalogGroupedWork | null>(null);
   const mounted = useRef(true);
-  const refreshSearch = useRef<() => void>(() => {});
+  const refreshSearch = useRef<(quiet?: boolean) => Promise<void>>(async () => {});
   const [query, setQuery] = useState("");
   const [language, setLanguage] = useState<CatalogLanguage>("korean");
   const languageRef = useRef<CatalogLanguage>("korean");
-  const [sort, setSort] = useState<CatalogSort>("latest");
-  const [scope, setScope] = useState<CatalogScope>("all");
+  const [sort, setSort] = useState<CatalogSort>("hotDay");
+  const [scope, setScope] = useState<CatalogScope>(initialScope);
   const [revealBlocked, setRevealBlocked] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<CatalogSuggestion[]>([]);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
   const suggestionsListboxId = useId();
   const [loading, setLoading] = useState(false);
+  const [quietRefresh, setQuietRefresh] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [openingWorkKey, setOpeningWorkKey] = useState<string | null>(null);
   const [detail, setDetail] = useState<CatalogWorkDetail | null>(null);
@@ -112,15 +121,16 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
     };
   }, [gateway]);
 
-  async function search(text: string, nextSort = sort, nextScope = scope, nextPage = 0, nextRevealBlocked = revealBlocked, nextLanguage = language) {
+  async function search(text: string, nextSort = sort, nextScope = scope, nextPage = 0, nextRevealBlocked = revealBlocked, nextLanguage = language, quiet = false) {
     if (!mounted.current) return;
     setAppliedQuery(text);
     setSearchOpen(false);
     const request = ++searchRequest.current;
-    setLoading(true);
-    setTotalCount(null);
+    setLoading(!quiet);
+    setQuietRefresh(quiet);
+    if (!quiet) setTotalCount(null);
     setCountError(null);
-    refreshSearch.current = () => { void search(text, nextSort, nextScope, nextPage, nextRevealBlocked, nextLanguage); };
+    refreshSearch.current = (quiet = false) => search(text, nextSort, nextScope, nextPage, nextRevealBlocked, nextLanguage, quiet);
     suggestionRequest.current += 1;
     setSuggestions([]);
     setActiveSuggestionIndex(-1);
@@ -136,10 +146,15 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
         pageSize: CATALOG_PAGE_SIZE,
       }, (event) => {
         if (request !== searchRequest.current) return;
-        if (event.type === "page") { setResults(event.page); setLoading(false); }
+        if (event.type === "page") {
+          const previous = displayedOrder.current;
+          resetGridScroll.current = !quiet && (!previous || previous.page !== event.page.page || previous.sort !== nextSort);
+          displayedOrder.current = { page: event.page.page, sort: nextSort };
+          setResults(event.page); setLoading(false);
+        }
         else if (event.type === "count") {
           if (nextPage > 0 && nextPage * CATALOG_PAGE_SIZE >= event.totalCount) {
-            void search(text, nextSort, nextScope, Math.max(0, Math.ceil(event.totalCount / CATALOG_PAGE_SIZE) - 1), nextRevealBlocked, nextLanguage);
+            void search(text, nextSort, nextScope, Math.max(0, Math.ceil(event.totalCount / CATALOG_PAGE_SIZE) - 1), nextRevealBlocked, nextLanguage, quiet);
             return;
           }
           setTotalCount(event.totalCount); setCountError(null);
@@ -268,24 +283,21 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
     const identityKey = catalogIdentityKey(identity);
     if (bookmarkRequests.current.has(identityKey)) return false;
     searchRequest.current += 1;
-    setTotalCount(null);
     setCountError(null);
     bookmarkRequests.current.add(identityKey);
     setBookmarkPendingKeys(new Set(bookmarkRequests.current));
     try {
       await gateway.setOnlineCatalogBookmark(identity, bookmarked);
       if (!mounted.current) return false;
-      setResults((current) => current && ({
-        ...current,
-        works: current.works.map((work) => catalogIdentityKey(work) === identityKey ? { ...work, bookmarked } : work),
-      }));
+      // Group bookmark flags must arrive together from the authoritative page.
+      // Updating only the representative briefly invents a saved-other-edition state.
       setDetail((current) => current && catalogIdentityKey(current) === identityKey ? { ...current, bookmarked } : current);
-      refreshSearch.current();
+      await refreshSearch.current(true);
       return true;
     } catch {
       if (!mounted.current) return false;
       setMessage("북마크를 변경하지 못했습니다");
-      refreshSearch.current();
+      await refreshSearch.current(true);
       return false;
     } finally {
       bookmarkRequests.current.delete(identityKey);
@@ -398,8 +410,8 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
           source="online"
           onlineScope={scope}
           onLocal={() => { closeDetail(); closeViewer(); onSwitchLocal(); }}
-          onOnline={() => {
-            const nextScope: CatalogScope = scope === "all" ? "bookmarked" : "all";
+          onOnline={(nextScope) => {
+            if (nextScope === scope) return;
             setScope(nextScope);
             void search(query.trim(), sort, nextScope, 0);
           }}
@@ -459,9 +471,15 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
           </div>}
         </form>);
 
+  const completedUpdates = [status?.lastSuccessAt, ...(status?.streams ?? []).map((stream) => stream.lastCompletedAt)]
+    .filter((value): value is string => Boolean(value) && Number.isFinite(Date.parse(value!)));
+  const latestUpdate = completedUpdates.sort((a, b) => Date.parse(b) - Date.parse(a))[0];
   return <section className="manga-browser online-catalog" aria-label="온라인 망가">
     <ViewToolbar
       title="망가"
+      titleAccessory={status?.installed && <span className="online-catalog__updated-at" title="카탈로그 DB의 가장 최근 갱신 완료 시각 (현지 시간)">
+        {latestUpdate ? <time dateTime={latestUpdate} aria-label="최근 DB 갱신">{new Intl.DateTimeFormat("sv-SE", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(latestUpdate))}</time> : "갱신 기록 없음"}
+      </span>}
       ariaLabel="온라인 망가 도구"
       chrome={{
         navigation: catalogNavigation,
@@ -501,7 +519,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
         : !workspace && <span className="online-catalog__sync-status">아직 갱신 기록이 없습니다</span>}
     </div>}
     {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
-    <div className="manga-browser__content online-catalog__content">
+    <div ref={gridScroll} className="manga-browser__content online-catalog__content">
       {!status ? <Skeleton className="manga-browser__skeleton" label="온라인 카탈로그를 불러오는 중" />
         : !status.installed ? <EmptyState title="온라인 카탈로그가 없습니다">
           <p>기존 VCK 폴더의 데이터를 한 번 가져오면 Lakomics에서 독립적으로 사용할 수 있습니다.</p>
@@ -522,7 +540,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
         </div>}
     </div>
     {results && <footer className="online-catalog__pagination" aria-busy={loading || totalCount === null}>
-      <span>{totalCount === null ? countError ? "결과 수를 확인하지 못했습니다" : "페이지 표시 중" : totalCount === 0 ? "0 / 0" : `${(results.page * results.pageSize + 1).toLocaleString()}–${Math.min(totalCount, (results.page + 1) * results.pageSize).toLocaleString()} / ${totalCount.toLocaleString()}`}{loading && <em className="online-catalog__pagination-loading" role="status"> · 불러오는 중…</em>}</span>
+      <span>{totalCount === null ? countError ? "결과 수를 확인하지 못했습니다" : "페이지 표시 중" : totalCount === 0 ? "0 / 0" : `${(results.page * results.pageSize + 1).toLocaleString()}–${Math.min(totalCount, (results.page + 1) * results.pageSize).toLocaleString()} / ${totalCount.toLocaleString()}`}{loading && !quietRefresh && <em className="online-catalog__pagination-loading" role="status"> · 불러오는 중…</em>}</span>
       <div>
         <Button size="sm" disabled={loading || totalCount === null || results.page === 0} onClick={() => void search(query.trim(), sort, scope, results.page - 1)}>이전 결과</Button>
         <Button size="sm" disabled={loading || totalCount === null || (results.page + 1) * results.pageSize >= totalCount} onClick={() => void search(query.trim(), sort, scope, results.page + 1)}>다음 결과</Button>

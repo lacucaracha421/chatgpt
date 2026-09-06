@@ -359,11 +359,9 @@ export const libraryGateway: LibraryGateway = {
   listCollectionWorkArtworks: (collectionId) =>
     invoke<WorkArtworkSummary[]>("list_collection_work_artworks", { collectionId }),
   listCollectionVolumes: (collectionId, onProgress) => {
-    if (!onProgress) {
-      return invoke<CollectionVolume[]>("list_collection_volumes", { collectionId });
-    }
+    // The native command requires a channel even when progress is not displayed.
     const onProgressChannel = new Channel<VolumeImportProgress>();
-    onProgressChannel.onmessage = onProgress;
+    onProgressChannel.onmessage = (progress) => onProgress?.(progress);
     return invoke<CollectionVolume[]>("list_collection_volumes", {
       collectionId,
       onProgress: onProgressChannel,

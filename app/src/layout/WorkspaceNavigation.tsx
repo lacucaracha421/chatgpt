@@ -2,7 +2,8 @@ import { BookOpenIcon, Cog6ToothIcon, EllipsisHorizontalIcon, MagnifyingGlassIco
 import { useRef, type CSSProperties, type ReactNode } from "react";
 import type { AssetView, CollectionType } from "../library/types";
 import { Menu } from "../shared/ui/Menu";
-import { ChromeSettingsDock, ChromeTarget, useWorkspaceChrome } from "./WorkspaceChrome";
+import { ChromeSettingsDock, ChromeTarget } from "./WorkspaceChrome";
+import { useWorkspaceChrome } from "./WorkspaceChromeContext";
 import { clampSidebarWidth, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH } from "./sidebarWidth";
 
 export function workspaceArea(view: AssetView): "assets" | "collections" | "manga" | "manage" {

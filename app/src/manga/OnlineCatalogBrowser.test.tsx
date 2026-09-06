@@ -7,6 +7,8 @@ import type { CatalogGroupedSearchEvent, CatalogStatus, CatalogWork, CatalogWork
 import { CatalogVisibilitySettings } from "../settings/CatalogVisibilitySettings";
 import { OnlineCatalogBrowser } from "./OnlineCatalogBrowser";
 import { ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
+import { lazy, Suspense } from "react";
+import { WindowControls } from "../layout/WindowControls";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 afterEach(() => { cleanup(); vi.useRealTimers(); });
@@ -44,16 +46,87 @@ const detail: CatalogWorkDetail = {
 };
 
 describe("OnlineCatalogBrowser", () => {
+  it("resets only the grid scroll on accepted page or sort changes", async () => {
+    const gateway = createGateway(true);
+    vi.mocked(gateway.searchOnlineCatalog).mockImplementation(async (query) => ({ works: [work], totalCount: 100, page: query.page, pageSize: 48 }));
+    render(<LibraryProvider gateway={gateway}><WorkspaceChromeProvider scope="catalog">
+      <aside><ChromeTarget name="navigation" /></aside>
+      <OnlineCatalogBrowser onSwitchLocal={vi.fn()} />
+    </WorkspaceChromeProvider></LibraryProvider>);
+    await screen.findByRole("button", { name: "오래된 제독 상세 보기" });
+    const grid = document.querySelector<HTMLDivElement>(".online-catalog__content")!;
+    const sidebar = document.querySelector("aside")!;
+    sidebar.scrollTop = 70;
+    grid.scrollTop = 500;
+    await userEvent.click(screen.getByRole("button", { name: "다음 결과" }));
+    await waitFor(() => expect(grid.scrollTop).toBe(0));
+    grid.scrollTop = 400;
+    await userEvent.click(screen.getByRole("button", { name: "이전 결과" }));
+    await waitFor(() => expect(grid.scrollTop).toBe(0));
+    grid.scrollTop = 300;
+    await userEvent.selectOptions(screen.getByLabelText("정렬"), "views");
+    await waitFor(() => expect(grid.scrollTop).toBe(0));
+    expect(sidebar.scrollTop).toBe(70);
+    grid.scrollTop = 200;
+    await userEvent.click(screen.getByRole("button", { name: "오래된 제독 북마크" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "오래된 제독 북마크" })).toBeEnabled());
+    expect(grid.scrollTop).toBe(200);
+  });
+  it("shows the latest completed DB update beside the title, not a later failed attempt", async () => {
+    const gateway = createGateway(true);
+    const status = await gateway.getOnlineCatalogStatus();
+    vi.mocked(gateway.getOnlineCatalogStatus).mockResolvedValue({ ...status,
+      lastSuccessAt: "2026-09-05T01:00:00Z",
+      lastAttemptAt: "2026-09-06T10:00:00Z",
+      streams: [{ provider: "kHentai", language: "japanese", hasState: true, initialComplete: true,
+        watermark: 0, cursor: null, pendingMax: 0, lastAttemptAt: "2026-09-06T10:00:00Z",
+        lastProgressAt: "2026-09-06T09:00:00Z", lastCompletedAt: "2026-09-06T02:30:00Z", lastAdded: 0, lastError: null }],
+    });
+    renderBrowser(gateway);
+    const time = await screen.findByLabelText("최근 DB 갱신");
+    expect(time).toHaveAttribute("datetime", "2026-09-06T02:30:00Z");
+    expect(time.closest(".view-toolbar")).toContainElement(screen.getByRole("heading", { name: "망가" }));
+  });
+  it("keeps bookmark flags and pagination stable until the refreshed page arrives", async () => {
+    const gateway = createGateway(true);
+    vi.mocked(gateway.searchOnlineCatalog).mockResolvedValue({ works: [{ ...work, bookmarked: true }], totalCount: 60, page: 0, pageSize: 48 });
+    renderBrowser(gateway);
+    const bookmark = await screen.findByRole("button", { name: "오래된 제독 북마크 해제" });
+    const footer = document.querySelector(".online-catalog__pagination")!;
+    const before = footer.textContent;
+    const pending = deferred<Awaited<ReturnType<LibraryGateway["searchOnlineCatalog"]>>>();
+    vi.mocked(gateway.searchOnlineCatalog).mockReturnValueOnce(pending.promise);
+    await userEvent.click(bookmark);
+    await waitFor(() => expect(gateway.searchOnlineCatalog).toHaveBeenCalledTimes(2));
+    expect(bookmark).toBeDisabled();
+    expect(bookmark).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByText("북마크된 판본 있음")).not.toBeInTheDocument();
+    expect(footer.textContent).toBe(before);
+    expect(screen.getByRole("button", { name: "다음 결과" })).toBeEnabled();
+    expect(screen.getByRole("combobox", { name: "카탈로그 언어" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "새로고침" })).toBeEnabled();
+    await act(async () => pending.resolve({ works: [{ ...work, bookmarked: false }], totalCount: 60, page: 0, pageSize: 48 }));
+    expect(await screen.findByRole("button", { name: "오래된 제독 북마크" })).toBeEnabled();
+    expect(screen.queryByText("북마크된 판본 있음")).not.toBeInTheDocument();
+    expect(footer.textContent).toBe(before);
+  });
   it("keeps catalog controls in the index and opens search only from its icon", async () => {
     const gateway = createGateway(true);
     const user = userEvent.setup();
+    const DeferredCatalog = lazy(async () => ({ default: (await import("./OnlineCatalogBrowser")).OnlineCatalogBrowser }));
     render(<LibraryProvider gateway={gateway}><WorkspaceChromeProvider scope="catalog">
       <aside aria-label="카탈로그 인덱스"><ChromeTarget name="search" /><ChromeTarget name="navigation" /></aside>
-      <OnlineCatalogBrowser onSwitchLocal={vi.fn()} />
+      <div data-testid="shared-titlebar"><ChromeTarget name="header" /><WindowControls /></div>
+      <Suspense fallback={null}><DeferredCatalog onSwitchLocal={vi.fn()} /></Suspense>
     </WorkspaceChromeProvider></LibraryProvider>);
     const index = screen.getByRole("complementary", { name: "카탈로그 인덱스" });
     expect(await within(index).findByLabelText("정렬")).toBeVisible();
     expect(within(index).getByRole("button", { name: "신규 작품 갱신" })).toBeVisible();
+    expect(within(index).getByRole("button", { name: "중복 후보 검토" })).toBeVisible();
+    expect(within(index).getByRole("button", { name: "카탈로그" })).toBeVisible();
+    expect(screen.getAllByRole("button", { name: "창 닫기" })).toHaveLength(1);
+    expect(screen.getByTestId("shared-titlebar")).toContainElement(screen.getByRole("toolbar"));
+    expect(within(screen.getByTestId("shared-titlebar")).queryByLabelText("정렬")).not.toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "온라인 만화 검색" })).not.toBeInTheDocument();
     await user.click(within(index).getByRole("button", { name: "온라인 만화 검색" }));
     const input = await screen.findByRole("combobox", { name: "온라인 만화 검색" });
@@ -272,7 +345,7 @@ describe("OnlineCatalogBrowser", () => {
     }));
     renderBrowser(gateway);
     await screen.findByRole("button", { name: "오래된 제독 상세 보기" });
-    await userEvent.click(screen.getByRole("button", { name: "카탈로그" }));
+    await userEvent.click(screen.getByRole("button", { name: "북마크" }));
     await userEvent.click(await screen.findByRole("button", { name: "다음 결과" }));
     await userEvent.click(await screen.findByRole("button", { name: "오래된 제독 북마크 해제" }));
     await waitFor(() => expect(gateway.searchOnlineCatalog).toHaveBeenLastCalledWith(
@@ -290,11 +363,11 @@ describe("OnlineCatalogBrowser", () => {
     }));
     renderBrowser(gateway);
     await screen.findByRole("button", { name: "오래된 제독 상세 보기" });
-    await userEvent.click(screen.getByRole("button", { name: "카탈로그" }));
+    await userEvent.click(screen.getByRole("button", { name: "북마크" }));
     const pending = deferred<void>();
     vi.mocked(gateway.setOnlineCatalogBookmark).mockReturnValueOnce(pending.promise);
     await userEvent.click(await screen.findByRole("button", { name: "오래된 제독 북마크 해제" }));
-    await userEvent.click(screen.getByRole("button", { name: "북마크" }));
+    await userEvent.click(screen.getByRole("button", { name: "카탈로그" }));
     await act(async () => pending.resolve());
 
     expect(gateway.searchOnlineCatalog).toHaveBeenLastCalledWith(
@@ -304,12 +377,23 @@ describe("OnlineCatalogBrowser", () => {
 
   it("opens local details before resolving pages and routes tag searches", async () => {
     const gateway = createGateway(true);
+    vi.mocked(gateway.getOnlineCatalogWorkDetail).mockResolvedValue({ ...detail, tagGroups: [
+      { namespace: "character", values: ["teitoku", "untranslated_name"], labels: { teitoku: "제독" } },
+      { namespace: "language", values: ["korean"] },
+    ] });
     renderBrowser(gateway);
 
     await userEvent.click(await screen.findByRole("button", { name: "오래된 제독 상세 보기" }));
     expect(gateway.getOnlineCatalogWorkDetail).toHaveBeenCalledWith({ provider: "kHentai", providerWorkId: "3" });
     expect(gateway.getRemoteReadingProgress).toHaveBeenCalledWith({ provider: "kHentai", providerWorkId: "3" });
     expect(gateway.resolveOnlineCatalogWork).not.toHaveBeenCalled();
+
+    expect(await screen.findByRole("button", { name: "character:teitoku 검색" })).toHaveTextContent("제독");
+    expect(screen.getByRole("button", { name: "character:untranslated_name 검색" })).toHaveTextContent("untranslated name");
+    expect(screen.getByRole("button", { name: "language:korean 검색" })).toHaveTextContent("한국어");
+    expect(screen.getByText("업로더")).not.toBeVisible();
+    await userEvent.click(screen.getByText("추가 정보"));
+    expect(screen.getByText("업로더")).toBeVisible();
 
     await userEvent.click(await screen.findByRole("button", { name: "character:teitoku 검색" }));
     expect(gateway.searchOnlineCatalog).toHaveBeenLastCalledWith(
@@ -382,7 +466,7 @@ describe("OnlineCatalogBrowser", () => {
     expect(gateway.setOnlineCatalogBookmark).toHaveBeenCalledWith({ provider: "kHentai", providerWorkId: "3" }, true);
     expect(gateway.getOnlineCatalogWorkDetail).not.toHaveBeenCalled();
 
-    await userEvent.click(screen.getByRole("button", { name: "카탈로그" }));
+    await userEvent.click(screen.getByRole("button", { name: "북마크" }));
     expect(gateway.searchOnlineCatalog).toHaveBeenLastCalledWith(
       expect.objectContaining({ scope: "bookmarked", page: 0 }),
     );
@@ -445,7 +529,8 @@ describe("OnlineCatalogBrowser", () => {
     await waitFor(() => expect(gateway.searchOnlineCatalog).toHaveBeenCalledWith(
       expect.objectContaining({ text: "character:teitoku" }),
     ));
-    await userEvent.click(screen.getByRole("button", { name: "정렬: 최신순" }));
+    expect(gateway.searchOnlineCatalog).toHaveBeenCalledWith(expect.objectContaining({ sort: "hotDay" }));
+    await userEvent.click(screen.getByRole("button", { name: "정렬: 오늘 인기" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "주간 인기" }));
     await waitFor(() => expect(gateway.searchOnlineCatalog).toHaveBeenCalledWith(
       expect.objectContaining({ sort: "hotWeek" }),

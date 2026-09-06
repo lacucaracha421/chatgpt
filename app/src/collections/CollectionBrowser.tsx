@@ -5,7 +5,7 @@ import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { AssetView, CollectionSummary, CollectionType, CreateCollection, UpdateCollection } from "../library/types";
 import { ViewToolbar } from "../layout/ViewToolbar";
-import { useWorkspaceChrome } from "../layout/WorkspaceChrome";
+import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 import { Select } from "../shared/ui/Select";
 import { Button } from "../shared/ui/Button";
 import { ContextMenu } from "../shared/ui/ContextMenu";

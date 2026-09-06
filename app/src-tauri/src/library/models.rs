@@ -1156,6 +1156,7 @@ pub struct CatalogWork {
 pub struct CatalogTagGroup {
     pub namespace: String,
     pub values: Vec<String>,
+    pub labels: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

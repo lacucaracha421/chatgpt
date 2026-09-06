@@ -1,5 +1,5 @@
-import { StarIcon as StarOutlineIcon } from "@heroicons/react/24/outline";
-import { StarIcon as StarSolidIcon } from "@heroicons/react/24/solid";
+import { BookmarkIcon } from "../shared/ui/ArchiveIcons";
+import { catalogDisplayTitle } from "./catalogDisplayTitle";
 import type { CatalogGroupedWork, CatalogWork, CatalogWorkIdentity } from "../library/types";
 import { Button } from "../shared/ui/Button";
 import { catalogIdentityOf } from "./catalogIdentity";
@@ -15,7 +15,6 @@ type OnlineCatalogCardProps = {
 };
 
 export function OnlineCatalogCard({ work, opening, bookmarkPending, onOpen, onBookmark, onEditions }: OnlineCatalogCardProps) {
-  const BookmarkIcon = work.bookmarked ? StarSolidIcon : StarOutlineIcon;
   const byline = [...work.artists, ...work.series].join(" · ") || "작가 정보 없음";
 
   return <article className="online-catalog-card">
@@ -33,13 +32,13 @@ export function OnlineCatalogCard({ work, opening, bookmarkPending, onOpen, onBo
         pageCount={work.fileCount}
       />
       <span className="online-catalog-card__metadata">
-        <strong title={opening ? undefined : work.title}>{opening ? "작품을 여는 중…" : work.title}</strong>
+        <strong title={opening ? undefined : work.title}>{opening ? "작품을 여는 중…" : catalogDisplayTitle(work.title)}</strong>
         <span title={byline}>{byline}</span>
         <small>조회 {work.views.toLocaleString()} · {work.fileCount}페이지</small>
       </span>
     </button>
+    <div className="online-catalog-card__footer">
     <Button size="sm" variant="ghost" className="online-catalog-card__editions" onClick={() => onEditions(work)}>{work.versionCount}개 판본</Button>
-    {work.hasBookmarkedVersion && !work.bookmarked && <span className="online-catalog-card__saved-edition">북마크된 판본 있음</span>}
     <button
       type="button"
       className="online-catalog-card__bookmark"
@@ -50,5 +49,7 @@ export function OnlineCatalogCard({ work, opening, bookmarkPending, onOpen, onBo
     >
       <BookmarkIcon aria-hidden="true" />
     </button>
+    </div>
+    {work.hasBookmarkedVersion && !work.bookmarked && <span className="online-catalog-card__saved-edition">북마크된 판본 있음</span>}
   </article>;
 }

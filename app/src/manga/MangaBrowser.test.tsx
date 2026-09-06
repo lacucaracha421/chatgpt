@@ -207,18 +207,20 @@ describe("MangaBrowser", () => {
     expect(await screen.findByText(/원격에서도 1개 ID를 찾지 못했습니다/)).toBeVisible();
   });
 
-  it("prefers the catalog and orders the source switch as catalog then local", async () => {
+  it("offers catalog and bookmarks separately and opens bookmarks directly from local", async () => {
     const gateway = createGateway({ root: "C:\\manga", series });
     render(<LibraryProvider gateway={gateway}><MangaBrowser /></LibraryProvider>);
 
     expect(await screen.findByText("온라인 카탈로그가 없습니다")).toBeVisible();
     const sourceButtons = screen.getByLabelText("망가 출처").querySelectorAll("button");
-    expect([...sourceButtons].map((button) => button.textContent)).toEqual(["카탈로그", "로컬"]);
+    expect([...sourceButtons].map((button) => button.textContent)).toEqual(["카탈로그", "북마크", "로컬"]);
 
     await userEvent.click(screen.getByRole("button", { name: "로컬" }));
     expect(await screen.findByText("T1")).toBeVisible();
-    await userEvent.click(screen.getByRole("button", { name: "카탈로그" }));
+    await userEvent.click(screen.getByRole("button", { name: "북마크" }));
     expect(await screen.findByText("온라인 카탈로그가 없습니다")).toBeVisible();
+    expect(screen.getByRole("button", { name: "북마크" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "카탈로그" })).toHaveAttribute("aria-pressed", "false");
   });
 });
 

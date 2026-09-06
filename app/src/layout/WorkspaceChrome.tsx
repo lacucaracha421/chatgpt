@@ -1,25 +1,12 @@
 import { ChevronRightIcon } from "@heroicons/react/24/outline";
 import { AdjustmentsHorizontalIcon } from "../shared/ui/ArchiveIcons";
-import { createContext, useCallback, useContext, useId, useLayoutEffect, useMemo, useState, type PropsWithChildren, type ReactNode } from "react";
+import { useCallback, useId, useLayoutEffect, useMemo, useState, type PropsWithChildren, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AnchoredPanel } from "../shared/ui/AnchoredPanel";
 import { TooltipLayer } from "../shared/ui/TooltipLayer";
 import { ChromeSearch, type ChromeSearchSpec } from "./ChromeSearch";
 import "../styles/chrome.css";
-
-type Slot = "navigation" | "actions" | "search" | "settings" | "header";
-type Targets = Record<Slot, HTMLElement | null>;
-type ChromeMeta = { owner: string; scope: string; title: string; summary: string; settings: boolean; navigation: boolean; actions: boolean; search: boolean };
-type ChromeContextValue = {
-  scope: string;
-  targets: Targets;
-  setTarget: (slot: Slot, element: HTMLElement | null) => void;
-  publish: (meta: ChromeMeta) => void;
-  unpublish: (owner: string) => void;
-  meta: ChromeMeta | null;
-};
-const ChromeContext = createContext<ChromeContextValue | null>(null);
-export const useWorkspaceChrome = () => useContext(ChromeContext);
+import { ChromeContext, useWorkspaceChrome, type Slot, type Targets, type ChromeMeta } from "./WorkspaceChromeContext";
 export type ViewChromeSpec = {
   navigation?: ReactNode;
   actions?: ReactNode;

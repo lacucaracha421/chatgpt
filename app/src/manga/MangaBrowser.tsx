@@ -1,7 +1,7 @@
 import { ArrowPathIcon, ArrowsPointingOutIcon, Bars3BottomLeftIcon, BarsArrowDownIcon, ClockIcon, DocumentTextIcon, LifebuoyIcon, MagnifyingGlassIcon, UserIcon } from "@heroicons/react/24/outline";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useLibrary } from "../library/LibraryContext";
-import type { MangaCatalogRecoveryPreview, MangaSeries } from "../library/types";
+import type { CatalogScope, MangaCatalogRecoveryPreview, MangaSeries } from "../library/types";
 import { mangaCoverUrl } from "../assets/mediaUrl";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { Button } from "../shared/ui/Button";
@@ -34,6 +34,7 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
   const [recovery, setRecovery] = useState<MangaCatalogRecoveryPreview | null>(null);
   const [recoveryBusy, setRecoveryBusy] = useState(false);
   const [source, setSource] = useState<"local" | "online">("online");
+  const [onlineScope, setOnlineScope] = useState<CatalogScope>("all");
   useAutoDismiss(message, setMessage);
 
   const visibleSeries = useMemo(() => {
@@ -141,10 +142,10 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gateway, source]);
 
-  const localNavigation = <MangaSourceTabs source="local" onLocal={() => undefined} onOnline={() => setSource("online")} />;
+  const localNavigation = <MangaSourceTabs source="local" onLocal={() => undefined} onOnline={(scope) => { setOnlineScope(scope); setSource("online"); }} />;
 
   if (source === "online") {
-    return <OnlineCatalogBrowser onSwitchLocal={() => setSource("local")} />;
+    return <OnlineCatalogBrowser initialScope={onlineScope} onSwitchLocal={() => setSource("local")} />;
   }
 
   if (root === undefined) {
@@ -187,7 +188,7 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
         </>,
       }}
       children={<>
-        <MangaSourceTabs source="local" onLocal={() => undefined} onOnline={() => setSource("online")} />
+        {localNavigation}
         <span className="manga-browser__count">{countLabel}</span>
         {scanning && <span className="manga-browser__scan-status" role="status">폴더 스캔 중</span>}
         <label className="manga-browser__search">

@@ -160,7 +160,7 @@ export function PageViewer({ title, pageUrls, initialPage, sourceLabel, onPageCh
     })),
   ];
 
-  return <Dialog open variant="fullscreen" title={title} onClose={onClose} onKeyDown={(event) => {
+  return <Dialog open variant="fullscreen" title={title} onClose={overviewOpen ? closeOverview : onClose} onKeyDown={(event) => {
     const advance = arrowAdvance(event.key, direction);
     if (advance) {
       event.preventDefault();
@@ -210,6 +210,10 @@ export function PageViewer({ title, pageUrls, initialPage, sourceLabel, onPageCh
         })}
       </div>
       {overviewOpen && <div className="manga-viewer__overview" role="dialog" aria-label="페이지 목록">
+        <div className="manga-viewer__overview-header">
+          <Button variant="ghost" onClick={closeOverview}><ChevronLeftIcon aria-hidden="true" />뷰어로 돌아가기</Button>
+          <span>{progress}</span>
+        </div>
         <div
           ref={overviewGridRef}
           className="manga-viewer__overview-grid"
