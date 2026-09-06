@@ -29,7 +29,7 @@
 | [0011 Library trash before file deletion](0011-library-trash-before-file-deletion.md) | Accepted | 앱 휴지통을 거쳐 삭제 |
 | [0012 Classification tree is primary navigation](0012-classification-tree-is-primary-navigation.md) | Accepted | Asset Library 탐색 원칙; ADR-0013이 membership 경계를 명확히 함 |
 | [0013 Classification tree + single direct membership](0013-classification-tree-single-direct-membership.md) | **Accepted** | 현재 Classification/Album/Collection 경계 |
-| [0013 자산 목록은 높이가 같은 행으로 배치한다](0013-justified-row-asset-gallery.md) | Accepted | 행 기반 갤러리; membership ADR-0013과 별개 |
+| [0013 자산 목록은 높이가 같은 행으로 배치한다](0013-justified-row-asset-gallery.md) | **Superseded by ADR-0034** | justified rows는 선택 보기로 유지; PC 기본은 날짜별 masonry |
 | [0014 기존 Lakomics 데이터는 한 번 가져오고 형식 호환은 유지하지 않는다](0014-one-time-legacy-lakomics-import.md) | Accepted | 복사 기반 이전과 원본 보존; 기존 rollout을 재실행하는 지시가 아님 |
 | [0015 이미지 5만 개와 영상 5천 개를 성능 목표로 삼는다](0015-fifty-thousand-images-five-thousand-videos.md) | Accepted, partly superseded | 규모 목표 유지; 영상 원본 접근 제한은 ADR-0025로 대체 |
 | [0016 첫 버전은 영상을 관리하되 직접 재생하지 않는다](0016-manage-video-before-building-a-player.md) | Superseded by ADR-0025 | 외부 플레이어만 사용하던 초기 범위 |
@@ -42,7 +42,7 @@
 | [0023 백그라운드 작업은 중단 후 다시 이어갈 수 있어야 한다](0023-resumable-background-jobs.md) | Accepted | 중단 복구 및 파일/메타데이터 commit 안전성 |
 | [0024 기존 공통 UI를 발전시키고 shadcn을 도입하지 않는다](0024-evolve-existing-ui-system-without-shadcn.md) | Accepted; icon detail updated | 기존 공통 UI/CSS 유지; 현재 아이콘 구현은 app/package.json의 Heroicons |
 | [0025 영상은 원본을 우선 재생하고 필요할 때만 호환 재생본을 만든다](0025-original-first-video-playback.md) | Accepted | ADR-0016 및 ADR-0015의 원본 접근 제한 대체 |
-| [0026 아이콘 버튼에 툴팁을 두지 않고 설정 보기의 버튼 설명으로 모은다](0026-icon-buttons-without-tooltips.md) | Accepted · scoped amendment | 접근 가능한 이름·정적 설명 유지. Chrome 03b의 명시적 PC 아이콘 힌트는 한정 허용 |
+| [0026 아이콘 버튼에 툴팁을 두지 않고 설정 보기의 버튼 설명으로 모은다](0026-icon-buttons-without-tooltips.md) | **Superseded by ADR-0034** | 모호한 명시적 PC shell icon에는 짧은 tooltip 허용 |
 | [0027 안전 설정을 설정 보기의 [안전] 섹션으로 통합한다](0027-safety-settings-in-settings-view.md) | Accepted | 안전 설정 통합; 현재 UI 구성은 구현과 함께 확인 |
 | [0028 망가 시리즈는 라이브러리 밖 폴더를 참조한다](0028-manga-series-reference-external-folders.md) | Accepted for local manga folders | 외부 사용자 폴더 참조; 타입별 Works Collection과 구분 |
 | [0029 분류 항목을 폴더처럼 조작하되 저장 위치로 만들지 않는다](0029-classification-folders-are-navigation.md) | Partly superseded by ADR-0030 | 다중 직접 소속/추가형 드롭은 대체; 파일 저장 경로와 분류의 분리는 유지 |
@@ -50,5 +50,6 @@
 | [0031 컬렉션을 타입별 작품 모델로 재정의하고 외부 메타데이터를 연동한다](0031-collection-as-typed-work-model.md) | Accepted | 타입별 Works 경계; 초기 구현 순서는 완료 상태를 증명하지 않음 |
 | [0032 Provider artwork stays outside the Asset Library](0032-provider-artwork-stays-out-of-the-asset-library.md) | Accepted | WorkArtwork와 사용자 Asset 생명주기 구분 |
 | [0033 Local authority with optional cloud sync](0033-local-authority-with-optional-cloud-sync.md) | **Accepted** | 로컬 권위를 유지하며 선택적 단방향 클라우드 복제를 허용 |
+| [0034 Current PC archive shell and browsing defaults](0034-current-pc-archive-shell-and-browsing-defaults.md) | **Accepted** | Chrome 03b shell, masonry 기본, contextual icon tooltip 규칙 |
 
 새 ADR을 추가하거나 기존 결정을 대체할 때 이 인덱스와 해당 ADR의 `Status`/`Supersedes`/`Clarifies` 관계도 같이 갱신합니다.

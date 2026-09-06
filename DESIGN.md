@@ -1,226 +1,125 @@
 # Lakomics Design Language
 
-## Approved PC visual amendment - 2026-09-06
+> 상태: 현재 PC Lakomics의 최상위 시각·상호작용 원칙. 2026-09-06의 Lab 06 콘텐츠 방향과 Chrome 03b 실제 개편을 통합한 기준이다.
+> 상세 구현 기준은 `docs/agents/pc-design-reference.md`를 따른다. 매체별 Works 문법은 `docs/agents/works-viewer-design.md`를 따른다.
 
-`docs/agents/approved-design-direction.md` records the user-approved Lab 06 final direction and Codex handoff. Its scoped rules take precedence over older visual prescriptions below: date-grouped asset masonry with artist/HH:mm captions, ivory single selection versus neutral-gray multi-select, line icons, closed seam-side game cases, media-specific physicality, and hero/cover/fallback composition.
-Game-case depth/contact shadow and unified projection are limited collectible exceptions, not permission to decorate ordinary Asset/UI surfaces. Unspecified typography, shared UI, product boundaries, safety rules, and existing behavior remain unchanged. The approval is visual intent, not implementation or production-verification evidence.
+Lakomics는 장시간 사용하는 Windows 데스크톱 개인 미디어 아카이브다. 이미지·영상과 작품이 화면의 주인공이며, 앱 chrome은 자료를 찾고 정리하고 다시 감상하기 위한 조용한 도구여야 한다.
 
-## Approved PC chrome amendment - 2026-09-06
+## 1. 핵심 인상
 
-`docs/agents/approved-chrome-direction.md` records the user-selected Chrome 03b B shell: a narrow area rail, persistent contextual index, icon-only search, and a bottom View Settings trigger opening a non-modal panel to the right. It supersedes older requirements to preserve sidebar/topbar placement or a permanent horizontal toolbar; stability during use, shared controls, and domain/data rules remain.
-Opening/closing the settings panel alone must not resize the gallery or reset selection, scroll, or owned settings. The Lab 06 content direction and neutral-gray multi-select styling remain in force. This is a documented design decision, not implementation, a new framework, or Git/deployment authorization.
+- 깔끔하고 밀도 높은 개인 아카이브.
+- dark neutral 기반의 단정한 사각형, 얇은 선, 작은 반경.
+- 작품과 자산의 색이 화면 분위기를 만들고 UI는 한발 물러난다.
+- 기능만 남긴 무미건조한 도구도, 오래 보면 피로한 테마 장식도 피한다.
+- NieR:Automata에서 참고한 것은 절제된 구획·버튼·표식이지 게임 HUD 복제가 아니다.
+- mymind/Cosmos/Raindrop에서 참고한 것은 이미지 배치와 정돈감이다.
+- Criterion/A24/Delicious Library의 소장감은 매체별 Collection 표현에만 제한적으로 쓴다.
 
-Lakomics는 장시간 사용하는 고밀도 Windows 데스크톱 미디어 라이브러리다.
-SaaS 대시보드, 랜딩 페이지, 모바일 앱, shadcn 데모처럼 보이면 안 된다.
+## 2. 시각적 우선순위
 
-## 핵심 인상
-
-- 조용하고 밀도 높은 데스크톱 도구
-- 이미지와 영상이 화면의 주인공
-- 장식보다 정렬, 계층, 상태 표현을 우선
-- 유행하는 UI보다 오래 써도 질리지 않는 UI
-- Eagle/Lightroom/Windows 데스크톱 도구의 장점만 참고하고 그대로 복제하지 않음
-
-### Quiet Archive 기준
-
-전역 리스킨의 이름은 **Quiet Archive / 조용한 개인 아카이브**다. 이 이름은 별도 테마가 아니라 기존 Lakomics 디자인 언어를 더 일관되게 적용하기 위한 기준이다.
-
-- 일반 탐색은 평평하고 조용하게 유지하고, 작품 감상 화면에서만 수집품의 물성을 제한적으로 강화한다.
-- 새로움은 큰 카드, 웹폰트, 광택, 그림자보다 typography hierarchy, caption 정렬, selection/focus 구분, media-type별 표현에서 만든다.
-- 기본 UI는 Segoe UI 계열을 유지하고 한국어는 Malgun Gothic, 일본어는 Yu Gothic UI/Meiryo 폴백을 우선한다. Inter Tight 같은 display webfont를 전역 도입하지 않는다.
-- 역할 기준은 UI 본문 13/18, metadata 12/16, section 16/22, 작품 상세 제목 18/24, 감상 중심 큰 제목 22/30을 출발점으로 한다.
-- 일반 grid의 Asset/Collection 타일에는 drop shadow, blur, pointer-tracked transform을 두지 않는다. floating menu/dialog과 집중한 collectible object만 제한적으로 깊이를 가진다.
-- Works는 같은 shell 안에서 Manga=cover shelf, Game=hero/package exhibit, Video=flat poster archive라는 서로 다른 감상 문법을 사용한다.
-
-표현 강도는 대략 Library < Detail < Showcase 순서로 높인다. Library는 탐색이 우선이고, Detail은 감상과 정보가 균형을 이루며, Showcase는 같은 primitive를 더 여유롭게 전시한다.
-
-## 피해야 할 것
-
-특별한 이유 없이 다음을 추가하지 않는다.
-
-- 장식용 gradient
-- glassmorphism
-- 큰 둥근 카드
-- 일반 버튼의 pill 형태
-- 큰 페이지 제목과 과도한 설명문
-- 카드형 통계 위젯
-- 비어 있는 공간을 채우기 위한 장식
-- 모든 패널의 그림자
-- 일반 hover의 scale/translate 애니메이션
-- 모든 컨트롤에 동일한 테두리/베벨/강조색
-- "기술적인 느낌"만을 위한 monospace + uppercase 제목
-- 의미가 다른 화면을 억지로 완전히 같은 레이아웃 공식에 맞추는 것
-
-## 우선순위
-
-시각적 우선순위는 다음 순서를 따른다.
-
-1. 미디어
+1. 미디어와 작품 아트워크
 2. 현재 위치와 선택 상태
-3. 현재 작업에 필요한 조작
-4. 메타데이터
-5. 유지보수/보조 기능
+3. 지금 작업에 필요한 조작
+4. 메타데이터와 상태
+5. 관리·provider·유지보수 기능
 
-앱 chrome은 미디어보다 먼저 눈에 들어오면 안 된다.
+앱 chrome, 통계, 설명 문구가 자료보다 먼저 눈에 들어오면 실패다.
 
-## 간격과 형태
+## 3. PC shell
 
-기본 간격 단위는 4px이다.
+PC의 기본 shell은 **Chrome 03b B 좌측 중심 구조**다.
 
-- 4px: 미세 간격
-- 6px: 조밀한 inline 간격
-- 8px: 일반 컨트롤 간격
-- 12px: 구역 간격
-- 16px: 드물게 사용하는 큰 분리
+- 가장 왼쪽은 에셋·컬렉션·망가 같은 큰 영역을 바꾸는 좁은 area rail이다.
+- 그 옆은 현재 영역에 맞는 persistent contextual index다. 에셋에서는 분류·앨범, 컬렉션에서는 라이브러리/쇼케이스·유형, 망가에서는 해당 탐색 문맥을 제공한다.
+- 본문 위에는 얇은 위치/창 영역만 남기고 예전의 전체 수평 toolbar를 중복하지 않는다.
+- 검색은 평소 돋보기 아이콘만 보인다. 검색을 지원하는 화면에서만 실제 입력 surface를 연다.
+- 에셋의 보기 설정은 인덱스 하단에서 필요할 때만 오른쪽 non-modal panel로 연다. 단순 개폐로 갤러리 폭·스크롤·선택을 바꾸지 않는다.
+- 화면별 정렬·필터·관리 기능은 그 문맥에 가장 가까운 인덱스나 임시 surface에 둔다. 빈 toolbar를 유지하기 위해 기능을 복제하지 않는다.
+- 창 제어는 한 곳에만 둔다. 입력·메뉴·슬라이더가 native drag region으로 오인되지 않아야 한다.
 
-권장 radius:
+## 4. 표면과 형태
 
-- 미디어 타일: 0~2px
-- 행/버튼: 3~4px
-- 메뉴/팝오버: 4~6px
-- 대화상자: 최대 8px
+카드보다 **명도 차이 → 1px separator → 간격 → typography** 순으로 계층을 만든다.
 
-12px 이상의 radius는 명확한 이유가 없으면 사용하지 않는다.
+- media tile radius: 0–2px 정도.
+- 일반 행/버튼: 3–4px 정도.
+- menu/popover: 작은 반경과 얇은 경계.
+- dialog: 필요할 때만 더 큰 surface와 shadow.
+- shadow는 실제로 떠 있는 menu/dialog/drag preview와 의미 있는 collectible object에만 쓴다.
+- 일반 grid tile, toolbar, settings row, sidebar section에 장식용 shadow를 퍼뜨리지 않는다.
+- glassmorphism, 장식용 gradient, 큰 rounded card, pill 남발, 강한 glow는 사용하지 않는다.
 
-## 표면
+## 5. Typography와 색
 
-카드보다 경계를 사용한다.
+- UI는 Segoe UI 계열을 기본으로 하고 한국어는 Malgun Gothic, 일본어는 Yu Gothic UI/Meiryo 폴백을 우선한다.
+- display webfont를 전역 도입하지 않는다.
+- 역할 기준은 metadata 11–12px, 기본 UI 13px, 강조 label 14px, section 16px 안팎을 출발점으로 한다.
+- monospace는 경로·ID·timestamp 같은 실제 기술 값에만 제한한다.
+- 사용자 폴더/앨범 이름을 uppercase로 바꾸지 않는다.
+- dark neutral surface가 기본이며, accent는 선택·focus·valid drop·중요한 confirmation에만 쓴다.
 
-우선순위:
-1. 배경 명도 차이
-2. 1px separator
-3. 간격
-4. typography
-5. 필요한 경우에만 shadow
+## 6. 선택과 컨트롤
 
-shadow는 dialog, popover, context menu, drag preview처럼 실제로 떠 있는 요소에만 사용한다.
+선택의 역할을 구분한다.
 
-## Typography
+- **현재 위치 / 주요 단일 선택**: pale ivory `#DDD8CA` 계열 면과 작은 내부 사각 표식. 글자와 표식은 어두운 색.
+- **복수 선택 필터**: 중성 회색 면, 반복 사각 표식 없음. 누런/올리브 selection은 사용하지 않는다.
+- **자산 자체의 선택**: 좌상단 작은 사각 표식 + 이미지에만 약한 중성 회색 음영. 바깥 selection outline과 metadata 영역의 색·여백 변화로 선택을 표현하지 않는다.
+- keyboard focus는 selection과 별도 상태다. focus가 이동했다고 선택으로 보이거나, 선택 때문에 focus가 사라지면 안 된다.
+- 일반 icon action은 quiet하게 두고, 한 화면에 강한 primary surface를 여러 개 만들지 않는다.
 
-일반 UI는 Segoe UI를 사용한다.
+아이콘은 선 기반·기하학적 형태를 우선하고 stroke, optical size, baseline을 일관되게 맞춘다. 사용자 지정 Classification icon/color는 제품 데이터이므로 전역 미학을 이유로 덮어쓰지 않는다.
 
-monospace는 ID, 경로, timestamp, 기술적 값처럼 실제 이점이 있을 때만 사용한다.
-사용자가 만든 폴더/앨범 이름을 uppercase로 바꾸지 않는다.
+## 7. Gallery와 자산 정보
 
-권장 크기:
-- 11px: 3차 metadata
-- 12px: 보조 UI
-- 13px: 기본 UI
-- 14px: 강조 label
-- 16px: 드문 section heading
+PC 자산 기본 보기는 **수집일별 masonry/waterfall**이다. justified row는 대체 보기로 남긴다.
 
-## 색상
+- 이미지는 원본 비율을 존중한다.
+- 날짜 group heading이 수집일을 맡는다.
+- 이미지 바로 아래 한 줄에 왼쪽 작가, 오른쪽 `HH:mm` 수집 시각을 둔다. 날짜를 반복하지 않는다.
+- 정렬·group·시각은 같은 `collectedAt`과 같은 표시 시간대에서 계산한다.
+- 긴 작가명과 누락 메타데이터를 정직하게 처리하고, 가짜 현재 시각을 채우지 않는다.
+- metadata가 켜져 있을 때도 이미지 감상을 방해하는 overlay로 바꾸지 않는다.
+- dense scrolling에서는 hover scale, pointer-tracked transform, 타일별 shadow를 사용하지 않는다.
 
-중성 dark gray + 하나의 절제된 accent를 기본으로 한다.
+## 8. Collection / Works의 물성
 
-accent는 다음 상태에 사용한다.
-- selection
-- keyboard focus
-- valid drop target
-- 필요한 경우 primary confirmation
+모든 매체를 같은 카드 효과로 만들지 않는다.
 
-모든 active tab, 모든 icon, 모든 button에 accent를 사용하지 않는다.
+- **게임**: 접합부가 보이는 닫힌 neutral case. 앞표지가 주인공이며 플랫폼 띠·가짜 책등·가짜 뒷표지를 만들지 않는다.
+- **만화**: 얇은 책의 물성, 권 순서와 cover appreciation을 강조한다. 선반은 support cue이지 가구 시뮬레이션이 아니다.
+- **영화/영상**: 일반 목록은 평면 poster archive다. 게임 케이스나 책 물성을 강제하지 않는다.
+- **상세**: 원본 hero/backdrop 뒤에 표지를 겹치고 하단을 넓게 fade한다. 표지에는 fade를 걸지 않는다.
+- 배경이 없으면 가짜 blurred background를 만들지 않고 상단 공간을 접어 compact 정보 배치로 전환한다.
 
-## Controls
+물성은 Library < Detail < Showcase 순으로 강해질 수 있지만, ordinary UI와 Asset tile에는 전염시키지 않는다.
 
-모든 컨트롤을 같은 상자로 만들지 않는다.
+## 9. Floating surface와 tooltip
 
-- Quiet: 자주 쓰는 저위험 icon/toolbar action. 평면, 기본 border 없음.
-- Standard: 일반 labeled action/select. 필요할 때만 얇은 border.
-- Emphasized: 한 그룹에서 가장 중요한 즉시 실행 action 하나. accent fill 허용.
+- menu, context menu, popover, 보기 설정은 같은 얇은 경계 언어를 쓴다.
+- 파괴적 확인은 dialog, 즉시 선택은 menu/popover, 짧은 설명은 tooltip처럼 역할을 나눈다.
+- icon만으로 의미가 모호한 **명시적 PC shell 제어**에는 짧은 비대화형 tooltip을 허용한다. 모든 버튼에 의무적으로 붙이지 않는다.
+- tooltip은 `aria-label`을 대신하지 않는다. 키보드 focus에서도 같은 설명에 접근할 수 있어야 한다.
+- nested menu/popover를 부모 panel의 바깥 클릭으로 오인하지 않는다.
+- Esc는 가장 안쪽 surface부터 한 단계씩 닫고 같은 입력이 뒤의 선택 해제·viewer 종료까지 연쇄되지 않게 한다.
 
-한 화면에 emphasized action을 여러 개 두지 않는다.
+## 10. Motion과 성능
 
-## Toolbar
+- 일반 UI 전환은 대체로 80–160ms 범위의 opacity/background/border/짧은 위치 변화로 충분하다.
+- spring, bounce, 장식용 entrance animation, 상시 animation을 피한다.
+- sidebar/panel open-close는 공간 관계를 이해시키기 위한 짧은 motion만 허용한다.
+- gallery scroll 중 레이아웃 재계산·shadow·transform을 매 프레임 추가하지 않는다.
+- 게임 case/만화 cover의 작은 lift·depth는 수집품 감상이라는 의미가 있을 때만 제한적으로 허용한다.
+- reduced motion과 keyboard path를 깨지 않는다.
 
-Toolbar는 application chrome이 먼저고 form row가 아니다.
+## 11. 피해야 할 것
 
-- 현재 위치와 문맥상 필요한 컨트롤만 둔다.
-- obvious subtitle을 붙이지 않는다.
-- 제목, 검색/범위, 보기 설정, 창 제어의 슬롯 위치는 고정한다. 선택 같은 상태 변화로 컨트롤을 삽입·삭제해 이 슬롯들이 밀리지 않게 한다.
-- 항목·선택 전용 명령은 toolbar에 삽입하지 않는다. 자산 화면처럼 고정 selection bar(오버레이)나 컨텍스트 메뉴에서 수행한다.
-- 자주 쓰지 않는 기능은 overflow로 보낸다.
-- 공통 높이는 유지해도 내부 구성을 모든 화면에 강제로 같게 만들 필요는 없다.
-- 일반 위치 제목은 monospace/uppercase로 꾸미지 않는다.
+- 기존 화면을 다시 SaaS dashboard/card wall로 감싸기.
+- 빈 공간을 채우기 위한 설명문, 통계 카드, 장식 panel.
+- 모든 곳에 아이보리/베이지를 칠해 NieR 테마처럼 만들기.
+- fake retro, scanline, 기계 HUD, 과도한 Persona식 장식.
+- media 비율을 희생하는 획일적 crop.
+- 한 기능을 rail/index/topbar에 중복 노출.
+- prototype 수치·가상 데이터·임시 레이블을 production contract로 하드코딩.
 
-## Sidebar
-
-Sidebar는 버튼 목록이 아니라 navigation tree처럼 보여야 한다.
-
-- selected는 약한 배경 + 좁은 indicator
-- hover는 selected보다 약하게
-- icon은 label보다 시각적으로 약하게
-- count는 낮은 대비
-- 내부를 카드로 나누지 않음
-
-## Gallery
-
-Gallery chrome은 거의 사라져야 한다.
-
-- 이미지 간격 4~6px
-- 타일 radius 0~2px
-- thumbnail shadow 금지
-- selection은 inset outline으로 표시
-- hover scale 금지
-- metadata는 사용자가 켰을 때만 표시
-
-## Inspector / Settings
-
-Inspector는 하나의 정보 sheet로 취급하고 boxed sub-panel을 남발하지 않는다.
-
-Settings는 desktop preference window처럼 구성한다.
-큰 카드, 큰 heading, 마케팅 문구 대신 compact property row와 separator를 사용한다.
-
-## Motion
-
-기본 duration은 80~160ms.
-
-일반 UI에서는 opacity/background/border 같은 상태 전환을 우선한다.
-translateY, scale, spring, 장식용 entrance animation은 피한다.
-
-### Functional motion
-
-모션은 장식이 아니라 **continuity와 feedback**을 위해 사용한다.
-
-- Sidebar/Inspector의 열림·닫힘, view 전환, selection 변화처럼 상태나 공간 관계를 이해시키는 짧은 전환은 허용한다.
-- 레이아웃 변화가 순간적으로 튀어 보이는 경우에는 width/position/opacity 전환으로 관계를 유지하되, 화면 전체를 과도하게 움직이지 않는다.
-- 빠른 반복 조작과 대량 Gallery 스크롤에서는 애니메이션보다 프레임 안정성과 입력 반응성을 우선한다.
-- 스크롤 중 타일마다 transform/shadow를 추가하거나 레이아웃을 계속 재계산하게 만드는 모션은 피한다.
-- 사용자가 기능을 더 잘 이해하거나 상태 변화를 놓치지 않게 만드는 경우에만 모션을 추가한다.
-
-부드러움의 목표는 "많이 움직이는 UI"가 아니라 **갑작스러운 점프 없이 자연스럽게 이어지는 데스크톱 도구**다.
-
-### Works collectible interaction exception
-
-Works의 만화 표지 감상 뷰어와 게임 패키지 전시는 일반 UI motion 규칙의 제한적 예외다.
-실제 수집품을 집어 들거나 살펴보는 의미를 전달할 때만 작은 translate/scale/3D transform과
-접지·부유 shadow를 사용할 수 있다.
-
-- 일반 버튼, toolbar, settings row, 일반 card, Asset tile에는 이 예외를 적용하지 않는다.
-- 기본 browsing 상태에서는 효과를 없애거나 매우 약하게 유지한다.
-- 큰 bounce/spring, 큰 각도 회전, 강한 holo/glare, 상시 animation은 금지한다.
-- 권장 motion 시간은 기존 80~160ms 범위를 우선한다.
-- game package는 정면 cover밖에 없는 경우가 많으므로 옆/뒤 빈 면이 드러날 정도로 회전하지 않는다.
-- Manga volume cover click의 기본 목적은 metadata dialog가 아니라 cover appreciation이다.
-
-이 예외의 현재 시각 기준은
-`docs/prototypes/lakomics-works-v6-reference.html`이며 production 구현은 기존 token/component를 사용한다.
-
-## AI 출력 거부 체크
-
-UI 변경을 받기 전에 다음이 새로 생겼는지 확인한다.
-
-- 12px 이상 radius
-- 장식용 gradient
-- 큰 padding
-- 기존 영역을 둘러싼 새 card wrapper
-- obvious title을 설명하는 새 subtitle
-- non-floating element의 새 shadow
-- ordinary pill button
-- 큰 accent surface
-- hover scale/translate
-- token 대신 새 raw color/spacing/radius/font-size
-- 시각적 wrapping만을 위한 새 component
-- "tech feel"만을 위한 monospace/uppercase
-
-장식을 추가하는 것과 alignment/spacing/hierarchy/state clarity를 개선하는 것 중 선택해야 한다면 항상 후자를 우선한다.
+디자인 판단이 애매하면 **alignment, hierarchy, state clarity, media visibility**를 장식보다 우선한다.

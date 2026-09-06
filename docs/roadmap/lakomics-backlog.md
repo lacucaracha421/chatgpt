@@ -2,12 +2,12 @@
 
 Living source of truth for Lakomics bugs, product work, cloud/mobile follow-ups, Collection/Works evolution, and long-term ideas.
 
-This backlog was reconciled on 2026-09-05 against:
+The backlog was reconciled from the 2026-09-05 full repository audit and its document routing was refreshed on 2026-09-06 against:
 
-- the full repository audit snapshot taken from the real `C:\chatgpt` codebase and production databases;
+- the real `C:\chatgpt` codebase and audited production-data findings;
 - `docs/agents/mobile-consumption-ux.md`;
+- `docs/agents/pc-design-reference.md`;
 - `docs/agents/works-viewer-design.md`;
-- `docs/roadmap/works-collection-visual-redesign-plan.md`;
 - current code, schemas, ADRs, `CONTEXT.md`, and `DESIGN.md`.
 
 Current code and migrations remain authoritative for implemented behavior. Git history retains the old verbose completion notes; this file intentionally keeps completed work compact so stale historical text does not look executable.
@@ -287,17 +287,149 @@ Prerequisites: CATALOG-002A, CATALOG-003, CATALOG-004, CATALOG-005/006.
 
 ## CATALOG-007B — Reviewed heuristic duplicate groups
 
-Status: `TODO`
+Status: `PARTIAL` — implementation/native checks passed; the 2026-09-05 incident
+audit preserves this status because the exact pre-incident provider DB/checkpoint
+baseline is unavailable. Verified local differences do not indicate recovery.
 Prerequisite: CATALOG-007A.
 
-After lineage groups are stable, add a bounded review candidate system using combinations such as normalized title + artist/group + compatible category/page/language evidence.
+Implemented in the working tree:
 
-Requirements:
+- Schema **37** adds `online_catalog_review_candidates` (replaceable) and
+  `online_catalog_review_decisions` (authoritative) in library.sqlite. Both use
+  ordered pairs of existing kHentai provider-work anchors from 007A; no new UUID
+  identity system, canonical provider writes, or foreign keys to replaceable data.
+- Manual canary generation reads at most the latest **500 IDs** using the Works
+  primary key. Eligible active works require an exact whitespace/case-normalized
+  title or Japanese-title match of at least eight characters, shared exact
+  artist/group tag, identical nonempty language sets, equal positive page counts,
+  and equal known category. Punctuation, numbers and edition qualifiers remain.
+  Title alone cannot create a candidate or a grouping relationship.
+- Each work has at most two title keys, each bucket at most **8** works; larger
+  buckets are skipped. At most **3,500** pair examinations, **50** stored candidates,
+  and **65** fetched creator/language tags per work (overflow is ineligible).
+  Tag hydration uses the existing WorkId/Namespace primary key. Generation reports
+  inspected works, comparisons and skipped buckets; it is absent from search SQL.
+- The first canary permits at most **500 manual decisions**. Decisions are never
+  removed to make room. Confirmation is accepted only for a current pending
+  candidate; source revision, group generation and candidate algorithm must match.
+  The request also carries a digest of the displayed evidence/context; regeneration
+  in another window cannot make an old review screen authorize a replacement pair.
+  False positive is permanent in this surface; split replaces a confirmation with
+  a permanent veto. Neither veto can be undone through an ordinary confirm call.
+- Rebuild applies confirmations above indivisible strong-lineage components,
+  then uses existing oldest-handle reconciliation. A veto inside a transitive
+  heuristic component quarantines that entire heuristic component; its strong
+  components remain intact. Confirmations conflicting with a veto fail atomically.
+  Existing strong lineage takes precedence when the source itself later proves
+  a rejected pair is lineage-related; the veto remains stored, not deleted.
+- Decisions do not depend on algorithm/source versions and keep dormant anchors.
+  Candidate refresh cannot overwrite them. Historical handles resolve through
+  existing anchors after confirm/split. Provider identities, bookmarks, reading
+  progress and manual representative preferences retain their original scope.
+- Review Dialog uses shared UI, shows both evidence works/current group UUIDs,
+  titles, creators, pages, languages, category, reason and decision state. Opening
+  lists only; generating and deciding require explicit actions. Metadata includes
+  hidden works, as disclosed in the dialog. Save refreshes grouped search; pending
+  candidates from a previous group generation become non-actionable.
+- Review writes rebuild membership transactionally and invalidate prepared counts
+  through generation; eager preparation refreshes counts afterward. Review can
+  incur a full membership rebuild; no new discovery work is added to ordinary
+  grouped COUNT/page queries. Whole-catalog review latency is not benchmarked.
 
-- title alone is never automatic identity;
-- explicit confirm / false-positive / split decisions;
-- manual decisions survive group rebuilds/algorithm versions;
-- canary review before enabling broader candidate generation.
+Verified on 2026-09-05 (base/HEAD `5206961d44c3531228814bc96ee42c28880e3c16`):
+
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib catalog_ -- --nocapture`
+  from app: **156 passed / 9 opt-in ignored**, exit 0. Includes grouped search,
+  COUNT, lineage, schema preservation and bounded synthetic performance fixtures.
+- Final expanded `--lib catalog_review -- --nocapture`: **6 passed**, exit 0.
+  Covers title-only exclusion, multisignal candidates, source/version changes,
+  reopen, veto regeneration suppression, indirect conflicts, stable handles,
+  retained provider-work state, bounded discovery and v36→37 preservation.
+- `npx vitest run src/manga/CatalogReviewDialog.test.tsx
+  src/manga/OnlineCatalogBrowser.test.tsx src/library/client.test.ts`:
+  **44 passed**, exit 0. `npx tsc --noEmit`: exit 0 after final frontend edits.
+  After adding displayed-evidence concurrency tokens, the affected client/review
+  subset passed **15 tests** and TypeScript returned exit 0 again.
+- Corrected native acceptance used `npm run tauri -- dev --config <isolated.json>
+  --no-watch`, a distinct app identifier, explicit fresh WebView2 dataDirectory,
+  and a disposable six-work library. The blank setup page and fixture library
+  path were verified before use. Actual WebView2/Tauri IPC and rendered UI showed
+  5 groups before/after generation (2 candidates, 4 comparisons); confirm changed
+  this to 4 groups/3 editions with the old public UUID. False positive persisted.
+  Full restart after fixture source/derived-algorithm invalidation retained both
+  decisions. Split returned 5 groups and the original 2-edition lineage; refresh
+  and another full restart retained split/rejection with zero pending candidates.
+  Native grouped page and exact COUNT both returned 5. The fixture has no catalog
+  transport credentials, so unrelated updater failure is outside this acceptance.
+  Final token-contract native check added two disposable works: a stale review
+  token was rejected with 7 groups unchanged; valid confirm/split returned 6→7
+  groups, while previous split/rejection decisions remained authoritative.
+- Scoped critical self-review (not independent) checked automatic merge entry
+  points, stale decisions, transitive vetoes, identity reconciliation, bounds,
+  search coupling and provider scope. No cross-provider/Heliotrope code was added.
+  `git diff --check` passed. Existing catalog acceptance-document edits and
+  concurrently changed Phosphor prototype files were preserved outside this task.
+
+**Production-boundary incident — not an authorized rollout:** the first native
+launch relied on APPDATA/LOCALAPPDATA/WEBVIEW2_USER_DATA_FOLDER overrides, which
+did not isolate the existing Tauri profile. It automatically opened
+`C:\New_lakomics_assets`, migrated library.sqlite **36→37**, rebuilt group generation
+**2→3**, and logged **6 automatic cloud-backfill commits** before the process was
+stopped. Read-only comparison against the automatic pre-migration snapshot found
+identical complete rows in group membership, handles, representative preferences,
+bookmarks and reading progress; there are **zero manual review decisions** in the
+production library. This does not establish absence of other startup/job side
+effects. The preserved backup is
+`C:\New_lakomics_assets\backups\pre-migration-20260905-092612-v36-165ef5b1-02d2-4488-af18-1f856a71d5aa.sqlite`.
+No rollback or further production write was attempted. Recovery/disposition
+requires separate explicit authority; this incident prevents an unconditional
+DONE claim. Later isolated acceptance does not erase it. Test app processes were
+stopped; Git writes and deployment were not performed.
+
+**Production incident audit, 2026-09-05:** see the
+[complete comparison, startup checklist and evidence limits](../operations/catalog-007b-incident-audit.md).
+The exact comparison used the v36 backup named above against current
+`C:\New_lakomics_assets\library.sqlite`; all SQL ran on disposable immutable copies.
+The original DBs/sidecars and complete library file inventory remained unchanged
+between the audit snapshot and final filesystem fence (09:53:46–10:04:31 UTC).
+
+- Full keyed comparison of the 40→42 table union found **no deleted rows and no
+  changed pre-existing user-domain rows**. Schema differences are exactly the two
+  schema37 tables, both empty. Collections, classification definitions, ordering,
+  favorites/personal metadata, trash, Revisit and library/cloud settings match.
+- All 131,213 group members/handles, representative preferences (empty), 251
+  bookmarks and 35 reading-progress rows match. Generation2→3 changes the grouping
+  algorithm prefix, not provider revision. Six prepared counts retain their values;
+  all context hashes and independent read-only COUNT results match.
+- The six logged backfill commits were **six newly imported cloud captures**
+  (three images, three videos), not old pending local uploads. Exactly six assets,
+  six classification relations, six acknowledged receipts, six synced revision-1
+  queue rows and three ready video records were added. All six originals match
+  stored SHA-256/size. Preserve these results; rollback would discard acknowledged
+  captures. Four older pending trash-asset queue rows remain unchanged.
+- Startup recovery, ordering, artwork, similarity, backup scheduling, trash,
+  release-watch, capture, video, replication, catalog preparation/update and view
+  caches were traced. Surviving incident files comprise the six originals, three
+  image thumbnails, 37 video derivatives, ten catalog thumbnails, two DB files and
+  the migration backup. All 8,220 prior originals and referenced video/artwork files
+  are present. Remote classification/saved-X snapshot publication is also invoked
+  by capture polling; its outcome is not proven by the local log.
+- Before/current library and current catalog copies passed full SQLite integrity
+  and foreign-key checks; group-anchor/oldest-handle checks passed. No recovery was
+  performed or indicated by these local results. Existing isolated native evidence
+  remains applicable; this audit changed no implementation and did not relaunch.
+- **Remaining evidence gap:** kdata.db mtime is inside the incident and its Korean
+  attempt timestamp advanced. The unchanged provider revision, old crawl/progress
+  timestamps and update transaction code support start/status-only writes. The
+  retained backup contains no kdata.db, so exact source rows and Korean/Japanese
+  checkpoint deltas cannot be proved. No source corruption was found; nevertheless
+  DONE requires closing this explicit audit gate. Seek a trustworthy prior catalog
+  copy/checkpoint snapshot, without updating or restoring production. A complete
+  pre-incident filesystem manifest is also unavailable for transient/unreferenced
+  files; all surviving incident-window files are accounted for.
+
+Deferred: broader/fuzzy rules, whole-catalog discovery, negative-decision reversal,
+more than 500 decisions, cross-provider/Heliotrope grouping, and production rollout.
 
 ## CATALOG-002B — Optional Heliotrope coexistence
 
@@ -556,8 +688,8 @@ Required concepts before implementation:
 
 # Works / Collection presentation lane
 
-Stable product intent: `docs/agents/works-viewer-design.md`.
-Concrete visual plan: `docs/roadmap/works-collection-visual-redesign-plan.md`.
+Current PC visual baseline: `docs/agents/pc-design-reference.md`.
+Stable type-specific Works intent: `docs/agents/works-viewer-design.md`.
 
 The central principle is a shared Lakomics shell with type-specific viewing grammar:
 
@@ -571,19 +703,29 @@ Artwork > work identity > personal state > useful provider metadata > provider/m
 ## LONG-002A — Type-aware presentation foundation and normal Works visual pass
 
 Parent item: legacy `LONG-002`
-Status: `TODO`
+Status: `PARTIAL`
 Legacy LONG-002 remains `PARTIAL` because type-specific classes and a game package seed already exist.
 
-Shared primitives should remain lightweight DOM/CSS:
+2026-09-05 first reskin slice: Quiet Archive typography/fallback and Works depth tokens,
+flat Collection captions, Manga cover baselines/shared support lines and below-cover release
+captions, conditional edition controls, and Game hero/package calibration are implemented.
+Existing CollectionOverlay/CollectionCard/GameCollectionDetail tests: 51 passed; TypeScript
+check passed. Isolated browser fixtures covered mixed cover ratios, 20 volumes, multiple/single
+editions, long Korean/Japanese titles, keyboard focus, and sparse Game art at 960/800px widths.
+Native Tauri visual acceptance remains unverified; no active production library was opened
+or mutated for this check. Game metadata/artwork composition and type-specific WorkTile
+work remain pending, as do the later Video/Series and Showcase slices.
 
-- `WorkTile`;
-- `PhysicalCover`;
+Shared presentation primitives should remain lightweight and type-aware:
+
+- type-aware `WorkTile`;
+- thin book/package presentation primitive where reuse is real;
 - `ArtworkStrip`;
 - `RelatedWorksRail`;
 - `MetadataLine`;
 - a small `collectionType -> presentation preset` mapping.
 
-No Three.js/WebGL for ordinary grids. Dense library grids remain static or use one restrained hover/focus lift; no continuous pointer tracking.
+Ordinary grids prefer DOM/CSS and bounded static rendering. The approved closed game case may keep the current bounded 2D projection/canvas path for edge quality; this is not permission to introduce Three.js/WebGL or continuous pointer tracking.
 
 ### LONG-002A.1 — Manga Shelf Grid quality baseline
 
@@ -617,7 +759,7 @@ Preserve current hero + package foundation, then improve composition:
 
 ### LONG-002A.3 — Type-specific Collection library `WorkTile`
 
-Preserve the current compact toolbar/search/sort/rating shell.
+Preserve the current Chrome 03b contextual shell and its icon-first search/settings behavior; do not recreate the retired horizontal toolbar.
 
 At a glance:
 
@@ -625,7 +767,7 @@ At a glance:
 - Manga reads as shallow books/shelf library;
 - Video reads as a flat poster archive.
 
-Reduce redundant body headings when the toolbar already communicates Collection -> Library/Showcase -> type, allowing artwork to begin sooner.
+Reduce redundant body headings when the contextual index/current location already communicates Collection -> Library/Showcase -> type, allowing artwork to begin sooner.
 
 Do not turn the normal library into a decorative showcase.
 
