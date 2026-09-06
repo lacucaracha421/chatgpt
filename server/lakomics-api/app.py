@@ -1967,3 +1967,102 @@ def replication_commit(
         "committed_at": ts,
         "object_keys": keys,
     }
+
+# Album metadata replica: independent of capture ingestion and asset replication.
+class AlbumReplicaEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=256)
+    parent_id: str | None = Field(default=None, max_length=64)
+
+
+class AlbumReplicaMedia(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(min_length=1, max_length=64)
+    date: int = Field(ge=0)
+    width: int = Field(ge=0)
+    height: int = Field(ge=0)
+    duration: int = Field(ge=0)
+    albums: list[str] = Field(max_length=2000)
+
+
+class AlbumReplicaPublish(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    published_at: AwareDatetime
+    albums: list[AlbumReplicaEntry] = Field(max_length=2000)
+    media: list[AlbumReplicaMedia] = Field(max_length=100000)
+
+
+@app.on_event("startup")
+def startup_album_replica():
+    with get_db() as db:
+        db.execute("""CREATE TABLE IF NOT EXISTS album_replica (
+            singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+            payload TEXT NOT NULL, published_at TEXT NOT NULL
+        )""")
+        db.commit()
+
+
+@app.put("/v1/library/album-snapshot")
+def publish_album_replica(snapshot: AlbumReplicaPublish, authorization: str | None = Header(default=None)):
+    require_auth(authorization)
+    ids = {album.id for album in snapshot.albums}
+    if len(ids) != len(snapshot.albums) or len({m.id for m in snapshot.media}) != len(snapshot.media):
+        raise HTTPException(400, "Duplicate IDs")
+    if any(a.parent_id == a.id or (a.parent_id is not None and a.parent_id not in ids) for a in snapshot.albums):
+        raise HTTPException(400, "Invalid album parent")
+    if any(not m.albums or len(set(m.albums)) != len(m.albums) or not set(m.albums) <= ids for m in snapshot.media):
+        raise HTTPException(400, "Invalid album membership")
+    payload = json.dumps({"albums": [a.model_dump() for a in snapshot.albums],
+                          "media": [m.model_dump() for m in snapshot.media]}, separators=(",", ":"), sort_keys=True)
+    if len(payload.encode()) > 16 * 1024 * 1024:
+        raise HTTPException(413, "Album snapshot too large")
+    published = snapshot.published_at.astimezone(timezone.utc).isoformat()
+    with get_db() as db:
+        db.execute("BEGIN IMMEDIATE")
+        old = db.execute("SELECT published_at FROM album_replica WHERE singleton=1").fetchone()
+        if old and old["published_at"] > published:
+            raise HTTPException(409, "Stale album snapshot")
+        db.execute("""INSERT INTO album_replica VALUES (1,?,?)
+            ON CONFLICT(singleton) DO UPDATE SET payload=excluded.payload,published_at=excluded.published_at""",
+            (payload, published))
+        db.commit()
+    return {"ok": True}
+
+
+@app.get("/v1/library/album-media")
+def read_album_replica(
+    album_id: Annotated[list[str], Query(min_length=1, max_length=20)],
+    authorization: str | None = Header(default=None),
+    if_none_match: str | None = Header(default=None),
+):
+    require_auth(authorization)
+    selected = set(album_id)
+    with get_db() as db:
+        row = db.execute("SELECT payload FROM album_replica WHERE singleton=1").fetchone()
+        if row is None:
+            raise HTTPException(503, "Album snapshot has not been published")
+        snapshot = json.loads(row["payload"])
+        albums = [a for a in snapshot["albums"] if a["id"] in selected]
+        members = [m for m in snapshot["media"] if selected.intersection(m["albums"])]
+        ready = {}
+        for offset in range(0, len(members), 500):
+            ids = [m["id"] for m in members[offset:offset + 500]]
+            placeholders = ",".join("?" for _ in ids)
+            for asset in db.execute(f"""SELECT id,content_type,size_bytes FROM assets
+                WHERE committed=1 AND thumbnail_key IS NOT NULL AND content_type IS NOT NULL
+                AND size_bytes > 0 AND id IN ({placeholders})""", ids):
+                ready[asset["id"]] = dict(asset)
+        media = [{**m, "albums": sorted(selected.intersection(m["albums"])),
+                  "mime": ready[m["id"]]["content_type"], "size": ready[m["id"]]["size_bytes"]}
+                 for m in members if m["id"] in ready]
+    import hashlib
+    albums.sort(key=lambda a: a["id"])
+    media.sort(key=lambda m: (-m["date"], m["id"]))
+    payload = {"albums": albums, "media": media}
+    revision = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    etag = '"' + revision + '"'
+    headers = {"ETag": etag, "Cache-Control": "private, no-cache"}
+    if if_none_match == etag:
+        return Response(status_code=304, headers=headers)
+    return JSONResponse({**payload, "revision": revision, "generation": 1}, headers=headers)

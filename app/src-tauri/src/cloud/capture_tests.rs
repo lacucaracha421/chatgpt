@@ -1011,7 +1011,7 @@ fn snapshot_publish_serializes_saved_keys_and_failure_does_not_fail_sync_cycle()
     let base_url = format!("http://{}", server.server_addr());
     let handle = thread::spawn(move || {
         let mut requests = Vec::new();
-        for _ in 0..3 {
+        for _ in 0..4 {
             let mut request = server.recv().unwrap();
             assert_eq!(
                 header_value(&request, "authorization"),
@@ -1026,6 +1026,7 @@ fn snapshot_publish_serializes_saved_keys_and_failure_does_not_fail_sync_cycle()
                     .respond(json_response(json!({ "captures": [] })))
                     .unwrap(),
                 "/v1/classifications" => request.respond(Response::empty(200)).unwrap(),
+                "/v1/library/album-snapshot" => request.respond(Response::empty(200)).unwrap(),
                 "/v1/saved-x-media" => request.respond(Response::empty(503)).unwrap(),
                 _ => panic!("unexpected request: {url}"),
             }
@@ -1073,6 +1074,7 @@ fn snapshot_publish_serializes_saved_keys_and_failure_does_not_fail_sync_cycle()
             "/v1/captures/pending",
             "/v1/classifications",
             "/v1/saved-x-media",
+            "/v1/library/album-snapshot",
         ]
     );
     let saved_body: Value = serde_json::from_str(&requests[2].1).unwrap();

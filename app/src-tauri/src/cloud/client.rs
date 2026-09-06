@@ -236,6 +236,18 @@ impl CloudClient {
 
     /// 분류 스냅샷을 VPS에 게시한다. PC 라이브러리가 분류의 원본이며 VPS는
     /// 모바일 확장용 최소 스냅샷만 저장한다.
+    pub(crate) fn publish_album_replica(&self, token: &str, snapshot: &serde_json::Value) -> Result<(), LibraryError> {
+        let body = serde_json::to_vec(snapshot).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        self.agent.put(self.endpoint("/v1/library/album-snapshot")?)
+            .header("Authorization", bearer(token)?)
+            .content_type("application/json").send(&body)
+            .map_err(|error| match error {
+                ureq::Error::Timeout(_) => LibraryError::CloudRequestTimedOut,
+                _ => LibraryError::CloudRequestUnavailable,
+            })?;
+        Ok(())
+    }
+
     pub(crate) fn publish_classification_snapshot(
         &self,
         token: &str,

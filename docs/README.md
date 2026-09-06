@@ -51,3 +51,7 @@ Separate implemented facts from authority to change them.
 - `agents/approved-chrome-direction.md` — superseded Chrome 03b comparison/handoff pointer; current rules moved to `pc-design-reference.md`.
 - `roadmap/works-collection-visual-redesign-plan.md` — retired implementation plan; do not execute it as a current plan.
 - `prototypes/lakomics-works-v6-reference.html` — retained historical Works visual/interaction reference, not production code or current visual source of truth.
+
+## Device research records
+
+- `research/android-cloud-media-provider-poc-20260906.md` — Galaxy Tab S11 Android Photo Picker / custom `CloudMediaProvider` device PoC, album-filtering findings, ADB eligibility caveats, and the related temporary/one-use media inbox proposal. This is validated research evidence, not an adopted replacement for the current Mobile roadmap.

@@ -1,3 +1,4 @@
+mod albums;
 pub(crate) mod backfill;
 pub(crate) mod activity;
 #[cfg(test)]

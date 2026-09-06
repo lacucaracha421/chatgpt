@@ -111,6 +111,10 @@ impl Library {
             publish_failed = true;
             eprintln!("cloud saved X media publish: {error}");
         }
+        if let Err(error) = self.publish_album_replica_with(client, token) {
+            publish_failed = true;
+            eprintln!("cloud album metadata publish: {error}");
+        }
         self.record_cloud_metadata_activity(publish_failed.then_some("모바일 분류·수집 기록을 전송하지 못했습니다. 서버 연결을 확인해 주세요."))?;
         Ok(result)
     }

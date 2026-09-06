@@ -1,0 +1,10 @@
+platform-tools/
+platform-tools.zip
+/*.png
+/*.xml
+/*.log
+/server-before-albums.py
+app/build/
+**/connection.json
+**/connection.new
+**/album-cache.json

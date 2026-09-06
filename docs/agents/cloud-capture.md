@@ -133,3 +133,7 @@ Use the living backlog's active item statuses and dependencies rather than a sec
 - Last successful capture/media cycle survives later errors. Diagnostic messages persisted by the activity boundary are fixed public strings, excluding transport payloads and credentials.
 - Backup lists load only in Data management, on a blocking worker thread. Existing snapshot verification and restore validation remain intact.
 - This implementation does not close device/native acceptance by itself. During editing an already-running development watcher unexpectedly migrated the active library to v38; it was stopped. A verified pre-migration v37 backup exists. v39 must not be applied to the active library without authorization.
+
+## Android album metadata replica
+
+The existing metadata poll also publishes album definitions and normal-asset memberships through `/v1/library/album-snapshot`. This is metadata-only and never queues media backfill. The Android provider reads the selected album IDs from `/v1/library/album-media`; only cloud-committed items with thumbnail metadata appear. Album membership removal affects the returned view, not original media retention. The selected temporary album has no TTL or automatic deletion. Deployed and verified on the S11 on 2026-09-07; exact selected-album membership matched the PC. Deployment/native evidence is recorded in `../research/android-cloud-media-provider-poc-20260906.md`.
