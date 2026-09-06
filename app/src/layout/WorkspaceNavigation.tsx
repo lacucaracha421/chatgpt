@@ -1,5 +1,6 @@
 import { BookOpenIcon, CalendarIcon, InboxIcon, Cog6ToothIcon, EllipsisHorizontalIcon, MagnifyingGlassIcon, PhotoIcon, PlusIcon, RectangleStackIcon, TrashIcon } from "../shared/ui/ArchiveIcons";
 import { useRef, type CSSProperties, type ReactNode } from "react";
+import lakomicsMark from "../brand/lakomics-mark.svg?no-inline";
 import type { AssetView, CollectionType } from "../library/types";
 import { Menu } from "../shared/ui/Menu";
 import { ChromeSettingsDock, ChromeTarget } from "./WorkspaceChrome";
@@ -45,7 +46,7 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
   ];
   return <div className="workspace-navigation">
     <nav className="workspace-rail" aria-label="주요 영역">
-      <span className="workspace-mark" aria-label="Lakomics"><i /><i /><i /></span>
+      <span className="workspace-mark"><img src={lakomicsMark} alt="Lakomics" width="32" height="32" /></span>
       {(["assets", "collections", "manga"] as const).map((key) => {
         const Icon = key === "assets" ? RectangleStackIcon : key === "collections" ? BookOpenIcon : PhotoIcon;
         const label = { assets: "에셋", collections: "컬렉션", manga: "망가" }[key];

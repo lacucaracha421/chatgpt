@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" color="#DCD8CB" role="img" aria-labelledby="title">
+  <title id="title">Lakomics</title>
+  <g fill="currentColor" fill-rule="evenodd">
+    <path d="M1 3H4V13H1ZM2 4V12H3V4Z"/>
+    <path d="M6 1H10V15H6ZM7 2V14H9V2Z"/>
+    <path d="M12 3H15V13H12ZM13 4V12H14V4Z"/>
+  </g>
+</svg>

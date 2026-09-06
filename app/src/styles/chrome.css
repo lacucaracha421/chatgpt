@@ -6,8 +6,7 @@
 .workspace-navigation svg { flex: none; width: 18px; height: 18px; }
 .workspace-rail { width: var(--chrome-rail-width); flex: none; display: flex; flex-direction: column; align-items: stretch; padding: var(--space-2) var(--space-compact); gap: var(--space-2); background: var(--color-sidebar); border-right: 1px solid var(--color-border); }
 .workspace-mark { height: 48px; display: flex; justify-content: center; align-items: center; gap: 3px; }
-.workspace-mark i { width: 5px; height: 17px; border: 1px solid var(--color-accent); opacity: .8; }
-.workspace-mark i:nth-child(2) { height: 23px; }
+.workspace-mark img { display: block; width: 32px; height: 32px; }
 .workspace-rail__item, .workspace-rail__tail > .ui-menu__trigger { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-compact); min-height: 56px; width: 100%; padding: var(--space-2) 0; color: var(--color-muted); border: 1px solid transparent; border-radius: var(--chrome-radius); background: transparent; font-size: var(--text-xs); }
 .workspace-rail__item:hover, .workspace-rail__tail > .ui-menu__trigger:hover { background: var(--color-surface-hover); color: var(--color-text); }
 .workspace-rail__item[aria-current=page] { background: var(--color-accent); color: var(--color-on-accent); }
