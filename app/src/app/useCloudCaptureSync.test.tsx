@@ -1,4 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CloudCaptureSyncResult, LibraryGateway } from "../library/types";
 import { useCloudCaptureSync } from "./useCloudCaptureSync";
@@ -31,6 +32,78 @@ describe("useCloudCaptureSync", () => {
     visibilitySpy.mockRestore();
     focusSpy.mockRestore();
     vi.useRealTimers();
+  });
+
+  it("delivers the consuming poll after StrictMode replay without a second ingestion", async () => {
+    let finish!: (value: CloudCaptureSyncResult) => void;
+    const consuming = new Promise<CloudCaptureSyncResult>((resolve) => { finish = resolve; });
+    const gateway = {
+      runDueCloudCaptureSync: vi.fn().mockReturnValueOnce(consuming).mockResolvedValue({
+        ...result, added: 0, videoAdded: 0,
+      }),
+    } as unknown as LibraryGateway;
+    const onResult = vi.fn();
+    renderHook(() => useCloudCaptureSync(gateway, "C:\\Library", onResult), { wrapper: StrictMode });
+
+    await act(async () => { finish(result); });
+
+    expect(gateway.runDueCloudCaptureSync).toHaveBeenCalledTimes(1);
+    expect(onResult).toHaveBeenCalledTimes(1);
+    expect(onResult).toHaveBeenCalledWith(result);
+
+    await act(async () => vi.advanceTimersByTimeAsync(15_000));
+    expect(gateway.runDueCloudCaptureSync).toHaveBeenCalledTimes(2);
+    expect(onResult).toHaveBeenCalledTimes(2);
+  });
+
+  it("delivers an in-flight result to the latest callback without starting another poll", async () => {
+    let finish!: (value: CloudCaptureSyncResult) => void;
+    const gateway = {
+      runDueCloudCaptureSync: vi.fn().mockReturnValue(new Promise<CloudCaptureSyncResult>((resolve) => { finish = resolve; })),
+    } as unknown as LibraryGateway;
+    const oldCallback = vi.fn();
+    const latestCallback = vi.fn();
+    const { rerender } = renderHook(({ callback }) => useCloudCaptureSync(gateway, "C:\\Library", callback), {
+      initialProps: { callback: oldCallback },
+    });
+    rerender({ callback: latestCallback });
+    await act(async () => { finish(result); });
+    expect(gateway.runDueCloudCaptureSync).toHaveBeenCalledTimes(1);
+    expect(oldCallback).not.toHaveBeenCalled();
+    expect(latestCallback).toHaveBeenCalledWith(result);
+  });
+
+  it("does not reuse or report a poll from a previous library", async () => {
+    let finishOld!: (value: CloudCaptureSyncResult) => void;
+    const empty = { ...result, added: 0, videoAdded: 0 };
+    const gateway = {
+      runDueCloudCaptureSync: vi.fn()
+        .mockReturnValueOnce(new Promise<CloudCaptureSyncResult>((resolve) => { finishOld = resolve; }))
+        .mockResolvedValue(empty),
+    } as unknown as LibraryGateway;
+    const onResult = vi.fn();
+    const { rerender } = renderHook(({ root }) => useCloudCaptureSync(gateway, root, onResult), {
+      initialProps: { root: "C:\\First" },
+    });
+    rerender({ root: "C:\\Second" });
+    await act(async () => { finishOld(result); });
+    expect(gateway.runDueCloudCaptureSync).toHaveBeenCalledTimes(2);
+    expect(onResult).toHaveBeenCalledTimes(1);
+    expect(onResult).toHaveBeenCalledWith(empty);
+  });
+
+  it("does not deliver a native result after real unmount", async () => {
+    let finish!: (value: CloudCaptureSyncResult) => void;
+    const gateway = {
+      runDueCloudCaptureSync: vi.fn().mockReturnValue(new Promise<CloudCaptureSyncResult>((resolve) => { finish = resolve; })),
+    } as unknown as LibraryGateway;
+    const onResult = vi.fn();
+    const { unmount } = renderHook(() => useCloudCaptureSync(gateway, "C:\\Library", onResult));
+    unmount();
+    await act(async () => { finish(result); });
+    await act(async () => vi.advanceTimersByTimeAsync(60_000));
+    expect(onResult).not.toHaveBeenCalled();
+    expect(gateway.runDueCloudCaptureSync).toHaveBeenCalledTimes(1);
   });
 
   it("polls immediately and every 15 seconds while visible", async () => {

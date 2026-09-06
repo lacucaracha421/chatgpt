@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { LibraryGateway } from "../library/types";
 
 const ACTIVE_POLL_INTERVAL_MS = 15_000;
@@ -11,6 +11,14 @@ export function useCloudCaptureSync(
     result: Awaited<ReturnType<LibraryGateway["runDueCloudCaptureSync"]>>,
   ) => void,
 ) {
+  // Effect replay cannot cancel a native poll that already consumed captures.
+  // Its result must reach the current subscriber to wake video preparation.
+  const inFlight = useRef<{
+    gateway: LibraryGateway;
+    libraryRoot: string;
+    promise: ReturnType<LibraryGateway["runDueCloudCaptureSync"]>;
+  } | null>(null);
+
   useEffect(() => {
     let active = true;
     let running = false;
@@ -31,12 +39,18 @@ export function useCloudCaptureSync(
     const run = async () => {
       if (!active || running) return;
       running = true;
+      let request = inFlight.current;
       try {
-        const result = await gateway.runDueCloudCaptureSync();
+        if (!request || request.gateway !== gateway || request.libraryRoot !== libraryRoot) {
+          request = { gateway, libraryRoot, promise: gateway.runDueCloudCaptureSync() };
+          inFlight.current = request;
+        }
+        const result = await request.promise;
         if (active) onResult(result);
       } catch {
         // Network/configuration failures are retried by the next scheduled poll.
       } finally {
+        if (inFlight.current === request) inFlight.current = null;
         running = false;
       }
     };
