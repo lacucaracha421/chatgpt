@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { WindowControls } from "./WindowControls";
 import { ChromeContribution, useWorkspaceChrome, type ViewChromeSpec } from "./WorkspaceChrome";
 import { ChromeQueryBadge } from "./ChromeSearch";
@@ -13,18 +14,19 @@ type ViewToolbarProps = {
 
 export function ViewToolbar({ title, ariaLabel, children, actions, chrome }: ViewToolbarProps) {
   const workspace = useWorkspaceChrome();
+  const place = (header: ReactNode) => workspace?.targets.header ? createPortal(header, workspace.targets.header) : header;
   if (workspace && chrome) {
     return <>
       <ChromeContribution title={title} spec={chrome} />
-      <header className="view-toolbar view-toolbar--context" role="toolbar" aria-label={ariaLabel}>
+      {place(<header className="view-toolbar view-toolbar--context" role="toolbar" aria-label={ariaLabel} data-tauri-drag-region="deep">
         <span className="chrome-location-mark" aria-hidden="true" />
         <h2 title={title}>{title}</h2>
         <ChromeQueryBadge search={chrome.search} />
         <div className="chrome-context-status">{chrome.status}</div>
-      </header>
+      </header>)}
     </>;
   }
-  return (
+  return place(
     <header className="view-toolbar" role="toolbar" aria-label={ariaLabel} data-tauri-drag-region="deep">
       <h2>{title}</h2>
       {children && <div className="view-toolbar__content">{children}</div>}

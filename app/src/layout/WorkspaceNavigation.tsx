@@ -53,8 +53,7 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
       </div>
     </nav>
     <aside className="workspace-index" style={{ "--workspace-index-width": `${width}px` } as CSSProperties} aria-label="탐색 인덱스">
-      <header className="workspace-index__head">
-        <div className="workspace-index__identity" aria-label={areaName} />
+      <header className="workspace-index__head" aria-label={areaName} data-tauri-drag-region="deep">
         <div className="workspace-index__head-actions">
           <ChromeTarget name="search" />
           {!chrome?.meta?.search && <span title="이 화면에는 별도의 텍스트 검색이 없습니다"><button type="button" className="ui-button ui-button--icon ui-button--ghost" disabled aria-label="검색 미지원"><MagnifyingGlassIcon aria-hidden="true" /></button></span>}

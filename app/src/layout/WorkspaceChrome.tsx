@@ -7,7 +7,7 @@ import { TooltipLayer } from "../shared/ui/TooltipLayer";
 import { ChromeSearch, type ChromeSearchSpec } from "./ChromeSearch";
 import "../styles/chrome.css";
 
-type Slot = "navigation" | "actions" | "search" | "settings";
+type Slot = "navigation" | "actions" | "search" | "settings" | "header";
 type Targets = Record<Slot, HTMLElement | null>;
 type ChromeMeta = { owner: string; scope: string; title: string; summary: string; settings: boolean; navigation: boolean; actions: boolean; search: boolean };
 type ChromeContextValue = {
@@ -30,7 +30,7 @@ export type ViewChromeSpec = {
   status?: ReactNode;
 };
 export function WorkspaceChromeProvider({ scope, children }: PropsWithChildren<{ scope: string }>) {
-  const [targets, setTargets] = useState<Targets>({ navigation: null, actions: null, search: null, settings: null });
+  const [targets, setTargets] = useState<Targets>({ navigation: null, actions: null, search: null, settings: null, header: null });
   const [registration, setRegistration] = useState<ChromeMeta | null>(null);
   const setTarget = useCallback((slot: Slot, element: HTMLElement | null) => {
     setTargets((current) => current[slot] === element ? current : { ...current, [slot]: element });

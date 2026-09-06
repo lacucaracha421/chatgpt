@@ -16,27 +16,43 @@ export function collectedDate(value: string | null | undefined) {
 
 export function buildMasonryLayout(items: AssetSummary[], width: number, targetWidth: number, gap: number, captions: boolean, groupDates: boolean) {
   const tiles: MasonryTile[] = [];
-  const headings: Array<{ key: string; label: string; top: number }> = [];
+  const headings: Array<{ key: string; label: string; top: number; left: number; width: number }> = [];
   if (width <= 0 || targetWidth <= 0) return { tiles, headings, height: 0 };
   const columns = Math.max(1, Math.floor((width + gap) / (targetWidth + gap)));
   const tileWidth = (width - gap * (columns - 1)) / columns;
-  let bottoms = Array<number>(columns).fill(0);
-  let previousDate: string | null = null;
+  const groups: Array<{ start: number; items: AssetSummary[] }> = [];
   items.forEach((asset, index) => {
-    const date = collectedDate(asset.collectedAt);
-    if (groupDates && date.key !== previousDate) {
-      const top = Math.max(...bottoms);
-      headings.push({ key: asset.id, label: date.label, top });
-      bottoms = bottoms.map(() => top + DATE_HEADING_HEIGHT);
-      previousDate = date.key;
-    }
-    const column = bottoms.indexOf(Math.min(...bottoms));
-    const imageHeight = tileWidth * (asset.width > 0 && asset.height > 0 ? asset.height / asset.width : 1);
-    const height = imageHeight + (captions ? CAPTION_HEIGHT : 0);
-    tiles.push({ asset, index, left: column * (tileWidth + gap), top: bottoms[column], width: tileWidth, imageHeight, height });
-    bottoms[column] += height + gap;
+    const last = groups[groups.length - 1];
+    if (!last || (groupDates && collectedDate(last.items[0].collectedAt).key !== collectedDate(asset.collectedAt).key)) {
+      groups.push({ start: index, items: [asset] });
+    } else last.items.push(asset);
   });
-  return { tiles, headings, height: Math.max(...bottoms) };
+  let rowTop = 0;
+  let rowBottom = 0;
+  let usedColumns = 0;
+  for (const group of groups) {
+    const span = groupDates ? Math.min(columns, group.items.length) : columns;
+    if (usedColumns + span > columns) {
+      rowTop = rowBottom;
+      usedColumns = 0;
+    }
+    const left = usedColumns * (tileWidth + gap);
+    if (groupDates) headings.push({
+      key: group.items[0].id, label: collectedDate(group.items[0].collectedAt).label,
+      top: rowTop, left, width: span * (tileWidth + gap) - gap,
+    });
+    const bottoms = Array<number>(span).fill(rowTop + (groupDates ? DATE_HEADING_HEIGHT : 0));
+    group.items.forEach((asset, offset) => {
+      const column = bottoms.indexOf(Math.min(...bottoms));
+      const imageHeight = tileWidth * (asset.width > 0 && asset.height > 0 ? asset.height / asset.width : 1);
+      const height = imageHeight + (captions ? CAPTION_HEIGHT : 0);
+      tiles.push({ asset, index: group.start + offset, left: left + column * (tileWidth + gap), top: bottoms[column], width: tileWidth, imageHeight, height });
+      bottoms[column] += height + gap;
+    });
+    rowBottom = Math.max(rowBottom, ...bottoms);
+    usedColumns += span;
+  }
+  return { tiles, headings, height: rowBottom };
 }
 
 export function masonryMove(tiles: MasonryTile[], currentId: string, direction: 1 | -1) {

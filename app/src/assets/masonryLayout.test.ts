@@ -4,6 +4,23 @@ import { buildMasonryLayout, collectedDate, masonryMove } from "./masonryLayout"
 
 const item = (id: string, day = 5, height = 300) => ({ id, width: 200, height, collectedAt: new Date(2026, 8, day, 21, 7).toISOString() } as AssetSummary);
 describe("date masonry", () => {
+  it("shares a row between sparse dates and wraps below the tallest group", () => {
+    const result = buildMasonryLayout([item("a", 5, 80), item("b", 4, 300), item("c", 3), item("d", 2)], 640, 180, 20, true, true);
+    expect(result.headings.slice(0, 3).map((heading) => heading.top)).toEqual([0, 0, 0]);
+    expect(result.headings.slice(0, 3).map((heading) => heading.left)).toEqual([0, 220, 440]);
+    expect(result.headings.map((heading) => heading.width)).toEqual([200, 200, 200, 200]);
+    expect(result.headings[3].top).toBe(Math.max(...result.tiles.slice(0, 3).map((tile) => tile.top + tile.height)) + 20);
+    expect(result.tiles.map((tile) => tile.asset.id)).toEqual(["a", "b", "c", "d"]);
+  });
+  it("keeps multi-image date headings over their own columns and stacks on narrow screens", () => {
+    const items = [item("a", 5), item("b", 5), item("c", 4), item("d", 3)];
+    const wide = buildMasonryLayout(items, 640, 180, 20, true, true);
+    expect(wide.headings[0]).toMatchObject({ left: 0, width: 420, top: 0 });
+    expect(wide.headings[1]).toMatchObject({ left: 440, width: 200, top: 0 });
+    const narrow = buildMasonryLayout(items, 200, 180, 20, true, true);
+    expect(narrow.headings.every((heading) => heading.left === 0 && heading.width === 200)).toBe(true);
+    expect(narrow.headings[1].top).toBeGreaterThan(narrow.tiles[1].top + narrow.tiles[1].height);
+  });
   it("keeps earlier positions when a page extends the same date", () => {
     const first = [item("a"), item("b", 5, 80), item("c")];
     const initial = buildMasonryLayout(first, 640, 180, 20, true, true);

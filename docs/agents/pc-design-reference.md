@@ -115,6 +115,7 @@ Default PC Asset layout is **date-grouped masonry/waterfall**. Justified rows re
 - Preserve intrinsic aspect ratio.
 - Group by `collectedAt` local date using the same timestamp/timezone as sort and caption time.
 - The date heading carries the date; each asset caption uses artist/creator on the left and `HH:mm` on the right.
+- Approved on 2026-09-06 after user trial: sparse date groups share a horizontal row, each using only the columns its assets need. Keep each date heading and rule within its group's width. Wrap whole groups when remaining columns are insufficient, placing the next row below the tallest preceding group. Larger groups retain full-width masonry; narrow viewports naturally stack groups. Preserve chronological order, intrinsic image ratios, and artist/time captions.
 - Do not repeat the date per image.
 - Missing creator/time data stays honest; do not synthesize current values.
 

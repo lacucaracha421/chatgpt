@@ -1,7 +1,7 @@
 /* Chrome 03b: navigation stays mounted; transient tools never reserve content width. */
 .ui-tooltip { position: fixed; z-index: var(--chrome-z-tooltip); max-width: min(280px, calc(100vw - 16px)); padding: 6px 9px; background: var(--color-surface); color: var(--color-text); border: 1px solid var(--chrome-border); border-radius: var(--chrome-radius); box-shadow: var(--shadow-floating); font-size: var(--text-xs); line-height: var(--line-copy); pointer-events: none; overflow-wrap: anywhere; }
 .workspace-navigation, .workspace-navigation *, .workspace-titlebar, .workspace-titlebar *, .view-toolbar--context, .ui-anchored-panel, .ui-anchored-panel *, .chrome-query, .chrome-search-editor, .chrome-search-editor * { box-sizing: border-box; }
-:root { --chrome-rail-width: 64px; --chrome-titlebar-height: 32px; --chrome-context-height: 42px; --chrome-panel-width: 320px; --chrome-border: #505254; --chrome-radius: 3px; --chrome-z-panel: 1080; --chrome-z-tooltip: 1250; }
+:root { --chrome-rail-width: 64px; --chrome-titlebar-height: 44px; --chrome-context-height: 44px; --chrome-panel-width: 320px; --chrome-border: #505254; --chrome-radius: 3px; --chrome-z-panel: 1080; --chrome-z-tooltip: 1250; }
 .workspace-navigation { display: flex; height: 100%; min-height: 0; }
 .workspace-navigation svg { flex: none; width: 18px; height: 18px; }
 .workspace-rail { width: var(--chrome-rail-width); flex: none; display: flex; flex-direction: column; align-items: stretch; padding: var(--space-2) var(--space-compact); gap: var(--space-2); background: var(--color-sidebar); border-right: 1px solid var(--color-border); }
@@ -35,8 +35,10 @@
 .chrome-tree-heading > .classification-sidebar__tree-heading { flex: 1; min-width: 0; }
 .workspace-index .classification-sidebar__badge { font-variant-numeric: tabular-nums; }
 .workspace-index .classification-sidebar__tree-row[aria-selected=true] .classification-sidebar__badge { color: var(--color-on-accent); opacity: .7; }
+.workspace-index .classification-sidebar__tree-row[data-classification-id][aria-selected=true] .classification-sidebar__tree-surface::after { content: none; }
+.workspace-index .classification-sidebar__tree-row[data-classification-id][aria-selected=true] .classification-sidebar__tree-folder { background: linear-gradient(#000, #000) center / var(--selection-mark-size) var(--selection-mark-size) no-repeat; opacity: 1; }
+.workspace-index .classification-sidebar__tree-row[data-classification-id][aria-selected=true] .classification-sidebar__tree-folder > * { visibility: hidden; }
 .workspace-index__resize { position: absolute; top: 0; bottom: 0; right: -3px; width: 6px; cursor: col-resize; z-index: 2; touch-action: none; }
-.workspace-index__resize:hover { background: color-mix(in srgb, var(--color-accent) 22%, transparent); }
 .workspace-settings-dock { flex: none; padding: var(--space-2); border-top: 1px solid var(--color-border); }
 .workspace-settings-toggle { display: flex; width: 100%; align-items: center; gap: var(--space-2); padding: var(--space-2); min-height: 52px; background: transparent; border: 1px solid transparent; border-radius: var(--chrome-radius); color: var(--color-text); text-align: left; }
 .workspace-settings-toggle > span { min-width: 0; flex: 1; }
@@ -114,8 +116,13 @@ body .ui-menu { border-color: var(--chrome-border); border-radius: var(--chrome-
 .workspace-index .manga-source-tabs + .ui-select select { width: 100%; }
 
 /* Chrome refinement: compact labels, squared symbols, quiet tree hierarchy. */
-.workspace-titlebar { justify-content: flex-end; }
-.workspace-index__head { min-height: 56px; }
+.workspace-titlebar { padding-left: 0; }
+.workspace-titlebar__context { flex: 1; min-width: 0; height: 100%; }
+.workspace-titlebar__context > .view-toolbar { height: 100%; min-height: 0; flex-wrap: nowrap; border: 0; padding: 0 var(--space-4); background: transparent; }
+.workspace-titlebar__context .view-toolbar h2 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-index__head { height: var(--chrome-titlebar-height); min-height: var(--chrome-titlebar-height); padding: 0 var(--space-3); flex-wrap: nowrap; }
+.workspace-index__head-actions { margin-left: 0; }
+.workspace-mark { height: calc(var(--chrome-titlebar-height) - var(--space-2)); flex: none; }
 .workspace-index__identity h1 { font-size: var(--text-md); font-weight: 500; }
 .workspace-settings-toggle { min-height: 36px; }
 .workspace-navigation { --chrome-radius: 0px; }

@@ -17,7 +17,7 @@ import { DropOverlay } from "../ingestion/DropOverlay";
 import { WorkTray } from "../ingestion/WorkTray";
 import { executeMetadataImport, type MetadataImportWork } from "../ingestion/metadataImport";
 import { AppShell } from "../layout/AppShell";
-import { WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
+import { ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
 import { WorkspaceNavigation } from "../layout/WorkspaceNavigation";
 import { WindowControls } from "../layout/WindowControls";
 import { StatusBar } from "../layout/StatusBar";
@@ -629,7 +629,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
           }
           content={
             <div className="workspace-content">
-              <div className="workspace-titlebar" data-tauri-drag-region="deep"><WindowControls /></div>
+              <div className="workspace-titlebar" data-tauri-drag-region="deep"><ChromeTarget name="header" className="workspace-titlebar__context" /><WindowControls /></div>
             <div className="library-content">
               <section className="library-content__browser" aria-label="자산 내용">
                 <Suspense fallback={<DeferredViewFallback />}>

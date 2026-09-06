@@ -1,10 +1,25 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { ViewToolbar } from "./ViewToolbar";
+import { ChromeTarget, WorkspaceChromeProvider } from "./WorkspaceChrome";
 
 afterEach(cleanup);
 
 describe("ViewToolbar", () => {
+  it("moves the contextual toolbar into the shared titlebar without duplicating it", () => {
+    const view = (title: string) => <WorkspaceChromeProvider scope={title}>
+      <div data-testid="titlebar"><ChromeTarget name="header" /></div>
+      <main><ViewToolbar title={title} chrome={{ status: <button>선택 해제</button> }} /></main>
+    </WorkspaceChromeProvider>;
+    const { container, rerender } = render(view("저장소"));
+    expect(screen.getByTestId("titlebar")).toContainElement(screen.getByRole("heading", { name: "저장소" }));
+    expect(container.querySelector("main .view-toolbar")).toBeNull();
+    expect(screen.getAllByRole("toolbar")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "선택 해제" })).toBeInTheDocument();
+    rerender(view("건담"));
+    expect(screen.queryByRole("heading", { name: "저장소" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("titlebar")).toContainElement(screen.getByRole("heading", { name: "건담" }));
+  });
   it("marks the whole bar as a deep native drag region", () => {
     const { container } = render(<ViewToolbar title="망가" />);
     const header = container.querySelector(".view-toolbar")!;
