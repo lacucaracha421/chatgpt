@@ -1,4 +1,5 @@
-import { ChevronDownIcon, ChevronRightIcon } from "@heroicons/react/24/outline";
+import { StarIcon } from "@heroicons/react/20/solid";
+import { ChevronDownIcon, ChevronRightIcon, ArrowsPointingInIcon, ViewfinderCircleIcon } from "@heroicons/react/24/outline";
 import { BookOpenIcon, CalendarIcon, FolderIcon, PhotoIcon, InboxIcon, PlusIcon, RectangleStackIcon, Cog6ToothIcon, TrashIcon } from "../shared/ui/ArchiveIcons";
 import { useLayoutEffect, useEffect, useRef, useState, type CSSProperties } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -24,6 +25,9 @@ type ClassificationSidebarProps = {
   view: AssetView;
   collectionType: CollectionType;
   expandedIds: string[];
+  pinnedIds?: string[];
+  orderIds?: string[];
+  onPinnedIdsChange?: (ids: string[]) => void;
   expandedAlbumIds?: string[];
   sidebarWidth: number;
   reviewCount: number;
@@ -68,6 +72,9 @@ export function ClassificationSidebar({
   entries,
   albums = [],
   expandedIds,
+  pinnedIds = [],
+  orderIds = [],
+  onPinnedIdsChange = () => undefined,
   expandedAlbumIds = [],
   onChanged,
   onAlbumsChanged = onChanged,
@@ -91,7 +98,7 @@ export function ClassificationSidebar({
   const { gateway } = useLibrary();
   const classificationEntries: SidebarTreeEntry[] = entries.map((entry) => ({ ...entry, treeKind: "classification" }));
   const albumEntries: SidebarTreeEntry[] = albums.map((entry) => ({ ...entry, treeKind: "album", kind: "tag" }));
-  const tree = buildTree(classificationEntries);
+  const tree = buildTree(classificationEntries, orderIds);
   const albumTree = buildTree(albumEntries);
   const visibleNodes = visibleTreeNodes(tree, expandedIds);
   const visibleAlbumNodes = visibleTreeNodes(albumTree, expandedAlbumIds);
@@ -113,6 +120,40 @@ export function ClassificationSidebar({
   useAutoDismiss(message, setMessage);
   const resize = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
+  const sidebarRef = useRef<HTMLElement>(null);
+  const [scrollFolderId, setScrollFolderId] = useState<string | null>(null);
+  const folderPath = (id: string | null): SidebarTreeEntry[] => {
+    const path: SidebarTreeEntry[] = [];
+    const seen = new Set<string>();
+    let entry = classificationEntries.find((item) => item.id === id);
+    while (entry && !seen.has(entry.id)) {
+      seen.add(entry.id); path.unshift(entry);
+      entry = classificationEntries.find((item) => item.id === entry!.parentId);
+    }
+    return path;
+  };
+  const openPinned = (id: string) => {
+    setFoldersOpen(true);
+    onExpandedIdsChange([...new Set([...expandedIds, ...folderPath(id).slice(0, -1).map((entry) => entry.id)])]);
+    onViewChange({ kind: "classification", classificationId: id });
+  };
+  const togglePin = (entry: SidebarTreeEntry) => onPinnedIdsChange(pinnedIds.includes(entry.id) ? pinnedIds.filter((id) => id !== entry.id) : [...pinnedIds, entry.id]);
+  useEffect(() => {
+    const sidebar = sidebarRef.current;
+    const scroller = embedded ? sidebar?.closest<HTMLElement>(".workspace-index__scroll") : sidebar;
+    if (!sidebar || !scroller) return;
+    const update = () => {
+      const top = scroller.getBoundingClientRect().top + 28;
+      const rows = [...sidebar.querySelectorAll<HTMLElement>("[data-classification-id]")];
+      const row = rows.find((item) => { const rect = item.getBoundingClientRect(); return rect.height > 0 && rect.bottom > top; });
+      const id = row?.dataset.classificationId;
+      const entry = entries.find((item) => item.id === id);
+      setScrollFolderId(scroller.scrollTop > 0 ? entry?.parentId ?? null : null);
+    };
+    update();
+    scroller.addEventListener("scroll", update, { passive: true });
+    return () => scroller.removeEventListener("scroll", update);
+  }, [embedded, entries, expandedIds, foldersOpen]);
   const allEntries = [...classificationEntries, ...albumEntries];
   // Each role="tree" keeps its own roving tabindex stop: the focused row when
   // it belongs to that tree, otherwise the nearest visible row. A collapsed
@@ -365,6 +406,7 @@ export function ClassificationSidebar({
 
   return (
     <aside
+      ref={sidebarRef}
       className={`classification-sidebar${embedded ? " classification-sidebar--embedded" : ""}`}
       aria-label="분류"
       style={embedded ? undefined : { width: sidebarWidth }}
@@ -389,21 +431,32 @@ export function ClassificationSidebar({
           <PlusIcon aria-hidden="true" />
         </Button>
       </div>}
-      <nav className="classification-sidebar__quick-views" aria-label="빠른 보기">
+      {!embedded && <nav className="classification-sidebar__quick-views" aria-label="빠른 보기">
         <QuickViewButton icon={<FolderIcon aria-hidden="true" />} label="저장소" selected={view.kind === "classification" && view.classificationId === null} onClick={() => onViewChange({ kind: "classification", classificationId: null })} />
         <QuickViewButton icon={<InboxIcon aria-hidden="true" />} label="미분류" selected={view.kind === "unsorted"} onClick={() => onViewChange({ kind: "unsorted" })} />
         <QuickViewButton icon={<CalendarIcon aria-hidden="true" />} label="다시보기" selected={view.kind === "revisit" || view.kind === "creator"} onClick={() => onViewChange({ kind: "revisit" })} />
         {!embedded && <><QuickViewButton icon={<BookOpenIcon aria-hidden="true" />} label="망가" selected={view.kind === "manga"} onClick={() => onViewChange({ kind: "manga" })} />
         <QuickViewButton icon={<RectangleStackIcon aria-hidden="true" />} label="컬렉션" selected={view.kind === "collections" || view.kind === "collection"} onClick={() => onViewChange({ kind: "collections", typeFilter: collectionType, showcase: false })} /></>}
-      </nav>
+      </nav>}
       {tree.hasOrphans && <p className="classification-sidebar__warning" role="alert">연결되지 않은 분류는 숨겨집니다.</p>}
+      {pinnedIds.some((id) => entries.some((entry) => entry.id === id)) && <nav className="classification-sidebar__pins" aria-label="즐겨찾기 폴더">
+        <span className="workspace-section-label">즐겨찾기</span>
+        {pinnedIds.map((id) => { const entry = entries.find((item) => item.id === id); return entry ? <ContextMenu key={id} items={[{ id: "unpin", label: "즐겨찾기 해제", onSelect: () => onPinnedIdsChange(pinnedIds.filter((value) => value !== id)) }]}>
+          <button type="button" className="classification-sidebar__pin" aria-current={view.kind === "classification" && view.classificationId === id ? "page" : undefined} title={folderPath(id).map((item) => item.name).join(" / ")} onClick={() => openPinned(id)}><StarIcon aria-hidden="true" /><span>{entry.name}</span></button>
+        </ContextMenu> : null; })}
+      </nav>}
+      <section className="classification-sidebar__folder-section" aria-label="폴더 탐색">
       <div className="chrome-tree-heading">
       <button type="button" className="classification-sidebar__tree-heading" aria-expanded={foldersOpen} aria-label={`폴더 ${foldersOpen ? "접기" : "펼치기"}`} onClick={() => setFoldersOpen((open) => !open)}>
         {foldersOpen ? <ChevronDownIcon aria-hidden="true" /> : <ChevronRightIcon aria-hidden="true" />}
         <span>폴더 ({tree.length})</span>
       </button>
+      <Button type="button" size="icon" variant="ghost" aria-label="모든 폴더 접기" title="모든 폴더 접기" onClick={() => onExpandedIdsChange([])}><ArrowsPointingInIcon aria-hidden="true" /></Button>
+      <Button type="button" size="icon" variant="ghost" aria-label="현재 위치만 펼치기" title="현재 위치만 펼치기" disabled={selected?.treeKind !== "classification"} onClick={() => { setFoldersOpen(true); onExpandedIdsChange(folderPath(selected?.id ?? null).map((entry) => entry.id)); }}><ViewfinderCircleIcon aria-hidden="true" /></Button>
       {embedded && <Button type="button" size="icon" variant="ghost" aria-label="새 폴더" onClick={() => openTopLevelCreate("classification")}><PlusIcon aria-hidden="true" /></Button>}
       </div>
+      {foldersOpen && scrollFolderId && <nav className="classification-sidebar__scroll-path" aria-label="스크롤 위치 경로">{folderPath(scrollFolderId).map((entry) => <button key={entry.id} type="button" title={entry.name} onClick={() => openPinned(entry.id)}>{entry.name}</button>)}</nav>}
+      {embedded && <div className="classification-sidebar__all"><QuickViewButton icon={<FolderIcon aria-hidden="true" />} label="전체" selected={view.kind === "classification" && view.classificationId === null} onClick={() => onViewChange({ kind: "classification", classificationId: null })} /></div>}
       <ContextMenu items={[{ id: "create-root", label: "새 폴더", onSelect: () => openTopLevelCreate("classification") }]}>
         <ul className="classification-sidebar__tree" role="tree" aria-label="폴더" hidden={!foldersOpen}>
           {tree.map((node, index) => (
@@ -413,6 +466,8 @@ export function ClassificationSidebar({
               hasNextSibling={index < tree.length - 1}
               view={view}
               expandedIds={expandedIds}
+              pinnedIds={pinnedIds}
+              onTogglePin={togglePin}
               activeRowId={activeFolderRowId}
               inlineEdit={inlineEdit}
               editName={name}
@@ -442,6 +497,7 @@ export function ClassificationSidebar({
           )}
         </ul>
       </ContextMenu>
+      </section>
       {albumTree.hasOrphans && <p className="classification-sidebar__warning" role="alert">연결되지 않은 앨범을 숨겼습니다.</p>}
       <ContextMenu items={[{ id: "create-album", label: "새 앨범", onSelect: () => openTopLevelCreate("album") }]}>
         <div>
@@ -556,7 +612,9 @@ function QuickViewButton({ icon, label, count, onClick, selected }: { icon: Reac
   );
 }
 
-function TreeItem({ activeRowId, editError, editName, expandedIds, hasNextSibling, inlineEdit, node, onAppearance, onCreateChild, onDelete, onEditCancel, onEditNameChange, onEditSave, onMove, onRename, onRowFocus, onRowKeyDown, onToggleExpanded, onViewChange, registerTreeRow, view, dragTarget, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: {
+function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editName, expandedIds, hasNextSibling, inlineEdit, node, onAppearance, onCreateChild, onDelete, onEditCancel, onEditNameChange, onEditSave, onMove, onRename, onRowFocus, onRowKeyDown, onToggleExpanded, onViewChange, registerTreeRow, view, dragTarget, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: {
+  pinnedIds?: string[];
+  onTogglePin?: (entry: SidebarTreeEntry) => void;
   activeRowId: string | null;
   editError: string | null;
   editName: string;
@@ -593,6 +651,7 @@ function TreeItem({ activeRowId, editError, editName, expandedIds, hasNextSiblin
   const editingName = inlineEdit?.type === "rename" && inlineEdit.entry.id === node.entry.id;
   const creatingChild = inlineEdit?.type === "create" && inlineEdit.treeKind === node.entry.treeKind && inlineEdit.parentId === node.entry.id;
   const actions: MenuItem[] = [
+    ...(onTogglePin && node.entry.treeKind === "classification" ? [{ id: "pin", label: pinnedIds.includes(node.entry.id) ? "즐겨찾기 해제" : "즐겨찾기에 추가", onSelect: () => onTogglePin(node.entry) }] : []),
     { id: "create-child", label: node.entry.treeKind === "album" ? "하위 앨범 만들기" : "하위 폴더 만들기", onSelect: () => onCreateChild(node.entry) },
     { id: "rename", label: "이름 변경", onSelect: () => onRename(node.entry) },
     { id: "appearance", label: "아이콘 및 색상", onSelect: () => onAppearance(node.entry) },
@@ -677,7 +736,7 @@ function TreeItem({ activeRowId, editError, editName, expandedIds, hasNextSiblin
               : "var(--color-sidebar-connector)",
           } as CSSProperties}
         >
-          {node.children.map((child, index) => <TreeItem key={child.entry.id} node={child} hasNextSibling={index < node.children.length - 1} view={view} expandedIds={expandedIds} activeRowId={activeRowId} inlineEdit={inlineEdit} editName={editName} editError={editError} onViewChange={onViewChange} onToggleExpanded={onToggleExpanded} onRowFocus={onRowFocus} onRowKeyDown={onRowKeyDown} registerTreeRow={registerTreeRow} onAppearance={onAppearance} onCreateChild={onCreateChild} onRename={onRename} onEditNameChange={onEditNameChange} onEditSave={onEditSave} onEditCancel={onEditCancel} onMove={onMove} onDelete={onDelete} dragTarget={dragTarget} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />)}
+          {node.children.map((child, index) => <TreeItem pinnedIds={pinnedIds} onTogglePin={onTogglePin} key={child.entry.id} node={child} hasNextSibling={index < node.children.length - 1} view={view} expandedIds={expandedIds} activeRowId={activeRowId} inlineEdit={inlineEdit} editName={editName} editError={editError} onViewChange={onViewChange} onToggleExpanded={onToggleExpanded} onRowFocus={onRowFocus} onRowKeyDown={onRowKeyDown} registerTreeRow={registerTreeRow} onAppearance={onAppearance} onCreateChild={onCreateChild} onRename={onRename} onEditNameChange={onEditNameChange} onEditSave={onEditSave} onEditCancel={onEditCancel} onMove={onMove} onDelete={onDelete} dragTarget={dragTarget} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />)}
           {creatingChild && <InlineFolderEditor name={editName} error={editError} onNameChange={onEditNameChange} onSave={onEditSave} onCancel={onEditCancel} />}
         </ul>
       )}

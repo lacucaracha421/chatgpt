@@ -14,6 +14,9 @@ export type UiPreferences = {
   privacyMode: boolean;
   sidebarWidth: number;
   expandedClassificationIds: string[];
+  pinnedClassificationIds: string[];
+  classificationOrderIds: string[];
+  classificationCountOrderApplied?: boolean;
   expandedAlbumIds: string[];
   assetSort: AssetSort;
   thumbnailRowHeight: number;
@@ -32,6 +35,8 @@ export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   privacyMode: false,
   sidebarWidth: 208,
   expandedClassificationIds: [],
+  pinnedClassificationIds: [],
+  classificationOrderIds: [],
   expandedAlbumIds: [],
   assetSort: "newest",
   thumbnailRowHeight: 180,
@@ -57,6 +62,7 @@ export function loadUiPreferences(storage: Storage = localStorage): UiPreference
   if (!isRecord(value)) return DEFAULT_UI_PREFERENCES;
 
   return {
+    ...(value.classificationCountOrderApplied === true ? { classificationCountOrderApplied: true } : {}),
     galleryLayout: value.galleryLayout === "justified" ? "justified" : "masonry",
     metadataVisible:
       typeof value.metadataVisible === "boolean"
@@ -73,6 +79,12 @@ export function loadUiPreferences(storage: Storage = localStorage): UiPreference
     expandedClassificationIds: Array.isArray(value.expandedClassificationIds)
       ? [...new Set(value.expandedClassificationIds.filter(isString))]
       : DEFAULT_UI_PREFERENCES.expandedClassificationIds,
+    classificationOrderIds: Array.isArray(value.classificationOrderIds)
+      ? [...new Set(value.classificationOrderIds.filter(isString))]
+      : [],
+    pinnedClassificationIds: Array.isArray(value.pinnedClassificationIds)
+      ? [...new Set(value.pinnedClassificationIds.filter(isString))]
+      : [],
     expandedAlbumIds: Array.isArray(value.expandedAlbumIds)
       ? [...new Set(value.expandedAlbumIds.filter(isString))]
       : DEFAULT_UI_PREFERENCES.expandedAlbumIds,

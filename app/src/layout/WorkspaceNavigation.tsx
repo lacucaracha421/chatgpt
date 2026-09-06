@@ -1,4 +1,4 @@
-import { BookOpenIcon, Cog6ToothIcon, EllipsisHorizontalIcon, MagnifyingGlassIcon, PhotoIcon, PlusIcon, RectangleStackIcon, TrashIcon } from "../shared/ui/ArchiveIcons";
+import { BookOpenIcon, CalendarIcon, InboxIcon, Cog6ToothIcon, EllipsisHorizontalIcon, MagnifyingGlassIcon, PhotoIcon, PlusIcon, RectangleStackIcon, TrashIcon } from "../shared/ui/ArchiveIcons";
 import { useRef, type CSSProperties, type ReactNode } from "react";
 import type { AssetView, CollectionType } from "../library/types";
 import { Menu } from "../shared/ui/Menu";
@@ -28,11 +28,12 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
   const chrome = useWorkspaceChrome();
   const area = workspaceArea(view);
   const history = useRef<Partial<Record<ReturnType<typeof workspaceArea>, AssetView>>>({});
-  history.current[area] = view;
+  const quickAssetView = view.kind === "revisit" || view.kind === "creator" || view.kind === "unsorted";
+  if (!quickAssetView) history.current[area] = view;
   const resize = useRef<{ id: number; x: number; width: number } | null>(null);
   const areaName = { assets: "에셋", collections: "컬렉션", manga: "망가", manage: "라이브러리 관리" }[area];
   const enterArea = (next: "assets" | "collections" | "manga") => {
-    if (next === area) return;
+    if (next === area && !quickAssetView) return;
     onNavigate(history.current[next] ?? (next === "collections" ? { kind: "collections", typeFilter: collectionType, showcase: false } : next === "manga" ? { kind: "manga" } : { kind: "classification", classificationId: null }));
   };
   const management = [
@@ -46,11 +47,13 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
       {(["assets", "collections", "manga"] as const).map((key) => {
         const Icon = key === "assets" ? RectangleStackIcon : key === "collections" ? BookOpenIcon : PhotoIcon;
         const label = { assets: "에셋", collections: "컬렉션", manga: "망가" }[key];
-        return <button key={key} type="button" className="workspace-rail__item" aria-current={area === key ? "page" : undefined} onClick={() => enterArea(key)}><Icon aria-hidden="true" /><span>{label}</span></button>;
+        return <button key={key} type="button" className="workspace-rail__item" aria-current={area === key && !quickAssetView ? "page" : undefined} onClick={() => enterArea(key)}><Icon aria-hidden="true" /><span>{label}</span></button>;
       })}
+      <button type="button" className="workspace-rail__item" aria-current={view.kind === "revisit" || view.kind === "creator" ? "page" : undefined} onClick={() => onNavigate({ kind: "revisit" })}><CalendarIcon aria-hidden="true" /><span>다시보기</span></button>
       <div className="workspace-rail__tail">
+        <button type="button" className="workspace-rail__item" aria-current={view.kind === "unsorted" ? "page" : undefined} onClick={() => onNavigate({ kind: "unsorted" })}><InboxIcon aria-hidden="true" /><span>미분류</span></button>
         <button type="button" className="workspace-rail__item" aria-label={`휴지통 ${trashCount}개`} aria-current={view.kind === "trash" ? "page" : undefined} onClick={() => onNavigate({ kind: "trash" })}><TrashIcon aria-hidden="true" /><span>휴지통</span></button>
-        <Menu label="라이브러리 관리" trigger={<><EllipsisHorizontalIcon aria-hidden="true" /><span>관리</span></>} items={management} />
+        <Menu label="라이브러리 관리" trigger={<><EllipsisHorizontalIcon aria-hidden="true" /><span>관리</span>{reviewCount > 0 && <span className="workspace-rail__review-alert" role="img" aria-label={`유사 검토 ${reviewCount}개 대기`} title={`유사 검토 ${reviewCount}개 대기`}>!</span>}</>} items={management} />
       </div>
     </nav>
     <aside className="workspace-index" style={{ "--workspace-index-width": `${width}px` } as CSSProperties} aria-label="탐색 인덱스">

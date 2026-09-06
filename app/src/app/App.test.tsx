@@ -221,7 +221,7 @@ describe("App", () => {
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
 
     expect(await screen.findByRole("main", { name: "라이브러리 작업 공간" })).toBeVisible();
-    expect(await screen.findByRole("button", { name: "저장소" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "전체" })).toBeVisible();
     expect(libraryGateway.runDueReleaseWatch).toHaveBeenCalledOnce();
     await waitFor(() => expect(libraryGateway.listCollections).toHaveBeenCalledOnce());
 
@@ -459,7 +459,10 @@ describe("App", () => {
       classificationId: null,
             unclassifiedOnly: false,
     })));
-    expect(screen.getByRole("button", { name: "저장소" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "전체" })).toHaveAttribute("aria-current", "page");
+    const rail = screen.getByRole("navigation", { name: "주요 영역" });
+    expect(within(rail).getAllByRole("button").map((button) => button.textContent)).toEqual(["에셋", "컬렉션", "망가", "다시보기", "미분류", "휴지통", "관리"]);
+    expect(screen.queryByRole("navigation", { name: "빠른 보기" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "미분류" }));
     await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -477,10 +480,10 @@ describe("App", () => {
     await user.click(await screen.findByRole("button", { name: "미분류" }));
     expect(screen.getByRole("button", { name: "미분류" })).toHaveAttribute("aria-current", "page");
     await user.keyboard("{Escape}");
-    expect(screen.getByRole("button", { name: "저장소" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "전체" })).toHaveAttribute("aria-current", "page");
 
     await user.keyboard("{Escape}");
-    expect(screen.getByRole("button", { name: "저장소" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "전체" })).toHaveAttribute("aria-current", "page");
   });
 
   it("stores drops from broad views in the unclassified destination", async () => {
@@ -509,7 +512,7 @@ describe("App", () => {
 
     await user.click(screen.getByRole("button", { name: "다시보기" }));
     act(() => drop?.(["C:\\images\\recent.png"]));
-    await user.click(screen.getByRole("button", { name: "저장소" }));
+    await user.click(screen.getByRole("button", { name: "전체" }));
     act(() => drop?.(["C:\\images\\all-assets.png"]));
 
     await waitFor(() => expect(libraryGateway.ingestMedia).toHaveBeenCalledTimes(3));
@@ -1020,6 +1023,49 @@ describe("App", () => {
     fireEvent.pointerUp(imagesRow, { pointerId: 8, clientX: 20, clientY: 10 });
 
     await waitFor(() => expect(libraryGateway.moveClassification).toHaveBeenCalledWith(images.id, games.id));
+  });
+
+  it("reorders sibling folders at row edges without reparenting and persists the order", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games, images]);
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    const target = await screen.findByRole("treeitem", { name: games.name });
+    const source = screen.getByRole("treeitem", { name: images.name });
+    vi.spyOn(target, "getBoundingClientRect").mockReturnValue({ top: 100, bottom: 140, height: 40 } as DOMRect);
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: vi.fn().mockReturnValue(target) });
+    fireEvent.pointerDown(source, { button: 0, pointerId: 9, clientX: 10, clientY: 110 });
+    fireEvent.pointerMove(source, { pointerId: 9, clientX: 20, clientY: 102 });
+    expect(target).toHaveAttribute("data-drop-position", "before");
+    fireEvent.pointerUp(source, { pointerId: 9, clientX: 20, clientY: 102 });
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(UI_PREFERENCES_KEY)!).classificationOrderIds).toEqual([images.id, games.id]));
+    expect(libraryGateway.moveClassification).not.toHaveBeenCalled();
+    expect(screen.getAllByRole("treeitem").map((row) => row.getAttribute("data-classification-id"))).toEqual([images.id, games.id]);
+  });
+
+  it("expands a hovered folder and scrolls at the sidebar edge until the drag is cancelled", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games, images]);
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    const target = await screen.findByRole("treeitem", { name: games.name });
+    const source = screen.getByRole("treeitem", { name: images.name });
+    const scroller = target.closest<HTMLElement>(".workspace-index__scroll")!;
+    vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue({ top: 0, bottom: 200, height: 200 } as DOMRect);
+    vi.spyOn(target, "getBoundingClientRect").mockReturnValue({ top: 170, bottom: 210, height: 40 } as DOMRect);
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: vi.fn().mockReturnValue(target) });
+    vi.useFakeTimers();
+    fireEvent.pointerDown(source, { button: 0, pointerId: 10, clientX: 10, clientY: 180 });
+    fireEvent.pointerMove(source, { pointerId: 10, clientX: 20, clientY: 190 });
+    await act(async () => { vi.advanceTimersByTime(650); });
+    expect(scroller.scrollTop).toBeGreaterThan(0);
+    expect(JSON.parse(localStorage.getItem(UI_PREFERENCES_KEY)!).expandedClassificationIds).toContain(games.id);
+    fireEvent.pointerCancel(source, { pointerId: 10 });
+    const stoppedAt = scroller.scrollTop;
+    await act(async () => { vi.advanceTimersByTime(100); });
+    expect(scroller.scrollTop).toBe(stoppedAt);
+    expect(libraryGateway.moveClassification).not.toHaveBeenCalled();
+    vi.useRealTimers();
   });
 
   it("rejects moving a folder into a destination with the same child name", async () => {

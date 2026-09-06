@@ -690,7 +690,7 @@ describe("AssetBrowser", () => {
     renderBrowser(gateway);
 
     await user.click(await screen.findByRole("option", { name: "asset-0.png" }));
-    await user.click(screen.getByRole("button", { name: "정보 열기" }));
+    await user.click(await selectionAction("정보 열기"));
     const sourceGroup = await screen.findByRole("region", { name: "같은 게시물" });
     expect(gateway.recordAssetOpened).not.toHaveBeenCalled();
 
@@ -710,7 +710,7 @@ describe("AssetBrowser", () => {
     await user.click(first);
     expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "정보 열기" }));
+    await user.click(await selectionAction("정보 열기"));
     expect(screen.getByRole("complementary", { name: "자산 정보" })).toBeVisible();
 
     await user.click(second);
@@ -732,7 +732,7 @@ describe("AssetBrowser", () => {
     renderBrowser(gateway);
 
     await user.click(await screen.findByRole("option", { name: original.originalName }));
-    await user.click(screen.getByRole("button", { name: "정보 열기" }));
+    await user.click(await selectionAction("정보 열기"));
     await user.click(screen.getByRole("button", { name: "출처 정보 편집" }));
     await user.type(screen.getByLabelText("제작자 이름"), "Updated Artist");
     await user.click(screen.getByRole("button", { name: "저장" }));
@@ -757,7 +757,7 @@ describe("AssetBrowser", () => {
     renderBrowser(gateway);
 
     await user.click(await screen.findByRole("option", { name: "Delete me" }));
-    await user.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
+    await user.click(await selectionAction("휴지통으로 이동"));
 
     expect(gateway.trashAssets).toHaveBeenCalledWith(["asset-0"]);
     expect(screen.getByText("1개 자산을 휴지통으로 이동했습니다.")).toBeVisible();
@@ -774,7 +774,7 @@ describe("AssetBrowser", () => {
     );
 
     await user.click(await screen.findByRole("option", { name: "asset-0.png" }));
-    await user.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
+    await user.click(await selectionAction("휴지통으로 이동"));
 
     expect(onMembershipChanged).toHaveBeenCalledOnce();
   });
@@ -788,7 +788,7 @@ describe("AssetBrowser", () => {
     await user.click(tile);
     vi.useFakeTimers();
 
-    fireEvent.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
+    fireEvent.click(await selectionAction("휴지통으로 이동"));
     await act(async () => { await Promise.resolve(); });
     expect(screen.getByRole("button", { name: "실행 취소" })).toBeVisible();
     act(() => vi.advanceTimersByTime(5_000));
@@ -803,6 +803,26 @@ describe("AssetBrowser", () => {
     expect(screen.queryByRole("button", { name: "실행 취소" })).not.toBeInTheDocument();
   });
 
+  it("keeps multi-selection for context actions and targets an unselected tile on right click", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway({ items: [asset(0), asset(1), asset(2)], nextCursor: null });
+    renderBrowser(gateway);
+    const first = await screen.findByRole("option", { name: "asset-0.png" });
+    fireEvent.click(first);
+    fireEvent.click(screen.getByRole("option", { name: "asset-1.png" }), { ctrlKey: true });
+    fireEvent.contextMenu(first, { clientX: 200, clientY: 180 });
+    await user.click(screen.getByRole("menuitem", { name: "좋아요 켜기" }));
+    expect(gateway.setAssetsFavorite).toHaveBeenLastCalledWith(["asset-0", "asset-1"], true);
+    fireEvent.contextMenu(screen.getByRole("option", { name: "asset-2.png" }));
+    await user.click(screen.getByRole("menuitem", { name: "좋아요 끄기" }));
+    expect(gateway.setAssetsFavorite).toHaveBeenLastCalledWith(["asset-2"], false);
+    fireEvent.contextMenu(screen.getByRole("option", { name: "asset-2.png" }));
+    await user.click(screen.getByRole("menuitem", { name: "폴더로 이동" }));
+    expect(screen.getByRole("option", { name: "asset-2.png" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(await screen.findByRole("menuitem", { name: "미분류" }));
+    expect(gateway.setAssetClassification).toHaveBeenLastCalledWith({ assetIds: ["asset-2"], classificationId: null });
+  });
+
   it("runs explicit batch favorite, trash, and undo actions", async () => {
     const user = userEvent.setup();
     const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
@@ -814,12 +834,12 @@ describe("AssetBrowser", () => {
     const first = await screen.findByRole("option", { name: "asset-0.png" });
     first.focus();
     await user.keyboard("{Control>}a{/Control}");
-    expect(screen.getByText("2개 선택")).toBeVisible();
+    expect(screen.queryByRole("toolbar", { name: "선택 작업" })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "좋아요 켜기" }));
+    await user.click(await selectionAction("좋아요 켜기"));
     expect(gateway.setAssetsFavorite).toHaveBeenCalledWith(["asset-0", "asset-1"], true);
 
-    await user.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
+    await user.click(await selectionAction("휴지통으로 이동"));
     expect(gateway.trashAssets).toHaveBeenCalledWith(["asset-0", "asset-1"]);
     await user.click(await screen.findByRole("button", { name: "실행 취소" }));
     expect(gateway.restoreAssets).toHaveBeenCalledWith(["asset-0", "asset-1"]);
@@ -834,7 +854,7 @@ describe("AssetBrowser", () => {
     first.focus();
     await user.keyboard("{Control>}a{/Control}");
 
-    await user.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
+    await user.click(await selectionAction("휴지통으로 이동"));
 
     expect(await screen.findByText("batch failed")).toBeVisible();
     expect(screen.getByRole("option", { name: "asset-0.png" })).toHaveAttribute("aria-selected", "true");
@@ -848,10 +868,10 @@ describe("AssetBrowser", () => {
     renderBrowser(gateway);
 
     await user.click(await screen.findByRole("option", { name: "Keep me" }));
-    await user.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
+    await user.click(await selectionAction("휴지통으로 이동"));
 
     expect(await screen.findByText("trash failed")).toBeVisible();
-    expect(screen.getByRole("button", { name: "휴지통으로 이동" })).toBeVisible();
+    expect(await selectionAction("휴지통으로 이동")).toBeVisible();
   });
 
   it("disables trash while pending and preserves a newer selection", async () => {
@@ -863,13 +883,14 @@ describe("AssetBrowser", () => {
     renderBrowser(gateway);
 
     await user.click(await screen.findByRole("option", { name: "First" }));
-    await user.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
-    expect(screen.getByRole("button", { name: "휴지통으로 이동" })).toBeDisabled();
+    await user.click(await selectionAction("휴지통으로 이동"));
+    expect(await selectionAction("휴지통으로 이동")).toBeDisabled();
+    await user.keyboard("{Escape}");
     await user.click(screen.getByRole("option", { name: "Second" }));
     await act(async () => { resolveTrash(); await pendingTrash; });
 
     expect(await screen.findByRole("option", { name: "Second" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("button", { name: "휴지통으로 이동" })).not.toBeDisabled();
+    expect(await selectionAction("휴지통으로 이동")).not.toBeDisabled();
   });
 
   it("removes the selection from the active collection and refreshes the gallery", async () => {
@@ -881,7 +902,7 @@ describe("AssetBrowser", () => {
     first.focus();
     await user.keyboard("{Control>}a{/Control}");
 
-    await user.click(screen.getByRole("button", { name: "이 컬렉션에서 제거" }));
+    await user.click(await selectionAction("이 컬렉션에서 제거"));
 
     expect(gateway.patchAssetCollections).toHaveBeenCalledWith({ assetIds: ["asset-0", "asset-1"], addCollectionIds: [], removeCollectionIds: ["collection-1"] });
     expect(onCollectionsChanged).not.toHaveBeenCalled();
@@ -895,7 +916,7 @@ describe("AssetBrowser", () => {
     render(<LibraryProvider gateway={gateway}><AssetBrowser galleryLayout="justified" view={{ kind: "collection", collectionId: "collection-1" }} classifications={classifications} onCollectionsChanged={onCollectionsChanged} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
 
     await user.click(await screen.findByRole("option", { name: "asset-0.png" }));
-    await user.click(screen.getByRole("button", { name: "대표 이미지로 지정" }));
+    await user.click(await selectionAction("대표 이미지로 지정"));
 
     expect(gateway.setCollectionCover).toHaveBeenCalledWith("collection-1", "asset-0");
     expect(onCollectionsChanged).toHaveBeenCalledOnce();
@@ -1004,4 +1025,11 @@ function createGateway(page: AssetPage = { items: [], nextCursor: null }): Libra
     preparePendingVideos: vi.fn(), retryVideoPreparation: vi.fn(), inspectBookImport: vi.fn(), importBookCollections: vi.fn(), getCollectionSourceRoot: vi.fn(), setCollectionSourceRoot: vi.fn(), importCollectionArtworks: vi.fn().mockResolvedValue(0),
   listCollectionWorkArtworks: vi.fn().mockResolvedValue([]), listCollectionCovers: vi.fn(), listCollectionVolumes: vi.fn(), syncMangaDexVolumeCovers: vi.fn(), inspectLegacyPackageMigration: vi.fn(), executeLegacyPackageMigration: vi.fn(), getAladinCredentialStatus: vi.fn(), setAladinTtbKey: vi.fn(), deleteAladinTtbKey: vi.fn(), searchAladin: vi.fn(), applyAladin: vi.fn(), refreshAladin: vi.fn(), getAladinConnection: vi.fn(), getReleaseWatchStatus: vi.fn().mockResolvedValue({ enabled: false, lastCheckedAt: null }), setReleaseWatchEnabled: vi.fn().mockResolvedValue({ enabled: false, lastCheckedAt: null }), takeUnreadReleaseChanges: vi.fn().mockResolvedValue([]), listUnreadReleaseChanges: vi.fn().mockResolvedValue([]), runDueReleaseWatch: vi.fn().mockResolvedValue({ checked: 0, changedCollections: 0, skipped: 0, stopReason: null }),
   };
+}
+
+async function selectionAction(name: string) {
+  if (!screen.queryByRole("menu")) {
+    await act(async () => { fireEvent.contextMenu(screen.getAllByRole("option", { selected: true }).find((element) => element.hasAttribute("data-asset-id"))!); });
+  }
+  return screen.getByRole("menuitem", { name });
 }

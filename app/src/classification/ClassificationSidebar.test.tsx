@@ -116,6 +116,7 @@ function renderSidebar(
   function Fixture() {
     const [view, setView] = useState<AssetView>(props.view ?? { kind: "classification", classificationId: null });
     const [expandedIds, setExpandedIds] = useState(props.expandedIds ?? ["root", "work"]);
+    const [pinnedIds, setPinnedIds] = useState(props.pinnedIds ?? []);
     const [sidebarWidth, setSidebarWidth] = useState(props.sidebarWidth ?? 232);
     return (
       <LibraryProvider gateway={libraryGateway}>
@@ -125,6 +126,8 @@ function renderSidebar(
           collectionType={props.collectionType ?? "manga"}
           view={view}
           expandedIds={expandedIds}
+          pinnedIds={pinnedIds}
+          onPinnedIdsChange={setPinnedIds}
           sidebarWidth={sidebarWidth}
           reviewCount={props.reviewCount ?? 0}
           trashCount={props.trashCount}
@@ -168,6 +171,38 @@ describe("buildClassificationTree", () => {
 });
 
 describe("ClassificationSidebar", () => {
+  it("pins nested folders and opens their ancestors after collapsing the tree", async () => {
+    const user = userEvent.setup();
+    const { onExpandedIdsChange, onViewChange } = renderSidebar();
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: "Arona" }));
+    await user.click(screen.getByRole("menuitem", { name: "즐겨찾기에 추가" }));
+    const pins = screen.getByRole("navigation", { name: "즐겨찾기 폴더" });
+    await user.click(screen.getByRole("button", { name: "모든 폴더 접기" }));
+    expect(onExpandedIdsChange).toHaveBeenLastCalledWith([]);
+    await user.click(within(pins).getByRole("button", { name: "Arona" }));
+    expect(onExpandedIdsChange).toHaveBeenLastCalledWith(["root", "work"]);
+    expect(onViewChange).toHaveBeenLastCalledWith({ kind: "classification", classificationId: "tag" });
+    await user.click(screen.getByRole("button", { name: "현재 위치만 펼치기" }));
+    expect(onExpandedIdsChange).toHaveBeenLastCalledWith(["root", "work", "tag"]);
+    fireEvent.contextMenu(within(pins).getByRole("button", { name: "Arona" }));
+    await user.click(screen.getByRole("menuitem", { name: "즐겨찾기 해제" }));
+    expect(screen.queryByRole("navigation", { name: "즐겨찾기 폴더" })).not.toBeInTheDocument();
+  });
+
+  it("shows the visible branch ancestry while scrolling and clears it at the top", () => {
+    renderSidebar();
+    const sidebar = screen.getByRole("complementary", { name: "분류" });
+    vi.spyOn(sidebar, "getBoundingClientRect").mockReturnValue({ top: 0 } as DOMRect);
+    for (const [name, top] of [["Games", -70], ["Blue Archive", -35], ["Arona", 28]] as const) {
+      vi.spyOn(screen.getByRole("treeitem", { name }), "getBoundingClientRect").mockReturnValue({ top, bottom: top + 30, height: 30 } as DOMRect);
+    }
+    fireEvent.scroll(sidebar, { target: { scrollTop: 100 } });
+    const path = screen.getByRole("navigation", { name: "스크롤 위치 경로" });
+    expect(within(path).getAllByRole("button").map((item) => item.textContent)).toEqual(["Games", "Blue Archive"]);
+    fireEvent.scroll(sidebar, { target: { scrollTop: 0 } });
+    expect(screen.queryByRole("navigation", { name: "스크롤 위치 경로" })).not.toBeInTheDocument();
+  });
+
   it("creates the first album from the album heading context menu", async () => {
     const user = userEvent.setup();
     const fixtureGateway = gateway();
@@ -472,7 +507,7 @@ describe("ClassificationSidebar", () => {
 
     expect(screen.queryByRole("button", { name: /추가 작업/ })).not.toBeInTheDocument();
     fireEvent.contextMenu(row, { clientX: 20, clientY: 20 });
-    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["하위 폴더 만들기", "이름 변경", "아이콘 및 색상", "폴더 이동", "삭제 — 하위 폴더 있음"]);
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["즐겨찾기에 추가", "하위 폴더 만들기", "이름 변경", "아이콘 및 색상", "폴더 이동", "삭제 — 하위 폴더 있음"]);
     await user.click(screen.getByRole("menuitem", { name: "이름 변경" }));
     const rename = screen.getByRole("textbox", { name: "폴더 이름" });
     await user.clear(rename);

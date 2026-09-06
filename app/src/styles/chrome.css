@@ -13,6 +13,7 @@
 .workspace-rail__item[aria-current=page] { background: var(--color-accent); color: var(--color-on-accent); }
 .workspace-rail__item[aria-current=page]::after { content: ''; position: absolute; right: 4px; top: 4px; width: 4px; height: 4px; background: currentColor; }
 .workspace-rail__tail { margin-top: auto; display: flex; flex-direction: column; gap: var(--space-compact); }
+.workspace-rail__review-alert { position: absolute; top: 4px; right: 6px; display: grid; place-items: center; width: 15px; height: 17px; border: 1px solid var(--color-danger); border-radius: 2px; background: var(--color-bg); color: var(--color-danger); font-size: 13px; font-weight: 700; line-height: 1; }
 .workspace-index { position: relative; display: flex; flex-direction: column; width: var(--workspace-index-width, 208px); min-height: 0; background: var(--color-sidebar); border-right: 1px solid var(--color-border); }
 .workspace-index__head { display: flex; align-items: center; gap: var(--space-compact); min-height: 78px; flex: none; padding: var(--space-3); border-bottom: 1px solid var(--color-border); }
 .workspace-index__identity { flex: 1; min-width: 0; }
@@ -23,7 +24,23 @@
 .workspace-index__head-actions .ui-menu__trigger { width: 28px; padding: 0; }
 .workspace-index__scroll { flex: 1; min-height: 0; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--color-border) transparent; overscroll-behavior: contain; }
 .workspace-index__assets[hidden] { display: none; }
-.workspace-index .classification-sidebar--embedded { width: 100%; min-width: 0; max-width: none; height: auto; padding: var(--space-2); overflow: visible; border: 0; }
+.workspace-index .classification-sidebar--embedded { width: 100%; min-width: 0; max-width: none; height: auto; padding: 0 var(--space-2) var(--space-2); overflow: visible; border: 0; }
+.classification-sidebar__pins { display: grid; gap: 0; padding: var(--space-2) 0 var(--space-1); border-bottom: 1px solid var(--color-border); }
+.classification-sidebar__pins > .workspace-section-label { margin: 0 0 var(--space-2); }
+.classification-sidebar__pin { display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: 28px; padding: var(--space-1) var(--space-2); border: 0; border-radius: var(--radius-sm); color: var(--color-text); background: transparent; text-align: left; }
+.classification-sidebar__pin > svg { width: 14px; height: 14px; flex: none; color: var(--color-muted); }
+.classification-sidebar__pin > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.classification-sidebar__pin:hover { background: var(--color-surface-hover); }
+.classification-sidebar__pin[aria-current=page] { background: var(--color-sidebar-selection); color: var(--color-on-accent); }
+.classification-sidebar__pin[aria-current=page] > svg { color: inherit; }
+.classification-sidebar__scroll-path { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; min-height: 28px; padding: 0 var(--space-1); background: var(--color-sidebar); border-bottom: 1px solid var(--color-border); overflow: hidden; }
+.classification-sidebar__scroll-path { height: 28px; margin-bottom: -28px; }
+.classification-sidebar__scroll-path button { min-width: 0; padding: var(--space-1); border: 0; background: transparent; color: var(--color-muted); font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.classification-sidebar__scroll-path button + button::before { content: "/ "; }
+.classification-sidebar__scroll-path button:hover { color: var(--color-text); }
+.classification-sidebar__tree-row[data-drop-state=valid]:is([data-drop-position=before], [data-drop-position=after])::after { content: ""; position: absolute; left: 16px; right: 0; height: 2px; background: var(--color-accent); pointer-events: none; z-index: 4; }
+.classification-sidebar__tree-row[data-drop-state=valid][data-drop-position=before]::after { top: 0; }
+.classification-sidebar__tree-row[data-drop-state=valid][data-drop-position=after]::after { bottom: 0; }
 .workspace-index__view-navigation:empty { display: none; }
 .workspace-index__view-navigation, .workspace-index__fallback { padding: var(--space-3); }
 .workspace-index__view-navigation:empty { padding: 0; }

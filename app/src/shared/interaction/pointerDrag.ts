@@ -8,7 +8,7 @@ export type PointerDragState =
   | { phase: "armed"; payload: InternalDragPayload; startX: number; startY: number }
   | { phase: "dragging"; payload: InternalDragPayload; x: number; y: number };
 
-export type ClassificationDropPosition = "inside";
+export type ClassificationDropPosition = "inside" | "before" | "after";
 export type ClassificationDropTarget = {
   kind: "classification" | "album";
   entryId: string;

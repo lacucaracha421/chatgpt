@@ -1,3 +1,4 @@
+import { applyInitialCountOrder, reorderFolders } from "../classification/folderOrder";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { AssetBrowser, type AssetBrowserStatus } from "../assets/AssetBrowser";
@@ -127,6 +128,9 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const viewHistoryRef = useRef<AssetView[]>([]);
   const collectionReturnViewRef = useRef<Extract<AssetView, { kind: "collections" }> | null>(null);
   const [preferences, setPreferences] = useState<UiPreferences>(loadUiPreferences);
+  useEffect(() => {
+    setPreferences((current) => applyInitialCountOrder(entries, current));
+  }, [entries]);
   const [sidebarWidth, setSidebarWidth] = useState(preferences.sidebarWidth);
   const [message, setMessage] = useState<string | null>(null);
   const [assetRefresh, setAssetRefresh] = useState(0);
@@ -530,6 +534,34 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     void performInternalDrop(current.payload, target);
   }
 
+  useEffect(() => {
+    if (dragState.phase !== "dragging" || dragTarget?.position !== "inside" || !dragTarget.valid) return;
+    const target = dragTarget;
+    const timer = window.setTimeout(() => setPreferences((current) => {
+      const key = target.kind === "album" ? "expandedAlbumIds" : "expandedClassificationIds";
+      return current[key].includes(target.entryId) ? current : { ...current, [key]: [...current[key], target.entryId] };
+    }), 600);
+    return () => window.clearTimeout(timer);
+  }, [dragState.phase, dragTarget?.kind, dragTarget?.entryId, dragTarget?.position, dragTarget?.valid]);
+
+  useEffect(() => {
+    if (dragState.phase !== "dragging") return;
+    const timer = window.setInterval(() => {
+      const state = dragStateRef.current;
+      if (state.phase !== "dragging") return;
+      const scroller = document.elementFromPoint?.(state.x, state.y)?.closest<HTMLElement>(".workspace-index__scroll");
+      if (!scroller) return;
+      const rect = scroller.getBoundingClientRect();
+      const edge = 36;
+      const delta = state.y < rect.top + edge ? -10 : state.y > rect.bottom - edge ? 10 : 0;
+      if (delta) {
+        scroller.scrollTop += delta;
+        setDragTarget(sidebarTargetAt(state.x, state.y, state.payload, entries, albums));
+      }
+    }, 32);
+    return () => window.clearInterval(timer);
+  }, [dragState.phase, entries, albums]);
+
   async function performInternalDrop(payload: InternalDragPayload, target: ClassificationDropTarget) {
     try {
       if (payload.kind === "assets") {
@@ -543,13 +575,16 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
         setMessage(`${payload.assetIds.length}개 자산을 ${target.kind === "album" ? "앨범에 추가" : "폴더로 이동"}했습니다.`);
         return;
       }
+      const destination = entries.find((entry) => entry.id === target.entryId);
+      const parentId = target.position === "inside" ? target.entryId : destination?.parentId ?? null;
       if (payload.kind === "album") await gateway.moveAlbum(payload.entryId, target.entryId);
-      else await gateway.moveClassification(payload.entryId, target.entryId);
+      else if (entries.find((entry) => entry.id === payload.entryId)?.parentId !== parentId) await gateway.moveClassification(payload.entryId, parentId);
       setPreferences((current) => ({
         ...current,
+        ...(payload.kind === "classification" ? { classificationOrderIds: reorderFolders(entries, current.classificationOrderIds, payload.entryId, target, parentId) } : {}),
         ...(payload.kind === "album"
           ? { expandedAlbumIds: current.expandedAlbumIds.includes(target.entryId) ? current.expandedAlbumIds : [...current.expandedAlbumIds, target.entryId] }
-          : { expandedClassificationIds: current.expandedClassificationIds.includes(target.entryId) ? current.expandedClassificationIds : [...current.expandedClassificationIds, target.entryId] }),
+          : { expandedClassificationIds: parentId && !current.expandedClassificationIds.includes(parentId) ? [...current.expandedClassificationIds, parentId] : current.expandedClassificationIds }),
       }));
       if (payload.kind === "album") await refreshAlbums();
       else await refreshClassifications();
@@ -604,6 +639,9 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
               view={view}
               collectionType={preferences.collectionType}
               expandedIds={preferences.expandedClassificationIds}
+              pinnedIds={preferences.pinnedClassificationIds}
+              orderIds={preferences.classificationOrderIds}
+              onPinnedIdsChange={(pinnedClassificationIds) => updatePreferences({ pinnedClassificationIds })}
               expandedAlbumIds={preferences.expandedAlbumIds}
               sidebarWidth={sidebarWidth}
               createClassificationRequest={createClassificationRequest}
@@ -754,7 +792,11 @@ function sidebarTargetAt(x: number, y: number, payload: InternalDragPayload, ent
   const kind = element?.dataset.albumId ? "album" : "classification";
   const entryId = kind === "album" ? element?.dataset.albumId : element?.dataset.classificationId;
   if (!element || !entryId) return null;
-  const position = "inside" as const;
+  const rect = element.getBoundingClientRect();
+  const fraction = rect.height > 0 ? (y - rect.top) / rect.height : 0.5;
+  const position = payload.kind === "classification" && kind === "classification"
+    ? fraction < 0.25 ? "before" : fraction > 0.75 ? "after" : "inside"
+    : "inside";
   const target = { kind, entryId, position, valid: true } as const;
   const valid = payload.kind === "assets"
     || payload.kind === kind && (kind === "album"
@@ -765,10 +807,14 @@ function sidebarTargetAt(x: number, y: number, payload: InternalDragPayload, ent
 
 function validClassificationDrop(entryId: string, target: ClassificationDropTarget, entries: ClassificationEntry[]) {
   const entry = entries.find((candidate) => candidate.id === entryId);
-  const parent = entries.find((candidate) => candidate.id === target.entryId);
-  if (!entry || !parent || entry.parentId === parent.id || parent.id === entry.id || isDescendant(parent.id, entry.id, entries)) return false;
-  if (entries.some((candidate) => candidate.id !== entry.id && candidate.parentId === parent.id && candidate.name.toLocaleLowerCase() === entry.name.toLocaleLowerCase())) return false;
-  return entry.kind !== "work" || parent.kind === "root";
+  const destination = entries.find((candidate) => candidate.id === target.entryId);
+  if (!entry || !destination || entry.id === destination.id) return false;
+  const parentId = target.position === "inside" ? destination.id : destination.parentId;
+  const parent = entries.find((candidate) => candidate.id === parentId);
+  if (target.position === "inside" && entry.parentId === parentId) return false;
+  if (isDescendant(parentId, entry.id, entries)) return false;
+  if (entries.some((candidate) => candidate.id !== entry.id && candidate.parentId === parentId && candidate.name.toLocaleLowerCase() === entry.name.toLocaleLowerCase())) return false;
+  return entry.kind !== "work" || parent?.kind === "root";
 }
 
 function validTreeDrop(entryId: string, parentId: string, entries: Array<{ id: string; name: string; parentId: string | null }>) {

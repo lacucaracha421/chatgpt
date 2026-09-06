@@ -24,7 +24,8 @@ export type ClassificationTree = ClassificationTreeNode[] & {
   hasOrphans: boolean;
 };
 
-export function buildTree<T extends TreeEntry>(entries: T[]): Tree<T> {
+export function buildTree<T extends TreeEntry>(entries: T[], orderedIds: string[] = []): Tree<T> {
+  const order = new Map(orderedIds.map((id, index) => [id, index]));
   const nodes = new Map<string, TreeNode<T>>(
     entries.map((entry) => [entry.id, { entry, children: [] }]),
   );
@@ -41,7 +42,8 @@ export function buildTree<T extends TreeEntry>(entries: T[]): Tree<T> {
   const visible = new Set<string>();
   const sort = (items: TreeNode<T>[]) => {
     items.sort((left, right) =>
-      left.entry.name.localeCompare(right.entry.name, "ko"),
+      (order.get(left.entry.id) ?? Number.MAX_SAFE_INTEGER) - (order.get(right.entry.id) ?? Number.MAX_SAFE_INTEGER)
+      || left.entry.name.localeCompare(right.entry.name, "ko"),
     );
     for (const item of items) {
       visible.add(item.entry.id);
