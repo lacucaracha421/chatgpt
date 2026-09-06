@@ -722,7 +722,7 @@ describe("CollectionOverlay movie detail flow", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("TMDB 새로고침 실패");
     expect(screen.getByRole("img", { name: "퍼펙트 블루 포스터" })).toHaveAttribute("src", "http://lakomics.localhost/work-artwork/movie-poster");
-    expect(screen.getByRole("region", { name: "영화 배경 이미지" })).toHaveStyle({ backgroundImage: 'url("http://lakomics.localhost/work-artwork/movie-backdrop")' });
+    expect(screen.getByRole("region", { name: "영화 배경 이미지" }).querySelector(".movie-collection-detail__backdrop-art")).toHaveAttribute("src", "http://lakomics.localhost/work-artwork/movie-backdrop");
     expect(screen.getByText("현실과 환상의 경계가 무너진다.")).toBeVisible();
   });
 });

@@ -6,6 +6,7 @@ import { LibraryProvider } from "../library/LibraryContext";
 import type { CatalogGroupedSearchEvent, CatalogStatus, CatalogWork, CatalogWorkDetail, LibraryGateway, ResolvedGallery } from "../library/types";
 import { CatalogVisibilitySettings } from "../settings/CatalogVisibilitySettings";
 import { OnlineCatalogBrowser } from "./OnlineCatalogBrowser";
+import { ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 afterEach(() => { cleanup(); vi.useRealTimers(); });
@@ -43,6 +44,23 @@ const detail: CatalogWorkDetail = {
 };
 
 describe("OnlineCatalogBrowser", () => {
+  it("keeps catalog controls in the index and opens search only from its icon", async () => {
+    const gateway = createGateway(true);
+    const user = userEvent.setup();
+    render(<LibraryProvider gateway={gateway}><WorkspaceChromeProvider scope="catalog">
+      <aside aria-label="카탈로그 인덱스"><ChromeTarget name="search" /><ChromeTarget name="navigation" /></aside>
+      <OnlineCatalogBrowser onSwitchLocal={vi.fn()} />
+    </WorkspaceChromeProvider></LibraryProvider>);
+    const index = screen.getByRole("complementary", { name: "카탈로그 인덱스" });
+    expect(await within(index).findByLabelText("정렬")).toBeVisible();
+    expect(within(index).getByRole("button", { name: "신규 작품 갱신" })).toBeVisible();
+    expect(screen.queryByRole("combobox", { name: "온라인 만화 검색" })).not.toBeInTheDocument();
+    await user.click(within(index).getByRole("button", { name: "온라인 만화 검색" }));
+    const input = await screen.findByRole("combobox", { name: "온라인 만화 검색" });
+    await user.type(input, "기록{Enter}");
+    await waitFor(() => expect(screen.queryByRole("combobox", { name: "온라인 만화 검색" })).not.toBeInTheDocument());
+    expect(gateway.searchOnlineCatalog).toHaveBeenLastCalledWith(expect.objectContaining({ text: "기록", page: 0 }));
+  });
   it("searches Korean by default and explicitly switches to Japanese from page zero", async () => {
     const gateway = createGateway(true);
     renderBrowser(gateway);

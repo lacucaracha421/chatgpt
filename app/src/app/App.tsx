@@ -4,6 +4,7 @@ import { AssetBrowser, type AssetBrowserStatus } from "../assets/AssetBrowser";
 import { startAssetDrag as nativeStartAssetDrag, type StartAssetDrag } from "../drag-out/startAssetDrag";
 import { ClassificationSidebar } from "../classification/ClassificationSidebar";
 import { createDefaultCollectionLibraryState, type CollectionLibraryState, type CollectionLibraryStateByType } from "../collections/collectionLibrary";
+import type { CollectionNavigationMemory } from "../collections/CollectionBrowser";
 import {
   type DropSubscriber,
   type IngestionWork,
@@ -16,6 +17,9 @@ import { DropOverlay } from "../ingestion/DropOverlay";
 import { WorkTray } from "../ingestion/WorkTray";
 import { executeMetadataImport, type MetadataImportWork } from "../ingestion/metadataImport";
 import { AppShell } from "../layout/AppShell";
+import { WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
+import { WorkspaceNavigation } from "../layout/WorkspaceNavigation";
+import { WindowControls } from "../layout/WindowControls";
 import { StatusBar } from "../layout/StatusBar";
 import { libraryGateway } from "../library/client";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -115,6 +119,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const [albums, setAlbums] = useState<AlbumEntry[]>([]);
   const [collections, setCollections] = useState<CollectionSummary[]>([]);
   const [collectionLibraryState, setCollectionLibraryState] = useState<CollectionLibraryStateByType>(createDefaultCollectionLibraryState);
+  const collectionNavigationMemory = useRef<CollectionNavigationMemory>(new Map());
   const [view, setView] = useState<AssetView>({
     kind: "classification",
     classificationId: null,
@@ -260,6 +265,15 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     onNativeDragEvent: handleNativeDragEvent,
   });
 
+  async function importFiles() {
+    const destination = dropClassificationId;
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const paths = await open({ multiple: true, directory: false, title: "라이브러리로 가져올 파일" });
+      if (paths) dropState.importPaths(Array.isArray(paths) ? paths : [paths], destination);
+    } catch (error) { setMessage(commandErrorMessage(error, "가져올 파일을 선택하지 못했습니다.")); }
+  }
+
   const beginMetadataImport = useCallback(async (folder: string, existingWorkId?: string) => {
     if (metadataImportRunningRef.current) return false;
     metadataImportRunningRef.current = true;
@@ -374,6 +388,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
       const key = event.key.toLowerCase();
       if (key === "n") {
         event.preventDefault();
+        if (["collections", "collection", "manga", "settings", "trash", "similarity_review"].includes(view.kind)) navigateView({ kind: "classification", classificationId: null });
         setCreateClassificationRequest((current) => current + 1);
         return;
       }
@@ -577,9 +592,13 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   return (
     <PrivacyProvider privacyMode={preferences.privacyMode} setPrivacyMode={(privacyMode) => updatePreferences({ privacyMode })}>
       <div className="library-workspace" data-privacy-mode={preferences.privacyMode ? "true" : undefined} inert={maintenance !== null ? true : undefined}>
+        <WorkspaceChromeProvider scope={JSON.stringify(view)}>
         <AppShell
           sidebar={
-            <ClassificationSidebar
+            <WorkspaceNavigation view={view} collectionType={preferences.collectionType}
+              width={sidebarWidth} onWidthChange={setSidebarWidth} onNavigate={navigateView}
+              reviewCount={reviewCount} trashCount={trashCount} onImportFiles={dropEnabled ? () => void importFiles() : undefined}
+              assetNavigation={<ClassificationSidebar embedded
               entries={entries}
               albums={albums}
               view={view}
@@ -606,9 +625,11 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
               onPointerDragEnd={finishPointerDrag}
               onPointerDragCancel={cancelPointerDrag}
               onClearAssetSelection={() => setClearAssetSelectionRequest((current) => current + 1)}
-            />
+            />} />
           }
           content={
+            <div className="workspace-content">
+              <div className="workspace-titlebar" data-tauri-drag-region="deep"><WindowControls /></div>
             <div className="library-content">
               <section className="library-content__browser" aria-label="자산 내용">
                 <Suspense fallback={<DeferredViewFallback />}>
@@ -657,6 +678,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     typeFilter={view.typeFilter}
                     showcase={view.showcase}
                     libraryState={collectionLibraryState[view.typeFilter]}
+                    navigationMemory={collectionNavigationMemory.current}
                     onLibraryStateChange={(next) => updateCollectionLibraryState(view.typeFilter, next)}
                     onViewChange={navigateView}
                     onChanged={refreshCollections}
@@ -679,6 +701,8 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     onCollectionsChanged={() => void refreshCollections()}
                     onMembershipChanged={refreshMembershipCounts}
                     sort={preferences.assetSort}
+                    galleryLayout={preferences.galleryLayout}
+                    onGalleryLayoutChange={(galleryLayout) => updatePreferences({ galleryLayout })}
                     metadataVisible={preferences.metadataVisible}
                     privacyMode={preferences.privacyMode}
                     onPrivacyModeChange={(privacyMode) => updatePreferences({ privacyMode })}
@@ -701,9 +725,11 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                 {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
               </section>
             </div>
+            </div>
           }
           status={<StatusBar status={browserStatus} progress={dropState.progress} dropEnabled={dropEnabled} similarityIndex={similarityIndex} />}
         />
+        </WorkspaceChromeProvider>
         <WorkTray
           works={[...dropState.works, ...nativeDragWorks, ...metadataImportWorks, ...(videoPreparation.work ? [videoPreparation.work] : [])]}
           retryFailed={retryWork}

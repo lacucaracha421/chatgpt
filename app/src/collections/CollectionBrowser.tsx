@@ -1,10 +1,12 @@
 import { ArrowDownIcon, ArrowUpIcon, Bars3BottomLeftIcon, BarsArrowDownIcon, CalendarDaysIcon, ClockIcon, MagnifyingGlassIcon, PlusIcon, StarIcon } from "@heroicons/react/24/outline";
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { collectionSourceThumbnailUrl, thumbnailUrl, workArtworkThumbnailUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { AssetView, CollectionSummary, CollectionType, CreateCollection, UpdateCollection } from "../library/types";
 import { ViewToolbar } from "../layout/ViewToolbar";
+import { useWorkspaceChrome } from "../layout/WorkspaceChrome";
+import { Select } from "../shared/ui/Select";
 import { Button } from "../shared/ui/Button";
 import { ContextMenu } from "../shared/ui/ContextMenu";
 import { Dialog } from "../shared/ui/Dialog";
@@ -24,8 +26,10 @@ const TYPE_LABEL: Record<CollectionType, string> = {
   manga: "만화",
   movie: "영화",
 };
+export type CollectionNavigationMemory = Map<string, { scrollTop: number; focusId: string | null }>;
 
 type CollectionBrowserProps = {
+  navigationMemory?: CollectionNavigationMemory;
   collections: CollectionSummary[];
   typeFilter: CollectionType;
   showcase: boolean;
@@ -36,6 +40,7 @@ type CollectionBrowserProps = {
 };
 
 export function CollectionBrowser({
+  navigationMemory,
   collections,
   typeFilter,
   showcase,
@@ -45,6 +50,7 @@ export function CollectionBrowser({
   onLibraryStateChange,
 }: CollectionBrowserProps) {
   const { gateway } = useLibrary();
+  const workspace = useWorkspaceChrome();
   const [editMode, setEditMode] = useState<CollectionEditMode | null>(null);
   const [mangaDexOpen, setMangaDexOpen] = useState(false);
   const [igdbOpen, setIgdbOpen] = useState(false);
@@ -54,6 +60,16 @@ export function CollectionBrowser({
   const libraryStateRef = useRef(libraryState);
   libraryStateRef.current = libraryState;
   useAutoDismiss(message, setMessage);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const scope = JSON.stringify([typeFilter, showcase, libraryState]);
+  useLayoutEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const remembered = navigationMemory?.get(scope);
+    stage.scrollTop = remembered?.scrollTop ?? 0;
+    if (remembered?.focusId) [...stage.querySelectorAll<HTMLElement>("[data-collection-id]")].find((card) => card.dataset.collectionId === remembered.focusId)?.focus({ preventScroll: true });
+    return () => { navigationMemory?.set(scope, { scrollTop: stage.scrollTop, focusId: navigationMemory.get(scope)?.focusId ?? null }); };
+  }, [scope, navigationMemory]);
 
   const visible = showcase
     ? collections.filter((collection) => collection.type === typeFilter && collection.showcase).sort((a, b) => (a.showcaseOrder ?? Number.MAX_SAFE_INTEGER) - (b.showcaseOrder ?? Number.MAX_SAFE_INTEGER) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
@@ -103,12 +119,7 @@ export function CollectionBrowser({
     }
   }
 
-  return (
-    <section className="collection-browser" aria-label="컬렉션">
-      <ViewToolbar
-        title="컬렉션"
-        ariaLabel="컬렉션 도구"
-        actions={
+  const indexActions = (
           <Menu
             label="새 컬렉션"
             trigger={<PlusIcon aria-hidden="true" />}
@@ -119,7 +130,28 @@ export function CollectionBrowser({
               { id: "manual", label: "직접 입력", onSelect: () => setEditMode({ kind: "create", type: typeFilter }) },
             ]}
           />
-        }
+  );
+
+  const indexControls = <fieldset className="chrome-settings-group"><legend>정렬 · 필터</legend>
+            <Select label="정렬" value={libraryState.sort} onChange={(event) => patchLibraryState({ sort: event.target.value as CollectionLibrarySort })}><option value="media_date">출시·출간·개봉일</option><option value="recent">최근 추가</option><option value="name">제목</option></Select>
+            <Select label="방향" value={libraryState.direction} onChange={(event) => patchLibraryState({ direction: event.target.value as "asc" | "desc" })}><option value="desc">내림차순</option><option value="asc">오름차순</option></Select>
+            <Select label="내 별점" value={String(libraryState.rating)} onChange={(event) => { const value = event.target.value; patchLibraryState({ rating: value === "all" || value === "unrated" ? value : Number(value) }); }}><option value="all">전체</option>{[5, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1, 0.5, 0].map((rating) => <option key={rating} value={String(rating)}>{rating.toFixed(1)}</option>)}<option value="unrated">미평가</option></Select>
+          </fieldset>;
+
+  return (
+    <section className="collection-browser" aria-label="컬렉션">
+      <ViewToolbar
+        title={workspace ? `${sectionLabel} ${showcase ? "쇼케이스" : "컬렉션"}` : "컬렉션"}
+        ariaLabel="컬렉션 도구"
+        actions={indexActions}
+        chrome={{
+          actions: indexActions,
+          navigation: <><ModeSegment showcase={showcase} onChange={setShowcase} /><span className="workspace-section-label">작품 유형</span><TypeSegment current={typeFilter} onChange={setTypeFilter} />{!showcase && <div className="chrome-index-controls chrome-settings-controls">{indexControls}</div>}</>,
+          summary: `${sortLabel(libraryState.sort)}${libraryState.rating !== "all" ? ` · 내 별점 ${ratingLabel(libraryState.rating)}` : ""}`,
+          status: <span>{showcase ? "선정 작품" : "작품"} {visible.length}개</span>,
+          search: showcase ? undefined : { scope: `${sectionLabel} 컬렉션`, query: libraryState.query, label: "제목 검색", placeholder: "작품 제목 검색", onApply: (query) => patchLibraryState({ query }) },
+
+        }}
       >
         <div className="collection-browser__filters">
           <ModeSegment showcase={showcase} onChange={setShowcase} />
@@ -150,13 +182,13 @@ export function CollectionBrowser({
         </div>
       </ViewToolbar>
       {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
-      <div className={`collection-browser__stage${showcase ? " collection-browser__stage--showcase" : ""}`}>
-        <div className="collection-browser__heading">
+      <div ref={stageRef} className={`collection-browser__stage${showcase ? " collection-browser__stage--showcase" : ""}`}>
+        {!workspace && <div className="collection-browser__heading">
           <div>
             <h3>{sectionLabel} {showcase ? "쇼케이스" : "컬렉션"}</h3>
           </div>
           <span>{showcase ? "선정 작품" : "작품"} {visible.length}개</span>
-        </div>
+        </div>}
         <div
           className="collection-browser__grid"
           onContextMenu={(event) => {
@@ -186,15 +218,18 @@ export function CollectionBrowser({
                       : null
                 }
                 selected={false}
-                onClick={() => onViewChange({ kind: "collection", collectionId: collection.id })}
+                onClick={() => {
+                  navigationMemory?.set(scope, { scrollTop: stageRef.current?.scrollTop ?? 0, focusId: collection.id });
+                  onViewChange({ kind: "collection", collectionId: collection.id });
+                }}
               />
             </ContextMenu>
           ))}
           {visible.length === 0 && (
             <div className="collection-browser__empty">
-              <EmptyState title={showcase ? "쇼케이스에 컬렉션이 없습니다." : "컬렉션이 없습니다."}>
+              {!showcase && (libraryState.query.trim() || libraryState.rating !== "all") ? <EmptyState title="조건에 맞는 작품이 없습니다."><p>검색어나 별점 조건을 바꿔보세요.</p><Button onClick={() => patchLibraryState({ query: "", rating: "all" })}>검색·필터 초기화</Button></EmptyState> : <EmptyState title={showcase ? "쇼케이스에 컬렉션이 없습니다." : "컬렉션이 없습니다."}>
                 {showcase ? "라이브러리에서 쇼케이스에 추가한 컬렉션이 여기에 표시됩니다." : <><p>새 컬렉션을 만들어 작품을 모아보세요.</p><Button type="button" onClick={() => typeFilter === "manga" ? setMangaDexOpen(true) : typeFilter === "game" ? setIgdbOpen(true) : typeFilter === "movie" ? setTmdbOpen(true) : setEditMode({ kind: "create", type: typeFilter })}>{typeFilter === "manga" ? "MangaDex에서 만화 추가" : typeFilter === "game" ? "IGDB에서 게임 추가" : typeFilter === "movie" ? "TMDB에서 영화 추가" : "직접 입력"}</Button></>}
-              </EmptyState>
+              </EmptyState>}
             </div>
           )}
         </div>

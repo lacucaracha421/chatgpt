@@ -29,6 +29,7 @@ describe("UI preferences", () => {
   it("saves preferences for a later load", () => {
     const localStorage = storage();
     const value = {
+      galleryLayout: "masonry" as const,
       metadataVisible: false,
       privacyMode: false,
       sidebarWidth: 240,
@@ -62,7 +63,8 @@ describe("UI preferences", () => {
     localStorage.setItem(
       UI_PREFERENCES_KEY,
       JSON.stringify({
-        metadataVisible: false,
+        galleryLayout: "masonry" as const,
+      metadataVisible: false,
         sidebarWidth: 240,
         expandedClassificationIds: ["a"],
         assetSort: "name",
@@ -70,6 +72,7 @@ describe("UI preferences", () => {
     );
 
     expect(loadUiPreferences(localStorage)).toEqual({
+      galleryLayout: "masonry" as const,
       metadataVisible: false,
       privacyMode: false,
       sidebarWidth: 240,
@@ -92,7 +95,8 @@ describe("UI preferences", () => {
     localStorage.setItem(
       UI_PREFERENCES_KEY,
       JSON.stringify({
-        metadataVisible: false,
+        galleryLayout: "masonry" as const,
+      metadataVisible: false,
         sidebarWidth: 999,
         expandedClassificationIds: ["a", "a", 3],
         assetSort: "random",
@@ -100,6 +104,7 @@ describe("UI preferences", () => {
     );
 
     expect(loadUiPreferences(localStorage)).toEqual({
+      galleryLayout: "masonry" as const,
       metadataVisible: false,
       privacyMode: false,
       sidebarWidth: 320,

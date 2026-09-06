@@ -65,7 +65,7 @@ function renderDetail(overrides: Partial<React.ComponentProps<typeof MovieCollec
 it("renders a backdrop-led flat-poster movie detail with available metadata", () => {
   renderDetail();
 
-  expect(screen.getByRole("region", { name: "영화 배경 이미지" })).toHaveStyle({ backgroundImage: 'url("backdrop-url")' });
+  expect(screen.getByRole("region", { name: "영화 배경 이미지" }).querySelector(".movie-collection-detail__backdrop-art")).toHaveAttribute("src", "backdrop-url");
   expect(screen.getByRole("img", { name: "퍼펙트 블루 포스터" })).toHaveAttribute("src", "poster-url");
   expect(screen.getByRole("heading", { name: "퍼펙트 블루", level: 1 })).toBeInTheDocument();
   for (const value of ["Perfect Blue", "TMDB 84", "내 평점 4.5", "현실과 환상의 경계가 무너진다."]) {

@@ -7,6 +7,7 @@ import { assetDragIds, type InternalDragPayload } from "../shared/interaction/po
 import { Skeleton } from "../shared/ui/Skeleton";
 import type { SelectionGesture } from "./selection";
 import { buildJustifiedRows } from "./justifiedRows";
+import { buildMasonryLayout, collectedDate, masonryMove, CAPTION_HEIGHT, type GalleryLayout } from "./masonryLayout";
 import { assetUrl, thumbnailUrl } from "./mediaUrl";
 import { AssetGalleryScrollbar } from "./AssetGalleryScrollbar";
 import { VideoTileMedia } from "../video/VideoTileMedia";
@@ -23,6 +24,8 @@ type QuickPreviewState = { asset: AssetSummary; anchor: DOMRect };
 
 type AssetGalleryProps = {
   items: AssetSummary[];
+  layout?: GalleryLayout;
+  groupDates?: boolean;
   scopeKey?: string;
   totalCount?: number | null;
   selectedAssetIds?: ReadonlySet<string>;
@@ -46,7 +49,7 @@ type AssetGalleryProps = {
   onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void;
   onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void;
 };
-export function AssetGallery({ items, scopeKey, totalCount = null, selectedAssetIds = new Set(), focusAssetId = null, targetRowHeight = 180, metadataVisible = false, privacyMode = false, hasNextPage = false, onLoadNextPage, hasPreviousPage = false, onLoadPrevPage, onSelectionGesture, onSelectAll, onDeleteSelection, onClearSelection, onMoveFocus, onOpen, onRetryVideo, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
+export function AssetGallery({ items, layout = "justified", groupDates = true, scopeKey, totalCount = null, selectedAssetIds = new Set(), focusAssetId = null, targetRowHeight = 180, metadataVisible = false, privacyMode = false, hasNextPage = false, onLoadNextPage, hasPreviousPage = false, onLoadPrevPage, onSelectionGesture, onSelectAll, onDeleteSelection, onClearSelection, onMoveFocus, onOpen, onRetryVideo, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const focusRequestedRef = useRef(false);
   const quickPreviewTimerRef = useRef<number | null>(null);
@@ -54,8 +57,10 @@ export function AssetGallery({ items, scopeKey, totalCount = null, selectedAsset
   const prependGuardRef = useRef({ pending: false, firstAssetId: null as string | null });
   const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
   const [quickPreview, setQuickPreview] = useState<QuickPreviewState | null>(null);
-  const { width, gap } = useGalleryMetrics(scrollRef);
-  const rows = useMemo(() => buildJustifiedRows(items, width, targetRowHeight, gap), [gap, items, targetRowHeight, width]);
+  const { width, gap, height: viewportHeight } = useGalleryMetrics(scrollRef, layout);
+  const [scrollTop, setScrollTop] = useState(0);
+  const masonry = useMemo(() => buildMasonryLayout(layout === "masonry" ? items : [], width, targetRowHeight, gap, metadataVisible, groupDates), [layout, items, width, targetRowHeight, gap, metadataVisible, groupDates]);
+  const rows = useMemo(() => buildJustifiedRows(layout === "justified" ? items : [], width, targetRowHeight, gap), [layout, gap, items, targetRowHeight, width]);
   const rowVirtualizer = useVirtualizer({ count: rows.length, getScrollElement: () => scrollRef.current, estimateSize: (index) => rows[index]?.height ?? targetRowHeight, getItemKey: (index) => rows[index]?.items[0]?.id ?? index, gap, overscan: VIRTUAL_OVERSCAN_ROWS });
   const lastScopeKeyRef = useRef<string | null>(scopeKey ?? null);
   const scrollMemoryRef = useRef(new Map<string, number>());
@@ -76,32 +81,48 @@ export function AssetGallery({ items, scopeKey, totalCount = null, selectedAsset
     if (remembered > 0) element.scrollTop = remembered;
   }, [scopeKey, rowVirtualizer]);
   const virtualRows = rowVirtualizer.getVirtualItems();
-  const measuredTotal = rowVirtualizer.getTotalSize();
+  const layoutUnits = layout === "masonry" ? masonry.tiles.length : rows.length;
+  const measuredTotal = layout === "masonry" ? masonry.height : rowVirtualizer.getTotalSize();
+  const previousMasonryRef = useRef({ masonry, scopeKey, layout });
+  useLayoutEffect(() => {
+    const previous = previousMasonryRef.current;
+    const element = scrollRef.current;
+    if (element && layout === "masonry" && previous.layout === layout && previous.scopeKey === scopeKey && previous.masonry !== masonry) {
+      const anchor = previous.masonry.tiles.find((tile) => tile.top + tile.height > element.scrollTop);
+      const next = anchor && masonry.tiles.find((tile) => tile.asset.id === anchor.asset.id);
+      if (anchor && next) element.scrollTop += next.top - anchor.top;
+    }
+    previousMasonryRef.current = { masonry, scopeKey, layout };
+    if (element) setScrollTop(element.scrollTop);
+  }, [masonry, scopeKey, layout]);
   // Freeze the estimation base on the first measured rows so appended pages
   // never shift the reserved range (which would yank the scrollbar thumb).
   // The base is scoped: a new scope re-samples instead of reusing stale
   // aspect data. The estimate changes only when the backend total changes.
   const [estimateBase, setEstimateBase] = useState<{
     scopeKey: string | null;
+    geometryKey: string;
     avgItemsPerRow: number;
     avgRowHeight: number;
   } | null>(null);
+  const geometryKey = `${layout}:${width}:${targetRowHeight}:${metadataVisible}`;
   useLayoutEffect(() => {
     const currentScopeKey = scopeKey ?? null;
-    if (rows.length === 0) {
+    if (layoutUnits === 0) {
       if (estimateBase) setEstimateBase(null);
     } else if (
-      (!estimateBase || estimateBase.scopeKey !== currentScopeKey) &&
+      (!estimateBase || estimateBase.scopeKey !== currentScopeKey || estimateBase.geometryKey !== geometryKey) &&
       measuredTotal > 0 &&
       items.length > 0
     ) {
       setEstimateBase({
         scopeKey: currentScopeKey,
-        avgItemsPerRow: items.length / rows.length,
-        avgRowHeight: measuredTotal / rows.length,
+        geometryKey,
+        avgItemsPerRow: items.length / layoutUnits,
+        avgRowHeight: measuredTotal / layoutUnits,
       });
     }
-  }, [estimateBase, items.length, measuredTotal, rows.length, scopeKey]);
+  }, [estimateBase, items.length, measuredTotal, layoutUnits, scopeKey, geometryKey]);
   // Reserve the full filtered range up front so appended pages stop growing
   // the scroll range (which yanks the scrollbar thumb upward mid-drag).
   // Once everything is loaded the measured size is exact again.
@@ -120,7 +141,7 @@ export function AssetGallery({ items, scopeKey, totalCount = null, selectedAsset
   }
   useLayoutEffect(() => {
     const pending = pendingRestoreRef.current;
-    if (!pending || pending.scopeKey !== scopeKey || rows.length === 0) return;
+    if (!pending || pending.scopeKey !== scopeKey || layoutUnits === 0) return;
     const element = scrollRef.current;
     if (!element) return;
     if (element.scrollTop < pending.offset - 1) {
@@ -130,7 +151,7 @@ export function AssetGallery({ items, scopeKey, totalCount = null, selectedAsset
       if (element.scrollTop < pending.offset - 1) return;
     }
     pendingRestoreRef.current = null;
-  }, [rows.length, scopeKey, reservedTotal]);
+  }, [layoutUnits, scopeKey, reservedTotal]);
   const cancelQuickPreview = () => {
     quickPreviewRequestRef.current += 1;
     if (quickPreviewTimerRef.current !== null) window.clearTimeout(quickPreviewTimerRef.current);
@@ -155,9 +176,9 @@ export function AssetGallery({ items, scopeKey, totalCount = null, selectedAsset
     }, QUICK_PREVIEW_DELAY_MS);
   };
   useEffect(() => {
-    if (!hasNextPage || !onLoadNextPage || rows.length === 0) return;
+    if (!hasNextPage || !onLoadNextPage || layoutUnits === 0) return;
     const last = virtualRows[virtualRows.length - 1];
-    if (last && last.index >= rows.length - NEXT_PAGE_THRESHOLD_ROWS) {
+    if (layout === "justified" && last && last.index >= rows.length - NEXT_PAGE_THRESHOLD_ROWS) {
       onLoadNextPage();
       return;
     }
@@ -167,14 +188,14 @@ export function AssetGallery({ items, scopeKey, totalCount = null, selectedAsset
         <= element.clientHeight * NEXT_PAGE_PREFETCH_VIEWPORTS) {
       onLoadNextPage();
     }
-  }, [hasNextPage, onLoadNextPage, rows.length, virtualRows, measuredTotal]);
+  }, [hasNextPage, onLoadNextPage, rows.length, layoutUnits, virtualRows, measuredTotal, layout, scrollTop]);
   useEffect(() => {
     const first = virtualRows[0];
-    if (hasPreviousPage && onLoadPrevPage && first && first.index < NEXT_PAGE_THRESHOLD_ROWS) {
+    if (hasPreviousPage && onLoadPrevPage && (layout === "masonry" ? scrollTop < 500 : first && first.index < NEXT_PAGE_THRESHOLD_ROWS)) {
       prependGuardRef.current.pending = true;
       onLoadPrevPage();
     }
-  }, [hasPreviousPage, onLoadPrevPage, virtualRows]);
+  }, [hasPreviousPage, onLoadPrevPage, virtualRows, layout, scrollTop]);
   useEffect(() => () => {
     if (quickPreviewTimerRef.current !== null) window.clearTimeout(quickPreviewTimerRef.current);
   }, []);
@@ -192,20 +213,26 @@ export function AssetGallery({ items, scopeKey, totalCount = null, selectedAsset
         }
         let insertedHeight = 0;
         for (let index = 0; index < rowIndex; index += 1) insertedHeight += rows[index].height + gap;
-        element.scrollTop += insertedHeight;
+        if (layout !== "masonry") element.scrollTop += insertedHeight;
       }
     }
     guard.pending = false;
     guard.firstAssetId = items[0]?.id ?? null;
-  }, [gap, items, rows]);
+  }, [gap, items, rows, layout]);
   useLayoutEffect(() => {
     if (!focusRequestedRef.current || !focusAssetId) return;
+    const tile = layout === "masonry" ? masonry.tiles.find((entry) => entry.asset.id === focusAssetId) : null;
+    const element = scrollRef.current;
+    if (tile && element && (tile.top < element.scrollTop || tile.top + tile.height > element.scrollTop + viewportHeight)) {
+      element.scrollTop = tile.top < element.scrollTop ? tile.top : Math.max(tile.top, tile.top + tile.height - viewportHeight);
+      setScrollTop(element.scrollTop);
+    }
     [...(scrollRef.current?.querySelectorAll<HTMLElement>("[role=option]") ?? [])]
       .find((element) => element.dataset.assetId === focusAssetId)
       ?.focus();
-    focusRequestedRef.current = false;
-  }, [focusAssetId]);
-  return <div className="asset-gallery">
+    if ([...(scrollRef.current?.querySelectorAll<HTMLElement>("[data-asset-id]") ?? [])].some((entry) => entry.dataset.assetId === focusAssetId)) focusRequestedRef.current = false;
+  }, [focusAssetId, scrollTop, layout, masonry, viewportHeight]);
+  return <div className={`asset-gallery asset-gallery--${layout}`}>
     <div
       ref={scrollRef}
       className="asset-gallery__scroll"
@@ -215,8 +242,9 @@ export function AssetGallery({ items, scopeKey, totalCount = null, selectedAsset
       aria-multiselectable="true"
       onScroll={(event) => {
         cancelQuickPreview();
-        if (rows.length === 0) return;
+        if (layoutUnits === 0) return;
         const element = event.currentTarget;
+        if (layout === "masonry") setScrollTop(element.scrollTop);
         if (hasNextPage && onLoadNextPage && element.clientHeight > 0
           && measuredTotal - (element.scrollTop + element.clientHeight)
             <= element.clientHeight * NEXT_PAGE_PREFETCH_VIEWPORTS) {
@@ -251,7 +279,7 @@ export function AssetGallery({ items, scopeKey, totalCount = null, selectedAsset
           focusRequestedRef.current = true;
           if (event.key === "ArrowUp" || event.key === "ArrowDown") {
             if (focusAssetId) {
-              const delta = rowMoveDelta(rows, gap, items, focusAssetId, event.key === "ArrowDown" ? 1 : -1);
+              const delta = layout === "masonry" ? masonryMove(masonry.tiles, focusAssetId, event.key === "ArrowDown" ? 1 : -1) : rowMoveDelta(rows, gap, items, focusAssetId, event.key === "ArrowDown" ? 1 : -1);
               if (delta !== 0) onMoveFocus?.(delta, event.shiftKey);
             }
           } else {
@@ -261,7 +289,11 @@ export function AssetGallery({ items, scopeKey, totalCount = null, selectedAsset
       }}
     >
       <div className="asset-gallery__virtual-space" style={{ height: reservedTotal }}>
-        {virtualRows.map((virtualRow) => {
+        {layout === "masonry" && masonry.headings.filter((heading) => heading.top >= scrollTop - 500 && heading.top < scrollTop + viewportHeight + 500).map((heading) => <div key={heading.key} className="asset-gallery__date" role="presentation" style={{ transform: `translateY(${heading.top}px)` }}>{heading.label}</div>)}
+        {layout === "masonry" && masonry.tiles.filter((tile) => tile.top + tile.height >= scrollTop - 400 && tile.top < scrollTop + viewportHeight + 400).map((tile) => <div key={tile.asset.id} className="asset-gallery__masonry-cell" style={{ left: tile.left, top: tile.top, width: tile.width, height: tile.height }}>
+          <AssetTile asset={{ ...tile.asset, width: tile.width }} height={tile.imageHeight} captionBelow selected={selectedAssetIds.has(tile.asset.id)} selectedAssetIds={selectedAssetIds} focused={focusAssetId ? focusAssetId === tile.asset.id : tile.index === 0} metadataVisible={metadataVisible} privacyMode={privacyMode} activePreview={activePreviewId === tile.asset.id} onRequestPreview={() => setActivePreviewId(tile.asset.id)} onReleasePreview={() => setActivePreviewId((current) => current === tile.asset.id ? null : current)} onRequestQuickPreview={requestQuickPreview} onCancelQuickPreview={cancelQuickPreview} onRetryVideo={onRetryVideo} onSelectionGesture={onSelectionGesture} onOpen={onOpen} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />
+        </div>)}
+        {layout === "justified" && virtualRows.map((virtualRow) => {
           const row = rows[virtualRow.index]; if (!row) return null;
           return <div key={virtualRow.key} className="asset-gallery__row" style={{ gap, height: row.height + gap, backgroundColor: "var(--color-bg)", transform: `translateY(${virtualRow.start}px)` }}>
             {row.items.map((asset, index) => <AssetTile key={asset.id} asset={asset} height={row.height} selected={selectedAssetIds.has(asset.id)} selectedAssetIds={selectedAssetIds} focused={focusAssetId ? focusAssetId === asset.id : virtualRow.index === 0 && index === 0} metadataVisible={metadataVisible} privacyMode={privacyMode} activePreview={activePreviewId === asset.id} onRequestPreview={() => setActivePreviewId(asset.id)} onReleasePreview={() => setActivePreviewId((current) => current === asset.id ? null : current)} onRequestQuickPreview={requestQuickPreview} onCancelQuickPreview={cancelQuickPreview} onRetryVideo={onRetryVideo} onSelectionGesture={onSelectionGesture} onOpen={onOpen} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />)}
@@ -274,23 +306,23 @@ export function AssetGallery({ items, scopeKey, totalCount = null, selectedAsset
   </div>;
 }
 
-function AssetTile({ asset, height, selected, selectedAssetIds, focused, metadataVisible, privacyMode, activePreview, onRequestPreview, onReleasePreview, onRequestQuickPreview, onCancelQuickPreview, onRetryVideo, onSelectionGesture, onOpen, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: { asset: AssetSummary; height: number; selected: boolean; selectedAssetIds: ReadonlySet<string>; focused: boolean; metadataVisible: boolean; privacyMode: boolean; activePreview: boolean; onRequestPreview(): void; onReleasePreview(): void; onRequestQuickPreview(asset: AssetSummary, trigger: HTMLElement): void; onCancelQuickPreview(): void; onRetryVideo?: AssetGalleryProps["onRetryVideo"]; onSelectionGesture?: (asset: AssetSummary, gesture: SelectionGesture) => void; onOpen?: (asset: AssetSummary) => void; onPointerDragStart?: AssetGalleryProps["onPointerDragStart"]; onPointerDragMove?: AssetGalleryProps["onPointerDragMove"]; onPointerDragEnd?: AssetGalleryProps["onPointerDragEnd"]; onPointerDragCancel?: AssetGalleryProps["onPointerDragCancel"] }) {
+function AssetTile({ asset, height, captionBelow = false, selected, selectedAssetIds, focused, metadataVisible, privacyMode, activePreview, onRequestPreview, onReleasePreview, onRequestQuickPreview, onCancelQuickPreview, onRetryVideo, onSelectionGesture, onOpen, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: { asset: AssetSummary; height: number; captionBelow?: boolean; selected: boolean; selectedAssetIds: ReadonlySet<string>; focused: boolean; metadataVisible: boolean; privacyMode: boolean; activePreview: boolean; onRequestPreview(): void; onReleasePreview(): void; onRequestQuickPreview(asset: AssetSummary, trigger: HTMLElement): void; onCancelQuickPreview(): void; onRetryVideo?: AssetGalleryProps["onRetryVideo"]; onSelectionGesture?: (asset: AssetSummary, gesture: SelectionGesture) => void; onOpen?: (asset: AssetSummary) => void; onPointerDragStart?: AssetGalleryProps["onPointerDragStart"]; onPointerDragMove?: AssetGalleryProps["onPointerDragMove"]; onPointerDragEnd?: AssetGalleryProps["onPointerDragEnd"]; onPointerDragCancel?: AssetGalleryProps["onPointerDragCancel"] }) {
   const alt = asset.title || asset.originalName;
-  return <div role="option" data-asset-id={asset.id} className="asset-gallery__asset" style={{ width: asset.width, height }} aria-label={alt} aria-selected={selected} tabIndex={focused ? 0 : -1} onClick={(event) => onSelectionGesture?.(asset, { toggle: event.ctrlKey || event.metaKey, range: event.shiftKey })} onDoubleClick={() => onOpen?.(asset)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); onOpen?.(asset); } }} onPointerDown={(event) => { if (event.button === 0) onPointerDragStart?.({ kind: "assets", assetIds: assetDragIds(asset.id, selectedAssetIds) }, event); }} onPointerMove={onPointerDragMove} onPointerUp={onPointerDragEnd} onPointerCancel={onPointerDragCancel}>
+  return <div role="option" data-asset-id={asset.id} className={`asset-gallery__asset${captionBelow ? " asset-gallery__asset--caption" : ""}`} style={{ width: asset.width, height: height + (captionBelow && metadataVisible ? CAPTION_HEIGHT : 0) }} aria-label={alt} aria-description={metadataVisible ? `${asset.creatorName || asset.creatorHandle || "작가 미상"} · ${collectedDate(asset.collectedAt).full}` : undefined} aria-selected={selected} tabIndex={focused ? 0 : -1} onClick={(event) => onSelectionGesture?.(asset, { toggle: event.ctrlKey || event.metaKey, range: event.shiftKey })} onDoubleClick={() => onOpen?.(asset)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); onOpen?.(asset); } else if (event.key === " ") { event.preventDefault(); onSelectionGesture?.(asset, { toggle: true, range: event.shiftKey }); } }} onPointerDown={(event) => { if (event.button === 0) onPointerDragStart?.({ kind: "assets", assetIds: assetDragIds(asset.id, selectedAssetIds) }, event); }} onPointerMove={onPointerDragMove} onPointerUp={onPointerDragEnd} onPointerCancel={onPointerDragCancel}>
+    <div className="asset-gallery__image" style={{ height }}>
     {privacyMode ? <Skeleton className="privacy-mask asset-gallery__media-mask" label="비공개 모드" /> : asset.media.kind === "video" ? <VideoTileMedia asset={asset as AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> }} active={activePreview} onRequestActive={onRequestPreview} onReleaseActive={onReleasePreview} onRetry={() => onRetryVideo?.(asset)} /> : <img src={thumbnailUrl(asset.id)} alt={alt} width={asset.width} height={asset.height} loading="lazy" decoding="async" draggable={false} />}
+    {asset.media.kind === "image" && !privacyMode && <button type="button" className="asset-gallery__quick-preview-trigger" aria-label={`${alt} 빠른 확대 미리보기`} onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onPointerEnter={(event) => onRequestQuickPreview(asset, event.currentTarget)} onPointerLeave={onCancelQuickPreview} onFocus={(event) => onRequestQuickPreview(asset, event.currentTarget)} onBlur={onCancelQuickPreview} onKeyDown={(event) => { event.stopPropagation(); if (event.key === "Escape") { event.preventDefault(); onCancelQuickPreview(); } }}><MagnifyingGlassPlusIcon aria-hidden="true" /></button>}
+    </div>
     {selected && <span className="asset-gallery__selection-indicator" aria-hidden="true" />}
     {asset.favorite && <span className="asset-gallery__favorite" aria-hidden="true"><HeartIcon /></span>}
-    {metadataVisible && <span className="asset-gallery__metadata"><span>{sourceHost(asset.sourceUrl)}</span><span>{localDate(asset.collectedAt)}</span></span>}
-    {asset.media.kind === "image" && !privacyMode && <button type="button" className="asset-gallery__quick-preview-trigger" aria-label={`${alt} 빠른 확대 미리보기`} onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onPointerEnter={(event) => onRequestQuickPreview(asset, event.currentTarget)} onPointerLeave={onCancelQuickPreview} onFocus={(event) => onRequestQuickPreview(asset, event.currentTarget)} onBlur={onCancelQuickPreview} onKeyDown={(event) => { event.stopPropagation(); if (event.key === "Escape") { event.preventDefault(); onCancelQuickPreview(); } }}><MagnifyingGlassPlusIcon aria-hidden="true" /></button>}
+    {metadataVisible && <span className="asset-gallery__metadata"><span title={asset.creatorName || asset.creatorHandle || "작가 미상"}>{asset.creatorName || asset.creatorHandle || "작가 미상"}</span><time title={collectedDate(asset.collectedAt).full} dateTime={asset.collectedAt}>{collectedDate(asset.collectedAt).time}</time></span>}
   </div>;
 }
 
-function sourceHost(sourceUrl: string | null) { if (!sourceUrl) return null; try { return new URL(sourceUrl).hostname || null; } catch { return null; } }
-function localDate(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? null : date.toLocaleDateString(); }
 
 const METRICS_QUANTIZE = 16;
 
-function useGalleryMetrics(ref: React.RefObject<HTMLElement | null>) {
+function useGalleryMetrics(ref: React.RefObject<HTMLElement | null>, layout: GalleryLayout) {
   const [metrics, setMetrics] = useState({ width: 0, gap: 0, height: 0 });
   useLayoutEffect(() => {
     const element = ref.current; if (!element) return;
@@ -309,7 +341,7 @@ function useGalleryMetrics(ref: React.RefObject<HTMLElement | null>) {
     };
     update(element.clientWidth, element.clientHeight, true); if (!window.ResizeObserver) return;
     const observer = new ResizeObserver(([entry]) => entry ? update(entry.contentRect.width, entry.contentRect.height, false) : update(element.clientWidth, element.clientHeight, true)); observer.observe(element); return () => observer.disconnect();
-  }, [ref]);
+  }, [ref, layout]);
   return metrics;
 }
 

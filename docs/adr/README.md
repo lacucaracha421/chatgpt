@@ -42,7 +42,7 @@
 | [0023 백그라운드 작업은 중단 후 다시 이어갈 수 있어야 한다](0023-resumable-background-jobs.md) | Accepted | 중단 복구 및 파일/메타데이터 commit 안전성 |
 | [0024 기존 공통 UI를 발전시키고 shadcn을 도입하지 않는다](0024-evolve-existing-ui-system-without-shadcn.md) | Accepted; icon detail updated | 기존 공통 UI/CSS 유지; 현재 아이콘 구현은 app/package.json의 Heroicons |
 | [0025 영상은 원본을 우선 재생하고 필요할 때만 호환 재생본을 만든다](0025-original-first-video-playback.md) | Accepted | ADR-0016 및 ADR-0015의 원본 접근 제한 대체 |
-| [0026 아이콘 버튼에 툴팁을 두지 않고 설정 보기의 버튼 설명으로 모은다](0026-icon-buttons-without-tooltips.md) | Accepted | 접근 가능한 이름을 유지하고 정적 버튼 설명 사용 |
+| [0026 아이콘 버튼에 툴팁을 두지 않고 설정 보기의 버튼 설명으로 모은다](0026-icon-buttons-without-tooltips.md) | Accepted · scoped amendment | 접근 가능한 이름·정적 설명 유지. Chrome 03b의 명시적 PC 아이콘 힌트는 한정 허용 |
 | [0027 안전 설정을 설정 보기의 [안전] 섹션으로 통합한다](0027-safety-settings-in-settings-view.md) | Accepted | 안전 설정 통합; 현재 UI 구성은 구현과 함께 확인 |
 | [0028 망가 시리즈는 라이브러리 밖 폴더를 참조한다](0028-manga-series-reference-external-folders.md) | Accepted for local manga folders | 외부 사용자 폴더 참조; 타입별 Works Collection과 구분 |
 | [0029 분류 항목을 폴더처럼 조작하되 저장 위치로 만들지 않는다](0029-classification-folders-are-navigation.md) | Partly superseded by ADR-0030 | 다중 직접 소속/추가형 드롭은 대체; 파일 저장 경로와 분류의 분리는 유지 |

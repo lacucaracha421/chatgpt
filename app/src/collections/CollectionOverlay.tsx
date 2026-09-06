@@ -1,6 +1,6 @@
 import { XMarkIcon } from "@heroicons/react/24/outline";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { collectionCoverUrl, workArtworkUrl } from "../assets/mediaUrl";
+import { assetUrl, collectionCoverUrl, collectionSourcePreviewUrl, workArtworkUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { AladinConnection, CollectionCover, CollectionSummary, CollectionVolume, CreateCollection, IgdbConnection, MangaDexConnection, ReleaseWatchEvent, ReleaseWatchStatus, TmdbConnection, UpdateCollection, VolumeImportProgress, WorkArtworkSummary } from "../library/types";
@@ -297,11 +297,12 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
 
   const gameCoverUrl = collection?.selectedWorkArtworkId
     ? workArtworkUrl(collection.selectedWorkArtworkId)
-    : null;
+    : collection?.coverAssetId ? assetUrl(collection.coverAssetId)
+    : collection?.sourcePath ? collectionSourcePreviewUrl(collection.id) : null;
   const gameHeroUrl = collection?.selectedHeroArtworkId
     ? workArtworkUrl(collection.selectedHeroArtworkId)
     : null;
-  const moviePosterUrl = collection?.selectedWorkArtworkId ? workArtworkUrl(collection.selectedWorkArtworkId) : null;
+  const moviePosterUrl = gameCoverUrl;
   const movieBackdropUrl = collection?.selectedBackdropArtworkId ? workArtworkUrl(collection.selectedBackdropArtworkId) : null;
 
   const providerMenu = isManga ? (

@@ -5,6 +5,11 @@
 `docs/agents/approved-design-direction.md` records the user-approved Lab 06 final direction and Codex handoff. Its scoped rules take precedence over older visual prescriptions below: date-grouped asset masonry with artist/HH:mm captions, ivory single selection versus neutral-gray multi-select, line icons, closed seam-side game cases, media-specific physicality, and hero/cover/fallback composition.
 Game-case depth/contact shadow and unified projection are limited collectible exceptions, not permission to decorate ordinary Asset/UI surfaces. Unspecified typography, shared UI, product boundaries, safety rules, and existing behavior remain unchanged. The approval is visual intent, not implementation or production-verification evidence.
 
+## Approved PC chrome amendment - 2026-09-06
+
+`docs/agents/approved-chrome-direction.md` records the user-selected Chrome 03b B shell: a narrow area rail, persistent contextual index, icon-only search, and a bottom View Settings trigger opening a non-modal panel to the right. It supersedes older requirements to preserve sidebar/topbar placement or a permanent horizontal toolbar; stability during use, shared controls, and domain/data rules remain.
+Opening/closing the settings panel alone must not resize the gallery or reset selection, scroll, or owned settings. The Lab 06 content direction and neutral-gray multi-select styling remain in force. This is a documented design decision, not implementation, a new framework, or Git/deployment authorization.
+
 Lakomics는 장시간 사용하는 고밀도 Windows 데스크톱 미디어 라이브러리다.
 SaaS 대시보드, 랜딩 페이지, 모바일 앱, shadcn 데모처럼 보이면 안 된다.
 
@@ -15,6 +20,19 @@ SaaS 대시보드, 랜딩 페이지, 모바일 앱, shadcn 데모처럼 보이�
 - 장식보다 정렬, 계층, 상태 표현을 우선
 - 유행하는 UI보다 오래 써도 질리지 않는 UI
 - Eagle/Lightroom/Windows 데스크톱 도구의 장점만 참고하고 그대로 복제하지 않음
+
+### Quiet Archive 기준
+
+전역 리스킨의 이름은 **Quiet Archive / 조용한 개인 아카이브**다. 이 이름은 별도 테마가 아니라 기존 Lakomics 디자인 언어를 더 일관되게 적용하기 위한 기준이다.
+
+- 일반 탐색은 평평하고 조용하게 유지하고, 작품 감상 화면에서만 수집품의 물성을 제한적으로 강화한다.
+- 새로움은 큰 카드, 웹폰트, 광택, 그림자보다 typography hierarchy, caption 정렬, selection/focus 구분, media-type별 표현에서 만든다.
+- 기본 UI는 Segoe UI 계열을 유지하고 한국어는 Malgun Gothic, 일본어는 Yu Gothic UI/Meiryo 폴백을 우선한다. Inter Tight 같은 display webfont를 전역 도입하지 않는다.
+- 역할 기준은 UI 본문 13/18, metadata 12/16, section 16/22, 작품 상세 제목 18/24, 감상 중심 큰 제목 22/30을 출발점으로 한다.
+- 일반 grid의 Asset/Collection 타일에는 drop shadow, blur, pointer-tracked transform을 두지 않는다. floating menu/dialog과 집중한 collectible object만 제한적으로 깊이를 가진다.
+- Works는 같은 shell 안에서 Manga=cover shelf, Game=hero/package exhibit, Video=flat poster archive라는 서로 다른 감상 문법을 사용한다.
+
+표현 강도는 대략 Library < Detail < Showcase 순서로 높인다. Library는 탐색이 우선이고, Detail은 감상과 정보가 균형을 이루며, Showcase는 같은 primitive를 더 여유롭게 전시한다.
 
 ## 피해야 할 것
 

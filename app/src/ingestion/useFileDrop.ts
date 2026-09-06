@@ -41,6 +41,7 @@ type UseFileDropOptions = {
 };
 
 export type FileDropState = {
+  importPaths: (paths: string[], destination?: string | null) => void;
   progress: DropProgress | null;
   over: boolean;
   works: IngestionWork[];
@@ -198,7 +199,14 @@ export function useFileDrop(options: UseFileDropOptions): FileDropState {
     };
   }, [subscribe]);
 
-  return { progress, over, works, retryFailed, dismissWork };
+  const importPaths = useCallback((paths: string[], destination?: string | null) => {
+    const current = optionsRef.current;
+    if (!current.enabled) return;
+    const external = current.libraryRoot ? paths.filter((path) => !isInsideLibrary(path, current.libraryRoot!)) : paths;
+    if (external.length) enqueueRef.current(external, destination === undefined ? current.classificationId : destination);
+  }, []);
+
+  return { progress, over, works, retryFailed, dismissWork, importPaths };
 }
 
 function emptyWork(id: string, total: number): IngestionWork {

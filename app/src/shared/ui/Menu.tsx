@@ -1,6 +1,6 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { CheckIcon } from "@heroicons/react/20/solid";
-import type { ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 
 export type MenuItem = {
   id: string;
@@ -29,15 +29,17 @@ type MenuProps = {
 };
 
 export function Menu({ items, label, trigger }: MenuProps): ReactNode {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [panelOwner, setPanelOwner] = useState<string | undefined>();
   return (
-    <DropdownMenu.Root modal={false}>
+    <DropdownMenu.Root modal={false} onOpenChange={(open) => setPanelOwner(open ? triggerRef.current?.closest("[data-workspace-popover]")?.getAttribute("data-workspace-popover") ?? undefined : undefined)}>
       <DropdownMenu.Trigger asChild>
-        <button className="ui-menu__trigger" type="button" aria-label={label}>
+        <button ref={triggerRef} className="ui-menu__trigger" type="button" aria-label={label} data-tooltip={label}>
           {trigger}
         </button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
-        <DropdownMenu.Content className="ui-menu" align="start" sideOffset={4}>
+        <DropdownMenu.Content className="ui-menu" data-panel-owner={panelOwner} align="start" sideOffset={4}>
           {renderMenuItems(items)}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
@@ -113,6 +115,7 @@ function MenuRow({ item }: { item: MenuItem }): ReactNode {
     >
       <button
         type="button"
+        data-selected={item.selected || undefined}
         className={`ui-menu__item${item.destructive ? " ui-menu__item--destructive" : ""}`}
         disabled={item.disabled}
       >

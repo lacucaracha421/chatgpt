@@ -13,6 +13,7 @@ This directory contains only current or intentionally retained Lakomics document
 ## Current reference documents
 
 - `agents/approved-design-direction.md` - user-approved PC Lab 06 final design direction, scoped visual supersession, reference values, and Codex handoff; not implemented merely by this documentation.
+- `agents/approved-chrome-direction.md` - user-selected Chrome 03b B left-centric navigation shell, icon-only search, right-side View Settings popover, state-preservation contract, and Codex handoff; complements the Lab 06 content reference.
 
 - `agents/domain.md` — how to interpret repository documentation and resolve conflicts.
 - `agents/implementation.md` — implementation/shared-UI rules, complete review scope, and verification-evidence reuse.

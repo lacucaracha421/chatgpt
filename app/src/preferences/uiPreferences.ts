@@ -9,6 +9,7 @@ export type MangaViewerMargin = "compact" | "normal" | "wide";
 export type MangaViewerGap = "none" | "narrow" | "wide";
 
 export type UiPreferences = {
+  galleryLayout: "masonry" | "justified";
   metadataVisible: boolean;
   privacyMode: boolean;
   sidebarWidth: number;
@@ -26,6 +27,7 @@ export type UiPreferences = {
 };
 
 export const DEFAULT_UI_PREFERENCES: UiPreferences = {
+  galleryLayout: "masonry",
   metadataVisible: true,
   privacyMode: false,
   sidebarWidth: 208,
@@ -55,6 +57,7 @@ export function loadUiPreferences(storage: Storage = localStorage): UiPreference
   if (!isRecord(value)) return DEFAULT_UI_PREFERENCES;
 
   return {
+    galleryLayout: value.galleryLayout === "justified" ? "justified" : "masonry",
     metadataVisible:
       typeof value.metadataVisible === "boolean"
         ? value.metadataVisible

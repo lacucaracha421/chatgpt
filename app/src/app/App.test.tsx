@@ -166,6 +166,11 @@ function gateway(): LibraryGateway {
   };
 }
 
+async function openSettings() {
+  await userEvent.click(await screen.findByRole("button", { name: "라이브러리 관리" }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: "설정" }));
+}
+
 describe("App", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -200,7 +205,7 @@ describe("App", () => {
     render(<App gateway={libraryGateway} subscribeDrops={noDrops} />);
 
     expect(await screen.findByRole("treeitem", { name: "Old library" })).toBeVisible();
-    await userEvent.click(screen.getByRole("button", { name: "설정" }));
+    await openSettings();
     await userEvent.click(await screen.findByRole("button", { name: "다른 저장소 열기" }));
 
     expect(await screen.findByRole("treeitem", { name: "New library" })).toBeVisible();
@@ -238,7 +243,7 @@ describe("App", () => {
     render(<App gateway={libraryGateway} subscribeDrops={noDrops} />);
 
     await waitFor(() => expect(libraryGateway.runDueReleaseWatch).toHaveBeenCalledOnce());
-    await userEvent.click(await screen.findByRole("button", { name: "설정" }));
+    await openSettings();
     await userEvent.click(screen.getByRole("button", { name: "다른 저장소 열기" }));
     await waitFor(() => expect(libraryGateway.runDueReleaseWatch).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(libraryGateway.listCollections).toHaveBeenCalledTimes(3));
@@ -384,7 +389,7 @@ describe("App", () => {
     const classificationCalls = vi.mocked(libraryGateway.listClassifications).mock.calls.length;
     const assetCalls = vi.mocked(libraryGateway.listAssets).mock.calls.length;
 
-    await user.click(screen.getByRole("button", { name: "설정" }));
+    await openSettings();
     await user.click(await screen.findByRole("button", { name: "데이터 관리" }));
     await user.click(await screen.findByRole("button", { name: "이 시점으로 복구" }));
     await user.click(screen.getByRole("button", { name: "복구 시작" }));
@@ -405,7 +410,7 @@ describe("App", () => {
     const user = userEvent.setup();
 
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
-    await user.click(await screen.findByRole("button", { name: "설정" }));
+    await openSettings();
     await user.click(await screen.findByRole("button", { name: "데이터 관리" }));
     await user.click(await screen.findByRole("button", { name: "이 시점으로 복구" }));
     await user.click(screen.getByRole("button", { name: "복구 시작" }));
@@ -431,7 +436,9 @@ describe("App", () => {
     expect(content).toBeInTheDocument();
     expect(screen.getByRole("contentinfo")).toBeInTheDocument();
     expect(within(content).queryByRole("button", { name: "설정" })).not.toBeInTheDocument();
-    expect(within(sidebar).getByRole("button", { name: "설정" })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "주요 영역" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "라이브러리 관리" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "창 닫기" })).toHaveLength(1);
     expect(screen.queryByRole("heading", { name: "Lakomics" })).not.toBeInTheDocument();
   });
 
@@ -551,10 +558,11 @@ describe("App", () => {
 
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} />);
 
-    const metadata = await screen.findByLabelText("정보 표시");
-    expect(metadata).not.toBeChecked();
+    await user.click(await screen.findByRole("button", { name: "보기 설정" }));
+    const metadata = await screen.findByLabelText("정보 숨기기");
+    expect(metadata).toBeChecked();
     expect(screen.getByLabelText("정렬")).toHaveValue("oldest");
-    expect(screen.getByRole("complementary", { name: "분류" })).toHaveStyle({ width: "264px" });
+    expect(screen.getByRole("complementary", { name: "탐색 인덱스" }).style.getPropertyValue("--workspace-index-width")).toBe("264px");
 
     await user.selectOptions(screen.getByLabelText("정렬"), "random");
     await user.click(metadata);
@@ -564,12 +572,13 @@ describe("App", () => {
       setPointerCapture: { configurable: true, value: vi.fn() },
       releasePointerCapture: { configurable: true, value: vi.fn() },
     });
-    fireEvent.pointerDown(resizeHandle, { pointerId: 1, clientX: 100 });
+    fireEvent.pointerDown(resizeHandle, { button: 0, pointerId: 1, clientX: 100 });
     fireEvent.pointerMove(resizeHandle, { pointerId: 1, clientX: 108 });
     fireEvent.pointerUp(resizeHandle, { pointerId: 1 });
 
     await waitFor(() =>
       expect(JSON.parse(localStorage.getItem(UI_PREFERENCES_KEY) ?? "{}")).toEqual({
+        galleryLayout: "masonry",
         metadataVisible: true,
         privacyMode: false,
         sidebarWidth: 272,
@@ -594,7 +603,7 @@ describe("App", () => {
     vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games]);
 
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} />);
-    const sidebar = await screen.findByRole("complementary", { name: "분류" });
+    const sidebar = await screen.findByRole("complementary", { name: "탐색 인덱스" });
     const resizeHandle = screen.getByRole("separator", { name: "사이드바 너비 조절" });
     Object.defineProperties(resizeHandle, {
       setPointerCapture: { configurable: true, value: vi.fn() },
@@ -605,12 +614,12 @@ describe("App", () => {
     vi.useFakeTimers();
 
     try {
-      fireEvent.pointerDown(resizeHandle, { pointerId: 1, clientX: 100 });
+      fireEvent.pointerDown(resizeHandle, { button: 0, pointerId: 1, clientX: 100 });
       fireEvent.pointerMove(resizeHandle, { pointerId: 1, clientX: -100.4 });
       fireEvent.pointerMove(resizeHandle, { pointerId: 1, clientX: 400.4 });
       fireEvent.pointerUp(resizeHandle, { pointerId: 1 });
 
-      expect(sidebar).toHaveStyle({ width: "320px" });
+      expect(sidebar.style.getPropertyValue("--workspace-index-width")).toBe("320px");
       const preferenceWrites = () => setItem.mock.calls.filter(([key]) => key === UI_PREFERENCES_KEY);
       expect(preferenceWrites()).toHaveLength(0);
 
@@ -736,7 +745,7 @@ describe("App", () => {
     act(() => drop?.(["C:\\images\\arona.png"]));
 
     expect(
-      await screen.findByText("1개 중 1번째 파일을 처리하고 있습니다."),
+      await screen.findByText("파일 가져오기 1 / 1"),
     ).toBeInTheDocument();
     expect(libraryGateway.ingestMedia).toHaveBeenCalledWith({
       sourcePath: "C:\\images\\arona.png",
@@ -1200,7 +1209,7 @@ describe("App", () => {
     expect(await screen.findByRole("region", { name: "컬렉션" })).toBeInTheDocument();
     expect(await screen.findByText("Astral Chain")).toBeInTheDocument();
 
-    await user.click(await screen.findByRole("button", { name: "저장소" }));
+    await user.click(await screen.findByRole("button", { name: "에셋" }));
     expect(await screen.findByRole("region", { name: "자산 내용" })).toBeInTheDocument();
   });
 
@@ -1220,10 +1229,17 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
     await user.click(await screen.findByRole("button", { name: "컬렉션" }));
+    const index = screen.getByRole("complementary", { name: "탐색 인덱스" });
+    expect(await within(index).findByRole("button", { name: "제목 검색" })).toBeVisible();
+    expect(within(index).getByLabelText("내 별점")).toBeVisible();
+    expect(screen.queryByRole("searchbox", { name: "제목 검색" })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "제목 검색" }));
     const search = await screen.findByRole("searchbox", { name: "제목 검색" });
-    await user.type(search, "nier");
+    await user.type(search, "nier{Enter}");
     await user.click(await screen.findByText("NieR: Automata"));
     await user.click(await screen.findByRole("button", { name: "컬렉션 표지 보기 닫기" }));
+    expect(await screen.findByRole("button", { name: "검색 해제" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "제목 검색" }));
     expect(await screen.findByRole("searchbox", { name: "제목 검색" })).toHaveValue("nier");
   });
 
@@ -1300,4 +1316,35 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "게임" })).toHaveAttribute("aria-pressed", "true");
   });
 
+});
+
+describe("Chrome 03b app integration", () => {
+  beforeEach(() => { localStorage.clear(); localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics"); vi.mocked(open).mockReset(); });
+  afterEach(cleanup);
+  it("does not reload, unselect or remount assets when opening and closing view settings", async () => {
+    const user = userEvent.setup(); const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listAssets).mockResolvedValue({ items: [asset], nextCursor: null });
+    render(<App gateway={libraryGateway} subscribeDrops={noDrops} />);
+    const tile = await screen.findByRole("option", { name: "arona.png" });
+    await user.click(tile);
+    const gallery = document.querySelector(".asset-gallery");
+    const calls = vi.mocked(libraryGateway.listAssets).mock.calls.length;
+    await user.click(screen.getByRole("button", { name: "보기 설정" }));
+    await screen.findByRole("dialog", { name: "보기 설정" });
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "보기 설정" })).not.toBeInTheDocument();
+    expect(document.querySelector(".asset-gallery")).toBe(gallery);
+    expect(screen.getByRole("option", { name: "arona.png" })).toHaveAttribute("aria-selected", "true");
+    expect(libraryGateway.listAssets).toHaveBeenCalledTimes(calls);
+  });
+  it("sends explicitly picked files through the existing ingestion queue and destination", async () => {
+    const user = userEvent.setup(); const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games]);
+    vi.mocked(libraryGateway.ingestMedia).mockResolvedValue({ status: "added", asset });
+    vi.mocked(open).mockResolvedValue(["C:\\images\\picked.png"]);
+    render(<App gateway={libraryGateway} subscribeDrops={noDrops} />);
+    await user.click(await screen.findByRole("treeitem", { name: "게임" }));
+    await user.click(screen.getByRole("button", { name: "파일 가져오기" }));
+    await waitFor(() => expect(libraryGateway.ingestMedia).toHaveBeenCalledWith(expect.objectContaining({ sourcePath: "C:\\images\\picked.png", classificationId: games.id, importSource: "direct" })));
+  });
 });

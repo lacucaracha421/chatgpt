@@ -1,21 +1,36 @@
 import type { ReactNode } from "react";
 import { WindowControls } from "./WindowControls";
+import { ChromeContribution, useWorkspaceChrome, type ViewChromeSpec } from "./WorkspaceChrome";
+import { ChromeQueryBadge } from "./ChromeSearch";
 
 type ViewToolbarProps = {
   title: string;
   ariaLabel?: string;
   children?: ReactNode;
   actions?: ReactNode;
+  chrome?: ViewChromeSpec;
 };
 
-export function ViewToolbar({ title, ariaLabel, children, actions }: ViewToolbarProps) {
+export function ViewToolbar({ title, ariaLabel, children, actions, chrome }: ViewToolbarProps) {
+  const workspace = useWorkspaceChrome();
+  if (workspace && chrome) {
+    return <>
+      <ChromeContribution title={title} spec={chrome} />
+      <header className="view-toolbar view-toolbar--context" role="toolbar" aria-label={ariaLabel}>
+        <span className="chrome-location-mark" aria-hidden="true" />
+        <h2 title={title}>{title}</h2>
+        <ChromeQueryBadge search={chrome.search} />
+        <div className="chrome-context-status">{chrome.status}</div>
+      </header>
+    </>;
+  }
   return (
     <header className="view-toolbar" role="toolbar" aria-label={ariaLabel} data-tauri-drag-region="deep">
       <h2>{title}</h2>
       {children && <div className="view-toolbar__content">{children}</div>}
       <div className="view-toolbar__actions">
         {actions && <div className="view-toolbar__view-actions">{actions}</div>}
-        <WindowControls />
+        {!workspace && <WindowControls />}
       </div>
     </header>
   );

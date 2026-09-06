@@ -1,4 +1,5 @@
-import { BookOpenIcon, CalendarIcon, ChevronDownIcon, ChevronRightIcon, FolderIcon, PhotoIcon, InboxIcon, PlusIcon, RectangleStackIcon, Cog6ToothIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { ChevronDownIcon, ChevronRightIcon } from "@heroicons/react/24/outline";
+import { BookOpenIcon, CalendarIcon, FolderIcon, PhotoIcon, InboxIcon, PlusIcon, RectangleStackIcon, Cog6ToothIcon, TrashIcon } from "../shared/ui/ArchiveIcons";
 import { useLayoutEffect, useEffect, useRef, useState, type CSSProperties } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
 import { useLibrary } from "../library/LibraryContext";
@@ -17,6 +18,7 @@ import { ClassificationAppearanceDialog } from "./ClassificationAppearanceDialog
 import { ClassificationIcon, classificationColor } from "./classificationAppearance";
 
 type ClassificationSidebarProps = {
+  embedded?: boolean;
   entries: ClassificationEntry[];
   albums?: AlbumEntry[];
   view: AssetView;
@@ -62,6 +64,7 @@ type InlineEdit =
   | { type: "rename"; entry: SidebarTreeEntry };
 
 export function ClassificationSidebar({
+  embedded = false,
   entries,
   albums = [],
   expandedIds,
@@ -362,9 +365,9 @@ export function ClassificationSidebar({
 
   return (
     <aside
-      className="classification-sidebar"
+      className={`classification-sidebar${embedded ? " classification-sidebar--embedded" : ""}`}
       aria-label="분류"
-      style={{ width: sidebarWidth }}
+      style={embedded ? undefined : { width: sidebarWidth }}
       onKeyDown={handleSidebarKeyDown}
       onClick={(event) => {
         const target = event.target as HTMLElement;
@@ -380,24 +383,27 @@ export function ClassificationSidebar({
         if (!target.closest("button, a, input, select, textarea, [contenteditable='true'], [role='treeitem'], [role='menuitem'], [role='dialog'], [role='separator']")) onClearAssetSelection?.();
       }}
     >
-      <div className="classification-sidebar__heading" data-tauri-drag-region>
+      {!embedded && <div className="classification-sidebar__heading" data-tauri-drag-region>
         <h2>분류</h2>
         <Button type="button" size="icon" variant="ghost" aria-label="새 폴더" onClick={() => openTopLevelCreate("classification")}>
           <PlusIcon aria-hidden="true" />
         </Button>
-      </div>
+      </div>}
       <nav className="classification-sidebar__quick-views" aria-label="빠른 보기">
         <QuickViewButton icon={<FolderIcon aria-hidden="true" />} label="저장소" selected={view.kind === "classification" && view.classificationId === null} onClick={() => onViewChange({ kind: "classification", classificationId: null })} />
         <QuickViewButton icon={<InboxIcon aria-hidden="true" />} label="미분류" selected={view.kind === "unsorted"} onClick={() => onViewChange({ kind: "unsorted" })} />
         <QuickViewButton icon={<CalendarIcon aria-hidden="true" />} label="다시보기" selected={view.kind === "revisit" || view.kind === "creator"} onClick={() => onViewChange({ kind: "revisit" })} />
-        <QuickViewButton icon={<BookOpenIcon aria-hidden="true" />} label="망가" selected={view.kind === "manga"} onClick={() => onViewChange({ kind: "manga" })} />
-        <QuickViewButton icon={<RectangleStackIcon aria-hidden="true" />} label="컬렉션" selected={view.kind === "collections" || view.kind === "collection"} onClick={() => onViewChange({ kind: "collections", typeFilter: collectionType, showcase: false })} />
+        {!embedded && <><QuickViewButton icon={<BookOpenIcon aria-hidden="true" />} label="망가" selected={view.kind === "manga"} onClick={() => onViewChange({ kind: "manga" })} />
+        <QuickViewButton icon={<RectangleStackIcon aria-hidden="true" />} label="컬렉션" selected={view.kind === "collections" || view.kind === "collection"} onClick={() => onViewChange({ kind: "collections", typeFilter: collectionType, showcase: false })} /></>}
       </nav>
       {tree.hasOrphans && <p className="classification-sidebar__warning" role="alert">연결되지 않은 분류는 숨겨집니다.</p>}
+      <div className="chrome-tree-heading">
       <button type="button" className="classification-sidebar__tree-heading" aria-expanded={foldersOpen} aria-label={`폴더 ${foldersOpen ? "접기" : "펼치기"}`} onClick={() => setFoldersOpen((open) => !open)}>
         {foldersOpen ? <ChevronDownIcon aria-hidden="true" /> : <ChevronRightIcon aria-hidden="true" />}
         <span>폴더 ({tree.length})</span>
       </button>
+      {embedded && <Button type="button" size="icon" variant="ghost" aria-label="새 폴더" onClick={() => openTopLevelCreate("classification")}><PlusIcon aria-hidden="true" /></Button>}
+      </div>
       <ContextMenu items={[{ id: "create-root", label: "새 폴더", onSelect: () => openTopLevelCreate("classification") }]}>
         <ul className="classification-sidebar__tree" role="tree" aria-label="폴더" hidden={!foldersOpen}>
           {tree.map((node, index) => (
@@ -439,10 +445,13 @@ export function ClassificationSidebar({
       {albumTree.hasOrphans && <p className="classification-sidebar__warning" role="alert">연결되지 않은 앨범을 숨겼습니다.</p>}
       <ContextMenu items={[{ id: "create-album", label: "새 앨범", onSelect: () => openTopLevelCreate("album") }]}>
         <div>
+          <div className="chrome-tree-heading">
           <button type="button" className="classification-sidebar__tree-heading" aria-expanded={albumsOpen} aria-label={`앨범 ${albumsOpen ? "접기" : "펼치기"}`} onClick={() => setAlbumsOpen((open) => !open)}>
             {albumsOpen ? <ChevronDownIcon aria-hidden="true" /> : <ChevronRightIcon aria-hidden="true" />}
             <span>앨범 ({albumTree.length})</span>
           </button>
+          {embedded && <Button type="button" size="icon" variant="ghost" aria-label="새 앨범" onClick={() => openTopLevelCreate("album")}><PlusIcon aria-hidden="true" /></Button>}
+          </div>
           <ul className="classification-sidebar__tree" role="tree" aria-label="앨범" hidden={!albumsOpen}>
             {albumTree.map((node, index) => (
               <TreeItem
@@ -481,12 +490,12 @@ export function ClassificationSidebar({
           </ul>
         </div>
       </ContextMenu>
-      <div className="classification-sidebar__footer">
+      {!embedded && <div className="classification-sidebar__footer">
         <QuickViewButton icon={<PhotoIcon aria-hidden="true" />} label="유사 검토" count={reviewCount} selected={view.kind === "similarity_review"} onClick={() => onViewChange({ kind: "similarity_review" })} />
         <QuickViewButton icon={<TrashIcon aria-hidden="true" />} label="휴지통" count={trashCount} selected={view.kind === "trash"} onClick={() => onViewChange({ kind: "trash" })} />
         <QuickViewButton icon={<Cog6ToothIcon aria-hidden="true" />} label="설정" selected={view.kind === "settings"} onClick={() => onViewChange({ kind: "settings" })} />
-      </div>
-      <div
+      </div>}
+      {!embedded && <div
         aria-label="사이드바 너비 조절"
         className="classification-sidebar__resize-handle"
         role="separator"
@@ -495,7 +504,7 @@ export function ClassificationSidebar({
         onPointerMove={resizeSidebar}
         onPointerUp={stopResize}
         onPointerCancel={stopResize}
-      />
+      />}
       {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
       <ClassificationAppearanceDialog
         entry={appearanceEntry ? { ...appearanceEntry, scope: appearanceEntry.treeKind } : null}

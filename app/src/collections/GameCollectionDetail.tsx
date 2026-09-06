@@ -1,3 +1,4 @@
+import { GameCase } from "./GameCase";
 import { useState, type PointerEvent } from "react";
 import type { CollectionSummary, WorkArtworkSummary } from "../library/types";
 import { usePrivacy } from "../privacy/PrivacyContext";
@@ -35,7 +36,10 @@ export function GameCollectionDetail({
 }: GameCollectionDetailProps) {
   const [lifted, setLifted] = useState(false);
   const { privacyMode } = usePrivacy();
-  const heroVisible = Boolean(heroUrl) && !privacyMode;
+  const [failedCover, setFailedCover] = useState<string | null>(null);
+  const coverVisible = Boolean(coverUrl) && coverUrl !== failedCover && !privacyMode;
+  const [failedHero, setFailedHero] = useState<string | null>(null);
+  const heroVisible = Boolean(heroUrl) && heroUrl !== failedHero && !privacyMode;
 
   function clearTilt(button: HTMLButtonElement) {
     button.style.removeProperty("--game-package-tilt-x");
@@ -43,7 +47,7 @@ export function GameCollectionDetail({
   }
 
   function tiltPackage(event: PointerEvent<HTMLButtonElement>) {
-    if (!lifted) return;
+    if (!lifted || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
     const bounds = event.currentTarget.getBoundingClientRect();
     const x = clamp((event.clientX - bounds.left) / bounds.width, 0, 1);
     const y = clamp((event.clientY - bounds.top) / bounds.height, 0, 1);
@@ -68,6 +72,7 @@ export function GameCollectionDetail({
       >
         {heroVisible && (
           <img
+            onError={() => setFailedHero(heroUrl)}
             className="game-collection-detail__hero-art"
             src={heroUrl ?? undefined}
             alt={`${collection.name} 대표 아트워크`}
@@ -75,8 +80,8 @@ export function GameCollectionDetail({
           />
         )}
         <div className="game-collection-detail__hero-scrim" aria-hidden="true" />
-        <div className="game-collection-detail__hero-content">
-          <div className="game-collection-detail__package-stage">
+        <div className="game-collection-detail__hero-content" data-no-cover={!coverVisible}>
+          {coverVisible && <div className="game-collection-detail__package-stage">
             <button
               type="button"
               className={`game-collection-detail__package${lifted ? " game-collection-detail__package--lifted" : ""}`}
@@ -89,19 +94,9 @@ export function GameCollectionDetail({
               onPointerMove={tiltPackage}
               onPointerLeave={(event) => clearTilt(event.currentTarget)}
             >
-              <span className="game-collection-detail__package-shell" aria-hidden="true" />
-              <span className="game-collection-detail__package-spine" aria-hidden="true" />
-              <span className="game-collection-detail__package-front">
-                {coverUrl && !privacyMode ? (
-                  <img className="collection-cover-image" src={coverUrl} alt={`${collection.name} 표지`} draggable={false} />
-                ) : (
-                  <span className="game-collection-detail__package-placeholder" aria-hidden="true" />
-                )}
-              </span>
-              <span className="game-collection-detail__package-edge" aria-hidden="true" />
-              <span className="game-collection-detail__package-rim" aria-hidden="true" />
+              {coverUrl && !privacyMode ? <GameCase src={coverUrl} alt={`${collection.name} 표지`} onError={() => setFailedCover(coverUrl)} /> : <span className="game-collection-detail__package-placeholder" aria-label="표지 없음" />}
             </button>
-          </div>
+          </div>}
           <div className="game-collection-detail__copy">
             <div className="game-collection-detail__actions">
               <Menu

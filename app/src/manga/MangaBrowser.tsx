@@ -12,6 +12,8 @@ import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { Menu } from "../shared/ui/Menu";
 import { Slider } from "../shared/ui/Slider";
+import { Select } from "../shared/ui/Select";
+import { Toggle } from "../shared/ui/Toggle";
 import { MangaSourceTabs, OnlineCatalogBrowser } from "./OnlineCatalogBrowser";
 
 type MangaSort = "recent" | "title_asc" | "author_asc" | "pages_desc";
@@ -21,6 +23,7 @@ type MangaBrowserProps = {
 };
 export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
   const { gateway } = useLibrary();
+  const { privacyMode, setPrivacyMode } = usePrivacy();
   const [root, setRoot] = useState<string | null | undefined>(undefined);
   const [series, setSeries] = useState<MangaSeries[] | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -138,20 +141,22 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gateway, source]);
 
+  const localNavigation = <MangaSourceTabs source="local" onLocal={() => undefined} onOnline={() => setSource("online")} />;
+
   if (source === "online") {
     return <OnlineCatalogBrowser onSwitchLocal={() => setSource("local")} />;
   }
 
   if (root === undefined) {
     return <section className="manga-browser" aria-label="망가">
-      <ViewToolbar title="망가" ariaLabel="망가 도구" children={<MangaSourceTabs source="local" onLocal={() => undefined} onOnline={() => setSource("online")} />} />
+      <ViewToolbar title="망가" ariaLabel="망가 도구" chrome={{ navigation: localNavigation }} children={localNavigation} />
       <div className="manga-browser__content"><Skeleton className="manga-browser__skeleton" label="망가를 불러오는 중" /></div>
     </section>;
   }
 
   if (!root) {
     return <section className="manga-browser" aria-label="망가">
-      <ViewToolbar title="망가" ariaLabel="망가 도구" children={<MangaSourceTabs source="local" onLocal={() => undefined} onOnline={() => setSource("online")} />} />
+      <ViewToolbar title="망가" ariaLabel="망가 도구" chrome={{ navigation: localNavigation }} children={localNavigation} />
       <div className="manga-browser__content"><EmptyState title="망가 폴더가 설정되지 않았습니다">설정에서 망가 폴더를 선택하면 여기에 표시됩니다.</EmptyState></div>
     </section>;
   }
@@ -164,6 +169,23 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
     <ViewToolbar
       title="망가"
       ariaLabel="망가 도구"
+      chrome={{
+        navigation: localNavigation,
+        status: <><span>{countLabel}</span>{scanning && <span role="status">폴더 스캔 중</span>}</>,
+        summary: `${mangaSortLabel(sort)} · ${cardWidth}px${privacyMode ? " · 비공개" : ""}`,
+        search: { scope: "로컬 망가", label: "망가 검색", placeholder: "제목 또는 작가 검색", query, onApply: setQuery },
+        actions: <Menu label="망가 관리" trigger={<ArrowPathIcon aria-hidden="true" />} items={[
+          { id: "refresh", label: scanning ? "스캔 중" : "새로고침", disabled: scanning, onSelect: () => void refreshSeries() },
+          ...(gateway.previewMangaCatalogRecovery ? [{ id: "recovery", label: "카탈로그로 복구", disabled: recoveryBusy, onSelect: () => void previewRecovery() }] : []),
+        ]} />,
+        settings: <>
+          <fieldset className="chrome-settings-group"><legend>정렬 · 보기</legend>
+            <Select label="정렬" value={sort} onChange={(event) => setSort(event.target.value as MangaSort)}><option value="recent">최근 변경순</option><option value="title_asc">제목순</option><option value="author_asc">작가순</option><option value="pages_desc">페이지 많은 순</option></Select>
+            <Slider label="카드 크기" min={112} max={220} step={8} value={cardWidth} onChange={(event) => setCardWidth(Number(event.target.value))} />
+          </fieldset>
+          <fieldset className="chrome-settings-group"><legend>표시</legend><Toggle aria-label="비공개 모드" checked={privacyMode} onChange={(event) => setPrivacyMode(event.target.checked)}>비공개 모드</Toggle></fieldset>
+        </>,
+      }}
       children={<>
         <MangaSourceTabs source="local" onLocal={() => undefined} onOnline={() => setSource("online")} />
         <span className="manga-browser__count">{countLabel}</span>

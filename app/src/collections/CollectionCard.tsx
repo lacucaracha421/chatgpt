@@ -1,3 +1,4 @@
+import { GameCase } from "./GameCase";
 import { useState } from "react";
 import type { CollectionSummary } from "../library/types";
 import { usePrivacy } from "../privacy/PrivacyContext";
@@ -30,12 +31,14 @@ export function CollectionCard({
     <button
       type="button"
       className={`collection-card collection-card--${collection.type}`}
+      data-collection-id={collection.id}
+      aria-label={`${collection.name}${collectionCredit(collection) ? ` · ${collectionCredit(collection)}` : ""}`}
       aria-selected={selected}
       onClick={onClick}
     >
       <span className={`collection-card__object collection-card__object--${collection.type}`}>
         <span className="collection-card__cover">
-          {visibleCoverUrl && !privacyMode ? (
+          {visibleCoverUrl && !privacyMode && collection.type === "game" ? <GameCase src={visibleCoverUrl} alt={collection.name} onError={() => setFailedCoverUrl(visibleCoverUrl)} /> : visibleCoverUrl && !privacyMode ? (
             <img
               className="collection-cover-image"
               src={visibleCoverUrl}

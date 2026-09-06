@@ -62,6 +62,15 @@ function renderDetail(overrides: Partial<React.ComponentProps<typeof GameCollect
 }
 
 describe("GameCollectionDetail", () => {
+  it("collapses failed artwork without replacing the chosen hero with cover art", () => {
+    renderDetail();
+    fireEvent.error(screen.getByRole("img", { name: "Astral Chain 대표 아트워크" }));
+    expect(screen.getByRole("region", { name: "게임 대표 아트워크" })).toHaveClass("game-collection-detail__hero--empty");
+    expect(screen.getByRole("img", { name: "Astral Chain 표지" })).toBeInTheDocument();
+    fireEvent.error(screen.getByRole("img", { name: "Astral Chain 표지" }));
+    expect(screen.queryByRole("button", { name: "게임 패키지 들어 올리기" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Astral Chain" })).toBeInTheDocument();
+  });
   it("uses hero artwork as the dominant labelled surface", () => {
     renderDetail();
 

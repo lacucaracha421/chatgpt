@@ -16,6 +16,47 @@ afterEach(() => {
 });
 
 describe("AssetGallery", () => {
+  it("restores masonry scope offsets without replacing its scroll container", async () => {
+    const items = Array.from({ length: 120 }, (_, index) => asset(index));
+    const { container, rerender } = render(<AssetGallery layout="masonry" scopeKey="a" items={items} />);
+    const scroll = container.querySelector(".asset-gallery__scroll") as HTMLElement;
+    scroll.scrollTop = 800;
+    fireEvent.scroll(scroll);
+    rerender(<AssetGallery layout="masonry" scopeKey="b" items={items} />);
+    expect(scroll.scrollTop).toBe(0);
+    rerender(<AssetGallery layout="masonry" scopeKey="a" items={items} />);
+    await waitFor(() => expect(scroll.scrollTop).toBe(800));
+    expect(container.querySelector(".asset-gallery__scroll")).toBe(scroll);
+  });
+
+  it("selects a focused masonry asset with Space", async () => {
+    const select = vi.fn();
+    render(<AssetGallery layout="masonry" items={[asset(0)]} onSelectionGesture={select} />);
+    fireEvent.keyDown(await screen.findByRole("option", { name: "asset-0.png" }), { key: " " });
+    expect(select).toHaveBeenCalledWith(expect.objectContaining({ id: "asset-0" }), { toggle: true, range: false });
+  });
+  it("bounds masonry DOM and loads the next page only near the displayed end", async () => {
+    const next = vi.fn();
+    const { container } = render(<AssetGallery layout="masonry" metadataVisible items={Array.from({ length: 50_000 }, (_, index) => asset(index))} hasNextPage onLoadNextPage={next} />);
+    expect(await screen.findByRole("option", { name: "asset-0.png" })).toBeInTheDocument();
+    expect(screen.getAllByRole("option").length).toBeLessThan(100);
+    expect(next).not.toHaveBeenCalled();
+    const scroll = container.querySelector(".asset-gallery__scroll") as HTMLElement;
+    const height = Number.parseFloat((container.querySelector(".asset-gallery__virtual-space") as HTMLElement).style.height);
+    scroll.scrollTop = height - 650;
+    fireEvent.scroll(scroll);
+    await waitFor(() => expect(next).toHaveBeenCalled());
+    expect(screen.getAllByRole("option").length).toBeLessThan(100);
+  });
+
+  it("places creator and local time below masonry images and merges a continued date", async () => {
+    const first = { ...asset(0), creatorName: "긴 작가 이름", collectedAt: new Date(2026, 8, 6, 21, 7).toISOString() };
+    const { container, rerender } = render(<AssetGallery layout="masonry" metadataVisible items={[first]} />);
+    expect(await screen.findByText("긴 작가 이름")).toBeVisible();
+    expect(screen.getByText("21:07")).toBeVisible();
+    rerender(<AssetGallery layout="masonry" metadataVisible items={[first, { ...first, id: "second" }]} />);
+    expect(container.querySelectorAll(".asset-gallery__date")).toHaveLength(1);
+  });
   it("renders rows with the gallery gap supplied by computed styles", async () => {
     const computedStyle = vi.spyOn(window, "getComputedStyle").mockReturnValue({
       getPropertyValue: (name: string) => name === "--gallery-gap" ? "6px" : "",
@@ -79,7 +120,7 @@ describe("AssetGallery", () => {
   it("offers quick preview only for image assets", async () => {
     render(<AssetGallery items={[asset(0), videoAsset(1)]} />);
 
-    expect(await screen.findByRole("button", { name: "asset-0.png 빠른 확대 미리보기" })).toBeInTheDocument();
+    expect((await screen.findByRole("button", { name: "asset-0.png 빠른 확대 미리보기" })).parentElement).toHaveClass("asset-gallery__image");
     expect(screen.queryByRole("button", { name: "video-1.webm 빠른 확대 미리보기" })).not.toBeInTheDocument();
   });
 

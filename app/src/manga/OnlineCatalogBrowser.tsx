@@ -2,6 +2,10 @@ import { ArrowDownTrayIcon, ArrowPathIcon, BarsArrowDownIcon, ClockIcon, EyeIcon
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { ViewToolbar } from "../layout/ViewToolbar";
+import { useWorkspaceChrome } from "../layout/WorkspaceChrome";
+import { SearchSurface } from "../layout/SearchSurface";
+import { ChromeQueryBadge } from "../layout/ChromeSearch";
+import { Toggle } from "../shared/ui/Toggle";
 import { useLibrary } from "../library/LibraryContext";
 import { catalogStreamStatus } from "../library/catalogStreams";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -52,6 +56,9 @@ export function MangaSourceTabs({ source, onlineScope = "all", onLocal, onOnline
 
 export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProps) {
   const { gateway } = useLibrary();
+  const workspace = useWorkspaceChrome();
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [appliedQuery, setAppliedQuery] = useState("");
   const [status, setStatus] = useState<CatalogStatus | null>(null);
   const [results, setResults] = useState<CatalogGroupedPage | null>(null);
   const [totalCount, setTotalCount] = useState<number | null>(null);
@@ -105,6 +112,8 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
 
   async function search(text: string, nextSort = sort, nextScope = scope, nextPage = 0, nextRevealBlocked = revealBlocked, nextLanguage = language) {
     if (!mounted.current) return;
+    setAppliedQuery(text);
+    setSearchOpen(false);
     const request = ++searchRequest.current;
     setLoading(true);
     setTotalCount(null);
@@ -378,11 +387,11 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
     }
   }
 
-  return <section className="manga-browser online-catalog" aria-label="온라인 망가">
-    <ViewToolbar
-      title="망가"
-      ariaLabel="온라인 망가 도구"
-      children={<>
+  const catalogControls = status?.installed ? <fieldset className="chrome-settings-group"><legend>정렬 · 표시</legend>
+          <Select label="정렬" value={sort} disabled={loading} onChange={(event) => { const next = event.target.value as CatalogSort; setSort(next); void search(appliedQuery, next, scope, 0); }}><option value="latest">최신순</option><option value="views">조회순</option><option value="hotDay">오늘 인기</option><option value="hotWeek">주간 인기</option><option value="hotMonth">월간 인기</option></Select>
+          <Toggle aria-label="숨긴 결과 표시" checked={revealBlocked} disabled={loading} onChange={toggleRevealBlocked}>숨긴 결과 표시</Toggle>
+        </fieldset> : undefined;
+  const catalogNavigation = <>
         <MangaSourceTabs
           source="online"
           onlineScope={scope}
@@ -408,11 +417,13 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
           <option value="korean">한국어</option>
           <option value="japanese">일본어</option>
         </Select>
-        <span className="manga-browser__count">{totalCount !== null ? `${totalCount.toLocaleString()}개 결과` : status?.installed ? countError ? "결과 수 확인 실패" : "결과 수 계산 중…" : ""}</span>
-        {status?.installed && <form className="manga-browser__search online-catalog__search" role="search" onSubmit={submit}>
+        {workspace && status?.installed && <div className="chrome-index-controls chrome-settings-controls">{catalogControls}<Button size="sm" variant="ghost" disabled={loading} onClick={() => refreshSearch.current()}><ArrowPathIcon aria-hidden="true" />새로고침</Button><Button size="sm" variant="ghost" disabled={updating} onClick={() => void updateCatalog()}><ArrowDownTrayIcon aria-hidden="true" />{updating ? "갱신 중…" : "신규 작품 갱신"}</Button></div>}
+  </>;
+  const searchForm = (status?.installed && <form className="manga-browser__search online-catalog__search" role="search" onSubmit={submit}>
           <MagnifyingGlassIcon aria-hidden="true" />
           <input
             type="search"
+            autoFocus={Boolean(workspace)}
             role="combobox"
             aria-label="온라인 만화 검색"
             aria-autocomplete="list"
@@ -444,7 +455,25 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
               <span>{suggestion.label}</span><small>{suggestion.value} · {suggestion.count.toLocaleString()}</small>
             </button>)}
           </div>}
-        </form>}
+        </form>);
+
+  return <section className="manga-browser online-catalog" aria-label="온라인 망가">
+    <ViewToolbar
+      title="망가"
+      ariaLabel="온라인 망가 도구"
+      chrome={{
+        navigation: catalogNavigation,
+        summary: `${catalogSortLabel(sort)} · ${language === "korean" ? "한국어" : "일본어"}${revealBlocked ? " · 숨김 포함" : ""}`,
+        status: <><ChromeQueryBadge search={{ scope: "온라인 카탈로그", label: "온라인 만화 검색", query: appliedQuery, onApply: (text) => { setQuery(text); void search(text); } }} /><span>{totalCount !== null ? `${totalCount.toLocaleString()}개 결과` : status?.installed ? countError ? "결과 수 확인 실패" : "결과 수 계산 중…" : ""}</span></>,
+        searchSurface: status?.installed ? <SearchSurface label="온라인 만화 검색" scope={scope === "bookmarked" ? "망가 북마크" : "온라인 카탈로그"} active={Boolean(appliedQuery)} open={searchOpen}
+          onOpen={() => { setQuery(appliedQuery); setSearchOpen(true); }} onClose={() => { setSearchOpen(false); setQuery(appliedQuery); closeSuggestions(); }}>
+          {searchForm}<div className="ui-dialog__actions"><Button type="button" variant="ghost" onClick={() => { setSearchOpen(false); setQuery(appliedQuery); closeSuggestions(); }}>취소</Button><Button type="button" variant="primary" onClick={() => { closeSuggestions(); void search(query.trim()); }}>검색</Button></div>
+        </SearchSurface> : undefined,
+      }}
+      children={<>
+        {catalogNavigation}
+        <span className="manga-browser__count">{totalCount !== null ? `${totalCount.toLocaleString()}개 결과` : status?.installed ? countError ? "결과 수 확인 실패" : "결과 수 계산 중…" : ""}</span>
+        {searchForm}
       </>}
       actions={status?.installed ? <>
         <Button size="icon" variant={revealBlocked ? "primary" : "ghost"} title="숨긴 결과 표시" aria-label="숨긴 결과 표시" aria-pressed={revealBlocked} disabled={loading} onClick={toggleRevealBlocked}><EyeSlashIcon aria-hidden="true" /></Button>
@@ -464,8 +493,8 @@ export function OnlineCatalogBrowser({ onSwitchLocal }: OnlineCatalogBrowserProp
     {status?.installed && <div className="online-catalog__sync-summary">
       {revealBlocked && <span className="online-catalog__visibility-status" role="status">숨긴 분류와 차단 태그를 표시 중입니다</span>}
       {catalogStreamStatus(status, language).lastError ? <span className="online-catalog__sync-status" role="alert">마지막 갱신 실패 — {catalogStreamStatus(status, language).lastError}</span>
-        : catalogStreamStatus(status, language).lastProgressAt ? <span className="online-catalog__sync-status">마지막 갱신 {localDateTime(catalogStreamStatus(status, language).lastProgressAt!)}{catalogStreamStatus(status, language).lastAdded > 0 ? ` · 신규 ${catalogStreamStatus(status, language).lastAdded.toLocaleString()}개` : ""}</span>
-        : <span className="online-catalog__sync-status">아직 갱신 기록이 없습니다</span>}
+        : !workspace && catalogStreamStatus(status, language).lastProgressAt ? <span className="online-catalog__sync-status">마지막 갱신 {localDateTime(catalogStreamStatus(status, language).lastProgressAt!)}{catalogStreamStatus(status, language).lastAdded > 0 ? ` · 신규 ${catalogStreamStatus(status, language).lastAdded.toLocaleString()}개` : ""}</span>
+        : !workspace && <span className="online-catalog__sync-status">아직 갱신 기록이 없습니다</span>}
     </div>}
     {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
     <div className="manga-browser__content online-catalog__content">

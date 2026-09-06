@@ -23,7 +23,7 @@ describe("AssetBrowser", () => {
     const status = vi.fn();
     const browser = (clearSelectionRequest: number) => (
       <LibraryProvider gateway={gateway}>
-        <AssetBrowser view={{ kind: "classification", classificationId: null }} classifications={classifications} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} clearSelectionRequest={clearSelectionRequest} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={status} />
+        <AssetBrowser galleryLayout="justified" view={{ kind: "classification", classificationId: null }} classifications={classifications} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} clearSelectionRequest={clearSelectionRequest} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={status} />
       </LibraryProvider>
     );
     const { rerender } = render(browser(0));
@@ -46,7 +46,7 @@ describe("AssetBrowser", () => {
 
     render(
       <LibraryProvider gateway={gateway}>
-        <AssetBrowser
+        <AssetBrowser galleryLayout="justified"
           view={view}
           classifications={classifications}
           sort={sort}
@@ -81,7 +81,7 @@ describe("AssetBrowser", () => {
     const gateway = createGateway({ items: [asset(0)], nextCursor: null });
     const renderView = (view: AssetView) => (
       <LibraryProvider gateway={gateway}>
-        <AssetBrowser
+        <AssetBrowser galleryLayout="justified"
           view={view}
           classifications={classifications}
           sort="newest"
@@ -136,7 +136,7 @@ describe("AssetBrowser", () => {
 
     render(
       <LibraryProvider gateway={gateway}>
-        <AssetBrowser
+        <AssetBrowser galleryLayout="justified"
           view={{ kind: "classification", classificationId: null }}
           classifications={classifications}
           sort="random"
@@ -180,7 +180,7 @@ describe("AssetBrowser", () => {
     const onThumbnailRowHeightChange = vi.fn();
     render(
       <LibraryProvider gateway={gateway}>
-        <AssetBrowser
+        <AssetBrowser galleryLayout="justified"
           view={{ kind: "classification", classificationId: null }}
           classifications={classifications}
           sort="newest"
@@ -238,7 +238,7 @@ describe("AssetBrowser", () => {
 
     render(
       <LibraryProvider gateway={gateway}>
-        <AssetBrowser
+        <AssetBrowser galleryLayout="justified"
           view={{ kind: "classification", classificationId: null }}
           classifications={classifications}
           sort="newest"
@@ -566,7 +566,7 @@ describe("AssetBrowser", () => {
     const { rerender } = renderBrowser(gateway, { sort: "newest" });
     await screen.findByRole("img", { name: "asset-0.png" });
 
-    rerender(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "classification", classificationId: null }} classifications={classifications} sort="oldest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
+    rerender(<LibraryProvider gateway={gateway}><AssetBrowser galleryLayout="justified" view={{ kind: "classification", classificationId: null }} classifications={classifications} sort="oldest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
 
     await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledWith(expect.objectContaining({ sort: "oldest", after: null })));
     expect(vi.mocked(gateway.listAssets).mock.calls).not.toContainEqual([expect.objectContaining({ sort: "oldest", after: { token: "old-cursor" } })]);
@@ -580,7 +580,7 @@ describe("AssetBrowser", () => {
     vi.mocked(gateway.listAssetDateBuckets).mockResolvedValue([{ date: "2026-08-06", count: 1 }]);
     render(
       <LibraryProvider gateway={gateway}>
-        <AssetBrowser view={{ kind: "revisit" }} classifications={classifications} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} />
+        <AssetBrowser galleryLayout="justified" view={{ kind: "revisit" }} classifications={classifications} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} />
       </LibraryProvider>,
     );
 
@@ -611,7 +611,7 @@ describe("AssetBrowser", () => {
     await user.dblClick(tile);
     expect(screen.getByRole("dialog")).toBeInTheDocument();
 
-    rerender(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "classification", classificationId: null }} classifications={classifications} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={1} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
+    rerender(<LibraryProvider gateway={gateway}><AssetBrowser galleryLayout="justified" view={{ kind: "classification", classificationId: null }} classifications={classifications} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={1} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
 
     await waitFor(() => expect(container.querySelector('[data-asset-id="asset-0"]')).toHaveAttribute("aria-selected", "true"));
     expect(container.querySelector('[data-asset-id="asset-0"]')).toHaveAccessibleName("After");
@@ -630,7 +630,7 @@ describe("AssetBrowser", () => {
     const user = userEvent.setup(); const gateway = createGateway();
     vi.mocked(gateway.listAssets).mockResolvedValue({ items: [{ ...asset(0), title: "Selected" }], nextCursor: null });
     const { rerender } = renderBrowser(gateway); await user.click(await screen.findByRole("option", { name: "Selected" }));
-    rerender(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "trash" }} classifications={classifications} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
+    rerender(<LibraryProvider gateway={gateway}><AssetBrowser galleryLayout="justified" view={{ kind: "trash" }} classifications={classifications} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
     expect(await screen.findByRole("option", { name: "Selected" })).toHaveAttribute("aria-selected", "false");
   });
 
@@ -769,7 +769,7 @@ describe("AssetBrowser", () => {
     const onMembershipChanged = vi.fn();
     render(
       <LibraryProvider gateway={gateway}>
-        <AssetBrowser view={{ kind: "classification", classificationId: null }} classifications={[]} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} onMembershipChanged={onMembershipChanged} />
+        <AssetBrowser galleryLayout="justified" view={{ kind: "classification", classificationId: null }} classifications={[]} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} onMembershipChanged={onMembershipChanged} />
       </LibraryProvider>,
     );
 
@@ -808,7 +808,7 @@ describe("AssetBrowser", () => {
     const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
     render(
       <LibraryProvider gateway={gateway}>
-        <AssetBrowser view={{ kind: "classification", classificationId: null }} classifications={[]} albums={[]} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} />
+        <AssetBrowser galleryLayout="justified" view={{ kind: "classification", classificationId: null }} classifications={[]} albums={[]} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} />
       </LibraryProvider>,
     );
     const first = await screen.findByRole("option", { name: "asset-0.png" });
@@ -876,7 +876,7 @@ describe("AssetBrowser", () => {
     const user = userEvent.setup();
     const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
     const onCollectionsChanged = vi.fn();
-    render(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "collection", collectionId: "collection-1" }} classifications={classifications} collections={[{ id: "collection-1", name: "엘든 링", description: null, type: "game", coverAssetId: null, selectedWorkArtworkId: null, selectedHeroArtworkId: null, selectedBackdropArtworkId: null, assetCount: 2, unreadReleaseCount: 0, year: null, originalTitle: null, runtimeMinutes: null, author: null, developer: null, publisher: null, platforms: null, productionCompany: null, releaseDate: null, director: null, externalScore: null, myScore: null, genres: null, overview: null, showcase: false, showcaseOrder: null, createdAt: "2026-08-10T00:00:00Z", updatedAt: "2026-08-10T00:00:00Z" }]} onCollectionsChanged={onCollectionsChanged} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
+    render(<LibraryProvider gateway={gateway}><AssetBrowser galleryLayout="justified" view={{ kind: "collection", collectionId: "collection-1" }} classifications={classifications} collections={[{ id: "collection-1", name: "엘든 링", description: null, type: "game", coverAssetId: null, selectedWorkArtworkId: null, selectedHeroArtworkId: null, selectedBackdropArtworkId: null, assetCount: 2, unreadReleaseCount: 0, year: null, originalTitle: null, runtimeMinutes: null, author: null, developer: null, publisher: null, platforms: null, productionCompany: null, releaseDate: null, director: null, externalScore: null, myScore: null, genres: null, overview: null, showcase: false, showcaseOrder: null, createdAt: "2026-08-10T00:00:00Z", updatedAt: "2026-08-10T00:00:00Z" }]} onCollectionsChanged={onCollectionsChanged} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
     const first = await screen.findByRole("option", { name: "asset-0.png" });
     first.focus();
     await user.keyboard("{Control>}a{/Control}");
@@ -892,7 +892,7 @@ describe("AssetBrowser", () => {
     const user = userEvent.setup();
     const gateway = createGateway({ items: [asset(0)], nextCursor: null });
     const onCollectionsChanged = vi.fn();
-    render(<LibraryProvider gateway={gateway}><AssetBrowser view={{ kind: "collection", collectionId: "collection-1" }} classifications={classifications} onCollectionsChanged={onCollectionsChanged} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
+    render(<LibraryProvider gateway={gateway}><AssetBrowser galleryLayout="justified" view={{ kind: "collection", collectionId: "collection-1" }} classifications={classifications} onCollectionsChanged={onCollectionsChanged} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
 
     await user.click(await screen.findByRole("option", { name: "asset-0.png" }));
     await user.click(screen.getByRole("button", { name: "대표 이미지로 지정" }));
@@ -908,7 +908,7 @@ it("opens a requested asset that is not in the loaded page and clears it on clos
   const onRequestedAssetHandled = vi.fn();
   render(
     <LibraryProvider gateway={createGateway()}>
-      <AssetBrowser
+      <AssetBrowser galleryLayout="justified"
         view={{ kind: "classification", classificationId: null }}
         classifications={[]}
         sort="newest"
@@ -934,7 +934,7 @@ function renderBrowser(gateway: LibraryGateway, options: BrowserOptions = {}) {
 
 type BrowserOptions = { view?: AssetView; sort?: AssetSort; refreshVersion?: number; status?: (status: AssetBrowserStatus) => void };
 function browserElement(gateway: LibraryGateway, { view = { kind: "classification", classificationId: null }, sort = "newest", refreshVersion = 0, status = vi.fn() }: BrowserOptions = {}) {
-  return <LibraryProvider gateway={gateway}><AssetBrowser view={view} classifications={classifications} sort={sort} metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={refreshVersion} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={status} /></LibraryProvider>;
+  return <LibraryProvider gateway={gateway}><AssetBrowser galleryLayout="justified" view={view} classifications={classifications} sort={sort} metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={refreshVersion} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={status} /></LibraryProvider>;
 }
 
 function asset(index: number) {

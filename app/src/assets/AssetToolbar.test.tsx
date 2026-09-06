@@ -38,7 +38,7 @@ it("shows the fixed browsing slots regardless of the selection", () => {
   expect(screen.getByRole("heading", { name: "저장소" })).toBeVisible();
   expect(screen.getByLabelText("정렬")).toBeVisible();
   expect(screen.getByLabelText("미리보기 크기")).toBeVisible();
-  expect(screen.getByLabelText("정보 표시")).toBeVisible();
+  expect(screen.getByLabelText("정보 숨기기")).toBeVisible();
   expect(screen.getByLabelText("비공개 모드")).toBeVisible();
   expect(screen.getByLabelText("정렬 및 필터")).toBeVisible();
   expect(screen.getByLabelText("보기 설정")).toBeVisible();
@@ -66,7 +66,8 @@ it("places media and aspect filters after sort only in asset browsing views", as
     />,
   );
 
-  expect(screen.getAllByRole("combobox")).toHaveLength(1);
+  expect(screen.getAllByRole("combobox")).toHaveLength(2);
+  expect(screen.getByRole("combobox", { name: "배치" })).toBeVisible();
   expect(screen.getByRole("combobox", { name: "정렬" })).toBeVisible();
 
   await user.click(screen.getByRole("button", { name: "미디어 필터: 전체" }));
@@ -175,4 +176,17 @@ it("reserves the reshuffle slot without an interactive control", () => {
   rerender(<AssetToolbar {...baseProps} sort="random" />);
   expect(container.querySelector(".asset-toolbar__action-placeholder")).toBeNull();
   expect(screen.getByRole("button", { name: "다시 섞기" })).toBeVisible();
+});
+
+it("leaves information visible when Hide information is off", async () => {
+  const onMetadataVisibleChange = vi.fn();
+  const user = userEvent.setup();
+  const { rerender } = render(<AssetToolbar {...baseProps} metadataVisible onMetadataVisibleChange={onMetadataVisibleChange} />);
+  expect(screen.getByLabelText("정보 숨기기")).not.toBeChecked();
+  await user.click(screen.getByLabelText("정보 숨기기"));
+  expect(onMetadataVisibleChange).toHaveBeenLastCalledWith(false);
+  rerender(<AssetToolbar {...baseProps} metadataVisible={false} onMetadataVisibleChange={onMetadataVisibleChange} />);
+  expect(screen.getByLabelText("정보 숨기기")).toBeChecked();
+  await user.click(screen.getByLabelText("정보 숨기기"));
+  expect(onMetadataVisibleChange).toHaveBeenLastCalledWith(true);
 });
