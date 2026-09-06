@@ -893,6 +893,22 @@ describe("AssetBrowser", () => {
     expect(await selectionAction("휴지통으로 이동")).not.toBeDisabled();
   });
 
+  it("excludes selected assets only from the active album without trashing originals", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
+    vi.mocked(gateway.patchAssetAlbums).mockResolvedValue(undefined);
+    renderBrowser(gateway, { view: { kind: "album", albumId: "album-1" } });
+    await user.click(await screen.findByRole("option", { name: "asset-0.png" }));
+    await user.keyboard("{Control>}a{/Control}");
+    const previousQueries = vi.mocked(gateway.listAssets).mock.calls.length;
+    await user.click(await selectionAction("이 앨범에서 제외"));
+    await waitFor(() => expect(gateway.patchAssetAlbums).toHaveBeenCalledWith({
+      assetIds: ["asset-0", "asset-1"], addAlbumIds: [], removeAlbumIds: ["album-1"],
+    }));
+    expect(gateway.trashAssets).not.toHaveBeenCalled();
+    await waitFor(() => expect(vi.mocked(gateway.listAssets).mock.calls.length).toBeGreaterThan(previousQueries));
+  });
+
   it("removes the selection from the active collection and refreshes the gallery", async () => {
     const user = userEvent.setup();
     const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
