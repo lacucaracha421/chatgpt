@@ -28,7 +28,8 @@ Manga is volume-centric. The pleasure is seeing covers together, understanding s
 
 - Use cover-first rows/shelves with a subtle shared support/contact cue.
 - Front cover remains roughly 90–95% of the perceived object.
-- Thin page/book depth is allowed; heavy wood, room furniture, spine-only browsing, or large 3D is not.
+- Approved Paperback FINAL supplies the closed paper-cover/page-block model. Thin physical depth is intentional; heavy wood, room furniture and spine-only browsing are not.
+- Library/volume rows show cached static renders of that model. Only the current appreciation book is live 3D; no per-tile WebGL contexts.
 - Preserve source aspect ratio rather than cropping every volume into one cabinet shape.
 
 ### Manga detail
@@ -40,6 +41,9 @@ The volume shelf is the primary content, not a generic metadata hero.
 - hide edition UI when only one edition exists;
 - use meaningful edition names when available;
 - clicking a volume primarily opens cover appreciation with previous/next volume navigation;
+- the large cover and the same-edition thumbnail strip occupy separate layout rows; preserve the cover aspect and leave the strip unobscured;
+- retain the gentle cursor tilt, respect reduced motion, and offer an original-image fallback/view;
+- the selected volume lifts slightly; compact work information stays secondary to the shelf; large lists use row virtualization without losing order, keyboard focus or scroll restoration;
 - ISBN, publisher, provider identity and other deep edition data stay secondary.
 
 MangaDex may supply work identity/general metadata and cover candidates. Korean release providers such as Aladin supply local commercial-edition/release information. The shelf design must survive provider replacement.
@@ -104,7 +108,9 @@ TMDB expansion should add only data needed by an approved presentation: TV searc
 Showcase is a manually curated exhibition, not an automatic favorites filter or ranking page.
 
 - membership and order remain user-controlled;
-- type-aware presentation remains intact;
+- game, manga and film are separate exhibition scopes; type-aware presentation remains intact;
+- selected works, not synthetic ranking or recommendations, fill a cover-only wall: up to 9 uses 3?3, 10?16 uses 4?4, more than 16 continues on pages;
+- pack the wall by the available book/poster height rather than distributing narrow objects across the whole window; titles may appear on hover/focus;
 - use the same primitives as normal Library/Detail with slightly more space and appreciation;
 - stronger book/package lift or larger artwork is allowed, but no simulated room, cabinet renderer, or continuous animation;
 - clicking a Showcase item opens the normal Collection detail model.
@@ -145,7 +151,11 @@ Reusable concepts may include:
 
 Names and exact component boundaries are implementation choices, not a requirement to create abstraction before a second real use case exists.
 
-Ordinary grids should remain lightweight. No Three.js/WebGL, giant decoded provider images, continuous pointer-driven 3D, or expensive per-frame layout measurements for normal browsing.
+Ordinary grids remain static image surfaces. The approved Paperback FINAL allows one shared, on-demand WebGL2 renderer to bake nearby book thumbnails and display one live appreciation book. It does not authorize a WebGL canvas per tile, continuous animation, or unbounded full-resolution decoding.
+
+Current implementation is in `app/src/collections/physical/`: a common 7,888-triangle model, serialized/cancellable snapshot queue, reference-counted bounded raster cache, and one live-book owner. Static images have an estimated decoded budget of 24 MiB / 64 entries; GPU cover textures have an estimated 12 MiB / 4-entry budget. These are managed-resource estimates, not total browser RAM/VRAM measurements. Live input is capped at 30fps, DPR 1.5 and 1.4 million pixels; idle drawing stops. The cache is memory-only and recreated after restart.
+
+Game optimization reuses the existing `drawGameCase.ts` projection unchanged, snapshots through a shared 2D surface, and releases offscreen tile subscriptions. It is not a game-case redesign. Movie detail remains unchanged.
 
 ## 9. Non-goals
 

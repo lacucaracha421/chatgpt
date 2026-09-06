@@ -1,3 +1,14 @@
+// Raster lifecycle is covered separately; jsdom has no canvas/WebGL implementation.
+vi.mock("./physical/coverVisibility", () => ({
+  observeCover: (_element: Element, callback: (visible: boolean) => void) => { callback(true); return () => undefined; },
+  observeCoverSize: () => () => undefined,
+}));
+vi.mock("./physical/collectibleRuntime", () => ({
+  coverKey: (request: unknown) => JSON.stringify(request),
+  acquireCover: (_request: unknown, listener: (value: null) => void) => { listener(null); return () => undefined; },
+  attachLiveBook: (_host: unknown, _request: unknown, onReady: (value: boolean) => void) => { onReady(false); return { tilt: () => undefined, refresh: () => undefined, dispose: () => undefined }; },
+}));
+
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";

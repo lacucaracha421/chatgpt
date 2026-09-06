@@ -33,7 +33,7 @@ type CollectionOverlayProps = {
 };
 
 export function CollectionOverlay({ collectionId, collections, onExit, onChanged, onOpenSettings }: CollectionOverlayProps) {
-  const { gateway } = useLibrary();
+  const { gateway, library } = useLibrary();
   const { privacyMode } = usePrivacy();
   const [covers, setCovers] = useState<CollectionCover[] | null>(null);
   const [volumes, setVolumes] = useState<CollectionVolume[] | null>(null);
@@ -500,6 +500,7 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
       {isGame && collection ? (
         <GameCollectionDetail
           collection={collection}
+          renderScope={library?.root ?? ""}
           coverUrl={gameCoverUrl}
           heroUrl={gameHeroUrl}
           artworks={workArtworks}
@@ -533,6 +534,8 @@ export function CollectionOverlay({ collectionId, collections, onExit, onChanged
               {volumes !== null ? (
                 <CollectionVolumeGrid
                   volumes={volumes}
+                  scope={library?.root ?? ""}
+                  revision={collection?.updatedAt ?? ""}
                   selectedVolumeId={selectedVolumeId}
                   editionIndex={editionIndex}
                   onEditionIndexChange={selectEdition}

@@ -88,12 +88,12 @@ PC 자산 기본 보기는 **수집일별 masonry/waterfall**이다. justified r
 모든 매체를 같은 카드 효과로 만들지 않는다.
 
 - **게임**: 접합부가 보이는 닫힌 neutral case. 앞표지가 주인공이며 플랫폼 띠·가짜 책등·가짜 뒷표지를 만들지 않는다.
-- **만화**: 얇은 책의 물성, 권 순서와 cover appreciation을 강조한다. 선반은 support cue이지 가구 시뮬레이션이 아니다.
+- **만화**: 승인된 Paperback FINAL의 얇은 단행본을 사용한다. 목록은 정적 렌더 캐시, 큰 표지 감상창의 한 권만 실시간 3D로 표시한다. 권 순서·선택권의 작은 lift·가리지 않는 하단 표지 스트립을 유지한다. 선반은 support cue이지 가구 시뮬레이션이 아니다.
 - **영화/영상**: 일반 목록은 평면 poster archive다. 게임 케이스나 책 물성을 강제하지 않는다.
 - **상세**: 원본 hero/backdrop 뒤에 표지를 겹치고 하단을 넓게 fade한다. 표지에는 fade를 걸지 않는다.
 - 배경이 없으면 가짜 blurred background를 만들지 않고 상단 공간을 접어 compact 정보 배치로 전환한다.
 
-물성은 Library < Detail < Showcase 순으로 강해질 수 있지만, ordinary UI와 Asset tile에는 전염시키지 않는다.
+물성은 Library < Detail < Showcase 순으로 강해질 수 있지만, ordinary UI와 Asset tile에는 전염시키지 않는다. 쇼케이스는 매체별로 사용자가 고른 표지만 촘촘히 전시하며 9개까지 3×3, 10개부터 4×4, 16개 초과는 다음 페이지로 이어진다.
 
 ## 9. Floating surface와 tooltip
 
@@ -112,6 +112,7 @@ PC 자산 기본 보기는 **수집일별 masonry/waterfall**이다. justified r
 - gallery scroll 중 레이아웃 재계산·shadow·transform을 매 프레임 추가하지 않는다.
 - 게임 case/만화 cover의 작은 lift·depth는 수집품 감상이라는 의미가 있을 때만 제한적으로 허용한다.
 - reduced motion과 keyboard path를 깨지 않는다.
+- 공통 모델·단일 렌더러·상한 있는 캐시를 공유한다. 타일마다 3D 컨텍스트를 만들지 않고, 화면 밖 작업은 취소하고 유휴 상태에서는 그리기를 멈춘다.
 
 ## 11. 피해야 할 것
 

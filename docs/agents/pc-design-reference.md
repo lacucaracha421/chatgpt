@@ -185,7 +185,17 @@ The case renderer may use unified 2D projection/high-DPR sampling to avoid jagge
 
 ### Manga
 
-Manga uses thin book physicality and volume-centered shelf grammar. A shelf is a baseline/contact cue, not wood furniture or a rendered room.
+Manga uses the approved **Paperback FINAL** model and volume-centered shelf grammar: separate thin covers, a recessed page block, satin print and unprinted spine/back. The supplied final artifact is the visual baseline, including depth `.12`, right binding, live pose `.13/.34/.005` and the reference static paper-side angle `.40`; these are local renderer parameters, not a claim about a real edition. A shelf is a contact cue, not furniture.
+
+- Library and volume lists display nearby cached static renders; row virtualization bounds large-list DOM work.
+- Appreciation uses one live book with on-demand cursor tilt. A separate footer owns same-edition thumbnails, position and original-image mode, so it never overlays the large cover.
+- Showcase keeps manual membership/order within each media type. Cover-only pages use 3×3 for up to 9 works, 4×4 from 10, and pagination beyond 16. The wall is packed around the objects rather than spread across the viewport.
+- A shared serialized raster cache is capped at 64 entries / estimated decoded 24 MiB; book GPU textures at 4 / estimated 12 MiB. Drawing stops at idle and when hidden. Current-view callbacks and image URLs are released on scope/source changes.
+- Source keys include library scope, artwork URL, revision, render preset and pixel bucket. No DB or provider-state ownership moves into the renderer; there is no persistent thumbnail-cache schema in this slice.
+- Game cases share cached 2D snapshots while `drawGameCase.ts` geometry/lighting remains unchanged. Existing neutral loading silhouettes are cached too.
+- Native cover responses allow anonymous canvas use only for exact app origins and cover-image routes. CSP permits local blob images, not remote script execution. Failure falls back to the original cover.
+
+Implementation: `app/src/collections/physical/`, `CollectionCard.tsx`, `CollectionVolumeGrid.tsx`, `MangaCoverViewer.tsx`, `GameCase.tsx`, and the response-only `collectible_cors.rs` helper.
 
 ### Film/video
 
@@ -252,6 +262,18 @@ Evidence recorded during the redesign included:
 - real Collection fixture search reducing visible results while the input surface closed.
 
 This is not native production-library acceptance. Browser fixtures do not prove Tauri file dialog, OS window, real media protocol, active-library performance, or every DPR/GPU path.
+
+### Paperback FINAL / case optimization verification (2026-09-06)
+
+The final prototype was approved for application, not retained as another open design vote. The renderer, virtual grids, appreciation strip and cover-only paged exhibition are integrated in React; no prototype artwork or fixture gateway is shipped.
+
+Verification: TypeScript passed. The Collection suite passed 393 tests during integration; after the final behavior changes the affected 249-test subset passed again. The native response helper passed 3 Rust tests. Existing unrelated warnings were not rewritten.
+
+An isolated Edge 152 frontend fixture rendered the actual components with synthetic, separately keyed artwork URLs. Observed 1,000-item library/volume lists kept 28–42 card DOM nodes depending on viewport/range; the snapshot cache stayed at or below 64 entries and estimated decoded 24 MiB. One reusable book mesh/WebGL context was used; grids had no live canvas per tile. Settled list and live-viewer observations each added zero renders over two idle seconds. Game snapshot generation also stopped at idle. Source checks confirmed `drawGameCase.ts` itself unchanged.
+
+The fixture exercised 9/10/16/20-item exhibition boundaries, page two, 800×640 and 1536×960 layouts, DPR 1.125/1.25/2, original-image fallback, context loss/restoration, privacy unmount, previous/next volumes, Esc-to-opener focus and virtual-grid scroll/focus restoration. Cover and thumbnail-strip bounds remained separate; an unnecessary 8px exhibition overflow and legacy frame/label overlap were corrected.
+
+These are isolated browser observations, not a benchmark of 1,000 distinct high-resolution originals or native production-library acceptance. Native CORS/CSP integration was compiled/tested but not verified by opening the active library. Rebuild/restart through the normal Tauri development command for native acceptance; do not directly launch the debug executable. Caches are bounded in memory, not persistent on disk, and first-time raster generation still has a cost.
 
 ## 14. Review checklist
 

@@ -15,6 +15,8 @@ import { Menu } from "../shared/ui/Menu";
 import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { CollectionCard } from "./CollectionCard";
+import { VirtualCoverGrid } from "./physical/VirtualCoverGrid";
+import { CollectionExhibition, exhibitionPage } from "./physical/CollectionExhibition";
 import { CollectionEditDialog, type CollectionEditMode } from "./CollectionEditDialog";
 import { MangaDexImportDialog } from "./MangaDexImportDialog";
 import { IgdbImportDialog } from "./IgdbImportDialog";
@@ -26,7 +28,7 @@ const TYPE_LABEL: Record<CollectionType, string> = {
   manga: "만화",
   movie: "영화",
 };
-export type CollectionNavigationMemory = Map<string, { scrollTop: number; focusId: string | null }>;
+export type CollectionNavigationMemory = Map<string, { scrollTop: number; focusId: string | null; page?: number }>;
 
 type CollectionBrowserProps = {
   navigationMemory?: CollectionNavigationMemory;
@@ -49,7 +51,7 @@ export function CollectionBrowser({
   libraryState,
   onLibraryStateChange,
 }: CollectionBrowserProps) {
-  const { gateway } = useLibrary();
+  const { gateway, library } = useLibrary();
   const workspace = useWorkspaceChrome();
   const [editMode, setEditMode] = useState<CollectionEditMode | null>(null);
   const [mangaDexOpen, setMangaDexOpen] = useState(false);
@@ -61,20 +63,39 @@ export function CollectionBrowser({
   libraryStateRef.current = libraryState;
   useAutoDismiss(message, setMessage);
   const stageRef = useRef<HTMLDivElement>(null);
-  const scope = JSON.stringify([typeFilter, showcase, libraryState]);
+  const [pageMemory, setPageMemory] = useState<{ scope: string; page: number } | null>(null);
+  const scope = JSON.stringify([library?.root ?? "", typeFilter, showcase, libraryState]);
   useLayoutEffect(() => {
     const stage = stageRef.current;
     if (!stage) return;
     const remembered = navigationMemory?.get(scope);
     stage.scrollTop = remembered?.scrollTop ?? 0;
-    if (remembered?.focusId) [...stage.querySelectorAll<HTMLElement>("[data-collection-id]")].find((card) => card.dataset.collectionId === remembered.focusId)?.focus({ preventScroll: true });
-    return () => { navigationMemory?.set(scope, { scrollTop: stage.scrollTop, focusId: navigationMemory.get(scope)?.focusId ?? null }); };
+    let restoreFrame = 0;
+    let observer: MutationObserver | null = null;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    if (remembered?.focusId) {
+      const focus = () => {
+        const card = [...stage.querySelectorAll<HTMLElement>("[data-collection-id]")].find(item => item.dataset.collectionId === remembered.focusId);
+        if (!card) return;
+        card.focus({ preventScroll: true }); observer?.disconnect(); clearTimeout(timeout);
+      };
+      // Virtual rows can arrive after their first measurement; do not poll forever.
+      observer = new MutationObserver(focus); observer.observe(stage, { childList: true, subtree: true });
+      timeout = setTimeout(() => observer?.disconnect(), 800);
+      restoreFrame = requestAnimationFrame(() => { restoreFrame = requestAnimationFrame(focus); });
+    }
+    return () => { cancelAnimationFrame(restoreFrame); clearTimeout(timeout); observer?.disconnect(); navigationMemory?.set(scope, { ...navigationMemory.get(scope), scrollTop: stage.scrollTop, focusId: navigationMemory.get(scope)?.focusId ?? null }); };
   }, [scope, navigationMemory]);
 
   const visible = showcase
     ? collections.filter((collection) => collection.type === typeFilter && collection.showcase).sort((a, b) => (a.showcaseOrder ?? Number.MAX_SAFE_INTEGER) - (b.showcaseOrder ?? Number.MAX_SAFE_INTEGER) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
     : deriveCollectionLibrary(collections, typeFilter, libraryState);
   const sectionLabel = TYPE_LABEL[typeFilter];
+  const exhibition = exhibitionPage(visible.length, pageMemory?.scope === scope ? pageMemory.page : navigationMemory?.get(scope)?.page ?? 0);
+  function changeExhibitionPage(page: number) {
+    setPageMemory({ scope, page });
+    navigationMemory?.set(scope, { scrollTop: 0, focusId: null, page });
+  }
 
   function setTypeFilter(next: CollectionType) {
     onViewChange({ kind: "collections", typeFilter: next, showcase });
@@ -119,6 +140,38 @@ export function CollectionBrowser({
     }
   }
 
+  const renderCollection = (collection: CollectionSummary) => (
+            <ContextMenu
+              key={collection.id}
+              items={[
+                { id: "edit", label: "편집", onSelect: () => setEditMode({ kind: "edit", collection }) },
+                { id: "showcase", label: collection.showcase ? "쇼케이스에서 제거" : "쇼케이스에 추가", onSelect: () => void toggleShowcase(collection) },
+                { id: "delete", label: "삭제", destructive: true, onSelect: () => setDeleteTarget(collection) },
+              ]}
+            >
+              <CollectionCard
+                collection={collection}
+                coverUrl={
+                  collection.selectedWorkArtworkId
+                    ? workArtworkThumbnailUrl(collection.selectedWorkArtworkId)
+                    : collection.coverAssetId
+                    ? thumbnailUrl(collection.coverAssetId)
+                    : collection.sourcePath
+                      ? collectionSourceThumbnailUrl(collection.id)
+                      : null
+                }
+                selected={false}
+                scope={library?.root ?? ""}
+                exhibition={showcase}
+                onClick={() => {
+                  navigationMemory?.set(scope, { scrollTop: stageRef.current?.scrollTop ?? 0, focusId: collection.id, page: exhibition.page });
+                  onViewChange({ kind: "collection", collectionId: collection.id });
+                }}
+              />
+            </ContextMenu>
+
+  );
+
   const indexActions = (
           <Menu
             label="새 컬렉션"
@@ -146,7 +199,7 @@ export function CollectionBrowser({
         actions={indexActions}
         chrome={{
           actions: indexActions,
-          navigation: <><ModeSegment showcase={showcase} onChange={setShowcase} /><span className="workspace-section-label">작품 유형</span><TypeSegment current={typeFilter} onChange={setTypeFilter} />{!showcase && <div className="chrome-index-controls chrome-settings-controls">{indexControls}</div>}</>,
+          navigation: <><ModeSegment showcase={showcase} onChange={setShowcase} /><span className="workspace-section-label">{showcase ? "전시관" : "작품 유형"}</span><TypeSegment current={typeFilter} onChange={setTypeFilter} />{!showcase && <div className="chrome-index-controls chrome-settings-controls">{indexControls}</div>}</>,
           summary: `${sortLabel(libraryState.sort)}${libraryState.rating !== "all" ? ` · 내 별점 ${ratingLabel(libraryState.rating)}` : ""}`,
           status: <span>{showcase ? "선정 작품" : "작품"} {visible.length}개</span>,
           search: showcase ? undefined : { scope: `${sectionLabel} 컬렉션`, query: libraryState.query, label: "제목 검색", placeholder: "작품 제목 검색", onApply: (query) => patchLibraryState({ query }) },
@@ -182,7 +235,7 @@ export function CollectionBrowser({
         </div>
       </ViewToolbar>
       {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
-      <div ref={stageRef} className={`collection-browser__stage${showcase ? " collection-browser__stage--showcase" : ""}`}>
+      <div className={`collection-browser__stage${showcase ? " collection-browser__stage--showcase" : ""}`}>
         {!workspace && <div className="collection-browser__heading">
           <div>
             <h3>{sectionLabel} {showcase ? "쇼케이스" : "컬렉션"}</h3>
@@ -190,41 +243,16 @@ export function CollectionBrowser({
           <span>{showcase ? "선정 작품" : "작품"} {visible.length}개</span>
         </div>}
         <div
-          className="collection-browser__grid"
+          className="collection-browser__content-final"
           onContextMenu={(event) => {
             if ((event.target as HTMLElement).closest(".collection-card")) return;
             event.preventDefault();
             setEditMode({ kind: "create", type: typeFilter });
           }}
         >
-          {visible.map((collection) => (
-            <ContextMenu
-              key={collection.id}
-              items={[
-                { id: "edit", label: "편집", onSelect: () => setEditMode({ kind: "edit", collection }) },
-                { id: "showcase", label: collection.showcase ? "쇼케이스에서 제거" : "쇼케이스에 추가", onSelect: () => void toggleShowcase(collection) },
-                { id: "delete", label: "삭제", destructive: true, onSelect: () => setDeleteTarget(collection) },
-              ]}
-            >
-              <CollectionCard
-                collection={collection}
-                coverUrl={
-                  collection.selectedWorkArtworkId
-                    ? workArtworkThumbnailUrl(collection.selectedWorkArtworkId)
-                    : collection.coverAssetId
-                    ? thumbnailUrl(collection.coverAssetId)
-                    : collection.sourcePath
-                      ? collectionSourceThumbnailUrl(collection.id)
-                      : null
-                }
-                selected={false}
-                onClick={() => {
-                  navigationMemory?.set(scope, { scrollTop: stageRef.current?.scrollTop ?? 0, focusId: collection.id });
-                  onViewChange({ kind: "collection", collectionId: collection.id });
-                }}
-              />
-            </ContextMenu>
-          ))}
+          {visible.length > 0 && (showcase ?
+            <CollectionExhibition items={visible} page={exhibition.page} onPageChange={changeExhibitionPage} render={renderCollection} scrollRef={stageRef} /> :
+            <VirtualCoverGrid items={visible} itemKey={collection => collection.id} render={renderCollection} legacyMetrics={typeFilter !== "manga"} metadataHeight={38} label={`${sectionLabel} 작품 목록`} scrollRef={stageRef} />)}
           {visible.length === 0 && (
             <div className="collection-browser__empty">
               {!showcase && (libraryState.query.trim() || libraryState.rating !== "all") ? <EmptyState title="조건에 맞는 작품이 없습니다."><p>검색어나 별점 조건을 바꿔보세요.</p><Button onClick={() => patchLibraryState({ query: "", rating: "all" })}>검색·필터 초기화</Button></EmptyState> : <EmptyState title={showcase ? "쇼케이스에 컬렉션이 없습니다." : "컬렉션이 없습니다."}>

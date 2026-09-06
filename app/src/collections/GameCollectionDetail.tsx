@@ -7,6 +7,7 @@ import { WorkArtworkGallery } from "./WorkArtworkGallery";
 
 export type GameCollectionDetailProps = {
   collection: CollectionSummary;
+  renderScope?: string;
   coverUrl: string | null;
   heroUrl: string | null;
   artworks: WorkArtworkSummary[];
@@ -22,6 +23,7 @@ export type GameCollectionDetailProps = {
 
 export function GameCollectionDetail({
   collection,
+  renderScope = "",
   coverUrl,
   heroUrl,
   artworks,
@@ -94,7 +96,7 @@ export function GameCollectionDetail({
               onPointerMove={tiltPackage}
               onPointerLeave={(event) => clearTilt(event.currentTarget)}
             >
-              {coverUrl && !privacyMode ? <GameCase src={coverUrl} alt={`${collection.name} 표지`} onError={() => setFailedCover(coverUrl)} /> : <span className="game-collection-detail__package-placeholder" aria-label="표지 없음" />}
+              {coverUrl && !privacyMode ? <GameCase src={coverUrl} alt={`${collection.name} 표지`} scope={renderScope} revision={collection.updatedAt} large onError={() => setFailedCover(coverUrl)} /> : <span className="game-collection-detail__package-placeholder" aria-label="표지 없음" />}
             </button>
           </div>}
           <div className="game-collection-detail__copy">

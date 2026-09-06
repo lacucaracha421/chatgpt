@@ -1,3 +1,4 @@
+mod collectible_cors;
 mod catalog_source;
 mod catalog_transport;
 mod cloud;
@@ -51,15 +52,21 @@ pub fn run() {
                 .get(tauri::http::header::RANGE)
                 .and_then(|value| value.to_str().ok())
                 .map(str::to_string);
+            let origin = request
+                .headers()
+                .get(tauri::http::header::ORIGIN)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned);
             let method = request.method().clone();
             let path = request.uri().path().to_string();
             tauri::async_runtime::spawn_blocking(move || {
-                let response = media_protocol::media_response_gated(
+                let mut response = media_protocol::media_response_gated(
                     library.as_ref(),
                     &method,
                     &path,
                     range.as_deref(),
                 );
+                collectible_cors::allow_cover_canvas(&mut response, origin.as_deref(), &path);
                 responder.respond(response);
             });
         })
