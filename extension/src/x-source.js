@@ -176,7 +176,17 @@
   }
 
   function findVideoPostSource(video) {
-    return findPostSource(video, null, "video");
+    const source = findPostSource(video, null, "video");
+    if (source) return source;
+    // X quote cards can omit every status link. The mini-player carries the
+    // video post ID; only inspect this video's player, never the outer tweet.
+    const player = video.closest?.('[data-testid="videoPlayer"]');
+    const marker = player?.querySelector?.('[data-testid^="video-player-mini-ui-"]');
+    const postId = marker?.getAttribute?.('data-testid')?.match(/^video-player-mini-ui-(\d+)$/)?.[1];
+    if (!postId) return null;
+    const avatar = postScope(video)?.querySelector?.('[data-testid^="UserAvatar-Container-"]');
+    const author = avatar?.getAttribute?.('data-testid')?.match(/^UserAvatar-Container-([A-Za-z0-9_]{1,15})$/)?.[1] || 'i';
+    return withMediaIndex({author, postId, sourceUrl:`https://x.com/${author}/status/${postId}`}, inferVideoIndex(video), "video");
   }
 
   function findDirectStatusLink(element, kind) {

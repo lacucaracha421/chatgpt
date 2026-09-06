@@ -327,3 +327,28 @@ test("gallery images preserve explicit post metadata for the existing radial sav
   assert.equal(candidate.postId, "999");
   assert.equal(candidate.mediaIndex, 3);
 });
+
+test("linkless quoted video uses its own mini-player identity, never the outer post", () => {
+  let markerId = "video-player-mini-ui-222";
+  const marker = {getAttribute: () => markerId};
+  const quote = {
+    querySelectorAll: selector => selector === '[data-testid="videoPlayer"]' ? [player] : selector === 'video' ? [video] : [],
+    querySelector: selector => selector.startsWith('[data-testid^="UserAvatar') ? {getAttribute: () => 'UserAvatar-Container-quoted'} : null,
+  };
+  const outer = {querySelectorAll: () => [{getAttribute: () => '/outer/status/111'}]};
+  function closest(selector) {
+    if (selector === 'video') return video;
+    if (selector === '[data-testid="videoPlayer"]') return player;
+    if (selector === 'article') return outer;
+    if (selector.includes('quoteTweet')) return quote;
+    return null;
+  }
+  const player = {closest, querySelector: selector => selector.includes('video-player-mini-ui-') ? marker : null};
+  const video = {closest};
+  const candidate = findCandidate(video);
+  assert.equal(candidate.postId, '222');
+  assert.equal(candidate.author, 'quoted');
+  assert.equal(candidate.sourceUrl, 'https://x.com/quoted/status/222/video/1');
+  markerId = 'video-player-mini-ui-invalid';
+  assert.equal(findCandidate(video), null);
+});
