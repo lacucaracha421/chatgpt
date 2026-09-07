@@ -461,7 +461,7 @@ describe("App", () => {
     })));
     expect(screen.getByRole("button", { name: "전체" })).toHaveAttribute("aria-current", "page");
     const rail = screen.getByRole("navigation", { name: "주요 영역" });
-    expect(within(rail).getAllByRole("button").map((button) => button.textContent)).toEqual(["에셋", "컬렉션", "망가", "다시보기", "미분류", "휴지통", "관리"]);
+    expect(within(rail).getAllByRole("button").map((button) => button.textContent)).toEqual(["에셋", "컬렉션", "망가", "다시보기", "메모", "미분류", "휴지통", "관리"]);
     expect(screen.queryByRole("navigation", { name: "빠른 보기" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "미분류" }));

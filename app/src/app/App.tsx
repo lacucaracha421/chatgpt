@@ -1,4 +1,5 @@
 import { applyInitialCountOrder, reorderFolders } from "../classification/folderOrder";
+import { useNotesCloseGuard } from "../notes/useNotesCloseGuard";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { AssetBrowser, type AssetBrowserStatus } from "../assets/AssetBrowser";
@@ -55,6 +56,7 @@ import { BackNavigationProvider, useBackHandler, useBackRequest } from "../share
 const CollectionBrowser = lazy(() => import("../collections/CollectionBrowser").then((module) => ({ default: module.CollectionBrowser })));
 const CollectionOverlay = lazy(() => import("../collections/CollectionOverlay").then((module) => ({ default: module.CollectionOverlay })));
 const RevisitedBundleView = lazy(() => import("../revisit/RevisitedBundleView").then((module) => ({ default: module.RevisitedBundleView })));
+const NotesView = lazy(() => import("../notes/NotesView").then((module) => ({default:module.NotesView})));
 const SettingsView = lazy(() => import("../settings/SettingsView").then((module) => ({ default: module.SettingsView })));
 const StatisticsPanel = lazy(() => import("../statistics/StatisticsPanel").then((module) => ({ default: module.StatisticsPanel })));
 const TrashBrowser = lazy(() => import("../safety/TrashBrowser").then((module) => ({ default: module.TrashBrowser })));
@@ -93,6 +95,7 @@ export function App({
 }
 
 function DesktopInteractions() {
+  useNotesCloseGuard();
   useDesktopInteractions(useBackRequest());
   return null;
 }
@@ -239,7 +242,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     retry: gateway.retryVideoPreparation,
     onChanged: () => setAssetRefresh((current) => current + 1),
   });
-  const dropEnabled = maintenance === null && view.kind !== "trash" && view.kind !== "similarity_review" && view.kind !== "settings" && view.kind !== "statistics" && view.kind !== "manga";
+  const dropEnabled = maintenance === null && view.kind !== "trash" && view.kind !== "similarity_review" && view.kind !== "settings" && view.kind !== "statistics" && view.kind !== "manga" && view.kind !== "notes";
   const dropClassificationId = view.kind === "classification" ? view.classificationId : null;
   function handleNativeDragEvent(event: NativeFileDropEvent, disposition: NativeFileDragDisposition) {
     const assetIds = activeNativeDragAssetIdsRef.current;
@@ -677,7 +680,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
             <div className="library-content">
               <section className="library-content__browser" aria-label="자산 내용">
                 <Suspense fallback={<DeferredViewFallback />}>
-                {view.kind === "statistics" ? <StatisticsPanel /> : view.kind === "trash" ? <TrashBrowser onCountChange={setTrashCount} /> : view.kind === "settings" ? (
+                {view.kind === "notes" ? <NotesView /> : view.kind === "statistics" ? <StatisticsPanel /> : view.kind === "trash" ? <TrashBrowser onCountChange={setTrashCount} /> : view.kind === "settings" ? (
                   <SettingsView
                     restoring={maintenance === "restore"}
                     onRestore={restoreBackup}

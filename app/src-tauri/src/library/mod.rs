@@ -1,4 +1,5 @@
 pub(crate) mod aladin;
+pub(crate) mod notes;
 mod aladin_flow;
 pub(crate) mod kakao_books;
 mod album;

@@ -8,6 +8,21 @@ const CLOUD_API_TARGET: &str = "Lakomics/CloudApi";
 const IGDB_TARGET: &str = "Lakomics/Igdb";
 const TMDB_TARGET: &str = "Lakomics/Tmdb";
 
+#[cfg(target_os = "windows")]
+pub(crate) fn notes_key(target: &str) -> Result<Option<Vec<u8>>, LibraryError> {
+    windows::WindowsCredentialBackend.read(target).map_err(map_backend_error)
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn set_notes_key(target: &str, value: &[u8]) -> Result<(), LibraryError> {
+    windows::WindowsCredentialBackend.write(target, value).map_err(map_backend_error)
+}
+
+#[cfg(all(test, target_os = "windows"))]
+pub(crate) fn delete_notes_test_key(target: &str) {
+    windows::WindowsCredentialBackend.delete(target).expect("remove isolated Notes test key");
+}
+
 #[derive(Debug)]
 enum CredentialError {
     System(u32),

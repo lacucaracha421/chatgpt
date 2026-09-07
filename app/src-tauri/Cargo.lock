@@ -2252,6 +2252,7 @@ dependencies = [
  "image 0.25.10",
  "pdqhash",
  "regex",
+ "ring",
  "rusqlite",
  "serde",
  "serde_json",

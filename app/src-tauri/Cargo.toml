@@ -35,6 +35,7 @@ tiny_http = "0.12.0"
 ureq = { version = "3.4.0", features = ["json"] }
 url = "2"
 regex = "1"
+ring = "0.17.14"
 
 tempfile = "3.27.0"
 

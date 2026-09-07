@@ -118,6 +118,10 @@ On Android, extension installation and API support depend on the browser. Do not
 
 ### Device-only temporary image save (2.0.0.1558)
 
+2026-09-07 user acceptance after `6524c4c`: extension 15.59 was activated on the
+Galaxy Tab and Arca downloads became faster. The URL optimization is accepted on
+that observed result; numerical throughput and source-file equivalence were not measured.
+
 Version 2.0.0.1559 adopts the narrow ArcaRefresher JPEG URL-selection optimization (see `extension/THIRD_PARTY_NOTICES.txt`). Only on `https://arca.live/` pages and recognized Arca media hosts, an IMG with a JPEG URL and an explicit positive numeric width up to 1280 keeps its selected URL instead of forcing `type=orig`. Explicit original requests remain original; larger/unknown widths and other formats retain the existing behavior. No CDN host substitution, proxy or cache extraction is added. Shared candidate selection applies to both permanent and temporary saves. Targeted URL/controller checks passed; real Arca throughput and file-equivalence measurements remain pending.
 
 The root list ends with a separate green **임시 저장** row after the classification rows. It is an action rather than a classification, cannot be reordered, and never calls the permanent save/Cloud Capture path. For a selected direct HTTPS image, the actual tap synchronously opens a package-targeted Android intent (`lakomics://temporary`) handled by Lakomics APK 0.3.3+. The settings preview shows this fixed action disabled. Videos and missing/unsupported image URLs are disabled.
@@ -125,3 +129,9 @@ The root list ends with a separate green **임시 저장** row after the classif
 The Android receiver downloads the image directly without app credentials, browser cookies or Cloud APIs, validates a decodable supported image, then writes `Pictures/Lakomics/임시보관/` through MediaStore.Images. Pending media is made public only after a complete copy; failed/cancelled writes are removed. Bounds: HTTPS public hosts, at most three revalidated redirects, 32 MiB, bounded transfer/read timeouts. No broad photo/storage permission is needed on Android 10+. Login-protected images may fail; no server-upload fallback or additional sharing feature is added.
 
 Galaxy Tab S11 acceptance passed on 2026-09-07 with APK 0.3.3 (10) and Titanium extension 2.0.0.1558: long-press a public HTTPS WebP, release, tap **임시 저장**, and return to the browser after a complete 30,320-byte MediaStore write. The menu retains its image intent after the opening pointer is released. The system Photo Picker exposes the album under **컬렉션 → 이 기기에서 → 임시보관**; selecting its image returned a readable picker URI with all 30,320 bytes to the recipient test app. Protected-site images were not part of this check. See [Android shared-media storage](https://developer.android.com/training/data-storage/shared/media) and [browser intent restrictions](https://developer.chrome.com/docs/android/intents).
+
+Subsequent real attachment Picker inspection showed an empty **이 기기에서** view
+despite three completed local images. Samsung Gallery **앨범 → 모두 보기** did show
+**임시보관 (3)**. The earlier test-recipient success is limited to that launch path;
+recipient/filter/provider compatibility remains open under MOBILE-002. The separate
+save-progress Activity is current behavior; a background-only replacement is not implemented.

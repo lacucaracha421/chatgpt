@@ -38,7 +38,8 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
+            // Let the frontend flush pending note edits before destroying the window.
+            if matches!(event, tauri::WindowEvent::Destroyed) && window.label() == "main" {
                 window.app_handle().exit(0);
             }
         })
@@ -215,6 +216,7 @@ pub fn run() {
             commands::list_unread_release_changes,
             commands::list_volume_ownership,
             commands::get_library_statistics,
+            commands::notes_request,
             commands::measure_library_derivative_storage,
             commands::record_collection_opened,
             commands::set_owned_volume_count,

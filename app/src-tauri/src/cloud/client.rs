@@ -61,6 +61,23 @@ pub(crate) struct CloudClient {
 }
 
 impl CloudClient {
+    pub(crate) fn notes_list(&self, vault: &str, cursor:i64, token:&str) -> crate::library::notes::Result<crate::library::notes::Page> {
+        let agent:ureq::Agent=ureq::Agent::config_builder().max_redirects(0).timeout_global(Some(Duration::from_secs(30))).build().into();
+        let mut response=agent.get(self.endpoint(&format!("/v1/notes/{vault}?after={cursor}&limit=10"))?)
+            .header("Authorization",bearer(token)?).call()
+            .map_err(|_|crate::library::notes::Error::Message("메모 서버에 연결하지 못했습니다. PC 저장 내용은 유지됩니다."))?;
+        Ok(read_json_bounded(&mut response,8*1024*1024)?)
+    }
+    pub(crate) fn notes_put(&self,vault:&str,id:&str,revision:i64,operation:&str,payload:&crate::library::notes::Envelope,token:&str)->crate::library::notes::Result<crate::library::notes::Remote> {
+        let body=serde_json::to_vec(&serde_json::json!({"expectedRevision":revision,"operationId":operation,"payload":payload}))?;
+        let agent:ureq::Agent=ureq::Agent::config_builder().max_redirects(0).timeout_global(Some(Duration::from_secs(30))).build().into();
+        let mut response=agent.put(self.endpoint(&format!("/v1/notes/{vault}/{id}"))?).header("Authorization",bearer(token)?)
+            .content_type("application/json").send(&body).map_err(|error|match error {
+                ureq::Error::StatusCode(409)=>crate::library::notes::Error::Message("다른 기기에서 메모가 변경됐습니다. 다시 동기화해 두 버전을 확인해 주세요."),
+                _=>crate::library::notes::Error::Message("메모를 서버에 보내지 못했습니다. PC 저장 내용은 유지됩니다.")
+            })?;
+        Ok(read_json_bounded(&mut response,1024*1024)?)
+    }
     pub(crate) fn collections_revision(&self, token: &str) -> Result<Option<String>, LibraryError> {
         #[derive(serde::Deserialize)]
         struct State { revision: Option<String> }

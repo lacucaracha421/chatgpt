@@ -51,5 +51,6 @@
 | [0032 Provider artwork stays outside the Asset Library](0032-provider-artwork-stays-out-of-the-asset-library.md) | Accepted | WorkArtwork와 사용자 Asset 생명주기 구분 |
 | [0033 Local authority with optional cloud sync](0033-local-authority-with-optional-cloud-sync.md) | **Accepted** | 로컬 권위를 유지하며 선택적 단방향 클라우드 복제를 허용 |
 | [0034 Current PC archive shell and browsing defaults](0034-current-pc-archive-shell-and-browsing-defaults.md) | **Accepted** | Chrome 03b shell, masonry 기본, contextual icon tooltip 규칙 |
+| [0035 Encrypted personal Notes](0035-encrypted-personal-notes.md) | **Accepted** | 별도 복구키, 로컬 암호문 저장, Notes 전용 양방향 revision 동기화 |
 
 새 ADR을 추가하거나 기존 결정을 대체할 때 이 인덱스와 해당 ADR의 `Status`/`Supersedes`/`Clarifies` 관계도 같이 갱신합니다.

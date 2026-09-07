@@ -1,4 +1,4 @@
-import { BookOpenIcon, CalendarIcon, InboxIcon, Cog6ToothIcon, EllipsisHorizontalIcon, MagnifyingGlassIcon, PhotoIcon, PlusIcon, RectangleStackIcon, TrashIcon } from "../shared/ui/ArchiveIcons";
+import { BookOpenIcon, CalendarIcon, InboxIcon, Cog6ToothIcon, EllipsisHorizontalIcon, MagnifyingGlassIcon, NoteIcon, PhotoIcon, PlusIcon, RectangleStackIcon, TrashIcon } from "../shared/ui/ArchiveIcons";
 import { useRef, type CSSProperties, type ReactNode } from "react";
 import lakomicsMark from "../brand/lakomics-mark.svg?no-inline";
 import type { AssetView, CollectionType } from "../library/types";
@@ -7,7 +7,8 @@ import { ChromeSettingsDock, ChromeTarget } from "./WorkspaceChrome";
 import { useWorkspaceChrome } from "./WorkspaceChromeContext";
 import { clampSidebarWidth, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH } from "./sidebarWidth";
 
-export function workspaceArea(view: AssetView): "assets" | "collections" | "manga" | "manage" {
+export function workspaceArea(view: AssetView): "assets" | "collections" | "manga" | "notes" | "manage" {
+  if (view.kind === "notes") return "notes";
   if (view.kind === "collections" || view.kind === "collection") return "collections";
   if (view.kind === "manga") return "manga";
   if (view.kind === "settings" || view.kind === "trash" || view.kind === "similarity_review" || view.kind === "statistics") return "manage";
@@ -33,7 +34,7 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
   const quickAssetView = view.kind === "revisit" || view.kind === "creator" || view.kind === "unsorted";
   if (!quickAssetView) history.current[area] = view;
   const resize = useRef<{ id: number; x: number; width: number } | null>(null);
-  const areaName = { assets: "에셋", collections: "컬렉션", manga: "망가", manage: "라이브러리 관리" }[area];
+  const areaName = { assets: "에셋", collections: "컬렉션", manga: "망가", notes:"메모", manage: "라이브러리 관리" }[area];
   const enterArea = (next: "assets" | "collections" | "manga") => {
     if (next === area && !quickAssetView) return;
     onNavigate(history.current[next] ?? (next === "collections" ? { kind: "collections", typeFilter: collectionType, showcase: false } : next === "manga" ? { kind: "manga" } : { kind: "classification", classificationId: null }));
@@ -53,6 +54,7 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
         return <button key={key} type="button" className="workspace-rail__item" aria-current={area === key && !quickAssetView ? "page" : undefined} onClick={() => enterArea(key)}><Icon aria-hidden="true" /><span>{label}</span></button>;
       })}
       <button type="button" className="workspace-rail__item" aria-current={view.kind === "revisit" || view.kind === "creator" ? "page" : undefined} onClick={() => onNavigate({ kind: "revisit" })}><CalendarIcon aria-hidden="true" /><span>다시보기</span></button>
+      <button type="button" className="workspace-rail__item" aria-current={view.kind === "notes" ? "page" : undefined} onClick={() => onNavigate({kind:"notes"})}><NoteIcon aria-hidden="true"/><span>메모</span></button>
       <div className="workspace-rail__tail">
         {cloudProblemCount > 0 && <button type="button" className="workspace-rail__item" onClick={() => onNavigate({ kind: "settings", section: "cloud" })} aria-label={`동기화 문제 ${cloudProblemCount}개`}><span aria-hidden="true">!</span><span>동기화 문제 {cloudProblemCount}</span></button>}
         <button type="button" className="workspace-rail__item" aria-current={view.kind === "unsorted" ? "page" : undefined} onClick={() => onNavigate({ kind: "unsorted" })}><InboxIcon aria-hidden="true" /><span>미분류</span></button>

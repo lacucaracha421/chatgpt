@@ -2059,6 +2059,10 @@ def read_album_replica(
 
 
 # Collections are a separate read replica; provider artwork never enters assets.
+from notes import register_notes
+
+startup_notes = register_notes(app, get_db, require_auth)
+
 from mobile_collections import register_collections
 from r2 import presign_put as _collection_presign_put
 

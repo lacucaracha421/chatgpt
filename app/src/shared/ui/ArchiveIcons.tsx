@@ -20,6 +20,7 @@ export const archivePaths = {
   calendar: "M3 5h18v16H3zM7 2v6M17 2v6M3 10h18M7 14h3v3H7z",
   archive: "M3 3h18v5H3zM5 8v13h14V8M9 12h6",
   bookmark: "M6 3h12v18l-6-4-6 4z",
+  note: "M4 3h16v18H4zM8 7h8M8 11h8M8 15h5",
 } as const;
 type Props = SVGProps<SVGSVGElement>;
 function Glyph({ kind, ...props }: Props & { kind: keyof typeof archivePaths }) {
@@ -38,3 +39,4 @@ export const EllipsisHorizontalIcon = (props: Props) => <Glyph kind="more" {...p
 export const MagnifyingGlassIcon = (props: Props) => <Glyph kind="search" {...props} />;
 export const PlusIcon = (props: Props) => <Glyph kind="plus" {...props} />;
 export const BookmarkIcon = (props: Props) => <Glyph kind="bookmark" {...props} />;
+export const NoteIcon = (props: Props) => <Glyph kind="note" {...props} />;

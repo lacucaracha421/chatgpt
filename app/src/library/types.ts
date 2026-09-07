@@ -274,6 +274,7 @@ export type AssetView =
   | { kind: "similarity_review" }
   | { kind: "trash" }
   | { kind: "statistics" }
+  | { kind: "notes" }
   | { kind: "settings"; section?: "general" | "cloud" | "catalog" | "external_services" | "data" | "about" }
   | { kind: "manga" }
   | { kind: "collections"; typeFilter: CollectionType; showcase: boolean }

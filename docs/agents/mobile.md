@@ -4,9 +4,26 @@ Status: current product direction with retained rollout history
 
 Current-status clarification (2026-09-07): the initial full-library backfill, Galaxy Tab browser browsing milestone, and queued-work pause/wait/restart/resume acceptance are complete. `CLOUD-006` is `DONE` in the living backlog. Do not reseed or rerun the completed backfill without a separately approved recovery operation.
 
-The checkpoint below records the browser prototype, not a completed native Android client. Current production-client scope follows [the approved consumption UX](mobile-consumption-ux.md) and [the living backlog](../roadmap/lakomics-backlog.md). Older rollout proposals below, including a later `display.webp` derivative, are not authorization to implement them; measure the current original/thumbnail path before considering another derivative.
+Current installed native client: APK 0.3.3 (10), with independent cloud browsing,
+Home/Library/Collections, shared 1 GiB cache and cache-clear controls, DocumentsProvider
+and integrated CloudMediaProvider. Continue/이어보기 was removed at user request;
+classification/date/creator discovery remains. Collections deployment, cover repair
+and device visual acceptance are complete. Extension 15.59 activation and improved
+Arca download speed were confirmed by the user after commit `6524c4c`.
 
-## Current implementation checkpoint (2026-09-03)
+Remaining native gates: actual recipient Picker compatibility (one real attachment
+flow showed empty local folders), full SAF/multi-select/restart acceptance and
+systematic media timing. Temporary saves exist in Samsung Gallery > all albums;
+the current save-progress Activity transition is intentional and remains unchanged.
+System Share quick-save, extension update management and Mobile Manga Catalog /
+bookmark changes / DB refresh remain future work in [the living backlog](../roadmap/lakomics-backlog.md).
+
+The older checkpoints below are retained history, not current install/deployment
+status. Current production-client scope follows [the living backlog](../roadmap/lakomics-backlog.md);
+later user decisions supersede the original consumption specification where noted.
+Do not infer authorization for another media derivative from old rollout proposals.
+
+## Historical browser implementation checkpoint (2026-09-03)
 
 - Phase 1 full-library cloud replication is complete and production-verified. The PC remains authoritative; VPS/R2 serve the read-oriented replica.
 - The Galaxy Tab browser prototype now provides production cloud classification browsing, Recent, Home/Revisit, grouped creator rails, date/creator detail grids, image/video viewing, metadata, cursor pagination, and short-lived media-ticket access.
@@ -587,8 +604,8 @@ Exit condition:
 - Multi-select: **required**.
 - Media types: **images and videos**.
 - Metadata: **available on demand, media remains visually primary**.
-- Home: **yes, consumption-oriented with Continue/Revisit**.
-- Collections/Showcase: **later**.
+- Home: **yes, Recent and classification/Revisit discovery; Continue removed**.
+- Collections/Showcase: **read-only Collections shipped; Manga Catalog is later**.
 - Authentication: **one-time device registration/token**.
 - Extension relationship: **separate runtime, shared services where useful; distribution/maintenance may live in the same Mobile APK through an independent Extension Manager**.
 - Long-term media optimization: **WebP variants and later controlled migration**.

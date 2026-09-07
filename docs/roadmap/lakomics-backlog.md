@@ -19,6 +19,11 @@ repository-wide or production-data audit. Unrelated Cloud/Mobile acceptance gate
 
 ## Status legend
 
+2026-09-07 refresh: reconciled current Mobile/extension work through `6524c4c`,
+the Collection deployment/cover-repair evidence, and the user's confirmation that
+extension 15.59 is activated and Arca downloads are faster. This is a documentation
+refresh, not a new production audit or measured throughput benchmark.
+
 - `IN PROGRESS`: currently being implemented
 - `PARTIAL`: useful implementation exists, but a material acceptance condition is still missing
 - `TODO`: planned executable work
@@ -481,14 +486,14 @@ Prerequisites: CATALOG-002A and CATALOG-007A; preferably complete reviewed group
 ## NOTE-001A — Revision-safe server Notes foundation
 
 Parent item: legacy `NOTE-001`
-Status: `TODO`
+Status: `DONE` — encrypted API deployed; live HTTPS checks and verified SQLite backup completed.
 
 Notes are a separate everyday text domain, not Asset metadata.
 
 Initial server model:
 
 - client-generated stable ID;
-- title/body;
+- versioned AES-256-GCM envelope; title/body and tombstone encrypted on PC;
 - monotonically increasing revision;
 - created/updated timestamps;
 - tombstone deletion;
@@ -499,14 +504,20 @@ Updates/deletes require expected revision and return conflict instead of last-wr
 
 Reuse the existing authenticated Cloud API and server SQLite patterns. Ensure server DB backup/recovery exists before real notes become relied upon.
 
+2026-09-07 implementation: `server/lakomics-api/notes.py` provides authenticated paginated GET and revision-checked/idempotent PUT. Server tests cover authentication, vault separation, opaque storage, pagination and conflict retries. [ADR-0035](../adr/0035-encrypted-personal-notes.md) records the user's separate recovery-key decision. Deployment completed after user approval. Verified server backup: `/home/linuxuser/lakomics-api/backups/notes-20260907T084216Z/lakomics.sqlite3`. Live HTTPS encrypted PUT/GET/decryption, retry, stale revision 409, missing-auth 401, existing Collections and service health passed. The isolated test note was removed by exact vault/ID.
+
 ## NOTE-001B — Desktop Notes section
 
-Status: `TODO`
+Status: `PARTIAL` — desktop implementation and isolated checks; native acceptance pending.
 Prerequisite: NOTE-001A.
 
 Add a dedicated sidebar destination and list/editor with explicit unsaved/saving/saved/error/conflict states.
 
 A conflict must offer a safe decision such as reload server copy or duplicate the local draft as a new note. React must never receive/store the Cloud bearer token.
+
+2026-09-07 implementation: Notes below Revisit, list/editor, title/body search, pin, immediate encrypted local autosave, trash/restore, sync status, conflict-copy recovery, recovery-key setup and encrypted file backup/import. Schema 43 stores ciphertext and durable pending state; key stays in Windows Credential Store. Rust fixture tests cover wrong keys/tamper, local CAS, conflict preservation, atomic backup recovery and two-device encrypted exchange. Frontend tests cover in-flight edits, stale sync, save retry, editor flows, setup, navigation and close guards. Browser checks use an isolated in-memory UI fixture. Remaining: real Windows credential/dialog/close behavior, active-library migration approval, server backup and live sync acceptance. Mobile Notes is outside this PC task.
+
+2026-09-07 deployment checkpoint: actual Windows Credential Store persistence across Library reopen, wrong-key rejection and cleanup passed an opt-in native test using a temporary library. Live server checks passed after approval. The pre-existing dev watcher had already applied schema 43 before that approval; the earlier no-production-change claim was incorrect. Its automatic v42 backup `pre-migration-20260907-080946-v42-9246ca7d-c8cc-48d9-a93b-3ddbb7dd1d2b.sqlite` passed quick_check. Current-state backup `before-notes-deployment-20260907-174041.sqlite` also passed. Active schema 43 quick_check is ok, with zero user Notes. Latest dev app is running. Remaining native UI acceptance: user key setup, file dialogs and close-during-edit through the actual Tauri window; native UI automation was unavailable.
 
 ## STATS-001 — Personal statistics
 
@@ -569,7 +580,9 @@ no historical activity was fabricated. Feature-level native/visual acceptance re
 
 Status: `PARTIAL`
 
-Current creator/date/surprise foundation exists, but preference weights and open history are not yet trustworthy inputs.
+Current creator/date/surprise foundation exists. BUG-013 now records deliberate opens;
+preference weighting and cooldown/scoring integration still need work. Mobile Home's
+classification/date/creator discovery improvements do not close the PC scoring items below.
 
 ### IDEA-001A — Scoring, feedback, and cooldown correctness
 
@@ -666,7 +679,12 @@ The current browser/mobile-extension prototype remains a verified behavioral ref
 
 Status: `PARTIAL`
 
-2026-09-07 native preview: independent `android/` APK and `app/mobile-client` React entry implement direct authenticated browsing, Keystore credentials, lifecycle/back handling, and separate pending Capture viewing. Build/signature and focused offline checks passed; no device install or production writes were performed. Android Share quick-save and the optional signed-CRX manager remain pending. See `android/README.md` for build/use and device gates; this does not complete production acceptance.
+Installed APK 0.3.3 (10) implements direct authenticated browsing, Keystore credentials,
+lifecycle/back handling, pending Capture previews and a shared 1 GiB media cache with
+usage/clear controls. Galaxy Tab browsing is in use; the earlier no-install checkpoint
+is superseded. Remaining scope: Android system Share quick-save, optional extension
+update management, and full provider/lifecycle acceptance. The extension's device-local
+temporary save is implemented (EXT-006 below); it is not a general Android Share receiver.
 
 Goal:
 
@@ -695,7 +713,13 @@ Do not change the stable browser X Collector merely to support the native client
 ## MOBILE-004 — Approved portrait-first consumption UX
 
 Status: `PARTIAL`
-2026-09-07 native preview implements Home/Library, full-aspect justified rows, three densities, bounded cursor pages/virtual rows, Continue, contained progressive viewer, pinch/pan, adjacent-image preload, and state/request guards. Browser fixtures and targeted regressions pass. Real cloud media, native gestures/lifecycle, and Galaxy Tab cold/warm timing remain unverified; do not mark this device-ready.
+Installed Home/Library supports full-aspect justified rows, three densities, continuous
+cursor loading, progressive media viewing and retained state. Continue/이어보기 and
+the idle scroll-hint section were removed at user request; sidebar buttons lead the
+Home/Library controls, and the native app hides system bars. Home adds visited/daily
+classifications and date/creator Revisit groups. User device use and visual acceptance
+are recorded; systematic cold/warm timing, large-video reliability and the complete
+gesture/lifecycle matrix remain open. Do not restart the initial Home implementation.
 Prerequisite for production integration: MOBILE-001. Pure layout/state algorithms may be developed/tested earlier.
 
 Initial destinations:
@@ -705,9 +729,11 @@ Initial destinations:
 
 Home order:
 
-1. optional Continue card restoring useful prior context;
-2. dominant canonical Recent gallery using `{type: "recent"}`;
-3. secondary Revisit/discovery that must not delay first useful Recent paint.
+1. dominant canonical Recent gallery using `{type: "recent"}`;
+2. visited classifications and daily classification covers;
+3. secondary date/creator Revisit that must not delay first useful Recent paint.
+
+Do not restore Continue/이어보기 cards without a new user request.
 
 Gallery requirements:
 
@@ -756,9 +782,8 @@ Progressive loading:
 - preload at most previous and next image originals, deduplicated by asset/variant;
 - do not preload neighboring video originals.
 
-First pass explicitly excludes:
+Remaining exclusions (Collections shipped separately in MOBILE-005):
 
-- Collections/Showcase;
 - Online Manga Catalog;
 - classification editing/bulk management;
 - a third `display.webp` derivative;
@@ -769,7 +794,16 @@ Device gate: pass all documented Galaxy Tab S11 portrait checks first, then land
 ## MOBILE-002 — Read-only Android DocumentsProvider
 
 Status: `PARTIAL`
-2026-09-07 native preview implements the read-only root/classification hierarchy, stable asset document IDs, thumbnail/original cache, continuation folders, cancellation and notifications. Offline network/ancestry checks and APK build pass. Real SAF grant/multi-select/recipient/cancellation acceptance is pending; original downloads are bounded to 256 MiB per file. Existing CloudMediaProvider PoC remains separate.
+The main APK now contains both read-only DocumentsProvider and API33+ CloudMediaProvider,
+with classification folders/albums, stable identities, complete metadata snapshots,
+cancellation and a shared 1 GiB cache. Selected file transfers are bounded to 512 MiB.
+The old PoC remains installed separately; it is not the sole Picker implementation.
+Full SAF grants/multi-select/recipient/cancellation and provider restart acceptance remain
+open. A local temporary image was read successfully through the test recipient, but a
+later real attachment Photo Picker showed an empty '이 기기에서' list despite existing
+MediaStore files. Diagnose the launch/filter/provider difference; do not treat the test
+recipient result as proof for every website. Samsung Gallery > albums > all did show
+임시보관 with three files.
 Prerequisite: MOBILE-001. May proceed in parallel with MOBILE-004 after the native cache/auth boundary is stable.
 
 Initial boundary:
@@ -785,35 +819,44 @@ Initial boundary:
 
 ## MOBILE-005 — Read-only Collections on Android
 
-Status: IN PROGRESS (2026-09-07). User requested a staged implementation; follow the current PC Collections and Manga Catalog design. Existing Mobile/Android WIP is preserved. Implementation uses writing-plans; independent bounded modules can follow dispatching-parallel-agents. No Git writes, deployment, active-library writes or production publication are authorized by this plan alone.
+Status: `DONE` — deployed, source-cover repair verified and Galaxy Tab presentation
+accepted by the user on 2026-09-07. All 340 Collections have primary cover references;
+2,332 volume/edition covers are published. APK 0.3.2 removed cover effects/black boxes
+and duplicate volume captions; current installed APK is 0.3.3. Manga Catalog remains
+separate work under MOBILE-006/007/008.
 
 Goal: PC-off Collection browsing, with PC owning metadata/artwork and Android viewing only. Keep game package/hero, manga volume shelf and movie poster/backdrop distinctions. Preserve IDs, editions and manual Showcase ordering; do not import provider artwork into Assets or expose provider configuration/local paths.
 
 - [x] Server (`server/lakomics-api/mobile_collections.py`, registration in `app.py`, focused isolated-DB tests): authenticated immutable artwork preparation, atomic complete Collection snapshot publication with compare-and-swap revision, paginated type/search/Showcase list, detail and short-lived artwork tickets. Unpublished, empty and failed states must differ. Old snapshot remains readable after failed publication.
 - [x] PC (`app/src-tauri/src/cloud/collections.rs`, cloud client/command registration and targeted fixture tests): side-effect-free snapshot extraction from existing committed rows; no provider fetch, migration or lazy volume/artwork import. Omit local paths/raw bindings. Explicit publication uploads content-addressed artwork first, then complete metadata; interruption cannot publish an incomplete snapshot. Make the operation callable through an explicit PC control, not a new automatic polling loop.
 - [x] Android/React (`android` native read allowlist/shared media cache, `app/mobile-client/Collections.tsx` and owning navigation): library/type/Showcase browsing, retained list state, cover-led detail and edition-aware volume appreciation; read-only controls only. Reuse PC presentation primitives where their runtime is compatible, otherwise match the existing material/geometry without importing Tauri/provider code.
-- [ ] Verify isolated server/PC fixtures, mobile request/navigation tests, TypeScript/build and portrait/landscape browser layout. Produce a reviewable APK and server change set. Obtain explicit production deployment/publication approval only after these are ready. Device/real-media acceptance remains a separate recorded gate.
+- [x] Isolated server/PC fixtures, mobile navigation tests, TypeScript/build and browser layouts passed. Explicitly authorized deployment/publication and subsequent Galaxy Tab cover/volume viewing and user polish acceptance completed. Detailed historical checkpoints follow; their earlier pending gates are superseded by the final source-cover/device evidence.
 
 Contract v1: GET `/v1/collections` accepts `type=game|manga|movie`, `q`, `showcase`, `limit<=48`, opaque `cursor`; replies `{ready,revision,publishedAt,items,nextCursor}`. GET `/v1/collections/{id}` replies `{revision,item}`. Public item uses the existing camelCase CollectionSummary display fields (without sourcePath), and detail adds camelCase volumes plus artwork descriptors `{id,kind,selected,thumbnailAvailable,originalAvailable}`. POST `/v1/collections/{id}/artworks/{artworkId}/media-ticket` takes `{variant:thumbnail|original}` and returns the existing Ticket shape. PC-only POST `/v1/collections/artworks/prepare` takes `{sha256,sizeBytes,contentType}`, returns `{objectKey,uploadUrl,requiredHeaders}` (null URL on an existing exact object). PC-only PUT `/v1/collections/replica` takes `{version:1,baseRevision:null|string,collections:[...]}`; private artwork variants are `{sha256,sizeBytes,contentType,objectKey}` under `work-artwork/mobile/<sha256>`. Server validates referenced objects before atomic publication and rejects stale baseRevision. No Android access to prepare/publish routes.
 
-Local checkpoint (2026-09-07): implementation and APK 0.3.0 (7) are ready for review. Server tests: 81 passed including 12 Collection cases; PC publisher Rust fixtures: 4 passed; PC TypeScript exit 0; mobile tests: 45 passed; mobile TypeScript/Vite and Android build exit 0. Native checks: 45 network, 19 ancestry, 18 cache, 22 transfer and PickerSnapshot checks passed; packaged assets and v2/v3 signatures verified. Browser fixtures covered Collection type/list/detail, manga volume appreciation and return navigation at 1100x760 and 390x844; warning/error logs empty. APK SHA-256: `BDB41E7E89D7BAE901CF1E12EC1E73A70147AFDA1D93821D35D25971F15FA58F`. Production deployment, first Collection publication and device/real-media acceptance remain pending; this is not deployed functionality. Final integration review was inline, not independent.
+Verification checkpoint: 81 server tests (including 12 Collection cases), PC publisher
+fixtures, PC TypeScript, 45 mobile tests, mobile TypeScript/Vite and Android build
+passed. Native policy/cache/transfer and packaged asset/signature checks passed.
+Browser fixtures covered type/list/detail/volume navigation at tablet and phone widths.
+Final integration review was inline, not independent.
 
-Operational checkpoint (2026-09-07, user explicitly approved): API deployed with prior code and verified SQLite backup at `/home/linuxuser/lakomics-api/backups/collections-20260907T050947Z`. First publication succeeded: 340 collections (181 game, 147 manga, 12 movie), 695 artwork records, 1,384 verified unique blobs; revision `235cc17a8a6f637e7908461644b0ed6a9efe7b452bbe89e60bb2682d139a2615`. All list pages were traversed without duplicate IDs; representative detail, original and thumbnail downloads for each type passed SHA-256 checks. Service active/running, NRestarts=0. Publisher regression fixtures now include a four-transfer/metadata barrier check; the approved operational entry point passed using a read-only source connection. Device UI/cache acceptance remains pending. APK 0.3.1 (8) also reuses the PC icon PNG exactly; see android/README.md for the current artifact hash.
-
-
+Deployment/publication was explicitly approved and completed. The first snapshot's
+cover omissions were repaired in the later source-cover publication below; do not
+repeat the first publication or treat its earlier device-pending note as current.
+Current APK 0.3.3 retains the PC icon and user-accepted plain-cover/volume polish.
 Source-cover repair completed (2026-09-07): publication revision `3b640e2627ad526d7b3a8764bca87adc6cc4f04796a9373881d5c3910a196898`; 340 works, 2,803 artwork records, 5,588 unique blobs (4,204 uploaded in this repair), 2,332 volume/edition covers. Full comparison with the preceding replica confirmed 261 recovered primary covers, all 79 existing selected covers retained, and every existing volume ID/number/edition/label/release field retained. Every current work and volume has a thumbnail reference. Type pagination had 181 game, 147 manga and 12 movie records with no duplicate IDs; representative original and thumbnail downloads passed SHA-256 checks. Service active/running, NRestarts=0. Galaxy Tab SM-X730 running installed APK 0.3.1 was woken and refreshed: the game grid loaded covers and a previously missing manga (Prison School) displayed its primary cover and ordered 28-volume shelf. No APK rebuild/install was needed. The operation opened the source DB READ_ONLY and wrote previews only to TEMP. Prior replica backup: `/home/linuxuser/lakomics-api/backups/collections-before-source-20260907T053812Z.json`. An interrupted preparation attempt left its TEMP preview directory; manual cleanup was blocked by automatic approval policy, and no workaround deletion was attempted. The successful attempt retained normal TempDir lifecycle cleanup.
 
 ## MOBILE-006 — Shared Manga Catalog browsing
 
-Status: PLANNED; follows MOBILE-005. User scope: PC-style catalog design with minimal editing. Inspect the current Rust catalog identity/query/grouping/visibility contracts before choosing the server search implementation. Search must preserve provider/work identity, language scope, blocked tags/categories and confirmed edition groups; do not silently substitute the legacy upstream search proxy for the PC catalog. Plan a versioned server search replica that supports PC-off reads, safe staged replacement and rollback; no active catalog replacement for verification. Deliver catalog list/search/detail and bookmark filter before reader/offline downloads. Reader work requires ordered page access, bounded prefetch/retry and device-local reading position; cross-device progress editing is deferred unless requested.
+Status: `TODO`; follows MOBILE-005. User scope: PC-style catalog design with minimal editing. Inspect the current Rust catalog identity/query/grouping/visibility contracts before choosing the server search implementation. Search must preserve provider/work identity, language scope, blocked tags/categories and confirmed edition groups; do not silently substitute the legacy upstream search proxy for the PC catalog. Plan a versioned server search replica that supports PC-off reads, safe staged replacement and rollback; no active catalog replacement for verification. Deliver catalog list/search/detail and bookmark filter before reader/offline downloads. Reader work requires ordered page access, bounded prefetch/retry and device-local reading position; cross-device progress editing is deferred unless requested.
 
 ## MOBILE-007 — Catalog bookmark changes across devices
 
-Status: PLANNED; follows the catalog read contract. Add/remove bookmarks from Android with stable `(provider, providerWorkId)` identity, idempotent operation IDs, durable retry and an explicit conflict rule. Preserve PC local authority from ADR-0033; define remote change receipt/PC application acknowledgements before enabling writes. Do not implement toggles that can invert twice after retries, or let a stale PC snapshot erase accepted mobile changes. Test offline/reconnect, duplicate requests, deletion tombstones and concurrent PC/mobile changes.
+Status: `TODO`; follows the catalog read contract. Add/remove bookmarks from Android with stable `(provider, providerWorkId)` identity, idempotent operation IDs, durable retry and an explicit conflict rule. Preserve PC local authority from ADR-0033; define remote change receipt/PC application acknowledgements before enabling writes. Do not implement toggles that can invert twice after retries, or let a stale PC snapshot erase accepted mobile changes. Test offline/reconnect, duplicate requests, deletion tombstones and concurrent PC/mobile changes.
 
 ## MOBILE-008 — Catalog update requests and status
 
-Status: PLANNED. Android can request a catalog DB refresh and see queued/running/completed/failed state, last successful update and errors while continuing to read the prior index. Bound and deduplicate jobs; persist crash/retry state. Resolve the relationship between the existing PC updater and server-side update worker before deployment, keeping the same catalog identity/grouping rules. The proposed target is server-side refresh available with PC off; if this needs a materially different authority/runtime arrangement, discuss that decision with the user. User data/bookmarks must survive catalog replacement. Operating a worker, deploying services and first production ingestion require explicit approval after implementation and isolated tests.
+Status: `TODO`. Android can request a catalog DB refresh and see queued/running/completed/failed state, last successful update and errors while continuing to read the prior index. Bound and deduplicate jobs; persist crash/retry state. Resolve the relationship between the existing PC updater and server-side update worker before deployment, keeping the same catalog identity/grouping rules. The proposed target is server-side refresh available with PC off; if this needs a materially different authority/runtime arrangement, discuss that decision with the user. User data/bookmarks must survive catalog replacement. Operating a worker, deploying services and first production ingestion require explicit approval after implementation and isolated tests.
 
 ## MOBILE-003 — Safe global deletion / tombstone protocol
 
@@ -830,6 +873,44 @@ Required concepts before implementation:
 - client acknowledgement/reconciliation;
 - explicit purge;
 - conflict/recovery behavior.
+
+---
+
+# Extension follow-up — 2026-09-07
+
+## EXT-005 — Deep list navigation and folder ordering
+
+Status: `DONE`
+
+Window/list mode traverses the actual hierarchy beyond levels 2/3/4/5, with deeper
+surfaces becoming darker. The save-check pop animation is removed. Settings embeds
+the real list and supports hold/drag ordering within siblings, automatic persistence,
+rollback on failure and keyboard ordering. Model/DOM/worker tests and browser checks
+passed. Actual Galaxy Tab long-press reorder ergonomics remain a follow-up observation;
+do not confuse the verified temporary-save long press with a full reorder device test.
+
+## EXT-006 — Device-only temporary image saving
+
+Status: `DONE` — core save and local album path verified; recipient compatibility is
+tracked by MOBILE-002 rather than closed by this status.
+
+The separate green root-list action opens APK 0.3.3, downloads directly and publishes
+to `Pictures/Lakomics/임시보관/` without server upload. Real Titanium handoff, complete
+MediaStore write and a test recipient's 30,320-byte read passed. Samsung Gallery's
+all-albums view shows the folder; it need not appear among selected major albums.
+The current implementation intentionally opens a save-progress Activity. Removing
+that transition was discussed as a UX improvement, not implemented or committed.
+
+## EXT-007 — Arca JPEG download URL optimization
+
+Status: `DONE` — user confirmed extension 15.59 activation and improved speed.
+
+Only `https://arca.live/` pages use the bounded JPEG optimization for both temporary
+and permanent saves. Known positive width <=1280 keeps the selected JPEG URL without
+forcing orig; explicit original requests, unknown/large widths and other formats
+retain their prior handling. ArcaRefresher attribution/MIT notice is included.
+34 focused URL/controller tests passed. User-observed improvement is not a numerical
+throughput benchmark or proof of byte/quality equivalence for every source image.
 
 ---
 
@@ -1163,14 +1244,8 @@ read-only inspection found 253 bookmarks intact. Focused catalog tests passed.
 
 These are detailed in active sections above:
 
-- CATALOG-003 — `PARTIAL`
-- CATALOG-004 — `PARTIAL`
-- CATALOG-005 — `MERGE CANDIDATE` with CATALOG-006
-- CATALOG-006 — `MERGE CANDIDATE` with CATALOG-005
-- CATALOG-007 — `TODO` split into A/B
-- CATALOG-002 — `PARTIAL` split into provider-key foundation + Heliotrope
-- CLOUD-UI-001 — `PARTIAL`
-- CLOUD-006 — `PARTIAL`
+- CATALOG-002 — provider-key foundation DONE; optional Heliotrope remains `TODO`
+- CLOUD-UI-001 — `VERIFY`
 - NOTE-001 — `TODO` split server/desktop
 - STATS-001 — `PARTIAL` split inventory/activity
 - IDEA-001 — `PARTIAL` split correctness/themes
@@ -1178,6 +1253,11 @@ These are detailed in active sections above:
 - LONG-002 — `PARTIAL` split foundation/focused interaction
 - LONG-003 — `TODO` in audit, intentionally `HOLD` here until security gate is approved
 - LONG-004 — `MERGE CANDIDATE` consuming LONG-002 renderer
+
+Later completions superseding the audit: CLOUD-006, BUG-013, CATALOG-003/004/005/006,
+CATALOG-007A/B, LONG-002A, WORKS-002, MOBILE-005 and EXT-005/006/007 are DONE.
+MOBILE-001/002/004 remain PARTIAL for the specific remaining work in their sections;
+MOBILE-006/007/008 are the next planned catalog sequence.
 
 ## OBSOLETE / incident-only
 
@@ -1227,69 +1307,22 @@ This is a dependency map, not a list of unfinished tasks: consult each active it
 
 This is the authoritative dependency order, not a prohibition on parallel work in independent subsystems. In particular, Collection presentation and pure Mobile layout/state work may proceed in parallel once worktree ownership is clear.
 
-0. **Backlog truth alignment — DONE by this reconciliation**
-   - retire UI-003 and CLOUD-003 from executable work;
-   - correct EXT-002 Cloud-first wording;
-   - remove stale MANGA-001/performance completion ambiguity;
-   - reopen CLOUD-UI-001 and CLOUD-006 as `PARTIAL`;
-   - promote the approved Mobile/Works scope above.
+Completed prerequisites: CLOUD-006, BUG-013, CATALOG-002A/003/004/005/006/007A/007B,
+LONG-002A and WORKS-002. Do not schedule them again.
 
-1. **CLOUD-006 pause closure**
-   - validate current pause guard/test and real pause/restart/resume.
+Remaining work, grouped by dependency rather than one mandatory serial queue:
 
-2. **BUG-013 Asset-open recording**
-   - begin trustworthy activity data immediately.
-
-3. **CLOUD-UI-001 durable status**
-   - persistent operational truth before further server/mobile expansion.
-
-4. **CATALOG-002A provider-key contract**
-
-5. **CATALOG-003 independent Japanese source**
-
-6. **CATALOG-004 AST compiler + bulk tag hydration**
-
-7. **CATALOG-005/006 unified visibility/block policy**
-
-8. **CATALOG-007A lineage groups**
-
-9. **CATALOG-007B reviewed heuristic groups**
-
-10. **CATALOG-002B optional Heliotrope**
-
-11. **NOTE-001A server foundation**
-
-12. **NOTE-001B desktop Notes**
-
-13. **STATS-001A inventory statistics**
-
-14. **STATS-001B activity statistics**
-
-15. **IDEA-001A Revisit scoring/cooldown**
-
-16. **IDEA-001B Revisit themes**
-
-17. **LONG-002A presentation foundation / normal Works visual pass**
-    - Manga Shelf Grid establishes the aesthetic quality bar;
-    - Game Exhibit refinement;
-    - type-specific `WorkTile` library surface.
-
-18. **WORKS-001 Video Works Film/Series expansion**
-    - TMDB TV/season/episode structure and Video archive viewer.
-
-19. **LONG-001 AV model and explicit cover roles**
-
-20. **LONG-002B focused complete-cover interaction**
-
-21. **LONG-004 optional Display/Shelf mode**
-
-22. **LONG-003 Phase 0 threat model/format/recovery gate**
-
-23. **LONG-003 Phase 1 encrypted metadata/image copy-in**
-
-24. **LONG-003 Phase 2 health/recovery/key rotation**
-
-25. **LONG-003 Phase 3 authenticated video chunks**
+1. **CLOUD-UI-001 and STATS-001A/B — native acceptance** of already implemented UI.
+2. **IDEA-001A → IDEA-001B — Revisit scoring/cooldown, then themes.**
+3. **NOTE-001A → NOTE-001B — revision-safe server Notes, then desktop Notes.**
+4. **CATALOG-002B — optional Heliotrope coexistence.** Not a prerequisite for the
+   existing-provider Mobile catalog lane.
+5. **WORKS-001 — remaining related-work/richer Film presentation.** TV/season/episode
+   structure already exists; do not restart that foundation.
+6. **LONG-001 → LONG-002B → LONG-004 — AV relations/cover roles, focused full-cover
+   interaction, then optional Display mode using the same renderer.**
+7. **LONG-003 — HOLD:** threat model/format/recovery approval before encrypted
+   metadata/images, recovery/key rotation and later video chunks.
 
 ## Separately promoted Similarity order
 
@@ -1307,25 +1340,30 @@ S4. **PERF-SIMILARITY BK-tree / metric index**
 
 ## Separately promoted Mobile production order
 
-M1. **MOBILE-001 native authenticated shell**
-- may begin after the immediate Cloud correctness/status foundation is stable;
-- production mobile work does not require waiting for the entire catalog/Notes lane;
-- includes the conditional Extension Manager distribution experiment, but Mobile browsing itself remains independent from Titanium/the extension.
+M1. **MOBILE-002 recipient compatibility:** reproduce the real attachment Picker's
+empty local folders; verify SAF grants, multi-select, cancellation and restart.
 
-M2. **MOBILE-004 approved consumption UX**
-- production integration after M1;
-- justified-row calculator, cancellation/state models, and tests may start earlier.
+M2. **MOBILE-001/004 remaining shell/consumption work:** cold/warm media measurements,
+large-video/retry behavior, full gesture/lifecycle checks, system Share quick-save and
+optional extension update management. The installed app/Home/cache are not new work.
 
-M3. **MOBILE-002 read-only DocumentsProvider**
-- technically parallel with M2 after the M1 auth/cache boundary is stable;
-- ship after/alongside consumption according to product priority.
+M3. **MOBILE-005 Collections — DONE.** Keep the deployed cover/volume implementation.
 
-M4. **MOBILE-003 global tombstone deletion**
-- only after read-only behavior is stable and the high-risk acknowledgement/grace-period protocol is explicitly approved.
+M4. **MOBILE-006 shared Manga Catalog reads:** versioned server replica, PC-style
+search/list/detail/bookmark filter, then reader. Resolve authority before deployment.
+
+M5. **MOBILE-007 bookmark changes:** after read identity/revision contract, with
+idempotent retries and PC receipt/conflict semantics.
+
+M6. **MOBILE-008 DB refresh requests:** define PC/server updater responsibility;
+implement durable jobs while the previous index stays readable.
+
+M7. **MOBILE-003 global deletion — HOLD** until explicitly approved safe protocol.
 
 ## Parallelism note for the Collection lane
 
-LONG-002A has no catalog/Notes dependency. After the immediate correctness gates (roughly steps 0–3), its visual prototype work can proceed without waiting for catalog batches 4–16, provided it does not collide with another agent’s Collection files.
+Remaining Works/Collection expansion has no blanket catalog/Notes dependency.
+Use each item's actual prerequisites and preserve ownership of shared files.
 
 The Manga Shelf Grid and Game/Film normal presentation baseline are implemented.
 LONG-002A and WORKS-002 are user-accepted; do not restart the shelf reskin.

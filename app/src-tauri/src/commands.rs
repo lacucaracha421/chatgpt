@@ -1271,6 +1271,45 @@ pub fn list_volume_ownership(collection_id: String, state: State<'_, AppState>) 
 }
 
 #[tauri::command]
+pub async fn notes_request(root:String, operation:String, input:serde_json::Value, app:tauri::AppHandle, state:State<'_,AppState>) -> Result<serde_json::Value,String> {
+    let library=current_required(state).map_err(|_|"라이브러리를 열어 주세요.".to_string())?;
+    if library.root().to_string_lossy()!=root {return Err("라이브러리가 변경됐습니다. 메모를 다시 열어 주세요.".into());}
+    tauri::async_runtime::spawn_blocking(move || -> crate::library::notes::Result<serde_json::Value> {
+        use crate::library::notes::{Error,generate_key,MAX_BACKUP_BYTES};
+        use tauri_plugin_dialog::DialogExt;
+        use std::io::Read;
+        Ok(match operation.as_str() {
+            "state"=>serde_json::to_value(library.notes_state()?)?,
+            "generateKey"=>serde_json::json!({"key":generate_key()?}),
+            "unlock"=>serde_json::to_value(library.notes_unlock(input.get("key").and_then(|v|v.as_str()).ok_or(Error::Message("복구키를 입력해 주세요."))?)?)?,
+            "save"=>serde_json::to_value(library.notes_save(serde_json::from_value(input)?)?)?,
+            "sync"=>serde_json::to_value(library.notes_sync()?)?,
+            "export"=>{
+                let backup=library.notes_export()?;
+                let bytes=serde_json::to_vec(&backup)?;
+                if bytes.len()>MAX_BACKUP_BYTES{return Err(Error::Message("메모 백업은 64 MiB까지 저장할 수 있습니다."));}
+                if let Some(file)=app.dialog().file().add_filter("Lakomics 암호화 메모",&["lakonotes"]).set_file_name("lakomics-notes.lakonotes").blocking_save_file(){
+                    let path=file.into_path().map_err(|_|Error::Message("백업 경로를 열 수 없습니다."))?;
+                    std::fs::write(path,bytes).map_err(|_|Error::Message("메모 백업을 저장하지 못했습니다."))?;
+                    serde_json::json!(true)
+                }else{serde_json::Value::Null}
+            },
+            "import"=>{
+                if let Some(file)=app.dialog().file().add_filter("Lakomics 암호화 메모",&["lakonotes"]).blocking_pick_file(){
+                    let path=file.into_path().map_err(|_|Error::Message("백업 경로를 열 수 없습니다."))?;
+                    let file=std::fs::File::open(path).map_err(|_|Error::Message("메모 백업을 열 수 없습니다."))?;
+                    let mut bytes=Vec::new();file.take(MAX_BACKUP_BYTES as u64+1).read_to_end(&mut bytes).map_err(|_|Error::Message("메모 백업을 읽지 못했습니다."))?;
+                    if bytes.len()>MAX_BACKUP_BYTES{return Err(Error::Message("메모 백업은 64 MiB까지 불러올 수 있습니다."));}
+                    serde_json::to_value(library.notes_import(serde_json::from_slice(&bytes)?)?)?
+                }else{serde_json::Value::Null}
+            },
+            "resolve"=>serde_json::to_value(library.notes_resolve(input.get("id").and_then(|v|v.as_str()).ok_or(Error::Message("메모를 선택해 주세요."))?,input.get("expectedRevision").and_then(|v|v.as_i64()).unwrap_or(-1),input.get("keepCopy").and_then(|v|v.as_bool()).unwrap_or(true))?)?,
+            _=>return Err(Error::Message("지원하지 않는 메모 요청입니다."))
+        })
+    }).await.map_err(|_|"메모 작업을 완료하지 못했습니다.".to_string())?.map_err(|e|e.to_string())
+}
+
+#[tauri::command]
 pub async fn get_library_statistics(state: State<'_, AppState>) -> Result<crate::library::statistics::LibraryStatistics, CommandError> {
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || library.get_library_statistics()).await

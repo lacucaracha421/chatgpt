@@ -6,7 +6,7 @@ mod backfill_tests;
 #[cfg(test)]
 mod capture_tests;
 pub(crate) mod captures;
-mod client;
+pub(crate) mod client;
 pub(crate) mod collections;
 pub(crate) mod metadata_backup;
 pub(crate) mod models;
