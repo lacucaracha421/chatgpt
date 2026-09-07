@@ -1,0 +1,13 @@
+{
+  "repo": "deepghs/ccip_onnx",
+  "model": "ccip-caformer_b36-24",
+  "revision": "eb2acdd29af1703388d3d0c04221add322bc9110",
+  "sha256": {
+    "model_feat.onnx": "c1e7333a55c2ad9e03cd340c635e96c9c1d86f0836fa7eae65720e7c9c94ee51",
+    "model_metrics.onnx": "816f291e385e854896276ff283dc83eac4966e5f51ab10260fee50de3ca9b8e3",
+    "metrics.json": "5e4a1cdb81053acfbab36980ca3b5ec6ca545cb73f3a38d5b114ddbd5c6ab60a"
+  },
+  "preprocessing": "RGB-white-alpha-exif; bilinear stretch 384; CLIP mean/std; v1",
+  "source": "https://github.com/deepghs/imgutils/blob/main/imgutils/metrics/ccip.py",
+  "license": "OpenRAIL; https://huggingface.co/deepghs/ccip_onnx"
+}

@@ -1,0 +1,115 @@
+{
+  "baseline": {
+    "total": 67,
+    "positives": 14,
+    "before": {
+      "tp": 14,
+      "fp": 6,
+      "fn": 0
+    },
+    "after": {
+      "tp": 14,
+      "fp": 6,
+      "fn": 0
+    }
+  },
+  "oneRejectionRuns": [
+    {
+      "rejectedId": 55,
+      "name": "HOZgIblbQAAER-9.jfif",
+      "total": 66,
+      "positives": 14,
+      "before": {
+        "tp": 14,
+        "fp": 5,
+        "fn": 0
+      },
+      "after": {
+        "tp": 14,
+        "fp": 4,
+        "fn": 0
+      }
+    },
+    {
+      "rejectedId": 52,
+      "name": "HONQvwTboAAUd84.jfif",
+      "total": 66,
+      "positives": 14,
+      "before": {
+        "tp": 14,
+        "fp": 5,
+        "fn": 0
+      },
+      "after": {
+        "tp": 14,
+        "fp": 4,
+        "fn": 0
+      }
+    },
+    {
+      "rejectedId": 66,
+      "name": "remote-d3e1df73-9b61-452b-a870-ebfe8805a905.png",
+      "total": 66,
+      "positives": 14,
+      "before": {
+        "tp": 14,
+        "fp": 5,
+        "fn": 0
+      },
+      "after": {
+        "tp": 14,
+        "fp": 2,
+        "fn": 0
+      }
+    },
+    {
+      "rejectedId": 59,
+      "name": "remote-c186a553-56ef-47d8-950d-90cae2012cc1.png",
+      "total": 66,
+      "positives": 14,
+      "before": {
+        "tp": 14,
+        "fp": 5,
+        "fn": 0
+      },
+      "after": {
+        "tp": 14,
+        "fp": 3,
+        "fn": 0
+      }
+    },
+    {
+      "rejectedId": 31,
+      "name": "HBpDggpWEAAWFPV.webp",
+      "total": 66,
+      "positives": 14,
+      "before": {
+        "tp": 14,
+        "fp": 5,
+        "fn": 0
+      },
+      "after": {
+        "tp": 14,
+        "fp": 3,
+        "fn": 0
+      }
+    },
+    {
+      "rejectedId": 65,
+      "name": "remote-capture-9858ce1d-77f1-4263-9d74-872e4e56a30a.jpg",
+      "total": 66,
+      "positives": 14,
+      "before": {
+        "tp": 14,
+        "fp": 5,
+        "fn": 0
+      },
+      "after": {
+        "tp": 14,
+        "fp": 2,
+        "fn": 0
+      }
+    }
+  ],
+  "note": "Exploratory single-rejection diagnostics on previously inspected data. Each run starts fresh; taught image and duplicates excluded on both sides. No best run automatically selected or applied to user session."
+}

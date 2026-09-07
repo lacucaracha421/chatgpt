@@ -1,0 +1,14 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import {initialState} from './public/review-engine.mjs';
+import {envelope} from './public/review-migrate.mjs';
+const root=process.cwd();
+const info=JSON.parse(fs.readFileSync('incremental-verification.json','utf8'));
+const base=path.join(info.fixture,'_experiment');
+for(const name of ['review.html','review.css','review-app.mjs','review-engine.mjs','review-migrate.mjs'])fs.copyFileSync(path.join(root,'public',name),path.join(base,'public',name));
+const data=JSON.parse(fs.readFileSync(path.join(base,'public','data.json'),'utf8'));
+fs.writeFileSync(path.join(base,'review-checkpoint.json'),JSON.stringify(envelope(data,{state:initialState(data),history:[]})));
+const live=JSON.parse(fs.readFileSync('public/data.json','utf8'));
+const sample=live.items.find(x=>!x.positive&&!data.items.some(y=>y.sha256===x.sha256));
+fs.copyFileSync(path.join(path.dirname(root),sample.path),path.join(info.fixture,'additional-comparison'+path.extname(sample.path)));
+console.log(base);

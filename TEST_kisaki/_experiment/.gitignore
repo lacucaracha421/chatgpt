@@ -1,0 +1,10 @@
+# Local environment and regenerated artifacts
+.venv/
+__pycache__/
+cache/
+checks/
+archive/
+checkpoints/
+public/thumbs/
+models/*.onnx
+analysis.log
