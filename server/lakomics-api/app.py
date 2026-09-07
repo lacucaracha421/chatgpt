@@ -1345,10 +1345,13 @@ def _revisit_date_bundle(db, limit: int) -> list:
     return rows[:limit]
 
 
-def _revisit_creator_groups(db, limit: int) -> list[dict]:
-    """작가 그룹 선택: 3개 이상 자산 + 30일 이전 자산 보유 작가를 결정론적으로
-    선택한다(최다 자산 작가와 가장 오래된 자산 보유 작가를 번갈아). 홈에는
-    최대 3그룹, 그룹당 4~6개 미리보기."""
+def _revisit_creator_groups(db, limit: int, *, day: int | None = None) -> list[dict]:
+    """Rotate through all eligible creators in stable daily groups (UTC).
+
+    With at least six candidates adjacent days do not overlap. No history writes
+    or per-refresh randomness: repeated requests on the same day remain stable.
+    """
+    day = datetime.now(timezone.utc).date().toordinal() if day is None else day
     creators = db.execute(
         """
         SELECT creator_handle,
@@ -1362,27 +1365,14 @@ def _revisit_creator_groups(db, limit: int) -> list[dict]:
         GROUP BY creator_handle
         HAVING COUNT(*) >= 3
           AND MIN(COALESCE(assets.collected_at, assets.created_at)) <= datetime('now', '-30 days')
-        ORDER BY asset_count DESC, creator_handle ASC
-        LIMIT 12
+        ORDER BY creator_handle ASC
         """
     ).fetchall()
     if not creators:
         return []
-    chosen = []
-    pool = [dict(row) for row in creators]
-    seen_handles: set[str] = set()
-    pick_by_count = True
-    while len(chosen) < 3 and pool:
-        if pick_by_count:
-            pool.sort(key=lambda row: (-(row["asset_count"] or 0), row["creator_handle"]))
-        else:
-            pool.sort(key=lambda row: (row["oldest_at"] or "", row["creator_handle"]))
-        candidate = pool.pop(0)
-        if candidate["creator_handle"] in seen_handles:
-            continue
-        seen_handles.add(candidate["creator_handle"])
-        chosen.append(candidate)
-        pick_by_count = not pick_by_count
+    start = (day * 3) % len(creators)
+    chosen = [creators[(start + index) % len(creators)]
+              for index in range(min(3, len(creators)))]
     groups = []
     for creator in chosen[:3]:
         rows = db.execute(
@@ -2066,3 +2056,13 @@ def read_album_replica(
     if if_none_match == etag:
         return Response(status_code=304, headers=headers)
     return JSONResponse({**payload, "revision": revision, "generation": 1}, headers=headers)
+
+
+# Collections are a separate read replica; provider artwork never enters assets.
+from mobile_collections import register_collections
+from r2 import presign_put as _collection_presign_put
+
+startup_mobile_collections = register_collections(
+    app, get_db, require_auth, lambda: _s3, lambda: R2_BUCKET,
+    presign_get, _collection_presign_put,
+)

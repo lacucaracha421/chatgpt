@@ -1,6 +1,8 @@
 # Lakomics Mobile consumption UX
 
-Status: approved design direction, not yet implemented
+Status: approved design direction; native preview implemented 2026-09-07, device acceptance pending
+
+The new `app/mobile-client` / `android` preview implements the core consumption path. See `android/README.md` for its exact scope and current limitations. Browser fixture/static/offline checks do not complete the Galaxy Tab device gate below. The living backlog retains MOBILE-004 as PARTIAL.
 
 This document defines the consumption-oriented UI and loading behavior for the
 Galaxy Tab Lakomics client. It refines the product direction in `mobile.md`;
@@ -12,7 +14,7 @@ it is scheduled.
 
 Mobile should optimize for these activities in order:
 
-1. inspect recently saved media and continue from the previous position;
+1. inspect recently saved media immediately;
 2. choose a classification or creator and browse it deliberately;
 3. rediscover older media without a specific destination.
 
@@ -48,7 +50,7 @@ separately after its PC experience and data contracts are updated.
 
 The initial bottom navigation contains two destinations:
 
-- **Home** — continue, inspect recent additions, and enter lightweight revisit
+- **Home** — inspect recent additions and enter lightweight revisit
   or discovery experiences;
 - **Library** — browse the existing classification hierarchy and its assets.
 
@@ -58,17 +60,15 @@ destinations are not shown merely to reserve space.
 
 ## Home
 
-Home is a recent-first gallery rather than a collection of equally weighted
-dashboard rails.
+Home starts directly with the Recent toolbar and gallery. The introductory
+heading and Continue section were removed at user request on 2026-09-07.
 
 The vertical order is:
 
-1. **Continue** — a compact card that restores the last grid/viewer context and
-   position. It is omitted when no useful continuation exists.
-2. **Recent additions** — the dominant, full-width gallery. It uses the same
+1. **Recent additions** — the dominant, full-width gallery. It uses the same
    canonical Recent query as the Library (`{type: "recent"}`), not a fabricated
    classification ID.
-3. **Revisit and discovery** — secondary modules below Recent. They should be
+2. **Revisit and discovery** — secondary modules below Recent. They should be
    concise and must not delay the first useful Recent paint.
 
 Recent, Revisit, and discovery maintain separate viewer sequences. Opening an
@@ -110,8 +110,9 @@ gallery while preserving the current visual anchor where practical.
   scroll position.
 - Portrait opens the classification hierarchy as a drawer or sheet. Landscape
   may keep the persistent classification sidebar defined in `mobile.md`.
-- Pagination remains bounded; changing the grid must not load the complete
-  library into the DOM.
+- Cursor requests remain bounded, while continuous scrolling appends subsequent
+  batches. Virtualized rows keep the full library out of the DOM. The next batch
+  is prefetched as metadata only; visible thumbnails never block a list commit.
 
 ## Media viewer
 
@@ -241,3 +242,9 @@ Record cold and warm timings for tap-to-first-visual, tap-to-original-replace,
 adjacent navigation, and video first-frame presentation. Measurements decide
 whether a future viewer-sized derivative is warranted; its need is not assumed
 by this design.
+
+## 2026-09-07 Home and transfer update (0.2.0)
+
+The latest direction replaces the introductory/Continue blocks with a compact Recent entry and varied real-library exploration. Home presents recent 12, up to six visited classifications, four daily classification covers chosen across top-level branches before filling remaining slots, and date/creator Revisit image groups. Classifications use saved IDs/counts/breadcrumbs, with no fixed personal folders. Recent is usable before up to four cover metadata requests finish (concurrency two). Classification collages may crop their previews; Library/gallery and viewer preserve complete media aspect ratios.
+
+Leaving the viewer cancels native original requests. Gallery thumbnails pause beneath the viewer and adjacent original preload is reduced to one known-size image no larger than 8 MiB. Viewed image originals up to 32 MiB share the native 1 GiB media cache; videos use direct signed streaming URLs. A delayed video offers retry with a renewed URL and preserved playback position. The device timing gates above remain required; build/browser checks do not establish a measured speedup.

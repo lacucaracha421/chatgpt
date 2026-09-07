@@ -200,6 +200,7 @@ pub fn run() {
             commands::delete_cloud_api_token,
             commands::test_cloud_capture_connection,
             commands::push_cloud_metadata_backup,
+            commands::push_cloud_collections,
             commands::restore_cloud_metadata_backup,
             commands::run_due_cloud_capture_sync,
             commands::cloud_backfill_preflight,

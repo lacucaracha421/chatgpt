@@ -1,0 +1,38 @@
+// Development-only fixtures. Vite removes this module from the production APK.
+import type {Asset} from './types';
+import type {CollectionDetail} from './collectionModel';
+const palettes = [['#b8b1a0','#474d48','#7a8176','#d8cbb2'],['#afc0bb','#31464a','#607d7a','#d3d3bf'],['#c5ab98','#483d46','#826a73','#e2c9a8'],['#b6b7c4','#363d57','#737c93','#d4cbc3']];
+function art(index: number, w: number, h: number) {
+  const p = palettes[index % palettes.length];
+  return `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 600 800" preserveAspectRatio="none"><rect width="600" height="800" fill="${p[0]}"/><circle cx="${180+index%3*95}" cy="190" r="85" fill="${p[3]}"/><path d="M0 480L140 280 320 580 460 370 600 490V800H0" fill="${p[2]}"/><path d="M0 610L240 420 430 630 600 530V800H0" fill="${p[1]}"/><path d="M290 800L370 600 343 482 393 607 346 800" fill="${p[3]}" opacity=".7"/><path d="M25 25H575V775H25Z" fill="none" stroke="${p[3]}" opacity=".3"/><text x="45" y="745" fill="${p[3]}" font-family="sans-serif" font-size="15" letter-spacing="7">STUDY / ${String(index+1).padStart(2,'0')}</text></svg>`)}`;
+}
+const authors = ['bluealex1203','YanghuiyaRBQ','koragen1925','moon_archive','atelier.04'];
+const assets: Asset[] = Array.from({length:120}, (_, i) => {
+  const [w,h] = [[600,800],[900,600],[600,960],[800,800],[1200,680]][i%5];
+  return {id:`demo-${i}`,kind:'image',width:w,height:h,ratio:w/h,creator_handle:authors[i%authors.length],collected_at:`2026-09-${String(6 - Math.floor(i/25)).padStart(2,'0')}T12:00:00Z`,content_type:'image/svg+xml',size_bytes:483217,thumbnail_available:true,preview:art(i,w,h)};
+});
+const collectionNames={game:['여름의 항로','조용한 행성','먼 바다의 기억','숲의 기록'],manga:['밤의 도서관','여름과 파도','푸른 궤도','작은 정원'],movie:['오후의 빛','도시의 창','먼 곳에서','겨울의 초상']};
+const collections:CollectionDetail[]=(['game','manga','movie'] as const).flatMap(type=>Array.from({length:12},(_,i)=>({id:`collection-${type}-${i}`,name:collectionNames[type][i%4]+(i>3?` ${Math.floor(i/4)+1}`:''),type,showcase:i<7,showcaseOrder:i,year:2024+i%3,author:type==='manga'?'서유진':null,developer:type==='game'?'Studio Field':null,director:type==='movie'?'이수현':null,selectedWorkArtworkId:`cover-${i}`,selectedHeroArtworkId:type==='game'?`hero-${i}`:null,selectedBackdropArtworkId:type==='movie'?`hero-${i}`:null,overview:'조용히 보관해 두었다가 다시 꺼내 보는 작품. 빛과 계절, 그리고 오래 남아 있는 장면들을 따라갑니다.',volumes:type==='manga'?Array.from({length:8},(_,v)=>({id:`volume-${v}`,volumeNumber:v%5+1,editionIndex:v<5?0:1,displayLabel:`${v%5+1}권`,coverArtworkId:`volume-cover-${v}`})):[],artworks:[{id:`cover-${i}`,kind:'cover',selected:true,thumbnailAvailable:true,originalAvailable:true}]})));
+export async function demoTransport(op: string, payload: Record<string, unknown>): Promise<unknown> {
+  await new Promise(resolve => setTimeout(resolve, 80));
+  if (op === 'collectionArtwork') {const index=Number(String(payload.artworkId).match(/\d+$/)?.[0]??0);return {url:art(index,String(payload.artworkId).startsWith('hero')?1200:600,String(payload.artworkId).startsWith('hero')?600:800),expires_in:240};}
+  if (op === 'cacheStatus' || op === 'clearCache') return {bytes:0,count:0,limit:1024*1024*1024};
+  if (op === 'thumbnail' || op === 'media') return {url:assets.find(asset => asset.id === payload.assetId)?.preview,expires_in:240};
+  if (op === 'pickerStatus' || op === 'pickerRefresh') return {supported:true,eligible:false,selected:false,syncing:false,scanned:120,mediaCount:120,albumCount:7,ready:true,lastSyncedAt:Date.now(),error:''};
+  if (op === 'status' || op === 'configure') return {configured:true,endpoint:'https://preview.invalid'};
+  if (op === 'disconnect') return {configured:false,endpoint:''};
+  if (op !== 'api') return {};
+  const url = new URL(String(payload.path),'https://preview.invalid');
+  if(url.pathname==='/v1/collections'){const items=collections.filter(item=>item.type===url.searchParams.get('type')&&(!url.searchParams.get('q')||item.name.includes(url.searchParams.get('q')!))&&(url.searchParams.get('showcase')!=='true'||item.showcase));return {ready:true,revision:'demo-1',publishedAt:'2026-09-07T00:00:00Z',items,nextCursor:null};}
+  if(url.pathname.startsWith('/v1/collections/'))return {revision:'demo-1',item:collections.find(item=>item.id===url.pathname.split('/')[3])};
+  if (url.pathname.includes('media-ticket')) {const id = url.pathname.split('/')[4]; return {url:assets.find(a => a.id === id)?.preview,expires_in:300};}
+  if (url.pathname.endsWith('/classifications')) return {items:[{id:'game',name:'게임',parent_id:null,asset_count:120},{id:'wuthering',name:'명조',parent_id:'game',asset_count:48},{id:'reverse',name:'리버스',parent_id:'game',asset_count:52},{id:'zenless',name:'젠레스',parent_id:'game',asset_count:20},{id:'art',name:'일러스트',parent_id:null,asset_count:36},{id:'landscape',name:'풍경',parent_id:'art',asset_count:24},{id:'design',name:'디자인',parent_id:'art',asset_count:12}]};
+  if (url.pathname.endsWith('/revisit')) return {bundles:[{kind:'date',title:'과거의 이날',items:assets.slice(0,8)},{kind:'creator',title:'다시 만난 작가',groups:[{creator_key:'bluealex1203',creator_name:'bluealex1203',asset_count:24,items:assets.slice(0,4)}]}]};
+  if (url.pathname.includes('/captures')) return {captures:[]};
+  const offset = Number(url.searchParams.get('cursor') ?? 0), limit = Number(url.searchParams.get('limit') ?? 40);
+  const ranges:Record<string,[number,number]> = {game:[0,120],wuthering:[0,48],reverse:[48,100],zenless:[100,120],art:[0,36],landscape:[0,24],design:[24,36]};
+  const range = ranges[url.searchParams.get('classification_id') ?? ''];
+  const selected = range ? assets.slice(...range) : assets;
+  // Match current server metadata: dimensions/preview arrive through thumbnails.
+  return {items:selected.slice(offset,offset+limit).map(({preview,ratio,...asset}) => ({...asset,width:null,height:null})),has_more:offset+limit<selected.length,next_cursor:offset+limit<selected.length?String(offset+limit):null};
+}

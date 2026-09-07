@@ -2050,6 +2050,15 @@ pub async fn test_cloud_capture_connection(
 }
 
 #[tauri::command]
+pub async fn push_cloud_collections(
+    state: State<'_, AppState>,
+) -> Result<crate::cloud::collections::CloudCollectionsPublishResult, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.push_cloud_collections())
+        .await.map_err(|_| background_task_error())?.map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub async fn push_cloud_metadata_backup(
     state: State<'_, AppState>,
 ) -> Result<CloudMetadataBackupResult, CommandError> {

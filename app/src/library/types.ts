@@ -125,6 +125,7 @@ export type CloudCaptureSettings = {
 export type CloudCredentialStatus = { configured: boolean };
 export type CloudCaptureConnectionStatus = { pendingCount: number };
 export type CloudMetadataBackupResult = { byteSize: number };
+export type CloudCollectionsPublishResult = { collections: number; artworks: number; uploaded: number; revision: string };
 export type CloudLibraryRestoreReport = {
   metadataByteSize: number;
   totalAssets: number;
@@ -999,6 +1000,7 @@ export interface LibraryGateway {
   deleteCloudApiToken(): Promise<CloudCredentialStatus>;
   testCloudCaptureConnection(): Promise<CloudCaptureConnectionStatus>;
   pushCloudMetadataBackup?(): Promise<CloudMetadataBackupResult>;
+  pushCloudCollections?(): Promise<CloudCollectionsPublishResult>;
   restoreCloudMetadataBackup?(): Promise<CloudLibraryRestoreReport>;
   runDueCloudCaptureSync(): Promise<CloudCaptureSyncResult>;
   cloudBackfillPreflight(): Promise<CloudBackfillPreflightReport>;

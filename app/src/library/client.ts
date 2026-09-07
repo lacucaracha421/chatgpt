@@ -78,6 +78,7 @@ import type {
   CloudCredentialStatus,
   CloudCaptureConnectionStatus,
   CloudMetadataBackupResult,
+  CloudCollectionsPublishResult,
   CloudLibraryRestoreReport,
   CatalogWorkDetail,
   CollectionCover,
@@ -164,6 +165,7 @@ export const libraryGateway: LibraryGateway = {
     invoke<CloudCaptureConnectionStatus>("test_cloud_capture_connection"),
   pushCloudMetadataBackup: () =>
     invoke<CloudMetadataBackupResult>("push_cloud_metadata_backup"),
+  pushCloudCollections: () => invoke<CloudCollectionsPublishResult>("push_cloud_collections"),
   restoreCloudMetadataBackup: () =>
     invoke<CloudLibraryRestoreReport>("restore_cloud_metadata_backup"),
   runDueCloudCaptureSync: () =>

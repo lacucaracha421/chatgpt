@@ -22,7 +22,7 @@ const BACKDROPS_DIR: &str = "backdrops";
 /// DB의 source_path는 폴더 이름만 저장하므로 직속 경로를 먼저 시도한 뒤 하위 폴더를 확인한다.
 const LEGACY_SOURCE_SUBDIRS: [&str; 3] = ["games", "comics", "movies"];
 
-fn resolve_collection_dir(root: &str, source_path: &str) -> PathBuf {
+pub(crate) fn resolve_collection_dir(root: &str, source_path: &str) -> PathBuf {
     let root_path = Path::new(root);
     let direct = root_path.join(source_path);
     if direct.is_dir() {
@@ -219,6 +219,20 @@ fn naturally_sorted_images(directory: &Path) -> Result<Vec<PathBuf>, LibraryErro
     Ok(images)
 }
 
+/// Read-only projection using the same source filename/edition rules as the PC shelf.
+pub(crate) fn source_volume_images(directory: &Path) -> Result<Vec<(i64, u8, PathBuf)>, LibraryError> {
+    let regex = vol_regex();
+    let mut slots = std::collections::BTreeMap::new();
+    for path in naturally_sorted_images(&directory.join(COVERS_DIR))? {
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        let (_, label) = classify_shelf(&name, &regex);
+        if let Some(slot) = label.strip_prefix("vol.").and_then(super::collection_volume::parse_volume_slot) {
+            slots.entry(slot).or_insert(path);
+        }
+    }
+    Ok(slots.into_iter().map(|((number, edition), path)| (number, edition, path)).collect())
+}
+
 fn source_metadata_stamp(path: &Path) -> u128 {
     let Ok(metadata) = fs::metadata(path) else {
         return 0;
@@ -250,7 +264,7 @@ fn collection_artwork_source_signature(collection_dir: &Path, collection_type: &
     })
 }
 
-fn source_preview_path(collection_dir: &Path) -> Result<PathBuf, LibraryError> {
+pub(crate) fn source_preview_path(collection_dir: &Path) -> Result<PathBuf, LibraryError> {
     if let Some(cover) = info_cover(collection_dir)? {
         return Ok(cover);
     }
@@ -747,7 +761,7 @@ fn collection_thumbnail_relative_path(
     format!("collection-thumbnails/{collection_id}/{hash}.webp")
 }
 
-fn write_collection_thumbnail(
+pub(crate) fn write_collection_thumbnail(
     image: &image::DynamicImage,
     path: &Path,
 ) -> Result<(), LibraryError> {

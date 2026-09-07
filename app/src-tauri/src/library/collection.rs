@@ -10,7 +10,7 @@ use super::{
     validated_asset_ids, Library,
 };
 
-const COLLECTION_SUMMARY_SQL: &str = "SELECT
+pub(crate) const COLLECTION_SUMMARY_SQL: &str = "SELECT
     collection.id,
     collection.name,
     collection.description,
@@ -497,7 +497,7 @@ pub(crate) fn collection_by_id(
         .ok_or(LibraryError::CollectionNotFound)
 }
 
-fn collection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollectionSummary> {
+pub(crate) fn collection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollectionSummary> {
     let type_str: String = row.get(3)?;
     let collection_type = match type_str.as_str() {
         "game" => CollectionType::Game,

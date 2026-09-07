@@ -2,7 +2,7 @@
 
 Status: current product direction with retained rollout history
 
-Current-status clarification (2026-09-05): the initial full-library backfill and browser browsing milestone are complete. `CLOUD-006` remains `PARTIAL` only for the separate queued-work pause/wait/restart/resume gate in the living backlog. Do not reseed or rerun the completed backfill without a separately approved recovery operation.
+Current-status clarification (2026-09-07): the initial full-library backfill, Galaxy Tab browser browsing milestone, and queued-work pause/wait/restart/resume acceptance are complete. `CLOUD-006` is `DONE` in the living backlog. Do not reseed or rerun the completed backfill without a separately approved recovery operation.
 
 The checkpoint below records the browser prototype, not a completed native Android client. Current production-client scope follows [the approved consumption UX](mobile-consumption-ux.md) and [the living backlog](../roadmap/lakomics-backlog.md). Older rollout proposals below, including a later `display.webp` derivative, are not authorization to implement them; measure the current original/thumbnail path before considering another derivative.
 
@@ -76,23 +76,29 @@ V1 responsibilities:
 
 V1 does **not** need classification/tag editing or bulk organization features.
 
-### X Collector extension
+### Browser extension relationship
 
-The extension stays a separate product surface.
+The browser collector remains a separate runtime, but extension distribution and maintenance may live inside the same installed Lakomics Mobile APK as a convenience surface.
 
-- X collection continues to be handled by the browser extension.
-- Mobile Lakomics must not require the extension to be installed in order to browse the library.
-- The extension and Mobile may share the same Cloud API and replicated library data, but neither should depend directly on the other's runtime.
-- A deeper combined workflow can be reconsidered later.
+- X/general web collection continues to be handled by the browser extension.
+- Mobile library browsing must never require the extension or Titanium to be installed or running.
+- The Lakomics Mobile APK may include an Extension Manager for version checks, signed-package download/update, opening Titanium, and install/recovery guidance.
+- This shared APK packaging does not merge runtimes: Mobile talks directly to the Cloud API, while the browser extension keeps its own browser lifecycle.
+- Do not assume an external APK can call Chromium's internal Load Unpacked API or silently install an extension. User confirmation may still be required.
+- Preferred production distribution experiment: a fixed-ID, consistently signed CRX. Adopt it only after install/update identity and reboot persistence are verified on the Galaxy Tab + Titanium. Keep unpacked SAF loading as a development/fallback path until that gate passes.
 
 Target relationship:
 
 ```text
-                    ┌─ Desktop Lakomics
-                    │
-Lakomics Cloud API ─┼─ Lakomics Mobile
-                    │
-                    └─ X Collector
+Desktop Lakomics ---------+
+                         |
+Lakomics Cloud API -------+---- Lakomics Mobile library
+                         +---- Browser collector extension
+
+Lakomics Mobile APK
+  +-- Mobile library (direct Cloud API)
+  +-- Android integration
+  +-- Extension Manager -> signed CRX / Titanium handoff
 ```
 
 ## Cloud library direction
@@ -507,6 +513,9 @@ Implement:
 - external URL handling
 - sharing/file stream primitives
 - stable APK installation/update workflow for personal use
+- integrated Extension Manager utility for checking/distributing the Lakomics browser extension without making Mobile depend on the extension runtime
+- fixed-ID signed-CRX install/update experiment with Titanium, gated by real Galaxy Tab reboot-persistence verification
+- unpacked SAF loading retained as a development/fallback path until the signed-CRX gate passes
 
 Exit condition:
 - Mobile is usable as a standalone installed app with no browser extension runtime dependency
@@ -581,5 +590,65 @@ Exit condition:
 - Home: **yes, consumption-oriented with Continue/Revisit**.
 - Collections/Showcase: **later**.
 - Authentication: **one-time device registration/token**.
-- Extension relationship: **separate runtime, shared services where useful**.
+- Extension relationship: **separate runtime, shared services where useful; distribution/maintenance may live in the same Mobile APK through an independent Extension Manager**.
 - Long-term media optimization: **WebP variants and later controlled migration**.
+
+## Native APK implementation plan — 2026-09-07
+
+User delegated design and implementation overnight. This section owns the current implementation plan; the living backlog remains the only product task tracker. Existing edits above are preserved. Start HEAD: b83e8ccbcf20017b06c064d6f10c73dc45aab10a.
+
+Goal: build an installable independent Galaxy Tab consumption APK, with direct authenticated cloud browsing and a read-only Android document source. Preserve the browser prototype and CloudMediaProvider PoC.
+
+Architecture decision for this first build: reuse installed React/TypeScript/Vite and bundled fonts from app; isolate the new entry at app/mobile-client and native source at android. A small platform Java WebView shell uses the available Android SDK/JDK without adding Capacitor/Gradle/Kotlin dependencies. Java serves the proposed small native-layer responsibility; it does not introduce a second product UI. Capacitor adds a plugin/dependency chain and Tauri Mobile adds a separate Rust/mobile toolchain; neither is needed for this bounded platform shell.
+
+Design: dark neutral surfaces, ivory rectangular active states, small square markers, SUIT/Barlow/Rajdhani fonts, 44px touch actions, minimal separators. Portrait Home/Library bottom navigation; landscape contextual classification index. Recent dominates Home; Continue and Revisit remain secondary. Settings and connection live in one modal surface. Full-aspect justified rows, three row-height densities, contained progressive image/video viewer with pinch-only image pan and explicit adjacent actions. Pending Captures remain a separate labelled preview section and never count as Assets. No copied NieR artwork or HUD.
+
+Bridge contract: window.LakomicsNative.request(id, operation, JSON.stringify(payload)); cancel(id). Native dispatches CustomEvent('lakomics-native', {detail:{id,ok,data,error}}). Operations: status -> {configured,endpoint}; configure {endpoint,token,allowPrivateHttp} -> status; disconnect -> status; api {path,method?,body?} -> server JSON; openExternal {url}. Native emits lakomics-resume and lakomics-back; frontend calls finish operation only when no overlay/back context remains. API paths are native allowlisted for read-only library/classification/revisit, media-ticket POST, pending list/download; no ingest/delete/writeback routes. Credentials are encrypted under Android Keystore, excluded from backup, never returned to JS or logged. Plain HTTP requires explicit connection-screen opt-in and numeric private-network address. No redirects carrying Authorization. WebView loads bundled content only from https://app.lakomics.local/; external pages cannot use the bridge.
+
+- [x] Native foundation: android/AndroidManifest.xml, native Activity, secure settings, bounded authenticated HTTP client, read-only DocumentsProvider, build.ps1, README. Build takes -SdkRoot; outputs ignored debug APK and retains its debug key for update identity. No device install or production changes in this task.
+- [x] Mobile client: app/mobile-client entry, bridge client, typed server contracts, page/state controller, gallery geometry, shared controls, navigation/settings/viewer. Vite config and separate TypeScript/test configuration reuse installed packages. Keep secrets out of localStorage. Demo data is accessible only in development browser and clearly labelled.
+- [x] Loading correctness: cancel or ignore superseded requests; preserve old grid until replacement page commits; restore viewer/grid and density; refresh on native/browser foreground without blanking. Metadata-only pagination remains bounded; mounted rows are virtualized. Server currently returns null dimensions; resolve thumbnail dimensions before committing page geometry, with a stable neutral fallback on failure and bounded thumbnail concurrency.
+- [x] Media: memory-only expiring/deduplicated tickets; thumbnail remains through original decode/failure; only immediately adjacent image originals preload; videos never preload as neighbours. Pending previews use download tickets, remain separate, and disappear on refreshed pending-list absence after desktop processing. No fabricated identity mapping or desktop duplicate decisions.
+- [x] Verification and review: targeted geometry/request-state/media tests, separate TypeScript check, mobile Vite bundle, native compile/signature verification, browser portrait/landscape interaction and screenshot checks, independent scoped code review. Record native/device acceptance separately as unverified if no authorized isolated runtime is available. Never install onto sleeping user's tablet or change its existing provider configuration.
+
+Scope boundaries: no Git writes, production deployment/data writes, full backfill, automatic deletion, CloudMediaProvider replacement, or silent CRX installation. Extension Manager is optional and remains deferred until signed-CRX distribution contract exists. DocumentsProvider and normal Photo Picker integration are distinct. Critical unresolved credential/data safety failures stop affected work; routine build/implementation failures are repaired locally.
+
+### Build and review checkpoint
+
+2026-09-07: `npm --prefix app run mobile:test` passed 25 client tests; `npm --prefix app run mobile:build` completed its TypeScript check and production bundle with exit 0. `android/build.ps1 -SdkRoot C:\LakomicsCloudMediaPoC\sdk` passed 38 network-policy and 19 document-tree checks, compiled/packaged the app and verified v2/v3 signatures, exit 0. Artifact: `android/build/lakomics-mobile-debug.apk`, 1,119,652 bytes, SHA-256 `211750C636B9FEEA2006FE1E046EA88750496EE07DB2C3FA391F1931AC62A720`. APK metadata identifies `com.lakomics.mobile` version 0.1.0 (1), min SDK 26 / target 35, one Internet permission and the document provider. Production JS excludes the development fixture module; bundled fonts include OFL notices.
+
+Independent native and frontend reviews found and then accepted fixes for page-tree grant boundaries, cancel-before-lock connection changes, WebView rotation retention, Continue provenance, retained-gallery request races, pinch pan bounds, shared classification expansion, and Library/native-back context restoration. Browser fixture checks covered 800x1280 portrait, 1280x800 landscape and 800x600 short height: classification navigation/drawer state, density persistence, cursor next page, image viewer/next/resize, no horizontal document overflow, and no new warning/error logs after a fresh final-code reload. These are browser/fixture outcomes, not real media or Android acceptance.
+
+The APK is an installable read-only preview. Device installation/authentication, real cloud image/video consumption, SAF recipients/grants, multi-select/cancellation and cold/warm timing remain unverified. Android Share quick-save, temporary capture storage and optional signed-CRX management remain pending. No production deployment/data writes, device changes, Git mutations or modifications to the prior browser site/extension/PoC were performed. Use `android/README.md` for build and first-use instructions. MOBILE-001/002/004 remain PARTIAL in the living backlog.
+
+### 2026-09-07 unified APK 0.2.0 checkpoint
+
+User delegated integration of the prior Pick role, faster/reliable media access and a richer classification-based Home while disconnecting the Galaxy Tab. This supersedes the first-build exclusion of integrated CloudMediaProvider; device configuration and production/Git writes were not performed.
+
+The main APK now contains `com.lakomics.mobile.documents` and API33+ `com.lakomics.mobile.cloud`. Breadcrumb classifications become flat Photo Picker albums backed by a complete background metadata replica, stable IDs/generations and deletion tombstones. Queries use the last completed replica; interrupted refreshes do not publish a partial library. Existing read APIs suffice. The old PoC package, private manual albums and selected device provider remain untouched; eligibility/selection transition needs the tablet and native acceptance.
+
+One 1 GiB media cache serves thumbnails, viewed image originals up to 32 MiB, and selected files up to 512 MiB. Video viewing streams signed URLs directly. Transfers run outside the document metadata lock, deduplicate per file, verify complete lengths, reject stale commits and retry transient failures once with a fresh ticket. Control and file workers are separated. Viewer originals cancel on exit, speculative preload is limited to one known-small image, and video retry preserves position.
+
+Home retains the compact Recent start without Continue, then adds visited classifications, daily covers across top-level classifications, and image-led date/creator Revisit groups. Cover metadata requests are bounded independently of first paint. Settings exposes combined cache clear/usage and integrated Picker readiness/refresh/system settings.
+
+Verification: 40 frontend tests; TypeScript/Vite; SDK35 compilation; 38 network, 19 ancestry, 18 cache and 22 transfer checks plus PickerSnapshot tests; APK asset/signature verification all passed. Browser fixtures were checked in landscape, portrait and narrow phone widths. Independent read-only native review identified a provider permission mismatch and truncated-download retry mismatch; both were corrected before final build. APK: `android/build/lakomics-mobile-debug.apk` v0.2.0 (6), SHA-256 `908233AFA68A86BBD246A3040F2FC53448C3ACB81F0445F402F12B9A3FF94C89`.
+
+Actual provider eligibility, receiving-app attachment, process-restart warm reuse, large-library memory and real latency remain unverified without the device. This task made no server changes/deployment, old PoC edits, installation/provider switch, production data write or Git mutation. Current behavior and the prepared transition procedure are in `android/README.md`. Earlier task WIP is preserved.
+
+
+### 2026-09-07 Collections deployment and icon checkpoint
+
+Explicit user approval authorized deployment of the Collection API and first Collection publication. The deployed `app.py` and new `mobile_collections.py` matched local SHA-256 (`9b67615b0775c7dd9910c7231465de02adf1830f1beac884607732a601fd2493`, `39ea3a6783dbb8c5b00adeedfd2e3d278f0eb239def874d8b536366f0fc2763f`). Backup: `/home/linuxuser/lakomics-api/backups/collections-20260907T050947Z` contains prior application code and an online SQLite backup with `quick_check=ok`. Restart succeeded; health and authenticated unpublished-list response passed, missing auth returned 401, service active/running with NRestarts=0.
+
+The publisher has an explicit ignored operational entry point that opens `library.sqlite` READ_ONLY, without Library startup migrations/background work. Real-source extraction exposed an overbroad data-version rejection: the existing read transaction already fixes the metadata view, so unrelated concurrent PC writes no longer cancel it; image bytes are still hash-checked before PUT. Actual signed upload exposed duplicate Content-Type headers from ureq's append semantics; the publisher now sends the signed header exactly once. Artwork PUTs are bounded to four workers and complete before the metadata commit. A targeted fixture verified that no fifth transfer or metadata publication occurs before pending artwork completes.
+
+Android launcher now copies the existing PC icon PNG byte-for-byte. See `android/README.md` for APK 0.3.1 (8) and hash. Deployment alone does not prove Galaxy Tab rendering, cache behavior or recipient-app attachment.
+
+First publication completed: 340 collections (181 game, 147 manga, 12 movie), 695 WorkArtwork records, 1,384 verified blobs. Revision `235cc17a8a6f637e7908461644b0ed6a9efe7b452bbe89e60bb2682d139a2615`. The last run uploaded 1,288 files and reused previously completed immutable objects. Full list pagination had 340 distinct IDs; representative type-specific details and both thumbnail/original signed downloads matched SHA-256. Service remained active/running with NRestarts=0. Galaxy Tab acceptance is still pending; this proves server publication/media availability, not the installed APK experience.
+
+
+### Source-folder cover omission repair
+
+The first Collection publication covered managed WorkArtwork only, omitting 261 works whose source images were already inside the active library's configured Collection source root. The publisher now also reads those existing source files using the PC preview selection and volume/edition filename rules. It fills absent cover references and volume slots in the outgoing replica without importing rows or modifying the local library. Existing selected artwork and volume IDs/metadata remain authoritative. Derived 360px WebP previews stage in a temporary directory owned by the snapshot and are deleted after the attempt; originals and thumbnails remain bounded, hash checked and deduplicated. Source paths never enter the API payload, and resolved files outside the configured library are rejected. Seven focused publisher fixtures pass, including source-only covers, editions, stable outgoing IDs, retained volume IDs, thumbnail bounds, no source DB writes and out-of-library rejection.
+
+Source-cover repair completed (2026-09-07): publication revision `3b640e2627ad526d7b3a8764bca87adc6cc4f04796a9373881d5c3910a196898`; 340 works, 2,803 artwork records, 5,588 unique blobs (4,204 uploaded in this repair), 2,332 volume/edition covers. Full comparison with the preceding replica confirmed 261 recovered primary covers, all 79 existing selected covers retained, and every existing volume ID/number/edition/label/release field retained. Every current work and volume has a thumbnail reference. Type pagination had 181 game, 147 manga and 12 movie records with no duplicate IDs; representative original and thumbnail downloads passed SHA-256 checks. Service active/running, NRestarts=0. Galaxy Tab SM-X730 running installed APK 0.3.1 was woken and refreshed: the game grid loaded covers and a previously missing manga (Prison School) displayed its primary cover and ordered 28-volume shelf. No APK rebuild/install was needed. The operation opened the source DB READ_ONLY and wrote previews only to TEMP. Prior replica backup: `/home/linuxuser/lakomics-api/backups/collections-before-source-20260907T053812Z.json`. An interrupted preparation attempt left its TEMP preview directory; manual cleanup was blocked by automatic approval policy, and no workaround deletion was attempted. The successful attempt retained normal TempDir lifecycle cleanup.

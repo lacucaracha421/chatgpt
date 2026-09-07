@@ -61,6 +61,64 @@ pub(crate) struct CloudClient {
 }
 
 impl CloudClient {
+    pub(crate) fn collections_revision(&self, token: &str) -> Result<Option<String>, LibraryError> {
+        #[derive(serde::Deserialize)]
+        struct State { revision: Option<String> }
+        let mut response = self.agent.get(self.endpoint("/v1/collections?limit=1")?)
+            .header("Authorization", bearer(token)?).call().map_err(map_registration_error)?;
+        Ok(read_json_bounded::<State>(&mut response, super::collections::MAX_METADATA_BYTES)?.revision)
+    }
+
+    pub(crate) fn upload_collection_artwork(&self, blob: &super::collections::ArtworkBlob, bytes: &[u8], token: &str) -> Result<bool, LibraryError> {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Prepared { object_key: String, upload_url: Option<String>, required_headers: std::collections::BTreeMap<String, String> }
+        let body = serde_json::to_vec(&serde_json::json!({ "sha256": blob.sha256, "sizeBytes": blob.size_bytes, "contentType": blob.content_type }))
+            .map_err(|_| LibraryError::InvalidCloudResponse)?;
+        let mut response = self.agent.post(self.endpoint("/v1/collections/artworks/prepare")?)
+            .header("Authorization", bearer(token)?).content_type("application/json").send(&body).map_err(map_presign_error)?;
+        let prepared: Prepared = read_json(&mut response)?;
+        if prepared.object_key != blob.object_key || prepared.object_key != format!("work-artwork/mobile/{}", blob.sha256) || bytes.len() as u64 != blob.size_bytes {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        let Some(upload_url) = prepared.upload_url else { return Ok(false); };
+        let url = url::Url::parse(&upload_url).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        if url.scheme() != "https" || url.host_str().is_none() || !url.username().is_empty() || url.password().is_some() || url.fragment().is_some() {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        // Signed storage requests never carry the API token, cookies or follow redirects.
+        let upload_agent: ureq::Agent = ureq::Agent::config_builder().max_redirects(0)
+            .timeout_global(Some(UPLOAD_BODY_TIMEOUT)).build().into();
+        let request = upload_agent.put(url.as_str()).content_type(&blob.content_type);
+        for (name, value) in prepared.required_headers {
+            if !name.eq_ignore_ascii_case("content-type") || value != blob.content_type { return Err(LibraryError::InvalidCloudResponse); }
+            // content_type above already sets this signed header. ureq::header
+            // appends values, so adding it again invalidates the storage signature.
+        }
+        let response = request.send(bytes).map_err(map_upload_error)?;
+        if !response.status().is_success() { return Err(LibraryError::InvalidCloudResponse); }
+        // Register a successful exact HEAD check before metadata publication. This
+        // avoids a large snapshot commit having to HEAD every already verified object.
+        let mut response = self.agent.post(self.endpoint("/v1/collections/artworks/prepare")?)
+            .header("Authorization", bearer(token)?).content_type("application/json").send(&body).map_err(map_presign_error)?;
+        let verified: Prepared = read_json(&mut response)?;
+        if verified.object_key != blob.object_key || verified.upload_url.is_some() {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        Ok(true)
+    }
+
+    pub(crate) fn publish_collections(&self, metadata: &[u8], token: &str) -> Result<String, LibraryError> {
+        #[derive(serde::Deserialize)]
+        struct Published { revision: String }
+        if metadata.len() > super::collections::MAX_METADATA_BYTES { return Err(LibraryError::InvalidCloudResponse); }
+        let mut response = self.agent.put(self.endpoint("/v1/collections/replica")?)
+            .header("Authorization", bearer(token)?).content_type("application/json").send(metadata).map_err(map_registration_error)?;
+        let result: Published = read_json(&mut response)?;
+        if result.revision.is_empty() { return Err(LibraryError::InvalidCloudResponse); }
+        Ok(result.revision)
+    }
+
     pub(crate) fn new(base_url: &str) -> Result<Self, LibraryError> {
         let parsed =
             url::Url::parse(base_url.trim()).map_err(|_| LibraryError::InvalidCloudSyncConfig)?;
@@ -599,14 +657,21 @@ fn validate_presign(
 fn read_json<T: serde::de::DeserializeOwned>(
     response: &mut ureq::http::Response<ureq::Body>,
 ) -> Result<T, LibraryError> {
+    read_json_bounded(response, MAX_RESPONSE_BYTES)
+}
+
+fn read_json_bounded<T: serde::de::DeserializeOwned>(
+    response: &mut ureq::http::Response<ureq::Body>,
+    limit: usize,
+) -> Result<T, LibraryError> {
     let mut bytes = Vec::new();
     response
         .body_mut()
         .as_reader()
-        .take((MAX_RESPONSE_BYTES + 1) as u64)
+        .take((limit + 1) as u64)
         .read_to_end(&mut bytes)
         .map_err(|_| LibraryError::CloudRequestUnavailable)?;
-    if bytes.len() > MAX_RESPONSE_BYTES {
+    if bytes.len() > limit {
         return Err(LibraryError::InvalidCloudResponse);
     }
     serde_json::from_slice(&bytes).map_err(|_| LibraryError::InvalidCloudResponse)

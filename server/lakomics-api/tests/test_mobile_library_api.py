@@ -581,29 +581,28 @@ class MobileRevisitTests(MobileLibraryApiTests):
             all_ids.extend(item["id"] for item in group["items"])
         self.assertEqual(len(all_ids), len(set(all_ids)))
 
-    def test_revisit_creator_selection_alternates_count_and_oldest_history(self):
-        specs = [
-            ("count-top", 6, "2025-05"),
-            ("count-second", 5, "2025-04"),
-            ("oldest-history", 3, "2023-01"),
-            ("count-third", 4, "2025-03"),
-        ]
-        serial = 1
-        for creator, count, month in specs:
-            for index in range(count):
-                asset_id = f"44000000-0000-4000-8000-{serial:012d}"
-                serial += 1
+    def test_revisit_creator_rotation_is_daily_fair_and_not_limited_to_top_twelve(self):
+        for creator in range(14):
+            for index in range(3):
                 self.commit_asset(
-                    asset_id,
-                    creator=creator,
-                    collected_at=f"{month}-{10 + index:02d}T00:00:00.000Z",
+                    f"44000000-0000-4000-8000-{creator * 3 + index:012d}",
+                    creator=f"creator-{creator:02d}",
+                    collected_at=f"2023-01-{10 + index:02d}T00:00:00.000Z",
                 )
-
-        response = self.client.get("/v1/library/revisit", headers=self.auth, params={"limit": 12})
-        self.assertEqual(response.status_code, 200)
-        creator_bundle = next(bundle for bundle in response.json()["bundles"] if bundle["kind"] == "creator")
-        keys = [group["creator_key"] for group in creator_bundle["groups"]]
-        self.assertEqual(keys, ["count-top", "oldest-history", "count-second"])
+        with api_app.get_db() as db:
+            def keys(day):
+                return [group["creator_key"] for group in
+                        api_app._revisit_creator_groups(db, 12, day=day)]
+            previous = keys(0)
+            seen = set(previous)
+            self.assertEqual(keys(0), previous)
+            for day in range(1, 14):
+                current = keys(day)
+                self.assertEqual(len(current), 3)
+                self.assertFalse(set(previous) & set(current))
+                seen.update(current)
+                previous = current
+            self.assertEqual(len(seen), 14)
 
     def test_revisit_rejects_oversized_limit_and_requires_authentication(self):
         self.assertEqual(

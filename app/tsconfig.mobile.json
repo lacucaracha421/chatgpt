@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["mobile-client", "src/vite-env.d.ts"],
+  "exclude": ["mobile-client/**/*.test.ts", "mobile-client/**/*.test.tsx"],
+  "references": []
+}
