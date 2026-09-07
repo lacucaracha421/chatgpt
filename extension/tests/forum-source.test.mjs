@@ -38,6 +38,34 @@ test("Arca original CDN keeps signed fields and normalizes duplicate original-si
   assert.deepEqual(url.searchParams.getAll("type"), ["orig"]);
 });
 
+test("Arca known small JPEGs keep their URL while large or unknown widths keep original requests", () => {
+  for (const ext of ["jpg", "JPEG"]) {
+    const src = `https://ac-p.namu.la/photo.${ext}?expires=123&key=fixture`;
+    for (const width of ["1", "800", "1280"]) {
+      assert.equal(candidate("https://arca.live/b/art/1", "IMG", { src, width }).mediaUrl, src);
+    }
+    for (const width of [undefined, "", "0", "-1", "1281", "3000", "100%", "NaN"]) {
+      assert.equal(candidate("https://arca.live/b/art/1", "IMG", { src, width }).mediaUrl, `${src}&type=orig`);
+    }
+  }
+});
+
+test("Arca optimization preserves explicit originals and does not affect PNG, links or other sites", () => {
+  const page = "https://arca.live/b/art/1";
+  const src = "https://ac-o.arca.live/photo.jpg?key=fixture&type=orig&type=orig";
+  const original = new URL(candidate(page, "IMG", { src, width: "800" }).mediaUrl);
+  assert.deepEqual(original.searchParams.getAll("type"), ["orig"]);
+  assert.equal(original.searchParams.get("key"), "fixture");
+  for (const ext of ["png", "webp", "gif"]) {
+    assert.equal(candidate(page, "IMG", { src: `https://ac-p.namu.la/a.${ext}`, width: "800" }).mediaUrl,
+      `https://ac-p.namu.la/a.${ext}?type=orig`);
+  }
+  assert.equal(candidate(page, "A", { href: "https://ac-p.namu.la/a.jpg", width: "800" }).mediaUrl,
+    "https://ac-p.namu.la/a.jpg?type=orig");
+  assert.equal(candidate("https://blog.example.com/1", "IMG", { src: "https://cdn.example.com/a.jpg", width: "800" }, true).mediaUrl,
+    "https://cdn.example.com/a.jpg");
+});
+
 test("DC desktop and mobile accept images and progressive video without X resolution", () => {
   for (const host of ["gall.dcinside.com", "m.dcinside.com"]) {
     assert.equal(candidate(`https://${host}/board/view/?id=art&no=1`, "IMG", {

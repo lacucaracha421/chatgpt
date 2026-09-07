@@ -1,6 +1,6 @@
 # Lakomics Android client
 
-Current build: **0.2.0 (6)**. The unified Picker/cache/Home section at the end supersedes earlier dated checkpoints and the original separate-PoC behavior described below.
+Current build: **0.3.3 (10)**. The unified Picker/cache/Home section at the end supersedes earlier dated checkpoints and the original separate-PoC behavior described below.
 
 This independent APK bundles the React client from `app/mobile-client`. It requires no desktop/browser extension runtime. The old `_tools/lakomics-cloudmedia-poc` and its installed Android Photo Picker configuration are separate and unchanged. Package: `com.lakomics.mobile`; document authority: `com.lakomics.mobile.documents`.
 
@@ -121,3 +121,9 @@ The authorized Collection API deployment and first publication are now complete:
 Collection source-cover repair is a PC publisher change compatible with installed APK 0.3.1. It includes cover/volume files already present in the library's Collection source folders, in addition to managed WorkArtwork. It preserves explicit selections and existing volume IDs, generates bounded previews in TEMP, and does not re-copy or register the source files into the local Asset Library. Refresh Collections after the corrected publication; no APK reinstall is required for this repair.
 
 Source-cover correction is published: all 340 works now have covers, including the 261 omitted previously; 2,332 volume covers are linked. The Galaxy Tab showed populated game covers and the recovered Prison School volume shelf on existing APK 0.3.1. No reinstall is needed. See the current operational checkpoint in docs/agents/mobile.md.
+
+## 0.3.3 device-only temporary images
+
+Extension 2.0.0.1558 adds a root-list **임시 저장** action. `TemporaryImageActivity` accepts its package-targeted browsable intent, downloads a direct public HTTPS image without cloud/auth settings, and creates a local photo under `Pictures/Lakomics/임시보관/`. MediaStore pending publication keeps incomplete files out of pickers. Completion returns to the browser; failure stays visible with a close action. The source URL and filename are not persisted in the library, and no server API is used. Android 10+ is required for this action; the Galaxy Tab target satisfies that OS boundary. No auto-cleanup, gallery manager or cloud-promotion feature is included.
+
+Build 0.3.3 (10), APK SHA-256 `5CD79B33C9EDF3ED38C1ED039099DECD2933D413256A3876A7AC8D12224A43F5`: mobile TypeScript/Vite, native compilation, 23 temporary-image policy cases, existing native checks, asset paths and APK signatures passed. Extension tests cover validated URL handoff and exclusion from permanent saving; a browser fixture verified the separate colored row after the six root classifications. Installed on Galaxy Tab S11 on 2026-09-07 with Titanium extension 2.0.0.1558. A real long-press/release and temporary-save tap wrote the public WebP completely to MediaStore; **컬렉션 → 이 기기에서 → 임시보관** was visible and a recipient app read the selected 30,320-byte image successfully. Cookie-protected images were not tested.

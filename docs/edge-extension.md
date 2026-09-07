@@ -4,9 +4,17 @@ This document describes the current bundled browser extension in `extension/`. I
 
 ## Collector menu
 
-Settings → 수집 메뉴 selects the existing donut (`radial`, default) or the fixed list window (`list`). Existing tabs apply preference changes to the next gesture. The list opens after the usual image drag or touch long press and stays open after release. Its header shows only the current breadcrumb and action icons. Clicking a folder opens its children; clicking a leaf selects that one classification. There is no multi-selection.
+Settings → 수집 메뉴 selects the existing donut (`radial`, default) or the fixed list window (`list`). Existing tabs apply preference changes to the next gesture. The list opens after the usual image drag or touch long press and stays open after release. Its header shows only the current breadcrumb and action icons. Clicking a folder opens its children; clicking a leaf selects that one classification. There is no multi-selection. The list follows canonical parent-child relationships at every depth (including third, fourth, fifth and deeper levels), using radial placement only to order siblings. Pinned shortcuts remain at the top. Each entered folder darkens the panel and alternating rows slightly, capped after six steps for readability; the breadcrumb and back button retain the navigation path.
 
 Drag a row left past the threshold and release to save directly to that classification, including a top-level folder. The row slides aside to reveal the save action. A short or cancelled drag does not save. Drag right to return to the previous folder. The header save icon submits the current classification; Ctrl+Enter saves a focused row. Each action uses the existing single-classification ingestion API. Hidden secondary tags and pinned placement are respected. Secondary donut entries are sorted by descending save count, preserving their existing order for ties; the order stays fixed while the menu is open. The list UI is isolated in a shadow root and never receives connection credentials.
+
+### List order editing
+
+With **수집 메뉴 → 목록 창** selected, **분류 배치** embeds the same list window used for collection. Tap to browse folders; hold a row for 400 ms to lift it, drag vertically to the insertion marker, then release to save the order of that folder's visible siblings. Dragging before the hold scrolls the list, and a lifted row near either edge scrolls automatically. Pointer cancellation or Escape cancels the move; Alt+ArrowUp/ArrowDown offers keyboard reordering. A failed save restores the preceding order and reports the failure. This editor never submits media.
+
+Manual order is stored as classification IDs in the existing extension preferences (`listOrder`), included in portable settings backup, and applied when opening the next collection window. Reopening settings retains it; newly added classifications appear after ordered items and removed/hidden items are omitted. Folder membership and donut placement remain unchanged. The depth tint and save-check scale removal also apply to the shared window.
+
+Targeted checks: `node --test extension/tests/list-collector.test.mjs extension/tests/list-order-dom.test.mjs extension/tests/background.test.mjs`. DOM interaction checks reuse the existing `app/node_modules/jsdom` workspace dependency. Browser fixture checks cover the actual options markup, folder navigation, keyboard reorder, reopening persistence and failure rollback. Long-press, pre-hold scroll and cancellation are covered by DOM pointer tests; real Galaxy Tab touch acceptance remains required.
 
 ## Current save paths
 
@@ -107,3 +115,13 @@ On Android, extension installation and API support depend on the browser. Do not
 - If Collector capture is unavailable, test the Collector endpoint/token independently from the direct PC endpoint.
 - A browser-download fallback means the server path did not complete; it is not proof that the Lakomics library imported the media.
 - Never expose connection or Collector tokens in logs, screenshots, or committed files.
+
+### Device-only temporary image save (2.0.0.1558)
+
+Version 2.0.0.1559 adopts the narrow ArcaRefresher JPEG URL-selection optimization (see `extension/THIRD_PARTY_NOTICES.txt`). Only on `https://arca.live/` pages and recognized Arca media hosts, an IMG with a JPEG URL and an explicit positive numeric width up to 1280 keeps its selected URL instead of forcing `type=orig`. Explicit original requests remain original; larger/unknown widths and other formats retain the existing behavior. No CDN host substitution, proxy or cache extraction is added. Shared candidate selection applies to both permanent and temporary saves. Targeted URL/controller checks passed; real Arca throughput and file-equivalence measurements remain pending.
+
+The root list ends with a separate green **임시 저장** row after the classification rows. It is an action rather than a classification, cannot be reordered, and never calls the permanent save/Cloud Capture path. For a selected direct HTTPS image, the actual tap synchronously opens a package-targeted Android intent (`lakomics://temporary`) handled by Lakomics APK 0.3.3+. The settings preview shows this fixed action disabled. Videos and missing/unsupported image URLs are disabled.
+
+The Android receiver downloads the image directly without app credentials, browser cookies or Cloud APIs, validates a decodable supported image, then writes `Pictures/Lakomics/임시보관/` through MediaStore.Images. Pending media is made public only after a complete copy; failed/cancelled writes are removed. Bounds: HTTPS public hosts, at most three revalidated redirects, 32 MiB, bounded transfer/read timeouts. No broad photo/storage permission is needed on Android 10+. Login-protected images may fail; no server-upload fallback or additional sharing feature is added.
+
+Galaxy Tab S11 acceptance passed on 2026-09-07 with APK 0.3.3 (10) and Titanium extension 2.0.0.1558: long-press a public HTTPS WebP, release, tap **임시 저장**, and return to the browser after a complete 30,320-byte MediaStore write. The menu retains its image intent after the opening pointer is released. The system Photo Picker exposes the album under **컬렉션 → 이 기기에서 → 임시보관**; selecting its image returned a readable picker URI with all 30,320 bytes to the recipient test app. Protected-site images were not part of this check. See [Android shared-media storage](https://developer.android.com/training/data-storage/shared/media) and [browser intent restrictions](https://developer.chrome.com/docs/android/intents).

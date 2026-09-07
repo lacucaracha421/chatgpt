@@ -404,6 +404,7 @@
     return {
       saveMode,
       collectorMenu: value.collectorMenu === "list" ? "list" : "radial",
+      listOrder: normalizeListOrder(value.listOrder),
       downloadFolder,
       touchLongPressMs,
       touchPersistent: value.touchPersistent !== false,
@@ -411,6 +412,13 @@
       suppressDownloadUi: value.suppressDownloadUi !== false,
       autoLikeOnSave: value.autoLikeOnSave !== false,
     };
+  }
+
+  function normalizeListOrder(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return Object.fromEntries(Object.entries(value).slice(0, 2000)
+      .filter(([key, ids]) => key.length <= 240 && Array.isArray(ids))
+      .map(([key, ids]) => [key, [...new Set(ids.filter(id => typeof id === "string" && id.length > 0 && id.length <= 240))].slice(0, 2000)]));
   }
 
   function normalizeRemoteSettings(value = {}) {

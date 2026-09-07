@@ -2383,3 +2383,14 @@ test('menu preference updates preserve other saved preferences', async () => {
   const second=await harness.api.handleMessage({type:'settings:set-preferences',preferences:{saveMode:'auto'}});
   assert.equal(second.preferences.collectorMenu,'list');
 });
+
+test('manual list order persists through preference updates and worker reconstruction', async () => {
+ const harness=createHarness({preferences:{saveMode:'download'}});
+ const order={__root__:['b','a','b',null],folder:['child2','child1']};
+ await harness.api.handleMessage({type:'settings:set-preferences',preferences:{listOrder:order}});
+ await harness.api.handleMessage({type:'settings:set-preferences',preferences:{collectorMenu:'list'}});
+ const reopened=createHarness({preferences:harness.storage.preferences});
+ const result=await reopened.api.handleMessage({type:'settings:get'});
+ assert.deepEqual(plain(result.preferences.listOrder),{__root__:['b','a'],folder:['child2','child1']});
+ assert.equal(result.preferences.saveMode,'download');
+});

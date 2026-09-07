@@ -543,3 +543,11 @@ test('list saves exactly the requested folder or leaf and rejects unknown IDs', 
   assert.equal((await controller.saveClassification('missing')).ok,false);
   assert.deepEqual(sent,['root','leaf']);
 });
+
+test('temporary image handoff contains only a validated image URL and targets the Android app',()=>{
+ const api=loadContent(async()=>{throw new Error('Cloud must not be called');});
+ const source='https://images.example.test/a.png?name=a%20b&size=original';
+ const intent=api.temporaryImageIntent({type:'image',mediaUrl:source,sourceUrl:'https://example.test/post',author:'unused'});
+ assert.equal(intent,`intent://temporary?url=${encodeURIComponent(source)}#Intent;scheme=lakomics;package=com.lakomics.mobile;end`);
+ for(const candidate of [{type:'video',mediaUrl:source},{mediaUrl:'http://example.test/a.jpg'},{mediaUrl:'https://user:pass@example.test/a.jpg'},{mediaUrl:'https://example.test/a.jpg#Intent;end'},{}])assert.equal(api.temporaryImageIntent(candidate),null);
+});

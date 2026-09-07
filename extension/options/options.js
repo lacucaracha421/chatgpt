@@ -44,6 +44,8 @@
   const requestMobileSiteAccess = document.querySelector("#request-mobile-site-access");
   const mobileSiteAccessResult = document.querySelector("#mobile-site-access-result");
   const mobileSiteAccessDiagnostic = document.querySelector("#mobile-site-access-diagnostic");
+  let listPreview = null;
+  let listOrder = {};
   let entries = [];
   let workingLayout = { version: 1, parents: {} };
   let activeEditorParentId = null;
@@ -111,6 +113,7 @@
       status.textContent += ` · 마지막 실패: ${when} (${describeErrorCode(settings.lastConnectionFailure.code)})`;
     }
     const preferences = settings.preferences ?? {};
+    listOrder = preferences.listOrder ?? {};
     collectorMenu.value = preferences.collectorMenu === "list" ? "list" : "radial";
     const remote = settings.remote ?? {};
     const collector = settings.collector ?? {};
@@ -148,6 +151,7 @@
       localTree = local.tree;
       renderLocalTreeEditor();
     }
+    if (collectorMenu.value === "list") await loadListPreview();
   }
 
 
@@ -157,7 +161,10 @@
     try {
       const response = await chrome.runtime.sendMessage({type: "settings:set-preferences", preferences: {collectorMenu: collectorMenu.value}});
       collectorMenuStatus.textContent = response.ok ? "저장됨" : "저장하지 못했습니다.";
-      if (response.ok) collectorMenu.value = response.preferences.collectorMenu;
+      if (response.ok) {
+        collectorMenu.value = response.preferences.collectorMenu;
+        if (collectorMenu.value === "list") await loadListPreview(); else renderEditor();
+      }
     } catch { collectorMenuStatus.textContent = "저장하지 못했습니다."; }
     finally { collectorMenu.disabled = false; }
   });
@@ -459,8 +466,41 @@
     renderEditor();
   });
 
+  async function loadListPreview() {
+    listPreview?.close(); listPreview = null;
+    editor.textContent = "분류를 불러오는 중…";
+    try {
+      const response = await chrome.runtime.sendMessage({type:"classifications:get"});
+      if (!response?.ok) throw new Error("Unavailable");
+      entries = response.entries; workingLayout = response.layout;
+      pinnedIds = response.pinnedIds ?? []; hiddenSecondaryIds = response.hiddenSecondaryIds ?? [];
+      renderEditor();
+    } catch {
+      editor.textContent = "분류를 불러오지 못했습니다.";
+      const retry = document.createElement("button"); retry.textContent = "다시 시도";
+      retry.onclick = () => void loadListPreview(); editor.append(retry);
+    }
+  }
+
   function renderEditor() {
+    listPreview?.close(); listPreview = null;
     editor.replaceChildren();
+    editor.classList.toggle("list-order-editor",collectorMenu.value === "list");
+    if (collectorMenu.value === "list") {
+      const hint = document.createElement("p"); hint.className = "setting-note";
+      hint.textContent = "폴더를 꾹 눌러 위아래로 옮기세요. 짧게 누르면 하위 분류가 열립니다.";
+      const keyboard = document.createElement("p"); keyboard.className = "setting-note";
+      keyboard.textContent = "같은 폴더 안에서 순서 변경 · 놓으면 자동 저장 · 키보드 Alt + ↑↓";
+      editor.append(hint);
+      listPreview = LakomicsListCollector.mount({entries,layout:workingLayout,pinnedIds,hiddenIds:hiddenSecondaryIds,order:listOrder,container:editor,
+        onReorder:async order => {
+          const response = await chrome.runtime.sendMessage({type:"settings:set-preferences",preferences:{listOrder:order}});
+          if (response?.ok) listOrder = response.preferences.listOrder;
+          return response;
+        },onClose:()=>{}});
+      editor.append(keyboard);
+      return;
+    }
     if (!workingLayout.parents?.[LakomicsRadial.PINNED]) {
       workingLayout = LakomicsRadial.reorderPinned(workingLayout, entries, pinnedIds);
     }

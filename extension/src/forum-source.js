@@ -72,10 +72,16 @@
       filename = download || (/\.[a-z0-9]{1,8}$/i.test(label) ? label : null);
     }
     if (!mediaUrl || !element) return null;
-    // Arca's image CDN exposes the original with type=orig; preserve signatures and formats.
+    // ArcaRefresher's JPEG optimization: avoid forcing orig for known widths <=1280.
+    // Unknown dimensions stay on the original path; explicit URL choices are preserved.
     const url = new URL(mediaUrl);
     if (source === "arca" && (url.hostname === "ac-o.arca.live" || /^(ac-[a-z0-9-]+|ac)\.namu\.la$/.test(url.hostname))) {
-      url.searchParams.set("type", "orig");
+      const width = Number(media?.getAttribute?.("width"));
+      const fastJpeg = type === "image" && /^img$/i.test(media?.tagName ?? "")
+        && /\.jpe?g$/i.test(url.pathname) && Number.isFinite(width) && width > 0 && width <= 1280;
+      if (!fastJpeg || url.searchParams.getAll("type").includes("orig")) {
+        url.searchParams.set("type", "orig");
+      }
     }
     return { source, type, element, mediaUrl: url.href, sourceUrl, filename };
   }

@@ -21,7 +21,7 @@ $taskSources=@(Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'src') -Filte
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $taskTests=Join-Path $taskBuild 'tests'
 New-Item -ItemType Directory -Force $taskTests | Out-Null
-& "$env:JAVA_HOME/bin/javac.exe" -encoding UTF-8 -d $taskTests (Join-Path $PSScriptRoot 'src/com/lakomics/mobile/NetworkPolicy.java') (Join-Path $PSScriptRoot 'tests/NetworkPolicyTest.java') (Join-Path $PSScriptRoot 'src/com/lakomics/mobile/DocumentTreePolicy.java') (Join-Path $PSScriptRoot 'tests/DocumentTreePolicyTest.java') (Join-Path $PSScriptRoot 'src/com/lakomics/mobile/ThumbnailCache.java') (Join-Path $PSScriptRoot 'tests/ThumbnailCacheTest.java') (Join-Path $PSScriptRoot 'src/com/lakomics/mobile/PickerSnapshot.java') (Join-Path $PSScriptRoot 'tests/PickerSnapshotTest.java') (Join-Path $PSScriptRoot 'src/com/lakomics/mobile/MediaTransfer.java') (Join-Path $PSScriptRoot 'tests/MediaTransferTest.java')
+& "$env:JAVA_HOME/bin/javac.exe" -encoding UTF-8 -d $taskTests (Join-Path $PSScriptRoot 'src/com/lakomics/mobile/NetworkPolicy.java') (Join-Path $PSScriptRoot 'tests/NetworkPolicyTest.java') (Join-Path $PSScriptRoot 'src/com/lakomics/mobile/DocumentTreePolicy.java') (Join-Path $PSScriptRoot 'tests/DocumentTreePolicyTest.java') (Join-Path $PSScriptRoot 'src/com/lakomics/mobile/ThumbnailCache.java') (Join-Path $PSScriptRoot 'tests/ThumbnailCacheTest.java') (Join-Path $PSScriptRoot 'src/com/lakomics/mobile/PickerSnapshot.java') (Join-Path $PSScriptRoot 'tests/PickerSnapshotTest.java') (Join-Path $PSScriptRoot 'src/com/lakomics/mobile/MediaTransfer.java') (Join-Path $PSScriptRoot 'tests/MediaTransferTest.java') (Join-Path $PSScriptRoot 'src/com/lakomics/mobile/TemporaryImagePolicy.java') (Join-Path $PSScriptRoot 'tests/TemporaryImagePolicyTest.java')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & "$env:JAVA_HOME/bin/java.exe" -cp $taskTests com.lakomics.mobile.NetworkPolicyTest
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -32,6 +32,8 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & "$env:JAVA_HOME/bin/java.exe" -cp $taskTests com.lakomics.mobile.PickerSnapshotTest
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & "$env:JAVA_HOME/bin/java.exe" -cp $taskTests com.lakomics.mobile.MediaTransferTest
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& "$env:JAVA_HOME/bin/java.exe" -cp $taskTests com.lakomics.mobile.TemporaryImagePolicyTest
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if ($CompileOnly) { Write-Output 'Native compile and network policy tests passed.'; exit 0 }
 if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'assets/index.html'))) { throw 'Build the app/mobile-client Vite bundle first; android/assets/index.html is required.' }

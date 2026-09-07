@@ -7,6 +7,15 @@
       ?? globalThis.LakomicsForumSource?.findGenericCandidate(target) ?? null;
   }
 
+  function temporaryImageIntent(candidate) {
+    if (!candidate || (candidate.type && candidate.type !== "image") || typeof candidate.mediaUrl !== "string" || candidate.mediaUrl.length > 8192) return null;
+    try {
+      const url = new URL(candidate.mediaUrl);
+      if (url.protocol !== "https:" || url.username || url.password || url.hash) return null;
+      return `intent://temporary?url=${encodeURIComponent(url.href)}#Intent;scheme=lakomics;package=com.lakomics.mobile;end`;
+    } catch { return null; }
+  }
+
   function createCollectorController({ send, status, snapshot = () => {}, close = () => {}, saved = () => {} }) {
     let active = null;
     let failedPayload = null;
@@ -410,6 +419,7 @@
 
   if (globalThis.__LAKOMICS_TEST__) {
     globalThis.LakomicsContent = {
+      temporaryImageIntent,
       X_FAVORITE_TWEET_QUERY_ID,
       autoLikeFeedback,
       autoLikePost,
@@ -773,12 +783,19 @@
       );
       if (preferences.collectorMenu === "list" && globalThis.LakomicsListCollector) {
         closeRadial();
+        // The opening pointer is cleared on release; retain this menu's image.
+        const temporaryIntent = temporaryImageIntent(pointer.candidate);
         listPicker = globalThis.LakomicsListCollector.mount({
           entries: pointer.classifications.entries,
           layout: pointer.classifications.layout,
           pinnedIds: pointer.classifications.pinnedIds ?? [],
           hiddenIds: pointer.classifications.hiddenSecondaryIds ?? [],
+          order: preferences.listOrder,
           origin: pointer.origin,
+          onTemporary: temporaryIntent ? () => {
+            // Keep navigation synchronous with the actual tap (Android intent gesture).
+            window.location.href = temporaryIntent;
+          } : null,
           onSave: id => controller.saveClassification(id),
           onClose: result => {
             listPicker = null; menuContext = null; pointer = null;
