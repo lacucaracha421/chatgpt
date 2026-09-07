@@ -2,9 +2,12 @@
 .venv/
 __pycache__/
 cache/
+crop-cache/
+detection-cache/
 checks/
 archive/
 checkpoints/
 public/thumbs/
+public/crops/
 models/*.onnx
 analysis.log

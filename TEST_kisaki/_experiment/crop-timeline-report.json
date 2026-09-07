@@ -1,0 +1,205 @@
+{
+  "threshold": 0.21323118981474148,
+  "refs": [
+    22,
+    72,
+    105,
+    2,
+    18
+  ],
+  "batches": {
+    "initialHeldOut": {
+      "whole": {
+        "count": 139,
+        "positives": 12,
+        "negatives": 127,
+        "tp": 12,
+        "fp": 0,
+        "fn": 0,
+        "predicted": [
+          13,
+          14,
+          15,
+          16,
+          17,
+          19,
+          20,
+          21,
+          23,
+          91,
+          109,
+          143
+        ]
+      },
+      "cropMin": {
+        "count": 139,
+        "positives": 12,
+        "negatives": 127,
+        "tp": 12,
+        "fp": 4,
+        "fn": 0,
+        "predicted": [
+          13,
+          14,
+          15,
+          16,
+          17,
+          19,
+          20,
+          21,
+          23,
+          31,
+          39,
+          48,
+          65,
+          91,
+          109,
+          143
+        ]
+      },
+      "consensus2": {
+        "count": 139,
+        "positives": 12,
+        "negatives": 127,
+        "tp": 11,
+        "fp": 0,
+        "fn": 1,
+        "predicted": [
+          13,
+          15,
+          16,
+          17,
+          19,
+          20,
+          21,
+          23,
+          91,
+          109,
+          143
+        ]
+      }
+    },
+    "append55": {
+      "whole": {
+        "count": 55,
+        "positives": 0,
+        "negatives": 55,
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "predicted": []
+      },
+      "cropMin": {
+        "count": 55,
+        "positives": 0,
+        "negatives": 55,
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "predicted": []
+      },
+      "consensus2": {
+        "count": 55,
+        "positives": 0,
+        "negatives": 55,
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "predicted": []
+      }
+    },
+    "append4": {
+      "whole": {
+        "count": 4,
+        "positives": 4,
+        "negatives": 0,
+        "tp": 4,
+        "fp": 0,
+        "fn": 0,
+        "predicted": [
+          199,
+          200,
+          201,
+          202
+        ]
+      },
+      "cropMin": {
+        "count": 4,
+        "positives": 4,
+        "negatives": 0,
+        "tp": 4,
+        "fp": 0,
+        "fn": 0,
+        "predicted": [
+          199,
+          200,
+          201,
+          202
+        ]
+      },
+      "consensus2": {
+        "count": 4,
+        "positives": 4,
+        "negatives": 0,
+        "tp": 4,
+        "fp": 0,
+        "fn": 0,
+        "predicted": [
+          199,
+          200,
+          201,
+          202
+        ]
+      }
+    },
+    "append9": {
+      "whole": {
+        "count": 9,
+        "positives": 9,
+        "negatives": 0,
+        "tp": 3,
+        "fp": 0,
+        "fn": 6,
+        "predicted": [
+          207,
+          208,
+          210
+        ]
+      },
+      "cropMin": {
+        "count": 9,
+        "positives": 9,
+        "negatives": 0,
+        "tp": 7,
+        "fp": 0,
+        "fn": 2,
+        "predicted": [
+          203,
+          204,
+          205,
+          206,
+          207,
+          208,
+          210
+        ]
+      },
+      "consensus2": {
+        "count": 9,
+        "positives": 9,
+        "negatives": 0,
+        "tp": 7,
+        "fp": 0,
+        "fn": 2,
+        "predicted": [
+          203,
+          204,
+          205,
+          206,
+          207,
+          208,
+          210
+        ]
+      }
+    }
+  }
+}

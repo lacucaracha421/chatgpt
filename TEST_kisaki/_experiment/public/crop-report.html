@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CCIP 자동 크롭 A/B</title>
+<style>
+:root{font-family:system-ui,sans-serif;color:#eee;background:#101112}*{box-sizing:border-box}
+body{margin:0}.wrap{max-width:1500px;margin:auto;padding:24px}a{color:#ddd}
+header{display:flex;justify-content:space-between;gap:20px;align-items:end;margin-bottom:22px}
+h1{margin:0;font-size:28px}.muted{color:#9b9b9b}.controls{display:flex;gap:10px;flex-wrap:wrap}
+select{background:#1b1c1e;color:#eee;border:1px solid #34363a;border-radius:8px;padding:9px 12px}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:16px 0}
+.metric,.panel{background:#18191b;border:1px solid #2c2e31;border-radius:12px;padding:14px}
+.metric strong{display:block;font-size:25px}.report{width:100%;border-collapse:collapse;margin-top:8px}
+th,td{text-align:right;padding:8px;border-bottom:1px solid #2d2f32}th:first-child,td:first-child{text-align:left}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;margin-top:18px}
+.card{background:#17181a;border:1px solid #292b2e;border-radius:12px;overflow:hidden}.card.bad{border-color:#835151}
+.main{width:100%;height:250px;object-fit:contain;background:#0a0b0c}.body{padding:11px}.line{display:flex;justify-content:space-between;gap:10px}
+.crops{display:flex;gap:5px;overflow:auto;margin-top:8px}.crops img{width:62px;height:62px;object-fit:cover;border-radius:6px;background:#090a0b}
+.badge{font-size:12px;padding:3px 6px;border-radius:5px;background:#292b2e}.yes{background:#31533d}.no{background:#58383b}
+.filename{font-size:11px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:7px}
+</style>
+</head>
+<body><div class="wrap">
+<header><div><h1>CCIP 자동 캐릭터 크롭 A/B</h1><div class="muted" id="meta">불러오는 중…</div></div><a href="review.html">기존 검토 화면</a></header>
+<div class="controls">
+<label>전략 <select id="mode"><option value="whole">Whole</option><option value="crop">Crop</option><option value="hybrid">Hybrid</option></select></label>
+<label>참조 <select id="refs"><option>1</option><option>3</option><option selected>5</option></select></label>
+<label>필터 <select id="filter"><option value="all">전체</option><option value="target">정답 캐릭터</option><option value="fp">오탐</option><option value="miss">놓침</option><option value="multi">다인 검출</option><option value="fallback">검출 실패</option></select></label>
+<label>정렬 <select id="sort"><option value="close">가까운 순</option><option value="far">먼 순</option></select></label>
+</div>
+<div class="metrics" id="metrics"></div>
+<div class="panel"><b>공식 CCIP 기준선 · 동일 고정 평가셋 비교</b><table class="report"><thead><tr><th>전략</th><th>발견</th><th>오탐</th><th>놓침</th><th>Top10</th><th>AP</th></tr></thead><tbody id="report"></tbody></table><p class="muted">아래 카드의 후보/제외 판정도 기존 CCIP 공개 기준선을 사용합니다.</p></div>
+<div class="panel" id="calibration" style="margin-top:10px"></div>
+<div class="grid" id="grid"></div>
+</div>
+<script type="module">
+const $=id=>document.getElementById(id);const fmt=n=>Number.isFinite(n)?n.toFixed(3):'—';
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let base,crop;const thumb=x=>x.thumbnail??`thumbs/${x.id}.jpg`;
+const matrix=mode=>mode==='whole'?base.distances:crop.matrices[mode];
+const refs=()=>base.referencePool.slice(0,Number($('refs').value));
+const score=(id,mode)=>Math.min(...refs().map(r=>matrix(mode)[id][r]));
+const report=(mode,count)=>crop.strategies[mode].find(x=>x.references===count);
+
+function renderReports(){
+ const count=Number($('refs').value);
+ $('report').innerHTML=['whole','crop','hybrid'].map(mode=>{const r=report(mode,count);return `<tr><td>${mode}</td><td>${r.truePositive}/${r.heldOutPositives}</td><td>${r.falsePositive}</td><td>${r.missed}</td><td>${r.top10Correct}</td><td>${r.averagePrecision?.toFixed(3)??'—'}</td></tr>`}).join('');
+ if(count!==5){$('calibration').innerHTML='<b>탐색용 calibration</b><p class="muted">현재 calibration 기록은 5개 참조에 대해서만 계산했습니다. 1/3 참조에는 적용하지 않습니다.</p>';return;}
+ const rows=['whole','crop','hybrid'].map(mode=>{const x=crop.exploratoryCalibration?.[mode]?.zeroFalsePositive;return x?`<tr><td>${mode}</td><td>${x.threshold.toFixed(4)}</td><td>${x.truePositive}/25</td><td>${x.falsePositive}</td><td>${x.missed}</td><td>${x.f1.toFixed(3)}</td></tr>`:''}).join('');
+ $('calibration').innerHTML=`<b>탐색용 0-오탐 지점 · 5개 참조</b><table class="report"><thead><tr><th>전략</th><th>기준선</th><th>발견</th><th>오탐</th><th>놓침</th><th>F1</th></tr></thead><tbody>${rows}</tbody></table><p class="muted">같은 212장 평가 자료를 보고 고른 값입니다. 독립 검증된 일반 임계값이 아니며 실제 판정에는 아직 사용하지 않습니다.</p>`;
+}
+function render(){
+ const mode=$('mode').value,count=Number($('refs').value),r=report(mode,count);
+ $('metrics').innerHTML=[['발견',`${r.truePositive}/${r.heldOutPositives}`],['오탐',r.falsePositive],['놓침',r.missed],['검출 성공',`${crop.detectedImages}/${crop.imageCount}`],['다인 이미지',crop.multiCharacterImages],['총 crop',crop.cropCount]].map(([k,v])=>`<div class="metric"><span class="muted">${k}</span><strong>${v}</strong></div>`).join('');
+ renderReports();
+ const selectedRefs=new Set(refs()),filter=$('filter').value;
+ let ids=base.items.map(x=>x.id).filter(id=>!selectedRefs.has(id));
+ ids=ids.filter(id=>{const item=base.items[id],ci=crop.items[id],hit=score(id,mode)<=base.threshold;
+  if(filter==='target')return item.positive;if(filter==='fp')return !item.positive&&hit;if(filter==='miss')return item.positive&&!hit;
+  if(filter==='multi')return ci.detections.length>=2;if(filter==='fallback')return ci.fallbackToWhole;return true;});
+ ids.sort((a,b)=>($('sort').value==='close'?1:-1)*(score(a,mode)-score(b,mode))||a-b);
+ $('grid').innerHTML=ids.map(id=>{const item=base.items[id],ci=crop.items[id],s=score(id,mode),hit=s<=base.threshold,bad=item.positive!==hit;
+  const scores=['whole','crop','hybrid'].map(m=>`${m[0].toUpperCase()} ${fmt(score(id,m))}`).join(' · ');
+  const crops=ci.detections.map((d,i)=>`<img src="${d.thumbnail}" title="#${i+1} score ${d.score.toFixed(3)}" alt="crop ${i+1}">`).join('');
+  const safeName=esc(item.name),safeThumb=esc(thumb(item));
+  return `<article class="card ${bad?'bad':''}"><img class="main" loading="lazy" src="${safeThumb}"><div class="body"><div class="line"><span class="badge ${item.positive?'yes':''}">${item.positive?'TARGET':'OTHER'}</span><span class="badge ${hit?'yes':'no'}">${hit?'후보':'제외'}</span></div><p>선택 거리 <b>${fmt(s)}</b> · crop ${ci.detections.length}${ci.fallbackToWhole?' (fallback)':''}</p><div class="muted">${scores}</div><div class="crops">${crops||'<span class="muted">검출 없음 → whole 사용</span>'}</div><div class="filename" title="${safeName}">${safeName}</div></div></article>`;
+ }).join('');
+}
+async function start(){
+ [base,crop]=await Promise.all([fetch('data.json').then(r=>r.json()),fetch('crop-data.json').then(r=>{if(!r.ok)throw Error('crop-data.json 없음');return r.json();})]);
+ $('meta').textContent=`${crop.imageCount}장 · YOLOX-s character detector · margin ${(crop.config.margin*100).toFixed(0)}% · CCIP ${crop.ccipModel.model} · ${crop.elapsedSeconds}s`;
+ render();
+}
+for(const id of ['mode','refs','filter','sort'])$(id).onchange=render;
+start().catch(e=>$('meta').textContent=`불러오기 실패: ${e.message}`);
+</script></body></html>

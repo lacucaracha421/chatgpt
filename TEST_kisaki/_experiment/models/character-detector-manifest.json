@@ -1,0 +1,9 @@
+{
+  "repo": "ksasao/anime-character-detector",
+  "commit": "815aeced8ed86081f251e7383d2a50a5a6d29b54",
+  "path": "python/character.onnx",
+  "sha256": "6b600e405d3b9d4b457b6d5bcb3c9c6fea0e60385b734caaf9d075ed7a12b622",
+  "sizeBytes": 35791102,
+  "architecture": "YOLOX-s, 640x640, single character class",
+  "license": "Apache-2.0"
+}
