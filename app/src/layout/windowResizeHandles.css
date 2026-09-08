@@ -1,0 +1,20 @@
+.window-resize {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: var(--z-window-resize);
+  --resize-edge: 5px;
+  --resize-corner: 12px;
+}
+.window-resize__handle { position: absolute; pointer-events: auto; }
+.window-resize__handle--North, .window-resize__handle--South { left: var(--resize-corner); right: var(--resize-corner); height: var(--resize-edge); cursor: ns-resize; }
+.window-resize__handle--North { top: 0; }
+.window-resize__handle--South { bottom: 0; }
+.window-resize__handle--East, .window-resize__handle--West { top: var(--resize-corner); bottom: var(--resize-corner); width: var(--resize-edge); cursor: ew-resize; }
+.window-resize__handle--East { right: 0; }
+.window-resize__handle--West { left: 0; }
+.window-resize__handle--NorthEast, .window-resize__handle--NorthWest, .window-resize__handle--SouthEast, .window-resize__handle--SouthWest { width: var(--resize-corner); height: var(--resize-corner); }
+.window-resize__handle--NorthEast { top: 0; right: 0; cursor: nesw-resize; }
+.window-resize__handle--NorthWest { top: 0; left: 0; cursor: nwse-resize; }
+.window-resize__handle--SouthEast { bottom: 0; right: 0; cursor: nwse-resize; }
+.window-resize__handle--SouthWest { bottom: 0; left: 0; cursor: nesw-resize; }
