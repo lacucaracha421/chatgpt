@@ -715,3 +715,22 @@ pub(crate) fn delete_kakao_key() -> Result<(), LibraryError> {
 pub(crate) fn read_kakao_key() -> Result<String, LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
+
+#[cfg(not(windows))]
+pub(crate) fn notes_key(_target: &str) -> Result<Option<Vec<u8>>, LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
+}
+
+#[cfg(not(windows))]
+pub(crate) fn set_notes_key(_target: &str, _value: &[u8]) -> Result<(), LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
+}
+
+#[cfg(all(test, target_os = "linux"))]
+#[test]
+fn linux_secure_credentials_fail_closed() {
+    assert!(matches!(notes_key("test-only"), Err(LibraryError::CredentialStoreUnavailable)));
+    assert!(matches!(set_notes_key("test-only", b"not-a-real-key"), Err(LibraryError::CredentialStoreUnavailable)));
+    assert!(matches!(cloud_api_token_status(), Err(LibraryError::CredentialStoreUnavailable)));
+    assert!(matches!(set_cloud_api_token_os("test-only"), Err(LibraryError::CredentialStoreUnavailable)));
+}

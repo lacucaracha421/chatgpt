@@ -516,6 +516,7 @@ impl Library {
 mod tests {
     use super::*;
     #[test]
+    #[cfg(windows)]
     #[ignore = "Opt-in Windows Credential Store integration; isolated temporary library"]
     fn windows_key_survives_library_reopen_and_rejects_replacement() {
         let temp = tempfile::tempdir().unwrap();

@@ -1,8 +1,12 @@
 use std::sync::RwLock;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+#[cfg(windows)]
+use std::sync::Mutex;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, State};
+#[cfg(windows)]
+use tauri::Emitter;
 
 use crate::{
     catalog_transport::CatalogTransport,
@@ -1510,46 +1514,57 @@ pub fn start_asset_drag(
     window: tauri::Window,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    let prepared = current_required(state)?
-        .prepare_asset_drag(&asset_ids)
-        .map_err(CommandError::from)?;
-    let files = prepared.files.clone();
-    let preview = prepared.preview.clone();
-    let cleanup = Arc::new(Mutex::new(Some(prepared)));
-    let callback_cleanup = Arc::clone(&cleanup);
-    let callback_window = window.clone();
-    let ended_asset_ids = asset_ids.clone();
-    let result = drag::start_drag(
-        &window,
-        drag::DragItem::Files(files),
-        drag::Image::File(preview),
-        move |_result, _cursor| {
-            let _ = callback_window.emit("asset-drag://ended", ended_asset_ids.clone());
+    #[cfg(not(windows))]
+    {
+        let _ = (asset_ids, window, state);
+        Err(CommandError {
+            code: "unsupported_platform",
+            message: "Desktop drag-out is not supported on this platform.".into(),
+        })
+    }
+    #[cfg(windows)]
+    {
+        let prepared = current_required(state)?
+            .prepare_asset_drag(&asset_ids)
+            .map_err(CommandError::from)?;
+        let files = prepared.files.clone();
+        let preview = prepared.preview.clone();
+        let cleanup = Arc::new(Mutex::new(Some(prepared)));
+        let callback_cleanup = Arc::clone(&cleanup);
+        let callback_window = window.clone();
+        let ended_asset_ids = asset_ids.clone();
+        let result = drag::start_drag(
+            &window,
+            drag::DragItem::Files(files),
+            drag::Image::File(preview),
+            move |_result, _cursor| {
+                let _ = callback_window.emit("asset-drag://ended", ended_asset_ids.clone());
+                drop(
+                    callback_cleanup
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .take(),
+                );
+            },
+            drag::Options {
+                mode: drag::DragMode::Copy,
+                ..Default::default()
+            },
+        );
+        if result.is_err() {
             drop(
-                callback_cleanup
+                cleanup
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .take(),
             );
-        },
-        drag::Options {
-            mode: drag::DragMode::Copy,
-            ..Default::default()
-        },
-    );
-    if result.is_err() {
-        drop(
-            cleanup
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .take(),
-        );
-        return Err(CommandError {
-            code: "asset_drag_failed",
-            message: "자산 드래그를 시작하지 못했습니다.".into(),
-        });
+            return Err(CommandError {
+                code: "asset_drag_failed",
+                message: "자산 드래그를 시작하지 못했습니다.".into(),
+            });
+        }
+        Ok(())
     }
-    Ok(())
 }
 
 #[tauri::command]
