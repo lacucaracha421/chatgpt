@@ -81,4 +81,5 @@ final class ThumbnailCache {
   if(System.currentTimeMillis()-file.lastModified()>MAX_AGE)throw new FileNotFoundException();
   InputStream stream=new FileInputStream(file);file.setLastModified(System.currentTimeMillis());return stream;
  }
+ synchronized void remove(String key,long expected)throws IOException{check(expected);File file=entry(key);if(file.exists()&&!file.delete())throw new IOException("Cache remove failed");}
 }

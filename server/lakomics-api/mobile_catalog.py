@@ -10,6 +10,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from urllib.parse import urlsplit, parse_qs
 from fastapi import Header, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 import mobile_catalog_replica as replica
@@ -17,6 +18,55 @@ from mobile_catalog_query import QueryError, parse_query, freeze_query, count_gr
 
 PREFIX = "/v1/mobile-catalog"
 TTL = 24 * 60 * 60
+MAX_READER_PAGES = 2000
+READER_PATTERN = re.compile(r"(?is)const\s+gallery\s*=\s*(\{.*?\});\s*</script>")
+
+def parse_reader_pages(html):
+    if not isinstance(html, str) or len(html.encode("utf-8")) > 5 * 1024 * 1024:
+        replica.fail(502, "Catalog pages are unavailable")
+    match = READER_PATTERN.search(html)
+    if not match:
+        replica.fail(502, "Catalog pages are unavailable")
+    try:
+        payload = json.loads(match.group(1))
+    except (TypeError, ValueError):
+        replica.fail(502, "Catalog pages are unavailable")
+    files = payload.get("files") if isinstance(payload, dict) else None
+    if not isinstance(files, list) or len(files) > MAX_READER_PAGES:
+        replica.fail(502, "Catalog pages are unavailable")
+    pages = []
+    for entry in files:
+        image = entry.get("image") if isinstance(entry, dict) else None
+        if image is None:
+            continue
+        if not isinstance(image, dict) or not isinstance(image.get("url"), str) or len(image["url"]) > 16384:
+            replica.fail(502, "Catalog pages are unavailable")
+        try:
+            url = urlsplit(image["url"])
+            host = (url.hostname or "").lower()
+            if url.scheme != "https" or url.username or url.password or url.fragment or url.port not in (None, 443) or not (host == "siam-cdn.net" or host.endswith(".siam-cdn.net")):
+                replica.fail(502, "Catalog pages are unavailable")
+        except ValueError:
+            replica.fail(502, "Catalog pages are unavailable")
+        width, height = image.get("width"), image.get("height")
+        if width is not None and (type(width) is not int or not 1 <= width <= 50000):
+            replica.fail(502, "Catalog pages are unavailable")
+        if height is not None and (type(height) is not int or not 1 <= height <= 50000):
+            replica.fail(502, "Catalog pages are unavailable")
+        name = entry.get("name") if isinstance(entry, dict) else None
+        if not isinstance(name, str) or len(name) > 1000:
+            name = None
+        expires = None
+        raw_expiry = parse_qs(url.query).get("expires", [None])[0]
+        if raw_expiry is not None:
+            try:
+                expires = int(raw_expiry)
+            except (TypeError, ValueError):
+                expires = None
+        pages.append({"index": len(pages), "url": image["url"], "name": name, "width": width, "height": height, "expiresAt": expires})
+    if not pages:
+        replica.fail(502, "Catalog pages are unavailable")
+    return pages
 
 def normalize(params):
     allowed = {"provider", "language", "text", "sort", "scope", "revealBlocked", "limit"}
@@ -38,7 +88,7 @@ def normalize(params):
         raise HTTPException(422, {"code": "invalidQuery", "message": "검색식을 확인해 주세요.", "span": exc.span}) from exc
     return q
 
-def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret):
+def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret, gallery_fetcher=None):
     upload_lock = threading.Lock()
     def startup():
         replica.startup(get_db)
@@ -139,9 +189,18 @@ def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret):
                 budget(db)
                 q = freeze_query(db, payload["query"])
                 payload = {**payload, "revision": publication["revision"], "query": q}
-                items = search_groups(db, q, payload["offset"], q["limit"] + 1)
-                next_cursor = token(payload, "search", offset=payload["offset"] + q["limit"]) if len(items) > q["limit"] else None
-                return {"ready": True, "publicationRevision": publication["revision"], "publishedAt": publication["published_at"], "items": items[:q["limit"]], "nextCursor": next_cursor, "context": token(payload, "context", offset=0), "countToken": token(payload, "count", offset=0), "totalCount": None, "countStatus": "pending"}
+                total = replica.prepared_count(db, q)
+                prepared = replica.prepared_items(db, q, payload["offset"], q["limit"], total)
+                if prepared is not None:
+                    items = prepared
+                    has_more = total is not None and payload["offset"] + len(items) < total
+                else:
+                    items = search_groups(db, q, payload["offset"], q["limit"] + 1)
+                    has_more = (payload["offset"] + q["limit"] < total) if total is not None else len(items) > q["limit"]
+                    items = items[:q["limit"]]
+                next_cursor = token(payload, "search", offset=payload["offset"] + q["limit"]) if has_more else None
+                count_token = None if total is not None else token(payload, "count", offset=0)
+                return {"ready": True, "publicationRevision": publication["revision"], "publishedAt": publication["published_at"], "items": items, "nextCursor": next_cursor, "context": token(payload, "context", offset=0), "countToken": count_token, "totalCount": total, "countStatus": "ready" if total is not None else "pending"}
         except sqlite3.Error as exc:
             unavailable(exc)
 
@@ -153,9 +212,8 @@ def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret):
             with replica.open_publication(root(), get_db, payload["revision"]) as (db, publication):
                 budget(db)
                 q = payload["query"]
-                if not q["text"].strip() and q["scope"] == "all" and "hotCutoff" not in q:
-                    n = db.execute("SELECT exact_count FROM prepared_counts WHERE language=? AND reveal=?", [q["language"], int(q["revealBlocked"])]).fetchone()[0]
-                else:
+                n = replica.prepared_count(db, q)
+                if n is None:
                     n = count_groups(db, q)
                 return {"publicationRevision": publication["revision"], "totalCount": n}
         except sqlite3.Error as exc:
@@ -176,6 +234,31 @@ def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret):
                 return {"publicationRevision": publication["revision"], "item": item}
         except sqlite3.Error as exc:
             unavailable(exc)
+
+    @app.get(PREFIX + "/works/{provider}/{work_id}/reader")
+    def reader(provider: str, work_id: str, context: str, authorization: str | None = Header(default=None)):
+        require_auth(authorization)
+        if provider != "kHentai" or not re.fullmatch("[1-9][0-9]{0,18}", work_id) or int(work_id) > 9223372036854775807:
+            replica.fail(400)
+        payload = decode(context, "context")
+        try:
+            with replica.open_publication(root(), get_db, payload["revision"]) as (db, publication):
+                budget(db)
+                if detail(db, int(work_id), payload["query"]) is None:
+                    replica.fail(404, "Catalog work is unavailable")
+                revision = publication["revision"]
+        except sqlite3.Error as exc:
+            unavailable(exc)
+        if gallery_fetcher is None:
+            replica.fail(503, "Catalog reader is unavailable")
+        try:
+            pages = parse_reader_pages(gallery_fetcher(int(work_id)))
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(502, "Catalog pages are unavailable") from exc
+        expiries = [page["expiresAt"] for page in pages if page["expiresAt"] is not None]
+        return {"publicationRevision": revision, "provider": provider, "providerWorkId": work_id, "pages": pages, "manifestExpiresAt": min(expiries) if expiries else None}
 
     @app.get(PREFIX + "/groups/{provider}/{group_id}/editions")
     def group(provider: str, group_id: str, context: str, cursor: str | None = None, authorization: str | None = Header(default=None)):

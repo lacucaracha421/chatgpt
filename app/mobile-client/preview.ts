@@ -18,6 +18,7 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
   if (op === 'collectionArtwork') {const index=Number(String(payload.artworkId).match(/\d+$/)?.[0]??0);return {url:art(index,String(payload.artworkId).startsWith('hero')?1200:600,String(payload.artworkId).startsWith('hero')?600:800),expires_in:240};}
   if (op === 'cacheStatus' || op === 'clearCache') return {bytes:0,count:0,limit:1024*1024*1024};
   if (op === 'thumbnail' || op === 'media') return {url:assets.find(asset => asset.id === payload.assetId)?.preview,expires_in:240};
+  if (op === 'catalogImage') {const index=Number(payload.index??0)+(Number(payload.workId??1)%7);return {url:art(index,900,1350),expires_in:240};}
   if (op === 'pickerStatus' || op === 'pickerRefresh') return {supported:true,eligible:false,selected:false,syncing:false,scanned:120,mediaCount:120,albumCount:7,ready:true,lastSyncedAt:Date.now(),error:''};
   if (op === 'status' || op === 'configure') return {configured:true,endpoint:'https://preview.invalid'};
   if (op === 'disconnect') return {configured:false,endpoint:''};
@@ -30,10 +31,11 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
       const q=url.searchParams.has('cursor')?decode('cursor'):{language:url.searchParams.get('language')??'korean',text:url.searchParams.get('text')??'',scope:url.searchParams.get('scope')??'all',limit:40};
       const selected=catalog.filter((item,i)=>(q.language==='all'||i%2===(q.language==='japanese'?1:0))&&(!q.text||item.title.includes(q.text))&&(q.scope!=='bookmarked'||item.bookmarked));
       const offset=q.offset??0,limit=q.limit??40,context=JSON.stringify({...q,offset:0});
-      return {ready:true,publicationRevision:'demo-catalog',publishedAt:'2026-09-08T00:00:00Z',items:selected.slice(offset,offset+limit),nextCursor:offset+limit<selected.length?JSON.stringify({...q,offset:offset+limit}):null,context,countToken:JSON.stringify({count:selected.length}),totalCount:null,countStatus:'pending'};
+      return {ready:true,publicationRevision:'demo-catalog',publishedAt:'2026-09-08T00:00:00Z',items:selected.slice(offset,offset+limit),nextCursor:offset+limit<selected.length?JSON.stringify({...q,offset:offset+limit}):null,context,countToken:null,totalCount:selected.length,countStatus:'ready'};
     }
     if(url.pathname.endsWith('/count'))return {publicationRevision:'demo-catalog',totalCount:JSON.parse(url.searchParams.get('token')??'{}').count??0};
-    if(url.pathname.includes('/works/')){const item=catalog.find(item=>item.providerWorkId===url.pathname.split('/').slice(-1)[0])??catalog[0];return {publicationRevision:'demo-catalog',item:{...item,uploader:'Archive',category:1,updated:null,fileSize:null,rating:null,tagGroups:[{namespace:'artist',values:item.artists},{namespace:'language',values:['korean']}]}};}
+    if(url.pathname.endsWith('/reader')){const workId=url.pathname.split('/').slice(-2)[0];return {publicationRevision:'demo-catalog',provider:'kHentai',providerWorkId:workId,manifestExpiresAt:1800000000,pages:Array.from({length:28},(_,index)=>({index,url:`https://demo.siam-cdn.net/${workId}/${index}.webp?expires=1800000000`,name:`${String(index+1).padStart(3,'0')}.webp`,width:900,height:1350,expiresAt:1800000000}))};}
+    if(url.pathname.includes('/works/')){const workId=url.pathname.split('/').slice(-1)[0];const item=catalog.find(item=>item.providerWorkId===workId)??catalog[0];return {publicationRevision:'demo-catalog',item:{...item,uploader:'Archive',category:1,updated:null,fileSize:null,rating:null,tagGroups:[{namespace:'artist',values:item.artists},{namespace:'language',values:['korean']}]}};}
     if(url.pathname.endsWith('/editions')){const group=url.pathname.split('/').slice(-2)[0];const item=catalog.find(item=>item.groupId===group)??catalog[0];return {publicationRevision:'demo-catalog',groupId:item.groupId,selectedProviderWorkId:null,items:[item],nextCursor:null,totalCount:1};}
   }
   if(url.pathname==='/v1/collections'){const items=collections.filter(item=>item.type===url.searchParams.get('type')&&(!url.searchParams.get('q')||item.name.includes(url.searchParams.get('q')!))&&(url.searchParams.get('showcase')!=='true'||item.showcase));return {ready:true,revision:'demo-1',publishedAt:'2026-09-07T00:00:00Z',items,nextCursor:null};}

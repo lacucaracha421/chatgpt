@@ -1,0 +1,18 @@
+.catalog-reader{position:relative;width:100%;height:100%;overflow:hidden;background:#08090a;color:var(--color-text)}
+.catalog-reader-stage{position:absolute;inset:0;overflow:hidden;display:flex;align-items:center;justify-content:center;background:#08090a;touch-action:none;user-select:none}
+.catalog-reader-slot{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+.catalog-reader-slot.is-prefetch{display:none}
+.catalog-reader-page{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#08090a;overflow:hidden}
+.catalog-reader-page img{display:block;max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;background:#08090a;user-select:none;-webkit-user-drag:none;transform-origin:center center;will-change:transform}
+.catalog-reader-page-loading,.catalog-reader-page-error{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--color-muted);font-size:12px}
+.catalog-reader-page-error{flex-direction:column;gap:10px}.catalog-reader-page-error>div{display:flex;gap:6px}
+.catalog-reader-bar,.catalog-reader-footer{position:absolute;left:0;right:0;z-index:4;background:#111214ed;opacity:0;pointer-events:none;transition:opacity .16s ease}
+.catalog-reader-bar{top:0;height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;border-bottom:1px solid var(--color-border)}
+.catalog-reader-footer{bottom:0;height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;border-top:1px solid var(--color-border)}
+.catalog-reader.chrome-visible .catalog-reader-bar,.catalog-reader.chrome-visible .catalog-reader-footer{opacity:1;pointer-events:auto}
+.catalog-reader-bar>div{min-width:0;display:flex;flex-direction:column;align-items:center;gap:2px;max-width:70%}
+.catalog-reader-bar strong{font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.catalog-reader-bar span,.catalog-reader-footer span{font-size:11px;color:var(--color-muted)}
+.catalog-reader-zoom-reset{position:absolute;right:14px;bottom:14px;z-index:5}
+.catalog-reader.chrome-visible .catalog-reader-zoom-reset{bottom:66px}
+@media(max-width:700px){.catalog-reader-bar,.catalog-reader-footer{height:48px;padding:0 8px}.catalog-reader.chrome-visible .catalog-reader-zoom-reset{bottom:62px}}

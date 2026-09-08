@@ -63,13 +63,14 @@ public final class MainActivity extends Activity {
   @JavascriptInterface public void cancel(String id){CancellationSignal s=active.remove(id);if(s!=null)s.cancel();}
   @JavascriptInterface public void request(String id,String operation,String payload){
    if(id==null || id.length()>128 || payload==null || payload.length()>65536){return;}CancellationSignal signal=new CancellationSignal();if(active.putIfAbsent(id,signal)!=null)return;
-   try{(operation.equals("thumbnail") || operation.equals("media") || operation.equals("collectionArtwork")?mediaWorkers:workers).execute(()->{try{signal.throwIfCanceled();JSONObject p=new JSONObject(payload);Object data;
+   try{(operation.equals("thumbnail") || operation.equals("media") || operation.equals("collectionArtwork") || operation.equals("catalogImage")?mediaWorkers:workers).execute(()->{try{signal.throwIfCanceled();JSONObject p=new JSONObject(payload);Object data;
     switch(operation){
      case "status":data=settings.status();break;
      case "cacheStatus":data=cacheStatus();break;
      case "clearCache":if(media==null)throw new IOException();media.clear();data=cacheStatus();break;
      case "thumbnail":data=thumbnail(p.getString("assetId"),signal);break;
      case "collectionArtwork":if(media==null)throw new IOException("Cache unavailable");data=media.collectionArtwork(p.getString("collectionId"),p.getString("artworkId"),p.getString("variant"),p.getString("revision"),signal);break;
+     case "catalogImage":if(media==null)throw new IOException("Cache unavailable");data=media.catalogImage(p.getString("workId"),p.getString("revision"),p.getString("kind"),p.getInt("index"),p.getString("url"),signal);break;
      case "media":data=media==null?client.api("/v1/library/assets/"+Uri.encode(p.getString("assetId"))+"/media-ticket","POST",new JSONObject().put("variant","original"),signal):media.browser(p.getString("assetId"),"original",p.optString("mime"),signal);break;
      case "pickerStatus":data=pickerStatus();break;
      case "pickerRefresh":PickerLibrary.get(MainActivity.this).refresh(true);data=pickerStatus();break;

@@ -869,20 +869,21 @@ Source-cover repair completed (2026-09-07): publication revision `3b640e2627ad52
 
 ## MOBILE-006 — Shared Manga Catalog browsing
 
-Status: `PARTIAL`; the MOBILE-006 implementation slice is complete. It includes explicit
-PC snapshot publication, a versioned server read replica and mobile list/search/detail,
-edition and bookmark-filter browsing. Rust parity/export, Python API/replica (13 tests),
-mobile UI (53 tests/build) and Android native policy/compile checks pass. Publication,
-user policy and group identity are pinned together; old cursors retain their publication.
-`PARTIAL` is retained for deployment, actual PC-off/Galaxy Tab acceptance and representative
-catalog-scale performance. See
-[execution evidence](../research/mobile-catalog-execution-plan-20260908.md).
+Status: `PARTIAL`; shared catalog browsing and the v2 performance/Reader server slice are
+deployed. The current publication was upgraded in place to the v2 projection with unchanged
+revision; production default search is now prepared server-side and the authenticated Reader
+returns ordered validated page manifests. Android 0.4.3 uses a fullscreen one-page reader with
+horizontal page navigation, screen-fit rendering, 1x–5x pinch zoom and bounded drag while
+retaining device-local position, ±2 page prefetch, one-shot expired-manifest refresh and shared
+native cover/page caching. Reader chrome appears only on a short tap. Selecting bookmark scope
+forces Latest sort. Server evidence includes 16 Python catalog/replica tests, production-scale
+timing and a real k-hentai/siam-cdn Reader canary. `PARTIAL` remains only for APK 0.4.3 Galaxy
+Tab install and native reader/cold-warm acceptance.
 
-User scope: PC-style catalog design with minimal editing. Search must preserve
-provider/work identity, language scope, blocked tags/categories and confirmed edition
-groups. The legacy upstream proxy is not the shared search contract. Reader/offline
-downloads remain later work and require ordered page access, bounded prefetch/retry
-and device-local reading position; cross-device progress editing is deferred.
+User scope: PC-style catalog design with minimal editing. Search preserves provider/work
+identity, language scope, blocked tags/categories and confirmed edition groups. The legacy
+upstream proxy is not the shared search contract. Reader is read-only; offline full-gallery
+download and cross-device reading progress remain deferred.
 
 ## MOBILE-007 — Catalog bookmark changes across devices
 
@@ -1398,9 +1399,10 @@ optional extension update management. The installed app/Home/cache are not new w
 
 M3. **MOBILE-005 Collections — DONE.** Keep the deployed cover/volume implementation.
 
-M4. **MOBILE-006 shared Manga Catalog reads — implementation complete / rollout gate open:**
-versioned server replica and PC-style search/list/detail/bookmark filter are implemented. Next is
-approved deployment and PC-off Galaxy Tab acceptance; reader remains a later slice.
+M4. **MOBILE-006 shared Manga Catalog reads — server/v2 deployed / device acceptance open:**
+versioned replica, PC-style search/list/detail/bookmark filter, Reader endpoint, native cover/page
+cache and v2 latency projection are deployed. The current publication was upgraded in place.
+Next is APK 0.4.3 Galaxy Tab install plus reader interaction and cold/warm timing acceptance.
 
 M5. **MOBILE-007 bookmark changes:** after read identity/revision contract, with
 idempotent retries and PC receipt/conflict semantics.

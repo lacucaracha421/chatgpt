@@ -95,6 +95,22 @@ final class MediaRepository {
    });
   }finally{active.remove(signal);if(permit)transfers.release();if(locked)entry.lock.unlock();synchronized(locks){if(--entry.users==0)locks.remove(scope.key);}}
  }
+ private String cachedImageMime(Scope scope)throws Exception{
+  try(InputStream raw=cache.open(scope.key,scope.generation);BufferedInputStream input=new BufferedInputStream(raw)){
+   input.mark(32);byte[] header=new byte[16];int count=input.read(header);input.reset();
+   if(count>=12 && header[0]=='R' && header[1]=='I' && header[2]=='F' && header[3]=='F' && header[8]=='W' && header[9]=='E' && header[10]=='B' && header[11]=='P')return "image/webp";
+   if(count>=12 && header[4]=='f' && header[5]=='t' && header[6]=='y' && header[7]=='p' && header[8]=='a' && header[9]=='v' && header[10]=='i' && (header[11]=='f' || header[11]=='s'))return "image/avif";
+   String mime=java.net.URLConnection.guessContentTypeFromStream(input);return imageMime(mime)?mime:null;
+  }
+ }
+ JSONObject catalogImage(String workId,String revision,String kind,int index,String url,CancellationSignal signal)throws Exception{
+  if(workId==null || !workId.matches("[1-9][0-9]{0,18}") || !(kind.equals("cover") || kind.equals("page")) || index<0 || index>=2000 || kind.equals("cover")&&index!=0)throw new IllegalArgumentException();
+  NetworkPolicy.catalogImage(workId,revision,kind,index,url);Scope scope=scopedIdentity("catalog/kHentai/"+workId+"/"+revision+"/"+kind+"/"+index);
+  try{String mime=cachedImageMime(scope);if(imageMime(mime))return local(scope,mime);cache.remove(scope.key,scope.generation);}catch(FileNotFoundException ignored){}
+  JSONObject external=new JSONObject().put("url",url).put("size_bytes",0);
+  try{fillFrom("thumbnail",scope,signal,external,()->external);}catch(CloudClient.HttpFailure failure){if(failure.status==403)throw new IOException("Catalog image URL expired");throw failure;}
+  signal.throwIfCanceled();String mime=cachedImageMime(scope);if(!imageMime(mime)){cache.remove(scope.key,scope.generation);throw new IOException("Catalog image type is unsupported");}return local(scope,mime);
+ }
  JSONObject collectionArtwork(String collection,String artwork,String variant,String revision,CancellationSignal signal)throws Exception{
   if(!collection.matches("[A-Za-z0-9_-]{1,128}") || !artwork.matches("[A-Za-z0-9_-]{1,128}") || !revision.matches("[a-f0-9]{64}") || !(variant.equals("thumbnail") || variant.equals("original")))throw new IllegalArgumentException();
   Scope scope=scopedIdentity("collection/"+collection+"/"+artwork+"/"+revision+"/"+variant);

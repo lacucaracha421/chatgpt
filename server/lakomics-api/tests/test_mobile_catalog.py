@@ -92,7 +92,8 @@ class MobileCatalogApiTests(unittest.TestCase):
                 raise HTTPException(401)
         self.get_db = get_db
         self.app = FastAPI()
-        start = register_mobile_catalog(self.app, get_db, auth, lambda: self.root / "artifacts", lambda: "catalog-test")
+        self.gallery_html = '<html><script>const gallery = {"files":[{"name":"001.webp","image":{"url":"https://a.siam-cdn.net/001.webp?expires=1800000000","width":1200,"height":1800}},{"name":"002.webp","image":{"url":"https://siam-cdn.net/002.webp?expires=1800000100","width":1200,"height":1800}}]};</script></html>'
+        start = register_mobile_catalog(self.app, get_db, auth, lambda: self.root / "artifacts", lambda: "catalog-test", lambda _work_id: self.gallery_html)
         start()
         self.client = TestClient(self.app)
         self.data, self.digest, self.users = fixture_projection()
@@ -113,9 +114,13 @@ class MobileCatalogApiTests(unittest.TestCase):
             page = response.json()
             actual = [[r["groupId"], int(r["providerWorkId"]), r["versionCount"], r["hasBookmarkedVersion"]] for r in page["items"]]
             self.assertEqual(actual, case["expected"], case)
-            count = self.client.get("/v1/mobile-catalog/count", headers=AUTH, params={"token": page["countToken"]})
-            self.assertEqual(count.status_code, 200, count.text)
-            self.assertEqual(count.json()["totalCount"], len(actual))
+            if page["countStatus"] == "ready":
+                self.assertIsNone(page["countToken"])
+                self.assertEqual(page["totalCount"], len(actual))
+            else:
+                count = self.client.get("/v1/mobile-catalog/count", headers=AUTH, params={"token": page["countToken"]})
+                self.assertEqual(count.status_code, 200, count.text)
+                self.assertEqual(count.json()["totalCount"], len(actual))
     def test_auth_unpublished_and_query_rejections(self):
         self.assertEqual(self.client.get("/v1/mobile-catalog/status").status_code, 401)
         self.assertFalse(self.search().json()["ready"])
@@ -134,6 +139,20 @@ class MobileCatalogApiTests(unittest.TestCase):
         self.assertTrue(detail["item"]["bookmarked"])
         self.assertEqual(self.client.get("/v1/mobile-catalog/search", headers=AUTH, params={"cursor": page["nextCursor"], "text": "changed"}).status_code, 400)
         self.assertEqual(self.client.get("/v1/mobile-catalog/search", headers=AUTH, params={"cursor": page["nextCursor"] + "x"}).status_code, 400)
+    def test_reader_returns_bounded_safe_page_manifest(self):
+        self.publish()
+        page = self.search(language="korean").json()
+        response = self.client.get("/v1/mobile-catalog/works/kHentai/1/reader", headers=AUTH, params={"context": page["context"]})
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["publicationRevision"], page["publicationRevision"])
+        self.assertEqual([item["index"] for item in body["pages"]], [0, 1])
+        self.assertEqual(body["manifestExpiresAt"], 1800000000)
+        self.assertTrue(all("siam-cdn.net" in item["url"] for item in body["pages"]))
+        self.gallery_html = '<script>const gallery = {"files":[{"image":{"url":"https://evil.example/page.webp"}}]};</script>'
+        rejected = self.client.get("/v1/mobile-catalog/works/kHentai/1/reader", headers=AUTH, params={"context": page["context"]})
+        self.assertEqual(rejected.status_code, 502)
+
     def test_detail_editions_hide_excluded_manual_selection_and_keep_alias(self):
         self.publish()
         page = self.search(language="korean").json()

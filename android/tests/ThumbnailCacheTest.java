@@ -24,7 +24,7 @@ public final class ThumbnailCacheTest {
    try{cache.open("../outside",cache.generation());throw new AssertionError("path escape");}catch(IOException expected){check(true);}
    try{put(cache,a,11);throw new AssertionError("oversize");}catch(IOException expected){check(cache.status()[0]==0);}
    try{cache.obtain(a,cache.generation(),file->{Files.write(file.toPath(),new byte[4]);throw new IOException("interrupted");});}catch(IOException expected){check(dir.listFiles().length==0);}
-   put(cache,a,5);try(InputStream in=cache.open(a,cache.generation())){check(in.read()==0);}cache.clear();check(cache.status()[0]==0 && cache.status()[1]==0);
+   put(cache,a,5);try(InputStream in=cache.open(a,cache.generation())){check(in.read()==0);}cache.remove(a,cache.generation());check(cache.status()[0]==0);put(cache,a,5);cache.clear();check(cache.status()[0]==0 && cache.status()[1]==0);
    // In-flight reservations share the same cap as completed files.
    cache.obtain(a,cache.generation(),6,file->{
     Files.write(file.toPath(),new byte[4]);

@@ -2068,6 +2068,7 @@ from mobile_catalog import register_mobile_catalog
 
 startup_mobile_catalog = register_mobile_catalog(
     app, get_db, require_auth, lambda: DB_PATH.parent / "mobile-catalog", lambda: API_TOKEN,
+    lambda work_id: _catalog_cached_get(f"{KHENTAI_ORIGIN}/r/{work_id}").body.decode("utf-8"),
 )
 from r2 import presign_put as _collection_presign_put
 

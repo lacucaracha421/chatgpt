@@ -171,7 +171,14 @@ def compile_query(expr):
     return (walk(expr), params) if expr else ("1", [])
 
 
-def eligible(query):
+def eligible(query, state="state"):
+    if query.get("preparedState"):
+        clauses, params = [], []
+        if query["language"] != "all":
+            clauses.append(f"{state}.{query['language']}=1")
+        if not query["revealBlocked"]:
+            clauses.append(f"{state}.visible=1")
+        return " AND ".join(clauses) or "1", params
     clauses, params = ["likely(work.Expunged=0)" if query["sort"] == "latest" else "work.Expunged=0"], []
     if query["language"] != "all":
         clauses.append("EXISTS(SELECT 1 FROM catalog.Tags t WHERE t.WorkId=work.Id AND t.Namespace='language' AND t.Value=?)")
@@ -187,10 +194,14 @@ def eligible(query):
 def freeze_query(db, query):
     query = dict(query)
     query["hasHidden"], query["hasBlocked"] = map(bool, db.execute("SELECT EXISTS(SELECT 1 FROM online_catalog_hidden_categories),EXISTS(SELECT 1 FROM online_catalog_blocked_tags)").fetchone())
+    query["preparedState"] = bool(db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='mobile_catalog_work_state'").fetchone())
     seconds = {"hotDay": 86400, "hotWeek": 604800, "hotMonth": 2592000}.get(query["sort"])
     if seconds and "hotCutoff" not in query:
         where, params = eligible(query)
-        latest = db.execute("SELECT work.Posted FROM catalog.Works work WHERE " + where + " ORDER BY work.Posted DESC LIMIT 1", params).fetchone()
+        source = "catalog.Works work"
+        if query["preparedState"]:
+            source += " JOIN mobile_catalog_work_state state ON state.work_id=work.Id"
+        latest = db.execute("SELECT work.Posted FROM " + source + " WHERE " + where + " ORDER BY work.Posted DESC LIMIT 1", params).fetchone()
         now = int(time.time())
         query["hotCutoff"] = min(latest[0] if latest and latest[0] is not None else now, now) - seconds
     return query
@@ -201,32 +212,46 @@ def cte(query):
     sql, values = compile_query(parse_query(query["text"]))
     params.extend(values)
     if query["scope"] == "bookmarked":
-        sql += " AND EXISTS(SELECT 1 FROM online_catalog_bookmarks b WHERE b.provider='kHentai' AND b.work_id=CAST(work.Id AS TEXT))"
+        sql += " AND " + ("work._bookmarked=1" if query.get("preparedState") else "EXISTS(SELECT 1 FROM online_catalog_bookmarks b WHERE b.provider='kHentai' AND b.work_id=CAST(work.Id AS TEXT))")
     if "hotCutoff" in query:
         sql += " AND work.Posted>=?"
         params.append(query["hotCutoff"])
-    return f"WITH eligible AS NOT MATERIALIZED (SELECT work.* FROM catalog.Works work WHERE {where}), matching AS NOT MATERIALIZED (SELECT work.* FROM eligible work WHERE {sql})", params
+    if query.get("preparedState"):
+        eligible_source = "SELECT work.*,state.group_id AS _group_id,state.bookmarked AS _bookmarked FROM catalog.Works work JOIN mobile_catalog_work_state state ON state.work_id=work.Id WHERE " + where
+    else:
+        eligible_source = "SELECT work.* FROM catalog.Works work WHERE " + where
+    return f"WITH eligible AS NOT MATERIALIZED ({eligible_source}), matching AS MATERIALIZED (SELECT work.* FROM eligible work WHERE {sql})", params
 
 
 def count_groups(db, query):
     prefix, params = cte(query)
+    if query.get("preparedState"):
+        return db.execute(prefix + " SELECT COUNT(DISTINCT work._group_id) FROM matching work", params).fetchone()[0]
     return db.execute(prefix + " SELECT COUNT(DISTINCT m.group_id) FROM matching work JOIN online_catalog_group_members m ON m.provider='kHentai' AND m.catalog_work_id=work.Id", params).fetchone()[0]
 
 
 def search_groups(db, query, offset=0, limit=40):
     prefix, params = cte(query)
     latest = query["sort"] == "latest"
-    order = "donor.Posted DESC,donor.Id DESC" if latest else "donor.Views DESC,donor.Posted DESC,donor.Id DESC"
-    tuple_sql = "work.Posted IS NOT NULL,COALESCE(work.Posted,0),work.Id"
-    donor_tuple = "donor.Posted IS NOT NULL,COALESCE(donor.Posted,0),donor.Id"
+    rank_order = "donor.Posted IS NOT NULL DESC,COALESCE(donor.Posted,0) DESC,donor.Id DESC"
+    final_order = "Posted DESC,Id DESC"
     if not latest:
-        tuple_sql, donor_tuple = "work.Views," + tuple_sql, "donor.Views," + donor_tuple
-    sql = prefix + f""" SELECT member.group_id FROM matching donor
-        CROSS JOIN online_catalog_group_members member ON member.provider='kHentai' AND member.catalog_work_id=donor.Id
-        WHERE NOT EXISTS(SELECT 1 FROM online_catalog_group_members sibling CROSS JOIN matching work ON work.Id=sibling.catalog_work_id
-          WHERE sibling.provider=member.provider AND sibling.group_id=member.group_id AND ({tuple_sql})>({donor_tuple}))
-        ORDER BY {order} LIMIT ? OFFSET ?"""
-    groups = [r[0] for r in db.execute(sql, [*params, limit, offset])]
+        rank_order = "donor.Views DESC," + rank_order
+        final_order = "Views DESC,Posted DESC,Id DESC"
+    if query.get("preparedState"):
+        ranked = f""", ranked AS (
+          SELECT donor._group_id AS group_id,donor.Posted,donor.Id,donor.Views,
+                 ROW_NUMBER() OVER(PARTITION BY donor._group_id ORDER BY {rank_order}) AS rn
+          FROM matching donor
+        ) SELECT group_id FROM ranked WHERE rn=1 ORDER BY {final_order} LIMIT ? OFFSET ?"""
+    else:
+        ranked = f""", ranked AS (
+          SELECT member.group_id,donor.Posted,donor.Id,donor.Views,
+                 ROW_NUMBER() OVER(PARTITION BY member.group_id ORDER BY {rank_order}) AS rn
+          FROM matching donor JOIN online_catalog_group_members member
+            ON member.provider='kHentai' AND member.catalog_work_id=donor.Id
+        ) SELECT group_id FROM ranked WHERE rn=1 ORDER BY {final_order} LIMIT ? OFFSET ?"""
+    groups = [r[0] for r in db.execute(prefix + ranked, [*params, limit, offset])]
     if not groups:
         return []
     requested = ",".join("(?)" for _ in groups)
@@ -246,7 +271,6 @@ def search_groups(db, query, offset=0, limit=40):
     selected = list(db.execute(sql, [*params, *groups]))
     works = summaries(db, [r[1] for r in selected])
     return [dict(works[r[1]], groupId=r[0], versionCount=r[2], hasBookmarkedVersion=bool(r[3])) for r in selected]
-
 
 def thumbnail(raw):
     try:
@@ -277,7 +301,10 @@ def summaries(db, ids):
 
 def detail(db, work_id, query):
     where, params = eligible(query)
-    row = db.execute("SELECT work.* FROM catalog.Works work WHERE work.Id=? AND " + where, [work_id, *params]).fetchone()
+    source = "catalog.Works work"
+    if query.get("preparedState"):
+        source += " JOIN mobile_catalog_work_state state ON state.work_id=work.Id"
+    row = db.execute("SELECT work.* FROM " + source + " WHERE work.Id=? AND " + where, [work_id, *params]).fetchone()
     if row is None:
         return None
     result = summaries(db, [work_id])[work_id]
@@ -299,7 +326,10 @@ def editions(db, handle, query, offset, limit):
         return None
     group = row[0]
     where, params = eligible(query)
-    source = "FROM online_catalog_group_members m JOIN catalog.Works work ON work.Id=m.catalog_work_id WHERE m.provider='kHentai' AND m.group_id=? AND " + where
+    source = "FROM online_catalog_group_members m JOIN catalog.Works work ON work.Id=m.catalog_work_id"
+    if query.get("preparedState"):
+        source += " JOIN mobile_catalog_work_state state ON state.work_id=work.Id"
+    source += " WHERE m.provider='kHentai' AND m.group_id=? AND " + where
     total = db.execute("SELECT COUNT(*) " + source, [group, *params]).fetchone()[0]
     selected = db.execute("SELECT p.selected_work_id FROM online_catalog_group_preferences p JOIN online_catalog_group_members a ON a.provider=p.provider AND a.work_id=p.anchor_work_id WHERE a.provider='kHentai' AND a.group_id=? ORDER BY p.edit_revision DESC LIMIT 1", [group]).fetchone()
     selected = selected[0] if selected else None

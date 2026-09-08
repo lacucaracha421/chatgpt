@@ -5,12 +5,15 @@ export type CatalogItem = CatalogWork & {groupId:string;versionCount:number;hasB
 export type CatalogPage = {ready:boolean;publicationRevision:string|null;publishedAt:string|null;items:CatalogItem[];nextCursor:string|null;context:string|null;countToken:string|null;totalCount:number|null;countStatus:'pending'|'ready'|'unavailable'};
 export type CatalogDetail = {provider:'kHentai';providerWorkId:string;title:string;titleJpn:string|null;thumbnailUrl:string|null;uploader:string|null;category:number|null;posted:number|null;updated:number|null;fileCount:number;fileSize:number|null;rating:number|null;views:number;bookmarked:boolean;tagGroups:{namespace:string;values:string[];labels?:Record<string,string>}[]};
 export type CatalogEditions = {publicationRevision:string;groupId:string;selectedProviderWorkId:string|null;items:CatalogWork[];nextCursor:string|null;totalCount:number};
+export type CatalogReaderPage = {index:number;url:string;name:string|null;width:number|null;height:number|null;expiresAt:number|null};
+export type CatalogReaderManifest = {publicationRevision:string;provider:'kHentai';providerWorkId:string;pages:CatalogReaderPage[];manifestExpiresAt:number|null};
 export function catalogPath(query:CatalogQuery,cursor:string|null){
   const params=cursor?new URLSearchParams({cursor}):new URLSearchParams(Object.entries(query).map(([key,value])=>[key,String(value)]));
   return `/v1/mobile-catalog/search?${params}`;
 }
 export function catalogDetailPath(item:Pick<CatalogWork,'provider'|'providerWorkId'>,context:string){return `/v1/mobile-catalog/works/${item.provider}/${encodeURIComponent(item.providerWorkId)}?${new URLSearchParams({context})}`;}
 export function catalogEditionsPath(groupId:string,context:string,cursor:string|null){return `/v1/mobile-catalog/groups/kHentai/${encodeURIComponent(groupId)}/editions?${new URLSearchParams({context,...(cursor?{cursor}:{})})}`;}
+export function catalogReaderPath(item:Pick<CatalogWork,'provider'|'providerWorkId'>,context:string){return `/v1/mobile-catalog/works/${item.provider}/${encodeURIComponent(item.providerWorkId)}/reader?${new URLSearchParams({context})}`;}
 export function catalogTagQuery(namespace:string,value:string){return `${namespace}:"${value.replace(/\\/g,'\\\\').replace(/"/g,'\\"')}"`;}
 export function catalogError(reason:unknown){
   const status=(reason as {status?:number})?.status;

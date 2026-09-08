@@ -35,6 +35,32 @@ class MobileCatalogReplicaTests(unittest.TestCase):
         conflict = self.publish(None, users)
         self.assertEqual(conflict.status_code, 409)
         self.assertEqual(self.client.get("/v1/mobile-catalog/status", headers=AUTH).json()["publicationRevision"], first.json()["publicationRevision"])
+    def test_same_revision_republish_upgrades_legacy_user_projection(self):
+        import shutil
+        import sqlite3
+        import mobile_catalog_replica as replica
+        first = self.publish().json()
+        revision = first["publicationRevision"]
+        root = self.root / "artifacts"
+        current = replica.users_path(root, revision)
+        legacy = replica.legacy_users_path(root, revision)
+        shutil.copy2(current, legacy)
+        with sqlite3.connect(legacy) as db:
+            db.execute("DROP TABLE prepared_pages")
+            db.execute("DROP TABLE mobile_catalog_work_state")
+            db.commit()
+        current.unlink()
+        self.assertFalse(current.exists())
+        before = self.search().json()
+        self.assertEqual(len(before["items"]), 3)
+        again = self.publish(revision)
+        self.assertEqual(again.status_code, 200, again.text)
+        self.assertEqual(again.json()["publicationRevision"], revision)
+        self.assertTrue(current.is_file())
+        with sqlite3.connect(current) as db:
+            self.assertGreater(db.execute("SELECT COUNT(*) FROM mobile_catalog_work_state").fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM prepared_pages WHERE sort='latest'").fetchone()[0], 3)
+
     def test_invalid_uploads_leave_previous_publication_readable(self):
         self.publish()
         for data, digest in [(self.data[:-5], self.digest), (b'{"kind":"sql","value":"DROP TABLE Works"}\n', "a" * 64), (self.data, "b" * 64)]:

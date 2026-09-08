@@ -12,11 +12,13 @@ import time
 from contextlib import contextmanager, closing
 from pathlib import Path
 from fastapi import HTTPException
-from mobile_catalog_query import count_groups
+from mobile_catalog_query import count_groups, freeze_query, search_groups
 
 MAX_CONTENT = 512 * 1024 * 1024
 MAX_RECORD = 1024 * 1024
 MAX_USERS = 8 * 1024 * 1024
+PREPARED_PAGE_ITEMS = 80
+USER_PROJECTION_VERSION = 2
 TABLES = {
     "work": ("Works", "Id Title TitleJpn Category Uploader Posted Updated FileCount FileSize Rating Views Thumb Expunged".split()),
     "tag": ("Tags", "WorkId Namespace Value".split()),
@@ -53,6 +55,10 @@ CREATE TABLE online_catalog_blocked_tags(namespace TEXT,value TEXT,created_at TE
 CREATE TABLE online_catalog_group_preferences(provider TEXT,anchor_work_id TEXT,selected_work_id TEXT,edit_revision INTEGER,PRIMARY KEY(provider,anchor_work_id)) WITHOUT ROWID;
 CREATE TABLE prepared_counts(language TEXT,reveal INTEGER,exact_count INTEGER,PRIMARY KEY(language,reveal)) WITHOUT ROWID;
 """
+PROJECTION_DDL = """
+CREATE TABLE mobile_catalog_work_state(work_id INTEGER PRIMARY KEY,group_id TEXT NOT NULL,korean INTEGER NOT NULL,japanese INTEGER NOT NULL,visible INTEGER NOT NULL,bookmarked INTEGER NOT NULL);
+CREATE TABLE prepared_pages(language TEXT NOT NULL,sort TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(language,sort)) WITHOUT ROWID;
+"""
 
 def encode(value):
     return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
@@ -85,7 +91,14 @@ def artifact_path(root, value):
     return Path(root) / (checked_digest(value) + ".sqlite")
 
 def users_path(root, value):
+    return Path(root) / (checked_digest(value) + f"-users-v{USER_PROJECTION_VERSION}.sqlite")
+
+def legacy_users_path(root, value):
     return Path(root) / (checked_digest(value) + "-users.sqlite")
+
+def readable_users_path(root, value):
+    current = users_path(root, value)
+    return current if current.is_file() else legacy_users_path(root, value)
 
 def import_content(path, expected, root, get_db):
     checked_digest(expected)
@@ -223,14 +236,34 @@ def prepare_users(root, content, revision, users):
     fd, temporary = tempfile.mkstemp(prefix="users-", suffix=".sqlite", dir=root); os.close(fd)
     try:
         with closing(sqlite3.connect(temporary, uri=True)) as db:
-            db.executescript(USER_DDL)
+            db.row_factory = sqlite3.Row
+            db.executescript(USER_DDL + PROJECTION_DDL)
             for key, table, n in (("bookmarks", "online_catalog_bookmarks", 3), ("hiddenCategories", "online_catalog_hidden_categories", 2), ("blockedTags", "online_catalog_blocked_tags", 3), ("preferences", "online_catalog_group_preferences", 4)):
                 db.executemany(f"INSERT INTO {table} VALUES({','.join('?' for _ in range(n))})", users[key])
             db.execute("ATTACH DATABASE ? AS catalog", [artifact_path(root, content).as_uri() + "?mode=ro"])
+            db.execute("""INSERT INTO mobile_catalog_work_state
+              SELECT work.Id,member.group_id,
+                EXISTS(SELECT 1 FROM catalog.Tags tag WHERE tag.WorkId=work.Id AND tag.Namespace='language' AND tag.Value='korean'),
+                EXISTS(SELECT 1 FROM catalog.Tags tag WHERE tag.WorkId=work.Id AND tag.Namespace='language' AND tag.Value='japanese'),
+                NOT EXISTS(SELECT 1 FROM online_catalog_hidden_categories hidden WHERE hidden.category=work.Category)
+                  AND NOT EXISTS(SELECT 1 FROM catalog.Tags tag JOIN online_catalog_blocked_tags blocked ON blocked.namespace=tag.Namespace AND blocked.value=tag.Value WHERE tag.WorkId=work.Id),
+                EXISTS(SELECT 1 FROM online_catalog_bookmarks bookmark WHERE bookmark.provider='kHentai' AND bookmark.work_id=CAST(work.Id AS TEXT))
+              FROM catalog.Works work JOIN catalog.online_catalog_group_members member
+                ON member.provider='kHentai' AND member.catalog_work_id=work.Id
+              WHERE work.Expunged=0""")
+            db.executescript("""
+              CREATE INDEX mobile_catalog_work_state_group ON mobile_catalog_work_state(group_id,work_id);
+              CREATE INDEX mobile_catalog_work_state_visible ON mobile_catalog_work_state(visible,work_id);
+              CREATE INDEX mobile_catalog_work_state_korean ON mobile_catalog_work_state(korean,visible,work_id);
+              CREATE INDEX mobile_catalog_work_state_japanese ON mobile_catalog_work_state(japanese,visible,work_id);
+            """)
             for language in ("all", "korean", "japanese"):
                 for reveal in (False, True):
-                    q = {"language": language, "revealBlocked": reveal, "text": "", "scope": "all", "sort": "latest"}
+                    q = freeze_query(db, {"language": language, "revealBlocked": reveal, "text": "", "scope": "all", "sort": "latest"})
                     db.execute("INSERT INTO prepared_counts VALUES(?,?,?)", [language, int(reveal), count_groups(db, q)])
+                for sort in ("latest",):
+                    q = freeze_query(db, {"language": language, "revealBlocked": False, "text": "", "scope": "all", "sort": sort})
+                    db.execute("INSERT INTO prepared_pages VALUES(?,?,?)", [language, sort, encode(search_groups(db, q, 0, PREPARED_PAGE_ITEMS))])
             db.commit()
         with open(temporary, "rb+") as sealed:
             os.fsync(sealed.fileno())
@@ -244,6 +277,36 @@ def prepare_users(root, content, revision, users):
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
+
+def prepared_count(db, query):
+    if query.get("text", "").strip() or query.get("scope") != "all" or "hotCutoff" in query:
+        return None
+    try:
+        row = db.execute("SELECT exact_count FROM prepared_counts WHERE language=? AND reveal=?", [query["language"], int(query["revealBlocked"])]).fetchone()
+    except sqlite3.OperationalError as exc:
+        if "no such table" in str(exc): return None
+        raise
+    return row[0] if row else None
+
+def prepared_items(db, query, offset, limit, total):
+    if query.get("text", "").strip() or query.get("scope") != "all" or query.get("revealBlocked") or query.get("sort") not in ("latest", "views"):
+        return None
+    try:
+        row = db.execute("SELECT payload FROM prepared_pages WHERE language=? AND sort=?", [query["language"], query["sort"]]).fetchone()
+    except sqlite3.OperationalError as exc:
+        if "no such table" in str(exc): return None
+        raise
+    if not row:
+        return None
+    try:
+        items = json.loads(row[0])
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(items, list) or offset < 0 or (total is not None and offset >= total):
+        return []
+    if offset + limit > len(items) and (total is None or len(items) < total):
+        return None
+    return items[offset:offset + limit]
 
 def publish(body, root, get_db):
     if not isinstance(body, dict) or set(body) != {"version", "baseRevision", "contentDigest", "userSnapshot"} or body["version"] != 1:
@@ -261,13 +324,18 @@ def publish(body, root, get_db):
         if json.loads(artifact[0])["groupDecisionRevision"] != users["decisionRevision"]:
             fail(409, "Catalog decisions changed; export again")
         prior = current(db)
-        if prior and prior["revision"] == revision:
-            return dict(publicationRevision=revision, publishedAt=prior["published_at"], userRevision=user_revision)
-        if (prior["revision"] if prior else None) != body["baseRevision"]:
+        already_current = bool(prior and prior["revision"] == revision)
+        if not already_current and (prior["revision"] if prior else None) != body["baseRevision"]:
             fail(409, "Catalog publication changed; refresh before publishing")
-        if prior and prior["content_digest"] != content and prior["user_revision"] != user_revision and db.execute("SELECT EXISTS(SELECT 1 FROM mobile_catalog_publications WHERE content_digest=?)", [content]).fetchone()[0]:
+        if already_current:
+            published_at = prior["published_at"]
+        else:
+            published_at = None
+        if prior and not already_current and prior["content_digest"] != content and prior["user_revision"] != user_revision and db.execute("SELECT EXISTS(SELECT 1 FROM mobile_catalog_publications WHERE content_digest=?)", [content]).fetchone()[0]:
             fail(409, "A rollback must retain the current user snapshot")
     prepare_users(root, content, revision, users)
+    if published_at is not None:
+        return dict(publicationRevision=revision, publishedAt=published_at, userRevision=user_revision)
     with get_db() as db:
         db.execute("BEGIN IMMEDIATE")
         prior = current(db)
@@ -289,7 +357,7 @@ def open_publication(root, get_db, revision=None):
         if row is None:
             fail(409, "Catalog snapshot is unavailable; refresh")
         publication = dict(row)
-    db = sqlite3.connect(users_path(root, publication["revision"]).as_uri() + "?mode=ro", uri=True)
+    db = sqlite3.connect(readable_users_path(root, publication["revision"]).as_uri() + "?mode=ro", uri=True)
     db.row_factory = sqlite3.Row
     try:
         db.execute("ATTACH DATABASE ? AS catalog", [artifact_path(root, publication["content_digest"]).as_uri() + "?mode=ro"])
