@@ -17,6 +17,15 @@ recorded checks from that implementation. This refresh covers Collection present
 ownership/release notifications, and the catalog bookmark filter fix; it is not a new
 repository-wide or production-data audit. Unrelated Cloud/Mobile acceptance gates remain unchanged.
 
+## Documentation reconciliation — 2026-09-09
+
+Checked against source commit `0c61206`; no new tests, device inspection or production
+audit were performed. Android source is 0.4.3 (14); its built artifact and remaining
+install/native-reader gates are recorded under MOBILE-006 and in the Android README.
+References to installed APK 0.3.3 in older entries are dated device evidence, not a
+fresh inventory. CLOUD-006 is DONE; CHAR-UI-001 and Linux drag-out retain their native
+acceptance limits. Existing item statuses below remain the owners of pending work.
+
 ## Status legend
 
 2026-09-07 refresh: reconciled current Mobile/extension work through `6524c4c`,
@@ -753,7 +762,7 @@ The current browser/mobile-extension prototype remains a verified behavioral ref
 
 Status: `PARTIAL`
 
-Installed APK 0.3.3 (10) implements direct authenticated browsing, Keystore credentials,
+The 2026-09-07 installed APK checkpoint, 0.3.3 (10), implements direct authenticated browsing, Keystore credentials,
 lifecycle/back handling, pending Capture previews and a shared 1 GiB media cache with
 usage/clear controls. Galaxy Tab browsing is in use; the earlier no-install checkpoint
 is superseded. Remaining scope: Android system Share quick-save, optional extension
@@ -896,7 +905,7 @@ Initial boundary:
 Status: `DONE` — deployed, source-cover repair verified and Galaxy Tab presentation
 accepted by the user on 2026-09-07. All 340 Collections have primary cover references;
 2,332 volume/edition covers are published. APK 0.3.2 removed cover effects/black boxes
-and duplicate volume captions; current installed APK is 0.3.3. Manga Catalog remains
+and duplicate volume captions; the installed APK recorded on 2026-09-07 was 0.3.3. Manga Catalog remains
 separate work under MOBILE-006/007/008.
 
 Goal: PC-off Collection browsing, with PC owning metadata/artwork and Android viewing only. Keep game package/hero, manga volume shelf and movie poster/backdrop distinctions. Preserve IDs, editions and manual Showcase ordering; do not import provider artwork into Assets or expose provider configuration/local paths.
@@ -917,7 +926,7 @@ Final integration review was inline, not independent.
 Deployment/publication was explicitly approved and completed. The first snapshot's
 cover omissions were repaired in the later source-cover publication below; do not
 repeat the first publication or treat its earlier device-pending note as current.
-Current APK 0.3.3 retains the PC icon and user-accepted plain-cover/volume polish.
+The 2026-09-07 APK 0.3.3 checkpoint retains the PC icon and user-accepted plain-cover/volume polish.
 Source-cover repair completed (2026-09-07): publication revision `3b640e2627ad526d7b3a8764bca87adc6cc4f04796a9373881d5c3910a196898`; 340 works, 2,803 artwork records, 5,588 unique blobs (4,204 uploaded in this repair), 2,332 volume/edition covers. Full comparison with the preceding replica confirmed 261 recovered primary covers, all 79 existing selected covers retained, and every existing volume ID/number/edition/label/release field retained. Every current work and volume has a thumbnail reference. Type pagination had 181 game, 147 manga and 12 movie records with no duplicate IDs; representative original and thumbnail downloads passed SHA-256 checks. Service active/running, NRestarts=0. Galaxy Tab SM-X730 running installed APK 0.3.1 was woken and refreshed: the game grid loaded covers and a previously missing manga (Prison School) displayed its primary cover and ordered 28-volume shelf. No APK rebuild/install was needed. The operation opened the source DB READ_ONLY and wrote previews only to TEMP. Prior replica backup: `/home/linuxuser/lakomics-api/backups/collections-before-source-20260907T053812Z.json`. An interrupted preparation attempt left its TEMP preview directory; manual cleanup was blocked by automatic approval policy, and no workaround deletion was attempted. The successful attempt retained normal TempDir lifecycle cleanup.
 
 ## MOBILE-006 — Shared Manga Catalog browsing

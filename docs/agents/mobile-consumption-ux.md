@@ -1,6 +1,11 @@
 # Lakomics Mobile consumption UX
 
-Status: approved design direction; native preview implemented 2026-09-07, device acceptance pending
+Status: approved consumption design with historical implementation checkpoints.
+Current source/documentation reconciliation: 2026-09-09 against `0c61206`.
+Home/Library behavior here remains a focused reference; Android source is 0.4.3 (14)
+and also includes Collections and Catalog/Reader outside this document's scope.
+See the [Android README](../../android/README.md) and the living backlog for current
+feature coverage and the separate installed-device/acceptance status.
 
 The new `app/mobile-client` / `android` preview implements the core consumption path. See `android/README.md` for its exact scope and current limitations. Browser fixture/static/offline checks do not complete the Galaxy Tab device gate below. The living backlog retains MOBILE-004 as PARTIAL.
 

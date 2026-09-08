@@ -1,10 +1,16 @@
 # Lakomics
 
-Lakomics is a local-first Windows media library for JPEG, PNG, GIF, WebP, MP4, WebM, and MOV media.
+Lakomics is a local-first media library with Windows and Linux desktop implementations, built with React/TypeScript, Vite, Tauri 2, and Rust. It manages assets, classifications, albums, typed Works/Collections, and an independent Online Catalog.
+
+Documentation reconciled on 2026-09-09 against source commit `0c61206`. See the [repository overview](../README.md), [document map](../docs/README.md), and [living backlog](../docs/roadmap/lakomics-backlog.md) for other clients and remaining acceptance gates.
 
 ## Run and verify
 
-Node.js 24.19.0 LTS, npm 12.0.2, Rust 1.98.0, and Windows WebView2 are required.
+The pinned baselines are Node.js 24.19.0, npm 12.0.2, and Rust 1.98.0.
+Windows uses WebView2 and Windows build prerequisites. Linux uses GTK 3 and
+WebKitGTK 4.1; follow the [Linux setup guide](../docs/operations/linux-desktop.md)
+for distribution packages, system FFmpeg/ffprobe, filesystem requirements, and
+platform verification limits. The Windows FFmpeg commands below apply only to Windows.
 The repository pins the Node.js baseline in `../.node-version`, the npm baseline in
 `package.json`, and the Rust toolchain in `rust-toolchain.toml`.
 
@@ -34,7 +40,7 @@ cargo test
 ## Current daily-use behavior
 
 - Lakomics always starts in **All assets**. The sidebar also provides Unsorted, Recent, Favorites, classifications, Trash, and Library safety.
-- Choose newest, oldest, favorites, or random sort. Change the justified-row height with the preview-size slider and toggle thumbnail metadata independently.
+- Asset browsing defaults to date-grouped masonry/waterfall; justified rows remain an alternative. Choose newest, oldest, favorites, or random sort. Adjust preview size and toggle thumbnail metadata independently. See [the PC design reference](../docs/agents/pc-design-reference.md) for current shell and navigation behavior.
 - Click to select one asset, Ctrl-click to toggle, Shift-click for a loaded range, and Ctrl+A to select only currently loaded assets. Escape clears selection; arrow keys move focus; Delete moves the selection to Trash.
 - Double-click or press Enter to open the full-screen viewer. Left and Right move through the currently loaded order, and Escape closes the viewer.
 - The information panel opens on the first non-empty selection. Closing it manually keeps it closed while the selection changes; clearing the selection resets that choice. It shows one-asset metadata or a multi-selection summary and delegates classification changes to the same batch operation as the toolbar.
@@ -45,7 +51,7 @@ cargo test
 - Double-click or press Enter on a video to use the full viewer with play/pause, current and total time, seeking and timeline preview, mute/volume, fullscreen, and previous/next navigation. Space toggles playback unless a control owns keyboard focus.
 - The Similar image review entry compares the existing and incoming images with public metadata. Choose Keep existing, Replace with new image, or Keep both. Existing-image replacement transfers its favorite and classifications while preserving the incoming image's source and collected date.
 - Existing images are prepared for similarity checks in non-blocking batches. The status bar reports remaining work and any images whose perceptual hash could not be prepared.
-- Drag assets onto a classification to add it, or drag classifications to reorganize the tree. Dragging selected assets out of Lakomics starts a Windows copy operation with their original names; duplicate names receive a Windows-style numeric suffix.
+- Drag assets onto a classification to move their single direct classification, or drag classifications to reorganize the tree. Dragging selected assets out uses native copy semantics and original names with collision suffixes. Windows uses OLE; Linux uses GTK file URIs and independent staging copies. Linux recipient acceptance remains pending; see the [platform guide](../docs/operations/linux-desktop.md#linux-drag-out-follow-up-2026-09-09).
 - The work tray reports ingestion and drag-out progress for the current app session only. It is not a persistent background-job history.
 
 Release Watch is opt-in per Aladin-connected manga. On startup Lakomics checks subscriptions whose last successful check is at least 24 hours old, shows an unread `신간 N` badge for new or changed Korean releases, and marks those changes read when the Collection is opened. Lakomics does not check while the app is closed.
@@ -54,9 +60,17 @@ Folder-recursive ingestion and AVIF/HEIC are deferred.
 
 ## Edge X image collection
 
-The unpacked Microsoft Edge extension in `..\extension` collects an X post image directly into the open Lakomics library through an authenticated loopback connection. See [the Korean installation and operation guide](../docs/edge-extension.md).
+The bundled [Chromium collector](../extension/README.md) supports image/video collection, radial or list destination menus, and X translation. Direct PC ingestion uses an authenticated loopback connection; optional Cloud Capture supports remote collection. See the [installation and operation guide](../docs/edge-extension.md) for routing and supported sources.
 
-## Similar image review acceptance
+## Historical acceptance records
+
+The following 2026-08-09 records describe older revisions and temporary Windows
+fixtures. Their paths, test counts, screenshots, and timings are historical evidence,
+not current setup commands, current library locations, or verification of `0c61206`.
+Current platform evidence is in the [Linux guide](../docs/operations/linux-desktop.md)
+and feature acceptance is tracked in the [backlog](../docs/roadmap/lakomics-backlog.md).
+
+### Similar image review acceptance
 
 Verified on 2026-08-09 with the temporary library at
 `C:\Users\namwoojun\Desktop\test`:
@@ -83,7 +97,7 @@ npm.cmd run tauri build -- --debug --no-bundle
 - `.acceptance\similarity-review-normal.png` records the maximized side-by-side comparison.
 - `.acceptance\similarity-review-narrow.png` records the 960×650 stacked comparison without horizontal clipping.
 
-## Eagle compact UI acceptance
+### Eagle compact UI acceptance
 
 Verified on 2026-08-09 with the temporary library at
 `C:\Users\namwoojun\Desktop\test`:
@@ -101,7 +115,7 @@ npm.cmd run check
 - Single and multi-file incoming drops were exercised over the gallery, sidebar, and inspector. Exact duplicates did not create a new asset.
 - Dragging an asset to `.acceptance\output\run-eagle-compact-20260809-123822` produced a byte-identical copy while the managed original remained in the library.
 
-## Windows drag-out acceptance
+### Windows drag-out acceptance
 
 Verified on 2026-08-09 with the library at
 `C:\Users\namwoojun\Desktop\test` and Windows File Explorer:

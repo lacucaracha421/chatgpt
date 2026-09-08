@@ -9,7 +9,7 @@ The current version is defined in `manifest.json`. Current save routing and Clou
 ## Core behavior
 
 - Chrome Manifest V3 extension for `x.com` and `twitter.com`.
-- PC keeps direct radial drag/drop saving.
+- The collector offers radial (default) and list destination menus. PC radial mode keeps direct drag/drop saving; the [operation guide](../docs/edge-extension.md#collector-menu) defines list navigation and save gestures.
 - Mobile selects a radial destination first and saves only when the center Save button is tapped.
 - Local PC ingestion uses `127.0.0.1:32145`.
 - Tablet/mobile and Tailscale-hosted endpoints are supported separately.
@@ -49,7 +49,7 @@ Introduced in alpha.15.30.
 
 The extension authenticates Cloud Library requests through its background worker for the browser prototype hosted on GitHub Pages. Classifications, committed replica assets, Recent/Home/Revisit, and image/video media tickets are live; Capture Inbox rows are not the mobile library source.
 
-Full-library replication has been implemented and the initial backfill completed. The browser prototype remains a reference for the future native Android client, not a completed native client or DocumentsProvider. See [current behavior and limitations](../docs/edge-extension.md#cloud-inbound-and-mobile-library) and the living backlog for remaining gates.
+Full-library replication and the initial backfill are implemented and recorded complete. The browser prototype remains a historical behavior reference. The independent [Android client](../android/README.md) now implements direct Cloud API browsing, Collections, Manga Catalog/reader, DocumentsProvider and integrated CloudMediaProvider without requiring the extension runtime. Native recipient compatibility and device acceptance remain separately tracked in the [living backlog](../docs/roadmap/lakomics-backlog.md). See [current collector behavior](../docs/edge-extension.md#cloud-inbound-and-mobile-library) for the extension transport boundary.
 
 ## Version landmarks
 

@@ -1,6 +1,21 @@
 # Lakomics Documentation Map
 
-This directory contains current Lakomics references plus a small number of intentionally retained historical records.
+This directory maps current Lakomics references and retained historical records.
+Start with the [repository overview](../README.md) for the product and applications.
+
+Documentation reconciliation: 2026-09-09 against source commit `0c61206`. This records
+source/document consistency, not new native acceptance or production verification.
+
+## Application entry points
+
+- [Desktop setup and behavior](../app/README.md): Windows and Linux Tauri application.
+- [Linux platform setup and acceptance limits](operations/linux-desktop.md).
+- [Android build, current source version and acceptance](../android/README.md).
+- [Browser collector overview](../extension/README.md) and [operation guide](edge-extension.md).
+
+Current summaries and the living backlog take precedence over older dated rollout
+paragraphs. Source version, built artifact, deployed service and installed client
+are separate states; a dated test result only covers its recorded revision and inputs.
 
 ## Read first
 
@@ -26,6 +41,7 @@ This directory contains current Lakomics references plus a small number of inten
 - `operations/linux-desktop.md` — Linux desktop setup, filesystem guarantees, system media tools, and platform limitations.
 - `operations/pc-migration.md` — backup, recovery, credential portability, and PC migration.
 - `research/reference-projects.md` — optional external-project research, not adopted implementation.
+- `agents/issue-tracker.md` — backlog and explicitly requested GitHub Issue tracking boundaries.
 - `performance/online-catalog-query-regression-20260905.md` — measured Online Catalog query-plan/performance record.
 - `operations/catalog-hybrid-count-gate.md` — retained CATALOG-007A native acceptance evidence.
 
@@ -56,3 +72,14 @@ Separate implemented facts from authority to change them.
 ## Device research records
 
 - `research/android-cloud-media-provider-poc-20260906.md` — Galaxy Tab S11 Android Photo Picker / custom `CloudMediaProvider` device PoC, album-filtering findings, ADB eligibility caveats, and the related temporary/one-use media inbox proposal. This is validated research evidence, not an adopted replacement for the current Mobile roadmap.
+
+## Retained execution plans
+
+Dated files under `research/` preserve original design, batch contracts and acceptance
+evidence. They are not a second source of active task status or fresh authorization.
+In particular, [the mobile catalog plan](research/mobile-catalog-execution-plan-20260908.md)
+and [three-lane coordination record](research/parallel-roadmap-execution-20260908.md)
+predate later Reader and deployment work. Follow `MOBILE-006` in the living backlog
+and the Android README for the current implementation and remaining device gates.
+Character batch records, video-similarity plans and AV/cover plans likewise retain
+their recorded scope; consult the corresponding backlog item before resuming work.

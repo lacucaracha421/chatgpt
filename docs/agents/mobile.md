@@ -2,26 +2,36 @@
 
 Status: current product direction with retained rollout history
 
-Current-status clarification (2026-09-07): the initial full-library backfill, Galaxy Tab browser browsing milestone, and queued-work pause/wait/restart/resume acceptance are complete. `CLOUD-006` is `DONE` in the living backlog. Do not reseed or rerun the completed backfill without a separately approved recovery operation.
+## Current source and recorded acceptance — 2026-09-09
 
-Current installed native client: APK 0.3.3 (10), with independent cloud browsing,
-Home/Library/Collections, shared 1 GiB cache and cache-clear controls, DocumentsProvider
-and integrated CloudMediaProvider. Continue/이어보기 was removed at user request;
-classification/date/creator discovery remains. Collections deployment, cover repair
-and device visual acceptance are complete. Extension 15.59 activation and improved
-Arca download speed were confirmed by the user after commit `6524c4c`.
+Reconciled against source commit `0c61206`. Android source declares **0.4.3 (14)**;
+this is not a claim about the currently installed device version. The recorded
+0.4.3 Galaxy Tab install and native reader/cold-warm acceptance remain pending.
+See [Android README](../../android/README.md) for build instructions and versioned evidence.
 
-Remaining native gates: actual recipient Picker compatibility (one real attachment
-flow showed empty local folders), full SAF/multi-select/restart acceptance and
-systematic media timing. Temporary saves exist in Samsung Gallery > all albums;
-the current save-progress Activity transition is intentional and remains unchanged.
-System Share quick-save, extension update management and Mobile Manga Catalog /
-bookmark changes / DB refresh remain future work in [the living backlog](../roadmap/lakomics-backlog.md).
+Implemented client scope includes independent authenticated Home/Library/Collections,
+Manga Catalog search/detail and a fullscreen single-page reader, 1x–5x pinch zoom,
+device-local reading position, bounded nearby-page prefetch, shared 1 GiB media
+cache, DocumentsProvider and integrated CloudMediaProvider. Asset videos request
+autoplay and loop. Continue/이어보기 was removed; classification/date/creator discovery remains.
 
-The older checkpoints below are retained history, not current install/deployment
-status. Current production-client scope follows [the living backlog](../roadmap/lakomics-backlog.md);
-later user decisions supersede the original consumption specification where noted.
-Do not infer authorization for another media derivative from old rollout proposals.
+The initial full-library backfill and queued-work pause/wait/restart/resume acceptance
+are recorded complete (`CLOUD-006`). Collections deployment, cover repair and device
+visual acceptance are recorded complete. Catalog v2 server/projection and Reader
+deployment evidence is recorded under `MOBILE-006`; no live deployment or device
+state was checked by this documentation refresh. Do not rerun completed backfill.
+
+Remaining work follows the [living backlog](../roadmap/lakomics-backlog.md):
+0.4.3 native reader/media timing and recipient Picker/SAF compatibility gates;
+`MOBILE-007` bookmark mutations and `MOBILE-008` refresh/updater authority;
+System Share quick-save and extension update management. Temporary image saves
+and integrated picker code already exist; remaining recipient compatibility does
+not mean these features are unimplemented.
+
+The dated checkpoints and initial product proposals below retain their original
+scope. This current summary and the living backlog supersede their older rollout
+statuses and removed Home proposals. They do not authorize another media derivative,
+production write, or rerun of completed deployment/backfill work.
 
 ## Historical browser implementation checkpoint (2026-09-03)
 
@@ -164,11 +174,13 @@ Example:
    └─ ...
 ```
 
-## Home experience
+## Home experience (initial proposal; current clarification below)
 
 Because the first priority is viewing rather than management, Mobile should have a real home screen instead of opening directly into a settings or administration view.
 
-Initial home modules should favor consumption:
+The initial proposal below is retained as design history. Continue was subsequently removed; current Home behavior follows [Mobile consumption UX](mobile-consumption-ux.md).
+
+Initial home modules proposed:
 
 - **Continue / 이어보기**: resume the last browsing/viewer context.
 - **Revisit / 다시보기**: surface previously viewed or older library items using the existing Lakomics revisit concept.

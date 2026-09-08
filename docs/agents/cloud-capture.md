@@ -1,6 +1,6 @@
 # Cloud Capture / Cloud Sync Reference
 
-> Status: current repository architecture/reference, reviewed 2026-09-05. Task status lives in `docs/roadmap/lakomics-backlog.md`; code changes do not by themselves prove deployment.
+> Status: current repository architecture/reference, source/documentation reconciliation 2026-09-09 against `0c61206`; no new live deployment verification. Task status lives in `docs/roadmap/lakomics-backlog.md`; code changes do not by themselves prove deployment.
 
 Lakomics keeps the local library authoritative. Cloud features are optional transport/replication paths; they do not make the VPS or R2 the canonical library.
 
@@ -42,7 +42,7 @@ Current server limits are 50 MiB for images and 512 MiB by default for videos (v
 The desktop Cloud Capture consumer:
 
 - requires Cloud sync to be enabled and an API base URL to be configured;
-- reads the Cloud API token from Windows Credential Manager;
+- reads the Cloud API token through the platform credential interface: Windows Credential Manager or Linux Secret Service;
 - downloads into `assets/.staging/remote-capture-<uuid>.<ext>`;
 - uses `BrowserExtension` as the ingestion source and reuses normal hashing, duplicate handling, thumbnails, and similarity review;
 - records local import state before remote ACK so a later run can retry ACK without re-downloading;
@@ -58,14 +58,14 @@ The repository implementation now includes the core `CLOUD-001` / `CLOUD-002` pa
 
 - A poll drains pending captures sequentially with a 25-attempt cap and per-capture failure isolation.
 - Capture pending payloads carry `classification_id`; the desktop applies it only when that classification exists locally, otherwise the import safely remains unclassified.
-- Settings exposes Cloud enablement, API base URL, Credential Manager-backed API token management, connection testing, and a manual sync action.
+- Settings exposes Cloud enablement, API base URL, platform secure-store-backed API token management, connection testing, and a manual sync action.
 - The frontend consumes typed inbound summaries: new assets refresh the current asset/sidebar state, classification-changing exact duplicates refresh membership counts, review-pending work refreshes the review count, and newly added videos trigger normal video preparation.
 - ACK-only retries and unchanged exact duplicates do not force an unnecessary asset reload.
 - Outbound replication remains independent in `cloud_sync_queue`.
 
 The backlog records the `CLOUD-001` / `CLOUD-002` rollout and `VERIFY-001` real-image/video verification as completed. These are retained results, not pending rollout tasks.
 
-Current follow-ups are `CLOUD-UI-001` durable last-attempt/success/error/problem visibility and `CLOUD-006`'s queued-work pause/wait/restart/resume acceptance gate. The full-library backfill itself is complete and must not be rerun by default. `CLOUD-003` is obsolete/incident-only unless a real reproducible failure warrants reopening it.
+`CLOUD-UI-001` remains `VERIFY` for its recorded acceptance limits. `CLOUD-006`, including queued-work pause/wait/restart/resume acceptance, is recorded `DONE` in the living backlog. The full-library backfill itself is complete and must not be rerun by default. `CLOUD-003` is obsolete/incident-only unless a real reproducible failure warrants reopening it.
 
 ## Batch-drain semantics
 
@@ -120,10 +120,12 @@ Android/Titanium에서 Cloud Capture에 접근할 때는 Tailscale Serve HTTPS �
 
 ## Current implementation order
 
-Use the living backlog's active item statuses and dependencies rather than a second execution sequence here. Preserve the remaining CLOUD-006 pause gate, then follow its relationship to CLOUD-UI-001. Do not repeat the completed inbound rollout, E2E verification, or full backfill merely because an older procedure mentions them. Production writes and deployments require separate explicit authorization.
+Use the living backlog's active item statuses and dependencies rather than a second execution sequence here. CLOUD-006's pause/wait/restart/resume gate is recorded complete; follow the remaining CLOUD-UI-001 verification scope in the backlog. Do not repeat the completed inbound rollout, E2E verification, or full backfill merely because an older procedure mentions them. Production writes and deployments require separate explicit authorization.
 
 
-## Settings reorganization (2026-09-06 working change)
+## Historical Settings reorganization checkpoint (2026-09-06)
+
+The following describes that implementation session, including its migration incident. It is not a current migration instruction or an assertion that the current library remains at v37; current schemas and the backlog govern follow-up work.
 
 - Settings navigation occupies the existing contextual sidebar. General, Cloud, Catalog, Connections, Data management, and About own their respective controls.
 - v38 preserves the old cloud enablement for inbound capture, independently controls outbound replication, and maps an old paused choice to outbound disabled. Restart no longer silently introduces pause. Existing internal control values remain compatible, but normal UI has no Pause/Resume actions.

@@ -17,7 +17,7 @@
 | ADR | Status | Note |
 | --- | --- | --- |
 | [0001 Managed asset ingestion](0001-managed-asset-ingestion.md) | Accepted | Media Vault가 자산 파일 생명주기를 소유하는 기본 원칙 |
-| [0002 Windows first](0002-windows-first.md) | Accepted | 현재 데스크톱 제품 기준 |
+| [0002 Windows first](0002-windows-first.md) | **Partly superseded by current platform policy** | Windows 전용 최초 범위는 역사; 현재 AGENTS.md와 Linux 운영 reference에 따라 Windows/Linux 지원 및 라이브러리 이식성 유지 |
 | [0003 Local first](0003-local-first.md) | Accepted, clarified by ADR-0033 | 로컬 라이브러리와 오프라인 사용 우선 |
 | [0004 Tags and collections over folders](0004-tags-and-collections-over-folders.md) | **Superseded** | ADR-0013이 현재 Classification 모델을 정의함 |
 | [0005 Typed hierarchical tags](0005-typed-hierarchical-tags.md) | **Superseded** | hierarchy 취지는 유지되지만 다중 직접 membership은 ADR-0013으로 대체 |
@@ -33,7 +33,7 @@
 | [0014 기존 Lakomics 데이터는 한 번 가져오고 형식 호환은 유지하지 않는다](0014-one-time-legacy-lakomics-import.md) | Accepted | 복사 기반 이전과 원본 보존; 기존 rollout을 재실행하는 지시가 아님 |
 | [0015 이미지 5만 개와 영상 5천 개를 성능 목표로 삼는다](0015-fifty-thousand-images-five-thousand-videos.md) | Accepted, partly superseded | 규모 목표 유지; 영상 원본 접근 제한은 ADR-0025로 대체 |
 | [0016 첫 버전은 영상을 관리하되 직접 재생하지 않는다](0016-manage-video-before-building-a-player.md) | Superseded by ADR-0025 | 외부 플레이어만 사용하던 초기 범위 |
-| [0017 데스크톱 앱은 Tauri와 작은 Rust 핵심부로 만든다](0017-tauri-desktop-with-a-small-rust-core.md) | Accepted | Tauri/WebView2 + React/TypeScript + Rust 경계 |
+| [0017 데스크톱 앱은 Tauri와 작은 Rust 핵심부로 만든다](0017-tauri-desktop-with-a-small-rust-core.md) | Accepted | Tauri + React/TypeScript + Rust 경계; Windows WebView2, Linux WebKitGTK |
 | [0018 라이브러리는 SQLite와 일반 미디어 폴더로 구성한다](0018-self-contained-library-folder.md) | Accepted | SQLite와 미디어/백업 폴더 소유 경계 |
 | [0019 자산 파일은 내용 해시로 이름을 정한다](0019-content-addressed-asset-files.md) | Accepted | 내용 해시 기반 저장과 사용자 파일명 메타데이터 분리 |
 | [0020 확장 프로그램은 인증된 로컬 HTTP로 앱과 연결한다](0020-authenticated-loopback-extension-interface.md) | Accepted for direct PC transport | 선택적 Cloud 경로는 ADR-0033과 현재 X Collector reference를 함께 확인 |

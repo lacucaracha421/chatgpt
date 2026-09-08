@@ -1,6 +1,16 @@
 # Lakomics Android client
 
-Current build: **0.4.3 (14)**. The 0.4.3 checkpoint below supersedes the 0.4.2 reader presentation while retaining its server/performance/cache architecture. The unified Picker/cache/Home sections remain current.
+Current source version: **0.4.3 (14)**, declared in [AndroidManifest.xml](AndroidManifest.xml). Documentation reconciled on 2026-09-09 against `0c61206`. The versioned evidence below records a built/signed 0.4.3 APK; the [living backlog](../docs/roadmap/lakomics-backlog.md#mobile-006--shared-manga-catalog-browsing) still leaves its Galaxy Tab installation and native reader/cold-warm acceptance pending. This refresh did not inspect the installed device or production services.
+
+## Current functionality and remaining gates
+
+- Independent authenticated Home, Library and read-only Collections; Continue was removed in favor of Recent and classification/date/creator discovery.
+- Shared Manga Catalog search, detail, editions and bookmark filtering. The reader shows one page at a time with hidden-by-default overlay controls, horizontal navigation, 1x–5x zoom and bounded pan, device-local position, nearby-page prefetch and one expired-manifest refresh.
+- Shared 1 GiB native media cache and cache-clear controls; Asset videos request autoplay and looping while preserving a paused retry state.
+- Read-only DocumentsProvider and integrated CloudMediaProvider, plus device-only temporary image saves. Provider implementation does not guarantee every receiving app's picker compatibility.
+- Remaining gates include the recorded 0.4.3 device install/reader checks, recipient Picker/SAF multi-select/restart compatibility and real media timing. Catalog bookmark mutations, server refresh authority, System Share quick-save and extension update management remain separate backlog work.
+
+Collections and Catalog deployment evidence is recorded in the version history and backlog. An APK build alone does not publish their data or establish device acceptance.
 
 This independent APK bundles the React client from `app/mobile-client`. It requires no desktop/browser extension runtime. The old `_tools/lakomics-cloudmedia-poc` and its installed Android Photo Picker configuration are separate and unchanged. Package: `com.lakomics.mobile`; document authority: `com.lakomics.mobile.documents`.
 
@@ -24,11 +34,18 @@ No device installation, provider selection, or production service/data changes a
 1. Install `build/lakomics-mobile-debug.apk` on the intended Android device when authorized. This package coexists with the prior CloudMediaProvider PoC; it does not replace that package or change Android Photo Picker settings.
 2. Open Lakomics → 라이브러리 연결. Enter the same Cloud API origin and device token configured for your library. Enable the private HTTP option only if using an HTTP Tailscale/internal numeric IP. Tailscale must be connected when that route requires it. Connection is checked before it replaces a previously working configuration.
 3. Home shows canonical Recent, with separate Revisit and 처리 대기 access. Library opens the actual classification hierarchy. Original viewing uses existing cloud media tickets; the PC need not be running to read already replicated media. Pending Captures remain outside the canonical library.
-4. In a compatible app's **file/document picker**, choose Lakomics from the locations drawer. Browse All assets or classifications, then select one or multiple files as permitted by the receiving app. A Photo Picker-only attachment flow continues to use the separate PoC integration.
+4. In a compatible app's **file/document picker**, choose Lakomics from the locations drawer. Browse All assets or classifications, then select one or multiple files as permitted by the receiving app. For Android Photo Picker, the APK includes its own CloudMediaProvider. Availability depends on OS eligibility, provider selection and the recipient; use the integrated Picker guidance below. The separate PoC is a historical experiment, not a required browsing dependency.
 
 For browser layout review, run `npm --prefix app run mobile:dev`, then open `http://127.0.0.1:1448/?demo`. The labelled sample illustrations are development fixtures, excluded from production APK output. Without `?demo`, a browser shows the connection welcome screen; authenticated browsing belongs to the Android bridge, not browser token storage. `npm --prefix app run mobile:test` runs the focused client checks. The existing `mobile/` site and `extension/` source remain unchanged.
 
-## Preview scope and remaining acceptance
+## Historical implementation and acceptance checkpoints
+
+The following dated/versioned sections preserve results and limitations at the time
+of each rollout. Their earlier “not added”, “not installed”, “pending deployment”
+and “current APK” statements do not override the current summary above or the living
+backlog. Keep recorded hashes and test counts tied to their original artifacts.
+
+### Initial preview scope and remaining acceptance (historical)
 
 2026-09-07 startup fix, version 0.1.1 (2): Windows aapt2 `-A` packaged nested asset entries with backslashes, so Android could load index.html but not its JS/CSS. Build now inserts assets using forward-slash ZIP names and runs `tests/VerifyApkAssets.ps1` before signing. The checker fails on the original APK and passes all 12 bundled files on the fixed APK. The existing Galaxy Tab installation was updated in place via ADB; native UI hierarchy confirmed the connection settings screen is rendered. This supersedes the earlier no-install status only for installation/startup; authenticated media and SAF acceptance are still separate.
 

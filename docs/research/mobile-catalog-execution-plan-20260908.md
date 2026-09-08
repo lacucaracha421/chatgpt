@@ -1,6 +1,12 @@
-# MOBILE-006 모바일 만화 카탈로그 실행 제안
+# MOBILE-006 모바일 만화 카탈로그 실행 제안 — 역사 기록
 
-작성일: 2026-09-08. 현재 체크아웃 소스에 대한 read-only 조사로 작성했습니다. 이 문서는 `docs/roadmap/lakomics-backlog.md:849`의 MOBILE-006을 구체화하는 실행 제안이며, 별도 백로그나 구현 완료 기록이 아닙니다. 기존 캐릭터 v44 WIP 및 실행 중인 dev 상태를 변경하지 않았고 테스트·빌드·앱 재시작·Git 쓰기·배포·운영 자료 쓰기를 수행하지 않았습니다.
+> 상태 정리 (2026-09-09, 소스 `0c61206`): 아래는 2026-09-08 계획과 당시 통합 검증 기록이다.
+> 이후 카탈로그 v2 서버/Reader 배포와 Android 0.4.3 리더 구현이 진행되었다.
+> 현재 범위와 남은 APK 설치·네이티브 검증은 [MOBILE-006](../roadmap/lakomics-backlog.md#mobile-006--shared-manga-catalog-browsing) 및 [Android README](../../android/README.md)를 따른다.
+> 아래의 미구현·미배포·Reader 후속 작업 표현과 체크박스는 해당 시점의 상태이며 현재 실행 지시가 아니다.
+> 이 문서 갱신은 운영 상태를 새로 검증하거나 기존 배포·publication 재실행을 승인하지 않는다.
+
+작성일: 2026-09-08. 현재 체크아웃 소스에 대한 read-only 조사로 작성했습니다. 이 문서는 [MOBILE-006](../roadmap/lakomics-backlog.md#mobile-006--shared-manga-catalog-browsing)을 구체화하는 실행 제안이며, 별도 백로그나 구현 완료 기록이 아닙니다. 기존 캐릭터 v44 WIP 및 실행 중인 dev 상태를 변경하지 않았고 테스트·빌드·앱 재시작·Git 쓰기·배포·운영 자료 쓰기를 수행하지 않았습니다.
 
 **목표:** PC가 꺼져 있어도 현재 PC 카탈로그의 그룹 목록, 검색, 상세, 판본 목록, 북마크 필터를 Android에서 읽습니다. 사용자 자료의 권위는 PC에 남습니다.
 

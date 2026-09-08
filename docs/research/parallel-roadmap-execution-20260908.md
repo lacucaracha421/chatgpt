@@ -1,6 +1,11 @@
 # Three-lane roadmap execution — 2026-09-08
 
-Status: implementation authorized by the user after the three plans are reviewed.
+Status: historical execution coordination record. The authorization and source state
+below belong to the original 2026-09-08 task, not a new instruction to execute it.
+As of the 2026-09-09 documentation reconciliation (`0c61206`), later Catalog Reader
+and deployment work supersedes this record's original Reader exclusion and rollout
+status. Consult the [living backlog](../roadmap/lakomics-backlog.md) and
+[Android README](../../android/README.md) for current scope and acceptance.
 This document coordinates execution; `docs/roadmap/lakomics-backlog.md` remains the
 product backlog. No plan checkbox alone establishes implemented behavior.
 
