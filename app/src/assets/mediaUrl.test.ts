@@ -50,3 +50,17 @@ describe("media URLs", () => {
     );
   });
 });
+
+it("uses the native Linux scheme without double-encoding IDs", async () => {
+  const { mockConvertFileSrc, clearMocks } = await import("@tauri-apps/api/mocks");
+  Object.defineProperty(window, "isTauri", { configurable: true, value: true });
+  try {
+    mockConvertFileSrc("linux");
+    expect(assetUrl("a/b")).toBe("lakomics://localhost/asset/a%2Fb");
+    mockConvertFileSrc("windows");
+    expect(assetUrl("a/b")).toBe("http://lakomics.localhost/asset/a%2Fb");
+  } finally {
+    clearMocks();
+    Reflect.deleteProperty(window, "isTauri");
+  }
+});

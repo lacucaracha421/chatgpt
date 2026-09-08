@@ -177,9 +177,9 @@ impl VideoTool for ProcessVideoTool {
                 "-vf".into(),
                 "scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,fps=30".into(),
                 "-c:v".into(),
-                "h264_mf".into(),
+                if cfg!(windows) { "h264_mf" } else { "libx264" }.into(),
                 "-pix_fmt".into(),
-                "nv12".into(),
+                if cfg!(windows) { "nv12" } else { "yuv420p" }.into(),
                 "-c:a".into(),
                 "aac".into(),
                 "-movflags".into(),
@@ -496,6 +496,7 @@ fn safe_asset_id(asset_id: &str) -> bool {
             .all(|character| character.is_ascii_alphanumeric() || character == '-')
 }
 
+#[cfg(windows)]
 fn run_tool<const N: usize>(name: &str, arguments: [OsString; N]) -> Result<Vec<u8>, LibraryError> {
     let executable = tool_path(name).ok_or(LibraryError::VideoToolUnavailable)?;
     let mut command = Command::new(executable);
@@ -515,6 +516,16 @@ fn run_tool<const N: usize>(name: &str, arguments: [OsString; N]) -> Result<Vec<
     }
 }
 
+#[cfg(target_os = "linux")]
+fn run_tool<const N: usize>(name: &str, arguments: [OsString; N]) -> Result<Vec<u8>, LibraryError> {
+    run_similarity_tool(name, &arguments, &std::sync::atomic::AtomicBool::new(false),
+        std::time::Instant::now() + std::time::Duration::from_secs(30 * 60), None)
+        .map_err(|error| if error == "tool_unavailable" {
+            LibraryError::VideoToolUnavailable
+        } else { LibraryError::VideoPreparationFailed })
+}
+
+#[cfg(windows)]
 fn tool_path(name: &str) -> Option<PathBuf> {
     let executable_name = format!("{name}.exe");
     let current_executable = std::env::current_exe().ok();
@@ -534,6 +545,16 @@ fn tool_path(name: &str) -> Option<PathBuf> {
         .into_iter()
         .flatten()
         .find(|path| path.is_file())
+}
+
+#[cfg(target_os = "linux")]
+fn tool_path(name: &str) -> Option<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    if !matches!(name, "ffmpeg" | "ffprobe") { return None; }
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .filter(|directory| directory.is_absolute())
+        .map(|directory| directory.join(name))
+        .find(|path| path.metadata().is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0))
 }
 
 /// Fingerprint jobs share the installed tools, but never create playback derivatives.
@@ -1322,4 +1343,24 @@ mod tests {
             )
             .unwrap();
     }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+#[test]
+#[ignore = "requires installed system FFmpeg with libx264 and libwebp"]
+fn linux_system_video_tools_create_and_probe_proxy() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("source.mp4");
+    run_tool("ffmpeg", ["-v".into(), "error".into(), "-f".into(), "lavfi".into(),
+        "-i".into(), "color=c=blue:s=64x64:d=1".into(), "-c:v".into(), "libx264".into(),
+        source.as_os_str().to_owned()]).unwrap();
+    let proxy = temp.path().join("proxy.mp4");
+    ProcessVideoTool.create_proxy(&source, &proxy).unwrap();
+    let probe = ProcessVideoTool.probe(&proxy, "mp4").unwrap();
+    assert_eq!(probe.video_codec, "h264");
+    assert_eq!((probe.width, probe.height), (64, 64));
+    assert!(probe.duration_ms > 0);
+    let poster = temp.path().join("poster.webp");
+    ProcessVideoTool.create_poster(&proxy, 0, &poster).unwrap();
+    assert!(poster.metadata().unwrap().len() > 0);
 }

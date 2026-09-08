@@ -1,0 +1,13 @@
+{
+  "bundle": {
+    "externalBin": [
+      "binaries/ffmpeg",
+      "binaries/ffprobe"
+    ],
+    "resources": {
+      "binaries/*.dll": ".",
+      "binaries/ffmpeg-license/*": "ffmpeg-license/",
+      "binaries/THIRD-PARTY-NOTICES.md": "ffmpeg-license/THIRD-PARTY-NOTICES.md"
+    }
+  }
+}

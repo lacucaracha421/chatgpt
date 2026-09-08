@@ -13,8 +13,8 @@ pub use cloud::thumbnail_refresh::{
 mod catalog_source_tests;
 mod media_protocol;
 
-#[cfg(not(windows))]
-compile_error!("Lakomics is supported only on Windows");
+#[cfg(not(any(windows, target_os = "linux")))]
+compile_error!("Lakomics desktop supports Windows and Linux only");
 
 use tauri::Manager;
 

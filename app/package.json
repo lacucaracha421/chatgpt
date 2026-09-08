@@ -15,7 +15,7 @@
     "mobile:dev": "vite --config vite.mobile.config.ts",
     "mobile:build": "tsc -p tsconfig.mobile.json --noEmit && vite build --config vite.mobile.config.ts",
     "mobile:test": "vitest run --config vitest.mobile.config.ts",
-    "tauri": "call \"%npm_node_execpath%\" scripts/run-tauri.mjs",
+    "tauri": "node scripts/run-tauri.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "npm run test && npm run build"
