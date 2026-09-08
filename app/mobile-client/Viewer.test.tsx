@@ -15,6 +15,11 @@ describe('progressive viewer',()=>{
     const signal=mocks.ticket.mock.calls[0][2] as AbortSignal;expect(signal.aborted).toBe(false);
     unmount();expect(signal.aborted).toBe(true);
   });
+  it('autoplays and loops videos by default',async()=>{
+    render(<Viewer items={[{id:'v',kind:'video'}]} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+    await waitFor(()=>expect(document.querySelector('video')?.getAttribute('src')??'').toContain('original-v'));
+    const player=document.querySelector('video')!;expect(player.autoplay).toBe(true);expect(player.loop).toBe(true);expect(player.preload).toBe('auto');
+  });
   it('renews a failed video and restores its playback position',async()=>{
     render(<Viewer items={[{id:'v',kind:'video'}]} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
     await waitFor(()=>expect(document.querySelector('video')?.getAttribute('src')).toContain('original-v'));

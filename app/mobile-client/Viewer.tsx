@@ -98,7 +98,7 @@ export function Viewer({items, index, onIndex, onClose}: {items: Asset[]; index:
         if (g.points.size === 0 && !g.pinched && transform.scale === 1 && Math.abs(dx) > 56 && Math.abs(dx) > Math.abs(dy) * 1.2) change(index + (dx < 0 ? 1 : -1));
         else if (g.points.size === 0 && !g.moved && !g.pinched) setChrome(value => !value);
       }} onPointerCancel={() => gesture.current.points.clear()}>
-        {asset.kind === 'video' ? <video ref={video} key={`${asset.id}:${retry}`} src={original} poster={asset.preview} controls playsInline preload="metadata" onWaiting={waiting} onStalled={waiting} onPlaying={playing} onCanPlay={playing} onLoadedMetadata={event => {
+        {asset.kind === 'video' ? <video ref={video} key={`${asset.id}:${retry}`} src={original} poster={asset.preview} controls autoPlay={videoResume.current.id!==asset.id||videoResume.current.playing} loop playsInline preload="auto" onWaiting={waiting} onStalled={waiting} onPlaying={playing} onCanPlay={playing} onLoadedMetadata={event => {
           const saved=videoResume.current;if(saved.id!==asset.id)return;
           event.currentTarget.currentTime=Math.min(saved.time,Number.isFinite(event.currentTarget.duration)?event.currentTarget.duration:saved.time);
           if(saved.playing)void event.currentTarget.play().catch(() => {});
