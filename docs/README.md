@@ -23,6 +23,7 @@ This directory contains current Lakomics references plus a small number of inten
 - `agents/mobile-consumption-ux.md` — approved Mobile Home/Library/viewer behavior.
 - `edge-extension.md` — current bundled X Collector routing and Cloud Library behavior; `../extension/AGENTS.md` owns extension source rules.
 - `agents/catalog-troubleshooting.md` — catalog transport/checkpoint behavior and rollout safeguards.
+- `operations/linux-desktop.md` — Linux desktop setup, filesystem guarantees, system media tools, and platform limitations.
 - `operations/pc-migration.md` — backup, recovery, credential portability, and PC migration.
 - `research/reference-projects.md` — optional external-project research, not adopted implementation.
 - `performance/online-catalog-query-regression-20260905.md` — measured Online Catalog query-plan/performance record.
