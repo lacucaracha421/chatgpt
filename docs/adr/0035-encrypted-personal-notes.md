@@ -29,3 +29,12 @@ Clarifies: ADR-0033, Notes domain only. Asset replication authority is unchanged
 구현과 격리 fixture 검증은 운영 적용과 구분한다. 운영 적용 전 현재 서버 SQLite의 일관된 백업/복원 경로를 확인하고 백업을 확보해야 한다. API 배포에는 `app.py`와 `notes.py`가 함께 필요하다. 서버 startup은 Notes 테이블만 추가하며 PC는 기존 사전 마이그레이션 백업 절차 후 스키마 43을 적용한다. 실제 라이브러리 마이그레이션과 서버 배포는 각각 사용자의 명시적 승인이 필요하다.
 
 Windows 자격 증명 저장·재실행, 네이티브 파일 대화상자, 종료 중 저장, 실제 서버 왕복은 네이티브/운영 수용 단계에서 확인한다. 코드·브라우저 fixture 통과를 이 단계의 완료로 간주하지 않는다.
+
+
+## Linux credential backend clarification (2026-09-08)
+
+Linux에서는 동일한 Notes 키를 GNOME Keyring 등 Secret Service의 기본 영구
+저장소에 보관한다. Windows Credential Manager 구현과 Notes 암호문/복구키
+형식은 그대로 유지한다. OS를 이동할 때는 원래 복구키를 다시 등록하며 키를
+라이브러리 파일이나 평문 설정으로 옮기지 않는다. 키링이 없거나 잠겼으면
+명시적인 오류로 종료하고, 백그라운드 조회는 키링 잠금 해제를 시도하지 않는다.

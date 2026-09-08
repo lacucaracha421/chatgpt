@@ -516,9 +516,9 @@ impl Library {
 mod tests {
     use super::*;
     #[test]
-    #[cfg(windows)]
-    #[ignore = "Opt-in Windows Credential Store integration; isolated temporary library"]
-    fn windows_key_survives_library_reopen_and_rejects_replacement() {
+    #[cfg(any(windows, target_os = "linux"))]
+    #[ignore = "Opt-in native credential store integration; isolated temporary library"]
+    fn native_key_survives_library_reopen_and_rejects_replacement() {
         let temp = tempfile::tempdir().unwrap();
         let lib = Library::open(temp.path()).unwrap();
         struct Cleanup(String);

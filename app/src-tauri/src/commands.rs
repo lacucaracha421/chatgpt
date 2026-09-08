@@ -275,6 +275,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::AladinCredentialNotConfigured => "aladin_credential_not_configured",
             LibraryError::InvalidAladinCredentialValue => "invalid_aladin_credential_value",
             LibraryError::CredentialStoreUnavailable => "credential_store_unavailable",
+            LibraryError::CredentialStoreLocked => "credential_store_locked",
             LibraryError::CredentialStoreFailed => "credential_store_failed",
             LibraryError::InvalidIgdbCredential => "invalid_igdb_credential",
             LibraryError::IgdbCredentialNotConfigured => "igdb_credential_not_configured",
@@ -2694,6 +2695,7 @@ mod tests {
                 LibraryError::CredentialStoreUnavailable,
                 "credential_store_unavailable",
             ),
+            (LibraryError::CredentialStoreLocked, "credential_store_locked"),
         ];
         for (error, expected) in cases {
             assert_eq!(CommandError::from(error).code, expected);

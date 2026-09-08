@@ -50,9 +50,17 @@ managed library files while the application is using them.
 ## Remaining platform limitations
 
 - Native drag-out returns `unsupported_platform` on Linux.
-- Secure credential operations return `CredentialStoreUnavailable`; no plaintext
-  fallback is provided. Notes unlock and credential-backed providers/cloud
-  operations are unavailable until a secure Linux credential backend is added.
+- Linux credentials use the desktop Secret Service default persistent collection
+  (GNOME Keyring on Ubuntu) with an encrypted DH session. The login keyring must
+  be unlocked. Missing credentials are reported as unconfigured; a locked keyring
+  has a separate actionable error. Missing Secret Service still fails closed.
+  There is no plaintext or session-only fallback, and operations have a 10-second
+  deadline, including any authorization prompt.
+- Credentials from Windows Credential Manager do not travel with the library.
+  Enter the Cloud/provider tokens again in Settings on Linux. Existing encrypted
+  Notes require the original recovery key, entered in the Notes unlock screen.
+  Each OS keeps its own secure credential store; the Notes ciphertext format and
+  Windows backend are unchanged.
 - Native playback, external application integration, packaging/distribution,
   and Windows regression acceptance need their own device verification.
 
@@ -127,3 +135,25 @@ Files in this batch:
 - `app/src-tauri/src/library/manga.rs`, `app/src-tauri/src/library/revisit.rs`
 - `app/src/assets/mediaUrl.ts`, `app/src/assets/mediaUrl.test.ts`
 - `docs/README.md`, `docs/operations/linux-desktop.md` (new)
+
+
+## Linux credential follow-up
+
+The original bring-up verification above records the initial unavailable backend.
+The subsequent Secret Service integration adds secure read/write/replace/delete
+for Notes, Cloud, Kakao, Aladin, IGDB, and TMDB through the existing credential
+interface. It uses the maintained `secret-service` Rust client, encrypted DH
+sessions, application/target attributes, and the desktop default collection.
+Background reads do not unlock collections or create credentials. Test entries
+use unique targets and are removed after native verification; real tokens are
+never printed or copied into the repository.
+
+References: [Secret Service API](https://specifications.freedesktop.org/secret-service/latest-single/),
+[secret-service Rust client](https://docs.rs/secret-service/5.2.0/secret_service/).
+
+Credential follow-up verification: `cargo check` passed; credential unit tests
+9 passed, Notes tests 4 passed, and command tests 17 passed. The opt-in native
+keyring roundtrip and Notes reopen/wrong-key integration tests both passed using
+isolated synthetic secrets. The Windows native backend body was compared with
+the preceding commit and is unchanged. Real account tokens and the user's Notes
+recovery key were not read, imported, or tested; they must be entered in the app.

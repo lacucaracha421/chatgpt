@@ -2,30 +2,41 @@ use super::error::LibraryError;
 use super::models::{IgdbCredentialStatus, IgdbCredentials, TmdbCredentialStatus, TmdbCredentials};
 use serde_json;
 
+#[cfg(windows)]
+use windows::WindowsCredentialBackend as OsCredentialBackend;
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "linux")]
+use linux::LinuxCredentialBackend as OsCredentialBackend;
+
 const KAKAO_TARGET: &str = "Lakomics/KakaoBooks";
 const ALADIN_TARGET: &str = "Lakomics/AladinTTB";
 const CLOUD_API_TARGET: &str = "Lakomics/CloudApi";
 const IGDB_TARGET: &str = "Lakomics/Igdb";
 const TMDB_TARGET: &str = "Lakomics/Tmdb";
 
-#[cfg(target_os = "windows")]
+#[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn notes_key(target: &str) -> Result<Option<Vec<u8>>, LibraryError> {
-    windows::WindowsCredentialBackend.read(target).map_err(map_backend_error)
+    OsCredentialBackend.read(target).map_err(map_backend_error)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn set_notes_key(target: &str, value: &[u8]) -> Result<(), LibraryError> {
-    windows::WindowsCredentialBackend.write(target, value).map_err(map_backend_error)
+    OsCredentialBackend.write(target, value).map_err(map_backend_error)
 }
 
-#[cfg(all(test, target_os = "windows"))]
+#[cfg(all(test, any(windows, target_os = "linux")))]
 pub(crate) fn delete_notes_test_key(target: &str) {
-    windows::WindowsCredentialBackend.delete(target).expect("remove isolated Notes test key");
+    OsCredentialBackend.delete(target).expect("remove isolated Notes test key");
 }
 
 #[derive(Debug)]
 enum CredentialError {
     System(u32),
+    #[cfg(target_os = "linux")]
+    Unavailable,
+    #[cfg(target_os = "linux")]
+    Locked,
 }
 
 trait CredentialBackend {
@@ -83,8 +94,13 @@ impl<'a, B: CredentialBackend> CredentialService<'a, B> {
 }
 
 fn map_backend_error(error: CredentialError) -> LibraryError {
-    let CredentialError::System(_code) = error;
-    LibraryError::CredentialStoreFailed
+    match error {
+        CredentialError::System(_code) => LibraryError::CredentialStoreFailed,
+        #[cfg(target_os = "linux")]
+        CredentialError::Unavailable => LibraryError::CredentialStoreUnavailable,
+        #[cfg(target_os = "linux")]
+        CredentialError::Locked => LibraryError::CredentialStoreLocked,
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -167,137 +183,137 @@ mod windows {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn aladin_key_status() -> Result<bool, LibraryError> {
-    CredentialService::new(&windows::WindowsCredentialBackend, ALADIN_TARGET).configured()
+    CredentialService::new(&OsCredentialBackend, ALADIN_TARGET).configured()
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn set_aladin_key(value: &str) -> Result<(), LibraryError> {
-    CredentialService::new(&windows::WindowsCredentialBackend, ALADIN_TARGET).set(value)
+    CredentialService::new(&OsCredentialBackend, ALADIN_TARGET).set(value)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn delete_aladin_key() -> Result<(), LibraryError> {
-    CredentialService::new(&windows::WindowsCredentialBackend, ALADIN_TARGET).delete()
+    CredentialService::new(&OsCredentialBackend, ALADIN_TARGET).delete()
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn read_aladin_key() -> Result<String, LibraryError> {
-    CredentialService::new(&windows::WindowsCredentialBackend, ALADIN_TARGET).read()
+    CredentialService::new(&OsCredentialBackend, ALADIN_TARGET).read()
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn cloud_api_token_status() -> Result<bool, LibraryError> {
-    cloud_api_token_status_with(&windows::WindowsCredentialBackend)
+    cloud_api_token_status_with(&OsCredentialBackend)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn set_cloud_api_token_os(token: &str) -> Result<(), LibraryError> {
-    set_cloud_api_token(&windows::WindowsCredentialBackend, token)
+    set_cloud_api_token(&OsCredentialBackend, token)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn delete_cloud_api_token_os() -> Result<(), LibraryError> {
-    windows::WindowsCredentialBackend
+    OsCredentialBackend
         .delete(CLOUD_API_TARGET)
         .map_err(map_backend_error)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn read_cloud_api_token_os() -> Result<String, LibraryError> {
-    read_cloud_api_token(&windows::WindowsCredentialBackend)
+    read_cloud_api_token(&OsCredentialBackend)
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn aladin_key_status() -> Result<bool, LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn set_aladin_key(_value: &str) -> Result<(), LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn delete_aladin_key() -> Result<(), LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn read_aladin_key() -> Result<String, LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn cloud_api_token_status() -> Result<bool, LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn set_cloud_api_token_os(_token: &str) -> Result<(), LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn delete_cloud_api_token_os() -> Result<(), LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn read_cloud_api_token_os() -> Result<String, LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn igdb_credential_status() -> Result<IgdbCredentialStatus, LibraryError> {
-    igdb_credentials_status(&windows::WindowsCredentialBackend)
+    igdb_credentials_status(&OsCredentialBackend)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn set_igdb_credentials_os(
     client_id: &str,
     client_secret: &str,
 ) -> Result<IgdbCredentialStatus, LibraryError> {
-    set_igdb_credentials(&windows::WindowsCredentialBackend, client_id, client_secret)
+    set_igdb_credentials(&OsCredentialBackend, client_id, client_secret)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn delete_igdb_credentials_os() -> Result<IgdbCredentialStatus, LibraryError> {
-    delete_igdb_credentials(&windows::WindowsCredentialBackend)
+    delete_igdb_credentials(&OsCredentialBackend)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn read_igdb_credentials_os() -> Result<IgdbCredentials, LibraryError> {
-    read_igdb_credentials(&windows::WindowsCredentialBackend)
+    read_igdb_credentials(&OsCredentialBackend)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn tmdb_credential_status() -> Result<TmdbCredentialStatus, LibraryError> {
-    tmdb_token_status(&windows::WindowsCredentialBackend)
+    tmdb_token_status(&OsCredentialBackend)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn set_tmdb_token_os(token: &str) -> Result<TmdbCredentialStatus, LibraryError> {
-    set_tmdb_token(&windows::WindowsCredentialBackend, token)
+    set_tmdb_token(&OsCredentialBackend, token)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn delete_tmdb_token_os() -> Result<TmdbCredentialStatus, LibraryError> {
-    delete_tmdb_token(&windows::WindowsCredentialBackend)
+    delete_tmdb_token(&OsCredentialBackend)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn read_tmdb_token_os() -> Result<TmdbCredentials, LibraryError> {
-    read_tmdb_token(&windows::WindowsCredentialBackend)
+    read_tmdb_token(&OsCredentialBackend)
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn igdb_credential_status() -> Result<IgdbCredentialStatus, LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn set_igdb_credentials_os(
     _client_id: &str,
     _client_secret: &str,
@@ -305,32 +321,32 @@ pub(crate) fn set_igdb_credentials_os(
     Err(LibraryError::CredentialStoreUnavailable)
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn delete_igdb_credentials_os() -> Result<IgdbCredentialStatus, LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn read_igdb_credentials_os() -> Result<IgdbCredentials, LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn tmdb_credential_status() -> Result<TmdbCredentialStatus, LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn set_tmdb_token_os(_token: &str) -> Result<TmdbCredentialStatus, LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn delete_tmdb_token_os() -> Result<TmdbCredentialStatus, LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn read_tmdb_token_os() -> Result<TmdbCredentials, LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
@@ -676,61 +692,52 @@ fn read_tmdb_token_with<B: CredentialBackend>(
     read_tmdb_token(backend)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn kakao_key_status() -> Result<bool, LibraryError> {
-    CredentialService::new(&windows::WindowsCredentialBackend, KAKAO_TARGET).configured()
+    CredentialService::new(&OsCredentialBackend, KAKAO_TARGET).configured()
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn set_kakao_key(value: &str) -> Result<(), LibraryError> {
-    CredentialService::new(&windows::WindowsCredentialBackend, KAKAO_TARGET).set(value)
+    CredentialService::new(&OsCredentialBackend, KAKAO_TARGET).set(value)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn delete_kakao_key() -> Result<(), LibraryError> {
-    CredentialService::new(&windows::WindowsCredentialBackend, KAKAO_TARGET).delete()
+    CredentialService::new(&OsCredentialBackend, KAKAO_TARGET).delete()
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn read_kakao_key() -> Result<String, LibraryError> {
-    CredentialService::new(&windows::WindowsCredentialBackend, KAKAO_TARGET).read()
+    CredentialService::new(&OsCredentialBackend, KAKAO_TARGET).read()
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn kakao_key_status() -> Result<bool, LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn set_kakao_key(_value: &str) -> Result<(), LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn delete_kakao_key() -> Result<(), LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn read_kakao_key() -> Result<String, LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn notes_key(_target: &str) -> Result<Option<Vec<u8>>, LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn set_notes_key(_target: &str, _value: &[u8]) -> Result<(), LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
-}
-
-#[cfg(all(test, target_os = "linux"))]
-#[test]
-fn linux_secure_credentials_fail_closed() {
-    assert!(matches!(notes_key("test-only"), Err(LibraryError::CredentialStoreUnavailable)));
-    assert!(matches!(set_notes_key("test-only", b"not-a-real-key"), Err(LibraryError::CredentialStoreUnavailable)));
-    assert!(matches!(cloud_api_token_status(), Err(LibraryError::CredentialStoreUnavailable)));
-    assert!(matches!(set_cloud_api_token_os("test-only"), Err(LibraryError::CredentialStoreUnavailable)));
 }

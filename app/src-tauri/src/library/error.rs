@@ -324,6 +324,8 @@ pub enum LibraryError {
     InvalidAladinCredentialValue,
     #[error("이 운영체제에서는 보안 자격 증명 저장소를 사용할 수 없습니다")]
     CredentialStoreUnavailable,
+    #[error("보안 자격 증명 저장소가 잠겨 있습니다. 시스템의 ‘암호 및 키’에서 로그인 키링을 잠금 해제한 뒤 다시 시도해 주세요")]
+    CredentialStoreLocked,
     #[error("보안 자격 증명 저장소 작업에 실패했습니다")]
     CredentialStoreFailed,
     #[error("IGDB Client ID 또는 Client Secret이 올바르지 않습니다")]
