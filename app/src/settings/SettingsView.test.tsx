@@ -128,7 +128,7 @@ it("uses desktop settings navigation and compact property rows", async () => {
   expect(navigation).toHaveClass("settings-view__navigation");
   expect(screen.getByRole("button", { name: "일반" })).toHaveAttribute("aria-current", "page");
   expect(screen.getByRole("heading", { name: "일반" })).toBeInTheDocument();
-  expect(container.querySelectorAll(".settings-view__property")).toHaveLength(3);
+  expect(container.querySelectorAll(".settings-view__property")).toHaveLength(4);
 
   await userEvent.click(screen.getByRole("button", { name: "데이터 관리" }));
   expect(screen.getByRole("heading", { name: "데이터 관리" })).toBeInTheDocument();
@@ -163,6 +163,18 @@ it("groups extension diagnostics and shortcuts under 정보", async () => {
   for (const group of ["브라우저 확장", "작품 정보 서비스"]) {
     expect(screen.getByRole("heading", { name: group, level: 3 })).toBeInTheDocument();
   }
+});
+
+it("changes app zoom and restores its default from general settings", async () => {
+  const onAppZoomChange = vi.fn();
+  render(<LibraryProvider gateway={createGateway()}>
+    <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} appZoom={125} onAppZoomChange={onAppZoomChange} />
+  </LibraryProvider>);
+  expect(screen.getByRole("combobox", { name: "앱 전체 배율" })).toHaveValue("125");
+  await userEvent.selectOptions(screen.getByRole("combobox", { name: "앱 전체 배율" }), "150");
+  expect(onAppZoomChange).toHaveBeenLastCalledWith(150);
+  await userEvent.click(screen.getByRole("button", { name: "100%로 복원" }));
+  expect(onAppZoomChange).toHaveBeenLastCalledWith(100);
 });
 
 it("toggles privacy mode from the general section", async () => {

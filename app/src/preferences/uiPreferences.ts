@@ -2,6 +2,11 @@ import type { AssetSort, CollectionType } from "../library/types";
 import { clampSidebarWidth } from "../layout/sidebarWidth";
 
 export const UI_PREFERENCES_KEY = "lakomics.uiPreferences.v1";
+export const APP_ZOOM_LEVELS = [80, 90, 100, 110, 125, 150] as const;
+
+export function normalizeAppZoom(value: unknown): number {
+  return typeof value === "number" && APP_ZOOM_LEVELS.some(level => level === value) ? value : 100;
+}
 
 export type MangaReadingDirection = "rtl" | "ltr";
 export type MangaPageMode = "single" | "double";
@@ -9,6 +14,7 @@ export type MangaViewerMargin = "compact" | "normal" | "wide";
 export type MangaViewerGap = "none" | "narrow" | "wide";
 
 export type UiPreferences = {
+  appZoom: number;
   galleryLayout: "masonry" | "justified";
   metadataVisible: boolean;
   privacyMode: boolean;
@@ -30,6 +36,7 @@ export type UiPreferences = {
 };
 
 export const DEFAULT_UI_PREFERENCES: UiPreferences = {
+  appZoom: 100,
   galleryLayout: "masonry",
   metadataVisible: true,
   privacyMode: false,
@@ -62,6 +69,7 @@ export function loadUiPreferences(storage: Storage = localStorage): UiPreference
   if (!isRecord(value)) return DEFAULT_UI_PREFERENCES;
 
   return {
+    appZoom: normalizeAppZoom(value.appZoom),
     ...(value.classificationCountOrderApplied === true ? { classificationCountOrderApplied: true } : {}),
     galleryLayout: value.galleryLayout === "justified" ? "justified" : "masonry",
     metadataVisible:

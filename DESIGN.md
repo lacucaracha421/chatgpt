@@ -54,7 +54,8 @@ PC의 기본 shell은 **Chrome 03b B 좌측 중심 구조**다.
 - 2026-09-06 실제 화면 확인 후 확정: 한글 UI는 SUIT, 영문·작가명은 Barlow를 사용한다. 일본어는 Yu Gothic UI/Meiryo를 유지한다.
 - 날짜·시각·사이드바 개수에는 Rajdhani Medium과 폭이 일정한 숫자를 사용한다. 작가명 안의 숫자는 Barlow로 유지한다.
 - 폰트 파일과 라이선스를 앱에 포함해 오프라인에서도 표시한다. Segoe UI/Malgun Gothic은 폴백으로 유지한다.
-- 역할 기준은 metadata 11–12px, 기본 UI 13px, 강조 label 14px, section 16px 안팎을 출발점으로 한다.
+- 2026-09-08 가독성 조정: metadata 12–13px, 기본 UI 15px, 강조 label 16px, section 18px를 기본으로 한다. Windows와 Linux에서 공통 typography token을 사용한다.
+- 설정 → 일반의 앱 전체 배율은 80·90·100·110·125·150%를 지원하며 기본값은 100%다. WebView 배율로 모든 UI와 미디어를 함께 조절하고, 이 PC의 UI 설정에 저장해 다음 실행에도 적용한다.
 - monospace는 경로·ID·timestamp 같은 실제 기술 값에만 제한한다.
 - 사용자 폴더/앨범 이름을 uppercase로 바꾸지 않는다.
 - dark neutral surface가 기본이며, accent는 선택·focus·valid drop·중요한 confirmation에만 쓴다.

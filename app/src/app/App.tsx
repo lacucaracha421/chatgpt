@@ -37,6 +37,7 @@ import {
   saveUiPreferences,
   type UiPreferences,
 } from "../preferences/uiPreferences";
+import { useAppZoom } from "../preferences/useAppZoom";
 import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { PrivacyProvider } from "../privacy/PrivacyContext";
@@ -136,6 +137,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   useCollectionOpen(gateway, libraryRoot, view.kind === "collection" ? view.collectionId : null);
   const collectionReturnViewRef = useRef<Extract<AssetView, { kind: "collections" }> | null>(null);
   const [preferences, setPreferences] = useState<UiPreferences>(loadUiPreferences);
+  const appZoomError = useAppZoom(preferences.appZoom);
   useEffect(() => {
     setPreferences((current) => applyInitialCountOrder(entries, current));
   }, [entries]);
@@ -694,6 +696,9 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     initialSection={view.section}
                     privacyMode={preferences.privacyMode}
                     onPrivacyModeChange={(privacyMode) => updatePreferences({ privacyMode })}
+                    appZoom={preferences.appZoom}
+                    onAppZoomChange={(appZoom) => updatePreferences({ appZoom })}
+                    appZoomError={appZoomError}
                   />
                 ) : view.kind === "similarity_review" ? (
                   <SimilarityReviewBrowser

@@ -18,6 +18,7 @@ import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { CloudBackfillSettings } from "./CloudBackfillSettings";
 import { CatalogVisibilitySettings } from "./CatalogVisibilitySettings";
 import { MobileCatalogPublishSettings } from "./MobileCatalogPublishSettings";
+import { APP_ZOOM_LEVELS } from "../preferences/uiPreferences";
 
 type SettingsViewProps = {
   restoring: boolean;
@@ -31,6 +32,9 @@ type SettingsViewProps = {
   initialSection?: SettingsSection;
   privacyMode?: boolean;
   onPrivacyModeChange?: (privacyMode: boolean) => void;
+  appZoom?: number;
+  onAppZoomChange?: (percent: number) => void;
+  appZoomError?: string | null;
 };
 
 type SettingsSection = "general" | "cloud" | "catalog" | "external_services" | "data" | "about";
@@ -42,7 +46,7 @@ const SECTIONS: { id: SettingsSection; label: string }[] = [
 
 const METADATA_IMPORT_FOLDER_KEY = "lakomics.metadataImportFolder";
 
-export function SettingsView({ restoring, onRestore, onExit, onImportFolder, metadataImportRunning = false, onCollectionsChanged, onCloudCaptureSynced = () => undefined, onRestoreCloudMetadata, initialSection, privacyMode = false, onPrivacyModeChange = () => undefined }: SettingsViewProps) {
+export function SettingsView({ restoring, onRestore, onExit, onImportFolder, metadataImportRunning = false, onCollectionsChanged, onCloudCaptureSynced = () => undefined, onRestoreCloudMetadata, initialSection, privacyMode = false, onPrivacyModeChange = () => undefined, appZoom = 100, onAppZoomChange = () => undefined, appZoomError = null }: SettingsViewProps) {
   const workspace = useWorkspaceChrome();
   const { error: libraryError, gateway, library, openLibrary } = useLibrary();
   const [section, setSection] = useState<SettingsSection>(() => initialSection ?? "general");
@@ -702,6 +706,15 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     {section === "general" && (
       <div className="settings-view__section">
         <header className="settings-view__header"><h2>일반</h2></header>
+        <dl className="settings-view__property">
+          <dt>화면 배율</dt>
+          <dd className="settings-view__credential-status">글자, 버튼, 이미지 등 앱 전체 크기를 조절합니다. 변경 즉시 적용되며 다음 실행에도 유지됩니다.</dd>
+          <dd><Select label="앱 전체 배율" value={appZoom} onChange={(event) => onAppZoomChange(Number(event.target.value))}>
+            {APP_ZOOM_LEVELS.map(level => <option key={level} value={level}>{level}%{level === 100 ? " (기본)" : ""}</option>)}
+          </Select></dd>
+          <dd><Button size="sm" disabled={appZoom === 100} onClick={() => onAppZoomChange(100)}>100%로 복원</Button></dd>
+          {appZoomError && <dd role="alert">{appZoomError}</dd>}
+        </dl>
         <dl className="settings-view__property">
           <dt>비공개 모드</dt>
           <dd className="settings-view__credential-status">모든 이미지와 영상을 자리표시로 가립니다. 화면 공유 중에 내용이 보이지 않습니다.</dd>

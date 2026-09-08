@@ -21,6 +21,15 @@ function storage(): Storage {
 }
 
 describe("UI preferences", () => {
+  it("persists app zoom and rejects unsupported stored values", () => {
+    const target = storage();
+    saveUiPreferences({ ...DEFAULT_UI_PREFERENCES, appZoom: 125 }, target);
+    expect(loadUiPreferences(target).appZoom).toBe(125);
+    for (const appZoom of [0, -1, 1000, "125", null]) {
+      target.setItem(UI_PREFERENCES_KEY, JSON.stringify({ appZoom }));
+      expect(loadUiPreferences(target).appZoom).toBe(100);
+    }
+  });
   it("preserves the AV collection scope across restart", () => {
     const target = storage();
     saveUiPreferences({ ...DEFAULT_UI_PREFERENCES, collectionType: "av" }, target);
@@ -37,6 +46,7 @@ describe("UI preferences", () => {
       galleryLayout: "masonry" as const,
       metadataVisible: false,
       privacyMode: false,
+      appZoom: 100,
       sidebarWidth: 240,
       expandedClassificationIds: ["a"],
       classificationOrderIds: [],
@@ -82,6 +92,7 @@ describe("UI preferences", () => {
       galleryLayout: "masonry" as const,
       metadataVisible: false,
       privacyMode: false,
+      appZoom: 100,
       sidebarWidth: 240,
       expandedClassificationIds: ["a"],
       classificationOrderIds: [],
@@ -116,6 +127,7 @@ describe("UI preferences", () => {
       galleryLayout: "masonry" as const,
       metadataVisible: false,
       privacyMode: false,
+      appZoom: 100,
       sidebarWidth: 320,
       expandedClassificationIds: ["a"],
       classificationOrderIds: [],
