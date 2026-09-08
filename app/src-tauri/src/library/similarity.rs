@@ -372,7 +372,7 @@ impl Library {
         Ok(())
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     fn remove_review_candidate_files(
         &self,
         relative_path: &str,
@@ -385,7 +385,7 @@ impl Library {
             })
     }
 
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "linux")))]
     fn remove_review_candidate_files(
         &self,
         _relative_path: &str,

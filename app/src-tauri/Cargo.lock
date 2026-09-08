@@ -2250,6 +2250,7 @@ dependencies = [
  "chrono",
  "drag",
  "image 0.25.10",
+ "libc",
  "pdqhash",
  "regex",
  "ring",

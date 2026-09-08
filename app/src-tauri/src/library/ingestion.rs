@@ -1,3 +1,5 @@
+#[cfg(target_os = "linux")]
+use super::linux_fs::{FileIdentity, rename_no_replace};
 use std::{
     fmt::Write as _,
     fs::{self, File, OpenOptions},

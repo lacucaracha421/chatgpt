@@ -1,3 +1,5 @@
+#[cfg(target_os = "linux")]
+mod linux_fs;
 pub(crate) mod aladin;
 pub(crate) mod notes;
 mod aladin_flow;

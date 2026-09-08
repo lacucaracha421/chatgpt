@@ -4,11 +4,9 @@ use std::{
     fs::OpenOptions,
     os::windows::{ffi::OsStringExt, fs::OpenOptionsExt, io::AsRawHandle},
 };
-use std::{
-    fs::{self, File},
-    io,
-    path::{Path, PathBuf},
-};
+use std::{fs, path::Path};
+#[cfg(windows)]
+use std::{fs::File, io, path::PathBuf};
 
 use chrono::{DateTime, Duration, FixedOffset, Utc};
 use rusqlite::{params, OptionalExtension};
@@ -221,7 +219,7 @@ impl Library {
         Ok(())
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     fn purge_candidates(&self, asset_ids: Vec<String>) -> Result<PurgeSummary, LibraryError> {
         let connection = self.connection()?;
         let mut deleted_count = 0;
@@ -261,12 +259,12 @@ impl Library {
         })
     }
 
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "linux")))]
     fn purge_candidates(&self, _asset_ids: Vec<String>) -> Result<PurgeSummary, LibraryError> {
         Err(LibraryError::UnsupportedManagedFileDeletion)
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     fn remove_managed_paths(&self, paths: &ManagedAssetPaths) -> Result<(), ()> {
         let canonical_root = fs::canonicalize(&self.root).map_err(|_| ())?;
         delete_managed_file(&canonical_root, &paths.original)?;
@@ -655,4 +653,13 @@ mod tests {
         assert_eq!(std::fs::read(&original).unwrap(), b"replacement");
         assert!(!moved.exists());
     }
+}
+
+#[cfg(target_os = "linux")]
+fn delete_managed_file(root: &Path, relative: &str) -> Result<(), ()> {
+    super::linux_fs::delete_managed(root, checked_relative_path(relative)?, false).map_err(|_| ())
+}
+#[cfg(target_os = "linux")]
+fn delete_managed_directory(root: &Path, relative: &str) -> Result<(), ()> {
+    super::linux_fs::delete_managed(root, checked_relative_path(relative)?, true).map_err(|_| ())
 }
