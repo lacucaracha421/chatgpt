@@ -17,6 +17,7 @@ fn seed_prediction(f: &Fixture, target: &Target, scan_id: &str) {
     let input = f.library.current_input(target, "asset-5").unwrap();
     let mut state = f.library.character_scan.lock().unwrap();
     let status = ScanStatus {
+        automatic: false,
         id: scan_id.into(),
         target_id: target.id.clone(),
         target_fingerprint: target.fingerprint.clone(),
@@ -25,6 +26,7 @@ fn seed_prediction(f: &Fixture, target: &Target, scan_id: &str) {
         total: 1,
         completed: 1,
         errors: 0,
+        reused: 0,
         cache_hits: 0,
         extractions: 1,
         error: None,
@@ -219,6 +221,7 @@ fn stale_result_queries_recheck_scope_and_actual_reference_bytes() {
     {
         let mut state = f.library.character_scan.lock().unwrap();
         state.status = Some(ScanStatus {
+        automatic: false,
             id: "scan".into(),
             target_id: target.id.clone(),
             target_fingerprint: target.fingerprint.clone(),
@@ -227,7 +230,8 @@ fn stale_result_queries_recheck_scope_and_actual_reference_bytes() {
             total: 1,
             completed: 1,
             errors: 0,
-            cache_hits: 0,
+            reused: 0,
+        cache_hits: 0,
             extractions: 0,
             error: None,
         });
@@ -409,7 +413,7 @@ fn real_native_scan_cold_warm_incremental_and_ref_replacement_parity() {
         .unwrap();
     let warm = wait(&f.library);
     assert_eq!(warm.state, "completed", "{warm:?}");
-    assert_eq!((warm.extractions, warm.cache_hits), (0, 6));
+    assert_eq!((warm.total, warm.extractions, warm.cache_hits), (0, 0, 0));
     // This corrupt asset sorts BETWEEN the two valid queries. Its decode failure
     // must not prevent the newly added valid query from producing evidence.
     let broken = f.temp.path().join("assets/broken.png");
@@ -444,9 +448,9 @@ fn real_native_scan_cold_warm_incremental_and_ref_replacement_parity() {
             incremental.extractions,
             incremental.cache_hits
         ),
-        (3, 1, 6)
+        (2, 1, 5)
     );
-    assert_eq!((incremental.completed, incremental.errors), (3, 1));
+    assert_eq!((incremental.completed, incremental.errors), (2, 1));
     let rows = f
         .library
         .character_scan_results(&incremental_id, Some("asset-5"), 10)
@@ -527,7 +531,7 @@ fn automatic_series_approval_keeps_conflicting_candidates_for_review() {
 }
 
 #[test]
-fn confirmed_images_leave_other_character_scans_and_review_until_cleared() {
+fn confirmed_images_remain_available_for_other_people_in_the_picture() {
     let f = Fixture::new();
     let a = f.ready("Towa");
     let b = f.ready("Other");
@@ -546,9 +550,9 @@ fn confirmed_images_leave_other_character_scans_and_review_until_cleared() {
         f.library.connection().unwrap().execute(
             "UPDATE character_decisions SET origin=?1 WHERE target_id=?2 AND decision='accepted'", params![origin, a.id]).unwrap();
         assert!(contains(&a));
-        assert!(!contains(&b));
+        assert!(contains(&b));
         assert!(review(&a));
-        assert!(!review(&b)); // A previous recommendation must not reappear as pending/recommended.
+        assert!(review(&b)); // Another person in the picture may belong to B.
         let mut decision = prediction_decision(&a, "unused");
         decision.scan_id = None;
         decision.baseline_fingerprint = None;
@@ -581,4 +585,119 @@ fn series_scan_and_review_exclude_parent_images_and_reject_old_predictions() {
             assert!(f.library.character_relations_for_asset("asset-5").unwrap().is_empty());
         }
     }
+}
+
+fn person_prediction(f: &Fixture, target: &Target, scan: &str, person: usize) {
+    seed_prediction(f, target, scan);
+    let mut state = f.library.character_scan.lock().unwrap();
+    let row = state.previous.get_mut(&target.id).unwrap().1.get_mut("asset-5").unwrap();
+    let evidence = row.evidence.as_mut().unwrap();
+    evidence["wholeFallback"] = json!(false);
+    evidence["bestQueryCrop"] = json!(person);
+    evidence["queryBoxes"] = json!([[0,0,40,100], [60,0,100,100]]);
+    evidence["evidence"] = json!([
+        {"matchedReferences": if person == 0 { vec![0,1,2] } else { vec![] }},
+        {"matchedReferences": if person == 1 { vec![0,1,2] } else { vec![] }}
+    ]);
+}
+
+#[test]
+fn separate_people_are_shared_but_same_person_conflicts_stay_for_review() {
+    let f = Fixture::new();
+    let a = f.ready("Towa");
+    let b = f.ready("Noel");
+    person_prediction(&f,&a,"a",0);
+    person_prediction(&f,&b,"b",0);
+    assert_eq!(f.library.apply_automatic_characters(vec!["a".into(),"b".into()]).unwrap(),0);
+    person_prediction(&f,&b,"b",1);
+    assert_eq!(f.library.apply_automatic_characters(vec!["a".into(),"b".into()]).unwrap(),2);
+    assert_eq!(f.library.character_relations_for_asset("asset-5").unwrap().len(),2);
+    assert_eq!(f.library.apply_automatic_characters(vec!["a".into(),"b".into()]).unwrap(),0);
+    assert!(f.library.get_character_target(&a.id).unwrap().learned_references.is_empty());
+}
+
+#[test]
+fn rejection_is_per_character_and_unknown_companion_does_not_block() {
+    let f = Fixture::new();
+    let a = f.ready("Towa");
+    let b = f.ready("Noel");
+    person_prediction(&f,&a,"a",0);
+    person_prediction(&f,&b,"b",0);
+    let mut reject = prediction_decision(&a,"a");
+    reject.decision = characters::DecisionKind::Rejected;
+    f.library.record_character_decisions(reject).unwrap();
+    assert_eq!(f.library.apply_automatic_characters(vec!["a".into(),"b".into()]).unwrap(),1);
+    assert_eq!(f.library.character_relations_for_asset("asset-5").unwrap(),vec![b.id]);
+}
+
+#[test]
+fn automatic_root_input_moves_to_series_without_expanding_manual_scan() {
+    let f = Fixture::new();
+    let a = f.ready("Towa");
+    person_prediction(&f,&a,"a",0);
+    let root: String = f.library.connection().unwrap().query_row(
+        "SELECT parent_id FROM classification_entries WHERE id=?1", [&f.series], |r| r.get(0)).unwrap();
+    f.library.set_asset_classification(SetAssetClassification {
+        asset_ids: vec!["asset-5".into()], classification_id: Some(root),
+    }).unwrap();
+    assert!(!f.library.character_scan_inputs(&a).unwrap().iter().any(|i| i.id == "asset-5"));
+    assert!(f.library.character_scan_inputs_mode(&a,true).unwrap().iter().any(|i| i.id == "asset-5"));
+    {
+        let mut state = f.library.character_scan.lock().unwrap();
+        let (status,rows) = state.previous.get_mut(&a.id).unwrap();
+        status.automatic = true;
+        rows.get_mut("asset-5").unwrap().evidence.as_mut().unwrap()["automaticScope"] = json!(true);
+    }
+    assert_eq!(f.library.apply_automatic_characters(vec!["a".into()]).unwrap(),1);
+    assert_eq!(f.library.get_asset_classifications("asset-5").unwrap()[0].id,f.series);
+}
+
+#[test]
+#[ignore = "requires LAKOMICS_CHARACTER_TEST_PYTHON; TEMP fake protocol worker"]
+fn completed_comparisons_survive_restart_and_only_new_images_are_compared() {
+    let f = Fixture::new();
+    let target = f.ready("Towa");
+    let config = fake(&f);
+    f.library.start_character_scan(&target.id,&target.fingerprint,config.clone()).unwrap();
+    assert_eq!(wait(&f.library).total,1);
+    // Dropping all recomputable state simulates the next app session.
+    *f.library.character_scan.lock().unwrap() = ScanState::default();
+    f.library.set_asset_classification(SetAssetClassification {
+        asset_ids: vec!["asset-6".into()], classification_id: Some(f.series.clone()),
+    }).unwrap();
+    let scan = f.library.start_character_scan(&target.id,&target.fingerprint,config.clone()).unwrap();
+    let status = wait(&f.library);
+    assert_eq!(status.state,"completed", "{status:?}");
+    assert_eq!((status.total,status.completed,status.reused),(1,1,1));
+    assert_eq!(f.library.character_scan_results(&scan.id,None,10).unwrap().len(),2);
+    // Replacing the anchors invalidates comparisons, even though features remain reusable.
+    let updated = f.library.replace_character_references(&target.id,target.revision,
+        &["asset-1","asset-2","asset-3","asset-4","asset-5"].map(String::from)).unwrap();
+    f.library.start_character_scan(&updated.id,&updated.fingerprint,config).unwrap();
+    let status = wait(&f.library);
+    assert_eq!((status.total,status.reused),(2,0));
+}
+
+#[test]
+fn streaming_approval_waits_for_each_images_candidates_not_the_whole_scan() {
+    let f = Fixture::new();
+    let a = f.ready("Towa");
+    let b = f.ready("Noel");
+    person_prediction(&f,&a,"a",0);
+    assert_eq!(f.library.apply_automatic_characters(vec!["a".into()]).unwrap(),0);
+    person_prediction(&f,&b,"b",1);
+    {
+        let mut state = f.library.character_scan.lock().unwrap();
+        let (status,_) = state.previous.get_mut(&b.id).unwrap();
+        status.state = "running".into();
+        status.total = 20;
+        status.completed = 1;
+    }
+    assert_eq!(f.library.apply_automatic_characters(vec!["a".into(),"b".into()]).unwrap(),2);
+}
+
+#[test]
+fn overlapping_detector_boxes_are_not_two_distinct_people() {
+    assert!(same_person(&[0.,0.,100.,100.], &[10.,10.,90.,90.]));
+    assert!(!same_person(&[0.,0.,40.,100.], &[60.,0.,100.,100.]));
 }

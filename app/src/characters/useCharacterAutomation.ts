@@ -16,7 +16,7 @@ export function useCharacterAutomation(targets: CharacterTarget[], series: Chara
   const [retry, setRetry] = useState(0);
   const active = useRef(true), requested = useRef(false), owned = useRef<string | null>(null), stopped = useRef(false);
   const latest = useRef({ targets, series, onChanged }); latest.current = { targets, series, onChanged };
-  const signature = targets.filter(t => t.ready && series.some(s => s.classificationId === t.seriesClassificationId && s.autoClassify)).map(t => `${t.id}:${t.fingerprint}`).sort().join("|");
+  const signature = targets.filter(t => t.ready && series.some(s => s.classificationId === t.seriesClassificationId && s.autoClassify)).map(t => `${t.id}:${t.fingerprint}:${(t.learnedReferences ?? []).map(r => r.assetHash).join(",")}`).sort().join("|");
   useEffect(() => { requested.current = Boolean(signature); }, [signature, refreshVersion, retry]);
   useEffect(() => { stopped.current = paused; }, [paused]);
   useEffect(() => {
@@ -36,31 +36,44 @@ export function useCharacterAutomation(targets: CharacterTarget[], series: Chara
               const initial = await api.targets();
               const eligible = initial.filter(t => t.ready && latest.current.series.some(s => s.autoClassify && s.classificationId === t.seriesClassificationId));
               const scanIds: string[] = [];
+              let confirmed = 0;
+              const failures: string[] = [];
               for (const target of eligible) {
                 if (!active.current || stopped.current) break;
-                if (!latest.current.series.some(s => s.autoClassify && s.classificationId === target.seriesClassificationId)) break;
-                const scan = await api.start(target.id, target.fingerprint);
-                owned.current = scan.id;
-                if (!active.current || stopped.current) { await api.cancel(scan.id); break; }
-                setMessage(null); setProgress(scan);
-                for (;;) {
-                  await wait();
+                if (!latest.current.series.some(s => s.autoClassify && s.classificationId === target.seriesClassificationId)) continue;
+                try {
+                  const scan = await api.start(target.id, target.fingerprint, true);
+                  owned.current = scan.id;
                   if (!active.current || stopped.current) { await api.cancel(scan.id); break; }
-                  const runs = await api.runs();
-                  if (!active.current) return;
-                  const status = runs.find(s => s.id === scan.id);
-                  if (!status) throw new Error("분석 작업이 바뀌었습니다. 다시 시작해 주세요.");
-                  setProgress(status);
-                  if (!running(status)) {
-                    if (status.state !== "completed") throw new Error(status.error ?? "캐릭터 분석이 중단되었습니다.");
-                    scanIds.push(status.id); break;
+                  setMessage(null); setProgress(scan);
+                  for (;;) {
+                    await wait();
+                    if (!active.current || stopped.current) { await api.cancel(scan.id); break; }
+                    const runs = await api.runs();
+                    if (!active.current) return;
+                    const status = runs.find(s => s.id === scan.id);
+                    if (!status) throw new Error("분석 작업이 바뀌었습니다. 다시 시작해 주세요.");
+                    setProgress(status);
+                    if (status.state === "completed" || (status.state === "running" && status.completed > 0)) {
+                      const count = await api.applyAutomatic([...scanIds, status.id]);
+                      confirmed += count;
+                      if (count && active.current) latest.current.onChanged();
+                    }
+                    if (!running(status)) {
+                      if (status.state !== "completed") throw new Error(status.error ?? "캐릭터 분석이 중단되었습니다.");
+                      scanIds.push(status.id); break;
+                    }
                   }
-                }
-                owned.current = null;
+                } catch (error) {
+                  failures.push(`${target.displayName}: ${commandErrorMessage(error, "분석 실패")}`);
+                  if (owned.current) await api.cancel(owned.current).catch(() => undefined);
+                } finally { owned.current = null; }
               }
-              if (active.current && !stopped.current && eligible.length > 0 && scanIds.length === eligible.length) {
-                const count = await api.applyAutomatic(scanIds);
-                if (active.current) { setMessage(count ? `캐릭터 자동 분류 · ${count}건 확정` : "캐릭터 분석 완료 · 애매한 결과는 분석·검토에서 확인"); latest.current.onChanged(); }
+              if (active.current && !stopped.current && eligible.length > 0) {
+                setMessage(failures.length
+                  ? `캐릭터 자동 분류 · ${confirmed}건 확정 · ${failures.join(" / ")}`
+                  : confirmed ? `캐릭터 자동 분류 · ${confirmed}건 확정` : "캐릭터 분석 완료 · 애매한 결과는 분석·검토에서 확인");
+                if (!confirmed) latest.current.onChanged();
               }
               if (active.current) setProgress(null);
             }

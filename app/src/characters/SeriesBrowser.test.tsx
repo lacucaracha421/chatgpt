@@ -5,7 +5,7 @@ import { SeriesBrowser } from "./SeriesBrowser";
 import { createCharacterFixture, fixtureAssets, fixtureClassifications } from "./characterFixtures";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { LibraryGateway } from "../library/types";
-import { characterHubApi, type CharacterHubApi } from "./hubApi";
+import { type CharacterHubApi } from "./hubApi";
 
 beforeEach(() => { Object.defineProperties(HTMLElement.prototype, { clientWidth: { configurable:true,get:()=>850 },clientHeight:{configurable:true,get:()=>650} }); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
@@ -24,20 +24,33 @@ it("opens a character relation from its card without changing classifications",a
   expect(navigate).toHaveBeenCalledWith({kind:"classification",classificationId:"series",characterId:"hina"});
   expect(browse).toHaveBeenCalledWith(expect.objectContaining({targetId:null,all:false}));
 });
-it("opens editable information independently and keeps the nested reference picker usable",async()=>{
-  const referenceBrowse=vi.spyOn(characterHubApi,"browse").mockResolvedValue({items:fixtureAssets,nextCursor:null,totalCount:fixtureAssets.length});
-  const {api,navigate}=await mount(); const save=vi.spyOn(api,"save"); const user=userEvent.setup();
-  await user.click(screen.getByRole("button",{name:"히나 정보"}));
-  const panel=await screen.findByRole("dialog",{name:"히나 · 캐릭터 정보"});
+it("selects in the existing gallery and preserves the editor draft",async()=>{
+  const {api,browse,navigate}=await mount(); const save=vi.spyOn(api,"save"); const user=userEvent.setup();
+  await user.click(await screen.findByRole("button",{name:"히나 정보"}));
+  let panel=await screen.findByRole("dialog",{name:"히나 · 캐릭터 정보"});
   await user.type(within(panel).getByLabelText("설명"),"기준 설명");
-  await user.click(within(panel).getByRole("button",{name:"설정 저장"}));
-  await waitFor(()=>expect(save).toHaveBeenCalledWith(expect.objectContaining({description:"기준 설명"})));
+  await user.click(within(panel).getByRole("button",{name:"선택"}));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  await waitFor(()=>expect(browse).toHaveBeenCalledWith(expect.objectContaining({seriesId:"series",referenceTargetId:"hina",targetId:null,all:true})));
+  await user.click(screen.getByRole("button",{name:"선택 이미지 1 해제"}));
+  await user.click(await screen.findByRole("option",{name:"이미지 5.webp"}));
+  await user.click(screen.getByRole("button",{name:"완료"}));
+  panel=await screen.findByRole("dialog",{name:"히나 · 캐릭터 정보"});
+  expect(within(panel).getByLabelText("설명")).toHaveValue("기준 설명");
+  await user.click(within(panel).getByRole("button",{name:"저장"}));
+  await waitFor(()=>expect(save).toHaveBeenCalledWith(expect.objectContaining({description:"기준 설명"}),true));
   expect(navigate).not.toHaveBeenCalled();
-  await user.click(within(panel).getByRole("button",{name:"기준 이미지 선택"}));
-  const picker=await screen.findByRole("dialog",{name:"히나 · 기준 이미지"});
-  await waitFor(()=>expect(referenceBrowse).toHaveBeenCalledWith(expect.objectContaining({seriesId:"series",referenceTargetId:"hina",targetId:null})));
-  await user.click(within(picker).getByRole("button",{name:"기준 이미지 1 해제"}));
-  expect(picker).toBeInTheDocument();
-  await user.click(within(picker).getByRole("button",{name:"닫기"}));
-  expect(panel).toBeInTheDocument();
+});
+it("filters a new character's selection even when all is requested",async()=>{
+  const {browse}=await mount(); const user=userEvent.setup();
+  await user.click(await screen.findByRole("button",{name:"캐릭터 등록"}));
+  let panel=await screen.findByRole("dialog",{name:"새 캐릭터"});
+  await user.type(within(panel).getByLabelText("캐릭터 이름"),"아루");
+  await user.click(within(panel).getByRole("button",{name:"대표 이미지 선택"}));
+  await waitFor(()=>expect(browse).toHaveBeenCalledWith(expect.objectContaining({referenceTargetId:"",all:false})));
+  await user.click(screen.getByRole("button",{name:"전체 보기"}));
+  await waitFor(()=>expect(browse).toHaveBeenCalledWith(expect.objectContaining({referenceTargetId:"",all:true})));
+  await user.click(screen.getByRole("button",{name:"취소"}));
+  panel=await screen.findByRole("dialog",{name:"새 캐릭터"});
+  expect(within(panel).getByLabelText("캐릭터 이름")).toHaveValue("아루");
 });

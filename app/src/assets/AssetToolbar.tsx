@@ -1,3 +1,5 @@
+import { useContext } from "react";
+import { FolderRegistrationContext } from "../characters/FolderRegistrationContext";
 import { ArrowPathIcon, ComputerDesktopIcon, DevicePhoneMobileIcon, EyeSlashIcon, FolderIcon, InformationCircleIcon, PhotoIcon, RectangleGroupIcon, RectangleStackIcon, Square2StackIcon, VideoCameraIcon } from "@heroicons/react/24/outline";
 import type { AlbumEntry, AssetAspectFilter, AssetMediaFilter, AssetSort, AssetView, ClassificationEntry, CollectionSummary } from "../library/types";
 import { Button } from "../shared/ui/Button";
@@ -29,15 +31,15 @@ type AssetToolbarProps = {
   onThumbnailRowHeightChange: (value: number) => void;
   collections?: CollectionSummary[];
   onReshuffle: () => void;
-  onCharacterReview?: () => void;
 };
 
 // 상단바는 선택 상태와 무관하게 제목·보기 설정·창 제어 슬롯을 고정한다.
 // 선택 작업은 SelectionBar(갤러리 위 고정 바)에서 수행한다.
 export function AssetToolbar({
   galleryLayout = "masonry", onGalleryLayoutChange, view: rawView, classifications, albums, collections = [], sort, mediaFilter, aspectFilter, directOnly, metadataVisible, privacyMode, thumbnailRowHeight,
-  onSortChange, onMediaFilterChange, onAspectFilterChange, onDirectOnlyChange, onMetadataVisibleChange, onPrivacyModeChange, onThumbnailRowHeightChange, onReshuffle, onCharacterReview,
+  onSortChange, onMediaFilterChange, onAspectFilterChange, onDirectOnlyChange, onMetadataVisibleChange, onPrivacyModeChange, onThumbnailRowHeightChange, onReshuffle,
 }: AssetToolbarProps) {
+  const registration = useContext(FolderRegistrationContext);
   const view = rawView.kind === "notes" || rawView.kind === "similarity_review" || rawView.kind === "settings" || rawView.kind === "statistics" || rawView.kind === "manga" || rawView.kind === "calendar" || rawView.kind === "creators" || rawView.kind === "revisited-bundle"
     ? ({ kind: "classification", classificationId: null } as const)
     : rawView;
@@ -60,7 +62,7 @@ export function AssetToolbar({
   const viewActions = reshuffleAction || directOnlyAction ? <>{reshuffleAction}{directOnlyAction}</> : undefined;
 
   return (
-    <ViewToolbar title={location} ariaLabel="자산 도구" titleAccessory={onCharacterReview && <Button size="sm" variant="ghost" onClick={onCharacterReview}>캐릭터 검토</Button>} actions={viewActions} chrome={{
+    <ViewToolbar title={location} ariaLabel="자산 도구" titleAccessory={registration} actions={viewActions} chrome={{
       summary: [!recent ? ({ newest: "최신순", oldest: "오래된순", favorites: "좋아요순", random: "랜덤" })[sort] : "다시보기", galleryLayout === "masonry" ? "폭포수" : "같은 높이", filterable && (mediaFilter !== "all" || aspectFilter !== "all" || directOnly) ? `필터 ${Number(mediaFilter !== "all") + Number(aspectFilter !== "all") + Number(directOnly)}` : "", privacyMode ? "비공개" : ""].filter(Boolean).join(" · "),
       status: privacyMode ? <span>비공개 모드</span> : undefined,
       settings: <>

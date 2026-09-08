@@ -14,12 +14,20 @@ pub struct PreparedAssetDrag {
     pub files: Vec<PathBuf>,
     pub preview: PathBuf,
     cleanup_root: PathBuf,
+    retain: bool,
 }
 
 impl Drop for PreparedAssetDrag {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.cleanup_root);
+        if !self.retain { let _ = fs::remove_dir_all(&self.cleanup_root); }
     }
+}
+
+impl PreparedAssetDrag {
+    /// URI recipients may finish GTK DnD before their asynchronous file copy ends.
+    /// Library startup already removes abandoned drag staging directories.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn retain_for_external_copy(mut self) { self.retain = true; }
 }
 
 impl Library {
@@ -59,6 +67,7 @@ impl Library {
             files,
             preview,
             cleanup_root: staging,
+            retain: false,
         })
     }
 
@@ -154,6 +163,10 @@ fn unique_file_name(name: &str, used: &mut BTreeSet<String>) -> String {
 }
 
 fn link_or_copy(source: &Path, destination: &Path) -> Result<(), LibraryError> {
+    // URI recipients may open/edit the staging file directly. Do not alias originals.
+    #[cfg(target_os = "linux")]
+    fs::copy(source, destination).map_err(drag_error)?;
+    #[cfg(not(target_os = "linux"))]
     if fs::hard_link(source, destination).is_err() {
         fs::copy(source, destination).map_err(drag_error)?;
     }
@@ -261,4 +274,25 @@ fn insert_asset(
         "INSERT INTO assets (id, content_hash, media_kind, original_name, relative_path, thumbnail_relative_path, byte_size, width, height, collected_at, status) VALUES (?1, ?2, 'image', ?3, ?4, ?5, 1, 1, 1, '2026-08-08T00:00:00Z', ?6)",
         rusqlite::params![id, format!("hash-{id}"), original_name, relative_path, thumbnail_path, status],
     ).unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_drag_retains_independent_copy_until_next_library_open() {
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    insert_asset(&library, "a", "토와 #1.png", "assets/a.png", "thumbnails/a.webp", "normal");
+    let original = temp.path().join("assets/a.png");
+    fs::write(&original, b"original").unwrap();
+    fs::write(temp.path().join("thumbnails/a.webp"), b"preview").unwrap();
+    let prepared = library.prepare_asset_drag(&["a".into()]).unwrap();
+    let exported = prepared.files[0].clone();
+    prepared.retain_for_external_copy();
+    assert_eq!(fs::read(&exported).unwrap(), b"original");
+    fs::write(&exported, b"external edit").unwrap();
+    assert_eq!(fs::read(&original).unwrap(), b"original");
+    drop(library);
+    let _reopened = Library::open(temp.path()).unwrap();
+    assert!(!exported.exists());
+    assert!(original.exists());
 }

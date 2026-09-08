@@ -483,6 +483,59 @@ Prerequisites: CATALOG-002A and CATALOG-007A; preferably complete reviewed group
 
 # P2 — Personal library features
 
+## CHAR-UI-001 — Series / character navigation, registration, and review UX
+
+Status: `IMPLEMENTED — NATIVE ACCEPTANCE PENDING` — user approved implementation on 2026-09-08. Shared headers, in-gallery character registration, fixed-character review, and shared asset context menus are implemented. Windows/Linux native interaction acceptance remains pending.
+
+### User requirements
+
+1. **Ordinary folders:** remove the unconditional `캐릭터 검토` beside the folder name. Move `시리즈로 등록` into that header location, using a compact icon or similarly concise control instead of the separate content-area button.
+2. **Series folders:** restore the series name in the header. Move character registration and hero-image controls into the same header; shorten labels or use icons. Match existing shared controls, icon style, spacing, and states. Compact the `수집 후 자동 분류` control at the far right, preferably an icon. Replace the character tile's `분석 준비됨` subtitle with a check mark beside its name; retain explanations for not-ready/inactive states.
+3. **Character folders:** remove the `시리즈로` button and `캐릭터 에셋` heading. Put the character name in the header, with a small image count immediately beside it. Source clarification: the current `시리즈로` button navigates to the parent series; it does not promote a character into a series. The requested removal still stands; preserve a natural navigation route to the parent.
+4. **Character registration / editing:** remove the `관련 폴더` UI. Select the representative thumbnail and reference images directly from the existing series asset gallery instead of a separate picker window. Reuse its `전체 보기` / `미분류만 보기` interaction. Other characters' assets must not appear in either picker, including when changing the gallery filter. Account for both other characters' confirmed assets and reference images; an existing character's own images remain available when editing that character.
+5. **Review entry / left area:** expose analysis/review entry only inside a character folder. Fix the vertical/wrapped `시리즈 폴더` label. Fix the review context, character settings, and other character-specific information to the character from which review was opened; remove redundant series/character selection.
+6. **Review right area:** fix the review target to the current character. Remove `선택 캐릭터 분석` and other redundant selection-oriented controls. The approved concise `분석` action retains the underlying analysis/retry capability.
+7. **Review filters:** consolidate the excessive `추천`, `미확정`, `다중 후보`, etc. sections. The approved grouping uses two main views and compact additional filters, retaining unresolved work and failures.
+8. **Image decisions:** show only the current character's decision in the selected image panel. Use `승인` / `거절`; do not list decision controls for every registered character.
+9. **Context menus:** remove `캐릭터 검토` from asset-repository context menus. Restore normal context-menu behavior in registered series folders. Menu disappearance is user-reported; native reproduction and the exact affected surface (asset versus gallery background) remain to be checked during implementation.
+
+### Existing behavior to preserve
+
+- A confidently recognized image captured into a root category can be assigned to its series and character automatically.
+- One physical image may appear in several recognized characters' folders. Unknown companions do not block a recognized character; ambiguous identities for the same person stay for review.
+- `거절` applies to the current image/character pair, not every character in that image. Approving or rejecting here must preserve other characters' existing decisions and memberships.
+- Manual series analysis remains scoped to that series; simplifying the visible review context must not remove competing-character checks needed for safe automatic decisions.
+- Keep comparison checkpoints, resumability, and global background-work visibility when rearranging controls. Do not interpret UI-only requests as authorization to erase existing folder links, decision history, or recognition settings.
+- Preserve Windows and Linux behavior and the existing asset-gallery/context-menu contracts. No Mobile redesign is included in this item.
+
+### Accepted design direction
+
+- Use the same compact location header for ordinary, series, and character folders. Show the current name on the left, context actions beside it, and automation state at the far right. Avoid creating an additional toolbar row. A breadcrumb or existing back navigation can replace the removed `시리즈로` button.
+- Treat icon-only automation as a stateful control: distinguish on/off, running, and failure using shape/badge as well as color. Keep short tooltips and accessible names; do not hide failures behind a permanently indistinguishable icon. Global progress/pause remains available outside character folders, while review entry remains inside them.
+- Define the name-adjacent check as **reference setup ready**, not **all images analyzed / all classifications correct**. This prevents an apparently completed check while background work remains.
+- Use an in-place selection mode with `대표 이미지 선택` or `기준 이미지 선택 2/5`, plus `완료` and `취소`. Preserve the registration draft, gallery position, and prior filter on exit. Thumbnail selection is single-select; reference selection shows its existing required count. Other characters' assets remain excluded even under `전체 보기`; make that restricted selection scope clear.
+- Make the review presentation character-specific while retaining internal comparisons against other plausible characters. A small read-only ambiguity reason may be useful, without exposing other characters' approval buttons.
+- Start with two prominent review views, `검토 대기` and `확정`. Group recommendation/ambiguous-candidate work under review waiting; expose `전체`, `일치 없음`, `분석 필요`, `거절`, and failures through a compact filter or status entry. Failures must retain a visible count and retry route. These names and grouping were approved for this implementation.
+- Remove the redundant word `선택 캐릭터`; retain a concise `분석` or `다시 분석` action for existing images, changed references, and failed work. Automatic classification alone is not a substitute for recovery controls.
+
+### Acceptance checklist
+
+- Verify ordinary folder, series folder, and character folder headers side by side, including long names and narrow window widths.
+- Verify registration draft preservation, thumbnail single-selection, reference selection count, cancellation, and scrolling without opening a second picker window.
+- Verify other characters' images cannot reappear through `전체 보기`, pagination, refresh, or a concurrent classification while selecting references/thumbnail.
+- In a shared Towa/Noel image, review opened from Towa displays only Towa's decision controls and cannot remove Noel's membership.
+- Check both asset and background context menus in ordinary, series, and character folders; preserve ordinary actions and multi-selection behavior.
+- Check preparation, automation on/off, running, paused, failed, and completed states; distinguish reference readiness from analysis completion.
+
+### Implementation evidence (2026-09-08)
+
+- Existing ViewToolbar, anchored panel, buttons, Heroicons, design tokens, and date-grouped masonry gallery are reused. Ordinary-folder registration is contributed into the existing header; series/character names and actions share that header. Portrait tiles remain 3:4 with a 220px minimum column.
+- Representative/reference selection uses the existing gallery with Done/Cancel, retained draft/filter/scroll state, and a restricted browse scope. SQL excludes other characters' confirmed/reference images before pagination, including unsaved characters and All mode. Strict saves revalidate eligibility inside the write transaction; existing stored folder links are preserved.
+- Review entry is character-only; two main views plus compact filters, current-character approval/rejection, analysis/recovery, history, and close controls remain. Internal automatic competing-character comparisons and global automation status remain intact.
+- Targeted frontend suite: 86 tests passed (characters, asset browser/toolbar, shared ViewToolbar); TypeScript checked. Character Rust suite: 27 passed, 4 pre-existing ignored tests. Additional targeted selection checks cover strict reference and thumbnail rejection without changing the previous references.
+- Isolated browser fixture exercised series/character headers, registry-to-gallery selection and cancellation, fixed-character evidence, asset/background context menus, and automatic on/off. Layout inspected at 1280px and 900px, including long character names, using the real shared components and synthetic media; no production library writes were used for this verification.
+- Linux dev app was rebuilt and relaunched through `npm run tauri -- dev` after verification. Remaining acceptance: native Windows/Linux titlebar/window controls, real media/drag-and-drop and production background running/paused/error states. Browser evidence and successful startup do not establish those native behaviors.
+
 ## NOTE-001A — Revision-safe server Notes foundation
 
 Parent item: legacy `NOTE-001`

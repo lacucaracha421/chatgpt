@@ -1,3 +1,5 @@
+#[cfg(target_os = "linux")]
+mod linux_drag;
 use std::sync::RwLock;
 use std::sync::Arc;
 #[cfg(windows)]
@@ -1509,13 +1511,31 @@ pub fn retry_video_preparation(
         .map_err(CommandError::from)
 }
 
+#[cfg(target_os = "linux")]
+#[tauri::command]
+pub async fn start_asset_drag(
+    asset_ids: Vec<String>, window: tauri::Window, state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    let prepare_ids = asset_ids.clone();
+    let prepared = tauri::async_runtime::spawn_blocking(move || library.prepare_asset_drag(&prepare_ids))
+        .await.map_err(|_| background_task_error())?.map_err(CommandError::from)?;
+    let (sender, mut receiver) = tauri::async_runtime::channel(1);
+    let drag_window = window.clone();
+    window.run_on_main_thread(move || {
+        let _ = sender.try_send(linux_drag::start(&drag_window, prepared, asset_ids));
+    }).map_err(|_| background_task_error())?;
+    receiver.recv().await.ok_or_else(background_task_error)?
+}
+
+#[cfg(not(target_os = "linux"))]
 #[tauri::command]
 pub fn start_asset_drag(
     asset_ids: Vec<String>,
     window: tauri::Window,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         let _ = (asset_ids, window, state);
         Err(CommandError {

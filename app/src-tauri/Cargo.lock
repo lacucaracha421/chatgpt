@@ -2340,6 +2340,7 @@ dependencies = [
  "chrono",
  "drag",
  "futures-lite",
+ "gtk",
  "image 0.25.10",
  "libc",
  "pdqhash",

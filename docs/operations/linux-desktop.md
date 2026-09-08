@@ -49,7 +49,7 @@ managed library files while the application is using them.
 
 ## Remaining platform limitations
 
-- Native drag-out returns `unsupported_platform` on Linux.
+- Linux native drag-out uses GTK `text/uri-list` with COPY semantics. File preparation runs off the UI thread; GTK starts on the main thread while button 1 remains held. URI encoding supports spaces, Korean names, and reserved characters. Recipients receive independent staging copies, not hard links to originals. Successful staging remains until the library is next opened because file managers may acknowledge the drop before asynchronous copying finishes; cancellation/start failure cleans staging immediately. Native Wayland/X11 file-manager acceptance is still pending.
 - Linux credentials use the desktop Secret Service default persistent collection
   (GNOME Keyring on Ubuntu) with an encrypted DH session. The login keyring must
   be unlocked. Missing credentials are reported as unconfigured; a locked keyring
@@ -157,3 +157,26 @@ keyring roundtrip and Notes reopen/wrong-key integration tests both passed using
 isolated synthetic secrets. The Windows native backend body was compared with
 the preceding commit and is unchanged. Real account tokens and the user's Notes
 recovery key were not read, imported, or tested; they must be entered in the app.
+
+
+## Linux drag-out follow-up, 2026-09-09
+
+The previous unsupported-platform guard now routes Linux to a GTK source adapter.
+The Windows OLE implementation is preserved. The adapter serves file URIs until
+GTK `drag-end`, rather than disconnecting at `drop-performed` before a recipient
+has requested the data. It sends the existing `asset-drag://ended` event so the
+frontend can clear native-drag state and suppress accidental re-ingestion.
+
+Verification uses synthetic temporary libraries: URI roundtrips, original-name
+preservation/collisions, cancellation cleanup, retained-copy independence, and
+cleanup on library reopen. Real drag to a file manager or external editor still
+requires user-assisted native acceptance on Wayland/X11; Windows execution is
+also unavailable in this Linux session. A successful compilation is not a native
+drop acceptance result.
+
+Focused follow-up results: `cargo test --lib drag` passed 6 tests; the frontend
+native-drag/invoke selection passed 4 tests (42 unrelated tests skipped). The
+Linux dev binary rebuilt and launched through `npm run tauri -- dev`. Changes
+were reviewed inline for GTK main-thread use, button numbering, URI escaping,
+source-copy independence, drag-end data lifetime, cleanup, and Windows cfg
+isolation. Native drop confirmation remains user-assisted and pending.

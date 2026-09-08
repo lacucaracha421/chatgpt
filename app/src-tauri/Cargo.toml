@@ -44,6 +44,7 @@ drag = "2.1.1"
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security_Credentials", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
 libc = "0.2"
 secret-service = { version = "5.2", features = ["rt-async-io-crypto-rust"] }
 async-io = "2"

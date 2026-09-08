@@ -41,6 +41,8 @@ pub(crate) mod credential;
 pub mod cloud_preflight;
 mod db;
 mod drag_out;
+#[cfg(target_os = "linux")]
+pub(crate) use drag_out::PreparedAssetDrag;
 pub mod error;
 mod external_binding;
 mod favorite;

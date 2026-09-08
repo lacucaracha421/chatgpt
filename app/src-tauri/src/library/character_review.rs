@@ -51,6 +51,7 @@ impl Library {
                 "confirmed",
                 "pending",
                 "error",
+                "rejected",
             ]
             .contains(&query.filter.as_str())
         {
@@ -64,16 +65,25 @@ impl Library {
                     && query.target_id.as_ref().is_none_or(|id| id == &t.id)
             })
             .collect();
-        let (inputs, decisions, confirmed) = {
+        let root_candidates = {
+            let state = self.character_scan.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            state.previous.values().map(|(s,r)| (s,r)).chain(state.status.as_ref().map(|s| (s,&state.results)))
+                .filter(|(s,_)| s.automatic && targets.iter().any(|t| t.id == s.target_id))
+                .flat_map(|(_,rows)| rows.keys().cloned()).collect::<std::collections::BTreeSet<_>>()
+        };
+        let (inputs, decisions) = {
             let connection = self.connection()?;
+            let root_candidates = root_candidates.into_iter().filter(|id|
+                super::super::character_hub::candidate_image_mode(&connection,&query.series_id,id,true).is_ok())
+                .collect::<Vec<_>>();
             let mut statement = connection.prepare("WITH RECURSIVE scope(id) AS (
                 SELECT id FROM classification_entries WHERE id=?1 UNION
                 SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id)
                 SELECT a.id,a.content_hash,a.relative_path FROM assets a
                 WHERE a.status='normal' AND a.media_kind='image' AND (?2 IS NULL OR a.id>?2)
-                AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope)) ORDER BY a.id")?;
+                AND (EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope)) OR a.id IN (SELECT value FROM json_each(?3))) ORDER BY a.id")?;
             let inputs = statement
-                .query_map(params![query.series_id, query.after], |r| {
+                .query_map(params![query.series_id, query.after, serde_json::to_string(&root_candidates)?], |r| {
                     Ok(ScanInput {
                         id: r.get(0)?,
                         hash: r.get(1)?,
@@ -92,12 +102,7 @@ impl Library {
                     ))
                 })?
                 .collect::<std::result::Result<BTreeMap<_, _>, _>>()?;
-            let confirmed = connection.prepare("SELECT asset_id,target_id FROM character_relations")?
-                .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
-                .collect::<std::result::Result<Vec<_>, _>>()?;
-            let mut owners = BTreeMap::<String, std::collections::BTreeSet<String>>::new();
-            for (asset, target) in confirmed { owners.entry(asset).or_default().insert(target); }
-            (inputs, decisions, owners)
+            (inputs, decisions)
         };
         let ready: BTreeMap<_, _> = targets
             .iter()
@@ -121,9 +126,6 @@ impl Library {
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
                 targets
                     .iter()
-                    .filter(|target| {
-                        confirmed.get(&input.id).is_none_or(|owners| owners.contains(&target.id))
-                    })
                     .map(|target| {
                         let pair = state
                             .status
@@ -219,6 +221,7 @@ fn matches_filter(predictions: &[Prediction], filter: &str) -> bool {
                     .iter()
                     .any(|p| matches!(p.state.as_str(), "pending" | "stale"))
         }
+        "rejected" => predictions.iter().any(|p| p.decision.as_deref() == Some("rejected")),
         "error" => predictions.iter().any(|p| p.state == "error"),
         _ => true,
     }

@@ -142,6 +142,10 @@ impl Library {
     }
 
     pub fn save_character_target(&self, draft: TargetDraft) -> Result<Target> {
+        self.save_character_target_selection(draft, false)
+    }
+
+    pub fn save_character_target_selection(&self, draft: TargetDraft, strict: bool) -> Result<Target> {
         let name = draft.display_name.trim();
         if name.is_empty() {
             return Err(Error::Invalid("캐릭터 이름을 입력해 주세요."));
@@ -166,6 +170,12 @@ impl Library {
         }
         if let Some(image) = &draft.thumbnail_asset_id {
             super::character_hub::validate_art(&transaction, image)?;
+            let unchanged = draft.id.as_deref().map(|id| self.read_character_target(&transaction,id))
+                .transpose()?.is_some_and(|t| t.thumbnail_asset_id.as_ref() == Some(image));
+            if strict && !unchanged {
+                super::character_hub::validate_character_selection(&transaction,
+                    draft.series_classification_id.as_deref().ok_or(Error::Stale)?, draft.id.as_deref(), image)?;
+            }
         }
         if let Some(series) = &draft.series_classification_id {
             transaction.execute("INSERT OR IGNORE INTO character_series(classification_id) VALUES(?1)", [series])?;
@@ -209,6 +219,10 @@ impl Library {
         expected_revision: i64,
         asset_ids: &[String],
     ) -> Result<Target> {
+        self.replace_character_references_selection(id, expected_revision, asset_ids, false)
+    }
+
+    pub fn replace_character_references_selection(&self, id: &str, expected_revision: i64, asset_ids: &[String], strict: bool) -> Result<Target> {
         if asset_ids.len() > REFERENCE_COUNT
             || asset_ids.iter().collect::<BTreeSet<_>>().len() != asset_ids.len()
         {
@@ -229,6 +243,7 @@ impl Library {
         let mut hashes = BTreeSet::new();
         let mut values = Vec::new();
         for asset_id in asset_ids {
+            if strict { super::character_hub::validate_character_selection(&transaction,series,Some(id),asset_id)?; }
             let (hash, path) = scoped_image(&transaction, series, asset_id)?;
             self.open_library_media(&path)?;
             if !hashes.insert(hash.clone()) {
@@ -338,7 +353,8 @@ impl Library {
                     .series_classification_id
                     .as_deref()
                     .ok_or(Error::Invalid("시리즈 폴더를 다시 연결해 주세요."))?;
-                super::character_hub::candidate_image(&transaction, series, asset_id)?.0
+                super::character_hub::candidate_image_mode(&transaction, series, asset_id,
+                    evidence.get(asset_id).is_some_and(|e| e["prediction"]["automaticScope"] == true))?.0
             };
             let previous: Option<String> = transaction
                 .query_row(
@@ -466,6 +482,9 @@ impl Library {
                 JOIN character_decisions d ON d.sequence=r.sequence JOIN assets a ON a.id=r.asset_id
                 WHERE r.target_id=?1 AND d.origin='manual' AND a.status='normal' AND a.media_kind='image'
                 AND d.asset_hash=a.content_hash
+                AND json_valid(d.reference_snapshot)
+                AND json_array_length(d.reference_snapshot,'$.prediction.queryBoxes')=1
+                AND json_extract(d.reference_snapshot,'$.prediction.wholeFallback')=0
                 AND NOT EXISTS(SELECT 1 FROM character_relations other WHERE other.asset_id=a.id AND other.target_id<>?1)
                 ORDER BY d.sequence DESC")?;
             let rows = statement.query_map([id], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?)))?;

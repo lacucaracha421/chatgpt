@@ -123,6 +123,7 @@ impl From<Error> for CommandError {
 pub async fn start_character_scan(
     target_id: String,
     expected_fingerprint: String,
+    automatic: Option<bool>,
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<crate::library::character_scan::ScanStatus, CommandError> {
@@ -130,7 +131,7 @@ pub async fn start_character_scan(
     let config = crate::library::character_worker::RuntimeConfig::configured(script, &settings)?;
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || {
-        library.start_character_scan(&target_id, &expected_fingerprint, config)
+        library.start_character_scan_mode(&target_id, &expected_fingerprint, config, automatic.unwrap_or(false))
     })
     .await
     .map_err(|_| super::background_task_error())?
@@ -180,10 +181,11 @@ pub fn list_character_targets(state: State<'_, AppState>) -> Result<Vec<Target>,
 #[tauri::command]
 pub fn save_character_target(
     request: TargetDraft,
+    strict_selection: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<Target, CommandError> {
     current_required(state)?
-        .save_character_target(request)
+        .save_character_target_selection(request, strict_selection.unwrap_or(false))
         .map_err(Into::into)
 }
 
@@ -192,10 +194,11 @@ pub fn replace_character_references(
     target_id: String,
     expected_revision: i64,
     asset_ids: Vec<String>,
+    strict_selection: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<Target, CommandError> {
     current_required(state)?
-        .replace_character_references(&target_id, expected_revision, &asset_ids)
+        .replace_character_references_selection(&target_id, expected_revision, &asset_ids, strict_selection.unwrap_or(false))
         .map_err(Into::into)
 }
 

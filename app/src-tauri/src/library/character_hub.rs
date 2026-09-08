@@ -69,7 +69,7 @@ impl Library {
         if !(1..=200).contains(&query.limit) {
             return Err(Error::Invalid("조회 개수가 올바르지 않습니다."));
         }
-        if let Some(id) = query.reference_target_id.as_ref().or(query.target_id.as_ref()) {
+        if let Some(id) = query.reference_target_id.as_ref().or(query.target_id.as_ref()).filter(|id| !id.is_empty()) {
             if self
                 .get_character_target(id)?
                 .series_classification_id
@@ -86,9 +86,10 @@ impl Library {
             .transpose()?;
         let (ids, total) = {
             let connection = self.connection()?;
-            let gallery_scope = "WITH RECURSIVE scope(id) AS (SELECT id FROM classification_entries WHERE id=?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id)
+            let gallery_scope = "WITH RECURSIVE scope(id) AS (SELECT id FROM classification_entries WHERE id=?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id),
+              ancestors(id,parent_id) AS (SELECT id,parent_id FROM classification_entries WHERE id=?1 UNION ALL SELECT c.id,c.parent_id FROM classification_entries c JOIN ancestors p ON c.id=p.parent_id)
               SELECT a.id,a.collected_at FROM assets a WHERE a.status='normal'
-              AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope))
+              AND (EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope)) OR (?2 IS NOT NULL AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM ancestors WHERE parent_id IS NULL)) AND EXISTS(SELECT 1 FROM character_relations r WHERE r.asset_id=a.id AND r.target_id=?2)))
               AND ((?2 IS NOT NULL AND (EXISTS(SELECT 1 FROM character_relations r WHERE r.asset_id=a.id AND r.target_id=?2)
                 OR EXISTS(SELECT 1 FROM character_references r WHERE r.asset_id=a.id AND r.target_id=?2)))
                 OR (?2 IS NULL AND (?3 OR (NOT EXISTS(SELECT 1 FROM character_relations r JOIN character_targets t ON t.id=r.target_id WHERE r.asset_id=a.id AND t.series_classification_id=?1)
@@ -98,10 +99,11 @@ impl Library {
               AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope))
               AND NOT EXISTS(SELECT 1 FROM character_relations r WHERE r.asset_id=a.id AND r.target_id<>?2)
               AND NOT EXISTS(SELECT 1 FROM character_references r WHERE r.asset_id=a.id AND r.target_id<>?2)
-              AND ?3=0";
+              AND (?3 OR (NOT EXISTS(SELECT 1 FROM character_relations r WHERE r.asset_id=a.id)
+              AND NOT EXISTS(SELECT 1 FROM character_references r WHERE r.asset_id=a.id)))";
             let scope = if query.reference_target_id.is_some() { reference_scope } else { gallery_scope };
             let target_id = query.reference_target_id.as_ref().or(query.target_id.as_ref());
-            let all = query.reference_target_id.is_none() && query.all;
+            let all = query.all;
             let total: i64 = connection.query_row(
                 &format!("SELECT COUNT(*) FROM ({scope})"),
                 params![query.series_id, target_id, all],
@@ -149,10 +151,18 @@ pub(super) fn candidate_image(
     series: &str,
     id: &str,
 ) -> Result<(String, String)> {
-    connection.query_row("WITH RECURSIVE scope(id) AS (SELECT id FROM classification_entries WHERE id=?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id)
+    candidate_image_mode(connection, series, id, false)
+}
+
+pub(super) fn candidate_image_mode(
+    connection: &Connection, series: &str, id: &str, automatic: bool,
+) -> Result<(String, String)> {
+    connection.query_row("WITH RECURSIVE scope(id) AS (SELECT id FROM classification_entries WHERE id=?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id),
+      ancestors(id,parent_id) AS (SELECT id,parent_id FROM classification_entries WHERE id=?1 UNION ALL
+      SELECT c.id,c.parent_id FROM classification_entries c JOIN ancestors p ON c.id=p.parent_id)
       SELECT a.content_hash,a.relative_path FROM assets a WHERE a.id=?2 AND a.status='normal' AND a.media_kind='image'
-      AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope))",
-      params![series,id], |r| Ok((r.get(0)?,r.get(1)?))).optional()?.ok_or(Error::Invalid("시리즈 폴더 안의 정상 이미지를 선택해 주세요."))
+      AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND (ac.classification_id IN (SELECT id FROM scope) OR (?3 AND ac.classification_id IN (SELECT id FROM ancestors WHERE parent_id IS NULL))))",
+      params![series,id,automatic], |r| Ok((r.get(0)?,r.get(1)?))).optional()?.ok_or(Error::Invalid("시리즈 폴더 안의 정상 이미지를 선택해 주세요."))
 }
 
 #[cfg(test)]
@@ -299,7 +309,7 @@ mod tests {
         f.library.connection().unwrap().execute("UPDATE asset_classifications SET classification_id=?1 WHERE asset_id='asset-6'", [&f.series]).unwrap();
         let query = |id: &str, after| BrowseQuery {
             series_id: f.series.clone(), target_id: None, reference_target_id: Some(id.into()),
-            after, limit: 2, all: false,
+            after, limit: 2, all: true,
         };
         let new = f.library.browse_character_assets(query(&b.id, None)).unwrap();
         assert_eq!(new.total_count, 1);
@@ -307,10 +317,36 @@ mod tests {
         assert!(new.next_cursor.is_none());
         let own = f.library.browse_character_assets(query(&a.id, None)).unwrap();
         assert_eq!(own.total_count, 7);
+        let unclassified = f.library.browse_character_assets(BrowseQuery { all: false, ..query(&a.id, None) }).unwrap();
+        assert_eq!(unclassified.total_count, 1);
+        let unsaved = f.library.browse_character_assets(query("", None)).unwrap();
+        assert_eq!(unsaved.total_count, 1);
+        let connection = f.library.connection().unwrap();
+        assert!(validate_character_selection(&connection, &f.series, Some(&b.id), "asset-5").is_err());
+        assert!(validate_character_selection(&connection, &f.series, None, "asset-0").is_err());
+        assert!(validate_character_selection(&connection, &f.series, Some(&a.id), "asset-5").is_ok());
+        assert!(validate_character_selection(&connection, &f.series, None, "asset-6").is_ok());
+        drop(connection);
+        assert!(f.library.replace_character_references_selection(&b.id, b.revision, &["asset-5".into()], true).is_err());
+        assert!(f.library.get_character_target(&b.id).unwrap().references.is_empty());
+        assert!(f.library.save_character_target_selection(super::super::characters::TargetDraft {
+            id: None, expected_revision: None, series_classification_id: Some(f.series.clone()),
+            linked_classification_id: None, display_name: "Unsaved".into(), description: String::new(),
+            thumbnail_asset_id: Some("asset-5".into()), enabled: true,
+        }, true).is_err());
+
         assert_eq!(own.items.len(), 2);
         assert!(own.next_cursor.is_some());
         let next = f.library.browse_character_assets(query(&a.id, own.next_cursor)).unwrap();
         assert!(next.items.iter().all(|i| own.items.iter().all(|o| o.id != i.id)));
     }
 
+}
+
+// The same eligibility rule protects thumbnail/reference saves if a concurrent decision changes ownership.
+pub(super) fn validate_character_selection(connection: &Connection, series: &str, target: Option<&str>, asset: &str) -> Result<()> {
+    super::characters::scoped_image(connection,series,asset)?;
+    let excluded: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM character_relations WHERE asset_id=?1 AND (?2 IS NULL OR target_id<>?2)) OR EXISTS(SELECT 1 FROM character_references WHERE asset_id=?1 AND (?2 IS NULL OR target_id<>?2))", params![asset,target], |r| r.get(0))?;
+    if excluded { return Err(Error::Invalid("다른 캐릭터에 등록된 이미지입니다. 선택을 다시 확인해 주세요.")); }
+    Ok(())
 }

@@ -613,6 +613,8 @@ fn learned_examples_follow_current_human_approvals_only() {
     let count = || f.library.get_character_target(&target.id).unwrap().learned_references.len();
     assert_eq!(count(), 0);
     f.decide(&target, &["asset-5"], DecisionKind::Accepted).unwrap();
+    assert_eq!(count(), 0); // Approval without a verified person region cannot teach.
+    f.library.connection().unwrap().execute("UPDATE character_decisions SET reference_snapshot=?1 WHERE target_id=?2 AND decision='accepted'", params![r#"{"prediction":{"queryBoxes":[[0,0,10,10]],"wholeFallback":false}}"#, target.id]).unwrap();
     assert_eq!(count(), 1);
     f.library.connection().unwrap().execute("UPDATE character_decisions SET origin='automatic' WHERE target_id=?1", [&target.id]).unwrap();
     assert_eq!(count(), 0);
@@ -621,6 +623,7 @@ fn learned_examples_follow_current_human_approvals_only() {
     f.decide(&target, &["asset-5"], DecisionKind::Cleared).unwrap();
     assert_eq!(count(), 0);
     f.decide(&target, &["asset-5"], DecisionKind::Accepted).unwrap();
+    f.library.connection().unwrap().execute("UPDATE character_decisions SET reference_snapshot=?1 WHERE target_id=?2 AND decision='accepted'", params![r#"{"prediction":{"queryBoxes":[[0,0,10,10]],"wholeFallback":false}}"#, target.id]).unwrap();
     let other = f.ready("Other");
     f.decide(&other, &["asset-5"], DecisionKind::Accepted).unwrap();
     assert_eq!(count(), 0);

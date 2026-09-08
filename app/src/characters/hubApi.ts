@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { AssetSummary } from "../library/types";
 export type CharacterSeries = { classificationId: string; heroAssetId: string | null; autoClassify: boolean };
+// referenceTargetId selects eligible reference/thumbnail images; an empty ID denotes an unsaved character.
 export type CharacterBrowseQuery = { seriesId: string; targetId: string | null; referenceTargetId?: string; after: string | null; limit: number; all: boolean };
 export type CharacterBrowsePage = { items: AssetSummary[]; nextCursor: string | null; totalCount: number };
 export const characterHubApi = {

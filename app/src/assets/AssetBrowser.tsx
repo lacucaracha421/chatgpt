@@ -1,5 +1,5 @@
+import { libraryContextItems } from "./libraryContextItems";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CharacterLab } from "../characters/CharacterLab";
 import { ASSET_PAGE_SIZE } from "../library/constants";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -52,7 +52,6 @@ export function AssetBrowser({ onReviewVideos, galleryLayout = "masonry", onGall
   const [selection, setSelection] = useState<SelectionState>(emptySelection);
   const [viewerAssetId, setViewerAssetId] = useState<string | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
-  const [characterOpen, setCharacterOpen] = useState(false);
   const [batchPending, setBatchPending] = useState(false);
   const [undoAssetIds, setUndoAssetIds] = useState<string[] | null>(null);
   const [dateBuckets, setDateBuckets] = useState<{ queryKey: string; buckets: AssetDateBucket[] }>({ queryKey: "", buckets: [] });
@@ -212,16 +211,6 @@ export function AssetBrowser({ onReviewVideos, galleryLayout = "masonry", onGall
   const changeMembership = (operation: () => Promise<void>) => void (async () => {
     if (await runBatch(operation, "분류를 변경하지 못했습니다.")) onMembershipChanged();
   })();
-  const destinationLabel = (entry: { id: string; name: string; parentId: string | null }, entries: { id: string; name: string; parentId: string | null }[]) => {
-    const names = [entry.name];
-    const seen = new Set([entry.id]);
-    let parent = entries.find((item) => item.id === entry.parentId);
-    while (parent && !seen.has(parent.id)) {
-      seen.add(parent.id); names.unshift(parent.name);
-      parent = entries.find((item) => item.id === parent!.parentId);
-    }
-    return names.join(" / ");
-  };
   const toggleFavorite = (asset: AssetSummary) => void (async () => {
     try {
       await gateway.setAssetFavorite(asset.id, !asset.favorite);
@@ -304,18 +293,14 @@ export function AssetBrowser({ onReviewVideos, galleryLayout = "masonry", onGall
   const visiblePage = activePage ?? (!currentFirstError ? page : null);
   const visibleItems = visiblePage?.items ?? [];
   const contextItems: ContextMenuItem[] = [
-    { id: "character-review", label: "캐릭터 검토", onSelect: () => setCharacterOpen(true) },
     ...(onReviewVideos && selectedAssets.length >= 2 && selectedAssets.length <= 100 && selectedAssets.every(asset => asset.media.kind === "video")
       ? [{ id: "video-similarity", label: "선택한 영상 비교", disabled: batchPending, onSelect: () => onReviewVideos([...selectedIds]) }]
       : []),
-    { id: "count", label: `${selectedIds.length}개 선택`, disabled: true, onSelect: () => undefined },
-    { id: "favorite", label: "좋아요 켜기", disabled: batchPending, onSelect: () => setBatchFavorite(true) },
-    { id: "unfavorite", label: "좋아요 끄기", disabled: batchPending, onSelect: () => setBatchFavorite(false) },
-    { id: "move", label: "폴더로 이동", disabled: batchPending, onSelect: () => undefined, children: [
-      { id: "unsorted", label: "미분류", onSelect: () => changeMembership(() => gateway.setAssetClassification({ assetIds: selectedIds, classificationId: null })) },
-      ...classifications.map((entry) => ({ id: entry.id, label: destinationLabel(entry, classifications), onSelect: () => changeMembership(() => gateway.setAssetClassification({ assetIds: selectedIds, classificationId: entry.id })) })),
-    ] },
-    { id: "album", label: "앨범에 추가", disabled: batchPending || albums.length === 0, onSelect: () => undefined, children: albums.map((entry) => ({ id: entry.id, label: destinationLabel(entry, albums), onSelect: () => changeMembership(() => gateway.patchAssetAlbums({ assetIds: selectedIds, addAlbumIds: [entry.id], removeAlbumIds: [] })) })) },
+    ...libraryContextItems({ count: selectedIds.length, busy: batchPending, classifications, albums,
+      onFavorite: setBatchFavorite,
+      onMove: classificationId => changeMembership(() => gateway.setAssetClassification({ assetIds: selectedIds, classificationId })),
+      onAlbum: id => changeMembership(() => gateway.patchAssetAlbums({ assetIds: selectedIds, addAlbumIds: [id], removeAlbumIds: [] })),
+    }),
     ...(view.kind === "album" ? [{ id: "remove-album", label: "이 앨범에서 제외", disabled: batchPending, onSelect: () => changeMembership(() => gateway.patchAssetAlbums({ assetIds: selectedIds, addAlbumIds: [], removeAlbumIds: [view.albumId] })) }] : []),
     ...(view.kind === "collection" ? [{ id: "remove", label: "이 컬렉션에서 제거", disabled: batchPending, onSelect: removeFromCollection }] : []),
     ...(view.kind === "collection" && selectedIds.length === 1 ? [{ id: "cover", label: "대표 이미지로 지정", disabled: batchPending, onSelect: () => setCover(selectedIds[0]!) }] : []),
@@ -338,8 +323,7 @@ export function AssetBrowser({ onReviewVideos, galleryLayout = "masonry", onGall
           if (!selection.ids.has(target.id)) selectWithGesture(target, { toggle: false, range: false });
         }} className="asset-browser__results" aria-busy={firstLoading} inert={!activePage ? true : undefined}><AssetGallery layout={galleryLayout} groupDates={visiblePage?.sort === "newest" || visiblePage?.sort === "oldest"} items={visibleItems} scopeKey={visiblePage?.queryKey} totalCount={visiblePage?.totalCount ?? null} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} targetRowHeight={thumbnailRowHeight} metadataVisible={metadataVisible} privacyMode={privacyMode} hasNextPage={Boolean(activePage && tailCursor !== null)} onLoadNextPage={loadNextPage} hasPreviousPage={Boolean(activePage && headCursor !== null)} onLoadPrevPage={loadPrevPage} onSelectionGesture={selectWithGesture} onSelectAll={selectAll} onDeleteSelection={trashSelection} onClearSelection={clearSelection} onMoveFocus={moveFocus} onOpen={(asset) => { viewerViewKeyRef.current = viewKey; setViewerAssetId(asset.id); }} onRetryVideo={(asset) => void gateway.retryVideoPreparation(asset.id).then(() => gateway.preparePendingVideos(1)).then(refresh).catch((error) => setMessage(commandErrorMessage(error, "미리보기 준비를 다시 시작하지 못했습니다.")))} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} /></div></ContextMenu>;
   return <section className="asset-browser" aria-label="저장소">
-    {characterOpen && <CharacterLab classifications={classifications} initialSeriesId={view.kind === "classification" ? view.classificationId : null} privacyMode={privacyMode} onClose={() => setCharacterOpen(false)} />}
-    {view.kind !== "revisit" && <AssetToolbar onCharacterReview={() => setCharacterOpen(true)} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} view={view} classifications={classifications} albums={albums} collections={collections} sort={sort} mediaFilter={mediaFilter} aspectFilter={aspectFilter} directOnly={directOnly} metadataVisible={metadataVisible} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} thumbnailRowHeight={thumbnailRowHeight} onSortChange={onSortChange} onMediaFilterChange={changeMediaFilter} onAspectFilterChange={changeAspectFilter} onDirectOnlyChange={setDirectOnly} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onReshuffle={reshuffle} />}
+    {view.kind !== "revisit" && <AssetToolbar galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} view={view} classifications={classifications} albums={albums} collections={collections} sort={sort} mediaFilter={mediaFilter} aspectFilter={aspectFilter} directOnly={directOnly} metadataVisible={metadataVisible} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} thumbnailRowHeight={thumbnailRowHeight} onSortChange={onSortChange} onMediaFilterChange={changeMediaFilter} onAspectFilterChange={changeAspectFilter} onDirectOnlyChange={setDirectOnly} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onReshuffle={reshuffle} />}
     {hasActiveFilters && <div className="asset-browser__active-filters" aria-label="적용 중인 필터">
       {mediaFilter !== "all" && <Button size="sm" onClick={() => changeMediaFilter("all")} aria-label="미디어 필터 해제">{mediaFilter === "images" ? "이미지" : "영상"}<span aria-hidden="true"> ×</span></Button>}
       {aspectFilter !== "all" && <Button size="sm" onClick={() => changeAspectFilter("all")} aria-label="비율 필터 해제">{aspectFilter === "portrait" ? "세로형" : aspectFilter === "landscape" ? "가로형" : "정사각형"}<span aria-hidden="true"> ×</span></Button>}

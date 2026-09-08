@@ -40,6 +40,7 @@ export function createCharacterFixture(): CharacterApi {
         if (query.filter === "recommended") return count > 0;
         if (query.filter === "multiple") return count > 1;
         if (query.filter === "confirmed") return row.predictions.some(p => p.decision === "accepted");
+        if (query.filter === "rejected") return row.predictions.some(p => p.decision === "rejected");
         if (query.filter === "unmatched") return row.predictions.every(p => p.state === "unmatched");
         if (query.filter === "pending" || query.filter === "error") return false;
         return true;
