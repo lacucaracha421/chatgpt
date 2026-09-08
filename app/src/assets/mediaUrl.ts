@@ -7,6 +7,12 @@ function mediaOrigin(): string {
   return isTauri() ? convertFileSrc("", "lakomics").replace(/\/$/, "") : "http://lakomics.localhost";
 }
 
+/** Adapt backend media URLs to the current WebView's custom-protocol origin. */
+export function nativeMediaUrl(url: string): string {
+  const origin = "http://lakomics.localhost";
+  return url.startsWith(`${origin}/`) ? `${mediaOrigin()}${url.slice(origin.length)}` : url;
+}
+
 export function thumbnailUrl(assetId: string): string {
   return `${mediaOrigin()}/thumbnail/${encodeURIComponent(assetId)}`;
 }

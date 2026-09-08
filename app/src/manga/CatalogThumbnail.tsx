@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { Skeleton } from "../shared/ui/Skeleton";
+import { nativeMediaUrl } from "../assets/mediaUrl";
 
 type CatalogThumbnailProps = {
   src: string | null;
@@ -27,7 +28,7 @@ export function CatalogThumbnail({ src, title, pageCount, className }: CatalogTh
 
   return <img
     className={className}
-    src={src}
+    src={nativeMediaUrl(src)}
     alt={`${title} 표지`}
     referrerPolicy="no-referrer"
     draggable={false}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   assetUrl,
+  nativeMediaUrl,
   collectionCoverThumbnailUrl,
   collectionSourceThumbnailUrl,
   mangadexCoverPreviewUrl,
@@ -57,8 +58,13 @@ it("uses the native Linux scheme without double-encoding IDs", async () => {
   try {
     mockConvertFileSrc("linux");
     expect(assetUrl("a/b")).toBe("lakomics://localhost/asset/a%2Fb");
+    expect(nativeMediaUrl("http://lakomics.localhost/remote-catalog-thumbnail/kHentai/42")).toBe("lakomics://localhost/remote-catalog-thumbnail/kHentai/42");
+    expect(nativeMediaUrl("http://lakomics.localhost/asset/a%2Fb")).toBe("lakomics://localhost/asset/a%2Fb");
+    expect(nativeMediaUrl("https://example.com/cover.jpg")).toBe("https://example.com/cover.jpg");
+    expect(nativeMediaUrl("http://lakomics.localhost.example.com/cover.jpg")).toBe("http://lakomics.localhost.example.com/cover.jpg");
     mockConvertFileSrc("windows");
     expect(assetUrl("a/b")).toBe("http://lakomics.localhost/asset/a%2Fb");
+    expect(nativeMediaUrl("http://lakomics.localhost/remote-catalog-thumbnail/kHentai/42")).toBe("http://lakomics.localhost/remote-catalog-thumbnail/kHentai/42");
   } finally {
     clearMocks();
     Reflect.deleteProperty(window, "isTauri");
