@@ -471,19 +471,19 @@ describe("App", () => {
     })));
   });
 
-  it("returns to the previous application view once and remains at the root", async () => {
+  it("keeps mouse back and Escape inside the current application tab", async () => {
     localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
     const libraryGateway = gateway();
     const user = userEvent.setup();
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
 
-    await user.click(await screen.findByRole("button", { name: "미분류" }));
-    expect(screen.getByRole("button", { name: "미분류" })).toHaveAttribute("aria-current", "page");
-    await user.keyboard("{Escape}");
-    expect(screen.getByRole("button", { name: "전체" })).toHaveAttribute("aria-current", "page");
-
-    await user.keyboard("{Escape}");
-    expect(screen.getByRole("button", { name: "전체" })).toHaveAttribute("aria-current", "page");
+    for (const name of ["컬렉션", "망가", "미분류", "컬렉션"]) {
+      await user.click(await screen.findByRole("button", { name }));
+      fireEvent.mouseUp(window, { button: 3 });
+      expect(screen.getByRole("button", { name })).toHaveAttribute("aria-current", "page");
+      await user.keyboard("{Escape}");
+      expect(screen.getByRole("button", { name })).toHaveAttribute("aria-current", "page");
+    }
   });
 
   it("stores drops from broad views in the unclassified destination", async () => {
@@ -1339,6 +1339,10 @@ describe("App", () => {
 
     expect(await screen.findByRole("heading", { name: "만화 컬렉션" })).toBeInTheDocument();
     expect(screen.getByText("던전밥")).toBeInTheDocument();
+    await user.click(screen.getByText("던전밥"));
+    await screen.findByRole("button", { name: "컬렉션 표지 보기 닫기" });
+    fireEvent.mouseUp(window, { button: 3 });
+    expect(await screen.findByRole("heading", { name: "만화 컬렉션" })).toBeInTheDocument();
   });
 
   it("returns from a Showcase detail to the originating Showcase mode", async () => {

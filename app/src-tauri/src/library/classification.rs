@@ -194,6 +194,12 @@ impl Library {
     ) -> Result<(), LibraryError> {
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
+        Self::set_asset_classification_in(&transaction, &request)?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub(super) fn set_asset_classification_in(transaction: &rusqlite::Connection, request: &SetAssetClassification) -> Result<(), LibraryError> {
         let asset_ids = validated_asset_ids(&transaction, &request.asset_ids)?;
         if let Some(classification_id) = request.classification_id.as_deref() {
             if find_classification(&transaction, classification_id)?.is_none() {
@@ -236,7 +242,6 @@ impl Library {
                 ],
             )?;
         }
-        transaction.commit()?;
         Ok(())
     }
 

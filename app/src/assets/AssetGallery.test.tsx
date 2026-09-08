@@ -746,3 +746,15 @@ describe("AssetGallery", () => {
 
 function asset(index: number): AssetSummary { return { id: `asset-${index}`, title: null, originalName: `asset-${index}.png`, byteSize: 1, width: 200, height: 200, collectedAt: "2026-07-30T00:00:00Z", favorite: false, sourceUrl: null, sourcePublishedAt: null, creatorName: null, creatorHandle: null, creatorUrl: null, importSource: null, importBatchId: null, originalModifiedAt: null, media: { kind: "image" } }; }
 function videoAsset(index: number): AssetSummary { return { ...asset(index), id: `video-${index}`, originalName: `video-${index}.webm`, media: { kind: "video", durationMs: 10_000, preparationState: "ready", scrubFrameCount: 10 } }; }
+
+it("keeps series header controls outside the asset list and their keys out of selection", async () => {
+  const selectAll = vi.fn();
+  const { container } = render(<AssetGallery intro={<input aria-label="시리즈 설명" />} layout="masonry" items={[asset(0)]} onSelectAll={selectAll} />);
+  const field = screen.getByLabelText("시리즈 설명");
+  expect(screen.getByRole("listbox", { name:"자산" })).not.toContainElement(field);
+  fireEvent.keyDown(field, { key:"a",ctrlKey:true });
+  expect(selectAll).not.toHaveBeenCalled();
+  fireEvent.keyDown(await screen.findByRole("option", {name:"asset-0.png"}), {key:"a",ctrlKey:true});
+  expect(selectAll).toHaveBeenCalledTimes(1);
+  expect(container.querySelectorAll(".asset-gallery__scroll")).toHaveLength(1);
+});

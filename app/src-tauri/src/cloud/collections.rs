@@ -1,5 +1,6 @@
 //! Explicit, one-way publication of committed Collection presentation data.
 //! No provider calls, lazy imports or writes to the library. Source previews stage in TEMP.
+use super::publication::{report, Reporter};
 use super::client::CloudClient;
 use crate::library::{
     collection::{collection_from_row, COLLECTION_SUMMARY_SQL},
@@ -79,7 +80,9 @@ struct Snapshot {
 impl Library {
     pub(crate) fn push_cloud_collections(
         &self,
+        progress: Reporter<'_>,
     ) -> Result<CloudCollectionsPublishResult, LibraryError> {
+        report(progress, "connecting", 0, None, "items");
         let config = self.cloud_sync_config()?;
         let client = CloudClient::new(
             config
@@ -91,24 +94,28 @@ impl Library {
         // Capture the remote generation before doing expensive local work. A competing
         // publisher must result in a conflict, never silently overwrite its snapshot.
         let base_revision = client.collections_revision(&token)?;
-        let snapshot = self.cloud_collections_snapshot(base_revision)?;
-        publish_snapshot(&client, &token, snapshot)
+        let snapshot = self.cloud_collections_snapshot(base_revision, progress)?;
+        publish_snapshot(&client, &token, snapshot, progress)
     }
 
     fn cloud_collections_snapshot(
         &self,
         base_revision: Option<String>,
+        progress: Reporter<'_>,
     ) -> Result<Snapshot, LibraryError> {
         let root = self
             .root()
             .canonicalize()
             .map_err(|_| LibraryError::InvalidWorkArtwork)?;
-        let mut connection = self.connection()?;
-        snapshot_from_connection(&root, &mut connection, base_revision)
+        // Independent WAL reader: image preparation must not hold the library mutex.
+        let mut connection = rusqlite::Connection::open_with_flags(
+            self.root().join("library.sqlite"), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        connection.busy_timeout(std::time::Duration::from_secs(5))?;
+        snapshot_from_connection(&root, &mut connection, base_revision, progress)
     }
 }
 
-fn publish_snapshot(client: &CloudClient, token: &str, snapshot: Snapshot) -> Result<CloudCollectionsPublishResult, LibraryError> {
+fn publish_snapshot(client: &CloudClient, token: &str, snapshot: Snapshot, progress: Reporter<'_>) -> Result<CloudCollectionsPublishResult, LibraryError> {
         let metadata = serde_json::to_vec(&snapshot.replica)
             .map_err(|_| LibraryError::InvalidCloudResponse)?;
         if metadata.len() > MAX_METADATA_BYTES {
@@ -118,9 +125,13 @@ fn publish_snapshot(client: &CloudClient, token: &str, snapshot: Snapshot) -> Re
         // metadata barrier. Completed immutable objects are reused after interruption.
         let files: Vec<_> = snapshot.files.values().collect();
         let stopped = std::sync::atomic::AtomicBool::new(false);
+        let completed = std::sync::Mutex::new(0u64);
+        let total = files.len() as u64;
+        report(progress, "uploading", 0, Some(total), "files");
         let uploaded = std::thread::scope(|scope| {
             let workers: Vec<_> = files.chunks(files.len().div_ceil(4).max(1)).map(|chunk| {
                 let stopped = &stopped;
+                let completed = &completed;
                 scope.spawn(move || {
                     let mut uploaded = 0usize;
                     for local in chunk {
@@ -130,12 +141,16 @@ fn publish_snapshot(client: &CloudClient, token: &str, snapshot: Snapshot) -> Re
                             Ok(false) => {},
                             Err(error) => { stopped.store(true, std::sync::atomic::Ordering::Relaxed); return Err(error); }
                         }
+                        let mut count = completed.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                        *count += 1;
+                        report(progress, "uploading", *count, Some(total), "files");
                     }
                     Ok(uploaded)
                 })
             }).collect();
             workers.into_iter().map(|worker| worker.join().unwrap_or(Err(LibraryError::InvalidCloudResponse))).collect::<Result<Vec<_>, _>>()
         })?.into_iter().sum();
+        report(progress, "publishing", 0, None, "items");
         let revision = client.publish_collections(&metadata, &token)?;
         Ok(CloudCollectionsPublishResult {
             collections: snapshot.replica.collections.len(),
@@ -159,9 +174,9 @@ fn upload_local_blob(client: &CloudClient, token: &str, local: &LocalBlob) -> Re
     client.upload_collection_artwork(&local.descriptor, &bytes, token)
 }
 
-fn snapshot_from_connection(root: &Path, connection: &mut rusqlite::Connection, base_revision: Option<String>) -> Result<Snapshot, LibraryError> {
+fn snapshot_from_connection(root: &Path, connection: &mut rusqlite::Connection, base_revision: Option<String>, progress: Reporter<'_>) -> Result<Snapshot, LibraryError> {
         let transaction = connection.transaction()?;
-        let source_root = collection_source_root(&transaction)?;
+        let source_root = collection_source_root(&transaction, root)?;
         let staging = tempfile::tempdir().map_err(|_| LibraryError::InvalidWorkArtwork)?;
         let staging_root = staging.path().canonicalize().map_err(|_| LibraryError::InvalidWorkArtwork)?;
         let mut files = BTreeMap::new();
@@ -178,6 +193,8 @@ fn snapshot_from_connection(root: &Path, connection: &mut rusqlite::Connection, 
         if summaries.len() > MAX_COLLECTIONS {
             return Err(LibraryError::InvalidCloudResponse);
         }
+        let total = summaries.len() as u64;
+        report(progress, "preparing", 0, Some(total), "items");
         for mut summary in summaries {
             let source_path = summary.source_path.take();
             let mut volumes = committed_volumes(&transaction, &summary.id)?;
@@ -235,6 +252,7 @@ fn snapshot_from_connection(root: &Path, connection: &mut rusqlite::Connection, 
                 return Err(LibraryError::InvalidCloudResponse);
             }
             collections.push(collection);
+            report(progress, "preparing", collections.len() as u64, Some(total), "items");
         }
         // Keep the single committed SQLite view during extraction, release it before HTTP.
         transaction.commit()?;
@@ -459,6 +477,17 @@ mod tests {
     use serde_json::json;
     use tiny_http::{Response, Server};
 
+    #[test]
+    fn snapshot_preparation_does_not_acquire_library_mutex() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let _guard = library.connection().unwrap();
+        let events = std::sync::Mutex::new(Vec::new());
+        let snapshot = library.cloud_collections_snapshot(None, &|event| events.lock().unwrap().push(event)).unwrap();
+        assert!(snapshot.replica.collections.is_empty());
+        assert_eq!(events.lock().unwrap()[0].phase, "preparing");
+    }
+
     // Explicit operational entry point: never opens Library or performs startup writes.
     #[test]
     #[ignore = "Publishes cloud metadata and artwork; requires explicit operator approval"]
@@ -469,9 +498,9 @@ mod tests {
         let token = credential::read_cloud_api_token_os().unwrap();
         let revision = client.collections_revision(&token).unwrap();
         let mut connection = rusqlite::Connection::open_with_flags(root.join("library.sqlite"), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
-        let snapshot = snapshot_from_connection(&root, &mut connection, revision).unwrap();
+        let snapshot = snapshot_from_connection(&root, &mut connection, revision, &|_| {}).unwrap();
         println!("Prepared {} collections and {} unique artwork files; {} cover-ready works; {} volumes", snapshot.replica.collections.len(), snapshot.files.len(), snapshot.replica.collections.iter().filter(|c| available_artwork(&c.artworks, c.summary.selected_work_artwork_id.as_deref()) || c.summary.cover_asset_id.is_some()).count(), snapshot.replica.collections.iter().map(|c|c.volumes.len()).sum::<usize>());
-        let result = publish_snapshot(&client, &token, snapshot).unwrap();
+        let result = publish_snapshot(&client, &token, snapshot, &|_| {}).unwrap();
         println!("Collection publication: {}", serde_json::to_string(&result).unwrap());
     }
 
@@ -494,8 +523,8 @@ mod tests {
         drop(connection);
         let observer = rusqlite::Connection::open_with_flags(temp.path().join("library.sqlite"), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
         let before: i64 = observer.query_row("PRAGMA data_version", [], |r|r.get(0)).unwrap();
-        let first = library.cloud_collections_snapshot(None).unwrap();
-        let second = library.cloud_collections_snapshot(None).unwrap();
+        let first = library.cloud_collections_snapshot(None, &|_| {}).unwrap();
+        let second = library.cloud_collections_snapshot(None, &|_| {}).unwrap();
         assert_eq!(serde_json::to_value(&first.replica).unwrap(),serde_json::to_value(&second.replica).unwrap());
         let game = first.replica.collections.iter().find(|c|c.summary.id=="g").unwrap();
         assert_eq!(game.summary.selected_work_artwork_id.as_deref(),Some(source_id("artwork/g/collection-sources/book/games/game/covers/preferred.png").as_str()));
@@ -527,7 +556,7 @@ mod tests {
         connection.execute("UPDATE library_settings SET collection_source_root=?1 WHERE singleton=1",[outside.path().to_str().unwrap()]).unwrap();
         connection.execute_batch("INSERT INTO collections(id,name,type,source_path,created_at,updated_at) VALUES ('g','Game','game','game','2026','2026')").unwrap();
         drop(connection);
-        assert!(matches!(library.cloud_collections_snapshot(None),Err(LibraryError::InvalidWorkArtwork)));
+        assert!(matches!(library.cloud_collections_snapshot(None, &|_| {}),Err(LibraryError::InvalidWorkArtwork)));
     }
 
     #[test]
@@ -548,7 +577,7 @@ mod tests {
             .query_row("PRAGMA data_version", [], |r| r.get(0))
             .unwrap();
         let snapshot = library
-            .cloud_collections_snapshot(Some("old-revision".into()))
+            .cloud_collections_snapshot(Some("old-revision".into()), &|_| {})
             .unwrap();
         let value = serde_json::to_value(&snapshot.replica).unwrap();
         let item = &value["collections"][0];
@@ -582,7 +611,7 @@ mod tests {
             connection.execute("INSERT INTO collections(id,name,type,created_at,updated_at) VALUES(?1,?1,?2,'2026','2026')",rusqlite::params![id,kind]).unwrap();
         }
         connection.execute("INSERT INTO collection_work_artworks(id,collection_id,provider,provider_image_id,kind,relative_path,mime_type,width,height,selected,created_at,updated_at) VALUES('av-front','a','local-manual','cover/hash','cover','../outside-invalid.png','image/png',10,20,1,'2026','2026')",[]).unwrap();
-        let snapshot = snapshot_from_connection(temp.path(), &mut connection, None).unwrap();
+        let snapshot = snapshot_from_connection(temp.path(), &mut connection, None, &|_| {}).unwrap();
         let ids: std::collections::BTreeSet<_> = snapshot.replica.collections.iter().map(|item|item.summary.id.as_str()).collect();
         assert_eq!(ids, ["g","m","v"].into_iter().collect());
         assert!(snapshot.files.is_empty());
@@ -660,7 +689,12 @@ mod tests {
             request.respond(Response::from_string(json!({"revision":"published"}).to_string())).unwrap();
         });
         let snapshot = Snapshot { files, _staging: tempfile::tempdir().unwrap(), replica: CollectionReplica {version:1,base_revision:None,collections:vec![]} };
-        assert_eq!(publish_snapshot(&client, "test-token", snapshot).unwrap().revision, "published");
+        let events = std::sync::Mutex::new(Vec::new());
+        assert_eq!(publish_snapshot(&client, "test-token", snapshot, &|event| events.lock().unwrap().push(event)).unwrap().revision, "published");
+        let events = events.into_inner().unwrap();
+        let counts: Vec<_> = events.iter().filter(|event| event.phase == "uploading").map(|event| event.completed).collect();
+        assert_eq!(counts, (0..=8).collect::<Vec<_>>());
+        assert_eq!(events.last().unwrap().phase, "publishing");
         worker.join().unwrap();
     }
 

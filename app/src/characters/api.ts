@@ -1,20 +1,23 @@
 import { invoke } from "@tauri-apps/api/core";
+import { characterHubApi } from "./hubApi";
 import type { AssetSummary } from "../library/types";
 
 export type CharacterRef = { slot: number; assetId: string | null; assetHash: string; status: string };
-export type CharacterTarget = { id: string; seriesClassificationId: string | null; linkedClassificationId: string | null; displayName: string; enabled: boolean; revision: number; references: CharacterRef[]; ready: boolean; fingerprint: string };
-export type TargetDraft = { id: string | null; expectedRevision: number | null; seriesClassificationId: string; linkedClassificationId: string | null; displayName: string; enabled: boolean };
+export type CharacterTarget = { id: string; seriesClassificationId: string | null; linkedClassificationId: string | null; displayName: string; description?: string; thumbnailAssetId?: string | null; enabled: boolean; revision: number; references: CharacterRef[]; learnedReferences?: CharacterRef[]; ready: boolean; fingerprint: string };
+export type TargetDraft = { id: string | null; expectedRevision: number | null; seriesClassificationId: string; linkedClassificationId: string | null; displayName: string; description?: string; thumbnailAssetId?: string | null; enabled: boolean };
 export type ScanStatus = { id: string; targetId: string; targetFingerprint: string; runtimeFingerprint: string | null; state: string; total: number; completed: number; errors: number; cacheHits: number; extractions: number; error: string | null };
-export type Prediction = { targetId: string; targetName: string; targetFingerprint: string; scanId: string | null; runtimeFingerprint: string | null; state: string; decision: string | null; evidence: { distance: number; bestQueryCrop: number; queryBoxes: number[][]; wholeFallback: boolean; evidence: { queryCrop: number; matchedReferences: number[]; referenceDistances: number[] }[] } | null; error: string | null };
+export type Prediction = { targetId: string; targetName: string; targetFingerprint: string; scanId: string | null; runtimeFingerprint: string | null; state: string; decision: string | null; evidence: { referenceHashes?: string[]; learnedReferenceCount?: number; distance: number; bestQueryCrop: number; queryBoxes: number[][]; wholeFallback: boolean; evidence: { queryCrop: number; matchedReferences: number[]; referenceDistances: number[] }[] } | null; error: string | null };
 export type ReviewRow = { asset: AssetSummary; predictions: Prediction[] };
 export type ReviewPage = { rows: ReviewRow[]; nextCursor: string | null };
 export type ReviewFilter = "all" | "recommended" | "unmatched" | "multiple" | "confirmed" | "pending" | "error";
 export type ReviewQuery = { seriesId: string; targetId: string | null; filter: ReviewFilter; after: string | null; limit: number };
 export type DecisionKind = "accepted" | "rejected" | "cleared";
 export type DecisionRequest = { targetId: string; expectedFingerprint: string; assetIds: string[]; decision: DecisionKind; baselineFingerprint: string | null; scanId: string | null };
-export type Decision = { sequence: number; assetId: string | null; sourceAssetId: string; decision: DecisionKind; createdAt: string; referenceSnapshot: string; targetFingerprint: string; baselineFingerprint: string | null };
+export type Decision = { origin?: "manual" | "automatic"; sequence: number; assetId: string | null; sourceAssetId: string; decision: DecisionKind; createdAt: string; referenceSnapshot: string; targetFingerprint: string; baselineFingerprint: string | null };
 
 export interface CharacterApi {
+  automaticSeries(): Promise<string[]>;
+  applyAutomatic(scanIds: string[]): Promise<number>;
   targets(): Promise<CharacterTarget[]>;
   save(request: TargetDraft): Promise<CharacterTarget>;
   refs(targetId: string, expectedRevision: number, assetIds: string[]): Promise<CharacterTarget>;
@@ -29,6 +32,8 @@ export interface CharacterApi {
   setup(): Promise<boolean>;
 }
 export const characterApi: CharacterApi = {
+  automaticSeries: async () => (await characterHubApi.series()).filter(s => s.autoClassify).map(s => s.classificationId),
+  applyAutomatic: scanIds => invoke("apply_automatic_characters", { scanIds }),
   targets: () => invoke("list_character_targets"),
   save: request => invoke("save_character_target", { request }),
   refs: (targetId, expectedRevision, assetIds) => invoke("replace_character_references", { targetId, expectedRevision, assetIds }),

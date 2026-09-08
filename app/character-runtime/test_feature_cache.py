@@ -79,3 +79,36 @@ class CacheTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 self.cache.extract(self.source, self.digest)
         self.assertFalse(list(self.cache.root.iterdir()))
+
+class ExtractionIdentityTests(unittest.TestCase):
+    def test_comparison_changes_keep_features_but_extraction_changes_invalidate(self):
+        import copy
+        from feature_cache import extraction_fingerprint
+        from runtime import BASELINE
+        source = Path(__file__).with_name('runtime.py').read_text()
+        original = extraction_fingerprint(source)
+        policy = copy.deepcopy(BASELINE)
+        policy['threshold'] = 0.01
+        policy['required_references'] = 4
+        policy['sha256']['model_metrics.onnx'] = 'changed-metric'
+        self.assertEqual(original, extraction_fingerprint(source.replace('second = np.sort(per_ref, axis=1)', 'second = np.sort(per_ref + 0, axis=1)'), policy))
+        policy['sha256']['model_feat.onnx'] = 'changed-features'
+        self.assertNotEqual(original, extraction_fingerprint(source, policy))
+        self.assertNotEqual(original, extraction_fingerprint(source.replace('(384, 384)', '(383, 383)')))
+
+    def test_verified_legacy_cache_reuse_avoids_inference_and_unknown_caches_do_not(self):
+        from feature_cache import extraction_fingerprint, compatible_feature_caches
+        import json
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); image=root/'input.png';Image.new('RGB',(32,32),'red').save(image)
+            engine=FakeEngine(); old='a'*64; current=extraction_fingerprint()
+            FeatureCache(root/'cache',engine,old).extract(image,sha256(image))
+            (root/'cache-compatibility.json').write_text(json.dumps({current:[old,'../../bad']}))
+            aliases=compatible_feature_caches(root,current)
+            self.assertEqual(aliases,[old])
+            new=FeatureCache(root/'cache',engine,current,aliases)
+            new.extract(image,sha256(image))
+            self.assertEqual((new.hits,new.misses,engine.calls),(1,0,1))
+            changed=FeatureCache(root/'cache',engine,'b'*64,compatible_feature_caches(root,'b'*64))
+            changed.extract(image,sha256(image))
+            self.assertEqual(engine.calls,2)

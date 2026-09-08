@@ -51,12 +51,10 @@ pub async fn setup_character_runtime(app: tauri::AppHandle) -> Result<bool, Comm
     use tauri_plugin_dialog::DialogExt;
     let (script, settings) = runtime_paths(&app)?;
     tauri::async_runtime::spawn_blocking(move || -> Result<bool, CommandError> {
-        let Some(python) = app
-            .dialog()
-            .file()
-            .set_title("캐릭터 분석용 Python 실행 파일 선택")
-            .add_filter("Python", &["exe"])
-            .blocking_pick_file()
+        let picker = app.dialog().file().set_title("캐릭터 분석용 Python 실행 파일 선택");
+        #[cfg(target_os = "windows")]
+        let picker = picker.add_filter("Python", &["exe"]);
+        let Some(python) = picker.blocking_pick_file()
         else {
             return Ok(false);
         };
@@ -233,4 +231,25 @@ pub fn character_relations_for_asset(
     current_required(state)?
         .character_relations_for_asset(&asset_id)
         .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn character_series(state: State<'_, AppState>) -> Result<Vec<crate::library::character_hub::Series>, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.character_series()).await.map_err(|_| super::background_task_error())?.map_err(Into::into)
+}
+#[tauri::command]
+pub async fn save_character_series(request: crate::library::character_hub::Series, state: State<'_, AppState>) -> Result<crate::library::character_hub::Series, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.save_character_series(request)).await.map_err(|_| super::background_task_error())?.map_err(Into::into)
+}
+#[tauri::command]
+pub async fn browse_character_assets(query: crate::library::character_hub::BrowseQuery, state: State<'_, AppState>) -> Result<crate::library::character_hub::BrowsePage, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.browse_character_assets(query)).await.map_err(|_| super::background_task_error())?.map_err(Into::into)
+}
+#[tauri::command]
+pub async fn apply_automatic_characters(scan_ids: Vec<String>, state: State<'_, AppState>) -> Result<u64, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.apply_automatic_characters(scan_ids)).await.map_err(|_| super::background_task_error())?.map_err(Into::into)
 }

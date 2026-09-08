@@ -1,13 +1,14 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { characterHubApi } from "./hubApi";
 import { CharacterLab } from "./CharacterLab";
 import { createCharacterFixture, fixtureAssets, fixtureClassifications } from "./characterFixtures";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { LibraryGateway } from "../library/types";
 
 beforeEach(() => { localStorage.clear(); Object.defineProperties(HTMLElement.prototype, { clientWidth: { configurable: true, get: () => 850 }, clientHeight: { configurable: true, get: () => 650 } }); });
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 function mount(api = createCharacterFixture()) {
   const gateway = { listAssets: vi.fn().mockResolvedValue({ items: fixtureAssets, nextCursor: null }), openLibrary: vi.fn() } as unknown as LibraryGateway;
   render(<LibraryProvider gateway={gateway}><CharacterLab classifications={fixtureClassifications} initialSeriesId="series" onClose={vi.fn()} api={api} /></LibraryProvider>);
@@ -48,7 +49,8 @@ describe("Character review", () => {
   });
 
   it("chooses references recursively and refuses a sixth image", async () => {
-    const api = createCharacterFixture(), refs = vi.spyOn(api, "refs"); const { gateway } = mount(api); const user = userEvent.setup();
+    vi.spyOn(characterHubApi,"browse").mockResolvedValue({items:fixtureAssets,nextCursor:null,totalCount:fixtureAssets.length});
+    const api = createCharacterFixture(), refs = vi.spyOn(api, "refs"); mount(api); const user = userEvent.setup();
     await user.selectOptions(await screen.findByRole("combobox", { name: "캐릭터 설정" }), "hina");
     await user.click(screen.getByRole("button", { name: "기준 이미지 선택" }));
     const picker = await screen.findByRole("dialog", { name: "히나 · 기준 이미지" });
@@ -58,7 +60,7 @@ describe("Character review", () => {
     await user.click(within(picker).getByRole("option", { name: "이미지 5.webp" }));
     await user.click(within(picker).getByRole("button", { name: "기준 이미지 저장" }));
     await waitFor(() => expect(refs).toHaveBeenCalledWith("hina", 1, ["image-1", "image-2", "image-3", "image-4", "image-5"]));
-    expect(gateway.listAssets).toHaveBeenCalledWith(expect.objectContaining({ classificationId: "series", directOnly: false }));
+    expect(characterHubApi.browse).toHaveBeenCalledWith(expect.objectContaining({ seriesId: "series", referenceTargetId: "hina" }));
   });
 
   it("gates scan until runtime setup and creates a registry entry without moving folders", async () => {
@@ -72,4 +74,23 @@ describe("Character review", () => {
     await user.click(screen.getByRole("button", { name: "캐릭터 만들기" }));
     await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({ displayName: "아루", seriesClassificationId: "series", linkedClassificationId: null })));
   });
+});
+
+it("manual analysis with automatic classification compares the whole series before applying", async () => {
+  const api=createCharacterFixture();
+  vi.spyOn(api,"automaticSeries").mockResolvedValue(["series"]);
+  const states: Awaited<ReturnType<typeof api.runs>> = [];
+  const start=vi.spyOn(api,"start").mockImplementation(async(targetId,targetFingerprint)=>{
+    const run={id:`new-${targetId}`,targetId,targetFingerprint,runtimeFingerprint:"runtime",state:"completed",total:1,completed:1,errors:0,cacheHits:1,extractions:0,error:null};
+    states.push(run);return run;
+  });
+  vi.spyOn(api,"runs").mockImplementation(async()=>states);
+  const apply=vi.spyOn(api,"applyAutomatic").mockResolvedValue(2);
+  mount(api);const user=userEvent.setup();
+  await user.selectOptions(await screen.findByRole("combobox",{name:"캐릭터 설정"}),"hina");
+  await user.click(screen.getByRole("button",{name:"선택 캐릭터 분석"}));
+  await waitFor(()=>expect(apply).toHaveBeenCalledTimes(1),{timeout:4000});
+  expect(start).toHaveBeenCalledTimes((await api.targets()).filter(t=>t.ready&&t.seriesClassificationId==="series").length);
+  expect(apply).toHaveBeenCalledWith(states.map(s=>s.id));
+  expect(screen.getByText("분석 완료 · 2장 자동 확정")).toBeInTheDocument();
 });

@@ -14,6 +14,7 @@ This is the operational procedure for moving Lakomics to another Windows PC or r
 
 - External manga originals/folders are not uploaded by the PC recovery point. Copy or remount those folders separately, then set the manga root again.
 - External collection source/book folders are not server recovery payloads. Reattach them only when those source files are still needed.
+- Collection source folders selected inside the library are stored relative to the library root and follow a full library-folder copy between Windows and Linux. Older absolute settings pointing into `collection-sources/` are resolved against the current library when the old folder is unavailable and the corresponding local folder exists; reading does not rewrite the database. External source folders retain their explicit paths and must be reattached after a move. Copy the source image files too: metadata recovery alone cannot recreate them.
 - Windows Credential Manager secrets are not copied. Re-enter the Cloud API token and any Kakao/IGDB/TMDB credentials (and legacy Aladin credentials if still needed) on the new PC.
 - Tailscale identity is machine-level state. Install/login to Tailscale on the new PC instead of copying its local state.
 - The extension Collector/Cloud token is the bootstrap secret for extension backup encryption and must be entered on the new browser before restore. It is not stored inside its own encrypted payload.

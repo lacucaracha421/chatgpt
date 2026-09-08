@@ -41,7 +41,11 @@ fn mobile_catalog_export_reads_existing_preparation_without_source_writes() {
     }
     let before=std::fs::read(temp.path().join("catalogs/kdata.db")).unwrap();
     let users_before=super::mobile_catalog::user_snapshot(&library.connection().unwrap()).unwrap();
-    let mut exported=library.export_mobile_catalog_snapshot().unwrap();
+    let events = std::sync::Mutex::new(Vec::new());
+    let mut exported=library.export_mobile_catalog_snapshot_with_progress(&|event| events.lock().unwrap().push(event)).unwrap();
+    let events = events.into_inner().unwrap();
+    assert_eq!(events.last().unwrap().total, Some(events.last().unwrap().completed));
+    assert_eq!(events.last().unwrap().phase, "preparing");
     let mut output=String::new();exported.file.read_to_string(&mut output).unwrap();
     let records:Vec<Value>=output.lines().map(|s|serde_json::from_str(s).unwrap()).collect();
     assert_eq!(records[0]["value"]["counts"]["work"],7);

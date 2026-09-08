@@ -46,6 +46,9 @@ pub struct TargetDraft {
     pub series_classification_id: Option<String>,
     pub linked_classification_id: Option<String>,
     pub display_name: String,
+    #[serde(default)]
+    pub description: String,
+    pub thumbnail_asset_id: Option<String>,
     pub enabled: bool,
 }
 
@@ -66,9 +69,13 @@ pub struct Target {
     pub series_classification_id: Option<String>,
     pub linked_classification_id: Option<String>,
     pub display_name: String,
+    #[serde(default)]
+    pub description: String,
+    pub thumbnail_asset_id: Option<String>,
     pub enabled: bool,
     pub revision: i64,
     pub references: Vec<Reference>,
+    pub learned_references: Vec<Reference>,
     pub ready: bool,
     pub fingerprint: String,
 }
@@ -113,6 +120,7 @@ pub struct Decision {
     pub target_fingerprint: String,
     pub baseline_fingerprint: Option<String>,
     pub reference_snapshot: String,
+    pub origin: String,
     pub created_at: String,
 }
 
@@ -156,6 +164,12 @@ impl Library {
                 return Err(Error::Invalid("연결할 폴더를 찾을 수 없습니다."));
             }
         }
+        if let Some(image) = &draft.thumbnail_asset_id {
+            super::character_hub::validate_art(&transaction, image)?;
+        }
+        if let Some(series) = &draft.series_classification_id {
+            transaction.execute("INSERT OR IGNORE INTO character_series(classification_id) VALUES(?1)", [series])?;
+        }
         let now = chrono::Utc::now().to_rfc3339();
         let id = if let Some(id) = draft.id {
             let previous = self.read_character_target(&transaction, &id)?;
@@ -182,6 +196,8 @@ impl Library {
                 VALUES(?1,?2,?3,?4,?5,?6,?6)", params![id,draft.series_classification_id,draft.linked_classification_id,name,draft.enabled,now])?;
             id
         };
+        transaction.execute("UPDATE character_targets SET description=?2, thumbnail_asset_id=?3 WHERE id=?1",
+            params![id, draft.description, draft.thumbnail_asset_id])?;
         let result = self.read_character_target(&transaction, &id)?;
         transaction.commit()?;
         Ok(result)
@@ -273,7 +289,7 @@ impl Library {
         Ok(changed)
     }
 
-    fn write_character_decisions(
+    pub(super) fn write_character_decisions(
         &self,
         transaction: &Connection,
         request: DecisionRequest,
@@ -322,7 +338,7 @@ impl Library {
                     .series_classification_id
                     .as_deref()
                     .ok_or(Error::Invalid("시리즈 폴더를 다시 연결해 주세요."))?;
-                scoped_image(&transaction, series, asset_id)?.0
+                super::character_hub::candidate_image(&transaction, series, asset_id)?.0
             };
             let previous: Option<String> = transaction
                 .query_row(
@@ -360,7 +376,7 @@ impl Library {
         let connection = self.connection()?;
         self.read_character_target(&connection, target_id)?;
         let mut statement = connection.prepare("SELECT sequence,asset_id,source_asset_id,asset_hash,decision,
-            target_fingerprint,baseline_fingerprint,reference_snapshot,created_at FROM character_decisions
+            target_fingerprint,baseline_fingerprint,reference_snapshot,created_at,origin FROM character_decisions
             WHERE target_id=?1 AND (?2 IS NULL OR sequence<?2) ORDER BY sequence DESC LIMIT ?3")?;
         let rows = statement
             .query_map(params![target_id, before, limit], |r| {
@@ -374,6 +390,7 @@ impl Library {
                     baseline_fingerprint: r.get(6)?,
                     reference_snapshot: r.get(7)?,
                     created_at: r.get(8)?,
+                    origin: r.get(9)?,
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -397,10 +414,11 @@ impl Library {
         connection: &Connection,
         id: &str,
     ) -> Result<Target> {
-        let mut target = connection.query_row("SELECT id,series_classification_id,linked_classification_id,display_name,enabled,revision
+        let mut target = connection.query_row("SELECT id,series_classification_id,linked_classification_id,display_name,enabled,revision,description,
+            (SELECT a.id FROM assets a WHERE a.id=thumbnail_asset_id AND a.status='normal')
             FROM character_targets WHERE id=?1", [id], |r| Ok(Target {
                 id:r.get(0)?,series_classification_id:r.get(1)?,linked_classification_id:r.get(2)?,display_name:r.get(3)?,
-                enabled:r.get(4)?,revision:r.get(5)?,references:Vec::new(),ready:false,fingerprint:String::new()
+                enabled:r.get(4)?,revision:r.get(5)?,description:r.get(6)?,thumbnail_asset_id:r.get(7)?,references:Vec::new(),learned_references:Vec::new(),ready:false,fingerprint:String::new()
             })).optional()?.ok_or(Error::NotFound)?;
         let mut statement = connection.prepare("SELECT slot,asset_id,asset_hash FROM character_references WHERE target_id=?1 ORDER BY slot")?;
         let rows = statement.query_map([id], |r| {
@@ -440,6 +458,23 @@ impl Library {
                 asset_hash,
                 status,
             });
+        }
+        // Only current, explicit human approvals may teach later comparisons.
+        if let Some(series) = &target.series_classification_id {
+            let mut seen = target.references.iter().map(|r| r.asset_hash.clone()).collect::<BTreeSet<_>>();
+            let mut statement = connection.prepare("SELECT a.id,a.content_hash,a.relative_path FROM character_relations r
+                JOIN character_decisions d ON d.sequence=r.sequence JOIN assets a ON a.id=r.asset_id
+                WHERE r.target_id=?1 AND d.origin='manual' AND a.status='normal' AND a.media_kind='image'
+                AND d.asset_hash=a.content_hash
+                AND NOT EXISTS(SELECT 1 FROM character_relations other WHERE other.asset_id=a.id AND other.target_id<>?1)
+                ORDER BY d.sequence DESC")?;
+            let rows = statement.query_map([id], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?)))?;
+            for row in rows {
+                let (asset_id, asset_hash, path) = row?;
+                if !seen.insert(asset_hash.clone()) || scoped_image(connection,series,&asset_id).is_err() || self.open_library_media(&path).is_err() { continue; }
+                target.learned_references.push(Reference { slot: target.learned_references.len() as u32, asset_id:Some(asset_id), asset_hash, status:"ready" });
+                if target.learned_references.len() == 20 { break; }
+            }
         }
         target.ready = target.enabled
             && target.series_classification_id.is_some()

@@ -64,7 +64,7 @@ impl Library {
                     && query.target_id.as_ref().is_none_or(|id| id == &t.id)
             })
             .collect();
-        let (inputs, decisions) = {
+        let (inputs, decisions, confirmed) = {
             let connection = self.connection()?;
             let mut statement = connection.prepare("WITH RECURSIVE scope(id) AS (
                 SELECT id FROM classification_entries WHERE id=?1 UNION
@@ -92,7 +92,12 @@ impl Library {
                     ))
                 })?
                 .collect::<std::result::Result<BTreeMap<_, _>, _>>()?;
-            (inputs, decisions)
+            let confirmed = connection.prepare("SELECT asset_id,target_id FROM character_relations")?
+                .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            let mut owners = BTreeMap::<String, std::collections::BTreeSet<String>>::new();
+            for (asset, target) in confirmed { owners.entry(asset).or_default().insert(target); }
+            (inputs, decisions, owners)
         };
         let ready: BTreeMap<_, _> = targets
             .iter()
@@ -116,6 +121,9 @@ impl Library {
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
                 targets
                     .iter()
+                    .filter(|target| {
+                        confirmed.get(&input.id).is_none_or(|owners| owners.contains(&target.id))
+                    })
                     .map(|target| {
                         let pair = state
                             .status
@@ -156,7 +164,7 @@ impl Library {
                     })
                     .collect::<Vec<_>>()
             };
-            if !matches_filter(&predictions, &query.filter) {
+            if predictions.is_empty() || !matches_filter(&predictions, &query.filter) {
                 continue;
             }
             if predictions.iter().any(|p| p.evidence.is_some()) && self.verify_input(input).is_err()

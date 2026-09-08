@@ -1,4 +1,5 @@
 """Disposable content-addressed features. Never part of a recovery snapshot."""
+import ast
 import hashlib
 import json
 import os
@@ -25,8 +26,41 @@ def runtime_fingerprint():
                 "numpy": np.__version__, "onnxruntime": onnxruntime.__version__,
                 "pillow": PIL.__version__, "sources": {
                     name: sha256(here / name) for name in
-                    ("runtime.py", "baseline.json", "feature_cache.py", "scan_worker.py")}}
+                    ("runtime.py", "baseline.json", "feature_cache.py", "scan_worker.py", "learned_compare.py")}}
     return hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+
+
+
+def extraction_fingerprint(source=None, baseline=None):
+    """Feature identity excludes the worker, storage implementation and matching policy."""
+    baseline = BASELINE if baseline is None else baseline
+    source = Path(__file__).with_name("runtime.py").read_text() if source is None else source
+    tree = ast.parse(source)
+    functions = {"sha256", "rgb", "letterbox", "nms", "decode", "expanded_box", "ccip_input"}
+    extraction = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in functions:
+            extraction.append(ast.dump(node, include_attributes=False))
+        elif isinstance(node, ast.ClassDef) and node.name == "Runtime":
+            extraction.extend(ast.dump(method, include_attributes=False) for method in node.body
+                              if isinstance(method, ast.FunctionDef) and method.name in {"__init__", "extract"})
+    identity = {"format": 1, "python": sys.version, "numpy": np.__version__,
+                "onnxruntime": onnxruntime.__version__, "pillow": PIL.__version__,
+                "extraction": extraction,
+                "policy": {key: baseline[key] for key in ("detector_score", "nms", "margin", "max_boxes", "min_crop_side", "fallback", "preprocessing")},
+                "models": {key: baseline["sha256"][key] for key in ("model_feat.onnx", "character-detector.onnx")}}
+    return hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+
+
+def compatible_feature_caches(model_dir, fingerprint):
+    # Machine-local upgrade receipt. Never discover compatibility from cache names alone.
+    try:
+        receipt = json.loads((Path(model_dir) / "cache-compatibility.json").read_text())
+        names = receipt.get(fingerprint, [])
+        return [name for name in names if isinstance(name, str) and len(name) == 64
+                and all(c in "0123456789abcdef" for c in name) and name != fingerprint][:8]
+    except (OSError, ValueError, TypeError, AttributeError):
+        return []
 
 
 def input_digest(path):
@@ -36,7 +70,8 @@ def input_digest(path):
 
 
 class FeatureCache:
-    def __init__(self, root, engine, fingerprint):
+    def __init__(self, root, engine, fingerprint, compatible=()):
+        self.legacy_roots = [Path(root) / name for name in compatible]
         self.root = Path(root) / fingerprint
         self.root.mkdir(parents=True, exist_ok=True)
         # One native worker owns this library. A killed writer can leave only a
@@ -53,6 +88,11 @@ class FeatureCache:
             raise ValueError("Source content differs from library metadata")
         destination = self.root / (digest + ".npz")
         feature = self._read(destination, digest)
+        if feature is None:
+            for legacy in self.legacy_roots:
+                feature = self._read(legacy / (digest + ".npz"), digest)
+                if feature is not None:
+                    break
         if feature is None:
             with Image.open(path) as image:
                 if image.width * image.height > MAX_PIXELS:

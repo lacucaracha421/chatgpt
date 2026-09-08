@@ -483,3 +483,102 @@ fn real_native_scan_cold_warm_incremental_and_ref_replacement_parity() {
         "cold={cold:?}\nwarm={warm:?}\nincremental={incremental:?}\nrefs_replaced={changed:?}"
     );
 }
+
+#[test]
+fn automatic_approval_requires_strong_unique_evidence_and_preserves_rejections() {
+    let f=Fixture::new();
+    let a=f.ready("A");
+    seed_prediction(&f,&a,"auto-a");
+    {
+        let mut state=f.library.character_scan.lock().unwrap();
+        state.previous.get_mut(&a.id).unwrap().1.get_mut("asset-5").unwrap().evidence.as_mut().unwrap()["bestQueryCrop"]=json!(0);
+        state.previous.get_mut(&a.id).unwrap().1.get_mut("asset-5").unwrap().evidence.as_mut().unwrap()["evidence"]=json!([{ "matchedReferences":[0,1] }]);
+    }
+    assert_eq!(f.library.apply_automatic_characters(vec!["auto-a".into()]).unwrap(),0);
+    {
+        let mut state=f.library.character_scan.lock().unwrap();
+        state.previous.get_mut(&a.id).unwrap().1.get_mut("asset-5").unwrap().evidence.as_mut().unwrap()["evidence"]=json!([{ "matchedReferences":[0,1,2] }]);
+    }
+    assert_eq!(f.library.apply_automatic_characters(vec!["auto-a".into()]).unwrap(),1);
+    assert_eq!(f.library.apply_automatic_characters(vec!["auto-a".into()]).unwrap(),0);
+    let mut reject=prediction_decision(&a,"auto-a"); reject.decision=characters::DecisionKind::Rejected;
+    f.library.record_character_decisions(reject).unwrap();
+    assert_eq!(f.library.apply_automatic_characters(vec!["auto-a".into()]).unwrap(),0);
+    assert!(f.library.character_relations_for_asset("asset-5").unwrap().is_empty());
+}
+
+#[test]
+fn automatic_series_approval_keeps_conflicting_candidates_for_review() {
+    let f=Fixture::new();
+    let a=f.ready("A");
+    seed_prediction(&f,&a,"a");
+    {
+        let mut state=f.library.character_scan.lock().unwrap();
+        let e=state.previous.get_mut(&a.id).unwrap().1.get_mut("asset-5").unwrap().evidence.as_mut().unwrap();
+        e["bestQueryCrop"]=json!(0); e["evidence"]=json!([{ "matchedReferences":[0,1,2] }]);
+    }
+    let b=f.ready("B");
+    seed_prediction(&f,&b,"b");
+    assert_eq!(f.library.apply_automatic_characters(vec!["a".into(),"b".into()]).unwrap(),0);
+    f.library.character_scan.lock().unwrap().previous.get_mut(&b.id).unwrap().1.get_mut("asset-5").unwrap().state="unmatched".into();
+    assert_eq!(f.library.apply_automatic_characters(vec!["a".into(),"b".into()]).unwrap(),1);
+    assert_eq!(f.library.get_asset_classifications("asset-5").unwrap()[0].id,f.series);
+    assert_eq!(f.library.list_character_decisions(&a.id,None,10).unwrap()[0].origin,"automatic");
+}
+
+#[test]
+fn confirmed_images_leave_other_character_scans_and_review_until_cleared() {
+    let f = Fixture::new();
+    let a = f.ready("Towa");
+    let b = f.ready("Other");
+    seed_prediction(&f, &b, "before-confirmation");
+    let contains = |target: &Target| f.library.character_scan_inputs(target).unwrap().iter().any(|i| i.id == "asset-5");
+    let review = |target: &Target| f.library.character_review_page(ReviewQuery {
+        series_id: f.series.clone(), target_id: Some(target.id.clone()),
+        filter: "all".into(), after: None, limit: 60,
+    }).unwrap().rows.iter().any(|r| r.asset.id == "asset-5");
+    assert!(contains(&b));
+    for origin in ["manual", "automatic"] {
+        let mut decision = prediction_decision(&a, "unused");
+        decision.scan_id = None;
+        decision.baseline_fingerprint = None;
+        f.library.record_character_decisions(decision).unwrap();
+        f.library.connection().unwrap().execute(
+            "UPDATE character_decisions SET origin=?1 WHERE target_id=?2 AND decision='accepted'", params![origin, a.id]).unwrap();
+        assert!(contains(&a));
+        assert!(!contains(&b));
+        assert!(review(&a));
+        assert!(!review(&b)); // A previous recommendation must not reappear as pending/recommended.
+        let mut decision = prediction_decision(&a, "unused");
+        decision.scan_id = None;
+        decision.baseline_fingerprint = None;
+        decision.decision = characters::DecisionKind::Cleared;
+        f.library.record_character_decisions(decision).unwrap();
+        assert!(contains(&b));
+        assert!(review(&b));
+    }
+}
+
+#[test]
+fn series_scan_and_review_exclude_parent_images_and_reject_old_predictions() {
+    let f = Fixture::new();
+    let target = f.ready("Towa");
+    let root: String = f.library.connection().unwrap().query_row(
+        "SELECT parent_id FROM classification_entries WHERE id=?1", [&f.series], |r| r.get(0)).unwrap();
+    seed_prediction(&f, &target, "before-move");
+    for folder in [&f.series, &f.child, &root, &f.outside] {
+        f.library.set_asset_classification(SetAssetClassification {
+            asset_ids: vec!["asset-5".into()], classification_id: Some(folder.clone()),
+        }).unwrap();
+        let expected = folder == &f.series || folder == &f.child;
+        assert_eq!(f.library.character_scan_inputs(&target).unwrap().iter().any(|i| i.id == "asset-5"), expected);
+        let page = f.library.character_review_page(ReviewQuery {
+            series_id: f.series.clone(), target_id: Some(target.id.clone()), filter: "all".into(), after: None, limit: 60,
+        }).unwrap();
+        assert_eq!(page.rows.iter().any(|r| r.asset.id == "asset-5"), expected);
+        if !expected {
+            assert!(f.library.record_character_decisions(prediction_decision(&target, "before-move")).is_err());
+            assert!(f.library.character_relations_for_asset("asset-5").unwrap().is_empty());
+        }
+    }
+}

@@ -1,0 +1,11 @@
+.publication-status {
+  flex-wrap: wrap;
+  padding-block: var(--space-1);
+}
+.publication-status > span {
+  overflow-wrap: anywhere;
+}
+.publication-status > progress {
+  accent-color: var(--color-muted);
+  max-width: 100%;
+}

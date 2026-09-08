@@ -3,7 +3,7 @@ import { useLibrary } from "../library/LibraryContext";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { Button } from "../shared/ui/Button";
 import { PlusIcon, BookmarkIcon, TrashIcon } from "../shared/ui/ArchiveIcons";
-import { notesStore, type Note, type NotesStore } from "./store";
+import { NOTES_REFRESH_INTERVAL, notesStore, type Note, type NotesStore } from "./store";
 import "./notes.css";
 
 function KeySetup({store}:{store:NotesStore}){
@@ -23,7 +23,7 @@ export function NotesWorkspace({store}:{store:NotesStore}){
   const bodyRef=useRef<HTMLTextAreaElement>(null);
   const [backupBusy,setBackupBusy]=useState(false);
   useEffect(()=>{void store.load();},[store]);
-  useEffect(()=>{if(!state.unlocked)return;const refresh=()=>void store.sync();refresh();window.addEventListener("focus",refresh);const timer=setInterval(refresh,60000);return()=>{window.removeEventListener("focus",refresh);clearInterval(timer);};},[store,state.unlocked]);
+  useEffect(()=>{if(!state.unlocked)return;const refresh=()=>{if(!document.hidden)void store.sync(false);};refresh();window.addEventListener("focus",refresh);const timer=setInterval(refresh,NOTES_REFRESH_INTERVAL);return()=>{window.removeEventListener("focus",refresh);clearInterval(timer);};},[store,state.unlocked]);
   const notes=useMemo(()=>state.notes.filter(n=>n.deleted===trash && (!pinned||n.pinned) && `${n.title}\n${n.body}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())).sort((a,b)=>Number(b.pinned)-Number(a.pinned)||b.updatedAt.localeCompare(a.updatedAt)),[state.notes,query,trash,pinned]);
   const note=state.notes.find(n=>n.id===selected && n.deleted===trash)??null;
   const newNote=()=>{setTrash(false);setPinned(false);setQuery("");setSelected(store.create());requestAnimationFrame(()=>bodyRef.current?.focus());};

@@ -1,3 +1,8 @@
+import { PublicationStatus } from "../layout/PublicationStatus";
+import { useCharacterAutomation } from "../characters/useCharacterAutomation";
+import { CharacterAutomationStatus } from "../characters/CharacterAutomationStatus";
+import { useCharacterHub } from "../characters/useCharacterHub";
+import { CharacterFolderContent } from "../characters/CharacterFolderContent";
 import { applyInitialCountOrder, reorderFolders } from "../classification/folderOrder";
 import { useNotesCloseGuard } from "../notes/useNotesCloseGuard";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -78,6 +83,15 @@ type AppProps = {
   subscribeExtensionIngest?: ExtensionIngestListener;
 };
 
+function backNavigationTab(view: AssetView): string {
+  switch (view.kind) {
+    case "classification": case "album": return "assets";
+    case "collection": case "collections": return "collections";
+    case "revisit": case "creators": case "creator": case "calendar": case "revisited-bundle": return "revisit";
+    default: return view.kind;
+  }
+}
+
 export function App({
   gateway = libraryGateway,
   selectFolder = selectLibraryFolder,
@@ -144,6 +158,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const [sidebarWidth, setSidebarWidth] = useState(preferences.sidebarWidth);
   const [message, setMessage] = useState<string | null>(null);
   const [assetRefresh, setAssetRefresh] = useState(0);
+  const characterHub = useCharacterHub(assetRefresh);
   const [clearAssetSelectionRequest, setClearAssetSelectionRequest] = useState(0);
   const [maintenance, setMaintenance] = useState<"restore" | null>(null);
   const [createClassificationRequest, setCreateClassificationRequest] = useState(0);
@@ -204,6 +219,11 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     void refreshAlbums();
     void refreshTrashCount();
   }, [refreshClassifications, refreshAlbums, refreshTrashCount]);
+  const refreshCharacterViews = useCallback(() => {
+    characterHub.refresh();
+    refreshMembershipCounts();
+  }, [characterHub.refresh, refreshMembershipCounts]);
+  const characterAutomation = useCharacterAutomation(characterHub.targets, characterHub.series, assetRefresh, refreshCharacterViews);
   const handleIngested = useCallback((result: IngestOutcome) => {
     if (result.status === "added" || (result.status === "exact_duplicate" && result.classificationChanged)) {
       setAssetRefresh((current) => current + 1);
@@ -429,14 +449,15 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     if (next.kind === "settings" && view.kind !== "settings") settingsReturnViewRef.current = view;
     if (next.kind === "collections") updatePreferences({ collectionType: next.typeFilter });
     if (JSON.stringify(next) === JSON.stringify(view)) return;
-    viewHistoryRef.current.push(view);
+    if (backNavigationTab(next) === backNavigationTab(view)) viewHistoryRef.current.push(view);
+    else viewHistoryRef.current = [];
     setView(next);
   }
 
   function navigateBack(fallback?: AssetView) {
-    const previous = viewHistoryRef.current.pop();
-    if (!previous && !fallback) return false;
-    setView(previous ?? fallback!);
+    const previous = viewHistoryRef.current.pop() ?? fallback;
+    if (!previous || backNavigationTab(previous) !== backNavigationTab(view)) return false;
+    setView(previous);
     return true;
   }
   useBackHandler(() => navigateBack(), 0, maintenance === null);
@@ -645,7 +666,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
               width={sidebarWidth} onWidthChange={setSidebarWidth} onNavigate={navigateView}
               reviewCount={reviewCount} trashCount={trashCount} onImportFiles={dropEnabled ? () => void importFiles() : undefined}
               cloudProblemCount={cloudProblems}
-              assetNavigation={<ClassificationSidebar embedded
+              assetNavigation={<ClassificationSidebar embedded characters={characterHub.targets}
               entries={entries}
               albums={albums}
               view={view}
@@ -748,6 +769,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     onBack={() => { navigateBack({ kind: "revisit" }); }}
                   />
                 ) : (
+                  <CharacterFolderContent requestedAsset={requestedAsset} onRequestedAssetHandled={() => setRequestedAsset(null)} view={view} hub={{ ...characterHub, refresh: refreshCharacterViews }} clearSelectionRequest={clearAssetSelectionRequest} galleryDrag={{ onPointerDragStart: startPointerDrag, onPointerDragMove: movePointerDrag, onPointerDragEnd: finishPointerDrag, onPointerDragCancel: cancelPointerDrag }} classifications={entries} privacyMode={preferences.privacyMode} metadataVisible={preferences.metadataVisible} thumbnailRowHeight={preferences.thumbnailRowHeight} refreshVersion={assetRefresh} onNavigate={navigateView}>
                   <AssetBrowser
                     view={view}
                     onViewChange={navigateView}
@@ -777,6 +799,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     onPointerDragEnd={finishPointerDrag}
                     onPointerDragCancel={cancelPointerDrag}
                   />
+                  </CharacterFolderContent>
                 )}
                 </Suspense>
                 {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
@@ -784,7 +807,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
             </div>
             </div>
           }
-          status={<StatusBar status={browserStatus} progress={dropState.progress} dropEnabled={dropEnabled} similarityIndex={similarityIndex} />}
+          status={<><PublicationStatus /><CharacterAutomationStatus state={characterAutomation} /><StatusBar status={browserStatus} progress={dropState.progress} dropEnabled={dropEnabled} similarityIndex={similarityIndex} /></>}
         />
         </WorkspaceChromeProvider>
         <WorkTray

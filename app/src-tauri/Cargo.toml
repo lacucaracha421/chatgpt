@@ -48,3 +48,20 @@ libc = "0.2"
 secret-service = { version = "5.2", features = ["rt-async-io-crypto-rust"] }
 async-io = "2"
 futures-lite = "2"
+
+# Keep decoding and PDQ math optimized while retaining normal app debug builds.
+# Version qualifiers distinguish the app image stack from pdqhash's legacy stack.
+[profile.dev.package."image:0.25.10"]
+opt-level = 3
+[profile.dev.package."image:0.23.14"]
+opt-level = 3
+[profile.dev.package.pdqhash]
+opt-level = 3
+[profile.dev.package.zune-jpeg]
+opt-level = 3
+[profile.dev.package.image-webp]
+opt-level = 3
+[profile.dev.package."png:0.18.1"]
+opt-level = 3
+[profile.dev.package."gif:0.14.2"]
+opt-level = 3

@@ -133,7 +133,7 @@ class Runtime:
             if sha256(model_dir / name) != expected:
                 raise ValueError(f"Frozen model hash mismatch: {name}")
         opts = ort.SessionOptions()
-        opts.intra_op_num_threads, opts.inter_op_num_threads = 4, 1
+        opts.intra_op_num_threads, opts.inter_op_num_threads = 6, 1
         def session(name):
             return ort.InferenceSession(str(model_dir / name), sess_options=opts, providers=["CPUExecutionProvider"])
         self.detector = session("character-detector.onnx")

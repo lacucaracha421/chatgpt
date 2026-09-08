@@ -1,5 +1,5 @@
 import { StarIcon } from "@heroicons/react/20/solid";
-import { ChevronDownIcon, ChevronRightIcon, ArrowsPointingInIcon, ViewfinderCircleIcon } from "@heroicons/react/24/outline";
+import { ChevronDownIcon, ChevronRightIcon, ArrowsPointingInIcon, ViewfinderCircleIcon, UserCircleIcon } from "@heroicons/react/24/outline";
 import { BookOpenIcon, CalendarIcon, FolderIcon, PhotoIcon, InboxIcon, PlusIcon, RectangleStackIcon, Cog6ToothIcon, TrashIcon } from "../shared/ui/ArchiveIcons";
 import { useLayoutEffect, useEffect, useRef, useState, type CSSProperties } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -18,7 +18,10 @@ import { buildTree, type TreeNode } from "./buildTree";
 import { ClassificationAppearanceDialog } from "./ClassificationAppearanceDialog";
 import { ClassificationIcon, classificationColor } from "./classificationAppearance";
 
+import type { CharacterTarget } from "../characters/api";
+
 type ClassificationSidebarProps = {
+  characters?: CharacterTarget[];
   embedded?: boolean;
   entries: ClassificationEntry[];
   albums?: AlbumEntry[];
@@ -48,6 +51,7 @@ type ClassificationSidebarProps = {
 };
 
 type SidebarTreeEntry = {
+  characterId?: string;
   treeKind: "classification" | "album";
   id: string;
   name: string;
@@ -69,6 +73,7 @@ type InlineEdit =
 
 export function ClassificationSidebar({
   embedded = false,
+  characters = [],
   entries,
   albums = [],
   expandedIds,
@@ -96,14 +101,17 @@ export function ClassificationSidebar({
   createClassificationRequest = 0,
 }: ClassificationSidebarProps) {
   const { gateway } = useLibrary();
-  const classificationEntries: SidebarTreeEntry[] = entries.map((entry) => ({ ...entry, treeKind: "classification" }));
+  const classificationEntries: SidebarTreeEntry[] = [
+    ...entries.map((entry): SidebarTreeEntry => ({ ...entry, name: characters.some(t => t.linkedClassificationId === entry.id) ? `${entry.name} · 일반 폴더` : entry.name, treeKind: "classification" })),
+    ...characters.filter(t => t.seriesClassificationId && entries.some(e => e.id === t.seriesClassificationId)).map((t): SidebarTreeEntry => ({ id: `character:${t.id}`, characterId: t.id, parentId: t.seriesClassificationId, name: t.displayName, kind: "tag", iconKey: null, colorKey: null, treeKind: "classification" })),
+  ];
   const albumEntries: SidebarTreeEntry[] = albums.map((entry) => ({ ...entry, treeKind: "album", kind: "tag" }));
   const tree = buildTree(classificationEntries, orderIds);
   const albumTree = buildTree(albumEntries);
   const visibleNodes = visibleTreeNodes(tree, expandedIds);
   const visibleAlbumNodes = visibleTreeNodes(albumTree, expandedAlbumIds);
   const selected = view.kind === "classification" && view.classificationId
-    ? classificationEntries.find((entry) => entry.id === view.classificationId) ?? null
+    ? classificationEntries.find((entry) => view.characterId ? entry.characterId === view.characterId : entry.id === view.classificationId) ?? null
     : view.kind === "album"
       ? albumEntries.find((entry) => entry.id === view.albumId) ?? null
       : null;
@@ -317,7 +325,7 @@ export function ClassificationSidebar({
   }
 
   function handleSidebarKeyDown(event: React.KeyboardEvent<HTMLElement>) {
-    if (inlineEdit || dialog) return;
+    if (inlineEdit || dialog || selected?.characterId) return;
     const key = event.key.toLowerCase();
     if (key === "n" && event.ctrlKey && event.shiftKey && !event.altKey) {
       event.preventDefault();
@@ -380,7 +388,7 @@ export function ClassificationSidebar({
       case "Enter":
       case " ":
         event.preventDefault();
-        onViewChange(node.entry.treeKind === "album" ? { kind: "album", albumId: node.entry.id } : { kind: "classification", classificationId: node.entry.id });
+        onViewChange(treeEntryView(node.entry));
         break;
     }
   }
@@ -647,7 +655,7 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
   const expanded = expandedIds.includes(node.entry.id);
   const selected = node.entry.treeKind === "album"
     ? view.kind === "album" && view.albumId === node.entry.id
-    : view.kind === "classification" && view.classificationId === node.entry.id;
+    : view.kind === "classification" && (node.entry.characterId ? view.characterId === node.entry.characterId : !view.characterId && view.classificationId === node.entry.id);
   const editingName = inlineEdit?.type === "rename" && inlineEdit.entry.id === node.entry.id;
   const creatingChild = inlineEdit?.type === "create" && inlineEdit.treeKind === node.entry.treeKind && inlineEdit.parentId === node.entry.id;
   const actions: MenuItem[] = [
@@ -671,14 +679,14 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
 
   return (
     <li className="classification-sidebar__tree-item" data-has-next-sibling={hasNextSibling ? "true" : undefined}>
-      <ContextMenu items={actions}>
+      <ContextMenu items={node.entry.characterId ? [{ id: "open-character", label: "캐릭터 열기", onSelect: () => onViewChange(treeEntryView(node.entry)) }] : actions}>
         <div
           ref={(element) => {
             rowRef.current = element;
             registerTreeRow(node.entry.id, element);
           }}
           className="classification-sidebar__tree-row"
-          data-classification-id={node.entry.treeKind === "classification" ? node.entry.id : undefined}
+          data-classification-id={node.entry.treeKind === "classification" && !node.entry.characterId ? node.entry.id : undefined}
           data-album-id={node.entry.treeKind === "album" ? node.entry.id : undefined}
           data-drop-state={dragTarget?.kind === node.entry.treeKind && dragTarget.entryId === node.entry.id ? (dragTarget.valid ? "valid" : "invalid") : undefined}
           data-drop-position={dragTarget?.kind === node.entry.treeKind && dragTarget.entryId === node.entry.id ? dragTarget.position : undefined}
@@ -687,7 +695,7 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
           aria-selected={selected}
           aria-expanded={hasChildren ? expanded : undefined}
           tabIndex={node.entry.id === activeRowId ? 0 : -1}
-          onClick={() => onViewChange(node.entry.treeKind === "album" ? { kind: "album", albumId: node.entry.id } : { kind: "classification", classificationId: node.entry.id })}
+          onClick={() => onViewChange(treeEntryView(node.entry))}
           onFocus={() => onRowFocus(node.entry.id)}
           onKeyDown={(event) => {
             if ((event.key === "F10" && event.shiftKey) || event.key === "ContextMenu") {
@@ -703,7 +711,7 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
             }
             onRowKeyDown(event, node);
           }}
-          onPointerDown={(event) => { if (event.button === 0 && !(event.target as HTMLElement).closest("button")) onPointerDragStart?.({ kind: node.entry.treeKind, entryId: node.entry.id }, event); }}
+          onPointerDown={(event) => { if (!node.entry.characterId && event.button === 0 && !(event.target as HTMLElement).closest("button")) onPointerDragStart?.({ kind: node.entry.treeKind, entryId: node.entry.id }, event); }}
           onPointerMove={onPointerDragMove}
           onPointerUp={onPointerDragEnd}
           onPointerCancel={onPointerDragCancel}
@@ -714,12 +722,12 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
             </Button>
           ) : <span className="classification-sidebar__tree-spacer" aria-hidden="true" />}
           <span className="classification-sidebar__tree-surface">
-            <ClassificationIcon
+            {node.entry.characterId ? <UserCircleIcon className="classification-sidebar__tree-folder" aria-hidden="true" /> : <ClassificationIcon
               className="classification-sidebar__tree-folder"
               kind={node.entry.kind}
               iconKey={node.entry.iconKey}
               style={{ color: classificationColor(node.entry.colorKey) }}
-            />
+            />}
             {editingName ? (
               <InlineFolderInput name={editName} error={editError} onNameChange={onEditNameChange} onSave={onEditSave} onCancel={onEditCancel} />
             ) : <span className="classification-sidebar__tree-label">{node.entry.name}</span>}
@@ -850,4 +858,9 @@ function isDescendant(candidateId: string, ancestorId: string, entries: SidebarT
     current = entries.find((entry) => entry.id === current?.parentId);
   }
   return false;
+}
+
+function treeEntryView(entry: SidebarTreeEntry): AssetView {
+  if (entry.characterId) return { kind: "classification", classificationId: entry.parentId, characterId: entry.characterId };
+  return entry.treeKind === "album" ? { kind: "album", albumId: entry.id } : { kind: "classification", classificationId: entry.id };
 }

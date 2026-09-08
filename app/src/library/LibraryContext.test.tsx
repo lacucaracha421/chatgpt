@@ -1,3 +1,6 @@
+import { StrictMode } from "react";
+import { act } from "@testing-library/react";
+import { LibrarySetup } from "./LibrarySetup";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
@@ -9,7 +12,7 @@ afterEach(() => {
   cleanup();
 });
 
-it("removes a stored startup path when automatic restore fails", async () => {
+it("retains the startup path for the next launch when automatic restore fails", async () => {
   localStorage.setItem(LIBRARY_PATH_STORAGE_KEY, "C:\\Missing");
   const libraryGateway = gateway();
   vi.mocked(libraryGateway.openLibrary).mockRejectedValue(new Error("missing"));
@@ -18,7 +21,7 @@ it("removes a stored startup path when automatic restore fails", async () => {
 
   expect(await screen.findByRole("alert")).toHaveTextContent("missing");
   expect(screen.getByText("none")).toBeVisible();
-  expect(localStorage.getItem(LIBRARY_PATH_STORAGE_KEY)).toBeNull();
+  expect(localStorage.getItem(LIBRARY_PATH_STORAGE_KEY)).toBe("C:\\Missing");
 });
 
 it("keeps the current library when opening another library fails", async () => {
@@ -35,6 +38,25 @@ it("keeps the current library when opening another library fails", async () => {
   expect(await screen.findByRole("alert")).toHaveTextContent("switch failed");
   expect(screen.getByText("C:\\Current")).toBeVisible();
   expect(localStorage.getItem(LIBRARY_PATH_STORAGE_KEY)).toBe("C:\\Current");
+});
+
+it.each(["C:\\Media", "/home/user/Media"])("hides the chooser while reopening %s and opens only once under StrictMode", async (path) => {
+  localStorage.setItem(LIBRARY_PATH_STORAGE_KEY, path);
+  const libraryGateway = gateway();
+  let resolve!: (summary: { root: string }) => void;
+  vi.mocked(libraryGateway.openLibrary).mockReturnValue(new Promise(done => { resolve = done; }));
+  const picker = vi.fn();
+  function StartupScreen() {
+    const { library } = useLibrary();
+    return library ? <p>작업 공간</p> : <LibrarySetup selectFolder={picker} />;
+  }
+  render(<StrictMode><LibraryProvider gateway={libraryGateway}><StartupScreen /></LibraryProvider></StrictMode>);
+  expect(screen.getByRole("status")).toHaveTextContent("저장소 여는 중");
+  expect(screen.queryByRole("button", { name: "라이브러리 선택" })).toBeNull();
+  expect(libraryGateway.openLibrary).toHaveBeenCalledTimes(1);
+  await act(async () => { resolve({ root: path }); });
+  expect(screen.getByText("작업 공간")).toBeVisible();
+  expect(picker).not.toHaveBeenCalled();
 });
 
 function Probe() {

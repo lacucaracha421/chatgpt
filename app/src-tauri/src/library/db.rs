@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 47;
+pub(crate) const SCHEMA_VERSION: i64 = 48;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -240,6 +240,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         if version <= 46 {
             transaction.execute_batch(include_str!("../../migrations/0047_similarity_orientation.sql"))?;
         }
+        if version <= 47 {
+            transaction.execute_batch(include_str!("../../migrations/0048_character_hub.sql"))?;
+        }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction.prepare("PRAGMA foreign_key_check")?.exists([])? {
             return Err(LibraryError::Database(rusqlite::Error::InvalidQuery));
@@ -306,7 +309,7 @@ mod tests {
             ).unwrap();
         }
         migrate_to_latest(&mut connection, 46).unwrap();
-        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 47);
+        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
         for id in ["jpeg", "webp"] {
             assert_eq!(connection.query_row("SELECT perceptual_hash IS NULL FROM assets WHERE id=?1", [id], |row| row.get::<_, bool>(0)).unwrap(), true);
         }

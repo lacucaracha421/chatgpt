@@ -38,6 +38,14 @@ CREATE INDEX IdxWorksPosted ON Works(Posted DESC,Id DESC);
 CREATE INDEX IdxWorksRank ON Works(Expunged,Views DESC,Posted DESC,Id DESC);
 CREATE INDEX online_catalog_group_members_reverse ON online_catalog_group_members(provider,group_id,catalog_work_id);
 """
+# The membership key is (provider, catalog_work_id). Bind its leading column
+# so validation probes each work instead of rescanning all members per work.
+CONTENT_VALIDATION_SQL = """SELECT
+              EXISTS(SELECT 1 FROM Works WHERE typeof(Id)!='integer' OR Id<=0 OR typeof(Title)!='text' OR typeof(FileCount)!='integer' OR FileCount<0 OR typeof(Views)!='integer' OR Views<0 OR Expunged NOT IN (0,1)) OR
+              EXISTS(SELECT 1 FROM Tags t LEFT JOIN Works w ON w.Id=t.WorkId WHERE w.Id IS NULL OR typeof(t.Namespace)!='text' OR typeof(t.Value)!='text') OR
+              EXISTS(SELECT 1 FROM online_catalog_group_members m LEFT JOIN Works w ON w.Id=m.catalog_work_id WHERE w.Id IS NULL OR m.work_id!=CAST(w.Id AS TEXT) OR m.group_id IS NULL OR m.thumbnail_valid NOT IN(0,1) OR m.lineage_terminal NOT IN(0,1)) OR
+              EXISTS(SELECT 1 FROM Works w WHERE w.Expunged=0 AND NOT EXISTS(SELECT 1 FROM online_catalog_group_members m WHERE m.provider='kHentai' AND m.catalog_work_id=w.Id)) OR
+              EXISTS(SELECT 1 FROM online_catalog_group_members m WHERE NOT EXISTS(SELECT 1 FROM online_catalog_group_handles h WHERE h.group_id=m.group_id))"""
 USER_DDL = """
 CREATE TABLE online_catalog_bookmarks(provider TEXT,work_id TEXT,created_at TEXT,PRIMARY KEY(provider,work_id)) WITHOUT ROWID;
 CREATE TABLE online_catalog_hidden_categories(category INTEGER PRIMARY KEY,created_at TEXT);
@@ -144,12 +152,7 @@ def import_content(path, expected, root, get_db):
                 counts[kind] += 1
             if manifest is None or h.hexdigest() != expected or counts != manifest["counts"]:
                 fail()
-            invalid = db.execute("""SELECT
-              EXISTS(SELECT 1 FROM Works WHERE typeof(Id)!='integer' OR Id<=0 OR typeof(Title)!='text' OR typeof(FileCount)!='integer' OR FileCount<0 OR typeof(Views)!='integer' OR Views<0 OR Expunged NOT IN (0,1)) OR
-              EXISTS(SELECT 1 FROM Tags t LEFT JOIN Works w ON w.Id=t.WorkId WHERE w.Id IS NULL OR typeof(t.Namespace)!='text' OR typeof(t.Value)!='text') OR
-              EXISTS(SELECT 1 FROM online_catalog_group_members m LEFT JOIN Works w ON w.Id=m.catalog_work_id WHERE w.Id IS NULL OR m.work_id!=CAST(w.Id AS TEXT) OR m.group_id IS NULL OR m.thumbnail_valid NOT IN(0,1) OR m.lineage_terminal NOT IN(0,1)) OR
-              EXISTS(SELECT 1 FROM Works w WHERE w.Expunged=0 AND NOT EXISTS(SELECT 1 FROM online_catalog_group_members m WHERE m.catalog_work_id=w.Id)) OR
-              EXISTS(SELECT 1 FROM online_catalog_group_members m WHERE NOT EXISTS(SELECT 1 FROM online_catalog_group_handles h WHERE h.group_id=m.group_id))""").fetchone()[0]
+            invalid = db.execute(CONTENT_VALIDATION_SQL).fetchone()[0]
             if invalid:
                 fail()
             db.executescript(INDEX_DDL)

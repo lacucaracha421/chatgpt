@@ -76,6 +76,7 @@ impl Fixture {
     fn target(&self, name: &str) -> Target {
         self.library
             .save_character_target(TargetDraft {
+                description: String::new(), thumbnail_asset_id: None,
                 id: None,
                 expected_revision: None,
                 series_classification_id: Some(self.series.clone()),
@@ -107,6 +108,7 @@ impl Fixture {
 
 fn edit(target: &Target) -> TargetDraft {
     TargetDraft {
+                description: String::new(), thumbnail_asset_id: None,
         id: Some(target.id.clone()),
         expected_revision: Some(target.revision),
         series_classification_id: target.series_classification_id.clone(),
@@ -602,4 +604,28 @@ fn foreign_key_failure_rolls_back_new_schema_before_commit() {
         .unwrap()
         .exists([])
         .unwrap());
+}
+
+#[test]
+fn learned_examples_follow_current_human_approvals_only() {
+    let f = Fixture::new();
+    let target = f.ready("Towa");
+    let count = || f.library.get_character_target(&target.id).unwrap().learned_references.len();
+    assert_eq!(count(), 0);
+    f.decide(&target, &["asset-5"], DecisionKind::Accepted).unwrap();
+    assert_eq!(count(), 1);
+    f.library.connection().unwrap().execute("UPDATE character_decisions SET origin='automatic' WHERE target_id=?1", [&target.id]).unwrap();
+    assert_eq!(count(), 0);
+    f.library.connection().unwrap().execute("UPDATE character_decisions SET origin='manual' WHERE target_id=?1", [&target.id]).unwrap();
+    assert_eq!(count(), 1);
+    f.decide(&target, &["asset-5"], DecisionKind::Cleared).unwrap();
+    assert_eq!(count(), 0);
+    f.decide(&target, &["asset-5"], DecisionKind::Accepted).unwrap();
+    let other = f.ready("Other");
+    f.decide(&other, &["asset-5"], DecisionKind::Accepted).unwrap();
+    assert_eq!(count(), 0);
+    f.decide(&other, &["asset-5"], DecisionKind::Cleared).unwrap();
+    assert_eq!(count(), 1);
+    f.library.set_asset_classification(SetAssetClassification { asset_ids:vec!["asset-5".into()], classification_id:Some(f.outside.clone()) }).unwrap();
+    assert_eq!(count(), 0);
 }

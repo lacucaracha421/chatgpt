@@ -617,10 +617,7 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
               {collection && <CollectionInfoPanel collection={collection} />}
               {providerMenu}
             </aside>}
-            {sidebar && (collection?.description?.trim() || collection?.overview?.trim()) && <div className="collection-detail-description">
-              {collection.description?.trim() && <p>{collection.description}</p>}
-              {collection.overview?.trim() && <p>{collection.overview}</p>}
-            </div>}
+
         </div>
       ) : (
         <>

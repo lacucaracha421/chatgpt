@@ -55,13 +55,20 @@ included in the dataset requests. Existing report labels remain unchanged.
 
 ## Batch 3 native scan
 
-`feature_cache.py` wraps the unchanged inference with disposable `.npz` features
-under the selected library's `.cache/characters/<runtime fingerprint>/`. The key
-contains actual source SHA-256, baseline/model hashes, worker/cache/inference source
-hashes, Python, NumPy, ONNX Runtime and Pillow versions. Refs changes reuse features;
-comparisons are recomputed. Reads verify source content even on hits. Corrupt entries
-are recomputed; writes use atomic replacement and startup removes interrupted
-`.part` files. Old namespaces are disposable and currently have no automatic eviction.
+`feature_cache.py` stores disposable `.npz` image features under
+`.cache/characters/<extraction fingerprint>/`. Extraction identity includes the
+detector/feature-model hashes, preprocessing/crop policy, extraction code AST,
+Python, NumPy, ONNX Runtime and Pillow versions. Matching thresholds, comparison
+code, learned examples, the worker protocol and cache implementation do not invalidate
+features. Runtime/result identity remains separate and tracks all worker/comparison
+sources, so changed decisions are recomputed while image features remain reusable.
+
+Reads still verify source bytes and cached content/shape/finiteness. Corrupt entries
+are recomputed; writes are atomic. Machine-local `cache-compatibility.json` beside
+the models can map an extraction identity to explicitly verified legacy namespaces.
+Only exact 64-character hashes are accepted, at most eight namespaces; unknown caches
+are never inferred compatible. Legacy entries are read through the same validation
+without copying or rewriting them. Old namespaces have no automatic eviction.
 
 Only normal `image` assets in the explicit target's recursive subtree are scanned;
 its five reference IDs are excluded. A start captures the asset inventory. New
@@ -125,3 +132,22 @@ For analysis-bound decisions, `reference_snapshot` stores an object containing
 the reference array. The legacy field name `baseline_fingerprint` stores the full
 runtime fingerprint for analysis-bound decisions, including the frozen baseline.
 No additional schema beyond migration 44 was introduced by the review UI.
+
+## Human-approved supporting examples (2026-09-08)
+
+The five manually selected anchors remain required. Native code additionally selects
+up to 20 recent distinct-content images with a current manual accepted decision in
+the same series subtree. Automatic decisions, cleared/rejected decisions, missing or
+changed images, and images currently assigned to another character are excluded.
+These are retrieval examples, not model weight training. References used for a query
+are recorded and their current approval/content is revalidated before accepting it.
+
+`learned_compare.py` compares those examples through the unchanged five-reference
+metric in bounded groups, discards padding votes, then computes same-crop distinct-image
+consensus over the combined pool. Recommendation remains two matches and automatic
+approval remains three matches with a unique character candidate and no whole fallback.
+The UI displays the actual reference count. Worker preparation accepts 5–25 images.
+
+Manual scan buttons now apply the same automatic policy when the selected series has
+automatic classification enabled. They compare all ready characters in that series
+before applying, so a single selected-character scan cannot bypass ambiguity checks.

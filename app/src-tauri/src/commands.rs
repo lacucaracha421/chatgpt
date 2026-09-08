@@ -2115,18 +2115,20 @@ pub async fn test_cloud_capture_connection(
 #[tauri::command]
 pub async fn push_cloud_collections(
     state: State<'_, AppState>,
+    on_progress: tauri::ipc::Channel<crate::cloud::publication::PublishProgress>,
 ) -> Result<crate::cloud::collections::CloudCollectionsPublishResult, CommandError> {
     let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.push_cloud_collections())
+    tauri::async_runtime::spawn_blocking(move || library.push_cloud_collections(&|progress| { let _ = on_progress.send(progress); }))
         .await.map_err(|_| background_task_error())?.map_err(CommandError::from)
 }
 
 #[tauri::command]
 pub async fn push_cloud_catalog(
     state: State<'_, AppState>,
+    on_progress: tauri::ipc::Channel<crate::cloud::publication::PublishProgress>,
 ) -> Result<crate::cloud::catalog::MobileCatalogPublishResult, CommandError> {
     let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.push_cloud_catalog())
+    tauri::async_runtime::spawn_blocking(move || library.push_cloud_catalog(&|progress| { let _ = on_progress.send(progress); }))
         .await.map_err(|_| background_task_error())?.map_err(CommandError::from)
 }
 

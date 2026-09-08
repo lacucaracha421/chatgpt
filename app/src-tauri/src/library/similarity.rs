@@ -27,6 +27,9 @@ use super::{
 const PDQ_QUALITY_MIN: u8 = 50;
 const PDQ_DISTANCE_MAX: u32 = 20;
 const INDEX_BATCH_SIZE: u32 = 50;
+const INDEX_WORKERS: usize = 2;
+// Bound decoding across overlapping UI requests, including a reopened library.
+static INDEX_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SimilarAssetCandidate {
@@ -395,6 +398,7 @@ impl Library {
     }
 
     pub fn index_missing_similarity_hashes(&self) -> Result<SimilarityIndexProgress, LibraryError> {
+        let _index = INDEX_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let asset_ids = {
             let connection = self.connection()?;
             let mut statement = connection.prepare(
@@ -413,31 +417,15 @@ impl Library {
             ids
         };
 
-        for asset_id in &asset_ids {
-            let result = self
-                .resolve_media(asset_id, MediaVariant::Asset)
-                .and_then(|media| perceptual_hash_from_file(media.file));
-            let connection = self.connection()?;
-            match result {
-                Ok(result) => {
-                    connection.execute(
-                        "UPDATE assets
-                         SET perceptual_hash = ?2, perceptual_hash_quality = ?3, width = ?4, height = ?5
-                         WHERE id = ?1 AND status = 'normal'",
-                        params![asset_id, result.fingerprint.to_stored_bytes(), result.fingerprint.quality, i64::from(result.width), i64::from(result.height)],
-                    )?;
-                }
-                Err(error) => {
-                    let code = similarity_index_error_code(&error).ok_or(error)?;
-                    connection.execute(
-                        "UPDATE assets
-                         SET perceptual_hash_error = ?2
-                         WHERE id = ?1 AND status = 'normal'",
-                        params![asset_id, code],
-                    )?;
-                }
-            }
-        }
+        let workers = std::thread::available_parallelism().map_or(1, |count| count.get().min(INDEX_WORKERS));
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = asset_ids.chunks(asset_ids.len().div_ceil(workers).max(1))
+                .map(|chunk| scope.spawn(move || chunk.iter().try_for_each(|id| self.index_similarity_asset(id))))
+                .collect();
+            // Each worker persists completed images immediately; no image buffers are queued.
+            handles.into_iter().map(|handle| handle.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)))
+                .collect::<Result<Vec<_>, LibraryError>>()
+        })?;
 
         let connection = self.connection()?;
         let (remaining, failed): (i64, i64) = connection.query_row(
@@ -453,6 +441,35 @@ impl Library {
             remaining: remaining as u64,
             failed: failed as u64,
         })
+    }
+
+    fn index_similarity_asset(&self, asset_id: &str) -> Result<(), LibraryError> {
+        let result = self
+            .resolve_media(asset_id, MediaVariant::Asset)
+            .and_then(|media| perceptual_hash_from_file(media.file));
+        let connection = self.connection()?;
+        match result {
+            Ok(result) => {
+                connection.execute(
+                    "UPDATE assets
+                     SET perceptual_hash = ?2, perceptual_hash_quality = ?3, width = ?4, height = ?5
+                     WHERE id = ?1 AND status = 'normal'
+                       AND perceptual_hash IS NULL AND perceptual_hash_error IS NULL",
+                    params![asset_id, result.fingerprint.to_stored_bytes(), result.fingerprint.quality, i64::from(result.width), i64::from(result.height)],
+                )?;
+            }
+            Err(error) => {
+                let code = similarity_index_error_code(&error).ok_or(error)?;
+                connection.execute(
+                    "UPDATE assets
+                     SET perceptual_hash_error = ?2
+                     WHERE id = ?1 AND status = 'normal'
+                       AND perceptual_hash IS NULL AND perceptual_hash_error IS NULL",
+                    params![asset_id, code],
+                )?;
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn find_similar_asset(
@@ -1034,6 +1051,35 @@ mod tests {
             )
             .unwrap();
         assert_eq!(error, "media_not_found");
+    }
+
+    #[test]
+    fn overlapping_index_requests_finish_distinct_batches_and_preserve_results() {
+        let fixture = library_with_unindexed_assets(51);
+        fixture.library.connection().unwrap().execute_batch(
+            "CREATE TABLE hash_updates(asset_id TEXT); CREATE TRIGGER record_hash_update AFTER UPDATE OF perceptual_hash,perceptual_hash_error ON assets BEGIN INSERT INTO hash_updates VALUES(NEW.id); END;"
+        ).unwrap();
+        let expected = perceptual_hash_from_file(fs::File::open(fixture.library.root().join("assets/asset-001.png")).unwrap()).unwrap();
+        let outcomes = std::thread::scope(|scope| {
+            let library = &fixture.library;
+            let first = scope.spawn(|| library.index_missing_similarity_hashes().unwrap());
+            let second = scope.spawn(|| library.index_missing_similarity_hashes().unwrap());
+            [first.join().unwrap(), second.join().unwrap()]
+        });
+        assert_eq!(outcomes.iter().map(|outcome| outcome.remaining).sum::<u64>(), 1);
+        let connection = fixture.library.connection().unwrap();
+        let updates: i64 = connection.query_row("SELECT COUNT(*) FROM hash_updates", [], |row| row.get(0)).unwrap();
+        assert_eq!(updates, 51);
+        let (bytes, quality, width, height): (Vec<u8>, u8, u32, u32) = connection.query_row(
+            "SELECT perceptual_hash,perceptual_hash_quality,width,height FROM assets WHERE id='asset-001'", [],
+            |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?))
+        ).unwrap();
+        assert_eq!(bytes, expected.fingerprint.to_stored_bytes());
+        assert_eq!((quality,width,height), (expected.fingerprint.quality,expected.width,expected.height));
+        drop(connection);
+        assert_eq!(fixture.library.index_missing_similarity_hashes().unwrap().remaining, 0);
+        let updates: i64 = fixture.library.connection().unwrap().query_row("SELECT COUNT(*) FROM hash_updates", [], |row| row.get(0)).unwrap();
+        assert_eq!(updates, 51);
     }
 
     #[test]

@@ -71,7 +71,7 @@ pub struct BookExternalBinding {
 impl Library {
     pub(crate) fn backfill_legacy_collection_kinds(&self) -> Result<u64, LibraryError> {
         let connection = self.connection()?;
-        let Some(root) = collection_source_root(&connection)? else {
+        let Some(root) = collection_source_root(&connection, self.root())? else {
             return Ok(0);
         };
         let Ok(canonical_root) = fs::canonicalize(&root) else {
@@ -128,7 +128,7 @@ impl Library {
         plan: &BookImportPlan,
     ) -> Result<BookMigrationReport, LibraryError> {
         let connection = self.connection()?;
-        set_collection_source_root(&connection, Some(&plan.root))?;
+        set_collection_source_root(&connection, self.root(), Some(&plan.root))?;
         let mut report = BookMigrationReport {
             scanned: plan.entries.len() as u64 + plan.skipped.len() as u64,
             created: 0,

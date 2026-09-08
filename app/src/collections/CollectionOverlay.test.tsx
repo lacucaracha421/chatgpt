@@ -864,3 +864,9 @@ describe("CollectionOverlay movie detail flow", () => {
     expect(screen.getByText("현실과 환상의 경계가 무너진다.")).toBeVisible();
   });
 });
+it.each([false, true])("omits manga description sections with sidebar=%s", async (sidebar) => {
+  renderOverlay({}, vi.fn(), vi.fn(), {...collection, description:"English manga description", overview:"English manga overview"}, vi.fn(), sidebar);
+  expect(await screen.findByRole("region", {name:"만화 상세"})).toBeInTheDocument();
+  expect(screen.queryByText("English manga description")).toBeNull();
+  expect(screen.queryByText("English manga overview")).toBeNull();
+});

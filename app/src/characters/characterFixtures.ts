@@ -11,6 +11,8 @@ export function createCharacterFixture(): CharacterApi {
   const decisions = new Map<string, string>();
   let scans: ScanStatus[] = targets.map(t => ({ id: `scan-${t.id}`, targetId: t.id, targetFingerprint: t.fingerprint, runtimeFingerprint: "runtime", state: "completed", total: 13, completed: 13, errors: 0, cacheHits: 18, extractions: 0, error: null }));
   const api: CharacterApi = {
+    automaticSeries: async () => [],
+    applyAutomatic: async () => 0,
     targets: async () => [...targets],
     save: async draft => {
       const old = targets.find(t => t.id === draft.id);

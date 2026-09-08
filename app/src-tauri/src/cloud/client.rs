@@ -66,10 +66,12 @@ impl CloudClient {
         let mut response=self.agent.get(self.endpoint("/v1/mobile-catalog/status")?).header("Authorization",bearer(token)?).call().map_err(map_registration_error)?;
         Ok(read_json::<Status>(&mut response)?.publication_revision)
     }
-    pub(crate) fn upload_mobile_catalog(&self,digest:&str,file:File,token:&str)->Result<(),LibraryError>{
+    pub(crate) fn upload_mobile_catalog(&self,digest:&str,file:File,token:&str,progress: super::publication::Reporter<'_>)->Result<(),LibraryError>{
         if digest.len()!=64 || !digest.bytes().all(|b|b.is_ascii_hexdigit()) || file.metadata().map_err(|_|LibraryError::InvalidOnlineCatalog)?.len()>crate::library::mobile_catalog::MAX_CONTENT {return Err(LibraryError::InvalidOnlineCatalog);}
         let agent:ureq::Agent=ureq::Agent::config_builder().max_redirects(0).timeout_global(Some(UPLOAD_BODY_TIMEOUT)).build().into();
-        let mut response=agent.put(self.endpoint(&format!("/v1/mobile-catalog/replicas/{digest}"))?).header("Authorization",bearer(token)?).content_type("application/x-ndjson").send(file).map_err(map_registration_error)?;
+        let total = file.metadata().map_err(|_|LibraryError::InvalidOnlineCatalog)?.len();
+        let mut reader = PublicationReader { file, progress, total, completed: 0, reported: 0 };
+        let mut response=agent.put(self.endpoint(&format!("/v1/mobile-catalog/replicas/{digest}"))?).header("Authorization",bearer(token)?).content_type("application/x-ndjson").header("Content-Length", total.to_string()).send(ureq::SendBody::from_reader(&mut reader)).map_err(map_registration_error)?;
         let body:serde_json::Value=read_json(&mut response)?;
         if body["contentDigest"].as_str()!=Some(digest) || body["ready"]!=true {return Err(LibraryError::InvalidCloudResponse);} Ok(())
     }
@@ -785,4 +787,56 @@ fn map_capture_download_error(error: ureq::Error) -> LibraryError {
 
 fn map_capture_ack_error(error: ureq::Error) -> LibraryError {
     map_api_error(error, LibraryError::CloudCaptureAcknowledgementRejected)
+}
+
+struct PublicationReader<'a> {
+    file: File,
+    progress: super::publication::Reporter<'a>,
+    total: u64,
+    completed: u64,
+    reported: u64,
+}
+impl Read for PublicationReader<'_> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let count = self.file.read(buffer)?;
+        self.completed += count as u64;
+        if self.completed - self.reported >= 1024 * 1024 || self.completed == self.total {
+            super::publication::report(self.progress, "uploading", self.completed, Some(self.total), "bytes");
+            self.reported = self.completed;
+        }
+        Ok(count)
+    }
+}
+
+#[cfg(test)]
+mod publication_progress_tests {
+    use super::*;
+    #[test]
+    fn catalog_upload_preserves_body_and_reports_transferred_bytes() {
+        use std::io::{Seek, Write};
+        let mut file = tempfile::tempfile().unwrap();
+        let data = vec![b'a'; 1024 * 1024 + 17];
+        file.write_all(&data).unwrap();
+        file.rewind().unwrap();
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let client = CloudClient::new(&format!("http://{}", server.server_addr())).unwrap();
+        let digest = "a".repeat(64);
+        let expected_digest = digest.clone();
+        let worker = std::thread::spawn(move || {
+            let mut request = server.recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
+            assert_eq!(request.body_length(), Some(data.len()));
+            let mut received = Vec::new();
+            request.as_reader().read_to_end(&mut received).unwrap();
+            assert_eq!(received, data);
+            request.respond(tiny_http::Response::from_string(serde_json::json!({"contentDigest":expected_digest,"ready":true}).to_string())).unwrap();
+        });
+        let events = std::sync::Mutex::new(Vec::new());
+        client.upload_mobile_catalog(&digest, file, "test-token", &|event| events.lock().unwrap().push(event)).unwrap();
+        worker.join().unwrap();
+        let events = events.into_inner().unwrap();
+        assert!(!events.is_empty());
+        assert!(events.windows(2).all(|pair| pair[0].completed <= pair[1].completed));
+        assert_eq!(events.last().unwrap().completed, 1024 * 1024 + 17);
+        assert_eq!(events.last().unwrap().unit, "bytes");
+    }
 }

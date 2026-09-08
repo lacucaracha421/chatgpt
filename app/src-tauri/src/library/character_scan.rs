@@ -241,7 +241,7 @@ impl Library {
 
     fn current_input(&self, target: &Target, id: &str) -> Result<ScanInput> {
         let connection = self.connection()?;
-        let (hash, path) = characters::scoped_image(
+        let (hash, path) = super::character_hub::candidate_image(
             &connection,
             target
                 .series_classification_id
@@ -285,6 +285,7 @@ impl Library {
         target
             .references
             .iter()
+            .chain(target.learned_references.iter())
             .map(|reference| {
                 let input =
                     self.current_input(target, reference.asset_id.as_deref().ok_or(Error::Stale)?)?;
@@ -298,19 +299,14 @@ impl Library {
     }
 
     fn ensure_current_target(&self, target: &Target) -> Result<()> {
-        if self.get_character_target(&target.id)?.fingerprint != target.fingerprint {
+        let current = self.get_character_target(&target.id)?;
+        if current.fingerprint != target.fingerprint || current.learned_references.iter().map(|r| (&r.asset_id,&r.asset_hash)).collect::<Vec<_>>() != target.learned_references.iter().map(|r| (&r.asset_id,&r.asset_hash)).collect::<Vec<_>>() {
             return Err(Error::Stale);
         }
         Ok(())
     }
 
-    fn run_character_scan(
-        &self,
-        target: &Target,
-        config: RuntimeConfig,
-        cancel: Arc<AtomicBool>,
-    ) -> Result<()> {
-        let references = self.reference_inputs(target)?;
+    fn character_scan_inputs(&self, target: &Target) -> Result<Vec<ScanInput>> {
         let inputs = {
             let connection = self.connection()?;
             let mut statement = connection.prepare("WITH RECURSIVE scope(id) AS (
@@ -319,6 +315,7 @@ impl Library {
                 SELECT a.id,a.content_hash,a.relative_path FROM assets a
                 WHERE a.status='normal' AND a.media_kind='image'
                 AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope))
+                AND NOT EXISTS(SELECT 1 FROM character_relations r WHERE r.asset_id=a.id AND r.target_id<>?2)
                 AND NOT EXISTS(SELECT 1 FROM character_references r WHERE r.target_id=?2 AND r.asset_id=a.id) ORDER BY a.id")?;
             let rows = statement
                 .query_map(params![target.series_classification_id, target.id], |r| {
@@ -331,6 +328,17 @@ impl Library {
                 .collect::<std::result::Result<Vec<_>, _>>()?;
             rows
         };
+        Ok(inputs)
+    }
+
+    fn run_character_scan(
+        &self,
+        target: &Target,
+        config: RuntimeConfig,
+        cancel: Arc<AtomicBool>,
+    ) -> Result<()> {
+        let references = self.reference_inputs(target)?;
+        let inputs = self.character_scan_inputs(target)?.into_iter().filter(|input| !references.iter().any(|r| r.hash == input.hash)).collect::<Vec<_>>();
         {
             let mut state = self
                 .character_scan
@@ -436,6 +444,7 @@ impl Library {
                         .into();
                         row.evidence = Some(event.clone());
                         row.evidence.as_mut().unwrap()["runtimeFingerprint"] = json!(runtime);
+                        row.evidence.as_mut().unwrap()["learnedReferences"] = json!(target.learned_references);
                     }
                     Err(_) => row.state = "stale".into(),
                 }
@@ -546,10 +555,23 @@ impl Library {
         }
         rows.into_iter().map(|row| {
             if !matches!(row.state.as_str(), "recommended" | "unmatched") { return Err(Error::Stale); }
-            let (hash,path) = characters::scoped_image(connection,series,&row.asset_id)?;
+            let (hash,path) = super::character_hub::candidate_image(connection,series,&row.asset_id)?;
             if hash != row.content_hash { return Err(Error::Stale); }
             self.verify_input(&ScanInput {id:row.asset_id.clone(),hash,path})?;
             let evidence = row.evidence.ok_or(Error::Stale)?;
+            if let Some(learned) = evidence["learnedReferences"].as_array() {
+                for reference in learned {
+                    let learned_id = reference["assetId"].as_str().ok_or(Error::Stale)?;
+                    let learned_hash = reference["assetHash"].as_str().ok_or(Error::Stale)?;
+                    let valid: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM character_relations r JOIN character_decisions d ON d.sequence=r.sequence
+                        WHERE r.target_id=?1 AND r.asset_id=?2 AND d.origin='manual' AND d.asset_hash=?3
+                        AND NOT EXISTS(SELECT 1 FROM character_relations other WHERE other.asset_id=r.asset_id AND other.target_id<>r.target_id))", params![target.id,learned_id,learned_hash], |r| r.get(0))?;
+                    if !valid { return Err(Error::Stale); }
+                    let (hash,path) = characters::scoped_image(connection,series,learned_id)?;
+                    if hash != learned_hash { return Err(Error::Stale); }
+                    self.verify_input(&ScanInput {id:learned_id.into(),hash,path})?;
+                }
+            }
             Ok((row.asset_id, json!({"scanId":id,"runtimeFingerprint":status.runtime_fingerprint,"prediction":evidence,"references":target.references})))
         }).collect()
     }
@@ -567,3 +589,67 @@ fn worker_error(event: &Value) -> Error {
 #[cfg(test)]
 #[path = "character_scan_tests.rs"]
 mod tests;
+
+impl Library {
+    /// Auto approval is deliberately narrower than recommendation. It never replaces a human decision.
+    pub fn apply_automatic_characters(&self, scan_ids: Vec<String>) -> Result<u64> {
+        use characters::{DecisionKind, DecisionRequest};
+        let allowed = self.character_series()?.into_iter().filter(|s| s.auto_classify).map(|s| s.classification_id).collect::<std::collections::BTreeSet<_>>();
+        let all_targets = self.list_character_targets()?;
+        let requested_series = {
+            let state = self.character_scan.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            scan_ids.iter().filter_map(|id| state.find(id)).filter_map(|(status,_)| all_targets.iter().find(|t| t.id == status.target_id).and_then(|t| t.series_classification_id.clone())).collect::<std::collections::BTreeSet<_>>()
+        };
+        let targets = all_targets.into_iter().filter(|t| t.ready && t.series_classification_id.as_ref().is_some_and(|s| allowed.contains(s) && requested_series.contains(s))).collect::<Vec<_>>();
+        if targets.is_empty() { return Ok(0); }
+        // Copy before acquiring SQLite: decision validation uses DB -> scan lock order.
+        let snapshots = {
+            let state = self.character_scan.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut snapshots = Vec::new();
+            for target in &targets {
+                let (status, rows) = scan_ids.iter().filter_map(|id| state.find(id)).find(|(s,_)| s.target_id == target.id).ok_or(Error::Stale)?;
+                if status.state != "completed" || status.target_fingerprint != target.fingerprint { return Err(Error::Stale); }
+                snapshots.push((target.clone(),status.clone(),rows.clone()));
+            }
+            snapshots
+        };
+        let mut by_asset: BTreeMap<String,Vec<usize>> = BTreeMap::new();
+        let mut uncertain = std::collections::BTreeSet::new();
+        for (index,(_,_,rows)) in snapshots.iter().enumerate() {
+            for (id,row) in rows {
+                if row.state == "recommended" { by_asset.entry(id.clone()).or_default().push(index); }
+                if !matches!(row.state.as_str(), "recommended" | "unmatched") { uncertain.insert(id.clone()); }
+            }
+        }
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let mut changed = 0;
+        for (asset_id, candidates) in by_asset {
+            if candidates.len()!=1 || uncertain.contains(&asset_id) { continue; }
+            let (target,status,rows)=&snapshots[candidates[0]];
+            let row=&rows[&asset_id];
+            if !automatic_evidence(row.evidence.as_ref()) { continue; }
+            // Cleared/rejected decisions also block automatic re-assignment.
+            let judged: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM character_decisions WHERE source_asset_id=?1)", [&asset_id], |r| r.get(0))?;
+            if judged { continue; }
+            let applied = self.write_character_decisions(&transaction, DecisionRequest {
+                target_id:target.id.clone(),expected_fingerprint:target.fingerprint.clone(),asset_ids:vec![asset_id.clone()],
+                decision:DecisionKind::Accepted,baseline_fingerprint:status.runtime_fingerprint.clone(),scan_id:Some(status.id.clone()),
+            })?;
+            if applied > 0 {
+                transaction.execute("UPDATE character_decisions SET origin='automatic' WHERE sequence=(SELECT MAX(sequence) FROM character_decisions WHERE target_id=?1 AND source_asset_id=?2)", params![target.id,asset_id])?;
+                changed += applied;
+            }
+        }
+        transaction.commit()?;
+        Ok(changed)
+    }
+}
+fn automatic_evidence(evidence: Option<&Value>) -> bool {
+    let Some(e) = evidence else { return false; };
+    if e["passed"] != true || e["wholeFallback"] == true { return false; }
+    let Some(crop) = e["bestQueryCrop"].as_u64() else { return false; };
+    e["evidence"].as_array().and_then(|rows| rows.get(crop as usize))
+        .and_then(|row| row["matchedReferences"].as_array())
+        .is_some_and(|refs| refs.len() >= 3)
+}

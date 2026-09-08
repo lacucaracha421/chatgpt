@@ -264,7 +264,7 @@ export type AssetMediaFilter = "all" | "images" | "videos";
 export type AssetAspectFilter = "all" | "square" | "landscape" | "portrait";
 
 export type AssetView =
-  | { kind: "classification"; classificationId: string | null }
+  | { kind: "classification"; classificationId: string | null; characterId?: string }
   | { kind: "album"; albumId: string }
   | { kind: "unsorted" }
   | { kind: "revisit" }
@@ -1001,7 +1001,7 @@ export interface LibraryGateway {
   deleteCloudApiToken(): Promise<CloudCredentialStatus>;
   testCloudCaptureConnection(): Promise<CloudCaptureConnectionStatus>;
   pushCloudMetadataBackup?(): Promise<CloudMetadataBackupResult>;
-  pushCloudCollections?(): Promise<CloudCollectionsPublishResult>;
+  pushCloudCollections?(onProgress?: (progress: import("./publicationJobs").PublishProgress) => void): Promise<CloudCollectionsPublishResult>;
   restoreCloudMetadataBackup?(): Promise<CloudLibraryRestoreReport>;
   runDueCloudCaptureSync(): Promise<CloudCaptureSyncResult>;
   cloudBackfillPreflight(): Promise<CloudBackfillPreflightReport>;

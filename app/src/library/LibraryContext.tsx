@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type PropsWithChildren,
 } from "react";
@@ -15,6 +16,7 @@ type LibraryContextValue = {
   gateway: LibraryGateway;
   library: LibrarySummary | null;
   error: string | null;
+  initializing: boolean;
   openLibrary(path: string): Promise<void>;
 };
 
@@ -25,6 +27,8 @@ export function LibraryProvider({
   gateway,
 }: PropsWithChildren<{ gateway: LibraryGateway }>) {
   const [library, setLibrary] = useState<LibrarySummary | null>(null);
+  const [initializing, setInitializing] = useState(() => Boolean(localStorage.getItem(LIBRARY_PATH_STORAGE_KEY)));
+  const startup = useRef<{ gateway: LibraryGateway; promise: Promise<boolean> } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const tryOpenLibrary = useCallback(
     async (path: string) => {
@@ -50,17 +54,21 @@ export function LibraryProvider({
 
   useEffect(() => {
     const path = localStorage.getItem(LIBRARY_PATH_STORAGE_KEY);
-    if (path) {
-      void tryOpenLibrary(path).then((opened) => {
-        if (!opened && localStorage.getItem(LIBRARY_PATH_STORAGE_KEY) === path) {
-          localStorage.removeItem(LIBRARY_PATH_STORAGE_KEY);
-        }
-      });
+    if (!path) { setInitializing(false); return; }
+    let active = true;
+    setInitializing(true);
+    // Reuse the startup request when StrictMode replays effects.
+    if (startup.current?.gateway !== gateway) {
+      startup.current = { gateway, promise: tryOpenLibrary(path) };
     }
-  }, [tryOpenLibrary]);
+    void startup.current.promise.finally(() => {
+      if (active) setInitializing(false);
+    });
+    return () => { active = false; };
+  }, [gateway, tryOpenLibrary]);
 
   return (
-    <LibraryContext.Provider value={{ gateway, library, error, openLibrary }}>
+    <LibraryContext.Provider value={{ gateway, library, error, initializing, openLibrary }}>
       {children}
     </LibraryContext.Provider>
   );

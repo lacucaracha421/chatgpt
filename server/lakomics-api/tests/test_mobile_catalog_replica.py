@@ -11,6 +11,21 @@ class MobileCatalogReplicaTests(unittest.TestCase):
     tearDown = base.MobileCatalogApiTests.tearDown
     publish = base.MobileCatalogApiTests.publish
     search = base.MobileCatalogApiTests.search
+    def test_content_validation_uses_member_lookup_and_rejects_missing_members(self):
+        import sqlite3
+        import mobile_catalog_replica as replica
+        with sqlite3.connect(":memory:") as db:
+            db.executescript(replica.CONTENT_DDL)
+            plan = [row[3] for row in db.execute("EXPLAIN QUERY PLAN " + replica.CONTENT_VALIDATION_SQL)]
+            self.assertTrue(any("SEARCH m" in step and "provider=? AND catalog_work_id=?" in step for step in plan), plan)
+        records = [json.loads(line) for line in self.data.splitlines()]
+        removed = next(record for record in records if record["kind"] == "member")
+        records.remove(removed)
+        records[0]["value"]["counts"]["member"] -= 1
+        data = b"".join((replica.encode(record) + "\n").encode() for record in records)
+        response = self.client.put("/v1/mobile-catalog/replicas/" + hashlib.sha256(data).hexdigest(), headers=AUTH, content=data)
+        self.assertEqual(response.status_code, 422, response.text)
+
     def test_idempotent_publish_and_stale_base_preserve_current(self):
         first = self.publish()
         self.assertEqual(first.status_code, 200, first.text)

@@ -39,6 +39,7 @@ const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "bmp", "tiff",
 
 pub(crate) fn collection_source_root(
     connection: &rusqlite::Connection,
+    library_root: &Path,
 ) -> Result<Option<String>, LibraryError> {
     let value = connection
         .query_row(
@@ -48,25 +49,70 @@ pub(crate) fn collection_source_root(
         )
         .optional()?
         .flatten();
-    Ok(value)
+    value.map(|path| resolve_source_root(library_root, &path)).transpose()
 }
 
 pub(crate) fn set_collection_source_root(
     connection: &rusqlite::Connection,
+    library_root: &Path,
     path: Option<&str>,
 ) -> Result<(), LibraryError> {
+    let stored = path.map(|value| -> Result<String, LibraryError> {
+        let resolved = resolve_source_root(library_root, value)?;
+        let path = PathBuf::from(&resolved);
+        if !path.is_absolute() { return Err(LibraryError::MediaNotFound); }
+        fs::create_dir_all(&path).map_err(|source| LibraryError::CreateDirectory {
+            path: path.clone(), source,
+        })?;
+        let canonical = fs::canonicalize(&path).map_err(|source| LibraryError::ReadMedia {
+            path: path.clone(), source,
+        })?;
+        let root = fs::canonicalize(library_root).map_err(|source| LibraryError::ReadMedia {
+            path: library_root.to_path_buf(), source,
+        })?;
+        Ok(match canonical.strip_prefix(&root) {
+            Ok(relative) => format!("./{}", relative.iter().map(|part| part.to_string_lossy()).collect::<Vec<_>>().join("/")),
+            Err(_) => resolved,
+        })
+    }).transpose()?;
     connection.execute(
         "UPDATE library_settings SET collection_source_root = ?1 WHERE singleton = 1",
-        [path],
+        [stored.as_deref()],
     )?;
-    if let Some(root) = path {
-        let root_path = PathBuf::from(root);
-        fs::create_dir_all(&root_path).map_err(|source| LibraryError::CreateDirectory {
-            path: root_path.clone(),
-            source,
-        })?;
-    }
     Ok(())
+}
+
+// Relative settings travel with the library. Recover old absolute paths only for
+// the managed collection-sources directory, and only if the old path is absent.
+fn resolve_source_root(library_root: &Path, stored: &str) -> Result<String, LibraryError> {
+    let normalized = stored.replace('\\', "/");
+    let absolute = normalized.starts_with('/') || normalized.as_bytes().get(1) == Some(&b':');
+    if absolute && Path::new(stored).is_dir() {
+        return Ok(stored.to_owned());
+    }
+    let parts: Vec<_> = normalized.split('/').filter(|part| !part.is_empty() && *part != ".").collect();
+    let relative = if absolute {
+        let Some(index) = parts.iter().position(|part| *part == "collection-sources") else {
+            return Ok(stored.to_owned());
+        };
+        &parts[index..]
+    } else {
+        &parts[..]
+    };
+    if relative.iter().any(|part| *part == ".." || part.contains(':')) {
+        return Err(LibraryError::MediaNotFound);
+    }
+    let candidate = relative.iter().fold(library_root.to_path_buf(), |path, part| path.join(part));
+    if absolute && !candidate.is_dir() {
+        return Ok(stored.to_owned());
+    }
+    if let Some(canonical) = candidate.ancestors().find_map(|parent| parent.canonicalize().ok()) {
+        let root = library_root.canonicalize().map_err(|source| LibraryError::ReadMedia {
+            path: library_root.to_path_buf(), source,
+        })?;
+        if !canonical.starts_with(root) { return Err(LibraryError::MediaNotFound); }
+    }
+    Ok(candidate.to_string_lossy().into_owned())
 }
 
 fn vol_regex() -> regex::Regex {
@@ -295,12 +341,12 @@ pub(crate) fn source_preview_path(collection_dir: &Path) -> Result<PathBuf, Libr
 impl Library {
     pub fn collection_source_root(&self) -> Result<Option<String>, LibraryError> {
         let connection = self.connection()?;
-        collection_source_root(&connection)
+        collection_source_root(&connection, self.root())
     }
 
     pub fn set_collection_source_root(&self, path: Option<&str>) -> Result<(), LibraryError> {
         let connection = self.connection()?;
-        set_collection_source_root(&connection, path)
+        set_collection_source_root(&connection, self.root(), path)
     }
 
     pub fn list_collection_covers(
@@ -309,7 +355,7 @@ impl Library {
     ) -> Result<Vec<CollectionCover>, LibraryError> {
         let connection = self.connection()?;
         let root =
-            collection_source_root(&connection)?.ok_or(LibraryError::CollectionSourceRootNotSet)?;
+            collection_source_root(&connection, self.root())?.ok_or(LibraryError::CollectionSourceRootNotSet)?;
         let source_path: Option<String> = connection
             .query_row(
                 "SELECT source_path FROM collections WHERE id = ?1",
@@ -384,7 +430,7 @@ impl Library {
         };
         let root = {
             let connection = self.connection()?;
-            collection_source_root(&connection)?.ok_or(LibraryError::CollectionSourceRootNotSet)?
+            collection_source_root(&connection, self.root())?.ok_or(LibraryError::CollectionSourceRootNotSet)?
         };
         let collection_dir = resolve_collection_dir(&root, &source_path);
         let provider_managed: bool = self.connection()?.query_row(
@@ -652,7 +698,7 @@ impl Library {
     ) -> Result<(PathBuf, PathBuf), LibraryError> {
         let connection = self.connection()?;
         let root =
-            collection_source_root(&connection)?.ok_or(LibraryError::CollectionSourceRootNotSet)?;
+            collection_source_root(&connection, self.root())?.ok_or(LibraryError::CollectionSourceRootNotSet)?;
         let source_path: Option<String> = connection
             .query_row(
                 "SELECT source_path FROM collections WHERE id = ?1",
@@ -826,6 +872,60 @@ mod tests {
             .save(path)
             .unwrap();
         fs::read(path).unwrap()
+    }
+
+    #[test]
+    fn source_root_recovers_legacy_windows_and_linux_paths_without_rewriting_settings() {
+        let (_temp, library, _) = source_library();
+        let root = library.root().join("collection-sources/book");
+        fs::create_dir_all(root.join("series")).unwrap();
+        let bytes = write_png(&root.join("series/thumbnail.png"), 24, 32);
+        for old in [r"Z:\old-library\collection-sources\book", "/missing/old-library/collection-sources/book"] {
+            library.connection().unwrap().execute("UPDATE library_settings SET collection_source_root=?1", [old]).unwrap();
+            assert_eq!(library.collection_source_root().unwrap(), Some(root.to_string_lossy().into_owned()));
+            assert_eq!(read_media(library.collection_source_preview_media(COLLECTION_ID).unwrap()), bytes);
+            assert!(!read_media(library.collection_source_thumbnail_media(COLLECTION_ID).unwrap()).is_empty());
+            let stored: String = library.connection().unwrap().query_row("SELECT collection_source_root FROM library_settings", [], |row| row.get(0)).unwrap();
+            assert_eq!(stored, old);
+        }
+    }
+
+    #[test]
+    fn source_root_stores_internal_folders_portably_and_survives_library_move() {
+        let (temp, library, _) = source_library();
+        let root = library.root().join("collection-sources/book");
+        library.set_collection_source_root(Some(root.to_str().unwrap())).unwrap();
+        let stored: String = library.connection().unwrap().query_row("SELECT collection_source_root FROM library_settings", [], |row| row.get(0)).unwrap();
+        assert_eq!(stored, "./collection-sources/book");
+        let old_root = library.root().to_path_buf();
+        drop(library);
+        let moved = temp.path().join("renamed-library");
+        fs::rename(old_root, &moved).unwrap();
+        let library = Library::open(&moved).unwrap();
+        assert_eq!(library.collection_source_root().unwrap(), Some(moved.join("collection-sources/book").to_string_lossy().into_owned()));
+        library.set_collection_source_root(None).unwrap();
+        assert_eq!(library.collection_source_root().unwrap(), None);
+    }
+
+    #[test]
+    fn source_root_preserves_external_folders_and_rejects_traversal() {
+        let (temp, library, _) = source_library();
+        let external = temp.path().join("source");
+        assert_eq!(library.collection_source_root().unwrap(), Some(external.to_string_lossy().into_owned()));
+        let missing = temp.path().join("external-missing");
+        assert_eq!(resolve_source_root(library.root(), missing.to_str().unwrap()).unwrap(), missing.to_string_lossy());
+        assert!(resolve_source_root(library.root(), "../source").is_err());
+        assert!(resolve_source_root(library.root(), r"Z:\old\collection-sources\..\outside").is_err());
+        assert_eq!(resolve_source_root(library.root(), r".\collection-sources\book").unwrap(), library.root().join("collection-sources/book").to_string_lossy());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_root_rejects_symlinks_outside_the_library_before_creating_folders() {
+        let (temp, library, _) = source_library();
+        std::os::unix::fs::symlink(temp.path().join("source"), library.root().join("linked")).unwrap();
+        assert!(library.set_collection_source_root(Some("./linked/new-folder")).is_err());
+        assert!(!temp.path().join("source/new-folder").exists());
     }
 
     #[test]

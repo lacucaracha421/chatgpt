@@ -142,8 +142,6 @@ export function GameCollectionDetail({
                 ))}
               </dl>
             )}
-            {collection.description?.trim() && <p className="game-collection-detail__description">{collection.description}</p>}
-            {collection.overview?.trim() && <p className="game-collection-detail__overview">{collection.overview}</p>}
           </div>
         </div>
       </section>

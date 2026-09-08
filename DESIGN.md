@@ -104,6 +104,7 @@ PC 자산 기본 보기는 **수집일별 masonry/waterfall**이다. justified r
 - tooltip은 `aria-label`을 대신하지 않는다. 키보드 focus에서도 같은 설명에 접근할 수 있어야 한다.
 - nested menu/popover를 부모 panel의 바깥 클릭으로 오인하지 않는다.
 - Esc는 가장 안쪽 surface부터 한 단계씩 닫고 같은 입력이 뒤의 선택 해제·viewer 종료까지 연쇄되지 않게 한다.
+- 마우스 뒤로가기와 Esc의 화면 이동 기록은 현재 탭 안으로 제한한다. 주요 탭 전환은 뒤로가기 기록에 넣지 않으며, 같은 탭에서 돌아갈 화면이나 닫을 surface가 없으면 현재 화면을 유지한다.
 
 ## 10. Motion과 성능
 

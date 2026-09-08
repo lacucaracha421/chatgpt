@@ -63,7 +63,9 @@ fn write_record(out: &mut BufWriter<File>, kind: &str, data: Value, bytes: &mut 
     out.write_all(&line).map_err(invalid)
 }
 impl Library {
-    pub(crate) fn export_mobile_catalog_snapshot(&self) -> Result<Snapshot,LibraryError> {
+    pub(crate) fn export_mobile_catalog_snapshot_with_progress(&self, progress: crate::cloud::publication::Reporter<'_>) -> Result<Snapshot,LibraryError> {
+        use crate::cloud::publication::report;
+        report(progress, "preparing", 0, None, "items");
         let mut reader = self.catalog_read_connection()?;
         let tx = reader.transaction()?;
         let context = catalog_counts::read_context(&tx)?.ok_or(LibraryError::InvalidOnlineCatalog)?;
@@ -78,6 +80,9 @@ impl Library {
         let mut counts = BTreeMap::new();
         for (kind,table,_,_) in tables { counts.insert(kind,tx.query_row(&format!("SELECT COUNT(*) FROM {table}"),[],|r|r.get::<_,i64>(0))?.max(0) as u64); }
         counts.insert("translation", translations.len() as u64);
+        let total = counts.values().sum();
+        let mut completed = 0u64;
+        report(progress, "preparing", 0, Some(total), "items");
         let source_revision: String = tx.query_row("SELECT Value FROM catalog.CrawlState WHERE Key='lakomics.catalog.contentRevision'",[],|r|r.get(0))?;
         let temporary = tempfile::tempdir().map_err(invalid)?;
         let path = temporary.path().join("catalog.ndjson");
@@ -92,9 +97,12 @@ impl Library {
                 let mut data = serde_json::Map::new();
                 for (index,name) in names.iter().enumerate() { data.insert((*name).to_owned(),value(row,index)?); }
                 write_record(&mut out,kind,Value::Object(data),&mut bytes)?;
+                completed += 1;
+                if completed % 10000 == 0 { report(progress, "preparing", completed, Some(total), "items"); }
             }
         }
         for data in translations { write_record(&mut out,"translation",data,&mut bytes)?; }
+        report(progress, "preparing", total, Some(total), "items");
         out.flush().map_err(invalid)?;
         drop(out); drop(tx); drop(reader);
         let mut file = File::open(&path).map_err(invalid)?;

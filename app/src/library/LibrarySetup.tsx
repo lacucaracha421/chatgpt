@@ -8,7 +8,7 @@ export const selectLibraryFolder: FolderPicker = () =>
   open({ directory: true, multiple: false });
 
 export function LibrarySetup({ selectFolder = selectLibraryFolder }: { selectFolder?: FolderPicker }) {
-  const { error, openLibrary } = useLibrary();
+  const { error, initializing, openLibrary } = useLibrary();
 
   async function select() {
     const path = await selectFolder();
@@ -18,9 +18,11 @@ export function LibrarySetup({ selectFolder = selectLibraryFolder }: { selectFol
   return <main className="setup-screen">
     <section className="setup-screen__panel" aria-labelledby="setup-title">
       <h1 id="setup-title">Lakomics</h1>
-      <p>개인 미디어 라이브러리를 선택해 주세요.</p>
-      {error && <p className="setup-screen__error" role="alert">{error}</p>}
-      <Button type="button" onClick={() => void select()}>라이브러리 선택</Button>
+      {initializing ? <p role="status">저장소 여는 중…</p> : <>
+        <p>개인 미디어 라이브러리를 선택해 주세요.</p>
+        {error && <p className="setup-screen__error" role="alert">{error}</p>}
+        <Button type="button" onClick={() => void select()}>라이브러리 선택</Button>
+      </>}
     </section>
   </main>;
 }

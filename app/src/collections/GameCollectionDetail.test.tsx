@@ -205,3 +205,9 @@ describe("GameCollectionDetail", () => {
     expect(screen.getByRole("menuitem", { name: "표지·hero 변경" })).toBeDisabled();
   });
 });
+
+it("omits the game description and overview sections", () => {
+  renderDetail({ collection: { ...collection, description: "English description", overview: "English overview" } });
+  expect(screen.queryByText("English description")).toBeNull();
+  expect(screen.queryByText("English overview")).toBeNull();
+});

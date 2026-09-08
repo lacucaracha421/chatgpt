@@ -99,7 +99,12 @@ export function CharacterLab({ classifications, initialSeriesId, privacyMode = f
     if (batchRunning || scanning || !list.length) return;
     queueStop.current = false; setBatchRunning(true); setError(null);
     try {
-      for (const entry of list) {
+      const scope = currentSeries.current;
+      const automatic = (await api.automaticSeries()).includes(scope);
+      const batch = automatic ? (await reloadTargets()).filter(t => t.ready && t.seriesClassificationId === scope) : list;
+      const completed: string[] = [];
+      if (automatic) setNotice("자동 확정을 위해 시리즈의 준비된 캐릭터를 함께 비교합니다.");
+      for (const entry of batch) {
         if (queueStop.current || !active.current) break;
         const latest = (await reloadTargets()).find(t => t.id === entry.id);
         if (!latest?.ready) throw new Error(`${entry.displayName}: 기준 이미지 5장을 확인해 주세요.`);
@@ -114,12 +119,17 @@ export function CharacterLab({ classifications, initialSeriesId, privacyMode = f
           const status = states.find(s => s.id === started.id);
           if (!status) throw new Error("라이브러리 또는 분석 작업이 바뀌었습니다.");
           if (!isRunning(status)) {
-            if (status.state === "failed" || status.state === "stale") throw new Error(status.error ?? "분석을 완료하지 못했습니다.");
+            if (status.state !== "completed") throw new Error(status.error ?? "분석을 완료하지 못했습니다.");
+            completed.push(status.id);
             break;
           }
           if (!active.current || queueStop.current) { await api.cancel(started.id); break; }
         }
         if (active.current) setRefresh(v => v + 1);
+      }
+      if (automatic && active.current && !queueStop.current && currentSeries.current === scope && completed.length === batch.length && completed.length) {
+        const count = await api.applyAutomatic(completed);
+        if (active.current) { setNotice(`분석 완료 · ${count}장 자동 확정`); setRefresh(v => v + 1); await reloadTargets(); }
       }
     } catch (e) { if (active.current) setError(commandErrorMessage(e, "캐릭터 분석을 완료하지 못했습니다.")); }
     finally { ownedScan.current = null; if (active.current) setBatchRunning(false); }
@@ -133,6 +143,7 @@ export function CharacterLab({ classifications, initialSeriesId, privacyMode = f
     const compatible = rows.every(row => row.predictions.some(item => item.targetId === p.targetId && item.scanId === p.scanId && item.targetFingerprint === p.targetFingerprint && item.evidence && ["recommended", "unmatched"].includes(item.state)));
     if (!compatible) throw new Error("선택한 이미지에 현재 분석 결과가 없는 항목이 있습니다.");
     await api.decide(predictionRequest(p, rows.map(row => row.asset.id), decision));
+    await reloadTargets();
     if (active.current) { setNotice(`${rows.length}장 ${decision === "accepted" ? "확정" : "거절"}`); setRefresh(v => v + 1); }
   }
   const batchPrediction = selectedRows[0]?.predictions.find(p => p.targetId === targetId && p.evidence && ["recommended", "unmatched"].includes(p.state));
@@ -165,7 +176,7 @@ export function CharacterLab({ classifications, initialSeriesId, privacyMode = f
         {history ? <div className="character-history">
           <h3>{target?.displayName} · 판단 이력</h3>
           {history.length === 0 && <p>저장된 판단이 없습니다.</p>}
-          {history.map(d => <div key={d.sequence}><span>{new Date(d.createdAt).toLocaleString()} · {stateLabels[d.decision]}</span><small>{d.sourceAssetId}{d.assetId ? "" : " · 원본 삭제됨"}</small>{d.assetId && target && <Button size="sm" disabled={busy} onClick={() => void action(async () => { await api.decide({ targetId: target.id, expectedFingerprint: target.fingerprint, assetIds: [d.assetId!], decision: "cleared", scanId: null, baselineFingerprint: null }); setHistory(await api.history(target.id, null)); setRefresh(v => v + 1); })}>판단 해제</Button>}</div>)}
+          {history.map(d => <div key={d.sequence}><span>{new Date(d.createdAt).toLocaleString()} · {stateLabels[d.decision]}{d.origin === "automatic" ? " · 자동 분류" : ""}</span><small>{d.sourceAssetId}{d.assetId ? "" : " · 원본 삭제됨"}</small>{d.assetId && target && <Button size="sm" disabled={busy} onClick={() => void action(async () => { await api.decide({ targetId: target.id, expectedFingerprint: target.fingerprint, assetIds: [d.assetId!], decision: "cleared", scanId: null, baselineFingerprint: null }); setHistory(await api.history(target.id, null)); setRefresh(v => v + 1); })}>판단 해제</Button>}</div>)}
           <Button disabled={busy || history.length % 50 !== 0 || history.length === 0} onClick={() => target && void action(async () => { const more = await api.history(target.id, history[history.length - 1]!.sequence); if (active.current) setHistory(old => [...old!, ...more]); })}>이전 이력</Button>
         </div> : <>
           {selection.ids.size > 0 && <div className="character-actions character-selection"><span>{selection.ids.size}장 선택</span><Button size="sm" disabled={busy || !batchPrediction} onClick={() => batchPrediction && void action(() => decideRows(selectedRows, batchPrediction, "accepted"))}>선택 캐릭터로 승인</Button><Button size="sm" disabled={busy || !batchPrediction} onClick={() => batchPrediction && void action(() => decideRows(selectedRows, batchPrediction, "rejected"))}>선택 캐릭터 거절</Button><Button size="sm" disabled={busy || !target?.enabled} onClick={() => target && void action(async () => { await api.decide({ targetId: target.id, expectedFingerprint: target.fingerprint, assetIds: [...selection.ids], decision: "accepted", scanId: null, baselineFingerprint: null }); setNotice(`${selection.ids.size}장 수동 지정`); setRefresh(v => v + 1); })}>선택 캐릭터 수동 지정</Button><Button size="sm" onClick={() => setSelection(emptySelection())}>선택 해제</Button></div>}
@@ -191,7 +202,7 @@ function CharacterEvidence({ row, privacyMode, busy, onDecide, onDecideAll }: { 
     {row.predictions.filter(p => p.state === "recommended" && p.evidence && p.decision !== "rejected").length > 1 && <div className="character-actions"><Button size="sm" disabled={busy} onClick={() => onDecideAll("accepted")}>후보 모두 승인</Button><Button size="sm" disabled={busy} onClick={() => onDecideAll("rejected")}>모두 아님</Button></div>}
     <div className={`character-evidence__image${privacyMode ? " character-private" : ""}`}><img src={assetUrl(row.asset.id)} alt={row.asset.originalName} onLoad={e => setSize({ width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight })} />{box && size.width > 0 && size.height > 0 && <svg viewBox={`0 0 ${size.width} ${size.height}`} aria-label="판단에 사용한 영역"><rect x={box[0]} y={box[1]} width={box[2]! - box[0]!} height={box[3]! - box[1]!} vectorEffect="non-scaling-stroke" /></svg>}</div>
     {row.predictions.map(p => <section key={p.targetId}><Button size="sm" aria-pressed={chosen === p.targetId} onClick={() => setChosen(p.targetId)}>{p.targetName}</Button><span>{stateLabels[p.decision ?? p.state] ?? p.state}</span>{p.error && <small>{p.error}</small>}<div className="character-actions"><Button size="sm" disabled={busy || !p.evidence} onClick={() => onDecide(p, "accepted")}>승인</Button><Button size="sm" disabled={busy || !p.evidence} onClick={() => onDecide(p, "rejected")}>아님</Button></div></section>)}
-    {evidence && <details><summary>판단 근거</summary><p>{evidence.evidence?.[evidence.bestQueryCrop]?.matchedReferences.length ?? 0} / 5 기준 일치</p><p>거리 {evidence.distance.toFixed(6)}</p>{evidence.wholeFallback && <p>유효한 인물 영역이 없어 전체 이미지로 비교했습니다.</p>}</details>}
+    {evidence && <details><summary>판단 근거</summary><p>{evidence.evidence?.[evidence.bestQueryCrop]?.matchedReferences.length ?? 0} / {evidence.referenceHashes?.length ?? 5} 기준 일치</p><p>거리 {evidence.distance.toFixed(6)}</p>{Boolean(evidence.learnedReferenceCount) && <p>직접 승인한 이미지 {evidence.learnedReferenceCount}장 포함</p>}{evidence.wholeFallback && <p>유효한 인물 영역이 없어 전체 이미지로 비교했습니다.</p>}</details>}
   </aside>;
 }
 

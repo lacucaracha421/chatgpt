@@ -7,7 +7,8 @@ import queue
 import sys
 import threading
 
-from feature_cache import FeatureCache, runtime_fingerprint
+from learned_compare import compare_supported
+from feature_cache import FeatureCache, runtime_fingerprint, extraction_fingerprint, compatible_feature_caches
 from runtime import BASELINE, FINGERPRINT, Runtime
 
 MAX_REQUEST_BYTES = 128 * 1024
@@ -41,7 +42,8 @@ def main():
     try:
         engine = Runtime(args.models)
         fingerprint = runtime_fingerprint()
-        cache = FeatureCache(args.cache, engine, fingerprint)
+        feature_fingerprint = extraction_fingerprint()
+        cache = FeatureCache(args.cache, engine, feature_fingerprint, compatible_feature_caches(args.models, feature_fingerprint))
     except Exception as error:
         emit({"type": "startup_error", "error": str(error)})
         return 1
@@ -56,14 +58,14 @@ def main():
             if request["type"] == "prepare":
                 refs = None
                 items = request["references"]
-                if len(items) != 5 or len({i["hash"] for i in items}) != 5:
-                    raise ValueError("Exactly five distinct refs required")
+                if not 5 <= len(items) <= 25 or len({i["hash"] for i in items}) != len(items):
+                    raise ValueError("Five anchors and at most twenty distinct approved examples required")
                 refs = [cache.extract(Path(i["path"]), i["hash"]) for i in items]
                 emit({"type": "prepared", "referenceHashes": [r.content_hash for r in refs],
                       "cacheHits": cache.hits, "extractions": cache.misses})
             elif request["type"] == "query" and refs is not None:
                 query = cache.extract(Path(request["path"]), request["hash"])
-                result = engine.compare(query, refs)
+                result = compare_supported(engine, query, refs)
                 emit({"type": "result", "assetId": request["assetId"], **result,
                       "cacheHits": cache.hits, "extractions": cache.misses})
             else:

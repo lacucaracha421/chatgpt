@@ -4,6 +4,9 @@ export type Note = {id:string; title:string; body:string; pinned:boolean; delete
 export type NotesState = {unlocked:boolean; notes:Note[]; lastSyncedAt:string|null};
 export type Snapshot = NotesState & {ready:boolean; saving:boolean; syncing:boolean; error:string|null};
 export type NotesRequest = <T>(operation:string,input?:unknown)=>Promise<T>;
+export const NOTES_REFRESH_INTERVAL = 5 * 60_000;
+const AUTO_SYNC_IDLE = 10_000;
+const AUTO_SYNC_MIN_INTERVAL = 60_000;
 const message=(error:unknown)=>typeof error === "string" ? error : "메모 작업을 완료하지 못했습니다. 작성 내용은 유지됩니다.";
 
 /** Lives beyond area navigation; immediate serialized local writes never depend on a debounce. */
@@ -14,6 +17,8 @@ export class NotesStore {
   private running:Promise<void>|null=null;
   private writing:string|null=null;
   private timer:ReturnType<typeof setTimeout>|undefined;
+  private lastSyncAttempt = -Infinity;
+  private lastEdit = -Infinity;
   constructor(readonly request:NotesRequest) {}
   snapshot=()=>this.current;
   subscribe=(fn:()=>void)=>{this.listeners.add(fn);return()=>{this.listeners.delete(fn);};};
@@ -27,6 +32,7 @@ export class NotesStore {
   async load(){if(this.current.ready&&!this.current.error)return;try{this.merge(await this.request<NotesState>("state"));this.patch({error:null});}catch(e){this.patch({error:message(e),ready:true});}}
   async unlock(key:string){try{this.merge(await this.request<NotesState>("unlock",{key}));this.patch({error:null});return true;}catch(e){this.patch({error:message(e)});return false;}}
   edit(note:Note){
+    this.lastEdit=Date.now();clearTimeout(this.timer);
     const updated={...note,updatedAt:new Date().toISOString(),pending:true};this.queue.set(note.id,updated);
     this.patch({notes:[updated,...this.current.notes.filter(n=>n.id!==note.id)],saving:true,error:null});void this.drain();
   }
@@ -43,17 +49,29 @@ export class NotesStore {
         }catch(e){this.queue.set(id,this.queue.get(id)??draft);this.patch({error:message(e)});break;}
         finally{this.writing=null;}
       }
-    })().finally(()=>{this.running=null;this.patch({saving:this.queue.size>0});if(!this.queue.size){clearTimeout(this.timer);this.timer=setTimeout(()=>void this.sync(),1200);}});
+    })().finally(()=>{this.running=null;this.patch({saving:this.queue.size>0});if(!this.queue.size)this.scheduleSync();});
     return this.running;
   }
-  async sync(){
-    if(this.current.syncing || !this.current.unlocked)return;
+  private scheduleSync(){
     clearTimeout(this.timer);
-    if(this.queue.size || this.running){await this.drain();clearTimeout(this.timer);if(this.queue.size)return;}
+    const delay=Math.max(AUTO_SYNC_IDLE, this.lastEdit+AUTO_SYNC_IDLE-Date.now(), this.lastSyncAttempt+AUTO_SYNC_MIN_INTERVAL-Date.now());
+    this.timer=setTimeout(()=>void this.sync(false),delay);
+  }
+  async sync(manual=true){
+    if(this.current.syncing || !this.current.unlocked)return;
+    if(!manual && (Date.now()-this.lastSyncAttempt<AUTO_SYNC_MIN_INTERVAL || Date.now()-this.lastEdit<AUTO_SYNC_IDLE))return;
+    clearTimeout(this.timer);
+    // Claim the sync before awaiting local saves so focus/manual/timer requests cannot overlap.
     this.patch({syncing:true});
-    try{this.merge(await this.request<NotesState>("sync"));this.patch({error:null});}
-    catch(e){this.patch({error:message(e)});}
-    finally{this.patch({syncing:false});}
+    this.lastSyncAttempt=Date.now();
+    try{
+      if(this.queue.size || this.running){await this.drain();clearTimeout(this.timer);if(this.queue.size)return;}
+      this.merge(await this.request<NotesState>("sync"));this.patch({error:null});
+    }catch(e){this.patch({error:message(e)});}
+    finally{
+      this.patch({syncing:false});
+      if(!this.queue.size && this.current.notes.some(note=>note.pending&&!note.conflict))this.scheduleSync();
+    }
   }
   async resolve(note:Note,keepCopy:boolean){
     if(this.current.syncing)return;
