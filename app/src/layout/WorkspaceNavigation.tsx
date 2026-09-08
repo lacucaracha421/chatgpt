@@ -31,11 +31,17 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
   const chrome = useWorkspaceChrome();
   const area = workspaceArea(view);
   const history = useRef<Partial<Record<ReturnType<typeof workspaceArea>, AssetView>>>({});
+  const collectionList = useRef<Extract<AssetView, { kind: "collections" }> | null>(null);
+  if (view.kind === "collections") collectionList.current = view;
   const quickAssetView = view.kind === "revisit" || view.kind === "creator" || view.kind === "unsorted";
   if (!quickAssetView) history.current[area] = view;
   const resize = useRef<{ id: number; x: number; width: number } | null>(null);
   const areaName = { assets: "에셋", collections: "컬렉션", manga: "망가", notes:"메모", manage: "라이브러리 관리" }[area];
   const enterArea = (next: "assets" | "collections" | "manga") => {
+    if (next === "collections" && view.kind === "collection") {
+      onNavigate(collectionList.current ?? { kind: "collections", typeFilter: collectionType, showcase: false });
+      return;
+    }
     if (next === area && !quickAssetView) return;
     onNavigate(history.current[next] ?? (next === "collections" ? { kind: "collections", typeFilter: collectionType, showcase: false } : next === "manga" ? { kind: "manga" } : { kind: "classification", classificationId: null }));
   };

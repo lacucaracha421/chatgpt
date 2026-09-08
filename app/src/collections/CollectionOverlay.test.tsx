@@ -17,6 +17,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { CollectionSummary, LibraryGateway, ReleaseWatchEvent } from "../library/types";
 import { CollectionOverlay } from "./CollectionOverlay";
+import { BackNavigationProvider, useBackHandler } from "../shared/navigation/BackNavigation";
+import { avGateway } from "./avClient";
 
 afterEach(cleanup);
 
@@ -161,9 +163,9 @@ function renderOverlay(
       initialTmdbSearch={pendingSearch} onTmdbSearchConsumed={() => setPendingSearch(undefined)} />;
   }
   const content = (
-    <LibraryProvider gateway={gateway}>
+    <BackNavigationProvider><LibraryProvider gateway={gateway}>
       <Detail />
-    </LibraryProvider>
+    </LibraryProvider></BackNavigationProvider>
   );
   render(
     withSidebar ? <WorkspaceChromeProvider scope={targetCollection.id}><aside aria-label="작품 사이드바"><ChromeTarget name="details" /></aside>{content}</WorkspaceChromeProvider> : content,
@@ -176,6 +178,43 @@ async function openProviderMenu(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("CollectionOverlay MangaDex flow", () => {
+  it("closes AV info editing before leaving the collection on Escape", async () => {
+    const details = vi.spyOn(avGateway, "getDetails").mockResolvedValue({ collectionId: "av-1", revision: 0, productCode: null, label: null, series: null, people: [] });
+    const covers = vi.spyOn(avGateway, "getCoverSet").mockResolvedValue({ frontId: null, spineId: null, backId: null, revision: "0" });
+    const people = vi.spyOn(avGateway, "searchPeople").mockResolvedValue([]);
+    try {
+      const { onExit } = renderOverlay({}, undefined, undefined, { ...collection, id: "av-1", type: "av" });
+      await userEvent.click(await screen.findByRole("button", { name: "AV 정보 편집" }));
+      expect(screen.getByRole("dialog", { name: "AV 정보 편집" })).toBeInTheDocument();
+      await userEvent.keyboard("{Escape}");
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(onExit).not.toHaveBeenCalled();
+      await userEvent.keyboard("{Escape}");
+      expect(onExit).toHaveBeenCalledTimes(1);
+    } finally {
+      details.mockRestore(); covers.mockRestore(); people.mockRestore();
+    }
+  });
+
+  it("shows a recovery action for missing collections and handles Escape only once", async () => {
+    const onExit = vi.fn();
+    const appBack = vi.fn();
+    const listCollectionCovers = vi.fn().mockResolvedValue([]);
+    const gateway = { listCollectionCovers } as unknown as LibraryGateway;
+    function AppBack() { useBackHandler(appBack); return null; }
+    render(<BackNavigationProvider><AppBack /><LibraryProvider gateway={gateway}>
+      <CollectionOverlay collectionId="missing" collections={[]} onExit={onExit} onChanged={vi.fn()} onOpenSettings={vi.fn()} />
+    </LibraryProvider></BackNavigationProvider>);
+    expect(screen.getByRole("heading", { name: "컬렉션을 찾을 수 없습니다." })).toBeInTheDocument();
+    expect(screen.queryByText("표지가 없습니다.")).not.toBeInTheDocument();
+    expect(listCollectionCovers).not.toHaveBeenCalled();
+    await userEvent.keyboard("{Escape}");
+    expect(onExit).toHaveBeenCalledTimes(1);
+    expect(appBack).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "돌아가기" }));
+    expect(onExit).toHaveBeenCalledTimes(2);
+  });
+
   it.each([collection, gameCollection, movieCollection])("places $type information and working management actions in the sidebar", async (target) => {
     const user = userEvent.setup();
     const { gateway } = renderOverlay({}, undefined, undefined, target, undefined, true);

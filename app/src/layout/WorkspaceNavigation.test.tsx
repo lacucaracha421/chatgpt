@@ -4,6 +4,24 @@ import { afterEach, expect, it, vi } from "vitest";
 import { WorkspaceNavigation } from "./WorkspaceNavigation";
 
 afterEach(cleanup);
+it("returns from collection detail to the last collection list when its rail button is clicked", async () => {
+  const onNavigate = vi.fn();
+  const props = { collectionType: "av" as const, width: 208, onWidthChange: vi.fn(), onNavigate,
+    assetNavigation: null, reviewCount: 0, trashCount: 0 };
+  const list = { kind: "collections" as const, typeFilter: "av" as const, showcase: true };
+  const { rerender } = render(<WorkspaceNavigation {...props} view={list} />);
+  rerender(<WorkspaceNavigation {...props} view={{ kind: "collection", collectionId: "av-1" }} />);
+  await userEvent.click(screen.getByRole("button", { name: "컬렉션" }));
+  expect(onNavigate).toHaveBeenCalledWith(list);
+});
+
+it("offers a collection list when detail was opened without a remembered list", async () => {
+  const onNavigate = vi.fn();
+  render(<WorkspaceNavigation view={{kind:"collection",collectionId:"missing"}} collectionType="av" width={208} onWidthChange={vi.fn()} onNavigate={onNavigate} assetNavigation={null} reviewCount={0} trashCount={0}/>);
+  await userEvent.click(screen.getByRole("button", { name: "컬렉션" }));
+  expect(onNavigate).toHaveBeenCalledWith({ kind: "collections", typeFilter: "av", showcase: false });
+});
+
 it("places Notes immediately below Revisit and navigates to the notes area", async () => {
   const onNavigate=vi.fn();
   render(<WorkspaceNavigation view={{kind:"notes"}} collectionType="manga" width={208} onWidthChange={vi.fn()} onNavigate={onNavigate} assetNavigation={null} reviewCount={0} trashCount={0}/>);

@@ -10,6 +10,8 @@ import { CollectionSidebarSection } from "./CollectionSidebarSection";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
+import { EmptyState } from "../shared/ui/EmptyState";
+import { useBackHandler, useBackNavigationContext } from "../shared/navigation/BackNavigation";
 import { Menu } from "../shared/ui/Menu";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { Toast } from "../shared/ui/Toast";
@@ -79,6 +81,7 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
   }, [onChanged]);
 
   const collection = collections.find((candidate) => candidate.id === collectionId);
+  const hasCollection = Boolean(collection);
   const isManga = collection?.type === "manga";
   const isGame = collection?.type === "game";
   const isMovie = collection?.type === "movie";
@@ -101,7 +104,7 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
   );
 
   useEffect(() => {
-    if (isManga || isGame || isMovie || isAv) {
+    if (!hasCollection || isManga || isGame || isMovie || isAv) {
       setCovers([]);
       setSelectedFileName(null);
       return;
@@ -116,7 +119,7 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
       () => { if (active) setCovers([]); },
     );
     return () => { active = false; };
-  }, [gateway, collectionId, isGame, isManga, isMovie, isAv]);
+  }, [gateway, collectionId, hasCollection, isGame, isManga, isMovie, isAv]);
 
   useEffect(() => {
     let active = true;
@@ -292,13 +295,20 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
     return () => { active = false; };
   }, [gateway, collectionId, isGame, collection]);
 
+  const backNavigation = useBackNavigationContext();
+  const canExit = viewerVolumeId === null && !importOpen && !kakaoOpen && !igdbOpen && tmdbTarget === null && editMode === null && !deleteOpen;
+  useBackHandler(onExit, 10, canExit);
   useEffect(() => {
+    if (backNavigation || !canExit) return;
     const exit = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !event.defaultPrevented && viewerVolumeId === null && !importOpen && !kakaoOpen && !igdbOpen && tmdbTarget === null && editMode === null && !deleteOpen) onExit();
+      if (event.key === "Escape" && !event.defaultPrevented) {
+        event.preventDefault();
+        onExit();
+      }
     };
     window.addEventListener("keydown", exit);
     return () => window.removeEventListener("keydown", exit);
-  }, [kakaoOpen, deleteOpen, editMode, igdbOpen, importOpen, onExit, tmdbTarget, viewerVolumeId]);
+  }, [backNavigation, canExit, onExit]);
 
   const heroUrl = useMemo(
     () => selectedCover
@@ -497,6 +507,16 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
     setViewerVolumeId(null);
     requestAnimationFrame(() => viewerOpenerRef.current?.focus());
   }
+
+  if (!collection) return (
+    <section className="collection-overlay" aria-label="컬렉션 표지 보기">
+      <ViewToolbar title="컬렉션" ariaLabel="컬렉션 표지 도구"
+        actions={<Button size="icon" variant="ghost" aria-label="컬렉션 표지 보기 닫기" onClick={onExit}><XMarkIcon aria-hidden="true" /></Button>} />
+      <EmptyState title="컬렉션을 찾을 수 없습니다.">
+        <Button onClick={onExit}>돌아가기</Button>
+      </EmptyState>
+    </section>
+  );
 
   return (
     <section className="collection-overlay" aria-label="컬렉션 표지 보기">
