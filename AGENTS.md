@@ -9,6 +9,7 @@
 - Git writes (including commits, pushes, merges, tags, branch/worktree creation or deletion), deployment, service provisioning, and writes to production data require explicit authorization for that action. Implementation or skill activation alone does not authorize them.
 - Ignore unrelated pre-existing warnings or failures unless they block the requested task.
 - Keep explanations concise unless detailed analysis is requested.
+- All future changes must support both Windows and Linux. Preserve cross-platform library portability and use platform-appropriate paths, media protocols, and credential backends. Verify affected behavior for both platforms where possible; explicitly report any native platform verification that is unavailable.
 
 ## Canonical checkout
 
