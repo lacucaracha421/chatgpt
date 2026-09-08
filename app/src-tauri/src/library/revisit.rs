@@ -616,10 +616,10 @@ mod tests {
     use crate::library::Library;
     use rusqlite::params;
 
-    fn fixture() -> Library {
+    fn fixture() -> (tempfile::TempDir, Library) {
         let temp = tempfile::tempdir().unwrap();
-        let library = Library::open(temp.path()).unwrap();;
-        library
+        let library = Library::open(temp.path()).unwrap();
+        (temp, library)
     }
 
     fn insert_asset(library: &Library, id: &str, collected_at: &str) {
@@ -638,7 +638,7 @@ mod tests {
 
     #[test]
     fn opening_and_exposure_update_aggregates_without_event_rows() {
-        let library = fixture();
+        let (_temp, library) = fixture();
         insert_asset(&library, "asset-a", "2026-08-30T00:00:00Z");
         let connection = library.connection().unwrap();
         record_asset_opened(&connection, "asset-a", "2026-08-30T01:00:00Z").unwrap();
@@ -665,7 +665,7 @@ mod tests {
 
     #[test]
     fn rejects_unknown_assets_and_unparsable_timestamps() {
-        let library = fixture();
+        let (_temp, library) = fixture();
         insert_asset(&library, "asset-a", "2026-08-30T00:00:00Z");
         let connection = library.connection().unwrap();
         assert!(matches!(
@@ -687,7 +687,7 @@ mod tests {
 
     #[test]
     fn persists_and_loads_a_daily_slate_transactionally() {
-        let library = fixture();
+        let (_temp, library) = fixture();
         for id in ["asset-a", "asset-b", "asset-c", "asset-d"] {
             insert_asset(&library, id, "2026-08-30T00:00:00Z");
         }
@@ -739,7 +739,7 @@ mod tests {
 
     #[test]
     fn generated_slate_is_bounded_unique_and_fixed_for_the_day() {
-        let library = fixture();
+        let (_temp, library) = fixture();
         for index in 0..60 {
             insert_favorite_with_creator(&library, &format!("asset-{index}"), "creator", index % 3 == 0, "2026-08-30T00:00:00Z");
         }
@@ -762,7 +762,7 @@ mod tests {
 
     #[test]
     fn recent_exposure_is_a_hard_first_tier_when_fresh_alternatives_exist() {
-        let library = fixture();
+        let (_temp, library) = fixture();
         for index in 0..12 {
             insert_favorite_with_creator(&library, &format!("asset-{index}"), "creator", false, "2025-01-01T00:00:00Z");
         }
@@ -780,7 +780,7 @@ mod tests {
 
     #[test]
     fn less_view_feedback_is_bounded_and_removes_a_disliked_type_from_primary_schedule() {
-        let library = fixture();
+        let (_temp, library) = fixture();
         for _ in 0..10 {
             library.set_revisit_preference("recommendation_type", "surprise", "2026-09-08T01:00:00Z").unwrap();
         }
@@ -792,7 +792,7 @@ mod tests {
 
     #[test]
     fn creator_feedback_moves_creator_spotlight_to_another_creator() {
-        let library = fixture();
+        let (_temp, library) = fixture();
         for index in 0..3 {
             insert_favorite_with_creator(&library, &format!("a-{index}"), "creator-a", false, "2025-01-01T00:00:00Z");
             insert_favorite_with_creator(&library, &format!("b-{index}"), "creator-b", false, "2025-01-01T00:00:00Z");
@@ -809,7 +809,7 @@ mod tests {
 
     #[test]
     fn bundle_reshuffle_keeps_neighbors_and_bumps_only_target() {
-        let library = fixture();
+        let (_temp, library) = fixture();
         for index in 0..60 {
             insert_favorite_with_creator(&library, &format!("asset-{index}"), "creator", index % 3 == 0, "2026-08-30T00:00:00Z");
         };
@@ -841,7 +841,7 @@ mod tests {
 
     #[test]
     fn slate_reshuffle_regenerates_every_bundle() {
-        let library = fixture();
+        let (_temp, library) = fixture();
         for index in 0..60 {
             insert_favorite_with_creator(&library, &format!("asset-{index}"), "creator", index % 3 == 0, "2026-08-30T00:00:00Z");
         }

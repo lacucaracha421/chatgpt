@@ -378,7 +378,8 @@ pub(crate) fn list_page_files(folder: &Path) -> Result<Vec<String>, LibraryError
             pages.push((number, name));
         }
     }
-    pages.sort_by_key(|(number, _)| *number);
+    // Directory enumeration order differs between filesystems; break numeric ties by name.
+    pages.sort();
     Ok(pages.into_iter().map(|(_, name)| name).collect())
 }
 
