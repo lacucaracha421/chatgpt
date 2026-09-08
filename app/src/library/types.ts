@@ -300,7 +300,7 @@ export type AlbumEntry = {
   assetCount?: number;
 };
 
-export type CollectionType = "game" | "manga" | "movie";
+export type CollectionType = "game" | "manga" | "movie" | "av";
 export type LegacyCollectionKind = "game" | "manga" | "movie" | "gacha";
 
 export type CollectionSummary = {

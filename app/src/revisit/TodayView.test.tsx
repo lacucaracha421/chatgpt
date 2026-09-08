@@ -48,6 +48,7 @@ beforeEach(() => {
       Promise.resolve({ ...slate, localDate, revision: slate.revision + 1 })),
     recordAssetOpened: vi.fn().mockResolvedValue(undefined),
     recordAssetsExposed: vi.fn().mockResolvedValue(undefined),
+    setRevisitPreference: vi.fn().mockResolvedValue(undefined),
     getAsset: vi.fn().mockImplementation((assetId: string) => Promise.resolve(assets.find((asset) => asset.id === assetId) ?? assets[0]!)),
   } as unknown as LibraryGateway;
 });
@@ -75,4 +76,38 @@ it("opens the 관심 없음 menu with hide choice", async () => {
   );
   await user.click((await screen.findAllByRole("button", { name: "관심 없음" }))[0]!);
   expect(await screen.findByRole("menuitem", { name: "이 묶음만 숨기기" })).toBeVisible();
+});
+
+
+it("persists a less-like-this preference and hides the bundle", async () => {
+  const user = userEvent.setup();
+  render(
+    <LibraryProvider gateway={gateway}>
+      <TodayView />
+    </LibraryProvider>,
+  );
+  await screen.findByTestId("revisit-hero-bundle");
+  await user.click(screen.getAllByRole("button", { name: "관심 없음" })[0]!);
+  await user.click(await screen.findByRole("menuitem", { name: "이런 추천 덜 보기" }));
+  await waitFor(() => expect(vi.mocked(gateway.setRevisitPreference)).toHaveBeenCalledWith({
+    kind: "recommendation_type", recommendationType: "rediscovery",
+  }));
+  expect(screen.queryByLabelText("다시 만난 자산")).not.toBeInTheDocument();
+});
+
+it("can down-rank the creator represented by a creator bundle", async () => {
+  const creatorAsset = { ...assets[0]!, creatorHandle: "@artist" };
+  vi.mocked(gateway.getAsset).mockResolvedValue(creatorAsset);
+  const user = userEvent.setup();
+  render(
+    <LibraryProvider gateway={gateway}>
+      <TodayView />
+    </LibraryProvider>,
+  );
+  const menus = await screen.findAllByRole("button", { name: "관심 없음" });
+  await user.click(menus[1]!);
+  await user.click(await screen.findByRole("menuitem", { name: "이 작가 덜 보기" }));
+  await waitFor(() => expect(vi.mocked(gateway.setRevisitPreference)).toHaveBeenCalledWith({
+    kind: "creator", creatorKey: "@artist",
+  }));
 });

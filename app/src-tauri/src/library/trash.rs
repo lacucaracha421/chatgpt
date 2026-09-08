@@ -216,13 +216,7 @@ impl Library {
     ) -> Result<(), LibraryError> {
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
-        let asset_ids = validated_asset_ids(&transaction, asset_ids)?;
-        for asset_id in asset_ids {
-            transaction.execute(
-                "UPDATE assets SET status = ?3, trashed_at = ?4 WHERE id = ?1 AND status = ?2",
-                params![asset_id, from_status, to_status, trashed_at],
-            )?;
-        }
+        update_trash_status_in_transaction(&transaction, asset_ids, from_status, to_status, trashed_at.as_deref())?;
         transaction.commit()?;
         Ok(())
     }
@@ -298,6 +292,24 @@ impl Library {
             video_directory: None,
         })
     }
+}
+
+/// Shares the existing trash semantics with callers that must atomically record a decision.
+pub(crate) fn update_trash_status_in_transaction(
+    transaction: &rusqlite::Transaction<'_>,
+    asset_ids: &[String],
+    from_status: &str,
+    to_status: &str,
+    trashed_at: Option<&str>,
+) -> Result<(), LibraryError> {
+    let asset_ids = validated_asset_ids(transaction, asset_ids)?;
+    for asset_id in asset_ids {
+        transaction.execute(
+            "UPDATE assets SET status = ?3, trashed_at = ?4 WHERE id = ?1 AND status = ?2",
+            params![asset_id, from_status, to_status, trashed_at],
+        )?;
+    }
+    Ok(())
 }
 
 fn checked_relative_path(relative_path: &str) -> Result<&Path, ()> {

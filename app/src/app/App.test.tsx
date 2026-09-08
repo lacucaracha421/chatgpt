@@ -586,6 +586,8 @@ describe("App", () => {
         privacyMode: false,
         sidebarWidth: 272,
         expandedClassificationIds: [],
+        pinnedClassificationIds: [],
+        classificationOrderIds: [],
         expandedAlbumIds: [],
         assetSort: "random",
         thumbnailRowHeight: 180,
@@ -1283,7 +1285,7 @@ describe("App", () => {
     const search = await screen.findByRole("searchbox", { name: "제목 검색" });
     await user.type(search, "nier{Enter}");
     await user.click(await screen.findByText("NieR: Automata"));
-    await user.click(await screen.findByRole("button", { name: "컬렉션 표지 보기 닫기" }));
+    await user.click(await screen.findByRole("button", { name: "컬렉션 표지 보기 닫기" }, { timeout: 5_000 }));
     expect(await screen.findByRole("button", { name: "검색 해제" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "제목 검색" }));
     expect(await screen.findByRole("searchbox", { name: "제목 검색" })).toHaveValue("nier");

@@ -146,7 +146,7 @@ function isAssetSort(value: unknown): value is AssetSort {
 }
 
 function isCollectionType(value: unknown): value is CollectionType {
-  return value === "game" || value === "manga" || value === "movie";
+  return value === "game" || value === "manga" || value === "movie" || value === "av";
 }
 
 function isMangaReadingDirection(value: unknown): value is MangaReadingDirection {

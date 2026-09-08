@@ -21,6 +21,8 @@ pub(crate) enum WorkArtworkKind {
     Hero,
     Backdrop,
     Screenshot,
+    Spine,
+    Back,
 }
 
 impl WorkArtworkKind {
@@ -30,6 +32,8 @@ impl WorkArtworkKind {
             Self::Hero => "hero",
             Self::Backdrop => "backdrop",
             Self::Screenshot => "screenshot",
+            Self::Spine => "spine",
+            Self::Back => "back",
         }
     }
 }

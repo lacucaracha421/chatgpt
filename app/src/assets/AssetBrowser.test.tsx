@@ -17,6 +17,32 @@ beforeEach(() => Object.defineProperties(HTMLElement.prototype, {
 }));
 
 describe("AssetBrowser", () => {
+  it.each([false, true])("offers video comparison only for a fully video selection (mixed=%s)", async (mixed) => {
+    const video = (index: number) => ({ ...asset(index), media: { kind: "video" as const, durationMs: 12000, preparationState: "ready" as const, scrubFrameCount: 12 } });
+    const gateway = createGateway({ items: [video(0), mixed ? asset(1) : video(1)], nextCursor: null });
+    const onReviewVideos = vi.fn();
+    render(<LibraryProvider gateway={gateway}><AssetBrowser
+      galleryLayout="justified" view={{ kind: "classification", classificationId: null }}
+      classifications={classifications} sort="newest" metadataVisible={false}
+      privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0}
+      onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()}
+      onReviewVideos={onReviewVideos}
+    /></LibraryProvider>);
+    const first = await screen.findByRole("option", { name: /asset-0.png/ });
+    fireEvent.click(first);
+    fireEvent.click(screen.getByRole("option", { name: /asset-1.png/ }), { ctrlKey: true });
+    fireEvent.contextMenu(first, { clientX: 200, clientY: 180 });
+    if (mixed) {
+      expect(screen.queryByRole("menuitem", { name: "선택한 영상 비교" })).not.toBeInTheDocument();
+      expect(onReviewVideos).not.toHaveBeenCalled();
+    } else {
+      fireEvent.click(screen.getByRole("menuitem", { name: "선택한 영상 비교" }));
+      expect(onReviewVideos).toHaveBeenCalledExactlyOnceWith(["asset-0", "asset-1"]);
+    }
+    expect(gateway.trashAssets).not.toHaveBeenCalled();
+    expect(gateway.indexMissingSimilarityHashes).not.toHaveBeenCalled();
+  });
+
   it("clears its current selection when the scoped sidebar request changes", async () => {
     const user = userEvent.setup();
     const gateway = createGateway({ items: [asset(0)], nextCursor: null });

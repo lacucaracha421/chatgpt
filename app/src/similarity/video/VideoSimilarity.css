@@ -1,0 +1,13 @@
+.similarity-review-workspace { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.similarity-review-workspace > .similarity-review { flex: 1; min-height: 0; }
+.similarity-review-workspace__tabs { display: flex; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-border); }
+.video-similarity__scan { padding: var(--space-3); border-bottom: 1px solid var(--color-border); }
+.video-similarity__scan p { margin: var(--space-2) 0 0; color: var(--color-muted); font-size: var(--text-sm); }
+.video-similarity__scan-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.video-similarity .similarity-review__comparison { flex: 1; }
+.video-similarity .similarity-review__preview { min-height: 180px; }
+.video-similarity .video-player { width: 100%; max-height: 45vh; }
+.video-similarity .similarity-review__actions { flex-wrap: wrap; }
+.video-similarity__evidence { grid-column: 1 / -1; color: var(--color-muted); font-size: var(--text-sm); }
+.video-similarity__evidence summary { cursor: pointer; }
+.video-similarity__evidence ul { columns: 2; padding-left: var(--space-4); }

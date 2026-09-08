@@ -169,6 +169,10 @@ impl Library {
         let release_date = normalized_release_date(request.release_date)?;
         let my_score = validated_personal_rating(request.my_score)?;
         let connection = self.connection()?;
+        let current_type: Option<String> = connection.query_row("SELECT type FROM collections WHERE id=?1", [id], |r| r.get(0)).optional()?;
+        if current_type.as_deref().is_some_and(|current| (current == "av") != (type_str == "av")) {
+            return Err(LibraryError::InvalidCollectionType);
+        }
         let changed = connection
             .execute(
                 "UPDATE collections
@@ -502,6 +506,7 @@ pub(crate) fn collection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<C
     let collection_type = match type_str.as_str() {
         "game" => CollectionType::Game,
         "movie" => CollectionType::Movie,
+        "av" => CollectionType::Av,
         _ => CollectionType::Manga,
     };
     let showcase_int: i64 = row.get(23)?;
@@ -553,6 +558,7 @@ pub(crate) fn collection_type_str(collection_type: CollectionType) -> &'static s
         CollectionType::Game => "game",
         CollectionType::Manga => "manga",
         CollectionType::Movie => "movie",
+        CollectionType::Av => "av",
     }
 }
 

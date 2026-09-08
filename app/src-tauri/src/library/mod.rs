@@ -22,7 +22,13 @@ mod catalog_lineage;
 mod catalog_revision;
 pub(crate) mod catalog_update;
 mod classification;
+pub mod characters;
+pub mod character_scan;
+pub(crate) mod character_worker;
 pub(crate) mod collection;
+pub(crate) mod av_models;
+pub(crate) mod av_collection;
+pub(crate) mod av_artwork;
 pub(crate) mod collection_source;
 mod collection_volume;
 pub(crate) mod catalog_provider;
@@ -49,6 +55,9 @@ mod mangadex_flow;
 pub mod metadata_import;
 pub mod models;
 mod online_catalog;
+pub(crate) mod mobile_catalog;
+#[cfg(test)]
+mod mobile_catalog_tests;
 mod query;
 mod release_watch;
 pub mod collection_tracking;
@@ -64,6 +73,7 @@ pub mod thumbnail_maintenance;
 pub(crate) mod tmdb;
 mod trash;
 mod video_media;
+pub(crate) mod video_similarity;
 mod work_artwork;
 
 use std::{
@@ -147,6 +157,8 @@ pub struct Library {
     catalog_preparation: Arc<Mutex<catalog_preparation::PreparationState>>,
     catalog_lookup_cache: Arc<Mutex<Option<online_catalog::CatalogLookupCache>>>,
     collection_artwork_scan_cache: Arc<Mutex<HashMap<String, u128>>>,
+    character_scan: Arc<Mutex<character_scan::ScanState>>,
+    video_similarity_scan: Arc<Mutex<video_similarity::ScanState>>,
     igdb_token_cache: igdb::IgdbTokenCache,
     igdb_request_limiter: igdb::IgdbRequestLimiter,
 }
@@ -205,6 +217,8 @@ impl Library {
             catalog_preparation: Arc::default(),
             catalog_lookup_cache: Arc::new(Mutex::new(None)),
             collection_artwork_scan_cache: Arc::new(Mutex::new(HashMap::new())),
+            character_scan: Arc::default(),
+            video_similarity_scan: Arc::default(),
             igdb_token_cache: igdb::IgdbTokenCache::default(),
             igdb_request_limiter: igdb::IgdbRequestLimiter::default(),
         };
@@ -213,6 +227,7 @@ impl Library {
         library.cleanup_stale_asset_drags()?;
         library.cleanup_resolving_similarity_reviews()?;
         library.requeue_interrupted_video_preparation()?;
+        library.recover_video_similarity_scans()?;
         library.requeue_interrupted_cloud_sync()?;
         library.cleanup_unreferenced_work_artwork()?;
         library.start_work_artwork_thumbnail_backfill();

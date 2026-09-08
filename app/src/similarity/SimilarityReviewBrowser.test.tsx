@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import type { LibraryGateway, SimilarityReviewSummary } from "../library/types";
@@ -6,7 +6,24 @@ import { assetUrl } from "../assets/mediaUrl";
 import { PrivacyProvider } from "../privacy/PrivacyContext";
 import { SimilarityReviewBrowser } from "./SimilarityReviewBrowser";
 
+vi.mock("./video/VideoSimilarityPanel", () => ({ VideoSimilarityPanel: () => <section aria-label="영상 검토 테스트" /> }));
+
 afterEach(cleanup);
+
+it("does not publish a late image decision result after switching to video", async () => {
+  const gateway = reviewGateway();
+  vi.mocked(gateway.listSimilarityReviews).mockResolvedValue(reviewPage([review("review-1")], 1));
+  let complete!: () => void;
+  vi.mocked(gateway.decideSimilarityReview).mockImplementation(() => new Promise((resolve) => { complete = resolve; }));
+  const onCountChange = vi.fn();
+  render(<SimilarityReviewBrowser gateway={gateway} onCountChange={onCountChange} onClose={vi.fn()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "둘 다 보관" }));
+  fireEvent.click(screen.getByRole("button", { name: "영상" }));
+  await act(async () => complete());
+  expect(gateway.listSimilarityReviews).toHaveBeenCalledOnce();
+  expect(onCountChange).toHaveBeenCalledOnce();
+  expect(screen.getByRole("region", { name: "영상 검토 테스트" })).toBeInTheDocument();
+});
 
 it("shows both public assets and advances after a successful decision", async () => {
   const gateway = reviewGateway();
@@ -17,8 +34,8 @@ it("shows both public assets and advances after a successful decision", async ()
   render(<SimilarityReviewBrowser gateway={gateway} onCountChange={onCountChange} onClose={vi.fn()} />);
 
   expect(await screen.findByRole("heading", { name: "유사 검토" })).toBeInTheDocument();
-  expect(screen.getByRole("img", { name: "기존 이미지" })).toHaveAttribute("src", assetUrl("existing-review-1"));
-  expect(screen.getByRole("img", { name: "새 이미지" })).toHaveAttribute("src", assetUrl("candidate-review-1"));
+  expect(await screen.findByRole("img", { name: "기존 이미지" })).toHaveAttribute("src", assetUrl("existing-review-1"));
+  expect(await screen.findByRole("img", { name: "새 이미지" })).toHaveAttribute("src", assetUrl("candidate-review-1"));
   expect(screen.getAllByText("1920 × 1080")).toHaveLength(2);
 
   await userEvent.click(screen.getByRole("button", { name: "둘 다 보관" }));

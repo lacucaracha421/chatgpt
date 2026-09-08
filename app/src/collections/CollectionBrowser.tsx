@@ -28,6 +28,7 @@ const TYPE_LABEL: Record<CollectionType, string> = {
   game: "게임",
   manga: "만화",
   movie: "영화",
+  av: "AV",
 };
 export type CollectionNavigationMemory = Map<string, { scrollTop: number; focusId: string | null; page?: number }>;
 
@@ -364,6 +365,7 @@ function TypeSegment({
     ["game", "게임"],
     ["manga", "만화"],
     ["movie", "영화"],
+    ["av", "AV"],
   ];
   return (
     <div className="collection-browser__segment" role="group" aria-label="유형">

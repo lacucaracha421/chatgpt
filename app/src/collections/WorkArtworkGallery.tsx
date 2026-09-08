@@ -17,6 +17,8 @@ type WorkArtworkGalleryProps = {
 
 const KIND_LABEL: Record<string, string> = {
   cover: "표지",
+  spine: "책등",
+  back: "뒷면",
   hero: "아트워크",
   backdrop: "배경",
   screenshot: "스크린샷",

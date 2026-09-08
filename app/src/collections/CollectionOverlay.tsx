@@ -25,6 +25,7 @@ import { CollectionOwnershipPanel } from "./CollectionOwnershipPanel";
 import { GameCollectionDetail } from "./GameCollectionDetail";
 import { IgdbImportDialog } from "./IgdbImportDialog";
 import { MovieCollectionDetail } from "./MovieCollectionDetail";
+import { AvCollectionDetail } from "./AvCollectionDetail";
 import { TmdbMovieDialog, type TmdbMovieTarget } from "./TmdbMovieDialog";
 
 type CollectionOverlayProps = {
@@ -81,6 +82,7 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
   const isManga = collection?.type === "manga";
   const isGame = collection?.type === "game";
   const isMovie = collection?.type === "movie";
+  const isAv = collection?.type === "av";
   useEffect(() => {
     if (!initialTmdbSearch || !isMovie) return;
     setTmdbTarget({ kind: "existing", collectionId, initialSearch: initialTmdbSearch });
@@ -99,7 +101,7 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
   );
 
   useEffect(() => {
-    if (isManga || isGame || isMovie) {
+    if (isManga || isGame || isMovie || isAv) {
       setCovers([]);
       setSelectedFileName(null);
       return;
@@ -114,7 +116,7 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
       () => { if (active) setCovers([]); },
     );
     return () => { active = false; };
-  }, [gateway, collectionId, isGame, isManga, isMovie]);
+  }, [gateway, collectionId, isGame, isManga, isMovie, isAv]);
 
   useEffect(() => {
     let active = true;
@@ -534,7 +536,8 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
         } catch (error) { setMessage(commandErrorMessage(error, "신간 알림을 확인 처리하지 못했습니다.")); }
         finally { setReleaseWatchSaving(false); }
       }}>표시된 신간 알림 확인</Button>}
-      {isGame && collection ? (
+      {isAv && collection ? <AvCollectionDetail key={collection.id} collection={collection} scope={library?.root ?? ""} onChanged={onChanged}
+        onEdit={() => setEditMode({ kind: "edit", collection })} onToggleShowcase={() => void toggleShowcase()} onDelete={() => setDeleteOpen(true)} /> : isGame && collection ? (
         <GameCollectionDetail
           collection={collection}
           renderScope={library?.root ?? ""}

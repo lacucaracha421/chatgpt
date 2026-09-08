@@ -33,6 +33,10 @@
       "binaries/ffprobe"
     ],
     "resources": {
+      "../character-runtime/runtime.py": "character-runtime/runtime.py",
+      "../character-runtime/baseline.json": "character-runtime/baseline.json",
+      "../character-runtime/feature_cache.py": "character-runtime/feature_cache.py",
+      "../character-runtime/scan_worker.py": "character-runtime/scan_worker.py",
       "binaries/*.dll": ".",
       "binaries/ffmpeg-license/*": "ffmpeg-license/",
       "binaries/THIRD-PARTY-NOTICES.md": "ffmpeg-license/THIRD-PARTY-NOTICES.md",

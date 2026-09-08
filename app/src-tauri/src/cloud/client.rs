@@ -61,6 +61,28 @@ pub(crate) struct CloudClient {
 }
 
 impl CloudClient {
+    pub(crate) fn mobile_catalog_revision(&self, token:&str)->Result<Option<String>,LibraryError>{
+        #[derive(serde::Deserialize)] #[serde(rename_all="camelCase")] struct Status { publication_revision:Option<String> }
+        let mut response=self.agent.get(self.endpoint("/v1/mobile-catalog/status")?).header("Authorization",bearer(token)?).call().map_err(map_registration_error)?;
+        Ok(read_json::<Status>(&mut response)?.publication_revision)
+    }
+    pub(crate) fn upload_mobile_catalog(&self,digest:&str,file:File,token:&str)->Result<(),LibraryError>{
+        if digest.len()!=64 || !digest.bytes().all(|b|b.is_ascii_hexdigit()) || file.metadata().map_err(|_|LibraryError::InvalidOnlineCatalog)?.len()>crate::library::mobile_catalog::MAX_CONTENT {return Err(LibraryError::InvalidOnlineCatalog);}
+        let agent:ureq::Agent=ureq::Agent::config_builder().max_redirects(0).timeout_global(Some(UPLOAD_BODY_TIMEOUT)).build().into();
+        let mut response=agent.put(self.endpoint(&format!("/v1/mobile-catalog/replicas/{digest}"))?).header("Authorization",bearer(token)?).content_type("application/x-ndjson").send(file).map_err(map_registration_error)?;
+        let body:serde_json::Value=read_json(&mut response)?;
+        if body["contentDigest"].as_str()!=Some(digest) || body["ready"]!=true {return Err(LibraryError::InvalidCloudResponse);} Ok(())
+    }
+    pub(crate) fn publish_mobile_catalog(&self,body:&serde_json::Value,token:&str)->Result<(String,String),LibraryError>{
+        let bytes=serde_json::to_vec(body).map_err(|_|LibraryError::InvalidCloudResponse)?;
+        if bytes.len()>crate::library::mobile_catalog::MAX_USERS+4096 {return Err(LibraryError::InvalidCloudResponse);}
+        let agent:ureq::Agent=ureq::Agent::config_builder().max_redirects(0).timeout_global(Some(UPLOAD_BODY_TIMEOUT)).build().into();
+        let mut response=agent.put(self.endpoint("/v1/mobile-catalog/publication")?).header("Authorization",bearer(token)?).content_type("application/json").send(&bytes).map_err(map_registration_error)?;
+        let value:serde_json::Value=read_json(&mut response)?;
+        let revision=value["publicationRevision"].as_str().filter(|s|s.len()==64).ok_or(LibraryError::InvalidCloudResponse)?;
+        let published=value["publishedAt"].as_str().ok_or(LibraryError::InvalidCloudResponse)?;
+        Ok((revision.to_owned(),published.to_owned()))
+    }
     pub(crate) fn notes_list(&self, vault: &str, cursor:i64, token:&str) -> crate::library::notes::Result<crate::library::notes::Page> {
         let agent:ureq::Agent=ureq::Agent::config_builder().max_redirects(0).timeout_global(Some(Duration::from_secs(30))).build().into();
         let mut response=agent.get(self.endpoint(&format!("/v1/notes/{vault}?after={cursor}&limit=10"))?)

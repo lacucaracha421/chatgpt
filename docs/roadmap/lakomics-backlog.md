@@ -578,15 +578,14 @@ no historical activity was fabricated. Feature-level native/visual acceptance re
 
 ## IDEA-001 — More varied Revisit mixes
 
-Status: `PARTIAL`
+Status: `PARTIAL` — IDEA-001A scoring/feedback/cooldown is implemented; IDEA-001B theme expansion remains.
 
-Current creator/date/surprise foundation exists. BUG-013 now records deliberate opens;
-preference weighting and cooldown/scoring integration still need work. Mobile Home's
-classification/date/creator discovery improvements do not close the PC scoring items below.
+The creator/date/surprise foundation now consumes BUG-013 deliberate opens and recorded exposures.
+Mobile Home's classification/date/creator discovery improvements remain separate from the PC theme work below.
 
 ### IDEA-001A — Scoring, feedback, and cooldown correctness
 
-Status: `TODO`
+Status: `DONE` (2026-09-08)
 Prerequisite: BUG-013.
 
 - version the daily slate algorithm;
@@ -595,6 +594,13 @@ Prerequisite: BUG-013.
 - add a small `덜 보기` feedback affordance;
 - keep one deterministic complete slate transaction per local date/revision.
 
+Implemented evidence: Revisit v2 applies a 14-day exposure / 30-day open strict cooldown with
+3-day / 7-day fallback before an open fallback, then scores age since open/exposure, counts,
+collected age and favorite state. Recommendation-type feedback reduces bundle frequency and
+creator feedback down-ranks that creator, both clamped at -5. Creator bundles now contain one
+creator rather than a mixed pool. Existing v1 daily bundle IDs are regenerated once into the v2
+algorithm while same-day v2 slates remain deterministic. Rust Revisit tests pass 10/10, the full Revisit frontend passes 13/13, and TypeScript passes. No production library was opened for this work.
+
 ### IDEA-001B — Theme expansion
 
 Status: `TODO`
@@ -602,11 +608,12 @@ Prerequisite: IDEA-001A.
 
 Candidate themes:
 
-- one focused creator per bundle;
+- favorite-seeded discovery only when favorites provide real evidence;
 - bounded period nostalgia;
 - recently collected but rarely opened;
 - favorite + discovery only when favorites exist;
 - cross-classification discovery;
+- bounded collection-session/source-group rediscovery where durable grouping exists;
 - Collection-level high-rated discovery only where Collection scores actually exist.
 
 A theme label must match its actual selection logic. Missing data should omit/fallback rather than fabricate meaning.
@@ -633,11 +640,19 @@ Czkawka is a design/reference source only. Keep Lakomics' existing PDQ-based fin
 
 ## SIMILARITY-002A — EXIF orientation normalization before PDQ
 
-Status: `TODO`
+Status: `DONE` (2026-09-08)
 
 - normalize decoded image orientation from EXIF before generating the existing full + 5% crop PDQ fingerprints;
 - preserve the current quality gate, distance threshold, crop tolerance, and Similarity Review decisions;
 - add fixtures proving equivalent rotated-by-metadata images converge without increasing unrelated-image false positives.
+
+Implemented evidence: the existing `image` decoder now applies EXIF orientation before PDQ and
+new ingestion thumbnails use the same orientation. Display dimensions follow the oriented image.
+Schema 47 clears only JPEG/JPEG-extension/WebP PDQ state so the existing bounded indexer lazily
+recomputes old orientation-capable hashes instead of mixing old and new hash semantics; PNG/GIF
+state is left alone. The actual EXIF-6 JPEG fixture converges at the existing PDQ <=20 threshold,
+and the v46->v47 migration fixture passes. Quality 50, distance 20, 5% crop fingerprints and
+Similarity Review decisions were not widened. The final Rust library regression is 774 passed / 0 failed / 18 explicit ignored. Czkawka remains a design/reference source only.
 
 ## SIMILARITY-002B — PDQ geometric-invariance candidates
 
@@ -651,7 +666,13 @@ Prerequisite: SIMILARITY-002A.
 
 ## SIMILARITY-003 — Similar-video fingerprinting and review
 
-Status: `TODO`
+Status: `PARTIAL` — the bounded implementation slice is complete: explicit 2–100-video
+temporal PDQ analysis, durable pause/resume, separate normal-video pair decisions and the
+existing review surface's video pane are integrated. Full Rust regression is 769/769 passed,
+and explicit native FFmpeg re-encode/resolution plus timeout/cancellation checks pass.
+`PARTIAL` is retained for the representative real-video positive/hard-negative accuracy gate
+and production-library/native product acceptance. See
+[execution evidence](../research/video-similarity-execution-plan-20260908.md).
 
 - extend the existing FFmpeg/video preparation foundation with bounded temporal frame sampling;
 - use duration/window gates before expensive comparison;
@@ -848,7 +869,20 @@ Source-cover repair completed (2026-09-07): publication revision `3b640e2627ad52
 
 ## MOBILE-006 — Shared Manga Catalog browsing
 
-Status: `TODO`; follows MOBILE-005. User scope: PC-style catalog design with minimal editing. Inspect the current Rust catalog identity/query/grouping/visibility contracts before choosing the server search implementation. Search must preserve provider/work identity, language scope, blocked tags/categories and confirmed edition groups; do not silently substitute the legacy upstream search proxy for the PC catalog. Plan a versioned server search replica that supports PC-off reads, safe staged replacement and rollback; no active catalog replacement for verification. Deliver catalog list/search/detail and bookmark filter before reader/offline downloads. Reader work requires ordered page access, bounded prefetch/retry and device-local reading position; cross-device progress editing is deferred unless requested.
+Status: `PARTIAL`; the MOBILE-006 implementation slice is complete. It includes explicit
+PC snapshot publication, a versioned server read replica and mobile list/search/detail,
+edition and bookmark-filter browsing. Rust parity/export, Python API/replica (13 tests),
+mobile UI (53 tests/build) and Android native policy/compile checks pass. Publication,
+user policy and group identity are pinned together; old cursors retain their publication.
+`PARTIAL` is retained for deployment, actual PC-off/Galaxy Tab acceptance and representative
+catalog-scale performance. See
+[execution evidence](../research/mobile-catalog-execution-plan-20260908.md).
+
+User scope: PC-style catalog design with minimal editing. Search must preserve
+provider/work identity, language scope, blocked tags/categories and confirmed edition
+groups. The legacy upstream proxy is not the shared search contract. Reader/offline
+downloads remain later work and require ordered page access, bounded prefetch/retry
+and device-local reading position; cross-device progress editing is deferred.
 
 ## MOBILE-007 — Catalog bookmark changes across devices
 
@@ -1117,7 +1151,14 @@ Dependency: use LONG-002A primitives/presets for final presentation; provider/da
 
 ## LONG-001 — AV typed Collections, people relations, and full cover sets
 
-Status: `TODO`
+Status: `PARTIAL` — the manual-first implementation slice is complete: local AV Collection
+type, independent person identities with ordered performer/director relations, and manual
+front/spine/back artwork selection are integrated. Backup/restore, ownership and full Rust
+regression pass, and the bundled Tauri app builds/opens without the dev server. `PARTIAL` is
+retained for native file-picker/subjective visual acceptance, production-library migration,
+and the later external-provider portion of the broader LONG-001 scope. AV is
+excluded before artwork collection from the current Mobile Collections replica;
+it remains part of ordinary metadata recovery and is not an encrypted vault.
 
 Extend the existing Collection work model rather than create a parallel work system.
 
@@ -1135,7 +1176,12 @@ Prerequisite for full-cover interaction: LONG-002A should establish the presenta
 
 ## LONG-002B — Focused complete-cover interaction
 
-Status: `TODO`
+Status: `PARTIAL` — the focused interaction implementation is complete: front/spine/back
+snap and original-image view use actual registered AV cover surfaces and the existing case
+renderer. Keyboard, missing-surface and privacy behavior are covered by the green 893-test
+frontend suite, and the bundled Tauri app starts successfully. `PARTIAL` is retained for
+subjective native visual acceptance with real user cover media. Initial stops change immediately without free-angle rotation; missing
+artwork is never synthesized. See [execution evidence](../research/av-covers-execution-plan-20260908.md).
 Prerequisites: LONG-002A and truthful front/spine/back surfaces from LONG-001.
 
 - activate side/back interaction only in focused/detail contexts;
@@ -1248,16 +1294,17 @@ These are detailed in active sections above:
 - CLOUD-UI-001 — `VERIFY`
 - NOTE-001 — `TODO` split server/desktop
 - STATS-001 — `PARTIAL` split inventory/activity
-- IDEA-001 — `PARTIAL` split correctness/themes
-- LONG-001 — `TODO`
-- LONG-002 — `PARTIAL` split foundation/focused interaction
+- IDEA-001 — `PARTIAL`; IDEA-001A `DONE`, IDEA-001B `TODO`
+- LONG-001 — `PARTIAL` implementation complete; provider/native/product acceptance remains
+- LONG-002 — LONG-002A `DONE`; LONG-002B `PARTIAL` only for native visual acceptance
 - LONG-003 — `TODO` in audit, intentionally `HOLD` here until security gate is approved
 - LONG-004 — `MERGE CANDIDATE` consuming LONG-002 renderer
 
 Later completions superseding the audit: CLOUD-006, BUG-013, CATALOG-003/004/005/006,
 CATALOG-007A/B, LONG-002A, WORKS-002, MOBILE-005 and EXT-005/006/007 are DONE.
-MOBILE-001/002/004 remain PARTIAL for the specific remaining work in their sections;
-MOBILE-006/007/008 are the next planned catalog sequence.
+MOBILE-001/002/004 remain PARTIAL for the specific remaining work in their sections.
+MOBILE-006 has its read implementation complete and remains PARTIAL for rollout/device acceptance;
+MOBILE-007/008 are the next catalog implementation sequence.
 
 ## OBSOLETE / incident-only
 
@@ -1313,27 +1360,29 @@ LONG-002A and WORKS-002. Do not schedule them again.
 Remaining work, grouped by dependency rather than one mandatory serial queue:
 
 1. **CLOUD-UI-001 and STATS-001A/B — native acceptance** of already implemented UI.
-2. **IDEA-001A → IDEA-001B — Revisit scoring/cooldown, then themes.**
+2. **IDEA-001B — Revisit theme expansion.** IDEA-001A scoring/cooldown/feedback is DONE.
 3. **NOTE-001A → NOTE-001B — revision-safe server Notes, then desktop Notes.**
 4. **CATALOG-002B — optional Heliotrope coexistence.** Not a prerequisite for the
    existing-provider Mobile catalog lane.
 5. **WORKS-001 — remaining related-work/richer Film presentation.** TV/season/episode
    structure already exists; do not restart that foundation.
-6. **LONG-001 → LONG-002B → LONG-004 — AV relations/cover roles, focused full-cover
-   interaction, then optional Display mode using the same renderer.**
+6. **LONG-001 / LONG-002B acceptance → LONG-004 — AV relations/cover roles and focused
+   full-cover interaction are implemented; finish real-media/native acceptance before optional
+   Display mode using the same renderer.**
 7. **LONG-003 — HOLD:** threat model/format/recovery approval before encrypted
    metadata/images, recovery/key rotation and later video chunks.
 
 ## Separately promoted Similarity order
 
-S1. **SIMILARITY-002A EXIF orientation normalization**
-- small correctness fix; preserve current PDQ and review thresholds.
+S1. **SIMILARITY-002A EXIF orientation normalization — DONE**
+- schema 47 safely reindexes orientation-capable stored hashes; current PDQ and review thresholds are preserved.
 
 S2. **SIMILARITY-002B geometric-invariance candidates**
 - after S1; validate false positives on real artwork before enabling broadly.
 
-S3. **SIMILARITY-003 similar-video fingerprinting**
-- independent enough to prototype after the existing video pipeline is stable; reuse Similarity Review.
+S3. **SIMILARITY-003 similar-video fingerprinting — implementation complete / accuracy gate open**
+- bounded analysis and Similarity Review integration are implemented; next work is representative
+  real-video calibration/holdout validation rather than another architecture prototype.
 
 S4. **PERF-SIMILARITY BK-tree / metric index**
 - HOLD until measured 100k+ / 250k+ scale or ingestion latency justifies it.
@@ -1349,8 +1398,9 @@ optional extension update management. The installed app/Home/cache are not new w
 
 M3. **MOBILE-005 Collections — DONE.** Keep the deployed cover/volume implementation.
 
-M4. **MOBILE-006 shared Manga Catalog reads:** versioned server replica, PC-style
-search/list/detail/bookmark filter, then reader. Resolve authority before deployment.
+M4. **MOBILE-006 shared Manga Catalog reads — implementation complete / rollout gate open:**
+versioned server replica and PC-style search/list/detail/bookmark filter are implemented. Next is
+approved deployment and PC-off Galaxy Tab acceptance; reader remains a later slice.
 
 M5. **MOBILE-007 bookmark changes:** after read identity/revision contract, with
 idempotent retries and PC receipt/conflict semantics.

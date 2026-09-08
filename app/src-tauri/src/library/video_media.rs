@@ -536,6 +536,170 @@ fn tool_path(name: &str) -> Option<PathBuf> {
         .find(|path| path.is_file())
 }
 
+/// Fingerprint jobs share the installed tools, but never create playback derivatives.
+pub(crate) fn similarity_tool_profile() -> Result<String, &'static str> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let path = tool_path("ffmpeg").ok_or("tool_unavailable")?;
+    let mut file = fs::File::open(path).map_err(|_| "tool_unavailable")?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let count = file.read(&mut buffer).map_err(|_| "tool_unavailable")?;
+        if count == 0 { break; }
+        hasher.update(&buffer[..count]);
+    }
+    Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
+}
+
+pub(crate) fn inspect_similarity_geometry(
+    source: &Path,
+    cancel: &std::sync::atomic::AtomicBool,
+    deadline: std::time::Instant,
+) -> Result<(), &'static str> {
+    let output = run_similarity_tool("ffprobe", &[
+        "-v".into(), "error".into(), "-select_streams".into(), "v:0".into(),
+        "-show_streams".into(), "-of".into(), "json".into(), source.as_os_str().to_owned(),
+    ], cancel, deadline, None)?;
+    let json: serde_json::Value = serde_json::from_slice(&output).map_err(|_| "decode_failed")?;
+    let stream = json["streams"].as_array().and_then(|s| s.first()).ok_or("decode_failed")?;
+    let width = stream["width"].as_u64().ok_or("unsupported_geometry")?;
+    let height = stream["height"].as_u64().ok_or("unsupported_geometry")?;
+    if width == 0 || height == 0 || width > 8192 || height > 8192 { return Err("unsupported_geometry"); }
+    if stream["sample_aspect_ratio"].as_str().is_some_and(|sar| !matches!(sar, "1:1" | "N/A")) {
+        return Err("unsupported_geometry");
+    }
+    if stream["tags"]["rotate"].as_str().is_some_and(|r| r.parse::<i64>().map_or(true, |n| n % 360 != 0))
+        || stream["side_data_list"].as_array().is_some_and(|rows|
+            rows.iter().any(|r| r["rotation"].as_f64().is_some_and(|n| n % 360.0 != 0.0))) {
+        return Err("unsupported_geometry");
+    }
+    Ok(())
+}
+
+pub(crate) fn extract_similarity_frame(
+    source: &Path,
+    at_ms: u64,
+    cancel: &std::sync::atomic::AtomicBool,
+    deadline: std::time::Instant,
+) -> Result<image::DynamicImage, &'static str> {
+    let temporary = tempfile::Builder::new().prefix("lakomics-video-similarity-").suffix(".png")
+        .tempfile().map_err(|_| "decode_failed")?;
+    let seek = format!("{}.{:03}", at_ms / 1000, at_ms % 1000);
+    run_similarity_tool("ffmpeg", &[
+        "-y".into(), "-nostdin".into(), "-hide_banner".into(), "-v".into(), "error".into(),
+        "-threads".into(), "1".into(), "-ss".into(), seek.into(),
+        "-i".into(), source.as_os_str().to_owned(), "-map".into(), "0:v:0".into(),
+        "-an".into(), "-sn".into(), "-dn".into(), "-frames:v".into(), "1".into(),
+        "-vf".into(), "scale=512:512:force_original_aspect_ratio=decrease".into(),
+        "-c:v".into(), "png".into(), "-threads".into(), "1".into(),
+        temporary.path().as_os_str().to_owned(),
+    ], cancel, deadline, Some(temporary.path()))?;
+    let frame = image::open(temporary.path()).map_err(|_| "decode_failed")?;
+    if frame.width() > 512 || frame.height() > 512 { return Err("decode_failed"); }
+    Ok(frame)
+}
+
+fn run_similarity_tool(
+    name: &str,
+    arguments: &[OsString],
+    cancel: &std::sync::atomic::AtomicBool,
+    deadline: std::time::Instant,
+    output_file: Option<&Path>,
+) -> Result<Vec<u8>, &'static str> {
+    use std::{io::Read, process::Stdio, sync::atomic::{AtomicBool, Ordering}, time::{Duration, Instant}};
+    struct ReapedChild(std::process::Child);
+    impl Drop for ReapedChild {
+        fn drop(&mut self) { let _ = self.0.kill(); let _ = self.0.wait(); }
+    }
+    fn drain(mut reader: impl Read, cap: usize, overflow: &AtomicBool) -> Vec<u8> {
+        let mut retained = Vec::new();
+        let mut chunk = [0_u8; 8192];
+        loop {
+            let Ok(n) = reader.read(&mut chunk) else { break; };
+            if n == 0 { break; }
+            let take = n.min(cap.saturating_sub(retained.len()));
+            retained.extend_from_slice(&chunk[..take]);
+            if take < n { overflow.store(true, Ordering::Relaxed); }
+        }
+        retained
+    }
+    if cancel.load(Ordering::Relaxed) { return Err("cancelled"); }
+    if Instant::now() >= deadline { return Err("timeout"); }
+    let mut command = Command::new(tool_path(name).ok_or("tool_unavailable")?);
+    command.args(arguments).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(windows)]
+    command.creation_flags(0x08000000);
+    let mut child = ReapedChild(command.spawn().map_err(|_| "tool_unavailable")?);
+    // Kernel ownership also terminates this child if the application exits before
+    // its cancellation worker can run. Ordinary completion still kill/waits below.
+    #[cfg(windows)]
+    let _job = SimilarityProcessJob::assign(&child.0)?;
+    let stdout = child.0.stdout.take().ok_or("decode_failed")?;
+    let stderr = child.0.stderr.take().ok_or("decode_failed")?;
+    let overflow = AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        let out = scope.spawn(|| drain(stdout, 1024 * 1024, &overflow));
+        // Continue draining even after the diagnostic retention limit is reached.
+        let err = scope.spawn(|| drain(stderr, 16 * 1024, &AtomicBool::new(false)));
+        let outcome = loop {
+            if cancel.load(Ordering::Relaxed) { break Err("cancelled"); }
+            if Instant::now() >= deadline { break Err("timeout"); }
+            if overflow.load(Ordering::Relaxed)
+                || output_file.is_some_and(|p| fs::metadata(p).is_ok_and(|m| m.len() > 2 * 1024 * 1024)) {
+                break Err("output_limit");
+            }
+            match child.0.try_wait() {
+                Ok(Some(status)) => break if status.success() { Ok(()) } else { Err("decode_failed") },
+                Err(_) => break Err("decode_failed"),
+                Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+            }
+        };
+        // Always terminate/reap before joining pipe readers, including cancellation.
+        let _ = child.0.kill();
+        let _ = child.0.wait();
+        let bytes = out.join().map_err(|_| "decode_failed")?;
+        let _ = err.join();
+        outcome?;
+        if overflow.load(Ordering::Relaxed) { return Err("output_limit"); }
+        if let Some(path) = output_file {
+            let size = fs::metadata(path).map_err(|_| "insufficient_evidence")?.len();
+            if size == 0 { return Err("insufficient_evidence"); }
+            if size > 2 * 1024 * 1024 { return Err("output_limit"); }
+        }
+        Ok(bytes)
+    })
+}
+
+#[cfg(windows)]
+struct SimilarityProcessJob(windows_sys::Win32::Foundation::HANDLE);
+
+#[cfg(windows)]
+impl SimilarityProcessJob {
+    fn assign(child: &std::process::Child) -> Result<Self, &'static str> {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::System::JobObjects::*;
+        let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+        if handle.is_null() { return Err("process_limit_failed"); }
+        let job = Self(handle);
+        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_PROCESS_MEMORY;
+        limits.ProcessMemoryLimit = 1024 * 1024 * 1024;
+        let configured = unsafe { SetInformationJobObject(handle, JobObjectExtendedLimitInformation,
+            (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+            std::mem::size_of_val(&limits) as u32) };
+        if configured == 0 || unsafe { AssignProcessToJobObject(handle, child.as_raw_handle()) } == 0 {
+            return Err("process_limit_failed");
+        }
+        Ok(job)
+    }
+}
+
+#[cfg(windows)]
+impl Drop for SimilarityProcessJob {
+    fn drop(&mut self) { unsafe { windows_sys::Win32::Foundation::CloseHandle(self.0); } }
+}
+
 fn scrub_frames_complete(directory: &Path, expected_count: u64) -> bool {
     let Ok(expected_count) = usize::try_from(expected_count) else {
         return false;
@@ -661,6 +825,27 @@ pub(crate) fn parse_probe(json: &str, extension: &str) -> Result<VideoProbe, Lib
         width,
         height,
     })
+}
+
+#[test]
+#[ignore = "explicit native FFmpeg lifecycle acceptance"]
+fn native_similarity_tool_timeout_and_cancellation() {
+    use std::{sync::atomic::{AtomicBool, Ordering}, time::{Duration, Instant}};
+    let arguments: Vec<OsString> = [
+        "-nostdin", "-v", "error", "-re", "-f", "lavfi", "-i",
+        "testsrc2=size=64x64:rate=10:duration=30", "-f", "null", "-",
+    ].into_iter().map(Into::into).collect();
+    let started = Instant::now();
+    assert_eq!(run_similarity_tool("ffmpeg", &arguments, &AtomicBool::new(false),
+        Instant::now() + Duration::from_millis(150), None), Err("timeout"));
+    assert!(started.elapsed() < Duration::from_secs(2));
+    let cancel = AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        scope.spawn(|| { std::thread::sleep(Duration::from_millis(150)); cancel.store(true, Ordering::Relaxed); });
+        assert_eq!(run_similarity_tool("ffmpeg", &arguments, &cancel,
+            Instant::now() + Duration::from_secs(30), None), Err("cancelled"));
+    });
+    assert!(started.elapsed() < Duration::from_secs(4));
 }
 
 #[cfg(test)]

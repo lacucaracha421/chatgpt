@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 43;
+pub(crate) const SCHEMA_VERSION: i64 = 47;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -228,16 +228,46 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         if version <= 42 {
             transaction.execute_batch(include_str!("../../migrations/0043_notes.sql"))?;
         }
+        if version <= 43 {
+            transaction.execute_batch(include_str!("../../migrations/0044_characters.sql"))?;
+        }
+        if version <= 44 {
+            transaction.execute_batch(include_str!("../../migrations/0045_video_similarity.sql"))?;
+        }
+        if version <= 45 {
+            transaction.execute_batch(include_str!("../../migrations/0046_collection_av.sql"))?;
+        }
+        if version <= 46 {
+            transaction.execute_batch(include_str!("../../migrations/0047_similarity_orientation.sql"))?;
+        }
+        // Validate before commit so a failed migration leaves the old DB intact.
+        if transaction.prepare("PRAGMA foreign_key_check")?.exists([])? {
+            return Err(LibraryError::Database(rusqlite::Error::InvalidQuery));
+        }
         transaction.commit()?;
         Ok::<(), LibraryError>(())
     })();
     connection.pragma_update(None, "foreign_keys", "ON")?;
     migration?;
 
-    let has_foreign_key_error = connection.prepare("PRAGMA foreign_key_check")?.exists([])?;
-    if has_foreign_key_error {
+    Ok(())
+}
+
+/// Only the temporary copy of an already verified restore snapshot reaches here.
+/// The original selected backup and current pre-restore snapshot stay untouched.
+pub(super) fn prepare_snapshot_for_restore(path: &Path) -> Result<(), LibraryError> {
+    let mut connection = open_database(path)?;
+    let version: i64 = connection.pragma_query_value(None, "user_version", |r| r.get(0))?;
+    if !(1..=SCHEMA_VERSION).contains(&version) {
+        return Err(LibraryError::UnsupportedSchema(version));
+    }
+    if version < SCHEMA_VERSION {
+        migrate_to_latest(&mut connection, version)?;
+    }
+    if connection.prepare("PRAGMA foreign_key_check")?.exists([])? {
         return Err(LibraryError::Database(rusqlite::Error::InvalidQuery));
     }
+    connection.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
     Ok(())
 }
 
@@ -245,28 +275,107 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
 mod tests {
     use super::*;
 
+    // Build the actual historical schema; downgrading user_version on today's
+    // schema leaves later tables behind and cannot exercise an upgrade faithfully.
+    fn historical_schema(connection: &mut Connection, version: usize) {
+        connection.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        let mut files = std::fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations"))
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().is_some_and(|extension| extension == "sql"))
+            .collect::<Vec<_>>();
+        files.sort();
+        let transaction = connection.transaction().unwrap();
+        for file in files.iter().take(version) {
+            transaction.execute_batch(&std::fs::read_to_string(file).unwrap()).unwrap();
+        }
+        transaction.commit().unwrap();
+        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), version as i64);
+        connection.pragma_update(None, "foreign_keys", "ON").unwrap();
+    }
+
+    #[test]
+    fn similarity_orientation_v47_reindexes_orientation_capable_formats_only() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        historical_schema(&mut connection, 46);
+        for (id, path) in [("jpeg", "assets/a.jpg"), ("webp", "assets/b.webp"), ("png", "assets/c.png")] {
+            connection.execute(
+                "INSERT INTO assets (id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at,perceptual_hash,perceptual_hash_quality)
+                 VALUES (?1,?2,'image',?3,?4,?5,1,10,20,'2026-01-01T00:00:00Z',zeroblob(64),100)",
+                rusqlite::params![id, format!("hash-{id}"), format!("{id}.img"), path, format!("thumb-{id}.webp")],
+            ).unwrap();
+        }
+        migrate_to_latest(&mut connection, 46).unwrap();
+        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 47);
+        for id in ["jpeg", "webp"] {
+            assert_eq!(connection.query_row("SELECT perceptual_hash IS NULL FROM assets WHERE id=?1", [id], |row| row.get::<_, bool>(0)).unwrap(), true);
+        }
+        assert_eq!(connection.query_row("SELECT perceptual_hash IS NULL FROM assets WHERE id='png'", [], |row| row.get::<_, bool>(0)).unwrap(), false);
+    }
+
+    #[test]
+    fn roadmap_v47_preserves_v44_relations_and_upgrades_restore_copy() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(temp.path().join("backups")).unwrap();
+        let path = temp.path().join("library.sqlite");
+        let mut previous = Connection::open(&path).unwrap();
+        historical_schema(&mut previous, 44);
+        previous.execute_batch("INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at)
+            VALUES('asset','source-hash','image','kept.png','assets/kept.png','thumbnails/kept.webp',5,1,1,'before');
+            INSERT INTO classification_entries(id,kind,name,created_at) VALUES('series','work','Kept series','before');
+            INSERT INTO asset_classifications VALUES('asset','series');
+            INSERT INTO collections(id,name,type,cover_asset_id,created_at,updated_at) VALUES('work','Kept game','game','asset','before','before');
+            INSERT INTO collection_assets VALUES('work','asset','before');
+            INSERT INTO collection_work_artworks(id,collection_id,provider,provider_image_id,kind,relative_path,mime_type,width,height,selected,created_at,updated_at)
+            VALUES('cover','work','manual','front','cover','work-artwork/kept.png','image/png',1,1,1,'before','before');
+            INSERT INTO character_targets(id,series_classification_id,display_name,enabled,created_at,updated_at) VALUES('character','series','Kept character',1,'before','before');
+            INSERT INTO character_references VALUES('character',0,'asset','source-hash');
+            INSERT INTO character_decisions(target_id,asset_id,source_asset_id,asset_hash,decision,target_fingerprint,reference_snapshot,created_at)
+            VALUES('character','asset','asset','source-hash','accepted','fingerprint','[]','before');
+            INSERT INTO online_catalog_bookmarks VALUES('kHentai','123','before');").unwrap();
+        drop(previous);
+        let upgraded = initialize_database(&path).unwrap();
+        let check_preserved = |connection: &Connection| {
+            assert_eq!(connection.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
+            for sql in [
+                "SELECT count(*) FROM asset_classifications WHERE asset_id='asset' AND classification_id='series'",
+                "SELECT count(*) FROM collection_assets WHERE collection_id='work' AND asset_id='asset'",
+                "SELECT count(*) FROM collections WHERE id='work' AND type='game' AND cover_asset_id='asset'",
+                "SELECT count(*) FROM collection_work_artworks WHERE id='cover' AND selected=1 AND kind='cover'",
+                "SELECT count(*) FROM character_relations WHERE target_id='character' AND asset_id='asset'",
+                "SELECT count(*) FROM character_references WHERE target_id='character' AND asset_hash='source-hash'",
+                "SELECT count(*) FROM online_catalog_bookmarks WHERE provider='kHentai' AND work_id='123'",
+            ] {
+                assert_eq!(connection.query_row(sql, [], |r| r.get::<_, i64>(0)).unwrap(), 1, "{sql}");
+            }
+            for table in ["video_similarity_reviews", "video_similarity_scans", "collection_av_details", "collection_people"] {
+                assert_eq!(connection.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+            }
+            assert!(!connection.prepare("PRAGMA foreign_key_check").unwrap().exists([]).unwrap());
+        };
+        check_preserved(&upgraded);
+        drop(upgraded);
+        let snapshot = std::fs::read_dir(temp.path().join("backups")).unwrap().next().unwrap().unwrap().path();
+        let original = Connection::open(&snapshot).unwrap();
+        assert_eq!(original.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 44);
+        drop(original);
+        let restoration = temp.path().join("restore-copy.sqlite");
+        std::fs::copy(&snapshot, &restoration).unwrap();
+        prepare_snapshot_for_restore(&restoration).unwrap();
+        check_preserved(&Connection::open(restoration).unwrap());
+        assert_eq!(Connection::open(snapshot).unwrap().pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 44);
+    }
+
     #[test]
     fn catalog_groups_v35_preserves_v34_user_state_and_snapshot() {
         let temp = tempfile::tempdir().unwrap();
         std::fs::create_dir(temp.path().join("backups")).unwrap();
         let path = temp.path().join("library.sqlite");
         let mut connection = Connection::open(&path).unwrap();
-        // Build the previous schema using the migration path, then remove only
-        // the additive group tables if this test runs against the new schema.
-        migrate_to_latest(&mut connection, 0).unwrap();
-        connection.execute_batch("ALTER TABLE library_settings DROP COLUMN cloud_capture_enabled; DROP TABLE cloud_activity;").unwrap();
+        historical_schema(&mut connection, 34);
         connection
             .execute_batch(
-                "DROP TABLE IF EXISTS online_catalog_review_candidates;
-            DROP TABLE IF EXISTS online_catalog_review_decisions;
-            DROP TABLE IF EXISTS online_catalog_prepared_counts;
-            DROP TABLE IF EXISTS online_catalog_group_diagnostics;
-            DROP TABLE IF EXISTS online_catalog_group_state;
-            DROP TABLE IF EXISTS online_catalog_group_members;
-            DROP TABLE IF EXISTS online_catalog_group_preferences;
-            DROP TABLE IF EXISTS online_catalog_group_handles;
-            PRAGMA user_version = 34;
-            INSERT INTO online_catalog_bookmarks VALUES ('provider','work','before');
+                "INSERT INTO online_catalog_bookmarks VALUES ('provider','work','before');
             INSERT INTO remote_reading_progress VALUES ('provider','work',2,9,'before');
             INSERT INTO online_catalog_hidden_categories VALUES (2,'before');
             INSERT INTO online_catalog_blocked_tags VALUES ('artist','blocked','before');
@@ -343,17 +452,10 @@ mod tests {
         std::fs::create_dir(temp.path().join("backups")).unwrap();
         let path = temp.path().join("library.sqlite");
         let mut connection = Connection::open(&path).unwrap();
-        // Build the previous schema using the migration path, then remove only
-        // the additive group tables if this test runs against the new schema.
-        migrate_to_latest(&mut connection, 0).unwrap();
-        connection.execute_batch("ALTER TABLE library_settings DROP COLUMN cloud_capture_enabled; DROP TABLE cloud_activity;").unwrap();
+        historical_schema(&mut connection, 35);
         connection
             .execute_batch(
-                "DROP TABLE IF EXISTS online_catalog_review_candidates;
-            DROP TABLE IF EXISTS online_catalog_review_decisions;
-            DROP TABLE IF EXISTS online_catalog_prepared_counts;
-            PRAGMA user_version = 35;
-            INSERT INTO online_catalog_group_handles(provider,anchor_work_id,group_id) VALUES('provider','work','stable-uuid');
+                "INSERT INTO online_catalog_group_handles(provider,anchor_work_id,group_id) VALUES('provider','work','stable-uuid');
             INSERT INTO online_catalog_group_preferences VALUES('provider','work','edition',1);
             INSERT INTO online_catalog_bookmarks VALUES ('provider','work','before');
             INSERT INTO remote_reading_progress VALUES ('provider','work',2,9,'before');
@@ -1924,16 +2026,7 @@ mod tests {
     #[test]
     fn migrates_v32_to_manga_catalog_recovery_source_paths() {
         let mut connection = Connection::open_in_memory().unwrap();
-        connection
-            .execute_batch(MANGA_CATALOG_RECOVERY_SCHEMA)
-            .unwrap();
-
-        // Match the pre-existing book watch tables in real v31/v32 libraries.
-        connection.execute_batch("CREATE TABLE collections(id TEXT PRIMARY KEY, external_source TEXT, external_id TEXT, external_metadata_json TEXT, external_synced_at TEXT, created_at TEXT, updated_at TEXT);").unwrap();
-        connection.execute_batch(COLLECTION_EXTERNAL_BINDINGS_SCHEMA).unwrap();
-        connection.execute_batch(ALADIN_RELEASE_WATCH_SCHEMA).unwrap();
-        // This focused legacy fixture also needs the cloud settings present in real v31/v32 libraries.
-        connection.execute_batch("CREATE TABLE library_settings(singleton INTEGER PRIMARY KEY, cloud_sync_enabled INTEGER NOT NULL DEFAULT 0, cloud_api_base_url TEXT); INSERT INTO library_settings(singleton) VALUES(1); CREATE TABLE cloud_backfill_control(singleton INTEGER PRIMARY KEY, state TEXT NOT NULL); INSERT INTO cloud_backfill_control VALUES(1, 'idle');").unwrap();
+        historical_schema(&mut connection, 32);
         migrate_to_latest(&mut connection, 32).unwrap();
 
         let source_column_count: i64 = connection
@@ -2037,14 +2130,7 @@ mod tests {
     #[test]
     fn migrates_v31_to_manga_catalog_recovery_links() {
         let mut connection = Connection::open_in_memory().unwrap();
-        connection.pragma_update(None, "user_version", 31).unwrap();
-
-        // Match the pre-existing book watch tables in real v31/v32 libraries.
-        connection.execute_batch("CREATE TABLE collections(id TEXT PRIMARY KEY, external_source TEXT, external_id TEXT, external_metadata_json TEXT, external_synced_at TEXT, created_at TEXT, updated_at TEXT);").unwrap();
-        connection.execute_batch(COLLECTION_EXTERNAL_BINDINGS_SCHEMA).unwrap();
-        connection.execute_batch(ALADIN_RELEASE_WATCH_SCHEMA).unwrap();
-        // This focused legacy fixture also needs the cloud settings present in real v31/v32 libraries.
-        connection.execute_batch("CREATE TABLE library_settings(singleton INTEGER PRIMARY KEY, cloud_sync_enabled INTEGER NOT NULL DEFAULT 0, cloud_api_base_url TEXT); INSERT INTO library_settings(singleton) VALUES(1); CREATE TABLE cloud_backfill_control(singleton INTEGER PRIMARY KEY, state TEXT NOT NULL); INSERT INTO cloud_backfill_control VALUES(1, 'idle');").unwrap();
+        historical_schema(&mut connection, 31);
         migrate_to_latest(&mut connection, 31).unwrap();
 
         let table_count: i64 = connection

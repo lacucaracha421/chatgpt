@@ -23,6 +23,19 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
   if (op === 'disconnect') return {configured:false,endpoint:''};
   if (op !== 'api') return {};
   const url = new URL(String(payload.path),'https://preview.invalid');
+  if(url.pathname.startsWith('/v1/mobile-catalog/')){
+    const catalog=Array.from({length:48},(_,i)=>({provider:'kHentai',providerWorkId:String(i+1),groupId:`demo-group-${i}`,title:['밤의 도서관','여름의 항로','계절의 기록','조용한 정원','먼 바다에서','푸른 궤도'][i%6]+(i>5?` ${Math.floor(i/6)+1}`:''),titleJpn:null,artists:['서유진','Studio Field','하루'][i%3].split(','),series:[],thumbnailUrl:art(i,600,900),bookmarked:i%3===0,hasBookmarkedVersion:i%3===0,fileCount:24+i*2,views:12480-i*167,posted:1788000000-i*86400,versionCount:i%5===0?2:1}));
+    const decode=(name:string)=>JSON.parse(url.searchParams.get(name)??'{}') as {offset?:number;language?:string;text?:string;scope?:string;limit?:number};
+    if(url.pathname.endsWith('/search')){
+      const q=url.searchParams.has('cursor')?decode('cursor'):{language:url.searchParams.get('language')??'korean',text:url.searchParams.get('text')??'',scope:url.searchParams.get('scope')??'all',limit:40};
+      const selected=catalog.filter((item,i)=>(q.language==='all'||i%2===(q.language==='japanese'?1:0))&&(!q.text||item.title.includes(q.text))&&(q.scope!=='bookmarked'||item.bookmarked));
+      const offset=q.offset??0,limit=q.limit??40,context=JSON.stringify({...q,offset:0});
+      return {ready:true,publicationRevision:'demo-catalog',publishedAt:'2026-09-08T00:00:00Z',items:selected.slice(offset,offset+limit),nextCursor:offset+limit<selected.length?JSON.stringify({...q,offset:offset+limit}):null,context,countToken:JSON.stringify({count:selected.length}),totalCount:null,countStatus:'pending'};
+    }
+    if(url.pathname.endsWith('/count'))return {publicationRevision:'demo-catalog',totalCount:JSON.parse(url.searchParams.get('token')??'{}').count??0};
+    if(url.pathname.includes('/works/')){const item=catalog.find(item=>item.providerWorkId===url.pathname.split('/').slice(-1)[0])??catalog[0];return {publicationRevision:'demo-catalog',item:{...item,uploader:'Archive',category:1,updated:null,fileSize:null,rating:null,tagGroups:[{namespace:'artist',values:item.artists},{namespace:'language',values:['korean']}]}};}
+    if(url.pathname.endsWith('/editions')){const group=url.pathname.split('/').slice(-2)[0];const item=catalog.find(item=>item.groupId===group)??catalog[0];return {publicationRevision:'demo-catalog',groupId:item.groupId,selectedProviderWorkId:null,items:[item],nextCursor:null,totalCount:1};}
+  }
   if(url.pathname==='/v1/collections'){const items=collections.filter(item=>item.type===url.searchParams.get('type')&&(!url.searchParams.get('q')||item.name.includes(url.searchParams.get('q')!))&&(url.searchParams.get('showcase')!=='true'||item.showcase));return {ready:true,revision:'demo-1',publishedAt:'2026-09-07T00:00:00Z',items,nextCursor:null};}
   if(url.pathname.startsWith('/v1/collections/'))return {revision:'demo-1',item:collections.find(item=>item.id===url.pathname.split('/')[3])};
   if (url.pathname.includes('media-ticket')) {const id = url.pathname.split('/')[4]; return {url:assets.find(a => a.id === id)?.preview,expires_in:300};}

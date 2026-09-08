@@ -577,7 +577,7 @@ impl Library {
     }
 }
 
-fn translated_detail_tag(
+pub(super) fn translated_detail_tag(
     translations: &BTreeMap<String, String>,
     namespace: &str,
     value: &str,

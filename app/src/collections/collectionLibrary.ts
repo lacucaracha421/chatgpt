@@ -20,7 +20,7 @@ export function createDefaultCollectionLibraryState(): CollectionLibraryStateByT
     direction: "desc",
     rating: "all",
   });
-  return { game: initial(), manga: initial(), movie: initial() };
+  return { game: initial(), manga: initial(), movie: initial(), av: initial() };
 }
 
 export function deriveCollectionLibrary(

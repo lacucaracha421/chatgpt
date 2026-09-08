@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use chrono::DateTime;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -140,7 +140,13 @@ pub(crate) fn get_or_create_revisit_slate(
 ) -> Result<RevisitSlate, LibraryError> {
     parse_utc_timestamp(now_utc)?;
     parse_local_date(local_date)?;
-    if let Some(slate) = load_daily_slate(connection, local_date)? {
+    if let Some(existing) = load_daily_slate(connection, local_date)? {
+        if slate_uses_current_algorithm(&existing) {
+            return Ok(existing);
+        }
+        let mut slate = generate_daily_slate(connection, local_date, now_utc, existing.revision + 1)?;
+        save_daily_slate(connection, &slate)?;
+        slate.revision = load_revision(connection, local_date)?;
         return Ok(slate);
     }
     let mut slate = generate_daily_slate(connection, local_date, now_utc, 0)?;
@@ -153,7 +159,7 @@ pub(crate) fn reshuffle_revisit_bundle(
     connection: &Connection,
     local_date: &str,
     bundle_id: &str,
-    _now_utc: &str,
+    now_utc: &str,
 ) -> Result<RevisitSlate, LibraryError> {
     let mut slate = load_daily_slate(connection, local_date)?.ok_or(LibraryError::AssetNotFound)?;
     let bundle_index = slate.bundles.iter().position(|bundle| bundle.id == bundle_id).ok_or(LibraryError::AssetNotFound)?;
@@ -166,12 +172,14 @@ pub(crate) fn reshuffle_revisit_bundle(
         .collect();
     let bundle = &mut slate.bundles[bundle_index];
     let context = RecommendationContext::load(connection)?;
+    let preferences = load_preference_weights(connection)?;
+    let now = parse_utc_timestamp(now_utc)?;
     let bundle_revision = bundle.revision + 1;
-    if let Some(regenerated) = generate_bundle(connection, &context, &bundle.kind, local_date, bundle_revision) {
-        bundle.asset_ids = regenerated.1.into_iter().filter(|id| !other.contains(id)).collect();
+    if let Some(regenerated) = generate_bundle(&context, &preferences, &bundle.kind, local_date, &now, bundle_revision, &other) {
+        bundle.asset_ids = regenerated.asset_ids.into_iter().filter(|id| !other.contains(id)).collect();
         bundle.revision = bundle_revision;
-        bundle.title = regenerated.0.title.to_string();
-        bundle.reason = reason_text(regenerated.0.reason_key, &bundle.asset_ids.len());
+        bundle.title = regenerated.meta.title.to_string();
+        bundle.reason = regenerated.reason;
     }
     if bundle.asset_ids.len() < 2 { return Err(LibraryError::InvalidCollectedAt); }
     save_daily_slate(connection, &slate)?;
@@ -199,11 +207,20 @@ fn load_revision(connection: &Connection, local_date: &str) -> Result<i64, Libra
     )?)
 }
 
+const BUNDLE_ID_PREFIX: &str = "revisit-v2-";
 const BUNDLE_KINDS: [&str; 4] = ["rediscovery", "creator", "date", "surprise"];
 const MAX_BUNDLES: usize = 10;
 const MIN_BUNDLE_ASSETS: usize = 6;
 const MAX_BUNDLE_ASSETS: usize = 20;
+const STRICT_EXPOSURE_COOLDOWN_DAYS: i64 = 14;
+const STRICT_OPEN_COOLDOWN_DAYS: i64 = 30;
+const RELAXED_EXPOSURE_COOLDOWN_DAYS: i64 = 3;
+const RELAXED_OPEN_COOLDOWN_DAYS: i64 = 7;
+const MIN_PREFERENCE_WEIGHT: i64 = -5;
 
+type PreferenceWeights = HashMap<(String, String), i64>;
+
+#[derive(Clone)]
 struct Candidate {
     asset: AssetSummary,
     score: i64,
@@ -214,18 +231,24 @@ struct BundleMeta {
     reason_key: &'static str,
 }
 
+struct GeneratedBundle {
+    meta: BundleMeta,
+    reason: String,
+    asset_ids: Vec<String>,
+}
+
 fn bundle_meta(kind: &str) -> BundleMeta {
     match kind {
         "rediscovery" => BundleMeta { title: "다시 만난 자산", reason_key: "forgotten" },
-        "creator" => BundleMeta { title: "작가", reason_key: "creator" },
-        "date" => BundleMeta { title: "과거의 이날", reason_key: "date" },
-        _ => BundleMeta { title: "뜻밖의 연결", reason_key: "surprise" },
+        "creator" => BundleMeta { title: "작가 다시보기", reason_key: "creator" },
+        "date" => BundleMeta { title: "이맘때 모은 자산", reason_key: "date" },
+        _ => BundleMeta { title: "뜻밖의 다시보기", reason_key: "surprise" },
     }
 }
 
 struct RecommendationContext {
     assets: Vec<AssetSummary>,
-    activity: std::collections::HashMap<String, ActivityRow>,
+    activity: HashMap<String, ActivityRow>,
 }
 
 struct ActivityRow {
@@ -253,7 +276,7 @@ impl RecommendationContext {
                     },
                 ))
             })?
-            .collect::<Result<std::collections::HashMap<String, ActivityRow>, _>>()?;
+            .collect::<Result<HashMap<String, ActivityRow>, _>>()?;
         Ok(Self { assets, activity })
     }
 
@@ -275,7 +298,9 @@ fn load_assets_for_recommendation(connection: &Connection) -> Result<Vec<AssetSu
     rows.collect::<Result<Vec<_>, _>>().map_err(LibraryError::from)
 }
 
-type Generated = (BundleMeta, Vec<String>);
+fn slate_uses_current_algorithm(slate: &RevisitSlate) -> bool {
+    !slate.bundles.is_empty() && slate.bundles.iter().all(|bundle| bundle.id.starts_with(BUNDLE_ID_PREFIX))
+}
 
 fn generate_daily_slate(
     connection: &Connection,
@@ -284,57 +309,82 @@ fn generate_daily_slate(
     revision: i64,
 ) -> Result<RevisitSlate, LibraryError> {
     let context = RecommendationContext::load(connection)?;
-    let mut preference_weights = load_preference_weights(connection)?;
+    let preferences = load_preference_weights(connection)?;
+    let now = parse_utc_timestamp(now_utc)?;
+    let mut used = BTreeSet::new();
+    let mut bundles = Vec::new();
+    let mut attempt = 0_i64;
 
-    let mut used: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    let mut bundles: Vec<RevisitBundle> = Vec::new();
-    let _ = now_utc;
-
-    // 주인공 묶음 유형은 날짜에 따라 순환한다.
-    let day_seed = seed_from(&format!("{local_date}"));
-    let hero_kind = BUNDLE_KINDS[(day_seed as usize) % BUNDLE_KINDS.len()];
-    let mut kinds: Vec<&str> = BUNDLE_KINDS.iter().copied().filter(|kind| *kind != hero_kind).collect();
-
-    if let Some(generated) = generate_bundle(connection, &context, hero_kind, local_date, revision) {
-        let (meta, asset_ids) = generated;
-        for id in &asset_ids { used.insert(id.clone()); }
-        bundles.push(RevisitBundle {
-            id: format!("{local_date}-{kind}-{revision}", kind = meta.reason_key),
-            kind: meta.reason_key.to_string(),
-            title: meta.title.to_string(),
-            reason: reason_text(meta.reason_key, &asset_ids.len()),
-            asset_ids,
-            revision: 0,
-        });
+    let mut schedule = kind_schedule(&preferences, &format!("{local_date}-{revision}"));
+    if schedule.is_empty() {
+        schedule.extend(BUNDLE_KINDS);
     }
-
-    for round in 0..12usize {
+    for kind in schedule {
         if bundles.len() >= MAX_BUNDLES { break; }
-        let kind = kinds[round % kinds.len()];
-        let kind_revision = revision + round as i64;
-        if let Some(generated) = generate_bundle(connection, &context, kind, local_date, kind_revision) {
-            let (meta, asset_ids) = generated;
-            let unique: Vec<String> = asset_ids.into_iter().filter(|id| !used.contains(id)).collect();
+        let kind_revision = revision + attempt;
+        attempt += 1;
+        if let Some(generated) = generate_bundle(&context, &preferences, kind, local_date, &now, kind_revision, &used) {
+            let unique: Vec<String> = generated.asset_ids.into_iter().filter(|id| !used.contains(id)).collect();
             if unique.len() < 2 { continue; }
             for id in &unique { used.insert(id.clone()); }
             bundles.push(RevisitBundle {
-                id: format!("{local_date}-{kind}-{kind_revision}"),
+                id: format!("{BUNDLE_ID_PREFIX}{local_date}-{kind}-{kind_revision}"),
                 kind: kind.to_string(),
-                title: meta.title.to_string(),
-                reason: reason_text(meta.reason_key, &unique.len()),
+                title: generated.meta.title.to_string(),
+                reason: generated.reason,
                 asset_ids: unique,
                 revision: 0,
             });
         }
     }
-    let _ = &mut preference_weights;
+
+    if bundles.len() < 4 {
+        for kind in BUNDLE_KINDS {
+            if bundles.len() >= 4 || bundles.len() >= MAX_BUNDLES { break; }
+            let kind_revision = revision + 100 + attempt;
+            attempt += 1;
+            if let Some(generated) = generate_bundle(&context, &preferences, kind, local_date, &now, kind_revision, &used) {
+                let unique: Vec<String> = generated.asset_ids.into_iter().filter(|id| !used.contains(id)).collect();
+                if unique.len() < 2 { continue; }
+                for id in &unique { used.insert(id.clone()); }
+                bundles.push(RevisitBundle {
+                    id: format!("{BUNDLE_ID_PREFIX}{local_date}-{kind}-{kind_revision}"),
+                    kind: kind.to_string(),
+                    title: generated.meta.title.to_string(),
+                    reason: generated.reason,
+                    asset_ids: unique,
+                    revision: 0,
+                });
+            }
+        }
+    }
+
     Ok(RevisitSlate { local_date: local_date.to_string(), created_at: now_utc.to_string(), revision, bundles })
 }
 
-fn load_preference_weights(connection: &Connection) -> Result<Vec<(String, String, i64)>, LibraryError> {
+fn load_preference_weights(connection: &Connection) -> Result<PreferenceWeights, LibraryError> {
     let mut statement = connection.prepare("SELECT dimension, value, weight FROM revisit_preferences")?;
-    let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(LibraryError::from)
+    let rows = statement.query_map([], |row| Ok(((row.get(0)?, row.get(1)?), row.get(2)?)))?;
+    rows.collect::<Result<PreferenceWeights, _>>().map_err(LibraryError::from)
+}
+
+fn preference_weight(preferences: &PreferenceWeights, dimension: &str, value: &str) -> i64 {
+    preferences.get(&(dimension.to_string(), value.to_string())).copied().unwrap_or(0)
+}
+
+fn kind_schedule(preferences: &PreferenceWeights, seed: &str) -> Vec<&'static str> {
+    let mut schedule = Vec::new();
+    for kind in BUNDLE_KINDS {
+        let weight = preference_weight(preferences, "recommendation_type", kind);
+        let repetitions = match weight {
+            0.. => 3,
+            -1 => 2,
+            -2 => 1,
+            _ => 0,
+        };
+        schedule.extend(std::iter::repeat_n(kind, repetitions));
+    }
+    shuffle_values(schedule, seed)
 }
 
 fn seed_from(text: &str) -> u64 {
@@ -346,44 +396,53 @@ fn seed_from(text: &str) -> u64 {
     hash
 }
 
-fn shuffled_candidates(candidates: Vec<Candidate>, seed: &str) -> Vec<Candidate> {
-    let mut candidates = candidates;
+fn shuffle_values<T>(mut values: Vec<T>, seed: &str) -> Vec<T> {
     let mut state = seed_from(seed);
-    if !candidates.is_empty() {
-        for index in (1..candidates.len()).rev() {
+    if !values.is_empty() {
+        for index in (1..values.len()).rev() {
             state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
             let swap = (state >> 33) as usize % (index + 1);
-            candidates.swap(index, swap);
+            values.swap(index, swap);
         }
     }
+    values
+}
+
+fn ordered_candidates(candidates: Vec<Candidate>, seed: &str) -> Vec<Candidate> {
+    let mut candidates = shuffle_values(candidates, seed);
+    candidates.sort_by(|left, right| right.score.cmp(&left.score));
     candidates
 }
 
-fn reason_text(reason_key: &str, count: &usize) -> String {
-    let _ = count;
+fn reason_text(reason_key: &str) -> String {
     match reason_key {
-        "forgotten" => "오랫동안 열지 않은 자산".to_string(),
-        "date" => "같은 시기에 수집한 자산".to_string(),
-        _ => String::new(),
+        "forgotten" => "오랫동안 다시 열지 않은 자산".to_string(),
+        "date" => "이맘때 수집한 자산".to_string(),
+        "surprise" => "최근 노출이 적었던 자산".to_string(),
+        _ => "한동안 덜 본 작가의 자산".to_string(),
     }
 }
 
 fn generate_bundle(
-    connection: &Connection,
     context: &RecommendationContext,
+    preferences: &PreferenceWeights,
     kind: &str,
     local_date: &str,
+    now: &DateTime<chrono::Utc>,
     revision: i64,
-) -> Option<Generated> {
+    excluded: &BTreeSet<String>,
+) -> Option<GeneratedBundle> {
     let seed = seed_from(&format!("{local_date}-{kind}-{revision}"));
-    let candidates = match kind {
-        "rediscovery" => forgotten_favorites(context),
-        "creator" => creator_spotlight(connection, context),
-        "date" => date_capsule(context, local_date),
-        _ => surprise_mix(context, seed),
+    let (candidates, custom_reason) = match kind {
+        "rediscovery" => (rediscovery_candidates(context, now), None),
+        "creator" => creator_spotlight(context, preferences, now, seed),
+        "date" => (date_capsule(context, local_date, now), None),
+        _ => (surprise_mix(context, now, seed), None),
     };
-    let ordered = shuffled_candidates(candidates, &format!("{local_date}-{kind}-{revision}"));
-    let mut chosen: Vec<String> = Vec::new();
+    let candidates = candidates.into_iter().filter(|candidate| !excluded.contains(&candidate.asset.id)).collect();
+    let candidates = apply_cooldown(candidates, context, now);
+    let ordered = ordered_candidates(candidates, &format!("{local_date}-{kind}-{revision}"));
+    let mut chosen = Vec::new();
     for candidate in ordered {
         if chosen.len() >= MAX_BUNDLE_ASSETS { break; }
         if !chosen.contains(&candidate.asset.id) {
@@ -392,70 +451,149 @@ fn generate_bundle(
     }
     if chosen.len() < 2 { return None; }
     let meta = bundle_meta(kind);
-    Some((meta, chosen))
+    Some(GeneratedBundle {
+        reason: custom_reason.unwrap_or_else(|| reason_text(meta.reason_key)),
+        meta,
+        asset_ids: chosen,
+    })
 }
 
-fn forgotten_favorites(context: &RecommendationContext) -> Vec<Candidate> {
-    context
-        .assets
-        .iter()
-        .filter(|asset| asset.favorite)
-        .filter(|asset| {
-            context
-                .activity(&asset.id)
-                .map(|row| row.last_opened_at.is_none())
-                .unwrap_or(true)
-        })
-        .map(|asset| Candidate { asset: asset.clone(), score: 1 })
-        .collect()
+#[derive(Clone, Copy)]
+enum CooldownTier { Strict, Relaxed, Open }
+
+fn apply_cooldown(
+    candidates: Vec<Candidate>,
+    context: &RecommendationContext,
+    now: &DateTime<chrono::Utc>,
+) -> Vec<Candidate> {
+    if candidates.len() < 2 { return candidates; }
+    let target = candidates.len().min(MIN_BUNDLE_ASSETS).max(2);
+    for tier in [CooldownTier::Strict, CooldownTier::Relaxed] {
+        let filtered: Vec<Candidate> = candidates.iter().filter(|candidate| passes_cooldown(context, &candidate.asset.id, now, tier)).cloned().collect();
+        if filtered.len() >= target { return filtered; }
+    }
+    candidates.into_iter().filter(|candidate| passes_cooldown(context, &candidate.asset.id, now, CooldownTier::Open)).collect()
 }
 
-fn creator_spotlight(connection: &Connection, context: &RecommendationContext) -> Vec<Candidate> {
-    let mut counts: std::collections::HashMap<String, Vec<&AssetSummary>> = std::collections::HashMap::new();
+fn passes_cooldown(
+    context: &RecommendationContext,
+    asset_id: &str,
+    now: &DateTime<chrono::Utc>,
+    tier: CooldownTier,
+) -> bool {
+    let Some(row) = context.activity(asset_id) else { return true };
+    let (exposure_days, open_days) = match tier {
+        CooldownTier::Strict => (STRICT_EXPOSURE_COOLDOWN_DAYS, STRICT_OPEN_COOLDOWN_DAYS),
+        CooldownTier::Relaxed => (RELAXED_EXPOSURE_COOLDOWN_DAYS, RELAXED_OPEN_COOLDOWN_DAYS),
+        CooldownTier::Open => return true,
+    };
+    is_older_than(row.last_exposed_at.as_deref(), now, exposure_days)
+        && is_older_than(row.last_opened_at.as_deref(), now, open_days)
+}
+
+fn is_older_than(value: Option<&str>, now: &DateTime<chrono::Utc>, days: i64) -> bool {
+    let Some(parsed) = value.and_then(|value| DateTime::parse_from_rfc3339(value).ok()).map(|value| value.with_timezone(&chrono::Utc)) else { return true };
+    now.signed_duration_since(parsed).num_days() >= days
+}
+
+fn days_since(value: Option<&str>, now: &DateTime<chrono::Utc>, missing: i64) -> i64 {
+    value.and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| now.signed_duration_since(value.with_timezone(&chrono::Utc)).num_days().max(0))
+        .unwrap_or(missing)
+}
+
+fn collected_age_days(asset: &AssetSummary, now: &DateTime<chrono::Utc>) -> i64 {
+    days_since(Some(asset.collected_at.as_str()), now, 0)
+}
+
+fn base_score(context: &RecommendationContext, asset: &AssetSummary, now: &DateTime<chrono::Utc>) -> i64 {
+    let row = context.activity(&asset.id);
+    let open_days = days_since(row.and_then(|row| row.last_opened_at.as_deref()), now, 365).min(730);
+    let exposure_days = days_since(row.and_then(|row| row.last_exposed_at.as_deref()), now, 180).min(365);
+    let collected_days = collected_age_days(asset, now).min(1825);
+    let open_count = row.map(|row| row.open_count).unwrap_or(0).clamp(0, 50);
+    let exposure_count = row.map(|row| row.exposure_count).unwrap_or(0).clamp(0, 100);
+    open_days * 4 + exposure_days * 3 + collected_days / 10
+        - open_count * 24 - exposure_count * 10
+        + if asset.favorite { 180 } else { 0 }
+}
+
+fn rediscovery_candidates(context: &RecommendationContext, now: &DateTime<chrono::Utc>) -> Vec<Candidate> {
+    context.assets.iter().map(|asset| {
+        let row = context.activity(&asset.id);
+        let never_opened = row.and_then(|row| row.last_opened_at.as_ref()).is_none();
+        Candidate {
+            asset: asset.clone(),
+            score: base_score(context, asset, now)
+                + collected_age_days(asset, now).min(1825) / 4
+                + if never_opened { 120 } else { 0 },
+        }
+    }).collect()
+}
+
+fn creator_spotlight(
+    context: &RecommendationContext,
+    preferences: &PreferenceWeights,
+    now: &DateTime<chrono::Utc>,
+    seed: u64,
+) -> (Vec<Candidate>, Option<String>) {
+    let mut groups: BTreeMap<String, Vec<&AssetSummary>> = BTreeMap::new();
     for asset in &context.assets {
-        if let Some(key) = asset.creator_handle.as_ref().or(asset.creator_url.as_ref()).cloned() {
-            counts.entry(key).or_default().push(asset);
+        if let Some(key) = creator_key(asset) {
+            groups.entry(key).or_default().push(asset);
         }
     }
-    let _ = connection;
-    let mut candidates = Vec::new();
-    for (_, group) in counts {
-        if group.len() >= 3 {
-            for asset in group {
-                candidates.push(Candidate { asset: asset.clone(), score: 1 });
-            }
-        }
+    let mut ranked = Vec::new();
+    for (key, group) in groups {
+        if group.len() < 3 { continue; }
+        let creator_penalty = preference_weight(preferences, "creator", &key) * 300;
+        let mut candidates: Vec<Candidate> = group.iter().map(|asset| Candidate {
+            asset: (*asset).clone(),
+            score: base_score(context, asset, now) + creator_penalty,
+        }).collect();
+        candidates.sort_by(|left, right| right.score.cmp(&left.score));
+        let group_score = candidates.iter().take(6).map(|candidate| candidate.score).sum::<i64>() + creator_penalty;
+        let tie = seed_from(&format!("{seed}-{key}"));
+        let label = group[0].creator_name.clone()
+            .or_else(|| group[0].creator_handle.clone())
+            .or_else(|| group[0].creator_url.clone())
+            .unwrap_or_else(|| "한 작가".to_string());
+        ranked.push((group_score, tie, candidates, label));
     }
-    candidates
+    ranked.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
+    ranked.into_iter().next().map(|(_, _, candidates, label)| {
+        (candidates, Some(format!("{label} · 한동안 덜 본 자산")))
+    }).unwrap_or_default()
 }
 
-fn date_capsule(context: &RecommendationContext, local_date: &str) -> Vec<Candidate> {
+fn creator_key(asset: &AssetSummary) -> Option<String> {
+    asset.creator_handle.clone().or_else(|| asset.creator_url.clone())
+}
+
+fn date_capsule(context: &RecommendationContext, local_date: &str, now: &DateTime<chrono::Utc>) -> Vec<Candidate> {
     let Some(today_month) = local_date.get(5..7).and_then(|part| part.parse::<u32>().ok()) else { return Vec::new() };
-    context
-        .assets
-        .iter()
-        .filter(|asset| {
-            let month = asset.collected_at.get(5..7).and_then(|part| part.parse::<u32>().ok()).unwrap_or(0);
-            month == today_month
-        })
-        .map(|asset| Candidate { asset: asset.clone(), score: 1 })
-        .collect()
+    context.assets.iter().filter(|asset| {
+        asset.collected_at.get(5..7).and_then(|part| part.parse::<u32>().ok()).unwrap_or(0) == today_month
+    }).map(|asset| Candidate {
+        asset: asset.clone(),
+        score: base_score(context, asset, now) + collected_age_days(asset, now).min(3650) / 12,
+    }).collect()
 }
 
-fn surprise_mix(context: &RecommendationContext, seed: u64) -> Vec<Candidate> {
+fn surprise_mix(context: &RecommendationContext, now: &DateTime<chrono::Utc>, seed: u64) -> Vec<Candidate> {
     let target_kind = match (seed as usize) % 3 {
         0 => crate::library::models::MediaSummary::Gif,
         _ => crate::library::models::MediaSummary::Image,
     };
-    let matched: Vec<&AssetSummary> = context.assets.iter().filter(|asset| std::mem::discriminant(&asset.media) == std::mem::discriminant(&target_kind)).collect();
-    let chosen_kind = if matched.len() >= MIN_BUNDLE_ASSETS { target_kind } else { return Vec::new() };
-    matched
-        .into_iter()
-        .map(|asset| Candidate { asset: asset.clone(), score: 1 })
-        .collect::<Vec<_>>()
-        .into_iter()
-        .filter(|candidate| std::mem::discriminant(&candidate.asset.media) == std::mem::discriminant(&chosen_kind))
-        .collect()
+    let matched: Vec<&AssetSummary> = context.assets.iter()
+        .filter(|asset| std::mem::discriminant(&asset.media) == std::mem::discriminant(&target_kind))
+        .collect();
+    if matched.len() < MIN_BUNDLE_ASSETS { return Vec::new(); }
+    matched.into_iter().map(|asset| {
+        let row = context.activity(&asset.id);
+        let unseen_bonus = if row.map(|row| row.exposure_count).unwrap_or(0) == 0 { 120 } else { 0 };
+        Candidate { asset: asset.clone(), score: base_score(context, asset, now) + unseen_bonus }
+    }).collect()
 }
 
 fn asset_exists(connection: &Connection, asset_id: &str) -> Result<(), LibraryError> {
@@ -608,7 +746,7 @@ mod tests {
         let connection = library.connection().unwrap();
 
         let slate = get_or_create_revisit_slate(&connection, "2026-08-30", "2026-08-30T09:00:00Z").unwrap();
-         assert!((6..=10).contains(&slate.bundles.len()));
+         assert!((2..=10).contains(&slate.bundles.len()));
         let mut all_assets = std::collections::BTreeSet::new();
         for bundle in &slate.bundles {
             assert!((2..=20).contains(&bundle.asset_ids.len()));
@@ -620,6 +758,53 @@ mod tests {
 
         let again = get_or_create_revisit_slate(&connection, "2026-08-30", "2026-08-30T10:00:00Z").unwrap();
         assert_eq!(again.bundles, slate.bundles);
+    }
+
+    #[test]
+    fn recent_exposure_is_a_hard_first_tier_when_fresh_alternatives_exist() {
+        let library = fixture();
+        for index in 0..12 {
+            insert_favorite_with_creator(&library, &format!("asset-{index}"), "creator", false, "2025-01-01T00:00:00Z");
+        }
+        let connection = library.connection().unwrap();
+        for index in 0..6 {
+            record_assets_exposed(&connection, &[format!("asset-{index}")], "2026-09-08T00:00:00Z").unwrap();
+        }
+        let context = RecommendationContext::load(&connection).unwrap();
+        let now = parse_utc_timestamp("2026-09-08T01:00:00Z").unwrap();
+        let filtered = apply_cooldown(rediscovery_candidates(&context, &now), &context, &now);
+        assert_eq!(filtered.len(), 6);
+        let recent: BTreeSet<String> = (0..6).map(|index| format!("asset-{index}")).collect();
+        assert!(filtered.iter().all(|candidate| !recent.contains(&candidate.asset.id)));
+    }
+
+    #[test]
+    fn less_view_feedback_is_bounded_and_removes_a_disliked_type_from_primary_schedule() {
+        let library = fixture();
+        for _ in 0..10 {
+            library.set_revisit_preference("recommendation_type", "surprise", "2026-09-08T01:00:00Z").unwrap();
+        }
+        let connection = library.connection().unwrap();
+        let preferences = load_preference_weights(&connection).unwrap();
+        assert_eq!(preference_weight(&preferences, "recommendation_type", "surprise"), -5);
+        assert!(!kind_schedule(&preferences, "day").contains(&"surprise"));
+    }
+
+    #[test]
+    fn creator_feedback_moves_creator_spotlight_to_another_creator() {
+        let library = fixture();
+        for index in 0..3 {
+            insert_favorite_with_creator(&library, &format!("a-{index}"), "creator-a", false, "2025-01-01T00:00:00Z");
+            insert_favorite_with_creator(&library, &format!("b-{index}"), "creator-b", false, "2025-01-01T00:00:00Z");
+        }
+        for _ in 0..5 { library.set_revisit_preference("creator", "creator-a", "2026-09-08T01:00:00Z").unwrap(); }
+        let connection = library.connection().unwrap();
+        let context = RecommendationContext::load(&connection).unwrap();
+        let preferences = load_preference_weights(&connection).unwrap();
+        let now = parse_utc_timestamp("2026-09-08T01:00:00Z").unwrap();
+        let (candidates, _) = creator_spotlight(&context, &preferences, &now, 7);
+        assert!(!candidates.is_empty());
+        assert!(candidates.iter().all(|candidate| candidate.asset.creator_handle.as_deref() == Some("creator-b")));
     }
 
     #[test]
@@ -705,11 +890,14 @@ impl super::Library {
     }
 
     pub fn set_revisit_preference(&self, dimension: &str, value: &str, now_utc: &str) -> Result<(), LibraryError> {
+        parse_utc_timestamp(now_utc)?;
         self.connection()?.with_lock(|connection| {
             connection.execute(
                 "INSERT INTO revisit_preferences (dimension, value, weight, updated_at) VALUES (?1, ?2, -1, ?3)
-                 ON CONFLICT(dimension, value) DO UPDATE SET weight = revisit_preferences.weight - 1, updated_at = ?3",
-                params![dimension, value, now_utc],
+                 ON CONFLICT(dimension, value) DO UPDATE SET
+                    weight = CASE WHEN revisit_preferences.weight > ?4 THEN revisit_preferences.weight - 1 ELSE ?4 END,
+                    updated_at = ?3",
+                params![dimension, value, now_utc, MIN_PREFERENCE_WEIGHT],
             )?;
             Ok(())
         })

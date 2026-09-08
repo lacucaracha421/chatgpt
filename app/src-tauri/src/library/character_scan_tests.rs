@@ -1,0 +1,485 @@
+use super::*;
+use crate::library::{characters::tests::Fixture, models::SetAssetClassification};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::{Duration, Instant},
+};
+
+fn digest(path: &Path) -> String {
+    Sha256::digest(fs::read(path).unwrap())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+fn seed_prediction(f: &Fixture, target: &Target, scan_id: &str) {
+    let input = f.library.current_input(target, "asset-5").unwrap();
+    let mut state = f.library.character_scan.lock().unwrap();
+    let status = ScanStatus {
+        id: scan_id.into(),
+        target_id: target.id.clone(),
+        target_fingerprint: target.fingerprint.clone(),
+        runtime_fingerprint: Some("a".repeat(64)),
+        state: "completed".into(),
+        total: 1,
+        completed: 1,
+        errors: 0,
+        cache_hits: 0,
+        extractions: 1,
+        error: None,
+    };
+    let rows = BTreeMap::from([(
+        input.id.clone(),
+        ScanResult {
+            asset_id: input.id,
+            content_hash: input.hash,
+            state: "recommended".into(),
+            evidence: Some(
+                json!({"passed":true,"distance":0.1,"referenceHashes":target.references.iter().map(|r| &r.asset_hash).collect::<Vec<_>>()}),
+            ),
+            error: None,
+        },
+    )]);
+    state.previous.insert(target.id.clone(), (status, rows));
+}
+
+fn prediction_decision(target: &Target, scan: &str) -> characters::DecisionRequest {
+    characters::DecisionRequest {
+        target_id: target.id.clone(),
+        expected_fingerprint: target.fingerprint.clone(),
+        asset_ids: vec!["asset-5".into()],
+        decision: characters::DecisionKind::Accepted,
+        baseline_fingerprint: Some("a".repeat(64)),
+        scan_id: Some(scan.into()),
+    }
+}
+
+#[test]
+fn multi_target_approval_is_atomic_revalidated_and_recoverable() {
+    let f = Fixture::new();
+    let a = f.ready("A");
+    let b = f.ready("B");
+    seed_prediction(&f, &a, "a");
+    seed_prediction(&f, &b, "b");
+    let query = |filter: &str| ReviewQuery {
+        series_id: f.series.clone(),
+        target_id: None,
+        filter: filter.into(),
+        after: None,
+        limit: 60,
+    };
+    assert_eq!(
+        f.library
+            .character_review_page(query("multiple"))
+            .unwrap()
+            .rows
+            .len(),
+        1
+    );
+    let mut stale = prediction_decision(&b, "b");
+    stale.baseline_fingerprint = Some("bad-runtime".into());
+    assert!(f
+        .library
+        .record_character_decision_batch(vec![prediction_decision(&a, "a"), stale])
+        .is_err());
+    assert!(f
+        .library
+        .character_relations_for_asset("asset-5")
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        f.library
+            .record_character_decision_batch(vec![
+                prediction_decision(&a, "a"),
+                prediction_decision(&b, "b")
+            ])
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        f.library
+            .character_relations_for_asset("asset-5")
+            .unwrap()
+            .len(),
+        2
+    );
+    assert!(f
+        .library
+        .character_review_page(query("recommended"))
+        .unwrap()
+        .rows
+        .is_empty());
+    assert_eq!(
+        f.library
+            .character_review_page(query("confirmed"))
+            .unwrap()
+            .rows
+            .len(),
+        1
+    );
+    let history = f.library.list_character_decisions(&a.id, None, 10).unwrap();
+    let evidence: Value = serde_json::from_str(&history[0].reference_snapshot).unwrap();
+    assert_eq!(evidence["scanId"], "a");
+    assert_eq!(evidence["prediction"]["distance"], 0.1);
+    let snapshot = f.temp.path().join("approved.sqlite");
+    f.library.create_cloud_metadata_snapshot(&snapshot).unwrap();
+    let mut clear = prediction_decision(&a, "a");
+    clear.decision = characters::DecisionKind::Cleared;
+    clear.scan_id = None;
+    clear.baseline_fingerprint = None;
+    f.library.record_character_decisions(clear).unwrap();
+    f.library
+        .restore_cloud_metadata_snapshot(&snapshot)
+        .unwrap();
+    assert_eq!(
+        f.library
+            .character_relations_for_asset("asset-5")
+            .unwrap()
+            .len(),
+        2
+    );
+    f.library.trash_assets(&["asset-5".into()]).unwrap();
+    f.library.empty_trash().unwrap();
+    assert!(!f.temp.path().join("assets/asset-5.png").exists());
+    assert!(
+        f.library.list_character_decisions(&a.id, None, 10).unwrap()[0]
+            .asset_id
+            .is_none()
+    );
+}
+
+#[test]
+fn approval_rejects_actual_bytes_changed_after_preview_without_touching_history() {
+    let f = Fixture::new();
+    let target = f.ready("A");
+    seed_prediction(&f, &target, "scan");
+    fs::write(f.temp.path().join("assets/asset-0.png"), b"changed ref").unwrap();
+    assert!(f
+        .library
+        .record_character_decisions(prediction_decision(&target, "scan"))
+        .is_err());
+    fs::write(f.temp.path().join("assets/asset-0.png"), b"asset-0").unwrap();
+    fs::write(f.temp.path().join("assets/asset-5.png"), b"changed query").unwrap();
+    assert!(f
+        .library
+        .record_character_decisions(prediction_decision(&target, "scan"))
+        .is_err());
+    assert!(f
+        .library
+        .list_character_decisions(&target.id, None, 10)
+        .unwrap()
+        .is_empty());
+}
+
+fn wait(library: &Library) -> ScanStatus {
+    let started = Instant::now();
+    loop {
+        let status = library.character_scan_status().unwrap();
+        if !matches!(status.state.as_str(), "running" | "cancelling") {
+            return status;
+        }
+        assert!(started.elapsed() < Duration::from_secs(180), "{status:?}");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn config(script: PathBuf, models: PathBuf) -> RuntimeConfig {
+    RuntimeConfig {
+        python: std::env::var_os("LAKOMICS_CHARACTER_TEST_PYTHON")
+            .expect("set test Python")
+            .into(),
+        script,
+        models,
+    }
+}
+
+fn fake(fixture: &Fixture) -> RuntimeConfig {
+    let script = fixture.temp.path().join("fake.py");
+    fs::write(&script, format!(r#"import json,sys,time
+def emit(v): print(json.dumps(v),flush=True)
+emit({{"type":"ready","baselineFingerprint":"{BASELINE}","runtimeFingerprint":"a" * 64}})
+refs=[]
+for line in sys.stdin:
+ r=json.loads(line)
+ if r['type']=='prepare':
+  refs=[i['hash'] for i in r['references']]
+  emit({{"type":"prepared","referenceHashes":refs}})
+ else:
+  time.sleep(.25)
+  emit({{"type":"result","assetId":r['assetId'],"contentHash":r['hash'],"referenceHashes":refs,"baselineFingerprint":"{BASELINE}","distance":.1,"passed":True}})
+"#)).unwrap();
+    config(script, fixture.temp.path().into())
+}
+
+#[test]
+fn stale_result_queries_recheck_scope_and_actual_reference_bytes() {
+    let f = Fixture::new();
+    let target = f.ready("test");
+    {
+        let mut state = f.library.character_scan.lock().unwrap();
+        state.status = Some(ScanStatus {
+            id: "scan".into(),
+            target_id: target.id.clone(),
+            target_fingerprint: target.fingerprint.clone(),
+            runtime_fingerprint: Some("a".repeat(64)),
+            state: "completed".into(),
+            total: 1,
+            completed: 1,
+            errors: 0,
+            cache_hits: 0,
+            extractions: 0,
+            error: None,
+        });
+        let input = f.library.current_input(&target, "asset-5").unwrap();
+        state.results.insert(
+            input.id.clone(),
+            ScanResult {
+                asset_id: input.id,
+                content_hash: input.hash,
+                state: "recommended".into(),
+                evidence: Some(json!({"passed":true})),
+                error: None,
+            },
+        );
+    }
+    assert_eq!(
+        f.library.character_scan_results("scan", None, 10).unwrap()[0].state,
+        "recommended"
+    );
+    fs::write(
+        f.temp.path().join("assets/asset-0.png"),
+        b"changed reference",
+    )
+    .unwrap();
+    assert_eq!(
+        f.library.character_scan_results("scan", None, 10).unwrap()[0].state,
+        "stale"
+    );
+    fs::write(f.temp.path().join("assets/asset-0.png"), b"asset-0").unwrap();
+    f.library
+        .set_asset_classification(SetAssetClassification {
+            asset_ids: vec!["asset-5".into()],
+            classification_id: Some(f.outside.clone()),
+        })
+        .unwrap();
+    assert_eq!(
+        f.library.character_scan_results("scan", None, 10).unwrap()[0].state,
+        "stale"
+    );
+    assert!(f.library.character_scan_results("old", None, 10).is_err());
+}
+
+#[test]
+#[ignore = "requires LAKOMICS_CHARACTER_TEST_PYTHON; TEMP fake protocol worker"]
+fn scan_scope_cancel_concurrency_and_target_edit_are_enforced() {
+    let f = Fixture::new();
+    let target = f.ready("test");
+    let configuration = fake(&f);
+    let scan = f
+        .library
+        .start_character_scan(&target.id, &target.fingerprint, configuration.clone())
+        .unwrap();
+    assert!(f
+        .library
+        .start_character_scan(&target.id, &target.fingerprint, configuration.clone())
+        .is_err());
+    let status = wait(&f.library);
+    assert_eq!(status.state, "completed", "{status:?}");
+    assert_eq!((status.total, status.completed), (1, 1));
+    let rows = f
+        .library
+        .character_scan_results(&scan.id, None, 10)
+        .unwrap();
+    assert_eq!(rows[0].asset_id, "asset-5");
+    assert_eq!(rows[0].state, "recommended");
+    assert!(f
+        .library
+        .character_relations_for_asset("asset-5")
+        .unwrap()
+        .is_empty());
+    let other = f.ready("second character");
+    f.library
+        .start_character_scan(&other.id, &other.fingerprint, configuration.clone())
+        .unwrap();
+    assert_eq!(wait(&f.library).state, "completed");
+    assert_eq!(f.library.character_scan_runs().len(), 2);
+    assert_eq!(
+        f.library.character_scan_results(&scan.id, None, 10).unwrap()[0].state,
+        "recommended"
+    );
+    let scan = f
+        .library
+        .start_character_scan(&target.id, &target.fingerprint, configuration.clone())
+        .unwrap();
+    f.library.cancel_character_scan(&scan.id).unwrap();
+    assert_eq!(wait(&f.library).state, "cancelled");
+    f.library
+        .start_character_scan(&target.id, &target.fingerprint, configuration)
+        .unwrap();
+    f.library
+        .replace_character_references(&target.id, target.revision, &[])
+        .unwrap();
+    assert_eq!(wait(&f.library).state, "stale");
+}
+
+#[test]
+#[ignore = "real frozen ONNX models and fixture copies; explicit Python environment required"]
+fn real_native_scan_cold_warm_incremental_and_ref_replacement_parity() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let f = Fixture::new();
+    let fixture = root.join("TEST_HINA");
+    let mut refs: Vec<_> = fs::read_dir(fixture.join("refs"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.is_file())
+        .collect();
+    refs.sort();
+    assert_eq!(refs.len(), 5);
+    let report: Value =
+        serde_json::from_slice(&fs::read(fixture.join("verification-fixed-report.json")).unwrap())
+            .unwrap();
+    let mut queries: Vec<_> = fs::read_dir(fixture.join("target"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.is_file())
+        .collect();
+    queries.sort();
+    let copy = |i: usize, path: &Path| {
+        let dest = f.temp.path().join(format!("assets/asset-{i}.png"));
+        fs::copy(path, &dest).unwrap();
+        f.library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE assets SET content_hash=?2 WHERE id=?1",
+                params![format!("asset-{i}"), digest(&dest)],
+            )
+            .unwrap();
+    };
+    for (i, path) in refs.iter().enumerate() {
+        copy(i, path);
+    }
+    copy(5, &queries[0]);
+    copy(6, &queries[1]);
+    let target = f.ready("Hina");
+    let configuration = config(
+        root.join("app/character-runtime/scan_worker.py"),
+        root.join("TEST_kisaki/_experiment/models"),
+    );
+    // Probe and persist only in TEMP, leaving the user's runtime settings alone.
+    let settings = f.temp.path().join("runtime/settings.json");
+    RuntimeConfig::setup(
+        configuration.python.clone(),
+        configuration.models.clone(),
+        configuration.script.clone(),
+        &settings,
+    )
+    .unwrap();
+    let saved: RuntimeConfig = serde_json::from_slice(&fs::read(&settings).unwrap()).unwrap();
+    assert_eq!(saved.python, configuration.python);
+    assert_eq!(saved.models, configuration.models);
+    let before = fs::read(&settings).unwrap();
+    assert!(RuntimeConfig::setup(
+        configuration.python.clone(),
+        f.temp.path().join("missing-models"),
+        configuration.script.clone(),
+        &settings,
+    ).is_err());
+    assert_eq!(fs::read(&settings).unwrap(), before);
+    let first = f
+        .library
+        .start_character_scan(&target.id, &target.fingerprint, configuration.clone())
+        .unwrap();
+    let cold = wait(&f.library);
+    assert_eq!(cold.state, "completed", "{cold:?}");
+    assert_eq!((cold.total, cold.extractions, cold.cache_hits), (1, 6, 0));
+    let rows = f
+        .library
+        .character_scan_results(&first.id, None, 10)
+        .unwrap();
+    let evidence = rows[0].evidence.as_ref().unwrap();
+    let expected = report["scores"][queries[0].file_name().unwrap().to_str().unwrap()]
+        ["consensus2"]
+        .as_f64()
+        .unwrap();
+    assert!((evidence["distance"].as_f64().unwrap() - expected).abs() <= 1e-6);
+    f.library
+        .start_character_scan(&target.id, &target.fingerprint, configuration.clone())
+        .unwrap();
+    let warm = wait(&f.library);
+    assert_eq!(warm.state, "completed", "{warm:?}");
+    assert_eq!((warm.extractions, warm.cache_hits), (0, 6));
+    // This corrupt asset sorts BETWEEN the two valid queries. Its decode failure
+    // must not prevent the newly added valid query from producing evidence.
+    let broken = f.temp.path().join("assets/broken.png");
+    fs::write(&broken, b"not an image").unwrap();
+    {
+        let connection = f.library.connection().unwrap();
+        connection.execute("INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at,status)
+            VALUES('asset-55',?1,'image','broken.png','assets/broken.png','thumbnails/broken.webp',12,1,1,'2026-09-08','normal')",[digest(&broken)]).unwrap();
+        connection
+            .execute(
+                "INSERT INTO asset_classifications VALUES('asset-55',?1)",
+                [&f.series],
+            )
+            .unwrap();
+    }
+    f.library
+        .set_asset_classification(SetAssetClassification {
+            asset_ids: vec!["asset-6".into()],
+            classification_id: Some(f.child.clone()),
+        })
+        .unwrap();
+    let incremental_id = f
+        .library
+        .start_character_scan(&target.id, &target.fingerprint, configuration.clone())
+        .unwrap()
+        .id;
+    let incremental = wait(&f.library);
+    assert_eq!(incremental.state, "completed", "{incremental:?}");
+    assert_eq!(
+        (
+            incremental.total,
+            incremental.extractions,
+            incremental.cache_hits
+        ),
+        (3, 1, 6)
+    );
+    assert_eq!((incremental.completed, incremental.errors), (3, 1));
+    let rows = f
+        .library
+        .character_scan_results(&incremental_id, Some("asset-5"), 10)
+        .unwrap();
+    let expected2 = report["scores"][queries[1].file_name().unwrap().to_str().unwrap()]
+        ["consensus2"]
+        .as_f64()
+        .unwrap();
+    assert!(
+        (rows[1].evidence.as_ref().unwrap()["distance"]
+            .as_f64()
+            .unwrap()
+            - expected2)
+            .abs()
+            <= 1e-6
+    );
+    assert_eq!(rows[0].state, "error");
+    assert!(rows[0].error.is_some());
+    let replacement = ["asset-1", "asset-2", "asset-3", "asset-4", "asset-5"].map(String::from);
+    let target = f
+        .library
+        .replace_character_references(&target.id, target.revision, &replacement)
+        .unwrap();
+    f.library
+        .start_character_scan(&target.id, &target.fingerprint, configuration)
+        .unwrap();
+    let changed = wait(&f.library);
+    assert_eq!(changed.state, "completed", "{changed:?}");
+    assert_eq!(
+        (changed.total, changed.extractions, changed.cache_hits),
+        (3, 0, 7)
+    );
+    println!(
+        "cold={cold:?}\nwarm={warm:?}\nincremental={incremental:?}\nrefs_replaced={changed:?}"
+    );
+}

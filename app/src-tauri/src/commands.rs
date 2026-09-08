@@ -46,6 +46,10 @@ use crate::library::models::{
     TmdbCredentialStatus, TmdbMoviePreview, TmdbSearchResult,
 };
 
+pub(crate) mod characters;
+pub(crate) mod av;
+pub(crate) mod video_similarity;
+
 #[tauri::command]
 pub async fn inspect_metadata_import(folder: String) -> Result<MetadataImportPlan, CommandError> {
     tauri::async_runtime::spawn_blocking(move || metadata_import::inspect(folder.as_ref()))
@@ -354,6 +358,10 @@ fn open_library_in_state(path: String, state: &AppState) -> Result<LibrarySummar
 
     let library = open_library_at(path)?;
     let summary = library.summary().map_err(CommandError::from)?;
+    if let Some(previous) = current.as_ref() {
+        previous.stop_character_scan();
+        previous.stop_video_similarity_scan();
+    }
     *current = Some(library);
     Ok(summary)
 }
@@ -2094,6 +2102,15 @@ pub async fn push_cloud_collections(
 ) -> Result<crate::cloud::collections::CloudCollectionsPublishResult, CommandError> {
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || library.push_cloud_collections())
+        .await.map_err(|_| background_task_error())?.map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn push_cloud_catalog(
+    state: State<'_, AppState>,
+) -> Result<crate::cloud::catalog::MobileCatalogPublishResult, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.push_cloud_catalog())
         .await.map_err(|_| background_task_error())?.map_err(CommandError::from)
 }
 

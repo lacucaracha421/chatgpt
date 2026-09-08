@@ -8,6 +8,8 @@
 .collection-card--manga .collection-card__object { background:transparent; padding:0; box-shadow:none; }
 .collection-card--manga .collection-card__cover { aspect-ratio:256 / 368; background:transparent; outline:none; overflow:visible; }
 .collection-card .physical-cover > img { background:transparent; border:0; box-shadow:none; }
+.collection-card__object--av { padding:0; background:transparent; }
+.collection-card--av .collection-card__cover { background:transparent; outline:none; overflow:visible; }
 .collection-card--manga:focus-visible { outline:var(--focus-width) solid var(--color-focus); outline-offset:var(--space-1); }
 .collection-browser__content-final { flex:1; display:flex; flex-direction:column; min-height:0; min-width:0; overflow:hidden; }
 .collection-browser__content-final > .collection-browser__empty { margin:var(--space-6); }

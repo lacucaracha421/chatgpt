@@ -109,17 +109,18 @@ export function CollectionEditDialog({
         <TextField label="이름" value={name} onChange={(event) => { setName(event.target.value); setError(null); }} />
         <TextField label="설명" value={description} onChange={(event) => setDescription(event.target.value)} />
         {mode.kind === "create" ? <div role="group" aria-label="유형" className="collection-edit-dialog__types">
-          {(["game", "manga", "movie", "tv"] as const).map(value => (
+          {(["game", "manga", "movie", "tv", "av"] as const).map(value => (
             <Button key={value} type="button" aria-pressed={value === "tv" ? type === "movie" && series : type === value && !series}
               variant={(value === "tv" ? type === "movie" && series : type === value && !series) ? "primary" : "secondary"}
               disabled={saving} onClick={() => { setType(value === "tv" ? "movie" : value); setSeries(value === "tv"); }}>
-              {{ game: "게임", manga: "만화", movie: "영화", tv: "시리즈" }[value]}
+              {{ game: "게임", manga: "만화", movie: "영화", tv: "시리즈", av: "AV" }[value]}
             </Button>
           ))}
-        </div> : <Select label="유형" value={type} onChange={(event) => setType(event.target.value as CollectionType)}>
+        </div> : <Select label="유형" value={type} disabled={existing?.type === "av"} onChange={(event) => setType(event.target.value as CollectionType)}>
           <option value="game">게임</option>
           <option value="manga">만화</option>
           <option value="movie">영화</option>
+          {existing?.type === "av" && <option value="av">AV</option>}
         </Select>}
         {mode.kind === "edit" && type === "manga" && (
           <>
@@ -145,6 +146,12 @@ export function CollectionEditDialog({
             <TextField label="개봉 연도" inputMode="numeric" value={year?.toString() ?? ""} onChange={(event) => setYear(event.target.value ? Number(event.target.value) : null)} />
           </>
         )}
+        {mode.kind === "edit" && type === "av" && <>
+          <TextField label="원제" value={originalTitle} onChange={event => setOriginalTitle(event.target.value)} />
+          <TextField label="제작사" value={productionCompany} onChange={event => setProductionCompany(event.target.value)} />
+          <TextField label="출시일" type="date" value={releaseDate ?? ""} onChange={event => setReleaseDate(event.target.value || null)} />
+          <TextField label="상영 시간(분)" type="number" min="1" step="1" value={runtimeMinutes?.toString() ?? ""} onChange={event => setRuntimeMinutes(event.target.value ? Number(event.target.value) : null)} />
+        </>}
         {mode.kind === "edit" && (
           <Select label="내 별점" value={myScore?.toString() ?? ""} onChange={(event) => setMyScore(event.target.value === "" ? null : Number(event.target.value))}>
             <option value="">미평가</option>

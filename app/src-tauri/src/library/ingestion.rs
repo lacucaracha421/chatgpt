@@ -9,7 +9,7 @@ use std::{
 use std::os::windows::io::AsRawHandle;
 
 use chrono::{DateTime, SecondsFormat, Utc};
-use image::{ImageFormat, ImageReader};
+use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader};
 use rusqlite::{params, OptionalExtension};
 use sha2::{Digest, Sha256};
 #[cfg(windows)]
@@ -146,7 +146,7 @@ impl Library {
         original_modified_at: Option<String>,
         collected_at: String,
     ) -> Result<IngestOutcome, LibraryError> {
-        let (format, width, height) = inspect_image(pending.owned_file(&staging_path)?)?;
+        let (format, mut width, mut height) = inspect_image(pending.owned_file(&staging_path)?)?;
         let existing_asset_id = self.find_asset_by_hash(&content_hash)?;
         if let Some(existing_asset_id) = existing_asset_id {
             return self.finish_exact_duplicate(existing_asset_id, &request);
@@ -157,9 +157,11 @@ impl Library {
             (None, None)
         } else {
             match perceptual_hash_from_file(pending.owned_file(&staging_path)?) {
-                Ok(fingerprint) => {
-                    let similar = self.find_similar_asset(&fingerprint, (width, height))?;
-                    (Some(fingerprint), similar)
+                Ok(result) => {
+                    width = result.width;
+                    height = result.height;
+                    let similar = self.find_similar_asset(&result.fingerprint, (width, height))?;
+                    (Some(result.fingerprint), similar)
                 }
                 Err(LibraryError::UnsupportedImage) => (None, None),
                 Err(error) => return Err(error),
@@ -233,7 +235,7 @@ impl Library {
 
     fn install_thumbnail(&self, staging: File, path: &Path, relative: &str, pending: &mut PendingFiles) -> Result<(), LibraryError> {
         // Never expose the final name before decoding/encoding and disk writes finish.
-        let image = staging_image_reader(staging)?.decode().map_err(|_| LibraryError::UnsupportedImage)?;
+        let image = decode_staging_image(staging_image_reader(staging)?)?;
         let encoded = encode_thumbnail_webp(&image)?;
         let error = |source| LibraryError::WriteAsset { path: path.to_path_buf(), source };
         let mut temporary = tempfile::NamedTempFile::new_in(path.parent().expect("thumbnail parent")).map_err(error)?;
@@ -649,19 +651,17 @@ fn copy_and_hash(
 
 fn inspect_image(staging: File) -> Result<(ImageFormat, u32, u32), LibraryError> {
     let reader = staging_image_reader(staging)?;
-    let format = reader
-        .format()
-        .filter(|format| extension_for(*format).is_some())
-        .ok_or(LibraryError::UnsupportedImage)?;
-    let (width, height) = reader
-        .into_dimensions()
-        .map_err(|_| LibraryError::UnsupportedImage)?;
-    let pixels = u64::from(width)
-        .checked_mul(u64::from(height))
-        .ok_or(LibraryError::UnsupportedImage)?;
-    if pixels > MAX_IMAGE_PIXELS {
-        return Err(LibraryError::UnsupportedImage);
-    }
+    let format = reader.format().filter(|format| extension_for(*format).is_some()).ok_or(LibraryError::UnsupportedImage)?;
+    let mut decoder = reader.into_decoder().map_err(|_| LibraryError::UnsupportedImage)?;
+    let orientation = decoder.orientation().unwrap_or(image::metadata::Orientation::NoTransforms);
+    let (raw_width, raw_height) = decoder.dimensions();
+    let pixels = u64::from(raw_width).checked_mul(u64::from(raw_height)).ok_or(LibraryError::UnsupportedImage)?;
+    if pixels > MAX_IMAGE_PIXELS { return Err(LibraryError::UnsupportedImage); }
+    let (width, height) = match orientation {
+        image::metadata::Orientation::Rotate90 | image::metadata::Orientation::Rotate270
+        | image::metadata::Orientation::Rotate90FlipH | image::metadata::Orientation::Rotate270FlipH => (raw_height, raw_width),
+        _ => (raw_width, raw_height),
+    };
     Ok((format, width, height))
 }
 
@@ -688,6 +688,14 @@ fn staging_image_reader(mut staging: File) -> Result<ImageReader<BufReader<File>
     ImageReader::new(BufReader::new(staging))
         .with_guessed_format()
         .map_err(|_| LibraryError::UnsupportedImage)
+}
+
+fn decode_staging_image(reader: ImageReader<BufReader<File>>) -> Result<DynamicImage, LibraryError> {
+    let mut decoder = reader.into_decoder().map_err(|_| LibraryError::UnsupportedImage)?;
+    let orientation = decoder.orientation().unwrap_or(image::metadata::Orientation::NoTransforms);
+    let mut image = DynamicImage::from_decoder(decoder).map_err(|_| LibraryError::UnsupportedImage)?;
+    image.apply_orientation(orientation);
+    Ok(image)
 }
 
 fn create_parent_directory(path: &Path) -> Result<(), LibraryError> {

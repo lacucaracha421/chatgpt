@@ -112,4 +112,36 @@ export function attachLiveBook(host:HTMLElement, request:CoverRequest, onReady:(
 }
 // Development/test observation only; no polling, telemetry upload or persistent state.
 export function clearCollectibleCache() { cache.clear(); engine?.clearTextures(); }
+export function attachLiveCase(host:HTMLElement, request:{src:string;scope:string;revision:string;pose:"front"|"spine"|"back"}, onReady:(ready:boolean)=>void) {
+  releaseLive?.();watchVisibility();
+  const owner=Symbol("live-case");liveOwner=owner;cache.pause(true);
+  const abort=new AbortController(),canvas=document.createElement("canvas");
+  let disposed=false,frame=0,source:HTMLImageElement|null=null;
+  const current=()=>!disposed&&liveOwner===owner&&!abort.signal.aborted;
+  function draw() {
+    frame=0;if(!current()||document.hidden||!source)return;
+    const rect=host.getBoundingClientRect();
+    if(rect.width<1||rect.height<1)return;
+    const cssWidth=Math.min(rect.width,rect.height*184/260);
+    const pixelWidth=Math.min(900,cssWidth*Math.min(window.devicePixelRatio||1,1.5));
+    try {
+      if(!drawGameCase(canvas,source,pixelWidth/((window.devicePixelRatio||1)*2),request.pose))throw new Error("Canvas unavailable");
+      canvas.style.width=`${cssWidth}px`;canvas.style.height=`${cssWidth*260/184}px`;
+      if(canvas.parentElement!==host)host.append(canvas);
+      onReady(true);
+    } catch {onReady(false);}
+  }
+  function refresh() {if(!current())return;if(frame)cancelAnimationFrame(frame);frame=0;if(!document.hidden)frame=requestAnimationFrame(draw);}
+  const resize=typeof ResizeObserver==="undefined"?null:new ResizeObserver(refresh);resize?.observe(host);
+  window.addEventListener("resize",refresh);wakeLive=refresh;
+  // Bounded native thumbnails are sufficient for the snap overview. Original mode
+  // explicitly loads the full surface; no full-resolution image cache is retained.
+  void loadCoverImage(sourceUrl(request),abort.signal).then(image=>{if(!current()){image.src="";return;}source=image;refresh();},()=>{if(current())onReady(false);});
+  function dispose() {
+    if(disposed)return;disposed=true;abort.abort();if(frame)cancelAnimationFrame(frame);resize?.disconnect();window.removeEventListener("resize",refresh);
+    if(source)source.src="";source=null;canvas.remove();canvas.width=canvas.height=2;
+    if(liveOwner===owner){liveOwner=null;wakeLive=null;releaseLive=null;cache.pause(document.hidden||contextLost);}
+  }
+  releaseLive=dispose;return {dispose};
+}
 if(import.meta.hot) import.meta.hot.dispose(()=>{releaseLive?.();cache.clear();engine?.dispose();document.removeEventListener("visibilitychange",visibilityChanged);});

@@ -127,17 +127,28 @@ mod tests {
 
     #[test]
     fn v40_upgrade_preserves_existing_release_events() {
-        let (temp, library) = library();
-        {
-            let connection = library.connection().unwrap();
-            connection.execute("INSERT INTO release_watch_events(id,collection_id,event_kind,volume_number,detected_at) VALUES('old','m','new_volume',7,'t')", []).unwrap();
-            connection.execute_batch("DROP TABLE collection_volume_ownership; PRAGMA user_version=40;").unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("library.sqlite");
+        let mut connection = rusqlite::Connection::open(&path).unwrap();
+        connection.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        let mut files = std::fs::read_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations"))
+            .unwrap().map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().is_some_and(|extension| extension == "sql"))
+            .collect::<Vec<_>>();
+        files.sort();
+        let transaction = connection.transaction().unwrap();
+        for file in files.iter().take(40) {
+            transaction.execute_batch(&std::fs::read_to_string(file).unwrap()).unwrap();
         }
-        drop(library);
+        transaction.commit().unwrap();
+        connection.pragma_update(None, "foreign_keys", "ON").unwrap();
+        connection.execute("INSERT INTO collections(id,name,type,created_at,updated_at) VALUES('m','Manga','manga','t','t')", []).unwrap();
+        connection.execute("INSERT INTO release_watch_events(id,collection_id,event_kind,volume_number,detected_at) VALUES('old','m','new_volume',7,'t')", []).unwrap();
+        drop(connection);
         let upgraded = Library::open(temp.path()).unwrap();
         assert_eq!(upgraded.list_release_inbox().unwrap()[0].event.id, "old");
         assert!(upgraded.list_volume_ownership("m").unwrap().is_empty());
-        assert_eq!(upgraded.connection().unwrap().query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0)).unwrap(), 41);
+        assert_eq!(upgraded.connection().unwrap().query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0)).unwrap(), super::super::db::SCHEMA_VERSION);
     }
 
     #[test]

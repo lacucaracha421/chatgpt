@@ -39,9 +39,7 @@ fn catalog_review_appended_translation_with_small_page_difference() {
     assert!(generate(&c).unwrap().rows.is_empty());
 }
 
-fn fixture(path: &std::path::Path) -> Connection {
-    std::fs::create_dir_all(path.parent().unwrap().join("backups")).unwrap();
-    let c = super::super::db::initialize_database(path).unwrap();
+fn attach_catalog_fixture(c: &Connection) {
     c.execute_batch("ATTACH ':memory:' AS catalog;
         CREATE TABLE catalog.CrawlState(Key TEXT PRIMARY KEY,Value TEXT);
         INSERT INTO catalog.CrawlState VALUES('lakomics.catalog.contentRevision','fixture-v1');
@@ -55,6 +53,28 @@ fn fixture(path: &std::path::Path) -> Connection {
         INSERT INTO catalog.Tags VALUES(1,'artist','alice'),(2,'artist','alice'),(3,'artist','bob'),
         (1,'language','korean'),(2,'language','korean'),(3,'language','korean');
         UPDATE catalog.Works SET ParentGid=1,ParentKey='one' WHERE Id=4;").unwrap();
+}
+fn fixture(path: &std::path::Path) -> Connection {
+    std::fs::create_dir_all(path.parent().unwrap().join("backups")).unwrap();
+    let c = super::super::db::initialize_database(path).unwrap();
+    attach_catalog_fixture(&c);
+    c
+}
+fn historical_fixture(path: &std::path::Path, version: usize) -> Connection {
+    let mut c = Connection::open(path).unwrap();
+    c.pragma_update(None, "foreign_keys", "OFF").unwrap();
+    let mut files = std::fs::read_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations"))
+        .unwrap().map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "sql"))
+        .collect::<Vec<_>>();
+    files.sort();
+    let transaction = c.transaction().unwrap();
+    for file in files.iter().take(version) {
+        transaction.execute_batch(&std::fs::read_to_string(file).unwrap()).unwrap();
+    }
+    transaction.commit().unwrap();
+    c.pragma_update(None, "foreign_keys", "ON").unwrap();
+    attach_catalog_fixture(&c);
     c
 }
 fn groups(c: &Connection) -> i64 {
@@ -233,10 +253,13 @@ fn catalog_review_window_bucket_bounds_and_primary_key_plans() {
 fn catalog_review_migration_preserves_v36_handles_and_provider_state() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("test.sqlite");
-    let c = fixture(&path);
-    generate(&c).unwrap();
+    let c = historical_fixture(&path, 36);
+    c.execute_batch("INSERT INTO online_catalog_group_handles(provider,anchor_work_id,group_id) VALUES
+        ('kHentai','1','stable-group-1'),('kHentai','2','stable-group-2'),('kHentai','3','stable-group-3');
+        INSERT INTO online_catalog_group_members(provider,work_id,catalog_work_id,group_id,thumbnail_valid,completeness,lineage_terminal) VALUES
+        ('kHentai','1',1,'stable-group-1',1,1,1),('kHentai','4',4,'stable-group-1',1,1,0),
+        ('kHentai','2',2,'stable-group-2',1,1,1),('kHentai','3',3,'stable-group-3',1,1,1);").unwrap();
     let before = work(&c, "1").unwrap().group_id;
-    c.execute_batch("DROP TABLE online_catalog_review_candidates; DROP TABLE online_catalog_review_decisions; PRAGMA user_version=36;").unwrap();
     let handles: i64 = c
         .query_row(
             "SELECT COUNT(*) FROM online_catalog_group_handles",
@@ -261,7 +284,7 @@ fn catalog_review_migration_preserves_v36_handles_and_provider_state() {
     assert_eq!(
         c.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
-        37
+        super::super::db::SCHEMA_VERSION
     );
     assert_eq!(
         c.query_row(

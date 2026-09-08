@@ -161,6 +161,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const metadataImportRunningRef = useRef(false);
   const [requestedAsset, setRequestedAsset] = useState<AssetSummary | null>(null);
   const [reviewCount, setReviewCount] = useState(0);
+  const [videoReviewAssetIds, setVideoReviewAssetIds] = useState<string[]>([]);
   const [trashCount, setTrashCount] = useState(0);
   const [mangaViewer, setMangaViewer] = useState<{ seriesId: string; title: string; pageCount: number; galleryId: string | null } | null>(null);
   const [videoPreparationTrigger, setVideoPreparationTrigger] = useState(0);
@@ -697,8 +698,9 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                 ) : view.kind === "similarity_review" ? (
                   <SimilarityReviewBrowser
                     gateway={gateway}
+                    videoAssetIds={videoReviewAssetIds}
                     onCountChange={setReviewCount}
-                    onClose={() => { navigateBack({ kind: "classification", classificationId: null }); }}
+                    onClose={() => { setVideoReviewAssetIds([]); void refreshMembershipCounts(); void refreshCollections(); navigateBack({ kind: "classification", classificationId: null }); }}
                   />
                 ) : view.kind === "manga" ? (
                   <MangaBrowser
@@ -744,6 +746,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                   <AssetBrowser
                     view={view}
                     onViewChange={navigateView}
+                    onReviewVideos={(assetIds) => { setVideoReviewAssetIds(assetIds); navigateView({ kind: "similarity_review" }); }}
                     classifications={entries}
                     albums={albums}
                     collections={collections}

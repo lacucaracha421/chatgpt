@@ -13,7 +13,7 @@ Lakomics has two connected but distinct pillars:
 
 Do not collapse Asset, Classification, Album, Collection/Work, WorkArtwork, Volume, or ExternalBinding into one concept merely because they are related.
 
-Current implemented Collection types are game, manga, and movie. Future collection types or specialized presentation systems belong in the roadmap until implemented.
+Current implemented Collection types are game, manga, movie, and AV. AV supports manual metadata, ID-based people/role/order relations, and explicitly selected local front/spine/back artwork. Its current focused viewer snaps to the actual surface using the shared package renderer; original-image viewing remains available. External AV providers and arbitrary-angle rotation are not implemented. AV is excluded from the Mobile Collections replica, but remains part of full PC metadata recovery backups; this is not an encrypted vault. Artwork bytes need the existing separate library-file backup. Native production-library and device acceptance remain separate from implementation checks. Future collection types or specialized presentation systems belong in the roadmap until implemented.
 
 The `movie` persistence type now contains Film and TV Series (2026-09-06). TMDB's
 numeric movie binding identity is preserved; TV identities use `tv:ID`. Media type

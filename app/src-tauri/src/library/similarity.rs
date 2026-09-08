@@ -5,7 +5,7 @@ use std::{
     path::Path,
 };
 
-use image::ImageReader;
+use image::{ImageDecoder, ImageReader};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
@@ -32,6 +32,13 @@ const INDEX_BATCH_SIZE: u32 = 50;
 pub(crate) struct SimilarAssetCandidate {
     pub(crate) asset_id: String,
     pub(crate) distance: u32,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PerceptualHashResult {
+    pub(crate) fingerprint: ImageFingerprint,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -412,12 +419,12 @@ impl Library {
                 .and_then(|media| perceptual_hash_from_file(media.file));
             let connection = self.connection()?;
             match result {
-                Ok(fingerprint) => {
+                Ok(result) => {
                     connection.execute(
                         "UPDATE assets
-                         SET perceptual_hash = ?2, perceptual_hash_quality = ?3
+                         SET perceptual_hash = ?2, perceptual_hash_quality = ?3, width = ?4, height = ?5
                          WHERE id = ?1 AND status = 'normal'",
-                        params![asset_id, fingerprint.to_stored_bytes(), fingerprint.quality],
+                        params![asset_id, result.fingerprint.to_stored_bytes(), result.fingerprint.quality, i64::from(result.width), i64::from(result.height)],
                     )?;
                 }
                 Err(error) => {
@@ -761,15 +768,19 @@ fn run_after_review_resolving_hook() -> Result<(), LibraryError> {
 
 pub(crate) fn perceptual_hash_from_file(
     mut file: File,
-) -> Result<ImageFingerprint, LibraryError> {
+) -> Result<PerceptualHashResult, LibraryError> {
     file.seek(SeekFrom::Start(0))
         .map_err(|_| LibraryError::UnsupportedImage)?;
-    let image = ImageReader::new(BufReader::new(file))
+    let reader = ImageReader::new(BufReader::new(file))
         .with_guessed_format()
-        .map_err(|_| LibraryError::UnsupportedImage)?
-        .decode()
         .map_err(|_| LibraryError::UnsupportedImage)?;
-    fingerprint(&image)
+    let mut decoder = reader.into_decoder().map_err(|_| LibraryError::UnsupportedImage)?;
+    let orientation = decoder.orientation().unwrap_or(image::metadata::Orientation::NoTransforms);
+    let mut image = image::DynamicImage::from_decoder(decoder)
+        .map_err(|_| LibraryError::UnsupportedImage)?;
+    image.apply_orientation(orientation);
+    let fingerprint = fingerprint(&image)?;
+    Ok(PerceptualHashResult { fingerprint, width: image.width(), height: image.height() })
 }
 
 fn similarity_index_error_code(error: &LibraryError) -> Option<&'static str> {
@@ -802,7 +813,7 @@ mod tests {
         Library,
     };
     use super::super::image_fingerprint::{fingerprint, minimum_distance, ImageFingerprint};
-    use super::set_after_review_resolving_hook;
+    use super::{perceptual_hash_from_file, set_after_review_resolving_hook};
 
     #[derive(Clone, Copy)]
     enum StripeDirection {
@@ -856,6 +867,25 @@ mod tests {
             unrelated_distance > 20,
             "unrelated distance={unrelated_distance}"
         );
+    }
+
+    #[test]
+    fn exif_orientation_is_applied_before_pdq_and_dimensions() {
+        let displayed = striped_fixture(640, 480, StripeDirection::Vertical);
+        let raw_rotated = displayed.rotate270();
+        let plain_path = tempfile::NamedTempFile::new().unwrap();
+        let oriented_path = tempfile::NamedTempFile::new().unwrap();
+        fs::write(plain_path.path(), jpeg_bytes(&displayed, 95)).unwrap();
+        fs::write(
+            oriented_path.path(),
+            jpeg_with_exif_orientation(jpeg_bytes(&raw_rotated, 95), 6),
+        ).unwrap();
+
+        let plain = perceptual_hash_from_file(fs::File::open(plain_path.path()).unwrap()).unwrap();
+        let oriented = perceptual_hash_from_file(fs::File::open(oriented_path.path()).unwrap()).unwrap();
+        assert_eq!((plain.width, plain.height), (640, 480));
+        assert_eq!((oriented.width, oriented.height), (640, 480));
+        assert!(minimum_distance(&plain.fingerprint, &oriented.fingerprint) <= 20);
     }
 
     #[test]
@@ -1363,11 +1393,25 @@ mod tests {
 
     fn jpeg_variant(source: &DynamicImage, width: u32, height: u32, quality: u8) -> DynamicImage {
         let resized = source.resize_exact(width, height, FilterType::Triangle);
+        image::load_from_memory(&jpeg_bytes(&resized, quality)).unwrap()
+    }
+
+    fn jpeg_bytes(source: &DynamicImage, quality: u8) -> Vec<u8> {
         let mut bytes = Vec::new();
-        JpegEncoder::new_with_quality(&mut bytes, quality)
-            .encode_image(&resized)
-            .unwrap();
-        image::load_from_memory(&bytes).unwrap()
+        JpegEncoder::new_with_quality(&mut bytes, quality).encode_image(source).unwrap();
+        bytes
+    }
+
+    fn jpeg_with_exif_orientation(jpeg: Vec<u8>, orientation: u16) -> Vec<u8> {
+        assert_eq!(&jpeg[..2], &[0xff, 0xd8]);
+        let mut payload = b"Exif\0\0II*\0\x08\0\0\0\x01\0\x12\x01\x03\0\x01\0\0\0".to_vec();
+        payload.extend_from_slice(&orientation.to_le_bytes());
+        payload.extend_from_slice(&[0, 0, 0, 0, 0, 0]);
+        let length = u16::try_from(payload.len() + 2).unwrap().to_be_bytes();
+        let mut output = vec![0xff, 0xd8, 0xff, 0xe1, length[0], length[1]];
+        output.extend_from_slice(&payload);
+        output.extend_from_slice(&jpeg[2..]);
+        output
     }
 
     fn horizontal_band_fixture(width: u32, height: u32, band_count: u32) -> DynamicImage {

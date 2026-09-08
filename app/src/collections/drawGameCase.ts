@@ -7,7 +7,7 @@ const VIEW_HEIGHT = 260;
 const CASE_SCALE = 0.95;
 
 /** One projected surface for the closed shells, seam, artwork and lip. */
-export function drawGameCase(canvas: HTMLCanvasElement, image: HTMLImageElement | null, width: number) {
+export function drawGameCase(canvas: HTMLCanvasElement, image: HTMLImageElement | null, width: number, focused?: "front" | "spine" | "back") {
   // Fit the shell to the artwork, so the full cover reaches every front edge.
   const artworkRatio = image && image.naturalWidth > 0 && image.naturalHeight > 0
     ? image.naturalWidth / image.naturalHeight : MAX_WIDTH / MAX_HEIGHT;
@@ -21,7 +21,9 @@ export function drawGameCase(canvas: HTMLCanvasElement, image: HTMLImageElement 
   ctx.setTransform(canvas.width / VIEW_WIDTH, 0, 0, canvas.height / VIEW_HEIGHT, 0, 0);
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
-  const rx = -8 * Math.PI / 180, ry = -26 * Math.PI / 180;
+  // Focused stops look straight at the actual selected surface. The spine image's
+  // own aspect defines its width; no illustrated side is synthesized from a front.
+  const rx = focused ? 0 : -8 * Math.PI / 180, ry = focused ? 0 : -26 * Math.PI / 180;
   const project = (x: number, y: number, z: number): Point => {
     x -= WIDTH / 2; y -= HEIGHT / 2;
     const tx = Math.cos(ry) * x + Math.sin(ry) * z;
@@ -37,10 +39,11 @@ export function drawGameCase(canvas: HTMLCanvasElement, image: HTMLImageElement 
     ctx.closePath();
   };
   const edge: Point[] = [];
-  for (const [x, y, start] of [[WIDTH - 6, 6, -90], [WIDTH - 6, HEIGHT - 6, 0], [6, HEIGHT - 6, 90], [6, 6, 180]]) {
+  const radius = focused ? Math.min(6, WIDTH / 2, HEIGHT / 2) : 6;
+  for (const [x, y, start] of [[WIDTH - radius, radius, -90], [WIDTH - radius, HEIGHT - radius, 0], [radius, HEIGHT - radius, 90], [radius, radius, 180]]) {
     for (let step = 0; step <= 10; step++) {
       const angle = (start + step * 9) * Math.PI / 180;
-      edge.push({ x: x + 6 * Math.cos(angle), y: y + 6 * Math.sin(angle) });
+      edge.push({ x: x + radius * Math.cos(angle), y: y + radius * Math.sin(angle) });
     }
   }
   polygon(edge.map((p) => project(p.x, p.y, -DEPTH / 2)));

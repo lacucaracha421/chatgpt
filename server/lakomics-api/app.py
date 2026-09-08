@@ -2064,6 +2064,11 @@ from notes import register_notes
 startup_notes = register_notes(app, get_db, require_auth)
 
 from mobile_collections import register_collections
+from mobile_catalog import register_mobile_catalog
+
+startup_mobile_catalog = register_mobile_catalog(
+    app, get_db, require_auth, lambda: DB_PATH.parent / "mobile-catalog", lambda: API_TOKEN,
+)
 from r2 import presign_put as _collection_presign_put
 
 startup_mobile_collections = register_collections(

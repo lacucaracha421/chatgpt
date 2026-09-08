@@ -40,6 +40,10 @@ pub fn run() {
         .on_window_event(|window, event| {
             // Let the frontend flush pending note edits before destroying the window.
             if matches!(event, tauri::WindowEvent::Destroyed) && window.label() == "main" {
+                if let Some(library) = window.app_handle().state::<commands::AppState>().current_library() {
+                    library.stop_character_scan();
+                    library.stop_video_similarity_scan();
+                }
                 window.app_handle().exit(0);
             }
         })
@@ -153,6 +157,13 @@ pub fn run() {
             commands::index_missing_similarity_hashes,
             commands::list_similarity_reviews,
             commands::decide_similarity_review,
+            commands::video_similarity::start_video_similarity_scan,
+            commands::video_similarity::get_video_similarity_scan,
+            commands::video_similarity::latest_video_similarity_scan,
+            commands::video_similarity::cancel_video_similarity_scan,
+            commands::video_similarity::resume_video_similarity_scan,
+            commands::video_similarity::list_video_similarity_reviews,
+            commands::video_similarity::decide_video_similarity_review,
             commands::get_asset,
             commands::update_asset_metadata,
             commands::trash_assets,
@@ -165,6 +176,27 @@ pub fn run() {
             commands::set_asset_favorite,
             commands::set_assets_favorite,
             commands::set_asset_classification,
+            commands::characters::list_character_targets,
+            commands::characters::save_character_target,
+            commands::characters::replace_character_references,
+            commands::characters::record_character_decisions,
+            commands::characters::record_character_decision_batch,
+            commands::characters::list_character_decisions,
+            commands::characters::character_relations_for_asset,
+            commands::characters::start_character_scan,
+            commands::characters::character_scan_status,
+            commands::characters::cancel_character_scan,
+            commands::characters::character_scan_results,
+            commands::characters::character_scan_runs,
+            commands::characters::character_review_page,
+            commands::characters::character_runtime_status,
+            commands::characters::setup_character_runtime,
+            commands::av::get_av_details,
+            commands::av::save_av_details,
+            commands::av::search_av_people,
+            commands::av::preview_av_artwork,
+            commands::av::apply_av_artwork,
+            commands::av::get_av_cover_set,
             commands::ingest_media,
             commands::prepare_pending_videos,
             commands::retry_video_preparation,
@@ -202,6 +234,7 @@ pub fn run() {
             commands::test_cloud_capture_connection,
             commands::push_cloud_metadata_backup,
             commands::push_cloud_collections,
+            commands::push_cloud_catalog,
             commands::restore_cloud_metadata_backup,
             commands::run_due_cloud_capture_sync,
             commands::cloud_backfill_preflight,

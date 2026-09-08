@@ -168,7 +168,9 @@ fn snapshot_from_connection(root: &Path, connection: &mut rusqlite::Connection, 
         let mut total_bytes = 0;
         let mut collections = Vec::new();
         let mut metadata_bytes = 128usize;
-        let sql = format!("{COLLECTION_SUMMARY_SQL} WHERE collection.legacy_kind IS NULL OR collection.legacy_kind <> 'gacha' ORDER BY collection.updated_at DESC, collection.id DESC LIMIT {}", MAX_COLLECTIONS + 1);
+        // AV is local Collection data; the current Mobile replica supports three types.
+        // Filter before collecting any artwork paths, while retaining the complete supported snapshot.
+        let sql = format!("{COLLECTION_SUMMARY_SQL} WHERE (collection.legacy_kind IS NULL OR collection.legacy_kind <> 'gacha') AND collection.type IN ('game','manga','movie') ORDER BY collection.updated_at DESC, collection.id DESC LIMIT {}", MAX_COLLECTIONS + 1);
         let summaries = transaction
             .prepare(&sql)?
             .query_map([], collection_from_row)?
@@ -569,6 +571,21 @@ mod tests {
             .path()
             .join("work-artwork-thumbnails/collection-one")
             .exists());
+    }
+
+    #[test]
+    fn av_is_excluded_before_artwork_loading_without_dropping_supported_types() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = crate::library::Library::open(temp.path()).unwrap();
+        let mut connection = library.connection().unwrap();
+        for (id, kind) in [("g","game"),("m","manga"),("v","movie"),("a","av")] {
+            connection.execute("INSERT INTO collections(id,name,type,created_at,updated_at) VALUES(?1,?1,?2,'2026','2026')",rusqlite::params![id,kind]).unwrap();
+        }
+        connection.execute("INSERT INTO collection_work_artworks(id,collection_id,provider,provider_image_id,kind,relative_path,mime_type,width,height,selected,created_at,updated_at) VALUES('av-front','a','local-manual','cover/hash','cover','../outside-invalid.png','image/png',10,20,1,'2026','2026')",[]).unwrap();
+        let snapshot = snapshot_from_connection(temp.path(), &mut connection, None).unwrap();
+        let ids: std::collections::BTreeSet<_> = snapshot.replica.collections.iter().map(|item|item.summary.id.as_str()).collect();
+        assert_eq!(ids, ["g","m","v"].into_iter().collect());
+        assert!(snapshot.files.is_empty());
     }
 
     #[test]

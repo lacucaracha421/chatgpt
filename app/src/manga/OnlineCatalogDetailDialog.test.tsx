@@ -44,13 +44,14 @@ describe("OnlineCatalogDetailDialog", () => {
       onClose={vi.fn()}
     />);
 
-    expect(screen.getByText("오래된 제독")).toBeVisible();
-    expect(screen.getByText("tester")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "오래된 제독" })).toBeVisible();
     const summary = screen.getByRole("dialog")
       .querySelector<HTMLElement>(".online-catalog-detail__summary")!;
     expect(within(summary).getByText("circle artist")).toBeVisible();
     expect(within(summary).getByText("fleet saga")).toBeVisible();
-    expect(within(summary).getByText("korean")).toBeVisible();
+    expect(within(summary).getByText("한국어")).toBeVisible();
+    await userEvent.click(screen.getByText("추가 정보"));
+    expect(screen.getByText("tester")).toBeVisible();
     expect(screen.getByText("4.57")).toBeVisible();
     expect(screen.queryByText("수정일")).not.toBeInTheDocument();
 

@@ -81,6 +81,7 @@ impl Library {
     }
 
     pub fn restore_backup(&self, backup_id: &str) -> Result<(), LibraryError> {
+        let _video_scan_guard = self.video_similarity_restore_guard()?;
         let _backup_guard = self
             .backup_lock
             .lock()
@@ -101,6 +102,7 @@ impl Library {
         drop(database_guard);
         drop(file_guard);
         if result.is_ok() {
+            self.recover_video_similarity_scans()?;
             self.request_catalog_preparation();
         }
         result
@@ -128,6 +130,7 @@ impl Library {
         &self,
         snapshot: &Path,
     ) -> Result<(), LibraryError> {
+        let _video_scan_guard = self.video_similarity_restore_guard()?;
         let _backup_guard = self
             .backup_lock
             .lock()
@@ -145,6 +148,7 @@ impl Library {
         drop(database_guard);
         drop(file_guard);
         if result.is_ok() {
+            self.recover_video_similarity_scans()?;
             self.request_catalog_preparation();
         }
         result
@@ -170,6 +174,13 @@ impl Library {
                 .map_err(|source| backup_error(selected_path, std::io::Error::other(source)))?;
         create_verified_snapshot(&selected_connection, &temporary)?;
         drop(selected_connection);
+
+        // Older restores must have current feature tables before APIs resume.
+        // Migrate the disposable copy before replacing the current database.
+        if let Err(error) = db::prepare_snapshot_for_restore(&temporary) {
+            cleanup_temporary_restore(&temporary)?;
+            return Err(error);
+        }
 
         if let Err(source) = rename_database(&current, &recovery) {
             cleanup_temporary_restore(&temporary)?;

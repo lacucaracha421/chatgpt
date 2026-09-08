@@ -75,7 +75,7 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
       <div className="workspace-index__scroll">
         <div hidden={area !== "assets"} className="workspace-index__assets">{assetNavigation}</div>
         <ChromeTarget name="navigation" className="workspace-index__view-navigation" />
-        {view.kind === "collections" && !chrome?.meta?.navigation && <div className="workspace-index__fallback"><span className="workspace-section-label">작품 유형</span>{(["game", "manga", "movie"] as const).map((type) => <button key={type} type="button" className="workspace-index-link" onClick={() => onNavigate({ kind: "collections", typeFilter: type, showcase: false })}>{({ game: "게임", manga: "만화", movie: "영화" })[type]}</button>)}</div>}
+        {view.kind === "collections" && !chrome?.meta?.navigation && <div className="workspace-index__fallback"><span className="workspace-section-label">작품 유형</span>{(["game", "manga", "movie", "av"] as const).map((type) => <button key={type} type="button" className="workspace-index-link" onClick={() => onNavigate({ kind: "collections", typeFilter: type, showcase: false })}>{({ game: "게임", manga: "만화", movie: "영화", av: "AV" })[type]}</button>)}</div>}
         {area === "manage" && view.kind !== "settings" && <div className="workspace-index__fallback">{management.map((item) => <button key={item.id} type="button" className="workspace-index-link" aria-current={(item.id === "review" ? view.kind === "similarity_review" : view.kind === item.id) ? "page" : undefined} onClick={item.onSelect}>{item.icon}{item.label}</button>)}</div>}
         {view.kind === "collection" && <ChromeTarget name="details" className="collection-detail-sidebar" />}
       </div>

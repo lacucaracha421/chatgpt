@@ -702,7 +702,7 @@ fn serve_multi_capture_list(
         // 각 캡처의 ticket → download → acknowledge 순서를 상한까지 받는다.
         for _ in 0..capture_count * 3 + 4 {
             use std::time::Duration;
-            let mut request = match server.recv_timeout(Duration::from_secs(5)) {
+            let mut request = match server.recv_timeout(Duration::from_secs(15)) {
                 Ok(Some(request)) => request,
                 _ => break,
             };

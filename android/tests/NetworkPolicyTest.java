@@ -19,6 +19,10 @@ public final class NetworkPolicyTest {
  reject(()->NetworkPolicy.api("/v1/collections/artworks/prepare","POST"));
  reject(()->NetworkPolicy.api("/v1/collections/work-1","DELETE"));
  reject(()->NetworkPolicy.api("/v1/collections/work-1/artworks/../media-ticket","POST"));
+ for(String p:new String[]{"/v1/mobile-catalog/status","/v1/mobile-catalog/search?language=korean","/v1/mobile-catalog/count?token=opaque","/v1/mobile-catalog/works/kHentai/42?context=opaque","/v1/mobile-catalog/groups/kHentai/group-1/editions?context=opaque"})pass(()->NetworkPolicy.api(p,"GET"));
+ for(String p:new String[]{"/v1/mobile-catalog/publication","/v1/mobile-catalog/replicas/abc","/v1/mobile-catalog/bookmarks","/v1/mobile-catalog/refresh","/v1/mobile-catalog/works/kHentai/01","/v1/mobile-catalog/works/heliotrope/42","/v1/mobile-catalog/groups/kHentai/%2e%2e/editions"})for(String method:new String[]{"GET","POST","PUT","DELETE"})reject(()->NetworkPolicy.api(p,method));
+ StringBuilder longQuery=new StringBuilder("/v1/mobile-catalog/search?text=");for(int i=0;i<1365;i++)longQuery.append("%EA%B0%80");pass(()->NetworkPolicy.api(longQuery.toString(),"GET"));
+ for(int i=0;i<5000;i++)longQuery.append('a');reject(()->NetworkPolicy.api(longQuery.toString(),"GET"));
  System.out.println("NetworkPolicy: "+checks+" checks passed");
  }
 }

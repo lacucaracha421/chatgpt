@@ -734,6 +734,7 @@ pub enum CollectionType {
     Game,
     Manga,
     Movie,
+    Av,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1553,6 +1554,7 @@ mod tests {
 pub enum RevisitFeedback {
     Bundle { bundle_id: String },
     Creator { creator_key: String },
+    #[serde(rename = "recommendation_type", alias = "recommendationType")]
     RecommendationType { recommendation_type: String },
 }
 

@@ -1,0 +1,21 @@
+{
+  "version": "ccip-crop-consensus-v1",
+  "threshold": 0.21323118981474148,
+  "reference_count": 5,
+  "required_references": 2,
+  "detector_score": 0.30,
+  "nms": 0.45,
+  "margin": 0.18,
+  "max_boxes": 8,
+  "min_crop_side": 24,
+  "fallback": "whole-image-only-when-no-valid-crops",
+  "preprocessing": "RGB-white-alpha-exif-first-frame; detector-BGR-bicubic-letterbox640; CCIP-bilinear-stretch384-CLIP-v1",
+  "ccip_revision": "eb2acdd29af1703388d3d0c04221add322bc9110",
+  "detector_revision": "815aeced8ed86081f251e7383d2a50a5a6d29b54",
+  "sha256": {
+    "model_feat.onnx": "c1e7333a55c2ad9e03cd340c635e96c9c1d86f0836fa7eae65720e7c9c94ee51",
+    "model_metrics.onnx": "816f291e385e854896276ff283dc83eac4966e5f51ab10260fee50de3ca9b8e3",
+    "metrics.json": "5e4a1cdb81053acfbab36980ca3b5ec6ca545cb73f3a38d5b114ddbd5c6ab60a",
+    "character-detector.onnx": "6b600e405d3b9d4b457b6d5bcb3c9c6fea0e60385b734caaf9d075ed7a12b622"
+  }
+}

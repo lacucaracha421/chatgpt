@@ -11,14 +11,29 @@ import { EmptyState } from "../shared/ui/EmptyState";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
+import { VideoSimilarityPanel } from "./video/VideoSimilarityPanel";
 
 type Props = {
   gateway: LibraryGateway;
   onCountChange(count: number): void;
   onClose(): void;
+  videoAssetIds?: string[];
 };
 
-export function SimilarityReviewBrowser({ gateway, onCountChange, onClose }: Props) {
+const NO_VIDEO_SELECTION: string[] = [];
+
+export function SimilarityReviewBrowser({ videoAssetIds = NO_VIDEO_SELECTION, ...props }: Props) {
+  const [mode, setMode] = useState<"image" | "video">(videoAssetIds.length >= 2 ? "video" : "image");
+  return <div className="similarity-review-workspace">
+    <nav className="similarity-review-workspace__tabs" aria-label="검토 미디어">
+      <Button variant={mode === "image" ? "secondary" : "ghost"} aria-pressed={mode === "image"} onClick={() => setMode("image")}>이미지</Button>
+      <Button variant={mode === "video" ? "secondary" : "ghost"} aria-pressed={mode === "video"} onClick={() => setMode("video")}>영상</Button>
+    </nav>
+    {mode === "video" ? <VideoSimilarityPanel assetIds={videoAssetIds} onClose={props.onClose} /> : <ImageSimilarityReviewBrowser {...props} />}
+  </div>;
+}
+
+function ImageSimilarityReviewBrowser({ gateway, onCountChange, onClose }: Props) {
   const [review, setReview] = useState<SimilarityReviewSummary | null>(null);
   const [totalCount, setTotalCount] = useState(0);
   const [initialTotal, setInitialTotal] = useState(0);
@@ -27,6 +42,7 @@ export function SimilarityReviewBrowser({ gateway, onCountChange, onClose }: Pro
   const [message, setMessage] = useState<string | null>(null);
   useAutoDismiss(message, setMessage);
   const generationRef = useRef(0);
+  const mountedRef = useRef(false);
 
   const load = useCallback(async () => {
     const generation = ++generationRef.current;
@@ -49,8 +65,9 @@ export function SimilarityReviewBrowser({ gateway, onCountChange, onClose }: Pro
   }, [gateway, onCountChange]);
 
   useEffect(() => {
+    mountedRef.current = true;
     void load();
-    return () => { generationRef.current += 1; };
+    return () => { mountedRef.current = false; generationRef.current += 1; };
   }, [load]);
 
   useEffect(() => {
@@ -67,11 +84,12 @@ export function SimilarityReviewBrowser({ gateway, onCountChange, onClose }: Pro
     setMessage(null);
     try {
       await gateway.decideSimilarityReview({ reviewId: review.id, decision });
+      if (!mountedRef.current) return;
       await load();
     } catch (error) {
-      setMessage(commandErrorMessage(error, "선택을 저장하지 못했습니다. 다시 시도해 주세요."));
+      if (mountedRef.current) setMessage(commandErrorMessage(error, "선택을 저장하지 못했습니다. 다시 시도해 주세요."));
     } finally {
-      setPending(false);
+      if (mountedRef.current) setPending(false);
     }
   }
 

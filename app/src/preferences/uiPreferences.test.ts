@@ -21,6 +21,11 @@ function storage(): Storage {
 }
 
 describe("UI preferences", () => {
+  it("preserves the AV collection scope across restart", () => {
+    const target = storage();
+    saveUiPreferences({ ...DEFAULT_UI_PREFERENCES, collectionType: "av" }, target);
+    expect(loadUiPreferences(target).collectionType).toBe("av");
+  });
   it("loads defaults when no preferences are stored", () => {
     expect(loadUiPreferences(storage())).toEqual(DEFAULT_UI_PREFERENCES);
     expect(DEFAULT_UI_PREFERENCES.sidebarWidth).toBe(208);
