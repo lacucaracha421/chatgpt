@@ -30,6 +30,7 @@ export function FolderCharacterRegistration({ folderId, classifications, targets
   const [targetId, setTargetId] = useState("");
   const [name, setName] = useState(ancestors[0]?.name ?? "");
   const [recursive, setRecursive] = useState(false);
+  const [cleanupFolder, setCleanupFolder] = useState(true);
   const [items, setItems] = useState<AssetSummary[]>([]);
   const [cursor, setCursor] = useState<AssetCursor | null>(null);
   const [count, setCount] = useState<number | null>(null);
@@ -41,9 +42,9 @@ export function FolderCharacterRegistration({ folderId, classifications, targets
   useEffect(() => {
     let active = true;
     setLoading(true); setCount(null); setItems([]); setReferences([]); setThumbnail(null); setError(null);
-    void Promise.all([gateway.listAssets({ ...query, after: null }), invoke<number>("character_folder_image_count", { folderId, recursive })]).then(([page, imageCount]) => {
+    void Promise.all([gateway.listAssets({ ...query, after: null }), invoke<number>("character_folder_asset_count", { folderId, recursive })]).then(([page, imageCount]) => {
       if (!active) return;
-      // GIFs are excluded by the native registration contract as well.
+      // Only still images can be selected as recognition references or portraits.
       setItems(page.items.filter(asset => asset.media.kind === "image"));
       setCursor(page.nextCursor); setCount(imageCount);
     }).catch(reason => { if (active) setError(commandErrorMessage(reason, "폴더를 불러오지 못했습니다.")); })
@@ -65,7 +66,7 @@ export function FolderCharacterRegistration({ folderId, classifications, targets
       const saved = await invoke<CharacterTarget>("register_character_folder", { request: {
         folderId, seriesId, recursive, expectedCount: count, targetId: targetId || null,
         expectedFingerprint: target?.fingerprint ?? null, displayName: name,
-        referenceIds: target ? [] : references, thumbnailId: target ? null : thumbnail,
+        cleanupFolder, referenceIds: target ? [] : references, thumbnailId: target ? null : thumbnail,
       } });
       onSaved(saved);
     } catch (reason) { setError(commandErrorMessage(reason, "캐릭터 폴더를 등록하지 못했습니다.")); }
@@ -81,7 +82,9 @@ export function FolderCharacterRegistration({ folderId, classifications, targets
       </Select>
       {!targetId && <TextField label="캐릭터 이름" value={name} disabled={busy} onChange={event => setName(event.target.value)} />}
       <label><input type="checkbox" checked={recursive} disabled={busy || loading} onChange={event => setRecursive(event.target.checked)} />하위 폴더 포함</label>
-      <p>{count === null ? "대상 확인 중…" : `${count}장 연결 예정`} · 파일과 기존 분류, 다른 캐릭터 연결을 유지합니다.</p>
+      <label><input type="checkbox" checked={cleanupFolder} disabled={busy} onChange={event => setCleanupFolder(event.target.checked)} />등록 후 기존 폴더 정리</label>
+      <p>{cleanupFolder ? "이미지·GIF·영상을 연결하고, 직접 소속 자산은 시리즈로 옮깁니다. 하위 폴더와 남은 자산이 있으면 기존 폴더를 보존합니다." : "기존 분류 폴더를 유지합니다."}</p>
+      <p>{count === null ? "대상 확인 중…" : `${count}개 자산 연결 예정`} · 원본 파일과 다른 캐릭터 연결을 유지합니다.</p>
       {!targetId && <><div className="character-actions"><Button disabled={busy} onClick={() => setMode("references")}>기준 이미지 {references.length}/5</Button><Button disabled={busy} onClick={() => setMode("thumbnail")}>대표 이미지 {thumbnail ? "선택됨" : "선택"}</Button><span>{mode === "references" ? "기준 이미지 선택" : "대표 이미지 선택"}</span></div>
         <div className="character-picker__gallery"><AssetGallery layout="masonry" items={items} privacyMode={privacyMode} targetRowHeight={140} selectedAssetIds={new Set(mode === "references" ? references : thumbnail ? [thumbnail] : [])} onSelectionGesture={asset => {
           if (busy) return;

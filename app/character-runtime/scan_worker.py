@@ -50,6 +50,13 @@ def main():
         return 1
     emit({"type": "ready", "baselineFingerprint": FINGERPRINT,
           "runtimeFingerprint": fingerprint})
+    timings = None
+    if os.environ.get("LAKOMICS_CHARACTER_PROFILE") == "1":
+        import feature_cache, runtime
+        from profiling import Timings, instrument
+        timings = Timings()
+        instrument(engine, feature_cache, runtime, timings)
+        cache.extract = timings.wrap("cache_extract_total", cache.extract)
     refs = None
     bundles = OrderedDict()
     resident = None
@@ -85,7 +92,11 @@ def main():
                     query = resident[2]
                 else:
                     query = cache.extract(Path(request["path"]), request["hash"])
-                result = compare_supported(engine, query, refs)
+                if timings is None:
+                    result = compare_supported(engine, query, refs)
+                else:
+                    with timings.measure("comparison_total"):
+                        result = compare_supported(engine, query, refs)
                 emit({"type": "result", "assetId": request["assetId"], **result,
                       "cacheHits": cache.hits, "extractions": cache.misses})
             else:
@@ -94,6 +105,10 @@ def main():
             emit({"type": "asset_error" if request.get("type") == "query" else "request_error",
                   "assetId": request.get("assetId"), "error": str(error),
                   "cacheHits": cache.hits, "extractions": cache.misses})
+        finally:
+            if timings is not None:
+                print(json.dumps({"characterProfile": timings.snapshot(), "operation": request.get("type"),
+                                  "cacheHits": cache.hits, "extractions": cache.misses}), file=sys.stderr, flush=True)
     return 0
 
 

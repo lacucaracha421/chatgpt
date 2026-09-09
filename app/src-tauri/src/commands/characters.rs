@@ -174,7 +174,9 @@ pub async fn start_character_scan(
     let config = crate::library::character_worker::RuntimeConfig::configured(script, &settings)?;
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || {
-        library.start_character_scan_mode(&target_id, &expected_fingerprint, config, automatic.unwrap_or(false))
+        let status = library.start_character_scan_mode(&target_id, &expected_fingerprint, config.clone(), false)?;
+        library.start_character_incremental(config);
+        Ok::<_, Error>(status)
     })
     .await
     .map_err(|_| super::background_task_error())?
@@ -271,6 +273,20 @@ pub async fn replace_character_references(
 }
 
 #[tauri::command]
+pub async fn move_assets_to_character(
+    target_id: String,
+    expected_fingerprint: String,
+    asset_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<u64, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.move_assets_to_character(target_id, expected_fingerprint, asset_ids))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
+}
+
+#[tauri::command]
 pub async fn record_character_decisions(
     request: DecisionRequest,
     state: State<'_, AppState>,
@@ -347,4 +363,50 @@ pub async fn character_folder_image_count(folder_id: String, recursive: bool, st
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || library.character_folder_image_count(folder_id,recursive))
         .await.map_err(|_| super::background_task_error())?.map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn character_folder_asset_count(folder_id: String, recursive: bool, state: State<'_, AppState>) -> Result<usize, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.character_folder_asset_count(folder_id,recursive))
+        .await.map_err(|_| super::background_task_error())?.map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn exclude_character_reference(target_id: String, expected_revision: i64, asset_id: String, state: State<'_, AppState>) -> Result<Target, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.exclude_character_reference(&target_id, expected_revision, &asset_id))
+        .await.map_err(|_| super::background_task_error())?.map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn character_groups(series_id: String, state: State<'_, AppState>) -> Result<Vec<crate::library::character_groups::Group>, CommandError> {
+ let library=current_required(state)?;
+ tauri::async_runtime::spawn_blocking(move || library.character_groups(&series_id)).await.map_err(|_|super::background_task_error())?.map_err(Into::into)
+}
+#[tauri::command]
+pub async fn save_character_group(request: crate::library::character_groups::GroupDraft, state: State<'_, AppState>) -> Result<(), CommandError> {
+ let library=current_required(state)?;
+ tauri::async_runtime::spawn_blocking(move || library.save_character_group(request)).await.map_err(|_|super::background_task_error())?.map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn character_conversion_preview(target_id: String, state: State<'_, AppState>) -> Result<crate::library::character_conversion::ConversionPreview, CommandError> {
+ let library=current_required(state)?;
+ tauri::async_runtime::spawn_blocking(move || library.character_conversion_preview(&target_id)).await.map_err(|_|super::background_task_error())?.map_err(Into::into)
+}
+#[tauri::command]
+pub async fn convert_character_to_folder(target_id: String, token: String, confirmation: String, state: State<'_, AppState>) -> Result<String, CommandError> {
+ let library=current_required(state)?;
+ tauri::async_runtime::spawn_blocking(move || library.convert_character_to_folder(&target_id,&token,&confirmation)).await.map_err(|_|super::background_task_error())?.map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn retry_failed_character_assets(series_id: String, app: tauri::AppHandle, state: State<'_, AppState>) -> Result<usize, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let count = library.retry_failed_character_assets(series_id)?;
+        start_incremental_if_configured(&app, &library);
+        Ok::<_, CommandError>(count)
+    }).await.map_err(|_| super::background_task_error())?
 }

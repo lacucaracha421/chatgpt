@@ -10,6 +10,9 @@ import type {
   ReleaseWatchRunResult,
 } from "../library/types";
 import { UI_PREFERENCES_KEY } from "../preferences/uiPreferences";
+import * as characters from "../characters/api";
+import { characterHubApi } from "../characters/hubApi";
+import { fixtureTarget } from "../characters/characterFixtures";
 import { App, type ExtensionIngestListener } from "./App";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
@@ -918,6 +921,44 @@ describe("App", () => {
     const refreshedTarget = await screen.findByRole("treeitem", { name: games.name });
     expect(refreshedTarget).toHaveTextContent("2");
     expect(libraryGateway.listClassifications).toHaveBeenCalledTimes(2);
+  });
+
+  it("moves assets through the atomic character command when dropped on a character", async () => {
+    Object.defineProperties(HTMLElement.prototype, {
+      offsetWidth: { configurable: true, get: () => 900 },
+      clientWidth: { configurable: true, get: () => 840 },
+      offsetHeight: { configurable: true, get: () => 600 },
+      clientHeight: { configurable: true, get: () => 600 },
+    });
+    localStorage.setItem("lakomics.libraryPath", summary.root);
+    const character = { ...fixtureTarget("marcus", "마커스"), seriesClassificationId: games.id };
+    const targets = vi.spyOn(characters.characterApi, "targets").mockResolvedValue([character]);
+    const series = vi.spyOn(characterHubApi, "series").mockResolvedValue([]);
+    const move = vi.spyOn(characters, "moveAssetsToCharacter").mockResolvedValue(1);
+    try {
+      const libraryGateway = gateway();
+      vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games]);
+      vi.mocked(libraryGateway.listAssets).mockResolvedValue({ items: [asset], nextCursor: null });
+      render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+      const tile = await screen.findByRole("option", { name: "arona.png" });
+      await userEvent.click(await screen.findByRole("button", { name: "게임 펼치기" }));
+      const target = await screen.findByRole("treeitem", { name: "마커스" });
+      Object.defineProperties(tile, {
+        setPointerCapture: { configurable: true, value: vi.fn() },
+        releasePointerCapture: { configurable: true, value: vi.fn() },
+      });
+      Object.defineProperty(document, "elementFromPoint", { configurable: true, value: vi.fn().mockReturnValue(target) });
+      fireEvent.pointerDown(tile, { button: 0, pointerId: 3, clientX: 10, clientY: 10 });
+      fireEvent.pointerMove(tile, { pointerId: 3, clientX: 20, clientY: 1 });
+      expect(target).toHaveAttribute("data-drop-state", "valid");
+      fireEvent.pointerUp(tile, { pointerId: 3, clientX: 20, clientY: 1 });
+      await waitFor(() => expect(move).toHaveBeenCalledWith(character.id, character.fingerprint, [asset.id]));
+      expect(await screen.findByText("1개 자산을 마커스 캐릭터 폴더로 이동했습니다.")).toBeVisible();
+      expect(libraryGateway.setAssetClassification).not.toHaveBeenCalled();
+    } finally {
+      cleanup();
+      targets.mockRestore(); series.mockRestore(); move.mockRestore();
+    }
   });
 
   it("drops an asset selection on an album without moving its folder", async () => {

@@ -167,7 +167,7 @@ impl Worker {
             .arg(cache)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            .stderr(if std::env::var_os("LAKOMICS_CHARACTER_PROFILE").as_deref() == Some(std::ffi::OsStr::new("1")) { Stdio::inherit() } else { Stdio::null() });
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;

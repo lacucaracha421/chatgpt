@@ -33,6 +33,7 @@
       "../character-runtime/runtime.py": "character-runtime/runtime.py",
       "../character-runtime/baseline.json": "character-runtime/baseline.json",
       "../character-runtime/feature_cache.py": "character-runtime/feature_cache.py",
+      "../character-runtime/profiling.py": "character-runtime/profiling.py",
       "../character-runtime/scan_worker.py": "character-runtime/scan_worker.py",
       "licenses/*": "licenses/"
     },

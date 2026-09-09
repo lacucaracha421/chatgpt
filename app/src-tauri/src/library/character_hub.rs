@@ -79,6 +79,10 @@ impl Library {
                 return Err(Error::Stale);
             }
         }
+        if query.reference_target_id.is_some() && query.target_id.is_some()
+            && query.reference_target_id != query.target_id {
+            return Err(Error::Stale);
+        }
         let cursor: Option<(String, String)> = query
             .after
             .as_deref()
@@ -92,7 +96,7 @@ impl Library {
               AND (EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope)) OR (?2 IS NOT NULL AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM ancestors WHERE parent_id IS NULL)) AND EXISTS(SELECT 1 FROM character_relations r WHERE r.asset_id=a.id AND r.target_id=?2)))
               AND ((?2 IS NOT NULL AND (EXISTS(SELECT 1 FROM character_relations r WHERE r.asset_id=a.id AND r.target_id=?2)
                 OR EXISTS(SELECT 1 FROM character_references r WHERE r.asset_id=a.id AND r.target_id=?2)))
-                OR (?2 IS NULL AND (?3 OR (NOT EXISTS(SELECT 1 FROM character_relations r JOIN character_targets t ON t.id=r.target_id WHERE r.asset_id=a.id AND t.series_classification_id=?1)
+                OR (?2 IS NULL AND (?3 OR EXISTS(SELECT 1 FROM character_autotag_jobs j WHERE j.asset_id=a.id AND j.review_state='partially_resolved') OR (NOT EXISTS(SELECT 1 FROM character_relations r JOIN character_targets t ON t.id=r.target_id WHERE r.asset_id=a.id AND t.series_classification_id=?1)
                 AND NOT EXISTS(SELECT 1 FROM character_references r JOIN character_targets t ON t.id=r.target_id WHERE r.asset_id=a.id AND t.series_classification_id=?1)))))";
             let reference_scope = "WITH RECURSIVE scope(id) AS (SELECT id FROM classification_entries WHERE id=?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id)
               SELECT a.id,a.collected_at FROM assets a WHERE a.status='normal' AND a.media_kind='image'
@@ -101,7 +105,10 @@ impl Library {
               AND NOT EXISTS(SELECT 1 FROM character_references r WHERE r.asset_id=a.id AND r.target_id<>?2)
               AND (?3 OR (NOT EXISTS(SELECT 1 FROM character_relations r WHERE r.asset_id=a.id)
               AND NOT EXISTS(SELECT 1 FROM character_references r WHERE r.asset_id=a.id)))";
-            let scope = if query.reference_target_id.is_some() { reference_scope } else { gallery_scope };
+            let scoped_references = format!("{reference_scope} AND (EXISTS(SELECT 1 FROM character_relations r WHERE r.asset_id=a.id AND r.target_id=?2) OR EXISTS(SELECT 1 FROM character_references r WHERE r.asset_id=a.id AND r.target_id=?2))");
+            let scope = if query.reference_target_id.is_some() {
+                if query.target_id.is_some() { scoped_references.as_str() } else { reference_scope }
+            } else { gallery_scope };
             let target_id = query.reference_target_id.as_ref().or(query.target_id.as_ref());
             let all = query.all;
             let total: i64 = connection.query_row(
@@ -160,14 +167,14 @@ pub(super) fn candidate_image_mode(
     candidate_media_mode(connection, series, id, automatic, false)
 }
 
-// Direct human assignment accepts videos; recognition and references stay image-only.
+// Direct human assignment accepts videos and GIFs; recognition and references stay image-only.
 pub(super) fn candidate_media_mode(
     connection: &Connection, series: &str, id: &str, automatic: bool, allow_video: bool,
 ) -> Result<(String, String)> {
     connection.query_row("WITH RECURSIVE scope(id) AS (SELECT id FROM classification_entries WHERE id=?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id),
       ancestors(id,parent_id) AS (SELECT id,parent_id FROM classification_entries WHERE id=?1 UNION ALL
       SELECT c.id,c.parent_id FROM classification_entries c JOIN ancestors p ON c.id=p.parent_id)
-      SELECT a.content_hash,a.relative_path FROM assets a WHERE a.id=?2 AND a.status='normal' AND (a.media_kind='image' OR (?4 AND a.media_kind='video'))
+      SELECT a.content_hash,a.relative_path FROM assets a WHERE a.id=?2 AND a.status='normal' AND (a.media_kind='image' OR (?4 AND a.media_kind IN ('video','gif')))
       AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND (ac.classification_id IN (SELECT id FROM scope) OR (?3 AND ac.classification_id IN (SELECT id FROM ancestors WHERE parent_id IS NULL))))",
       params![series,id,automatic,allow_video], |r| Ok((r.get(0)?,r.get(1)?))).optional()?.ok_or(Error::Invalid("시리즈 폴더 안의 지원되는 자산을 선택해 주세요."))
 }
@@ -324,6 +331,17 @@ mod tests {
         assert!(new.next_cursor.is_none());
         let own = f.library.browse_character_assets(query(&a.id, None)).unwrap();
         assert_eq!(own.total_count, 7);
+        let scoped = f.library.browse_character_assets(BrowseQuery {
+            target_id: Some(a.id.clone()), ..query(&a.id, None)
+        }).unwrap();
+        assert_eq!(scoped.total_count, 6);
+        assert!(scoped.items.iter().all(|item| item.id != "asset-6"));
+        assert!(scoped.next_cursor.is_some());
+        let scoped_next = f.library.browse_character_assets(BrowseQuery {
+            target_id: Some(a.id.clone()), ..query(&a.id, scoped.next_cursor)
+        }).unwrap();
+        assert!(scoped_next.items.iter().all(|item| item.id != "asset-6" && scoped.items.iter().all(|previous| previous.id != item.id)));
+
         let unclassified = f.library.browse_character_assets(BrowseQuery { all: false, ..query(&a.id, None) }).unwrap();
         assert_eq!(unclassified.total_count, 1);
         let unsaved = f.library.browse_character_assets(query("", None)).unwrap();

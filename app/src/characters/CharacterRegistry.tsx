@@ -11,8 +11,9 @@ export function characterDraft(target: CharacterTarget | null): CharacterEditorD
 }
 
 /** Draft ownership stays with the series so gallery selection never discards typing. */
-export function CharacterRegistry({ draft, target, privacyMode, busy, error, onChange, onPick, onSave }: {
+export function CharacterRegistry({ draft, target, privacyMode, busy, error, onChange, onPick, onSave, onExcludeReference, onOpenReference }: {
   draft: CharacterEditorDraft; target: CharacterTarget | null; privacyMode: boolean; busy: boolean; error: string | null;
+  onExcludeReference?: (assetId: string) => void; onOpenReference?: (assetId: string) => void;
   onChange: (draft: CharacterEditorDraft) => void; onPick: (kind: "thumbnail" | "references") => void; onSave: () => void;
 }) {
   return <section className="character-registry" aria-label="캐릭터 설정">
@@ -25,10 +26,16 @@ export function CharacterRegistry({ draft, target, privacyMode, busy, error, onC
       <div><Button size="sm" disabled={busy} onClick={() => onPick("thumbnail")}>대표 이미지</Button>{draft.thumbnail && <Button size="icon" variant="ghost" aria-label="대표 이미지 해제" disabled={busy} onClick={() => onChange({ ...draft, thumbnail: null })}><XMarkIcon aria-hidden="true" /></Button>}</div>
     </div>
     <div className="character-registry__label"><span>기준 이미지</span><small>{draft.references.length}/5</small><Button size="sm" disabled={busy} onClick={() => onPick("references")}>선택</Button></div>
-    <div className="character-refs" aria-label="기준 이미지">{Array.from({ length: 5 }, (_, i) => <button type="button" key={i} aria-label={`기준 이미지 ${i + 1} 선택`} disabled={busy} onClick={() => onPick("references")}>
+    <div className="character-refs" aria-label="기준 이미지">{Array.from({ length: 5 }, (_, i) => <button type="button" key={i} aria-label={`기준 이미지 ${i + 1} ${draft.references[i] && onOpenReference ? "원본 보기" : "선택"}`} disabled={busy} onClick={() => draft.references[i] && onOpenReference ? onOpenReference(draft.references[i]!) : onPick("references")}>
       {draft.references[i] ? <img className={privacyMode ? "character-private" : ""} src={thumbnailUrl(draft.references[i]!)} alt={`기준 ${i + 1}`} /> : <span>{i + 1}</span>}
     </button>)}</div>
-    {Boolean(target?.learnedReferences?.length) && <small>승인한 단독 이미지 {target!.learnedReferences!.length}장도 비교에 활용 중</small>}
+    {target && <section aria-label="추가 참조"><div className="character-registry__label">추가 참조 <small>{target.learnedReferences?.length ?? 0}장</small></div>
+      <p className="series-description">직접 승인한 단독 인물 이미지에서 선정합니다. 제외해도 원본과 캐릭터 소속은 유지됩니다.</p>
+      <div className="character-learned-references">{target.learnedReferences?.map(reference => reference.assetId && <div key={reference.assetId}>
+        <button disabled={busy || !onOpenReference} aria-label={`추가 참조 ${reference.slot + 1} 원본 보기`} onClick={() => onOpenReference?.(reference.assetId!)}><img src={thumbnailUrl(reference.assetId)} className={privacyMode ? "character-private" : ""} alt={`추가 참조 ${reference.slot + 1}`} /></button>
+        <Button size="sm" variant="ghost" disabled={busy || !onExcludeReference} onClick={() => onExcludeReference?.(reference.assetId!)}>추가 참조에서 제외</Button>
+      </div>)}</div>
+    </section>}
     <label className="character-check"><input type="checkbox" checked={draft.enabled} disabled={busy} onChange={e => onChange({ ...draft, enabled: e.target.checked })} />분석에 사용</label>
     {error && <p role="alert">{error}</p>}
     <Button disabled={busy || !draft.name.trim()} onClick={onSave}>{target ? "저장" : "캐릭터 만들기"}</Button>

@@ -1,6 +1,6 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { WorkspaceChromeProvider, ChromeTarget } from "../layout/WorkspaceChrome";
 import { NotesWorkspace } from "./NotesView";
 import { NotesStore, type NotesRequest, type Note } from "./store";
@@ -34,4 +34,20 @@ it("requires backing up a newly generated key before unlocking",async()=>{
   const open=screen.getByRole("button",{name:"메모 열기"});expect(open).toBeDisabled();
   await userEvent.click(screen.getByRole("checkbox",{name:"복구키를 안전한 곳에 보관했습니다"}));
   await userEvent.click(open);expect(operations).toContain("unlock");
+});
+
+it("keeps typing status stable without delaying local writes",async()=>{
+  const note:Note={id:"n",title:"Draft",body:"",pinned:false,deleted:false,createdAt:"2026-09-07T00:00:00Z",updatedAt:"2026-09-07T00:00:00Z",localRevision:0,pending:false,conflict:false};
+  const request=vi.fn(async(op:string,input:any)=>op==="save"?{...note,...input,localRevision:1,pending:true}:{unlocked:true,notes:[note],lastSyncedAt:null});
+  const store=new NotesStore(request as NotesRequest);surface(store);
+  await userEvent.click(await screen.findByRole("button",{name:/Draft/}));
+  vi.useFakeTimers();
+  try {
+    fireEvent.change(screen.getByRole("textbox",{name:"메모 본문"}),{target:{value:"typing"}});
+    await act(async()=>{await Promise.resolve();});
+    expect(request).toHaveBeenCalledWith("save",expect.objectContaining({body:"typing"}));
+    expect(screen.getByText("편집 중 · 자동 저장")).toBeInTheDocument();
+    await act(async()=>{vi.advanceTimersByTime(1200);});
+    expect(screen.getByText("PC에 저장됨 · 동기화 대기")).toBeInTheDocument();
+  } finally { vi.useRealTimers(); }
 });

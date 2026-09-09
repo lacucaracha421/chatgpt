@@ -688,8 +688,9 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
           className="classification-sidebar__tree-row"
           data-classification-id={node.entry.treeKind === "classification" && !node.entry.characterId ? node.entry.id : undefined}
           data-album-id={node.entry.treeKind === "album" ? node.entry.id : undefined}
-          data-drop-state={dragTarget?.kind === node.entry.treeKind && dragTarget.entryId === node.entry.id ? (dragTarget.valid ? "valid" : "invalid") : undefined}
-          data-drop-position={dragTarget?.kind === node.entry.treeKind && dragTarget.entryId === node.entry.id ? dragTarget.position : undefined}
+          data-character-id={node.entry.characterId}
+          data-drop-state={dragTarget?.kind === (node.entry.characterId ? "character" : node.entry.treeKind) && dragTarget.entryId === (node.entry.characterId ?? node.entry.id) ? (dragTarget.valid ? "valid" : "invalid") : undefined}
+          data-drop-position={dragTarget?.kind === (node.entry.characterId ? "character" : node.entry.treeKind) && dragTarget.entryId === (node.entry.characterId ?? node.entry.id) ? dragTarget.position : undefined}
           role="treeitem"
           aria-label={node.entry.name}
           aria-selected={selected}

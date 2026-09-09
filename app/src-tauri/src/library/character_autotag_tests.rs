@@ -448,3 +448,57 @@ fn closest_registered_series_excludes_registered_ancestors() {
         .unwrap();
     assert!(context(&f, &job).targets.is_empty());
 }
+
+
+#[test]
+fn completed_manual_scan_enrolls_old_images_without_overwriting_work_or_decisions() {
+    use std::sync::atomic::AtomicBool;
+    let f = Fixture::new();
+    let a = f.ready("A");
+    let b = f.ready("B");
+    let cancel = AtomicBool::new(false);
+    let ids = vec!["asset-5".into(), "asset-6".into()];
+    f.library.save_character_series(super::super::character_hub::Series {
+        classification_id: f.series.clone(), hero_asset_id: None, auto_classify: false,
+    }).unwrap();
+    assert_eq!(f.library.queue_analyzed_character_assets(&a, &ids, &cancel).unwrap(), 0);
+    f.library.save_character_series(super::super::character_hub::Series {
+        classification_id: f.series.clone(), hero_asset_id: None, auto_classify: true,
+    }).unwrap();
+    assert_eq!(f.library.queue_analyzed_character_assets(&a, &ids, &AtomicBool::new(true)).unwrap(), 0);
+    assert!(f.library.character_autotag_job("asset-5").unwrap().is_none());
+    f.library.record_character_decisions(DecisionRequest {
+        target_id: a.id.clone(), expected_fingerprint: a.fingerprint.clone(), asset_ids: vec!["asset-5".into()],
+        decision: DecisionKind::Rejected, baseline_fingerprint: None, scan_id: None,
+    }).unwrap();
+    assert_eq!(f.library.queue_analyzed_character_assets(&a, &ids, &cancel).unwrap(), 1);
+    assert!(f.library.character_autotag_job("asset-6").unwrap().is_none());
+    assert_eq!(f.library.queue_analyzed_character_assets(&a, &ids, &cancel).unwrap(), 0);
+    let job = f.library.claim_character_autotag().unwrap().unwrap();
+    assert_eq!(f.library.queue_analyzed_character_assets(&a, &ids, &cancel).unwrap(), 0);
+    let preserved = f.library.character_autotag_job("asset-5").unwrap().unwrap();
+    assert_eq!(preserved.generation, job.generation);
+    assert_eq!(preserved.claim_id, job.claim_id);
+    let ctx = context(&f, &job);
+    assert!(ctx.targets.iter().any(|target| target.id == b.id));
+    assert!(f.library.character_relations_for_asset("asset-5").unwrap().is_empty());
+    let decision: String = f.library.connection().unwrap().query_row(
+        "SELECT decision FROM character_decisions WHERE target_id=?1 AND source_asset_id='asset-5' ORDER BY sequence DESC LIMIT 1",
+        [&a.id], |row| row.get(0)).unwrap();
+    assert_eq!(decision, "rejected");
+    let mut stale = a.clone(); stale.fingerprint = "stale".into();
+    assert!(matches!(f.library.queue_analyzed_character_assets(&stale, &ids, &cancel), Err(Error::Stale)));
+}
+
+#[test]
+fn failed_jobs_can_be_reconsidered_and_explicitly_retried() {
+    let f=Fixture::new(); let _target=f.ready("A");
+    let job=queue(&f,"asset-5");
+    f.library.connection().unwrap().execute("UPDATE character_autotag_jobs SET state='failed',review_state='failed',attempts=3,claim_id=NULL WHERE asset_id=?1",[&job.asset_id]).unwrap();
+    assert_eq!(f.library.reconsider_character_autotag(&f.series,None,200).unwrap(),vec!["asset-5"]);
+    let retried=f.library.character_autotag_job("asset-5").unwrap().unwrap();
+    assert_eq!(retried.state,"pending"); assert_eq!(retried.attempts,0);
+    f.library.connection().unwrap().execute("UPDATE character_autotag_jobs SET state='failed',review_state='failed' WHERE asset_id='asset-5'",[]).unwrap();
+    assert_eq!(f.library.retry_failed_character_assets(f.series.clone()).unwrap(),1);
+    assert_eq!(f.library.retry_failed_character_assets(f.series.clone()).unwrap(),0);
+}

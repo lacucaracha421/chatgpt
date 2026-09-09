@@ -1557,6 +1557,8 @@ pub async fn start_asset_drag(
 ) -> Result<(), CommandError> {
     let library = current_required(state)?;
     let prepare_ids = asset_ids.clone();
+    #[cfg(debug_assertions)]
+    eprintln!("asset drag: preparing {} images", prepare_ids.len());
     let prepared = tauri::async_runtime::spawn_blocking(move || library.prepare_asset_drag(&prepare_ids))
         .await.map_err(|_| background_task_error())?.map_err(CommandError::from)?;
     let (sender, mut receiver) = tauri::async_runtime::channel(1);

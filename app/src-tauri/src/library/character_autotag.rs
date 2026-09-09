@@ -62,6 +62,7 @@ pub(super) fn evidence_row(
         .map(|(row, fingerprint, runtime)| {
             Ok((
                 super::character_scan::ScanStatus {
+                    automatic_queued: 0,
                     automatic: true,
                     id: evidence_id.into(),
                     target_id: target_id.into(),
@@ -172,6 +173,57 @@ fn read_job(connection: &Connection, id: &str) -> Result<Option<Job>> {
 }
 
 impl Library {
+    /// Explicit manual analysis enrolls historical images in the same durable
+    /// pipeline as new arrivals. The queue rechecks all competing characters;
+    /// no prediction or user decision is directly applied here.
+    pub(super) fn queue_analyzed_character_assets(
+        &self, target: &super::characters::Target, asset_ids: &[String],
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> Result<usize> {
+        use std::sync::atomic::Ordering;
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let current = self.read_character_target(&transaction, &target.id)?;
+        if current.fingerprint != target.fingerprint { return Err(Error::Stale); }
+        let Some(series) = current.series_classification_id.as_deref() else { return Err(Error::Stale); };
+        let enabled: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM character_series WHERE classification_id=?1 AND auto_classify=1)",
+            [series], |r| r.get(0))?;
+        if !enabled { return Ok(0); }
+        let mut queued = 0;
+        for id in asset_ids {
+            if cancel.load(Ordering::Acquire) { return Ok(0); }
+            // Ignore images moved out of this series, trashed, or made unavailable
+            // since the manual scan. Enrollment always snapshots current inputs.
+            if super::character_hub::candidate_image_mode(&transaction, series, id, false).is_err() { continue; }
+            let in_flight: bool = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM character_autotag_jobs WHERE asset_id=?1 AND state IN ('pending','processing'))",
+                [id], |r| r.get(0))?;
+            if in_flight { continue; }
+            queued += usize::from(enqueue(&transaction, id, Cause::Reconsideration)?);
+        }
+        if cancel.load(Ordering::Acquire) { return Ok(0); }
+        transaction.commit()?;
+        Ok(queued)
+    }
+
+    pub fn retry_failed_character_assets(&self, series_id: String) -> Result<usize> {
+        let mut connection = self.connection()?;
+        let tx = connection.transaction()?;
+        let ids = tx.prepare("WITH RECURSIVE scope(id) AS (
+            SELECT classification_id FROM character_series WHERE classification_id=?1
+            UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id)
+            SELECT j.asset_id FROM character_autotag_jobs j JOIN assets a ON a.id=j.asset_id
+            WHERE j.state='failed' AND a.status='normal'
+            AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=j.asset_id AND ac.classification_id IN (SELECT id FROM scope))
+            ORDER BY j.asset_id LIMIT 200")?
+            .query_map([series_id], |r| r.get::<_, String>(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        for id in &ids { enqueue(&tx, id, Cause::Reconsideration)?; }
+        tx.commit()?;
+        Ok(ids.len())
+    }
+
     pub fn character_autotag_job(&self, asset_id: &str) -> Result<Option<Job>> {
         let connection = self.connection()?;
         read_job(&connection, asset_id)
@@ -389,7 +441,7 @@ impl Library {
             ancestors(id,parent_id) AS (SELECT id,parent_id FROM classification_entries WHERE id=?1
             UNION SELECT c.id,c.parent_id FROM classification_entries c JOIN ancestors p ON c.id=p.parent_id)
             SELECT j.asset_id FROM character_autotag_jobs j JOIN assets a ON a.id=j.asset_id
-            WHERE j.review_state IN ('awaiting_candidates','unresolved','partially_resolved')
+            WHERE j.review_state IN ('awaiting_candidates','unresolved','partially_resolved','failed')
             AND j.state IN ('completed','failed') AND a.status='normal' AND (?2 IS NULL OR j.asset_id>?2)
             AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=j.asset_id
             AND (ac.classification_id IN (SELECT id FROM descendants) OR ac.classification_id IN (SELECT id FROM ancestors WHERE parent_id IS NULL)))

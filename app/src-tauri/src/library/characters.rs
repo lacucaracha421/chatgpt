@@ -58,6 +58,8 @@ pub struct FolderRegistration {
     pub folder_id: String,
     pub series_id: String,
     pub recursive: bool,
+    #[serde(default)]
+    pub cleanup_folder: bool,
     pub expected_count: usize,
     pub target_id: Option<String>,
     pub expected_fingerprint: Option<String>,
@@ -163,17 +165,25 @@ impl Library {
         Ok(ids.len())
     }
 
-    /// Register existing classified images without changing file or folder membership.
+    pub fn character_folder_asset_count(&self, folder_id: String, recursive: bool) -> Result<usize> {
+        let connection = self.connection()?;
+        let ids = connection.prepare("WITH RECURSIVE scope(id) AS (SELECT ?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id WHERE ?2) SELECT a.id FROM assets a WHERE a.status='normal' AND a.media_kind IN ('image','gif','video') AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope)) ORDER BY a.id")?
+            .query_map(params![folder_id,recursive], |r| r.get::<_,String>(0))?
+            .collect::<std::result::Result<Vec<_>,_>>()?;
+        Ok(ids.len())
+    }
+
+    /// Register existing image, GIF and video memberships; references remain still images.
     pub fn register_character_folder(&self, request: FolderRegistration) -> Result<Target> {
         if request.reference_ids.len() > REFERENCE_COUNT { return Err(Error::Invalid("기준 이미지는 최대 5장입니다.")); }
         let mut connection = self.connection()?;
         let tx = connection.transaction()?;
         let inside: bool = tx.query_row("WITH RECURSIVE scope(id) AS (SELECT id FROM classification_entries WHERE id=?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id) SELECT EXISTS(SELECT 1 FROM scope WHERE id=?2)", params![request.series_id,request.folder_id], |r| r.get(0))?;
         if !inside { return Err(Error::Invalid("원본 폴더를 포함하는 시리즈를 선택해 주세요.")); }
-        let ids = tx.prepare("WITH RECURSIVE scope(id) AS (SELECT ?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id WHERE ?2) SELECT a.id FROM assets a WHERE a.status='normal' AND a.media_kind='image' AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope)) ORDER BY a.id")?
+        let ids = tx.prepare("WITH RECURSIVE scope(id) AS (SELECT ?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id WHERE ?2) SELECT a.id FROM assets a WHERE a.status='normal' AND a.media_kind IN ('image','gif','video') AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope)) ORDER BY a.id")?
             .query_map(params![request.folder_id,request.recursive], |r| r.get::<_,String>(0))?
             .collect::<std::result::Result<Vec<_>,_>>()?;
-        if ids.is_empty() || ids.len() != request.expected_count { return Err(Error::Invalid("폴더의 이미지 수가 바뀌었습니다. 목록을 다시 확인해 주세요.")); }
+        if ids.is_empty() || ids.len() != request.expected_count { return Err(Error::Invalid("폴더의 자산 수가 바뀌었습니다. 목록을 다시 확인해 주세요.")); }
         let target = if let Some(id) = request.target_id {
             let target = self.read_character_target(&tx, &id)?;
             if target.series_classification_id.as_deref() != Some(&request.series_id) || request.expected_fingerprint.as_deref() != Some(&target.fingerprint) { return Err(Error::Stale); }
@@ -208,6 +218,14 @@ impl Library {
                 asset_ids: chunk.to_vec(), decision: DecisionKind::Accepted,
                 baseline_fingerprint: None, scan_id: None,
             })?;
+        }
+        if request.cleanup_folder && request.folder_id != request.series_id {
+            // Descendant folders and assets not included in registration keep their structure.
+            let direct = tx.prepare("SELECT asset_id FROM asset_classifications WHERE classification_id=?1 ORDER BY asset_id")?.query_map([&request.folder_id],|r|r.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?;
+            let moving = direct.into_iter().filter(|id|ids.contains(id)).collect::<Vec<_>>();
+            if !moving.is_empty() { Self::set_asset_classification_in(&tx,&super::models::SetAssetClassification {asset_ids:moving,classification_id:Some(request.series_id.clone())})?; }
+            let retained: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM classification_entries WHERE parent_id=?1) OR EXISTS(SELECT 1 FROM asset_classifications WHERE classification_id=?1) OR EXISTS(SELECT 1 FROM character_series WHERE classification_id=?1) OR EXISTS(SELECT 1 FROM character_targets WHERE linked_classification_id=?1 AND id<>?2)",params![request.folder_id,target.id],|r|r.get(0))?;
+            if !retained { tx.execute("DELETE FROM classification_entries WHERE id=?1",[&request.folder_id])?; }
         }
         let result = self.read_character_target(&tx,&target.id)?;
         tx.commit()?;
@@ -286,6 +304,23 @@ impl Library {
         Ok(result)
     }
 
+    pub fn exclude_character_reference(&self, id: &str, expected_revision: i64, asset_id: &str) -> Result<Target> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let target = self.read_character_target(&transaction, id)?;
+        if target.revision != expected_revision { return Err(Error::Stale); }
+        let already: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM character_reference_exclusions WHERE target_id=?1 AND asset_id=?2)", params![id,asset_id], |r| r.get(0))?;
+        if !already {
+            if !target.learned_references.iter().any(|r| r.asset_id.as_deref() == Some(asset_id)) {
+                return Err(Error::Invalid("현재 추가 참조가 아닙니다. 새로고침 후 확인해 주세요."));
+            }
+            transaction.execute("INSERT INTO character_reference_exclusions(target_id,asset_id,created_at) VALUES(?1,?2,?3)", params![id,asset_id,chrono::Utc::now().to_rfc3339()])?;
+        }
+        let result = self.read_character_target(&transaction, id)?;
+        transaction.commit()?;
+        Ok(result)
+    }
+
     pub fn replace_character_references(
         &self,
         id: &str,
@@ -345,6 +380,25 @@ impl Library {
         let result = self.read_character_target(&transaction, id)?;
         transaction.commit()?;
         Ok(result)
+    }
+
+    /// Move within a series and assign the character as one atomic operation.
+    pub fn move_assets_to_character(&self, target_id: String, expected_fingerprint: String, asset_ids: Vec<String>) -> Result<u64> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let target = self.read_character_target(&transaction, &target_id)?;
+        let series_id = target.series_classification_id.clone()
+            .ok_or(Error::Invalid("시리즈 폴더를 다시 연결해 주세요."))?;
+        // Validate the original scope before moving; unrelated series cannot be pulled in.
+        self.write_character_decisions(&transaction, DecisionRequest {
+            target_id, expected_fingerprint, asset_ids: asset_ids.clone(),
+            decision: DecisionKind::Accepted, baseline_fingerprint: None, scan_id: None,
+        })?;
+        Self::set_asset_classification_in(&transaction, &super::models::SetAssetClassification {
+            asset_ids: asset_ids.clone(), classification_id: Some(series_id),
+        })?;
+        transaction.commit()?;
+        Ok(asset_ids.into_iter().collect::<BTreeSet<_>>().len() as u64)
     }
 
     pub fn record_character_decisions(&self, request: DecisionRequest) -> Result<u64> {
@@ -564,6 +618,7 @@ impl Library {
                 JOIN character_decisions d ON d.sequence=r.sequence JOIN assets a ON a.id=r.asset_id
                 WHERE r.target_id=?1 AND d.origin='manual' AND a.status='normal' AND a.media_kind='image'
                 AND d.asset_hash=a.content_hash
+                AND NOT EXISTS(SELECT 1 FROM character_reference_exclusions x WHERE x.target_id=r.target_id AND x.asset_id=a.id)
                 AND json_valid(d.reference_snapshot)
                 AND json_array_length(d.reference_snapshot,'$.prediction.queryBoxes')=1
                 AND json_extract(d.reference_snapshot,'$.prediction.wholeFallback')=0

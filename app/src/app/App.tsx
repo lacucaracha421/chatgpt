@@ -1,4 +1,5 @@
 import { PublicationStatus } from "../layout/PublicationStatus";
+import { characterApi, moveAssetsToCharacter } from "../characters/api";
 import { useCharacterAutomation } from "../characters/useCharacterAutomation";
 import { CharacterAutomationStatus } from "../characters/CharacterAutomationStatus";
 import { useCharacterHub } from "../characters/useCharacterHub";
@@ -223,7 +224,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     characterHub.refresh();
     refreshMembershipCounts();
   }, [characterHub.refresh, refreshMembershipCounts]);
-  const characterAutomation = useCharacterAutomation(characterHub.targets, characterHub.series, assetRefresh, refreshCharacterViews);
+  const characterAutomation = useCharacterAutomation(refreshCharacterViews);
   const handleIngested = useCallback((result: IngestOutcome) => {
     if (result.status === "added" || (result.status === "exact_duplicate" && result.classificationChanged)) {
       setAssetRefresh((current) => current + 1);
@@ -567,7 +568,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   }
 
   useEffect(() => {
-    if (dragState.phase !== "dragging" || dragTarget?.position !== "inside" || !dragTarget.valid) return;
+    if (dragState.phase !== "dragging" || dragTarget?.position !== "inside" || !dragTarget.valid || dragTarget.kind === "character") return;
     const target = dragTarget;
     const timer = window.setTimeout(() => setPreferences((current) => {
       const key = target.kind === "album" ? "expandedAlbumIds" : "expandedClassificationIds";
@@ -597,6 +598,15 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   async function performInternalDrop(payload: InternalDragPayload, target: ClassificationDropTarget) {
     try {
       if (payload.kind === "assets") {
+        if (target.kind === "character") {
+          const character = (await characterApi.targets()).find(entry => entry.id === target.entryId && entry.enabled);
+          if (!character) throw new Error("캐릭터를 다시 확인해 주세요.");
+          await moveAssetsToCharacter(character.id, character.fingerprint, payload.assetIds);
+          refreshCharacterViews();
+          setAssetRefresh(value => value + 1);
+          setMessage(`${payload.assetIds.length}개 자산을 ${character.displayName} 캐릭터 폴더로 이동했습니다.`);
+          return;
+        }
         if (target.kind === "album") {
           await gateway.patchAssetAlbums({ assetIds: payload.assetIds, addAlbumIds: [target.entryId], removeAlbumIds: [] });
         } else {
@@ -607,6 +617,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
         setMessage(`${payload.assetIds.length}개 자산을 ${target.kind === "album" ? "앨범에 추가" : "폴더로 이동"}했습니다.`);
         return;
       }
+      if (target.kind === "character") return;
       const destination = entries.find((entry) => entry.id === target.entryId);
       const parentId = target.position === "inside" ? target.entryId : destination?.parentId ?? null;
       if (payload.kind === "album") await gateway.moveAlbum(payload.entryId, target.entryId);
@@ -830,7 +841,8 @@ function DeferredViewFallback() {
 }
 
 function sidebarTargetAt(x: number, y: number, payload: InternalDragPayload, entries: ClassificationEntry[], albums: AlbumEntry[]): ClassificationDropTarget | null {
-  const element = document.elementFromPoint?.(x, y)?.closest<HTMLElement>("[data-classification-id], [data-album-id]");
+  const element = document.elementFromPoint?.(x, y)?.closest<HTMLElement>("[data-classification-id], [data-album-id], [data-character-id]");
+  if (element?.dataset.characterId) return { kind: "character", entryId: element.dataset.characterId, position: "inside", valid: payload.kind === "assets" && payload.assetIds.length <= 200 };
   const kind = element?.dataset.albumId ? "album" : "classification";
   const entryId = kind === "album" ? element?.dataset.albumId : element?.dataset.classificationId;
   if (!element || !entryId) return null;

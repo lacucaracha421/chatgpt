@@ -18,6 +18,8 @@ pub(super) fn start(window: &tauri::Window, prepared: PreparedAssetDrag, asset_i
     let pointer = widget.display().default_seat().and_then(|seat| seat.pointer()).ok_or_else(failure)?;
     let surface = widget.window().ok_or_else(failure)?;
     if !surface.device_position(&pointer).3.contains(gdk::ModifierType::BUTTON1_MASK) {
+        #[cfg(debug_assertions)]
+        eprintln!("asset drag: button released before native start");
         return Err(failure());
     }
     let uris = file_uris(&prepared.files)?;
@@ -29,7 +31,9 @@ pub(super) fn start(window: &tauri::Window, prepared: PreparedAssetDrag, asset_i
         selection.set_uris(&uris.iter().map(String::as_str).collect::<Vec<_>>());
     }));
     let cancelled = failed.clone();
-    handlers.borrow_mut().push(widget.connect_drag_failed(move |_, _, _| {
+    handlers.borrow_mut().push(widget.connect_drag_failed(move |_, _, reason| {
+        #[cfg(debug_assertions)]
+        eprintln!("asset drag: GTK failed: {reason:?}");
         cancelled.set(true);
         glib::Propagation::Proceed
     }));
@@ -49,6 +53,8 @@ pub(super) fn start(window: &tauri::Window, prepared: PreparedAssetDrag, asset_i
     let context = widget.drag_begin_with_coordinates(&targets, gdk::DragAction::COPY, 1, None, -1, -1);
     match context {
         Some(context) => {
+            #[cfg(debug_assertions)]
+            eprintln!("asset drag: native drag started");
             if let Some(icon) = icon { context.drag_set_icon_pixbuf(&icon, 0, 0); }
             else { context.drag_set_icon_default(); }
             Ok(())

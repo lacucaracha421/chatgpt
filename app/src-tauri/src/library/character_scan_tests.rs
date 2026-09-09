@@ -17,6 +17,7 @@ fn seed_prediction(f: &Fixture, target: &Target, scan_id: &str) {
     let input = f.library.current_input(target, "asset-5").unwrap();
     let mut state = f.library.character_scan.lock().unwrap();
     let status = ScanStatus {
+        automatic_queued: 0,
         automatic: false,
         id: scan_id.into(),
         target_id: target.id.clone(),
@@ -221,6 +222,7 @@ fn stale_result_queries_recheck_scope_and_actual_reference_bytes() {
     {
         let mut state = f.library.character_scan.lock().unwrap();
         state.status = Some(ScanStatus {
+        automatic_queued: 0,
         automatic: false,
             id: "scan".into(),
             target_id: target.id.clone(),
@@ -489,48 +491,6 @@ fn real_native_scan_cold_warm_incremental_and_ref_replacement_parity() {
 }
 
 #[test]
-fn automatic_approval_requires_strong_unique_evidence_and_preserves_rejections() {
-    let f=Fixture::new();
-    let a=f.ready("A");
-    seed_prediction(&f,&a,"auto-a");
-    {
-        let mut state=f.library.character_scan.lock().unwrap();
-        state.previous.get_mut(&a.id).unwrap().1.get_mut("asset-5").unwrap().evidence.as_mut().unwrap()["bestQueryCrop"]=json!(0);
-        state.previous.get_mut(&a.id).unwrap().1.get_mut("asset-5").unwrap().evidence.as_mut().unwrap()["evidence"]=json!([{ "matchedReferences":[0,1] }]);
-    }
-    assert_eq!(f.library.apply_automatic_characters(vec!["auto-a".into()]).unwrap(),0);
-    {
-        let mut state=f.library.character_scan.lock().unwrap();
-        state.previous.get_mut(&a.id).unwrap().1.get_mut("asset-5").unwrap().evidence.as_mut().unwrap()["evidence"]=json!([{ "matchedReferences":[0,1,2] }]);
-    }
-    assert_eq!(f.library.apply_automatic_characters(vec!["auto-a".into()]).unwrap(),1);
-    assert_eq!(f.library.apply_automatic_characters(vec!["auto-a".into()]).unwrap(),0);
-    let mut reject=prediction_decision(&a,"auto-a"); reject.decision=characters::DecisionKind::Rejected;
-    f.library.record_character_decisions(reject).unwrap();
-    assert_eq!(f.library.apply_automatic_characters(vec!["auto-a".into()]).unwrap(),0);
-    assert!(f.library.character_relations_for_asset("asset-5").unwrap().is_empty());
-}
-
-#[test]
-fn automatic_series_approval_keeps_conflicting_candidates_for_review() {
-    let f=Fixture::new();
-    let a=f.ready("A");
-    seed_prediction(&f,&a,"a");
-    {
-        let mut state=f.library.character_scan.lock().unwrap();
-        let e=state.previous.get_mut(&a.id).unwrap().1.get_mut("asset-5").unwrap().evidence.as_mut().unwrap();
-        e["bestQueryCrop"]=json!(0); e["evidence"]=json!([{ "matchedReferences":[0,1,2] }]);
-    }
-    let b=f.ready("B");
-    seed_prediction(&f,&b,"b");
-    assert_eq!(f.library.apply_automatic_characters(vec!["a".into(),"b".into()]).unwrap(),0);
-    f.library.character_scan.lock().unwrap().previous.get_mut(&b.id).unwrap().1.get_mut("asset-5").unwrap().state="unmatched".into();
-    assert_eq!(f.library.apply_automatic_characters(vec!["a".into(),"b".into()]).unwrap(),1);
-    assert_eq!(f.library.get_asset_classifications("asset-5").unwrap()[0].id,f.series);
-    assert_eq!(f.library.list_character_decisions(&a.id,None,10).unwrap()[0].origin,"automatic");
-}
-
-#[test]
 fn confirmed_images_remain_available_for_other_people_in_the_picture() {
     let f = Fixture::new();
     let a = f.ready("Towa");
@@ -602,57 +562,6 @@ fn person_prediction(f: &Fixture, target: &Target, scan: &str, person: usize) {
 }
 
 #[test]
-fn separate_people_are_shared_but_same_person_conflicts_stay_for_review() {
-    let f = Fixture::new();
-    let a = f.ready("Towa");
-    let b = f.ready("Noel");
-    person_prediction(&f,&a,"a",0);
-    person_prediction(&f,&b,"b",0);
-    assert_eq!(f.library.apply_automatic_characters(vec!["a".into(),"b".into()]).unwrap(),0);
-    person_prediction(&f,&b,"b",1);
-    assert_eq!(f.library.apply_automatic_characters(vec!["a".into(),"b".into()]).unwrap(),2);
-    assert_eq!(f.library.character_relations_for_asset("asset-5").unwrap().len(),2);
-    assert_eq!(f.library.apply_automatic_characters(vec!["a".into(),"b".into()]).unwrap(),0);
-    assert!(f.library.get_character_target(&a.id).unwrap().learned_references.is_empty());
-}
-
-#[test]
-fn rejection_is_per_character_and_unknown_companion_does_not_block() {
-    let f = Fixture::new();
-    let a = f.ready("Towa");
-    let b = f.ready("Noel");
-    person_prediction(&f,&a,"a",0);
-    person_prediction(&f,&b,"b",0);
-    let mut reject = prediction_decision(&a,"a");
-    reject.decision = characters::DecisionKind::Rejected;
-    f.library.record_character_decisions(reject).unwrap();
-    assert_eq!(f.library.apply_automatic_characters(vec!["a".into(),"b".into()]).unwrap(),1);
-    assert_eq!(f.library.character_relations_for_asset("asset-5").unwrap(),vec![b.id]);
-}
-
-#[test]
-fn automatic_root_input_moves_to_series_without_expanding_manual_scan() {
-    let f = Fixture::new();
-    let a = f.ready("Towa");
-    person_prediction(&f,&a,"a",0);
-    let root: String = f.library.connection().unwrap().query_row(
-        "SELECT parent_id FROM classification_entries WHERE id=?1", [&f.series], |r| r.get(0)).unwrap();
-    f.library.set_asset_classification(SetAssetClassification {
-        asset_ids: vec!["asset-5".into()], classification_id: Some(root),
-    }).unwrap();
-    assert!(!f.library.character_scan_inputs(&a).unwrap().iter().any(|i| i.id == "asset-5"));
-    assert!(f.library.character_scan_inputs_mode(&a,true).unwrap().iter().any(|i| i.id == "asset-5"));
-    {
-        let mut state = f.library.character_scan.lock().unwrap();
-        let (status,rows) = state.previous.get_mut(&a.id).unwrap();
-        status.automatic = true;
-        rows.get_mut("asset-5").unwrap().evidence.as_mut().unwrap()["automaticScope"] = json!(true);
-    }
-    assert_eq!(f.library.apply_automatic_characters(vec!["a".into()]).unwrap(),1);
-    assert_eq!(f.library.get_asset_classifications("asset-5").unwrap()[0].id,f.series);
-}
-
-#[test]
 #[ignore = "requires LAKOMICS_CHARACTER_TEST_PYTHON; TEMP fake protocol worker"]
 fn completed_comparisons_survive_restart_and_only_new_images_are_compared() {
     let f = Fixture::new();
@@ -679,43 +588,9 @@ fn completed_comparisons_survive_restart_and_only_new_images_are_compared() {
 }
 
 #[test]
-fn streaming_approval_waits_for_each_images_candidates_not_the_whole_scan() {
-    let f = Fixture::new();
-    let a = f.ready("Towa");
-    let b = f.ready("Noel");
-    person_prediction(&f,&a,"a",0);
-    assert_eq!(f.library.apply_automatic_characters(vec!["a".into()]).unwrap(),0);
-    person_prediction(&f,&b,"b",1);
-    {
-        let mut state = f.library.character_scan.lock().unwrap();
-        let (status,_) = state.previous.get_mut(&b.id).unwrap();
-        status.state = "running".into();
-        status.total = 20;
-        status.completed = 1;
-    }
-    assert_eq!(f.library.apply_automatic_characters(vec!["a".into(),"b".into()]).unwrap(),2);
-}
-
-#[test]
 fn overlapping_detector_boxes_are_not_two_distinct_people() {
     assert!(same_person(&[0.,0.,100.,100.], &[10.,10.,90.,90.]));
     assert!(!same_person(&[0.,0.,40.,100.], &[60.,0.,100.,100.]));
-}
-
-#[test]
-fn learned_competitor_change_blocks_old_automatic_evidence() {
-    let f=Fixture::new();let a=f.ready("A");let b=f.ready("B");
-    person_prediction(&f,&a,"a",0);person_prediction(&f,&b,"b",0);
-    {
-        let mut state=f.library.character_scan.lock().unwrap();
-        let evidence=state.previous.get_mut(&b.id).unwrap().1.get_mut("asset-5").unwrap().evidence.as_mut().unwrap();
-        evidence["queryBoxes"]=json!([[0,0,40,100]]);
-    }
-    f.library.record_character_decisions(prediction_decision(&b,"b")).unwrap();
-    assert_eq!(f.library.get_character_target(&b.id).unwrap().learned_references.len(),1);
-    f.library.character_scan.lock().unwrap().previous.get_mut(&b.id).unwrap().1.get_mut("asset-5").unwrap().state="unmatched".into();
-    assert_eq!(f.library.apply_automatic_characters(vec!["a".into(),"b".into()]).unwrap(),0);
-    assert_eq!(f.library.character_relations_for_asset("asset-5").unwrap(),vec![b.id]);
 }
 
 #[test]

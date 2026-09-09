@@ -10,7 +10,7 @@ export type PointerDragState =
 
 export type ClassificationDropPosition = "inside" | "before" | "after";
 export type ClassificationDropTarget = {
-  kind: "classification" | "album";
+  kind: "classification" | "album" | "character";
   entryId: string;
   position: ClassificationDropPosition;
   valid: boolean;

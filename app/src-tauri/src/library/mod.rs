@@ -25,6 +25,8 @@ mod catalog_revision;
 pub(crate) mod catalog_update;
 mod classification;
 pub mod characters;
+pub mod character_conversion;
+pub mod character_groups;
 pub mod character_hub;
 pub mod character_scan;
 pub mod character_autotag;

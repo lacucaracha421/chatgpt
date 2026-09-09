@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { CharacterTarget, ScanStatus } from "./api";
-import type { CharacterSeries } from "./hubApi";
+import type { ScanStatus } from "./api";
 import { commandErrorMessage } from "../library/errorMessage";
 
 export type IncrementalStatus = { running: boolean; paused: boolean; pending: number; completed: number; confirmed: number; activeAssetId: string | null; total: number; compared: number; error: string | null };
@@ -12,7 +11,7 @@ const defaultApi: AutomaticCharacterApi = {
 };
 
 /** Status/control only. Native mutations and the native owner discover all work. */
-export function useCharacterAutomation(_targets: CharacterTarget[], _series: CharacterSeries[], _refreshVersion: number, onChanged: () => void, api = defaultApi) {
+export function useCharacterAutomation(onChanged: () => void, api = defaultApi) {
   const [progress, setProgress] = useState<ScanStatus | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);

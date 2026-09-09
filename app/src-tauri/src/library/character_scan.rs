@@ -28,6 +28,7 @@ use comparisons::Comparisons;
 #[serde(rename_all = "camelCase")]
 pub struct ScanStatus {
     pub automatic: bool,
+    pub automatic_queued: usize,
     pub id: String,
     pub target_id: String,
     pub target_fingerprint: String,
@@ -102,6 +103,7 @@ impl Library {
         }
         let status = ScanStatus {
             automatic,
+            automatic_queued: 0,
             id: uuid::Uuid::new_v4().to_string(),
             target_id: target.id.clone(),
             target_fingerprint: target.fingerprint.clone(),
@@ -129,7 +131,14 @@ impl Library {
         let library = self.clone();
         std::thread::spawn(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                library.run_character_scan(&target, config, cancel.clone(), automatic)
+                library.run_character_scan(&target, config, cancel.clone(), automatic)?;
+                if automatic || cancel.load(Ordering::Acquire) { return Ok(0); }
+                let ids = {
+                    let state = library.character_scan.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    state.results.values().filter(|row| matches!(row.state.as_str(), "recommended" | "unmatched"))
+                        .map(|row| row.asset_id.clone()).collect::<Vec<_>>()
+                };
+                library.queue_analyzed_character_assets(&target, &ids, &cancel)
             }));
             let mut state = library
                 .character_scan
@@ -140,7 +149,7 @@ impl Library {
                 status.state = "cancelled".into();
             } else {
                 match result {
-                    Ok(Ok(())) => status.state = "completed".into(),
+                    Ok(Ok(queued)) => { status.automatic_queued = queued; status.state = "completed".into(); },
                     Ok(Err(Error::Stale)) => {
                         status.state = "stale".into();
                         status.error =
@@ -434,10 +443,14 @@ impl Library {
                 return Err(Error::Worker("취소됨".into()));
             }
             self.ensure_current_target(target)?;
+            let verification_start = std::time::Instant::now();
             let current = self.current_input_mode(target, &input.id, automatic);
             let event = match current {
                 Ok(current) if current.hash == input.hash => match self.wire_input(&current) {
                     Ok(mut request) => {
+                        if std::env::var_os("LAKOMICS_CHARACTER_PROFILE").as_deref() == Some(std::ffi::OsStr::new("1")) {
+                            eprintln!("character_profile native_input_verification_ms={:.3}", verification_start.elapsed().as_secs_f64()*1000.0);
+                        }
                         request["type"] = json!("query");
                         let event=self.character_worker_pool.with(&config,&cache,cancel.clone(),!automatic,|worker,_| {
                             worker.send(&json!({"type":"prepare","references":refs}))?;
@@ -618,6 +631,7 @@ impl Library {
                     let learned_hash = reference["assetHash"].as_str().ok_or(Error::Stale)?;
                     let valid: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM character_relations r JOIN character_decisions d ON d.sequence=r.sequence
                         WHERE r.target_id=?1 AND r.asset_id=?2 AND d.origin='manual' AND d.asset_hash=?3
+                        AND NOT EXISTS(SELECT 1 FROM character_reference_exclusions x WHERE x.target_id=r.target_id AND x.asset_id=r.asset_id)
                         AND NOT EXISTS(SELECT 1 FROM character_relations other WHERE other.asset_id=r.asset_id AND other.target_id<>r.target_id))", params![target.id,learned_id,learned_hash], |r| r.get(0))?;
                     if !valid { return Err(Error::Stale); }
                     let (hash,path) = characters::scoped_image(connection,series,learned_id)?;
@@ -643,131 +657,6 @@ fn worker_error(event: &Value) -> Error {
 #[path = "character_scan_tests.rs"]
 mod tests;
 
-impl Library {
-    /// Auto approval is deliberately narrower than recommendation. It never replaces a human decision.
-    pub fn apply_automatic_characters(&self, scan_ids: Vec<String>) -> Result<u64> {
-        use characters::{DecisionKind, DecisionRequest};
-        let allowed = self.character_series()?.into_iter().filter(|s| s.auto_classify).map(|s| s.classification_id).collect::<std::collections::BTreeSet<_>>();
-        let all_targets = self.list_character_targets()?;
-        let (requested_series, automatic_batch) = {
-            let state = self.character_scan.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            let automatic = scan_ids.iter().filter_map(|id| state.find(id)).any(|(s,_)| s.automatic);
-            (scan_ids.iter().filter_map(|id| state.find(id)).filter_map(|(status,_)| all_targets.iter().find(|t| t.id == status.target_id).and_then(|t| t.series_classification_id.clone())).collect::<std::collections::BTreeSet<_>>(), automatic)
-        };
-        let targets = all_targets.into_iter().filter(|t| t.ready && t.series_classification_id.as_ref().is_some_and(|s| allowed.contains(s) && (automatic_batch || requested_series.contains(s)))).collect::<Vec<_>>();
-        if targets.is_empty() { return Ok(0); }
-        // Copy before acquiring SQLite: decision validation uses DB -> scan lock order.
-        let snapshots = {
-            let state = self.character_scan.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            let mut snapshots = Vec::new();
-            for target in &targets {
-                let Some((status, rows)) = scan_ids.iter().filter_map(|id| state.find(id)).find(|(s,_)| s.target_id == target.id) else { continue; };
-                if !matches!(status.state.as_str(), "running" | "completed") || status.target_fingerprint != target.fingerprint { continue; }
-                snapshots.push((target.clone(),status.clone(),rows.clone()));
-            }
-            snapshots
-        };
-        let mut by_asset: BTreeMap<String,Vec<usize>> = BTreeMap::new();
-        for (index,(_,_,rows)) in snapshots.iter().enumerate() {
-            for (id,row) in rows {
-                if row.state == "recommended" { by_asset.entry(id.clone()).or_default().push(index); }
-            }
-        }
-        let mut changed = 0;
-        for (asset_id, candidates) in by_asset {
-            let mut connection = self.connection()?;
-            // Every applicable character must have a final result for this image.
-            let transaction = connection.transaction()?;
-            // Refresh the applicable roster within each write transaction: another
-            // target may become ready while the previous asset releases the lock.
-            let ids = transaction.prepare("SELECT t.id FROM character_targets t JOIN character_series s ON s.classification_id=t.series_classification_id WHERE s.auto_classify=1")?
-                .query_map([], |row| row.get::<_, String>(0))?
-                .collect::<std::result::Result<Vec<_>, _>>()?;
-            let current_targets = ids.iter().map(|id| self.read_character_target(&transaction, id))
-                .collect::<Result<Vec<_>>>()?.into_iter()
-                .filter(|target| target.ready && target.series_classification_id.as_ref().is_some_and(|series| automatic_batch || requested_series.contains(series)))
-                .collect::<Vec<_>>();
-            let blocked = transaction.prepare("SELECT DISTINCT target_id FROM character_decisions WHERE source_asset_id=?1 AND decision IN ('rejected','cleared')")?
-                .query_map([&asset_id], |r| r.get::<_,String>(0))?
-                .collect::<std::result::Result<std::collections::BTreeSet<_>,_>>()?;
-            let incomplete = current_targets.iter().any(|target| {
-                if blocked.contains(&target.id) { return false; }
-                let row = snapshots.iter().find(|(t,_,_)| t.id == target.id).and_then(|(_,_,rows)| rows.get(&asset_id));
-                !row.is_some_and(|r| matches!(r.state.as_str(), "recommended" | "unmatched"))
-                    && target.series_classification_id.as_ref().is_some_and(|series|
-                        super::character_hub::candidate_image_mode(&transaction,series,&asset_id,automatic_batch).is_ok())
-            });
-            if incomplete { continue; }
-            // Negative competitors are evidence too. Validate their current context
-            // before an old unmatched result can authorize another character.
-            let mut stale = false;
-            for (snapshot_target, status, rows) in &snapshots {
-                if blocked.contains(&snapshot_target.id) { continue; }
-                let Some(row) = rows.get(&asset_id) else { continue; };
-                if !snapshot_target.series_classification_id.as_ref().is_some_and(|series|
-                    super::character_hub::candidate_image_mode(&transaction, series, &asset_id, automatic_batch).is_ok()) { continue; }
-                let current = self.read_character_target(&transaction, &snapshot_target.id)?;
-                if row.evidence.as_ref().and_then(|e| e.get("learnedReferences"))
-                    .map_or(!current.learned_references.is_empty(), |refs| *refs != serde_json::to_value(&current.learned_references).unwrap_or(Value::Null)) {
-                    stale = true; break;
-                }
-                if self.checked_character_evidence(&transaction, &current, &DecisionRequest {
-                    target_id: current.id.clone(), expected_fingerprint: current.fingerprint.clone(),
-                    asset_ids: vec![asset_id.clone()], decision: DecisionKind::Accepted,
-                    baseline_fingerprint: status.runtime_fingerprint.clone(), scan_id: Some(status.id.clone()),
-                }).is_err() { stale = true; break; }
-            }
-            if stale { continue; }
-            let permitted = candidates.into_iter().filter(|index| !blocked.contains(&snapshots[*index].0.id) && current_targets.iter().any(|target| target.id == snapshots[*index].0.id)).collect::<Vec<_>>();
-            let mut accepted = Vec::new();
-            for &index in &permitted {
-                let (target,status,rows) = &snapshots[index];
-                let row = &rows[&asset_id];
-                if !automatic_evidence(row.evidence.as_ref()) { continue; }
-                let strong = evidence_regions(row.evidence.as_ref(), 3);
-                let unambiguous = strong.as_ref().is_some_and(|regions| regions.iter().any(|region| {
-                    permitted.iter().filter(|other| **other != index).all(|other| {
-                        evidence_regions(snapshots[*other].2[&asset_id].evidence.as_ref(), 2)
-                            .is_some_and(|others| others.iter().all(|other| !same_person(region, other)))
-                    })
-                })) || permitted.len() == 1;
-                if !unambiguous { continue; }
-                let judged: bool = transaction.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM character_decisions WHERE source_asset_id=?1 AND target_id=?2)",
-                    params![asset_id,target.id], |r| r.get(0))?;
-                if judged { continue; }
-                accepted.push((target,status));
-            }
-            let mut applied_count = 0;
-            for (target,status) in &accepted {
-                let applied = self.write_character_decisions(&transaction, DecisionRequest {
-                    target_id:target.id.clone(),expected_fingerprint:target.fingerprint.clone(),asset_ids:vec![asset_id.clone()],
-                    decision:DecisionKind::Accepted,baseline_fingerprint:status.runtime_fingerprint.clone(),scan_id:Some(status.id.clone()),
-                })?;
-                if applied > 0 {
-                    transaction.execute("UPDATE character_decisions SET origin='automatic' WHERE sequence=(SELECT MAX(sequence) FROM character_decisions WHERE target_id=?1 AND source_asset_id=?2)", params![target.id,asset_id])?;
-                    applied_count += applied;
-                }
-            }
-            // Keep the one ordinary folder contract; character folders are shared references.
-            let series = transaction.prepare("SELECT DISTINCT t.series_classification_id FROM character_relations r JOIN character_targets t ON t.id=r.target_id WHERE r.asset_id=?1 AND t.series_classification_id IS NOT NULL")?
-                .query_map([&asset_id], |r| r.get::<_,String>(0))?
-                .collect::<std::result::Result<std::collections::BTreeSet<_>,_>>()?;
-            if series.len() == 1 && accepted.iter().any(|(_,status)| status.automatic) {
-                let series = series.first().unwrap();
-                let at_root: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM asset_classifications ac JOIN classification_entries c ON c.id=ac.classification_id WHERE ac.asset_id=?1 AND c.parent_id IS NULL AND c.id<>?2)", params![asset_id,series], |r| r.get(0))?;
-                if at_root {
-                    Self::set_asset_classification_cause_in(&transaction, &super::models::SetAssetClassification {
-                        asset_ids: vec![asset_id.clone()], classification_id: Some(series.clone()),
-                    }, super::character_autotag::Cause::AutomaticFinalization)?;
-                }
-            }
-            transaction.commit()?;
-            changed += applied_count;
-        }
-        Ok(changed)
-    }
-}
 pub(super) fn automatic_evidence(evidence: Option<&Value>) -> bool {
     let Some(e) = evidence else { return false; };
     if e["passed"] != true || e["wholeFallback"] == true { return false; }

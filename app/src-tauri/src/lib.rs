@@ -30,6 +30,48 @@ pub fn run() {
         .manage(catalog_transport::CatalogTransport::default())
         .manage(library::catalog_update::CatalogUpdateState::default())
         .setup(move |app| {
+            #[cfg(target_os = "linux")]
+            if let Some(window) = app.get_webview_window("main") {
+                window.with_webview(|webview| {
+                    use webkit2gtk::{InputMethodContextExt, WebViewExt};
+                    // Wry disables inline preedit for candidate-window positioning.
+                    // Keep Korean composition visible inside the focused input instead.
+                    if let Some(context) = webview.inner().input_method_context() {
+                        context.set_enable_preedit(true);
+                        use gtk::prelude::WidgetExt;
+                        use std::{cell::Cell, rc::Rc};
+
+                        let composing = Rc::new(Cell::new(false));
+                        let active = composing.clone();
+                        context.connect_preedit_started(move |_| active.set(true));
+                        let active = composing.clone();
+                        context.connect_preedit_finished(move |_| active.set(false));
+                        let active = composing.clone();
+                        context.connect_committed(move |_, _| active.set(false));
+
+                        // WebKit cancels its composition before resetting IBus.
+                        // With synchronous IBus that reset commits the same text
+                        // again. Drain it before WebKit handles focus-moving input.
+                        let active = composing.clone();
+                        let input = context.clone();
+                        webview.inner().connect_button_press_event(move |_, _| {
+                            if active.replace(false) { input.reset(); }
+                            gtk::glib::Propagation::Proceed
+                        });
+                        let active = composing.clone();
+                        let input = context.clone();
+                        webview.inner().connect_key_press_event(move |_, event| {
+                            if matches!(event.keyval(), gtk::gdk::keys::constants::Tab | gtk::gdk::keys::constants::ISO_Left_Tab)
+                                && active.replace(false) { input.reset(); }
+                            gtk::glib::Propagation::Proceed
+                        });
+                        webview.inner().connect_focus_out_event(move |_, _| {
+                            if composing.replace(false) { context.reset(); }
+                            gtk::glib::Propagation::Proceed
+                        });
+                    }
+                })?;
+            }
             extension_api::start(
                 app.handle().clone(),
                 app_state.clone(),
@@ -184,15 +226,23 @@ pub fn run() {
             commands::characters::browse_character_assets,
             commands::characters::save_character_target,
             commands::characters::replace_character_references,
+            commands::characters::exclude_character_reference,
+            commands::characters::character_groups,
+            commands::characters::save_character_group,
+            commands::characters::character_conversion_preview,
+            commands::characters::convert_character_to_folder,
             commands::characters::record_character_decisions,
+            commands::characters::move_assets_to_character,
             commands::characters::record_character_decision_batch,
             commands::characters::register_character_folder,
             commands::characters::character_folder_image_count,
+            commands::characters::character_folder_asset_count,
             commands::characters::list_character_decisions,
             commands::characters::character_relations_for_asset,
             commands::characters::start_character_scan,
             commands::characters::character_scan_status,
             commands::characters::character_autotag_job,
+            commands::characters::retry_failed_character_assets,
             commands::characters::character_incremental_status,
             commands::characters::pause_character_incremental,
             commands::characters::cancel_character_scan,

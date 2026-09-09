@@ -52,28 +52,43 @@ describe("Character review", () => {
     const api = createCharacterFixture(); vi.spyOn(api, "runtime").mockResolvedValue(false);
     const setup = vi.spyOn(api, "setup"); mount(api); const user = userEvent.setup();
     await screen.findByRole("option", { name: "이미지 5.webp" });
-    expect(screen.getByRole("button", { name: "분석" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "분류 시작" })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "분석 환경 설정" }));
     await waitFor(() => expect(setup).toHaveBeenCalledTimes(1));
   });
 
 });
 
-it("manual review only scans the selected target even with automatic classification enabled", async () => {
+it("manual review reports native automatic continuation without applying unchecked predictions", async () => {
   const api=createCharacterFixture();
-  vi.spyOn(api,"automaticSeries").mockResolvedValue(["series"]);
   const states: Awaited<ReturnType<typeof api.runs>> = [];
   const start=vi.spyOn(api,"start").mockImplementation(async(targetId,targetFingerprint)=>{
-    const run={id:`new-${targetId}`,targetId,targetFingerprint,runtimeFingerprint:"runtime",state:"completed",total:1,completed:1,errors:0,cacheHits:1,extractions:0,error:null};
+    const run={automaticQueued:1,id:`new-${targetId}`,targetId,targetFingerprint,runtimeFingerprint:"runtime",state:"completed",total:1,completed:1,errors:0,cacheHits:1,extractions:0,error:null};
     states.push(run);return run;
   });
   vi.spyOn(api,"runs").mockImplementation(async()=>states);
-  const apply=vi.spyOn(api,"applyAutomatic").mockResolvedValue(2);
   mount(api);const user=userEvent.setup();
   await screen.findByRole("option", { name: "이미지 5.webp" });
-  await user.click(screen.getByRole("button",{name:"분석"}));
+  await user.click(screen.getByRole("button",{name:"분류 시작"}));
   await waitFor(()=>expect(start).toHaveBeenCalledTimes(1));
-  await waitFor(()=>expect(screen.getByRole("button",{name:"분석"})).toBeEnabled(),{timeout:4000});
+  await waitFor(()=>expect(screen.getByRole("button",{name:"분류 시작"})).toBeEnabled(),{timeout:4000});
   expect(start).toHaveBeenCalledWith("hina",expect.any(String));
-  expect(apply).not.toHaveBeenCalled();
+  expect(await screen.findByText(/1장의 자동 분류를 이어갑니다/, {}, {timeout:3000})).toBeInTheDocument();
+});
+
+it("closing review does not cancel its running analysis", async () => {
+  const api=createCharacterFixture();
+  const cancel=vi.spyOn(api,"cancel");
+  vi.spyOn(api,"runs").mockResolvedValue([]);
+  vi.spyOn(api,"start").mockImplementation(async(targetId,targetFingerprint)=>({
+    id:"ongoing",targetId,targetFingerprint,runtimeFingerprint:"runtime",state:"running",total:100,completed:0,errors:0,cacheHits:0,extractions:0,error:null,
+  }));
+  mount(api); const user=userEvent.setup();
+  const start=await screen.findByRole("button",{name:"분류 시작"});
+  await waitFor(()=>expect(start).toBeEnabled());
+  await user.click(start);
+  await screen.findByText("분류를 시작했습니다. 이 창을 닫아도 계속 진행합니다.");
+  await user.click(screen.getByRole("button",{name:"검토 닫기"}));
+  cleanup();
+  expect(cancel).not.toHaveBeenCalled();
 });

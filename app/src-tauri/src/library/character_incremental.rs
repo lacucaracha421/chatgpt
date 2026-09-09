@@ -365,10 +365,14 @@ impl Library {
     ) -> Result<()> {
         let decisions=tx.prepare("SELECT target_id,decision,origin FROM character_decisions WHERE source_asset_id=?1 ORDER BY sequence DESC")?
             .query_map([&job.asset_id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
-        let blocked = decisions
+        let mut latest = BTreeMap::new();
+        for (id, decision, _) in &decisions {
+            latest.entry(id).or_insert(decision);
+        }
+        let blocked = latest
             .iter()
-            .filter(|(_, d, _)| matches!(d.as_str(), "rejected" | "cleared"))
-            .map(|(id, _, _)| id.as_str())
+            .filter(|(_, d)| matches!(d.as_str(), "rejected" | "cleared"))
+            .map(|(id, _)| id.as_str())
             .collect::<BTreeSet<_>>();
         let candidates = predictions
             .iter()
@@ -382,10 +386,6 @@ impl Library {
             .and_then(|e| e["queryBoxes"].as_array())
             .cloned()
             .unwrap_or_default();
-        let mut latest = BTreeMap::new();
-        for (id, decision, _) in &decisions {
-            latest.entry(id).or_insert(decision);
-        }
         let known = latest
             .values()
             .any(|decision| decision.as_str() == "accepted");

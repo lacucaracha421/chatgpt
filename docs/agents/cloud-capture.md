@@ -31,9 +31,10 @@ Capture creation accepts:
 - `media_url`
 - `classification_id`
 - `published_at`
-- `media_type` (`image` or `video`)
+- `media_type` (`image`, `video`, or `animated_gif`)
+- `source` (`x`, `arca`, `dcinside`, or generic `web`)
 
-The server currently exposes pending-list, per-capture download, and acknowledge/imported routes. Image fetches are limited to X image hosts and video fetches to X video hosts; remote fetches use HTTPS allowlisting, size limits, streamed temporary files, and R2 cleanup on failed upload.
+The server exposes pending-list, per-capture download, acknowledge/imported, and extension confirmation routes. Known sources retain host validation; generic HTTPS capture additionally rejects private/special-use resolution and verifies the connected peer against the validated address set. Remote fetches keep bounded sizes/timeouts, no redirect following, streamed temporary files, and R2 cleanup on failed upload. Animated GIFs remain `image/gif` bytes and are identified explicitly through the inbound PC path rather than flattened or normalized to video.
 
 Current server limits are 50 MiB for images and 512 MiB by default for videos (video limit is environment-configurable).
 

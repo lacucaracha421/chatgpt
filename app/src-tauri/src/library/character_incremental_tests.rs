@@ -95,8 +95,12 @@ fn native_auto_and_manual_scan_share_one_worker_and_keep_review_durable() {
             .unwrap()
             .unwrap()
             .state,
-        "completed"
+        "pending"
     );
+    let job = f.library.claim_character_autotag().unwrap().unwrap();
+    f.library.compare_incremental_asset(&job, &config, Arc::new(AtomicBool::new(false))).unwrap();
+    assert_eq!(f.library.character_relations_for_asset("asset-5").unwrap(), vec![target.id]);
+    assert_eq!(f.library.character_autotag_job("asset-5").unwrap().unwrap().state, "completed");
 }
 #[test]
 #[ignore = "requires explicit test Python; fake protocol worker in TEMP"]
@@ -278,4 +282,44 @@ fn native_context_events_reconsider_only_recorded_unresolved_assets() {
         .unwrap(),
         1
     );
+}
+
+#[test]
+fn arbitration_uses_latest_judgment_and_keeps_ambiguous_people_for_review() {
+    use super::super::characters::{DecisionKind, DecisionRequest};
+    for (a_person, b_person, strength, rejected, reaccepted, expected) in [
+        (0,0,3,false,false,0), (0,1,3,false,false,2),
+        (0,1,2,false,false,0), (0,0,3,true,false,1),
+        (0,0,3,true,true,1),
+    ] {
+        let f = Fixture::new();
+        let a = f.ready("A"); let b = f.ready("B");
+        if rejected {
+            for decision in [Some(DecisionKind::Rejected), reaccepted.then_some(DecisionKind::Accepted)].into_iter().flatten() {
+                f.library.record_character_decisions(DecisionRequest {
+                    target_id:a.id.clone(),expected_fingerprint:a.fingerprint.clone(),asset_ids:vec!["asset-5".into()],
+                    decision,baseline_fingerprint:None,scan_id:None,
+                }).unwrap();
+            }
+        }
+        character_autotag::enqueue(&f.library.connection().unwrap(), "asset-5", character_autotag::Cause::Ingestion).unwrap();
+        let job=f.library.claim_character_autotag().unwrap().unwrap();
+        let mut c=f.library.connection().unwrap();
+        let tx=c.transaction().unwrap();
+        let context=f.library.character_autotag_context(&tx,&job,&"a".repeat(64)).unwrap();
+        let predictions=[(&a,a_person),(&b,b_person)].into_iter().map(|(target,person)| {
+            let mut evidence=vec![json!({"matchedReferences":[]}),json!({"matchedReferences":[]})];
+            evidence[person]=json!({"matchedReferences":(0..strength).collect::<Vec<_>>()});
+            Prediction {target_id:target.id.clone(),result:ScanResult {
+                asset_id:job.asset_id.clone(),content_hash:job.content_hash.clone(),state:"recommended".into(),error:None,
+                evidence:Some(json!({"passed":true,"wholeFallback":false,"bestQueryCrop":person,
+                    "queryBoxes":[[0,0,40,100],[60,0,100,100]],"evidence":evidence})),
+            }}
+        }).collect::<Vec<_>>();
+        f.library.finalize_incremental(&tx,&job,&context,&predictions,false).unwrap();
+        tx.commit().unwrap(); drop(c);
+        let relations=f.library.character_relations_for_asset("asset-5").unwrap();
+        assert_eq!(relations.len(),expected);
+        if reaccepted {assert_eq!(relations,vec![a.id]);}
+    }
 }

@@ -151,3 +151,24 @@ The UI displays the actual reference count. Worker preparation accepts 5–25 im
 Manual scan buttons now apply the same automatic policy when the selected series has
 automatic classification enabled. They compare all ready characters in that series
 before applying, so a single selected-character scan cannot bypass ambiguity checks.
+
+### First-analysis timing (opt-in)
+
+Set `LAKOMICS_CHARACTER_PROFILE=1` before launching the normal Tauri development
+command to write cumulative JSON `characterProfile` records to the development
+terminal. The default remains quiet. Windows PowerShell uses
+`$env:LAKOMICS_CHARACTER_PROFILE='1'`; Linux uses
+`LAKOMICS_CHARACTER_PROFILE=1 npm run tauri -- dev` from `app/`.
+Do not start a production-library scan without the user's approval.
+
+Counters separate file hashing, image decode, detector inference, feature inference,
+metric inference, total comparison and total cache extraction. Total counters contain
+substage time; do not sum totals and their substages. Compare per-operation deltas,
+cache hits and extraction counts, not cumulative time alone. Native manual scans also
+report `native_input_verification_ms` for source preparation. No file paths, asset
+names or image content are included in timing records.
+
+Instrumentation leaves the frozen inference implementation, CPU settings, feature
+cache identity and source-integrity checks intact. Cold/warm synthetic measurements
+validate the instrumentation and cache reuse; they do not establish real-library
+throughput or justify a CPU/GPU configuration change.
