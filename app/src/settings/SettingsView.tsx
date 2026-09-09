@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
 import { catalogStreamStatus } from "../library/catalogStreams";
-import type { CatalogLanguage, CatalogStatus, CatalogStreamStatus, CloudCaptureSettings, CloudCaptureSyncResult, CloudLibraryRestoreReport, ExtensionConnection, LegacyPackageMigrationPlan, LegacyPackageMigrationReport, MetadataBackup } from "../library/types";
+import type { CatalogLanguage, CatalogStatus, CatalogStreamStatus, CloudCaptureSettings, CloudCaptureSyncResult, CloudLibraryRestoreReport, ExtensionConnection, ExtensionPairingLink, LegacyPackageMigrationPlan, LegacyPackageMigrationReport, MetadataBackup } from "../library/types";
 import { formatBytes } from "../assets/assetMetadata";
 import { notifyCloudBackfillSupervisor } from "../app/useCloudBackfillSupervisor";
 import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
@@ -17,6 +17,7 @@ import { Toast } from "../shared/ui/Toast";
 import { Toggle } from "../shared/ui/Toggle";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { CloudBackfillSettings } from "./CloudBackfillSettings";
+import { ExtensionPairingQr } from "./ExtensionPairingQr";
 import { CatalogVisibilitySettings } from "./CatalogVisibilitySettings";
 import { MobileCatalogPublishSettings } from "./MobileCatalogPublishSettings";
 import { APP_ZOOM_LEVELS } from "../preferences/uiPreferences";
@@ -116,6 +117,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [cloudBusy, setCloudBusy] = useState(false);
   const [cloudError, setCloudError] = useState<string | null>(null);
   const [cloudMessage, setCloudMessage] = useState<string | null>(null);
+  const [extensionPairingQr, setExtensionPairingQr] = useState<ExtensionPairingLink | null>(null);
   useAutoDismiss(catalogCacheMessage, setCatalogCacheMessage);
   useAutoDismiss(cloudMessage, setCloudMessage);
   const pending = restoring || submitting || kakaoBusy || igdbBusy || tmdbBusy || cloudBusy || catalogBusy || catalogRestoreBusy || catalogCacheBusy || legacyBusy || bookImportRunning || switchingLibrary;
@@ -350,6 +352,37 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
       setLegacyError(commandErrorMessage(error, "레거시 패키지 자산을 가져오지 못했습니다."));
     } finally {
       setLegacyBusy(false);
+    }
+  }
+
+  async function copyListExtensionPairing() {
+    if (!extensionPairingQr) return;
+    try {
+      await navigator.clipboard.writeText(extensionPairingQr.pairingUrl);
+      setCloudError(null);
+      setCloudMessage("연결 링크 복사됨");
+    } catch (copyError) {
+      setCloudError(commandErrorMessage(copyError, "연결 링크를 복사하지 못했습니다."));
+    }
+  }
+
+  async function createListExtensionPairing() {
+    if (cloudBusy || !gateway.createExtensionPairing) return;
+    setCloudBusy(true);
+    setCloudError(null);
+    try {
+      const pairing = await gateway.createExtensionPairing();
+      setExtensionPairingQr(pairing);
+      try {
+        await navigator.clipboard.writeText(pairing.pairingUrl);
+        setCloudMessage("연결 링크 복사됨");
+      } catch {
+        setCloudMessage("QR 생성됨");
+      }
+    } catch (pairingError) {
+      setCloudError(commandErrorMessage(pairingError, "확장 연결 링크를 만들지 못했습니다."));
+    } finally {
+      setCloudBusy(false);
     }
   }
 
@@ -918,9 +951,18 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             </dl>
             </details>
             <div className="settings-view__actions">
+              <Button size="sm" disabled={cloudBusy || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured || !gateway.createExtensionPairing} onClick={() => void createListExtensionPairing()}>확장 연결</Button>
               <Button size="sm" disabled={cloudBusy || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured} onClick={() => void testCloudConnection()}>연결 확인</Button>
               <Button size="sm" variant="primary" disabled={cloudBusy || !(cloudSettings.captureEnabled ?? cloudSettings.enabled) || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured} onClick={() => void syncCloudNow()}>지금 수신</Button>
             </div>
+            {extensionPairingQr && (
+              <ExtensionPairingQr
+                value={extensionPairingQr}
+                onCopy={copyListExtensionPairing}
+                onRefresh={createListExtensionPairing}
+                onClose={() => setExtensionPairingQr(null)}
+              />
+            )}
 
           </>
         )}

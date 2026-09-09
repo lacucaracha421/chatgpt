@@ -105,6 +105,13 @@ pub struct CloudCaptureConnectionStatus {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ExtensionPairingLink {
+    pub pairing_url: String,
+    pub expires_at: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CloudMetadataBackupResult {
     pub byte_size: u64,
 }
@@ -2160,6 +2167,18 @@ pub async fn delete_cloud_api_token() -> Result<CloudCredentialStatus, CommandEr
     })
     .await
     .map_err(|_| background_task_error())?
+}
+
+#[tauri::command]
+pub async fn create_extension_pairing(
+    state: State<'_, AppState>,
+) -> Result<ExtensionPairingLink, CommandError> {
+    let library = current_required(state)?;
+    let pairing = tauri::async_runtime::spawn_blocking(move || library.create_extension_pairing())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)?;
+    Ok(ExtensionPairingLink { pairing_url: pairing.pairing_url, expires_at: pairing.expires_at })
 }
 
 #[tauri::command]

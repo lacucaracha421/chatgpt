@@ -1,6 +1,6 @@
 use std::{fs, thread};
 
-use image::{DynamicImage, ImageBuffer, Rgb};
+use image::{codecs::gif::{GifEncoder, Repeat}, Delay, DynamicImage, Frame, ImageBuffer, Rgb, Rgba, RgbaImage};
 use rusqlite::OptionalExtension;
 use serde_json::{json, Value};
 use tiny_http::{Header, Response, Server};
@@ -20,6 +20,22 @@ fn png_bytes() -> Vec<u8> {
     let mut bytes = std::io::Cursor::new(Vec::new());
     image.write_to(&mut bytes, image::ImageFormat::Png).unwrap();
     bytes.into_inner()
+}
+
+fn animated_gif_bytes() -> Vec<u8> {
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = GifEncoder::new(&mut bytes);
+        encoder.set_repeat(Repeat::Infinite).unwrap();
+        let first = Frame::from_parts(
+            RgbaImage::from_pixel(4, 4, Rgba([220, 30, 30, 255])), 0, 0, Delay::from_numer_denom_ms(80, 1),
+        );
+        let second = Frame::from_parts(
+            RgbaImage::from_pixel(4, 4, Rgba([30, 30, 220, 255])), 0, 0, Delay::from_numer_denom_ms(80, 1),
+        );
+        encoder.encode_frames([first, second]).unwrap();
+    }
+    bytes
 }
 
 fn pending_capture_json(id: &str) -> Value {
@@ -209,6 +225,31 @@ fn pending_capture_downloads_ingests_and_acknowledges() {
         )
         .unwrap();
     assert_eq!(import_status, "acknowledged");
+    handle.join().unwrap();
+}
+
+#[test]
+fn animated_gif_capture_reaches_library_as_original_gif_bytes() {
+    let media = animated_gif_bytes();
+    let mut capture = pending_capture_json("capture-gif");
+    capture["kind"] = json!("animated_gif");
+    capture["content_type"] = json!("image/gif");
+    capture["object_key"] = json!("captures/capture-gif/original");
+    capture["classification_id"] = Value::Null;
+    let media_by_object_key = vec![("captures/capture-gif/original".to_string(), media.clone())];
+    let (base_url, handle) = serve_multi_capture_list(vec![capture], &[], &media_by_object_key);
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
+
+    let result = library.sync_next_cloud_capture_with(&CloudClient::new(&base_url).unwrap(), "test-token").unwrap();
+    assert_eq!(result.added, 1);
+    let page = library.list_assets(crate::library::models::AssetQuery { limit: 1, ..Default::default() }).unwrap();
+    assert!(matches!(page.items[0].media, crate::library::models::MediaSummary::Gif));
+    let relative_path: String = library.connection().unwrap().query_row(
+        "SELECT relative_path FROM assets WHERE id=?1", [&page.items[0].id], |row| row.get(0),
+    ).unwrap();
+    assert_eq!(fs::read(library.root().join(relative_path)).unwrap(), media);
     handle.join().unwrap();
 }
 

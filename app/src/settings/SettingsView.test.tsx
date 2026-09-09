@@ -783,6 +783,28 @@ it("confirms before clearing the remote manga cache", async () => {
 });
 
 
+it("opens a scan-first extension pairing QR from Cloud settings", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getCloudCaptureSettings).mockResolvedValue({ enabled: true, apiBaseUrl: "https://cloud.example.test", tokenConfigured: true });
+  vi.mocked(gateway.createExtensionPairing!).mockResolvedValue({
+    pairingUrl: "https://cloud.example.test/extension-pair#" + "A".repeat(43),
+    expiresAt: "2099-01-01T00:00:00Z",
+  });
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="cloud" />
+    </LibraryProvider>,
+  );
+
+  await user.click(await screen.findByRole("button", { name: "확장 연결" }));
+  expect(gateway.createExtensionPairing).toHaveBeenCalledOnce();
+  expect(await screen.findByRole("img", { name: "Lakomics 확장 연결 QR 코드" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "링크 복사" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "새로 발급" })).toBeEnabled();
+  expect(document.body.textContent).not.toContain("AAAAAAAAAAAAAAAAAAAA");
+});
+
 it("configures Cloud Capture and forwards manual sync results", async () => {
   const user = userEvent.setup();
   const gateway = createGateway();
@@ -837,7 +859,7 @@ function createGateway(): LibraryGateway {
     refreshTmdbMovie: vi.fn(),
     getTmdbConnection: vi.fn(),
     replaceTmdbMovieArtwork: vi.fn(),
-    openLibrary: vi.fn(), importVckCatalog: vi.fn(), getOnlineCatalogStatus: vi.fn().mockResolvedValue({ installed: false, workCount: 0, updateEnabled: true, updateIntervalSeconds: 3600, lastAttemptAt: null, lastSuccessAt: null, lastAdded: 0, lastError: null }), getCatalogVisibilityPolicy: vi.fn().mockResolvedValue({ hiddenCategories: [], blockedTags: [] }), setCatalogCategoryHidden: vi.fn(), setCatalogTagBlocked: vi.fn(), searchCatalogGroups: vi.fn(), getCatalogGroupEditions: vi.fn(), setCatalogGroupRepresentative: vi.fn(), listCatalogReview: vi.fn(), generateCatalogReview: vi.fn(), decideCatalogReview: vi.fn(), searchOnlineCatalog: vi.fn(), suggestOnlineCatalog: vi.fn(), updateOnlineCatalog: vi.fn(), resetJapaneseCatalogCheckpoint: vi.fn(), setOnlineCatalogUpdateSettings: vi.fn(), runDueOnlineCatalogUpdate: vi.fn(), getCloudCaptureSettings: vi.fn().mockResolvedValue({ enabled: false, apiBaseUrl: null, tokenConfigured: false }), setCloudCaptureSettings: vi.fn(), setCloudApiToken: vi.fn(), deleteCloudApiToken: vi.fn(), testCloudCaptureConnection: vi.fn().mockResolvedValue({ pendingCount: 0 }), runDueCloudCaptureSync: vi.fn().mockResolvedValue({ attempted: 0, acknowledged: 0, failed: 0, reviewPending: 0, added: 0, videoAdded: 0, classificationChanged: 0 }), cloudBackfillPreflight: vi.fn(), cloudBackfillSeed: vi.fn(), cloudBackfillRunCycle: vi.fn(), cloudBackfillProgress: vi.fn().mockResolvedValue({ controlState: "idle", totalAssets: 0, queued: 0, preparing: 0, uploading: 0, committing: 0, completed: 0, failed: 0, activeWorkers: 0, lastError: null }), cloudBackfillRetryFailed: vi.fn(), getOnlineCatalogWorkDetail: vi.fn(), setOnlineCatalogBookmark: vi.fn(), resolveOnlineCatalogWork: vi.fn(), getRemoteReadingProgress: vi.fn(), saveRemoteReadingProgress: vi.fn(), clearRemoteMangaCache: vi.fn(), getExtensionConnection: vi.fn().mockResolvedValue({ baseUrl: "http://127.0.0.1:32145", token: "test", status: "ready" }), listClassifications: vi.fn(),
+    openLibrary: vi.fn(), importVckCatalog: vi.fn(), getOnlineCatalogStatus: vi.fn().mockResolvedValue({ installed: false, workCount: 0, updateEnabled: true, updateIntervalSeconds: 3600, lastAttemptAt: null, lastSuccessAt: null, lastAdded: 0, lastError: null }), getCatalogVisibilityPolicy: vi.fn().mockResolvedValue({ hiddenCategories: [], blockedTags: [] }), setCatalogCategoryHidden: vi.fn(), setCatalogTagBlocked: vi.fn(), searchCatalogGroups: vi.fn(), getCatalogGroupEditions: vi.fn(), setCatalogGroupRepresentative: vi.fn(), listCatalogReview: vi.fn(), generateCatalogReview: vi.fn(), decideCatalogReview: vi.fn(), searchOnlineCatalog: vi.fn(), suggestOnlineCatalog: vi.fn(), updateOnlineCatalog: vi.fn(), resetJapaneseCatalogCheckpoint: vi.fn(), setOnlineCatalogUpdateSettings: vi.fn(), runDueOnlineCatalogUpdate: vi.fn(), getCloudCaptureSettings: vi.fn().mockResolvedValue({ enabled: false, apiBaseUrl: null, tokenConfigured: false }), setCloudCaptureSettings: vi.fn(), setCloudApiToken: vi.fn(), deleteCloudApiToken: vi.fn(), testCloudCaptureConnection: vi.fn().mockResolvedValue({ pendingCount: 0 }), createExtensionPairing: vi.fn(), runDueCloudCaptureSync: vi.fn().mockResolvedValue({ attempted: 0, acknowledged: 0, failed: 0, reviewPending: 0, added: 0, videoAdded: 0, classificationChanged: 0 }), cloudBackfillPreflight: vi.fn(), cloudBackfillSeed: vi.fn(), cloudBackfillRunCycle: vi.fn(), cloudBackfillProgress: vi.fn().mockResolvedValue({ controlState: "idle", totalAssets: 0, queued: 0, preparing: 0, uploading: 0, committing: 0, completed: 0, failed: 0, activeWorkers: 0, lastError: null }), cloudBackfillRetryFailed: vi.fn(), getOnlineCatalogWorkDetail: vi.fn(), setOnlineCatalogBookmark: vi.fn(), resolveOnlineCatalogWork: vi.fn(), getRemoteReadingProgress: vi.fn(), saveRemoteReadingProgress: vi.fn(), clearRemoteMangaCache: vi.fn(), getExtensionConnection: vi.fn().mockResolvedValue({ baseUrl: "http://127.0.0.1:32145", token: "test", status: "ready" }), listClassifications: vi.fn(),
     listAlbums: vi.fn().mockResolvedValue([]), createAlbum: vi.fn(), renameAlbum: vi.fn(), moveAlbum: vi.fn(), updateAlbumAppearance: vi.fn(), deleteAlbum: vi.fn(),
     createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(), updateClassificationAppearance: vi.fn(),
     deleteClassification: vi.fn(), listAssets: vi.fn(), listAssetDateBuckets: vi.fn().mockResolvedValue([]), indexMissingSimilarityHashes: vi.fn(),

@@ -1,0 +1,23 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lakomics</title><link rel="stylesheet" href="options.css"></head><body>
+<main>
+  <header><h1>Lakomics</h1><span id="state-dot" aria-hidden="true"></span></header>
+  <section id="pair-section">
+    <div class="section-head"><span>연결</span><output id="pair-status"></output></div>
+    <form id="pair-form"><input id="pairing" autocomplete="off" spellcheck="false" placeholder="연결 링크"><button aria-label="연결">→</button></form>
+    <div class="paired-actions" hidden><code id="origin"></code><button id="refresh" aria-label="동기화">↻</button><button id="disconnect" aria-label="연결 해제">×</button></div>
+  </section>
+  <section id="pin-section" hidden>
+    <div class="section-head"><span>고정</span></div>
+    <div id="pins" class="pins"></div>
+    <div class="pin-add"><select id="pin-candidate" aria-label="고정할 분류"></select><button id="pin-add" aria-label="고정">＋</button></div>
+  </section>
+  <section id="order-section" hidden>
+    <div class="section-head"><span>순서</span><output id="sync-status"></output></div>
+    <div id="order-editor"></div>
+  </section>
+  <section id="preference-section" hidden class="preferences">
+    <label><span>X 좋아요</span><input id="auto-like" type="checkbox"></label>
+    <label><span>X 번역</span><input id="x-translate" type="checkbox"></label>
+  </section>
+</main>
+<script src="../src/classification-tree.js"></script><script src="../src/list-collector.js"></script><script src="options.js"></script></body></html>

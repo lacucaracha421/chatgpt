@@ -243,6 +243,7 @@ pub fn run() {
             commands::set_cloud_api_token,
             commands::delete_cloud_api_token,
             commands::test_cloud_capture_connection,
+            commands::create_extension_pairing,
             commands::push_cloud_metadata_backup,
             commands::push_cloud_collections,
             commands::push_cloud_catalog,

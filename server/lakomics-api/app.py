@@ -1,7 +1,9 @@
 import base64
 import binascii
+import hashlib
 import json
 import os
+import secrets
 import sqlite3
 import time
 import urllib.error as urllib_error
@@ -45,6 +47,40 @@ def require_auth(authorization: str | None):
 
     if authorization != f"Bearer {API_TOKEN}":
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _bearer_value(authorization: str | None) -> str:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = authorization[7:].strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return token
+
+
+def _token_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def require_extension_client(authorization: str | None) -> str:
+    token = _bearer_value(authorization)
+    digest = _token_hash(token)
+    with get_db() as db:
+        row = db.execute(
+            "SELECT id FROM extension_clients WHERE token_hash=? AND revoked_at IS NULL",
+            (digest,),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        db.execute("UPDATE extension_clients SET last_seen_at=? WHERE id=?", (now_iso(), row["id"]))
+        db.commit()
+        return str(row["id"])
+
+
+def require_admin_or_extension(authorization: str | None) -> str:
+    if API_TOKEN and authorization == f"Bearer {API_TOKEN}":
+        return "admin"
+    return require_extension_client(authorization)
 
 
 class AssetCreate(BaseModel):
@@ -431,7 +467,8 @@ class CaptureCreate(BaseModel):
     media_url: str
     classification_id: str
     published_at: str | None = None
-    media_type: Literal["image", "video"] = "image"
+    media_type: Literal["image", "video", "animated_gif"] = "image"
+    source: Literal["x", "arca", "dcinside", "web"] = "x"
 
 
 class CaptureAcknowledge(BaseModel):
@@ -457,7 +494,7 @@ def startup_captures():
                 created_at TEXT NOT NULL,
                 imported_at TEXT,
                 media_type TEXT NOT NULL DEFAULT 'image'
-                    CHECK (media_type IN ('image', 'video')),
+                    CHECK (media_type IN ('image', 'video', 'animated_gif')),
                 UNIQUE(source_url, media_url, classification_id)
             )
             """
@@ -472,6 +509,26 @@ def startup_captures():
                 ADD COLUMN media_type TEXT NOT NULL DEFAULT 'image'
                 """
             )
+        table_sql = db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='captures'").fetchone()
+        if table_sql and "animated_gif" not in (table_sql["sql"] or ""):
+            db.execute("ALTER TABLE captures RENAME TO captures_legacy_gif")
+            db.execute(
+                """
+                CREATE TABLE captures (
+                    id TEXT PRIMARY KEY, source_url TEXT NOT NULL, media_url TEXT NOT NULL,
+                    classification_id TEXT NOT NULL, object_key TEXT NOT NULL UNIQUE,
+                    content_type TEXT NOT NULL, size_bytes INTEGER NOT NULL, published_at TEXT,
+                    status TEXT NOT NULL CHECK (status IN ('pending', 'imported')),
+                    created_at TEXT NOT NULL, imported_at TEXT,
+                    media_type TEXT NOT NULL DEFAULT 'image' CHECK (media_type IN ('image','video','animated_gif')),
+                    UNIQUE(source_url, media_url, classification_id)
+                )
+                """
+            )
+            db.execute(
+                "INSERT INTO captures SELECT id,source_url,media_url,classification_id,object_key,content_type,size_bytes,published_at,status,created_at,imported_at,media_type FROM captures_legacy_gif"
+            )
+            db.execute("DROP TABLE captures_legacy_gif")
         db.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_captures_status_created
@@ -490,10 +547,14 @@ def startup_classifications():
                 singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
                 payload TEXT NOT NULL,
                 published_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                revision INTEGER NOT NULL DEFAULT 1
             )
             """
         )
+        columns = {row["name"] for row in db.execute("PRAGMA table_info(classification_snapshots)")}
+        if "revision" not in columns:
+            db.execute("ALTER TABLE classification_snapshots ADD COLUMN revision INTEGER NOT NULL DEFAULT 1")
         db.commit()
 
 
@@ -511,6 +572,256 @@ def startup_saved_x_media():
             """
         )
         db.commit()
+
+
+PAIRING_TTL_SECONDS = 10 * 60
+MAX_EXTENSION_PROFILE_BYTES = 256 * 1024
+MAX_EXTENSION_PROFILE_IDS = 2000
+
+
+def _extension_public_origin(request: Request) -> str:
+    configured = os.environ.get("LAKOMICS_EXTENSION_BASE_URL", "").strip()
+    raw = configured or str(request.base_url)
+    parsed = urlparse(raw)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.password:
+        raise HTTPException(status_code=500, detail="Invalid extension base URL")
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+@app.on_event("startup")
+def startup_extension_profile():
+    with get_db() as db:
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS extension_pairings (
+                secret_hash TEXT PRIMARY KEY,
+                expires_at TEXT NOT NULL,
+                used_at TEXT
+            )
+            """
+        )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS extension_clients (
+                id TEXT PRIMARY KEY,
+                token_hash TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL,
+                last_seen_at TEXT,
+                revoked_at TEXT
+            )
+            """
+        )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS extension_profiles (
+                singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                revision INTEGER NOT NULL CHECK(revision>=1),
+                payload TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        default_payload = json.dumps({
+            "schemaVersion": 1,
+            "pinnedClassificationIds": [],
+            "listOrder": {},
+            "preferences": {"autoLikeOnSave": True, "xTranslateEnabled": True},
+        }, separators=(",", ":"), sort_keys=True)
+        db.execute(
+            "INSERT OR IGNORE INTO extension_profiles(singleton,revision,payload,updated_at) VALUES(1,1,?,?)",
+            (default_payload, now_iso()),
+        )
+        db.commit()
+
+
+class ExtensionPairExchange(BaseModel):
+    secret: str = Field(min_length=16, max_length=256)
+
+
+class ExtensionProfilePatch(BaseModel):
+    expectedRevision: int = Field(ge=1)
+    pinnedClassificationIds: list[str] | None = None
+    listOrder: dict[str, list[str]] | None = None
+    listOrderPatch: dict[str, list[str] | None] | None = None
+    preferences: dict[str, bool] | None = None
+
+
+def _read_extension_profile(db: sqlite3.Connection) -> dict:
+    row = db.execute("SELECT revision,payload,updated_at FROM extension_profiles WHERE singleton=1").fetchone()
+    if row is None:
+        raise HTTPException(status_code=500, detail="Extension profile is not initialized")
+    payload = json.loads(row["payload"])
+    payload["revision"] = int(row["revision"])
+    payload["updatedAt"] = row["updated_at"]
+    return payload
+
+
+def _validate_profile_ids(values: list[str]) -> list[str]:
+    result = []
+    seen = set()
+    for raw in values[:MAX_EXTENSION_PROFILE_IDS]:
+        value = str(raw).strip()
+        if not value or len(value) > 240 or value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
+
+
+def _validate_list_order(value: dict[str, list[str]]) -> dict[str, list[str]]:
+    result: dict[str, list[str]] = {}
+    for parent, ids in list(value.items())[:MAX_EXTENSION_PROFILE_IDS]:
+        parent = str(parent).strip()
+        if not parent or len(parent) > 240 or not isinstance(ids, list):
+            continue
+        result[parent] = _validate_profile_ids(ids)
+    return result
+
+
+def _classification_snapshot() -> dict:
+    with get_db() as db:
+        row = db.execute("SELECT payload,revision FROM classification_snapshots WHERE singleton=1").fetchone()
+    if row is None:
+        return {"entries": [], "revision": 0}
+    payload = json.loads(row["payload"])
+    return {"entries": payload.get("entries", []), "revision": int(row["revision"])}
+
+
+@app.post("/v1/extension/pairings")
+def create_extension_pairing(request: Request, authorization: str | None = Header(default=None)):
+    require_auth(authorization)
+    secret = secrets.token_urlsafe(32)
+    expires = datetime.now(timezone.utc) + timedelta(seconds=PAIRING_TTL_SECONDS)
+    with get_db() as db:
+        db.execute("DELETE FROM extension_pairings WHERE used_at IS NOT NULL OR expires_at<?", (now_iso(),))
+        db.execute(
+            "INSERT INTO extension_pairings(secret_hash,expires_at,used_at) VALUES(?,?,NULL)",
+            (_token_hash(secret), expires.isoformat()),
+        )
+        db.commit()
+    origin = _extension_public_origin(request)
+    return {"pairingUrl": f"{origin}/extension-pair#{secret}", "expiresAt": expires.isoformat()}
+
+
+@app.post("/v1/extension/pair")
+def exchange_extension_pairing(exchange: ExtensionPairExchange, request: Request):
+    secret_hash = _token_hash(exchange.secret)
+    now = datetime.now(timezone.utc)
+    client_id = str(uuid.uuid4())
+    client_token = secrets.token_urlsafe(40)
+    with get_db() as db:
+        row = db.execute(
+            "SELECT expires_at,used_at FROM extension_pairings WHERE secret_hash=?",
+            (secret_hash,),
+        ).fetchone()
+        if row is None or row["used_at"] is not None:
+            raise HTTPException(status_code=410, detail="Pairing link is no longer valid")
+        try:
+            expires = datetime.fromisoformat(row["expires_at"])
+        except ValueError:
+            raise HTTPException(status_code=410, detail="Pairing link is no longer valid")
+        if expires <= now:
+            raise HTTPException(status_code=410, detail="Pairing link has expired")
+        db.execute("UPDATE extension_pairings SET used_at=? WHERE secret_hash=?", (now.isoformat(), secret_hash))
+        db.execute(
+            "INSERT INTO extension_clients(id,token_hash,created_at,last_seen_at,revoked_at) VALUES(?,?,?,?,NULL)",
+            (client_id, _token_hash(client_token), now.isoformat(), now.isoformat()),
+        )
+        profile = _read_extension_profile(db)
+        db.commit()
+    return {
+        "serverOrigin": _extension_public_origin(request),
+        "clientToken": client_token,
+        "clientId": client_id,
+        "profile": profile,
+        "classifications": _classification_snapshot(),
+    }
+
+
+@app.get("/v1/extension/bootstrap")
+def extension_bootstrap(authorization: str | None = Header(default=None)):
+    require_extension_client(authorization)
+    with get_db() as db:
+        profile = _read_extension_profile(db)
+    return {"profile": profile, "classifications": _classification_snapshot()}
+
+
+@app.get("/v1/extension/profile")
+def get_extension_profile(authorization: str | None = Header(default=None)):
+    require_extension_client(authorization)
+    with get_db() as db:
+        return _read_extension_profile(db)
+
+
+@app.patch("/v1/extension/profile")
+def patch_extension_profile(patch: ExtensionProfilePatch, authorization: str | None = Header(default=None)):
+    require_extension_client(authorization)
+    with get_db() as db:
+        current = _read_extension_profile(db)
+        if current["revision"] != patch.expectedRevision:
+            raise HTTPException(status_code=409, detail={"code": "profile_conflict", "profile": current})
+        next_profile = {
+            "schemaVersion": 1,
+            "pinnedClassificationIds": current.get("pinnedClassificationIds", []),
+            "listOrder": current.get("listOrder", {}),
+            "preferences": current.get("preferences", {"autoLikeOnSave": True, "xTranslateEnabled": True}),
+        }
+        if patch.pinnedClassificationIds is not None:
+            next_profile["pinnedClassificationIds"] = _validate_profile_ids(patch.pinnedClassificationIds)
+        if patch.listOrder is not None:
+            next_profile["listOrder"] = _validate_list_order(patch.listOrder)
+        if patch.listOrderPatch is not None:
+            order = dict(next_profile["listOrder"])
+            for parent, ids in list(patch.listOrderPatch.items())[:MAX_EXTENSION_PROFILE_IDS]:
+                key = str(parent).strip()
+                if not key or len(key) > 240:
+                    continue
+                if ids is None:
+                    order.pop(key, None)
+                else:
+                    order[key] = _validate_profile_ids(ids)
+            next_profile["listOrder"] = order
+        if patch.preferences is not None:
+            allowed = {"autoLikeOnSave", "xTranslateEnabled"}
+            preferences = dict(next_profile["preferences"])
+            for key, value in patch.preferences.items():
+                if key in allowed and isinstance(value, bool):
+                    preferences[key] = value
+            next_profile["preferences"] = preferences
+        encoded = json.dumps(next_profile, separators=(",", ":"), sort_keys=True)
+        if len(encoded.encode("utf-8")) > MAX_EXTENSION_PROFILE_BYTES:
+            raise HTTPException(status_code=413, detail="Extension profile too large")
+        revision = current["revision"] + 1
+        updated_at = now_iso()
+        db.execute(
+            "UPDATE extension_profiles SET revision=?,payload=?,updated_at=? WHERE singleton=1",
+            (revision, encoded, updated_at),
+        )
+        db.commit()
+        return {**next_profile, "revision": revision, "updatedAt": updated_at}
+
+
+@app.delete("/v1/extension/session")
+def revoke_current_extension_client(authorization: str | None = Header(default=None)):
+    client_id = require_extension_client(authorization)
+    with get_db() as db:
+        db.execute("UPDATE extension_clients SET revoked_at=COALESCE(revoked_at,?) WHERE id=?", (now_iso(), client_id))
+        db.commit()
+    return {"ok": True}
+
+
+@app.post("/v1/extension/clients/{client_id}/revoke")
+def revoke_extension_client(client_id: str, authorization: str | None = Header(default=None)):
+    require_auth(authorization)
+    with get_db() as db:
+        changed = db.execute(
+            "UPDATE extension_clients SET revoked_at=COALESCE(revoked_at,?) WHERE id=?",
+            (now_iso(), client_id),
+        ).rowcount
+        db.commit()
+    if changed == 0:
+        raise HTTPException(status_code=404, detail="Extension client not found")
+    return {"ok": True}
 
 
 MAX_EXTENSION_BACKUP_BYTES = 256 * 1024
@@ -603,14 +914,19 @@ def get_library_metadata_backup(authorization: str | None = Header(default=None)
     }
 
 
-def valid_x_source_url(value: str) -> bool:
+def valid_capture_source_url(value: str, source: str) -> bool:
     try:
         url = urlparse(value)
-        return (
-            url.scheme == "https"
-            and url.hostname in {"x.com", "twitter.com"}
-            and bool(url.path)
-        )
+        if url.scheme != "https" or not url.hostname or not url.path or url.username or url.password or url.fragment:
+            return False
+        host = url.hostname.lower()
+        if source == "x":
+            return host in {"x.com", "twitter.com"}
+        if source == "arca":
+            return host == "arca.live"
+        if source == "dcinside":
+            return host in {"gall.dcinside.com", "m.dcinside.com"}
+        return source == "web"
     except Exception:
         return False
 
@@ -620,15 +936,20 @@ def create_capture(
     capture: CaptureCreate,
     authorization: str | None = Header(default=None),
 ):
-    require_auth(authorization)
+    principal = require_admin_or_extension(authorization)
 
     classification_id = capture.classification_id.strip()
 
     if not classification_id or len(classification_id) > 200:
         raise HTTPException(status_code=400, detail="Invalid classification_id")
+    if principal != "admin":
+        snapshot = _classification_snapshot()
+        live_ids = {str(entry.get("id")) for entry in snapshot.get("entries", []) if isinstance(entry, dict) and entry.get("id")}
+        if classification_id not in live_ids:
+            raise HTTPException(status_code=409, detail={"code": "classification_stale"})
 
-    if not valid_x_source_url(capture.source_url):
-        raise HTTPException(status_code=400, detail="Invalid X source URL")
+    if not valid_capture_source_url(capture.source_url, capture.source):
+        raise HTTPException(status_code=400, detail="Invalid source URL")
 
     with get_db() as db:
         existing = db.execute(
@@ -657,12 +978,14 @@ def create_capture(
             capture.media_url,
             object_key,
             capture.media_type,
+            capture.source,
         )
     except CaptureValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except CaptureDownloadError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 
+    stored_media_type = "animated_gif" if content_type == "image/gif" else capture.media_type
     ts = now_iso()
 
     try:
@@ -695,7 +1018,7 @@ def create_capture(
                     size_bytes,
                     capture.published_at,
                     ts,
-                    capture.media_type,
+                    stored_media_type,
                 ),
             )
             db.commit()
@@ -740,7 +1063,7 @@ def create_capture(
             "status": "pending",
             "created_at": ts,
             "imported_at": None,
-            "media_type": capture.media_type,
+            "media_type": stored_media_type,
         },
     }
 
@@ -748,7 +1071,7 @@ def create_capture(
 def pending_capture_payload(row: sqlite3.Row) -> dict:
     source = urlparse(row["source_url"])
     path_parts = [part for part in source.path.split("/") if part]
-    creator_handle = path_parts[0] if path_parts else None
+    creator_handle = path_parts[0] if source.hostname in {"x.com", "twitter.com"} and path_parts else None
     return {
         "id": row["id"],
         "kind": row["media_type"],
@@ -785,6 +1108,20 @@ def list_pending_captures(
         ).fetchall()
 
     return {"captures": [pending_capture_payload(row) for row in rows]}
+
+
+@app.get("/v1/extension/captures/confirm")
+def confirm_extension_capture(
+    source_url: str, media_url: str, classification_id: str,
+    authorization: str | None = Header(default=None),
+):
+    require_extension_client(authorization)
+    with get_db() as db:
+        row = db.execute(
+            "SELECT id,status,media_type,content_type,created_at FROM captures WHERE source_url=? AND media_url=? AND classification_id=? ORDER BY created_at DESC LIMIT 1",
+            (source_url, media_url, classification_id),
+        ).fetchone()
+    return {"found": row is not None, "capture": dict(row) if row is not None else None}
 
 
 @app.get("/v1/captures/{capture_id}/download")
@@ -928,48 +1265,59 @@ def publish_classification_snapshot(
         raise HTTPException(status_code=413, detail="Snapshot too large")
 
     with get_db() as db:
+        row = db.execute("SELECT payload,revision FROM classification_snapshots WHERE singleton=1").fetchone()
+        revision = 1
+        if row is not None:
+            try:
+                previous_entries = json.loads(row["payload"]).get("entries", [])
+            except (TypeError, ValueError, AttributeError):
+                previous_entries = []
+            revision = int(row["revision"]) + (previous_entries != snapshot.entries)
         db.execute(
             """
-            INSERT INTO classification_snapshots (singleton, payload, published_at, updated_at)
-            VALUES (1, ?, ?, ?)
+            INSERT INTO classification_snapshots (singleton, payload, published_at, updated_at, revision)
+            VALUES (1, ?, ?, ?, ?)
             ON CONFLICT(singleton) DO UPDATE SET
                 payload = excluded.payload,
                 published_at = excluded.published_at,
-                updated_at = excluded.updated_at
+                updated_at = excluded.updated_at,
+                revision = excluded.revision
             """,
-            (payload, snapshot.published_at, now_iso()),
+            (payload, snapshot.published_at, now_iso(), revision),
         )
         db.commit()
 
-    return {"ok": True, "published_at": snapshot.published_at}
+    return {"ok": True, "published_at": snapshot.published_at, "revision": revision}
 
 
 @app.get("/v1/classifications")
 def get_classification_snapshot(
     authorization: str | None = Header(default=None),
 ):
-    require_auth(authorization)
+    require_admin_or_extension(authorization)
 
     with get_db() as db:
         row = db.execute(
-            "SELECT payload FROM classification_snapshots WHERE singleton = 1"
+            "SELECT payload,revision FROM classification_snapshots WHERE singleton = 1"
         ).fetchone()
 
     if row is None:
         raise HTTPException(status_code=404, detail="No classification snapshot published yet")
 
-    return json.loads(row["payload"])
+    payload = json.loads(row["payload"])
+    payload["revision"] = int(row["revision"])
+    return payload
 
 
 @app.get("/v1/classifications/meta")
 def classification_snapshot_meta(
     authorization: str | None = Header(default=None),
 ):
-    require_auth(authorization)
+    require_admin_or_extension(authorization)
 
     with get_db() as db:
         row = db.execute(
-            "SELECT published_at, updated_at FROM classification_snapshots WHERE singleton = 1"
+            "SELECT published_at, updated_at, revision FROM classification_snapshots WHERE singleton = 1"
         ).fetchone()
 
     if row is None:
@@ -1053,7 +1401,7 @@ def publish_saved_x_media_snapshot(
 def get_saved_x_media_snapshot(
     authorization: str | None = Header(default=None),
 ):
-    require_auth(authorization)
+    require_admin_or_extension(authorization)
     with get_db() as db:
         row = db.execute(
             "SELECT payload FROM saved_x_media_snapshots WHERE singleton = 1"

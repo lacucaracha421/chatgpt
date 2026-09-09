@@ -1308,6 +1308,340 @@ retain their prior handling. ArcaRefresher attribution/MIT notice is included.
 34 focused URL/controller tests passed. User-observed improvement is not a numerical
 throughput benchmark or proof of byte/quality equivalence for every source image.
 
+## EXT-008 — First-open double activation
+
+Status: `VERIFY` for the new list-only extension — the local `idle -> armed -> opening -> list-open` controller has focused coverage proving a first gesture cannot open twice and release during asynchronous opening does not cancel/retrigger it. Chromium/Titanium/Galaxy touch acceptance is still pending; the preserved legacy `extension/` is not modified by this fix.
+
+Legacy user report: the first extension-window invocation could double-handle a touch/tap. The new list-only client replaces the radial/touch-held path with a one-open-per-pointer state machine; keep device acceptance focused on first invocation, release/click-through, cancellation and immediate reopen.
+
+## EXT-009 — GIF saving failure
+
+Status: `VERIFY` for the new list-only extension — GIF has an explicit `animated_gif` server/PC capture identity, URL/filename detection, server-only permanent-save semantics and Android temporary-intent eligibility. A Rust end-to-end fixture verified a real two-frame GIF reaches the Lakomics library as `MediaSummary::Gif` with byte-for-byte original content. Existing Android temporary storage already accepts `image/gif` and copies the original file; real Titanium/Galaxy permanent and temporary GIF acceptance remains pending. The preserved legacy `extension/` remains unchanged.
+
+## EXT-010 — List-only slim extension and server-owned profile sync
+
+Status: `IN PROGRESS` — 2026-09-09 local implementation now includes the separate `extension-list/` package, server-issued scoped pairing/profile sync, a local QR pairing surface plus scan-to-pair bridge for PC → Galaxy Tab setup, list-native ordering/pins, minimal invocation state machine, server-first capture, and explicit GIF transport into the PC library. Focused extension tests, TypeScript and Rust GIF ingestion tests pass locally. The server portion is deployed to `laku-tokyo`: production `app.py` SHA-256 `4428342f29fc2ea978f06fb903202f076a6b0dc12f8578f2bcefcff5e6f966dc`, `capture_store.py` SHA-256 `d465e14f3d5fefe637defa48f05ff26184ed5b33be812f647d1c7ffce66a31a3`; pre-deploy code plus a 12,804,096-byte SQLite online backup are retained under `backups/extension-list-20260909-1615/` with `quick_check=ok`. Post-restart service is active with `NRestarts=0`, raw and Tailscale HTTPS health return 200, 489/489 existing captures were preserved, GIF/profile schemas are active, and an HTTPS pairing -> bootstrap -> revoke canary passed without exposing credentials. The VPS candidate's full `tests.test_capture_api` suite passed 49 tests in the production venv. Chromium/Titanium/Galaxy device acceptance remains a separate gate, and the existing `extension/` remains unchanged.
+
+### Product goal
+
+Create a **separate list-only collector extension** while leaving the current `extension/` implementation intact as the working reference/fallback. The new extension is not a radial mode with the donut hidden: it is a clean client whose normal job is only to detect media, open the classification list, submit a save, and reflect Lakomics-owned state.
+
+The normal setup experience is one step:
+
+`Lakomics -> Copy extension pairing link -> paste once in the new extension -> connected`
+
+After pairing, classifications, pinned destinations, list ordering and portable collector preferences converge automatically through the Lakomics server. There is no normal UI for separate PC connection keys, localhost/Tailscale selection, Cloud Collector setup, manual portable-backup push/restore, donut layout, secondary-ring visibility, or local fallback-tree editing.
+
+### Non-goals and preservation rules
+
+- Do not modify, slim, or migrate the existing `extension/` in place. Build the new implementation under a separate directory, working name `extension-list/`.
+- Do not delete the old extension, its current manifest identity, its portable backup, or its existing direct-PC path during this work.
+- Do not introduce a new frontend framework, build system, ANN/vector service, or general account system merely for this extension.
+- Preserve current site/source support where it remains useful: X, ordinary HTTPS pages, Arca, DCInside, image/video detection, X metadata, saved-state marking, optional X auto-like, temporary Android image save, and X translation.
+- Do not carry radial-only behavior forward for compatibility. Radial layout, gesture hit-testing, dwell, rings, slot pages, hidden-secondary presentation and local donut trees are intentionally retired from the new extension.
+- The new extension and the old collector must not both be enabled for real interaction acceptance in the same browser profile because both can intercept the same media gesture. They may coexist as installed packages, but one collector is enabled at a time during acceptance.
+
+### Source-of-truth model
+
+The Lakomics server owns portable extension state. The new extension owns only credentials, device/browser capabilities, ephemeral caches, pending offline mutations and other device-specific state.
+
+Server-owned state:
+
+- canonical Lakomics classification snapshot and classification revision;
+- pinned/favorite classification destinations and their order;
+- per-parent list/sibling ordering;
+- portable collector preferences such as X auto-like and X Translate enabled state;
+- profile schema version, profile revision and update timestamp;
+- optional future portable list presentation fields only when they are real user preferences.
+
+Device-local state:
+
+- scoped extension bearer token and paired server origin;
+- browser permission state and feature capability detection;
+- Android temporary-save intent/capability and other genuinely device-local browser capabilities;
+- translation provider secrets/API keys; portable non-secret translation preferences may sync;
+- validated cached profile/classification snapshots;
+- bounded offline profile-patch outbox and transient diagnostics.
+
+Do not store bearer tokens, pairing secrets or external provider API keys inside the server profile document.
+
+### Pairing and authentication contract
+
+Normal setup uses **one pairing URL/string**, not separate server/token fields. Lakomics creates a short-lived single-use pairing secret on the server and presents a fragment-bearing HTTPS pairing URL. Desktop renders that URL as a local QR as well as a copyable link; the Android/Titanium bridge can scan/open it and exchange the secret without a second connection setting.
+
+Target flow:
+
+1. Lakomics desktop, authenticated with the existing server/admin credential, requests a pairing secret.
+2. Server stores only a bounded/hashed pairing record with a short expiry and single-use state.
+3. User pastes the one pairing URL into the new extension.
+4. Extension exchanges the secret for a **scoped extension client token** and bootstrap metadata.
+5. Extension stores the resulting server origin + client token locally and discards the pairing secret.
+6. The client token grants only the extension capabilities required by this plan: extension bootstrap/profile read-write, classification read, capture creation/status needed by save confirmation, and saved-media state read. It is not the server administration token.
+7. Revocation is per extension client without rotating the server's desktop/admin credential.
+
+For development/migration only, a hidden/manual base-URL + token path may exist if required. It is not the normal product UI or acceptance path.
+
+Production pairing/server origins should be HTTPS. Localhost exceptions are development-only and must not silently broaden production origin validation.
+
+### Versioned server profile API
+
+Add a small server-owned extension profile rather than reusing the current encrypted `extension-backup` blob as the live state. The existing backup endpoint remains migration/recovery material only.
+
+Preferred contract:
+
+- `GET /v1/extension/bootstrap` — authenticated capability/bootstrap response containing API/profile/classification revisions and the current profile/classification payloads when practical.
+- `GET /v1/extension/profile` — current profile plus revision/ETag.
+- `PATCH /v1/extension/profile` — partial user mutation with expected revision/If-Match semantics.
+- Existing or revised `GET /v1/classifications` — canonical classification snapshot with a stable revision/ETag.
+- Capture/saved-state endpoints required by the unified save path below.
+
+Profile v1 semantics should be small and explicit, for example:
+
+```json
+{
+  "schemaVersion": 1,
+  "revision": 12,
+  "pinnedClassificationIds": ["..."],
+  "listOrder": {
+    "__root__": ["..."],
+    "<parent-id>": ["..."]
+  },
+  "preferences": {
+    "autoLikeOnSave": true,
+    "xTranslateEnabled": true
+  }
+}
+```
+
+Do not copy current radial layout, secondary usage buckets, hidden secondary IDs, local radial tree, touch-persistent state, or menu-mode selection into profile v1.
+
+### Profile synchronization and conflict contract
+
+The list should be usable immediately from the last validated cache, then revalidate against the server without blocking the first-open UI on a network round trip.
+
+- On service-worker startup and after pairing, load bootstrap/profile/classifications.
+- On list open, render the validated local snapshot immediately and trigger a bounded freshness check if needed.
+- Use revision/ETag conditional reads so unchanged profile/classification state is cheap.
+- User edits are sent as **partial patches**, not whole-profile replacement. Reordering one folder patches only that parent order; pin edits patch only pinned state.
+- On revision conflict, refetch the latest profile, replay the user's still-valid local field patch onto it, and retry once. A second conflict is surfaced rather than looping indefinitely.
+- Offline profile edits enter a bounded local outbox, coalesced by logical field/key. They retry on startup/connectivity/future interaction and are removed only after server acknowledgement.
+- Removed classification IDs are ignored when rendering stored order/pins. Newly added siblings appear after explicitly ordered siblings. Do not silently remap IDs by name in the steady-state protocol; any old-extension migration remapping is a one-time migration concern.
+- A profile update received from another paired device becomes visible on the next bounded refresh without a manual push/restore action.
+
+### Classification/list model — no radial dependency
+
+Create a list-native classification model. `list-collector.js` must no longer call `LakomicsRadial`, consume radial pages, or treat radial placement as sibling ordering.
+
+Required list behavior:
+
+- canonical parent/child relationships come directly from the server classification entries;
+- arbitrary depth remains supported;
+- root view presents ordered pinned shortcuts first, followed by canonical root classifications;
+- a pinned item is a shortcut, not a move: opening it follows its real canonical children/breadcrumb and saving to it uses its real classification ID;
+- per-parent `listOrder` controls visible sibling ordering only;
+- removed IDs disappear safely; new siblings append after ordered live IDs;
+- folder click enters the folder; leaf click selects; right-swipe saves with a resisted commit gesture, left-swipe goes back, and current-folder save plus keyboard accessibility remain available;
+- ordering editor operates on the same list-native model and automatically PATCHes the server profile.
+
+The fixed `임시 저장` action remains an action, never a classification and never part of ordering/profile data.
+
+### Minimal invocation/input state machine
+
+Preserve the familiar invocation semantics initially — mouse drag threshold and touch long-press — but reimplement them only as a **list-open trigger**, not a radial gesture session.
+
+Target state machine:
+
+`idle -> armed(pointer) -> opening -> list-open -> closed`
+
+- A pointer can transition to `opening` at most once.
+- While `opening` or `list-open`, subsequent pointer/click events from the opening gesture cannot open or activate the list again.
+- Release after the list opens does not select/save anything by itself.
+- A single one-shot click/context suppression guard may protect the underlying page after an opening gesture; radial dwell, radial hit-test, touch-held selection, SVG coordinate transforms and click-shield layers are not carried over.
+- Loading classifications/profile is coalesced so simultaneous first-open events share one promise rather than mounting twice.
+
+This state machine is the primary redesign surface for EXT-008 (first-open double activation). Reproduce the old failure first, then add a focused regression for one mount/one activation from the first gesture.
+
+### Unified permanent-save route
+
+The new extension's normal permanent-save transport is the **paired Lakomics server**. Remove the user-facing PC/Cloud/Remote routing matrix from the new client.
+
+Target flow:
+
+`media candidate -> classification ID -> authenticated server capture -> server stores/fetches safely -> PC Cloud Capture consumer imports when available`
+
+- X, Arca, DCInside and generic public HTTPS image/video captures should converge through one versioned server capture contract.
+- Extend/generalize the current server capture API rather than reintroducing direct-PC routing inside the new extension.
+- Known sources keep source-specific host validation where useful. Generic web capture must reuse equivalent public-URL/SSRF protections: HTTPS, no credentials, public address validation/revalidation, bounded redirects, bounded bytes/time, and no browser-cookie forwarding.
+- Audio/files, login-protected URLs, blob/HLS/DASH and other unsupported media fail explicitly in the slim client rather than silently invoking Android/browser downloads.
+- Default save policy for the slim client is server-only for supported permanent media. Timeout/transport ambiguity uses bounded server confirmation; a failed server save is reported as failure and does not fall back to `chrome.downloads`.
+- Server timeout/failure confirmation must remain bounded so an ambiguous response is resolved without submitting or reporting a duplicate capture.
+- Temporary Android save remains intentionally device-local and bypasses the permanent server capture path.
+
+### GIF contract / EXT-009
+
+GIF support is a release gate for the new client, not an optional follow-up.
+
+- Reproduce current GIF failure for permanent save and Android temporary save separately.
+- Preserve animated GIF bytes/animation semantics. Do not flatten GIF to PNG/WebP or silently label it as ordinary video merely to pass transport validation.
+- The server capture contract must represent GIF/animated image identity explicitly enough for the PC importer to restore the correct Lakomics media kind/content type.
+- Source detection must not misclassify an animated GIF as a static image when the original URL/content type proves GIF.
+- Permanent GIF saves stay on the server capture path; Android temporary save must preserve the original GIF extension/content semantics.
+- Android temporary save should publish a valid animated GIF to MediaStore when the source is a public supported GIF, or return an explicit unsupported result if the native receiver cannot yet preserve it; silent static conversion is not acceptable.
+
+### Saved-state and X behavior
+
+Retain useful X-only behavior without pulling old architecture back in:
+
+- X saved-media badges/index should read a server-backed authoritative state or revisioned snapshot plus a short-lived local recent-save overlay.
+- Successful permanent capture should mark the relevant X media locally immediately, then converge with server/PC saved state.
+- X auto-like remains optional and profile-controlled; it runs only after a successful relevant save and must never like the wrong outer/quoted post.
+- X Translate remains a standalone optional content feature. Sync only non-secret enable/model preferences that are truly portable; provider credentials remain device-local.
+
+### New extension source shape
+
+Target a smaller, explicit module graph under `extension-list/`. Exact filenames may adjust during implementation, but the dependency direction should resemble:
+
+```text
+extension-list/
+  manifest.json
+  src/
+    background.js              # message router only
+    api-client.js              # paired server auth/request/ETag
+    profile-store.js           # cache, outbox, merge/retry
+    classification-tree.js     # canonical tree + pins/order
+    save-client.js             # server capture + bounded confirmation
+    content.js                 # minimal invocation controller
+    list-collector.js          # list UI only
+    x-source.js / x-gallery.js
+    forum-source.js
+    x-translate.js
+    defaults.js                # genuinely device-local defaults only
+  options/
+    options.html/css/js        # pairing, status, minimal device prefs
+  tests/
+```
+
+Do not copy `gesture.js`, radial `layout.js`, donut SVG rendering, radial options editor, secondary presentation logic or local donut tree into the new implementation.
+
+The old generated MV3 worker remains untouched. Give the new extension its own deterministic bundle/generation entry if Titanium/Chromium compatibility still requires the tracked worker-bundle pattern. Do not hand-edit generated workers.
+
+Audit the current mobile bridge/library prototype files before copying them. Default to excluding functionality already owned by the native Android app unless the new collector directly needs it.
+
+### Extension identity and side-by-side safety
+
+The new extension uses a distinct manifest name/identity/storage namespace so the old package remains installable as fallback. Do not reuse the old direct-PC authorization assumption (`nclkmjmmlcdaeomgadndeangccfidfbk`) as the new extension's security boundary; server-issued scoped credentials replace it for the new path.
+
+During development, do not treat simultaneous activation of both collectors on the same page as supported. Browser acceptance enables one collector at a time. A later explicit coexistence feature would require a separate arbitration design.
+
+### Legacy-state migration
+
+Migration is subordinate to the clean architecture.
+
+- Do not let the new runtime depend on legacy radial/local-tree/portable-backup formats.
+- If the existing server-side `extension-backup` can be safely decoded client-side using already available legacy credentials, offer a **one-time optional import** of portable values that map cleanly to profile v1: `listOrder`, pinned IDs, auto-like and translate-enabled state.
+- Ignore radial placement, hidden-secondary state, usage buckets and local donut tree during migration.
+- If safe automatic import is not possible, keep the old extension unchanged and allow the user to establish pins/order once in the new profile. Do not broaden credential exposure to make migration automatic.
+
+### Offline and failure behavior
+
+- Pairing requires a reachable server and succeeds atomically or leaves no half-configured credential state.
+- Once paired, cached classifications/profile may open offline with a visible stale/offline indication only when useful; normal browsing should not block on network timeouts.
+- Offline profile edits are queued/coalesced locally and later reconciled; they do not disappear on service-worker suspension.
+- Permanent server save failure is explicit. Bounded confirmation distinguishes a lost response from a real failure; the slim client does not start an Android/browser download as a substitute.
+- Corrupt/invalid cached profile/classification data is discarded and refetched, never trusted as authoritative state.
+- Pair/client revocation produces a clear “pair again” state without deleting unrelated browser downloads or old-extension data.
+
+### Security contract
+
+- Extension client tokens are scoped, revocable and stored only in extension-local credential storage.
+- Pairing secrets are single-use and short-lived; logs/errors never include the secret or bearer token.
+- Server profile payloads contain no credentials.
+- Server capture keeps strict SSRF/public-host protections and bounded downloads; generic HTTPS support is not permission to create an open proxy.
+- Page content never receives server credentials. List UI remains isolated from tokens; service-worker/background code owns authenticated requests.
+- Browser translation provider keys remain local and are not synchronized through Lakomics profile APIs.
+
+### Implementation phases and gates
+
+#### Phase A — Freeze baseline and create the clean sibling package
+
+- Record current `extension/` manifest/version and focused tests as reference evidence.
+- Create `extension-list/` with a distinct manifest identity; copy only still-required source detectors/behaviors.
+- Establish list-native model tests before porting settings or server sync.
+- Gate: old `extension/` source has no functional diff from this phase; new package loads independently with no radial modules.
+
+#### Phase B — Server pairing, scoped auth and profile/classification bootstrap
+
+- Add server pairing/client-token storage and bootstrap/profile revision contracts.
+- Add extension API client, local validated cache and profile patch outbox.
+- Gate: a fresh browser profile pastes one pairing link and receives classifications + profile without any second connection setting; revoke/re-pair and offline-cache behavior are covered.
+
+#### Phase C — List-native collector and synchronized pins/order
+
+- Remove every `LakomicsRadial` dependency from the new list model.
+- Implement root pinned shortcuts, canonical deep navigation and per-parent ordering.
+- Auto-PATCH pin/order edits to the server; conflict retry uses the field-level patch contract.
+- Gate: two paired extension instances converge on pin/order changes without manual backup push/restore; deep folders and newly added/removed classifications remain correct.
+
+#### Phase D — Minimal invocation controller / EXT-008
+
+- Port media candidate detection to the new content controller.
+- Implement the one-open-per-pointer state machine and focused first-open double-activation regression.
+- Gate: first touch/mouse invocation mounts exactly one list and release/click-through cannot cause a second activation or accidental save.
+
+#### Phase E — Unified server capture, GIF fix and saved-state convergence
+
+- Generalize the server capture route for supported sources/media while preserving validation bounds.
+- Implement server-only slim save client for supported permanent media with bounded confirmation and explicit failure.
+- Fix GIF semantics end to end and refresh saved-media/X markers.
+- Gate: X/static image, public GIF, video, Arca image, DCInside supported media and generic public HTTPS image each take the intended route; unsupported/private cases fail explicitly without browser download; GIF remains animated.
+
+#### Phase F — Options/settings diet and feature audit
+
+- Replace the 900-line current-style options surface with pairing status, disconnect/re-pair, server/profile sync status, and only genuinely device-local controls that still need user choice.
+- Keep X Translate credentials/settings only to the extent the retained translate feature requires them.
+- Audit mobile bridge/prototype/patch/release-note carry-over before inclusion; do not copy dead files for familiarity.
+- Gate: a new user can configure the extension without understanding PC vs Cloud vs Tailscale vs backup vs radial concepts.
+
+#### Phase G — Cross-device/native acceptance and cutover readiness
+
+- Chromium desktop and Titanium Android: pair, open list, deep navigation, pin/order sync, save, restart/reopen, offline cache/recovery.
+- Galaxy Tab: first-open touch regression, temporary image/GIF behavior, list reorder ergonomics.
+- Windows/Linux Lakomics: server-published classifications and Cloud Capture import remain compatible; no direct-PC requirement exists for the new extension.
+- Only after these gates may the user decide whether the new package replaces the old installed collector. Do not delete the old implementation as part of acceptance.
+
+### Acceptance scenarios
+
+1. **Fresh install:** only one pairing link is entered; no other endpoint/token/layout setup is required.
+2. **Second device:** pairing immediately reproduces the same classification tree, pins and sibling order.
+3. **Cross-device edit:** pin/reorder on device A appears on device B after bounded refresh; concurrent revision conflict does not lose an unrelated field edit.
+4. **Offline open:** previously validated list opens without waiting through a dead-server timeout; stale state is not misrepresented as a fresh server read.
+5. **Deep hierarchy:** 5+ levels navigate using canonical parent IDs with correct breadcrumb/back behavior.
+6. **First-open input:** exactly one list mounts from the first gesture; release/tap does not double-open or auto-select.
+7. **Permanent save:** supported media uses one server route and the classification ID remains intact through later PC import.
+8. **GIF:** permanent and temporary GIF behavior is explicitly verified; animation is preserved where supported and never silently flattened.
+9. **Server capture failure:** bounded confirmation prevents duplicate capture; a real failure stays a server failure and never produces a browser/Android download or a false “Lakomics saved” result.
+10. **Profile persistence:** browser/service-worker restart does not lose acknowledged pin/order state or pending offline profile edits.
+11. **Revocation:** a revoked extension client cannot read/write profile or create captures and is prompted to pair again.
+12. **Old extension preservation:** existing `extension/` remains buildable/usable as the reference fallback and is not silently migrated or overwritten.
+
+### Verification discipline
+
+Start with focused module tests rather than repeatedly running the entire extension suite. New coverage should emphasize contracts the old radial tests cannot prove:
+
+- pairing parser/exchange and credential non-leakage;
+- profile revision conflict/rebase and offline outbox persistence;
+- list-native canonical tree ordering/pins without `LakomicsRadial`;
+- one-open-per-pointer controller behavior;
+- server capture source/media validation, timeout confirmation and GIF handling;
+- options fresh-install flow requiring only one pairing input;
+- package/bundle parity for the new manifest worker.
+
+Browser/device acceptance is required for pointer/touch behavior and Android intent handling; Node/jsdom tests are not substitutes for Titanium/Galaxy native behavior. Server endpoint tests use isolated test DB/storage and do not deploy or mutate production captures without separate approval.
+
+### Exit criteria before implementation is called complete
+
+The work is complete only when the new package can be installed on a clean browser profile, paired with one Lakomics-generated link, and used without radial/local-tree/PC-remote/backup configuration; portable list state syncs automatically; normal saves use the unified server route; EXT-008 and EXT-009 have reproductions plus passing fixes; and the old extension remains untouched and available as fallback.
+
 ---
 
 # Works / Collection presentation lane

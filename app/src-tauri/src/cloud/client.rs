@@ -2,7 +2,7 @@ use std::{fs::File, io::Read, time::Duration};
 
 use super::models::{
     AcknowledgeCaptureRequest, ClassificationSnapshotPublish, PreparedAssetUpload,
-    PresignUploadRequest, PresignUploadResponse, RegisterAssetRequest, RemoteCaptureDownloadTicket,
+    ExtensionPairingResponse, PresignUploadRequest, PresignUploadResponse, RegisterAssetRequest, RemoteCaptureDownloadTicket,
     RemoteCapturePage, RemoteCapturePayload, SavedXMediaSnapshotPublish,
 };
 use crate::library::error::LibraryError;
@@ -244,6 +244,16 @@ impl CloudClient {
         token: &str,
     ) -> Result<Vec<RemoteCapturePayload>, LibraryError> {
         self.list_pending_captures_after(token, None)
+    }
+
+    pub(crate) fn create_extension_pairing(&self, token: &str) -> Result<ExtensionPairingResponse, LibraryError> {
+        let mut response = self.agent
+            .post(self.endpoint("/v1/extension/pairings")?)
+            .header("Authorization", bearer(token)?)
+            .content_type("application/json")
+            .send("{}")
+            .map_err(|error| map_api_error(error, LibraryError::CloudAssetRegistrationRejected))?;
+        read_json(&mut response)
     }
 
     pub(crate) fn capture_endpoint(&self) -> &str { self.base_url.as_str() }

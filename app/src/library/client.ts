@@ -77,6 +77,7 @@ import type {
   CloudCaptureSettings,
   CloudCredentialStatus,
   CloudCaptureConnectionStatus,
+  ExtensionPairingLink,
   CloudMetadataBackupResult,
   CloudCollectionsPublishResult,
   CloudLibraryRestoreReport,
@@ -164,6 +165,8 @@ export const libraryGateway: LibraryGateway = {
     invoke<CloudCredentialStatus>("delete_cloud_api_token"),
   testCloudCaptureConnection: () =>
     invoke<CloudCaptureConnectionStatus>("test_cloud_capture_connection"),
+  createExtensionPairing: () =>
+    invoke<ExtensionPairingLink>("create_extension_pairing"),
   pushCloudMetadataBackup: () =>
     invoke<CloudMetadataBackupResult>("push_cloud_metadata_backup"),
   pushCloudCollections: (onProgress) => {

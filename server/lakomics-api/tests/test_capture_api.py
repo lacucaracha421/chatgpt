@@ -261,6 +261,31 @@ class CaptureStoreTests(unittest.TestCase):
         self.assertTrue(all(not path.exists() for path in created_paths))
 
 
+    def test_animated_gif_is_preserved_as_gif(self):
+        data = b"GIF89a\x01\x00\x01\x00"
+        result, _stream = self.fetch(
+            FakeResponse([data], content_type="image/gif"),
+            "https://pbs.twimg.com/media/ANIMATED.gif",
+            "images/inbox/capture-gif/original",
+            "animated_gif",
+        )
+        self.assertEqual(result, ("image/gif", len(data)))
+        self.assertEqual(fake_s3.objects["images/inbox/capture-gif/original"]["body"], data)
+
+    def test_generic_web_rejects_private_dns_before_network(self):
+        stream = FakeStream(FakeResponse([b"image"], content_type="image/png"))
+        with mock.patch.object(capture_store.socket, "getaddrinfo", return_value=[(2, 1, 6, "", ("127.0.0.1", 443))]):
+            with mock.patch.object(capture_store.httpx, "stream", stream):
+                with self.assertRaises(capture_store.CaptureValidationError):
+                    capture_store.fetch_media_to_r2(
+                        "https://example.test/image.png",
+                        "images/inbox/private/original",
+                        "image",
+                        "web",
+                    )
+        self.assertEqual(stream.calls, [])
+
+
 class CaptureApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -271,14 +296,17 @@ class CaptureApiTests(unittest.TestCase):
         api_app.API_TOKEN = "test-token"
         api_app.startup()
         api_app.startup_captures()
-        self.media_calls: list[tuple[str, str, str]] = []
+        api_app.startup_classifications()
+        api_app.startup_saved_x_media()
+        api_app.startup_extension_profile()
+        self.media_calls: list[tuple[str, str, str, str]] = []
         self.storage_error: Exception | None = None
 
-        def fake_fetch(media_url: str, object_key: str, media_type: str = "image"):
-            self.media_calls.append((media_url, object_key, media_type))
+        def fake_fetch(media_url: str, object_key: str, media_type: str = "image", source: str = "x"):
+            self.media_calls.append((media_url, object_key, media_type, source))
             if self.storage_error is not None:
                 raise self.storage_error
-            content_type = "video/mp4" if media_type == "video" else "image/jpeg"
+            content_type = "video/mp4" if media_type == "video" else "image/gif" if media_type == "animated_gif" else "image/jpeg"
             return content_type, 123
 
         self.fetch_patch = mock.patch.object(
@@ -343,6 +371,18 @@ class CaptureApiTests(unittest.TestCase):
         self.assertEqual(payload["media_type"], "image")
         self.assertTrue(payload["object_key"].startswith("images/inbox/"))
         self.assertEqual(self.media_calls[0][2], "image")
+
+    def test_animated_gif_capture_keeps_media_identity(self):
+        response = self.create_capture(
+            media_type="animated_gif",
+            media_url="https://pbs.twimg.com/media/ANIMATED.gif",
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["capture"]
+        self.assertEqual(payload["media_type"], "animated_gif")
+        self.assertEqual(payload["content_type"], "image/gif")
+        self.assertTrue(payload["object_key"].startswith("images/inbox/"))
+        self.assertEqual(self.media_calls[0][2:], ("animated_gif", "x"))
 
     def test_explicit_image_request_remains_supported(self):
         response = self.create_capture(media_type="image")
@@ -687,6 +727,97 @@ class ClassificationSnapshotApiTests(unittest.TestCase):
             json=self.publish_body(entries=entries),
         )
         self.assertEqual(response.status_code, 413)
+
+
+class ExtensionProfileApiTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.database_path = Path(self.temp_dir.name) / "lakomics.sqlite3"
+        self.original_database_path = api_app.DB_PATH
+        self.original_api_token = api_app.API_TOKEN
+        api_app.DB_PATH = self.database_path
+        api_app.API_TOKEN = "test-token"
+        api_app.startup()
+        api_app.startup_classifications()
+        api_app.startup_extension_profile()
+        self.client = TestClient(api_app.app)
+        self.admin = {"Authorization": "Bearer test-token"}
+        published = self.client.put("/v1/classifications", headers=self.admin, json={
+            "entries": [
+                {"id": "games", "kind": "root", "name": "게임", "parentId": None},
+                {"id": "blue", "kind": "work", "name": "블루 아카이브", "parentId": "games"},
+            ],
+            "published_at": "2026-09-09T00:00:00+00:00",
+        })
+        self.assertEqual(published.status_code, 200)
+
+    def tearDown(self) -> None:
+        self.client.close()
+        api_app.DB_PATH = self.original_database_path
+        api_app.API_TOKEN = self.original_api_token
+        self.temp_dir.cleanup()
+
+    def pair(self):
+        created = self.client.post("/v1/extension/pairings", headers=self.admin, json={})
+        self.assertEqual(created.status_code, 200)
+        pairing_url = created.json()["pairingUrl"]
+        secret = pairing_url.split("#", 1)[1]
+        exchanged = self.client.post("/v1/extension/pair", json={"secret": secret})
+        self.assertEqual(exchanged.status_code, 200)
+        token = exchanged.json()["clientToken"]
+        return secret, exchanged.json(), {"Authorization": f"Bearer {token}"}
+
+    def test_pairing_is_single_use_and_bootstraps_profile_and_classifications(self):
+        secret, exchanged, auth = self.pair()
+        self.assertEqual(exchanged["profile"]["revision"], 1)
+        self.assertEqual([row["id"] for row in exchanged["classifications"]["entries"]], ["games", "blue"])
+        self.assertEqual(self.client.post("/v1/extension/pair", json={"secret": secret}).status_code, 410)
+        bootstrap = self.client.get("/v1/extension/bootstrap", headers=auth)
+        self.assertEqual(bootstrap.status_code, 200)
+        self.assertEqual(bootstrap.json()["profile"]["revision"], 1)
+
+    def test_pairing_uses_configured_public_extension_origin(self):
+        public = "https://laku.example.test:8443"
+        with mock.patch.dict(api_app.os.environ, {"LAKOMICS_EXTENSION_BASE_URL": public}, clear=False):
+            created = self.client.post("/v1/extension/pairings", headers=self.admin, json={})
+            self.assertEqual(created.status_code, 200)
+            self.assertTrue(created.json()["pairingUrl"].startswith(public + "/extension-pair#"))
+            secret = created.json()["pairingUrl"].split("#", 1)[1]
+            exchanged = self.client.post("/v1/extension/pair", json={"secret": secret})
+            self.assertEqual(exchanged.status_code, 200)
+            self.assertEqual(exchanged.json()["serverOrigin"], public)
+
+    def test_profile_patch_is_revision_safe_and_field_scoped(self):
+        _secret, _exchanged, auth = self.pair()
+        first = self.client.patch("/v1/extension/profile", headers=auth, json={
+            "expectedRevision": 1,
+            "pinnedClassificationIds": ["blue"],
+            "listOrderPatch": {"games": ["blue"]},
+        })
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.json()["revision"], 2)
+        self.assertEqual(first.json()["pinnedClassificationIds"], ["blue"])
+        conflict = self.client.patch("/v1/extension/profile", headers=auth, json={
+            "expectedRevision": 1,
+            "preferences": {"autoLikeOnSave": False},
+        })
+        self.assertEqual(conflict.status_code, 409)
+        self.assertEqual(conflict.json()["detail"]["profile"]["revision"], 2)
+        second = self.client.patch("/v1/extension/profile", headers=auth, json={
+            "expectedRevision": 2,
+            "preferences": {"autoLikeOnSave": False},
+        })
+        self.assertEqual(second.status_code, 200)
+        self.assertFalse(second.json()["preferences"]["autoLikeOnSave"])
+        self.assertEqual(second.json()["listOrder"]["games"], ["blue"])
+
+    def test_extension_token_can_read_classifications_but_cannot_publish_them(self):
+        _secret, _exchanged, auth = self.pair()
+        self.assertEqual(self.client.get("/v1/classifications", headers=auth).status_code, 200)
+        denied = self.client.put("/v1/classifications", headers=auth, json={
+            "entries": [], "published_at": "2026-09-09T01:00:00+00:00"
+        })
+        self.assertEqual(denied.status_code, 401)
 
 
 class ExtensionBackupApiTests(unittest.TestCase):

@@ -81,6 +81,7 @@ pub(crate) struct RemoteCapture {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RemoteCaptureKind {
     Image,
+    AnimatedGif,
     Video,
 }
 
@@ -88,6 +89,7 @@ impl RemoteCaptureKind {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Image => "image",
+            Self::AnimatedGif => "animated_gif",
             Self::Video => "video",
         }
     }
@@ -101,6 +103,7 @@ impl TryFrom<RemoteCapturePayload> for RemoteCapture {
         }
         let media_kind = match payload.kind.as_str() {
             "image" => RemoteCaptureKind::Image,
+            "animated_gif" => RemoteCaptureKind::AnimatedGif,
             "video" => RemoteCaptureKind::Video,
             _ => return Err(LibraryError::InvalidCloudCaptureRecord),
         };
@@ -146,6 +149,14 @@ pub(crate) struct RemoteCapturePayload {
     pub source_published_at: Option<String>,
     #[serde(default)]
     pub created_at: String,
+}
+
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ExtensionPairingResponse {
+    pub pairing_url: String,
+    pub expires_at: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -222,4 +233,27 @@ pub(crate) struct ReplicationVariantPayload {
     pub content_type: String,
     pub size_bytes: u64,
     pub sha256: Option<String>,
+}
+
+#[cfg(test)]
+mod extension_capture_kind_tests {
+    use super::*;
+
+    #[test]
+    fn animated_gif_capture_is_a_distinct_remote_kind() {
+        let capture = RemoteCapture::try_from(RemoteCapturePayload {
+            id: "capture-gif".into(),
+            kind: "animated_gif".into(),
+            object_key: "images/inbox/capture-gif/original".into(),
+            content_type: Some("image/gif".into()),
+            size_bytes: Some(128),
+            source_url: Some("https://x.com/a/status/1/photo/1".into()),
+            classification_id: Some("games".into()),
+            creator_handle: Some("a".into()),
+            source_published_at: None,
+            created_at: "2026-09-09T00:00:00Z".into(),
+        }).unwrap();
+        assert_eq!(capture.media_kind, RemoteCaptureKind::AnimatedGif);
+        assert_eq!(capture.media_kind.as_str(), "animated_gif");
+    }
 }

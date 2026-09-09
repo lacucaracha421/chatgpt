@@ -119,6 +119,13 @@ impl Library {
         Ok(result)
     }
 
+    pub(crate) fn create_extension_pairing(&self) -> Result<super::models::ExtensionPairingResponse, LibraryError> {
+        let config = self.cloud_sync_config()?;
+        let base_url = config.api_base_url.ok_or(LibraryError::InvalidCloudSyncConfig)?;
+        let token = crate::library::credential::read_cloud_api_token_os()?;
+        CloudClient::new(&base_url)?.create_extension_pairing(&token)
+    }
+
     pub(crate) fn test_cloud_capture_connection(&self) -> Result<u32, LibraryError> {
         let config = self.cloud_sync_config()?;
         let base_url = config.api_base_url.ok_or(LibraryError::InvalidCloudSyncConfig)?;
@@ -250,7 +257,7 @@ impl Library {
         capture: &RemoteCapture,
     ) -> Result<ConsumedCapture, LibraryError> {
         let maximum_bytes = match capture.media_kind {
-            RemoteCaptureKind::Image => MAX_CAPTURE_IMAGE_BYTES,
+            RemoteCaptureKind::Image | RemoteCaptureKind::AnimatedGif => MAX_CAPTURE_IMAGE_BYTES,
             RemoteCaptureKind::Video => MAX_CAPTURE_VIDEO_BYTES,
         };
         let ticket = client.capture_download_ticket(&capture.id, token)?;
@@ -319,7 +326,9 @@ impl Library {
     ) -> Result<IngestMediaRequest, LibraryError> {
         // object key와 캡처 ID만 경로 재료로 쓴다. 원격 원본 파일명은 신뢰하지 않는다.
         let source_url = capture.source_url.as_deref().filter(|value| {
-            value.starts_with("https://x.com/") || value.starts_with("https://twitter.com/")
+            url::Url::parse(value).ok().is_some_and(|url|
+                url.scheme() == "https" && url.host_str().is_some()
+                && url.username().is_empty() && url.password().is_none() && url.fragment().is_none())
         });
         let creator_url = source_url.and_then(capture_creator_url);
         let creator_handle = capture.creator_handle.clone().or_else(|| {
@@ -425,6 +434,7 @@ fn capture_extension(capture: &RemoteCapture) -> Result<&'static str, LibraryErr
         });
     match capture.media_kind {
         RemoteCaptureKind::Image => Ok(from_content_type.unwrap_or("png")),
+        RemoteCaptureKind::AnimatedGif => Ok("gif"),
         RemoteCaptureKind::Video => Ok(from_content_type.unwrap_or("mp4")),
     }
 }

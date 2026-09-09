@@ -124,6 +124,7 @@ export type CloudCaptureSettings = {
 
 export type CloudCredentialStatus = { configured: boolean };
 export type CloudCaptureConnectionStatus = { pendingCount: number };
+export type ExtensionPairingLink = { pairingUrl: string; expiresAt: string };
 export type CloudMetadataBackupResult = { byteSize: number };
 export type CloudCollectionsPublishResult = { collections: number; artworks: number; uploaded: number; revision: string };
 export type CloudLibraryRestoreReport = {
@@ -1001,6 +1002,7 @@ export interface LibraryGateway {
   setCloudApiToken(token: string): Promise<CloudCredentialStatus>;
   deleteCloudApiToken(): Promise<CloudCredentialStatus>;
   testCloudCaptureConnection(): Promise<CloudCaptureConnectionStatus>;
+  createExtensionPairing?(): Promise<ExtensionPairingLink>;
   pushCloudMetadataBackup?(): Promise<CloudMetadataBackupResult>;
   pushCloudCollections?(onProgress?: (progress: import("./publicationJobs").PublishProgress) => void): Promise<CloudCollectionsPublishResult>;
   restoreCloudMetadataBackup?(): Promise<CloudLibraryRestoreReport>;
