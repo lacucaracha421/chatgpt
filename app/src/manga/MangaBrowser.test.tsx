@@ -4,8 +4,27 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { LibraryGateway, MangaSeries } from "../library/types";
 import { MangaBrowser } from "./MangaBrowser";
+import { ChromeSettingsDock, ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
+import { WindowControls } from "../layout/WindowControls";
 
 afterEach(cleanup);
+
+function renderBrowser(gateway: LibraryGateway, onOpenSeries?: (series: MangaSeries) => void) {
+  return render(
+    <LibraryProvider gateway={gateway}>
+      <WorkspaceChromeProvider scope="manga-test">
+        <aside aria-label="망가 인덱스">
+          <ChromeTarget name="actions" />
+          <ChromeTarget name="search" />
+          <ChromeTarget name="navigation" />
+          <ChromeSettingsDock />
+        </aside>
+        <div data-testid="shared-titlebar"><ChromeTarget name="header" /><WindowControls /></div>
+        <MangaBrowser onOpenSeries={onOpenSeries} />
+      </WorkspaceChromeProvider>
+    </LibraryProvider>,
+  );
+}
 
 const series: MangaSeries[] = [
   { id: "s1", title: "T1", author: "a", galleryId: null, pageCount: 60 },
@@ -15,7 +34,7 @@ const series: MangaSeries[] = [
 describe("MangaBrowser", () => {
   it("scans and shows the cover grid when the root is set", async () => {
     const gateway = createGateway({ root: "C:\\manga", series });
-    const { container } = render(<LibraryProvider gateway={gateway}><MangaBrowser /></LibraryProvider>);
+    const { container } = renderBrowser(gateway);
     await userEvent.click(await screen.findByRole("button", { name: "로컬" }));
     await waitFor(() => expect(gateway.scanManga).toHaveBeenCalled());
     expect(await screen.findByText("T1")).toBeVisible();
@@ -30,25 +49,27 @@ describe("MangaBrowser", () => {
     const gateway = createGateway({ root: "C:\\manga", series });
     gateway.scanManga = vi.fn().mockReturnValue(scanning);
 
-    render(<LibraryProvider gateway={gateway}><MangaBrowser /></LibraryProvider>);
+    renderBrowser(gateway);
     await userEvent.click(await screen.findByRole("button", { name: "로컬" }));
 
     expect(await screen.findByText("T1")).toBeVisible();
-    expect(screen.getByRole("button", { name: "스캔 중" })).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent("폴더 스캔 중");
+    await userEvent.click(screen.getByRole("button", { name: "망가 관리" }));
+    expect(screen.getByRole("menuitem", { name: "스캔 중" })).toBeDisabled();
     finishScan();
-    await waitFor(() => expect(screen.getByRole("button", { name: "새로고침" })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: "새로고침" })).toBeEnabled());
   });
 
   it("shows the setup prompt when the root is not set", async () => {
     const gateway = createGateway({ root: null, series: [] });
-    render(<LibraryProvider gateway={gateway}><MangaBrowser /></LibraryProvider>);
+    renderBrowser(gateway);
     await userEvent.click(await screen.findByRole("button", { name: "로컬" }));
     expect(await screen.findByText("망가 폴더가 설정되지 않았습니다")).toBeVisible();
   });
 
   it("uses the shared view toolbar with window controls", async () => {
     const gateway = createGateway({ root: "C:\\manga", series });
-    const { container } = render(<LibraryProvider gateway={gateway}><MangaBrowser /></LibraryProvider>);
+    const { container } = renderBrowser(gateway);
     await userEvent.click(await screen.findByRole("button", { name: "로컬" }));
     expect(await screen.findByRole("toolbar")).toBeInTheDocument();
     expect(container.querySelector(".view-toolbar")).toBeInTheDocument();
@@ -58,11 +79,13 @@ describe("MangaBrowser", () => {
   it("filters by title or author and reports the visible count", async () => {
     const gateway = createGateway({ root: "C:\\manga", series });
     const user = userEvent.setup();
-    render(<LibraryProvider gateway={gateway}><MangaBrowser /></LibraryProvider>);
+    renderBrowser(gateway);
     await userEvent.click(await screen.findByRole("button", { name: "로컬" }));
 
     expect(await screen.findByText("2개 작품")).toBeVisible();
-    await user.type(screen.getByRole("searchbox", { name: "망가 검색" }), "b");
+    await user.click(screen.getByRole("button", { name: "망가 검색" }));
+    await user.type(await screen.findByRole("searchbox", { name: "망가 검색" }), "b");
+    await user.click(screen.getByRole("button", { name: "검색" }));
 
     expect(screen.queryByText("T1")).not.toBeInTheDocument();
     expect(screen.getByText("T2")).toBeVisible();
@@ -72,12 +95,13 @@ describe("MangaBrowser", () => {
   it("sorts manga and changes the card density", async () => {
     const gateway = createGateway({ root: "C:\\manga", series: [series[1]!, series[0]!] });
     const user = userEvent.setup();
-    const { container } = render(<LibraryProvider gateway={gateway}><MangaBrowser /></LibraryProvider>);
+    const { container } = renderBrowser(gateway);
     await userEvent.click(await screen.findByRole("button", { name: "로컬" }));
     await screen.findByText("T1");
 
-    await user.click(screen.getByRole("button", { name: "정렬: 최근 변경순" }));
-    await user.click(screen.getByRole("menuitemradio", { name: "페이지 많은 순" }));
+    await user.click(screen.getByRole("button", { name: "보기 설정" }));
+    await screen.findByRole("dialog");
+    await user.selectOptions(screen.getByRole("combobox", { name: "정렬" }), "pages_desc");
     expect(container.querySelectorAll(".manga-browser__cover-title")[0]).toHaveTextContent("T1");
 
     fireEvent.change(screen.getByRole("slider", { name: "카드 크기" }), { target: { value: "200" } });
@@ -87,7 +111,7 @@ describe("MangaBrowser", () => {
   it("opens the viewer when a cover is clicked", async () => {
     const gateway = createGateway({ root: "C:\\manga", series });
     const onOpenSeries = vi.fn();
-    render(<LibraryProvider gateway={gateway}><MangaBrowser onOpenSeries={onOpenSeries} /></LibraryProvider>);
+    renderBrowser(gateway, onOpenSeries);
     await userEvent.click(await screen.findByRole("button", { name: "로컬" }));
     await userEvent.click(await screen.findByText("T1"));
     expect(onOpenSeries).toHaveBeenCalledWith(series[0]);
@@ -118,10 +142,11 @@ describe("MangaBrowser", () => {
       existingBookmarks: 1,
     });
 
-    render(<LibraryProvider gateway={gateway}><MangaBrowser /></LibraryProvider>);
+    renderBrowser(gateway);
     await userEvent.click(await screen.findByRole("button", { name: "로컬" }));
     await screen.findByText("T1");
-    await userEvent.click(screen.getByRole("button", { name: "카탈로그로 복구" }));
+    await userEvent.click(screen.getByRole("button", { name: "망가 관리" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "카탈로그로 복구" }));
 
     expect(await screen.findByRole("region", { name: "카탈로그 복구 미리보기" })).toBeVisible();
     expect(screen.getByText("정확한 현행 작품 2개")).toBeVisible();
@@ -169,10 +194,11 @@ describe("MangaBrowser", () => {
       existingBookmarks: 0,
     });
 
-    render(<LibraryProvider gateway={gateway}><MangaBrowser /></LibraryProvider>);
+    renderBrowser(gateway);
     await userEvent.click(await screen.findByRole("button", { name: "로컬" }));
     await screen.findByText("T1");
-    await userEvent.click(screen.getByRole("button", { name: "카탈로그로 복구" }));
+    await userEvent.click(screen.getByRole("button", { name: "망가 관리" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "카탈로그로 복구" }));
 
     expect(await screen.findByText("과거 작품 계보 제안 (자동 등록 안 함)")).toBeVisible();
     expect(screen.getByText("→ 현행판 C New (ID 12)")).toBeVisible();
@@ -197,10 +223,11 @@ describe("MangaBrowser", () => {
     };
     gateway.previewMangaCatalogRecovery = vi.fn().mockResolvedValue(firstPreview);
     gateway.refreshMangaCatalogRecoveryRemote = vi.fn().mockResolvedValue({ attemptedCount: 1, importedCount: 0, notFoundCount: 1 });
-    render(<LibraryProvider gateway={gateway}><MangaBrowser /></LibraryProvider>);
+    renderBrowser(gateway);
     await userEvent.click(await screen.findByRole("button", { name: "로컬" }));
     await screen.findByText("T1");
-    await userEvent.click(screen.getByRole("button", { name: "카탈로그로 복구" }));
+    await userEvent.click(screen.getByRole("button", { name: "망가 관리" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "카탈로그로 복구" }));
     expect((await screen.findAllByText(/카탈로그에 없는 로컬\/자체번역 작품일 수 있습니다/)).length).toBe(2);
     await userEvent.click(screen.getByRole("button", { name: "원격 ID 확인 1개" }));
     await waitFor(() => expect(gateway.refreshMangaCatalogRecoveryRemote).toHaveBeenCalledOnce());
@@ -209,7 +236,7 @@ describe("MangaBrowser", () => {
 
   it("offers catalog and bookmarks separately and opens bookmarks directly from local", async () => {
     const gateway = createGateway({ root: "C:\\manga", series });
-    render(<LibraryProvider gateway={gateway}><MangaBrowser /></LibraryProvider>);
+    renderBrowser(gateway);
 
     expect(await screen.findByText("온라인 카탈로그가 없습니다")).toBeVisible();
     const sourceButtons = screen.getByLabelText("망가 출처").querySelectorAll("button");

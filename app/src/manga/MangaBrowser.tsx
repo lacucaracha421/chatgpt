@@ -1,4 +1,4 @@
-import { ArrowPathIcon, ArrowsPointingOutIcon, Bars3BottomLeftIcon, BarsArrowDownIcon, ClockIcon, DocumentTextIcon, LifebuoyIcon, MagnifyingGlassIcon, UserIcon } from "@heroicons/react/24/outline";
+import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useLibrary } from "../library/LibraryContext";
 import type { CatalogScope, MangaCatalogRecoveryPreview, MangaSeries } from "../library/types";
@@ -150,14 +150,14 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
 
   if (root === undefined) {
     return <section className="manga-browser" aria-label="망가">
-      <ViewToolbar title="망가" ariaLabel="망가 도구" chrome={{ navigation: localNavigation }} children={localNavigation} />
+      <ViewToolbar title="망가" ariaLabel="망가 도구" chrome={{ navigation: localNavigation }} />
       <div className="manga-browser__content"><Skeleton className="manga-browser__skeleton" label="망가를 불러오는 중" /></div>
     </section>;
   }
 
   if (!root) {
     return <section className="manga-browser" aria-label="망가">
-      <ViewToolbar title="망가" ariaLabel="망가 도구" chrome={{ navigation: localNavigation }} children={localNavigation} />
+      <ViewToolbar title="망가" ariaLabel="망가 도구" chrome={{ navigation: localNavigation }} />
       <div className="manga-browser__content"><EmptyState title="망가 폴더가 설정되지 않았습니다">설정에서 망가 폴더를 선택하면 여기에 표시됩니다.</EmptyState></div>
     </section>;
   }
@@ -187,28 +187,6 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
           <fieldset className="chrome-settings-group"><legend>표시</legend><Toggle aria-label="비공개 모드" checked={privacyMode} onChange={(event) => setPrivacyMode(event.target.checked)}>비공개 모드</Toggle></fieldset>
         </>,
       }}
-      children={<>
-        {localNavigation}
-        <span className="manga-browser__count">{countLabel}</span>
-        {scanning && <span className="manga-browser__scan-status" role="status">폴더 스캔 중</span>}
-        <label className="manga-browser__search">
-          <MagnifyingGlassIcon aria-hidden="true" />
-          <input type="search" aria-label="망가 검색" placeholder="제목 또는 작가 검색" value={query} onChange={(event) => setQuery(event.target.value)} />
-        </label>
-      </>}
-      actions={<>
-        <span className="manga-browser__icon-control" title={`정렬: ${mangaSortLabel(sort)}`}>
-          <Menu label={`정렬: ${mangaSortLabel(sort)}`} trigger={<BarsArrowDownIcon aria-hidden="true" />} items={[
-            { id: "recent", label: "최근 변경순", icon: <ClockIcon />, group: "sort", selected: sort === "recent", onSelect: () => setSort("recent") },
-            { id: "title_asc", label: "제목순", icon: <Bars3BottomLeftIcon />, group: "sort", selected: sort === "title_asc", onSelect: () => setSort("title_asc") },
-            { id: "author_asc", label: "작가순", icon: <UserIcon />, group: "sort", selected: sort === "author_asc", onSelect: () => setSort("author_asc") },
-            { id: "pages_desc", label: "페이지 많은 순", icon: <DocumentTextIcon />, group: "sort", selected: sort === "pages_desc", onSelect: () => setSort("pages_desc") },
-          ]} />
-        </span>
-        <span className="manga-browser__size-control" title="카드 크기"><ArrowsPointingOutIcon aria-hidden="true" /><Slider label="카드 크기" min={112} max={220} step={8} value={cardWidth} onChange={(event) => setCardWidth(Number(event.target.value))} /></span>
-        {gateway.previewMangaCatalogRecovery && <Button size="icon" variant="ghost" title="카탈로그로 복구" aria-label="카탈로그로 복구" disabled={recoveryBusy} onClick={() => void previewRecovery()}><LifebuoyIcon aria-hidden="true" /></Button>}
-        <Button size="icon" variant="ghost" title={scanning ? "스캔 중" : "새로고침"} aria-label={scanning ? "스캔 중" : "새로고침"} disabled={scanning} onClick={() => void refreshSeries()}><ArrowPathIcon aria-hidden="true" /></Button>
-      </>}
     />
     {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
     {recovery && <MangaRecoveryPanel preview={recovery} busy={recoveryBusy} onRemoteLookup={gateway.refreshMangaCatalogRecoveryRemote ? () => void refreshRecoveryRemote() : undefined} onApply={() => void applyRecovery()} onApplySelection={(mangaId, workId) => void applyRecoverySelection(mangaId, workId)} onClose={() => setRecovery(null)} />}

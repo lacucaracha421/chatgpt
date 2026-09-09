@@ -723,7 +723,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                   <SettingsView
                     restoring={maintenance === "restore"}
                     onRestore={restoreBackup}
-                    onExit={() => { navigateBack(settingsReturnViewRef.current); }}
+                    onExit={() => { setView(settingsReturnViewRef.current); }}
                     onImportFolder={beginMetadataImport}
                     metadataImportRunning={metadataImportWorks.some((work) => work.status === "running")}
                     onCollectionsChanged={refreshCollections}

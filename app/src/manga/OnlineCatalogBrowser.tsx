@@ -1,4 +1,4 @@
-import { ArrowDownTrayIcon, ArrowPathIcon, BarsArrowDownIcon, ClockIcon, EyeIcon, EyeSlashIcon, FireIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
+import { ArrowDownTrayIcon, ArrowPathIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { ViewToolbar } from "../layout/ViewToolbar";
@@ -24,7 +24,6 @@ import type {
 } from "../library/types";
 import { Button } from "../shared/ui/Button";
 import { EmptyState } from "../shared/ui/EmptyState";
-import { Menu } from "../shared/ui/Menu";
 import { Select } from "../shared/ui/Select";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { Toast } from "../shared/ui/Toast";
@@ -493,25 +492,6 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all" }: On
           {searchForm}<div className="ui-dialog__actions"><Button type="button" variant="ghost" onClick={() => { setSearchOpen(false); setQuery(appliedQuery); closeSuggestions(); }}>취소</Button><Button type="button" variant="primary" onClick={() => { closeSuggestions(); void search(query.trim()); }}>검색</Button></div>
         </SearchSurface> : undefined,
       }}
-      children={<>
-        {catalogNavigation}
-        <span className="manga-browser__count">{totalCount !== null ? `${totalCount.toLocaleString()}개 결과` : status?.installed ? countError ? "결과 수 확인 실패" : "결과 수 계산 중…" : ""}</span>
-        {searchForm}
-      </>}
-      actions={status?.installed ? <>
-        <Button size="icon" variant={revealBlocked ? "primary" : "ghost"} title="숨긴 결과 표시" aria-label="숨긴 결과 표시" aria-pressed={revealBlocked} disabled={loading} onClick={toggleRevealBlocked}><EyeSlashIcon aria-hidden="true" /></Button>
-        <span className="manga-browser__icon-control" title={`정렬: ${catalogSortLabel(sort)}`}>
-          <Menu label={`정렬: ${catalogSortLabel(sort)}`} trigger={<BarsArrowDownIcon aria-hidden="true" />} items={[
-            { id: "latest", label: "최신순", icon: <ClockIcon />, selected: sort === "latest", onSelect: () => { setSort("latest"); void search(query.trim(), "latest", scope, 0); } },
-            { id: "views", label: "조회순", icon: <EyeIcon />, selected: sort === "views", onSelect: () => { setSort("views"); void search(query.trim(), "views", scope, 0); } },
-            { id: "hotDay", label: "오늘 인기", icon: <FireIcon />, selected: sort === "hotDay", onSelect: () => { setSort("hotDay"); void search(query.trim(), "hotDay", scope, 0); } },
-            { id: "hotWeek", label: "주간 인기", icon: <FireIcon />, selected: sort === "hotWeek", onSelect: () => { setSort("hotWeek"); void search(query.trim(), "hotWeek", scope, 0); } },
-            { id: "hotMonth", label: "월간 인기", icon: <FireIcon />, selected: sort === "hotMonth", onSelect: () => { setSort("hotMonth"); void search(query.trim(), "hotMonth", scope, 0); } },
-          ]} />
-        </span>
-        <Button size="icon" variant="ghost" title={updating ? "갱신 중…" : "신규 작품 갱신"} aria-label="신규 작품 갱신" disabled={updating} onClick={() => void updateCatalog()}><ArrowDownTrayIcon aria-hidden="true" /></Button>
-        <Button size="icon" variant="ghost" title="새로고침" aria-label="새로고침" disabled={loading} onClick={() => refreshSearch.current()}><ArrowPathIcon aria-hidden="true" /></Button>
-      </> : undefined}
     />
     {status?.installed && <div className="online-catalog__sync-summary">
       {!workspace && <Button size="sm" variant="ghost" onClick={() => setReviewOpen(true)}>중복 후보 검토</Button>}

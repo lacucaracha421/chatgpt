@@ -76,6 +76,9 @@
 .chrome-context-status { margin-left: auto; color: var(--color-muted); display: flex; align-items: center; gap: var(--space-2); min-width: 0; font-size: var(--text-sm); white-space: nowrap; }
 .workspace-content .collection-browser__heading { display: none; }
 .workspace-content .collection-browser__stage { padding-top: var(--space-4); }
+
+/* aria-disabled stays focusable so its tooltip is keyboard-reachable. */
+.workspace-index__head-actions .ui-button--unsupported { opacity: .5; cursor: not-allowed; }
 .workspace-index .collection-browser__segment, .workspace-index .manga-source-tabs { display: flex; flex-direction: column; align-items: stretch; width: 100%; margin: 0 0 var(--space-4); gap: var(--space-1); }
 .workspace-index .collection-browser__segment-button { text-align: left; justify-content: flex-start; min-height: 34px; padding: var(--space-2); }
 .workspace-index .collection-browser__segment-button::after { margin-left: auto; }

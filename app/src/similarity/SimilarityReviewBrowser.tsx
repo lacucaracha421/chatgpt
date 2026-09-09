@@ -1,4 +1,3 @@
-import { XMarkIcon } from "@heroicons/react/24/outline";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatBytes, localDate, sourceLabel } from "../assets/assetMetadata";
 import { assetUrl } from "../assets/mediaUrl";
@@ -97,8 +96,7 @@ function ImageSimilarityReviewBrowser({ gateway, onCountChange, onClose }: Props
   return <section className="similarity-review" aria-label="유사 검토" onKeyDown={(event) => event.stopPropagation()}>
     <ViewToolbar
       title="유사 검토"
-      children={review && initialTotal > 0 ? <span>{current} / {initialTotal}</span> : undefined}
-      actions={<Button size="icon" variant="ghost" aria-label="유사 검토 닫기" onClick={onClose}><XMarkIcon aria-hidden="true" /></Button>}
+      chrome={{ status: review && initialTotal > 0 ? <span>{current} / {initialTotal}</span> : undefined }}
     />
     {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
     {loading ? <Skeleton className="similarity-review__skeleton" label="유사 이미지를 불러오는 중" /> : !review ? (

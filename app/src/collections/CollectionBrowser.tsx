@@ -1,4 +1,4 @@
-import { ArrowDownIcon, ArrowUpIcon, Bars3BottomLeftIcon, BarsArrowDownIcon, CalendarDaysIcon, ClockIcon, MagnifyingGlassIcon, PlusIcon, StarIcon } from "@heroicons/react/24/outline";
+import { PlusIcon } from "@heroicons/react/24/outline";
 import { useLayoutEffect, useRef, useState } from "react";
 import { collectionSourceThumbnailUrl, thumbnailUrl, workArtworkThumbnailUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
@@ -208,44 +208,14 @@ export function CollectionBrowser({
       <ViewToolbar
         title={workspace ? `${sectionLabel} ${showcase ? "쇼케이스" : "컬렉션"}` : "컬렉션"}
         ariaLabel="컬렉션 도구"
-        actions={indexActions}
         chrome={{
           actions: indexActions,
           navigation: <><ModeSegment showcase={showcase} onChange={setShowcase} /><span className="workspace-section-label">{showcase ? "전시관" : "작품 유형"}</span><TypeSegment current={typeFilter} onChange={setTypeFilter} />{!showcase && <div className="chrome-index-controls chrome-settings-controls">{indexControls}</div>}</>,
           summary: `${sortLabel(libraryState.sort)}${libraryState.rating !== "all" ? ` · 내 별점 ${ratingLabel(libraryState.rating)}` : ""}`,
           status: <span>{showcase ? "선정 작품" : "작품"} {visible.length}개</span>,
           search: showcase ? undefined : { scope: `${sectionLabel} 컬렉션`, query: libraryState.query, label: "제목 검색", placeholder: "작품 제목 검색", onApply: (query) => patchLibraryState({ query }) },
-
         }}
-      >
-        <div className="collection-browser__filters">
-          <ModeSegment showcase={showcase} onChange={setShowcase} />
-          <TypeSegment current={typeFilter} onChange={setTypeFilter} />
-          {!showcase && <div className="collection-browser__library-controls">
-            <label className="manga-browser__search">
-              <MagnifyingGlassIcon aria-hidden="true" />
-              <input type="search" aria-label="제목 검색" placeholder="제목 검색" value={libraryState.query} onChange={(event) => patchLibraryState({ query: event.target.value })} />
-            </label>
-            <span className="collection-browser__icon-control" title={`정렬: ${sortLabel(libraryState.sort)}`}>
-              <Menu label={`정렬: ${sortLabel(libraryState.sort)}`} trigger={<BarsArrowDownIcon aria-hidden="true" />} items={[
-                { id: "media_date", label: "출시·출간·개봉일", icon: <CalendarDaysIcon />, selected: libraryState.sort === "media_date", onSelect: () => patchLibraryState({ sort: "media_date" }) },
-                { id: "recent", label: "최근 추가", icon: <ClockIcon />, selected: libraryState.sort === "recent", onSelect: () => patchLibraryState({ sort: "recent" }) },
-                { id: "name", label: "제목", icon: <Bars3BottomLeftIcon />, selected: libraryState.sort === "name", onSelect: () => patchLibraryState({ sort: "name" }) },
-              ]} />
-            </span>
-            <Button size="icon" variant="ghost" title={libraryState.direction === "desc" ? "내림차순" : "오름차순"} aria-label={libraryState.direction === "desc" ? "내림차순" : "오름차순"} onClick={() => patchLibraryState({ direction: libraryState.direction === "desc" ? "asc" : "desc" })}>
-              {libraryState.direction === "desc" ? <ArrowDownIcon aria-hidden="true" /> : <ArrowUpIcon aria-hidden="true" />}
-            </Button>
-            <span className="collection-browser__icon-control" title={`내 별점: ${ratingLabel(libraryState.rating)}`}>
-              <Menu label={`내 별점: ${ratingLabel(libraryState.rating)}`} trigger={<StarIcon aria-hidden="true" />} items={[
-                { id: "all", label: "전체", selected: libraryState.rating === "all", onSelect: () => patchLibraryState({ rating: "all" }) },
-                ...[5, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1, 0.5, 0].map((rating) => ({ id: String(rating), label: rating.toFixed(1), selected: libraryState.rating === rating, onSelect: () => patchLibraryState({ rating }) })),
-                { id: "unrated", label: "미평가", selected: libraryState.rating === "unrated", onSelect: () => patchLibraryState({ rating: "unrated" }) },
-              ]} />
-            </span>
-          </div>}
-        </div>
-      </ViewToolbar>
+      />
       {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
       <div className={`collection-browser__stage${showcase ? " collection-browser__stage--showcase" : ""}`}>
         {!workspace && <div className="collection-browser__heading">

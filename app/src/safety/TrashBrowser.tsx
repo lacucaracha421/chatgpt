@@ -154,7 +154,9 @@ export function TrashBrowser({ onCountChange }: { onCountChange?: (count: number
   return <section className="trash-browser" aria-label="휴지통">
     <ViewToolbar
       title="휴지통"
-      actions={<Button variant="danger" onClick={() => setConfirmEmpty(true)} disabled={!page || page.totalCount === 0 || mutationPending}>휴지통 비우기</Button>}
+      chrome={{
+        actions: <Button variant="danger" onClick={() => setConfirmEmpty(true)} disabled={!page || page.totalCount === 0 || mutationPending}>휴지통 비우기</Button>,
+      }}
     />
     <details className="trash-browser__policy">
       <summary>보존 설정 <span>{policy ? automaticDeletion ? `${policy.retentionDays}일 후 자동 삭제` : "자동 삭제 안 함" : "설정 확인 중…"}</span></summary>

@@ -73,7 +73,7 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
         <div className="workspace-index__head-actions">
           {view.kind === "settings" && <span className="workspace-section-label">설정</span>}
           <ChromeTarget name="search" />
-          {view.kind !== "settings" && !chrome?.meta?.search && <span title="이 화면에는 별도의 텍스트 검색이 없습니다"><button type="button" className="ui-button ui-button--icon ui-button--ghost" disabled aria-label="검색 미지원"><MagnifyingGlassIcon aria-hidden="true" /></button></span>}
+          {view.kind !== "settings" && !chrome?.meta?.search && <span title="이 화면에는 별도의 텍스트 검색이 없습니다"><button type="button" className="ui-button ui-button--icon ui-button--ghost ui-button--unsupported" aria-disabled="true" aria-label="검색 미지원" onClick={(event) => event.preventDefault()}><MagnifyingGlassIcon aria-hidden="true" /></button></span>}
           <ChromeTarget name="actions" />
           {area === "assets" && !chrome?.meta?.actions && onImportFiles && <button type="button" className="ui-button ui-button--icon ui-button--ghost" aria-label="파일 가져오기" data-tooltip="선택한 파일을 라이브러리로 가져오기" onClick={onImportFiles}><PlusIcon aria-hidden="true" /></button>}
         </div>

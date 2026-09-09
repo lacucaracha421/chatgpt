@@ -10,6 +10,7 @@ import { useState } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
+import { ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
 import type { CollectionSummary, LibraryGateway } from "../library/types";
 import { CollectionBrowser } from "./CollectionBrowser";
 import { createDefaultCollectionLibraryState } from "./collectionLibrary";
@@ -66,7 +67,15 @@ function renderBrowser(props: {
     /></LibraryProvider>;
   }
   render(
-    <Harness />,
+    <WorkspaceChromeProvider scope="collections-test">
+      <aside aria-label="index">
+        <ChromeTarget name="header" />
+        <ChromeTarget name="actions" />
+        <ChromeTarget name="search" />
+        <ChromeTarget name="navigation" />
+      </aside>
+      <Harness />
+    </WorkspaceChromeProvider>,
   );
   return gateway;
 }
@@ -91,15 +100,20 @@ describe("CollectionBrowser", () => {
     renderBrowser({ collections: [sample], typeFilter: "game", showcase: false, libraryState: defaults.game });
     expect(screen.getByRole("button", { name: "라이브러리" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "쇼케이스" })).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByRole("searchbox", { name: "제목 검색" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "정렬: 출시·출간·개봉일" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "내 별점: 전체" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "제목 검색" })).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "정렬" })).toHaveValue("media_date");
+    expect(screen.getByRole("combobox", { name: "방향" })).toHaveValue("desc");
+    expect(screen.getByRole("combobox", { name: "내 별점" })).toHaveValue("all");
   });
 
   it("updates only the active media browse state", async () => {
     const onLibraryStateChange = vi.fn();
     renderBrowser({ collections: [sample], typeFilter: "game", showcase: false, onLibraryStateChange });
-    await userEvent.setup().type(screen.getByRole("searchbox", { name: "제목 검색" }), "nier");
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "제목 검색" }));
+    await user.type(await screen.findByRole("searchbox", { name: "제목 검색" }), "nier");
+    expect(onLibraryStateChange).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "검색" }));
     expect(onLibraryStateChange).toHaveBeenLastCalledWith({ ...createDefaultCollectionLibraryState().game, query: "nier" });
   });
 
@@ -107,11 +121,11 @@ describe("CollectionBrowser", () => {
     const onLibraryStateChange = vi.fn();
     renderBrowser({ collections: [sample], typeFilter: "game", showcase: false, onLibraryStateChange });
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "내림차순" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "방향" }), "asc");
     expect(onLibraryStateChange).toHaveBeenLastCalledWith({ ...createDefaultCollectionLibraryState().game, direction: "asc" });
-    await user.click(screen.getByRole("button", { name: "내 별점: 전체" }));
-    expect(screen.getByRole("menuitem", { name: "미평가" })).toBeInTheDocument();
-    await user.click(screen.getByRole("menuitem", { name: "4.5" }));
+    const rating = screen.getByRole("combobox", { name: "내 별점" });
+    expect(screen.getByRole("option", { name: "미평가" })).toBeInTheDocument();
+    await user.selectOptions(rating, "4.5");
     expect(onLibraryStateChange).toHaveBeenLastCalledWith({ ...createDefaultCollectionLibraryState().game, direction: "asc", rating: 4.5 });
   });
 

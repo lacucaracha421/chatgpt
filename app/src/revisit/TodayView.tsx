@@ -14,7 +14,7 @@ function localDateString(date: Date): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-export function TodayView({ onOpenBundle, toolbarContent }: { onOpenBundle?: (bundleId: string) => void; toolbarContent?: ReactNode }) {
+export function TodayView({ onOpenBundle, navigation }: { onOpenBundle?: (bundleId: string) => void; navigation?: ReactNode }) {
   const { gateway } = useLibrary();
   const [slate, setSlate] = useState<RevisitSlate | null>(null);
   const [hiddenBundleIds, setHiddenBundleIds] = useState<string[]>([]);
@@ -79,10 +79,11 @@ export function TodayView({ onOpenBundle, toolbarContent }: { onOpenBundle?: (bu
     <ViewToolbar
       title="다시보기"
       ariaLabel="다시보기 도구"
-      actions={<Button size="icon" variant="ghost" title="전체 다시 섞기" aria-label="전체 다시 섞기" disabled={pending || slate === null} onClick={reshuffleAll}><ArrowPathIcon aria-hidden="true" /></Button>}
-    >
-      {toolbarContent}
-    </ViewToolbar>
+      chrome={{
+        navigation,
+        actions: <Button size="icon" variant="ghost" title="전체 다시 섞기" aria-label="전체 다시 섞기" disabled={pending || slate === null} onClick={reshuffleAll}><ArrowPathIcon aria-hidden="true" /></Button>,
+      }}
+    />
     <div className="revisit-today" aria-label="오늘">
       {error && slate === null ? <EmptyState title={error} /> : slate === null ? <Skeleton className="revisit-today__skeleton" label="오늘의 다시보기를 불러오는 중" /> : <>
         {error && <div role="alert" className="revisit-today__error">{error}</div>}

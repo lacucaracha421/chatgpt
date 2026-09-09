@@ -427,6 +427,7 @@ describe("App", () => {
 
     await waitFor(() => expect(libraryGateway.restoreMetadataBackup).toHaveBeenCalledWith("backup-1"));
     expect(await screen.findByText("복구가 완료되었습니다.")).toBeVisible();
+    await waitFor(() => expect(screen.getByRole("button", { name: "이 시점으로 복구" })).toBeEnabled());
     await user.keyboard("{Escape}");
     await waitFor(() => expect(libraryGateway.listClassifications).toHaveBeenCalledTimes(classificationCalls + 1));
     await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenCalledTimes(assetCalls + 1));

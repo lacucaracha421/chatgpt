@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
+import { WorkspaceChromeProvider, ChromeTarget } from "../layout/WorkspaceChrome";
 import { LibraryProvider } from "../library/LibraryContext";
 import { libraryGateway } from "../library/client";
 import { RevisitBrowser } from "./RevisitBrowser";
@@ -17,7 +18,12 @@ it("switches from 오늘 to 날짜와 작가가 있는 둘러보기", async () =
   const user = userEvent.setup();
   render(
     <LibraryProvider gateway={libraryGateway}>
-      <RevisitBrowser />
+      <WorkspaceChromeProvider scope="revisit-test">
+        <aside>
+          <ChromeTarget name="navigation" data-testid="index-navigation" />
+        </aside>
+        <RevisitBrowser />
+      </WorkspaceChromeProvider>
     </LibraryProvider>,
   );
 

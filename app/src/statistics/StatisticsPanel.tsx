@@ -54,7 +54,7 @@ export function StatisticsPanel() {
     return () => { cancelled = true; };
   }, [gateway, library?.root, revision]);
   return <main className="statistics-panel" aria-label="개인 통계">
-    <ViewToolbar title="통계" actions={<Button disabled={!library || loading} onClick={() => setRevision(value => value + 1)}>새로고침</Button>} />
+    <ViewToolbar title="통계" chrome={{ actions: <Button disabled={!library || loading} onClick={() => setRevision(value => value + 1)}>새로고침</Button> }} />
     <p>현재 보관 상태와 실제로 기록된 열기 활동입니다.</p>
     {!library && <p>라이브러리를 열면 통계를 볼 수 있습니다.</p>}
     {loading && <p role="status">통계를 확인하고 있습니다.</p>}
