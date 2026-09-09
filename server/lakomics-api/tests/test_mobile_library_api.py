@@ -89,6 +89,16 @@ class MobileLibraryApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
 
+    def test_tree_membership_uses_current_classification_after_move(self):
+        self.commit_asset("tree-asset", classification_ids=[OTHER_CLASSIFICATION_ID])
+        path = f"/v1/library/classifications/{OTHER_CLASSIFICATION_ID}/contains/tree-asset"
+        self.assertTrue(self.client.get(path, headers=self.auth).json()["is_child"])
+        self.commit_asset("tree-asset", classification_ids=[CLASSIFICATION_ID])
+        self.assertFalse(self.client.get(path, headers=self.auth).json()["is_child"])
+        self.assertTrue(self.client.get(f"/v1/library/classifications/{CLASSIFICATION_ID}/contains/tree-asset", headers=self.auth).json()["is_child"])
+        self.assertEqual(self.client.get(path).status_code, 401)
+        self.assertFalse(self.client.get(path.replace("tree-asset", "missing"), headers=self.auth).json()["is_child"])
+
     def prepare_asset(
         self,
         asset_id: str,

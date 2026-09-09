@@ -698,9 +698,9 @@ fn serve_multi_capture_list(
         let captures = json!({ "captures": captures });
         let mut list = server.recv().unwrap();
         seen.push(list.url().to_string());
-        list.respond(json_response(captures)).unwrap();
+        list.respond(json_response(captures.clone())).unwrap();
         // 각 캡처의 ticket → download → acknowledge 순서를 상한까지 받는다.
-        for _ in 0..capture_count * 3 + 4 {
+        for _ in 0..capture_count * 3 + 12 {
             use std::time::Duration;
             let mut request = match server.recv_timeout(Duration::from_secs(15)) {
                 Ok(Some(request)) => request,
@@ -709,8 +709,12 @@ fn serve_multi_capture_list(
             let url = request.url().to_string();
             let failing = failing_ticket_ids
                 .iter()
-                .any(|id| url.starts_with(&format!("/v1/captures/{id}/download")));
+                .any(|id| url.starts_with(&format!("/v1/captures/{id}/")));
             seen.push(url.clone());
+            if url.starts_with("/v1/captures/pending") {
+                request.respond(json_response(if url.contains("after_id=") { json!({"captures":[]}) } else { captures.clone() })).unwrap();
+                continue;
+            }
             if url.starts_with("/v1/captures/") && url != "/v1/captures/pending" {
                 if url.ends_with("/download") {
                     if failing {
@@ -726,7 +730,7 @@ fn serve_multi_capture_list(
                             .unwrap();
                     }
                 } else if url.ends_with("/acknowledge") {
-                    request.respond(Response::empty(200)).unwrap();
+                    request.respond(Response::empty(if failing {500} else {200})).unwrap();
                 } else {
                     request.respond(Response::empty(404)).unwrap();
                 }
@@ -1002,7 +1006,20 @@ fn review_pending_capture_is_not_acknowledged() {
         .optional()
         .unwrap();
     assert_eq!(import_record, None);
-    handle.join().unwrap();
+    let client = CloudClient::new(&base_url).unwrap();
+    let second = library.sync_next_cloud_capture_with(&client, "test-token").unwrap();
+    assert_eq!(second.review_pending, 1);
+    assert_eq!(second.acknowledged, 0);
+    let review_id: String = library.connection().unwrap().query_row("SELECT review_id FROM cloud_capture_reviews WHERE capture_id='capture-similar'", [], |r| r.get(0)).unwrap();
+    library.decide_similarity_review(crate::library::models::SimilarityDecisionRequest {
+        review_id, decision: crate::library::models::SimilarityDecision::KeepExisting,
+    }).unwrap();
+    let third = library.sync_next_cloud_capture_with(&client, "test-token").unwrap();
+    assert_eq!(third.acknowledged, 1);
+    assert_eq!(third.review_pending, 0);
+    let seen = handle.join().unwrap();
+    assert_eq!(seen.iter().filter(|url| url.ends_with("/download")).count(), 1);
+    assert_eq!(seen.iter().filter(|url| url.ends_with("/acknowledge")).count(), 1);
 }
 
 #[test]
@@ -1133,4 +1150,59 @@ fn header_value<'a>(request: &'a tiny_http::Request, name: &str) -> Option<&'a s
 fn json_response(value: Value) -> Response<std::io::Cursor<Vec<u8>>> {
     Response::from_data(serde_json::to_vec(&value).unwrap())
         .with_header(Header::from_bytes("Content-Type", "application/json").unwrap())
+}
+
+#[test]
+fn persistent_failed_prefix_does_not_starve_the_twenty_sixth_capture() {
+    let server = Server::http("127.0.0.1:0").unwrap();
+    let addr = server.server_addr().to_string();
+    let base = format!("http://{addr}");
+    let handle = std::thread::spawn(move || {
+        loop {
+            let Some(request) = server.recv_timeout(std::time::Duration::from_secs(10)).unwrap() else { break; };
+            let url = request.url().to_owned();
+            if url.starts_with("/v1/captures/pending") {
+                let parsed = url::Url::parse(&format!("http://fixture{url}")).unwrap();
+                let after = parsed.query_pairs().find(|(key,_)| key=="after_id").map(|(_,v)|v.into_owned());
+                let captures = (0..26).map(|i|format!("capture-{i:02}"))
+                    .filter(|id|after.as_ref().is_none_or(|after|id>after))
+                    .map(|id|pending_capture_json(&id)).collect::<Vec<_>>();
+                request.respond(json_response(json!({"captures":captures}))).unwrap();
+            } else if url=="/v1/captures/capture-25/download" {
+                request.respond(json_response(capture_specific_ticket(&addr,"capture-25"))).unwrap();
+            } else if url.starts_with("/r2-download/") {
+                request.respond(Response::from_data(png_bytes())).unwrap();
+            } else if url=="/v1/captures/capture-25/acknowledge" {
+                request.respond(Response::empty(200)).unwrap();break;
+            } else {
+                assert!(url.ends_with("/download"),"Unexpected request {url}");
+                request.respond(Response::empty(404)).unwrap();
+            }
+        }
+    });
+    let temp=tempfile::tempdir().unwrap();
+    let library=Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig {enabled:true,api_base_url:Some("https://fixture.test".into())},true).unwrap();
+    let client=CloudClient::new(&base).unwrap();
+    let first=library.sync_next_cloud_capture_with(&client,"test-token").unwrap();
+    assert_eq!((first.attempted,first.failed),(25,25));
+    drop(library);
+    let library=Library::open(temp.path()).unwrap();
+    let second=library.sync_next_cloud_capture_with(&client,"test-token").unwrap();
+    assert_eq!((second.attempted,second.acknowledged),(1,1));
+    handle.join().unwrap();
+}
+
+#[test]
+fn ack_only_failure_does_not_abort_the_next_capture() {
+    let captures=vec![pending_capture_json("capture-broken"),pending_capture_json("capture-good")];
+    let (base,handle)=serve_multi_capture_list(captures,&["capture-broken"],&[]);
+    let temp=tempfile::tempdir().unwrap();let library=Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig {enabled:true,api_base_url:Some("https://fixture.test".into())},true).unwrap();
+    library.mark_cloud_capture_imported("capture-broken","imported",None,"2026-09-09T00:00:00Z").unwrap();
+    let result=library.sync_next_cloud_capture_with(&CloudClient::new(&base).unwrap(),"test-token").unwrap();
+    assert_eq!(result.attempted,2);
+    assert_eq!(result.failed,1);
+    assert_eq!(result.acknowledged,1);
+    handle.join().unwrap();
 }

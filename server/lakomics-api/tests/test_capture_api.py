@@ -328,6 +328,13 @@ class CaptureApiTests(unittest.TestCase):
             json=self.capture_body(**overrides),
         )
 
+    def test_pending_cursor_reaches_tail_without_acknowledging_head(self):
+        ids = sorted(self.create_capture(source_url=f"https://x.com/artist/status/{i}/photo/1").json()["capture"]["id"] for i in range(3))
+        first = self.client.get("/v1/captures/pending", headers=self.auth, params={"limit": 2}).json()["captures"]
+        self.assertEqual([row["id"] for row in first], ids[:2])
+        tail = self.client.get("/v1/captures/pending", headers=self.auth, params={"limit": 2, "after_id": ids[1]}).json()["captures"]
+        self.assertEqual([row["id"] for row in tail], ids[2:])
+
     def test_old_image_request_defaults_to_image(self):
         response = self.create_capture()
 

@@ -984,6 +984,7 @@ export interface LibraryGateway {
   getCatalogVisibilityPolicy(): Promise<CatalogVisibilityPolicy>;
   setCatalogCategoryHidden(category: number, hidden: boolean): Promise<CatalogVisibilityPolicy>;
   setCatalogTagBlocked(tag: CatalogBlockedTag, blocked: boolean): Promise<CatalogVisibilityPolicy>;
+  cancelCatalogSearch?(): Promise<void>;
   searchCatalogGroups(query: CatalogSearchQuery, onEvent: (event: CatalogGroupedSearchEvent) => void): Promise<void>;
   getCatalogGroupEditions(query: CatalogGroupEditionsQuery): Promise<CatalogGroupEditionsPage>;
   setCatalogGroupRepresentative(query: CatalogGroupRepresentativeQuery): Promise<void>;
@@ -1033,6 +1034,7 @@ export interface LibraryGateway {
   updateAlbumAppearance(id: string, iconKey: string | null, colorKey: string | null): Promise<void>;
   deleteAlbum(id: string): Promise<void>;
   listAssets(query: AssetQuery): Promise<AssetPage>;
+  refreshAssets?(query: AssetQuery, assetIds: string[]): Promise<AssetSummary[]>;
   listSourceGroupAssets?(assetId: string): Promise<AssetSummary[]>;
   listAssetDateBuckets(query: AssetDateBucketQuery): Promise<AssetDateBucket[]>;
   listAssetCreators(query: AssetQuery): Promise<AssetCreatorSummary[]>;

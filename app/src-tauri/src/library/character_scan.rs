@@ -1,6 +1,6 @@
 //! Recomputable scan state; human decisions are owned by characters.rs.
 use super::{
-    character_worker::{RuntimeConfig, Worker, BASELINE},
+    character_worker::{RuntimeConfig, BASELINE},
     characters::{self, Error, Result, Target},
     Library,
 };
@@ -198,6 +198,7 @@ impl Library {
     }
 
     pub(crate) fn stop_character_scan(&self) {
+        self.stop_character_incremental();
         self.character_scan
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -382,12 +383,8 @@ impl Library {
                 );
             }
         }
-        let mut worker = Worker::start(
-            &config,
-            &self.root.join(".cache/characters"),
-            cancel.clone(),
-        )?;
-        let ready = worker.receive()?;
+        let cache=self.root.join(".cache/characters");
+        let ready=self.character_worker_pool.with(&config,&cache,cancel.clone(),!automatic,|_,ready| Ok(ready.clone()))?;
         if ready["type"] != "ready" || ready["baselineFingerprint"] != BASELINE {
             return Err(worker_error(&ready));
         }
@@ -431,13 +428,7 @@ impl Library {
             .iter()
             .map(|input| self.wire_input(input))
             .collect::<Result<Vec<_>>>()?;
-        worker.send(&json!({"type":"prepare", "references":refs}))?;
-        let prepared = worker.receive()?;
         let hashes: Vec<_> = references.iter().map(|r| r.hash.as_str()).collect();
-        if prepared["type"] != "prepared" || prepared["referenceHashes"] != json!(hashes) {
-            return Err(worker_error(&prepared));
-        }
-        self.update_scan_counters(&prepared);
         for (input, comparison_key) in pending {
             if cancel.load(Ordering::Acquire) {
                 return Err(Error::Worker("취소됨".into()));
@@ -448,8 +439,13 @@ impl Library {
                 Ok(current) if current.hash == input.hash => match self.wire_input(&current) {
                     Ok(mut request) => {
                         request["type"] = json!("query");
-                        worker.send(&request)?;
-                        let event = worker.receive()?;
+                        let event=self.character_worker_pool.with(&config,&cache,cancel.clone(),!automatic,|worker,_| {
+                            worker.send(&json!({"type":"prepare","references":refs}))?;
+                            let prepared=worker.receive()?;
+                            if prepared["type"]!="prepared" || prepared["referenceHashes"]!=json!(hashes) { return Err(worker_error(&prepared)); }
+                            worker.send(&request)?;
+                            worker.receive()
+                        })?;
                         if event["assetId"] != input.id
                             || (event["type"] != "result" && event["type"] != "asset_error")
                         {
@@ -566,7 +562,11 @@ impl Library {
         request: &characters::DecisionRequest,
     ) -> Result<BTreeMap<String, Value>> {
         let id = request.scan_id.as_deref().ok_or(Error::Stale)?;
-        let (status, rows) = {
+        let (status, rows) = if id.starts_with("autotag:") {
+            let (status,row)=super::character_autotag::evidence_row(connection,id,&target.id)?.ok_or(Error::Stale)?;
+            if request.asset_ids.iter().any(|asset| asset!=&row.asset_id) { return Err(Error::Stale); }
+            (status,vec![row])
+        } else {
             let state = self
                 .character_scan
                 .lock()
@@ -610,10 +610,8 @@ impl Library {
             if hash != row.content_hash { return Err(Error::Stale); }
             self.verify_input(&ScanInput {id:row.asset_id.clone(),hash,path})?;
             let evidence = row.evidence.ok_or(Error::Stale)?;
-            if evidence.get("learnedReferences").is_some()
-                && evidence["learnedReferences"] != serde_json::to_value(&target.learned_references)? {
-                return Err(Error::Stale);
-            }
+            // Manual review may retain its original evidence when new exemplars are
+            // added. Every exemplar actually used is still checked below.
             if let Some(learned) = evidence["learnedReferences"].as_array() {
                 for reference in learned {
                     let learned_id = reference["assetId"].as_str().ok_or(Error::Stale)?;
@@ -675,15 +673,24 @@ impl Library {
                 if row.state == "recommended" { by_asset.entry(id.clone()).or_default().push(index); }
             }
         }
-        let mut connection = self.connection()?;
         let mut changed = 0;
         for (asset_id, candidates) in by_asset {
+            let mut connection = self.connection()?;
             // Every applicable character must have a final result for this image.
             let transaction = connection.transaction()?;
+            // Refresh the applicable roster within each write transaction: another
+            // target may become ready while the previous asset releases the lock.
+            let ids = transaction.prepare("SELECT t.id FROM character_targets t JOIN character_series s ON s.classification_id=t.series_classification_id WHERE s.auto_classify=1")?
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            let current_targets = ids.iter().map(|id| self.read_character_target(&transaction, id))
+                .collect::<Result<Vec<_>>>()?.into_iter()
+                .filter(|target| target.ready && target.series_classification_id.as_ref().is_some_and(|series| automatic_batch || requested_series.contains(series)))
+                .collect::<Vec<_>>();
             let blocked = transaction.prepare("SELECT DISTINCT target_id FROM character_decisions WHERE source_asset_id=?1 AND decision IN ('rejected','cleared')")?
                 .query_map([&asset_id], |r| r.get::<_,String>(0))?
                 .collect::<std::result::Result<std::collections::BTreeSet<_>,_>>()?;
-            let incomplete = targets.iter().any(|target| {
+            let incomplete = current_targets.iter().any(|target| {
                 if blocked.contains(&target.id) { return false; }
                 let row = snapshots.iter().find(|(t,_,_)| t.id == target.id).and_then(|(_,_,rows)| rows.get(&asset_id));
                 !row.is_some_and(|r| matches!(r.state.as_str(), "recommended" | "unmatched"))
@@ -691,7 +698,27 @@ impl Library {
                         super::character_hub::candidate_image_mode(&transaction,series,&asset_id,automatic_batch).is_ok())
             });
             if incomplete { continue; }
-            let permitted = candidates.into_iter().filter(|index| !blocked.contains(&snapshots[*index].0.id)).collect::<Vec<_>>();
+            // Negative competitors are evidence too. Validate their current context
+            // before an old unmatched result can authorize another character.
+            let mut stale = false;
+            for (snapshot_target, status, rows) in &snapshots {
+                if blocked.contains(&snapshot_target.id) { continue; }
+                let Some(row) = rows.get(&asset_id) else { continue; };
+                if !snapshot_target.series_classification_id.as_ref().is_some_and(|series|
+                    super::character_hub::candidate_image_mode(&transaction, series, &asset_id, automatic_batch).is_ok()) { continue; }
+                let current = self.read_character_target(&transaction, &snapshot_target.id)?;
+                if row.evidence.as_ref().and_then(|e| e.get("learnedReferences"))
+                    .map_or(!current.learned_references.is_empty(), |refs| *refs != serde_json::to_value(&current.learned_references).unwrap_or(Value::Null)) {
+                    stale = true; break;
+                }
+                if self.checked_character_evidence(&transaction, &current, &DecisionRequest {
+                    target_id: current.id.clone(), expected_fingerprint: current.fingerprint.clone(),
+                    asset_ids: vec![asset_id.clone()], decision: DecisionKind::Accepted,
+                    baseline_fingerprint: status.runtime_fingerprint.clone(), scan_id: Some(status.id.clone()),
+                }).is_err() { stale = true; break; }
+            }
+            if stale { continue; }
+            let permitted = candidates.into_iter().filter(|index| !blocked.contains(&snapshots[*index].0.id) && current_targets.iter().any(|target| target.id == snapshots[*index].0.id)).collect::<Vec<_>>();
             let mut accepted = Vec::new();
             for &index in &permitted {
                 let (target,status,rows) = &snapshots[index];
@@ -730,9 +757,9 @@ impl Library {
                 let series = series.first().unwrap();
                 let at_root: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM asset_classifications ac JOIN classification_entries c ON c.id=ac.classification_id WHERE ac.asset_id=?1 AND c.parent_id IS NULL AND c.id<>?2)", params![asset_id,series], |r| r.get(0))?;
                 if at_root {
-                    Self::set_asset_classification_in(&transaction, &super::models::SetAssetClassification {
+                    Self::set_asset_classification_cause_in(&transaction, &super::models::SetAssetClassification {
                         asset_ids: vec![asset_id.clone()], classification_id: Some(series.clone()),
-                    })?;
+                    }, super::character_autotag::Cause::AutomaticFinalization)?;
                 }
             }
             transaction.commit()?;
@@ -741,7 +768,7 @@ impl Library {
         Ok(changed)
     }
 }
-fn automatic_evidence(evidence: Option<&Value>) -> bool {
+pub(super) fn automatic_evidence(evidence: Option<&Value>) -> bool {
     let Some(e) = evidence else { return false; };
     if e["passed"] != true || e["wholeFallback"] == true { return false; }
     let Some(crop) = e["bestQueryCrop"].as_u64() else { return false; };
@@ -751,7 +778,7 @@ fn automatic_evidence(evidence: Option<&Value>) -> bool {
 }
 
 // Compare geometry as well as crop indexes: duplicate/overlapping detections are one person.
-fn evidence_regions(evidence: Option<&Value>, minimum: usize) -> Option<Vec<[f64; 4]>> {
+pub(super) fn evidence_regions(evidence: Option<&Value>, minimum: usize) -> Option<Vec<[f64; 4]>> {
     let e = evidence?;
     if e["wholeFallback"] == true { return None; }
     let boxes = e["queryBoxes"].as_array()?;
@@ -767,7 +794,7 @@ fn evidence_regions(evidence: Option<&Value>, minimum: usize) -> Option<Vec<[f64
     Some(regions)
 }
 
-fn same_person(a: &[f64; 4], b: &[f64; 4]) -> bool {
+pub(super) fn same_person(a: &[f64; 4], b: &[f64; 4]) -> bool {
     let intersection = (a[2].min(b[2]) - a[0].max(b[0])).max(0.0)
         * (a[3].min(b[3]) - a[1].max(b[1])).max(0.0);
     let smaller = ((a[2]-a[0])*(a[3]-a[1])).min((b[2]-b[0])*(b[3]-b[1]));

@@ -56,3 +56,9 @@
   .character-evidence { width: auto; flex: 0 0 auto; padding: var(--space-3) 0 0; border-left: 0; border-top: 1px solid var(--color-border); }
   .character-evidence__image { max-width: 240px; }
 }
+
+/* Reserve the evidence column before selection so opening it cannot reflow tiles. */
+.character-evidence-slot { width: 270px; flex: 0 0 270px; min-height: 0; display: flex; }
+.character-evidence-slot > .character-evidence { width: 100%; flex: 1; min-width: 0; box-sizing: border-box; }
+@media (max-width: 1100px) { .character-evidence-slot { width: 220px; flex-basis: 220px; } }
+@media (max-width: 800px) { .character-evidence-slot { width: auto; flex: 0 0 240px; overflow: auto; } }

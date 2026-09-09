@@ -18,6 +18,7 @@ type PageViewerProps = {
   onPageChange: (page: number) => void;
   onClose: () => void;
   actions?: ReactNode;
+  onRetryPage?: () => Promise<void>;
 };
 
 const VIEWER_MARGIN_PX: Record<MangaViewerMargin, number> = { compact: 0, normal: 16, wide: 48 };
@@ -26,10 +27,20 @@ const VIEWER_GAP_PX: Record<MangaViewerGap, number> = { none: 0, narrow: 8, wide
 const MARGIN_LABEL: Record<MangaViewerMargin, string> = { compact: "좁게", normal: "보통", wide: "넓게" };
 const GAP_LABEL: Record<MangaViewerGap, string> = { none: "없음", narrow: "좁게", wide: "넓게" };
 
-export function PageViewer({ title, pageUrls, initialPage, sourceLabel, onPageChange, onClose, actions }: PageViewerProps) {
+export function PageViewer({ title, pageUrls, initialPage, sourceLabel, onPageChange, onClose, actions, onRetryPage }: PageViewerProps) {
   const { privacyMode } = usePrivacy();
   const pageCount = pageUrls.length;
   const [page, setPage] = useState(() => Math.max(1, Math.min(pageCount, initialPage)));
+  const [retryingPages, setRetryingPages] = useState<Set<number>>(() => new Set());
+  async function retryPage(value: number) {
+    if (retryingPages.has(value)) return;
+    setRetryingPages(current => new Set(current).add(value));
+    try {
+      await onRetryPage?.();
+      setFailedPages(current => { const next = new Set(current); next.delete(value); return next; });
+    } catch { /* Keep the failed page and its retry action visible. */ }
+    finally { setRetryingPages(current => { const next = new Set(current); next.delete(value); return next; }); }
+  }
   const [failedPages, setFailedPages] = useState<Set<number>>(() => new Set());
   const [readerPrefs, setReaderPrefs] = useState(() => {
     const stored = loadUiPreferences();
@@ -189,7 +200,7 @@ export function PageViewer({ title, pageUrls, initialPage, sourceLabel, onPageCh
           style={{ boxSizing: "border-box", padding: VIEWER_MARGIN_PX[margin], columnGap: VIEWER_GAP_PX[gap] }}
         >
           {pages.map((value) => failedPages.has(value)
-            ? <span key={value} className="manga-viewer__page-error">{value}페이지를 불러오지 못했습니다</span>
+            ? <span key={value} className="manga-viewer__page-error">{value}페이지를 불러오지 못했습니다<Button disabled={retryingPages.has(value)} onClick={() => void retryPage(value)}>{retryingPages.has(value) ? "재시도 중…" : "다시 시도"}</Button></span>
             : privacyMode
               ? <Skeleton key={value} className="privacy-mask manga-viewer__page" label="비공개 모드" />
               : <StableImage key={value} className="manga-viewer__page" src={pageUrls[value - 1]} alt={`${title} ${value}페이지`} referrerPolicy="no-referrer" draggable={false} onError={() => setFailedPages((current) => new Set(current).add(value))} onPreloadError={() => setFailedPages((current) => new Set(current).add(value))} />)}

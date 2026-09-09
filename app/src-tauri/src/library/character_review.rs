@@ -65,14 +65,23 @@ impl Library {
                     && query.target_id.as_ref().is_none_or(|id| id == &t.id)
             })
             .collect();
-        let root_candidates = {
+        let mut root_candidates = {
             let state = self.character_scan.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             state.previous.values().map(|(s,r)| (s,r)).chain(state.status.as_ref().map(|s| (s,&state.results)))
                 .filter(|(s,_)| s.automatic && targets.iter().any(|t| t.id == s.target_id))
                 .flat_map(|(_,rows)| rows.keys().cloned()).collect::<std::collections::BTreeSet<_>>()
         };
-        let (inputs, decisions) = {
+        let (inputs, decisions, durable_assets, failed_jobs) = {
             let connection = self.connection()?;
+            let durable=connection.prepare("SELECT DISTINCT e.asset_id FROM character_autotag_evidence e
+                JOIN character_autotag_predictions p ON p.evidence_id=e.id
+                JOIN character_autotag_jobs j ON j.asset_id=e.asset_id AND j.source_generation=e.source_generation
+                WHERE p.series_id=?1 AND j.state<>'superseded'")?
+                .query_map([&query.series_id],|r|r.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?;
+            root_candidates.extend(durable.iter().cloned());
+            let failed_jobs=connection.prepare("SELECT asset_id,error FROM character_autotag_jobs WHERE state='failed'")?
+                .query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?)))?.collect::<std::result::Result<BTreeMap<_,_>,_>>()?;
+            root_candidates.extend(failed_jobs.keys().cloned());
             let root_candidates = root_candidates.into_iter().filter(|id|
                 super::super::character_hub::candidate_image_mode(&connection,&query.series_id,id,true).is_ok())
                 .collect::<Vec<_>>();
@@ -102,7 +111,7 @@ impl Library {
                     ))
                 })?
                 .collect::<std::result::Result<BTreeMap<_, _>, _>>()?;
-            (inputs, decisions)
+            (inputs, decisions, durable.into_iter().collect::<std::collections::BTreeSet<_>>(), failed_jobs)
         };
         let ready: BTreeMap<_, _> = targets
             .iter()
@@ -166,6 +175,30 @@ impl Library {
                     })
                     .collect::<Vec<_>>()
             };
+            if durable_assets.contains(&input.id) {
+                let connection=self.connection()?;
+                for prediction in &mut predictions {
+                    // Explicit active/manual scans retain precedence when they have a row.
+                    if prediction.evidence.is_some() { continue; }
+                    if let Some(id)=super::super::character_autotag::latest_evidence(&connection,&input.id,&prediction.target_id)? {
+                        if let Some((status,row))=super::super::character_autotag::evidence_row(&connection,&id,&prediction.target_id)? {
+                            prediction.scan_id=Some(id);
+                            prediction.runtime_fingerprint=status.runtime_fingerprint;
+                            prediction.state=row.state;
+                            prediction.evidence=row.evidence;
+                            prediction.error=row.error;
+                            if status.target_fingerprint!=prediction.target_fingerprint || row.content_hash!=input.hash || !ready[&prediction.target_id] {
+                                prediction.state="stale".into();prediction.evidence=None;
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(error)=failed_jobs.get(&input.id) {
+                for prediction in &mut predictions {
+                    if prediction.evidence.is_none() {prediction.state="error".into();prediction.error=error.clone();}
+                }
+            }
             if predictions.is_empty() || !matches_filter(&predictions, &query.filter) {
                 continue;
             }

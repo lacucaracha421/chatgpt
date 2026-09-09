@@ -1,4 +1,5 @@
 import { FolderPlusIcon } from "@heroicons/react/24/outline";
+import { FolderCharacterRegistration } from "./FolderCharacterRegistration";
 import { FolderRegistrationContext } from "./FolderRegistrationContext";
 import { useState, type ReactNode } from "react";
 import type { AlbumEntry, AssetSummary, AssetView, ClassificationEntry } from "../library/types";
@@ -15,6 +16,7 @@ export function CharacterFolderContent({ children, requestedAsset, onRequestedAs
   privacyMode: boolean; metadataVisible: boolean; thumbnailRowHeight: number; refreshVersion: number; onNavigate: (view: AssetView) => void;
 }) {
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
+  const [registerCharacter, setRegisterCharacter] = useState(false);
   const id = view.kind === "classification" ? view.classificationId : null;
   const series = hub.series.find(s => s.classificationId === id);
   if (series) return <SeriesBrowser requestedAsset={requestedAsset} onRequestedAssetHandled={onRequestedAssetHandled} clearSelectionRequest={clearSelectionRequest} galleryDrag={galleryDrag} key={series.classificationId} series={series} targetId={view.kind === "classification" ? view.characterId : undefined} targets={hub.targets} classifications={classifications} albums={albums} privacyMode={privacyMode} metadataVisible={metadataVisible} thumbnailRowHeight={thumbnailRowHeight} refreshVersion={refreshVersion + hub.revision} onNavigate={onNavigate} onChanged={hub.refresh} />;
@@ -25,7 +27,7 @@ export function CharacterFolderContent({ children, requestedAsset, onRequestedAs
     catch (e) { setError(commandErrorMessage(e, "시리즈를 등록하지 못했습니다.")); }
     finally { setBusy(false); }
   }
-  return <FolderRegistrationContext.Provider value={id ? <Button size="icon" variant="ghost" aria-label="시리즈로 등록" data-tooltip="시리즈로 등록" disabled={busy} onClick={() => void register()}><FolderPlusIcon aria-hidden="true" /></Button> : null}>
-    <div className="character-folder-content">{(error || hub.error) && <p className="character-message" role="alert">{error || hub.error}</p>}{children}</div>
+  return <FolderRegistrationContext.Provider value={id ? <><Button size="icon" variant="ghost" aria-label="시리즈로 등록" data-tooltip="시리즈로 등록" disabled={busy} onClick={() => void register()}><FolderPlusIcon aria-hidden="true" /></Button><Button size="sm" variant="ghost" onClick={() => setRegisterCharacter(true)}>캐릭터로 등록</Button></> : null}>
+    <div className="character-folder-content">{(error || hub.error) && <p className="character-message" role="alert">{error || hub.error}</p>}{children}{registerCharacter && id && <FolderCharacterRegistration key={id} folderId={id} classifications={classifications} targets={hub.targets} privacyMode={privacyMode} onClose={() => setRegisterCharacter(false)} onSaved={target => { setRegisterCharacter(false); hub.refresh(); onNavigate({ kind: "classification", classificationId: target.seriesClassificationId!, characterId: target.id }); }} />}</div>
   </FolderRegistrationContext.Provider>;
 }

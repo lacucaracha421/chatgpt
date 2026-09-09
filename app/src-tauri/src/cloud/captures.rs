@@ -162,13 +162,23 @@ impl Library {
     ) -> Result<CloudCaptureSyncResult, LibraryError> {
         // 한 번의 폴에서 상한까지 계속 소진한다. 실패한 캡처는 건너뛰고 다음
         // 캡처로 진행하므로 한 건의 오류가 이후 캡처를 막지 않는다.
-        let captures = client.list_pending_captures(token)?;
+        let endpoint = client.capture_endpoint();
+        let cursor: Option<String> = self.connection()?.query_row(
+            "SELECT after_id FROM cloud_capture_poll_cursor WHERE endpoint=?1", [endpoint], |r| r.get(0)).optional()?;
+        let mut captures = client.list_pending_captures_after(token, cursor.as_deref())?;
+        if captures.is_empty() {
+            self.connection()?.execute("DELETE FROM cloud_capture_poll_cursor WHERE endpoint=?1", [endpoint])?;
+            if cursor.is_some() { captures = client.list_pending_captures(token)?; }
+        }
         let mut result = CloudCaptureSyncResult::default();
         for payload in captures {
             if !self.cloud_capture_enabled()? { break; }
             if result.attempted >= Self::MAX_CAPTURES_PER_SYNC as u32 {
                 break;
             }
+            // Advance even past malformed/temporarily deferred entries. Cursor and
+            // retry windows survive restarts and belong to this server endpoint.
+            self.connection()?.execute("INSERT INTO cloud_capture_poll_cursor(endpoint,after_id) VALUES(?1,?2) ON CONFLICT(endpoint) DO UPDATE SET after_id=excluded.after_id", rusqlite::params![endpoint, payload.id])?;
             let capture = match RemoteCapture::try_from(payload) {
                 Ok(capture) => capture,
                 Err(error) => {
@@ -177,13 +187,31 @@ impl Library {
                     continue;
                 }
             };
+            let review: Option<(String, Option<String>)> = self.connection()?.query_row(
+                "SELECT r.status, CASE WHEN r.decision='keep_existing' THEN r.existing_asset_id ELSE r.candidate_asset_id END FROM cloud_capture_reviews c JOIN similarity_reviews r ON r.id=c.review_id WHERE c.endpoint=?1 AND c.capture_id=?2",
+                rusqlite::params![endpoint,capture.id], |r| Ok((r.get(0)?,r.get(1)?))).optional()?;
+            if let Some((status, asset_id)) = review {
+                if status != "resolved" { result.attempted += 1; result.review_pending += 1; continue; }
+                // An explicit review disposition is terminal, including Keep existing.
+                // Retrying the download would recreate the rejected candidate forever.
+                self.mark_cloud_capture_imported(&capture.id,"imported",asset_id.as_deref(),&chrono::Utc::now().to_rfc3339())?;
+            }
+            let now = chrono::Utc::now().timestamp();
+            let deferred: bool = self.connection()?.query_row("SELECT EXISTS(SELECT 1 FROM cloud_capture_retry WHERE endpoint=?1 AND capture_id=?2 AND retry_after>?3)", rusqlite::params![endpoint,capture.id,now], |r| r.get(0))?;
+            if deferred && !self.cloud_capture_imported(&capture.id)? { continue; }
+            // ACK-only retries are cheap and must remain immediately retryable.
+            if !self.cloud_capture_imported(&capture.id)? {
+                self.connection()?.execute("INSERT INTO cloud_capture_retry(endpoint,capture_id,retry_after) VALUES(?1,?2,?3) ON CONFLICT(endpoint,capture_id) DO UPDATE SET retry_after=excluded.retry_after", rusqlite::params![endpoint,capture.id,now+60])?;
+            }
             result.attempted += 1;
             if self.cloud_capture_imported(&capture.id)? {
                 // 이전 실행에서 로컬 수집은 끝났지만 acknowledge가 유실된 케이스.
                 let imported_at = chrono::Utc::now().to_rfc3339();
-                client.acknowledge_capture_imported(&capture.id, token, &imported_at)?;
-                self.mark_cloud_capture_acknowledged(&capture.id)?;
-                result.acknowledged += 1;
+                match client.acknowledge_capture_imported(&capture.id, token, &imported_at)
+                    .and_then(|_| self.mark_cloud_capture_acknowledged(&capture.id)) {
+                    Ok(()) => result.acknowledged += 1,
+                    Err(error) => { result.failed += 1; eprintln!("cloud capture {} ACK: {error}", capture.id); }
+                }
                 continue;
             }
             match self.consume_cloud_capture(client, token, &capture) {
@@ -211,6 +239,7 @@ impl Library {
                 }
             }
         }
+        self.connection()?.execute("DELETE FROM cloud_capture_retry WHERE retry_after <= ?1", [chrono::Utc::now().timestamp()])?;
         Ok(result)
     }
 
@@ -257,7 +286,8 @@ impl Library {
                 Some(existing_asset_id.clone()),
                 ConsumedCapture::ExactDuplicate { classification_changed: *classification_changed },
             ),
-            IngestOutcome::ReviewPending { .. } => {
+            IngestOutcome::ReviewPending { review_id } => {
+                self.connection()?.execute("INSERT INTO cloud_capture_reviews(endpoint,capture_id,review_id) VALUES(?1,?2,?3) ON CONFLICT(endpoint,capture_id) DO UPDATE SET review_id=excluded.review_id", rusqlite::params![client.capture_endpoint(),capture.id,review_id])?;
                 // 유사 이미지 검토는 로컬 확정이 아니다. 원격은 imported로 만들지 않고
                 // 다음 폴에서 다시 시도한다.
                 return Ok(ConsumedCapture::ReviewPending);

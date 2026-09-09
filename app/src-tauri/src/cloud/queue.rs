@@ -144,7 +144,9 @@ pub(crate) fn enqueue_asset_upsert(
     transaction.execute(
         "INSERT INTO cloud_sync_queue (
             id, entity_type, entity_id, operation, status, revision, updated_at
-         ) VALUES (?1, 'asset', ?2, 'upsert', 'pending', 1, ?3)",
+         ) VALUES (?1, 'asset', ?2, 'upsert', 'pending',
+             (SELECT COALESCE(MAX(revision), 0) + 1 FROM cloud_sync_queue
+              WHERE entity_type='asset' AND entity_id=?2 AND operation='upsert'), ?3)",
         params![uuid::Uuid::new_v4().to_string(), asset_id, updated_at],
     )?;
     Ok(())

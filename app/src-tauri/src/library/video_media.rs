@@ -496,27 +496,6 @@ fn safe_asset_id(asset_id: &str) -> bool {
             .all(|character| character.is_ascii_alphanumeric() || character == '-')
 }
 
-#[cfg(windows)]
-fn run_tool<const N: usize>(name: &str, arguments: [OsString; N]) -> Result<Vec<u8>, LibraryError> {
-    let executable = tool_path(name).ok_or(LibraryError::VideoToolUnavailable)?;
-    let mut command = Command::new(executable);
-    command.args(arguments);
-    #[cfg(windows)]
-    {
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
-    let output = command
-        .output()
-        .map_err(|_| LibraryError::VideoToolUnavailable)?;
-    if output.status.success() {
-        Ok(output.stdout)
-    } else {
-        Err(LibraryError::VideoPreparationFailed)
-    }
-}
-
-#[cfg(target_os = "linux")]
 fn run_tool<const N: usize>(name: &str, arguments: [OsString; N]) -> Result<Vec<u8>, LibraryError> {
     run_similarity_tool(name, &arguments, &std::sync::atomic::AtomicBool::new(false),
         std::time::Instant::now() + std::time::Duration::from_secs(30 * 60), None)

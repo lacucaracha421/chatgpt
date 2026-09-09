@@ -161,6 +161,9 @@ impl Library {
             return Err(LibraryError::ClassificationHasChildren);
         }
 
+        let affected=transaction.prepare("SELECT asset_id FROM asset_classifications WHERE classification_id=?1")?
+            .query_map([id],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
+
         if let Some(parent_id) = entry.parent_id {
             transaction.execute(
                 "INSERT OR IGNORE INTO asset_classifications (asset_id, classification_id)
@@ -173,6 +176,9 @@ impl Library {
             [id],
         )?;
         transaction.execute("DELETE FROM classification_entries WHERE id = ?1", [id])?;
+        for asset_id in affected {
+            super::character_autotag::enqueue(&transaction,&asset_id,super::character_autotag::Cause::Classification)?;
+        }
         transaction.commit()?;
         Ok(())
     }
@@ -200,6 +206,10 @@ impl Library {
     }
 
     pub(super) fn set_asset_classification_in(transaction: &rusqlite::Connection, request: &SetAssetClassification) -> Result<(), LibraryError> {
+        Self::set_asset_classification_cause_in(transaction,request,super::character_autotag::Cause::Classification)
+    }
+
+    pub(super) fn set_asset_classification_cause_in(transaction: &Connection, request: &SetAssetClassification, cause: super::character_autotag::Cause) -> Result<(), LibraryError> {
         let asset_ids = validated_asset_ids(&transaction, &request.asset_ids)?;
         if let Some(classification_id) = request.classification_id.as_deref() {
             if find_classification(&transaction, classification_id)?.is_none() {
@@ -207,6 +217,9 @@ impl Library {
             }
         }
         for asset_id in asset_ids {
+            let current=transaction.prepare("SELECT classification_id FROM asset_classifications WHERE asset_id=?1 ORDER BY classification_id")?
+                .query_map([asset_id],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
+            if current == request.classification_id.iter().cloned().collect::<Vec<_>>() { continue; }
             transaction.execute(
                 "DELETE FROM asset_classifications WHERE asset_id = ?1",
                 [asset_id],
@@ -218,6 +231,7 @@ impl Library {
                     params![asset_id, classification_id],
                 )?;
             }
+            super::character_autotag::enqueue(transaction,asset_id,cause)?;
             // 관계-only 변경도 복제본에 전파되어야 한다. 증분 복제는 커밋 시
             // classification_ids를 다시 읽으므로, 다음 revision을 pending으로
             // 만들면 원본 미디어 재업로드 없이 관계가 수렴한다.
@@ -269,6 +283,8 @@ impl Library {
             }
         }
         for asset_id in asset_ids {
+            let before=transaction.prepare("SELECT classification_id FROM asset_classifications WHERE asset_id=?1 ORDER BY classification_id")?
+                .query_map([asset_id],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
             for classification_id in &remove_ids {
                 transaction.execute(
                     "DELETE FROM asset_classifications WHERE asset_id = ?1 AND classification_id = ?2",
@@ -280,6 +296,11 @@ impl Library {
                     "INSERT OR IGNORE INTO asset_classifications (asset_id, classification_id) VALUES (?1, ?2)",
                     params![asset_id, classification_id],
                 )?;
+            }
+            let after=transaction.prepare("SELECT classification_id FROM asset_classifications WHERE asset_id=?1 ORDER BY classification_id")?
+                .query_map([asset_id],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
+            if before != after {
+                super::character_autotag::enqueue(&transaction,asset_id,super::character_autotag::Cause::Classification)?;
             }
         }
         transaction.commit()?;

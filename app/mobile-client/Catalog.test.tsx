@@ -15,6 +15,20 @@ beforeEach(()=>{localStorage.clear();mocks.api.mockReset();mocks.native.mockRese
 });});
 afterEach(cleanup);
 describe('mobile catalog reads',()=>{
+  it('ignores a reader response after the catalog becomes inactive even if transport ignores abort',async()=>{
+    const original=mocks.api.getMockImplementation()!;
+    let resolve!:(value:unknown)=>void;
+    mocks.api.mockImplementation((path,...args)=>path.includes('/reader?')?new Promise(r=>{resolve=r;}):original(path,...args));
+    const backRef={current:null};
+    const {rerender}=render(<Catalog active paused={false} backRef={backRef}/>);
+    fireEvent.click(await screen.findByText('밤의 도서관'));
+    fireEvent.click(await screen.findByRole('button',{name:'읽기'}));
+    await waitFor(()=>expect(resolve).toBeTypeOf('function'));
+    rerender(<Catalog active={false} paused={false} backRef={backRef}/>);
+    await act(async()=>resolve({publicationRevision:'p1',provider:'kHentai',providerWorkId:'42',manifestExpiresAt:1800000000,pages:[]}));
+    rerender(<Catalog active paused={false} backRef={backRef}/>);
+    expect(screen.queryByRole('button',{name:'읽기 닫기'})).toBeNull();
+  });
   it('delivers a usable page while count is pending and keeps it on count failure',async()=>{
     let reject!:(e:Error)=>void;mocks.api.mockImplementation(path=>path.includes('/count?')?new Promise((_,r)=>{reject=r;}):Promise.resolve(page));
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');expect(screen.getByText('개수 확인 중')).toBeTruthy();

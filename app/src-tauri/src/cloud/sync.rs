@@ -190,6 +190,7 @@ pub(super) fn hex_digest(bytes: &[u8]) -> String {
 pub(super) fn is_retryable_cloud_error(error: &LibraryError) -> bool {
     match error {
         LibraryError::CloudRequestTimedOut | LibraryError::CloudRequestUnavailable => true,
+        LibraryError::CloudReplicationCommitRejected(409) => true,
         LibraryError::CloudPresignRejected(status)
         | LibraryError::CloudUploadRejected(status)
         | LibraryError::CloudAssetRegistrationRejected(status)

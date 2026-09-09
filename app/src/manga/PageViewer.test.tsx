@@ -68,6 +68,20 @@ describe("PageViewer", () => {
     expect(onPageChange).toHaveBeenLastCalledWith(2);
     fireEvent.error(screen.getByRole("img", { name: "Remote 2페이지" }));
     expect(screen.getByText("2페이지를 불러오지 못했습니다")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+    expect(screen.getByRole("img", { name: "Remote 2페이지" })).toHaveAttribute("src", "page-2");
+    expect(screen.getByText("2 / 2")).toBeVisible();
+  });
+
+  it("keeps a failed page retryable until its URL resolver succeeds", async () => {
+    const onRetryPage = vi.fn().mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce(undefined);
+    render(<PageViewer {...viewerProps({ onRetryPage })} />);
+    fireEvent.error(screen.getByRole("img", { name: "Remote 1페이지" }));
+    await userEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+    expect(screen.getByRole("button", { name: "다시 시도" })).toBeEnabled();
+    await userEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+    expect(onRetryPage).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("img", { name: "Remote 1페이지" })).toBeVisible();
   });
 
   it("preloads the previous page and five pages ahead", () => {

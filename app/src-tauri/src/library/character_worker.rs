@@ -16,7 +16,7 @@ pub(super) const BASELINE: &str =
     "40246ab31230e100e9592811d032e7383959ad168c1c738520003993bf357199";
 const MAX_MESSAGE: u64 = 256 * 1024;
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeConfig {
     pub(super) python: PathBuf,
     pub(super) script: PathBuf,
@@ -98,6 +98,57 @@ pub(super) struct Worker {
     input: mpsc::SyncSender<Vec<u8>>,
     output: mpsc::Receiver<Result<Value>>,
     cancel: Arc<AtomicBool>,
+}
+
+/// One Python owner for both manual scans and the incremental queue. Ownership
+/// is borrowed for one query/asset, not for an entire historical inventory.
+#[derive(Default)]
+pub(super) struct Pool {
+    session: std::sync::Mutex<Option<(RuntimeConfig, Worker, Value)>>,
+    manual_waiters: std::sync::atomic::AtomicUsize,
+}
+impl std::fmt::Debug for Pool {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str("CharacterWorkerPool") }
+}
+impl Pool {
+    pub(super) fn with<T>(&self, config: &RuntimeConfig, cache: &Path, cancel: Arc<AtomicBool>, manual: bool,
+        work: impl FnOnce(&mut Worker,&Value)->Result<T>) -> Result<T> {
+        if manual { self.manual_waiters.fetch_add(1,Ordering::AcqRel); }
+        let mut guard=loop {
+            if cancel.load(Ordering::Acquire) {
+                if manual { self.manual_waiters.fetch_sub(1,Ordering::AcqRel); }
+                return Err(Error::Worker("취소됨".into()));
+            }
+            if manual || self.manual_waiters.load(Ordering::Acquire)==0 {
+                match self.session.try_lock() {
+                    Ok(guard)=>break guard,
+                    Err(std::sync::TryLockError::Poisoned(error))=> {
+                        let mut guard=error.into_inner();
+                        *guard=None;
+                        self.session.clear_poison();
+                        break guard;
+                    },
+                    Err(std::sync::TryLockError::WouldBlock)=>{}
+                }
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        if manual { self.manual_waiters.fetch_sub(1,Ordering::AcqRel); }
+        if guard.as_ref().is_some_and(|(previous,_,_)|previous!=config) { *guard=None; }
+        if guard.is_none() {
+            let mut worker=Worker::start(config,cache,cancel.clone())?;
+            let ready=worker.receive()?;
+            if ready["type"]!="ready" || ready["baselineFingerprint"]!=BASELINE {
+                return Err(Error::Worker("캐릭터 런타임 검증 실패".into()));
+            }
+            *guard=Some((config.clone(),worker,ready));
+        }
+        let (_,worker,ready)=guard.as_mut().unwrap();
+        worker.cancel=cancel;
+        let result=work(worker,ready);
+        if result.is_err() { *guard=None; }
+        result
+    }
 }
 
 impl Worker {

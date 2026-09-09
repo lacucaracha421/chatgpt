@@ -76,6 +76,22 @@ class ReplicationTestCase(unittest.TestCase):
         body.update(overrides)
         return self.client.post("/v1/replication/prepare", headers=self.auth, json=body)
 
+    def test_stale_commit_cannot_overwrite_newer_revision_or_legacy_downgrade(self):
+        first = self.prepare().json()
+        self.assertEqual(first["metadata_revision"], 0)
+        self.assertEqual(self.commit(expected_revision=0, commit_id="new", classification_ids=["new-folder"]).status_code, 200)
+        delayed = self.commit(expected_revision=0, commit_id="old", classification_ids=["old-folder"])
+        self.assertEqual(delayed.status_code, 409)
+        self.assertEqual(self.commit(classification_ids=["legacy-folder"]).status_code, 409)
+        self.assertEqual(self.rows("SELECT classification_id FROM asset_classifications"), [{"classification_id": "new-folder"}])
+        self.assertEqual(self.prepare().json()["metadata_revision"], 1)
+        self.assertEqual(self.commit(expected_revision=0, commit_id="new", classification_ids=["new-folder"]).status_code, 200)
+        self.assertEqual(self.prepare().json()["metadata_revision"], 1)
+        # A restart/restored local DB obtains the server revision instead of reusing a local counter.
+        self.assertEqual(self.commit(expected_revision=1, commit_id="restored", classification_ids=["restored-folder"]).status_code, 200)
+        self.assertEqual(self.commit(expected_revision=1, commit_id="late", classification_ids=["old-folder"]).status_code, 409)
+        self.assertEqual(self.rows("SELECT classification_id FROM asset_classifications"), [{"classification_id": "restored-folder"}])
+
     def presign(self, object_key: str):
         return self.client.post(
             "/v1/uploads/presign",

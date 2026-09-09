@@ -115,6 +115,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all" }: On
     return () => {
       mounted.current = false;
       searchRequest.current += 1;
+      void gateway.cancelCatalogSearch?.();
       detailRequest.current += 1;
       if (progressTimer.current !== null) window.clearTimeout(progressTimer.current);
       if (pendingProgress.current) void gateway.saveRemoteReadingProgress(pendingProgress.current);
@@ -566,6 +567,11 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all" }: On
       pageUrls={viewer.pageUrls}
       initialPage={viewer.initialPage}
       sourceLabel="K-Hentai"
+      onRetryPage={async () => {
+        const owner = viewer;
+        const gallery = await gateway.resolveOnlineCatalogWork({ provider: owner.provider, providerWorkId: owner.providerWorkId });
+        setViewer(current => current === owner ? { ...current, pageUrls: gallery.pageUrls } : current);
+      }}
       onPageChange={saveProgress}
       onClose={closeViewer}
     />}

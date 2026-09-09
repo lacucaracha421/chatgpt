@@ -49,10 +49,12 @@ pub(crate) fn media_response_gated(
     range_header: Option<&str>,
 ) -> Response<Vec<u8>> {
     // MangaDex 커버는 parse_path 통과 후에 식별되므로 접두어로 직접 판정한다.
-    if !is_remote_media_path(path) {
-        let _permit = MediaPermit::acquire();
-    }
-    media_response_with_range(library, method, path, range_header)
+    with_media_permit(path, || media_response_with_range(library, method, path, range_header))
+}
+
+fn with_media_permit<T>(path: &str, work: impl FnOnce() -> T) -> T {
+    let _permit = (!is_remote_media_path(path)).then(MediaPermit::acquire);
+    work()
 }
 
 struct MediaPermit;
@@ -1282,5 +1284,33 @@ mod tests {
                 params![id, poster, scrub],
             )
             .unwrap();
+    }
+}
+
+#[cfg(test)]
+mod permit_tests {
+    #[test]
+    fn twelve_local_jobs_hold_six_slots_through_work_and_release_on_errors() {
+        use std::sync::{Arc, Mutex, Condvar, mpsc};
+        use std::time::Duration;
+        let release = Arc::new((Mutex::new(false),Condvar::new()));
+        let (entered, receive) = mpsc::channel();
+        let mut jobs = Vec::new();
+        for i in 0..12 {
+            let release = release.clone(); let entered = entered.clone();
+            jobs.push(std::thread::spawn(move || super::with_media_permit("/asset/local", || {
+                entered.send(i).unwrap();
+                let (lock, notify) = &*release;
+                let mut ready = lock.lock().unwrap();
+                while !*ready { ready = notify.wait(ready).unwrap(); }
+                if i % 2 == 0 { Ok(()) } else { Err(()) }
+            })));
+        }
+        for _ in 0..6 { receive.recv_timeout(Duration::from_secs(5)).unwrap(); }
+        assert!(receive.recv_timeout(Duration::from_millis(100)).is_err());
+        assert_eq!(super::with_media_permit("/remote-manga-page/x", || 7),7);
+        *release.0.lock().unwrap() = true; release.1.notify_all();
+        for job in jobs { let _ = job.join().unwrap(); }
+        assert_eq!(*super::lock_media_active(),0);
     }
 }

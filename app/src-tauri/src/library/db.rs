@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 48;
+pub(crate) const SCHEMA_VERSION: i64 = 51;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -243,6 +243,15 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         if version <= 47 {
             transaction.execute_batch(include_str!("../../migrations/0048_character_hub.sql"))?;
         }
+        if version <= 48 {
+            transaction.execute_batch(include_str!("../../migrations/0049_capture_poll.sql"))?;
+        }
+        if version <= 49 {
+            transaction.execute_batch(include_str!("../../migrations/0050_character_autotag.sql"))?;
+        }
+        if version <= 50 {
+            transaction.execute_batch(include_str!("../../migrations/0051_character_autotag_runtime.sql"))?;
+        }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction.prepare("PRAGMA foreign_key_check")?.exists([])? {
             return Err(LibraryError::Database(rusqlite::Error::InvalidQuery));
@@ -295,6 +304,18 @@ mod tests {
         transaction.commit().unwrap();
         assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), version as i64);
         connection.pragma_update(None, "foreign_keys", "ON").unwrap();
+    }
+
+    #[test]
+    fn character_autotag_migration_does_not_enqueue_history() {
+        let mut connection=Connection::open_in_memory().unwrap();
+        historical_schema(&mut connection,49);
+        connection.execute_batch("INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at)
+            VALUES('covered','hash','image','covered.png','assets/covered.png','thumbnails/covered.webp',1,1,1,'before');").unwrap();
+        migrate_to_latest(&mut connection,49).unwrap();
+        assert_eq!(connection.query_row("SELECT COUNT(*) FROM character_autotag_jobs",[],|r|r.get::<_,i64>(0)).unwrap(),0);
+        assert_eq!(connection.query_row("SELECT COUNT(*) FROM assets WHERE id='covered'",[],|r|r.get::<_,i64>(0)).unwrap(),1);
+        assert!(!connection.prepare("PRAGMA foreign_key_check").unwrap().exists([]).unwrap());
     }
 
     #[test]

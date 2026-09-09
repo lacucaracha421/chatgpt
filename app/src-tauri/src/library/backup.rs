@@ -16,6 +16,21 @@ use super::{
 
 const DAILY_BACKUP_LIMIT: usize = 7;
 const BACKUP_TIMESTAMP_FORMAT: &str = "%Y%m%d-%H%M%S";
+const RESTORE_INTENT: &str = "library.sqlite.restore-intent";
+
+// An interrupted swap must never turn into initialization of an empty library.
+// Preserve every database and artwork until an explicit recovery resolves authority.
+pub(super) fn check_interrupted_restore(root: &Path) -> Result<(), LibraryError> {
+    for entry in fs::read_dir(root).map_err(|source| backup_error(root, source))? {
+        let entry = entry.map_err(|source| backup_error(root, source))?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name == RESTORE_INTENT || name.starts_with("library.sqlite.restore-old-") {
+            return Err(LibraryError::RestoreFailed { recovery_path: entry.path() });
+        }
+    }
+    Ok(())
+}
 
 struct BackupEntry {
     metadata: MetadataBackup,
@@ -155,6 +170,8 @@ impl Library {
     }
 
     fn restore_snapshot_locked(&self, selected_path: &Path) -> Result<(), LibraryError> {
+        self.stop_character_scan();
+        check_interrupted_restore(&self.root)?;
         let current = self.root.join("library.sqlite");
         let temporary = self.root.join("library.sqlite.restore.part");
         let recovery = self.root.join(format!(
@@ -182,10 +199,23 @@ impl Library {
             return Err(error);
         }
 
+        let intent_path = self.root.join(RESTORE_INTENT);
+        let mut intent = OpenOptions::new().write(true).create_new(true).open(&intent_path)
+            .map_err(|source| backup_error(&intent_path, source))?;
+        use std::io::Write;
+        writeln!(intent, "{}", recovery.file_name().unwrap().to_string_lossy())
+            .and_then(|_| intent.sync_all()).map_err(|source| backup_error(&intent_path, source))?;
+        #[cfg(unix)]
+        fs::File::open(&self.root).and_then(|dir| dir.sync_all())
+            .map_err(|source| backup_error(&self.root, source))?;
+        drop(intent);
+        restore_crash_point("before-rename");
         if let Err(source) = rename_database(&current, &recovery) {
             cleanup_temporary_restore(&temporary)?;
+            remove_file_if_exists(&intent_path)?;
             return Err(backup_error(&current, source));
         }
+        restore_crash_point("after-first-rename");
         if let Err(error) = rename_database(&temporary, &current) {
             if rollback_restore(&self.root, &current, &recovery).is_err() {
                 return Err(LibraryError::RestoreFailed {
@@ -193,28 +223,37 @@ impl Library {
                 });
             }
             cleanup_temporary_restore(&temporary)?;
+            remove_file_if_exists(&intent_path)?;
             return Err(backup_error(&temporary, error));
         }
 
+        restore_crash_point("after-install");
         let post_swap = (|| {
             run_after_swap_hook()?;
             remove_database_sidecars(&current)?;
             drop(db::open_database(&current)?);
             remove_database_sidecars(&recovery)?;
+            restore_crash_point("before-cleanup");
             remove_file_if_exists(&recovery)
         })();
         match post_swap {
-            Ok(()) => Ok(()),
+            Ok(()) => remove_file_if_exists(&intent_path),
             Err(error) => {
                 if rollback_restore(&self.root, &current, &recovery).is_err() {
                     return Err(LibraryError::RestoreFailed {
                         recovery_path: recovery,
                     });
                 }
+                remove_file_if_exists(&intent_path)?;
                 Err(error)
             }
         }
     }
+}
+
+fn restore_crash_point(_point: &str) {
+    #[cfg(test)]
+    if std::env::var("LAKOMICS_TEST_RESTORE_CRASH").as_deref() == Ok(_point) { std::process::exit(88); }
 }
 
 fn backup_entries(root: &Path) -> Result<Vec<BackupEntry>, LibraryError> {
@@ -538,6 +577,54 @@ mod tests {
         models::{BackupKind, ClassificationKind, CreateClassification, TrashPolicy},
         Library,
     };
+
+    #[test]
+    fn restore_crash_child() {
+        let Ok(root) = std::env::var("LAKOMICS_TEST_RESTORE_ROOT") else { return; };
+        let library = Library::open(std::path::Path::new(&root)).unwrap();
+        library.create_classification(CreateClassification {kind:ClassificationKind::Root,name:"preserved metadata".into(),parent_id:None}).unwrap();
+        let backup = library.ensure_daily_backup(Utc::now()).unwrap().unwrap();
+        fs::create_dir_all(library.root().join("work-artwork/fixture")).unwrap();
+        fs::write(library.root().join("work-artwork/fixture/preserved.webp"),b"artwork").unwrap();
+        library.restore_backup(&backup.id).unwrap();
+        panic!("crash point was not reached");
+    }
+
+    #[test]
+    fn process_exit_during_each_restore_phase_preserves_database_and_artwork() {
+        for point in ["before-rename","after-first-rename","after-install","before-cleanup"] {
+            let temp = tempfile::tempdir().unwrap();
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact","library::backup::tests::restore_crash_child","--nocapture"])
+                .env("LAKOMICS_TEST_RESTORE_ROOT",temp.path())
+                .env("LAKOMICS_TEST_RESTORE_CRASH",point).status().unwrap();
+            assert_eq!(status.code(),Some(88));
+            assert!(matches!(Library::open(temp.path()),Err(LibraryError::RestoreFailed{..})));
+            assert_eq!(fs::read(temp.path().join("work-artwork/fixture/preserved.webp")).unwrap(),b"artwork");
+            let dbs: Vec<_> = fs::read_dir(temp.path()).unwrap().filter_map(|e| e.ok()).filter(|e| e.file_name().to_string_lossy().starts_with("library.sqlite") && e.path().extension().is_some_and(|ext| ext == "sqlite")).collect();
+            assert!(!dbs.is_empty());
+            for db in dbs {
+                assert!(super::verify_snapshot(&db.path()).is_ok());
+                let connection=rusqlite::Connection::open_with_flags(db.path(),rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+                assert_eq!(connection.query_row::<i64,_,_>("SELECT COUNT(*) FROM classification_entries WHERE name='preserved metadata'",[],|r|r.get(0)).unwrap(),1);
+            }
+        }
+    }
+
+    #[test]
+    fn interrupted_restore_blocks_initialization_and_artwork_cleanup() {
+        for marker in [super::RESTORE_INTENT, "library.sqlite.restore-old-interrupted.sqlite"] {
+            let temp = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(temp.path().join("work-artwork/fixture")).unwrap();
+            let artwork = temp.path().join("work-artwork/fixture/preserved.webp");
+            std::fs::write(&artwork, b"irreplaceable artwork").unwrap();
+            std::fs::write(temp.path().join(marker), b"recovery state").unwrap();
+            assert!(matches!(Library::open(temp.path()), Err(LibraryError::RestoreFailed { .. })));
+            assert!(!temp.path().join("library.sqlite").exists());
+            assert_eq!(std::fs::read(artwork).unwrap(), b"irreplaceable artwork");
+            assert!(temp.path().join(marker).exists());
+        }
+    }
 
     #[test]
     fn daily_backups_are_created_once_per_utc_date_and_retain_the_newest_seven() {

@@ -46,6 +46,7 @@ fn stream_snapshot(
     connection: &Connection,
     query: &CatalogSearchQuery,
     emit: &mut impl FnMut(CatalogGroupedSearchEvent) -> Result<(), LibraryError>,
+    cancelled: &impl Fn() -> bool,
 ) -> Result<bool, LibraryError> {
     let plan = GroupQueryPlan::new(connection, query, chrono::Utc::now().timestamp())?;
     let selected = catalog_group_query::select_page(connection, &plan)?;
@@ -71,12 +72,13 @@ fn stream_snapshot(
             page_size: query.page_size.clamp(1, 100),
         },
     })?;
+    if cancelled() { return Ok(true); }
     // This call deliberately follows delivery, including the expensive route.
     let count = catalog_group_query::count_groups(connection, &plan);
     if matches!(count, Ok(None)) {
         return Ok(false);
     }
-    emit(count_event(count))?;
+    if !cancelled() { emit(count_event(count))?; }
     Ok(true)
 }
 
@@ -102,6 +104,15 @@ impl Library {
     pub fn search_catalog_groups(
         &self,
         query: CatalogSearchQuery,
+        emit: impl FnMut(CatalogGroupedSearchEvent) -> Result<(), LibraryError>,
+    ) -> Result<(), LibraryError> {
+        self.search_catalog_groups_cancellable(query, || false, emit)
+    }
+
+    pub fn search_catalog_groups_cancellable(
+        &self,
+        query: CatalogSearchQuery,
+        cancelled: impl Fn() -> bool + Send + Clone + 'static,
         mut emit: impl FnMut(CatalogGroupedSearchEvent) -> Result<(), LibraryError>,
     ) -> Result<(), LibraryError> {
         provider_supported(query.provider)?;
@@ -112,10 +123,12 @@ impl Library {
         // normal DB mutex survives the wait; search never starts preparation.
         let mut waited = false;
         let original = loop {
+            if cancelled() { return Ok(()); }
             let mut reader = self.catalog_read_connection()?;
+            reader.progress_handler(1000, Some(cancelled.clone()))?;
             let snapshot = reader.transaction()?;
             if let Some(context) = catalog_counts::read_context(&snapshot)? {
-                if stream_snapshot(&snapshot, &query, &mut emit)? {
+                if stream_snapshot(&snapshot, &query, &mut emit, &cancelled)? {
                     return Ok(());
                 }
                 break context;
@@ -131,8 +144,11 @@ impl Library {
         // The first page is already usable. Any pending/count failure thereafter
         // must be an event, not an invocation error that discards that page.
         let count = (|| {
+            if cancelled() { return Ok(None); }
             self.wait_existing_catalog_preparation()?;
+            if cancelled() { return Ok(None); }
             let mut reader = self.catalog_read_connection()?;
+            reader.progress_handler(1000, Some(cancelled.clone()))?;
             let snapshot = reader.transaction()?;
             let current = catalog_counts::read_context(&snapshot)?;
             if !current
@@ -143,6 +159,7 @@ impl Library {
             }
             catalog_counts::lookup(&snapshot, query.language, query.reveal_blocked)
         })();
+        if cancelled() { return Ok(()); }
         emit(count_event(count))
     }
 
@@ -323,6 +340,21 @@ mod tests {
     }
 
     #[test]
+    fn cancellation_after_page_skips_obsolete_count() {
+        use std::sync::{Arc,atomic::{AtomicBool,Ordering}};
+        let (_root,library)=fixture();library.prepare_online_catalog_counts().unwrap();
+        let cancelled=Arc::new(AtomicBool::new(false));let check=cancelled.clone();
+        let mut events=Vec::new();
+        library.search_catalog_groups_cancellable(query("alpha"),move ||check.load(Ordering::Acquire),|event|{
+            cancelled.store(true,Ordering::Release);events.push(event);Ok(())
+        }).unwrap();
+        assert_eq!(events.len(),1);
+        assert!(matches!(events[0],CatalogGroupedSearchEvent::Page{..}));
+        let mut fresh=Vec::new();library.search_catalog_groups(query("beta"),|event|{fresh.push(event);Ok(())}).unwrap();
+        assert!(fresh.iter().any(|e|matches!(e,CatalogGroupedSearchEvent::Count{..})));
+    }
+
+    #[test]
     fn catalog_group_api_page_precedes_count_and_avoids_global_mutex() {
         let (_root, library) = fixture();
         library.prepare_online_catalog_counts().unwrap();
@@ -419,7 +451,7 @@ mod tests {
             }
             events.push(event);
             Ok(())
-        })
+        }, &|| false)
         .unwrap();
         assert!(matches!(&events[0],CatalogGroupedSearchEvent::Page {page} if page.works.len()==2));
         assert!(matches!(

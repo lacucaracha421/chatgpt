@@ -27,6 +27,9 @@ mod classification;
 pub mod characters;
 pub mod character_hub;
 pub mod character_scan;
+pub mod character_autotag;
+mod character_sources;
+pub mod character_incremental;
 pub(crate) mod character_worker;
 pub(crate) mod collection;
 pub(crate) mod av_models;
@@ -163,6 +166,8 @@ pub struct Library {
     catalog_lookup_cache: Arc<Mutex<Option<online_catalog::CatalogLookupCache>>>,
     collection_artwork_scan_cache: Arc<Mutex<HashMap<String, u128>>>,
     character_scan: Arc<Mutex<character_scan::ScanState>>,
+    character_incremental: Arc<Mutex<character_incremental::Engine>>,
+    character_worker_pool: Arc<character_worker::Pool>,
     video_similarity_scan: Arc<Mutex<video_similarity::ScanState>>,
     igdb_token_cache: igdb::IgdbTokenCache,
     igdb_request_limiter: igdb::IgdbRequestLimiter,
@@ -195,6 +200,7 @@ impl Library {
             source,
         })?;
         let lease = Arc::new(LibraryLease::acquire(&root)?);
+        backup::check_interrupted_restore(&root)?;
         for name in [
             "assets",
             "thumbnails",
@@ -223,6 +229,8 @@ impl Library {
             catalog_lookup_cache: Arc::new(Mutex::new(None)),
             collection_artwork_scan_cache: Arc::new(Mutex::new(HashMap::new())),
             character_scan: Arc::default(),
+            character_incremental: Arc::default(),
+            character_worker_pool: Arc::default(),
             video_similarity_scan: Arc::default(),
             igdb_token_cache: igdb::IgdbTokenCache::default(),
             igdb_request_limiter: igdb::IgdbRequestLimiter::default(),
@@ -233,6 +241,7 @@ impl Library {
         library.cleanup_resolving_similarity_reviews()?;
         library.requeue_interrupted_video_preparation()?;
         library.recover_video_similarity_scans()?;
+        library.recover_character_autotag()?;
         library.requeue_interrupted_cloud_sync()?;
         library.cleanup_unreferenced_work_artwork()?;
         library.start_work_artwork_thumbnail_backfill();

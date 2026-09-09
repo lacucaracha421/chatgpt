@@ -538,7 +538,7 @@ fn backfill_worker_prepares_uploads_and_commits_one_image() {
         let asset_id = body["asset_id"].as_str().expect("prepare carries asset_id");
         let prepare_response = json!({
             "asset_id": asset_id,
-            "already_committed": false,
+            "already_committed": false, "metadata_revision": 0,
             "object_keys": {
                 "original": format!("library/{asset_id}/original"),
                 "thumbnail": format!("library/{asset_id}/thumbnail"),
@@ -666,7 +666,7 @@ fn already_committed_asset_recommits_relationships_without_reupload() {
         prepare
             .respond(json_response(json!({
                 "asset_id": asset_id,
-                "already_committed": true,
+                "already_committed": true, "metadata_revision": 0,
                 "object_keys": {
                     "original": format!("library/{asset_id}/original"),
                     "thumbnail": format!("library/{asset_id}/thumbnail"),
@@ -729,7 +729,7 @@ fn spawn_replication_server(
         prepare
             .respond(json_response(json!({
                 "asset_id": asset_id,
-                "already_committed": false,
+                "already_committed": false, "metadata_revision": 0,
                 "object_keys": {
                     "original": format!("library/{asset_id}/original"),
                     "thumbnail": format!("library/{asset_id}/thumbnail"),
@@ -849,7 +849,7 @@ fn video_prepare_upload_and_commit_flow() {
         prepare
             .respond(json_response(json!({
                 "asset_id": video_asset,
-                "already_committed": false,
+                "already_committed": false, "metadata_revision": 0,
                 "object_keys": {
                     "original": format!("library/{video_asset}/original"),
                     "thumbnail": format!("library/{video_asset}/thumbnail"),
@@ -1039,7 +1039,7 @@ fn retry_does_not_duplicate_assets_or_relations_and_permanent_failure_is_isolate
         let prepare = server.recv().unwrap();
         prepare
             .respond(json_response(json!({
-                "asset_id": "x", "already_committed": false,
+                "asset_id": "x", "already_committed": false, "metadata_revision": 0,
                 "object_keys": {"original": "a", "thumbnail": "b"}
             })))
             .unwrap();
@@ -1103,7 +1103,7 @@ fn retry_does_not_duplicate_assets_or_relations_and_permanent_failure_is_isolate
         let prepare = server2.recv().unwrap();
         prepare
             .respond(json_response(json!({
-                "asset_id": "x", "already_committed": false,
+                "asset_id": "x", "already_committed": false, "metadata_revision": 0,
                 "object_keys": {"original": "a", "thumbnail": "b"}
             })))
             .unwrap();
@@ -1194,7 +1194,7 @@ fn missing_original_fails_that_asset_only_and_later_assets_still_commit() {
         let prepare = server.recv().unwrap();
         prepare
             .respond(json_response(json!({
-                "asset_id": "n", "already_committed": false,
+                "asset_id": "n", "already_committed": false, "metadata_revision": 0,
                 "object_keys": {"original": "a", "thumbnail": "b"}
             })))
             .unwrap();
@@ -1264,4 +1264,62 @@ fn disabling_replication_prevents_the_next_claim_without_discarding_pending_work
     assert!(matches!(result, Ok(None)));
     assert_eq!(queue_status(&library, &asset_id).as_deref(), Some("pending"));
     assert!(library.cloud_capture_enabled().unwrap());
+}
+
+#[test]
+fn revisions_of_one_asset_are_serialized_and_superseded_pending_work_is_retired() {
+    let temp=tempfile::tempdir().unwrap();let library=Library::open(temp.path().join("library")).unwrap();
+    library.set_cloud_sync_config(super::models::CloudSyncConfig {enabled:true,api_base_url:Some("https://fixture.test".into())}).unwrap();
+    let source=temp.path().join("source.png");fs::write(&source,png_bytes(42)).unwrap();
+    let id=ingest_png(&library,&source,"2026-09-09T00:00:00Z");
+    let first=library.claim_next_backfill_for_test().unwrap().unwrap();
+    {
+        let mut connection=library.connection().unwrap();let tx=connection.transaction().unwrap();
+        super::queue::enqueue_asset_upsert(&tx,&id,"2026-09-09T00:00:01Z").unwrap();tx.commit().unwrap();
+    }
+    assert!(library.claim_next_backfill_for_test().unwrap().is_none());
+    library.mark_cloud_sync_retry(&first.queue.id,"retry").unwrap();
+    let second=library.claim_next_backfill_for_test().unwrap().unwrap();
+    assert_ne!(first.queue.id,second.queue.id);
+    library.mark_cloud_sync_synced(&second.queue.id).unwrap();
+    assert!(library.claim_next_backfill_for_test().unwrap().is_none());
+    assert_eq!(library.cloud_sync_queue_item(&first.queue.id).unwrap().unwrap().status,"synced");
+}
+
+#[test]
+fn legacy_server_pauses_replication_without_failing_the_queue() {
+    let server = Server::http("127.0.0.1:0").unwrap();
+    let base_url = format!("http://{}", server.server_addr());
+    let server_thread = thread::spawn(move || {
+        let mut requests = 0;
+        while let Some(mut request) = server.recv_timeout(std::time::Duration::from_secs(1)).unwrap() {
+            assert_eq!(request.url(), "/v1/replication/prepare");
+            let body = read_json(&mut request);
+            let id = body["asset_id"].as_str().unwrap();
+            request.respond(json_response(json!({
+                "asset_id": id, "already_committed": false,
+                "object_keys": {"original":format!("library/{id}/original"),"thumbnail":format!("library/{id}/thumbnail")}
+            }))).unwrap();
+            requests += 1;
+        }
+        requests
+    });
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path().join("library")).unwrap();
+    library.set_cloud_sync_config(super::models::CloudSyncConfig { enabled:true, api_base_url:Some(base_url.clone()) }).unwrap();
+    for i in 0..8 {
+        let path = temp.path().join(format!("{i}.png"));
+        fs::write(&path, png_bytes(i * 23)).unwrap();
+        ingest_png(&library, &path, "2026-09-09T00:00:00Z");
+    }
+    assert!(matches!(library.run_cloud_backfill_cycle_with_client(&CloudClient::new(&base_url).unwrap(),"test-token"), Err(LibraryError::CloudReplicationUpgradeRequired)));
+    assert_eq!(library.cloud_backfill_control_state().unwrap(), BackfillControlState::Paused);
+    let connection = library.connection().unwrap();
+    let failed: i64 = connection.query_row("SELECT COUNT(*) FROM cloud_sync_queue WHERE status='failed'",[],|r|r.get(0)).unwrap();
+    let pending: i64 = connection.query_row("SELECT COUNT(*) FROM cloud_sync_queue WHERE status='pending'",[],|r|r.get(0)).unwrap();
+    assert_eq!(failed, 0);
+    assert_eq!(pending, 8);
+    drop(connection);
+    assert!(library.claim_next_backfill_for_test().unwrap().is_none());
+    assert!((1..=4).contains(&server_thread.join().unwrap()));
 }

@@ -243,10 +243,18 @@ impl CloudClient {
         &self,
         token: &str,
     ) -> Result<Vec<RemoteCapturePayload>, LibraryError> {
+        self.list_pending_captures_after(token, None)
+    }
+
+    pub(crate) fn capture_endpoint(&self) -> &str { self.base_url.as_str() }
+
+    pub(crate) fn list_pending_captures_after(&self, token: &str, after_id: Option<&str>) -> Result<Vec<RemoteCapturePayload>, LibraryError> {
+        let mut endpoint = url::Url::parse(&self.endpoint("/v1/captures/pending")?).map_err(|_| LibraryError::InvalidCloudSyncConfig)?;
+        if let Some(id) = after_id { endpoint.query_pairs_mut().append_pair("after_id", id); }
         let authorization = bearer(token)?;
         let mut response = self
             .agent
-            .get(self.endpoint("/v1/captures/pending")?)
+            .get(endpoint.as_str())
             .header("Authorization", authorization)
             .call()
             .map_err(map_capture_list_error)?;

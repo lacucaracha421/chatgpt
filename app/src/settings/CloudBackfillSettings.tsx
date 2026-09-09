@@ -119,6 +119,10 @@ export function CloudBackfillSettings() {
           </details>
         </dd>
       </dl>)}
+      {progress?.controlState === "paused" && progress.replicationEnabled !== false && gateway.cloudBackfillSetControlState && <Button size="sm" disabled={busy} onClick={() => void act(async () => {
+        await gateway.cloudBackfillSetControlState!("running");
+        notifyCloudBackfillSupervisor();
+      }, "동기화를 계속하지 못했습니다.")}>동기화 계속</Button>}
       {(progress?.failed ?? 0) > 0 && <Button size="sm" disabled={busy} onClick={() => void retry()}>실패 항목 다시 시도</Button>}
       <details className="settings-view__advanced"><summary>점검·복구</summary>
       {preflight && <div className="cloud-backfill__summary" aria-label="모바일 동기화 사전 점검 결과">
@@ -146,9 +150,9 @@ export function CloudBackfillSettings() {
 function stateLabel(progress: CloudBackfillProgress | null, settled: boolean): string {
   if (!progress) return "상태 확인 중…";
   if (progress.replicationEnabled === false) return "자동 복제 꺼짐";
+  if (progress.controlState === "paused") return "동기화 일시정지";
   if (progress.queued + progress.preparing + progress.uploading + progress.committing > 0) return "복제 대기·진행 중";
   if (progress.controlState === "running") return "업로드 중";
-  if (progress.controlState === "paused") return "자동 복제 꺼짐";
   if (settled && progress.failed > 0) return `복제 완료 — ${progress.completed.toLocaleString()}개 완료, ${progress.failed.toLocaleString()}개 확인 필요`;
   if (settled) return `복제 완료 — ${progress.completed.toLocaleString()}개 완료`;
   return "최신 상태";

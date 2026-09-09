@@ -59,7 +59,7 @@ describe("Character review", () => {
 
 });
 
-it("manual analysis with automatic classification compares the whole series before applying", async () => {
+it("manual review only scans the selected target even with automatic classification enabled", async () => {
   const api=createCharacterFixture();
   vi.spyOn(api,"automaticSeries").mockResolvedValue(["series"]);
   const states: Awaited<ReturnType<typeof api.runs>> = [];
@@ -72,8 +72,8 @@ it("manual analysis with automatic classification compares the whole series befo
   mount(api);const user=userEvent.setup();
   await screen.findByRole("option", { name: "이미지 5.webp" });
   await user.click(screen.getByRole("button",{name:"분석"}));
-  await waitFor(()=>expect(apply).toHaveBeenCalledTimes(1),{timeout:4000});
-  expect(start).toHaveBeenCalledTimes((await api.targets()).filter(t=>t.ready&&t.seriesClassificationId==="series").length);
-  expect(apply).toHaveBeenCalledWith(states.map(s=>s.id));
-  expect(screen.getByText("분석 완료 · 2장 자동 확정")).toBeInTheDocument();
+  await waitFor(()=>expect(start).toHaveBeenCalledTimes(1));
+  await waitFor(()=>expect(screen.getByRole("button",{name:"분석"})).toBeEnabled(),{timeout:4000});
+  expect(start).toHaveBeenCalledWith("hina",expect.any(String));
+  expect(apply).not.toHaveBeenCalled();
 });

@@ -40,6 +40,14 @@ export function Catalog({active,paused,backRef}:{active:boolean;paused:boolean;b
   const prefetches=useRef(new Map<string,AbortController>()),readerRequest=useRef<AbortController|null>(null);
   const path=catalogPath(query,cursor),key=`${path}:${refresh}`;
 
+  const readerOwner = `${active}:${paused}:${selected?.provider ?? ''}:${selected?.providerWorkId ?? ''}:${page?.publicationRevision ?? ''}:${page?.context ?? ''}:${key}`;
+  const currentReaderOwner = useRef(readerOwner); currentReaderOwner.current = readerOwner;
+  useEffect(() => {
+    readerRequest.current?.abort(); readerRequest.current = null;
+    setReader(null); setReaderBusy(false); setReaderError('');
+    return () => { readerRequest.current?.abort(); };
+  }, [readerOwner]);
+
   const resetPublicationCaches=(revision:string|null)=>{
     if(publication.current&&revision&&publication.current!==revision){pageCache.current.clear();detailCache.current.clear();editionCache.current.clear();readerCache.current.clear();}
     if(revision)publication.current=revision;
@@ -71,12 +79,12 @@ export function Catalog({active,paused,backRef}:{active:boolean;paused:boolean;b
     return()=>controller.abort();
   },[active,paused,page?.countToken,countRetry]);
   useEffect(()=>{
-    backRef.current=()=>{if(reader){setReader(null);return true;}if(selected){setSelected(null);return true;}return false;};return()=>{backRef.current=null;};
+    backRef.current=()=>{if(reader){closeReader();return true;}if(selected){setSelected(null);return true;}return false;};return()=>{backRef.current=null;};
   },[reader,selected,backRef]);
   useEffect(()=>{if(!selected&&list.current)list.current.scrollTop=scroll.current;},[selected]);
   useEffect(()=>{
     if(!selected||!page?.context||!page.publicationRevision||!active||paused)return;
-    const cacheKey=`${page.publicationRevision}:${selected.providerWorkId}`,cached=lruGet(detailCache.current,cacheKey);
+    const cacheKey=`${page.publicationRevision}:${selected.provider}:${selected.providerWorkId}`,cached=lruGet(detailCache.current,cacheKey);
     if(cached){setDetail(cached);setDetailError('');return;}
     const controller=new AbortController();setDetail(null);setDetailError('');
     void api<{publicationRevision:string;item:CatalogDetail}>(catalogDetailPath(selected,page.context),controller.signal).then(result=>{if(!controller.signal.aborted&&result.publicationRevision===page.publicationRevision){lruSet(detailCache.current,cacheKey,result.item,48);setDetail(result.item);}}).catch(reason=>{if(!controller.signal.aborted)setDetailError(catalogError(reason)||errorText(reason));});
@@ -91,12 +99,13 @@ export function Catalog({active,paused,backRef}:{active:boolean;paused:boolean;b
     return()=>controller.abort();
   },[selected?.groupId,page?.context,page?.publicationRevision,editionCursor,active,paused,detailRefresh]);
 
+  function closeReader(){readerRequest.current?.abort();readerRequest.current=null;setReaderBusy(false);setReader(null);}
   const loadReader=(force=false)=>{
-    if(!selected||!page?.context||!page.publicationRevision)return;const cacheKey=`${page.publicationRevision}:${selected.providerWorkId}`;
+    if(!active||paused||!selected||!page?.context||!page.publicationRevision)return;const owner=readerOwner;const cacheKey=`${page.publicationRevision}:${selected.provider}:${selected.providerWorkId}`;
     if(!force){const cached=lruGet(readerCache.current,cacheKey);if(cached){setReader(cached);setReaderError('');return;}}
     readerRequest.current?.abort();const controller=new AbortController();readerRequest.current=controller;setReaderBusy(true);setReaderError('');
     void api<CatalogReaderManifest>(catalogReaderPath(selected,page.context),controller.signal).then(result=>{
-      if(controller.signal.aborted||result.publicationRevision!==page.publicationRevision)return;lruSet(readerCache.current,cacheKey,result,24);setReader(result);
+      if(controller.signal.aborted||currentReaderOwner.current!==owner||result.publicationRevision!==page.publicationRevision||result.provider!==selected.provider||result.providerWorkId!==selected.providerWorkId)return;lruSet(readerCache.current,cacheKey,result,24);setReader(result);
     }).catch(reason=>{if(!controller.signal.aborted)setReaderError(catalogError(reason)||errorText(reason));}).finally(()=>{if(readerRequest.current===controller){readerRequest.current=null;setReaderBusy(false);}});
   };
   function change(next:Partial<CatalogQuery>){setQuery(current=>({...current,...next}));setCursor(null);setPrevious([]);setSelected(null);setReader(null);scroll.current=0;}
@@ -117,6 +126,6 @@ export function Catalog({active,paused,backRef}:{active:boolean;paused:boolean;b
     {selected&&<div className="catalog-detail"><div className="catalog-heading"><IconButton label="카탈로그 목록으로" icon={ArrowLeftIcon} onClick={()=>setSelected(null)}/><span>상세 정보</span></div>{detailError?<div role="alert" className="inline-error">{detailError}<Button onClick={()=>setDetailRefresh(n=>n+1)}>다시 시도</Button></div>:!detail?<p role="status">상세 정보를 불러오는 중…</p>:<><div className="catalog-detail-intro"><div className="catalog-detail-cover"><CatalogCover item={{...selected,thumbnailUrl:detail.thumbnailUrl}} revision={page?.publicationRevision??'0'.repeat(64)} active={active&&!paused&&!reader}/></div><div><h2>{detail.title}</h2>{detail.titleJpn&&detail.titleJpn!==detail.title&&<p className="muted">{detail.titleJpn}</p>}<p>{detail.fileCount}페이지 · 조회 {detail.views.toLocaleString()}</p>{detail.bookmarked&&<p className="catalog-bookmark-label"><BookmarkIcon/>북마크됨</p>}<Button className="catalog-read-action" disabled={readerBusy} onClick={()=>loadReader(false)}><BookOpenIcon/>{readerBusy?'페이지 확인 중…':'읽기'}</Button>{readerError&&<p className="catalog-reader-error">{readerError}</p>}</div></div><div className="catalog-tags">{detail.tagGroups.map(group=><div key={group.namespace}><h3>{group.namespace}</h3><div>{group.values.map(value=><Button key={value} size="sm" variant="ghost" onClick={()=>{const text=catalogTagQuery(group.namespace,value);setDraft(text);change({text});}}>{group.labels?.[value]??value}</Button>)}</div></div>)}</div></>}
       <section className="catalog-editions" aria-label="카탈로그 판본"><h3>판본{editions?` · ${editions.totalCount}`:''}</h3>{editionError?<div role="alert">{editionError}<Button onClick={()=>setDetailRefresh(n=>n+1)}>다시 시도</Button></div>:editions?.items.map(item=><button key={item.providerWorkId} className="catalog-edition" aria-current={detail?.providerWorkId===item.providerWorkId?'true':undefined} onClick={()=>setSelected(current=>current?{...current,...item}:current)}><span>{item.title}</span><small>{item.fileCount}p{item.bookmarked?' · 북마크':''}</small></button>)}{editionCursor&&<Button variant="ghost" onClick={()=>setEditionCursor(null)}>처음 판본</Button>}{editions?.nextCursor&&<Button variant="ghost" onClick={()=>setEditionCursor(editions.nextCursor)}>다음 판본</Button>}</section>
     </div>}
-    {reader&&selected&&<CatalogReader manifest={reader} title={detail?.title??selected.title} onClose={()=>setReader(null)} onRefresh={()=>loadReader(true)} refreshing={readerBusy}/>}
+    {reader&&selected&&<CatalogReader manifest={reader} title={detail?.title??selected.title} onClose={closeReader} onRefresh={()=>loadReader(true)} refreshing={readerBusy}/>}
   </section>;
 }

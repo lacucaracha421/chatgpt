@@ -157,12 +157,19 @@ pub(super) fn candidate_image(
 pub(super) fn candidate_image_mode(
     connection: &Connection, series: &str, id: &str, automatic: bool,
 ) -> Result<(String, String)> {
+    candidate_media_mode(connection, series, id, automatic, false)
+}
+
+// Direct human assignment accepts videos; recognition and references stay image-only.
+pub(super) fn candidate_media_mode(
+    connection: &Connection, series: &str, id: &str, automatic: bool, allow_video: bool,
+) -> Result<(String, String)> {
     connection.query_row("WITH RECURSIVE scope(id) AS (SELECT id FROM classification_entries WHERE id=?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id),
       ancestors(id,parent_id) AS (SELECT id,parent_id FROM classification_entries WHERE id=?1 UNION ALL
       SELECT c.id,c.parent_id FROM classification_entries c JOIN ancestors p ON c.id=p.parent_id)
-      SELECT a.content_hash,a.relative_path FROM assets a WHERE a.id=?2 AND a.status='normal' AND a.media_kind='image'
+      SELECT a.content_hash,a.relative_path FROM assets a WHERE a.id=?2 AND a.status='normal' AND (a.media_kind='image' OR (?4 AND a.media_kind='video'))
       AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND (ac.classification_id IN (SELECT id FROM scope) OR (?3 AND ac.classification_id IN (SELECT id FROM ancestors WHERE parent_id IS NULL))))",
-      params![series,id,automatic], |r| Ok((r.get(0)?,r.get(1)?))).optional()?.ok_or(Error::Invalid("시리즈 폴더 안의 정상 이미지를 선택해 주세요."))
+      params![series,id,automatic,allow_video], |r| Ok((r.get(0)?,r.get(1)?))).optional()?.ok_or(Error::Invalid("시리즈 폴더 안의 지원되는 자산을 선택해 주세요."))
 }
 
 #[cfg(test)]

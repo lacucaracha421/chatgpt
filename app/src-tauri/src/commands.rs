@@ -151,6 +151,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::InvalidCloudCredentialValue => "invalid_cloud_credential_value",
             LibraryError::CloudUnauthorized => "cloud_unauthorized",
             LibraryError::CloudRequestTimedOut => "cloud_request_timed_out",
+            LibraryError::CloudReplicationUpgradeRequired => "cloud_replication_upgrade_required",
             LibraryError::CloudRequestUnavailable => "cloud_request_unavailable",
             LibraryError::InvalidCloudResponse => "invalid_cloud_response",
             LibraryError::CloudMetadataBackupNotFound => "cloud_metadata_backup_not_found",
@@ -235,6 +236,8 @@ impl From<LibraryError> for CommandError {
             LibraryError::InvalidMovieRuntime => "invalid_movie_runtime",
             LibraryError::AssetNotFound => "asset_not_found",
             LibraryError::EmptyAssetSelection => "empty_asset_selection",
+            LibraryError::DuplicateInTrash => "duplicate_in_trash",
+            LibraryError::DuplicateOriginalCorrupt => "duplicate_original_corrupt",
             LibraryError::InvalidAssetSelection => "invalid_asset_selection",
             LibraryError::AssetDragFailed { .. } => "asset_drag_failed",
             LibraryError::InvalidAssetPageLimit => "invalid_asset_page_limit",
@@ -342,11 +345,16 @@ pub fn get_extension_connection(
 #[tauri::command]
 pub async fn open_library(
     path: String,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<LibrarySummary, CommandError> {
     // 폴더 스캔·스키마 확인이 포함되어 수 초 걸릴 수 있으므로 메인 스레드를 막지 않는다.
     let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || open_library_in_state(path, &state))
+    tauri::async_runtime::spawn_blocking(move || {
+        let summary=open_library_in_state(path,&state)?;
+        if let Some(library)=state.current_library(){characters::start_incremental_if_configured(&app,&library);}
+        Ok(summary)
+    })
         .await
         .map_err(|_| background_task_error())?
 }
@@ -417,12 +425,13 @@ pub async fn list_metadata_backups(
         .map_err(CommandError::from)
 }
 #[tauri::command]
-pub fn list_classifications(
+pub async fn list_classifications(
     state: State<'_, AppState>,
 ) -> Result<Vec<ClassificationEntry>, CommandError> {
-    current_required(state)?
-        .list_classifications()
-        .map_err(CommandError::from)
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library
+        .list_classifications())
+        .await.map_err(|_| background_task_error())?.map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -477,44 +486,53 @@ pub fn delete_classification(id: String, state: State<'_, AppState>) -> Result<(
 }
 
 #[tauri::command]
-pub fn get_asset_classifications(
+pub async fn get_asset_classifications(
     asset_id: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, CommandError> {
-    current_required(state)?
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library
         .get_asset_classifications(&asset_id)
-        .map(|entries| entries.into_iter().map(|entry| entry.id).collect())
-        .map_err(CommandError::from)
+        .map(|entries| entries.into_iter().map(|entry| entry.id).collect()))
+        .await.map_err(|_| background_task_error())?.map_err(CommandError::from)
 }
 
 #[tauri::command]
-pub fn list_assets(
+pub async fn refresh_assets(query: AssetQuery, asset_ids: Vec<String>, state: State<'_, AppState>) -> Result<Vec<AssetSummary>, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.refresh_assets(query, asset_ids))
+        .await.map_err(|_| background_task_error())?.map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn list_assets(
     query: AssetQuery,
     state: State<'_, AppState>,
 ) -> Result<AssetPage, CommandError> {
-    current_required(state)?
-        .list_assets(query)
-        .map_err(CommandError::from)
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.list_assets(query))
+        .await.map_err(|_| background_task_error())?.map_err(CommandError::from)
 }
 
 #[tauri::command]
-pub fn list_source_group_assets(
+pub async fn list_source_group_assets(
     asset_id: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<AssetSummary>, CommandError> {
-    current_required(state)?
-        .list_source_group_assets(&asset_id)
-        .map_err(CommandError::from)
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library
+        .list_source_group_assets(&asset_id))
+        .await.map_err(|_| background_task_error())?.map_err(CommandError::from)
 }
 
 #[tauri::command]
-pub fn list_asset_date_buckets(
+pub async fn list_asset_date_buckets(
     query: AssetDateBucketQuery,
     state: State<'_, AppState>,
 ) -> Result<Vec<AssetDateBucket>, CommandError> {
-    current_required(state)?
-        .list_asset_date_buckets(query)
-        .map_err(CommandError::from)
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.list_asset_date_buckets(query))
+        .await.map_err(|_| background_task_error())?.map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -582,25 +600,35 @@ pub async fn reshuffle_revisit_slate(
 }
 
 #[tauri::command]
-pub fn record_asset_opened(
+pub async fn record_asset_opened(
     asset_id: String,
     opened_at: String,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    current_required(state)?
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library
         .record_asset_opened(&asset_id, &opened_at)
         .map_err(CommandError::from)
+    })
+    .await
+    .map_err(|_| background_task_error())?
 }
 
 #[tauri::command]
-pub fn record_assets_exposed(
+pub async fn record_assets_exposed(
     asset_ids: Vec<String>,
     exposed_at: String,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    current_required(state)?
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library
         .record_assets_exposed(&asset_ids, &exposed_at)
         .map_err(CommandError::from)
+    })
+    .await
+    .map_err(|_| background_task_error())?
 }
 
 #[tauri::command]
@@ -652,13 +680,14 @@ pub async fn decide_similarity_review(
 }
 
 #[tauri::command]
-pub fn get_asset(
+pub async fn get_asset(
     asset_id: String,
     state: State<'_, AppState>,
 ) -> Result<AssetSummary, CommandError> {
-    current_required(state)?
-        .get_asset(&asset_id)
-        .map_err(CommandError::from)
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library
+        .get_asset(&asset_id))
+        .await.map_err(|_| background_task_error())?.map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -767,10 +796,11 @@ pub fn set_assets_favorite(
 }
 
 #[tauri::command]
-pub fn list_albums(state: State<'_, AppState>) -> Result<Vec<AlbumEntry>, CommandError> {
-    current_required(state)?
-        .list_albums()
-        .map_err(CommandError::from)
+pub async fn list_albums(state: State<'_, AppState>) -> Result<Vec<AlbumEntry>, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library
+        .list_albums())
+        .await.map_err(|_| background_task_error())?.map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -825,14 +855,15 @@ pub fn delete_album(id: String, state: State<'_, AppState>) -> Result<(), Comman
 }
 
 #[tauri::command]
-pub fn get_asset_albums(
+pub async fn get_asset_albums(
     asset_id: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, CommandError> {
-    current_required(state)?
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library
         .get_asset_albums(&asset_id)
-        .map(|entries| entries.into_iter().map(|entry| entry.id).collect())
-        .map_err(CommandError::from)
+        .map(|entries| entries.into_iter().map(|entry| entry.id).collect()))
+        .await.map_err(|_| background_task_error())?.map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -1434,13 +1465,14 @@ pub fn set_collection_cover(
 }
 
 #[tauri::command]
-pub fn get_asset_collections(
+pub async fn get_asset_collections(
     asset_id: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, CommandError> {
-    current_required(state)?
-        .get_asset_collections(&asset_id)
-        .map_err(CommandError::from)
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library
+        .get_asset_collections(&asset_id))
+        .await.map_err(|_| background_task_error())?.map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -1792,28 +1824,28 @@ pub async fn search_online_catalog(
         .map_err(CommandError::from)
 }
 
-// Admission happens before spawning, so rapid navigation cannot build an
-// unbounded queue of long exact COUNT workers.
-static CATALOG_SEARCH_WORKERS: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(0);
+// Superseded searches release SQLite through its progress callback, including COUNT.
+static CATALOG_SEARCH_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static CATALOG_SEARCH_WORKERS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 struct CatalogSearchPermit;
 impl CatalogSearchPermit {
-    fn acquire() -> Result<Self, CommandError> {
+    fn acquire(generation: u64) -> Option<Self> {
         use std::sync::atomic::Ordering;
-        CATALOG_SEARCH_WORKERS
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
-                (n < 4).then_some(n + 1)
-            })
-            .map(|_| Self)
-            .map_err(|_| CommandError::from(LibraryError::InvalidOnlineCatalog))
+        loop {
+            if CATALOG_SEARCH_GENERATION.load(Ordering::Acquire) != generation { return None; }
+            if CATALOG_SEARCH_WORKERS.fetch_update(Ordering::AcqRel, Ordering::Acquire,
+                |n| (n < 4).then_some(n + 1)).is_ok() { return Some(Self); }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
     }
 }
 impl Drop for CatalogSearchPermit {
-    fn drop(&mut self) {
-        CATALOG_SEARCH_WORKERS.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
-    }
+    fn drop(&mut self) { CATALOG_SEARCH_WORKERS.fetch_sub(1, std::sync::atomic::Ordering::AcqRel); }
 }
-
+#[tauri::command]
+pub fn cancel_catalog_search() {
+    CATALOG_SEARCH_GENERATION.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+}
 #[tauri::command]
 pub async fn search_catalog_groups(
     query: CatalogSearchQuery,
@@ -1821,18 +1853,13 @@ pub async fn search_catalog_groups(
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
     let library = current_required(state)?;
-    let permit = CatalogSearchPermit::acquire()?;
+    let generation = CATALOG_SEARCH_GENERATION.fetch_add(1, std::sync::atomic::Ordering::AcqRel) + 1;
     tauri::async_runtime::spawn_blocking(move || {
-        let _permit = permit;
-        library.search_catalog_groups(query, |event| {
-            on_event
-                .send(event)
-                .map_err(|_| LibraryError::InvalidOnlineCatalog)
-        })
-    })
-    .await
-    .map_err(|_| background_task_error())?
-    .map_err(CommandError::from)
+        let Some(_permit) = CatalogSearchPermit::acquire(generation) else { return Ok(()); };
+        library.search_catalog_groups_cancellable(query, move || {
+            CATALOG_SEARCH_GENERATION.load(std::sync::atomic::Ordering::Acquire) != generation
+        }, |event| on_event.send(event).map_err(|_| LibraryError::InvalidOnlineCatalog))
+    }).await.map_err(|_| background_task_error())?.map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -2073,11 +2100,12 @@ pub async fn set_online_catalog_update_settings(
 }
 
 #[tauri::command]
-pub fn get_cloud_capture_settings(
+pub async fn get_cloud_capture_settings(
     state: State<'_, AppState>,
 ) -> Result<CloudCaptureSettings, CommandError> {
     let library = current_required(state)?;
-    let config = library.cloud_sync_config().map_err(CommandError::from)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let config = library.cloud_sync_config().map_err(CommandError::from)?;
     let token_configured = credential::cloud_api_token_status().map_err(CommandError::from)?;
     Ok(CloudCaptureSettings {
         enabled: config.enabled,
@@ -2085,17 +2113,21 @@ pub fn get_cloud_capture_settings(
         api_base_url: config.api_base_url,
         token_configured,
     })
+    })
+    .await
+    .map_err(|_| background_task_error())?
 }
 
 #[tauri::command]
-pub fn set_cloud_capture_settings(
+pub async fn set_cloud_capture_settings(
     enabled: bool,
     api_base_url: Option<String>,
     capture_enabled: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<CloudCaptureSettings, CommandError> {
     let library = current_required(state)?;
-    let config = library
+    tauri::async_runtime::spawn_blocking(move || {
+        let config = library
         .set_cloud_settings(CloudSyncConfig { enabled, api_base_url }, capture_enabled.unwrap_or(enabled))
         .map_err(CommandError::from)?;
     let token_configured = credential::cloud_api_token_status().map_err(CommandError::from)?;
@@ -2105,18 +2137,29 @@ pub fn set_cloud_capture_settings(
         api_base_url: config.api_base_url,
         token_configured,
     })
+    })
+    .await
+    .map_err(|_| background_task_error())?
 }
 
 #[tauri::command]
-pub fn set_cloud_api_token(token: String) -> Result<CloudCredentialStatus, CommandError> {
-    credential::set_cloud_api_token_os(&token).map_err(CommandError::from)?;
+pub async fn set_cloud_api_token(token: String) -> Result<CloudCredentialStatus, CommandError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        credential::set_cloud_api_token_os(&token).map_err(CommandError::from)?;
     Ok(CloudCredentialStatus { configured: true })
+    })
+    .await
+    .map_err(|_| background_task_error())?
 }
 
 #[tauri::command]
-pub fn delete_cloud_api_token() -> Result<CloudCredentialStatus, CommandError> {
-    credential::delete_cloud_api_token_os().map_err(CommandError::from)?;
+pub async fn delete_cloud_api_token() -> Result<CloudCredentialStatus, CommandError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        credential::delete_cloud_api_token_os().map_err(CommandError::from)?;
     Ok(CloudCredentialStatus { configured: false })
+    })
+    .await
+    .map_err(|_| background_task_error())?
 }
 
 #[tauri::command]
@@ -2896,5 +2939,23 @@ mod tests {
 
         assert_eq!(second, first);
         assert_eq!(second.root, root.to_string_lossy());
+    }
+}
+
+#[cfg(test)]
+mod catalog_admission_tests {
+    #[test]
+    fn latest_search_waits_for_a_slot_and_superseded_waiters_exit() {
+        use super::{CatalogSearchPermit,CATALOG_SEARCH_GENERATION};
+        use std::sync::atomic::Ordering;
+        CATALOG_SEARCH_GENERATION.store(1,Ordering::Release);
+        let permits=(0..4).map(|_|CatalogSearchPermit::acquire(1).unwrap()).collect::<Vec<_>>();
+        CATALOG_SEARCH_GENERATION.store(2,Ordering::Release);
+        assert!(CatalogSearchPermit::acquire(1).is_none());
+        let (send,receive)=std::sync::mpsc::channel();
+        let worker=std::thread::spawn(move || {let _permit=CatalogSearchPermit::acquire(2).unwrap();send.send(()).unwrap();});
+        assert!(receive.recv_timeout(std::time::Duration::from_millis(50)).is_err());
+        drop(permits);
+        receive.recv_timeout(std::time::Duration::from_secs(2)).unwrap();worker.join().unwrap();
     }
 }

@@ -52,6 +52,20 @@ pub struct TargetDraft {
     pub enabled: bool,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderRegistration {
+    pub folder_id: String,
+    pub series_id: String,
+    pub recursive: bool,
+    pub expected_count: usize,
+    pub target_id: Option<String>,
+    pub expected_fingerprint: Option<String>,
+    pub display_name: String,
+    pub reference_ids: Vec<String>,
+    pub thumbnail_id: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Reference {
@@ -139,6 +153,65 @@ impl Library {
     pub fn get_character_target(&self, id: &str) -> Result<Target> {
         let connection = self.connection()?;
         self.read_character_target(&connection, id)
+    }
+
+    pub fn character_folder_image_count(&self, folder_id: String, recursive: bool) -> Result<usize> {
+        let connection = self.connection()?;
+        let ids = connection.prepare("WITH RECURSIVE scope(id) AS (SELECT ?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id WHERE ?2) SELECT a.id FROM assets a WHERE a.status='normal' AND a.media_kind='image' AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope)) ORDER BY a.id")?
+            .query_map(params![folder_id,recursive], |r| r.get::<_,String>(0))?
+            .collect::<std::result::Result<Vec<_>,_>>()?;
+        Ok(ids.len())
+    }
+
+    /// Register existing classified images without changing file or folder membership.
+    pub fn register_character_folder(&self, request: FolderRegistration) -> Result<Target> {
+        if request.reference_ids.len() > REFERENCE_COUNT { return Err(Error::Invalid("기준 이미지는 최대 5장입니다.")); }
+        let mut connection = self.connection()?;
+        let tx = connection.transaction()?;
+        let inside: bool = tx.query_row("WITH RECURSIVE scope(id) AS (SELECT id FROM classification_entries WHERE id=?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id) SELECT EXISTS(SELECT 1 FROM scope WHERE id=?2)", params![request.series_id,request.folder_id], |r| r.get(0))?;
+        if !inside { return Err(Error::Invalid("원본 폴더를 포함하는 시리즈를 선택해 주세요.")); }
+        let ids = tx.prepare("WITH RECURSIVE scope(id) AS (SELECT ?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id WHERE ?2) SELECT a.id FROM assets a WHERE a.status='normal' AND a.media_kind='image' AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope)) ORDER BY a.id")?
+            .query_map(params![request.folder_id,request.recursive], |r| r.get::<_,String>(0))?
+            .collect::<std::result::Result<Vec<_>,_>>()?;
+        if ids.is_empty() || ids.len() != request.expected_count { return Err(Error::Invalid("폴더의 이미지 수가 바뀌었습니다. 목록을 다시 확인해 주세요.")); }
+        let target = if let Some(id) = request.target_id {
+            let target = self.read_character_target(&tx, &id)?;
+            if target.series_classification_id.as_deref() != Some(&request.series_id) || request.expected_fingerprint.as_deref() != Some(&target.fingerprint) { return Err(Error::Stale); }
+            target
+        } else {
+            let name = request.display_name.trim();
+            if name.is_empty() { return Err(Error::Invalid("캐릭터 이름을 입력해 주세요.")); }
+            let duplicate: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM character_targets WHERE series_classification_id=?1 AND (display_name=?2 OR linked_classification_id=?3))", params![request.series_id,name,request.folder_id], |r| r.get(0))?;
+            if duplicate { return Err(Error::Invalid("이미 등록된 캐릭터를 연결 대상으로 선택해 주세요.")); }
+            let id = uuid::Uuid::new_v4().to_string();
+            let now = chrono::Utc::now().to_rfc3339();
+            tx.execute("INSERT OR IGNORE INTO character_series(classification_id) VALUES(?1)", [&request.series_id])?;
+            if let Some(image) = &request.thumbnail_id {
+                if !ids.contains(image) { return Err(Error::Invalid("대표 이미지는 대상 폴더에서 선택해 주세요.")); }
+                super::character_hub::validate_art(&tx,image)?;
+            }
+            tx.execute("INSERT INTO character_targets(id,series_classification_id,linked_classification_id,display_name,enabled,thumbnail_asset_id,created_at,updated_at) VALUES(?1,?2,?3,?4,1,?5,?6,?6)", params![id,request.series_id,request.folder_id,name,request.thumbnail_id,now])?;
+            let mut hashes = BTreeSet::new();
+            for (slot, image) in request.reference_ids.iter().enumerate() {
+                if !ids.contains(image) { return Err(Error::Invalid("기준 이미지는 대상 폴더에서 선택해 주세요.")); }
+                super::character_hub::validate_character_selection(&tx,&request.series_id,Some(&id),image)?;
+                let (hash,path) = scoped_image(&tx,&request.series_id,image)?;
+                self.open_library_media(&path)?;
+                if !hashes.insert(hash.clone()) { return Err(Error::Invalid("기준 이미지가 중복되었습니다.")); }
+                tx.execute("INSERT INTO character_references(target_id,slot,asset_id,asset_hash) VALUES(?1,?2,?3,?4)", params![id,slot as i64,image,hash])?;
+            }
+            self.read_character_target(&tx,&id)?
+        };
+        for chunk in ids.chunks(200) {
+            self.write_character_decisions(&tx, DecisionRequest {
+                target_id: target.id.clone(), expected_fingerprint: target.fingerprint.clone(),
+                asset_ids: chunk.to_vec(), decision: DecisionKind::Accepted,
+                baseline_fingerprint: None, scan_id: None,
+            })?;
+        }
+        let result = self.read_character_target(&tx,&target.id)?;
+        tx.commit()?;
+        Ok(result)
     }
 
     pub fn save_character_target(&self, draft: TargetDraft) -> Result<Target> {
@@ -353,8 +426,9 @@ impl Library {
                     .series_classification_id
                     .as_deref()
                     .ok_or(Error::Invalid("시리즈 폴더를 다시 연결해 주세요."))?;
-                super::character_hub::candidate_image_mode(&transaction, series, asset_id,
-                    evidence.get(asset_id).is_some_and(|e| e["prediction"]["automaticScope"] == true))?.0
+                super::character_hub::candidate_media_mode(&transaction, series, asset_id,
+                    evidence.get(asset_id).is_some_and(|e| e["prediction"]["automaticScope"] == true),
+                    request.scan_id.is_none())?.0
             };
             let previous: Option<String> = transaction
                 .query_row(
@@ -375,6 +449,14 @@ impl Library {
             transaction.execute("INSERT INTO character_decisions
                 (target_id,asset_id,source_asset_id,asset_hash,decision,target_fingerprint,baseline_fingerprint,reference_snapshot,created_at)
                 VALUES(?1,?2,?2,?3,?4,?5,?6,?7,?8)", params![target.id,asset_id,hash,request.decision.stored(),target.fingerprint,request.baseline_fingerprint,snapshot,now])?;
+            if request.decision == DecisionKind::Accepted {
+                if let Some(snapshot)=evidence.get(asset_id) {
+                    let prediction=&snapshot["prediction"];
+                    let single=prediction["wholeFallback"]==false && prediction["queryBoxes"].as_array().is_some_and(|boxes|boxes.len()==1);
+                    transaction.execute("UPDATE character_autotag_jobs SET review_state=?2 WHERE asset_id=?1 AND state='completed'",
+                        params![asset_id,if single {"resolved"} else {"partially_resolved"}])?;
+                }
+            }
             changed += 1;
         }
         Ok(changed)

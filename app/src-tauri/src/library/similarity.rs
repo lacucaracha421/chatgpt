@@ -266,11 +266,18 @@ impl Library {
         let transaction = connection.transaction()?;
         verify_asset_status(&transaction, existing_id, "normal")?;
         verify_asset_status(&transaction, candidate_id, "review")?;
-        transaction.execute(
-            "INSERT OR IGNORE INTO asset_classifications (asset_id, classification_id)
-             SELECT ?2, classification_id FROM asset_classifications WHERE asset_id = ?1",
-            params![existing_id, candidate_id],
-        )?;
+        let existing_classifications = transaction.prepare(
+            "SELECT classification_id FROM asset_classifications WHERE asset_id=?1 ORDER BY classification_id")?
+            .query_map([existing_id], |r| r.get::<_,String>(0))?
+            .collect::<Result<Vec<_>,_>>()?;
+        // Do not silently choose a location for legacy invalid memberships.
+        if existing_classifications.len() > 1 { return Err(LibraryError::InvalidAssetSelection); }
+        if let Some(classification_id) = existing_classifications.first() {
+            transaction.execute("DELETE FROM asset_classifications WHERE asset_id=?1", [candidate_id])?;
+            transaction.execute("INSERT INTO asset_classifications(asset_id,classification_id) VALUES(?1,?2)", params![candidate_id,classification_id])?;
+        }
+        let count: i64 = transaction.query_row("SELECT COUNT(*) FROM asset_classifications WHERE asset_id=?1", [candidate_id], |r| r.get(0))?;
+        if count > 1 { return Err(LibraryError::InvalidAssetSelection); }
         transaction.execute(
             "INSERT OR IGNORE INTO collection_assets (collection_id, asset_id, added_at)
              SELECT collection_id, ?2, added_at
@@ -296,6 +303,8 @@ impl Library {
             "UPDATE assets SET status = 'normal', trashed_at = NULL WHERE id = ?1 AND status = 'review'",
             [candidate_id],
         )?;
+        super::character_autotag::enqueue(&transaction,candidate_id,super::character_autotag::Cause::SimilarityResolution)?;
+        crate::cloud::queue::enqueue_asset_upsert(&transaction, candidate_id, &chrono::Utc::now().to_rfc3339())?;
         resolve_review(&transaction, review_id, "replace_existing")?;
         transaction.commit()?;
         Ok(())
@@ -315,6 +324,8 @@ impl Library {
             "UPDATE assets SET status = 'normal', trashed_at = NULL WHERE id = ?1 AND status = 'review'",
             [candidate_id],
         )?;
+        super::character_autotag::enqueue(&transaction,candidate_id,super::character_autotag::Cause::SimilarityResolution)?;
+        crate::cloud::queue::enqueue_asset_upsert(&transaction, candidate_id, &chrono::Utc::now().to_rfc3339())?;
         resolve_review(&transaction, review_id, "keep_both")?;
         transaction.commit()?;
         Ok(())
@@ -1195,6 +1206,39 @@ mod tests {
     }
 
     #[test]
+    fn exact_duplicate_preserves_review_and_rejects_trash_or_missing_original() {
+        let f=review_fixture();
+        let request=|path| IngestMediaRequest { source_path:path,classification_id:None,source_url:None,
+            collected_at:None,replace_duplicate_metadata:false,source_published_at:None,creator_name:None,
+            creator_handle:None,creator_url:None,import_source:ImportSource::Direct,
+            import_batch_id:"00000000-0000-4000-8000-000000000002".into() };
+        match f.library.ingest_media(request(f.input.join("candidate.jpg"))).unwrap() {
+            IngestOutcome::ReviewPending{review_id}=>assert_eq!(review_id,f.review_id),other=>panic!("{other:?}")
+        }
+        f.library.connection().unwrap().execute("UPDATE assets SET status='trash',trashed_at='2026-09-09' WHERE id=?1",[&f.existing_id]).unwrap();
+        assert!(matches!(f.library.ingest_media(request(f.input.join("existing.png"))),Err(LibraryError::DuplicateInTrash)));
+        let path:String=f.library.connection().unwrap().query_row("SELECT relative_path FROM assets WHERE id=?1",[&f.existing_id],|r|r.get(0)).unwrap();
+        f.library.connection().unwrap().execute("UPDATE assets SET status='normal',trashed_at=NULL WHERE id=?1",[&f.existing_id]).unwrap();
+        fs::remove_file(f.library.root().join(path)).unwrap();
+        assert!(f.library.ingest_media(request(f.input.join("existing.png"))).is_err());
+    }
+
+    #[test]
+    fn review_promotion_and_outbox_are_atomic_and_idempotent() {
+        for decision in [SimilarityDecision::KeepBoth,SimilarityDecision::ReplaceExisting] {
+            let f=review_fixture();
+            let count=||f.library.connection().unwrap().query_row::<i64,_,_>("SELECT COUNT(*) FROM cloud_sync_queue WHERE entity_id=?1",[&f.candidate_id],|r|r.get(0)).unwrap();
+            assert_eq!(count(),0);
+            f.library.connection().unwrap().execute_batch("CREATE TRIGGER reject_queue BEFORE INSERT ON cloud_sync_queue BEGIN SELECT RAISE(ABORT,'fixture'); END;").unwrap();
+            assert!(f.library.decide_similarity_review(SimilarityDecisionRequest{review_id:f.review_id.clone(),decision}).is_err());
+            assert_eq!(f.status(&f.candidate_id),"review");assert_eq!(count(),0);
+            f.library.connection().unwrap().execute_batch("DROP TRIGGER reject_queue;").unwrap();
+            for _ in 0..2 {f.library.decide_similarity_review(SimilarityDecisionRequest{review_id:f.review_id.clone(),decision}).unwrap();}
+            assert_eq!(f.status(&f.candidate_id),"normal");assert_eq!(count(),1);
+        }
+    }
+
+    #[test]
     fn get_asset_returns_normal_assets_but_not_review_candidates() {
         let fixture = review_fixture();
 
@@ -1242,10 +1286,13 @@ mod tests {
 
         assert_eq!(fixture.status(&fixture.existing_id), "trash");
         assert_eq!(fixture.status(&fixture.candidate_id), "normal");
+        let job=fixture.library.character_autotag_job(&fixture.candidate_id).unwrap().unwrap();
+        assert_eq!(job.state,"pending");
+        assert_eq!(job.classification_ids,vec![fixture.old_tag.clone()]);
         assert!(fixture.favorite(&fixture.candidate_id));
         let mut actual = fixture.classification_ids(&fixture.candidate_id);
         actual.sort();
-        let mut expected = vec![fixture.old_tag.clone(), fixture.requested_tag.clone()];
+        let mut expected = vec![fixture.old_tag.clone()];
         expected.sort();
         assert_eq!(actual, expected);
         assert_eq!(

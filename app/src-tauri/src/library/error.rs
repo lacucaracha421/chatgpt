@@ -44,6 +44,8 @@ pub enum LibraryError {
     CloudRequestTimedOut,
     #[error("클라우드 API에 연결할 수 없습니다")]
     CloudRequestUnavailable,
+    #[error("자산 동기화를 계속하려면 서버를 revision 지원 버전으로 업데이트해 주세요.")]
+    CloudReplicationUpgradeRequired,
     #[error("클라우드 API 응답이 올바르지 않습니다")]
     InvalidCloudResponse,
     #[error("서버에 라이브러리 메타데이터 백업이 없습니다")]
@@ -268,6 +270,10 @@ pub enum LibraryError {
     InvalidLegacyPackage(String),
     #[error("요청한 미디어 파일을 찾을 수 없습니다")]
     MediaNotFound,
+    #[error("같은 파일이 휴지통에 있습니다. 휴지통에서 복원한 뒤 다시 수집해 주세요.")]
+    DuplicateInTrash,
+    #[error("기존 원본이 손상되었습니다. 라이브러리 복구 후 다시 수집해 주세요.")]
+    DuplicateOriginalCorrupt,
     #[error("미디어 경로가 라이브러리 폴더 밖을 가리킵니다")]
     UnsafeMediaPath,
     #[error("미디어 파일을 읽을 수 없습니다: {path}")]

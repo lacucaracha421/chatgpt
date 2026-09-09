@@ -419,6 +419,7 @@ impl Library {
         let (processed, problems, error) = match &result {
             Ok(summary) => (summary.committed, summary.retry_scheduled + summary.permanent_failures,
                 (summary.retry_scheduled + summary.permanent_failures > 0).then_some("전송하지 못한 자료가 있습니다. 연결과 원본 파일을 확인해 주세요.")),
+            Err(LibraryError::CloudReplicationUpgradeRequired) => (0, 1, Some("서버 업데이트가 필요하여 동기화를 일시정지했습니다. 서버 업데이트 후 실패 항목 재시도와 계속을 선택해 주세요.")),
             Err(_) => (0, 1, Some("복제 연결을 확인하지 못했습니다. 서버 주소·연결 키와 네트워크를 확인해 주세요.")),
         };
         self.finish_cloud_activity("replication", processed, problems, error)?;
@@ -442,6 +443,7 @@ impl Library {
         token: &str,
     ) -> Result<BackfillRunSummary, LibraryError> {
         let summary = std::sync::Arc::new(std::sync::Mutex::new(BackfillRunSummary::default()));
+        let upgrade_required = std::sync::atomic::AtomicBool::new(false);
         let library = std::sync::Arc::new(self.clone());
         let token = std::sync::Arc::new(token.to_owned());
 
@@ -451,6 +453,7 @@ impl Library {
                 let client = client;
                 let token = std::sync::Arc::clone(&token);
                 let summary = std::sync::Arc::clone(&summary);
+                let upgrade_required = &upgrade_required;
                 scope.spawn(move || {
                     // 재시도 가능 오류도 사이클당 최대 N회로 제한한다. 무한
                     // 재시도는 야간 백필이 끝나지 않는 원인이 된다. 남은
@@ -482,6 +485,9 @@ impl Library {
                                 consecutive_retries = 0;
                             }
                             Err(CloudBackfillError::Library(error)) => {
+                                if matches!(error, LibraryError::CloudReplicationUpgradeRequired) {
+                                    upgrade_required.store(true, std::sync::atomic::Ordering::Release);
+                                }
                                 eprintln!("cloud backfill library error: {error}");
                                 break;
                             }
@@ -491,6 +497,9 @@ impl Library {
             }
         });
 
+        if upgrade_required.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(LibraryError::CloudReplicationUpgradeRequired);
+        }
         let summary = std::sync::Arc::try_unwrap(summary)
             .map_err(|_| LibraryError::InvalidCloudSyncQueueItem)?
             .into_inner()
@@ -560,6 +569,11 @@ impl Library {
                 return Err(classify_backfill_error(asset_id, &error));
             }
         };
+        let Some(expected_revision) = prepare_result.metadata_revision else {
+            let error = LibraryError::CloudReplicationUpgradeRequired;
+            self.pause_backfill_for_upgrade(&queue_id).map_err(CloudBackfillError::Library)?;
+            return Err(CloudBackfillError::Library(error));
+        };
         if prepare_result.already_committed {
             // 원본/썸네일은 그대로다. 관계-only 변경(revision 상승)이라도
             // 커밋을 다시 보내 classification_ids를 수렴시킨다. 서버 commit은
@@ -567,7 +581,7 @@ impl Library {
             let commit_payload = self
                 .backfill_commit_payload(&prepared)
                 .map_err(|error| classify_backfill_error(asset_id.clone(), &error))?;
-            if let Err(error) = client.commit_replication(&commit_payload_wire(&commit_payload), token)
+            if let Err(error) = client.commit_replication(&commit_payload_wire(&commit_payload, expected_revision), token)
             {
                 self.backfill_failure(&queue_id, &error)
                     .map_err(CloudBackfillError::Library)?;
@@ -595,7 +609,7 @@ impl Library {
         let commit_payload = self
             .backfill_commit_payload(&prepared)
             .map_err(|error| classify_backfill_error(asset_id.clone(), &error))?;
-        if let Err(error) = client.commit_replication(&commit_payload_wire(&commit_payload), token)
+        if let Err(error) = client.commit_replication(&commit_payload_wire(&commit_payload, expected_revision), token)
         {
             self.backfill_failure(&queue_id, &error)
                 .map_err(CloudBackfillError::Library)?;
@@ -608,12 +622,29 @@ impl Library {
         Ok(Some(asset_id))
     }
 
+    fn pause_backfill_for_upgrade(&self, queue_id: &str) -> Result<(), LibraryError> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let now = chrono::Utc::now().to_rfc3339();
+        transaction.execute(
+            "UPDATE cloud_sync_queue SET status='pending', updated_at=?2, last_error=?3 WHERE id=?1 AND status IN ('preparing','uploading')",
+            params![queue_id, now, LibraryError::CloudReplicationUpgradeRequired.to_string()],
+        )?;
+        transaction.execute(
+            "UPDATE cloud_backfill_control SET state='paused', updated_at=?1 WHERE singleton=1",
+            [&now],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn claim_next_backfill_asset(&self) -> Option<PreparedAssetUpload> {
         // 백필 전용 클레임: 최근 수집 자산부터(updated_at DESC) 원자적으로
         // preparing으로 전이한다. 점증 동기화(sync.rs)는 FIFO(ASC)을 유지해
         // 서로 간섭하지 않는다. 비디오 reserve와 같은 UPDATE...RETURNING 패턴.
         let mut connection = self.connection().ok()?;
         let transaction = connection.transaction().ok()?;
+        transaction.execute("UPDATE cloud_sync_queue SET status='synced', synced_at=?1, last_error=NULL WHERE entity_type='asset' AND operation='upsert' AND status IN ('pending','failed') AND EXISTS (SELECT 1 FROM cloud_sync_queue newer WHERE newer.entity_type='asset' AND newer.entity_id=cloud_sync_queue.entity_id AND newer.operation='upsert' AND newer.revision>cloud_sync_queue.revision AND newer.status='synced')", [chrono::Utc::now().to_rfc3339()]).ok()?;
         let claimed = transaction
             .query_row(
                 "SELECT queue.id, queue.entity_id, asset.media_kind,
@@ -624,6 +655,12 @@ impl Library {
                    AND EXISTS (SELECT 1 FROM library_settings WHERE singleton = 1 AND cloud_sync_enabled = 1)
                    AND queue.entity_type = 'asset'
                    AND queue.operation = 'upsert'
+                   AND NOT EXISTS (SELECT 1 FROM cloud_sync_queue busy
+                       WHERE busy.entity_type='asset' AND busy.entity_id=queue.entity_id
+                       AND busy.status IN ('processing','preparing','uploading','committing'))
+                   AND NOT EXISTS (SELECT 1 FROM cloud_sync_queue newer
+                       WHERE newer.entity_type='asset' AND newer.entity_id=queue.entity_id
+                       AND newer.operation='upsert' AND newer.revision > queue.revision)
                    AND asset.status = 'normal'
                    AND (NOT EXISTS (SELECT 1 FROM cloud_backfill_scope)
                         OR queue.entity_id IN (SELECT asset_id FROM cloud_backfill_scope))
@@ -649,6 +686,7 @@ impl Library {
             .ok()?;
         let Some((queue_id, asset_id, media_kind, relative_path, byte_size, sha256)) = claimed
         else {
+            transaction.commit().ok()?;
             return None;
         };
         transaction
@@ -846,8 +884,10 @@ fn prepared_metadata(
     }
 }
 
-fn commit_payload_wire(payload: &BackfillCommitPayload) -> super::models::ReplicationCommitRequest {
+fn commit_payload_wire(payload: &BackfillCommitPayload, expected_revision: u64) -> super::models::ReplicationCommitRequest {
     super::models::ReplicationCommitRequest {
+        expected_revision,
+        commit_id: uuid::Uuid::new_v4().to_string(),
         asset_id: payload.asset_id.clone(),
         kind: payload.kind.clone(),
         original: super::models::ReplicationVariantPayload {

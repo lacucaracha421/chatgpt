@@ -632,3 +632,53 @@ fn learned_examples_follow_current_human_approvals_only() {
     f.library.set_asset_classification(SetAssetClassification { asset_ids:vec!["asset-5".into()], classification_id:Some(f.outside.clone()) }).unwrap();
     assert_eq!(count(), 0);
 }
+
+#[test]
+fn folder_registration_is_atomic_idempotent_and_preserves_memberships() {
+    let f = Fixture::new();
+    assert_eq!(f.library.character_folder_image_count(f.series.clone(),false).unwrap(),1);
+    assert_eq!(f.library.character_folder_image_count(f.series.clone(),true).unwrap(),6);
+    let request = |target: Option<&Target>, count| FolderRegistration {
+        folder_id: f.child.clone(), series_id: f.series.clone(), recursive: false,
+        expected_count: count, target_id: target.map(|t| t.id.clone()),
+        expected_fingerprint: target.map(|t| t.fingerprint.clone()), display_name: "Imported".into(),
+        reference_ids: vec![], thumbnail_id: None,
+    };
+    assert!(f.library.register_character_folder(request(None,6)).is_err());
+    assert!(f.library.list_character_targets().unwrap().is_empty());
+    let target = f.library.register_character_folder(request(None,5)).unwrap();
+    assert_eq!(f.library.character_relations_for_asset("asset-0").unwrap(),vec![target.id.clone()]);
+    assert_eq!(f.library.get_asset_classifications("asset-0").unwrap()[0].id,f.child);
+    assert!(f.library.register_character_folder(request(None,5)).is_err());
+    f.library.register_character_folder(request(Some(&target),5)).unwrap();
+    assert_eq!(f.library.list_character_decisions(&target.id,None,200).unwrap().len(),5);
+    assert!(f.library.character_relations_for_asset("asset-5").unwrap().is_empty());
+}
+
+#[test]
+fn manual_video_membership_is_visible_but_not_recognition_evidence() {
+    let f = Fixture::new();
+    let target = f.ready("Video owner");
+    f.library.connection().unwrap().execute("INSERT INTO video_assets(asset_id,duration_ms,container,video_codec,preparation_state) VALUES('asset-5',1000,'mp4','h264','pending')", []).unwrap();
+    f.library.connection().unwrap().execute("UPDATE assets SET media_kind='video' WHERE id IN ('asset-5','asset-6')", []).unwrap();
+    let request = |id: &str, decision| DecisionRequest {
+        target_id: target.id.clone(), expected_fingerprint: target.fingerprint.clone(),
+        asset_ids: vec![id.into()], decision, baseline_fingerprint: None, scan_id: None,
+    };
+    assert!(f.library.record_character_decisions(request("asset-6", DecisionKind::Accepted)).is_err());
+    f.library.record_character_decisions(request("asset-5", DecisionKind::Accepted)).unwrap();
+    assert_eq!(f.library.character_relations_for_asset("asset-5").unwrap(), vec![target.id.clone()]);
+    let page = f.library.browse_character_assets(super::super::character_hub::BrowseQuery {
+        series_id: f.series.clone(), target_id: Some(target.id.clone()), reference_target_id: None,
+        all: false, after: None, limit: 100,
+    }).unwrap();
+    assert!(page.items.iter().any(|a| a.id == "asset-5"));
+    let c = f.library.connection().unwrap();
+    assert!(super::super::character_hub::candidate_image(&c, &f.series, "asset-5").is_err());
+    assert!(scoped_image(&c, &f.series, "asset-5").is_err());
+    assert!(!super::super::character_autotag::enqueue(&c, "asset-5", super::super::character_autotag::Cause::Ingestion).unwrap());
+    drop(c);
+    assert!(f.library.get_character_target(&target.id).unwrap().learned_references.is_empty());
+    f.library.record_character_decisions(request("asset-5", DecisionKind::Cleared)).unwrap();
+    assert!(f.library.character_relations_for_asset("asset-5").unwrap().is_empty());
+}

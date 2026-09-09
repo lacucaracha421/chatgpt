@@ -120,6 +120,7 @@ export const libraryGateway: LibraryGateway = {
     invoke<CatalogVisibilityPolicy>("set_catalog_category_hidden", { category, hidden }),
   setCatalogTagBlocked: (tag: CatalogBlockedTag, blocked) =>
     invoke<CatalogVisibilityPolicy>("set_catalog_tag_blocked", { tag, blocked }),
+  cancelCatalogSearch: () => invoke<void>("cancel_catalog_search"),
   searchCatalogGroups: (query, onEvent) => {
     const channel = new Channel<CatalogGroupedSearchEvent>();
     channel.onmessage = onEvent;
@@ -217,6 +218,7 @@ export const libraryGateway: LibraryGateway = {
   deleteAlbum: (id) => invoke("delete_album", { id }),
   listAssets: (query: AssetQuery) =>
     invoke<AssetPage>("list_assets", { query }),
+  refreshAssets: (query, assetIds) => invoke<AssetSummary[]>("refresh_assets", { query, assetIds }),
   listSourceGroupAssets: (assetId) =>
     invoke<AssetSummary[]>("list_source_group_assets", { assetId }),
   listAssetDateBuckets: (query: AssetDateBucketQuery) =>

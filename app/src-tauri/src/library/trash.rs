@@ -302,10 +302,13 @@ pub(crate) fn update_trash_status_in_transaction(
 ) -> Result<(), LibraryError> {
     let asset_ids = validated_asset_ids(transaction, asset_ids)?;
     for asset_id in asset_ids {
-        transaction.execute(
+        let changed=transaction.execute(
             "UPDATE assets SET status = ?3, trashed_at = ?4 WHERE id = ?1 AND status = ?2",
             params![asset_id, from_status, to_status, trashed_at],
         )?;
+        if changed > 0 && to_status == "normal" && from_status != "normal" {
+            super::character_autotag::enqueue(transaction,asset_id,super::character_autotag::Cause::Restore)?;
+        }
     }
     Ok(())
 }

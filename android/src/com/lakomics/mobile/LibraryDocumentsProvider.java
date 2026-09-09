@@ -62,10 +62,12 @@ public final class LibraryDocumentsProvider extends DocumentsProvider {
   // A continuation can be navigated to pick files, but cannot widen a tree grant.
   if(parent.equals(document) || parent.startsWith("page:"))return false;
   try{synchronized(CONNECTION_LOCK){if(!configured())return false;
+   // Cached gallery metadata is display-only; tree grants require current server evidence.
+   if(parent.startsWith("class:") && document.startsWith("asset:"))return api("/v1/library/classifications/"+Uri.encode(parent.substring(6))+"/contains/"+Uri.encode(document.substring(6)),"GET",null,null).optBoolean("is_child",false);
    String pageClass=null;if(document.startsWith("page:"))pageClass=new JSONObject(new String(Base64.decode(document.substring(5),Base64.URL_SAFE|Base64.NO_WRAP),StandardCharsets.UTF_8)).getString("classification");
    Map<String,String> parents=new HashMap<>();List<String> memberships=new ArrayList<>();
-   if(parent.startsWith("class:")){JSONArray list=classifications(null);for(int i=0;i<list.length();i++){JSONObject c=list.getJSONObject(i);parents.put(c.getString("id"),c.isNull("parent_id")?null:c.optString("parent_id",null));}
-    if(document.startsWith("asset:")){JSONArray ids=recalled(document.substring(6)).optJSONArray("classification_ids");if(ids!=null)for(int i=0;i<ids.length();i++)memberships.add(ids.getString(i));}}
+   if(parent.startsWith("class:")){JSONArray list=api("/v1/library/classifications","GET",null,null).getJSONArray("items");for(int i=0;i<list.length();i++){JSONObject c=list.getJSONObject(i);parents.put(c.getString("id"),c.isNull("parent_id")?null:c.optString("parent_id",null));}
+   }
    return DocumentTreePolicy.isChild(parent,document,pageClass,parents,memberships);
   }}catch(Exception e){return false;}
  }

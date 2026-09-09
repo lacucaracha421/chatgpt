@@ -701,3 +701,40 @@ fn overlapping_detector_boxes_are_not_two_distinct_people() {
     assert!(same_person(&[0.,0.,100.,100.], &[10.,10.,90.,90.]));
     assert!(!same_person(&[0.,0.,40.,100.], &[60.,0.,100.,100.]));
 }
+
+#[test]
+fn learned_competitor_change_blocks_old_automatic_evidence() {
+    let f=Fixture::new();let a=f.ready("A");let b=f.ready("B");
+    person_prediction(&f,&a,"a",0);person_prediction(&f,&b,"b",0);
+    {
+        let mut state=f.library.character_scan.lock().unwrap();
+        let evidence=state.previous.get_mut(&b.id).unwrap().1.get_mut("asset-5").unwrap().evidence.as_mut().unwrap();
+        evidence["queryBoxes"]=json!([[0,0,40,100]]);
+    }
+    f.library.record_character_decisions(prediction_decision(&b,"b")).unwrap();
+    assert_eq!(f.library.get_character_target(&b.id).unwrap().learned_references.len(),1);
+    f.library.character_scan.lock().unwrap().previous.get_mut(&b.id).unwrap().1.get_mut("asset-5").unwrap().state="unmatched".into();
+    assert_eq!(f.library.apply_automatic_characters(vec!["a".into(),"b".into()]).unwrap(),0);
+    assert_eq!(f.library.character_relations_for_asset("asset-5").unwrap(),vec![b.id]);
+}
+
+#[test]
+fn manual_snapshot_allows_successive_approvals_after_learning() {
+    let f=Fixture::new();let a=f.ready("A");
+    f.library.set_asset_classification(SetAssetClassification {asset_ids:vec!["asset-6".into()],classification_id:Some(f.series.clone())}).unwrap();
+    person_prediction(&f,&a,"a",0);
+    let input=f.library.current_input(&a,"asset-6").unwrap();
+    {
+        let mut state=f.library.character_scan.lock().unwrap();
+        let rows=&mut state.previous.get_mut(&a.id).unwrap().1;
+        let row=rows.get_mut("asset-5").unwrap();
+        row.evidence.as_mut().unwrap()["queryBoxes"]=json!([[0,0,40,100]]);
+        row.evidence.as_mut().unwrap()["learnedReferences"]=json!([]);
+        let mut second=row.clone();second.asset_id=input.id.clone();second.content_hash=input.hash;
+        rows.insert(input.id,second);
+    }
+    f.library.record_character_decisions(prediction_decision(&a,"a")).unwrap();
+    assert_eq!(f.library.get_character_target(&a.id).unwrap().learned_references.len(),1);
+    let mut second=prediction_decision(&a,"a");second.asset_ids=vec!["asset-6".into()];
+    assert_eq!(f.library.record_character_decisions(second).unwrap(),1);
+}

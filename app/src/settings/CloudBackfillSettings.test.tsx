@@ -153,3 +153,12 @@ it("adds no polling timer while waiting for supervisor progress", async () => {
   expect(gateway.cloudBackfillProgress).toHaveBeenCalledTimes(1);
   vi.useRealTimers();
 });
+
+
+it("resumes an enabled paused queue without reseeding", async () => {
+  const gateway = renderSection({ cloudBackfillProgress: vi.fn().mockResolvedValue({ ...inactive, replicationEnabled: true, controlState: "paused", queued: 8 }) });
+  await screen.findByText("동기화 일시정지");
+  await userEvent.click(screen.getByRole("button", { name: "동기화 계속" }));
+  expect(gateway.cloudBackfillSetControlState).toHaveBeenCalledWith("running");
+  expect(gateway.cloudBackfillSeed).not.toHaveBeenCalled();
+});

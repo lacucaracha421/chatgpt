@@ -204,6 +204,24 @@ impl Library {
         Ok(urls)
     }
 
+    /// Refresh only retained rows, using the same membership predicates as paging.
+    /// This never scans forward from page one to rediscover a user's viewport.
+    pub fn refresh_assets(&self, query: AssetQuery, asset_ids: Vec<String>) -> Result<Vec<AssetSummary>, LibraryError> {
+        if asset_ids.len() > 500 { return Err(LibraryError::InvalidAssetPageLimit); }
+        let (start, end) = collected_range_bounds(&query)?;
+        let connection = self.connection()?;
+        let select = "SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url, asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count, asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url, asset.import_source, asset.import_batch_id, asset.original_modified_at FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id";
+        let sql = ASSET_COUNT_SQL.replace("SELECT COUNT(*) FROM assets AS asset", select)
+            + " AND asset.id IN (SELECT value FROM json_each(?12))";
+        let mut statement = connection.prepare(&sql)?;
+        let rows = statement.query_map(params![query.classification_id, query.album_id,
+            query.favorite_only, query.creator_key, query.direct_only, query.unclassified_only,
+            query.collection_id, media_filter_value(query.media_kind), aspect_filter_value(query.aspect_ratio),
+            start, end, serde_json::to_string(&asset_ids).expect("string IDs serialize")],
+            |row| Ok(asset_row(row, false)?.summary))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     pub fn list_assets(&self, query: AssetQuery) -> Result<AssetPage, LibraryError> {
         if !(1..=200).contains(&query.limit) {
             return Err(LibraryError::InvalidAssetPageLimit);
@@ -948,6 +966,19 @@ mod tests {
         },
         Library,
     };
+
+    #[test]
+    fn refreshing_retained_ids_removes_trash_and_filter_departures() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        for i in 0..250 { insert_asset(&library, &format!("retained-{i}"), "2026-08-06T00:00:00Z"); }
+        let ids = (0..250).map(|i| format!("retained-{i}")).collect::<Vec<_>>();
+        assert_eq!(library.refresh_assets(AssetQuery::default(),ids.clone()).unwrap().len(),250);
+        library.connection().unwrap().execute("UPDATE assets SET status='trash',trashed_at='2026-08-07' WHERE id='retained-249'",[]).unwrap();
+        library.connection().unwrap().execute("UPDATE assets SET favorite=1 WHERE id='retained-248'",[]).unwrap();
+        let rows=library.refresh_assets(AssetQuery {favorite_only:true,..Default::default()},ids).unwrap();
+        assert_eq!(rows.len(),1);assert_eq!(rows[0].id,"retained-248");
+    }
 
     #[test]
     fn exact_collected_range_excludes_neighboring_instants() {

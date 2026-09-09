@@ -340,6 +340,35 @@ impl Library {
         existing_asset_id: String,
         request: &IngestMediaRequest,
     ) -> Result<IngestOutcome, LibraryError> {
+        let (status, path) = self.connection()?.query_row(
+            "SELECT status,relative_path FROM assets WHERE id=?1", [&existing_asset_id],
+            |row| Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?)))?;
+        if status == "review" {
+            let review_id = self.connection()?.query_row(
+                "SELECT id FROM similarity_reviews WHERE candidate_asset_id=?1 AND status='open'",
+                [&existing_asset_id], |row| row.get(0)).optional()?;
+            return review_id.map(|review_id| IngestOutcome::ReviewPending { review_id })
+                .ok_or(LibraryError::InvalidAssetSelection);
+        }
+        if status == "trash" { return Err(LibraryError::DuplicateInTrash); }
+        if status != "normal" { return Err(LibraryError::InvalidAssetSelection); }
+        // A DB hash does not prove a usable managed original. Missing/corrupt media
+        // must be recovered explicitly before acknowledging an incoming capture.
+        let mut original = self.open_library_media(&path)?.file;
+        let mut hasher = Sha256::new();
+        let mut buffer = [0_u8; 64 * 1024];
+        loop {
+            let count = original.read(&mut buffer)
+                .map_err(|source| read_source_error(&self.root.join(&path), source))?;
+            if count == 0 { break; }
+            hasher.update(&buffer[..count]);
+        }
+        let mut actual = String::with_capacity(64);
+        for byte in hasher.finalize() {
+            write!(&mut actual, "{byte:02x}").expect("writing to a String cannot fail");
+        }
+        let expected: String = self.connection()?.query_row("SELECT content_hash FROM assets WHERE id=?1", [&existing_asset_id], |r| r.get(0))?;
+        if actual != expected { return Err(LibraryError::DuplicateOriginalCorrupt); }
         let current_ids = self
             .get_asset_classifications(&existing_asset_id)?
             .into_iter()
@@ -500,6 +529,7 @@ impl Library {
             )?;
         }
         if matches!(registration, Registration::Normal) {
+            super::character_autotag::enqueue(&transaction,&asset.id,super::character_autotag::Cause::Ingestion)?;
             enqueue_asset_upsert(&transaction, &asset.id, &asset.collected_at)?;
         }
         transaction.commit()?;
@@ -1419,12 +1449,15 @@ mod tests {
                 .unwrap()
         };
         assert_eq!(count(), 1);
+        let character_job=fixture.library.character_autotag_job(&asset.id).unwrap().unwrap();
+        assert_eq!(character_job.state,"pending");
 
         assert!(matches!(
             fixture.ingest(),
             IngestOutcome::ExactDuplicate { .. }
         ));
         assert_eq!(count(), 1);
+        assert_eq!(fixture.library.character_autotag_job(&asset.id).unwrap().unwrap(),character_job);
     }
 
     #[test]

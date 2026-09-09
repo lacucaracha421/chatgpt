@@ -6,6 +6,7 @@ from pathlib import Path
 import queue
 import sys
 import threading
+from collections import OrderedDict
 
 from learned_compare import compare_supported
 from feature_cache import FeatureCache, runtime_fingerprint, extraction_fingerprint, compatible_feature_caches
@@ -50,6 +51,8 @@ def main():
     emit({"type": "ready", "baselineFingerprint": FINGERPRINT,
           "runtimeFingerprint": fingerprint})
     refs = None
+    bundles = OrderedDict()
+    resident = None
     while True:
         line = inbox.get()
         request = {}
@@ -60,11 +63,28 @@ def main():
                 items = request["references"]
                 if not 5 <= len(items) <= 25 or len({i["hash"] for i in items}) != len(items):
                     raise ValueError("Five anchors and at most twenty distinct approved examples required")
-                refs = [cache.extract(Path(i["path"]), i["hash"]) for i in items]
+                key = tuple(i["hash"] for i in items)
+                refs = bundles.pop(key, None)
+                if refs is None:
+                    refs = [cache.extract(Path(i["path"]), i["hash"]) for i in items]
+                bundles[key] = refs
+                while len(bundles) > 32:
+                    bundles.popitem(last=False)
                 emit({"type": "prepared", "referenceHashes": [r.content_hash for r in refs],
                       "cacheHits": cache.hits, "extractions": cache.misses})
-            elif request["type"] == "query" and refs is not None:
+            elif request["type"] == "load_query":
+                resident = None
                 query = cache.extract(Path(request["path"]), request["hash"])
+                resident = (request["assetId"], request["hash"], query)
+                emit({"type": "query_loaded", "assetId": request["assetId"],
+                      "contentHash": query.content_hash, "cacheHits": cache.hits, "extractions": cache.misses})
+            elif request["type"] in ("query", "compare_query") and refs is not None:
+                if request["type"] == "compare_query":
+                    if resident is None or resident[:2] != (request["assetId"], request["hash"]):
+                        raise ValueError("Resident query identity mismatch")
+                    query = resident[2]
+                else:
+                    query = cache.extract(Path(request["path"]), request["hash"])
                 result = compare_supported(engine, query, refs)
                 emit({"type": "result", "assetId": request["assetId"], **result,
                       "cacheHits": cache.hits, "extractions": cache.misses})

@@ -4,6 +4,16 @@ use super::{current_required, AppState, CommandError};
 use crate::library::characters::{Decision, DecisionRequest, Error, Target, TargetDraft};
 
 #[tauri::command]
+pub async fn character_autotag_job(
+    asset_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<crate::library::character_autotag::Job>, CommandError> {
+    let library=current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.character_autotag_job(&asset_id))
+        .await.map_err(|_| super::background_task_error())?.map_err(Into::into)
+}
+
+#[tauri::command]
 pub async fn record_character_decision_batch(
     requests: Vec<DecisionRequest>,
     state: State<'_, AppState>,
@@ -40,6 +50,31 @@ fn runtime_paths(
     ))
 }
 
+pub(super) fn start_incremental_if_configured(app:&tauri::AppHandle,library:&crate::library::Library) {
+    if let Ok((script,settings))=runtime_paths(app) {
+        if let Ok(config)=crate::library::character_worker::RuntimeConfig::configured(script,&settings){library.start_character_incremental(config);}
+    }
+}
+
+#[tauri::command]
+pub async fn character_incremental_status(app:tauri::AppHandle,state:State<'_,AppState>) -> Result<crate::library::character_incremental::Status,CommandError> {
+    let library=current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        start_incremental_if_configured(&app,&library);
+        library.character_incremental_status().map_err(Into::into)
+    }).await.map_err(|_|super::background_task_error())?
+}
+
+#[tauri::command]
+pub async fn pause_character_incremental(paused:bool,app:tauri::AppHandle,state:State<'_,AppState>) -> Result<(),CommandError> {
+    let library=current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.set_character_incremental_paused(paused)?;
+        if !paused {start_incremental_if_configured(&app,&library);}
+        Ok(())
+    }).await.map_err(|_|super::background_task_error())?
+}
+
 #[tauri::command]
 pub fn character_runtime_status(app: tauri::AppHandle) -> Result<bool, CommandError> {
     let (script, settings) = runtime_paths(&app)?;
@@ -47,8 +82,9 @@ pub fn character_runtime_status(app: tauri::AppHandle) -> Result<bool, CommandEr
 }
 
 #[tauri::command]
-pub async fn setup_character_runtime(app: tauri::AppHandle) -> Result<bool, CommandError> {
+pub async fn setup_character_runtime(app: tauri::AppHandle, state: State<'_,AppState>) -> Result<bool, CommandError> {
     use tauri_plugin_dialog::DialogExt;
+    let library=current_required(state)?;
     let (script, settings) = runtime_paths(&app)?;
     tauri::async_runtime::spawn_blocking(move || -> Result<bool, CommandError> {
         let picker = app.dialog().file().set_title("캐릭터 분석용 Python 실행 파일 선택");
@@ -73,9 +109,10 @@ pub async fn setup_character_runtime(app: tauri::AppHandle) -> Result<bool, Comm
         crate::library::character_worker::RuntimeConfig::setup(
             python.into_path().map_err(error)?,
             models.into_path().map_err(error)?,
-            script,
+            script.clone(),
             &settings,
         )?;
+        library.start_character_incremental(crate::library::character_worker::RuntimeConfig::configured(script,&settings)?);
         Ok(true)
     })
     .await
@@ -83,10 +120,15 @@ pub async fn setup_character_runtime(app: tauri::AppHandle) -> Result<bool, Comm
 }
 
 #[tauri::command]
-pub fn character_scan_runs(
+pub async fn character_scan_runs(
     state: State<'_, AppState>,
 ) -> Result<Vec<crate::library::character_scan::ScanStatus>, CommandError> {
-    Ok(current_required(state)?.character_scan_runs())
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        Ok(library.character_scan_runs())
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
 }
 
 #[tauri::command]
@@ -127,6 +169,7 @@ pub async fn start_character_scan(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<crate::library::character_scan::ScanStatus, CommandError> {
+    if automatic.unwrap_or(false) {return Err(Error::Invalid("자동 분류는 이미지 작업 큐에서 실행됩니다.").into());}
     let (script, settings) = runtime_paths(&app)?;
     let config = crate::library::character_worker::RuntimeConfig::configured(script, &settings)?;
     let library = current_required(state)?;
@@ -139,20 +182,30 @@ pub async fn start_character_scan(
 }
 
 #[tauri::command]
-pub fn character_scan_status(
+pub async fn character_scan_status(
     state: State<'_, AppState>,
 ) -> Result<Option<crate::library::character_scan::ScanStatus>, CommandError> {
-    Ok(current_required(state)?.character_scan_status())
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        Ok(library.character_scan_status())
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
 }
 
 #[tauri::command]
-pub fn cancel_character_scan(
+pub async fn cancel_character_scan(
     scan_id: String,
     state: State<'_, AppState>,
 ) -> Result<crate::library::character_scan::ScanStatus, CommandError> {
-    current_required(state)?
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library
         .cancel_character_scan(&scan_id)
         .map_err(Into::into)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
 }
 
 #[tauri::command]
@@ -172,34 +225,49 @@ pub async fn character_scan_results(
 }
 
 #[tauri::command]
-pub fn list_character_targets(state: State<'_, AppState>) -> Result<Vec<Target>, CommandError> {
-    current_required(state)?
+pub async fn list_character_targets(state: State<'_, AppState>) -> Result<Vec<Target>, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library
         .list_character_targets()
         .map_err(Into::into)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
 }
 
 #[tauri::command]
-pub fn save_character_target(
+pub async fn save_character_target(
     request: TargetDraft,
     strict_selection: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<Target, CommandError> {
-    current_required(state)?
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library
         .save_character_target_selection(request, strict_selection.unwrap_or(false))
         .map_err(Into::into)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
 }
 
 #[tauri::command]
-pub fn replace_character_references(
+pub async fn replace_character_references(
     target_id: String,
     expected_revision: i64,
     asset_ids: Vec<String>,
     strict_selection: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<Target, CommandError> {
-    current_required(state)?
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library
         .replace_character_references_selection(&target_id, expected_revision, &asset_ids, strict_selection.unwrap_or(false))
         .map_err(Into::into)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
 }
 
 #[tauri::command]
@@ -215,25 +283,35 @@ pub async fn record_character_decisions(
 }
 
 #[tauri::command]
-pub fn list_character_decisions(
+pub async fn list_character_decisions(
     target_id: String,
     before: Option<i64>,
     limit: u32,
     state: State<'_, AppState>,
 ) -> Result<Vec<Decision>, CommandError> {
-    current_required(state)?
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library
         .list_character_decisions(&target_id, before, limit)
         .map_err(Into::into)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
 }
 
 #[tauri::command]
-pub fn character_relations_for_asset(
+pub async fn character_relations_for_asset(
     asset_id: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, CommandError> {
-    current_required(state)?
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library
         .character_relations_for_asset(&asset_id)
         .map_err(Into::into)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
 }
 
 #[tauri::command]
@@ -253,6 +331,20 @@ pub async fn browse_character_assets(query: crate::library::character_hub::Brows
 }
 #[tauri::command]
 pub async fn apply_automatic_characters(scan_ids: Vec<String>, state: State<'_, AppState>) -> Result<u64, CommandError> {
+    let _=(scan_ids,state);
+    Err(Error::Invalid("자동 확정은 이미지 작업 큐에서 실행됩니다.").into())
+}
+
+#[tauri::command]
+pub async fn register_character_folder(request: crate::library::characters::FolderRegistration, state: State<'_, AppState>) -> Result<Target, CommandError> {
     let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.apply_automatic_characters(scan_ids)).await.map_err(|_| super::background_task_error())?.map_err(Into::into)
+    tauri::async_runtime::spawn_blocking(move || library.register_character_folder(request))
+        .await.map_err(|_| super::background_task_error())?.map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn character_folder_image_count(folder_id: String, recursive: bool, state: State<'_, AppState>) -> Result<usize, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.character_folder_image_count(folder_id,recursive))
+        .await.map_err(|_| super::background_task_error())?.map_err(Into::into)
 }

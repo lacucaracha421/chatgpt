@@ -189,6 +189,8 @@ pub(crate) struct ReplicationPrepareRequest<'a> {
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct ReplicationPrepareResponse {
+    #[serde(default)]
+    pub metadata_revision: Option<u64>,
     pub asset_id: String,
     pub already_committed: bool,
     pub object_keys: BTreeMap<String, String>,
@@ -198,6 +200,8 @@ pub(crate) struct ReplicationPrepareResponse {
 /// 메타데이터, 분류 관계를 한 번에 커밋한다.
 #[derive(Debug, Serialize)]
 pub(crate) struct ReplicationCommitRequest {
+    pub expected_revision: u64,
+    pub commit_id: String,
     pub asset_id: String,
     pub kind: String,
     pub original: ReplicationVariantPayload,

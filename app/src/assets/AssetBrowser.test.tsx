@@ -332,6 +332,37 @@ describe("AssetBrowser", () => {
     expect(vi.mocked(gateway.listAssets).mock.calls[2]![0].randomPivot).not.toBe(first);
   });
 
+  it("refreshes a retained 250-image window without dropping an older selection", async () => {
+    const retained = [asset(249), ...Array.from({ length: 249 }, (_, i) => asset(i))];
+    const gateway = createGateway({ items: retained, nextCursor: null });
+    gateway.refreshAssets = vi.fn().mockResolvedValue(retained);
+    const status = vi.fn();
+    const { rerender } = renderBrowser(gateway, { status });
+    await userEvent.click(await screen.findByRole("option", { name: "asset-249.png" }));
+    vi.mocked(gateway.listAssets).mockResolvedValue({ items: retained.slice(1,101), nextCursor: null });
+    rerender(browserElement(gateway, { refreshVersion: 1, status }));
+    await waitFor(() => expect(gateway.refreshAssets).toHaveBeenCalled());
+    await waitFor(() => expect(status).toHaveBeenLastCalledWith(expect.objectContaining({selectedAsset:expect.objectContaining({id:"asset-249"})})));
+    expect(vi.mocked(gateway.refreshAssets).mock.calls[0]![1]).toHaveLength(250);
+    gateway.refreshAssets = vi.fn().mockResolvedValue(retained.filter(a => a.id !== "asset-249"));
+    rerender(browserElement(gateway, { refreshVersion: 2, status }));
+    await waitFor(() => expect(gateway.refreshAssets).toHaveBeenCalled());
+    await waitFor(() => expect(status).toHaveBeenLastCalledWith(expect.objectContaining({selectedAsset:null})));
+  });
+
+  it("opens the fresh first page when new arrivals no longer overlap the retained range", async () => {
+    const retained = [asset(1), asset(2)];
+    const gateway = createGateway({ items: retained, nextCursor: null });
+    gateway.refreshAssets = vi.fn().mockResolvedValue(retained);
+    const { rerender } = renderBrowser(gateway);
+    await screen.findByRole("option", { name: "asset-1.png" });
+    vi.mocked(gateway.listAssets).mockResolvedValue({ items: [asset(300)], nextCursor: null });
+    rerender(browserElement(gateway, { refreshVersion: 1 }));
+    await userEvent.click(await screen.findByRole("button", { name: "처음부터 보기" }));
+    expect(await screen.findByRole("option", { name: "asset-300.png" })).toBeVisible();
+    expect(screen.queryByRole("option", { name: "asset-1.png" })).not.toBeInTheDocument();
+  });
+
   it("keeps the random pivot through an ordinary refresh", async () => {
     const gateway = createGateway(); const { rerender } = renderBrowser(gateway, { sort: "random" });
     await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledTimes(1));

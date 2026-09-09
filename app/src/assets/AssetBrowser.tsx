@@ -46,6 +46,7 @@ export function AssetBrowser({ onReviewVideos, galleryLayout = "masonry", onGall
   const [nextError, setNextError] = useState<QueryError | null>(null);
   const [prevError, setPrevError] = useState<QueryError | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [newAssetsAvailable, setNewAssetsAvailable] = useState(false);
   const [retryVersion, setRetryVersion] = useState(0);
   const [randomVersion, setRandomVersion] = useState(0);
   const [selectedAsset, setSelectedAsset] = useState<AssetSummary | null>(null);
@@ -73,10 +74,13 @@ export function AssetBrowser({ onReviewVideos, galleryLayout = "masonry", onGall
   const creatorKey = view.kind === "creator" ? view.creatorKey : null;
   const queryBase = useMemo<Omit<AssetQuery, "after">>(() => ({ classificationId: view.kind === "classification" ? view.classificationId : null, albumId: view.kind === "album" ? view.albumId : null, collectionId: view.kind === "collection" ? view.collectionId : null, creatorKey, directOnly: view.kind === "classification" ? directOnly : false, unclassifiedOnly: view.kind === "unsorted", mediaKind: filterable && mediaFilter !== "all" ? mediaFilter : null, aspectRatio: filterable && aspectFilter !== "all" ? aspectFilter : null, sort, randomPivot: sort === "random" ? randomPivotRef.current : null, collectedRange: view.kind === "revisit" && revisitDate ? toUtcDateRange(revisitDate) : null, limit: ASSET_PAGE_SIZE }), [aspectFilter, creatorKey, directOnly, sort, filterable, mediaFilter, randomVersion, revisitDate, view]);
   const queryKey = JSON.stringify(queryBase);
+  useEffect(() => setNewAssetsAvailable(false), [queryKey]);
   const viewKey = view.kind === "classification" ? `classification:${view.classificationId}` : view.kind === "album" ? `album:${view.albumId}` : view.kind === "collection" ? `collection:${view.collectionId}` : view.kind === "creator" ? `creator:${view.creatorKey}` : view.kind === "revisit" ? `revisit:${revisitDate ?? "index"}` : view.kind;
   const activePage = page?.queryKey === queryKey ? page : null;
   const items = activePage?.items ?? EMPTY_ASSETS;
   const itemIds = useMemo(() => items.map((asset) => asset.id), [items]);
+  const pageRef = useRef(activePage);
+  pageRef.current = activePage;
   const headCursor = activePage?.headCursor ?? null;
   const tailCursor = activePage?.tailCursor ?? null;
   const currentFirstError = firstError?.queryKey === queryKey ? firstError.message : null;
@@ -88,7 +92,39 @@ export function AssetBrowser({ onReviewVideos, galleryLayout = "masonry", onGall
     nextLoadingRef.current = false; prevLoadingRef.current = false; setFirstLoading(true); setNextLoading(false); setPrevLoading(false); setFirstError(null); setNextError(null); setPrevError(null);
     const generation = ++generationRef.current;
     const request = { ...queryBase, after: null, aroundDate: null };
-    void gateway.listAssets(request).then((result) => {
+    const retained = pageRef.current;
+    const load = async () => {
+      if (!retained?.items.length || !gateway.refreshAssets) return gateway.listAssets(request);
+      const first = retained.headCursor === null ? await gateway.listAssets(request) : null;
+      const refreshed = new Map<string, AssetSummary>();
+      for (let offset = 0; offset < retained.items.length; offset += 500) {
+        if (generation !== generationRef.current) return null;
+        const batch = await gateway.refreshAssets(request, retained.items.slice(offset, offset + 500).map(asset => asset.id));
+        for (const asset of batch) refreshed.set(asset.id, asset);
+      }
+      let items = retained.items.flatMap(asset => { const fresh = refreshed.get(asset.id); return fresh ? [fresh] : []; });
+      if (!items.length) return first ?? gateway.listAssets(request);
+      if (generation !== generationRef.current) return null;
+      if (first) {
+        const overlap = first.items.some(asset => refreshed.has(asset.id));
+        setNewAssetsAvailable(!overlap && first.items.length > 0);
+        if (overlap) {
+          const retainedIds = new Set(retained.items.map(asset => asset.id));
+          const freshItems = first.items.filter(asset => !retainedIds.has(asset.id) || refreshed.has(asset.id))
+            .map(asset => refreshed.get(asset.id) ?? asset);
+          const freshIds = new Set(freshItems.map(asset => asset.id));
+          items = [...freshItems, ...items.filter(asset => !freshIds.has(asset.id))];
+        }
+      }
+      if (queryBase.sort !== "random") items.sort((a, b) => {
+        if (queryBase.sort === "favorites" && a.favorite !== b.favorite) return Number(b.favorite) - Number(a.favorite);
+        const order = a.collectedAt.localeCompare(b.collectedAt) || a.id.localeCompare(b.id);
+        return queryBase.sort === "oldest" ? order : -order;
+      });
+      return { items, previousCursor: retained.headCursor, nextCursor: retained.tailCursor, totalCount: first?.totalCount ?? retained.totalCount };
+    };
+    void load().then((result) => {
+      if (!result) return;
       if (generation !== generationRef.current) return;
       setPage({ sort: queryBase.sort, queryKey, items: result.items, headCursor: result.previousCursor ?? null, tailCursor: result.nextCursor, totalCount: result.totalCount ?? null });
       setSelectedAsset((selected) => reconcileAsset(selected, selectedViewKeyRef.current, viewKey, result.items));
@@ -308,6 +344,7 @@ export function AssetBrowser({ onReviewVideos, galleryLayout = "masonry", onGall
     { id: "clear", label: "선택 해제", onSelect: clearSelection },
     { id: "trash", label: "휴지통으로 이동", destructive: true, disabled: batchPending, onSelect: trashSelection },
   ];
+  const showNewest = () => { setPage(null); pageRef.current = null; setNewAssetsAvailable(false); refresh(); };
   const assetResults = (firstLoading && visibleItems.length === 0) || (!visiblePage && !currentFirstError)
     ? <Skeleton className="asset-browser__skeleton" label="자산을 불러오는 중" />
     : currentFirstError && !activePage
@@ -323,6 +360,7 @@ export function AssetBrowser({ onReviewVideos, galleryLayout = "masonry", onGall
           if (!selection.ids.has(target.id)) selectWithGesture(target, { toggle: false, range: false });
         }} className="asset-browser__results" aria-busy={firstLoading} inert={!activePage ? true : undefined}><AssetGallery layout={galleryLayout} groupDates={visiblePage?.sort === "newest" || visiblePage?.sort === "oldest"} items={visibleItems} scopeKey={visiblePage?.queryKey} totalCount={visiblePage?.totalCount ?? null} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} targetRowHeight={thumbnailRowHeight} metadataVisible={metadataVisible} privacyMode={privacyMode} hasNextPage={Boolean(activePage && tailCursor !== null)} onLoadNextPage={loadNextPage} hasPreviousPage={Boolean(activePage && headCursor !== null)} onLoadPrevPage={loadPrevPage} onSelectionGesture={selectWithGesture} onSelectAll={selectAll} onDeleteSelection={trashSelection} onClearSelection={clearSelection} onMoveFocus={moveFocus} onOpen={(asset) => { viewerViewKeyRef.current = viewKey; setViewerAssetId(asset.id); }} onRetryVideo={(asset) => void gateway.retryVideoPreparation(asset.id).then(() => gateway.preparePendingVideos(1)).then(refresh).catch((error) => setMessage(commandErrorMessage(error, "미리보기 준비를 다시 시작하지 못했습니다.")))} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} /></div></ContextMenu>;
   return <section className="asset-browser" aria-label="저장소">
+    {newAssetsAvailable && <div role="status">새 자료가 있습니다. <Button size="sm" onClick={showNewest}>처음부터 보기</Button></div>}
     {view.kind !== "revisit" && <AssetToolbar galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} view={view} classifications={classifications} albums={albums} collections={collections} sort={sort} mediaFilter={mediaFilter} aspectFilter={aspectFilter} directOnly={directOnly} metadataVisible={metadataVisible} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} thumbnailRowHeight={thumbnailRowHeight} onSortChange={onSortChange} onMediaFilterChange={changeMediaFilter} onAspectFilterChange={changeAspectFilter} onDirectOnlyChange={setDirectOnly} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onReshuffle={reshuffle} />}
     {hasActiveFilters && <div className="asset-browser__active-filters" aria-label="적용 중인 필터">
       {mediaFilter !== "all" && <Button size="sm" onClick={() => changeMediaFilter("all")} aria-label="미디어 필터 해제">{mediaFilter === "images" ? "이미지" : "영상"}<span aria-hidden="true"> ×</span></Button>}

@@ -75,6 +75,8 @@ def startup_replication():
             "creator_name": "TEXT",
             "creator_handle": "TEXT",
             "import_source": "TEXT",
+            "metadata_revision": "INTEGER NOT NULL DEFAULT 0",
+            "metadata_commit_id": "TEXT",
         }
         for column, definition in additions.items():
             if column not in columns:
@@ -765,6 +767,7 @@ def pending_capture_payload(row: sqlite3.Row) -> dict:
 def list_pending_captures(
     authorization: str | None = Header(default=None),
     limit: int = 100,
+    after_id: str | None = None,
 ):
     require_auth(authorization)
     limit = max(1, min(limit, 500))
@@ -774,11 +777,11 @@ def list_pending_captures(
             """
             SELECT *
             FROM captures
-            WHERE status = 'pending'
-            ORDER BY created_at ASC
+            WHERE status = 'pending' AND (? IS NULL OR id > ?)
+            ORDER BY id ASC
             LIMIT ?
             """,
-            (limit,),
+            (after_id, after_id, limit),
         ).fetchall()
 
     return {"captures": [pending_capture_payload(row) for row in rows]}
@@ -1159,6 +1162,31 @@ def list_mobile_classifications(
             }
         )
     return {"items": items, "published_at": payload.get("published_at")}
+
+
+@app.get("/v1/library/classifications/{classification_id}/contains/{asset_id}")
+def mobile_tree_membership(classification_id: str, asset_id: str, authorization: str | None = Header(default=None)):
+    """Authorization evidence must use current membership and ancestry in one snapshot."""
+    require_auth(authorization)
+    with get_db() as db:
+        db.execute("BEGIN")
+        snapshot = db.execute("SELECT payload FROM classification_snapshots WHERE singleton=1").fetchone()
+        if snapshot is None:
+            return {"is_child": False}
+        entries = json.loads(snapshot["payload"]).get("entries", [])
+        parents = {entry["id"]: entry.get("parentId") for entry in entries if isinstance(entry.get("id"), str)}
+        if classification_id not in parents:
+            return {"is_child": False}
+        memberships = db.execute("SELECT ac.classification_id FROM asset_classifications ac JOIN assets a ON a.id=ac.asset_id WHERE a.id=? AND a.committed=1", (asset_id,)).fetchall()
+        for membership in memberships:
+            current = membership["classification_id"]
+            seen = set()
+            while current in parents and current not in seen:
+                if current == classification_id:
+                    return {"is_child": True}
+                seen.add(current)
+                current = parents[current]
+    return {"is_child": False}
 
 
 @app.get("/v1/library/assets")
@@ -1780,6 +1808,8 @@ class ReplicationPrepare(BaseModel):
 
 
 class ReplicationCommit(BaseModel):
+    expected_revision: int | None = Field(default=None, ge=0)
+    commit_id: str | None = Field(default=None, min_length=1, max_length=64)
     asset_id: str = Field(min_length=1, max_length=64)
     kind: Literal["image", "gif", "video"]
     original: ReplicationVariant
@@ -1847,6 +1877,7 @@ def replication_prepare(
             return {
                 "asset_id": request.asset_id,
                 "already_committed": True,
+                "metadata_revision": existing["metadata_revision"],
                 "object_keys": keys,
             }
         if existing["object_key"] != keys["original"]:
@@ -1857,6 +1888,7 @@ def replication_prepare(
     return {
         "asset_id": request.asset_id,
         "already_committed": False,
+        "metadata_revision": existing["metadata_revision"],
         "object_keys": keys,
     }
 
@@ -1883,7 +1915,7 @@ def replication_commit(
         raise HTTPException(status_code=400, detail="Thumbnail variant required")
 
     with get_db() as db:
-        db.execute("BEGIN")
+        db.execute("BEGIN IMMEDIATE")
         row = _replication_row(db, request.asset_id)
         if row is None:
             db.execute("ROLLBACK")
@@ -1891,6 +1923,17 @@ def replication_commit(
                 status_code=404,
                 detail="Asset was not prepared; call /v1/replication/prepare first",
             )
+        if request.expected_revision is None:
+            if row["metadata_revision"] > 0:
+                raise HTTPException(status_code=409, detail="Revision-aware client required")
+        else:
+            if not request.commit_id:
+                raise HTTPException(status_code=400, detail="commit_id required")
+            if row["metadata_commit_id"] == request.commit_id:
+                return {"ok": True, "asset_id": request.asset_id, "committed": True,
+                        "committed_at": row["committed_at"], "object_keys": keys}
+            if row["metadata_revision"] != request.expected_revision:
+                raise HTTPException(status_code=409, detail="Stale metadata revision; prepare again")
         db.execute(
             """
             INSERT INTO assets (
@@ -1949,6 +1992,9 @@ def replication_commit(
                 """,
                 (request.asset_id, classification_id, ts),
             )
+        if request.expected_revision is not None:
+            db.execute("UPDATE assets SET metadata_revision=metadata_revision+1, metadata_commit_id=? WHERE id=?",
+                       (request.commit_id, request.asset_id))
         db.commit()
     return {
         "ok": True,
