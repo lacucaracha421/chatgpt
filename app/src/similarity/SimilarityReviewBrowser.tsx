@@ -104,11 +104,13 @@ function ImageSimilarityReviewBrowser({ gateway, onCountChange, onClose }: Props
     {loading ? <Skeleton className="similarity-review__skeleton" label="유사 이미지를 불러오는 중" /> : !review ? (
       <EmptyState title="검토할 유사 이미지가 없습니다">새 이미지가 들어오면 여기에 표시됩니다.</EmptyState>
     ) : <>
+      <p className="similarity-review__difference">{comparisonSummary(review)}</p>
       <div className="similarity-review__comparison">
         <ReviewAssetPanel side="기존 이미지" reviewAsset={review.existing} />
         <ReviewAssetPanel side="새 이미지" reviewAsset={review.candidate} />
       </div>
       <footer className="similarity-review__actions">
+        <p className="similarity-review__action-hint">기존 이미지 유지 시 새 이미지는 영구 삭제됩니다. 교체 시 기존 이미지는 휴지통으로 이동합니다.</p>
         <Button disabled={pending} onClick={() => void decide("keep_existing")}>기존 이미지 유지</Button>
         <Button disabled={pending} onClick={() => void decide("replace_existing")}>새 이미지로 교체</Button>
         <Button variant="secondary" disabled={pending} onClick={() => void decide("keep_both")}>둘 다 보관</Button>
@@ -121,8 +123,9 @@ function ReviewAssetPanel({ side, reviewAsset }: { side: "기존 이미지" | "�
   const { privacyMode } = usePrivacy();
   const { asset, format, classifications } = reviewAsset;
   return <section className="similarity-review__asset" aria-label={side}>
+    <h3 className="similarity-review__side">{side}</h3>
     <div className="similarity-review__preview">{privacyMode ? <Skeleton className="privacy-mask similarity-review__preview-mask" label="비공개 모드" /> : <img src={assetUrl(asset.id)} alt={side} />}</div>
-    <h3>{asset.title || asset.originalName}</h3>
+    <p className="similarity-review__filename">{asset.title || asset.originalName}</p>
     <dl>
       <div><dt>해상도</dt><dd>{asset.width} × {asset.height}</dd></div>
       <div><dt>파일 크기</dt><dd>{formatBytes(asset.byteSize)}</dd></div>
@@ -132,4 +135,15 @@ function ReviewAssetPanel({ side, reviewAsset }: { side: "기존 이미지" | "�
       <div><dt>분류</dt><dd>{classifications.map((entry) => entry.name).join(", ") || "미분류"}</dd></div>
     </dl>
   </section>;
+}
+
+function comparisonSummary(review: SimilarityReviewSummary): string {
+  const previous = review.existing.asset;
+  const next = review.candidate.asset;
+  const resolution = previous.width === next.width && previous.height === next.height
+    ? "해상도 동일"
+    : `해상도 ${previous.width} × ${previous.height} → ${next.width} × ${next.height}`;
+  const bytes = next.byteSize - previous.byteSize;
+  const size = bytes === 0 ? "파일 크기 동일" : `새 이미지가 ${formatBytes(Math.abs(bytes))} 더 ${bytes > 0 ? "큼" : "작음"}`;
+  return `${resolution} · ${size}`;
 }

@@ -14,7 +14,7 @@ import type { AssetCreatorSummary, LibraryGateway } from "../library/types";
 import { CreatorBrowse } from "./CreatorBrowse";
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
-vi.mock("@tauri-apps/api/core", () => ({ invoke }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke, isTauri: () => false }));
 
 let gateway: LibraryGateway;
 

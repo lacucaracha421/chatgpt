@@ -34,3 +34,18 @@ test('save result text reports real server ingestion state', () => {
   assert.equal(content.saveResultMessage({ok:true,status:'duplicate',captureStatus:'imported'}), '서버에 이미 있음 · PC 반영 완료');
   assert.equal(content.saveResultMessage({ok:true,status:'confirmed',captureStatus:'pending'}), '서버 저장 확인됨 · PC 수신 대기');
 });
+
+
+test('collector save waits for the server contract instead of timing out at 15 seconds', () => {
+  assert.equal(content.runtimeTimeoutMs({type:'collector:state'}), 15000);
+  assert.equal(content.runtimeTimeoutMs({type:'collector:save',payload:{candidate:{type:'image'}}}), 70000);
+  assert.equal(content.runtimeTimeoutMs({type:'collector:save',payload:{candidate:{type:'video'}}}), 310000);
+});
+
+test('save failures expose useful server reasons', () => {
+  assert.equal(content.saveFailureMessage({code:'server_save_failed',httpStatus:400,serverDetail:'Invalid source URL'}), '서버 거절 · 원문 URL 검증 실패');
+  assert.equal(content.saveFailureMessage({code:'server_save_failed',httpStatus:400,serverDetail:'Unsupported content type: text/html'}), '서버 거절 · 원본 형식 text/html');
+  assert.equal(content.saveFailureMessage({code:'server_save_failed',httpStatus:502,serverDetail:'Media returned HTTP 403'}), '서버 원본 수신 실패 · HTTP 403');
+  assert.equal(content.saveFailureMessage({code:'timeout',httpStatus:0}), '서버 응답 시간 초과');
+  assert.equal(content.saveFailureMessage({code:'offline',httpStatus:0}), '서버 연결 실패');
+});

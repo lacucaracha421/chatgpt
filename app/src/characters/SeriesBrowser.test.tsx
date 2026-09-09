@@ -9,8 +9,9 @@ import { type CharacterHubApi } from "./hubApi";
 
 beforeEach(() => { Object.defineProperties(HTMLElement.prototype, { clientWidth: { configurable:true,get:()=>850 },clientHeight:{configurable:true,get:()=>650} }); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
-async function mount(targetId?: string) {
+async function mount(targetId?: string, pendingOnly = false) {
   const api=createCharacterFixture(), targets=await api.targets();
+  if (pendingOnly) { api.reviewPending = vi.fn(async () => true); vi.spyOn(api, "review"); }
   const browse=vi.fn().mockResolvedValue({ items:fixtureAssets.slice(5),nextCursor:null,totalCount:13 });
   const hubApi={browse,saveSeries:vi.fn(),series:vi.fn()} as CharacterHubApi;
   const navigate=vi.fn(),changed=vi.fn();
@@ -111,4 +112,11 @@ it("allows reference selection from the series after opening the character folde
   await waitFor(()=>expect(browse).toHaveBeenLastCalledWith(expect.objectContaining({targetId:null,referenceTargetId:"hina"})));
   await user.click(screen.getByRole("button",{name:"캐릭터 폴더로 돌아가기"}));
   await waitFor(()=>expect(browse).toHaveBeenLastCalledWith(expect.objectContaining({targetId:"hina",referenceTargetId:"hina"})));
+});
+
+it("uses the lightweight pending lookup without loading review evidence for the badge", async () => {
+  const { api } = await mount("hina", true);
+  await screen.findByRole("button", { name: "검토 · 검토 대기 있음" });
+  expect(api.reviewPending).toHaveBeenCalledWith("series", "hina");
+  expect(api.review).not.toHaveBeenCalled();
 });

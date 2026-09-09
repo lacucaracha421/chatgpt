@@ -224,7 +224,11 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     characterHub.refresh();
     refreshMembershipCounts();
   }, [characterHub.refresh, refreshMembershipCounts]);
-  const characterAutomation = useCharacterAutomation(refreshCharacterViews);
+  const refreshAutomaticCharacterViews = useCallback((membershipChanged: boolean) => {
+    characterHub.refresh();
+    if (membershipChanged) void refreshClassifications();
+  }, [characterHub.refresh, refreshClassifications]);
+  const characterAutomation = useCharacterAutomation(refreshAutomaticCharacterViews);
   const handleIngested = useCallback((result: IngestOutcome) => {
     if (result.status === "added" || (result.status === "exact_duplicate" && result.classificationChanged)) {
       setAssetRefresh((current) => current + 1);

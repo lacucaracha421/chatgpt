@@ -16,6 +16,29 @@ import { fixtureTarget } from "../characters/characterFixtures";
 import { App, type ExtensionIngestListener } from "./App";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
+const { nativeInvoke } = vi.hoisted(() => ({
+  nativeInvoke: vi.fn(async (command: string) => {
+    if (command === "character_incremental_status") return {
+      running: true,
+      paused: false,
+      pending: 0,
+      completed: 0,
+      confirmed: 0,
+      activeAssetId: null,
+      total: 0,
+      compared: 0,
+      error: null,
+    };
+    if (command === "list_character_targets" || command === "character_series") return [];
+    if (command === "browse_character_assets") return { items: [], nextCursor: null, totalCount: 0 };
+    return undefined;
+  }),
+}));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: nativeInvoke,
+  isTauri: () => false,
+  convertFileSrc: (path: string) => path,
+}));
 import { open } from "@tauri-apps/plugin-dialog";
 
 const summary = { root: "C:\\Lakomics" };
@@ -178,6 +201,11 @@ describe("App", () => {
   beforeEach(() => {
     localStorage.clear();
     vi.mocked(open).mockReset();
+    vi.spyOn(characters.characterApi, "reviewPending").mockResolvedValue(false);
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: { invoke: nativeInvoke },
+    });
   });
   afterEach(cleanup);
 
@@ -584,6 +612,7 @@ describe("App", () => {
 
     await waitFor(() =>
       expect(JSON.parse(localStorage.getItem(UI_PREFERENCES_KEY) ?? "{}")).toEqual({
+        appZoom: 100,
         galleryLayout: "masonry",
         metadataVisible: true,
         privacyMode: false,

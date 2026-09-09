@@ -32,6 +32,20 @@
     return ["x", "arca", "dcinside", "web"].includes(candidate?.source) ? candidate.source : "web";
   }
 
+  function safeServerDetail(value) {
+    const raw = typeof value === "string" ? value
+      : typeof value?.message === "string" ? value.message
+      : typeof value?.code === "string" ? value.code
+      : "";
+    return raw
+      .replace(/Bearer\s+[A-Za-z0-9._~+\/-]+/gi, "Bearer […]")
+      .replace(/https?:\/\/[^\s"']+/gi, "[URL]")
+      .replace(/#[A-Za-z0-9_-]{16,}/g, "#[…]")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 180);
+  }
+
   async function rememberRecent(sourceUrl) {
     const key = xKey(sourceUrl);
     if (!key) return;
@@ -89,7 +103,12 @@
     }
     if (response.status === 401) return { ok: false, code: "revoked" };
     if (response.status === 409 && response.data?.detail?.code === "classification_stale") return { ok: false, code: "classification_stale" };
-    return { ok: false, code: response.status === 0 ? (response.code || "server_offline") : "server_save_failed", httpStatus: response.status };
+    return {
+      ok: false,
+      code: response.status === 0 ? (response.code || "server_offline") : "server_save_failed",
+      httpStatus: response.status,
+      serverDetail: safeServerDetail(response.data?.detail),
+    };
   }
 
   async function savedIndex() {
@@ -100,5 +119,5 @@
     return { ok: true, savedKeys: [...new Set([...keys, ...recent])], indexSource: "server", authoritative: true };
   }
 
-  globalThis.LakomicsSaveClient = { gifLike, mediaType, save, savedIndex, xKey };
+  globalThis.LakomicsSaveClient = { gifLike, mediaType, safeServerDetail, save, savedIndex, xKey };
 })();

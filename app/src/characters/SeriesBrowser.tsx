@@ -83,8 +83,10 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     if (!current || picking) { setReviewPending(null); return; }
     let active = true;
     setReviewPending(null);
-    void api.review({ seriesId: series.classificationId, targetId: current.id, filter: "recommended", after: null, limit: 1 })
-      .then(result => { if (active) setReviewPending(result.rows.length > 0); })
+    void (api.reviewPending
+      ? api.reviewPending(series.classificationId, current.id)
+      : api.review({ seriesId: series.classificationId, targetId: current.id, filter: "recommended", after: null, limit: 1 }).then(result => result.rows.length > 0))
+      .then(found => { if (active) setReviewPending(found); })
       .catch(() => { if (active) setReviewPending(null); });
     return () => { active = false; };
   }, [api, current?.id, current?.fingerprint, series.classificationId, refreshVersion, reload, review, picking]);

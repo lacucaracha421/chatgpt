@@ -23,6 +23,7 @@ export interface CharacterApi {
   start(targetId: string, expectedFingerprint: string, automatic?: boolean): Promise<ScanStatus>;
   cancel(scanId: string): Promise<ScanStatus>;
   review(query: ReviewQuery): Promise<ReviewPage>;
+  reviewPending?(seriesId: string, targetId: string): Promise<boolean>;
   decide(request: DecisionRequest): Promise<number>;
   decideBatch(requests: DecisionRequest[]): Promise<number>;
   history(targetId: string, before: number | null): Promise<Decision[]>;
@@ -38,6 +39,7 @@ export const characterApi: CharacterApi = {
   runs: () => invoke("character_scan_runs"),
   start: (targetId, expectedFingerprint, automatic = false) => invoke("start_character_scan", { targetId, expectedFingerprint, automatic }),
   cancel: scanId => invoke("cancel_character_scan", { scanId }),
+  reviewPending: (seriesId, targetId) => invoke("character_review_pending", { seriesId, targetId }),
   review: query => invoke("character_review_page", { query }),
   decide: request => invoke("record_character_decisions", { request }),
   decideBatch: requests => invoke("record_character_decision_batch", { requests }),

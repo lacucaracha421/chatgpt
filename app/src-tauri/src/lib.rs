@@ -249,6 +249,7 @@ pub fn run() {
             commands::characters::character_scan_results,
             commands::characters::character_scan_runs,
             commands::characters::character_review_page,
+            commands::characters::character_review_pending,
             commands::characters::character_runtime_status,
             commands::characters::setup_character_runtime,
             commands::av::get_av_details,

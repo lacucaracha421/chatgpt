@@ -92,3 +92,35 @@ it("closing review does not cancel its running analysis", async () => {
   cleanup();
   expect(cancel).not.toHaveBeenCalled();
 });
+
+it("keeps loaded pages and selection during a background refresh", async () => {
+  const api = createCharacterFixture(), original = api.review;
+  api.review = vi.fn(async query => {
+    const all = await original({ ...query, after: null });
+    return query.after ? { rows: all.rows.slice(4), nextCursor: null } : { rows: all.rows.slice(0, 4), nextCursor: "page-2" };
+  });
+  const gateway = { listAssets: vi.fn(), openLibrary: vi.fn() } as unknown as LibraryGateway;
+  const view = (version: number) => <LibraryProvider gateway={gateway}><CharacterLab classifications={fixtureClassifications} initialSeriesId="series" targetId="hina" refreshVersion={version} onClose={vi.fn()} api={api} /></LibraryProvider>;
+  const { rerender } = render(view(0)); const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "더 불러오기" }));
+  await user.click(await screen.findByRole("option", { name: "이미지 13.webp" }));
+  const selected = screen.getByRole("option", { name: "이미지 13.webp" });
+  const calls = vi.mocked(api.review).mock.calls.length;
+  rerender(view(1));
+  await screen.findByRole("button", { name: "새 결과 확인" });
+  expect(selected).toBeInTheDocument();
+  expect(selected).toHaveAttribute("aria-selected", "true");
+  expect(api.review).toHaveBeenCalledTimes(calls);
+  await user.click(screen.getByRole("button", { name: "새 결과 확인" }));
+  await waitFor(() => expect(api.review).toHaveBeenCalledTimes(calls + 2));
+  expect(screen.getByRole("option", { name: "이미지 13.webp" })).toHaveAttribute("aria-selected", "true");
+});
+
+it("loads a thumbnail for review and the original only on request", async () => {
+  mount(); const user = userEvent.setup();
+  await user.click(await screen.findByRole("option", { name: "이미지 5.webp" }));
+  const panel = screen.getByRole("complementary", { name: "선택 이미지 판단" });
+  expect(within(panel).getByRole("img", { name: "이미지 5.webp" })).toHaveAttribute("src", expect.stringContaining("/thumbnail/"));
+  await user.click(within(panel).getByRole("button", { name: "원본 보기" }));
+  expect(within(panel).getByRole("img", { name: "이미지 5.webp" })).toHaveAttribute("src", expect.stringContaining("/asset/"));
+});

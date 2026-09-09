@@ -6,10 +6,9 @@ from pathlib import Path
 import queue
 import sys
 import threading
-from collections import OrderedDict
 
 from learned_compare import compare_supported
-from feature_cache import FeatureCache, runtime_fingerprint, extraction_fingerprint, compatible_feature_caches
+from feature_cache import ReferenceBundles, FeatureCache, runtime_fingerprint, extraction_fingerprint, compatible_feature_caches
 from runtime import BASELINE, FINGERPRINT, Runtime
 
 MAX_REQUEST_BYTES = 128 * 1024
@@ -58,7 +57,7 @@ def main():
         instrument(engine, feature_cache, runtime, timings)
         cache.extract = timings.wrap("cache_extract_total", cache.extract)
     refs = None
-    bundles = OrderedDict()
+    bundles = ReferenceBundles(cache)
     resident = None
     while True:
         line = inbox.get()
@@ -70,13 +69,7 @@ def main():
                 items = request["references"]
                 if not 5 <= len(items) <= 25 or len({i["hash"] for i in items}) != len(items):
                     raise ValueError("Five anchors and at most twenty distinct approved examples required")
-                key = tuple(i["hash"] for i in items)
-                refs = bundles.pop(key, None)
-                if refs is None:
-                    refs = [cache.extract(Path(i["path"]), i["hash"]) for i in items]
-                bundles[key] = refs
-                while len(bundles) > 32:
-                    bundles.popitem(last=False)
+                refs = bundles.prepare(items)
                 emit({"type": "prepared", "referenceHashes": [r.content_hash for r in refs],
                       "cacheHits": cache.hits, "extractions": cache.misses})
             elif request["type"] == "load_query":

@@ -1,3 +1,6 @@
+import { PhotoIcon } from "@heroicons/react/24/outline";
+import { trashThumbnailUrl } from "../assets/mediaUrl";
+import { usePrivacy } from "../privacy/PrivacyContext";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ASSET_PAGE_SIZE } from "../library/constants";
 import { useLibrary } from "../library/LibraryContext";
@@ -19,6 +22,7 @@ const MAX_RETENTION_DAYS = 3650;
 
 export function TrashBrowser({ onCountChange }: { onCountChange?: (count: number) => void } = {}) {
   const { gateway } = useLibrary();
+  const { privacyMode } = usePrivacy();
   const [page, setPage] = useState<TrashPage | null>(null);
   const [policy, setPolicy] = useState<TrashPolicy | null>(null);
   const [retentionDays, setRetentionDays] = useState("");
@@ -152,13 +156,16 @@ export function TrashBrowser({ onCountChange }: { onCountChange?: (count: number
       title="휴지통"
       actions={<Button variant="danger" onClick={() => setConfirmEmpty(true)} disabled={!page || page.totalCount === 0 || mutationPending}>휴지통 비우기</Button>}
     />
-    <section className="trash-browser__policy" aria-label="보존 기간 설정">
+    <details className="trash-browser__policy">
+      <summary>보존 설정 <span>{policy ? automaticDeletion ? `${policy.retentionDays}일 후 자동 삭제` : "자동 삭제 안 함" : "설정 확인 중…"}</span></summary>
+      <div className="trash-browser__policy-controls" role="group" aria-label="보존 기간 설정">
       <Toggle checked={automaticDeletion} disabled={!policy || mutationPending} onChange={(event) => void setAutomaticDeletion(event.target.checked)}>자동 삭제</Toggle>
       {automaticDeletion && <div className="trash-browser__retention"><TextField label="보존 기간" type="number" min={MIN_RETENTION_DAYS} max={MAX_RETENTION_DAYS} value={retentionDays} error={retentionError} disabled={mutationPending} onChange={(event) => setRetentionDays(event.target.value)} /><Button onClick={() => void saveRetention()} disabled={Boolean(retentionError) || mutationPending}>저장</Button></div>}
-    </section>
+      </div>
+    </details>
     {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
     {loadError && <div className="trash-browser__load-error"><Toast tone="error">{loadError}</Toast><Button disabled={mutationPending} onClick={load}>다시 시도</Button></div>}
-    {pageLoading && !page ? <Skeleton className="trash-browser__skeleton" label="휴지통을 불러오는 중" /> : pageError && !page ? <EmptyState title="휴지통을 불러오지 못했습니다." /> : !page || page.items.length === 0 ? <EmptyState title="휴지통이 비어 있습니다">삭제한 자산은 이곳에서 복원할 수 있습니다.</EmptyState> : <ul className="trash-browser__list">{page.items.map(({ asset, trashedAt, purgeAt }) => <li key={asset.id} className="trash-browser__item"><div><strong>{asset.title || asset.originalName}</strong><span>삭제: {localDate(trashedAt)}</span><span>{purgeAt ? `영구 삭제까지 ${remainingDays(purgeAt)}일` : "자동 삭제 안 함"}</span></div><Button disabled={mutationPending} onClick={() => void restore(asset.id)}>복원</Button></li>)}</ul>}
+    {pageLoading && !page ? <Skeleton className="trash-browser__skeleton" label="휴지통을 불러오는 중" /> : pageError && !page ? <EmptyState title="휴지통을 불러오지 못했습니다." /> : !page || page.items.length === 0 ? <EmptyState title="휴지통이 비어 있습니다">삭제한 자산은 이곳에서 복원할 수 있습니다.</EmptyState> : <ul className="trash-browser__list">{page.items.map(({ asset, trashedAt, purgeAt }) => <li key={asset.id} className="trash-browser__item"><TrashThumbnail key={`${asset.id}:${privacyMode}`} assetId={asset.id} hidden={privacyMode} /><div className="trash-browser__copy"><strong>{asset.title || asset.originalName}</strong><span>삭제: {localDate(trashedAt)}</span><span>{purgeAt ? `영구 삭제까지 ${remainingDays(purgeAt)}일` : "자동 삭제 안 함"}</span></div><Button disabled={mutationPending} onClick={() => void restore(asset.id)}>복원</Button></li>)}</ul>}
     {confirmEmpty && page && <Dialog open title="휴지통 비우기" onClose={() => setConfirmEmpty(false)}><p>휴지통의 자산 {page.totalCount}개 ({formatBytes(page.totalBytes)})를 영구 삭제합니다.</p><p>이 작업은 되돌릴 수 없습니다.</p><div className="ui-dialog__actions"><Button disabled={mutationPending} onClick={() => setConfirmEmpty(false)}>취소</Button><Button variant="danger" disabled={mutationPending} onClick={() => void emptyTrash()}>영구 삭제</Button></div></Dialog>}
   </section>;
 }
@@ -181,4 +188,12 @@ function remainingDays(purgeAt: string): number {
 function localDate(value: string): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
+}
+
+function TrashThumbnail({ assetId, hidden }: { assetId: string; hidden: boolean }) {
+  const [failed, setFailed] = useState(false);
+  return <div className="trash-browser__thumbnail">
+    {hidden || failed ? <PhotoIcon aria-hidden={false} aria-label={hidden ? "비공개 모드" : "미리보기 없음"} role="img" />
+      : <img src={trashThumbnailUrl(assetId)} alt="삭제한 자산 미리보기" width={72} height={72} loading="lazy" onError={() => setFailed(true)} />}
+  </div>;
 }

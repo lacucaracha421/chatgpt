@@ -107,6 +107,7 @@ pub(crate) use video_media::VideoProbe;
 
 #[derive(Debug, Clone, Copy)]
 pub enum MediaVariant {
+    TrashThumbnail,
     Asset,
     Thumbnail,
     Playback,
@@ -454,6 +455,15 @@ impl Library {
                 .query_row(
                     "SELECT CASE WHEN media_kind != 'video' THEN relative_path END
                      FROM assets WHERE id = ?1 AND status IN ('normal', 'review')",
+                    [asset_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()?
+                .flatten(),
+            MediaVariant::TrashThumbnail => self
+                .connection()?
+                .query_row(
+                    "SELECT thumbnail_relative_path FROM assets WHERE id = ?1 AND status = 'trash'",
                     [asset_id],
                     |row| row.get::<_, Option<String>>(0),
                 )

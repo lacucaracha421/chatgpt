@@ -48,3 +48,23 @@ test('server saved index is authoritative for existing image checks', async () =
     globalThis.LakomicsListApi.request = originalRequest;
   }
 });
+
+
+test('server failure preserves a safe diagnostic without leaking URLs or bearer values', async () => {
+  const originalRequest = globalThis.LakomicsListApi.request;
+  globalThis.chrome = { storage: { local: { get: async () => ({}), set: async () => {} } } };
+  globalThis.LakomicsListApi.request = async () => ({
+    ok: false, status: 400,
+    data: { detail: 'Unsupported content type: text/html https://secret.example/a Bearer abcdefghijklmnopqrstuvwxyz' },
+  });
+  try {
+    const result = await globalThis.LakomicsSaveClient.save({
+      candidate: { type: 'image', source: 'x', sourceUrl: 'https://x.com/a/status/1/photo/1', mediaUrl: 'https://pbs.twimg.com/media/A.jpg' },
+      classificationId: 'games',
+    });
+    assert.equal(result.httpStatus, 400);
+    assert.match(result.serverDetail, /^Unsupported content type: text\/html/);
+    assert.equal(result.serverDetail.includes('secret.example'), false);
+    assert.equal(result.serverDetail.includes('abcdefghijklmnopqrstuvwxyz'), false);
+  } finally { globalThis.LakomicsListApi.request = originalRequest; }
+});

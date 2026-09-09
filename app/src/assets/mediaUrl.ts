@@ -17,6 +17,10 @@ export function thumbnailUrl(assetId: string): string {
   return `${mediaOrigin()}/thumbnail/${encodeURIComponent(assetId)}`;
 }
 
+export function trashThumbnailUrl(assetId: string): string {
+  return `${mediaOrigin()}/trash-thumbnail/${encodeURIComponent(assetId)}`;
+}
+
 export function assetUrl(assetId: string): string {
   return `${mediaOrigin()}/asset/${encodeURIComponent(assetId)}`;
 }

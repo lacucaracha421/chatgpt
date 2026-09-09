@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { LibraryGateway, TrashPage } from "../library/types";
+import { PrivacyProvider } from "../privacy/PrivacyContext";
 import { TrashBrowser } from "./TrashBrowser";
 
 afterEach(cleanup);
@@ -12,6 +13,7 @@ it("loads trash, shows its purge date, and restores an asset", async () => {
   const gateway = createGateway();
 
   render(<LibraryProvider gateway={gateway}><TrashBrowser /></LibraryProvider>);
+  await userEvent.click(screen.getByText("보존 설정", { exact: false, selector: "summary" }));
 
   await waitFor(() => expect(gateway.listTrash).toHaveBeenCalledWith({ after: null, limit: 100 }));
   expect(await screen.findByText("영구 삭제까지 12일")).toBeVisible();
@@ -29,11 +31,12 @@ it("reports the trash total count after each load", async () => {
   await waitFor(() => expect(onCountChange).toHaveBeenLastCalledWith(7));
 });
 
-it("keeps retention controls disabled until the policy is loaded", () => {
+it("keeps retention controls disabled until the policy is loaded", async () => {
   const gateway = createGateway();
   vi.mocked(gateway.getTrashPolicy).mockReturnValue(new Promise(() => undefined));
 
   render(<LibraryProvider gateway={gateway}><TrashBrowser /></LibraryProvider>);
+  await userEvent.click(screen.getByText("보존 설정", { exact: false, selector: "summary" }));
 
   expect(screen.getByRole("checkbox", { name: "자동 삭제" })).toBeDisabled();
   expect(screen.getByRole("checkbox", { name: "자동 삭제" })).not.toBeChecked();
@@ -48,6 +51,7 @@ it("keeps a loaded trash page visible when the policy request fails and retries 
     .mockResolvedValueOnce({ retentionDays: 30 });
 
   render(<LibraryProvider gateway={gateway}><TrashBrowser /></LibraryProvider>);
+  await userEvent.click(screen.getByText("보존 설정", { exact: false, selector: "summary" }));
 
   expect(await screen.findByText("asset-1.png")).toBeVisible();
   expect(screen.getByRole("checkbox", { name: "자동 삭제" })).toBeDisabled();
@@ -67,6 +71,7 @@ it("shows a retry instead of an empty state when listing trash fails", async () 
     .mockResolvedValueOnce({ items: [{ asset: asset(), trashedAt: "2026-07-20T00:00:00Z", purgeAt: null }], nextCursor: null, totalCount: 1, totalBytes: 1_024 });
 
   render(<LibraryProvider gateway={gateway}><TrashBrowser /></LibraryProvider>);
+  await userEvent.click(screen.getByText("보존 설정", { exact: false, selector: "summary" }));
 
   expect(await screen.findByText("trash list failed")).toBeVisible();
   expect(screen.getByRole("heading", { name: "휴지통을 불러오지 못했습니다." })).toBeVisible();
@@ -87,6 +92,7 @@ it("retries after listing trash fails while policy loading is still pending", as
     .mockResolvedValueOnce({ retentionDays: 30 });
 
   render(<LibraryProvider gateway={gateway}><TrashBrowser /></LibraryProvider>);
+  await userEvent.click(screen.getByText("보존 설정", { exact: false, selector: "summary" }));
 
   expect(await screen.findByText("trash list failed")).toBeVisible();
   const retry = screen.getByRole("button", { name: "다시 시도" });
@@ -109,6 +115,7 @@ it("retries after policy loading fails while listing trash is still pending", as
     .mockResolvedValueOnce({ retentionDays: 30 });
 
   render(<LibraryProvider gateway={gateway}><TrashBrowser /></LibraryProvider>);
+  await userEvent.click(screen.getByText("보존 설정", { exact: false, selector: "summary" }));
 
   expect(await screen.findByText("policy failed")).toBeVisible();
   const retry = screen.getByRole("button", { name: "다시 시도" });
@@ -129,6 +136,7 @@ it("ignores an older policy completion after a newer refresh", async () => {
     .mockResolvedValueOnce({ retentionDays: 45 });
 
   render(<LibraryProvider gateway={gateway}><TrashBrowser /></LibraryProvider>);
+  await userEvent.click(screen.getByText("보존 설정", { exact: false, selector: "summary" }));
 
   await user.click(await screen.findByRole("button", { name: "복원" }));
   await waitFor(() => expect(gateway.getTrashPolicy).toHaveBeenCalledTimes(2));
@@ -145,6 +153,7 @@ it("disables conflicting trash mutations while a restore is pending", async () =
   vi.mocked(gateway.restoreAsset).mockReturnValue(pendingRestore);
 
   render(<LibraryProvider gateway={gateway}><TrashBrowser /></LibraryProvider>);
+  await userEvent.click(screen.getByText("보존 설정", { exact: false, selector: "summary" }));
 
   await user.click(await screen.findByRole("button", { name: "복원" }));
   expect(screen.getByRole("button", { name: "복원" })).toBeDisabled();
@@ -158,6 +167,7 @@ it("disables automatic deletion and saves a valid retention period", async () =>
   const user = userEvent.setup();
   const gateway = createGateway();
   render(<LibraryProvider gateway={gateway}><TrashBrowser /></LibraryProvider>);
+  await userEvent.click(screen.getByText("보존 설정", { exact: false, selector: "summary" }));
 
   await screen.findByRole("checkbox", { name: "자동 삭제" });
   await user.click(screen.getByRole("checkbox", { name: "자동 삭제" }));
@@ -175,6 +185,7 @@ it("confirms emptying the whole trash using the server totals", async () => {
   const user = userEvent.setup();
   const gateway = createGateway();
   render(<LibraryProvider gateway={gateway}><TrashBrowser /></LibraryProvider>);
+  await userEvent.click(screen.getByText("보존 설정", { exact: false, selector: "summary" }));
 
   await screen.findByText("asset-1.png");
   await user.click(screen.getByRole("button", { name: "휴지통 비우기" }));
@@ -186,6 +197,7 @@ it("confirms emptying the whole trash using the server totals", async () => {
 it("uses the shared view toolbar with window controls", async () => {
   const gateway = createGateway();
   const { container } = render(<LibraryProvider gateway={gateway}><TrashBrowser /></LibraryProvider>);
+  await userEvent.click(screen.getByText("보존 설정", { exact: false, selector: "summary" }));
   expect(await screen.findByRole("toolbar")).toBeInTheDocument();
   expect(container.querySelector(".view-toolbar")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "창 닫기" })).toBeInTheDocument();
@@ -253,3 +265,17 @@ function asset() {
     media: { kind: "image" as const },
   };
 }
+
+it("keeps policy collapsed and renders only a trash thumbnail", async () => {
+  render(<LibraryProvider gateway={createGateway()}><TrashBrowser /></LibraryProvider>);
+  const image = await screen.findByRole("img", { name: "삭제한 자산 미리보기" });
+  expect(image).toHaveAttribute("src", "http://lakomics.localhost/trash-thumbnail/asset-1");
+  expect(document.querySelector("details")).not.toHaveAttribute("open");
+});
+
+it("does not request trash thumbnails in privacy mode", async () => {
+  render(<PrivacyProvider privacyMode setPrivacyMode={() => {}}><LibraryProvider gateway={createGateway()}><TrashBrowser /></LibraryProvider></PrivacyProvider>);
+  await screen.findByText("asset-1.png");
+  expect(document.querySelector("img")).toBeNull();
+  expect(screen.getByRole("img", { name: "비공개 모드" })).toBeVisible();
+});

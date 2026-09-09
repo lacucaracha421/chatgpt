@@ -493,6 +493,7 @@ fn parse_path(path: &str) -> Option<(MediaVariant, String, Option<String>)> {
     }
     let (variant, file_name) = match route {
         "asset" if segments.next().is_none() => (MediaVariant::Asset, None),
+        "trash-thumbnail" if segments.next().is_none() => (MediaVariant::TrashThumbnail, None),
         "thumbnail" if segments.next().is_none() => (MediaVariant::Thumbnail, None),
         "playback" if segments.next().is_none() => (MediaVariant::Playback, None),
         "manga-cover" if segments.next().is_none() => (MediaVariant::MangaCover, None),
@@ -949,6 +950,20 @@ mod tests {
         );
 
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn trash_thumbnail_route_only_exposes_trashed_thumbnails() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        for (id, status) in [(ASSET_ID, "normal"), (REVIEW_ID, "review"), (TRASH_ID, "trash")] {
+            let thumbnail = format!("thumbnails/{id}.webp");
+            insert_asset_with_status(&library, id, &format!("assets/{id}.png"), &thumbnail, status);
+            std::fs::write(library.root().join(thumbnail), b"thumbnail bytes").unwrap();
+            let response = media_response(Some(&library), &Method::GET, &format!("/trash-thumbnail/{id}"));
+            assert_eq!(response.status(), if status == "trash" { StatusCode::OK } else { StatusCode::NOT_FOUND });
+            if status == "trash" { assert_eq!(response.body(), b"thumbnail bytes"); }
+        }
     }
 
     #[test]

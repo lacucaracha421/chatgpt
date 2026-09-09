@@ -1,4 +1,5 @@
 """Disposable content-addressed features. Never part of a recovery snapshot."""
+from collections import OrderedDict
 import ast
 import hashlib
 import json
@@ -145,3 +146,33 @@ class FeatureCache:
         finally:
             if temporary is not None:
                 temporary.unlink(missing_ok=True)
+
+
+class ReferenceBundles:
+    """Bound reference residency by memory, rather than evicting at 32 characters.
+
+    Native ownership verifies source snapshots before committing a decision.
+    Keys have the same content identity as the previous worker-local cache.
+    """
+    def __init__(self, cache, max_bytes=64 * 1024 * 1024):
+        self.cache = cache
+        self.max_bytes = max_bytes
+        self.bytes = 0
+        self.entries = OrderedDict()
+
+    def prepare(self, items):
+        key = tuple(item["hash"] for item in items)
+        cached = self.entries.pop(key, None)
+        if cached is not None:
+            self.entries[key] = cached
+            return cached[0]
+        refs = [self.cache.extract(Path(item["path"]), item["hash"]) for item in items]
+        # Include a conservative allowance for Python containers and box/hash objects.
+        size = 256 + sum(ref.vectors.nbytes + len(ref.boxes) * 256 + 1024 for ref in refs)
+        if size <= self.max_bytes:
+            while self.entries and (self.bytes + size > self.max_bytes or len(self.entries) >= 1024):
+                _, (_, removed) = self.entries.popitem(last=False)
+                self.bytes -= removed
+            self.entries[key] = (refs, size)
+            self.bytes += size
+        return refs

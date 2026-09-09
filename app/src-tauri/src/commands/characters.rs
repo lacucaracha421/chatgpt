@@ -143,6 +143,13 @@ pub async fn character_review_page(
         .map_err(Into::into)
 }
 
+#[tauri::command]
+pub async fn character_review_pending(series_id: String, target_id: String, state: State<'_, AppState>) -> Result<bool, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.character_review_pending(&series_id, &target_id))
+        .await.map_err(|_| super::background_task_error())?.map_err(Into::into)
+}
+
 impl From<Error> for CommandError {
     fn from(error: Error) -> Self {
         let code = match &error {

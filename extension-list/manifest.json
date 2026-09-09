@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Lakomics Collector List",
-  "version": "3.0.0.5",
-  "version_name": "3.0.0-alpha.5",
+  "version": "3.0.0.6",
+  "version_name": "3.0.0-alpha.6",
   "description": "A list-first Lakomics media collector.",
   "permissions": [
     "storage"

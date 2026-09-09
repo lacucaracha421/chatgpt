@@ -11,7 +11,7 @@ const defaultApi: AutomaticCharacterApi = {
 };
 
 /** Status/control only. Native mutations and the native owner discover all work. */
-export function useCharacterAutomation(onChanged: () => void, api = defaultApi) {
+export function useCharacterAutomation(onChanged: (membershipChanged: boolean) => void, api = defaultApi) {
   const [progress, setProgress] = useState<ScanStatus | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
@@ -21,17 +21,25 @@ export function useCharacterAutomation(onChanged: () => void, api = defaultApi) 
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
     let completed: number | null = null;
+    let confirmed: number | null = null;
+    let interval = 5000;
+    let polling = false;
     let notice = "";
     async function poll() {
+      if (!active || polling) return;
+      polling = true;
+      clearTimeout(timer);
       try {
         const status = await api.status();
         if (!active) return;
         setPaused(status.paused);
-        setProgress(status.activeAssetId ? {
+        const nextProgress: ScanStatus | null = status.activeAssetId ? {
           id: status.activeAssetId, targetId: "", targetFingerprint: "", runtimeFingerprint: status.total ? "native" : null,
           state: "running", total: status.total, completed: status.compared, errors: 0, cacheHits: 0, extractions: 0, error: null,
-        } : null);
-        if (completed !== null && completed !== status.completed) latest.current();
+        } : null;
+        setProgress(previous => JSON.stringify(previous) === JSON.stringify(nextProgress) ? previous : nextProgress);
+        interval = status.activeAssetId || (status.pending > 0 && !status.paused) ? 1000 : 5000;
+        if (completed !== null && completed !== status.completed) latest.current(confirmed !== status.confirmed);
         const stamp = `${status.error ?? ""}:${status.completed}:${status.running}`;
         if (stamp !== notice) {
           notice = stamp;
@@ -42,13 +50,17 @@ export function useCharacterAutomation(onChanged: () => void, api = defaultApi) 
             : finished ? "캐릭터 분석 완료 · 결과는 분석·검토에서 확인" : null);
         }
         completed = status.completed;
+        confirmed = status.confirmed;
       } catch (error) {
         if (active) { setTransient(false); setMessage(commandErrorMessage(error, "자동 분류 상태를 불러오지 못했습니다.")); }
       }
-      if (active) timer = setTimeout(() => void poll(), 1000);
+      finally { polling = false; }
+      if (active) timer = setTimeout(() => void poll(), document.visibilityState === "hidden" ? 15000 : interval);
     }
+    const onVisible = () => { if (document.visibilityState === "visible") void poll(); };
+    document.addEventListener("visibilitychange", onVisible);
     void poll();
-    return () => { active = false; clearTimeout(timer); }; // Navigation never cancels native work.
+    return () => { active = false; clearTimeout(timer); document.removeEventListener("visibilitychange", onVisible); }; // Navigation never cancels native work.
   }, [api]);
   useEffect(() => {
     if (!message || !transient || progress || paused) return;

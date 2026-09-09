@@ -3,10 +3,15 @@
   const OPEN_DISTANCE_PX = 12;
   const TOUCH_LONG_PRESS_MS = 420;
 
+  function runtimeTimeoutMs(message) {
+    if (message?.type !== "collector:save") return 15_000;
+    return message?.payload?.candidate?.type === "video" ? 310_000 : 70_000;
+  }
+
   function runtimeMessage(message) {
     return new Promise((resolve) => {
       let settled = false;
-      const timer = setTimeout(() => finish({ ok: false, code: "worker_timeout" }), 15_000);
+      const timer = setTimeout(() => finish({ ok: false, code: "worker_timeout" }), runtimeTimeoutMs(message));
       const finish = (value) => {
         if (settled) return;
         settled = true;
@@ -83,6 +88,30 @@
     return `서버 저장됨 · ${remote}`;
   }
 
+  function saveFailureMessage(result) {
+    if (!result) return "서버 저장 실패";
+    if (result.code === "revoked") return "다시 연결 필요";
+    if (result.code === "classification_stale") return "분류 목록 갱신 필요";
+    if (result.code === "timeout" || result.code === "worker_timeout") return "서버 응답 시간 초과";
+    if (result.code === "offline" || result.code === "server_offline") return "서버 연결 실패";
+    if (result.code === "media_unsupported") return "지원하지 않는 미디어";
+    const detail = String(result.serverDetail || "");
+    if (/^Invalid source URL$/i.test(detail)) return "서버 거절 · 원문 URL 검증 실패";
+    if (/^Unsupported content type:/i.test(detail)) return `서버 거절 · 원본 형식 ${detail.split(":", 2)[1]?.trim() || "알 수 없음"}`;
+    if (/^Unsupported .* media URL$/i.test(detail)) return "서버 거절 · 미디어 URL 검증 실패";
+    if (/^Unsupported .* media host$/i.test(detail)) return "서버 거절 · 미디어 호스트 검증 실패";
+    if (/^Media host could not be resolved$/i.test(detail)) return "서버 원본 수신 실패 · DNS 확인 실패";
+    if (/^Private or special-use media host is not allowed$/i.test(detail)) return "서버 거절 · 원본 주소 보안 검증 실패";
+    if (/^Media connection address was not validated$/i.test(detail)) return "서버 거절 · 원본 서버 주소 검증 실패";
+    if (/^Media host address changed during download$/i.test(detail)) return "서버 거절 · 원본 서버 주소 변경 감지";
+    if (/^Empty .* response$/i.test(detail)) return "서버 원본 수신 실패 · 빈 응답";
+    if (/ is too large$/i.test(detail)) return "서버 거절 · 원본 파일 용량 초과";
+    const upstream = detail.match(/^Media returned HTTP (\d{3})$/i);
+    if (upstream) return `서버 원본 수신 실패 · HTTP ${upstream[1]}`;
+    if (detail) return `${result.httpStatus === 502 ? "서버 원본 수신 실패" : "서버 거절"} · ${detail}`;
+    return result.httpStatus ? `서버 저장 실패 · HTTP ${result.httpStatus}` : "서버 저장 실패";
+  }
+
   function normalizePostId(value) { const text = String(value ?? "").trim(); return /^\d+$/.test(text) ? text : ""; }
   function findTweetArticle(root, postId) {
     const targetId = normalizePostId(postId); if (!targetId) return null;
@@ -104,7 +133,7 @@
   }
 
   if (globalThis.__LAKOMICS_TEST__) {
-    globalThis.LakomicsListContent = { createInvocationGate, temporaryIntent, plainCandidate, shouldSuppressNativeContext, saveResultMessage, normalizePostId };
+    globalThis.LakomicsListContent = { createInvocationGate, temporaryIntent, plainCandidate, shouldSuppressNativeContext, runtimeTimeoutMs, saveResultMessage, saveFailureMessage, normalizePostId };
     return;
   }
 
@@ -245,7 +274,9 @@
             globalThis.LakomicsXGalleryRuntime?.markSaved?.(candidate.mediaUrl, { status: result.status, postId: candidate.postId, mediaIndex: candidate.mediaIndex, sourceUrl: candidate.sourceUrl });
             return { ok: true, message: saveResultMessage(result) };
           }
-          return { ok: false, message: result?.code === "revoked" ? "다시 연결" : result?.code === "classification_stale" ? "목록 갱신" : result?.code === "server_offline" ? "서버 연결 실패" : "서버 저장 실패" };
+          const message = saveFailureMessage(result);
+          showStatus(message, "error", 5200);
+          return { ok: false, message };
         },
         onClose: (result) => {
           picker = null; gate.close(); clearTouchOwnership(); active = null; suppressNextClick = false;
@@ -254,11 +285,11 @@
       });
     }
 
-    function showStatus(message, kind) {
+    function showStatus(message, kind, durationMs = 2200) {
       toast?.remove(); if (toastTimer) clearTimeout(toastTimer);
       toast = document.createElement("div"); toast.className = `lakomics-list-toast ${kind || ""}`; toast.textContent = message;
       document.documentElement.append(toast);
-      toastTimer = setTimeout(() => { toast?.remove(); toast = null; toastTimer = null; }, 2200);
+      toastTimer = setTimeout(() => { toast?.remove(); toast = null; toastTimer = null; }, durationMs);
     }
   }
 })();

@@ -613,3 +613,54 @@ fn manual_snapshot_allows_successive_approvals_after_learning() {
     let mut second=prediction_decision(&a,"a");second.asset_ids=vec!["asset-6".into()];
     assert_eq!(f.library.record_character_decisions(second).unwrap(),1);
 }
+
+#[test]
+fn review_pending_is_advisory_and_approval_still_verifies_source() {
+    let f = Fixture::new();
+    let target = f.ready("A");
+    seed_prediction(&f, &target, "scan");
+    assert!(f.library.character_review_pending(&f.series, &target.id).unwrap());
+    let input = f.library.current_input(&target, "asset-5").unwrap();
+    fs::write(f.temp.path().join(input.path), b"changed").unwrap();
+    // The badge reads metadata only; it is never authorization to accept stale evidence.
+    assert!(f.library.character_review_pending(&f.series, &target.id).unwrap());
+    assert!(f.library.record_character_decisions(prediction_decision(&target, "scan")).is_err());
+    assert!(f.library.character_review_page(ReviewQuery {
+        series_id: f.series.clone(), target_id: Some(target.id), filter: "recommended".into(),
+        after: None, limit: 60,
+    }).unwrap().rows.is_empty());
+}
+
+#[test]
+fn review_reaches_sparse_matches_beyond_an_input_batch() {
+    let f = Fixture::new();
+    let target = f.ready("A");
+    seed_prediction(&f, &target, "scan");
+    {
+        let c = f.library.connection().unwrap();
+        for index in 0..300 {
+            let id = format!("a-{index:04}");
+            c.execute("INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at,status)
+                SELECT ?1,?1,media_kind,original_name,'assets/' || ?1,'thumbnails/' || ?1,byte_size,width,height,collected_at,status FROM assets WHERE id='asset-5'", [&id]).unwrap();
+            c.execute("INSERT INTO asset_classifications VALUES(?1,?2)", params![id,f.series]).unwrap();
+        }
+    }
+    assert!(f.library.character_review_pending(&f.series, &target.id).unwrap());
+    let page = f.library.character_review_page(ReviewQuery {
+        series_id: f.series.clone(), target_id: Some(target.id), filter: "recommended".into(), after: None, limit: 1,
+    }).unwrap();
+    assert_eq!(page.rows.len(), 1);
+    assert_eq!(page.rows[0].asset.id, "asset-5");
+}
+
+#[test]
+fn review_pending_respects_character_decisions_and_series_scope() {
+    let f = Fixture::new();
+    let a = f.ready("A");
+    let b = f.ready("B");
+    seed_prediction(&f, &a, "a"); seed_prediction(&f, &b, "b");
+    assert!(!f.library.character_review_pending(&f.outside, &a.id).unwrap());
+    f.library.record_character_decisions(prediction_decision(&a, "a")).unwrap();
+    assert!(!f.library.character_review_pending(&f.series, &a.id).unwrap());
+    assert!(f.library.character_review_pending(&f.series, &b.id).unwrap());
+}

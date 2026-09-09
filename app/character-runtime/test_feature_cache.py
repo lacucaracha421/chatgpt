@@ -112,3 +112,32 @@ class ExtractionIdentityTests(unittest.TestCase):
             changed=FeatureCache(root/'cache',engine,'b'*64,compatible_feature_caches(root,'b'*64))
             changed.extract(image,sha256(image))
             self.assertEqual(engine.calls,2)
+
+class ReferenceBundleTests(unittest.TestCase):
+    def test_more_than_32_targets_reuse_features_with_a_byte_budget(self):
+        from feature_cache import ReferenceBundles
+        class Cache:
+            calls = 0
+            def extract(self, path, digest):
+                self.calls += 1
+                return Features(digest, [(0, 0, 24, 24)], np.ones((1, 768), np.float32), False)
+        cache = Cache()
+        bundles = ReferenceBundles(cache)
+        groups = [[{"hash": f"{target}-{slot}", "path": "unused"} for slot in range(5)] for target in range(64)]
+        for group in groups:
+            bundles.prepare(group)
+        cold = cache.calls
+        for group in groups:
+            bundles.prepare(group)
+        self.assertEqual(cold, 320)
+        self.assertEqual(cache.calls, cold)
+        self.assertLessEqual(bundles.bytes, bundles.max_bytes)
+
+    def test_oversized_bundle_is_not_retained(self):
+        from feature_cache import ReferenceBundles
+        class Cache:
+            def extract(self, path, digest):
+                return Features(digest, [], np.ones((1, 768), np.float32), True)
+        bundles = ReferenceBundles(Cache(), max_bytes=1)
+        self.assertEqual(len(bundles.prepare([{"hash": "a", "path": "unused"}])), 1)
+        self.assertEqual(bundles.bytes, 0)

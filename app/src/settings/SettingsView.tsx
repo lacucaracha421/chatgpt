@@ -735,10 +735,10 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
         <dl className="settings-view__property">
           <dt>화면 배율</dt>
           <dd className="settings-view__credential-status">글자, 버튼, 이미지 등 앱 전체 크기를 조절합니다. 변경 즉시 적용되며 다음 실행에도 유지됩니다.</dd>
-          <dd><Select label="앱 전체 배율" value={appZoom} onChange={(event) => onAppZoomChange(Number(event.target.value))}>
+          <dd className="settings-view__inline-controls"><Select label="앱 전체 배율" value={appZoom} onChange={(event) => onAppZoomChange(Number(event.target.value))}>
             {APP_ZOOM_LEVELS.map(level => <option key={level} value={level}>{level}%{level === 100 ? " (기본)" : ""}</option>)}
-          </Select></dd>
-          <dd><Button size="sm" disabled={appZoom === 100} onClick={() => onAppZoomChange(100)}>100%로 복원</Button></dd>
+          </Select>
+          <Button size="sm" disabled={appZoom === 100} onClick={() => onAppZoomChange(100)}>100%로 복원</Button></dd>
           {appZoomError && <dd role="alert">{appZoomError}</dd>}
         </dl>
         <dl className="settings-view__property">
