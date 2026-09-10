@@ -681,7 +681,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
               width={sidebarWidth} onWidthChange={setSidebarWidth} onNavigate={navigateView}
               reviewCount={reviewCount} trashCount={trashCount} onImportFiles={dropEnabled ? () => void importFiles() : undefined}
               cloudProblemCount={cloudProblems}
-              assetNavigation={<ClassificationSidebar embedded characters={characterHub.targets}
+              assetNavigation={<ClassificationSidebar embedded characters={characterHub.targets} characterGroups={characterHub.groups}
               entries={entries}
               albums={albums}
               view={view}
@@ -845,7 +845,8 @@ function DeferredViewFallback() {
 }
 
 function sidebarTargetAt(x: number, y: number, payload: InternalDragPayload, entries: ClassificationEntry[], albums: AlbumEntry[]): ClassificationDropTarget | null {
-  const element = document.elementFromPoint?.(x, y)?.closest<HTMLElement>("[data-classification-id], [data-album-id], [data-character-id]");
+  const element = document.elementFromPoint?.(x, y)?.closest<HTMLElement>("[data-classification-id], [data-album-id], [data-character-id], [data-character-group-id]");
+  if (element?.dataset.characterGroupId) return null;
   if (element?.dataset.characterId) return { kind: "character", entryId: element.dataset.characterId, position: "inside", valid: payload.kind === "assets" && payload.assetIds.length <= 200 };
   const kind = element?.dataset.albumId ? "album" : "classification";
   const entryId = kind === "album" ? element?.dataset.albumId : element?.dataset.classificationId;

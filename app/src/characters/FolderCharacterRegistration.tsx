@@ -72,7 +72,7 @@ export function FolderCharacterRegistration({ folderId, classifications, targets
     } catch (reason) { setError(commandErrorMessage(reason, "캐릭터 폴더를 등록하지 못했습니다.")); }
     finally { setBusy(false); }
   }
-  return <Dialog open title="기존 폴더를 캐릭터로 등록" variant="wide" onClose={() => { if (!busy) onClose(); }}>
+  return <Dialog open title="한 캐릭터 폴더 정리" variant="wide" onClose={() => { if (!busy) onClose(); }}>
     <div className="character-picker">
       <Select label="시리즈" value={seriesId} disabled={busy} onChange={event => { setSeriesId(event.target.value); setTargetId(""); }}>
         {ancestors.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
@@ -82,7 +82,7 @@ export function FolderCharacterRegistration({ folderId, classifications, targets
       </Select>
       {!targetId && <TextField label="캐릭터 이름" value={name} disabled={busy} onChange={event => setName(event.target.value)} />}
       <label><input type="checkbox" checked={recursive} disabled={busy || loading} onChange={event => setRecursive(event.target.checked)} />하위 폴더 포함</label>
-      <label><input type="checkbox" checked={cleanupFolder} disabled={busy} onChange={event => setCleanupFolder(event.target.checked)} />등록 후 기존 폴더 정리</label>
+      <label><input type="checkbox" checked={cleanupFolder} disabled={busy} onChange={event => setCleanupFolder(event.target.checked)} />전환 후 기존 폴더 정리</label>
       <p>{cleanupFolder ? "이미지·GIF·영상을 연결하고, 직접 소속 자산은 시리즈로 옮깁니다. 하위 폴더와 남은 자산이 있으면 기존 폴더를 보존합니다." : "기존 분류 폴더를 유지합니다."}</p>
       <p>{count === null ? "대상 확인 중…" : `${count}개 자산 연결 예정`} · 원본 파일과 다른 캐릭터 연결을 유지합니다.</p>
       {!targetId && <><div className="character-actions"><Button disabled={busy} onClick={() => setMode("references")}>기준 이미지 {references.length}/5</Button><Button disabled={busy} onClick={() => setMode("thumbnail")}>대표 이미지 {thumbnail ? "선택됨" : "선택"}</Button><span>{mode === "references" ? "기준 이미지 선택" : "대표 이미지 선택"}</span></div>
@@ -92,7 +92,7 @@ export function FolderCharacterRegistration({ folderId, classifications, targets
           else setReferences(old => old.includes(asset.id) ? old.filter(id => id !== asset.id) : old.length < 5 ? [...old, asset.id] : old);
         }} /></div></>}
       {error && <p role="alert">{error}</p>}
-      <div className="character-actions"><Button disabled={busy || loading || !cursor} onClick={() => void more()}>더 불러오기</Button><Button disabled={busy || loading || !count || (!targetId && !name.trim())} onClick={() => void save()}>등록</Button><Button disabled={busy} onClick={onClose}>취소</Button></div>
+      <div className="character-actions"><Button disabled={busy || loading || !cursor} onClick={() => void more()}>더 불러오기</Button><Button disabled={busy || loading || !count || (!targetId && !name.trim())} onClick={() => void save()}>캐릭터로 전환</Button><Button disabled={busy} onClick={onClose}>취소</Button></div>
     </div>
   </Dialog>;
 }

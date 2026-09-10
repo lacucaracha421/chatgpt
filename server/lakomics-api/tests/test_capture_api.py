@@ -285,6 +285,49 @@ class CaptureStoreTests(unittest.TestCase):
                     )
         self.assertEqual(stream.calls, [])
 
+    def test_generic_web_allows_dns_rotation_after_verified_peer(self):
+        class NetworkStream:
+            def get_extra_info(self, name):
+                return ("93.184.216.34", 443) if name == "server_addr" else None
+
+        response = FakeResponse([b"image"], content_type="image/png")
+        response.extensions = {"network_stream": NetworkStream()}
+        stream = FakeStream(response)
+        first_dns = [(2, 1, 6, "", ("93.184.216.34", 443))]
+        rotated_dns = [(2, 1, 6, "", ("1.1.1.1", 443))]
+        with mock.patch.object(capture_store.socket, "getaddrinfo", side_effect=[first_dns, rotated_dns]) as resolver:
+            with mock.patch.object(capture_store.httpx, "stream", stream):
+                result = capture_store.fetch_media_to_r2(
+                    "https://example.test/image.png",
+                    "images/inbox/rotating/original",
+                    "image",
+                    "web",
+                )
+
+        self.assertEqual(result, ("image/png", 5))
+        self.assertEqual(resolver.call_count, 1)
+        self.assertEqual(fake_s3.objects["images/inbox/rotating/original"]["body"], b"image")
+
+    def test_generic_web_rejects_connection_outside_validated_dns(self):
+        class NetworkStream:
+            def get_extra_info(self, name):
+                return ("1.1.1.1", 443) if name == "server_addr" else None
+
+        response = FakeResponse([b"image"], content_type="image/png")
+        response.extensions = {"network_stream": NetworkStream()}
+        stream = FakeStream(response)
+        public_dns = [(2, 1, 6, "", ("93.184.216.34", 443))]
+        with mock.patch.object(capture_store.socket, "getaddrinfo", return_value=public_dns):
+            with mock.patch.object(capture_store.httpx, "stream", stream):
+                with self.assertRaisesRegex(capture_store.CaptureValidationError, "connection address was not validated"):
+                    capture_store.fetch_media_to_r2(
+                        "https://example.test/image.png",
+                        "images/inbox/unvalidated/original",
+                        "image",
+                        "web",
+                    )
+        self.assertNotIn("images/inbox/unvalidated/original", fake_s3.objects)
+
 
 class CaptureApiTests(unittest.TestCase):
     def setUp(self) -> None:

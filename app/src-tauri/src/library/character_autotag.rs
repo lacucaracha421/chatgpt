@@ -105,6 +105,30 @@ pub(super) enum Cause {
     ManualScanEnrollment,
     AutomaticFinalization,
 }
+impl Cause {
+    pub(super) fn stored(self) -> &'static str {
+        match self {
+            Self::Ingestion => "ingestion",
+            Self::Classification => "classification",
+            Self::Restore => "restore",
+            Self::SimilarityResolution => "similarity_resolution",
+            Self::Reconsideration => "reconsideration",
+            Self::ManualScanEnrollment => "manual_scan",
+            Self::AutomaticFinalization => "classification",
+        }
+    }
+    fn priority(self) -> i32 {
+        match self {
+            Self::Ingestion | Self::Classification | Self::Restore | Self::SimilarityResolution => 0,
+            Self::ManualScanEnrollment => 1,
+            Self::Reconsideration => 2,
+            Self::AutomaticFinalization => 0,
+        }
+    }
+    fn force(self) -> bool {
+        matches!(self, Self::Reconsideration | Self::ManualScanEnrollment)
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -119,12 +143,21 @@ pub struct Job {
     pub review_state: String,
     pub claim_id: Option<String>,
     pub attempts: i64,
+    pub cause: String,
     pub error: Option<String>,
 }
 
 fn folders(connection: &Connection, asset_id: &str) -> rusqlite::Result<Vec<String>> {
     connection.prepare("SELECT classification_id FROM asset_classifications WHERE asset_id=?1 ORDER BY classification_id")?
         .query_map([asset_id], |r| r.get(0))?.collect()
+}
+
+fn in_originals_scope(connection: &Connection, asset_id: &str) -> rusqlite::Result<bool> {
+    connection.query_row("WITH RECURSIVE lineage(id,parent_id,name) AS (
+        SELECT c.id,c.parent_id,c.name FROM classification_entries c JOIN asset_classifications a ON a.classification_id=c.id WHERE a.asset_id=?1
+        UNION ALL SELECT c.id,c.parent_id,c.name FROM classification_entries c JOIN lineage p ON c.id=p.parent_id)
+        SELECT EXISTS(SELECT 1 FROM lineage WHERE parent_id IS NULL AND (id='lakomics-originals' OR name='오리지널' COLLATE NOCASE))",
+        [asset_id], |r| r.get(0))
 }
 
 /// Call after the final classification/status mutation, inside its transaction.
@@ -143,28 +176,33 @@ pub(super) fn enqueue(
     let Some((hash, path)) = input else {
         return Ok(false);
     };
+    if in_originals_scope(connection, asset_id)? {
+        connection.execute("UPDATE character_autotag_jobs SET state='superseded',claim_id=NULL,error=NULL,updated_at=?2 WHERE asset_id=?1 AND state<>'superseded'",
+            params![asset_id,chrono::Utc::now().to_rfc3339()])?;
+        return Ok(false);
+    }
     let classification =
         serde_json::to_string(&folders(connection, asset_id)?).expect("string list");
-    let force = matches!(cause, Cause::Reconsideration | Cause::ManualScanEnrollment);
+    let force = cause.force();
     let changed = connection.execute("INSERT INTO character_autotag_jobs
-        (asset_id,generation,content_hash,relative_path,classification_ids,state,review_state,priority,updated_at)
-        VALUES(?1,1,?2,?3,?4,'pending','unresolved',?5,?6)
-        ON CONFLICT(asset_id) DO UPDATE SET generation=generation+1,source_generation=source_generation+CASE WHEN ?7 AND character_autotag_jobs.state<>'superseded' AND content_hash=excluded.content_hash AND relative_path=excluded.relative_path AND classification_ids=excluded.classification_ids THEN 0 ELSE 1 END,content_hash=excluded.content_hash,
+        (asset_id,generation,content_hash,relative_path,classification_ids,state,review_state,priority,cause,updated_at)
+        VALUES(?1,1,?2,?3,?4,'pending','unresolved',?5,?6,?7)
+        ON CONFLICT(asset_id) DO UPDATE SET generation=generation+1,source_generation=source_generation+CASE WHEN ?8 AND character_autotag_jobs.state<>'superseded' AND content_hash=excluded.content_hash AND relative_path=excluded.relative_path AND classification_ids=excluded.classification_ids THEN 0 ELSE 1 END,content_hash=excluded.content_hash,
         relative_path=excluded.relative_path,classification_ids=excluded.classification_ids,
-        state='pending',review_state='unresolved',claim_id=NULL,priority=excluded.priority,
+        state='pending',review_state='unresolved',claim_id=NULL,priority=excluded.priority,cause=excluded.cause,
         attempts=0,retry_at=0,error=NULL,updated_at=excluded.updated_at
-        WHERE ?7 OR character_autotag_jobs.state='superseded'
+        WHERE ?8 OR character_autotag_jobs.state='superseded'
         OR content_hash<>excluded.content_hash OR relative_path<>excluded.relative_path
         OR classification_ids<>excluded.classification_ids",
-        params![asset_id,hash,path,classification,i32::from(force),chrono::Utc::now().to_rfc3339(),force])?;
+        params![asset_id,hash,path,classification,cause.priority(),cause.stored(),chrono::Utc::now().to_rfc3339(),force])?;
     Ok(changed > 0)
 }
 
 fn read_job(connection: &Connection, id: &str) -> Result<Option<Job>> {
     let data = connection.query_row("SELECT asset_id,generation,content_hash,relative_path,classification_ids,
-        state,review_state,claim_id,attempts,error,source_generation FROM character_autotag_jobs WHERE asset_id=?1", [id], |r| {
+        state,review_state,claim_id,attempts,error,source_generation,cause FROM character_autotag_jobs WHERE asset_id=?1", [id], |r| {
         Ok((Job { asset_id:r.get(0)?,generation:r.get(1)?,source_generation:r.get(10)?,content_hash:r.get(2)?,relative_path:r.get(3)?,
-            classification_ids:Vec::new(),state:r.get(5)?,review_state:r.get(6)?,claim_id:r.get(7)?,attempts:r.get(8)?,error:r.get(9)? },r.get::<_,String>(4)?))
+            classification_ids:Vec::new(),state:r.get(5)?,review_state:r.get(6)?,claim_id:r.get(7)?,attempts:r.get(8)?,cause:r.get(11)?,error:r.get(9)? },r.get::<_,String>(4)?))
     }).optional()?;
     data.map(|(mut job, classification)| {
         job.classification_ids = serde_json::from_str(&classification)?;
@@ -329,9 +367,19 @@ impl Library {
             UNION ALL SELECT c.id,c.parent_id,p.depth+1 FROM classification_entries c JOIN lineage p ON c.id=p.parent_id)
             SELECT l.id FROM lineage l JOIN character_series s ON s.classification_id=l.id ORDER BY l.depth,l.id LIMIT 1",
             [&job.asset_id],|r|r.get(0)).optional()?;
-        let ids=connection.prepare("SELECT t.id FROM character_targets t JOIN character_series s ON s.classification_id=t.series_classification_id
-            WHERE s.auto_classify=1 AND t.enabled=1 AND (?1 IS NULL OR s.classification_id=?1) ORDER BY t.id")?
-            .query_map([nearest_series],|r|r.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?;
+        let originals = in_originals_scope(connection, &job.asset_id)?;
+        let excluded = if let Some(series) = nearest_series.as_ref() {
+            connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM character_series_asset_exclusions WHERE series_id=?1 AND asset_id=?2)",
+                params![series,job.asset_id], |r| r.get(0))?
+        } else { false };
+        let ids = if originals || excluded {
+            Vec::new()
+        } else {
+            connection.prepare("SELECT t.id FROM character_targets t JOIN character_series s ON s.classification_id=t.series_classification_id
+                WHERE s.auto_classify=1 AND t.enabled=1 AND t.manual_only=0 AND (?1 IS NULL OR s.classification_id=?1) ORDER BY t.id")?
+                .query_map([nearest_series],|r|r.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?
+        };
         let mut targets = Vec::new();
         for id in ids {
             let target = self.read_character_target(connection, &id)?;

@@ -21,6 +21,8 @@ pub struct BrowseQuery {
     pub series_id: String,
     pub target_id: Option<String>,
     #[serde(default)]
+    pub group_id: Option<String>,
+    #[serde(default)]
     pub reference_target_id: Option<String>,
     pub after: Option<String>,
     pub limit: usize,
@@ -70,6 +72,13 @@ impl Library {
         if !(1..=200).contains(&query.limit) {
             return Err(Error::Invalid("조회 개수가 올바르지 않습니다."));
         }
+        if query.group_id.is_some() && (query.target_id.is_some() || query.reference_target_id.is_some()) {
+            return Err(Error::Stale);
+        }
+        if let Some(group_id) = query.group_id.as_ref() {
+            let valid: bool = self.connection()?.query_row("SELECT EXISTS(SELECT 1 FROM character_groups WHERE id=?1 AND series_id=?2)", params![group_id,query.series_id], |r| r.get(0))?;
+            if !valid { return Err(Error::Stale); }
+        }
         if let Some(id) = query.reference_target_id.as_ref().or(query.target_id.as_ref()).filter(|id| !id.is_empty()) {
             if self
                 .get_character_target(id)?
@@ -94,45 +103,62 @@ impl Library {
             let gallery_scope = "WITH RECURSIVE scope(id) AS (SELECT id FROM classification_entries WHERE id=?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id),
               ancestors(id,parent_id) AS (SELECT id,parent_id FROM classification_entries WHERE id=?1 UNION ALL SELECT c.id,c.parent_id FROM classification_entries c JOIN ancestors p ON c.id=p.parent_id)
               SELECT a.id,a.collected_at FROM assets a WHERE a.status='normal'
+              AND (?2 IS NOT NULL OR ?3 OR NOT EXISTS(SELECT 1 FROM character_series_asset_exclusions x WHERE x.series_id=?1 AND x.asset_id=a.id))
               AND (EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope)) OR (?2 IS NOT NULL AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM ancestors WHERE parent_id IS NULL)) AND EXISTS(SELECT 1 FROM character_relations r WHERE r.asset_id=a.id AND r.target_id=?2)))
               AND ((?2 IS NOT NULL AND (EXISTS(SELECT 1 FROM character_relations r WHERE r.asset_id=a.id AND r.target_id=?2)
                 OR EXISTS(SELECT 1 FROM character_references r WHERE r.asset_id=a.id AND r.target_id=?2)))
                 OR (?2 IS NULL AND (?3 OR EXISTS(SELECT 1 FROM character_autotag_jobs j WHERE j.asset_id=a.id AND j.review_state='partially_resolved') OR (NOT EXISTS(SELECT 1 FROM character_relations r JOIN character_targets t ON t.id=r.target_id WHERE r.asset_id=a.id AND t.series_classification_id=?1)
                 AND NOT EXISTS(SELECT 1 FROM character_references r JOIN character_targets t ON t.id=r.target_id WHERE r.asset_id=a.id AND t.series_classification_id=?1)))))";
+            let group_scope = "WITH RECURSIVE scope(id) AS (SELECT id FROM classification_entries WHERE id=?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id),
+              ancestors(id,parent_id) AS (SELECT id,parent_id FROM classification_entries WHERE id=?1 UNION ALL SELECT c.id,c.parent_id FROM classification_entries c JOIN ancestors p ON c.id=p.parent_id)
+              SELECT a.id,a.collected_at FROM assets a WHERE a.status='normal'
+              AND (EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope))
+                OR (EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM ancestors WHERE parent_id IS NULL))
+                  AND EXISTS(SELECT 1 FROM character_relations r JOIN character_group_members gm ON gm.target_id=r.target_id WHERE r.asset_id=a.id AND gm.group_id=?2)))
+              AND (EXISTS(SELECT 1 FROM character_relations r JOIN character_group_members gm ON gm.target_id=r.target_id WHERE r.asset_id=a.id AND gm.group_id=?2)
+                OR EXISTS(SELECT 1 FROM character_references r JOIN character_group_members gm ON gm.target_id=r.target_id WHERE r.asset_id=a.id AND gm.group_id=?2))";
             let reference_scope = "WITH RECURSIVE scope(id) AS (SELECT id FROM classification_entries WHERE id=?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id)
               SELECT a.id,a.collected_at FROM assets a WHERE a.status='normal' AND a.media_kind='image'
+              AND NOT EXISTS(SELECT 1 FROM character_series_asset_exclusions x WHERE x.series_id=?1 AND x.asset_id=a.id)
               AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope))
               AND NOT EXISTS(SELECT 1 FROM character_relations r WHERE r.asset_id=a.id AND r.target_id<>?2)
               AND NOT EXISTS(SELECT 1 FROM character_references r WHERE r.asset_id=a.id AND r.target_id<>?2)
               AND (?3 OR (NOT EXISTS(SELECT 1 FROM character_relations r WHERE r.asset_id=a.id)
               AND NOT EXISTS(SELECT 1 FROM character_references r WHERE r.asset_id=a.id)))";
             let scoped_references = format!("{reference_scope} AND (EXISTS(SELECT 1 FROM character_relations r WHERE r.asset_id=a.id AND r.target_id=?2) OR EXISTS(SELECT 1 FROM character_references r WHERE r.asset_id=a.id AND r.target_id=?2))");
-            let scope = if query.reference_target_id.is_some() {
-                if query.target_id.is_some() { scoped_references.as_str() } else { reference_scope }
-            } else { gallery_scope };
             let target_id = query.reference_target_id.as_ref().or(query.target_id.as_ref());
             let all = query.all;
-            let total: i64 = connection.query_row(
-                &format!("SELECT COUNT(*) FROM ({scope})"),
-                params![query.series_id, target_id, all],
-                |r| r.get(0),
-            )?;
-            let sql = format!("{scope} AND (?4 IS NULL OR (a.collected_at,a.id)<(?4,?5)) ORDER BY a.collected_at DESC,a.id DESC LIMIT ?6");
-            let mut statement = connection.prepare(&sql)?;
-            let ids = statement
-                .query_map(
-                    params![
-                        query.series_id,
-                        target_id,
-                        all,
-                        cursor.as_ref().map(|c| &c.0),
-                        cursor.as_ref().map(|c| &c.1),
-                        (query.limit + 1) as i64
-                    ],
-                    |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
-                )?
-                .collect::<std::result::Result<Vec<_>, _>>()?;
-            (ids, total)
+            if let Some(group_id) = query.group_id.as_ref() {
+                let total: i64 = connection.query_row(&format!("SELECT COUNT(*) FROM ({group_scope})"), params![query.series_id,group_id], |r| r.get(0))?;
+                let sql = format!("{group_scope} AND (?3 IS NULL OR (a.collected_at,a.id)<(?3,?4)) ORDER BY a.collected_at DESC,a.id DESC LIMIT ?5");
+                let ids = connection.prepare(&sql)?.query_map(params![query.series_id,group_id,cursor.as_ref().map(|c| &c.0),cursor.as_ref().map(|c| &c.1),(query.limit + 1) as i64], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
+                (ids,total)
+            } else {
+                let scope = if query.reference_target_id.is_some() {
+                    if query.target_id.is_some() { scoped_references.as_str() } else { reference_scope }
+                } else { gallery_scope };
+                let total: i64 = connection.query_row(
+                    &format!("SELECT COUNT(*) FROM ({scope})"),
+                    params![query.series_id, target_id, all],
+                    |r| r.get(0),
+                )?;
+                let sql = format!("{scope} AND (?4 IS NULL OR (a.collected_at,a.id)<(?4,?5)) ORDER BY a.collected_at DESC,a.id DESC LIMIT ?6");
+                let mut statement = connection.prepare(&sql)?;
+                let ids = statement
+                    .query_map(
+                        params![
+                            query.series_id,
+                            target_id,
+                            all,
+                            cursor.as_ref().map(|c| &c.0),
+                            cursor.as_ref().map(|c| &c.1),
+                            (query.limit + 1) as i64
+                        ],
+                        |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+                    )?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                (ids, total)
+            }
         };
         let next_cursor = if ids.len() > query.limit {
             let last = &ids[query.limit - 1];
@@ -212,6 +238,7 @@ mod tests {
             reference_target_id: None,
             series_id: f.series.clone(),
             target_id,
+            group_id: None,
             after,
             limit: 2,
             all: false,
@@ -283,6 +310,22 @@ mod tests {
             .is_none());
     }
     #[test]
+    fn group_gallery_unions_member_assets_without_duplicates() {
+        let f = Fixture::new();
+        let a = f.ready("A");
+        let b = f.ready("B");
+        for target in [&a,&b] {
+            f.library.record_character_decisions(DecisionRequest { target_id:target.id.clone(), expected_fingerprint:target.fingerprint.clone(), asset_ids:vec!["asset-5".into()], decision:DecisionKind::Accepted, baseline_fingerprint:None, scan_id:None }).unwrap();
+        }
+        let group_id = super::super::character_groups::save_character_group_in(&f.library.connection().unwrap(), super::super::character_groups::GroupDraft { id:None, series_id:f.series.clone(), expected_revision:None, name:"Duo".into(), target_ids:vec![a.id.clone(),b.id.clone()], delete:false }).unwrap();
+        let page = f.library.browse_character_assets(BrowseQuery { series_id:f.series.clone(), target_id:None, group_id:Some(group_id.clone()), reference_target_id:None, after:None, limit:100, all:false }).unwrap();
+        let ids = page.items.iter().map(|item| item.id.as_str()).collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(ids.len(), page.items.len());
+        assert!(ids.contains("asset-5"));
+        assert_eq!(page.total_count as usize, ids.len());
+        assert!(f.library.browse_character_assets(BrowseQuery { series_id:f.outside.clone(), target_id:None, group_id:Some(group_id), reference_target_id:None, after:None, limit:100, all:false }).is_err());
+    }
+    #[test]
     fn ancestor_and_other_series_images_are_not_eligible() {
         let f = Fixture::new();
         let root: String = f
@@ -327,7 +370,7 @@ mod tests {
         }).unwrap();
         f.library.connection().unwrap().execute("UPDATE asset_classifications SET classification_id=?1 WHERE asset_id='asset-6'", [&f.series]).unwrap();
         let query = |id: &str, after| BrowseQuery {
-            series_id: f.series.clone(), target_id: None, reference_target_id: Some(id.into()),
+            series_id: f.series.clone(), target_id: None, group_id: None, reference_target_id: Some(id.into()),
             after, limit: 2, all: true,
         };
         let new = f.library.browse_character_assets(query(&b.id, None)).unwrap();

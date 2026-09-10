@@ -1,0 +1,262 @@
+//! Explicit manual-character and series-level character-classification workflow.
+use std::collections::BTreeSet;
+use rusqlite::params;
+use serde::Deserialize;
+use super::{
+    character_autotag::{self, Cause},
+    character_hub,
+    characters::{DecisionKind, DecisionRequest, Error, Result, Target},
+    query::asset_summaries_by_ids,
+    Library,
+};
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManualCharacterRequest {
+    pub series_id: String,
+    pub display_name: String,
+    pub asset_ids: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SeriesAssetExclusionRequest {
+    pub series_id: String,
+    pub asset_ids: Vec<String>,
+    pub excluded: bool,
+}
+
+impl Library {
+    pub fn create_manual_character(&self, request: ManualCharacterRequest) -> Result<Target> {
+        let ids = request.asset_ids.into_iter().collect::<BTreeSet<_>>();
+        let name = request.display_name.trim();
+        if ids.is_empty() || ids.len() > 200 || name.is_empty() {
+            return Err(Error::Invalid("캐릭터 이름과 1~200개 자산을 확인해 주세요."));
+        }
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let registered: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM character_series WHERE classification_id=?1)",
+            [&request.series_id], |r| r.get(0),
+        )?;
+        if !registered {
+            return Err(Error::Invalid("등록된 시리즈를 선택해 주세요."));
+        }
+        let duplicate: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM character_targets WHERE series_classification_id=?1 AND display_name=?2 COLLATE NOCASE)",
+            params![request.series_id, name], |r| r.get(0),
+        )?;
+        if duplicate {
+            return Err(Error::Invalid("같은 이름의 캐릭터가 이미 있습니다."));
+        }
+        for asset_id in &ids {
+            character_hub::candidate_media_mode(
+                &transaction, &request.series_id, asset_id, false, true,
+            )?;
+        }
+        let thumbnail: Option<String> = ids.iter().find_map(|asset_id| {
+            transaction.query_row(
+                "SELECT id FROM assets WHERE id=?1 AND status='normal' AND media_kind='image'",
+                [asset_id], |r| r.get(0),
+            ).ok()
+        });
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        transaction.execute(
+            "INSERT INTO character_targets(id,series_classification_id,display_name,enabled,manual_only,thumbnail_asset_id,created_at,updated_at)
+             VALUES(?1,?2,?3,1,1,?4,?5,?5)",
+            params![id, request.series_id, name, thumbnail, now],
+        )?;
+        transaction.execute(
+            "INSERT INTO character_manual_targets(target_id,created_at) VALUES(?1,?2)",
+            params![id, now],
+        )?;
+        let target = self.read_character_target(&transaction, &id)?;
+        self.write_character_decisions(
+            &transaction,
+            DecisionRequest {
+                target_id: id.clone(),
+                expected_fingerprint: target.fingerprint.clone(),
+                asset_ids: ids.into_iter().collect(),
+                decision: DecisionKind::Accepted,
+                baseline_fingerprint: None,
+                scan_id: None,
+            },
+        )?;
+        let result = self.read_character_target(&transaction, &id)?;
+        transaction.commit()?;
+        Ok(result)
+    }
+
+    pub fn set_character_series_asset_excluded(
+        &self,
+        request: SeriesAssetExclusionRequest,
+    ) -> Result<usize> {
+        let ids = request.asset_ids.into_iter().collect::<BTreeSet<_>>();
+        if ids.is_empty() || ids.len() > 200 {
+            return Err(Error::Invalid("한 번에 1~200개 자산을 선택해 주세요."));
+        }
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let registered: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM character_series WHERE classification_id=?1)",
+            [&request.series_id], |r| r.get(0),
+        )?;
+        if !registered {
+            return Err(Error::Invalid("등록된 시리즈를 선택해 주세요."));
+        }
+        for asset_id in &ids {
+            character_hub::candidate_media_mode(
+                &transaction, &request.series_id, asset_id, false, true,
+            )?;
+            if request.excluded {
+                transaction.execute(
+                    "INSERT OR IGNORE INTO character_series_asset_exclusions(series_id,asset_id,created_at) VALUES(?1,?2,?3)",
+                    params![request.series_id, asset_id, chrono::Utc::now().to_rfc3339()],
+                )?;
+            } else {
+                transaction.execute(
+                    "DELETE FROM character_series_asset_exclusions WHERE series_id=?1 AND asset_id=?2",
+                    params![request.series_id, asset_id],
+                )?;
+            }
+        }
+        transaction.commit()?;
+        drop(connection);
+        if !request.excluded {
+            let connection = self.connection()?;
+            for asset_id in &ids {
+                character_autotag::enqueue(&connection, asset_id, Cause::ManualScanEnrollment)?;
+            }
+        }
+        Ok(ids.len())
+    }
+}
+
+impl Library {
+    pub fn character_series_excluded_assets(
+        &self,
+        series_id: &str,
+        after: Option<&str>,
+        limit: usize,
+    ) -> Result<character_hub::BrowsePage> {
+        if !(1..=200).contains(&limit) {
+            return Err(Error::Invalid("조회 개수가 올바르지 않습니다."));
+        }
+        let cursor: Option<(String, String)> = after.map(serde_json::from_str).transpose()?;
+        let connection = self.connection()?;
+        let scope = "WITH RECURSIVE scope(id) AS (SELECT id FROM classification_entries WHERE id=?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id)
+            SELECT a.id,a.collected_at FROM assets a WHERE a.status='normal'
+            AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope))
+            AND EXISTS(SELECT 1 FROM character_series_asset_exclusions x WHERE x.series_id=?1 AND x.asset_id=a.id)";
+        let total: i64 = connection.query_row(
+            &format!("SELECT COUNT(*) FROM ({scope})"),
+            [series_id], |r| r.get(0),
+        )?;
+        let sql = format!("{scope} AND (?2 IS NULL OR (a.collected_at,a.id)<(?2,?3)) ORDER BY a.collected_at DESC,a.id DESC LIMIT ?4");
+        let rows = connection.prepare(&sql)?.query_map(
+            params![series_id,cursor.as_ref().map(|c| &c.0),cursor.as_ref().map(|c| &c.1),(limit + 1) as i64],
+            |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)),
+        )?.collect::<std::result::Result<Vec<_>,_>>()?;
+        let next_cursor = if rows.len() > limit {
+            let last = &rows[limit - 1];
+            Some(serde_json::to_string(&(&last.1,&last.0))?)
+        } else { None };
+        let ids = rows.iter().take(limit).map(|row| row.0.clone()).collect::<Vec<_>>();
+        let items = asset_summaries_by_ids(&connection, &ids)?;
+        Ok(character_hub::BrowsePage { items, next_cursor, total_count: total as u64 })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::library::{
+        character_hub::Series,
+        characters::tests::Fixture,
+        models::SetAssetClassification,
+    };
+
+    fn register_series(f: &Fixture) {
+        f.library.save_character_series(Series {
+            classification_id: f.series.clone(),
+            hero_asset_id: None,
+            auto_classify: true,
+        }).unwrap();
+        f.library.connection().unwrap()
+            .execute("DELETE FROM character_autotag_reconsideration", []).unwrap();
+    }
+
+    #[test]
+    fn manual_character_needs_no_references_and_promotes_in_place_at_five() {
+        let f = Fixture::new();
+        register_series(&f);
+        let manual = f.library.create_manual_character(ManualCharacterRequest {
+            series_id: f.series.clone(), display_name: "Small cast".into(),
+            asset_ids: vec!["asset-5".into()],
+        }).unwrap();
+        assert!(manual.manual_only);
+        assert!(!manual.ready);
+        assert_eq!(f.library.character_relations_for_asset("asset-5").unwrap(), vec![manual.id.clone()]);
+        let reconsideration: i64 = f.library.connection().unwrap().query_row(
+            "SELECT COUNT(*) FROM character_autotag_reconsideration WHERE series_id=?1",
+            [&f.series], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(reconsideration, 0);
+
+        let promoted = f.library.replace_character_references(
+            &manual.id, manual.revision, &f.refs,
+        ).unwrap();
+        assert_eq!(promoted.id, manual.id);
+        assert!(!promoted.manual_only);
+        assert!(promoted.ready);
+        let reconsideration: i64 = f.library.connection().unwrap().query_row(
+            "SELECT COUNT(*) FROM character_autotag_reconsideration WHERE series_id=?1",
+            [&f.series], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(reconsideration, 1);
+    }
+
+    #[test]
+    fn series_exclusion_hides_unclassified_asset_and_restore_queues_manual_work() {
+        let f = Fixture::new();
+        register_series(&f);
+        let before = f.library.browse_character_assets(character_hub::BrowseQuery {
+            series_id: f.series.clone(), target_id: None, group_id: None,
+            reference_target_id: None, after: None, limit: 100, all: false,
+        }).unwrap().total_count;
+        f.library.set_character_series_asset_excluded(SeriesAssetExclusionRequest {
+            series_id: f.series.clone(), asset_ids: vec!["asset-5".into()], excluded: true,
+        }).unwrap();
+        let hidden = f.library.browse_character_assets(character_hub::BrowseQuery {
+            series_id: f.series.clone(), target_id: None, group_id: None,
+            reference_target_id: None, after: None, limit: 100, all: false,
+        }).unwrap().total_count;
+        assert_eq!(hidden + 1, before);
+        let excluded = f.library.character_series_excluded_assets(&f.series, None, 100).unwrap();
+        assert_eq!(excluded.items.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), vec!["asset-5"]);
+
+        f.library.set_character_series_asset_excluded(SeriesAssetExclusionRequest {
+            series_id: f.series.clone(), asset_ids: vec!["asset-5".into()], excluded: false,
+        }).unwrap();
+        let job = f.library.character_autotag_job("asset-5").unwrap().unwrap();
+        assert_eq!(job.state, "pending");
+        assert_eq!(job.cause, "manual_scan");
+    }
+
+    #[test]
+    fn originals_are_storage_only_and_never_enter_character_queue() {
+        let f = Fixture::new();
+        let original_id: String = f.library.connection().unwrap().query_row(
+            "SELECT id FROM classification_entries WHERE parent_id IS NULL AND name='오리지널'",
+            [], |r| r.get(0),
+        ).unwrap();
+        f.library.set_asset_classification(SetAssetClassification {
+            asset_ids: vec!["asset-5".into()], classification_id: Some(original_id),
+        }).unwrap();
+        assert!(f.library.character_autotag_job("asset-5").unwrap().is_none());
+        assert!(!character_autotag::enqueue(
+            &f.library.connection().unwrap(), "asset-5", Cause::Ingestion,
+        ).unwrap());
+    }
+}

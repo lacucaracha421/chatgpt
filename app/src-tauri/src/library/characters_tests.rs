@@ -3,7 +3,7 @@ use crate::library::{
     db,
     models::{ClassificationKind, CreateClassification, SetAssetClassification},
 };
-use std::{fs, path::Path};
+use std::{collections::BTreeSet, fs, path::Path};
 
 pub(in crate::library) struct Fixture {
     pub(in crate::library) library: Library,
@@ -906,6 +906,7 @@ fn manual_video_membership_is_visible_but_not_recognition_evidence() {
         .browse_character_assets(super::super::character_hub::BrowseQuery {
             series_id: f.series.clone(),
             target_id: Some(target.id.clone()),
+            group_id: None,
             reference_target_id: None,
             all: false,
             after: None,
@@ -1273,4 +1274,189 @@ fn character_drop_rejects_other_series_atomically() {
         .library
         .move_assets_to_character(target.id, "stale".into(), vec!["asset-0".into()])
         .is_err());
+}
+
+#[test]
+fn mixed_folder_migration_queues_images_creates_group_and_removes_empty_source() {
+    use super::super::character_folder_migration::{
+        FinalizeMixedFolderRequest, QueueMixedFolderRequest,
+    };
+    let f = Fixture::new();
+    let mixed = folder(&f.library, "Pair folder", Some(f.series.clone()));
+    let a = f.ready("A");
+    let b = f.ready("B");
+    let connection = f.library.connection().unwrap();
+    for id in ["asset-5", "asset-6"] {
+        connection
+            .execute("DELETE FROM asset_classifications WHERE asset_id=?1", [id])
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO asset_classifications(asset_id,classification_id) VALUES(?1,?2)",
+                params![id, mixed],
+            )
+            .unwrap();
+    }
+    drop(connection);
+
+    let preview = f.library.mixed_character_folder_preview(&mixed).unwrap();
+    assert_eq!(preview.series_id, f.series);
+    assert_eq!(preview.image_count, 2);
+    assert_eq!(preview.unscanned_count, 2);
+    assert_eq!(
+        f.library
+            .queue_mixed_character_folder(QueueMixedFolderRequest {
+                folder_id: mixed.clone(),
+                series_id: f.series.clone(),
+                expected_total_count: 2,
+                expected_image_count: 2,
+            })
+            .unwrap(),
+        2
+    );
+
+    let connection = f.library.connection().unwrap();
+    for id in ["asset-5", "asset-6"] {
+        connection.execute("INSERT INTO character_autotag_evidence(id,asset_id,generation,source_generation,content_hash,context_hash,runtime_fingerprint,scope_json,unresolved_regions,created_at)
+            SELECT ?2,asset_id,generation,source_generation,content_hash,'ctx','runtime','{}','[]','2026-09-10' FROM character_autotag_jobs WHERE asset_id=?1",
+            params![id,format!("evidence-{id}")]).unwrap();
+        connection.execute("UPDATE character_autotag_jobs SET state='completed',review_state='resolved',claim_id=NULL WHERE asset_id=?1",[id]).unwrap();
+    }
+    drop(connection);
+    f.decide(&a, &["asset-5"], DecisionKind::Accepted).unwrap();
+    f.decide(&b, &["asset-6"], DecisionKind::Accepted).unwrap();
+
+    let preview = f.library.mixed_character_folder_preview(&mixed).unwrap();
+    assert_eq!(preview.resolved_count, 2);
+    assert_eq!(preview.target_counts.len(), 2);
+    let result = f
+        .library
+        .finalize_mixed_character_folder(FinalizeMixedFolderRequest {
+            folder_id: mixed.clone(),
+            series_id: f.series.clone(),
+            expected_total_count: 2,
+            expected_image_count: 2,
+            group_name: "Pair".into(),
+            target_ids: vec![a.id.clone(), b.id.clone()],
+        })
+        .unwrap();
+    assert!(result.folder_removed);
+    assert_eq!(result.moved_image_count, 2);
+    assert_eq!(result.retained_asset_count, 0);
+    let group = f.library.character_groups(&f.series).unwrap().remove(0);
+    assert_eq!(group.name, "Pair");
+    assert_eq!(
+        group.target_ids.into_iter().collect::<BTreeSet<_>>(),
+        [a.id, b.id].into_iter().collect()
+    );
+    let connection = f.library.connection().unwrap();
+    assert!(!connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM classification_entries WHERE id=?1)",
+            [mixed],
+            |row| row.get::<_, bool>(0)
+        )
+        .unwrap());
+    for id in ["asset-5", "asset-6"] {
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT classification_id FROM asset_classifications WHERE asset_id=?1",
+                    [id],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            f.series
+        );
+    }
+}
+
+#[test]
+fn mixed_folder_migration_keeps_non_image_assets_and_requires_two_group_members() {
+    use super::super::character_folder_migration::{
+        FinalizeMixedFolderRequest, QueueMixedFolderRequest,
+    };
+    let f = Fixture::new();
+    let mixed = folder(&f.library, "Mixed media", Some(f.series.clone()));
+    let a = f.ready("A");
+    let b = f.ready("B");
+    let connection = f.library.connection().unwrap();
+    connection
+        .execute(
+            "DELETE FROM asset_classifications WHERE asset_id='asset-5'",
+            [],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO asset_classifications(asset_id,classification_id) VALUES('asset-5',?1)",
+            [&mixed],
+        )
+        .unwrap();
+    let hash = Sha256::digest(b"gif")
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    fs::write(f.temp.path().join("assets/mixed.gif"), b"gif").unwrap();
+    fs::write(f.temp.path().join("thumbnails/mixed.webp"), b"thumb").unwrap();
+    connection.execute("INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at,status)
+        VALUES('mixed-gif',?1,'gif','mixed.gif','assets/mixed.gif','thumbnails/mixed.webp',3,1,1,'2026-09-10','normal')",[hash]).unwrap();
+    connection
+        .execute(
+            "INSERT INTO asset_classifications(asset_id,classification_id) VALUES('mixed-gif',?1)",
+            [&mixed],
+        )
+        .unwrap();
+    drop(connection);
+    assert_eq!(
+        f.library
+            .queue_mixed_character_folder(QueueMixedFolderRequest {
+                folder_id: mixed.clone(),
+                series_id: f.series.clone(),
+                expected_total_count: 2,
+                expected_image_count: 1,
+            })
+            .unwrap(),
+        1
+    );
+    let connection = f.library.connection().unwrap();
+    connection.execute("INSERT INTO character_autotag_evidence(id,asset_id,generation,source_generation,content_hash,context_hash,runtime_fingerprint,scope_json,unresolved_regions,created_at)
+        SELECT 'mixed-evidence',asset_id,generation,source_generation,content_hash,'ctx','runtime','{}','[]','2026-09-10' FROM character_autotag_jobs WHERE asset_id='asset-5'",[]).unwrap();
+    connection.execute("UPDATE character_autotag_jobs SET state='completed',review_state='resolved',claim_id=NULL WHERE asset_id='asset-5'",[]).unwrap();
+    drop(connection);
+    assert!(f
+        .library
+        .finalize_mixed_character_folder(FinalizeMixedFolderRequest {
+            folder_id: mixed.clone(),
+            series_id: f.series.clone(),
+            expected_total_count: 2,
+            expected_image_count: 1,
+            group_name: "Mixed media".into(),
+            target_ids: vec![a.id.clone()],
+        })
+        .is_err());
+    let result = f
+        .library
+        .finalize_mixed_character_folder(FinalizeMixedFolderRequest {
+            folder_id: mixed.clone(),
+            series_id: f.series.clone(),
+            expected_total_count: 2,
+            expected_image_count: 1,
+            group_name: "Mixed media".into(),
+            target_ids: vec![a.id, b.id],
+        })
+        .unwrap();
+    assert!(!result.folder_removed);
+    assert_eq!(result.retained_asset_count, 1);
+    let connection = f.library.connection().unwrap();
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT classification_id FROM asset_classifications WHERE asset_id='mixed-gif'",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+        mixed
+    );
 }

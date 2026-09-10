@@ -5,19 +5,19 @@ import { SeriesBrowser } from "./SeriesBrowser";
 import { createCharacterFixture, fixtureAssets, fixtureClassifications } from "./characterFixtures";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { LibraryGateway } from "../library/types";
-import { type CharacterHubApi } from "./hubApi";
+import { type CharacterGroup, type CharacterHubApi } from "./hubApi";
 
 beforeEach(() => { Object.defineProperties(HTMLElement.prototype, { clientWidth: { configurable:true,get:()=>850 },clientHeight:{configurable:true,get:()=>650} }); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
-async function mount(targetId?: string, pendingOnly = false) {
+async function mount(targetId?: string, pendingOnly = false, groups: CharacterGroup[] = [], groupId?: string) {
   const api=createCharacterFixture(), targets=await api.targets();
   if (pendingOnly) { api.reviewPending = vi.fn(async () => true); vi.spyOn(api, "review"); }
   const browse=vi.fn().mockResolvedValue({ items:fixtureAssets.slice(5),nextCursor:null,totalCount:13 });
-  const hubApi={browse,saveSeries:vi.fn(),series:vi.fn()} as CharacterHubApi;
+  const hubApi={browse,saveSeries:vi.fn(),series:vi.fn(),createManualCharacter:vi.fn(),setSeriesAssetExcluded:vi.fn(),excludedAssets:vi.fn().mockResolvedValue({items:[],nextCursor:null,totalCount:0})} as CharacterHubApi;
   const navigate=vi.fn(),changed=vi.fn();
   const gateway={listAssets:vi.fn().mockResolvedValue({items:fixtureAssets,nextCursor:null}),openLibrary:vi.fn()} as unknown as LibraryGateway;
-  render(<LibraryProvider gateway={gateway}><SeriesBrowser targetId={targetId} series={{classificationId:"series",heroAssetId:null,autoClassify:true}} targets={targets} classifications={fixtureClassifications} privacyMode={false} metadataVisible thumbnailRowHeight={180} refreshVersion={0} onNavigate={navigate} onChanged={changed} api={api} hubApi={hubApi} /></LibraryProvider>);
-  return {api,browse,navigate,changed};
+  render(<LibraryProvider gateway={gateway}><SeriesBrowser targetId={targetId} groupId={groupId} series={{classificationId:"series",heroAssetId:null,autoClassify:true}} targets={targets} groups={groups} classifications={fixtureClassifications} privacyMode={false} metadataVisible thumbnailRowHeight={180} refreshVersion={0} onNavigate={navigate} onChanged={changed} api={api} hubApi={hubApi} /></LibraryProvider>);
+  return {api,browse,navigate,changed,hubApi};
 }
 it("opens a character relation from its card without changing classifications",async()=>{
   const {navigate,browse}=await mount(); const user=userEvent.setup();
@@ -25,6 +25,25 @@ it("opens a character relation from its card without changing classifications",a
   expect(navigate).toHaveBeenCalledWith({kind:"classification",classificationId:"series",characterId:"hina"});
   expect(browse).toHaveBeenCalledWith(expect.objectContaining({targetId:null,all:false}));
 });
+it("shows a mosaic group card and opens the group asset union",async()=>{
+  const groups: CharacterGroup[]=[{id:"duo",seriesId:"series",name:"선도부",revision:1,targetIds:["hina","kisaki"]}];
+  const {navigate}=await mount(undefined,false,groups); const user=userEvent.setup();
+  const card=await screen.findByRole("button",{name:"선도부 그룹 열기"});
+  expect(card.querySelector(".character-group-card__mosaic")).toHaveAttribute("data-count","2");
+  expect(screen.queryByRole("button",{name:"히나 열기"})).not.toBeInTheDocument();
+  expect(screen.queryByRole("button",{name:"키사키 열기"})).not.toBeInTheDocument();
+  await user.click(card);
+  expect(navigate).toHaveBeenCalledWith({kind:"classification",classificationId:"series",characterGroupId:"duo"});
+
+  cleanup();
+  const mounted=await mount(undefined,false,groups,"duo");
+  await screen.findByRole("heading",{name:"그룹 · 선도부"});
+  expect(screen.getByRole("button",{name:"히나 열기"})).toBeVisible();
+  expect(screen.getByRole("button",{name:"키사키 열기"})).toBeVisible();
+  await waitFor(()=>expect(mounted.browse).toHaveBeenCalledWith(expect.objectContaining({seriesId:"series",targetId:null,groupId:"duo"})));
+  expect(screen.getByRole("heading",{name:/선도부 이미지/})).toBeVisible();
+});
+
 it("selects in the existing gallery and preserves the editor draft",async()=>{
   const {api,browse,navigate}=await mount(); const save=vi.spyOn(api,"save"); const user=userEvent.setup();
   await user.click(await screen.findByRole("button",{name:"히나 정보"}));
@@ -54,6 +73,46 @@ it("filters a new character's selection even when all is requested",async()=>{
   await user.click(screen.getByRole("button",{name:"취소"}));
   panel=await screen.findByRole("dialog",{name:"새 캐릭터"});
   expect(within(panel).getByLabelText("캐릭터 이름")).toHaveValue("아루");
+});
+
+
+it("reuses one candidate snapshot for thumbnail and reference picking",async()=>{
+  const {browse}=await mount(); const user=userEvent.setup();
+  await user.click(await screen.findByRole("button",{name:"캐릭터 등록"}));
+  let panel=await screen.findByRole("dialog",{name:"새 캐릭터"});
+  await user.type(within(panel).getByLabelText("캐릭터 이름"),"아루");
+  await user.click(within(panel).getByRole("button",{name:"대표 이미지 선택"}));
+  await waitFor(()=>expect(browse).toHaveBeenCalledWith(expect.objectContaining({referenceTargetId:"",targetId:null,all:false})));
+  const candidateCalls=()=>browse.mock.calls.filter(([query])=>query.referenceTargetId==="" && query.all===false).length;
+  expect(candidateCalls()).toBe(1);
+  await user.click(await screen.findByRole("option",{name:"이미지 5.webp"}));
+  await user.click(screen.getByRole("button",{name:"완료"}));
+  panel=await screen.findByRole("dialog",{name:"새 캐릭터"});
+  await user.click(within(panel).getByRole("button",{name:"선택"}));
+  await screen.findByRole("option",{name:"이미지 5.webp"});
+  expect(candidateCalls()).toBe(1);
+});
+
+it("creates a manual character or explicitly ends character classification",async()=>{
+  const first=await mount(); const user=userEvent.setup();
+  const manual={...(await first.api.targets())[0],id:"manual",displayName:"단역",manualOnly:true,ready:false,references:[]};
+  vi.mocked(first.hubApi.createManualCharacter).mockResolvedValue(manual);
+  await user.click(await screen.findByRole("option",{name:"이미지 5.webp"}));
+  const actions=screen.getByRole("region",{name:"선택 이미지 캐릭터 지정"});
+  await user.click(within(actions).getByRole("button",{name:"새 수동 캐릭터"}));
+  const dialog=screen.getByRole("dialog",{name:"새 수동 캐릭터"});
+  await user.type(within(dialog).getByRole("textbox",{name:"캐릭터 이름"}),"단역");
+  await user.click(within(dialog).getByRole("button",{name:"수동 캐릭터 만들기"}));
+  await waitFor(()=>expect(first.hubApi.createManualCharacter).toHaveBeenCalledWith({seriesId:"series",displayName:"단역",assetIds:["image-5"]}));
+  expect(first.navigate).toHaveBeenCalledWith({kind:"classification",classificationId:"series",characterId:"manual"});
+
+  cleanup();
+  const second=await mount();
+  await userEvent.setup().click(await screen.findByRole("option",{name:"이미지 5.webp"}));
+  await userEvent.setup().click(screen.getByRole("button",{name:"캐릭터 분류 제외"}));
+  await waitFor(()=>expect(second.hubApi.setSeriesAssetExcluded).toHaveBeenCalledWith({seriesId:"series",assetIds:["image-5"],excluded:true}));
+  await userEvent.setup().click(screen.getByRole("button",{name:"분류 제외 보기"}));
+  await waitFor(()=>expect(second.hubApi.excludedAssets).toHaveBeenCalledWith("series",null,100));
 });
 
 it("keeps character selection in the header and shows pending review",async()=>{
@@ -110,8 +169,10 @@ it("allows reference selection from the series after opening the character folde
   await user.click(within(panel).getByRole("button",{name:"대표 이미지 선택"}));
   await user.click(await screen.findByRole("button",{name:"시리즈에서 이미지 찾기"}));
   await waitFor(()=>expect(browse).toHaveBeenLastCalledWith(expect.objectContaining({targetId:null,referenceTargetId:"hina"})));
+  const callsBeforeReturn=browse.mock.calls.length;
   await user.click(screen.getByRole("button",{name:"캐릭터 폴더로 돌아가기"}));
-  await waitFor(()=>expect(browse).toHaveBeenLastCalledWith(expect.objectContaining({targetId:"hina",referenceTargetId:"hina"})));
+  await screen.findByRole("heading",{name:/히나 캐릭터 폴더/});
+  expect(browse).toHaveBeenCalledTimes(callsBeforeReturn);
 });
 
 it("uses the lightweight pending lookup without loading review evidence for the badge", async () => {

@@ -10,6 +10,8 @@ import { libraryContextItems } from "../assets/libraryContextItems";
 import { assetUrl, thumbnailUrl } from "../assets/mediaUrl";
 import { applySelectionGesture, emptySelection, moveSelectionFocus, selectAllLoaded } from "../assets/selection";
 import { Button } from "../shared/ui/Button";
+import { Dialog } from "../shared/ui/Dialog";
+import { TextField } from "../shared/ui/TextField";
 import { ContextMenu, type ContextMenuItem } from "../shared/ui/ContextMenu";
 import { AnchoredPanel } from "../shared/ui/AnchoredPanel";
 import { useBackHandler } from "../shared/navigation/BackNavigation";
@@ -19,7 +21,7 @@ import { CharacterConversion } from "./CharacterConversion";
 import { CharacterGroups } from "./CharacterGroups";
 import { CharacterLab } from "./CharacterLab";
 import { characterApi, type CharacterApi, type CharacterTarget } from "./api";
-import { characterHubApi, type CharacterBrowsePage, type CharacterHubApi, type CharacterSeries } from "./hubApi";
+import { characterHubApi, type CharacterBrowsePage, type CharacterGroup, type CharacterHubApi, type CharacterSeries } from "./hubApi";
 import "./CharacterLab.css";
 import "./SeriesBrowser.css";
 
@@ -27,7 +29,7 @@ export type CharacterGalleryDrag = Pick<ComponentProps<typeof AssetGallery>, "on
 type Props = {
   requestedAsset?: AssetSummary | null; onRequestedAssetHandled?: () => void;
   clearSelectionRequest?: number; galleryDrag?: CharacterGalleryDrag; albums?: AlbumEntry[];
-  series: CharacterSeries; targetId?: string; targets: CharacterTarget[]; classifications: ClassificationEntry[];
+  series: CharacterSeries; targetId?: string; groupId?: string; targets: CharacterTarget[]; groups?: CharacterGroup[]; classifications: ClassificationEntry[];
   privacyMode: boolean; metadataVisible: boolean; thumbnailRowHeight: number; refreshVersion: number;
   onNavigate: (view: AssetView) => void; onChanged: () => void;
   api?: CharacterApi; hubApi?: CharacterHubApi;
@@ -36,7 +38,7 @@ type Editor = { target: CharacterTarget | null; draft: CharacterEditorDraft };
 type Picking = { kind: "thumbnail" | "references" | "hero"; ids: string[]; previousAll: boolean };
 const emptyPage = (): CharacterBrowsePage => ({ items: [], nextCursor: null, totalCount: 0 });
 
-export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSelectionRequest = 0, galleryDrag, albums = [], series, targetId, targets, classifications, privacyMode, metadataVisible, thumbnailRowHeight, refreshVersion, onNavigate, onChanged, api = characterApi, hubApi = characterHubApi }: Props) {
+export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSelectionRequest = 0, galleryDrag, albums = [], series, targetId, groupId, targets, groups = [], classifications, privacyMode, metadataVisible, thumbnailRowHeight, refreshVersion, onNavigate, onChanged, api = characterApi, hubApi = characterHubApi }: Props) {
   const { gateway } = useLibrary();
   const [page, setPage] = useState<CharacterBrowsePage>(emptyPage);
   const [all, setAll] = useState(false), [loading, setLoading] = useState(true), [busy, setBusy] = useState(false);
@@ -47,26 +49,43 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const [pickFromSeries, setPickFromSeries] = useState(false);
   const [picking, setPicking] = useState<Picking | null>(null), [review, setReview] = useState(false), [inspector, setInspector] = useState(false);
   const [converting, setConverting] = useState(false);
+  const [excludedOnly, setExcludedOnly] = useState(false);
+  const [manualName, setManualName] = useState<string | null>(null);
   const [reviewPending, setReviewPending] = useState<boolean | null>(null);
   const [undo, setUndo] = useState<string[]>([]);
   const generation = useRef(0), pending = useRef(false), saving = useRef(false);
   const loadedScope = useRef<string | null>(null);
+  const pickerPages = useRef(new Map<string, CharacterBrowsePage>());
   const returnGallery = useRef<{ scope: string; page: CharacterBrowsePage } | null>(null);
   const current = targets.find(t => t.id === targetId);
+  const currentGroup = groups.find(group => group.id === groupId && group.seriesId === series.classificationId);
   const members = targets.filter(t => t.seriesClassificationId === series.classificationId);
   const name = classifications.find(c => c.id === series.classificationId)?.name ?? "시리즈";
-  const scope = `${series.classificationId}:${picking ? `pick-${picking.kind}-${editor?.target?.id ?? "new"}-${pickFromSeries}` : targetId ?? ""}:${all}`;
+  const pickerScope = picking && picking.kind !== "hero" ? `${series.classificationId}:${editor?.target?.id ?? "new"}:${pickFromSeries ? "series" : "character"}:${all}` : null;
+  const scope = `${series.classificationId}:${picking ? picking.kind === "hero" ? "pick-hero" : `pick-${editor?.target?.id ?? "new"}-${pickFromSeries}` : targetId ? `character-${targetId}` : currentGroup ? `group-${currentGroup.id}` : excludedOnly ? "excluded" : "series"}:${all}`;
   const ids = page.items.map(a => a.id);
   const selectedIds = [...selection.ids];
   function refresh() { setReload(v => v + 1); onChanged(); }
   async function load(after: string | null = null) {
     if (after && pending.current) return;
+    if (!after && pickerScope) {
+      const cached = pickerPages.current.get(pickerScope);
+      if (cached) { setPage(cached); setLoading(false); setError(null); return; }
+    }
     const token = after ? generation.current : ++generation.current;
     pending.current = true; setLoading(true); setError(null);
     try {
-      const next = await hubApi.browse({ seriesId: series.classificationId, targetId: picking ? picking.kind !== "hero" && !pickFromSeries ? editor?.target?.id ?? null : null : targetId ?? null,
+      const next = !picking && !targetId && !currentGroup && excludedOnly
+        ? await hubApi.excludedAssets(series.classificationId, after, 100)
+        : await hubApi.browse({ seriesId: series.classificationId,
+        targetId: picking ? picking.kind !== "hero" && !pickFromSeries ? editor?.target?.id ?? null : null : targetId ?? null,
+        groupId: picking ? null : currentGroup?.id ?? null,
         ...(picking && picking.kind !== "hero" ? { referenceTargetId: editor?.target?.id ?? "" } : {}), all, after, limit: 100 });
-      if (token === generation.current) setPage(old => after ? { ...next, items: [...old.items, ...next.items.filter(a => !old.items.some(b => b.id === a.id))] } : next);
+      if (token === generation.current) setPage(old => {
+        const value = after ? { ...next, items: [...old.items, ...next.items.filter(a => !old.items.some(b => b.id === a.id))] } : next;
+        if (pickerScope) pickerPages.current.set(pickerScope, value);
+        return value;
+      });
     } catch (e) { if (token === generation.current) setError(commandErrorMessage(e, "이미지를 불러오지 못했습니다.")); }
     finally { if (token === generation.current) { pending.current = false; setLoading(false); } }
   }
@@ -100,7 +119,18 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     catch (e) { setError(commandErrorMessage(e, "변경을 저장하지 못했습니다.")); }
     finally { saving.current = false; setBusy(false); }
   }
-  function openEditor(target: CharacterTarget | null) { setEditor({ target, draft: characterDraft(target) }); setEditorError(null); }
+  async function createManualCharacter() {
+    const displayName = manualName?.trim();
+    if (!displayName || !selectedIds.length || saving.current) return;
+    saving.current = true; setBusy(true); setError(null);
+    try {
+      const target = await hubApi.createManualCharacter({ seriesId: series.classificationId, displayName, assetIds: selectedIds });
+      setManualName(null); setSelection(emptySelection()); refresh();
+      onNavigate({ kind: "classification", classificationId: series.classificationId, characterId: target.id });
+    } catch (e) { setError(commandErrorMessage(e, "수동 캐릭터를 만들지 못했습니다.")); }
+    finally { saving.current = false; setBusy(false); }
+  }
+  function openEditor(target: CharacterTarget | null) { pickerPages.current.clear(); setEditor({ target, draft: characterDraft(target) }); setEditorError(null); }
   function beginPick(kind: Picking["kind"]) {
     setPickFromSeries(false);
     returnGallery.current = { scope, page }; ++generation.current; setPage(emptyPage()); setError(null);
@@ -167,9 +197,10 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     { id: "refresh", label: "새로고침", onSelect: refresh },
     { id: "trash", label: "휴지통으로 이동", destructive: true, disabled: busy || !selectedIds.length, onSelect: () => void action(async () => { await gateway.trashAssets(selectedIds); setUndo(selectedIds); setSelection(emptySelection()); }) },
   ];
-  return <section className="series-browser" aria-label={current?.displayName ?? name}>
-    <ViewToolbar title={current ? `${name} / ${current.displayName}` : name} ariaLabel="시리즈 도구"
-      titleContent={current ? <span className="series-breadcrumb"><button onClick={() => onNavigate({ kind: "classification", classificationId: series.classificationId })}>{name}</button><ChevronRightIcon aria-hidden="true" /><span>{current.displayName}</span><small className="series-header-count">{page.totalCount.toLocaleString()}장</small></span> : name}
+  const focusedName = current?.displayName ?? currentGroup?.name;
+  return <section className="series-browser" aria-label={focusedName ?? name}>
+    <ViewToolbar title={focusedName ? `${name} / ${focusedName}` : name} ariaLabel="시리즈 도구"
+      titleContent={focusedName ? <span className="series-breadcrumb"><button onClick={() => onNavigate({ kind: "classification", classificationId: series.classificationId })}>{name}</button><ChevronRightIcon aria-hidden="true" /><span>{focusedName}</span><small className="series-header-count">{page.totalCount.toLocaleString()}장</small></span> : name}
       titleAccessory={<div className="series-header-actions">
         {!picking && current && (selectedIds.length > 0 ? <>
           <small className="series-selection-count">{selectedIds.length.toLocaleString()}장 선택</small>
@@ -179,15 +210,15 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
             setSelection(emptySelection());
           })}>캐릭터에서 제외</Button>
         </> : <>
-          <Button className="series-review-button" size="sm" variant="ghost" aria-label={reviewPending ? "검토 · 검토 대기 있음" : reviewPending === null ? "검토 · 대기 상태 확인 필요" : "검토"} onClick={() => setReview(true)}>검토<span className="series-review-badge" data-pending={reviewPending === true} aria-hidden="true">!</span></Button>
+          {!current.manualOnly && <Button className="series-review-button" size="sm" variant="ghost" aria-label={reviewPending ? "검토 · 검토 대기 있음" : reviewPending === null ? "검토 · 대기 상태 확인 필요" : "검토"} onClick={() => setReview(true)}>검토<span className="series-review-badge" data-pending={reviewPending === true} aria-hidden="true">!</span></Button>}
           <Button size="icon" variant="ghost" aria-label="새로고침" data-tooltip="새로고침" onClick={refresh}><ArrowPathIcon aria-hidden="true" /></Button>
         </>)}
-        {!current && !picking && <>
+        {!current && !currentGroup && !picking && <>
           <Button size="icon" variant="ghost" aria-label="히어로 이미지 선택" data-tooltip="히어로 이미지" onClick={() => beginPick("hero")}><PhotoIcon aria-hidden="true" /></Button>
           {series.heroAssetId && <Button size="icon" variant="ghost" aria-label="히어로 이미지 해제" disabled={busy} onClick={() => void action(() => hubApi.saveSeries({ ...series, heroAssetId: null }))}><XMarkIcon aria-hidden="true" /></Button>}
           <Button size="icon" variant="ghost" aria-label="새로고침" data-tooltip="새로고침" onClick={refresh}><ArrowPathIcon aria-hidden="true" /></Button>
         </>}
-        {!picking && editorPanel}
+        {!picking && !currentGroup && editorPanel}
       </div>}
       chrome={{ status: automation }} actions={automation} />
     {picking && <div className="series-picking" role="region" aria-label="갤러리 이미지 선택">
@@ -200,46 +231,62 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       const id = (event.target as HTMLElement).closest<HTMLElement>("[data-asset-id]")?.dataset.assetId;
       if (id && !selection.ids.has(id)) setSelection(old => applySelectionGesture(old, ids, id, { range: false, toggle: false }));
     }}>
-      {!picking && !current && selection.ids.size > 0 && <div className="character-actions series-selection" role="region" aria-label="선택 이미지 캐릭터 지정">
+      {!picking && !current && !currentGroup && selection.ids.size > 0 && <div className="character-actions series-selection" role="region" aria-label={excludedOnly ? "캐릭터 분류 제외 선택" : "선택 이미지 캐릭터 지정"}>
         <span>{selection.ids.size}장 선택</span>
-        <fieldset className="series-assignment" disabled={busy}>
-          <legend>캐릭터 지정 · 복수 선택</legend>
-          <div className="series-assignment__options">{members.filter(t => t.enabled).map(target => <label key={target.id}>
-            <input type="checkbox" checked={assignTo.includes(target.id)} onChange={event => { const checked = event.target.checked; setAssignTo(old => checked ? [...old, target.id] : old.filter(id => id !== target.id)); }} />
-            {target.displayName}
-          </label>)}</div>
-        </fieldset>
-        <Button size="sm" disabled={busy || !assignTo.length || selectedIds.length * assignTo.length > 200} onClick={() => void action(async () => {
-          const available = await api.targets();
-          const chosen = assignTo.map(id => {
-            const target = available.find(t => t.id === id && t.enabled && t.seriesClassificationId === series.classificationId);
-            if (!target) throw new Error("캐릭터를 다시 선택해 주세요.");
-            return target;
-          });
-          await api.decideBatch(chosen.map(target => ({ targetId: target.id, expectedFingerprint: target.fingerprint, assetIds: selectedIds, decision: "accepted", baselineFingerprint: null, scanId: null })));
-          setSelection(emptySelection());
-          setAssignTo([]);
-        })}>지정{assignTo.length > 0 ? ` · ${assignTo.length}명` : ""}</Button>
-        <Button size="sm" variant="ghost" disabled={busy} onClick={() => setSelection(emptySelection())}>선택 해제</Button>
-        {selectedIds.length * assignTo.length > 200 && <small role="status">이미지 수 × 캐릭터 수는 한 번에 200개까지 지정할 수 있습니다.</small>}
+        {excludedOnly ? <>
+          <Button size="sm" disabled={busy || selectedIds.length > 200} onClick={() => void action(async () => {
+            await hubApi.setSeriesAssetExcluded({ seriesId: series.classificationId, assetIds: selectedIds, excluded: false });
+            setSelection(emptySelection());
+          })}>분류 다시 시작</Button>
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => setSelection(emptySelection())}>선택 해제</Button>
+        </> : <>
+          <fieldset className="series-assignment" disabled={busy}>
+            <legend>캐릭터 지정 · 복수 선택</legend>
+            <div className="series-assignment__options">{members.filter(t => t.enabled).map(target => <label key={target.id}>
+              <input type="checkbox" checked={assignTo.includes(target.id)} onChange={event => { const checked = event.target.checked; setAssignTo(old => checked ? [...old, target.id] : old.filter(id => id !== target.id)); }} />
+              {target.displayName}
+            </label>)}</div>
+          </fieldset>
+          <Button size="sm" disabled={busy || !assignTo.length || selectedIds.length * assignTo.length > 200} onClick={() => void action(async () => {
+            const available = await api.targets();
+            const chosen = assignTo.map(id => {
+              const target = available.find(t => t.id === id && t.enabled && t.seriesClassificationId === series.classificationId);
+              if (!target) throw new Error("캐릭터를 다시 선택해 주세요.");
+              return target;
+            });
+            await api.decideBatch(chosen.map(target => ({ targetId: target.id, expectedFingerprint: target.fingerprint, assetIds: selectedIds, decision: "accepted", baselineFingerprint: null, scanId: null })));
+            setSelection(emptySelection()); setAssignTo([]);
+          })}>지정{assignTo.length > 0 ? ` · ${assignTo.length}명` : ""}</Button>
+          {!all && <><Button size="sm" variant="ghost" disabled={busy || selectedIds.length > 200} onClick={() => setManualName("")}>새 수동 캐릭터</Button>
+            <Button size="sm" variant="ghost" disabled={busy || selectedIds.length > 200} onClick={() => void action(async () => {
+              await hubApi.setSeriesAssetExcluded({ seriesId: series.classificationId, assetIds: selectedIds, excluded: true });
+              setSelection(emptySelection());
+            })}>캐릭터 분류 제외</Button></>}
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => setSelection(emptySelection())}>선택 해제</Button>
+          {selectedIds.length * assignTo.length > 200 && <small role="status">이미지 수 × 캐릭터 수는 한 번에 200개까지 지정할 수 있습니다.</small>}
+        </>}
       </div>}
       <AssetGallery {...(!picking ? galleryDrag : {})} intro={<>
-        {!picking && !current && <div className="series-browser__overview">
-          {series.heroAssetId && <img className={`series-hero${privacyMode ? " character-private" : ""}`} src={assetUrl(series.heroAssetId)} alt={`${name} 히어로 이미지`} />}
-          <CharacterGroups key={series.classificationId} seriesId={series.classificationId} members={members}>{visibleMembers => <div className="series-characters" aria-label="등록 캐릭터">{visibleMembers.map(target => <article className="series-character" key={target.id}>
-            <button className="series-character__open" aria-label={`${target.displayName} 열기`} onClick={() => onNavigate({ kind: "classification", classificationId: series.classificationId, characterId: target.id })}>
-              {(target.thumbnailAssetId ?? target.references.find(r => r.status === "ready")?.assetId) ? <img loading="lazy" className={privacyMode ? "character-private" : ""} src={thumbnailUrl((target.thumbnailAssetId ?? target.references.find(r => r.status === "ready")!.assetId)!)} alt="" /> : <span className="series-character__placeholder"><PhotoIcon aria-hidden="true" />대표 이미지</span>}
-              <strong><span className="series-character__name">{target.displayName}</span>{target.ready && <CheckIcon className="series-character__ready" aria-label="기준 이미지 준비 완료" data-tooltip="기준 이미지 준비 완료" />}</strong>
-              {!target.ready && <small>기준 {target.references.filter(r => r.status === "ready").length}/5 · {target.enabled ? "준비 필요" : "비활성"}</small>}
-            </button>
-            <Button className="series-character__info" size="icon" variant="ghost" aria-label={`${target.displayName} 정보`} data-tooltip="캐릭터 정보" onClick={() => openEditor(target)}><InformationCircleIcon aria-hidden="true" /></Button>
-          </article>)}{!members.length && <p className="series-empty">캐릭터를 등록하고 기준 이미지를 선택하세요.</p>}</div>}</CharacterGroups>
+        {!picking && !current && !excludedOnly && <div className="series-browser__overview">
+          {!currentGroup && series.heroAssetId && <img className={`series-hero${privacyMode ? " character-private" : ""}`} src={assetUrl(series.heroAssetId)} alt={`${name} 히어로 이미지`} />}
+          <CharacterGroups key={`${series.classificationId}:${currentGroup?.id ?? "series"}`} seriesId={series.classificationId} members={members} groups={groups.filter(group => group.seriesId === series.classificationId)} activeGroupId={currentGroup?.id} privacyMode={privacyMode}
+            onOpenGroup={id => onNavigate({ kind: "classification", classificationId: series.classificationId, ...(id ? { characterGroupId: id } : {}) })}
+            onGroupsChanged={onChanged}>{visibleMembers => <>{visibleMembers.map(target => <article className="series-character" key={target.id}>
+              <button className="series-character__open" aria-label={`${target.displayName} 열기`} onClick={() => onNavigate({ kind: "classification", classificationId: series.classificationId, characterId: target.id })}>
+                {(target.thumbnailAssetId ?? target.references.find(r => r.status === "ready")?.assetId) ? <img loading="lazy" className={privacyMode ? "character-private" : ""} src={thumbnailUrl((target.thumbnailAssetId ?? target.references.find(r => r.status === "ready")!.assetId)!)} alt="" /> : <span className="series-character__placeholder"><PhotoIcon aria-hidden="true" />대표 이미지</span>}
+                <strong><span className="series-character__name">{target.displayName}</span>{target.ready && <CheckIcon className="series-character__ready" aria-label="기준 이미지 준비 완료" data-tooltip="기준 이미지 준비 완료" />}</strong>
+                {target.manualOnly ? <small>수동 관리 · 기준 {target.references.filter(r => r.status === "ready").length}/5</small> : !target.ready && <small>기준 {target.references.filter(r => r.status === "ready").length}/5 · {target.enabled ? "준비 필요" : "비활성"}</small>}
+              </button>
+              <Button className="series-character__info" size="icon" variant="ghost" aria-label={`${target.displayName} 정보`} data-tooltip="캐릭터 정보" onClick={() => openEditor(target)}><InformationCircleIcon aria-hidden="true" /></Button>
+            </article>)}</>}</CharacterGroups>
         </div>}
         {!picking && current?.description && <p className="series-description">{current.description}</p>}
-        {picking && picking.kind !== "hero" && editor?.target ? <div className="series-gallery-heading"><h3>{pickFromSeries ? "시리즈에서 이미지 선택" : `${editor.target.displayName} 캐릭터 폴더`}<small>{page.totalCount}</small></h3><Button size="sm" variant="ghost" onClick={() => setPickFromSeries(v => !v)}>{pickFromSeries ? "캐릭터 폴더로 돌아가기" : "시리즈에서 이미지 찾기"}</Button></div> : (!current || picking) && <div className="series-gallery-heading"><h3>{all ? picking && picking.kind !== "hero" ? "선택 가능한 전체" : "시리즈 전체" : "미분류 · 추가 확인"}<small>{page.totalCount}</small></h3><Button size="sm" variant="ghost" aria-pressed={all} onClick={() => setAll(v => !v)}>{all ? "미분류만 보기" : "전체 보기"}</Button></div>}
+        {picking && picking.kind !== "hero" && editor?.target ? <div className="series-gallery-heading"><h3>{pickFromSeries ? "시리즈에서 이미지 선택" : `${editor.target.displayName} 캐릭터 폴더`}<small>{page.totalCount}</small></h3><Button size="sm" variant="ghost" onClick={() => setPickFromSeries(v => !v)}>{pickFromSeries ? "캐릭터 폴더로 돌아가기" : "시리즈에서 이미지 찾기"}</Button></div>
+          : currentGroup && !picking ? <div className="series-gallery-heading"><h3>{currentGroup.name} 이미지<small>{page.totalCount}</small></h3></div>
+          : (!current || picking) && <div className="series-gallery-heading"><h3>{excludedOnly && !picking ? "캐릭터 분류 제외" : all ? picking && picking.kind !== "hero" ? "선택 가능한 전체" : "시리즈 전체" : "미분류 · 추가 확인"}<small>{page.totalCount}</small></h3>{!picking && excludedOnly ? <Button size="sm" variant="ghost" onClick={() => setExcludedOnly(false)}>미분류로 돌아가기</Button> : <><Button size="sm" variant="ghost" aria-pressed={all} onClick={() => setAll(v => !v)}>{all ? "미분류만 보기" : "전체 보기"}</Button>{!picking && !all && <Button size="sm" variant="ghost" onClick={() => { setExcludedOnly(true); setSelection(emptySelection()); }}>분류 제외 보기</Button>}</>}</div>}
         {error && <p className="character-message" role="alert">{error}<Button size="sm" onClick={() => setReload(v => v + 1)}>다시 시도</Button></p>}
         {!!undo.length && <div className="character-actions"><span>휴지통으로 이동했습니다.</span><Button size="sm" onClick={() => void action(async () => { await gateway.restoreAssets(undo); setUndo([]); })}>실행 취소</Button></div>}
-        {!loading && !error && !page.items.length && <p className="series-gallery__empty">{picking ? "선택할 수 있는 이미지가 없습니다." : current ? "이 캐릭터의 이미지가 없습니다." : "미분류 또는 추가 확인할 이미지가 없습니다."}</p>}
+        {!loading && !error && !page.items.length && <p className="series-gallery__empty">{picking ? "선택할 수 있는 이미지가 없습니다." : current ? "이 캐릭터의 이미지가 없습니다." : currentGroup ? "이 그룹에 연결된 이미지가 없습니다." : excludedOnly ? "캐릭터 분류에서 제외한 이미지가 없습니다." : "미분류 또는 추가 확인할 이미지가 없습니다."}</p>}
       </>} layout="masonry" groupDates items={page.items} scopeKey={scope} totalCount={page.totalCount} metadataVisible={metadataVisible} privacyMode={privacyMode} targetRowHeight={thumbnailRowHeight}
         selectedAssetIds={picking ? new Set(picking.ids) : selection.ids} focusAssetId={picking ? null : selection.focusId}
         hasNextPage={Boolean(page.nextCursor) && !loading && !error} onLoadNextPage={() => void load(page.nextCursor)}
@@ -247,6 +294,13 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
         onSelectAll={picking ? undefined : () => setSelection(old => selectAllLoaded(old, ids))} onClearSelection={() => picking ? setPicking({ ...picking, ids: [] }) : setSelection(emptySelection())}
         onMoveFocus={picking ? undefined : (delta,extend) => setSelection(old => moveSelectionFocus(old, ids, delta, extend))} onOpen={a => picking ? choose(a.id) : setViewer(a.id)} />
     </div></ContextMenu>
+    {manualName !== null && <Dialog open title="새 수동 캐릭터" onClose={() => { if (!busy) setManualName(null); }}>
+      <div className="character-manual-dialog">
+        <p>선택한 {selectedIds.length.toLocaleString()}장을 바로 이 캐릭터로 지정합니다. 기준 이미지 5장은 필요하지 않으며, 나중에 5장을 채우면 자동 분류 캐릭터로 전환됩니다.</p>
+        <TextField label="캐릭터 이름" value={manualName} disabled={busy} onChange={event => setManualName(event.target.value)} />
+        <div className="character-actions"><Button disabled={busy || !manualName.trim()} onClick={() => void createManualCharacter()}>수동 캐릭터 만들기</Button><Button variant="ghost" disabled={busy} onClick={() => setManualName(null)}>취소</Button></div>
+      </div>
+    </Dialog>}
     {converting && current && <CharacterConversion targetId={current.id} onClose={() => setConverting(false)} onConverted={folderId => { setConverting(false); refresh(); onNavigate({ kind: "classification", classificationId: folderId }); }} />}
     {review && current && <CharacterLab refreshVersion={refreshVersion} api={api} classifications={classifications} initialSeriesId={series.classificationId} targetId={current.id} privacyMode={privacyMode} onEdit={() => { setReview(false); openEditor(current); }} onClose={() => { setReview(false); refresh(); }} />}
     <AssetInspector assets={page.items.filter(a => selection.ids.has(a.id))} open={inspector} onOpenChange={setInspector} onOpenAsset={a => setViewer(a.id)} onAssetUpdated={refresh} />

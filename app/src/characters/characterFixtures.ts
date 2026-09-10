@@ -4,7 +4,7 @@ import type { CharacterApi, CharacterTarget, Decision, Prediction, ReviewRow, Sc
 
 export const fixtureClassifications: ClassificationEntry[] = [{ id: "series", name: "블루 아카이브", kind: "root", parentId: null, iconKey: null, colorKey: null }, { id: "child", name: "히나", kind: "tag", parentId: "series", iconKey: null, colorKey: null }];
 export const fixtureAssets: AssetSummary[] = Array.from({ length: 18 }, (_, i) => ({ id: `image-${i}`, title: null, originalName: `이미지 ${i}.webp`, byteSize: 100000, width: i % 3 === 0 ? 1000 : 700, height: i % 3 === 0 ? 700 : 1000, collectedAt: "2026-09-08T01:30:00Z", favorite: false, sourceUrl: null, sourcePublishedAt: null, creatorName: "보관한 이미지", creatorHandle: null, creatorUrl: null, importSource: null, importBatchId: null, originalModifiedAt: null, media: { kind: "image" } }));
-export function fixtureTarget(id = "hina", name = "히나"): CharacterTarget { return { id, displayName: name, seriesClassificationId: "series", linkedClassificationId: "child", enabled: true, revision: 1, fingerprint: `fingerprint-${id}`, ready: true, references: fixtureAssets.slice(0, 5).map((a, slot) => ({ slot, assetId: a.id, assetHash: `hash-${a.id}`, status: "ready" })) }; }
+export function fixtureTarget(id = "hina", name = "히나"): CharacterTarget { return { id, displayName: name, seriesClassificationId: "series", linkedClassificationId: "child", enabled: true, manualOnly: false, revision: 1, fingerprint: `fingerprint-${id}`, ready: true, references: fixtureAssets.slice(0, 5).map((a, slot) => ({ slot, assetId: a.id, assetHash: `hash-${a.id}`, status: "ready" })) }; }
 export function createCharacterFixture(): CharacterApi {
   let targets = [fixtureTarget(), fixtureTarget("kisaki", "키사키")];
   const history: Decision[] = [];

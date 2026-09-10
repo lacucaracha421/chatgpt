@@ -554,6 +554,48 @@ pub async fn exclude_character_reference(
 }
 
 #[tauri::command]
+pub async fn mixed_character_folder_preview(
+    folder_id: String,
+    state: State<'_, AppState>,
+) -> Result<crate::library::character_folder_migration::MixedFolderPreview, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.mixed_character_folder_preview(&folder_id))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn queue_mixed_character_folder(
+    request: crate::library::character_folder_migration::QueueMixedFolderRequest,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<usize, CommandError> {
+    let (script, settings) = runtime_paths(&app)?;
+    let config = crate::library::character_worker::RuntimeConfig::configured(script, &settings)?;
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let queued = library.queue_mixed_character_folder(request)?;
+        library.start_character_incremental(config);
+        Ok::<_, CommandError>(queued)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+}
+
+#[tauri::command]
+pub async fn finalize_mixed_character_folder(
+    request: crate::library::character_folder_migration::FinalizeMixedFolderRequest,
+    state: State<'_, AppState>,
+) -> Result<crate::library::character_folder_migration::FinalizeMixedFolderResult, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.finalize_mixed_character_folder(request))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
+}
+
+#[tauri::command]
 pub async fn character_groups(
     series_id: String,
     state: State<'_, AppState>,
@@ -601,6 +643,50 @@ pub async fn convert_character_to_folder(
     .await
     .map_err(|_| super::background_task_error())?
     .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn create_manual_character(
+    request: crate::library::character_workflow::ManualCharacterRequest,
+    state: State<'_, AppState>,
+) -> Result<crate::library::characters::Target, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.create_manual_character(request))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn set_character_series_asset_excluded(
+    request: crate::library::character_workflow::SeriesAssetExclusionRequest,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<usize, CommandError> {
+    let resume = !request.excluded;
+    let library = current_required(state)?;
+    let result = tauri::async_runtime::spawn_blocking({
+        let library = library.clone();
+        move || library.set_character_series_asset_excluded(request)
+    })
+    .await
+    .map_err(|_| super::background_task_error())??;
+    if resume { start_incremental_if_configured(&app, &library); }
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn character_series_excluded_assets(
+    series_id: String,
+    after: Option<String>,
+    limit: usize,
+    state: State<'_, AppState>,
+) -> Result<crate::library::character_hub::BrowsePage, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.character_series_excluded_assets(&series_id, after.as_deref(), limit))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
 }
 
 #[tauri::command]

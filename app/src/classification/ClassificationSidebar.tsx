@@ -1,5 +1,5 @@
 import { StarIcon } from "@heroicons/react/20/solid";
-import { ChevronDownIcon, ChevronRightIcon, ArrowsPointingInIcon, ViewfinderCircleIcon, UserCircleIcon } from "@heroicons/react/24/outline";
+import { ChevronDownIcon, ChevronRightIcon, ArrowsPointingInIcon, ViewfinderCircleIcon, UserCircleIcon, UserGroupIcon } from "@heroicons/react/24/outline";
 import { BookOpenIcon, CalendarIcon, FolderIcon, PhotoIcon, InboxIcon, PlusIcon, RectangleStackIcon, Cog6ToothIcon, TrashIcon } from "../shared/ui/ArchiveIcons";
 import { useLayoutEffect, useEffect, useRef, useState, type CSSProperties } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -19,9 +19,11 @@ import { ClassificationAppearanceDialog } from "./ClassificationAppearanceDialog
 import { ClassificationIcon, classificationColor } from "./classificationAppearance";
 
 import type { CharacterTarget } from "../characters/api";
+import type { CharacterGroup } from "../characters/hubApi";
 
 type ClassificationSidebarProps = {
   characters?: CharacterTarget[];
+  characterGroups?: CharacterGroup[];
   embedded?: boolean;
   entries: ClassificationEntry[];
   albums?: AlbumEntry[];
@@ -52,6 +54,8 @@ type ClassificationSidebarProps = {
 
 type SidebarTreeEntry = {
   characterId?: string;
+  characterGroupId?: string;
+  seriesId?: string;
   treeKind: "classification" | "album";
   id: string;
   name: string;
@@ -74,6 +78,7 @@ type InlineEdit =
 export function ClassificationSidebar({
   embedded = false,
   characters = [],
+  characterGroups = [],
   entries,
   albums = [],
   expandedIds,
@@ -101,9 +106,18 @@ export function ClassificationSidebar({
   createClassificationRequest = 0,
 }: ClassificationSidebarProps) {
   const { gateway } = useLibrary();
+  const groupByTarget = new Map(characterGroups.flatMap(group => group.targetIds.map(targetId => [targetId, group] as const)));
   const classificationEntries: SidebarTreeEntry[] = [
     ...entries.map((entry): SidebarTreeEntry => ({ ...entry, name: characters.some(t => t.linkedClassificationId === entry.id) ? `${entry.name} · 일반 폴더` : entry.name, treeKind: "classification" })),
-    ...characters.filter(t => t.seriesClassificationId && entries.some(e => e.id === t.seriesClassificationId)).map((t): SidebarTreeEntry => ({ id: `character:${t.id}`, characterId: t.id, parentId: t.seriesClassificationId, name: t.displayName, kind: "tag", iconKey: null, colorKey: null, treeKind: "classification" })),
+    ...characterGroups.filter(group => entries.some(entry => entry.id === group.seriesId)).map((group): SidebarTreeEntry => ({
+      id: `character-group:${group.id}`, characterGroupId: group.id, seriesId: group.seriesId, parentId: group.seriesId,
+      name: group.name, kind: "tag", iconKey: null, colorKey: null, treeKind: "classification",
+    })),
+    ...characters.filter(t => t.seriesClassificationId && entries.some(e => e.id === t.seriesClassificationId)).map((t): SidebarTreeEntry => {
+      const group = groupByTarget.get(t.id);
+      return { id: `character:${t.id}`, characterId: t.id, seriesId: t.seriesClassificationId!, parentId: group ? `character-group:${group.id}` : t.seriesClassificationId,
+        name: t.displayName, kind: "tag", iconKey: null, colorKey: null, treeKind: "classification" };
+    }),
   ];
   const albumEntries: SidebarTreeEntry[] = albums.map((entry) => ({ ...entry, treeKind: "album", kind: "tag" }));
   const tree = buildTree(classificationEntries, orderIds);
@@ -111,7 +125,7 @@ export function ClassificationSidebar({
   const visibleNodes = visibleTreeNodes(tree, expandedIds);
   const visibleAlbumNodes = visibleTreeNodes(albumTree, expandedAlbumIds);
   const selected = view.kind === "classification" && view.classificationId
-    ? classificationEntries.find((entry) => view.characterId ? entry.characterId === view.characterId : entry.id === view.classificationId) ?? null
+    ? classificationEntries.find((entry) => view.characterId ? entry.characterId === view.characterId : view.characterGroupId ? entry.characterGroupId === view.characterGroupId : entry.id === view.classificationId) ?? null
     : view.kind === "album"
       ? albumEntries.find((entry) => entry.id === view.albumId) ?? null
       : null;
@@ -216,10 +230,12 @@ export function ClassificationSidebar({
   }
 
   function openRename(entry: SidebarTreeEntry) {
+    if (isOriginalsRoot(entry)) { setMessage("오리지널 기본 영역의 이름은 유지됩니다."); return; }
     beginInlineEdit({ type: "rename", entry }, entry.name);
   }
 
   function openDelete(entry: SidebarTreeEntry) {
+    if (isOriginalsRoot(entry)) { setMessage("오리지널 기본 영역은 삭제하지 않습니다."); return; }
     const siblings = entry.treeKind === "album" ? albumEntries : classificationEntries;
     if (siblings.some((candidate) => candidate.parentId === entry.id)) {
       setMessage("하위 폴더가 있어 삭제할 수 없습니다.");
@@ -325,7 +341,7 @@ export function ClassificationSidebar({
   }
 
   function handleSidebarKeyDown(event: React.KeyboardEvent<HTMLElement>) {
-    if (inlineEdit || dialog || selected?.characterId) return;
+    if (inlineEdit || dialog || selected?.characterId || selected?.characterGroupId) return;
     const key = event.key.toLowerCase();
     if (key === "n" && event.ctrlKey && event.shiftKey && !event.altKey) {
       event.preventDefault();
@@ -655,40 +671,33 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
   const expanded = expandedIds.includes(node.entry.id);
   const selected = node.entry.treeKind === "album"
     ? view.kind === "album" && view.albumId === node.entry.id
-    : view.kind === "classification" && (node.entry.characterId ? view.characterId === node.entry.characterId : !view.characterId && view.classificationId === node.entry.id);
+    : view.kind === "classification" && (node.entry.characterId ? view.characterId === node.entry.characterId : node.entry.characterGroupId ? view.characterGroupId === node.entry.characterGroupId : !view.characterId && !view.characterGroupId && view.classificationId === node.entry.id);
   const editingName = inlineEdit?.type === "rename" && inlineEdit.entry.id === node.entry.id;
   const creatingChild = inlineEdit?.type === "create" && inlineEdit.treeKind === node.entry.treeKind && inlineEdit.parentId === node.entry.id;
+  const virtualEntry = Boolean(node.entry.characterId || node.entry.characterGroupId);
+  const originalsRoot = isOriginalsRoot(node.entry);
   const actions: MenuItem[] = [
     ...(onTogglePin && node.entry.treeKind === "classification" ? [{ id: "pin", label: pinnedIds.includes(node.entry.id) ? "즐겨찾기 해제" : "즐겨찾기에 추가", onSelect: () => onTogglePin(node.entry) }] : []),
     { id: "create-child", label: node.entry.treeKind === "album" ? "하위 앨범 만들기" : "하위 폴더 만들기", onSelect: () => onCreateChild(node.entry) },
-    { id: "rename", label: "이름 변경", onSelect: () => onRename(node.entry) },
+    ...(!originalsRoot ? [{ id: "rename", label: "이름 변경", onSelect: () => onRename(node.entry) }] : []),
     { id: "appearance", label: "아이콘 및 색상", onSelect: () => onAppearance(node.entry) },
-    {
-      id: "move",
-      label: node.entry.treeKind === "album" ? "앨범 이동" : "폴더 이동",
-      onSelect: () => onMove(node.entry),
-    },
-    {
-      id: "delete",
-      label: hasChildren ? "삭제 — 하위 폴더 있음" : "삭제",
-      destructive: true,
-      disabled: hasChildren,
-      onSelect: () => onDelete(node.entry),
-    },
+    ...(!originalsRoot ? [{ id: "move", label: node.entry.treeKind === "album" ? "앨범 이동" : "폴더 이동", onSelect: () => onMove(node.entry) }] : []),
+    ...(!originalsRoot ? [{ id: "delete", label: hasChildren ? "삭제 — 하위 폴더 있음" : "삭제", destructive: true, disabled: hasChildren, onSelect: () => onDelete(node.entry) }] : []),
   ];
 
   return (
     <li className="classification-sidebar__tree-item" data-has-next-sibling={hasNextSibling ? "true" : undefined}>
-      <ContextMenu items={node.entry.characterId ? [{ id: "open-character", label: "캐릭터 열기", onSelect: () => onViewChange(treeEntryView(node.entry)) }] : actions}>
+      <ContextMenu items={virtualEntry ? [{ id: "open-virtual", label: node.entry.characterGroupId ? "그룹 열기" : "캐릭터 열기", onSelect: () => onViewChange(treeEntryView(node.entry)) }] : actions}>
         <div
           ref={(element) => {
             rowRef.current = element;
             registerTreeRow(node.entry.id, element);
           }}
           className="classification-sidebar__tree-row"
-          data-classification-id={node.entry.treeKind === "classification" && !node.entry.characterId ? node.entry.id : undefined}
+          data-classification-id={node.entry.treeKind === "classification" && !virtualEntry ? node.entry.id : undefined}
           data-album-id={node.entry.treeKind === "album" ? node.entry.id : undefined}
           data-character-id={node.entry.characterId}
+          data-character-group-id={node.entry.characterGroupId}
           data-drop-state={dragTarget?.kind === (node.entry.characterId ? "character" : node.entry.treeKind) && dragTarget.entryId === (node.entry.characterId ?? node.entry.id) ? (dragTarget.valid ? "valid" : "invalid") : undefined}
           data-drop-position={dragTarget?.kind === (node.entry.characterId ? "character" : node.entry.treeKind) && dragTarget.entryId === (node.entry.characterId ?? node.entry.id) ? dragTarget.position : undefined}
           role="treeitem"
@@ -712,7 +721,7 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
             }
             onRowKeyDown(event, node);
           }}
-          onPointerDown={(event) => { if (!node.entry.characterId && event.button === 0 && !(event.target as HTMLElement).closest("button")) onPointerDragStart?.({ kind: node.entry.treeKind, entryId: node.entry.id }, event); }}
+          onPointerDown={(event) => { if (!virtualEntry && !originalsRoot && event.button === 0 && !(event.target as HTMLElement).closest("button")) onPointerDragStart?.({ kind: node.entry.treeKind, entryId: node.entry.id }, event); }}
           onPointerMove={onPointerDragMove}
           onPointerUp={onPointerDragEnd}
           onPointerCancel={onPointerDragCancel}
@@ -723,7 +732,7 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
             </Button>
           ) : <span className="classification-sidebar__tree-spacer" aria-hidden="true" />}
           <span className="classification-sidebar__tree-surface">
-            {node.entry.characterId ? <UserCircleIcon className="classification-sidebar__tree-folder" aria-hidden="true" /> : <ClassificationIcon
+            {node.entry.characterGroupId ? <UserGroupIcon className="classification-sidebar__tree-folder classification-sidebar__tree-group" aria-hidden="true" /> : node.entry.characterId ? <UserCircleIcon className="classification-sidebar__tree-folder" aria-hidden="true" /> : <ClassificationIcon
               className="classification-sidebar__tree-folder"
               kind={node.entry.kind}
               iconKey={node.entry.iconKey}
@@ -861,7 +870,12 @@ function isDescendant(candidateId: string, ancestorId: string, entries: SidebarT
   return false;
 }
 
+function isOriginalsRoot(entry: SidebarTreeEntry): boolean {
+  return entry.treeKind === "classification" && entry.parentId === null && (entry.id === "lakomics-originals" || entry.name === "오리지널");
+}
+
 function treeEntryView(entry: SidebarTreeEntry): AssetView {
-  if (entry.characterId) return { kind: "classification", classificationId: entry.parentId, characterId: entry.characterId };
+  if (entry.characterId) return { kind: "classification", classificationId: entry.seriesId ?? null, characterId: entry.characterId };
+  if (entry.characterGroupId) return { kind: "classification", classificationId: entry.seriesId ?? null, characterGroupId: entry.characterGroupId };
   return entry.treeKind === "album" ? { kind: "album", albumId: entry.id } : { kind: "classification", classificationId: entry.id };
 }

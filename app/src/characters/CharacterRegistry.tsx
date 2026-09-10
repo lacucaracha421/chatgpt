@@ -25,6 +25,7 @@ export function CharacterRegistry({ draft, target, privacyMode, busy, error, onC
       </button>
       <div><Button size="sm" disabled={busy} onClick={() => onPick("thumbnail")}>대표 이미지</Button>{draft.thumbnail && <Button size="icon" variant="ghost" aria-label="대표 이미지 해제" disabled={busy} onClick={() => onChange({ ...draft, thumbnail: null })}><XMarkIcon aria-hidden="true" /></Button>}</div>
     </div>
+    {target?.manualOnly && <p className="series-description">수동 관리 캐릭터입니다. 기준 이미지 5장을 지정해 저장하면 같은 캐릭터를 자동 분류 대상으로 전환합니다.</p>}
     <div className="character-registry__label"><span>기준 이미지</span><small>{draft.references.length}/5</small><Button size="sm" disabled={busy} onClick={() => onPick("references")}>선택</Button></div>
     <div className="character-refs" aria-label="기준 이미지">{Array.from({ length: 5 }, (_, i) => <button type="button" key={i} aria-label={`기준 이미지 ${i + 1} ${draft.references[i] && onOpenReference ? "원본 보기" : "선택"}`} disabled={busy} onClick={() => draft.references[i] && onOpenReference ? onOpenReference(draft.references[i]!) : onPick("references")}>
       {draft.references[i] ? <img className={privacyMode ? "character-private" : ""} src={thumbnailUrl(draft.references[i]!)} alt={`기준 ${i + 1}`} /> : <span>{i + 1}</span>}
@@ -36,7 +37,7 @@ export function CharacterRegistry({ draft, target, privacyMode, busy, error, onC
         <Button size="sm" variant="ghost" disabled={busy || !onExcludeReference} onClick={() => onExcludeReference?.(reference.assetId!)}>학습에서 제거</Button>
       </div>)}</div>
     </section>}
-    <label className="character-check"><input type="checkbox" checked={draft.enabled} disabled={busy} onChange={e => onChange({ ...draft, enabled: e.target.checked })} />분석에 사용</label>
+    {!target?.manualOnly && <label className="character-check"><input type="checkbox" checked={draft.enabled} disabled={busy} onChange={e => onChange({ ...draft, enabled: e.target.checked })} />분석에 사용</label>}
     {error && <p role="alert">{error}</p>}
     <Button disabled={busy || !draft.name.trim()} onClick={onSave}>{target ? "저장" : "캐릭터 만들기"}</Button>
   </section>;

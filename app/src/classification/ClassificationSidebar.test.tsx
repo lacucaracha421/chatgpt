@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { AssetView, ClassificationEntry, LibraryGateway } from "../library/types";
 import { ClassificationSidebar } from "./ClassificationSidebar";
+import { fixtureTarget } from "../characters/characterFixtures";
 import { buildClassificationTree } from "./buildTree";
 
 const entries: ClassificationEntry[] = [
@@ -122,6 +123,8 @@ function renderSidebar(
       <LibraryProvider gateway={libraryGateway}>
         <ClassificationSidebar
           entries={props.entries ?? entries}
+          characters={props.characters}
+          characterGroups={props.characterGroups}
           albums={props.albums}
           collectionType={props.collectionType ?? "manga"}
           view={view}
@@ -171,6 +174,40 @@ describe("buildClassificationTree", () => {
 });
 
 describe("ClassificationSidebar", () => {
+  it("nests grouped characters under a distinct group node and opens both routes", async () => {
+    const user = userEvent.setup();
+    const hina = { ...fixtureTarget("hina", "히나"), seriesClassificationId: "work", linkedClassificationId: null };
+    const kisaki = { ...fixtureTarget("kisaki", "키사키"), seriesClassificationId: "work", linkedClassificationId: null };
+    const { onViewChange } = renderSidebar(gateway(), {
+      characters: [hina, kisaki],
+      characterGroups: [{ id: "group-1", seriesId: "work", name: "학생회", revision: 1, targetIds: ["hina", "kisaki"] }],
+      expandedIds: ["root", "work", "character-group:group-1"],
+    });
+    const group = screen.getByRole("treeitem", { name: "학생회" });
+    expect(group).toHaveAttribute("aria-expanded", "true");
+    expect(group.querySelector(".classification-sidebar__tree-group")).not.toBeNull();
+    expect(screen.getByRole("treeitem", { name: "히나" })).toBeVisible();
+    await user.click(group);
+    expect(onViewChange).toHaveBeenLastCalledWith({ kind: "classification", classificationId: "work", characterGroupId: "group-1" });
+    await user.click(screen.getByRole("treeitem", { name: "히나" }));
+    expect(onViewChange).toHaveBeenLastCalledWith({ kind: "classification", classificationId: "work", characterId: "hina" });
+  });
+
+
+  it("keeps the Originals root visible but protects its storage-only identity", async () => {
+    const originals = [...entries, { id: "lakomics-originals", kind: "root" as const, name: "오리지널", parentId: null, iconKey: "sparkles", colorKey: null }];
+    renderSidebar(gateway(), { entries: originals });
+    const row = screen.getByRole("treeitem", { name: "오리지널" });
+    expect(row.querySelector("[data-icon-key='sparkles']")).toBeInTheDocument();
+    fireEvent.contextMenu(row, { clientX: 20, clientY: 20 });
+    const labels = screen.getAllByRole("menuitem").map(item => item.textContent);
+    expect(labels).toContain("하위 폴더 만들기");
+    expect(labels).toContain("아이콘 및 색상");
+    expect(labels).not.toContain("이름 변경");
+    expect(labels).not.toContain("폴더 이동");
+    expect(labels).not.toContain("삭제");
+  });
+
   it("pins nested folders and opens their ancestors after collapsing the tree", async () => {
     const user = userEvent.setup();
     const { onExpandedIdsChange, onViewChange } = renderSidebar();

@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ScanStatus } from "./api";
 import { commandErrorMessage } from "../library/errorMessage";
 
-export type IncrementalStatus = { running: boolean; paused: boolean; pending: number; completed: number; confirmed: number; activeAssetId: string | null; activeSeriesName: string | null; activeTargetName: string | null; activeTargetIndex: number; activeReconsideration: boolean; total: number; compared: number; error: string | null };
+export type IncrementalStatus = { running: boolean; paused: boolean; pending: number; pendingAutomatic: number; pendingLegacy: number; pendingManual: number; pendingReconsideration: number; completed: number; confirmed: number; activeAssetId: string | null; activeSeriesName: string | null; activeTargetName: string | null; activeTargetIndex: number; activeReconsideration: boolean; activeCause: string | null; total: number; compared: number; error: string | null };
 export type AutomaticCharacterApi = { status(): Promise<IncrementalStatus>; pause(paused: boolean): Promise<void> };
 const defaultApi: AutomaticCharacterApi = {
   status: () => invoke("character_incremental_status"),
@@ -16,6 +16,11 @@ export function useCharacterAutomation(onChanged: (membershipChanged: boolean) =
   const [message, setMessage] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
   const [queuePending, setQueuePending] = useState(0);
+  const [queueAutomatic, setQueueAutomatic] = useState(0);
+  const [queueLegacy, setQueueLegacy] = useState(0);
+  const [queueManual, setQueueManual] = useState(0);
+  const [queueReconsideration, setQueueReconsideration] = useState(0);
+  const [activeCause, setActiveCause] = useState<string | null>(null);
   const [activeSeriesName, setActiveSeriesName] = useState<string | null>(null);
   const [activeTargetName, setActiveTargetName] = useState<string | null>(null);
   const [activeTargetIndex, setActiveTargetIndex] = useState(0);
@@ -39,6 +44,11 @@ export function useCharacterAutomation(onChanged: (membershipChanged: boolean) =
         if (!active) return;
         setPaused(status.paused);
         setQueuePending(status.pending);
+        setQueueAutomatic(status.pendingAutomatic);
+        setQueueLegacy(status.pendingLegacy);
+        setQueueManual(status.pendingManual);
+        setQueueReconsideration(status.pendingReconsideration);
+        setActiveCause(status.activeCause);
         setActiveSeriesName(status.activeSeriesName);
         setActiveTargetName(status.activeTargetName);
         setActiveTargetIndex(status.activeTargetIndex);
@@ -82,5 +92,5 @@ export function useCharacterAutomation(onChanged: (membershipChanged: boolean) =
       setTransient(false); setMessage(commandErrorMessage(error, "자동 분류 상태 변경 실패"));
     });
   };
-  return { progress, message, paused, queuePending, activeSeriesName, activeTargetName, activeTargetIndex, activeReconsideration, pause: () => control(true), resume: () => control(false), dismiss: () => setMessage(null) };
+  return { progress, message, paused, queuePending, queueAutomatic, queueLegacy, queueManual, queueReconsideration, activeCause, activeSeriesName, activeTargetName, activeTargetIndex, activeReconsideration, pause: () => control(true), resume: () => control(false), dismiss: () => setMessage(null) };
 }

@@ -45,6 +45,7 @@ pub(super) struct Engine {
     active_target_name: Option<String>,
     active_target_index: usize,
     active_reconsideration: bool,
+    active_cause: Option<String>,
     total: usize,
     compared: usize,
     error: Option<String>,
@@ -58,6 +59,10 @@ pub struct Status {
     running: bool,
     paused: bool,
     pending: i64,
+    pending_automatic: i64,
+    pending_legacy: i64,
+    pending_manual: i64,
+    pending_reconsideration: i64,
     completed: i64,
     confirmed: i64,
     active_asset_id: Option<String>,
@@ -65,6 +70,7 @@ pub struct Status {
     active_target_name: Option<String>,
     active_target_index: usize,
     active_reconsideration: bool,
+    active_cause: Option<String>,
     total: usize,
     compared: usize,
     error: Option<String>,
@@ -113,6 +119,7 @@ impl Library {
             engine.active_target_name = None;
             engine.active_target_index = 0;
             engine.active_reconsideration = false;
+            engine.active_cause = None;
             if result.is_err() {
                 engine.error = Some("자동 분석 작업이 중단되었습니다. 재개해 주세요.".into());
             }
@@ -133,7 +140,7 @@ impl Library {
         engine.prepared_references = None;
     }
     pub fn character_incremental_status(&self) -> Result<Status> {
-        let (running, active, active_series_name, active_target_name, active_target_index, active_reconsideration, total, compared, error) = {
+        let (running, active, active_series_name, active_target_name, active_target_index, active_reconsideration, active_cause, total, compared, error) = {
             let e = self
                 .character_incremental
                 .lock()
@@ -145,6 +152,7 @@ impl Library {
                 e.active_target_name.clone(),
                 e.active_target_index,
                 e.active_reconsideration,
+                e.active_cause.clone(),
                 e.total,
                 e.compared,
                 e.error.clone(),
@@ -156,15 +164,24 @@ impl Library {
             [],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )?;
-        let pending = c.query_row(
-            "SELECT COUNT(*) FROM character_autotag_jobs WHERE state='pending'",
+        let (pending, pending_automatic, pending_legacy, pending_manual, pending_reconsideration) = c.query_row(
+            "SELECT COUNT(*),
+                COALESCE(SUM(CASE WHEN cause IN ('ingestion','classification','restore','similarity_resolution') THEN 1 ELSE 0 END),0),
+                COALESCE(SUM(CASE WHEN cause='legacy' THEN 1 ELSE 0 END),0),
+                COALESCE(SUM(CASE WHEN cause='manual_scan' THEN 1 ELSE 0 END),0),
+                COALESCE(SUM(CASE WHEN cause='reconsideration' THEN 1 ELSE 0 END),0)
+             FROM character_autotag_jobs WHERE state='pending'",
             [],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)),
         )?;
         Ok(Status {
             running,
             paused,
             pending,
+            pending_automatic,
+            pending_legacy,
+            pending_manual,
+            pending_reconsideration,
             completed,
             confirmed,
             active_asset_id: active,
@@ -172,6 +189,7 @@ impl Library {
             active_target_name,
             active_target_index,
             active_reconsideration,
+            active_cause,
             total,
             compared,
             error,
@@ -203,7 +221,8 @@ impl Library {
                     e.active_series_name = None;
                     e.active_target_name = None;
                     e.active_target_index = 0;
-                    e.active_reconsideration = job.generation > job.source_generation;
+                    e.active_reconsideration = job.cause == "reconsideration";
+                    e.active_cause = Some(job.cause.clone());
                     e.total = 0;
                     e.compared = 0;
                 }
@@ -236,6 +255,7 @@ impl Library {
                     e.active_target_name = None;
                     e.active_target_index = 0;
                     e.active_reconsideration = false;
+                    e.active_cause = None;
                 }
                 Ok(true)
             })();

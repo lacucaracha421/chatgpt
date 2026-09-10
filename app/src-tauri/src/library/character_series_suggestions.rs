@@ -45,13 +45,16 @@ struct Candidate {
 fn validate_root(connection: &Connection, root_id: &str) -> Result<()> {
     let root = connection
         .query_row(
-            "SELECT kind,parent_id FROM classification_entries WHERE id=?1",
+            "SELECT kind,parent_id,name FROM classification_entries WHERE id=?1",
             [root_id],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, String>(2)?)),
         )
         .optional()?;
-    if !matches!(root, Some((ref kind, None)) if kind == "root") {
+    if !matches!(root, Some((ref kind, None, _)) if kind == "root") {
         return Err(Error::Invalid("최상위 분류에서만 작품 후보를 찾을 수 있습니다."));
+    }
+    if root_id == "lakomics-originals" || matches!(root, Some((_, None, ref name)) if name == "오리지널") {
+        return Err(Error::Invalid("오리지널은 작품·캐릭터 자동 분류를 사용하지 않습니다."));
     }
     let has_series: bool = connection.query_row(
         "WITH RECURSIVE descendants(id) AS (

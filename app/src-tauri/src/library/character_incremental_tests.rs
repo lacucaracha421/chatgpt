@@ -61,6 +61,28 @@ fn run_with_cause(f: &Fixture, config: &RuntimeConfig, id: &str, cause: characte
         .compare_incremental_asset(&job, config, Arc::new(AtomicBool::new(false)))
         .unwrap();
 }
+
+#[test]
+fn status_splits_automatic_manual_and_reconsideration_queue_causes() {
+    let f = Fixture::new();
+    character_autotag::enqueue(&f.library.connection().unwrap(), "asset-0", character_autotag::Cause::Ingestion).unwrap();
+    character_autotag::enqueue(&f.library.connection().unwrap(), "asset-5", character_autotag::Cause::ManualScanEnrollment).unwrap();
+    character_autotag::enqueue(&f.library.connection().unwrap(), "asset-6", character_autotag::Cause::Reconsideration).unwrap();
+    let status = f.library.character_incremental_status().unwrap();
+    assert_eq!(status.pending, 3);
+    assert_eq!(status.pending_automatic, 1);
+    assert_eq!(status.pending_legacy, 0);
+    assert_eq!(status.pending_manual, 1);
+    assert_eq!(status.pending_reconsideration, 1);
+    let automatic = f.library.claim_character_autotag().unwrap().unwrap();
+    assert_eq!(automatic.asset_id, "asset-0");
+    assert_eq!(automatic.cause, "ingestion");
+    let manual = f.library.claim_character_autotag().unwrap().unwrap();
+    assert_eq!(manual.cause, "manual_scan");
+    let reconsideration = f.library.claim_character_autotag().unwrap().unwrap();
+    assert_eq!(reconsideration.cause, "reconsideration");
+}
+
 #[test]
 fn mixed_root_work_labels_the_scope_instead_of_the_first_series() {
     let f = Fixture::new();
@@ -108,6 +130,7 @@ fn mixed_root_work_labels_the_scope_instead_of_the_first_series() {
         review_state: "unresolved".into(),
         claim_id: None,
         attempts: 1,
+        cause: "reconsideration".into(),
         error: None,
     };
     let connection = f.library.connection().unwrap();

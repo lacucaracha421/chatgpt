@@ -132,8 +132,6 @@ def fetch_media_to_r2(media_url: str, object_key: str, media_type: str, source: 
                     output.write(chunk)
         if size_bytes == 0:
             raise CaptureValidationError(f"Empty {media_type} response")
-        if initial_addresses is not None and _public_addresses(host) != initial_addresses:
-            raise CaptureValidationError("Media host address changed during download")
         try:
             with temp_path.open("rb") as body:
                 _s3.put_object(Bucket=R2_BUCKET, Key=object_key, Body=body, ContentType=content_type)

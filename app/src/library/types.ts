@@ -265,7 +265,7 @@ export type AssetMediaFilter = "all" | "images" | "videos";
 export type AssetAspectFilter = "all" | "square" | "landscape" | "portrait";
 
 export type AssetView =
-  | { kind: "classification"; classificationId: string | null; characterId?: string }
+  | { kind: "classification"; classificationId: string | null; characterId?: string; characterGroupId?: string }
   | { kind: "album"; albumId: string }
   | { kind: "unsorted" }
   | { kind: "revisit" }

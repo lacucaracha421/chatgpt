@@ -89,6 +89,7 @@ pub struct Target {
     pub description: String,
     pub thumbnail_asset_id: Option<String>,
     pub enabled: bool,
+    pub manual_only: bool,
     pub revision: i64,
     pub references: Vec<Reference>,
     pub learned_references: Vec<Reference>,
@@ -555,15 +556,24 @@ impl Library {
                 .iter()
                 .zip(&values)
                 .all(|(r, (id, hash))| r.asset_id.as_ref() == Some(*id) && r.asset_hash == *hash);
+        let promote_manual = previous.manual_only && values.len() == REFERENCE_COUNT;
         if !unchanged {
             transaction.execute("DELETE FROM character_references WHERE target_id=?1", [id])?;
             for (slot, (asset_id, hash)) in values.iter().enumerate() {
                 transaction.execute("INSERT INTO character_references(target_id,slot,asset_id,asset_hash) VALUES(?1,?2,?3,?4)", params![id,slot as i64,asset_id,hash])?;
             }
             transaction.execute(
-                "UPDATE character_targets SET revision=revision+1,updated_at=?2 WHERE id=?1",
+                "UPDATE character_targets SET manual_only=CASE WHEN ?3 THEN 0 ELSE manual_only END,revision=revision+1,updated_at=?2 WHERE id=?1",
+                params![id, chrono::Utc::now().to_rfc3339(), promote_manual],
+            )?;
+        } else if promote_manual {
+            transaction.execute(
+                "UPDATE character_targets SET manual_only=0,revision=revision+1,updated_at=?2 WHERE id=?1",
                 params![id, chrono::Utc::now().to_rfc3339()],
             )?;
+        }
+        if promote_manual {
+            transaction.execute("DELETE FROM character_manual_targets WHERE target_id=?1", [id])?;
         }
         let result = self.read_character_target(&transaction, id)?;
         transaction.commit()?;
@@ -717,6 +727,12 @@ impl Library {
                 (target_id,asset_id,source_asset_id,asset_hash,decision,target_fingerprint,baseline_fingerprint,reference_snapshot,created_at)
                 VALUES(?1,?2,?2,?3,?4,?5,?6,?7,?8)", params![target.id,asset_id,hash,request.decision.stored(),target.fingerprint,request.baseline_fingerprint,snapshot,now])?;
             if request.decision == DecisionKind::Accepted {
+                if let Some(series) = target.series_classification_id.as_deref() {
+                    transaction.execute(
+                        "DELETE FROM character_series_asset_exclusions WHERE series_id=?1 AND asset_id=?2",
+                        params![series, asset_id],
+                    )?;
+                }
                 if let Some(snapshot) = evidence.get(asset_id) {
                     let prediction = &snapshot["prediction"];
                     let single = prediction["wholeFallback"] == false
@@ -783,10 +799,10 @@ impl Library {
         id: &str,
     ) -> Result<Target> {
         let mut target = connection.query_row("SELECT id,series_classification_id,linked_classification_id,display_name,enabled,revision,description,
-            (SELECT a.id FROM assets a WHERE a.id=thumbnail_asset_id AND a.status='normal')
+            (SELECT a.id FROM assets a WHERE a.id=thumbnail_asset_id AND a.status='normal'),manual_only
             FROM character_targets WHERE id=?1", [id], |r| Ok(Target {
                 id:r.get(0)?,series_classification_id:r.get(1)?,linked_classification_id:r.get(2)?,display_name:r.get(3)?,
-                enabled:r.get(4)?,revision:r.get(5)?,description:r.get(6)?,thumbnail_asset_id:r.get(7)?,references:Vec::new(),learned_references:Vec::new(),ready:false,fingerprint:String::new()
+                enabled:r.get(4)?,revision:r.get(5)?,description:r.get(6)?,thumbnail_asset_id:r.get(7)?,manual_only:r.get(8)?,references:Vec::new(),learned_references:Vec::new(),ready:false,fingerprint:String::new()
             })).optional()?.ok_or(Error::NotFound)?;
         let mut statement = connection.prepare("SELECT slot,asset_id,asset_hash FROM character_references WHERE target_id=?1 ORDER BY slot")?;
         let rows = statement.query_map([id], |r| {
@@ -866,6 +882,7 @@ impl Library {
             }
         }
         target.ready = target.enabled
+            && !target.manual_only
             && target.series_classification_id.is_some()
             && target.references.len() == REFERENCE_COUNT
             && target.references.iter().all(|r| r.status == "ready");
@@ -873,6 +890,7 @@ impl Library {
             &target.id,
             target.revision,
             &target.series_classification_id,
+            target.manual_only,
             &target.references,
         ))?)
         .iter()
