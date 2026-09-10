@@ -14,7 +14,7 @@
 ## Canonical checkout
 
 - Use `C:\chatgpt` as the canonical local repository for all Lakomics development.
-- `main` is the accepted integration baseline for the Lakomics app and bundled `extension/` code. For ongoing work, inspect the current branch, staged/unstaged changes, and relevant untracked files; do not treat an older `main` snapshot as the current task state.
+- `main` is the accepted integration baseline for the Lakomics app and the active `extension-list/` extension. `extension/` is a legacy frozen implementation: do not modify it unless the user explicitly asks for legacy-extension work. For ongoing work, inspect the current branch, staged/unstaged changes, and relevant untracked files; do not treat an older `main` snapshot as the current task state.
 
 ## Instruction and skill applicability
 
@@ -36,7 +36,7 @@ Before changing code, use `docs/README.md` as the document map.
 - Living bugs, priorities, and future work: `docs/roadmap/lakomics-backlog.md`
 - Cloud Capture work: `docs/agents/cloud-capture.md`
 - Works / Collection work: `docs/agents/lakomics-works-handoff-v2.md`
-- X Collector behavior: `docs/edge-extension.md`; extension source/generation rules: `extension/AGENTS.md`
+- X Collector behavior: `docs/edge-extension.md`; active list-extension rules: `extension-list/AGENTS.md`; legacy frozen extension rules: `extension/AGENTS.md`
 - Catalog changes, production deployment/canary safeguards: `docs/agents/catalog-troubleshooting.md`
 - Backup, recovery, and PC migration: `docs/operations/pc-migration.md`
 

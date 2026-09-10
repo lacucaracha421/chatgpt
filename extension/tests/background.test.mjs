@@ -210,7 +210,7 @@ test("auto mode falls back to local classifications when the app is unavailable"
   assert.equal(response.ok, true);
   assert.equal(response.classificationSource, "local");
   assert.equal(response.fallbackCode, "app_offline");
-  assert.deepEqual(plain(response.entries.map((entry) => entry.name)), ["리버스", "명조", "젠레스", "게임", "만화", "기타"]);
+  assert.deepEqual(plain(response.entries.map((entry) => entry.name)), ["리버스", "명조", "젠레스", "게임", "만화", "기타", "오리지널"]);
 });
 
 test("offline backoff skips the network probe and serves the snapshot immediately", async () => {
@@ -276,7 +276,7 @@ test("classification diagnostics from settings:get reflect the latest lookup", a
   assert.equal(settings.classificationDiagnostics.fallbackReason, null);
 });
 
-test("settings:get marks the six-item local fallback explicitly", async () => {
+test("settings:get marks the seven-item local fallback explicitly", async () => {
   const harness = createHarness({ connectionToken: "0123456789abcdef0123456789abcdef" });
   harness.queueError(new TypeError("Failed to fetch"));
   await harness.api.handleMessage({ type: "classifications:get" });
@@ -284,7 +284,7 @@ test("settings:get marks the six-item local fallback explicitly", async () => {
   const settings = await harness.api.handleMessage({ type: "settings:get" });
   assert.equal(settings.classificationDiagnostics.source, "local");
   assert.equal(settings.classificationDiagnostics.fallbackReason, "app_offline");
-  assert.equal(settings.classificationDiagnostics.count, 6);
+  assert.equal(settings.classificationDiagnostics.count, 7);
   assert.equal(settings.lastConnectionFailure.code, "app_offline");
 });
 

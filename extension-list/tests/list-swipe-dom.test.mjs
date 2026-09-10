@@ -39,7 +39,7 @@ test('legacy paper chooser styling is retained in the list-only build', () => {
   const view = mount([{ id: 'a', name: 'A', parentId: null }]);
   const css = view.host.shadowRoot.querySelector('style').textContent;
   assert.match(css, /--paper:#d7d3b9/);
-  assert.match(css, /width:350px;height:410px/);
+  assert.match(css, /width:350px;height:480px/);
   assert.match(css, /justify-content:flex-end/);
   view.close();
 });

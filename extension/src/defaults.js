@@ -30,6 +30,7 @@
     ["local:game", "게임"],
     ["local:manga", "만화"],
     ["local:other", "기타"],
+    ["local:originals", "오리지널"],
   ]);
 
   function defaultLocalTree() {

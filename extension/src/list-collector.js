@@ -337,7 +337,7 @@
   const CSS = `
 :host{--paper:#d7d3b9;--ink:#302f28;--line:#aaa68f;--quiet:#bdb9a1;font:14px/1.4 'Segoe UI',sans-serif;color:var(--ink);position:fixed;inset:0;z-index:2147483646;pointer-events:none}
 *{box-sizing:border-box}button{font:inherit;color:inherit;cursor:pointer;border:0;border-radius:0}button:focus-visible{outline:2px solid var(--ink);outline-offset:-3px}button:disabled{opacity:.35;cursor:default}
-.backdrop{position:fixed;inset:0;pointer-events:auto}.panel{position:fixed;width:350px;height:410px;max-width:calc(100vw - 16px);max-height:calc(100dvh - 16px);background:var(--paper);box-shadow:0 14px 40px #0005;display:flex;flex-direction:column;border:1px solid var(--line)}
+.backdrop{position:fixed;inset:0;pointer-events:auto}.panel{position:fixed;width:350px;height:480px;max-width:calc(100vw - 16px);max-height:calc(100dvh - 16px);background:var(--paper);box-shadow:0 14px 40px #0005;display:flex;flex-direction:column;border:1px solid var(--line)}
 .panel:before{content:'';position:absolute;inset:8px auto 8px 7px;border-left:4px solid var(--quiet);width:3px;border-right:1px solid var(--line);pointer-events:none}
 header{display:flex;align-items:center;gap:3px;min-height:52px;margin:0 10px 0 21px;border-bottom:1px solid var(--line)}header button{flex:none;width:30px;min-height:40px;background:none;font-size:22px}.save-current{font-size:19px}.path{flex:1;min-width:0;max-height:60px;overflow:auto;font-size:12px;overflow-wrap:anywhere}
 .swipe{flex:1;min-height:0;position:relative;margin:8px 10px 8px 21px;touch-action:pan-y pinch-zoom;overflow:hidden}.rows{position:relative;height:100%;touch-action:pan-y pinch-zoom;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--ink) transparent;padding-right:5px;background:var(--paper)}
@@ -346,7 +346,7 @@ header{display:flex;align-items:center;gap:3px;min-height:52px;margin:0 10px 0 2
 .temporary-save{display:block;width:100%;min-height:44px;margin-top:12px;padding:10px 12px;border-top:1px solid #838e87;background:#a8b9ae;color:#263b32;text-align:left}.temporary-save:before{content:"↓";margin-right:12px}.temporary-save:hover{background:#97ad9f}.temporary-save:disabled{opacity:.65}
 .reveal{transition:background-color 100ms,color 100ms}.ready .reveal{font-weight:600}.saving .reveal{background:var(--ink);color:var(--paper);justify-content:center;font-size:20px;letter-spacing:4px;padding:0}.saved .reveal{letter-spacing:0;font-size:25px}.panel[aria-busy=true] .row:disabled{opacity:1}.panel[aria-busy=true] .row-wrap:not(.saving){opacity:.6}
 :host(.embedded){position:relative;display:block;inset:auto;z-index:auto;pointer-events:auto;width:100%;max-width:350px;min-width:0}
-:host(.embedded) .backdrop{position:relative;inset:auto}:host(.embedded) .panel{position:relative;width:100%;max-width:100%;height:410px;box-shadow:none}
+:host(.embedded) .backdrop{position:relative;inset:auto}:host(.embedded) .panel{position:relative;width:100%;max-width:100%;height:480px;box-shadow:none}
 .editing .swipe,.editing .rows,.editing .row-wrap,.editing .row{touch-action:none}
 .editing .row-wrap{overflow:visible}.editing .row-wrap:has(.lifted){z-index:2}
 .editing .lifted{box-shadow:0 5px 14px #0005;outline:2px solid var(--ink);background:var(--quiet);cursor:grabbing}

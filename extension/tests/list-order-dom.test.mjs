@@ -65,6 +65,16 @@ test('failed drop restores order and leaves navigation usable',async()=>{
  }finally{h.close();}
 });
 
+test('reserves enough panel height for seven destinations plus temporary save',()=>{
+ const h=setup(null,{onTemporary:()=>{}});
+ try {
+  const css=h.shadow.querySelector('style').textContent;
+  assert.match(css,/width:350px;height:480px/);
+  // 52px header + 16px body margins + 7×48px rows + 56px temporary row = 460px.
+  assert.ok(480>=52+16+7*48+56);
+ } finally {h.close();}
+});
+
 test('temporary row hands off once without classification save and stays outside the editable order',()=>{
  let temporary=0, permanent=0;
  const h=setup(null,{onTemporary:()=>{temporary++;},onSave:()=>{permanent++;}});

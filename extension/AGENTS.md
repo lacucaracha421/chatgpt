@@ -1,5 +1,7 @@
 # Extension development
 
+> **LEGACY / FROZEN:** `extension/` is no longer the user's active extension. Do not modify, regenerate, version-bump, test as part of active extension work, or keep it in sync with `extension-list/` unless the user explicitly requests work on the legacy extension. Existing uncommitted or committed legacy changes should not be reverted merely because this rule exists.
+
 Root `AGENTS.md` applies. Read `docs/edge-extension.md` from the repository root for current save/Cloud Library behavior; the README and historical release notes are not separate execution plans.
 
 ## Source and generated output
