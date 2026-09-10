@@ -35,3 +35,11 @@ test('status toast is top-safe and saved badges never force X positioning', asyn
   assert.equal(gallerySource.includes('host.classList.add("lakomics-x-saved-badge-host")'), false);
   assert.equal(gallerySource.includes('style.position'), false);
 });
+
+
+test('Android collector never calls the restricted Vibration API', async () => {
+  const contentSource = await readFile(new URL('../src/content.js', import.meta.url), 'utf8');
+  const listSource = await readFile(new URL('../src/list-collector.js', import.meta.url), 'utf8');
+  assert.equal(contentSource.includes('navigator.vibrate'), false);
+  assert.equal(listSource.includes('navigator.vibrate'), false);
+});

@@ -39,6 +39,16 @@ it("shows its title and returns focus to the opener after Escape", async () => {
   expect(opener).toHaveFocus();
 });
 
+it("uses an opaque fullscreen surface so workspace text cannot show through", () => {
+  render(<Dialog open title="감상" variant="fullscreen" onClose={vi.fn()}><span>내용</span></Dialog>);
+  const dialog = screen.getByRole("dialog", { name: "감상" });
+  const root = window.getComputedStyle(document.documentElement);
+
+  expect(dialog).toHaveClass("ui-dialog--fullscreen");
+  expect(root.getPropertyValue("--color-viewer-bg").trim()).toBe("#070a0f");
+  expect(root.getPropertyValue("--color-overlay").trim()).toContain("0.82");
+});
+
 it("layers shared dialog content above its overlay and application content", async () => {
   const user = userEvent.setup();
   render(<DialogFixture />);

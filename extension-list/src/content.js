@@ -1,7 +1,7 @@
 (() => {
   "use strict";
   const OPEN_DISTANCE_PX = 12;
-  const TOUCH_LONG_PRESS_MS = 420;
+  const TOUCH_LONG_PRESS_MS = 360;
 
   function runtimeTimeoutMs(message) {
     if (message?.type !== "collector:save") return 15_000;
@@ -79,6 +79,11 @@
     return Boolean(active?.input === "touch" || active?.longPressed || phase === "opening" || phase === "list-open");
   }
 
+  function openingClickDisposition(guarded, insidePicker) {
+    if (guarded) return "consume";
+    return insidePicker ? "picker" : "page";
+  }
+
   function saveResultMessage(result) {
     if (!result?.ok) return "저장 실패";
     if (result.localOnly) return "기기 다운로드";
@@ -133,7 +138,7 @@
   }
 
   if (globalThis.__LAKOMICS_TEST__) {
-    globalThis.LakomicsListContent = { createInvocationGate, temporaryIntent, plainCandidate, shouldSuppressNativeContext, runtimeTimeoutMs, saveResultMessage, saveFailureMessage, normalizePostId };
+    globalThis.LakomicsListContent = { createInvocationGate, temporaryIntent, plainCandidate, shouldSuppressNativeContext, openingClickDisposition, runtimeTimeoutMs, saveResultMessage, saveFailureMessage, normalizePostId, TOUCH_LONG_PRESS_MS };
     return;
   }
 
@@ -145,8 +150,10 @@
     let picker = null;
     let statePromise = null;
     let suppressNextClick = false;
+    let suppressClickTimer = null;
     let toast = null, toastTimer = null;
     let gestureTarget = null;
+    let touchGuardRestore = [];
 
     document.addEventListener("pointerdown", onDown, true);
     document.addEventListener("pointermove", onMove, true);
@@ -164,6 +171,40 @@
       document.documentElement.classList.remove("lakomics-list-touch-active");
       gestureTarget?.classList?.remove("lakomics-list-gesture-target");
       gestureTarget = null;
+      for (const item of touchGuardRestore) {
+        for (const [name, value, priority] of item.styles) {
+          if (value) item.node.style.setProperty(name, value, priority);
+          else item.node.style.removeProperty(name);
+        }
+        if (item.title !== null) item.node.setAttribute("title", item.title);
+      }
+      touchGuardRestore = [];
+    }
+    function claimTouchOwnership(element) {
+      clearTouchOwnership();
+      document.documentElement.classList.add("lakomics-list-touch-active");
+      gestureTarget = element || null;
+      gestureTarget?.classList?.add("lakomics-list-gesture-target");
+      let node = element;
+      for (let depth = 0; node instanceof Element && depth < 6; depth += 1, node = node.parentElement) {
+        const names = ["-webkit-touch-callout", "-webkit-user-select", "user-select"];
+        touchGuardRestore.push({
+          node, title: node.getAttribute("title"),
+          styles: names.map((name) => [name, node.style.getPropertyValue(name), node.style.getPropertyPriority(name)]),
+        });
+        node.removeAttribute("title");
+        node.style.setProperty("-webkit-touch-callout", "none", "important");
+        node.style.setProperty("-webkit-user-select", "none", "important");
+        node.style.setProperty("user-select", "none", "important");
+      }
+    }
+    function armPostOpenClickGuard(durationMs = 320) {
+      suppressNextClick = true;
+      if (suppressClickTimer !== null) clearTimeout(suppressClickTimer);
+      suppressClickTimer = setTimeout(() => { suppressNextClick = false; suppressClickTimer = null; }, durationMs);
+    }
+    function unlockPickerAfterRelease() {
+      setTimeout(() => picker?.unlockInput?.(), 0);
     }
     function reset() { clearTimer(); clearTouchOwnership(); active = null; gate.close(); }
 
@@ -175,15 +216,13 @@
       const origin = point(event);
       active = { id: event.pointerId, input, candidate, origin, latest: origin };
       if (input === "touch") {
-        document.documentElement.classList.add("lakomics-list-touch-active");
-        gestureTarget = candidate.element || event.target;
-        gestureTarget?.classList?.add("lakomics-list-gesture-target");
+        claimTouchOwnership(candidate.element || event.target);
         longPressTimer = setTimeout(() => {
           longPressTimer = null;
           if (active?.id !== event.pointerId) return;
           active.longPressed = true;
-          suppressNextClick = true;
-          try { event.preventDefault(); } catch {}
+          try { (candidate.element || event.target)?.setPointerCapture?.(event.pointerId); active.pointerCaptured = true; } catch {}
+          try { window.getSelection?.()?.removeAllRanges?.(); } catch {}
           void open(active);
         }, TOUCH_LONG_PRESS_MS);
       }
@@ -210,20 +249,33 @@
       // Once opening has started, releasing the trigger pointer must not cancel
       // the asynchronous state load. The list owns the session until it closes.
       active.released = true;
-      suppressNextClick = true;
+      armPostOpenClickGuard();
       event.preventDefault(); event.stopImmediatePropagation();
+      try { if (active.pointerCaptured) (active.candidate.element || event.target)?.releasePointerCapture?.(event.pointerId); } catch {}
+      clearTouchOwnership();
+      unlockPickerAfterRelease();
     }
     function onCancel(event) {
       if (!active || active.id !== event.pointerId) return;
       clearTimer();
       if (gate.phase === "armed") { reset(); return; }
       active.released = true;
-      suppressNextClick = true;
+      armPostOpenClickGuard();
+      try { if (active.pointerCaptured) (active.candidate.element || event.target)?.releasePointerCapture?.(event.pointerId); } catch {}
+      clearTouchOwnership();
+      unlockPickerAfterRelease();
     }
     function onClick(event) {
-      if (insidePicker(event)) return;
-      if (!suppressNextClick) return;
-      suppressNextClick = false; event.preventDefault(); event.stopImmediatePropagation();
+      // Consume the release-generated click before checking whether it landed
+      // inside the newly mounted picker. This prevents row-1 auto entry.
+      const disposition = openingClickDisposition(suppressNextClick, insidePicker(event));
+      if (disposition === "consume") {
+        suppressNextClick = false;
+        if (suppressClickTimer !== null) { clearTimeout(suppressClickTimer); suppressClickTimer = null; }
+        event.preventDefault(); event.stopImmediatePropagation();
+        return;
+      }
+      if (disposition === "picker") return;
     }
     function onContextMenu(event) {
       if (insidePicker(event)) return;
@@ -264,6 +316,8 @@
         entries: state.classifications.entries,
         profile: state.profile,
         origin: session.origin,
+        inputKind: session.input,
+        inputLocked: session.input === "touch" && !session.released,
         onTemporary: temporary ? () => { window.location.href = temporary; return true; } : null,
         onSave: async (classificationId) => {
           const model = globalThis.LakomicsClassificationTree.createModel(state.classifications.entries, state.profile);
@@ -280,6 +334,7 @@
         },
         onClose: (result) => {
           picker = null; gate.close(); clearTouchOwnership(); active = null; suppressNextClick = false;
+          if (suppressClickTimer !== null) { clearTimeout(suppressClickTimer); suppressClickTimer = null; }
           if (result?.ok) showStatus(result.message || "저장됨", "success");
         },
       });

@@ -44,6 +44,8 @@ export function CharacterLab({ classifications, initialSeriesId, targetId, refre
   const target = targets.find(t => t.id === targetId) ?? null;
   const scanning = runs.find(isRunning);
   const selectedRows = page.rows.filter(row => selection.ids.has(row.asset.id));
+  const learnedIds = new Set(target?.learnedReferences?.flatMap(reference => reference.assetId ? [reference.assetId] : []) ?? []);
+  const learnableRows = selectedRows.filter(row => !learnedIds.has(row.asset.id) && row.predictions.some(prediction => prediction.targetId === targetId && prediction.decision === "accepted"));
   const focused = page.rows.find(row => row.asset.id === selection.focusId) ?? selectedRows[0];
   const itemIds = useMemo(() => page.rows.map(row => row.asset.id), [page.rows]);
   const scopeKey = `${seriesId}:${filterTarget}:${filter}`;
@@ -158,6 +160,23 @@ export function CharacterLab({ classifications, initialSeriesId, targetId, refre
     if (scanning) void action(async () => { await api.cancel(scanning.id); });
   }
   function close() { onClose(); }
+  async function learnRows(rows: ReviewRow[]) {
+    if (!target || !api.learnReferences) return;
+    const ids = rows.filter(row => !learnedIds.has(row.asset.id) && row.predictions.some(prediction => prediction.targetId === targetId && prediction.decision === "accepted")).map(row => row.asset.id);
+    if (!ids.length) return;
+    await action(async () => {
+      const latest = (await reloadTargets()).find(item => item.id === target.id);
+      if (!latest) throw new Error("캐릭터 설정을 다시 불러와 주세요.");
+      const next = await api.learnReferences!(latest.id, latest.revision, ids);
+      if (active.current) {
+        setTargets(current => current.map(item => item.id === next.id ? next : item));
+        setNotice(`${ids.length}장 학습에 추가 · 시리즈 재평가를 예약했습니다.`);
+        setSelection(emptySelection());
+        setRefresh(value => value + 1);
+      }
+    });
+  }
+
   async function decideRows(rows: ReviewRow[], p: Prediction, decision: DecisionKind) {
     if (rows.length > 200) throw new Error("한 번에 최대 200장을 선택해 주세요.");
     const groups = new Map<string, ReturnType<typeof predictionRequest>>();
@@ -173,8 +192,15 @@ export function CharacterLab({ classifications, initialSeriesId, targetId, refre
     const requests = [...groups.values()];
     if (requests.length === 1) await api.decide(requests[0]);
     else await api.decideBatch(requests);
-    await reloadTargets();
-    if (active.current) { setNotice(`${rows.length}장 ${decision === "accepted" ? "확정" : "거절"}`); setRefresh(v => v + 1); }
+    if (active.current) {
+      const decided = new Set(rows.map(row => row.asset.id));
+      setNotice(`${rows.length}장 ${decision === "accepted" ? "확정" : "거절"}`);
+      setSelection(emptySelection());
+      // Decisions no longer mutate learned references or the target fingerprint.
+      // Remove settled cards immediately; refresh the backend page in the background.
+      if (filter === "recommended") setPage(current => ({ ...current, rows: current.rows.filter(row => !decided.has(row.asset.id)) }));
+      setRefresh(v => v + 1);
+    }
   }
   const batchPrediction = selectedRows[0]?.predictions.find(p => p.targetId === targetId && p.evidence && ["recommended", "unmatched"].includes(p.state));
   return <Dialog open title={`${target?.displayName ?? "캐릭터"} · 검토`} variant="fullscreen" onClose={close}>
@@ -215,7 +241,7 @@ export function CharacterLab({ classifications, initialSeriesId, targetId, refre
           {history.map(d => <div key={d.sequence}><>{d.assetId && <img width={64} height={64} src={thumbnailUrl(d.assetId)} className={privacyMode ? "character-private" : ""} alt="판단한 이미지" />}</><span>{new Date(d.createdAt).toLocaleString()} · {stateLabels[d.decision]}{d.origin === "automatic" ? " · 자동 분류" : ""}</span><small>{d.assetId ? "" : "원본 삭제됨"}</small>{d.assetId && target && <Button size="sm" disabled={busy} onClick={() => void action(async () => { await api.decide({ targetId: target.id, expectedFingerprint: target.fingerprint, assetIds: [d.assetId!], decision: "cleared", scanId: null, baselineFingerprint: null }); setHistory(await api.history(target.id, null)); setRefresh(v => v + 1); })}>판단 해제</Button>}</div>)}
           <Button disabled={busy || history.length % 50 !== 0 || history.length === 0} onClick={() => target && void action(async () => { const more = await api.history(target.id, history[history.length - 1]!.sequence); if (active.current) setHistory(old => [...old!, ...more]); })}>이전 이력</Button>
         </div> : <>
-          {selection.ids.size > 0 && <div className="character-actions character-selection"><span>{selection.ids.size}장 선택</span><Button size="sm" disabled={busy || !batchPrediction} onClick={() => batchPrediction && void action(() => decideRows(selectedRows, batchPrediction, "accepted"))}>승인</Button><Button size="sm" disabled={busy || !batchPrediction} onClick={() => batchPrediction && void action(() => decideRows(selectedRows, batchPrediction, "rejected"))}>거절</Button><Button size="sm" onClick={() => setSelection(emptySelection())}>선택 해제</Button></div>}
+          {selection.ids.size > 0 && <div className="character-actions character-selection"><span>{selection.ids.size}장 선택</span><Button size="sm" disabled={busy || !batchPrediction} onClick={() => batchPrediction && void action(() => decideRows(selectedRows, batchPrediction, "accepted"))}>승인</Button><Button size="sm" disabled={busy || !batchPrediction} onClick={() => batchPrediction && void action(() => decideRows(selectedRows, batchPrediction, "rejected"))}>거절</Button>{api.learnReferences && learnableRows.length > 0 && <Button size="sm" variant="ghost" disabled={busy} onClick={() => void learnRows(learnableRows)}>학습에 추가</Button>}<Button size="sm" onClick={() => setSelection(emptySelection())}>선택 해제</Button></div>}
           <div className="character-lab__workspace">
             <div className="character-lab__gallery">{!seriesId ? <p>왼쪽에서 시리즈 폴더를 선택하세요.</p> : !loading && page.rows.length === 0 ? <p>{seriesTargets.length ? "이 조건에 해당하는 이미지가 없습니다." : "캐릭터를 만들고 기준 이미지 5장을 지정하세요."}</p> : <AssetGallery layout="masonry" groupDates={false} scopeKey={scopeKey} items={page.rows.map(row => row.asset)} targetRowHeight={190} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} privacyMode={privacyMode} metadataVisible onSelectionGesture={(asset, gesture) => setSelection(old => applySelectionGesture(old, itemIds, asset.id, gesture))} onSelectAll={() => setSelection(old => selectAllLoaded(old, itemIds))} onClearSelection={() => setSelection(emptySelection())} onMoveFocus={(delta, extend) => setSelection(old => moveSelectionFocus(old, itemIds, delta, extend))} onOpen={asset => setSelection(old => applySelectionGesture(old, itemIds, asset.id, { range: false, toggle: false }))} />}
               <div className="character-actions"><Button size="sm" disabled={loading || page.rows.length === 0} onClick={() => setSelection(old => selectAllLoaded(old, itemIds))}>불러온 이미지 선택</Button>{page.nextCursor && <Button disabled={loading} onClick={() => void load(page.nextCursor)}>더 불러오기</Button>}{loading && <span role="status">불러오는 중…</span>}</div>

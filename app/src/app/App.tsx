@@ -784,7 +784,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     onBack={() => { navigateBack({ kind: "revisit" }); }}
                   />
                 ) : (
-                  <CharacterFolderContent albums={albums} requestedAsset={requestedAsset} onRequestedAssetHandled={() => setRequestedAsset(null)} view={view} hub={{ ...characterHub, refresh: refreshCharacterViews }} clearSelectionRequest={clearAssetSelectionRequest} galleryDrag={{ onPointerDragStart: startPointerDrag, onPointerDragMove: movePointerDrag, onPointerDragEnd: finishPointerDrag, onPointerDragCancel: cancelPointerDrag }} classifications={entries} privacyMode={preferences.privacyMode} metadataVisible={preferences.metadataVisible} thumbnailRowHeight={preferences.thumbnailRowHeight} refreshVersion={assetRefresh} onNavigate={navigateView}>
+                  <CharacterFolderContent albums={albums} requestedAsset={requestedAsset} onRequestedAssetHandled={() => setRequestedAsset(null)} view={view} hub={{ ...characterHub, refresh: refreshCharacterViews }} clearSelectionRequest={clearAssetSelectionRequest} galleryDrag={{ onPointerDragStart: startPointerDrag, onPointerDragMove: movePointerDrag, onPointerDragEnd: finishPointerDrag, onPointerDragCancel: cancelPointerDrag }} classifications={entries} privacyMode={preferences.privacyMode} metadataVisible={preferences.metadataVisible} thumbnailRowHeight={preferences.thumbnailRowHeight} refreshVersion={assetRefresh} onNavigate={navigateView} onAssetsChanged={() => { setAssetRefresh(value => value + 1); refreshCharacterViews(); }}>
                   <AssetBrowser
                     view={view}
                     onViewChange={navigateView}

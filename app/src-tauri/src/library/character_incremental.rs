@@ -16,19 +16,41 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
+
+#[derive(Debug, PartialEq, Eq)]
+struct PreparedKey {
+    runtime: String,
+    targets: Vec<(String, String, Vec<(String, String, String)>)>,
+}
+#[derive(Debug)]
+struct PreparedReferences {
+    key: PreparedKey,
+    sources: BTreeMap<String, Arc<Source>>,
+}
+impl PreparedReferences {
+    fn check_identity(&self, library: &Library) -> Result<()> {
+        for source in self.sources.values() { source.check_identity(library)?; }
+        Ok(())
+    }
+}
 
 #[derive(Debug, Default)]
 pub(super) struct Engine {
     running: bool,
     stop: Arc<AtomicBool>,
     active: Option<String>,
+    active_series_name: Option<String>,
+    active_target_name: Option<String>,
+    active_target_index: usize,
+    active_reconsideration: bool,
     total: usize,
     compared: usize,
     error: Option<String>,
     config: Option<RuntimeConfig>,
     next_config: Option<RuntimeConfig>,
+    prepared_references: Option<Arc<PreparedReferences>>,
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -39,6 +61,10 @@ pub struct Status {
     completed: i64,
     confirmed: i64,
     active_asset_id: Option<String>,
+    active_series_name: Option<String>,
+    active_target_name: Option<String>,
+    active_target_index: usize,
+    active_reconsideration: bool,
     total: usize,
     compared: usize,
     error: Option<String>,
@@ -83,6 +109,10 @@ impl Library {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             engine.running = false;
             engine.active = None;
+            engine.active_series_name = None;
+            engine.active_target_name = None;
+            engine.active_target_index = 0;
+            engine.active_reconsideration = false;
             if result.is_err() {
                 engine.error = Some("자동 분석 작업이 중단되었습니다. 재개해 주세요.".into());
             }
@@ -100,9 +130,10 @@ impl Library {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         engine.next_config = None;
         engine.stop.store(true, Ordering::Release);
+        engine.prepared_references = None;
     }
     pub fn character_incremental_status(&self) -> Result<Status> {
-        let (running, active, total, compared, error) = {
+        let (running, active, active_series_name, active_target_name, active_target_index, active_reconsideration, total, compared, error) = {
             let e = self
                 .character_incremental
                 .lock()
@@ -110,6 +141,10 @@ impl Library {
             (
                 e.running,
                 e.active.clone(),
+                e.active_series_name.clone(),
+                e.active_target_name.clone(),
+                e.active_target_index,
+                e.active_reconsideration,
                 e.total,
                 e.compared,
                 e.error.clone(),
@@ -133,6 +168,10 @@ impl Library {
             completed,
             confirmed,
             active_asset_id: active,
+            active_series_name,
+            active_target_name,
+            active_target_index,
+            active_reconsideration,
             total,
             compared,
             error,
@@ -161,6 +200,10 @@ impl Library {
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
                     e.active = Some(job.asset_id.clone());
+                    e.active_series_name = None;
+                    e.active_target_name = None;
+                    e.active_target_index = 0;
+                    e.active_reconsideration = job.generation > job.source_generation;
                     e.total = 0;
                     e.compared = 0;
                 }
@@ -184,10 +227,16 @@ impl Library {
                         .unwrap_or_else(std::sync::PoisonError::into_inner)
                         .error = None;
                 }
-                self.character_incremental
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .active = None;
+                {
+                    let mut e = self.character_incremental
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    e.active = None;
+                    e.active_series_name = None;
+                    e.active_target_name = None;
+                    e.active_target_index = 0;
+                    e.active_reconsideration = false;
+                }
                 Ok(true)
             })();
             if !matches!(attempt, Ok(true)) {
@@ -220,6 +269,7 @@ impl Library {
         config: &RuntimeConfig,
         stop: Arc<AtomicBool>,
     ) -> Result<()> {
+        let total_started = Instant::now();
         // Empty rosters require no model process and still get a durable checkpoint.
         let initial = {
             let c = self.connection()?;
@@ -279,38 +329,54 @@ impl Library {
         if context.targets.is_empty() {
             return Err(Error::Stale);
         }
-        let query = Source::capture(self, &job.relative_path, &job.content_hash)?;
-        let mut sources = BTreeMap::new();
-        for (id, (hash, path)) in &reference_paths {
-            if stop.load(Ordering::Acquire) {
-                return Err(Error::Stale);
-            }
-            sources.insert(id.clone(), Source::capture(self, path, hash)?);
+        let series_name = {
+            let c = self.connection()?;
+            active_scope_name(&c, job, &context)?
+        };
+        {
+            let mut e = self.character_incremental.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            e.active_series_name = series_name;
+            e.total = context.targets.len();
+            e.compared = 0;
         }
-        self.character_incremental
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .total = context.targets.len();
+        let query_started = Instant::now();
+        let query = Source::capture(self, &job.relative_path, &job.content_hash)?;
+        let query_capture = query_started.elapsed();
+        let reference_started = Instant::now();
+        let (prepared, references_reused) = self.prepare_incremental_references(
+            prepared_key(&context, &reference_paths, runtime)?, &reference_paths, &stop)?;
+        let reference_prepare = reference_started.elapsed();
         let is_reference = reference_paths
             .values()
             .any(|(hash, _)| hash == &job.content_hash);
+        let mut worker_prepare = Duration::ZERO;
+        let mut cached_compare = Duration::ZERO;
         let predictions=self.character_worker_pool.with(config,&cache,stop.clone(),false,|worker,worker_ready| {
             if worker_ready["runtimeFingerprint"]!=runtime {return Err(Error::Stale);}
             worker.send(&json!({"type":"load_query","assetId":job.asset_id,"hash":job.content_hash,"path":query.path()}))?;
             let loaded=worker.receive()?;
             if loaded["type"]!="query_loaded" || loaded["assetId"]!=job.asset_id || loaded["contentHash"]!=job.content_hash {return Err(Error::Worker("이미지 특징을 불러오지 못했습니다.".into()));}
             let mut predictions=Vec::new();
-            for target in &context.targets {
+            for (index, target) in context.targets.iter().enumerate() {
+                {
+                    let mut e = self.character_incremental.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    e.active_target_name = Some(target.display_name.clone());
+                    e.active_target_index = index + 1;
+                }
                 let refs=target.references.iter().chain(&target.learned_references).map(|r|{
                     let id=r.asset_id.as_ref().ok_or(Error::Stale)?;
-                    Ok(json!({"assetId":id,"hash":r.asset_hash,"path":sources.get(id).ok_or(Error::Stale)?.path()}))
+                    Ok(json!({"assetId":id,"hash":r.asset_hash,"path":prepared.sources.get(id).ok_or(Error::Stale)?.path()}))
                 }).collect::<Result<Vec<_>>>()?;
                 let hashes=refs.iter().map(|r|r["hash"].clone()).collect::<Vec<_>>();
+                let prepare_started = Instant::now();
                 worker.send(&json!({"type":"prepare","references":refs}))?;
                 let prepared=worker.receive()?;
+                worker_prepare += prepare_started.elapsed();
                 if prepared["type"]!="prepared" || prepared["referenceHashes"]!=json!(hashes) {return Err(Error::Worker("기준 이미지 준비 실패".into()));}
+                let compare_started = Instant::now();
                 worker.send(&json!({"type":"compare_query","assetId":job.asset_id,"hash":job.content_hash}))?;
                 let result=worker.receive()?;
+                cached_compare += compare_started.elapsed();
                 if result["type"]!="result" || result["assetId"]!=job.asset_id || result["contentHash"]!=job.content_hash
                     || result["referenceHashes"]!=json!(hashes) || result["baselineFingerprint"]!=BASELINE
                     || !result["passed"].is_boolean() || !result["distance"].as_f64().is_some_and(|v|v.is_finite()) {
@@ -322,20 +388,17 @@ impl Library {
             }
             Ok(predictions)
         })?;
-        // Full reads happen once per distinct source, outside the global DB lock.
+        let verification_started = Instant::now();
         query.verify(self)?;
-        for source in sources.values() {
-            source.verify(self)?;
-        }
+        self.check_incremental_references(&prepared)?;
+        let source_verification = verification_started.elapsed();
         let mut c = self.connection()?;
         let tx = c.transaction()?;
         if stop.load(Ordering::Acquire) {
             return Err(Error::Stale);
         }
         query.check_identity(self)?;
-        for source in sources.values() {
-            source.check_identity(self)?;
-        }
+        self.check_incremental_references(&prepared)?;
         let current: i64 = tx.query_row(
             "SELECT COALESCE(MAX(sequence),0) FROM character_decisions WHERE source_asset_id=?1",
             [&job.asset_id],
@@ -346,14 +409,51 @@ impl Library {
         }
         self.finalize_incremental(&tx, job, &context, &predictions, is_reference)?;
         query.check_identity(self)?;
-        for source in sources.values() {
-            source.check_identity(self)?;
-        }
+        self.check_incremental_references(&prepared)?;
         if stop.load(Ordering::Acquire) {
             return Err(Error::Stale);
         }
         tx.commit()?;
+        if std::env::var_os("LAKOMICS_CHARACTER_PROFILE").as_deref() == Some(std::ffi::OsStr::new("1")) {
+            eprintln!("{}", json!({"characterIncrementalProfile": {
+                "assetId": job.asset_id,
+                "queryCaptureMs": query_capture.as_secs_f64() * 1000.0,
+                "referencePrepareMs": reference_prepare.as_secs_f64() * 1000.0,
+                "referencesReused": references_reused,
+                "workerPrepareMs": worker_prepare.as_secs_f64() * 1000.0,
+                "cachedCompareMs": cached_compare.as_secs_f64() * 1000.0,
+                "sourceVerificationMs": source_verification.as_secs_f64() * 1000.0,
+                "totalMs": total_started.elapsed().as_secs_f64() * 1000.0
+            }}));
+        }
         Ok(())
+    }
+    fn prepare_incremental_references(&self, key: PreparedKey, reference_paths: &BTreeMap<String,(String,String)>, stop: &AtomicBool) -> Result<(Arc<PreparedReferences>,bool)> {
+        let cached=self.character_incremental.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+            .prepared_references.as_ref().filter(|prepared|prepared.key==key).cloned();
+        if let Some(prepared)=cached {
+            if prepared.check_identity(self).is_ok() { return Ok((prepared,true)); }
+            self.invalidate_incremental_references(&prepared);
+        }
+        let mut sources=BTreeMap::new();
+        for (id,(hash,path)) in reference_paths {
+            if stop.load(Ordering::Acquire) { return Err(Error::Stale); }
+            sources.insert(id.clone(),Arc::new(Source::capture(self,path,hash)?));
+        }
+        let prepared=Arc::new(PreparedReferences{key,sources});
+        self.character_incremental.lock().unwrap_or_else(std::sync::PoisonError::into_inner).prepared_references=Some(prepared.clone());
+        Ok((prepared,false))
+    }
+    fn check_incremental_references(&self, prepared: &Arc<PreparedReferences>) -> Result<()> {
+        if let Err(error)=prepared.check_identity(self) {
+            self.invalidate_incremental_references(prepared);
+            return Err(error);
+        }
+        Ok(())
+    }
+    fn invalidate_incremental_references(&self, prepared: &Arc<PreparedReferences>) {
+        let mut engine=self.character_incremental.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if engine.prepared_references.as_ref().is_some_and(|current|Arc::ptr_eq(current,prepared)) { engine.prepared_references=None; }
     }
     fn finalize_incremental(
         &self,
@@ -486,6 +586,58 @@ impl Library {
         tx.execute("UPDATE character_autotag_control SET completed=completed+1,confirmed=confirmed+?1 WHERE singleton=1",[accepted.len() as i64])?;
         Ok(())
     }
+}
+fn active_scope_name(
+    connection: &rusqlite::Connection,
+    job: &Job,
+    context: &Context,
+) -> Result<Option<String>> {
+    let series_ids = context
+        .targets
+        .iter()
+        .filter_map(|target| target.series_classification_id.as_deref())
+        .collect::<BTreeSet<_>>();
+    if series_ids.len() == 1 {
+        let series_id = *series_ids.first().ok_or(Error::Stale)?;
+        return Ok(connection
+            .query_row(
+                "SELECT name FROM classification_entries WHERE id=?1",
+                [series_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?);
+    }
+    if series_ids.is_empty() {
+        return Ok(None);
+    }
+    let scope_name = if job.classification_ids.len() == 1 {
+        connection
+            .query_row(
+                "SELECT name FROM classification_entries WHERE id=?1",
+                [&job.classification_ids[0]],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+    } else {
+        None
+    };
+    Ok(Some(scope_name.map_or_else(
+        || "여러 시리즈".into(),
+        |name| format!("{name} · 여러 시리즈"),
+    )))
+}
+
+fn prepared_key(context:&Context,reference_paths:&BTreeMap<String,(String,String)>,runtime:&str)->Result<PreparedKey>{
+    let targets=context.targets.iter().map(|target|{
+        let references=target.references.iter().chain(&target.learned_references).map(|reference|{
+            let id=reference.asset_id.as_ref().ok_or(Error::Stale)?;
+            let (hash,path)=reference_paths.get(id).ok_or(Error::Stale)?;
+            if hash!=&reference.asset_hash{return Err(Error::Stale);}
+            Ok((id.clone(),hash.clone(),path.clone()))
+        }).collect::<Result<Vec<_>>>()?;
+        Ok((target.id.clone(),target.fingerprint.clone(),references))
+    }).collect::<Result<Vec<_>>>()?;
+    Ok(PreparedKey{runtime:runtime.into(),targets})
 }
 fn box_array(value: &Value) -> Option<[f64; 4]> {
     let b = value.as_array()?;

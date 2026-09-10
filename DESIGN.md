@@ -66,7 +66,7 @@ PC의 기본 shell은 **Chrome 03b B 좌측 중심 구조**다.
 
 - **현재 위치 / 주요 단일 선택**: pale ivory `#DDD8CA` 계열 면과 작은 내부 사각 표식. 글자와 표식은 어두운 색.
 - **복수 선택 필터**: 중성 회색 면, 반복 사각 표식 없음. 누런/올리브 selection은 사용하지 않는다.
-- **자산 자체의 선택**: 좌상단 작은 사각 표식 + 이미지에만 약한 중성 회색 음영. 바깥 selection outline과 metadata 영역의 색·여백 변화로 선택을 표현하지 않는다.
+- **자산 자체의 선택**: 좌상단 작은 사각 표식 + 이미지에만 청록색 선택 음영(`--asset-selection-tint`). 2026-09-06 사용자가 기존 중성 회색 음영의 낮은 가시성을 이유로 승인한 값이다. 바깥 selection outline과 metadata 영역의 색·여백 변화로 선택을 표현하지 않는다.
 - keyboard focus는 selection과 별도 상태다. focus가 이동했다고 선택으로 보이거나, 선택 때문에 focus가 사라지면 안 된다.
 - 일반 icon action은 quiet하게 두고, 한 화면에 강한 primary surface를 여러 개 만들지 않는다.
 

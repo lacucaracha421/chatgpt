@@ -18,6 +18,7 @@ export interface CharacterApi {
   targets(): Promise<CharacterTarget[]>;
   save(request: TargetDraft, strictSelection?: boolean): Promise<CharacterTarget>;
   refs(targetId: string, expectedRevision: number, assetIds: string[], strictSelection?: boolean): Promise<CharacterTarget>;
+  learnReferences?(targetId: string, expectedRevision: number, assetIds: string[]): Promise<CharacterTarget>;
   excludeReference?(targetId: string, expectedRevision: number, assetId: string): Promise<CharacterTarget>;
   runs(): Promise<ScanStatus[]>;
   start(targetId: string, expectedFingerprint: string, automatic?: boolean): Promise<ScanStatus>;
@@ -35,6 +36,7 @@ export const characterApi: CharacterApi = {
   targets: () => invoke("list_character_targets"),
   save: (request, strictSelection = false) => invoke("save_character_target", { request, strictSelection }),
   refs: (targetId, expectedRevision, assetIds, strictSelection = false) => invoke("replace_character_references", { targetId, expectedRevision, assetIds, strictSelection }),
+  learnReferences: (targetId, expectedRevision, assetIds) => invoke("add_character_learned_references", { targetId, expectedRevision, assetIds }),
   excludeReference: (targetId, expectedRevision, assetId) => invoke("exclude_character_reference", { targetId, expectedRevision, assetId }),
   runs: () => invoke("character_scan_runs"),
   start: (targetId, expectedFingerprint, automatic = false) => invoke("start_character_scan", { targetId, expectedFingerprint, automatic }),

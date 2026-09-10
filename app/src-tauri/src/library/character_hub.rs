@@ -2,6 +2,7 @@
 use super::{
     characters::{Error, Result},
     models::AssetSummary,
+    query::asset_summaries_by_ids,
     Library,
 };
 use rusqlite::{params, Connection, OptionalExtension};
@@ -139,11 +140,15 @@ impl Library {
         } else {
             None
         };
-        let items = ids
+        let page_ids = ids
             .iter()
             .take(query.limit)
-            .map(|(id, _)| self.get_asset(id).map_err(Error::from))
-            .collect::<Result<Vec<_>>>()?;
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>();
+        let items = {
+            let connection = self.connection()?;
+            asset_summaries_by_ids(&connection, &page_ids)?
+        };
         Ok(BrowsePage {
             items,
             next_cursor,

@@ -1,5 +1,7 @@
 use super::super::characters::tests::Fixture;
 use super::*;
+use sha2::{Digest, Sha256};
+use std::path::PathBuf;
 
 fn config(f: &Fixture) -> RuntimeConfig {
     let script = f.temp.path().join("worker.py");
@@ -18,6 +20,7 @@ for line in sys.stdin:
     if r['type']=='compare_query' and pathlib.Path(__file__).with_name('change-reference').exists():
         pathlib.Path(__file__).with_name('assets').joinpath('asset-0.png').write_bytes(b'changed')
     if r['type']=='prepare':
+        record('prepare_paths:'+json.dumps([i['path'] for i in r['references']]))
         refs=[i['hash'] for i in r['references']]
         emit({'type':'prepared','referenceHashes':refs})
     elif r['type']=='load_query':
@@ -37,11 +40,19 @@ for line in sys.stdin:
         models: f.temp.path().into(),
     }
 }
+fn prepare_paths(config: &RuntimeConfig) -> Vec<Vec<String>> {
+    std::fs::read_to_string(config.script.with_extension("log")).unwrap().lines()
+        .filter_map(|line| line.strip_prefix("prepare_paths:"))
+        .map(|paths| serde_json::from_str(paths).unwrap()).collect()
+}
 fn run(f: &Fixture, config: &RuntimeConfig, id: &str) {
+    run_with_cause(f, config, id, character_autotag::Cause::Ingestion);
+}
+fn run_with_cause(f: &Fixture, config: &RuntimeConfig, id: &str, cause: character_autotag::Cause) {
     character_autotag::enqueue(
         &f.library.connection().unwrap(),
         id,
-        character_autotag::Cause::Ingestion,
+        cause,
     )
     .unwrap();
     let job = f.library.claim_character_autotag().unwrap().unwrap();
@@ -50,6 +61,76 @@ fn run(f: &Fixture, config: &RuntimeConfig, id: &str) {
         .compare_incremental_asset(&job, config, Arc::new(AtomicBool::new(false)))
         .unwrap();
 }
+#[test]
+fn mixed_root_work_labels_the_scope_instead_of_the_first_series() {
+    let f = Fixture::new();
+    let first = f.ready("A");
+    let root: String = f
+        .library
+        .connection()
+        .unwrap()
+        .query_row(
+            "SELECT parent_id FROM classification_entries WHERE id=?1",
+            [&f.series],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let second_series = f
+        .library
+        .create_classification(crate::library::models::CreateClassification {
+            kind: crate::library::models::ClassificationKind::Tag,
+            name: "Second series".into(),
+            parent_id: Some(root.clone()),
+        })
+        .unwrap()
+        .id;
+    let second = f
+        .library
+        .save_character_target(crate::library::characters::TargetDraft {
+            id: None,
+            expected_revision: None,
+            series_classification_id: Some(second_series),
+            linked_classification_id: None,
+            display_name: "B".into(),
+            description: String::new(),
+            thumbnail_asset_id: None,
+            enabled: true,
+        })
+        .unwrap();
+    let job = Job {
+        asset_id: "asset-5".into(),
+        generation: 2,
+        source_generation: 1,
+        content_hash: String::new(),
+        relative_path: String::new(),
+        classification_ids: vec![root],
+        state: "processing".into(),
+        review_state: "unresolved".into(),
+        claim_id: None,
+        attempts: 1,
+        error: None,
+    };
+    let connection = f.library.connection().unwrap();
+    let mixed = Context {
+        hash: String::new(),
+        runtime: String::new(),
+        scope: json!({}),
+        targets: vec![first.clone(), second],
+    };
+    assert_eq!(
+        active_scope_name(&connection, &job, &mixed).unwrap().as_deref(),
+        Some("Root · 여러 시리즈")
+    );
+    let single = Context {
+        targets: vec![first],
+        ..mixed
+    };
+    assert_eq!(
+        active_scope_name(&connection, &job, &single).unwrap().as_deref(),
+        Some("Series is a tag")
+    );
+}
+
 #[test]
 #[ignore = "requires explicit test Python; fake protocol worker in TEMP"]
 fn native_auto_and_manual_scan_share_one_worker_and_keep_review_durable() {
@@ -95,10 +176,9 @@ fn native_auto_and_manual_scan_share_one_worker_and_keep_review_durable() {
             .unwrap()
             .unwrap()
             .state,
-        "pending"
+            "completed"
     );
-    let job = f.library.claim_character_autotag().unwrap().unwrap();
-    f.library.compare_incremental_asset(&job, &config, Arc::new(AtomicBool::new(false))).unwrap();
+    assert!(f.library.claim_character_autotag().unwrap().is_none());
     assert_eq!(f.library.character_relations_for_asset("asset-5").unwrap(), vec![target.id]);
     assert_eq!(f.library.character_autotag_job("asset-5").unwrap().unwrap().state, "completed");
 }
@@ -160,6 +240,31 @@ fn same_scope_history_growth_does_not_add_queries_or_worker_starts() {
             "unresolved"
         );
     }
+    let paths=prepare_paths(&config);
+    assert_eq!(paths.len(),4);
+    assert_eq!(paths[0],paths[2],"warm candidates must reuse target A snapshots");
+    assert_eq!(paths[1],paths[3],"warm candidates must reuse target B snapshots");
+    assert!(f.library.character_incremental.lock().unwrap().prepared_references.is_some());
+    f.library.stop_character_scan();
+    assert!(f.library.character_incremental.lock().unwrap().prepared_references.is_none());
+}
+
+#[test]
+#[ignore = "requires explicit test Python; fake protocol worker in TEMP"]
+fn anchors_and_explicit_learning_invalidate_prepared_reference_snapshots() {
+    let f=Fixture::new(); let mut target=f.ready("A"); let config=config(&f);
+    run(&f,&config,"asset-5"); let first=prepare_paths(&config).last().unwrap().clone();
+    f.library.connection().unwrap().execute("UPDATE asset_classifications SET classification_id=?1 WHERE asset_id='asset-6'",[&f.child]).unwrap();
+    let mut anchors=f.refs[..4].to_vec(); anchors.push("asset-6".into());
+    target=f.library.replace_character_references(&target.id,target.revision,&anchors).unwrap();
+    run_with_cause(&f,&config,"asset-5",character_autotag::Cause::Reconsideration);
+    let changed_anchors=prepare_paths(&config).last().unwrap().clone(); assert_ne!(first,changed_anchors);
+    target=f.library.add_character_learned_references(&target.id,target.revision,&["asset-5".into()]).unwrap();
+    run_with_cause(&f,&config,"asset-5",character_autotag::Cause::Reconsideration);
+    let with_learning=prepare_paths(&config).last().unwrap().clone(); assert_eq!(with_learning.len(),6); assert_ne!(changed_anchors,with_learning);
+    f.library.exclude_character_reference(&target.id,target.revision,"asset-5").unwrap();
+    run_with_cause(&f,&config,"asset-5",character_autotag::Cause::Reconsideration);
+    let without_learning=prepare_paths(&config).last().unwrap().clone(); assert_eq!(without_learning.len(),5); assert_ne!(with_learning,without_learning);
 }
 #[test]
 #[ignore = "requires explicit test Python; fake protocol worker in TEMP"]
@@ -236,6 +341,62 @@ fn externally_changed_reference_cannot_authorize_automatic_decisions() {
             .unwrap(),
         0
     );
+    assert!(f.library.character_incremental.lock().unwrap().prepared_references.is_none());
+}
+
+#[test]
+#[ignore = "real external fixture and models; explicit environment required"]
+fn real_native_incremental_queue_reuses_kisaki_references() {
+    let fixture = PathBuf::from(std::env::var_os("LAKOMICS_CHARACTER_TEST_FIXTURE").unwrap());
+    let mut refs = std::fs::read_dir(fixture.join("refs")).unwrap()
+        .map(|entry| entry.unwrap().path()).filter(|path| path.is_file()).collect::<Vec<_>>();
+    let mut queries = std::fs::read_dir(fixture.join("target")).unwrap()
+        .map(|entry| entry.unwrap().path()).filter(|path| path.is_file()).collect::<Vec<_>>();
+    refs.sort(); queries.sort();
+    assert_eq!(refs.len(), 5); assert!(queries.len() >= 2);
+    let f = Fixture::new();
+    for (index, source) in refs.iter().chain(queries.iter().take(2)).enumerate() {
+        let destination = f.temp.path().join(format!("assets/asset-{index}.png"));
+        std::fs::copy(source, &destination).unwrap();
+        let bytes = std::fs::read(&destination).unwrap();
+        let hash = Sha256::digest(&bytes).iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+        f.library.connection().unwrap().execute(
+            "UPDATE assets SET content_hash=?2,byte_size=?3 WHERE id=?1",
+            params![format!("asset-{index}"), hash, bytes.len() as i64],
+        ).unwrap();
+    }
+    f.library.connection().unwrap().execute(
+        "UPDATE asset_classifications SET classification_id=?1 WHERE asset_id='asset-6'",
+        [&f.series],
+    ).unwrap();
+    let target = f.ready("Kisaki");
+    let config = RuntimeConfig {
+        python: std::env::var_os("LAKOMICS_CHARACTER_TEST_PYTHON").unwrap().into(),
+        script: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../character-runtime/scan_worker.py"),
+        models: std::env::var_os("LAKOMICS_CHARACTER_TEST_MODELS").unwrap().into(),
+    };
+    f.library.start_character_scan(&target.id, &target.fingerprint, config.clone()).unwrap();
+    let wait_started = std::time::Instant::now();
+    loop {
+        let status = f.library.character_scan_status().unwrap();
+        assert!(wait_started.elapsed() < Duration::from_secs(60), "{status:?}");
+        if status.state != "running" {
+            assert_eq!(status.state, "completed", "{status:?}");
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let started = std::time::Instant::now();
+    run(&f, &config, "asset-5");
+    let first = started.elapsed();
+    let started = std::time::Instant::now();
+    run(&f, &config, "asset-6");
+    let second = started.elapsed();
+    assert!(f.library.character_incremental.lock().unwrap().prepared_references.is_some());
+    for id in ["asset-5", "asset-6"] {
+        assert_eq!(f.library.character_autotag_job(id).unwrap().unwrap().state, "completed");
+    }
+    println!("kisaki incremental first={first:?} warm={second:?}");
 }
 
 #[test]

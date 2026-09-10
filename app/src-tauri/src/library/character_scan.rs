@@ -4,7 +4,7 @@ use super::{
     characters::{self, Error, Result, Target},
     Library,
 };
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -79,7 +79,11 @@ impl Library {
     }
 
     pub fn start_character_scan_mode(
-        &self, target_id: &str, expected_fingerprint: &str, config: RuntimeConfig, automatic: bool,
+        &self,
+        target_id: &str,
+        expected_fingerprint: &str,
+        config: RuntimeConfig,
+        automatic: bool,
     ) -> Result<ScanStatus> {
         let target = self.get_character_target(target_id)?;
         if !target.ready {
@@ -132,13 +136,33 @@ impl Library {
         std::thread::spawn(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 library.run_character_scan(&target, config, cancel.clone(), automatic)?;
-                if automatic || cancel.load(Ordering::Acquire) { return Ok(0); }
-                let ids = {
-                    let state = library.character_scan.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                    state.results.values().filter(|row| matches!(row.state.as_str(), "recommended" | "unmatched"))
-                        .map(|row| row.asset_id.clone()).collect::<Vec<_>>()
+                if automatic || cancel.load(Ordering::Acquire) {
+                    return Ok(0);
+                }
+                let (ids, runtime_fingerprint) = {
+                    let state = library
+                        .character_scan
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let runtime_fingerprint = state
+                        .status
+                        .as_ref()
+                        .and_then(|status| status.runtime_fingerprint.clone())
+                        .ok_or(Error::Stale)?;
+                    let ids = state
+                        .results
+                        .values()
+                        .filter(|row| matches!(row.state.as_str(), "recommended" | "unmatched"))
+                        .map(|row| row.asset_id.clone())
+                        .collect::<Vec<_>>();
+                    (ids, runtime_fingerprint)
                 };
-                library.queue_analyzed_character_assets(&target, &ids, &cancel)
+                library.queue_analyzed_character_assets(
+                    &target,
+                    &ids,
+                    &runtime_fingerprint,
+                    &cancel,
+                )
             }));
             let mut state = library
                 .character_scan
@@ -149,7 +173,10 @@ impl Library {
                 status.state = "cancelled".into();
             } else {
                 match result {
-                    Ok(Ok(queued)) => { status.automatic_queued = queued; status.state = "completed".into(); },
+                    Ok(Ok(queued)) => {
+                        status.automatic_queued = queued;
+                        status.state = "completed".into();
+                    }
                     Ok(Err(Error::Stale)) => {
                         status.state = "stale".into();
                         status.error =
@@ -274,7 +301,8 @@ impl Library {
                 .series_classification_id
                 .as_deref()
                 .ok_or(Error::Stale)?,
-            id, automatic,
+            id,
+            automatic,
         )?;
         Ok(ScanInput {
             id: id.into(),
@@ -327,7 +355,18 @@ impl Library {
 
     fn ensure_current_target(&self, target: &Target) -> Result<()> {
         let current = self.get_character_target(&target.id)?;
-        if current.fingerprint != target.fingerprint || current.learned_references.iter().map(|r| (&r.asset_id,&r.asset_hash)).collect::<Vec<_>>() != target.learned_references.iter().map(|r| (&r.asset_id,&r.asset_hash)).collect::<Vec<_>>() {
+        if current.fingerprint != target.fingerprint
+            || current
+                .learned_references
+                .iter()
+                .map(|r| (&r.asset_id, &r.asset_hash))
+                .collect::<Vec<_>>()
+                != target
+                    .learned_references
+                    .iter()
+                    .map(|r| (&r.asset_id, &r.asset_hash))
+                    .collect::<Vec<_>>()
+        {
             return Err(Error::Stale);
         }
         Ok(())
@@ -338,7 +377,11 @@ impl Library {
         self.character_scan_inputs_mode(target, false)
     }
 
-    fn character_scan_inputs_mode(&self, target: &Target, automatic: bool) -> Result<Vec<ScanInput>> {
+    fn character_scan_inputs_mode(
+        &self,
+        target: &Target,
+        automatic: bool,
+    ) -> Result<Vec<ScanInput>> {
         let inputs = {
             let connection = self.connection()?;
             let mut statement = connection.prepare("WITH RECURSIVE scope(id) AS (
@@ -351,13 +394,16 @@ impl Library {
                 AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND  (ac.classification_id IN (SELECT id FROM scope) OR (?3 AND ac.classification_id IN (SELECT id FROM ancestors WHERE parent_id IS NULL))))
                 AND NOT EXISTS(SELECT 1 FROM character_references r WHERE r.target_id=?2 AND r.asset_id=a.id) ORDER BY a.id")?;
             let rows = statement
-                .query_map(params![target.series_classification_id, target.id, automatic], |r| {
-                    Ok(ScanInput {
-                        id: r.get(0)?,
-                        hash: r.get(1)?,
-                        path: r.get(2)?,
-                    })
-                })?
+                .query_map(
+                    params![target.series_classification_id, target.id, automatic],
+                    |r| {
+                        Ok(ScanInput {
+                            id: r.get(0)?,
+                            hash: r.get(1)?,
+                            path: r.get(2)?,
+                        })
+                    },
+                )?
                 .collect::<std::result::Result<Vec<_>, _>>()?;
             rows
         };
@@ -372,7 +418,11 @@ impl Library {
         automatic: bool,
     ) -> Result<()> {
         let references = self.reference_inputs(target)?;
-        let inputs = self.character_scan_inputs_mode(target, automatic)?.into_iter().filter(|input| !references.iter().any(|r| r.hash == input.hash)).collect::<Vec<_>>();
+        let inputs = self
+            .character_scan_inputs_mode(target, automatic)?
+            .into_iter()
+            .filter(|input| !references.iter().any(|r| r.hash == input.hash))
+            .collect::<Vec<_>>();
         {
             let mut state = self
                 .character_scan
@@ -392,8 +442,14 @@ impl Library {
                 );
             }
         }
-        let cache=self.root.join(".cache/characters");
-        let ready=self.character_worker_pool.with(&config,&cache,cancel.clone(),!automatic,|_,ready| Ok(ready.clone()))?;
+        let cache = self.root.join(".cache/characters");
+        let ready = self.character_worker_pool.with(
+            &config,
+            &cache,
+            cancel.clone(),
+            !automatic,
+            |_, ready| Ok(ready.clone()),
+        )?;
         if ready["type"] != "ready" || ready["baselineFingerprint"] != BASELINE {
             return Err(worker_error(&ready));
         }
@@ -412,18 +468,29 @@ impl Library {
         let mut pending = Vec::new();
         for input in inputs {
             let key = Comparisons::key(self, target, runtime, &input).ok();
-            if let Some(mut row) = key.as_deref().map(|key| comparisons.get(key)).transpose()?.flatten() {
+            if let Some(mut row) = key
+                .as_deref()
+                .map(|key| comparisons.get(key))
+                .transpose()?
+                .flatten()
+            {
                 if let Some(evidence) = row.evidence.as_mut() {
                     evidence["automaticScope"] = json!(automatic);
                 }
-                self.character_scan.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .results.insert(input.id, row);
+                self.character_scan
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .results
+                    .insert(input.id, row);
             } else {
                 pending.push((input, key));
             }
         }
         {
-            let mut state = self.character_scan.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut state = self
+                .character_scan
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let reused = state.results.len() - pending.len();
             let status = state.status.as_mut().unwrap();
             status.total = pending.len();
@@ -448,17 +515,32 @@ impl Library {
             let event = match current {
                 Ok(current) if current.hash == input.hash => match self.wire_input(&current) {
                     Ok(mut request) => {
-                        if std::env::var_os("LAKOMICS_CHARACTER_PROFILE").as_deref() == Some(std::ffi::OsStr::new("1")) {
-                            eprintln!("character_profile native_input_verification_ms={:.3}", verification_start.elapsed().as_secs_f64()*1000.0);
+                        if std::env::var_os("LAKOMICS_CHARACTER_PROFILE").as_deref()
+                            == Some(std::ffi::OsStr::new("1"))
+                        {
+                            eprintln!(
+                                "character_profile native_input_verification_ms={:.3}",
+                                verification_start.elapsed().as_secs_f64() * 1000.0
+                            );
                         }
                         request["type"] = json!("query");
-                        let event=self.character_worker_pool.with(&config,&cache,cancel.clone(),!automatic,|worker,_| {
-                            worker.send(&json!({"type":"prepare","references":refs}))?;
-                            let prepared=worker.receive()?;
-                            if prepared["type"]!="prepared" || prepared["referenceHashes"]!=json!(hashes) { return Err(worker_error(&prepared)); }
-                            worker.send(&request)?;
-                            worker.receive()
-                        })?;
+                        let event = self.character_worker_pool.with(
+                            &config,
+                            &cache,
+                            cancel.clone(),
+                            !automatic,
+                            |worker, _| {
+                                worker.send(&json!({"type":"prepare","references":refs}))?;
+                                let prepared = worker.receive()?;
+                                if prepared["type"] != "prepared"
+                                    || prepared["referenceHashes"] != json!(hashes)
+                                {
+                                    return Err(worker_error(&prepared));
+                                }
+                                worker.send(&request)?;
+                                worker.receive()
+                            },
+                        )?;
                         if event["assetId"] != input.id
                             || (event["type"] != "result" && event["type"] != "asset_error")
                         {
@@ -487,10 +569,12 @@ impl Library {
                 {
                     return Err(worker_error(&event));
                 }
-                match self.current_input_mode(target, &input.id, automatic).and_then(|current| {
-                    if current.hash != input.hash {
-                        return Err(Error::Stale);
-                    }
+                match self
+                    .current_input_mode(target, &input.id, automatic)
+                    .and_then(|current| {
+                        if current.hash != input.hash {
+                            return Err(Error::Stale);
+                        }
                     self.verify_input(&current)
                 }) {
                     Ok(()) => {
@@ -502,7 +586,8 @@ impl Library {
                         .into();
                         row.evidence = Some(event.clone());
                         row.evidence.as_mut().unwrap()["runtimeFingerprint"] = json!(runtime);
-                        row.evidence.as_mut().unwrap()["learnedReferences"] = json!(target.learned_references);
+                        row.evidence.as_mut().unwrap()["learnedReferences"] =
+                            json!(target.learned_references);
                         row.evidence.as_mut().unwrap()["automaticScope"] = json!(automatic);
                     }
                     Err(_) => row.state = "stale".into(),
@@ -510,7 +595,9 @@ impl Library {
             } else {
                 row.error = Some(event["error"].as_str().unwrap_or("이미지 분석 실패").into());
             }
-            if let Some(key) = comparison_key { comparisons.put(&target.id, &key, &row)?; }
+            if let Some(key) = comparison_key {
+                comparisons.put(&target.id, &key, &row)?;
+            }
             self.update_scan_counters(&event);
             let mut state = self
                 .character_scan
@@ -576,9 +663,12 @@ impl Library {
     ) -> Result<BTreeMap<String, Value>> {
         let id = request.scan_id.as_deref().ok_or(Error::Stale)?;
         let (status, rows) = if id.starts_with("autotag:") {
-            let (status,row)=super::character_autotag::evidence_row(connection,id,&target.id)?.ok_or(Error::Stale)?;
-            if request.asset_ids.iter().any(|asset| asset!=&row.asset_id) { return Err(Error::Stale); }
-            (status,vec![row])
+            let (status, row) = super::character_autotag::evidence_row(connection, id, &target.id)?
+                .ok_or(Error::Stale)?;
+            if request.asset_ids.iter().any(|asset| asset != &row.asset_id) {
+                return Err(Error::Stale);
+            }
+            (status, vec![row])
         } else {
             let state = self
                 .character_scan
@@ -629,14 +719,9 @@ impl Library {
                 for reference in learned {
                     let learned_id = reference["assetId"].as_str().ok_or(Error::Stale)?;
                     let learned_hash = reference["assetHash"].as_str().ok_or(Error::Stale)?;
-                    let valid: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM character_relations r JOIN character_decisions d ON d.sequence=r.sequence
-                        WHERE r.target_id=?1 AND r.asset_id=?2 AND d.origin='manual' AND d.asset_hash=?3
-                        AND NOT EXISTS(SELECT 1 FROM character_reference_exclusions x WHERE x.target_id=r.target_id AND x.asset_id=r.asset_id)
-                        AND NOT EXISTS(SELECT 1 FROM character_relations other WHERE other.asset_id=r.asset_id AND other.target_id<>r.target_id))", params![target.id,learned_id,learned_hash], |r| r.get(0))?;
-                    if !valid { return Err(Error::Stale); }
-                    let (hash,path) = characters::scoped_image(connection,series,learned_id)?;
-                    if hash != learned_hash { return Err(Error::Stale); }
-                    self.verify_input(&ScanInput {id:learned_id.into(),hash,path})?;
+                    let path: Option<String> = connection.query_row("SELECT a.relative_path FROM character_learned_references l JOIN assets a ON a.id=l.asset_id WHERE l.target_id=?1 AND l.asset_id=?2 AND l.asset_hash=?3 AND a.content_hash=?3 AND a.status='normal' AND a.media_kind='image'", params![target.id,learned_id,learned_hash], |row| row.get(0)).optional()?;
+                    let path = path.ok_or(Error::Stale)?;
+                    self.verify_input(&ScanInput {id:learned_id.into(),hash:learned_hash.into(),path})?;
                 }
             }
             Ok((row.asset_id, json!({"scanId":id,"runtimeFingerprint":status.runtime_fingerprint,"prediction":evidence,"references":target.references})))
@@ -658,10 +743,18 @@ fn worker_error(event: &Value) -> Error {
 mod tests;
 
 pub(super) fn automatic_evidence(evidence: Option<&Value>) -> bool {
-    let Some(e) = evidence else { return false; };
-    if e["passed"] != true || e["wholeFallback"] == true { return false; }
-    let Some(crop) = e["bestQueryCrop"].as_u64() else { return false; };
-    e["evidence"].as_array().and_then(|rows| rows.get(crop as usize))
+    let Some(e) = evidence else {
+        return false;
+    };
+    if e["passed"] != true || e["wholeFallback"] == true {
+        return false;
+    }
+    let Some(crop) = e["bestQueryCrop"].as_u64() else {
+        return false;
+    };
+    e["evidence"]
+        .as_array()
+        .and_then(|rows| rows.get(crop as usize))
         .and_then(|row| row["matchedReferences"].as_array())
         .is_some_and(|refs| refs.len() >= 3)
 }
@@ -669,23 +762,37 @@ pub(super) fn automatic_evidence(evidence: Option<&Value>) -> bool {
 // Compare geometry as well as crop indexes: duplicate/overlapping detections are one person.
 pub(super) fn evidence_regions(evidence: Option<&Value>, minimum: usize) -> Option<Vec<[f64; 4]>> {
     let e = evidence?;
-    if e["wholeFallback"] == true { return None; }
+    if e["wholeFallback"] == true {
+        return None;
+    }
     let boxes = e["queryBoxes"].as_array()?;
     let mut regions = Vec::new();
     for (index, row) in e["evidence"].as_array()?.iter().enumerate() {
-        if row["matchedReferences"].as_array()?.len() < minimum { continue; }
+        if row["matchedReferences"].as_array()?.len() < minimum {
+            continue;
+        }
         let b = boxes.get(index)?.as_array()?;
-        if b.len() != 4 { return None; }
-        let region = [b[0].as_f64()?, b[1].as_f64()?, b[2].as_f64()?, b[3].as_f64()?];
-        if region.iter().any(|v| !v.is_finite()) || region[2] <= region[0] || region[3] <= region[1] { return None; }
+        if b.len() != 4 {
+            return None;
+        }
+        let region = [
+            b[0].as_f64()?,
+            b[1].as_f64()?,
+            b[2].as_f64()?,
+            b[3].as_f64()?,
+        ];
+        if region.iter().any(|v| !v.is_finite()) || region[2] <= region[0] || region[3] <= region[1]
+        {
+            return None;
+        }
         regions.push(region);
     }
     Some(regions)
 }
 
 pub(super) fn same_person(a: &[f64; 4], b: &[f64; 4]) -> bool {
-    let intersection = (a[2].min(b[2]) - a[0].max(b[0])).max(0.0)
-        * (a[3].min(b[3]) - a[1].max(b[1])).max(0.0);
-    let smaller = ((a[2]-a[0])*(a[3]-a[1])).min((b[2]-b[0])*(b[3]-b[1]));
+    let intersection =
+        (a[2].min(b[2]) - a[0].max(b[0])).max(0.0) * (a[3].min(b[3]) - a[1].max(b[1])).max(0.0);
+    let smaller = ((a[2] - a[0]) * (a[3] - a[1])).min((b[2] - b[0]) * (b[3] - b[1]));
     intersection / smaller >= 0.5
 }

@@ -102,6 +102,7 @@ pub(super) enum Cause {
     Restore,
     SimilarityResolution,
     Reconsideration,
+    ManualScanEnrollment,
     AutomaticFinalization,
 }
 
@@ -144,7 +145,7 @@ pub(super) fn enqueue(
     };
     let classification =
         serde_json::to_string(&folders(connection, asset_id)?).expect("string list");
-    let force = cause == Cause::Reconsideration;
+    let force = matches!(cause, Cause::Reconsideration | Cause::ManualScanEnrollment);
     let changed = connection.execute("INSERT INTO character_autotag_jobs
         (asset_id,generation,content_hash,relative_path,classification_ids,state,review_state,priority,updated_at)
         VALUES(?1,1,?2,?3,?4,'pending','unresolved',?5,?6)
@@ -177,32 +178,65 @@ impl Library {
     /// pipeline as new arrivals. The queue rechecks all competing characters;
     /// no prediction or user decision is directly applied here.
     pub(super) fn queue_analyzed_character_assets(
-        &self, target: &super::characters::Target, asset_ids: &[String],
+        &self,
+        target: &super::characters::Target,
+        asset_ids: &[String],
+        runtime_fingerprint: &str,
         cancel: &std::sync::atomic::AtomicBool,
     ) -> Result<usize> {
         use std::sync::atomic::Ordering;
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
         let current = self.read_character_target(&transaction, &target.id)?;
-        if current.fingerprint != target.fingerprint { return Err(Error::Stale); }
-        let Some(series) = current.series_classification_id.as_deref() else { return Err(Error::Stale); };
+        if current.fingerprint != target.fingerprint {
+            return Err(Error::Stale);
+        }
+        let Some(series) = current.series_classification_id.as_deref() else {
+            return Err(Error::Stale);
+        };
         let enabled: bool = transaction.query_row(
             "SELECT EXISTS(SELECT 1 FROM character_series WHERE classification_id=?1 AND auto_classify=1)",
             [series], |r| r.get(0))?;
-        if !enabled { return Ok(0); }
+        if !enabled {
+            return Ok(0);
+        }
+        let learned_references = serde_json::to_value(&current.learned_references)?;
         let mut queued = 0;
         for id in asset_ids {
-            if cancel.load(Ordering::Acquire) { return Ok(0); }
+            if cancel.load(Ordering::Acquire) {
+                return Ok(0);
+            }
             // Ignore images moved out of this series, trashed, or made unavailable
             // since the manual scan. Enrollment always snapshots current inputs.
-            if super::character_hub::candidate_image_mode(&transaction, series, id, false).is_err() { continue; }
+            if super::character_hub::candidate_image_mode(&transaction, series, id, false).is_err()
+            {
+                continue;
+            }
             let in_flight: bool = transaction.query_row(
                 "SELECT EXISTS(SELECT 1 FROM character_autotag_jobs WHERE asset_id=?1 AND state IN ('pending','processing'))",
                 [id], |r| r.get(0))?;
-            if in_flight { continue; }
-            queued += usize::from(enqueue(&transaction, id, Cause::Reconsideration)?);
+            if in_flight {
+                continue;
+            }
+            let current_prediction = latest_evidence(&transaction, id, &current.id)?
+                .map(|evidence_id| evidence_row(&transaction, &evidence_id, &current.id))
+                .transpose()?
+                .flatten()
+                .is_some_and(|(status, result)| {
+                    status.target_fingerprint == current.fingerprint
+                        && status.runtime_fingerprint.as_deref() == Some(runtime_fingerprint)
+                        && result.evidence.as_ref().is_some_and(|evidence| {
+                            evidence.get("learnedReferences") == Some(&learned_references)
+                        })
+                });
+            if current_prediction {
+                continue;
+            }
+            queued += usize::from(enqueue(&transaction, id, Cause::ManualScanEnrollment)?);
         }
-        if cancel.load(Ordering::Acquire) { return Ok(0); }
+        if cancel.load(Ordering::Acquire) {
+            return Ok(0);
+        }
         transaction.commit()?;
         Ok(queued)
     }
@@ -219,7 +253,9 @@ impl Library {
             ORDER BY j.asset_id LIMIT 200")?
             .query_map([series_id], |r| r.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
-        for id in &ids { enqueue(&tx, id, Cause::Reconsideration)?; }
+        for id in &ids {
+            enqueue(&tx, id, Cause::Reconsideration)?;
+        }
         tx.commit()?;
         Ok(ids.len())
     }

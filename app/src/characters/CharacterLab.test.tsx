@@ -16,14 +16,30 @@ function mount(api = createCharacterFixture()) {
 
 describe("Character review", () => {
   it("binds approval to the shown scan and does not move a folder", async () => {
-    const api = createCharacterFixture(), decide = vi.spyOn(api, "decide"); mount(api);
+    const api = createCharacterFixture(), decide = vi.spyOn(api, "decide"), targets = vi.spyOn(api, "targets"); mount(api);
     const user = userEvent.setup();
     await user.click(await screen.findByRole("option", { name: "이미지 5.webp" }));
     const panel = screen.getByRole("complementary", { name: "선택 이미지 판단" });
     await user.click(within(panel).getAllByRole("button", { name: "승인" })[0]!);
     await waitFor(() => expect(decide).toHaveBeenCalledWith(expect.objectContaining({ targetId: "hina", assetIds: ["image-5"], expectedFingerprint: "fingerprint-hina", baselineFingerprint: "runtime", scanId: "scan-hina", decision: "accepted" })));
+    await waitFor(() => expect(screen.queryByRole("option", { name: "이미지 5.webp" })).not.toBeInTheDocument());
+    expect(targets).toHaveBeenCalledTimes(1);
     await user.click(screen.getByRole("button", { name: "확정" }));
     expect(await screen.findByRole("option", { name: "이미지 5.webp" })).toBeInTheDocument();
+  });
+
+  it("keeps approval separate from explicit learning", async () => {
+    const api = createCharacterFixture(), learn = vi.spyOn(api, "learnReferences"); mount(api);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("option", { name: "이미지 5.webp" }));
+    await user.click(within(screen.getByRole("complementary", { name: "선택 이미지 판단" })).getByRole("button", { name: "승인" }));
+    await waitFor(() => expect(screen.getByText("1장 확정")).toBeInTheDocument());
+    expect(learn).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "확정" }));
+    await user.click(await screen.findByRole("option", { name: "이미지 5.webp" }));
+    await user.click(await screen.findByRole("button", { name: "학습에 추가" }));
+    await waitFor(() => expect(learn).toHaveBeenCalledWith("hina", 1, ["image-5"]));
+    expect(await screen.findByText(/1장 학습에 추가/)).toBeInTheDocument();
   });
 
   it("fixes the review and evidence to the current character", async () => {

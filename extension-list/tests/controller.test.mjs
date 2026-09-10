@@ -49,3 +49,11 @@ test('save failures expose useful server reasons', () => {
   assert.equal(content.saveFailureMessage({code:'timeout',httpStatus:0}), '서버 응답 시간 초과');
   assert.equal(content.saveFailureMessage({code:'offline',httpStatus:0}), '서버 연결 실패');
 });
+
+
+test('opening release click is consumed even when it lands inside the picker', () => {
+  assert.equal(content.openingClickDisposition(true, true), 'consume');
+  assert.equal(content.openingClickDisposition(false, true), 'picker');
+  assert.equal(content.openingClickDisposition(false, false), 'page');
+  assert.equal(content.TOUCH_LONG_PRESS_MS, 360);
+});

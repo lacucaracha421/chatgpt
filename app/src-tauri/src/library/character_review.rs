@@ -128,11 +128,11 @@ impl Library {
                 )
             })
             .collect();
-        let mut rows = Vec::new();
+        let mut pending_rows = Vec::new();
         let mut after = query.after.clone();
         const INPUT_BATCH: usize = 256;
         loop {
-            let (inputs, decisions, durable_assets, failed_jobs) = {
+            let (inputs, decisions, durable_predictions, failed_jobs) = {
                 let connection = self.connection()?;
                 // Bound both candidate materialization and related evidence/decision queries.
                 // Root-category candidates must belong to this series' root, just as in
@@ -167,12 +167,25 @@ impl Library {
                     )?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
                 let ids = serde_json::to_string(&inputs.iter().map(|i| &i.id).collect::<Vec<_>>())?;
-                let durable = connection.prepare("SELECT DISTINCT e.asset_id FROM character_autotag_evidence e
+                let durable_rows = connection.prepare("SELECT e.id,e.asset_id,p.target_id,p.result_json,p.target_fingerprint,e.runtime_fingerprint
+                    FROM character_autotag_evidence e
                     JOIN character_autotag_predictions p ON p.evidence_id=e.id
                     JOIN character_autotag_jobs j ON j.asset_id=e.asset_id AND j.source_generation=e.source_generation
-                    WHERE e.asset_id IN (SELECT value FROM json_each(?2)) AND p.series_id=?1 AND j.state<>'superseded'")?
-                    .query_map(params![query.series_id,ids],|r|r.get::<_,String>(0))?
-                    .collect::<std::result::Result<std::collections::BTreeSet<_>,_>>()?;
+                    JOIN assets a ON a.id=e.asset_id AND a.content_hash=e.content_hash AND a.status='normal'
+                    WHERE e.asset_id IN (SELECT value FROM json_each(?2)) AND p.series_id=?1 AND j.state<>'superseded'
+                    AND (?3 IS NULL OR p.target_id=?3)
+                    ORDER BY e.asset_id,p.target_id,e.generation DESC,e.id DESC")?
+                    .query_map(params![query.series_id,ids,query.target_id],|r|Ok((
+                        r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,
+                        r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,String>(5)?
+                    )))?
+                    .collect::<std::result::Result<Vec<_>,_>>()?;
+                let mut durable = BTreeMap::new();
+                for (evidence_id, asset_id, target_id, result_json, target_fingerprint, runtime_fingerprint) in durable_rows {
+                    let key = (asset_id, target_id);
+                    if durable.contains_key(&key) { continue; }
+                    durable.insert(key, (evidence_id, serde_json::from_str::<ScanResult>(&result_json)?, target_fingerprint, runtime_fingerprint));
+                }
                 let failed = connection
                     .prepare(
                         "SELECT asset_id,error FROM character_autotag_jobs
@@ -202,6 +215,7 @@ impl Library {
                 }) {
                     continue;
                 }
+                let source_current = advisory || self.verify_input(input).is_ok();
                 let mut predictions = {
                     let state = self
                         .character_scan
@@ -239,6 +253,7 @@ impl Library {
                                     if status.target_fingerprint != target.fingerprint
                                         || row.content_hash != input.hash
                                         || !ready[&target.id]
+                                        || !source_current
                                     {
                                         prediction.state = "stale".into();
                                         prediction.evidence = None;
@@ -249,38 +264,25 @@ impl Library {
                         })
                         .collect::<Vec<_>>()
                 };
-                if durable_assets.contains(&input.id) {
-                    let connection = self.connection()?;
-                    for prediction in &mut predictions {
-                        // Explicit active/manual scans retain precedence when they have a row.
-                        if prediction.evidence.is_some() {
-                            continue;
-                        }
-                        if let Some(id) = super::super::character_autotag::latest_evidence(
-                            &connection,
-                            &input.id,
-                            &prediction.target_id,
-                        )? {
-                            if let Some((status, row)) =
-                                super::super::character_autotag::evidence_row(
-                                    &connection,
-                                    &id,
-                                    &prediction.target_id,
-                                )?
-                            {
-                                prediction.scan_id = Some(id);
-                                prediction.runtime_fingerprint = status.runtime_fingerprint;
-                                prediction.state = row.state;
-                                prediction.evidence = row.evidence;
-                                prediction.error = row.error;
-                                if status.target_fingerprint != prediction.target_fingerprint
-                                    || row.content_hash != input.hash
-                                    || !ready[&prediction.target_id]
-                                {
-                                    prediction.state = "stale".into();
-                                    prediction.evidence = None;
-                                }
-                            }
+                for prediction in &mut predictions {
+                    // Explicit active/manual scans retain precedence when they have a row.
+                    if prediction.evidence.is_some() {
+                        continue;
+                    }
+                    if let Some((evidence_id, row, target_fingerprint, runtime_fingerprint)) =
+                        durable_predictions.get(&(input.id.clone(), prediction.target_id.clone()))
+                    {
+                        prediction.scan_id = Some(evidence_id.clone());
+                        prediction.runtime_fingerprint = Some(runtime_fingerprint.clone());
+                        prediction.state = row.state.clone();
+                        prediction.evidence = row.evidence.clone();
+                        prediction.error = row.error.clone();
+                        if target_fingerprint != &prediction.target_fingerprint
+                            || row.content_hash != input.hash
+                            || !ready[&prediction.target_id]
+                        {
+                            prediction.state = "stale".into();
+                            prediction.evidence = None;
                         }
                     }
                 }
@@ -315,13 +317,11 @@ impl Library {
                         continue;
                     }
                 }
-                let Ok(asset) = self.get_asset(&input.id) else {
-                    continue;
-                };
-                rows.push(ReviewRow { asset, predictions });
-                if rows.len() == query.limit {
+                pending_rows.push((input.id.clone(), predictions));
+                if pending_rows.len() == query.limit {
                     let next_cursor = (index + 1 < inputs.len() || inputs.len() == INPUT_BATCH)
                         .then(|| input.id.clone());
+                    let rows = materialize_review_rows(self, std::mem::take(&mut pending_rows))?;
                     return Ok((ReviewPage { rows, next_cursor }, true));
                 }
             }
@@ -330,6 +330,7 @@ impl Library {
                 break;
             }
         }
+        let rows = materialize_review_rows(self, pending_rows)?;
         let found = !rows.is_empty();
         Ok((
             ReviewPage {
@@ -339,6 +340,22 @@ impl Library {
             found,
         ))
     }
+}
+
+fn materialize_review_rows(
+    library: &Library,
+    pending: Vec<(String, Vec<Prediction>)>,
+) -> Result<Vec<ReviewRow>> {
+    let ids = pending.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>();
+    let assets = {
+        let connection = library.connection()?;
+        super::super::query::asset_summaries_by_ids(&connection, &ids)?
+    };
+    Ok(assets
+        .into_iter()
+        .zip(pending)
+        .map(|(asset, (_, predictions))| ReviewRow { asset, predictions })
+        .collect())
 }
 
 fn matches_filter(predictions: &[Prediction], filter: &str) -> bool {

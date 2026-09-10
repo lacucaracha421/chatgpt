@@ -61,6 +61,7 @@ fn hash_copy(file: &mut File, mut copy: Option<&mut File>) -> Result<String> {
     }
     Ok(hash.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
+#[derive(Debug)]
 pub(super) struct Source {
     relative: String,
     hash: String,
@@ -154,5 +155,42 @@ mod tests {
         }
         #[cfg(windows)]
         assert!(std::fs::write(f.temp.path().join("assets/asset-5.png"), b"changed").is_err());
+    }
+
+    #[test]
+    #[ignore = "explicit local reference lifecycle benchmark"]
+    fn benchmark_prepared_reference_lifecycle() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        std::fs::create_dir(temp.path().join("references")).unwrap();
+        let references = (0..18).map(|index| {
+            let relative = format!("references/{index}.bin");
+            let bytes = vec![index as u8; 421_000];
+            std::fs::write(temp.path().join(&relative), &bytes).unwrap();
+            let hash = Sha256::digest(&bytes).iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+            (relative, hash)
+        }).collect::<Vec<_>>();
+        let candidates = 20;
+
+        let old_started = std::time::Instant::now();
+        for _ in 0..candidates {
+            for (path, hash) in &references {
+                let source = Source::capture(&library, path, hash).unwrap();
+                source.verify(&library).unwrap();
+            }
+        }
+        let old = old_started.elapsed();
+
+        let prepared_started = std::time::Instant::now();
+        let prepared = references.iter().map(|(path, hash)| Source::capture(&library, path, hash).unwrap()).collect::<Vec<_>>();
+        for _ in 0..candidates {
+            for source in &prepared {
+                source.check_identity(&library).unwrap();
+            }
+        }
+        let prepared_time = prepared_started.elapsed();
+        eprintln!("reference_lifecycle before_assets_per_sec={:.2} after_assets_per_sec={:.2} before_ms_per_asset={:.2} after_ms_per_asset={:.2}",
+            candidates as f64 / old.as_secs_f64(), candidates as f64 / prepared_time.as_secs_f64(),
+            old.as_secs_f64() * 1000.0 / candidates as f64, prepared_time.as_secs_f64() * 1000.0 / candidates as f64);
     }
 }

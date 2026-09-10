@@ -30,10 +30,10 @@ export function CharacterRegistry({ draft, target, privacyMode, busy, error, onC
       {draft.references[i] ? <img className={privacyMode ? "character-private" : ""} src={thumbnailUrl(draft.references[i]!)} alt={`기준 ${i + 1}`} /> : <span>{i + 1}</span>}
     </button>)}</div>
     {target && <section aria-label="추가 참조"><div className="character-registry__label">추가 참조 <small>{target.learnedReferences?.length ?? 0}장</small></div>
-      <p className="series-description">직접 승인한 단독 인물 이미지에서 선정합니다. 제외해도 원본과 캐릭터 소속은 유지됩니다.</p>
+      <p className="series-description">직접 학습에 추가한 이미지입니다. 일반 승인·거절과 독립적으로 유지됩니다.</p>
       <div className="character-learned-references">{target.learnedReferences?.map(reference => reference.assetId && <div key={reference.assetId}>
         <button disabled={busy || !onOpenReference} aria-label={`추가 참조 ${reference.slot + 1} 원본 보기`} onClick={() => onOpenReference?.(reference.assetId!)}><img src={thumbnailUrl(reference.assetId)} className={privacyMode ? "character-private" : ""} alt={`추가 참조 ${reference.slot + 1}`} /></button>
-        <Button size="sm" variant="ghost" disabled={busy || !onExcludeReference} onClick={() => onExcludeReference?.(reference.assetId!)}>추가 참조에서 제외</Button>
+        <Button size="sm" variant="ghost" disabled={busy || !onExcludeReference} onClick={() => onExcludeReference?.(reference.assetId!)}>학습에서 제거</Button>
       </div>)}</div>
     </section>}
     <label className="character-check"><input type="checkbox" checked={draft.enabled} disabled={busy} onChange={e => onChange({ ...draft, enabled: e.target.checked })} />분석에 사용</label>

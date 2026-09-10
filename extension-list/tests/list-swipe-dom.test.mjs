@@ -20,17 +20,17 @@ function mount(entries, onSave = async () => ({ ok: true })) {
     container: document.querySelector('#root'), onSave, onClose: () => {},
   });
 }
-test('right swipe saves the row and exposes the legacy save surface', async () => {
+test('left swipe saves the row and exposes the legacy save surface', async () => {
   let saved = null;
   const view = mount([{ id: 'a', name: 'A', parentId: null }], async (id) => { saved = id; return { ok: true }; });
   const shadow = view.host.shadowRoot;
   const row = shadow.querySelector('.row');
   const swipe = shadow.querySelector('.swipe');
   row.dispatchEvent(pointer('pointerdown', { x: 10, y: 20 }));
-  swipe.dispatchEvent(pointer('pointermove', { x: 92, y: 20 }));
+  swipe.dispatchEvent(pointer('pointermove', { x: -72, y: 20 }));
   assert.equal(row.parentElement.classList.contains('ready'), true);
   assert.equal(row.parentElement.querySelector('.reveal').textContent, '저장');
-  swipe.dispatchEvent(pointer('pointerup', { x: 92, y: 20 }));
+  swipe.dispatchEvent(pointer('pointerup', { x: -72, y: 20 }));
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(saved, 'a');
 });
@@ -40,10 +40,10 @@ test('legacy paper chooser styling is retained in the list-only build', () => {
   const css = view.host.shadowRoot.querySelector('style').textContent;
   assert.match(css, /--paper:#d7d3b9/);
   assert.match(css, /width:350px;height:410px/);
-  assert.match(css, /justify-content:flex-start/);
+  assert.match(css, /justify-content:flex-end/);
   view.close();
 });
-test('left swipe goes back inside a folder and never saves', async () => {
+test('right swipe goes back inside a folder and never saves', async () => {
   let saves = 0;
   const view = mount([
     { id: 'root', name: 'ROOT', parentId: null },
@@ -53,9 +53,9 @@ test('left swipe goes back inside a folder and never saves', async () => {
   shadow.querySelector('.row').click();
   let row = shadow.querySelector('.row');
   const swipe = shadow.querySelector('.swipe');
-  row.dispatchEvent(pointer('pointerdown', { x: 100, y: 20 }));
-  swipe.dispatchEvent(pointer('pointermove', { x: 20, y: 20 }));
-  swipe.dispatchEvent(pointer('pointerup', { x: 20, y: 20 }));
+  row.dispatchEvent(pointer('pointerdown', { x: 20, y: 20 }));
+  swipe.dispatchEvent(pointer('pointermove', { x: 100, y: 20 }));
+  swipe.dispatchEvent(pointer('pointerup', { x: 100, y: 20 }));
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(saves, 0);
   assert.equal(shadow.querySelector('.back').disabled, true);
@@ -74,5 +74,33 @@ test('chooser long press owns its shadow DOM and exposes no native title tooltip
   assert.equal(selection.defaultPrevented, true);
   assert.equal(row.hasAttribute('title'), false);
   assert.match(shadow.querySelector('style').textContent, /-webkit-touch-callout:none/);
+  view.close();
+});
+
+
+test('touch picker starts locked and unlocks only after the opening finger is released', () => {
+  const view = globalThis.LakomicsListCollector.mount({
+    entries: [{ id: 'a', name: 'A', parentId: null }],
+    profile: { revision: 1, listOrder: {}, pinnedClassificationIds: [] },
+    container: document.querySelector('#root'), onSave: async () => ({ ok: true }), onClose: () => {},
+    inputKind: 'touch', inputLocked: true,
+  });
+  assert.equal(view.host.classList.contains('input-locked'), true);
+  assert.match(view.host.shadowRoot.querySelector('style').textContent, /input-locked[^}]*pointer-events:none/);
+  view.unlockInput();
+  assert.equal(view.host.classList.contains('input-locked'), false);
+  view.close();
+});
+
+test('touch picker anchors the press point to its inert header instead of row one', () => {
+  const view = globalThis.LakomicsListCollector.mount({
+    entries: [{ id: 'a', name: 'A', parentId: null }],
+    profile: { revision: 1, listOrder: {}, pinnedClassificationIds: [] },
+    origin: { x: 500, y: 300 }, inputKind: 'touch', inputLocked: true,
+    onSave: async () => ({ ok: true }), onClose: () => {},
+  });
+  const panel = view.host.shadowRoot.querySelector('.panel');
+  assert.equal(panel.style.left, '325px');
+  assert.equal(panel.style.top, '274px');
   view.close();
 });

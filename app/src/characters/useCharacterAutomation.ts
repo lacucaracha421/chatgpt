@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ScanStatus } from "./api";
 import { commandErrorMessage } from "../library/errorMessage";
 
-export type IncrementalStatus = { running: boolean; paused: boolean; pending: number; completed: number; confirmed: number; activeAssetId: string | null; total: number; compared: number; error: string | null };
+export type IncrementalStatus = { running: boolean; paused: boolean; pending: number; completed: number; confirmed: number; activeAssetId: string | null; activeSeriesName: string | null; activeTargetName: string | null; activeTargetIndex: number; activeReconsideration: boolean; total: number; compared: number; error: string | null };
 export type AutomaticCharacterApi = { status(): Promise<IncrementalStatus>; pause(paused: boolean): Promise<void> };
 const defaultApi: AutomaticCharacterApi = {
   status: () => invoke("character_incremental_status"),
@@ -15,6 +15,11 @@ export function useCharacterAutomation(onChanged: (membershipChanged: boolean) =
   const [progress, setProgress] = useState<ScanStatus | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
+  const [queuePending, setQueuePending] = useState(0);
+  const [activeSeriesName, setActiveSeriesName] = useState<string | null>(null);
+  const [activeTargetName, setActiveTargetName] = useState<string | null>(null);
+  const [activeTargetIndex, setActiveTargetIndex] = useState(0);
+  const [activeReconsideration, setActiveReconsideration] = useState(false);
   const [transient, setTransient] = useState(false);
   const latest = useRef(onChanged); latest.current = onChanged;
   useEffect(() => {
@@ -33,6 +38,11 @@ export function useCharacterAutomation(onChanged: (membershipChanged: boolean) =
         const status = await api.status();
         if (!active) return;
         setPaused(status.paused);
+        setQueuePending(status.pending);
+        setActiveSeriesName(status.activeSeriesName);
+        setActiveTargetName(status.activeTargetName);
+        setActiveTargetIndex(status.activeTargetIndex);
+        setActiveReconsideration(status.activeReconsideration);
         const nextProgress: ScanStatus | null = status.activeAssetId ? {
           id: status.activeAssetId, targetId: "", targetFingerprint: "", runtimeFingerprint: status.total ? "native" : null,
           state: "running", total: status.total, completed: status.compared, errors: 0, cacheHits: 0, extractions: 0, error: null,
@@ -72,5 +82,5 @@ export function useCharacterAutomation(onChanged: (membershipChanged: boolean) =
       setTransient(false); setMessage(commandErrorMessage(error, "자동 분류 상태 변경 실패"));
     });
   };
-  return { progress, message, paused, pause: () => control(true), resume: () => control(false), dismiss: () => setMessage(null) };
+  return { progress, message, paused, queuePending, activeSeriesName, activeTargetName, activeTargetIndex, activeReconsideration, pause: () => control(true), resume: () => control(false), dismiss: () => setMessage(null) };
 }

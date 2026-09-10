@@ -32,6 +32,7 @@ pub mod character_scan;
 pub mod character_autotag;
 mod character_sources;
 pub mod character_incremental;
+pub mod character_series_suggestions;
 pub(crate) mod character_worker;
 pub(crate) mod collection;
 pub(crate) mod av_models;
@@ -144,6 +145,7 @@ pub struct MediaResponse {
 #[derive(Debug, Clone)]
 pub struct Library {
     root: PathBuf,
+    canonical_root: PathBuf,
     #[allow(dead_code)] // Keeps the operating-system lease alive for all Library clones.
     lease: Arc<LibraryLease>,
     // ponytail: one lock per open Library; split by content hash only if ingest throughput demands it.
@@ -202,6 +204,10 @@ impl Library {
             path: root.clone(),
             source,
         })?;
+        let canonical_root = fs::canonicalize(&root).map_err(|source| LibraryError::ReadMedia {
+            path: root.clone(),
+            source,
+        })?;
         let lease = Arc::new(LibraryLease::acquire(&root)?);
         backup::check_interrupted_restore(&root)?;
         for name in [
@@ -218,6 +224,7 @@ impl Library {
         db::initialize_database(&root.join("library.sqlite"))?;
         let library = Self {
             root,
+            canonical_root,
             lease,
             ingestion_lock: Arc::new(Mutex::new(())),
             trash_lock: Arc::new(Mutex::new(())),
@@ -537,12 +544,7 @@ impl Library {
         &self,
         relative_path: &str,
     ) -> Result<MediaResponse, LibraryError> {
-        let canonical_root =
-            fs::canonicalize(&self.root).map_err(|source| LibraryError::ReadMedia {
-                path: self.root.clone(),
-                source,
-            })?;
-        let requested_path = canonical_root.join(relative_path);
+        let requested_path = self.canonical_root.join(relative_path);
         let canonical_path = fs::canonicalize(&requested_path).map_err(|source| {
             if source.kind() == std::io::ErrorKind::NotFound {
                 LibraryError::MediaNotFound
@@ -553,7 +555,7 @@ impl Library {
                 }
             }
         })?;
-        if !canonical_path.starts_with(&canonical_root) {
+        if !canonical_path.starts_with(&self.canonical_root) {
             return Err(LibraryError::UnsafeMediaPath);
         }
         let mime = mime_for_path(&canonical_path);
@@ -660,5 +662,30 @@ mod tests {
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
         assert_eq!(version, super::db::SCHEMA_VERSION);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn media_opens_remain_bound_to_the_library_root_canonicalized_at_open() {
+        use std::io::Read;
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let original = temp.path().join("original");
+        let replacement = temp.path().join("replacement");
+        fs::create_dir(&original).unwrap();
+        fs::create_dir_all(replacement.join("assets")).unwrap();
+        let selected = temp.path().join("selected");
+        symlink(&original, &selected).unwrap();
+        let library = Library::open(&selected).unwrap();
+        fs::write(original.join("assets/source.png"), b"original").unwrap();
+        fs::write(replacement.join("assets/source.png"), b"replacement").unwrap();
+
+        fs::remove_file(&selected).unwrap();
+        symlink(&replacement, &selected).unwrap();
+
+        let mut bytes = Vec::new();
+        library.open_library_media("assets/source.png").unwrap().file.read_to_end(&mut bytes).unwrap();
+        assert_eq!(bytes, b"original");
     }
 }

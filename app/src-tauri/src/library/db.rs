@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 53;
+pub(crate) const SCHEMA_VERSION: i64 = 57;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -214,13 +214,19 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
             transaction.execute_batch(include_str!("../../migrations/0038_cloud_settings.sql"))?;
         }
         if version <= 38 {
-            transaction.execute_batch(include_str!("../../migrations/0039_cloud_metadata_status.sql"))?;
+            transaction.execute_batch(include_str!(
+                "../../migrations/0039_cloud_metadata_status.sql"
+            ))?;
         }
         if version <= 39 {
-            transaction.execute_batch(include_str!("../../migrations/0040_book_release_providers.sql"))?;
+            transaction.execute_batch(include_str!(
+                "../../migrations/0040_book_release_providers.sql"
+            ))?;
         }
         if version <= 40 {
-            transaction.execute_batch(include_str!("../../migrations/0041_collection_ownership.sql"))?;
+            transaction.execute_batch(include_str!(
+                "../../migrations/0041_collection_ownership.sql"
+            ))?;
         }
         if version <= 41 {
             transaction.execute_batch(include_str!("../../migrations/0042_statistics.sql"))?;
@@ -232,13 +238,16 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
             transaction.execute_batch(include_str!("../../migrations/0044_characters.sql"))?;
         }
         if version <= 44 {
-            transaction.execute_batch(include_str!("../../migrations/0045_video_similarity.sql"))?;
+            transaction
+                .execute_batch(include_str!("../../migrations/0045_video_similarity.sql"))?;
         }
         if version <= 45 {
             transaction.execute_batch(include_str!("../../migrations/0046_collection_av.sql"))?;
         }
         if version <= 46 {
-            transaction.execute_batch(include_str!("../../migrations/0047_similarity_orientation.sql"))?;
+            transaction.execute_batch(include_str!(
+                "../../migrations/0047_similarity_orientation.sql"
+            ))?;
         }
         if version <= 47 {
             transaction.execute_batch(include_str!("../../migrations/0048_character_hub.sql"))?;
@@ -247,19 +256,48 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
             transaction.execute_batch(include_str!("../../migrations/0049_capture_poll.sql"))?;
         }
         if version <= 49 {
-            transaction.execute_batch(include_str!("../../migrations/0050_character_autotag.sql"))?;
+            transaction
+                .execute_batch(include_str!("../../migrations/0050_character_autotag.sql"))?;
         }
         if version <= 50 {
-            transaction.execute_batch(include_str!("../../migrations/0051_character_autotag_runtime.sql"))?;
+            transaction.execute_batch(include_str!(
+                "../../migrations/0051_character_autotag_runtime.sql"
+            ))?;
         }
         if version <= 51 {
-            transaction.execute_batch(include_str!("../../migrations/0052_character_reference_exclusions.sql"))?;
+            transaction.execute_batch(include_str!(
+                "../../migrations/0052_character_reference_exclusions.sql"
+            ))?;
         }
         if version <= 52 {
-            transaction.execute_batch(include_str!("../../migrations/0053_character_groups.sql"))?;
+            transaction
+                .execute_batch(include_str!("../../migrations/0053_character_groups.sql"))?;
+        }
+        if version <= 53 {
+            transaction.execute_batch(include_str!(
+                "../../migrations/0054_character_reconsideration.sql"
+            ))?;
+        }
+        if version <= 54 {
+            transaction.execute_batch(include_str!(
+                "../../migrations/0055_explicit_character_learning.sql"
+            ))?;
+        }
+        if version <= 55 {
+            transaction.execute_batch(include_str!(
+                "../../migrations/0056_explicit_character_learning_triggers.sql"
+            ))?;
+        }
+        if version <= 56 {
+            transaction.execute_batch(include_str!(
+                "../../migrations/0057_character_series_suggestions.sql"
+            ))?;
         }
         // Validate before commit so a failed migration leaves the old DB intact.
-        if transaction.prepare("PRAGMA foreign_key_check")?.exists([])? {
+        if transaction
+            .prepare("PRAGMA foreign_key_check")?
+            .exists([])?
+        {
             return Err(LibraryError::Database(rusqlite::Error::InvalidQuery));
         }
         transaction.commit()?;
@@ -296,7 +334,9 @@ mod tests {
     // Build the actual historical schema; downgrading user_version on today's
     // schema leaves later tables behind and cannot exercise an upgrade faithfully.
     fn historical_schema(connection: &mut Connection, version: usize) {
-        connection.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", "OFF")
+            .unwrap();
         let mut files = std::fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations"))
             .unwrap()
             .map(|entry| entry.unwrap().path())
@@ -305,11 +345,20 @@ mod tests {
         files.sort();
         let transaction = connection.transaction().unwrap();
         for file in files.iter().take(version) {
-            transaction.execute_batch(&std::fs::read_to_string(file).unwrap()).unwrap();
+            transaction
+                .execute_batch(&std::fs::read_to_string(file).unwrap())
+                .unwrap();
         }
         transaction.commit().unwrap();
-        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), version as i64);
-        connection.pragma_update(None, "foreign_keys", "ON").unwrap();
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            version as i64
+        );
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .unwrap();
     }
 
     #[test]
@@ -318,9 +367,85 @@ mod tests {
         historical_schema(&mut connection,49);
         connection.execute_batch("INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at)
             VALUES('covered','hash','image','covered.png','assets/covered.png','thumbnails/covered.webp',1,1,1,'before');").unwrap();
-        migrate_to_latest(&mut connection,49).unwrap();
-        assert_eq!(connection.query_row("SELECT COUNT(*) FROM character_autotag_jobs",[],|r|r.get::<_,i64>(0)).unwrap(),0);
-        assert_eq!(connection.query_row("SELECT COUNT(*) FROM assets WHERE id='covered'",[],|r|r.get::<_,i64>(0)).unwrap(),1);
+        migrate_to_latest(&mut connection, 49).unwrap();
+        assert_eq!(
+            connection
+                .query_row("SELECT COUNT(*) FROM character_autotag_jobs", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT COUNT(*) FROM assets WHERE id='covered'", [], |r| {
+                    r.get::<_, i64>(0)
+                })
+                .unwrap(),
+            1
+        );
+        assert!(!connection
+            .prepare("PRAGMA foreign_key_check")
+            .unwrap()
+            .exists([])
+            .unwrap());
+    }
+
+    #[test]
+    fn explicit_character_learning_v55_preserves_effective_examples_without_requeue() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        historical_schema(&mut connection, 54);
+        connection.execute_batch("INSERT INTO classification_entries(id,kind,name,created_at) VALUES('series','tag','Series','before');
+            INSERT INTO character_series(classification_id) VALUES('series');
+            INSERT INTO character_targets(id,series_classification_id,display_name,enabled,created_at,updated_at) VALUES('target','series','Target',1,'before','before');").unwrap();
+        for i in 0..6 {
+            connection.execute("INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at,status)
+                VALUES(?1,?2,'image',?3,?4,?5,1,1,1,'before','normal')",
+                rusqlite::params![format!("asset-{i}"),format!("hash-{i}"),format!("{i}.png"),format!("assets/{i}.png"),format!("thumbnails/{i}.webp")]).unwrap();
+            connection.execute("INSERT INTO asset_classifications(asset_id,classification_id) VALUES(?1,'series')", [format!("asset-{i}")]).unwrap();
+            if i < 5 {
+                connection.execute("INSERT INTO character_references(target_id,slot,asset_id,asset_hash) VALUES('target',?1,?2,?3)",
+                    rusqlite::params![i,format!("asset-{i}"),format!("hash-{i}")]).unwrap();
+            }
+        }
+        connection.execute("INSERT INTO character_decisions(target_id,asset_id,source_asset_id,asset_hash,decision,target_fingerprint,reference_snapshot,origin,created_at)
+            VALUES('target','asset-5','asset-5','hash-5','accepted','fingerprint',?1,'manual','after')",
+            [r#"{"prediction":{"queryBoxes":[[0,0,10,10]],"wholeFallback":false}}"#]).unwrap();
+        connection
+            .execute("DELETE FROM character_autotag_reconsideration", [])
+            .unwrap();
+        migrate_to_latest(&mut connection, 54).unwrap();
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
+        assert_eq!(connection.query_row("SELECT COUNT(*) FROM character_learned_references WHERE target_id='target' AND asset_id='asset-5' AND asset_hash='hash-5'",[],|row|row.get::<_,i64>(0)).unwrap(),1);
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM character_autotag_reconsideration",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn character_series_suggestions_v57_adds_only_dismissal_state() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        historical_schema(&mut connection, 56);
+        migrate_to_latest(&mut connection, 56).unwrap();
+        assert_eq!(
+            connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(),
+            SCHEMA_VERSION
+        );
+        assert_eq!(
+            connection.query_row("SELECT COUNT(*) FROM character_series_suggestion_dismissals", [], |row| row.get::<_, i64>(0)).unwrap(),
+            0
+        );
         assert!(!connection.prepare("PRAGMA foreign_key_check").unwrap().exists([]).unwrap());
     }
 
@@ -328,7 +453,11 @@ mod tests {
     fn similarity_orientation_v47_reindexes_orientation_capable_formats_only() {
         let mut connection = Connection::open_in_memory().unwrap();
         historical_schema(&mut connection, 46);
-        for (id, path) in [("jpeg", "assets/a.jpg"), ("webp", "assets/b.webp"), ("png", "assets/c.png")] {
+        for (id, path) in [
+            ("jpeg", "assets/a.jpg"),
+            ("webp", "assets/b.webp"),
+            ("png", "assets/c.png"),
+        ] {
             connection.execute(
                 "INSERT INTO assets (id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at,perceptual_hash,perceptual_hash_quality)
                  VALUES (?1,?2,'image',?3,?4,?5,1,10,20,'2026-01-01T00:00:00Z',zeroblob(64),100)",
@@ -336,11 +465,34 @@ mod tests {
             ).unwrap();
         }
         migrate_to_latest(&mut connection, 46).unwrap();
-        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
         for id in ["jpeg", "webp"] {
-            assert_eq!(connection.query_row("SELECT perceptual_hash IS NULL FROM assets WHERE id=?1", [id], |row| row.get::<_, bool>(0)).unwrap(), true);
+            assert_eq!(
+                connection
+                    .query_row(
+                        "SELECT perceptual_hash IS NULL FROM assets WHERE id=?1",
+                        [id],
+                        |row| row.get::<_, bool>(0)
+                    )
+                    .unwrap(),
+                true
+            );
         }
-        assert_eq!(connection.query_row("SELECT perceptual_hash IS NULL FROM assets WHERE id='png'", [], |row| row.get::<_, bool>(0)).unwrap(), false);
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT perceptual_hash IS NULL FROM assets WHERE id='png'",
+                    [],
+                    |row| row.get::<_, bool>(0)
+                )
+                .unwrap(),
+            false
+        );
     }
 
     #[test]
@@ -366,7 +518,12 @@ mod tests {
         drop(previous);
         let upgraded = initialize_database(&path).unwrap();
         let check_preserved = |connection: &Connection| {
-            assert_eq!(connection.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
+            assert_eq!(
+                connection
+                    .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+                    .unwrap(),
+                SCHEMA_VERSION
+            );
             for sql in [
                 "SELECT count(*) FROM asset_classifications WHERE asset_id='asset' AND classification_id='series'",
                 "SELECT count(*) FROM collection_assets WHERE collection_id='work' AND asset_id='asset'",
@@ -378,22 +535,53 @@ mod tests {
             ] {
                 assert_eq!(connection.query_row(sql, [], |r| r.get::<_, i64>(0)).unwrap(), 1, "{sql}");
             }
-            for table in ["video_similarity_reviews", "video_similarity_scans", "collection_av_details", "collection_people"] {
-                assert_eq!(connection.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+            for table in [
+                "video_similarity_reviews",
+                "video_similarity_scans",
+                "collection_av_details",
+                "collection_people",
+            ] {
+                assert_eq!(
+                    connection
+                        .query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r
+                            .get::<_, i64>(0))
+                        .unwrap(),
+                    0
+                );
             }
-            assert!(!connection.prepare("PRAGMA foreign_key_check").unwrap().exists([]).unwrap());
+            assert!(!connection
+                .prepare("PRAGMA foreign_key_check")
+                .unwrap()
+                .exists([])
+                .unwrap());
         };
         check_preserved(&upgraded);
         drop(upgraded);
-        let snapshot = std::fs::read_dir(temp.path().join("backups")).unwrap().next().unwrap().unwrap().path();
+        let snapshot = std::fs::read_dir(temp.path().join("backups"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
         let original = Connection::open(&snapshot).unwrap();
-        assert_eq!(original.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 44);
+        assert_eq!(
+            original
+                .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+                .unwrap(),
+            44
+        );
         drop(original);
         let restoration = temp.path().join("restore-copy.sqlite");
         std::fs::copy(&snapshot, &restoration).unwrap();
         prepare_snapshot_for_restore(&restoration).unwrap();
         check_preserved(&Connection::open(restoration).unwrap());
-        assert_eq!(Connection::open(snapshot).unwrap().pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 44);
+        assert_eq!(
+            Connection::open(snapshot)
+                .unwrap()
+                .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+                .unwrap(),
+            44
+        );
     }
 
     #[test]
@@ -2189,12 +2377,35 @@ mod tests {
             CREATE INDEX release_watch_subscriptions_by_due ON release_watch_subscriptions(last_checked_at,collection_id);
             INSERT INTO collection_external_bindings VALUES ('work','aladin'),('work','kakao');
             INSERT INTO release_watch_subscriptions VALUES ('work','aladin','2026-09-05');").unwrap();
-        connection.execute_batch(include_str!("../../migrations/0040_book_release_providers.sql")).unwrap();
-        let old: String = connection.query_row("SELECT last_checked_at FROM release_watch_subscriptions WHERE provider='aladin'", [], |r| r.get(0)).unwrap();
+        connection
+            .execute_batch(include_str!(
+                "../../migrations/0040_book_release_providers.sql"
+            ))
+            .unwrap();
+        let old: String = connection
+            .query_row(
+                "SELECT last_checked_at FROM release_watch_subscriptions WHERE provider='aladin'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(old, "2026-09-05");
-        connection.execute("INSERT INTO release_watch_subscriptions VALUES ('work','kakao',NULL)", []).unwrap();
-        assert!(!connection.prepare("PRAGMA foreign_key_check").unwrap().exists([]).unwrap());
-        assert!(connection.execute("INSERT INTO release_watch_subscriptions VALUES ('missing','kakao',NULL)", []).is_err());
+        connection
+            .execute(
+                "INSERT INTO release_watch_subscriptions VALUES ('work','kakao',NULL)",
+                [],
+            )
+            .unwrap();
+        assert!(!connection
+            .prepare("PRAGMA foreign_key_check")
+            .unwrap()
+            .exists([])
+            .unwrap());
+        assert!(connection
+            .execute(
+                "INSERT INTO release_watch_subscriptions VALUES ('missing','kakao',NULL)",
+                []
+            )
+            .is_err());
     }
-
 }

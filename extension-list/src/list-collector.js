@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  function mount({ entries, profile, origin, onSave, onClose, onTemporary = null, container = null, editing = false, onReorder = null }) {
+  function mount({ entries, profile, origin, onSave, onClose, onTemporary = null, container = null, editing = false, onReorder = null, inputKind = null, inputLocked = false }) {
     let tree = globalThis.LakomicsClassificationTree.createModel(entries, profile);
     const trail = [];
     let selectedId = null;
@@ -9,10 +9,12 @@
     let disposed = false;
     let gesture = null;
     let suppressClick = false;
+    let interactionLocked = Boolean(inputLocked);
     const offsets = new Map();
     const host = document.createElement("div");
     host.id = "lakomics-list-collector";
     if (container) host.className = "embedded";
+    host.classList.toggle("input-locked", interactionLocked);
     const shadow = host.attachShadow({ mode: "open" });
     const style = document.createElement("style"); style.textContent = CSS; shadow.append(style);
     const backdrop = document.createElement("div"); backdrop.className = "backdrop";
@@ -44,6 +46,10 @@
       return current ? tree.path(current).map((entry) => entry.name).join(" > ") : "";
     }
     function remember() { offsets.set(key(), rows.scrollTop); }
+    function setInputLocked(value) {
+      interactionLocked = Boolean(value);
+      host.classList.toggle("input-locked", interactionLocked);
+    }
 
     function close(result) {
       if (disposed) return;
@@ -62,8 +68,15 @@
     function position() {
       if (container) return;
       const width = panel.offsetWidth || 350, height = panel.offsetHeight || 410;
-      panel.style.left = `${Math.max(8, Math.min(window.innerWidth - width - 8, (origin?.x ?? 16) + 16))}px`;
-      panel.style.top = `${Math.max(8, Math.min(window.innerHeight - height - 8, (origin?.y ?? 100) - 80))}px`;
+      const viewportWidth = window.visualViewport?.width || window.innerWidth;
+      const viewportHeight = window.visualViewport?.height || window.innerHeight;
+      const touch = inputKind === "touch";
+      // Touch opens with the finger over the non-action header, not over row 1.
+      // This removes the old +16/-80 drift that made the sheet feel detached.
+      const desiredLeft = touch ? (origin?.x ?? viewportWidth / 2) - width / 2 : (origin?.x ?? 16) + 16;
+      const desiredTop = touch ? (origin?.y ?? 34) - 26 : (origin?.y ?? 100) - 80;
+      panel.style.left = `${Math.max(8, Math.min(viewportWidth - width - 8, desiredLeft))}px`;
+      panel.style.top = `${Math.max(8, Math.min(viewportHeight - height - 8, desiredTop))}px`;
     }
     async function save(id, row = null) {
       if (editing || busy || !id || !tree.byId.has(id)) return;
@@ -75,7 +88,7 @@
       if (reveal) reveal.textContent = "···";
       const departure = row ? animate(row, [
         { transform: window.getComputedStyle?.(row)?.transform || "none" },
-        { transform: "translateX(105%)" },
+        { transform: "translateX(-105%)" },
       ], 170, "cubic-bezier(.4,0,.8,.4)") : Promise.resolve();
       $(".notice").hidden = true;
       try {
@@ -101,7 +114,7 @@
       } finally {
         if (!disposed) {
           await departure;
-          if (row) await animate(row, [{ transform: "translateX(105%)" }, { transform: "translateX(0)" }], 180, "cubic-bezier(.16,.84,.31,1)");
+          if (row) await animate(row, [{ transform: "translateX(-105%)" }, { transform: "translateX(0)" }], 180, "cubic-bezier(.16,.84,.31,1)");
           for (const animation of animations) animation.cancel();
           animations.clear();
           busy = false;
@@ -193,7 +206,7 @@
       if (!row) return;
       gesture = {
         id: event.pointerId, x: event.clientX, y: event.clientY, dx: 0, dy: 0, axis: null, row,
-        lastX: event.clientX, lastT: performance.now(), velocityX: 0, ready: false, hapticFired: false, targetIndex: null,
+        lastX: event.clientX, lastT: performance.now(), velocityX: 0, ready: false, targetIndex: null,
       };
       suppressClick = false;
     });
@@ -228,25 +241,22 @@
       if (gesture.axis !== "x") return;
       event.preventDefault(); suppressClick = true;
       const limit = threshold();
-      if (dx > 0) {
-        // Direct at first, then increasingly resistant after the commit threshold.
-        const travel = dx <= limit ? dx : limit + (dx - limit) * .28;
+      if (dx < 0) {
+        // Leftward save: direct at first, then resistant beyond the commit threshold.
+        const magnitude = -dx;
+        const travel = magnitude <= limit ? magnitude : limit + (magnitude - limit) * .28;
         gesture.row.style.transition = "none";
-        gesture.row.style.transform = `translateX(${Math.min(travel, swipe.clientWidth * .72)}px)`;
-        const ready = dx >= limit;
+        gesture.row.style.transform = `translateX(${-Math.min(travel, swipe.clientWidth * .72)}px)`;
+        const ready = magnitude >= limit;
         gesture.row.parentElement.classList.toggle("ready", ready);
-        if (ready && !gesture.ready && !gesture.hapticFired) {
-          gesture.hapticFired = true;
-          try { navigator.vibrate?.(7); } catch {}
-        }
         gesture.ready = ready;
         rows.style.transform = ""; $(".back-reveal").style.opacity = "0";
       } else {
         gesture.row.style.transition = "none"; gesture.row.style.transform = ""; gesture.row.parentElement.classList.remove("ready"); gesture.ready = false;
         if (trail.length) {
-          const travel = Math.max(-limit, dx);
+          const travel = Math.min(limit, dx);
           rows.style.transform = `translateX(${travel}px)`;
-          $(".back-reveal").style.opacity = String(Math.min(1, -dx / limit));
+          $(".back-reveal").style.opacity = String(Math.min(1, dx / limit));
         }
       }
     });
@@ -266,15 +276,15 @@
       }
       if (done.axis !== "x") return;
       const limit = threshold();
-      const flickSave = done.dx >= limit * .55 && done.velocityX > .55;
-      if (done.dx >= limit || flickSave) {
-        // Keep the row under the finger; save() takes over with the rightward departure.
+      const flickSave = done.dx <= -limit * .55 && done.velocityX < -.55;
+      if (done.dx <= -limit || flickSave) {
+        // Keep the row under the finger; save() takes over with the leftward departure.
         done.row.style.transition = "none";
         void save(done.row.dataset.classificationId, done.row);
         return;
       }
       done.row.style.transition = "transform 190ms cubic-bezier(.16,.84,.31,1)"; done.row.style.transform = ""; done.row.parentElement.classList.remove("ready");
-      if (done.dx <= -limit && trail.length) back();
+      if (done.dx >= limit && trail.length) back();
     }
     swipe.addEventListener("pointerup", (event) => finish(event));
     swipe.addEventListener("pointercancel", (event) => finish(event, true));
@@ -284,19 +294,19 @@
     window.addEventListener("resize", position);
     render(); position();
     if (!container) rows.querySelector(".row")?.focus({ preventScroll: true });
-    return { host, close: cancel, tree };
+    return { host, close: cancel, tree, unlockInput: () => setInputLocked(false), lockInput: () => setInputLocked(true) };
   }
 
   const CSS = `
 :host{--paper:#d7d3b9;--ink:#302f28;--line:#aaa68f;--quiet:#bdb9a1;font:14px/1.4 'Segoe UI',sans-serif;color:var(--ink);position:fixed;inset:0;z-index:2147483646;pointer-events:none;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
 *{box-sizing:border-box;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}button{font:inherit;color:inherit;cursor:pointer;border:0;border-radius:0}button:focus-visible{outline:2px solid var(--ink);outline-offset:-3px}button:disabled{opacity:.35;cursor:default}
-.backdrop{position:fixed;inset:0;pointer-events:auto}.panel{position:fixed;width:350px;height:410px;max-width:calc(100vw - 16px);max-height:calc(100dvh - 16px);background:var(--paper);box-shadow:0 14px 40px #0005;display:flex;flex-direction:column;border:1px solid var(--line)}
+.backdrop{position:fixed;inset:0;pointer-events:auto}:host(.input-locked) .backdrop{pointer-events:none}.panel{position:fixed;width:350px;height:410px;max-width:calc(100vw - 16px);max-height:calc(100dvh - 16px);background:var(--paper);box-shadow:0 14px 40px #0005;display:flex;flex-direction:column;border:1px solid var(--line)}
 .panel:before{content:'';position:absolute;inset:8px auto 8px 7px;border-left:4px solid var(--quiet);width:3px;border-right:1px solid var(--line);pointer-events:none}
 header{display:flex;align-items:center;gap:3px;min-height:52px;margin:0 10px 0 21px;border-bottom:1px solid var(--line)}header button{flex:none;width:30px;min-height:40px;background:none;font-size:22px}.save-current{font-size:19px}.path{flex:1;min-width:0;max-height:60px;overflow:auto;font-size:12px;overflow-wrap:anywhere}
 .swipe{flex:1;min-height:0;position:relative;margin:8px 10px 8px 21px;touch-action:pan-y pinch-zoom;overflow:hidden}.rows{position:relative;height:100%;touch-action:pan-y pinch-zoom;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--ink) transparent;padding-right:5px;background:var(--paper)}
-.row-wrap{position:relative;touch-action:pan-y pinch-zoom;overflow:hidden;margin-bottom:4px;--row-paper:var(--paper)}.row-wrap:nth-child(even){--row-paper:var(--row-alt,#c9c5ac)}.reveal{position:absolute;inset:0;display:flex;align-items:center;justify-content:flex-start;padding-left:16px;background:var(--quiet);color:var(--ink);font-size:12px;transition:background-color 100ms,color 100ms,letter-spacing 120ms}.ready .reveal{background:var(--ink);color:var(--paper);font-weight:600;letter-spacing:.08em}
+.row-wrap{position:relative;touch-action:pan-y pinch-zoom;overflow:hidden;margin-bottom:4px;--row-paper:var(--paper)}.row-wrap:nth-child(even){--row-paper:var(--row-alt,#c9c5ac)}.reveal{position:absolute;inset:0;display:flex;align-items:center;justify-content:flex-end;padding-right:16px;background:var(--quiet);color:var(--ink);font-size:12px;transition:background-color 100ms,color 100ms,letter-spacing 120ms}.ready .reveal{background:var(--ink);color:var(--paper);font-weight:600;letter-spacing:.08em}
 .row{position:relative;display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding:9px 10px;background:var(--row-paper);text-align:left;user-select:none;-webkit-user-select:none}.row:before{content:'';width:10px;height:10px;flex:none;background:var(--ink)}.name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.mark{font-size:17px}.row:hover{background:var(--quiet)}.row.selected{background:var(--ink);color:var(--paper)}.row.selected:before{background:var(--paper)}
-.back-reveal{position:absolute;right:12px;left:auto;top:40%;z-index:2;font-size:40px;opacity:0;transform:rotate(180deg);pointer-events:none}.notice{font-size:12px;margin:0 12px 10px 23px;max-height:48px;overflow:auto}[hidden]{display:none!important}
+.back-reveal{position:absolute;left:12px;right:auto;top:40%;z-index:2;font-size:40px;opacity:0;transform:none;pointer-events:none}.notice{font-size:12px;margin:0 12px 10px 23px;max-height:48px;overflow:auto}[hidden]{display:none!important}
 .temporary-save{display:block;width:100%;min-height:44px;margin-top:12px;padding:10px 12px;border-top:1px solid #838e87;background:#a8b9ae;color:#263b32;text-align:left}.temporary-save:before{content:'↓';margin-right:12px}.temporary-save:hover{background:#97ad9f}.temporary-save:disabled{opacity:.65}
 .saving .reveal{background:var(--ink);color:var(--paper);justify-content:center;font-size:20px;letter-spacing:4px;padding:0}.saved .reveal{letter-spacing:0;font-size:25px}.panel[aria-busy=true] .row:disabled{opacity:1}.panel[aria-busy=true] .row-wrap:not(.saving){opacity:.6}
 :host(.embedded){position:relative;display:block;inset:auto;z-index:auto;pointer-events:auto;width:100%;max-width:350px;min-width:0}:host(.embedded) .backdrop{position:relative;inset:auto}:host(.embedded) .panel{position:relative;width:100%;max-width:100%;height:410px;box-shadow:none}

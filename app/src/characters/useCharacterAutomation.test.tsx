@@ -2,7 +2,7 @@ import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { useCharacterAutomation, type AutomaticCharacterApi, type IncrementalStatus } from "./useCharacterAutomation";
 afterEach(() => { cleanup(); vi.useRealTimers(); });
-const idle: IncrementalStatus = { running: true, paused: false, pending: 0, completed: 0, confirmed: 0, activeAssetId: null, total: 0, compared: 0, error: null };
+const idle: IncrementalStatus = { running: true, paused: false, pending: 0, completed: 0, confirmed: 0, activeAssetId: null, activeSeriesName: null, activeTargetName: null, activeTargetIndex: 0, activeReconsideration: false, total: 0, compared: 0, error: null };
 it("refresh and target changes never launch target scans or create native work", async () => {
  vi.useFakeTimers();
  const api: AutomaticCharacterApi = {status: vi.fn().mockResolvedValue(idle),pause:vi.fn().mockResolvedValue(undefined)};
@@ -40,6 +40,26 @@ it("backs off when idle and preserves an unchanged progress object", async () =>
  const progress=result.current.progress;
  await act(async()=>{await vi.advanceTimersByTimeAsync(2000);});
  expect(result.current.progress).toBe(progress);
+ expect(result.current.queuePending).toBe(0);
+});
+it("exposes the active series, character and re-evaluation state", async () => {
+ vi.useFakeTimers();
+ const api:AutomaticCharacterApi={status:vi.fn().mockResolvedValue({...idle,activeAssetId:"image",activeSeriesName:"젠레스",activeTargetName:"아리아",activeTargetIndex:2,activeReconsideration:true,total:3,compared:1,pending:28}),pause:vi.fn()};
+ const {result}=renderHook(()=>useCharacterAutomation(vi.fn(),api));
+ await act(async()=>{await vi.advanceTimersByTimeAsync(100);});
+ expect(result.current.activeSeriesName).toBe("젠레스");
+ expect(result.current.activeTargetName).toBe("아리아");
+ expect(result.current.activeTargetIndex).toBe(2);
+ expect(result.current.activeReconsideration).toBe(true);
+ expect(result.current.queuePending).toBe(28);
+});
+it("exposes pending work as the current queue rather than total progress", async () => {
+ vi.useFakeTimers();
+ const api:AutomaticCharacterApi={status:vi.fn().mockResolvedValue({...idle,pending:31}),pause:vi.fn()};
+ const {result}=renderHook(()=>useCharacterAutomation(vi.fn(),api));
+ await act(async()=>{await vi.advanceTimersByTimeAsync(100);});
+ expect(result.current.progress).toBeNull();
+ expect(result.current.queuePending).toBe(31);
 });
 it("refreshes promptly on visibility and reports whether membership changed", async () => {
  vi.useFakeTimers();let visible=false,state=idle;

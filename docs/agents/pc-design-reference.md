@@ -68,6 +68,7 @@ The visual system is dark-neutral, square/rectilinear, low-radius, line-icon hea
 - Show current location and only meaningful transient state; do not repeat brand subtitles, “내 라이브러리”, or explanatory prose on every screen.
 - Do not recreate the old full toolbar above the content merely because individual controls used to live there.
 - Selection-only commands remain in selection/context surfaces, not inserted into the persistent header.
+- Exception (2026-09-09, user-approved CHAR-UI-002~006, native verification pending): the series/character review screen may expose selection accessories (count, clear, exclude, review entry) in the titlebar as `titleAccessory`. Converging this with the Asset SelectionBar pattern is a separate backlog decision, not a license to spread selection commands to other headers.
 
 ## 4. View settings
 
@@ -126,7 +127,7 @@ Default PC Asset layout is **date-grouped masonry/waterfall**. Justified rows re
 Asset selection is intentionally quieter than navigation selection.
 
 - Keep the small top-left square marker.
-- Apply a neutral gray wash to the image area only.
+- Apply the approved teal selection tint (`--asset-selection-tint`) to the image area only. The 2026-09-06 user-approved value replaced the original neutral gray wash, which was too faint to notice during real use.
 - Do not add a strong outer selection outline around the whole tile.
 - Do not recolor or reflow the artist/time caption merely because the asset is selected.
 - Keyboard focus remains independently visible.

@@ -842,7 +842,7 @@ Status: `TODO` — 2026-09-09 사용자 요구 기록. 원본을 그대로 남�
 
 ## CHAR-UI-009 — 분류에 영향을 주지 않는 캐릭터 그룹
 
-Status: `TODO` — 2026-09-09 사용자 동의한 방향 기록. 실제 시리즈 이동과 구분한다.
+Status: `PARTIAL` — 기본 표시 그룹 생성·편집·한 단계 내부 탐색은 구현됐고 네이티브 확인이 남아 있다. 아래 사이드바/비주얼 그룹 카드/그룹 전체 에셋 탐색 확장은 아직 TODO다. 실제 시리즈 이동과 구분한다.
 
 - **사용자 예시:** `버튜버` 시리즈 안의 `노엘`, `토와`를 `홀로라이브`라는 가벼운 표시용 그룹으로 감싼다. 두 캐릭터의 실제 소속 시리즈와 분석 범위는 계속 `버튜버`다.
 - 그룹 생성·이름 변경·캐릭터 넣기/빼기·해제를 제공한다. 그룹을 열면 포함된 캐릭터 목록을 보여준다.
@@ -851,6 +851,72 @@ Status: `TODO` — 2026-09-09 사용자 동의한 방향 기록. 실제 시리�
 - 초기 방향은 같은 시리즈 내 한 단계 그룹이며 중첩 그룹·복수 그룹 소속은 범위에서 제외한다. 일반 분류 폴더와 혼동하지 않도록 `캐릭터 그룹`/`그룹으로 묶기` 등의 이름을 사용한다.
 - **실제 시리즈 이동은 별도 미확정 사항:** 후보 범위, 참조 자격, 연결 이미지 분류, 여러 캐릭터 공유 이미지, 진행 중 분석/검토 무효화에 영향을 준다. 이번 그룹 요구를 실제 시리즈 이동 기능 구현 승인으로 해석하지 않는다.
 - 위 전환·참조 관리·그룹 기능은 Windows/Linux에서 같은 의미로 동작하도록 설계한다. 이번 기록은 구현·마이그레이션·파일 이동·삭제·커밋·푸시 실행 승인이 아니다.
+
+### 추가 방향 — 그룹을 실제 탐색 단위처럼 표현 (2026-09-09)
+
+Status: `TODO` — CHAR-UI-009의 표시 전용 계약을 유지한 채 탐색/비주얼 표현을 확장하는 사용자 방향이다.
+
+- **사용자 예시:** `초카구야 공주` 그룹에 `야치요`, `카쿠야`를 묶고, 그룹 자체를 사이드바와 시리즈 본문에서 눈에 보이는 단위로 다룬다.
+- 사이드바에서는 `시리즈 → 그룹 → 캐릭터` 계층을 표현한다. 그룹은 일반 폴더나 캐릭터와 다른 아이콘/행 표현을 사용하고, 펼치면 멤버 캐릭터가 나타난다.
+- 시리즈 본문에서는 현재의 `그룹명 · N명` 텍스트 버튼보다 멤버 대표 이미지를 조합한 **그룹 카드**를 우선 검토한다. 2명은 2분할, 3명은 3분할, 4명 이상은 대표 4명의 2×2 합성처럼 별도 그룹 이미지를 요구하지 않는 기본값을 둔다.
+- 그룹을 열면 멤버 캐릭터 카드와 멤버들의 에셋 합집합을 함께 탐색할 수 있게 한다. 여러 멤버에 동시에 연결된 같은 에셋은 한 번만 표시한다.
+- 그룹에 속한 캐릭터는 시리즈 메인에서 개별 카드로 중복 표시하지 않는 현재 의도를 유지한다. 필요하면 이후 단계에서 사용자 지정 그룹 대표 이미지/키비주얼을 선택적으로 추가한다.
+- 그룹 화면을 직접 탐색 위치로 취급하려면 `AssetView` 또는 동등한 라우팅 상태가 group id를 표현할 수 있어야 한다. 뒤로가기·현재 선택 표시·사이드바 포커스도 같은 위치를 이해해야 한다.
+- **불변 조건:** 그룹 생성·탐색·대표 비주얼은 `character_targets`, reference fingerprint, 자동 분석 범위, 실제 Classification, 재검토 큐를 바꾸지 않는다. CHAR-UI-009의 presentation-only 경계를 유지한다.
+
+## CHAR-UI-010 — 소수 캐릭터와 캐릭터 분류 종료 상태
+
+Status: `TODO` — 2026-09-09 사용자 방향 기록. 현재 CharacterTarget/수동 relation을 최대한 재사용하는 쪽을 우선 검토한다.
+
+- **문제:** 시리즈 안에 이름은 아는 캐릭터지만 이미지가 1~4장뿐인 경우, 기준 이미지 5장과 자동 비교를 준비하는 현재 UX가 과하다. 반대로 이름도 없거나 관리 가치가 낮은 NPC/배경 인물/잡다한 단체컷은 영구히 `캐릭터 미분류`에 남을 수 있다.
+- **수동 캐릭터:** 미분류 에셋을 선택한 상태에서 `새 캐릭터`를 만들고 이름과 선택 에셋만으로 바로 수동 관계를 확정하는 흐름을 제공한다. 자동 비교용 기준 이미지 5장을 즉시 요구하지 않는다.
+- 현재 백엔드는 reference가 부족한 CharacterTarget 생성과 `baselineFingerprint=null`의 수동 accepted 관계를 이미 허용하고, 자동 경로는 `ready` target만 비교한다. 구현은 이 성질을 정식 UX로 승격하는 방향을 우선 검토한다.
+- `ready=false`는 현재 `준비 필요`라는 뜻과 의도적으로 수동인 캐릭터를 구분하지 못한다. UI 전용 상태로 충분한지, 명시적 `manual/automatic` 의도 필드를 저장해야 하는지는 구현 전에 결정한다. 고의적인 수동 캐릭터를 영구 오류/미완성처럼 표시하지 않는다.
+- 수동 캐릭터가 나중에 충분한 이미지와 기준 5장을 갖추면 같은 identity를 유지한 채 자동 비교 대상으로 승격할 수 있게 한다. 캐릭터를 새로 만들거나 기존 수동 관계를 다시 생성하지 않는다.
+- **캐릭터 분류 제외:** 어느 캐릭터에도 넣을 가치가 없는 에셋에는 시리즈×에셋 수준의 명시적 종료 상태를 둔다. 이는 특정 target에 대한 `rejected`와 의미가 다르며, `캐릭터 미분류` 목록에서는 빠지되 나중에 다시 복구/재분류할 수 있어야 한다.
+- `분류 제외`는 원본 자산 삭제, 일반 Classification 이동, 모든 target에 대한 일괄 rejected로 구현하지 않는다. 다른 작품/캐릭터 관계가 있는 공유 이미지도 보존한다.
+- **오리지널 캐릭터 경계:** 사용자는 `게임 / 만화 / 기타`와 별도로 최상위 `오리지널` 일반 분류를 만들고 OC별 일반 폴더로 관리할 계획이다. 오리지널 트리는 기본적으로 캐릭터 비교 시스템의 대상이 아니며, 자동 비교가 필요해질 때만 명시적으로 시리즈/CharacterTarget에 등록한다.
+- 시리즈 미분류 선택 UX의 목표는 `기존 캐릭터 지정 / 새 수동 캐릭터 / 캐릭터 분류 제외` 세 경로를 빠르게 제공하는 것이다.
+
+## CHAR-AUTO-002 — 전체 진행률과 중복 재분석 성능/진단
+
+Status: `TODO` — 2026-09-09 Linux 개발 앱 실사용 중 진행률 의미 오류와 반복 재분석 비용을 읽기 전용으로 관측했다. 정확한 중복 트리거 순서는 구현 전에 추가 추적한다.
+
+- **현재 UI 문제:** `이미지 후보 비교 · 1/1`은 전체 후보 이미지 진행률이 아니다. native engine의 `total/compared`는 현재 에셋 한 장을 몇 ready target과 비교했는지 나타내므로, 마커스 한 명뿐인 시리즈에서는 수천 장이 남아도 계속 `1/1`이 될 수 있다.
+- `character_incremental_status`는 `pending`, 누적 `completed`, 누적 `confirmed`, 현재 `activeAssetId`, 현재 이미지의 `total/compared`를 이미 반환하지만 프론트는 현재 이미지 비교 수만 진행 표시로 사용한다. `completed/confirmed`는 전역 누적값이고 이번 재분석 작업의 분모/분자로 직접 사용할 수 없다.
+- reconsideration은 한 시리즈의 기록된 미해결 에셋을 한꺼번에 pending으로 넣지 않고 cursor를 따라 **32장씩** 공급한다. 따라서 현재 `pending` 개수도 전체 남은 작업 수가 아니다.
+- **목표 진행 표시:** 작업/시리즈/재검토 revision 단위의 `전체 대상 / 처리 완료 / 남음 / 현재 큐 / 자동 확정 / 검토 필요 / 실패`를 노출한다. `현재 이미지 · 캐릭터 비교 1/1`은 보조 정보로만 남긴다. 전체 대상 수가 아직 확정되지 않은 단계라면 그 사실을 명시하고 거짓 백분율을 만들지 않는다.
+- 작업 식별자 또는 동등한 durable scope를 두어 앱 재시작·32장 보충·pause/resume 뒤에도 같은 진행률을 이어갈 수 있게 한다. target/reference/series 변경으로 작업 범위가 무효화되면 새 revision으로 명확히 전환한다.
+
+### 2026-09-09 실제 실행 관측 — Reverse / Marcus
+
+- 관측은 실행 중인 Linux 개발 앱과 라이브러리를 **읽기 전용**으로 확인한 것이다. 값은 작업이 계속 진행되는 동안의 스냅샷이며 고정 benchmark가 아니다.
+- Reverse 시리즈 subtree 조회는 약 **2,565장**이었다. 자동 비교 자격 범위와 subtree 집계는 완전히 같은 조건이 아니므로 아래 distinct asset 수와 1~2장 차이가 날 수 있다.
+- 마커스 prediction evidence는 관측 후반에 **7,910행 / 2,567 distinct asset**, 평균 약 **3.08회/asset**이었다. evidence generation 분포도 generation 1~3에 약 2.5k씩 몰려 있어 대부분의 후보가 여러 번 재처리된 사실을 확인했다.
+- `character_autotag_jobs`는 한 asset당 최신 job 한 행만 가지므로 당시 `completed≈2,608 / pending≈31 / processing≈1 / failed≈1`처럼 보였지만, `character_autotag_control.completed`는 7천 회 이상으로 증가해 실제 처리 횟수가 job 행 수보다 훨씬 컸다.
+- 약 10초 표본에서는 누적 completed가 64 증가했고, 최신 마커스 evidence 300개가 약 48초 범위에 생성된 구간도 있었다. 완전 정지는 아니며 처리량은 구간별로 크게 변한다.
+- 같은 시점 프로세스 표본에서 Lakomics Rust 프로세스가 약 한 코어를 포화시키고 Python worker CPU는 낮았다. 이 표본만으로 전체 런타임의 추론 병목을 단정하지 않으며, 현재 패스에서는 native 준비/검증 비용이 상당하다는 신호로 취급한다.
+
+### 중복 작업과 파일 검증 비용의 조사 방향
+
+- target insert/update, series 변경, manual decision 학습, 명시적 historical scan enrollment가 모두 reconsideration/queue에 영향을 준다. 특히 `queue_analyzed_character_assets(... Cause::Reconsideration)`와 `character_autotag_reconsideration` cursor가 같은 asset을 겹쳐 재등록하는지 원인별 generation/queue provenance를 계측한다.
+- 우선순위는 **같은 입력·같은 target context를 불필요하게 여러 번 분석하지 않게 하는 것**이다. 단순히 worker를 빠르게 만들기 전에 중복 generation의 실제 원인을 제거한다.
+- 현재 `compare_incremental_asset`은 후보마다 query 원본과 모든 reference를 `Source::capture`하여 전체 SHA-256을 계산하고 임시 snapshot을 만들며, 추론 뒤 `verify`에서 query/reference 전체를 다시 읽어 hash 검증한다. 마커스 기준 5장처럼 target fingerprint가 변하지 않는 reference도 후보마다 이 작업을 반복한다.
+- reference snapshot/검증 결과를 target fingerprint + asset hash/identity 단위로 안전하게 재사용할 수 있는지 검토한다. reference 변경·외부 교체·캐시 identity 불일치 시 즉시 무효화해야 한다.
+- query 원본의 최종 identity/hash fence와 Linux 외부 writer 방어를 약화시키는 최적화는 금지한다. 전체 재해시 횟수를 줄이려면 먼저 기존 source replacement 회귀와 Windows retained-handle 계약을 보존하는 대안을 설계하고 계측한다.
+- 진단 UI/로그는 현재 작업이 `새 수집`, `수동 분석 후 enrollment`, `series reconsideration`, `retry` 중 어느 원인으로 실행되는지 식별할 수 있게 한다. 장시간 작업이 느린지, 반복 중인지 사용자가 구별할 수 있어야 한다.
+- **Acceptance:** 동일 입력에서 기존 prediction/자동 relation 결과 동등성, 중복 작업 제거, restart/pause 복구, stale source 차단, Linux/Windows 안전성, 정확한 전체 진행률을 함께 확인한다.
+
+## CHAR-AUTO-003 — 군집 기반 캐릭터 후보 찾기 연구
+
+Status: `HOLD` — 현재 캐릭터 시스템을 교체하지 않는다. 기존 UX/성능을 안정화한 뒤 별도 실험으로 판단한다.
+
+- 장기적으로는 사용자가 캐릭터 identity를 먼저 만들고 기준 이미지를 고르는 흐름 외에, 시리즈 에셋의 캐릭터 crop/embedding을 먼저 계산해 비슷한 인물끼리 군집으로 묶고 **사용자가 군집에 이름만 붙이는** 초기 정리 흐름을 검토한다.
+- 참고 방향은 CCIP 계열의 anime-character embedding/clustering과 Immich류의 `충분히 큰 군집만 person 후보로 승격하고 작은 outlier는 보류` UX다. 외부 프로젝트 코드를 복사하지 않고 아이디어/측정만 참고한다.
+- 큰 군집은 이름 지정 후 기존 CharacterTarget + relations로 가져오고, 작은 군집은 CHAR-UI-010의 수동 캐릭터로 만들거나 그대로 보류/분류 제외할 수 있게 한다.
+- 군집 결과가 기존 character data model의 새 source가 되는 구조를 우선한다. `character_targets`, decisions, review, incremental auto-tagging을 군집 중심 모델로 갈아엎는 재설계는 현재 범위가 아니다.
+- 초기 적용 후보는 `캐릭터 후보 찾기` 같은 명시적 도구다. 기존 캐릭터와 먼저 매칭하고 남은 unknown embedding만 clustering하는 혼합형도 실험한다.
+- 실제 라이브러리 일괄 backfill이나 production data write는 별도 사용자 승인 없이 수행하지 않는다. 복사본/격리 샘플에서 cluster purity, 작은 군집 처리, 단체컷 중복, fanart 스타일 편차와 처리 시간을 먼저 측정한다.
 
 ## NOTE-001A — Revision-safe server Notes foundation
 
@@ -1455,7 +1521,7 @@ Required list behavior:
 - a pinned item is a shortcut, not a move: opening it follows its real canonical children/breadcrumb and saving to it uses its real classification ID;
 - per-parent `listOrder` controls visible sibling ordering only;
 - removed IDs disappear safely; new siblings append after ordered live IDs;
-- folder click enters the folder; leaf click selects; right-swipe saves with a resisted commit gesture, left-swipe goes back, and current-folder save plus keyboard accessibility remain available;
+- folder click enters the folder; leaf click selects; left-swipe saves with a resisted commit gesture, right-swipe goes back, and current-folder save plus keyboard accessibility remain available;
 - ordering editor operates on the same list-native model and automatically PATCHes the server profile.
 
 The fixed `임시 저장` action remains an action, never a classification and never part of ordering/profile data.

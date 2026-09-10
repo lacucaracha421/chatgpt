@@ -773,6 +773,29 @@ pub(crate) fn asset_summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Resul
     })
 }
 
+pub(crate) fn asset_summaries_by_ids(
+    connection: &rusqlite::Connection,
+    asset_ids: &[String],
+) -> Result<Vec<AssetSummary>, LibraryError> {
+    if asset_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = std::iter::repeat_n("?", asset_ids.len()).collect::<Vec<_>>().join(",");
+    let sql = format!("SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url, asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count, asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url, asset.import_source, asset.import_batch_id, asset.original_modified_at FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id=asset.id WHERE asset.status='normal' AND asset.id IN ({placeholders})");
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement
+        .query_map(rusqlite::params_from_iter(asset_ids.iter()), asset_summary_from_row)?
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut by_id = rows
+        .into_iter()
+        .map(|asset| (asset.id.clone(), asset))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    asset_ids
+        .iter()
+        .map(|id| by_id.remove(id).ok_or(LibraryError::AssetNotFound))
+        .collect()
+}
+
 fn preparation_state(value: &str) -> rusqlite::Result<VideoPreparationState> {
     match value {
         "pending" => Ok(VideoPreparationState::Pending),
