@@ -502,6 +502,22 @@ fn real_native_scan_cold_warm_incremental_and_ref_replacement_parity() {
 }
 
 #[test]
+fn manual_scan_inputs_respect_series_exclusions() {
+    let f = Fixture::new();
+    let target = f.ready("A");
+    f.library.save_character_series(super::super::character_hub::Series {
+        classification_id: f.series.clone(), hero_asset_id: None, auto_classify: true,
+    }).unwrap();
+    f.library.set_character_series_asset_excluded(
+        super::super::character_workflow::SeriesAssetExclusionRequest {
+            series_id: f.series.clone(), asset_ids: vec!["asset-5".into()], excluded: true,
+        },
+    ).unwrap();
+    let inputs = f.library.character_scan_inputs(&target).unwrap();
+    assert!(inputs.iter().all(|input| input.id != "asset-5"));
+}
+
+#[test]
 fn confirmed_images_remain_available_for_other_people_in_the_picture() {
     let f = Fixture::new();
     let a = f.ready("Towa");

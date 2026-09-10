@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use super::{
     character_autotag::{self, Cause},
     character_groups::{save_character_group_in, GroupDraft},
-    characters::{Error, Result},
+    characters::{asset_set_fingerprint, Error, Result},
     models::SetAssetClassification,
     Library,
 };
@@ -30,6 +30,7 @@ pub struct MixedFolderPreview {
     pub image_count: u64,
     pub other_media_count: u64,
     pub child_folder_count: u64,
+    pub asset_fingerprint: String,
     pub unscanned_count: u64,
     pub pending_count: u64,
     pub resolved_count: u64,
@@ -46,6 +47,7 @@ pub struct QueueMixedFolderRequest {
     pub series_id: String,
     pub expected_total_count: u64,
     pub expected_image_count: u64,
+    pub expected_asset_fingerprint: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -55,6 +57,7 @@ pub struct FinalizeMixedFolderRequest {
     pub series_id: String,
     pub expected_total_count: u64,
     pub expected_image_count: u64,
+    pub expected_asset_fingerprint: String,
     pub group_name: String,
     pub target_ids: Vec<String>,
 }
@@ -204,6 +207,8 @@ impl Library {
         let (folder_name, series_id, series_name) = folder_context(&connection, folder_id)?;
         let (total_count, image_count, other_media_count, child_folder_count) =
             counts(&connection, folder_id)?;
+        let asset_ids = direct_asset_ids(&connection, folder_id, false)?;
+        let asset_fingerprint = asset_set_fingerprint(&connection, &asset_ids)?;
         let (unscanned_count, pending_count, resolved_count, review_count, failed_count) =
             analysis_counts(&connection, folder_id, image_count)?;
         let target_counts = connection
@@ -238,6 +243,7 @@ impl Library {
             image_count,
             other_media_count,
             child_folder_count,
+            asset_fingerprint,
             unscanned_count,
             pending_count,
             resolved_count,
@@ -250,20 +256,23 @@ impl Library {
 
     pub fn queue_mixed_character_folder(&self, request: QueueMixedFolderRequest) -> Result<usize> {
         let mut connection = self.connection()?;
-        let (_, series_id, _) = folder_context(&connection, &request.folder_id)?;
+        let transaction = connection.transaction()?;
+        let (_, series_id, _) = folder_context(&transaction, &request.folder_id)?;
         if series_id != request.series_id {
             return Err(Error::Stale);
         }
-        let (total_count, image_count, _, _) = counts(&connection, &request.folder_id)?;
+        let (total_count, image_count, _, _) = counts(&transaction, &request.folder_id)?;
+        let all_ids = direct_asset_ids(&transaction, &request.folder_id, false)?;
         if total_count != request.expected_total_count
             || image_count != request.expected_image_count
+            || asset_set_fingerprint(&transaction, &all_ids)? != request.expected_asset_fingerprint
         {
             return Err(Error::Stale);
         }
         if image_count == 0 {
             return Err(Error::Invalid("분석할 이미지가 없습니다."));
         }
-        let automatic: bool = connection.query_row(
+        let automatic: bool = transaction.query_row(
             "SELECT auto_classify FROM character_series WHERE classification_id=?1",
             [&series_id],
             |row| row.get(0),
@@ -271,22 +280,14 @@ impl Library {
         if !automatic {
             return Err(Error::Invalid("먼저 작품의 자동 분류를 켜 주세요."));
         }
-        let ids = direct_asset_ids(&connection, &request.folder_id, true)?;
-        let transaction = connection.transaction()?;
+        let ids = direct_asset_ids(&transaction, &request.folder_id, true)?;
         let mut queued = 0;
         for id in ids {
-            let in_flight: bool = transaction.query_row(
-                "SELECT EXISTS(SELECT 1 FROM character_autotag_jobs WHERE asset_id=?1 AND state IN ('pending','processing'))",
-                [&id],
-                |row| row.get(0),
-            )?;
-            if !in_flight {
-                queued += usize::from(character_autotag::enqueue(
-                    &transaction,
-                    &id,
-                    Cause::ManualScanEnrollment,
-                )?);
-            }
+            queued += usize::from(character_autotag::enqueue(
+                &transaction,
+                &id,
+                Cause::ManualScanEnrollment,
+            )?);
         }
         transaction.commit()?;
         Ok(queued)
@@ -297,13 +298,16 @@ impl Library {
         request: FinalizeMixedFolderRequest,
     ) -> Result<FinalizeMixedFolderResult> {
         let mut connection = self.connection()?;
-        let (folder_name, series_id, _) = folder_context(&connection, &request.folder_id)?;
+        let transaction = connection.transaction()?;
+        let (folder_name, series_id, _) = folder_context(&transaction, &request.folder_id)?;
         if series_id != request.series_id {
             return Err(Error::Stale);
         }
-        let (total_count, image_count, _, _) = counts(&connection, &request.folder_id)?;
+        let (total_count, image_count, _, _) = counts(&transaction, &request.folder_id)?;
+        let all_ids = direct_asset_ids(&transaction, &request.folder_id, false)?;
         if total_count != request.expected_total_count
             || image_count != request.expected_image_count
+            || asset_set_fingerprint(&transaction, &all_ids)? != request.expected_asset_fingerprint
         {
             return Err(Error::Stale);
         }
@@ -311,7 +315,7 @@ impl Library {
             return Err(Error::Invalid("정리할 이미지가 없습니다."));
         }
         let (_, pending, resolved, review, failed) =
-            analysis_counts(&connection, &request.folder_id, image_count)?;
+            analysis_counts(&transaction, &request.folder_id, image_count)?;
         let analyzed = pending
             .saturating_add(resolved)
             .saturating_add(review)
@@ -331,7 +335,7 @@ impl Library {
         if group_name.is_empty() || group_name.chars().count() > 100 {
             return Err(Error::Invalid("그룹 이름을 확인해 주세요."));
         }
-        let duplicate_group: bool = connection.query_row(
+        let duplicate_group: bool = transaction.query_row(
             "SELECT EXISTS(SELECT 1 FROM character_groups WHERE series_id=?1 AND name=?2 COLLATE NOCASE)",
             params![series_id, group_name],
             |row| row.get(0),
@@ -339,8 +343,7 @@ impl Library {
         if duplicate_group {
             return Err(Error::Invalid("같은 이름의 캐릭터 그룹이 이미 있습니다."));
         }
-        let image_ids = direct_asset_ids(&connection, &request.folder_id, true)?;
-        let transaction = connection.transaction()?;
+        let image_ids = direct_asset_ids(&transaction, &request.folder_id, true)?;
         let group_id = save_character_group_in(
             &transaction,
             GroupDraft {

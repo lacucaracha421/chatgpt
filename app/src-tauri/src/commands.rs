@@ -218,6 +218,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::UnsupportedManagedFileDeletion => "unsupported_managed_file_deletion",
             LibraryError::EmptyClassificationName => "empty_classification_name",
             LibraryError::ClassificationNotFound => "classification_not_found",
+            LibraryError::ProtectedClassification => "protected_classification",
             LibraryError::DuplicateClassificationName => "duplicate_classification_name",
             LibraryError::InvalidClassificationParent => "invalid_classification_parent",
             LibraryError::ClassificationCycle => "classification_cycle",

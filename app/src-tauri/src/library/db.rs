@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 59;
+pub(crate) const SCHEMA_VERSION: i64 = 60;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -303,6 +303,11 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
                 "../../migrations/0059_manual_characters.sql"
             ))?;
         }
+        if version <= 59 {
+            transaction.execute_batch(include_str!(
+                "../../migrations/0060_character_correctness.sql"
+            ))?;
+        }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction
             .prepare("PRAGMA foreign_key_check")?
@@ -369,6 +374,61 @@ mod tests {
         connection
             .pragma_update(None, "foreign_keys", "ON")
             .unwrap();
+    }
+
+    #[test]
+    fn v60_binds_legacy_originals_root_to_persistent_role() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        historical_schema(&mut connection, 57);
+        connection.execute(
+            "INSERT INTO classification_entries(id,kind,name,parent_id,created_at,icon_key,color_key) VALUES('legacy-originals','root','오리지널',NULL,'old',NULL,NULL)",
+            [],
+        ).unwrap();
+
+        migrate_to_latest(&mut connection, 57).unwrap();
+
+        assert_eq!(connection.query_row(
+            "SELECT classification_id FROM classification_roles WHERE role='originals'",
+            [], |row| row.get::<_, String>(0),
+        ).unwrap(), "legacy-originals");
+        assert_eq!(connection.query_row(
+            "SELECT COUNT(*) FROM classification_entries WHERE id='lakomics-originals'",
+            [], |row| row.get::<_, i64>(0),
+        ).unwrap(), 0);
+        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 60);
+    }
+
+    #[test]
+    fn v60_reopens_only_multi_person_reference_resolved_jobs() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        historical_schema(&mut connection, 59);
+        connection.execute_batch(r#"
+            INSERT INTO classification_entries(id,kind,name,parent_id,created_at)
+            VALUES('root','root','Root',NULL,'now'),('series','tag','Series','root','now');
+            INSERT INTO character_series(classification_id,auto_classify) VALUES('series',1);
+            INSERT INTO character_targets(id,series_classification_id,display_name,enabled,manual_only,created_at,updated_at)
+            VALUES('target','series','A',1,0,'now','now');
+            INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at,status)
+            VALUES('affected','same-hash','image','affected.png','assets/affected.png','thumbnails/affected.webp',1,1,1,'now','normal'),
+                  ('safe','safe-hash','image','safe.png','assets/safe.png','thumbnails/safe.webp',1,1,1,'now','normal');
+            INSERT INTO asset_classifications VALUES('affected','series'),('safe','series');
+            INSERT INTO character_autotag_jobs(asset_id,generation,source_generation,content_hash,relative_path,classification_ids,state,review_state,priority,cause,updated_at)
+            VALUES('affected',1,1,'same-hash','assets/affected.png','["series"]','completed','resolved',0,'ingestion','now'),
+                  ('safe',1,1,'safe-hash','assets/safe.png','["series"]','completed','resolved',0,'ingestion','now');
+            INSERT INTO character_autotag_evidence(id,asset_id,generation,source_generation,content_hash,context_hash,runtime_fingerprint,scope_json,unresolved_regions,created_at)
+            VALUES('e-affected','affected',1,1,'same-hash','context','runtime','{}','[]','now'),
+                  ('e-safe','safe',1,1,'safe-hash','context','runtime','{}','[]','now');
+            INSERT INTO character_autotag_predictions(evidence_id,target_id,series_id,target_fingerprint,result_json)
+            VALUES('e-affected','target','series','fingerprint','{"assetId":"affected","contentHash":"same-hash","state":"recommended","evidence":{"queryBoxes":[[0,0,10,10],[20,0,30,10]],"referenceHashes":["same-hash","a","b","c","d"]},"error":null}'),
+                  ('e-safe','target','series','fingerprint','{"assetId":"safe","contentHash":"safe-hash","state":"recommended","evidence":{"queryBoxes":[[0,0,10,10],[20,0,30,10]],"referenceHashes":["other","a","b","c","d"]},"error":null}');
+        "#).unwrap();
+
+        migrate_to_latest(&mut connection, 59).unwrap();
+
+        assert_eq!(connection.query_row("SELECT review_state FROM character_autotag_jobs WHERE asset_id='affected'", [], |row| row.get::<_, String>(0)).unwrap(), "partially_resolved");
+        assert_eq!(connection.query_row("SELECT review_state FROM character_autotag_jobs WHERE asset_id='safe'", [], |row| row.get::<_, String>(0)).unwrap(), "resolved");
+        assert_eq!(connection.query_row("SELECT COUNT(*) FROM character_autotag_reconsideration WHERE series_id='series'", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
+        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 60);
     }
 
     #[test]

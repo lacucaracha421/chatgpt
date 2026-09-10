@@ -1,7 +1,7 @@
 use tauri::State;
 
 use super::{current_required, AppState, CommandError};
-use crate::library::characters::{Decision, DecisionRequest, Error, Target, TargetDraft};
+use crate::library::characters::{CharacterSettingsDraft, Decision, DecisionRequest, Error, Target, TargetDraft};
 
 #[tauri::command]
 pub async fn character_autotag_job(
@@ -300,6 +300,22 @@ pub async fn save_character_target(
 }
 
 #[tauri::command]
+pub async fn save_character_settings(
+    request: CharacterSettingsDraft,
+    strict_selection: Option<bool>,
+    state: State<'_, AppState>,
+) -> Result<Target, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library
+            .save_character_settings(request, strict_selection.unwrap_or(false))
+            .map_err(Into::into)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+}
+
+#[tauri::command]
 pub async fn replace_character_references(
     target_id: String,
     expected_revision: i64,
@@ -500,6 +516,21 @@ pub async fn character_folder_image_count(
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || {
         library.character_folder_image_count(folder_id, recursive)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn character_folder_asset_snapshot(
+    folder_id: String,
+    recursive: bool,
+    state: State<'_, AppState>,
+) -> Result<crate::library::characters::FolderAssetSnapshot, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.character_folder_asset_snapshot(folder_id, recursive)
     })
     .await
     .map_err(|_| super::background_task_error())?

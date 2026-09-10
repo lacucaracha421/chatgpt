@@ -5,6 +5,10 @@ import { thumbnailUrl } from "../assets/mediaUrl";
 import type { CharacterTarget } from "./api";
 
 export type CharacterEditorDraft = { name: string; description: string; thumbnail: string | null; references: string[]; enabled: boolean };
+
+const learnedReferenceStatus = (status: string) => ({
+  ready: "사용 중", ineligible: "시리즈 밖", changed_content: "내용 변경", missing_file: "파일 없음", duplicate_content: "중복 내용", missing_asset: "자산 없음",
+}[status] ?? status);
 export function characterDraft(target: CharacterTarget | null): CharacterEditorDraft {
   return { name: target?.displayName ?? "", description: target?.description ?? "", thumbnail: target?.thumbnailAssetId ?? null,
     references: target?.references.flatMap(r => r.assetId ? [r.assetId] : []) ?? [], enabled: target?.enabled ?? true };
@@ -32,12 +36,14 @@ export function CharacterRegistry({ draft, target, privacyMode, busy, error, onC
     </button>)}</div>
     {target && <section aria-label="추가 참조"><div className="character-registry__label">추가 참조 <small>{target.learnedReferences?.length ?? 0}장</small></div>
       <p className="series-description">직접 학습에 추가한 이미지입니다. 일반 승인·거절과 독립적으로 유지됩니다.</p>
+      {target.learnedReferences?.some(reference => reference.status !== "ready") && <p className="character-message" role="status">사용할 수 없는 추가 참조가 있습니다. 상태를 확인한 뒤 제거하거나 원래 시리즈로 되돌려 주세요.</p>}
       <div className="character-learned-references">{target.learnedReferences?.map(reference => reference.assetId && <div key={reference.assetId}>
         <button disabled={busy || !onOpenReference} aria-label={`추가 참조 ${reference.slot + 1} 원본 보기`} onClick={() => onOpenReference?.(reference.assetId!)}><img src={thumbnailUrl(reference.assetId)} className={privacyMode ? "character-private" : ""} alt={`추가 참조 ${reference.slot + 1}`} /></button>
+        <small>{learnedReferenceStatus(reference.status)}</small>
         <Button size="sm" variant="ghost" disabled={busy || !onExcludeReference} onClick={() => onExcludeReference?.(reference.assetId!)}>학습에서 제거</Button>
       </div>)}</div>
     </section>}
-    {!target?.manualOnly && <label className="character-check"><input type="checkbox" checked={draft.enabled} disabled={busy} onChange={e => onChange({ ...draft, enabled: e.target.checked })} />분석에 사용</label>}
+    {!target?.manualOnly && <label className="character-check"><input type="checkbox" checked={draft.enabled} disabled={busy} onChange={e => onChange({ ...draft, enabled: e.target.checked })} />자동 분석에 사용</label>}
     {error && <p role="alert">{error}</p>}
     <Button disabled={busy || !draft.name.trim()} onClick={onSave}>{target ? "저장" : "캐릭터 만들기"}</Button>
   </section>;

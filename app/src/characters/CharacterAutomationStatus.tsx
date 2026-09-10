@@ -16,8 +16,10 @@ export function CharacterAutomationStatus({ state }: { state: ReturnType<typeof 
     cause,
     state.activeTargetName ? `현재 이미지 · ${state.activeTargetName} 비교 ${state.activeTargetIndex}/${state.progress.total}` : `현재 이미지 · 캐릭터 비교 ${state.progress.completed}/${state.progress.total}`,
   ].filter(Boolean).join(" · ") : null;
+  const primary = activity ? `${activity}${queue}` : state.paused ? `캐릭터 분석 일시 정지${queue}` : state.queuePending > 0 ? `캐릭터 분석 준비${queue}` : state.message;
   return <div className="character-actions series-automation" role="status">
-    <span>{activity ? `${activity}${queue}` : state.paused ? `캐릭터 분석 일시 정지${queue}` : state.queuePending > 0 ? `캐릭터 분석 준비${queue}` : state.message}</span>
+    {primary && <span>{primary}</span>}
+    {state.message && state.message !== primary && <small className="character-message">{state.message}</small>}
     {state.progress ? <Button size="sm" onClick={state.paused ? state.resume : state.pause}>{state.paused ? "재개" : "현재 이미지 후 정지"}</Button> : state.paused ? <Button size="sm" onClick={state.resume}>재개</Button> : null}
     {!state.progress && !state.paused && state.queuePending === 0 && <Button size="sm" onClick={state.dismiss}>닫기</Button>}
   </div>;

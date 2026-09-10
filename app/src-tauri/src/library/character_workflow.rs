@@ -106,7 +106,7 @@ impl Library {
             return Err(Error::Invalid("등록된 시리즈를 선택해 주세요."));
         }
         for asset_id in &ids {
-            character_hub::candidate_media_mode(
+            character_hub::candidate_media_mode_including_excluded(
                 &transaction, &request.series_id, asset_id, false, true,
             )?;
             if request.excluded {
@@ -119,16 +119,14 @@ impl Library {
                     "DELETE FROM character_series_asset_exclusions WHERE series_id=?1 AND asset_id=?2",
                     params![request.series_id, asset_id],
                 )?;
+                character_autotag::enqueue(
+                    &transaction,
+                    asset_id,
+                    Cause::ManualScanEnrollment,
+                )?;
             }
         }
         transaction.commit()?;
-        drop(connection);
-        if !request.excluded {
-            let connection = self.connection()?;
-            for asset_id in &ids {
-                character_autotag::enqueue(&connection, asset_id, Cause::ManualScanEnrollment)?;
-            }
-        }
         Ok(ids.len())
     }
 }
@@ -242,6 +240,86 @@ mod tests {
         let job = f.library.character_autotag_job("asset-5").unwrap().unwrap();
         assert_eq!(job.state, "pending");
         assert_eq!(job.cause, "manual_scan");
+    }
+
+    #[test]
+    fn excluded_asset_requires_explicit_restore_before_manual_assignment() {
+        let f = Fixture::new();
+        register_series(&f);
+        let target = f.ready("A");
+        f.library.set_character_series_asset_excluded(SeriesAssetExclusionRequest {
+            series_id: f.series.clone(), asset_ids: vec!["asset-5".into()], excluded: true,
+        }).unwrap();
+
+        assert!(character_hub::candidate_image_mode(
+            &f.library.connection().unwrap(), &f.series, "asset-5", false,
+        ).is_err());
+        assert!(character_hub::validate_character_selection(
+            &f.library.connection().unwrap(), &f.series, Some(&target.id), "asset-5",
+        ).is_err());
+        assert!(f.library.record_character_decisions(DecisionRequest {
+            target_id: target.id.clone(), expected_fingerprint: target.fingerprint.clone(),
+            asset_ids: vec!["asset-5".into()], decision: DecisionKind::Accepted,
+            baseline_fingerprint: None, scan_id: None,
+        }).is_err());
+        assert!(f.library.connection().unwrap().query_row(
+            "SELECT EXISTS(SELECT 1 FROM character_series_asset_exclusions WHERE series_id=?1 AND asset_id='asset-5')",
+            [&f.series], |row| row.get::<_, bool>(0),
+        ).unwrap());
+
+        f.library.set_character_series_asset_excluded(SeriesAssetExclusionRequest {
+            series_id: f.series.clone(), asset_ids: vec!["asset-5".into()], excluded: false,
+        }).unwrap();
+        assert!(character_hub::candidate_image_mode(
+            &f.library.connection().unwrap(), &f.series, "asset-5", false,
+        ).is_ok());
+        let job = f.library.character_autotag_job("asset-5").unwrap().unwrap();
+        assert_eq!(job.state, "pending");
+        assert_eq!(job.cause, "manual_scan");
+    }
+
+    #[test]
+    fn failed_exclusion_restore_rolls_back_the_exclusion_and_queue_together() {
+        let f = Fixture::new();
+        register_series(&f);
+        f.library.set_character_series_asset_excluded(SeriesAssetExclusionRequest {
+            series_id: f.series.clone(), asset_ids: vec!["asset-5".into()], excluded: true,
+        }).unwrap();
+
+        assert!(f.library.set_character_series_asset_excluded(SeriesAssetExclusionRequest {
+            series_id: f.series.clone(),
+            asset_ids: vec!["asset-5".into(), "asset-6".into()],
+            excluded: false,
+        }).is_err());
+
+        assert!(f.library.connection().unwrap().query_row(
+            "SELECT EXISTS(SELECT 1 FROM character_series_asset_exclusions WHERE series_id=?1 AND asset_id='asset-5')",
+            [&f.series], |row| row.get::<_, bool>(0),
+        ).unwrap());
+        assert!(f.library.character_autotag_job("asset-5").unwrap().is_none());
+    }
+
+    #[test]
+    fn originals_role_blocks_registered_series_from_moving_into_storage_scope() {
+        let f = Fixture::new();
+        register_series(&f);
+        let originals: String = f.library.connection().unwrap().query_row(
+            "SELECT classification_id FROM classification_roles WHERE role='originals'",
+            [], |row| row.get(0),
+        ).unwrap();
+
+        assert!(f.library.save_character_series(Series {
+            classification_id: originals.clone(), hero_asset_id: None, auto_classify: true,
+        }).is_err());
+        assert!(f.library.move_classification(&f.series, Some(&originals)).is_err());
+        assert!(f.library.rename_classification(&originals, "Renamed originals").is_err());
+        assert!(f.library.move_classification(&originals, None).is_err());
+        assert!(f.library.delete_classification(&originals).is_err());
+
+        let parent: Option<String> = f.library.connection().unwrap().query_row(
+            "SELECT parent_id FROM classification_entries WHERE id=?1", [&f.series], |row| row.get(0),
+        ).unwrap();
+        assert_ne!(parent.as_deref(), Some(originals.as_str()));
     }
 
     #[test]

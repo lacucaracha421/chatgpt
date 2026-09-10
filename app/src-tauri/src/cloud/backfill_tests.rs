@@ -1292,7 +1292,15 @@ fn legacy_server_pauses_replication_without_failing_the_queue() {
     let base_url = format!("http://{}", server.server_addr());
     let server_thread = thread::spawn(move || {
         let mut requests = 0;
-        while let Some(mut request) = server.recv_timeout(std::time::Duration::from_secs(1)).unwrap() {
+        loop {
+            // Under the full parallel suite, fixture ingestion can delay the first
+            // client request. Once traffic starts, keep the short idle shutdown.
+            let timeout = if requests == 0 {
+                std::time::Duration::from_secs(10)
+            } else {
+                std::time::Duration::from_secs(1)
+            };
+            let Some(mut request) = server.recv_timeout(timeout).unwrap() else { break; };
             assert_eq!(request.url(), "/v1/replication/prepare");
             let body = read_json(&mut request);
             let id = body["asset_id"].as_str().unwrap();

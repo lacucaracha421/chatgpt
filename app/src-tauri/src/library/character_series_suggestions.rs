@@ -53,7 +53,7 @@ fn validate_root(connection: &Connection, root_id: &str) -> Result<()> {
     if !matches!(root, Some((ref kind, None, _)) if kind == "root") {
         return Err(Error::Invalid("최상위 분류에서만 작품 후보를 찾을 수 있습니다."));
     }
-    if root_id == "lakomics-originals" || matches!(root, Some((_, None, ref name)) if name == "오리지널") {
+    if super::classification::classification_in_role_scope(connection, root_id, "originals")? {
         return Err(Error::Invalid("오리지널은 작품·캐릭터 자동 분류를 사용하지 않습니다."));
     }
     let has_series: bool = connection.query_row(

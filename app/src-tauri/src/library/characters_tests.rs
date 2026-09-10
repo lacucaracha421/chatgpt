@@ -207,6 +207,44 @@ fn registry_accepts_recursive_refs_and_rejects_invalid_atomic_replacement() {
 }
 
 #[test]
+fn display_name_edit_keeps_recognition_fingerprint_and_does_not_reconsider() {
+    let f = Fixture::new();
+    let target = f.ready("Before");
+    f.library.connection().unwrap().execute(
+        "DELETE FROM character_autotag_reconsideration", [],
+    ).unwrap();
+    let mut draft = edit(&target);
+    draft.display_name = "After".into();
+
+    let updated = f.library.save_character_target(draft).unwrap();
+
+    assert_eq!(updated.revision, target.revision + 1);
+    assert_eq!(updated.fingerprint, target.fingerprint);
+    assert_eq!(updated.display_name, "After");
+    assert_eq!(f.library.connection().unwrap().query_row(
+        "SELECT COUNT(*) FROM character_autotag_reconsideration", [], |row| row.get::<_, i64>(0),
+    ).unwrap(), 0);
+}
+
+#[test]
+fn base_reference_change_still_reconsiders_with_revision_independent_fingerprint() {
+    let f = Fixture::new();
+    let target = f.ready("A");
+    f.library.connection().unwrap().execute(
+        "DELETE FROM character_autotag_reconsideration", [],
+    ).unwrap();
+
+    let changed = f.library.replace_character_references(
+        &target.id, target.revision, &["asset-0".into(), "asset-1".into(), "asset-2".into(), "asset-3".into(), "asset-5".into()],
+    ).unwrap();
+
+    assert_ne!(changed.fingerprint, target.fingerprint);
+    assert_eq!(f.library.connection().unwrap().query_row(
+        "SELECT COUNT(*) FROM character_autotag_reconsideration WHERE series_id=?1", [&f.series], |row| row.get::<_, i64>(0),
+    ).unwrap(), 1);
+}
+
+#[test]
 fn trash_restore_missing_file_and_hard_delete_preserve_reference_slots() {
     let f = Fixture::new();
     let target = f.ready("A");
@@ -305,6 +343,30 @@ fn deleting_folders_detaches_targets_without_reparenting_or_losing_history() {
     let mut draft = edit(&detached);
     draft.enabled = false;
     assert!(!f.library.save_character_target(draft).unwrap().enabled);
+}
+
+#[test]
+fn disabled_automatic_target_still_accepts_direct_manual_membership() {
+    let f = Fixture::new();
+    let target = f.ready("Manual while disabled");
+    let mut draft = edit(&target);
+    draft.enabled = false;
+    let disabled = f.library.save_character_target(draft).unwrap();
+    assert!(!disabled.enabled);
+    assert!(!disabled.ready);
+
+    assert_eq!(f.library.record_character_decisions(DecisionRequest {
+        target_id: disabled.id.clone(),
+        expected_fingerprint: disabled.fingerprint.clone(),
+        asset_ids: vec!["asset-5".into()],
+        decision: DecisionKind::Accepted,
+        baseline_fingerprint: None,
+        scan_id: None,
+    }).unwrap(), 1);
+    assert_eq!(
+        f.library.character_relations_for_asset("asset-5").unwrap(),
+        vec![disabled.id],
+    );
 }
 
 #[test]
@@ -609,6 +671,27 @@ fn foreign_key_failure_rolls_back_new_schema_before_commit() {
 }
 
 #[test]
+fn character_settings_save_rolls_back_target_changes_when_references_fail() {
+    let f = Fixture::new();
+    let before = f.ready("Atomic");
+    let mut draft = edit(&before);
+    draft.display_name = "Should roll back".into();
+
+    assert!(f.library.save_character_settings(CharacterSettingsDraft {
+        target: draft,
+        reference_ids: vec!["asset-6".into()],
+    }, true).is_err());
+
+    let after = f.library.get_character_target(&before.id).unwrap();
+    assert_eq!(after.display_name, before.display_name);
+    assert_eq!(after.revision, before.revision);
+    assert_eq!(
+        after.references.iter().map(|reference| (&reference.asset_id, &reference.asset_hash)).collect::<Vec<_>>(),
+        before.references.iter().map(|reference| (&reference.asset_id, &reference.asset_hash)).collect::<Vec<_>>(),
+    );
+}
+
+#[test]
 fn learned_examples_are_explicit_and_stable_across_membership_decisions() {
     let f = Fixture::new();
     let target = f.ready("Towa");
@@ -805,6 +888,28 @@ fn source_changes_reconsider_only_explicit_recognition_references() {
 }
 
 #[test]
+fn folder_registration_rejects_same_count_asset_replacement() {
+    let f = Fixture::new();
+    let snapshot = f.library.character_folder_asset_snapshot(f.child.clone(), false).unwrap();
+    let connection = f.library.connection().unwrap();
+    connection.execute("DELETE FROM asset_classifications WHERE asset_id='asset-0'", []).unwrap();
+    connection.execute("INSERT INTO asset_classifications VALUES('asset-0',?1)", [&f.outside]).unwrap();
+    connection.execute("DELETE FROM asset_classifications WHERE asset_id='asset-5'", []).unwrap();
+    connection.execute("INSERT INTO asset_classifications VALUES('asset-5',?1)", [&f.child]).unwrap();
+    drop(connection);
+    assert_eq!(f.library.character_folder_asset_count(f.child.clone(), false).unwrap(), snapshot.count);
+
+    assert!(f.library.register_character_folder(FolderRegistration {
+        folder_id: f.child.clone(), series_id: f.series.clone(), recursive: false,
+        cleanup_folder: false, expected_count: snapshot.count,
+        expected_asset_fingerprint: snapshot.fingerprint,
+        target_id: None, expected_fingerprint: None, display_name: "Stale".into(),
+        reference_ids: vec![], thumbnail_id: None,
+    }).is_err());
+    assert!(f.library.list_character_targets().unwrap().is_empty());
+}
+
+#[test]
 fn folder_registration_is_atomic_idempotent_and_preserves_memberships() {
     let f = Fixture::new();
     assert_eq!(
@@ -819,12 +924,14 @@ fn folder_registration_is_atomic_idempotent_and_preserves_memberships() {
             .unwrap(),
         6
     );
+    let asset_fingerprint = f.library.character_folder_asset_snapshot(f.child.clone(), false).unwrap().fingerprint;
     let request = |target: Option<&Target>, count| FolderRegistration {
         folder_id: f.child.clone(),
         series_id: f.series.clone(),
         recursive: false,
         cleanup_folder: false,
         expected_count: count,
+        expected_asset_fingerprint: asset_fingerprint.clone(),
         target_id: target.map(|t| t.id.clone()),
         expected_fingerprint: target.map(|t| t.fingerprint.clone()),
         display_name: "Imported".into(),
@@ -1086,6 +1193,7 @@ fn registration_cleanup_moves_direct_assets_and_removes_only_empty_folder() {
             recursive: false,
             cleanup_folder: true,
             expected_count: 5,
+            expected_asset_fingerprint: f.library.character_folder_asset_snapshot(f.child.clone(), false).unwrap().fingerprint,
             target_id: None,
             expected_fingerprint: None,
             display_name: "Registered".into(),
@@ -1151,12 +1259,14 @@ fn folder_registration_inherits_video_and_gif_without_using_them_as_references()
             .unwrap(),
         5
     );
+    let asset_fingerprint = f.library.character_folder_asset_snapshot(f.child.clone(), false).unwrap().fingerprint;
     let request = |references| FolderRegistration {
         folder_id: f.child.clone(),
         series_id: f.series.clone(),
         recursive: false,
         cleanup_folder: true,
         expected_count: 5,
+        expected_asset_fingerprint: asset_fingerprint.clone(),
         target_id: None,
         expected_fingerprint: None,
         display_name: "Mixed".into(),
@@ -1277,6 +1387,39 @@ fn character_drop_rejects_other_series_atomically() {
 }
 
 #[test]
+fn mixed_folder_queue_rejects_same_count_asset_replacement() {
+    use super::super::character_folder_migration::QueueMixedFolderRequest;
+    let f = Fixture::new();
+    let mixed = folder(&f.library, "Stale mixed", Some(f.series.clone()));
+    f.library.save_character_series(super::super::character_hub::Series {
+        classification_id: f.series.clone(), hero_asset_id: None, auto_classify: true,
+    }).unwrap();
+    let connection = f.library.connection().unwrap();
+    for id in ["asset-5", "asset-6"] {
+        connection.execute("DELETE FROM asset_classifications WHERE asset_id=?1", [id]).unwrap();
+        connection.execute("INSERT INTO asset_classifications VALUES(?1,?2)", params![id, mixed]).unwrap();
+    }
+    drop(connection);
+    let preview = f.library.mixed_character_folder_preview(&mixed).unwrap();
+
+    let connection = f.library.connection().unwrap();
+    connection.execute("DELETE FROM asset_classifications WHERE asset_id='asset-5'", []).unwrap();
+    connection.execute("INSERT INTO asset_classifications VALUES('asset-5',?1)", [&f.series]).unwrap();
+    connection.execute("DELETE FROM asset_classifications WHERE asset_id='asset-4'", []).unwrap();
+    connection.execute("INSERT INTO asset_classifications VALUES('asset-4',?1)", [&mixed]).unwrap();
+    drop(connection);
+    let changed = f.library.mixed_character_folder_preview(&mixed).unwrap();
+    assert_eq!((changed.total_count, changed.image_count), (preview.total_count, preview.image_count));
+    assert_ne!(changed.asset_fingerprint, preview.asset_fingerprint);
+
+    assert!(f.library.queue_mixed_character_folder(QueueMixedFolderRequest {
+        folder_id: mixed, series_id: f.series.clone(),
+        expected_total_count: preview.total_count, expected_image_count: preview.image_count,
+        expected_asset_fingerprint: preview.asset_fingerprint,
+    }).is_err());
+}
+
+#[test]
 fn mixed_folder_migration_queues_images_creates_group_and_removes_empty_source() {
     use super::super::character_folder_migration::{
         FinalizeMixedFolderRequest, QueueMixedFolderRequest,
@@ -1310,6 +1453,7 @@ fn mixed_folder_migration_queues_images_creates_group_and_removes_empty_source()
                 series_id: f.series.clone(),
                 expected_total_count: 2,
                 expected_image_count: 2,
+                expected_asset_fingerprint: preview.asset_fingerprint.clone(),
             })
             .unwrap(),
         2
@@ -1336,6 +1480,7 @@ fn mixed_folder_migration_queues_images_creates_group_and_removes_empty_source()
             series_id: f.series.clone(),
             expected_total_count: 2,
             expected_image_count: 2,
+            expected_asset_fingerprint: preview.asset_fingerprint.clone(),
             group_name: "Pair".into(),
             target_ids: vec![a.id.clone(), b.id.clone()],
         })
@@ -1408,6 +1553,7 @@ fn mixed_folder_migration_keeps_non_image_assets_and_requires_two_group_members(
         )
         .unwrap();
     drop(connection);
+    let preview = f.library.mixed_character_folder_preview(&mixed).unwrap();
     assert_eq!(
         f.library
             .queue_mixed_character_folder(QueueMixedFolderRequest {
@@ -1415,6 +1561,7 @@ fn mixed_folder_migration_keeps_non_image_assets_and_requires_two_group_members(
                 series_id: f.series.clone(),
                 expected_total_count: 2,
                 expected_image_count: 1,
+                expected_asset_fingerprint: preview.asset_fingerprint.clone(),
             })
             .unwrap(),
         1
@@ -1424,6 +1571,7 @@ fn mixed_folder_migration_keeps_non_image_assets_and_requires_two_group_members(
         SELECT 'mixed-evidence',asset_id,generation,source_generation,content_hash,'ctx','runtime','{}','[]','2026-09-10' FROM character_autotag_jobs WHERE asset_id='asset-5'",[]).unwrap();
     connection.execute("UPDATE character_autotag_jobs SET state='completed',review_state='resolved',claim_id=NULL WHERE asset_id='asset-5'",[]).unwrap();
     drop(connection);
+    let preview = f.library.mixed_character_folder_preview(&mixed).unwrap();
     assert!(f
         .library
         .finalize_mixed_character_folder(FinalizeMixedFolderRequest {
@@ -1431,6 +1579,7 @@ fn mixed_folder_migration_keeps_non_image_assets_and_requires_two_group_members(
             series_id: f.series.clone(),
             expected_total_count: 2,
             expected_image_count: 1,
+            expected_asset_fingerprint: preview.asset_fingerprint.clone(),
             group_name: "Mixed media".into(),
             target_ids: vec![a.id.clone()],
         })
@@ -1442,6 +1591,7 @@ fn mixed_folder_migration_keeps_non_image_assets_and_requires_two_group_members(
             series_id: f.series.clone(),
             expected_total_count: 2,
             expected_image_count: 1,
+            expected_asset_fingerprint: preview.asset_fingerprint.clone(),
             group_name: "Mixed media".into(),
             target_ids: vec![a.id, b.id],
         })
@@ -1459,4 +1609,47 @@ fn mixed_folder_migration_keeps_non_image_assets_and_requires_two_group_members(
             .unwrap(),
         mixed
     );
+}
+
+
+#[test]
+fn moved_explicit_reference_is_visible_as_invalid_and_blocks_the_series_roster() {
+    let f = Fixture::new();
+    let a = f.ready("A");
+    let _b = f.ready("B");
+    f.decide(&a, &["asset-5"], DecisionKind::Accepted).unwrap();
+    let a = f
+        .library
+        .add_character_learned_references(&a.id, a.revision, &["asset-5".into()])
+        .unwrap();
+    assert!(a.ready);
+    assert_eq!(a.learned_references[0].status, "ready");
+
+    f.library
+        .set_asset_classification(SetAssetClassification {
+            asset_ids: vec!["asset-5".into()],
+            classification_id: Some(f.outside.clone()),
+        })
+        .unwrap();
+    let broken = f.library.get_character_target(&a.id).unwrap();
+    assert!(!broken.ready);
+    assert_eq!(broken.learned_references.len(), 1);
+    assert_eq!(broken.learned_references[0].status, "ineligible");
+
+    f.library.connection().unwrap().execute("DELETE FROM character_autotag_jobs", []).unwrap();
+    f.library.connection().unwrap().execute("DELETE FROM character_autotag_reconsideration", []).unwrap();
+    f.library
+        .set_asset_classification(SetAssetClassification {
+            asset_ids: vec!["asset-6".into()],
+            classification_id: Some(f.series.clone()),
+        })
+        .unwrap();
+    let job = f.library.claim_character_autotag().unwrap().unwrap();
+    assert_eq!(job.asset_id, "asset-6");
+    let context = f
+        .library
+        .character_autotag_context(&f.library.connection().unwrap(), &job, &"a".repeat(64))
+        .unwrap();
+    assert!(context.targets.is_empty());
+    assert_eq!(context.scope["invalidReferenceTargetIds"], serde_json::json!([a.id]));
 }

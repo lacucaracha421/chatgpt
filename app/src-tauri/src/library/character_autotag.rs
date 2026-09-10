@@ -83,6 +83,126 @@ pub(super) fn evidence_row(
         .transpose()
 }
 
+
+
+pub(super) fn refresh_character_review_state(
+    connection: &Connection,
+    asset_id: &str,
+) -> Result<()> {
+    let current: Option<(String, String)> = connection
+        .query_row(
+            "SELECT e.id,e.content_hash FROM character_autotag_jobs j
+             JOIN character_autotag_evidence e ON e.asset_id=j.asset_id
+              AND e.generation=j.generation AND e.source_generation=j.source_generation
+             WHERE j.asset_id=?1 AND j.state='completed'",
+            [asset_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    let Some((evidence_id, content_hash)) = current else {
+        return Ok(());
+    };
+
+    let predictions = connection
+        .prepare(
+            "SELECT target_id,series_id,result_json FROM character_autotag_predictions
+             WHERE evidence_id=?1 ORDER BY target_id",
+        )?
+        .query_map([&evidence_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    if predictions.is_empty() {
+        return Ok(());
+    }
+    let rows = predictions
+        .into_iter()
+        .map(|(target_id, series_id, result)| {
+            Ok((target_id, series_id, serde_json::from_str::<Value>(&result)?))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let boxes = rows
+        .first()
+        .and_then(|(_, _, result)| result["evidence"]["queryBoxes"].as_array())
+        .cloned()
+        .unwrap_or_default();
+    if boxes.is_empty() {
+        return Ok(());
+    }
+    let series_id = &rows[0].1;
+    let accepted = connection
+        .prepare(
+            "SELECT r.target_id FROM character_relations r
+             JOIN character_targets t ON t.id=r.target_id
+             WHERE r.asset_id=?1 AND t.series_classification_id=?2 ORDER BY r.target_id",
+        )?
+        .query_map(params![asset_id, series_id], |row| row.get::<_, String>(0))?
+        .collect::<std::result::Result<std::collections::BTreeSet<_>, _>>()?;
+    let reference_known: bool = connection.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM character_targets t
+            WHERE t.series_classification_id=?2 AND (
+                EXISTS(SELECT 1 FROM character_references r WHERE r.target_id=t.id AND r.asset_id=?1 AND r.asset_hash=?3)
+                OR EXISTS(SELECT 1 FROM character_learned_references r WHERE r.target_id=t.id AND r.asset_id=?1 AND r.asset_hash=?3)
+            )
+        )",
+        params![asset_id, series_id, content_hash],
+        |row| row.get(0),
+    )?;
+
+    let mut covered = Vec::new();
+    for (target_id, _, result) in &rows {
+        if !accepted.contains(target_id) {
+            continue;
+        }
+        if let Some(regions) = super::character_scan::evidence_regions(result.get("evidence"), 2) {
+            covered.extend(regions);
+        }
+    }
+    let unresolved = boxes
+        .iter()
+        .filter(|box_value| {
+            let Some(region) = box_value.as_array().and_then(|box_value| {
+                if box_value.len() != 4 {
+                    return None;
+                }
+                let region = [
+                    box_value[0].as_f64()?,
+                    box_value[1].as_f64()?,
+                    box_value[2].as_f64()?,
+                    box_value[3].as_f64()?,
+                ];
+                (region.iter().all(|value| value.is_finite())
+                    && region[2] > region[0]
+                    && region[3] > region[1])
+                    .then_some(region)
+            }) else {
+                return true;
+            };
+            !covered
+                .iter()
+                .any(|known| super::character_scan::same_person(&region, known))
+        })
+        .count();
+    let known = !accepted.is_empty() || reference_known;
+    let state = if (known && boxes.len() == 1) || unresolved == 0 {
+        "resolved"
+    } else if known || !covered.is_empty() {
+        "partially_resolved"
+    } else {
+        "unresolved"
+    };
+    connection.execute(
+        "UPDATE character_autotag_jobs SET review_state=?2 WHERE asset_id=?1 AND state='completed'",
+        params![asset_id, state],
+    )?;
+    Ok(())
+}
+
 pub(super) fn latest_evidence(
     connection: &Connection,
     asset_id: &str,
@@ -119,10 +239,10 @@ impl Cause {
     }
     fn priority(self) -> i32 {
         match self {
-            Self::Ingestion | Self::Classification | Self::Restore | Self::SimilarityResolution => 0,
-            Self::ManualScanEnrollment => 1,
+            Self::ManualScanEnrollment => 0,
+            Self::Ingestion | Self::Classification | Self::Restore | Self::SimilarityResolution => 1,
             Self::Reconsideration => 2,
-            Self::AutomaticFinalization => 0,
+            Self::AutomaticFinalization => 1,
         }
     }
     fn force(self) -> bool {
@@ -153,10 +273,10 @@ fn folders(connection: &Connection, asset_id: &str) -> rusqlite::Result<Vec<Stri
 }
 
 fn in_originals_scope(connection: &Connection, asset_id: &str) -> rusqlite::Result<bool> {
-    connection.query_row("WITH RECURSIVE lineage(id,parent_id,name) AS (
-        SELECT c.id,c.parent_id,c.name FROM classification_entries c JOIN asset_classifications a ON a.classification_id=c.id WHERE a.asset_id=?1
-        UNION ALL SELECT c.id,c.parent_id,c.name FROM classification_entries c JOIN lineage p ON c.id=p.parent_id)
-        SELECT EXISTS(SELECT 1 FROM lineage WHERE parent_id IS NULL AND (id='lakomics-originals' OR name='오리지널' COLLATE NOCASE))",
+    connection.query_row("WITH RECURSIVE lineage(id,parent_id) AS (
+        SELECT c.id,c.parent_id FROM classification_entries c JOIN asset_classifications a ON a.classification_id=c.id WHERE a.asset_id=?1
+        UNION ALL SELECT c.id,c.parent_id FROM classification_entries c JOIN lineage p ON c.id=p.parent_id)
+        SELECT EXISTS(SELECT 1 FROM lineage l JOIN classification_roles r ON r.classification_id=l.id WHERE r.role='originals')",
         [asset_id], |r| r.get(0))
 }
 
@@ -183,6 +303,35 @@ pub(super) fn enqueue(
     }
     let classification =
         serde_json::to_string(&folders(connection, asset_id)?).expect("string list");
+    if cause == Cause::ManualScanEnrollment {
+        let existing: Option<(String, String, String, String)> = connection
+            .query_row(
+                "SELECT state,content_hash,relative_path,classification_ids FROM character_autotag_jobs WHERE asset_id=?1",
+                [asset_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .optional()?;
+        if let Some((state, existing_hash, existing_path, existing_classification)) = existing {
+            if existing_hash == hash
+                && existing_path == path
+                && existing_classification == classification
+            {
+                if state == "processing" {
+                    return Ok(false);
+                }
+                if state == "pending" {
+                    let changed = connection.execute(
+                        "UPDATE character_autotag_jobs
+                         SET priority=?2,cause=?3,retry_at=0,error=NULL,updated_at=?4
+                         WHERE asset_id=?1 AND state='pending'
+                           AND (priority<>?2 OR cause<>?3 OR retry_at<>0 OR error IS NOT NULL)",
+                        params![asset_id,cause.priority(),cause.stored(),chrono::Utc::now().to_rfc3339()],
+                    )?;
+                    return Ok(changed > 0);
+                }
+            }
+        }
+    }
     let force = cause.force();
     let changed = connection.execute("INSERT INTO character_autotag_jobs
         (asset_id,generation,content_hash,relative_path,classification_ids,state,review_state,priority,cause,updated_at)
@@ -238,7 +387,7 @@ impl Library {
         if !enabled {
             return Ok(0);
         }
-        let learned_references = serde_json::to_value(&current.learned_references)?;
+        let learned_references = serde_json::to_value(current.usable_learned_references().collect::<Vec<_>>())?;
         let mut queued = 0;
         for id in asset_ids {
             if cancel.load(Ordering::Acquire) {
@@ -254,6 +403,7 @@ impl Library {
                 "SELECT EXISTS(SELECT 1 FROM character_autotag_jobs WHERE asset_id=?1 AND state IN ('pending','processing'))",
                 [id], |r| r.get(0))?;
             if in_flight {
+                queued += usize::from(enqueue(&transaction, id, Cause::ManualScanEnrollment)?);
                 continue;
             }
             let current_prediction = latest_evidence(&transaction, id, &current.id)?
@@ -381,8 +531,13 @@ impl Library {
                 .query_map([nearest_series],|r|r.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?
         };
         let mut targets = Vec::new();
+        let mut invalid_reference_targets = Vec::new();
         for id in ids {
             let target = self.read_character_target(connection, &id)?;
+            if target.has_invalid_learned_references() {
+                invalid_reference_targets.push(target.id.clone());
+                continue;
+            }
             if job.classification_ids.len() == 1
                 && target.ready
                 && target
@@ -400,6 +555,11 @@ impl Library {
             {
                 targets.push(target);
             }
+        }
+        // A broken explicit reference is a series configuration problem. Do not
+        // silently remove that competitor and let the remaining targets auto-accept.
+        if !invalid_reference_targets.is_empty() {
+            targets.clear();
         }
         let lineage=connection.prepare("WITH RECURSIVE ancestors(id,parent_id) AS (
             SELECT c.id,c.parent_id FROM classification_entries c JOIN asset_classifications a ON a.classification_id=c.id WHERE a.asset_id=?1
@@ -420,10 +580,10 @@ impl Library {
                 .collect::<std::result::Result<Vec<_>,_>>()?;
             series_lineage.push((series.clone(), rows));
         }
-        let scope = json!({"classificationIds":job.classification_ids,"lineage":lineage,"seriesLineage":series_lineage});
-        let recognition=targets.iter().map(|t|json!({"id":t.id,"fingerprint":t.fingerprint,"learnedReferences":t.learned_references})).collect::<Vec<_>>();
+        let scope = json!({"classificationIds":job.classification_ids,"lineage":lineage,"seriesLineage":series_lineage,"invalidReferenceTargetIds":invalid_reference_targets});
+        let recognition=targets.iter().map(|t|json!({"id":t.id,"fingerprint":t.fingerprint,"learnedReferences":t.usable_learned_references().collect::<Vec<_>>()})).collect::<Vec<_>>();
         let encoded = serde_json::to_vec(
-            &json!({"assetId":job.asset_id,"generation":job.generation,"hash":job.content_hash,"path":job.relative_path,
+            &json!({"assetId":job.asset_id,"hash":job.content_hash,"path":job.relative_path,
             "scope":scope,"candidates":recognition,"runtime":runtime}),
         )?;
         Ok(Context {
@@ -495,7 +655,7 @@ impl Library {
                 .ok_or(Error::Stale)?;
             let mut row = prediction.result.clone();
             if let Some(evidence) = row.evidence.as_mut() {
-                evidence["learnedReferences"] = json!(target.learned_references);
+                evidence["learnedReferences"] = json!(target.usable_learned_references().collect::<Vec<_>>());
                 evidence["runtimeFingerprint"] = json!(context.runtime);
                 evidence["automaticScope"] = json!(true);
             }

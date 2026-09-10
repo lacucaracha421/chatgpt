@@ -717,7 +717,8 @@ mod tests {
         let error = library.restore_backup(&backup.id).unwrap_err();
 
         assert!(matches!(error, LibraryError::InvalidBackup));
-        assert_eq!(library.list_classifications().unwrap().len(), 1);
+        let classifications = library.list_classifications().unwrap();
+        assert!(classifications.iter().any(|entry| entry.name == "Current only"));
     }
 
     #[test]
@@ -745,7 +746,9 @@ mod tests {
 
         library.restore_backup(&backup.id).unwrap();
 
-        assert_eq!(library.list_classifications().unwrap().len(), 1);
+        let classifications = library.list_classifications().unwrap();
+        assert!(classifications.iter().any(|entry| entry.name == "Before backup"));
+        assert!(!classifications.iter().any(|entry| entry.name == "After backup"));
         assert_eq!(
             library
                 .list_backups()
@@ -930,7 +933,7 @@ mod tests {
         let snapshot = rusqlite::Connection::open(destination).unwrap();
         assert_eq!(
             snapshot
-                .query_row("SELECT COUNT(*) FROM classification_entries", [], |row| {
+                .query_row("SELECT COUNT(*) FROM classification_entries WHERE id='root'", [], |row| {
                     row.get::<_, i64>(0)
                 })
                 .unwrap(),

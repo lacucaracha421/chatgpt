@@ -74,13 +74,35 @@ fn status_splits_automatic_manual_and_reconsideration_queue_causes() {
     assert_eq!(status.pending_legacy, 0);
     assert_eq!(status.pending_manual, 1);
     assert_eq!(status.pending_reconsideration, 1);
+    let manual = f.library.claim_character_autotag().unwrap().unwrap();
+    assert_eq!(manual.asset_id, "asset-5");
+    assert_eq!(manual.cause, "manual_scan");
     let automatic = f.library.claim_character_autotag().unwrap().unwrap();
     assert_eq!(automatic.asset_id, "asset-0");
     assert_eq!(automatic.cause, "ingestion");
-    let manual = f.library.claim_character_autotag().unwrap().unwrap();
-    assert_eq!(manual.cause, "manual_scan");
     let reconsideration = f.library.claim_character_autotag().unwrap().unwrap();
     assert_eq!(reconsideration.cause, "reconsideration");
+}
+
+#[test]
+fn manual_request_promotes_pending_work_without_creating_a_new_generation() {
+    let f = Fixture::new();
+    character_autotag::enqueue(
+        &f.library.connection().unwrap(), "asset-5", character_autotag::Cause::Ingestion,
+    ).unwrap();
+    let before = f.library.character_autotag_job("asset-5").unwrap().unwrap();
+
+    assert!(character_autotag::enqueue(
+        &f.library.connection().unwrap(), "asset-5", character_autotag::Cause::ManualScanEnrollment,
+    ).unwrap());
+    let after = f.library.character_autotag_job("asset-5").unwrap().unwrap();
+    assert_eq!(after.generation, before.generation);
+    assert_eq!(after.source_generation, before.source_generation);
+    assert_eq!(after.state, "pending");
+    assert_eq!(after.cause, "manual_scan");
+    let claimed = f.library.claim_character_autotag().unwrap().unwrap();
+    assert_eq!(claimed.asset_id, "asset-5");
+    assert_eq!(claimed.cause, "manual_scan");
 }
 
 #[test]
@@ -500,10 +522,218 @@ fn arbitration_uses_latest_judgment_and_keeps_ambiguous_people_for_review() {
                     "queryBoxes":[[0,0,40,100],[60,0,100,100]],"evidence":evidence})),
             }}
         }).collect::<Vec<_>>();
-        f.library.finalize_incremental(&tx,&job,&context,&predictions,false).unwrap();
+        f.library.finalize_incremental(&tx,&job,&context,&predictions,&std::collections::BTreeSet::new()).unwrap();
         tx.commit().unwrap(); drop(c);
         let relations=f.library.character_relations_for_asset("asset-5").unwrap();
         assert_eq!(relations.len(),expected);
         if reaccepted {assert_eq!(relations,vec![a.id]);}
     }
+}
+
+
+#[test]
+fn reference_image_blocks_only_its_own_target_and_keeps_other_people_for_review() {
+    let f = Fixture::new();
+    let a = f.ready("A");
+    let b = f.ready("B");
+    character_autotag::enqueue(
+        &f.library.connection().unwrap(),
+        "asset-5",
+        character_autotag::Cause::Ingestion,
+    )
+    .unwrap();
+    let job = f.library.claim_character_autotag().unwrap().unwrap();
+    let mut c = f.library.connection().unwrap();
+    let tx = c.transaction().unwrap();
+    let context = f
+        .library
+        .character_autotag_context(&tx, &job, &"a".repeat(64))
+        .unwrap();
+    let predictions = [(&a, 0usize), (&b, 1usize)]
+        .into_iter()
+        .map(|(target, person)| {
+            let mut evidence = vec![
+                json!({"matchedReferences": []}),
+                json!({"matchedReferences": []}),
+            ];
+            evidence[person] = json!({"matchedReferences": [0, 1, 2]});
+            Prediction {
+                target_id: target.id.clone(),
+                result: ScanResult {
+                    asset_id: job.asset_id.clone(),
+                    content_hash: job.content_hash.clone(),
+                    state: "recommended".into(),
+                    error: None,
+                    evidence: Some(json!({
+                        "passed": true,
+                        "wholeFallback": false,
+                        "bestQueryCrop": person,
+                        "queryBoxes": [[0,0,40,100],[60,0,100,100]],
+                        "evidence": evidence
+                    })),
+                },
+            }
+        })
+        .collect::<Vec<_>>();
+    let reference_targets = std::collections::BTreeSet::from([a.id.clone()]);
+    f.library
+        .finalize_incremental(&tx, &job, &context, &predictions, &reference_targets)
+        .unwrap();
+    tx.commit().unwrap();
+    drop(c);
+
+    assert_eq!(
+        f.library.character_relations_for_asset("asset-5").unwrap(),
+        vec![b.id]
+    );
+    assert_eq!(
+        f.library.character_autotag_job("asset-5").unwrap().unwrap().review_state,
+        "partially_resolved"
+    );
+}
+
+#[test]
+fn arbitration_accepts_a_three_vote_region_even_when_best_crop_has_only_two_votes() {
+    let f = Fixture::new();
+    let a = f.ready("A");
+    character_autotag::enqueue(
+        &f.library.connection().unwrap(),
+        "asset-5",
+        character_autotag::Cause::Ingestion,
+    )
+    .unwrap();
+    let job = f.library.claim_character_autotag().unwrap().unwrap();
+    let mut c = f.library.connection().unwrap();
+    let tx = c.transaction().unwrap();
+    let context = f
+        .library
+        .character_autotag_context(&tx, &job, &"a".repeat(64))
+        .unwrap();
+    let predictions = vec![Prediction {
+        target_id: a.id.clone(),
+        result: ScanResult {
+            asset_id: job.asset_id.clone(),
+            content_hash: job.content_hash.clone(),
+            state: "recommended".into(),
+            error: None,
+            evidence: Some(json!({
+                "passed": true,
+                "wholeFallback": false,
+                "bestQueryCrop": 0,
+                "queryBoxes": [[0,0,40,100],[60,0,100,100]],
+                "evidence": [
+                    {"matchedReferences": [0,1]},
+                    {"matchedReferences": [0,1,2]}
+                ]
+            })),
+        },
+    }];
+    f.library
+        .finalize_incremental(
+            &tx,
+            &job,
+            &context,
+            &predictions,
+            &std::collections::BTreeSet::new(),
+        )
+        .unwrap();
+    tx.commit().unwrap();
+    drop(c);
+
+    assert_eq!(
+        f.library.character_relations_for_asset("asset-5").unwrap(),
+        vec![a.id]
+    );
+}
+
+#[test]
+fn manual_decisions_recalculate_multi_person_review_state_from_saved_regions() {
+    use super::super::characters::{DecisionKind, DecisionRequest};
+    let f = Fixture::new();
+    let a = f.ready("A");
+    let b = f.ready("B");
+    character_autotag::enqueue(
+        &f.library.connection().unwrap(),
+        "asset-5",
+        character_autotag::Cause::Ingestion,
+    )
+    .unwrap();
+    let job = f.library.claim_character_autotag().unwrap().unwrap();
+    let mut c = f.library.connection().unwrap();
+    let tx = c.transaction().unwrap();
+    let context = f
+        .library
+        .character_autotag_context(&tx, &job, &"a".repeat(64))
+        .unwrap();
+    let predictions = [(&a, 0usize), (&b, 1usize)]
+        .into_iter()
+        .map(|(target, person)| {
+            let mut evidence = vec![
+                json!({"matchedReferences": []}),
+                json!({"matchedReferences": []}),
+            ];
+            evidence[person] = json!({"matchedReferences": [0, 1]});
+            Prediction {
+                target_id: target.id.clone(),
+                result: ScanResult {
+                    asset_id: job.asset_id.clone(),
+                    content_hash: job.content_hash.clone(),
+                    state: "recommended".into(),
+                    error: None,
+                    evidence: Some(json!({
+                        "passed": true,
+                        "wholeFallback": false,
+                        "bestQueryCrop": person,
+                        "queryBoxes": [[0,0,40,100],[60,0,100,100]],
+                        "evidence": evidence
+                    })),
+                },
+            }
+        })
+        .collect::<Vec<_>>();
+    f.library
+        .finalize_incremental(
+            &tx,
+            &job,
+            &context,
+            &predictions,
+            &std::collections::BTreeSet::new(),
+        )
+        .unwrap();
+    tx.commit().unwrap();
+    drop(c);
+    assert_eq!(
+        f.library.character_autotag_job("asset-5").unwrap().unwrap().review_state,
+        "unresolved"
+    );
+
+    f.library
+        .record_character_decisions(DecisionRequest {
+            target_id: a.id.clone(),
+            expected_fingerprint: a.fingerprint.clone(),
+            asset_ids: vec!["asset-5".into()],
+            decision: DecisionKind::Accepted,
+            baseline_fingerprint: None,
+            scan_id: None,
+        })
+        .unwrap();
+    assert_eq!(
+        f.library.character_autotag_job("asset-5").unwrap().unwrap().review_state,
+        "partially_resolved"
+    );
+
+    f.library
+        .record_character_decisions(DecisionRequest {
+            target_id: b.id.clone(),
+            expected_fingerprint: b.fingerprint.clone(),
+            asset_ids: vec!["asset-5".into()],
+            decision: DecisionKind::Accepted,
+            baseline_fingerprint: None,
+            scan_id: None,
+        })
+        .unwrap();
+    assert_eq!(
+        f.library.character_autotag_job("asset-5").unwrap().unwrap().review_state,
+        "resolved"
+    );
 }

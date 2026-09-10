@@ -76,6 +76,7 @@ export function MixedCharacterFolderMigration({ folderId, targets, onClose, onFi
         seriesId: preview.seriesId,
         expectedTotalCount: preview.totalCount,
         expectedImageCount: preview.imageCount,
+        expectedAssetFingerprint: preview.assetFingerprint,
       });
       setNotice(queued ? `${queued.toLocaleString()}장 분석을 예약했습니다.` : "이미 분석 중인 이미지가 있습니다.");
       await load(true);
@@ -95,6 +96,7 @@ export function MixedCharacterFolderMigration({ folderId, targets, onClose, onFi
         seriesId: preview.seriesId,
         expectedTotalCount: preview.totalCount,
         expectedImageCount: preview.imageCount,
+        expectedAssetFingerprint: preview.assetFingerprint,
         groupName,
         targetIds: selected,
       });
@@ -110,6 +112,13 @@ export function MixedCharacterFolderMigration({ folderId, targets, onClose, onFi
   const analyzed = preview ? preview.resolvedCount + preview.reviewCount + preview.failedCount : 0;
   const readyTargets = seriesTargets.filter(row => row.target.ready).length;
   const canFinalize = Boolean(preview && !busy && preview.imageCount > 0 && preview.pendingCount === 0 && preview.unscannedCount === 0 && selected.length >= 2 && groupName.trim());
+  const finalizeHint = !preview ? null
+    : preview.imageCount === 0 ? "정리할 이미지가 없습니다."
+    : preview.pendingCount > 0 ? `분석 대기 ${preview.pendingCount.toLocaleString()}장`
+    : preview.unscannedCount > 0 ? `미분석 ${preview.unscannedCount.toLocaleString()}장`
+    : selected.length < 2 ? `그룹 멤버 ${2 - selected.length}명 더 선택`
+    : !groupName.trim() ? "그룹 이름 입력 필요"
+    : null;
 
   return <Dialog open title="여러 캐릭터 폴더 정리" variant="wide" onClose={() => { if (!busy) onClose(); }}>
     <div className="mixed-character-migration">
@@ -117,6 +126,7 @@ export function MixedCharacterFolderMigration({ folderId, targets, onClose, onFi
         <section className="mixed-character-migration__summary">
           <div><strong>{preview.folderName}</strong><span>→ {preview.seriesName}</span></div>
           <p>이 폴더의 이미지를 작품 캐릭터들과 비교한 뒤 작품 본체로 옮기고, 현재 폴더 이름을 캐릭터 그룹으로 남깁니다.</p>
+          <p className="character-message">완료 후 그룹에는 선택한 캐릭터들의 기존 이미지도 함께 표시됩니다.</p>
           <div className="mixed-character-migration__counts">
             <span>이미지 {preview.imageCount.toLocaleString()}장</span>
             <span>분석 완료 {analyzed.toLocaleString()}장</span>
@@ -155,6 +165,7 @@ export function MixedCharacterFolderMigration({ folderId, targets, onClose, onFi
         {notice && <p className="character-message" role="status">{notice}</p>}
         <div className="character-actions mixed-character-migration__footer">
           <Button variant="primary" disabled={!canFinalize} onClick={() => void finalize()}>그룹으로 정리 완료</Button>
+          {finalizeHint && <small role="status">{finalizeHint}</small>}
           <Button variant="ghost" disabled={busy} onClick={onClose}>취소</Button>
         </div>
       </>}

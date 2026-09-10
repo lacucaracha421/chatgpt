@@ -378,10 +378,10 @@ describe("CollectionOverlay MangaDex flow", () => {
         { id: "volume-1", volumeNumber: 1, editionIndex: 0, displayLabel: "1", coverArtworkId: "local-art" },
       ]),
     });
-    expect(await screen.findByRole("img", { name: "1권 표지" })).toHaveAttribute(
+    await waitFor(() => expect(screen.getByRole("img", { name: "1권 표지" })).toHaveAttribute(
       "src",
       "http://lakomics.localhost/work-artwork-thumbnail/local-art",
-    );
+    ));
     expect(document.querySelector(".collection-overlay__hero")).toBeNull();
   });
 

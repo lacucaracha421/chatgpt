@@ -45,7 +45,7 @@ it("shows a mosaic group card and opens the group asset union",async()=>{
 });
 
 it("selects in the existing gallery and preserves the editor draft",async()=>{
-  const {api,browse,navigate}=await mount(); const save=vi.spyOn(api,"save"); const user=userEvent.setup();
+  const {api,browse,navigate}=await mount(); const saveSettings=vi.spyOn(api,"saveSettings"); const user=userEvent.setup();
   await user.click(await screen.findByRole("button",{name:"히나 정보"}));
   let panel=await screen.findByRole("dialog",{name:"히나 · 캐릭터 정보"});
   await user.type(within(panel).getByLabelText("설명"),"기준 설명");
@@ -58,7 +58,7 @@ it("selects in the existing gallery and preserves the editor draft",async()=>{
   panel=await screen.findByRole("dialog",{name:"히나 · 캐릭터 정보"});
   expect(within(panel).getByLabelText("설명")).toHaveValue("기준 설명");
   await user.click(within(panel).getByRole("button",{name:"저장"}));
-  await waitFor(()=>expect(save).toHaveBeenCalledWith(expect.objectContaining({description:"기준 설명"}),true));
+  await waitFor(()=>expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({description:"기준 설명",referenceIds:expect.any(Array)}),true));
   expect(navigate).not.toHaveBeenCalled();
 });
 it("filters a new character's selection even when all is requested",async()=>{

@@ -11,11 +11,11 @@ export type CharacterSeriesSuggestionPage = { items: CharacterSeriesSuggestion[]
 export type MixedFolderTargetCount = { targetId: string; count: number };
 export type MixedFolderPreview = {
   folderId: string; folderName: string; seriesId: string; seriesName: string;
-  totalCount: number; imageCount: number; otherMediaCount: number; childFolderCount: number;
+  totalCount: number; imageCount: number; otherMediaCount: number; childFolderCount: number; assetFingerprint: string;
   unscannedCount: number; pendingCount: number; resolvedCount: number; reviewCount: number; failedCount: number;
   targetCounts: MixedFolderTargetCount[]; groupedTargetIds: string[];
 };
-export type QueueMixedFolderRequest = { folderId: string; seriesId: string; expectedTotalCount: number; expectedImageCount: number };
+export type QueueMixedFolderRequest = { folderId: string; seriesId: string; expectedTotalCount: number; expectedImageCount: number; expectedAssetFingerprint: string };
 export type FinalizeMixedFolderRequest = QueueMixedFolderRequest & { groupName: string; targetIds: string[] };
 export type FinalizeMixedFolderResult = { seriesId: string; groupId: string; movedImageCount: number; retainedAssetCount: number; folderRemoved: boolean };
 export type ManualCharacterRequest = { seriesId: string; displayName: string; assetIds: string[] };

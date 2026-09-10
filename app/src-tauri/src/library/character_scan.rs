@@ -340,7 +340,7 @@ impl Library {
         target
             .references
             .iter()
-            .chain(target.learned_references.iter())
+            .chain(target.usable_learned_references())
             .map(|reference| {
                 let input =
                     self.current_input(target, reference.asset_id.as_deref().ok_or(Error::Stale)?)?;
@@ -392,6 +392,7 @@ impl Library {
                 SELECT a.id,a.content_hash,a.relative_path FROM assets a
                 WHERE a.status='normal' AND a.media_kind='image'
                 AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND  (ac.classification_id IN (SELECT id FROM scope) OR (?3 AND ac.classification_id IN (SELECT id FROM ancestors WHERE parent_id IS NULL))))
+                AND NOT EXISTS(SELECT 1 FROM character_series_asset_exclusions x WHERE x.series_id=?1 AND x.asset_id=a.id)
                 AND NOT EXISTS(SELECT 1 FROM character_references r WHERE r.target_id=?2 AND r.asset_id=a.id) ORDER BY a.id")?;
             let rows = statement
                 .query_map(
@@ -587,7 +588,7 @@ impl Library {
                         row.evidence = Some(event.clone());
                         row.evidence.as_mut().unwrap()["runtimeFingerprint"] = json!(runtime);
                         row.evidence.as_mut().unwrap()["learnedReferences"] =
-                            json!(target.learned_references);
+                            json!(target.usable_learned_references().collect::<Vec<_>>());
                         row.evidence.as_mut().unwrap()["automaticScope"] = json!(automatic);
                     }
                     Err(_) => row.state = "stale".into(),
@@ -749,14 +750,7 @@ pub(super) fn automatic_evidence(evidence: Option<&Value>) -> bool {
     if e["passed"] != true || e["wholeFallback"] == true {
         return false;
     }
-    let Some(crop) = e["bestQueryCrop"].as_u64() else {
-        return false;
-    };
-    e["evidence"]
-        .as_array()
-        .and_then(|rows| rows.get(crop as usize))
-        .and_then(|row| row["matchedReferences"].as_array())
-        .is_some_and(|refs| refs.len() >= 3)
+    evidence_regions(evidence, 3).is_some_and(|regions| !regions.is_empty())
 }
 
 // Compare geometry as well as crop indexes: duplicate/overlapping detections are one person.

@@ -4,6 +4,7 @@ import type { AssetSummary } from "../library/types";
 export type CharacterRef = { slot: number; assetId: string | null; assetHash: string; status: string };
 export type CharacterTarget = { id: string; seriesClassificationId: string | null; linkedClassificationId: string | null; displayName: string; description?: string; thumbnailAssetId?: string | null; enabled: boolean; manualOnly: boolean; revision: number; references: CharacterRef[]; learnedReferences?: CharacterRef[]; ready: boolean; fingerprint: string };
 export type TargetDraft = { id: string | null; expectedRevision: number | null; seriesClassificationId: string; linkedClassificationId: string | null; displayName: string; description?: string; thumbnailAssetId?: string | null; enabled: boolean };
+export type CharacterSettingsDraft = TargetDraft & { referenceIds: string[] };
 export type ScanStatus = { automaticQueued?: number; id: string; targetId: string; targetFingerprint: string; runtimeFingerprint: string | null; state: string; total: number; completed: number; errors: number; reused?: number; cacheHits: number; extractions: number; error: string | null };
 export type Prediction = { targetId: string; targetName: string; targetFingerprint: string; scanId: string | null; runtimeFingerprint: string | null; state: string; decision: string | null; evidence: { referenceHashes?: string[]; learnedReferenceCount?: number; distance: number; bestQueryCrop: number; queryBoxes: number[][]; wholeFallback: boolean; evidence: { queryCrop: number; matchedReferences: number[]; referenceDistances: number[] }[] } | null; error: string | null };
 export type ReviewRow = { asset: AssetSummary; predictions: Prediction[] };
@@ -17,6 +18,7 @@ export type Decision = { origin?: "manual" | "automatic"; sequence: number; asse
 export interface CharacterApi {
   targets(): Promise<CharacterTarget[]>;
   save(request: TargetDraft, strictSelection?: boolean): Promise<CharacterTarget>;
+  saveSettings(request: CharacterSettingsDraft, strictSelection?: boolean): Promise<CharacterTarget>;
   refs(targetId: string, expectedRevision: number, assetIds: string[], strictSelection?: boolean): Promise<CharacterTarget>;
   learnReferences?(targetId: string, expectedRevision: number, assetIds: string[]): Promise<CharacterTarget>;
   excludeReference?(targetId: string, expectedRevision: number, assetId: string): Promise<CharacterTarget>;
@@ -35,6 +37,7 @@ export interface CharacterApi {
 export const characterApi: CharacterApi = {
   targets: () => invoke("list_character_targets"),
   save: (request, strictSelection = false) => invoke("save_character_target", { request, strictSelection }),
+  saveSettings: (request, strictSelection = false) => invoke("save_character_settings", { request, strictSelection }),
   refs: (targetId, expectedRevision, assetIds, strictSelection = false) => invoke("replace_character_references", { targetId, expectedRevision, assetIds, strictSelection }),
   learnReferences: (targetId, expectedRevision, assetIds) => invoke("add_character_learned_references", { targetId, expectedRevision, assetIds }),
   excludeReference: (targetId, expectedRevision, assetId) => invoke("exclude_character_reference", { targetId, expectedRevision, assetId }),

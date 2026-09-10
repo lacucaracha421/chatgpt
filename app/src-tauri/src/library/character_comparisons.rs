@@ -21,7 +21,7 @@ impl Comparisons {
         let modified = metadata.modified()?.duration_since(std::time::UNIX_EPOCH)
             .map_err(|_| Error::Stale)?.as_nanos().to_string();
         let bytes = serde_json::to_vec(&(
-            "comparison-v1", &target.fingerprint, &target.learned_references,
+            "comparison-v1", &target.fingerprint, target.usable_learned_references().collect::<Vec<_>>(),
             runtime, &input.id, &input.hash, metadata.len(), modified,
         ))?;
         Ok(Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect())

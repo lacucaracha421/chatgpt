@@ -131,16 +131,18 @@ For analysis-bound decisions, `reference_snapshot` stores an object containing
 `scanId`, `runtimeFingerprint`, `prediction` and `references`; manual decisions keep
 the reference array. The legacy field name `baseline_fingerprint` stores the full
 runtime fingerprint for analysis-bound decisions, including the frozen baseline.
-No additional schema beyond migration 44 was introduced by the review UI.
+Later character workflow migrations persist automatic queue evidence, explicit supporting references,
+series exclusions, manual-only characters, groups, and protected classification roles.
 
-## Human-approved supporting examples (2026-09-08)
+## Explicit supporting references
 
-The five manually selected anchors remain required. Native code additionally selects
-up to 20 recent distinct-content images with a current manual accepted decision in
-the same series subtree. Automatic decisions, cleared/rejected decisions, missing or
-changed images, and images currently assigned to another character are excluded.
-These are retrieval examples, not model weight training. References used for a query
-are recorded and their current approval/content is revalidated before accepting it.
+The five manually selected anchors remain required. A user may explicitly add up to
+20 additional distinct-content images already assigned to that character. Ordinary
+manual accept/reject/clear decisions never mutate this set. Supporting references must
+remain normal still images in the character's series scope; invalid references stay
+visible for recovery and suspend automatic arbitration for that series until fixed.
+These are retrieval examples, not model weight training. References actually used for
+a query are recorded and their current content/scope is revalidated before publication.
 
 `learned_compare.py` compares those examples through the unchanged five-reference
 metric in bounded groups, discards padding votes, then computes same-crop distinct-image

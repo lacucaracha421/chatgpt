@@ -20,13 +20,14 @@ repository-wide or production-data audit. Unrelated Cloud/Mobile acceptance gate
 ## Documentation reconciliation — 2026-09-09
 
 Checked against source commit `0c61206`; no new tests, device inspection or production
-audit were performed. Android source is 0.4.3 (14); its built artifact and remaining
+audit were performed. Android source is 0.4.3 (14); its built artifact and earlier
 install/native-reader gates are recorded under MOBILE-006 and in the Android README.
+The 2026-09-10 user completion confirmation supersedes those remaining acceptance gates for MOBILE-001/002/004/006.
 References to installed APK 0.3.3 in older entries are dated device evidence, not a
 fresh inventory. CLOUD-006 is DONE; CHAR-UI-001 and Linux drag-out retain their native
 acceptance limits. Existing item statuses below remain the owners of pending work.
 
-## 현재 작업 요약 — 2026-09-09 사용자 확인 반영
+## 현재 작업 요약 — 2026-09-10 사용자 확인 반영
 
 이번 정리는 이 문서의 항목·실행 기록과 현재 대화의 사용자 확인을 대조한 것이다. 전체 코드·운영 상태를 새로 감사하거나 기존 네이티브 검증을 대신한 것은 아니다. 아래는 탐색용 요약이며 상세 요구와 완료 기준은 각 항목이 소유한다. 역사적 P0/P1/P2 배치는 현재 실행 우선순위 확정으로 해석하지 않는다.
 
@@ -37,8 +38,8 @@ acceptance limits. Existing item statuses below remain the owners of pending wor
 | 클라우드·통계·Notes | CLOUD-UI-001, STATS-001A/B, NOTE-001B 네이티브 확인/남은 보완 | CLOUD-006와 NOTE-001A는 완료 |
 | 개인 탐색·카탈로그 | 기존 카탈로그 주 경로 완료 | IDEA-001B 테마 확장, CATALOG-002B 선택적 공급자; IDEA-002 보류 |
 | 유사 이미지·영상 | SIMILARITY-003 실제 영상 정확도 검증 | SIMILARITY-002B 기하 변형 후보; PERF-SIMILARITY는 측정 근거 전까지 보류 |
-| 모바일 | MOBILE-001/002/004/006 기기·권한·Reader·성능 확인과 각 항목의 잔여 구현 | MOBILE-007 북마크 쓰기 → 008 갱신 요청; 003 삭제 프로토콜 보류 |
-| 확장 프로그램 | EXT-008 첫 실행 중복 입력, EXT-009 GIF 저장 실패 재현 필요 | EXT-010 별도 목록형 확장 계획. 설계 문서와 구현 완료를 구분 |
+| 모바일 | MOBILE-001/002/004/006은 사용자 실사용 확인으로 완료 | MOBILE-007 북마크 쓰기 → 008 갱신 요청; 003 삭제 프로토콜 보류 |
+| 확장 프로그램 | EXT-005~010 완료. 목록형 확장과 저장/임시저장/GIF/입력 흐름까지 사용자 확인 완료 | 추가 필수 구현 없음; 이후 필요 시 편의 개선만 별도 등록 |
 | Works / Collection | WORKS-001, LONG-001, LONG-002B 남은 기능/실제 미디어 확인 | LONG-004는 기존 화면에 통합; LONG-003 보안 설계 승인 전 보류 |
 
 캐릭터·메모 작업의 **사용자 승인 순서 (2026-09-09)**: 상단바 → 메모 상태 문구 → CHAR-UI-007 추가 참조 → CHAR-UI-009 표시 그룹 → CHAR-UI-004·008 폴더 전환 → CHAR-AUTO-001 첫 분석 계측. 확장프로그램 리디자인은 이 작업에서 제외한다.
@@ -55,11 +56,11 @@ acceptance limits. Existing item statuses below remain the owners of pending wor
 
 아래 항목의 과거 `TODO / 요구 기록만` 문구보다 이 체크포인트를 우선한다. 구현과 운영 라이브러리 적용·네이티브 실사용 승인은 구분한다.
 
-- **상단바 (CHAR-UI-002·005): 구현 / 네이티브 확인 대기.** 캐릭터 이름 옆 자산 수, 단일 선택 개수, 선택 해제·다중 제외, 실제 현재 캐릭터의 recommended 미해결 조회 배지를 연결했다. 비선택 시 제외 버튼을 숨기고 정보·참조·전환은 더보기 패널에 둔다. 캐릭터 갤러리 내부의 중복 선택 행을 제거하고 좁은 창에서도 상단바 줄바꿈을 막았다.
+- **선택 그리드·검토 대기 표시 (CHAR-UI-002·005 후속): DONE — 2026-09-10 사용자 확인.** 캐릭터 이름 옆 자산 수, 단일 선택 개수, 선택 해제·다중 제외, 실제 현재 캐릭터의 recommended 미해결 조회 배지를 연결했다. 비선택 시 제외 버튼을 숨기고 정보·참조·전환은 더보기 패널에 둔다. 캐릭터 갤러리 내부의 중복 선택 행을 제거하고 좁은 창에서도 상단바 줄바꿈을 막았다. 이 완료 판정은 CHAR-UI-002/005의 다른 네이티브 검증 항목 전체를 일괄 종료하는 뜻은 아니다.
 - **메모 (NOTE-001B): 구현 / 네이티브 확인 대기.** 입력 중 `편집 중 · 자동 저장`을 유지하고 마지막 입력 1.2초 뒤 실제 저장·동기화 상태를 표시한다. 오류·충돌은 즉시 우선 표시한다. 즉시 로컬 자동 저장과 기존 서버 동기화 주기는 변경하지 않았다.
-- **추가 참조 (CHAR-UI-007): 구현 / 네이티브 확인 대기.** 기준 5장과 추가 참조의 썸네일·원본 접근을 구분한다. 추가 참조 제외는 자산·캐릭터 소속을 보존하고 재승인 뒤에도 유지한다. 제외된 참조를 사용한 오래된 판단은 거절하고 기록된 미해결 자동 작업의 재검토를 예약한다. 스키마 52는 제외 목록만 추가하며 과거 자산을 일괄 분석하지 않는다.
+- **추가 참조 (CHAR-UI-007): DONE — 2026-09-10 사용자 확인.** 기준 5장과 추가 참조의 썸네일·원본 접근을 구분한다. 추가 참조 제외는 자산·캐릭터 소속을 보존하고 재승인 뒤에도 유지한다. 제외된 참조를 사용한 오래된 판단은 거절하고 기록된 미해결 자동 작업의 재검토를 예약한다. 스키마 52는 제외 목록만 추가하며 과거 자산을 일괄 분석하지 않는다.
 - **표시 그룹 (CHAR-UI-009): 구현 / 네이티브 확인 대기.** 같은 시리즈 내 한 단계 그룹 생성·이름 변경·소속 편집·해제와 그룹 내부 탐색을 제공한다. 스키마 53의 별도 그룹 테이블을 사용하고 인식 fingerprint·분류·재분석 큐를 바꾸지 않는다. 시리즈 이동 시 남은 표시 그룹 연결은 정리한다.
-- **폴더 전환 (CHAR-UI-004·008): 구현 / 네이티브 확인 대기.** 등록 시 기존 폴더 정리 선택을 제공한다. 직접 소속 등록 이미지는 시리즈로 이동하고 하위 폴더·잔여 자산·다른 시리즈/캐릭터 연결이 없는 빈 원래 폴더만 정리한다. 역방향은 대상·공유·누락 수 미리보기 → 이름 입력 확인 → 원자적 전환이다. **사용자는 동명 일반 폴더에 합치기를 선택했다.** 미확정 후보는 제외하고 확정 자산·기준/추가 참조를 모은다. 원본과 다른 캐릭터 관계·이력은 보존하며 전환한 캐릭터의 등록·참조 설정·판단 이력은 정리한다. 미리보기 이후 대상/분류 변경은 적용 전에 거절한다. 다른 시리즈나 캐릭터에 연결된 동명 폴더는 자동 병합하지 않는다.
+- **폴더 전환:** CHAR-UI-008은 **DONE — 2026-09-10 사용자 확인**. CHAR-UI-004는 기존 `PARTIAL` 상태를 유지한다. 등록 시 기존 폴더 정리 선택을 제공한다. 직접 소속 등록 이미지는 시리즈로 이동하고 하위 폴더·잔여 자산·다른 시리즈/캐릭터 연결이 없는 빈 원래 폴더만 정리한다. 역방향은 대상·공유·누락 수 미리보기 → 이름 입력 확인 → 원자적 전환이다. **사용자는 동명 일반 폴더에 합치기를 선택했다.** 미확정 후보는 제외하고 확정 자산·기준/추가 참조를 모은다. 원본과 다른 캐릭터 관계·이력은 보존하며 전환한 캐릭터의 등록·참조 설정·판단 이력은 정리한다. 미리보기 이후 대상/분류 변경은 적용 전에 거절한다. 다른 시리즈나 캐릭터에 연결된 동명 폴더는 자동 병합하지 않는다.
 - **첫 분석 성능 (CHAR-AUTO-001): 계측 구현 / 실데이터 최적화 남음.** `LAKOMICS_CHARACTER_PROFILE=1`로 파일 검증·이미지 decode·검출·특징 추출·비교·캐시 시간을 분리한다. 기본 로그는 조용하며 추론·모델·CPU·특징 캐시 identity 정책은 유지한다. 실제 ONNX와 합성 768×1024 이미지 6장으로 냉 캐시 4,856ms(검출 604ms, 특징 추출 4,032ms), 온 캐시 5.64ms 및 동일 비교 결과를 관측했다. 이는 실자료 처리량이나 이번 변경으로 얻은 속도 개선 수치가 아니다. 운영 이미지 벤치마크·CPU/GPU 최적화는 아직 수행하지 않았다.
 - **검증:** TypeScript 통과, 관련 React 21개 통과, Rust 캐릭터 검사 50개와 추가 전환 stale 회귀 1개 통과/환경 지정 8개 제외, 실제 모델 worker 프로토콜 2개 통과. 합성 브라우저에서 800px 및 더 좁은 600px, 일반 1536px 폭을 확인하고 선택 전후 상단 높이와 첫 타일 위치 유지 확인. 미디어는 합성 메타데이터/미연결 썸네일이므로 실제 원본 표시·Tauri 프로토콜 확인은 아니다. Windows/Linux 네이티브 새 스키마 적용·폴더 조작은 미검증이다. 리뷰는 동일 에이전트가 수행했으며 독립 리뷰는 아니다.
 - **운영 적용 (2026-09-09, 사용자 승인 후):** 현재 Linux 개발 앱이 사용하던 라이브러리를 SQLite backup API로 백업하고 quick_check 통과를 확인했다(`backups/before-character-ui-v53-20260909-172916.sqlite`). 유휴 분석 상태를 확인한 후 기존 `npm run tauri -- dev` 감시를 재개해 빌드·재시작 및 스키마 51→53 적용을 완료했다. 앱의 자동 v51 사전 마이그레이션 백업도 생성됐다. 적용 후 quick_check=ok, foreign_key_check=0건. 자산 8,463개·분류 61개·캐릭터 11개·기준 참조 50개·판단 이력 383개·현재 캐릭터 연결 298개가 적용 전후 동일하다. 새 제외/그룹/그룹 소속 테이블은 모두 0건이다. 감시 일시정지는 해제됐으며 개발 앱이 실행 중이다. 실제 폴더 전환·참조 제외·그룹 생성 작업은 수행하지 않았으며 UI 실사용 및 Windows 수용 검증은 남아 있다.
@@ -752,10 +753,10 @@ Status: `VERIFY` — 2026-09-09 통합 계획 C/D에서 구현·격리 검증 �
 
 ### 추가 사용자 보고 — 선택 안내의 그리드 밀림 및 중복 (2026-09-09)
 
-- **TODO / 재현 필요:** 캐릭터 폴더에서 이미지를 선택하면 `1장 선택`, `선택 해제` 영역이 새로 나타나 이미지 그리드를 아래로 밀어낸다. 상단바에도 `1장 선택`이 중복 표시된다.
+- **DONE — 2026-09-10 사용자 확인:** 캐릭터 폴더 선택 시 별도 선택 행이 그리드를 밀던 문제와 선택 개수 중복 표시를 정리했다.
 - 사용자는 선택 안내를 오버레이로 바꾸는 방안을 제안했다. 우선 기존 상단바 한 곳에 선택 개수·선택 해제를 통합하고 높이를 유지하는 방향을 검토한다. 별도 오버레이가 필요하면 레이아웃 흐름에서 분리하되 이미지 클릭/스크롤을 가리지 않게 한다. 최종 배치는 아직 미확정이다.
 - 선택 시작·추가·전체 해제 시 그리드 위치/스크롤이 변하지 않고 선택 개수는 한 곳에서 표시되는지 Windows/Linux에서 확인한다. CHAR-UI-005의 검토 상세 패널 문제와 구분한다.
-- 이번 요청은 메모만이며 코드 변경이나 수정 완료를 의미하지 않는다.
+- 2026-09-10 사용자 실사용 확인으로 이 그리드/선택 표시 항목은 완료 처리한다.
 
 ### 추가 디자인 방향 — 캐릭터 폴더 상단바 정돈 (2026-09-09)
 
@@ -813,10 +814,10 @@ Status: `VERIFY` — 2026-09-09 통합 계획 C/D에서 구현·격리 검증 �
 
 ### 추가 사용자 요구 — 캐릭터별 검토 대기 표시 (2026-09-09)
 
-- **TODO:** 검토 대기 이미지가 있는 캐릭터 폴더는 해당 폴더 상단바의 `검토` 버튼에 느낌표·배지 등 눈에 띄는 표시를 제공한다. 표시 형태는 미확정이며, 검토 화면을 열기 전에 대기 여부를 알 수 있어야 한다.
+- **DONE — 2026-09-10 사용자 확인:** 검토 대기 이미지가 있는 캐릭터 폴더는 상단바 `검토` 버튼의 배지/표시로 검토 화면을 열기 전에 대기 여부를 확인할 수 있다.
 - 현재 캐릭터의 실제 미해결 검토 항목을 기준으로 표시하고, 승인·거절 등으로 대기가 해소되면 갱신한다. 다른 캐릭터의 대기나 단순 분석 실행 중 상태를 검토 대기로 혼동하지 않는다.
 - 아이콘만 사용하는 경우 접근 가능한 이름/설명으로 `검토 대기 있음`을 전달하고, 배지 출현으로 상단바나 그리드가 밀리지 않도록 한다.
-- 코드 변경 없이 요구사항만 기록한다.
+- 2026-09-10 사용자 실사용 확인으로 검토 대기 표시 항목은 완료 처리한다.
 
 ## CHAR-UI-006 — 검토 중 추가 레퍼런스 변경으로 인한 판단 중단 및 안내 개선
 
@@ -831,7 +832,7 @@ Status: `VERIFY` — 2026-09-09 통합 계획 C/D에서 구현·격리 검증 �
 
 ## CHAR-UI-007 — 자동 선정된 추가 참조 확인 및 제외
 
-Status: `TODO` — 2026-09-09 사용자 요구 기록. 코드 수정·운영 데이터 변경은 요청하지 않았다.
+Status: `DONE` — 구현 후 2026-09-10 사용자 확인으로 완료 처리.
 
 - 캐릭터별로 현재 어떤 이미지가 참조로 선정됐는지 확인하고, 잘못 선정된 이미지를 제외할 수 있어야 한다.
 - 고정 기준 이미지 5장과 자동 선정되는 추가 참조를 구분해 썸네일·원본 접근을 제공한다. 선정 근거/출처 표시를 설계한다. 현재 추가 참조는 적격한 수동 승인 이미지에서 선정되며, 자동 확정만으로 추가 참조가 되는 것으로 표현하지 않는다.
@@ -840,13 +841,13 @@ Status: `TODO` — 2026-09-09 사용자 요구 기록. 코드 수정·운영 데
 
 ## CHAR-UI-008 — 캐릭터 삭제 시 같은 이름의 일반 폴더로 전환
 
-Status: `TODO` — 2026-09-09 사용자 요구 기록. 원본을 그대로 남겨 두기만 하는 이전 제안보다 아래 전환 요구를 우선한다.
+Status: `DONE` — 구현 후 2026-09-10 사용자 확인으로 완료 처리. 원본을 그대로 남겨 두기만 하는 이전 제안보다 아래 전환 요구를 우선한다.
 
 - 캐릭터 폴더를 없앨 때 그 내용물을 같은 이름의 일반 폴더에 모두 모아 보존한다. UI에서는 `일반 폴더로 전환` 등 실제 결과가 드러나는 명칭을 검토한다.
 - 제안 위치는 해당 시리즈 아래이며, 확정 이미지와 기준·추가 참조가 빠지지 않도록 대상과 개수를 미리 보여준다. 원본 파일과 자산은 복제하지 않고 분류/관계를 변경한다.
 - 일반 폴더 연결이 성공한 뒤 캐릭터 등록과 현재 캐릭터의 참조·연결을 정리한다. 다른 캐릭터의 연결은 보존한다. 중간 실패로 일부만 전환되지 않도록 원자성/복구를 설계한다.
 - 사용자는 여러 차례 주의 안내를 원한다. 제안은 1차 전환 영향·대상 개수·보존 범위 안내, 2차 캐릭터 이름 입력 후 최종 확인의 두 단계다.
-- **미결정:** 동일 이름의 일반 폴더가 이미 있을 때 합치기/이름 변경, 미확정 검토 후보 포함 여부, 공유 이미지의 분류 처리와 판단 이력 보존·정리 정책. 원본 보존과 모든 확정 내용물의 접근 가능성을 유지하며 구현 전에 확정한다.
+- **완료된 전환 정책:** 동일 이름의 일반 폴더가 안전하게 재사용 가능하면 합치고, 다른 시리즈/캐릭터와 충돌하는 동명 폴더는 자동 병합하지 않는다. 미확정 검토 후보는 전환 대상에서 제외하며, 다른 캐릭터의 연결과 원본 자산은 보존한다. 전환한 캐릭터의 등록·참조 설정·판단 이력은 정리하고 미리보기 이후 대상/분류가 달라지면 적용을 거절한다.
 
 ## CHAR-UI-009 — 분류에 영향을 주지 않는 캐릭터 그룹
 
@@ -1148,13 +1149,13 @@ The current browser/mobile-extension prototype remains a verified behavioral ref
 
 ## MOBILE-001 — Direct authenticated native Android shell
 
-Status: `PARTIAL`
+Status: `DONE` — 2026-09-10 사용자 실사용 확인으로 완료 처리. 이 완료 판정은 현재 제품 범위에 대한 사용자 수용 기준이며, 아래 과거 follow-up 메모를 필수 미완료 항목으로 다시 열지 않는다.
 
 The 2026-09-07 installed APK checkpoint, 0.3.3 (10), implements direct authenticated browsing, Keystore credentials,
 lifecycle/back handling, pending Capture previews and a shared 1 GiB media cache with
 usage/clear controls. Galaxy Tab browsing is in use; the earlier no-install checkpoint
-is superseded. Remaining scope: Android system Share quick-save, optional extension
-update management, and full provider/lifecycle acceptance. The extension's device-local
+is superseded. Earlier follow-up ideas included Android system Share quick-save, optional extension
+update management, and broader provider/lifecycle acceptance; they no longer keep MOBILE-001 open. The extension's device-local
 temporary save is implemented (EXT-006 below); it is not a general Android Share receiver.
 
 Goal:
@@ -1183,14 +1184,14 @@ Do not change the stable browser X Collector merely to support the native client
 
 ## MOBILE-004 — Approved portrait-first consumption UX
 
-Status: `PARTIAL`
+Status: `DONE` — 2026-09-10 사용자 실사용 확인으로 완료 처리.
 Installed Home/Library supports full-aspect justified rows, three densities, continuous
 cursor loading, progressive media viewing and retained state. Continue/이어보기 and
 the idle scroll-hint section were removed at user request; sidebar buttons lead the
 Home/Library controls, and the native app hides system bars. Home adds visited/daily
 classifications and date/creator Revisit groups. User device use and visual acceptance
-are recorded; systematic cold/warm timing, large-video reliability and the complete
-gesture/lifecycle matrix remain open. Do not restart the initial Home implementation.
+are recorded. Earlier cold/warm timing, large-video reliability and gesture/lifecycle
+checks no longer keep MOBILE-004 open after the 2026-09-10 user completion confirmation. Do not restart the initial Home implementation.
 Prerequisite for production integration: MOBILE-001. Pure layout/state algorithms may be developed/tested earlier.
 
 Initial destinations:
@@ -1264,17 +1265,15 @@ Device gate: pass all documented Galaxy Tab S11 portrait checks first, then land
 
 ## MOBILE-002 — Read-only Android DocumentsProvider
 
-Status: `PARTIAL`
+Status: `DONE` — 2026-09-10 사용자 실사용 확인으로 완료 처리.
 The main APK now contains both read-only DocumentsProvider and API33+ CloudMediaProvider,
 with classification folders/albums, stable identities, complete metadata snapshots,
 cancellation and a shared 1 GiB cache. Selected file transfers are bounded to 512 MiB.
 The old PoC remains installed separately; it is not the sole Picker implementation.
-Full SAF grants/multi-select/recipient/cancellation and provider restart acceptance remain
-open. A local temporary image was read successfully through the test recipient, but a
-later real attachment Photo Picker showed an empty '이 기기에서' list despite existing
-MediaStore files. Diagnose the launch/filter/provider difference; do not treat the test
-recipient result as proof for every website. Samsung Gallery > albums > all did show
-임시보관 with three files.
+Earlier SAF/multi-select/recipient/cancellation/provider-restart checks and the historical
+Photo Picker empty-list observation are retained as diagnostic history, but no longer keep
+MOBILE-002 open after the 2026-09-10 user completion confirmation. Samsung Gallery > albums > all
+did show 임시보관 with three files.
 Prerequisite: MOBILE-001. May proceed in parallel with MOBILE-004 after the native cache/auth boundary is stable.
 
 Initial boundary:
@@ -1319,7 +1318,7 @@ Source-cover repair completed (2026-09-07): publication revision `3b640e2627ad52
 
 ## MOBILE-006 — Shared Manga Catalog browsing
 
-Status: `PARTIAL`; shared catalog browsing and the v2 performance/Reader server slice are
+Status: `DONE` — 2026-09-10 사용자 실사용 확인으로 완료 처리. Shared catalog browsing and the v2 performance/Reader server slice are
 deployed. The current publication was upgraded in place to the v2 projection with unchanged
 revision; production default search is now prepared server-side and the authenticated Reader
 returns ordered validated page manifests. Android 0.4.3 uses a fullscreen one-page reader with
@@ -1327,8 +1326,8 @@ horizontal page navigation, screen-fit rendering, 1x–5x pinch zoom and bounded
 retaining device-local position, ±2 page prefetch, one-shot expired-manifest refresh and shared
 native cover/page caching. Reader chrome appears only on a short tap. Selecting bookmark scope
 forces Latest sort. Server evidence includes 16 Python catalog/replica tests, production-scale
-timing and a real k-hentai/siam-cdn Reader canary. `PARTIAL` remains only for APK 0.4.3 Galaxy
-Tab install and native reader/cold-warm acceptance.
+timing and a real k-hentai/siam-cdn Reader canary. The prior APK/Galaxy Tab acceptance gate is
+superseded by the 2026-09-10 user completion confirmation.
 
 User scope: PC-style catalog design with minimal editing. Search preserves provider/work
 identity, language scope, blocked tags/categories and confirmed edition groups. The legacy
@@ -1399,17 +1398,17 @@ throughput benchmark or proof of byte/quality equivalence for every source image
 
 ## EXT-008 — First-open double activation
 
-Status: `VERIFY` for the new list-only extension — the local `idle -> armed -> opening -> list-open` controller has focused coverage proving a first gesture cannot open twice and release during asynchronous opening does not cancel/retrigger it. Chromium/Titanium/Galaxy touch acceptance is still pending; the preserved legacy `extension/` is not modified by this fix.
+Status: `DONE` — 2026-09-10 사용자 확인. The local `idle -> armed -> opening -> list-open` controller has focused coverage proving a first gesture cannot open twice and release during asynchronous opening does not cancel/retrigger it. The prior Chromium/Titanium/Galaxy acceptance gate is superseded by this user completion confirmation; the preserved legacy `extension/` is not modified by this fix.
 
 Legacy user report: the first extension-window invocation could double-handle a touch/tap. The new list-only client replaces the radial/touch-held path with a one-open-per-pointer state machine; keep device acceptance focused on first invocation, release/click-through, cancellation and immediate reopen.
 
 ## EXT-009 — GIF saving failure
 
-Status: `VERIFY` for the new list-only extension — GIF has an explicit `animated_gif` server/PC capture identity, URL/filename detection, server-only permanent-save semantics and Android temporary-intent eligibility. A Rust end-to-end fixture verified a real two-frame GIF reaches the Lakomics library as `MediaSummary::Gif` with byte-for-byte original content. Existing Android temporary storage already accepts `image/gif` and copies the original file; real Titanium/Galaxy permanent and temporary GIF acceptance remains pending. The preserved legacy `extension/` remains unchanged.
+Status: `DONE` — 2026-09-10 사용자 확인. GIF has an explicit `animated_gif` server/PC capture identity, URL/filename detection, server-only permanent-save semantics and Android temporary-intent eligibility. A Rust end-to-end fixture verified a real two-frame GIF reaches the Lakomics library as `MediaSummary::Gif` with byte-for-byte original content. Existing Android temporary storage accepts `image/gif` and copies the original file; the prior Titanium/Galaxy acceptance gate is superseded by this user completion confirmation. The preserved legacy `extension/` remains unchanged.
 
 ## EXT-010 — List-only slim extension and server-owned profile sync
 
-Status: `IN PROGRESS` — 2026-09-09 local implementation now includes the separate `extension-list/` package, server-issued scoped pairing/profile sync, a local QR pairing surface plus scan-to-pair bridge for PC → Galaxy Tab setup, list-native ordering/pins, minimal invocation state machine, server-first capture, and explicit GIF transport into the PC library. Focused extension tests, TypeScript and Rust GIF ingestion tests pass locally. The server portion is deployed to `laku-tokyo`: production `app.py` SHA-256 `4428342f29fc2ea978f06fb903202f076a6b0dc12f8578f2bcefcff5e6f966dc`, `capture_store.py` SHA-256 `d465e14f3d5fefe637defa48f05ff26184ed5b33be812f647d1c7ffce66a31a3`; pre-deploy code plus a 12,804,096-byte SQLite online backup are retained under `backups/extension-list-20260909-1615/` with `quick_check=ok`. Post-restart service is active with `NRestarts=0`, raw and Tailscale HTTPS health return 200, 489/489 existing captures were preserved, GIF/profile schemas are active, and an HTTPS pairing -> bootstrap -> revoke canary passed without exposing credentials. The VPS candidate's full `tests.test_capture_api` suite passed 49 tests in the production venv. Chromium/Titanium/Galaxy device acceptance remains a separate gate, and the existing `extension/` remains unchanged.
+Status: `DONE` — 2026-09-10 사용자 확인으로 목록형 확장 전환을 완료 처리. The earlier cross-device acceptance gate is superseded by this completion confirmation. 2026-09-09 local implementation includes the separate `extension-list/` package, server-issued scoped pairing/profile sync, a local QR pairing surface plus scan-to-pair bridge for PC → Galaxy Tab setup, list-native ordering/pins, minimal invocation state machine, server-first capture, and explicit GIF transport into the PC library. Focused extension tests, TypeScript and Rust GIF ingestion tests pass locally. The server portion is deployed to `laku-tokyo`: production `app.py` SHA-256 `4428342f29fc2ea978f06fb903202f076a6b0dc12f8578f2bcefcff5e6f966dc`, `capture_store.py` SHA-256 `d465e14f3d5fefe637defa48f05ff26184ed5b33be812f647d1c7ffce66a31a3`; pre-deploy code plus a 12,804,096-byte SQLite online backup are retained under `backups/extension-list-20260909-1615/` with `quick_check=ok`. Post-restart service is active with `NRestarts=0`, raw and Tailscale HTTPS health return 200, 489/489 existing captures were preserved, GIF/profile schemas are active, and an HTTPS pairing -> bootstrap -> revoke canary passed without exposing credentials. The VPS candidate's full `tests.test_capture_api` suite passed 49 tests in the production venv. The existing `extension/` remains available as the preserved fallback/reference implementation.
 
 ### Product goal
 
@@ -2086,10 +2085,8 @@ These are detailed in active sections above:
 - LONG-004 — `MERGE CANDIDATE` consuming LONG-002 renderer
 
 Later completions superseding the audit: CLOUD-006, BUG-013, CATALOG-003/004/005/006,
-CATALOG-007A/B, LONG-002A, WORKS-002, MOBILE-005 and EXT-005/006/007 are DONE.
-MOBILE-001/002/004 remain PARTIAL for the specific remaining work in their sections.
-MOBILE-006 has its read implementation complete and remains PARTIAL for rollout/device acceptance;
-MOBILE-007/008 are the next catalog implementation sequence.
+CATALOG-007A/B, LONG-002A, WORKS-002, MOBILE-001/002/004/005/006 and EXT-005/006/007/008/009/010 are DONE.
+MOBILE-007/008 are the next catalog implementation sequence; MOBILE-003 remains HOLD.
 
 ## OBSOLETE / incident-only
 
@@ -2176,19 +2173,13 @@ S4. **PERF-SIMILARITY BK-tree / metric index**
 
 ## Separately promoted Mobile production order
 
-M1. **MOBILE-002 recipient compatibility:** reproduce the real attachment Picker's
-empty local folders; verify SAF grants, multi-select, cancellation and restart.
+M1. **MOBILE-002 — DONE.** Recipient/Picker scope is closed by the 2026-09-10 user completion confirmation; earlier compatibility observations remain diagnostic history only.
 
-M2. **MOBILE-001/004 remaining shell/consumption work:** cold/warm media measurements,
-large-video/retry behavior, full gesture/lifecycle checks, system Share quick-save and
-optional extension update management. The installed app/Home/cache are not new work.
+M2. **MOBILE-001/004 — DONE.** The native shell and consumption UX are closed by the 2026-09-10 user completion confirmation; earlier measurement/share/update ideas do not keep these items open.
 
 M3. **MOBILE-005 Collections — DONE.** Keep the deployed cover/volume implementation.
 
-M4. **MOBILE-006 shared Manga Catalog reads — server/v2 deployed / device acceptance open:**
-versioned replica, PC-style search/list/detail/bookmark filter, Reader endpoint, native cover/page
-cache and v2 latency projection are deployed. The current publication was upgraded in place.
-Next is APK 0.4.3 Galaxy Tab install plus reader interaction and cold/warm timing acceptance.
+M4. **MOBILE-006 shared Manga Catalog reads — DONE.** Versioned replica, PC-style search/list/detail/bookmark filter, Reader endpoint, native cover/page cache and v2 latency projection are deployed. The 2026-09-10 user completion confirmation closes the prior Galaxy Tab/device acceptance gate.
 
 M5. **MOBILE-007 bookmark changes:** after read identity/revision contract, with
 idempotent retries and PC receipt/conflict semantics.

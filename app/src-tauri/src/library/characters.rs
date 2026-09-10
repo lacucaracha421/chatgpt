@@ -52,6 +52,14 @@ pub struct TargetDraft {
     pub enabled: bool,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CharacterSettingsDraft {
+    #[serde(flatten)]
+    pub target: TargetDraft,
+    pub reference_ids: Vec<String>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FolderRegistration {
@@ -61,11 +69,19 @@ pub struct FolderRegistration {
     #[serde(default)]
     pub cleanup_folder: bool,
     pub expected_count: usize,
+    pub expected_asset_fingerprint: String,
     pub target_id: Option<String>,
     pub expected_fingerprint: Option<String>,
     pub display_name: String,
     pub reference_ids: Vec<String>,
     pub thumbnail_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderAssetSnapshot {
+    pub count: usize,
+    pub fingerprint: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -95,6 +111,16 @@ pub struct Target {
     pub learned_references: Vec<Reference>,
     pub ready: bool,
     pub fingerprint: String,
+}
+
+impl Target {
+    pub(super) fn usable_learned_references(&self) -> impl Iterator<Item = &Reference> {
+        self.learned_references.iter().filter(|reference| reference.status == "ready")
+    }
+
+    pub(super) fn has_invalid_learned_references(&self) -> bool {
+        self.learned_references.iter().any(|reference| reference.status != "ready")
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -175,11 +201,22 @@ impl Library {
         folder_id: String,
         recursive: bool,
     ) -> Result<usize> {
+        Ok(self.character_folder_asset_snapshot(folder_id, recursive)?.count)
+    }
+
+    pub fn character_folder_asset_snapshot(
+        &self,
+        folder_id: String,
+        recursive: bool,
+    ) -> Result<FolderAssetSnapshot> {
         let connection = self.connection()?;
         let ids = connection.prepare("WITH RECURSIVE scope(id) AS (SELECT ?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id WHERE ?2) SELECT a.id FROM assets a WHERE a.status='normal' AND a.media_kind IN ('image','gif','video') AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope)) ORDER BY a.id")?
             .query_map(params![folder_id,recursive], |r| r.get::<_,String>(0))?
             .collect::<std::result::Result<Vec<_>,_>>()?;
-        Ok(ids.len())
+        Ok(FolderAssetSnapshot {
+            count: ids.len(),
+            fingerprint: asset_set_fingerprint(&connection, &ids)?,
+        })
     }
 
     /// Register existing image, GIF and video memberships; references remain still images.
@@ -189,6 +226,9 @@ impl Library {
         }
         let mut connection = self.connection()?;
         let tx = connection.transaction()?;
+        if super::classification::classification_in_role_scope(&tx, &request.series_id, "originals")? {
+            return Err(Error::Invalid("오리지널 보관 영역은 캐릭터로 정리할 수 없습니다."));
+        }
         let inside: bool = tx.query_row("WITH RECURSIVE scope(id) AS (SELECT id FROM classification_entries WHERE id=?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id) SELECT EXISTS(SELECT 1 FROM scope WHERE id=?2)", params![request.series_id,request.folder_id], |r| r.get(0))?;
         if !inside {
             return Err(Error::Invalid(
@@ -198,9 +238,12 @@ impl Library {
         let ids = tx.prepare("WITH RECURSIVE scope(id) AS (SELECT ?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id WHERE ?2) SELECT a.id FROM assets a WHERE a.status='normal' AND a.media_kind IN ('image','gif','video') AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope)) ORDER BY a.id")?
             .query_map(params![request.folder_id,request.recursive], |r| r.get::<_,String>(0))?
             .collect::<std::result::Result<Vec<_>,_>>()?;
-        if ids.is_empty() || ids.len() != request.expected_count {
+        if ids.is_empty()
+            || ids.len() != request.expected_count
+            || asset_set_fingerprint(&tx, &ids)? != request.expected_asset_fingerprint
+        {
             return Err(Error::Invalid(
-                "폴더의 자산 수가 바뀌었습니다. 목록을 다시 확인해 주세요.",
+                "폴더의 자산 구성이 바뀌었습니다. 목록을 다시 확인해 주세요.",
             ));
         }
         let target = if let Some(id) = request.target_id {
@@ -306,14 +349,53 @@ impl Library {
         draft: TargetDraft,
         strict: bool,
     ) -> Result<Target> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let result = self.save_character_target_selection_in(&transaction, draft, strict)?;
+        transaction.commit()?;
+        Ok(result)
+    }
+
+    pub fn save_character_settings(
+        &self,
+        request: CharacterSettingsDraft,
+        strict: bool,
+    ) -> Result<Target> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let saved = self.save_character_target_selection_in(
+            &transaction,
+            request.target,
+            strict,
+        )?;
+        let result = self.replace_character_references_selection_in(
+            &transaction,
+            &saved.id,
+            saved.revision,
+            &request.reference_ids,
+            strict,
+        )?;
+        transaction.commit()?;
+        Ok(result)
+    }
+
+    fn save_character_target_selection_in(
+        &self,
+        transaction: &Connection,
+        draft: TargetDraft,
+        strict: bool,
+    ) -> Result<Target> {
         let name = draft.display_name.trim();
         if name.is_empty() {
             return Err(Error::Invalid("캐릭터 이름을 입력해 주세요."));
         }
-        let mut connection = self.connection()?;
-        let transaction = connection.transaction()?;
         if draft.id.is_none() && draft.series_classification_id.is_none() {
             return Err(Error::Invalid("시리즈 폴더를 선택해 주세요."));
+        }
+        if let Some(series) = draft.series_classification_id.as_deref() {
+            if super::classification::classification_in_role_scope(transaction, series, "originals")? {
+                return Err(Error::Invalid("오리지널 보관 영역에서는 캐릭터를 등록할 수 없습니다."));
+            }
         }
         for id in draft
             .series_classification_id
@@ -329,16 +411,16 @@ impl Library {
             }
         }
         if let Some(image) = &draft.thumbnail_asset_id {
-            super::character_hub::validate_art(&transaction, image)?;
+            super::character_hub::validate_art(transaction, image)?;
             let unchanged = draft
                 .id
                 .as_deref()
-                .map(|id| self.read_character_target(&transaction, id))
+                .map(|id| self.read_character_target(transaction, id))
                 .transpose()?
                 .is_some_and(|t| t.thumbnail_asset_id.as_ref() == Some(image));
             if strict && !unchanged {
                 super::character_hub::validate_character_selection(
-                    &transaction,
+                    transaction,
                     draft
                         .series_classification_id
                         .as_deref()
@@ -356,7 +438,7 @@ impl Library {
         }
         let now = chrono::Utc::now().to_rfc3339();
         let id = if let Some(id) = draft.id {
-            let previous = self.read_character_target(&transaction, &id)?;
+            let previous = self.read_character_target(transaction, &id)?;
             if draft.expected_revision != Some(previous.revision) {
                 return Err(Error::Stale);
             }
@@ -384,9 +466,7 @@ impl Library {
             "UPDATE character_targets SET description=?2, thumbnail_asset_id=?3 WHERE id=?1",
             params![id, draft.description, draft.thumbnail_asset_id],
         )?;
-        let result = self.read_character_target(&transaction, &id)?;
-        transaction.commit()?;
-        Ok(result)
+        self.read_character_target(transaction, &id)
     }
 
     pub fn add_character_learned_references(
@@ -513,6 +593,27 @@ impl Library {
         asset_ids: &[String],
         strict: bool,
     ) -> Result<Target> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let result = self.replace_character_references_selection_in(
+            &transaction,
+            id,
+            expected_revision,
+            asset_ids,
+            strict,
+        )?;
+        transaction.commit()?;
+        Ok(result)
+    }
+
+    fn replace_character_references_selection_in(
+        &self,
+        transaction: &Connection,
+        id: &str,
+        expected_revision: i64,
+        asset_ids: &[String],
+        strict: bool,
+    ) -> Result<Target> {
         if asset_ids.len() > REFERENCE_COUNT
             || asset_ids.iter().collect::<BTreeSet<_>>().len() != asset_ids.len()
         {
@@ -520,9 +621,7 @@ impl Library {
                 "기준 이미지는 중복 없이 최대 5장까지 지정할 수 있습니다.",
             ));
         }
-        let mut connection = self.connection()?;
-        let transaction = connection.transaction()?;
-        let previous = self.read_character_target(&transaction, id)?;
+        let previous = self.read_character_target(transaction, id)?;
         if previous.revision != expected_revision {
             return Err(Error::Stale);
         }
@@ -535,13 +634,13 @@ impl Library {
         for asset_id in asset_ids {
             if strict {
                 super::character_hub::validate_character_selection(
-                    &transaction,
+                    transaction,
                     series,
                     Some(id),
                     asset_id,
                 )?;
             }
-            let (hash, path) = scoped_image(&transaction, series, asset_id)?;
+            let (hash, path) = scoped_image(transaction, series, asset_id)?;
             self.open_library_media(&path)?;
             if !hashes.insert(hash.clone()) {
                 return Err(Error::Invalid(
@@ -575,9 +674,7 @@ impl Library {
         if promote_manual {
             transaction.execute("DELETE FROM character_manual_targets WHERE target_id=?1", [id])?;
         }
-        let result = self.read_character_target(&transaction, id)?;
-        transaction.commit()?;
-        Ok(result)
+        self.read_character_target(transaction, id)
     }
 
     /// Move within a series and assign the character as one atomic operation.
@@ -667,9 +764,6 @@ impl Library {
         if target.fingerprint != request.expected_fingerprint {
             return Err(Error::Stale);
         }
-        if request.decision != DecisionKind::Cleared && !target.enabled {
-            return Err(Error::Invalid("비활성화된 캐릭터입니다."));
-        }
         if request.baseline_fingerprint.is_some() && !target.ready {
             return Err(Error::Invalid("기준 이미지 설정을 확인해 주세요."));
         }
@@ -716,6 +810,7 @@ impl Library {
                 )
                 .optional()?;
             if previous.as_deref() == Some(request.decision.stored()) {
+                super::character_autotag::refresh_character_review_state(transaction, asset_id)?;
                 continue;
             }
             let snapshot = evidence
@@ -726,23 +821,7 @@ impl Library {
             transaction.execute("INSERT INTO character_decisions
                 (target_id,asset_id,source_asset_id,asset_hash,decision,target_fingerprint,baseline_fingerprint,reference_snapshot,created_at)
                 VALUES(?1,?2,?2,?3,?4,?5,?6,?7,?8)", params![target.id,asset_id,hash,request.decision.stored(),target.fingerprint,request.baseline_fingerprint,snapshot,now])?;
-            if request.decision == DecisionKind::Accepted {
-                if let Some(series) = target.series_classification_id.as_deref() {
-                    transaction.execute(
-                        "DELETE FROM character_series_asset_exclusions WHERE series_id=?1 AND asset_id=?2",
-                        params![series, asset_id],
-                    )?;
-                }
-                if let Some(snapshot) = evidence.get(asset_id) {
-                    let prediction = &snapshot["prediction"];
-                    let single = prediction["wholeFallback"] == false
-                        && prediction["queryBoxes"]
-                            .as_array()
-                            .is_some_and(|boxes| boxes.len() == 1);
-                    transaction.execute("UPDATE character_autotag_jobs SET review_state=?2 WHERE asset_id=?1 AND state='completed'",
-                        params![asset_id,if single {"resolved"} else {"partially_resolved"}])?;
-                }
-            }
+            super::character_autotag::refresh_character_review_state(transaction, asset_id)?;
             changed += 1;
         }
         Ok(changed)
@@ -843,14 +922,14 @@ impl Library {
                 status,
             });
         }
-        // Learned references are explicit, stable user choices. Manual accept/reject
-        // changes character membership only and never mutates this set implicitly.
+        // Learned references are explicit, stable user choices. Keep invalid rows visible
+        // so the UI and automatic roster use the same scope/content/file eligibility.
         let mut seen = target
             .references
             .iter()
             .map(|r| r.asset_hash.clone())
             .collect::<BTreeSet<_>>();
-        let mut learned = connection.prepare("SELECT l.asset_id,l.asset_hash,a.content_hash,a.relative_path,a.status,a.media_kind FROM character_learned_references l JOIN assets a ON a.id=l.asset_id WHERE l.target_id=?1 ORDER BY l.created_at,l.asset_id")?;
+        let mut learned = connection.prepare("SELECT l.asset_id,l.asset_hash,a.content_hash,a.relative_path,a.status,a.media_kind FROM character_learned_references l JOIN assets a ON a.id=l.asset_id WHERE l.target_id=?1 ORDER BY l.created_at,l.asset_id LIMIT 20")?;
         let rows = learned.query_map([id], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -862,34 +941,54 @@ impl Library {
             ))
         })?;
         for row in rows {
-            let (asset_id, asset_hash, current_hash, path, status, media_kind) = row?;
-            if status != "normal"
-                || media_kind != "image"
-                || asset_hash != current_hash
-                || !seen.insert(asset_hash.clone())
-                || self.open_library_media(&path).is_err()
-            {
-                continue;
-            }
+            let (asset_id, asset_hash, current_hash, path, asset_status, media_kind) = row?;
+            let duplicate = !seen.insert(asset_hash.clone());
+            let status = if duplicate {
+                "duplicate_content"
+            } else if asset_status != "normal" || media_kind != "image" {
+                "ineligible"
+            } else if asset_hash != current_hash {
+                "changed_content"
+            } else {
+                match target.series_classification_id.as_deref() {
+                    Some(series) => {
+                        let eligible = connection
+                            .query_row(SCOPED_IMAGE, params![series, asset_id], |r| {
+                                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                            })
+                            .optional()?;
+                        match eligible {
+                            None => "ineligible",
+                            Some((hash, _)) if hash != asset_hash => "changed_content",
+                            Some((_, scoped_path))
+                                if self.open_library_media(&scoped_path).is_err() =>
+                            {
+                                "missing_file"
+                            }
+                            Some(_) if self.open_library_media(&path).is_err() => "missing_file",
+                            Some(_) => "ready",
+                        }
+                    }
+                    None => "ineligible",
+                }
+            };
             target.learned_references.push(Reference {
                 slot: target.learned_references.len() as u32,
                 asset_id: Some(asset_id),
                 asset_hash,
-                status: "ready",
+                status,
             });
-            if target.learned_references.len() == 20 {
-                break;
-            }
         }
         target.ready = target.enabled
             && !target.manual_only
             && target.series_classification_id.is_some()
             && target.references.len() == REFERENCE_COUNT
-            && target.references.iter().all(|r| r.status == "ready");
+            && target.references.iter().all(|r| r.status == "ready")
+            && !target.has_invalid_learned_references();
         target.fingerprint = Sha256::digest(serde_json::to_vec(&(
             &target.id,
-            target.revision,
             &target.series_classification_id,
+            target.enabled,
             target.manual_only,
             &target.references,
         ))?)
@@ -898,6 +997,29 @@ impl Library {
         .collect();
         Ok(target)
     }
+}
+
+pub(super) fn asset_set_fingerprint(connection: &Connection, ids: &[String]) -> Result<String> {
+    let mut sorted = ids.to_vec();
+    sorted.sort();
+    sorted.dedup();
+    let mut rows = Vec::with_capacity(sorted.len());
+    for id in sorted {
+        let hash: String = connection.query_row(
+            "SELECT content_hash FROM assets WHERE id=?1 AND status='normal'",
+            [&id],
+            |row| row.get(0),
+        )?;
+        let classifications = connection
+            .prepare("SELECT classification_id FROM asset_classifications WHERE asset_id=?1 ORDER BY classification_id")?
+            .query_map([&id], |row| row.get::<_, String>(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        rows.push((id, hash, classifications));
+    }
+    Ok(Sha256::digest(serde_json::to_vec(&rows)?)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
 }
 
 pub(super) fn scoped_image(

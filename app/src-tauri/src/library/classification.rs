@@ -56,6 +56,16 @@ impl Library {
         let transaction = connection.transaction()?;
         let entry =
             find_classification(&transaction, id)?.ok_or(LibraryError::ClassificationNotFound)?;
+        if classification_has_role(&transaction, id, "originals")? {
+            return Err(LibraryError::ProtectedClassification);
+        }
+        if let Some(parent_id) = parent_id {
+            if classification_in_role_scope(&transaction, parent_id, "originals")?
+                && classification_subtree_contains_character_series(&transaction, id)?
+            {
+                return Err(LibraryError::ProtectedClassification);
+            }
+        }
         let parent = find_parent(&transaction, parent_id)?;
         let next_kind = match (&entry.kind, parent.as_ref()) {
             (ClassificationKind::Root, Some(_)) => ClassificationKind::Tag,
@@ -95,6 +105,9 @@ impl Library {
     pub fn rename_classification(&self, id: &str, name: &str) -> Result<(), LibraryError> {
         let name = normalized_name(name.to_owned())?;
         let connection = self.connection()?;
+        if classification_has_role(&connection, id, "originals")? {
+            return Err(LibraryError::ProtectedClassification);
+        }
         let changed = connection
             .execute(
                 "UPDATE classification_entries SET name = ?1 WHERE id = ?2",
@@ -152,6 +165,9 @@ impl Library {
         let transaction = connection.transaction()?;
         let entry =
             find_classification(&transaction, id)?.ok_or(LibraryError::ClassificationNotFound)?;
+        if classification_has_role(&transaction, id, "originals")? {
+            return Err(LibraryError::ProtectedClassification);
+        }
         let has_children: bool = transaction.query_row(
             "SELECT EXISTS(SELECT 1 FROM classification_entries WHERE parent_id = ?1)",
             [id],
@@ -343,6 +359,47 @@ fn find_parent(
             find_classification(connection, parent_id)?.ok_or(LibraryError::ClassificationNotFound)
         })
         .transpose()
+}
+
+pub(crate) fn classification_in_role_scope(
+    connection: &Connection,
+    id: &str,
+    role: &str,
+) -> Result<bool, LibraryError> {
+    Ok(connection.query_row(
+        "WITH RECURSIVE lineage(id,parent_id) AS (
+            SELECT id,parent_id FROM classification_entries WHERE id=?1
+            UNION ALL SELECT c.id,c.parent_id FROM classification_entries c JOIN lineage p ON c.id=p.parent_id)
+         SELECT EXISTS(SELECT 1 FROM lineage l JOIN classification_roles r ON r.classification_id=l.id WHERE r.role=?2)",
+        params![id, role],
+        |row| row.get(0),
+    )?)
+}
+
+fn classification_subtree_contains_character_series(
+    connection: &Connection,
+    id: &str,
+) -> Result<bool, LibraryError> {
+    Ok(connection.query_row(
+        "WITH RECURSIVE descendants(id) AS (
+            SELECT id FROM classification_entries WHERE id=?1
+            UNION ALL SELECT c.id FROM classification_entries c JOIN descendants d ON c.parent_id=d.id)
+         SELECT EXISTS(SELECT 1 FROM character_series s JOIN descendants d ON d.id=s.classification_id)",
+        [id],
+        |row| row.get(0),
+    )?)
+}
+
+fn classification_has_role(
+    connection: &Connection,
+    id: &str,
+    role: &str,
+) -> Result<bool, LibraryError> {
+    Ok(connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM classification_roles WHERE role=?2 AND classification_id=?1)",
+        params![id, role],
+        |row| row.get(0),
+    )?)
 }
 
 fn find_classification(
@@ -849,7 +906,11 @@ mod tests {
             .get_asset_classifications("asset-1")
             .unwrap()
             .is_empty());
-        assert!(library.list_classifications().unwrap().is_empty());
+        assert!(library
+            .list_classifications()
+            .unwrap()
+            .iter()
+            .all(|entry| entry.id != root.id));
     }
 
     #[test]
@@ -866,7 +927,11 @@ mod tests {
 
         library.delete_classification(&root.id).unwrap();
 
-        assert!(library.list_classifications().unwrap().is_empty());
+        assert!(library
+            .list_classifications()
+            .unwrap()
+            .iter()
+            .all(|entry| entry.id != root.id));
     }
 
     #[test]
@@ -971,7 +1036,7 @@ mod tests {
         let entries = fixture.library.list_classifications().unwrap();
         let ids: Vec<_> = entries.into_iter().map(|entry| entry.id).collect();
 
-        assert_eq!(ids.len(), 4);
+        assert_eq!(ids.len(), 5);
         assert!(ids.contains(&fixture.root.id));
         assert!(ids.contains(&fixture.parent_tag.id));
         assert!(ids.contains(&fixture.child_tag.id));

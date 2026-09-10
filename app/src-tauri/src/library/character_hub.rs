@@ -60,6 +60,13 @@ impl Library {
     }
     pub fn save_character_series(&self, request: Series) -> Result<Series> {
         let connection = self.connection()?;
+        if super::classification::classification_in_role_scope(
+            &connection,
+            &request.classification_id,
+            "originals",
+        )? {
+            return Err(Error::Invalid("오리지널 보관 영역은 캐릭터 시리즈로 등록할 수 없습니다."));
+        }
         if let Some(id) = &request.hero_asset_id {
             validate_art(&connection, id)?;
         }
@@ -202,6 +209,37 @@ pub(super) fn candidate_image_mode(
 pub(super) fn candidate_media_mode(
     connection: &Connection, series: &str, id: &str, automatic: bool, allow_video: bool,
 ) -> Result<(String, String)> {
+    candidate_media_mode_with_exclusions(connection, series, id, automatic, allow_video, false)
+}
+
+pub(super) fn candidate_media_mode_including_excluded(
+    connection: &Connection, series: &str, id: &str, automatic: bool, allow_video: bool,
+) -> Result<(String, String)> {
+    candidate_media_mode_with_exclusions(connection, series, id, automatic, allow_video, true)
+}
+
+pub(super) fn series_asset_excluded(connection: &Connection, series: &str, id: &str) -> Result<bool> {
+    Ok(connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM character_series_asset_exclusions WHERE series_id=?1 AND asset_id=?2)",
+        params![series, id],
+        |row| row.get(0),
+    )?)
+}
+
+fn candidate_media_mode_with_exclusions(
+    connection: &Connection,
+    series: &str,
+    id: &str,
+    automatic: bool,
+    allow_video: bool,
+    include_excluded: bool,
+) -> Result<(String, String)> {
+    if super::classification::classification_in_role_scope(connection, series, "originals")? {
+        return Err(Error::Invalid("오리지널 보관 영역에서는 캐릭터 분류를 사용할 수 없습니다."));
+    }
+    if !include_excluded && series_asset_excluded(connection, series, id)? {
+        return Err(Error::Invalid("캐릭터 분류에서 제외된 자산입니다. 먼저 제외를 해제해 주세요."));
+    }
     connection.query_row("WITH RECURSIVE scope(id) AS (SELECT id FROM classification_entries WHERE id=?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id),
       ancestors(id,parent_id) AS (SELECT id,parent_id FROM classification_entries WHERE id=?1 UNION ALL
       SELECT c.id,c.parent_id FROM classification_entries c JOIN ancestors p ON c.id=p.parent_id)
@@ -419,6 +457,9 @@ mod tests {
 // The same eligibility rule protects thumbnail/reference saves if a concurrent decision changes ownership.
 pub(super) fn validate_character_selection(connection: &Connection, series: &str, target: Option<&str>, asset: &str) -> Result<()> {
     super::characters::scoped_image(connection,series,asset)?;
+    if series_asset_excluded(connection, series, asset)? {
+        return Err(Error::Invalid("캐릭터 분류에서 제외된 이미지는 선택할 수 없습니다."));
+    }
     let excluded: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM character_relations WHERE asset_id=?1 AND (?2 IS NULL OR target_id<>?2)) OR EXISTS(SELECT 1 FROM character_references WHERE asset_id=?1 AND (?2 IS NULL OR target_id<>?2))", params![asset,target], |r| r.get(0))?;
     if excluded { return Err(Error::Invalid("다른 캐릭터에 등록된 이미지입니다. 선택을 다시 확인해 주세요.")); }
     Ok(())

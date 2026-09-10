@@ -17,6 +17,12 @@ export function createCharacterFixture(): CharacterApi {
       const value = { ...fixtureTarget(draft.id ?? `new-${targets.length}`, draft.displayName), ...draft, id: draft.id ?? `new-${targets.length}`, revision: (old?.revision ?? 0) + 1, references: old?.references ?? [], ready: Boolean(old?.references.length === 5 && draft.enabled), fingerprint: `saved-${Date.now()}` };
       targets = [...targets.filter(t => t.id !== value.id), value]; return value;
     },
+    saveSettings: async draft => {
+      const old = targets.find(t => t.id === draft.id);
+      const references = draft.referenceIds.map((assetId, slot) => ({ slot, assetId, assetHash: assetId, status: "ready" }));
+      const value = { ...fixtureTarget(draft.id ?? `new-${targets.length}`, draft.displayName), ...draft, id: draft.id ?? `new-${targets.length}`, revision: (old?.revision ?? 0) + 1, references, ready: Boolean(references.length === 5 && draft.enabled), fingerprint: `saved-${Date.now()}` };
+      targets = [...targets.filter(t => t.id !== value.id), value]; return value;
+    },
     refs: async (targetId, revision, assetIds) => { const old = targets.find(t => t.id === targetId)!; if (old.revision !== revision) throw new Error("설정이 바뀌었습니다."); const value = { ...old, revision: revision + 1, references: assetIds.map((assetId, slot) => ({ slot, assetId, assetHash: assetId, status: "ready" })), ready: assetIds.length === 5 }; targets = targets.map(t => t.id === targetId ? value : t); return value; },
     learnReferences: async (targetId, revision, assetIds) => { const old = targets.find(t => t.id === targetId)!; if (old.revision !== revision) throw new Error("설정이 바뀌었습니다."); const known = new Set(old.learnedReferences?.flatMap(r => r.assetId ? [r.assetId] : []) ?? []); const learned = [...(old.learnedReferences ?? [])]; for (const assetId of assetIds) if (!known.has(assetId)) learned.push({ slot: learned.length, assetId, assetHash: `hash-${assetId}`, status: "ready" }); const value = { ...old, learnedReferences: learned }; targets = targets.map(t => t.id === targetId ? value : t); return value; },
     runs: async () => [...scans],

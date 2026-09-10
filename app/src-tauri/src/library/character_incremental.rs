@@ -327,7 +327,7 @@ impl Library {
             let context = self.character_autotag_context(&c, job, runtime)?;
             let mut paths = BTreeMap::new();
             for target in &context.targets {
-                for reference in target.references.iter().chain(&target.learned_references) {
+                for reference in target.references.iter().chain(target.usable_learned_references()) {
                     let id = reference.asset_id.as_ref().ok_or(Error::Stale)?;
                     let (hash, path) = super::characters::scoped_image(
                         &c,
@@ -366,9 +366,18 @@ impl Library {
         let (prepared, references_reused) = self.prepare_incremental_references(
             prepared_key(&context, &reference_paths, runtime)?, &reference_paths, &stop)?;
         let reference_prepare = reference_started.elapsed();
-        let is_reference = reference_paths
-            .values()
-            .any(|(hash, _)| hash == &job.content_hash);
+        let reference_targets = context
+            .targets
+            .iter()
+            .filter(|target| {
+                target
+                    .references
+                    .iter()
+                    .chain(target.usable_learned_references())
+                    .any(|reference| reference.asset_hash == job.content_hash)
+            })
+            .map(|target| target.id.clone())
+            .collect::<BTreeSet<_>>();
         let mut worker_prepare = Duration::ZERO;
         let mut cached_compare = Duration::ZERO;
         let predictions=self.character_worker_pool.with(config,&cache,stop.clone(),false,|worker,worker_ready| {
@@ -383,7 +392,7 @@ impl Library {
                     e.active_target_name = Some(target.display_name.clone());
                     e.active_target_index = index + 1;
                 }
-                let refs=target.references.iter().chain(&target.learned_references).map(|r|{
+                let refs=target.references.iter().chain(target.usable_learned_references()).map(|r|{
                     let id=r.asset_id.as_ref().ok_or(Error::Stale)?;
                     Ok(json!({"assetId":id,"hash":r.asset_hash,"path":prepared.sources.get(id).ok_or(Error::Stale)?.path()}))
                 }).collect::<Result<Vec<_>>>()?;
@@ -427,7 +436,7 @@ impl Library {
         if current != decision_sequence {
             return Err(Error::Stale);
         }
-        self.finalize_incremental(&tx, job, &context, &predictions, is_reference)?;
+        self.finalize_incremental(&tx, job, &context, &predictions, &reference_targets)?;
         query.check_identity(self)?;
         self.check_incremental_references(&prepared)?;
         if stop.load(Ordering::Acquire) {
@@ -481,7 +490,7 @@ impl Library {
         job: &Job,
         context: &Context,
         predictions: &[Prediction],
-        is_reference: bool,
+        reference_targets: &BTreeSet<String>,
     ) -> Result<()> {
         let decisions=tx.prepare("SELECT target_id,decision,origin FROM character_decisions WHERE source_asset_id=?1 ORDER BY sequence DESC")?
             .query_map([&job.asset_id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
@@ -506,12 +515,13 @@ impl Library {
             .and_then(|e| e["queryBoxes"].as_array())
             .cloned()
             .unwrap_or_default();
-        let known = latest
-            .values()
-            .any(|decision| decision.as_str() == "accepted");
+        let known = !reference_targets.is_empty()
+            || latest
+                .values()
+                .any(|decision| decision.as_str() == "accepted");
         for p in &candidates {
             let evidence = p.result.evidence.as_ref();
-            if is_reference || !automatic_evidence(evidence) {
+            if reference_targets.contains(&p.target_id) || !automatic_evidence(evidence) {
                 continue;
             }
             let Some(regions) = evidence_regions(evidence, 3) else {
@@ -555,8 +565,7 @@ impl Library {
             .filter(|b| box_array(b).is_none_or(|r| !covered.iter().any(|c| same_person(&r, c))))
             .cloned()
             .collect::<Vec<_>>();
-        let resolved = is_reference
-            || (known && boxes.len() == 1)
+        let resolved = (known && boxes.len() == 1)
             || (!boxes.is_empty() && unresolved.is_empty());
         let review = if resolved {
             ReviewState::Resolved
@@ -580,7 +589,7 @@ impl Library {
                 .find(|t| t.id == p.target_id)
                 .ok_or(Error::Stale)?;
             let mut evidence = p.result.evidence.clone().ok_or(Error::Stale)?;
-            evidence["learnedReferences"] = json!(target.learned_references);
+            evidence["learnedReferences"] = json!(target.usable_learned_references().collect::<Vec<_>>());
             evidence["automaticScope"] = json!(true);
             let snapshot = json!({"scanId":evidence_id,"runtimeFingerprint":context.runtime,"prediction":evidence,"references":target.references});
             tx.execute("INSERT INTO character_decisions(target_id,asset_id,source_asset_id,asset_hash,decision,target_fingerprint,baseline_fingerprint,reference_snapshot,origin,created_at)
@@ -649,7 +658,7 @@ fn active_scope_name(
 
 fn prepared_key(context:&Context,reference_paths:&BTreeMap<String,(String,String)>,runtime:&str)->Result<PreparedKey>{
     let targets=context.targets.iter().map(|target|{
-        let references=target.references.iter().chain(&target.learned_references).map(|reference|{
+        let references=target.references.iter().chain(target.usable_learned_references()).map(|reference|{
             let id=reference.asset_id.as_ref().ok_or(Error::Stale)?;
             let (hash,path)=reference_paths.get(id).ok_or(Error::Stale)?;
             if hash!=&reference.asset_hash{return Err(Error::Stale);}

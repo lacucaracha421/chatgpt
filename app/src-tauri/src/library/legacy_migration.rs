@@ -630,7 +630,11 @@ mod tests {
             ),
             (0, 1, 0)
         );
-        assert_eq!(library.list_classifications().unwrap().len(), 1);
+        let classifications = library.list_classifications().unwrap();
+        assert_eq!(
+            classifications.iter().filter(|entry| entry.name == "게임").count(),
+            1
+        );
         let assets = library
             .list_assets(AssetQuery {
                 classification_id: None,

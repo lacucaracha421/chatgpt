@@ -65,6 +65,11 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const scope = `${series.classificationId}:${picking ? picking.kind === "hero" ? "pick-hero" : `pick-${editor?.target?.id ?? "new"}-${pickFromSeries}` : targetId ? `character-${targetId}` : currentGroup ? `group-${currentGroup.id}` : excludedOnly ? "excluded" : "series"}:${all}`;
   const ids = page.items.map(a => a.id);
   const selectedIds = [...selection.ids];
+  const currentReferenceIds = new Set(current ? [
+    ...current.references.flatMap(reference => reference.assetId ? [reference.assetId] : []),
+    ...(current.learnedReferences?.flatMap(reference => reference.assetId ? [reference.assetId] : []) ?? []),
+  ] : []);
+  const selectedReferenceCount = selectedIds.filter(id => currentReferenceIds.has(id)).length;
   function refresh() { setReload(v => v + 1); onChanged(); }
   async function load(after: string | null = null) {
     if (after && pending.current) return;
@@ -157,12 +162,10 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     saving.current = true; setBusy(true); setEditorError(null);
     try {
       const { draft, target } = editor;
-      let saved = await api.save({ id: target?.id ?? null, expectedRevision: target?.revision ?? null,
+      await api.saveSettings({ id: target?.id ?? null, expectedRevision: target?.revision ?? null,
         seriesClassificationId: series.classificationId, linkedClassificationId: target?.linkedClassificationId ?? null,
-        displayName: draft.name.trim(), description: draft.description, thumbnailAssetId: draft.thumbnail, enabled: draft.enabled }, true);
-      setEditor({ target: saved, draft }); // Keep the new identity if reference saving needs a retry.
-      if (JSON.stringify(saved.references.flatMap(r => r.assetId ? [r.assetId] : [])) !== JSON.stringify(draft.references))
-        saved = await api.refs(saved.id, saved.revision, draft.references, true);
+        displayName: draft.name.trim(), description: draft.description, thumbnailAssetId: draft.thumbnail, enabled: draft.enabled,
+        referenceIds: draft.references }, true);
       setEditor(null); refresh();
     } catch (e) { setEditorError(commandErrorMessage(e, "캐릭터 설정을 저장하지 못했습니다.")); onChanged(); }
     finally { saving.current = false; setBusy(false); }
@@ -205,10 +208,10 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
         {!picking && current && (selectedIds.length > 0 ? <>
           <small className="series-selection-count">{selectedIds.length.toLocaleString()}장 선택</small>
           <Button size="icon" variant="ghost" aria-label="선택 해제" data-tooltip="선택 해제" onClick={() => setSelection(emptySelection())}><XMarkIcon aria-hidden="true" /></Button>
-          <Button size="sm" variant="ghost" disabled={busy || selectedIds.length > 200} title="한 번에 최대 200장" onClick={() => void action(async () => {
+          {selectedReferenceCount > 0 ? <Button size="sm" variant="ghost" disabled={busy} title="선택에 참조 이미지가 포함되어 있습니다. 설정에서 먼저 해제·교체해 주세요." onClick={() => openEditor(current)}>참조 설정 · {selectedReferenceCount.toLocaleString()}</Button> : <Button size="sm" variant="ghost" disabled={busy || selectedIds.length > 200} title="한 번에 최대 200장" onClick={() => void action(async () => {
             await api.decide({ targetId: current.id, expectedFingerprint: current.fingerprint, assetIds: selectedIds, decision: "rejected", baselineFingerprint: null, scanId: null });
             setSelection(emptySelection());
-          })}>캐릭터에서 제외</Button>
+          })}>캐릭터에서 제외</Button>}
         </> : <>
           {!current.manualOnly && <Button className="series-review-button" size="sm" variant="ghost" aria-label={reviewPending ? "검토 · 검토 대기 있음" : reviewPending === null ? "검토 · 대기 상태 확인 필요" : "검토"} onClick={() => setReview(true)}>검토<span className="series-review-badge" data-pending={reviewPending === true} aria-hidden="true">!</span></Button>}
           <Button size="icon" variant="ghost" aria-label="새로고침" data-tooltip="새로고침" onClick={refresh}><ArrowPathIcon aria-hidden="true" /></Button>
@@ -242,15 +245,15 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
         </> : <>
           <fieldset className="series-assignment" disabled={busy}>
             <legend>캐릭터 지정 · 복수 선택</legend>
-            <div className="series-assignment__options">{members.filter(t => t.enabled).map(target => <label key={target.id}>
+            <div className="series-assignment__options">{members.map(target => <label key={target.id}>
               <input type="checkbox" checked={assignTo.includes(target.id)} onChange={event => { const checked = event.target.checked; setAssignTo(old => checked ? [...old, target.id] : old.filter(id => id !== target.id)); }} />
-              {target.displayName}
+              {target.displayName}{!target.enabled && !target.manualOnly ? " · 자동 분석 꺼짐" : ""}
             </label>)}</div>
           </fieldset>
           <Button size="sm" disabled={busy || !assignTo.length || selectedIds.length * assignTo.length > 200} onClick={() => void action(async () => {
             const available = await api.targets();
             const chosen = assignTo.map(id => {
-              const target = available.find(t => t.id === id && t.enabled && t.seriesClassificationId === series.classificationId);
+              const target = available.find(t => t.id === id && t.seriesClassificationId === series.classificationId);
               if (!target) throw new Error("캐릭터를 다시 선택해 주세요.");
               return target;
             });
@@ -275,7 +278,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
               <button className="series-character__open" aria-label={`${target.displayName} 열기`} onClick={() => onNavigate({ kind: "classification", classificationId: series.classificationId, characterId: target.id })}>
                 {(target.thumbnailAssetId ?? target.references.find(r => r.status === "ready")?.assetId) ? <img loading="lazy" className={privacyMode ? "character-private" : ""} src={thumbnailUrl((target.thumbnailAssetId ?? target.references.find(r => r.status === "ready")!.assetId)!)} alt="" /> : <span className="series-character__placeholder"><PhotoIcon aria-hidden="true" />대표 이미지</span>}
                 <strong><span className="series-character__name">{target.displayName}</span>{target.ready && <CheckIcon className="series-character__ready" aria-label="기준 이미지 준비 완료" data-tooltip="기준 이미지 준비 완료" />}</strong>
-                {target.manualOnly ? <small>수동 관리 · 기준 {target.references.filter(r => r.status === "ready").length}/5</small> : !target.ready && <small>기준 {target.references.filter(r => r.status === "ready").length}/5 · {target.enabled ? "준비 필요" : "비활성"}</small>}
+                {target.manualOnly ? <small>수동 관리</small> : target.learnedReferences?.some(reference => reference.status !== "ready") ? <small>추가 참조 확인 필요</small> : !target.ready && <small>기준 {target.references.filter(r => r.status === "ready").length}/5 · {target.enabled ? "준비 필요" : "자동 분석 꺼짐"}</small>}
               </button>
               <Button className="series-character__info" size="icon" variant="ghost" aria-label={`${target.displayName} 정보`} data-tooltip="캐릭터 정보" onClick={() => openEditor(target)}><InformationCircleIcon aria-hidden="true" /></Button>
             </article>)}</>}</CharacterGroups>
