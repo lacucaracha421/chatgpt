@@ -42,6 +42,25 @@ pub(super) struct Prediction {
     pub result: super::character_scan::ScanResult,
 }
 
+/// One predicate for both the review error filter and its retry action. The series
+/// subtree covers registered folders; the root branch covers images still filed
+/// under the originals root that a failed job marked as an error.
+pub(super) const FAILED_SCOPE_CTES: &str = r#"WITH RECURSIVE scope(id) AS (
+    SELECT id FROM classification_entries WHERE id=?1
+    UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id
+), ancestors(id,parent_id) AS (
+    SELECT id,parent_id FROM classification_entries WHERE id=?1
+    UNION ALL SELECT c.id,c.parent_id FROM classification_entries c JOIN ancestors p ON c.id=p.parent_id
+)"#;
+
+pub(super) const FAILED_SCOPE_PREDICATE: &str = r#"EXISTS(
+    SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=j.asset_id AND (
+        ac.classification_id IN (SELECT id FROM scope)
+        OR (ac.classification_id IN (SELECT id FROM ancestors WHERE parent_id IS NULL)
+            AND EXISTS(SELECT 1 FROM character_autotag_jobs failed WHERE failed.asset_id=j.asset_id AND failed.state='failed'))
+    )
+)"#;
+
 pub(super) fn evidence_row(
     connection: &Connection,
     evidence_id: &str,
@@ -429,23 +448,44 @@ impl Library {
         Ok(queued)
     }
 
+    /// Retries exactly what the review error filter lists: series-scope assets plus
+    /// root-category assets whose job failed. A narrower scope would leave visible
+    /// failures without a reachable retry route.
     pub fn retry_failed_character_assets(&self, series_id: String) -> Result<usize> {
         let mut connection = self.connection()?;
         let tx = connection.transaction()?;
-        let ids = tx.prepare("WITH RECURSIVE scope(id) AS (
-            SELECT classification_id FROM character_series WHERE classification_id=?1
-            UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id)
-            SELECT j.asset_id FROM character_autotag_jobs j JOIN assets a ON a.id=j.asset_id
-            WHERE j.state='failed' AND a.status='normal'
-            AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=j.asset_id AND ac.classification_id IN (SELECT id FROM scope))
-            ORDER BY j.asset_id LIMIT 200")?
-            .query_map([series_id], |r| r.get::<_, String>(0))?
+        let ids = tx.prepare(&format!(
+            "{FAILED_SCOPE_CTES}
+             SELECT j.asset_id FROM character_autotag_jobs j
+             JOIN assets a ON a.id=j.asset_id AND a.status='normal' AND a.media_kind='image'
+             WHERE j.state='failed' AND {FAILED_SCOPE_PREDICATE}
+             ORDER BY j.asset_id LIMIT 200"
+        ))?
+            .query_map([&series_id], |r| r.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         for id in &ids {
             enqueue(&tx, id, Cause::Reconsideration)?;
         }
         tx.commit()?;
         Ok(ids.len())
+    }
+
+    /// Durable, metadata-only failure count for the same predicate retry acts on.
+    /// The review panel polls this so failures survive a restart instead of living
+    /// only in the in-memory scan status.
+    pub fn failed_character_asset_count(&self, series_id: &str) -> Result<usize> {
+        let connection = self.connection()?;
+        let count: i64 = connection.query_row(
+            &format!(
+                "{FAILED_SCOPE_CTES}
+                 SELECT COUNT(*) FROM character_autotag_jobs j
+                 JOIN assets a ON a.id=j.asset_id AND a.status='normal' AND a.media_kind='image'
+                 WHERE j.state='failed' AND {FAILED_SCOPE_PREDICATE}"
+            ),
+            [series_id],
+            |r| r.get(0),
+        )?;
+        Ok(count as usize)
     }
 
     pub fn character_autotag_job(&self, asset_id: &str) -> Result<Option<Job>> {

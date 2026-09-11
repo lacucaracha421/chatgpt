@@ -646,3 +646,65 @@ fn failed_jobs_can_be_reconsidered_and_explicitly_retried() {
         0
     );
 }
+
+#[test]
+fn failed_count_and_retry_cover_the_same_assets_the_error_filter_lists() {
+    let f = Fixture::new();
+    let _target = f.ready("A");
+    // asset-5 sits in the series subtree; asset-6 is filed at the series' own root
+    // category, which the review error filter also lists. A narrower retry scope
+    // would show failures with no reachable retry route.
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE asset_classifications SET classification_id=(SELECT parent_id FROM classification_entries WHERE id=?1)
+             WHERE asset_id='asset-6'",
+            [&f.series],
+        )
+        .unwrap();
+    queue(&f, "asset-5");
+    queue(&f, "asset-6");
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE character_autotag_jobs SET state='failed',review_state='failed',attempts=3,claim_id=NULL
+             WHERE asset_id IN ('asset-5','asset-6')",
+            [],
+        )
+        .unwrap();
+
+    assert_eq!(f.library.failed_character_asset_count(&f.series).unwrap(), 2);
+    assert_eq!(
+        f.library
+            .retry_failed_character_assets(f.series.clone())
+            .unwrap(),
+        2
+    );
+    assert_eq!(f.library.failed_character_asset_count(&f.series).unwrap(), 0);
+}
+
+#[test]
+fn failed_assets_outside_the_series_scope_are_not_counted_or_retried() {
+    let f = Fixture::new();
+    let _target = f.ready("A");
+    // asset-6 lives in an unrelated root, so this series' error filter never lists it.
+    queue(&f, "asset-6");
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE character_autotag_jobs SET state='failed',review_state='failed',attempts=3,claim_id=NULL WHERE asset_id='asset-6'",
+            [],
+        )
+        .unwrap();
+
+    assert_eq!(f.library.failed_character_asset_count(&f.series).unwrap(), 0);
+    assert_eq!(
+        f.library
+            .retry_failed_character_assets(f.series.clone())
+            .unwrap(),
+        0
+    );
+}

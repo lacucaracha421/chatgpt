@@ -23,6 +23,7 @@ export function CharacterLab({ classifications, initialSeriesId, targetId, refre
   const [filter, setFilter] = useState<ReviewFilter>("recommended");
   const [page, setPage] = useState<ReviewPage>({ rows: [], nextCursor: null });
   const [runs, setRuns] = useState<ScanStatus[]>([]);
+  const [failedCount, setFailedCount] = useState(0);
   const [runtimeReady, setRuntimeReady] = useState(false);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -129,6 +130,14 @@ export function CharacterLab({ classifications, initialSeriesId, targetId, refre
     setUpdatesAvailable(false);
     if (seriesId) void load(null, changedScope ? 0 : pageRef.current.rows.length);
   }, [scopeKey, refresh, api]);
+  useEffect(() => {
+    if (!seriesId || !api.failedCount) { setFailedCount(0); return; }
+    let current = true;
+    void api.failedCount(seriesId)
+      .then(count => { if (current && active.current) setFailedCount(count); })
+      .catch(() => { if (current && active.current) setFailedCount(0); });
+    return () => { current = false; };
+  }, [seriesId, refresh, api]);
   useEffect(() => {
     if (backgroundVersion.current === refreshVersion) return;
     backgroundVersion.current = refreshVersion;
@@ -264,17 +273,16 @@ export function CharacterLab({ classifications, initialSeriesId, targetId, refre
             <Button size="sm" variant="ghost" aria-pressed={filter === "confirmed" && !history} onClick={() => { setFilter("confirmed"); setHistory(null); }}>확정</Button>
           </div>
           <Select label="추가 필터" value={filters.some(([v]) => v === filter) ? filter : ""} onChange={e => { if (e.target.value) { setFilter(e.target.value as ReviewFilter); setHistory(null); } }}><option value="">필터</option>{filters.map(([value,label]) => <option key={value} value={value}>{label}</option>)}</Select>
-          {filter === "error" && api.retryFailed && <Button size="sm" disabled={busy} onClick={() => void action(async () => {
-            const count = await api.retryFailed!(seriesId);
-            setNotice(count ? `${count}장의 재시도를 요청했습니다. 일시 정지 중이면 재개해 주세요.` : "이 시리즈에 재시도할 자동 분류 실패 항목이 없습니다.");
-            setRefresh(v => v + 1);
-          })}>시리즈 실패 항목 재시도 (최대 200장)</Button>}
           <Button size="sm" variant="ghost" disabled={!target} onClick={() => target && void action(async () => { setHistory(await api.history(target.id,null)); })}>이력</Button>
           <div className="character-review-toolbar__actions"><Button size="icon" variant="ghost" aria-label={updatesAvailable ? "새 결과 확인" : "새로고침"} data-tooltip={updatesAvailable ? "새 결과 확인" : "새로고침"} disabled={busy || loading} onClick={() => setRefresh(v => v + 1)}><ArrowPathIcon aria-hidden="true" /></Button>{updatesAvailable && <small role="status">새 결과 있음</small>}<Button size="sm" disabled={!target?.ready || !runtimeReady || busy || Boolean(scanning)} onClick={() => void scan()}>분류 시작</Button>
           {(scanning) && <Button size="sm" disabled={busy} onClick={cancel}>취소</Button>}{!embedded && <Button size="icon" variant="ghost" aria-label="검토 닫기" data-tooltip="검토 닫기" onClick={close}><XMarkIcon aria-hidden="true" /></Button>}</div>
         </div>
         {scanning && <div className="character-progress" role="status"><span>{scanning.targetId === targetId ? `${scanning.completed} / ${scanning.total}장 비교${scanning.reused ? ` · 이전 결과 ${scanning.reused}장 유지` : ""}` : "자동 판정을 위한 후보 확인 중"}</span><progress max={Math.max(1, scanning.total)} value={scanning.completed} /></div>}
-        {!!runs.find(r => r.targetId === targetId)?.errors && <Button size="sm" variant="ghost" className="character-review-errors" onClick={() => { setFilter("error"); setHistory(null); }}>분석 오류 {runs.find(r => r.targetId === targetId)!.errors}장 · 확인</Button>}
+        {failedCount > 0 && <div className="character-review-errors" role="status"><span>분석 실패 {failedCount}장</span>{api.retryFailed && <Button size="sm" variant="ghost" disabled={busy} onClick={() => void action(async () => {
+          const count = await api.retryFailed!(seriesId);
+          setNotice(count ? `${count}장을 다시 분석하도록 예약했습니다. 일시 정지 중이면 재개해 주세요.` : "이 시리즈에 다시 분석할 실패 항목이 없습니다.");
+          setRefresh(v => v + 1);
+        })}>다시 분석</Button>}<Button size="sm" variant="ghost" onClick={() => { setFilter("error"); setHistory(null); }}>목록 보기</Button></div>}
         {error && <p className="character-message" role="alert">{error}</p>}{notice && <p className="character-message" role="status">{notice}</p>}
         {history ? <div className="character-history">
           <h3>{target?.displayName} · 판단 이력</h3>

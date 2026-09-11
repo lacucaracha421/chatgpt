@@ -257,6 +257,7 @@ pub fn run() {
             commands::characters::character_scan_status,
             commands::characters::character_autotag_job,
             commands::characters::retry_failed_character_assets,
+            commands::characters::failed_character_asset_count,
             commands::characters::character_incremental_status,
             commands::characters::pause_character_incremental,
             commands::characters::cancel_character_scan,

@@ -733,6 +733,20 @@ pub async fn character_series_excluded_assets(
 }
 
 #[tauri::command]
+pub async fn failed_character_asset_count(
+    series_id: String,
+    state: State<'_, AppState>,
+) -> Result<usize, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.failed_character_asset_count(&series_id)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}
+
+#[tauri::command]
 pub async fn retry_failed_character_assets(
     series_id: String,
     app: tauri::AppHandle,

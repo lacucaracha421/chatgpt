@@ -189,4 +189,25 @@ it("keeps the review panel on the thumbnail without an original-view control", a
   expect(within(panel).queryByRole("button", { name: "미리보기" })).not.toBeInTheDocument();
 });
 
+it("surfaces durable analysis failures without opening the error filter", async () => {
+  const api = createCharacterFixture();
+  api.failedCount = vi.fn().mockResolvedValue(4);
+  const retry = vi.fn().mockResolvedValue(4);
+  api.retryFailed = retry;
+  mountEmbedded(api); const user = userEvent.setup();
 
+  const row = await screen.findByText("분석 실패 4장");
+  expect(row).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "다시 분석" }));
+  await waitFor(() => expect(retry).toHaveBeenCalledWith("series"));
+  expect(await screen.findByText(/4장을 다시 분석하도록 예약했습니다/)).toBeVisible();
+
+  await user.click(screen.getByRole("button", { name: "목록 보기" }));
+  expect(screen.getByRole("combobox", { name: "추가 필터" })).toHaveValue("error");
+});
+
+it("hides the failure row when nothing failed", async () => {
+  mountEmbedded();
+  await screen.findByRole("option", { name: "이미지 5.webp" });
+  expect(screen.queryByText(/분석 실패/)).not.toBeInTheDocument();
+});

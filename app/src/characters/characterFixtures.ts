@@ -56,6 +56,7 @@ export function createCharacterFixture(): CharacterApi {
     decideBatch: async requests => { let total = 0; for (const request of requests) total += await api.decide(request); return total; },
     history: async (_id, before) => history.filter(d => before === null || d.sequence < before),
     runtime: async () => true,
+    failedCount: async () => 0,
     setup: async () => true,
   };
   return api;

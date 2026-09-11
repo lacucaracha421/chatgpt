@@ -31,6 +31,7 @@ export interface CharacterApi {
   decideBatch(requests: DecisionRequest[]): Promise<number>;
   history(targetId: string, before: number | null): Promise<Decision[]>;
   retryFailed?(seriesId: string): Promise<number>;
+  failedCount?(seriesId: string): Promise<number>;
   runtime(): Promise<boolean>;
   setup(): Promise<boolean>;
 }
@@ -50,6 +51,7 @@ export const characterApi: CharacterApi = {
   decideBatch: requests => invoke("record_character_decision_batch", { requests }),
   history: (targetId, before) => invoke("list_character_decisions", { targetId, before, limit: 50 }),
   retryFailed: seriesId => invoke("retry_failed_character_assets", { seriesId }),
+  failedCount: seriesId => invoke("failed_character_asset_count", { seriesId }),
   runtime: () => invoke("character_runtime_status"),
   setup: () => invoke("setup_character_runtime"),
 };
