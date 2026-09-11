@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { InformationCircleIcon, PhotoIcon, UserGroupIcon } from "@heroicons/react/24/outline";
+import { PhotoIcon, UserGroupIcon } from "@heroicons/react/24/outline";
+import { PencilIcon } from "../shared/ui/ArchiveIcons";
 import { Dialog } from "../shared/ui/Dialog";
 import { Button } from "../shared/ui/Button";
 import { TextField } from "../shared/ui/TextField";
@@ -101,6 +102,6 @@ function CharacterGroupCard({ group, members, privacyMode, onOpen, onEdit }: { g
       <strong><UserGroupIcon className="character-group-card__icon" aria-hidden="true" /><span className="series-character__name">{group.name}</span></strong>
       <small>{group.targetIds.length.toLocaleString()}명{groupMembers.length ? ` · ${groupMembers.slice(0, 3).map(member => member.displayName).join(" · ")}${groupMembers.length > 3 ? "…" : ""}` : ""}</small>
     </button>
-    <Button className="series-character__info" size="icon" variant="ghost" aria-label={`${group.name} 그룹 편집`} data-tooltip="그룹 편집" onClick={onEdit}><InformationCircleIcon aria-hidden="true" /></Button>
+    <Button className="series-character__info" size="icon" variant="ghost" aria-label={`${group.name} 그룹 편집`} data-tooltip="그룹 편집" onClick={onEdit}><PencilIcon aria-hidden="true" /></Button>
   </article>;
 }

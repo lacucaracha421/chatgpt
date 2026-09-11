@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ComponentProps } from "react";
-import { ArrowPathIcon, BoltIcon, BoltSlashIcon, ChevronRightIcon, InformationCircleIcon, EllipsisHorizontalIcon, PhotoIcon, PlusIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { ArrowPathIcon, BoltIcon, BoltSlashIcon, ChevronRightIcon, PhotoIcon, PlusIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { EllipsisHorizontalIcon, PencilIcon } from "../shared/ui/ArchiveIcons";
 import type { AlbumEntry, AssetSummary, AssetView, ClassificationEntry } from "../library/types";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -323,7 +324,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
                 <strong><span className="series-character__name">{target.displayName}</span></strong>
                 {target.manualOnly ? <small className="series-character__status">수동 관리</small> : target.learnedReferences?.some(reference => reference.status !== "ready") ? <small className="series-character__status series-character__status--attention">추가 참조 확인 필요</small> : !target.ready && <small className="series-character__status">기준 {target.references.filter(r => r.status === "ready").length}/5 · {target.enabled ? "준비 필요" : "자동 분석 꺼짐"}</small>}
               </button>
-              <Button className="series-character__info" size="icon" variant="ghost" aria-label={`${target.displayName} 정보`} data-tooltip="캐릭터 정보" onClick={() => openEditor(target)}><InformationCircleIcon aria-hidden="true" /></Button>
+              <Button className="series-character__info" size="icon" variant="ghost" aria-label={`${target.displayName} 편집`} data-tooltip="캐릭터 편집" onClick={() => openEditor(target)}><PencilIcon aria-hidden="true" /></Button>
             </article>)}</>}</CharacterGroups>
         </div>}
         {!picking && current?.description && <p className="series-description">{current.description}</p>}

@@ -11,7 +11,9 @@
 .series-description { margin: var(--space-3) 0; color: var(--color-muted); white-space: pre-wrap; overflow-wrap: anywhere; }
 .series-characters { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 160px), 180px)); justify-content: start; gap: var(--space-3); }
 .series-hero + .character-group-heading { margin-top: var(--space-5); }
-.series-character { position: relative; min-width: 0; }
+/* Cards keep their content height so the action stays on the name row even when a
+   neighbour in the same grid row carries a taller status line. */
+.series-character { position: relative; align-self: start; min-width: 0; }
 .series-character__open { width: 100%; display: flex; flex-direction: column; gap: var(--space-2); text-align: left; background: transparent; color: var(--color-text); border: 0; padding: 0; cursor: pointer; }
 .series-character__open img, .series-character__placeholder { box-sizing: border-box; display: block; width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border: 1px solid transparent; border-radius: var(--radius-tile); transition: border-color var(--motion-fast) var(--ease-standard), opacity var(--motion-fast) var(--ease-standard); }
 .series-character__placeholder { display: flex; align-items: center; justify-content: center; gap: var(--space-2); background: var(--color-surface); color: var(--color-muted); font-size: var(--text-sm); }
@@ -19,9 +21,15 @@
 .series-character__open strong { display: flex; align-items: center; gap: var(--space-1); max-width: calc(100% - 32px); font-size: var(--text-md); font-weight: 500; line-height: var(--line-ui); }
 .series-character__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .series-character__open small, .series-empty { color: var(--color-muted); font-size: var(--text-sm); line-height: var(--line-ui); }
-.series-character__open > small { min-height: var(--line-ui); padding-right: 32px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.series-character__open > small { min-height: var(--line-ui); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .series-character__status--attention { color: var(--color-text) !important; }
-.series-character__info { position: absolute; right: 0; bottom: 0; }
+/* The edit action rides the name row, so its position never drifts with the optional status row. */
+.series-character__info { position: absolute; right: 0; bottom: calc((var(--line-ui) - var(--control-height-icon)) / 2); }
+.series-character:has(> .series-character__open > small) > .series-character__info { bottom: calc((var(--line-ui) - var(--control-height-icon)) / 2 + var(--line-ui) + var(--space-2)); }
+/* Quiet until the card is pointed at or keyboard-focused; the action keeps its accessible name. */
+.series-character__info:not(:focus-visible) { opacity: 0; }
+.series-character:hover > .series-character__info, .series-character:focus-within > .series-character__info { opacity: 1; }
+.series-character > .series-character__info { transition: opacity var(--motion-fast) var(--ease-standard); }
 .series-character__open:hover img, .series-character__open:hover .series-character__placeholder { border-color: var(--color-border-strong); }
 .series-character__open:active img, .series-character__open:active .series-character__placeholder { border-color: var(--color-accent); opacity: .88; }
 .series-character__open:focus-visible { outline: none; }

@@ -102,7 +102,7 @@ it("shows a mosaic group card and opens the group asset union",async()=>{
 
 it("selects in the existing gallery and preserves the editor draft",async()=>{
   const {api,browse,navigate}=await mount(); const saveSettings=vi.spyOn(api,"saveSettings"); const user=userEvent.setup();
-  await user.click(await screen.findByRole("button",{name:"히나 정보"}));
+  await user.click(await screen.findByRole("button",{name:"히나 편집"}));
   let panel=await screen.findByRole("dialog",{name:"히나 · 캐릭터 정보"});
   await user.type(within(panel).getByLabelText("설명"),"기준 설명");
   await user.click(within(panel).getByText("자동 분류"));

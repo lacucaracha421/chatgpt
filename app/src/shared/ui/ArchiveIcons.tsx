@@ -11,6 +11,7 @@ export const archivePaths = {
   trash: "M4 6h16M8 3h8v3M6 6v15h12V6M10 10v7M14 10v7",
   settings: "M3 6h18M3 12h18M3 18h18M7 4h3v4H7zM15 10h3v4h-3zM7 16h3v4H7z",
   more: "M3 10h4v4H3zM10 10h4v4h-4zM17 10h4v4h-4z",
+  edit: "M4 20h4L20 8l-4-4L4 16zM13 7l4 4",
   search: "M4 3h10l3 3v8l-3 3H6l-3-3V6zM16 16l6 6",
   plus: "M12 4v16M4 12h16",
   rocket: "M8 7l8-4h5v5l-4 8-5 1-5-5zM8 7H4l-2 6 5-1M17 16v4l-6 2 1-5M5 17l-3 5 5-3M15 6h3v3h-3z",
@@ -37,6 +38,7 @@ export const TrashIcon = (props: Props) => <Glyph kind="trash" {...props} />;
 export const Cog6ToothIcon = (props: Props) => <Glyph kind="settings" {...props} />;
 export const AdjustmentsHorizontalIcon = Cog6ToothIcon;
 export const EllipsisHorizontalIcon = (props: Props) => <Glyph kind="more" {...props} />;
+export const PencilIcon = (props: Props) => <Glyph kind="edit" {...props} />;
 export const MagnifyingGlassIcon = (props: Props) => <Glyph kind="search" {...props} />;
 export const PlusIcon = (props: Props) => <Glyph kind="plus" {...props} />;
 export const BookmarkIcon = (props: Props) => <Glyph kind="bookmark" {...props} />;
