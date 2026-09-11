@@ -4,7 +4,8 @@ export type CharacterSeries = { classificationId: string; heroAssetId: string | 
 export type CharacterGroup = { id: string; seriesId: string; name: string; revision: number; targetIds: string[] };
 // referenceTargetId selects eligible reference/thumbnail images; an empty ID denotes an unsaved character.
 // Pair it with the same targetId to restrict candidates to that character folder.
-export type CharacterBrowseQuery = { seriesId: string; targetId: string | null; groupId?: string | null; referenceTargetId?: string; after: string | null; limit: number; all: boolean };
+export type SeriesGalleryFilter = "unclassified" | "needs_review" | "all";
+export type CharacterBrowseQuery = { seriesId: string; targetId: string | null; groupId?: string | null; referenceTargetId?: string; seriesFilter?: SeriesGalleryFilter; after: string | null; limit: number; all: boolean };
 export type CharacterBrowsePage = { items: AssetSummary[]; nextCursor: string | null; totalCount: number };
 export type CharacterSeriesSuggestion = { asset: AssetSummary; seriesId: string; seriesName: string; targetId: string; targetName: string; targetCount: number; matchedReferences: number };
 export type CharacterSeriesSuggestionPage = { items: CharacterSeriesSuggestion[]; unscannedCount: number; pendingCount: number };
@@ -20,6 +21,7 @@ export type FinalizeMixedFolderRequest = QueueMixedFolderRequest & { groupName: 
 export type FinalizeMixedFolderResult = { seriesId: string; groupId: string; movedImageCount: number; retainedAssetCount: number; folderRemoved: boolean };
 export type ManualCharacterRequest = { seriesId: string; displayName: string; assetIds: string[] };
 export type SeriesAssetExclusionRequest = { seriesId: string; assetIds: string[]; excluded: boolean };
+export type CharacterReviewCompletionRequest = { seriesId: string; assetIds: string[] };
 export const characterHubApi = {
   series: (): Promise<CharacterSeries[]> => invoke("character_series"),
   groups: async (seriesId: string): Promise<CharacterGroup[]> => (await invoke<Omit<CharacterGroup, "seriesId">[]>("character_groups", { seriesId })).map(group => ({ ...group, seriesId })),
@@ -33,9 +35,10 @@ export const characterHubApi = {
   queueMixedFolder: (request: QueueMixedFolderRequest): Promise<number> => invoke("queue_mixed_character_folder", { request }),
   finalizeMixedFolder: (request: FinalizeMixedFolderRequest): Promise<FinalizeMixedFolderResult> => invoke("finalize_mixed_character_folder", { request }),
   createManualCharacter: (request: ManualCharacterRequest): Promise<import("./api").CharacterTarget> => invoke("create_manual_character", { request }),
+  completeReview: (request: CharacterReviewCompletionRequest): Promise<number> => invoke("complete_character_review", { request }),
   setSeriesAssetExcluded: (request: SeriesAssetExclusionRequest): Promise<number> => invoke("set_character_series_asset_excluded", { request }),
   excludedAssets: (seriesId: string, after: string | null, limit = 100): Promise<CharacterBrowsePage> => invoke("character_series_excluded_assets", { seriesId, after, limit }),
 };
-export type CharacterHubApi = Pick<typeof characterHubApi, "series" | "saveSeries" | "browse" | "createManualCharacter" | "setSeriesAssetExcluded" | "excludedAssets">;
+export type CharacterHubApi = Pick<typeof characterHubApi, "series" | "saveSeries" | "browse" | "createManualCharacter" | "completeReview" | "setSeriesAssetExcluded" | "excludedAssets">;
 export type CharacterSuggestionApi = Pick<typeof characterHubApi, "suggestions" | "queueDiscovery" | "dismissSuggestion" | "acceptSuggestion">;
 export type CharacterFolderMigrationApi = Pick<typeof characterHubApi, "mixedFolderPreview" | "queueMixedFolder" | "finalizeMixedFolder">;

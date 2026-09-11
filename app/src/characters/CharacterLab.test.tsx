@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CharacterLab } from "./CharacterLab";
@@ -14,13 +14,61 @@ function mount(api = createCharacterFixture()) {
   return { api, gateway };
 }
 
+function mountEmbedded(api = createCharacterFixture(), onClose = vi.fn()) {
+  const gateway = { listAssets: vi.fn().mockResolvedValue({ items: fixtureAssets, nextCursor: null }), openLibrary: vi.fn() } as unknown as LibraryGateway;
+  render(<LibraryProvider gateway={gateway}><CharacterLab embedded classifications={fixtureClassifications} initialSeriesId="series" targetId="hina" onClose={onClose} api={api} /></LibraryProvider>);
+  return { api, gateway, onClose };
+}
+
 describe("Character review", () => {
+  it("opens the first recommendation as a preview without selecting it", async () => {
+    mountEmbedded();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    const panel = await screen.findByRole("complementary", { name: "선택 이미지 판단" });
+    expect(within(panel).getByRole("img", { name: "이미지 5.webp" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "이미지 5.webp" })).toHaveAttribute("aria-selected", "false");
+    expect(screen.queryByText("1장 선택")).not.toBeInTheDocument();
+    expect(within(panel).getByRole("button", { name: "히나로 확정" })).toBeInTheDocument();
+    expect(within(panel).getByRole("button", { name: "히나 아님" })).toBeInTheDocument();
+  });
+
+  it("defers the current preview for this session without recording a decision", async () => {
+    const api = createCharacterFixture(), decide = vi.spyOn(api, "decide");
+    mountEmbedded(api); const user = userEvent.setup();
+    const panel = await screen.findByRole("complementary", { name: "선택 이미지 판단" });
+    expect(within(panel).getByRole("img", { name: "이미지 5.webp" })).toBeInTheDocument();
+    await user.click(within(panel).getByRole("button", { name: "이번에는 건너뛰기" }));
+    expect(within(await screen.findByRole("complementary", { name: "선택 이미지 판단" })).getByRole("img", { name: "이미지 6.webp" })).toBeInTheDocument();
+    expect(decide).not.toHaveBeenCalled();
+  });
+
+  it("shows batch decisions only for two or more explicit selections", async () => {
+    mountEmbedded();
+    const first = await screen.findByRole("option", { name: "이미지 5.webp" });
+    const second = screen.getByRole("option", { name: "이미지 6.webp" });
+    fireEvent.click(first, { ctrlKey: true });
+    expect(screen.queryByText("1장 선택")).not.toBeInTheDocument();
+    fireEvent.click(second, { ctrlKey: true });
+    const batch = screen.getByRole("region", { name: "선택 이미지 일괄 판단" });
+    expect(within(batch).getByText("2장 선택")).toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "선택 이미지 판단" })).not.toBeInTheDocument();
+  });
+
+  it("explains an empty recommendation view and offers a return action", async () => {
+    const api = createCharacterFixture();
+    vi.spyOn(api, "review").mockResolvedValue({ rows: [], nextCursor: null });
+    const onClose = vi.fn(); mountEmbedded(api, onClose); const user = userEvent.setup();
+    expect(await screen.findByRole("heading", { name: "현재 확인할 추천이 없습니다" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "이미지로 돌아가기" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it("binds approval to the shown scan and does not move a folder", async () => {
     const api = createCharacterFixture(), decide = vi.spyOn(api, "decide"), targets = vi.spyOn(api, "targets"); mount(api);
     const user = userEvent.setup();
     await user.click(await screen.findByRole("option", { name: "이미지 5.webp" }));
     const panel = screen.getByRole("complementary", { name: "선택 이미지 판단" });
-    await user.click(within(panel).getAllByRole("button", { name: "승인" })[0]!);
+    await user.click(within(panel).getByRole("button", { name: "히나로 확정" }));
     await waitFor(() => expect(decide).toHaveBeenCalledWith(expect.objectContaining({ targetId: "hina", assetIds: ["image-5"], expectedFingerprint: "fingerprint-hina", baselineFingerprint: "runtime", scanId: "scan-hina", decision: "accepted" })));
     await waitFor(() => expect(screen.queryByRole("option", { name: "이미지 5.webp" })).not.toBeInTheDocument());
     expect(targets).toHaveBeenCalledTimes(1);
@@ -32,14 +80,14 @@ describe("Character review", () => {
     const api = createCharacterFixture(), learn = vi.spyOn(api, "learnReferences"); mount(api);
     const user = userEvent.setup();
     await user.click(await screen.findByRole("option", { name: "이미지 5.webp" }));
-    await user.click(within(screen.getByRole("complementary", { name: "선택 이미지 판단" })).getByRole("button", { name: "승인" }));
+    await user.click(within(screen.getByRole("complementary", { name: "선택 이미지 판단" })).getByRole("button", { name: "히나로 확정" }));
     await waitFor(() => expect(screen.getByText("1장 확정")).toBeInTheDocument());
     expect(learn).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "확정" }));
     await user.click(await screen.findByRole("option", { name: "이미지 5.webp" }));
-    await user.click(await screen.findByRole("button", { name: "학습에 추가" }));
+    await user.click(within(screen.getByRole("complementary", { name: "선택 이미지 판단" })).getByRole("button", { name: "추가 참조로 사용" }));
     await waitFor(() => expect(learn).toHaveBeenCalledWith("hina", 1, ["image-5"]));
-    expect(await screen.findByText(/1장 학습에 추가/)).toBeInTheDocument();
+    expect(await screen.findByText(/1장을 추가 참조로 사용/)).toBeInTheDocument();
   });
 
   it("fixes the review and evidence to the current character", async () => {
@@ -50,7 +98,7 @@ describe("Character review", () => {
     expect(within(panel).queryByText("키사키")).not.toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "캐릭터 설정" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "후보 모두 승인" })).not.toBeInTheDocument();
-    await user.click(within(panel).getByRole("button", { name: "거절" }));
+    await user.click(within(panel).getByRole("button", { name: "히나 아님" }));
     await waitFor(() => expect(decide).toHaveBeenCalledWith(expect.objectContaining({ targetId: "hina", decision: "rejected" })));
   });
 
@@ -58,7 +106,7 @@ describe("Character review", () => {
     const api = createCharacterFixture(), decide = vi.spyOn(api, "decide").mockRejectedValue({ code: "character_stale", message: "기준 이미지가 바뀌었습니다." }); mount(api);
     const user = userEvent.setup();
     await user.click(await screen.findByRole("option", { name: "이미지 5.webp" }));
-    await user.click(within(screen.getByRole("complementary", { name: "선택 이미지 판단" })).getAllByRole("button", { name: "승인" })[0]!);
+    await user.click(within(screen.getByRole("complementary", { name: "선택 이미지 판단" })).getByRole("button", { name: "히나로 확정" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("기준 이미지가 바뀌었습니다.");
     expect(decide).toHaveBeenCalledTimes(1);
     expect(decide.mock.calls[0]![0].scanId).not.toBeNull();
@@ -119,7 +167,7 @@ it("keeps loaded pages and selection during a background refresh", async () => {
   const view = (version: number) => <LibraryProvider gateway={gateway}><CharacterLab classifications={fixtureClassifications} initialSeriesId="series" targetId="hina" refreshVersion={version} onClose={vi.fn()} api={api} /></LibraryProvider>;
   const { rerender } = render(view(0)); const user = userEvent.setup();
   await user.click(await screen.findByRole("button", { name: "더 불러오기" }));
-  await user.click(await screen.findByRole("option", { name: "이미지 13.webp" }));
+  fireEvent.click(await screen.findByRole("option", { name: "이미지 13.webp" }), { ctrlKey: true });
   const selected = screen.getByRole("option", { name: "이미지 13.webp" });
   const calls = vi.mocked(api.review).mock.calls.length;
   rerender(view(1));

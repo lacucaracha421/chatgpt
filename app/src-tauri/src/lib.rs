@@ -237,6 +237,7 @@ pub fn run() {
             commands::characters::queue_mixed_character_folder,
             commands::characters::finalize_mixed_character_folder,
             commands::characters::create_manual_character,
+            commands::characters::complete_character_review,
             commands::characters::set_character_series_asset_excluded,
             commands::characters::character_series_excluded_assets,
             commands::characters::character_groups,

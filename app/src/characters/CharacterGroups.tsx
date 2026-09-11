@@ -62,7 +62,7 @@ export function CharacterGroups({ seriesId, members, groups: providedGroups, act
 
   return <>
     <div className="series-gallery-heading character-group-heading">
-      <h3>{current ? `그룹 · ${current.name}` : "캐릭터"}</h3>
+      <h3 aria-label={current ? `그룹 · ${current.name}` : "캐릭터"}>{current ? `그룹 · ${current.name}` : "캐릭터"}<small aria-hidden="true">{current ? visibleMembers.length : members.length}</small></h3>
       {current ? <>
         <Button size="sm" variant="ghost" onClick={() => onOpenGroup?.(null)}>시리즈로</Button>
         <Button size="sm" variant="ghost" onClick={() => setDraft({ ...current, targetIds: [...current.targetIds] })}>그룹 편집</Button>
@@ -98,7 +98,7 @@ function CharacterGroupCard({ group, members, privacyMode, onOpen, onEdit }: { g
           return assetId ? <img key={target.id} loading="lazy" className={privacyMode ? "character-private" : undefined} src={thumbnailUrl(assetId)} alt="" /> : <span key={target.id} className="character-group-card__slot"><PhotoIcon aria-hidden="true" /></span>;
         }) : <span className="character-group-card__slot"><UserGroupIcon aria-hidden="true" /></span>}
       </span>
-      <strong><UserGroupIcon className="series-character__ready character-group-card__icon" aria-hidden="true" /><span className="series-character__name">{group.name}</span></strong>
+      <strong><UserGroupIcon className="character-group-card__icon" aria-hidden="true" /><span className="series-character__name">{group.name}</span></strong>
       <small>{group.targetIds.length.toLocaleString()}명{groupMembers.length ? ` · ${groupMembers.slice(0, 3).map(member => member.displayName).join(" · ")}${groupMembers.length > 3 ? "…" : ""}` : ""}</small>
     </button>
     <Button className="series-character__info" size="icon" variant="ghost" aria-label={`${group.name} 그룹 편집`} data-tooltip="그룹 편집" onClick={onEdit}><InformationCircleIcon aria-hidden="true" /></Button>

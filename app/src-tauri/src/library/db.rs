@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 61;
+pub(crate) const SCHEMA_VERSION: i64 = 64;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -313,6 +313,21 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
                 "../../migrations/0061_character_correctness_forward_repair.sql"
             ))?;
         }
+        if version <= 61 {
+            transaction.execute_batch(include_str!(
+                "../../migrations/0062_character_browse_performance.sql"
+            ))?;
+        }
+        if version <= 62 {
+            transaction.execute_batch(include_str!(
+                "../../migrations/0063_character_review_performance.sql"
+            ))?;
+        }
+        if version <= 63 {
+            transaction.execute_batch(include_str!(
+                "../../migrations/0064_character_review_completion.sql"
+            ))?;
+        }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction
             .prepare("PRAGMA foreign_key_check")?
@@ -400,7 +415,7 @@ mod tests {
             "SELECT COUNT(*) FROM classification_entries WHERE id='lakomics-originals'",
             [], |row| row.get::<_, i64>(0),
         ).unwrap(), 0);
-        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 61);
+        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 64);
     }
 
     #[test]
@@ -433,7 +448,7 @@ mod tests {
         assert_eq!(connection.query_row("SELECT review_state FROM character_autotag_jobs WHERE asset_id='affected'", [], |row| row.get::<_, String>(0)).unwrap(), "partially_resolved");
         assert_eq!(connection.query_row("SELECT review_state FROM character_autotag_jobs WHERE asset_id='safe'", [], |row| row.get::<_, String>(0)).unwrap(), "resolved");
         assert_eq!(connection.query_row("SELECT COUNT(*) FROM character_autotag_reconsideration WHERE series_id='series'", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
-        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 61);
+        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 64);
     }
 
     #[test]
@@ -479,7 +494,7 @@ mod tests {
         assert_eq!(connection.query_row("SELECT priority FROM character_autotag_jobs WHERE asset_id='affected'", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
         assert_eq!(connection.query_row("SELECT review_state FROM character_autotag_jobs WHERE asset_id='affected'", [], |row| row.get::<_, String>(0)).unwrap(), "partially_resolved");
         assert_eq!(connection.query_row("SELECT COUNT(*) FROM character_autotag_reconsideration WHERE series_id='series'", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
-        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 61);
+        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 64);
     }
 
     #[test]
@@ -514,7 +529,47 @@ mod tests {
         ).unwrap();
         assert_eq!(after, before);
         assert_eq!(connection.query_row("SELECT review_state FROM character_autotag_jobs WHERE asset_id='affected'", [], |row| row.get::<_, String>(0)).unwrap(), "partially_resolved");
-        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 61);
+        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 64);
+    }
+
+    #[test]
+    fn v62_adds_target_scoped_prediction_lookup() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        historical_schema(&mut connection, 61);
+        migrate_to_latest(&mut connection, 61).unwrap();
+        assert_eq!(connection.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='character_autotag_predictions_target_scope'",
+            [], |row| row.get::<_, i64>(0),
+        ).unwrap(), 1);
+        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 64);
+    }
+
+    #[test]
+    fn v63_adds_recommended_review_partial_index() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        historical_schema(&mut connection, 62);
+        connection.execute_batch(include_str!("../../migrations/0063_character_review_performance.sql")).unwrap();
+        let sql: String = connection.query_row(
+            "SELECT sql FROM sqlite_master WHERE type='index' AND name='character_autotag_predictions_recommended'",
+            [], |row| row.get(0),
+        ).unwrap();
+        assert!(sql.contains("target_fingerprint"));
+        assert!(sql.contains("json_extract(result_json,'$.state')='recommended'"));
+        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 63);
+    }
+
+    #[test]
+    fn v64_adds_generation_bound_character_review_completion() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        historical_schema(&mut connection, 63);
+        migrate_to_latest(&mut connection, 63).unwrap();
+        let sql: String = connection.query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='character_review_completions'",
+            [], |row| row.get(0),
+        ).unwrap();
+        assert!(sql.contains("generation INTEGER NOT NULL"));
+        assert!(sql.contains("source_generation INTEGER NOT NULL"));
+        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 64);
     }
 
     #[test]

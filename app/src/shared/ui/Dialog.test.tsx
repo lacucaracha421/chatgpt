@@ -67,6 +67,17 @@ it("layers shared dialog content above its overlay and application content", asy
   expect(floatingMenuLayer).toBeGreaterThan(dialogLayer);
 });
 
+it("centers shared overlays without a transformed text layer", async () => {
+  const user = userEvent.setup();
+  render(<DialogFixture />);
+  await user.click(screen.getByRole("button", { name: "열기" }));
+
+  const style = window.getComputedStyle(screen.getByRole("dialog"));
+  expect(style.transform).toBe("none");
+  expect(style.inset).toBe("0px");
+  expect(style.margin).toBe("auto");
+});
+
 it("treats a strong horizontal trackpad swipe as back", async () => {
   const user = userEvent.setup();
   render(<DialogFixture />);

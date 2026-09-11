@@ -38,6 +38,13 @@ it("supports buttons and Escape without wrapping at the final asset", async () =
   expect(onClose).toHaveBeenCalledOnce();
 });
 
+it("shows the current asset name and position without replacing the dialog label", () => {
+  render(<AssetViewer items={[asset("a", "a.gif"), asset("b", "b.png")]} activeId="b" onActiveIdChange={vi.fn()} onClose={vi.fn()} />);
+
+  expect(screen.getByRole("dialog", { name: "b.png" })).toBeInTheDocument();
+  expect(screen.getByRole("status", { name: "현재 자산" })).toHaveTextContent("b.png2 / 2");
+});
+
 it("toggles favorite and moves to trash from the keyboard and buttons", () => {
   const onToggleFavorite = vi.fn();
   const onTrash = vi.fn();

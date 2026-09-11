@@ -1016,6 +1016,7 @@ fn manual_video_membership_is_visible_but_not_recognition_evidence() {
             group_id: None,
             reference_target_id: None,
             all: false,
+            series_filter: None,
             after: None,
             limit: 100,
         })

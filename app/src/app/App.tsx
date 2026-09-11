@@ -1,7 +1,5 @@
-import { PublicationStatus } from "../layout/PublicationStatus";
 import { characterApi, moveAssetsToCharacter } from "../characters/api";
 import { useCharacterAutomation } from "../characters/useCharacterAutomation";
-import { CharacterAutomationStatus } from "../characters/CharacterAutomationStatus";
 import { useCharacterHub } from "../characters/useCharacterHub";
 import { CharacterFolderContent } from "../characters/CharacterFolderContent";
 import { applyInitialCountOrder, reorderFolders } from "../classification/folderOrder";
@@ -28,7 +26,7 @@ import { AppShell } from "../layout/AppShell";
 import { ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
 import { WorkspaceNavigation } from "../layout/WorkspaceNavigation";
 import { WindowControls } from "../layout/WindowControls";
-import { StatusBar } from "../layout/StatusBar";
+import { WorkStatusCenter } from "../layout/WorkStatusCenter";
 import { libraryGateway } from "../library/client";
 import { commandErrorMessage } from "../library/errorMessage";
 import { LibraryProvider, useLibrary } from "../library/LibraryContext";
@@ -681,6 +679,8 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
               width={sidebarWidth} onWidthChange={setSidebarWidth} onNavigate={navigateView}
               reviewCount={reviewCount} trashCount={trashCount} onImportFiles={dropEnabled ? () => void importFiles() : undefined}
               cloudProblemCount={cloudProblems}
+              workStatus={<WorkStatusCenter characterAutomation={characterAutomation} progress={dropState.progress}
+                similarityIndex={similarityIndex} browserStatus={browserStatus} dropEnabled={dropEnabled} />}
               assetNavigation={<ClassificationSidebar embedded characters={characterHub.targets} characterGroups={characterHub.groups}
               entries={entries}
               albums={albums}
@@ -784,7 +784,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     onBack={() => { navigateBack({ kind: "revisit" }); }}
                   />
                 ) : (
-                  <CharacterFolderContent albums={albums} requestedAsset={requestedAsset} onRequestedAssetHandled={() => setRequestedAsset(null)} view={view} hub={{ ...characterHub, refresh: refreshCharacterViews }} clearSelectionRequest={clearAssetSelectionRequest} galleryDrag={{ onPointerDragStart: startPointerDrag, onPointerDragMove: movePointerDrag, onPointerDragEnd: finishPointerDrag, onPointerDragCancel: cancelPointerDrag }} classifications={entries} privacyMode={preferences.privacyMode} metadataVisible={preferences.metadataVisible} thumbnailRowHeight={preferences.thumbnailRowHeight} refreshVersion={assetRefresh} onNavigate={navigateView} onAssetsChanged={() => { setAssetRefresh(value => value + 1); refreshCharacterViews(); }}>
+                  <CharacterFolderContent albums={albums} requestedAsset={requestedAsset} onRequestedAssetHandled={() => setRequestedAsset(null)} view={view} hub={{ ...characterHub, refresh: refreshCharacterViews }} clearSelectionRequest={clearAssetSelectionRequest} galleryDrag={{ onPointerDragStart: startPointerDrag, onPointerDragMove: movePointerDrag, onPointerDragEnd: finishPointerDrag, onPointerDragCancel: cancelPointerDrag }} classifications={entries} galleryLayout={preferences.galleryLayout} onGalleryLayoutChange={(galleryLayout) => updatePreferences({ galleryLayout })} privacyMode={preferences.privacyMode} onPrivacyModeChange={(privacyMode) => updatePreferences({ privacyMode })} metadataVisible={preferences.metadataVisible} onMetadataVisibleChange={(metadataVisible) => updatePreferences({ metadataVisible })} thumbnailRowHeight={preferences.thumbnailRowHeight} onThumbnailRowHeightChange={(thumbnailRowHeight) => updatePreferences({ thumbnailRowHeight })} refreshVersion={assetRefresh} onNavigate={navigateView} onAssetsChanged={() => { setAssetRefresh(value => value + 1); refreshCharacterViews(); }}>
                   <AssetBrowser
                     view={view}
                     onViewChange={navigateView}
@@ -822,7 +822,6 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
             </div>
             </div>
           }
-          status={<><PublicationStatus /><CharacterAutomationStatus state={characterAutomation} /><StatusBar status={browserStatus} progress={dropState.progress} dropEnabled={dropEnabled} similarityIndex={similarityIndex} /></>}
         />
         </WorkspaceChromeProvider>
         <WorkTray

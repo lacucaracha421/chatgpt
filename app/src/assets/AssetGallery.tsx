@@ -20,7 +20,7 @@ const QUICK_PREVIEW_DELAY_MS = 150;
 const QUICK_PREVIEW_GAP = 8;
 const QUICK_PREVIEW_MARGIN = 12;
 
-type QuickPreviewState = { asset: AssetSummary; anchor: DOMRect };
+type QuickPreviewState = { asset: AssetSummary; anchor: DOMRect; boundary: DOMRect | null };
 
 type AssetGalleryProps = {
   intro?: ReactNode;
@@ -178,7 +178,11 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
       const preview = new Image();
       const reveal = () => {
         if (request === quickPreviewRequestRef.current) {
-          setQuickPreview({ asset: sourceAsset, anchor: trigger.getBoundingClientRect() });
+          setQuickPreview({
+            asset: sourceAsset,
+            anchor: trigger.getBoundingClientRect(),
+            boundary: trigger.closest<HTMLElement>(".asset-gallery")?.getBoundingClientRect() ?? null,
+          });
         }
       };
       preview.src = assetUrl(sourceAsset.id);
@@ -362,21 +366,27 @@ function cssLength(value: string) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function quickPreviewLayout({ asset, anchor }: QuickPreviewState): React.CSSProperties {
-  const maxWidth = window.innerWidth * 0.55;
-  const maxHeight = window.innerHeight * 0.7;
+function quickPreviewLayout({ asset, anchor, boundary }: QuickPreviewState): React.CSSProperties {
+  const boundaryLeft = boundary && boundary.width > 0 ? Math.max(0, boundary.left) : 0;
+  const boundaryRight = boundary && boundary.width > 0 ? Math.min(window.innerWidth, boundary.right) : window.innerWidth;
+  const boundaryTop = boundary && boundary.height > 0 ? Math.max(0, boundary.top) : 0;
+  const boundaryBottom = boundary && boundary.height > 0 ? Math.min(window.innerHeight, boundary.bottom) : window.innerHeight;
+  const availableWidth = Math.max(1, boundaryRight - boundaryLeft - QUICK_PREVIEW_MARGIN * 2);
+  const availableHeight = Math.max(1, boundaryBottom - boundaryTop - QUICK_PREVIEW_MARGIN * 2);
+  const maxWidth = Math.min(window.innerWidth * 0.55, availableWidth);
+  const maxHeight = Math.min(window.innerHeight * 0.7, availableHeight);
   const sourceWidth = Math.max(1, asset.width);
   const sourceHeight = Math.max(1, asset.height);
   const scale = Math.min(maxWidth / sourceWidth, maxHeight / sourceHeight);
   const width = sourceWidth * scale;
   const height = sourceHeight * scale;
   const preferredRight = anchor.right + QUICK_PREVIEW_GAP;
-  const left = preferredRight + width + QUICK_PREVIEW_MARGIN <= window.innerWidth
+  const left = preferredRight + width + QUICK_PREVIEW_MARGIN <= boundaryRight
     ? preferredRight
-    : Math.max(QUICK_PREVIEW_MARGIN, anchor.left - QUICK_PREVIEW_GAP - width);
+    : Math.max(boundaryLeft + QUICK_PREVIEW_MARGIN, anchor.left - QUICK_PREVIEW_GAP - width);
   const top = Math.min(
-    window.innerHeight - QUICK_PREVIEW_MARGIN - height,
-    Math.max(QUICK_PREVIEW_MARGIN, anchor.top + anchor.height / 2 - height / 2),
+    boundaryBottom - QUICK_PREVIEW_MARGIN - height,
+    Math.max(boundaryTop + QUICK_PREVIEW_MARGIN, anchor.top + anchor.height / 2 - height / 2),
   );
   return { left, top, width, height };
 }

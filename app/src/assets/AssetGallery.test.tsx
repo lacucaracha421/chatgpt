@@ -233,6 +233,30 @@ describe("AssetGallery", () => {
     expect(width / height).toBeCloseTo(0.5);
   });
 
+  it("keeps a large quick preview inside the gallery instead of covering navigation", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("innerWidth", 1000);
+    vi.stubGlobal("innerHeight", 800);
+    const { container } = render(<AssetGallery items={[{ ...asset(0), width: 700, height: 900 }]} />);
+    const gallery = container.querySelector(".asset-gallery") as HTMLElement;
+    vi.spyOn(gallery, "getBoundingClientRect").mockReturnValue({
+      left: 240, right: 1000, top: 0, bottom: 800, width: 760, height: 800,
+      x: 240, y: 0, toJSON: () => ({}),
+    });
+    const trigger = screen.getByRole("button", { name: "asset-0.png 빠른 확대 미리보기" });
+    vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue({
+      left: 650, right: 674, top: 360, bottom: 384, width: 24, height: 24,
+      x: 650, y: 360, toJSON: () => ({}),
+    });
+
+    fireEvent.pointerEnter(trigger);
+    act(() => vi.advanceTimersByTime(150));
+
+    const preview = screen.getByRole("img", { name: "asset-0.png 빠른 미리보기" }).parentElement!;
+    expect(Number.parseFloat(preview.style.left)).toBeGreaterThanOrEqual(252);
+    expect(Number.parseFloat(preview.style.left) + Number.parseFloat(preview.style.width)).toBeLessThanOrEqual(988);
+  });
+
   it("reports multi-selection gestures and loaded-item keyboard commands", async () => {
     const user = userEvent.setup();
     const onSelectionGesture = vi.fn();

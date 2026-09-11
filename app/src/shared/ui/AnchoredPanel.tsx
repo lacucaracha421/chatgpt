@@ -31,7 +31,10 @@ export function AnchoredPanel({ open, onOpenChange, trigger, title, description,
     const triggerNode = triggerRef.current;
     const content = contentNode;
     if (!triggerNode || !content) return;
-    const index = triggerNode.closest<HTMLElement>(".workspace-index") ?? triggerNode;
+    const navigation = triggerNode.closest<HTMLElement>(".workspace-navigation");
+    const index = triggerNode.closest<HTMLElement>(".workspace-index")
+      ?? navigation?.querySelector<HTMLElement>(".workspace-index")
+      ?? triggerNode;
     const positionPanel = () => {
       const anchor = triggerNode.getBoundingClientRect();
       const side = index.getBoundingClientRect();

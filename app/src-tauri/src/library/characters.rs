@@ -351,7 +351,7 @@ impl Library {
     ) -> Result<Target> {
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
-        let result = self.save_character_target_selection_in(&transaction, draft, strict)?;
+        let result = self.save_character_target_selection_in(&transaction, draft, strict, false)?;
         transaction.commit()?;
         Ok(result)
     }
@@ -363,10 +363,13 @@ impl Library {
     ) -> Result<Target> {
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
+        let manual_on_create =
+            request.target.id.is_none() && request.reference_ids.len() < REFERENCE_COUNT;
         let saved = self.save_character_target_selection_in(
             &transaction,
             request.target,
             strict,
+            manual_on_create,
         )?;
         let result = self.replace_character_references_selection_in(
             &transaction,
@@ -384,6 +387,7 @@ impl Library {
         transaction: &Connection,
         draft: TargetDraft,
         strict: bool,
+        manual_on_create: bool,
     ) -> Result<Target> {
         let name = draft.display_name.trim();
         if name.is_empty() {
@@ -458,8 +462,14 @@ impl Library {
             }
             let id = uuid::Uuid::new_v4().to_string();
             transaction.execute("INSERT INTO character_targets
-                (id,series_classification_id,linked_classification_id,display_name,enabled,created_at,updated_at)
-                VALUES(?1,?2,?3,?4,?5,?6,?6)", params![id,draft.series_classification_id,draft.linked_classification_id,name,draft.enabled,now])?;
+                (id,series_classification_id,linked_classification_id,display_name,enabled,manual_only,created_at,updated_at)
+                VALUES(?1,?2,?3,?4,?5,?6,?7,?7)", params![id,draft.series_classification_id,draft.linked_classification_id,name,draft.enabled,manual_on_create,now])?;
+            if manual_on_create {
+                transaction.execute(
+                    "INSERT INTO character_manual_targets(target_id,created_at) VALUES(?1,?2)",
+                    params![id, now],
+                )?;
+            }
             id
         };
         transaction.execute(
@@ -821,6 +831,7 @@ impl Library {
             transaction.execute("INSERT INTO character_decisions
                 (target_id,asset_id,source_asset_id,asset_hash,decision,target_fingerprint,baseline_fingerprint,reference_snapshot,created_at)
                 VALUES(?1,?2,?2,?3,?4,?5,?6,?7,?8)", params![target.id,asset_id,hash,request.decision.stored(),target.fingerprint,request.baseline_fingerprint,snapshot,now])?;
+            transaction.execute("DELETE FROM character_review_completions WHERE asset_id=?1", [asset_id])?;
             super::character_autotag::refresh_character_review_state(transaction, asset_id)?;
             changed += 1;
         }

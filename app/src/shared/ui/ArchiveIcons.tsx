@@ -21,6 +21,7 @@ export const archivePaths = {
   archive: "M3 3h18v5H3zM5 8v13h14V8M9 12h6",
   bookmark: "M6 3h12v18l-6-4-6 4z",
   note: "M4 3h16v18H4zM8 7h8M8 11h8M8 15h5",
+  activity: "M4 4h16v16H4zM7 15h2v2H7zM11 11h2v6h-2zM15 7h2v10h-2z",
 } as const;
 type Props = SVGProps<SVGSVGElement>;
 function Glyph({ kind, ...props }: Props & { kind: keyof typeof archivePaths }) {
@@ -40,3 +41,4 @@ export const MagnifyingGlassIcon = (props: Props) => <Glyph kind="search" {...pr
 export const PlusIcon = (props: Props) => <Glyph kind="plus" {...props} />;
 export const BookmarkIcon = (props: Props) => <Glyph kind="bookmark" {...props} />;
 export const NoteIcon = (props: Props) => <Glyph kind="note" {...props} />;
+export const ActivityIcon = (props: Props) => <Glyph kind="activity" {...props} />;

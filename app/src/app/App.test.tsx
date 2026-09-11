@@ -458,7 +458,7 @@ describe("App", () => {
     await waitFor(() => expect(document.querySelector(".library-workspace")).not.toHaveAttribute("inert"));
   });
 
-  it("renders the persistent four-region workspace when a library is restored", async () => {
+  it("renders the persistent workspace without a bottom status region", async () => {
     localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
     const libraryGateway = gateway();
 
@@ -470,7 +470,8 @@ describe("App", () => {
     expect(sidebar).toBeInTheDocument();
     expect(screen.getByRole("toolbar", { name: "자산 도구" })).toBeInTheDocument();
     expect(content).toBeInTheDocument();
-    expect(screen.getByRole("contentinfo")).toBeInTheDocument();
+    expect(screen.queryByRole("contentinfo")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /작업 센터/ })).toBeInTheDocument();
     expect(within(content).queryByRole("button", { name: "설정" })).not.toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "주요 영역" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "라이브러리 관리" })).toBeInTheDocument();
@@ -497,7 +498,7 @@ describe("App", () => {
     })));
     expect(screen.getByRole("button", { name: "전체" })).toHaveAttribute("aria-current", "page");
     const rail = screen.getByRole("navigation", { name: "주요 영역" });
-    expect(within(rail).getAllByRole("button").map((button) => button.textContent)).toEqual(["에셋", "컬렉션", "망가", "다시보기", "메모", "미분류", "휴지통", "관리"]);
+    expect(within(rail).getAllByRole("button").map((button) => button.textContent)).toEqual(["에셋", "컬렉션", "망가", "다시보기", "메모", expect.stringMatching(/^작업/), "미분류", "휴지통", "관리"]);
     expect(screen.queryByRole("navigation", { name: "빠른 보기" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "미분류" }));
@@ -786,6 +787,7 @@ describe("App", () => {
 
     act(() => drop?.(["C:\\images\\arona.png"]));
 
+    await user.click(screen.getByRole("button", { name: /작업 센터/ }));
     expect(
       await screen.findByText("파일 가져오기 1 / 1"),
     ).toBeInTheDocument();

@@ -4,9 +4,8 @@ import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import type { AlbumEntry, AssetAspectFilter, AssetMediaFilter, AssetSort, AssetView, ClassificationEntry, CollectionSummary } from "../library/types";
 import { Button } from "../shared/ui/Button";
 import { Select } from "../shared/ui/Select";
-import { Slider } from "../shared/ui/Slider";
-import { Toggle } from "../shared/ui/Toggle";
 import { ViewToolbar } from "../layout/ViewToolbar";
+import { GalleryDisplaySettings } from "./GalleryDisplaySettings";
 
 type AssetToolbarProps = {
   galleryLayout?: "masonry" | "justified";
@@ -59,15 +58,11 @@ export function AssetToolbar({
           </>}
           {sort === "random" && <Button onClick={onReshuffle}><ArrowPathIcon aria-hidden="true" />다시 섞기</Button>}
         </fieldset>}
-        <fieldset className="chrome-settings-group"><legend>보기</legend>
-          <Select label="배치" value={galleryLayout} onChange={(event) => onGalleryLayoutChange?.(event.target.value as "masonry" | "justified")}><option value="masonry">날짜별 폭포수</option><option value="justified">같은 높이의 행</option></Select>
-          <Slider label="크기" aria-label="미리보기 크기" min={96} max={320} step={8} value={thumbnailRowHeight} onChange={(event) => onThumbnailRowHeightChange(Number(event.target.value))} />
-        </fieldset>
-        <fieldset className="chrome-settings-group"><legend>표시</legend>
-          <Toggle aria-label="정보 숨기기" checked={!metadataVisible} onChange={(event) => onMetadataVisibleChange(!event.target.checked)}>정보 숨기기</Toggle>
-          <Toggle aria-label="비공개 모드" checked={privacyMode} onChange={(event) => onPrivacyModeChange(event.target.checked)}>비공개 모드</Toggle>
-          {view.kind === "classification" && <Toggle aria-label="이 분류만" checked={directOnly} onChange={(event) => onDirectOnlyChange(event.target.checked)}>현재 분류만 보기</Toggle>}
-        </fieldset>
+        <GalleryDisplaySettings galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange}
+          thumbnailRowHeight={thumbnailRowHeight} onThumbnailRowHeightChange={onThumbnailRowHeightChange}
+          metadataVisible={metadataVisible} onMetadataVisibleChange={onMetadataVisibleChange}
+          privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange}
+          directOnly={directOnly} onDirectOnlyChange={view.kind === "classification" ? onDirectOnlyChange : undefined} />
       </>,
     }} />
   );

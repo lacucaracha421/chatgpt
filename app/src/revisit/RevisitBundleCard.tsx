@@ -3,6 +3,7 @@ import { ArrowPathIcon, EyeSlashIcon } from "@heroicons/react/24/outline";
 import { useLibrary } from "../library/LibraryContext";
 import type { RevisitBundle, RevisitFeedback } from "../library/types";
 import { thumbnailUrl } from "../assets/mediaUrl";
+import { Menu } from "../shared/ui/Menu";
 
 export function RevisitBundleCard({ bundle, hero = false, pending, onOpen, onReshuffle, onDismiss }: {
   bundle: RevisitBundle;
@@ -12,7 +13,6 @@ export function RevisitBundleCard({ bundle, hero = false, pending, onOpen, onRes
   onReshuffle: () => void;
   onDismiss: () => void;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
   const [feedbackPending, setFeedbackPending] = useState(false);
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
   const { gateway } = useLibrary();
@@ -93,19 +93,20 @@ export function RevisitBundleCard({ bundle, hero = false, pending, onOpen, onRes
         <h4>{bundle.title}{bundle.reason && <span className="revisit-bundle__reason">{bundle.reason}</span>}</h4>
         <div className="revisit-bundle__actions">
           <button type="button" className="revisit-bundle__icon-button" aria-label="이 묶음 다시 섞기" disabled={pending} onClick={onReshuffle}><ArrowPathIcon aria-hidden="true" /></button>
-          <div className="revisit-bundle__feedback">
-            <button type="button" className="revisit-bundle__icon-button" aria-label="관심 없음" disabled={pending || feedbackPending} onClick={() => setMenuOpen((open) => !open)}><EyeSlashIcon aria-hidden="true" /></button>
-            {menuOpen && (
-              <div role="menu" className="revisit-bundle__feedback-menu">
-                <button type="button" role="menuitem" disabled={feedbackPending} onClick={() => void saveFeedback({ kind: "recommendation_type", recommendationType: bundle.kind })}>이런 추천 덜 보기</button>
-                {bundle.kind === "creator" && <button type="button" role="menuitem" disabled={feedbackPending} onClick={() => void reduceCreator()}>이 작가 덜 보기</button>}
-                <button type="button" role="menuitem" disabled={feedbackPending} onClick={onDismiss}>이 묶음만 숨기기</button>
-                {feedbackError && <span role="status">{feedbackError}</span>}
-              </div>
-            )}
-          </div>
+          <Menu
+            label="관심 없음"
+            trigger={<EyeSlashIcon aria-hidden="true" />}
+            triggerClassName="revisit-bundle__icon-button"
+            disabled={pending || feedbackPending}
+            items={[
+              { id: "recommendation", label: "이런 추천 덜 보기", disabled: feedbackPending, onSelect: () => void saveFeedback({ kind: "recommendation_type", recommendationType: bundle.kind }) },
+              ...(bundle.kind === "creator" ? [{ id: "creator", label: "이 작가 덜 보기", disabled: feedbackPending, onSelect: () => void reduceCreator() }] : []),
+              { id: "dismiss", label: "이 묶음만 숨기기", disabled: feedbackPending, onSelect: onDismiss },
+            ]}
+          />
         </div>
       </header>
+      {feedbackError && <span className="revisit-bundle__feedback-error" role="alert">{feedbackError}</span>}
       {coversButton}
       <span className="revisit-bundle__count">{bundle.assetIds.length.toLocaleString("ko-KR")}개</span>
     </section>

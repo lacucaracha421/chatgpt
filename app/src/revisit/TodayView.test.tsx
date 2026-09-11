@@ -78,6 +78,23 @@ it("opens the 관심 없음 menu with hide choice", async () => {
   expect(await screen.findByRole("menuitem", { name: "이 묶음만 숨기기" })).toBeVisible();
 });
 
+it("closes the 관심 없음 menu with Escape and restores trigger focus", async () => {
+  const user = userEvent.setup();
+  render(
+    <LibraryProvider gateway={gateway}>
+      <TodayView />
+    </LibraryProvider>,
+  );
+  const trigger = (await screen.findAllByRole("button", { name: "관심 없음" }))[0]!;
+  await user.click(trigger);
+  expect(await screen.findByRole("menuitem", { name: "이 묶음만 숨기기" })).toBeVisible();
+
+  await user.keyboard("{Escape}");
+
+  expect(screen.queryByRole("menuitem", { name: "이 묶음만 숨기기" })).not.toBeInTheDocument();
+  expect(trigger).toHaveFocus();
+});
+
 
 it("persists a less-like-this preference and hides the bundle", async () => {
   const user = userEvent.setup();

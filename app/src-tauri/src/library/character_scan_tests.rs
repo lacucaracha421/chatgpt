@@ -47,6 +47,59 @@ fn seed_prediction(f: &Fixture, target: &Target, scan_id: &str) {
     state.previous.insert(target.id.clone(), (status, rows));
 }
 
+fn add_review_asset(f: &Fixture, id: &str) -> (String, String) {
+    let hash = Sha256::digest(id.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let path = format!("assets/{id}.png");
+    let thumbnail = format!("thumbnails/{id}.webp");
+    fs::write(f.temp.path().join(&path), id.as_bytes()).unwrap();
+    fs::write(f.temp.path().join(&thumbnail), id.as_bytes()).unwrap();
+    let connection = f.library.connection().unwrap();
+    connection.execute(
+        "INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at,status) VALUES(?1,?2,'image',?1,?3,?4,7,1,1,'2026-09-08','normal')",
+        params![id, hash, path, thumbnail],
+    ).unwrap();
+    connection.execute(
+        "INSERT INTO asset_classifications(asset_id,classification_id) VALUES(?1,?2)",
+        params![id, f.series],
+    ).unwrap();
+    (hash, path)
+}
+
+fn seed_durable_review(
+    f: &Fixture,
+    target: &Target,
+    asset_id: &str,
+    generation: i64,
+    state: &str,
+) {
+    let (hash, path): (String, String) = f.library.connection().unwrap().query_row(
+        "SELECT content_hash,relative_path FROM assets WHERE id=?1",
+        [asset_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    ).unwrap();
+    let evidence_id = format!("durable-{asset_id}-{generation}");
+    let connection = f.library.connection().unwrap();
+    connection.execute(
+        "INSERT INTO character_autotag_jobs(asset_id,generation,source_generation,content_hash,relative_path,classification_ids,state,review_state,priority,cause,updated_at) VALUES(?1,?2,1,?3,?4,?5,'completed','unresolved',1,'ingestion','now') ON CONFLICT(asset_id) DO UPDATE SET generation=excluded.generation,state='completed',review_state='unresolved'",
+        params![asset_id, generation, hash, path, serde_json::to_string(&vec![&f.series]).unwrap()],
+    ).unwrap();
+    connection.execute(
+        "INSERT INTO character_autotag_evidence(id,asset_id,generation,source_generation,content_hash,context_hash,runtime_fingerprint,scope_json,unresolved_regions,created_at) VALUES(?1,?2,?3,1,?4,'context','runtime','{}','[]','now')",
+        params![evidence_id, asset_id, generation, hash],
+    ).unwrap();
+    connection.execute(
+        "INSERT INTO character_autotag_predictions(evidence_id,target_id,series_id,target_fingerprint,result_json) VALUES(?1,?2,?3,?4,?5)",
+        params![evidence_id, target.id, f.series, target.fingerprint, serde_json::json!({
+            "assetId":asset_id,"contentHash":hash,"state":state,
+            "evidence": if matches!(state, "recommended" | "unmatched") { Some(serde_json::json!({"passed": state == "recommended", "distance": 0.1})) } else { None },
+            "error":null
+        }).to_string()],
+    ).unwrap();
+}
+
 fn prediction_decision(target: &Target, scan: &str) -> characters::DecisionRequest {
     characters::DecisionRequest {
         target_id: target.id.clone(),
@@ -768,6 +821,83 @@ fn review_pending_is_advisory_and_approval_still_verifies_source() {
 }
 
 #[test]
+fn review_pending_fast_path_reads_durable_predictions_and_latest_decision() {
+    let f = Fixture::new();
+    let target = f.ready("A");
+    let (hash, path): (String, String) = f.library.connection().unwrap().query_row(
+        "SELECT content_hash,relative_path FROM assets WHERE id='asset-5'",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    ).unwrap();
+    {
+        let connection = f.library.connection().unwrap();
+        connection.execute(
+            "INSERT INTO character_autotag_jobs(asset_id,generation,source_generation,content_hash,relative_path,classification_ids,state,review_state,priority,cause,updated_at) VALUES('asset-5',1,1,?1,?2,?3,'completed','unresolved',1,'ingestion','now')",
+            params![hash, path, serde_json::to_string(&vec![&f.series]).unwrap()],
+        ).unwrap();
+        connection.execute(
+            "INSERT INTO character_autotag_evidence(id,asset_id,generation,source_generation,content_hash,context_hash,runtime_fingerprint,scope_json,unresolved_regions,created_at) VALUES('durable-review','asset-5',1,1,?1,'context','runtime','{}','[]','now')",
+            [&hash],
+        ).unwrap();
+        connection.execute(
+            "INSERT INTO character_autotag_predictions(evidence_id,target_id,series_id,target_fingerprint,result_json) VALUES('durable-review',?1,?2,?3,?4)",
+            params![target.id, f.series, target.fingerprint, serde_json::json!({
+                "assetId":"asset-5","contentHash":hash,"state":"recommended","evidence":null,"error":null
+            }).to_string()],
+        ).unwrap();
+    }
+    assert!(f.library.character_review_pending(&f.series, &target.id).unwrap());
+    assert!(!f.library.character_review_page(ReviewQuery {
+        series_id: f.series.clone(), target_id: Some(target.id.clone()),
+        filter: "recommended".into(), after: None, limit: 1,
+    }).unwrap().rows.is_empty());
+    f.library.record_character_decisions(characters::DecisionRequest {
+        target_id: target.id.clone(), expected_fingerprint: target.fingerprint.clone(),
+        asset_ids: vec!["asset-5".into()], decision: characters::DecisionKind::Accepted,
+        baseline_fingerprint: None, scan_id: None,
+    }).unwrap();
+    assert!(!f.library.character_review_pending(&f.series, &target.id).unwrap());
+    assert!(f.library.character_review_page(ReviewQuery {
+        series_id: f.series.clone(), target_id: Some(target.id.clone()),
+        filter: "recommended".into(), after: None, limit: 1,
+    }).unwrap().rows.is_empty());
+    f.library.record_character_decisions(characters::DecisionRequest {
+        target_id: target.id.clone(), expected_fingerprint: target.fingerprint.clone(),
+        asset_ids: vec!["asset-5".into()], decision: characters::DecisionKind::Cleared,
+        baseline_fingerprint: None, scan_id: None,
+    }).unwrap();
+    assert!(f.library.character_review_pending(&f.series, &target.id).unwrap());
+}
+
+#[test]
+fn review_pending_memory_fast_path_preserves_automatic_root_candidates() {
+    let f = Fixture::new();
+    let target = f.ready("A");
+    seed_prediction(&f, &target, "memory-root");
+    let root: String = f.library.connection().unwrap().query_row(
+        "SELECT parent_id FROM classification_entries WHERE id=?1",
+        [&f.series], |row| row.get(0),
+    ).unwrap();
+    f.library.connection().unwrap().execute(
+        "UPDATE asset_classifications SET classification_id=?1 WHERE asset_id='asset-5'",
+        [&root],
+    ).unwrap();
+    assert!(!f.library.character_review_pending(&f.series, &target.id).unwrap());
+    assert!(f.library.character_review_page(ReviewQuery {
+        series_id: f.series.clone(), target_id: Some(target.id.clone()),
+        filter: "recommended".into(), after: None, limit: 10,
+    }).unwrap().rows.is_empty());
+    f.library.character_scan.lock().unwrap().previous.get_mut(&target.id).unwrap().0.automatic = true;
+    assert!(f.library.character_review_pending(&f.series, &target.id).unwrap());
+    let page = f.library.character_review_page(ReviewQuery {
+        series_id: f.series.clone(), target_id: Some(target.id.clone()),
+        filter: "recommended".into(), after: None, limit: 10,
+    }).unwrap();
+    assert_eq!(page.rows.len(), 1);
+    assert_eq!(page.rows[0].asset.id, "asset-5");
+}
+
+#[test]
 fn review_reaches_sparse_matches_beyond_an_input_batch() {
     let f = Fixture::new();
     let target = f.ready("A");
@@ -801,6 +931,76 @@ fn review_reaches_sparse_matches_beyond_an_input_batch() {
         .unwrap();
     assert_eq!(page.rows.len(), 1);
     assert_eq!(page.rows[0].asset.id, "asset-5");
+}
+
+#[test]
+fn recommended_review_merges_memory_and_durable_in_asset_order() {
+    let f = Fixture::new();
+    let target = f.ready("A");
+    add_review_asset(&f, "asset-40");
+    add_review_asset(&f, "asset-41");
+    seed_durable_review(&f, &target, "asset-40", 1, "recommended");
+    seed_durable_review(&f, &target, "asset-41", 1, "recommended");
+    seed_durable_review(&f, &target, "asset-5", 1, "recommended");
+    seed_prediction(&f, &target, "memory");
+
+    let first = f.library.character_review_page(ReviewQuery {
+        series_id: f.series.clone(), target_id: Some(target.id.clone()),
+        filter: "recommended".into(), after: None, limit: 2,
+    }).unwrap();
+    assert_eq!(first.rows.iter().map(|row| row.asset.id.as_str()).collect::<Vec<_>>(), vec!["asset-40", "asset-41"]);
+    assert!(first.next_cursor.is_some());
+    let second = f.library.character_review_page(ReviewQuery {
+        series_id: f.series.clone(), target_id: Some(target.id.clone()),
+        filter: "recommended".into(), after: first.next_cursor, limit: 2,
+    }).unwrap();
+    assert_eq!(second.rows.iter().map(|row| row.asset.id.as_str()).collect::<Vec<_>>(), vec!["asset-5"]);
+
+    let mut state = f.library.character_scan.lock().unwrap();
+    let row = state.previous.get_mut(&target.id).unwrap().1.get_mut("asset-5").unwrap();
+    row.state = "unmatched".into();
+    drop(state);
+    let page = f.library.character_review_page(ReviewQuery {
+        series_id: f.series.clone(), target_id: Some(target.id),
+        filter: "recommended".into(), after: None, limit: 10,
+    }).unwrap();
+    assert_eq!(page.rows.iter().map(|row| row.asset.id.as_str()).collect::<Vec<_>>(), vec!["asset-40", "asset-41"]);
+}
+
+#[test]
+fn recommended_review_uses_latest_durable_prediction_only() {
+    let f = Fixture::new();
+    let target = f.ready("A");
+    seed_durable_review(&f, &target, "asset-5", 1, "recommended");
+    seed_durable_review(&f, &target, "asset-5", 2, "unmatched");
+    let page = f.library.character_review_page(ReviewQuery {
+        series_id: f.series.clone(), target_id: Some(target.id),
+        filter: "recommended".into(), after: None, limit: 10,
+    }).unwrap();
+    assert!(page.rows.is_empty());
+}
+
+#[test]
+fn recommended_review_skips_stale_source_and_keeps_pagination() {
+    let f = Fixture::new();
+    let target = f.ready("A");
+    for id in ["asset-40", "asset-41", "asset-42", "asset-43"] {
+        add_review_asset(&f, id);
+        seed_durable_review(&f, &target, id, 1, "recommended");
+    }
+    fs::write(f.temp.path().join("assets/asset-40.png"), b"changed after prediction").unwrap();
+    let first = f.library.character_review_page(ReviewQuery {
+        series_id: f.series.clone(), target_id: Some(target.id.clone()),
+        filter: "recommended".into(), after: None, limit: 2,
+    }).unwrap();
+    assert_eq!(first.rows.iter().map(|row| row.asset.id.as_str()).collect::<Vec<_>>(), vec!["asset-41", "asset-42"]);
+    assert!(first.next_cursor.is_some());
+    let second = f.library.character_review_page(ReviewQuery {
+        series_id: f.series.clone(), target_id: Some(target.id),
+        filter: "recommended".into(), after: first.next_cursor, limit: 2,
+    }).unwrap();
+    assert_eq!(second.rows.iter().map(|row| row.asset.id.as_str()).collect::<Vec<_>>(), vec!["asset-43"]);
+    assert!(second.next_cursor.is_none());
 }
 
 #[test]

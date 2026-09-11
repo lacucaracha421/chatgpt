@@ -689,6 +689,18 @@ pub async fn create_manual_character(
 }
 
 #[tauri::command]
+pub async fn complete_character_review(
+    request: crate::library::character_workflow::CharacterReviewCompletionRequest,
+    state: State<'_, AppState>,
+) -> Result<usize, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.complete_character_review(request))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
+}
+
+#[tauri::command]
 pub async fn set_character_series_asset_excluded(
     request: crate::library::character_workflow::SeriesAssetExclusionRequest,
     app: tauri::AppHandle,

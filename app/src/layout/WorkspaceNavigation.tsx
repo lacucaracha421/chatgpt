@@ -25,9 +25,10 @@ type Props = {
   trashCount: number;
   cloudProblemCount?: number;
   onImportFiles?: () => void;
+  workStatus?: ReactNode;
 };
 
-export function WorkspaceNavigation({ view, collectionType, width, onWidthChange, onNavigate, assetNavigation, reviewCount, trashCount, cloudProblemCount = 0, onImportFiles }: Props) {
+export function WorkspaceNavigation({ view, collectionType, width, onWidthChange, onNavigate, assetNavigation, reviewCount, trashCount, cloudProblemCount = 0, onImportFiles, workStatus }: Props) {
   const chrome = useWorkspaceChrome();
   const area = workspaceArea(view);
   const history = useRef<Partial<Record<ReturnType<typeof workspaceArea>, AssetView>>>({});
@@ -62,6 +63,7 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
       <button type="button" className="workspace-rail__item" aria-current={view.kind === "revisit" || view.kind === "creator" ? "page" : undefined} onClick={() => onNavigate({ kind: "revisit" })}><CalendarIcon aria-hidden="true" /><span>다시보기</span></button>
       <button type="button" className="workspace-rail__item" aria-current={view.kind === "notes" ? "page" : undefined} onClick={() => onNavigate({kind:"notes"})}><NoteIcon aria-hidden="true"/><span>메모</span></button>
       <div className="workspace-rail__tail">
+        {workStatus}
         {cloudProblemCount > 0 && <button type="button" className="workspace-rail__item" onClick={() => onNavigate({ kind: "settings", section: "cloud" })} aria-label={`동기화 문제 ${cloudProblemCount}개`}><span aria-hidden="true">!</span><span>동기화 문제 {cloudProblemCount}</span></button>}
         <button type="button" className="workspace-rail__item" aria-current={view.kind === "unsorted" ? "page" : undefined} onClick={() => onNavigate({ kind: "unsorted" })}><InboxIcon aria-hidden="true" /><span>미분류</span></button>
         <button type="button" className="workspace-rail__item" aria-label={`휴지통 ${trashCount}개`} aria-current={view.kind === "trash" ? "page" : undefined} onClick={() => onNavigate({ kind: "trash" })}><TrashIcon aria-hidden="true" /><span>휴지통</span></button>

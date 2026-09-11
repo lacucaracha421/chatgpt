@@ -7,15 +7,17 @@ import { applySelectionGesture, emptySelection, moveSelectionFocus, reconcileSel
 import { Dialog } from "../shared/ui/Dialog";
 import { Select } from "../shared/ui/Select";
 import { Button } from "../shared/ui/Button";
+import { EmptyState } from "../shared/ui/EmptyState";
 import { commandErrorMessage } from "../library/errorMessage";
 import { thumbnailUrl } from "../assets/mediaUrl";
 import { characterApi, isRunning, predictionRequest, type CharacterApi, type CharacterTarget, type Decision, type DecisionKind, type Prediction, type ReviewFilter, type ReviewPage, type ReviewRow, type ScanStatus } from "./api";
+import type { SelectionGesture } from "../assets/selection";
 import "./CharacterLab.css";
 
 const filters: [ReviewFilter, string][] = [["all", "전체"], ["unmatched", "일치 없음"], ["pending", "분석 필요"], ["rejected", "거절"], ["error", "오류"]];
 const stateLabels: Record<string, string> = { pending: "분석 전", recommended: "추천", unmatched: "일치 없음", error: "분석 실패", stale: "다시 분석 필요", accepted: "확정", rejected: "거절", cleared: "판단 해제", running: "분석 중", cancelling: "취소 중", cancelled: "취소됨", completed: "완료", failed: "실패" };
 
-export function CharacterLab({ classifications, initialSeriesId, targetId, refreshVersion = 0, privacyMode = false, onClose, onEdit, api = characterApi }: { classifications: ClassificationEntry[]; initialSeriesId: string | null; targetId: string; refreshVersion?: number; privacyMode?: boolean; onClose: () => void; onEdit?: () => void; api?: CharacterApi }) {
+export function CharacterLab({ classifications, initialSeriesId, targetId, refreshVersion = 0, privacyMode = false, embedded = false, onClose, onEdit, api = characterApi }: { classifications: ClassificationEntry[]; initialSeriesId: string | null; targetId: string; refreshVersion?: number; privacyMode?: boolean; embedded?: boolean; onClose: () => void; onEdit?: () => void; api?: CharacterApi }) {
   const seriesId = initialSeriesId ?? "";
   const [targets, setTargets] = useState<CharacterTarget[]>([]);
   const filterTarget = targetId;
@@ -30,6 +32,8 @@ export function CharacterLab({ classifications, initialSeriesId, targetId, refre
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [history, setHistory] = useState<Decision[] | null>(null);
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  const [deferredIds, setDeferredIds] = useState<string[]>([]);
   const active = useRef(true);
   const generation = useRef(0);
   const paging = useRef(false);
@@ -46,8 +50,10 @@ export function CharacterLab({ classifications, initialSeriesId, targetId, refre
   const selectedRows = page.rows.filter(row => selection.ids.has(row.asset.id));
   const learnedIds = new Set(target?.learnedReferences?.flatMap(reference => reference.assetId ? [reference.assetId] : []) ?? []);
   const learnableRows = selectedRows.filter(row => !learnedIds.has(row.asset.id) && row.predictions.some(prediction => prediction.targetId === targetId && prediction.decision === "accepted"));
-  const focused = page.rows.find(row => row.asset.id === selection.focusId) ?? selectedRows[0];
   const itemIds = useMemo(() => page.rows.map(row => row.asset.id), [page.rows]);
+  const itemKey = itemIds.join("|");
+  const batchMode = selectedRows.length >= 2;
+  const focused = batchMode ? null : page.rows.find(row => row.asset.id === previewId) ?? null;
   const scopeKey = `${seriesId}:${filterTarget}:${filter}`;
 
   const reloadTargets = useCallback(async () => {
@@ -119,7 +125,7 @@ export function CharacterLab({ classifications, initialSeriesId, targetId, refre
     const changedScope = loadedScope.current !== scopeKey;
     loadedScope.current = scopeKey;
     if (changedScope) {
-      setPage({ rows: [], nextCursor: null }); setSelection(emptySelection());
+      setPage({ rows: [], nextCursor: null }); setSelection(emptySelection()); setPreviewId(null); setDeferredIds([]);
     }
     setUpdatesAvailable(false);
     if (seriesId) void load(null, changedScope ? 0 : pageRef.current.rows.length);
@@ -131,6 +137,14 @@ export function CharacterLab({ classifications, initialSeriesId, targetId, refre
     else setRefresh(v => v + 1);
   }, [refreshVersion]);
   useEffect(() => { setHistory(null); }, [targetId, seriesId]);
+  useEffect(() => {
+    const loaded = new Set(itemIds);
+    setDeferredIds(previous => {
+      const next = previous.filter(id => loaded.has(id));
+      return next.length === previous.length && next.every((id, index) => id === previous[index]) ? previous : next;
+    });
+    setPreviewId(current => current && loaded.has(current) ? current : itemIds.find(id => !deferredIds.includes(id)) ?? null);
+  }, [itemKey]);
 
   async function action(work: () => Promise<void>) {
     if (pending.current) return;
@@ -170,7 +184,7 @@ export function CharacterLab({ classifications, initialSeriesId, targetId, refre
       const next = await api.learnReferences!(latest.id, latest.revision, ids);
       if (active.current) {
         setTargets(current => current.map(item => item.id === next.id ? next : item));
-        setNotice(`${ids.length}장 학습에 추가 · 시리즈 재평가를 예약했습니다.`);
+        setNotice(`${ids.length}장을 추가 참조로 사용 · 시리즈 재평가를 예약했습니다.`);
         setSelection(emptySelection());
         setRefresh(value => value + 1);
       }
@@ -196,16 +210,44 @@ export function CharacterLab({ classifications, initialSeriesId, targetId, refre
       const decided = new Set(rows.map(row => row.asset.id));
       setNotice(`${rows.length}장 ${decision === "accepted" ? "확정" : "거절"}`);
       setSelection(emptySelection());
+      setDeferredIds(current => current.filter(id => !decided.has(id)));
+      setPreviewId(pageRef.current.rows.find(row => !decided.has(row.asset.id) && !deferredIds.includes(row.asset.id))?.asset.id ?? null);
       // Decisions no longer mutate learned references or the target fingerprint.
       // Remove settled cards immediately; refresh the backend page in the background.
       if (filter === "recommended") setPage(current => ({ ...current, rows: current.rows.filter(row => !decided.has(row.asset.id)) }));
       setRefresh(v => v + 1);
     }
   }
+  function preview(assetId: string, gesture?: SelectionGesture) {
+    setPreviewId(assetId);
+    setDeferredIds(current => current.filter(id => id !== assetId));
+    if (gesture && (gesture.toggle || gesture.range)) setSelection(current => applySelectionGesture(current, itemIds, assetId, gesture));
+    else setSelection(emptySelection());
+  }
+  function movePreview(delta: number, extend: boolean) {
+    if (extend) {
+      const next = moveSelectionFocus(selection, itemIds, delta, true);
+      setSelection(next); setPreviewId(next.focusId);
+      return;
+    }
+    const index = Math.max(0, itemIds.indexOf(previewId ?? ""));
+    const next = itemIds[Math.max(0, Math.min(itemIds.length - 1, index + delta))];
+    if (next) preview(next);
+  }
+  function deferPreview() {
+    if (!focused) return;
+    const deferred = new Set([...deferredIds, focused.asset.id]);
+    setDeferredIds([...deferred]);
+    setPreviewId(page.rows.find(row => !deferred.has(row.asset.id))?.asset.id ?? null);
+  }
+  function resumeDeferred() {
+    const first = deferredIds.find(id => itemIds.includes(id)) ?? itemIds[0] ?? null;
+    setDeferredIds([]); setPreviewId(first);
+  }
   const batchPrediction = selectedRows[0]?.predictions.find(p => p.targetId === targetId && p.evidence && ["recommended", "unmatched"].includes(p.state));
-  return <Dialog open title={`${target?.displayName ?? "캐릭터"} · 검토`} variant="fullscreen" onClose={close}>
-    <div className="character-lab" aria-busy={busy}>
-      <aside className="character-lab__index" aria-label="현재 캐릭터 정보">
+  const emptyTitle = !target?.ready ? "분류 기준 확인이 필요합니다" : !runtimeReady ? "자동 분류 초기 설정이 필요합니다" : scanning ? "이미지를 분석하고 있습니다" : filter === "recommended" ? "현재 확인할 추천이 없습니다" : filter === "error" ? "분석 오류가 없습니다" : "이 필터에 맞는 이미지가 없습니다";
+  const content = <div className={`character-lab${embedded ? " character-lab--embedded" : ""}`} aria-busy={busy}>
+      {!embedded && <aside className="character-lab__index" aria-label="현재 캐릭터 정보">
         <header className="character-lab__identity"><small className="character-lab__series">{classifications.find(c => c.id === seriesId)?.name ?? "시리즈"}</small>
         <h2 data-tauri-drag-region="deep">{target?.displayName ?? "불러오는 중"}</h2>
         {target?.thumbnailAssetId && <img className={`character-lab__portrait${privacyMode ? " character-private" : ""}`} src={thumbnailUrl(target.thumbnailAssetId)} alt={target.displayName} />}
@@ -215,7 +257,7 @@ export function CharacterLab({ classifications, initialSeriesId, targetId, refre
         {!target?.ready && <small>기준 이미지와 활성 상태를 확인해 주세요.</small>}</section>
         {onEdit && <Button size="sm" variant="ghost" onClick={onEdit}>캐릭터 정보 수정</Button>}
         <div className="character-lab__runtime"><Button size="sm" variant="ghost" disabled={busy || Boolean(scanning)} onClick={() => void action(async () => { const ready = await api.setup(); if (active.current && ready) { setRuntimeReady(true); setNotice("분석 환경 확인 완료"); } })}>{runtimeReady ? "분석 환경" : "분석 환경 설정"}</Button></div>
-      </aside>
+      </aside>}
       <main className="character-lab__main">
         <div className="character-review-toolbar" data-tauri-drag-region="deep">
           <div className="character-tabs" role="group" aria-label="검토 상태">
@@ -230,7 +272,7 @@ export function CharacterLab({ classifications, initialSeriesId, targetId, refre
           })}>시리즈 실패 항목 재시도 (최대 200장)</Button>}
           <Button size="sm" variant="ghost" disabled={!target} onClick={() => target && void action(async () => { setHistory(await api.history(target.id,null)); })}>이력</Button>
           <div className="character-review-toolbar__actions"><Button size="icon" variant="ghost" aria-label={updatesAvailable ? "새 결과 확인" : "새로고침"} data-tooltip={updatesAvailable ? "새 결과 확인" : "새로고침"} disabled={busy || loading} onClick={() => setRefresh(v => v + 1)}><ArrowPathIcon aria-hidden="true" /></Button>{updatesAvailable && <small role="status">새 결과 있음</small>}<Button size="sm" disabled={!target?.ready || !runtimeReady || busy || Boolean(scanning)} onClick={() => void scan()}>분류 시작</Button>
-          {(scanning) && <Button size="sm" disabled={busy} onClick={cancel}>취소</Button>}<Button size="icon" variant="ghost" aria-label="검토 닫기" data-tooltip="검토 닫기" onClick={close}><XMarkIcon aria-hidden="true" /></Button></div>
+          {(scanning) && <Button size="sm" disabled={busy} onClick={cancel}>취소</Button>}{!embedded && <Button size="icon" variant="ghost" aria-label="검토 닫기" data-tooltip="검토 닫기" onClick={close}><XMarkIcon aria-hidden="true" /></Button>}</div>
         </div>
         {scanning && <div className="character-progress" role="status"><span>{scanning.targetId === targetId ? `${scanning.completed} / ${scanning.total}장 비교${scanning.reused ? ` · 이전 결과 ${scanning.reused}장 유지` : ""}` : "자동 판정을 위한 후보 확인 중"}</span><progress max={Math.max(1, scanning.total)} value={scanning.completed} /></div>}
         {!!runs.find(r => r.targetId === targetId)?.errors && <Button size="sm" variant="ghost" className="character-review-errors" onClick={() => { setFilter("error"); setHistory(null); }}>분석 오류 {runs.find(r => r.targetId === targetId)!.errors}장 · 확인</Button>}
@@ -241,20 +283,22 @@ export function CharacterLab({ classifications, initialSeriesId, targetId, refre
           {history.map(d => <div key={d.sequence}><>{d.assetId && <img width={64} height={64} src={thumbnailUrl(d.assetId)} className={privacyMode ? "character-private" : ""} alt="판단한 이미지" />}</><span>{new Date(d.createdAt).toLocaleString()} · {stateLabels[d.decision]}{d.origin === "automatic" ? " · 자동 분류" : ""}</span><small>{d.assetId ? "" : "원본 삭제됨"}</small>{d.assetId && target && <Button size="sm" disabled={busy} onClick={() => void action(async () => { await api.decide({ targetId: target.id, expectedFingerprint: target.fingerprint, assetIds: [d.assetId!], decision: "cleared", scanId: null, baselineFingerprint: null }); setHistory(await api.history(target.id, null)); setRefresh(v => v + 1); })}>판단 해제</Button>}</div>)}
           <Button disabled={busy || history.length % 50 !== 0 || history.length === 0} onClick={() => target && void action(async () => { const more = await api.history(target.id, history[history.length - 1]!.sequence); if (active.current) setHistory(old => [...old!, ...more]); })}>이전 이력</Button>
         </div> : <>
-          {selection.ids.size > 0 && <div className="character-actions character-selection"><span>{selection.ids.size}장 선택</span><Button size="sm" disabled={busy || !batchPrediction} onClick={() => batchPrediction && void action(() => decideRows(selectedRows, batchPrediction, "accepted"))}>승인</Button><Button size="sm" disabled={busy || !batchPrediction} onClick={() => batchPrediction && void action(() => decideRows(selectedRows, batchPrediction, "rejected"))}>거절</Button>{api.learnReferences && learnableRows.length > 0 && <Button size="sm" variant="ghost" disabled={busy} onClick={() => void learnRows(learnableRows)}>학습에 추가</Button>}<Button size="sm" onClick={() => setSelection(emptySelection())}>선택 해제</Button></div>}
+          {batchMode && <div className="character-actions character-selection" role="region" aria-label="선택 이미지 일괄 판단"><strong>{selection.ids.size}장 선택</strong><Button size="sm" disabled={busy || !batchPrediction} onClick={() => batchPrediction && void action(() => decideRows(selectedRows, batchPrediction, "accepted"))}>{target?.displayName ?? "캐릭터"}로 확정</Button><Button size="sm" variant="ghost" disabled={busy || !batchPrediction} onClick={() => batchPrediction && void action(() => decideRows(selectedRows, batchPrediction, "rejected"))}>{target?.displayName ?? "캐릭터"} 아님</Button>{api.learnReferences && learnableRows.length > 0 && <Button size="sm" variant="ghost" disabled={busy} onClick={() => void learnRows(learnableRows)}>추가 참조로 사용</Button>}<Button size="sm" variant="ghost" onClick={() => setSelection(emptySelection())}>선택 해제</Button></div>}
           <div className="character-lab__workspace">
-            <div className="character-lab__gallery">{!seriesId ? <p>왼쪽에서 시리즈 폴더를 선택하세요.</p> : !loading && page.rows.length === 0 ? <p>{seriesTargets.length ? "이 조건에 해당하는 이미지가 없습니다." : "캐릭터를 만들고 기준 이미지 5장을 지정하세요."}</p> : <AssetGallery layout="masonry" groupDates={false} scopeKey={scopeKey} items={page.rows.map(row => row.asset)} targetRowHeight={190} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} privacyMode={privacyMode} metadataVisible onSelectionGesture={(asset, gesture) => setSelection(old => applySelectionGesture(old, itemIds, asset.id, gesture))} onSelectAll={() => setSelection(old => selectAllLoaded(old, itemIds))} onClearSelection={() => setSelection(emptySelection())} onMoveFocus={(delta, extend) => setSelection(old => moveSelectionFocus(old, itemIds, delta, extend))} onOpen={asset => setSelection(old => applySelectionGesture(old, itemIds, asset.id, { range: false, toggle: false }))} />}
+            {!loading && page.rows.length === 0 ? <EmptyState title={seriesTargets.length ? emptyTitle : "캐릭터 설정이 필요합니다"}>
+              {!target?.ready && onEdit ? <Button size="sm" onClick={onEdit}>기준 이미지 확인</Button> : !runtimeReady ? <Button size="sm" onClick={() => void action(async () => { const ready = await api.setup(); if (active.current && ready) setRuntimeReady(true); })}>초기 설정</Button> : filter === "recommended" ? <Button size="sm" variant="ghost" onClick={onClose}>이미지로 돌아가기</Button> : <Button size="sm" variant="ghost" onClick={() => setFilter("recommended")}>검토 대기로 돌아가기</Button>}
+            </EmptyState> : <><div className="character-lab__gallery">{!seriesId ? <p>시리즈를 찾지 못했습니다.</p> : <AssetGallery layout="masonry" groupDates={false} scopeKey={scopeKey} items={page.rows.map(row => row.asset)} targetRowHeight={190} selectedAssetIds={selection.ids} focusAssetId={previewId ?? selection.focusId} privacyMode={privacyMode} metadataVisible onSelectionGesture={(asset, gesture) => preview(asset.id, gesture)} onSelectAll={() => setSelection(old => selectAllLoaded(old, itemIds))} onClearSelection={() => setSelection(emptySelection())} onMoveFocus={movePreview} onOpen={asset => preview(asset.id)} />}
               <div className="character-actions"><Button size="sm" disabled={loading || page.rows.length === 0} onClick={() => setSelection(old => selectAllLoaded(old, itemIds))}>불러온 이미지 선택</Button>{page.nextCursor && <Button disabled={loading} onClick={() => void load(page.nextCursor)}>더 불러오기</Button>}{loading && <span role="status">불러오는 중…</span>}</div>
             </div>
-            <div className="character-evidence-slot">{focused ? <CharacterEvidence key={focused.asset.id} row={focused} privacyMode={privacyMode} busy={busy} onDecide={(p, decision) => void action(() => decideRows([focused], p, decision))} targetId={targetId} /> : <div className="character-evidence-empty"><PhotoIcon aria-hidden="true" /><p>이미지를 선택해 검토하세요</p></div>}</div>
+            {batchMode ? <aside className="character-batch-summary" aria-label="일괄 판단 안내"><strong>{selection.ids.size}장에 같은 판단을 적용합니다</strong><p>선택한 이미지의 현재 캐릭터 관계만 변경합니다.</p></aside> : <div className="character-evidence-slot">{focused ? <CharacterEvidence key={focused.asset.id} row={focused} privacyMode={privacyMode} busy={busy} onDecide={(p, decision) => void action(() => decideRows([focused], p, decision))} onLearn={api.learnReferences && focused.predictions.some(prediction => prediction.targetId === targetId && prediction.decision === "accepted") && !learnedIds.has(focused.asset.id) ? () => void learnRows([focused]) : undefined} onDefer={filter === "recommended" ? deferPreview : undefined} targetId={targetId} /> : <div className="character-evidence-empty"><PhotoIcon aria-hidden="true" /><p>{deferredIds.length ? `이번 검토에서 ${deferredIds.length}장을 건너뛰었습니다.` : "이미지를 선택해 검토하세요"}</p>{deferredIds.length > 0 && <Button size="sm" variant="ghost" onClick={resumeDeferred}>건너뛴 이미지 다시 보기</Button>}</div>}</div>}</>}
           </div>
         </>}
       </main>
-    </div>
-  </Dialog>;
+    </div>;
+  return embedded ? content : <Dialog open title={`${target?.displayName ?? "캐릭터"} · 검토`} variant="fullscreen" onClose={close}>{content}</Dialog>;
 }
 
-function CharacterEvidence({ row, targetId, privacyMode, busy, onDecide }: { row: ReviewRow; targetId: string; privacyMode: boolean; busy: boolean; onDecide: (p: Prediction, decision: DecisionKind) => void }) {
+function CharacterEvidence({ row, targetId, privacyMode, busy, onDecide, onLearn, onDefer }: { row: ReviewRow; targetId: string; privacyMode: boolean; busy: boolean; onDecide: (p: Prediction, decision: DecisionKind) => void; onLearn?: () => void; onDefer?: () => void }) {
   const [original, setOriginal] = useState(false);
   const [size, setSize] = useState({ width: row.asset.width, height: row.asset.height });
   const prediction = row.predictions.find(p => p.targetId === targetId);
@@ -262,7 +306,7 @@ function CharacterEvidence({ row, targetId, privacyMode, busy, onDecide }: { row
   const box = evidence?.queryBoxes?.[evidence.bestQueryCrop];
   return <aside className="character-evidence" aria-label="선택 이미지 판단">
     <div className="character-evidence__stage"><div className={`character-evidence__image${privacyMode ? " character-private" : ""}`} style={{ width: size.height > 0 ? `min(100%, ${36 * size.width / size.height}vh)` : undefined }}><img src={original ? assetUrl(row.asset.id) : thumbnailUrl(row.asset.id)} decoding="async" width={size.width || undefined} height={size.height || undefined} alt={row.asset.originalName} onLoad={e => { if (original) setSize({ width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight }); }} />{box && size.width > 0 && size.height > 0 && <svg viewBox={`0 0 ${size.width} ${size.height}`} aria-label="판단에 사용한 영역"><rect x={box[0]} y={box[1]} width={box[2]! - box[0]!} height={box[3]! - box[1]!} vectorEffect="non-scaling-stroke" /></svg>}</div><Button size="sm" variant="ghost" onClick={() => setOriginal(value => !value)}>{original ? "미리보기" : "원본 보기"}</Button></div>
-    {prediction && <section><div className="character-evidence__heading"><strong>{prediction.targetName}</strong><span>{stateLabels[prediction.decision ?? prediction.state] ?? prediction.state}</span></div>{prediction.error && <small>{prediction.error}</small>}<div className="character-actions"><Button size="sm" variant="primary" disabled={busy || !evidence} onClick={() => onDecide(prediction, "accepted")}>승인</Button><Button size="sm" variant="ghost" disabled={busy || !evidence} onClick={() => onDecide(prediction, "rejected")}>거절</Button></div></section>}
+    {prediction && <section><div className="character-evidence__heading"><strong>{prediction.targetName}</strong><span>{stateLabels[prediction.decision ?? prediction.state] ?? prediction.state}</span></div>{prediction.error && <small>{prediction.error}</small>}<div className="character-actions">{prediction.decision !== "accepted" && <Button size="sm" variant="primary" disabled={busy || !evidence} onClick={() => onDecide(prediction, "accepted")}>{prediction.targetName}로 확정</Button>}{prediction.decision !== "rejected" && <Button size="sm" variant="ghost" disabled={busy || !evidence} onClick={() => onDecide(prediction, "rejected")}>{prediction.targetName} 아님</Button>}{onLearn && <Button size="sm" variant="ghost" disabled={busy} onClick={onLearn}>추가 참조로 사용</Button>}{onDefer && <Button size="sm" variant="ghost" disabled={busy} onClick={onDefer}>이번에는 건너뛰기</Button>}</div></section>}
     {evidence && <details><summary>판단 근거</summary><p>{evidence.evidence?.[evidence.bestQueryCrop]?.matchedReferences.length ?? 0} / {evidence.referenceHashes?.length ?? 5} 기준 일치</p><p>거리 {evidence.distance.toFixed(6)}</p>{Boolean(evidence.learnedReferenceCount) && <p>직접 승인한 이미지 {evidence.learnedReferenceCount}장 포함</p>}{evidence.wholeFallback && <p>유효한 인물 영역이 없어 전체 이미지로 비교했습니다.</p>}</details>}
   </aside>;
 }

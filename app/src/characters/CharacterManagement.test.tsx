@@ -37,7 +37,7 @@ it("keeps Originals as storage-only without series or character registration too
     {id:"oc",name:"내 캐릭터",kind:"tag" as const,parentId:"originals",iconKey:null,colorKey:null},
   ];
   const hub={targets:[],series:[],groups:[],error:null,refresh:vi.fn(),revision:0} as any;
-  render(<CharacterFolderContent view={{kind:"classification",classificationId:"oc"}} hub={hub} classifications={classifications} privacyMode={false} metadataVisible thumbnailRowHeight={180} refreshVersion={0} onNavigate={()=>{}} onAssetsChanged={()=>{}}>
+  render(<CharacterFolderContent view={{kind:"classification",classificationId:"oc"}} hub={hub} classifications={classifications} galleryLayout="masonry" onGalleryLayoutChange={()=>{}} privacyMode={false} onPrivacyModeChange={()=>{}} metadataVisible onMetadataVisibleChange={()=>{}} thumbnailRowHeight={180} onThumbnailRowHeightChange={()=>{}} refreshVersion={0} onNavigate={()=>{}} onAssetsChanged={()=>{}}>
     <FolderRegistrationContext.Consumer>{tools=><span>{tools ? "분류 도구 있음" : "오리지널 보관"}</span>}</FolderRegistrationContext.Consumer>
   </CharacterFolderContent>);
   expect(screen.getByText("오리지널 보관")).toBeInTheDocument();

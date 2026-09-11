@@ -10,11 +10,15 @@ import { characterHubApi } from "./hubApi";
 import { SeriesBrowser, type CharacterGalleryDrag } from "./SeriesBrowser";
 import { CharacterSeriesSuggestions } from "./CharacterSeriesSuggestions";
 
-export function CharacterFolderContent({ children, requestedAsset, onRequestedAssetHandled, clearSelectionRequest, galleryDrag, view, hub, classifications, albums = [], privacyMode, metadataVisible, thumbnailRowHeight, refreshVersion, onNavigate, onAssetsChanged }: {
+export function CharacterFolderContent({ children, requestedAsset, onRequestedAssetHandled, clearSelectionRequest, galleryDrag, view, hub, classifications, albums = [], galleryLayout, onGalleryLayoutChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, onNavigate, onAssetsChanged }: {
   requestedAsset?: AssetSummary | null; onRequestedAssetHandled?: () => void;
   clearSelectionRequest?: number; galleryDrag?: CharacterGalleryDrag;
   children: ReactNode; view: AssetView; hub: ReturnType<typeof useCharacterHub>; classifications: ClassificationEntry[]; albums?: AlbumEntry[];
-  privacyMode: boolean; metadataVisible: boolean; thumbnailRowHeight: number; refreshVersion: number; onNavigate: (view: AssetView) => void; onAssetsChanged: () => void;
+  galleryLayout: "masonry" | "justified"; onGalleryLayoutChange: (layout: "masonry" | "justified") => void;
+  privacyMode: boolean; onPrivacyModeChange: (value: boolean) => void;
+  metadataVisible: boolean; onMetadataVisibleChange: (value: boolean) => void;
+  thumbnailRowHeight: number; onThumbnailRowHeightChange: (value: number) => void;
+  refreshVersion: number; onNavigate: (view: AssetView) => void; onAssetsChanged: () => void;
 }) {
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
   const [organizeCharacter, setOrganizeCharacter] = useState(false);
@@ -48,7 +52,7 @@ export function CharacterFolderContent({ children, requestedAsset, onRequestedAs
     }
     return false;
   }));
-  if (series && !originalScope) return <SeriesBrowser requestedAsset={requestedAsset} onRequestedAssetHandled={onRequestedAssetHandled} clearSelectionRequest={clearSelectionRequest} galleryDrag={galleryDrag} key={series.classificationId} series={series} targetId={view.kind === "classification" ? view.characterId : undefined} groupId={view.kind === "classification" ? view.characterGroupId : undefined} targets={hub.targets} groups={hub.groups} classifications={classifications} albums={albums} privacyMode={privacyMode} metadataVisible={metadataVisible} thumbnailRowHeight={thumbnailRowHeight} refreshVersion={refreshVersion + hub.revision} onNavigate={onNavigate} onChanged={hub.refresh} />;
+  if (series && !originalScope) return <SeriesBrowser requestedAsset={requestedAsset} onRequestedAssetHandled={onRequestedAssetHandled} clearSelectionRequest={clearSelectionRequest} galleryDrag={galleryDrag} key={series.classificationId} series={series} targetId={view.kind === "classification" ? view.characterId : undefined} groupId={view.kind === "classification" ? view.characterGroupId : undefined} targets={hub.targets} groups={hub.groups} classifications={classifications} albums={albums} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} metadataVisible={metadataVisible} onMetadataVisibleChange={onMetadataVisibleChange} thumbnailRowHeight={thumbnailRowHeight} onThumbnailRowHeightChange={onThumbnailRowHeightChange} refreshVersion={refreshVersion + hub.revision} onNavigate={onNavigate} onChanged={hub.refresh} />;
   async function register() {
     if (!id || busy) return;
     setBusy(true); setError(null);

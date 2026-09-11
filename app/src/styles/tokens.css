@@ -1,13 +1,17 @@
 @import "./fonts.css";
 
 :root {
-  --color-bg: #171819;
-  --color-sidebar: #1c1d1e;
-  --color-toolbar: #1c1d1e;
-  --color-surface: #242526;
-  --color-surface-elevated: #2c2d2e;
+  --color-bg: #161718;
+  --color-sidebar: #1a1b1c;
+  --color-toolbar: #191a1b;
+  --color-surface: #222324;
+  --color-surface-elevated: #292a2b;
   --color-surface-raised: var(--color-surface-elevated);
-  --color-surface-hover: #303132;
+  --color-surface-hover: #2d2e2f;
+  --color-surface-pressed: #343536;
+  --color-control: #232425;
+  --color-control-hover: #2d2e2f;
+  --color-control-pressed: #353637;
   --color-selected: rgba(221, 216, 202, 0.12);
   --color-sidebar-selection: #ddd8ca;
   --color-sidebar-hover: #292a2b;
@@ -19,6 +23,8 @@
   --color-text-muted: var(--color-muted);
   --color-accent: #ddd8ca;
   --color-on-accent: #202628;
+  --color-accent-hover: #e7e2d5;
+  --color-accent-pressed: #cbc6b9;
   --color-filter-selected: #383838;
   --color-filter-text: #e7e7e7;
   --color-filter-border: #808080;
@@ -27,7 +33,8 @@
   --selection-mark-size: 7px;
   --gallery-masonry-gap: 20px;
   --color-heart: #e5484d;
-  --color-border: #353638;
+  --color-border: #363739;
+  --color-border-strong: #55585a;
   --color-danger: #e26767;
   --color-focus: #7db1ff;
   --space-1: 4px;
@@ -35,6 +42,7 @@
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
+  --space-5: 20px;
   --space-6: 24px;
   --text-xs: 0.75rem;
   --text-sm: 0.8125rem;
@@ -59,6 +67,7 @@
   --control-height-md: 28px;
   --control-height-icon: 28px;
   --control-height-form: 32px;
+  --control-height-menu: 32px;
   --control-height-viewer: 36px;
   --sidebar-quick-row-height: 34px;
   --sidebar-tree-row-height: 32px;
@@ -70,13 +79,18 @@
   --sidebar-width-min: 176px;
   --sidebar-width-max: 320px;
   --toolbar-height: 40px;
-  --statusbar-height: 24px;
   --gallery-target-row-height: 180px;
   --inspector-width: 272px;
   --gallery-gap: 6px;
   --classification-icon-size: 16px;
   --classification-connector-radius: 4px;
   --classification-connector-mix: 55%;
+  --icon-sm: 16px;
+  --icon-md: 20px;
+  --icon-lg: 24px;
+  --motion-fast: 90ms;
+  --motion-standard: 140ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
   --z-dialog-overlay: 1110;
   --z-dialog-content: 1120;
   --z-floating-menu: 1200;
@@ -84,8 +98,8 @@
   --z-window-resize: 1400;
   --video-progress-height: 6px;
   --video-overlay-bg: rgba(7, 10, 15, 0.72);
-  --shadow-floating: 0 2px 6px rgba(0, 0, 0, 0.2), 0 8px 24px rgba(0, 0, 0, 0.32);
-  --shadow-dialog: 0 4px 12px rgba(0, 0, 0, 0.24), 0 16px 40px rgba(0, 0, 0, 0.36);
+  --shadow-floating: 0 1px 3px rgba(0, 0, 0, 0.24), 0 8px 20px rgba(0, 0, 0, 0.3);
+  --shadow-dialog: 0 3px 10px rgba(0, 0, 0, 0.26), 0 18px 48px rgba(0, 0, 0, 0.38);
   --inset-light: inset 0 1px 0 rgba(255, 255, 255, 0.04);
   --font-ui: "Barlow", "SUIT", "Segoe UI", "Malgun Gothic", "Yu Gothic UI", "Meiryo", sans-serif;
   --font-numeric: "Rajdhani Numbers", var(--font-ui);

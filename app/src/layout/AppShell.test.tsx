@@ -5,17 +5,16 @@ import { StatusBar } from "./StatusBar";
 
 afterEach(cleanup);
 
-it("uses Korean workspace and status labels", () => {
+it("uses the full workspace without reserving a bottom status row", () => {
   render(
     <AppShell
       sidebar={<aside>분류</aside>}
       content={<section>자산</section>}
-      status={<StatusBar status={{ loadedCount: 3, selectedAsset: null, loading: true }} progress={null} dropEnabled />}
     />,
   );
 
   expect(screen.getByRole("main", { name: "라이브러리 작업 공간" })).toBeInTheDocument();
-  expect(screen.queryByRole("contentinfo", { name: "라이브러리 상태" })).not.toBeInTheDocument();
+  expect(document.querySelector(".app-shell")?.children).toHaveLength(1);
 });
 
 it("shows similarity indexing progress and failures", () => {
