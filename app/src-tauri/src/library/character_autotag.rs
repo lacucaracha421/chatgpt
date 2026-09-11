@@ -316,7 +316,9 @@ pub(super) fn enqueue(
         return Ok(false);
     };
     if in_originals_scope(connection, asset_id)? {
-        connection.execute("UPDATE character_autotag_jobs SET state='superseded',claim_id=NULL,error=NULL,updated_at=?2 WHERE asset_id=?1 AND state<>'superseded'",
+        // Superseding is terminal, so review_state must move with state; otherwise
+        // the row keeps claiming unresolved work that no worker will ever claim.
+        connection.execute("UPDATE character_autotag_jobs SET state='superseded',review_state='superseded',claim_id=NULL,error=NULL,updated_at=?2 WHERE asset_id=?1 AND state<>'superseded'",
             params![asset_id,chrono::Utc::now().to_rfc3339()])?;
         return Ok(false);
     }

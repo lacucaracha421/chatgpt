@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 64;
+pub(crate) const SCHEMA_VERSION: i64 = 65;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -328,6 +328,11 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
                 "../../migrations/0064_character_review_completion.sql"
             ))?;
         }
+        if version <= 64 {
+            transaction.execute_batch(include_str!(
+                "../../migrations/0065_character_superseded_review_state.sql"
+            ))?;
+        }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction
             .prepare("PRAGMA foreign_key_check")?
@@ -415,7 +420,7 @@ mod tests {
             "SELECT COUNT(*) FROM classification_entries WHERE id='lakomics-originals'",
             [], |row| row.get::<_, i64>(0),
         ).unwrap(), 0);
-        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 64);
+        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
     }
 
     #[test]
@@ -448,7 +453,7 @@ mod tests {
         assert_eq!(connection.query_row("SELECT review_state FROM character_autotag_jobs WHERE asset_id='affected'", [], |row| row.get::<_, String>(0)).unwrap(), "partially_resolved");
         assert_eq!(connection.query_row("SELECT review_state FROM character_autotag_jobs WHERE asset_id='safe'", [], |row| row.get::<_, String>(0)).unwrap(), "resolved");
         assert_eq!(connection.query_row("SELECT COUNT(*) FROM character_autotag_reconsideration WHERE series_id='series'", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
-        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 64);
+        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
     }
 
     #[test]
@@ -494,7 +499,7 @@ mod tests {
         assert_eq!(connection.query_row("SELECT priority FROM character_autotag_jobs WHERE asset_id='affected'", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
         assert_eq!(connection.query_row("SELECT review_state FROM character_autotag_jobs WHERE asset_id='affected'", [], |row| row.get::<_, String>(0)).unwrap(), "partially_resolved");
         assert_eq!(connection.query_row("SELECT COUNT(*) FROM character_autotag_reconsideration WHERE series_id='series'", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
-        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 64);
+        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
     }
 
     #[test]
@@ -529,7 +534,7 @@ mod tests {
         ).unwrap();
         assert_eq!(after, before);
         assert_eq!(connection.query_row("SELECT review_state FROM character_autotag_jobs WHERE asset_id='affected'", [], |row| row.get::<_, String>(0)).unwrap(), "partially_resolved");
-        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 64);
+        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
     }
 
     #[test]
@@ -541,7 +546,7 @@ mod tests {
             "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='character_autotag_predictions_target_scope'",
             [], |row| row.get::<_, i64>(0),
         ).unwrap(), 1);
-        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 64);
+        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
     }
 
     #[test]
@@ -569,7 +574,41 @@ mod tests {
         ).unwrap();
         assert!(sql.contains("generation INTEGER NOT NULL"));
         assert!(sql.contains("source_generation INTEGER NOT NULL"));
-        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 64);
+        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn v65_aligns_superseded_review_state_without_touching_live_work() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        historical_schema(&mut connection, 64);
+        connection.execute_batch(r#"
+            INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at,status)
+            VALUES('stale','h1','image','stale.png','assets/stale.png','thumbnails/stale.webp',1,1,1,'now','normal'),
+                  ('done','h2','image','done.png','assets/done.png','thumbnails/done.webp',1,1,1,'now','normal'),
+                  ('open','h3','image','open.png','assets/open.png','thumbnails/open.webp',1,1,1,'now','normal');
+            INSERT INTO character_autotag_jobs(asset_id,generation,source_generation,content_hash,relative_path,classification_ids,state,review_state,priority,cause,updated_at)
+            VALUES('stale',1,1,'h1','assets/stale.png','["series"]','superseded','unresolved',0,'ingestion','now'),
+                  ('done',1,1,'h2','assets/done.png','["series"]','completed','resolved',0,'ingestion','now'),
+                  ('open',1,1,'h3','assets/open.png','["series"]','completed','unresolved',0,'ingestion','now');
+        "#).unwrap();
+
+        migrate_to_latest(&mut connection, 64).unwrap();
+
+        // The terminal row now agrees with its state.
+        assert_eq!(connection.query_row(
+            "SELECT review_state FROM character_autotag_jobs WHERE asset_id='stale'",
+            [], |row| row.get::<_, String>(0),
+        ).unwrap(), "superseded");
+        // Completed work keeps its own review state; this is not a blanket rewrite.
+        assert_eq!(connection.query_row(
+            "SELECT review_state FROM character_autotag_jobs WHERE asset_id='done'",
+            [], |row| row.get::<_, String>(0),
+        ).unwrap(), "resolved");
+        assert_eq!(connection.query_row(
+            "SELECT review_state FROM character_autotag_jobs WHERE asset_id='open'",
+            [], |row| row.get::<_, String>(0),
+        ).unwrap(), "unresolved");
+        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
     }
 
     #[test]
