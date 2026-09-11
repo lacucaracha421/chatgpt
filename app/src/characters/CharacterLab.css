@@ -76,10 +76,16 @@
 .character-lab__references .character-registry__label { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); font-size: var(--text-sm); }
 .character-lab__references small { font-variant-numeric: tabular-nums; line-height: var(--line-copy); }
 .character-evidence__stage { display: flex; flex-direction: column; gap: var(--space-2); justify-content: center; align-items: center; min-height: 120px; }
-.character-evidence__heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
-.character-evidence__heading strong { font-size: var(--text-lg); font-weight: 500; overflow-wrap: anywhere; }
-.character-evidence__heading > span { font-size: var(--text-sm); color: var(--color-muted); }
-.character-evidence section .character-actions > .ui-button { flex: 1; }
+/* Candidate identity: one line so the recommendation badge never drifts to its own row. */
+.character-evidence__heading { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); min-width: 0; }
+.character-evidence__heading strong { min-width: 0; font-size: var(--text-lg); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.character-evidence__heading > span { flex: 0 0 auto; font-size: var(--text-sm); color: var(--color-muted); }
+/* Review verdict: one full-width primary action, quiet secondary row beneath it. */
+.character-verdict { display: flex; flex-direction: column; align-items: stretch; gap: var(--space-2); }
+.character-verdict__primary { min-width: 0; justify-content: center; }
+.character-verdict__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.character-verdict__secondary { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.character-verdict__secondary > .ui-button { flex: 1 1 auto; min-width: 0; white-space: nowrap; }
 .character-evidence-empty { align-self: center; width: 100%; padding: var(--space-4); text-align: center; color: var(--color-muted); }
 .character-evidence-empty svg { width: var(--space-6); height: var(--space-6); }
 .character-evidence-empty p { margin: var(--space-3) 0 var(--space-1); font-size: var(--text-md); }

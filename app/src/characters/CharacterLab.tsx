@@ -2,7 +2,6 @@ import { ArrowPathIcon, PhotoIcon, XMarkIcon } from "@heroicons/react/24/outline
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ClassificationEntry } from "../library/types";
 import { AssetGallery } from "../assets/AssetGallery";
-import { assetUrl } from "../assets/mediaUrl";
 import { applySelectionGesture, emptySelection, moveSelectionFocus, reconcileSelection, selectAllLoaded } from "../assets/selection";
 import { Dialog } from "../shared/ui/Dialog";
 import { Select } from "../shared/ui/Select";
@@ -299,14 +298,31 @@ export function CharacterLab({ classifications, initialSeriesId, targetId, refre
 }
 
 function CharacterEvidence({ row, targetId, privacyMode, busy, onDecide, onLearn, onDefer }: { row: ReviewRow; targetId: string; privacyMode: boolean; busy: boolean; onDecide: (p: Prediction, decision: DecisionKind) => void; onLearn?: () => void; onDefer?: () => void }) {
-  const [original, setOriginal] = useState(false);
-  const [size, setSize] = useState({ width: row.asset.width, height: row.asset.height });
   const prediction = row.predictions.find(p => p.targetId === targetId);
   const evidence = prediction?.evidence;
   const box = evidence?.queryBoxes?.[evidence.bestQueryCrop];
+  const size = { width: row.asset.width, height: row.asset.height };
+  const canAccept = prediction !== undefined && prediction.decision !== "accepted";
+  const canReject = prediction !== undefined && prediction.decision !== "rejected";
   return <aside className="character-evidence" aria-label="선택 이미지 판단">
-    <div className="character-evidence__stage"><div className={`character-evidence__image${privacyMode ? " character-private" : ""}`} style={{ width: size.height > 0 ? `min(100%, ${36 * size.width / size.height}vh)` : undefined }}><img src={original ? assetUrl(row.asset.id) : thumbnailUrl(row.asset.id)} decoding="async" width={size.width || undefined} height={size.height || undefined} alt={row.asset.originalName} onLoad={e => { if (original) setSize({ width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight }); }} />{box && size.width > 0 && size.height > 0 && <svg viewBox={`0 0 ${size.width} ${size.height}`} aria-label="판단에 사용한 영역"><rect x={box[0]} y={box[1]} width={box[2]! - box[0]!} height={box[3]! - box[1]!} vectorEffect="non-scaling-stroke" /></svg>}</div><Button size="sm" variant="ghost" onClick={() => setOriginal(value => !value)}>{original ? "미리보기" : "원본 보기"}</Button></div>
-    {prediction && <section><div className="character-evidence__heading"><strong>{prediction.targetName}</strong><span>{stateLabels[prediction.decision ?? prediction.state] ?? prediction.state}</span></div>{prediction.error && <small>{prediction.error}</small>}<div className="character-actions">{prediction.decision !== "accepted" && <Button size="sm" variant="primary" disabled={busy || !evidence} onClick={() => onDecide(prediction, "accepted")}>{prediction.targetName}로 확정</Button>}{prediction.decision !== "rejected" && <Button size="sm" variant="ghost" disabled={busy || !evidence} onClick={() => onDecide(prediction, "rejected")}>{prediction.targetName} 아님</Button>}{onLearn && <Button size="sm" variant="ghost" disabled={busy} onClick={onLearn}>추가 참조로 사용</Button>}{onDefer && <Button size="sm" variant="ghost" disabled={busy} onClick={onDefer}>이번에는 건너뛰기</Button>}</div></section>}
+    <div className="character-evidence__stage">
+      <div className={`character-evidence__image${privacyMode ? " character-private" : ""}`} style={{ width: size.height > 0 ? `min(100%, ${36 * size.width / size.height}vh)` : undefined }}>
+        <img src={thumbnailUrl(row.asset.id)} decoding="async" width={size.width || undefined} height={size.height || undefined} alt={row.asset.originalName} />
+        {box && size.width > 0 && size.height > 0 && <svg viewBox={`0 0 ${size.width} ${size.height}`} aria-label="판단에 사용한 영역"><rect x={box[0]} y={box[1]} width={box[2]! - box[0]!} height={box[3]! - box[1]!} vectorEffect="non-scaling-stroke" /></svg>}
+      </div>
+    </div>
+    {prediction && <section>
+      <div className="character-evidence__heading"><strong title={prediction.targetName}>{prediction.targetName}</strong><span>{stateLabels[prediction.decision ?? prediction.state] ?? prediction.state}</span></div>
+      {prediction.error && <small>{prediction.error}</small>}
+      <div className="character-verdict">
+        {canAccept && <Button size="sm" variant="primary" className="character-verdict__primary" title={`${prediction.targetName}로 확정`} disabled={busy || !evidence} onClick={() => onDecide(prediction, "accepted")}><span className="character-verdict__label">{prediction.targetName}로 확정</span></Button>}
+        {(canReject || onLearn || onDefer) && <div className="character-verdict__secondary">
+          {canReject && <Button size="sm" variant="ghost" disabled={busy || !evidence} onClick={() => onDecide(prediction, "rejected")}>아님</Button>}
+          {onLearn && <Button size="sm" variant="ghost" disabled={busy} onClick={onLearn}>추가 참조로 사용</Button>}
+          {onDefer && <Button size="sm" variant="ghost" disabled={busy} onClick={onDefer}>이번엔 건너뛰기</Button>}
+        </div>}
+      </div>
+    </section>}
     {evidence && <details><summary>판단 근거</summary><p>{evidence.evidence?.[evidence.bestQueryCrop]?.matchedReferences.length ?? 0} / {evidence.referenceHashes?.length ?? 5} 기준 일치</p><p>거리 {evidence.distance.toFixed(6)}</p>{Boolean(evidence.learnedReferenceCount) && <p>직접 승인한 이미지 {evidence.learnedReferenceCount}장 포함</p>}{evidence.wholeFallback && <p>유효한 인물 영역이 없어 전체 이미지로 비교했습니다.</p>}</details>}
   </aside>;
 }

@@ -29,7 +29,7 @@ describe("Character review", () => {
     expect(screen.getByRole("option", { name: "이미지 5.webp" })).toHaveAttribute("aria-selected", "false");
     expect(screen.queryByText("1장 선택")).not.toBeInTheDocument();
     expect(within(panel).getByRole("button", { name: "히나로 확정" })).toBeInTheDocument();
-    expect(within(panel).getByRole("button", { name: "히나 아님" })).toBeInTheDocument();
+    expect(within(panel).getByRole("button", { name: "아님" })).toBeInTheDocument();
   });
 
   it("defers the current preview for this session without recording a decision", async () => {
@@ -37,7 +37,7 @@ describe("Character review", () => {
     mountEmbedded(api); const user = userEvent.setup();
     const panel = await screen.findByRole("complementary", { name: "선택 이미지 판단" });
     expect(within(panel).getByRole("img", { name: "이미지 5.webp" })).toBeInTheDocument();
-    await user.click(within(panel).getByRole("button", { name: "이번에는 건너뛰기" }));
+    await user.click(within(panel).getByRole("button", { name: "이번엔 건너뛰기" }));
     expect(within(await screen.findByRole("complementary", { name: "선택 이미지 판단" })).getByRole("img", { name: "이미지 6.webp" })).toBeInTheDocument();
     expect(decide).not.toHaveBeenCalled();
   });
@@ -98,7 +98,7 @@ describe("Character review", () => {
     expect(within(panel).queryByText("키사키")).not.toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "캐릭터 설정" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "후보 모두 승인" })).not.toBeInTheDocument();
-    await user.click(within(panel).getByRole("button", { name: "히나 아님" }));
+    await user.click(within(panel).getByRole("button", { name: "아님" }));
     await waitFor(() => expect(decide).toHaveBeenCalledWith(expect.objectContaining({ targetId: "hina", decision: "rejected" })));
   });
 
@@ -180,11 +180,13 @@ it("keeps loaded pages and selection during a background refresh", async () => {
   expect(screen.getByRole("option", { name: "이미지 13.webp" })).toHaveAttribute("aria-selected", "true");
 });
 
-it("loads a thumbnail for review and the original only on request", async () => {
+it("keeps the review panel on the thumbnail without an original-view control", async () => {
   mount(); const user = userEvent.setup();
   await user.click(await screen.findByRole("option", { name: "이미지 5.webp" }));
   const panel = screen.getByRole("complementary", { name: "선택 이미지 판단" });
   expect(within(panel).getByRole("img", { name: "이미지 5.webp" })).toHaveAttribute("src", expect.stringContaining("/thumbnail/"));
-  await user.click(within(panel).getByRole("button", { name: "원본 보기" }));
-  expect(within(panel).getByRole("img", { name: "이미지 5.webp" })).toHaveAttribute("src", expect.stringContaining("/asset/"));
+  expect(within(panel).queryByRole("button", { name: "원본 보기" })).not.toBeInTheDocument();
+  expect(within(panel).queryByRole("button", { name: "미리보기" })).not.toBeInTheDocument();
 });
+
+
