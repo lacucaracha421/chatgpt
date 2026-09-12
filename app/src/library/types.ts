@@ -99,6 +99,7 @@ export type CloudBackfillControlState = "idle" | "running" | "paused";
 
 export type CloudBackfillReconcileReport = {
   requeued: number;
+  seededMissing: number;
 };
 
 export type CloudBackfillRetryReport = {

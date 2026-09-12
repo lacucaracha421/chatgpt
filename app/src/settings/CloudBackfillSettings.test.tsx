@@ -34,7 +34,7 @@ function renderSection(overrides: Record<string, unknown> = {}) {
     cloudBackfillSeed: vi.fn().mockResolvedValue({ seeded: 7, skippedReplicated: 2, skippedProblem: 1 }),
     cloudBackfillRunCycle: vi.fn(),
     cloudBackfillSetControlState: vi.fn().mockResolvedValue("running"),
-    cloudBackfillReconcile: vi.fn().mockResolvedValue({ requeued: 0 }),
+    cloudBackfillReconcile: vi.fn().mockResolvedValue({ requeued: 0, seededMissing: 0 }),
     cloudBackfillRetryFailed: vi.fn().mockResolvedValue({ retried: 0 }),
     ...overrides,
   };
@@ -116,21 +116,21 @@ it("distinguishes clean completion from completion with problems", async () => {
   expect(await screen.findByText("복제 완료 — 8개 완료, 2개 확인 필요")).toBeInTheDocument();
 });
 
-it("offers an explicit non-destructive interrupted-work recovery action", async () => {
-  const reconcile = vi.fn().mockResolvedValue({ requeued: 2 });
+it("reports both interrupted and missing-queue recovery", async () => {
+  const reconcile = vi.fn().mockResolvedValue({ requeued: 2, seededMissing: 1 });
   renderSection({ cloudBackfillReconcile: reconcile });
-  await userEvent.click(await screen.findByRole("button", { name: "중단된 작업 복구" }));
+  await userEvent.click(await screen.findByRole("button", { name: "동기화 상태 복구" }));
   expect(reconcile).toHaveBeenCalledTimes(1);
-  expect(await screen.findByText("중단된 작업 2개를 대기열로 복구했습니다.")).toBeInTheDocument();
+  expect(await screen.findByText("중단된 작업 2개 · 누락 복제 1개를 대기열로 복구했습니다.")).toBeInTheDocument();
 });
 
 it("refreshes persistent counts immediately after an operator action", async () => {
   const progress = vi.fn()
     .mockResolvedValueOnce({ ...inactive, totalAssets: 5, queued: 5 })
     .mockResolvedValue({ ...inactive, totalAssets: 5, completed: 5 });
-  renderSection({ cloudBackfillProgress: progress, cloudBackfillReconcile: vi.fn().mockResolvedValue({ requeued: 0 }) });
+  renderSection({ cloudBackfillProgress: progress, cloudBackfillReconcile: vi.fn().mockResolvedValue({ requeued: 0, seededMissing: 0 }) });
   expect(await screen.findByText("0 / 5개 (0%)")).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "중단된 작업 복구" }));
+  await userEvent.click(screen.getByRole("button", { name: "동기화 상태 복구" }));
   expect(await screen.findByText("5 / 5개 (100%)")).toBeInTheDocument();
 });
 

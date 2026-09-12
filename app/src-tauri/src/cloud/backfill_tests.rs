@@ -226,6 +226,96 @@ fn progress_redacts_queue_errors_and_hides_resolved_failures() {
 }
 
 #[test]
+fn progress_uses_only_the_latest_revision_for_each_asset() {
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    let source = temp.path().join("latest-revision.png");
+    fs::write(&source, png_bytes(32)).unwrap();
+    let id = ingest_png(&library, &source, "2026-09-02T00:00:00Z");
+
+    let connection = library.connection().unwrap();
+    connection.execute(
+        "UPDATE cloud_sync_queue SET status='synced', synced_at='2026-09-02T00:01:00Z' WHERE entity_id=?1 AND revision=1",
+        [&id],
+    ).unwrap();
+    connection.execute(
+        "INSERT INTO cloud_sync_queue (id, entity_type, entity_id, operation, status, revision, updated_at) VALUES ('latest-revision-2', 'asset', ?1, 'upsert', 'pending', 2, '2026-09-02T00:02:00Z')",
+        [&id],
+    ).unwrap();
+    drop(connection);
+
+    let pending = library.cloud_backfill_progress().unwrap();
+    assert_eq!(pending.total_assets, 1);
+    assert_eq!(pending.queued, 1);
+    assert_eq!(pending.completed, 0);
+
+    library.connection().unwrap().execute(
+        "UPDATE cloud_sync_queue SET status='synced', synced_at='2026-09-02T00:03:00Z' WHERE entity_id=?1 AND revision=2",
+        [&id],
+    ).unwrap();
+    let synced = library.cloud_backfill_progress().unwrap();
+    assert_eq!(synced.queued, 0);
+    assert_eq!(synced.completed, 1);
+}
+
+#[test]
+fn reconcile_repairs_normal_assets_that_never_entered_the_cloud_queue() {
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    let normal_source = temp.path().join("missing-queue-normal.png");
+    let trashed_source = temp.path().join("missing-queue-trash.png");
+    fs::write(&normal_source, png_bytes(33)).unwrap();
+    fs::write(&trashed_source, png_bytes(34)).unwrap();
+    let normal_id = ingest_png(&library, &normal_source, "2026-09-02T00:00:00Z");
+    let trashed_id = ingest_png(&library, &trashed_source, "2026-09-01T00:00:00Z");
+
+    let connection = library.connection().unwrap();
+    connection.execute("DELETE FROM cloud_sync_queue WHERE entity_id IN (?1, ?2)", [&normal_id, &trashed_id]).unwrap();
+    connection.execute("UPDATE assets SET status='trash', trashed_at='2026-09-03T00:00:00Z' WHERE id=?1", [&trashed_id]).unwrap();
+    drop(connection);
+
+    let report = library.reconcile_cloud_backfill().unwrap();
+    assert_eq!(report.requeued, 0);
+    assert_eq!(report.seeded_missing, 1);
+    assert_eq!(queue_status(&library, &normal_id).as_deref(), Some("pending"));
+    assert_eq!(queue_status(&library, &trashed_id), None);
+    let second = library.reconcile_cloud_backfill().unwrap();
+    assert_eq!(second.requeued, 0);
+    assert_eq!(second.seeded_missing, 0);
+}
+
+#[test]
+fn progress_hides_resolved_replication_item_activity_but_keeps_unresolved_retry_activity() {
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    let source = temp.path().join("resolved-activity.png");
+    fs::write(&source, png_bytes(35)).unwrap();
+    let id = ingest_png(&library, &source, "2026-09-02T00:00:00Z");
+    let item_error = "전송하지 못한 자료가 있습니다. 연결과 원본 파일을 확인해 주세요.";
+
+    library.begin_cloud_activity("replication").unwrap();
+    library.finish_cloud_activity("replication", 1, 1, Some(item_error)).unwrap();
+    library.connection().unwrap().execute(
+        "UPDATE cloud_sync_queue SET status='synced', synced_at='2026-09-02T00:01:00Z', last_error=NULL WHERE entity_id=?1",
+        [&id],
+    ).unwrap();
+
+    let resolved = library.cloud_backfill_progress().unwrap();
+    let resolved_activity = resolved.activity.iter().find(|item| item.direction == "replication").unwrap();
+    assert_eq!(resolved_activity.last_error, None);
+    assert_eq!(resolved_activity.problems, 0);
+
+    library.connection().unwrap().execute(
+        "UPDATE cloud_sync_queue SET status='pending', synced_at=NULL, last_error='temporary retry' WHERE entity_id=?1",
+        [&id],
+    ).unwrap();
+    let unresolved = library.cloud_backfill_progress().unwrap();
+    let unresolved_activity = unresolved.activity.iter().find(|item| item.direction == "replication").unwrap();
+    assert_eq!(unresolved_activity.last_error.as_deref(), Some(item_error));
+    assert_eq!(unresolved_activity.problems, 1);
+}
+
+#[test]
 fn bounded_scope_excludes_preexisting_pending_work_from_progress_and_claims() {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();

@@ -77,7 +77,7 @@ export function CloudBackfillSettings() {
 
   const reconcile = () => act(async () => {
     const report = await gateway.cloudBackfillReconcile?.();
-    setMessage(`중단된 작업 ${report?.requeued ?? 0}개를 대기열로 복구했습니다.`);
+    setMessage(`중단된 작업 ${report?.requeued ?? 0}개 · 누락 복제 ${report?.seededMissing ?? 0}개를 대기열로 복구했습니다.`);
     notifyCloudBackfillSupervisor();
   }, "중단된 작업을 복구하지 못했습니다.");
 
@@ -140,7 +140,7 @@ export function CloudBackfillSettings() {
           <Button size="sm" disabled={busy} onClick={() => setConfirmingStart(false)}>취소</Button>
           <Button size="sm" disabled={busy} onClick={() => void start()}>업로드 시작 확인</Button>
         </>}
-        <Button size="sm" disabled={busy} onClick={() => void reconcile()}>중단된 작업 복구</Button>
+        <Button size="sm" disabled={busy} onClick={() => void reconcile()}>동기화 상태 복구</Button>
       </div>
       </details>
     </section>

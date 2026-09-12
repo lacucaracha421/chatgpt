@@ -23,6 +23,8 @@ use crate::library::Library;
 pub(crate) const BACKFILL_CONCURRENCY: usize = 4;
 /// 개별 자산 재시도 전 대기. 백필은 야간 최대 처리량이 목표라 짧게 유지한다.
 const RETRY_BACKOFF: Duration = Duration::from_secs(2);
+const REPLICATION_ITEM_FAILURE_MESSAGE: &str =
+    "전송하지 못한 자료가 있습니다. 연결과 원본 파일을 확인해 주세요.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -95,6 +97,7 @@ pub struct BackfillRetryReport {
 #[serde(rename_all = "camelCase")]
 pub struct BackfillReconcileReport {
     pub requeued: u64,
+    pub seeded_missing: u64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -128,9 +131,10 @@ impl Library {
     }
 
     pub fn reconcile_cloud_backfill(&self) -> Result<BackfillReconcileReport, LibraryError> {
-        let connection = self.connection()?;
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
         let now = chrono::Utc::now().to_rfc3339();
-        let interrupted = connection.execute(
+        let interrupted = transaction.execute(
             "UPDATE cloud_sync_queue
              SET status = 'pending', updated_at = ?1,
                  last_error = COALESCE(last_error, 'interrupted before completion')
@@ -140,7 +144,7 @@ impl Library {
                     OR entity_id IN (SELECT asset_id FROM cloud_backfill_scope))",
             [&now],
         )? as u64;
-        let thumbnail_waiting = connection.execute(
+        let thumbnail_waiting = transaction.execute(
             "UPDATE cloud_sync_queue
              SET status = 'pending', updated_at = ?1, last_error = NULL
              WHERE entity_type = 'asset' AND operation = 'upsert'
@@ -154,8 +158,33 @@ impl Library {
                     OR entity_id IN (SELECT asset_id FROM cloud_backfill_scope))",
             params![now, LibraryError::CloudThumbnailUnavailable.to_string()],
         )? as u64;
+        let missing_assets = {
+            let mut statement = transaction.prepare(
+                "SELECT asset.id, asset.collected_at
+                 FROM assets AS asset
+                 WHERE asset.status = 'normal'
+                   AND NOT EXISTS (
+                     SELECT 1 FROM cloud_sync_queue AS queue
+                     WHERE queue.entity_type = 'asset'
+                       AND queue.entity_id = asset.id
+                       AND queue.operation = 'upsert'
+                   )
+                   AND (NOT EXISTS (SELECT 1 FROM cloud_backfill_scope)
+                        OR asset.id IN (SELECT asset_id FROM cloud_backfill_scope))
+                 ORDER BY asset.collected_at DESC, asset.id"
+            )?;
+            let rows = statement
+                .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
+        };
+        for (asset_id, collected_at) in &missing_assets {
+            super::queue::enqueue_asset_upsert(&transaction, asset_id, collected_at)?;
+        }
+        transaction.commit()?;
         Ok(BackfillReconcileReport {
             requeued: interrupted + thumbnail_waiting,
+            seeded_missing: missing_assets.len() as u64,
         })
     }
 
@@ -333,6 +362,13 @@ impl Library {
                        AND queue.operation = 'upsert'
                        AND queue.status = ?1
                        AND asset.status = 'normal'
+                       AND NOT EXISTS (
+                         SELECT 1 FROM cloud_sync_queue AS newer
+                         WHERE newer.entity_type = queue.entity_type
+                           AND newer.entity_id = queue.entity_id
+                           AND newer.operation = queue.operation
+                           AND newer.revision > queue.revision
+                       )
                        AND (NOT EXISTS (SELECT 1 FROM cloud_backfill_scope)
                             OR queue.entity_id IN (SELECT asset_id FROM cloud_backfill_scope))",
                 [status],
@@ -344,17 +380,24 @@ impl Library {
         let committing = count("committing")?;
         let last_error = connection
             .query_row(
-                "SELECT '전송하지 못한 자료가 있습니다. 연결과 원본 파일을 확인해 주세요.'
+                "SELECT ?1
                  FROM cloud_sync_queue AS queue
                  JOIN assets AS asset ON asset.id = queue.entity_id
                  WHERE queue.entity_type = 'asset' AND queue.operation = 'upsert'
                    AND queue.last_error IS NOT NULL
                    AND queue.status = 'failed'
                    AND asset.status = 'normal'
+                   AND NOT EXISTS (
+                     SELECT 1 FROM cloud_sync_queue AS newer
+                     WHERE newer.entity_type = queue.entity_type
+                       AND newer.entity_id = queue.entity_id
+                       AND newer.operation = queue.operation
+                       AND newer.revision > queue.revision
+                   )
                    AND (NOT EXISTS (SELECT 1 FROM cloud_backfill_scope)
                         OR queue.entity_id IN (SELECT asset_id FROM cloud_backfill_scope))
                  ORDER BY queue.updated_at DESC, queue.id DESC LIMIT 1",
-                [],
+                [REPLICATION_ITEM_FAILURE_MESSAGE],
                 |row| row.get::<_, String>(0),
             )
             .optional()?;
@@ -370,6 +413,37 @@ impl Library {
             [],
             |row| row.get::<_, String>(0),
         )?;
+        let unresolved_replication_item_error = connection.query_row(
+            "SELECT EXISTS(
+                 SELECT 1
+                 FROM cloud_sync_queue AS queue
+                 JOIN assets AS asset ON asset.id = queue.entity_id
+                 WHERE queue.entity_type = 'asset' AND queue.operation = 'upsert'
+                   AND queue.status != 'synced'
+                   AND queue.last_error IS NOT NULL
+                   AND asset.status = 'normal'
+                   AND NOT EXISTS (
+                     SELECT 1 FROM cloud_sync_queue AS newer
+                     WHERE newer.entity_type = queue.entity_type
+                       AND newer.entity_id = queue.entity_id
+                       AND newer.operation = queue.operation
+                       AND newer.revision > queue.revision
+                   )
+                   AND (NOT EXISTS (SELECT 1 FROM cloud_backfill_scope)
+                        OR queue.entity_id IN (SELECT asset_id FROM cloud_backfill_scope))
+             )",
+            [],
+            |row| row.get::<_, i64>(0),
+        )? != 0;
+        let mut activity = super::activity::read_activity(&connection)?;
+        if !unresolved_replication_item_error {
+            if let Some(replication) = activity.iter_mut().find(|item| item.direction == "replication") {
+                if replication.last_error.as_deref() == Some(REPLICATION_ITEM_FAILURE_MESSAGE) {
+                    replication.last_error = None;
+                    replication.problems = 0;
+                }
+            }
+        }
         Ok(BackfillProgress {
             control_state: BackfillControlState::from_database(&control_value)?,
             total_assets,
@@ -381,7 +455,7 @@ impl Library {
             failed: count("failed")?,
             active_workers: preparing + uploading + committing,
             last_error,
-            activity: super::activity::read_activity(&connection)?,
+            activity,
             replication_enabled: connection.query_row("SELECT cloud_sync_enabled FROM library_settings WHERE singleton = 1", [], |row| row.get(0))?,
         })
     }
@@ -418,7 +492,7 @@ impl Library {
         let result = self.run_configured_cloud_backfill_cycle(config);
         let (processed, problems, error) = match &result {
             Ok(summary) => (summary.committed, summary.retry_scheduled + summary.permanent_failures,
-                (summary.retry_scheduled + summary.permanent_failures > 0).then_some("전송하지 못한 자료가 있습니다. 연결과 원본 파일을 확인해 주세요.")),
+                (summary.retry_scheduled + summary.permanent_failures > 0).then_some(REPLICATION_ITEM_FAILURE_MESSAGE)),
             Err(LibraryError::CloudReplicationUpgradeRequired) => (0, 1, Some("서버 업데이트가 필요하여 동기화를 일시정지했습니다. 서버 업데이트 후 실패 항목 재시도와 계속을 선택해 주세요.")),
             Err(_) => (0, 1, Some("복제 연결을 확인하지 못했습니다. 서버 주소·연결 키와 네트워크를 확인해 주세요.")),
         };
