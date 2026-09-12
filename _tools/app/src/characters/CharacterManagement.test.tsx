@@ -1,5 +1,5 @@
 import { within } from "@testing-library/react";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
@@ -123,4 +123,69 @@ it("offers reference suggestions after curated-folder conversion and keeps conve
   await userEvent.setup().click(screen.getByRole("button",{name:"나중에"}));
   expect(saved).toHaveBeenCalledWith(manual);
   expect(vi.mocked(invoke).mock.calls.some(([command])=>command==="confirm_reference_batch")).toBe(false);
+});
+
+it("shows inherited folder exclusions and lets the owning folder restore inclusion", async () => {
+  const classifications = [...fixtureClassifications, { id: "nested", name: "바리에이션", kind: "tag" as const, parentId: "child", iconKey: null, colorKey: null }];
+  const hub = { targets: [], series: [{ classificationId: "series", heroAssetId: null, autoClassify: true }], groups: [], folderExclusions: ["child"], error: null, refresh: vi.fn(), revision: 0 } as any;
+  vi.mocked(invoke).mockResolvedValue(undefined);
+  const show = (id: string) => <CharacterFolderContent view={{ kind: "classification", classificationId: id }} hub={hub} classifications={classifications} galleryLayout="masonry" onGalleryLayoutChange={() => {}} privacyMode={false} onPrivacyModeChange={() => {}} metadataVisible onMetadataVisibleChange={() => {}} thumbnailRowHeight={180} onThumbnailRowHeightChange={() => {}} refreshVersion={0} onNavigate={() => {}} onAssetsChanged={() => {}}>
+    <FolderRegistrationContext.Consumer>{tools => <div>{tools}</div>}</FolderRegistrationContext.Consumer>
+  </CharacterFolderContent>;
+  const view = render(show("nested"));
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "폴더 더보기" }));
+  expect(screen.getByRole("menuitem", { name: "히나 폴더에서 분류 제외됨" })).toHaveAttribute("aria-disabled", "true");
+  await user.keyboard("{Escape}");
+  hub.folderExclusions = ["child", "nested"];
+  view.rerender(show("nested"));
+  await user.click(screen.getByRole("button", { name: "폴더 더보기" }));
+  expect(screen.getByRole("menuitem", { name: "이 폴더의 제외 설정 해제" })).toBeEnabled();
+  await user.keyboard("{Escape}");
+  hub.folderExclusions = ["child"];
+  view.rerender(show("child"));
+  await user.click(screen.getByRole("button", { name: "폴더 더보기" }));
+  await user.click(screen.getByRole("menuitem", { name: "캐릭터 분류에 다시 포함" }));
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("set_character_folder_excluded", { request: { classificationId: "child", excluded: false } }));
+  expect(hub.refresh).toHaveBeenCalled();
+});
+
+
+it("paginates groups, characters and folders in two rows and clamps the page after resizing", async () => {
+  let resize = () => {};
+  vi.stubGlobal("ResizeObserver", class {
+    constructor(callback: () => void) { resize = callback; }
+    observe() {} disconnect() {} unobserve() {}
+  });
+  try {
+    const members = Array.from({ length: 7 }, (_, index) => fixtureTarget(`pilot-${index}`, `파일럿 ${index}`));
+    const group = { id: "group", name: "파일럿 그룹", revision: 1, targetIds: [members[0].id] };
+    const view = render(<CharacterGroups seriesId="series" members={members} groups={[group]} folderCards={[
+      <button key="machines">기체 폴더</button>, <button key="scenery">배경 폴더</button>,
+    ]}>{pageMembers => <>{pageMembers.map(member => <button key={member.id}>{member.displayName}</button>)}</>}</CharacterGroups>);
+    const grid = view.container.querySelector(".series-characters")!;
+    Object.defineProperty(grid, "clientWidth", { configurable: true, value: 400 });
+    act(() => resize());
+    expect(screen.getByRole("button", { name: "파일럿 그룹 그룹 열기" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "파일럿 3" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "파일럿 4" })).not.toBeInTheDocument();
+    const pages = screen.getByRole("navigation", { name: "캐릭터·폴더 페이지" });
+    expect(within(pages).getByRole("button", { name: "1페이지" })).toHaveAttribute("aria-current", "page");
+    const user = userEvent.setup();
+    await user.click(within(pages).getByRole("button", { name: "2페이지" }));
+    expect(screen.getByRole("button", { name: "파일럿 4" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "기체 폴더" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "파일럿 3" })).not.toBeInTheDocument();
+    await user.click(within(pages).getByRole("button", { name: "3페이지" }));
+    expect(screen.getByRole("button", { name: "배경 폴더" })).toBeInTheDocument();
+    Object.defineProperty(grid, "clientWidth", { configurable: true, value: 600 });
+    act(() => resize());
+    expect(within(pages).queryByRole("button", { name: "3페이지" })).not.toBeInTheDocument();
+    expect(within(pages).getByRole("button", { name: "2페이지" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "배경 폴더" })).toBeInTheDocument();
+    view.rerender(<CharacterGroups seriesId="series" members={members.slice(0, 1)} groups={[]}>{pageMembers => <>{pageMembers.map(member => <button key={member.id}>{member.displayName}</button>)}</>}</CharacterGroups>);
+    expect(screen.queryByRole("navigation", { name: "캐릭터·폴더 페이지" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "파일럿 0" })).toBeInTheDocument();
+    view.unmount();
+  } finally { vi.unstubAllGlobals(); }
 });

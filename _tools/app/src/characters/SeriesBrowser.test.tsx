@@ -5,7 +5,7 @@ import { SeriesBrowser } from "./SeriesBrowser";
 import { createCharacterFixture, fixtureAssets, fixtureClassifications } from "./characterFixtures";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { LibraryGateway } from "../library/types";
-import { type CharacterGroup, type CharacterHubApi } from "./hubApi";
+import { type CharacterGroup, type CharacterHubApi, type SeriesFolder } from "./hubApi";
 import { ChromeSettingsDock, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
 
 beforeEach(() => { Object.defineProperties(HTMLElement.prototype, { clientWidth: { configurable:true,get:()=>850 },clientHeight:{configurable:true,get:()=>650} }); });
@@ -25,12 +25,12 @@ it("can select and save a sixth reference without a separate additional-referenc
   await user.click(within(panel).getByRole("button", { name: "저장" }));
   await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({ referenceIds: fixtureAssets.slice(0, 6).map(asset => asset.id) }), true));
 });
-async function mount(targetId?: string, pendingOnly = false, groups: CharacterGroup[] = [], groupId?: string, withChrome = false, legacy?: { seriesAutoClassify?: boolean; excludedCount?: number; targetEnabled?: boolean }) {
+async function mount(targetId?: string, pendingOnly = false, groups: CharacterGroup[] = [], groupId?: string, withChrome = false, legacy?: { seriesAutoClassify?: boolean; excludedCount?: number; targetEnabled?: boolean; folders?: SeriesFolder[]; exclusions?: string[]; privacyMode?: boolean; sourceUrl?: string }) {
   const api=createCharacterFixture(), sourceTargets=await api.targets();
   const targets = legacy?.targetEnabled === undefined ? sourceTargets : sourceTargets.map(target => target.id === (targetId ?? "hina") ? { ...target, enabled: legacy.targetEnabled!, ready: legacy.targetEnabled! && target.ready } : target);
   if (pendingOnly) { api.reviewPending = vi.fn(async () => true); vi.spyOn(api, "review"); }
-  const browse=vi.fn().mockResolvedValue({ items:fixtureAssets.slice(5),nextCursor:null,totalCount:13 });
-  const hubApi={browse,saveSeries:vi.fn(),series:vi.fn(),createManualCharacter:vi.fn(),completeReview:vi.fn().mockResolvedValue(1),setSeriesAssetExcluded:vi.fn(),excludedAssets:vi.fn().mockResolvedValue({items:[],nextCursor:null,totalCount:legacy?.excludedCount ?? 0}),
+  const browse=vi.fn().mockResolvedValue({ items:fixtureAssets.slice(5).map(asset => ({ ...asset, sourceUrl: legacy?.sourceUrl ?? asset.sourceUrl })),nextCursor:null,totalCount:13 });
+  const hubApi={folderExclusions:vi.fn().mockResolvedValue([]),seriesFolders:vi.fn().mockResolvedValue(legacy?.folders ?? []),setFolderExcluded:vi.fn().mockResolvedValue(undefined),browse,saveSeries:vi.fn(),series:vi.fn(),createManualCharacter:vi.fn(),completeReview:vi.fn().mockResolvedValue(1),setSeriesAssetExcluded:vi.fn(),excludedAssets:vi.fn().mockResolvedValue({items:[],nextCursor:null,totalCount:legacy?.excludedCount ?? 0}),
     referenceCandidates:vi.fn(async(targetId:string)=>{ const target=targets.find(item=>item.id===targetId)!; return {targetId,targetRevision:target.revision,referenceSetHash:`set-${targetId}`,confirmationMode:target.manualOnly?"initialize":"add_learned",minimumSelection:target.manualOnly?5:1,items:fixtureAssets.slice(5,7),suggestedAssetIds:fixtureAssets.slice(5,7).map(item=>item.id)}; }),
     confirmReferenceBatch:vi.fn(async()=>targets[0]),
     requestReferenceRefresh:vi.fn(async(targetId:string)=>({targetId,requestRevision:1,state:"pending" as const,eligibleCount:12})),
@@ -38,7 +38,7 @@ async function mount(targetId?: string, pendingOnly = false, groups: CharacterGr
   const navigate=vi.fn(),changed=vi.fn();
   const onGalleryLayoutChange=vi.fn(),onMetadataVisibleChange=vi.fn(),onPrivacyModeChange=vi.fn(),onThumbnailRowHeightChange=vi.fn();
   const gateway={listAssets:vi.fn().mockResolvedValue({items:fixtureAssets,nextCursor:null}),openLibrary:vi.fn()} as unknown as LibraryGateway;
-  const browser=<SeriesBrowser targetId={targetId} groupId={groupId} series={{classificationId:"series",heroAssetId:null,autoClassify:legacy?.seriesAutoClassify ?? true}} targets={targets} groups={groups} classifications={fixtureClassifications} galleryLayout="masonry" onGalleryLayoutChange={onGalleryLayoutChange} privacyMode={false} onPrivacyModeChange={onPrivacyModeChange} metadataVisible onMetadataVisibleChange={onMetadataVisibleChange} thumbnailRowHeight={180} onThumbnailRowHeightChange={onThumbnailRowHeightChange} refreshVersion={0} onNavigate={navigate} onChanged={changed} api={api} hubApi={hubApi} />;
+  const browser=<SeriesBrowser folderExclusions={legacy?.exclusions ?? []} targetId={targetId} groupId={groupId} series={{classificationId:"series",heroAssetId:null,autoClassify:legacy?.seriesAutoClassify ?? true}} targets={targets} groups={groups} classifications={[...fixtureClassifications, {id:"machines",name:"기체",kind:"tag",parentId:"series",iconKey:null,colorKey:null}]} galleryLayout="masonry" onGalleryLayoutChange={onGalleryLayoutChange} privacyMode={legacy?.privacyMode ?? false} onPrivacyModeChange={onPrivacyModeChange} metadataVisible onMetadataVisibleChange={onMetadataVisibleChange} thumbnailRowHeight={180} onThumbnailRowHeightChange={onThumbnailRowHeightChange} refreshVersion={0} onNavigate={navigate} onChanged={changed} api={api} hubApi={hubApi} />;
   render(<LibraryProvider gateway={gateway}>{withChrome ? <WorkspaceChromeProvider scope="series"><div className="workspace-navigation"><aside className="workspace-index"><ChromeSettingsDock /></aside>{browser}</div></WorkspaceChromeProvider> : browser}</LibraryProvider>);
   return {api,browse,navigate,changed,hubApi,onGalleryLayoutChange,onMetadataVisibleChange,onPrivacyModeChange,onThumbnailRowHeightChange};
 }
@@ -210,6 +210,9 @@ it("keeps manual refresh available from the gallery context menu",async()=>{
   const item=await screen.findByRole("option",{name:"이미지 5.webp"});
   const calls=browse.mock.calls.length;
   await user.pointer({target:item,keys:"[MouseRight]"});
+  for (const name of ["좋아요 켜기", "좋아요 끄기", "폴더로 이동", "불러온 이미지 선택", "선택 해제"]) {
+    expect(screen.queryByRole("menuitem", { name })).not.toBeInTheDocument();
+  }
   await user.click(await screen.findByRole("menuitem",{name:"새로고침"}));
   await waitFor(()=>expect(browse.mock.calls.length).toBeGreaterThan(calls));
   expect(changed).toHaveBeenCalled();
@@ -370,4 +373,56 @@ it("shows only character states that need attention on overview cards", async ()
   await mount();
   await screen.findByRole("button", { name: "히나 열기" });
   expect(screen.queryByLabelText("기준 이미지 준비 완료")).not.toBeInTheDocument();
+});
+
+it("places ordinary folders beside characters with navigation and a persisted exclusion action", async () => {
+  const { navigate, hubApi, changed } = await mount(undefined, false, [], undefined, false, {
+    folders: [{ classificationId: "machines", thumbnailAssetId: "asset-5" }], privacyMode: true,
+  });
+  const card = await screen.findByRole("button", { name: "기체 폴더 열기" });
+  expect(card.closest(".series-characters")).toContainElement(screen.getByRole("button", { name: "히나 열기" }));
+  expect(card.querySelector("img")).toHaveClass("character-private");
+  const user = userEvent.setup();
+  await user.click(card);
+  expect(navigate).toHaveBeenCalledWith({ kind: "classification", classificationId: "machines" });
+  await user.click(screen.getByRole("button", { name: "기체 폴더 더보기" }));
+  await user.click(screen.getByRole("menuitem", { name: "캐릭터 분류에서 제외" }));
+  await waitFor(() => expect(hubApi.setFolderExcluded).toHaveBeenCalledWith("machines", true));
+  await waitFor(() => expect(changed).toHaveBeenCalled());
+});
+
+it("restores folder inclusion and leaves failed saves recoverable", async () => {
+  const { hubApi, changed } = await mount(undefined, false, [], undefined, false, {
+    folders: [{ classificationId: "machines", thumbnailAssetId: null }], exclusions: ["machines"],
+  });
+  const card = await screen.findByRole("button", { name: "기체 폴더 열기" });
+  expect(within(card).getByText("캐릭터 분류 제외")).toBeVisible();
+  vi.mocked(hubApi.setFolderExcluded).mockRejectedValueOnce(new Error("저장 실패"));
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "기체 폴더 더보기" }));
+  await user.click(screen.getByRole("menuitem", { name: "캐릭터 분류에 다시 포함" }));
+  await screen.findByRole("alert");
+  expect(changed).not.toHaveBeenCalled();
+  expect(within(card).getByText("캐릭터 분류 제외")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "기체 폴더 더보기" }));
+  await user.click(screen.getByRole("menuitem", { name: "캐릭터 분류에 다시 포함" }));
+  await waitFor(() => expect(changed).toHaveBeenCalled());
+  expect(hubApi.setFolderExcluded).toHaveBeenLastCalledWith("machines", false);
+});
+
+
+it("copies a character asset source and reports clipboard failures without changing the gallery", async () => {
+  const user = userEvent.setup();
+  const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+  const { changed } = await mount("hina", false, [], undefined, false, { sourceUrl: "https://example.com/pilot" });
+  const item = await screen.findByRole("option", { name: "이미지 5.webp" });
+  await user.pointer({ target: item, keys: "[MouseRight]" });
+  await user.click(screen.getByRole("menuitem", { name: "출처 복사" }));
+  expect(writeText).toHaveBeenCalledWith("https://example.com/pilot");
+  expect(await screen.findByText("출처를 복사했습니다.")).toBeVisible();
+  writeText.mockRejectedValueOnce(undefined);
+  await user.pointer({ target: item, keys: "[MouseRight]" });
+  await user.click(screen.getByRole("menuitem", { name: "출처 복사" }));
+  expect(await screen.findByText("출처를 복사하지 못했습니다.")).toBeVisible();
+  expect(changed).not.toHaveBeenCalled();
 });

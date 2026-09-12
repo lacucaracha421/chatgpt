@@ -249,10 +249,6 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
       setBatchPending(false);
     }
   };
-  const setBatchFavorite = (favorite: boolean) => void runBatch(
-    () => gateway.setAssetsFavorite(selectedIds, favorite),
-    "즐겨찾기를 변경하지 못했습니다.",
-  );
   const changeMembership = (operation: () => Promise<void>) => void (async () => {
     if (await runBatch(operation, "분류를 변경하지 못했습니다.")) onMembershipChanged();
   })();
@@ -341,16 +337,15 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
     ...(onReviewVideos && selectedAssets.length >= 2 && selectedAssets.length <= 100 && selectedAssets.every(asset => asset.media.kind === "video")
       ? [{ id: "video-similarity", label: "선택한 영상 비교", disabled: batchPending, onSelect: () => onReviewVideos([...selectedIds]) }]
       : []),
-    ...libraryContextItems({ count: selectedIds.length, busy: batchPending, classifications, albums,
-      onFavorite: setBatchFavorite,
-      onMove: classificationId => changeMembership(() => gateway.setAssetClassification({ assetIds: selectedIds, classificationId })),
+    ...libraryContextItems({ count: selectedIds.length, busy: batchPending, albums,
+      sourceUrls: selectedAssets.map(asset => asset.sourceUrl),
+      onMessage: message => { setUndoAssetIds(null); setMessage(message); },
       onAlbum: id => changeMembership(() => gateway.patchAssetAlbums({ assetIds: selectedIds, addAlbumIds: [id], removeAlbumIds: [] })),
     }),
     ...(view.kind === "album" ? [{ id: "remove-album", label: "이 앨범에서 제외", disabled: batchPending, onSelect: () => changeMembership(() => gateway.patchAssetAlbums({ assetIds: selectedIds, addAlbumIds: [], removeAlbumIds: [view.albumId] })) }] : []),
     ...(view.kind === "collection" ? [{ id: "remove", label: "이 컬렉션에서 제거", disabled: batchPending, onSelect: removeFromCollection }] : []),
     ...(view.kind === "collection" && selectedIds.length === 1 ? [{ id: "cover", label: "대표 이미지로 지정", disabled: batchPending, onSelect: () => setCover(selectedIds[0]!) }] : []),
     { id: "info", label: "정보 열기", onSelect: () => setInspectorOpen(true) },
-    { id: "clear", label: "선택 해제", onSelect: clearSelection },
     { id: "trash", label: "휴지통으로 이동", destructive: true, disabled: batchPending, onSelect: trashSelection },
   ];
   const showNewest = () => { setPage(null); pageRef.current = null; setNewAssetsAvailable(false); refresh(); };

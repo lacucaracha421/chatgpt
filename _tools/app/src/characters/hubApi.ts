@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { AssetSummary } from "../library/types";
 export type CharacterSeries = { classificationId: string; heroAssetId: string | null; autoClassify: boolean };
+export type SeriesFolder = { classificationId: string; thumbnailAssetId: string | null };
 export type CharacterGroup = { id: string; seriesId: string; name: string; revision: number; targetIds: string[] };
 // referenceTargetId selects eligible reference/thumbnail images; an empty ID denotes an unsaved character.
 // Pair it with the same targetId to restrict candidates to that character folder.
@@ -23,6 +24,9 @@ export type ReferenceRefreshReceipt = {
   targetId: string; requestRevision: number; state: "pending" | "running" | "failed" | "completed"; eligibleCount: number;
 };
 export const characterHubApi = {
+  folderExclusions: (): Promise<string[]> => invoke("character_folder_exclusions"),
+  seriesFolders: (seriesId: string): Promise<SeriesFolder[]> => invoke("character_series_folders", { seriesId }),
+  setFolderExcluded: (classificationId: string, excluded: boolean): Promise<void> => invoke("set_character_folder_excluded", { request: { classificationId, excluded } }),
   series: (): Promise<CharacterSeries[]> => invoke("character_series"),
   groups: async (seriesId: string): Promise<CharacterGroup[]> => (await invoke<Omit<CharacterGroup, "seriesId">[]>("character_groups", { seriesId })).map(group => ({ ...group, seriesId })),
   saveSeries: (request: CharacterSeries): Promise<CharacterSeries> => invoke("save_character_series", { request }),
@@ -35,5 +39,5 @@ export const characterHubApi = {
   confirmReferenceBatch: (request: ConfirmReferenceBatch): Promise<import("./api").CharacterTarget> => invoke("confirm_reference_batch", { request }),
   requestReferenceRefresh: (targetId: string, expectedRevision: number): Promise<ReferenceRefreshReceipt> => invoke("request_character_reference_refresh", { targetId, expectedRevision }),
 };
-export type CharacterHubApi = Pick<typeof characterHubApi, "series" | "saveSeries" | "browse" | "createManualCharacter" | "completeReview" | "setSeriesAssetExcluded" | "excludedAssets" | "referenceCandidates" | "confirmReferenceBatch" | "requestReferenceRefresh">;
+export type CharacterHubApi = Pick<typeof characterHubApi, "folderExclusions" | "seriesFolders" | "setFolderExcluded" | "series" | "saveSeries" | "browse" | "createManualCharacter" | "completeReview" | "setSeriesAssetExcluded" | "excludedAssets" | "referenceCandidates" | "confirmReferenceBatch" | "requestReferenceRefresh">;
 export type ReferenceCandidateApi = Pick<typeof characterHubApi, "referenceCandidates" | "confirmReferenceBatch">;

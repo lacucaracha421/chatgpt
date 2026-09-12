@@ -22,6 +22,15 @@ pub(super) fn resolve_character_scope(
         return Ok(None);
     };
 
+    let folder_excluded: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM character_excluded_folders WHERE id=?1)",
+        [classification_id],
+        |row| row.get(0),
+    )?;
+    if folder_excluded {
+        return Ok(None);
+    }
+
     let in_originals: bool = connection.query_row(
         "WITH RECURSIVE lineage(id,parent_id) AS (
             SELECT id,parent_id FROM classification_entries WHERE id=?1
@@ -67,7 +76,7 @@ pub(super) fn resolve_character_scope(
              )
              SELECT s.classification_id FROM character_series s
              JOIN descendants d ON d.id=s.classification_id
-             WHERE s.auto_classify=1 ORDER BY s.classification_id",
+             WHERE s.auto_classify=1 AND s.classification_id NOT IN (SELECT id FROM character_excluded_folders) ORDER BY s.classification_id",
             )?
             .query_map([classification_id], |row| row.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?,

@@ -905,19 +905,43 @@ describe("AssetBrowser", () => {
     fireEvent.click(first);
     fireEvent.click(screen.getByRole("option", { name: "asset-1.png" }), { ctrlKey: true });
     fireEvent.contextMenu(first, { clientX: 200, clientY: 180 });
-    await user.click(screen.getByRole("menuitem", { name: "좋아요 켜기" }));
-    expect(gateway.setAssetsFavorite).toHaveBeenLastCalledWith(["asset-0", "asset-1"], true);
+    expect(screen.getByRole("menuitem", { name: "2개 선택" })).toBeInTheDocument();
+    for (const name of ["좋아요 켜기", "좋아요 끄기", "폴더로 이동", "불러온 이미지 선택", "선택 해제"]) {
+      expect(screen.queryByRole("menuitem", { name })).not.toBeInTheDocument();
+    }
+    expect(screen.getByRole("menuitem", { name: "정보 열기" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
     fireEvent.contextMenu(screen.getByRole("option", { name: "asset-2.png" }));
-    await user.click(screen.getByRole("menuitem", { name: "좋아요 끄기" }));
-    expect(gateway.setAssetsFavorite).toHaveBeenLastCalledWith(["asset-2"], false);
-    fireEvent.contextMenu(screen.getByRole("option", { name: "asset-2.png" }));
-    await user.click(screen.getByRole("menuitem", { name: "폴더로 이동" }));
+    expect(screen.getByRole("menuitem", { name: "1개 선택" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "asset-2.png" })).toHaveAttribute("aria-selected", "true");
-    fireEvent.click(await screen.findByRole("menuitem", { name: "미분류" }));
-    expect(gateway.setAssetClassification).toHaveBeenLastCalledWith({ assetIds: ["asset-2"], classificationId: null });
+    expect(first).toHaveAttribute("aria-selected", "false");
   });
 
-  it("runs explicit batch favorite, trash, and undo actions", async () => {
+  it("copies selected source URLs without duplicates and disables copying for missing sources", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+    const gateway = createGateway({ items: [
+      { ...asset(0), sourceUrl: "https://example.com/first" },
+      { ...asset(1), sourceUrl: "https://example.com/first" },
+      { ...asset(2), sourceUrl: "https://example.com/second" },
+      asset(3),
+    ], nextCursor: null });
+    renderBrowser(gateway);
+    const first = await screen.findByRole("option", { name: "asset-0.png" });
+    first.focus();
+    await user.keyboard("{Control>}a{/Control}");
+    fireEvent.contextMenu(first);
+    await user.click(screen.getByRole("menuitem", { name: "출처 복사" }));
+    expect(writeText).toHaveBeenCalledWith("https://example.com/first\nhttps://example.com/second");
+    expect(await screen.findByText("출처 2개를 복사했습니다.")).toBeVisible();
+    await user.click(first);
+    fireEvent.contextMenu(screen.getByRole("option", { name: "asset-3.png" }));
+    expect(screen.getByRole("menuitem", { name: "출처 복사" })).toBeDisabled();
+    expect(writeText).toHaveBeenCalledTimes(1);
+    writeText.mockRestore();
+  });
+
+  it("runs keyboard selection, trash, and undo actions", async () => {
     const user = userEvent.setup();
     const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
     render(
@@ -929,9 +953,6 @@ describe("AssetBrowser", () => {
     first.focus();
     await user.keyboard("{Control>}a{/Control}");
     expect(screen.queryByRole("toolbar", { name: "선택 작업" })).not.toBeInTheDocument();
-
-    await user.click(await selectionAction("좋아요 켜기"));
-    expect(gateway.setAssetsFavorite).toHaveBeenCalledWith(["asset-0", "asset-1"], true);
 
     await user.click(await selectionAction("휴지통으로 이동"));
     expect(gateway.trashAssets).toHaveBeenCalledWith(["asset-0", "asset-1"]);

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { PhotoIcon, UserGroupIcon } from "@heroicons/react/24/outline";
 import { PencilIcon } from "../shared/ui/ArchiveIcons";
@@ -18,10 +18,30 @@ type Props = {
   privacyMode?: boolean;
   onOpenGroup?: (groupId: string | null) => void;
   onGroupsChanged?: () => void;
+  folderCards?: ReactNode[];
   children: (members: CharacterTarget[]) => ReactNode;
 };
 
-export function CharacterGroups({ seriesId, members, groups: providedGroups, activeGroupId, privacyMode = false, onOpenGroup, onGroupsChanged, children }: Props) {
+export function CharacterGroups({ seriesId, members, groups: providedGroups, activeGroupId, privacyMode = false, onOpenGroup, onGroupsChanged, folderCards, children }: Props) {
+  const gridRef = useRef<HTMLDivElement>(null);
+  const [columns, setColumns] = useState(1);
+  const [pagination, setPagination] = useState({ scope: "", page: 0 });
+  useLayoutEffect(() => {
+    const grid = gridRef.current;
+    if (!grid) return;
+    const measure = () => {
+      const style = getComputedStyle(grid);
+      const tracks = style.gridTemplateColumns.match(/[\d.]+px/g);
+      const width = grid.clientWidth - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0);
+      const cardWidth = parseFloat(style.getPropertyValue("--series-card-width")) || 180;
+      const gap = parseFloat(style.columnGap) || 12;
+      setColumns(Math.max(1, tracks?.length ?? Math.floor((width + gap) / (cardWidth + gap))));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(grid);
+    return () => observer.disconnect();
+  }, []);
   const [loadedGroups, setLoadedGroups] = useState<Group[]>([]);
   const [draft, setDraft] = useState<Group | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
@@ -43,6 +63,22 @@ export function CharacterGroups({ seriesId, members, groups: providedGroups, act
     ? members.filter(target => current.targetIds.includes(target.id))
     : members.filter(target => !grouped.has(target.id));
 
+  const scope = `${seriesId}:${current?.id ?? ""}`;
+  const rootGroups = current ? [] : groups;
+  const rootFolders = current ? [] : (folderCards ?? []).filter(Boolean);
+  const pageSize = columns * 2;
+  const pageCount = Math.max(1, Math.ceil((rootGroups.length + visibleMembers.length + rootFolders.length) / pageSize));
+  const page = Math.min(pagination.scope === scope ? pagination.page : 0, pageCount - 1);
+  const start = page * pageSize;
+  const end = start + pageSize;
+  const pageGroups = rootGroups.slice(start, end);
+  const pageMembers = visibleMembers.slice(Math.max(0, start - rootGroups.length), Math.max(0, end - rootGroups.length));
+  const folderOffset = rootGroups.length + visibleMembers.length;
+  const pageFolders = rootFolders.slice(Math.max(0, start - folderOffset), Math.max(0, end - folderOffset));
+  useEffect(() => {
+    setPagination(previous => previous.scope === scope && previous.page === page ? previous : { scope, page });
+  }, [scope, page]);
+
   async function save(remove = false) {
     if (!draft || busy) return;
     setBusy(true); setError(null);
@@ -63,18 +99,22 @@ export function CharacterGroups({ seriesId, members, groups: providedGroups, act
 
   return <>
     <div className="series-gallery-heading character-group-heading">
-      <h3 aria-label={current ? `그룹 · ${current.name}` : "캐릭터"}>{current ? `그룹 · ${current.name}` : "캐릭터"}<small aria-hidden="true">{current ? visibleMembers.length : members.length}</small></h3>
+      <h3 aria-label={current ? `그룹 · ${current.name}` : folderCards?.length ? "캐릭터 · 폴더" : "캐릭터"}>{current ? `그룹 · ${current.name}` : folderCards?.length ? "캐릭터 · 폴더" : "캐릭터"}<small aria-hidden="true">{current ? visibleMembers.length : members.length + (folderCards?.length ?? 0)}</small></h3>
       {current ? <>
         <Button size="sm" variant="ghost" onClick={() => onOpenGroup?.(null)}>시리즈로</Button>
         <Button size="sm" variant="ghost" onClick={() => setDraft({ ...current, targetIds: [...current.targetIds] })}>그룹 편집</Button>
       </> : <Button size="sm" variant="ghost" onClick={() => setDraft({ id: "", name: "", revision: 0, targetIds: [] })}>그룹 만들기</Button>}
     </div>
     {error && <p className="character-message" role="alert">{error}<Button size="sm" onClick={() => setRevision(value => value + 1)}>다시 불러오기</Button></p>}
-    <div className="series-characters" aria-label={current ? `${current.name} 그룹 캐릭터` : "등록 캐릭터"}>
-      {!current && groups.map(group => <CharacterGroupCard key={group.id} group={group} members={members} privacyMode={privacyMode} onOpen={() => onOpenGroup?.(group.id)} onEdit={() => setDraft({ ...group, targetIds: [...group.targetIds] })} />)}
-      {children(visibleMembers)}
-      {!groups.length && !members.length && <p className="series-empty">캐릭터를 등록하고 기준 이미지를 선택하세요.</p>}
+    <div ref={gridRef} className={`series-characters${pageCount > 1 ? " series-characters--paged" : ""}`} aria-label={current ? `${current.name} 그룹 캐릭터` : folderCards?.length ? "캐릭터와 일반 폴더" : "등록 캐릭터"}>
+      {pageGroups.map(group => <CharacterGroupCard key={group.id} group={group} members={members} privacyMode={privacyMode} onOpen={() => onOpenGroup?.(group.id)} onEdit={() => setDraft({ ...group, targetIds: [...group.targetIds] })} />)}
+      {children(pageMembers)}
+      {pageFolders}
+      {!groups.length && !members.length && !folderCards && <p className="series-empty">캐릭터를 등록하고 기준 이미지를 선택하세요.</p>}
     </div>
+    {pageCount > 1 && <nav className="series-card-pagination" aria-label="캐릭터·폴더 페이지">
+      {Array.from({ length: pageCount }, (_, index) => <Button key={index} size="sm" variant="ghost" className="series-card-pagination__page" aria-label={`${index + 1}페이지`} aria-current={page === index ? "page" : undefined} onClick={() => setPagination({ scope, page: index })}>{index + 1}</Button>)}
+    </nav>}
     {draft && <Dialog open title={draft.id ? "캐릭터 그룹 편집" : "캐릭터 그룹 만들기"} onClose={() => { if (!busy) setDraft(null); }}>
       <TextField label="그룹 이름" value={draft.name} maxLength={100} disabled={busy} onChange={event => setDraft({ ...draft, name: event.target.value })} />
       <p>탐색 목록만 묶습니다. 시리즈 소속, 이미지 분류와 분석 범위는 바뀌지 않습니다.</p>

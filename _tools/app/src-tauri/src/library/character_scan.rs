@@ -388,6 +388,7 @@ impl Library {
                 SELECT a.id,a.content_hash,a.relative_path FROM assets a
                 WHERE a.status='normal' AND a.media_kind='image'
                 AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND  (ac.classification_id IN (SELECT id FROM scope) OR (?3 AND ac.classification_id IN (SELECT id FROM ancestors WHERE parent_id IS NULL))))
+                AND NOT EXISTS(SELECT 1 FROM asset_classifications ac JOIN character_excluded_folders e ON e.id=ac.classification_id WHERE ac.asset_id=a.id)
                 AND NOT EXISTS(SELECT 1 FROM character_series_asset_exclusions x WHERE x.series_id=?1 AND x.asset_id=a.id)
                 AND NOT EXISTS(SELECT 1 FROM character_references r WHERE r.target_id=?2 AND r.asset_id=a.id) ORDER BY a.id")?;
             let rows = statement

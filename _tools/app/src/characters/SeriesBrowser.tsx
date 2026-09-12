@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ComponentProps } from "react";
-import { ChevronRightIcon, PhotoIcon, PlusIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { ChevronRightIcon, FolderIcon, PhotoIcon, PlusIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { EllipsisHorizontalIcon, PencilIcon } from "../shared/ui/ArchiveIcons";
 import type { AlbumEntry, AssetSummary, AssetView, ClassificationEntry } from "../library/types";
 import { useLibrary } from "../library/LibraryContext";
@@ -23,9 +23,10 @@ import { useBackHandler } from "../shared/navigation/BackNavigation";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { CharacterRegistry, characterDraft, activeCharacterReferences, MAX_CHARACTER_REFERENCES, type CharacterEditorDraft } from "./CharacterRegistry";
 import { CharacterConversion } from "./CharacterConversion";
+import { folderExclusionItem } from "./folderExclusion";
 import { CharacterGroups } from "./CharacterGroups";
 import { characterApi, type CharacterApi, type CharacterTarget } from "./api";
-import { characterHubApi, type CharacterBrowsePage, type CharacterGroup, type CharacterHubApi, type CharacterSeries, type SeriesGalleryFilter } from "./hubApi";
+import { characterHubApi, type CharacterBrowsePage, type CharacterGroup, type CharacterHubApi, type CharacterSeries, type SeriesFolder, type SeriesGalleryFilter } from "./hubApi";
 import "./CharacterManagement.css";
 import "./SeriesBrowser.css";
 
@@ -33,6 +34,7 @@ export type CharacterGalleryDrag = Pick<ComponentProps<typeof AssetGallery>, "on
 type Props = {
   requestedAsset?: AssetSummary | null; onRequestedAssetHandled?: () => void;
   clearSelectionRequest?: number; galleryDrag?: CharacterGalleryDrag; albums?: AlbumEntry[];
+  folderExclusions?: string[];
   series: CharacterSeries; targetId?: string; groupId?: string; targets: CharacterTarget[]; groups?: CharacterGroup[]; classifications: ClassificationEntry[];
   galleryLayout: "masonry" | "justified"; onGalleryLayoutChange: (layout: "masonry" | "justified") => void;
   privacyMode: boolean; onPrivacyModeChange: (value: boolean) => void;
@@ -50,8 +52,10 @@ const ordinarySeriesGalleryViews: { value: SeriesGalleryView; label: string }[] 
 ];
 const emptyPage = (): CharacterBrowsePage => ({ items: [], nextCursor: null, totalCount: 0 });
 
-export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSelectionRequest = 0, galleryDrag, albums = [], series, targetId, groupId, targets, groups = [], classifications, galleryLayout, onGalleryLayoutChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, onNavigate, onChanged, api = characterApi, hubApi = characterHubApi }: Props) {
+export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSelectionRequest = 0, galleryDrag, albums = [], folderExclusions = [], series, targetId, groupId, targets, groups = [], classifications, galleryLayout, onGalleryLayoutChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, onNavigate, onChanged, api = characterApi, hubApi = characterHubApi }: Props) {
   const { gateway } = useLibrary();
+  const [folders, setFolders] = useState<SeriesFolder[]>([]);
+  const [folderError, setFolderError] = useState<string | null>(null);
   const [page, setPage] = useState<CharacterBrowsePage>(emptyPage);
   const [all, setAll] = useState(false), [loading, setLoading] = useState(true), [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null), [editorError, setEditorError] = useState<string | null>(null);
@@ -138,6 +142,15 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       setSeriesGalleryState({ seriesId: series.classificationId, view: "unclassified" });
     }
   }, [legacyExcludedCount, series.classificationId, seriesGalleryView]);
+  useEffect(() => {
+    setFolderError(null);
+    if (targetId || currentGroup || picking) return;
+    let active = true;
+    void hubApi.seriesFolders(series.classificationId).then(result => {
+      if (active) setFolders(result);
+    }).catch(error => { if (active) setFolderError(commandErrorMessage(error, "하위 폴더를 불러오지 못했습니다.")); });
+    return () => { active = false; };
+  }, [hubApi, series.classificationId, targetId, currentGroup?.id, Boolean(picking), refreshVersion, reload]);
   useEffect(() => { setAssignTo([]); setAssignmentQuery(""); }, [series.classificationId]);
   useEffect(() => setSelection(emptySelection()), [clearSelectionRequest]);
   useEffect(() => { if (requestedAsset) { setExternalAsset(requestedAsset); setViewer(requestedAsset.id); onRequestedAssetHandled?.(); } }, [requestedAsset]);
@@ -224,13 +237,10 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const contextItems: ContextMenuItem[] = picking ? [
     { id: "cancel-pick", label: "이미지 선택 취소", onSelect: () => finishPick(false) },
   ] : [
-    ...libraryContextItems({ count: selectedIds.length, busy, classifications, albums,
-      onFavorite: favorite => void action(() => gateway.setAssetsFavorite(selectedIds, favorite)),
-      onMove: classificationId => void action(() => gateway.setAssetClassification({ assetIds: selectedIds, classificationId })),
+    ...libraryContextItems({ count: selectedIds.length, busy, albums,
+      sourceUrls: page.items.filter(asset => selection.ids.has(asset.id)).map(asset => asset.sourceUrl), onMessage: setMessage,
       onAlbum: id => void action(() => gateway.patchAssetAlbums({ assetIds: selectedIds, addAlbumIds: [id], removeAlbumIds: [] })) }),
     { id: "info", label: "정보 열기", disabled: !selectedIds.length, onSelect: () => setInspector(true) },
-    { id: "all", label: "불러온 이미지 선택", onSelect: () => setSelection(old => selectAllLoaded(old, ids)) },
-    { id: "clear", label: "선택 해제", onSelect: () => setSelection(emptySelection()) },
     { id: "refresh", label: "새로고침", onSelect: refresh },
     { id: "trash", label: "휴지통으로 이동", destructive: true, disabled: busy || !selectedIds.length, onSelect: () => void action(async () => { await gateway.trashAssets(selectedIds); setUndo(selectedIds); setSelection(emptySelection()); }) },
   ];
@@ -313,7 +323,21 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
           {!currentGroup && series.heroAssetId && <img className={`series-hero${privacyMode ? " character-private" : ""}`} src={assetUrl(series.heroAssetId)} alt={`${name} 히어로 이미지`} />}
           <CharacterGroups key={`${series.classificationId}:${currentGroup?.id ?? "series"}`} seriesId={series.classificationId} members={members} groups={groups.filter(group => group.seriesId === series.classificationId)} activeGroupId={currentGroup?.id} privacyMode={privacyMode}
             onOpenGroup={id => onNavigate({ kind: "classification", classificationId: series.classificationId, ...(id ? { characterGroupId: id } : {}) })}
-            onGroupsChanged={onChanged}>{visibleMembers => <>{visibleMembers.map(target => <article className="series-character" key={target.id}>
+            onGroupsChanged={onChanged}
+            folderCards={folders.length > 0 ? folders.map(item => {
+              const folder = classifications.find(folder => folder.id === item.classificationId);
+              if (!folder) return null;
+              const exclusion = folderExclusionItem(folder.id, classifications, folderExclusions, excluded => void action(() => hubApi.setFolderExcluded(folder.id, excluded)));
+              const excluded = folderExclusions.includes(folder.id) || exclusion.disabled;
+              return <article className="series-character" key={folder.id}>
+                <button className="series-character__open" aria-label={`${folder.name} 폴더 열기`} onClick={() => onNavigate({ kind: "classification", classificationId: folder.id })}>
+                  {item.thumbnailAssetId ? <img loading="lazy" className={privacyMode ? "character-private" : undefined} src={thumbnailUrl(item.thumbnailAssetId)} alt="" /> : <span className="series-character__placeholder"><FolderIcon aria-hidden="true" />일반 폴더</span>}
+                  <strong><FolderIcon className="character-group-card__icon" aria-hidden="true" /><span className="series-character__name">{folder.name}</span></strong>
+                  <small>{excluded ? "캐릭터 분류 제외" : "일반 폴더"}</small>
+                </button>
+                <Menu label={`${folder.name} 폴더 더보기`} triggerClassName="series-character__info" disabled={busy} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[exclusion]} />
+              </article>;
+            }) : undefined}>{visibleMembers => <>{visibleMembers.map(target => <article className="series-character" key={target.id}>
               <button className="series-character__open" aria-label={`${target.displayName} 열기`} onClick={() => onNavigate({ kind: "classification", classificationId: series.classificationId, characterId: target.id })}>
                 {(target.thumbnailAssetId ?? activeCharacterReferences(target)[0]?.assetId) ? <img loading="lazy" className={privacyMode ? "character-private" : ""} src={thumbnailUrl((target.thumbnailAssetId ?? activeCharacterReferences(target)[0]!.assetId)!)} alt="" /> : <span className="series-character__placeholder"><PhotoIcon aria-hidden="true" />대표 이미지</span>}
                 <strong><span className="series-character__name">{target.displayName}</span></strong>
@@ -322,6 +346,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
               <Button className="series-character__info" size="icon" variant="ghost" aria-label={`${target.displayName} 편집`} aria-description="캐릭터 편집" onClick={() => openEditor(target)}><PencilIcon aria-hidden="true" /></Button>
             </article>)}</>}</CharacterGroups>
         </div>}
+        {folderError && <p className="character-message" role="alert">{folderError}<Button size="sm" onClick={() => setReload(v => v + 1)}>다시 시도</Button></p>}
         {!picking && current?.description && <p className="series-description">{current.description}</p>}
         {picking && picking.kind !== "hero" && editor?.target ? <div className="series-gallery-heading"><h3>{pickFromSeries ? "시리즈에서 이미지 선택" : `${editor.target.displayName} 캐릭터 폴더`}<small>{page.totalCount}</small></h3><Button size="sm" variant="ghost" onClick={() => setPickFromSeries(v => !v)}>{pickFromSeries ? "캐릭터 폴더로 돌아가기" : "시리즈에서 이미지 찾기"}</Button></div>
           : currentGroup && !picking ? <div className="series-gallery-heading"><h3>{currentGroup.name} 이미지<small>{page.totalCount}</small></h3></div>

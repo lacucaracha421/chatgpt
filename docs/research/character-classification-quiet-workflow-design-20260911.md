@@ -55,7 +55,7 @@ The user's initial classification choice is authoritative.
 ### Registered series or its descendant
 
 An image saved directly to a registered series, or to a normal descendant folder
-whose nearest registered ancestor is that series, may enter character recognition.
+whose nearest registered ancestor is that series, may enter character recognition. Ordinary folders can opt out through `캐릭터 분류에서 제외`: the persisted folder identity excludes its current and future descendants from the unclassified pool, automatic enrollment, historical refresh, and late automatic publication. Whole-series browsing and existing manual memberships remain available. Removing the folder policy restores eligibility without automatically replaying historical assets.
 It is compared only with ready characters registered to that nearest series.
 
 Example: an image saved to `던전밥` is compared with ready `던전밥` characters.

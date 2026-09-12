@@ -738,3 +738,24 @@ pub async fn retry_failed_character_assets(
     .await
     .map_err(|_| super::background_task_error())?
 }
+
+#[tauri::command]
+pub async fn character_folder_exclusions(state: State<'_, AppState>) -> Result<Vec<String>, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.character_folder_exclusions())
+        .await.map_err(|_| super::background_task_error())?.map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn character_series_folders(series_id: String, state: State<'_, AppState>) -> Result<Vec<crate::library::character_folders::SeriesFolder>, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.character_series_folders(&series_id))
+        .await.map_err(|_| super::background_task_error())?.map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn set_character_folder_excluded(request: crate::library::character_folders::FolderExclusionRequest, state: State<'_, AppState>) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.set_character_folder_excluded(request))
+        .await.map_err(|_| super::background_task_error())?.map_err(Into::into)
+}

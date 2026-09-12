@@ -1,7 +1,8 @@
-import type { AlbumEntry, ClassificationEntry } from "../library/types";
+import { commandErrorMessage } from "../library/errorMessage";
+import type { AlbumEntry } from "../library/types";
 import type { ContextMenuItem } from "../shared/ui/ContextMenu";
 
-function destinationLabel(entry: ClassificationEntry | AlbumEntry, entries: (ClassificationEntry | AlbumEntry)[]) {
+function destinationLabel(entry: AlbumEntry, entries: AlbumEntry[]) {
   const names = [entry.name], seen = new Set([entry.id]);
   let parent = entries.find(item => item.id === entry.parentId);
   while (parent && !seen.has(parent.id)) {
@@ -13,19 +14,24 @@ function destinationLabel(entry: ClassificationEntry | AlbumEntry, entries: (Cla
 }
 
 /** Ordinary asset actions use the same menu in folder and character galleries. */
-export function libraryContextItems({ count, busy, classifications, albums, onFavorite, onMove, onAlbum }: {
-  count: number; busy: boolean; classifications: ClassificationEntry[]; albums: AlbumEntry[];
-  onFavorite: (favorite: boolean) => void; onMove: (id: string | null) => void; onAlbum: (id: string) => void;
+export function libraryContextItems({ count, busy, albums, sourceUrls, onMessage, onAlbum }: {
+  count: number; busy: boolean; albums: AlbumEntry[];
+  sourceUrls: (string | null)[]; onMessage: (message: string) => void;
+  onAlbum: (id: string) => void;
 }): ContextMenuItem[] {
   const disabled = busy || count === 0;
+  const sources = [...new Set(sourceUrls.map(url => url?.trim()).filter((url): url is string => Boolean(url)))];
   return [
     { id: "count", label: `${count}개 선택`, disabled: true, onSelect: () => undefined },
-    { id: "favorite", label: "좋아요 켜기", disabled, onSelect: () => onFavorite(true) },
-    { id: "unfavorite", label: "좋아요 끄기", disabled, onSelect: () => onFavorite(false) },
-    { id: "move", label: "폴더로 이동", disabled, onSelect: () => undefined, children: [
-      { id: "unsorted", label: "미분류", onSelect: () => onMove(null) },
-      ...classifications.map(entry => ({ id: entry.id, label: destinationLabel(entry, classifications), onSelect: () => onMove(entry.id) })),
-    ] },
+    { id: "copy-source", label: "출처 복사", disabled: disabled || sources.length === 0, onSelect: async () => {
+      if (disabled || !sources.length) return;
+      try {
+        await navigator.clipboard.writeText(sources.join("\n"));
+        onMessage(sources.length === 1 ? "출처를 복사했습니다." : `출처 ${sources.length}개를 복사했습니다.`);
+      } catch (error) {
+        onMessage(commandErrorMessage(error, "출처를 복사하지 못했습니다."));
+      }
+    } },
     { id: "album", label: "앨범에 추가", disabled: disabled || !albums.length, onSelect: () => undefined,
       children: albums.map(entry => ({ id: entry.id, label: destinationLabel(entry, albums), onSelect: () => onAlbum(entry.id) })) },
   ];

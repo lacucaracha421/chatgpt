@@ -1,5 +1,6 @@
 import { EllipsisHorizontalIcon } from "../shared/ui/ArchiveIcons";
 import { CharacterFolderOrganizer } from "./CharacterFolderOrganizer";
+import { folderExclusionItem } from "./folderExclusion";
 import { FolderRegistrationContext } from "./FolderRegistrationContext";
 import { useState, type ReactNode } from "react";
 import type { AlbumEntry, AssetSummary, AssetView, ClassificationEntry } from "../library/types";
@@ -34,7 +35,26 @@ export function CharacterFolderContent({ children, requestedAsset, onRequestedAs
     }
     return false;
   })());
-  if (series && !originalScope) return <SeriesBrowser requestedAsset={requestedAsset} onRequestedAssetHandled={onRequestedAssetHandled} clearSelectionRequest={clearSelectionRequest} galleryDrag={galleryDrag} key={series.classificationId} series={series} targetId={view.kind === "classification" ? view.characterId : undefined} groupId={view.kind === "classification" ? view.characterGroupId : undefined} targets={hub.targets} groups={hub.groups} classifications={classifications} albums={albums} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} metadataVisible={metadataVisible} onMetadataVisibleChange={onMetadataVisibleChange} thumbnailRowHeight={thumbnailRowHeight} onThumbnailRowHeightChange={onThumbnailRowHeightChange} refreshVersion={refreshVersion + hub.revision} onNavigate={onNavigate} onChanged={hub.refresh} />;
+  const folderExclusions = hub.folderExclusions ?? [];
+  const seriesAncestor = (() => {
+    let current = folder;
+    const seen = new Set<string>();
+    while (current?.parentId && !seen.has(current.id)) {
+      seen.add(current.id);
+      const parentId = current.parentId;
+      if (hub.series.some(series => series.classificationId === parentId)) return true;
+      current = classifications.find(folder => folder.id === parentId);
+    }
+    return false;
+  })();
+  async function setExcluded(excluded: boolean) {
+    if (!id || busy) return;
+    setBusy(true); setError(null);
+    try { await characterHubApi.setFolderExcluded(id, excluded); hub.refresh(); onAssetsChanged(); }
+    catch (error) { setError(commandErrorMessage(error, "폴더의 분류 설정을 저장하지 못했습니다.")); }
+    finally { setBusy(false); }
+  }
+  if (series && !originalScope) return <SeriesBrowser requestedAsset={requestedAsset} onRequestedAssetHandled={onRequestedAssetHandled} clearSelectionRequest={clearSelectionRequest} galleryDrag={galleryDrag} key={series.classificationId} folderExclusions={folderExclusions} series={series} targetId={view.kind === "classification" ? view.characterId : undefined} groupId={view.kind === "classification" ? view.characterGroupId : undefined} targets={hub.targets} groups={hub.groups} classifications={classifications} albums={albums} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} metadataVisible={metadataVisible} onMetadataVisibleChange={onMetadataVisibleChange} thumbnailRowHeight={thumbnailRowHeight} onThumbnailRowHeightChange={onThumbnailRowHeightChange} refreshVersion={refreshVersion + hub.revision} onNavigate={onNavigate} onChanged={hub.refresh} />;
   async function register() {
     if (!id || busy) return;
     setBusy(true); setError(null);
@@ -43,6 +63,7 @@ export function CharacterFolderContent({ children, requestedAsset, onRequestedAs
     finally { setBusy(false); }
   }
   return <FolderRegistrationContext.Provider value={folder?.parentId && !originalScope ? <Menu label="폴더 더보기" disabled={busy} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
+    ...((seriesAncestor && !hub.targets.some(target => target.linkedClassificationId === id)) || folderExclusions.includes(id!) ? [folderExclusionItem(id!, classifications, folderExclusions, excluded => void setExcluded(excluded))] : []),
     { id: "register-series", label: "시리즈로 등록", onSelect: () => void register() },
     { id: "make-character", label: "캐릭터로 만들기", onSelect: () => setOrganizeCharacter(true) },
   ]} /> : null}>

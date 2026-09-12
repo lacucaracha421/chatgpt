@@ -157,6 +157,7 @@ impl Library {
                AND NOT EXISTS(SELECT 1 FROM character_reference_exclusions excluded WHERE excluded.target_id=?1 AND excluded.asset_id=a.id)
                AND NOT EXISTS(SELECT 1 FROM character_references base_hash WHERE base_hash.target_id=?1 AND base_hash.asset_hash=a.content_hash)
                AND NOT EXISTS(SELECT 1 FROM character_learned_references learned_hash WHERE learned_hash.target_id=?1 AND learned_hash.asset_hash=a.content_hash)
+               AND NOT EXISTS(SELECT 1 FROM asset_classifications ac JOIN character_excluded_folders e ON e.id=ac.classification_id WHERE ac.asset_id=a.id)
                AND NOT EXISTS(SELECT 1 FROM character_series_asset_exclusions excluded WHERE excluded.series_id=?2 AND excluded.asset_id=a.id)
              ORDER BY d.sequence DESC,r.asset_id LIMIT 400"
         )?;
