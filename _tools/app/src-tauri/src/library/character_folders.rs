@@ -392,7 +392,7 @@ mod tests {
         f.ready("Pilot");
         let folder_id = folder(&f, &f.series, "Machines");
         let connection = f.library.connection().unwrap();
-        connection.execute_batch("DROP VIEW character_excluded_folders; DROP TABLE character_folder_exclusions; PRAGMA user_version=70;").unwrap();
+        connection.execute_batch("DROP TRIGGER character_group_remove_empty; DROP VIEW character_excluded_folders; DROP TABLE character_folder_exclusions; PRAGMA user_version=70;").unwrap();
         drop(connection);
         drop(f.library);
         let library = Library::open(f.temp.path()).unwrap();
@@ -423,7 +423,7 @@ mod tests {
                 .unwrap()
                 .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                 .unwrap(),
-            71
+            super::super::db::SCHEMA_VERSION
         );
     }
 }

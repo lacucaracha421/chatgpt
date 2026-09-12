@@ -702,6 +702,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                 updatePreferences({ expandedAlbumIds })
               }
               onSidebarWidthChange={setSidebarWidth}
+              onCharactersChanged={() => { setAssetRefresh(value => value + 1); refreshCharacterViews(); }}
               onChanged={() => void refreshClassifications()}
               onAlbumsChanged={() => void refreshAlbums()}
               reviewCount={reviewCount}

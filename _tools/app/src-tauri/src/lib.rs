@@ -261,6 +261,8 @@ pub fn run() {
             commands::characters::character_groups,
             commands::characters::save_character_group,
             commands::characters::character_conversion_preview,
+            commands::characters::character_series_move_preview,
+            commands::characters::move_character_to_series,
             commands::characters::convert_character_to_folder,
             commands::characters::record_character_decisions,
             commands::characters::move_assets_to_character,

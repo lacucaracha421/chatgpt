@@ -23,6 +23,7 @@ it("creates a display group and keeps its characters accessible",async()=>{
   const user=userEvent.setup();
   await user.click(screen.getByRole("button",{name:"그룹 만들기"}));
   await user.type(screen.getByRole("textbox",{name:"그룹 이름"}),"학생회");
+  expect(screen.getByRole("button", { name: "저장" })).toBeDisabled();
   await user.click(screen.getByRole("checkbox",{name:"히나"}));
   await user.click(screen.getByRole("button",{name:"저장"}));
   expect(await screen.findByRole("button",{name:"학생회 그룹 열기"})).toBeInTheDocument();
@@ -31,6 +32,19 @@ it("creates a display group and keeps its characters accessible",async()=>{
   cleanup();
   render(<CharacterGroups seriesId="series" members={[fixtureTarget()]} groups={[{id:"g",name:"학생회",revision:1,targetIds:["hina"]}]} activeGroupId="g">{members=><div>{members.map(target=><span key={target.id}>{target.displayName} 카드</span>)}</div>}</CharacterGroups>);
   expect(screen.getByText("히나 카드")).toBeInTheDocument();
+});
+
+it("dissolves an active group after its last member is unchecked and returns to the series", async () => {
+  const onOpenGroup = vi.fn(), onGroupsChanged = vi.fn();
+  vi.mocked(invoke).mockResolvedValue(undefined);
+  render(<CharacterGroups seriesId="series" members={[fixtureTarget()]} groups={[{ id: "g", name: "학생회", revision: 2, targetIds: ["hina"] }]} activeGroupId="g" onOpenGroup={onOpenGroup} onGroupsChanged={onGroupsChanged}>{() => null}</CharacterGroups>);
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "그룹 편집" }));
+  await user.click(screen.getByRole("checkbox", { name: "히나" }));
+  await user.click(screen.getByRole("button", { name: "빈 그룹 해제" }));
+  await waitFor(() => expect(onOpenGroup).toHaveBeenCalledWith(null));
+  expect(onGroupsChanged).toHaveBeenCalledOnce();
+  expect(invoke).toHaveBeenCalledWith("save_character_group", { request: { id: "g", seriesId: "series", expectedRevision: 2, name: "학생회", targetIds: [], delete: false } });
 });
 
 it("keeps Originals as storage-only without series or character registration tools",()=>{

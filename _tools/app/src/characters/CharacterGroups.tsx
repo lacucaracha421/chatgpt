@@ -87,7 +87,7 @@ export function CharacterGroups({ seriesId, members, groups: providedGroups, act
         id: draft.id || null, seriesId, expectedRevision: draft.id ? draft.revision : null,
         name: draft.name, targetIds: draft.targetIds, delete: remove,
       } });
-      const removedId = remove ? draft.id : null;
+      const removedId = remove || !draft.targetIds.length ? draft.id : null;
       setDraft(null);
       if (removedId && activeGroupId === removedId) onOpenGroup?.(null);
       setRevision(value => value + 1);
@@ -118,12 +118,13 @@ export function CharacterGroups({ seriesId, members, groups: providedGroups, act
     {draft && <Dialog open title={draft.id ? "캐릭터 그룹 편집" : "캐릭터 그룹 만들기"} onClose={() => { if (!busy) setDraft(null); }}>
       <TextField label="그룹 이름" value={draft.name} maxLength={100} disabled={busy} onChange={event => setDraft({ ...draft, name: event.target.value })} />
       <p>탐색 목록만 묶습니다. 시리즈 소속, 이미지 분류와 분석 범위는 바뀌지 않습니다.</p>
+      <p>소속 캐릭터가 모두 빠지면 그룹은 자동으로 해제됩니다.</p>
       <div className="character-group-members">{members.filter(target => !grouped.has(target.id) || groups.find(group => group.id === draft.id)?.targetIds.includes(target.id)).map(target => <label key={target.id}>
         <input type="checkbox" disabled={busy} checked={draft.targetIds.includes(target.id)} onChange={event => setDraft({ ...draft, targetIds: event.target.checked ? [...draft.targetIds, target.id] : draft.targetIds.filter(id => id !== target.id) })} />
         {target.displayName}
       </label>)}</div>
       {error && <p role="alert">{error}</p>}
-      <div className="character-actions"><Button disabled={busy || !draft.name.trim()} onClick={() => void save()}>저장</Button>{draft.id && <Button variant="ghost" disabled={busy} onClick={() => void save(true)}>그룹 해제 · 캐릭터 유지</Button>}</div>
+      <div className="character-actions"><Button disabled={busy || !draft.name.trim() || (!draft.id && !draft.targetIds.length)} onClick={() => void save()}>{draft.id && !draft.targetIds.length ? "빈 그룹 해제" : "저장"}</Button>{draft.id && <Button variant="ghost" disabled={busy} onClick={() => void save(true)}>그룹 해제 · 캐릭터 유지</Button>}</div>
     </Dialog>}
   </>;
 }

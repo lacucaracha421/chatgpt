@@ -27,6 +27,7 @@ pub(crate) mod catalog_update;
 mod catalog_visibility;
 pub mod character_autotag;
 pub mod character_conversion;
+pub mod character_series_move;
 pub mod character_groups;
 pub mod character_folders;
 pub mod character_hub;

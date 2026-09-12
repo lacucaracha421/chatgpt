@@ -6,6 +6,38 @@ use crate::library::characters::{
 };
 
 #[tauri::command]
+pub async fn character_series_move_preview(
+    target_id: String,
+    destination_id: String,
+    state: State<'_, AppState>,
+) -> Result<crate::library::character_series_move::SeriesMovePreview, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.character_series_move_preview(&target_id, &destination_id)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn move_character_to_series(
+    target_id: String,
+    destination_id: String,
+    token: String,
+    state: State<'_, AppState>,
+) -> Result<Target, CommandError> {
+    let library = current_required(state)?;
+    // Deliberately do not start the worker or request a reference refresh here.
+    tauri::async_runtime::spawn_blocking(move || {
+        library.move_character_to_series(&target_id, &destination_id, &token)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}
+
+#[tauri::command]
 pub async fn character_autotag_job(
     asset_id: String,
     state: State<'_, AppState>,

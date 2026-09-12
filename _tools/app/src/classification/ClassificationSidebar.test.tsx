@@ -7,6 +7,9 @@ import type { AssetView, ClassificationEntry, LibraryGateway } from "../library/
 import { ClassificationSidebar } from "./ClassificationSidebar";
 import { fixtureTarget } from "../characters/characterFixtures";
 import { buildClassificationTree } from "./buildTree";
+import { invoke } from "@tauri-apps/api/core";
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
 const entries: ClassificationEntry[] = [
   { id: "root", kind: "root", name: "Games", parentId: null, iconKey: null, colorKey: null },
@@ -175,6 +178,30 @@ describe("buildClassificationTree", () => {
 });
 
 describe("ClassificationSidebar", () => {
+  it("opens series relocation from a grouped character and navigates after moving", async () => {
+    const user = userEvent.setup();
+    const target = { ...fixtureTarget("lorentz", "로렌츠"), seriesClassificationId: "work", linkedClassificationId: null };
+    vi.mocked(invoke).mockImplementation(async command => {
+      if (command === "character_series") return [{ classificationId: "work" }, { classificationId: "tag" }];
+      if (command === "character_series_move_preview") return { targetId: target.id, destinationId: "tag", assetCount: 3, relocationCount: 3, sharedCount: 0, groupName: "라플라스", token: "move-token" };
+      if (command === "move_character_to_series") return { ...target, seriesClassificationId: "tag" };
+      throw new Error(command);
+    });
+    const { onViewChange, onChanged } = renderSidebar(gateway(), {
+      characters: [target],
+      characterGroups: [{ id: "laplace", name: "라플라스", seriesId: "work", revision: 1, targetIds: [target.id] }],
+      expandedIds: ["root", "work", "character-group:laplace"],
+    });
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: "로렌츠" }));
+    await user.click(await screen.findByRole("menuitem", { name: "다른 시리즈로 이동…" }));
+    const dialog = await screen.findByRole("dialog", { name: "로렌츠 · 다른 시리즈로 이동" });
+    await waitFor(() => expect(within(dialog).getByRole("combobox")).toBeEnabled());
+    await user.selectOptions(within(dialog).getByRole("combobox"), "tag");
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "이동" })).toBeEnabled());
+    await user.click(within(dialog).getByRole("button", { name: "이동" }));
+    expect(onChanged).toHaveBeenCalledOnce();
+    expect(onViewChange).toHaveBeenLastCalledWith({ kind: "classification", classificationId: "tag", characterId: "lorentz" });
+  });
   it("nests grouped characters under a distinct group node and opens both routes", async () => {
     const user = userEvent.setup();
     const hina = { ...fixtureTarget("hina", "히나"), seriesClassificationId: "work", linkedClassificationId: null };
