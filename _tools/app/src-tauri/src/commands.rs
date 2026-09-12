@@ -575,6 +575,19 @@ pub async fn get_revisit_slate(
 }
 
 #[tauri::command]
+pub async fn prepare_revisit_color_bundle(
+    local_date: String,
+    now_utc: String,
+    expected_revision: i64,
+    state: State<'_, AppState>,
+) -> Result<Option<crate::library::models::RevisitSlate>, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.prepare_revisit_color_bundle(&local_date, &now_utc, expected_revision).map_err(CommandError::from)
+    }).await.map_err(|_| background_task_error())?
+}
+
+#[tauri::command]
 pub async fn reshuffle_revisit_bundle(
     local_date: String,
     bundle_id: String,

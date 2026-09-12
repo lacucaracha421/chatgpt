@@ -265,6 +265,11 @@ describe("libraryGateway revisit contract", () => {
       nowUtc: "2026-08-30T03:00:00.000Z",
     });
 
+    await libraryGateway.prepareRevisitColorBundle("2026-08-30", "2026-08-30T03:00:00.000Z", 7);
+    expect(invoke).toHaveBeenCalledWith("prepare_revisit_color_bundle", {
+      localDate: "2026-08-30", nowUtc: "2026-08-30T03:00:00.000Z", expectedRevision: 7,
+    });
+
     await libraryGateway.reshuffleRevisitBundle("2026-08-30", "bundle-1");
     expect(invoke).toHaveBeenCalledWith("reshuffle_revisit_bundle", {
       localDate: "2026-08-30",

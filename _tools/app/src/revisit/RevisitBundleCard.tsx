@@ -5,9 +5,11 @@ import type { RevisitBundle, RevisitFeedback } from "../library/types";
 import { thumbnailUrl } from "../assets/mediaUrl";
 import { Menu } from "../shared/ui/Menu";
 
-export function RevisitBundleCard({ bundle, hero = false, pending, onOpen, onReshuffle, onDismiss }: {
+const PREVIEW_COUNT = 5;
+
+export function RevisitBundleCard({ bundle, ordinal, pending, onOpen, onReshuffle, onDismiss }: {
   bundle: RevisitBundle;
-  hero?: boolean;
+  ordinal: string;
   pending?: boolean;
   onOpen?: () => void;
   onReshuffle: () => void;
@@ -21,11 +23,11 @@ export function RevisitBundleCard({ bundle, hero = false, pending, onOpen, onRes
   useEffect(() => {
     if (!element || recordedBundleId.current === bundle.id) return;
     recordedBundleId.current = bundle.id;
-    const visibleAssetIds = bundle.assetIds.slice(0, hero ? 6 : 3);
+    const visibleAssetIds = bundle.assetIds.slice(0, PREVIEW_COUNT);
     if (visibleAssetIds.length > 0) {
       void gateway.recordAssetsExposed(visibleAssetIds, new Date().toISOString()).catch(() => undefined);
     }
-  }, [element, bundle.id, bundle.assetIds, gateway, hero]);
+  }, [element, bundle.id, bundle.assetIds, gateway]);
   const saveFeedback = async (feedback: RevisitFeedback) => {
     if (feedbackPending) return;
     setFeedbackPending(true);
@@ -68,16 +70,18 @@ export function RevisitBundleCard({ bundle, hero = false, pending, onOpen, onRes
       onClick={onOpen}
     >
       <span className="revisit-bundle__covers">
-        {bundle.assetIds.slice(0, hero ? 6 : 3).map((assetId) => (
-          <img
-            key={assetId}
-            src={thumbnailUrl(assetId)}
-            alt=""
-            loading="lazy"
-            decoding="async"
-            draggable={false}
-            className="revisit-bundle__cover"
-          />
+        {bundle.assetIds.slice(0, PREVIEW_COUNT).map((assetId, index) => (
+          <span className="revisit-bundle__frame" key={assetId}>
+            <img
+              src={thumbnailUrl(assetId)}
+              alt=""
+              loading="lazy"
+              decoding="async"
+              draggable={false}
+              className="revisit-bundle__cover"
+            />
+            {bundle.kind === "color" && index === 0 && <span className="revisit-bundle__seed-label">기준 이미지</span>}
+          </span>
         ))}
       </span>
     </button>
@@ -85,11 +89,12 @@ export function RevisitBundleCard({ bundle, hero = false, pending, onOpen, onRes
   return (
     <section
       ref={setElement}
-      data-testid={hero ? "revisit-hero-bundle" : "revisit-heap-bundle"}
-      className={`revisit-bundle${hero ? " revisit-bundle--hero" : ""}`}
+      data-testid="revisit-theme-bundle"
+      className="revisit-bundle"
       aria-label={bundle.title}
     >
       <header className="revisit-bundle__header">
+        <span className="revisit-bundle__ordinal" aria-hidden="true">{ordinal}</span>
         <h4>{bundle.title}{bundle.reason && <span className="revisit-bundle__reason">{bundle.reason}</span>}</h4>
         <div className="revisit-bundle__actions">
           <button type="button" className="revisit-bundle__icon-button" aria-label="이 묶음 다시 섞기" disabled={pending} onClick={onReshuffle}><ArrowPathIcon aria-hidden="true" /></button>

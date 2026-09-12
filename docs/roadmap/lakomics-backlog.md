@@ -36,7 +36,7 @@ acceptance limits. Existing item statuses below remain the owners of pending wor
 | 캐릭터 | 2026-09-12 quiet workflow로 일반 수집 중 큐/검토/캐시 상태 노출을 제거하고, 가장 가까운 등록 시리즈 + 명시적 참조만 자동 비교한다. 과거 미분류 갱신은 사용자 요청 때만 낮은 우선순위로 실행한다. Linux 격리 앱 기동은 통과했으나 실제 GUI 행동 수용과 Windows 네이티브 확인은 남음 | CHAR-AUTO-004의 자동확정 support=6 유지. 참조 추가는 신규 이미지에 즉시 적용되고 과거 갱신은 명시적 유지보수 작업으로 분리됨 |
 | 통합 코드 리뷰 | REVIEW-20260909: A–H/I1 반영 후 남은 Windows·Android·실제 미디어 검증 | 구현 완료 배치를 처음부터 재실행하지 않음 |
 | 클라우드·통계·Notes | CLOUD-UI-001, STATS-001A/B, NOTE-001B 네이티브 확인/남은 보완 | CLOUD-006와 NOTE-001A는 완료 |
-| 개인 탐색·카탈로그 | 기존 카탈로그 주 경로 완료 | IDEA-001B 테마 확장, CATALOG-002B 선택적 공급자; IDEA-002 보류 |
+| 개인 탐색·카탈로그 | IDEA-001A/B 다시보기 테마와 색감 재섞기 사용자 확인으로 완료 (2026-09-12). 기존 카탈로그 주 경로 완료 | Windows 다시보기 네이티브 확인 미실시. CATALOG-002B 선택적 공급자; IDEA-002 보류 |
 | 유사 이미지·영상 | SIMILARITY-003 실제 영상 정확도 검증 | SIMILARITY-002B 기하 변형 후보; PERF-SIMILARITY는 측정 근거 전까지 보류 |
 | 모바일 | MOBILE-001/002/004/006은 사용자 실사용 확인으로 완료 | MOBILE-007 북마크 쓰기 → 008 갱신 요청; 003 삭제 프로토콜 보류 |
 | 확장 프로그램 | EXT-005~010 완료. 목록형 확장과 저장/임시저장/GIF/입력 흐름까지 사용자 확인 완료 | 추가 필수 구현 없음; 이후 필요 시 편의 개선만 별도 등록 |
@@ -1155,9 +1155,9 @@ no historical activity was fabricated. Feature-level native/visual acceptance re
 
 ## IDEA-001 — More varied Revisit mixes
 
-Status: `PARTIAL` — IDEA-001A scoring/feedback/cooldown is implemented; IDEA-001B theme expansion remains.
+Status: `DONE` — IDEA-001A and IDEA-001B are implemented. The user confirmed the Revisit themes and reshuffle behavior in the running development app on 2026-09-12. Windows native acceptance remains unverified.
 
-The creator/date/surprise foundation now consumes BUG-013 deliberate opens and recorded exposures.
+The current creator/date/color themes consume BUG-013 deliberate opens and recorded exposures; legacy rediscovery/surprise records remain readable.
 Mobile Home's classification/date/creator discovery improvements remain separate from the PC theme work below.
 
 ### IDEA-001A — Scoring, feedback, and cooldown correctness
@@ -1178,24 +1178,156 @@ creator feedback down-ranks that creator, both clamped at -5. Creator bundles no
 creator rather than a mixed pool. Existing v1 daily bundle IDs are regenerated once into the v2
 algorithm while same-day v2 slates remain deterministic. Rust Revisit tests pass 10/10, the full Revisit frontend passes 13/13, and TypeScript passes. No production library was opened for this work.
 
-### IDEA-001B — Theme expansion
+### IDEA-001B — 가벼운 다시보기 테마: 작가 / 과거 수집함 / 비슷한 색감
 
-Status: `TODO`
-Prerequisite: IDEA-001A.
+Status: `DONE` — 2026-09-12 사용자가 현재 Linux dev 앱에서 다시보기와 색감 재섞기가 정상 동작함을 확인하고 완료 처리를 요청했다. 구현·fixture/프런트 검증과 사용자 수용을 완료했으며 Windows 네이티브 수용은 별도로 미확인이다. 기존 IDEA-001A 추천/피드백 기반을 재사용한다.
 
-Candidate themes:
+**Goal:** 앱이 기준 이미지를 자동 선택해 비슷한 색감의 이미지·영상 포스터를 추천하고, 오늘의 테마를 `작가 다시보기 / 과거 수집함 / 비슷한 색감`으로 정리한다.
 
-- favorite-seeded discovery only when favorites provide real evidence;
-- bounded period nostalgia;
-- recently collected but rarely opened;
-- favorite + discovery only when favorites exist;
-- cross-classification discovery;
-- bounded collection-session/source-group rediscovery where durable grouping exists;
-- Collection-level high-rated discovery only where Collection scores actually exist.
+**Architecture:** Rust의 기존 `image` 디코더로 작은 썸네일의 색 분포를 비교한다. Library 인스턴스에 제한된 메모리 캐시를 두고, 오늘의 기본 묶음을 먼저 반환한 뒤 선택적 색감 묶음 하나를 준비한다. 기존 일일 slate 저장·재섞기·열람/노출 기록을 사용한다.
 
-A theme label must match its actual selection logic. Missing data should omit/fallback rather than fabricate meaning.
+**Tech Stack:** 현재 React/TypeScript, Tauri/Rust, `image`, SQLite. 추가 패키지·AI 모델·외부 API 없음.
+
+**Spec:** 이 항목의 아래 제품 계약과 비용 상한이 현재 설계다. 이전 AI 분위기 추천 제안과 위 후보 테마 목록을 대체하며, 별도 경쟁 백로그를 만들지 않는다.
+
+**Execution:** 루트 `AGENTS.md`에 따라 현재 작업에서 직접 구현·검토한다. 하위 에이전트, 자동 커밋/브랜치 생성, 운영 데이터 일괄 분석은 포함하지 않는다.
+
+#### 제품 계약과 비용 상한
+
+- `작가 다시보기`: 기존 단일 작가 묶음을 유지한다. 작가 정보가 없으면 다른 작가의 자료를 억지로 합치지 않는다.
+- `과거 수집함`: 기존 `date` 테마를 재사용하고 제목을 변경한다. 기존 같은 수집 월 기준 후보 중 최근 30일 자료를 제외하고, 설명은 `이맘때 수집한 오래된 자료`로 실제 규칙과 맞춘다. 새로운 날짜 탐색 UI를 만들지 않는다.
+- `비슷한 색감`: 기준은 앱이 자동 선택한 이미지/GIF 썸네일이다. 후보에는 이미지/GIF와 **이미 준비된 영상 포스터**를 포함한다. 영상 내용·움직임·음악의 유사성으로 설명하지 않는다.
+- 이미지를 올리거나 모델을 받지 않는다. 원본 이미지·영상, FFmpeg, 캐릭터 특징, PDQ 재색인을 호출하지 않는다. 색감 추천은 중복 판정/자동 분류/삭제에 영향을 주지 않는다.
+- 썸네일을 최대 64×64로 줄여 색 분포를 만든다. 한 번에 파일 하나만 decode한다. 입력 파일 2 MiB 및 decode 2백만 픽셀 상한을 두고 손상·과대·누락 파일은 건너뛴다. 원본 fallback이나 썸네일 생성은 금지한다.
+- 진입 또는 명시적 전체/색감 묶음 재섞기마다 **최대 64개 미계산 파일 / 작업 시작부터 500ms 중 먼저 도달한 쪽**에서 새 파일 내용 읽기·decode를 멈춘다. 이미 준비한 최대 512개 캐시의 DB/파일 metadata 검증과 매칭·저장은 이어서 수행한다. 500ms는 새 입력 준비 단계의 soft budget이며 전체 RPC 응답 시간이나 단일 decode의 실행 기한을 보장하지 않는다. 같은 방문 중 끝까지 돌리는 자동 반복은 없다.
+- 캐시 최대 **512개 항목**, 색 특징과 식별 정보만 저장한다. decoded image는 저장하지 않는다. 라이브러리 종료/앱 재시작 시 버리고 DB 테이블·디스크 특징 파일을 추가하지 않는다. 재시작 후에도 기존에 저장한 당일 추천 묶음은 그대로 재사용한다.
+- 입력 후보는 전체 DB에서 `ORDER BY RANDOM()`이나 OFFSET 없이 읽는다. 기존 날짜/ID 인덱스로 오래된 쪽과 최근 쪽 각각 최대 32개 keyset 페이지를 선택하고 다음 방문의 cursor는 메모리에 유지한다. 실패 항목도 페이지 cursor는 진행하며, 중복은 ID로 제거한다. 전체 후보를 한 번에 decode하거나 자동으로 끝까지 순회하지 않는다.
+- 이 첫 버전은 준비된 작은 후보 집합에서 추천한다. 전체 라이브러리 최적 이웃 검색으로 표현하지 않는다. 색감이 충분히 가까운 이웃이 2개 미만이면 추천 묶음은 만들지 않고 고정 색감 칸에 안내를 표시한다.
+- 오늘 테마는 최대 3개, 종류별 최대 1개다. 색감 묶음은 기준 1개 + 이웃 최대 11개, 다른 묶음은 기존 최대 20개다. 화면 재진입만으로 당일 목록을 계속 바꾸지 않는다.
+- 기존 `덜 보기`, 숨김, 최근 열람/노출 회피, 동일 일일 slate 내 자산 중복 방지와 개인정보 표시 규칙을 유지한다. 색감 거리 기준은 후보 부족 때문에 느슨하게 풀지 않는다.
+- 본 예산은 구현 시작값이며 측정 성능 보장이 아니다. CPU·시간이 초과하면 batch를 줄이고 추천 범위를 좁힌다. 전체 분석/새 모델로 범위를 늘리지 않는다.
+
+#### Task 1 — 썸네일 색 특징과 거리 계산
+
+**Files:** 새 `_tools/app/src-tauri/src/library/revisit_color.rs`; 모듈 선언은 `_tools/app/src-tauri/src/library/mod.rs`.
+
+**Interfaces (새 내부 인터페이스):**
+
+```rust
+#[derive(Clone)]
+pub(super) struct ColorSignature { pub bins: [f32; 100] }
+pub(super) fn color_signature(image: &image::DynamicImage) -> Option<ColorSignature>;
+pub(super) fn color_distance(a: &ColorSignature, b: &ColorSignature) -> f32;
+```
+
+- [x] 순수 색 fixture로 같은 팔레트/다른 크기, 빨강과 파랑, 저채도, 투명 배경, 단색 입력을 검사하는 회귀를 먼저 작성한다. 동일한 정상 descriptor의 거리는 0이고, 붉은 계열끼리의 거리가 붉은/푸른 계열보다 작아야 한다.
+- [x] 기존 `image`만 사용한다. 최대 64×64 RGBA에서 투명 픽셀을 흰색에 합성한 후 HSV histogram을 정규화한다. 유채색은 hue 12 × saturation 2 × value 4 = 96 bin, 채도 0.15 미만은 value 4 bin을 사용한다. hue 경계는 인접 bin에 선형 분배한다. 표본이 없거나 하나의 bin이 95% 이상인 사실상 단색 자료는 기준에서 제외한다.
+- [x] 거리는 `1.0 - sum(min(a[i], b[i]))`를 0..1로 clamp한다. 후보 cutoff는 우선 0.25로 시작하고, 색상 fixture 및 실제 수용에서 조정한다. 의미/피사체 유사도를 측정하는 값이나 정확도 퍼센트로 UI에 표시하지 않는다.
+- [x] `_tools/app/src-tauri`에서 `cargo test --lib revisit_color`를 실행해 색 분포/경계 회귀를 확인한다. 전역 재포맷은 하지 않는다.
+
+예시 검증식(테스트에서 빨강·파랑의 두 색 이상 패턴 fixture를 생성):
+
+```rust
+assert_eq!(color_distance(&warm, &warm), 0.0);
+assert!(color_distance(&warm, &warm_resized) < color_distance(&warm, &cool));
+assert!((0.0..=1.0).contains(&color_distance(&warm, &cool)));
+```
+
+#### Task 2 — 제한된 후보 읽기와 캐시 준비
+
+**Files:** `revisit_color.rs`, `library/mod.rs`; 새 `revisit_color_tests.rs`를 `revisit_color.rs`의 test module로 연결한다.
+
+**Interfaces:** `ColorSignature`를 소비한다. `Library`에 library-local `Arc<Mutex<ColorCache>>`와 단일 준비 작업 guard를 둔다. `ColorCache`는 최대 512개의 ready/failed 항목과 양방향 후보 cursor를 소유하며, private `prepare_color_candidates(&self) -> Result<(), LibraryError>`로 다음 제한 batch를 준비한다.
+
+- [x] normal 자산의 ID, content hash, thumbnail 상대 경로만 짧은 DB lock 안에서 snapshot한다. video는 포스터 경로가 있는 항목만 받는다. `list_assets`를 호출해 불필요한 exact count를 만들지 않는다.
+- [x] `open_library_media`의 canonical-root containment와 열린 파일 경계를 재사용한다. 이미지 I/O/decode 중에는 DB lock과 캐시 lock을 모두 풀어 둔다. 캐시 key는 asset ID + 원본 hash + 썸네일 상대 경로 + 열린 썸네일 파일의 길이/수정 시각으로 잡는다.
+- [x] 캐시 재사용 시 현재 thumbnail metadata를 확인하고, 교체/삭제/휴지통 이동은 제거한다. 읽기 전후 metadata가 달라지면 이번 특징은 버린다. 추천 저장 직전에도 normal 상태와 원본 hash·thumbnail 경로를 다시 대조한다. 절대 파일 경로를 renderer에 보내지 않는다.
+- [x] 같은 identity의 실패 항목은 같은 세션에서 반복 decode하지 않는다. identity가 바뀌면 다시 시도한다. 캐시 제한 초과 시 오래 사용하지 않은 항목을 제거한다. 여러 요청이 와도 준비 작업은 하나만 실행하고 다른 요청은 기존 slate를 유지한다.
+- [x] 임시 라이브러리 fixture에서 65개 입력의 64개 상한, 513번째 캐시 항목의 상한, warm 요청의 decode 재호출 방지, 누락/변조/과대 파일, 영상 포스터 부재, 루트 외 경로, 라이브러리 간 캐시 격리를 확인한다. 단일 파일 실패는 정상 항목 준비를 중단하지 않아야 한다.
+
+#### Task 3 — 자동 기준 선택과 기존 slate에 색감 묶음 연결
+
+**Files:** `library/revisit.rs`, `library/revisit_color.rs`, `src-tauri/src/commands.rs`, `src-tauri/src/lib.rs`, `src/library/client.ts`, `src/library/types.ts` (모두 `_tools/app/` 아래).
+
+**새 RPC 계약:**
+
+```ts
+prepareRevisitColorBundle(
+  localDate: string, nowUtc: string, expectedRevision: number
+): Promise<RevisitSlate | null>;
+```
+
+대응하는 Tauri command `prepare_revisit_color_bundle`은 기존 `spawn_blocking` 패턴을 사용한다. `null`은 진행 중 요청, 후보 부족 또는 obsolete revision으로 추가할 묶음이 없다는 뜻이다. 기존 `getRevisitSlate`는 이미지 decode를 기다리지 않는다.
+
+- [x] 캐시의 최대 512개 ID에 한정해 normal 자산 metadata·activity를 조회하고 추천 점수를 계산한다. 색감 준비 경로에서 전체 `RecommendationContext::load`를 다시 호출하지 않는다. 준비된 descriptor 중 이미지/GIF의 기존 열람/노출 점수와 날짜 seed로 기준 후보를 최대 8개 고른다. 각 기준의 가까운 이웃을 찾고, 거리 기준을 통과한 이웃 수와 평균 거리가 좋은 후보를 선택한다. 색감 묶음 재섞기에서는 이전에 없던 기준/이웃과 새 자료 수를 우선하고 같은 구성의 순서 변경만으로 새 묶음을 만들지 않는다. 재섞기는 revision을 seed에 포함하며 이웃 정렬의 동점에도 적용한다.
+- [x] 이웃은 색 거리 우선, 같은 거리에서는 기존 추천 점수와 안정적 ID 순으로 고른다. 기준 자신과 동일 content hash, 다른 당일 묶음의 자산, normal이 아닌 자산을 제외한다. 기존 cooldown을 적용하되 색 cutoff는 고정한다.
+- [x] 준비 시작 전에 `color` 선호 값과 Task 4의 일일 포함 규칙을 확인한다. 제외된 날에는 파일 준비도 하지 않는다. 첫 응답의 작가/과거 묶음을 유지하고, 준비가 끝나면 색감 묶음을 끝에 한 번 추가한다. DB lock 재획득 후 `expectedRevision`과 당일 색감 묶음 부재를 확인하고, 기존 `save_daily_slate` 트랜잭션으로 slate revision을 증가시켜 저장한다. 중간 재섞기·날짜 변경 시 오래된 작업이 새 slate를 덮어쓰지 않는다.
+- [x] 같은 날짜 색감 묶음이 이미 있으면 cache warm 작업도 생략한다. 명시적 색감 묶음 재섞기는 제한 batch를 한 번 더 허용해 재시작 후 빈 캐시를 복구하고 후보 cursor를 진행한다. 이전 묶음에 없던 자료를 우선 선택하며 새 자료를 포함하는 대안이 없으면 기존 묶음과 revision을 유지하고 화면에 안내한다. 전체 재섞기도 새 revision에서 제한 batch를 한 번 더 허용한다.
+- [x] 순수 매칭 fixture와 임시 DB로 자동 기준 선택, 최소 이웃 수, 유사성이 약한 후보 생략, 이미지/포스터 혼합, 동일 hash 제외, 중복 호출/CAS, 휴지통 이동, 재섞기 중 늦은 응답을 검증한다. 캐시 실패가 기본 두 테마를 막으면 실패다.
+
+#### Task 4 — 세 테마와 화면 상태 통합
+
+**Files:** `library/revisit.rs`, `src/library/types.ts`, `src/revisit/TodayView.tsx`, `src/revisit/RevisitBundleCard.tsx`, `src/revisit/TodayView.test.tsx`, `src/library/client.test.ts` (모두 `_tools/app/` 아래).
+
+- [x] 활성 kind는 `creator`, `date`, `color`로 제한하고 표시 이름은 합의한 세 가지를 사용한다. 과거 `rediscovery`/`surprise` 저장 기록과 선호 값은 삭제하지 않는다. 기존 TypeScript union은 과거 값도 읽을 수 있게 유지하고 `color`를 추가한다.
+- [x] 알고리즘 prefix를 `revisit-v3-`로 올려 현재 날짜의 옛 slate만 기존 경로로 한 번 갱신한다. 완료된 과거 날짜 기록을 일괄 다시 만들지 않는다. 저장된 빈 slate는 prefix 판정의 예외로 재사용해 반복 재생성이 발생하지 않게 한다. 이후 같은 날짜 새 자료의 반영은 명시적 전체 재섞기로 처리한다.
+- [x] 테마 종류별 한 묶음만 허용한다. `recommendation_type` weight -5는 제외하고, -1..-4는 날짜/revision seed로 일일 포함 빈도를 낮춘다(`seed % 5 < 5 + weight`). 작가 선호 점수, 노출/열람 cooldown은 기존 정책을 유지한다.
+- [x] TodayView는 기본 slate를 먼저 보여준 뒤 색감이 없을 때 준비 RPC를 한 번 호출한다. 앱/라이브러리·날짜·요청 generation이 달라졌거나 이미 재섞기가 시작됐으면 응답을 버린다. cleanup으로 이전 컴포넌트 결과를 무효화한다. 백엔드 작업은 짧은 bounded batch를 마치며 자동 반복하지 않는다.
+- [x] 색감 준비를 위한 전체 skeleton, 진행률, 모델/캐시 설정을 추가하지 않는다. 후보가 부족하면 고정 색감 칸에 이번 추천 묶음이 없다는 안내를 표시한다. 준비 실패 시 이미 표시한 카드와 기존 다시 섞기 동작을 유지한다.
+- [x] 프런트 fixture로 두 카드 즉시 표시→색감 카드 추가, stale 응답 무시, 실패 시 화면 유지, 세 테마 제목, `덜 보기`, 클릭 후 기존 갤러리·영상 열기를 확인한다. 날짜/작가 둘러보기 탭은 그대로 유지한다.
+
+#### Task 5 — 비용 측정과 완료 기준
+
+- [x] 임시 썸네일 fixture 64개에서 최초/재진입의 decode 수, 파일 읽기 수, 준비 elapsed와 캐시 메모리를 측정한다. 기존 추천/색감 준비를 분리해 기록한다. API 호출·모델 로드·FFmpeg 호출은 0이어야 한다.
+- [x] 기존 `RecommendationContext::load`가 전체 normal 자산/활동 행을 읽는 비용은 기존 병목으로 분리 측정한다. 색감 기능 때문에 그 전체 조회를 추가 반복하지 않는다. 이번 작업을 대규모 추천 SQL 최적화 완료로 보고하지 않는다.
+- [x] Rust: `_tools/app/src-tauri`에서 `cargo test --lib revisit`. 프런트: `_tools/app`에서 `npm test -- src/revisit src/library/client.test.ts`, `node node_modules/typescript/bin/tsc --noEmit`. 변경과 직접 관련된 검증만 수행한다.
+- [x] 2026-09-12 사용자가 현재 Linux dev에서 “다 잘되는거 확인”으로 다시보기와 색감 재섞기를 수용하고 완료 처리를 요청했다. 각 세부 동작의 독립 계측이나 Windows 네이티브 확인까지 수행한 것으로 확대하지 않는다. 별도 운영 데이터 쓰기 검증은 실행하지 않았다.
+- [x] 결과를 이 항목에 반영한다. 코드만 구현했다고 `DONE`으로 닫지 않으며, 측정치와 테스트 결과는 실제 실행한 범위만 기록한다.
+
+
+#### 2026-09-12 구현 및 검증 결과
+
+- `revisit_color.rs`에 기존 썸네일 전용 HSV 특징, 거리 cutoff 0.25, 64개/500ms 준비 상한, 양방향 keyset 페이지, Library별 512개 ready/failed 캐시를 구현했다. 영상은 `thumbnail_relative_path`에 기존 포스터가 있는 경우만 읽는다. 순차 처리하며 원본 fallback·미디어 생성·추가 의존성·DB migration은 없다.
+- 작은 입력은 확대하지 않고, 큰 입력은 nearest sampling으로 최대 64×64로 줄인다. 이는 투명 픽셀에 숨겨진 RGB가 보간 과정에서 주변 색에 섞이는 회귀를 막는다. HSV에서 흰 배경 alpha 합성과 hue 경계 분배를 적용한다.
+- 기본 두 테마 조회와 선택적 `prepare_revisit_color_bundle`을 분리했다. revision 재확인 후 색감 하나를 추가하며, 준비가 실패하거나 가까운 이웃이 부족하면 기본 slate를 유지한다. 개별 재섞기도 slate revision을 올려 늦은 준비 결과가 덮어쓰지 못하게 한다.
+- 저장된 색감 slate는 재준비하지 않는다. 색감만 재섞을 때는 현재 캐시를 사용하고 대안이 없으면 유지한다. 파일 내용은 준비할 때만 읽으며 캐시 재사용에도 DB와 파일 metadata 확인은 수행한다. 새 입력 예산을 다 써도 이미 준비한 유효 후보는 사용한다. 그 후보 안에서 가까운 이웃이 2개 미만이면 해당 방문에 색감 추천이 없을 수 있다.
+- 처음 비용 검사에서 파일마다 DB 연결을 열던 경로가 예산을 소모하는 것을 발견해 batch 끝의 짧은 연결 하나로 합쳤다. 파일 I/O/decode 중 DB/cache guard를 유지하지 않는다.
+- Rust: `_tools/app/src-tauri`에서 `cargo test --lib revisit -- --nocapture` **25 passed**. palette/resize/hue/alpha/gray/단색, 파일/픽셀 크기 상한, 65개 후보/64개 상한, 513번째 eviction, warm 재디코딩 방지, 누락/손상/교체/루트 외 경로와 Linux symlink, 캐시 격리, 영상 포스터 혼합, 최소 이웃/cutoff, busy/CAS/삭제된 후보, 기본 카드 보존/중복 방지, 선호/빈 slate/기존 버전 전환을 확인했다. 기존 무관한 컴파일 경고는 그대로다.
+- 프런트: `_tools/app`에서 `npm test -- src/revisit src/library/client.test.ts` **7 files / 36 passed**, `node node_modules/typescript/bin/tsc --noEmit` 통과. 기본 카드 우선 표시, 색감 추가/실패, 전체·개별 재섞기 중 늦은 응답, gateway 변경/unmount, 저장된 색감 재사용, 덜 보기, 기존 묶음 열기 callback, 갤러리에서 이미지/영상 ID를 뷰어에 전달하는 경로를 확인했다. 갤러리/뷰어 전달 테스트는 mock 경계이며 실제 재생 증거가 아니다.
+- 비용 fixture: Linux debug 테스트에서 임시 **32×32 PNG 썸네일 64개**. 기본 slate 생성 **35.26ms**, 최초 준비 **97.04ms / 내용 읽기 64 / decode 64**, 동일 후보 캐시 재사용 **23.40ms / 내용 읽기 0 / decode 0**. 64개 descriptor payload **25,600B**, identity 포함 entry payload **38,784B**(HashMap/allocator overhead 제외). 이 수치는 병렬 테스트 실행 중 측정한 작은 fixture이며 실제 라이브러리/큰 썸네일/Windows 성능으로 일반화하지 않는다. 별도 optional 준비 경로에 API·모델·FFmpeg 호출이 없음을 코드에서 확인했다.
+- 기존 `RecommendationContext::load`의 전체 normal 자산·활동 조회는 기본 slate 생성에 남아 있다. 위 35.26ms는 64행 fixture 비용이고 대규모 추천 SQL 최적화 완료를 뜻하지 않는다. 색감 매칭은 캐시의 최대 512개 ID만 조회한다.
+- 현재 작업에서 직접 코드/계약/변경 범위를 검토했으며 독립 리뷰나 네이티브 수용을 주장하지 않는다. 운영 라이브러리 쓰기, dev 앱 실행/재시작, Windows/Linux 실제 추천 감상 및 영상 재생은 수행하지 않았다. 남은 수용 후에 `DONE` 여부를 판단한다.
+
+
+#### 2026-09-12 후속 UI — NieR 구획과 세로 3열
+
+- 사용자 요청에 따라 `작가 다시보기 / 과거 수집함 / 비슷한 색감`을 좌→우 고정 3열로 배치한다. 같은 폭·높이의 긴 세로 칸, 얇은 상하/세로 경계, 아이보리 번호/제목으로 구획하며 hero+작은 카드 배치를 대체한다.
+- 각 칸은 첫 이미지와 아래 작은 이미지 4장(최대 5장)을 원본 비율을 유지해 보여준다. 색감 칸 첫 이미지에는 `기준 이미지` 표시를 붙인다. 기존 묶음 열기·재섞기·덜 보기·숨김을 유지한다.
+- 기존에는 optional 색감 결과가 null이거나 RPC가 실패하면 카드 자체를 생략했고 실패도 화면에서 구분되지 않았다. 이제 세 칸은 초기 로딩·후보 부족·실패·숨김에도 유지하며 칸 안에서 상태를 안내한다. null은 후보 부족 외에 선호/진행 중/오래된 revision도 포함하므로 특정 원인을 단정하지 않는 문구를 사용한다. 준비 batch·거리 cutoff·외부 비용 정책은 변경하지 않았다.
+- 검증: `npm test -- src/revisit` **6 files / 23 passed**, TypeScript `--noEmit` 통과. 고정 칸, 준비→null 상태, 실패 안내, 늦은 응답과 기존 조작을 확인했다. agent-browser에서 임시 mock 이미지/게이트웨이로 **1440×1000**, **900×800** 배치 및 빈 색감 칸을 확인했다. 900px 화면에서 세 칸 약 217.7px씩·동일 높이 746px, 가로 overflow 없음. 실제 Tauri/운영 자료의 추천 결과나 재생을 검증한 것은 아니다.
+
+
+#### 2026-09-12 색감 준비 마감 시간 수정
+
+- 원인: `prepare_color_candidates`와 `current_colors`가 같은 시작 시각/500ms를 검사해, decode를 마친 직후 시간이 초과하면 검증 단계가 준비된 후보를 하나도 반환하지 않았다. 읽기 전용 실제 썸네일 64개 진단에서 계산 약 479ms → source 검사 포함 약 503ms → 매칭 전달 0개를 재현했다. 후보 내 색감 이웃은 최대 13개 있었으므로 자료 부족만의 문제가 아니었다.
+- 수정: `current_colors()`에서 입력 준비 deadline 의존성을 제거했다. 새 파일은 여전히 64개/500ms에서 멈추고, 이미 준비한 최대 512개 캐시는 이미지 내용 재읽기/decode 없이 DB 상태·hash·경로 및 파일 metadata를 확인한 뒤 매칭으로 전달한다. 파일 안전 검사와 저장 직전 revision/상태 재확인은 유지한다.
+- 회귀: 예산이 이미 만료된 시각을 넣어 새 내용 읽기/decode가 0회인지 확인하고, 준비한 6개 중 파일 삭제·휴지통 이동·hash 변경 3개를 제외한 유효 3개가 추천으로 저장되는지 검사했다. 수정 전 `0 != 3`으로 실패, 수정 후 통과.
+- 검증: `_tools/app/src-tauri`에서 `cargo test --lib revisit` **26 passed**. 프런트/스키마/외부 모델/API 변경 없음. 운영 라이브러리 추천 생성 RPC를 별도로 실행하지 않았으며 Windows 네이티브 수용은 미확인이다.
 
 ---
+
+#### 2026-09-12 색감 묶음 재섞기 수정
+
+- 원인: 개별 색감 재섞기가 메모리 캐시만 읽어 앱 재시작 후 저장된 묶음을 그대로 반환했다. 캐시가 있어도 이전 기준 이미지만 제외하고 이웃을 고정 ID로 정렬해 같은 자료 구성의 반복이 가능했다.
+- 수정: 명시적 색감 재섞기에도 기존 64개/500ms 준비 batch를 한 번 허용한다. 같은 cutoff 안에서 이전 묶음에 없던 기준/이웃을 우선하며 동점은 revision seed로 섞는다. 구성원 추가 없이 순서만 바뀌는 결과는 저장하지 않고, 대안이 없으면 기존 묶음을 유지했다는 안내를 표시한다. 추가 모델/API·전체 순회·원본 decode는 없다.
+- 검증: `cargo test --lib revisit` **27 passed**. 24개 임시 썸네일에서 기존 캐시 및 재시작을 모사한 빈 캐시 모두 12개 묶음이 겹치지 않는 다른 12개로 교체됨을 확인했다. 전체 후보가 이미 표시된 12개뿐이면 묶음/revision이 유지된다. `npm test -- --run src/revisit/TodayView.test.tsx` **14 passed**, `npx tsc --noEmit` 통과. 반복 구성과 안내 부재 회귀는 수정 전 실패·수정 후 통과했다.
+- 개발 watcher의 자동 빌드 후 실행 바이너리를 확인했다. 실제 사용자 자료에서 버튼을 눌러 추천을 저장하는 검증과 Windows 네이티브 수용은 수행하지 않았다.
+
+#### 2026-09-12 사용자 수용 및 완료
+
+- 색감 재섞기 수정이 적용된 dev 앱을 사용자가 직접 확인하고 “다 잘되는거 확인” 및 완료·커밋·푸시를 요청했다. IDEA-001B와 상위 IDEA-001을 `DONE`으로 전환한다.
+- 앞선 미확인/VERIFY 기록은 각 검증 당시의 이력이다. 현재 사용자 수용은 Linux dev 범위이며 Windows 네이티브 검증이나 추가 성능 측정으로 해석하지 않는다.
+
 
 ## IDEA-002 — Asset date timeline exploration
 

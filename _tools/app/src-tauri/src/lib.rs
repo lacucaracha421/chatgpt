@@ -209,6 +209,7 @@ pub fn run() {
             commands::list_source_group_assets,
             commands::list_asset_creators,
             commands::get_revisit_slate,
+            commands::prepare_revisit_color_bundle,
             commands::reshuffle_revisit_bundle,
             commands::reshuffle_revisit_slate,
             commands::record_asset_opened,

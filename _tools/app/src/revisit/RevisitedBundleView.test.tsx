@@ -6,9 +6,9 @@ import type { AssetSummary, LibraryGateway } from "../library/types";
 import { RevisitedBundleView } from "./RevisitedBundleView";
 
 vi.mock("../assets/AssetGallery", () => ({
-  AssetGallery: ({ items }: { items: AssetSummary[] }) => <div data-testid="bundle-gallery">{items.map((item) => <span key={item.id}>{item.originalName}</span>)}</div>,
+  AssetGallery: ({ items, onOpen }: { items: AssetSummary[]; onOpen: (asset: AssetSummary) => void }) => <div data-testid="bundle-gallery">{items.map((item) => <button key={item.id} onClick={() => onOpen(item)}>{item.originalName}</button>)}</div>,
 }));
-vi.mock("../assets/AssetViewer", () => ({ AssetViewer: () => null }));
+vi.mock("../assets/AssetViewer", () => ({ AssetViewer: ({ activeId }: { activeId: string | null }) => activeId ? <div data-testid="opened-asset">{activeId}</div> : null }));
 
 afterEach(cleanup);
 
@@ -45,3 +45,13 @@ function deferred<T>() {
   const promise = new Promise<T>((next) => { resolve = next; });
   return { promise, resolve };
 }
+
+it("passes a color bundle's image and video to the existing gallery and viewer", async () => {
+  const video: AssetSummary = { ...asset, id: "video-1", originalName: "영상.mp4", media: { kind: "video", durationMs: 1000, preparationState: "ready", scrubFrameCount: 0 } };
+  const gateway = { getAsset: vi.fn().mockImplementation((id: string) => Promise.resolve(id === video.id ? video : asset)) } as unknown as LibraryGateway;
+  render(<LibraryProvider gateway={gateway}><RevisitedBundleView bundleId="color" title="비슷한 색감" assetIds={[asset.id, video.id]} privacyMode={false} onBack={vi.fn()} /></LibraryProvider>);
+  await userEvent.click(await screen.findByRole("button", { name: video.originalName }));
+  expect(screen.getByTestId("opened-asset")).toHaveTextContent(video.id);
+  await userEvent.click(screen.getByRole("button", { name: asset.originalName }));
+  expect(screen.getByTestId("opened-asset")).toHaveTextContent(asset.id);
+});

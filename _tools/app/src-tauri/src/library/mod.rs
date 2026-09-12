@@ -81,6 +81,7 @@ pub(crate) mod remote_gallery;
 pub(crate) mod remote_media;
 pub(crate) mod remote_progress;
 mod revisit;
+mod revisit_color;
 mod similarity;
 mod source_group;
 pub mod statistics;
@@ -175,6 +176,8 @@ pub struct Library {
     catalog_preparation: Arc<Mutex<catalog_preparation::PreparationState>>,
     catalog_lookup_cache: Arc<Mutex<Option<online_catalog::CatalogLookupCache>>>,
     collection_artwork_scan_cache: Arc<Mutex<HashMap<String, u128>>>,
+    revisit_color_cache: Arc<Mutex<revisit_color::ColorCache>>,
+    revisit_color_lock: Arc<Mutex<()>>,
     character_scan: Arc<Mutex<character_scan::ScanState>>,
     character_incremental: Arc<Mutex<character_incremental::Engine>>,
     character_worker_pool: Arc<character_worker::Pool>,
@@ -243,6 +246,8 @@ impl Library {
             catalog_preparation: Arc::default(),
             catalog_lookup_cache: Arc::new(Mutex::new(None)),
             collection_artwork_scan_cache: Arc::new(Mutex::new(HashMap::new())),
+            revisit_color_cache: Arc::default(),
+            revisit_color_lock: Arc::default(),
             character_scan: Arc::default(),
             character_incremental: Arc::default(),
             character_worker_pool: Arc::default(),

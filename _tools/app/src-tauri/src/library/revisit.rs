@@ -73,7 +73,8 @@ pub(crate) fn save_daily_slate(
     }
     let transaction = connection.unchecked_transaction()?;
     for asset_id in &seen {
-        asset_exists(&transaction, asset_id)?;
+        let normal = transaction.query_row("SELECT 1 FROM assets WHERE id=?1 AND status='normal'", [asset_id], |_| Ok(())).optional()?.is_some();
+        if !normal { return Err(LibraryError::AssetNotFound); }
     }
     transaction.execute(
         "DELETE FROM revisit_slates WHERE local_date = ?1",
@@ -182,6 +183,7 @@ pub(crate) fn reshuffle_revisit_bundle(
         bundle.reason = regenerated.reason;
     }
     if bundle.asset_ids.len() < 2 { return Err(LibraryError::InvalidCollectedAt); }
+    slate.revision += 1;
     save_daily_slate(connection, &slate)?;
     Ok(slate)
 }
@@ -207,9 +209,9 @@ fn load_revision(connection: &Connection, local_date: &str) -> Result<i64, Libra
     )?)
 }
 
-const BUNDLE_ID_PREFIX: &str = "revisit-v2-";
-const BUNDLE_KINDS: [&str; 4] = ["rediscovery", "creator", "date", "surprise"];
-const MAX_BUNDLES: usize = 10;
+const BUNDLE_ID_PREFIX: &str = "revisit-v3-";
+const BUNDLE_KINDS: [&str; 3] = ["creator", "date", "color"];
+const MAX_BUNDLES: usize = 3;
 const MIN_BUNDLE_ASSETS: usize = 6;
 const MAX_BUNDLE_ASSETS: usize = 20;
 const STRICT_EXPOSURE_COOLDOWN_DAYS: i64 = 14;
@@ -241,7 +243,8 @@ fn bundle_meta(kind: &str) -> BundleMeta {
     match kind {
         "rediscovery" => BundleMeta { title: "다시 만난 자산", reason_key: "forgotten" },
         "creator" => BundleMeta { title: "작가 다시보기", reason_key: "creator" },
-        "date" => BundleMeta { title: "이맘때 모은 자산", reason_key: "date" },
+        "date" => BundleMeta { title: "과거 수집함", reason_key: "date" },
+        "color" => BundleMeta { title: "비슷한 색감", reason_key: "color" },
         _ => BundleMeta { title: "뜻밖의 다시보기", reason_key: "surprise" },
     }
 }
@@ -286,20 +289,26 @@ impl RecommendationContext {
 }
 
 fn load_assets_for_recommendation(connection: &Connection) -> Result<Vec<AssetSummary>, LibraryError> {
+    load_recommendation_assets(connection, None)
+}
+
+fn load_recommendation_assets(connection: &Connection, ids: Option<&[String]>) -> Result<Vec<AssetSummary>, LibraryError> {
+    if ids.is_some_and(|ids| ids.is_empty()) { return Ok(Vec::new()); }
+    let restriction = ids.map(|ids| format!(" AND asset.id IN ({})", vec!["?"; ids.len()].join(","))).unwrap_or_default();
     let mut statement = connection.prepare(&format!(
         "SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url, \
          asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count, \
          asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url, \
          asset.import_source, asset.import_batch_id, asset.original_modified_at \
          FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id \
-         WHERE asset.status = 'normal'"
+         WHERE asset.status = 'normal'{restriction}"
     ))?;
-    let rows = statement.query_map([], asset_summary_from_row)?;
+    let rows = statement.query_map(rusqlite::params_from_iter(ids.unwrap_or_default().iter()), asset_summary_from_row)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(LibraryError::from)
 }
 
 fn slate_uses_current_algorithm(slate: &RevisitSlate) -> bool {
-    !slate.bundles.is_empty() && slate.bundles.iter().all(|bundle| bundle.id.starts_with(BUNDLE_ID_PREFIX))
+    slate.bundles.iter().all(|bundle| bundle.id.starts_with(BUNDLE_ID_PREFIX))
 }
 
 fn generate_daily_slate(
@@ -315,10 +324,7 @@ fn generate_daily_slate(
     let mut bundles = Vec::new();
     let mut attempt = 0_i64;
 
-    let mut schedule = kind_schedule(&preferences, &format!("{local_date}-{revision}"));
-    if schedule.is_empty() {
-        schedule.extend(BUNDLE_KINDS);
-    }
+    let schedule = kind_schedule(&preferences, &format!("{local_date}-{revision}"));
     for kind in schedule {
         if bundles.len() >= MAX_BUNDLES { break; }
         let kind_revision = revision + attempt;
@@ -338,27 +344,6 @@ fn generate_daily_slate(
         }
     }
 
-    if bundles.len() < 4 {
-        for kind in BUNDLE_KINDS {
-            if bundles.len() >= 4 || bundles.len() >= MAX_BUNDLES { break; }
-            let kind_revision = revision + 100 + attempt;
-            attempt += 1;
-            if let Some(generated) = generate_bundle(&context, &preferences, kind, local_date, &now, kind_revision, &used) {
-                let unique: Vec<String> = generated.asset_ids.into_iter().filter(|id| !used.contains(id)).collect();
-                if unique.len() < 2 { continue; }
-                for id in &unique { used.insert(id.clone()); }
-                bundles.push(RevisitBundle {
-                    id: format!("{BUNDLE_ID_PREFIX}{local_date}-{kind}-{kind_revision}"),
-                    kind: kind.to_string(),
-                    title: generated.meta.title.to_string(),
-                    reason: generated.reason,
-                    asset_ids: unique,
-                    revision: 0,
-                });
-            }
-        }
-    }
-
     Ok(RevisitSlate { local_date: local_date.to_string(), created_at: now_utc.to_string(), revision, bundles })
 }
 
@@ -372,19 +357,13 @@ fn preference_weight(preferences: &PreferenceWeights, dimension: &str, value: &s
     preferences.get(&(dimension.to_string(), value.to_string())).copied().unwrap_or(0)
 }
 
+fn kind_enabled(preferences: &PreferenceWeights, kind: &str, seed: &str) -> bool {
+    let weight = preference_weight(preferences, "recommendation_type", kind).clamp(-5, 0);
+    seed_from(&format!("{seed}-{kind}")) % 5 < (5 + weight) as u64
+}
+
 fn kind_schedule(preferences: &PreferenceWeights, seed: &str) -> Vec<&'static str> {
-    let mut schedule = Vec::new();
-    for kind in BUNDLE_KINDS {
-        let weight = preference_weight(preferences, "recommendation_type", kind);
-        let repetitions = match weight {
-            0.. => 3,
-            -1 => 2,
-            -2 => 1,
-            _ => 0,
-        };
-        schedule.extend(std::iter::repeat_n(kind, repetitions));
-    }
-    shuffle_values(schedule, seed)
+    shuffle_values(BUNDLE_KINDS.into_iter().filter(|kind| kind_enabled(preferences, kind, seed)).collect(), seed)
 }
 
 fn seed_from(text: &str) -> u64 {
@@ -417,7 +396,7 @@ fn ordered_candidates(candidates: Vec<Candidate>, seed: &str) -> Vec<Candidate> 
 fn reason_text(reason_key: &str) -> String {
     match reason_key {
         "forgotten" => "오랫동안 다시 열지 않은 자산".to_string(),
-        "date" => "이맘때 수집한 자산".to_string(),
+        "date" => "이맘때 수집한 오래된 자료".to_string(),
         "surprise" => "최근 노출이 적었던 자산".to_string(),
         _ => "한동안 덜 본 작가의 자산".to_string(),
     }
@@ -434,6 +413,7 @@ fn generate_bundle(
 ) -> Option<GeneratedBundle> {
     let seed = seed_from(&format!("{local_date}-{kind}-{revision}"));
     let (candidates, custom_reason) = match kind {
+        "color" => return None,
         "rediscovery" => (rediscovery_candidates(context, now), None),
         "creator" => creator_spotlight(context, preferences, now, seed),
         "date" => (date_capsule(context, local_date, now), None),
@@ -574,6 +554,7 @@ fn date_capsule(context: &RecommendationContext, local_date: &str, now: &DateTim
     let Some(today_month) = local_date.get(5..7).and_then(|part| part.parse::<u32>().ok()) else { return Vec::new() };
     context.assets.iter().filter(|asset| {
         asset.collected_at.get(5..7).and_then(|part| part.parse::<u32>().ok()).unwrap_or(0) == today_month
+            && collected_age_days(asset, now) >= 30
     }).map(|asset| Candidate {
         asset: asset.clone(),
         score: base_score(context, asset, now) + collected_age_days(asset, now).min(3650) / 12,
@@ -608,6 +589,110 @@ fn asset_exists(connection: &Connection, asset_id: &str) -> Result<(), LibraryEr
         return Err(LibraryError::AssetNotFound);
     }
     Ok(())
+}
+
+impl RecommendationContext {
+    fn load_for_ids(connection: &Connection, ids: &[String]) -> Result<Self, LibraryError> {
+        let assets = load_recommendation_assets(connection, Some(ids))?;
+        let mut activity = HashMap::new();
+        let mut statement = connection.prepare("SELECT last_opened_at,open_count,last_exposed_at,exposure_count FROM asset_activity WHERE asset_id=?1")?;
+        for id in ids {
+            if let Some(row) = statement.query_row([id], |row| Ok(ActivityRow {
+                last_opened_at: row.get(0)?, open_count: row.get(1)?, last_exposed_at: row.get(2)?, exposure_count: row.get(3)?,
+            })).optional()? { activity.insert(id.clone(), row); }
+        }
+        Ok(Self { assets, activity })
+    }
+}
+
+pub(super) fn can_prepare_color(connection: &Connection, local_date: &str, revision: i64) -> Result<bool, LibraryError> {
+    let Some(slate) = load_daily_slate(connection, local_date)? else { return Ok(false); };
+    Ok(slate.revision == revision && slate.bundles.len() < MAX_BUNDLES
+        && !slate.bundles.iter().any(|bundle| bundle.kind == "color")
+        && kind_enabled(&load_preference_weights(connection)?, "color", &format!("{local_date}-{revision}")))
+}
+
+fn make_color_bundle(
+    connection: &Connection, slate: &RevisitSlate, now_utc: &str,
+    colors: &[super::revisit_color::PreparedColor], previous: Option<&RevisitBundle>,
+) -> Result<Option<RevisitBundle>, LibraryError> {
+    use super::revisit_color::{color_distance, COLOR_CUTOFF};
+    let now = parse_utc_timestamp(now_utc)?;
+    let mut current = HashMap::new();
+    for color in colors {
+        if color.source.is_current(connection)? { current.insert(color.source.id.clone(), color); }
+    }
+    let context = RecommendationContext::load_for_ids(connection, &current.keys().cloned().collect::<Vec<_>>())?;
+    let excluded: BTreeSet<_> = slate.bundles.iter().filter(|bundle| Some(bundle.id.as_str()) != previous.map(|bundle| bundle.id.as_str())).flat_map(|bundle| bundle.asset_ids.iter().cloned()).collect();
+    let candidates: Vec<_> = context.assets.iter().filter(|asset| !excluded.contains(&asset.id)).map(|asset| Candidate {
+        asset: asset.clone(), score: base_score(&context, asset, &now),
+    }).collect();
+    let mut candidates = apply_cooldown(candidates, &context, &now);
+    let seed = format!("{}-color-{}", slate.local_date, slate.revision + 1);
+    // Stable input makes revision-based tie shuffling independent of HashMap order.
+    candidates.sort_by(|a, b| a.asset.id.cmp(&b.asset.id));
+    let candidates = ordered_candidates(candidates, &seed);
+    let previous_ids: BTreeSet<_> = previous.into_iter().flat_map(|bundle| bundle.asset_ids.iter()).collect();
+    let mut seeds: Vec<_> = candidates.iter().filter(|candidate| {
+        !matches!(candidate.asset.media, super::models::MediaSummary::Video { .. })
+            && Some(&candidate.asset.id) != previous.and_then(|bundle| bundle.asset_ids.first())
+    }).cloned().collect();
+    seeds.sort_by_key(|candidate| previous_ids.contains(&candidate.asset.id));
+    let mut best: Option<(usize, usize, f32, Vec<String>)> = None;
+    for seed in seeds.into_iter().take(8) {
+        let color = current[&seed.asset.id];
+        let mut neighbors: Vec<_> = candidates.iter().filter_map(|candidate| {
+            let other = current[&candidate.asset.id];
+            if color.source.hash == other.source.hash || candidate.asset.id == seed.asset.id { return None; }
+            let distance = color_distance(&color.signature, &other.signature);
+            (distance <= COLOR_CUTOFF).then_some((distance, candidate))
+        }).collect();
+        // All neighbors already pass the color cutoff. Prefer new members on
+        // explicit shuffle; stable sorting retains revision-shuffled score ties.
+        neighbors.sort_by(|a, b| previous_ids.contains(&a.1.asset.id).cmp(&previous_ids.contains(&b.1.asset.id))
+            .then_with(|| a.0.total_cmp(&b.0)).then_with(|| b.1.score.cmp(&a.1.score)));
+        if neighbors.len() < 2 { continue; }
+        let count = neighbors.len();
+        neighbors.truncate(11);
+        let average = neighbors.iter().map(|neighbor| neighbor.0).sum::<f32>() / neighbors.len() as f32;
+        let mut ids = vec![seed.asset.id];
+        ids.extend(neighbors.into_iter().map(|neighbor| neighbor.1.asset.id.clone()));
+        let new_count = if previous.is_some() { ids.iter().filter(|id| !previous_ids.contains(id)).count() } else { 0 };
+        // Reordering the same members is not a new recommendation.
+        if previous.is_some() && new_count == 0 { continue; }
+        if best.as_ref().is_some_and(|best| best.0 > new_count || (best.0 == new_count
+            && (best.1 > count || (best.1 == count && best.2 <= average)))) { continue; }
+        best = Some((new_count, count, average, ids));
+    }
+    Ok(best.map(|(_, _, _, asset_ids)| RevisitBundle {
+        id: format!("{BUNDLE_ID_PREFIX}{}-color-{}", slate.local_date, slate.revision + 1),
+        kind: "color".into(), title: "비슷한 색감".into(),
+        reason: "첫 이미지와 색감이 비슷한 이미지·영상 포스터".into(),
+        asset_ids, revision: slate.revision + 1,
+    }))
+}
+
+pub(super) fn append_color_bundle(connection: &Connection, local_date: &str, now_utc: &str, expected_revision: i64, colors: &[super::revisit_color::PreparedColor]) -> Result<Option<RevisitSlate>, LibraryError> {
+    // Caller holds the per-Library database guard across this check and the save.
+    if !can_prepare_color(connection, local_date, expected_revision)? { return Ok(None); }
+    let mut slate = load_daily_slate(connection, local_date)?.ok_or(LibraryError::AssetNotFound)?;
+    let Some(bundle) = make_color_bundle(connection, &slate, now_utc, colors, None)? else { return Ok(None); };
+    slate.bundles.push(bundle);
+    slate.revision += 1;
+    save_daily_slate(connection, &slate)?;
+    Ok(Some(slate))
+}
+
+fn reshuffle_color_bundle(connection: &Connection, local_date: &str, bundle_id: &str, now_utc: &str, colors: &[super::revisit_color::PreparedColor]) -> Result<RevisitSlate, LibraryError> {
+    let mut slate = load_daily_slate(connection, local_date)?.ok_or(LibraryError::AssetNotFound)?;
+    let index = slate.bundles.iter().position(|bundle| bundle.id == bundle_id && bundle.kind == "color").ok_or(LibraryError::AssetNotFound)?;
+    let previous = &slate.bundles[index];
+    if let Some(bundle) = make_color_bundle(connection, &slate, now_utc, colors, Some(previous))? {
+        slate.bundles[index] = bundle;
+        slate.revision += 1;
+        save_daily_slate(connection, &slate)?;
+    }
+    Ok(slate)
 }
 
 #[cfg(test)]
@@ -738,21 +823,71 @@ mod tests {
     }
 
     #[test]
+    fn active_themes_are_unique_and_recent_dates_are_excluded() {
+        let (_temp, library) = fixture();
+        for index in 0..3 {
+            insert_favorite_with_creator(&library, &format!("old-{index}"), "creator", false, "2025-08-30T00:00:00Z");
+            insert_favorite_with_creator(&library, &format!("new-{index}"), "creator", false, "2026-08-29T00:00:00Z");
+        }
+        let connection = library.connection().unwrap();
+        let context = RecommendationContext::load(&connection).unwrap();
+        let now = parse_utc_timestamp("2026-08-30T10:00:00Z").unwrap();
+        let dated = date_capsule(&context, "2026-08-30", &now);
+        assert_eq!(dated.len(), 3);
+        assert!(dated.iter().all(|candidate| candidate.asset.id.starts_with("old-")));
+        let schedule = kind_schedule(&HashMap::new(), "day");
+        assert_eq!(schedule.len(), 3);
+        assert_eq!(schedule.iter().collect::<BTreeSet<_>>().len(), 3);
+        assert_eq!(bundle_meta("date").title, "과거 수집함");
+    }
+
+    #[test]
+    fn hidden_types_never_return_through_fallback_and_empty_slates_stay_fixed() {
+        let (_temp, library) = fixture();
+        for kind in BUNDLE_KINDS {
+            for _ in 0..5 { library.set_revisit_preference("recommendation_type", kind, "2026-09-12T00:00:00Z").unwrap(); }
+        }
+        let first = library.get_or_create_revisit_slate("2026-09-12", "2026-09-12T00:00:00Z").unwrap();
+        assert!(first.bundles.is_empty());
+        insert_favorite_with_creator(&library, "new-a", "creator", false, "2025-09-01T00:00:00Z");
+        insert_favorite_with_creator(&library, "new-b", "creator", false, "2025-09-01T00:00:00Z");
+        assert_eq!(library.get_or_create_revisit_slate("2026-09-12", "2026-09-12T01:00:00Z").unwrap(), first);
+        assert!(library.reshuffle_revisit_slate("2026-09-12", "2026-09-12T01:00:00Z").unwrap().bundles.is_empty());
+    }
+
+    #[test]
+    fn legacy_slate_is_upgraded_only_for_the_requested_date() {
+        let (_temp, library) = fixture();
+        insert_asset(&library, "a", "2025-09-01T00:00:00Z");
+        insert_asset(&library, "b", "2025-09-01T00:00:00Z");
+        let connection = library.connection().unwrap();
+        for date in ["2026-09-11", "2026-09-12"] {
+            save_daily_slate(&connection, &RevisitSlate {
+                local_date: date.into(), created_at: format!("{date}T00:00:00Z"), revision: 0,
+                bundles: vec![RevisitBundle { id: format!("revisit-v2-{date}"), kind: "rediscovery".into(), title: "old".into(), reason: "old".into(), asset_ids: vec!["a".into(), "b".into()], revision: 0 }],
+            }).unwrap();
+        }
+        let next = get_or_create_revisit_slate(&connection, "2026-09-12", "2026-09-12T00:00:00Z").unwrap();
+        assert_eq!(next.revision, 1);
+        assert!(next.bundles.iter().all(|bundle| bundle.id.starts_with("revisit-v3-")));
+        assert!(load_daily_slate(&connection, "2026-09-11").unwrap().unwrap().bundles[0].id.starts_with("revisit-v2-"));
+    }
+
+    #[test]
     fn generated_slate_is_bounded_unique_and_fixed_for_the_day() {
         let (_temp, library) = fixture();
         for index in 0..60 {
-            insert_favorite_with_creator(&library, &format!("asset-{index}"), "creator", index % 3 == 0, "2026-08-30T00:00:00Z");
+            insert_favorite_with_creator(&library, &format!("asset-{index}"), "creator", index % 3 == 0, "2025-08-30T00:00:00Z");
         }
         let connection = library.connection().unwrap();
 
         let slate = get_or_create_revisit_slate(&connection, "2026-08-30", "2026-08-30T09:00:00Z").unwrap();
-         assert!((2..=10).contains(&slate.bundles.len()));
+         assert_eq!(slate.bundles.len(), 2);
         let mut all_assets = std::collections::BTreeSet::new();
         for bundle in &slate.bundles {
             assert!((2..=20).contains(&bundle.asset_ids.len()));
-            let before = all_assets.len();
             for id in &bundle.asset_ids {
-                all_assets.insert(id.clone());
+                assert!(all_assets.insert(id.clone()));
             }
         }
 
@@ -811,7 +946,7 @@ mod tests {
     fn bundle_reshuffle_keeps_neighbors_and_bumps_only_target() {
         let (_temp, library) = fixture();
         for index in 0..60 {
-            insert_favorite_with_creator(&library, &format!("asset-{index}"), "creator", index % 3 == 0, "2026-08-30T00:00:00Z");
+            insert_favorite_with_creator(&library, &format!("asset-{index}"), "creator", index % 3 == 0, "2025-08-30T00:00:00Z");
         };
         let slate = {
             let connection = library.connection().unwrap();
@@ -843,7 +978,7 @@ mod tests {
     fn slate_reshuffle_regenerates_every_bundle() {
         let (_temp, library) = fixture();
         for index in 0..60 {
-            insert_favorite_with_creator(&library, &format!("asset-{index}"), "creator", index % 3 == 0, "2026-08-30T00:00:00Z");
+            insert_favorite_with_creator(&library, &format!("asset-{index}"), "creator", index % 3 == 0, "2025-08-30T00:00:00Z");
         }
         let slate = {
             let connection = library.connection().unwrap();
@@ -874,6 +1009,14 @@ impl super::Library {
     }
 
     pub fn reshuffle_revisit_bundle(&self, local_date: &str, bundle_id: &str, now_utc: &str) -> Result<RevisitSlate, LibraryError> {
+        let is_color = {
+            let connection = self.connection()?;
+            load_daily_slate(&connection, local_date)?.is_some_and(|slate| slate.bundles.iter().any(|bundle| bundle.id == bundle_id && bundle.kind == "color"))
+        };
+        if is_color {
+            let colors = self.colors_for_reshuffle()?;
+            return reshuffle_color_bundle(&*self.connection()?, local_date, bundle_id, now_utc, &colors);
+        }
         self.connection()?.with_lock(|connection| reshuffle_revisit_bundle(connection, local_date, bundle_id, now_utc))
     }
 

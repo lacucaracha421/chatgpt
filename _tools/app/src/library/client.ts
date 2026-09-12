@@ -230,6 +230,8 @@ export const libraryGateway: LibraryGateway = {
     invoke<AssetCreatorSummary[]>("list_asset_creators", { query }),
   getRevisitSlate: (localDate: string, nowUtc: string) =>
     invoke<RevisitSlate>("get_revisit_slate", { localDate, nowUtc }),
+  prepareRevisitColorBundle: (localDate: string, nowUtc: string, expectedRevision: number) =>
+    invoke<RevisitSlate | null>("prepare_revisit_color_bundle", { localDate, nowUtc, expectedRevision }),
   reshuffleRevisitBundle: (localDate: string, bundleId: string) =>
     invoke<RevisitSlate>("reshuffle_revisit_bundle", { localDate, bundleId, nowUtc: new Date().toISOString() }),
   reshuffleRevisitSlate: (localDate: string) =>

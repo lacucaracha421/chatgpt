@@ -378,6 +378,7 @@ function createGateway(): LibraryGateway {
     listAssetDateBuckets: vi.fn().mockResolvedValue([]),
     listAssetCreators: vi.fn().mockResolvedValue([]),
     getRevisitSlate: vi.fn().mockResolvedValue({ localDate: "", createdAt: "", revision: 0, bundles: [] }),
+    prepareRevisitColorBundle: vi.fn().mockResolvedValue(null),
     reshuffleRevisitBundle: vi.fn().mockResolvedValue({ localDate: "", createdAt: "", revision: 0, bundles: [] }),
     reshuffleRevisitSlate: vi.fn().mockResolvedValue({ localDate: "", createdAt: "", revision: 0, bundles: [] }),
     recordAssetOpened: vi.fn().mockResolvedValue(undefined),

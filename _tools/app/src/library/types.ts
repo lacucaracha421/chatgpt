@@ -771,7 +771,7 @@ export type AssetCreatorSummary = {
   coverAssetIds: string[];
 };
 
-export type RevisitBundleKind = "rediscovery" | "creator" | "date" | "surprise";
+export type RevisitBundleKind = "rediscovery" | "creator" | "date" | "surprise" | "color";
 
 export type RevisitBundle = {
   id: string;
@@ -1042,6 +1042,7 @@ export interface LibraryGateway {
   listAssetDateBuckets(query: AssetDateBucketQuery): Promise<AssetDateBucket[]>;
   listAssetCreators(query: AssetQuery): Promise<AssetCreatorSummary[]>;
   getRevisitSlate(localDate: string, nowUtc: string): Promise<RevisitSlate>;
+  prepareRevisitColorBundle(localDate: string, nowUtc: string, expectedRevision: number): Promise<RevisitSlate | null>;
   reshuffleRevisitBundle(localDate: string, bundleId: string): Promise<RevisitSlate>;
   reshuffleRevisitSlate(localDate: string): Promise<RevisitSlate>;
   recordAssetOpened(assetId: string, openedAt: string): Promise<void>;

@@ -11,7 +11,11 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 
 beforeEach(() => {
   invoke.mockReset();
-  invoke.mockResolvedValue([]);
+  invoke.mockImplementation(async (command: string) => {
+    if (command === "get_revisit_slate") return { localDate: "2026-09-12", createdAt: "2026-09-12T00:00:00Z", revision: 0, bundles: [] };
+    if (command === "prepare_revisit_color_bundle") return null;
+    return [];
+  });
 });
 
 it("switches from 오늘 to 날짜와 작가가 있는 둘러보기", async () => {
