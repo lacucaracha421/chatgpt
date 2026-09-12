@@ -1,63 +1,67 @@
-#[cfg(target_os = "linux")]
-mod linux_fs;
 pub(crate) mod aladin;
-pub(crate) mod notes;
 mod aladin_flow;
-pub(crate) mod kakao_books;
 mod album;
 mod asset_metadata;
+pub(crate) mod av_artwork;
+pub(crate) mod av_collection;
+pub(crate) mod av_models;
 mod backup;
 pub mod book_migration;
 pub(crate) mod catalog_checkpoint;
-mod catalog_counts;
-#[cfg(test)]
-mod catalog_count_gate_tests;
 #[cfg(test)]
 mod catalog_count_fixture_tests;
-mod catalog_preparation;
-mod catalog_group_identity;
+#[cfg(test)]
+mod catalog_count_gate_tests;
+mod catalog_counts;
 mod catalog_group_api;
+mod catalog_group_identity;
 mod catalog_group_query;
 mod catalog_groups;
-pub(crate) mod catalog_review;
 mod catalog_lineage;
-mod catalog_revision;
-pub(crate) mod catalog_update;
-mod classification;
-pub mod characters;
-pub mod character_conversion;
-pub mod character_folder_migration;
-pub mod character_groups;
-pub mod character_hub;
-pub mod character_scan;
-pub mod character_autotag;
-mod character_sources;
-pub mod character_incremental;
-pub mod character_series_suggestions;
-pub mod character_workflow;
-pub(crate) mod character_worker;
-pub(crate) mod collection;
-pub(crate) mod av_models;
-pub(crate) mod av_collection;
-pub(crate) mod av_artwork;
-pub(crate) mod collection_source;
-mod collection_volume;
+mod catalog_preparation;
 pub(crate) mod catalog_provider;
 mod catalog_query;
+pub(crate) mod catalog_review;
+mod catalog_revision;
+pub(crate) mod catalog_update;
 mod catalog_visibility;
-pub(crate) mod credential;
+pub mod character_autotag;
+pub mod character_conversion;
+pub mod character_groups;
+pub mod character_hub;
+pub mod character_incremental;
+pub mod character_reference_candidates;
+pub mod character_reference_refresh;
+#[cfg(test)]
+mod character_reference_refresh_bench;
+pub mod character_scan;
+mod character_scope;
+mod character_sources;
+pub(crate) mod character_worker;
+pub mod character_workflow;
+pub mod characters;
+mod classification;
 pub mod cloud_preflight;
+pub(crate) mod collection;
+pub(crate) mod collection_source;
+mod collection_volume;
+pub(crate) mod credential;
 mod db;
 mod drag_out;
+pub(crate) mod kakao_books;
+#[cfg(target_os = "linux")]
+mod linux_fs;
+pub(crate) mod notes;
 #[cfg(target_os = "linux")]
 pub(crate) use drag_out::PreparedAssetDrag;
+pub mod collection_tracking;
 pub mod error;
 mod external_binding;
 mod favorite;
 mod folder_appearance;
-mod image_fingerprint;
 pub(crate) mod igdb;
 mod igdb_flow;
+mod image_fingerprint;
 pub(crate) mod ingestion;
 pub mod legacy_migration;
 pub mod legacy_package_migration;
@@ -66,14 +70,13 @@ mod manga;
 pub(crate) mod mangadex;
 mod mangadex_flow;
 pub mod metadata_import;
-pub mod models;
-mod online_catalog;
 pub(crate) mod mobile_catalog;
 #[cfg(test)]
 mod mobile_catalog_tests;
+pub mod models;
+mod online_catalog;
 mod query;
 mod release_watch;
-pub mod collection_tracking;
 pub(crate) mod remote_gallery;
 pub(crate) mod remote_media;
 pub(crate) mod remote_progress;
@@ -81,9 +84,9 @@ mod revisit;
 mod similarity;
 mod source_group;
 pub mod statistics;
-mod tmdb_flow;
 pub mod thumbnail_maintenance;
 pub(crate) mod tmdb;
+mod tmdb_flow;
 mod trash;
 mod video_media;
 pub(crate) mod video_similarity;
@@ -105,8 +108,8 @@ use models::{
     MangaCatalogRecoverySelection, MangaSeries, TrashPolicy,
 };
 use rusqlite::{Connection, OptionalExtension};
-pub(crate) use work_artwork::MAX_WORK_ARTWORK_BYTES;
 pub(crate) use video_media::VideoProbe;
+pub(crate) use work_artwork::MAX_WORK_ARTWORK_BYTES;
 
 #[derive(Debug, Clone, Copy)]
 pub enum MediaVariant {
@@ -687,7 +690,12 @@ mod tests {
         symlink(&replacement, &selected).unwrap();
 
         let mut bytes = Vec::new();
-        library.open_library_media("assets/source.png").unwrap().file.read_to_end(&mut bytes).unwrap();
+        library
+            .open_library_media("assets/source.png")
+            .unwrap()
+            .file
+            .read_to_end(&mut bytes)
+            .unwrap();
         assert_eq!(bytes, b"original");
     }
 }

@@ -86,6 +86,22 @@ pub struct FolderAssetSnapshot {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct FolderRegistrationResult {
+    pub target: Target,
+    pub linked_asset_count: usize,
+    pub reference_candidate_count: usize,
+    pub source_folder_removed: bool,
+}
+
+impl std::ops::Deref for FolderRegistrationResult {
+    type Target = Target;
+    fn deref(&self) -> &Self::Target {
+        &self.target
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Reference {
     pub slot: u32,
     pub asset_id: Option<String>,
@@ -115,11 +131,15 @@ pub struct Target {
 
 impl Target {
     pub(super) fn usable_learned_references(&self) -> impl Iterator<Item = &Reference> {
-        self.learned_references.iter().filter(|reference| reference.status == "ready")
+        self.learned_references
+            .iter()
+            .filter(|reference| reference.status == "ready")
     }
 
     pub(super) fn has_invalid_learned_references(&self) -> bool {
-        self.learned_references.iter().any(|reference| reference.status != "ready")
+        self.learned_references
+            .iter()
+            .any(|reference| reference.status != "ready")
     }
 }
 
@@ -201,7 +221,9 @@ impl Library {
         folder_id: String,
         recursive: bool,
     ) -> Result<usize> {
-        Ok(self.character_folder_asset_snapshot(folder_id, recursive)?.count)
+        Ok(self
+            .character_folder_asset_snapshot(folder_id, recursive)?
+            .count)
     }
 
     pub fn character_folder_asset_snapshot(
@@ -220,14 +242,23 @@ impl Library {
     }
 
     /// Register existing image, GIF and video memberships; references remain still images.
-    pub fn register_character_folder(&self, request: FolderRegistration) -> Result<Target> {
+    pub fn register_character_folder(
+        &self,
+        request: FolderRegistration,
+    ) -> Result<FolderRegistrationResult> {
         if request.reference_ids.len() > REFERENCE_COUNT {
             return Err(Error::Invalid("기준 이미지는 최대 5장입니다."));
         }
         let mut connection = self.connection()?;
         let tx = connection.transaction()?;
-        if super::classification::classification_in_role_scope(&tx, &request.series_id, "originals")? {
-            return Err(Error::Invalid("오리지널 보관 영역은 캐릭터로 정리할 수 없습니다."));
+        if super::classification::classification_in_role_scope(
+            &tx,
+            &request.series_id,
+            "originals",
+        )? {
+            return Err(Error::Invalid(
+                "오리지널 보관 영역은 캐릭터로 정리할 수 없습니다.",
+            ));
         }
         let inside: bool = tx.query_row("WITH RECURSIVE scope(id) AS (SELECT id FROM classification_entries WHERE id=?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id) SELECT EXISTS(SELECT 1 FROM scope WHERE id=?2)", params![request.series_id,request.folder_id], |r| r.get(0))?;
         if !inside {
@@ -277,7 +308,14 @@ impl Library {
                 }
                 super::character_hub::validate_art(&tx, image)?;
             }
-            tx.execute("INSERT INTO character_targets(id,series_classification_id,linked_classification_id,display_name,enabled,thumbnail_asset_id,created_at,updated_at) VALUES(?1,?2,?3,?4,1,?5,?6,?6)", params![id,request.series_id,request.folder_id,name,request.thumbnail_id,now])?;
+            let manual_only = request.reference_ids.len() < REFERENCE_COUNT;
+            tx.execute("INSERT INTO character_targets(id,series_classification_id,linked_classification_id,display_name,enabled,manual_only,thumbnail_asset_id,created_at,updated_at) VALUES(?1,?2,?3,?4,1,?5,?6,?7,?7)", params![id,request.series_id,request.folder_id,name,manual_only,request.thumbnail_id,now])?;
+            if manual_only {
+                tx.execute(
+                    "INSERT INTO character_manual_targets(target_id,created_at) VALUES(?1,?2)",
+                    params![id, now],
+                )?;
+            }
             let mut hashes = BTreeSet::new();
             for (slot, image) in request.reference_ids.iter().enumerate() {
                 if !ids.contains(image) {
@@ -311,6 +349,18 @@ impl Library {
                 },
             )?;
         }
+        let reference_candidate_count: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM character_relations r
+             JOIN assets a ON a.id=r.asset_id AND a.status='normal' AND a.media_kind='image'
+             WHERE r.target_id=?1
+               AND NOT EXISTS(SELECT 1 FROM character_relations other WHERE other.asset_id=r.asset_id AND other.target_id<>r.target_id)
+               AND NOT EXISTS(SELECT 1 FROM character_references base WHERE base.target_id=r.target_id AND base.asset_id=r.asset_id)
+               AND NOT EXISTS(SELECT 1 FROM character_learned_references learned WHERE learned.target_id=r.target_id AND learned.asset_id=r.asset_id)
+               AND NOT EXISTS(SELECT 1 FROM character_reference_exclusions excluded WHERE excluded.target_id=r.target_id AND excluded.asset_id=r.asset_id)",
+            [&target.id],
+            |row| row.get(0),
+        )?;
+        let mut source_folder_removed = false;
         if request.cleanup_folder && request.folder_id != request.series_id {
             // Descendant folders and assets not included in registration keep their structure.
             let direct = tx.prepare("SELECT asset_id FROM asset_classifications WHERE classification_id=?1 ORDER BY asset_id")?.query_map([&request.folder_id],|r|r.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?;
@@ -319,12 +369,13 @@ impl Library {
                 .filter(|id| ids.contains(id))
                 .collect::<Vec<_>>();
             if !moving.is_empty() {
-                Self::set_asset_classification_in(
+                Self::set_asset_classification_cause_in(
                     &tx,
                     &super::models::SetAssetClassification {
                         asset_ids: moving,
                         classification_id: Some(request.series_id.clone()),
                     },
+                    super::character_autotag::Cause::AutomaticFinalization,
                 )?;
             }
             let retained: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM classification_entries WHERE parent_id=?1) OR EXISTS(SELECT 1 FROM asset_classifications WHERE classification_id=?1) OR EXISTS(SELECT 1 FROM character_series WHERE classification_id=?1) OR EXISTS(SELECT 1 FROM character_targets WHERE linked_classification_id=?1 AND id<>?2)",params![request.folder_id,target.id],|r|r.get(0))?;
@@ -333,11 +384,18 @@ impl Library {
                     "DELETE FROM classification_entries WHERE id=?1",
                     [&request.folder_id],
                 )?;
+                source_folder_removed = true;
             }
         }
         let result = self.read_character_target(&tx, &target.id)?;
+        let linked_asset_count = ids.len();
         tx.commit()?;
-        Ok(result)
+        Ok(FolderRegistrationResult {
+            target: result,
+            linked_asset_count,
+            reference_candidate_count: reference_candidate_count.max(0) as usize,
+            source_folder_removed,
+        })
     }
 
     pub fn save_character_target(&self, draft: TargetDraft) -> Result<Target> {
@@ -397,8 +455,14 @@ impl Library {
             return Err(Error::Invalid("시리즈 폴더를 선택해 주세요."));
         }
         if let Some(series) = draft.series_classification_id.as_deref() {
-            if super::classification::classification_in_role_scope(transaction, series, "originals")? {
-                return Err(Error::Invalid("오리지널 보관 영역에서는 캐릭터를 등록할 수 없습니다."));
+            if super::classification::classification_in_role_scope(
+                transaction,
+                series,
+                "originals",
+            )? {
+                return Err(Error::Invalid(
+                    "오리지널 보관 영역에서는 캐릭터를 등록할 수 없습니다.",
+                ));
             }
         }
         for id in draft
@@ -485,15 +549,32 @@ impl Library {
         expected_revision: i64,
         asset_ids: &[String],
     ) -> Result<Target> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let result = self.add_character_learned_references_in(
+            &transaction,
+            id,
+            expected_revision,
+            asset_ids,
+        )?;
+        transaction.commit()?;
+        Ok(result)
+    }
+
+    pub(super) fn add_character_learned_references_in(
+        &self,
+        transaction: &Connection,
+        id: &str,
+        expected_revision: i64,
+        asset_ids: &[String],
+    ) -> Result<Target> {
         let ids = asset_ids.iter().collect::<BTreeSet<_>>();
         if ids.is_empty() || ids.len() > 20 {
             return Err(Error::Invalid(
                 "학습 이미지는 한 번에 1~20장까지 선택해 주세요.",
             ));
         }
-        let mut connection = self.connection()?;
-        let transaction = connection.transaction()?;
-        let target = self.read_character_target(&transaction, id)?;
+        let target = self.read_character_target(transaction, id)?;
         if target.revision != expected_revision {
             return Err(Error::Stale);
         }
@@ -527,7 +608,7 @@ impl Library {
                     "여러 캐릭터에 연결된 이미지는 학습에 추가할 수 없습니다.",
                 ));
             }
-            let (hash, path) = scoped_image(&transaction, series, asset_id)?;
+            let (hash, path) = scoped_image(transaction, series, asset_id)?;
             self.open_library_media(&path)?;
             let current: Option<String> = transaction.query_row("SELECT asset_hash FROM character_learned_references WHERE target_id=?1 AND asset_id=?2", params![id,asset_id], |row| row.get(0)).optional()?;
             if current.as_deref() == Some(&hash) {
@@ -551,9 +632,7 @@ impl Library {
             )?;
             transaction.execute("INSERT INTO character_learned_references(target_id,asset_id,asset_hash,created_at) VALUES(?1,?2,?3,?4) ON CONFLICT(target_id,asset_id) DO UPDATE SET asset_hash=excluded.asset_hash,created_at=excluded.created_at", params![id,asset_id,hash,now])?;
         }
-        let result = self.read_character_target(&transaction, id)?;
-        transaction.commit()?;
-        Ok(result)
+        self.read_character_target(transaction, id)
     }
 
     pub fn exclude_character_reference(
@@ -616,7 +695,7 @@ impl Library {
         Ok(result)
     }
 
-    fn replace_character_references_selection_in(
+    pub(super) fn replace_character_references_selection_in(
         &self,
         transaction: &Connection,
         id: &str,
@@ -682,7 +761,10 @@ impl Library {
             )?;
         }
         if promote_manual {
-            transaction.execute("DELETE FROM character_manual_targets WHERE target_id=?1", [id])?;
+            transaction.execute(
+                "DELETE FROM character_manual_targets WHERE target_id=?1",
+                [id],
+            )?;
         }
         self.read_character_target(transaction, id)
     }
@@ -800,9 +882,10 @@ impl Library {
                     .series_classification_id
                     .as_deref()
                     .ok_or(Error::Invalid("시리즈 폴더를 다시 연결해 주세요."))?;
-                super::character_hub::candidate_media_mode(
+                super::character_hub::candidate_decision_media_mode(
                     &transaction,
                     series,
+                    &target.id,
                     asset_id,
                     evidence
                         .get(asset_id)
@@ -831,7 +914,10 @@ impl Library {
             transaction.execute("INSERT INTO character_decisions
                 (target_id,asset_id,source_asset_id,asset_hash,decision,target_fingerprint,baseline_fingerprint,reference_snapshot,created_at)
                 VALUES(?1,?2,?2,?3,?4,?5,?6,?7,?8)", params![target.id,asset_id,hash,request.decision.stored(),target.fingerprint,request.baseline_fingerprint,snapshot,now])?;
-            transaction.execute("DELETE FROM character_review_completions WHERE asset_id=?1", [asset_id])?;
+            transaction.execute(
+                "DELETE FROM character_review_completions WHERE asset_id=?1",
+                [asset_id],
+            )?;
             super::character_autotag::refresh_character_review_state(transaction, asset_id)?;
             changed += 1;
         }

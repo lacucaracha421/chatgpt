@@ -1156,6 +1156,17 @@ textarea:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
+/* Advisory dot for characters with pending review. Small square marker keeps the
+   same restrained language as the rail alert without claiming a count. */
+.classification-sidebar__review-mark {
+  flex-shrink: 0;
+  width: var(--selection-mark-size);
+  height: var(--selection-mark-size);
+  margin-left: var(--space-1);
+  border-radius: 1px;
+  background: var(--color-warning, #d6a34c);
+}
+
 .classification-sidebar__tree-label {
   flex: 1;
   min-width: 0;

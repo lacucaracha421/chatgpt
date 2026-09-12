@@ -5,8 +5,54 @@ use crate::library::{
 };
 
 fn queue(f: &Fixture, id: &str) -> Job {
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "INSERT OR IGNORE INTO character_series(classification_id) VALUES(?1)",
+            [&f.series],
+        )
+        .unwrap();
     enqueue(&f.library.connection().unwrap(), id, Cause::Ingestion).unwrap();
     f.library.claim_character_autotag().unwrap().unwrap()
+}
+
+#[test]
+fn broad_category_asset_creates_no_character_job() {
+    let f = Fixture::new();
+    f.ready("A");
+    let broad: String = f
+        .library
+        .connection()
+        .unwrap()
+        .query_row(
+            "SELECT parent_id FROM classification_entries WHERE id=?1",
+            [&f.series],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let connection = f.library.connection().unwrap();
+    connection
+        .execute(
+            "UPDATE asset_classifications SET classification_id=?1 WHERE asset_id='asset-6'",
+            [&broad],
+        )
+        .unwrap();
+
+    assert!(!enqueue(&connection, "asset-6", Cause::Ingestion).unwrap());
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT
+                    (SELECT COUNT(*) FROM character_autotag_jobs WHERE asset_id='asset-6') +
+                    (SELECT COUNT(*) FROM character_autotag_evidence WHERE asset_id='asset-6') +
+                    (SELECT COUNT(*) FROM character_relations WHERE asset_id='asset-6')",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        0
+    );
 }
 
 fn context(f: &Fixture, job: &Job) -> Context {
@@ -162,18 +208,21 @@ fn automatic_move_preserves_outbox_without_recursive_generation() {
 }
 
 #[test]
-fn empty_roster_checkpoint_is_reconsidered_when_first_target_is_ready() {
+fn empty_roster_checkpoint_is_refreshed_only_after_an_explicit_request() {
     let f = Fixture::new();
     let job = queue(&f, "asset-5");
     let ctx = context(&f, &job);
     assert!(ctx.targets.is_empty());
     publish(&f, &job, &ctx, ReviewState::AwaitingCandidates);
-    f.ready("A");
+    let target = f.ready("A");
+    let receipt = f
+        .library
+        .request_character_reference_refresh(&target.id, target.revision)
+        .unwrap();
+    assert_eq!(receipt.eligible_count, 0);
     assert_eq!(
-        f.library
-            .reconsider_character_autotag(&f.series, None, 10)
-            .unwrap(),
-        vec!["asset-5"]
+        f.library.advance_character_reference_refresh(10).unwrap(),
+        1
     );
     let retry = f.library.claim_character_autotag().unwrap().unwrap();
     assert_eq!(retry.source_generation, job.source_generation);
@@ -181,24 +230,29 @@ fn empty_roster_checkpoint_is_reconsidered_when_first_target_is_ready() {
 }
 
 #[test]
-fn losing_predictions_do_not_requeue_a_resolved_image() {
+fn explicit_refresh_does_not_requeue_a_resolved_image() {
     let f = Fixture::new();
-    f.ready("A");
+    let target = f.ready("A");
     f.ready("B");
     let job = queue(&f, "asset-5");
     let ctx = context(&f, &job);
     publish(&f, &job, &ctx, ReviewState::Resolved);
-    assert!(f
-        .library
-        .reconsider_character_autotag(&f.series, None, 10)
-        .unwrap()
-        .is_empty());
-    f.library.connection().unwrap().execute("UPDATE character_autotag_jobs SET review_state='partially_resolved' WHERE asset_id='asset-5'",[]).unwrap();
     assert_eq!(
         f.library
-            .reconsider_character_autotag(&f.series, None, 10)
-            .unwrap(),
-        vec!["asset-5"]
+            .request_character_reference_refresh(&target.id, target.revision)
+            .unwrap()
+            .eligible_count,
+        0
+    );
+    f.library.connection().unwrap().execute("UPDATE character_autotag_jobs SET review_state='partially_resolved' WHERE asset_id='asset-5'",[]).unwrap();
+    let receipt = f
+        .library
+        .request_character_reference_refresh(&target.id, target.revision)
+        .unwrap();
+    assert_eq!(receipt.eligible_count, 0);
+    assert_eq!(
+        f.library.advance_character_reference_refresh(10).unwrap(),
+        1
     );
 }
 
@@ -254,9 +308,15 @@ fn durable_review_survives_scan_loss_and_learning_reconsideration() {
         .iter()
         .any(|r| r.asset.id == "asset-5" && r.predictions[0].scan_id.as_deref() == Some(&id)));
     // A context-only retry must not invalidate a human's currently displayed source.
-    f.library
-        .reconsider_character_autotag(&f.series, None, 10)
+    let receipt = f
+        .library
+        .request_character_reference_refresh(&target.id, target.revision)
         .unwrap();
+    assert_eq!(receipt.eligible_count, 0);
+    assert_eq!(
+        f.library.advance_character_reference_refresh(10).unwrap(),
+        1
+    );
     assert_eq!(
         f.library
             .record_character_decisions(DecisionRequest {
@@ -286,6 +346,14 @@ fn reopening_recovers_claims_and_preserves_published_review() {
     let first = queue(&f, "asset-5");
     let ctx = context(&f, &first);
     let id = publish(&f, &first, &ctx, ReviewState::Unresolved);
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE asset_classifications SET classification_id=?1 WHERE asset_id='asset-6'",
+            [&f.series],
+        )
+        .unwrap();
     let interrupted = queue(&f, "asset-6");
     let Fixture {
         library,
@@ -444,7 +512,14 @@ fn closest_registered_series_excludes_registered_ancestors() {
             auto_classify: false,
         })
         .unwrap();
-    assert!(context(&f, &job).targets.is_empty());
+    assert!(matches!(
+        f.library.character_autotag_context(
+            &f.library.connection().unwrap(),
+            &job,
+            &"a".repeat(64)
+        ),
+        Err(Error::Stale)
+    ));
 }
 
 #[test]
@@ -620,14 +695,17 @@ fn manual_scan_enrollment_requeues_completed_evidence_missing_current_target() {
 #[test]
 fn failed_jobs_can_be_reconsidered_and_explicitly_retried() {
     let f = Fixture::new();
-    let _target = f.ready("A");
+    let target = f.ready("A");
     let job = queue(&f, "asset-5");
     f.library.connection().unwrap().execute("UPDATE character_autotag_jobs SET state='failed',review_state='failed',attempts=3,claim_id=NULL WHERE asset_id=?1",[&job.asset_id]).unwrap();
+    let receipt = f
+        .library
+        .request_character_reference_refresh(&target.id, target.revision)
+        .unwrap();
+    assert_eq!(receipt.eligible_count, 0);
     assert_eq!(
-        f.library
-            .reconsider_character_autotag(&f.series, None, 200)
-            .unwrap(),
-        vec!["asset-5"]
+        f.library.advance_character_reference_refresh(200).unwrap(),
+        1
     );
     let retried = f.library.character_autotag_job("asset-5").unwrap().unwrap();
     assert_eq!(retried.state, "pending");
@@ -648,12 +726,10 @@ fn failed_jobs_can_be_reconsidered_and_explicitly_retried() {
 }
 
 #[test]
-fn failed_count_and_retry_cover_the_same_assets_the_error_filter_lists() {
+fn broad_category_assets_never_enter_failed_count_or_retry() {
     let f = Fixture::new();
     let _target = f.ready("A");
-    // asset-5 sits in the series subtree; asset-6 is filed at the series' own root
-    // category, which the review error filter also lists. A narrower retry scope
-    // would show failures with no reachable retry route.
+    // asset-5 sits in the series subtree; asset-6 is filed at its broad parent.
     f.library
         .connection()
         .unwrap()
@@ -664,7 +740,12 @@ fn failed_count_and_retry_cover_the_same_assets_the_error_filter_lists() {
         )
         .unwrap();
     queue(&f, "asset-5");
-    queue(&f, "asset-6");
+    assert!(!enqueue(
+        &f.library.connection().unwrap(),
+        "asset-6",
+        Cause::Ingestion
+    )
+    .unwrap());
     f.library
         .connection()
         .unwrap()
@@ -675,14 +756,20 @@ fn failed_count_and_retry_cover_the_same_assets_the_error_filter_lists() {
         )
         .unwrap();
 
-    assert_eq!(f.library.failed_character_asset_count(&f.series).unwrap(), 2);
+    assert_eq!(
+        f.library.failed_character_asset_count(&f.series).unwrap(),
+        1
+    );
     assert_eq!(
         f.library
             .retry_failed_character_assets(f.series.clone())
             .unwrap(),
-        2
+        1
     );
-    assert_eq!(f.library.failed_character_asset_count(&f.series).unwrap(), 0);
+    assert_eq!(
+        f.library.failed_character_asset_count(&f.series).unwrap(),
+        0
+    );
 }
 
 #[test]
@@ -690,17 +777,17 @@ fn failed_assets_outside_the_series_scope_are_not_counted_or_retried() {
     let f = Fixture::new();
     let _target = f.ready("A");
     // asset-6 lives in an unrelated root, so this series' error filter never lists it.
-    queue(&f, "asset-6");
-    f.library
-        .connection()
-        .unwrap()
-        .execute(
-            "UPDATE character_autotag_jobs SET state='failed',review_state='failed',attempts=3,claim_id=NULL WHERE asset_id='asset-6'",
-            [],
-        )
-        .unwrap();
+    assert!(!enqueue(
+        &f.library.connection().unwrap(),
+        "asset-6",
+        Cause::Ingestion
+    )
+    .unwrap());
 
-    assert_eq!(f.library.failed_character_asset_count(&f.series).unwrap(), 0);
+    assert_eq!(
+        f.library.failed_character_asset_count(&f.series).unwrap(),
+        0
+    );
     assert_eq!(
         f.library
             .retry_failed_character_assets(f.series.clone())

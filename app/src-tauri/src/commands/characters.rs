@@ -1,7 +1,9 @@
 use tauri::State;
 
 use super::{current_required, AppState, CommandError};
-use crate::library::characters::{CharacterSettingsDraft, Decision, DecisionRequest, Error, Target, TargetDraft};
+use crate::library::characters::{
+    CharacterSettingsDraft, Decision, DecisionRequest, Error, Target, TargetDraft,
+};
 
 #[tauri::command]
 pub async fn character_autotag_job(
@@ -80,14 +82,14 @@ pub async fn character_incremental_status(
 }
 
 #[tauri::command]
-pub async fn pause_character_incremental(
+pub async fn pause_character_reference_refresh(
     paused: bool,
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || {
-        library.set_character_incremental_paused(paused)?;
+        library.set_character_reference_refresh_paused(paused)?;
         if !paused {
             start_incremental_if_configured(&app, &library);
         }
@@ -183,6 +185,17 @@ pub async fn character_review_pending(
     .await
     .map_err(|_| super::background_task_error())?
     .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn character_review_pending_map(
+    state: State<'_, AppState>,
+) -> Result<std::collections::BTreeMap<String, bool>, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.character_review_pending_map())
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
 }
 
 impl From<Error> for CommandError {
@@ -292,8 +305,8 @@ pub async fn save_character_target(
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || {
         library
-        .save_character_target_selection(request, strict_selection.unwrap_or(false))
-        .map_err(Into::into)
+            .save_character_target_selection(request, strict_selection.unwrap_or(false))
+            .map_err(Into::into)
     })
     .await
     .map_err(|_| super::background_task_error())?
@@ -376,8 +389,8 @@ pub async fn list_character_decisions(
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || {
         library
-        .list_character_decisions(&target_id, before, limit)
-        .map_err(Into::into)
+            .list_character_decisions(&target_id, before, limit)
+            .map_err(Into::into)
     })
     .await
     .map_err(|_| super::background_task_error())?
@@ -391,8 +404,8 @@ pub async fn character_relations_for_asset(
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || {
         library
-        .character_relations_for_asset(&asset_id)
-        .map_err(Into::into)
+            .character_relations_for_asset(&asset_id)
+            .map_err(Into::into)
     })
     .await
     .map_err(|_| super::background_task_error())?
@@ -431,62 +444,6 @@ pub async fn browse_character_assets(
         .map_err(Into::into)
 }
 #[tauri::command]
-pub async fn character_series_suggestions(
-    root_id: String,
-    limit: usize,
-    state: State<'_, AppState>,
-) -> Result<crate::library::character_series_suggestions::SeriesSuggestionPage, CommandError> {
-    let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.character_series_suggestions(&root_id, limit))
-        .await
-        .map_err(|_| super::background_task_error())?
-        .map_err(Into::into)
-}
-
-#[tauri::command]
-pub async fn queue_character_series_discovery(
-    root_id: String,
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
-) -> Result<usize, CommandError> {
-    let (script, settings) = runtime_paths(&app)?;
-    let config = crate::library::character_worker::RuntimeConfig::configured(script, &settings)?;
-    let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let queued = library.queue_character_series_discovery(&root_id)?;
-        library.start_character_incremental(config);
-        Ok::<_, CommandError>(queued)
-    })
-    .await
-    .map_err(|_| super::background_task_error())?
-}
-
-#[tauri::command]
-pub async fn dismiss_character_series_suggestion(
-    root_id: String, asset_id: String, series_id: String, state: State<'_, AppState>,
-) -> Result<(), CommandError> {
-    let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.dismiss_character_series_suggestion(&root_id, &asset_id, &series_id))
-        .await
-        .map_err(|_| super::background_task_error())?
-        .map_err(Into::into)
-}
-
-#[tauri::command]
-pub async fn accept_character_series_suggestion(
-    root_id: String, asset_id: String, series_id: String, app: tauri::AppHandle, state: State<'_, AppState>,
-) -> Result<(), CommandError> {
-    let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        library.accept_character_series_suggestion(&root_id, &asset_id, &series_id)?;
-        start_incremental_if_configured(&app, &library);
-        Ok::<_, CommandError>(())
-    })
-    .await
-    .map_err(|_| super::background_task_error())?
-}
-
-#[tauri::command]
 pub async fn apply_automatic_characters(
     scan_ids: Vec<String>,
     state: State<'_, AppState>,
@@ -499,7 +456,7 @@ pub async fn apply_automatic_characters(
 pub async fn register_character_folder(
     request: crate::library::characters::FolderRegistration,
     state: State<'_, AppState>,
-) -> Result<Target, CommandError> {
+) -> Result<crate::library::characters::FolderRegistrationResult, CommandError> {
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || library.register_character_folder(request))
         .await
@@ -553,6 +510,48 @@ pub async fn character_folder_asset_count(
 }
 
 #[tauri::command]
+pub async fn reference_candidates(
+    target_id: String,
+    limit: usize,
+    state: State<'_, AppState>,
+) -> Result<crate::library::character_reference_candidates::ReferenceCandidateSet, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.reference_candidates(&target_id, limit))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn confirm_reference_batch(
+    request: crate::library::character_reference_candidates::ConfirmReferenceBatch,
+    state: State<'_, AppState>,
+) -> Result<Target, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.confirm_reference_batch(request))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn request_character_reference_refresh(
+    target_id: String,
+    expected_revision: i64,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<crate::library::character_reference_refresh::ReferenceRefreshReceipt, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let receipt = library.request_character_reference_refresh(&target_id, expected_revision)?;
+        start_incremental_if_configured(&app, &library);
+        Ok::<_, CommandError>(receipt)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+}
+
+#[tauri::command]
 pub async fn add_character_learned_references(
     target_id: String,
     expected_revision: i64,
@@ -582,48 +581,6 @@ pub async fn exclude_character_reference(
     .await
     .map_err(|_| super::background_task_error())?
     .map_err(Into::into)
-}
-
-#[tauri::command]
-pub async fn mixed_character_folder_preview(
-    folder_id: String,
-    state: State<'_, AppState>,
-) -> Result<crate::library::character_folder_migration::MixedFolderPreview, CommandError> {
-    let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.mixed_character_folder_preview(&folder_id))
-        .await
-        .map_err(|_| super::background_task_error())?
-        .map_err(Into::into)
-}
-
-#[tauri::command]
-pub async fn queue_mixed_character_folder(
-    request: crate::library::character_folder_migration::QueueMixedFolderRequest,
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
-) -> Result<usize, CommandError> {
-    let (script, settings) = runtime_paths(&app)?;
-    let config = crate::library::character_worker::RuntimeConfig::configured(script, &settings)?;
-    let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let queued = library.queue_mixed_character_folder(request)?;
-        library.start_character_incremental(config);
-        Ok::<_, CommandError>(queued)
-    })
-    .await
-    .map_err(|_| super::background_task_error())?
-}
-
-#[tauri::command]
-pub async fn finalize_mixed_character_folder(
-    request: crate::library::character_folder_migration::FinalizeMixedFolderRequest,
-    state: State<'_, AppState>,
-) -> Result<crate::library::character_folder_migration::FinalizeMixedFolderResult, CommandError> {
-    let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.finalize_mixed_character_folder(request))
-        .await
-        .map_err(|_| super::background_task_error())?
-        .map_err(Into::into)
 }
 
 #[tauri::command]
@@ -714,7 +671,9 @@ pub async fn set_character_series_asset_excluded(
     })
     .await
     .map_err(|_| super::background_task_error())??;
-    if resume { start_incremental_if_configured(&app, &library); }
+    if resume {
+        start_incremental_if_configured(&app, &library);
+    }
     Ok(result)
 }
 
@@ -726,10 +685,12 @@ pub async fn character_series_excluded_assets(
     state: State<'_, AppState>,
 ) -> Result<crate::library::character_hub::BrowsePage, CommandError> {
     let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.character_series_excluded_assets(&series_id, after.as_deref(), limit))
-        .await
-        .map_err(|_| super::background_task_error())?
-        .map_err(Into::into)
+    tauri::async_runtime::spawn_blocking(move || {
+        library.character_series_excluded_assets(&series_id, after.as_deref(), limit)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
 }
 
 #[tauri::command]
@@ -738,12 +699,10 @@ pub async fn failed_character_asset_count(
     state: State<'_, AppState>,
 ) -> Result<usize, CommandError> {
     let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        library.failed_character_asset_count(&series_id)
-    })
-    .await
-    .map_err(|_| super::background_task_error())?
-    .map_err(Into::into)
+    tauri::async_runtime::spawn_blocking(move || library.failed_character_asset_count(&series_id))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
 }
 
 #[tauri::command]

@@ -1,9 +1,11 @@
 # Character runtime — frozen inference and native scan
 
-`worker.py` is the independent Batch 1 parity worker. Batch 3 connects the separate
-`scan_worker.py` protocol to native start/status/cancel/results commands. Neither
-protocol has been enabled against the active production library. Workers read
-native-supplied images/models and write JSON lines to stdout.
+`worker.py` is the independent Batch 1 parity worker. The product uses the separate
+`scan_worker.py` protocol only through the Rust native owner; renderers never receive
+filesystem/model paths. Verification commands in this document use fixtures or explicitly
+configured runtime inputs and must not be pointed at the production library without
+separate user authorization. Workers read native-supplied images/models and write JSON
+lines to stdout.
 It never imports the experiment, downloads models, accesses SQLite, or changes
 classification membership. Product scope enforcement belongs to the Rust
 native owner: the selected classification's recursive subtree, with a separate
@@ -70,17 +72,19 @@ Only exact 64-character hashes are accepted, at most eight namespaces; unknown c
 are never inferred compatible. Legacy entries are read through the same validation
 without copying or rewriting them. Old namespaces have no automatic eviction.
 
-Only normal `image` assets in the explicit target's recursive subtree are scanned;
-its five reference IDs are excluded. A start captures the asset inventory. New
-arrivals need another start, which reuses prior extraction. One worker runs per
-Library. Native state holds the latest scan per target, including pending, unmatched,
+The legacy manual scan path remains target/series scoped. The native automatic owner
+uses the shared nearest-registered-series resolver: broad/unrelated roots do not enqueue
+character work, nested registered series own their descendants, and explicit reference
+assets are excluded from authorizing themselves. One worker runs per Library. Native state holds the latest scan per target, including pending, unmatched,
 recommended, error and stale rows, with pages of at most 200. Restarting discards
 these recomputable rows; feature files and durable human decisions remain separate.
 
-The runtime does not download models or install Python. The Character Review
-screen provides an explicit native picker for an existing Python executable and
-model folder. It probes the real worker and validates the frozen model baseline
-before atomically saving `character-runtime.json` in the app configuration directory.
+The runtime does not download models or install Python. Persistent runtime/system
+failure exposes the quiet `분석 환경 설정` recovery action, which provides a native
+picker for an existing Python executable and model folder. It probes the real worker
+and validates the frozen model baseline before atomically saving
+`character-runtime.json` in the app configuration directory. Cancelling either picker
+leaves the previous error/settings state intact.
 A failed probe leaves previous settings intact. Settings are machine-specific,
 outside library metadata recovery. Alternatively, explicit host overrides are:
 
@@ -94,7 +98,7 @@ hashes are checked at every worker startup. Script resources are declared in Tau
 configuration; development uses the source directory. Renderer IPC takes IDs and
 fingerprints, never executable/model/image paths. No HTTP scan endpoint is added.
 
-The private scan protocol emits `ready`, accepts one `prepare` with five path/hash
+The private scan protocol emits `ready`, accepts one `prepare` with 5–25 path/hash
 entries, then one `query` at a time. The native owner must keep stdin open; EOF is
 ownership loss and terminates the worker even during inference. Rust kills/reaps
 on cancellation, protocol failure, timeout or normal completion; stdout messages
@@ -112,20 +116,27 @@ The opt-in Rust tests use TEMP copies and the existing experiment models. They d
 not open the active library. This proves the Rust-to-subprocess path, not WebView
 IPC, bundled-interpreter installation or large-library performance acceptance.
 
-## Review and durable judgments
+## Quiet automation, correction, and durable judgments
 
-Assets exposes Character Review through its toolbar and folder context menu.
-Choose a recursive series scope, create characters, and select five existing image
-references. Series analysis runs ready targets sequentially. Latest per-target
-results support recommended, unmatched, multiple, confirmed, pending and error
-filters. Review reuses the existing masonry gallery and selection gestures.
+Routine collection does not expose a Character Review inbox, per-character pending
+badges, scheduler counts, cache state, or target-by-target progress. Automatic work
+runs quietly for the nearest registered series scope and uses the current explicit
+reference set. Character management keeps visible correction/recovery actions without
+turning unresolved history into a required review queue.
+
+Reference growth affects newly enqueued images immediately. Historical reconsideration
+starts only from the explicit `과거 미분류 이미지 갱신` action, runs below fresh work,
+and is durable across restarts. Its pause flag is separate from the normal automatic
+worker, so pausing historical maintenance does not block new-image classification.
 
 Recommendation approvals carry scan, target and runtime fingerprints. Native code
 rechecks actual reference/query bytes and scope before a single transaction stores
 human decisions; multiple character approvals roll back together. Explicit manual
-assignment remains separate. Folder membership is never written by this workflow.
-Decision history and confirmed relations survive restart/metadata recovery; raw
-predictions are disposable and need a cache-backed scan again after restart.
+assignment remains separate. Automatic finalization may assign an eligible root-scoped
+asset to its uniquely resolved registered series, while unrelated classifications and
+other character memberships remain preserved. Decision history, automatic evidence,
+predictions, and confirmed relations are durable; the machine-local feature cache remains
+disposable and can be rebuilt after restart.
 
 For analysis-bound decisions, `reference_snapshot` stores an object containing
 `scanId`, `runtimeFingerprint`, `prediction` and `references`; manual decisions keep
@@ -146,9 +157,12 @@ a query are recorded and their current content/scope is revalidated before publi
 
 `learned_compare.py` compares those examples through the unchanged five-reference
 metric in bounded groups, discards padding votes, then computes same-crop distinct-image
-consensus over the combined pool. Recommendation remains two matches and automatic
-approval remains three matches with a unique character candidate and no whole fallback.
-The UI displays the actual reference count. Worker preparation accepts 5–25 images.
+consensus over the combined pool. Recommendation remains two matches. Automatic
+approval requires support from **six distinct references**, a unique character candidate,
+and no whole fallback (`AUTOMATIC_REFERENCE_SUPPORT = 6`). Characters with only the
+five anchors can still be recommended but cannot satisfy automatic approval until
+additional explicit supporting references exist. The UI displays the actual reference
+count. Worker preparation accepts 5–25 images.
 
 Manual scan buttons now apply the same automatic policy when the selected series has
 automatic classification enabled. They compare all ready characters in that series

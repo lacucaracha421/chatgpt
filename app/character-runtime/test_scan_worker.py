@@ -59,6 +59,44 @@ class OwnershipTests(unittest.TestCase):
                 process.stdout.close()
                 process.stderr.close()
 
+    @unittest.skipUnless(os.environ.get("LAKOMICS_CHARACTER_TEST_MODELS"), "explicit model directory required")
+    def test_compare_delta_protocol_matches_full_six_reference_result(self):
+        from PIL import Image, ImageDraw
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            items = []
+            for index in range(7):
+                path = root / f"delta-{index}.png"
+                image = Image.new("RGB", (128, 128), (40 + index * 15, 80, 120))
+                ImageDraw.Draw(image).ellipse((18 + index, 15, 95, 105), fill=(170, 90 + index, 60))
+                image.save(path)
+                items.append({"path": str(path), "hash": hashlib.sha256(path.read_bytes()).hexdigest(), "assetId": str(index)})
+            process = subprocess.Popen([sys.executable, "-B", str(Path(__file__).with_name("scan_worker.py")),
+                                        "--models", os.environ["LAKOMICS_CHARACTER_TEST_MODELS"], "--cache", str(root / "cache")],
+                                       stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            responses = queue.Queue()
+            threading.Thread(target=lambda: [responses.put(line) for line in process.stdout], daemon=True).start()
+            def receive(): return json.loads(responses.get(timeout=45))
+            def request(kind, **kwargs):
+                process.stdin.write(json.dumps({"type": kind, **kwargs}) + "\n"); process.stdin.flush()
+                return receive()
+            try:
+                self.assertEqual(receive()["type"], "ready")
+                self.assertEqual(request("prepare", references=items[:5])["type"], "prepared")
+                old = request("query", **items[6])
+                self.assertEqual(old["type"], "result")
+                self.assertEqual(request("load_query", **items[6])["type"], "query_loaded")
+                delta = request("compare_delta", assetId="6", hash=items[6]["hash"],
+                                oldEvidence=old, addedReferences=[items[5]])
+                self.assertEqual(delta["type"], "result")
+                self.assertEqual(request("prepare", references=items[:6])["type"], "prepared")
+                full = request("compare_query", assetId="6", hash=items[6]["hash"])
+                comparable = lambda result: {k: v for k, v in result.items() if k not in ("cacheHits", "extractions")}
+                self.assertEqual(comparable(delta), comparable(full))
+            finally:
+                process.kill(); process.wait(timeout=5)
+                process.stdin.close(); process.stdout.close(); process.stderr.close()
+
     def test_stdin_owner_loss_exits_while_main_thread_is_busy(self):
         code = """import queue,threading,time
 from scan_worker import read_requests

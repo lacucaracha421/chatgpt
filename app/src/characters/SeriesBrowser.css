@@ -78,9 +78,6 @@
 .series-header-actions { height: var(--control-height, 32px); white-space: nowrap; }
 .series-selection-count { font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
 .series-breadcrumb > .series-header-count { flex-shrink: 0; font-weight: 400; }
-.series-review-button { background: var(--color-surface); }
-.series-review-badge { width: 1em; visibility: hidden; color: var(--color-warning, #d6a34c); font-weight: 600; }
-.series-review-badge[data-pending="true"] { visibility: visible; }
 @media (max-width: 1000px) {
   .series-breadcrumb > button { max-width: 4em; }
 }

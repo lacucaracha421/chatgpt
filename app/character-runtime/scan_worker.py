@@ -7,7 +7,7 @@ import queue
 import sys
 import threading
 
-from learned_compare import compare_supported
+from learned_compare import compare_supported, compare_reference_delta
 from feature_cache import ReferenceBundles, FeatureCache, runtime_fingerprint, extraction_fingerprint, compatible_feature_caches
 from runtime import BASELINE, FINGERPRINT, Runtime
 
@@ -78,6 +78,20 @@ def main():
                 resident = (request["assetId"], request["hash"], query)
                 emit({"type": "query_loaded", "assetId": request["assetId"],
                       "contentHash": query.content_hash, "cacheHits": cache.hits, "extractions": cache.misses})
+            elif request["type"] == "compare_delta":
+                if resident is None or resident[:2] != (request["assetId"], request["hash"]):
+                    raise ValueError("Resident query identity mismatch")
+                items = request["addedReferences"]
+                if not 1 <= len(items) <= 20 or len({item["hash"] for item in items}) != len(items):
+                    raise ValueError("One to twenty distinct added references required")
+                added = bundles.prepare(items)
+                if timings is None:
+                    result = compare_reference_delta(engine, resident[2], request["oldEvidence"], added)
+                else:
+                    with timings.measure("comparison_total"):
+                        result = compare_reference_delta(engine, resident[2], request["oldEvidence"], added)
+                emit({"type": "result", "assetId": request["assetId"], **result,
+                      "cacheHits": cache.hits, "extractions": cache.misses})
             elif request["type"] in ("query", "compare_query") and refs is not None:
                 if request["type"] == "compare_query":
                     if resident is None or resident[:2] != (request["assetId"], request["hash"]):

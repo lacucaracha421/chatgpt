@@ -163,6 +163,32 @@ class Runtime:
             raise ValueError("Source changed during inference")
         return Features(digest, crops, vectors, fallback)
 
+    def reference_distances(self, query: Features, refs: list[Features]) -> list[list[float]]:
+        if not 1 <= len(refs) <= 20 or len({ref.content_hash for ref in refs}) != len(refs):
+            raise ValueError("Expected one to twenty distinct added references")
+        if not 1 <= len(query.vectors) <= BASELINE["max_boxes"]:
+            raise ValueError("Invalid query crop group size")
+        distances = [[] for _ in range(len(query.vectors))]
+        for offset in range(0, len(refs), BASELINE["reference_count"]):
+            group = refs[offset:offset + BASELINE["reference_count"]]
+            sizes = [len(ref.vectors) for ref in group]
+            if any(not 1 <= size <= BASELINE["max_boxes"] for size in sizes):
+                raise ValueError("Invalid reference crop group size")
+            stack = np.concatenate([query.vectors] + [ref.vectors for ref in group])
+            self.max_metric_vectors = max(self.max_metric_vectors, len(stack))
+            raw = self.metric.run(["output"], {"input": stack})[0]
+            if raw.shape != (len(stack), len(stack)) or not np.isfinite(raw).all():
+                raise ValueError("Invalid metric output shape")
+            query_rows = raw[:len(query.vectors), len(query.vectors):]
+            boundaries = np.cumsum([0] + sizes)
+            per_reference = np.stack([
+                query_rows[:, boundaries[index]:boundaries[index + 1]].min(axis=1)
+                for index in range(len(group))
+            ], axis=1).astype(np.float64)
+            for row_index, row in enumerate(per_reference):
+                distances[row_index].extend(float(value) for value in row)
+        return distances
+
     def compare(self, query: Features, refs: list[Features]) -> dict:
         if len(refs) != BASELINE["reference_count"] or len({r.content_hash for r in refs}) != BASELINE["reference_count"]:
             raise ValueError("Exactly five distinct reference images required")

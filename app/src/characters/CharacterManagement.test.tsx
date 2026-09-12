@@ -1,14 +1,16 @@
+import { within } from "@testing-library/react";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
+import { LibraryProvider } from "../library/LibraryContext";
+import type { LibraryGateway } from "../library/types";
 import { CharacterGroups } from "./CharacterGroups";
 import { CharacterConversion } from "./CharacterConversion";
 import { CharacterFolderOrganizer } from "./CharacterFolderOrganizer";
 import { CharacterFolderContent } from "./CharacterFolderContent";
 import { FolderRegistrationContext } from "./FolderRegistrationContext";
-import { MixedCharacterFolderMigration } from "./MixedCharacterFolderMigration";
-import { fixtureClassifications, fixtureTarget } from "./characterFixtures";
+import { fixtureAssets, fixtureClassifications, fixtureTarget } from "./characterFixtures";
 vi.mock("@tauri-apps/api/core",()=>({invoke:vi.fn(),isTauri:()=>false,convertFileSrc:vi.fn()}));
 afterEach(()=>{cleanup();vi.resetAllMocks();});
 it("creates a display group and keeps its characters accessible",async()=>{
@@ -43,6 +45,20 @@ it("keeps Originals as storage-only without series or character registration too
   expect(screen.getByText("오리지널 보관")).toBeInTheDocument();
 });
 
+it("does not offer broad series guessing from a root classification",()=>{
+  const classifications=[
+    {id:"root",name:"만화",kind:"root" as const,parentId:null,iconKey:null,colorKey:null},
+    {id:"series",name:"던전밥",kind:"tag" as const,parentId:"root",iconKey:null,colorKey:null},
+  ];
+  const hub={targets:[],series:[{classificationId:"series",heroAssetId:null,autoClassify:true}],groups:[],error:null,refresh:vi.fn(),revision:0} as any;
+  render(<CharacterFolderContent view={{kind:"classification",classificationId:"root"}} hub={hub} classifications={classifications} galleryLayout="masonry" onGalleryLayoutChange={()=>{}} privacyMode={false} onPrivacyModeChange={()=>{}} metadataVisible onMetadataVisibleChange={()=>{}} thumbnailRowHeight={180} onThumbnailRowHeightChange={()=>{}} refreshVersion={0} onNavigate={()=>{}} onAssetsChanged={()=>{}}>
+    <FolderRegistrationContext.Consumer>{tools=><div>{tools}</div>}</FolderRegistrationContext.Consumer>
+  </CharacterFolderContent>);
+  expect(screen.queryByRole("button",{name:"작품 후보"})).not.toBeInTheDocument();
+  expect(screen.getByRole("button",{name:"시리즈로 등록"})).toBeInTheDocument();
+  expect(screen.getByRole("button",{name:"캐릭터로 만들기"})).toBeInTheDocument();
+});
+
 it("requires the preview and exact character name before merging folders",async()=>{
   vi.mocked(invoke).mockImplementation(async(command)=>command==="character_conversion_preview"?{targetId:"hina",name:"히나",seriesId:"series",destinationId:"folder",assetCount:6,sharedCount:1,unavailableCount:0,token:"preview-token"}:"folder");
   const converted=vi.fn();
@@ -57,24 +73,32 @@ it("requires the preview and exact character name before merging folders",async(
   expect(invoke).toHaveBeenCalledWith("convert_character_to_folder",{targetId:"hina",token:"preview-token",confirmation:"히나"});
 });
 
-it("offers single and mixed cleanup from one character organization entry",()=>{
-  render(<CharacterFolderOrganizer folderId="child" classifications={fixtureClassifications} targets={[fixtureTarget()]} privacyMode={false} mixedAvailable onClose={()=>{}} onSingleSaved={()=>{}} onMixedFinished={()=>{}}/>);
-  expect(screen.getByRole("button",{name:/한 캐릭터 폴더/})).toBeInTheDocument();
-  expect(screen.getByRole("button",{name:/여러 캐릭터가 섞인 폴더/})).toBeInTheDocument();
+it("opens the curated-folder character conversion directly", async () => {
+  const gateway={listAssets:vi.fn().mockResolvedValue({items:[],nextCursor:null})} as unknown as LibraryGateway;
+  vi.mocked(invoke).mockImplementation(async command => command === "character_folder_asset_snapshot" ? {count:5,fingerprint:"snapshot"} : undefined);
+  render(<LibraryProvider gateway={gateway}><CharacterFolderOrganizer folderId="child" classifications={fixtureClassifications} targets={[fixtureTarget()]} privacyMode={false} onClose={()=>{}} onSingleSaved={()=>{}} /></LibraryProvider>);
+  const dialog=await screen.findByRole("dialog",{name:"한 캐릭터 폴더 정리"});
+  expect(screen.queryByRole("button",{name:/여러 캐릭터가 섞인 폴더/})).not.toBeInTheDocument();
+  expect(within(dialog).queryByText(/기준 이미지/)).not.toBeInTheDocument();
+  expect(within(dialog).getByText(/대표 이미지/)).toBeInTheDocument();
 });
 
-it("preselects detected mixed-folder characters and finalizes with the legacy folder name",async()=>{
-  const preview={folderId:"mixed",folderName:"카카졸데",seriesId:"series",seriesName:"리버스",totalCount:10,imageCount:10,otherMediaCount:0,childFolderCount:0,unscannedCount:0,pendingCount:0,resolvedCount:8,reviewCount:2,failedCount:0,targetCounts:[{targetId:"kakania",count:7},{targetId:"isolde",count:6}],groupedTargetIds:[]};
-  const result={seriesId:"series",groupId:"group",movedImageCount:10,retainedAssetCount:0,folderRemoved:true};
-  const api={mixedFolderPreview:vi.fn().mockResolvedValue(preview),queueMixedFolder:vi.fn(),finalizeMixedFolder:vi.fn().mockResolvedValue(result)};
-  const finished=vi.fn();
-  render(<MixedCharacterFolderMigration folderId="mixed" targets={[fixtureTarget("kakania","카카니아"),fixtureTarget("isolde","이졸데")]} onClose={()=>{}} onFinished={finished} api={api}/>);
-  await screen.findByText("카카졸데");
-  await waitFor(()=>{
-    expect(screen.getByRole("checkbox",{name:/카카니아/})).toBeChecked();
-    expect(screen.getByRole("checkbox",{name:/이졸데/})).toBeChecked();
+it("offers reference suggestions after curated-folder conversion and keeps conversion when deferred", async () => {
+  const assets=fixtureAssets.slice(0,5);
+  const gateway={listAssets:vi.fn().mockResolvedValue({items:assets,nextCursor:null})} as unknown as LibraryGateway;
+  const manual={...fixtureTarget("manual","마커스"),manualOnly:true,ready:false,references:[]};
+  vi.mocked(invoke).mockImplementation(async(command)=>{
+    if(command==="character_folder_asset_snapshot")return {count:5,fingerprint:"snapshot"};
+    if(command==="register_character_folder")return {target:manual,linkedAssetCount:5,referenceCandidateCount:5,sourceFolderRemoved:true};
+    if(command==="reference_candidates")return {targetId:"manual",targetRevision:manual.revision,referenceSetHash:"set",confirmationMode:"initialize",minimumSelection:5,items:assets,suggestedAssetIds:assets.map(item=>item.id)};
+    return undefined;
   });
-  await userEvent.setup().click(screen.getByRole("button",{name:"그룹으로 정리 완료"}));
-  await waitFor(()=>expect(finished).toHaveBeenCalledWith(result));
-  expect(api.finalizeMixedFolder).toHaveBeenCalledWith(expect.objectContaining({folderId:"mixed",seriesId:"series",groupName:"카카졸데",targetIds:expect.arrayContaining(["kakania","isolde"])}));
+  const saved=vi.fn();
+  render(<LibraryProvider gateway={gateway}><CharacterFolderOrganizer folderId="child" classifications={fixtureClassifications} targets={[]} privacyMode={false} onClose={()=>{}} onSingleSaved={saved} /></LibraryProvider>);
+  await userEvent.setup().click(await screen.findByRole("button",{name:"캐릭터로 전환"}));
+  expect(await screen.findByRole("dialog",{name:"레퍼런스 선택"})).toBeVisible();
+  expect(saved).not.toHaveBeenCalled();
+  await userEvent.setup().click(screen.getByRole("button",{name:"나중에"}));
+  expect(saved).toHaveBeenCalledWith(manual);
+  expect(vi.mocked(invoke).mock.calls.some(([command])=>command==="confirm_reference_batch")).toBe(false);
 });

@@ -1,7 +1,7 @@
-mod collectible_cors;
 mod catalog_source;
 mod catalog_transport;
 mod cloud;
+mod collectible_cors;
 mod commands;
 mod extension_api;
 pub mod library;
@@ -55,18 +55,28 @@ pub fn run() {
                         let active = composing.clone();
                         let input = context.clone();
                         webview.inner().connect_button_press_event(move |_, _| {
-                            if active.replace(false) { input.reset(); }
+                            if active.replace(false) {
+                                input.reset();
+                            }
                             gtk::glib::Propagation::Proceed
                         });
                         let active = composing.clone();
                         let input = context.clone();
                         webview.inner().connect_key_press_event(move |_, event| {
-                            if matches!(event.keyval(), gtk::gdk::keys::constants::Tab | gtk::gdk::keys::constants::ISO_Left_Tab)
-                                && active.replace(false) { input.reset(); }
+                            if matches!(
+                                event.keyval(),
+                                gtk::gdk::keys::constants::Tab
+                                    | gtk::gdk::keys::constants::ISO_Left_Tab
+                            ) && active.replace(false)
+                            {
+                                input.reset();
+                            }
                             gtk::glib::Propagation::Proceed
                         });
                         webview.inner().connect_focus_out_event(move |_, _| {
-                            if composing.replace(false) { context.reset(); }
+                            if composing.replace(false) {
+                                context.reset();
+                            }
                             gtk::glib::Propagation::Proceed
                         });
                     }
@@ -82,7 +92,11 @@ pub fn run() {
         .on_window_event(|window, event| {
             // Let the frontend flush pending note edits before destroying the window.
             if matches!(event, tauri::WindowEvent::Destroyed) && window.label() == "main" {
-                if let Some(library) = window.app_handle().state::<commands::AppState>().current_library() {
+                if let Some(library) = window
+                    .app_handle()
+                    .state::<commands::AppState>()
+                    .current_library()
+                {
                     library.stop_character_scan();
                     library.stop_video_similarity_scan();
                 }
@@ -99,7 +113,11 @@ pub fn run() {
                 .get(tauri::http::header::RANGE)
                 .and_then(|value| value.to_str().ok())
                 .map(str::to_string);
-            let origin = request.headers().get(tauri::http::header::ORIGIN).and_then(|value| value.to_str().ok()).map(str::to_owned);
+            let origin = request
+                .headers()
+                .get(tauri::http::header::ORIGIN)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned);
             let method = request.method().clone();
             let path = request.uri().path().to_string();
             tauri::async_runtime::spawn_blocking(move || {
@@ -224,18 +242,14 @@ pub fn run() {
             commands::characters::character_series,
             commands::characters::save_character_series,
             commands::characters::browse_character_assets,
-            commands::characters::character_series_suggestions,
-            commands::characters::queue_character_series_discovery,
-            commands::characters::dismiss_character_series_suggestion,
-            commands::characters::accept_character_series_suggestion,
             commands::characters::save_character_target,
             commands::characters::save_character_settings,
             commands::characters::replace_character_references,
+            commands::characters::reference_candidates,
+            commands::characters::confirm_reference_batch,
+            commands::characters::request_character_reference_refresh,
             commands::characters::add_character_learned_references,
             commands::characters::exclude_character_reference,
-            commands::characters::mixed_character_folder_preview,
-            commands::characters::queue_mixed_character_folder,
-            commands::characters::finalize_mixed_character_folder,
             commands::characters::create_manual_character,
             commands::characters::complete_character_review,
             commands::characters::set_character_series_asset_excluded,
@@ -259,12 +273,13 @@ pub fn run() {
             commands::characters::retry_failed_character_assets,
             commands::characters::failed_character_asset_count,
             commands::characters::character_incremental_status,
-            commands::characters::pause_character_incremental,
+            commands::characters::pause_character_reference_refresh,
             commands::characters::cancel_character_scan,
             commands::characters::character_scan_results,
             commands::characters::character_scan_runs,
             commands::characters::character_review_page,
             commands::characters::character_review_pending,
+            commands::characters::character_review_pending_map,
             commands::characters::character_runtime_status,
             commands::characters::setup_character_runtime,
             commands::av::get_av_details,

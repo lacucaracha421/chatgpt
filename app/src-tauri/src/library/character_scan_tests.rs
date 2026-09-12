@@ -61,25 +61,26 @@ fn add_review_asset(f: &Fixture, id: &str) -> (String, String) {
         "INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at,status) VALUES(?1,?2,'image',?1,?3,?4,7,1,1,'2026-09-08','normal')",
         params![id, hash, path, thumbnail],
     ).unwrap();
-    connection.execute(
-        "INSERT INTO asset_classifications(asset_id,classification_id) VALUES(?1,?2)",
-        params![id, f.series],
-    ).unwrap();
+    connection
+        .execute(
+            "INSERT INTO asset_classifications(asset_id,classification_id) VALUES(?1,?2)",
+            params![id, f.series],
+        )
+        .unwrap();
     (hash, path)
 }
 
-fn seed_durable_review(
-    f: &Fixture,
-    target: &Target,
-    asset_id: &str,
-    generation: i64,
-    state: &str,
-) {
-    let (hash, path): (String, String) = f.library.connection().unwrap().query_row(
-        "SELECT content_hash,relative_path FROM assets WHERE id=?1",
-        [asset_id],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    ).unwrap();
+fn seed_durable_review(f: &Fixture, target: &Target, asset_id: &str, generation: i64, state: &str) {
+    let (hash, path): (String, String) = f
+        .library
+        .connection()
+        .unwrap()
+        .query_row(
+            "SELECT content_hash,relative_path FROM assets WHERE id=?1",
+            [asset_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
     let evidence_id = format!("durable-{asset_id}-{generation}");
     let connection = f.library.connection().unwrap();
     connection.execute(
@@ -275,8 +276,8 @@ fn stale_result_queries_recheck_scope_and_actual_reference_bytes() {
     {
         let mut state = f.library.character_scan.lock().unwrap();
         state.status = Some(ScanStatus {
-        automatic_queued: 0,
-        automatic: false,
+            automatic_queued: 0,
+            automatic: false,
             id: "scan".into(),
             target_id: target.id.clone(),
             target_fingerprint: target.fingerprint.clone(),
@@ -286,7 +287,7 @@ fn stale_result_queries_recheck_scope_and_actual_reference_bytes() {
             completed: 1,
             errors: 0,
             reused: 0,
-        cache_hits: 0,
+            cache_hits: 0,
             extractions: 0,
             error: None,
         });
@@ -558,14 +559,22 @@ fn real_native_scan_cold_warm_incremental_and_ref_replacement_parity() {
 fn manual_scan_inputs_respect_series_exclusions() {
     let f = Fixture::new();
     let target = f.ready("A");
-    f.library.save_character_series(super::super::character_hub::Series {
-        classification_id: f.series.clone(), hero_asset_id: None, auto_classify: true,
-    }).unwrap();
-    f.library.set_character_series_asset_excluded(
-        super::super::character_workflow::SeriesAssetExclusionRequest {
-            series_id: f.series.clone(), asset_ids: vec!["asset-5".into()], excluded: true,
-        },
-    ).unwrap();
+    f.library
+        .save_character_series(super::super::character_hub::Series {
+            classification_id: f.series.clone(),
+            hero_asset_id: None,
+            auto_classify: true,
+        })
+        .unwrap();
+    f.library
+        .set_character_series_asset_excluded(
+            super::super::character_workflow::SeriesAssetExclusionRequest {
+                series_id: f.series.clone(),
+                asset_ids: vec!["asset-5".into()],
+                excluded: true,
+            },
+        )
+        .unwrap();
     let inputs = f.library.character_scan_inputs(&target).unwrap();
     assert!(inputs.iter().all(|input| input.id != "asset-5"));
 }
@@ -688,7 +697,7 @@ fn person_prediction(f: &Fixture, target: &Target, scan: &str, person: usize) {
     let evidence = row.evidence.as_mut().unwrap();
     evidence["wholeFallback"] = json!(false);
     evidence["bestQueryCrop"] = json!(person);
-    evidence["queryBoxes"] = json!([[0,0,40,100], [60,0,100,100]]);
+    evidence["queryBoxes"] = json!([[0, 0, 40, 100], [60, 0, 100, 100]]);
     evidence["evidence"] = json!([
         {"matchedReferences": if person == 0 { vec![0,1,2] } else { vec![] }},
         {"matchedReferences": if person == 1 { vec![0,1,2] } else { vec![] }}
@@ -745,8 +754,8 @@ fn completed_comparisons_survive_restart_and_only_new_images_are_compared() {
 
 #[test]
 fn overlapping_detector_boxes_are_not_two_distinct_people() {
-    assert!(same_person(&[0.,0.,100.,100.], &[10.,10.,90.,90.]));
-    assert!(!same_person(&[0.,0.,40.,100.], &[60.,0.,100.,100.]));
+    assert!(same_person(&[0., 0., 100., 100.], &[10., 10., 90., 90.]));
+    assert!(!same_person(&[0., 0., 40., 100.], &[60., 0., 100., 100.]));
 }
 
 #[test]
@@ -762,8 +771,8 @@ fn manual_snapshot_allows_successive_approvals_without_implicit_learning() {
     person_prediction(&f, &a, "a", 0);
     let input = f.library.current_input(&a, "asset-6").unwrap();
     {
-        let mut state=f.library.character_scan.lock().unwrap();
-        let rows=&mut state.previous.get_mut(&a.id).unwrap().1;
+        let mut state = f.library.character_scan.lock().unwrap();
+        let rows = &mut state.previous.get_mut(&a.id).unwrap().1;
         let row = rows.get_mut("asset-5").unwrap();
         row.evidence.as_mut().unwrap()["queryBoxes"] = json!([[0, 0, 40, 100]]);
         row.evidence.as_mut().unwrap()["learnedReferences"] = json!([]);
@@ -824,11 +833,16 @@ fn review_pending_is_advisory_and_approval_still_verifies_source() {
 fn review_pending_fast_path_reads_durable_predictions_and_latest_decision() {
     let f = Fixture::new();
     let target = f.ready("A");
-    let (hash, path): (String, String) = f.library.connection().unwrap().query_row(
-        "SELECT content_hash,relative_path FROM assets WHERE id='asset-5'",
-        [],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    ).unwrap();
+    let (hash, path): (String, String) = f
+        .library
+        .connection()
+        .unwrap()
+        .query_row(
+            "SELECT content_hash,relative_path FROM assets WHERE id='asset-5'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
     {
         let connection = f.library.connection().unwrap();
         connection.execute(
@@ -846,27 +860,62 @@ fn review_pending_fast_path_reads_durable_predictions_and_latest_decision() {
             }).to_string()],
         ).unwrap();
     }
-    assert!(f.library.character_review_pending(&f.series, &target.id).unwrap());
-    assert!(!f.library.character_review_page(ReviewQuery {
-        series_id: f.series.clone(), target_id: Some(target.id.clone()),
-        filter: "recommended".into(), after: None, limit: 1,
-    }).unwrap().rows.is_empty());
-    f.library.record_character_decisions(characters::DecisionRequest {
-        target_id: target.id.clone(), expected_fingerprint: target.fingerprint.clone(),
-        asset_ids: vec!["asset-5".into()], decision: characters::DecisionKind::Accepted,
-        baseline_fingerprint: None, scan_id: None,
-    }).unwrap();
-    assert!(!f.library.character_review_pending(&f.series, &target.id).unwrap());
-    assert!(f.library.character_review_page(ReviewQuery {
-        series_id: f.series.clone(), target_id: Some(target.id.clone()),
-        filter: "recommended".into(), after: None, limit: 1,
-    }).unwrap().rows.is_empty());
-    f.library.record_character_decisions(characters::DecisionRequest {
-        target_id: target.id.clone(), expected_fingerprint: target.fingerprint.clone(),
-        asset_ids: vec!["asset-5".into()], decision: characters::DecisionKind::Cleared,
-        baseline_fingerprint: None, scan_id: None,
-    }).unwrap();
-    assert!(f.library.character_review_pending(&f.series, &target.id).unwrap());
+    assert!(f
+        .library
+        .character_review_pending(&f.series, &target.id)
+        .unwrap());
+    assert!(!f
+        .library
+        .character_review_page(ReviewQuery {
+            series_id: f.series.clone(),
+            target_id: Some(target.id.clone()),
+            filter: "recommended".into(),
+            after: None,
+            limit: 1,
+        })
+        .unwrap()
+        .rows
+        .is_empty());
+    f.library
+        .record_character_decisions(characters::DecisionRequest {
+            target_id: target.id.clone(),
+            expected_fingerprint: target.fingerprint.clone(),
+            asset_ids: vec!["asset-5".into()],
+            decision: characters::DecisionKind::Accepted,
+            baseline_fingerprint: None,
+            scan_id: None,
+        })
+        .unwrap();
+    assert!(!f
+        .library
+        .character_review_pending(&f.series, &target.id)
+        .unwrap());
+    assert!(f
+        .library
+        .character_review_page(ReviewQuery {
+            series_id: f.series.clone(),
+            target_id: Some(target.id.clone()),
+            filter: "recommended".into(),
+            after: None,
+            limit: 1,
+        })
+        .unwrap()
+        .rows
+        .is_empty());
+    f.library
+        .record_character_decisions(characters::DecisionRequest {
+            target_id: target.id.clone(),
+            expected_fingerprint: target.fingerprint.clone(),
+            asset_ids: vec!["asset-5".into()],
+            decision: characters::DecisionKind::Cleared,
+            baseline_fingerprint: None,
+            scan_id: None,
+        })
+        .unwrap();
+    assert!(f
+        .library
+        .character_review_pending(&f.series, &target.id)
+        .unwrap());
 }
 
 #[test]
@@ -874,25 +923,63 @@ fn review_pending_memory_fast_path_preserves_automatic_root_candidates() {
     let f = Fixture::new();
     let target = f.ready("A");
     seed_prediction(&f, &target, "memory-root");
-    let root: String = f.library.connection().unwrap().query_row(
-        "SELECT parent_id FROM classification_entries WHERE id=?1",
-        [&f.series], |row| row.get(0),
-    ).unwrap();
-    f.library.connection().unwrap().execute(
-        "UPDATE asset_classifications SET classification_id=?1 WHERE asset_id='asset-5'",
-        [&root],
-    ).unwrap();
-    assert!(!f.library.character_review_pending(&f.series, &target.id).unwrap());
-    assert!(f.library.character_review_page(ReviewQuery {
-        series_id: f.series.clone(), target_id: Some(target.id.clone()),
-        filter: "recommended".into(), after: None, limit: 10,
-    }).unwrap().rows.is_empty());
-    f.library.character_scan.lock().unwrap().previous.get_mut(&target.id).unwrap().0.automatic = true;
-    assert!(f.library.character_review_pending(&f.series, &target.id).unwrap());
-    let page = f.library.character_review_page(ReviewQuery {
-        series_id: f.series.clone(), target_id: Some(target.id.clone()),
-        filter: "recommended".into(), after: None, limit: 10,
-    }).unwrap();
+    let root: String = f
+        .library
+        .connection()
+        .unwrap()
+        .query_row(
+            "SELECT parent_id FROM classification_entries WHERE id=?1",
+            [&f.series],
+            |row| row.get(0),
+        )
+        .unwrap();
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE asset_classifications SET classification_id=?1 WHERE asset_id='asset-5'",
+            [&root],
+        )
+        .unwrap();
+    assert!(!f
+        .library
+        .character_review_pending(&f.series, &target.id)
+        .unwrap());
+    assert!(f
+        .library
+        .character_review_page(ReviewQuery {
+            series_id: f.series.clone(),
+            target_id: Some(target.id.clone()),
+            filter: "recommended".into(),
+            after: None,
+            limit: 10,
+        })
+        .unwrap()
+        .rows
+        .is_empty());
+    f.library
+        .character_scan
+        .lock()
+        .unwrap()
+        .previous
+        .get_mut(&target.id)
+        .unwrap()
+        .0
+        .automatic = true;
+    assert!(f
+        .library
+        .character_review_pending(&f.series, &target.id)
+        .unwrap());
+    let page = f
+        .library
+        .character_review_page(ReviewQuery {
+            series_id: f.series.clone(),
+            target_id: Some(target.id.clone()),
+            filter: "recommended".into(),
+            after: None,
+            limit: 10,
+        })
+        .unwrap();
     assert_eq!(page.rows.len(), 1);
     assert_eq!(page.rows[0].asset.id, "asset-5");
 }
@@ -944,27 +1031,71 @@ fn recommended_review_merges_memory_and_durable_in_asset_order() {
     seed_durable_review(&f, &target, "asset-5", 1, "recommended");
     seed_prediction(&f, &target, "memory");
 
-    let first = f.library.character_review_page(ReviewQuery {
-        series_id: f.series.clone(), target_id: Some(target.id.clone()),
-        filter: "recommended".into(), after: None, limit: 2,
-    }).unwrap();
-    assert_eq!(first.rows.iter().map(|row| row.asset.id.as_str()).collect::<Vec<_>>(), vec!["asset-40", "asset-41"]);
+    let first = f
+        .library
+        .character_review_page(ReviewQuery {
+            series_id: f.series.clone(),
+            target_id: Some(target.id.clone()),
+            filter: "recommended".into(),
+            after: None,
+            limit: 2,
+        })
+        .unwrap();
+    assert_eq!(
+        first
+            .rows
+            .iter()
+            .map(|row| row.asset.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["asset-40", "asset-41"]
+    );
     assert!(first.next_cursor.is_some());
-    let second = f.library.character_review_page(ReviewQuery {
-        series_id: f.series.clone(), target_id: Some(target.id.clone()),
-        filter: "recommended".into(), after: first.next_cursor, limit: 2,
-    }).unwrap();
-    assert_eq!(second.rows.iter().map(|row| row.asset.id.as_str()).collect::<Vec<_>>(), vec!["asset-5"]);
+    let second = f
+        .library
+        .character_review_page(ReviewQuery {
+            series_id: f.series.clone(),
+            target_id: Some(target.id.clone()),
+            filter: "recommended".into(),
+            after: first.next_cursor,
+            limit: 2,
+        })
+        .unwrap();
+    assert_eq!(
+        second
+            .rows
+            .iter()
+            .map(|row| row.asset.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["asset-5"]
+    );
 
     let mut state = f.library.character_scan.lock().unwrap();
-    let row = state.previous.get_mut(&target.id).unwrap().1.get_mut("asset-5").unwrap();
+    let row = state
+        .previous
+        .get_mut(&target.id)
+        .unwrap()
+        .1
+        .get_mut("asset-5")
+        .unwrap();
     row.state = "unmatched".into();
     drop(state);
-    let page = f.library.character_review_page(ReviewQuery {
-        series_id: f.series.clone(), target_id: Some(target.id),
-        filter: "recommended".into(), after: None, limit: 10,
-    }).unwrap();
-    assert_eq!(page.rows.iter().map(|row| row.asset.id.as_str()).collect::<Vec<_>>(), vec!["asset-40", "asset-41"]);
+    let page = f
+        .library
+        .character_review_page(ReviewQuery {
+            series_id: f.series.clone(),
+            target_id: Some(target.id),
+            filter: "recommended".into(),
+            after: None,
+            limit: 10,
+        })
+        .unwrap();
+    assert_eq!(
+        page.rows
+            .iter()
+            .map(|row| row.asset.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["asset-40", "asset-41"]
+    );
 }
 
 #[test]
@@ -973,10 +1104,16 @@ fn recommended_review_uses_latest_durable_prediction_only() {
     let target = f.ready("A");
     seed_durable_review(&f, &target, "asset-5", 1, "recommended");
     seed_durable_review(&f, &target, "asset-5", 2, "unmatched");
-    let page = f.library.character_review_page(ReviewQuery {
-        series_id: f.series.clone(), target_id: Some(target.id),
-        filter: "recommended".into(), after: None, limit: 10,
-    }).unwrap();
+    let page = f
+        .library
+        .character_review_page(ReviewQuery {
+            series_id: f.series.clone(),
+            target_id: Some(target.id),
+            filter: "recommended".into(),
+            after: None,
+            limit: 10,
+        })
+        .unwrap();
     assert!(page.rows.is_empty());
 }
 
@@ -988,18 +1125,48 @@ fn recommended_review_skips_stale_source_and_keeps_pagination() {
         add_review_asset(&f, id);
         seed_durable_review(&f, &target, id, 1, "recommended");
     }
-    fs::write(f.temp.path().join("assets/asset-40.png"), b"changed after prediction").unwrap();
-    let first = f.library.character_review_page(ReviewQuery {
-        series_id: f.series.clone(), target_id: Some(target.id.clone()),
-        filter: "recommended".into(), after: None, limit: 2,
-    }).unwrap();
-    assert_eq!(first.rows.iter().map(|row| row.asset.id.as_str()).collect::<Vec<_>>(), vec!["asset-41", "asset-42"]);
+    fs::write(
+        f.temp.path().join("assets/asset-40.png"),
+        b"changed after prediction",
+    )
+    .unwrap();
+    let first = f
+        .library
+        .character_review_page(ReviewQuery {
+            series_id: f.series.clone(),
+            target_id: Some(target.id.clone()),
+            filter: "recommended".into(),
+            after: None,
+            limit: 2,
+        })
+        .unwrap();
+    assert_eq!(
+        first
+            .rows
+            .iter()
+            .map(|row| row.asset.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["asset-41", "asset-42"]
+    );
     assert!(first.next_cursor.is_some());
-    let second = f.library.character_review_page(ReviewQuery {
-        series_id: f.series.clone(), target_id: Some(target.id),
-        filter: "recommended".into(), after: first.next_cursor, limit: 2,
-    }).unwrap();
-    assert_eq!(second.rows.iter().map(|row| row.asset.id.as_str()).collect::<Vec<_>>(), vec!["asset-43"]);
+    let second = f
+        .library
+        .character_review_page(ReviewQuery {
+            series_id: f.series.clone(),
+            target_id: Some(target.id),
+            filter: "recommended".into(),
+            after: first.next_cursor,
+            limit: 2,
+        })
+        .unwrap();
+    assert_eq!(
+        second
+            .rows
+            .iter()
+            .map(|row| row.asset.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["asset-43"]
+    );
     assert!(second.next_cursor.is_none());
 }
 
@@ -1025,4 +1192,34 @@ fn review_pending_respects_character_decisions_and_series_scope() {
         .library
         .character_review_pending(&f.series, &b.id)
         .unwrap());
+}
+
+#[test]
+fn review_pending_map_matches_per_character_badges() {
+    let f = Fixture::new();
+    let a = f.ready("A");
+    let b = f.ready("B");
+    // Unready characters are never badged even when a scan row exists for them.
+    let unready = f.target("C");
+    seed_prediction(&f, &a, "a");
+    seed_prediction(&f, &b, "b");
+    seed_prediction(&f, &unready, "c");
+    f.library
+        .record_character_decisions(prediction_decision(&a, "a"))
+        .unwrap();
+
+    let map = f.library.character_review_pending_map().unwrap();
+    assert_eq!(map.keys().cloned().collect::<Vec<_>>(), vec![b.id.clone()]);
+    assert!(!map.contains_key(&a.id));
+    assert!(!map.contains_key(&unready.id));
+    for target in [&a, &b, &unready] {
+        assert_eq!(
+            map.get(&target.id).copied().unwrap_or(false),
+            f.library
+                .character_review_pending(&f.series, &target.id)
+                .unwrap(),
+            "batch and single badges must agree for {}",
+            target.display_name
+        );
+    }
 }

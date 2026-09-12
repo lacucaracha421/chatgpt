@@ -111,12 +111,13 @@ impl Library {
             id
         };
         if !preview.asset_ids.is_empty() {
-            Self::set_asset_classification_in(
+            Self::set_asset_classification_cause_in(
                 &tx,
                 &SetAssetClassification {
                     asset_ids: preview.asset_ids,
                     classification_id: Some(destination.clone()),
                 },
+                super::character_autotag::Cause::AutomaticFinalization,
             )?;
         }
         // Only this character's history/relations are removed, after all assets have a folder.
@@ -125,8 +126,7 @@ impl Library {
             [target_id],
         )?;
         tx.execute("DELETE FROM character_targets WHERE id=?1", [target_id])?;
-        tx.execute("INSERT INTO character_autotag_reconsideration(series_id) VALUES(?1) ON CONFLICT(series_id) DO UPDATE SET revision=revision+1,after_asset=NULL",[&preview.series_id])?;
         tx.commit()?;
-  Ok(destination)
- }
+        Ok(destination)
+    }
 }

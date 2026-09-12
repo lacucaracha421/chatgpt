@@ -9,7 +9,15 @@ import { Select } from "../shared/ui/Select";
 import { TextField } from "../shared/ui/TextField";
 import { AssetGallery } from "../assets/AssetGallery";
 import type { CharacterTarget } from "./api";
-import "./CharacterLab.css";
+import { ReferenceCandidateDialog } from "./ReferenceCandidateDialog";
+import "./CharacterManagement.css";
+
+type FolderRegistrationResult = {
+  target: CharacterTarget;
+  linkedAssetCount: number;
+  referenceCandidateCount: number;
+  sourceFolderRemoved: boolean;
+};
 
 export function FolderCharacterRegistration({ folderId, classifications, targets, privacyMode, onClose, onSaved }: {
   folderId: string; classifications: ClassificationEntry[]; targets: CharacterTarget[]; privacyMode: boolean;
@@ -34,14 +42,13 @@ export function FolderCharacterRegistration({ folderId, classifications, targets
   const [items, setItems] = useState<AssetSummary[]>([]);
   const [cursor, setCursor] = useState<AssetCursor | null>(null);
   const [snapshot, setSnapshot] = useState<{ count: number; fingerprint: string } | null>(null);
-  const [references, setReferences] = useState<string[]>([]);
   const [thumbnail, setThumbnail] = useState<string | null>(null);
-  const [mode, setMode] = useState<"references" | "thumbnail">("references");
+  const [converted, setConverted] = useState<FolderRegistrationResult | null>(null);
   const [busy, setBusy] = useState(false), [loading, setLoading] = useState(false), [error, setError] = useState<string | null>(null);
   const query = useMemo(() => ({ albumId: null, collectionId: null, unclassifiedOnly: false, aspectRatio: null, randomPivot: null, classificationId: folderId, directOnly: !recursive, sort: "newest" as const, mediaKind: "images" as const, limit: 100 }), [folderId, recursive]);
   useEffect(() => {
     let active = true;
-    setLoading(true); setSnapshot(null); setItems([]); setReferences([]); setThumbnail(null); setError(null);
+    setLoading(true); setSnapshot(null); setItems([]); setThumbnail(null); setError(null);
     void Promise.all([gateway.listAssets({ ...query, after: null }), invoke<{ count: number; fingerprint: string }>("character_folder_asset_snapshot", { folderId, recursive })]).then(([page, nextSnapshot]) => {
       if (!active) return;
       // Only still images can be selected as recognition references or portraits.
@@ -63,15 +70,23 @@ export function FolderCharacterRegistration({ folderId, classifications, targets
     setBusy(true); setError(null);
     try {
       const target = targets.find(target => target.id === targetId);
-      const saved = await invoke<CharacterTarget>("register_character_folder", { request: {
+      const saved = await invoke<FolderRegistrationResult>("register_character_folder", { request: {
         folderId, seriesId, recursive, expectedCount: snapshot.count, expectedAssetFingerprint: snapshot.fingerprint, targetId: targetId || null,
         expectedFingerprint: target?.fingerprint ?? null, displayName: name,
-        cleanupFolder, referenceIds: target ? [] : references, thumbnailId: target ? null : thumbnail,
+        cleanupFolder, referenceIds: [], thumbnailId: target ? null : thumbnail,
       } });
-      onSaved(saved);
+      if (saved.referenceCandidateCount > 0) setConverted(saved);
+      else onSaved(saved.target);
     } catch (reason) { setError(commandErrorMessage(reason, "캐릭터 폴더를 등록하지 못했습니다.")); }
     finally { setBusy(false); }
   }
+  if (converted) return <ReferenceCandidateDialog
+    target={converted.target}
+    privacyMode={privacyMode}
+    onClose={() => onSaved(converted.target)}
+    onSaved={onSaved}
+  />;
+
   return <Dialog open title="한 캐릭터 폴더 정리" variant="wide" onClose={() => { if (!busy) onClose(); }}>
     <div className="character-picker">
       <Select label="시리즈" value={seriesId} disabled={busy} onChange={event => { setSeriesId(event.target.value); setTargetId(""); }}>
@@ -85,11 +100,9 @@ export function FolderCharacterRegistration({ folderId, classifications, targets
       <label><input type="checkbox" checked={cleanupFolder} disabled={busy} onChange={event => setCleanupFolder(event.target.checked)} />전환 후 기존 폴더 정리</label>
       <p>{cleanupFolder ? "이미지·GIF·영상을 연결하고, 직접 소속 자산은 시리즈로 옮깁니다. 하위 폴더와 남은 자산이 있으면 기존 폴더를 보존합니다." : "기존 분류 폴더를 유지합니다."}</p>
       <p>{snapshot === null ? "대상 확인 중…" : `${snapshot.count}개 자산 연결 예정`} · 원본 파일과 다른 캐릭터 연결을 유지합니다.</p>
-      {!targetId && <><div className="character-actions"><Button disabled={busy} onClick={() => setMode("references")}>기준 이미지 {references.length}/5</Button><Button disabled={busy} onClick={() => setMode("thumbnail")}>대표 이미지 {thumbnail ? "선택됨" : "선택"}</Button><span>{mode === "references" ? "기준 이미지 선택" : "대표 이미지 선택"}</span></div>
-        <div className="character-picker__gallery"><AssetGallery layout="masonry" items={items} privacyMode={privacyMode} targetRowHeight={140} selectedAssetIds={new Set(mode === "references" ? references : thumbnail ? [thumbnail] : [])} onSelectionGesture={asset => {
-          if (busy) return;
-          if (mode === "thumbnail") setThumbnail(old => old === asset.id ? null : asset.id);
-          else setReferences(old => old.includes(asset.id) ? old.filter(id => id !== asset.id) : old.length < 5 ? [...old, asset.id] : old);
+      {!targetId && <><div className="character-actions"><strong>대표 이미지</strong><span>{thumbnail ? "선택됨" : "선택 사항"}</span></div>
+        <div className="character-picker__gallery"><AssetGallery layout="masonry" items={items} privacyMode={privacyMode} targetRowHeight={140} selectedAssetIds={new Set(thumbnail ? [thumbnail] : [])} onSelectionGesture={asset => {
+          if (!busy) setThumbnail(old => old === asset.id ? null : asset.id);
         }} /></div></>}
       {error && <p role="alert">{error}</p>}
       <div className="character-actions"><Button disabled={busy || loading || !cursor} onClick={() => void more()}>더 불러오기</Button><Button disabled={busy || loading || !snapshot?.count || (!targetId && !name.trim())} onClick={() => void save()}>캐릭터로 전환</Button><Button disabled={busy} onClick={onClose}>취소</Button></div>

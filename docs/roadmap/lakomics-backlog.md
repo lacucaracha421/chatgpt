@@ -33,7 +33,7 @@ acceptance limits. Existing item statuses below remain the owners of pending wor
 
 | 영역 | 구현 후 확인 / 남은 보완 | 새 구현 / 보류 |
 |---|---|---|
-| 캐릭터 | CHAR-AUTO-001: 신규 이미지 자동 분류 속도 개선은 Linux 개발 앱 실사용 확인. CHAR-AUTO-002는 큐 원인·우선순위·현재 이미지 진행 문구를 보강했으며 전체 작업 분모/중복 원인 제거는 남음. CHAR-UI-001~010의 주요 흐름은 구현되어 실사용/네이티브 확인 단계 | 실데이터 정확도·첫 분석 성능, 전체 작업 진행률, 남은 UX 폴리시 |
+| 캐릭터 | 2026-09-12 quiet workflow로 일반 수집 중 큐/검토/캐시 상태 노출을 제거하고, 가장 가까운 등록 시리즈 + 명시적 참조만 자동 비교한다. 과거 미분류 갱신은 사용자 요청 때만 낮은 우선순위로 실행한다. Linux 격리 앱 기동은 통과했으나 실제 GUI 행동 수용과 Windows 네이티브 확인은 남음 | CHAR-AUTO-004의 자동확정 support=6 유지. 참조 추가는 신규 이미지에 즉시 적용되고 과거 갱신은 명시적 유지보수 작업으로 분리됨 |
 | 통합 코드 리뷰 | REVIEW-20260909: A–H/I1 반영 후 남은 Windows·Android·실제 미디어 검증 | 구현 완료 배치를 처음부터 재실행하지 않음 |
 | 클라우드·통계·Notes | CLOUD-UI-001, STATS-001A/B, NOTE-001B 네이티브 확인/남은 보완 | CLOUD-006와 NOTE-001A는 완료 |
 | 개인 탐색·카탈로그 | 기존 카탈로그 주 경로 완료 | IDEA-001B 테마 확장, CATALOG-002B 선택적 공급자; IDEA-002 보류 |
@@ -44,12 +44,21 @@ acceptance limits. Existing item statuses below remain the owners of pending wor
 
 캐릭터·메모 작업의 **사용자 승인 순서 (2026-09-09)**: 상단바 → 메모 상태 문구 → CHAR-UI-007 추가 참조 → CHAR-UI-009 표시 그룹 → CHAR-UI-004·008 폴더 전환 → CHAR-AUTO-001 첫 분석 계측. 확장프로그램 리디자인은 이 작업에서 제외한다.
 
+### 2026-09-12 Quiet Character Workflow 최종 검증 체크포인트
+
+- **현재 제품 계약:** 일반 수집의 자동 캐릭터 분류는 조용히 실행한다. 큐 원인·캐시·현재 타깃·일상 진행률·검토 대기 배지/인박스를 정상 흐름에 노출하지 않는다. 자동 범위는 현재 자산의 가장 가까운 등록 시리즈이며, 비교 근거는 명시적 기준/추가 참조만 사용한다.
+- **과거 갱신:** 참조 저장만으로 과거 작업을 만들지 않는다. `과거 미분류 이미지 갱신`을 사용자가 직접 요청한 경우에만 durable 저우선순위 refresh를 만들고, 신규 자동 작업이 먼저 처리된다. 스키마 67은 이 refresh의 일시정지를 전역 자동분류 pause와 분리하여 새 이미지 자동분류를 막지 않는다.
+- **대체된 옛 정상 흐름:** `CharacterLab`, 작품/시리즈 추측 제안 UI, mixed-folder AI migration, routine review badge, scheduler-detail/global-progress 요구는 이 quiet workflow가 대체한다. 과거 migration 이름/테이블은 업그레이드 호환을 위한 역사적 스키마로만 남길 수 있다.
+- **집중 자동 검증:** Rust `character_` 필터는 111개 중 **98 passed / 0 failed / 13 ignored**. 설정된 Lakomics runtime venv의 Python delta/learned suite는 **4 passed / 1 skipped / 0 failed**이며 skipped 1개는 실제 frozen model 경로를 명시해야 하는 opt-in parity다. 프런트 character/classification/work-status/App 묶음은 **140 passed / 0 failed**. `npm run build`와 `cargo check`는 exit 0이다.
+- **delta fixture 증거:** 2,000개 deterministic 후보에서 추가 참조 1/5/10/20개 모두 delta의 `old_reference_recomparisons=0`, `full_fallbacks=0`이며 full과 normalized outcome이 일치했다. 20개 일괄은 2,000개 후보를 한 번 방문했고, 1개씩 20회 순차 갱신 모델은 40,000회 방문했다. fixture elapsed 값은 모델 없는 합성 측정이므로 실사용 처리량 주장에 사용하지 않는다.
+- **네이티브 경계:** production library를 열지 않은 격리 XDG 환경에서 Linux Tauri dev 앱이 20초 smoke 동안 정상 기동을 유지했다. 현재 도구로 실제 데스크톱 GUI 저장/교정/갱신 시나리오를 조작하지 않았으므로 Linux 행동 수용은 미검증이다. Windows 호스트는 오프라인이라 네이티브 수용은 미검증이며, Windows retained-handle source identity와 hidden Python worker 실행 분기는 정적 검토만 완료했다. production-library 마이그레이션/백필/재분석은 수행하지 않았다.
+
 ### 2026-09-10 캐릭터 정리 UX 체크포인트
 
 - **대표/기준 후보 일관성:** 시리즈 캐릭터 편집에서 대표 이미지와 기준 이미지가 같은 편집 세션의 동일 후보 snapshot을 공유한다. 백그라운드 분류 때문에 두 선택 화면의 후보가 중간에 달라지지 않으며, 저장 시 기존 strict 재검증으로 stale 선택은 계속 차단한다. 일반 폴더→단일 캐릭터 전환은 원래부터 같은 `items` 목록을 공유한다.
 - **CHAR-UI-010 수동 캐릭터 / 분류 종료: 구현 / 네이티브 확인 대기.** 시리즈의 `미분류 · 추가 확인`에서 `기존 캐릭터 지정 / 새 수동 캐릭터 / 캐릭터 분류 제외` 세 경로를 제공한다. 수동 캐릭터는 기준 이미지 없이 1~200개 선택 자산으로 만들고 `manual_only`로 자동 비교 roster·재평가에서 제외한다. 나중에 기준 이미지 5장을 채우면 같은 target ID를 유지한 채 자동 분류형으로 승격한다. `캐릭터 분류 제외`는 series×asset 종료 상태로 저장하며 특정 캐릭터의 `rejected`와 다르고, 별도 보기에서 `분류 다시 시작`으로 되돌릴 수 있다.
 - **오리지널 영역: 구현 / 네이티브 확인 대기.** 스키마 58이 최상위 `오리지널` 기본 영역을 추가하거나 동명 기존 루트를 재사용한다. 그 아래는 일반 OC 보관 폴더로만 사용하며 `작품 후보`, `시리즈로 등록`, `캐릭터로 정리`를 노출하지 않는다. 오리지널 subtree 자산은 자동 캐릭터 큐에 들어가지 않고 기존 pending도 해당 범위로 이동 시 superseded된다. 기본 루트는 이름 변경·이동·삭제를 막고 하위 폴더 생성과 외형 변경은 허용한다.
-- **CHAR-AUTO-002 1차 보강: PARTIAL.** 새 큐 작업은 `자동 / 직접 요청 / 재평가` 원인을 저장하며 우선순위는 자동 신규 작업 → 사용자 직접 분석 → 백그라운드 재평가다. v58 이전 큐는 추정하지 않고 `기존 작업`으로 표시한다. UI의 `1/1`은 전체 작업 진행률이 아니라 `현재 이미지 · 캐릭터 비교 1/1`로 명시한다. **아직 작업/시리즈 revision 단위의 전체 대상·완료·남음 분모와 중복 generation 원인 제거는 구현하지 않았으므로 CHAR-AUTO-002 전체는 완료가 아니다.**
+- **CHAR-AUTO-002 사용자 표시 요구: SUPERSEDED — 2026-09-12.** 큐 provenance와 과거 측정 기록은 진단용으로 남기지만 정상 UI의 원인별 대기 수·현재 이미지 비교·전체 진행률 요구는 quiet workflow가 대체했다. 사용자에게는 명시적으로 요청한 과거 갱신의 generic pause/resume와 영구 runtime/system 오류 복구만 노출한다.
 - **스키마:** 58은 큐 provenance, series×asset 분류 제외, 오리지널 루트 기반을 추가하고 59는 `character_targets.manual_only`와 자동 재평가 trigger 경계를 추가한다. 실행 중인 Linux dev 라이브러리는 watcher 재시작으로 59까지 적용됐고 적용 직후 기존 수동 캐릭터 0건·분류 제외 0건이었다.
 
 ### 2026-09-09 캐릭터·메모 구현 체크포인트
@@ -175,7 +184,7 @@ Status: `VERIFY` — 2026-09-09 A–H 코드 수정과 I1 권한 판단 보강 �
 
 ### D — 캐릭터 화면과 기존 폴더 연결 (CHAR-UI-002~005)
 
-- C의 판단 계약을 먼저 확정하고 기존 `SeriesBrowser`, `CharacterLab`, 공통 toolbar/panel/gallery를 재사용한다.
+- **역사적 설계 기록:** 당시에는 `SeriesBrowser`, `CharacterLab`, 공통 toolbar/panel/gallery 재사용을 전제로 했다. `CharacterLab` 정상 진입점은 2026-09-12 quiet workflow에서 제거되어 이 전제는 superseded다.
 - D1: CHAR-UI-002 상단 고정 제외·일괄 제외, CHAR-UI-003 완료 안내 자동 숨김, CHAR-UI-005 상세 패널로 인한 그리드 밀림 및 다중 승인·거절을 처리한다.
 - D2: CHAR-UI-004 기존 분류 폴더를 캐릭터로 등록한다. 시리즈·이름·대상 범위·개수를 확인하고 대표/기준 이미지를 기존 갤러리에서 선택한다. 파일·분류·다른 캐릭터 관계를 보존하며 반복 실행 시 중복 관계를 만들지 않는다.
 - 게이트: 넓고 좁은 창에서 선택/스크롤을 유지한 패널 전환, 다중 판단 후 목록 갱신, 처리 불가 항목 안내, 안내 타이머 교체/해제를 확인한다. 기존 폴더 등록은 합성 자료로 직접/하위 범위와 기존 캐릭터 연결 충돌을 검증한다. 실제 사용자 폴더에 일괄 적용하는 것은 별도 작업이다.
@@ -717,7 +726,7 @@ Status: `VERIFY` — user approved implementation on 2026-09-08. Shared headers,
 ### Accepted design direction
 
 - Use the same compact location header for ordinary, series, and character folders. Show the current name on the left, context actions beside it, and automation state at the far right. Avoid creating an additional toolbar row. A breadcrumb or existing back navigation can replace the removed `시리즈로` button.
-- Treat icon-only automation as a stateful control: distinguish on/off, running, and failure using shape/badge as well as color. Keep short tooltips and accessible names; do not hide failures behind a permanently indistinguishable icon. Global progress/pause remains available outside character folders, while review entry remains inside them.
+- **SUPERSEDED 2026-09-12:** routine running/progress badge와 global character progress/pause는 quiet workflow에서 제거됐다. 정상 자동 작업은 보이지 않고, 사용자가 시작한 과거 갱신과 영구 runtime/system failure만 작업 센터에 나타난다.
 - Define the name-adjacent check as **reference setup ready**, not **all images analyzed / all classifications correct**. This prevents an apparently completed check while background work remains.
 - Use an in-place selection mode with `대표 이미지 선택` or `기준 이미지 선택 2/5`, plus `완료` and `취소`. Preserve the registration draft, gallery position, and prior filter on exit. Thumbnail selection is single-select; reference selection shows its existing required count. Other characters' assets remain excluded even under `전체 보기`; make that restricted selection scope clear.
 - Make the review presentation character-specific while retaining internal comparisons against other plausible characters. A small read-only ambiguity reason may be useful, without exposing other characters' approval buttons.
@@ -817,7 +826,24 @@ Status: `VERIFY` — 2026-09-09 통합 계획 C/D에서 구현·격리 검증 �
 - **DONE — 2026-09-10 사용자 확인:** 검토 대기 이미지가 있는 캐릭터 폴더는 상단바 `검토` 버튼의 배지/표시로 검토 화면을 열기 전에 대기 여부를 확인할 수 있다.
 - 현재 캐릭터의 실제 미해결 검토 항목을 기준으로 표시하고, 승인·거절 등으로 대기가 해소되면 갱신한다. 다른 캐릭터의 대기나 단순 분석 실행 중 상태를 검토 대기로 혼동하지 않는다.
 - 아이콘만 사용하는 경우 접근 가능한 이름/설명으로 `검토 대기 있음`을 전달하고, 배지 출현으로 상단바나 그리드가 밀리지 않도록 한다.
-- 2026-09-10 사용자 실사용 확인으로 검토 대기 표시 항목은 완료 처리한다.
+- **역사적 완료 기록:** 2026-09-10 당시에는 사용자 확인으로 완료했으나, 2026-09-12 quiet workflow가 routine 검토 대기 표시 자체를 supersede했다.
+
+### 추가 사용자 요구 — 사이드바 캐릭터 행 검토 대기 표시 (2026-09-11)
+
+- **SUPERSEDED — 2026-09-12 quiet workflow:** 2026-09-11에 구현했던 사이드바/상단바 routine 검토 대기 표시는 정상 흐름에서 제거한다. 당시 구현·성능 기록은 역사적 증거로만 남긴다.
+- 표시는 숫자 없는 작은 호박색 사각 점(`--selection-mark-size`)이며, 기존 배지와 같이 `aria-hidden`으로 두고 행의 접근 가능한 이름에 `검토 대기 있음`을 덧붙여 전달한다. 시리즈·일반 폴더·그룹 행에는 표시하지 않는다.
+- 서버가 준비되지 않은(`ready=false`) 캐릭터와 시리즈 미지정 캐릭터는 표시 대상에서 제외한다.
+- 비용: 캐릭터별 판정을 사이드바에서 35회 호출하면 약 31ms이고, 대기가 없는 캐릭터가 많은 현재 분포에서 개별 `EXISTS`가 조기 종료되지 않아 최악이다. 대신 `character_review_pending_map` 한 번으로 전체를 조회하고 `useCharacterHub`가 캐릭터 목록과 같은 revision에서만 갱신한다(실측 웜 34ms, 화면 전환 시 재계산 없음). 사전 계산 컬럼·마이그레이션은 도입하지 않았다.
+- 배치 판정은 캐릭터별 판정과 같은 술어를 쓰며, 두 경로의 결과가 일치하는지 Rust 회귀(`review_pending_map_matches_per_character_badges`)로 고정한다.
+- **남은 확인:** 네이티브 Windows/Linux 실사용 확인은 아직이다. 프런트 렌더·계산 스타일·레이아웃은 브라우저 하네스로 확인했다.
+
+### 버그 — 루트 카테고리 자동 확정 이미지를 캐릭터 폴더에서 제외할 수 없음 (2026-09-11)
+
+- **사용자 보고:** `https://x.com/daruma_tatsuma/status/1965885982886293841/photo/1` 자산이 루시 캐릭터 폴더에 있는데 루시가 아니라서 제외하려 했으나 `시리즈 폴더 안의 지원되는 자산을 선택해 주세요.`로 거부됐다.
+- **재현·확정:** 해당 자산은 시리즈(`사이버펑크`) 하위가 아니라 상위 루트(`만화`)에 분류돼 있었고, 자동 분석이 루트 카테고리 범위로 루시에게 `accepted`(origin=`automatic`) 처리했다. 캐릭터 폴더 갤러리(`TARGET_GALLERY_SQL`)는 accepted 관계가 시리즈 루트 조상에 있으면 표시하지만, 결정 검증기 `candidate_media_mode`는 `automatic=true`일 때만 루트 조상을 허용했다. 수동 제외는 `automatic=false`라 거부됐다 — **표시 규칙과 검증 규칙의 비대칭**이 원인이다.
+- **수정:** 결정 기록 전용 `candidate_decision_media_mode`를 추가해, 대상 캐릭터의 기존 `character_relations` 관계가 있으면 자동/수동 구분 없이 판단을 허용한다. 시리즈 밖 자산을 억지로 수락하는 경로는 만들지 않았고, 관계 없는 자산은 계속 거부된다. `write_character_decisions`만 새 검증기를 쓴다.
+- **검증:** Rust 회귀 `root_category_automatic_acceptance_stays_rejectable_from_the_character_folder`를 추가했다. 수정 전에는 사용자가 본 것과 같은 메시지로 실패하고 수정 후 통과한다(되돌려 실패 확인). Rust `character` 101개·전체 895개, 프런트 991개, `tsc`, 프로덕션 빌드 통과. 실제 활성 라이브러리에서 해당 자산에 대해 판정이 `ALLOWED`로 바뀌고 무관 자산은 계속 거부됨을 읽기 전용으로 확인했다.
+- **남은 확인:** 실제 앱에서 루시 폴더의 해당 이미지를 `이 캐릭터에서 제외`로 처리하는 네이티브 조작 확인은 사용자 몫이다.
 
 ## CHAR-UI-006 — 검토 중 추가 레퍼런스 변경으로 인한 판단 중단 및 안내 개선
 
@@ -889,7 +915,7 @@ Status: `VERIFY` — 2026-09-10 수동 캐릭터·명시적 분류 종료·오�
 
 ## CHAR-AUTO-002 — 전체 진행률과 중복 재분석 성능/진단
 
-Status: `PARTIAL` — 2026-09-10 큐 provenance/우선순위와 현재-이미지 진행 문구를 구현했다. 전체 작업 범위의 durable 분모·완료·남음 집계와 중복 generation 원인 제거는 아직 남아 있다.
+Status: `SUPERSEDED / DIAGNOSTIC ONLY` — 2026-09-12 quiet workflow가 사용자용 전체 진행률·큐 세부정보 요구를 대체했다. provenance/중복 generation 자료는 내부 진단 기록으로 보존하지만 정상 UI에 scheduler detail이나 거짓 백분율을 다시 추가하지 않는다.
 
 - **현재 UI 문제:** `이미지 후보 비교 · 1/1`은 전체 후보 이미지 진행률이 아니다. native engine의 `total/compared`는 현재 에셋 한 장을 몇 ready target과 비교했는지 나타내므로, 마커스 한 명뿐인 시리즈에서는 수천 장이 남아도 계속 `1/1`이 될 수 있다.
 - `character_incremental_status`는 `pending`, 누적 `completed`, 누적 `confirmed`, 현재 `activeAssetId`, 현재 이미지의 `total/compared`를 이미 반환하지만 프론트는 현재 이미지 비교 수만 진행 표시로 사용한다. `completed/confirmed`는 전역 누적값이고 이번 재분석 작업의 분모/분자로 직접 사용할 수 없다.
@@ -915,6 +941,106 @@ Status: `PARTIAL` — 2026-09-10 큐 provenance/우선순위와 현재-이미지
 - query 원본의 최종 identity/hash fence와 Linux 외부 writer 방어를 약화시키는 최적화는 금지한다. 전체 재해시 횟수를 줄이려면 먼저 기존 source replacement 회귀와 Windows retained-handle 계약을 보존하는 대안을 설계하고 계측한다.
 - 진단 UI/로그는 현재 작업이 `새 수집`, `수동 분석 후 enrollment`, `series reconsideration`, `retry` 중 어느 원인으로 실행되는지 식별할 수 있게 한다. 장시간 작업이 느린지, 반복 중인지 사용자가 구별할 수 있어야 한다.
 - **Acceptance:** 동일 입력에서 기존 prediction/자동 relation 결과 동등성, 중복 작업 제거, restart/pause 복구, stale source 차단, Linux/Windows 안전성, 정확한 전체 진행률을 함께 확인한다.
+
+## CHAR-AUTO-004 — 캐릭터 자동확정 기준 상향 (2026-09-11)
+
+Status: `APPLIED` — `AUTOMATIC_REFERENCE_SUPPORT`를 3 → 4 → **6**으로 올렸다. 4는 사용자 실측 확인 후 6으로 대체했다. 측정 도구와 전체 근거는 아래에 남긴다.
+
+### 최종 적용 (2026-09-11 2차)
+
+- `AUTOMATIC_REFERENCE_SUPPORT = 6`. `character_scan.rs`의 상수 하나이며 `automatic_evidence`와 `character_incremental.rs` 중재가 함께 쓴다.
+- **자동확정만** 조였다. 거리 임계값 `threshold`(0.2132)와 `required_references`(2), `baseline.json`, `runtime.py`, `learned_compare.py`는 그대로다. `BASELINE`·`extraction_fingerprint`가 변하지 않아 **재추출도 재비교도 없다**.
+- 테스트 픽스처의 기준 이미지가 5장이라 support 6을 만들 수 없어, `add_learned_reference` 헬퍼로 학습 참조 1장을 추가했다. 갱신한 테스트: `arbitration_accepts_a_six_vote_region_even_when_best_crop_has_only_two_votes`(이름 변경), `arbitration_uses_latest_judgment_and_keeps_ambiguous_people_for_review`, `reference_image_blocks_only_its_own_target_and_keeps_other_people_for_review`.
+- 검증: Rust `character` 101/101, 전체 `--lib` **895 passed / 0 failed / 28 ignored**, 디버그 빌드 성공.
+
+### 4가 실패한 이유 (사용자 실측이 반증)
+
+**support 2·3·4는 정답률이 사실상 같다.** 사람이 검토한 1,119건 전체 기준:
+
+```
+support  승인  거절   정답률
+   2      67   367    15.4%
+   3      29   186    13.5%
+   4      20   125    13.8%   ← 4로 올려도 변화 없음
+   5      65    82    44.2%
+   6      32     1    97.0%   ← 여기서야 신뢰 가능
+   7      51     2    96.2%
+```
+
+앞서 보고한 "3→4로 오답률 31.8%→22.1%"는 **자동확정된 것만** 본 값이었다. 검토 전체로는 13.5% → 13.8%로 무의미하다.
+
+### 6의 대가 — 자동화가 크게 줄어든다
+
+```
+기준   자동확정   검토로   자동화율
+ 3      1,506     474    76.1%
+ 4      1,189     791    60.1%
+ 5        850   1,130    42.9%
+ 6        166   1,814     8.4%
+```
+
+**레퍼런스가 5장인 캐릭터는 support 6을 물리적으로 만들 수 없다.** 37명 중 **31명이 자동확정 정지** 상태가 된다(시노사와 히로 25장, 수나 8, 루시/카구야/에이메스 7, 파린 6만 가능). 사용자가 이 대가를 인지하고 6을 선택했다.
+
+### 진짜 해법은 레퍼런스 확충 (사용자 가설, 데이터로 확인)
+
+캐릭터별 상한과 정답률:
+
+```
+캐릭터           anchors learned 상한   s=5 정답률   s>=6 정답률
+시노사와 히로        5      20    25      —         89% (39/44)
+에이메스            5       2     7    100%        100% (81/81)
+아리아              5       0     5    100% (21/21)   불가
+마커스              5       0     5     94% (17/18)   불가
+안조               5       0     5      2% (1/55)    불가
+로렌츠              5       0     5     15% (2/13)   불가
+```
+
+**`시노사와 히로`가 5장 → 25장으로 늘려 89%를 달성**했다. 반면 `안조`는 5장뿐이라 s=5에서 2%이고 올릴 방법이 없다. 즉 **기준 상향보다 `추가 참조로 사용`으로 상한을 올리는 것이 근본 해법**이다. 현재 실제 등록은 30장뿐이다.
+
+사용자가 제안한 운용: 초벌 5장으로 돌려 확실한 것만 확정 → 그중 일부를 추가 참조로 등록(최대 20장, 총 25장) → 재분석. `waifuc` `CCIPAction`과 같은 부트스트랩 방식이다.
+
+### 남은 확인
+
+- **네이티브 실사용 확인은 아직이다.** 다음 재분석부터 새 기준이 적용된다. 기존 자동확정은 소급되지 않는다.
+- **31명의 자동확정 정지가 실제로 수용 가능한지.** 검토 부담이 크게 늘어난다. 필요하면 캐릭터별 기준(레퍼런스 상한에 맞춘 자동 결정)을 검토한다.
+- s>=6 표본이 `에이메스`(81건)·`시노사와 히로`(44건)에 편중돼 있어, 다른 캐릭터에서 6이 정말 정확한지 미확인.
+- `unmatched` 라벨이 승인 50 / 거절 2로 거의 없어 CCIP의 "모르겠다" 실패는 측정하지 못했다.
+- 검출기 파라미터(`margin`/`detector_score`) 조정은 전체 재추출이 필요해 후순위다.
+- 다음 후보(미승인): 통과 이미지를 저거리 조건으로 자동 참조 편입(waifuc `CCIPAction` 방식). 현재 20장 상한 관리가 함께 필요하다.
+
+### 이전 적용 기록 (3 → 4, 이후 6으로 대체됨)
+
+- `character_scan.rs`에 `AUTOMATIC_REFERENCE_SUPPORT` 상수를 추가하고 `automatic_evidence`와 `character_incremental.rs`의 중재 호출부가 이를 쓰도록 통일했다(이전에는 `3`이 두 곳에 흩어져 있었다).
+- 검증: Rust `character` 101/101, 전체 `--lib` 895 passed / 0 failed / 28 ignored.
+
+### 적용 근거 (실측)
+
+측정 도구: `app/character-runtime/shadow_rule_replay.py` (읽기 전용, 신규). `character_autotag_predictions`에 저장된 `referenceDistances`만으로 규칙을 오프라인 재생한다. 재생 정확도는 저장된 `distance`와 3,000건 대조에서 전부 일치했다.
+
+**앞선 보고의 precision 0.300은 오류였다.** 그 값은 *검토 추천 목록*을 잰 것이고, 실제 *자동확정*은 다르다.
+
+```
+자동확정 1,138건: 정답 776 / 나중에 사람이 거절 362 → precision 0.682
+```
+
+### 왜 임계값(`threshold`)이 아니라 이 상수인가
+
+`threshold`는 **추천 범위와 자동확정을 동시에** 지배한다. 낮추면 승인했을 정답이 추천 목록에서 아예 사라져 복구할 수 없다. 반면 `AUTOMATIC_REFERENCE_SUPPORT`는 **검토 대기로만** 옮기므로 사용자가 되살릴 수 있다. 게다가 `threshold`를 바꾸면 `BASELINE` fingerprint가 달라져 Rust 상수 갱신과 증분 재비교가 필요하다.
+
+### 함께 철회한 가설
+
+- **margin 중재는 해롭다.** `T=0.14`에서 `M=0.00 → F1 0.617`, `M=0.05 → 0.573`으로 단조 감소. 경쟁 후보 253건 중 72.3%가 margin<0.05라 정답까지 걸러낸다.
+- **캐릭터별 임계값은 이 데이터로는 이득이 없다.** in-sample 0.641이나 정직한 CV에서 0.599로 전역(0.606)보다 나쁘다. 캐릭터당 라벨 중앙값 8건(34명 중 17명이 8건 미만)이 원인이다.
+- **임계값 전역 재튜닝(`T≈0.15`)은 채택하지 않았다.** CV F1 0.606으로 `support>=k`(0.620)보다 낮고, `BASELINE` 변경 비용이 따른다.
+
+### 참고한 외부 사례
+
+- CCIP 공식 문서가 "존재하지 않는 캐릭터를 배제하는 능력이 부족하고 가장 비슷한 범주를 강제 선택한다"는 한계를 명시한다 — 현재 `unmatched:recommended = 18:1`의 원인.
+- `deepghs/imgutils`의 `map_clusters_to_reference`(임계값 이내 참조 **비율** 기반 판정, `same_threshold=0.5`), `ccip_merge`(정규화 평균 프로토타입)가 지원 기반 규칙의 근거다.
+- `deepghs/waifuc`의 `CCIPAction`은 통과 이미지를 자동으로 키 특징 집합에 편입해 쓸수록 정확해진다. 현재는 수동 `추가 참조로 사용`만 있고 실제 등록은 30장뿐이다(미구현 후보).
+- `cyber-meow/anime_screenshot_pipeline`은 OPTICS 클러스터링 후 참조 비율로 판정한다.
+- Immich는 DBSCAN 코어 포인트(최소 밀집)로 근거 없는 신규 person 생성을 막는다.
+- 모델은 이미 최상위다: `ccip-caformer_b36-24` F1 0.9409로 CCIP 공개 모델 중 1위이므로 교체 이득이 없다.
 
 ## CHAR-AUTO-003 — 군집 기반 캐릭터 후보 찾기 연구
 

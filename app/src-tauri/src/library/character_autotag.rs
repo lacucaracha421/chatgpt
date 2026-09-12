@@ -102,8 +102,6 @@ pub(super) fn evidence_row(
         .transpose()
 }
 
-
-
 pub(super) fn refresh_character_review_state(
     connection: &Connection,
     asset_id: &str,
@@ -141,7 +139,11 @@ pub(super) fn refresh_character_review_state(
     let rows = predictions
         .into_iter()
         .map(|(target_id, series_id, result)| {
-            Ok((target_id, series_id, serde_json::from_str::<Value>(&result)?))
+            Ok((
+                target_id,
+                series_id,
+                serde_json::from_str::<Value>(&result)?,
+            ))
         })
         .collect::<Result<Vec<_>>>()?;
     let boxes = rows
@@ -259,7 +261,9 @@ impl Cause {
     fn priority(self) -> i32 {
         match self {
             Self::ManualScanEnrollment => 0,
-            Self::Ingestion | Self::Classification | Self::Restore | Self::SimilarityResolution => 1,
+            Self::Ingestion | Self::Classification | Self::Restore | Self::SimilarityResolution => {
+                1
+            }
             Self::Reconsideration => 2,
             Self::AutomaticFinalization => 1,
         }
@@ -291,14 +295,6 @@ fn folders(connection: &Connection, asset_id: &str) -> rusqlite::Result<Vec<Stri
         .query_map([asset_id], |r| r.get(0))?.collect()
 }
 
-fn in_originals_scope(connection: &Connection, asset_id: &str) -> rusqlite::Result<bool> {
-    connection.query_row("WITH RECURSIVE lineage(id,parent_id) AS (
-        SELECT c.id,c.parent_id FROM classification_entries c JOIN asset_classifications a ON a.classification_id=c.id WHERE a.asset_id=?1
-        UNION ALL SELECT c.id,c.parent_id FROM classification_entries c JOIN lineage p ON c.id=p.parent_id)
-        SELECT EXISTS(SELECT 1 FROM lineage l JOIN classification_roles r ON r.classification_id=l.id WHERE r.role='originals')",
-        [asset_id], |r| r.get(0))
-}
-
 /// Call after the final classification/status mutation, inside its transaction.
 /// Equal inputs are a no-op; reconsideration intentionally creates a fresh attempt.
 pub(super) fn enqueue(
@@ -315,7 +311,7 @@ pub(super) fn enqueue(
     let Some((hash, path)) = input else {
         return Ok(false);
     };
-    if in_originals_scope(connection, asset_id)? {
+    if super::character_scope::resolve_character_scope(connection, asset_id)?.is_none() {
         // Superseding is terminal, so review_state must move with state; otherwise
         // the row keeps claiming unresolved work that no worker will ever claim.
         connection.execute("UPDATE character_autotag_jobs SET state='superseded',review_state='superseded',claim_id=NULL,error=NULL,updated_at=?2 WHERE asset_id=?1 AND state<>'superseded'",
@@ -346,7 +342,12 @@ pub(super) fn enqueue(
                          SET priority=?2,cause=?3,retry_at=0,error=NULL,updated_at=?4
                          WHERE asset_id=?1 AND state='pending'
                            AND (priority<>?2 OR cause<>?3 OR retry_at<>0 OR error IS NOT NULL)",
-                        params![asset_id,cause.priority(),cause.stored(),chrono::Utc::now().to_rfc3339()],
+                        params![
+                            asset_id,
+                            cause.priority(),
+                            cause.stored(),
+                            chrono::Utc::now().to_rfc3339()
+                        ],
                     )?;
                     return Ok(changed > 0);
                 }
@@ -408,7 +409,8 @@ impl Library {
         if !enabled {
             return Ok(0);
         }
-        let learned_references = serde_json::to_value(current.usable_learned_references().collect::<Vec<_>>())?;
+        let learned_references =
+            serde_json::to_value(current.usable_learned_references().collect::<Vec<_>>())?;
         let mut queued = 0;
         for id in asset_ids {
             if cancel.load(Ordering::Acquire) {
@@ -456,13 +458,14 @@ impl Library {
     pub fn retry_failed_character_assets(&self, series_id: String) -> Result<usize> {
         let mut connection = self.connection()?;
         let tx = connection.transaction()?;
-        let ids = tx.prepare(&format!(
-            "{FAILED_SCOPE_CTES}
+        let ids = tx
+            .prepare(&format!(
+                "{FAILED_SCOPE_CTES}
              SELECT j.asset_id FROM character_autotag_jobs j
              JOIN assets a ON a.id=j.asset_id AND a.status='normal' AND a.media_kind='image'
              WHERE j.state='failed' AND {FAILED_SCOPE_PREDICATE}
              ORDER BY j.asset_id LIMIT 200"
-        ))?
+            ))?
             .query_map([&series_id], |r| r.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         for id in &ids {
@@ -496,11 +499,91 @@ impl Library {
     }
 
     pub(super) fn recover_character_autotag(&self) -> std::result::Result<(), LibraryError> {
-        self.connection()?.execute(
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        transaction.execute(
             "UPDATE character_autotag_jobs SET state='pending',claim_id=NULL
             WHERE state='processing'",
             [],
         )?;
+        let interrupted = transaction
+            .prepare(
+                "SELECT i.target_id,i.request_revision,i.asset_id,j.state,j.cause,j.error
+                 FROM character_reference_refresh_items i
+                 LEFT JOIN character_autotag_jobs j
+                   ON j.asset_id=i.asset_id AND j.generation=i.generation
+                 WHERE i.state='processing'",
+            )?
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let now = chrono::Utc::now().timestamp();
+        for (target_id, request_revision, asset_id, state, cause, error) in interrupted {
+            if matches!(state.as_deref(), Some("pending") | Some("processing"))
+                && cause.as_deref() == Some("reconsideration")
+            {
+                continue;
+            }
+            let failed = state.as_deref() == Some("failed");
+            let error = failed.then(|| {
+                error.unwrap_or_else(|| "중단된 과거 이미지 갱신 작업이 실패했습니다.".into())
+            });
+            transaction.execute(
+                "UPDATE character_reference_refresh_items
+                 SET state=?4,error=?5,updated_at=?6
+                 WHERE target_id=?1 AND request_revision=?2 AND asset_id=?3 AND state='processing'",
+                params![
+                    target_id,
+                    request_revision,
+                    asset_id,
+                    if failed { "failed" } else { "superseded" },
+                    error,
+                    now
+                ],
+            )?;
+            transaction.execute(
+                "UPDATE character_reference_refreshes
+                 SET visited_count=visited_count+1,
+                     failure_count=failure_count+?3,
+                     last_error=CASE WHEN ?3=1 THEN ?4 ELSE last_error END,
+                     updated_at=?5
+                 WHERE target_id=?1 AND request_revision=?2",
+                params![target_id, request_revision, i64::from(failed), error, now],
+            )?;
+            let remaining: i64 = transaction.query_row(
+                "SELECT COUNT(*) FROM character_reference_refresh_items
+                 WHERE target_id=?1 AND request_revision=?2 AND state IN ('pending','processing')",
+                params![target_id, request_revision],
+                |row| row.get(0),
+            )?;
+            let discovery_complete: bool = transaction.query_row(
+                "SELECT discovery_complete FROM character_reference_refreshes
+                 WHERE target_id=?1 AND request_revision=?2",
+                params![target_id, request_revision],
+                |row| row.get(0),
+            )?;
+            if remaining == 0 && discovery_complete {
+                transaction.execute(
+                    "UPDATE character_reference_refreshes
+                     SET state=CASE WHEN failure_count>0 THEN 'failed' ELSE 'completed' END,completed_at=?3,updated_at=?3
+                     WHERE target_id=?1 AND request_revision=?2",
+                    params![
+                        target_id,
+                        request_revision,
+                        now
+                    ],
+                )?;
+            }
+        }
+        transaction.commit()?;
         Ok(())
     }
 
@@ -511,7 +594,12 @@ impl Library {
         let id: Option<String> = transaction
             .query_row(
                 "SELECT asset_id FROM character_autotag_jobs
-            WHERE state='pending' AND retry_at<=?1 ORDER BY priority,updated_at,asset_id LIMIT 1",
+            WHERE state='pending' AND retry_at<=?1
+              AND (cause<>'reconsideration' OR NOT EXISTS(
+                  SELECT 1 FROM character_autotag_control
+                  WHERE singleton=1 AND reference_refresh_paused=1
+              ))
+            ORDER BY priority,updated_at,asset_id LIMIT 1",
                 [chrono::Utc::now().timestamp()],
                 |r| r.get(0),
             )
@@ -552,26 +640,12 @@ impl Library {
         runtime: &str,
     ) -> Result<Context> {
         Self::check_character_autotag_claim(connection, job)?;
-        // A registered descendant series owns its own scope, even when another
-        // registered series is an ancestor (including a disabled ancestor).
-        let nearest_series: Option<String>=connection.query_row("WITH RECURSIVE lineage(id,parent_id,depth) AS (
-            SELECT c.id,c.parent_id,0 FROM classification_entries c JOIN asset_classifications a ON a.classification_id=c.id WHERE a.asset_id=?1
-            UNION ALL SELECT c.id,c.parent_id,p.depth+1 FROM classification_entries c JOIN lineage p ON c.id=p.parent_id)
-            SELECT l.id FROM lineage l JOIN character_series s ON s.classification_id=l.id ORDER BY l.depth,l.id LIMIT 1",
-            [&job.asset_id],|r|r.get(0)).optional()?;
-        let originals = in_originals_scope(connection, &job.asset_id)?;
-        let excluded = if let Some(series) = nearest_series.as_ref() {
-            connection.query_row(
-                "SELECT EXISTS(SELECT 1 FROM character_series_asset_exclusions WHERE series_id=?1 AND asset_id=?2)",
-                params![series,job.asset_id], |r| r.get(0))?
-        } else { false };
-        let ids = if originals || excluded {
-            Vec::new()
-        } else {
-            connection.prepare("SELECT t.id FROM character_targets t JOIN character_series s ON s.classification_id=t.series_classification_id
-                WHERE s.auto_classify=1 AND t.enabled=1 AND t.manual_only=0 AND (?1 IS NULL OR s.classification_id=?1) ORDER BY t.id")?
-                .query_map([nearest_series],|r|r.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?
-        };
+        let scope = super::character_scope::resolve_character_scope(connection, &job.asset_id)?
+            .ok_or(Error::Stale)?;
+        let ids = connection.prepare("SELECT t.id FROM character_targets t
+                WHERE t.series_classification_id=?1 AND t.enabled=1 AND t.manual_only=0 ORDER BY t.id")?
+            .query_map([&scope.series_classification_id],|r|r.get::<_,String>(0))?
+            .collect::<std::result::Result<Vec<_>,_>>()?;
         let mut targets = Vec::new();
         let mut invalid_reference_targets = Vec::new();
         for id in ids {
@@ -622,7 +696,7 @@ impl Library {
                 .collect::<std::result::Result<Vec<_>,_>>()?;
             series_lineage.push((series.clone(), rows));
         }
-        let scope = json!({"classificationIds":job.classification_ids,"lineage":lineage,"seriesLineage":series_lineage,"invalidReferenceTargetIds":invalid_reference_targets});
+        let scope = json!({"classificationIds":job.classification_ids,"registeredSeriesId":scope.series_classification_id,"lineage":lineage,"seriesLineage":series_lineage,"invalidReferenceTargetIds":invalid_reference_targets});
         let recognition=targets.iter().map(|t|json!({"id":t.id,"fingerprint":t.fingerprint,"learnedReferences":t.usable_learned_references().collect::<Vec<_>>()})).collect::<Vec<_>>();
         let encoded = serde_json::to_vec(
             &json!({"assetId":job.asset_id,"hash":job.content_hash,"path":job.relative_path,
@@ -697,7 +771,8 @@ impl Library {
                 .ok_or(Error::Stale)?;
             let mut row = prediction.result.clone();
             if let Some(evidence) = row.evidence.as_mut() {
-                evidence["learnedReferences"] = json!(target.usable_learned_references().collect::<Vec<_>>());
+                evidence["learnedReferences"] =
+                    json!(target.usable_learned_references().collect::<Vec<_>>());
                 evidence["runtimeFingerprint"] = json!(context.runtime);
                 evidence["automaticScope"] = json!(true);
             }
@@ -707,38 +782,6 @@ impl Library {
         connection.execute("UPDATE character_autotag_jobs SET state='completed',review_state=?2,claim_id=NULL,error=NULL WHERE asset_id=?1",
             params![job.asset_id,review.stored()])?;
         Ok(id)
-    }
-
-    /// Bounded selection by asset disposition, never by losing target predictions.
-    /// Includes checkpoints created before a series/target was registered.
-    pub(super) fn reconsider_character_autotag(
-        &self,
-        series_id: &str,
-        after: Option<&str>,
-        limit: usize,
-    ) -> Result<Vec<String>> {
-        if !(1..=200).contains(&limit) {
-            return Err(Error::Invalid("재검토 묶음 크기가 올바르지 않습니다."));
-        }
-        let mut connection = self.connection()?;
-        let transaction = connection.transaction()?;
-        let ids=transaction.prepare("WITH RECURSIVE descendants(id) AS (
-            SELECT id FROM classification_entries WHERE id=?1 UNION SELECT c.id FROM classification_entries c JOIN descendants s ON c.parent_id=s.id),
-            ancestors(id,parent_id) AS (SELECT id,parent_id FROM classification_entries WHERE id=?1
-            UNION SELECT c.id,c.parent_id FROM classification_entries c JOIN ancestors p ON c.id=p.parent_id)
-            SELECT j.asset_id FROM character_autotag_jobs j JOIN assets a ON a.id=j.asset_id
-            WHERE j.review_state IN ('awaiting_candidates','unresolved','partially_resolved','failed')
-            AND j.state IN ('completed','failed') AND a.status='normal' AND (?2 IS NULL OR j.asset_id>?2)
-            AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=j.asset_id
-            AND (ac.classification_id IN (SELECT id FROM descendants) OR ac.classification_id IN (SELECT id FROM ancestors WHERE parent_id IS NULL)))
-            ORDER BY j.asset_id LIMIT ?3")?
-            .query_map(params![series_id,after,limit as i64], |r|r.get::<_,String>(0))?
-            .collect::<std::result::Result<Vec<_>,_>>()?;
-        for id in &ids {
-            enqueue(&transaction, id, Cause::Reconsideration)?;
-        }
-        transaction.commit()?;
-        Ok(ids)
     }
 }
 

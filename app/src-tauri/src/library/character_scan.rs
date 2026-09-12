@@ -576,8 +576,8 @@ impl Library {
                         if current.hash != input.hash {
                             return Err(Error::Stale);
                         }
-                    self.verify_input(&current)
-                }) {
+                        self.verify_input(&current)
+                    }) {
                     Ok(()) => {
                         row.state = if event["passed"] == true {
                             "recommended"
@@ -743,6 +743,16 @@ fn worker_error(event: &Value) -> Error {
 #[path = "character_scan_tests.rs"]
 mod tests;
 
+/// Automatic acceptance needs stronger agreement. Measured on 1,119 human-reviewed pairs
+/// (2026-09-11), the accepted rate by matched-reference count is flat and poor from two
+/// through four (15.4% / 13.5% / 13.8%) and only becomes trustworthy at six (97.0%).
+/// Five sits at 44.2%, so six is the first threshold worth trusting.
+/// Consequence accepted by the user: a target with only five anchors can never reach this,
+/// so the 31 of 37 targets without learned references stop auto-accepting entirely. Extra
+/// learned references are what raise the ceiling; `시노사와 히로` reaches 89% at 25 refs.
+/// The extra caution only moves pairs to review; it never removes them from the series.
+pub(super) const AUTOMATIC_REFERENCE_SUPPORT: usize = 6;
+
 pub(super) fn automatic_evidence(evidence: Option<&Value>) -> bool {
     let Some(e) = evidence else {
         return false;
@@ -750,7 +760,8 @@ pub(super) fn automatic_evidence(evidence: Option<&Value>) -> bool {
     if e["passed"] != true || e["wholeFallback"] == true {
         return false;
     }
-    evidence_regions(evidence, 3).is_some_and(|regions| !regions.is_empty())
+    evidence_regions(evidence, AUTOMATIC_REFERENCE_SUPPORT)
+        .is_some_and(|regions| !regions.is_empty())
 }
 
 // Compare geometry as well as crop indexes: duplicate/overlapping detections are one person.

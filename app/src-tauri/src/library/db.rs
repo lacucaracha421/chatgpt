@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 65;
+pub(crate) const SCHEMA_VERSION: i64 = 68;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -299,9 +299,8 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
             ))?;
         }
         if version <= 58 {
-            transaction.execute_batch(include_str!(
-                "../../migrations/0059_manual_characters.sql"
-            ))?;
+            transaction
+                .execute_batch(include_str!("../../migrations/0059_manual_characters.sql"))?;
         }
         if version <= 59 {
             transaction.execute_batch(include_str!(
@@ -331,6 +330,21 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         if version <= 64 {
             transaction.execute_batch(include_str!(
                 "../../migrations/0065_character_superseded_review_state.sql"
+            ))?;
+        }
+        if version <= 65 {
+            transaction.execute_batch(include_str!(
+                "../../migrations/0066_quiet_character_workflow.sql"
+            ))?;
+        }
+        if version <= 66 {
+            transaction.execute_batch(include_str!(
+                "../../migrations/0067_character_reference_refresh_pause.sql"
+            ))?;
+        }
+        if version <= 67 {
+            transaction.execute_batch(include_str!(
+                "../../migrations/0068_character_reference_refresh_cursor.sql"
             ))?;
         }
         // Validate before commit so a failed migration leaves the old DB intact.
@@ -412,15 +426,32 @@ mod tests {
 
         migrate_to_latest(&mut connection, 57).unwrap();
 
-        assert_eq!(connection.query_row(
-            "SELECT classification_id FROM classification_roles WHERE role='originals'",
-            [], |row| row.get::<_, String>(0),
-        ).unwrap(), "legacy-originals");
-        assert_eq!(connection.query_row(
-            "SELECT COUNT(*) FROM classification_entries WHERE id='lakomics-originals'",
-            [], |row| row.get::<_, i64>(0),
-        ).unwrap(), 0);
-        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT classification_id FROM classification_roles WHERE role='originals'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "legacy-originals"
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM classification_entries WHERE id='lakomics-originals'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
     }
 
     #[test]
@@ -448,12 +479,43 @@ mod tests {
                   ('e-safe','target','series','fingerprint','{"assetId":"safe","contentHash":"safe-hash","state":"recommended","evidence":{"queryBoxes":[[0,0,10,10],[20,0,30,10]],"referenceHashes":["other","a","b","c","d"]},"error":null}');
         "#).unwrap();
 
-        migrate_to_latest(&mut connection, 59).unwrap();
+        connection
+            .execute_batch(include_str!(
+                "../../migrations/0060_character_correctness.sql"
+            ))
+            .unwrap();
 
-        assert_eq!(connection.query_row("SELECT review_state FROM character_autotag_jobs WHERE asset_id='affected'", [], |row| row.get::<_, String>(0)).unwrap(), "partially_resolved");
-        assert_eq!(connection.query_row("SELECT review_state FROM character_autotag_jobs WHERE asset_id='safe'", [], |row| row.get::<_, String>(0)).unwrap(), "resolved");
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT review_state FROM character_autotag_jobs WHERE asset_id='affected'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "partially_resolved"
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT review_state FROM character_autotag_jobs WHERE asset_id='safe'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "resolved"
+        );
         assert_eq!(connection.query_row("SELECT COUNT(*) FROM character_autotag_reconsideration WHERE series_id='series'", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
-        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
+
+        migrate_to_latest(&mut connection, 60).unwrap();
+
+        assert_eq!(connection.query_row("SELECT COUNT(*) FROM character_autotag_reconsideration WHERE series_id='series'", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
     }
 
     #[test]
@@ -480,12 +542,22 @@ mod tests {
             PRAGMA user_version=60;
         "#).unwrap();
 
-        migrate_to_latest(&mut connection, 60).unwrap();
+        connection
+            .execute_batch(include_str!(
+                "../../migrations/0061_character_correctness_forward_repair.sql"
+            ))
+            .unwrap();
 
-        assert_eq!(connection.query_row(
-            "SELECT classification_id FROM classification_roles WHERE role='originals'",
-            [], |row| row.get::<_, String>(0),
-        ).unwrap(), "lakomics-originals");
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT classification_id FROM classification_roles WHERE role='originals'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "lakomics-originals"
+        );
         assert_eq!(connection.query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name LIKE 'character_base_reference_%'",
             [], |row| row.get::<_, i64>(0),
@@ -495,11 +567,47 @@ mod tests {
             [], |row| row.get(0),
         ).unwrap();
         assert!(!target_trigger.contains("UPDATE OF revision"));
-        assert_eq!(connection.query_row("SELECT priority FROM character_autotag_jobs WHERE asset_id='manual'", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
-        assert_eq!(connection.query_row("SELECT priority FROM character_autotag_jobs WHERE asset_id='affected'", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
-        assert_eq!(connection.query_row("SELECT review_state FROM character_autotag_jobs WHERE asset_id='affected'", [], |row| row.get::<_, String>(0)).unwrap(), "partially_resolved");
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT priority FROM character_autotag_jobs WHERE asset_id='manual'",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT priority FROM character_autotag_jobs WHERE asset_id='affected'",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT review_state FROM character_autotag_jobs WHERE asset_id='affected'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "partially_resolved"
+        );
         assert_eq!(connection.query_row("SELECT COUNT(*) FROM character_autotag_reconsideration WHERE series_id='series'", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
-        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
+
+        migrate_to_latest(&mut connection, 61).unwrap();
+
+        assert_eq!(connection.query_row("SELECT COUNT(*) FROM character_autotag_reconsideration WHERE series_id='series'", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
     }
 
     #[test]
@@ -522,19 +630,53 @@ mod tests {
             INSERT INTO character_autotag_predictions(evidence_id,target_id,series_id,target_fingerprint,result_json)
             VALUES('e-affected','target','series','fingerprint','{"assetId":"affected","contentHash":"same-hash","state":"recommended","evidence":{"queryBoxes":[[0,0,10,10],[20,0,30,10]],"referenceHashes":["same-hash","a","b","c","d"]},"error":null}');
         "#).unwrap();
-        connection.execute_batch(include_str!("../../migrations/0060_character_correctness.sql")).unwrap();
-        let before: i64 = connection.query_row(
-            "SELECT revision FROM character_autotag_reconsideration WHERE series_id='series'", [], |row| row.get(0),
-        ).unwrap();
+        connection
+            .execute_batch(include_str!(
+                "../../migrations/0060_character_correctness.sql"
+            ))
+            .unwrap();
+        let before: i64 = connection
+            .query_row(
+                "SELECT revision FROM character_autotag_reconsideration WHERE series_id='series'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
 
-        migrate_to_latest(&mut connection, 60).unwrap();
+        connection
+            .execute_batch(include_str!(
+                "../../migrations/0061_character_correctness_forward_repair.sql"
+            ))
+            .unwrap();
 
-        let after: i64 = connection.query_row(
-            "SELECT revision FROM character_autotag_reconsideration WHERE series_id='series'", [], |row| row.get(0),
-        ).unwrap();
-        assert_eq!(after, before);
-        assert_eq!(connection.query_row("SELECT review_state FROM character_autotag_jobs WHERE asset_id='affected'", [], |row| row.get::<_, String>(0)).unwrap(), "partially_resolved");
-        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
+        let after_v61: i64 = connection
+            .query_row(
+                "SELECT revision FROM character_autotag_reconsideration WHERE series_id='series'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(after_v61, before);
+
+        migrate_to_latest(&mut connection, 61).unwrap();
+
+        assert_eq!(connection.query_row("SELECT COUNT(*) FROM character_autotag_reconsideration WHERE series_id='series'", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT review_state FROM character_autotag_jobs WHERE asset_id='affected'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "partially_resolved"
+        );
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
     }
 
     #[test]
@@ -546,21 +688,35 @@ mod tests {
             "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='character_autotag_predictions_target_scope'",
             [], |row| row.get::<_, i64>(0),
         ).unwrap(), 1);
-        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
     }
 
     #[test]
     fn v63_adds_recommended_review_partial_index() {
         let mut connection = Connection::open_in_memory().unwrap();
         historical_schema(&mut connection, 62);
-        connection.execute_batch(include_str!("../../migrations/0063_character_review_performance.sql")).unwrap();
+        connection
+            .execute_batch(include_str!(
+                "../../migrations/0063_character_review_performance.sql"
+            ))
+            .unwrap();
         let sql: String = connection.query_row(
             "SELECT sql FROM sqlite_master WHERE type='index' AND name='character_autotag_predictions_recommended'",
             [], |row| row.get(0),
         ).unwrap();
         assert!(sql.contains("target_fingerprint"));
         assert!(sql.contains("json_extract(result_json,'$.state')='recommended'"));
-        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 63);
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            63
+        );
     }
 
     #[test]
@@ -574,7 +730,12 @@ mod tests {
         ).unwrap();
         assert!(sql.contains("generation INTEGER NOT NULL"));
         assert!(sql.contains("source_generation INTEGER NOT NULL"));
-        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
     }
 
     #[test]
@@ -595,26 +756,209 @@ mod tests {
         migrate_to_latest(&mut connection, 64).unwrap();
 
         // The terminal row now agrees with its state.
-        assert_eq!(connection.query_row(
-            "SELECT review_state FROM character_autotag_jobs WHERE asset_id='stale'",
-            [], |row| row.get::<_, String>(0),
-        ).unwrap(), "superseded");
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT review_state FROM character_autotag_jobs WHERE asset_id='stale'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "superseded"
+        );
         // Completed work keeps its own review state; this is not a blanket rewrite.
-        assert_eq!(connection.query_row(
-            "SELECT review_state FROM character_autotag_jobs WHERE asset_id='done'",
-            [], |row| row.get::<_, String>(0),
-        ).unwrap(), "resolved");
-        assert_eq!(connection.query_row(
-            "SELECT review_state FROM character_autotag_jobs WHERE asset_id='open'",
-            [], |row| row.get::<_, String>(0),
-        ).unwrap(), "unresolved");
-        assert_eq!(connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT review_state FROM character_autotag_jobs WHERE asset_id='done'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "resolved"
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT review_state FROM character_autotag_jobs WHERE asset_id='open'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "unresolved"
+        );
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
+    }
+
+    #[test]
+    fn v66_preserves_character_history_and_stops_implicit_reconsideration() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        historical_schema(&mut connection, 65);
+        connection.execute_batch(r#"
+            INSERT INTO classification_entries(id,kind,name,parent_id,created_at)
+            VALUES('root','root','Root',NULL,'now'),('series','tag','Series','root','now');
+            INSERT INTO character_series(classification_id,auto_classify) VALUES('series',1);
+            INSERT INTO character_targets(id,series_classification_id,display_name,enabled,manual_only,created_at,updated_at)
+            VALUES('target','series','A',1,0,'now','now');
+            INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at,status)
+            VALUES('query','query-hash','image','query.png','assets/query.png','thumbnails/query.webp',1,1,1,'now','normal'),
+                  ('ref','ref-hash','image','ref.png','assets/ref.png','thumbnails/ref.webp',1,1,1,'now','normal'),
+                  ('ref-new','ref-new-hash','image','ref-new.png','assets/ref-new.png','thumbnails/ref-new.webp',1,1,1,'now','normal');
+            INSERT INTO asset_classifications VALUES('query','series'),('ref','series'),('ref-new','series');
+            INSERT INTO character_learned_references(target_id,asset_id,asset_hash,created_at)
+            VALUES('target','ref','ref-hash','now');
+            INSERT INTO character_decisions(target_id,asset_id,source_asset_id,asset_hash,decision,target_fingerprint,reference_snapshot,origin,created_at)
+            VALUES('target','query','query','query-hash','accepted','fingerprint','{}','manual','now');
+            INSERT INTO character_autotag_jobs(asset_id,generation,source_generation,content_hash,relative_path,classification_ids,state,review_state,priority,cause,updated_at)
+            VALUES('query',1,1,'query-hash','assets/query.png','["series"]','completed','resolved',1,'ingestion','now');
+            INSERT INTO character_autotag_evidence(id,asset_id,generation,source_generation,content_hash,context_hash,runtime_fingerprint,scope_json,unresolved_regions,created_at)
+            VALUES('evidence','query',1,1,'query-hash','context','runtime','{}','[]','now');
+            INSERT INTO character_autotag_predictions(evidence_id,target_id,series_id,target_fingerprint,result_json)
+            VALUES('evidence','target','series','fingerprint','{"assetId":"query","contentHash":"query-hash","state":"recommended","error":null}');
+        "#).unwrap();
+
+        migrate_to_latest(&mut connection, 65).unwrap();
+
+        assert_eq!(
+            connection
+                .query_row("SELECT COUNT(*) FROM character_relations", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT COUNT(*) FROM character_decisions", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM character_autotag_evidence",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM character_autotag_predictions",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM character_autotag_reconsideration",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
+        assert_eq!(connection.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='character_reference_refreshes'", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
+
+        connection.execute("INSERT INTO character_learned_references(target_id,asset_id,asset_hash,created_at) VALUES('target','ref-new','ref-new-hash','later')", []).unwrap();
+        connection
+            .execute(
+                "UPDATE character_targets SET enabled=0 WHERE id='target'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM character_autotag_reconsideration",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn character_reference_refresh_pause_v67_clears_hidden_legacy_worker_pause() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        historical_schema(&mut connection, 66);
+        connection
+            .execute(
+                "UPDATE character_autotag_control SET paused=1 WHERE singleton=1",
+                [],
+            )
+            .unwrap();
+
+        migrate_to_latest(&mut connection, 66).unwrap();
+
+        let (worker_paused, refresh_paused): (bool, bool) = connection
+            .query_row(
+                "SELECT paused,reference_refresh_paused FROM character_autotag_control WHERE singleton=1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert!(!worker_paused);
+        assert!(!refresh_paused);
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
+        assert!(!connection
+            .prepare("PRAGMA foreign_key_check")
+            .unwrap()
+            .exists([])
+            .unwrap());
+    }
+
+    #[test]
+    fn v68_marks_eagerly_created_refresh_requests_as_fully_discovered() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        historical_schema(&mut connection, 67);
+        connection.execute_batch(
+            r#"
+            INSERT INTO classification_entries(id,kind,name,parent_id,created_at)
+            VALUES('root','root','Root',NULL,'now'),('series','tag','Series','root','now');
+            INSERT INTO character_series(classification_id,auto_classify) VALUES('series',1);
+            INSERT INTO character_targets(id,series_classification_id,display_name,enabled,manual_only,created_at,updated_at)
+            VALUES('target','series','A',1,0,'now','now');
+            INSERT INTO character_reference_refreshes(
+                target_id,series_classification_id,target_revision,request_revision,
+                requested_reference_set_hash,requested_reference_hashes_json,added_reference_hashes_json,
+                state,requested_at,updated_at)
+            VALUES('target','series',1,1,'hash','[]','[]','running',1,1);
+            "#,
+        )
+        .unwrap();
+
+        migrate_to_latest(&mut connection, 67).unwrap();
+
+        assert!(connection
+            .query_row(
+                "SELECT discovery_complete FROM character_reference_refreshes WHERE target_id='target'",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap());
     }
 
     #[test]
     fn character_autotag_migration_does_not_enqueue_history() {
-        let mut connection=Connection::open_in_memory().unwrap();
-        historical_schema(&mut connection,49);
+        let mut connection = Connection::open_in_memory().unwrap();
+        historical_schema(&mut connection, 49);
         connection.execute_batch("INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at)
             VALUES('covered','hash','image','covered.png','assets/covered.png','thumbnails/covered.webp',1,1,1,'before');").unwrap();
         migrate_to_latest(&mut connection, 49).unwrap();
@@ -689,14 +1033,26 @@ mod tests {
         historical_schema(&mut connection, 56);
         migrate_to_latest(&mut connection, 56).unwrap();
         assert_eq!(
-            connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(),
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
             SCHEMA_VERSION
         );
         assert_eq!(
-            connection.query_row("SELECT COUNT(*) FROM character_series_suggestion_dismissals", [], |row| row.get::<_, i64>(0)).unwrap(),
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM character_series_suggestion_dismissals",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
             0
         );
-        assert!(!connection.prepare("PRAGMA foreign_key_check").unwrap().exists([]).unwrap());
+        assert!(!connection
+            .prepare("PRAGMA foreign_key_check")
+            .unwrap()
+            .exists([])
+            .unwrap());
     }
 
     #[test]

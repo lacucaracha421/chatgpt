@@ -1,82 +1,172 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { useCharacterAutomation, type AutomaticCharacterApi, type IncrementalStatus } from "./useCharacterAutomation";
-afterEach(() => { cleanup(); vi.useRealTimers(); });
-const idle: IncrementalStatus = { running: true, paused: false, pending: 0, pendingAutomatic: 0, pendingLegacy: 0, pendingManual: 0, pendingReconsideration: 0, completed: 0, confirmed: 0, activeAssetId: null, activeSeriesName: null, activeTargetName: null, activeTargetIndex: 0, activeReconsideration: false, activeCause: null, total: 0, compared: 0, error: null };
-it("refresh and target changes never launch target scans or create native work", async () => {
- vi.useFakeTimers();
- const api: AutomaticCharacterApi = {status: vi.fn().mockResolvedValue(idle),pause:vi.fn().mockResolvedValue(undefined)};
- const changed = vi.fn();
- const { rerender } = renderHook(() => useCharacterAutomation(changed,api),{initialProps:{version:0}});
- await act(async()=>{await vi.advanceTimersByTimeAsync(100);});
- rerender({version:1});rerender({version:20});
- await act(async()=>{await vi.advanceTimersByTimeAsync(6000);});
- expect(api.pause).not.toHaveBeenCalled();expect(changed).not.toHaveBeenCalled();
+
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
 });
-it("publishes one refresh per durable completion and does not cancel on navigation", async () => {
- vi.useFakeTimers();let state=idle;
- const api:AutomaticCharacterApi={status:vi.fn(async()=>state),pause:vi.fn().mockResolvedValue(undefined)};
- const changed=vi.fn();const {unmount}=renderHook(()=>useCharacterAutomation(changed,api));
- await act(async()=>{await vi.advanceTimersByTimeAsync(100);});
- state={...idle,completed:1,confirmed:1};
- await act(async()=>{await vi.advanceTimersByTimeAsync(6000);});
- expect(changed).toHaveBeenCalledTimes(1);unmount();expect(api.pause).not.toHaveBeenCalled();
+
+const idle = {
+  running: true,
+  workActive: false,
+  paused: false,
+  completed: 0,
+  confirmed: 0,
+  historyRefreshActive: false,
+  persistentError: null,
+} satisfies IncrementalStatus;
+
+it("keeps normal background scheduler details out of the renderer contract", async () => {
+  vi.useFakeTimers();
+  const api: AutomaticCharacterApi = {
+    status: vi.fn().mockResolvedValue({
+      ...idle,
+      workActive: true,
+      activeAssetId: "image",
+      pending: 12,
+      activeSeriesName: "젠레스",
+    }),
+    pause: vi.fn(),
+  };
+  const { result } = renderHook(() => useCharacterAutomation(vi.fn(), api));
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(100);
+  });
+
+  expect(result.current.historyRefreshActive).toBe(false);
+  expect(result.current.persistentError).toBeNull();
+  expect(result.current).not.toHaveProperty("progress");
+  expect(result.current).not.toHaveProperty("queuePending");
+  expect(result.current).not.toHaveProperty("activeSeriesName");
 });
-it("pause and resume control the native queue without renderer-owned scans",async()=>{
- vi.useFakeTimers();const api:AutomaticCharacterApi={status:vi.fn().mockResolvedValue({...idle,paused:true}),pause:vi.fn().mockResolvedValue(undefined)};
- const {result}=renderHook(()=>useCharacterAutomation(vi.fn(),api));
- await act(async()=>{await vi.advanceTimersByTimeAsync(100);});expect(result.current.paused).toBe(true);
- await act(async()=>result.current.resume());expect(api.pause).toHaveBeenCalledWith(false);
- await act(async()=>result.current.pause());expect(api.pause).toHaveBeenCalledWith(true);
+
+it("publishes one revision per durable completion and does not cancel on navigation", async () => {
+  vi.useFakeTimers();
+  let state = idle;
+  const api: AutomaticCharacterApi = {
+    status: vi.fn(async () => state),
+    pause: vi.fn(),
+  };
+  const changed = vi.fn();
+  const { result, unmount } = renderHook(() => useCharacterAutomation(changed, api));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(100);
+  });
+
+  state = { ...state, completed: 1, confirmed: 1 };
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(6000);
+  });
+
+  expect(changed).toHaveBeenCalledWith(true);
+  expect(result.current.revision).toBe(1);
+  unmount();
+  expect(api.pause).not.toHaveBeenCalled();
 });
-it("backs off when idle and preserves an unchanged progress object", async () => {
- vi.useFakeTimers();let state=idle;
- const api:AutomaticCharacterApi={status:vi.fn(async()=>state),pause:vi.fn()};
- const {result}=renderHook(()=>useCharacterAutomation(vi.fn(),api));
- await act(async()=>{await vi.advanceTimersByTimeAsync(4000);});
- expect(api.status).toHaveBeenCalledTimes(1);
- state={...idle,activeAssetId:"image",total:10,compared:1};
- await act(async()=>{await vi.advanceTimersByTimeAsync(1100);});
- const progress=result.current.progress;
- await act(async()=>{await vi.advanceTimersByTimeAsync(2000);});
- expect(result.current.progress).toBe(progress);
- expect(result.current.queuePending).toBe(0);
+
+it("keeps a persistent owner failure dismissible and provides runtime setup", async () => {
+  vi.useFakeTimers();
+  const setup = vi.fn().mockResolvedValue(undefined);
+  const api: AutomaticCharacterApi = {
+    status: vi.fn().mockResolvedValue({
+      ...idle,
+      running: false,
+      persistentError: "런타임을 시작하지 못했습니다.",
+    }),
+    pause: vi.fn(),
+    setup,
+  };
+  const { result } = renderHook(() => useCharacterAutomation(vi.fn(), api));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(100);
+  });
+
+  expect(result.current.persistentError).toContain("런타임을 시작하지 못했습니다.");
+  act(() => result.current.dismissError());
+  expect(result.current.persistentError).toBeNull();
+  await act(async () => {
+    await result.current.setupRuntime();
+  });
+  expect(setup).toHaveBeenCalledTimes(1);
 });
-it("exposes the active series, character and re-evaluation state", async () => {
- vi.useFakeTimers();
- const api:AutomaticCharacterApi={status:vi.fn().mockResolvedValue({...idle,activeAssetId:"image",activeSeriesName:"젠레스",activeTargetName:"아리아",activeTargetIndex:2,activeReconsideration:true,activeCause:"reconsideration",total:3,compared:1,pending:28,pendingReconsideration:28}),pause:vi.fn()};
- const {result}=renderHook(()=>useCharacterAutomation(vi.fn(),api));
- await act(async()=>{await vi.advanceTimersByTimeAsync(100);});
- expect(result.current.activeSeriesName).toBe("젠레스");
- expect(result.current.activeTargetName).toBe("아리아");
- expect(result.current.activeTargetIndex).toBe(2);
- expect(result.current.activeReconsideration).toBe(true);
- expect(result.current.activeCause).toBe("reconsideration");
- expect(result.current.queuePending).toBe(28);
- expect(result.current.queueReconsideration).toBe(28);
+
+it("keeps the runtime error visible when setup is cancelled", async () => {
+  vi.useFakeTimers();
+  const setup = vi.fn().mockResolvedValue(false);
+  const api: AutomaticCharacterApi = {
+    status: vi.fn().mockResolvedValue({
+      ...idle,
+      running: false,
+      persistentError: "분석 환경 설정이 필요합니다.",
+    }),
+    pause: vi.fn(),
+    setup,
+  };
+  const { result } = renderHook(() => useCharacterAutomation(vi.fn(), api));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(100);
+  });
+
+  await act(async () => {
+    await result.current.setupRuntime();
+  });
+
+  expect(setup).toHaveBeenCalledTimes(1);
+  expect(result.current.persistentError).toContain("분석 환경 설정이 필요합니다.");
 });
-it("exposes pending work as the current queue rather than total progress", async () => {
- vi.useFakeTimers();
- const api:AutomaticCharacterApi={status:vi.fn().mockResolvedValue({...idle,pending:31,pendingManual:4,pendingReconsideration:27}),pause:vi.fn()};
- const {result}=renderHook(()=>useCharacterAutomation(vi.fn(),api));
- await act(async()=>{await vi.advanceTimersByTimeAsync(100);});
- expect(result.current.progress).toBeNull();
- expect(result.current.queuePending).toBe(31);
- expect(result.current.queueManual).toBe(4);
- expect(result.current.queueReconsideration).toBe(27);
+
+it("controls pause and resume for an explicit history refresh", async () => {
+  vi.useFakeTimers();
+  const pause = vi.fn().mockResolvedValue(undefined);
+  const api: AutomaticCharacterApi = {
+    status: vi.fn().mockResolvedValue({
+      ...idle,
+      historyRefreshActive: true,
+    }),
+    pause,
+  };
+  const { result } = renderHook(() => useCharacterAutomation(vi.fn(), api));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(100);
+  });
+
+  expect(result.current.historyRefreshActive).toBe(true);
+  await act(async () => {
+    result.current.pauseHistoryRefresh();
+  });
+  expect(api.pause).toHaveBeenCalledWith(true);
+  await act(async () => {
+    result.current.resumeHistoryRefresh();
+  });
+  expect(api.pause).toHaveBeenCalledWith(false);
 });
+
 it("refreshes promptly on visibility and reports whether membership changed", async () => {
- vi.useFakeTimers();let visible=false,state=idle;
- const visibility=vi.spyOn(document,"visibilityState","get").mockImplementation(()=>visible?"visible":"hidden");
- const api:AutomaticCharacterApi={status:vi.fn(async()=>state),pause:vi.fn()};
- const changed=vi.fn();renderHook(()=>useCharacterAutomation(changed,api));
- await act(async()=>{await vi.advanceTimersByTimeAsync(5000);});
- expect(api.status).toHaveBeenCalledTimes(1);
- state={...idle,completed:1};visible=true;
- await act(async()=>{document.dispatchEvent(new Event("visibilitychange"));});
- expect(api.status).toHaveBeenCalledTimes(2);expect(changed).toHaveBeenLastCalledWith(false);
- state={...idle,completed:2,confirmed:1};
- await act(async()=>{await vi.advanceTimersByTimeAsync(5000);});
- expect(changed).toHaveBeenLastCalledWith(true);
- visibility.mockRestore();
+  vi.useFakeTimers();
+  let visible = false;
+  let state = idle;
+  const visibility = vi
+    .spyOn(document, "visibilityState", "get")
+    .mockImplementation(() => (visible ? "visible" : "hidden"));
+  const api: AutomaticCharacterApi = {
+    status: vi.fn(async () => state),
+    pause: vi.fn(),
+  };
+  const changed = vi.fn();
+  renderHook(() => useCharacterAutomation(changed, api));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5000);
+  });
+  expect(api.status).toHaveBeenCalledTimes(1);
+
+  state = { ...state, completed: 1 };
+  visible = true;
+  await act(async () => {
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  expect(api.status).toHaveBeenCalledTimes(2);
+  expect(changed).toHaveBeenLastCalledWith(false);
+  visibility.mockRestore();
 });

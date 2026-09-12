@@ -28,13 +28,16 @@ export function WorkStatusCenter({
 }: WorkStatusCenterProps) {
   const [open, setOpen] = useState(false);
   const publicationJobs = Object.values(usePublicationJobs()).filter(Boolean);
-  const characterVisible = Boolean(characterAutomation.progress || characterAutomation.message || characterAutomation.paused || characterAutomation.queuePending > 0);
+  const characterVisible = Boolean(
+    characterAutomation.persistentError || characterAutomation.historyRefreshActive,
+  );
   const libraryVisible = Boolean(progress || similarityIndex?.running || similarityIndex?.failed || similarityIndex?.message);
   const activeCount = publicationJobs.filter((job) => job.running).length
-    + Number(characterAutomation.progress !== null || characterAutomation.paused || characterAutomation.queuePending > 0)
+    + Number(characterAutomation.historyRefreshActive)
     + Number(progress !== null)
     + Number(Boolean(similarityIndex?.running));
   const problemCount = publicationJobs.filter((job) => job.error).length
+    + Number(Boolean(characterAutomation.persistentError))
     + Number(Boolean(similarityIndex?.failed || similarityIndex?.message));
   const visibleCount = publicationJobs.length + Number(characterVisible) + Number(libraryVisible);
   const state = problemCount > 0 ? "attention" : activeCount > 0 ? "active" : visibleCount > 0 ? "available" : "idle";

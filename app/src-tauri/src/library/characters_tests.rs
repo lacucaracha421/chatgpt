@@ -3,7 +3,7 @@ use crate::library::{
     db,
     models::{ClassificationKind, CreateClassification, SetAssetClassification},
 };
-use std::{collections::BTreeSet, fs, path::Path};
+use std::{fs, path::Path};
 
 pub(in crate::library) struct Fixture {
     pub(in crate::library) library: Library,
@@ -73,7 +73,7 @@ impl Fixture {
         }
     }
 
-    fn target(&self, name: &str) -> Target {
+    pub(in crate::library) fn target(&self, name: &str) -> Target {
         self.library
             .save_character_target(TargetDraft {
                 description: String::new(),
@@ -210,9 +210,11 @@ fn registry_accepts_recursive_refs_and_rejects_invalid_atomic_replacement() {
 fn display_name_edit_keeps_recognition_fingerprint_and_does_not_reconsider() {
     let f = Fixture::new();
     let target = f.ready("Before");
-    f.library.connection().unwrap().execute(
-        "DELETE FROM character_autotag_reconsideration", [],
-    ).unwrap();
+    f.library
+        .connection()
+        .unwrap()
+        .execute("DELETE FROM character_autotag_reconsideration", [])
+        .unwrap();
     let mut draft = edit(&target);
     draft.display_name = "After".into();
 
@@ -221,27 +223,58 @@ fn display_name_edit_keeps_recognition_fingerprint_and_does_not_reconsider() {
     assert_eq!(updated.revision, target.revision + 1);
     assert_eq!(updated.fingerprint, target.fingerprint);
     assert_eq!(updated.display_name, "After");
-    assert_eq!(f.library.connection().unwrap().query_row(
-        "SELECT COUNT(*) FROM character_autotag_reconsideration", [], |row| row.get::<_, i64>(0),
-    ).unwrap(), 0);
+    assert_eq!(
+        f.library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM character_autotag_reconsideration",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        0
+    );
 }
 
 #[test]
-fn base_reference_change_still_reconsiders_with_revision_independent_fingerprint() {
+fn base_reference_change_updates_fingerprint_without_implicit_history() {
     let f = Fixture::new();
     let target = f.ready("A");
-    f.library.connection().unwrap().execute(
-        "DELETE FROM character_autotag_reconsideration", [],
-    ).unwrap();
+    f.library
+        .connection()
+        .unwrap()
+        .execute("DELETE FROM character_autotag_reconsideration", [])
+        .unwrap();
 
-    let changed = f.library.replace_character_references(
-        &target.id, target.revision, &["asset-0".into(), "asset-1".into(), "asset-2".into(), "asset-3".into(), "asset-5".into()],
-    ).unwrap();
+    let changed = f
+        .library
+        .replace_character_references(
+            &target.id,
+            target.revision,
+            &[
+                "asset-0".into(),
+                "asset-1".into(),
+                "asset-2".into(),
+                "asset-3".into(),
+                "asset-5".into(),
+            ],
+        )
+        .unwrap();
 
     assert_ne!(changed.fingerprint, target.fingerprint);
-    assert_eq!(f.library.connection().unwrap().query_row(
-        "SELECT COUNT(*) FROM character_autotag_reconsideration WHERE series_id=?1", [&f.series], |row| row.get::<_, i64>(0),
-    ).unwrap(), 1);
+    assert_eq!(
+        f.library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM character_autotag_reconsideration WHERE series_id=?1",
+                [&f.series],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        0
+    );
 }
 
 #[test]
@@ -355,14 +388,19 @@ fn disabled_automatic_target_still_accepts_direct_manual_membership() {
     assert!(!disabled.enabled);
     assert!(!disabled.ready);
 
-    assert_eq!(f.library.record_character_decisions(DecisionRequest {
-        target_id: disabled.id.clone(),
-        expected_fingerprint: disabled.fingerprint.clone(),
-        asset_ids: vec!["asset-5".into()],
-        decision: DecisionKind::Accepted,
-        baseline_fingerprint: None,
-        scan_id: None,
-    }).unwrap(), 1);
+    assert_eq!(
+        f.library
+            .record_character_decisions(DecisionRequest {
+                target_id: disabled.id.clone(),
+                expected_fingerprint: disabled.fingerprint.clone(),
+                asset_ids: vec!["asset-5".into()],
+                decision: DecisionKind::Accepted,
+                baseline_fingerprint: None,
+                scan_id: None,
+            })
+            .unwrap(),
+        1
+    );
     assert_eq!(
         f.library.character_relations_for_asset("asset-5").unwrap(),
         vec![disabled.id],
@@ -677,22 +715,36 @@ fn character_settings_save_rolls_back_target_changes_when_references_fail() {
     let mut draft = edit(&before);
     draft.display_name = "Should roll back".into();
 
-    assert!(f.library.save_character_settings(CharacterSettingsDraft {
-        target: draft,
-        reference_ids: vec!["asset-6".into()],
-    }, true).is_err());
+    assert!(f
+        .library
+        .save_character_settings(
+            CharacterSettingsDraft {
+                target: draft,
+                reference_ids: vec!["asset-6".into()],
+            },
+            true
+        )
+        .is_err());
 
     let after = f.library.get_character_target(&before.id).unwrap();
     assert_eq!(after.display_name, before.display_name);
     assert_eq!(after.revision, before.revision);
     assert_eq!(
-        after.references.iter().map(|reference| (&reference.asset_id, &reference.asset_hash)).collect::<Vec<_>>(),
-        before.references.iter().map(|reference| (&reference.asset_id, &reference.asset_hash)).collect::<Vec<_>>(),
+        after
+            .references
+            .iter()
+            .map(|reference| (&reference.asset_id, &reference.asset_hash))
+            .collect::<Vec<_>>(),
+        before
+            .references
+            .iter()
+            .map(|reference| (&reference.asset_id, &reference.asset_hash))
+            .collect::<Vec<_>>(),
     );
 }
 
 #[test]
-fn learned_examples_are_explicit_and_stable_across_membership_decisions() {
+fn learned_examples_are_explicit_and_stable_without_implicit_history() {
     let f = Fixture::new();
     let target = f.ready("Towa");
     let clear_reconsideration = || {
@@ -730,7 +782,7 @@ fn learned_examples_are_explicit_and_stable_across_membership_decisions() {
         .add_character_learned_references(&target.id, target.revision, &["asset-5".into()])
         .unwrap();
     assert_eq!(learned.learned_references.len(), 1);
-    assert_eq!(reconsideration_count(), 1);
+    assert_eq!(reconsideration_count(), 0);
 
     clear_reconsideration();
     f.decide(&target, &["asset-5"], DecisionKind::Rejected)
@@ -758,7 +810,7 @@ fn learned_examples_are_explicit_and_stable_across_membership_decisions() {
 }
 
 #[test]
-fn explicit_learning_changes_reconsider_once_and_is_idempotent() {
+fn explicit_learning_changes_do_not_schedule_history_and_remain_idempotent() {
     let f = Fixture::new();
     let target = f.ready("Towa");
     f.decide(&target, &["asset-5"], DecisionKind::Accepted)
@@ -786,7 +838,7 @@ fn explicit_learning_changes_reconsider_once_and_is_idempotent() {
     f.library
         .add_character_learned_references(&target.id, target.revision, &["asset-5".into()])
         .unwrap();
-    assert_eq!(count(), 1);
+    assert_eq!(count(), 0);
     clear();
     f.library
         .add_character_learned_references(&target.id, target.revision, &["asset-5".into()])
@@ -796,7 +848,7 @@ fn explicit_learning_changes_reconsider_once_and_is_idempotent() {
     f.library
         .exclude_character_reference(&target.id, target.revision, "asset-5")
         .unwrap();
-    assert_eq!(count(), 1);
+    assert_eq!(count(), 0);
     clear();
     f.library
         .exclude_character_reference(&target.id, target.revision, "asset-5")
@@ -806,7 +858,7 @@ fn explicit_learning_changes_reconsider_once_and_is_idempotent() {
     f.library
         .add_character_learned_references(&target.id, target.revision, &["asset-5".into()])
         .unwrap();
-    assert_eq!(count(), 1);
+    assert_eq!(count(), 0);
     assert_eq!(
         f.library
             .get_character_target(&target.id)
@@ -818,7 +870,7 @@ fn explicit_learning_changes_reconsider_once_and_is_idempotent() {
 }
 
 #[test]
-fn source_changes_reconsider_only_explicit_recognition_references() {
+fn source_changes_to_explicit_references_do_not_schedule_history() {
     let f = Fixture::new();
     let target = f.ready("Towa");
     f.decide(&target, &["asset-5"], DecisionKind::Accepted)
@@ -884,28 +936,65 @@ fn source_changes_reconsider_only_explicit_recognition_references() {
             [format!("{original}.tmp")],
         )
         .unwrap();
-    assert_eq!(count(), 1);
+    assert_eq!(count(), 0);
 }
 
 #[test]
 fn folder_registration_rejects_same_count_asset_replacement() {
     let f = Fixture::new();
-    let snapshot = f.library.character_folder_asset_snapshot(f.child.clone(), false).unwrap();
+    let snapshot = f
+        .library
+        .character_folder_asset_snapshot(f.child.clone(), false)
+        .unwrap();
     let connection = f.library.connection().unwrap();
-    connection.execute("DELETE FROM asset_classifications WHERE asset_id='asset-0'", []).unwrap();
-    connection.execute("INSERT INTO asset_classifications VALUES('asset-0',?1)", [&f.outside]).unwrap();
-    connection.execute("DELETE FROM asset_classifications WHERE asset_id='asset-5'", []).unwrap();
-    connection.execute("INSERT INTO asset_classifications VALUES('asset-5',?1)", [&f.child]).unwrap();
+    connection
+        .execute(
+            "DELETE FROM asset_classifications WHERE asset_id='asset-0'",
+            [],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO asset_classifications VALUES('asset-0',?1)",
+            [&f.outside],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "DELETE FROM asset_classifications WHERE asset_id='asset-5'",
+            [],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO asset_classifications VALUES('asset-5',?1)",
+            [&f.child],
+        )
+        .unwrap();
     drop(connection);
-    assert_eq!(f.library.character_folder_asset_count(f.child.clone(), false).unwrap(), snapshot.count);
+    assert_eq!(
+        f.library
+            .character_folder_asset_count(f.child.clone(), false)
+            .unwrap(),
+        snapshot.count
+    );
 
-    assert!(f.library.register_character_folder(FolderRegistration {
-        folder_id: f.child.clone(), series_id: f.series.clone(), recursive: false,
-        cleanup_folder: false, expected_count: snapshot.count,
-        expected_asset_fingerprint: snapshot.fingerprint,
-        target_id: None, expected_fingerprint: None, display_name: "Stale".into(),
-        reference_ids: vec![], thumbnail_id: None,
-    }).is_err());
+    assert!(f
+        .library
+        .register_character_folder(FolderRegistration {
+            folder_id: f.child.clone(),
+            series_id: f.series.clone(),
+            recursive: false,
+            cleanup_folder: false,
+            expected_count: snapshot.count,
+            expected_asset_fingerprint: snapshot.fingerprint,
+            target_id: None,
+            expected_fingerprint: None,
+            display_name: "Stale".into(),
+            reference_ids: vec![],
+            thumbnail_id: None,
+        })
+        .is_err());
     assert!(f.library.list_character_targets().unwrap().is_empty());
 }
 
@@ -924,7 +1013,11 @@ fn folder_registration_is_atomic_idempotent_and_preserves_memberships() {
             .unwrap(),
         6
     );
-    let asset_fingerprint = f.library.character_folder_asset_snapshot(f.child.clone(), false).unwrap().fingerprint;
+    let asset_fingerprint = f
+        .library
+        .character_folder_asset_snapshot(f.child.clone(), false)
+        .unwrap()
+        .fingerprint;
     let request = |target: Option<&Target>, count| FolderRegistration {
         folder_id: f.child.clone(),
         series_id: f.series.clone(),
@@ -947,6 +1040,10 @@ fn folder_registration_is_atomic_idempotent_and_preserves_memberships() {
         .library
         .register_character_folder(request(None, 5))
         .unwrap();
+    assert!(
+        target.manual_only,
+        "converted folders wait for an explicit reference batch before automatic recognition"
+    );
     assert_eq!(
         f.library.character_relations_for_asset("asset-0").unwrap(),
         vec![target.id.clone()]
@@ -1186,7 +1283,7 @@ fn conversion_merges_same_name_and_preserves_other_character() {
 #[test]
 fn registration_cleanup_moves_direct_assets_and_removes_only_empty_folder() {
     let f = Fixture::new();
-    let target = f
+    let result = f
         .library
         .register_character_folder(FolderRegistration {
             folder_id: f.child.clone(),
@@ -1194,7 +1291,11 @@ fn registration_cleanup_moves_direct_assets_and_removes_only_empty_folder() {
             recursive: false,
             cleanup_folder: true,
             expected_count: 5,
-            expected_asset_fingerprint: f.library.character_folder_asset_snapshot(f.child.clone(), false).unwrap().fingerprint,
+            expected_asset_fingerprint: f
+                .library
+                .character_folder_asset_snapshot(f.child.clone(), false)
+                .unwrap()
+                .fingerprint,
             target_id: None,
             expected_fingerprint: None,
             display_name: "Registered".into(),
@@ -1202,6 +1303,10 @@ fn registration_cleanup_moves_direct_assets_and_removes_only_empty_folder() {
             thumbnail_id: None,
         })
         .unwrap();
+    assert_eq!(result.linked_asset_count, 5);
+    assert_eq!(result.reference_candidate_count, 5);
+    assert!(result.source_folder_removed);
+    let target = result.target;
     assert!(target.linked_classification_id.is_none());
     assert!(!f
         .library
@@ -1212,6 +1317,15 @@ fn registration_cleanup_moves_direct_assets_and_removes_only_empty_folder() {
     assert_eq!(
         f.library.character_relations_for_asset("asset-0").unwrap(),
         vec![target.id]
+    );
+    assert_eq!(
+        f.library.connection().unwrap().query_row(
+            "SELECT COUNT(*) FROM character_autotag_jobs WHERE asset_id IN ('asset-0','asset-1','asset-2','asset-3','asset-4')",
+            [],
+            |row| row.get::<_, i64>(0),
+        ).unwrap(),
+        0,
+        "authoritative folder conversion must not enqueue recognition for moved members",
     );
 }
 
@@ -1260,7 +1374,11 @@ fn folder_registration_inherits_video_and_gif_without_using_them_as_references()
             .unwrap(),
         5
     );
-    let asset_fingerprint = f.library.character_folder_asset_snapshot(f.child.clone(), false).unwrap().fingerprint;
+    let asset_fingerprint = f
+        .library
+        .character_folder_asset_snapshot(f.child.clone(), false)
+        .unwrap()
+        .fingerprint;
     let request = |references| FolderRegistration {
         folder_id: f.child.clone(),
         series_id: f.series.clone(),
@@ -1388,232 +1506,6 @@ fn character_drop_rejects_other_series_atomically() {
 }
 
 #[test]
-fn mixed_folder_queue_rejects_same_count_asset_replacement() {
-    use super::super::character_folder_migration::QueueMixedFolderRequest;
-    let f = Fixture::new();
-    let mixed = folder(&f.library, "Stale mixed", Some(f.series.clone()));
-    f.library.save_character_series(super::super::character_hub::Series {
-        classification_id: f.series.clone(), hero_asset_id: None, auto_classify: true,
-    }).unwrap();
-    let connection = f.library.connection().unwrap();
-    for id in ["asset-5", "asset-6"] {
-        connection.execute("DELETE FROM asset_classifications WHERE asset_id=?1", [id]).unwrap();
-        connection.execute("INSERT INTO asset_classifications VALUES(?1,?2)", params![id, mixed]).unwrap();
-    }
-    drop(connection);
-    let preview = f.library.mixed_character_folder_preview(&mixed).unwrap();
-
-    let connection = f.library.connection().unwrap();
-    connection.execute("DELETE FROM asset_classifications WHERE asset_id='asset-5'", []).unwrap();
-    connection.execute("INSERT INTO asset_classifications VALUES('asset-5',?1)", [&f.series]).unwrap();
-    connection.execute("DELETE FROM asset_classifications WHERE asset_id='asset-4'", []).unwrap();
-    connection.execute("INSERT INTO asset_classifications VALUES('asset-4',?1)", [&mixed]).unwrap();
-    drop(connection);
-    let changed = f.library.mixed_character_folder_preview(&mixed).unwrap();
-    assert_eq!((changed.total_count, changed.image_count), (preview.total_count, preview.image_count));
-    assert_ne!(changed.asset_fingerprint, preview.asset_fingerprint);
-
-    assert!(f.library.queue_mixed_character_folder(QueueMixedFolderRequest {
-        folder_id: mixed, series_id: f.series.clone(),
-        expected_total_count: preview.total_count, expected_image_count: preview.image_count,
-        expected_asset_fingerprint: preview.asset_fingerprint,
-    }).is_err());
-}
-
-#[test]
-fn mixed_folder_migration_queues_images_creates_group_and_removes_empty_source() {
-    use super::super::character_folder_migration::{
-        FinalizeMixedFolderRequest, QueueMixedFolderRequest,
-    };
-    let f = Fixture::new();
-    let mixed = folder(&f.library, "Pair folder", Some(f.series.clone()));
-    let a = f.ready("A");
-    let b = f.ready("B");
-    let connection = f.library.connection().unwrap();
-    for id in ["asset-5", "asset-6"] {
-        connection
-            .execute("DELETE FROM asset_classifications WHERE asset_id=?1", [id])
-            .unwrap();
-        connection
-            .execute(
-                "INSERT INTO asset_classifications(asset_id,classification_id) VALUES(?1,?2)",
-                params![id, mixed],
-            )
-            .unwrap();
-    }
-    drop(connection);
-
-    let preview = f.library.mixed_character_folder_preview(&mixed).unwrap();
-    assert_eq!(preview.series_id, f.series);
-    assert_eq!(preview.image_count, 2);
-    assert_eq!(preview.unscanned_count, 2);
-    assert_eq!(
-        f.library
-            .queue_mixed_character_folder(QueueMixedFolderRequest {
-                folder_id: mixed.clone(),
-                series_id: f.series.clone(),
-                expected_total_count: 2,
-                expected_image_count: 2,
-                expected_asset_fingerprint: preview.asset_fingerprint.clone(),
-            })
-            .unwrap(),
-        2
-    );
-
-    let connection = f.library.connection().unwrap();
-    for id in ["asset-5", "asset-6"] {
-        connection.execute("INSERT INTO character_autotag_evidence(id,asset_id,generation,source_generation,content_hash,context_hash,runtime_fingerprint,scope_json,unresolved_regions,created_at)
-            SELECT ?2,asset_id,generation,source_generation,content_hash,'ctx','runtime','{}','[]','2026-09-10' FROM character_autotag_jobs WHERE asset_id=?1",
-            params![id,format!("evidence-{id}")]).unwrap();
-        connection.execute("UPDATE character_autotag_jobs SET state='completed',review_state='resolved',claim_id=NULL WHERE asset_id=?1",[id]).unwrap();
-    }
-    drop(connection);
-    f.decide(&a, &["asset-5"], DecisionKind::Accepted).unwrap();
-    f.decide(&b, &["asset-6"], DecisionKind::Accepted).unwrap();
-
-    let preview = f.library.mixed_character_folder_preview(&mixed).unwrap();
-    assert_eq!(preview.resolved_count, 2);
-    assert_eq!(preview.target_counts.len(), 2);
-    let result = f
-        .library
-        .finalize_mixed_character_folder(FinalizeMixedFolderRequest {
-            folder_id: mixed.clone(),
-            series_id: f.series.clone(),
-            expected_total_count: 2,
-            expected_image_count: 2,
-            expected_asset_fingerprint: preview.asset_fingerprint.clone(),
-            group_name: "Pair".into(),
-            target_ids: vec![a.id.clone(), b.id.clone()],
-        })
-        .unwrap();
-    assert!(result.folder_removed);
-    assert_eq!(result.moved_image_count, 2);
-    assert_eq!(result.retained_asset_count, 0);
-    let group = f.library.character_groups(&f.series).unwrap().remove(0);
-    assert_eq!(group.name, "Pair");
-    assert_eq!(
-        group.target_ids.into_iter().collect::<BTreeSet<_>>(),
-        [a.id, b.id].into_iter().collect()
-    );
-    let connection = f.library.connection().unwrap();
-    assert!(!connection
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM classification_entries WHERE id=?1)",
-            [mixed],
-            |row| row.get::<_, bool>(0)
-        )
-        .unwrap());
-    for id in ["asset-5", "asset-6"] {
-        assert_eq!(
-            connection
-                .query_row(
-                    "SELECT classification_id FROM asset_classifications WHERE asset_id=?1",
-                    [id],
-                    |row| row.get::<_, String>(0)
-                )
-                .unwrap(),
-            f.series
-        );
-    }
-}
-
-#[test]
-fn mixed_folder_migration_keeps_non_image_assets_and_requires_two_group_members() {
-    use super::super::character_folder_migration::{
-        FinalizeMixedFolderRequest, QueueMixedFolderRequest,
-    };
-    let f = Fixture::new();
-    let mixed = folder(&f.library, "Mixed media", Some(f.series.clone()));
-    let a = f.ready("A");
-    let b = f.ready("B");
-    let connection = f.library.connection().unwrap();
-    connection
-        .execute(
-            "DELETE FROM asset_classifications WHERE asset_id='asset-5'",
-            [],
-        )
-        .unwrap();
-    connection
-        .execute(
-            "INSERT INTO asset_classifications(asset_id,classification_id) VALUES('asset-5',?1)",
-            [&mixed],
-        )
-        .unwrap();
-    let hash = Sha256::digest(b"gif")
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    fs::write(f.temp.path().join("assets/mixed.gif"), b"gif").unwrap();
-    fs::write(f.temp.path().join("thumbnails/mixed.webp"), b"thumb").unwrap();
-    connection.execute("INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at,status)
-        VALUES('mixed-gif',?1,'gif','mixed.gif','assets/mixed.gif','thumbnails/mixed.webp',3,1,1,'2026-09-10','normal')",[hash]).unwrap();
-    connection
-        .execute(
-            "INSERT INTO asset_classifications(asset_id,classification_id) VALUES('mixed-gif',?1)",
-            [&mixed],
-        )
-        .unwrap();
-    drop(connection);
-    let preview = f.library.mixed_character_folder_preview(&mixed).unwrap();
-    assert_eq!(
-        f.library
-            .queue_mixed_character_folder(QueueMixedFolderRequest {
-                folder_id: mixed.clone(),
-                series_id: f.series.clone(),
-                expected_total_count: 2,
-                expected_image_count: 1,
-                expected_asset_fingerprint: preview.asset_fingerprint.clone(),
-            })
-            .unwrap(),
-        1
-    );
-    let connection = f.library.connection().unwrap();
-    connection.execute("INSERT INTO character_autotag_evidence(id,asset_id,generation,source_generation,content_hash,context_hash,runtime_fingerprint,scope_json,unresolved_regions,created_at)
-        SELECT 'mixed-evidence',asset_id,generation,source_generation,content_hash,'ctx','runtime','{}','[]','2026-09-10' FROM character_autotag_jobs WHERE asset_id='asset-5'",[]).unwrap();
-    connection.execute("UPDATE character_autotag_jobs SET state='completed',review_state='resolved',claim_id=NULL WHERE asset_id='asset-5'",[]).unwrap();
-    drop(connection);
-    let preview = f.library.mixed_character_folder_preview(&mixed).unwrap();
-    assert!(f
-        .library
-        .finalize_mixed_character_folder(FinalizeMixedFolderRequest {
-            folder_id: mixed.clone(),
-            series_id: f.series.clone(),
-            expected_total_count: 2,
-            expected_image_count: 1,
-            expected_asset_fingerprint: preview.asset_fingerprint.clone(),
-            group_name: "Mixed media".into(),
-            target_ids: vec![a.id.clone()],
-        })
-        .is_err());
-    let result = f
-        .library
-        .finalize_mixed_character_folder(FinalizeMixedFolderRequest {
-            folder_id: mixed.clone(),
-            series_id: f.series.clone(),
-            expected_total_count: 2,
-            expected_image_count: 1,
-            expected_asset_fingerprint: preview.asset_fingerprint.clone(),
-            group_name: "Mixed media".into(),
-            target_ids: vec![a.id, b.id],
-        })
-        .unwrap();
-    assert!(!result.folder_removed);
-    assert_eq!(result.retained_asset_count, 1);
-    let connection = f.library.connection().unwrap();
-    assert_eq!(
-        connection
-            .query_row(
-                "SELECT classification_id FROM asset_classifications WHERE asset_id='mixed-gif'",
-                [],
-                |row| row.get::<_, String>(0)
-            )
-            .unwrap(),
-        mixed
-    );
-}
-
-
-#[test]
 fn moved_explicit_reference_is_visible_as_invalid_and_blocks_the_series_roster() {
     let f = Fixture::new();
     let a = f.ready("A");
@@ -1637,8 +1529,16 @@ fn moved_explicit_reference_is_visible_as_invalid_and_blocks_the_series_roster()
     assert_eq!(broken.learned_references.len(), 1);
     assert_eq!(broken.learned_references[0].status, "ineligible");
 
-    f.library.connection().unwrap().execute("DELETE FROM character_autotag_jobs", []).unwrap();
-    f.library.connection().unwrap().execute("DELETE FROM character_autotag_reconsideration", []).unwrap();
+    f.library
+        .connection()
+        .unwrap()
+        .execute("DELETE FROM character_autotag_jobs", [])
+        .unwrap();
+    f.library
+        .connection()
+        .unwrap()
+        .execute("DELETE FROM character_autotag_reconsideration", [])
+        .unwrap();
     f.library
         .set_asset_classification(SetAssetClassification {
             asset_ids: vec!["asset-6".into()],
@@ -1652,5 +1552,8 @@ fn moved_explicit_reference_is_visible_as_invalid_and_blocks_the_series_roster()
         .character_autotag_context(&f.library.connection().unwrap(), &job, &"a".repeat(64))
         .unwrap();
     assert!(context.targets.is_empty());
-    assert_eq!(context.scope["invalidReferenceTargetIds"], serde_json::json!([a.id]));
+    assert_eq!(
+        context.scope["invalidReferenceTargetIds"],
+        serde_json::json!([a.id])
+    );
 }

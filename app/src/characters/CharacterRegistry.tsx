@@ -30,7 +30,7 @@ export function CharacterRegistry({ draft, target, privacyMode, busy, error, onC
       <div><Button size="sm" disabled={busy} onClick={() => onPick("thumbnail")}>대표 이미지</Button>{draft.thumbnail && <Button size="icon" variant="ghost" aria-label="대표 이미지 해제" disabled={busy} onClick={() => onChange({ ...draft, thumbnail: null })}><XMarkIcon aria-hidden="true" /></Button>}</div>
     </div>
     <details className="character-registry__section" open={!target || target.manualOnly || !target.ready ? true : undefined}>
-      <summary><span>자동 분류</span><small>{target?.manualOnly ? "수동 관리" : draft.references.length < 5 ? `기준 ${draft.references.length}/5` : draft.enabled ? "사용 중" : "꺼짐"}</small></summary>
+      <summary><span>레퍼런스</span><small>{target?.manualOnly ? "수동 관리" : draft.references.length < 5 ? `기준 ${draft.references.length}/5` : draft.enabled ? `${draft.references.length}장 기준` : "자동 분류 꺼짐"}</small></summary>
       <div className="character-registry__section-body">
         {!target && draft.references.length < 5 && <p className="series-description">기준 이미지가 5장 미만이면 수동 관리로 생성됩니다. 나중에 5장을 채우면 같은 캐릭터가 자동 분류 대상으로 전환됩니다.</p>}
         {target?.manualOnly && <p className="series-description">수동 관리 캐릭터입니다. 기준 이미지 5장을 지정해 저장하면 같은 캐릭터를 자동 분류 대상으로 전환합니다.</p>}
@@ -47,7 +47,7 @@ export function CharacterRegistry({ draft, target, privacyMode, busy, error, onC
             <Button size="sm" variant="ghost" disabled={busy || !onExcludeReference} onClick={() => onExcludeReference?.(reference.assetId!)}>학습에서 제거</Button>
           </div>)}</div>
         </section>}
-        {!target?.manualOnly && <label className="character-check"><input type="checkbox" checked={draft.enabled} disabled={busy} onChange={e => onChange({ ...draft, enabled: e.target.checked })} />자동 분석에 사용</label>}
+        {target && !target.manualOnly && !draft.enabled && <div className="character-actions"><Button size="sm" variant="ghost" disabled={busy} onClick={() => onChange({ ...draft, enabled: true })}>자동 분류 다시 사용</Button><small>예전에 꺼 둔 캐릭터입니다.</small></div>}
       </div>
     </details>
     {error && <p role="alert">{error}</p>}

@@ -204,7 +204,10 @@ impl Library {
         if target.series_classification_id.as_deref() != Some(series_id)
             || self.reference_inputs(&target).is_err()
         {
-            return Ok(ReviewPage { rows: Vec::new(), next_cursor: None });
+            return Ok(ReviewPage {
+                rows: Vec::new(),
+                next_cursor: None,
+            });
         }
 
         let memory = {
@@ -217,7 +220,12 @@ impl Library {
                 .as_ref()
                 .filter(|status| status.target_id == target.id)
                 .map(|status| (status, &state.results))
-                .or_else(|| state.previous.get(&target.id).map(|(status, rows)| (status, rows)))
+                .or_else(|| {
+                    state
+                        .previous
+                        .get(&target.id)
+                        .map(|(status, rows)| (status, rows))
+                })
                 .filter(|(status, _)| status.target_fingerprint == target.fingerprint)
                 .map(|(status, rows)| {
                     let rows = rows
@@ -257,14 +265,20 @@ impl Library {
                 drop(connection);
                 for (asset_id, content_hash, path, decision) in valid {
                     memory_overrides.insert(asset_id.clone());
-                    let Some(row) = rows.get(&asset_id) else { continue; };
+                    let Some(row) = rows.get(&asset_id) else {
+                        continue;
+                    };
                     if row.state != "recommended"
                         || matches!(decision.as_deref(), Some("accepted" | "rejected"))
                         || after.is_some_and(|cursor| asset_id.as_str() <= cursor)
                     {
                         continue;
                     }
-                    let input = ScanInput { id: asset_id.clone(), hash: content_hash, path };
+                    let input = ScanInput {
+                        id: asset_id.clone(),
+                        hash: content_hash,
+                        path,
+                    };
                     if self.verify_input(&input).is_err() {
                         continue;
                     }
@@ -285,7 +299,9 @@ impl Library {
                             },
                         ),
                     );
-                    if memory_candidates.len() > limit { break; }
+                    if memory_candidates.len() > limit {
+                        break;
+                    }
                 }
             }
         }
@@ -322,15 +338,42 @@ impl Library {
                     .collect::<std::result::Result<Vec<_>, _>>()?;
                 rows
             };
-            if rows.is_empty() { break; }
+            if rows.is_empty() {
+                break;
+            }
             let fetched = rows.len();
-            for (evidence_id, asset_id, content_hash, path, result_json, target_fingerprint, runtime_fingerprint, decision) in rows {
+            for (
+                evidence_id,
+                asset_id,
+                content_hash,
+                path,
+                result_json,
+                target_fingerprint,
+                runtime_fingerprint,
+                decision,
+            ) in rows
+            {
                 durable_after = Some(asset_id.clone());
-                if memory_overrides.contains(&asset_id) || durable_candidates.contains_key(&asset_id) { continue; }
+                if memory_overrides.contains(&asset_id)
+                    || durable_candidates.contains_key(&asset_id)
+                {
+                    continue;
+                }
                 let row: ScanResult = serde_json::from_str(&result_json)?;
-                if row.state != "recommended" || row.asset_id != asset_id || row.content_hash != content_hash { continue; }
-                let input = ScanInput { id: asset_id.clone(), hash: content_hash, path };
-                if self.verify_input(&input).is_err() { continue; }
+                if row.state != "recommended"
+                    || row.asset_id != asset_id
+                    || row.content_hash != content_hash
+                {
+                    continue;
+                }
+                let input = ScanInput {
+                    id: asset_id.clone(),
+                    hash: content_hash,
+                    path,
+                };
+                if self.verify_input(&input).is_err() {
+                    continue;
+                }
                 durable_candidates.insert(
                     asset_id,
                     (
@@ -348,9 +391,13 @@ impl Library {
                         },
                     ),
                 );
-                if durable_candidates.len() > limit { break; }
+                if durable_candidates.len() > limit {
+                    break;
+                }
             }
-            if durable_candidates.len() > limit || fetched < fetch_limit { break; }
+            if durable_candidates.len() > limit || fetched < fetch_limit {
+                break;
+            }
         }
 
         let mut combined = memory_candidates;
@@ -362,7 +409,9 @@ impl Library {
             .map(|(id, (_, prediction))| (id, vec![prediction]))
             .collect::<Vec<_>>();
         let has_more = pending.len() > limit;
-        if has_more { pending.truncate(limit); }
+        if has_more {
+            pending.truncate(limit);
+        }
         let next_cursor = has_more
             .then(|| pending.last().map(|(id, _)| id.clone()))
             .flatten();
@@ -373,11 +422,22 @@ impl Library {
     /// Advisory badge only. Keep this metadata-only and bounded: opening a character
     /// folder must not materialize the full review page just to answer one boolean.
     pub fn character_review_pending(&self, series_id: &str, target_id: &str) -> Result<bool> {
-        let target = self.get_character_target(target_id)?;
+        let connection = self.connection()?;
+        let target = self.read_character_target(&connection, target_id)?;
         if target.series_classification_id.as_deref() != Some(series_id) || !target.ready {
             return Ok(false);
         }
+        self.review_pending_in(&connection, &target)
+    }
 
+    fn review_pending_in(
+        &self,
+        connection: &rusqlite::Connection,
+        target: &Target,
+    ) -> Result<bool> {
+        let Some(series_id) = target.series_classification_id.as_deref() else {
+            return Ok(false);
+        };
         let (memory_candidates, automatic_root_candidates) = {
             let state = self
                 .character_scan
@@ -388,7 +448,12 @@ impl Library {
                 .as_ref()
                 .filter(|status| status.target_id == target.id)
                 .map(|status| (status, &state.results))
-                .or_else(|| state.previous.get(&target.id).map(|(status, rows)| (status, rows)));
+                .or_else(|| {
+                    state
+                        .previous
+                        .get(&target.id)
+                        .map(|(status, rows)| (status, rows))
+                });
             let memory_candidates = pair
                 .filter(|(status, _)| status.target_fingerprint == target.fingerprint)
                 .map(|(_, rows)| {
@@ -414,12 +479,11 @@ impl Library {
         };
 
         if !memory_candidates.is_empty() {
-            let connection = self.connection()?;
             let memory_json = serde_json::to_string(&memory_candidates)?;
             let roots_json = serde_json::to_string(&automatic_root_candidates)?;
             let found: bool = connection.query_row(
                 REVIEW_PENDING_MEMORY_SQL,
-                params![series_id, target_id, memory_json, roots_json],
+                params![series_id, target.id, memory_json, roots_json],
                 |row| row.get(0),
             )?;
             if found {
@@ -427,12 +491,33 @@ impl Library {
             }
         }
 
-        let connection = self.connection()?;
         Ok(connection.query_row(
             REVIEW_PENDING_DURABLE_SQL,
-            params![series_id, target_id, target.fingerprint],
+            params![series_id, target.id, target.fingerprint],
             |row| row.get(0),
         )?)
+    }
+
+    /// Advisory badges for every ready character at once. The sidebar lists all
+    /// characters, so one round trip beats one call per row. Results are keyed by
+    /// target ID and only include characters that actually have pending review.
+    pub fn character_review_pending_map(&self) -> Result<std::collections::BTreeMap<String, bool>> {
+        let connection = self.connection()?;
+        let ids = connection
+            .prepare("SELECT id FROM character_targets ORDER BY display_name COLLATE NOCASE, id")?
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let mut pending = std::collections::BTreeMap::new();
+        for id in ids {
+            let target = self.read_character_target(&connection, &id)?;
+            if !target.ready {
+                continue;
+            }
+            if self.review_pending_in(&connection, &target)? {
+                pending.insert(target.id.clone(), true);
+            }
+        }
+        Ok(pending)
     }
 
     fn character_review_page_mode(
@@ -555,10 +640,28 @@ impl Library {
                     )))?
                     .collect::<std::result::Result<Vec<_>,_>>()?;
                 let mut durable = BTreeMap::new();
-                for (evidence_id, asset_id, target_id, result_json, target_fingerprint, runtime_fingerprint) in durable_rows {
+                for (
+                    evidence_id,
+                    asset_id,
+                    target_id,
+                    result_json,
+                    target_fingerprint,
+                    runtime_fingerprint,
+                ) in durable_rows
+                {
                     let key = (asset_id, target_id);
-                    if durable.contains_key(&key) { continue; }
-                    durable.insert(key, (evidence_id, serde_json::from_str::<ScanResult>(&result_json)?, target_fingerprint, runtime_fingerprint));
+                    if durable.contains_key(&key) {
+                        continue;
+                    }
+                    durable.insert(
+                        key,
+                        (
+                            evidence_id,
+                            serde_json::from_str::<ScanResult>(&result_json)?,
+                            target_fingerprint,
+                            runtime_fingerprint,
+                        ),
+                    );
                 }
                 let failed = connection
                     .prepare(

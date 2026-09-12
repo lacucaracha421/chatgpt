@@ -1,6 +1,7 @@
 //! One owned child, one in-flight query, bounded output and cancellable deadlines.
 use super::characters::{Error, Result};
 use serde_json::Value;
+use std::collections::BTreeSet;
 use std::{
     io::{BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
@@ -93,6 +94,56 @@ impl RuntimeConfig {
     }
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeltaCompareWire<'a> {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    asset_id: &'a str,
+    #[serde(rename = "hash")]
+    content_hash: &'a str,
+    old_evidence: &'a Value,
+    added_references: &'a [Value],
+}
+
+pub(super) fn delta_compare_request(
+    asset_id: &str,
+    content_hash: &str,
+    old_evidence: &Value,
+    added_references: &[Value],
+) -> Result<Value> {
+    if !(1..=20).contains(&added_references.len()) || !old_evidence.is_object() {
+        return Err(Error::Invalid("추가 레퍼런스 요청을 확인해 주세요."));
+    }
+    let old_hashes = old_evidence["referenceHashes"]
+        .as_array()
+        .ok_or(Error::Invalid("기존 레퍼런스 증거가 없습니다."))?
+        .iter()
+        .filter_map(Value::as_str)
+        .collect::<BTreeSet<_>>();
+    let mut added_hashes = BTreeSet::new();
+    for reference in added_references {
+        let hash = reference["hash"]
+            .as_str()
+            .ok_or(Error::Invalid("추가 레퍼런스 hash가 없습니다."))?;
+        if reference["path"].as_str().is_none()
+            || old_hashes.contains(hash)
+            || !added_hashes.insert(hash)
+        {
+            return Err(Error::Invalid(
+                "추가 레퍼런스는 기존과 겹치지 않는 이미지여야 합니다.",
+            ));
+        }
+    }
+    Ok(serde_json::to_value(DeltaCompareWire {
+        kind: "compare_delta",
+        asset_id,
+        content_hash,
+        old_evidence,
+        added_references,
+    })?)
+}
+
 pub(super) struct Worker {
     child: Child,
     input: mpsc::SyncSender<Vec<u8>>,
@@ -108,45 +159,66 @@ pub(super) struct Pool {
     manual_waiters: std::sync::atomic::AtomicUsize,
 }
 impl std::fmt::Debug for Pool {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str("CharacterWorkerPool") }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CharacterWorkerPool")
+    }
 }
 impl Pool {
-    pub(super) fn with<T>(&self, config: &RuntimeConfig, cache: &Path, cancel: Arc<AtomicBool>, manual: bool,
-        work: impl FnOnce(&mut Worker,&Value)->Result<T>) -> Result<T> {
-        if manual { self.manual_waiters.fetch_add(1,Ordering::AcqRel); }
-        let mut guard=loop {
+    pub(super) fn with<T>(
+        &self,
+        config: &RuntimeConfig,
+        cache: &Path,
+        cancel: Arc<AtomicBool>,
+        manual: bool,
+        work: impl FnOnce(&mut Worker, &Value) -> Result<T>,
+    ) -> Result<T> {
+        if manual {
+            self.manual_waiters.fetch_add(1, Ordering::AcqRel);
+        }
+        let mut guard = loop {
             if cancel.load(Ordering::Acquire) {
-                if manual { self.manual_waiters.fetch_sub(1,Ordering::AcqRel); }
+                if manual {
+                    self.manual_waiters.fetch_sub(1, Ordering::AcqRel);
+                }
                 return Err(Error::Worker("취소됨".into()));
             }
-            if manual || self.manual_waiters.load(Ordering::Acquire)==0 {
+            if manual || self.manual_waiters.load(Ordering::Acquire) == 0 {
                 match self.session.try_lock() {
-                    Ok(guard)=>break guard,
-                    Err(std::sync::TryLockError::Poisoned(error))=> {
-                        let mut guard=error.into_inner();
-                        *guard=None;
+                    Ok(guard) => break guard,
+                    Err(std::sync::TryLockError::Poisoned(error)) => {
+                        let mut guard = error.into_inner();
+                        *guard = None;
                         self.session.clear_poison();
                         break guard;
-                    },
-                    Err(std::sync::TryLockError::WouldBlock)=>{}
+                    }
+                    Err(std::sync::TryLockError::WouldBlock) => {}
                 }
             }
             std::thread::sleep(Duration::from_millis(20));
         };
-        if manual { self.manual_waiters.fetch_sub(1,Ordering::AcqRel); }
-        if guard.as_ref().is_some_and(|(previous,_,_)|previous!=config) { *guard=None; }
+        if manual {
+            self.manual_waiters.fetch_sub(1, Ordering::AcqRel);
+        }
+        if guard
+            .as_ref()
+            .is_some_and(|(previous, _, _)| previous != config)
+        {
+            *guard = None;
+        }
         if guard.is_none() {
-            let mut worker=Worker::start(config,cache,cancel.clone())?;
-            let ready=worker.receive()?;
-            if ready["type"]!="ready" || ready["baselineFingerprint"]!=BASELINE {
+            let mut worker = Worker::start(config, cache, cancel.clone())?;
+            let ready = worker.receive()?;
+            if ready["type"] != "ready" || ready["baselineFingerprint"] != BASELINE {
                 return Err(Error::Worker("캐릭터 런타임 검증 실패".into()));
             }
-            *guard=Some((config.clone(),worker,ready));
+            *guard = Some((config.clone(), worker, ready));
         }
-        let (_,worker,ready)=guard.as_mut().unwrap();
-        worker.cancel=cancel;
-        let result=work(worker,ready);
-        if result.is_err() { *guard=None; }
+        let (_, worker, ready) = guard.as_mut().unwrap();
+        worker.cancel = cancel;
+        let result = work(worker, ready);
+        if result.is_err() {
+            *guard = None;
+        }
         result
     }
 }
@@ -167,7 +239,15 @@ impl Worker {
             .arg(cache)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(if std::env::var_os("LAKOMICS_CHARACTER_PROFILE").as_deref() == Some(std::ffi::OsStr::new("1")) { Stdio::inherit() } else { Stdio::null() });
+            .stderr(
+                if std::env::var_os("LAKOMICS_CHARACTER_PROFILE").as_deref()
+                    == Some(std::ffi::OsStr::new("1"))
+                {
+                    Stdio::inherit()
+                } else {
+                    Stdio::null()
+                },
+            );
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -219,6 +299,28 @@ impl Worker {
             output,
             cancel,
         })
+    }
+
+    pub(super) fn compare_delta(
+        &mut self,
+        asset_id: &str,
+        content_hash: &str,
+        old_evidence: &Value,
+        added_references: &[Value],
+    ) -> Result<Value> {
+        let request =
+            delta_compare_request(asset_id, content_hash, old_evidence, added_references)?;
+        self.send(&request)?;
+        let event = self.receive()?;
+        if event["type"] != "result" || event["assetId"] != asset_id {
+            return Err(Error::Worker(
+                event["error"]
+                    .as_str()
+                    .unwrap_or("캐릭터 delta 비교 응답이 올바르지 않습니다.")
+                    .into(),
+            ));
+        }
+        Ok(event)
     }
 
     pub(super) fn send(&mut self, request: &Value) -> Result<()> {

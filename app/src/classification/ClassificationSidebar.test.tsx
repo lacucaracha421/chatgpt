@@ -194,6 +194,19 @@ describe("ClassificationSidebar", () => {
   });
 
 
+  it("keeps character rows free of review-pending status", () => {
+    const hina = { ...fixtureTarget("hina", "히나"), seriesClassificationId: "work", linkedClassificationId: null };
+    const kisaki = { ...fixtureTarget("kisaki", "키사키"), seriesClassificationId: "work", linkedClassificationId: null };
+    renderSidebar(gateway(), {
+      characters: [hina, kisaki],
+      expandedIds: ["root", "work"],
+    });
+
+    expect(screen.getByRole("treeitem", { name: "히나" }).querySelector(".classification-sidebar__review-mark")).toBeNull();
+    expect(screen.getByRole("treeitem", { name: "키사키" }).querySelector(".classification-sidebar__review-mark")).toBeNull();
+    expect(screen.queryByRole("treeitem", { name: "히나 · 검토 대기 있음" })).not.toBeInTheDocument();
+  });
+
   it("keeps the Originals root visible but protects its storage-only identity", async () => {
     const originals = [...entries, { id: "lakomics-originals", kind: "root" as const, name: "오리지널", parentId: null, iconKey: "sparkles", colorKey: null }];
     renderSidebar(gateway(), { entries: originals });
