@@ -1,11 +1,12 @@
 {
   "manifest_version": 3,
   "name": "Lakomics Collector List",
-  "version": "3.0.0.12",
-  "version_name": "3.0.0-alpha.12",
+  "version": "3.0.0.13",
+  "version_name": "3.0.0-alpha.13",
   "description": "A Lakomics media collector with a thumb-friendly edge menu.",
   "permissions": [
-    "storage"
+    "storage",
+    "downloads"
   ],
   "host_permissions": [
     "https://*/*",

@@ -294,3 +294,12 @@ test('settings preview uses the same shortcut deduplication and never enables te
   row(view, 'games').click(); view.$('.save-current').click();
   assert.deepEqual(currentIds(view), ['game0', 'game2', 'game3', 'game4', 'game5']);
 });
+
+test('temporary download waits for the result, prevents duplicate clicks and allows retry on failure', async () => {
+  let finish, calls = 0;
+  const view = mount({ onTemporary: () => { calls++; return new Promise(resolve => { finish = resolve; }); } });
+  view.$('.back').click(); view.$('.back').click();
+  assert.equal(calls, 1); assert.equal(view.host.isConnected, true); assert.equal(view.$('.back').disabled, true);
+  finish(false); await tick(); assert.equal(view.host.isConnected, true); assert.equal(view.$('.back').disabled, false);
+  view.$('.back').click(); finish(true); await tick(); assert.equal(view.host.isConnected, false);
+});

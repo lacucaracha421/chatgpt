@@ -26,8 +26,19 @@
     <div class="pin-add"><select id="pin-candidate" aria-label="고정할 분류"></select><button id="pin-add" aria-label="고정">＋</button></div>
   </section>
   <section id="preference-section" hidden class="preferences">
-    <label><span>X 좋아요</span><input id="auto-like" type="checkbox"></label>
-    <label><span>X 번역</span><input id="x-translate" type="checkbox"></label>
+    <label><span>X 저장 후 자동 좋아요</span><input id="auto-like" type="checkbox"></label>
+
+  </section>
+  <section id="temporary-section">
+    <div class="section-head"><span>PC 임시저장</span></div>
+    <p class="hint">이미지를 브라우저 기본 다운로드 폴더에 바로 저장합니다. 브라우저 설정 → 다운로드에서 위치를 바탕화면으로 지정하세요.</p>
+  </section>
+  <section id="translation-section">
+    <div class="section-head"><span>AI 번역</span><output id="translation-status" aria-live="polite"></output></div>
+    <p class="hint">OpenRouter · Gemini 2.5 Flash Lite · 한국어</p>
+    <label><input id="translation-enabled" type="checkbox"> 자동 번역</label>
+    <form id="translation-key-form"><input id="translation-key" type="password" aria-label="OpenRouter API 키" autocomplete="off" placeholder="OpenRouter API 키"><button>키 저장</button></form>
+    <button id="translation-clear" type="button">캐시 비우기</button>
   </section>
 </main>
 <script src="../src/classification-tree.js"></script><script src="../src/arc-collector.js"></script><script src="options.js"></script></body></html>

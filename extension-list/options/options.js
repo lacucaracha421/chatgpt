@@ -31,7 +31,6 @@
     if (!state) { preview?.close?.(); preview = null; return; }
     const m = model();
     $("auto-like").checked = state.profile.preferences.autoLikeOnSave !== false;
-    $("x-translate").checked = state.profile.preferences.xTranslateEnabled !== false;
     $("pins").replaceChildren();
     for (const id of state.profile.pinnedClassificationIds) {
       const entry = m.byId.get(id); if (!entry) continue;
@@ -104,6 +103,27 @@
   $("disconnect").onclick = async () => { await send({ type: "disconnect" }); state = null; await load(); };
   $("pin-add").onclick = () => { const id = $("pin-candidate").value; if (id && state) void patch({ pinnedClassificationIds: [...state.profile.pinnedClassificationIds, id] }); };
   $("auto-like").onchange = () => void patch({ preferences: { autoLikeOnSave: $("auto-like").checked } });
-  $("x-translate").onchange = () => void patch({ preferences: { xTranslateEnabled: $("x-translate").checked } });
   void load();
+  async function translationSettings() {
+    const result = await send({ type: "translation:settings" });
+    if (!result?.ok) return;
+    $("translation-enabled").checked = result.enabled;
+    $("translation-key").placeholder = result.hasApiKey ? "API 키 저장됨 · 변경할 키 입력" : "OpenRouter API 키";
+  }
+  $("translation-enabled").onchange = async () => {
+    const result = await send({ type: "translation:update", enabled: $("translation-enabled").checked });
+    $("translation-status").textContent = result?.ok ? "저장됨" : "설정 저장 실패";
+  };
+  $("translation-key-form").onsubmit = async event => {
+    event.preventDefault();
+    const result = await send({ type: "translation:update", apiKey: $("translation-key").value });
+    $("translation-key").value = "";
+    $("translation-status").textContent = result?.ok ? "저장됨" : "API 키 저장 실패";
+    await translationSettings();
+  };
+  $("translation-clear").onclick = async () => {
+    const result = await send({ type: "translation:clear" });
+    $("translation-status").textContent = result?.ok ? "캐시를 비웠습니다" : "캐시 삭제 실패";
+  };
+  void translationSettings().catch(() => { $("translation-status").textContent = "번역 설정을 불러오지 못했습니다"; });
 })();

@@ -17,9 +17,9 @@ test('collection uses the arc menu and keeps the list editor out of content page
 });
 
 
-test('server-only saves use stable DOM-local saved badges', async () => {
+test('permanent saves remain server-only while temporary PC saves allow downloads', async () => {
   const manifest = JSON.parse(await readFile(new URL('../manifest.json', import.meta.url), 'utf8'));
-  assert.equal((manifest.permissions || []).some((value) => value.startsWith('downloads')), false);
+  assert.ok(manifest.permissions.includes('downloads'));
 
   const saveSource = await readFile(new URL('../src/save-client.js', import.meta.url), 'utf8');
   assert.equal(saveSource.includes('chrome.downloads'), false);

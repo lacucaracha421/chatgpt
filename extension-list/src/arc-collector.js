@@ -237,10 +237,13 @@
       panel.dataset.side = side;
       panel.querySelectorAll(".sector").forEach((button, index) => shape(button, index));
     }
-    $(".back").onclick = () => {
+    $(".back").onclick = async () => {
       if (frame().id !== null) { back(); return; }
       if (!available() || editing || !onTemporary || performance.now() < temporaryBlockedUntil) return;
-      try { if (onTemporary() !== false) close(); } catch { notice("임시 저장을 열지 못했습니다."); }
+      busy = true; render();
+      try { if (await onTemporary() !== false) close(); }
+      catch { notice("임시 저장을 열지 못했습니다."); }
+      finally { busy = false; if (!disposed) render(); }
     };
     $(".save-current").onclick = () => editing ? openSelected() : void save();
     if (editing) {

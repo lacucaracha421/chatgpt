@@ -10,3 +10,5 @@
 .hidden-folder span{flex:1;min-width:0;overflow-wrap:anywhere;font-size:13px}
 .hidden-folder button{min-height:44px;flex:none}
 @media(max-width:600px){.layout-workspace{grid-template-columns:minmax(0,1fr);gap:18px}#order-editor{max-width:360px;margin:auto}.hidden-settings{margin-top:0}}
+
+#translation-section>label{display:flex;align-items:center;gap:8px;margin-bottom:12px}#translation-enabled{flex:none;min-height:16px;accent-color:var(--ivory)}#translation-key-form{margin-bottom:12px}

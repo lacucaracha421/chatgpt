@@ -7,7 +7,7 @@ retained.
 
 ## Edge menu
 
-Version 3.0.0.12 uses a semicircle attached to the selected screen edge. Image
+Version 3.0.0.13 uses a semicircle attached to the selected screen edge. Image
 dragging on desktop requires a held press of at least 250 ms and movement of
 12 px. Touch requires a stationary 500 ms long press. Releasing early, scrolling,
 losing window focus, or cancelling the pointer cancels the pending opening. Releasing the opening finger never selects a folder or saves an image.
@@ -42,7 +42,11 @@ curve marks folders with children; pagination keeps its page count.
   transparent corners, or press Escape to dismiss it. Saving and the opening
   finger lock prevent accidental dismissal. Short windows allow the panel to
   scroll rather than shrinking targets indefinitely.
-- Temporary Android image saving occupies the root screen's central upper half.
+- Temporary image saving occupies the root screen's central upper half.
+  Android uses the existing temporary album intent. PC starts a browser download
+  without a save dialog; choose Desktop once in the browser download settings.
+  Filename collisions are renamed, and download errors keep the menu available.
+  Download-start feedback is not a claim that the file has finished downloading.
   There is no additional temporary-save button below the arc. Permanent saves use the existing server capture
   flow; this change does not alter connection or ingestion behavior.
 
@@ -76,6 +80,34 @@ browser, paste into Connection link, and press Connect. The PC panel also offers
 Copy link and Reissue if needed. Tablet QR connection remains a separate button.
 Both methods use the existing pairing endpoint and session/profile contract;
 no server deployment, extra browser permission, or new credential type is needed.
+
+## X saving and translation
+
+Successful permanent X saves automatically like the saved post when the existing
+Save auto-like preference is enabled. Already-liked posts are left liked. Quote
+media retains its own post ID, including video thumbnails before a video element
+is mounted. If the matching like control is absent or does not confirm, the
+existing X session sends a bounded FavoriteTweet request for that exact post ID.
+Like failure is reported separately from successful media capture. X can change
+this private web endpoint; a fixture success does not establish live acceptance.
+
+AI translation uses only OpenRouter `google/gemini-2.5-flash-lite`, into Korean.
+Options retain an API key, one automatic on/off switch and Clear cache. The small
+X panel mirrors automatic on/off and Clear cache, and links to options. Other
+providers, model selection/fallback, manual translate, diagnostics and tuning are
+removed. Existing OpenRouter keys and automatic preferences migrate locally;
+retired provider settings and old caches are removed. Keys stay in extension
+storage and the worker: they are never returned to X content scripts or synced
+with the server profile. Visible tweets are translated, including quote text;
+links, hashtags, emoji and explicit line breaks are retained. Results use text
+nodes, not model HTML. The bounded cache is shared across tabs. Disabling auto or
+clearing the cache invalidates in-flight results; authentication/quota failures
+stop new requests until the setting is retried.
+
+Reload the extension and X tabs after updating. The new PC temporary-download
+path requires the browser's downloads permission. The extension does not change
+the browser's default download directory itself. Windows and Linux use the same
+browser setting; Android keeps the native temporary-album path.
 
 ## Verification
 

@@ -19,6 +19,7 @@
     const source = explicitImageSource(image) ?? findPostSource(image, mediaUrl, "photo");
     if (!source) return null;
     return {
+      source: "x",
       type: "image",
       element: image,
       image,
@@ -54,11 +55,12 @@
   }
 
   function findVideoCandidate(target) {
-    const video = findVideoElement(target);
+    const video = findVideoElement(target) ?? target?.closest?.('[data-testid="videoPlayer"], [data-testid="videoComponent"], [data-testid^="video-player-mini-ui-"]');
     if (!video) return null;
     const source = findVideoPostSource(video);
     if (!source) return null;
     return {
+      source: "x",
       type: "video",
       element: interactionElementForVideo(video),
       video,
@@ -81,7 +83,7 @@
     // Quote cards are not necessarily nested articles. Stop at their own link
     // container so their media ordinal and timestamp cannot come from the parent.
     const quote = element?.closest?.('[data-testid="quoteTweet"], [data-testid="quotedTweet"], div[role="link"]');
-    return quote ?? article;
+    return quote && (!article || article.contains(quote)) ? quote : article;
   }
 
   function findVideoElement(target) {
@@ -105,7 +107,7 @@
   }
 
   function interactionElementForVideo(video) {
-    return video.closest?.('[data-testid="videoPlayer"]') ?? video;
+    return video.closest?.('[data-testid="videoPlayer"], [data-testid="videoComponent"]') ?? video;
   }
 
   function imageSource(image) {
@@ -153,7 +155,7 @@
 
   function findPostSource(element, mediaUrl, kind) {
     const direct = findDirectStatusLink(element, kind);
-    if (direct) {
+    if (direct && postScope(element.closest?.('a[href*="/status/"]')) === postScope(element)) {
       const mediaIndex = direct.mediaIndex ?? inferMediaIndex(element, mediaUrl, kind);
       return withMediaIndex(direct, mediaIndex, kind);
     }
@@ -177,13 +179,12 @@
 
   function findVideoPostSource(video) {
     const source = findPostSource(video, null, "video");
-    if (source) return source;
     // X quote cards can omit every status link. The mini-player carries the
     // video post ID; only inspect this video's player, never the outer tweet.
-    const player = video.closest?.('[data-testid="videoPlayer"]');
-    const marker = player?.querySelector?.('[data-testid^="video-player-mini-ui-"]');
+    const player = video.closest?.('[data-testid="videoPlayer"], [data-testid="videoComponent"]') ?? video;
+    const marker = player.matches?.('[data-testid^="video-player-mini-ui-"]') ? player : player.querySelector?.('[data-testid^="video-player-mini-ui-"]');
     const postId = marker?.getAttribute?.('data-testid')?.match(/^video-player-mini-ui-(\d+)$/)?.[1];
-    if (!postId) return null;
+    if (!postId || source?.postId === postId) return source;
     const avatar = postScope(video)?.querySelector?.('[data-testid^="UserAvatar-Container-"]');
     const author = avatar?.getAttribute?.('data-testid')?.match(/^UserAvatar-Container-([A-Za-z0-9_]{1,15})$/)?.[1] || 'i';
     return withMediaIndex({author, postId, sourceUrl:`https://x.com/${author}/status/${postId}`}, inferVideoIndex(video), "video");
@@ -273,6 +274,7 @@
   }
 
   globalThis.LakomicsXSource = {
+    postScope,
     findCandidate,
     inferMediaIndex,
     normalizeMediaUrl,
