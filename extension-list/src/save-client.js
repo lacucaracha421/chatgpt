@@ -2,6 +2,7 @@
   "use strict";
   const RECENT_KEY = "lakomics:list:recent-saved-x:v1";
   const RECENT_MS = 10 * 60_000;
+  const X_SYNDICATION_ENDPOINT = "https://cdn.syndication.twimg.com/tweet-result";
 
   function xKey(sourceUrl) {
     try {
@@ -29,7 +30,67 @@
   }
 
   function source(candidate) {
+    try {
+      const url = new URL(candidate?.sourceUrl || "");
+      if (["x.com", "twitter.com"].includes(url.hostname)) return "x";
+    } catch {}
     return ["x", "arca", "dcinside", "web"].includes(candidate?.source) ? candidate.source : "web";
+  }
+
+  function xPostId(candidate) {
+    const explicit = String(candidate?.postId || "");
+    if (/^\d+$/.test(explicit)) return explicit;
+    try {
+      const url = new URL(candidate?.sourceUrl || "");
+      if (!["x.com", "twitter.com"].includes(url.hostname)) return "";
+      return url.pathname.match(/\/status\/(\d+)/)?.[1] || "";
+    } catch { return ""; }
+  }
+
+  function syndicationToken(postId) {
+    return ((Number(postId) / 1e15) * Math.PI).toString(36).replace(/(0+|\.)/g, "") || "a";
+  }
+
+  function isXVideoUrl(value) {
+    try {
+      const url = new URL(value);
+      return url.protocol === "https:" && url.hostname === "video.twimg.com" && !url.username && !url.password && !url.hash;
+    } catch { return false; }
+  }
+
+  function bestXVideoUrl(variants) {
+    return (Array.isArray(variants) ? variants : [])
+      .filter((variant) => variant?.content_type === "video/mp4" && isXVideoUrl(variant.url))
+      .map((variant) => ({ url: variant.url, bitrate: Number(variant.bitrate) || 0 }))
+      .sort((left, right) => right.bitrate - left.bitrate)[0]?.url || null;
+  }
+
+  async function resolveXVideo(candidate) {
+    if (candidate?.type !== "video" || source(candidate) !== "x") return { ok: true, candidate };
+    if (isXVideoUrl(candidate.mediaUrl)) return { ok: true, candidate };
+    const postId = xPostId(candidate);
+    if (!postId) return { ok: false, code: "video_unavailable" };
+    let response;
+    try {
+      const params = new URLSearchParams({ id: postId, token: syndicationToken(postId) });
+      response = await fetch(`${X_SYNDICATION_ENDPOINT}?${params}`, { method: "GET", credentials: "omit", cache: "no-store" });
+    } catch { return { ok: false, code: "video_info_failed" }; }
+    if (!response?.ok) {
+      return { ok: false, code: [403, 404].includes(response?.status) ? "video_unavailable" : "video_info_failed" };
+    }
+    let data;
+    try { data = await response.json(); }
+    catch { return { ok: false, code: "video_info_failed" }; }
+    if (!data || data.__typename === "TweetTombstone") return { ok: false, code: "video_unavailable" };
+    const videos = (Array.isArray(data.mediaDetails) ? data.mediaDetails : [])
+      .map((media) => bestXVideoUrl(media?.video_info?.variants))
+      .filter(Boolean);
+    const requestedIndex = Number(candidate.mediaIndex);
+    const index = Number.isInteger(requestedIndex) && requestedIndex > 0 ? requestedIndex - 1 : 0;
+    const mediaUrl = videos[index] || videos[0];
+    return mediaUrl
+      ? { ok: true, candidate: { ...candidate, mediaUrl, mediaIndex: index + 1 } }
+      : { ok: false, code: "video_unavailable" };
   }
 
   function safeServerDetail(value) {
@@ -73,6 +134,9 @@
   }
 
   async function save({ candidate, classificationId, classificationPath = [] }) {
+    const resolved = await resolveXVideo(candidate);
+    if (!resolved.ok) return resolved;
+    candidate = resolved.candidate;
     const type = mediaType(candidate);
     if (!["image", "video", "animated_gif"].includes(type)) return { ok: false, code: "media_unsupported" };
     const payload = {

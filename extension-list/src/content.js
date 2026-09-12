@@ -100,6 +100,8 @@
     if (result.code === "timeout" || result.code === "worker_timeout") return "서버 응답 시간 초과";
     if (result.code === "offline" || result.code === "server_offline") return "서버 연결 실패";
     if (result.code === "media_unsupported") return "지원하지 않는 미디어";
+    if (result.code === "video_unavailable") return "X 영상을 찾을 수 없음";
+    if (result.code === "video_info_failed") return "X 영상 정보 조회 실패";
     const detail = String(result.serverDetail || "");
     if (/^Invalid source URL$/i.test(detail)) return "서버 거절 · 원문 URL 검증 실패";
     if (/^Unsupported content type:/i.test(detail)) return `서버 거절 · 원본 형식 ${detail.split(":", 2)[1]?.trim() || "알 수 없음"}`;
