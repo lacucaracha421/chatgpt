@@ -1,0 +1,1015 @@
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, expect, it, vi } from "vitest";
+import { LibraryProvider } from "../library/LibraryContext";
+import type { CatalogStatus, LibraryGateway, MetadataBackup } from "../library/types";
+import { WorkspaceChromeProvider, ChromeTarget } from "../layout/WorkspaceChrome";
+import { SettingsView } from "./SettingsView";
+import { invoke } from "@tauri-apps/api/core";
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async () => ({ automationEnabled: false, paused: false })) }));
+
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
+import { open } from "@tauri-apps/plugin-dialog";
+
+afterEach(() => { vi.useRealTimers(); localStorage.clear(); cleanup(); });
+
+it("exposes persisted whole-engine automation in general settings without using history pause", async () => {
+  localStorage.setItem("lakomics.libraryPath", "C:\\Current");
+  vi.mocked(invoke).mockClear();
+  const gateway = createGateway();
+  vi.mocked(gateway.openLibrary).mockResolvedValue({ root: "C:\\Current" });
+  render(<LibraryProvider gateway={gateway}><SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} /></LibraryProvider>);
+  const toggle = await screen.findByRole("checkbox", { name: "캐릭터 자동 분류" });
+  await waitFor(() => expect(toggle).toBeEnabled());
+  expect(toggle).not.toBeChecked();
+  expect(invoke).not.toHaveBeenCalledWith("pause_character_automation", expect.anything());
+  await userEvent.click(toggle);
+  await waitFor(() => expect(toggle).toBeChecked());
+  expect(invoke).toHaveBeenCalledWith("pause_character_automation", { paused: false });
+  await userEvent.click(toggle);
+  await waitFor(() => expect(toggle).not.toBeChecked());
+  expect(invoke).toHaveBeenCalledWith("pause_character_automation", { paused: true });
+  expect(vi.mocked(invoke).mock.calls.some(([command]) => command === "pause_character_reference_refresh")).toBe(false);
+});
+
+it("keeps automation off and shows an error if the native setting cannot be saved", async () => {
+  localStorage.setItem("lakomics.libraryPath", "C:\\Current");
+  const gateway = createGateway();
+  vi.mocked(gateway.openLibrary).mockResolvedValue({ root: "C:\\Current" });
+  render(<LibraryProvider gateway={gateway}><SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} /></LibraryProvider>);
+  const toggle = await screen.findByRole("checkbox", { name: "캐릭터 자동 분류" });
+  await waitFor(() => expect(toggle).toBeEnabled());
+  vi.mocked(invoke).mockRejectedValueOnce(new Error("설정을 저장하지 못했습니다."));
+  await userEvent.click(toggle);
+  expect(await screen.findByRole("alert")).toHaveTextContent("설정을 저장하지 못했습니다.");
+  expect(toggle).not.toBeChecked();
+  expect(toggle).toBeEnabled();
+});
+
+it("blocks duplicate automation saves and library switching until the save finishes", async () => {
+  localStorage.setItem("lakomics.libraryPath", "C:\\Current");
+  const gateway = createGateway();
+  vi.mocked(gateway.openLibrary).mockResolvedValue({ root: "C:\\Current" });
+  render(<LibraryProvider gateway={gateway}><SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} /></LibraryProvider>);
+  const toggle = await screen.findByRole("checkbox", { name: "캐릭터 자동 분류" });
+  await waitFor(() => expect(toggle).toBeEnabled());
+  let finish!: () => void;
+  vi.mocked(invoke).mockClear().mockReturnValueOnce(new Promise<void>(resolve => { finish = resolve; }));
+  await userEvent.click(toggle);
+  expect(toggle).toBeDisabled();
+  expect(screen.getByRole("button", { name: "다른 저장소 열기" })).toBeDisabled();
+  await userEvent.click(toggle);
+  expect(invoke).toHaveBeenCalledTimes(1);
+  await act(async () => finish());
+  expect(toggle).toBeChecked();
+  expect(toggle).toBeEnabled();
+});
+
+it("disables unknown automation state and allows retrying a failed read", async () => {
+  localStorage.setItem("lakomics.libraryPath", "C:\\Current");
+  const gateway = createGateway();
+  vi.mocked(gateway.openLibrary).mockResolvedValue({ root: "C:\\Current" });
+  vi.mocked(invoke).mockRejectedValueOnce(new Error("설정 읽기 실패"));
+  render(<LibraryProvider gateway={gateway}><SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} /></LibraryProvider>);
+  expect(await screen.findByRole("alert")).toHaveTextContent("설정 읽기 실패");
+  const toggle = screen.getByRole("checkbox", { name: "캐릭터 자동 분류" });
+  expect(toggle).toBeDisabled();
+  await userEvent.click(screen.getByRole("button", { name: "다시 확인" }));
+  await waitFor(() => expect(toggle).toBeEnabled());
+  expect(toggle).not.toBeChecked();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
+it("keeps the current library when switching is cancelled", async () => {
+  localStorage.setItem("lakomics.libraryPath", "C:\\Current");
+  const gateway = createGateway();
+  vi.mocked(gateway.openLibrary).mockResolvedValue({ root: "C:\\Current" });
+  vi.mocked(open).mockResolvedValue(null);
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  await screen.findByText("C:\\Current");
+  await userEvent.click(screen.getByRole("button", { name: "다른 저장소 열기" }));
+
+  expect(open).toHaveBeenCalledWith({ directory: true, multiple: false, defaultPath: "C:\\Current" });
+  expect(gateway.openLibrary).toHaveBeenCalledTimes(1);
+});
+
+it("opens a selected library and disables duplicate switching while pending", async () => {
+  localStorage.setItem("lakomics.libraryPath", "C:\\Current");
+  const gateway = createGateway();
+  let resolveSwitch!: (summary: { root: string }) => void;
+  vi.mocked(gateway.openLibrary)
+    .mockResolvedValueOnce({ root: "C:\\Current" })
+    .mockReturnValueOnce(new Promise((resolve) => { resolveSwitch = resolve; }));
+  vi.mocked(open).mockResolvedValue("D:\\Next");
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  const button = await screen.findByRole("button", { name: "다른 저장소 열기" });
+  await userEvent.click(button);
+  expect(button).toBeDisabled();
+
+  resolveSwitch({ root: "D:\\Next" });
+  expect(await screen.findByText("D:\\Next")).toBeVisible();
+  expect(localStorage.getItem("lakomics.libraryPath")).toBe("D:\\Next");
+});
+
+it("shows a switch error without replacing the current library", async () => {
+  localStorage.setItem("lakomics.libraryPath", "C:\\Current");
+  const gateway = createGateway();
+  vi.mocked(gateway.openLibrary)
+    .mockResolvedValueOnce({ root: "C:\\Current" })
+    .mockRejectedValueOnce(new Error("switch failed"));
+  vi.mocked(open).mockResolvedValue("D:\\Broken");
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  await screen.findByText("C:\\Current");
+  await userEvent.click(screen.getByRole("button", { name: "다른 저장소 열기" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("switch failed");
+  expect(screen.getByText("C:\\Current")).toBeVisible();
+  expect(localStorage.getItem("lakomics.libraryPath")).toBe("C:\\Current");
+});
+
+it("starts a repeatable metadata folder import and remembers the selected folder", async () => {
+  localStorage.clear();
+  vi.mocked(open).mockResolvedValue("C:\\exports\\lakomics" as never);
+  const onImportFolder = vi.fn().mockResolvedValue(true);
+  const gateway = createGateway();
+  vi.mocked(gateway.getExtensionConnection).mockResolvedValue({ baseUrl: "http://127.0.0.1:32145", token: "token", status: "ready" });
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} onImportFolder={onImportFolder} />
+    </LibraryProvider>,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "데이터 관리" }));
+  const metadataRow = (await screen.findByText("최근 가져오기 폴더")).parentElement;
+  await userEvent.click(within(metadataRow!).getByRole("button", { name: "폴더 선택" }));
+  await waitFor(() => expect(onImportFolder).toHaveBeenCalledWith("C:\\exports\\lakomics"));
+  expect(localStorage.getItem("lakomics.metadataImportFolder")).toBe("C:\\exports\\lakomics");
+});
+
+it("acts as the window title bar", async () => {
+  const gateway = createGateway();
+  const { container } = render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+  await screen.findByRole("toolbar");
+  expect(container.querySelector(".view-toolbar")).toHaveAttribute("data-tauri-drag-region", "deep");
+  expect(container.querySelector(".view-toolbar h2")).not.toHaveAttribute("data-tauri-drag-region");
+  expect(screen.getByRole("button", { name: "창 닫기" })).toBeInTheDocument();
+});
+
+it("uses the shared view toolbar with window controls", async () => {
+  const gateway = createGateway();
+  const { container } = render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+  expect(await screen.findByRole("toolbar")).toBeInTheDocument();
+  expect(container.querySelector(".view-toolbar")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "창 닫기" })).toBeInTheDocument();
+});
+
+it("uses desktop settings navigation and compact property rows", async () => {
+  const gateway = createGateway();
+  const { container } = render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  const navigation = screen.getByRole("navigation", { name: "설정 구역" });
+  expect(navigation).toHaveClass("settings-view__navigation");
+  expect(screen.getByRole("button", { name: "일반" })).toHaveAttribute("aria-current", "page");
+  expect(screen.getByRole("heading", { name: "일반" })).toBeInTheDocument();
+  expect(container.querySelectorAll(".settings-view__property")).toHaveLength(4);
+
+  await userEvent.click(screen.getByRole("button", { name: "데이터 관리" }));
+  expect(screen.getByRole("heading", { name: "데이터 관리" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "데이터 관리" })).toHaveAttribute("aria-current", "page");
+  expect(screen.getByRole("heading", { name: "메타데이터 가져오기", level: 3 })).toBeInTheDocument();
+});
+
+it("groups data import and backup restore under 데이터 관리", async () => {
+  const gateway = createGateway();
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="data" />
+    </LibraryProvider>,
+  );
+
+  expect(await screen.findByRole("heading", { name: "데이터 관리" })).toBeInTheDocument();
+  for (const group of ["컬렉션 가져오기", "메타데이터 가져오기", "레거시 패키지 가져오기", "로컬 백업 복구"]) {
+    expect(screen.getByRole("heading", { name: group, level: 3 })).toBeInTheDocument();
+  }
+});
+
+it("groups extension diagnostics and shortcuts under 정보", async () => {
+  const gateway = createGateway();
+  vi.mocked(gateway.getExtensionConnection).mockResolvedValue({ baseUrl: "http://127.0.0.1:32145", token: "token", status: "ready" });
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="external_services" />
+    </LibraryProvider>,
+  );
+
+  expect(await screen.findByRole("heading", { name: "연결" })).toBeInTheDocument();
+  for (const group of ["브라우저 확장", "작품 정보 서비스"]) {
+    expect(screen.getByRole("heading", { name: group, level: 3 })).toBeInTheDocument();
+  }
+});
+
+it("changes app zoom and restores its default from general settings", async () => {
+  const onAppZoomChange = vi.fn();
+  render(<LibraryProvider gateway={createGateway()}>
+    <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} appZoom={125} onAppZoomChange={onAppZoomChange} />
+  </LibraryProvider>);
+  expect(screen.getByRole("combobox", { name: "앱 전체 배율" })).toHaveValue("125");
+  await userEvent.selectOptions(screen.getByRole("combobox", { name: "앱 전체 배율" }), "150");
+  expect(onAppZoomChange).toHaveBeenLastCalledWith(150);
+  await userEvent.click(screen.getByRole("button", { name: "100%로 복원" }));
+  expect(onAppZoomChange).toHaveBeenLastCalledWith(100);
+});
+
+it("toggles privacy mode from the general section", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  const onPrivacyModeChange = vi.fn();
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} privacyMode={false} onPrivacyModeChange={onPrivacyModeChange} />
+    </LibraryProvider>,
+  );
+
+  const toggle = screen.getByRole("checkbox", { name: "비공개 모드" });
+  expect(toggle).not.toBeChecked();
+  await user.click(toggle);
+
+  expect(onPrivacyModeChange).toHaveBeenCalledWith(true);
+});
+
+it("shows every external service status at once in the connection list", async () => {
+  const gateway = createGateway();
+  vi.mocked(gateway.getKakaoCredentialStatus).mockResolvedValue({ configured: true });
+  vi.mocked(gateway.getIgdbCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.getTmdbCredentialStatus).mockResolvedValue({ configured: false });
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="external_services" />
+    </LibraryProvider>,
+  );
+
+  const kakaoRow = (await screen.findByText("카카오 책 검색")).parentElement;
+  const igdbRow = screen.getByText("IGDB").parentElement;
+  const tmdbRow = screen.getByText("TMDB").parentElement;
+  expect(within(kakaoRow!).getByLabelText("카카오 REST API 키")).toHaveAttribute("placeholder", "설정됨");
+  expect(within(kakaoRow!).getByRole("button", { name: "키 삭제" })).toBeVisible();
+  expect(within(igdbRow!).getByLabelText("IGDB Client ID")).toHaveAttribute("placeholder", "설정되지 않음");
+  expect(within(igdbRow!).queryByRole("button", { name: "IGDB 키 삭제" })).not.toBeInTheDocument();
+  expect(within(tmdbRow!).getByLabelText("TMDB API Read Access Token")).toHaveAttribute("placeholder", "설정되지 않음");
+  expect(within(tmdbRow!).queryByRole("button", { name: "TMDB 키 삭제" })).not.toBeInTheDocument();
+});
+
+it("loads the manga root and changes it through the folder picker", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getMangaRoot).mockResolvedValue("C:\\Manga");
+  vi.mocked(open).mockResolvedValue("D:\\NewManga");
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  expect(await screen.findByText("C:\\Manga")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "변경" }));
+
+  await waitFor(() => expect(gateway.setMangaRoot).toHaveBeenCalledWith("D:\\NewManga"));
+  expect(await screen.findByText("D:\\NewManga")).toBeInTheDocument();
+});
+
+it("keeps the current manga root when the folder picker is cancelled", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getMangaRoot).mockResolvedValue("C:\\Manga");
+  vi.mocked(open).mockResolvedValue(null);
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  await user.click(await screen.findByRole("button", { name: "변경" }));
+
+  await waitFor(() => expect(open).toHaveBeenCalledWith({ directory: true, multiple: false }));
+  expect(gateway.setMangaRoot).not.toHaveBeenCalled();
+  expect(screen.getByText("C:\\Manga")).toBeInTheDocument();
+});
+
+it("loads the collection source root, backfills legacy kinds, and reports the count", async () => {
+  const user = userEvent.setup();
+  const onCollectionsChanged = vi.fn();
+  const gateway = createGateway();
+  vi.mocked(gateway.getCollectionSourceRoot).mockResolvedValue("C:\\book");
+  vi.mocked(gateway.setCollectionSourceRoot).mockResolvedValue(207);
+  vi.mocked(open).mockResolvedValue("C:\\lakomics\\book");
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView initialSection="data" restoring={false} onRestore={vi.fn()} onExit={vi.fn()} onCollectionsChanged={onCollectionsChanged} />
+    </LibraryProvider>,
+  );
+  await userEvent.click(screen.getByText("구버전 자료 가져오기"));
+
+  expect(await screen.findByText("C:\\book")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "컬렉션 소스 폴더 변경" }));
+
+  await waitFor(() => expect(gateway.setCollectionSourceRoot).toHaveBeenCalledWith("C:\\lakomics\\book"));
+  expect(await screen.findByText("레거시 출처를 207개 컬렉션에 표시했습니다")).toBeVisible();
+  expect(onCollectionsChanged).toHaveBeenCalled();
+  expect(screen.getByText("C:\\lakomics\\book")).toBeInTheDocument();
+});
+
+it("keeps the current collection source root when the folder picker is cancelled", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getCollectionSourceRoot).mockResolvedValue("C:\\book");
+  vi.mocked(open).mockResolvedValue(null);
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView initialSection="data" restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+  await userEvent.click(screen.getByText("구버전 자료 가져오기"));
+
+  await user.click(await screen.findByRole("button", { name: "컬렉션 소스 폴더 변경" }));
+
+  await waitFor(() => expect(open).toHaveBeenCalledWith({ directory: true, multiple: false }));
+  expect(gateway.setCollectionSourceRoot).not.toHaveBeenCalled();
+  expect(screen.getByText("C:\\book")).toBeInTheDocument();
+});
+
+it("shows an error when the collection source root cannot be saved", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getCollectionSourceRoot).mockResolvedValue(null);
+  vi.mocked(gateway.setCollectionSourceRoot).mockRejectedValue(new Error("디스크 오류"));
+  vi.mocked(open).mockResolvedValue("C:\\book");
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView initialSection="data" restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+  await userEvent.click(screen.getByText("구버전 자료 가져오기"));
+
+  await user.click(await screen.findByRole("button", { name: "컬렉션 소스 폴더 변경" }));
+
+  expect(await screen.findByText("디스크 오류")).toBeVisible();
+});
+
+it("keeps backup load errors visible for retry", async () => {
+  vi.useFakeTimers();
+  let rejectBackups!: (error: Error) => void;
+  let resolveRetry!: (backups: MetadataBackup[]) => void;
+  const failed = new Promise<MetadataBackup[]>((_resolve, reject) => { rejectBackups = reject; });
+  const retried = new Promise<MetadataBackup[]>((resolve) => { resolveRetry = resolve; });
+  const gateway = createGateway();
+  vi.mocked(gateway.listMetadataBackups).mockReturnValueOnce(failed).mockReturnValueOnce(retried);
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "데이터 관리" }));
+  act(() => vi.advanceTimersByTime(0));
+  await act(async () => { rejectBackups(new Error("backup failed")); await failed.catch(() => undefined); });
+  act(() => vi.advanceTimersByTime(5_000));
+
+  expect(screen.getByText("backup failed")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+  act(() => vi.advanceTimersByTime(0));
+  await act(async () => { resolveRetry([]); await retried; });
+
+  expect(gateway.listMetadataBackups).toHaveBeenCalledTimes(2);
+  expect(screen.getByText("사용할 수 있는 백업이 없습니다.")).toBeVisible();
+  expect(screen.queryByText("backup failed")).not.toBeInTheDocument();
+});
+
+it("shows the Edge connection and copies its hidden key on request", async () => {
+  const user = userEvent.setup();
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
+  const gateway = createGateway();
+  vi.mocked(gateway.getExtensionConnection).mockResolvedValue({
+    baseUrl: "http://127.0.0.1:32145",
+    token: "0123456789abcdef0123456789abcdef",
+    status: "ready",
+  });
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  await user.click(screen.getByRole("button", { name: "연결" }));
+
+  expect(await screen.findByText("PC 연결 준비됨")).toBeVisible();
+  expect(screen.getByText("http://127.0.0.1:32145")).toBeVisible();
+  const token = screen.getByLabelText("확장 프로그램 연결 키");
+  expect(token).toHaveAttribute("type", "password");
+  expect(token).toHaveAttribute("readonly");
+  expect(writeText).not.toHaveBeenCalled();
+
+  await user.click(screen.getByRole("button", { name: "연결 키 복사" }));
+
+  expect(writeText).toHaveBeenCalledWith("0123456789abcdef0123456789abcdef");
+  expect(await screen.findByText("연결 키를 복사했습니다")).toBeVisible();
+});
+
+it("stores and removes an Kakao key without reading it back", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getKakaoCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.setKakaoApiKey).mockResolvedValue({ configured: true });
+  vi.mocked(gateway.deleteKakaoApiKey).mockResolvedValue({ configured: false });
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  await user.click(screen.getByRole("button", { name: "연결" }));
+  const kakaoStatusRow = (await screen.findByText("카카오 책 검색")).parentElement;
+  expect(within(kakaoStatusRow!).getByLabelText("카카오 REST API 키")).toHaveAttribute("placeholder", "설정되지 않음");
+  expect(await gateway.getKakaoCredentialStatus()).toEqual({ configured: false });
+  await user.type(screen.getByLabelText("카카오 REST API 키"), "new-secret");
+  await user.click(screen.getByRole("button", { name: "저장" }));
+
+  expect(gateway.setKakaoApiKey).toHaveBeenCalledWith("new-secret");
+  expect(screen.getByLabelText("카카오 REST API 키")).toHaveValue("");
+  expect(within(kakaoStatusRow!).getByLabelText("카카오 REST API 키")).toHaveAttribute("placeholder", "설정됨");
+  expect(screen.queryByDisplayValue("new-secret")).not.toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "키 삭제" }));
+  expect(screen.getByText("저장된 카카오 REST API 키를 삭제할까요?")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "삭제 확인" }));
+  expect(gateway.deleteKakaoApiKey).toHaveBeenCalledOnce();
+  expect(within(kakaoStatusRow!).getByLabelText("카카오 REST API 키")).toHaveAttribute("placeholder", "설정되지 않음");
+});
+
+it("opens the requested settings section", async () => {
+  const gateway = createGateway();
+  vi.mocked(gateway.getKakaoCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.getIgdbCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.getOnlineCatalogStatus).mockResolvedValue({ installed: false, workCount: 0, updateEnabled: false, updateIntervalSeconds: 0, lastAttemptAt: null, lastSuccessAt: null, lastAdded: 0, lastError: null, streams: [] });
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="external_services" />
+    </LibraryProvider>,
+  );
+
+  expect(await screen.findByRole("heading", { name: "연결" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "연결" })).toHaveAttribute("aria-current", "page");
+});
+
+it("shows only IGDB credential status and keeps stored values out of the inputs", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getKakaoCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.getIgdbCredentialStatus).mockResolvedValue({ configured: true });
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  await user.click(screen.getByRole("button", { name: "연결" }));
+  const statusRow = (await screen.findByText("IGDB")).parentElement;
+  expect(statusRow).not.toBeNull();
+  expect(within(statusRow!).getByLabelText("IGDB Client ID")).toHaveAttribute("placeholder", "설정됨");
+  expect(screen.getByLabelText("IGDB Client ID")).toHaveAttribute("type", "password");
+  expect(screen.getByLabelText("IGDB Client Secret")).toHaveAttribute("type", "password");
+  expect(screen.getByLabelText("IGDB Client ID")).toHaveValue("");
+  expect(screen.getByLabelText("IGDB Client Secret")).toHaveValue("");
+  expect(screen.queryByDisplayValue("stored-client-id")).not.toBeInTheDocument();
+  expect(screen.queryByDisplayValue("stored-client-secret")).not.toBeInTheDocument();
+});
+
+it("saves both IGDB credentials exactly and clears them after success", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getKakaoCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.getIgdbCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.setIgdbCredentials).mockResolvedValue({ configured: true });
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  await user.click(screen.getByRole("button", { name: "연결" }));
+  const clientId = await screen.findByLabelText("IGDB Client ID");
+  const clientSecret = screen.getByLabelText("IGDB Client Secret");
+  expect(screen.getByRole("button", { name: "IGDB 저장" })).toBeDisabled();
+  await user.type(clientId, " client-id ");
+  await user.type(clientSecret, " client-secret ");
+  await user.click(screen.getByRole("button", { name: "IGDB 저장" }));
+
+  expect(gateway.setIgdbCredentials).toHaveBeenCalledWith({ clientId: " client-id ", clientSecret: " client-secret " });
+  expect(clientId).toHaveValue("");
+  expect(clientSecret).toHaveValue("");
+  const statusRow = screen.getByText("IGDB").parentElement;
+  expect(within(statusRow!).getByLabelText("IGDB Client ID")).toHaveAttribute("placeholder", "설정됨");
+});
+
+it("requires confirmation before deleting IGDB credentials", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getKakaoCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.getIgdbCredentialStatus).mockResolvedValue({ configured: true });
+  vi.mocked(gateway.deleteIgdbCredentials).mockResolvedValue({ configured: false });
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  await user.click(screen.getByRole("button", { name: "연결" }));
+  const statusRow = (await screen.findByText("IGDB")).parentElement;
+  await user.click(within(statusRow!).getByRole("button", { name: "IGDB 키 삭제" }));
+  expect(gateway.deleteIgdbCredentials).not.toHaveBeenCalled();
+  expect(screen.getByText("저장된 IGDB 자격 증명을 삭제할까요?")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "IGDB 삭제 확인" }));
+
+  expect(gateway.deleteIgdbCredentials).toHaveBeenCalledOnce();
+  expect(within(statusRow!).getByLabelText("IGDB Client ID")).toHaveAttribute("placeholder", "설정되지 않음");
+});
+
+it("stores and removes a TMDB token without reading it back", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getTmdbCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.setTmdbToken).mockResolvedValue({ configured: true });
+  vi.mocked(gateway.deleteTmdbToken).mockResolvedValue({ configured: false });
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="external_services" />
+    </LibraryProvider>,
+  );
+
+  const statusRow = (await screen.findByText("TMDB")).parentElement;
+  expect(statusRow).not.toBeNull();
+  const token = screen.getByLabelText("TMDB API Read Access Token");
+  expect(within(statusRow!).getByLabelText("TMDB API Read Access Token")).toHaveAttribute("placeholder", "설정되지 않음");
+  expect(token).toHaveAttribute("type", "password");
+  expect(token).toHaveValue("");
+  await user.type(token, "  tmdb-secret  ");
+  await user.click(screen.getByRole("button", { name: "TMDB 저장" }));
+
+  expect(gateway.setTmdbToken).toHaveBeenCalledWith("tmdb-secret");
+  expect(token).toHaveValue("");
+  expect(within(statusRow!).getByLabelText("TMDB API Read Access Token")).toHaveAttribute("placeholder", "설정됨");
+  expect(screen.queryByDisplayValue("tmdb-secret")).not.toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "TMDB 키 삭제" }));
+  expect(gateway.deleteTmdbToken).not.toHaveBeenCalled();
+  expect(screen.getByText("저장된 TMDB API Read Access Token을 삭제할까요?")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "TMDB 삭제 확인" }));
+
+  expect(gateway.deleteTmdbToken).toHaveBeenCalledOnce();
+  expect(within(statusRow!).getByLabelText("TMDB API Read Access Token")).toHaveAttribute("placeholder", "설정되지 않음");
+});
+
+it("changes online catalog automatic update settings", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getKakaoCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.getOnlineCatalogStatus).mockResolvedValue({
+    installed: true,
+    workCount: 100,
+    updateEnabled: true,
+    updateIntervalSeconds: 3_600,
+    lastAttemptAt: null,
+    lastSuccessAt: null,
+    lastAdded: 0,
+    lastError: null,
+    streams: [],
+  });
+  vi.mocked(gateway.setOnlineCatalogUpdateSettings).mockImplementation(async (enabled, intervalSeconds) => ({
+    installed: true,
+    workCount: 100,
+    updateEnabled: enabled,
+    updateIntervalSeconds: intervalSeconds,
+    lastAttemptAt: null,
+    lastSuccessAt: null,
+    lastAdded: 0,
+    lastError: null,
+    streams: [],
+  }));
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  await user.click(screen.getByRole("button", { name: "온라인 카탈로그" }));
+  const toggle = await screen.findByRole("checkbox", { name: "자동 갱신" });
+  expect(toggle).toBeChecked();
+  await user.selectOptions(screen.getByRole("combobox", { name: "갱신 간격" }), "21600");
+  expect(gateway.setOnlineCatalogUpdateSettings).toHaveBeenCalledWith(true, 21_600);
+  await user.click(toggle);
+  expect(gateway.setOnlineCatalogUpdateSettings).toHaveBeenCalledWith(false, 21_600);
+});
+
+it("shows separate catalog stream progress and bounds an incomplete Japanese update to one page", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getOnlineCatalogStatus).mockResolvedValue({
+    installed: true,
+    workCount: 100,
+    updateEnabled: true,
+    updateIntervalSeconds: 3_600,
+    lastAttemptAt: "2026-09-05T01:00:00Z",
+    lastSuccessAt: "2026-09-05T01:00:00Z",
+    lastAdded: 2,
+    lastError: null,
+    streams: [
+      {
+        provider: "kHentai",
+        language: "korean",
+        hasState: true,
+        initialComplete: true,
+        watermark: 100,
+        cursor: null,
+        pendingMax: 5,
+        lastAttemptAt: "2026-09-05T01:00:00Z",
+        lastProgressAt: "2026-09-05T01:00:00Z",
+        lastCompletedAt: "2026-09-05T01:00:00Z",
+        lastAdded: 2,
+        lastError: null,
+      },
+      {
+        provider: "kHentai",
+        language: "japanese",
+        hasState: true,
+        initialComplete: false,
+        watermark: 90,
+        cursor: 80,
+        pendingMax: 10,
+        lastAttemptAt: "2026-09-05T00:30:00Z",
+        lastProgressAt: "2026-09-05T00:20:00Z",
+        lastCompletedAt: null,
+        lastAdded: 1,
+        lastError: "요청이 제한되었습니다",
+      },
+    ],
+  });
+  vi.mocked(gateway.updateOnlineCatalog).mockResolvedValue({
+    language: "japanese",
+    added: 1,
+    pages: 1,
+    reason: "pageLimit",
+    lastSuccessAt: "2026-09-05T01:10:00Z",
+  });
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="catalog" />
+    </LibraryProvider>,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "온라인 카탈로그" }));
+  await userEvent.click(await screen.findByText("수집 상세·카탈로그 복구"));
+
+  expect((await screen.findByText("한국어 카탈로그")).parentElement).toHaveTextContent("초기 수집 완료 · 대기 5개");
+  const japaneseRow = screen.getByText("일본어 카탈로그").parentElement;
+  expect(japaneseRow).toHaveTextContent("초기 수집 진행 중 · 대기 10개");
+  expect(japaneseRow).toHaveTextContent("마지막 진행");
+  expect(japaneseRow).toHaveTextContent("마지막 시도 실패 — 요청이 제한되었습니다");
+
+  await user.click(within(japaneseRow!).getByRole("button", { name: "일본어 초기 수집 계속" }));
+
+  expect(gateway.updateOnlineCatalog).toHaveBeenCalledWith("japanese", 1);
+});
+
+it("bounds a completed Japanese settings update to forty pages", async () => {
+  const gateway = createGateway();
+  vi.mocked(gateway.getOnlineCatalogStatus).mockResolvedValue(catalogStatusWithJapanese(true));
+  vi.mocked(gateway.updateOnlineCatalog).mockResolvedValue({
+    language: "japanese",
+    added: 0,
+    pages: 1,
+    reason: "upToDate",
+    lastSuccessAt: "2026-09-05T02:00:00Z",
+  });
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="catalog" />
+    </LibraryProvider>,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "온라인 카탈로그" }));
+  await userEvent.click(await screen.findByText("수집 상세·카탈로그 복구"));
+
+  const japaneseRow = (await screen.findByText("일본어 카탈로그")).parentElement;
+  await userEvent.click(within(japaneseRow!).getByRole("button", { name: "일본어 신규 작품 갱신" }));
+
+  expect(gateway.updateOnlineCatalog).toHaveBeenCalledWith("japanese", 40);
+});
+
+it("confirms a Japanese checkpoint-only reset and keeps catalog data wording explicit", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  const resetStatus = {
+    installed: true,
+    workCount: 100,
+    updateEnabled: true,
+    updateIntervalSeconds: 3_600,
+    lastAttemptAt: null,
+    lastSuccessAt: null,
+    lastAdded: 0,
+    lastError: null,
+    streams: [],
+  };
+  vi.mocked(gateway.getOnlineCatalogStatus).mockResolvedValue(resetStatus);
+  vi.mocked(gateway.resetJapaneseCatalogCheckpoint).mockResolvedValue(resetStatus);
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="catalog" />
+    </LibraryProvider>,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "온라인 카탈로그" }));
+  await userEvent.click(await screen.findByText("수집 상세·카탈로그 복구"));
+
+  await user.click(await screen.findByRole("button", { name: "일본어 체크포인트 재설정" }));
+  expect(gateway.resetJapaneseCatalogCheckpoint).not.toHaveBeenCalled();
+  expect(screen.getByText("일본어 카탈로그 체크포인트만 재설정할까요? 기존 카탈로그와 북마크·읽기 기록은 그대로 유지됩니다.")).toBeVisible();
+
+  await user.click(screen.getByRole("button", { name: "체크포인트 재설정 확인" }));
+
+  expect(gateway.resetJapaneseCatalogCheckpoint).toHaveBeenCalledOnce();
+  expect(screen.getByText("일본어 카탈로그").parentElement).toHaveTextContent("초기 수집 전");
+});
+
+it("shows catalog status and restores the catalog from a re-selected VCK folder", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getKakaoCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.getOnlineCatalogStatus).mockResolvedValue({
+    installed: true,
+    workCount: 100,
+    updateEnabled: true,
+    updateIntervalSeconds: 3_600,
+    lastAttemptAt: "2026-08-28T09:00:00Z",
+    lastSuccessAt: "2026-08-28T09:00:00Z",
+    lastAdded: 3,
+    lastError: null,
+    streams: [],
+  });
+  vi.mocked(gateway.importVckCatalog).mockResolvedValue({
+    installed: true,
+    workCount: 200,
+    updateEnabled: true,
+    updateIntervalSeconds: 3_600,
+    lastAttemptAt: null,
+    lastSuccessAt: null,
+    lastAdded: 0,
+    lastError: null,
+    streams: [],
+  });
+  vi.mocked(open).mockResolvedValue("D:\\VCK");
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "온라인 카탈로그" }));
+  await userEvent.click(await screen.findByText("수집 상세·카탈로그 복구"));
+
+  await user.click(screen.getByRole("button", { name: "온라인 카탈로그" }));
+  expect(await screen.findByText("설치됨 · 100개 작품")).toBeVisible();
+  expect(screen.getByText("한국어 카탈로그").parentElement).toHaveTextContent("신규 3개");
+
+  await user.click(screen.getByRole("button", { name: "VCK 폴더 다시 선택" }));
+
+  expect(gateway.importVckCatalog).toHaveBeenCalledWith("D:\\VCK");
+  expect(await screen.findByText(/카탈로그를 교체했습니다/)).toBeVisible();
+  expect(screen.getByText("설치됨 · 200개 작품")).toBeVisible();
+});
+
+it("keeps the catalog error message when the VCK restore fails", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getKakaoCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.getOnlineCatalogStatus).mockResolvedValue({ installed: true, workCount: 100, updateEnabled: true, updateIntervalSeconds: 3600, lastAttemptAt: null, lastSuccessAt: null, lastAdded: 0, lastError: null, streams: [] });
+  vi.mocked(gateway.importVckCatalog).mockRejectedValue({ code: "invalid_online_catalog", message: "온라인 카탈로그 데이터가 올바르지 않습니다" });
+  vi.mocked(open).mockResolvedValue("D:\\Broken");
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="catalog" />
+    </LibraryProvider>,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "온라인 카탈로그" }));
+  await userEvent.click(await screen.findByText("수집 상세·카탈로그 복구"));
+
+  await user.click(await screen.findByRole("button", { name: "VCK 폴더 다시 선택" }));
+
+  expect(await screen.findByText("온라인 카탈로그 데이터가 올바르지 않습니다")).toBeVisible();
+});
+
+it("confirms before clearing the remote manga cache", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getKakaoCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.clearRemoteMangaCache).mockResolvedValue(undefined);
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  await user.click(screen.getByRole("button", { name: "온라인 카탈로그" }));
+  await user.click(await screen.findByRole("button", { name: "이미지 캐시 지우기" }));
+  expect(gateway.clearRemoteMangaCache).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "캐시 삭제 확인" }));
+  expect(gateway.clearRemoteMangaCache).toHaveBeenCalledOnce();
+  expect(await screen.findByText("온라인 이미지 캐시를 지웠습니다")).toBeVisible();
+});
+
+
+it("opens a scan-first extension pairing QR from Cloud settings", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getCloudCaptureSettings).mockResolvedValue({ enabled: true, apiBaseUrl: "https://cloud.example.test", tokenConfigured: true });
+  vi.mocked(gateway.createExtensionPairing!).mockResolvedValue({
+    pairingUrl: "https://cloud.example.test/extension-pair#" + "A".repeat(43),
+    expiresAt: "2099-01-01T00:00:00Z",
+  });
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="cloud" />
+    </LibraryProvider>,
+  );
+
+  await user.click(await screen.findByRole("button", { name: "확장 연결" }));
+  expect(gateway.createExtensionPairing).toHaveBeenCalledOnce();
+  expect(await screen.findByRole("img", { name: "Lakomics 확장 연결 QR 코드" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "링크 복사" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "새로 발급" })).toBeEnabled();
+  expect(document.body.textContent).not.toContain("AAAAAAAAAAAAAAAAAAAA");
+});
+
+it("configures Cloud Capture and forwards manual sync results", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  const cloud = { enabled: true, apiBaseUrl: "http://100.76.119.29:32146", tokenConfigured: true };
+  const syncResult = { attempted: 1, acknowledged: 1, failed: 0, reviewPending: 0, added: 1, videoAdded: 1, classificationChanged: 0 };
+  vi.mocked(gateway.getCloudCaptureSettings).mockResolvedValue(cloud);
+  vi.mocked(gateway.setCloudCaptureSettings).mockResolvedValue({ ...cloud, apiBaseUrl: "https://cloud.example.test" });
+  vi.mocked(gateway.setCloudApiToken).mockResolvedValue({ configured: true });
+  vi.mocked(gateway.testCloudCaptureConnection).mockResolvedValue({ pendingCount: 3 });
+  vi.mocked(gateway.runDueCloudCaptureSync).mockResolvedValue(syncResult);
+  const onCloudCaptureSynced = vi.fn();
+
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="cloud" onCloudCaptureSynced={onCloudCaptureSynced} />
+    </LibraryProvider>,
+  );
+
+  await user.click(await screen.findByText("서버 연결 설정"));
+  const url = await screen.findByRole("textbox", { name: "서버 주소" });
+  fireEvent.change(url, { target: { value: "https://cloud.example.test" } });
+  await user.click(screen.getByRole("button", { name: "저장" }));
+  expect(gateway.setCloudCaptureSettings).toHaveBeenCalledWith(true, "https://cloud.example.test", true);
+
+  await user.type(screen.getByLabelText("서버 연결 키"), "new-secret");
+  await user.click(screen.getByRole("button", { name: "토큰 저장" }));
+  expect(gateway.setCloudApiToken).toHaveBeenCalledWith("new-secret");
+
+  await user.click(screen.getByRole("button", { name: "연결 확인" }));
+  expect(await screen.findByText("Cloud 연결 정상 · 대기 3건")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "지금 수신" }));
+  expect(onCloudCaptureSynced).toHaveBeenCalledWith(syncResult);
+});
+
+function createGateway(): LibraryGateway {
+  return {
+    getIgdbCredentialStatus: vi.fn().mockResolvedValue({ configured: false }),
+    setIgdbCredentials: vi.fn(),
+    deleteIgdbCredentials: vi.fn(),
+    searchIgdbGames: vi.fn(),
+    previewIgdbGame: vi.fn(),
+    applyIgdbGame: vi.fn(),
+    refreshIgdbGame: vi.fn(),
+    getIgdbConnection: vi.fn(),
+    replaceIgdbGameArtwork: vi.fn(),
+    getTmdbCredentialStatus: vi.fn().mockResolvedValue({ configured: false }),
+    setTmdbToken: vi.fn(),
+    deleteTmdbToken: vi.fn(),
+    searchTmdbMovies: vi.fn(),
+    previewTmdbMovie: vi.fn(),
+    applyTmdbMovie: vi.fn(),
+    refreshTmdbMovie: vi.fn(),
+    getTmdbConnection: vi.fn(),
+    replaceTmdbMovieArtwork: vi.fn(),
+    openLibrary: vi.fn(), importVckCatalog: vi.fn(), getOnlineCatalogStatus: vi.fn().mockResolvedValue({ installed: false, workCount: 0, updateEnabled: true, updateIntervalSeconds: 3600, lastAttemptAt: null, lastSuccessAt: null, lastAdded: 0, lastError: null }), getCatalogVisibilityPolicy: vi.fn().mockResolvedValue({ hiddenCategories: [], blockedTags: [] }), setCatalogCategoryHidden: vi.fn(), setCatalogTagBlocked: vi.fn(), searchCatalogGroups: vi.fn(), getCatalogGroupEditions: vi.fn(), setCatalogGroupRepresentative: vi.fn(), listCatalogReview: vi.fn(), generateCatalogReview: vi.fn(), decideCatalogReview: vi.fn(), searchOnlineCatalog: vi.fn(), suggestOnlineCatalog: vi.fn(), updateOnlineCatalog: vi.fn(), resetJapaneseCatalogCheckpoint: vi.fn(), setOnlineCatalogUpdateSettings: vi.fn(), runDueOnlineCatalogUpdate: vi.fn(), getCloudCaptureSettings: vi.fn().mockResolvedValue({ enabled: false, apiBaseUrl: null, tokenConfigured: false }), setCloudCaptureSettings: vi.fn(), setCloudApiToken: vi.fn(), deleteCloudApiToken: vi.fn(), testCloudCaptureConnection: vi.fn().mockResolvedValue({ pendingCount: 0 }), createExtensionPairing: vi.fn(), runDueCloudCaptureSync: vi.fn().mockResolvedValue({ attempted: 0, acknowledged: 0, failed: 0, reviewPending: 0, added: 0, videoAdded: 0, classificationChanged: 0 }), cloudBackfillPreflight: vi.fn(), cloudBackfillSeed: vi.fn(), cloudBackfillRunCycle: vi.fn(), cloudBackfillProgress: vi.fn().mockResolvedValue({ controlState: "idle", totalAssets: 0, queued: 0, preparing: 0, uploading: 0, committing: 0, completed: 0, failed: 0, activeWorkers: 0, lastError: null }), cloudBackfillRetryFailed: vi.fn(), getOnlineCatalogWorkDetail: vi.fn(), setOnlineCatalogBookmark: vi.fn(), resolveOnlineCatalogWork: vi.fn(), getRemoteReadingProgress: vi.fn(), saveRemoteReadingProgress: vi.fn(), clearRemoteMangaCache: vi.fn(), getExtensionConnection: vi.fn().mockResolvedValue({ baseUrl: "http://127.0.0.1:32145", token: "test", status: "ready" }), listClassifications: vi.fn(),
+    listAlbums: vi.fn().mockResolvedValue([]), createAlbum: vi.fn(), renameAlbum: vi.fn(), moveAlbum: vi.fn(), updateAlbumAppearance: vi.fn(), deleteAlbum: vi.fn(),
+    createClassification: vi.fn(), renameClassification: vi.fn(), moveClassification: vi.fn(), updateClassificationAppearance: vi.fn(),
+    deleteClassification: vi.fn(), listAssets: vi.fn(), listAssetDateBuckets: vi.fn().mockResolvedValue([]), indexMissingSimilarityHashes: vi.fn(),
+    listAssetCreators: vi.fn().mockResolvedValue([]),
+    getRevisitSlate: vi.fn().mockResolvedValue({ localDate: "", createdAt: "", revision: 0, bundles: [] }),
+    reshuffleRevisitBundle: vi.fn().mockResolvedValue({ localDate: "", createdAt: "", revision: 0, bundles: [] }),
+    reshuffleRevisitSlate: vi.fn().mockResolvedValue({ localDate: "", createdAt: "", revision: 0, bundles: [] }),
+    recordAssetOpened: vi.fn().mockResolvedValue(undefined),
+    recordAssetsExposed: vi.fn().mockResolvedValue(undefined),
+    setRevisitPreference: vi.fn().mockResolvedValue(undefined),
+    listSimilarityReviews: vi.fn(), decideSimilarityReview: vi.fn(), getAsset: vi.fn(), updateAssetMetadata: vi.fn(), setAssetFavorite: vi.fn(), setAssetsFavorite: vi.fn(),
+    getAssetClassifications: vi.fn(), setAssetClassification: vi.fn(), patchAssetAlbums: vi.fn(), getAssetAlbums: vi.fn().mockResolvedValue([]), ingestMedia: vi.fn(),
+    listCollections: vi.fn().mockResolvedValue([]), searchMangaDex: vi.fn(), previewMangaDex: vi.fn(), applyMangaDex: vi.fn(), refreshMangaDex: vi.fn(), getMangaDexConnection: vi.fn().mockResolvedValue(null), createCollection: vi.fn(), updateCollection: vi.fn(), deleteCollection: vi.fn(), setCollectionCover: vi.fn(), setCollectionShowcase: vi.fn(), getAssetCollections: vi.fn().mockResolvedValue([]), patchAssetCollections: vi.fn(),
+    preparePendingVideos: vi.fn(), retryVideoPreparation: vi.fn(), inspectBookImport: vi.fn(), importBookCollections: vi.fn(), getCollectionSourceRoot: vi.fn().mockResolvedValue(null), setCollectionSourceRoot: vi.fn().mockResolvedValue(0), importCollectionArtworks: vi.fn().mockResolvedValue(0),
+  listCollectionWorkArtworks: vi.fn().mockResolvedValue([]), listCollectionCovers: vi.fn(), listCollectionVolumes: vi.fn(), syncMangaDexVolumeCovers: vi.fn(), inspectLegacyPackageMigration: vi.fn(), executeLegacyPackageMigration: vi.fn(), getKakaoCredentialStatus: vi.fn().mockResolvedValue({ configured: false }), setKakaoApiKey: vi.fn(), deleteKakaoApiKey: vi.fn(), searchKakao: vi.fn(), applyKakao: vi.fn(), refreshKakao: vi.fn(), getBookConnection: vi.fn(), getReleaseWatchStatus: vi.fn().mockResolvedValue({ enabled: false, lastCheckedAt: null }), setReleaseWatchEnabled: vi.fn().mockResolvedValue({ enabled: false, lastCheckedAt: null }), takeUnreadReleaseChanges: vi.fn().mockResolvedValue([]), listUnreadReleaseChanges: vi.fn().mockResolvedValue([]), runDueReleaseWatch: vi.fn().mockResolvedValue({ checked: 0, changedCollections: 0, skipped: 0, stopReason: null }),
+    getMangaRoot: vi.fn().mockResolvedValue(null), setMangaRoot: vi.fn().mockResolvedValue(undefined), scanManga: vi.fn().mockResolvedValue(0), listMangaSeries: vi.fn().mockResolvedValue([]),
+    trashAssets: vi.fn(), restoreAsset: vi.fn(), restoreAssets: vi.fn(),
+    listTrash: vi.fn(), emptyTrash: vi.fn(), getTrashPolicy: vi.fn(), setTrashPolicy: vi.fn(),
+    ensureDailyBackup: vi.fn(), listMetadataBackups: vi.fn().mockResolvedValue([]),
+    restoreMetadataBackup: vi.fn(), purgeExpiredTrash: vi.fn(),
+  };
+}
+
+function catalogStatusWithJapanese(initialComplete: boolean): CatalogStatus {
+  return {
+    installed: true,
+    workCount: 100,
+    updateEnabled: true,
+    updateIntervalSeconds: 3_600,
+    lastAttemptAt: null,
+    lastSuccessAt: null,
+    lastAdded: 0,
+    lastError: null,
+    streams: [{
+      provider: "kHentai",
+      language: "japanese",
+      hasState: true,
+      initialComplete,
+      watermark: 100,
+      cursor: null,
+      pendingMax: 0,
+      lastAttemptAt: null,
+      lastProgressAt: null,
+      lastCompletedAt: initialComplete ? "2026-09-05T01:00:00Z" : null,
+      lastAdded: 0,
+      lastError: null,
+    }],
+  };
+}
+
+
+it("uses the existing sidebar and avoids backup work outside data management", async () => {
+  const gateway = createGateway();
+  const { container } = render(<LibraryProvider gateway={gateway}>
+    <WorkspaceChromeProvider scope="settings">
+      <aside data-testid="settings-sidebar"><ChromeTarget name="navigation" /></aside>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+    </WorkspaceChromeProvider>
+  </LibraryProvider>);
+  const sidebar = screen.getByTestId("settings-sidebar");
+  expect(within(sidebar).getByRole("navigation", { name: "설정 구역" })).toBeInTheDocument();
+  expect(container.querySelector(".settings-view__body nav")).toBeNull();
+  await userEvent.click(within(sidebar).getByRole("button", { name: "클라우드" }));
+  await screen.findByText("클라우드 → PC");
+  await userEvent.click(within(sidebar).getByRole("button", { name: "정보·도움말" }));
+  expect(gateway.listMetadataBackups).not.toHaveBeenCalled();
+  await userEvent.click(within(sidebar).getByRole("button", { name: "데이터 관리" }));
+  await waitFor(() => expect(gateway.listMetadataBackups).toHaveBeenCalledTimes(1));
+});
+
+it("saves replication independently without applying an unsaved server address", async () => {
+  const gateway = createGateway();
+  const settings = { enabled: true, captureEnabled: true, apiBaseUrl: "https://saved.example", tokenConfigured: true };
+  vi.mocked(gateway.getCloudCaptureSettings).mockResolvedValue(settings);
+  vi.mocked(gateway.setCloudCaptureSettings).mockResolvedValue({ ...settings, enabled: false });
+  render(<LibraryProvider gateway={gateway}><SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="cloud" /></LibraryProvider>);
+  await userEvent.click(await screen.findByText("서버 연결 설정"));
+  fireEvent.change(screen.getByRole("textbox", { name: "서버 주소" }), { target: { value: "https://draft.example" } });
+  await userEvent.click(screen.getByRole("checkbox", { name: "자동 복제" }));
+  await waitFor(() => expect(gateway.setCloudCaptureSettings).toHaveBeenCalledWith(false, "https://saved.example", true));
+  expect(screen.getByRole("checkbox", { name: "자동 수신" })).toBeChecked();
+  expect(screen.getByRole("textbox", { name: "서버 주소" })).toHaveValue("https://draft.example");
+});

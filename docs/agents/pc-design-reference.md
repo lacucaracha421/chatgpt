@@ -13,7 +13,6 @@ It also supersedes visual assumptions that depended on:
 - a permanent horizontal toolbar;
 - a fixed old sidebar/topbar placement;
 - justified rows as the only normal Asset layout;
-- a universal ban on contextual icon tooltips;
 - completely flat game/manga collection objects.
 
 Do not restart the 1–6 reference comparison or Chrome A/B/C vote unless the user explicitly asks to reopen the design direction.
@@ -50,7 +49,7 @@ The visual system is dark-neutral, square/rectilinear, low-radius, line-icon hea
 
 ### Area rail
 
-- Primary areas are Assets, Collections, and Manga. Trash and management live quietly at the bottom.
+- Primary areas are Assets, Collections, and Manga. A single management entry at the bottom opens work status, the unsorted inbox, trash, statistics, similarity review, and settings. Work/error indicators remain on this entry; do not duplicate work, unsorted, or trash as separate rail buttons.
 - The rail is narrow and visually weaker than the contextual index.
 - Selection uses the ivory single-selection language; unrelated icons remain neutral.
 - Switching areas preserves the owning screen state where the current code supports it rather than resetting state for visual neatness.
@@ -69,6 +68,7 @@ The visual system is dark-neutral, square/rectilinear, low-radius, line-icon hea
 - Do not recreate the old full toolbar above the content merely because individual controls used to live there.
 - Selection-only commands remain in selection/context surfaces, not inserted into the persistent header.
 - Exception (2026-09-09, user-approved CHAR-UI-002~006, native verification pending): the series/character review screen may expose selection accessories (count, clear, exclude, review entry) in the titlebar as `titleAccessory`. Converging this with the Asset SelectionBar pattern is a separate backlog decision, not a license to spread selection commands to other headers.
+- Folder registration/conversion are one-time setup actions: expose them in the subfolder `폴더 더보기` menu, not as persistent buttons or on ordinary root folders. Existing registered series retain their series view. Series headers show the labeled `캐릭터 만들기` action and keep cover setup in `시리즈 더보기`; character headers retain reference and character actions. Do not add persistent refresh buttons: ingestion/classification updates refresh the view automatically, with error retry and gallery context-menu refresh retained for recovery.
 
 ## 4. View settings
 
@@ -163,12 +163,11 @@ Treat these as semantic token inputs rather than repeated raw colors. Multi-sele
 
 - Menus, context menus, anchored panels, and search surfaces use thin borders, small radii, shallow contrast, and only the shadow needed to read as floating.
 - Dialogs are reserved for modal confirmation or genuinely blocking flows.
-- Explicit icon-only PC shell controls may use short non-interactive tooltips when the icon is ambiguous.
-- Tooltips supplement, never replace, `aria-label` and keyboard-accessible naming.
-- Do not attach a tooltip to every labeled button or every decorative icon.
+- Do not display tooltips on hover or keyboard focus, including shared tooltip overlays and native HTML `title` bubbles.
+- Preserve `aria-label` and keyboard-accessible naming; supplementary descriptions may use `aria-description` without a visual popup. Keep actual headings and dialog titles intact.
 - Focus, selected, disabled, open, destructive, and hover states must remain distinguishable without color alone.
 
-The old “no icon tooltips anywhere” rule is superseded for the PC shell by ADR-0034.
+The user removed hover/focus tooltips on 2026-09-12, superseding the tooltip allowance in ADR-0034; its remaining shell and browsing decisions still apply.
 
 ## 9. Collection / Works presentation
 
@@ -246,7 +245,7 @@ Keep state with the feature that owns it; the shell should mostly relocate contr
 | --- | --- |
 | Shell / area rail / contextual index | `app/src/layout/WorkspaceChrome.tsx`, `WorkspaceNavigation.tsx`, `ViewToolbar.tsx`, `WindowControls.tsx` |
 | Search surfaces | `app/src/layout/ChromeSearch.tsx`, `SearchSurface.tsx`, owning browser query state |
-| Anchored settings / floating UI | `app/src/shared/ui/AnchoredPanel.tsx`, `Menu.tsx`, `ContextMenu.tsx`, `TooltipLayer.tsx` |
+| Anchored settings / floating UI | `app/src/shared/ui/AnchoredPanel.tsx`, `Menu.tsx`, `ContextMenu.tsx` |
 | Classification / Albums | `app/src/classification/ClassificationSidebar.tsx` |
 | Asset controls / gallery / selection | `app/src/assets/AssetToolbar.tsx`, `AssetBrowser.tsx`, `AssetGallery.tsx`, `SelectionBar.tsx` |
 | Collection browser / details | `app/src/collections/CollectionBrowser.tsx`, `CollectionCard.tsx`, type detail components |

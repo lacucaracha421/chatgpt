@@ -63,12 +63,22 @@ Character presentation groups do not change this candidate roster.
 
 ### Broad or unrelated classification
 
-An image saved to a broad classification such as `만화`, `게임`, or `기타` is
-stored there and receives no character comparison. Lakomics does not search every
-registered series, infer a likely series, create review evidence, or move the image.
+Updated by user approval on 2026-09-12: when the saved folder has no registered
+series ancestor, compare the image with ready characters in registered series
+below that folder. This applies to both top-level and intermediate folders, never
+to unrelated branches. Folder names do not affect eligibility.
 
-Saving to a broad category means the user did not identify a suitable child series.
-The application must respect that decision rather than guess across the library.
+Enabled series, asset exclusions, manual-only characters, and Originals protection
+still govern the roster. Compare all eligible characters together, including
+competitors from different descendant series. The existing six-reference support
+and competing-person checks still gate automatic acceptance. A confident result
+adds character membership without changing the ordinary classification or file;
+ambiguous results stay quietly in the saved folder.
+
+Expected scale is at most a few dozen characters. Reuse the existing local worker,
+one query extraction per image and cached explicit references (at most 25 per
+character); no extra model, network service, or whole-library image scan is added.
+An unrelated folder without eligible series descendants creates no character job.
 
 If the user later moves the image into a registered series or one of its ordinary
 descendants, that explicit reclassification may enqueue character recognition for
@@ -85,20 +95,28 @@ series under a separately approved workflow.
 Character recognition compares the incoming query image with explicit reference
 sets, not with every asset displayed in a character folder.
 
-For each ready character in the applicable series, the reference set consists of:
-
-- up to five anchor references; and
-- up to twenty explicitly approved learned references.
+For each ready character in the applicable series, one reference list contains up
+to 25 explicitly selected images. The former anchor/learned split remains only in
+legacy storage and API compatibility; it does not change a reference's weight or
+require the original five slots to remain populated.
 
 Ordinary character-folder membership does not make an image a reference. Automatic
 acceptance also does not silently turn the accepted image into a reference.
 
-Five valid anchors mean that a character is eligible to participate in comparison;
+Five valid references mean that a character is eligible to participate in comparison;
 they do not mean that automatic acceptance is possible. Under the current support
 rule, automatic acceptance needs agreement from at least six references, so the UI
-must not label the five-anchor state as `자동 분류 준비 완료`. Reference management
-may show the factual anchor and learned-reference counts without exposing scheduler
-states or promising a particular accuracy.
+must not label the five-reference state as `자동 분류 준비 완료`. Reference management
+shows one valid-reference count without exposing scheduler states or promising a
+particular accuracy. With fewer than five valid references, the target and its
+manual memberships remain intact; comparison waits for enough valid references.
+
+Trash and other unavailable references do not participate in comparison or appear
+in the active editor list. Their stored links survive an ordinary settings save,
+so restoring eligibility makes them available again. The 25-reference storage cap
+includes retained unavailable links. Explicit removal deletes the reference link
+and records an exclusion without deleting character membership. Reference edits
+advance the edit revision to reject an older editor's overlapping save.
 
 The query image is loaded once and compared with the reference bundle for each
 ready character in the series. The existing conservative automatic decision and
@@ -170,7 +188,7 @@ work of choosing references without treating every member as trusted training da
    style when those signals are available.
 4. Present up to twenty suggested references in one compact selection surface.
 5. The user removes wrong or poor candidates and confirms the batch once.
-6. Only the confirmed batch becomes learned references.
+6. Only the confirmed batch joins the same reference list.
 
 The application must not claim that twenty references guarantee accuracy. Reference
 quality and diversity matter, and automatic-acceptance behavior requires measured
@@ -207,8 +225,27 @@ The user corrects the small number of exceptions later with `캐릭터에서 제
 
 ## Reference changes and historical assets
 
+Settings → General → `캐릭터 자동 분류` exposes the library's persisted whole-engine
+pause flag. Enabling resumes new and already queued images; it does not create a
+historical refresh. Disabling takes effect after the current image completes.
+The existing historical-refresh pause control remains separate: neither switch
+changes the other's saved flag. Merely opening Settings must not enable automation.
+
+Schema v69 repairs early development v68 libraries missing the admission sequence
+table and historical-refresh cursor. Startup takes a verified pre-migration DB
+snapshot, then fills only missing schema inside the migration transaction. Existing
+admission numbers, refresh progress, classifications, references, and pause flags
+are preserved; the repair does not enqueue historical work. Applied migrations must
+not be extended in place: schema additions require a new forward migration.
+
 Adding or confirming references immediately affects newly enqueued images. It does
 not automatically start a historical pass.
+
+Removing or trashing a reference also applies to future comparisons without a
+historical pass. Reference-set identity and prepared-input checks invalidate stale
+work. An explicitly requested historical refresh may reuse a strict append-only
+delta; reference removal/replacement falls back to comparison of the current valid
+set, reusing available image-feature caches rather than reusing invalid votes.
 
 The normal reference action therefore completes when the new reference set is
 saved. The UI does not block on historical analysis or imply that thousands of old
@@ -290,8 +327,10 @@ inbox or ask the user to understand scheduler internals.
   characters.
 - Saving the same image to a descendant of `던전밥` uses `던전밥` as the nearest
   registered series.
-- Saving to `만화`, `게임`, `기타`, an unrelated root, or Originals creates no
-  character job, prediction, relation, move, review item, or notification.
+- Saving to an ordinary parent folder compares only its eligible descendant
+  characters, with cross-series competition checks and no automatic folder move.
+- Saving to an unrelated folder without registered descendants, or Originals,
+  creates no character job, prediction, relation, move, review item, or notification.
 - Moving an asset later from a broad category into `던전밥` enqueues it exactly once
   against the current `던전밥` roster.
 
@@ -340,8 +379,9 @@ inbox or ask the user to understand scheduler internals.
 This design is one product contract but should not be implemented as an unreviewed
 big-bang rewrite.
 
-1. Narrow automatic scope so broad-category saves create no character work, while a
-   later explicit move into a registered series enqueues exactly once.
+1. Keep explicit series scope narrow; the 2026-09-12 policy also permits inference
+   among eligible descendants of an ordinary parent folder. Later explicit moves
+   enqueue once for the new scope without sweeping old assets.
 2. Remove normal review obligations and simplify series, character, and status UI
    without deleting backend evidence or decisions.
 3. Consolidate normal-folder conversion and diverse batch reference selection around
@@ -359,7 +399,8 @@ migration or cleanup.
 - Treating every character-folder asset as a learned reference.
 - Automatically learning from automatic decisions.
 - Automatically sweeping historical assets after reference changes.
-- Guessing a series from a broad-category save.
+- Guessing among series outside the saved folder's descendants or changing the
+  ordinary classification after an automatic character decision.
 - Removing backend evidence merely because normal UI no longer exposes it.
 - Redesigning Mobile, Works, Collection, or the collector beyond the character
   classification boundary required by this workflow.

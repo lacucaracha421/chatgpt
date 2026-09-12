@@ -20,6 +20,13 @@ and requires a stricter, separately reviewed policy.
 
 ## Product problem
 
+2026-09-12 update: the approved unified-reference contract in
+`character-classification-quiet-workflow-design-20260911.md` supersedes the user-facing
+anchor/learned distinction below. Legacy storage still supports existing libraries.
+Only currently valid references participate; trash/restore changes the active set
+without erasing its stored links. Removal or replacement is not an append-only
+delta and does not automatically schedule historical analysis.
+
 More references can provide enough supporting matches for reliable automatic
 classification. The current automatic threshold requires support from six
 references, so a character with only five anchors cannot be automatically

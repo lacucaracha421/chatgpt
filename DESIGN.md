@@ -99,9 +99,9 @@ PC 자산 기본 보기는 **수집일별 masonry/waterfall**이다. justified r
 ## 9. Floating surface와 tooltip
 
 - menu, context menu, popover, 보기 설정은 같은 얇은 경계 언어를 쓴다.
-- 파괴적 확인은 dialog, 즉시 선택은 menu/popover, 짧은 설명은 tooltip처럼 역할을 나눈다.
-- icon만으로 의미가 모호한 **명시적 PC shell 제어**에는 짧은 비대화형 tooltip을 허용한다. 모든 버튼에 의무적으로 붙이지 않는다.
-- tooltip은 `aria-label`을 대신하지 않는다. 키보드 focus에서도 같은 설명에 접근할 수 있어야 한다.
+- 파괴적 확인은 dialog, 즉시 선택은 menu/popover로 역할을 나눈다.
+- 커서를 올리거나 키보드 focus를 옮겼을 때 뜨는 tooltip은 사용하지 않는다. 공통 tooltip과 HTML `title` 말풍선 모두 포함한다.
+- 아이콘 버튼의 `aria-label`과 키보드 조작은 유지한다. 추가 설명은 필요하면 `aria-description`으로 제공하고, 화면에서 필요한 안내는 실제 내용이나 클릭해서 여는 surface에 둔다.
 - nested menu/popover를 부모 panel의 바깥 클릭으로 오인하지 않는다.
 - Esc는 가장 안쪽 surface부터 한 단계씩 닫고 같은 입력이 뒤의 선택 해제·viewer 종료까지 연쇄되지 않게 한다.
 - 마우스 뒤로가기와 Esc의 화면 이동 기록은 현재 탭 안으로 제한한다. 주요 탭 전환은 뒤로가기 기록에 넣지 않으며, 같은 탭에서 돌아갈 화면이나 닫을 surface가 없으면 현재 화면을 유지한다.

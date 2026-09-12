@@ -41,8 +41,9 @@ are separate states; a dated test result only covers its recorded revision and i
 - `operations/linux-desktop.md` — Linux desktop setup, filesystem guarantees, system media tools, and platform limitations.
 - `operations/pc-migration.md` — backup, recovery, credential portability, and PC migration.
 - `research/reference-projects.md` — optional external-project research, not adopted implementation.
-- `research/character-classification-quiet-workflow-design-20260911.md` — approved quiet character workflow, narrow recognition scope, reference curation, and normal-folder conversion.
+- `research/character-classification-quiet-workflow-design-20260911.md` — approved quiet character workflow, parent-folder inference scope, reference curation, and normal-folder conversion.
 - `research/character-reference-delta-reconsideration-design-20260911.md` — accepted batched reference expansion and delta-only historical reconsideration contract.
+- `research/character-ingestion-flow-audit-20260912.md` — image arrival cases, character classification paths, failure visibility gaps, historical refresh coverage, and bottleneck candidates; diagnostic findings, not an implementation plan.
 - `agents/issue-tracker.md` — backlog and explicitly requested GitHub Issue tracking boundaries.
 - `performance/online-catalog-query-regression-20260905.md` — measured Online Catalog query-plan/performance record.
 - `operations/catalog-hybrid-count-gate.md` — retained CATALOG-007A native acceptance evidence.

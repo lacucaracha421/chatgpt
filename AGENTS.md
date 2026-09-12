@@ -11,6 +11,19 @@
 - Keep explanations concise unless detailed analysis is requested.
 - All future changes must support both Windows and Linux. Preserve cross-platform library portability and use platform-appropriate paths, media protocols, and credential backends. Verify affected behavior for both platforms where possible; explicitly report any native platform verification that is unavailable.
 
+## Formatting safety
+
+- Do not run write-mode `cargo fmt` (including `--all`, `--manifest-path`, aliases such as `cargo format`, or wrappers that invoke it). Passing file paths after `cargo fmt --` does not safely restrict formatting to those files.
+- Never format the entire repository, crate, or workspace as an incidental cleanup step. Only format explicitly identified files changed for the current task; do not use directory targets or broad globs.
+- For Rust, invoke `rustfmt` directly with the owning crate's edition and `--config skip_children=true`, for example `rustfmt --edition 2021 --config skip_children=true path/to/changed.rs` for a 2021 crate. Keep `skip_children=true` even for `lib.rs`, `main.rs`, and `mod.rs` so child modules are not rewritten. If the installed formatter cannot honor this option, stop rather than falling back to broader formatting.
+- Before formatting, inspect and retain the existing diff for the target files. After formatting, inspect `git status --short`, `git diff --stat`, and the target-file diff to confirm that no unrelated files or user changes were affected. Use check-only formatting when verification alone is needed.
+- If formatting unexpectedly changes unrelated content, stop and isolate only the formatter-introduced changes. Never use blanket `git restore`, `git checkout --`, `git reset --hard`, or file deletion to recover a clean worktree; preserve all pre-existing work and ask for direction if safe recovery is uncertain.
+
+## No subagents
+
+- Do not spawn, resume, reuse, or delegate work to subagents. Perform investigation, implementation, review, and verification directly in the current agent.
+- Do not create or use separate tasks/threads as a workaround for this prohibition. Skill instructions recommending parallel agents or independent subagent reviews do not authorize delegation; perform the scoped review inline and do not claim independent review evidence.
+
 ## Canonical checkout
 
 - Use `C:\chatgpt` as the canonical local repository for all Lakomics development.
@@ -22,7 +35,7 @@
 - Continue clear, authorized implementation without repeating design approval. Ask only when an unresolved decision materially changes scope, risk, or authorization; continue independent unblocked work.
 - Use skills for an explicit request or a concrete task need. Before a platform/runtime recipe, verify the actual package, owning directory, callable tools, and permissions. A cached skill is not proof of an available capability.
 - Ordinary Lakomics work does not authorize adopting Vercel hosting, Next.js, shadcn, AI SDK, new persistence, or another browser runtime. Existing direct Vercel AI Gateway integration is not consent to adopt that stack. Preserve the current framework, custom UI, and package manager.
-- Do not edit managed/plugin caches, broaden tool access, disable sandboxing, or install dependencies merely to activate a skill. If a named skill/subagent is unavailable, use a supported equivalent or perform the scoped method inline; disclose any missing independent/native evidence.
+- Do not edit managed/plugin caches, broaden tool access, disable sandboxing, or install dependencies merely to activate a skill. If a named skill is unavailable, use a supported equivalent or perform the scoped method inline; disclose any missing independent/native evidence. Subagent use remains prohibited.
 - Current repository sources outrank stale remembered workflow facts. Do not recreate retired backlog/plan files referenced by memory.
 
 ## Repository docs

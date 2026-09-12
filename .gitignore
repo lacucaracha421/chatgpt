@@ -8,3 +8,4 @@ share-probe-log.json
 lakomics-collector-list-*.zip
 *.lnk
 .tmp/
+.vite/

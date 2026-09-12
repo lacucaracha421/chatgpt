@@ -18,7 +18,7 @@ Keeping the old ADRs marked Accepted makes current code and current design docum
 - Asset browsing defaults to date-grouped masonry/waterfall with creator + `HH:mm` below each asset. Justified rows remain an available alternative layout.
 - Search is icon-first and only connects to screens with a real search contract.
 - Temporary view controls may use anchored non-modal panels when that keeps content geometry stable.
-- Short, non-interactive tooltips are allowed for ambiguous explicit PC shell icon controls. Accessible names remain mandatory; tooltips are not required on every button.
+- Updated by user request on 2026-09-12: hover/focus tooltips are removed, including native HTML `title` bubbles. Accessible names remain mandatory; supplementary descriptions may use `aria-description`. This replaces the earlier allowance for ambiguous PC shell icon controls.
 - Feature state remains owned by the relevant browser/preferences layer. Shell rearrangement does not authorize new persistence or domain merging.
 
 ## Consequences
