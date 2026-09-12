@@ -867,7 +867,7 @@ it("opens a scan-first extension pairing QR from Cloud settings", async () => {
     </LibraryProvider>,
   );
 
-  await user.click(await screen.findByRole("button", { name: "확장 연결" }));
+  await user.click(await screen.findByRole("button", { name: "태블릿 QR 연결" }));
   expect(gateway.createExtensionPairing).toHaveBeenCalledOnce();
   expect(await screen.findByRole("img", { name: "Lakomics 확장 연결 QR 코드" })).toBeVisible();
   expect(screen.getByRole("button", { name: "링크 복사" })).toBeEnabled();
@@ -1013,4 +1013,25 @@ it("saves replication independently without applying an unsaved server address",
   await waitFor(() => expect(gateway.setCloudCaptureSettings).toHaveBeenCalledWith(false, "https://saved.example", true));
   expect(screen.getByRole("checkbox", { name: "자동 수신" })).toBeChecked();
   expect(screen.getByRole("textbox", { name: "서버 주소" })).toHaveValue("https://draft.example");
+});
+
+
+it("copies a PC extension pairing link and shows setup instructions without requiring a QR scan", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  const pairingUrl = "https://cloud.example.test/extension-pair#" + "B".repeat(43);
+  vi.mocked(gateway.getCloudCaptureSettings).mockResolvedValue({ enabled: true, apiBaseUrl: "https://cloud.example.test", tokenConfigured: true });
+  vi.mocked(gateway.createExtensionPairing!).mockResolvedValue({ pairingUrl, expiresAt: "2099-01-01T00:00:00Z" });
+  const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+  render(<LibraryProvider gateway={gateway}><SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="cloud" /></LibraryProvider>);
+  await user.click(await screen.findByRole("button", { name: "PC 확장 연결" }));
+  expect(gateway.createExtensionPairing).toHaveBeenCalledOnce();
+  expect(writeText).toHaveBeenCalledWith(pairingUrl);
+  expect(screen.queryByRole("img", { name: "Lakomics 확장 연결 QR 코드" })).not.toBeInTheDocument();
+  expect(screen.getByText("브라우저에서 Lakomics 확장 아이콘을 눌러 설정을 여세요.")).toBeVisible();
+  expect(screen.getByRole("button", { name: "링크 복사" })).toBeEnabled();
+  await user.click(screen.getByRole("button", { name: "새로 발급" }));
+  expect(gateway.createExtensionPairing).toHaveBeenCalledTimes(2);
+  expect(screen.queryByRole("img", { name: "Lakomics 확장 연결 QR 코드" })).not.toBeInTheDocument();
+  expect(document.body.textContent).not.toContain("BBBBBBBBBBBBBBBBBBBB");
 });

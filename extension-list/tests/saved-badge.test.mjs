@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { JSDOM } from '../../app/node_modules/jsdom/lib/api.js';
+import { JSDOM } from '../../_tools/app/node_modules/jsdom/lib/api.js';
 
 globalThis.__LAKOMICS_TEST__ = true;
 const dom = new JSDOM('<!doctype html><body><div data-testid="tweetPhoto"><div id="wrap"><img id="img"></div></div></body>');

@@ -119,6 +119,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [cloudBusy, setCloudBusy] = useState(false);
   const [cloudError, setCloudError] = useState<string | null>(null);
   const [cloudMessage, setCloudMessage] = useState<string | null>(null);
+  const [extensionPairingMode, setExtensionPairingMode] = useState<"pc" | "qr">("pc");
   const [extensionPairingQr, setExtensionPairingQr] = useState<ExtensionPairingLink | null>(null);
   useAutoDismiss(catalogCacheMessage, setCatalogCacheMessage);
   useAutoDismiss(cloudMessage, setCloudMessage);
@@ -368,18 +369,21 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     }
   }
 
-  async function createListExtensionPairing() {
+  async function createListExtensionPairing(mode: "pc" | "qr" = "qr") {
     if (cloudBusy || !gateway.createExtensionPairing) return;
     setCloudBusy(true);
     setCloudError(null);
     try {
       const pairing = await gateway.createExtensionPairing();
       setExtensionPairingQr(pairing);
+      setExtensionPairingMode(mode);
       try {
-        await navigator.clipboard.writeText(pairing.pairingUrl);
-        setCloudMessage("연결 링크 복사됨");
+        if (mode === "pc") {
+          await navigator.clipboard.writeText(pairing.pairingUrl);
+          setCloudMessage("연결 링크 복사됨 · PC 확장 설정에 붙여넣으세요");
+        } else setCloudMessage("QR 생성됨");
       } catch {
-        setCloudMessage("QR 생성됨");
+        setCloudMessage("연결 링크 생성됨 · 링크 복사를 눌러 주세요");
       }
     } catch (pairingError) {
       setCloudError(commandErrorMessage(pairingError, "확장 연결 링크를 만들지 못했습니다."));
@@ -954,15 +958,17 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             </dl>
             </details>
             <div className="settings-view__actions">
-              <Button size="sm" disabled={cloudBusy || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured || !gateway.createExtensionPairing} onClick={() => void createListExtensionPairing()}>확장 연결</Button>
+              <Button size="sm" disabled={cloudBusy || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured || !gateway.createExtensionPairing} onClick={() => void createListExtensionPairing("pc")}>PC 확장 연결</Button>
+              <Button size="sm" disabled={cloudBusy || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured || !gateway.createExtensionPairing} onClick={() => void createListExtensionPairing("qr")}>태블릿 QR 연결</Button>
               <Button size="sm" disabled={cloudBusy || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured} onClick={() => void testCloudConnection()}>연결 확인</Button>
               <Button size="sm" variant="primary" disabled={cloudBusy || !(cloudSettings.captureEnabled ?? cloudSettings.enabled) || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured} onClick={() => void syncCloudNow()}>지금 수신</Button>
             </div>
             {extensionPairingQr && (
               <ExtensionPairingQr
                 value={extensionPairingQr}
+                mode={extensionPairingMode}
                 onCopy={copyListExtensionPairing}
-                onRefresh={createListExtensionPairing}
+                onRefresh={() => createListExtensionPairing(extensionPairingMode)}
                 onClose={() => setExtensionPairingQr(null)}
               />
             )}

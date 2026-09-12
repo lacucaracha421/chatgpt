@@ -2,10 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 
-test('list build has no radial or gesture entrypoints', async () => {
+test('collection uses the arc menu and keeps the list editor out of content pages', async () => {
   const manifest = JSON.parse(await readFile(new URL('../manifest.json', import.meta.url), 'utf8'));
   const scripts = manifest.content_scripts.flatMap(entry=>entry.js || []);
-  assert.equal(scripts.some(path=>/gesture|layout|radial/i.test(path)), false);
+  const collectors = manifest.content_scripts.filter(entry => entry.js?.includes('src/content.js'));
+  assert.equal(collectors.length, 2);
+  for (const entry of collectors) {
+    assert.ok(entry.js.indexOf('src/arc-collector.js') < entry.js.indexOf('src/content.js'));
+    assert.ok(entry.js.includes('src/arc-collector.js'));
+    assert.equal(entry.js.includes('src/list-collector.js'), false);
+  }
+  assert.equal(scripts.some(path=>/gesture|radial/i.test(path)), false);
   assert.equal(manifest.name, 'Lakomics Collector List');
 });
 

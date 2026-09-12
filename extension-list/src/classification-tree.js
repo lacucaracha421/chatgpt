@@ -61,10 +61,13 @@
     function rootItems() {
       const pinned = cleanIds(normalized.pinnedClassificationIds, byId).map((id) => byId.get(id)).filter(Boolean);
       const pinnedSet = new Set(pinned.map((entry) => entry.id));
-      return [
+      const items = [
         ...pinned.map((entry) => ({ entry, shortcut: true })),
         ...ordered(null).filter((entry) => !pinnedSet.has(entry.id)).map((entry) => ({ entry, shortcut: false })),
       ];
+      const rank = new Map((normalized.listOrder.__root__ || []).map((id, index) => [id, index]));
+      if (!pinned.some(entry => rank.has(entry.id))) return items;
+      return items.sort((a, b) => (rank.get(a.entry.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.entry.id) ?? Number.MAX_SAFE_INTEGER));
     }
 
     function children(parentId) { return ordered(parentId); }
@@ -89,5 +92,39 @@
     return { entries: liveEntries, profile: normalized, byId, ordered, rootItems, children, hasChildren, path, reorder };
   }
 
-  globalThis.LakomicsClassificationTree = { cleanEntries, cleanIds, normalizeProfile, createModel };
+  // Snapshot refresh keeps positions; portable pin/order edits explicitly reset
+  // the affected page layout. Removed folders leave holes for new folders.
+  function reconcileArcLayout(entries, profile = {}, previous = {}) {
+    const model = createModel(entries, profile);
+    const layout = Object.create(null);
+    const parents = new Set([null, ...model.entries.map(entry => entry.parentId)]);
+    for (const parent of parents) {
+      const key = parent ?? "__root__";
+      const ids = parent === null ? model.rootItems().map(item => item.entry.id) : model.children(parent).map(entry => entry.id);
+      const intent = JSON.stringify([parent === null ? model.profile.pinnedClassificationIds : [], model.profile.listOrder[key] || []]);
+      const old = previous?.[key];
+      if (!old || old.intent !== intent || !Array.isArray(old.slots)) {
+        layout[key] = { intent, slots: ids };
+        continue;
+      }
+      const remaining = new Set(ids);
+      const slots = old.slots.map(id => remaining.delete(id) ? id : null);
+      for (const id of ids) {
+        if (!remaining.has(id)) continue;
+        const hole = slots.indexOf(null);
+        if (hole < 0) slots.push(id); else slots[hole] = id;
+      }
+      layout[key] = { intent, slots };
+    }
+    return layout;
+  }
+
+  // Hiding a parent also hides pinned descendants, without changing membership.
+  function visibleEntries(entries, hiddenIds = []) {
+    const model = createModel(entries);
+    const hidden = new Set(cleanIds(hiddenIds));
+    return model.entries.filter(entry => !model.path(entry.id).some(ancestor => hidden.has(ancestor.id)));
+  }
+
+  globalThis.LakomicsClassificationTree = { visibleEntries, cleanEntries, cleanIds, normalizeProfile, createModel, reconcileArcLayout };
 })();

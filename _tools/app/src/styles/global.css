@@ -1783,6 +1783,11 @@ textarea:focus-visible {
 .extension-pairing__close { width: 30px; height: 30px; padding: 0; color: var(--color-text-muted); background: transparent; border: 0; }
 .extension-pairing__close:hover { color: var(--color-text); background: var(--color-surface-hover); }
 
+.extension-pairing__guide { padding: var(--space-3); color: var(--color-text-muted); font-size: var(--text-sm); line-height: 1.6; }
+.extension-pairing__guide p { margin: 0; }
+.extension-pairing__guide p + p { margin-top: var(--space-2); }
+.extension-pairing__guide strong { color: var(--color-text); font-weight: 500; }
+
 .extension-pairing__qr { padding: 14px; background: #f2f0e8; }
 .extension-pairing__qr svg { display: block; width: 100%; height: auto; aspect-ratio: 1; }
 .extension-pairing__actions { display: flex; gap: var(--space-2); padding: var(--space-2); border-top: var(--border-width) solid var(--color-border); }

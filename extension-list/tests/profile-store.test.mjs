@@ -21,6 +21,15 @@ const classifications = { revision: 1, entries: [
   { id: 'games', name: '게임', parentId: null },
   { id: 'blue', name: '블루 아카이브', parentId: 'games' },
 ] };
+test('snapshot refresh preserves local arc positions across reopening without sending them to the server', async () => {
+  for (const key of Object.keys(memory)) delete memory[key];
+  const profile = { revision: 1, pinnedClassificationIds: [], listOrder: {}, preferences: {} };
+  await store.seed({ classifications: { revision: 1, entries: ['a', 'b', 'c'].map(id => ({ id, name: id, parentId: null })) }, profile });
+  await store.seed({ classifications: { revision: 2, entries: ['c', 'a'].map(id => ({ id, name: id, parentId: null })) }, profile });
+  const restored = await store.readState();
+  assert.deepEqual(restored.arcLayout.__root__.slots, ['a', null, 'c']);
+  assert.equal(restored.profile.arcLayout, undefined);
+});
 test('profile conflict refetches the current revision and reapplies only the local patch', async () => {
   for (const key of Object.keys(memory)) delete memory[key];
   await store.seed({ classifications, profile: { revision: 1, pinnedClassificationIds: [], listOrder: {}, preferences: {} } });
@@ -65,4 +74,23 @@ test('offline profile edits remain visible and flush from the durable outbox lat
   const final = await store.readState();
   assert.deepEqual(final.profile.listOrder.games, ['blue']);
   assert.equal(final.profile.revision, 2);
+});
+
+test('hidden folders survive refresh and reopening locally without patching the server profile', async () => {
+  for (const key of Object.keys(memory)) delete memory[key];
+  const profile = { revision: 1, pinnedClassificationIds: ['blue'], listOrder: {}, preferences: {} };
+  await store.seed({ classifications, profile });
+  let requests = 0;
+  requestImpl = async () => { requests++; return { ok: true, data: { classifications, profile } }; };
+  const result = await store.setHidden(['games', 'games']);
+  assert.deepEqual(result.state.hiddenClassificationIds, ['games']);
+  assert.equal(requests, 0);
+  await store.refresh();
+  assert.deepEqual((await store.readState()).hiddenClassificationIds, ['games']);
+  assert.equal((await store.readState()).profile.hiddenClassificationIds, undefined);
+  assert.deepEqual((await store.readState()).profile.pinnedClassificationIds, ['blue']);
+  await store.setHidden([]);
+  assert.deepEqual((await store.readState()).hiddenClassificationIds, []);
+  await store.clear();
+  assert.equal(memory[store.HIDDEN_KEY], undefined);
 });

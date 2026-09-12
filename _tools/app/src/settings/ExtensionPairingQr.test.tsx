@@ -19,6 +19,17 @@ describe("ExtensionPairingQr", () => {
     expect(screen.getByRole("button", { name: "새로 발급" })).toBeEnabled();
   });
 
+  it("offers PC copy instructions without constructing a QR and disables expired copying", () => {
+    const onCopy = vi.fn();
+    render(<ExtensionPairingQr mode="pc" value={value} onCopy={onCopy} onRefresh={() => undefined} onClose={() => undefined} />);
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    expect(screen.getByText("브라우저에서 Lakomics 확장 아이콘을 눌러 설정을 여세요.")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "링크 복사" }));
+    expect(onCopy).toHaveBeenCalledOnce();
+    act(() => { vi.advanceTimersByTime(10 * 60 * 1000); });
+    expect(screen.getByRole("button", { name: "링크 복사" })).toBeDisabled();
+  });
+
   it("expires locally and leaves refresh available", () => {
     render(<ExtensionPairingQr value={value} onCopy={() => undefined} onRefresh={() => undefined} onClose={() => undefined} />);
     act(() => { vi.advanceTimersByTime(10 * 60 * 1000); });

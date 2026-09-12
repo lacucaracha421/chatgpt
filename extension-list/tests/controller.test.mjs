@@ -57,5 +57,6 @@ test('opening release click is consumed even when it lands inside the picker', (
   assert.equal(content.openingClickDisposition(true, true), 'consume');
   assert.equal(content.openingClickDisposition(false, true), 'picker');
   assert.equal(content.openingClickDisposition(false, false), 'page');
-  assert.equal(content.TOUCH_LONG_PRESS_MS, 360);
+  assert.equal(content.TOUCH_LONG_PRESS_MS, 500);
+  assert.equal(content.MOUSE_OPEN_DELAY_MS, 250);
 });

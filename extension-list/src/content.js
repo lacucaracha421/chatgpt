@@ -1,7 +1,8 @@
 (() => {
   "use strict";
   const OPEN_DISTANCE_PX = 12;
-  const TOUCH_LONG_PRESS_MS = 360;
+  const TOUCH_LONG_PRESS_MS = 500;
+  const MOUSE_OPEN_DELAY_MS = 250;
 
   function runtimeTimeoutMs(message) {
     if (message?.type !== "collector:save") return 15_000;
@@ -140,7 +141,7 @@
   }
 
   if (globalThis.__LAKOMICS_TEST__) {
-    globalThis.LakomicsListContent = { createInvocationGate, temporaryIntent, plainCandidate, shouldSuppressNativeContext, openingClickDisposition, runtimeTimeoutMs, saveResultMessage, saveFailureMessage, normalizePostId, TOUCH_LONG_PRESS_MS };
+    globalThis.LakomicsListContent = { createInvocationGate, temporaryIntent, plainCandidate, shouldSuppressNativeContext, openingClickDisposition, runtimeTimeoutMs, saveResultMessage, saveFailureMessage, normalizePostId, TOUCH_LONG_PRESS_MS, MOUSE_OPEN_DELAY_MS };
     return;
   }
 
@@ -165,6 +166,10 @@
     document.addEventListener("selectstart", onSelectStart, true);
     document.addEventListener("dragstart", onDragStart, true);
     document.addEventListener("click", onClick, true);
+    const cancelPending = () => { if (gate.phase === "armed") reset(); };
+    document.addEventListener("scroll", cancelPending, true);
+    document.addEventListener("wheel", cancelPending, { passive: true });
+    window.addEventListener("blur", cancelPending);
     document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !picker) reset(); }, true);
 
     function insidePicker(event) { return Boolean(picker && event.composedPath?.().includes(picker.host)); }
@@ -217,17 +222,19 @@
       if (!gate.arm(event.pointerId)) return;
       const origin = point(event);
       active = { id: event.pointerId, input, candidate, origin, latest: origin };
-      if (input === "touch") {
-        claimTouchOwnership(candidate.element || event.target);
-        longPressTimer = setTimeout(() => {
-          longPressTimer = null;
-          if (active?.id !== event.pointerId) return;
-          active.longPressed = true;
-          try { (candidate.element || event.target)?.setPointerCapture?.(event.pointerId); active.pointerCaptured = true; } catch {}
+      if (input === "touch") claimTouchOwnership(candidate.element || event.target);
+      const session = active;
+      longPressTimer = setTimeout(() => {
+        longPressTimer = null;
+        if (active !== session || gate.phase !== "armed") return;
+        session.delayElapsed = true;
+        if (input === "touch") {
+          session.longPressed = true;
+          try { (candidate.element || event.target)?.setPointerCapture?.(event.pointerId); session.pointerCaptured = true; } catch {}
           try { window.getSelection?.()?.removeAllRanges?.(); } catch {}
-          void open(active);
-        }, TOUCH_LONG_PRESS_MS);
-      }
+        } else if (distance(session.origin, session.latest) < OPEN_DISTANCE_PX) return;
+        void open(session);
+      }, input === "touch" ? TOUCH_LONG_PRESS_MS : MOUSE_OPEN_DELAY_MS);
     }
 
     function onMove(event) {
@@ -238,12 +245,12 @@
         return;
       }
       if (distance(active.origin, active.latest) >= OPEN_DISTANCE_PX) {
-        event.preventDefault(); event.stopPropagation(); void open(active);
+        event.preventDefault(); event.stopPropagation(); if (active.delayElapsed) void open(active);
       }
     }
 
     function onUp(event) {
-      if (!active || active.id !== event.pointerId) return;
+      if (!active || active.id !== event.pointerId || active.released) return;
       clearTimer();
       if (gate.phase === "armed") {
         gate.release(event.pointerId); clearTouchOwnership(); active = null; return;
@@ -258,7 +265,7 @@
       unlockPickerAfterRelease();
     }
     function onCancel(event) {
-      if (!active || active.id !== event.pointerId) return;
+      if (!active || active.id !== event.pointerId || active.released) return;
       clearTimer();
       if (gate.phase === "armed") { reset(); return; }
       active.released = true;
@@ -314,9 +321,11 @@
       const state = response.state;
       const candidate = plainCandidate(session.candidate);
       const temporary = temporaryIntent(candidate);
-      picker = globalThis.LakomicsListCollector.mount({
+      picker = globalThis.LakomicsArcCollector.mount({
         entries: state.classifications.entries,
         profile: state.profile,
+        arcLayout: state.arcLayout,
+        hiddenClassificationIds: state.hiddenClassificationIds,
         origin: session.origin,
         inputKind: session.input,
         inputLocked: session.input === "touch" && !session.released,

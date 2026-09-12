@@ -44,6 +44,8 @@ importScripts("classification-tree.js", "api-client.js", "profile-store.js", "sa
         if (result.ok) await syncPortablePreferences(result.state.profile);
         return result;
       }
+      case "arc:hidden":
+        return globalThis.LakomicsProfileStore.setHidden(message.ids);
       case "profile:patch": {
         const result = await globalThis.LakomicsProfileStore.patchProfile(message.patch || {});
         if (result.ok) await syncPortablePreferences(result.state.profile);

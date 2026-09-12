@@ -3,21 +3,31 @@
   <header><h1>Lakomics</h1><span id="state-dot" aria-hidden="true"></span></header>
   <section id="pair-section">
     <div class="section-head"><span>연결</span><output id="pair-status"></output></div>
-    <form id="pair-form"><input id="pairing" autocomplete="off" spellcheck="false" placeholder="연결 링크"><button aria-label="연결">→</button></form>
+    <p id="pair-help" class="hint">PC Lakomics의 설정 → 클라우드 → PC 확장 연결에서 복사한 링크를 붙여넣으세요.</p>
+    <form id="pair-form"><input id="pairing" type="password" aria-label="연결 링크" autocomplete="off" spellcheck="false" placeholder="연결 링크 붙여넣기"><button aria-label="연결">연결</button></form>
     <div class="paired-actions" hidden><code id="origin"></code><button id="refresh" aria-label="동기화">↻</button><button id="disconnect" aria-label="연결 해제">×</button></div>
   </section>
+  <section id="order-section" hidden>
+    <div class="section-head"><span>폴더 배치</span><output id="sync-status"></output></div>
+    <p class="hint">폴더를 누른 뒤 이전·다음 칸으로 옮기세요. 하위 폴더는 중앙의 열기로 들어갑니다.</p>
+    <div class="layout-workspace">
+      <div id="order-editor"></div>
+      <aside class="hidden-settings">
+        <div class="section-head"><span>숨긴 폴더</span><output id="hidden-count">0</output></div>
+        <p class="hint">숨기면 하위 폴더도 수집 메뉴에서 빠집니다. 숨김은 이 브라우저에 저장됩니다.</p>
+        <p id="hidden-empty" class="hint">숨긴 폴더가 없습니다.</p>
+        <div id="hidden-folders"></div>
+      </aside>
+    </div>
+  </section>
   <section id="pin-section" hidden>
-    <div class="section-head"><span>고정</span></div>
+    <div class="section-head"><span>첫 화면 바로가기</span></div>
     <div id="pins" class="pins"></div>
     <div class="pin-add"><select id="pin-candidate" aria-label="고정할 분류"></select><button id="pin-add" aria-label="고정">＋</button></div>
-  </section>
-  <section id="order-section" hidden>
-    <div class="section-head"><span>순서</span><output id="sync-status"></output></div>
-    <div id="order-editor"></div>
   </section>
   <section id="preference-section" hidden class="preferences">
     <label><span>X 좋아요</span><input id="auto-like" type="checkbox"></label>
     <label><span>X 번역</span><input id="x-translate" type="checkbox"></label>
   </section>
 </main>
-<script src="../src/classification-tree.js"></script><script src="../src/list-collector.js"></script><script src="options.js"></script></body></html>
+<script src="../src/classification-tree.js"></script><script src="../src/arc-collector.js"></script><script src="options.js"></script></body></html>

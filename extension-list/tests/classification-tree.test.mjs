@@ -25,3 +25,14 @@ test('stale pinned ids are ignored without changing the real tree', () => {
   const model = tree.createModel([{id:'games',name:'게임',parentId:null}], {pinnedClassificationIds:['gone']});
   assert.deepEqual(model.rootItems().map(item=>item.entry.id), ['games']);
 });
+
+test('arc slots survive additions and deletions and reset only for an explicit order edit', () => {
+  const entries = ['a', 'b', 'c'].map(id => ({ id, name: id, parentId: null }));
+  const first = tree.reconcileArcLayout(entries, {}, {});
+  const removed = tree.reconcileArcLayout(entries.filter(e => e.id !== 'b'), {}, first);
+  assert.deepEqual(removed.__root__.slots, ['a', null, 'c']);
+  const added = tree.reconcileArcLayout([...entries.filter(e => e.id !== 'b'), { id: 'd', name: 'd', parentId: null }], {}, removed);
+  assert.deepEqual(added.__root__.slots, ['a', 'd', 'c']);
+  const reordered = tree.reconcileArcLayout(entries, { listOrder: { __root__: ['c', 'b', 'a'] } }, first);
+  assert.deepEqual(reordered.__root__.slots, ['c', 'b', 'a']);
+});

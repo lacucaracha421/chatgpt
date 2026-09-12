@@ -2,6 +2,7 @@
   "use strict";
   const STATE_KEY = "lakomics:list:state:v1";
   const OUTBOX_KEY = "lakomics:list:profile-outbox:v1";
+  const HIDDEN_KEY = "lakomics:arc:hidden:v1";
   const MAX_OUTBOX = 32;
   let refreshPromise = null;
   let flushPromise = null;
@@ -14,25 +15,33 @@
     if (!entries.length && Number(value.classifications?.revision || 0) <= 0) return null;
     return {
       profile,
+      hiddenClassificationIds: tree.cleanIds(value.hiddenClassificationIds),
       classifications: { entries, revision: Math.max(0, Number(value.classifications?.revision) || 0) },
+      arcLayout: tree.reconcileArcLayout(entries, profile, value.arcLayout),
       syncedAt: Math.max(0, Number(value.syncedAt) || 0),
     };
   }
 
   async function readState() {
-    const stored = await chrome.storage.local.get([STATE_KEY]);
-    return normalizeState(stored[STATE_KEY]);
+    const stored = await chrome.storage.local.get([STATE_KEY, HIDDEN_KEY]);
+    return normalizeState(stored[STATE_KEY] && { ...stored[STATE_KEY], hiddenClassificationIds: stored[HIDDEN_KEY] });
   }
 
   async function writeState(value) {
-    const normalized = normalizeState({ ...value, syncedAt: value.syncedAt ?? Date.now() });
+    const stored = await chrome.storage.local.get([STATE_KEY, HIDDEN_KEY]);
+    const normalized = normalizeState({ ...value, hiddenClassificationIds: stored[HIDDEN_KEY], arcLayout: value.arcLayout ?? normalizeState(stored[STATE_KEY])?.arcLayout, syncedAt: value.syncedAt ?? Date.now() });
     if (!normalized) throw new Error("Invalid Lakomics state");
     await chrome.storage.local.set({ [STATE_KEY]: normalized });
     return normalized;
   }
 
   async function clear() {
-    await chrome.storage.local.remove([STATE_KEY, OUTBOX_KEY]);
+    await chrome.storage.local.remove([STATE_KEY, OUTBOX_KEY, HIDDEN_KEY]);
+  }
+
+  async function setHidden(ids) {
+    await chrome.storage.local.set({ [HIDDEN_KEY]: globalThis.LakomicsClassificationTree.cleanIds(ids) });
+    return { ok: true, state: await readState() };
   }
 
   async function seed(bootstrap) {
@@ -143,5 +152,5 @@
     return promise;
   }
 
-  globalThis.LakomicsProfileStore = { STATE_KEY, OUTBOX_KEY, normalizeState, readState, seed, refresh, getState, patchProfile, flush, clear };
+  globalThis.LakomicsProfileStore = { STATE_KEY, OUTBOX_KEY, HIDDEN_KEY, setHidden, normalizeState, readState, seed, refresh, getState, patchProfile, flush, clear };
 })();

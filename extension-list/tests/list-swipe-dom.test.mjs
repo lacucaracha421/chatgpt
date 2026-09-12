@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { JSDOM } from '../../app/node_modules/jsdom/lib/api.js';
+import { JSDOM } from '../../_tools/app/node_modules/jsdom/lib/api.js';
 
 const dom = new JSDOM('<!doctype html><body><div id="root"></div></body>', { url: 'https://example.test/' });
 globalThis.window = dom.window;
