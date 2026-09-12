@@ -12,7 +12,7 @@ Current source version: **0.4.3 (14)**, declared in [AndroidManifest.xml](Androi
 
 Collections and Catalog deployment evidence is recorded in the version history and backlog. An APK build alone does not publish their data or establish device acceptance.
 
-This independent APK bundles the React client from `app/mobile-client`. It requires no desktop/browser extension runtime. The old `_tools/lakomics-cloudmedia-poc` and its installed Android Photo Picker configuration are separate and unchanged. Package: `com.lakomics.mobile`; document authority: `com.lakomics.mobile.documents`.
+This independent APK bundles the React client from `_tools/app/mobile-client`. It requires no desktop/browser extension runtime. The old `_tools/lakomics-cloudmedia-poc` and its installed Android Photo Picker configuration are separate and unchanged. Package: `com.lakomics.mobile`; document authority: `com.lakomics.mobile.documents`.
 
 ## Build
 
@@ -21,7 +21,7 @@ Requirements: existing JDK 17 (`JAVA_HOME`), Android SDK platform 35 and build-t
 From the repository root, build the mobile TypeScript/Vite entry into `android/assets`, then package it:
 
 ```powershell
-npm --prefix app run mobile:build
+npm --prefix _tools/app run mobile:build
 .\android\build.ps1 -SdkRoot C:\LakomicsCloudMediaPoC\sdk
 ```
 
@@ -36,7 +36,7 @@ No device installation, provider selection, or production service/data changes a
 3. Home shows canonical Recent, with separate Revisit and 처리 대기 access. Library opens the actual classification hierarchy. Original viewing uses existing cloud media tickets; the PC need not be running to read already replicated media. Pending Captures remain outside the canonical library.
 4. In a compatible app's **file/document picker**, choose Lakomics from the locations drawer. Browse All assets or classifications, then select one or multiple files as permitted by the receiving app. For Android Photo Picker, the APK includes its own CloudMediaProvider. Availability depends on OS eligibility, provider selection and the recipient; use the integrated Picker guidance below. The separate PoC is a historical experiment, not a required browsing dependency.
 
-For browser layout review, run `npm --prefix app run mobile:dev`, then open `http://127.0.0.1:1448/?demo`. The labelled sample illustrations are development fixtures, excluded from production APK output. Without `?demo`, a browser shows the connection welcome screen; authenticated browsing belongs to the Android bridge, not browser token storage. `npm --prefix app run mobile:test` runs the focused client checks. The existing `mobile/` site and `extension/` source remain unchanged.
+For browser layout review, run `npm --prefix _tools/app run mobile:dev`, then open `http://127.0.0.1:1448/?demo`. The labelled sample illustrations are development fixtures, excluded from production APK output. Without `?demo`, a browser shows the connection welcome screen; authenticated browsing belongs to the Android bridge, not browser token storage. `npm --prefix _tools/app run mobile:test` runs the focused client checks. The existing `mobile/` site and `extension/` source remain unchanged.
 
 ## Historical implementation and acceptance checkpoints
 

@@ -46,8 +46,8 @@ Interpreter packaging and Linux/WebView acceptance remain later gates.
 Run from `C:\chatgpt` with the already installed environment:
 
 ```powershell
-& TEST_kisaki/_experiment/.venv/Scripts/python.exe -B -m unittest discover -s app/character-runtime -p 'test_*.py' -v
-& TEST_kisaki/_experiment/.venv/Scripts/python.exe -B app/character-runtime/verify.py --output .acceptance/character-batch1/report.json
+& TEST_kisaki/_experiment/.venv/Scripts/python.exe -B -m unittest discover -s _tools/app/character-runtime -p 'test_*.py' -v
+& TEST_kisaki/_experiment/.venv/Scripts/python.exe -B _tools/app/character-runtime/verify.py --output .acceptance/character-batch1/report.json
 ```
 
 The verification output is local evidence, not durable user state. `verify.py`
@@ -107,7 +107,7 @@ on cancellation, protocol failure, timeout or normal completion; stdout messages
 are bounded to 256 KiB and each response has a 120-second deadline. Images over
 256 MiB or 50 million pixels are rejected rather than changing preprocessing.
 
-Test from `app/src-tauri` with an explicitly supplied existing Python environment:
+Test from `_tools/app/src-tauri` with an explicitly supplied existing Python environment:
 
 ```powershell
 $env:LAKOMICS_CHARACTER_TEST_PYTHON = 'C:/chatgpt/TEST_kisaki/_experiment/.venv/Scripts/python.exe'
@@ -177,7 +177,7 @@ Set `LAKOMICS_CHARACTER_PROFILE=1` before launching the normal Tauri development
 command to write cumulative JSON `characterProfile` records to the development
 terminal. The default remains quiet. Windows PowerShell uses
 `$env:LAKOMICS_CHARACTER_PROFILE='1'`; Linux uses
-`LAKOMICS_CHARACTER_PROFILE=1 npm run tauri -- dev` from `app/`.
+`LAKOMICS_CHARACTER_PROFILE=1 npm run tauri -- dev` from `_tools/app/`.
 Do not start a production-library scan without the user's approval.
 
 Counters separate file hashing, image decode, detector inference, feature inference,

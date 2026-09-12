@@ -1,4 +1,8 @@
 use rusqlite::params;
+
+#[cfg(test)]
+#[path = "query_navigation_tests.rs"]
+mod navigation_tests;
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -172,7 +176,7 @@ fn count_filtered_assets(
 ) -> Result<u64, LibraryError> {
     let (range_start, range_end) = collected_range_bounds(query)?;
     let total: i64 = connection.query_row(
-        ASSET_COUNT_SQL,
+        &scoped_asset_sql(connection, ASSET_COUNT_SQL, query, 1, 7)?,
         rusqlite::params![
             query.classification_id.as_deref(),
             query.album_id.as_deref(),
@@ -190,6 +194,54 @@ fn count_filtered_assets(
     )?;
     Ok(u64::try_from(total.max(0)).unwrap_or(0))
 }
+
+/// Small scopes benefit from primary-key lookups; broad scopes need the existing
+/// ordered scan. Probe at most 1,001 links so choosing a plan stays bounded.
+fn scoped_asset_sql<'a>(
+    connection: &rusqlite::Connection,
+    sql: &'a str,
+    query: &AssetQuery,
+    classification_parameter: usize,
+    collection_parameter: usize,
+) -> Result<std::borrow::Cow<'a, str>, LibraryError> {
+    let (scope, links, column, hierarchy) = if let Some(id) = query.classification_id.as_deref() {
+        (id, "asset_classifications", "classification_id", (!query.direct_only).then_some("classification_entries"))
+    } else if let Some(id) = query.album_id.as_deref() {
+        (id, "asset_albums", "album_id", Some("albums"))
+    } else if let Some(id) = query.collection_id.as_deref() {
+        (id, "collection_assets", "collection_id", None)
+    } else {
+        return Ok(std::borrow::Cow::Borrowed(sql));
+    };
+    let probe = if let Some(table) = hierarchy {
+        format!("WITH RECURSIVE scopes(id) AS (SELECT ?1 UNION ALL SELECT child.id FROM {table} AS child JOIN scopes ON child.parent_id = scopes.id) SELECT COUNT(*) FROM (SELECT asset_id FROM {links} WHERE {column} IN (SELECT id FROM scopes) LIMIT 1001)")
+    } else {
+        format!("SELECT COUNT(*) FROM (SELECT asset_id FROM {links} WHERE {column} = ?1 LIMIT 1001)")
+    };
+    let count: i64 = connection.query_row(&probe, [scope], |row| row.get(0))?;
+    if count > 1000 {
+        return Ok(std::borrow::Cow::Borrowed(sql));
+    }
+    let condition = if query.classification_id.is_some() {
+        if query.direct_only {
+            format!("classification_id = ?{classification_parameter}")
+        } else {
+            "classification_id IN (SELECT id FROM descendants)".to_owned()
+        }
+    } else if query.album_id.is_some() {
+        "album_id IN (SELECT id FROM album_descendants)".to_owned()
+    } else {
+        format!("collection_id = ?{collection_parameter}")
+    };
+    // DISTINCT avoids duplicate assets linked to multiple descendants. CROSS JOIN
+    // keeps SQLite from reverting to a library-wide status scan for small scopes.
+    Ok(std::borrow::Cow::Owned(sql.replacen(
+        "FROM assets AS asset",
+        &format!("FROM (SELECT DISTINCT asset_id FROM {links} WHERE {condition}) AS membership CROSS JOIN assets AS asset ON asset.id = membership.asset_id"),
+        1,
+    )))
+}
+
 impl Library {
     pub(crate) fn list_normal_x_source_urls(&self) -> Result<Vec<String>, LibraryError> {
         let connection = self.connection()?;
@@ -292,12 +344,19 @@ impl Library {
         let media_kind = media_filter_value(query.media_kind);
         let aspect_ratio = aspect_filter_value(query.aspect_ratio);
         let random_pivot = query.random_pivot.as_deref().unwrap_or("");
-        let mut statement = connection.prepare(match query.sort {
+        let sql = match query.sort {
             AssetSort::Newest => CHRONO_DESC_HALF_SQL,
             AssetSort::Oldest => CHRONO_ASC_HALF_SQL,
             AssetSort::Favorites => FAVORITES_SQL,
             AssetSort::Random => RANDOM_SQL,
-        })?;
+        };
+        let collection_parameter = match query.sort {
+            AssetSort::Favorites => 10,
+            AssetSort::Random => 11,
+            _ => 9,
+        };
+        let sql = scoped_asset_sql(&connection, sql, &query, 1, collection_parameter)?;
+        let mut statement = connection.prepare(&sql)?;
         let mut rows = match query.sort {
             AssetSort::Newest => {
                 let (collected_at, id) = collected_at_and_id(&cursor);
@@ -650,7 +709,8 @@ fn run_chronological_page(
     let media_kind = media_filter_value(query.media_kind);
     let aspect_ratio = aspect_filter_value(query.aspect_ratio);
     let (range_start, range_end) = collected_range_bounds(query)?;
-    let mut statement = connection.prepare(sql)?;
+    let sql = scoped_asset_sql(connection, sql, query, 1, 9)?;
+    let mut statement = connection.prepare(&sql)?;
     let mut rows = statement.query(params![
         query.classification_id.as_deref(),
         query.direct_only,
@@ -932,7 +992,7 @@ const CREATORS_SQL: &str = "WITH RECURSIVE descendants(id) AS (
 ), keyed AS (
     SELECT id, creator_name, creator_handle, creator_url, collected_at,
            COALESCE(creator_handle, creator_url) AS key,
-           ROW_NUMBER() OVER (PARTITION BY COALESCE(creator_handle, creator_url) ORDER BY collected_at DESC) AS rn
+           ROW_NUMBER() OVER (PARTITION BY COALESCE(creator_handle, creator_url) ORDER BY collected_at DESC, id DESC) AS rn
     FROM scoped
 ), covers AS (
     SELECT key,
@@ -955,17 +1015,20 @@ const CREATORS_SQL: &str = "WITH RECURSIVE descendants(id) AS (
            MAX(collected_at) AS last_collected_at
     FROM keyed
     GROUP BY key
+), recent_activity AS (
+    SELECT keyed.key, MAX(activity.last_opened_at) AS last_opened_at,
+           MAX(CASE WHEN activity.last_opened_at IS NULL THEN 10 ELSE 0 END) AS unseen_bonus
+    FROM keyed LEFT JOIN asset_activity AS activity ON activity.asset_id = keyed.id
+    WHERE keyed.rn <= 5 GROUP BY keyed.key
 )
 SELECT g.key, g.creator_name, g.creator_handle, g.creator_url, g.asset_count, g.last_collected_at,
-       MAX(CASE WHEN activity.last_opened_at IS NOT NULL THEN activity.last_opened_at END) AS last_opened_at,
+       recent_activity.last_opened_at,
        (g.asset_count * 4 + CAST((julianday('now') - julianday(g.last_collected_at)) AS INTEGER)
-        + COALESCE(MAX(CASE WHEN activity.last_opened_at IS NULL THEN 10 ELSE 0 END), 0)) AS recommendation_score,
+        + COALESCE(recent_activity.unseen_bonus, 0)) AS recommendation_score,
        covers.cover_0, covers.cover_1, covers.cover_2, covers.cover_3, covers.cover_4, covers.cover_5, covers.cover_6, covers.cover_7
 FROM grouped AS g
 LEFT JOIN covers ON covers.key = g.key
-LEFT JOIN asset_activity AS activity ON activity.asset_id IN (
-    SELECT id FROM keyed WHERE COALESCE(creator_handle, creator_url) = g.key AND rn <= 5
-)
+LEFT JOIN recent_activity ON recent_activity.key = g.key
 ORDER BY g.asset_count DESC, g.key ASC";
 const DATE_BUCKETS_SQL: &str = "SELECT date(asset.collected_at, printf('%+d minutes', ?3)) AS date, COUNT(*) AS count
 FROM assets AS asset

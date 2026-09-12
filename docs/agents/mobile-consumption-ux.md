@@ -7,7 +7,7 @@ and also includes Collections and Catalog/Reader outside this document's scope.
 See the [Android README](../../android/README.md) and the living backlog for current
 feature coverage and the separate installed-device/acceptance status.
 
-The new `app/mobile-client` / `android` preview implements the core consumption path. See `android/README.md` for its exact scope and current limitations. Browser fixture/static/offline checks do not complete the Galaxy Tab device gate below. The living backlog retains MOBILE-004 as PARTIAL.
+The new `_tools/app/mobile-client` / `android` preview implements the core consumption path. See `android/README.md` for its exact scope and current limitations. Browser fixture/static/offline checks do not complete the Galaxy Tab device gate below. The living backlog retains MOBILE-004 as PARTIAL.
 
 This document defines the consumption-oriented UI and loading behavior for the
 Galaxy Tab Lakomics client. It refines the product direction in `mobile.md`;

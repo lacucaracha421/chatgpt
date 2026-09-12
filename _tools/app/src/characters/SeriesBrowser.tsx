@@ -22,7 +22,6 @@ import { AnchoredPanel } from "../shared/ui/AnchoredPanel";
 import { useBackHandler } from "../shared/navigation/BackNavigation";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { CharacterRegistry, characterDraft, activeCharacterReferences, MAX_CHARACTER_REFERENCES, type CharacterEditorDraft } from "./CharacterRegistry";
-import { ReferenceCandidateDialog } from "./ReferenceCandidateDialog";
 import { CharacterConversion } from "./CharacterConversion";
 import { CharacterGroups } from "./CharacterGroups";
 import { characterApi, type CharacterApi, type CharacterTarget } from "./api";
@@ -63,7 +62,6 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const [pickFromSeries, setPickFromSeries] = useState(false);
   const [picking, setPicking] = useState<Picking | null>(null), [inspector, setInspector] = useState(false);
   const [converting, setConverting] = useState(false);
-  const [referenceTarget, setReferenceTarget] = useState<CharacterTarget | null>(null);
   const [seriesGalleryState, setSeriesGalleryState] = useState<{ seriesId: string; view: SeriesGalleryView }>(() => ({ seriesId: series.classificationId, view: "unclassified" }));
   const [manualName, setManualName] = useState<string | null>(null);
   const [legacyExcludedCount, setLegacyExcludedCount] = useState(0);
@@ -161,12 +159,16 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     } catch (e) { setError(commandErrorMessage(e, "캐릭터를 만들지 못했습니다.")); }
     finally { saving.current = false; setBusy(false); }
   }
-  function openEditor(target: CharacterTarget | null) { pickerPages.current.clear(); setEditor({ target, draft: characterDraft(target) }); setEditorError(null); }
-  function beginPick(kind: Picking["kind"]) {
+  function openEditor(target: CharacterTarget | null) {
+    const next = { target, draft: characterDraft(target) };
+    pickerPages.current.clear(); setEditor(next); setEditorError(null);
+    return next;
+  }
+  function beginPick(kind: Picking["kind"], pickEditor = editor) {
     setPickFromSeries(false);
     returnGallery.current = { scope, page }; ++generation.current; setPage(emptyPage()); setError(null);
-    setPicking({ kind, previousAll: all, ids: kind === "hero" ? series.heroAssetId ? [series.heroAssetId] : [] : kind === "thumbnail" ? editor?.draft.thumbnail ? [editor.draft.thumbnail] : [] : editor?.draft.references ?? [] });
-    setAll(kind === "hero" || Boolean(editor?.target));
+    setPicking({ kind, previousAll: all, ids: kind === "hero" ? series.heroAssetId ? [series.heroAssetId] : [] : kind === "thumbnail" ? pickEditor?.draft.thumbnail ? [pickEditor.draft.thumbnail] : [] : pickEditor?.draft.references ?? [] });
+    setAll(kind === "hero" || Boolean(pickEditor?.target));
   }
   function finishPick(accept: boolean) {
     if (!picking) return;
@@ -245,7 +247,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
             setSelection(emptySelection());
           })}>이 캐릭터에서 제외</Button>}
         </> : <>
-          <Button size="sm" variant="ghost" disabled={busy} onClick={() => setReferenceTarget(current)}>레퍼런스 추가</Button>
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => beginPick("references", openEditor(current))}>레퍼런스 추가</Button>
         </>)}
         {!picking && !currentGroup && editorPanel}
         {!current && !currentGroup && !picking && <Menu label="시리즈 더보기" disabled={busy} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
@@ -351,8 +353,6 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       </div>
     </Dialog>}
     {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
-    {referenceTarget && <ReferenceCandidateDialog target={referenceTarget} privacyMode={privacyMode} api={hubApi}
-      onClose={() => setReferenceTarget(null)} onSaved={() => { setReferenceTarget(null); refresh(); }} />}
     {converting && current && <CharacterConversion targetId={current.id} onClose={() => setConverting(false)} onConverted={folderId => { setConverting(false); refresh(); onNavigate({ kind: "classification", classificationId: folderId }); }} />}
     <AssetInspector assets={page.items.filter(a => selection.ids.has(a.id))} open={inspector} onOpenChange={setInspector} onOpenAsset={a => setViewer(a.id)} onAssetUpdated={refresh} />
     <AssetViewer items={externalAsset && !page.items.some(a => a.id === externalAsset.id) ? [externalAsset, ...page.items] : page.items} activeId={viewer} onActiveIdChange={setViewer} onClose={() => setViewer(null)} privacyMode={privacyMode} onAssetOpened={a => gateway.recordAssetOpened(a.id, new Date().toISOString())} onToggleFavorite={a => void action(() => gateway.setAssetFavorite(a.id, !a.favorite))} onTrash={a => void action(() => gateway.trashAssets([a.id]))} />

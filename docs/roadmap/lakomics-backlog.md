@@ -27,12 +27,13 @@ References to installed APK 0.3.3 in older entries are dated device evidence, no
 fresh inventory. CLOUD-006 is DONE; CHAR-UI-001 and Linux drag-out retain their native
 acceptance limits. Existing item statuses below remain the owners of pending work.
 
-## 현재 작업 요약 — 2026-09-10 사용자 확인 반영
+## 현재 작업 요약 — 2026-09-12 경로·탐색 성능 대조
 
 이번 정리는 이 문서의 항목·실행 기록과 현재 대화의 사용자 확인을 대조한 것이다. 전체 코드·운영 상태를 새로 감사하거나 기존 네이티브 검증을 대신한 것은 아니다. 아래는 탐색용 요약이며 상세 요구와 완료 기준은 각 항목이 소유한다. 역사적 P0/P1/P2 배치는 현재 실행 우선순위 확정으로 해석하지 않는다.
 
 | 영역 | 구현 후 확인 / 남은 보완 | 새 구현 / 보류 |
 |---|---|---|
+| 탐색 성능 | PERF-NAV-001: 작은 폴더 조회·작가 집계·날짜 계산·재방문 화면·표지 대기 개선 구현 및 합성 검증 완료; 네이티브 클릭→이미지 표시 시간은 VERIFY | 큰 범위 집계, DB 경합, 실제 decode/GPU 지연은 측정 후 판단; AI 첫 분석 성능은 CHAR-AUTO-001 |
 | 캐릭터 | 2026-09-12 quiet workflow로 일반 수집 중 큐/검토/캐시 상태 노출을 제거하고, 가장 가까운 등록 시리즈 + 명시적 참조만 자동 비교한다. 과거 미분류 갱신은 사용자 요청 때만 낮은 우선순위로 실행한다. Linux 격리 앱 기동은 통과했으나 실제 GUI 행동 수용과 Windows 네이티브 확인은 남음 | CHAR-AUTO-004의 자동확정 support=6 유지. 참조 추가는 신규 이미지에 즉시 적용되고 과거 갱신은 명시적 유지보수 작업으로 분리됨 |
 | 통합 코드 리뷰 | REVIEW-20260909: A–H/I1 반영 후 남은 Windows·Android·실제 미디어 검증 | 구현 완료 배치를 처음부터 재실행하지 않음 |
 | 클라우드·통계·Notes | CLOUD-UI-001, STATS-001A/B, NOTE-001B 네이티브 확인/남은 보완 | CLOUD-006와 NOTE-001A는 완료 |
@@ -43,6 +44,13 @@ acceptance limits. Existing item statuses below remain the owners of pending wor
 | Works / Collection | WORKS-001, LONG-001, LONG-002B 남은 기능/실제 미디어 확인 | LONG-004는 기존 화면에 통합; LONG-003 보안 설계 승인 전 보류 |
 
 캐릭터·메모 작업의 **사용자 승인 순서 (2026-09-09)**: 상단바 → 메모 상태 문구 → CHAR-UI-007 추가 참조 → CHAR-UI-009 표시 그룹 → CHAR-UI-004·008 폴더 전환 → CHAR-AUTO-001 첫 분석 계측. 확장프로그램 리디자인은 이 작업에서 제외한다.
+
+### 2026-09-12 백로그 대조 범위
+
+- 현재 로컬 `main`의 `cc19cd4`와 미커밋 탐색 최적화·문서 경로 수정을 대조했다. 원격 배포/운영 데이터/전체 항목을 새로 검증한 기록은 아니다.
+- 현재 앱 패키지는 저장소 루트 기준 `_tools/app/`이다. 아래 날짜가 붙은 과거 기록의 `app/`는 당시 경로이며, 현재 명령과 소유 파일은 `_tools/app/`에서 찾는다.
+- CHAR-UI-004의 기존 폴더 정리는 이미 구현돼 있다. 아래 추가 요구의 상태를 구현 전 TODO에서 네이티브 확인 대기로 정정했다. CHAR-AUTO-001/CHAR-UI-007의 과거 기록보다 2026-09-12 quiet workflow와 명시적 참조 계약을 우선한다.
+- 이번 탐색 최적화는 PERF-NAV-001이 소유한다. 하단 legacy index의 PERF-001/002/003 DONE은 당시 범위의 완료 기록이며 이번 변경의 네이티브 수용을 뜻하지 않는다.
 
 ### 2026-09-12 Quiet Character Workflow 최종 검증 체크포인트
 
@@ -688,7 +696,8 @@ Prerequisites: CATALOG-002A and CATALOG-007A; preferably complete reviewed group
 
 ## CHAR-AUTO-001 — Native incremental character auto-tagging
 
-- **Status:** `PARTIAL` — 2026-09-09 Linux 개발 앱에서 신규 이미지의 즉시 자동 분류와 속도 개선을 사용자가 확인했다. Native incremental owner는 구현됐고 renderer-driven automatic scans와 manual-scan automatic application은 비활성화됐다. 아래 성능·안전성 보완과 Windows 확인은 남아 있다.
+- **Status:** `PARTIAL` — 2026-09-09 Linux 개발 앱에서 신규 이미지의 즉시 자동 분류와 속도 개선을 사용자가 확인했다. Native incremental owner는 구현됐고 renderer-driven automatic scans는 비활성화됐다. 수동 분석 결과는 현재 시리즈의 자동분류 설정에 따라 native queue로 넘기므로 수동 분석의 자동 적용이 항상 꺼져 있다고 해석하지 않는다. 아래 성능·안전성 보완과 Windows 확인은 남아 있다.
+- **현재 계약 (2026-09-12):** 가장 가까운 등록 시리즈와 명시적 기준/추가 참조만 사용한다. 참조 저장은 신규 이미지에 적용하며 과거 미분류 갱신은 사용자 요청으로만 만든다. 정상 UI에는 routine 검토 인박스/큐 상세를 다시 노출하지 않는다. 아래 2026-09-09 계약·구현·검증 설명은 당시 기록이며 이 현재 계약이 우선한다.
 - **Contract:** [Steady-state implementation review](../research/character-autotag-steady-state-review-20260909.md). Migrations 0050–0051 provide durable jobs/predictions, claim fencing, source/work generations, pause state, and bounded reconsideration cursors. Existing historical images are not automatically seeded.
 - **Implemented:** native ingestion/classification/restore/similarity events enqueue jobs; target, series, hierarchy, manual learning and reference-source changes schedule bounded reconsideration of recorded unresolved work. One shared Python process serves manual and automatic work, retaining one query's features and up to 32 reference bundles. Complete candidate results publish atomically with conservative decisions, optional series move and job completion. Automatic decisions do not feed learned references or recursively enqueue their own moves.
 - **Review behavior:** manual scans use the selected character; automatic completion does not start a scan or reset review selection. Durable evidence remains reviewable after restart, with explicit refresh for new results. Pause takes effect after the current image; transient failures retry up to three attempts and permanent failures remain visible in review.
@@ -794,7 +803,7 @@ Status: `VERIFY` — 2026-09-09 통합 계획 C/D에서 구현·격리 검증 �
 
 ## CHAR-UI-004 — 기존 분류 폴더를 캐릭터로 등록
 
-Status: `PARTIAL` — 기존 등록·일괄 연결은 구현·격리 검증됐고 네이티브 확인은 남아 있다. 아래 사용자 보고의 전환 후 중복 구조 정리는 추가 구현이 필요하다. 기존 검증은 REVIEW-20260909 실행 기록 참조.
+Status: `PARTIAL` — 기존 등록·일괄 연결은 구현·격리 검증됐고 네이티브 확인은 남아 있다. 전환 후 직접 소속 자산을 시리즈로 옮기고 안전한 빈 폴더만 정리하는 선택지도 구현돼 있다. 이를 새 구현 작업으로 다시 잡지 않는다. 기존 검증은 REVIEW-20260909 실행 기록 참조.
 
 - 사용자가 기존 일반 하위폴더(예: 시리즈 아래 `에이메스`)에 모아 둔 이미지를 새 캐릭터 체계로 연결할 수 있게 한다. 대상은 라이브러리의 기존 분류 폴더이며 외부 파일 폴더 가져오기와 구분한다.
 - 기존 폴더에서 캐릭터 등록을 시작하고, 소속 시리즈·캐릭터 이름을 확인한 뒤 해당 이미지들을 캐릭터의 확정 이미지로 일괄 연결하는 흐름을 제공한다.
@@ -805,12 +814,12 @@ Status: `PARTIAL` — 기존 등록·일괄 연결은 구현·격리 검증됐�
 
 ### 추가 요구 — 기존 폴더 전환 후 중복 구조 정리 (2026-09-09)
 
-Status: `TODO` — 요구사항 기록만 승인. 위 기존 등록 기능의 구현 기록과 구분한다.
+Status: `VERIFY` — 기존 폴더 정리 선택과 조건부 빈 폴더 삭제가 구현됐다. 2026-09-12 코드 대조: `_tools/app/src/characters/FolderCharacterRegistration.tsx`, `_tools/app/src-tauri/src/library/characters.rs`; `registration_cleanup_moves_direct_assets_and_removes_only_empty_folder` 회귀가 존재한다. 이 문서 대조에서 테스트를 재실행하거나 네이티브 수용을 새로 확인하지는 않았다.
 
 - **사용자 보고:** 일반 캐릭터 이미지 폴더를 새 캐릭터 체계로 등록해도 기존 일반 폴더와 그 내용이 따로 남아 탐색이 혼란스럽다. 등록부터 기존 폴더 정리까지 이어지는 전환 흐름이 필요하다.
 - 제안 흐름: 기존 폴더 선택 → 시리즈·캐릭터·기준 이미지 확인 → 기존 이미지 일괄 연결 또는 분석 후 검토 → 결과 확인 → 기존 일반 분류 정리. 사용자가 이미 정리한 폴더는 일괄 연결을 지원하고 불필요한 재분석을 강제하지 않는다.
 - 원본 파일 복사나 자산 중복 생성 없이 기존 자산의 관계를 전환한다. 다른 캐릭터 연결은 보존한다.
-- **미결정:** 기존 일반 폴더를 남기는 선택지/기본값, 시리즈로 분류를 옮기는 시점, 하위 폴더·비이미지·미승인 항목의 처리 범위. 등록에 성공했다는 이유만으로 남은 내용이 있는 폴더를 삭제하지 않는다. 기존 분류 보존 계약을 바꾸는 부분은 명시적인 전환 동작으로 설계한다.
+- **현재 정리 정책:** `전환 후 기존 폴더 정리`는 기본 선택이며 해제하면 기존 폴더를 유지한다. 등록에 포함된 직접 소속 자산만 같은 트랜잭션에서 시리즈로 옮긴다. 하위 폴더·잔여 자산·시리즈 등록·다른 캐릭터 연결이 있으면 원래 폴더를 보존한다. 원본 파일을 이동하거나 복제하지 않는다.
 
 ## CHAR-UI-005 — 검토 화면 상세 패널의 그리드 밀림 및 다중 판단 수정
 
@@ -859,6 +868,8 @@ Status: `VERIFY` — 2026-09-09 통합 계획 C/D에서 구현·격리 검증 �
 ## CHAR-UI-007 — 자동 선정된 추가 참조 확인 및 제외
 
 Status: `DONE` — 구현 후 2026-09-10 사용자 확인으로 완료 처리.
+
+**현재 계약 보정 (2026-09-12):** 위 DONE은 당시 제외/확인 UX의 사용자 수용 기록이다. 현재 비교에는 사용자가 명시적으로 등록한 기준/추가 참조만 사용하고, 승인 이력에서 추가 참조를 자동 선정하지 않는다. 아래 자동 선정·미해결 작업 예약 설명은 이전 계약이며 quiet workflow를 되돌리는 요구로 사용하지 않는다.
 
 - 캐릭터별로 현재 어떤 이미지가 참조로 선정됐는지 확인하고, 잘못 선정된 이미지를 제외할 수 있어야 한다.
 - 고정 기준 이미지 5장과 자동 선정되는 추가 참조를 구분해 썸네일·원본 접근을 제공한다. 선정 근거/출처 표시를 설계한다. 현재 추가 참조는 적격한 수동 승인 이미지에서 선정되며, 자동 확정만으로 추가 참조가 되는 것으로 표현하지 않는다.
@@ -1342,6 +1353,17 @@ User decision (2026-09-06): defer changes to Asset Repository scrolling. Of the 
 - Keep current scrolling behavior until the user resumes this discussion.
 
 ---
+
+# Desktop navigation performance
+
+## PERF-NAV-001 — 폴더·탭 전환과 이미지·표지 표시 지연
+
+Status: `VERIFY` — 2026-09-12 로컬 작업 트리에 구현 및 집중 검증 완료. Windows/Linux 네이티브 클릭→이미지 표시 시간의 수용 확인은 남아 있다. 커밋·배포 완료를 뜻하지 않는다.
+
+- **반영:** 분류 역방향 인덱스(스키마 70)와 작은 범위의 ID 조회; 큰 폴더는 기존 정렬 조회 유지. 작가별 집계를 수정해 여러 작가가 한 행으로 합쳐지는 오류와 반복 조회를 제거했다. 폴더 전환의 전역 날짜 집계 중복, masonry 날짜 포맷 반복, 표지별 고정 대기를 줄였다. 탭 재방문은 최대 8개 범위·각 200행의 비활성 snapshot을 표시한 뒤 최신 응답으로 교체하고, 3D 표지는 완성 전 원본을 표시한다.
+- **증거:** [실행·측정 기록](../performance/desktop-navigation-20260912.md). 합성 30만 장 중 20장 폴더 page+count 약 294→0.20ms, 5만 장/작가 500명 집계 2,403→147ms. 실제 클릭 지연이나 운영 라이브러리 처리량으로 해석하지 않는다. 관련 Rust query 31개·DB 44개와 집중 프런트엔드·타입 검증 통과 기록이 있다.
+- **남은 확인:** 대표 규모에서 첫 진입/재방문/빠른 연속 전환을 나누고 클릭→목록→첫 이미지→표지 완성 시간을 Windows/Linux에서 확인한다. 원본 decode, GPU/PNG 작업, 백그라운드 DB 경합, 큰 범위의 정확한 count는 측정 후 후속 변경 여부를 결정한다. 라이브러리 쓰기·재색인·마이그레이션 실행은 별도 승인 경계를 유지한다.
+- **중복 방지:** legacy PERF-001/002/003을 재구현하는 작업이 아니다. AI 모델 첫 분석·참조 준비 성능은 CHAR-AUTO-001이 소유하며, 이번 표지/탐색 개선으로 완료 처리하지 않는다.
 
 # Similarity / media identity lane
 
@@ -2336,7 +2358,7 @@ These are detailed in active sections above:
 - CLOUD-UI-001 — `VERIFY`
 - NOTE-001 — NOTE-001A server `DONE`; NOTE-001B desktop `PARTIAL`
 - STATS-001 — `PARTIAL` split inventory/activity
-- IDEA-001 — `PARTIAL`; IDEA-001A `DONE`, IDEA-001B `TODO`
+- IDEA-001 — `PARTIAL`; IDEA-001A `DONE`, IDEA-001B `VERIFY` (2026-09-12 implementation/fixture checkpoint supersedes the older TODO)
 - LONG-001 — `PARTIAL` implementation complete; provider/native/product acceptance remains
 - LONG-002 — LONG-002A `DONE`; LONG-002B `PARTIAL` only for native visual acceptance
 - LONG-003 — `TODO` in audit, intentionally `HOLD` here until security gate is approved
@@ -2402,7 +2424,7 @@ LONG-002A and WORKS-002. Do not schedule them again.
 Remaining work, grouped by dependency rather than one mandatory serial queue:
 
 1. **CLOUD-UI-001 and STATS-001A/B — native acceptance** of already implemented UI.
-2. **IDEA-001B — Revisit theme expansion.** IDEA-001A scoring/cooldown/feedback is DONE.
+2. **IDEA-001B — native/product acceptance of lightweight Revisit themes.** Creator/date/color implementation and fixture checks are complete; actual Windows/Linux color relevance and viewer acceptance remain.
 3. **NOTE-001B — finish desktop Notes acceptance and documented remaining work.** NOTE-001A revision-safe server is DONE; do not reimplement it.
 4. **CATALOG-002B — optional Heliotrope coexistence.** Not a prerequisite for the
    existing-provider Mobile catalog lane.

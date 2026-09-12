@@ -44,7 +44,8 @@ export class RenderCache {
   async whenIdle() { await this.active?.done; }
   private schedule() {
     if(this.timer!==null||this.active||this.paused||!this.jobs.size) return;
-    this.timer=setTimeout(() => { this.timer=null; this.pump(); },16);
+    // Yield between producers without making every ready cover wait a frame.
+    this.timer=setTimeout(() => { this.timer=null; this.pump(); },0);
   }
   private makeRoom(bytes: number) {
     if(bytes>this.limits.bytes) return false;

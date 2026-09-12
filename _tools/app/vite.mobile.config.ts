@@ -9,6 +9,6 @@ export default defineConfig({
       }
     },
   }],
-  build: { outDir: '../../android/assets', emptyOutDir: true, sourcemap: false },
+  build: { outDir: '../../../android/assets', emptyOutDir: true, sourcemap: false },
   server: { host: '127.0.0.1', port: 1448, strictPort: true },
 });

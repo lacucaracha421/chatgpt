@@ -6,7 +6,7 @@ import { LibraryProvider } from "../library/LibraryContext";
 import { ChromeSettingsDock, ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
 import { WindowControls } from "../layout/WindowControls";
 import type { AssetPage, AssetSort, AssetView, ClassificationEntry, LibraryGateway } from "../library/types";
-import { AssetBrowser, type AssetBrowserStatus } from "./AssetBrowser";
+import { AssetBrowser, type AssetBrowserStatus, type AssetNavigationMemory } from "./AssetBrowser";
 
 const classifications: ClassificationEntry[] = [];
 
@@ -19,6 +19,35 @@ beforeEach(() => Object.defineProperties(HTMLElement.prototype, {
 }));
 
 describe("AssetBrowser", () => {
+  it("shows a bounded return snapshot inert until the current request validates it", async () => {
+    const memory: AssetNavigationMemory = new Map();
+    const gateway = createGateway({ items: [asset(0)], nextCursor: null });
+    const first = renderBrowser(gateway, { navigationMemory: memory });
+    await screen.findByRole("option", { name: "asset-0.png" });
+    await waitFor(() => expect(memory.size).toBe(1));
+    first.unmount();
+    let finish!: (page: AssetPage) => void;
+    vi.mocked(gateway.listAssets).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    const { container } = renderBrowser(gateway, { navigationMemory: memory });
+    expect(screen.getByRole("option", { name: "asset-0.png" })).toBeInTheDocument();
+    expect(container.querySelector(".asset-browser__results")).toHaveAttribute("inert");
+    await act(async () => finish({ items: [asset(1)], nextCursor: null }));
+    expect(screen.queryByRole("option", { name: "asset-0.png" })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "asset-1.png" })).toBeInTheDocument();
+    expect(container.querySelector(".asset-browser__results")).not.toHaveAttribute("inert");
+  });
+
+  it("reuses global date buckets across folder navigation and refreshes after data changes", async () => {
+    const gateway = createGateway();
+    const { rerender } = renderBrowser(gateway);
+    await waitFor(() => expect(gateway.listAssetDateBuckets).toHaveBeenCalledTimes(1));
+    rerender(browserElement(gateway, { view: { kind: "classification", classificationId: "folder-b" } }));
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledTimes(2));
+    expect(gateway.listAssetDateBuckets).toHaveBeenCalledTimes(1);
+    rerender(browserElement(gateway, { view: { kind: "classification", classificationId: "folder-b" }, refreshVersion: 1 }));
+    await waitFor(() => expect(gateway.listAssetDateBuckets).toHaveBeenCalledTimes(2));
+  });
+
   it.each([false, true])("offers video comparison only for a fully video selection (mixed=%s)", async (mixed) => {
     const video = (index: number) => ({ ...asset(index), media: { kind: "video" as const, durationMs: 12000, preparationState: "ready" as const, scrubFrameCount: 12 } });
     const gateway = createGateway({ items: [video(0), mixed ? asset(1) : video(1)], nextCursor: null });
@@ -1049,9 +1078,9 @@ function withWorkspaceChrome(child: ReactNode) {
   );
 }
 
-type BrowserOptions = { view?: AssetView; sort?: AssetSort; refreshVersion?: number; status?: (status: AssetBrowserStatus) => void };
-function browserElement(gateway: LibraryGateway, { view = { kind: "classification", classificationId: null }, sort = "newest", refreshVersion = 0, status = vi.fn() }: BrowserOptions = {}) {
-  return <LibraryProvider gateway={gateway}>{withWorkspaceChrome(<AssetBrowser galleryLayout="justified" view={view} classifications={classifications} sort={sort} metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={refreshVersion} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={status} />)}</LibraryProvider>;
+type BrowserOptions = { navigationMemory?: AssetNavigationMemory; view?: AssetView; sort?: AssetSort; refreshVersion?: number; status?: (status: AssetBrowserStatus) => void };
+function browserElement(gateway: LibraryGateway, { navigationMemory, view = { kind: "classification", classificationId: null }, sort = "newest", refreshVersion = 0, status = vi.fn() }: BrowserOptions = {}) {
+  return <LibraryProvider gateway={gateway}>{withWorkspaceChrome(<AssetBrowser navigationMemory={navigationMemory} galleryLayout="justified" view={view} classifications={classifications} sort={sort} metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={refreshVersion} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={status} />)}</LibraryProvider>;
 }
 
 function asset(index: number) {

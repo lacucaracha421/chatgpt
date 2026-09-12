@@ -153,7 +153,7 @@ Names and exact component boundaries are implementation choices, not a requireme
 
 Ordinary grids remain static image surfaces. The approved Paperback FINAL allows one shared, on-demand WebGL2 renderer to bake nearby book thumbnails and display one live appreciation book. It does not authorize a WebGL canvas per tile, continuous animation, or unbounded full-resolution decoding.
 
-Current implementation is in `app/src/collections/physical/`: a common 7,888-triangle model, serialized/cancellable snapshot queue, reference-counted bounded raster cache, and one live-book owner. Static images have an estimated decoded budget of 24 MiB / 64 entries; GPU cover textures have an estimated 12 MiB / 4-entry budget. These are managed-resource estimates, not total browser RAM/VRAM measurements. Live input is capped at 30fps, DPR 1.5 and 1.4 million pixels; idle drawing stops. The cache is memory-only and recreated after restart.
+Current implementation is in `_tools/app/src/collections/physical/`: a common 7,888-triangle model, serialized/cancellable snapshot queue, reference-counted bounded raster cache, and one live-book owner. Static images have an estimated decoded budget of 24 MiB / 64 entries; GPU cover textures have an estimated 12 MiB / 4-entry budget. These are managed-resource estimates, not total browser RAM/VRAM measurements. Live input is capped at 30fps, DPR 1.5 and 1.4 million pixels; idle drawing stops. The cache is memory-only and recreated after restart.
 
 Game optimization reuses the existing `drawGameCase.ts` projection unchanged, snapshots through a shared 2D surface, and releases offscreen tile subscriptions. It is not a game-case redesign. Movie detail remains unchanged.
 

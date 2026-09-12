@@ -26,7 +26,7 @@ function snapshot(canvas:HTMLCanvasElement, width=canvas.width, height=canvas.he
   return new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve({blob,width,height}):reject(new Error("Snapshot unavailable")),"image/png"));
 }
 export function coverKey(request:CoverRequest) { return JSON.stringify([request.kind==="game"?"collectible-game-fit-v3":"collectible-final-v1",request.kind,request.scope,request.src,request.revision,request.pixels]); }
-function sourceUrl(request:Pick<CoverRequest,"src"|"revision"|"scope">) {
+export function coverSourceUrl(request:Pick<CoverRequest,"src"|"revision"|"scope">) {
   if((!request.revision&&!request.scope)||request.src.startsWith("data:")||request.src.startsWith("blob:")) return request.src;
   const scopeTag=[...request.scope].reduce((hash,char)=>Math.imul(hash^char.charCodeAt(0),16777619)>>>0,2166136261).toString(16);
   return `${request.src}${request.src.includes("?")?"&":"?"}v=${encodeURIComponent(request.revision)}&scope=${scopeTag}`;
@@ -35,13 +35,13 @@ async function bake(request:CoverRequest, signal:AbortSignal):Promise<RenderResu
   if(signal.aborted) throw new DOMException("Cancelled","AbortError");
   if(request.kind==="book") {
     const renderer=ensureEngine(), width=request.pixels, height=Math.round(width*368/256);
-    const texture=await renderer.texture(coverKey(request),sourceUrl(request),512,signal);
+    const texture=await renderer.texture(coverKey(request),coverSourceUrl(request),512,signal);
     if(signal.aborted) throw new DOMException("Cancelled","AbortError");
     renderer.draw(texture,{width,height,rx:PAPERBACK_FINAL.rx,ry:PAPERBACK_FINAL.bakeRy,rz:0,zoom:Math.min(1.13,width/height*1.8/texture.ratio),bake:true});
     return snapshot(renderer.canvas);
   }
   if(typeof CanvasRenderingContext2D==="undefined") throw new Error("Canvas unavailable");
-  const image=request.src?await loadCoverImage(sourceUrl(request),signal):null;
+  const image=request.src?await loadCoverImage(coverSourceUrl(request),signal):null;
   const output=document.createElement("canvas");
   try {
     if(signal.aborted) throw new DOMException("Cancelled","AbortError");
@@ -86,7 +86,7 @@ export function attachLiveBook(host:HTMLElement, request:CoverRequest, onReady:(
       await cache.whenIdle(); if(!current()) return;
       const active=ensureEngine();
       if(renderer!==active) {renderer=active; texture=null;}
-      texture??=await active.texture(coverKey(request),sourceUrl(request),1024,abort.signal);
+      texture??=await active.texture(coverKey(request),coverSourceUrl(request),1024,abort.signal);
       if(!current()||document.hidden||contextLost) return;
       const rect=host.getBoundingClientRect(); if(rect.width<1||rect.height<1) return;
       const cssWidth=Math.min(rect.width,rect.height*1.45),cssHeight=rect.height;
@@ -136,7 +136,7 @@ export function attachLiveCase(host:HTMLElement, request:{src:string;scope:strin
   window.addEventListener("resize",refresh);wakeLive=refresh;
   // Bounded native thumbnails are sufficient for the snap overview. Original mode
   // explicitly loads the full surface; no full-resolution image cache is retained.
-  void loadCoverImage(sourceUrl(request),abort.signal).then(image=>{if(!current()){image.src="";return;}source=image;refresh();},()=>{if(current())onReady(false);});
+  void loadCoverImage(coverSourceUrl(request),abort.signal).then(image=>{if(!current()){image.src="";return;}source=image;refresh();},()=>{if(current())onReady(false);});
   function dispose() {
     if(disposed)return;disposed=true;abort.abort();if(frame)cancelAnimationFrame(frame);resize?.disconnect();window.removeEventListener("resize",refresh);
     if(source)source.src="";source=null;canvas.remove();canvas.width=canvas.height=2;

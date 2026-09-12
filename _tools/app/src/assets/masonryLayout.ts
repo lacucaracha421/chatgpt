@@ -5,12 +5,19 @@ export type MasonryTile = { asset: AssetSummary; index: number; left: number; to
 export const CAPTION_HEIGHT = 26;
 const DATE_HEADING_HEIGHT = 44;
 const fullDateFormat = new Intl.DateTimeFormat("ko-KR", { dateStyle: "medium", timeStyle: "medium", hour12: false });
+function dateKey(date: Date) {
+  return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")}`;
+}
+function collectedDateKey(value: string) {
+  const date = value ? new Date(value) : null;
+  return date && Number.isFinite(date.getTime()) ? dateKey(date) : "unknown";
+}
 
 // Date headings and captions deliberately share the same local timestamp.
 export function collectedDate(value: string | null | undefined) {
   const date = value ? new Date(value) : null;
   if (!date || !Number.isFinite(date.getTime())) return { key: "unknown", label: "수집일 미상", time: "—", full: "수집 시각 없음" };
-  const key = `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")}`;
+  const key = dateKey(date);
   return { key, label: key, time: `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`, full: fullDateFormat.format(date) };
 }
 
@@ -20,11 +27,12 @@ export function buildMasonryLayout(items: AssetSummary[], width: number, targetW
   if (width <= 0 || targetWidth <= 0) return { tiles, headings, height: 0 };
   const columns = Math.max(1, Math.floor((width + gap) / (targetWidth + gap)));
   const tileWidth = (width - gap * (columns - 1)) / columns;
-  const groups: Array<{ start: number; items: AssetSummary[] }> = [];
+  const groups: Array<{ start: number; key: string; items: AssetSummary[] }> = [];
   items.forEach((asset, index) => {
     const last = groups[groups.length - 1];
-    if (!last || (groupDates && collectedDate(last.items[0].collectedAt).key !== collectedDate(asset.collectedAt).key)) {
-      groups.push({ start: index, items: [asset] });
+    const key = groupDates ? collectedDateKey(asset.collectedAt) : "";
+    if (!last || (groupDates && last.key !== key)) {
+      groups.push({ start: index, key, items: [asset] });
     } else last.items.push(asset);
   });
   let rowTop = 0;
@@ -38,7 +46,7 @@ export function buildMasonryLayout(items: AssetSummary[], width: number, targetW
     }
     const left = usedColumns * (tileWidth + gap);
     if (groupDates) headings.push({
-      key: group.items[0].id, label: collectedDate(group.items[0].collectedAt).label,
+      key: group.items[0].id, label: group.key === "unknown" ? "수집일 미상" : group.key,
       top: rowTop, left, width: span * (tileWidth + gap) - gap,
     });
     const bottoms = Array<number>(span).fill(rowTop + (groupDates ? DATE_HEADING_HEIGHT : 0));

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { acquireCover, coverKey, type CoverRequest } from "./collectibleRuntime";
+import { acquireCover, coverKey, coverSourceUrl, type CoverRequest } from "./collectibleRuntime";
 import type { Snapshot } from "./RenderCache";
 import { observeCover, observeCoverSize } from "./coverVisibility";
 import "./physicalCollections.css";
@@ -25,15 +25,15 @@ export function PhysicalCover({src,alt,kind,scope="",revision="",large=false,onE
   useEffect(()=>{
     if(!near) return;
     let active=true;
-    const stopShell=kind==="game"?acquireCover({kind,src:"",scope:"neutral-shell",revision:"",pixels},value=>{if(active)setShell(value);}):()=>undefined;
+    const stopShell=kind==="game"&&!src?acquireCover({kind,src:"",scope:"neutral-shell",revision:"",pixels},value=>{if(active)setShell(value);}):()=>undefined;
     const stop=src?acquireCover({kind,src,scope,revision,pixels},value=>{if(active)setResult({key,value,failed:value===null});}):()=>undefined;
     return ()=>{active=false;stop();stopShell();setShell(null);setResult(null);};
   },[near,key,kind,src,scope,revision,pixels]);
-  const visibleUrl=near?(current?.value?.url??(current?.failed?src:null)??shell?.url):null;
-  return <span ref={root} className={`physical-cover physical-cover--${kind}`} data-ready={Boolean(visibleUrl)} data-source={current?.failed?"fallback":"rendered"}>
-    <img src={visibleUrl??undefined} alt={alt} loading="lazy" decoding="async" draggable={false}
+  const visibleUrl=near?(current?.value?.url??(src?coverSourceUrl(request):shell?.url)):null;
+  return <span ref={root} className={`physical-cover physical-cover--${kind}`} data-ready={Boolean(visibleUrl)} data-source={current?.value||(!src&&shell)?"rendered":current?.failed?"fallback":"preview"}>
+    <img src={visibleUrl??undefined} crossOrigin="anonymous" alt={alt} loading="lazy" decoding="async" draggable={false}
       onError={()=>{
-        if(current?.failed) latestError.current?.();
+        if(!current?.value) latestError.current?.();
         else setResult({key,value:null,failed:true});
       }} />
   </span>;

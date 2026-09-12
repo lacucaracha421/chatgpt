@@ -10,6 +10,6 @@ All SVGs are self-contained, with no fonts, external resources, filters, or rast
 
 ## Selected identity
 
-Version 01 (Outline) was selected on 2026-09-06. Production sources are `app/src/brand/lakomics-mark.svg` (workspace rail) and `app/src/brand/lakomics-icon.svg` (charcoal app tile). The five studies here remain design references.
+Version 01 (Outline) was selected on 2026-09-06. Production sources are `_tools/app/src/brand/lakomics-mark.svg` (workspace rail) and `_tools/app/src/brand/lakomics-icon.svg` (charcoal app tile). The five studies here remain design references.
 
-PC icon files under `app/src-tauri/icons/` are generated using the existing Tauri icon command from the app tile source. Extension PNGs under `extension/icons/` use the same tile at 16, 32, 48, and 128px; the manifest references both toolbar and extension management icons. Native executable icons take effect after rebuilding/restarting the app; installed extensions need a reload/update.
+PC icon files under `_tools/app/src-tauri/icons/` are generated using the existing Tauri icon command from the app tile source. Extension PNGs under `extension/icons/` use the same tile at 16, 32, 48, and 128px; the manifest references both toolbar and extension management icons. Native executable icons take effect after rebuilding/restarting the app; installed extensions need a reload/update.

@@ -32,13 +32,13 @@ The server-side PC recovery point is latest-only: `backups/library-metadata.sqli
 
 ## Prepare the new PC
 
-The repository currently requires Windows, Node.js 24.19.0 LTS, npm 12.0.2, Rust 1.98.0, and WebView2. The repo pins Node/npm/Rust baselines.
+For this Windows migration procedure, install Node.js 24.19.0 LTS, npm 12.0.2, Rust 1.98.0, and WebView2. The repo pins Node/npm/Rust baselines.
 
 ```powershell
 git clone https://github.com/lacucaracha421/chatgpt.git C:\chatgpt
-cd C:\chatgpt\app
+cd C:\chatgpt\_tools\app
 npm ci
-cd ..
+cd ..\..
 powershell -ExecutionPolicy Bypass -File scripts\fetch-ffmpeg-windows.ps1
 powershell -ExecutionPolicy Bypass -File scripts\fetch-ffmpeg-windows.ps1 -VerifyOnly
 ```
@@ -91,11 +91,11 @@ npm test
 cd C:\chatgpt\server\lakomics-api
 py -m unittest tests.test_capture_api
 
-cd C:\chatgpt\app
+cd C:\chatgpt\_tools\app
 npm test -- --run
 npm run build
 
-cd C:\chatgpt\app\src-tauri
+cd C:\chatgpt\_tools\app\src-tauri
 cargo test --lib
 ```
 

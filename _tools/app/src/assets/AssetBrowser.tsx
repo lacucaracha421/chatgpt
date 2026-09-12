@@ -20,8 +20,9 @@ import { AssetViewer } from "./AssetViewer";
 import { applySelectionGesture, emptySelection, moveSelectionFocus, reconcileSelection, selectAllLoaded, type SelectionGesture, type SelectionState } from "./selection";
 
 export type AssetBrowserStatus = { loadedCount: number; totalCount?: number; selectedAsset: AssetSummary | null; loading: boolean };
-type Props = { onReviewVideos?: (assetIds: string[]) => void; galleryLayout?: "masonry" | "justified"; onGalleryLayoutChange?: (layout: "masonry" | "justified") => void; view: AssetView; onViewChange?: (view: AssetView) => void; classifications: ClassificationEntry[]; albums?: AlbumEntry[]; collections?: CollectionSummary[]; onCollectionsChanged?: () => void; onMembershipChanged?: () => void; sort: AssetSort; metadataVisible: boolean; privacyMode: boolean; onPrivacyModeChange: (privacyMode: boolean) => void; thumbnailRowHeight?: number; refreshVersion: number; clearSelectionRequest?: number; requestedAsset?: AssetSummary | null; onRequestedAssetHandled?: () => void; onSortChange: (sort: AssetSort) => void; onMetadataVisibleChange: (visible: boolean) => void; onThumbnailRowHeightChange?: (height: number) => void; onStatusChange: (status: AssetBrowserStatus) => void; onPointerDragStart?: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => void; onPointerDragMove?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void };
-  type PageState = { sort: AssetSort; queryKey: string; items: AssetSummary[]; headCursor: AssetCursor | null; tailCursor: AssetCursor | null; totalCount: number | null };
+type Props = { navigationMemory?: AssetNavigationMemory; onReviewVideos?: (assetIds: string[]) => void; galleryLayout?: "masonry" | "justified"; onGalleryLayoutChange?: (layout: "masonry" | "justified") => void; view: AssetView; onViewChange?: (view: AssetView) => void; classifications: ClassificationEntry[]; albums?: AlbumEntry[]; collections?: CollectionSummary[]; onCollectionsChanged?: () => void; onMembershipChanged?: () => void; sort: AssetSort; metadataVisible: boolean; privacyMode: boolean; onPrivacyModeChange: (privacyMode: boolean) => void; thumbnailRowHeight?: number; refreshVersion: number; clearSelectionRequest?: number; requestedAsset?: AssetSummary | null; onRequestedAssetHandled?: () => void; onSortChange: (sort: AssetSort) => void; onMetadataVisibleChange: (visible: boolean) => void; onThumbnailRowHeightChange?: (height: number) => void; onStatusChange: (status: AssetBrowserStatus) => void; onPointerDragStart?: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => void; onPointerDragMove?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void };
+type PageState = { sort: AssetSort; queryKey: string; items: AssetSummary[]; headCursor: AssetCursor | null; tailCursor: AssetCursor | null; totalCount: number | null };
+export type AssetNavigationMemory = Map<string, PageState>;
 type QueryError = { queryKey: string; message: string };
 const EMPTY_ASSETS: AssetSummary[] = [];
 const EMPTY_BUCKETS: AssetDateBucket[] = [];
@@ -32,7 +33,7 @@ const ALL_DATE_BUCKETS = {
 };
 
 
-export function AssetBrowser({ onReviewVideos, galleryLayout = "masonry", onGalleryLayoutChange, view, onViewChange, classifications, albums = [], collections = [], onCollectionsChanged = () => undefined, onMembershipChanged = () => undefined, sort, metadataVisible, privacyMode, onPrivacyModeChange, thumbnailRowHeight = 180, refreshVersion, clearSelectionRequest = 0, requestedAsset = null, onRequestedAssetHandled = () => undefined, onSortChange, onMetadataVisibleChange, onThumbnailRowHeightChange = () => undefined, onStatusChange, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: Props) {
+export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout = "masonry", onGalleryLayoutChange, view, onViewChange, classifications, albums = [], collections = [], onCollectionsChanged = () => undefined, onMembershipChanged = () => undefined, sort, metadataVisible, privacyMode, onPrivacyModeChange, thumbnailRowHeight = 180, refreshVersion, clearSelectionRequest = 0, requestedAsset = null, onRequestedAssetHandled = () => undefined, onSortChange, onMetadataVisibleChange, onThumbnailRowHeightChange = () => undefined, onStatusChange, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: Props) {
   const { gateway } = useLibrary();
   const [revisitDate, setRevisitDate] = useState<string | null>(null);
   const [directOnly, setDirectOnly] = useState(false);
@@ -55,7 +56,7 @@ export function AssetBrowser({ onReviewVideos, galleryLayout = "masonry", onGall
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [batchPending, setBatchPending] = useState(false);
   const [undoAssetIds, setUndoAssetIds] = useState<string[] | null>(null);
-  const [dateBuckets, setDateBuckets] = useState<{ queryKey: string; buckets: AssetDateBucket[] }>({ queryKey: "", buckets: [] });
+  const [dateBuckets, setDateBuckets] = useState<AssetDateBucket[]>([]);
   const dismissMessage = useCallback((value: null) => { setMessage(value); setUndoAssetIds(null); }, []);
   useAutoDismiss(message, dismissMessage);
   const selectedViewKeyRef = useRef<string | null>(null);
@@ -87,6 +88,13 @@ export function AssetBrowser({ onReviewVideos, galleryLayout = "masonry", onGall
   const currentNextError = nextError?.queryKey === queryKey ? nextError.message : null;
   const currentPrevError = prevError?.queryKey === queryKey ? prevError.message : null;
   const refresh = useCallback(() => setRetryVersion((value) => value + 1), []);
+  useEffect(() => {
+    if (!page || !navigationMemory) return;
+    // Display-only snapshots: mutations and paging always use a freshly read page.
+    navigationMemory.delete(page.queryKey);
+    navigationMemory.set(page.queryKey, { ...page, items: page.items.slice(0, 200) });
+    while (navigationMemory.size > 8) navigationMemory.delete(navigationMemory.keys().next().value!);
+  }, [page, navigationMemory]);
   useEffect(() => {
     if (view.kind === "revisit" && !revisitDate) { ++generationRef.current; nextLoadingRef.current = false; prevLoadingRef.current = false; setFirstLoading(false); setNextLoading(false); setPrevLoading(false); setFirstError(null); setNextError(null); setPrevError(null); return; }
     nextLoadingRef.current = false; prevLoadingRef.current = false; setFirstLoading(true); setNextLoading(false); setPrevLoading(false); setFirstError(null); setNextError(null); setPrevError(null);
@@ -131,15 +139,16 @@ export function AssetBrowser({ onReviewVideos, galleryLayout = "masonry", onGall
       setViewerAssetId((assetId) => requestedAssetRef.current?.id === assetId ? assetId : reconcileAssetId(assetId, viewerViewKeyRef.current, viewKey, result.items));
     }).catch((error: unknown) => { if (generation === generationRef.current) setFirstError({ queryKey, message: commandErrorMessage(error, "자산을 불러오지 못했습니다.") }); }).finally(() => { if (generation === generationRef.current) setFirstLoading(false); });
   }, [gateway, queryBase, queryKey, refreshVersion, retryVersion, revisitDate, view.kind, viewKey]);
+  const needsDateBuckets = view.kind !== "revisit";
   useEffect(() => {
-    if (view.kind === "revisit") { setDateBuckets({ queryKey, buckets: [] }); return; }
+    if (!needsDateBuckets) return;
     let cancelled = false;
     void gateway.listAssetDateBuckets(ALL_DATE_BUCKETS).then((result) => {
-      if (!cancelled) setDateBuckets({ queryKey, buckets: result });
-    }).catch(() => { if (!cancelled) setDateBuckets({ queryKey, buckets: [] }); });
+      if (!cancelled) setDateBuckets(result);
+    }).catch(() => { if (!cancelled) setDateBuckets([]); });
     return () => { cancelled = true; };
-  }, [gateway, queryBase, queryKey, refreshVersion]);
-  const activeBuckets = dateBuckets.queryKey === queryKey ? dateBuckets.buckets : EMPTY_BUCKETS;
+  }, [gateway, refreshVersion, needsDateBuckets]);
+  const activeBuckets = view.kind === "revisit" ? EMPTY_BUCKETS : dateBuckets;
   const totalAssets = useMemo(() => activeBuckets.reduce((sum, bucket) => sum + bucket.count, 0), [activeBuckets]);
   useEffect(() => onStatusChange({ loadedCount: items.length, totalCount: totalAssets, selectedAsset, loading: firstLoading || nextLoading || prevLoading }), [firstLoading, items.length, nextLoading, onStatusChange, prevLoading, selectedAsset, totalAssets]);
   useEffect(() => {
@@ -326,7 +335,7 @@ export function AssetBrowser({ onReviewVideos, galleryLayout = "masonry", onGall
   })();
   const hasActiveFilters = filterable && (mediaFilter !== "all" || aspectFilter !== "all");
   const resetFilters = () => { changeMediaFilter("all"); changeAspectFilter("all"); };
-  const visiblePage = activePage ?? (!currentFirstError ? page : null);
+  const visiblePage = activePage ?? (!currentFirstError ? navigationMemory?.get(queryKey) ?? page : null);
   const visibleItems = visiblePage?.items ?? [];
   const contextItems: ContextMenuItem[] = [
     ...(onReviewVideos && selectedAssets.length >= 2 && selectedAssets.length <= 100 && selectedAssets.every(asset => asset.media.kind === "video")

@@ -10,7 +10,7 @@ is offline.
 
 | Component | Role | Start here |
 | --- | --- | --- |
-| Desktop | React/TypeScript + Vite UI and Tauri/Rust library management on Windows and Linux | [Desktop setup and behavior](app/README.md) |
+| Desktop | React/TypeScript + Vite UI and Tauri/Rust library management on Windows and Linux | [Desktop setup and behavior](_tools/app/README.md) |
 | Android | Independent Java/WebView client with Home, Library, Collections, Manga Catalog and reader, media cache, and Android picker integration | [Android setup and current scope](android/README.md) |
 | Browser collector | Chromium extension for media collection and X translation; direct PC and optional Cloud Capture routes | [Collector README](extension/README.md) and [operation guide](docs/edge-extension.md) |
 | Cloud API | Optional capture transport, library/Collection replicas, and shared catalog reads | [Cloud architecture](docs/agents/cloud-capture.md) |
@@ -21,18 +21,21 @@ area. [Product vocabulary](CONTEXT.md) defines these boundaries.
 ## Development
 
 Desktop prerequisites are pinned by [.node-version](.node-version),
-[app/package.json](app/package.json), and
-[app/rust-toolchain.toml](app/rust-toolchain.toml). Follow the
-[desktop README](app/README.md) for Windows setup or the
+[_tools/app/package.json](_tools/app/package.json), and
+[_tools/app/rust-toolchain.toml](_tools/app/rust-toolchain.toml). Follow the
+[desktop README](_tools/app/README.md) for Windows setup or the
 [Linux guide](docs/operations/linux-desktop.md) for GTK/WebKitGTK, media tools,
 filesystem requirements, and remaining platform limitations.
 
-After platform setup, run from `app/` on either Windows or Linux:
+After platform setup, run from `_tools/app/` on either Windows or Linux:
 
 ```sh
 npm ci
 npm run tauri -- dev
 ```
+
+The active package path was verified on 2026-09-12. From the repository root,
+use `cd _tools/app`; the old root-level `app/` directory is not the package.
 
 Use a disposable library for development verification. Read [AGENTS.md](AGENTS.md)
 for repository workflow and production-library boundaries. Android uses its own

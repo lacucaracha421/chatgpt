@@ -107,7 +107,8 @@ variables through the local credential/session mechanism without logging secrets
 From the repository root, run only the bounded ignored test:
 
 ```powershell
-cargo test --manifest-path app/src-tauri/Cargo.toml --lib japanese_real_source_two_page_canary -- --ignored --nocapture --test-threads=1
+cd _tools/app # from the repository root; selects the pinned Rust toolchain
+cargo test --manifest-path src-tauri/Cargo.toml --lib japanese_real_source_two_page_canary -- --ignored --nocapture --test-threads=1
 ```
 
 It opens the source read-only, creates a SQLite online backup, verifies

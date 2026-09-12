@@ -3,7 +3,7 @@
 Linux desktop development uses the existing React/Vite + Tauri application:
 
 ```sh
-cd app
+cd _tools/app
 npm ci
 npm run build
 cargo check --manifest-path src-tauri/Cargo.toml
@@ -12,14 +12,14 @@ npm run tauri -- dev
 
 Install the Tauri v2 Linux build prerequisites for the distribution (including
 GTK 3 and WebKitGTK 4.1 development packages), Rust, and the Node/npm versions
-specified by `app/package.json`. The supported scope of this bring-up is modern
+specified by `_tools/app/package.json`. The supported scope of this bring-up is modern
 Linux desktop, alongside the existing Windows implementation; other targets
 remain explicitly blocked.
 
 ## Media and packaging
 
 Windows FFmpeg sidecars, DLLs, and their notices live in
-`app/src-tauri/tauri.windows.conf.json`. Tauri v2 automatically merges this into
+`_tools/app/src-tauri/tauri.windows.conf.json`. Tauri v2 automatically merges this into
 the common configuration on Windows. Linux must not contain placeholder DLLs,
 FFmpeg symlinks, or copies of system executables in the bundle.
 
@@ -69,14 +69,17 @@ For isolated manual verification, use an empty test library and separate
 loading a previously remembered production library. Never use production data
 for bring-up tests. Launch with `npm run tauri -- dev`, not a debug executable.
 
-Focused checks:
+Focused checks from `_tools/app/` (so Cargo selects its pinned toolchain):
 
 ```sh
-cargo test --manifest-path app/src-tauri/Cargo.toml --lib linux_
-cargo test --manifest-path app/src-tauri/Cargo.toml --lib library::ingestion::tests
-cargo test --manifest-path app/src-tauri/Cargo.toml --lib library::trash::tests
-cargo test --manifest-path app/src-tauri/Cargo.toml --lib linux_system_video_tools -- --ignored
+cargo test --manifest-path src-tauri/Cargo.toml --lib linux_
+cargo test --manifest-path src-tauri/Cargo.toml --lib library::ingestion::tests
+cargo test --manifest-path src-tauri/Cargo.toml --lib library::trash::tests
+cargo test --manifest-path src-tauri/Cargo.toml --lib linux_system_video_tools -- --ignored
 ```
+
+The dated records below retain the paths used at the time. Their `app/` prefix
+now corresponds to `_tools/app/`; the recorded results have not been rerun.
 
 ## Bring-up verification, 2026-09-08
 

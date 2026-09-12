@@ -307,12 +307,25 @@ it("offers recovery when a legacy character is disabled", async () => {
 });
 
 
-it("opens the quiet reference suggestion flow from an existing character", async () => {
-  const { hubApi } = await mount("hina");
-  await userEvent.setup().click(await screen.findByRole("button", { name: "레퍼런스 추가" }));
-  expect(await screen.findByRole("dialog", { name: "레퍼런스 선택" })).toBeVisible();
-  expect(hubApi.referenceCandidates).toHaveBeenCalledWith("hina", 20);
-  expect(screen.queryByText(/거리|일치 점수|검토 대기/)).not.toBeInTheDocument();
+it("opens manual reference selection from the character folder and saves only the chosen images", async () => {
+  const { api, browse, hubApi } = await mount("hina");
+  const save = vi.spyOn(api, "saveSettings");
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "레퍼런스 추가" }));
+  expect(await screen.findByRole("region", { name: "갤러리 이미지 선택" })).toBeVisible();
+  expect(screen.getByText("레퍼런스 선택 · 5/25")).toBeVisible();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  await waitFor(() => expect(browse).toHaveBeenLastCalledWith(expect.objectContaining({ targetId: "hina", referenceTargetId: "hina", all: true })));
+  expect(hubApi.referenceCandidates).not.toHaveBeenCalled();
+  const candidate = await screen.findByRole("option", { name: "이미지 5.webp" });
+  expect(candidate).toHaveAttribute("aria-selected", "false");
+  await user.click(candidate);
+  await user.click(screen.getByRole("button", { name: "완료" }));
+  const panel = await screen.findByRole("dialog", { name: "히나 · 캐릭터 정보" });
+  expect(save).not.toHaveBeenCalled();
+  await user.click(within(panel).getByRole("button", { name: "저장" }));
+  await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({ id: "hina", referenceIds: fixtureAssets.slice(0, 6).map(asset => asset.id) }), true));
+  expect(hubApi.confirmReferenceBatch).not.toHaveBeenCalled();
 });
 
 it("starts historical refresh only after explicit confirmation", async () => {

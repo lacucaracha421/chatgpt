@@ -8,23 +8,31 @@ source/document consistency, not new native acceptance or production verificatio
 
 ## Application entry points
 
-- [Desktop setup and behavior](../app/README.md): Windows and Linux Tauri application.
+- [Desktop setup and behavior](../_tools/app/README.md): Windows and Linux Tauri application.
 - [Linux platform setup and acceptance limits](operations/linux-desktop.md).
 - [Android build, current source version and acceptance](../android/README.md).
 - [Browser collector overview](../extension/README.md) and [operation guide](edge-extension.md).
+
+Package-path reconciliation: 2026-09-12. The active desktop package and shared
+mobile frontend are under `_tools/app/`, relative to the repository root.
+Older dated records may still use `app/`; preserve those historical paths and
+resolve present-day commands against the current package. This path update does
+not renew older native acceptance or production verification results.
 
 Current summaries and the living backlog take precedence over older dated rollout
 paragraphs. Source version, built artifact, deployed service and installed client
 are separate states; a dated test result only covers its recorded revision and inputs.
 
-## Read first
+## Choose references by task
 
-1. `../AGENTS.md` — repository workflow, safety boundaries, and document routing.
-2. `../CONTEXT.md` — product vocabulary and domain boundaries.
-3. `../DESIGN.md` — concise current design language.
-4. `agents/pc-design-reference.md` — detailed current PC shell/content/interaction contract.
-5. `adr/README.md` — architecture decision status index.
-6. `roadmap/lakomics-backlog.md` — the living source for pending work.
+Applicable `AGENTS.md` instructions govern the work. Read the references needed
+for the current task; this list is a map, not a mandatory reading sequence.
+
+- `../CONTEXT.md` — product vocabulary and domain boundaries when behavior or terminology is affected.
+- `../DESIGN.md` — current design language for visual changes.
+- `agents/pc-design-reference.md` — PC shell, content, and interaction contracts for affected desktop UI.
+- `adr/README.md` — architecture decision status when changing architectural boundaries.
+- `roadmap/lakomics-backlog.md` — pending work when checking priorities, recording a request, or resuming a tracked item.
 
 ## Current reference documents
 
@@ -46,6 +54,7 @@ are separate states; a dated test result only covers its recorded revision and i
 - `research/character-ingestion-flow-audit-20260912.md` — image arrival cases, character classification paths, failure visibility gaps, historical refresh coverage, and bottleneck candidates; diagnostic findings, not an implementation plan.
 - `agents/issue-tracker.md` — backlog and explicitly requested GitHub Issue tracking boundaries.
 - `performance/online-catalog-query-regression-20260905.md` — measured Online Catalog query-plan/performance record.
+- `performance/desktop-navigation-20260912.md` — folder/tab/cover optimization changes, synthetic before/after measurements, targeted checks, and native acceptance limits.
 - `operations/catalog-hybrid-count-gate.md` — retained CATALOG-007A native acceptance evidence.
 
 ## Execution tracking

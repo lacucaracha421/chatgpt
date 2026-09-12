@@ -11,6 +11,12 @@ afterEach(() => { for(const cache of caches.splice(0)) cache.clear(); vi.useReal
 function fresh(entries=64, bytes=24*1024*1024) { const cache=new RenderCache({entries,bytes,pending:96}); caches.push(cache); return cache; }
 
 describe("bounded collectible cache", () => {
+  it("does not charge a frame delay for every ready cover", async () => {
+    const cache=fresh(),notify=vi.fn();
+    for(let i=0;i<16;i++) cache.acquire(String(i),async()=>result(),notify);
+    await vi.advanceTimersByTimeAsync(32);
+    expect(notify).toHaveBeenCalledTimes(16);
+  });
   it("deduplicates one raster and keeps it alive until readers release it", async () => {
     const cache=fresh(1,64),produce=vi.fn(async()=>result()),a=vi.fn(),b=vi.fn();
     const releaseA=cache.acquire("a",produce,a); const releaseB=cache.acquire("a",produce,b);

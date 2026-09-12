@@ -19,7 +19,7 @@ Do not restart the 1–6 reference comparison or Chrome A/B/C vote unless the us
 
 ## 2. Product character
 
-Typography approved after user trial on 2026-09-06: SUIT for Korean UI, Barlow for Latin UI and creator names, and Rajdhani Medium for date headings, caption times and sidebar counts. Preserve Barlow digits within creator names and the existing Japanese fallback. Numeric roles use tabular figures; caption times use the small-text size rather than extra-small. Bundle font files and OFL notices locally for offline use. Implementation: `app/src/styles/fonts.css` and the `--font-ui` / `--font-numeric` tokens.
+Typography approved after user trial on 2026-09-06: SUIT for Korean UI, Barlow for Latin UI and creator names, and Rajdhani Medium for date headings, caption times and sidebar counts. Preserve Barlow digits within creator names and the existing Japanese fallback. Numeric roles use tabular figures; caption times use the small-text size rather than extra-small. Bundle font files and OFL notices locally for offline use. Implementation: `_tools/app/src/styles/fonts.css` and the `--font-ui` / `--font-numeric` tokens.
 
 Lakomics is a **media-first personal archive**, not a dashboard, launcher, streaming service, or room simulator.
 
@@ -199,7 +199,7 @@ Manga uses the approved **Paperback FINAL** model and volume-centered shelf gram
 - Game cases share cached 2D snapshots while `drawGameCase.ts` geometry/lighting remains unchanged. Existing neutral loading silhouettes are cached too.
 - Native cover responses allow anonymous canvas use only for exact app origins and cover-image routes. CSP permits local blob images, not remote script execution. Failure falls back to the original cover.
 
-Implementation: `app/src/collections/physical/`, `CollectionCard.tsx`, `CollectionVolumeGrid.tsx`, `MangaCoverViewer.tsx`, `GameCase.tsx`, and the response-only `collectible_cors.rs` helper.
+Implementation: `_tools/app/src/collections/physical/`, `CollectionCard.tsx`, `CollectionVolumeGrid.tsx`, `MangaCoverViewer.tsx`, `GameCase.tsx`, and the response-only `collectible_cors.rs` helper.
 
 ### Film/video
 
@@ -243,14 +243,14 @@ Keep state with the feature that owns it; the shell should mostly relocate contr
 
 | Responsibility | Current entry points |
 | --- | --- |
-| Shell / area rail / contextual index | `app/src/layout/WorkspaceChrome.tsx`, `WorkspaceNavigation.tsx`, `ViewToolbar.tsx`, `WindowControls.tsx` |
-| Search surfaces | `app/src/layout/ChromeSearch.tsx`, `SearchSurface.tsx`, owning browser query state |
-| Anchored settings / floating UI | `app/src/shared/ui/AnchoredPanel.tsx`, `Menu.tsx`, `ContextMenu.tsx` |
-| Classification / Albums | `app/src/classification/ClassificationSidebar.tsx` |
-| Asset controls / gallery / selection | `app/src/assets/AssetToolbar.tsx`, `AssetBrowser.tsx`, `AssetGallery.tsx`, `SelectionBar.tsx` |
-| Collection browser / details | `app/src/collections/CollectionBrowser.tsx`, `CollectionCard.tsx`, type detail components |
-| Manga local / online catalog | `app/src/manga/MangaBrowser.tsx`, `OnlineCatalogBrowser.tsx` |
-| Tokens and layout CSS | `app/src/styles/tokens.css`, `global.css`, `chrome.css` |
+| Shell / area rail / contextual index | `_tools/app/src/layout/WorkspaceChrome.tsx`, `WorkspaceNavigation.tsx`, `ViewToolbar.tsx`, `WindowControls.tsx` |
+| Search surfaces | `_tools/app/src/layout/ChromeSearch.tsx`, `SearchSurface.tsx`, owning browser query state |
+| Anchored settings / floating UI | `_tools/app/src/shared/ui/AnchoredPanel.tsx`, `Menu.tsx`, `ContextMenu.tsx` |
+| Classification / Albums | `_tools/app/src/classification/ClassificationSidebar.tsx` |
+| Asset controls / gallery / selection | `_tools/app/src/assets/AssetToolbar.tsx`, `AssetBrowser.tsx`, `AssetGallery.tsx`, `SelectionBar.tsx` |
+| Collection browser / details | `_tools/app/src/collections/CollectionBrowser.tsx`, `CollectionCard.tsx`, type detail components |
+| Manga local / online catalog | `_tools/app/src/manga/MangaBrowser.tsx`, `OnlineCatalogBrowser.tsx` |
+| Tokens and layout CSS | `_tools/app/src/styles/tokens.css`, `global.css`, `chrome.css` |
 
 Do not paste comparison HTML into React, duplicate feature state in the shell, or create a second settings/search persistence model.
 

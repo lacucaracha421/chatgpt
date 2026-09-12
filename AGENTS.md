@@ -26,13 +26,15 @@
 
 ## Canonical checkout
 
-- Use `C:\chatgpt` as the canonical local repository for all Lakomics development.
+- On Windows, use `C:\chatgpt` as the canonical local repository. On the current Linux host, the checkout is `/home/laku/chatgpt`. Verify the actual working directory before using host-specific commands.
+- The active desktop package is `_tools/app/`, with React sources in `_tools/app/src/` and the Rust crate in `_tools/app/src-tauri/`. The repository-root `app/` directory is not the package entry point. Run npm and Cargo commands from the owning package/crate so the pinned toolchain is selected.
 - `main` is the accepted integration baseline for the Lakomics app and the active `extension-list/` extension. `extension/` is a legacy frozen implementation: do not modify it unless the user explicitly asks for legacy-extension work. For ongoing work, inspect the current branch, staged/unstaged changes, and relevant untracked files; do not treat an older `main` snapshot as the current task state.
 
 ## Instruction and skill applicability
 
 - Subject to host/system instructions, the current user request and applicable repository instructions govern scope, authorization, and verification. Skills supply methods, not additional authority or mandatory process gates.
 - Continue clear, authorized implementation without repeating design approval. Ask only when an unresolved decision materially changes scope, risk, or authorization; continue independent unblocked work.
+- For implementation requests, continue through the requested behavior, relevant verification, and fixes for failures introduced by the change. Stop at the requested outcome or a concrete external blocker; a first implementation is not automatically a review checkpoint. Reuse valid verification evidence unless later changes invalidate it.
 - Use skills for an explicit request or a concrete task need. Before a platform/runtime recipe, verify the actual package, owning directory, callable tools, and permissions. A cached skill is not proof of an available capability.
 - Ordinary Lakomics work does not authorize adopting Vercel hosting, Next.js, shadcn, AI SDK, new persistence, or another browser runtime. Existing direct Vercel AI Gateway integration is not consent to adopt that stack. Preserve the current framework, custom UI, and package manager.
 - Do not edit managed/plugin caches, broaden tool access, disable sandboxing, or install dependencies merely to activate a skill. If a named skill is unavailable, use a supported equivalent or perform the scoped method inline; disclose any missing independent/native evidence. Subagent use remains prohibited.
@@ -40,7 +42,7 @@
 
 ## Repository docs
 
-Before changing code, use `docs/README.md` as the document map.
+Use `docs/README.md` to locate references when the task needs project context. Read the documents relevant to the affected behavior; a typo, isolated formatting correction, or already-understood local change does not require reading the whole map or unrelated references.
 
 - Product language and domain boundaries: `CONTEXT.md`
 - Visual/UI rules: `DESIGN.md`; detailed current PC reference: `docs/agents/pc-design-reference.md`
@@ -94,11 +96,11 @@ Historical dated implementation plans/specs were removed from the current tree a
 
 ## Lakomics runtime rule
 
-- NEVER launch `app/src-tauri/target/debug/lakomics.exe` directly.
-- For development/runtime verification, always run:
-  `cd C:\chatgpt\app && npm run tauri -- dev`
-- Use `target/release/lakomics.exe` only for standalone release verification.
+- NEVER launch `_tools/app/src-tauri/target/debug/lakomics.exe` (Windows) or `_tools/app/src-tauri/target/debug/lakomics` (Linux) directly.
+- For development/runtime verification, enter `_tools/app/` under the verified checkout, then run `npm run tauri -- dev`. Windows PowerShell: `Set-Location C:\chatgpt\_tools\app`; Linux: `cd /home/laku/chatgpt/_tools/app`.
+- Use `_tools/app/src-tauri/target/release/lakomics.exe` (Windows) or `_tools/app/src-tauri/target/release/lakomics` (Linux) only for standalone release verification.
 - A localhost/Vite failure from directly launching the debug executable is not an application regression.
+- Before claiming an already-running dev instance contains a change, verify its package directory and current Vite response or Rust build/restart evidence. Serving current frontend code does not itself prove that an open window received HMR or that native interaction passed.
 
 ## Works / Collection
 
