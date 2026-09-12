@@ -248,7 +248,7 @@ fn empty_roster_checkpoint_is_refreshed_only_after_an_explicit_request() {
         .library
         .request_character_reference_refresh(&target.id, target.revision)
         .unwrap();
-    assert_eq!(receipt.eligible_count, 0);
+    assert_eq!(receipt.eligible_count, 1);
     assert_eq!(
         f.library.advance_character_reference_refresh(10).unwrap(),
         1
@@ -278,7 +278,7 @@ fn explicit_refresh_does_not_requeue_a_resolved_image() {
         .library
         .request_character_reference_refresh(&target.id, target.revision)
         .unwrap();
-    assert_eq!(receipt.eligible_count, 0);
+    assert_eq!(receipt.eligible_count, 1);
     assert_eq!(
         f.library.advance_character_reference_refresh(10).unwrap(),
         1
@@ -341,7 +341,7 @@ fn durable_review_survives_scan_loss_and_learning_reconsideration() {
         .library
         .request_character_reference_refresh(&target.id, target.revision)
         .unwrap();
-    assert_eq!(receipt.eligible_count, 0);
+    assert_eq!(receipt.eligible_count, 1);
     assert_eq!(
         f.library.advance_character_reference_refresh(10).unwrap(),
         1
@@ -731,7 +731,7 @@ fn failed_jobs_can_be_reconsidered_and_explicitly_retried() {
         .library
         .request_character_reference_refresh(&target.id, target.revision)
         .unwrap();
-    assert_eq!(receipt.eligible_count, 0);
+    assert_eq!(receipt.eligible_count, 1);
     assert_eq!(
         f.library.advance_character_reference_refresh(200).unwrap(),
         1

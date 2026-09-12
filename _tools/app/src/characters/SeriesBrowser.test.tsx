@@ -342,7 +342,8 @@ it("starts historical refresh only after explicit confirmation", async () => {
   confirm.mockReturnValue(true);
   await user.click(refresh);
   await waitFor(() => expect(hubApi.requestReferenceRefresh).toHaveBeenCalledWith("hina", 1));
-  expect(await screen.findByText("과거 미분류 이미지 갱신을 예약했습니다.")).toBeVisible();
+  expect(confirm).toHaveBeenLastCalledWith(expect.stringContaining("미분류 이미지 전체"));
+  expect(await screen.findByText("미분류 이미지 12개 갱신을 예약했습니다. 작업 센터에서 진행 상황을 확인할 수 있습니다.")).toBeVisible();
 });
 
 it("limits an existing character portrait picker to its own folder", async () => {

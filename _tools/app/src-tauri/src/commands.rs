@@ -1418,6 +1418,25 @@ pub fn acknowledge_release_events(collection_id: String, event_ids: Vec<String>,
 }
 
 #[tauri::command]
+pub fn list_ownership_tracking(collection_id: String, state: State<'_, AppState>) -> Result<Vec<u8>, CommandError> {
+    current_required(state)?.list_ownership_tracking(&collection_id).map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn get_collection_update_status(provider: String, state: State<'_, AppState>) -> Result<crate::library::collection_updates::CollectionUpdateStatus, CommandError> {
+    current_required(state)?.collection_update_status(&provider).map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn run_collection_updates(provider: String, state: State<'_, AppState>) -> Result<crate::library::collection_updates::CollectionUpdateStatus, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let key = if provider == "kakao" { credential::read_kakao_key() } else { Ok(String::new()) };
+        library.run_collection_updates(&provider, key)
+    }).await.map_err(|_| background_task_error())?.map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub async fn run_due_release_watch(
     state: State<'_, AppState>,
 ) -> Result<ReleaseWatchRunResult, CommandError> {

@@ -279,7 +279,7 @@ export type AssetView =
   | { kind: "notes" }
   | { kind: "settings"; section?: "general" | "cloud" | "catalog" | "external_services" | "data" | "about" }
   | { kind: "manga" }
-  | { kind: "collections"; typeFilter: CollectionType; showcase: boolean }
+  | { kind: "collections"; typeFilter: CollectionType; showcase: boolean; releaseProvider?: CollectionUpdateProvider }
   | { kind: "collection"; collectionId: string; tmdbSearch?: { query: string; mediaType: "movie" | "tv" } }
   | { kind: "revisited-bundle"; bundleId: string; title: string; assetIds: string[] };
 
@@ -359,6 +359,7 @@ export type ReleaseWatchEvent = {
 };
 
 export type ReleaseWatchRunResult = {
+  provider?: CollectionUpdateProvider;
   checked: number;
   changedCollections: number;
   skipped: number;
@@ -963,8 +964,24 @@ export type IngestOutcome =
   | { status: "review_pending"; reviewId: string };
 
 export type VolumeOwnership = { volumeNumber: number; editionIndex: number; physical: boolean; digital: boolean };
-export type ReleaseInboxItem = { collectionId: string; collectionName: string; event: ReleaseWatchEvent };
+export type CollectionUpdateProvider = "mangadex" | "kakao";
+export type CollectionUpdateFailure = {
+  collectionId: string; detectedAt: string;
+  kind: string; endpoint: string; httpStatus: number | null; retryAfterSeconds: number | null;
+};
+export type CollectionUpdateStatus = {
+  provider: CollectionUpdateProvider;
+  checked: number; changedCollections: number; failed: number; remaining: number;
+  requests: number; elapsedMs: number; networkMs: number; throttleMs: number;
+  startedAt: string | null; finishedAt: string | null; retryAt: string | null;
+  stopReason: ReleaseWatchRunResult["stopReason"]; busy: boolean;
+  consecutiveFailures?: number; lastFailure?: CollectionUpdateFailure | null;
+};
+export type ReleaseInboxItem = { collectionId: string; collectionName: string; provider?: CollectionUpdateProvider | "aladin"; event: ReleaseWatchEvent };
 export interface CollectionTrackingGateway {
+  runUpdates?(provider: CollectionUpdateProvider): Promise<CollectionUpdateStatus>;
+  updateStatus?(provider: CollectionUpdateProvider): Promise<CollectionUpdateStatus>;
+  ownershipTracking?(collectionId: string): Promise<number[]>;
   setOwnedCount(collectionId: string, editionIndex: number, count: number): Promise<VolumeOwnership[]>;
   listOwnership(collectionId: string): Promise<VolumeOwnership[]>;
   setOwnership(collectionId: string, editionIndex: number, volumeNumbers: number[], format: "physical" | "digital", owned: boolean): Promise<VolumeOwnership[]>;

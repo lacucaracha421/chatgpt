@@ -33,16 +33,21 @@ export function WorkStatusCenter({
 }: WorkStatusCenterProps) {
   const [open, setOpen] = useState(false);
   const publicationJobs = Object.values(usePublicationJobs()).filter(Boolean);
+  const freshCharacterWork = Boolean(characterAutomation.activeWork && (characterAutomation.activeWork.freshRemaining > 0
+    || (characterAutomation.activeWork.active && characterAutomation.activeWork.cause !== "reconsideration")));
+  const characterFailures = (characterAutomation.historyRefreshes ?? []).filter(refresh => refresh.state === "failed").length;
   const characterVisible = Boolean(
-    characterAutomation.persistentError || characterAutomation.historyRefreshActive,
+    characterAutomation.persistentError || characterAutomation.historyRefreshActive || freshCharacterWork || characterFailures,
   );
   const libraryVisible = Boolean(progress || similarityIndex?.running || similarityIndex?.failed || similarityIndex?.message);
   const activeCount = publicationJobs.filter((job) => job.running).length
     + Number(characterAutomation.historyRefreshActive)
+    + Number(freshCharacterWork)
     + Number(progress !== null)
     + Number(Boolean(similarityIndex?.running));
   const problemCount = publicationJobs.filter((job) => job.error).length
     + Number(Boolean(characterAutomation.persistentError))
+    + characterFailures
     + Number(Boolean(similarityIndex?.failed || similarityIndex?.message));
   const visibleCount = publicationJobs.length + Number(characterVisible) + Number(libraryVisible);
   const state = problemCount > 0 ? "attention" : activeCount > 0 ? "active" : visibleCount > 0 ? "available" : "idle";

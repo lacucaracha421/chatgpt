@@ -212,11 +212,13 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     finally { saving.current = false; setBusy(false); }
   }
   async function requestHistoricalRefresh(target: CharacterTarget) {
-    if (busy || !window.confirm("현재 레퍼런스로 과거 미분류 이미지를 다시 확인할까요? 백그라운드에서 낮은 우선순위로 진행됩니다.")) return;
+    if (busy || !window.confirm("현재 레퍼런스로 이 시리즈의 미분류 이미지 전체를 확인할까요? 분류 제외와 수동 판단을 보존하며, 백그라운드에서 새 이미지보다 낮은 우선순위로 진행됩니다.")) return;
     setBusy(true); setEditorError(null);
     try {
-      await hubApi.requestReferenceRefresh(target.id, target.revision);
-      setMessage("과거 미분류 이미지 갱신을 예약했습니다.");
+      const receipt = await hubApi.requestReferenceRefresh(target.id, target.revision);
+      setMessage(receipt.eligibleCount > 0
+        ? `미분류 이미지 ${receipt.eligibleCount.toLocaleString()}개 갱신을 예약했습니다. 작업 센터에서 진행 상황을 확인할 수 있습니다.`
+        : receipt.state === "completed" ? "갱신할 미분류 이미지가 없습니다." : "갱신 대상을 확인하고 있습니다. 작업 센터에서 진행 상황을 확인할 수 있습니다.");
     } catch (reason) {
       setEditorError(commandErrorMessage(reason, "과거 이미지 갱신을 예약하지 못했습니다."));
     } finally { setBusy(false); }

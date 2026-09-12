@@ -59,6 +59,15 @@ pub(super) struct Engine {
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ActiveWork {
+    active: bool,
+    series_name: Option<String>,
+    target_name: Option<String>,
+    cause: Option<String>,
+    fresh_remaining: usize,
+}
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Status {
     running: bool,
     work_active: bool,
@@ -67,6 +76,8 @@ pub struct Status {
     completed: i64,
     confirmed: i64,
     history_refresh_active: bool,
+    active_work: ActiveWork,
+    history_refreshes: Vec<super::character_reference_refresh::ReferenceRefreshProgress>,
     persistent_error: Option<String>,
 }
 impl Library {
@@ -134,12 +145,15 @@ impl Library {
         engine.prepared_references = None;
     }
     pub fn character_incremental_status(&self) -> Result<Status> {
-        let (running, work_active, persistent_error) = {
+        let (running, work_active, persistent_error, mut active_work) = {
             let e = self
                 .character_incremental
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            (e.running, e.active.is_some(), e.error.clone())
+            (e.running, e.active.is_some(), e.error.clone(), ActiveWork {
+                active: e.active.is_some(), series_name: e.active_series_name.clone(),
+                target_name: e.active_target_name.clone(), cause: e.active_cause.clone(), fresh_remaining: 0,
+            })
         };
         let c = self.connection()?;
         let (paused, completed, confirmed, pending, history_refresh_active, automation_enabled) = c.query_row(
@@ -151,6 +165,9 @@ impl Library {
             [],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get::<_, bool>(3)?, r.get(4)?, r.get(5)?)),
         )?;
+        active_work.fresh_remaining = c.query_row("SELECT COUNT(*) FROM character_autotag_jobs
+            WHERE state IN ('pending','processing') AND cause<>'reconsideration'", [], |r| r.get::<_,i64>(0))?.max(0) as usize;
+        let history_refreshes = super::character_reference_refresh::refresh_progress(&c)?;
         Ok(Status {
             running,
             work_active: work_active || pending,
@@ -159,6 +176,8 @@ impl Library {
             completed,
             confirmed,
             history_refresh_active,
+            active_work,
+            history_refreshes,
             persistent_error,
         })
     }

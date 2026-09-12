@@ -27,9 +27,74 @@ pub struct ReferenceRefreshReceipt {
     pub eligible_count: usize,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReferenceRefreshProgress {
+    target_id: String,
+    target_name: String,
+    series_name: String,
+    state: String,
+    total: Option<usize>,
+    processed: usize,
+    remaining: usize,
+    failed: usize,
+}
+
+pub(super) fn refresh_progress(c: &rusqlite::Connection) -> Result<Vec<ReferenceRefreshProgress>> {
+    Ok(c.prepare("SELECT r.target_id,t.display_name,s.name,r.state,r.eligible_count,r.discovery_complete,
+            SUM(CASE WHEN i.state IN ('pending','processing') THEN 1 ELSE 0 END),r.failure_count,r.visited_count
+        FROM character_reference_refreshes r JOIN character_targets t ON t.id=r.target_id
+        JOIN classification_entries s ON s.id=r.series_classification_id
+        LEFT JOIN character_reference_refresh_items i ON i.target_id=r.target_id AND i.request_revision=r.request_revision
+        WHERE r.state IN ('pending','running','failed')
+        GROUP BY r.target_id ORDER BY r.requested_at,r.target_id")?.query_map([], |row| {
+            let total = row.get::<_, i64>(4)?.max(0) as usize;
+            let complete: bool = row.get(5)?;
+            let remaining = row.get::<_, i64>(6)?.max(0) as usize;
+            Ok(ReferenceRefreshProgress {
+                target_id: row.get(0)?, target_name: row.get(1)?, series_name: row.get(2)?, state: row.get(3)?,
+                total: complete.then_some(total),
+                processed: if complete { total.saturating_sub(remaining) } else { row.get::<_,i64>(8)?.max(0) as usize },
+                remaining, failed: row.get::<_,i64>(7)?.max(0) as usize,
+            })
+        })?.collect::<std::result::Result<Vec<_>,_>>()?)
+}
+
 pub(super) enum ReferenceRefreshEvidenceReuse {
     Exact(Value),
     Delta(Value),
+}
+
+// Explicit history belongs to the requested series subtree. Fresh ingestion may
+// infer descendant series from an ordinary parent, but must not widen a refresh.
+const REFRESH_SCOPE: &str = r#"WITH RECURSIVE subtree(id) AS (
+    SELECT id FROM classification_entries WHERE id=?2
+    UNION ALL SELECT c.id FROM classification_entries c JOIN subtree s ON c.parent_id=s.id
+    WHERE NOT EXISTS(SELECT 1 FROM character_series cs WHERE cs.classification_id=c.id)
+)"#;
+
+// The same eligibility check is used at snapshot, feed and claim time. Existing
+// manual decisions and reference images must never become automatic refresh input.
+const REFRESH_ELIGIBLE: &str = r#"a.status='normal' AND a.media_kind='image'
+    AND COALESCE(j.review_state,'unresolved')<>'resolved'
+    AND NOT EXISTS(SELECT 1 FROM asset_classifications ac JOIN character_excluded_folders e ON e.id=ac.classification_id WHERE ac.asset_id=a.id)
+    AND NOT EXISTS(SELECT 1 FROM character_series_asset_exclusions e WHERE e.series_id=?2 AND e.asset_id=a.id)
+    AND NOT EXISTS(SELECT 1 FROM character_references r WHERE r.asset_id=a.id)
+    AND NOT EXISTS(SELECT 1 FROM character_learned_references r WHERE r.asset_id=a.id)
+    AND NOT EXISTS(SELECT 1 FROM character_relations r WHERE r.target_id=?1 AND r.asset_id=a.id)
+    AND COALESCE((SELECT origin FROM character_decisions
+        WHERE target_id=?1 AND source_asset_id=a.id ORDER BY sequence DESC LIMIT 1),'')<>'manual'"#;
+
+fn refresh_eligible(c: &rusqlite::Connection, target: &str, series: &str, asset: &str) -> Result<bool> {
+    let scope = super::character_scope::resolve_character_scope(c, asset)?;
+    if !scope.is_some_and(|scope| scope.series_classification_ids.iter().any(|id| id == series)) {
+        return Ok(false);
+    }
+    Ok(c.query_row(&format!("{REFRESH_SCOPE} SELECT EXISTS(SELECT 1 FROM assets a
+        LEFT JOIN character_autotag_jobs j ON j.asset_id=a.id WHERE a.id=?3
+        AND EXISTS(SELECT 1 FROM asset_classifications ac JOIN subtree s ON s.id=ac.classification_id WHERE ac.asset_id=a.id)
+        AND {REFRESH_ELIGIBLE})"),
+        params![target,series,asset], |r| r.get(0))?)
 }
 
 impl Library {
@@ -121,18 +186,43 @@ impl Library {
             params![target_id, series_id, target.revision, request_revision, previous_hash, requested_hash,
                 serde_json::to_string(&requested_hashes)?, serde_json::to_string(&added_hashes)?, now],
         )?;
-        transaction.execute(
-            "UPDATE character_reference_refreshes SET discovery_complete=0,updated_at=?3,
-                through_job_sequence=(SELECT COALESCE(MAX(sequence),0) FROM character_autotag_admissions)
-             WHERE target_id=?1 AND request_revision=?2",
-            params![target_id, request_revision, now],
-        )?;
+        // Persist only candidate IDs and evidence pointers, never all jobs or media.
+        // A single metadata snapshot includes images that predate the automatic queue
+        // and gives this request a stable boundary across restart, deletion and VACUUM.
+        let eligible_count = transaction.execute(&format!(r#"
+            {REFRESH_SCOPE}, originals(id) AS (
+                SELECT classification_id FROM classification_roles WHERE role='originals'
+                UNION ALL SELECT c.id FROM classification_entries c JOIN originals o ON c.parent_id=o.id
+            )
+            INSERT INTO character_reference_refresh_items(target_id,request_revision,asset_id,base_evidence_id,generation,state,updated_at)
+            SELECT ?1,?3,a.id,COALESCE(
+                (SELECT e.id FROM character_autotag_evidence e
+                 WHERE e.asset_id=a.id AND e.generation=j.generation AND e.source_generation=j.source_generation AND e.content_hash=a.content_hash
+                 ORDER BY e.created_at DESC,e.id DESC LIMIT 1),
+                (SELECT i.base_evidence_id FROM character_reference_refresh_items i
+                 WHERE i.target_id=?1 AND i.asset_id=a.id AND i.base_evidence_id IS NOT NULL
+                 ORDER BY i.request_revision DESC LIMIT 1)
+            ),COALESCE(j.generation,0)+1,'pending',?4
+            FROM subtree s JOIN asset_classifications ac ON ac.classification_id=s.id
+            JOIN assets a ON a.id=ac.asset_id LEFT JOIN character_autotag_jobs j ON j.asset_id=a.id
+            WHERE EXISTS(SELECT 1 FROM character_series WHERE classification_id=?2 AND auto_classify=1)
+              AND ?2 NOT IN (SELECT id FROM originals) AND s.id NOT IN (SELECT id FROM originals)
+              AND ?2 NOT IN (SELECT id FROM character_excluded_folders)
+              AND NOT EXISTS(SELECT 1 FROM asset_classifications other WHERE other.asset_id=a.id AND other.classification_id<>ac.classification_id)
+              AND (j.review_state='partially_resolved' OR NOT EXISTS(
+                  SELECT 1 FROM character_relations r JOIN character_targets t ON t.id=r.target_id
+                  WHERE r.asset_id=a.id AND t.series_classification_id=?2))
+              AND {REFRESH_ELIGIBLE}
+        "#), params![target_id,series_id,request_revision,now])?;
+        transaction.execute("UPDATE character_reference_refreshes SET discovery_complete=1,eligible_count=?3,
+            state=CASE WHEN ?3=0 THEN 'completed' ELSE 'pending' END,completed_at=CASE WHEN ?3=0 THEN ?4 ELSE NULL END
+            WHERE target_id=?1 AND request_revision=?2", params![target_id,request_revision,eligible_count as i64,now])?;
         transaction.commit()?;
         Ok(ReferenceRefreshReceipt {
             target_id: target_id.into(),
             request_revision,
-            state: ReferenceRefreshState::Pending,
-            eligible_count: 0,
+            state: if eligible_count == 0 { ReferenceRefreshState::Completed } else { ReferenceRefreshState::Pending },
+            eligible_count,
         })
     }
 
@@ -251,17 +341,7 @@ impl Library {
                 let mut discovered = 0i64;
                 for (asset_id, generation, evidence_id) in candidates {
                     after_asset_id = Some(asset_id.clone());
-                    let scope =
-                        super::character_scope::resolve_character_scope(&transaction, &asset_id)?;
-                    let latest_origin: Option<String> = transaction.query_row(
-                        "SELECT origin FROM character_decisions WHERE target_id=?1 AND source_asset_id=?2 ORDER BY sequence DESC LIMIT 1",
-                        params![target_id, asset_id], |row| row.get(0),
-                    ).optional()?;
-                    if !scope
-                        .as_ref()
-                        .is_some_and(|scope| scope.series_classification_ids.contains(&series_id))
-                        || latest_origin.as_deref() == Some("manual")
-                    {
+                    if !refresh_eligible(&transaction, &target_id, &series_id, &asset_id)? {
                         continue;
                     }
                     transaction.execute(
@@ -307,11 +387,6 @@ impl Library {
         let mut fed = 0usize;
         let mut terminal = 0i64;
         for (asset_id, planned_generation) in items {
-            let scope = super::character_scope::resolve_character_scope(&transaction, &asset_id)?;
-            let manual: Option<String> = transaction.query_row(
-                "SELECT origin FROM character_decisions WHERE target_id=?1 AND source_asset_id=?2 ORDER BY sequence DESC LIMIT 1",
-                params![target_id,asset_id], |row| row.get(0),
-            ).optional()?;
             let current: Option<(i64, String, String)> = transaction
                 .query_row(
                     "SELECT generation,state,cause FROM character_autotag_jobs WHERE asset_id=?1",
@@ -319,10 +394,7 @@ impl Library {
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
                 .optional()?;
-            let scope_is_current = scope
-                .as_ref()
-                .is_some_and(|scope| scope.series_classification_ids.contains(&series_id))
-                && manual.as_deref() != Some("manual");
+            let scope_is_current = refresh_eligible(&transaction, &target_id, &series_id, &asset_id)?;
             if !scope_is_current {
                 transaction.execute(
                     "UPDATE character_reference_refresh_items SET state='superseded',updated_at=?4
@@ -332,15 +404,7 @@ impl Library {
                 terminal += 1;
                 continue;
             }
-            let Some((current_generation, current_state, current_cause)) = current else {
-                transaction.execute(
-                    "UPDATE character_reference_refresh_items SET state='superseded',updated_at=?4
-                     WHERE target_id=?1 AND request_revision=?2 AND asset_id=?3 AND state='pending'",
-                    params![target_id,request_revision,asset_id,now],
-                )?;
-                terminal += 1;
-                continue;
-            };
+            let (current_generation, current_state, current_cause) = current.unwrap_or_default();
             let active = matches!(current_state.as_str(), "pending" | "processing");
             if active && current_cause != "reconsideration" {
                 continue;
@@ -686,18 +750,9 @@ impl Library {
         let mut invalid = false;
         for (target_id, request_revision, series_id, target_revision, reference_hash) in rows {
             let target = self.read_character_target(&transaction, &target_id)?;
-            let scope =
-                super::character_scope::resolve_character_scope(&transaction, &job.asset_id)?;
-            let latest_origin: Option<String> = transaction.query_row(
-                "SELECT origin FROM character_decisions WHERE target_id=?1 AND source_asset_id=?2 ORDER BY sequence DESC LIMIT 1",
-                params![target_id,job.asset_id], |row| row.get(0),
-            ).optional()?;
             let still_valid = target.revision == target_revision
                 && reference_set_hash(&target)? == reference_hash
-                && scope
-                    .as_ref()
-                    .is_some_and(|scope| scope.series_classification_ids.contains(&series_id))
-                && latest_origin.as_deref() != Some("manual");
+                && refresh_eligible(&transaction, &target_id, &series_id, &job.asset_id)?;
             if still_valid {
                 continue;
             }

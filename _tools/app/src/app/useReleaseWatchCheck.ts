@@ -1,9 +1,8 @@
 import { useEffect } from "react";
-import type { LibraryGateway, ReleaseWatchRunResult } from "../library/types";
+import type { CollectionUpdateProvider, LibraryGateway, ReleaseWatchRunResult } from "../library/types";
 
-// run_due_release_watch는 due 판정을 서버(마지막 확인 시각) 기준으로 하므로
-// 자주 불러도 무의미한 호출은 무시된다. 1시간마다 due 만료를 확인한다.
-const RELEASE_WATCH_CHECK_INTERVAL_MS = 3_600_000;
+const CHECK_INTERVAL_MS = 3_600_000;
+const CONTINUATION_MS = 1_000;
 
 export function useReleaseWatchCheck(
   gateway: LibraryGateway,
@@ -12,28 +11,54 @@ export function useReleaseWatchCheck(
 ) {
   useEffect(() => {
     let active = true;
-    let running = false;
+    let timer: ReturnType<typeof setTimeout>;
     const run = async () => {
-      if (!active || running) return;
-      running = true;
+      let nextWakeAt = Date.now() + CHECK_INTERVAL_MS;
+      const scheduleRetry = (retryAt: string | null) => {
+        const remaining = retryAt ? Date.parse(retryAt) - Date.now() : NaN;
+        if (Number.isFinite(remaining)) nextWakeAt = Math.min(nextWakeAt, Date.now() + Math.max(CONTINUATION_MS, remaining));
+      };
       try {
-        const result = await gateway.runDueReleaseWatch();
-        if (!active) return;
-        // 기존 시작 확인도 결과와 관계없이 컬렉션을 갱신했다. 신간이 있으면 알림을 얹는다.
-        await onChanged(result);
-      } catch {
-        // 개별 컬렉션 화면과 토스트로 오류를 노출한다. 주기 확인은 조용히 재시도한다.
+        const api = gateway.collectionTracking;
+        if (api?.runUpdates && api.updateStatus) {
+          for (const provider of ["mangadex", "kakao"] as CollectionUpdateProvider[]) {
+            if (!active) break;
+            try {
+              const before = await api.updateStatus(provider);
+              if (!active) break;
+              if (!before.remaining) continue;
+              if (before.retryAt && Date.parse(before.retryAt) > Date.now()) {
+                scheduleRetry(before.retryAt);
+                continue;
+              }
+              const result = await api.runUpdates(provider);
+              if (!active) break;
+              if (result.busy || (result.remaining > 0 && !result.retryAt)) nextWakeAt = Math.min(nextWakeAt, Date.now() + CONTINUATION_MS);
+              else if (result.remaining > 0) scheduleRetry(result.retryAt);
+              if (result.busy) continue;
+              const previousChanges = result.startedAt === before.startedAt ? before.changedCollections : 0;
+              const previousChecked = result.startedAt === before.startedAt ? before.checked : 0;
+              if (result.checked > previousChecked) await onChanged({
+                provider, checked: result.checked - previousChecked,
+                changedCollections: Math.max(0, result.changedCollections - previousChanges),
+                skipped: result.failed, stopReason: result.stopReason,
+              });
+            } catch {
+              // Provider failures are independent. Persistent provider status is
+              // shown in its inbox; an IPC failure retries on the hourly pass.
+            }
+          }
+        } else {
+          const result = await gateway.runDueReleaseWatch();
+          if (active) await onChanged(result);
+        }
       } finally {
-        running = false;
+        if (active) timer = setTimeout(() => void run().catch(() => undefined), Math.max(CONTINUATION_MS, nextWakeAt - Date.now()));
       }
     };
-    void run();
-    const timer = window.setInterval(() => void run(), RELEASE_WATCH_CHECK_INTERVAL_MS);
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-    };
-    // 라이브러리 전환 시에만 재구독한다.
+    void run().catch(() => undefined);
+    return () => { active = false; clearTimeout(timer); };
+    // Resubscribe only on gateway/library switch; callbacks read current app state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gateway, libraryRoot]);
 }

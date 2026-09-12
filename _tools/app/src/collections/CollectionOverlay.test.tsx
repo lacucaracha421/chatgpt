@@ -296,13 +296,16 @@ describe("CollectionOverlay MangaDex flow", () => {
       setReleaseWatchEnabled,
     });
 
-    expect(screen.queryByRole("button", { name: "신간 알림 켜기" })).not.toBeInTheDocument();
-    await openProviderMenu(user);
-    await user.click(screen.getByRole("menuitem", { name: "신간 알림 켜기" }));
+    const checkbox = await screen.findByRole("checkbox", { name: "신간 알림" });
+    await waitFor(() => expect(checkbox).toBeEnabled());
+    expect(screen.getByLabelText("현재 보유 권수").closest("form")).toContainElement(checkbox);
+    await user.click(checkbox);
 
     expect(setReleaseWatchEnabled).toHaveBeenCalledWith("collection-1", true);
-    await openProviderMenu(user);
-    expect(await screen.findByRole("menuitem", { name: "신간 알림 끄기" })).toBeInTheDocument();
+    await waitFor(() => expect(checkbox).toBeChecked());
+    expect(screen.queryByText(/권수를 저장하고/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/다음 발매:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/신간 알림 켜짐|마지막 확인:|다음 확인:/)).not.toBeInTheDocument();
     expect(gateway.takeUnreadReleaseChanges).not.toHaveBeenCalled();
   });
 
@@ -315,20 +318,34 @@ describe("CollectionOverlay MangaDex flow", () => {
       setReleaseWatchEnabled,
     });
 
-    await openProviderMenu(user);
-    await user.click(screen.getByRole("menuitem", { name: "신간 알림 끄기" }));
+    const checkbox = await screen.findByRole("checkbox", { name: "신간 알림" });
+    await waitFor(() => expect(checkbox).toBeChecked());
+    await user.click(checkbox);
 
     expect(setReleaseWatchEnabled).toHaveBeenCalledWith("collection-1", false);
-    await openProviderMenu(user);
-    expect(await screen.findByRole("menuitem", { name: "신간 알림 켜기" })).toBeInTheDocument();
+    await waitFor(() => expect(checkbox).not.toBeChecked());
   });
 
-  it("does not expose release watch without an Kakao binding", async () => {
+  it("keeps the release watch checkbox unchanged when saving fails", async () => {
+    const user = userEvent.setup();
+    renderOverlay({
+      getBookConnection: vi.fn().mockResolvedValue({anchorItemId:"item-1",query:"던전밥",lastSyncedAt:"t"}),
+      getReleaseWatchStatus: vi.fn().mockResolvedValue({enabled:false,lastCheckedAt:null}),
+      setReleaseWatchEnabled: vi.fn().mockRejectedValue(new Error("save failed")),
+    });
+    const checkbox = await screen.findByRole("checkbox", {name:"신간 알림"});
+    await waitFor(() => expect(checkbox).toBeEnabled());
+    await user.click(checkbox);
+    await waitFor(() => expect(checkbox).toBeEnabled());
+    expect(checkbox).not.toBeChecked();
+  });
+
+  it("shows an unavailable checkbox without a Kakao binding", async () => {
     const user = userEvent.setup();
     const { gateway } = renderOverlay();
 
     await waitFor(() => expect(gateway.getBookConnection).toHaveBeenCalledOnce());
-    expect(screen.queryByRole("button", { name: /신간 알림/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "신간 알림" })).toBeDisabled();
     await openProviderMenu(user);
     expect(screen.queryByRole("menuitem", { name: /신간 알림/ })).not.toBeInTheDocument();
   });

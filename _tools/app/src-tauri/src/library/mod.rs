@@ -79,6 +79,8 @@ pub mod models;
 mod online_catalog;
 mod query;
 mod release_watch;
+pub(crate) mod collection_updates;
+mod provider_requests;
 pub(crate) mod remote_gallery;
 pub(crate) mod remote_media;
 pub(crate) mod remote_progress;

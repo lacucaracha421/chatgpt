@@ -17,6 +17,7 @@ pub struct ReleaseInboxItem {
     pub collection_id: String,
     pub collection_name: String,
     pub event: ReleaseWatchEvent,
+    pub provider: String,
 }
 
 impl Library {
@@ -29,12 +30,21 @@ impl Library {
             if kind != "manga" { return Err(LibraryError::InvalidCollectionType); }
             let transaction = connection.transaction()?;
             transaction.execute("DELETE FROM collection_volume_ownership WHERE collection_id=?1 AND edition_index=?2", params![collection_id, edition_index])?;
+            transaction.execute("INSERT OR IGNORE INTO collection_ownership_tracking(collection_id,edition_index) VALUES(?1,?2)", params![collection_id, edition_index])?;
             for volume in 1..=count {
                 transaction.execute("INSERT INTO collection_volume_ownership(collection_id,volume_number,edition_index,physical,digital) VALUES(?1,?2,?3,1,0)", params![collection_id,volume,edition_index])?;
             }
             transaction.commit()?;
         }
         self.list_volume_ownership(collection_id)
+    }
+
+    pub fn list_ownership_tracking(&self, collection_id: &str) -> Result<Vec<u8>, LibraryError> {
+        let connection = self.connection()?;
+        super::collection::require_collection(&connection, collection_id)?;
+        let mut statement = connection.prepare("SELECT edition_index FROM collection_ownership_tracking WHERE collection_id=?1 ORDER BY edition_index")?;
+        let result = statement.query_map([collection_id], |row| row.get(0))?.collect::<Result<Vec<_>, _>>()?;
+        Ok(result)
     }
 
     pub fn list_volume_ownership(&self, collection_id: &str) -> Result<Vec<VolumeOwnership>, LibraryError> {
@@ -59,6 +69,7 @@ impl Library {
             let transaction = connection.transaction()?;
             // The column name is a closed, validated format, never user SQL.
             let sql = format!("INSERT INTO collection_volume_ownership(collection_id,volume_number,edition_index,{format}) VALUES(?1,?2,?3,?4) ON CONFLICT(collection_id,volume_number,edition_index) DO UPDATE SET {format}=excluded.{format}");
+            transaction.execute("INSERT OR IGNORE INTO collection_ownership_tracking(collection_id,edition_index) VALUES(?1,?2)", params![collection_id, edition_index])?;
             for volume in volume_numbers {
                 transaction.execute(&sql, params![collection_id, volume, edition_index, owned])?;
             }
@@ -70,8 +81,9 @@ impl Library {
 
     pub fn list_release_inbox(&self) -> Result<Vec<ReleaseInboxItem>, LibraryError> {
         let connection = self.connection()?;
-        let mut statement = connection.prepare("SELECT e.id,e.event_kind,e.volume_number,e.previous_value,e.current_value,e.detected_at,e.collection_id,c.name FROM release_watch_events e JOIN collections c ON c.id=e.collection_id WHERE e.read_at IS NULL ORDER BY e.detected_at DESC,e.rowid DESC")?;
+        let mut statement = connection.prepare("SELECT e.id,e.event_kind,e.volume_number,e.previous_value,e.current_value,e.detected_at,e.collection_id,c.name,e.provider FROM release_watch_events e JOIN collections c ON c.id=e.collection_id WHERE e.read_at IS NULL ORDER BY e.detected_at DESC,e.rowid DESC")?;
         let result = statement.query_map([], |row| Ok(ReleaseInboxItem {
+            provider: row.get(8)?,
             collection_id: row.get(6)?, collection_name: row.get(7)?, event: release_watch_event_from_row(row)?,
         }))?.collect::<Result<Vec<_>, _>>()?;
         Ok(result)

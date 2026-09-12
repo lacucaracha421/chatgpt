@@ -362,12 +362,6 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
           disabled: kakaoConnection === undefined || kakaoRefreshing,
           onSelect: () => kakaoConnection && !needsBookReconnect ? void refreshKakao() : setKakaoOpen(true),
         },
-        ...(kakaoConnection && releaseWatchStatus ? [{
-          id: "release-watch",
-          label: releaseWatchStatus.enabled ? "신간 알림 끄기" : "신간 알림 켜기",
-          disabled: releaseWatchSaving || (needsBookReconnect && !releaseWatchStatus.enabled),
-          onSelect: () => void toggleReleaseWatch(),
-        }] : []),
       ]}
     />
   ) : null;
@@ -476,12 +470,12 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
     onOpenSettings();
   }
 
-  async function toggleReleaseWatch() {
-    if (!releaseWatchStatus) return;
+  async function toggleReleaseWatch(enabled: boolean) {
+    if (!releaseWatchStatus || releaseWatchSaving) return;
     setReleaseWatchSaving(true);
     setMessage(null);
     try {
-      setReleaseWatchStatus(await gateway.setReleaseWatchEnabled(collectionId, !releaseWatchStatus.enabled));
+      setReleaseWatchStatus(await gateway.setReleaseWatchEnabled(collectionId, enabled));
     } catch (error) {
       setMessage(commandErrorMessage(error, "신간 알림 설정을 바꾸지 못했습니다."));
     } finally {
@@ -527,13 +521,12 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
       </CollectionSidebarSection>}
       {sidebar && isManga && <CollectionSidebarSection actions>{providerMenu}</CollectionSidebarSection>}
       {isManga && <CollectionSidebarSection>
-        <CollectionOwnershipPanel key={collectionId} collectionId={collectionId} volumes={volumes ?? []} editionIndex={editionIndex} />
-        {releaseWatchStatus && <div className="collection-release-status">
-          <strong>신간 알림 {releaseWatchStatus.enabled ? "켜짐" : "꺼짐"}</strong>
-          <small>마지막 확인: {releaseWatchStatus.lastCheckedAt ? new Date(releaseWatchStatus.lastCheckedAt).toLocaleString("ko-KR") : "아직 확인하지 않음"}</small>
-          {releaseWatchStatus.enabled && <small>앱 실행 중 하루 간격으로 확인합니다.</small>}
-          {releaseWatchStatus.enabled && releaseWatchStatus.lastCheckedAt && Number.isFinite(Date.parse(releaseWatchStatus.lastCheckedAt)) && <small>다음 확인: {new Date(Date.parse(releaseWatchStatus.lastCheckedAt) + 86_400_000).toLocaleString("ko-KR")} 이후 앱 실행 중</small>}
-        </div>}
+        <CollectionOwnershipPanel key={collectionId} collectionId={collectionId} volumes={volumes ?? []} editionIndex={editionIndex} releaseWatch={{
+          enabled: releaseWatchStatus?.enabled ?? false,
+          disabled: !kakaoConnection || !releaseWatchStatus || releaseWatchSaving || (needsBookReconnect && !releaseWatchStatus.enabled),
+          unavailableReason: !kakaoConnection || needsBookReconnect ? "Kakao 연결 후 설정할 수 있습니다." : undefined,
+          onChange: enabled => void toggleReleaseWatch(enabled),
+        }} />
       </CollectionSidebarSection>}
       <ViewToolbar
         title={collection?.name ?? "컬렉션"}

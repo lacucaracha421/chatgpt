@@ -7,6 +7,7 @@ import type { AssetView, CollectionSummary, CollectionType, CreateCollection, Up
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 import { Select } from "../shared/ui/Select";
+import { Slider } from "../shared/ui/Slider";
 import { Button } from "../shared/ui/Button";
 import { ContextMenu } from "../shared/ui/ContextMenu";
 import { Dialog } from "../shared/ui/Dialog";
@@ -33,6 +34,7 @@ const TYPE_LABEL: Record<CollectionType, string> = {
 export type CollectionNavigationMemory = Map<string, { scrollTop: number; focusId: string | null; page?: number }>;
 
 type CollectionBrowserProps = {
+  releaseProvider?: import("../library/types").CollectionUpdateProvider;
   navigationMemory?: CollectionNavigationMemory;
   collections: CollectionSummary[];
   typeFilter: CollectionType;
@@ -44,6 +46,7 @@ type CollectionBrowserProps = {
 };
 
 export function CollectionBrowser({
+  releaseProvider,
   navigationMemory,
   collections,
   typeFilter,
@@ -59,7 +62,7 @@ export function CollectionBrowser({
   const [mangaDexOpen, setMangaDexOpen] = useState(false);
   const [igdbOpen, setIgdbOpen] = useState(false);
   const [tmdbOpen, setTmdbOpen] = useState(false);
-  const [releaseInboxOpen, setReleaseInboxOpen] = useState(false);
+
   const [deleteTarget, setDeleteTarget] = useState<CollectionSummary | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const libraryStateRef = useRef(libraryState);
@@ -67,7 +70,7 @@ export function CollectionBrowser({
   useAutoDismiss(message, setMessage);
   const stageRef = useRef<HTMLDivElement>(null);
   const [pageMemory, setPageMemory] = useState<{ scope: string; page: number } | null>(null);
-  const scope = JSON.stringify([library?.root ?? "", typeFilter, showcase, libraryState]);
+  const scope = JSON.stringify([library?.root ?? "", typeFilter, showcase, libraryState, releaseProvider]);
   useLayoutEffect(() => {
     const stage = stageRef.current;
     if (!stage) return;
@@ -182,7 +185,6 @@ export function CollectionBrowser({
 
   const indexActions = (
           <>
-          {gateway.collectionTracking && <Button size="sm" onClick={() => setReleaseInboxOpen(true)}>신간 알림함 {collections.reduce((sum, collection) => sum + collection.unreadReleaseCount, 0) || ""}</Button>}
           <Menu
             label="새 컬렉션"
             trigger={<PlusIcon aria-hidden="true" />}
@@ -199,26 +201,42 @@ export function CollectionBrowser({
   const indexControls = <fieldset className="chrome-settings-group"><legend>정렬 · 필터</legend>
             <Select label="정렬" value={libraryState.sort} onChange={(event) => patchLibraryState({ sort: event.target.value as CollectionLibrarySort })}><option value="media_date">출시·출간·개봉일</option><option value="recent">최근 추가</option><option value="name">제목</option></Select>
             <Select label="방향" value={libraryState.direction} onChange={(event) => patchLibraryState({ direction: event.target.value as "asc" | "desc" })}><option value="desc">내림차순</option><option value="asc">오름차순</option></Select>
-            <Select label="내 별점" value={String(libraryState.rating)} onChange={(event) => { const value = event.target.value; patchLibraryState({ rating: value === "all" || value === "unrated" ? value : Number(value) }); }}><option value="all">전체</option>{[5, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1, 0.5, 0].map((rating) => <option key={rating} value={String(rating)}>{rating.toFixed(1)}</option>)}<option value="unrated">미평가</option></Select>
+            <RatingFilter rating={libraryState.rating} onChange={rating => patchLibraryState({ rating })} />
           </fieldset>;
 
   return (
     <section className="collection-browser" aria-label="컬렉션">
-      {releaseInboxOpen && <ReleaseInbox onClose={() => setReleaseInboxOpen(false)} onChanged={onChanged} />}
       <ViewToolbar
-        title={workspace ? `${sectionLabel} ${showcase ? "쇼케이스" : "컬렉션"}` : "컬렉션"}
+        title={releaseProvider ? `${releaseProvider === "mangadex" ? "MangaDex" : "Kakao"} 알림` : workspace ? `${sectionLabel} ${showcase ? "쇼케이스" : "컬렉션"}` : "컬렉션"}
         ariaLabel="컬렉션 도구"
         chrome={{
           actions: indexActions,
-          navigation: <><ModeSegment showcase={showcase} onChange={setShowcase} /><span className="workspace-section-label">{showcase ? "전시관" : "작품 유형"}</span><TypeSegment current={typeFilter} onChange={setTypeFilter} />{!showcase && <div className="chrome-index-controls chrome-settings-controls">{indexControls}</div>}</>,
+          navigation: <>
+            <ModeSegment showcase={showcase} onChange={setShowcase} />
+            <span className="workspace-section-label">{showcase ? "전시관" : "작품 유형"}</span>
+            <TypeSegment current={releaseProvider ? undefined : typeFilter} onChange={setTypeFilter} />
+            {gateway.collectionTracking && typeFilter === "manga" && !showcase && <>
+              <span className="workspace-section-label">업데이트 알림</span>
+              <div className="collection-browser__segment" role="group" aria-label="만화 업데이트 알림">
+                {(["mangadex", "kakao"] as const).map(provider => <button
+                  key={provider}
+                  type="button"
+                  className="collection-browser__segment-button"
+                  aria-pressed={releaseProvider === provider}
+                  onClick={() => onViewChange({ kind: "collections", typeFilter, showcase, releaseProvider: provider })}
+                >{provider === "mangadex" ? "MangaDex" : "Kakao"}</button>)}
+              </div>
+            </>}
+            {!showcase && !releaseProvider && <div className="chrome-index-controls chrome-settings-controls">{indexControls}</div>}
+          </>,
           summary: `${sortLabel(libraryState.sort)}${libraryState.rating !== "all" ? ` · 내 별점 ${ratingLabel(libraryState.rating)}` : ""}`,
-          status: <span>{showcase ? "선정 작품" : "작품"} {visible.length}개</span>,
+          status: releaseProvider ? undefined : <span>{showcase ? "선정 작품" : "작품"} {visible.length}개</span>,
           search: showcase ? undefined : { scope: `${sectionLabel} 컬렉션`, query: libraryState.query, label: "제목 검색", placeholder: "작품 제목 검색", onApply: (query) => patchLibraryState({ query }) },
         }}
       />
       {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
       <div className={`collection-browser__stage${showcase ? " collection-browser__stage--showcase" : ""}`}>
-        {!workspace && <div className="collection-browser__heading">
+        {!releaseProvider && !workspace && <div className="collection-browser__heading">
           <div>
             <h3>{sectionLabel} {showcase ? "쇼케이스" : "컬렉션"}</h3>
           </div>
@@ -227,15 +245,16 @@ export function CollectionBrowser({
         <div
           className="collection-browser__content-final"
           onContextMenu={(event) => {
-            if ((event.target as HTMLElement).closest(".collection-card")) return;
+            if (releaseProvider || (event.target as HTMLElement).closest(".collection-card")) return;
             event.preventDefault();
             setEditMode({ kind: "create", type: typeFilter });
           }}
         >
-          {visible.length > 0 && (showcase ?
+          {releaseProvider && <ReleaseInbox provider={releaseProvider} query={libraryState.query} revision={collections} onOpen={collectionId => onViewChange({ kind: "collection", collectionId })} onChanged={onChanged} />}
+          {!releaseProvider && visible.length > 0 && (showcase ?
             <CollectionExhibition items={visible} page={exhibition.page} onPageChange={changeExhibitionPage} render={renderCollection} scrollRef={stageRef} /> :
             <VirtualCoverGrid items={visible} itemKey={collection => collection.id} render={renderCollection} legacyMetrics={typeFilter !== "manga"} metadataHeight={56} label={`${sectionLabel} 작품 목록`} scrollRef={stageRef} />)}
-          {visible.length === 0 && (
+          {!releaseProvider && visible.length === 0 && (
             <div className="collection-browser__empty">
               {!showcase && (libraryState.query.trim() || libraryState.rating !== "all") ? <EmptyState title="조건에 맞는 작품이 없습니다."><p>검색어나 별점 조건을 바꿔보세요.</p><Button onClick={() => patchLibraryState({ query: "", rating: "all" })}>검색·필터 초기화</Button></EmptyState> : <EmptyState title={showcase ? "쇼케이스에 컬렉션이 없습니다." : "컬렉션이 없습니다."}>
                 {showcase ? "라이브러리에서 쇼케이스에 추가한 컬렉션이 여기에 표시됩니다." : <><p>새 컬렉션을 만들어 작품을 모아보세요.</p><Button type="button" onClick={() => typeFilter === "manga" ? setMangaDexOpen(true) : typeFilter === "game" ? setIgdbOpen(true) : typeFilter === "movie" ? setTmdbOpen(true) : setEditMode({ kind: "create", type: typeFilter })}>{typeFilter === "manga" ? "MangaDex에서 만화 추가" : typeFilter === "game" ? "IGDB에서 게임 추가" : typeFilter === "movie" ? "TMDB에서 영화 추가" : "직접 입력"}</Button></>}
@@ -324,11 +343,28 @@ function ratingLabel(rating: CollectionLibraryState["rating"]): string {
   return rating === "all" ? "전체" : rating === "unrated" ? "미평가" : rating.toFixed(1);
 }
 
+function RatingFilter({ rating, onChange }: { rating: CollectionLibraryState["rating"]; onChange: (rating: CollectionLibraryState["rating"]) => void }) {
+  const commit = (value: number) => { if (rating !== value) onChange(value); };
+  return <div className="collection-rating-filter">
+    <span className="collection-rating-filter__value" aria-hidden="true">{typeof rating === "number" ? `${rating.toFixed(1)}점` : ratingLabel(rating)}</span>
+    <Slider label="내 별점" min={0} max={5} step={0.5} value={typeof rating === "number" ? rating : 0}
+      aria-valuetext={typeof rating === "number" ? `${rating.toFixed(1)}점` : ratingLabel(rating)}
+      onChange={event => commit(Number(event.target.value))}
+      onPointerUp={event => commit(Number(event.currentTarget.value))}
+      onKeyUp={event => { if (["Home", "End", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) commit(Number(event.currentTarget.value)); }}
+    />
+    <div className="collection-rating-filter__presets" role="group" aria-label="별점 필터 범위">
+      <button type="button" aria-pressed={rating === "all"} onClick={() => onChange("all")}>전체</button>
+      <button type="button" aria-pressed={rating === "unrated"} onClick={() => onChange("unrated")}>미평가</button>
+    </div>
+  </div>;
+}
+
 function TypeSegment({
   current,
   onChange,
 }: {
-  current: CollectionType;
+  current: CollectionType | undefined;
   onChange: (next: CollectionType) => void;
 }) {
   const options: Array<[CollectionType, string]> = [

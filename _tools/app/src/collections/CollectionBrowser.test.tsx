@@ -5,7 +5,7 @@ vi.mock("./physical/collectibleRuntime", () => ({
   attachLiveBook: (_host: unknown, _request: unknown, onReady: (value: boolean) => void) => { onReady(false); return { tilt: () => undefined, refresh: () => undefined, dispose: () => undefined }; },
 }));
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -103,7 +103,7 @@ describe("CollectionBrowser", () => {
     expect(screen.getByRole("button", { name: "제목 검색" })).toBeVisible();
     expect(screen.getByRole("combobox", { name: "정렬" })).toHaveValue("media_date");
     expect(screen.getByRole("combobox", { name: "방향" })).toHaveValue("desc");
-    expect(screen.getByRole("combobox", { name: "내 별점" })).toHaveValue("all");
+    expect(screen.getByRole("slider", { name: "내 별점" })).toHaveAttribute("aria-valuetext", "전체");
   });
 
   it("updates only the active media browse state", async () => {
@@ -123,10 +123,16 @@ describe("CollectionBrowser", () => {
     const user = userEvent.setup();
     await user.selectOptions(screen.getByRole("combobox", { name: "방향" }), "asc");
     expect(onLibraryStateChange).toHaveBeenLastCalledWith({ ...createDefaultCollectionLibraryState().game, direction: "asc" });
-    const rating = screen.getByRole("combobox", { name: "내 별점" });
-    expect(screen.getByRole("option", { name: "미평가" })).toBeInTheDocument();
-    await user.selectOptions(rating, "4.5");
+    const rating = screen.getByRole("slider", { name: "내 별점" });
+    expect(screen.getByRole("button", { name: "미평가" })).toBeInTheDocument();
+    fireEvent.change(rating, {target:{value:"4.5"}});
     expect(onLibraryStateChange).toHaveBeenLastCalledWith({ ...createDefaultCollectionLibraryState().game, direction: "asc", rating: 4.5 });
+    await user.click(screen.getByRole("button", {name:"미평가"}));
+    expect(onLibraryStateChange).toHaveBeenLastCalledWith(expect.objectContaining({rating:"unrated"}));
+    await user.click(screen.getByRole("button", {name:"전체"}));
+    expect(onLibraryStateChange).toHaveBeenLastCalledWith(expect.objectContaining({rating:"all"}));
+    fireEvent.pointerUp(rating);
+    expect(onLibraryStateChange).toHaveBeenLastCalledWith(expect.objectContaining({rating:0}));
   });
 
   it("renders a grid of collection cards", () => {

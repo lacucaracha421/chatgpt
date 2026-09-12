@@ -17,6 +17,190 @@ fn unresolved(f: &Fixture, asset_id: &str) {
     ).unwrap();
 }
 
+fn historical_images(f: &Fixture, count: usize) {
+    let mut c = f.library.connection().unwrap();
+    let tx = c.transaction().unwrap();
+    for index in 0..count {
+        let id = format!("history-{index:04}");
+        tx.execute("INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at,status)
+            VALUES(?1,?1,'image',?1,?2,?2,7,1,1,'2020-01-01','normal')", params![id,format!("assets/{id}.png")]).unwrap();
+        tx.execute("INSERT INTO asset_classifications(asset_id,classification_id) VALUES(?1,?2)", params![id,f.series]).unwrap();
+    }
+    tx.commit().unwrap();
+}
+
+#[test]
+fn full_refresh_snapshots_700_images_without_history_and_feeds_only_a_batch() {
+    let f = Fixture::new();
+    let target = f.ready("A");
+    // Five registered references are not unclassified; move the remaining fixture image away.
+    f.library.connection().unwrap().execute("UPDATE asset_classifications SET classification_id=?1 WHERE asset_id='asset-5'", [&f.outside]).unwrap();
+    historical_images(&f, 700);
+    let start = std::time::Instant::now();
+    let receipt = f.library.request_character_reference_refresh(&target.id, target.revision).unwrap();
+    eprintln!("700-image metadata snapshot: {:?}", start.elapsed());
+    assert_eq!(receipt.eligible_count, 700);
+    let c = f.library.connection().unwrap();
+    assert_eq!(c.query_row("SELECT COUNT(*) FROM character_autotag_jobs", [], |r| r.get::<_,i64>(0)).unwrap(), 0);
+    assert_eq!(c.query_row("SELECT COUNT(*) FROM character_reference_refresh_items WHERE state='pending'", [], |r| r.get::<_,i64>(0)).unwrap(), 700);
+    drop(c);
+    assert_eq!(f.library.advance_character_reference_refresh(32).unwrap(), 32);
+    let c = f.library.connection().unwrap();
+    assert_eq!(c.query_row("SELECT COUNT(*) FROM character_autotag_jobs WHERE cause='reconsideration' AND state='pending'", [], |r| r.get::<_,i64>(0)).unwrap(), 32);
+    assert_eq!(c.query_row("SELECT COUNT(*) FROM character_reference_refresh_items WHERE state='pending'", [], |r| r.get::<_,i64>(0)).unwrap(), 668);
+    drop(c);
+    let mut seen = BTreeSet::new();
+    loop {
+        while let Some(job) = f.library.claim_character_autotag().unwrap() {
+            assert!(seen.insert(job.asset_id.clone()), "duplicate work");
+            let mut c = f.library.connection().unwrap();
+            let tx = c.transaction().unwrap();
+            f.library.complete_reference_refresh_item(&tx, &job, &BTreeSet::new(), true, false).unwrap();
+            tx.execute("UPDATE character_autotag_jobs SET state='completed',claim_id=NULL WHERE asset_id=?1", [&job.asset_id]).unwrap();
+            tx.commit().unwrap();
+        }
+        if f.library.advance_character_reference_refresh(32).unwrap() == 0 { break; }
+    }
+    assert_eq!(seen.len(), 700);
+    let c = f.library.connection().unwrap();
+    assert_eq!(c.query_row("SELECT visited_count FROM character_reference_refreshes WHERE target_id=?1", [&target.id], |r| r.get::<_,i64>(0)).unwrap(),700);
+    assert_eq!(c.query_row("SELECT state FROM character_reference_refreshes WHERE target_id=?1", [&target.id], |r| r.get::<_,String>(0)).unwrap(),"completed");
+}
+
+fn history_fixture(count: usize) -> (Fixture, crate::library::characters::Target) {
+    let f = Fixture::new();
+    let target = f.ready("A");
+    f.library.connection().unwrap().execute("UPDATE asset_classifications SET classification_id=?1 WHERE asset_id='asset-5'", [&f.outside]).unwrap();
+    historical_images(&f, count);
+    (f, target)
+}
+
+#[test]
+fn full_refresh_preserves_exclusions_references_manual_choices_and_scope() {
+    let (f, target) = history_fixture(10);
+    let other = f.target("B");
+    for (id, who, decision) in [("history-0003", &other, DecisionKind::Accepted), ("history-0004", &target, DecisionKind::Rejected)] {
+        f.library.record_character_decisions(DecisionRequest {
+            target_id: who.id.clone(), expected_fingerprint: who.fingerprint.clone(),
+            asset_ids: vec![id.into()], decision, baseline_fingerprint: None, scan_id: None,
+        }).unwrap();
+    }
+    let nested = f.library.create_classification(CreateClassification { kind: ClassificationKind::Tag, name: "Nested".into(), parent_id: Some(f.series.clone()) }).unwrap().id;
+    f.library.save_character_series(crate::library::character_hub::Series { classification_id: nested.clone(), auto_classify: true, hero_asset_id: None }).unwrap();
+    let c = f.library.connection().unwrap();
+    c.execute("INSERT INTO character_folder_exclusions VALUES(?1)", [&f.child]).unwrap();
+    c.execute("UPDATE asset_classifications SET classification_id=?1 WHERE asset_id='history-0001'", [&f.child]).unwrap();
+    c.execute("INSERT INTO character_series_asset_exclusions VALUES(?1,'history-0002','now')", [&f.series]).unwrap();
+    c.execute("UPDATE assets SET status='trash' WHERE id='history-0005'", []).unwrap();
+    c.execute("UPDATE assets SET media_kind='video' WHERE id='history-0006'", []).unwrap();
+    c.execute("UPDATE asset_classifications SET classification_id=?1 WHERE asset_id='history-0007'", [&nested]).unwrap();
+    c.execute("UPDATE asset_classifications SET classification_id=(SELECT classification_id FROM classification_roles WHERE role='originals') WHERE asset_id='history-0008'", []).unwrap();
+    c.execute("DELETE FROM asset_classifications WHERE asset_id='history-0009'", []).unwrap();
+    drop(c);
+    let receipt = f.library.request_character_reference_refresh(&target.id, target.revision).unwrap();
+    assert_eq!(receipt.eligible_count, 1);
+    assert_eq!(f.library.advance_character_reference_refresh(32).unwrap(),1);
+    assert_eq!(f.library.claim_character_autotag().unwrap().unwrap().asset_id,"history-0000");
+    assert!(f.library.claim_character_autotag().unwrap().is_none());
+}
+
+#[test]
+fn full_refresh_limits_opted_in_series_to_its_own_subtree() {
+    let (f, target) = history_fixture(2);
+    let c = f.library.connection().unwrap();
+    c.execute("UPDATE asset_classifications SET classification_id=(SELECT parent_id FROM classification_entries WHERE id=?1) WHERE asset_id='history-0000'", [&f.series]).unwrap();
+    c.execute("INSERT INTO character_folder_exclusions VALUES(?1)", [&f.series]).unwrap();
+    drop(c);
+    assert_eq!(f.library.request_character_reference_refresh(&target.id, target.revision).unwrap().eligible_count, 0);
+    let c = f.library.connection().unwrap();
+    c.execute("DELETE FROM character_folder_exclusions WHERE classification_id=?1", [&f.series]).unwrap();
+    c.execute("UPDATE character_series SET auto_classify=0 WHERE classification_id=?1", [&f.series]).unwrap();
+    drop(c);
+    assert_eq!(f.library.request_character_reference_refresh(&target.id, target.revision).unwrap().eligible_count, 0);
+    let c = f.library.connection().unwrap();
+    c.execute("UPDATE character_series SET auto_classify=1 WHERE classification_id=?1", [&f.series]).unwrap();
+    c.execute("UPDATE asset_classifications SET classification_id=?1 WHERE asset_id='history-0001'", [&f.child]).unwrap();
+    drop(c);
+    assert_eq!(f.library.request_character_reference_refresh(&target.id, target.revision).unwrap().eligible_count, 1);
+    assert_eq!(f.library.advance_character_reference_refresh(32).unwrap(), 1);
+    assert_eq!(f.library.claim_character_autotag().unwrap().unwrap().asset_id, "history-0001");
+}
+
+#[test]
+fn snapshot_rechecks_exclusions_before_feeding_never_seen_assets() {
+    let (f, target) = history_fixture(2);
+    assert_eq!(f.library.request_character_reference_refresh(&target.id,target.revision).unwrap().eligible_count,2);
+    let c = f.library.connection().unwrap();
+    c.execute("INSERT INTO character_series_asset_exclusions VALUES(?1,'history-0000','now')", [&f.series]).unwrap();
+    c.execute("UPDATE assets SET status='trash' WHERE id='history-0001'", []).unwrap();
+    drop(c);
+    assert_eq!(f.library.advance_character_reference_refresh(32).unwrap(),0);
+    assert!(f.library.character_autotag_job("history-0000").unwrap().is_none());
+    assert!(f.library.character_autotag_job("history-0001").unwrap().is_none());
+    assert_eq!(f.library.advance_character_reference_refresh(32).unwrap(),0);
+    let c = f.library.connection().unwrap();
+    assert_eq!(c.query_row("SELECT visited_count FROM character_reference_refreshes WHERE target_id=?1",[&target.id],|r|r.get::<_,i64>(0)).unwrap(),2);
+}
+
+#[test]
+fn full_refresh_snapshot_survives_restart_pause_and_later_arrivals() {
+    let (f, target) = history_fixture(2);
+    let first = f.library.request_character_reference_refresh(&target.id,target.revision).unwrap();
+    f.library.set_character_reference_refresh_paused(true).unwrap();
+    let c = f.library.connection().unwrap();
+    c.execute("INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at,status)
+        SELECT '000-later','000-later',media_kind,original_name,'assets/later.png','thumbnails/later.webp',byte_size,width,height,collected_at,status FROM assets WHERE id='history-0000'", []).unwrap();
+    c.execute("INSERT INTO asset_classifications VALUES('000-later',?1)",[&f.series]).unwrap();
+    character_autotag::enqueue(&c,"000-later",Cause::Ingestion).unwrap();
+    drop(c);
+    let root = f.temp.path().to_path_buf();
+    drop(f.library);
+    let library = Library::open(&root).unwrap();
+    let again = library.request_character_reference_refresh(&target.id,target.revision).unwrap();
+    assert_eq!(again.request_revision,first.request_revision);
+    assert_eq!(again.eligible_count,2);
+    assert_eq!(library.advance_character_reference_refresh(32).unwrap(),0);
+    let fresh = library.claim_character_autotag().unwrap().unwrap();
+    assert_eq!(fresh.asset_id,"000-later");
+    library.set_character_reference_refresh_paused(false).unwrap();
+    assert_eq!(library.advance_character_reference_refresh(32).unwrap(),2);
+    assert_eq!(library.claim_character_autotag().unwrap().unwrap().asset_id,"history-0000");
+    assert_eq!(library.claim_character_autotag().unwrap().unwrap().asset_id,"history-0001");
+    assert!(library.claim_character_autotag().unwrap().is_none());
+}
+
+#[test]
+fn legacy_refresh_keeps_its_admission_cursor_without_claiming_a_known_total() {
+    let (f,target)=history_fixture(1);
+    unresolved(&f,"history-0000");
+    f.library.request_character_reference_refresh(&target.id,target.revision).unwrap();
+    let c=f.library.connection().unwrap();
+    c.execute("DELETE FROM character_reference_refresh_items WHERE target_id=?1",[&target.id]).unwrap();
+    c.execute("UPDATE character_reference_refreshes SET eligible_count=0,discovery_complete=0,through_job_sequence=(SELECT MAX(sequence) FROM character_autotag_admissions) WHERE target_id=?1",[&target.id]).unwrap();
+    let progress=serde_json::to_value(refresh_progress(&c).unwrap()).unwrap();
+    assert!(progress[0]["total"].is_null());
+    drop(c);
+    assert_eq!(f.library.advance_character_reference_refresh(32).unwrap(),1);
+}
+
+#[test]
+fn legacy_refresh_cursor_does_not_discover_parent_images() {
+    let (f, target) = history_fixture(2);
+    unresolved(&f, "history-0000");
+    unresolved(&f, "history-0001");
+    f.library.request_character_reference_refresh(&target.id, target.revision).unwrap();
+    let c = f.library.connection().unwrap();
+    c.execute("DELETE FROM character_reference_refresh_items WHERE target_id=?1", [&target.id]).unwrap();
+    c.execute("UPDATE character_reference_refreshes SET eligible_count=0,discovery_complete=0,through_job_sequence=(SELECT MAX(sequence) FROM character_autotag_admissions) WHERE target_id=?1", [&target.id]).unwrap();
+    c.execute("UPDATE asset_classifications SET classification_id=(SELECT parent_id FROM classification_entries WHERE id=?1) WHERE asset_id='history-0000'", [&f.series]).unwrap();
+    drop(c);
+    assert_eq!(f.library.advance_character_reference_refresh(32).unwrap(), 1);
+    assert_eq!(f.library.claim_character_autotag().unwrap().unwrap().asset_id, "history-0001");
+    let c = f.library.connection().unwrap();
+    assert_eq!(c.query_row("SELECT eligible_count FROM character_reference_refreshes WHERE target_id=?1", [&target.id], |r| r.get::<_,i64>(0)).unwrap(), 1);
+    assert!(!c.query_row("SELECT EXISTS(SELECT 1 FROM character_reference_refresh_items WHERE asset_id='history-0000')", [], |r| r.get::<_,bool>(0)).unwrap());
+}
+
 fn add_extra_reference(f: &Fixture, target: &crate::library::characters::Target) {
     let id = "refresh-reference";
     let hash = Sha256::digest(id.as_bytes())
@@ -52,22 +236,34 @@ fn add_extra_reference(f: &Fixture, target: &crate::library::characters::Target)
 }
 
 #[test]
-fn explicit_refresh_includes_parent_sources_and_revalidates_descendant_scope() {
+fn explicit_refresh_excludes_parent_sources_and_rechecks_before_analysis() {
     let f = Fixture::new();
     let target = f.ready("A");
     let c = f.library.connection().unwrap();
     c.execute("UPDATE asset_classifications SET classification_id=(SELECT parent_id FROM classification_entries WHERE id=?1) WHERE asset_id='asset-5'", [&f.series]).unwrap();
     drop(c);
     unresolved(&f, "asset-5");
-    f.library.request_character_reference_refresh(&target.id, target.revision).unwrap();
+    let receipt = f.library.request_character_reference_refresh(&target.id, target.revision).unwrap();
+    assert_eq!(receipt.eligible_count, 0, "ordinary ancestor images belong only to fresh-ingestion inference, not this historical refresh");
+    f.library.connection().unwrap().execute("UPDATE asset_classifications SET classification_id=?1 WHERE asset_id='asset-5'", [&f.child]).unwrap();
+    assert_eq!(f.library.request_character_reference_refresh(&target.id, target.revision).unwrap().eligible_count, 1);
     assert_eq!(f.library.advance_character_reference_refresh(32).unwrap(), 1);
     let job = f.library.claim_character_autotag().unwrap().unwrap();
     assert!(!f.library.supersede_invalid_reference_refresh_job(&job).unwrap());
-    let c = f.library.connection().unwrap();
-    c.execute("UPDATE classification_entries SET parent_id=?1 WHERE id=?2", params![f.outside, f.series]).unwrap();
-    drop(c);
+    // Also fences parent items already supplied by the former wider-scope implementation.
+    f.library.connection().unwrap().execute("UPDATE asset_classifications SET classification_id=(SELECT parent_id FROM classification_entries WHERE id=?1) WHERE asset_id='asset-5'", [&f.series]).unwrap();
     assert!(f.library.supersede_invalid_reference_refresh_job(&job).unwrap());
     assert_eq!(f.library.character_autotag_job("asset-5").unwrap().unwrap().state, "superseded");
+}
+
+#[test]
+fn existing_parent_snapshot_items_are_skipped_before_job_creation() {
+    let (f, target) = history_fixture(2);
+    f.library.request_character_reference_refresh(&target.id, target.revision).unwrap();
+    f.library.connection().unwrap().execute("UPDATE asset_classifications SET classification_id=(SELECT parent_id FROM classification_entries WHERE id=?1) WHERE asset_id='history-0000'", [&f.series]).unwrap();
+    assert_eq!(f.library.advance_character_reference_refresh(32).unwrap(), 1);
+    assert!(f.library.character_autotag_job("history-0000").unwrap().is_none());
+    assert_eq!(f.library.claim_character_autotag().unwrap().unwrap().asset_id, "history-0001");
 }
 
 #[test]
@@ -94,7 +290,7 @@ fn references_are_future_only_until_explicit_refresh_snapshots_history() {
         .request_character_reference_refresh(&target.id, current.revision)
         .unwrap();
     assert_eq!(receipt.state, ReferenceRefreshState::Pending);
-    assert_eq!(receipt.eligible_count, 0);
+    assert_eq!(receipt.eligible_count, 1);
     assert_eq!(
         f.library.advance_character_reference_refresh(32).unwrap(),
         1
@@ -113,10 +309,9 @@ fn references_are_future_only_until_explicit_refresh_snapshots_history() {
 }
 
 #[test]
-fn refresh_request_persists_a_cursor_and_discovers_only_one_bounded_page() {
-    let f = Fixture::new();
-    let target = f.ready("A");
-    for asset_id in ["asset-0", "asset-1", "asset-2"] {
+fn refresh_request_snapshots_all_ids_but_feeds_only_one_bounded_page() {
+    let (f, target) = history_fixture(3);
+    for asset_id in ["history-0000", "history-0001", "history-0002"] {
         unresolved(&f, asset_id);
     }
 
@@ -133,8 +328,8 @@ fn refresh_request_persists_a_cursor_and_discovers_only_one_bounded_page() {
         )
         .unwrap();
     drop(c);
-    assert_eq!(receipt.eligible_count, 0);
-    assert_eq!(initial_items, 0);
+    assert_eq!(receipt.eligible_count, 3);
+    assert_eq!(initial_items, 3);
 
     assert_eq!(f.library.advance_character_reference_refresh(2).unwrap(), 2);
     let c = f.library.connection().unwrap();
@@ -146,20 +341,20 @@ fn refresh_request_persists_a_cursor_and_discovers_only_one_bounded_page() {
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();
-    assert_eq!(items, 2);
-    assert!(cursor.is_some());
+    assert_eq!(items, 3);
+    assert!(cursor.is_none());
 }
 
 #[test]
-fn refresh_cursor_excludes_jobs_created_after_the_request() {
-    let f = Fixture::new();
-    let target = f.ready("A");
-    unresolved(&f, "asset-0");
+fn refresh_snapshot_excludes_images_outside_scope_at_request_time() {
+    let (f, target) = history_fixture(1);
+    unresolved(&f, "history-0000");
     let receipt = f
         .library
         .request_character_reference_refresh(&target.id, target.revision)
         .unwrap();
-    unresolved(&f, "asset-1");
+    f.library.connection().unwrap().execute("UPDATE asset_classifications SET classification_id=?1 WHERE asset_id='asset-5'", [&f.series]).unwrap();
+    unresolved(&f, "asset-5");
 
     assert_eq!(
         f.library.advance_character_reference_refresh(32).unwrap(),
@@ -169,7 +364,7 @@ fn refresh_cursor_excludes_jobs_created_after_the_request() {
     let late_item: bool = c
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM character_reference_refresh_items
-             WHERE target_id=?1 AND request_revision=?2 AND asset_id='asset-1')",
+             WHERE target_id=?1 AND request_revision=?2 AND asset_id='asset-5')",
             params![target.id, receipt.request_revision],
             |row| row.get(0),
         )
@@ -178,10 +373,9 @@ fn refresh_cursor_excludes_jobs_created_after_the_request() {
 }
 
 #[test]
-fn recovery_keeps_an_incomplete_cursor_open_after_an_orphaned_page_item() {
-    let f = Fixture::new();
-    let target = f.ready("A");
-    for asset_id in ["asset-0", "asset-1", "asset-2"] {
+fn recovery_keeps_snapshot_open_after_an_orphaned_batch_item() {
+    let (f, target) = history_fixture(3);
+    for asset_id in ["history-0000", "history-0001", "history-0002"] {
         unresolved(&f, asset_id);
     }
     let receipt = f
@@ -193,7 +387,7 @@ fn recovery_keeps_an_incomplete_cursor_open_after_an_orphaned_page_item() {
         .connection()
         .unwrap()
         .execute(
-            "DELETE FROM character_autotag_jobs WHERE asset_id='asset-0'",
+            "DELETE FROM character_autotag_jobs WHERE asset_id='history-0000'",
             [],
         )
         .unwrap();
@@ -217,10 +411,9 @@ fn recovery_keeps_an_incomplete_cursor_open_after_an_orphaned_page_item() {
 
 #[test]
 fn refresh_keeps_earlier_page_failures_when_later_pages_finish() {
-    let f = Fixture::new();
-    let target = f.ready("A");
-    unresolved(&f, "asset-0");
-    unresolved(&f, "asset-1");
+    let (f, target) = history_fixture(2);
+    unresolved(&f, "history-0000");
+    unresolved(&f, "history-0001");
     f.library
         .request_character_reference_refresh(&target.id, target.revision)
         .unwrap();
@@ -248,10 +441,9 @@ fn refresh_keeps_earlier_page_failures_when_later_pages_finish() {
 }
 
 #[test]
-fn refresh_boundary_survives_deletion_of_the_last_admitted_job() {
-    let f = Fixture::new();
-    let target = f.ready("A");
-    unresolved(&f, "asset-0");
+fn refresh_snapshot_survives_job_deletion_and_does_not_add_later_work() {
+    let (f, target) = history_fixture(1);
+    unresolved(&f, "history-0000");
     f.library
         .request_character_reference_refresh(&target.id, target.revision)
         .unwrap();
@@ -259,14 +451,14 @@ fn refresh_boundary_survives_deletion_of_the_last_admitted_job() {
         .connection()
         .unwrap()
         .execute(
-            "DELETE FROM character_autotag_jobs WHERE asset_id='asset-0'",
+            "DELETE FROM character_autotag_jobs WHERE asset_id='history-0000'",
             [],
         )
         .unwrap();
     unresolved(&f, "asset-1");
     assert_eq!(
         f.library.advance_character_reference_refresh(32).unwrap(),
-        0
+        1
     );
     assert_eq!(
         f.library
@@ -355,7 +547,7 @@ fn explicit_refresh_feeds_low_priority_generation_without_preempting_fresh_work(
         .library
         .request_character_reference_refresh(&target.id, target.revision)
         .unwrap();
-    assert_eq!(receipt.eligible_count, 0);
+    assert_eq!(receipt.eligible_count, 1);
     character_autotag::enqueue(
         &f.library.connection().unwrap(),
         "asset-0",
@@ -519,7 +711,7 @@ fn repeated_request_for_the_same_reference_set_coalesces() {
         .unwrap();
 
     assert_eq!(second.request_revision, first.request_revision);
-    assert_eq!(second.eligible_count, 0);
+    assert_eq!(second.eligible_count, 1);
     let c = f.library.connection().unwrap();
     assert_eq!(
         c.query_row(
@@ -528,21 +720,20 @@ fn repeated_request_for_the_same_reference_set_coalesces() {
             |row| row.get::<_, i64>(0),
         )
         .unwrap(),
-        0
+        1
     );
 }
 
 #[test]
-fn request_with_no_eligible_history_completes_on_first_bounded_scan() {
-    let f = Fixture::new();
-    let target = f.ready("A");
+fn request_with_no_eligible_history_completes_immediately() {
+    let (f, target) = history_fixture(0);
 
     let receipt = f
         .library
         .request_character_reference_refresh(&target.id, target.revision)
         .unwrap();
 
-    assert_eq!(receipt.state, ReferenceRefreshState::Pending);
+    assert_eq!(receipt.state, ReferenceRefreshState::Completed);
     assert_eq!(receipt.eligible_count, 0);
     assert_eq!(
         f.library.advance_character_reference_refresh(32).unwrap(),

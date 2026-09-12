@@ -18,6 +18,15 @@ The reference-expansion performance contract is recorded separately in
 defines how an explicitly requested historical refresh should avoid repeating
 unchanged comparison work.
 
+2026-09-13 user clarification: the work center shows the current series/character,
+per-request processed/total/remaining and failures, with new-image work separate.
+This supersedes the generic-only work-center restriction below. Explicit refresh
+now snapshots all eligible unclassified IDs inside the requested series and its
+ordinary descendants, even without automatic job history;
+reference changes still never start a historical pass. Existing in-flight legacy
+cursor requests are not expanded. Refresh discovery and pre-analysis checks exclude
+parent/sibling sources; ordinary-parent inference remains a fresh-ingestion rule. See CHAR-AUTO-002/005 for verification.
+
 ## Product judgment
 
 Character folders, representative thumbnails, and presentation-only character

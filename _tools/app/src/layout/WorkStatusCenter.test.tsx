@@ -63,7 +63,7 @@ it("keeps an always available work entry and reveals an idle detail panel", asyn
   expect(screen.getByRole("dialog", { name: "작업 센터" })).toHaveTextContent("진행 중인 작업이 없습니다.");
 });
 
-it("summarizes only an explicit character history refresh as active work", async () => {
+it("summarizes an explicit character history refresh alongside other active work", async () => {
   let finish!: () => void;
   act(() => {
     void startPublication("catalog", () => new Promise<number>((resolve) => { finish = () => resolve(1); }), String);
@@ -82,6 +82,15 @@ it("summarizes only an explicit character history refresh as active work", async
   expect(panel).toHaveTextContent("과거 미분류 이미지 갱신 일시 정지");
 
   await act(async () => { finish(); });
+});
+
+it("shows fresh character work and its target in the existing work center", async () => {
+  render(<WorkStatusCenter characterAutomation={{ ...idleCharacterAutomation,
+    activeWork: { active: true, seriesName: "젠레스", targetName: "레미엘", cause: "ingestion", freshRemaining: 12 },
+  }} progress={null} />);
+  await userEvent.click(screen.getByRole("button", { name: "작업 센터 · 1개 진행 중" }));
+  expect(screen.getByRole("dialog")).toHaveTextContent("현재 작업 · 젠레스 / 레미엘 비교 중");
+  expect(screen.getByRole("dialog")).toHaveTextContent("새 이미지 분석 · 12개 남음");
 });
 
 it("counts a persistent character failure as a problem with a recovery action", async () => {

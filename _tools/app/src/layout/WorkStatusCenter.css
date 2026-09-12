@@ -52,6 +52,10 @@
   font-size: var(--text-sm);
 }
 
+.work-status-center__list .series-automation p { margin: 0; line-height: var(--line-copy); }
+.character-refresh-progress { display: grid; gap: var(--space-1); min-width: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.character-refresh-progress strong { color: var(--color-text); font-weight: 500; }
+
 .work-status-center__list > :first-child { border-top: 0; }
 
 .work-status-center__list > .status-bar {

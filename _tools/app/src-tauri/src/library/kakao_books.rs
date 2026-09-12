@@ -1,4 +1,9 @@
-use std::{collections::HashSet, io::Read, time::Duration};
+use std::{
+    collections::HashSet,
+    io::Read,
+    sync::OnceLock,
+    time::{Duration, Instant},
+};
 
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -46,23 +51,38 @@ struct BookDocument {
 
 /// The REST key is sent only to Kakao in a header, never in a URL or diagnostic.
 pub(crate) fn search(api_key: &str, query: &str) -> Result<Vec<AladinItem>, LibraryError> {
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .https_only(true)
-        .max_redirects(0)
-        .timeout_global(Some(REQUEST_TIMEOUT))
-        .build()
-        .into();
+    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+    let agent = AGENT.get_or_init(|| {
+        ureq::Agent::config_builder()
+            .https_only(true)
+            .max_redirects(0)
+            .http_status_as_error(false)
+            .timeout_global(Some(REQUEST_TIMEOUT))
+            .build()
+            .into()
+    });
     search_with(api_key, query, |url, authorization| {
+        let _request = super::provider_requests::Request::start("kakao");
         let mut response = agent
             .get(url.as_str())
             .header("Authorization", authorization)
             .call()
-            .map_err(|error| match error {
-                ureq::Error::StatusCode(code) => TransportError::HttpStatus(code),
-                ureq::Error::Timeout(_) => TransportError::Timeout,
-                _ => TransportError::Unavailable,
+            .map_err(|error| {
+                super::provider_requests::record_failure(
+                    super::provider_requests::Failure::transport(&error, "search"),
+                );
+                match error {
+                    ureq::Error::StatusCode(code) => TransportError::HttpStatus(code),
+                    ureq::Error::Timeout(_) => TransportError::Timeout,
+                    _ => TransportError::Unavailable,
+                }
             })?;
         if !response.status().is_success() {
+            super::provider_requests::record_failure(super::provider_requests::Failure::http(
+                response.status().as_u16(),
+                response.headers(),
+                "search",
+            ));
             return Err(TransportError::HttpStatus(response.status().as_u16()));
         }
         let mut bytes = Vec::new();
@@ -71,9 +91,19 @@ pub(crate) fn search(api_key: &str, query: &str) -> Result<Vec<AladinItem>, Libr
             .as_reader()
             .take((MAX_JSON_BYTES + 1) as u64)
             .read_to_end(&mut bytes)
-            .map_err(|error| match error.kind() {
-                std::io::ErrorKind::TimedOut => TransportError::Timeout,
-                _ => TransportError::Unavailable,
+            .map_err(|error| {
+                super::provider_requests::record_failure(super::provider_requests::Failure::new(
+                    if error.kind() == std::io::ErrorKind::TimedOut {
+                        "timeout"
+                    } else {
+                        "body"
+                    },
+                    "search",
+                ));
+                match error.kind() {
+                    std::io::ErrorKind::TimedOut => TransportError::Timeout,
+                    _ => TransportError::Unavailable,
+                }
             })?;
         if bytes.len() > MAX_JSON_BYTES {
             return Err(TransportError::InvalidResponse);
@@ -98,7 +128,11 @@ fn search_with(
     let authorization = format!("KakaoAK {api_key}");
     let mut items = Vec::new();
     let mut seen = HashSet::new();
+    let started = Instant::now();
     for page in 1..=MAX_SEARCH_PAGES {
+        if started.elapsed() >= Duration::from_secs(60) {
+            return Err(LibraryError::AladinTimedOut);
+        }
         let mut url = Url::parse(SEARCH_URL).expect("static Kakao endpoint");
         url.query_pairs_mut()
             .append_pair("query", query)

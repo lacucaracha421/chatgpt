@@ -372,7 +372,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   }, [appendMessage, gateway, refreshTrashCount]);
   useReleaseWatchCheck(gateway, libraryRoot, async (result) => {
     await refreshCollections();
-    if (result.changedCollections > 0) appendMessage(`새 출간 정보가 있는 작품 ${result.changedCollections}개`);
+    if (result.changedCollections > 0) appendMessage(`${result.provider === "mangadex" ? "MangaDex 새 권" : "Kakao 신간"} 정보가 있는 작품 ${result.changedCollections}개`);
   });
   useEffect(() => {
     saveUiPreferences(preferences);
@@ -768,6 +768,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                   />
                 ) : view.kind === "collections" ? (
                   <CollectionBrowser
+                    releaseProvider={view.kind === "collections" ? view.releaseProvider : undefined}
                     collections={collections}
                     typeFilter={view.typeFilter}
                     showcase={view.showcase}

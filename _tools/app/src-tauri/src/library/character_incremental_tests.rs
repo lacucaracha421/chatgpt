@@ -772,7 +772,7 @@ fn incremental_owner_feeds_only_explicit_reference_refresh() {
         .library
         .request_character_reference_refresh(&target.id, target.revision)
         .unwrap();
-    assert_eq!(receipt.eligible_count, 0);
+    assert_eq!(receipt.eligible_count, 1);
     assert_eq!(
         f.library.advance_character_reference_refresh(32).unwrap(),
         1
@@ -1250,7 +1250,7 @@ fn explicit_reference_refresh_uses_delta_when_old_evidence_is_reusable() {
         .library
         .request_character_reference_refresh(&target.id, current.revision)
         .unwrap();
-    assert_eq!(receipt.eligible_count, 0);
+    assert_eq!(receipt.eligible_count, 1);
     assert_eq!(
         f.library.advance_character_reference_refresh(32).unwrap(),
         1
@@ -1335,4 +1335,38 @@ fn character_reference_refresh_retains_competitor_with_five_remaining_valid_refe
         )
         .unwrap();
     assert_eq!(request_state, "running");
+}
+
+#[test]
+fn work_status_uses_snapshot_totals_and_the_actual_comparison_target() {
+    let f = Fixture::new();
+    let target = f.ready("A");
+    let c = f.library.connection().unwrap();
+    c.execute("INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at,status)
+        SELECT 'second','second',media_kind,original_name,'assets/second.png','thumbnails/second.webp',byte_size,width,height,collected_at,status FROM assets WHERE id='asset-5'", []).unwrap();
+    c.execute("INSERT INTO asset_classifications VALUES('second',?1)",[&f.series]).unwrap();
+    drop(c);
+    f.library.request_character_reference_refresh(&target.id,target.revision).unwrap();
+    f.library.advance_character_reference_refresh(1).unwrap();
+    let job=f.library.claim_character_autotag().unwrap().unwrap();
+    {
+        let mut engine=f.library.character_incremental.lock().unwrap();
+        engine.active=Some(job.asset_id.clone());
+        engine.active_series_name=Some("Series".into());
+        engine.active_target_name=Some("Competing character".into());
+        engine.active_cause=Some("reconsideration".into());
+    }
+    let status=serde_json::to_value(f.library.character_incremental_status().unwrap()).unwrap();
+    assert_eq!(status["activeWork"]["targetName"],"Competing character");
+    assert_eq!(status["historyRefreshes"][0]["targetName"],"A");
+    assert_eq!(status["historyRefreshes"][0]["total"],2);
+    assert_eq!(status["historyRefreshes"][0]["remaining"],2);
+    let mut c=f.library.connection().unwrap();
+    let tx=c.transaction().unwrap();
+    f.library.complete_reference_refresh_item(&tx,&job,&BTreeSet::new(),true,false).unwrap();
+    tx.commit().unwrap();
+    drop(c);
+    let status=serde_json::to_value(f.library.character_incremental_status().unwrap()).unwrap();
+    assert_eq!(status["historyRefreshes"][0]["processed"],1);
+    assert_eq!(status["historyRefreshes"][0]["remaining"],1);
 }

@@ -104,6 +104,9 @@ export const libraryGateway: LibraryGateway = {
   measureLibraryDerivativeStorage: () => invoke("measure_library_derivative_storage"),
   recordCollectionOpened: (collectionId, openedAt) => invoke("record_collection_opened", { collectionId, openedAt }),
   collectionTracking: {
+    runUpdates: (provider) => invoke("run_collection_updates", { provider }),
+    updateStatus: (provider) => invoke("get_collection_update_status", { provider }),
+    ownershipTracking: (collectionId) => invoke("list_ownership_tracking", { collectionId }),
     setOwnedCount: (collectionId, editionIndex, count) => invoke("set_owned_volume_count", { collectionId, editionIndex, count }),
     listOwnership: (collectionId) => invoke("list_volume_ownership", { collectionId }),
     setOwnership: (collectionId, editionIndex, volumeNumbers, format, owned) => invoke("set_volume_ownership", { collectionId, editionIndex, volumeNumbers, format, owned }),

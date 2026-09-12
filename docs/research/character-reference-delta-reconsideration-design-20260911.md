@@ -194,3 +194,13 @@ Adding or confirming references affects newly enqueued images immediately and do
 not create a historical scheduler row. The explicit refresh runs at low priority,
 visits the eligible historical set once, and uses reference-delta comparison where
 the stored evidence passes current safety validation.
+
+2026-09-13 clarification: an explicit request snapshots all currently eligible
+unclassified asset IDs inside the requested series and its ordinary descendants
+into existing refresh items, including assets without a
+job/admission checkpoint. The snapshot supplies the work-center total; the worker
+still creates jobs in bounded batches and revalidates eligibility before work.
+Existing in-flight legacy cursor requests are not expanded. Parent/sibling sources
+are excluded during discovery, supply and pre-analysis checks, including items
+queued by the earlier wider-scope implementation. This changes
+candidate discovery, not the evidence-reuse or publication safety contract.

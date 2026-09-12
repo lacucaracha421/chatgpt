@@ -27,23 +27,31 @@ References to installed APK 0.3.3 in older entries are dated device evidence, no
 fresh inventory. CLOUD-006 is DONE; CHAR-UI-001 and Linux drag-out retain their native
 acceptance limits. Existing item statuses below remain the owners of pending work.
 
-## 현재 작업 요약 — 2026-09-12 경로·탐색 성능 대조
+## 현재 작업 요약 — 2026-09-13 커밋·캐릭터 정리·확장 변경 대조
 
 이번 정리는 이 문서의 항목·실행 기록과 현재 대화의 사용자 확인을 대조한 것이다. 전체 코드·운영 상태를 새로 감사하거나 기존 네이티브 검증을 대신한 것은 아니다. 아래는 탐색용 요약이며 상세 요구와 완료 기준은 각 항목이 소유한다. 역사적 P0/P1/P2 배치는 현재 실행 우선순위 확정으로 해석하지 않는다.
 
 | 영역 | 구현 후 확인 / 남은 보완 | 새 구현 / 보류 |
 |---|---|---|
 | 탐색 성능 | PERF-NAV-001: 작은 폴더 조회·작가 집계·날짜 계산·재방문 화면·표지 대기 개선 구현 및 합성 검증 완료; 네이티브 클릭→이미지 표시 시간은 VERIFY | 큰 범위 집계, DB 경합, 실제 decode/GPU 지연은 측정 후 판단; AI 첫 분석 성능은 CHAR-AUTO-001 |
-| 캐릭터 | 2026-09-12 quiet workflow로 일반 수집 중 큐/검토/캐시 상태 노출을 제거하고, 가장 가까운 등록 시리즈 + 명시적 참조만 자동 비교한다. 과거 미분류 갱신은 사용자 요청 때만 낮은 우선순위로 실행한다. Linux 격리 앱 기동은 통과했으나 실제 GUI 행동 수용과 Windows 네이티브 확인은 남음 | CHAR-AUTO-004의 자동확정 support=6 유지. 참조 추가는 신규 이미지에 즉시 적용되고 과거 갱신은 명시적 유지보수 작업으로 분리됨 |
+| 캐릭터 | CHAR-UI-011 시리즈 이동·공유 자료 보존, CHAR-UI-009 빈 그룹 자동 해제, CHAR-UI-012 일반 폴더 카드·분류 제외 구현. 실제 Windows/Linux 이동·탐색 수용은 VERIFY | CHAR-AUTO-005 전체 미분류 스냅샷과 CHAR-AUTO-002 작업 센터의 현재 캐릭터·남은 수량 구현 / 네이티브 VERIFY. 참조 저장·시리즈 이동만으로 갱신을 시작하지 않는 quiet workflow와 CHAR-AUTO-004 support=6 유지 |
 | 통합 코드 리뷰 | REVIEW-20260909: A–H/I1 반영 후 남은 Windows·Android·실제 미디어 검증 | 구현 완료 배치를 처음부터 재실행하지 않음 |
 | 클라우드·통계·Notes | CLOUD-UI-001, STATS-001A/B, NOTE-001B 네이티브 확인/남은 보완 | CLOUD-006와 NOTE-001A는 완료 |
 | 개인 탐색·카탈로그 | IDEA-001A/B 다시보기 테마와 색감 재섞기 사용자 확인으로 완료 (2026-09-12). 기존 카탈로그 주 경로 완료 | Windows 다시보기 네이티브 확인 미실시. CATALOG-002B 선택적 공급자; IDEA-002 보류 |
 | 유사 이미지·영상 | SIMILARITY-003 실제 영상 정확도 검증 | SIMILARITY-002B 기하 변형 후보; PERF-SIMILARITY는 측정 근거 전까지 보류 |
 | 모바일 | MOBILE-001/002/004/006은 사용자 실사용 확인으로 완료 | MOBILE-007 북마크 쓰기 → 008 갱신 요청; 003 삭제 프로토콜 보류 |
-| 확장 프로그램 | EXT-005~010 완료. 목록형 확장과 저장/임시저장/GIF/입력 흐름까지 사용자 확인 완료 | 추가 필수 구현 없음; 이후 필요 시 편의 개선만 별도 등록 |
+| 확장 프로그램 | EXT-005~010의 기존 완료 유지. 현재 `extension-list/`는 반원 메뉴 3.0.0.13이며 EXT-011 메뉴·PC 연결, EXT-012 번역·X 저장·PC 임시저장 후속은 구현 / 실사용 VERIFY | 과거 list-only 디자인을 다시 구현하지 않음. 최신 후속의 PC 브라우저·Titanium/Galaxy·실제 X/API 확인은 각 항목에서 추적 |
 | Works / Collection | WORKS-001, LONG-001, LONG-002B 남은 기능/실제 미디어 확인 | LONG-004는 기존 화면에 통합; LONG-003 보안 설계 승인 전 보류 |
 
 캐릭터·메모 작업의 **사용자 승인 순서 (2026-09-09)**: 상단바 → 메모 상태 문구 → CHAR-UI-007 추가 참조 → CHAR-UI-009 표시 그룹 → CHAR-UI-004·008 폴더 전환 → CHAR-AUTO-001 첫 분석 계측. 확장프로그램 리디자인은 이 작업에서 제외한다.
+
+### 2026-09-13 백로그 대조 범위
+
+- 로컬 `main`과 원격 `origin/main`이 모두 `dd2baa2`임을 확인했다. 탐색 성능 `7ac551a`, 반원 확장·PC 페어링 `cd345e3`, 폴더 탐색·자산 메뉴 `5d39518`, 번역·X 저장 `df89e61`, 안전한 시리즈 이동·빈 그룹 해제 `dd2baa2`까지 반영됐다.
+- 이번 갱신은 최근 커밋의 코드·현재 문서·이 대화의 검증 기록을 대조한 문서 작업이다. 새 전체 테스트, Windows/Linux 네이티브 수용, 운영 라이브러리 이동·갱신, 서버 배포를 수행한 기록이 아니다. 확장 최신 후속의 실사용 완료를 예전 EXT-010 사용자 확인으로 대신하지 않는다.
+- **최근 캐릭터 검증:** `dd2baa2` 구현 시 Rust 시리즈 이동 회귀 **10 passed**, 이동 확인창 **5 passed**, TypeScript 검사 통과. 공유 자료의 양쪽 캐릭터/그룹 표시, 참조 보호, 오래된 미리보기 거절, 원자적 실패 복구, 새 분석 미예약을 포함한다. 빈 그룹 관련 기존 집중 회귀도 통과했으며 이번 문서 갱신에서 재실행하지 않았다.
+- **후속 구현:** 작업 이력 없는 기존 미분류 전체 확인은 CHAR-AUTO-005, 작업 센터의 현재 캐릭터·남은 수량은 CHAR-AUTO-002에서 구현했다. 아래 각 항목의 검증 범위를 따른다.
+- IDEA-001/001B는 2026-09-12 사용자 확인으로 DONE이다. 하단 상태 색인과 실행 순서의 오래된 VERIFY 표기를 맞췄으며, Windows 미확인 사실은 그대로 보존한다.
 
 ### 2026-09-12 백로그 대조 범위
 
@@ -53,6 +61,8 @@ acceptance limits. Existing item statuses below remain the owners of pending wor
 - 이번 탐색 최적화는 PERF-NAV-001이 소유한다. 하단 legacy index의 PERF-001/002/003 DONE은 당시 범위의 완료 기록이며 이번 변경의 네이티브 수용을 뜻하지 않는다.
 
 ### 2026-09-12 Quiet Character Workflow 최종 검증 체크포인트
+
+2026-09-13 사용자 후속 요청으로 작업 센터의 현재 캐릭터·요청별 처리/전체/남은 수량 표시를 추가했다(CHAR-AUTO-002). 아래 정상 UI 표시 제한은 당시 기록이며, 참조 저장만으로 과거 갱신을 시작하지 않는 계약은 유지한다.
 
 - **현재 제품 계약:** 일반 수집의 자동 캐릭터 분류는 조용히 실행한다. 큐 원인·캐시·현재 타깃·일상 진행률·검토 대기 배지/인박스를 정상 흐름에 노출하지 않는다. 자동 범위는 현재 자산의 가장 가까운 등록 시리즈이며, 비교 근거는 명시적 기준/추가 참조만 사용한다.
 - **과거 갱신:** 참조 저장만으로 과거 작업을 만들지 않는다. `과거 미분류 이미지 갱신`을 사용자가 직접 요청한 경우에만 durable 저우선순위 refresh를 만들고, 신규 자동 작업이 먼저 처리된다. 스키마 67은 이 refresh의 일시정지를 전역 자동분류 pause와 분리하여 새 이미지 자동분류를 막지 않는다.
@@ -698,6 +708,7 @@ Prerequisites: CATALOG-002A and CATALOG-007A; preferably complete reviewed group
 
 - **Status:** `PARTIAL` — 2026-09-09 Linux 개발 앱에서 신규 이미지의 즉시 자동 분류와 속도 개선을 사용자가 확인했다. Native incremental owner는 구현됐고 renderer-driven automatic scans는 비활성화됐다. 수동 분석 결과는 현재 시리즈의 자동분류 설정에 따라 native queue로 넘기므로 수동 분석의 자동 적용이 항상 꺼져 있다고 해석하지 않는다. 아래 성능·안전성 보완과 Windows 확인은 남아 있다.
 - **현재 계약 (2026-09-12):** 가장 가까운 등록 시리즈와 명시적 기준/추가 참조만 사용한다. 참조 저장은 신규 이미지에 적용하며 과거 미분류 갱신은 사용자 요청으로만 만든다. 정상 UI에는 routine 검토 인박스/큐 상세를 다시 노출하지 않는다. 아래 2026-09-09 계약·구현·검증 설명은 당시 기록이며 이 현재 계약이 우선한다.
+- **갱신 범위 보완 (2026-09-13):** CHAR-AUTO-005는 명시적 요청 시 작업 이력 없는 적격 미분류도 기존 refresh item에 스냅샷으로 담고 32장씩 공급한다. 새 수집 우선순위와 명시적 시작 조건은 유지한다.
 - **Contract:** [Steady-state implementation review](../research/character-autotag-steady-state-review-20260909.md). Migrations 0050–0051 provide durable jobs/predictions, claim fencing, source/work generations, pause state, and bounded reconsideration cursors. Existing historical images are not automatically seeded.
 - **Implemented:** native ingestion/classification/restore/similarity events enqueue jobs; target, series, hierarchy, manual learning and reference-source changes schedule bounded reconsideration of recorded unresolved work. One shared Python process serves manual and automatic work, retaining one query's features and up to 32 reference bundles. Complete candidate results publish atomically with conservative decisions, optional series move and job completion. Automatic decisions do not feed learned references or recursively enqueue their own moves.
 - **Review behavior:** manual scans use the selected character; automatic completion does not start a scan or reset review selection. Durable evidence remains reviewable after restart, with explicit refresh for new results. Pause takes effect after the current image; transient failures retry up to three attempts and permanent failures remain visible in review.
@@ -888,14 +899,15 @@ Status: `DONE` — 구현 후 2026-09-10 사용자 확인으로 완료 처리. �
 
 ## CHAR-UI-009 — 분류에 영향을 주지 않는 캐릭터 그룹
 
-Status: `PARTIAL` — 기본 표시 그룹 생성·편집에 더해 2026-09-10 사이드바 `시리즈 → 그룹 → 캐릭터` 계층, 멤버 대표 이미지 합성 그룹 카드, 그룹 멤버 캐릭터 탐색과 중복 제거된 에셋 합집합 갤러리까지 구현됐다. 분류·인식·재분석 범위는 바꾸지 않는다. 네이티브 실사용/시각 확인과 선택적 사용자 지정 그룹 키비주얼은 남아 있다. 실제 시리즈 이동과 구분한다.
+Status: `PARTIAL` — 기본 표시 그룹 생성·편집, 사이드바 `시리즈 → 그룹 → 캐릭터` 계층, 모자이크 카드와 중복 제거된 에셋 합집합 갤러리에 더해 2026-09-13 빈 그룹 자동 해제까지 구현됐다(`dd2baa2`). 그룹 편집 자체는 분류·인식·재분석 범위를 바꾸지 않는다. 네이티브 실사용/시각 확인과 선택적 사용자 지정 그룹 키비주얼은 남아 있다. 실제 시리즈 이동은 CHAR-UI-011이 소유한다.
 
 - **사용자 예시:** `버튜버` 시리즈 안의 `노엘`, `토와`를 `홀로라이브`라는 가벼운 표시용 그룹으로 감싼다. 두 캐릭터의 실제 소속 시리즈와 분석 범위는 계속 `버튜버`다.
 - 그룹 생성·이름 변경·캐릭터 넣기/빼기·해제를 제공한다. 그룹을 열면 포함된 캐릭터 목록을 보여준다.
 - 그룹 변경은 이미지 분류/원본 위치, 캐릭터의 시리즈 소속, 기준·추가 참조, 분석 캐시와 검토 근거에 영향을 주지 않는다. 재분석 예약이나 검토 무효화를 발생시키지 않는다.
 - 그룹 삭제는 껍질만 제거하고 캐릭터를 시리즈 바로 아래로 돌려놓는다. CHAR-UI-008의 캐릭터 자체 삭제/일반 폴더 전환과 명확히 구별한다.
 - 초기 방향은 같은 시리즈 내 한 단계 그룹이며 중첩 그룹·복수 그룹 소속은 범위에서 제외한다. 일반 분류 폴더와 혼동하지 않도록 `캐릭터 그룹`/`그룹으로 묶기` 등의 이름을 사용한다.
-- **실제 시리즈 이동은 별도 미확정 사항:** 후보 범위, 참조 자격, 연결 이미지 분류, 여러 캐릭터 공유 이미지, 진행 중 분석/검토 무효화에 영향을 준다. 이번 그룹 요구를 실제 시리즈 이동 기능 구현 승인으로 해석하지 않는다.
+- **빈 그룹 자동 해제 (2026-09-13):** 마지막 캐릭터가 이동·삭제되거나 그룹 편집에서 빠지면 그룹도 자동 해제된다. 스키마 72는 기존 빈 그룹을 정리하고 마지막 멤버 삭제 trigger를 둔다. 일반 멤버 교체 때는 새 멤버를 먼저 넣어 그룹이 중간에 삭제되지 않게 한다. 새 빈 그룹 생성은 막고, 활성 그룹의 마지막 멤버를 해제하면 시리즈로 돌아간다. 자산·캐릭터 삭제나 분석 예약은 하지 않는다. 그룹 교체·마지막 멤버 삭제·71→72 업그레이드와 활성 그룹 해제 회귀 통과; 네이티브 확인은 남음.
+- **실제 시리즈 이동:** 별도 사용자 요청으로 구현됐으며 CHAR-UI-011의 참조·공유 자료·진행 중 작업 보호 계약을 따른다. 표시용 그룹 편집과 실제 시리즈 이동은 계속 구분한다.
 - 위 전환·참조 관리·그룹 기능은 Windows/Linux에서 같은 의미로 동작하도록 설계한다. 이번 기록은 구현·마이그레이션·파일 이동·삭제·커밋·푸시 실행 승인이 아니다.
 
 ### 추가 방향 — 그룹을 실제 탐색 단위처럼 표현 (2026-09-09)
@@ -924,15 +936,43 @@ Status: `VERIFY` — 2026-09-10 수동 캐릭터·명시적 분류 종료·오�
 - **오리지널 캐릭터 경계:** 사용자는 `게임 / 만화 / 기타`와 별도로 최상위 `오리지널` 일반 분류를 만들고 OC별 일반 폴더로 관리할 계획이다. 오리지널 트리는 기본적으로 캐릭터 비교 시스템의 대상이 아니며, 자동 비교가 필요해질 때만 명시적으로 시리즈/CharacterTarget에 등록한다.
 - 시리즈 미분류 선택 UX의 목표는 `기존 캐릭터 지정 / 새 수동 캐릭터 / 캐릭터 분류 제외` 세 경로를 빠르게 제공하는 것이다.
 
+## CHAR-UI-011 — 사이드바에서 캐릭터를 다른 시리즈로 이동
+
+Status: `VERIFY` — 사용자 요청으로 구현하고 `dd2baa2`를 `main`에 커밋·푸시했다(2026-09-13). 집중 검증은 통과했으며 실제 자료의 이동 조작과 Windows/Linux 네이티브 수용은 남아 있다.
+
+- **흐름:** 사이드바 캐릭터 우클릭 → `다른 시리즈로 이동…` → 등록된 대상 시리즈 선택 → 자료 수·공유 보관 위치 확인 → 이동. 시리즈 소속을 바꾸고 기존 그룹·일반 폴더 연결을 해제하며 새 위치로 탐색한다. 대상에 같은 이름의 다른 캐릭터가 있으면 거절한다.
+- **공유 자료 수정:** 마커스 이동이 비활성화된 원인은 히사베스·로렌츠와 공유하는 일반 이미지 4장을 대상 시리즈에 넣으면 다른 캐릭터 화면에서 숨겨지는 보호 조건이었다. 이제 기존 폴더가 모든 연결에 적합하면 유지하고, 그렇지 않으면 대상 시리즈 또는 모든 연결을 보존할 수 있는 가장 가까운 공통 상위 폴더에 둔다. 마커스/라플라스처럼 형제 시리즈의 공유 이미지는 리버스에 보관해 양쪽 캐릭터·그룹에서 계속 표시한다. 확인창은 대상 시리즈 이동 수와 공유 자료 위치·이동 수를 나눠 표시한다.
+- **보존·거절:** 같은 캐릭터 ID, 기준/추가 참조, 대표 이미지, 수동 판단·제외 이력과 원본 파일을 보존한다. 어느 캐릭터의 참조든 소속 시리즈 범위 안에 남아야 하며, 모두 보존할 위치가 없으면 이동을 막는다. 오래된 미리보기는 재확인을 요구하고 적용은 한 트랜잭션으로 처리한다.
+- **분석 경계:** 미분류 스캔/과거 갱신/새 자동 작업을 시작하지 않는다. 이동 캐릭터의 기존 과거 갱신을 종료하고, 재배치 자산의 오래된 작업·claim과 해당 캐릭터의 오래된 명시적 스캔을 무효화한다. 대상 시리즈 자동 분류 설정, 명시적 제외와 무관한 대기 작업은 보존한다. 비게 된 그룹은 CHAR-UI-009에 따라 해제한다.
+- **증거:** `_tools/app/src-tauri/src/library/character_series_move.rs`, `character_series_move_tests.rs`, `_tools/app/src/characters/CharacterSeriesMove.tsx` 및 테스트. Rust 10개·확인창 5개와 타입 검사 통과. 개발 바이너리 재빌드와 Vite의 변경 코드 제공은 확인했으나 실제 앱 내 이동 성공 증거로 취급하지 않는다.
+
+## CHAR-UI-012 — 시리즈 일반 폴더 탐색과 폴더 단위 분류 제외
+
+Status: `VERIFY` — `5d39518`에 구현·커밋됐다. 현재 코드와 [PC 화면 계약](../agents/pc-design-reference.md)을 대조했으며 실제 Windows/Linux 탐색·제외/복구 수용은 남아 있다.
+
+- 시리즈 개요에서 일반 직계 하위 폴더를 캐릭터·그룹 카드와 함께 표시한다. 폴더 아이콘/하위 썸네일을 사용하며 전체 카드가 최대 두 행과 같은 페이지 번호를 공유한다. 캐릭터와 연결된 일반 폴더는 별도 카드로 중복 표시하지 않는다.
+- 일반 폴더 더보기에서 `캐릭터 분류에서 제외` / `캐릭터 분류에 다시 포함`을 제공한다. 스키마 71의 폴더 제외는 하위에 상속되고, 전체 갤러리의 자산은 보존하면서 미분류·자동 인식·참조 후보에서 제외한다. 이미 실행 중인 해당 범위의 오래된 작업은 무효화한다.
+- 일반 자산/캐릭터 갤러리의 공통 우클릭 메뉴는 `출처 복사`·앨범 추가를 공유한다. 여러 선택 자료의 출처는 중복을 제거해 줄바꿈으로 복사하며 출처가 없으면 비활성화한다. 기존 우클릭 즐겨찾기·폴더 이동·선택 전체/해제 항목을 정리했다. 캐릭터 자체의 시리즈 이동 메뉴는 CHAR-UI-011이다.
+- Rust 폴더/제외·업그레이드 회귀와 SeriesBrowser/CharacterManagement/AssetBrowser 프런트 회귀가 소스에 있다. 이번 문서 갱신은 해당 테스트를 새로 실행하거나 기존 네이티브 검증 범위를 넓힌 기록이 아니다.
+
+## CHAR-AUTO-005 — 명시적 갱신으로 기존 미분류 전체 확인
+
+Status: `VERIFY` — 전체 후보 발견·묶음 공급·진행 표시 구현(2026-09-13). 실제 라이브러리 전체 실행 및 Windows/Linux 네이티브 수용은 남음.
+
+- **동작:** 사용자가 갱신하면 해당 캐릭터의 등록 시리즈와 하위 일반 폴더 안에서 작업/admission 이력과 관계없이 적격 미분류의 ID·근거 포인터를 기존 refresh item에 확정한다. 상위 일반 폴더·형제 폴더·별도 등록된 하위 시리즈는 포함하지 않는다. 700장이 적격이면 즉시 전체 700장으로 안내한다. 원본 읽기·추론·모든 job 생성은 요청 시 하지 않고 기존 worker가 32장씩 공급한다. 참조 저장·캐릭터 등록·시리즈 이동은 갱신을 시작하지 않는다.
+- **보호:** 폴더/자산 제외, 오리지널·휴지통·비이미지, 참조, 기존 수동 판단/분류 완료, 가장 가까운 시리즈 경계를 보존한다. 공급·claim 때 다시 검증하며 유효한 근거 재사용과 최종 저장 검증은 유지한다.
+- **복구:** 동일 참조의 진행 중 요청은 합쳐지고 확정한 목록은 재시작·일시 정지·이후 수집에도 유지된다. 새 수집을 먼저 처리한다. 이전 cursor 요청을 자동으로 전체 갱신으로 확대하지 않는다. 이전 구현에서 예약된 상위 폴더 자료도 공급·분석 전 재검증에서 건너뛴다. 새 스키마는 없다.
+- **범위 오류 수정 (2026-09-13):** 백합/카구야 갱신에 상위 만화 폴더 자료가 포함된다는 사용자 보고로, 신규 수집용 상위 폴더 추론을 명시적 과거 갱신에도 적용했던 오류를 수정했다. 요청·이전 cursor 발견·공급·분석 전 모두 같은 시리즈 subtree 경계를 사용한다. 신규 수집의 상위 폴더 추론은 유지한다. 수정 후 갱신 회귀 30 passed / 1 ignored, 신규 수집 상위 폴더 추론 회귀 2 passed / 1 ignored. 실행 중인 네이티브 앱 적용·운영 자료 재분석은 확인하거나 실행하지 않았다.
+- **검증:** 이력 없는 700장 전부를 중복 없이 32장씩 공급하는 DB/큐 회귀, 제외·수동 판단·참조 보호, 재시작·이후 유입·일시 정지·새 수집 우선·진행 수량 회귀를 추가했다. 캐릭터 Rust 회귀 130 passed / 15 ignored; 동시 컬렉션 migration 73과 충돌한 기존 스키마 재개 테스트 2건은 제외했다. 마지막 범위 보호 보완을 포함한 refresh 검사 28 passed / 1 ignored, 프런트 4파일 46 passed, TypeScript 검사 통과. 700장 검사는 실제 모델 추론/운영 처리량 측정이 아니다.
+
 ## CHAR-AUTO-002 — 전체 진행률과 중복 재분석 성능/진단
 
-Status: `SUPERSEDED / DIAGNOSTIC ONLY` — 2026-09-12 quiet workflow가 사용자용 전체 진행률·큐 세부정보 요구를 대체했다. provenance/중복 generation 자료는 내부 진단 기록으로 보존하지만 정상 UI에 scheduler detail이나 거짓 백분율을 다시 추가하지 않는다.
+Status: `VERIFY` — 2026-09-13 사용자 요청에 따라 작업 센터에 현재 캐릭터·남은 수량 구현. 2026-09-12의 generic 표시 제한은 이 범위에서 대체한다. 네이티브 창의 실사용 확인은 남음.
 
-- **현재 UI 문제:** `이미지 후보 비교 · 1/1`은 전체 후보 이미지 진행률이 아니다. native engine의 `total/compared`는 현재 에셋 한 장을 몇 ready target과 비교했는지 나타내므로, 마커스 한 명뿐인 시리즈에서는 수천 장이 남아도 계속 `1/1`이 될 수 있다.
-- `character_incremental_status`는 `pending`, 누적 `completed`, 누적 `confirmed`, 현재 `activeAssetId`, 현재 이미지의 `total/compared`를 이미 반환하지만 프론트는 현재 이미지 비교 수만 진행 표시로 사용한다. `completed/confirmed`는 전역 누적값이고 이번 재분석 작업의 분모/분자로 직접 사용할 수 없다.
-- reconsideration은 한 시리즈의 기록된 미해결 에셋을 한꺼번에 pending으로 넣지 않고 cursor를 따라 **32장씩** 공급한다. 따라서 현재 `pending` 개수도 전체 남은 작업 수가 아니다.
-- **목표 진행 표시:** 작업/시리즈/재검토 revision 단위의 `전체 대상 / 처리 완료 / 남음 / 현재 큐 / 자동 확정 / 검토 필요 / 실패`를 노출한다. `현재 이미지 · 캐릭터 비교 1/1`은 보조 정보로만 남긴다. 전체 대상 수가 아직 확정되지 않은 단계라면 그 사실을 명시하고 거짓 백분율을 만들지 않는다.
-- 작업 식별자 또는 동등한 durable scope를 두어 앱 재시작·32장 보충·pause/resume 뒤에도 같은 진행률을 이어갈 수 있게 한다. target/reference/series 변경으로 작업 범위가 무효화되면 새 revision으로 명확히 전환한다.
+- **현재 표시:** 실제 비교 중인 `시리즈 / 캐릭터`와 갱신 요청별 `처리 / 전체 · 남음 · 실패`를 보여준다. 요청한 캐릭터와 현재 경쟁 비교 중인 다른 캐릭터를 혼동하지 않는다. 새 이미지/수동 분석의 대기·처리 중 수는 따로 표시한다.
+- **분모:** 이번 요청의 durable snapshot만 사용한다. 전역 누적 완료 수, 현재 한 이미지의 캐릭터 비교 수, 공급된 32장 큐를 전체 작업량으로 표시하지 않는다. 이전 cursor 요청의 전체가 미확정이면 `대상 확인 중`으로 표시한다.
+- **복구:** 실패한 갱신은 이름·수량·재요청 안내를 유지하고, runtime 오류도 남은 수량을 가리지 않는다. 과거 갱신 pause/resume는 새 이미지 분석을 멈추지 않는다.
+- **검증:** CHAR-AUTO-005와 함께 Rust 상태 집계·프런트 표시/제어를 검증했다. 아래 중복 분석 성능 기록은 과거 진단 자료이며 이번 UI 변경으로 해결됐다고 주장하지 않는다.
 
 ### 2026-09-09 실제 실행 관측 — Reverse / Marcus
 
@@ -1358,7 +1398,7 @@ User decision (2026-09-06): defer changes to Asset Repository scrolling. Of the 
 
 ## PERF-NAV-001 — 폴더·탭 전환과 이미지·표지 표시 지연
 
-Status: `VERIFY` — 2026-09-12 로컬 작업 트리에 구현 및 집중 검증 완료. Windows/Linux 네이티브 클릭→이미지 표시 시간의 수용 확인은 남아 있다. 커밋·배포 완료를 뜻하지 않는다.
+Status: `VERIFY` — 2026-09-12 구현 및 집중 검증 완료 후 `7ac551a`에 커밋됐고, 2026-09-13 원격 `main`에 포함됨을 확인했다. Windows/Linux 네이티브 클릭→이미지 표시 시간의 수용 확인은 남아 있다. 커밋·푸시를 배포나 네이티브 수용 완료로 해석하지 않는다.
 
 - **반영:** 분류 역방향 인덱스(스키마 70)와 작은 범위의 ID 조회; 큰 폴더는 기존 정렬 조회 유지. 작가별 집계를 수정해 여러 작가가 한 행으로 합쳐지는 오류와 반복 조회를 제거했다. 폴더 전환의 전역 날짜 집계 중복, masonry 날짜 포맷 반복, 표지별 고정 대기를 줄였다. 탭 재방문은 최대 8개 범위·각 200행의 비활성 snapshot을 표시한 뒤 최신 응답으로 교체하고, 3D 표지는 완성 전 원본을 표시한다.
 - **증거:** [실행·측정 기록](../performance/desktop-navigation-20260912.md). 합성 30만 장 중 20장 폴더 page+count 약 294→0.20ms, 5만 장/작가 500명 집계 2,403→147ms. 실제 클릭 지연이나 운영 라이브러리 처리량으로 해석하지 않는다. 관련 Rust query 31개·DB 44개와 집중 프런트엔드·타입 검증 통과 기록이 있다.
@@ -1642,6 +1682,8 @@ Required concepts before implementation:
 
 # Extension follow-up — 2026-09-07
 
+**현재 상태 보정 (2026-09-13):** EXT-005~010의 DONE은 당시 사용자 수용 기록이다. 목록/녹색 임시저장 버튼/list-only 같은 아래 과거 표현은 현재 화면 계약이 아니다. 활성 `extension-list/`는 3.0.0.13 반원 메뉴이며 최신 변경과 남은 수용은 EXT-011/012 및 [현재 확장 README](../../extension-list/README.md)가 소유한다. `extension/`은 계속 수정하지 않는 레거시 구현이다.
+
 ## EXT-005 — Deep list navigation and folder ordering
 
 Status: `DONE`
@@ -1691,6 +1733,8 @@ Status: `DONE` — 2026-09-10 사용자 확인. GIF has an explicit `animated_gi
 Status: `DONE` — 2026-09-10 사용자 확인으로 목록형 확장 전환을 완료 처리. The earlier cross-device acceptance gate is superseded by this completion confirmation. 2026-09-09 local implementation includes the separate `extension-list/` package, server-issued scoped pairing/profile sync, a local QR pairing surface plus scan-to-pair bridge for PC → Galaxy Tab setup, list-native ordering/pins, minimal invocation state machine, server-first capture, and explicit GIF transport into the PC library. Focused extension tests, TypeScript and Rust GIF ingestion tests pass locally. The server portion is deployed to `laku-tokyo`: production `app.py` SHA-256 `4428342f29fc2ea978f06fb903202f076a6b0dc12f8578f2bcefcff5e6f966dc`, `capture_store.py` SHA-256 `d465e14f3d5fefe637defa48f05ff26184ed5b33be812f647d1c7ffce66a31a3`; pre-deploy code plus a 12,804,096-byte SQLite online backup are retained under `backups/extension-list-20260909-1615/` with `quick_check=ok`. Post-restart service is active with `NRestarts=0`, raw and Tailscale HTTPS health return 200, 489/489 existing captures were preserved, GIF/profile schemas are active, and an HTTPS pairing -> bootstrap -> revoke canary passed without exposing credentials. The VPS candidate's full `tests.test_capture_api` suite passed 49 tests in the production venv. The existing `extension/` remains available as the preserved fallback/reference implementation.
 
 ### Product goal
+
+아래 EXT-010의 목표·단계·완료 기준은 2026-09-09 목록형 전환 당시 기록이다. 서버 소유 분류/프로필·페어링·저장 계약은 유지하지만, 반원/슬롯을 금지하는 옛 시각·입력 요구는 이후 구현된 EXT-011이 대체한다. 완료된 list-only 전환을 새 실행 계획으로 다시 잡지 않는다.
 
 Create a **separate list-only collector extension** while leaving the current `extension/` implementation intact as the working reference/fallback. The new extension is not a radial mode with the donut hidden: it is a clean client whose normal job is only to detect media, open the classification list, submit a save, and reflect Lakomics-owned state.
 
@@ -2011,6 +2055,24 @@ Browser/device acceptance is required for pointer/touch behavior and Android int
 The work is complete only when the new package can be installed on a clean browser profile, paired with one Lakomics-generated link, and used without radial/local-tree/PC-remote/backup configuration; portable list state syncs automatically; normal saves use the unified server route; EXT-008 and EXT-009 have reproductions plus passing fixes; and the old extension remains untouched and available as fallback.
 
 ---
+
+## EXT-011 — 반원 수집 메뉴와 PC 브라우저 연결
+
+Status: `VERIFY` — `cd345e3`에 구현·커밋됐고 현재 `main`에 포함돼 있다. 이전 EXT-010 완료는 유지하되 새 메뉴의 PC/태블릿 실제 입력·저장·페어링 수용은 이번 코드/문서 대조로 완료 처리하지 않는다.
+
+- **메뉴:** 화면 좌우에 붙는 반원, 루트 6슬롯·하위 5폴더+페이지 슬롯, 한 번 탭 선택·두 번 탭 진입·중앙 저장을 사용한다. 데스크톱 누른 채 드래그/터치 길게 누르기로 열고, 열기 손가락을 떼는 동작이 선택·저장으로 이어지지 않게 한다. 임시저장/뒤로는 중앙 위쪽을 공유한다.
+- **설정:** 실제 메뉴와 같은 미리보기로 슬롯 순서를 편집하고 폴더 숨김/복구를 제공한다. 핀은 첫 화면에서만 바로가기로 노출한다. 분류·핀·순서는 기존 서버 계약을 유지하고 빈 슬롯 이력·숨김은 해당 브라우저의 로컬 설정이다.
+- **연결:** PC 앱 설정에서 `PC 확장 프로그램 연결` 링크를 복사해 브라우저에 붙여 넣는다. 태블릿 QR 연결은 별도로 유지하며 기존 페어링 API를 재사용한다.
+- **증거/남은 확인:** `arc-collector.js`, `profile-store.js`, `ExtensionPairingQr.tsx`와 관련 DOM/입력/설정 회귀가 존재한다. 실제 Windows/Linux 브라우저와 Titanium/Galaxy에서 첫 열기·손 떼기·빠른 뒤로·페이지·숨김/복구·저장·연결 유지 확인은 별도이며, 이 갱신에서 서버 배포나 기기 검증을 실행하지 않았다.
+
+## EXT-012 — X 번역 단순화·공유 게시물 저장·PC 임시저장
+
+Status: `VERIFY` — `df89e61`에 구현·커밋됐고 현재 확장 소스 버전은 3.0.0.13이다. 코드와 관련 회귀의 존재를 확인했으며 실제 X·OpenRouter 응답, PC 다운로드와 Android 인계의 최신 실사용 수용은 미확인이다.
+
+- **번역:** OpenRouter `google/gemini-2.5-flash-lite` 하나로 한국어 자동 번역한다. API 키·자동 on/off·캐시 비우기로 설정을 줄이고 기존 키/자동 설정을 로컬 이전한다. 키는 콘텐츠 스크립트나 서버 프로필에 전달하지 않는다. 인용문·링크·줄바꿈 보존, 탭 간 제한된 캐시, off/캐시 삭제 뒤 진행 중 결과 차단을 유지한다.
+- **X 저장:** 인용 게시물의 이미지·영상 포스터가 원 게시물과 섞이지 않도록 정확한 게시물 ID를 보존한다. 영구 저장 성공 후 자동 좋아요 설정을 따르며 이미 좋아요한 글은 해제하지 않는다. 제어 버튼이 없거나 확인되지 않으면 같은 게시물 ID에 제한된 FavoriteTweet 세션 요청을 사용하고 좋아요 실패는 저장 성공과 따로 알린다. X 내부 API 변화는 실제 검증이 필요한 외부 의존성이다.
+- **PC 임시저장:** 브라우저 기본 다운로드 위치에 확인창 없이 저장을 시작하고 동명 파일은 이름을 바꾼다. Desktop 위치는 사용자가 브라우저 설정에서 선택한다. 다운로드 시작 안내를 완료로 표시하지 않으며 Android의 기존 임시 앨범 경로는 유지한다.
+- **증거/남은 확인:** `translate-service.js`, `x-translate.js`, `x-source.js`, `content.js`, `background.js`와 `translation.test.mjs`, `x-actions.test.mjs`, `temporary-download.test.mjs`. 새 스크립트/다운로드 권한은 확장과 페이지를 다시 로드해야 적용된다. 테스트 존재와 README 설명을 실제 서비스 성공 증거로 취급하지 않는다.
 
 # Works / Collection presentation lane
 
@@ -2358,14 +2420,14 @@ These are detailed in active sections above:
 - CLOUD-UI-001 — `VERIFY`
 - NOTE-001 — NOTE-001A server `DONE`; NOTE-001B desktop `PARTIAL`
 - STATS-001 — `PARTIAL` split inventory/activity
-- IDEA-001 — `PARTIAL`; IDEA-001A `DONE`, IDEA-001B `VERIFY` (2026-09-12 implementation/fixture checkpoint supersedes the older TODO)
 - LONG-001 — `PARTIAL` implementation complete; provider/native/product acceptance remains
 - LONG-002 — LONG-002A `DONE`; LONG-002B `PARTIAL` only for native visual acceptance
 - LONG-003 — `TODO` in audit, intentionally `HOLD` here until security gate is approved
 - LONG-004 — `MERGE CANDIDATE` consuming LONG-002 renderer
 
 Later completions superseding the audit: CLOUD-006, BUG-013, CATALOG-003/004/005/006,
-CATALOG-007A/B, LONG-002A, WORKS-002, MOBILE-001/002/004/005/006 and EXT-005/006/007/008/009/010 are DONE.
+CATALOG-007A/B, IDEA-001/001A/001B, LONG-002A, WORKS-002, MOBILE-001/002/004/005/006 and EXT-005/006/007/008/009/010 are DONE.
+IDEA-001B was user-accepted on 2026-09-12; its Windows acceptance remains unverified without reopening the completed product scope. New extension follow-ups EXT-011/012 remain VERIFY.
 MOBILE-007/008 are the next catalog implementation sequence; MOBILE-003 remains HOLD.
 
 ## OBSOLETE / incident-only
@@ -2419,21 +2481,22 @@ This is a dependency map, not a list of unfinished tasks: consult each active it
 This is the authoritative dependency order, not a prohibition on parallel work in independent subsystems. In particular, Collection presentation and pure Mobile layout/state work may proceed in parallel once worktree ownership is clear.
 
 Completed prerequisites: CLOUD-006, BUG-013, CATALOG-002A/003/004/005/006/007A/007B,
-LONG-002A and WORKS-002. Do not schedule them again.
+IDEA-001/001B, LONG-002A and WORKS-002. Do not schedule them again.
+
+2026-09-13 character/extension follow-ups: CHAR-UI-009/011/012 and EXT-011/012 retain their native acceptance gates. CHAR-AUTO-005 full historical unclassified discovery and CHAR-AUTO-002 work-center progress are implemented with native acceptance pending. These items have no prerequisite on the independent lanes below.
 
 Remaining work, grouped by dependency rather than one mandatory serial queue:
 
 1. **CLOUD-UI-001 and STATS-001A/B — native acceptance** of already implemented UI.
-2. **IDEA-001B — native/product acceptance of lightweight Revisit themes.** Creator/date/color implementation and fixture checks are complete; actual Windows/Linux color relevance and viewer acceptance remain.
-3. **NOTE-001B — finish desktop Notes acceptance and documented remaining work.** NOTE-001A revision-safe server is DONE; do not reimplement it.
-4. **CATALOG-002B — optional Heliotrope coexistence.** Not a prerequisite for the
+2. **NOTE-001B — finish desktop Notes acceptance and documented remaining work.** NOTE-001A revision-safe server is DONE; do not reimplement it.
+3. **CATALOG-002B — optional Heliotrope coexistence.** Not a prerequisite for the
    existing-provider Mobile catalog lane.
-5. **WORKS-001 — remaining related-work/richer Film presentation.** TV/season/episode
+4. **WORKS-001 — remaining related-work/richer Film presentation.** TV/season/episode
    structure already exists; do not restart that foundation.
-6. **LONG-001 / LONG-002B acceptance → LONG-004 — AV relations/cover roles and focused
+5. **LONG-001 / LONG-002B acceptance → LONG-004 — AV relations/cover roles and focused
    full-cover interaction are implemented; finish real-media/native acceptance before optional
    Display mode using the same renderer.**
-7. **LONG-003 — HOLD:** threat model/format/recovery approval before encrypted
+6. **LONG-003 — HOLD:** threat model/format/recovery approval before encrypted
    metadata/images, recovery/key rotation and later video chunks.
 
 ## Separately promoted Similarity order

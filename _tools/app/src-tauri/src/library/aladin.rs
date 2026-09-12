@@ -2,6 +2,7 @@ use std::{
     io::Read,
     net::{SocketAddr, TcpStream},
     time::Duration,
+    sync::LazyLock,
 };
 
 use regex::Regex;
@@ -98,6 +99,16 @@ fn prioritize_reachable_address(
 }
 
 pub(crate) fn parse_volume_product(title: &str) -> Option<ParsedVolumeProduct> {
+    static DECIMAL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\d+\.\d+").unwrap());
+    static EDITION_SUFFIX: LazyLock<Regex> = LazyLock::new(|| Regex::new(
+        r"(?i)\s*(?:[-–—]\s*)?(?:\([^)]*(?:특별판|한정판|초판)[^)]*\)|\[[^\]]*(?:특별판|한정판|초판)[^\]]*\]|(?:초판\s*)?(?:한정판|특별판))\s*$",
+    ).unwrap());
+    static COMPLETION_SUFFIX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s*[\(\[]\s*완결\s*[\)\]]\s*$").unwrap());
+    static VOLUME_PATTERNS: LazyLock<[Regex; 3]> = LazyLock::new(|| [
+        r"(?i)(?:\s|^)(?:제\s*)?(\d+)\s*권\s*$",
+        r"(?i)(?:\s|^)(?:vol(?:ume)?\.?)\s*(\d+)\s*$",
+        r"(?:\s|-)(\d+)\s*$",
+    ].map(|pattern| Regex::new(pattern).unwrap()));
     let lower = title.to_ascii_lowercase();
     if [
         "세트",
@@ -116,25 +127,14 @@ pub(crate) fn parse_volume_product(title: &str) -> Option<ParsedVolumeProduct> {
     ]
     .iter()
     .any(|term| lower.contains(term))
-        || Regex::new(r"\d+\.\d+").unwrap().is_match(title)
+        || DECIMAL.is_match(title)
     {
         return None;
     }
 
-    let edition_suffix = Regex::new(
-        r"(?i)\s*(?:[-–—]\s*)?(?:\([^)]*(?:특별판|한정판|초판)[^)]*\)|\[[^\]]*(?:특별판|한정판|초판)[^\]]*\]|(?:초판\s*)?(?:한정판|특별판))\s*$",
-    )
-    .unwrap();
-    let completion_suffix = Regex::new(r"\s*[\(\[]\s*완결\s*[\)\]]\s*$").unwrap();
-    let title = completion_suffix.replace(title, "");
-    let volume_title = edition_suffix.replace(&title, "");
-
-    for pattern in [
-        r"(?i)(?:\s|^)(?:제\s*)?(\d+)\s*권\s*$",
-        r"(?i)(?:\s|^)(?:vol(?:ume)?\.?)\s*(\d+)\s*$",
-        r"(?:\s|-)(\d+)\s*$",
-    ] {
-        let regex = Regex::new(pattern).unwrap();
+    let title = COMPLETION_SUFFIX.replace(title, "");
+    let volume_title = EDITION_SUFFIX.replace(&title, "");
+    for regex in VOLUME_PATTERNS.iter() {
         let Some(captures) = regex.captures(&volume_title) else {
             continue;
         };

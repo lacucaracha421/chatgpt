@@ -2,6 +2,24 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { commandErrorMessage } from "../library/errorMessage";
 
+export type CharacterActiveWork = {
+  active: boolean;
+  seriesName: string | null;
+  targetName: string | null;
+  cause: string | null;
+  freshRemaining: number;
+};
+export type CharacterRefreshProgress = {
+  targetId: string;
+  targetName: string;
+  seriesName: string;
+  state: "pending" | "running" | "failed" | "completed";
+  total: number | null;
+  processed: number;
+  remaining: number;
+  failed: number;
+};
+
 export type IncrementalStatus = {
   running: boolean;
   workActive: boolean;
@@ -10,6 +28,8 @@ export type IncrementalStatus = {
   confirmed: number;
   historyRefreshActive: boolean;
   persistentError: string | null;
+  activeWork?: CharacterActiveWork;
+  historyRefreshes?: CharacterRefreshProgress[];
 };
 
 export type AutomaticCharacterApi = {
@@ -23,6 +43,8 @@ export type QuietCharacterAutomationState = {
   persistentError: string | null;
   historyRefreshActive: boolean;
   paused: boolean;
+  activeWork?: CharacterActiveWork | null;
+  historyRefreshes?: CharacterRefreshProgress[];
   dismissError(): void;
   pauseHistoryRefresh(): void;
   resumeHistoryRefresh(): void;
@@ -44,6 +66,8 @@ export function useCharacterAutomation(
   const [persistentError, setPersistentError] = useState<string | null>(null);
   const [historyRefreshActive, setHistoryRefreshActive] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [activeWork, setActiveWork] = useState<CharacterActiveWork | null>(null);
+  const [historyRefreshes, setHistoryRefreshes] = useState<CharacterRefreshProgress[]>([]);
   const latest = useRef(onChanged);
   latest.current = onChanged;
 
@@ -72,7 +96,9 @@ export function useCharacterAutomation(
         if (!active) return;
         setPaused(status.paused);
         setHistoryRefreshActive(status.historyRefreshActive);
-        interval = status.workActive && !status.paused ? 1000 : 5000;
+        setActiveWork(status.activeWork ?? null);
+        setHistoryRefreshes(status.historyRefreshes ?? []);
+        interval = status.workActive ? 1000 : 5000;
         if (completed !== null && completed !== status.completed) {
           latest.current(confirmed !== status.confirmed);
           setRevision((current) => current + 1);
@@ -134,6 +160,8 @@ export function useCharacterAutomation(
     persistentError,
     historyRefreshActive,
     paused,
+    activeWork,
+    historyRefreshes,
     dismissError: () => setPersistentError(null),
     pauseHistoryRefresh: () => control(true),
     resumeHistoryRefresh: () => control(false),

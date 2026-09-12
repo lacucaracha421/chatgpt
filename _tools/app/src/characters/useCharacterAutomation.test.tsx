@@ -17,7 +17,7 @@ const idle = {
   persistentError: null,
 } satisfies IncrementalStatus;
 
-it("keeps normal background scheduler details out of the renderer contract", async () => {
+it("publishes current character and durable refresh totals for the work center", async () => {
   vi.useFakeTimers();
   const api: AutomaticCharacterApi = {
     status: vi.fn().mockResolvedValue({
@@ -26,6 +26,8 @@ it("keeps normal background scheduler details out of the renderer contract", asy
       activeAssetId: "image",
       pending: 12,
       activeSeriesName: "젠레스",
+      activeWork: { active: true, seriesName: "젠레스", targetName: "레미엘", cause: "ingestion", freshRemaining: 12 },
+      historyRefreshes: [{ targetId: "a", targetName: "레미엘", seriesName: "젠레스", state: "running", total: 700, processed: 32, remaining: 668, failed: 0 }],
     }),
     pause: vi.fn(),
   };
@@ -40,6 +42,8 @@ it("keeps normal background scheduler details out of the renderer contract", asy
   expect(result.current).not.toHaveProperty("progress");
   expect(result.current).not.toHaveProperty("queuePending");
   expect(result.current).not.toHaveProperty("activeSeriesName");
+  expect(result.current.activeWork?.targetName).toBe("레미엘");
+  expect(result.current.historyRefreshes?.[0]).toMatchObject({ total: 700, processed: 32, remaining: 668 });
 });
 
 it("publishes one revision per durable completion and does not cancel on navigation", async () => {

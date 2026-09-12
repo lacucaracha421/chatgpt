@@ -372,6 +372,10 @@ impl BookFlow<'_> {
             ignored: selected.candidate.ignored_count,
         };
         let mut release_event_count = 0;
+        let tracks_ownership = self.provider != "kakao" || transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM collection_ownership_tracking WHERE collection_id=?1)",
+                [&request.collection_id], |row| row.get::<_, bool>(0),
+            )?;
         for item in &selected.items {
             let existing = reconcile_source(
                 self.provider,
@@ -381,7 +385,7 @@ impl BookFlow<'_> {
                 checked_at,
                 &mut result,
             )?;
-            if let Some(previous_checked_at) = &subscription_last_checked_at {
+            if let Some(previous_checked_at) = subscription_last_checked_at.as_ref().filter(|_| tracks_ownership) {
                 for change in pending_release_changes(
                     existing.as_ref(),
                     item,
@@ -391,8 +395,8 @@ impl BookFlow<'_> {
                     transaction.execute(
                         "INSERT INTO release_watch_events (
                             id, collection_id, event_kind, volume_number,
-                            previous_value, current_value, detected_at, read_at
-                         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL)",
+                            previous_value, current_value, detected_at, read_at, provider
+                         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8)",
                         params![
                             uuid::Uuid::new_v4().to_string(),
                             request.collection_id,
@@ -401,6 +405,7 @@ impl BookFlow<'_> {
                             change.previous_value,
                             change.current_value,
                             checked_at,
+                            self.provider,
                         ],
                     )?;
                     release_event_count += 1;
@@ -1259,6 +1264,7 @@ mod tests {
             .unwrap();
         assert_eq!(provider, "kakao");
         assert!(library.take_unread_release_changes(&id).unwrap().is_empty());
+        library.set_owned_volume_count(&id, 0, 1).unwrap();
         let mut refreshed = newer;
         refreshed.push(item(
             "isbn13:new-2",
@@ -1279,4 +1285,26 @@ mod tests {
         library.set_release_watch_enabled(&id, false).unwrap();
         assert!(!library.get_release_watch_status(&id).unwrap().enabled);
     }
+    #[test]
+    fn kakao_refreshes_all_but_notifies_only_explicit_count_and_subscription() {
+        for (entered, enabled, expected) in [(false,false,0), (false,true,0), (true,false,0), (true,true,1)] {
+            let temp = tempfile::tempdir().unwrap();
+            let library = Library::open(temp.path()).unwrap();
+            let id = create_work(&library, "던전밥");
+            let initial = vec![item("isbn:one", "던전밥", 1, "A출판", Some("9781"), Some("2020-01-01"))];
+            library.book_flow("kakao").apply_aladin_items(request(&id, &initial), initial.clone(), Vec::new()).unwrap();
+            if enabled { library.set_release_watch_enabled(&id, true).unwrap(); }
+            if entered { library.set_owned_volume_count(&id, 0, 0).unwrap(); }
+            let mut updated = initial;
+            updated.push(item("isbn:two", "던전밥", 2, "A출판", Some("9782"), Some("2099-10-01")));
+            let result = library.book_flow("kakao").refresh_aladin_items_at(&id, updated.clone(), "2026-09-13T00:00:00Z").unwrap();
+            assert_eq!(result.sync_result.added, 1);
+            let inbox = library.list_release_inbox().unwrap();
+            assert_eq!(inbox.len(), expected, "entered={entered}, enabled={enabled}");
+            if expected > 0 { assert_eq!(inbox[0].provider, "kakao"); assert_eq!(inbox[0].event.current_value.as_deref(), Some("2099-10-01")); }
+            library.book_flow("kakao").refresh_aladin_items_at(&id, updated, "2026-09-14T00:00:00Z").unwrap();
+            assert_eq!(library.list_release_inbox().unwrap().len(), expected);
+        }
+    }
+
 }

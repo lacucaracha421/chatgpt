@@ -1,7 +1,8 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::Read,
-    time::Duration,
+    sync::OnceLock,
+    time::{Duration, Instant},
 };
 
 use serde::Deserialize;
@@ -196,7 +197,6 @@ pub(crate) fn parse_work_preview(
                 relationship.relationship_type == "manga" && relationship.id == result.manga_id
             })
         })
-        .take(COVER_LIMIT)
         .map(|cover| {
             validate_cover_identity(&result.manga_id, &cover.attributes.file_name)?;
             uuid::Uuid::parse_str(&cover.id).map_err(|_| LibraryError::InvalidMangaDexResponse)?;
@@ -270,9 +270,8 @@ pub(crate) fn search(query: &str) -> Result<Vec<MangaDexSearchResult>, LibraryEr
 
 pub(crate) fn fetch_work(manga_id: &str) -> Result<MangaDexFetchedWork, LibraryError> {
     let detail_url = detail_url(manga_id)?;
-    let covers_url = covers_url(manga_id)?;
     let detail_json = get_text(&detail_url, MAX_JSON_BYTES)?;
-    let covers_json = get_text(&covers_url, MAX_JSON_BYTES)?;
+    let covers_json = fetch_covers_with(manga_id, |url| get_text(url, MAX_JSON_BYTES))?;
     let preview = parse_work_preview(&detail_json, &covers_json)?;
     let detail: serde_json::Value =
         serde_json::from_str(&detail_json).map_err(|_| LibraryError::InvalidMangaDexResponse)?;
@@ -287,6 +286,52 @@ pub(crate) fn fetch_work(manga_id: &str) -> Result<MangaDexFetchedWork, LibraryE
         preview,
         snapshot_json,
     })
+}
+
+fn fetch_covers_with(
+    manga_id: &str,
+    mut fetch: impl FnMut(&Url) -> Result<String, LibraryError>,
+) -> Result<String, LibraryError> {
+    let mut data = Vec::new();
+    let started = Instant::now();
+    // A complete snapshot is needed to detect new volumes in long series.
+    // Bound work and reject partial responses instead of publishing truncation.
+    for page in 0..50 {
+        if started.elapsed() >= Duration::from_secs(60) {
+            return Err(LibraryError::MangaDexTimedOut);
+        }
+        let mut url = covers_url(manga_id)?;
+        url.query_pairs_mut()
+            .append_pair("offset", &(page * COVER_LIMIT).to_string());
+        let json = fetch(&url)?;
+        let response: serde_json::Value =
+            serde_json::from_str(&json).map_err(|_| LibraryError::InvalidMangaDexResponse)?;
+        if response["result"] != "ok" {
+            return Err(LibraryError::InvalidMangaDexResponse);
+        }
+        let items = response["data"]
+            .as_array()
+            .ok_or(LibraryError::InvalidMangaDexResponse)?;
+        let total = response["total"].as_u64();
+        if items.len() > COVER_LIMIT
+            || (items.is_empty() && total.is_some_and(|total| (data.len() as u64) < total))
+        {
+            return Err(LibraryError::InvalidMangaDexResponse);
+        }
+        data.extend(items.iter().cloned());
+        if total.is_some_and(|total| data.len() as u64 >= total)
+            || (total.is_none() && items.len() < COVER_LIMIT)
+        {
+            let result = serde_json::to_string(&serde_json::json!({"result":"ok","data":data}))
+                .map_err(|_| LibraryError::InvalidMangaDexResponse)?;
+            return if result.len() <= MAX_JSON_BYTES {
+                Ok(result)
+            } else {
+                Err(LibraryError::InvalidMangaDexResponse)
+            };
+        }
+    }
+    Err(LibraryError::InvalidMangaDexResponse)
 }
 
 pub(crate) fn cover_preview(manga_id: &str, file_name: &str) -> Result<RemoteImage, LibraryError> {
@@ -335,12 +380,24 @@ fn get_text(url: &Url, maximum_bytes: usize) -> Result<String, LibraryError> {
 }
 
 fn get_bytes(url: &Url, maximum_bytes: usize) -> Result<Vec<u8>, LibraryError> {
-    let config = ureq::Agent::config_builder()
-        .https_only(true)
-        .max_redirects(0)
-        .timeout_global(Some(REQUEST_TIMEOUT))
-        .build();
-    let agent: ureq::Agent = config.into();
+    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+    let agent = AGENT.get_or_init(|| {
+        ureq::Agent::config_builder()
+            .https_only(true)
+            .max_redirects(0)
+            .http_status_as_error(false)
+            .timeout_global(Some(REQUEST_TIMEOUT))
+            .build()
+            .into()
+    });
+    let endpoint = match url.path() {
+        "/cover" => "covers",
+        path if path.starts_with("/manga/") => "detail",
+        "/manga" => "search",
+        _ => "image",
+    };
+    let _request = (url.host_str() == Some("api.mangadex.org"))
+        .then(|| super::provider_requests::Request::start("mangadex"));
     let mut response = agent
         .get(url.as_str())
         .header(
@@ -348,7 +405,21 @@ fn get_bytes(url: &Url, maximum_bytes: usize) -> Result<Vec<u8>, LibraryError> {
             format!("Lakomics/{}", env!("CARGO_PKG_VERSION")),
         )
         .call()
-        .map_err(map_ureq_error)?;
+        .map_err(|error| {
+            super::provider_requests::record_failure(super::provider_requests::Failure::transport(
+                &error, endpoint,
+            ));
+            map_ureq_error(error)
+        })?;
+    if !response.status().is_success() {
+        let code = response.status().as_u16();
+        super::provider_requests::record_failure(super::provider_requests::Failure::http(
+            code,
+            response.headers(),
+            endpoint,
+        ));
+        return Err(map_status_code(code));
+    }
     let mut bytes = Vec::new();
     response
         .body_mut()
@@ -356,6 +427,14 @@ fn get_bytes(url: &Url, maximum_bytes: usize) -> Result<Vec<u8>, LibraryError> {
         .take((maximum_bytes + 1) as u64)
         .read_to_end(&mut bytes)
         .map_err(|error| {
+            super::provider_requests::record_failure(super::provider_requests::Failure::new(
+                if error.kind() == std::io::ErrorKind::TimedOut {
+                    "timeout"
+                } else {
+                    "body"
+                },
+                endpoint,
+            ));
             if error.kind() == std::io::ErrorKind::TimedOut {
                 LibraryError::MangaDexTimedOut
             } else {
@@ -379,6 +458,7 @@ fn map_ureq_error(error: ureq::Error) -> LibraryError {
 fn map_status_code(code: u16) -> LibraryError {
     match code {
         404 => LibraryError::MangaDexNotFound,
+        408 => LibraryError::MangaDexTimedOut,
         429 => LibraryError::MangaDexRateLimited,
         _ => LibraryError::MangaDexUnavailable,
     }
@@ -583,5 +663,28 @@ mod tests {
             parse_search(r#"{"result":"error","data":[]}"#),
             Err(LibraryError::InvalidMangaDexResponse)
         ));
+    }
+    #[test]
+    fn cover_refresh_reads_beyond_first_hundred_and_rejects_incomplete_pages() {
+        let id = "d1a9fdeb-f713-407f-960c-8326b586e6fd";
+        let mut offsets = Vec::new();
+        let json = super::fetch_covers_with(id, |url| {
+            let offset = url.query_pairs().find(|(key,_)|key=="offset").unwrap().1.parse::<usize>().unwrap();
+            offsets.push(offset);
+            let count = if offset==0 {100} else {1};
+            Ok(serde_json::json!({"result":"ok", "total":101, "data":vec![serde_json::json!({"id":"cover"});count]}).to_string())
+        }).unwrap();
+        assert_eq!(offsets, vec![0, 100]);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&json).unwrap()["data"]
+                .as_array()
+                .unwrap()
+                .len(),
+            101
+        );
+        assert!(super::fetch_covers_with(id, |_| Ok(
+            r#"{"result":"ok","total":101,"data":[]}"#.into()
+        ))
+        .is_err());
     }
 }

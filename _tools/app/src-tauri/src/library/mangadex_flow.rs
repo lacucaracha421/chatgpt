@@ -169,6 +169,7 @@ impl Library {
                 } else {
                     None
                 };
+            super::collection_updates::reconcile_mangadex_volumes(&transaction, &collection_id, &request.manga_id, &preview.covers)?;
             materialize_mangadex_volumes(
                 &transaction,
                 &collection_id,
@@ -210,6 +211,7 @@ impl Library {
             let transaction = connection.transaction()?;
             let now = chrono::Utc::now().to_rfc3339();
             fill_blank_provider_fields(&transaction, collection_id, &fetched.preview, &now)?;
+            super::collection_updates::reconcile_mangadex_volumes(&transaction, collection_id, &fetched.preview.manga_id, &fetched.preview.covers)?;
             upsert_external_binding(
                 &transaction,
                 collection_id,
