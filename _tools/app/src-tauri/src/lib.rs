@@ -134,6 +134,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::open_library,
             commands::get_extension_connection,
+            commands::get_internal_playback_url,
             commands::inspect_metadata_import,
             commands::ensure_daily_backup,
             commands::list_metadata_backups,

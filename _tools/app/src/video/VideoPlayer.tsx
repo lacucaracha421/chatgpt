@@ -1,5 +1,6 @@
 import { ArrowsPointingOutIcon, ArrowsPointingInIcon, PauseIcon, PlayIcon, SpeakerWaveIcon, SpeakerXMarkIcon } from "@heroicons/react/24/outline";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import type { AssetSummary } from "../library/types";
 import { playbackUrl, scrubFrameUrl } from "../assets/mediaUrl";
 import { Button } from "../shared/ui/Button";
@@ -7,7 +8,12 @@ import { Button } from "../shared/ui/Button";
 type VideoAsset = AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> };
 const CONTROLS_IDLE_MS = 1_800;
 
-export function VideoPlayer({ asset }: { asset: VideoAsset }) {
+type PlaybackUrlResolver = (assetId: string) => Promise<string>;
+
+const resolveInternalPlaybackUrl: PlaybackUrlResolver = (assetId) =>
+  invoke<string>("get_internal_playback_url", { assetId });
+
+export function VideoPlayer({ asset, resolvePlaybackUrl = resolveInternalPlaybackUrl }: { asset: VideoAsset; resolvePlaybackUrl?: PlaybackUrlResolver }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -21,6 +27,7 @@ export function VideoPlayer({ asset }: { asset: VideoAsset }) {
   const [scrubbing, setScrubbing] = useState(false);
   const [volumeInteracting, setVolumeInteracting] = useState(false);
   const [controlsFocused, setControlsFocused] = useState(false);
+  const [source, setSource] = useState<string | undefined>(() => playbackUrl(asset.id));
   const idleTimerRef = useRef<number | null>(null);
 
   const clearIdleTimer = useCallback(() => {
@@ -58,14 +65,28 @@ export function VideoPlayer({ asset }: { asset: VideoAsset }) {
     setVolumeInteracting(false);
     setControlsFocused(false);
     const video = videoRef.current;
-    if (video) video.src = playbackUrl(asset.id);
+    const fallback = playbackUrl(asset.id);
+    let active = true;
+    const applySource = (next: string) => {
+      if (!active) return;
+      setSource(next);
+      if (video) video.src = next;
+    };
+    if (fallback.startsWith("lakomics:")) {
+      setSource(undefined);
+      video?.removeAttribute("src");
+      void resolvePlaybackUrl(asset.id).then(applySource).catch(() => undefined);
+    } else {
+      applySource(fallback);
+    }
     return () => {
+      active = false;
       if (!video) return;
       video.pause();
       video.removeAttribute("src");
       video.load();
     };
-  }, [asset.id, asset.media.durationMs]);
+  }, [asset.id, asset.media.durationMs, resolvePlaybackUrl]);
 
   const togglePlayback = () => {
     const video = videoRef.current;
@@ -102,7 +123,7 @@ export function VideoPlayer({ asset }: { asset: VideoAsset }) {
     <video
       ref={videoRef}
       className="video-player__media"
-      src={playbackUrl(asset.id)}
+      src={source}
       aria-label={`${title} 영상`}
       playsInline
       preload="metadata"

@@ -22,7 +22,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' blob: lakomics: http://lakomics.localhost https://ehgt.org https://*.ehgt.org https://*.siam-cdn.net; media-src 'self' lakomics: http://lakomics.localhost"
+      "csp": "default-src 'self'; img-src 'self' blob: lakomics: http://lakomics.localhost https://ehgt.org https://*.ehgt.org https://*.siam-cdn.net; media-src 'self' lakomics: http://lakomics.localhost http://127.0.0.1:32145"
     }
   },
   "bundle": {

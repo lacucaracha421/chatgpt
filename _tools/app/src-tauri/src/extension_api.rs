@@ -1,7 +1,7 @@
 use std::{
     collections::BTreeSet,
     fs::{self, OpenOptions},
-    io::{self, Read, Write},
+    io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     sync::{Arc, Mutex, RwLock},
     thread,
@@ -10,7 +10,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 use thiserror::Error;
-use tiny_http::{Header, Request, Response, Server};
+use tiny_http::{Header, Request, Response, Server, StatusCode};
 use uuid::Uuid;
 
 mod public_media;
@@ -74,6 +74,7 @@ enum RuntimeStatus {
     Starting,
     Ready {
         token: String,
+        playback_ticket: String,
     },
     BindFailed,
 }
@@ -101,7 +102,7 @@ impl ExtensionRuntime {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
         match status {
-            RuntimeStatus::Ready { token } => ExtensionConnection {
+            RuntimeStatus::Ready { token, .. } => ExtensionConnection {
                 base_url: API_BASE_URL,
                 token,
                 status: ConnectionStatus::Ready,
@@ -114,11 +115,20 @@ impl ExtensionRuntime {
         }
     }
 
-    fn mark_ready(&self, token: String) {
+    fn mark_ready(&self, token: String, playback_ticket: String) {
         *self
             .0
             .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = RuntimeStatus::Ready { token };
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = RuntimeStatus::Ready { token, playback_ticket };
+    }
+
+    pub(crate) fn playback_url(&self, asset_id: &str) -> Option<String> {
+        Uuid::parse_str(asset_id).ok()?;
+        let playback_ticket = match self.0.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone() {
+            RuntimeStatus::Ready { playback_ticket, .. } => playback_ticket,
+            RuntimeStatus::Starting | RuntimeStatus::BindFailed => return None,
+        };
+        Some(format!("{API_BASE_URL}/v1/internal/playback/{asset_id}?ticket={playback_ticket}"))
     }
 
     fn mark_bind_failed(&self) {
@@ -151,13 +161,14 @@ pub(crate) fn start(app: AppHandle, state: AppState, runtime: ExtensionRuntime) 
             return;
         }
     };
-    runtime.mark_ready(token.clone());
+    let playback_ticket = Uuid::new_v4().simple().to_string();
+    runtime.mark_ready(token.clone(), playback_ticket.clone());
     let _ = thread::Builder::new()
         .name("lakomics-extension-api".into())
-        .spawn(move || serve(app, server, state, token));
+        .spawn(move || serve(app, server, state, token, playback_ticket));
 }
 
-fn serve(app: AppHandle, server: Server, state: AppState, token: String) {
+fn serve(app: AppHandle, server: Server, state: AppState, token: String, playback_ticket: String) {
     // 영상 수집 한 건이 수 분 걸릴 수 있으므로 처리는 병렬이어야 한다.
     // 다만 무제한 스레드 스폰은 로컬 플러드 연결이 인증 검사 선점 전에
     // 스레드·메모리를 태울 수 있게 하므로 고정 워커 풀로 상한을 둔다.
@@ -169,6 +180,7 @@ fn serve(app: AppHandle, server: Server, state: AppState, token: String) {
         let app = app.clone();
         let state = state.clone();
         let token = token.clone();
+        let playback_ticket = playback_ticket.clone();
         let receiver = receiver.clone();
         let _ = thread::Builder::new()
             .name(format!("lakomics-extension-worker-{worker}"))
@@ -176,7 +188,7 @@ fn serve(app: AppHandle, server: Server, state: AppState, token: String) {
                 loop {
                     let request = { receiver.lock().unwrap_or_else(std::sync::PoisonError::into_inner).recv() };
                     let Ok(request) = request else { break };
-                    handle_request(app.clone(), request, &state, &token);
+                    handle_request(app.clone(), request, &state, &token, &playback_ticket);
                 }
             });
     }
@@ -187,14 +199,18 @@ fn serve(app: AppHandle, server: Server, state: AppState, token: String) {
     }
 }
 
-fn handle_request(app: AppHandle, mut request: Request, state: &AppState, token: &str) {
+fn handle_request(app: AppHandle, mut request: Request, state: &AppState, token: &str, playback_ticket: &str) {
     let method = request.method().as_str().to_owned();
-    let path = request
-        .url()
-        .split('?')
-        .next()
-        .unwrap_or(request.url())
-        .to_owned();
+    let request_url = request.url().to_owned();
+    let path = request_url.split('?').next().unwrap_or(&request_url).to_owned();
+    if path.starts_with("/v1/internal/playback/") {
+        if method != "GET" { let _ = request.respond(Response::empty(StatusCode(405))); return; }
+        let Some(asset_id) = parse_internal_playback_request(&request_url, playback_ticket) else { let _ = request.respond(Response::empty(StatusCode(401))); return; };
+        let range = request_header(&request, "Range");
+        let library = state.current_library();
+        let _ = request.respond(internal_playback_response(library.as_ref(), &asset_id, range.as_deref()));
+        return;
+    }
     let origin = request_header(&request, "Origin");
     let authorization = request_header(&request, "Authorization");
     let extension_id = request_header(&request, "X-Lakomics-Extension-Id");
@@ -231,6 +247,47 @@ fn request_header(request: &Request, name: &'static str) -> Option<String> {
         .iter()
         .find(|header| header.field.equiv(name))
         .map(|header| header.value.as_str().to_owned())
+}
+
+fn parse_internal_playback_request(value: &str, expected_ticket: &str) -> Option<String> {
+    if expected_ticket.is_empty() { return None; }
+    let parsed = url::Url::parse(value).or_else(|_| url::Url::parse(API_BASE_URL).and_then(|base| base.join(value))).ok()?;
+    if parsed.scheme() != "http" || parsed.host_str() != Some("127.0.0.1") || parsed.port_or_known_default() != Some(32145) { return None; }
+    let segments = parsed.path_segments()?.collect::<Vec<_>>();
+    let ["v1", "internal", "playback", asset_id] = segments.as_slice() else { return None; };
+    Uuid::parse_str(asset_id).ok()?;
+    let mut tickets = parsed.query_pairs().filter(|(key, _)| key == "ticket");
+    let ticket = tickets.next()?.1;
+    if tickets.next().is_some() || ticket.as_ref() != expected_ticket { return None; }
+    Some((*asset_id).to_owned())
+}
+
+type InternalPlaybackResponse = Response<Box<dyn Read>>;
+
+fn internal_playback_response(library: Option<&Library>, asset_id: &str, range_header: Option<&str>) -> InternalPlaybackResponse {
+    let Some(library) = library else { return internal_empty_response(404, None); };
+    let Ok(mut media) = library.resolve_media(asset_id, crate::library::MediaVariant::Playback) else { return internal_empty_response(404, None); };
+    if media.length == 0 { return internal_empty_response(416, Some("bytes */0".into())); }
+    let (status, start, end) = match range_header {
+        None => (200, 0, media.length - 1),
+        Some(value) => match crate::media_protocol::parse_range(value, media.length) { Some((start, end)) => (206, start, end), None => return internal_empty_response(416, Some(format!("bytes */{}", media.length))) },
+    };
+    if media.file.seek(SeekFrom::Start(start)).is_err() { return internal_empty_response(500, None); }
+    let length = end - start + 1;
+    let Ok(data_length) = usize::try_from(length) else { return internal_empty_response(500, None); };
+    let mut headers = vec![header("Content-Type", media.mime), header("Accept-Ranges", "bytes"), header("Cache-Control", "no-store")];
+    if status == 206 { headers.push(header("Content-Range", &format!("bytes {start}-{end}/{}", media.length))); }
+    Response::new(StatusCode(status), headers, Box::new(media.file.take(length)), Some(data_length), None)
+}
+
+fn internal_empty_response(status: u16, content_range: Option<String>) -> InternalPlaybackResponse {
+    let mut headers = vec![header("Accept-Ranges", "bytes"), header("Cache-Control", "no-store")];
+    if let Some(value) = content_range { headers.push(header("Content-Range", &value)); }
+    Response::new(StatusCode(status), headers, Box::new(io::empty()), Some(0), None)
+}
+
+fn header(name: &str, value: &str) -> Header {
+    Header::from_bytes(name.as_bytes(), value.as_bytes()).expect("static playback header is valid")
 }
 
 #[derive(Debug)]
@@ -933,6 +990,51 @@ mod tests {
         models::{ClassificationKind, CreateClassification, IngestOutcome},
         Library,
     };
+
+    #[test]
+    fn internal_playback_url_uses_a_separate_session_ticket() {
+        let runtime = ExtensionRuntime::default();
+        runtime.mark_ready("extension-secret".into(), "playback-secret".into());
+        let asset_id = "00000000-0000-4000-8000-000000000001";
+        let url = runtime.playback_url(asset_id).unwrap();
+        assert!(url.starts_with(&format!("{API_BASE_URL}/v1/internal/playback/{asset_id}?ticket=")));
+        assert!(url.ends_with("playback-secret"));
+        assert!(!url.contains("extension-secret"));
+        assert_eq!(parse_internal_playback_request(&url, "playback-secret").as_deref(), Some(asset_id));
+        assert!(parse_internal_playback_request(&url, "wrong").is_none());
+    }
+
+    #[test]
+    fn internal_playback_stream_supports_full_and_range_requests() {
+        use std::io::Read as _;
+        let root = tempfile::tempdir().unwrap();
+        let library = Library::open(root.path()).unwrap();
+        let asset_id = "00000000-0000-4000-8000-000000000001";
+        insert_prepared_video(&library, asset_id);
+        let full = internal_playback_response(Some(&library), asset_id, None);
+        assert_eq!(full.status_code().0, 200);
+        assert_eq!(full.data_length(), Some(36));
+        assert!(full.headers().iter().any(|h| h.field.equiv("Accept-Ranges") && h.value.as_str() == "bytes"));
+        let mut full_bytes = Vec::new(); full.into_reader().read_to_end(&mut full_bytes).unwrap();
+        assert_eq!(full_bytes, b"0123456789abcdefghijklmnopqrstuvwxyz");
+        let partial = internal_playback_response(Some(&library), asset_id, Some("bytes=10-19"));
+        assert_eq!(partial.status_code().0, 206);
+        assert_eq!(partial.data_length(), Some(10));
+        assert!(partial.headers().iter().any(|h| h.field.equiv("Content-Range") && h.value.as_str() == "bytes 10-19/36"));
+        let mut partial_bytes = Vec::new(); partial.into_reader().read_to_end(&mut partial_bytes).unwrap();
+        assert_eq!(partial_bytes, b"abcdefghij");
+    }
+
+    fn insert_prepared_video(library: &Library, id: &str) {
+        let original = format!("assets/{id}.webm"); let poster = format!("video-media/{id}/poster.webp"); let scrub = format!("video-media/{id}/scrub");
+        std::fs::create_dir_all(library.root().join(&scrub)).unwrap();
+        std::fs::write(library.root().join(&original), b"0123456789abcdefghijklmnopqrstuvwxyz").unwrap();
+        std::fs::write(library.root().join(&poster), b"poster").unwrap();
+        std::fs::write(library.root().join(&scrub).join("000.webp"), b"scrub").unwrap();
+        let c = library.connection().unwrap();
+        c.execute("INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at,status) VALUES(?1,?2,'video','clip.webm',?3,?4,36,1280,720,'2026-09-13T00:00:00Z','normal')", rusqlite::params![id,format!("hash-{id}"),original,poster]).unwrap();
+        c.execute("INSERT INTO video_assets(asset_id,duration_ms,container,video_codec,audio_codec,preparation_state,playback_kind,poster_relative_path,scrub_relative_dir,scrub_frame_count) VALUES(?1,5000,'webm','vp9','opus','ready','original',?2,?3,1)", rusqlite::params![id,poster,scrub]).unwrap();
+    }
 
     #[test]
     fn creates_and_reuses_one_install_token() {

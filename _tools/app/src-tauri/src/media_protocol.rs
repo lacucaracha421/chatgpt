@@ -462,7 +462,7 @@ fn playback_response(
         .expect("validated range response is valid")
 }
 
-fn parse_range(value: &str, total: u64) -> Option<(u64, u64)> {
+pub(crate) fn parse_range(value: &str, total: u64) -> Option<(u64, u64)> {
     if total == 0 || value.contains(',') {
         return None;
     }

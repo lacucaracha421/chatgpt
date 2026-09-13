@@ -355,6 +355,11 @@ pub fn get_extension_connection(
 }
 
 #[tauri::command]
+pub fn get_internal_playback_url(asset_id: String, runtime: State<'_, crate::extension_api::ExtensionRuntime>) -> Result<String, CommandError> {
+    runtime.playback_url(&asset_id).ok_or_else(|| CommandError { code: "playback_unavailable", message: "영상 재생 서버를 사용할 수 없습니다. 앱을 다시 실행해 주세요.".into() })
+}
+
+#[tauri::command]
 pub async fn open_library(
     path: String,
     app: AppHandle,

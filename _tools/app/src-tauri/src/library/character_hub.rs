@@ -62,7 +62,8 @@ pub(crate) const SERIES_GALLERY_SCOPE: &str = "WITH RECURSIVE scope(id) AS (SELE
               AND (?2 IS NOT NULL OR ?3 OR ?4='all' OR NOT EXISTS(SELECT 1 FROM character_series_asset_exclusions x WHERE x.series_id=?1 AND x.asset_id=a.id))
               AND (EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope)) OR (?2 IS NOT NULL AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM ancestors)) AND EXISTS(SELECT 1 FROM character_relations r WHERE r.asset_id=a.id AND r.target_id=?2)))
               AND ((?2 IS NOT NULL AND (EXISTS(SELECT 1 FROM character_relations r WHERE r.asset_id=a.id AND r.target_id=?2)
-                OR EXISTS(SELECT 1 FROM character_references r WHERE r.asset_id=a.id AND r.target_id=?2)))
+                OR EXISTS(SELECT 1 FROM character_references r WHERE r.asset_id=a.id AND r.target_id=?2)
+                OR EXISTS(SELECT 1 FROM character_learned_references r WHERE r.asset_id=a.id AND r.target_id=?2)))
                 OR (?2 IS NULL AND (
                   ?3 OR ?4='all'
                   OR ((?4 IS NULL OR ?4='needs_review') AND EXISTS(
@@ -70,7 +71,8 @@ pub(crate) const SERIES_GALLERY_SCOPE: &str = "WITH RECURSIVE scope(id) AS (SELE
                     AND NOT EXISTS(SELECT 1 FROM character_review_completions c WHERE c.asset_id=j.asset_id AND c.generation=j.generation AND c.source_generation=j.source_generation)
                   ))
                   OR ((?4 IS NULL OR ?4='unclassified') AND NOT EXISTS(SELECT 1 FROM character_relations r JOIN character_targets t ON t.id=r.target_id WHERE r.asset_id=a.id AND t.series_classification_id=?1)
-                    AND NOT EXISTS(SELECT 1 FROM character_references r JOIN character_targets t ON t.id=r.target_id WHERE r.asset_id=a.id AND t.series_classification_id=?1)))))";
+                    AND NOT EXISTS(SELECT 1 FROM character_references r JOIN character_targets t ON t.id=r.target_id WHERE r.asset_id=a.id AND t.series_classification_id=?1)
+                    AND NOT EXISTS(SELECT 1 FROM character_learned_references r JOIN character_targets t ON t.id=r.target_id WHERE r.asset_id=a.id AND t.series_classification_id=?1)))))";
 
 pub(crate) const GROUP_GALLERY_SCOPE: &str = "WITH RECURSIVE scope(id) AS (SELECT id FROM classification_entries WHERE id=?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id),
               ancestors(id,parent_id) AS (SELECT id,parent_id FROM classification_entries WHERE id=?1 UNION ALL SELECT c.id,c.parent_id FROM classification_entries c JOIN ancestors p ON c.id=p.parent_id)
@@ -79,7 +81,8 @@ pub(crate) const GROUP_GALLERY_SCOPE: &str = "WITH RECURSIVE scope(id) AS (SELEC
                 OR (EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM ancestors))
                   AND EXISTS(SELECT 1 FROM character_relations r JOIN character_group_members gm ON gm.target_id=r.target_id WHERE r.asset_id=a.id AND gm.group_id=?2)))
               AND (EXISTS(SELECT 1 FROM character_relations r JOIN character_group_members gm ON gm.target_id=r.target_id WHERE r.asset_id=a.id AND gm.group_id=?2)
-                OR EXISTS(SELECT 1 FROM character_references r JOIN character_group_members gm ON gm.target_id=r.target_id WHERE r.asset_id=a.id AND gm.group_id=?2))";
+                OR EXISTS(SELECT 1 FROM character_references r JOIN character_group_members gm ON gm.target_id=r.target_id WHERE r.asset_id=a.id AND gm.group_id=?2)
+                OR EXISTS(SELECT 1 FROM character_learned_references r JOIN character_group_members gm ON gm.target_id=r.target_id WHERE r.asset_id=a.id AND gm.group_id=?2))";
 
 pub(crate) const TARGET_GALLERY_SQL: &str = r#"
 WITH RECURSIVE scope(id) AS (
@@ -100,6 +103,7 @@ WITH RECURSIVE scope(id) AS (
     SELECT asset_id,1 FROM accepted
     UNION ALL
     SELECT asset_id,0 FROM character_references WHERE target_id=?2 AND asset_id IS NOT NULL
+    UNION ALL SELECT asset_id,0 FROM character_learned_references WHERE target_id=?2
 ), dedup(asset_id,accepted) AS (
     SELECT asset_id,MAX(accepted) FROM target_assets GROUP BY asset_id
 ), eligible(id,collected_at) AS (
@@ -131,6 +135,7 @@ WITH RECURSIVE scope(id) AS (
 ), target_assets(asset_id,accepted) AS (
     SELECT asset_id,1 FROM accepted
     UNION ALL SELECT asset_id,0 FROM character_references WHERE target_id=?2 AND asset_id IS NOT NULL
+    UNION ALL SELECT asset_id,0 FROM character_learned_references WHERE target_id=?2
 ), dedup(asset_id,accepted) AS (
     SELECT asset_id,MAX(accepted) FROM target_assets GROUP BY asset_id
 )
@@ -247,9 +252,11 @@ impl Library {
               AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope))
               AND NOT EXISTS(SELECT 1 FROM character_relations r WHERE r.asset_id=a.id AND r.target_id<>?2)
               AND NOT EXISTS(SELECT 1 FROM character_references r WHERE r.asset_id=a.id AND r.target_id<>?2)
+              AND NOT EXISTS(SELECT 1 FROM character_learned_references r WHERE r.asset_id=a.id AND r.target_id<>?2)
               AND (?3 OR (NOT EXISTS(SELECT 1 FROM character_relations r WHERE r.asset_id=a.id)
-              AND NOT EXISTS(SELECT 1 FROM character_references r WHERE r.asset_id=a.id)))";
-            let scoped_references = format!("{reference_scope} AND (EXISTS(SELECT 1 FROM character_relations r WHERE r.asset_id=a.id AND r.target_id=?2) OR EXISTS(SELECT 1 FROM character_references r WHERE r.asset_id=a.id AND r.target_id=?2))");
+              AND NOT EXISTS(SELECT 1 FROM character_references r WHERE r.asset_id=a.id)
+              AND NOT EXISTS(SELECT 1 FROM character_learned_references r WHERE r.asset_id=a.id)))";
+            let scoped_references = format!("{reference_scope} AND (EXISTS(SELECT 1 FROM character_relations r WHERE r.asset_id=a.id AND r.target_id=?2) OR EXISTS(SELECT 1 FROM character_references r WHERE r.asset_id=a.id AND r.target_id=?2) OR EXISTS(SELECT 1 FROM character_learned_references r WHERE r.asset_id=a.id AND r.target_id=?2))");
             let target_id = query
                 .reference_target_id
                 .as_ref()
@@ -532,7 +539,7 @@ fn candidate_media_mode_with_exclusions(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::library::characters::{tests::Fixture, DecisionKind, DecisionRequest, TargetDraft};
+    use crate::library::characters::{tests::Fixture, CharacterSettingsDraft, DecisionKind, DecisionRequest, TargetDraft};
     #[test]
     fn presentation_preserves_recognition_and_gallery_pages_real_relations() {
         let f = Fixture::new();
@@ -960,6 +967,49 @@ mod tests {
         assert!(candidate_image(&f.library.connection().unwrap(), &f.series, "asset-6").is_err());
     }
     #[test]
+    fn learned_references_are_full_character_membership_everywhere() {
+        let f = Fixture::new();
+        let a = f.ready("A");
+        let b = f.ready("B");
+        let connection = f.library.connection().unwrap();
+        connection.execute(
+            "INSERT INTO character_learned_references(target_id,asset_id,asset_hash,created_at) SELECT ?1,id,content_hash,'2026-09-13' FROM assets WHERE id='asset-5'",
+            [&a.id],
+        ).unwrap();
+        drop(connection);
+
+        let target_page = f.library.browse_character_assets(BrowseQuery { series_id:f.series.clone(), target_id:Some(a.id.clone()), group_id:None, reference_target_id:None, after:None, limit:100, all:false, series_filter:None }).unwrap();
+        assert_eq!(target_page.total_count, 6);
+        assert!(target_page.items.iter().any(|asset| asset.id == "asset-5"));
+
+        let unclassified = f.library.browse_character_assets(BrowseQuery { series_id:f.series.clone(), target_id:None, group_id:None, reference_target_id:None, after:None, limit:100, all:false, series_filter:Some(SeriesGalleryFilter::Unclassified) }).unwrap();
+        assert!(unclassified.items.iter().all(|asset| asset.id != "asset-5"));
+
+        let group_id = super::super::character_groups::save_character_group_in(&f.library.connection().unwrap(), super::super::character_groups::GroupDraft { id:None, series_id:f.series.clone(), expected_revision:None, name:"A only".into(), target_ids:vec![a.id.clone()], delete:false }).unwrap();
+        let group_page = f.library.browse_character_assets(BrowseQuery { series_id:f.series.clone(), target_id:None, group_id:Some(group_id), reference_target_id:None, after:None, limit:100, all:false, series_filter:None }).unwrap();
+        assert!(group_page.items.iter().any(|asset| asset.id == "asset-5"));
+
+        let picker = f.library.browse_character_assets(BrowseQuery { series_id:f.series.clone(), target_id:None, group_id:None, reference_target_id:Some(b.id.clone()), after:None, limit:100, all:true, series_filter:None }).unwrap();
+        assert!(picker.items.iter().all(|asset| asset.id != "asset-5"));
+        assert!(validate_character_selection(&f.library.connection().unwrap(), &f.series, Some(&b.id), "asset-5").is_err());
+    }
+
+    #[test]
+    fn initial_character_creation_shows_references_beyond_the_first_five() {
+        let f = Fixture::new();
+        let reference_ids = (0..6).map(|i| format!("asset-{i}")).collect::<Vec<_>>();
+        let target = f.library.save_character_settings(CharacterSettingsDraft {
+            target: TargetDraft { id:None, expected_revision:None, series_classification_id:Some(f.series.clone()), linked_classification_id:Some(f.child.clone()), display_name:"Six refs".into(), description:String::new(), thumbnail_asset_id:None, enabled:true },
+            reference_ids,
+        }, true).unwrap();
+        assert_eq!(target.references.len(), 5);
+        assert_eq!(target.learned_references.len(), 1);
+        let page = f.library.browse_character_assets(BrowseQuery { series_id:f.series.clone(), target_id:Some(target.id), group_id:None, reference_target_id:None, after:None, limit:100, all:false, series_filter:None }).unwrap();
+        assert_eq!(page.total_count, 6);
+        assert!(page.items.iter().any(|asset| asset.id == "asset-5"));
+    }
+
+    #[test]
     fn reference_picker_excludes_other_characters_before_pagination() {
         let f = Fixture::new();
         let a = f.ready("Towa");
@@ -1101,7 +1151,7 @@ pub(super) fn validate_character_selection(
             "캐릭터 분류에서 제외된 이미지는 선택할 수 없습니다.",
         ));
     }
-    let excluded: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM character_relations WHERE asset_id=?1 AND (?2 IS NULL OR target_id<>?2)) OR EXISTS(SELECT 1 FROM character_references WHERE asset_id=?1 AND (?2 IS NULL OR target_id<>?2))", params![asset,target], |r| r.get(0))?;
+    let excluded: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM character_relations WHERE asset_id=?1 AND (?2 IS NULL OR target_id<>?2)) OR EXISTS(SELECT 1 FROM character_references WHERE asset_id=?1 AND (?2 IS NULL OR target_id<>?2)) OR EXISTS(SELECT 1 FROM character_learned_references WHERE asset_id=?1 AND (?2 IS NULL OR target_id<>?2))", params![asset,target], |r| r.get(0))?;
     if excluded {
         return Err(Error::Invalid(
             "다른 캐릭터에 등록된 이미지입니다. 선택을 다시 확인해 주세요.",

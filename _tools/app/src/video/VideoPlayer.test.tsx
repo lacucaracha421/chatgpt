@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StrictMode } from "react";
 import type { AssetSummary } from "../library/types";
@@ -28,6 +28,21 @@ describe("VideoPlayer", () => {
     fireEvent.timeUpdate(video);
 
     expect(screen.getByText("0:05 / 1:30")).toBeInTheDocument();
+  });
+
+  it("uses loopback HTTP playback on Linux instead of the custom media scheme", async () => {
+    const { mockConvertFileSrc, clearMocks } = await import("@tauri-apps/api/mocks");
+    Object.defineProperty(window, "isTauri", { configurable: true, value: true });
+    const resolvePlaybackUrl = vi.fn().mockResolvedValue("http://127.0.0.1:32145/v1/internal/playback/video-1?ticket=session");
+    try {
+      mockConvertFileSrc("linux");
+      render(<VideoPlayer asset={videoAsset()} resolvePlaybackUrl={resolvePlaybackUrl} />);
+      await waitFor(() => expect(screen.getByLabelText("sample.webm 영상")).toHaveAttribute("src", "http://127.0.0.1:32145/v1/internal/playback/video-1?ticket=session"));
+      expect(resolvePlaybackUrl).toHaveBeenCalledWith("video-1");
+    } finally {
+      clearMocks();
+      Reflect.deleteProperty(window, "isTauri");
+    }
   });
 
   it("keeps its source attached across StrictMode effect checks", () => {
