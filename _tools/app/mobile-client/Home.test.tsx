@@ -78,8 +78,7 @@ describe('classification discovery',() => {
     render(<Home {...input}/>);
     fireEvent.click(screen.getByRole('button',{name:'전체 보기'}));
     expect(input.onSelect).toHaveBeenLastCalledWith({tab:'library',title:'최근 저장'});
-    fireEvent.click(screen.getByRole('button',{name:'분류 0 / 분류 1'}));
-    expect(input.onSelect).toHaveBeenLastCalledWith({tab:'library',classification:'folder-1',title:'분류 1'});
+    expect(screen.queryByRole('region',{name:'최근 방문 분류'})).toBeNull();
     fireEvent.click(screen.getByRole('button',{name:/날짜별 다시보기 작년의 오늘/}));
     expect(input.onSelect).toHaveBeenLastCalledWith({tab:'library',revisit:'date',title:'작년의 오늘'});
     fireEvent.click(screen.getByRole('button',{name:/작가별 다시보기 작가 A/}));

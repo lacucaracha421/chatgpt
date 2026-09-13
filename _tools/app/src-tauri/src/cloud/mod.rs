@@ -1,4 +1,6 @@
+pub(crate) mod auto_publication;
 mod albums;
+pub(crate) mod characters;
 pub(crate) mod backfill;
 pub(crate) mod activity;
 #[cfg(test)]

@@ -338,6 +338,8 @@ pub fn run() {
             commands::push_cloud_metadata_backup,
             commands::push_cloud_collections,
             commands::push_cloud_catalog,
+            commands::push_cloud_characters,
+            commands::run_due_mobile_publications,
             commands::restore_cloud_metadata_backup,
             commands::run_due_cloud_capture_sync,
             commands::cloud_backfill_preflight,

@@ -1,5 +1,5 @@
 export type CatalogQuery = {provider:'kHentai';language:'all'|'korean'|'japanese';text:string;sort:'latest'|'views'|'hotDay'|'hotWeek'|'hotMonth';scope:'all'|'bookmarked';revealBlocked:boolean;limit:number};
-export const DEFAULT_CATALOG_QUERY:CatalogQuery={provider:'kHentai',language:'korean',text:'',sort:'latest',scope:'all',revealBlocked:false,limit:40};
+export const DEFAULT_CATALOG_QUERY:CatalogQuery={provider:'kHentai',language:'korean',text:'',sort:'hotDay',scope:'all',revealBlocked:false,limit:40};
 export type CatalogWork = {provider:'kHentai';providerWorkId:string;title:string;titleJpn:string|null;thumbnailUrl:string|null;bookmarked:boolean;fileCount:number;views:number;posted:number;artists:string[];series:string[]};
 export type CatalogItem = CatalogWork & {groupId:string;versionCount:number;hasBookmarkedVersion:boolean};
 export type CatalogPage = {ready:boolean;publicationRevision:string|null;publishedAt:string|null;items:CatalogItem[];nextCursor:string|null;context:string|null;countToken:string|null;totalCount:number|null;countStatus:'pending'|'ready'|'unavailable'};

@@ -1,0 +1,142 @@
+{
+  "version": 1,
+  "baseRevision": null,
+  "nodes": [
+    {
+      "id": "series:s",
+      "kind": "series",
+      "sourceId": "s",
+      "seriesId": "s",
+      "parentId": null,
+      "name": "Series",
+      "description": "",
+      "thumbnailAssetId": "z",
+      "manualOnly": false,
+      "excluded": false
+    },
+    {
+      "id": "group:g",
+      "kind": "group",
+      "sourceId": "g",
+      "seriesId": "s",
+      "parentId": "series:s",
+      "name": "Group",
+      "description": "",
+      "thumbnailAssetId": "x",
+      "manualOnly": false,
+      "excluded": false
+    },
+    {
+      "id": "character:c",
+      "kind": "character",
+      "sourceId": "c",
+      "seriesId": "s",
+      "parentId": "group:g",
+      "name": "C",
+      "description": "",
+      "thumbnailAssetId": "x",
+      "manualOnly": false,
+      "excluded": false
+    },
+    {
+      "id": "character:d",
+      "kind": "character",
+      "sourceId": "d",
+      "seriesId": "s",
+      "parentId": "group:g",
+      "name": "D",
+      "description": "",
+      "thumbnailAssetId": "a",
+      "manualOnly": true,
+      "excluded": false
+    },
+    {
+      "id": "folder:e",
+      "kind": "folder",
+      "sourceId": "e",
+      "seriesId": "s",
+      "parentId": "series:s",
+      "name": "Excluded",
+      "description": "",
+      "thumbnailAssetId": "z",
+      "manualOnly": false,
+      "excluded": true
+    },
+    {
+      "id": "folder:f",
+      "kind": "folder",
+      "sourceId": "f",
+      "seriesId": "s",
+      "parentId": "series:s",
+      "name": "Folder",
+      "description": "",
+      "thumbnailAssetId": "u",
+      "manualOnly": false,
+      "excluded": false
+    }
+  ],
+  "scopes": [
+    {
+      "nodeId": "series:s",
+      "filter": "all",
+      "assetIds": [
+        "z",
+        "x",
+        "u",
+        "a"
+      ]
+    },
+    {
+      "nodeId": "series:s",
+      "filter": "unclassified",
+      "assetIds": [
+        "u"
+      ]
+    },
+    {
+      "nodeId": "series:s",
+      "filter": "needs_review",
+      "assetIds": []
+    },
+    {
+      "nodeId": "group:g",
+      "filter": "all",
+      "assetIds": [
+        "x",
+        "b",
+        "a"
+      ]
+    },
+    {
+      "nodeId": "character:c",
+      "filter": "all",
+      "assetIds": [
+        "x",
+        "b",
+        "a"
+      ]
+    },
+    {
+      "nodeId": "character:d",
+      "filter": "all",
+      "assetIds": [
+        "a"
+      ]
+    },
+    {
+      "nodeId": "folder:e",
+      "filter": "all",
+      "assetIds": [
+        "z"
+      ]
+    },
+    {
+      "nodeId": "folder:f",
+      "filter": "all",
+      "assetIds": [
+        "u"
+      ]
+    }
+  ],
+  "navigationOrder": []
+}

@@ -51,6 +51,23 @@ enum ConsumedCapture {
     ReviewPending,
 }
 
+#[derive(Clone, Copy)]
+enum CloudMetadataKind {
+    Classifications,
+    SavedX,
+    Albums,
+}
+
+impl CloudMetadataKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Classifications => "classifications",
+            Self::SavedX => "saved_x",
+            Self::Albums => "albums",
+        }
+    }
+}
+
 impl Library {
     /// 한 번의 폴에서 처리 시도하는 pending capture 상한.
     const MAX_CAPTURES_PER_SYNC: usize = 25;
@@ -100,23 +117,87 @@ impl Library {
     ) -> Result<CloudCaptureSyncResult, LibraryError> {
         let result = if self.cloud_capture_enabled()? { self.sync_next_cloud_capture_with(client, token)? } else { CloudCaptureSyncResult::default() };
         if !self.cloud_sync_config()?.enabled { return Ok(result); }
-        // 수집 폴과 같은 주기로 모바일용 읽기 스냅샷을 게시한다. 어느 한 게시
-        // 실패도 수집 결과나 다른 스냅샷 게시를 막지 않는다.
+        // 수집 폴과 같은 주기로 변경된 모바일 읽기 스냅샷만 게시한다. 세대는
+        // DB에 남으므로 재시작 후에도 이미 게시한 전체 스냅샷을 반복하지 않는다.
         let mut publish_failed = false;
-        if let Err(error) = self.publish_classification_snapshot_with(client, token) {
-            publish_failed = true;
-            eprintln!("cloud classifications publish: {error}");
-        }
-        if let Err(error) = self.publish_saved_x_media_snapshot_with(client, token) {
-            publish_failed = true;
-            eprintln!("cloud saved X media publish: {error}");
-        }
-        if let Err(error) = self.publish_album_replica_with(client, token) {
-            publish_failed = true;
-            eprintln!("cloud album metadata publish: {error}");
+        for kind in [
+            CloudMetadataKind::Classifications,
+            CloudMetadataKind::SavedX,
+            CloudMetadataKind::Albums,
+        ] {
+            let Some(generation) = self.claim_cloud_metadata_publication(
+                kind,
+                client.capture_endpoint(),
+            )? else {
+                continue;
+            };
+            let publish = match kind {
+                CloudMetadataKind::Classifications => {
+                    self.publish_classification_snapshot_with(client, token)
+                }
+                CloudMetadataKind::SavedX => {
+                    self.publish_saved_x_media_snapshot_with(client, token)
+                }
+                CloudMetadataKind::Albums => self.publish_album_replica_with(client, token),
+            };
+            match publish {
+                Ok(()) => self.ack_cloud_metadata_publication(
+                    kind,
+                    client.capture_endpoint(),
+                    generation,
+                )?,
+                Err(error) => {
+                    publish_failed = true;
+                    eprintln!("cloud {} publish: {error}", kind.as_str());
+                }
+            }
         }
         self.record_cloud_metadata_activity(publish_failed.then_some("모바일 분류·수집 기록을 전송하지 못했습니다. 서버 연결을 확인해 주세요."))?;
         Ok(result)
+    }
+
+    fn claim_cloud_metadata_publication(
+        &self,
+        kind: CloudMetadataKind,
+        endpoint: &str,
+    ) -> Result<Option<i64>, LibraryError> {
+        let connection = self.connection()?;
+        connection.execute(
+            "UPDATE cloud_metadata_publication_state
+             SET endpoint=?2,published_generation=0,retry_after=0
+             WHERE kind=?1 AND endpoint<>?2",
+            rusqlite::params![kind.as_str(), endpoint],
+        )?;
+        let now = chrono::Utc::now().timestamp();
+        let generation = connection.query_row(
+            "SELECT generation FROM cloud_metadata_publication_state
+             WHERE kind=?1 AND generation<>published_generation AND retry_after<=?2",
+            rusqlite::params![kind.as_str(), now],
+            |row| row.get::<_, i64>(0),
+        ).optional()?;
+        let Some(generation) = generation else { return Ok(None); };
+        let claimed = connection.execute(
+            "UPDATE cloud_metadata_publication_state SET retry_after=?3
+             WHERE kind=?1 AND generation=?2 AND generation<>published_generation
+               AND retry_after<=?4",
+            rusqlite::params![kind.as_str(), generation, now + 60, now],
+        )?;
+        Ok((claimed == 1).then_some(generation))
+    }
+
+    fn ack_cloud_metadata_publication(
+        &self,
+        kind: CloudMetadataKind,
+        endpoint: &str,
+        generation: i64,
+    ) -> Result<(), LibraryError> {
+        self.connection()?.execute(
+            "UPDATE cloud_metadata_publication_state
+             SET published_generation=MAX(published_generation,?3),retry_after=0
+             WHERE kind=?1 AND endpoint=?2",
+            rusqlite::params![kind.as_str(), endpoint, generation],
+        )?;
+        Ok(())
     }
 
     pub(crate) fn create_extension_pairing(&self) -> Result<super::models::ExtensionPairingResponse, LibraryError> {

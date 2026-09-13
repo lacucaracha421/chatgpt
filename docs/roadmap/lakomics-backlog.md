@@ -39,7 +39,7 @@ acceptance limits. Existing item statuses below remain the owners of pending wor
 | 클라우드·통계·Notes | CLOUD-UI-001, STATS-001A/B, NOTE-001B 네이티브 확인/남은 보완 | CLOUD-006와 NOTE-001A는 완료 |
 | 개인 탐색·카탈로그 | IDEA-001A/B 다시보기 테마와 색감 재섞기 사용자 확인으로 완료 (2026-09-12). 기존 카탈로그 주 경로 완료 | Windows 다시보기 네이티브 확인 미실시. CATALOG-002B 선택적 공급자; IDEA-002 보류 |
 | 유사 이미지·영상 | SIMILARITY-003 실제 영상 정확도 검증 | SIMILARITY-002B 기하 변형 후보; PERF-SIMILARITY는 측정 근거 전까지 보류 |
-| 모바일 | MOBILE-001/002/004/006은 사용자 실사용 확인으로 완료 | MOBILE-007 북마크 쓰기 → 008 갱신 요청; 003 삭제 프로토콜 보류 |
+| 모바일 | MOBILE-001/002/004/006은 사용자 실사용 확인으로 완료 | CLOUD-AUTH-001 최신 PC 모델 대응·서버 원본 전환 계획. MOBILE-007/008은 새 권한 계약에 맞춰 진행; 003 삭제 프로토콜 보류 |
 | 확장 프로그램 | EXT-005~010의 기존 완료 유지. 현재 `extension-list/`는 반원 메뉴 3.0.0.13이며 EXT-011 메뉴·PC 연결, EXT-012 번역·X 저장·PC 임시저장 후속은 구현 / 실사용 VERIFY | 과거 list-only 디자인을 다시 구현하지 않음. 최신 후속의 PC 브라우저·Titanium/Galaxy·실제 X/API 확인은 각 항목에서 추적 |
 | Works / Collection | WORKS-001, LONG-001, LONG-002B 남은 기능/실제 미디어 확인 | LONG-004는 기존 화면에 통합; LONG-003 보안 설계 승인 전 보류 |
 
@@ -1654,13 +1654,46 @@ identity, language scope, blocked tags/categories and confirmed edition groups. 
 upstream proxy is not the shared search contract. Reader is read-only; offline full-gallery
 download and cross-device reading progress remain deferred.
 
+## CLOUD-AUTH-001 — 서버 원본과 최신 PC 모델을 공유하는 모바일
+
+Status: `IN_PROGRESS` — 2026-09-13: the first character read publication/API/mobile browsing scope is implemented and locally verified. Step 1 has a proposed authority contract; no write-domain cutover is implemented. Deployment, active-library publication and native acceptance remain pending. Server-owned writes and workers are still future scope.
+
+Current source contract and evidence: [mobile character contract](../agents/mobile-character-contract.md). Proposed domain transition: [ADR-0036](../adr/0036-staged-server-authority.md). PC Settings → 데이터 관리 → 모바일 캐릭터 업데이트 publishes canonical gallery scopes in one read transaction; the server replaces a versioned projection atomically and Android Library reads it directly. Shared Rust/Python fixture parity, stale revision/cursor handling, cloud availability counts, mobile navigation/viewer integration and publication lifecycle have focused coverage. The Android Provider trees are unchanged. No deployment, production data write, full backfill, Git write or native acceptance was performed for this scope. Next implementation is the bookmark authority pilot after implementing the library/domain epoch, receipt/change log and all legacy-write fences required by step 1.
+
+S11 landscape follow-up (2026-09-13): PC-style character hero/cards/group mosaics and shared overview/gallery scrolling are implemented while preserving the compact portrait layout. Collections now offers exact half-star/unrated filters and recent-addition/media-date/title ordering across the server list; Showcase remains manual. Source contract and focused verification are recorded in [Mobile](../agents/mobile.md). The subsequent MOBILE-008 implementation adds server new-work refresh; reloading the published index remains a separate operation. Deployment and native device acceptance remain pending.
+
+조사 근거와 모델별 차이: [서버 원본 전환 대응 조사](../research/server-authority-model-audit-20260913.md). 기준은 `dd2baa2`와 당시 관련 미커밋·미추적 소스다. 진행 중인 캐릭터 과거 갱신 및 컬렉션 일일 갱신(v73)을 포함하되 해당 작업의 검증/운영 적용은 원래 항목과 기록이 소유한다. 이 항목이 전환 실행 상태를 소유하며 조사 문서는 별도 backlog가 아니다.
+
+목표는 서버가 공유 데이터의 변경을 최종 확정하고, PC와 Android가 같은 의미의 데이터를 읽고 변경하는 것이다. 일반 분류, 등록 시리즈, 캐릭터, 표시 그룹, 참조/판단/제외, 소장/출간 이벤트를 구별한다. PC의 모든 관리 화면을 모바일에 복제하는 요구는 아니며, 제공하는 모바일 일상 작업은 PC를 켜지 않고 완료해야 한다.
+
+| 순서 | 검토 가능한 작업 결과 | 주요 변경 경계 / 완료 조건 |
+|---|---|---|
+| 1 | 서버 권한·공통 ID/버전·오프라인/충돌·전환 계약 | ADR-0033 후속 결정, 도메인별 authority epoch·기존 발행 차단·operation ID·변경 cursor·복구 계약. 일반 분류와 캐릭터 표시 구조를 구별 |
+| 2 | 최신 PC 모델의 서버 읽기와 모바일 캐릭터 탐색 | `cloud/`, `server/lakomics-api/`, `mobile-client/`, Android NetworkPolicy/Provider. 일관된 읽기 발행으로 먼저 대조 가능하나 쓰기 권한 전환 완료로 표시하지 않음. PC와 캐릭터/그룹/일반 폴더 자산 ID·순서·개수 일치 |
+| 3 | 서버 쓰기 파일럿 | MOBILE-007 북마크와 PC 증분 수신. PC 승인 없이 확정되고 오래된 PC snapshot이 덮어쓰지 못함. 응답 유실·중복 요청·오프라인 재연결·동시 변경 검증 |
+| 4 | PC 없이 카탈로그 갱신·수집 확정 | MOBILE-008 서버 작업자, Capture→정식 자산·필수 미디어 처리. 갱신 중 기존 조회 유지, 중단/중복 실행 복구, exact/similar 처리 경계 보존 |
+| 5 | 공유 변경 범위와 PC 저장 경로 전환 | 분류/앨범/캐릭터 수동 판단·소장·출간 확인. provider별 baseline/이미 본 권/구독·사용자 값 보존. 서버 신간/캐릭터 작업자와 stale 결과 차단; 이동·참조 저장으로 과거 재분석 미예약 |
+| 6 | 영역별 데이터 전환과 native 수용 | 누락/불일치 대조 후 변경분 이전, 구버전 쓰기 차단, 복원 리허설. PC 종료 상태의 모바일 흐름과 이후 Windows/Linux PC 합류, Android Picker 수신 앱 읽기 검증 |
+
+첫 읽기 전환 범위는 시리즈·그룹·캐릭터·일반 폴더와 갤러리다. 컬렉션의 권/판본/표지 읽기는 기존 구현을 유지하고, 누락된 소장·출간 확인·provider 상태를 후속 계약에 포함한다. 서버 읽기 API가 있다고 화면/쓰기/자동 작업까지 완료됐다고 판단하지 않는다.
+
+필수 보존: Asset/WorkArtwork/Collection/Online Catalog 분리, 표시 그룹의 분류 비개입, 공유 캐릭터 자산 중복 제거, 수동 판단·참조 제외·originals 역할, 최신 quiet workflow, 소장 미입력과 명시적 0 구분, 이벤트 ID별 출간 확인. Notes 암호화·복구키 경계와 AV 모바일 제외는 유지한다.
+
+운영 경계: 완료된 CLOUD-006 backfill을 재실행하지 않는다. 기존 로컬 라이브러리와 서버/R2를 대조하고 필요한 변경분만 산출한다. 실제 활성 라이브러리 쓰기·배포·서비스 운영·Git 쓰기는 각각 별도 명시적 승인 대상이다. 서버 CPU/RAM·미디어 크기 분포를 측정하기 전 worker 용량이나 새로운 인프라를 확정하지 않는다.
+
+검증은 영역별 fixture/API → frontend/native bridge → Windows/Linux/Android 실사용 → 승인된 운영 전환 순서다. 최종 기준은 PC 종료 상태에서 새 모바일 연결·수집·조회·북마크/캐릭터 변경·카탈로그/신간 갱신이 끝나고, 나중에 PC를 켜도 변경이 유실되지 않는 것이다. MOBILE-003의 전역 삭제는 안전 protocol이 완성될 때까지 HOLD를 유지하며 이 계획만으로 활성화하지 않는다.
+
 ## MOBILE-007 — Catalog bookmark changes across devices
 
-Status: `TODO`; follows the catalog read contract. Add/remove bookmarks from Android with stable `(provider, providerWorkId)` identity, idempotent operation IDs, durable retry and an explicit conflict rule. Preserve PC local authority from ADR-0033; define remote change receipt/PC application acknowledgements before enabling writes. Do not implement toggles that can invert twice after retries, or let a stale PC snapshot erase accepted mobile changes. Test offline/reconnect, duplicate requests, deletion tombstones and concurrent PC/mobile changes.
+Status: `TODO`; follows the catalog read contract and CLOUD-AUTH-001 authority contract. Add/remove bookmarks from Android with stable `(provider, providerWorkId)` identity, idempotent operation IDs, durable retry and an explicit conflict rule. The 2026-09-13 requested target supersedes the earlier plan to await PC application acknowledgements: the server will accept bookmark changes with PC off, and PC will receive them as a client. Current code still follows ADR-0033 until the scoped transition is implemented; fence legacy snapshot writes before enabling server-owned mutations. Do not implement toggles that can invert twice after retries, or let a stale PC snapshot erase accepted mobile changes. Test offline/reconnect, duplicate requests, deletion tombstones and concurrent PC/mobile changes.
 
 ## MOBILE-008 — Catalog update requests and status
 
-Status: `TODO`. Android can request a catalog DB refresh and see queued/running/completed/failed state, last successful update and errors while continuing to read the prior index. Bound and deduplicate jobs; persist crash/retry state. Resolve the relationship between the existing PC updater and server-side update worker before deployment, keeping the same catalog identity/grouping rules. The proposed target is server-side refresh available with PC off; if this needs a materially different authority/runtime arrangement, discuss that decision with the user. User data/bookmarks must survive catalog replacement. Operating a worker, deploying services and first production ingestion require explicit approval after implementation and isolated tests.
+Status: `IN_PROGRESS` — server new-work refresh and Android request/status UI implemented locally (2026-09-13). After one PC baseline publication, Korean/Japanese ingestion runs with PC off. Durable requests, page checkpoints, worker leases, atomic publication and stale-PC additions preservation are implemented; current bookmarks, visibility and PC groups survive. Failed jobs leave the previous index readable. See the [mobile source checkpoint](../agents/mobile.md#catalog-refresh-source-checkpoint--2026-09-13) for isolated verification and bounds.
+
+Operational checkpoint (2026-09-13): server deployed, authenticated HTTPS and a read-only one-page provider canary passed, and APK 0.5.0 (15) built with the existing signing identity. Device installation was deferred by the user. Existing production catalog/assets/Collections were retained; no production refresh job was submitted.
+
+Remaining: first bounded live-source ingestion and native device acceptance; complete PC/server reconciliation and server automatic lineage/edition grouping. New works currently receive singleton groups until a later PC publication supplies grouping. This is additive ingestion, not full catalog replacement or user-domain authority cutover. CLOUD-AUTH-001 owns those later contracts. Operating a worker, deploying services and first production ingestion require explicit approval.
 
 ## MOBILE-003 — Safe global deletion / tombstone protocol
 
@@ -2524,11 +2557,11 @@ M3. **MOBILE-005 Collections — DONE.** Keep the deployed cover/volume implemen
 
 M4. **MOBILE-006 shared Manga Catalog reads — DONE.** Versioned replica, PC-style search/list/detail/bookmark filter, Reader endpoint, native cover/page cache and v2 latency projection are deployed. The 2026-09-10 user completion confirmation closes the prior Galaxy Tab/device acceptance gate.
 
-M5. **MOBILE-007 bookmark changes:** after read identity/revision contract, with
-idempotent retries and PC receipt/conflict semantics.
+M5. **MOBILE-007 bookmark changes:** after CLOUD-AUTH-001 authority and read identity/revision contract, with
+idempotent retries, server acceptance, PC change reception and conflict semantics.
 
-M6. **MOBILE-008 DB refresh requests:** define PC/server updater responsibility;
-implement durable jobs while the previous index stays readable.
+M6. **MOBILE-008 DB refresh requests:** additive server worker and request/status UI
+deployed with APK 0.5.0 built; installation, live ingestion/native acceptance and full grouping/reconciliation remain.
 
 M7. **MOBILE-003 global deletion — HOLD** until explicitly approved safe protocol.
 
@@ -2541,3 +2574,22 @@ The Manga Shelf Grid and Game/Film normal presentation baseline are implemented.
 LONG-002A and WORKS-002 are user-accepted; do not restart the shelf reskin.
 CLOUD-UI-001 and STATS-001A/B await native acceptance. WORKS-001 has the TV/season/episode
 structure implemented, with related-work/richer Film surfaces still partial.
+
+
+### MOBILE-009 — Portrait UX, automatic publications and encrypted Notes (2026-09-13)
+
+User approved implementation of the discussed scope. Execution order:
+- [x] Durable PC Collection/character publication after 30s quiet, at most 5m while changing; retry after restart/offline. Publish PC folder order and preserve the actual character/group hierarchy. Mobile checks on entry/resume and every minute without interrupting readers.
+- [x] Logo opens contextual sidebar; remove Home visited folders; compact portrait Collection controls; catalog count/refresh in header with search and compact filters below. Center landscape bottom navigation; connection state in Settings.
+- [x] Manga/game imported overview hidden in mobile display; portrait metadata in content and landscape metadata in sidebar. Movie/TV metadata, season posters and paged episodes from the committed PC provider snapshot. Progressive full-resolution hero.
+- [x] Asset viewer swipe navigation across images/videos without interfering with zoom or video controls.
+- [x] Landscape Japanese spreads: cover alone, 2–3 onward, no gap, retain current page across rotation. Reuse unchanged image cache entries and prioritize visible media.
+- [x] Android encrypted Notes with PC-compatible vault/key/envelope, durable local drafts, autosave, bidirectional revision sync and preserved conflicts.
+- [x] Focused server/Rust/mobile/Java checks, frontend build and signed APK; browser/device/native evidence recorded separately. No Git mutations or device installation.
+
+Implementation and local verification are complete. Server API modules were deployed with
+source backups and authenticated HTTPS checks. APK 0.6.0 uses release DEX and explicitly
+disables debugging, retaining the existing installation certificate. Updated desktop native
+code must be running for automatic publication. Android device installation, actual
+Keystore/SQLite offline-conflict acceptance, Windows native runtime and real-network image
+timing remain unverified. See `android/README.md` for the artifact and evidence.

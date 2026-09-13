@@ -441,6 +441,14 @@ def catalog_search_page(
     return response
 
 
+def _catalog_refresh_page(language, cursor):
+    # Reuse bounded provider transport without making a request to our own API.
+    query = f"search=language%3A{language}"
+    if cursor is not None:
+        query += f"&next-id={cursor}"
+    return _catalog_cached_get(f"{KHENTAI_ORIGIN}/ajax/search?{query}").body
+
+
 @app.get("/v1/catalog/gallery/{work_id}")
 def catalog_gallery(work_id: int, authorization: str | None = Header(default=None)):
     require_auth(authorization)
@@ -2463,6 +2471,7 @@ from mobile_catalog import register_mobile_catalog
 startup_mobile_catalog = register_mobile_catalog(
     app, get_db, require_auth, lambda: DB_PATH.parent / "mobile-catalog", lambda: API_TOKEN,
     lambda work_id: _catalog_cached_get(f"{KHENTAI_ORIGIN}/r/{work_id}").body.decode("utf-8"),
+    refresh_fetcher=_catalog_refresh_page,
 )
 from r2 import presign_put as _collection_presign_put
 
@@ -2470,3 +2479,7 @@ startup_mobile_collections = register_collections(
     app, get_db, require_auth, lambda: _s3, lambda: R2_BUCKET,
     presign_get, _collection_presign_put,
 )
+
+from mobile_characters import register_characters
+
+startup_mobile_characters = register_characters(app, get_db, require_auth, mobile_asset_item, _mobile_memberships)

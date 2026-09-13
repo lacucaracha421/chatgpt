@@ -24,9 +24,22 @@ public final class NetworkPolicyTest {
  reject(()->NetworkPolicy.api("/v1/collections/work-1","DELETE"));
  reject(()->NetworkPolicy.api("/v1/collections/work-1/artworks/../media-ticket","POST"));
  for(String p:new String[]{"/v1/mobile-catalog/status","/v1/mobile-catalog/search?language=korean","/v1/mobile-catalog/count?token=opaque","/v1/mobile-catalog/works/kHentai/42?context=opaque","/v1/mobile-catalog/works/kHentai/42/reader?context=opaque","/v1/mobile-catalog/groups/kHentai/group-1/editions?context=opaque"})pass(()->NetworkPolicy.api(p,"GET"));
- for(String p:new String[]{"/v1/mobile-catalog/publication","/v1/mobile-catalog/replicas/abc","/v1/mobile-catalog/bookmarks","/v1/mobile-catalog/refresh","/v1/mobile-catalog/works/kHentai/01","/v1/mobile-catalog/works/kHentai/01/reader","/v1/mobile-catalog/works/heliotrope/42","/v1/mobile-catalog/groups/kHentai/%2e%2e/editions"})for(String method:new String[]{"GET","POST","PUT","DELETE"})reject(()->NetworkPolicy.api(p,method));
+ for(String p:new String[]{"/v1/mobile-catalog/publication","/v1/mobile-catalog/replicas/abc","/v1/mobile-catalog/bookmarks","/v1/mobile-catalog/works/kHentai/01","/v1/mobile-catalog/works/kHentai/01/reader","/v1/mobile-catalog/works/heliotrope/42","/v1/mobile-catalog/groups/kHentai/%2e%2e/editions"})for(String method:new String[]{"GET","POST","PUT","DELETE"})reject(()->NetworkPolicy.api(p,method));
+ for(String method:new String[]{"GET","POST"})pass(()->NetworkPolicy.api("/v1/mobile-catalog/refresh",method));
+ for(String method:new String[]{"PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/mobile-catalog/refresh",method));
+ reject(()->NetworkPolicy.api("/v1/mobile-catalog/refresh/anything","POST"));
  StringBuilder longQuery=new StringBuilder("/v1/mobile-catalog/search?text=");for(int i=0;i<1365;i++)longQuery.append("%EA%B0%80");pass(()->NetworkPolicy.api(longQuery.toString(),"GET"));
  for(int i=0;i<5000;i++)longQuery.append('a');reject(()->NetworkPolicy.api(longQuery.toString(),"GET"));
+ for(String path:new String[]{"/v1/library/characters","/v1/library/characters/assets?node=character%3Aid&revision=abc"}){pass(()->NetworkPolicy.api(path,"GET"));for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));}
+ reject(()->NetworkPolicy.api("/v1/library/characters/replica","PUT"));
+ String vault="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+ pass(()->NetworkPolicy.api("/v1/notes/"+vault+"?cursor=2&limit=5","GET"));
+ pass(()->NetworkPolicy.api("/v1/notes/"+vault+"/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","PUT"));
+ for(String method:new String[]{"POST","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/notes/"+vault+"/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",method));
+ reject(()->NetworkPolicy.api("/v1/notes/short","GET"));
+ reject(()->NetworkPolicy.api("/v1/notes/"+vault+"/../bad","PUT"));
+ pass(()->NetworkPolicy.api("/v1/library/characters/status","GET"));
+ pass(()->NetworkPolicy.api("/v1/collections/status","GET"));
  System.out.println("NetworkPolicy: "+checks+" checks passed");
  }
 }

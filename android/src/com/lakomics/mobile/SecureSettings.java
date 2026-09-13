@@ -29,6 +29,14 @@ final class SecureSettings {
   String encrypted=new JSONObject().put("iv",Base64.encodeToString(c.getIV(),2)).put("data",Base64.encodeToString(c.doFinal(value.toString().getBytes("UTF-8")),2)).toString();
   if(!context.getSharedPreferences("connection",0).edit().putString("encrypted",encrypted).commit())throw new Exception("Cannot store connection");
  }
+ synchronized String notesKey(String endpoint,String value)throws Exception{
+  String name="notes-key-"+ThumbnailCache.key(endpoint);
+  android.content.SharedPreferences preferences=context.getSharedPreferences("notes-keys",0);
+  if(value==null){String stored=preferences.getString(name,null);if(stored==null)return "";JSONObject e=new JSONObject(stored);Cipher c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.DECRYPT_MODE,key(),new GCMParameterSpec(128,Base64.decode(e.getString("iv"),0)));c.updateAAD(name.getBytes("UTF-8"));return new String(c.doFinal(Base64.decode(e.getString("data"),0)),"UTF-8");}
+  Cipher c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.ENCRYPT_MODE,key());c.updateAAD(name.getBytes("UTF-8"));
+  String encrypted=new JSONObject().put("iv",Base64.encodeToString(c.getIV(),2)).put("data",Base64.encodeToString(c.doFinal(value.getBytes("UTF-8")),2)).toString();
+  if(!preferences.edit().putString(name,encrypted).commit())throw new java.io.IOException("Cannot store Notes key");return value;
+ }
  synchronized void clear() throws Exception {if(!context.getSharedPreferences("connection",0).edit().clear().commit())throw new Exception("Cannot clear connection");}
  JSONObject status() throws Exception {JSONObject s=read();return new JSONObject().put("configured",s.has("token")).put("endpoint",s.optString("endpoint",""));}
 }

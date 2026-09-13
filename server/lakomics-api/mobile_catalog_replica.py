@@ -81,6 +81,7 @@ def startup(get_db):
         CREATE TABLE IF NOT EXISTS mobile_catalog_users(revision TEXT PRIMARY KEY,payload TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS mobile_catalog_publications(revision TEXT PRIMARY KEY,content_digest TEXT NOT NULL,user_revision TEXT NOT NULL,published_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS mobile_catalog_current(singleton INTEGER PRIMARY KEY CHECK(singleton=1),publication_revision TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS mobile_catalog_server_additions(work_id INTEGER PRIMARY KEY,payload TEXT NOT NULL);
         """)
         db.commit()
 
@@ -308,13 +309,21 @@ def prepared_items(db, query, offset, limit, total):
         return None
     return items[offset:offset + limit]
 
-def publish(body, root, get_db):
+def publish(body, root, get_db, *, additions=(), finalize=None):
     if not isinstance(body, dict) or set(body) != {"version", "baseRevision", "contentDigest", "userSnapshot"} or body["version"] != 1:
         fail()
     content = checked_digest(body["contentDigest"])
     if body["baseRevision"] is not None:
         checked_digest(body["baseRevision"])
     users = validate_users(body["userSnapshot"])
+    with get_db() as db:
+        artifact = db.execute("SELECT manifest FROM mobile_catalog_artifacts WHERE digest=?", [content]).fetchone()
+        if artifact is None or not artifact_path(root, content).is_file():
+            fail(409, "Catalog projection is not ready")
+        if json.loads(artifact[0])["groupDecisionRevision"] != users["decisionRevision"]:
+            fail(409, "Catalog decisions changed; export again")
+    from catalog_refresh_content import materialize
+    content = materialize(root, content, get_db, additions)
     user_revision = digest(users)
     revision = digest(["mobile-catalog-v1", content, user_revision])
     with get_db() as db:
@@ -334,7 +343,7 @@ def publish(body, root, get_db):
         if prior and not already_current and prior["content_digest"] != content and prior["user_revision"] != user_revision and db.execute("SELECT EXISTS(SELECT 1 FROM mobile_catalog_publications WHERE content_digest=?)", [content]).fetchone()[0]:
             fail(409, "A rollback must retain the current user snapshot")
     prepare_users(root, content, revision, users)
-    if published_at is not None:
+    if published_at is not None and finalize is None:
         return dict(publicationRevision=revision, publishedAt=published_at, userRevision=user_revision)
     with get_db() as db:
         db.execute("BEGIN IMMEDIATE")
@@ -346,6 +355,8 @@ def publish(body, root, get_db):
         db.execute("INSERT INTO mobile_catalog_users VALUES(?,?) ON CONFLICT DO NOTHING", [user_revision, encode(users)])
         db.execute("INSERT INTO mobile_catalog_publications VALUES(?,?,?,?) ON CONFLICT DO NOTHING", [revision, content, user_revision, published])
         db.execute("INSERT INTO mobile_catalog_current VALUES(1,?) ON CONFLICT(singleton) DO UPDATE SET publication_revision=excluded.publication_revision", [revision])
+        if finalize is not None:
+            finalize(db, revision)
         db.commit()
         row = current(db)
         return dict(publicationRevision=revision, publishedAt=row["published_at"], userRevision=user_revision)

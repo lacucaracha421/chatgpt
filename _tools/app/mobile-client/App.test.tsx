@@ -11,6 +11,7 @@ vi.mock('./Viewer',()=>({Viewer:({items,index,onIndex,onClose}:{items:Asset[];in
 import {App} from './App';
 const a=[{id:'a1',kind:'image'},{id:'a2',kind:'image'}],b=[{id:'b1',kind:'image'},{id:'b2',kind:'image'}];
 beforeEach(()=>{
+  vi.stubGlobal('ResizeObserver',class{observe(){}disconnect(){}});
   localStorage.clear(); mocks.api.mockReset(); mocks.native.mockReset();
   mocks.native.mockResolvedValue({configured:true,endpoint:'https://example.invalid'});
   mocks.api.mockImplementation(async(path:string)=>{
@@ -19,7 +20,35 @@ beforeEach(()=>{
     return{items:path.includes('classification_id=b')?b:a,has_more:false,next_cursor:null};
   });
 });
-afterEach(cleanup);
+afterEach(()=>{cleanup();vi.unstubAllGlobals();});
+it('opens character browsing inside Library and uses Android back for its parent',async()=>{
+  const original=mocks.api.getMockImplementation()!;
+  const revision='a'.repeat(64);
+  mocks.api.mockImplementation((path:string)=>{
+    if(path==='/v1/library/characters')return Promise.resolve({version:1,authority:'pc',authorityEpoch:0,capabilities:{read:true,write:false},ready:true,revision,nodes:[{id:'series:s',sourceId:'s',seriesId:'s',kind:'series',parentId:null,name:'Series',description:'',thumbnailAssetId:null,manualOnly:false,excluded:false}],scopes:[{nodeId:'series:s',filter:'all',totalCount:2,sourceCount:2}]});
+    if(path.startsWith('/v1/library/characters/assets'))return Promise.resolve({revision,items:b,totalCount:2,sourceCount:2,has_more:false,next_cursor:null});
+    return original(path);
+  });
+  render(<App/>);await screen.findByText('tile-a1');
+  fireEvent.click(await screen.findByRole('button',{name:'Series2'}));
+  await screen.findByText('tile-b1');
+  act(()=>window.dispatchEvent(new Event('lakomics-back')));
+  await screen.findByRole('button',{name:'Series · 2개'});
+  expect(screen.queryByText('tile-b1')).toBeNull();
+  act(()=>window.dispatchEvent(new Event('lakomics-back')));
+  await screen.findByText('tile-a1');
+});
+it('keeps visited Catalog and Notes panels separate when returning Home',async()=>{
+  const api=mocks.api.getMockImplementation()!;
+  mocks.api.mockImplementation((path:string)=>path.startsWith('/v1/mobile-catalog')?Promise.resolve({ready:true,publicationRevision:'p1',items:[],totalCount:0,countStatus:'ready',context:'c',nextCursor:null}):api(path));
+  mocks.native.mockImplementation(async(op:string)=>op.startsWith('notes')?{unlocked:true,notes:[]}:{configured:true,endpoint:'https://example.invalid'});
+  render(<App/>);await screen.findByText('tile-a1');
+  fireEvent.click(screen.getByRole('button',{name:'Catalog',exact:true}));await screen.findByRole('region',{name:'만화 카탈로그'});
+  fireEvent.click(screen.getByRole('button',{name:'Notes',exact:true}));await screen.findByRole('button',{name:'메모 동기화'});
+  fireEvent.click(screen.getByRole('button',{name:'Home',exact:true}));await screen.findByText('tile-a1');
+  expect(screen.queryByRole('button',{name:'메모 동기화'})).toBeNull();expect(screen.queryByRole('region',{name:'메모',exact:true})).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:'Catalog',exact:true}));await screen.findByRole('region',{name:'만화 카탈로그'});expect(screen.queryByRole('button',{name:'메모 동기화'})).toBeNull();
+});
 describe('committed view and browsing',()=>{
   it('renders metadata without waiting for thumbnails and appends past 100 without replacing the view',async()=>{
     const original=mocks.api.getMockImplementation()!;
@@ -103,4 +132,20 @@ describe('committed view and browsing',()=>{
     fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));
     await screen.findByText('tile-b1');
   });
+});
+
+it('starts folders collapsed and provides expand, focus and collapse controls',async()=>{
+  const original=mocks.api.getMockImplementation()!;
+  mocks.api.mockImplementation((path:string)=>path.includes('classifications')?Promise.resolve({items:[{id:'p',name:'Parent',asset_count:2,parent_id:null},{id:'b',name:'Child',asset_count:2,parent_id:'p'},{id:'q',name:'Other',asset_count:2,parent_id:null},{id:'x',name:'Other child',asset_count:2,parent_id:'q'}]}):original(path));
+  render(<App/>);await screen.findByRole('button',{name:'Parent 펼치기'});
+  expect(screen.queryByRole('button',{name:'Child2'})).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));
+  fireEvent.click(await screen.findByRole('button',{name:'모든 폴더 펼치기'}));
+  fireEvent.click(await screen.findByRole('button',{name:'Child2'}));
+  await screen.findByText('tile-b1');
+  fireEvent.click(screen.getByRole('button',{name:'현재 위치만 펼치기'}));
+  expect(screen.getByRole('button',{name:'Child2'})).toBeTruthy();
+  expect(screen.queryByRole('button',{name:'Other child2'})).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:'모든 폴더 접기'}));
+  expect(screen.queryByRole('button',{name:'Child2'})).toBeNull();
 });

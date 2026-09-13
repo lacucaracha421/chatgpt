@@ -708,3 +708,14 @@ mod tests {
         assert_eq!(imported.notes.iter().filter(|n| n.id == id).count(), 1);
     }
 }
+
+#[cfg(test)]
+mod mobile_interop {
+    use super::*;
+    #[test]
+    fn android_notes_envelope_compatibility() {
+        let key=unhex("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f").unwrap();
+        let content=open(&key,"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",&Envelope {version:1,nonce:"000102030405060708090a0b".into(),ciphertext:"3c20a272b189a739b7637c222502d2c5a1faa5569f1f265e0245b5c6f1f08092eaba06171f55fe05c88653cff8ee46568b3d42b73cb7cfa95abb087d7d8f909a9558e440b5b04a127978880d9dea6f9c5dee88165459715acdcfa8ee54d2ccfdaf992d83c000bc38a43e0c827a4303023c0e7d8bb1f9d4ebd5dbca9f3a7604db".into()}).unwrap();
+        assert_eq!(content.title,"메모");assert_eq!(content.body,"PC와 모바일");
+    }
+}

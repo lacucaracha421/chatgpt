@@ -12,12 +12,12 @@ import java.util.*;
 import java.util.concurrent.*;
 public final class MainActivity extends Activity {
  private static final String ORIGIN="https://app.lakomics.local";
- private WebView web; private SecureSettings settings; private CloudClient client; private MediaRepository media;
+ private WebView web; private SecureSettings settings; private CloudClient client; private MediaRepository media; private NotesRepository notes;
  private final ThreadPoolExecutor workers=new ThreadPoolExecutor(4,4,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(48));
  private final ThreadPoolExecutor mediaWorkers=new ThreadPoolExecutor(4,4,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(24));
  private final ConcurrentHashMap<String,CancellationSignal> active=new ConcurrentHashMap<>();
  private boolean destroyed=false;
- @Override public void onCreate(Bundle b){super.onCreate(b);settings=new SecureSettings(this);client=new CloudClient(settings);
+ @Override public void onCreate(Bundle b){super.onCreate(b);settings=new SecureSettings(this);client=new CloudClient(settings);notes=new NotesRepository(this,settings);
   try{media=MediaRepository.get(this);}catch(IllegalStateException ignored){}
   getWindow().setStatusBarColor(Color.rgb(16,17,18));getWindow().setNavigationBarColor(Color.rgb(16,17,18));
   web=new WebView(this);web.setBackgroundColor(Color.rgb(16,17,18));setContentView(web);
@@ -65,11 +65,15 @@ public final class MainActivity extends Activity {
    if(id==null || id.length()>128 || payload==null || payload.length()>65536){return;}CancellationSignal signal=new CancellationSignal();if(active.putIfAbsent(id,signal)!=null)return;
    try{(operation.equals("thumbnail") || operation.equals("media") || operation.equals("collectionArtwork") || operation.equals("catalogImage")?mediaWorkers:workers).execute(()->{try{signal.throwIfCanceled();JSONObject p=new JSONObject(payload);Object data;
     switch(operation){
+     case "notesState":data=notes.state();break;
+     case "notesUnlock":data=notes.unlock(p.getString("key"));break;
+     case "notesSave":data=notes.save(p);break;
+     case "notesSync":data=notes.sync(signal);break;
      case "status":data=settings.status();break;
      case "cacheStatus":data=cacheStatus();break;
      case "clearCache":if(media==null)throw new IOException();media.clear();data=cacheStatus();break;
      case "thumbnail":data=thumbnail(p.getString("assetId"),signal);break;
-     case "collectionArtwork":if(media==null)throw new IOException("Cache unavailable");data=media.collectionArtwork(p.getString("collectionId"),p.getString("artworkId"),p.getString("variant"),p.getString("revision"),signal);break;
+     case "collectionArtwork":if(media==null)throw new IOException("Cache unavailable");data=media.collectionArtwork(p.getString("collectionId"),p.getString("artworkId"),p.getString("variant"),p.getString("revision"),p.optString("digest",""),signal);break;
      case "catalogImage":if(media==null)throw new IOException("Cache unavailable");data=media.catalogImage(p.getString("workId"),p.getString("revision"),p.getString("kind"),p.getInt("index"),p.getString("url"),signal);break;
      case "media":data=media==null?client.api("/v1/library/assets/"+Uri.encode(p.getString("assetId"))+"/media-ticket","POST",new JSONObject().put("variant","original"),signal):media.browser(p.getString("assetId"),"original",p.optString("mime"),signal);break;
      case "pickerStatus":data=pickerStatus();break;

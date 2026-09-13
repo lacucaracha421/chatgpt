@@ -1,5 +1,7 @@
 //! Explicit, one-way publication of committed Collection presentation data.
 //! No provider calls, lazy imports or writes to the library. Source previews stage in TEMP.
+#[path = "collection_cache.rs"]
+mod cache;
 use super::publication::{report, Reporter};
 use super::client::CloudClient;
 use crate::library::{
@@ -49,6 +51,7 @@ pub(crate) struct ReplicaCollection {
     #[serde(flatten)]
     summary: CollectionSummary,
     volumes: Vec<CollectionVolume>,
+    series: Option<serde_json::Value>,
     artworks: Vec<ReplicaArtwork>,
 }
 #[derive(Debug, Serialize)]
@@ -74,7 +77,6 @@ struct LocalBlob {
 struct Snapshot {
     replica: CollectionReplica,
     files: BTreeMap<String, LocalBlob>,
-    _staging: tempfile::TempDir,
 }
 
 impl Library {
@@ -123,7 +125,9 @@ fn publish_snapshot(client: &CloudClient, token: &str, snapshot: Snapshot, progr
         }
         // Bound simultaneous file buffers/PUTs, while retaining the all-artwork-before-
         // metadata barrier. Completed immutable objects are reused after interruption.
-        let files: Vec<_> = snapshot.files.values().collect();
+        let descriptors:Vec<_>=snapshot.files.values().map(|file|&file.descriptor).collect();
+        let missing=client.missing_collection_artworks(&descriptors,token)?;
+        let files: Vec<_> = snapshot.files.values().filter(|file|missing.contains(&file.descriptor.sha256)).collect();
         let stopped = std::sync::atomic::AtomicBool::new(false);
         let completed = std::sync::Mutex::new(0u64);
         let total = files.len() as u64;
@@ -177,8 +181,6 @@ fn upload_local_blob(client: &CloudClient, token: &str, local: &LocalBlob) -> Re
 fn snapshot_from_connection(root: &Path, connection: &mut rusqlite::Connection, base_revision: Option<String>, progress: Reporter<'_>) -> Result<Snapshot, LibraryError> {
         let transaction = connection.transaction()?;
         let source_root = collection_source_root(&transaction, root)?;
-        let staging = tempfile::tempdir().map_err(|_| LibraryError::InvalidWorkArtwork)?;
-        let staging_root = staging.path().canonicalize().map_err(|_| LibraryError::InvalidWorkArtwork)?;
         let mut files = BTreeMap::new();
         let mut total_bytes = 0;
         let mut collections = Vec::new();
@@ -237,9 +239,11 @@ fn snapshot_from_connection(root: &Path, connection: &mut rusqlite::Connection, 
                 });
             }
             if let (Some(configured), Some(source)) = (source_root.as_deref(), source_path.as_deref()) {
-                supplement_source_covers(root, configured, source, &staging_root, &mut summary, &mut volumes, &mut artworks, &mut files, &mut total_bytes)?;
+                supplement_source_covers(root, configured, source, &mut summary, &mut volumes, &mut artworks, &mut files, &mut total_bytes)?;
             }
+            let series = committed_series(&transaction, &summary.id)?;
             let collection = ReplicaCollection {
+                series,
                 summary,
                 volumes,
                 artworks,
@@ -266,7 +270,6 @@ fn snapshot_from_connection(root: &Path, connection: &mut rusqlite::Connection, 
                 collections,
             },
             files,
-            _staging: staging,
         })
 }
 
@@ -275,7 +278,7 @@ fn available_artwork(artworks: &[ReplicaArtwork], id: Option<&str>) -> bool {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn supplement_source_covers(root: &Path, configured: &str, source: &str, staging: &Path,
+fn supplement_source_covers(root: &Path, configured: &str, source: &str,
     summary: &mut CollectionSummary, volumes: &mut Vec<CollectionVolume>, artworks: &mut Vec<ReplicaArtwork>,
     files: &mut BTreeMap<String, LocalBlob>, total: &mut u64) -> Result<(), LibraryError> {
     let directory = resolve_collection_dir(configured, source);
@@ -284,7 +287,7 @@ fn supplement_source_covers(root: &Path, configured: &str, source: &str, staging
     if !directory.starts_with(root) { return Err(LibraryError::InvalidWorkArtwork); }
     if summary.cover_asset_id.is_none() && !available_artwork(artworks, summary.selected_work_artwork_id.as_deref()) {
         match source_preview_path(&directory) {
-            Ok(path) => { summary.selected_work_artwork_id = Some(source_artwork(root, staging, &path, &summary.id, artworks, files, total)?); }
+            Ok(path) => { summary.selected_work_artwork_id = Some(source_artwork(root, &path, &summary.id, artworks, files, total)?); }
             Err(LibraryError::MediaNotFound) => {},
             Err(error) => return Err(error),
         }
@@ -293,7 +296,7 @@ fn supplement_source_covers(root: &Path, configured: &str, source: &str, staging
     for (number, edition, path) in source_volume_images(&directory)? {
         let existing = volumes.iter().position(|v| v.volume_number == number && v.edition_index == edition);
         if existing.is_some_and(|i| available_artwork(artworks, volumes[i].cover_artwork_id.as_deref())) { continue; }
-        let artwork_id = source_artwork(root, staging, &path, &summary.id, artworks, files, total)?;
+        let artwork_id = source_artwork(root, &path, &summary.id, artworks, files, total)?;
         if let Some(index) = existing { volumes[index].cover_artwork_id = Some(artwork_id); }
         else {
             if volumes.len() >= MAX_VOLUMES { return Err(LibraryError::InvalidCloudResponse); }
@@ -309,7 +312,7 @@ fn source_id(identity: &str) -> String {
     format!("source-{}", Sha256::digest(identity.as_bytes()).iter().map(|b| format!("{b:02x}")).collect::<String>())
 }
 
-fn source_artwork(root: &Path, staging: &Path, path: &Path, collection: &str,
+fn source_artwork(root: &Path, path: &Path, collection: &str,
     artworks: &mut Vec<ReplicaArtwork>, files: &mut BTreeMap<String, LocalBlob>, total: &mut u64) -> Result<String, LibraryError> {
     let path = path.canonicalize().map_err(|_| LibraryError::InvalidWorkArtwork)?;
     let relative = path.strip_prefix(root).map_err(|_| LibraryError::InvalidWorkArtwork)?.to_str().ok_or(LibraryError::InvalidWorkArtwork)?.replace('\\', "/");
@@ -317,8 +320,9 @@ fn source_artwork(root: &Path, staging: &Path, path: &Path, collection: &str,
     if artworks.iter().any(|a| a.id == id) { return Ok(id); }
     if artworks.len() >= MAX_ARTWORKS { return Err(LibraryError::InvalidCloudResponse); }
     let original = add_blob(root, &relative, MAX_ORIGINAL_BYTES, files, total)?.ok_or(LibraryError::InvalidWorkArtwork)?;
-    let thumbnail_name = format!("{}.webp", original.sha256);
-    let thumbnail_path = staging.join(&thumbnail_name);
+    let thumbnail_name = format!(".cache/mobile-collections/thumbnails/{}.webp", original.sha256);
+    let thumbnail_path = root.join(&thumbnail_name);
+    let _thumbnail_write=cache::THUMBNAIL_WRITE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if !thumbnail_path.exists() {
         let bytes = read_existing_image(&path, MAX_ORIGINAL_BYTES)?.ok_or(LibraryError::InvalidWorkArtwork)?;
         if blob_for(&bytes)? != original { return Err(LibraryError::InvalidWorkArtwork); }
@@ -328,7 +332,7 @@ fn source_artwork(root: &Path, staging: &Path, path: &Path, collection: &str,
         let image = reader.decode().map_err(|_| LibraryError::InvalidWorkArtwork)?;
         write_collection_thumbnail(&image, &thumbnail_path)?;
     }
-    let thumbnail = add_blob(staging, &thumbnail_name, MAX_THUMBNAIL_BYTES, files, total)?;
+    let thumbnail = add_blob(root, &thumbnail_name, MAX_THUMBNAIL_BYTES, files, total)?;
     artworks.push(ReplicaArtwork {id: id.clone(), kind: "cover".into(), selected: false, original: Some(original), thumbnail});
     Ok(id)
 }
@@ -397,10 +401,7 @@ fn add_blob(
     if !path.starts_with(root) {
         return Err(LibraryError::InvalidWorkArtwork);
     }
-    let Some(bytes) = read_existing_image(&path, limit)? else {
-        return Ok(None);
-    };
-    let descriptor = blob_for(&bytes)?;
+    let Some(descriptor) = cache::descriptor(root, &path, limit)? else { return Ok(None); };
     if !files.contains_key(&descriptor.sha256) {
         *total += descriptor.size_bytes;
         if files.len() >= MAX_FILES || *total > MAX_TOTAL_BYTES {
@@ -671,6 +672,8 @@ mod tests {
         let server = Server::http("127.0.0.1:0").unwrap();
         let client = CloudClient::new(&format!("http://{}", server.server_addr())).unwrap();
         let worker = std::thread::spawn(move || {
+            let check=server.recv_timeout(std::time::Duration::from_secs(5)).unwrap().unwrap();
+            assert_eq!(check.url(),"/v1/collections/artworks/check");check.respond(Response::empty(404)).unwrap();
             for _ in 0..2 {
                 let mut pending = Vec::new();
                 for _ in 0..4 {
@@ -688,13 +691,33 @@ mod tests {
             assert_eq!(request.url(), "/v1/collections/replica");
             request.respond(Response::from_string(json!({"revision":"published"}).to_string())).unwrap();
         });
-        let snapshot = Snapshot { files, _staging: tempfile::tempdir().unwrap(), replica: CollectionReplica {version:1,base_revision:None,collections:vec![]} };
+        let snapshot = Snapshot { files, replica: CollectionReplica {version:1,base_revision:None,collections:vec![]} };
         let events = std::sync::Mutex::new(Vec::new());
         assert_eq!(publish_snapshot(&client, "test-token", snapshot, &|event| events.lock().unwrap().push(event)).unwrap().revision, "published");
         let events = events.into_inner().unwrap();
         let counts: Vec<_> = events.iter().filter(|event| event.phase == "uploading").map(|event| event.completed).collect();
         assert_eq!(counts, (0..=8).collect::<Vec<_>>());
         assert_eq!(events.last().unwrap().phase, "publishing");
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn confirmed_artwork_skips_file_reads_and_individual_requests() {
+        let server=Server::http("127.0.0.1:0").unwrap();
+        let client=CloudClient::new(&format!("http://{}",server.server_addr())).unwrap();
+        let blob=blob_for(b"\x89PNG\r\n\x1a\nknown").unwrap();
+        let files=BTreeMap::from([(blob.sha256.clone(),LocalBlob{descriptor:blob,path:PathBuf::from("does-not-exist.png"),limit:100})]);
+        let worker=std::thread::spawn(move || {
+            let mut request=server.recv_timeout(std::time::Duration::from_secs(5)).unwrap().unwrap();
+            assert_eq!(request.url(),"/v1/collections/artworks/check");
+            let body:serde_json::Value=serde_json::from_reader(request.as_reader()).unwrap();assert_eq!(body["items"].as_array().unwrap().len(),1);
+            request.respond(Response::from_string(r#"{"missing":[]}"#)).unwrap();
+            let request=server.recv_timeout(std::time::Duration::from_secs(5)).unwrap().unwrap();
+            assert_eq!(request.url(),"/v1/collections/replica");
+            request.respond(Response::from_string(r#"{"revision":"published"}"#)).unwrap();
+        });
+        let snapshot=Snapshot{files,replica:CollectionReplica{version:1,base_revision:None,collections:vec![]}};
+        assert_eq!(publish_snapshot(&client,"test-token",snapshot,&|_|{}).unwrap().uploaded,0);
         worker.join().unwrap();
     }
 
@@ -786,5 +809,35 @@ mod tests {
             ));
         }
         thread.join().unwrap();
+    }
+}
+
+// Only committed presentation metadata crosses the boundary, never provider URLs or credentials.
+fn committed_series(db: &rusqlite::Connection, id: &str) -> Result<Option<serde_json::Value>, LibraryError> {
+    use rusqlite::OptionalExtension;
+    let raw: Option<String> = db.query_row("SELECT provider_data_json FROM collection_external_bindings WHERE collection_id=?1 AND provider='tmdb' AND external_id LIKE 'tv:%' LIMIT 1", [id], |r| r.get(0)).optional()?;
+    let Some(raw) = raw else { return Ok(None) };
+    let value: serde_json::Value = serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
+    let Some(series) = value.get("series").filter(|s| s.is_object()) else { return Ok(None) };
+    let seasons = series.get("seasons").and_then(|s| s.as_array()).into_iter().flatten().map(|s| {
+        let episodes: Vec<_> = s.get("episodes").and_then(|v| v.as_array()).into_iter().flatten().map(|e| serde_json::json!({"id":e["id"],"episodeNumber":e["episodeNumber"],"name":e["name"],"airDate":e["airDate"],"runtimeMinutes":e["runtimeMinutes"]})).collect();
+        serde_json::json!({"id":s["id"],"seasonNumber":s["seasonNumber"],"name":s["name"],"airDate":s["airDate"],"posterArtworkId":s["posterArtworkId"],"episodes":episodes})
+    }).collect::<Vec<_>>();
+    Ok(Some(serde_json::json!({"status":series["status"],"cast":series.get("cast").cloned().unwrap_or(serde_json::json!([])),"seasons":seasons})))
+}
+
+#[cfg(test)]
+mod series_projection_tests {
+    #[test]
+    fn committed_tv_metadata_omits_provider_urls_and_overview() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE collection_external_bindings(collection_id TEXT,provider TEXT,external_id TEXT,provider_data_json TEXT)").unwrap();
+        let data = serde_json::json!({"series":{"status":"Ended","cast":["Actor"],"seasons":[{"id":1,"seasonNumber":1,"name":"Season 1","airDate":"2024-01-01","posterArtworkId":"poster","posterPath":"/private-provider-path","overview":"Imported overview","episodes":[{"id":2,"episodeNumber":1,"name":"Episode","airDate":null,"runtimeMinutes":24,"overview":"Imported episode overview"}]}]}});
+        db.execute("INSERT INTO collection_external_bindings VALUES('work','tmdb','tv:1',?1)",[data.to_string()]).unwrap();
+        let result = super::committed_series(&db,"work").unwrap().unwrap();
+        assert_eq!(result["seasons"][0]["posterArtworkId"], "poster");
+        assert_eq!(result["seasons"][0]["episodes"][0]["runtimeMinutes"],24);
+        assert!(!result.to_string().contains("overview"));
+        assert!(!result.to_string().contains("private-provider"));
     }
 }

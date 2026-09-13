@@ -1,11 +1,11 @@
 # Lakomics Android client
 
-Current source version: **0.4.3 (14)**, declared in [AndroidManifest.xml](AndroidManifest.xml). Documentation reconciled on 2026-09-09 against `0c61206`. The versioned evidence below records a built/signed 0.4.3 APK; the [living backlog](../docs/roadmap/lakomics-backlog.md#mobile-006--shared-manga-catalog-browsing) still leaves its Galaxy Tab installation and native reader/cold-warm acceptance pending. This refresh did not inspect the installed device or production services.
+Current source version: **0.6.2 (18)**, declared in [AndroidManifest.xml](AndroidManifest.xml). Release APK built with the existing installation certificate. The supporting server API update is deployed. Galaxy Tab installation is deferred because the device is unavailable.
 
 ## Current functionality and remaining gates
 
 - Independent authenticated Home, Library and read-only Collections; Continue was removed in favor of Recent and classification/date/creator discovery.
-- Shared Manga Catalog search, detail, editions and bookmark filtering. The reader shows one page at a time with hidden-by-default overlay controls, horizontal navigation, 1x–5x zoom and bounded pan, device-local position, nearby-page prefetch and one expired-manifest refresh.
+- Shared Manga Catalog search, detail, editions and bookmark filtering. The reader shows one page in portrait and Japanese two-page spreads after the cover in landscape, with hidden-by-default overlay controls, horizontal navigation, 1x–5x zoom and bounded pan, device-local position, nearby-page prefetch and one expired-manifest refresh.
 - Shared 1 GiB native media cache and cache-clear controls; Asset videos request autoplay and looping while preserving a paused retry state.
 - Read-only DocumentsProvider and integrated CloudMediaProvider, plus device-only temporary image saves. Provider implementation does not guarantee every receiving app's picker compatibility.
 - Remaining gates include the recorded 0.4.3 device install/reader checks, recipient Picker/SAF multi-select/restart compatibility and real media timing. Catalog bookmark mutations, server refresh authority, System Share quick-save and extension update management remain separate backlog work.
@@ -16,7 +16,15 @@ This independent APK bundles the React client from `_tools/app/mobile-client`. I
 
 ## Build
 
-Requirements: existing JDK 17 (`JAVA_HOME`), Android SDK platform 35 and build-tools 35.0.0, PowerShell, and the frontend dependencies already installed in `app`. No Gradle/Kotlin/Capacitor dependencies are added.
+Requirements: existing JDK 17 (`JAVA_HOME`), Android SDK platform 35 and build-tools 35.0.0, Python 3 for the release builder (or PowerShell for the older debug builder), and frontend dependencies already installed in `_tools/app`. No Gradle/Kotlin/Capacitor dependencies are added.
+
+Release packaging on Linux or Windows: run `npm run mobile:build` in `_tools/app`, then from the repository root:
+
+```sh
+python android/build.py --sdk-root <SDK-path> --java-home <JDK-17-path>
+```
+
+The builder uses `d8 --release`, validates `android:debuggable=false`, verifies bundled asset bytes and portable ZIP paths, aligns the APK and verifies its v2/v3 signatures. It requires the existing ignored `android/build/debug.keystore` and never creates or replaces a signing key. This is a release configuration signed with the existing personal-install development certificate, not a new store-distribution identity.
 
 From the repository root, build the mobile TypeScript/Vite entry into `android/assets`, then package it:
 
@@ -168,3 +176,158 @@ The Manga Catalog reader now uses the full fullscreen surface for the current pa
 The normal Asset video viewer now requests autoplay and loop by default. Android WebView no longer requires a media playback gesture, which allows the asynchronously resolved signed media URL to begin playback automatically. Audio is not forced muted. A paused video remains paused across retry while initial opens and actively playing retries autoplay.
 
 Verification: 60 mobile frontend tests and the production mobile TypeScript/Vite build passed. Android source compilation plus NetworkPolicy 97, DocumentTree 19, ThumbnailCache 19, MediaTransfer 22, TemporaryImage 23 and PickerSnapshot checks passed. Final APK: `android/build/lakomics-mobile-reader-0.4.3-debug.apk`, version 0.4.3 (14), SHA-256 `6117829f696105d2c89fe9e69cb5507d627f1e034015047fe82bc3a779d2b31f`, signed with the existing debug update identity; APK Signature Scheme v2/v3 verification passed.
+
+## 0.5.0 — Server catalog refresh and S11 browsing (2026-09-13)
+
+APK: `android/build/lakomics-mobile-0.5.0-debug.apk` (1,164,708 bytes), SHA-256
+`a52635cdbd36c3ef4530e3dda6344806a92d0a8a3aeb615a0db11fe562aa1680`.
+Package `com.lakomics.mobile`, versionCode 15, versionName 0.5.0. The signer
+SHA-256 `8e7bd2ce6cfc8b19c9d9aa9e86050a41f8a7d2a51d318d3f3f65eb57e2e5f4f7`
+matches the prior 0.4.3 APK. Install in place; no uninstall/data reset is needed.
+
+Includes the server catalog refresh request/progress UI, Collection rating/sort
+filters, and landscape character hierarchy/cards with retained portrait layout.
+The server API was deployed with backup and authenticated HTTPS checks; character
+content still needs its first PC publication. Catalog already has its baseline.
+No production refresh job was submitted during deployment.
+
+Linux SDK35/JDK17 compile, NetworkPolicy 110 / DocumentTree 19 / ThumbnailCache 19 /
+MediaTransfer 22 / TemporaryImage 23 checks and PickerSnapshot tests passed.
+Mobile TypeScript/Vite build, all 12 bundled asset byte comparisons/paths, APK
+alignment and v2/v3 signatures passed. The Linux packaging used the same native
+compile/DEX/resource/ZIP/alignment/signing steps as build.ps1 with Linux SDK tools
+and an isolated temporary output directory; the existing keystore was retained.
+No Galaxy Tab installation or native device interaction was performed.
+
+
+## 0.6.0 — Portrait layout, automatic publication and encrypted Notes (2026-09-13)
+
+APK: `android/build/lakomics-mobile-0.6.0-release.apk` (1,176,996 bytes), SHA-256
+`409e333927164eea69e4ba6e1af12c99dc2955f9661761705e7bd9fbdf9e3130`.
+VersionCode 16; release DEX, explicit non-debuggable manifest, WebView debugging off.
+The v2/v3 signer matches 0.5.0; the existing development certificate is retained
+for installation updates. This is not a separately provisioned store-signing key.
+
+- Logo opens the contextual sidebar. Home no longer shows visited folders. PC
+  classification order and character/group hierarchy are published to the Library tree.
+  Portrait Collection controls are compact; Catalog count/refresh are in the header.
+  Landscape navigation is centered and connection status lives in Settings.
+- Manga/game descriptions are hidden in the mobile presentation. Metadata appears
+  in portrait content and landscape sidebars. TV season posters, episode rows,
+  production/runtime/rating/genre metadata use committed PC metadata. Hero artwork
+  progressively replaces its thumbnail with the original image.
+- Landscape Catalog reading uses cover alone, then right-to-left 2–3/4–5 spreads
+  with no gutter. Aspect ratio and current page survive rotation. Asset swipes
+  work for images and video surfaces; video controls and pinch remain separate.
+  The Library viewer can append more assets as it approaches the loaded end.
+- PC migration 74 retains dirty Collection/character generations across restart;
+  the updated desktop publishes after 30 seconds quiet or five minutes of continuous
+  changes, retries failures, and publishes folder order. Mobile checks revisions
+  on entry/resume and every minute while browsing, keeping readers undisturbed.
+  The updated desktop native build must run for this publisher; an APK alone does
+  not update the PC executable.
+- Notes use the PC recovery key (entered once), AES-GCM envelopes, Android Keystore
+  protection, encrypted local SQLite drafts, 500 ms autosave and two-way revision
+  sync. Offline edits remain pending; concurrent edits are preserved as copies.
+  Notes support creation/editing, search, pin, trash and restore. Other mobile
+  Collection/character editing remains excluded.
+- Native asset ticket requests are batched, Collection artwork caches follow content
+  digests, Catalog media caches retain unchanged source URLs across publications,
+  and offscreen Catalog covers wait until near the viewport.
+
+Verification: mobile suite 79/79 passed, followed by final App 9/9 and Catalog/Viewer
+23/23 checks including four added regressions. Mobile TypeScript/Vite and desktop
+TypeScript passed. Rust automatic-publication durability, character projections
+(2), Collection snapshots (9), committed TV extraction (1) and Notes encryption
+interop (1) passed; the existing opt-in Collection canary stayed ignored. Server
+Collection/character/Notes tests passed 27/27. JDK17/SDK35 native compilation,
+NetworkPolicy 119, DocumentTree 19, ThumbnailCache 19, MediaTransfer 22,
+TemporaryImage 23, NotesCrypto 4 and PickerSnapshot checks passed. APK asset byte
+comparison, portable paths, alignment, manifest and signatures passed.
+
+Browser fixtures at 800×1280 and 1280×800 verified portrait/landscape metadata,
+compact controls, season episodes, original hero loading, Notes save/navigation,
+centered bottom buttons, correct ratio/RTL/gutter/rotation, and asset swipes in
+both directions. These are browser fixtures, not native device or real-network
+performance evidence. Android Keystore/SQLite offline conflict acceptance, native
+video gestures, actual cache timing and Windows native execution remain unverified.
+
+Server rollout replaced only `mobile_collections.py` and `mobile_characters.py`.
+Backup: `/home/linuxuser/lakomics-api/backups/mobile-0.6.0-20260913`.
+Installed SHA-256 values match local source:
+- Collections: `1fb9de4c4af1caed14a0d86409f6155b6dcf07b91fad1121c0eface01923a85f`
+- Characters: `f5f542d4c1b0fd617910626c986040e02b23008cc3b0b8ade78e8a8f5abac054`
+
+API and local proxy services are active/running with NRestarts=0. Tailnet HTTPS
+health, both revision status endpoints, Collection list, character index and
+Catalog status returned 200 with authentication; both new status endpoints reject
+missing authentication with 401. Character and Collection publications were ready.
+No refresh ingestion, full backfill, device installation or Git mutation was run.
+
+
+## 0.6.1 — Compact headers and Catalog cover fix (2026-09-13)
+
+Release APK: `android/build/lakomics-mobile-0.6.1-release.apk` (1,176,996 bytes).
+SHA-256: `083efd937446e26f2f3f9d5bb8fd840e74c672e5db92761b1cb31f3f71c7f331`.
+VersionCode 17, existing update certificate, non-debuggable release configuration.
+
+- Catalog detail cover now provides the positioning/overflow boundary for its
+  absolute image wrapper. It stays inside the 180×270 detail cover in the checked
+  landscape viewport, and the Read action opens the actual page reader.
+- Landscape Library title/path/count/density/refresh share the 64px app header;
+  the duplicate content heading and character-location rows are removed. Portrait
+  Library retains inline controls. The sidebar search is removed and an All folder
+  opens every Library asset with the existing recent-first listing.
+- Collection type/title and refresh move to the fixed app header in both orientations.
+- Grid cards in Home, Library and character views omit missing-author fallback text;
+  actual creator names/handles and the right-aligned date remain visible.
+
+Verification: focused App/Catalog/CharacterBrowser/Collections 37 tests, responsive
+header/All folder 2 tests, and Home/Gallery 9 tests passed. Mobile TypeScript/Vite,
+Java native compile and existing policy/cache/crypto checks, portable asset bytes,
+APK manifest/version, alignment and v2/v3 signatures passed. Browser fixtures at
+1280×800 and 800×1280 verified compact headers, correct detail-cover bounds, real
+reader entry, portrait Collection layout and no horizontal overflow. Device/native
+acceptance remains pending. No server/API changes or deployment were needed.
+The temporary mobile preview server was stopped; the PC development server was
+left running.
+
+
+## 0.6.2 — Reader stability, visibility sync and Library polish (2026-09-13)
+
+Release APK: `android/build/lakomics-mobile-0.6.2-release.apk`.
+SHA-256: `0ce58f2dca859ea42881dc86fec62c41403e73e14e5ec432e6ced7779edd76d6`.
+Release DEX, non-debuggable manifest, bundled asset verification and v2/v3 signature verification passed; the existing installation certificate is retained.
+
+- Catalog orientation follows the actual reader stage: portrait is single page; landscape uses Japanese spreads, with a right-side cover and blank left leaf. Decoded image dimensions determine page widths and `contain` preserves aspect ratio. Fractional flex growth no longer underfills single pages.
+- Nearby reader pages remain mounted under the same parent. Navigation commits only after all target pages decode; an evicted page must become ready again. Existing images survive address refresh and delayed loads. Catalog and Collection covers remain visible while their tab is paused.
+- PC hidden categories and blocked tags now publish automatically as a settings-only request. The existing 10-second PC tick uses a 30-second quiet period, a 5-minute maximum dirty age and 60-second failure retry. Migration 75 persists pending digests per endpoint. One initial Catalog publication is still required, and PC cloud sync must be enabled/running. Bookmarks, grouping and edition preferences retain their existing publication behavior.
+- Catalog defaults to Today popular. Movie cards show production company plus year or first/last season date; the fixed header shows the total after filters, including results beyond the current page.
+- Library folders start collapsed, including newly synchronized folders. Header icons collapse all, expand all or expand the current path. Video badges use a small play icon. Asset info panels have clearer grouping; adjacent image originals preload next-first with a bounded six-entry prepared cache.
+
+Verification: 90 mobile tests passed, then the final Catalog suite passed 17 tests including the added landscape regression (91 unique mobile tests). Two Rust auto-publication tests passed, including restart durability/debounce of visibility settings. All 24 Catalog/Collections API tests passed, including authenticated settings-only publication, preservation of other user state, idempotence and filtered pagination counts. Mobile TypeScript/build and native APK policy/cache/crypto checks passed. Browser demo checks at 800×1280 and 1280×800 confirmed original reader proportions, right-to-left touching pages, collapsed Library roots, movie captions/count and the Asset info panel. Device-level WebView flicker, actual network speed, APK installation and Windows native execution remain unverified.
+
+The two API modules were deployed with source backups at `/home/linuxuser/lakomics-api/backups/mobile-0.6.2-20260913`. Installed source hashes matched:
+
+- `mobile_catalog.py`: `857c4aa50e74da525e226e9d0de8f9d99f649c7661e76ec96388cf1a0a95f158`
+- `mobile_collections.py`: `6655babc268c84159f384f86bc29c23f096018a3a17bc17171c6bbd4024d4d25`
+
+Both API/proxy services were active with zero restarts. Authenticated HTTPS reads returned ready Catalog status and Movie Collections with `totalCount=12` while requesting only one item. No full catalog replacement, backfill or ingestion was run for verification. The PC dev process remains running with the rebuilt native source.
+
+
+### PC automatic publication follow-up (2026-09-13)
+
+Live investigation found automatic replication enabled, with Character generation 13 versus acknowledged generation 3, while the preceding Collection artwork pass was still running. The old scheduler awaited Collection completion before starting Characters or Catalog visibility, and kept the frontend tick occupied for the entire batch.
+
+The native dispatcher now returns after starting independent Collection, Character and visibility workers. Each kind has its own in-flight guard, retains durable debounce/retry state, and can run again on the next tick without waiting for another kind. A regression blocks the Collection worker while two Character ticks finish, rejects a duplicate Collection worker and verifies later reuse. All three scoped auto-publication tests passed. The running Linux dev process rebuilt/restarted; without invoking manual publication, Character generation and published generation both reached 14 and the server logged a successful Character replica PUT while Collection generation 98 remained pending against published generation 62. No user settings or library rows were edited manually. This is a PC-native fix; the delivered 0.6.2 APK and server source require no additional update. Windows native runtime remains unverified.
+
+
+### Collection publication performance follow-up (2026-09-13)
+
+Collection publication now checks immutable storage receipts in batches of up to 256 manifests. Confirmed files skip local rereading and per-file preparation; new/mismatched files retain the bounded four-worker upload and exact HEAD confirmation. The server validates receipt size/type, rejects duplicate/oversized batches, and invalidates a receipt when a media-ticket request discovers a missing object. Older servers returning 404 fall back to per-file preparation. Metadata remains a complete revision-checked snapshot; this is not per-collection delta serialization.
+
+PC image descriptors are cached in memory (up to 20,000 entries), keyed by canonical path plus file identity, size, modification time and change time (Unix device/inode/ctime; Windows file ID/ChangeTime). Replacements invalidate the descriptor, and uploaded bytes still receive a fresh hash check. Derived source thumbnails reuse process-owned temporary storage with a 256 MiB rotation threshold; in-flight snapshots retain their directory lease. Restarting the PC clears these caches, so its first snapshot still reads files and generates source thumbnails. Source path confinement and the library read-only snapshot boundary remain intact.
+
+Verification: 12 scoped Collection Rust tests passed, one explicitly authorized publication test remained ignored; 16 Collection API tests passed. Coverage includes same-size/same-mtime replacement, missing/oversized files, receipt reuse without file access or per-file HTTP, old-server fallback, four-transfer barrier, stale publication, and missing-media receipt invalidation. Windows native execution and actual mobile timing remain unverified. No APK update is required.
+
+API module deployed with backup `/home/linuxuser/lakomics-api/backups/collection-fast-20260913/mobile_collections.py`; installed SHA-256 `c3c93577b43770dd0755a0d163d5732f7262c3ebae40070d65efb7535c5fdc28` matched local source. API/proxy services were active with zero restarts; authenticated batch-check and collection-list reads passed. The Linux PC dev process rebuilt automatically.

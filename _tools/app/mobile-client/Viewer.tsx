@@ -6,10 +6,12 @@ import {dateLabel, imageNeighbours, fitTransform} from './model';
 import {decodeImage, invalidateTicket, mediaTicket} from './media';
 import {errorText, native} from './transport';
 
-export function Viewer({items, index, onIndex, onClose}: {items: Asset[]; index: number; onIndex(index: number): void; onClose(): void}) {
+export function Viewer({items, index, onIndex, onClose,onNearEnd}: {items: Asset[]; index: number; onIndex(index: number): void; onClose(): void;onNearEnd?():void}) {
   const asset = items[index];
+  useEffect(()=>{if(index>=items.length-3)onNearEnd?.();},[index,items.length,onNearEnd]);
+  const prepared=useRef(new Map<string,string>());
   const [decoded, setDecoded] = useState<{id: string; url: string}>();
-  const original = decoded?.id === asset.id ? decoded.url : undefined;
+  const original = decoded?.id === asset.id ? decoded.url : prepared.current.get(asset.id);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
   const [info, setInfo] = useState(false);
@@ -22,26 +24,26 @@ export function Viewer({items, index, onIndex, onClose}: {items: Asset[]; index:
   const gesture = useRef({points: new Map<number, {x: number; y: number}>(), startX: 0, startY: 0, distance: 0, scale: 1, lastX: 0, lastY: 0, moved: false, pinched: false});
   useEffect(() => {
     const controller = new AbortController();
-    setDecoded(undefined); setError(''); setInfo(false); setChrome(true);
+    setDecoded(prepared.current.has(asset.id)?{id:asset.id,url:prepared.current.get(asset.id)!}:undefined); setError(''); setInfo(false); setChrome(true);
     gesture.current.points.clear();
     const load = async () => {
       try {
         const ticket = await mediaTicket(asset, 'original', controller.signal);
         if (controller.signal.aborted) return;
         if (asset.kind !== 'video') await decodeImage(ticket.url, controller.signal);
-        if (!controller.signal.aborted) setDecoded({id:asset.id,url:ticket.url});
+        if (!controller.signal.aborted){if(asset.kind!=='video'){prepared.current.set(asset.id,ticket.url);while(prepared.current.size>6)prepared.current.delete(prepared.current.keys().next().value!);}setDecoded({id:asset.id,url:ticket.url});}
       } catch (reason) { if (!controller.signal.aborted) setError(errorText(reason)); }
     };
-    void load();
+    if(!prepared.current.has(asset.id)||asset.kind==='video'||retry)void load();
     return () => {controller.abort();clearTimeout(stallTimer.current);};
   }, [asset.id, asset.pending, retry]);
   useEffect(() => {setTransform({scale:1,x:0,y:0});}, [asset.id,asset.pending]);
   useEffect(() => {
     if (!original) return;
     const controller = new AbortController();
-    for (const neighbour of imageNeighbours(items, index).filter(item => item.size_bytes != null && item.size_bytes <= 8*1024*1024).slice(0,1)) {
+    for (const neighbour of imageNeighbours(items, index).reverse().filter(item => (item.size_bytes == null || item.size_bytes <= 8*1024*1024)&&!prepared.current.has(item.id)).slice(0,2)) {
       void mediaTicket(neighbour, 'original', controller.signal).then(ticket => {
-        if (!controller.signal.aborted) return decodeImage(ticket.url, controller.signal);
+        if (!controller.signal.aborted) return decodeImage(ticket.url, controller.signal).then(()=>{if(!controller.signal.aborted){prepared.current.set(neighbour.id,ticket.url);while(prepared.current.size>6)prepared.current.delete(prepared.current.keys().next().value!);}});
       }).catch(() => {});
     }
     return () => controller.abort();
@@ -64,20 +66,21 @@ export function Viewer({items, index, onIndex, onClose}: {items: Asset[]; index:
     if (event.key === 'ArrowLeft') { event.preventDefault(); change(index - 1); }
     if (event.key === 'ArrowRight') { event.preventDefault(); change(index + 1); }
   }}>
-    <DialogDescription className="sr-only">이미지는 두 손가락으로 확대할 수 있습니다. 좌우 버튼으로 같은 목록의 이전·다음 자산을 봅니다.</DialogDescription>
+    <DialogDescription className="sr-only">이미지는 두 손가락으로 확대할 수 있습니다. 좌우로 밀거나 버튼을 눌러 같은 목록의 이전·다음 자산을 봅니다.</DialogDescription>
     <div className={`viewer ${chrome ? 'chrome-visible' : ''}`}>
       <header className="viewer-bar"><IconButton label="뷰어 닫기" icon={ArrowLeftIcon} onClick={onClose}/><span className="numeric">{index + 1} / {items.length}</span><IconButton label="미디어 정보" icon={InformationCircleIcon} active={info} onClick={() => {setInfo(!info); setChrome(true);}}/></header>
       <div ref={surface} className={`viewer-surface ${asset.kind === 'video' ? 'is-video' : ''}`} onPointerDown={event => {
-        if (asset.kind === 'video' || event.button > 0) return;
-        event.currentTarget.setPointerCapture(event.pointerId);
+        if (event.button > 0 || info) return;
+        if(asset.kind==='video'&&video.current){const rect=video.current.getBoundingClientRect();if(event.clientY>rect.bottom-64)return;}
+        if(asset.kind!=='video')event.currentTarget.setPointerCapture?.(event.pointerId);
         const g = gesture.current; g.points.set(event.pointerId, {x:event.clientX, y:event.clientY});
         if (g.points.size === 1) Object.assign(g, {startX:event.clientX, startY:event.clientY, lastX:event.clientX, lastY:event.clientY, moved:false, pinched:false});
-        if (g.points.size === 2) { g.distance = distance(); g.scale = transform.scale; g.pinched = true; }
+        if (g.points.size === 2) { g.pinched=true; if(asset.kind==='video')return; g.distance = distance(); g.scale = transform.scale; g.pinched = true; }
       }} onPointerMove={event => {
         const g = gesture.current; if (!g.points.has(event.pointerId)) return;
         g.points.set(event.pointerId, {x:event.clientX, y:event.clientY});
         if (Math.hypot(event.clientX - g.startX, event.clientY - g.startY) > 8) g.moved = true;
-        if (g.points.size === 2 && g.distance > 0) {
+        if (asset.kind!=='video' && g.points.size === 2 && g.distance > 0) {
           const scale = Math.min(5, Math.max(1, g.scale * distance() / g.distance));
           setTransform(current => clamp(scale,current.x,current.y));
         } else if (transform.scale > 1) {
@@ -96,7 +99,7 @@ export function Viewer({items, index, onIndex, onClose}: {items: Asset[]; index:
         if (g.points.size === 1) { const remaining = [...g.points.values()][0]; g.lastX = remaining.x; g.lastY = remaining.y; }
         const dx = event.clientX - g.startX, dy = event.clientY - g.startY;
         if (g.points.size === 0 && !g.pinched && transform.scale === 1 && Math.abs(dx) > 56 && Math.abs(dx) > Math.abs(dy) * 1.2) change(index + (dx < 0 ? 1 : -1));
-        else if (g.points.size === 0 && !g.moved && !g.pinched) setChrome(value => !value);
+        else if (asset.kind!=='video' && g.points.size === 0 && !g.moved && !g.pinched) setChrome(value => !value);
       }} onPointerCancel={() => gesture.current.points.clear()}>
         {asset.kind === 'video' ? <video ref={video} key={`${asset.id}:${retry}`} src={original} poster={asset.preview} controls autoPlay={videoResume.current.id!==asset.id||videoResume.current.playing} loop playsInline preload="auto" onWaiting={waiting} onStalled={waiting} onPlaying={playing} onCanPlay={playing} onLoadedMetadata={event => {
           const saved=videoResume.current;if(saved.id!==asset.id)return;
@@ -108,7 +111,7 @@ export function Viewer({items, index, onIndex, onClose}: {items: Asset[]; index:
       {error && <div className="viewer-error" role="status"><span>{error}</span><Button onClick={() => {if(video.current)videoResume.current={id:asset.id,time:video.current.currentTime,playing:!video.current.paused};invalidateTicket(asset, 'original'); setRetry(value => value + 1);}}><ArrowPathIcon/>다시 시도</Button></div>}
       {transform.scale > 1 && <div className="zoom-reset"><IconButton label="화면에 맞추기" icon={MagnifyingGlassMinusIcon} onClick={() => setTransform({scale:1,x:0,y:0})}/></div>}
       <footer className="viewer-bar"><IconButton label="이전 자산" icon={ChevronLeftIcon} disabled={index === 0} onClick={() => change(index - 1)}/><span>{asset.pending ? '처리 대기' : dateLabel(asset)}</span><IconButton label="다음 자산" icon={ChevronRightIcon} disabled={index === items.length - 1} onClick={() => change(index + 1)}/></footer>
-      {info && <section className="viewer-info"><h2>미디어 정보</h2><dl><dt>작가</dt><dd>{asset.creator_name || asset.creator_handle || '정보 없음'}</dd><dt>{asset.pending ? '수집 요청' : '수집일'}</dt><dd>{dateLabel(asset)}</dd><dt>형식</dt><dd>{asset.content_type || asset.kind}</dd>{asset.size_bytes != null && <><dt>크기</dt><dd>{(asset.size_bytes / 1048576).toFixed(1)} MB</dd></>}</dl>{asset.source_url && /^https?:\/\//.test(asset.source_url) && <Button onClick={() => { void native('openExternal', {url:asset.source_url}).catch(e => setError(errorText(e))); }}><ArrowTopRightOnSquareIcon/>출처 열기</Button>}<Button variant="ghost" onClick={() => setInfo(false)}>정보 닫기</Button></section>}
+      {info && <section className="viewer-info"><div className="viewer-info-heading"><span>{asset.kind==='video'?'VIDEO':'IMAGE'}</span><h2>{asset.creator_name||asset.creator_handle||'미디어 정보'}</h2></div><dl>{(asset.creator_name||asset.creator_handle)&&<><dt>작가</dt><dd>{asset.creator_name||asset.creator_handle}</dd></>}<dt>{asset.pending ? '수집 요청' : '수집일'}</dt><dd>{dateLabel(asset)}</dd>{asset.width&&asset.height?<><dt>해상도</dt><dd>{asset.width.toLocaleString()} × {asset.height.toLocaleString()}</dd></>:null}<dt>형식</dt><dd>{asset.content_type || asset.kind}</dd>{asset.size_bytes != null && <><dt>크기</dt><dd>{(asset.size_bytes / 1048576).toFixed(1)} MB</dd></>}</dl>{asset.source_url && /^https?:\/\//.test(asset.source_url) && <Button onClick={() => { void native('openExternal', {url:asset.source_url}).catch(e => setError(errorText(e))); }}><ArrowTopRightOnSquareIcon/>출처 열기</Button>}<Button variant="ghost" onClick={() => setInfo(false)}>정보 닫기</Button></section>}
     </div>
   </Dialog>;
 }

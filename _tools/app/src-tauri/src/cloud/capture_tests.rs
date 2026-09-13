@@ -1139,6 +1139,137 @@ fn snapshot_publish_serializes_saved_keys_and_failure_does_not_fail_sync_cycle()
     assert_eq!(saved_body, json!({ "keys": ["123:2"] }));
 }
 
+#[test]
+fn unchanged_mobile_metadata_is_not_republished_on_the_next_capture_poll() {
+    let server = Server::http("127.0.0.1:0").unwrap();
+    let base_url = format!("http://{}", server.server_addr());
+    let handle = thread::spawn(move || {
+        let mut urls = Vec::new();
+        for _ in 0..5 {
+            let mut request = server
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap()
+                .expect("expected capture or metadata request");
+            let url = request.url().to_string();
+            let mut body = String::new();
+            request.as_reader().read_to_string(&mut body).unwrap();
+            urls.push(url.clone());
+            match url.as_str() {
+                "/v1/captures/pending" => request
+                    .respond(json_response(json!({ "captures": [] })))
+                    .unwrap(),
+                "/v1/classifications"
+                | "/v1/saved-x-media"
+                | "/v1/library/album-snapshot" => {
+                    request.respond(Response::empty(200)).unwrap()
+                }
+                _ => panic!("unexpected request: {url}"),
+            }
+        }
+        assert!(server
+            .recv_timeout(std::time::Duration::from_millis(150))
+            .unwrap()
+            .is_none());
+        urls
+    });
+
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some(base_url.clone()),
+            },
+            true,
+        )
+        .unwrap();
+    let client = CloudClient::new(&base_url).unwrap();
+
+    library
+        .sync_next_cloud_capture_cycle_with(&client, "test-token")
+        .unwrap();
+    library
+        .sync_next_cloud_capture_cycle_with(&client, "test-token")
+        .unwrap();
+
+    assert_eq!(
+        handle.join().unwrap(),
+        vec![
+            "/v1/captures/pending",
+            "/v1/classifications",
+            "/v1/saved-x-media",
+            "/v1/library/album-snapshot",
+            "/v1/captures/pending",
+        ]
+    );
+}
+
+#[test]
+fn album_change_republishes_only_album_metadata() {
+    let server = Server::http("127.0.0.1:0").unwrap();
+    let base_url = format!("http://{}", server.server_addr());
+    let handle = thread::spawn(move || {
+        let mut urls = Vec::new();
+        for _ in 0..6 {
+            let mut request = server.recv().unwrap();
+            let url = request.url().to_string();
+            let mut body = String::new();
+            request.as_reader().read_to_string(&mut body).unwrap();
+            urls.push(url.clone());
+            match url.as_str() {
+                "/v1/captures/pending" => request
+                    .respond(json_response(json!({ "captures": [] })))
+                    .unwrap(),
+                "/v1/classifications"
+                | "/v1/saved-x-media"
+                | "/v1/library/album-snapshot" => {
+                    request.respond(Response::empty(200)).unwrap()
+                }
+                _ => panic!("unexpected request: {url}"),
+            }
+        }
+        urls
+    });
+
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some(base_url.clone()),
+            },
+            true,
+        )
+        .unwrap();
+    let client = CloudClient::new(&base_url).unwrap();
+    library
+        .sync_next_cloud_capture_cycle_with(&client, "test-token")
+        .unwrap();
+    library
+        .create_album(crate::library::models::CreateAlbum {
+            name: "Mobile".into(),
+            parent_id: None,
+        })
+        .unwrap();
+    library
+        .sync_next_cloud_capture_cycle_with(&client, "test-token")
+        .unwrap();
+
+    assert_eq!(
+        handle.join().unwrap(),
+        vec![
+            "/v1/captures/pending",
+            "/v1/classifications",
+            "/v1/saved-x-media",
+            "/v1/library/album-snapshot",
+            "/v1/captures/pending",
+            "/v1/library/album-snapshot",
+        ]
+    );
+}
+
 /// 검토 트리거용 큰 이미지 픽스처. ingestion 테스트의 scene_fixture와 같은
 /// 패턴으로 유사 해시가 결정적으로 나오도록 한다.
 fn vertical_stripes_fixture(width: u32, height: u32) -> image::DynamicImage {

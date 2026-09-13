@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 73;
+pub(crate) const SCHEMA_VERSION: i64 = 76;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -384,6 +384,15 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         }
         if version <= 72 {
             transaction.execute_batch(include_str!("../../migrations/0073_collection_daily_updates.sql"))?;
+        }
+        if version <= 73 {
+            transaction.execute_batch(include_str!("../../migrations/0074_mobile_publication.sql"))?;
+        }
+        if version <= 74 {
+            transaction.execute_batch(include_str!("../../migrations/0075_mobile_catalog_visibility.sql"))?;
+        }
+        if version <= 75 {
+            transaction.execute_batch(include_str!("../../migrations/0076_cloud_metadata_publication.sql"))?;
         }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction

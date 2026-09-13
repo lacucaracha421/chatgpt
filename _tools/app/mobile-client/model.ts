@@ -2,7 +2,7 @@ import type {Asset, Page, View} from './types';
 export const PAGE_SIZE = 40;
 export const DENSITIES = ['크게', '균형', '촘촘하게'] as const;
 export function rowHeight(density: number, width: number) { return Math.min([290, 220, 150][density] ?? 220, width * .78); }
-export function viewKey(view: View) { return `${view.tab}:${view.classification ?? ''}:${view.revisit ?? ''}`; }
+export function viewKey(view: View) { return `${view.tab}:${view.characters?`characters:${view.characterNode??''}`:''}:${view.classification ?? ''}:${view.revisit ?? ''}`; }
 export function pagePath(view: View, cursor: string | null) {
   const params = new URLSearchParams({limit: String(PAGE_SIZE)});
   if (cursor) params.set('cursor', cursor);

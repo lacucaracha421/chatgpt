@@ -105,6 +105,22 @@ class MobileCatalogApiTests(unittest.TestCase):
         return self.client.put("/v1/mobile-catalog/publication", headers=AUTH, json={"version": 1, "baseRevision": base, "contentDigest": self.digest, "userSnapshot": users if users is not None else self.users})
     def search(self, **params):
         return self.client.get("/v1/mobile-catalog/search", headers=AUTH, params={"language": "all", **params})
+    def test_visibility_only_sync_preserves_catalog_and_other_user_state(self):
+        first = self.publish().json()
+        policy = {"hiddenCategories": [], "blockedTags": []}
+        response = self.client.put("/v1/mobile-catalog/visibility", headers=AUTH, json=policy)
+        self.assertEqual(response.status_code, 200, response.text)
+        with self.get_db() as db:
+            current = replica.current(db)
+            users = json.loads(db.execute("SELECT payload FROM mobile_catalog_users WHERE revision=?", [current["user_revision"]]).fetchone()[0])
+        for key in ("bookmarks", "preferences", "decisions", "decisionRevision"):
+            self.assertEqual(users[key], self.users[key])
+        self.assertEqual(users["blockedTags"], [])
+        again = self.client.put("/v1/mobile-catalog/visibility", headers=AUTH, json=policy)
+        self.assertEqual(again.json()["publicationRevision"], response.json()["publicationRevision"])
+        self.assertEqual(self.client.put("/v1/mobile-catalog/visibility", json=policy).status_code, 401)
+        self.assertEqual(self.client.put("/v1/mobile-catalog/visibility", headers=AUTH, json={**policy,"bookmarks":[]}).status_code, 422)
+
     def test_actual_api_runs_shared_fixture(self):
         self.assertEqual(self.publish().status_code, 200)
         for case in FIXTURE["queries"]:

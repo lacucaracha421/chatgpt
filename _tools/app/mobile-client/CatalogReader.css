@@ -16,3 +16,7 @@
 .catalog-reader-zoom-reset{position:absolute;right:14px;bottom:14px;z-index:5}
 .catalog-reader.chrome-visible .catalog-reader-zoom-reset{bottom:66px}
 @media(max-width:700px){.catalog-reader-bar,.catalog-reader-footer{height:48px;padding:0 8px}.catalog-reader.chrome-visible .catalog-reader-zoom-reset{bottom:62px}}
+
+.catalog-reader-spread{display:flex;flex-direction:row-reverse;flex-shrink:0;transform-origin:center;will-change:transform;gap:0}.catalog-reader-leaf{position:relative;min-width:0;height:100%}.catalog-reader-leaf .catalog-reader-page{background:transparent}.catalog-reader-leaf img{width:100%;height:100%;object-fit:contain}
+
+.reader-loading-next{position:absolute;bottom:16px;right:16px;font-size:11px;color:var(--color-muted);background:#111c;padding:6px 10px}.catalog-reader-leaf img{background:transparent}

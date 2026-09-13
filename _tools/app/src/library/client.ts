@@ -177,6 +177,12 @@ export const libraryGateway: LibraryGateway = {
     channel.onmessage = (value) => onProgress?.(value);
     return invoke<CloudCollectionsPublishResult>("push_cloud_collections", { onProgress: channel });
   },
+  runDueMobilePublications: (orderIds) => invoke<void>("run_due_mobile_publications", {orderIds}),
+  pushCloudCharacters: (onProgress) => {
+    const channel = new Channel<import("./publicationJobs").PublishProgress>();
+    channel.onmessage = (value) => onProgress?.(value);
+    return invoke<{revision: string; nodes: number}>("push_cloud_characters", { onProgress: channel });
+  },
   restoreCloudMetadataBackup: () =>
     invoke<CloudLibraryRestoreReport>("restore_cloud_metadata_backup"),
   runDueCloudCaptureSync: () =>

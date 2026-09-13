@@ -20,6 +20,7 @@ export function Settings({status, onStatus, onClose, onCacheCleared}: {status: S
   return <Dialog open title="연결 및 설정" onClose={onClose}>
     <header className="dialog-header"><span className="eyebrow">LAKOMICS / CONNECTION</span><IconButton label="설정 닫기" icon={XMarkIcon} onClick={onClose}/></header>
     <DialogDescription className="dialog-description">PC에서 설정한 서버 주소와 기기 토큰으로 연결합니다. 라이브러리와 파일 선택기가 같은 연결을 사용합니다.</DialogDescription>
+    <p className="settings-connection"><span className="status-dot"/>{status.configured?'클라우드 연결됨':'연결되지 않음'}</p>
     <form onSubmit={event => {
       event.preventDefault(); setBusy(true); setError('');
       void native<Status>('configure', {endpoint:endpoint.trim(), token:token.trim(), allowPrivateHttp:privateHttp}).then(result => {
@@ -45,6 +46,6 @@ export function Settings({status, onStatus, onClose, onCacheCleared}: {status: S
       }}>{cacheBusy ? '지우는 중…' : '캐시 지우기'}</Button></div><p className="hint">서버의 원본과 연결 정보는 유지됩니다.</p>{cacheMessage && <p role="status">{cacheMessage}</p>}
     </section>
     <PickerSettings configured={status.configured}/>
-    <div className="settings-foot"><span>0.3 · Android preview</span><Button variant="ghost" onClick={() => {void native('openExternal', {url:'https://github.com/lacucaracha421/chatgpt'}).catch(reason => setError(errorText(reason)));}}><ArrowTopRightOnSquareIcon/>프로젝트</Button></div>
+    <div className="settings-foot"><span>0.6.2 · Android</span><Button variant="ghost" onClick={() => {void native('openExternal', {url:'https://github.com/lacucaracha421/chatgpt'}).catch(reason => setError(errorText(reason)));}}><ArrowTopRightOnSquareIcon/>프로젝트</Button></div>
   </Dialog>;
 }

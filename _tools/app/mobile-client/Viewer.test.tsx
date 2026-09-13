@@ -50,6 +50,17 @@ describe('progressive viewer',()=>{
     await waitFor(()=>expect(screen.getByRole('img').getAttribute('src')).toContain('original-b'));
     finishA(); expect(screen.getByRole('img').getAttribute('src')).toContain('original-b');
   });
+  it('swipes across video content while keeping the native control strip usable',async()=>{
+    const change=vi.fn();render(<Viewer items={[{id:'v',kind:'video'},items[1]]} index={0} onIndex={change} onClose={()=>{}}/>);
+    await waitFor(()=>expect(document.querySelector('video')?.getAttribute('src')).toContain('original-v'));
+    const player=document.querySelector('video')!,surface=document.querySelector('.viewer-surface')!;
+    vi.spyOn(player,'getBoundingClientRect').mockReturnValue({left:0,top:0,right:800,bottom:600,width:800,height:600,x:0,y:0,toJSON:()=>({})});
+    fireEvent.pointerDown(surface,{pointerId:1,button:0,clientX:600,clientY:300});fireEvent.pointerUp(surface,{pointerId:1,clientX:200,clientY:300});expect(change).toHaveBeenCalledWith(1);
+    change.mockClear();fireEvent.pointerDown(player,{pointerId:2,button:0,clientX:600,clientY:570});fireEvent.pointerUp(player,{pointerId:2,clientX:200,clientY:570});expect(change).not.toHaveBeenCalled();
+  });
+  it('requests the next asset page when approaching the loaded end',()=>{
+    const more=vi.fn();render(<Viewer items={items} index={1} onIndex={()=>{}} onClose={()=>{}} onNearEnd={more}/>);expect(more).toHaveBeenCalledOnce();
+  });
   it('native video control gestures cannot navigate the gallery',async()=>{
     const change=vi.fn(); const {container}=render(<Viewer items={[{id:'v',kind:'video'},items[1]]} index={0} onIndex={change} onClose={()=>{}}/>);
     const surface=container.ownerDocument.querySelector('.viewer-surface')!;

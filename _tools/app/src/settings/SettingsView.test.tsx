@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
+import { dismissPublication } from "../library/publicationJobs";
 import type { CatalogStatus, LibraryGateway, MetadataBackup } from "../library/types";
 import { WorkspaceChromeProvider, ChromeTarget } from "../layout/WorkspaceChrome";
 import { SettingsView } from "./SettingsView";
@@ -12,7 +13,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async () => ({ automation
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 import { open } from "@tauri-apps/plugin-dialog";
 
-afterEach(() => { vi.useRealTimers(); localStorage.clear(); cleanup(); });
+afterEach(() => { vi.useRealTimers(); localStorage.clear(); cleanup(); dismissPublication("characters"); });
 
 it("exposes persisted whole-engine automation in general settings without using history pause", async () => {
   localStorage.setItem("lakomics.libraryPath", "C:\\Current");
@@ -852,6 +853,31 @@ it("confirms before clearing the remote manga cache", async () => {
   expect(await screen.findByText("온라인 이미지 캐시를 지웠습니다")).toBeVisible();
 });
 
+
+it("publishes character views explicitly, blocks duplicate clicks and preserves progress across settings remounts", async () => {
+  const gateway = createGateway();
+  vi.mocked(gateway.getCloudCaptureSettings).mockResolvedValue({ enabled: true, apiBaseUrl: "https://cloud.example.test", tokenConfigured: true });
+  let finish!: (result: { revision: string; nodes: number }) => void;
+  gateway.pushCloudCharacters = vi.fn<NonNullable<LibraryGateway["pushCloudCharacters"]>>(progress => {
+    progress?.({ phase: "preparing", completed: 2, total: 4, unit: "items" });
+    return new Promise<{ revision: string; nodes: number }>(resolve => { finish = resolve; });
+  });
+  const view = () => <LibraryProvider gateway={gateway}><SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="data" /></LibraryProvider>;
+  const mounted = render(view());
+  const button = await screen.findByRole("button", { name: "모바일 캐릭터 업데이트" });
+  await waitFor(() => expect(button).toBeEnabled());
+  expect(gateway.pushCloudCharacters).not.toHaveBeenCalled();
+  await userEvent.click(button);
+  expect(await screen.findByRole("button", { name: "모바일 캐릭터 업데이트 중…" })).toBeDisabled();
+  fireEvent.click(button);
+  expect(gateway.pushCloudCharacters).toHaveBeenCalledOnce();
+  mounted.unmount();
+  render(view());
+  expect(await screen.findByText("자료 준비 · 2 / 4 (50%)")).toBeVisible();
+  await act(async () => finish({ revision: "a".repeat(64), nodes: 4 }));
+  expect(await screen.findByText("4개 보기 게시 완료")).toBeVisible();
+  expect(screen.getByRole("button", { name: "모바일 캐릭터 업데이트" })).toBeEnabled();
+});
 
 it("opens a scan-first extension pairing QR from Cloud settings", async () => {
   const user = userEvent.setup();

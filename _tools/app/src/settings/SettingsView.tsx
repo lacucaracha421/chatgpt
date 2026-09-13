@@ -51,7 +51,7 @@ const METADATA_IMPORT_FOLDER_KEY = "lakomics.metadataImportFolder";
 
 export function SettingsView({ restoring, onRestore, onExit, onImportFolder, metadataImportRunning = false, onCollectionsChanged, onCloudCaptureSynced = () => undefined, onRestoreCloudMetadata, initialSection, privacyMode = false, onPrivacyModeChange = () => undefined, appZoom = 100, onAppZoomChange = () => undefined, appZoomError = null }: SettingsViewProps) {
   const workspace = useWorkspaceChrome();
-  const { collections: collectionPublication } = usePublicationJobs();
+  const { collections: collectionPublication, characters: characterPublication } = usePublicationJobs();
   const { error: libraryError, gateway, library, openLibrary } = useLibrary();
   const [section, setSection] = useState<SettingsSection>(() => initialSection ?? "general");
   useEffect(() => { if (initialSection) setSection(initialSection); }, [initialSection]);
@@ -1185,6 +1185,14 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           <dd className="settings-view__actions">
             <Button size="sm" disabled={cloudBusy || collectionPublication?.running || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured || !gateway.pushCloudCollections} onClick={() => void pushCloudCollections()}>{collectionPublication?.running ? "모바일 컬렉션 업데이트 중…" : "모바일 컬렉션 업데이트"}</Button>
             {collectionPublication && <p role={collectionPublication.error ? "alert" : "status"}>{collectionPublication.running ? publicationProgressText(collectionPublication.progress) : collectionPublication.message}</p>}
+          </dd>
+        </dl>}
+        {cloudSettings && <dl className="settings-view__property">
+          <dt>모바일 캐릭터</dt>
+          <dd className="settings-view__row-note">현재 시리즈·그룹·캐릭터와 폴더의 보기 목록을 게시합니다. 이미 서버에 보관된 자산을 모바일에서 감상할 수 있습니다.</dd>
+          <dd className="settings-view__actions">
+            <Button size="sm" disabled={cloudBusy || characterPublication?.running || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured || !gateway.pushCloudCharacters} onClick={() => void startPublication("characters", progress => gateway.pushCloudCharacters!(progress), result => `${result.nodes.toLocaleString()}개 보기 게시 완료`)}>{characterPublication?.running ? "모바일 캐릭터 업데이트 중…" : "모바일 캐릭터 업데이트"}</Button>
+            {characterPublication && <p role={characterPublication.error ? "alert" : "status"}>{characterPublication.running ? publicationProgressText(characterPublication.progress) : characterPublication.message}</p>}
           </dd>
         </dl>}
         <h3 className="settings-view__group-title">로컬 백업 복구</h3>

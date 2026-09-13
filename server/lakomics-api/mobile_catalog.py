@@ -88,7 +88,7 @@ def normalize(params):
         raise HTTPException(422, {"code": "invalidQuery", "message": "검색식을 확인해 주세요.", "span": exc.span}) from exc
     return q
 
-def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret, gallery_fetcher=None):
+def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret, gallery_fetcher=None, refresh_fetcher=None):
     upload_lock = threading.Lock()
     def startup():
         replica.startup(get_db)
@@ -131,7 +131,7 @@ def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret, ga
         with get_db() as db:
             current = replica.current(db)
             manifest = db.execute("SELECT manifest FROM mobile_catalog_artifacts WHERE digest=?", [current["content_digest"]]).fetchone() if current else None
-            return {"ready": bool(current), "publicationRevision": current["revision"] if current else None, "publishedAt": current["published_at"] if current else None, "sourceRevision": json.loads(manifest[0])["sourceRevision"] if manifest else None, "capabilities": {"providers": ["kHentai"], "read": True, "bookmarkWrite": False, "refreshRequest": False}}
+            return {"ready": bool(current), "publicationRevision": current["revision"] if current else None, "publishedAt": current["published_at"] if current else None, "sourceRevision": json.loads(manifest[0])["sourceRevision"] if manifest else None, "capabilities": {"providers": ["kHentai"], "read": True, "bookmarkWrite": False, "refreshRequest": refresh_fetcher is not None}}
 
     @app.put(PREFIX + "/replicas/{digest}")
     async def upload(digest: str, request: Request, authorization: str | None = Header(default=None)):
@@ -169,6 +169,40 @@ def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret, ga
         except (ValueError, UnicodeError):
             replica.fail()
         return await run_in_threadpool(replica.publish, body, root(), get_db)
+
+    @app.put(PREFIX + "/visibility")
+    async def update_visibility(request: Request, authorization: str | None = Header(default=None)):
+        require_auth(authorization)
+        data = bytearray()
+        async for chunk in request.stream():
+            if len(data) + len(chunk) > replica.MAX_USERS:
+                replica.fail(413)
+            data.extend(chunk)
+        try:
+            policy = json.loads(data)
+        except (ValueError, UnicodeError):
+            replica.fail()
+        if not isinstance(policy, dict) or set(policy) != {"hiddenCategories", "blockedTags"}:
+            replica.fail()
+        def publish_policy():
+            for attempt in range(3):
+                with get_db() as db:
+                    current = replica.current(db)
+                    if not current:
+                        replica.fail(409, "Publish the catalog once before syncing settings")
+                    current = dict(current)
+                    users = json.loads(db.execute("SELECT payload FROM mobile_catalog_users WHERE revision=?", [current["user_revision"]]).fetchone()[0])
+                changed = any(users[key] != value for key, value in policy.items())
+                users.update(policy)
+                replica.validate_users(users)
+                if not changed:
+                    return {"publicationRevision": current["revision"], "publishedAt": current["published_at"]}
+                try:
+                    return replica.publish({"version": 1, "baseRevision": current["revision"], "contentDigest": current["content_digest"], "userSnapshot": users}, root(), get_db)
+                except HTTPException as error:
+                    if error.status_code != 409 or attempt == 2:
+                        raise
+        return await run_in_threadpool(publish_policy)
 
     @app.get(PREFIX + "/search")
     def search(request: Request, authorization: str | None = Header(default=None)):
@@ -283,4 +317,7 @@ def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret, ga
                 return result
         except sqlite3.Error as exc:
             unavailable(exc)
+    if refresh_fetcher is not None:
+        from mobile_catalog_refresh import register_refresh
+        register_refresh(app, get_db, root, require_auth, refresh_fetcher)
     return startup

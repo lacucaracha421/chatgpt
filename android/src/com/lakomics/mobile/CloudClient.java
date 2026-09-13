@@ -9,6 +9,7 @@ final class CloudClient {
  JSONObject api(String path,String method,JSONObject body,CancellationSignal cancel) throws Exception {
   return authenticated(settings.read(),path,method,body,cancel);
  }
+ JSONObject apiFor(JSONObject connection,String path,String method,JSONObject body,CancellationSignal cancel)throws Exception{return authenticated(connection,path,method,body,cancel);}
  void validate(String endpoint,String token,CancellationSignal cancel)throws Exception{
   SecureSettings.validateToken(token);
   authenticated(new JSONObject().put("endpoint",endpoint).put("token",token),"/v1/library/classifications","GET",null,cancel).getJSONArray("items");
@@ -19,7 +20,7 @@ final class CloudClient {
   HttpURLConnection c=(HttpURLConnection)new URL(s.getString("endpoint")+path).openConnection();boolean reusable=false;
   try {
    prepare(c,cancel);c.setRequestMethod(method);c.setRequestProperty("Authorization","Bearer "+s.getString("token"));c.setRequestProperty("Accept","application/json");
-   if(method.equals("POST")){byte[] b=(body==null?"{}":body.toString()).getBytes("UTF-8");if(b.length>65536)throw new IOException("Request too large");c.setDoOutput(true);c.setFixedLengthStreamingMode(b.length);c.setRequestProperty("Content-Type","application/json");try(OutputStream o=c.getOutputStream()){o.write(b);}}
+   if(method.equals("POST") || method.equals("PUT")){byte[] b=(body==null?"{}":body.toString()).getBytes("UTF-8");if(b.length>(path.startsWith("/v1/notes/")?610000:65536))throw new IOException("Request too large");c.setDoOutput(true);c.setFixedLengthStreamingMode(b.length);c.setRequestProperty("Content-Type","application/json");try(OutputStream o=c.getOutputStream()){o.write(b);}}
    int code=c.getResponseCode();if(code<200 || code>=300)throw new HttpFailure(code);
    ByteArrayOutputStream out=new ByteArrayOutputStream();try(InputStream in=c.getInputStream()){copy(in,out,4*1024*1024,cancel);}JSONObject result=new JSONObject(out.toString("UTF-8"));stripKeys(result);reusable=true;return result;
   } finally {if(cancel!=null)cancel.setOnCancelListener(null);if(!reusable)c.disconnect();}

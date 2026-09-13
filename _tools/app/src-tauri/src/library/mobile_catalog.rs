@@ -126,3 +126,7 @@ fn read_translations(path: &Path, connection:&Connection) -> Result<Vec<Value>,L
     }
     Ok(result)
 }
+
+pub(crate) fn visibility_snapshot(connection:&Connection)->Result<Value,LibraryError>{
+    Ok(json!({"hiddenCategories":arrays(connection,"SELECT category,created_at FROM online_catalog_hidden_categories")?,"blockedTags":arrays(connection,"SELECT namespace,value,created_at FROM online_catalog_blocked_tags")?}))
+}

@@ -2,6 +2,115 @@
 
 Status: current product direction with retained rollout history
 
+## Character source checkpoint — 2026-09-13
+
+Library now includes series/group/character/ordinary-folder browsing against an
+explicit PC-published server projection. See the [character contract](mobile-character-contract.md)
+for endpoints, filters, counts, publication controls and verification limits.
+The server routes are deployed and APK 0.5.0 is built; Android installation and
+the initial character publication remain pending. It provides PC-off reading after publication; character edits and automatic publication remain
+PC-owned. Server write authority is proposed in ADR-0036 and tracked by CLOUD-AUTH-001.
+
+The S11 landscape follow-up aligns character browsing with PC: explicit series
+hero, 3:4 cards, group mosaics, breadcrumbs and an overview that scrolls together
+with the gallery. Portrait keeps compact cards and separate gallery scrolling.
+The shared mobile gallery still uses justified rows; this is not full PC masonry
+or management-feature parity.
+
+Collections now has PC-style exact personal-rating filters (0–5 in half points,
+all and unrated), recent-addition/media-date/title sorting and both directions.
+Filters live in the left panel on wide screens and retain separate choices per
+media type during the app session. Showcase keeps its manual order and membership.
+`GET /v1/collections` applies `rating`, `sort` and `direction` to the full server
+list before pagination; its cursor binds these conditions and its response declares
+`filterVersion:1`. An older server is reported as needing an update rather than
+silently presenting an unfiltered list. Recent addition uses `createdAt`, media
+date uses `releaseDate` with `year` fallback and unknown dates last. Scores and dates
+were already in PC publication, so this adds no rating-write route or backfill.
+
+Catalog now has a separate server refresh action; the existing icon still reloads
+the published index. The implementation and limits are recorded in the catalog
+refresh checkpoint below. Server deployment is complete; APK installation is pending.
+
+Follow-up verification: 22 focused mobile tests (Collections, CharacterBrowser,
+Gallery, App), 22 server tests (Collections/characters), two Rust export tests,
+mobile TypeScript and production build passed. Browser fixtures at 1280×800 and
+800×1280 verified filter/sort use, landscape hierarchy/scrolling and portrait
+retention without console errors. These are reference viewports, not a measurement
+of the current S11 WebView. No server deployment, APK installation, active-library
+publication or Windows/Linux/Android native acceptance was performed.
+
+## Catalog refresh source checkpoint — 2026-09-13
+
+Android can request Korean or Japanese new-work ingestion directly on the server.
+The UI uses `GET /v1/mobile-catalog/status` capability `refreshRequest`, then
+`GET/POST /v1/mobile-catalog/refresh`. POST carries `operationId` (UUID) and
+`language`; it returns a durable job receipt. The API process runs the worker,
+so closing the app or turning the PC off does not stop accepted work. Android
+allows only these two methods on the exact refresh route. Older servers keep
+catalog reading and omit the unsupported action.
+
+The existing PC-published baseline is required once. Each language starts at its
+own highest published language ID, then maintains independent watermark/cursor
+state. This is new-work ingestion, not replacement of the entire catalog or a
+refresh of every existing work's metadata. A missing language starts at zero with
+one page per request; ordinary requests stop at 40 pages. The UI offers continuation
+when a pass has more pages. Provider transport retains fixed origin, 5 MiB responses,
+bounded retries and timeouts. Job staging is capped at 16 MiB.
+
+SQLite leases serialize workers across processes. Page rows and cursor advancement
+commit together; expired jobs resume after at most the 180-second lease plus polling.
+A lease heartbeat covers long index preparation, and a stale worker cannot publish.
+A completed pass atomically commits its readable publication, additions ledger,
+language checkpoint and job result. Failure keeps the old publication. Request
+receipts deduplicate response loss and concurrent taps; mobile retains an uncertain
+operation UUID per endpoint across restart.
+
+Publication copies the immutable catalog, preserves current bookmarks/visibility/
+preferences/decisions, then prepares counts and switches the pointer. Concurrent
+PC publications are rebased before completion. The durable additions ledger is
+also applied to later PC publications: a stale PC snapshot cannot erase server-added
+works or the other language membership. The PC still owns user metadata and its
+existing grouping decisions. Newly discovered works receive deterministic singleton
+handles; automatic lineage/edition grouping remains the PC's responsibility on a
+later publication. This does not implement the complete ADR-0036 authority cutover
+or PC delta download. Retain the API control database (including additions, receipts
+and checkpoints) together with immutable catalog artifacts for recovery; restoring
+only an old PC snapshot is not a server backup.
+
+Verification: 12 isolated refresh tests cover actual API worker execution, new-work
+search, preserved users/old revisions, duplicate receipts, failure, interrupted page
+resume, lease fencing, bounded continuation and cross-language membership. The 49
+existing catalog API/query/replica/transport tests pass. Mobile catalog, refresh and
+App tests pass (25 tests); mobile TypeScript, production build and 110 Java
+NetworkPolicy checks pass. Browser fixtures at 1280×800 and 800×1280 confirm
+request/progress/completion controls, retained catalog browsing and no console errors.
+No server deployment, production ingestion, APK install, or Windows/Linux/Android
+native acceptance has been performed. Live-source/provider acceptance remains open.
+
+## 0.5.0 operational checkpoint — 2026-09-13
+
+Deployed seven API modules from the current working source after comparing all
+changed files to the running server and passing 50 isolated tests in its Python
+runtime. Backup: `/home/linuxuser/lakomics-api/backups/mobile-0.5.0-20260912T192228Z`
+contains prior code/hashes, a verified SQLite control backup and hard links to
+immutable catalog artifacts. Catalog publication stayed
+`681663e06a0a446684b5000317a402badc07c40322786b541ff7de898c08a54f`;
+8,681 assets and 340 Collections were retained. No production refresh job or
+initial character publication was submitted.
+
+Both API and local proxy are active/running with NRestarts=0. Stopping the API
+also stopped the dependent HTTPS proxy; starting that existing proxy restored
+the full route. Authenticated HTTPS catalog/search/refresh and Collection filters
+passed; unauthenticated refresh reads returned 401. `refreshRequest:true` is now
+served. A read-only Korean provider canary fetched exactly one page (50 works,
+IDs 4186275 down to 4183765) and passed the new parser; it did not ingest production
+rows. Character routes respond correctly with `ready:false` until first publication.
+
+APK 0.5.0 (15) is built, aligned and signed with the previous update identity;
+see [Android build evidence](../../android/README.md#050--server-catalog-refresh-and-s11-browsing-2026-09-13).
+Device installation was explicitly deferred because the Galaxy Tab is unavailable.
+
 ## Current source and recorded acceptance — 2026-09-09
 
 Reconciled against source commit `0c61206`. Android source declares **0.4.3 (14)**;

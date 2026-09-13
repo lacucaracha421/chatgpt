@@ -2240,6 +2240,16 @@ pub async fn push_cloud_collections(
 }
 
 #[tauri::command]
+pub async fn push_cloud_characters(
+    state: State<'_, AppState>,
+    on_progress: tauri::ipc::Channel<crate::cloud::publication::PublishProgress>,
+) -> Result<crate::cloud::characters::CharacterPublishResult, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.push_cloud_characters(&|progress| { let _ = on_progress.send(progress); }))
+        .await.map_err(|_| background_task_error())?.map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub async fn push_cloud_catalog(
     state: State<'_, AppState>,
     on_progress: tauri::ipc::Channel<crate::cloud::publication::PublishProgress>,
@@ -3012,4 +3022,11 @@ mod catalog_admission_tests {
         drop(permits);
         receive.recv_timeout(std::time::Duration::from_secs(2)).unwrap();worker.join().unwrap();
     }
+}
+
+#[tauri::command]
+pub async fn run_due_mobile_publications(state: State<'_, AppState>, order_ids: Vec<String>) -> Result<(),CommandError> {
+    let library=current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.run_due_mobile_publications(order_ids))
+        .await.map_err(|_| background_task_error())?.map_err(CommandError::from)
 }

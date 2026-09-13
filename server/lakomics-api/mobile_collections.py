@@ -34,6 +34,10 @@ class ArtworkBlob(ArtworkUpload):
     objectKey: str = Field(max_length=100)
 
 
+class ArtworkCheck(StrictModel):
+    items: list[ArtworkUpload] = Field(max_length=256)
+
+
 class Artwork(StrictModel):
     id: ID
     kind: str = Field(min_length=1, max_length=40)
@@ -51,6 +55,29 @@ class Volume(StrictModel):
     localReleaseDate: str | None = Field(default=None, max_length=100)
     isbn13: str | None = Field(default=None, max_length=100)
     releaseStatus: str | None = Field(default=None, max_length=100)
+
+
+class Episode(StrictModel):
+    id: int
+    episodeNumber: int = Field(ge=0)
+    name: str = Field(max_length=2000)
+    airDate: str | None = Field(default=None, max_length=100)
+    runtimeMinutes: int | None = None
+
+
+class Season(StrictModel):
+    id: int
+    seasonNumber: int = Field(ge=0)
+    name: str = Field(max_length=2000)
+    airDate: str | None = Field(default=None, max_length=100)
+    posterArtworkId: ID | None = None
+    episodes: list[Episode] = Field(default_factory=list, max_length=5000)
+
+
+class Series(StrictModel):
+    status: str | None = Field(default=None, max_length=200)
+    cast: list[str] = Field(default_factory=list, max_length=200)
+    seasons: list[Season] = Field(default_factory=list, max_length=200)
 
 
 class Collection(StrictModel):
@@ -83,6 +110,7 @@ class Collection(StrictModel):
     seasonDateRange: list[str] | None = Field(default=None, min_length=2, max_length=2)
     createdAt: str = Field(max_length=100)
     updatedAt: str = Field(max_length=100)
+    series: Series | None = None
     volumes: list[Volume] = Field(default_factory=list, max_length=5000)
     artworks: list[Artwork] = Field(default_factory=list, max_length=10000)
 
@@ -106,12 +134,17 @@ def encode(value) -> str:
 
 
 def public_item(item: dict, detail: bool = False) -> dict:
-    result = {key: value for key, value in item.items() if key not in ("volumes", "artworks")}
+    result = {key: value for key, value in item.items() if key not in ("volumes", "artworks", "series")}
+    visible = None if detail else {item.get("selectedWorkArtworkId"), item.get("selectedHeroArtworkId"), item.get("selectedBackdropArtworkId")}
+    result["artworkVersions"] = {art["id"]: {variant: (art.get(variant) or {}).get("sha256") for variant in ("thumbnail", "original")} for art in item["artworks"] if visible is None or art["id"] in visible}
     if detail:
+        result["series"] = item.get("series")
         result["volumes"] = item["volumes"]
         result["artworks"] = [
             {"id": art["id"], "kind": art["kind"], "selected": art["selected"],
-             "thumbnailAvailable": art["thumbnail"] is not None, "originalAvailable": art["original"] is not None}
+             "thumbnailAvailable": art["thumbnail"] is not None, "originalAvailable": art["original"] is not None,
+             "thumbnailDigest": (art.get("thumbnail") or {}).get("sha256"),
+             "originalDigest": (art.get("original") or {}).get("sha256")}
             for art in item["artworks"]
         ]
     return result
@@ -170,6 +203,19 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
         return {"objectKey": key, "uploadUrl": None if exists else presign_put(key, body.contentType, 600),
                 "requiredHeaders": {"Content-Type": body.contentType}}
 
+    @app.post("/v1/collections/artworks/check")
+    def check_artworks(body: ArtworkCheck, authorization: str | None = Header(default=None)):
+        require_auth(authorization)
+        # These are receipts of exact storage HEAD checks, also trusted by commit_snapshot.
+        # Unknown files still go through prepare/upload/confirmation before publication.
+        manifests = {item.sha256: item for item in body.items}
+        if len(manifests) != len(body.items):
+            raise HTTPException(422, "Duplicate artwork checks")
+        with get_db() as db:
+            rows = db.execute("SELECT sha256,size_bytes,content_type FROM mobile_collection_artwork WHERE sha256 IN (" + ",".join("?" for _ in manifests) + ")", list(manifests)).fetchall() if manifests else []
+        confirmed = {row["sha256"]: (row["size_bytes"], row["content_type"]) for row in rows}
+        return {"missing": [item.sha256 for item in body.items if confirmed.get(item.sha256) != (item.sizeBytes, item.contentType)]}
+
     @app.put("/v1/collections/replica")
     async def publish_replica(request: Request, authorization: str | None = Header(default=None)):
         require_auth(authorization)
@@ -199,6 +245,8 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
                 raise HTTPException(422, "Duplicate artwork or volume IDs")
             references = [item.selectedWorkArtworkId, item.selectedHeroArtworkId, item.selectedBackdropArtworkId]
             references.extend(volume.coverArtworkId for volume in item.volumes)
+            if item.series:
+                references.extend(season.posterArtworkId for season in item.series.seasons)
             if any(reference is not None and reference not in artworks for reference in references):
                 raise HTTPException(422, "Artwork reference is outside its collection")
             for art in item.artworks:
@@ -242,6 +290,9 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
     @app.get("/v1/collections")
     def list_collections(type: Literal["game", "manga", "movie"] | None = None,
                          q: str = Query(default="", max_length=200), showcase: bool = False,
+                         sort: Literal["name", "recent", "media_date"] = "name",
+                         direction: Literal["asc", "desc"] = "asc",
+                         rating: str = Query(default="all", pattern=r"^(all|unrated|[0-4](?:\.0|\.5)?|5(?:\.0)?)$"),
                          limit: int = Query(default=48, ge=1, le=48), cursor: str | None = Query(default=None, max_length=3000),
                          authorization: str | None = Header(default=None)):
         require_auth(authorization)
@@ -250,7 +301,10 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
             db.execute("BEGIN")
             revision, published = state(db)
             offset = 0
-            scope = [revision, type, q, showcase]
+            # Showcase is a manual exhibition; library filters never alter it.
+            rating_value = float(rating) if rating not in ("all", "unrated") else rating
+            scope = [revision, type, q, showcase, None if showcase else sort,
+                     None if showcase else direction, "all" if showcase else rating_value]
             if cursor:
                 try:
                     decoded = json.loads(base64.urlsafe_b64decode(cursor.encode()))
@@ -271,12 +325,34 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
             if q:
                 clauses.append("name LIKE ? ESCAPE '\\'")
                 parameters.append("%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%")
+            if not showcase and rating != "all":
+                if rating == "unrated":
+                    clauses.append("json_extract(payload,'$.myScore') IS NULL")
+                else:
+                    clauses.append("json_extract(payload,'$.myScore')=?")
+                    parameters.append(rating_value)
             where = " WHERE " + " AND ".join(clauses) if clauses else ""
-            order = "showcase_order IS NULL, showcase_order, name COLLATE NOCASE,id" if showcase else "name COLLATE NOCASE,id"
+            if showcase:
+                order = "showcase_order IS NULL, showcase_order, name COLLATE NOCASE,id"
+            elif sort == "media_date":
+                date = "CASE WHEN NULLIF(json_extract(payload,'$.releaseDate'),'') IS NOT NULL THEN CAST(REPLACE(json_extract(payload,'$.releaseDate'),'-','') AS INTEGER) ELSE json_extract(payload,'$.year')*10000 END"
+                order = f"({date}) IS NULL, ({date}) {direction}, name COLLATE NOCASE,id"
+            elif sort == "recent":
+                order = f"json_extract(payload,'$.createdAt') {direction}, name COLLATE NOCASE,id"
+            else:
+                order = f"name COLLATE NOCASE {direction}, id"
+            total = db.execute("SELECT COUNT(*) FROM mobile_collections" + where, parameters).fetchone()[0]
             rows = db.execute("SELECT payload FROM mobile_collections" + where + " ORDER BY " + order + " LIMIT ? OFFSET ?", [*parameters, limit + 1, offset]).fetchall()
         next_cursor = base64.urlsafe_b64encode(encode({"scope": scope, "offset": offset + limit}).encode()).decode() if len(rows) > limit else None
-        return {"ready": revision is not None, "revision": revision, "publishedAt": published,
+        return {"ready": revision is not None, "revision": revision, "publishedAt": published, "filterVersion": 1, "totalCount": total,
                 "items": [public_item(json.loads(row["payload"])) for row in rows[:limit]], "nextCursor": next_cursor}
+
+    @app.get("/v1/collections/status")
+    def publication_status(authorization: str | None = Header(default=None)):
+        require_auth(authorization)
+        with get_db() as db:
+            revision, published = state(db)
+        return {"revision": revision, "publishedAt": published}
 
     @app.get("/v1/collections/{collection_id}")
     def get_collection(collection_id: ID, authorization: str | None = Header(default=None)):
@@ -301,8 +377,11 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
             raise HTTPException(404, "Artwork variant unavailable")
         blob = ArtworkBlob.model_validate(art[body.variant])
         if not head(blob):
+            with get_db() as db:
+                db.execute("DELETE FROM mobile_collection_artwork WHERE sha256=?", [blob.sha256])
+                db.commit()
             raise HTTPException(404, "Artwork unavailable")
-        return {"url": presign_get(blob.objectKey, 300), "expires_in": 300,
+        return {"url": presign_get(blob.objectKey, 300), "expires_in": 300, "sha256": blob.sha256,
                 "content_type": blob.contentType, "size_bytes": blob.sizeBytes}
 
     return startup_collections

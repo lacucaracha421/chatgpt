@@ -61,6 +61,14 @@ pub(crate) struct CloudClient {
 }
 
 impl CloudClient {
+    pub(crate) fn publish_catalog_visibility(&self,body:&serde_json::Value,token:&str)->Result<(),LibraryError>{
+        let bytes=serde_json::to_vec(body).map_err(|_|LibraryError::InvalidCloudResponse)?;
+        if bytes.len()>crate::library::mobile_catalog::MAX_USERS{return Err(LibraryError::InvalidCloudResponse)}
+        let agent:ureq::Agent=ureq::Agent::config_builder().max_redirects(0).timeout_global(Some(UPLOAD_BODY_TIMEOUT)).build().into();
+        let mut response=agent.put(self.endpoint("/v1/mobile-catalog/visibility")?).header("Authorization",bearer(token)?).content_type("application/json").send(&bytes).map_err(map_registration_error)?;
+        let value:serde_json::Value=read_json(&mut response)?;
+        if value["publicationRevision"].as_str().is_none(){return Err(LibraryError::InvalidCloudResponse)} Ok(())
+    }
     pub(crate) fn mobile_catalog_revision(&self, token:&str)->Result<Option<String>,LibraryError>{
         #[derive(serde::Deserialize)] #[serde(rename_all="camelCase")] struct Status { publication_revision:Option<String> }
         let mut response=self.agent.get(self.endpoint("/v1/mobile-catalog/status")?).header("Authorization",bearer(token)?).call().map_err(map_registration_error)?;
@@ -147,6 +155,25 @@ impl CloudClient {
             return Err(LibraryError::InvalidCloudResponse);
         }
         Ok(true)
+    }
+
+    pub(crate) fn missing_collection_artworks(&self, blobs: &[&super::collections::ArtworkBlob], token: &str) -> Result<std::collections::BTreeSet<String>, LibraryError> {
+        #[derive(serde::Deserialize)]
+        struct Checked { missing: Vec<String> }
+        let mut missing=std::collections::BTreeSet::new();
+        for chunk in blobs.chunks(256) {
+            let body=serde_json::json!({"items":chunk.iter().map(|b|serde_json::json!({"sha256":b.sha256,"sizeBytes":b.size_bytes,"contentType":b.content_type})).collect::<Vec<_>>()});
+            let bytes=serde_json::to_vec(&body).map_err(|_|LibraryError::InvalidCloudResponse)?;
+            let response=self.agent.post(self.endpoint("/v1/collections/artworks/check")?).header("Authorization",bearer(token)?).content_type("application/json").send(&bytes);
+            // Older servers retain the verified per-file path during a rolling upgrade.
+            if matches!(&response,Err(ureq::Error::StatusCode(404))) {return Ok(blobs.iter().map(|b|b.sha256.clone()).collect())}
+            let mut response=response.map_err(map_presign_error)?;
+            let checked:Checked=read_json_bounded(&mut response,32*1024)?;
+            for digest in checked.missing {
+                if !chunk.iter().any(|b|b.sha256==digest)||!missing.insert(digest){return Err(LibraryError::InvalidCloudResponse)}
+            }
+        }
+        Ok(missing)
     }
 
     pub(crate) fn publish_collections(&self, metadata: &[u8], token: &str) -> Result<String, LibraryError> {
@@ -349,6 +376,24 @@ impl CloudClient {
             .send(&body)
             .map_err(map_capture_ack_error)?;
         Ok(())
+    }
+
+    /// Read the revision before publishing a replacement character projection.
+    pub(crate) fn character_revision(&self, token: &str) -> Result<Option<String>, LibraryError> {
+        let mut response = self.agent.get(self.endpoint("/v1/library/characters")?)
+            .header("Authorization", bearer(token)?).call().map_err(|_| LibraryError::CloudRequestUnavailable)?;
+        let bytes = response.body_mut().with_config().limit(8 * 1024 * 1024).read_to_vec().map_err(|_| LibraryError::InvalidCloudResponse)?;
+        let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        if value["version"] != 1 || value["authority"] != "pc" || value["authorityEpoch"] != 0 { return Err(LibraryError::InvalidCloudResponse); }
+        serde_json::from_value(value["revision"].clone()).map_err(|_| LibraryError::InvalidCloudResponse)
+    }
+
+    pub(crate) fn publish_characters(&self, token: &str, body: &[u8]) -> Result<super::characters::CharacterPublishResult, LibraryError> {
+        let mut response=self.agent.put(self.endpoint("/v1/library/characters/replica")?)
+            .header("Authorization",bearer(token)?).content_type("application/json").send(body)
+            .map_err(|_| LibraryError::CloudRequestUnavailable)?;
+        let bytes=response.body_mut().with_config().limit(MAX_RESPONSE_BYTES as u64).read_to_vec().map_err(|_|LibraryError::InvalidCloudResponse)?;
+        serde_json::from_slice(&bytes).map_err(|_|LibraryError::InvalidCloudResponse)
     }
 
     /// 분류 스냅샷을 VPS에 게시한다. PC 라이브러리가 분류의 원본이며 VPS는

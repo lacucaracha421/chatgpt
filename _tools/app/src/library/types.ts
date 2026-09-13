@@ -1023,6 +1023,8 @@ export interface LibraryGateway {
   createExtensionPairing?(): Promise<ExtensionPairingLink>;
   pushCloudMetadataBackup?(): Promise<CloudMetadataBackupResult>;
   pushCloudCollections?(onProgress?: (progress: import("./publicationJobs").PublishProgress) => void): Promise<CloudCollectionsPublishResult>;
+  runDueMobilePublications?(orderIds:string[]): Promise<void>;
+  pushCloudCharacters?(onProgress?: (progress: import("./publicationJobs").PublishProgress) => void): Promise<{revision: string; nodes: number}>;
   restoreCloudMetadataBackup?(): Promise<CloudLibraryRestoreReport>;
   runDueCloudCaptureSync(): Promise<CloudCaptureSyncResult>;
   cloudBackfillPreflight(): Promise<CloudBackfillPreflightReport>;
