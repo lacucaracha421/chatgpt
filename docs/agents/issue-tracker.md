@@ -4,7 +4,7 @@ Lakomics uses two different tracking surfaces for different purposes.
 
 ## Living product backlog
 
-`docs/roadmap/lakomics-backlog.md` is the default place for ongoing product bugs, UX improvements, architecture follow-ups, and long-term ideas that Laku wants retained with the repository.
+`docs/roadmap/lakomics-backlog.md` is the default place for ongoing product bugs, UX improvements, architecture follow-ups, and long-term ideas that Laku wants retained with the repository. Completed, superseded, and incident-only records belong in `docs/roadmap/lakomics-completed.md`, which is an archive rather than a second backlog.
 
 Use it when:
 

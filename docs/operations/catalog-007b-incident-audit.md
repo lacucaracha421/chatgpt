@@ -3,7 +3,7 @@
 Audit date: 2026-09-05. All times below are **UTC** (KST = UTC + 9 hours).
 Repository: `C:\chatgpt`; HEAD `5206961d44c3531228814bc96ee42c28880e3c16`,
 branch `codex/overnight-backlog-20260905`. This is incident evidence, not a rollout
-or a second backlog. Status remains in [CATALOG-007B](../roadmap/lakomics-backlog.md#catalog-007b--reviewed-heuristic-duplicate-groups).
+or a second backlog. Status remains in [CATALOG-007B](../roadmap/lakomics-completed.md#catalog-007b--reviewed-heuristic-duplicate-groups).
 
 ## Verdict and limits
 

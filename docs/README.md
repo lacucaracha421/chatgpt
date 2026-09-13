@@ -32,7 +32,8 @@ for the current task; this list is a map, not a mandatory reading sequence.
 - `../DESIGN.md` — current design language for visual changes.
 - `agents/pc-design-reference.md` — PC shell, content, and interaction contracts for affected desktop UI.
 - `adr/README.md` — architecture decision status when changing architectural boundaries.
-- `roadmap/lakomics-backlog.md` — pending work when checking priorities, recording a request, or resuming a tracked item.
+- `roadmap/lakomics-backlog.md` — active pending work when checking priorities, recording a request, or resuming a tracked item.
+- `roadmap/lakomics-completed.md` — completed/superseded/historical records; not an executable backlog.
 
 ## Current reference documents
 
@@ -61,9 +62,9 @@ for the current task; this list is a map, not a mandatory reading sequence.
 
 ## Execution tracking
 
-Pending product/design work is tracked only in `roadmap/lakomics-backlog.md`. Do not create a competing design plan when an item already exists there.
+Pending product/design work is tracked only in `roadmap/lakomics-backlog.md`. Completed/superseded records move to `roadmap/lakomics-completed.md`; that archive must not become a competing task list. Do not create a competing design plan when an active item already exists.
 
-The old `roadmap/works-collection-visual-redesign-plan.md` is retired. Its remaining actionable scope is already represented by LONG-002A, WORKS-001, LONG-002B, LONG-004 and related backlog entries.
+The old `roadmap/works-collection-visual-redesign-plan.md` is retired. Current actionable Works/AV scope is represented by active `WORKS-001` and `LONG-001`; completed presentation work is preserved in `roadmap/lakomics-completed.md`.
 
 ## Source-of-truth order
 
@@ -73,7 +74,7 @@ Separate implemented facts from authority to change them.
 2. `AGENTS.md`, `CONTEXT.md`, and `DESIGN.md` define repository/product rules.
 3. Accepted ADRs define active architecture constraints.
 4. `agents/pc-design-reference.md` and relevant current subsystem references define stable UX/subsystem intent.
-5. `roadmap/lakomics-backlog.md` describes planned/incomplete work; it does not prove implementation.
+5. `roadmap/lakomics-backlog.md` describes active planned/incomplete work; it does not prove implementation. `roadmap/lakomics-completed.md` preserves closure/history and is not a source of new authorization.
 6. Git history is historical context only.
 
 ## Historical / superseded design records
@@ -93,7 +94,6 @@ Dated files under `research/` preserve original design, batch contracts and acce
 evidence. They are not a second source of active task status or fresh authorization.
 In particular, [the mobile catalog plan](research/mobile-catalog-execution-plan-20260908.md)
 and [three-lane coordination record](research/parallel-roadmap-execution-20260908.md)
-predate later Reader and deployment work. Follow `MOBILE-006` in the living backlog
-and the Android README for the current implementation and remaining device gates.
+predate later Reader and deployment work. `MOBILE-006` is archived as completed; use the Android README for the current implementation and the active `CLOUD-AUTH-001` / `MOBILE-007` / `MOBILE-008` entries for remaining Mobile work.
 Character batch records, video-similarity plans and AV/cover plans likewise retain
 their recorded scope; consult the corresponding backlog item before resuming work.
