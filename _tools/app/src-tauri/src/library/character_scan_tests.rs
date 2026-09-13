@@ -753,6 +753,43 @@ fn completed_comparisons_survive_restart_and_only_new_images_are_compared() {
 }
 
 #[test]
+fn automatic_evidence_regions_reject_six_weak_reference_matches() {
+    let evidence = json!({
+        "passed": true,
+        "wholeFallback": false,
+        "queryBoxes": [[0, 0, 100, 100]],
+        "evidence": [{
+            "matchedReferences": [0, 1, 2, 3, 4, 5],
+            "referenceDistances": [0.10, 0.11, 0.12, 0.13, 0.14, 0.17]
+        }]
+    });
+    assert_eq!(automatic_evidence_regions(Some(&evidence)), Some(vec![]));
+}
+
+#[test]
+fn automatic_evidence_regions_keep_only_strong_crops() {
+    let evidence = json!({
+        "passed": true,
+        "wholeFallback": false,
+        "queryBoxes": [[0, 0, 40, 100], [60, 0, 100, 100]],
+        "evidence": [
+            {
+                "matchedReferences": [0, 1, 2, 3, 4, 5],
+                "referenceDistances": [0.10, 0.11, 0.12, 0.13, 0.14, 0.15]
+            },
+            {
+                "matchedReferences": [0, 1, 2, 3, 4, 5],
+                "referenceDistances": [0.10, 0.11, 0.12, 0.13, 0.14, 0.17]
+            }
+        ]
+    });
+    assert_eq!(
+        automatic_evidence_regions(Some(&evidence)),
+        Some(vec![[0.0, 0.0, 40.0, 100.0]])
+    );
+}
+
+#[test]
 fn overlapping_detector_boxes_are_not_two_distinct_people() {
     assert!(same_person(&[0., 0., 100., 100.], &[10., 10., 90., 90.]));
     assert!(!same_person(&[0., 0., 40., 100.], &[60., 0., 100., 100.]));

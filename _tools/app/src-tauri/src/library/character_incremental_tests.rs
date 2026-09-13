@@ -861,7 +861,7 @@ fn parent_inference_arbitrates_across_series_and_preserves_the_saved_folder() {
                 asset_id: job.asset_id.clone(), content_hash: job.content_hash.clone(),
                 state: "recommended".into(), error: None,
                 evidence: Some(json!({"passed": votes >= 2, "wholeFallback": false,
-                    "queryBoxes": [[0,0,40,100]], "evidence": [{"matchedReferences": (0..votes).collect::<Vec<_>>()}]})),
+                    "queryBoxes": [[0,0,40,100]], "evidence": [{"matchedReferences": (0..votes).collect::<Vec<_>>(), "referenceDistances": vec![0.1; 6]}]})),
             },
         }).collect::<Vec<_>>();
         f.library.finalize_incremental(&tx, &job, &context, &predictions, &BTreeSet::new(), &BTreeSet::new()).unwrap();
@@ -951,7 +951,7 @@ fn arbitration_uses_latest_judgment_and_keeps_ambiguous_people_for_review() {
                     json!({"matchedReferences":[]}),
                     json!({"matchedReferences":[]}),
                 ];
-                evidence[person] = json!({"matchedReferences":(0..strength).collect::<Vec<_>>()});
+                evidence[person] = json!({"matchedReferences":(0..strength).collect::<Vec<_>>(), "referenceDistances": vec![0.1; 6]});
                 Prediction {
                     target_id: target.id.clone(),
                     result: ScanResult {
@@ -988,6 +988,63 @@ fn arbitration_uses_latest_judgment_and_keeps_ambiguous_people_for_review() {
 }
 
 #[test]
+fn arbitration_keeps_weak_six_vote_companion_crop_for_review() {
+    let f = Fixture::new();
+    let target = f.ready("A");
+    add_learned_reference(&f, &target.id);
+    character_autotag::enqueue(
+        &f.library.connection().unwrap(),
+        "asset-5",
+        character_autotag::Cause::Ingestion,
+    )
+    .unwrap();
+    let job = f.library.claim_character_autotag().unwrap().unwrap();
+    let mut c = f.library.connection().unwrap();
+    let tx = c.transaction().unwrap();
+    let context = f
+        .library
+        .character_autotag_context(&tx, &job, &"a".repeat(64))
+        .unwrap();
+    let prediction = Prediction {
+        target_id: target.id.clone(),
+        result: ScanResult {
+            asset_id: job.asset_id.clone(),
+            content_hash: job.content_hash.clone(),
+            state: "recommended".into(),
+            error: None,
+            evidence: Some(json!({
+                "passed": true,
+                "wholeFallback": false,
+                "bestQueryCrop": 0,
+                "queryBoxes": [[0,0,40,100],[60,0,100,100]],
+                "evidence": [
+                    {"matchedReferences":[0,1,2,3,4,5],"referenceDistances":[0.10,0.11,0.12,0.13,0.14,0.15]},
+                    {"matchedReferences":[0,1,2,3,4,5],"referenceDistances":[0.10,0.11,0.12,0.13,0.14,0.17]}
+                ]
+            })),
+        },
+    };
+    f.library
+        .finalize_incremental(
+            &tx,
+            &job,
+            &context,
+            &[prediction],
+            &std::collections::BTreeSet::new(),
+            &std::collections::BTreeSet::new(),
+        )
+        .unwrap();
+    tx.commit().unwrap();
+    drop(c);
+    let state: String = f.library.connection().unwrap().query_row(
+        "SELECT review_state FROM character_autotag_jobs WHERE asset_id='asset-5'",
+        [],
+        |row| row.get(0),
+    ).unwrap();
+    assert_eq!(state, "partially_resolved");
+}
+
+#[test]
 fn reference_image_blocks_only_its_own_target_and_keeps_other_people_for_review() {
     let f = Fixture::new();
     let a = f.ready("A");
@@ -1014,7 +1071,7 @@ fn reference_image_blocks_only_its_own_target_and_keeps_other_people_for_review(
                 json!({"matchedReferences": []}),
                 json!({"matchedReferences": []}),
             ];
-            evidence[person] = json!({"matchedReferences": [0, 1, 2, 3, 4, 5]});
+            evidence[person] = json!({"matchedReferences": [0, 1, 2, 3, 4, 5], "referenceDistances": [0.10, 0.11, 0.12, 0.13, 0.14, 0.15]});
             Prediction {
                 target_id: target.id.clone(),
                 result: ScanResult {
@@ -1092,8 +1149,8 @@ fn arbitration_accepts_a_six_vote_region_even_when_best_crop_has_only_two_votes(
                 "bestQueryCrop": 0,
                 "queryBoxes": [[0,0,40,100],[60,0,100,100]],
                 "evidence": [
-                    {"matchedReferences": [0,1]},
-                    {"matchedReferences": [0,1,2,3,4,5]}
+                    {"matchedReferences": [0,1], "referenceDistances": [0.10,0.11,0.30,0.30,0.30,0.30]},
+                    {"matchedReferences": [0,1,2,3,4,5], "referenceDistances": [0.10,0.11,0.12,0.13,0.14,0.15]}
                 ]
             })),
         },

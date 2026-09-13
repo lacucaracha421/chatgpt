@@ -740,25 +740,43 @@ fn worker_error(event: &Value) -> Error {
 #[path = "character_scan_tests.rs"]
 mod tests;
 
-/// Automatic acceptance needs stronger agreement. Measured on 1,119 human-reviewed pairs
-/// (2026-09-11), the accepted rate by matched-reference count is flat and poor from two
-/// through four (15.4% / 13.5% / 13.8%) and only becomes trustworthy at six (97.0%).
-/// Five sits at 44.2%, so six is the first threshold worth trusting.
-/// Consequence accepted by the user: a target with only five anchors can never reach this,
-/// so the 31 of 37 targets without learned references stop auto-accepting entirely. Extra
-/// learned references are what raise the ceiling; `시노사와 히로` reaches 89% at 25 refs.
-/// The extra caution only moves pairs to review; it never removes them from the series.
+/// Automatic publication is deliberately stricter than recommendation. The six-reference
+/// support floor remains, and a 2026-09-13 read-only in-sample replay over 1,081 manually
+/// reviewed pairs improved precision from 0.750 to 0.991 when the sixth-smallest distance
+/// also had to be <= 0.16 (recall 0.435 -> 0.341). Replaying 1,414 historical automatic
+/// snapshots kept 13 of 410 later-rejected pairs with support alone and 0 with this distance
+/// gate. This only moves uncertain pairs to review; recommendation inference is unchanged.
 pub(super) const AUTOMATIC_REFERENCE_SUPPORT: usize = 6;
+const AUTOMATIC_MAX_SIXTH_DISTANCE: f64 = 0.16;
 
-pub(super) fn automatic_evidence(evidence: Option<&Value>) -> bool {
-    let Some(e) = evidence else {
-        return false;
-    };
+pub(super) fn automatic_evidence_regions(evidence: Option<&Value>) -> Option<Vec<[f64; 4]>> {
+    let e = evidence?;
     if e["passed"] != true || e["wholeFallback"] == true {
-        return false;
+        return None;
     }
-    evidence_regions(evidence, AUTOMATIC_REFERENCE_SUPPORT)
-        .is_some_and(|regions| !regions.is_empty())
+    let boxes = e["queryBoxes"].as_array()?;
+    let mut regions = Vec::new();
+    for (index, row) in e["evidence"].as_array()?.iter().enumerate() {
+        if row["matchedReferences"].as_array()?.len() < AUTOMATIC_REFERENCE_SUPPORT {
+            continue;
+        }
+        let mut distances = row["referenceDistances"]
+            .as_array()?
+            .iter()
+            .map(Value::as_f64)
+            .collect::<Option<Vec<_>>>()?;
+        if distances.len() < AUTOMATIC_REFERENCE_SUPPORT
+            || distances.iter().any(|value| !value.is_finite())
+        {
+            return None;
+        }
+        distances.sort_by(f64::total_cmp);
+        if distances[AUTOMATIC_REFERENCE_SUPPORT - 1] > AUTOMATIC_MAX_SIXTH_DISTANCE {
+            continue;
+        }
+        regions.push(box_region(boxes.get(index)?)?);
+    }
+    Some(regions)
 }
 
 // Compare geometry as well as crop indexes: duplicate/overlapping detections are one person.
@@ -773,23 +791,24 @@ pub(super) fn evidence_regions(evidence: Option<&Value>, minimum: usize) -> Opti
         if row["matchedReferences"].as_array()?.len() < minimum {
             continue;
         }
-        let b = boxes.get(index)?.as_array()?;
-        if b.len() != 4 {
-            return None;
-        }
-        let region = [
-            b[0].as_f64()?,
-            b[1].as_f64()?,
-            b[2].as_f64()?,
-            b[3].as_f64()?,
-        ];
-        if region.iter().any(|v| !v.is_finite()) || region[2] <= region[0] || region[3] <= region[1]
-        {
-            return None;
-        }
-        regions.push(region);
+        regions.push(box_region(boxes.get(index)?)?);
     }
     Some(regions)
+}
+
+fn box_region(value: &Value) -> Option<[f64; 4]> {
+    let b = value.as_array()?;
+    if b.len() != 4 {
+        return None;
+    }
+    let region = [
+        b[0].as_f64()?,
+        b[1].as_f64()?,
+        b[2].as_f64()?,
+        b[3].as_f64()?,
+    ];
+    (region.iter().all(|v| v.is_finite()) && region[2] > region[0] && region[3] > region[1])
+        .then_some(region)
 }
 
 pub(super) fn same_person(a: &[f64; 4], b: &[f64; 4]) -> bool {

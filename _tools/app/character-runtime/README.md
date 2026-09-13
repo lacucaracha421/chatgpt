@@ -161,11 +161,12 @@ a query are recorded and their current content/scope is revalidated before publi
 `learned_compare.py` compares those examples through the unchanged five-reference
 metric in bounded groups, discards padding votes, then computes same-crop distinct-image
 consensus over the combined pool. Recommendation remains two matches. Automatic
-approval requires support from **six distinct references**, a unique character candidate,
-and no whole fallback (`AUTOMATIC_REFERENCE_SUPPORT = 6`). Characters with only the
-five anchors can still be recommended but cannot satisfy automatic approval until
-additional explicit supporting references exist. The UI displays the actual reference
-count. Worker preparation accepts 5–25 images.
+approval requires same-crop support from **six distinct references**, with the sixth-smallest
+reference distance at or below **0.16**, a unique character candidate, and no whole fallback
+(`AUTOMATIC_REFERENCE_SUPPORT = 6`). Characters with only the five anchors can still be
+recommended but cannot satisfy automatic approval until additional explicit supporting
+references exist. The recommendation threshold remains unchanged. The UI displays the
+actual reference count. Worker preparation accepts 5–25 images.
 
 Manual scan buttons now apply the same automatic policy when the selected series has
 automatic classification enabled. They compare all ready characters in that series

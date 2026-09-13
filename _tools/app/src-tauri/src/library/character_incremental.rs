@@ -1,9 +1,7 @@
 //! Native queue consumer. One complete asset result is the publication unit.
 use super::{
     character_autotag::{self, Context, Job, Prediction, ReviewState},
-    character_scan::{
-        automatic_evidence, evidence_regions, same_person, ScanResult, AUTOMATIC_REFERENCE_SUPPORT,
-    },
+    character_scan::{automatic_evidence_regions, evidence_regions, same_person, ScanResult},
     character_sources::Source,
     character_worker::{RuntimeConfig, BASELINE},
     characters::{Error, Result},
@@ -592,12 +590,15 @@ impl Library {
                 .any(|decision| decision.as_str() == "accepted");
         for p in &candidates {
             let evidence = p.result.evidence.as_ref();
-            if reference_targets.contains(&p.target_id) || !automatic_evidence(evidence) {
+            if reference_targets.contains(&p.target_id) {
                 continue;
             }
-            let Some(regions) = evidence_regions(evidence, AUTOMATIC_REFERENCE_SUPPORT) else {
+            let Some(regions) = automatic_evidence_regions(evidence) else {
                 continue;
             };
+            if regions.is_empty() {
+                continue;
+            }
             let unique = regions
                 .iter()
                 .filter(|region| {

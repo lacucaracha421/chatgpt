@@ -5,9 +5,8 @@ import json
 import os
 import secrets
 import sqlite3
+import subprocess
 import time
-import urllib.error as urllib_error
-import urllib.request as urllib_request
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -339,8 +338,10 @@ CATALOG_UA = (
 CATALOG_ACCEPT_LANGUAGE = "ko,en;q=0.9,en-US;q=0.8,ko-KR;q=0.7"
 # Bounded retry: transient network failures and 5xx only; 4xx verdicts from
 # k-hentai (expired gallery, unknown id) are final for this request.
-CATALOG_ATTEMPTS = 3
-CATALOG_BACKOFF_SECONDS = 0.75
+CATALOG_ATTEMPTS = 2
+CATALOG_BACKOFF_SECONDS = 0.5
+CATALOG_TIMEOUT_SECONDS = 6
+CATALOG_DOH_URL = "https://cloudflare-dns.com/dns-query"
 # k-hentai pages are a few MB at most; a larger body means a hijack or an
 # HTML error page loop, so fail instead of buffering forever.
 CATALOG_MAX_BODY_BYTES = 5 * 1024 * 1024
@@ -353,27 +354,58 @@ _catalog_cache: dict[str, tuple[float, int, bytes]] = {}
 
 
 def _catalog_fetch_once(url: str) -> tuple[int, bytes]:
-    # /r/{id}는 비브라우저형 클라이언트(기본 UA/프로토콜 fingerprint)를 451로
-    # 거절한다(2026-09 VPS 실측: Lakomics UA 451, 브라우저 UA + Accept-Language
-    # 200 — curl/HTTP1.1 여부 무관). 그래서 브라우저형 UA와 Accept-Language를 보낸다.
-    request = urllib_request.Request(
+    """Fetch through bounded curl and authenticated DoH resolution."""
+    marker = b"\nLAKOMICS_HTTP_STATUS:"
+    command = [
+        "curl",
+        "--silent",
+        "--show-error",
+        "--location",
+        "--max-redirs",
+        "3",
+        "--connect-timeout",
+        str(CATALOG_TIMEOUT_SECONDS),
+        "--max-time",
+        str(CATALOG_TIMEOUT_SECONDS),
+        "--max-filesize",
+        str(CATALOG_MAX_BODY_BYTES + 1),
+        "--doh-url",
+        CATALOG_DOH_URL,
+        "--header",
+        f"User-Agent: {CATALOG_UA}",
+        "--header",
+        f"Accept-Language: {CATALOG_ACCEPT_LANGUAGE}",
+        "--header",
+        "Accept: text/html,application/json;q=0.9,*/*;q=0.8",
+        "--output",
+        "-",
+        "--write-out",
+        marker.decode() + "%{http_code}",
         url,
-        headers={
-            "User-Agent": CATALOG_UA,
-            "Accept-Language": CATALOG_ACCEPT_LANGUAGE,
-            "Accept": "text/html,application/json;q=0.9,*/*;q=0.8",
-        },
-    )
+    ]
     try:
-        with urllib_request.urlopen(request, timeout=30) as response:
-            return response.status, response.read(CATALOG_MAX_BODY_BYTES + 1)
-    except urllib_error.HTTPError as error:
-        return error.code, b""
-    except (urllib_error.URLError, TimeoutError, OSError):
-        # DNS/TLS/connect/timeout 실패는 k-hentai 쪽 장애다. 예외를 밖으로
-        # 흘려보내면 FastAPI raw 500이 되므로 게이트웨이 오류(0)로 정규화해
-        # 재시도 파이프라인이 502로 응답하게 한다. 프로그래머 오류는 잡지 않는다.
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=CATALOG_TIMEOUT_SECONDS + 1,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         return 0, b""
+
+    body, separator, status_bytes = result.stdout.rpartition(marker)
+    if not separator:
+        return 0, b""
+    try:
+        status = int(status_bytes)
+    except ValueError:
+        return 0, b""
+    if len(body) > CATALOG_MAX_BODY_BYTES:
+        return status, body
+    if result.returncode != 0:
+        return 0, b""
+    return status, body
 
 
 def _catalog_fetch_with_retry(url: str) -> tuple[int, bytes]:
@@ -399,12 +431,17 @@ def _catalog_cached_get(url: str) -> Response:
         _, status, body = cached
         return Response(content=body, status_code=status, media_type="text/html")
     status, body = _catalog_fetch_with_retry(url)
-    if status >= 500 or status == 0:
+    if status == 0:
+        raise HTTPException(
+            status_code=502,
+            detail="k-hentai temporarily unavailable (DNS/connect/timeout)",
+        )
+    if status >= 500:
         raise HTTPException(status_code=502, detail=f"k-hentai unreachable (upstream status {status})")
     if status == 404:
         raise HTTPException(status_code=404, detail="work not found on k-hentai")
-    if status in (403, 429):
-        # Cloudflare/bot 차단 가능성이 있는 403/429는 원인을 구분해 노출한다.
+    if status in (403, 429, 451):
+        # Cloudflare/bot 차단 가능성이 있는 403/429/451은 원인을 구분해 노출한다.
         # 상태 코드 외에 민감한 정보(토큰·헤더)는 응답에 포함하지 않는다.
         raise HTTPException(status_code=502, detail=f"k-hentai rejected the request (upstream status {status})")
     if status != 200 or not body:

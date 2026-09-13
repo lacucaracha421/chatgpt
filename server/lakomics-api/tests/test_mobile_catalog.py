@@ -93,7 +93,11 @@ class MobileCatalogApiTests(unittest.TestCase):
         self.get_db = get_db
         self.app = FastAPI()
         self.gallery_html = '<html><script>const gallery = {"files":[{"name":"001.webp","image":{"url":"https://a.siam-cdn.net/001.webp?expires=1800000000","width":1200,"height":1800}},{"name":"002.webp","image":{"url":"https://siam-cdn.net/002.webp?expires=1800000100","width":1200,"height":1800}}]};</script></html>'
-        start = register_mobile_catalog(self.app, get_db, auth, lambda: self.root / "artifacts", lambda: "catalog-test", lambda _work_id: self.gallery_html)
+        def gallery_fetcher(_work_id):
+            if isinstance(self.gallery_html, Exception):
+                raise self.gallery_html
+            return self.gallery_html
+        start = register_mobile_catalog(self.app, get_db, auth, lambda: self.root / "artifacts", lambda: "catalog-test", gallery_fetcher)
         start()
         self.client = TestClient(self.app)
         self.data, self.digest, self.users = fixture_projection()
@@ -168,6 +172,14 @@ class MobileCatalogApiTests(unittest.TestCase):
         self.gallery_html = '<script>const gallery = {"files":[{"image":{"url":"https://evil.example/page.webp"}}]};</script>'
         rejected = self.client.get("/v1/mobile-catalog/works/kHentai/1/reader", headers=AUTH, params={"context": page["context"]})
         self.assertEqual(rejected.status_code, 502)
+
+    def test_reader_preserves_shared_provider_failure(self):
+        self.publish()
+        page = self.search(language="korean").json()
+        self.gallery_html = HTTPException(502, "k-hentai temporarily unavailable (DNS/connect/timeout)")
+        response = self.client.get("/v1/mobile-catalog/works/kHentai/1/reader", headers=AUTH, params={"context": page["context"]})
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["detail"], "k-hentai temporarily unavailable (DNS/connect/timeout)")
 
     def test_detail_editions_hide_excluded_manual_selection_and_keep_alias(self):
         self.publish()

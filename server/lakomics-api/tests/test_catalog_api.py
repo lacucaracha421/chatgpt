@@ -6,7 +6,6 @@ import types
 import unittest
 from pathlib import Path
 from unittest import mock
-from urllib.error import HTTPError, URLError
 
 import httpx
 from fastapi.testclient import TestClient
@@ -279,7 +278,7 @@ class CatalogTransportApiTests(unittest.TestCase):
     # -- transient retry ---------------------------------------------------
 
     def test_search_page_retries_transient_5xx_then_succeeds(self) -> None:
-        responses = iter([(502, b""), (503, b""), (200, b"ok")])
+        responses = iter([(503, b""), (200, b"ok")])
         calls: list[str] = []
 
         def fake_fetch_once(url: str) -> tuple[int, bytes]:
@@ -295,11 +294,10 @@ class CatalogTransportApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.content, b"ok")
-        self.assertEqual(len(calls), 3)
-        # exponential backoff: 0.75s then 1.5s
-        self.assertEqual(sleeps, [0.75, 1.5])
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(sleeps, [0.5])
 
-    def test_search_page_gives_up_after_three_transient_failures(self) -> None:
+    def test_search_page_gives_up_after_two_transient_failures(self) -> None:
         calls: list[int] = []
 
         def fake_fetch_once(url: str) -> tuple[int, bytes]:
@@ -315,7 +313,7 @@ class CatalogTransportApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 502)
         self.assertEqual(len(calls), api_app.CATALOG_ATTEMPTS)
-        self.assertEqual(sleeps, [0.75, 1.5])
+        self.assertEqual(sleeps, [0.5])
 
     # -- upstream network failures -> 502, never raw 500 --------------------
 
@@ -335,57 +333,39 @@ class CatalogTransportApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 502)
         self.assertFalse(response.json().get("traceback", False))
 
-    def test_urllib_transport_normalizes_connection_refused_to_status_zero(self) -> None:
-        # urlopen이 연결 거부에서 던지는 URLError는 (0, b"")로 정규화돼야 한다.
+    def test_transport_normalizes_connection_refused_to_status_zero(self) -> None:
         status = api_app._catalog_fetch_once("http://127.0.0.1:9/refused")[0]
         self.assertEqual(status, 0)
 
-    def test_urllib_transport_normalizes_bad_host_to_status_zero(self) -> None:
+    def test_transport_normalizes_bad_host_to_status_zero(self) -> None:
         status = api_app._catalog_fetch_once("https://no-such-host-9x7.invalid/")[0]
         self.assertEqual(status, 0)
 
-    def test_urllib_transport_sends_browser_ua_and_accept_language(self) -> None:
-        # 451 우회의 핵심: /r/{id}는 비브라우저형 요청을 거절한다. 브라우저형
-        # UA와 Accept-Language가 실제 헤더로 나가는지 캡처해 검증한다.
-        captured: dict[str, str] = {}
-
-        class FakeResponse:
-            status = 200
-
-            def read(self, limit):
-                return b"<html>ui</html>"
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *args):
-                return False
-
-        def fake_urlopen(request, timeout):
-            captured.update(dict(request.header_items()))
-            return FakeResponse()
-
-        with mock.patch.object(api_app.urllib_request, "urlopen", side_effect=fake_urlopen):
-            status, body = api_app._catalog_fetch_once("https://k-hentai.org/r/42")
-
-        self.assertEqual(status, 200)
-        self.assertEqual(body, b"<html>ui</html>")
-        self.assertEqual(captured.get("User-agent"), api_app.CATALOG_UA)
-        self.assertEqual(captured.get("Accept-language"), api_app.CATALOG_ACCEPT_LANGUAGE)
-        self.assertEqual(
-            captured.get("Accept"), "text/html,application/json;q=0.9,*/*;q=0.8"
-        )
-
-    def test_urllib_transport_timeout_normalized_to_status_zero(self) -> None:
-        # urlopen 타임아웃(TimeoutError)도 (0, b"")로 정규화돼야 한다.
-        def timeout_urlopen(request, timeout):
-            raise TimeoutError("timed out")
-
-        with mock.patch.object(api_app.urllib_request, "urlopen", side_effect=timeout_urlopen):
+    def test_transport_timeout_normalized_to_status_zero(self) -> None:
+        with mock.patch.object(
+            api_app.subprocess,
+            "run",
+            side_effect=api_app.subprocess.TimeoutExpired(["curl"], api_app.CATALOG_TIMEOUT_SECONDS + 1),
+        ):
             status, body = api_app._catalog_fetch_once("https://k-hentai.org/r/42")
 
         self.assertEqual(status, 0)
         self.assertEqual(body, b"")
+
+    def test_transport_uses_doh_browser_headers_and_hard_timeout(self) -> None:
+        doh_response = mock.Mock(returncode=0, stdout=b"<html>gallery</html>\nLAKOMICS_HTTP_STATUS:200")
+        with mock.patch.object(api_app.subprocess, "run", return_value=doh_response) as run:
+            response = api_app._catalog_fetch_once("https://k-hentai.org/r/42")
+
+        self.assertEqual(response, (200, b"<html>gallery</html>"))
+        command = run.call_args.args[0]
+        self.assertIn("--doh-url", command)
+        self.assertIn(api_app.CATALOG_DOH_URL, command)
+        self.assertIn(f"User-Agent: {api_app.CATALOG_UA}", command)
+        self.assertIn(f"Accept-Language: {api_app.CATALOG_ACCEPT_LANGUAGE}", command)
+        self.assertEqual(command[command.index("--max-time") + 1], str(api_app.CATALOG_TIMEOUT_SECONDS))
+        self.assertEqual(run.call_args.kwargs["timeout"], api_app.CATALOG_TIMEOUT_SECONDS + 1)
+        self.assertEqual(command[-1], "https://k-hentai.org/r/42")
 
     def test_normalized_network_status_zero_is_retried_then_502(self) -> None:
         # 정규화 계약: _catalog_fetch_once가 네트워크 실패를 (0, b"")로 돌리면
@@ -405,7 +385,7 @@ class CatalogTransportApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 502)
         self.assertEqual(len(calls), api_app.CATALOG_ATTEMPTS)
-        self.assertEqual(sleeps, [0.75, 1.5])
+        self.assertEqual(sleeps, [0.5])
 
     # -- SSRF hardening ----------------------------------------------------
 
